@@ -11,6 +11,7 @@ ARG GOLANG_IMAGE=golang:1.26.2-alpine
 ARG ALPINE_IMAGE=alpine:3.20
 ARG GOPROXY=https://goproxy.cn,direct
 ARG GOSUMDB=sum.golang.google.cn
+ARG GOEXPERIMENT=jsonv2
 
 # -----------------------------------------------------------------------------
 # Stage 1: Frontend Builder
@@ -41,9 +42,11 @@ ARG COMMIT=docker
 ARG DATE
 ARG GOPROXY
 ARG GOSUMDB
+ARG GOEXPERIMENT
 
 ENV GOPROXY=${GOPROXY}
 ENV GOSUMDB=${GOSUMDB}
+ENV GOEXPERIMENT=${GOEXPERIMENT}
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata
