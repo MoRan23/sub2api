@@ -71,6 +71,13 @@ func (f optionalLimitField) ToServiceInput() *float64 {
 	return &zero
 }
 
+func (f optionalLimitField) ToServiceInputPreserveNull() *float64 {
+	if !f.set {
+		return nil
+	}
+	return f.value
+}
+
 // NewGroupHandler creates a new admin group handler
 func NewGroupHandler(adminService service.AdminService, dashboardService *service.DashboardService, groupCapacityService *service.GroupCapacityService) *GroupHandler {
 	return &GroupHandler{
@@ -239,6 +246,15 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		return
 	}
 
+	dayLimit := req.DailyLimitUSD.ToServiceInput()
+	weekLimit := req.WeeklyLimitUSD.ToServiceInput()
+	monthLimit := req.MonthlyLimitUSD.ToServiceInput()
+	if req.SubscriptionType == service.SubscriptionTypeTotalQuota {
+		dayLimit = req.DailyLimitUSD.ToServiceInputPreserveNull()
+		weekLimit = req.WeeklyLimitUSD.ToServiceInputPreserveNull()
+		monthLimit = req.MonthlyLimitUSD.ToServiceInputPreserveNull()
+	}
+
 	group, err := h.adminService.CreateGroup(c.Request.Context(), &service.CreateGroupInput{
 		Name:                            req.Name,
 		Description:                     req.Description,
@@ -246,9 +262,9 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		RateMultiplier:                  req.RateMultiplier,
 		IsExclusive:                     req.IsExclusive,
 		SubscriptionType:                req.SubscriptionType,
-		DailyLimitUSD:                   req.DailyLimitUSD.ToServiceInput(),
-		WeeklyLimitUSD:                  req.WeeklyLimitUSD.ToServiceInput(),
-		MonthlyLimitUSD:                 req.MonthlyLimitUSD.ToServiceInput(),
+		DailyLimitUSD:                   dayLimit,
+		WeeklyLimitUSD:                  weekLimit,
+		MonthlyLimitUSD:                 monthLimit,
 		TotalLimitUSD:                   req.TotalLimitUSD.ToServiceInput(),
 		ImagePrice1K:                    req.ImagePrice1K,
 		ImagePrice2K:                    req.ImagePrice2K,
@@ -290,6 +306,15 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		return
 	}
 
+	dayLimit := req.DailyLimitUSD.ToServiceInput()
+	weekLimit := req.WeeklyLimitUSD.ToServiceInput()
+	monthLimit := req.MonthlyLimitUSD.ToServiceInput()
+	if req.SubscriptionType == service.SubscriptionTypeTotalQuota {
+		dayLimit = req.DailyLimitUSD.ToServiceInputPreserveNull()
+		weekLimit = req.WeeklyLimitUSD.ToServiceInputPreserveNull()
+		monthLimit = req.MonthlyLimitUSD.ToServiceInputPreserveNull()
+	}
+
 	group, err := h.adminService.UpdateGroup(c.Request.Context(), groupID, &service.UpdateGroupInput{
 		Name:                            req.Name,
 		Description:                     req.Description,
@@ -298,9 +323,9 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		IsExclusive:                     req.IsExclusive,
 		Status:                          req.Status,
 		SubscriptionType:                req.SubscriptionType,
-		DailyLimitUSD:                   req.DailyLimitUSD.ToServiceInput(),
-		WeeklyLimitUSD:                  req.WeeklyLimitUSD.ToServiceInput(),
-		MonthlyLimitUSD:                 req.MonthlyLimitUSD.ToServiceInput(),
+		DailyLimitUSD:                   dayLimit,
+		WeeklyLimitUSD:                  weekLimit,
+		MonthlyLimitUSD:                 monthLimit,
 		TotalLimitUSD:                   req.TotalLimitUSD.ToServiceInput(),
 		ImagePrice1K:                    req.ImagePrice1K,
 		ImagePrice2K:                    req.ImagePrice2K,
