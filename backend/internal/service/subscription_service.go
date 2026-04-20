@@ -24,6 +24,11 @@ var MaxExpiresAt = time.Date(2099, 12, 31, 23, 59, 59, 0, time.UTC)
 // MaxValidityDays is the maximum allowed validity days for subscriptions (100 years)
 const MaxValidityDays = 36500
 
+const (
+	SubscriptionQuotaSourceAdminAssign = "admin_assign"
+	SubscriptionQuotaSourceRedeemCode  = "redeem_code"
+)
+
 var (
 	ErrSubscriptionNotFound       = infraerrors.NotFound("SUBSCRIPTION_NOT_FOUND", "subscription not found")
 	ErrSubscriptionExpired        = infraerrors.Forbidden("SUBSCRIPTION_EXPIRED", "subscription has expired")
@@ -31,6 +36,10 @@ var (
 	ErrSubscriptionAlreadyExists  = infraerrors.Conflict("SUBSCRIPTION_ALREADY_EXISTS", "subscription already exists for this user and group")
 	ErrSubscriptionAssignConflict = infraerrors.Conflict("SUBSCRIPTION_ASSIGN_CONFLICT", "subscription exists but request conflicts with existing assignment semantics")
 	ErrGroupNotSubscriptionType   = infraerrors.BadRequest("GROUP_NOT_SUBSCRIPTION_TYPE", "group is not a subscription type")
+	ErrTotalLimitExceeded         = infraerrors.TooManyRequests("TOTAL_LIMIT_EXCEEDED", "total quota limit exceeded")
+	ErrTotalQuotaLimitRequired    = infraerrors.BadRequest("TOTAL_QUOTA_LIMIT_REQUIRED", "total quota subscription requires total limit")
+	ErrTotalQuotaAdjustUnsupported = infraerrors.BadRequest("TOTAL_QUOTA_ADJUST_UNSUPPORTED", "total quota subscriptions do not support manual adjustment")
+	ErrTotalQuotaResetUnsupported  = infraerrors.BadRequest("TOTAL_QUOTA_RESET_UNSUPPORTED", "total quota subscriptions do not support quota reset")
 	ErrInvalidInput               = infraerrors.BadRequest("INVALID_INPUT", "at least one of resetDaily, resetWeekly, or resetMonthly must be true")
 	ErrDailyLimitExceeded         = infraerrors.TooManyRequests("DAILY_LIMIT_EXCEEDED", "daily usage limit exceeded")
 	ErrWeeklyLimitExceeded        = infraerrors.TooManyRequests("WEEKLY_LIMIT_EXCEEDED", "weekly usage limit exceeded")
@@ -144,11 +153,13 @@ func (s *SubscriptionService) InvalidateSubCache(userID, groupID int64) {
 
 // AssignSubscriptionInput 分配订阅输入
 type AssignSubscriptionInput struct {
-	UserID       int64
-	GroupID      int64
-	ValidityDays int
-	AssignedBy   int64
-	Notes        string
+	UserID          int64
+	GroupID         int64
+	ValidityDays    int
+	AssignedBy      int64
+	Notes           string
+	EventSourceKind string
+	EventSourceRef  string
 }
 
 // AssignSubscription 分配订阅给用户（不允许重复分配）
@@ -174,6 +185,9 @@ func (s *SubscriptionService) AssignOrExtendSubscription(ctx context.Context, in
 	}
 	if !group.IsSubscriptionType() {
 		return nil, false, ErrGroupNotSubscriptionType
+	}
+	if group.IsTotalQuotaSubscriptionType() {
+		return s.assignOrAppendTotalQuotaSubscription(ctx, group, input)
 	}
 
 	// 查询是否已有订阅
@@ -354,11 +368,13 @@ func (s *SubscriptionService) BulkAssignSubscription(ctx context.Context, input 
 
 	for _, userID := range input.UserIDs {
 		sub, reused, err := s.assignSubscriptionWithReuse(ctx, &AssignSubscriptionInput{
-			UserID:       userID,
-			GroupID:      input.GroupID,
-			ValidityDays: input.ValidityDays,
-			AssignedBy:   input.AssignedBy,
-			Notes:        input.Notes,
+			UserID:          userID,
+			GroupID:         input.GroupID,
+			ValidityDays:    input.ValidityDays,
+			AssignedBy:      input.AssignedBy,
+			Notes:           input.Notes,
+			EventSourceKind: SubscriptionQuotaSourceAdminAssign,
+			EventSourceRef:  buildAdminAssignSourceRef(input.AssignedBy),
 		})
 		if err != nil {
 			result.FailedCount++
@@ -388,6 +404,9 @@ func (s *SubscriptionService) assignSubscriptionWithReuse(ctx context.Context, i
 	}
 	if !group.IsSubscriptionType() {
 		return nil, false, ErrGroupNotSubscriptionType
+	}
+	if group.IsTotalQuotaSubscriptionType() {
+		return s.assignOrAppendTotalQuotaSubscription(ctx, group, input)
 	}
 
 	// 检查是否已存在订阅；若已存在，则按幂等成功返回现有订阅
@@ -462,6 +481,159 @@ func normalizeAssignValidityDays(days int) int {
 	return days
 }
 
+func buildAdminAssignSourceRef(adminID int64) string {
+	if adminID <= 0 {
+		return ""
+	}
+	return "admin:" + strconv.FormatInt(adminID, 10)
+}
+
+func (s *SubscriptionService) normalizeQuotaEventSource(input *AssignSubscriptionInput) (string, string) {
+	if input == nil {
+		return SubscriptionQuotaSourceAdminAssign, ""
+	}
+	kind := strings.TrimSpace(input.EventSourceKind)
+	ref := strings.TrimSpace(input.EventSourceRef)
+	switch kind {
+	case SubscriptionQuotaSourceAdminAssign, SubscriptionQuotaSourceRedeemCode:
+		return kind, ref
+	default:
+		if input.AssignedBy > 0 {
+			return SubscriptionQuotaSourceAdminAssign, buildAdminAssignSourceRef(input.AssignedBy)
+		}
+		return SubscriptionQuotaSourceAdminAssign, ref
+	}
+}
+
+func (s *SubscriptionService) createQuotaEvent(
+	ctx context.Context,
+	subscriptionID int64,
+	group *Group,
+	input *AssignSubscriptionInput,
+	startsAt, expiresAt time.Time,
+) (*UserSubscriptionQuotaEvent, error) {
+	if group == nil || !group.HasTotalLimit() {
+		return nil, ErrTotalQuotaLimitRequired
+	}
+	sourceKind, sourceRef := s.normalizeQuotaEventSource(input)
+	event := &UserSubscriptionQuotaEvent{
+		UserSubscriptionID: subscriptionID,
+		QuotaTotalUSD:      *group.TotalLimitUSD,
+		QuotaUsedUSD:       0,
+		StartsAt:           startsAt,
+		ExpiresAt:          expiresAt,
+		SourceKind:         sourceKind,
+		SourceRef:          sourceRef,
+	}
+	if err := s.userSubRepo.CreateQuotaEvent(ctx, event); err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
+func (s *SubscriptionService) assignOrAppendTotalQuotaSubscription(ctx context.Context, group *Group, input *AssignSubscriptionInput) (*UserSubscription, bool, error) {
+	if group == nil || !group.IsTotalQuotaSubscriptionType() {
+		return nil, false, ErrGroupNotSubscriptionType
+	}
+	if !group.HasTotalLimit() {
+		return nil, false, ErrTotalQuotaLimitRequired
+	}
+
+	validityDays := normalizeAssignValidityDays(input.ValidityDays)
+	now := time.Now()
+	eventExpiresAt := now.AddDate(0, 0, validityDays)
+	if eventExpiresAt.After(MaxExpiresAt) {
+		eventExpiresAt = MaxExpiresAt
+	}
+
+	existingSub, err := s.userSubRepo.GetByUserIDAndGroupID(ctx, input.UserID, input.GroupID)
+	if err != nil {
+		existingSub = nil
+	}
+
+	txCtx := ctx
+	var tx *dbent.Tx
+	if s.entClient != nil {
+		var err error
+		tx, err = s.entClient.Tx(ctx)
+		if err != nil {
+			return nil, false, fmt.Errorf("begin transaction: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		txCtx = dbent.NewTxContext(ctx, tx)
+	}
+	subscriptionID := int64(0)
+	reused := false
+
+	if existingSub != nil {
+		reused = true
+		subscriptionID = existingSub.ID
+
+		if existingSub.Status != SubscriptionStatusActive {
+			if err := s.userSubRepo.UpdateStatus(txCtx, existingSub.ID, SubscriptionStatusActive); err != nil {
+				return nil, false, fmt.Errorf("update subscription status: %w", err)
+			}
+		}
+		if eventExpiresAt.After(existingSub.ExpiresAt) {
+			if err := s.userSubRepo.ExtendExpiry(txCtx, existingSub.ID, eventExpiresAt); err != nil {
+				return nil, false, fmt.Errorf("extend subscription: %w", err)
+			}
+		}
+		if input.Notes != "" {
+			newNotes := existingSub.Notes
+			if newNotes != "" {
+				newNotes += "\n"
+			}
+			newNotes += input.Notes
+			if err := s.userSubRepo.UpdateNotes(txCtx, existingSub.ID, newNotes); err != nil {
+				return nil, false, fmt.Errorf("update subscription notes: %w", err)
+			}
+		}
+	} else {
+		sub := &UserSubscription{
+			UserID:     input.UserID,
+			GroupID:    input.GroupID,
+			StartsAt:   now,
+			ExpiresAt:  eventExpiresAt,
+			Status:     SubscriptionStatusActive,
+			AssignedAt: now,
+			Notes:      input.Notes,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		if input.AssignedBy > 0 {
+			sub.AssignedBy = &input.AssignedBy
+		}
+		if err := s.userSubRepo.Create(txCtx, sub); err != nil {
+			return nil, false, err
+		}
+		subscriptionID = sub.ID
+	}
+
+	if _, err := s.createQuotaEvent(txCtx, subscriptionID, group, input, now, eventExpiresAt); err != nil {
+		return nil, false, fmt.Errorf("create quota event: %w", err)
+	}
+
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return nil, false, fmt.Errorf("commit transaction: %w", err)
+		}
+	}
+
+	s.InvalidateSubCache(input.UserID, input.GroupID)
+	if s.billingCacheService != nil {
+		userID, groupID := input.UserID, input.GroupID
+		go func() {
+			cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = s.billingCacheService.InvalidateSubscription(cacheCtx, userID, groupID)
+		}()
+	}
+
+	sub, err := s.userSubRepo.GetByID(ctx, subscriptionID)
+	return sub, reused, err
+}
+
 // RevokeSubscription 撤销订阅
 func (s *SubscriptionService) RevokeSubscription(ctx context.Context, subscriptionID int64) error {
 	// 先获取订阅信息用于失效缓存
@@ -493,6 +665,9 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 	sub, err := s.userSubRepo.GetByID(ctx, subscriptionID)
 	if err != nil {
 		return nil, ErrSubscriptionNotFound
+	}
+	if sub.Group != nil && sub.Group.IsTotalQuotaSubscriptionType() {
+		return nil, ErrTotalQuotaAdjustUnsupported
 	}
 
 	// 限制调整天数范围
@@ -570,8 +745,13 @@ func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID,
 	if s.subCacheL1 != nil {
 		if v, ok := s.subCacheL1.Get(key); ok {
 			if sub, ok := v.(*UserSubscription); ok {
-				cp := *sub
-				return &cp, nil
+				if sub.Group != nil && sub.Group.IsTotalQuotaSubscriptionType() &&
+					sub.NextQuotaExpireAt != nil && !time.Now().Before(*sub.NextQuotaExpireAt) {
+					s.InvalidateSubCache(userID, groupID)
+				} else {
+					cp := *sub
+					return &cp, nil
+				}
 			}
 		}
 	}
@@ -706,6 +886,9 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 	if err != nil {
 		return nil, err
 	}
+	if sub.Group != nil && sub.Group.IsTotalQuotaSubscriptionType() {
+		return nil, ErrTotalQuotaResetUnsupported
+	}
 	windowStart := startOfDay(time.Now())
 	if resetDaily {
 		if err := s.userSubRepo.ResetDailyUsage(ctx, sub.ID, windowStart); err != nil {
@@ -786,6 +969,12 @@ func (s *SubscriptionService) CheckAndResetWindows(ctx context.Context, sub *Use
 // CheckUsageLimits 检查使用限额（返回错误如果超限）
 // 用于中间件的快速预检查，additionalCost 通常为 0
 func (s *SubscriptionService) CheckUsageLimits(ctx context.Context, sub *UserSubscription, group *Group, additionalCost float64) error {
+	if group != nil && group.IsTotalQuotaSubscriptionType() {
+		if !sub.CheckTotalLimit(group, additionalCost) {
+			return ErrTotalLimitExceeded
+		}
+		return nil
+	}
 	if !sub.CheckDailyLimit(group, additionalCost) {
 		return ErrDailyLimitExceeded
 	}
@@ -811,6 +1000,12 @@ func (s *SubscriptionService) ValidateAndCheckLimits(sub *UserSubscription, grou
 	}
 	if sub.IsExpired() {
 		return false, ErrSubscriptionExpired
+	}
+	if group != nil && group.IsTotalQuotaSubscriptionType() {
+		if sub.TotalRemainingUSD <= 0 {
+			return false, ErrTotalLimitExceeded
+		}
+		return false, nil
 	}
 
 	// 2. 内存中修正过期窗口的用量，确保 CheckUsageLimits 不会误拒绝用户
@@ -901,6 +1096,7 @@ type SubscriptionProgress struct {
 	Daily         *UsageWindowProgress `json:"daily,omitempty"`
 	Weekly        *UsageWindowProgress `json:"weekly,omitempty"`
 	Monthly       *UsageWindowProgress `json:"monthly,omitempty"`
+	Total         *TotalQuotaProgress  `json:"total,omitempty"`
 }
 
 // UsageWindowProgress 使用窗口进度
@@ -912,6 +1108,16 @@ type UsageWindowProgress struct {
 	WindowStart     time.Time `json:"window_start"`
 	ResetsAt        time.Time `json:"resets_at"`
 	ResetsInSeconds int64     `json:"resets_in_seconds"`
+}
+
+type TotalQuotaProgress struct {
+	LimitUSD                 float64    `json:"limit_usd"`
+	UsedUSD                  float64    `json:"used_usd"`
+	RemainingUSD             float64    `json:"remaining_usd"`
+	Percentage               float64    `json:"percentage"`
+	NextQuotaExpireAt        *time.Time `json:"next_quota_expire_at,omitempty"`
+	NextQuotaExpiresInSeconds int64     `json:"next_quota_expires_in_seconds"`
+	NextExpiringQuotaUSD     float64    `json:"next_expiring_quota_usd"`
 }
 
 // GetSubscriptionProgress 获取订阅使用进度
@@ -1010,6 +1216,35 @@ func (s *SubscriptionService) calculateProgress(sub *UserSubscription, group *Gr
 		}
 		if progress.Monthly.ResetsInSeconds < 0 {
 			progress.Monthly.ResetsInSeconds = 0
+		}
+	}
+
+	if group.IsTotalQuotaSubscriptionType() {
+		limit := sub.TotalLimitUSD
+		if limit <= 0 {
+			limit = sub.TotalUsedUSD + sub.TotalRemainingUSD
+		}
+		percentage := 0.0
+		if limit > 0 {
+			percentage = (sub.TotalUsedUSD / limit) * 100
+			if percentage > 100 {
+				percentage = 100
+			}
+		}
+		progress.Total = &TotalQuotaProgress{
+			LimitUSD:                 limit,
+			UsedUSD:                  sub.TotalUsedUSD,
+			RemainingUSD:             sub.TotalRemainingUSD,
+			Percentage:               percentage,
+			NextQuotaExpireAt:        sub.NextQuotaExpireAt,
+			NextQuotaExpiresInSeconds: 0,
+			NextExpiringQuotaUSD:     sub.NextExpiringQuotaUSD,
+		}
+		if sub.NextQuotaExpireAt != nil {
+			progress.Total.NextQuotaExpiresInSeconds = int64(time.Until(*sub.NextQuotaExpireAt).Seconds())
+			if progress.Total.NextQuotaExpiresInSeconds < 0 {
+				progress.Total.NextQuotaExpiresInSeconds = 0
+			}
 		}
 	}
 

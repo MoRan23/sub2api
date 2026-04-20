@@ -122,22 +122,36 @@
                   'inline-block rounded-full px-2 py-0.5 text-xs font-medium',
                   row.subscription_type === 'subscription'
                     ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400'
+                    : row.subscription_type === 'total_quota'
+                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
                     : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
                 ]"
               >
                 {{
                   row.subscription_type === "subscription"
                     ? t("admin.groups.subscription.subscription")
+                    : row.subscription_type === "total_quota"
+                      ? t("admin.groups.subscription.totalQuota")
                     : t("admin.groups.subscription.standard")
                 }}
               </span>
               <!-- Subscription Limits - compact single line -->
               <div
-                v-if="row.subscription_type === 'subscription'"
+                v-if="row.subscription_type === 'subscription' || row.subscription_type === 'total_quota'"
                 class="text-xs text-gray-500 dark:text-gray-400"
               >
+                <template v-if="row.subscription_type === 'total_quota'">
+                  <span v-if="row.total_limit_usd"
+                    >${{ row.total_limit_usd }}/{{
+                      t("admin.groups.subscription.total")
+                    }}</span
+                  >
+                  <span v-else class="text-gray-400 dark:text-gray-500">{{
+                    t("admin.groups.subscription.noLimit")
+                  }}</span>
+                </template>
                 <template
-                  v-if="
+                  v-else-if="
                     row.daily_limit_usd ||
                     row.weekly_limit_usd ||
                     row.monthly_limit_usd
@@ -492,7 +506,7 @@
           <p class="input-hint">{{ t("admin.groups.rateMultiplierHint") }}</p>
         </div>
         <div
-          v-if="createForm.subscription_type !== 'subscription'"
+          v-if="!isSubscriptionBasedType(createForm.subscription_type)"
           data-tour="group-form-exclusive"
         >
           <div class="mb-1.5 flex items-center gap-1">
@@ -623,6 +637,24 @@
                 min="0"
                 class="input"
                 :placeholder="t('admin.groups.subscription.noLimit')"
+              />
+            </div>
+          </div>
+          <div
+            v-else-if="createForm.subscription_type === 'total_quota'"
+            class="space-y-4 border-l-2 border-amber-200 pl-4 dark:border-amber-800"
+          >
+            <div>
+              <label class="input-label">{{
+                t("admin.groups.subscription.totalLimit")
+              }}</label>
+              <input
+                v-model.number="createForm.total_limit_usd"
+                type="number"
+                step="0.01"
+                min="0.01"
+                class="input"
+                :placeholder="t('admin.groups.subscription.totalLimitPlaceholder')"
               />
             </div>
           </div>
@@ -1207,7 +1239,7 @@
         <div
           v-if="
             ['anthropic', 'antigravity'].includes(createForm.platform) &&
-            createForm.subscription_type !== 'subscription'
+            !isSubscriptionBasedType(createForm.subscription_type)
           "
           class="border-t pt-4"
         >
@@ -1611,7 +1643,7 @@
             data-tour="group-form-multiplier"
           />
         </div>
-        <div v-if="editForm.subscription_type !== 'subscription'">
+        <div v-if="!isSubscriptionBasedType(editForm.subscription_type)">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
               {{ t("admin.groups.form.exclusive") }}
@@ -1745,6 +1777,24 @@
                 min="0"
                 class="input"
                 :placeholder="t('admin.groups.subscription.noLimit')"
+              />
+            </div>
+          </div>
+          <div
+            v-else-if="editForm.subscription_type === 'total_quota'"
+            class="space-y-4 border-l-2 border-amber-200 pl-4 dark:border-amber-800"
+          >
+            <div>
+              <label class="input-label">{{
+                t("admin.groups.subscription.totalLimit")
+              }}</label>
+              <input
+                v-model.number="editForm.total_limit_usd"
+                type="number"
+                step="0.01"
+                min="0.01"
+                class="input"
+                :placeholder="t('admin.groups.subscription.totalLimitPlaceholder')"
               />
             </div>
           </div>
@@ -2325,7 +2375,7 @@
         <div
           v-if="
             ['anthropic', 'antigravity'].includes(editForm.platform) &&
-            editForm.subscription_type !== 'subscription'
+            !isSubscriptionBasedType(editForm.subscription_type)
           "
           class="border-t pt-4"
         >
@@ -2796,9 +2846,13 @@ const editStatusOptions = computed(() => [
   { value: "inactive", label: t("admin.accounts.status.inactive") },
 ]);
 
+const isSubscriptionBasedType = (value: SubscriptionType) =>
+  value === "subscription" || value === "total_quota";
+
 const subscriptionTypeOptions = computed(() => [
   { value: "standard", label: t("admin.groups.subscription.standard") },
   { value: "subscription", label: t("admin.groups.subscription.subscription") },
+  { value: "total_quota", label: t("admin.groups.subscription.totalQuota") },
 ]);
 
 // 降级分组选项（创建时）- 仅包含 anthropic 平台且未启用 claude_code_only 的分组
@@ -2846,7 +2900,7 @@ const invalidRequestFallbackOptions = computed(() => {
     (g) =>
       g.platform === "anthropic" &&
       g.status === "active" &&
-      g.subscription_type !== "subscription" &&
+      !isSubscriptionBasedType(g.subscription_type) &&
       g.fallback_group_id_on_invalid_request === null,
   );
   eligibleGroups.forEach((g) => {
@@ -2865,7 +2919,7 @@ const invalidRequestFallbackOptionsForEdit = computed(() => {
     (g) =>
       g.platform === "anthropic" &&
       g.status === "active" &&
-      g.subscription_type !== "subscription" &&
+      !isSubscriptionBasedType(g.subscription_type) &&
       g.fallback_group_id_on_invalid_request === null &&
       g.id !== currentId,
   );
@@ -2963,6 +3017,7 @@ const createForm = reactive({
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
+  total_limit_usd: null as number | null,
   // 图片生成计费配置（仅 antigravity 平台使用）
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
@@ -3243,6 +3298,7 @@ const editForm = reactive({
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
+  total_limit_usd: null as number | null,
   // 图片生成计费配置（仅 antigravity 平台使用）
   image_price_1k: null as number | null,
   image_price_2k: null as number | null,
@@ -3276,7 +3332,7 @@ const deleteConfirmMessage = computed(() => {
   if (!deletingGroup.value) {
     return "";
   }
-  if (deletingGroup.value.subscription_type === "subscription") {
+  if (isSubscriptionBasedType(deletingGroup.value.subscription_type)) {
     return t("admin.groups.deleteConfirmSubscription", {
       name: deletingGroup.value.name,
     });
@@ -3429,6 +3485,7 @@ const closeCreateModal = () => {
   createForm.daily_limit_usd = null;
   createForm.weekly_limit_usd = null;
   createForm.monthly_limit_usd = null;
+  createForm.total_limit_usd = null;
   createForm.image_price_1k = null;
   createForm.image_price_2k = null;
   createForm.image_price_4k = null;
@@ -3482,6 +3539,9 @@ const handleCreateGroup = async () => {
       monthly_limit_usd: normalizeOptionalLimit(
         createForm.monthly_limit_usd as number | string | null,
       ),
+      total_limit_usd: normalizeOptionalLimit(
+        createForm.total_limit_usd as number | string | null,
+      ),
       model_routing: convertRoutingRulesToApiFormat(
         createModelRoutingRules.value,
       ),
@@ -3501,6 +3561,7 @@ const handleCreateGroup = async () => {
     requestData.daily_limit_usd = emptyToNull(requestData.daily_limit_usd);
     requestData.weekly_limit_usd = emptyToNull(requestData.weekly_limit_usd);
     requestData.monthly_limit_usd = emptyToNull(requestData.monthly_limit_usd);
+    requestData.total_limit_usd = emptyToNull(requestData.total_limit_usd);
     await adminAPI.groups.create(requestData);
     appStore.showSuccess(t("admin.groups.groupCreated"));
     closeCreateModal();
@@ -3532,6 +3593,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.daily_limit_usd = group.daily_limit_usd;
   editForm.weekly_limit_usd = group.weekly_limit_usd;
   editForm.monthly_limit_usd = group.monthly_limit_usd;
+  editForm.total_limit_usd = group.total_limit_usd;
   editForm.image_price_1k = group.image_price_1k;
   editForm.image_price_2k = group.image_price_2k;
   editForm.image_price_4k = group.image_price_4k;
@@ -3600,6 +3662,9 @@ const handleUpdateGroup = async () => {
       monthly_limit_usd: normalizeOptionalLimit(
         editForm.monthly_limit_usd as number | string | null,
       ),
+      total_limit_usd: normalizeOptionalLimit(
+        editForm.total_limit_usd as number | string | null,
+      ),
       fallback_group_id:
         editForm.fallback_group_id === null ? 0 : editForm.fallback_group_id,
       fallback_group_id_on_invalid_request:
@@ -3625,6 +3690,7 @@ const handleUpdateGroup = async () => {
     payload.daily_limit_usd = emptyToNull(payload.daily_limit_usd);
     payload.weekly_limit_usd = emptyToNull(payload.weekly_limit_usd);
     payload.monthly_limit_usd = emptyToNull(payload.monthly_limit_usd);
+    payload.total_limit_usd = emptyToNull(payload.total_limit_usd);
     await adminAPI.groups.update(editingGroup.value.id, payload);
     appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
@@ -3694,9 +3760,35 @@ const confirmDelete = async () => {
 watch(
   () => createForm.subscription_type,
   (newVal) => {
-    if (newVal === "subscription") {
+    if (isSubscriptionBasedType(newVal)) {
       createForm.is_exclusive = true;
       createForm.fallback_group_id_on_invalid_request = null;
+    }
+    if (newVal !== "subscription") {
+      createForm.daily_limit_usd = null;
+      createForm.weekly_limit_usd = null;
+      createForm.monthly_limit_usd = null;
+    }
+    if (newVal !== "total_quota") {
+      createForm.total_limit_usd = null;
+    }
+  },
+);
+
+watch(
+  () => editForm.subscription_type,
+  (newVal) => {
+    if (isSubscriptionBasedType(newVal)) {
+      editForm.is_exclusive = true;
+      editForm.fallback_group_id_on_invalid_request = null;
+    }
+    if (newVal !== "subscription") {
+      editForm.daily_limit_usd = null;
+      editForm.weekly_limit_usd = null;
+      editForm.monthly_limit_usd = null;
+    }
+    if (newVal !== "total_quota") {
+      editForm.total_limit_usd = null;
     }
   },
 );

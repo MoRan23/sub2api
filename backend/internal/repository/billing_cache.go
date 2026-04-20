@@ -53,6 +53,11 @@ const (
 	subFieldDailyUsage   = "daily_usage"
 	subFieldWeeklyUsage  = "weekly_usage"
 	subFieldMonthlyUsage = "monthly_usage"
+	subFieldTotalLimit   = "total_limit"
+	subFieldTotalUsed    = "total_used"
+	subFieldTotalRemain  = "total_remaining"
+	subFieldNextExpireAt = "next_quota_expire_at"
+	subFieldNextExpiring = "next_expiring_quota_usd"
 	subFieldVersion      = "version"
 )
 
@@ -209,6 +214,24 @@ func (c *billingCache) parseSubscriptionCache(data map[string]string) (*service.
 	if monthlyStr, ok := data[subFieldMonthlyUsage]; ok {
 		result.MonthlyUsage, _ = strconv.ParseFloat(monthlyStr, 64)
 	}
+	if totalLimitStr, ok := data[subFieldTotalLimit]; ok {
+		result.TotalLimit, _ = strconv.ParseFloat(totalLimitStr, 64)
+	}
+	if totalUsedStr, ok := data[subFieldTotalUsed]; ok {
+		result.TotalUsed, _ = strconv.ParseFloat(totalUsedStr, 64)
+	}
+	if totalRemainStr, ok := data[subFieldTotalRemain]; ok {
+		result.TotalRemaining, _ = strconv.ParseFloat(totalRemainStr, 64)
+	}
+	if nextExpireStr, ok := data[subFieldNextExpireAt]; ok && nextExpireStr != "" {
+		if unix, err := strconv.ParseInt(nextExpireStr, 10, 64); err == nil && unix > 0 {
+			t := time.Unix(unix, 0)
+			result.NextQuotaExpireAt = &t
+		}
+	}
+	if nextExpiringStr, ok := data[subFieldNextExpiring]; ok {
+		result.NextExpiringQuotaUSD, _ = strconv.ParseFloat(nextExpiringStr, 64)
+	}
 
 	if versionStr, ok := data[subFieldVersion]; ok {
 		result.Version, _ = strconv.ParseInt(versionStr, 10, 64)
@@ -230,7 +253,16 @@ func (c *billingCache) SetSubscriptionCache(ctx context.Context, userID, groupID
 		subFieldDailyUsage:   data.DailyUsage,
 		subFieldWeeklyUsage:  data.WeeklyUsage,
 		subFieldMonthlyUsage: data.MonthlyUsage,
+		subFieldTotalLimit:   data.TotalLimit,
+		subFieldTotalUsed:    data.TotalUsed,
+		subFieldTotalRemain:  data.TotalRemaining,
+		subFieldNextExpiring: data.NextExpiringQuotaUSD,
 		subFieldVersion:      data.Version,
+	}
+	if data.NextQuotaExpireAt != nil {
+		fields[subFieldNextExpireAt] = data.NextQuotaExpireAt.Unix()
+	} else {
+		fields[subFieldNextExpireAt] = 0
 	}
 
 	pipe := c.rdb.Pipeline()

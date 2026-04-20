@@ -21,6 +21,11 @@ type SubscriptionSummaryItem struct {
 	WeeklyLimitUSD  float64 `json:"weekly_limit_usd,omitempty"`
 	MonthlyUsedUSD  float64 `json:"monthly_used_usd,omitempty"`
 	MonthlyLimitUSD float64 `json:"monthly_limit_usd,omitempty"`
+	TotalLimitUSD   float64 `json:"total_limit_usd,omitempty"`
+	TotalUsedUSD    float64 `json:"total_used_usd,omitempty"`
+	TotalRemainingUSD float64 `json:"total_remaining_usd,omitempty"`
+	NextExpiringQuotaUSD float64 `json:"next_expiring_quota_usd,omitempty"`
+	NextQuotaExpireAt *string `json:"next_quota_expire_at,omitempty"`
 	ExpiresAt       *string `json:"expires_at,omitempty"`
 }
 
@@ -160,6 +165,16 @@ func (h *SubscriptionHandler) GetSummary(c *gin.Context) {
 			if sub.Group.MonthlyLimitUSD != nil {
 				item.MonthlyLimitUSD = *sub.Group.MonthlyLimitUSD
 			}
+			if sub.Group.TotalLimitUSD != nil {
+				item.TotalLimitUSD = *sub.Group.TotalLimitUSD
+			}
+		}
+		item.TotalUsedUSD = sub.TotalUsedUSD
+		item.TotalRemainingUSD = sub.TotalRemainingUSD
+		item.NextExpiringQuotaUSD = sub.NextExpiringQuotaUSD
+		if sub.NextQuotaExpireAt != nil {
+			formatted := sub.NextQuotaExpireAt.Format("2006-01-02T15:04:05Z07:00")
+			item.NextQuotaExpireAt = &formatted
 		}
 
 		// Format expiration time
@@ -168,8 +183,11 @@ func (h *SubscriptionHandler) GetSummary(c *gin.Context) {
 			item.ExpiresAt = &formatted
 		}
 
-		// Track total usage (use monthly as the most comprehensive)
-		totalUsed += sub.MonthlyUsageUSD
+		if sub.Group != nil && sub.Group.IsTotalQuotaSubscriptionType() {
+			totalUsed += sub.TotalUsedUSD
+		} else {
+			totalUsed += sub.MonthlyUsageUSD
+		}
 
 		items = append(items, item)
 	}

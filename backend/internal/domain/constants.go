@@ -57,6 +57,7 @@ const (
 const (
 	SubscriptionTypeStandard     = "standard"     // 标准计费模式（按余额扣费）
 	SubscriptionTypeSubscription = "subscription" // 订阅模式（按限额控制）
+	SubscriptionTypeTotalQuota   = "total_quota"  // 总额度订阅模式（按事件总额度控制）
 )
 
 // Subscription status constants

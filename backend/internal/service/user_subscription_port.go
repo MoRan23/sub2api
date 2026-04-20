@@ -30,6 +30,9 @@ type UserSubscriptionRepository interface {
 	ResetWeeklyUsage(ctx context.Context, id int64, newWindowStart time.Time) error
 	ResetMonthlyUsage(ctx context.Context, id int64, newWindowStart time.Time) error
 	IncrementUsage(ctx context.Context, id int64, costUSD float64) error
+	CreateQuotaEvent(ctx context.Context, event *UserSubscriptionQuotaEvent) error
+	GetQuotaSummary(ctx context.Context, subscriptionID int64, now time.Time) (*UserSubscriptionQuotaSummary, error)
+	GetQuotaSummaryBatch(ctx context.Context, subscriptionIDs []int64, now time.Time) (map[int64]*UserSubscriptionQuotaSummary, error)
 
 	BatchUpdateExpiredStatus(ctx context.Context) (int64, error)
 }

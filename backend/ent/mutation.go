@@ -4,7 +4,7 @@ package ent
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"sync"
@@ -39,6 +39,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/ent/usersubscriptionquotaevent"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
@@ -51,32 +52,33 @@ const (
 	OpUpdateOne = ent.OpUpdateOne
 
 	// Node types.
-	TypeAPIKey                  = "APIKey"
-	TypeAccount                 = "Account"
-	TypeAccountGroup            = "AccountGroup"
-	TypeAnnouncement            = "Announcement"
-	TypeAnnouncementRead        = "AnnouncementRead"
-	TypeErrorPassthroughRule    = "ErrorPassthroughRule"
-	TypeGroup                   = "Group"
-	TypeIdempotencyRecord       = "IdempotencyRecord"
-	TypePaymentAuditLog         = "PaymentAuditLog"
-	TypePaymentOrder            = "PaymentOrder"
-	TypePaymentProviderInstance = "PaymentProviderInstance"
-	TypePromoCode               = "PromoCode"
-	TypePromoCodeUsage          = "PromoCodeUsage"
-	TypeProxy                   = "Proxy"
-	TypeRedeemCode              = "RedeemCode"
-	TypeSecuritySecret          = "SecuritySecret"
-	TypeSetting                 = "Setting"
-	TypeSubscriptionPlan        = "SubscriptionPlan"
-	TypeTLSFingerprintProfile   = "TLSFingerprintProfile"
-	TypeUsageCleanupTask        = "UsageCleanupTask"
-	TypeUsageLog                = "UsageLog"
-	TypeUser                    = "User"
-	TypeUserAllowedGroup        = "UserAllowedGroup"
-	TypeUserAttributeDefinition = "UserAttributeDefinition"
-	TypeUserAttributeValue      = "UserAttributeValue"
-	TypeUserSubscription        = "UserSubscription"
+	TypeAPIKey                     = "APIKey"
+	TypeAccount                    = "Account"
+	TypeAccountGroup               = "AccountGroup"
+	TypeAnnouncement               = "Announcement"
+	TypeAnnouncementRead           = "AnnouncementRead"
+	TypeErrorPassthroughRule       = "ErrorPassthroughRule"
+	TypeGroup                      = "Group"
+	TypeIdempotencyRecord          = "IdempotencyRecord"
+	TypePaymentAuditLog            = "PaymentAuditLog"
+	TypePaymentOrder               = "PaymentOrder"
+	TypePaymentProviderInstance    = "PaymentProviderInstance"
+	TypePromoCode                  = "PromoCode"
+	TypePromoCodeUsage             = "PromoCodeUsage"
+	TypeProxy                      = "Proxy"
+	TypeRedeemCode                 = "RedeemCode"
+	TypeSecuritySecret             = "SecuritySecret"
+	TypeSetting                    = "Setting"
+	TypeSubscriptionPlan           = "SubscriptionPlan"
+	TypeTLSFingerprintProfile      = "TLSFingerprintProfile"
+	TypeUsageCleanupTask           = "UsageCleanupTask"
+	TypeUsageLog                   = "UsageLog"
+	TypeUser                       = "User"
+	TypeUserAllowedGroup           = "UserAllowedGroup"
+	TypeUserAttributeDefinition    = "UserAttributeDefinition"
+	TypeUserAttributeValue         = "UserAttributeValue"
+	TypeUserSubscription           = "UserSubscription"
+	TypeUserSubscriptionQuotaEvent = "UserSubscriptionQuotaEvent"
 )
 
 // APIKeyMutation represents an operation that mutates the APIKey nodes in the graph.
@@ -8230,6 +8232,8 @@ type GroupMutation struct {
 	addweekly_limit_usd                     *float64
 	monthly_limit_usd                       *float64
 	addmonthly_limit_usd                    *float64
+	total_limit_usd                         *float64
+	addtotal_limit_usd                      *float64
 	default_validity_days                   *int
 	adddefault_validity_days                *int
 	image_price_1k                          *float64
@@ -8991,6 +8995,76 @@ func (m *GroupMutation) ResetMonthlyLimitUsd() {
 	m.monthly_limit_usd = nil
 	m.addmonthly_limit_usd = nil
 	delete(m.clearedFields, group.FieldMonthlyLimitUsd)
+}
+
+// SetTotalLimitUsd sets the "total_limit_usd" field.
+func (m *GroupMutation) SetTotalLimitUsd(f float64) {
+	m.total_limit_usd = &f
+	m.addtotal_limit_usd = nil
+}
+
+// TotalLimitUsd returns the value of the "total_limit_usd" field in the mutation.
+func (m *GroupMutation) TotalLimitUsd() (r float64, exists bool) {
+	v := m.total_limit_usd
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTotalLimitUsd returns the old "total_limit_usd" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldTotalLimitUsd(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTotalLimitUsd is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTotalLimitUsd requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTotalLimitUsd: %w", err)
+	}
+	return oldValue.TotalLimitUsd, nil
+}
+
+// AddTotalLimitUsd adds f to the "total_limit_usd" field.
+func (m *GroupMutation) AddTotalLimitUsd(f float64) {
+	if m.addtotal_limit_usd != nil {
+		*m.addtotal_limit_usd += f
+	} else {
+		m.addtotal_limit_usd = &f
+	}
+}
+
+// AddedTotalLimitUsd returns the value that was added to the "total_limit_usd" field in this mutation.
+func (m *GroupMutation) AddedTotalLimitUsd() (r float64, exists bool) {
+	v := m.addtotal_limit_usd
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearTotalLimitUsd clears the value of the "total_limit_usd" field.
+func (m *GroupMutation) ClearTotalLimitUsd() {
+	m.total_limit_usd = nil
+	m.addtotal_limit_usd = nil
+	m.clearedFields[group.FieldTotalLimitUsd] = struct{}{}
+}
+
+// TotalLimitUsdCleared returns if the "total_limit_usd" field was cleared in this mutation.
+func (m *GroupMutation) TotalLimitUsdCleared() bool {
+	_, ok := m.clearedFields[group.FieldTotalLimitUsd]
+	return ok
+}
+
+// ResetTotalLimitUsd resets all changes to the "total_limit_usd" field.
+func (m *GroupMutation) ResetTotalLimitUsd() {
+	m.total_limit_usd = nil
+	m.addtotal_limit_usd = nil
+	delete(m.clearedFields, group.FieldTotalLimitUsd)
 }
 
 // SetDefaultValidityDays sets the "default_validity_days" field.
@@ -10201,7 +10275,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 30)
+	fields := make([]string, 0, 31)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -10240,6 +10314,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.monthly_limit_usd != nil {
 		fields = append(fields, group.FieldMonthlyLimitUsd)
+	}
+	if m.total_limit_usd != nil {
+		fields = append(fields, group.FieldTotalLimitUsd)
 	}
 	if m.default_validity_days != nil {
 		fields = append(fields, group.FieldDefaultValidityDays)
@@ -10326,6 +10403,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.WeeklyLimitUsd()
 	case group.FieldMonthlyLimitUsd:
 		return m.MonthlyLimitUsd()
+	case group.FieldTotalLimitUsd:
+		return m.TotalLimitUsd()
 	case group.FieldDefaultValidityDays:
 		return m.DefaultValidityDays()
 	case group.FieldImagePrice1k:
@@ -10395,6 +10474,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldWeeklyLimitUsd(ctx)
 	case group.FieldMonthlyLimitUsd:
 		return m.OldMonthlyLimitUsd(ctx)
+	case group.FieldTotalLimitUsd:
+		return m.OldTotalLimitUsd(ctx)
 	case group.FieldDefaultValidityDays:
 		return m.OldDefaultValidityDays(ctx)
 	case group.FieldImagePrice1k:
@@ -10528,6 +10609,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetMonthlyLimitUsd(v)
+		return nil
+	case group.FieldTotalLimitUsd:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTotalLimitUsd(v)
 		return nil
 	case group.FieldDefaultValidityDays:
 		v, ok := value.(int)
@@ -10668,6 +10756,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addmonthly_limit_usd != nil {
 		fields = append(fields, group.FieldMonthlyLimitUsd)
 	}
+	if m.addtotal_limit_usd != nil {
+		fields = append(fields, group.FieldTotalLimitUsd)
+	}
 	if m.adddefault_validity_days != nil {
 		fields = append(fields, group.FieldDefaultValidityDays)
 	}
@@ -10705,6 +10796,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedWeeklyLimitUsd()
 	case group.FieldMonthlyLimitUsd:
 		return m.AddedMonthlyLimitUsd()
+	case group.FieldTotalLimitUsd:
+		return m.AddedTotalLimitUsd()
 	case group.FieldDefaultValidityDays:
 		return m.AddedDefaultValidityDays()
 	case group.FieldImagePrice1k:
@@ -10755,6 +10848,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddMonthlyLimitUsd(v)
+		return nil
+	case group.FieldTotalLimitUsd:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTotalLimitUsd(v)
 		return nil
 	case group.FieldDefaultValidityDays:
 		v, ok := value.(int)
@@ -10828,6 +10928,9 @@ func (m *GroupMutation) ClearedFields() []string {
 	if m.FieldCleared(group.FieldMonthlyLimitUsd) {
 		fields = append(fields, group.FieldMonthlyLimitUsd)
 	}
+	if m.FieldCleared(group.FieldTotalLimitUsd) {
+		fields = append(fields, group.FieldTotalLimitUsd)
+	}
 	if m.FieldCleared(group.FieldImagePrice1k) {
 		fields = append(fields, group.FieldImagePrice1k)
 	}
@@ -10874,6 +10977,9 @@ func (m *GroupMutation) ClearField(name string) error {
 		return nil
 	case group.FieldMonthlyLimitUsd:
 		m.ClearMonthlyLimitUsd()
+		return nil
+	case group.FieldTotalLimitUsd:
+		m.ClearTotalLimitUsd()
 		return nil
 	case group.FieldImagePrice1k:
 		m.ClearImagePrice1k()
@@ -10939,6 +11045,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldMonthlyLimitUsd:
 		m.ResetMonthlyLimitUsd()
+		return nil
+	case group.FieldTotalLimitUsd:
+		m.ResetTotalLimitUsd()
 		return nil
 	case group.FieldDefaultValidityDays:
 		m.ResetDefaultValidityDays()
@@ -23757,8 +23866,8 @@ type UsageCleanupTaskMutation struct {
 	created_at      *time.Time
 	updated_at      *time.Time
 	status          *string
-	filters         *json.RawMessage
-	appendfilters   json.RawMessage
+	filters         *jsontext.Value
+	appendfilters   jsontext.Value
 	created_by      *int64
 	addcreated_by   *int64
 	deleted_rows    *int64
@@ -23982,13 +24091,13 @@ func (m *UsageCleanupTaskMutation) ResetStatus() {
 }
 
 // SetFilters sets the "filters" field.
-func (m *UsageCleanupTaskMutation) SetFilters(jm json.RawMessage) {
-	m.filters = &jm
+func (m *UsageCleanupTaskMutation) SetFilters(j jsontext.Value) {
+	m.filters = &j
 	m.appendfilters = nil
 }
 
 // Filters returns the value of the "filters" field in the mutation.
-func (m *UsageCleanupTaskMutation) Filters() (r json.RawMessage, exists bool) {
+func (m *UsageCleanupTaskMutation) Filters() (r jsontext.Value, exists bool) {
 	v := m.filters
 	if v == nil {
 		return
@@ -23999,7 +24108,7 @@ func (m *UsageCleanupTaskMutation) Filters() (r json.RawMessage, exists bool) {
 // OldFilters returns the old "filters" field's value of the UsageCleanupTask entity.
 // If the UsageCleanupTask object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *UsageCleanupTaskMutation) OldFilters(ctx context.Context) (v json.RawMessage, err error) {
+func (m *UsageCleanupTaskMutation) OldFilters(ctx context.Context) (v jsontext.Value, err error) {
 	if !m.op.Is(OpUpdateOne) {
 		return v, errors.New("OldFilters is only allowed on UpdateOne operations")
 	}
@@ -24013,13 +24122,13 @@ func (m *UsageCleanupTaskMutation) OldFilters(ctx context.Context) (v json.RawMe
 	return oldValue.Filters, nil
 }
 
-// AppendFilters adds jm to the "filters" field.
-func (m *UsageCleanupTaskMutation) AppendFilters(jm json.RawMessage) {
-	m.appendfilters = append(m.appendfilters, jm...)
+// AppendFilters adds j to the "filters" field.
+func (m *UsageCleanupTaskMutation) AppendFilters(j jsontext.Value) {
+	m.appendfilters = append(m.appendfilters, j...)
 }
 
 // AppendedFilters returns the list of values that were appended to the "filters" field in this mutation.
-func (m *UsageCleanupTaskMutation) AppendedFilters() (json.RawMessage, bool) {
+func (m *UsageCleanupTaskMutation) AppendedFilters() (jsontext.Value, bool) {
 	if len(m.appendfilters) == 0 {
 		return nil, false
 	}
@@ -24570,7 +24679,7 @@ func (m *UsageCleanupTaskMutation) SetField(name string, value ent.Value) error 
 		m.SetStatus(v)
 		return nil
 	case usagecleanuptask.FieldFilters:
-		v, ok := value.(json.RawMessage)
+		v, ok := value.(jsontext.Value)
 		if !ok {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
@@ -32844,6 +32953,9 @@ type UserSubscriptionMutation struct {
 	usage_logs              map[int64]struct{}
 	removedusage_logs       map[int64]struct{}
 	clearedusage_logs       bool
+	quota_events            map[int64]struct{}
+	removedquota_events     map[int64]struct{}
+	clearedquota_events     bool
 	done                    bool
 	oldValue                func(context.Context) (*UserSubscription, error)
 	predicates              []predicate.UserSubscription
@@ -33845,6 +33957,60 @@ func (m *UserSubscriptionMutation) ResetUsageLogs() {
 	m.removedusage_logs = nil
 }
 
+// AddQuotaEventIDs adds the "quota_events" edge to the UserSubscriptionQuotaEvent entity by ids.
+func (m *UserSubscriptionMutation) AddQuotaEventIDs(ids ...int64) {
+	if m.quota_events == nil {
+		m.quota_events = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.quota_events[ids[i]] = struct{}{}
+	}
+}
+
+// ClearQuotaEvents clears the "quota_events" edge to the UserSubscriptionQuotaEvent entity.
+func (m *UserSubscriptionMutation) ClearQuotaEvents() {
+	m.clearedquota_events = true
+}
+
+// QuotaEventsCleared reports if the "quota_events" edge to the UserSubscriptionQuotaEvent entity was cleared.
+func (m *UserSubscriptionMutation) QuotaEventsCleared() bool {
+	return m.clearedquota_events
+}
+
+// RemoveQuotaEventIDs removes the "quota_events" edge to the UserSubscriptionQuotaEvent entity by IDs.
+func (m *UserSubscriptionMutation) RemoveQuotaEventIDs(ids ...int64) {
+	if m.removedquota_events == nil {
+		m.removedquota_events = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.quota_events, ids[i])
+		m.removedquota_events[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedQuotaEvents returns the removed IDs of the "quota_events" edge to the UserSubscriptionQuotaEvent entity.
+func (m *UserSubscriptionMutation) RemovedQuotaEventsIDs() (ids []int64) {
+	for id := range m.removedquota_events {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// QuotaEventsIDs returns the "quota_events" edge IDs in the mutation.
+func (m *UserSubscriptionMutation) QuotaEventsIDs() (ids []int64) {
+	for id := range m.quota_events {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetQuotaEvents resets all changes to the "quota_events" edge.
+func (m *UserSubscriptionMutation) ResetQuotaEvents() {
+	m.quota_events = nil
+	m.clearedquota_events = false
+	m.removedquota_events = nil
+}
+
 // Where appends a list predicates to the UserSubscriptionMutation builder.
 func (m *UserSubscriptionMutation) Where(ps ...predicate.UserSubscription) {
 	m.predicates = append(m.predicates, ps...)
@@ -34328,7 +34494,7 @@ func (m *UserSubscriptionMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *UserSubscriptionMutation) AddedEdges() []string {
-	edges := make([]string, 0, 4)
+	edges := make([]string, 0, 5)
 	if m.user != nil {
 		edges = append(edges, usersubscription.EdgeUser)
 	}
@@ -34340,6 +34506,9 @@ func (m *UserSubscriptionMutation) AddedEdges() []string {
 	}
 	if m.usage_logs != nil {
 		edges = append(edges, usersubscription.EdgeUsageLogs)
+	}
+	if m.quota_events != nil {
+		edges = append(edges, usersubscription.EdgeQuotaEvents)
 	}
 	return edges
 }
@@ -34366,15 +34535,24 @@ func (m *UserSubscriptionMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case usersubscription.EdgeQuotaEvents:
+		ids := make([]ent.Value, 0, len(m.quota_events))
+		for id := range m.quota_events {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *UserSubscriptionMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 4)
+	edges := make([]string, 0, 5)
 	if m.removedusage_logs != nil {
 		edges = append(edges, usersubscription.EdgeUsageLogs)
+	}
+	if m.removedquota_events != nil {
+		edges = append(edges, usersubscription.EdgeQuotaEvents)
 	}
 	return edges
 }
@@ -34389,13 +34567,19 @@ func (m *UserSubscriptionMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case usersubscription.EdgeQuotaEvents:
+		ids := make([]ent.Value, 0, len(m.removedquota_events))
+		for id := range m.removedquota_events {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *UserSubscriptionMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 4)
+	edges := make([]string, 0, 5)
 	if m.cleareduser {
 		edges = append(edges, usersubscription.EdgeUser)
 	}
@@ -34407,6 +34591,9 @@ func (m *UserSubscriptionMutation) ClearedEdges() []string {
 	}
 	if m.clearedusage_logs {
 		edges = append(edges, usersubscription.EdgeUsageLogs)
+	}
+	if m.clearedquota_events {
+		edges = append(edges, usersubscription.EdgeQuotaEvents)
 	}
 	return edges
 }
@@ -34423,6 +34610,8 @@ func (m *UserSubscriptionMutation) EdgeCleared(name string) bool {
 		return m.clearedassigned_by_user
 	case usersubscription.EdgeUsageLogs:
 		return m.clearedusage_logs
+	case usersubscription.EdgeQuotaEvents:
+		return m.clearedquota_events
 	}
 	return false
 }
@@ -34460,6 +34649,925 @@ func (m *UserSubscriptionMutation) ResetEdge(name string) error {
 	case usersubscription.EdgeUsageLogs:
 		m.ResetUsageLogs()
 		return nil
+	case usersubscription.EdgeQuotaEvents:
+		m.ResetQuotaEvents()
+		return nil
 	}
 	return fmt.Errorf("unknown UserSubscription edge %s", name)
+}
+
+// UserSubscriptionQuotaEventMutation represents an operation that mutates the UserSubscriptionQuotaEvent nodes in the graph.
+type UserSubscriptionQuotaEventMutation struct {
+	config
+	op                  Op
+	typ                 string
+	id                  *int64
+	quota_total_usd     *float64
+	addquota_total_usd  *float64
+	quota_used_usd      *float64
+	addquota_used_usd   *float64
+	starts_at           *time.Time
+	expires_at          *time.Time
+	source_kind         *string
+	source_ref          *string
+	created_at          *time.Time
+	updated_at          *time.Time
+	clearedFields       map[string]struct{}
+	subscription        *int64
+	clearedsubscription bool
+	done                bool
+	oldValue            func(context.Context) (*UserSubscriptionQuotaEvent, error)
+	predicates          []predicate.UserSubscriptionQuotaEvent
+}
+
+var _ ent.Mutation = (*UserSubscriptionQuotaEventMutation)(nil)
+
+// usersubscriptionquotaeventOption allows management of the mutation configuration using functional options.
+type usersubscriptionquotaeventOption func(*UserSubscriptionQuotaEventMutation)
+
+// newUserSubscriptionQuotaEventMutation creates new mutation for the UserSubscriptionQuotaEvent entity.
+func newUserSubscriptionQuotaEventMutation(c config, op Op, opts ...usersubscriptionquotaeventOption) *UserSubscriptionQuotaEventMutation {
+	m := &UserSubscriptionQuotaEventMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeUserSubscriptionQuotaEvent,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withUserSubscriptionQuotaEventID sets the ID field of the mutation.
+func withUserSubscriptionQuotaEventID(id int64) usersubscriptionquotaeventOption {
+	return func(m *UserSubscriptionQuotaEventMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *UserSubscriptionQuotaEvent
+		)
+		m.oldValue = func(ctx context.Context) (*UserSubscriptionQuotaEvent, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().UserSubscriptionQuotaEvent.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withUserSubscriptionQuotaEvent sets the old UserSubscriptionQuotaEvent of the mutation.
+func withUserSubscriptionQuotaEvent(node *UserSubscriptionQuotaEvent) usersubscriptionquotaeventOption {
+	return func(m *UserSubscriptionQuotaEventMutation) {
+		m.oldValue = func(context.Context) (*UserSubscriptionQuotaEvent, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m UserSubscriptionQuotaEventMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m UserSubscriptionQuotaEventMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *UserSubscriptionQuotaEventMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *UserSubscriptionQuotaEventMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().UserSubscriptionQuotaEvent.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetUserSubscriptionID sets the "user_subscription_id" field.
+func (m *UserSubscriptionQuotaEventMutation) SetUserSubscriptionID(i int64) {
+	m.subscription = &i
+}
+
+// UserSubscriptionID returns the value of the "user_subscription_id" field in the mutation.
+func (m *UserSubscriptionQuotaEventMutation) UserSubscriptionID() (r int64, exists bool) {
+	v := m.subscription
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUserSubscriptionID returns the old "user_subscription_id" field's value of the UserSubscriptionQuotaEvent entity.
+// If the UserSubscriptionQuotaEvent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionQuotaEventMutation) OldUserSubscriptionID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUserSubscriptionID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUserSubscriptionID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUserSubscriptionID: %w", err)
+	}
+	return oldValue.UserSubscriptionID, nil
+}
+
+// ResetUserSubscriptionID resets all changes to the "user_subscription_id" field.
+func (m *UserSubscriptionQuotaEventMutation) ResetUserSubscriptionID() {
+	m.subscription = nil
+}
+
+// SetQuotaTotalUsd sets the "quota_total_usd" field.
+func (m *UserSubscriptionQuotaEventMutation) SetQuotaTotalUsd(f float64) {
+	m.quota_total_usd = &f
+	m.addquota_total_usd = nil
+}
+
+// QuotaTotalUsd returns the value of the "quota_total_usd" field in the mutation.
+func (m *UserSubscriptionQuotaEventMutation) QuotaTotalUsd() (r float64, exists bool) {
+	v := m.quota_total_usd
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldQuotaTotalUsd returns the old "quota_total_usd" field's value of the UserSubscriptionQuotaEvent entity.
+// If the UserSubscriptionQuotaEvent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionQuotaEventMutation) OldQuotaTotalUsd(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldQuotaTotalUsd is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldQuotaTotalUsd requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldQuotaTotalUsd: %w", err)
+	}
+	return oldValue.QuotaTotalUsd, nil
+}
+
+// AddQuotaTotalUsd adds f to the "quota_total_usd" field.
+func (m *UserSubscriptionQuotaEventMutation) AddQuotaTotalUsd(f float64) {
+	if m.addquota_total_usd != nil {
+		*m.addquota_total_usd += f
+	} else {
+		m.addquota_total_usd = &f
+	}
+}
+
+// AddedQuotaTotalUsd returns the value that was added to the "quota_total_usd" field in this mutation.
+func (m *UserSubscriptionQuotaEventMutation) AddedQuotaTotalUsd() (r float64, exists bool) {
+	v := m.addquota_total_usd
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetQuotaTotalUsd resets all changes to the "quota_total_usd" field.
+func (m *UserSubscriptionQuotaEventMutation) ResetQuotaTotalUsd() {
+	m.quota_total_usd = nil
+	m.addquota_total_usd = nil
+}
+
+// SetQuotaUsedUsd sets the "quota_used_usd" field.
+func (m *UserSubscriptionQuotaEventMutation) SetQuotaUsedUsd(f float64) {
+	m.quota_used_usd = &f
+	m.addquota_used_usd = nil
+}
+
+// QuotaUsedUsd returns the value of the "quota_used_usd" field in the mutation.
+func (m *UserSubscriptionQuotaEventMutation) QuotaUsedUsd() (r float64, exists bool) {
+	v := m.quota_used_usd
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldQuotaUsedUsd returns the old "quota_used_usd" field's value of the UserSubscriptionQuotaEvent entity.
+// If the UserSubscriptionQuotaEvent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionQuotaEventMutation) OldQuotaUsedUsd(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldQuotaUsedUsd is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldQuotaUsedUsd requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldQuotaUsedUsd: %w", err)
+	}
+	return oldValue.QuotaUsedUsd, nil
+}
+
+// AddQuotaUsedUsd adds f to the "quota_used_usd" field.
+func (m *UserSubscriptionQuotaEventMutation) AddQuotaUsedUsd(f float64) {
+	if m.addquota_used_usd != nil {
+		*m.addquota_used_usd += f
+	} else {
+		m.addquota_used_usd = &f
+	}
+}
+
+// AddedQuotaUsedUsd returns the value that was added to the "quota_used_usd" field in this mutation.
+func (m *UserSubscriptionQuotaEventMutation) AddedQuotaUsedUsd() (r float64, exists bool) {
+	v := m.addquota_used_usd
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetQuotaUsedUsd resets all changes to the "quota_used_usd" field.
+func (m *UserSubscriptionQuotaEventMutation) ResetQuotaUsedUsd() {
+	m.quota_used_usd = nil
+	m.addquota_used_usd = nil
+}
+
+// SetStartsAt sets the "starts_at" field.
+func (m *UserSubscriptionQuotaEventMutation) SetStartsAt(t time.Time) {
+	m.starts_at = &t
+}
+
+// StartsAt returns the value of the "starts_at" field in the mutation.
+func (m *UserSubscriptionQuotaEventMutation) StartsAt() (r time.Time, exists bool) {
+	v := m.starts_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStartsAt returns the old "starts_at" field's value of the UserSubscriptionQuotaEvent entity.
+// If the UserSubscriptionQuotaEvent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionQuotaEventMutation) OldStartsAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStartsAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStartsAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStartsAt: %w", err)
+	}
+	return oldValue.StartsAt, nil
+}
+
+// ResetStartsAt resets all changes to the "starts_at" field.
+func (m *UserSubscriptionQuotaEventMutation) ResetStartsAt() {
+	m.starts_at = nil
+}
+
+// SetExpiresAt sets the "expires_at" field.
+func (m *UserSubscriptionQuotaEventMutation) SetExpiresAt(t time.Time) {
+	m.expires_at = &t
+}
+
+// ExpiresAt returns the value of the "expires_at" field in the mutation.
+func (m *UserSubscriptionQuotaEventMutation) ExpiresAt() (r time.Time, exists bool) {
+	v := m.expires_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExpiresAt returns the old "expires_at" field's value of the UserSubscriptionQuotaEvent entity.
+// If the UserSubscriptionQuotaEvent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionQuotaEventMutation) OldExpiresAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExpiresAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExpiresAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExpiresAt: %w", err)
+	}
+	return oldValue.ExpiresAt, nil
+}
+
+// ResetExpiresAt resets all changes to the "expires_at" field.
+func (m *UserSubscriptionQuotaEventMutation) ResetExpiresAt() {
+	m.expires_at = nil
+}
+
+// SetSourceKind sets the "source_kind" field.
+func (m *UserSubscriptionQuotaEventMutation) SetSourceKind(s string) {
+	m.source_kind = &s
+}
+
+// SourceKind returns the value of the "source_kind" field in the mutation.
+func (m *UserSubscriptionQuotaEventMutation) SourceKind() (r string, exists bool) {
+	v := m.source_kind
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSourceKind returns the old "source_kind" field's value of the UserSubscriptionQuotaEvent entity.
+// If the UserSubscriptionQuotaEvent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionQuotaEventMutation) OldSourceKind(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSourceKind is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSourceKind requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSourceKind: %w", err)
+	}
+	return oldValue.SourceKind, nil
+}
+
+// ResetSourceKind resets all changes to the "source_kind" field.
+func (m *UserSubscriptionQuotaEventMutation) ResetSourceKind() {
+	m.source_kind = nil
+}
+
+// SetSourceRef sets the "source_ref" field.
+func (m *UserSubscriptionQuotaEventMutation) SetSourceRef(s string) {
+	m.source_ref = &s
+}
+
+// SourceRef returns the value of the "source_ref" field in the mutation.
+func (m *UserSubscriptionQuotaEventMutation) SourceRef() (r string, exists bool) {
+	v := m.source_ref
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSourceRef returns the old "source_ref" field's value of the UserSubscriptionQuotaEvent entity.
+// If the UserSubscriptionQuotaEvent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionQuotaEventMutation) OldSourceRef(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSourceRef is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSourceRef requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSourceRef: %w", err)
+	}
+	return oldValue.SourceRef, nil
+}
+
+// ClearSourceRef clears the value of the "source_ref" field.
+func (m *UserSubscriptionQuotaEventMutation) ClearSourceRef() {
+	m.source_ref = nil
+	m.clearedFields[usersubscriptionquotaevent.FieldSourceRef] = struct{}{}
+}
+
+// SourceRefCleared returns if the "source_ref" field was cleared in this mutation.
+func (m *UserSubscriptionQuotaEventMutation) SourceRefCleared() bool {
+	_, ok := m.clearedFields[usersubscriptionquotaevent.FieldSourceRef]
+	return ok
+}
+
+// ResetSourceRef resets all changes to the "source_ref" field.
+func (m *UserSubscriptionQuotaEventMutation) ResetSourceRef() {
+	m.source_ref = nil
+	delete(m.clearedFields, usersubscriptionquotaevent.FieldSourceRef)
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *UserSubscriptionQuotaEventMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *UserSubscriptionQuotaEventMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the UserSubscriptionQuotaEvent entity.
+// If the UserSubscriptionQuotaEvent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionQuotaEventMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *UserSubscriptionQuotaEventMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *UserSubscriptionQuotaEventMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *UserSubscriptionQuotaEventMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the UserSubscriptionQuotaEvent entity.
+// If the UserSubscriptionQuotaEvent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionQuotaEventMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *UserSubscriptionQuotaEventMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetSubscriptionID sets the "subscription" edge to the UserSubscription entity by id.
+func (m *UserSubscriptionQuotaEventMutation) SetSubscriptionID(id int64) {
+	m.subscription = &id
+}
+
+// ClearSubscription clears the "subscription" edge to the UserSubscription entity.
+func (m *UserSubscriptionQuotaEventMutation) ClearSubscription() {
+	m.clearedsubscription = true
+	m.clearedFields[usersubscriptionquotaevent.FieldUserSubscriptionID] = struct{}{}
+}
+
+// SubscriptionCleared reports if the "subscription" edge to the UserSubscription entity was cleared.
+func (m *UserSubscriptionQuotaEventMutation) SubscriptionCleared() bool {
+	return m.clearedsubscription
+}
+
+// SubscriptionID returns the "subscription" edge ID in the mutation.
+func (m *UserSubscriptionQuotaEventMutation) SubscriptionID() (id int64, exists bool) {
+	if m.subscription != nil {
+		return *m.subscription, true
+	}
+	return
+}
+
+// SubscriptionIDs returns the "subscription" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// SubscriptionID instead. It exists only for internal usage by the builders.
+func (m *UserSubscriptionQuotaEventMutation) SubscriptionIDs() (ids []int64) {
+	if id := m.subscription; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetSubscription resets all changes to the "subscription" edge.
+func (m *UserSubscriptionQuotaEventMutation) ResetSubscription() {
+	m.subscription = nil
+	m.clearedsubscription = false
+}
+
+// Where appends a list predicates to the UserSubscriptionQuotaEventMutation builder.
+func (m *UserSubscriptionQuotaEventMutation) Where(ps ...predicate.UserSubscriptionQuotaEvent) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the UserSubscriptionQuotaEventMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *UserSubscriptionQuotaEventMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.UserSubscriptionQuotaEvent, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *UserSubscriptionQuotaEventMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *UserSubscriptionQuotaEventMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (UserSubscriptionQuotaEvent).
+func (m *UserSubscriptionQuotaEventMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *UserSubscriptionQuotaEventMutation) Fields() []string {
+	fields := make([]string, 0, 9)
+	if m.subscription != nil {
+		fields = append(fields, usersubscriptionquotaevent.FieldUserSubscriptionID)
+	}
+	if m.quota_total_usd != nil {
+		fields = append(fields, usersubscriptionquotaevent.FieldQuotaTotalUsd)
+	}
+	if m.quota_used_usd != nil {
+		fields = append(fields, usersubscriptionquotaevent.FieldQuotaUsedUsd)
+	}
+	if m.starts_at != nil {
+		fields = append(fields, usersubscriptionquotaevent.FieldStartsAt)
+	}
+	if m.expires_at != nil {
+		fields = append(fields, usersubscriptionquotaevent.FieldExpiresAt)
+	}
+	if m.source_kind != nil {
+		fields = append(fields, usersubscriptionquotaevent.FieldSourceKind)
+	}
+	if m.source_ref != nil {
+		fields = append(fields, usersubscriptionquotaevent.FieldSourceRef)
+	}
+	if m.created_at != nil {
+		fields = append(fields, usersubscriptionquotaevent.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, usersubscriptionquotaevent.FieldUpdatedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *UserSubscriptionQuotaEventMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case usersubscriptionquotaevent.FieldUserSubscriptionID:
+		return m.UserSubscriptionID()
+	case usersubscriptionquotaevent.FieldQuotaTotalUsd:
+		return m.QuotaTotalUsd()
+	case usersubscriptionquotaevent.FieldQuotaUsedUsd:
+		return m.QuotaUsedUsd()
+	case usersubscriptionquotaevent.FieldStartsAt:
+		return m.StartsAt()
+	case usersubscriptionquotaevent.FieldExpiresAt:
+		return m.ExpiresAt()
+	case usersubscriptionquotaevent.FieldSourceKind:
+		return m.SourceKind()
+	case usersubscriptionquotaevent.FieldSourceRef:
+		return m.SourceRef()
+	case usersubscriptionquotaevent.FieldCreatedAt:
+		return m.CreatedAt()
+	case usersubscriptionquotaevent.FieldUpdatedAt:
+		return m.UpdatedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *UserSubscriptionQuotaEventMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case usersubscriptionquotaevent.FieldUserSubscriptionID:
+		return m.OldUserSubscriptionID(ctx)
+	case usersubscriptionquotaevent.FieldQuotaTotalUsd:
+		return m.OldQuotaTotalUsd(ctx)
+	case usersubscriptionquotaevent.FieldQuotaUsedUsd:
+		return m.OldQuotaUsedUsd(ctx)
+	case usersubscriptionquotaevent.FieldStartsAt:
+		return m.OldStartsAt(ctx)
+	case usersubscriptionquotaevent.FieldExpiresAt:
+		return m.OldExpiresAt(ctx)
+	case usersubscriptionquotaevent.FieldSourceKind:
+		return m.OldSourceKind(ctx)
+	case usersubscriptionquotaevent.FieldSourceRef:
+		return m.OldSourceRef(ctx)
+	case usersubscriptionquotaevent.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case usersubscriptionquotaevent.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown UserSubscriptionQuotaEvent field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *UserSubscriptionQuotaEventMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case usersubscriptionquotaevent.FieldUserSubscriptionID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUserSubscriptionID(v)
+		return nil
+	case usersubscriptionquotaevent.FieldQuotaTotalUsd:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetQuotaTotalUsd(v)
+		return nil
+	case usersubscriptionquotaevent.FieldQuotaUsedUsd:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetQuotaUsedUsd(v)
+		return nil
+	case usersubscriptionquotaevent.FieldStartsAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStartsAt(v)
+		return nil
+	case usersubscriptionquotaevent.FieldExpiresAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExpiresAt(v)
+		return nil
+	case usersubscriptionquotaevent.FieldSourceKind:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSourceKind(v)
+		return nil
+	case usersubscriptionquotaevent.FieldSourceRef:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSourceRef(v)
+		return nil
+	case usersubscriptionquotaevent.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case usersubscriptionquotaevent.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown UserSubscriptionQuotaEvent field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *UserSubscriptionQuotaEventMutation) AddedFields() []string {
+	var fields []string
+	if m.addquota_total_usd != nil {
+		fields = append(fields, usersubscriptionquotaevent.FieldQuotaTotalUsd)
+	}
+	if m.addquota_used_usd != nil {
+		fields = append(fields, usersubscriptionquotaevent.FieldQuotaUsedUsd)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *UserSubscriptionQuotaEventMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case usersubscriptionquotaevent.FieldQuotaTotalUsd:
+		return m.AddedQuotaTotalUsd()
+	case usersubscriptionquotaevent.FieldQuotaUsedUsd:
+		return m.AddedQuotaUsedUsd()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *UserSubscriptionQuotaEventMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case usersubscriptionquotaevent.FieldQuotaTotalUsd:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddQuotaTotalUsd(v)
+		return nil
+	case usersubscriptionquotaevent.FieldQuotaUsedUsd:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddQuotaUsedUsd(v)
+		return nil
+	}
+	return fmt.Errorf("unknown UserSubscriptionQuotaEvent numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *UserSubscriptionQuotaEventMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(usersubscriptionquotaevent.FieldSourceRef) {
+		fields = append(fields, usersubscriptionquotaevent.FieldSourceRef)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *UserSubscriptionQuotaEventMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *UserSubscriptionQuotaEventMutation) ClearField(name string) error {
+	switch name {
+	case usersubscriptionquotaevent.FieldSourceRef:
+		m.ClearSourceRef()
+		return nil
+	}
+	return fmt.Errorf("unknown UserSubscriptionQuotaEvent nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *UserSubscriptionQuotaEventMutation) ResetField(name string) error {
+	switch name {
+	case usersubscriptionquotaevent.FieldUserSubscriptionID:
+		m.ResetUserSubscriptionID()
+		return nil
+	case usersubscriptionquotaevent.FieldQuotaTotalUsd:
+		m.ResetQuotaTotalUsd()
+		return nil
+	case usersubscriptionquotaevent.FieldQuotaUsedUsd:
+		m.ResetQuotaUsedUsd()
+		return nil
+	case usersubscriptionquotaevent.FieldStartsAt:
+		m.ResetStartsAt()
+		return nil
+	case usersubscriptionquotaevent.FieldExpiresAt:
+		m.ResetExpiresAt()
+		return nil
+	case usersubscriptionquotaevent.FieldSourceKind:
+		m.ResetSourceKind()
+		return nil
+	case usersubscriptionquotaevent.FieldSourceRef:
+		m.ResetSourceRef()
+		return nil
+	case usersubscriptionquotaevent.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case usersubscriptionquotaevent.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown UserSubscriptionQuotaEvent field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *UserSubscriptionQuotaEventMutation) AddedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.subscription != nil {
+		edges = append(edges, usersubscriptionquotaevent.EdgeSubscription)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *UserSubscriptionQuotaEventMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case usersubscriptionquotaevent.EdgeSubscription:
+		if id := m.subscription; id != nil {
+			return []ent.Value{*id}
+		}
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *UserSubscriptionQuotaEventMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 1)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *UserSubscriptionQuotaEventMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *UserSubscriptionQuotaEventMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.clearedsubscription {
+		edges = append(edges, usersubscriptionquotaevent.EdgeSubscription)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *UserSubscriptionQuotaEventMutation) EdgeCleared(name string) bool {
+	switch name {
+	case usersubscriptionquotaevent.EdgeSubscription:
+		return m.clearedsubscription
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *UserSubscriptionQuotaEventMutation) ClearEdge(name string) error {
+	switch name {
+	case usersubscriptionquotaevent.EdgeSubscription:
+		m.ClearSubscription()
+		return nil
+	}
+	return fmt.Errorf("unknown UserSubscriptionQuotaEvent unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *UserSubscriptionQuotaEventMutation) ResetEdge(name string) error {
+	switch name {
+	case usersubscriptionquotaevent.EdgeSubscription:
+		m.ResetSubscription()
+		return nil
+	}
+	return fmt.Errorf("unknown UserSubscriptionQuotaEvent edge %s", name)
 }

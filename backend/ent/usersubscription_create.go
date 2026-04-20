@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/ent/usersubscriptionquotaevent"
 )
 
 // UserSubscriptionCreate is the builder for creating a UserSubscription entity.
@@ -273,6 +274,21 @@ func (_c *UserSubscriptionCreate) AddUsageLogs(v ...*UsageLog) *UserSubscription
 		ids[i] = v[i].ID
 	}
 	return _c.AddUsageLogIDs(ids...)
+}
+
+// AddQuotaEventIDs adds the "quota_events" edge to the UserSubscriptionQuotaEvent entity by IDs.
+func (_c *UserSubscriptionCreate) AddQuotaEventIDs(ids ...int64) *UserSubscriptionCreate {
+	_c.mutation.AddQuotaEventIDs(ids...)
+	return _c
+}
+
+// AddQuotaEvents adds the "quota_events" edges to the UserSubscriptionQuotaEvent entity.
+func (_c *UserSubscriptionCreate) AddQuotaEvents(v ...*UserSubscriptionQuotaEvent) *UserSubscriptionCreate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddQuotaEventIDs(ids...)
 }
 
 // Mutation returns the UserSubscriptionMutation object of the builder.
@@ -541,6 +557,22 @@ func (_c *UserSubscriptionCreate) createSpec() (*UserSubscription, *sqlgraph.Cre
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(usagelog.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.QuotaEventsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   usersubscription.QuotaEventsTable,
+			Columns: []string{usersubscription.QuotaEventsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usersubscriptionquotaevent.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

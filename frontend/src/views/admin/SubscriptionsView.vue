@@ -213,6 +213,44 @@
 
           <template #cell-usage="{ row }">
             <div class="min-w-[280px] space-y-2">
+              <template v-if="isTotalQuotaSubscription(row)">
+                <div class="usage-row">
+                  <div class="flex items-center gap-2">
+                    <span class="usage-label">{{ t('admin.subscriptions.total') }}</span>
+                    <div class="h-1.5 flex-1 rounded-full bg-gray-200 dark:bg-dark-600">
+                      <div
+                        class="h-1.5 rounded-full transition-all"
+                        :class="getProgressClass(row.total_used_usd, row.total_limit_usd ?? row.group?.total_limit_usd ?? null)"
+                        :style="{
+                          width: getProgressWidth(row.total_used_usd, row.total_limit_usd ?? row.group?.total_limit_usd ?? null)
+                        }"
+                      ></div>
+                    </div>
+                    <span class="usage-amount">
+                      ${{ row.total_used_usd?.toFixed(2) || '0.00' }}
+                      <span class="text-gray-400">/</span>
+                      ${{ (row.total_limit_usd ?? row.group?.total_limit_usd ?? 0).toFixed(2) }}
+                    </span>
+                  </div>
+                  <div class="reset-info" v-if="row.next_expiring_quota_usd > 0 && row.next_quota_expire_at">
+                    <svg
+                      class="h-3 w-3"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                      />
+                    </svg>
+                    <span>{{ formatQuotaExpiryHint(row.next_expiring_quota_usd, row.next_quota_expire_at) }}</span>
+                  </div>
+                </div>
+              </template>
+              <template v-else>
               <!-- Daily Usage -->
               <div v-if="row.group?.daily_limit_usd" class="usage-row">
                 <div class="flex items-center gap-2">
@@ -338,6 +376,7 @@
                   {{ t('admin.subscriptions.unlimited') }}
                 </span>
               </div>
+              </template>
             </div>
           </template>
 
@@ -380,7 +419,7 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <button
-                v-if="row.status === 'active' || row.status === 'expired'"
+                v-if="(row.status === 'active' || row.status === 'expired') && !isTotalQuotaSubscription(row)"
                 @click="handleExtend(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
               >
@@ -388,7 +427,7 @@
                 <span class="text-xs">{{ t('admin.subscriptions.adjust') }}</span>
               </button>
               <button
-                v-if="row.status === 'active'"
+                v-if="row.status === 'active' && !isTotalQuotaSubscription(row)"
                 @click="handleResetQuota(row)"
                 :disabled="resettingQuota && resettingSubscription?.id === row.id"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-orange-50 hover:text-orange-600 dark:hover:bg-orange-900/20 dark:hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
@@ -973,7 +1012,7 @@ const platformFilterOptions = computed(() => [
 // Group options for assign (only subscription type groups)
 const subscriptionGroupOptions = computed(() =>
   groups.value
-    .filter((g) => g.subscription_type === 'subscription' && g.status === 'active')
+    .filter((g) => (g.subscription_type === 'subscription' || g.subscription_type === 'total_quota') && g.status === 'active')
     .map((g) => ({
       value: g.id,
       label: g.name,
@@ -1302,6 +1341,35 @@ const getProgressWidth = (used: number | null | undefined, limit: number | null)
   const usedValue = used ?? 0
   const percentage = Math.min((usedValue / limit) * 100, 100)
   return `${percentage}%`
+}
+
+const isTotalQuotaSubscription = (subscription: UserSubscription): boolean =>
+  subscription.group?.subscription_type === 'total_quota'
+
+const formatQuotaExpiryHint = (amount: number | null | undefined, expiresAt: string | null | undefined): string => {
+  if (!amount || amount <= 0 || !expiresAt) return ''
+  const target = new Date(expiresAt)
+  const now = new Date()
+  const diffMs = target.getTime() - now.getTime()
+  if (diffMs <= 0) return ''
+
+  const diffMinutes = Math.floor(diffMs / (1000 * 60))
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+  let timeText = ''
+  if (diffDays >= 1) {
+    timeText = `${diffDays}d ${diffHours % 24}h`
+  } else if (diffHours >= 1) {
+    timeText = `${diffHours}h ${diffMinutes % 60}m`
+  } else {
+    timeText = `${Math.max(diffMinutes, 1)}m`
+  }
+
+  return t('admin.subscriptions.expiringQuotaHint', {
+    amount: amount.toFixed(2),
+    time: timeText
+  })
 }
 
 const getProgressClass = (used: number | null | undefined, limit: number | null): string => {

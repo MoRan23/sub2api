@@ -59,6 +59,7 @@ const (
 const (
 	SubscriptionTypeStandard     = domain.SubscriptionTypeStandard     // 标准计费模式（按余额扣费）
 	SubscriptionTypeSubscription = domain.SubscriptionTypeSubscription // 订阅模式（按限额控制）
+	SubscriptionTypeTotalQuota   = domain.SubscriptionTypeTotalQuota   // 总额度订阅模式（按事件总额度控制）
 )
 
 // Subscription status constants

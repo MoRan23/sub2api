@@ -87,6 +87,7 @@ type Group struct {
 	DailyLimitUSD    *float64 `json:"daily_limit_usd"`
 	WeeklyLimitUSD   *float64 `json:"weekly_limit_usd"`
 	MonthlyLimitUSD  *float64 `json:"monthly_limit_usd"`
+	TotalLimitUSD    *float64 `json:"total_limit_usd"`
 
 	// 图片生成计费配置（仅 antigravity 平台使用）
 	ImagePrice1K *float64 `json:"image_price_1k"`
@@ -495,6 +496,11 @@ type UserSubscription struct {
 	DailyUsageUSD   float64 `json:"daily_usage_usd"`
 	WeeklyUsageUSD  float64 `json:"weekly_usage_usd"`
 	MonthlyUsageUSD float64 `json:"monthly_usage_usd"`
+	TotalLimitUSD   float64 `json:"total_limit_usd"`
+	TotalUsedUSD    float64 `json:"total_used_usd"`
+	TotalRemainingUSD float64 `json:"total_remaining_usd"`
+	NextExpiringQuotaUSD float64 `json:"next_expiring_quota_usd"`
+	NextQuotaExpireAt *time.Time `json:"next_quota_expire_at"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

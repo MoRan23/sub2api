@@ -24,12 +24,17 @@ var (
 
 // subscriptionCacheData 订阅缓存数据结构（内部使用）
 type subscriptionCacheData struct {
-	Status       string
-	ExpiresAt    time.Time
-	DailyUsage   float64
-	WeeklyUsage  float64
-	MonthlyUsage float64
-	Version      int64
+	Status               string
+	ExpiresAt            time.Time
+	DailyUsage           float64
+	WeeklyUsage          float64
+	MonthlyUsage         float64
+	TotalLimit           float64
+	TotalUsed            float64
+	TotalRemaining       float64
+	NextQuotaExpireAt    *time.Time
+	NextExpiringQuotaUSD float64
+	Version              int64
 }
 
 // 缓存写入任务类型
@@ -383,7 +388,12 @@ func (s *BillingCacheService) GetSubscriptionStatus(ctx context.Context, userID,
 	// 尝试从缓存读取
 	cacheData, err := s.cache.GetSubscriptionCache(ctx, userID, groupID)
 	if err == nil && cacheData != nil {
-		return s.convertFromPortsData(cacheData), nil
+		data := s.convertFromPortsData(cacheData)
+		if data.NextQuotaExpireAt != nil && !time.Now().Before(*data.NextQuotaExpireAt) {
+			_ = s.cache.InvalidateSubscriptionCache(ctx, userID, groupID)
+		} else {
+			return data, nil
+		}
 	}
 
 	// 缓存未命中，从数据库读取
@@ -405,23 +415,33 @@ func (s *BillingCacheService) GetSubscriptionStatus(ctx context.Context, userID,
 
 func (s *BillingCacheService) convertFromPortsData(data *SubscriptionCacheData) *subscriptionCacheData {
 	return &subscriptionCacheData{
-		Status:       data.Status,
-		ExpiresAt:    data.ExpiresAt,
-		DailyUsage:   data.DailyUsage,
-		WeeklyUsage:  data.WeeklyUsage,
-		MonthlyUsage: data.MonthlyUsage,
-		Version:      data.Version,
+		Status:               data.Status,
+		ExpiresAt:            data.ExpiresAt,
+		DailyUsage:           data.DailyUsage,
+		WeeklyUsage:          data.WeeklyUsage,
+		MonthlyUsage:         data.MonthlyUsage,
+		TotalLimit:           data.TotalLimit,
+		TotalUsed:            data.TotalUsed,
+		TotalRemaining:       data.TotalRemaining,
+		NextQuotaExpireAt:    data.NextQuotaExpireAt,
+		NextExpiringQuotaUSD: data.NextExpiringQuotaUSD,
+		Version:              data.Version,
 	}
 }
 
 func (s *BillingCacheService) convertToPortsData(data *subscriptionCacheData) *SubscriptionCacheData {
 	return &SubscriptionCacheData{
-		Status:       data.Status,
-		ExpiresAt:    data.ExpiresAt,
-		DailyUsage:   data.DailyUsage,
-		WeeklyUsage:  data.WeeklyUsage,
-		MonthlyUsage: data.MonthlyUsage,
-		Version:      data.Version,
+		Status:               data.Status,
+		ExpiresAt:            data.ExpiresAt,
+		DailyUsage:           data.DailyUsage,
+		WeeklyUsage:          data.WeeklyUsage,
+		MonthlyUsage:         data.MonthlyUsage,
+		TotalLimit:           data.TotalLimit,
+		TotalUsed:            data.TotalUsed,
+		TotalRemaining:       data.TotalRemaining,
+		NextQuotaExpireAt:    data.NextQuotaExpireAt,
+		NextExpiringQuotaUSD: data.NextExpiringQuotaUSD,
+		Version:              data.Version,
 	}
 }
 
@@ -433,12 +453,17 @@ func (s *BillingCacheService) getSubscriptionFromDB(ctx context.Context, userID,
 	}
 
 	return &subscriptionCacheData{
-		Status:       sub.Status,
-		ExpiresAt:    sub.ExpiresAt,
-		DailyUsage:   sub.DailyUsageUSD,
-		WeeklyUsage:  sub.WeeklyUsageUSD,
-		MonthlyUsage: sub.MonthlyUsageUSD,
-		Version:      sub.UpdatedAt.Unix(),
+		Status:               sub.Status,
+		ExpiresAt:            sub.ExpiresAt,
+		DailyUsage:           sub.DailyUsageUSD,
+		WeeklyUsage:          sub.WeeklyUsageUSD,
+		MonthlyUsage:         sub.MonthlyUsageUSD,
+		TotalLimit:           sub.TotalLimitUSD,
+		TotalUsed:            sub.TotalUsedUSD,
+		TotalRemaining:       sub.TotalRemainingUSD,
+		NextQuotaExpireAt:    sub.NextQuotaExpireAt,
+		NextExpiringQuotaUSD: sub.NextExpiringQuotaUSD,
+		Version:              sub.UpdatedAt.Unix(),
 	}, nil
 }
 
@@ -714,6 +739,13 @@ func (s *BillingCacheService) checkSubscriptionEligibility(ctx context.Context, 
 	}
 
 	// 检查限额（使用传入的Group限额配置）
+	if group.IsTotalQuotaSubscriptionType() {
+		if group.HasTotalLimit() && subData.TotalRemaining <= 0 {
+			return ErrTotalLimitExceeded
+		}
+		return nil
+	}
+
 	if group.HasDailyLimit() && subData.DailyUsage >= *group.DailyLimitUSD {
 		return ErrDailyLimitExceeded
 	}

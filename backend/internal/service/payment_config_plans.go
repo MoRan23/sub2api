@@ -117,11 +117,63 @@ func (s *PaymentConfigService) ListPlans(ctx context.Context) ([]*dbent.Subscrip
 }
 
 func (s *PaymentConfigService) ListPlansForSale(ctx context.Context) ([]*dbent.SubscriptionPlan, error) {
-	return s.entClient.SubscriptionPlan.Query().Where(subscriptionplan.ForSaleEQ(true)).Order(subscriptionplan.BySortOrder()).All(ctx)
+	plans, err := s.entClient.SubscriptionPlan.Query().
+		Where(subscriptionplan.ForSaleEQ(true)).
+		Order(subscriptionplan.BySortOrder()).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(plans) == 0 {
+		return plans, nil
+	}
+
+	groupIDs := make([]int64, 0, len(plans))
+	seen := make(map[int64]struct{}, len(plans))
+	for _, plan := range plans {
+		if _, ok := seen[plan.GroupID]; ok {
+			continue
+		}
+		seen[plan.GroupID] = struct{}{}
+		groupIDs = append(groupIDs, plan.GroupID)
+	}
+
+	activeGroups, err := s.entClient.Group.Query().
+		Where(group.IDIn(groupIDs...), group.SubscriptionTypeEQ(SubscriptionTypeSubscription)).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	allowed := make(map[int64]struct{}, len(activeGroups))
+	for _, g := range activeGroups {
+		allowed[g.ID] = struct{}{}
+	}
+
+	filtered := make([]*dbent.SubscriptionPlan, 0, len(plans))
+	for _, plan := range plans {
+		if _, ok := allowed[plan.GroupID]; ok {
+			filtered = append(filtered, plan)
+		}
+	}
+	return filtered, nil
+}
+
+func (s *PaymentConfigService) validatePlanGroup(ctx context.Context, groupID int64) error {
+	g, err := s.entClient.Group.Get(ctx, groupID)
+	if err != nil {
+		return infraerrors.NotFound("PLAN_GROUP_NOT_FOUND", "subscription plan group not found")
+	}
+	if g.SubscriptionType != SubscriptionTypeSubscription {
+		return infraerrors.BadRequest("PLAN_GROUP_INVALID", "only windowed subscription groups can be sold as plans")
+	}
+	return nil
 }
 
 func (s *PaymentConfigService) CreatePlan(ctx context.Context, req CreatePlanRequest) (*dbent.SubscriptionPlan, error) {
 	if err := validatePlanRequired(req.Name, req.GroupID, req.Price, req.ValidityDays, req.ValidityUnit, req.OriginalPrice); err != nil {
+		return nil, err
+	}
+	if err := s.validatePlanGroup(ctx, req.GroupID); err != nil {
 		return nil, err
 	}
 	b := s.entClient.SubscriptionPlan.Create().
@@ -141,6 +193,11 @@ func (s *PaymentConfigService) CreatePlan(ctx context.Context, req CreatePlanReq
 func (s *PaymentConfigService) UpdatePlan(ctx context.Context, id int64, req UpdatePlanRequest) (*dbent.SubscriptionPlan, error) {
 	if err := validatePlanPatch(req); err != nil {
 		return nil, err
+	}
+	if req.GroupID != nil {
+		if err := s.validatePlanGroup(ctx, *req.GroupID); err != nil {
+			return nil, err
+		}
 	}
 	u := s.entClient.SubscriptionPlan.UpdateOneID(id)
 	if req.GroupID != nil {

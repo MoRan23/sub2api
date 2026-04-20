@@ -254,6 +254,33 @@ func (_u *GroupUpdate) ClearMonthlyLimitUsd() *GroupUpdate {
 	return _u
 }
 
+// SetTotalLimitUsd sets the "total_limit_usd" field.
+func (_u *GroupUpdate) SetTotalLimitUsd(v float64) *GroupUpdate {
+	_u.mutation.ResetTotalLimitUsd()
+	_u.mutation.SetTotalLimitUsd(v)
+	return _u
+}
+
+// SetNillableTotalLimitUsd sets the "total_limit_usd" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableTotalLimitUsd(v *float64) *GroupUpdate {
+	if v != nil {
+		_u.SetTotalLimitUsd(*v)
+	}
+	return _u
+}
+
+// AddTotalLimitUsd adds value to the "total_limit_usd" field.
+func (_u *GroupUpdate) AddTotalLimitUsd(v float64) *GroupUpdate {
+	_u.mutation.AddTotalLimitUsd(v)
+	return _u
+}
+
+// ClearTotalLimitUsd clears the value of the "total_limit_usd" field.
+func (_u *GroupUpdate) ClearTotalLimitUsd() *GroupUpdate {
+	_u.mutation.ClearTotalLimitUsd()
+	return _u
+}
+
 // SetDefaultValidityDays sets the "default_validity_days" field.
 func (_u *GroupUpdate) SetDefaultValidityDays(v int) *GroupUpdate {
 	_u.mutation.ResetDefaultValidityDays()
@@ -935,6 +962,15 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.MonthlyLimitUsdCleared() {
 		_spec.ClearField(group.FieldMonthlyLimitUsd, field.TypeFloat64)
 	}
+	if value, ok := _u.mutation.TotalLimitUsd(); ok {
+		_spec.SetField(group.FieldTotalLimitUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedTotalLimitUsd(); ok {
+		_spec.AddField(group.FieldTotalLimitUsd, field.TypeFloat64, value)
+	}
+	if _u.mutation.TotalLimitUsdCleared() {
+		_spec.ClearField(group.FieldTotalLimitUsd, field.TypeFloat64)
+	}
 	if value, ok := _u.mutation.DefaultValidityDays(); ok {
 		_spec.SetField(group.FieldDefaultValidityDays, field.TypeInt, value)
 	}
@@ -1559,6 +1595,33 @@ func (_u *GroupUpdateOne) AddMonthlyLimitUsd(v float64) *GroupUpdateOne {
 // ClearMonthlyLimitUsd clears the value of the "monthly_limit_usd" field.
 func (_u *GroupUpdateOne) ClearMonthlyLimitUsd() *GroupUpdateOne {
 	_u.mutation.ClearMonthlyLimitUsd()
+	return _u
+}
+
+// SetTotalLimitUsd sets the "total_limit_usd" field.
+func (_u *GroupUpdateOne) SetTotalLimitUsd(v float64) *GroupUpdateOne {
+	_u.mutation.ResetTotalLimitUsd()
+	_u.mutation.SetTotalLimitUsd(v)
+	return _u
+}
+
+// SetNillableTotalLimitUsd sets the "total_limit_usd" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableTotalLimitUsd(v *float64) *GroupUpdateOne {
+	if v != nil {
+		_u.SetTotalLimitUsd(*v)
+	}
+	return _u
+}
+
+// AddTotalLimitUsd adds value to the "total_limit_usd" field.
+func (_u *GroupUpdateOne) AddTotalLimitUsd(v float64) *GroupUpdateOne {
+	_u.mutation.AddTotalLimitUsd(v)
+	return _u
+}
+
+// ClearTotalLimitUsd clears the value of the "total_limit_usd" field.
+func (_u *GroupUpdateOne) ClearTotalLimitUsd() *GroupUpdateOne {
+	_u.mutation.ClearTotalLimitUsd()
 	return _u
 }
 
@@ -2272,6 +2335,15 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if _u.mutation.MonthlyLimitUsdCleared() {
 		_spec.ClearField(group.FieldMonthlyLimitUsd, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.TotalLimitUsd(); ok {
+		_spec.SetField(group.FieldTotalLimitUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedTotalLimitUsd(); ok {
+		_spec.AddField(group.FieldTotalLimitUsd, field.TypeFloat64, value)
+	}
+	if _u.mutation.TotalLimitUsdCleared() {
+		_spec.ClearField(group.FieldTotalLimitUsd, field.TypeFloat64)
 	}
 	if value, ok := _u.mutation.DefaultValidityDays(); ok {
 		_spec.SetField(group.FieldDefaultValidityDays, field.TypeInt, value)

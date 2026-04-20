@@ -557,6 +557,15 @@ const ringItems = computed<RingItem[]>(() => {
   } else {
     if (data.subscription) {
       const sub = data.subscription
+      if (sub.total_limit_usd > 0) {
+        const pct = (sub.total_used_usd / sub.total_limit_usd) * 100
+        items.push({
+          title: t('keyUsage.totalQuota'),
+          pct: Math.min(Math.round(pct), 100),
+          amount: `${usd(sub.total_used_usd)} / ${usd(sub.total_limit_usd)}`,
+          iconType: 'dollar'
+        })
+      }
       const limits = [
         { label: t('keyUsage.limitDaily'), usage: sub.daily_usage_usd, limit: sub.daily_limit_usd },
         { label: t('keyUsage.limitWeekly'), usage: sub.weekly_usage_usd, limit: sub.weekly_limit_usd },
@@ -655,6 +664,13 @@ const detailRows = computed<DetailRow[]>(() => {
 
     if (data.subscription) {
       const sub = data.subscription
+      if (sub.total_limit_usd > 0) {
+        const pct = (sub.total_used_usd / sub.total_limit_usd) * 100
+        rows.push({
+          iconBg: 'bg-amber-500/10', iconColor: 'text-amber-500', iconSvg: ICON_DOLLAR,
+          label: t('keyUsage.usedQuota'), value: `${usd(sub.total_used_usd)} / ${usd(sub.total_limit_usd)}`, valueClass: getUsageColor(pct),
+        })
+      }
       if (sub.daily_limit_usd > 0) {
         const pct = (sub.daily_usage_usd / sub.daily_limit_usd) * 100
         rows.push({
@@ -680,6 +696,14 @@ const detailRows = computed<DetailRow[]>(() => {
         rows.push({
           iconBg: 'bg-amber-500/10', iconColor: 'text-amber-500', iconSvg: ICON_CALENDAR,
           label: t('keyUsage.subscriptionExpires'), value: formatDate(sub.expires_at), valueClass: '',
+        })
+      }
+      if (sub.next_expiring_quota_usd > 0 && sub.next_quota_expire_at) {
+        rows.push({
+          iconBg: 'bg-indigo-500/10', iconColor: 'text-indigo-500', iconSvg: ICON_CALENDAR,
+          label: t('keyUsage.expiringQuota'),
+          value: `${usd(sub.next_expiring_quota_usd)} · ${formatDate(sub.next_quota_expire_at)}`,
+          valueClass: '',
         })
       }
     }

@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"strings"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -9,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 type userSubscriptionRepository struct {
@@ -69,7 +72,18 @@ func (r *userSubscriptionRepository) GetByID(ctx context.Context, id int64) (*se
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 	}
-	return userSubscriptionEntityToService(m), nil
+	sub := userSubscriptionEntityToService(m)
+	if sub == nil {
+		return nil, service.ErrSubscriptionNotFound
+	}
+	if sub.Group != nil && sub.Group.IsTotalQuotaSubscriptionType() {
+		summary, err := r.GetQuotaSummary(ctx, sub.ID, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		applyQuotaSummaryToSubscription(sub, summary)
+	}
+	return sub, nil
 }
 
 func (r *userSubscriptionRepository) GetByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
@@ -81,7 +95,18 @@ func (r *userSubscriptionRepository) GetByUserIDAndGroupID(ctx context.Context, 
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 	}
-	return userSubscriptionEntityToService(m), nil
+	sub := userSubscriptionEntityToService(m)
+	if sub == nil {
+		return nil, service.ErrSubscriptionNotFound
+	}
+	if sub.Group != nil && sub.Group.IsTotalQuotaSubscriptionType() {
+		summary, err := r.GetQuotaSummary(ctx, sub.ID, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		applyQuotaSummaryToSubscription(sub, summary)
+	}
+	return sub, nil
 }
 
 func (r *userSubscriptionRepository) GetActiveByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
@@ -98,7 +123,18 @@ func (r *userSubscriptionRepository) GetActiveByUserIDAndGroupID(ctx context.Con
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 	}
-	return userSubscriptionEntityToService(m), nil
+	sub := userSubscriptionEntityToService(m)
+	if sub == nil {
+		return nil, service.ErrSubscriptionNotFound
+	}
+	if sub.Group != nil && sub.Group.IsTotalQuotaSubscriptionType() {
+		summary, err := r.GetQuotaSummary(ctx, sub.ID, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		applyQuotaSummaryToSubscription(sub, summary)
+	}
+	return sub, nil
 }
 
 func (r *userSubscriptionRepository) Update(ctx context.Context, sub *service.UserSubscription) error {
@@ -148,7 +184,11 @@ func (r *userSubscriptionRepository) ListByUserID(ctx context.Context, userID in
 	if err != nil {
 		return nil, err
 	}
-	return userSubscriptionEntitiesToService(subs), nil
+	out := userSubscriptionEntitiesToService(subs)
+	if err := r.populateQuotaSummaries(ctx, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (r *userSubscriptionRepository) ListActiveByUserID(ctx context.Context, userID int64) ([]service.UserSubscription, error) {
@@ -165,7 +205,11 @@ func (r *userSubscriptionRepository) ListActiveByUserID(ctx context.Context, use
 	if err != nil {
 		return nil, err
 	}
-	return userSubscriptionEntitiesToService(subs), nil
+	out := userSubscriptionEntitiesToService(subs)
+	if err := r.populateQuotaSummaries(ctx, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (r *userSubscriptionRepository) ListByGroupID(ctx context.Context, groupID int64, params pagination.PaginationParams) ([]service.UserSubscription, *pagination.PaginationResult, error) {
@@ -188,7 +232,11 @@ func (r *userSubscriptionRepository) ListByGroupID(ctx context.Context, groupID 
 		return nil, nil, err
 	}
 
-	return userSubscriptionEntitiesToService(subs), paginationResultFromTotal(int64(total), params), nil
+	out := userSubscriptionEntitiesToService(subs)
+	if err := r.populateQuotaSummaries(ctx, out); err != nil {
+		return nil, nil, err
+	}
+	return out, paginationResultFromTotal(int64(total), params), nil
 }
 
 func (r *userSubscriptionRepository) List(ctx context.Context, params pagination.PaginationParams, userID, groupID *int64, status, platform, sortBy, sortOrder string) ([]service.UserSubscription, *pagination.PaginationResult, error) {
@@ -265,7 +313,11 @@ func (r *userSubscriptionRepository) List(ctx context.Context, params pagination
 		return nil, nil, err
 	}
 
-	return userSubscriptionEntitiesToService(subs), paginationResultFromTotal(int64(total), params), nil
+	out := userSubscriptionEntitiesToService(subs)
+	if err := r.populateQuotaSummaries(ctx, out); err != nil {
+		return nil, nil, err
+	}
+	return out, paginationResultFromTotal(int64(total), params), nil
 }
 
 func (r *userSubscriptionRepository) ExistsByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (bool, error) {
@@ -340,37 +392,150 @@ func (r *userSubscriptionRepository) ResetMonthlyUsage(ctx context.Context, id i
 // 限额检查已在请求前由 BillingCacheService.CheckBillingEligibility 完成，
 // 此处仅负责记录实际消费，确保消费数据的完整性。
 func (r *userSubscriptionRepository) IncrementUsage(ctx context.Context, id int64, costUSD float64) error {
-	const updateSQL = `
-		UPDATE user_subscriptions us
-		SET
-			daily_usage_usd = us.daily_usage_usd + $1,
-			weekly_usage_usd = us.weekly_usage_usd + $1,
-			monthly_usage_usd = us.monthly_usage_usd + $1,
-			updated_at = NOW()
-		FROM groups g
-		WHERE us.id = $2
-			AND us.deleted_at IS NULL
-			AND us.group_id = g.id
-			AND g.deleted_at IS NULL
-	`
-
 	client := clientFromContext(ctx, r.client)
-	result, err := client.ExecContext(ctx, updateSQL, costUSD, id)
+	return incrementSubscriptionUsage(ctx, client, id, costUSD)
+}
+
+func (r *userSubscriptionRepository) CreateQuotaEvent(ctx context.Context, event *service.UserSubscriptionQuotaEvent) error {
+	if event == nil {
+		return service.ErrSubscriptionNilInput
+	}
+	client := clientFromContext(ctx, r.client)
+	builder := client.UserSubscriptionQuotaEvent.Create().
+		SetUserSubscriptionID(event.UserSubscriptionID).
+		SetQuotaTotalUsd(event.QuotaTotalUSD).
+		SetQuotaUsedUsd(event.QuotaUsedUSD).
+		SetStartsAt(event.StartsAt).
+		SetExpiresAt(event.ExpiresAt).
+		SetSourceKind(event.SourceKind)
+	if strings.TrimSpace(event.SourceRef) != "" {
+		builder.SetSourceRef(event.SourceRef)
+	}
+	created, err := builder.Save(ctx)
 	if err != nil {
 		return err
 	}
+	event.ID = created.ID
+	event.CreatedAt = created.CreatedAt
+	event.UpdatedAt = created.UpdatedAt
+	return nil
+}
 
-	affected, err := result.RowsAffected()
+func (r *userSubscriptionRepository) GetQuotaSummary(ctx context.Context, subscriptionID int64, now time.Time) (*service.UserSubscriptionQuotaSummary, error) {
+	summaries, err := r.GetQuotaSummaryBatch(ctx, []int64{subscriptionID}, now)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if summary, ok := summaries[subscriptionID]; ok {
+		return summary, nil
+	}
+	return &service.UserSubscriptionQuotaSummary{}, nil
+}
+
+func (r *userSubscriptionRepository) GetQuotaSummaryBatch(ctx context.Context, subscriptionIDs []int64, now time.Time) (map[int64]*service.UserSubscriptionQuotaSummary, error) {
+	result := make(map[int64]*service.UserSubscriptionQuotaSummary)
+	if r == nil || len(subscriptionIDs) == 0 {
+		return result, nil
 	}
 
-	if affected > 0 {
-		return nil
+	normalized := make([]int64, 0, len(subscriptionIDs))
+	seen := make(map[int64]struct{}, len(subscriptionIDs))
+	for _, id := range subscriptionIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		normalized = append(normalized, id)
+	}
+	if len(normalized) == 0 {
+		return result, nil
 	}
 
-	// affected == 0：订阅不存在或已删除
-	return service.ErrSubscriptionNotFound
+	exec := clientFromContext(ctx, r.client)
+	rows, err := exec.QueryContext(ctx, `
+		WITH active AS (
+			SELECT
+				user_subscription_id,
+				quota_total_usd,
+				quota_used_usd,
+				expires_at,
+				GREATEST(quota_total_usd - quota_used_usd, 0) AS remaining
+			FROM user_subscription_quota_events
+			WHERE user_subscription_id = ANY($1)
+			  AND expires_at > $2
+		),
+		totals AS (
+			SELECT
+				user_subscription_id,
+				COALESCE(SUM(quota_total_usd), 0) AS total_limit_usd,
+				COALESCE(SUM(quota_used_usd), 0) AS total_used_usd,
+				COALESCE(SUM(remaining), 0) AS total_remaining_usd,
+				MIN(CASE WHEN remaining > 0 THEN expires_at END) AS next_quota_expire_at
+			FROM active
+			GROUP BY user_subscription_id
+		)
+		SELECT
+			t.user_subscription_id,
+			t.total_limit_usd,
+			t.total_used_usd,
+			t.total_remaining_usd,
+			t.next_quota_expire_at,
+			COALESCE(SUM(a.remaining) FILTER (
+				WHERE a.remaining > 0 AND a.expires_at = t.next_quota_expire_at
+			), 0) AS next_expiring_quota_usd
+		FROM totals t
+		LEFT JOIN active a ON a.user_subscription_id = t.user_subscription_id
+		GROUP BY
+			t.user_subscription_id,
+			t.total_limit_usd,
+			t.total_used_usd,
+			t.total_remaining_usd,
+			t.next_quota_expire_at
+	`, pq.Array(normalized), now.UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var (
+			subscriptionID         int64
+			totalLimitUSD          float64
+			totalUsedUSD           float64
+			totalRemainingUSD      float64
+			nextQuotaExpireAt      sql.NullTime
+			nextExpiringQuotaUSD   float64
+		)
+		if err := rows.Scan(
+			&subscriptionID,
+			&totalLimitUSD,
+			&totalUsedUSD,
+			&totalRemainingUSD,
+			&nextQuotaExpireAt,
+			&nextExpiringQuotaUSD,
+		); err != nil {
+			return nil, err
+		}
+		summary := &service.UserSubscriptionQuotaSummary{
+			TotalLimitUSD:        totalLimitUSD,
+			TotalUsedUSD:         totalUsedUSD,
+			TotalRemainingUSD:    totalRemainingUSD,
+			NextExpiringQuotaUSD: nextExpiringQuotaUSD,
+		}
+		if nextQuotaExpireAt.Valid {
+			t := nextQuotaExpireAt.Time
+			summary.NextQuotaExpireAt = &t
+		}
+		result[subscriptionID] = summary
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func (r *userSubscriptionRepository) BatchUpdateExpiredStatus(ctx context.Context) (int64, error) {
@@ -457,6 +622,12 @@ func userSubscriptionEntityToService(m *dbent.UserSubscription) *service.UserSub
 	if m.Edges.AssignedByUser != nil {
 		out.AssignedByUser = userEntityToService(m.Edges.AssignedByUser)
 	}
+	if len(m.Edges.QuotaEvents) > 0 {
+		out.QuotaEvents = make([]service.UserSubscriptionQuotaEvent, 0, len(m.Edges.QuotaEvents))
+		for i := range m.Edges.QuotaEvents {
+			out.QuotaEvents = append(out.QuotaEvents, quotaEventEntityToService(m.Edges.QuotaEvents[i]))
+		}
+	}
 	return out
 }
 
@@ -477,4 +648,65 @@ func applyUserSubscriptionEntityToService(dst *service.UserSubscription, src *db
 	dst.ID = src.ID
 	dst.CreatedAt = src.CreatedAt
 	dst.UpdatedAt = src.UpdatedAt
+}
+
+func quotaEventEntityToService(m *dbent.UserSubscriptionQuotaEvent) service.UserSubscriptionQuotaEvent {
+	return service.UserSubscriptionQuotaEvent{
+		ID:                 m.ID,
+		UserSubscriptionID: m.UserSubscriptionID,
+		QuotaTotalUSD:      m.QuotaTotalUsd,
+		QuotaUsedUSD:       m.QuotaUsedUsd,
+		StartsAt:           m.StartsAt,
+		ExpiresAt:          m.ExpiresAt,
+		SourceKind:         m.SourceKind,
+		SourceRef:          derefString(m.SourceRef),
+		CreatedAt:          m.CreatedAt,
+		UpdatedAt:          m.UpdatedAt,
+	}
+}
+
+func applyQuotaSummaryToSubscription(sub *service.UserSubscription, summary *service.UserSubscriptionQuotaSummary) {
+	if sub == nil {
+		return
+	}
+	sub.TotalLimitUSD = 0
+	sub.TotalUsedUSD = 0
+	sub.TotalRemainingUSD = 0
+	sub.NextQuotaExpireAt = nil
+	sub.NextExpiringQuotaUSD = 0
+	if summary == nil {
+		return
+	}
+	sub.TotalLimitUSD = summary.TotalLimitUSD
+	sub.TotalUsedUSD = summary.TotalUsedUSD
+	sub.TotalRemainingUSD = summary.TotalRemainingUSD
+	sub.NextQuotaExpireAt = summary.NextQuotaExpireAt
+	sub.NextExpiringQuotaUSD = summary.NextExpiringQuotaUSD
+}
+
+func (r *userSubscriptionRepository) populateQuotaSummaries(ctx context.Context, subs []service.UserSubscription) error {
+	if len(subs) == 0 {
+		return nil
+	}
+
+	ids := make([]int64, 0, len(subs))
+	for i := range subs {
+		if subs[i].Group != nil && subs[i].Group.IsTotalQuotaSubscriptionType() {
+			ids = append(ids, subs[i].ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	summaries, err := r.GetQuotaSummaryBatch(ctx, ids, time.Now())
+	if err != nil {
+		return err
+	}
+	for i := range subs {
+		if subs[i].Group != nil && subs[i].Group.IsTotalQuotaSubscriptionType() {
+			applyQuotaSummaryToSubscription(&subs[i], summaries[subs[i].ID])
+		}
+	}
+	return nil
 }

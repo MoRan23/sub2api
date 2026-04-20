@@ -175,6 +175,75 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		require.Equal(t, http.StatusTooManyRequests, w.Code)
 		require.Contains(t, w.Body.String(), "USAGE_LIMIT_EXCEEDED")
 	})
+
+	t.Run("standard_mode_enforces_total_quota_limit", func(t *testing.T) {
+		totalLimit := 100.0
+		totalQuotaGroup := &service.Group{
+			ID:               52,
+			Name:             "total-sub",
+			Status:           service.StatusActive,
+			Hydrated:         true,
+			SubscriptionType: service.SubscriptionTypeTotalQuota,
+			TotalLimitUSD:    &totalLimit,
+		}
+		totalQuotaAPIKey := &service.APIKey{
+			ID:     101,
+			UserID: user.ID,
+			Key:    "total-key",
+			Status: service.StatusActive,
+			User:   user,
+			Group:  totalQuotaGroup,
+		}
+		totalQuotaAPIKey.GroupID = &totalQuotaGroup.ID
+
+		totalQuotaRepo := &stubApiKeyRepo{
+			getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+				if key != totalQuotaAPIKey.Key {
+					return nil, service.ErrAPIKeyNotFound
+				}
+				clone := *totalQuotaAPIKey
+				return &clone, nil
+			},
+		}
+
+		cfg := &config.Config{RunMode: config.RunModeStandard}
+		apiKeyService := service.NewAPIKeyService(totalQuotaRepo, nil, nil, nil, nil, nil, cfg)
+
+		sub := &service.UserSubscription{
+			ID:                56,
+			UserID:            user.ID,
+			GroupID:           totalQuotaGroup.ID,
+			Status:            service.SubscriptionStatusActive,
+			ExpiresAt:         time.Now().Add(24 * time.Hour),
+			TotalLimitUSD:     100,
+			TotalUsedUSD:      100,
+			TotalRemainingUSD: 0,
+		}
+		subscriptionRepo := &stubUserSubscriptionRepo{
+			getActive: func(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
+				if userID != sub.UserID || groupID != sub.GroupID {
+					return nil, service.ErrSubscriptionNotFound
+				}
+				clone := *sub
+				return &clone, nil
+			},
+			updateStatus:   func(ctx context.Context, subscriptionID int64, status string) error { return nil },
+			activateWindow: func(ctx context.Context, id int64, start time.Time) error { return nil },
+			resetDaily:     func(ctx context.Context, id int64, start time.Time) error { return nil },
+			resetWeekly:    func(ctx context.Context, id int64, start time.Time) error { return nil },
+			resetMonthly:   func(ctx context.Context, id int64, start time.Time) error { return nil },
+		}
+		subscriptionService := service.NewSubscriptionService(nil, subscriptionRepo, nil, nil, cfg)
+		router := newAuthTestRouter(apiKeyService, subscriptionService, cfg)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/t", nil)
+		req.Header.Set("x-api-key", totalQuotaAPIKey.Key)
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusTooManyRequests, w.Code)
+		require.Contains(t, w.Body.String(), "USAGE_LIMIT_EXCEEDED")
+	})
 }
 
 func TestAPIKeyAuthSetsGroupContext(t *testing.T) {
@@ -703,6 +772,18 @@ func (r *stubUserSubscriptionRepo) ResetMonthlyUsage(ctx context.Context, id int
 
 func (r *stubUserSubscriptionRepo) IncrementUsage(ctx context.Context, id int64, costUSD float64) error {
 	return errors.New("not implemented")
+}
+
+func (r *stubUserSubscriptionRepo) CreateQuotaEvent(ctx context.Context, event *service.UserSubscriptionQuotaEvent) error {
+	return errors.New("not implemented")
+}
+
+func (r *stubUserSubscriptionRepo) GetQuotaSummary(ctx context.Context, subscriptionID int64, now time.Time) (*service.UserSubscriptionQuotaSummary, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (r *stubUserSubscriptionRepo) GetQuotaSummaryBatch(ctx context.Context, subscriptionIDs []int64, now time.Time) (map[int64]*service.UserSubscriptionQuotaSummary, error) {
+	return nil, errors.New("not implemented")
 }
 
 func (r *stubUserSubscriptionRepo) BatchUpdateExpiredStatus(ctx context.Context) (int64, error) {

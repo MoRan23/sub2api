@@ -18,6 +18,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/ent/usersubscriptionquotaevent"
 )
 
 // UserSubscriptionQuery is the builder for querying UserSubscription entities.
@@ -31,6 +32,7 @@ type UserSubscriptionQuery struct {
 	withGroup          *GroupQuery
 	withAssignedByUser *UserQuery
 	withUsageLogs      *UsageLogQuery
+	withQuotaEvents    *UserSubscriptionQuotaEventQuery
 	modifiers          []func(*sql.Selector)
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
@@ -149,6 +151,28 @@ func (_q *UserSubscriptionQuery) QueryUsageLogs() *UsageLogQuery {
 			sqlgraph.From(usersubscription.Table, usersubscription.FieldID, selector),
 			sqlgraph.To(usagelog.Table, usagelog.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, usersubscription.UsageLogsTable, usersubscription.UsageLogsColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryQuotaEvents chains the current query on the "quota_events" edge.
+func (_q *UserSubscriptionQuery) QueryQuotaEvents() *UserSubscriptionQuotaEventQuery {
+	query := (&UserSubscriptionQuotaEventClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(usersubscription.Table, usersubscription.FieldID, selector),
+			sqlgraph.To(usersubscriptionquotaevent.Table, usersubscriptionquotaevent.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, usersubscription.QuotaEventsTable, usersubscription.QuotaEventsColumn),
 		)
 		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
 		return fromU, nil
@@ -352,6 +376,7 @@ func (_q *UserSubscriptionQuery) Clone() *UserSubscriptionQuery {
 		withGroup:          _q.withGroup.Clone(),
 		withAssignedByUser: _q.withAssignedByUser.Clone(),
 		withUsageLogs:      _q.withUsageLogs.Clone(),
+		withQuotaEvents:    _q.withQuotaEvents.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
@@ -399,6 +424,17 @@ func (_q *UserSubscriptionQuery) WithUsageLogs(opts ...func(*UsageLogQuery)) *Us
 		opt(query)
 	}
 	_q.withUsageLogs = query
+	return _q
+}
+
+// WithQuotaEvents tells the query-builder to eager-load the nodes that are connected to
+// the "quota_events" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *UserSubscriptionQuery) WithQuotaEvents(opts ...func(*UserSubscriptionQuotaEventQuery)) *UserSubscriptionQuery {
+	query := (&UserSubscriptionQuotaEventClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withQuotaEvents = query
 	return _q
 }
 
@@ -480,11 +516,12 @@ func (_q *UserSubscriptionQuery) sqlAll(ctx context.Context, hooks ...queryHook)
 	var (
 		nodes       = []*UserSubscription{}
 		_spec       = _q.querySpec()
-		loadedTypes = [4]bool{
+		loadedTypes = [5]bool{
 			_q.withUser != nil,
 			_q.withGroup != nil,
 			_q.withAssignedByUser != nil,
 			_q.withUsageLogs != nil,
+			_q.withQuotaEvents != nil,
 		}
 	)
 	_spec.ScanValues = func(columns []string) ([]any, error) {
@@ -530,6 +567,15 @@ func (_q *UserSubscriptionQuery) sqlAll(ctx context.Context, hooks ...queryHook)
 		if err := _q.loadUsageLogs(ctx, query, nodes,
 			func(n *UserSubscription) { n.Edges.UsageLogs = []*UsageLog{} },
 			func(n *UserSubscription, e *UsageLog) { n.Edges.UsageLogs = append(n.Edges.UsageLogs, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withQuotaEvents; query != nil {
+		if err := _q.loadQuotaEvents(ctx, query, nodes,
+			func(n *UserSubscription) { n.Edges.QuotaEvents = []*UserSubscriptionQuotaEvent{} },
+			func(n *UserSubscription, e *UserSubscriptionQuotaEvent) {
+				n.Edges.QuotaEvents = append(n.Edges.QuotaEvents, e)
+			}); err != nil {
 			return nil, err
 		}
 	}
@@ -654,6 +700,36 @@ func (_q *UserSubscriptionQuery) loadUsageLogs(ctx context.Context, query *Usage
 		node, ok := nodeids[*fk]
 		if !ok {
 			return fmt.Errorf(`unexpected referenced foreign-key "subscription_id" returned %v for node %v`, *fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *UserSubscriptionQuery) loadQuotaEvents(ctx context.Context, query *UserSubscriptionQuotaEventQuery, nodes []*UserSubscription, init func(*UserSubscription), assign func(*UserSubscription, *UserSubscriptionQuotaEvent)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[int64]*UserSubscription)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(usersubscriptionquotaevent.FieldUserSubscriptionID)
+	}
+	query.Where(predicate.UserSubscriptionQuotaEvent(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(usersubscription.QuotaEventsColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.UserSubscriptionID
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "user_subscription_id" returned %v for node %v`, fk, n.ID)
 		}
 		assign(node, n)
 	}

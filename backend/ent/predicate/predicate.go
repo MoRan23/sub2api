@@ -83,3 +83,6 @@ type UserAttributeValue func(*sql.Selector)
 
 // UserSubscription is the predicate function for usersubscription builders.
 type UserSubscription func(*sql.Selector)
+
+// UserSubscriptionQuotaEvent is the predicate function for usersubscriptionquotaevent builders.
+type UserSubscriptionQuotaEvent func(*sql.Selector)

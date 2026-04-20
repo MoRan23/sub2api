@@ -65,7 +65,7 @@
                 {{ t(`userSubscriptions.status.${subscription.status}`) }}
               </span>
               <button
-                v-if="subscription.status === 'active'"
+                v-if="subscription.status === 'active' && !isTotalQuotaSubscription(subscription)"
                 :class="['rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors', platformButtonClass(subscription.group?.platform || '')]"
                 @click="router.push({ path: '/purchase', query: { tab: 'subscription', group: String(subscription.group_id) } })"
               >
@@ -94,8 +94,51 @@
               }}</span>
             </div>
 
+            <template v-if="isTotalQuotaSubscription(subscription)">
+              <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t('userSubscriptions.total') }}
+                  </span>
+                  <span class="text-sm text-gray-500 dark:text-dark-400">
+                    ${{ (subscription.total_used_usd || 0).toFixed(2) }} / ${{
+                      (subscription.total_limit_usd ?? subscription.group?.total_limit_usd ?? 0).toFixed(2)
+                    }}
+                  </span>
+                </div>
+                <div class="relative h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600">
+                  <div
+                    class="absolute inset-y-0 left-0 rounded-full transition-all duration-300"
+                    :class="
+                      getProgressBarClass(
+                        subscription.total_used_usd,
+                        subscription.total_limit_usd ?? subscription.group?.total_limit_usd
+                      )
+                    "
+                    :style="{
+                      width: getProgressWidth(
+                        subscription.total_used_usd,
+                        subscription.total_limit_usd ?? subscription.group?.total_limit_usd
+                      )
+                    }"
+                  ></div>
+                </div>
+                <p
+                  v-if="subscription.next_expiring_quota_usd > 0 && subscription.next_quota_expire_at"
+                  class="text-xs text-gray-500 dark:text-dark-400"
+                >
+                  {{
+                    formatQuotaExpiryHint(
+                      subscription.next_expiring_quota_usd,
+                      subscription.next_quota_expire_at
+                    )
+                  }}
+                </p>
+              </div>
+            </template>
+
             <!-- Daily Usage -->
-            <div v-if="subscription.group?.daily_limit_usd" class="space-y-2">
+            <div v-else-if="subscription.group?.daily_limit_usd" class="space-y-2">
               <div class="flex items-center justify-between">
                 <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
                   {{ t('userSubscriptions.daily') }}
@@ -220,6 +263,7 @@
             <!-- No limits configured - Unlimited badge -->
             <div
               v-if="
+                !isTotalQuotaSubscription(subscription) &&
                 !subscription.group?.daily_limit_usd &&
                 !subscription.group?.weekly_limit_usd &&
                 !subscription.group?.monthly_limit_usd
@@ -300,6 +344,10 @@ function getProgressBarClass(used: number | undefined, limit: number | null | un
   return 'bg-green-500'
 }
 
+function isTotalQuotaSubscription(subscription: UserSubscription): boolean {
+  return subscription.group?.subscription_type === 'total_quota'
+}
+
 function formatExpirationDate(expiresAt: string): string {
   const now = new Date()
   const expires = new Date(expiresAt)
@@ -358,6 +406,31 @@ function formatResetTime(windowStart: string | null, windowHours: number): strin
   }
 
   return `${minutes}m`
+}
+
+function formatQuotaExpiryHint(amount: number, expiresAt: string): string {
+  const target = new Date(expiresAt)
+  const now = new Date()
+  const diff = target.getTime() - now.getTime()
+  if (diff <= 0 || amount <= 0) return ''
+
+  const diffMinutes = Math.floor(diff / (1000 * 60))
+  const diffHours = Math.floor(diff / (1000 * 60 * 60))
+  const diffDays = Math.floor(diff / (1000 * 60 * 60 * 24))
+
+  let timeText = ''
+  if (diffDays >= 1) {
+    timeText = `${diffDays}d ${diffHours % 24}h`
+  } else if (diffHours >= 1) {
+    timeText = `${diffHours}h ${diffMinutes % 60}m`
+  } else {
+    timeText = `${Math.max(diffMinutes, 1)}m`
+  }
+
+  return t('userSubscriptions.expiringQuotaHint', {
+    amount: amount.toFixed(2),
+    time: timeText
+  })
 }
 
 onMounted(() => {

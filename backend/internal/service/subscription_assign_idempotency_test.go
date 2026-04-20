@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
@@ -122,6 +123,15 @@ func (userSubRepoNoop) ResetMonthlyUsage(context.Context, int64, time.Time) erro
 func (userSubRepoNoop) IncrementUsage(context.Context, int64, float64) error {
 	panic("unexpected IncrementUsage call")
 }
+func (userSubRepoNoop) CreateQuotaEvent(context.Context, *UserSubscriptionQuotaEvent) error {
+	panic("unexpected CreateQuotaEvent call")
+}
+func (userSubRepoNoop) GetQuotaSummary(context.Context, int64, time.Time) (*UserSubscriptionQuotaSummary, error) {
+	panic("unexpected GetQuotaSummary call")
+}
+func (userSubRepoNoop) GetQuotaSummaryBatch(context.Context, []int64, time.Time) (map[int64]*UserSubscriptionQuotaSummary, error) {
+	panic("unexpected GetQuotaSummaryBatch call")
+}
 func (userSubRepoNoop) BatchUpdateExpiredStatus(context.Context) (int64, error) {
 	panic("unexpected BatchUpdateExpiredStatus call")
 }
@@ -132,6 +142,7 @@ type subscriptionUserSubRepoStub struct {
 	nextID      int64
 	byID        map[int64]*UserSubscription
 	byUserGroup map[string]*UserSubscription
+	quotaEvents map[int64][]UserSubscriptionQuotaEvent
 	createCalls int
 }
 
@@ -140,6 +151,7 @@ func newSubscriptionUserSubRepoStub() *subscriptionUserSubRepoStub {
 		nextID:      1,
 		byID:        make(map[int64]*UserSubscription),
 		byUserGroup: make(map[string]*UserSubscription),
+		quotaEvents: make(map[int64][]UserSubscriptionQuotaEvent),
 	}
 }
 
@@ -196,7 +208,98 @@ func (s *subscriptionUserSubRepoStub) GetByID(_ context.Context, id int64) (*Use
 		return nil, ErrSubscriptionNotFound
 	}
 	cp := *sub
+	if events := s.quotaEvents[id]; len(events) > 0 {
+		cp.QuotaEvents = append([]UserSubscriptionQuotaEvent(nil), events...)
+		for _, event := range events {
+			if event.ExpiresAt.After(time.Now()) {
+				cp.TotalLimitUSD += event.QuotaTotalUSD
+				cp.TotalUsedUSD += event.QuotaUsedUSD
+				cp.TotalRemainingUSD += maxFloat(event.QuotaTotalUSD-event.QuotaUsedUSD, 0)
+			}
+		}
+	}
 	return &cp, nil
+}
+
+func (s *subscriptionUserSubRepoStub) ExtendExpiry(_ context.Context, subscriptionID int64, newExpiresAt time.Time) error {
+	sub := s.byID[subscriptionID]
+	if sub == nil {
+		return ErrSubscriptionNotFound
+	}
+	sub.ExpiresAt = newExpiresAt
+	return nil
+}
+
+func (s *subscriptionUserSubRepoStub) UpdateStatus(_ context.Context, subscriptionID int64, status string) error {
+	sub := s.byID[subscriptionID]
+	if sub == nil {
+		return ErrSubscriptionNotFound
+	}
+	sub.Status = status
+	return nil
+}
+
+func (s *subscriptionUserSubRepoStub) UpdateNotes(_ context.Context, subscriptionID int64, notes string) error {
+	sub := s.byID[subscriptionID]
+	if sub == nil {
+		return ErrSubscriptionNotFound
+	}
+	sub.Notes = notes
+	return nil
+}
+
+func (s *subscriptionUserSubRepoStub) CreateQuotaEvent(_ context.Context, event *UserSubscriptionQuotaEvent) error {
+	if event == nil {
+		return nil
+	}
+	cp := *event
+	cp.ID = int64(len(s.quotaEvents[event.UserSubscriptionID]) + 1)
+	event.ID = cp.ID
+	s.quotaEvents[event.UserSubscriptionID] = append(s.quotaEvents[event.UserSubscriptionID], cp)
+	return nil
+}
+
+func (s *subscriptionUserSubRepoStub) GetQuotaSummary(_ context.Context, subscriptionID int64, now time.Time) (*UserSubscriptionQuotaSummary, error) {
+	summaries, err := s.GetQuotaSummaryBatch(context.Background(), []int64{subscriptionID}, now)
+	if err != nil {
+		return nil, err
+	}
+	if summary, ok := summaries[subscriptionID]; ok {
+		return summary, nil
+	}
+	return &UserSubscriptionQuotaSummary{}, nil
+}
+
+func (s *subscriptionUserSubRepoStub) GetQuotaSummaryBatch(_ context.Context, subscriptionIDs []int64, now time.Time) (map[int64]*UserSubscriptionQuotaSummary, error) {
+	result := make(map[int64]*UserSubscriptionQuotaSummary, len(subscriptionIDs))
+	for _, subscriptionID := range subscriptionIDs {
+		summary := &UserSubscriptionQuotaSummary{}
+		var nextExpiry *time.Time
+		for _, event := range s.quotaEvents[subscriptionID] {
+			if !event.ExpiresAt.After(now) {
+				continue
+			}
+			summary.TotalLimitUSD += event.QuotaTotalUSD
+			summary.TotalUsedUSD += event.QuotaUsedUSD
+			remaining := maxFloat(event.QuotaTotalUSD-event.QuotaUsedUSD, 0)
+			summary.TotalRemainingUSD += remaining
+			if remaining <= 0 {
+				continue
+			}
+			if nextExpiry == nil || event.ExpiresAt.Before(*nextExpiry) {
+				exp := event.ExpiresAt
+				nextExpiry = &exp
+				summary.NextExpiringQuotaUSD = remaining
+				continue
+			}
+			if event.ExpiresAt.Equal(*nextExpiry) {
+				summary.NextExpiringQuotaUSD += remaining
+			}
+		}
+		summary.NextQuotaExpireAt = nextExpiry
+		result[subscriptionID] = summary
+	}
+	return result, nil
 }
 
 func TestAssignSubscriptionReuseWhenSemanticsMatch(t *testing.T) {
@@ -297,6 +400,45 @@ func TestBulkAssignSubscriptionCreatedReusedAndConflict(t *testing.T) {
 	require.Equal(t, 1, subRepo.createCalls)
 }
 
+func TestAssignSubscriptionTotalQuota_AppendsEventOnExistingSubscription(t *testing.T) {
+	totalLimit := 100.0
+	groupRepo := &subscriptionGroupRepoStub{
+		group: &Group{
+			ID:               1,
+			SubscriptionType: SubscriptionTypeTotalQuota,
+			TotalLimitUSD:    &totalLimit,
+		},
+	}
+	subRepo := newSubscriptionUserSubRepoStub()
+	start := time.Now().Add(-time.Hour)
+	expiresAt := time.Now().Add(23 * time.Hour)
+	subRepo.seed(&UserSubscription{
+		ID:        51,
+		UserID:    3001,
+		GroupID:   1,
+		StartsAt:  start,
+		ExpiresAt: expiresAt,
+		Status:    SubscriptionStatusActive,
+	})
+
+	svc := NewSubscriptionService(groupRepo, subRepo, nil, nil, &config.Config{})
+	sub, err := svc.AssignSubscription(context.Background(), &AssignSubscriptionInput{
+		UserID:          3001,
+		GroupID:         1,
+		ValidityDays:    2,
+		AssignedBy:      9,
+		EventSourceKind: SubscriptionQuotaSourceAdminAssign,
+		EventSourceRef:  "admin:9",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, sub)
+	require.Equal(t, int64(51), sub.ID)
+	require.Len(t, subRepo.quotaEvents[51], 1)
+	require.Equal(t, "admin:9", subRepo.quotaEvents[51][0].SourceRef)
+	require.Equal(t, SubscriptionQuotaSourceAdminAssign, subRepo.quotaEvents[51][0].SourceKind)
+	require.Equal(t, 0, subRepo.createCalls, "should reuse existing subscription row")
+}
+
 func TestAssignSubscriptionKeepsWorkingWhenIdempotencyStoreUnavailable(t *testing.T) {
 	groupRepo := &subscriptionGroupRepoStub{
 		group: &Group{ID: 1, SubscriptionType: SubscriptionTypeSubscription},
@@ -386,4 +528,11 @@ func strconvFormatInt(v int64) string {
 
 func infraerrorsReason(err error) string {
 	return infraerrors.Reason(err)
+}
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }

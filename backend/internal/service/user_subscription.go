@@ -18,6 +18,11 @@ type UserSubscription struct {
 	DailyUsageUSD   float64
 	WeeklyUsageUSD  float64
 	MonthlyUsageUSD float64
+	TotalLimitUSD   float64
+	TotalUsedUSD    float64
+	TotalRemainingUSD float64
+	NextExpiringQuotaUSD float64
+	NextQuotaExpireAt *time.Time
 
 	AssignedBy *int64
 	AssignedAt time.Time
@@ -29,6 +34,28 @@ type UserSubscription struct {
 	User           *User
 	Group          *Group
 	AssignedByUser *User
+	QuotaEvents    []UserSubscriptionQuotaEvent
+}
+
+type UserSubscriptionQuotaEvent struct {
+	ID                 int64
+	UserSubscriptionID int64
+	QuotaTotalUSD      float64
+	QuotaUsedUSD       float64
+	StartsAt           time.Time
+	ExpiresAt          time.Time
+	SourceKind         string
+	SourceRef          string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+type UserSubscriptionQuotaSummary struct {
+	TotalLimitUSD        float64
+	TotalUsedUSD         float64
+	TotalRemainingUSD    float64
+	NextQuotaExpireAt    *time.Time
+	NextExpiringQuotaUSD float64
 }
 
 func (s *UserSubscription) IsActive() bool {
@@ -121,4 +148,11 @@ func (s *UserSubscription) CheckAllLimits(group *Group, additionalCost float64) 
 	weekly = s.CheckWeeklyLimit(group, additionalCost)
 	monthly = s.CheckMonthlyLimit(group, additionalCost)
 	return
+}
+
+func (s *UserSubscription) CheckTotalLimit(group *Group, additionalCost float64) bool {
+	if group == nil || !group.HasTotalLimit() {
+		return true
+	}
+	return s.TotalRemainingUSD >= additionalCost
 }

@@ -391,6 +391,7 @@ var (
 		{Name: "daily_limit_usd", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
 		{Name: "weekly_limit_usd", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
 		{Name: "monthly_limit_usd", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
+		{Name: "total_limit_usd", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
 		{Name: "default_validity_days", Type: field.TypeInt, Default: 30},
 		{Name: "image_price_1k", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
 		{Name: "image_price_2k", Type: field.TypeFloat64, Nullable: true, SchemaType: map[string]string{"postgres": "decimal(20,8)"}},
@@ -443,7 +444,7 @@ var (
 			{
 				Name:    "group_sort_order",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[25]},
+				Columns: []*schema.Column{GroupsColumns[26]},
 			},
 		},
 	}
@@ -1311,6 +1312,55 @@ var (
 			},
 		},
 	}
+	// UserSubscriptionQuotaEventsColumns holds the columns for the "user_subscription_quota_events" table.
+	UserSubscriptionQuotaEventsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "quota_total_usd", Type: field.TypeFloat64, SchemaType: map[string]string{"postgres": "decimal(20,10)"}},
+		{Name: "quota_used_usd", Type: field.TypeFloat64, Default: 0, SchemaType: map[string]string{"postgres": "decimal(20,10)"}},
+		{Name: "starts_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "expires_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "source_kind", Type: field.TypeString, Size: 32},
+		{Name: "source_ref", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "user_subscription_id", Type: field.TypeInt64},
+	}
+	// UserSubscriptionQuotaEventsTable holds the schema information for the "user_subscription_quota_events" table.
+	UserSubscriptionQuotaEventsTable = &schema.Table{
+		Name:       "user_subscription_quota_events",
+		Columns:    UserSubscriptionQuotaEventsColumns,
+		PrimaryKey: []*schema.Column{UserSubscriptionQuotaEventsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "user_subscription_quota_events_user_subscriptions_quota_events",
+				Columns:    []*schema.Column{UserSubscriptionQuotaEventsColumns[9]},
+				RefColumns: []*schema.Column{UserSubscriptionsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "usersubscriptionquotaevent_user_subscription_id",
+				Unique:  false,
+				Columns: []*schema.Column{UserSubscriptionQuotaEventsColumns[9]},
+			},
+			{
+				Name:    "usersubscriptionquotaevent_expires_at",
+				Unique:  false,
+				Columns: []*schema.Column{UserSubscriptionQuotaEventsColumns[4]},
+			},
+			{
+				Name:    "usersubscriptionquotaevent_user_subscription_id_expires_at",
+				Unique:  false,
+				Columns: []*schema.Column{UserSubscriptionQuotaEventsColumns[9], UserSubscriptionQuotaEventsColumns[4]},
+			},
+			{
+				Name:    "usersubscriptionquotaevent_user_subscription_id_expires_at_id",
+				Unique:  false,
+				Columns: []*schema.Column{UserSubscriptionQuotaEventsColumns[9], UserSubscriptionQuotaEventsColumns[4], UserSubscriptionQuotaEventsColumns[0]},
+			},
+		},
+	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
 		APIKeysTable,
@@ -1339,6 +1389,7 @@ var (
 		UserAttributeDefinitionsTable,
 		UserAttributeValuesTable,
 		UserSubscriptionsTable,
+		UserSubscriptionQuotaEventsTable,
 	}
 )
 
@@ -1444,5 +1495,9 @@ func init() {
 	UserSubscriptionsTable.ForeignKeys[2].RefTable = UsersTable
 	UserSubscriptionsTable.Annotation = &entsql.Annotation{
 		Table: "user_subscriptions",
+	}
+	UserSubscriptionQuotaEventsTable.ForeignKeys[0].RefTable = UserSubscriptionsTable
+	UserSubscriptionQuotaEventsTable.Annotation = &entsql.Annotation{
+		Table: "user_subscription_quota_events",
 	}
 }

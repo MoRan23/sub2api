@@ -57,6 +57,8 @@ const (
 	EdgeAssignedByUser = "assigned_by_user"
 	// EdgeUsageLogs holds the string denoting the usage_logs edge name in mutations.
 	EdgeUsageLogs = "usage_logs"
+	// EdgeQuotaEvents holds the string denoting the quota_events edge name in mutations.
+	EdgeQuotaEvents = "quota_events"
 	// Table holds the table name of the usersubscription in the database.
 	Table = "user_subscriptions"
 	// UserTable is the table that holds the user relation/edge.
@@ -87,6 +89,13 @@ const (
 	UsageLogsInverseTable = "usage_logs"
 	// UsageLogsColumn is the table column denoting the usage_logs relation/edge.
 	UsageLogsColumn = "subscription_id"
+	// QuotaEventsTable is the table that holds the quota_events relation/edge.
+	QuotaEventsTable = "user_subscription_quota_events"
+	// QuotaEventsInverseTable is the table name for the UserSubscriptionQuotaEvent entity.
+	// It exists in this package in order to avoid circular dependency with the "usersubscriptionquotaevent" package.
+	QuotaEventsInverseTable = "user_subscription_quota_events"
+	// QuotaEventsColumn is the table column denoting the quota_events relation/edge.
+	QuotaEventsColumn = "user_subscription_id"
 )
 
 // Columns holds all SQL columns for usersubscription fields.
@@ -276,6 +285,20 @@ func ByUsageLogs(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 		sqlgraph.OrderByNeighborTerms(s, newUsageLogsStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
+
+// ByQuotaEventsCount orders the results by quota_events count.
+func ByQuotaEventsCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newQuotaEventsStep(), opts...)
+	}
+}
+
+// ByQuotaEvents orders the results by quota_events terms.
+func ByQuotaEvents(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newQuotaEventsStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
 func newUserStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -302,5 +325,12 @@ func newUsageLogsStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(UsageLogsInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, UsageLogsTable, UsageLogsColumn),
+	)
+}
+func newQuotaEventsStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(QuotaEventsInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, QuotaEventsTable, QuotaEventsColumn),
 	)
 }

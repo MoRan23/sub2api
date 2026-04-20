@@ -41,6 +41,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/ent/usersubscriptionquotaevent"
 
 	stdsql "database/sql"
 )
@@ -102,6 +103,8 @@ type Client struct {
 	UserAttributeValue *UserAttributeValueClient
 	// UserSubscription is the client for interacting with the UserSubscription builders.
 	UserSubscription *UserSubscriptionClient
+	// UserSubscriptionQuotaEvent is the client for interacting with the UserSubscriptionQuotaEvent builders.
+	UserSubscriptionQuotaEvent *UserSubscriptionQuotaEventClient
 }
 
 // NewClient creates a new client configured with the given options.
@@ -139,6 +142,7 @@ func (c *Client) init() {
 	c.UserAttributeDefinition = NewUserAttributeDefinitionClient(c.config)
 	c.UserAttributeValue = NewUserAttributeValueClient(c.config)
 	c.UserSubscription = NewUserSubscriptionClient(c.config)
+	c.UserSubscriptionQuotaEvent = NewUserSubscriptionQuotaEventClient(c.config)
 }
 
 type (
@@ -229,34 +233,35 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 	cfg := c.config
 	cfg.driver = tx
 	return &Tx{
-		ctx:                     ctx,
-		config:                  cfg,
-		APIKey:                  NewAPIKeyClient(cfg),
-		Account:                 NewAccountClient(cfg),
-		AccountGroup:            NewAccountGroupClient(cfg),
-		Announcement:            NewAnnouncementClient(cfg),
-		AnnouncementRead:        NewAnnouncementReadClient(cfg),
-		ErrorPassthroughRule:    NewErrorPassthroughRuleClient(cfg),
-		Group:                   NewGroupClient(cfg),
-		IdempotencyRecord:       NewIdempotencyRecordClient(cfg),
-		PaymentAuditLog:         NewPaymentAuditLogClient(cfg),
-		PaymentOrder:            NewPaymentOrderClient(cfg),
-		PaymentProviderInstance: NewPaymentProviderInstanceClient(cfg),
-		PromoCode:               NewPromoCodeClient(cfg),
-		PromoCodeUsage:          NewPromoCodeUsageClient(cfg),
-		Proxy:                   NewProxyClient(cfg),
-		RedeemCode:              NewRedeemCodeClient(cfg),
-		SecuritySecret:          NewSecuritySecretClient(cfg),
-		Setting:                 NewSettingClient(cfg),
-		SubscriptionPlan:        NewSubscriptionPlanClient(cfg),
-		TLSFingerprintProfile:   NewTLSFingerprintProfileClient(cfg),
-		UsageCleanupTask:        NewUsageCleanupTaskClient(cfg),
-		UsageLog:                NewUsageLogClient(cfg),
-		User:                    NewUserClient(cfg),
-		UserAllowedGroup:        NewUserAllowedGroupClient(cfg),
-		UserAttributeDefinition: NewUserAttributeDefinitionClient(cfg),
-		UserAttributeValue:      NewUserAttributeValueClient(cfg),
-		UserSubscription:        NewUserSubscriptionClient(cfg),
+		ctx:                        ctx,
+		config:                     cfg,
+		APIKey:                     NewAPIKeyClient(cfg),
+		Account:                    NewAccountClient(cfg),
+		AccountGroup:               NewAccountGroupClient(cfg),
+		Announcement:               NewAnnouncementClient(cfg),
+		AnnouncementRead:           NewAnnouncementReadClient(cfg),
+		ErrorPassthroughRule:       NewErrorPassthroughRuleClient(cfg),
+		Group:                      NewGroupClient(cfg),
+		IdempotencyRecord:          NewIdempotencyRecordClient(cfg),
+		PaymentAuditLog:            NewPaymentAuditLogClient(cfg),
+		PaymentOrder:               NewPaymentOrderClient(cfg),
+		PaymentProviderInstance:    NewPaymentProviderInstanceClient(cfg),
+		PromoCode:                  NewPromoCodeClient(cfg),
+		PromoCodeUsage:             NewPromoCodeUsageClient(cfg),
+		Proxy:                      NewProxyClient(cfg),
+		RedeemCode:                 NewRedeemCodeClient(cfg),
+		SecuritySecret:             NewSecuritySecretClient(cfg),
+		Setting:                    NewSettingClient(cfg),
+		SubscriptionPlan:           NewSubscriptionPlanClient(cfg),
+		TLSFingerprintProfile:      NewTLSFingerprintProfileClient(cfg),
+		UsageCleanupTask:           NewUsageCleanupTaskClient(cfg),
+		UsageLog:                   NewUsageLogClient(cfg),
+		User:                       NewUserClient(cfg),
+		UserAllowedGroup:           NewUserAllowedGroupClient(cfg),
+		UserAttributeDefinition:    NewUserAttributeDefinitionClient(cfg),
+		UserAttributeValue:         NewUserAttributeValueClient(cfg),
+		UserSubscription:           NewUserSubscriptionClient(cfg),
+		UserSubscriptionQuotaEvent: NewUserSubscriptionQuotaEventClient(cfg),
 	}, nil
 }
 
@@ -274,34 +279,35 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	cfg := c.config
 	cfg.driver = &txDriver{tx: tx, drv: c.driver}
 	return &Tx{
-		ctx:                     ctx,
-		config:                  cfg,
-		APIKey:                  NewAPIKeyClient(cfg),
-		Account:                 NewAccountClient(cfg),
-		AccountGroup:            NewAccountGroupClient(cfg),
-		Announcement:            NewAnnouncementClient(cfg),
-		AnnouncementRead:        NewAnnouncementReadClient(cfg),
-		ErrorPassthroughRule:    NewErrorPassthroughRuleClient(cfg),
-		Group:                   NewGroupClient(cfg),
-		IdempotencyRecord:       NewIdempotencyRecordClient(cfg),
-		PaymentAuditLog:         NewPaymentAuditLogClient(cfg),
-		PaymentOrder:            NewPaymentOrderClient(cfg),
-		PaymentProviderInstance: NewPaymentProviderInstanceClient(cfg),
-		PromoCode:               NewPromoCodeClient(cfg),
-		PromoCodeUsage:          NewPromoCodeUsageClient(cfg),
-		Proxy:                   NewProxyClient(cfg),
-		RedeemCode:              NewRedeemCodeClient(cfg),
-		SecuritySecret:          NewSecuritySecretClient(cfg),
-		Setting:                 NewSettingClient(cfg),
-		SubscriptionPlan:        NewSubscriptionPlanClient(cfg),
-		TLSFingerprintProfile:   NewTLSFingerprintProfileClient(cfg),
-		UsageCleanupTask:        NewUsageCleanupTaskClient(cfg),
-		UsageLog:                NewUsageLogClient(cfg),
-		User:                    NewUserClient(cfg),
-		UserAllowedGroup:        NewUserAllowedGroupClient(cfg),
-		UserAttributeDefinition: NewUserAttributeDefinitionClient(cfg),
-		UserAttributeValue:      NewUserAttributeValueClient(cfg),
-		UserSubscription:        NewUserSubscriptionClient(cfg),
+		ctx:                        ctx,
+		config:                     cfg,
+		APIKey:                     NewAPIKeyClient(cfg),
+		Account:                    NewAccountClient(cfg),
+		AccountGroup:               NewAccountGroupClient(cfg),
+		Announcement:               NewAnnouncementClient(cfg),
+		AnnouncementRead:           NewAnnouncementReadClient(cfg),
+		ErrorPassthroughRule:       NewErrorPassthroughRuleClient(cfg),
+		Group:                      NewGroupClient(cfg),
+		IdempotencyRecord:          NewIdempotencyRecordClient(cfg),
+		PaymentAuditLog:            NewPaymentAuditLogClient(cfg),
+		PaymentOrder:               NewPaymentOrderClient(cfg),
+		PaymentProviderInstance:    NewPaymentProviderInstanceClient(cfg),
+		PromoCode:                  NewPromoCodeClient(cfg),
+		PromoCodeUsage:             NewPromoCodeUsageClient(cfg),
+		Proxy:                      NewProxyClient(cfg),
+		RedeemCode:                 NewRedeemCodeClient(cfg),
+		SecuritySecret:             NewSecuritySecretClient(cfg),
+		Setting:                    NewSettingClient(cfg),
+		SubscriptionPlan:           NewSubscriptionPlanClient(cfg),
+		TLSFingerprintProfile:      NewTLSFingerprintProfileClient(cfg),
+		UsageCleanupTask:           NewUsageCleanupTaskClient(cfg),
+		UsageLog:                   NewUsageLogClient(cfg),
+		User:                       NewUserClient(cfg),
+		UserAllowedGroup:           NewUserAllowedGroupClient(cfg),
+		UserAttributeDefinition:    NewUserAttributeDefinitionClient(cfg),
+		UserAttributeValue:         NewUserAttributeValueClient(cfg),
+		UserSubscription:           NewUserSubscriptionClient(cfg),
+		UserSubscriptionQuotaEvent: NewUserSubscriptionQuotaEventClient(cfg),
 	}, nil
 }
 
@@ -337,7 +343,7 @@ func (c *Client) Use(hooks ...Hook) {
 		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
 		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
 		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserSubscription,
+		c.UserSubscription, c.UserSubscriptionQuotaEvent,
 	} {
 		n.Use(hooks...)
 	}
@@ -353,7 +359,7 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
 		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
 		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserSubscription,
+		c.UserSubscription, c.UserSubscriptionQuotaEvent,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -414,6 +420,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.UserAttributeValue.mutate(ctx, m)
 	case *UserSubscriptionMutation:
 		return c.UserSubscription.mutate(ctx, m)
+	case *UserSubscriptionQuotaEventMutation:
+		return c.UserSubscriptionQuotaEvent.mutate(ctx, m)
 	default:
 		return nil, fmt.Errorf("ent: unknown mutation type %T", m)
 	}
@@ -4598,6 +4606,22 @@ func (c *UserSubscriptionClient) QueryUsageLogs(_m *UserSubscription) *UsageLogQ
 	return query
 }
 
+// QueryQuotaEvents queries the quota_events edge of a UserSubscription.
+func (c *UserSubscriptionClient) QueryQuotaEvents(_m *UserSubscription) *UserSubscriptionQuotaEventQuery {
+	query := (&UserSubscriptionQuotaEventClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(usersubscription.Table, usersubscription.FieldID, id),
+			sqlgraph.To(usersubscriptionquotaevent.Table, usersubscriptionquotaevent.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, usersubscription.QuotaEventsTable, usersubscription.QuotaEventsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // Hooks returns the client hooks.
 func (c *UserSubscriptionClient) Hooks() []Hook {
 	hooks := c.hooks.UserSubscription
@@ -4625,6 +4649,155 @@ func (c *UserSubscriptionClient) mutate(ctx context.Context, m *UserSubscription
 	}
 }
 
+// UserSubscriptionQuotaEventClient is a client for the UserSubscriptionQuotaEvent schema.
+type UserSubscriptionQuotaEventClient struct {
+	config
+}
+
+// NewUserSubscriptionQuotaEventClient returns a client for the UserSubscriptionQuotaEvent from the given config.
+func NewUserSubscriptionQuotaEventClient(c config) *UserSubscriptionQuotaEventClient {
+	return &UserSubscriptionQuotaEventClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `usersubscriptionquotaevent.Hooks(f(g(h())))`.
+func (c *UserSubscriptionQuotaEventClient) Use(hooks ...Hook) {
+	c.hooks.UserSubscriptionQuotaEvent = append(c.hooks.UserSubscriptionQuotaEvent, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `usersubscriptionquotaevent.Intercept(f(g(h())))`.
+func (c *UserSubscriptionQuotaEventClient) Intercept(interceptors ...Interceptor) {
+	c.inters.UserSubscriptionQuotaEvent = append(c.inters.UserSubscriptionQuotaEvent, interceptors...)
+}
+
+// Create returns a builder for creating a UserSubscriptionQuotaEvent entity.
+func (c *UserSubscriptionQuotaEventClient) Create() *UserSubscriptionQuotaEventCreate {
+	mutation := newUserSubscriptionQuotaEventMutation(c.config, OpCreate)
+	return &UserSubscriptionQuotaEventCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of UserSubscriptionQuotaEvent entities.
+func (c *UserSubscriptionQuotaEventClient) CreateBulk(builders ...*UserSubscriptionQuotaEventCreate) *UserSubscriptionQuotaEventCreateBulk {
+	return &UserSubscriptionQuotaEventCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *UserSubscriptionQuotaEventClient) MapCreateBulk(slice any, setFunc func(*UserSubscriptionQuotaEventCreate, int)) *UserSubscriptionQuotaEventCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &UserSubscriptionQuotaEventCreateBulk{err: fmt.Errorf("calling to UserSubscriptionQuotaEventClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*UserSubscriptionQuotaEventCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &UserSubscriptionQuotaEventCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for UserSubscriptionQuotaEvent.
+func (c *UserSubscriptionQuotaEventClient) Update() *UserSubscriptionQuotaEventUpdate {
+	mutation := newUserSubscriptionQuotaEventMutation(c.config, OpUpdate)
+	return &UserSubscriptionQuotaEventUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *UserSubscriptionQuotaEventClient) UpdateOne(_m *UserSubscriptionQuotaEvent) *UserSubscriptionQuotaEventUpdateOne {
+	mutation := newUserSubscriptionQuotaEventMutation(c.config, OpUpdateOne, withUserSubscriptionQuotaEvent(_m))
+	return &UserSubscriptionQuotaEventUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *UserSubscriptionQuotaEventClient) UpdateOneID(id int64) *UserSubscriptionQuotaEventUpdateOne {
+	mutation := newUserSubscriptionQuotaEventMutation(c.config, OpUpdateOne, withUserSubscriptionQuotaEventID(id))
+	return &UserSubscriptionQuotaEventUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for UserSubscriptionQuotaEvent.
+func (c *UserSubscriptionQuotaEventClient) Delete() *UserSubscriptionQuotaEventDelete {
+	mutation := newUserSubscriptionQuotaEventMutation(c.config, OpDelete)
+	return &UserSubscriptionQuotaEventDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *UserSubscriptionQuotaEventClient) DeleteOne(_m *UserSubscriptionQuotaEvent) *UserSubscriptionQuotaEventDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *UserSubscriptionQuotaEventClient) DeleteOneID(id int64) *UserSubscriptionQuotaEventDeleteOne {
+	builder := c.Delete().Where(usersubscriptionquotaevent.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &UserSubscriptionQuotaEventDeleteOne{builder}
+}
+
+// Query returns a query builder for UserSubscriptionQuotaEvent.
+func (c *UserSubscriptionQuotaEventClient) Query() *UserSubscriptionQuotaEventQuery {
+	return &UserSubscriptionQuotaEventQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeUserSubscriptionQuotaEvent},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a UserSubscriptionQuotaEvent entity by its id.
+func (c *UserSubscriptionQuotaEventClient) Get(ctx context.Context, id int64) (*UserSubscriptionQuotaEvent, error) {
+	return c.Query().Where(usersubscriptionquotaevent.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *UserSubscriptionQuotaEventClient) GetX(ctx context.Context, id int64) *UserSubscriptionQuotaEvent {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QuerySubscription queries the subscription edge of a UserSubscriptionQuotaEvent.
+func (c *UserSubscriptionQuotaEventClient) QuerySubscription(_m *UserSubscriptionQuotaEvent) *UserSubscriptionQuery {
+	query := (&UserSubscriptionClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(usersubscriptionquotaevent.Table, usersubscriptionquotaevent.FieldID, id),
+			sqlgraph.To(usersubscription.Table, usersubscription.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, usersubscriptionquotaevent.SubscriptionTable, usersubscriptionquotaevent.SubscriptionColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *UserSubscriptionQuotaEventClient) Hooks() []Hook {
+	return c.hooks.UserSubscriptionQuotaEvent
+}
+
+// Interceptors returns the client interceptors.
+func (c *UserSubscriptionQuotaEventClient) Interceptors() []Interceptor {
+	return c.inters.UserSubscriptionQuotaEvent
+}
+
+func (c *UserSubscriptionQuotaEventClient) mutate(ctx context.Context, m *UserSubscriptionQuotaEventMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&UserSubscriptionQuotaEventCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&UserSubscriptionQuotaEventUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&UserSubscriptionQuotaEventUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&UserSubscriptionQuotaEventDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown UserSubscriptionQuotaEvent mutation op: %q", m.Op())
+	}
+}
+
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
@@ -4633,7 +4806,7 @@ type (
 		PaymentProviderInstance, PromoCode, PromoCodeUsage, Proxy, RedeemCode,
 		SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
 		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
-		UserAttributeValue, UserSubscription []ent.Hook
+		UserAttributeValue, UserSubscription, UserSubscriptionQuotaEvent []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead,
@@ -4641,7 +4814,8 @@ type (
 		PaymentProviderInstance, PromoCode, PromoCodeUsage, Proxy, RedeemCode,
 		SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
 		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
-		UserAttributeValue, UserSubscription []ent.Interceptor
+		UserAttributeValue, UserSubscription,
+		UserSubscriptionQuotaEvent []ent.Interceptor
 	}
 )
 

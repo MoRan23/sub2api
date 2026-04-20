@@ -691,7 +691,7 @@ func (s *SettingService) validateDefaultSubscriptionGroups(ctx context.Context, 
 			}
 			return fmt.Errorf("get default subscription group %d: %w", item.GroupID, err)
 		}
-		if !group.IsSubscriptionType() {
+		if !group.IsWindowedSubscriptionType() {
 			return ErrDefaultSubGroupInvalid.WithMetadata(map[string]string{
 				"group_id": strconv.FormatInt(item.GroupID, 10),
 			})

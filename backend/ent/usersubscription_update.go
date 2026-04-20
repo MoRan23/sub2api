@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	"github.com/Wei-Shaw/sub2api/ent/usersubscriptionquotaevent"
 )
 
 // UserSubscriptionUpdate is the builder for updating UserSubscription entities.
@@ -348,6 +349,21 @@ func (_u *UserSubscriptionUpdate) AddUsageLogs(v ...*UsageLog) *UserSubscription
 	return _u.AddUsageLogIDs(ids...)
 }
 
+// AddQuotaEventIDs adds the "quota_events" edge to the UserSubscriptionQuotaEvent entity by IDs.
+func (_u *UserSubscriptionUpdate) AddQuotaEventIDs(ids ...int64) *UserSubscriptionUpdate {
+	_u.mutation.AddQuotaEventIDs(ids...)
+	return _u
+}
+
+// AddQuotaEvents adds the "quota_events" edges to the UserSubscriptionQuotaEvent entity.
+func (_u *UserSubscriptionUpdate) AddQuotaEvents(v ...*UserSubscriptionQuotaEvent) *UserSubscriptionUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddQuotaEventIDs(ids...)
+}
+
 // Mutation returns the UserSubscriptionMutation object of the builder.
 func (_u *UserSubscriptionUpdate) Mutation() *UserSubscriptionMutation {
 	return _u.mutation
@@ -390,6 +406,27 @@ func (_u *UserSubscriptionUpdate) RemoveUsageLogs(v ...*UsageLog) *UserSubscript
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveUsageLogIDs(ids...)
+}
+
+// ClearQuotaEvents clears all "quota_events" edges to the UserSubscriptionQuotaEvent entity.
+func (_u *UserSubscriptionUpdate) ClearQuotaEvents() *UserSubscriptionUpdate {
+	_u.mutation.ClearQuotaEvents()
+	return _u
+}
+
+// RemoveQuotaEventIDs removes the "quota_events" edge to UserSubscriptionQuotaEvent entities by IDs.
+func (_u *UserSubscriptionUpdate) RemoveQuotaEventIDs(ids ...int64) *UserSubscriptionUpdate {
+	_u.mutation.RemoveQuotaEventIDs(ids...)
+	return _u
+}
+
+// RemoveQuotaEvents removes "quota_events" edges to UserSubscriptionQuotaEvent entities.
+func (_u *UserSubscriptionUpdate) RemoveQuotaEvents(v ...*UserSubscriptionQuotaEvent) *UserSubscriptionUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveQuotaEventIDs(ids...)
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -650,6 +687,51 @@ func (_u *UserSubscriptionUpdate) sqlSave(ctx context.Context) (_node int, err e
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(usagelog.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.QuotaEventsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   usersubscription.QuotaEventsTable,
+			Columns: []string{usersubscription.QuotaEventsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usersubscriptionquotaevent.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedQuotaEventsIDs(); len(nodes) > 0 && !_u.mutation.QuotaEventsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   usersubscription.QuotaEventsTable,
+			Columns: []string{usersubscription.QuotaEventsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usersubscriptionquotaevent.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.QuotaEventsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   usersubscription.QuotaEventsTable,
+			Columns: []string{usersubscription.QuotaEventsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usersubscriptionquotaevent.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {
@@ -994,6 +1076,21 @@ func (_u *UserSubscriptionUpdateOne) AddUsageLogs(v ...*UsageLog) *UserSubscript
 	return _u.AddUsageLogIDs(ids...)
 }
 
+// AddQuotaEventIDs adds the "quota_events" edge to the UserSubscriptionQuotaEvent entity by IDs.
+func (_u *UserSubscriptionUpdateOne) AddQuotaEventIDs(ids ...int64) *UserSubscriptionUpdateOne {
+	_u.mutation.AddQuotaEventIDs(ids...)
+	return _u
+}
+
+// AddQuotaEvents adds the "quota_events" edges to the UserSubscriptionQuotaEvent entity.
+func (_u *UserSubscriptionUpdateOne) AddQuotaEvents(v ...*UserSubscriptionQuotaEvent) *UserSubscriptionUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddQuotaEventIDs(ids...)
+}
+
 // Mutation returns the UserSubscriptionMutation object of the builder.
 func (_u *UserSubscriptionUpdateOne) Mutation() *UserSubscriptionMutation {
 	return _u.mutation
@@ -1036,6 +1133,27 @@ func (_u *UserSubscriptionUpdateOne) RemoveUsageLogs(v ...*UsageLog) *UserSubscr
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveUsageLogIDs(ids...)
+}
+
+// ClearQuotaEvents clears all "quota_events" edges to the UserSubscriptionQuotaEvent entity.
+func (_u *UserSubscriptionUpdateOne) ClearQuotaEvents() *UserSubscriptionUpdateOne {
+	_u.mutation.ClearQuotaEvents()
+	return _u
+}
+
+// RemoveQuotaEventIDs removes the "quota_events" edge to UserSubscriptionQuotaEvent entities by IDs.
+func (_u *UserSubscriptionUpdateOne) RemoveQuotaEventIDs(ids ...int64) *UserSubscriptionUpdateOne {
+	_u.mutation.RemoveQuotaEventIDs(ids...)
+	return _u
+}
+
+// RemoveQuotaEvents removes "quota_events" edges to UserSubscriptionQuotaEvent entities.
+func (_u *UserSubscriptionUpdateOne) RemoveQuotaEvents(v ...*UserSubscriptionQuotaEvent) *UserSubscriptionUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveQuotaEventIDs(ids...)
 }
 
 // Where appends a list predicates to the UserSubscriptionUpdate builder.
@@ -1326,6 +1444,51 @@ func (_u *UserSubscriptionUpdateOne) sqlSave(ctx context.Context) (_node *UserSu
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(usagelog.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.QuotaEventsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   usersubscription.QuotaEventsTable,
+			Columns: []string{usersubscription.QuotaEventsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usersubscriptionquotaevent.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedQuotaEventsIDs(); len(nodes) > 0 && !_u.mutation.QuotaEventsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   usersubscription.QuotaEventsTable,
+			Columns: []string{usersubscription.QuotaEventsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usersubscriptionquotaevent.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.QuotaEventsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   usersubscription.QuotaEventsTable,
+			Columns: []string{usersubscription.QuotaEventsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usersubscriptionquotaevent.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

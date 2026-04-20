@@ -69,9 +69,11 @@ type UserSubscriptionEdges struct {
 	AssignedByUser *User `json:"assigned_by_user,omitempty"`
 	// UsageLogs holds the value of the usage_logs edge.
 	UsageLogs []*UsageLog `json:"usage_logs,omitempty"`
+	// QuotaEvents holds the value of the quota_events edge.
+	QuotaEvents []*UserSubscriptionQuotaEvent `json:"quota_events,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [4]bool
+	loadedTypes [5]bool
 }
 
 // UserOrErr returns the User value or an error if the edge
@@ -114,6 +116,15 @@ func (e UserSubscriptionEdges) UsageLogsOrErr() ([]*UsageLog, error) {
 		return e.UsageLogs, nil
 	}
 	return nil, &NotLoadedError{edge: "usage_logs"}
+}
+
+// QuotaEventsOrErr returns the QuotaEvents value or an error if the edge
+// was not loaded in eager-loading.
+func (e UserSubscriptionEdges) QuotaEventsOrErr() ([]*UserSubscriptionQuotaEvent, error) {
+	if e.loadedTypes[4] {
+		return e.QuotaEvents, nil
+	}
+	return nil, &NotLoadedError{edge: "quota_events"}
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -289,6 +300,11 @@ func (_m *UserSubscription) QueryAssignedByUser() *UserQuery {
 // QueryUsageLogs queries the "usage_logs" edge of the UserSubscription entity.
 func (_m *UserSubscription) QueryUsageLogs() *UsageLogQuery {
 	return NewUserSubscriptionClient(_m.config).QueryUsageLogs(_m)
+}
+
+// QueryQuotaEvents queries the "quota_events" edge of the UserSubscription entity.
+func (_m *UserSubscription) QueryQuotaEvents() *UserSubscriptionQuotaEventQuery {
+	return NewUserSubscriptionClient(_m.config).QueryQuotaEvents(_m)
 }
 
 // Update returns a builder for updating this UserSubscription.
