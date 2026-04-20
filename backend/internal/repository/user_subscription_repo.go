@@ -421,6 +421,56 @@ func (r *userSubscriptionRepository) CreateQuotaEvent(ctx context.Context, event
 	return nil
 }
 
+func (r *userSubscriptionRepository) RetireDepletedQuotaEventsOnAppend(ctx context.Context, subscriptionID, keepEventID int64, retireAt time.Time) error {
+	if subscriptionID <= 0 {
+		return service.ErrSubscriptionNotFound
+	}
+
+	retireAt = retireAt.UTC()
+	exec := clientFromContext(ctx, r.client)
+
+	if _, err := exec.ExecContext(ctx, `
+		UPDATE user_subscription_quota_events
+		SET expires_at = $3,
+		    updated_at = NOW()
+		WHERE user_subscription_id = $1
+		  AND id <> $2
+		  AND expires_at > $3
+		  AND quota_total_usd - quota_used_usd <= $4
+	`, subscriptionID, keepEventID, retireAt, totalQuotaConsumeEpsilon); err != nil {
+		return err
+	}
+
+	var maxActiveExpiry time.Time
+	if err := scanSingleRow(ctx, exec, `
+		SELECT COALESCE(MAX(expires_at), $2)
+		FROM user_subscription_quota_events
+		WHERE user_subscription_id = $1
+		  AND expires_at > $2
+	`, []any{subscriptionID, retireAt}, &maxActiveExpiry); err != nil {
+		return err
+	}
+
+	res, err := exec.ExecContext(ctx, `
+		UPDATE user_subscriptions
+		SET expires_at = $2,
+		    updated_at = NOW()
+		WHERE id = $1
+		  AND deleted_at IS NULL
+	`, subscriptionID, maxActiveExpiry)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrSubscriptionNotFound
+	}
+	return nil
+}
+
 func (r *userSubscriptionRepository) GetQuotaSummary(ctx context.Context, subscriptionID int64, now time.Time) (*service.UserSubscriptionQuotaSummary, error) {
 	summaries, err := r.GetQuotaSummaryBatch(ctx, []int64{subscriptionID}, now)
 	if err != nil {
@@ -502,12 +552,12 @@ func (r *userSubscriptionRepository) GetQuotaSummaryBatch(ctx context.Context, s
 
 	for rows.Next() {
 		var (
-			subscriptionID         int64
-			totalLimitUSD          float64
-			totalUsedUSD           float64
-			totalRemainingUSD      float64
-			nextQuotaExpireAt      sql.NullTime
-			nextExpiringQuotaUSD   float64
+			subscriptionID       int64
+			totalLimitUSD        float64
+			totalUsedUSD         float64
+			totalRemainingUSD    float64
+			nextQuotaExpireAt    sql.NullTime
+			nextExpiringQuotaUSD float64
 		)
 		if err := rows.Scan(
 			&subscriptionID,
@@ -585,6 +635,35 @@ func (r *userSubscriptionRepository) BatchUpdateExpiredStatus(ctx context.Contex
 		SetStatus(service.SubscriptionStatusExpired).
 		Save(ctx)
 	return int64(n), err
+}
+
+func (r *userSubscriptionRepository) DeleteExpiredQuotaEventsBatch(ctx context.Context, now time.Time, limit int) (int64, error) {
+	if limit <= 0 {
+		return 0, nil
+	}
+
+	exec := clientFromContext(ctx, r.client)
+	res, err := exec.ExecContext(ctx, `
+		WITH targets AS (
+			SELECT id
+			FROM user_subscription_quota_events
+			WHERE expires_at <= $1
+			ORDER BY expires_at ASC, id ASC
+			FOR UPDATE SKIP LOCKED
+			LIMIT $2
+		)
+		DELETE FROM user_subscription_quota_events e
+		USING targets t
+		WHERE e.id = t.id
+	`, now.UTC(), limit)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return affected, nil
 }
 
 // Extra repository helpers (currently used only by integration tests).

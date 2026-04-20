@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const subscriptionQuotaEventCleanupBatchSize = 1000
+
 // SubscriptionExpiryService periodically updates expired subscription status.
 type SubscriptionExpiryService struct {
 	userSubRepo UserSubscriptionRepository
@@ -67,5 +69,29 @@ func (s *SubscriptionExpiryService) runOnce() {
 	}
 	if updated > 0 {
 		log.Printf("[SubscriptionExpiry] Updated %d expired subscriptions", updated)
+	}
+
+	cleanupBefore := time.Now().UTC()
+	var deletedTotal int64
+	for {
+		if err := ctx.Err(); err != nil {
+			if deletedTotal > 0 {
+				log.Printf("[SubscriptionExpiry] Deleted %d expired quota events before stop", deletedTotal)
+			}
+			return
+		}
+
+		deleted, err := s.userSubRepo.DeleteExpiredQuotaEventsBatch(ctx, cleanupBefore, subscriptionQuotaEventCleanupBatchSize)
+		if err != nil {
+			log.Printf("[SubscriptionExpiry] Delete expired quota events failed: %v", err)
+			return
+		}
+		if deleted == 0 {
+			break
+		}
+		deletedTotal += deleted
+	}
+	if deletedTotal > 0 {
+		log.Printf("[SubscriptionExpiry] Deleted %d expired quota events", deletedTotal)
 	}
 }

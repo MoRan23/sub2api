@@ -515,6 +515,181 @@ func (s *UserSubscriptionRepoSuite) TestBatchUpdateExpiredStatus() {
 	s.Require().Equal(service.SubscriptionStatusExpired, gotExpired.Status)
 }
 
+func (s *UserSubscriptionRepoSuite) TestRetireDepletedQuotaEventsOnAppend_RetiresDepletedAndSyncsExpiry() {
+	user := s.mustCreateUser("quota-retire@test.com", service.RoleUser)
+	totalLimit := 1.0
+	group, err := s.client.Group.Create().
+		SetName("g-quota-retire").
+		SetStatus(service.StatusActive).
+		SetSubscriptionType(service.SubscriptionTypeTotalQuota).
+		SetTotalLimitUsd(totalLimit).
+		Save(s.ctx)
+	s.Require().NoError(err, "create total quota group")
+
+	sub := s.mustCreateSubscription(user.ID, group.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetExpiresAt(time.Now().UTC().Add(72 * time.Hour))
+	})
+	retireAt := time.Now().UTC().Truncate(time.Microsecond)
+	oldExpiry := retireAt.Add(48 * time.Hour)
+	newExpiry := retireAt.Add(24 * time.Hour)
+
+	var retiredEventID int64
+	err = scanSingleRow(s.ctx, s.client, `
+		INSERT INTO user_subscription_quota_events (
+			user_subscription_id, quota_total_usd, quota_used_usd, starts_at, expires_at, source_kind
+		)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id
+	`, []any{sub.ID, 1.0, 1.5, retireAt.Add(-time.Hour), oldExpiry, service.SubscriptionQuotaSourceRedeemCode}, &retiredEventID)
+	s.Require().NoError(err, "insert depleted event")
+
+	var keepEventID int64
+	err = scanSingleRow(s.ctx, s.client, `
+		INSERT INTO user_subscription_quota_events (
+			user_subscription_id, quota_total_usd, quota_used_usd, starts_at, expires_at, source_kind
+		)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id
+	`, []any{sub.ID, 1.0, 0.0, retireAt, newExpiry, service.SubscriptionQuotaSourceAdminAssign}, &keepEventID)
+	s.Require().NoError(err, "insert kept event")
+
+	err = s.repo.RetireDepletedQuotaEventsOnAppend(s.ctx, sub.ID, keepEventID, retireAt)
+	s.Require().NoError(err, "RetireDepletedQuotaEventsOnAppend")
+
+	summary, err := s.repo.GetQuotaSummary(s.ctx, sub.ID, retireAt.Add(time.Second))
+	s.Require().NoError(err, "GetQuotaSummary")
+	s.Require().InDelta(1.0, summary.TotalLimitUSD, 1e-6)
+	s.Require().InDelta(0.0, summary.TotalUsedUSD, 1e-6)
+	s.Require().InDelta(1.0, summary.TotalRemainingUSD, 1e-6)
+
+	var retiredExpiresAt time.Time
+	err = scanSingleRow(s.ctx, s.client, `
+		SELECT expires_at
+		FROM user_subscription_quota_events
+		WHERE id = $1
+	`, []any{retiredEventID}, &retiredExpiresAt)
+	s.Require().NoError(err, "query retired event")
+	s.Require().False(retiredExpiresAt.After(retireAt), "retired event should leave the active set immediately")
+
+	gotSub, err := s.repo.GetByID(s.ctx, sub.ID)
+	s.Require().NoError(err, "GetByID")
+	s.Require().WithinDuration(newExpiry, gotSub.ExpiresAt, time.Second, "subscription expiry should match the latest active event")
+}
+
+func (s *UserSubscriptionRepoSuite) TestRetireDepletedQuotaEventsOnAppend_KeepsPartiallyUsedEventsActive() {
+	user := s.mustCreateUser("quota-partial@test.com", service.RoleUser)
+	totalLimit := 1.0
+	group, err := s.client.Group.Create().
+		SetName("g-quota-partial").
+		SetStatus(service.StatusActive).
+		SetSubscriptionType(service.SubscriptionTypeTotalQuota).
+		SetTotalLimitUsd(totalLimit).
+		Save(s.ctx)
+	s.Require().NoError(err, "create total quota group")
+
+	sub := s.mustCreateSubscription(user.ID, group.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetExpiresAt(time.Now().UTC().Add(72 * time.Hour))
+	})
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	oldExpiry := now.Add(48 * time.Hour)
+	newExpiry := now.Add(24 * time.Hour)
+
+	var oldEventID int64
+	err = scanSingleRow(s.ctx, s.client, `
+		INSERT INTO user_subscription_quota_events (
+			user_subscription_id, quota_total_usd, quota_used_usd, starts_at, expires_at, source_kind
+		)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id
+	`, []any{sub.ID, 1.0, 0.5, now.Add(-time.Hour), oldExpiry, service.SubscriptionQuotaSourceRedeemCode}, &oldEventID)
+	s.Require().NoError(err, "insert partially used event")
+
+	var keepEventID int64
+	err = scanSingleRow(s.ctx, s.client, `
+		INSERT INTO user_subscription_quota_events (
+			user_subscription_id, quota_total_usd, quota_used_usd, starts_at, expires_at, source_kind
+		)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id
+	`, []any{sub.ID, 1.0, 0.0, now, newExpiry, service.SubscriptionQuotaSourceAdminAssign}, &keepEventID)
+	s.Require().NoError(err, "insert kept event")
+
+	err = s.repo.RetireDepletedQuotaEventsOnAppend(s.ctx, sub.ID, keepEventID, now)
+	s.Require().NoError(err, "RetireDepletedQuotaEventsOnAppend")
+
+	summary, err := s.repo.GetQuotaSummary(s.ctx, sub.ID, now.Add(time.Second))
+	s.Require().NoError(err, "GetQuotaSummary")
+	s.Require().InDelta(2.0, summary.TotalLimitUSD, 1e-6)
+	s.Require().InDelta(0.5, summary.TotalUsedUSD, 1e-6)
+	s.Require().InDelta(1.5, summary.TotalRemainingUSD, 1e-6)
+
+	var oldExpiresAt time.Time
+	err = scanSingleRow(s.ctx, s.client, `
+		SELECT expires_at
+		FROM user_subscription_quota_events
+		WHERE id = $1
+	`, []any{oldEventID}, &oldExpiresAt)
+	s.Require().NoError(err, "query partially used event")
+	s.Require().WithinDuration(oldExpiry, oldExpiresAt, time.Second, "partially used event should stay active")
+
+	gotSub, err := s.repo.GetByID(s.ctx, sub.ID)
+	s.Require().NoError(err, "GetByID")
+	s.Require().WithinDuration(oldExpiry, gotSub.ExpiresAt, time.Second, "subscription expiry should remain at the latest active event")
+}
+
+func (s *UserSubscriptionRepoSuite) TestDeleteExpiredQuotaEventsBatch() {
+	user := s.mustCreateUser("quota-cleanup@test.com", service.RoleUser)
+	totalLimit := 1.0
+	group, err := s.client.Group.Create().
+		SetName("g-quota-cleanup").
+		SetStatus(service.StatusActive).
+		SetSubscriptionType(service.SubscriptionTypeTotalQuota).
+		SetTotalLimitUsd(totalLimit).
+		Save(s.ctx)
+	s.Require().NoError(err, "create total quota group")
+
+	sub := s.mustCreateSubscription(user.ID, group.ID, nil)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	for _, expiresAt := range []time.Time{
+		now.Add(-3 * time.Hour),
+		now.Add(-2 * time.Hour),
+		now.Add(-1 * time.Hour),
+		now.Add(1 * time.Hour),
+	} {
+		_, err := s.client.UserSubscriptionQuotaEvent.Create().
+			SetUserSubscriptionID(sub.ID).
+			SetQuotaTotalUsd(1).
+			SetQuotaUsedUsd(0).
+			SetStartsAt(now.Add(-4 * time.Hour)).
+			SetExpiresAt(expiresAt).
+			SetSourceKind(service.SubscriptionQuotaSourceAdminAssign).
+			Save(s.ctx)
+		s.Require().NoError(err, "create quota event")
+	}
+
+	deleted, err := s.repo.DeleteExpiredQuotaEventsBatch(s.ctx, now, 2)
+	s.Require().NoError(err, "DeleteExpiredQuotaEventsBatch first run")
+	s.Require().Equal(int64(2), deleted)
+
+	deleted, err = s.repo.DeleteExpiredQuotaEventsBatch(s.ctx, now, 2)
+	s.Require().NoError(err, "DeleteExpiredQuotaEventsBatch second run")
+	s.Require().Equal(int64(1), deleted)
+
+	deleted, err = s.repo.DeleteExpiredQuotaEventsBatch(s.ctx, now, 2)
+	s.Require().NoError(err, "DeleteExpiredQuotaEventsBatch third run")
+	s.Require().Equal(int64(0), deleted)
+
+	var remaining int
+	err = scanSingleRow(s.ctx, s.client, `
+		SELECT COUNT(*)
+		FROM user_subscription_quota_events
+		WHERE user_subscription_id = $1
+	`, []any{sub.ID}, &remaining)
+	s.Require().NoError(err, "count remaining quota events")
+	s.Require().Equal(1, remaining, "only the future event should remain")
+}
+
 // --- ExistsByUserIDAndGroupID ---
 
 func (s *UserSubscriptionRepoSuite) TestExistsByUserIDAndGroupID() {

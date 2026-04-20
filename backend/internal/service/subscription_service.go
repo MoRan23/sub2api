@@ -30,22 +30,22 @@ const (
 )
 
 var (
-	ErrSubscriptionNotFound       = infraerrors.NotFound("SUBSCRIPTION_NOT_FOUND", "subscription not found")
-	ErrSubscriptionExpired        = infraerrors.Forbidden("SUBSCRIPTION_EXPIRED", "subscription has expired")
-	ErrSubscriptionSuspended      = infraerrors.Forbidden("SUBSCRIPTION_SUSPENDED", "subscription is suspended")
-	ErrSubscriptionAlreadyExists  = infraerrors.Conflict("SUBSCRIPTION_ALREADY_EXISTS", "subscription already exists for this user and group")
-	ErrSubscriptionAssignConflict = infraerrors.Conflict("SUBSCRIPTION_ASSIGN_CONFLICT", "subscription exists but request conflicts with existing assignment semantics")
-	ErrGroupNotSubscriptionType   = infraerrors.BadRequest("GROUP_NOT_SUBSCRIPTION_TYPE", "group is not a subscription type")
-	ErrTotalLimitExceeded         = infraerrors.TooManyRequests("TOTAL_LIMIT_EXCEEDED", "total quota limit exceeded")
-	ErrTotalQuotaLimitRequired    = infraerrors.BadRequest("TOTAL_QUOTA_LIMIT_REQUIRED", "total quota subscription requires total limit")
+	ErrSubscriptionNotFound        = infraerrors.NotFound("SUBSCRIPTION_NOT_FOUND", "subscription not found")
+	ErrSubscriptionExpired         = infraerrors.Forbidden("SUBSCRIPTION_EXPIRED", "subscription has expired")
+	ErrSubscriptionSuspended       = infraerrors.Forbidden("SUBSCRIPTION_SUSPENDED", "subscription is suspended")
+	ErrSubscriptionAlreadyExists   = infraerrors.Conflict("SUBSCRIPTION_ALREADY_EXISTS", "subscription already exists for this user and group")
+	ErrSubscriptionAssignConflict  = infraerrors.Conflict("SUBSCRIPTION_ASSIGN_CONFLICT", "subscription exists but request conflicts with existing assignment semantics")
+	ErrGroupNotSubscriptionType    = infraerrors.BadRequest("GROUP_NOT_SUBSCRIPTION_TYPE", "group is not a subscription type")
+	ErrTotalLimitExceeded          = infraerrors.TooManyRequests("TOTAL_LIMIT_EXCEEDED", "total quota limit exceeded")
+	ErrTotalQuotaLimitRequired     = infraerrors.BadRequest("TOTAL_QUOTA_LIMIT_REQUIRED", "total quota subscription requires total limit")
 	ErrTotalQuotaAdjustUnsupported = infraerrors.BadRequest("TOTAL_QUOTA_ADJUST_UNSUPPORTED", "total quota subscriptions do not support manual adjustment")
 	ErrTotalQuotaResetUnsupported  = infraerrors.BadRequest("TOTAL_QUOTA_RESET_UNSUPPORTED", "total quota subscriptions do not support quota reset")
-	ErrInvalidInput               = infraerrors.BadRequest("INVALID_INPUT", "at least one of resetDaily, resetWeekly, or resetMonthly must be true")
-	ErrDailyLimitExceeded         = infraerrors.TooManyRequests("DAILY_LIMIT_EXCEEDED", "daily usage limit exceeded")
-	ErrWeeklyLimitExceeded        = infraerrors.TooManyRequests("WEEKLY_LIMIT_EXCEEDED", "weekly usage limit exceeded")
-	ErrMonthlyLimitExceeded       = infraerrors.TooManyRequests("MONTHLY_LIMIT_EXCEEDED", "monthly usage limit exceeded")
-	ErrSubscriptionNilInput       = infraerrors.BadRequest("SUBSCRIPTION_NIL_INPUT", "subscription input cannot be nil")
-	ErrAdjustWouldExpire          = infraerrors.BadRequest("ADJUST_WOULD_EXPIRE", "adjustment would result in expired subscription (remaining days must be > 0)")
+	ErrInvalidInput                = infraerrors.BadRequest("INVALID_INPUT", "at least one of resetDaily, resetWeekly, or resetMonthly must be true")
+	ErrDailyLimitExceeded          = infraerrors.TooManyRequests("DAILY_LIMIT_EXCEEDED", "daily usage limit exceeded")
+	ErrWeeklyLimitExceeded         = infraerrors.TooManyRequests("WEEKLY_LIMIT_EXCEEDED", "weekly usage limit exceeded")
+	ErrMonthlyLimitExceeded        = infraerrors.TooManyRequests("MONTHLY_LIMIT_EXCEEDED", "monthly usage limit exceeded")
+	ErrSubscriptionNilInput        = infraerrors.BadRequest("SUBSCRIPTION_NIL_INPUT", "subscription input cannot be nil")
+	ErrAdjustWouldExpire           = infraerrors.BadRequest("ADJUST_WOULD_EXPIRE", "adjustment would result in expired subscription (remaining days must be > 0)")
 )
 
 // SubscriptionService 订阅服务
@@ -614,8 +614,14 @@ func (s *SubscriptionService) assignOrAppendTotalQuotaSubscription(ctx context.C
 		subscriptionID = sub.ID
 	}
 
-	if _, err := s.createQuotaEvent(txCtx, subscriptionID, group, input, now, eventExpiresAt); err != nil {
+	createdEvent, err := s.createQuotaEvent(txCtx, subscriptionID, group, input, now, eventExpiresAt)
+	if err != nil {
 		return nil, false, fmt.Errorf("create quota event: %w", err)
+	}
+	if reused {
+		if err := s.userSubRepo.RetireDepletedQuotaEventsOnAppend(txCtx, subscriptionID, createdEvent.ID, now); err != nil {
+			return nil, false, fmt.Errorf("retire depleted quota events: %w", err)
+		}
 	}
 
 	if tx != nil {
@@ -1115,13 +1121,13 @@ type UsageWindowProgress struct {
 }
 
 type TotalQuotaProgress struct {
-	LimitUSD                 float64    `json:"limit_usd"`
-	UsedUSD                  float64    `json:"used_usd"`
-	RemainingUSD             float64    `json:"remaining_usd"`
-	Percentage               float64    `json:"percentage"`
-	NextQuotaExpireAt        *time.Time `json:"next_quota_expire_at,omitempty"`
-	NextQuotaExpiresInSeconds int64     `json:"next_quota_expires_in_seconds"`
-	NextExpiringQuotaUSD     float64    `json:"next_expiring_quota_usd"`
+	LimitUSD                  float64    `json:"limit_usd"`
+	UsedUSD                   float64    `json:"used_usd"`
+	RemainingUSD              float64    `json:"remaining_usd"`
+	Percentage                float64    `json:"percentage"`
+	NextQuotaExpireAt         *time.Time `json:"next_quota_expire_at,omitempty"`
+	NextQuotaExpiresInSeconds int64      `json:"next_quota_expires_in_seconds"`
+	NextExpiringQuotaUSD      float64    `json:"next_expiring_quota_usd"`
 }
 
 // GetSubscriptionProgress 获取订阅使用进度
@@ -1236,13 +1242,13 @@ func (s *SubscriptionService) calculateProgress(sub *UserSubscription, group *Gr
 			}
 		}
 		progress.Total = &TotalQuotaProgress{
-			LimitUSD:                 limit,
-			UsedUSD:                  sub.TotalUsedUSD,
-			RemainingUSD:             sub.TotalRemainingUSD,
-			Percentage:               percentage,
-			NextQuotaExpireAt:        sub.NextQuotaExpireAt,
+			LimitUSD:                  limit,
+			UsedUSD:                   sub.TotalUsedUSD,
+			RemainingUSD:              sub.TotalRemainingUSD,
+			Percentage:                percentage,
+			NextQuotaExpireAt:         sub.NextQuotaExpireAt,
 			NextQuotaExpiresInSeconds: 0,
-			NextExpiringQuotaUSD:     sub.NextExpiringQuotaUSD,
+			NextExpiringQuotaUSD:      sub.NextExpiringQuotaUSD,
 		}
 		if sub.NextQuotaExpireAt != nil {
 			progress.Total.NextQuotaExpiresInSeconds = int64(time.Until(*sub.NextQuotaExpireAt).Seconds())

@@ -186,6 +186,9 @@ func (f fakeGoogleSubscriptionRepo) IncrementUsage(ctx context.Context, id int64
 func (f fakeGoogleSubscriptionRepo) CreateQuotaEvent(ctx context.Context, event *service.UserSubscriptionQuotaEvent) error {
 	return errors.New("not implemented")
 }
+func (f fakeGoogleSubscriptionRepo) RetireDepletedQuotaEventsOnAppend(ctx context.Context, subscriptionID, keepEventID int64, retireAt time.Time) error {
+	return errors.New("not implemented")
+}
 func (f fakeGoogleSubscriptionRepo) GetQuotaSummary(ctx context.Context, subscriptionID int64, now time.Time) (*service.UserSubscriptionQuotaSummary, error) {
 	return nil, errors.New("not implemented")
 }
@@ -193,6 +196,9 @@ func (f fakeGoogleSubscriptionRepo) GetQuotaSummaryBatch(ctx context.Context, su
 	return nil, errors.New("not implemented")
 }
 func (f fakeGoogleSubscriptionRepo) BatchUpdateExpiredStatus(ctx context.Context) (int64, error) {
+	return 0, errors.New("not implemented")
+}
+func (f fakeGoogleSubscriptionRepo) DeleteExpiredQuotaEventsBatch(ctx context.Context, now time.Time, limit int) (int64, error) {
 	return 0, errors.New("not implemented")
 }
 

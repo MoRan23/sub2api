@@ -1405,6 +1405,9 @@ func (stubUserSubscriptionRepo) IncrementUsage(ctx context.Context, id int64, co
 func (stubUserSubscriptionRepo) CreateQuotaEvent(ctx context.Context, event *service.UserSubscriptionQuotaEvent) error {
 	return errors.New("not implemented")
 }
+func (stubUserSubscriptionRepo) RetireDepletedQuotaEventsOnAppend(ctx context.Context, subscriptionID, keepEventID int64, retireAt time.Time) error {
+	return errors.New("not implemented")
+}
 func (stubUserSubscriptionRepo) GetQuotaSummary(ctx context.Context, subscriptionID int64, now time.Time) (*service.UserSubscriptionQuotaSummary, error) {
 	return nil, errors.New("not implemented")
 }
@@ -1412,6 +1415,9 @@ func (stubUserSubscriptionRepo) GetQuotaSummaryBatch(ctx context.Context, subscr
 	return nil, errors.New("not implemented")
 }
 func (stubUserSubscriptionRepo) BatchUpdateExpiredStatus(ctx context.Context) (int64, error) {
+	return 0, errors.New("not implemented")
+}
+func (stubUserSubscriptionRepo) DeleteExpiredQuotaEventsBatch(ctx context.Context, now time.Time, limit int) (int64, error) {
 	return 0, errors.New("not implemented")
 }
 
