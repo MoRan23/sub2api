@@ -188,6 +188,20 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 					AbortWithError(c, status, code, validateErr.Error())
 					return
 				}
+				if apiKey.Group != nil && apiKey.Group.IsTotalQuotaSubscriptionType() {
+					if snapshot, err := subscriptionService.BuildTotalQuotaSpendSnapshot(c.Request.Context(), subscription); err != nil {
+						code := "SUBSCRIPTION_INVALID"
+						status := 403
+						if errors.Is(err, service.ErrTotalLimitExceeded) {
+							code = "USAGE_LIMIT_EXCEEDED"
+							status = 429
+						}
+						AbortWithError(c, status, code, err.Error())
+						return
+					} else if snapshot != nil {
+						c.Request = c.Request.WithContext(service.WithTotalQuotaSpendSnapshot(c.Request.Context(), snapshot))
+					}
+				}
 
 				// 窗口维护异步化（不阻塞请求）
 				if needsMaintenance {

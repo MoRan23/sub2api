@@ -204,7 +204,7 @@ func TestUsageBillingRepositoryApply_TotalQuotaSubscriptionFIFO(t *testing.T) {
 	require.Equal(t, []float64{100, 30}, used)
 }
 
-func TestUsageBillingRepositoryApply_TotalQuotaSubscriptionRollbackOnOverflow(t *testing.T) {
+func TestUsageBillingRepositoryApply_TotalQuotaSubscriptionAllowsOverflow(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
 	repo := NewUsageBillingRepository(client, integrationDB)
@@ -250,7 +250,7 @@ func TestUsageBillingRepositoryApply_TotalQuotaSubscriptionRollbackOnOverflow(t 
 		SubscriptionID:   &subscription.ID,
 		SubscriptionCost: 60,
 	})
-	require.ErrorIs(t, err, service.ErrTotalLimitExceeded)
+	require.NoError(t, err)
 
 	var quotaUsed float64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `
@@ -258,7 +258,92 @@ func TestUsageBillingRepositoryApply_TotalQuotaSubscriptionRollbackOnOverflow(t 
 		FROM user_subscription_quota_events
 		WHERE id = $1
 	`, event.ID).Scan(&quotaUsed))
-	require.InDelta(t, 0, quotaUsed, 0.000001)
+	require.InDelta(t, 60, quotaUsed, 0.000001)
+}
+
+func TestUsageBillingRepositoryApply_TotalQuotaSubscriptionUsesAdmissionSnapshotAfterExpiry(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := NewUsageBillingRepository(client, integrationDB)
+
+	totalLimit := 100.0
+	user := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("usage-billing-total-snapshot-user-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+	})
+	group := mustCreateGroup(t, client, &service.Group{
+		Name:             "usage-billing-total-snapshot-group-" + uuid.NewString(),
+		Platform:         service.PlatformAnthropic,
+		SubscriptionType: service.SubscriptionTypeTotalQuota,
+		TotalLimitUSD:    &totalLimit,
+	})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{
+		UserID:  user.ID,
+		GroupID: &group.ID,
+		Key:     "sk-usage-billing-total-snapshot-" + uuid.NewString(),
+		Name:    "billing-total-snapshot",
+	})
+	subscription := mustCreateSubscription(t, client, &service.UserSubscription{
+		UserID:  user.ID,
+		GroupID: group.ID,
+	})
+
+	now := time.Now().UTC()
+	event1, err := client.UserSubscriptionQuotaEvent.Create().
+		SetUserSubscriptionID(subscription.ID).
+		SetQuotaTotalUsd(100).
+		SetQuotaUsedUsd(0).
+		SetStartsAt(now.Add(-2 * time.Hour)).
+		SetExpiresAt(now.Add(-time.Minute)).
+		SetSourceKind(service.SubscriptionQuotaSourceAdminAssign).
+		Save(ctx)
+	require.NoError(t, err)
+	event2, err := client.UserSubscriptionQuotaEvent.Create().
+		SetUserSubscriptionID(subscription.ID).
+		SetQuotaTotalUsd(100).
+		SetQuotaUsedUsd(0).
+		SetStartsAt(now.Add(-time.Hour)).
+		SetExpiresAt(now.Add(time.Hour)).
+		SetSourceKind(service.SubscriptionQuotaSourceAdminAssign).
+		Save(ctx)
+	require.NoError(t, err)
+
+	snapshotCtx := service.WithTotalQuotaSpendSnapshot(ctx, &service.TotalQuotaSpendSnapshot{
+		SubscriptionID:  subscription.ID,
+		EventIDs:        []int64{event1.ID, event2.ID},
+		OverflowEventID: event2.ID,
+		TakenAt:         now.Add(-2 * time.Minute),
+	})
+
+	_, err = repo.Apply(snapshotCtx, &service.UsageBillingCommand{
+		RequestID:        uuid.NewString(),
+		APIKeyID:         apiKey.ID,
+		UserID:           user.ID,
+		AccountID:        0,
+		SubscriptionID:   &subscription.ID,
+		SubscriptionCost: 120,
+	})
+	require.NoError(t, err)
+
+	rows, err := integrationDB.QueryContext(ctx, `
+		SELECT id, quota_used_usd
+		FROM user_subscription_quota_events
+		WHERE user_subscription_id = $1
+		ORDER BY id ASC
+	`, subscription.ID)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+
+	usedByID := make(map[int64]float64)
+	for rows.Next() {
+		var id int64
+		var quotaUsed float64
+		require.NoError(t, rows.Scan(&id, &quotaUsed))
+		usedByID[id] = quotaUsed
+	}
+	require.NoError(t, rows.Err())
+	require.InDelta(t, 100, usedByID[event1.ID], 0.000001)
+	require.InDelta(t, 20, usedByID[event2.ID], 0.000001)
 }
 
 func TestUsageBillingRepositoryApply_RequestFingerprintConflict(t *testing.T) {

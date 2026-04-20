@@ -18,6 +18,7 @@ type RequestMetadata struct {
 	PrefetchedStickyGroupID    *int64
 	SingleAccountRetry         *bool
 	AccountSwitchCount         *int
+	TotalQuotaSpendSnapshot    *TotalQuotaSpendSnapshot
 }
 
 var (
@@ -114,6 +115,12 @@ func WithAccountSwitchCount(ctx context.Context, value int, bridgeOldKeys bool) 
 	}, func(base context.Context) context.Context {
 		return context.WithValue(base, ctxkey.AccountSwitchCount, value)
 	})
+}
+
+func WithTotalQuotaSpendSnapshot(ctx context.Context, snapshot *TotalQuotaSpendSnapshot) context.Context {
+	return updateRequestMetadata(ctx, false, func(md *RequestMetadata) {
+		md.TotalQuotaSpendSnapshot = snapshot
+	}, nil)
 }
 
 func IsMaxTokensOneHaikuRequestFromContext(ctx context.Context) (bool, bool) {
@@ -213,4 +220,11 @@ func AccountSwitchCountFromContext(ctx context.Context) (int, bool) {
 		return int(t), true
 	}
 	return 0, false
+}
+
+func TotalQuotaSpendSnapshotFromContext(ctx context.Context) (*TotalQuotaSpendSnapshot, bool) {
+	if md := metadataFromContext(ctx); md != nil && md.TotalQuotaSpendSnapshot != nil {
+		return md.TotalQuotaSpendSnapshot, true
+	}
+	return nil, false
 }

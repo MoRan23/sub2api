@@ -64,6 +64,10 @@ type SubscriptionService struct {
 	maintenanceQueue *SubscriptionMaintenanceQueue
 }
 
+type totalQuotaSpendSnapshotProvider interface {
+	GetQuotaSpendSnapshot(ctx context.Context, subscriptionID int64, now time.Time) (*TotalQuotaSpendSnapshot, error)
+}
+
 // NewSubscriptionService 创建订阅服务
 func NewSubscriptionService(groupRepo GroupRepository, userSubRepo UserSubscriptionRepository, billingCacheService *BillingCacheService, entClient *dbent.Client, cfg *config.Config) *SubscriptionService {
 	svc := &SubscriptionService{
@@ -1286,4 +1290,22 @@ func (s *SubscriptionService) ValidateSubscription(ctx context.Context, sub *Use
 		return ErrSubscriptionExpired
 	}
 	return nil
+}
+
+func (s *SubscriptionService) BuildTotalQuotaSpendSnapshot(ctx context.Context, sub *UserSubscription) (*TotalQuotaSpendSnapshot, error) {
+	if s == nil || sub == nil || sub.Group == nil || !sub.Group.IsTotalQuotaSubscriptionType() {
+		return nil, nil
+	}
+	provider, ok := s.userSubRepo.(totalQuotaSpendSnapshotProvider)
+	if !ok {
+		return nil, nil
+	}
+	snapshot, err := provider.GetQuotaSpendSnapshot(ctx, sub.ID, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	if snapshot == nil || len(snapshot.EventIDs) == 0 || snapshot.OverflowEventID == 0 {
+		return nil, ErrTotalLimitExceeded
+	}
+	return snapshot, nil
 }

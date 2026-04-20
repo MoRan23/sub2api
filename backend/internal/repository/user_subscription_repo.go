@@ -538,6 +538,43 @@ func (r *userSubscriptionRepository) GetQuotaSummaryBatch(ctx context.Context, s
 	return result, nil
 }
 
+func (r *userSubscriptionRepository) GetQuotaSpendSnapshot(ctx context.Context, subscriptionID int64, now time.Time) (*service.TotalQuotaSpendSnapshot, error) {
+	exec := clientFromContext(ctx, r.client)
+	rows, err := exec.QueryContext(ctx, `
+		SELECT id
+		FROM user_subscription_quota_events
+		WHERE user_subscription_id = $1
+		  AND expires_at > $2
+		ORDER BY expires_at ASC, id ASC
+	`, subscriptionID, now.UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	eventIDs := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		eventIDs = append(eventIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(eventIDs) == 0 {
+		return nil, nil
+	}
+
+	return &service.TotalQuotaSpendSnapshot{
+		SubscriptionID:  subscriptionID,
+		EventIDs:        eventIDs,
+		OverflowEventID: eventIDs[len(eventIDs)-1],
+		TakenAt:         now.UTC(),
+	}, nil
+}
+
 func (r *userSubscriptionRepository) BatchUpdateExpiredStatus(ctx context.Context) (int64, error) {
 	client := clientFromContext(ctx, r.client)
 	n, err := client.UserSubscription.Update().

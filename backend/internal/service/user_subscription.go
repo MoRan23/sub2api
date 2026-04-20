@@ -58,6 +58,13 @@ type UserSubscriptionQuotaSummary struct {
 	NextExpiringQuotaUSD float64
 }
 
+type TotalQuotaSpendSnapshot struct {
+	SubscriptionID  int64
+	EventIDs        []int64
+	OverflowEventID int64
+	TakenAt         time.Time
+}
+
 func (s *UserSubscription) IsActive() bool {
 	return s.Status == SubscriptionStatusActive && time.Now().Before(s.ExpiresAt)
 }
