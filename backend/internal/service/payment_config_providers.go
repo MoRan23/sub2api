@@ -12,8 +12,21 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
+	"github.com/Wei-Shaw/sub2api/internal/payment/provider"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
+
+// validateProviderConfig runs the provider's constructor to surface config-level
+// errors at save time (e.g. wxpay missing certSerial), instead of only failing
+// when an order is created. Returns the structured ApplicationError from the
+// constructor so the frontend i18n layer can localize it.
+//
+// Only validates enabled instances — a disabled instance may be a half-filled
+// draft the admin will complete later.
+func (s *PaymentConfigService) validateProviderConfig(providerKey string, config map[string]string) error {
+	_, err := provider.CreateProvider(providerKey, "_validate_", config)
+	return err
+}
 
 // --- Provider Instance CRUD ---
 
@@ -48,9 +61,8 @@ func (s *PaymentConfigService) ListProviderInstancesWithConfig(ctx context.Conte
 		resp := ProviderInstanceResponse{
 			ID: int64(inst.ID), ProviderKey: inst.ProviderKey, Name: inst.Name,
 			SupportedTypes: splitTypes(inst.SupportedTypes), Limits: inst.Limits,
-			Enabled: inst.Enabled, RefundEnabled: inst.RefundEnabled,
-			AllowUserRefund: inst.AllowUserRefund,
-			SortOrder:       inst.SortOrder, PaymentMode: inst.PaymentMode,
+			Enabled: inst.Enabled, RefundEnabled: inst.RefundEnabled, AllowUserRefund: inst.AllowUserRefund,
+			SortOrder: inst.SortOrder, PaymentMode: inst.PaymentMode,
 		}
 		resp.Config, err = s.decryptAndMaskConfig(inst.ProviderKey, inst.Config)
 		if err != nil {
@@ -138,6 +150,14 @@ func (s *PaymentConfigService) CreateProviderInstance(ctx context.Context, req C
 	if err := validateProviderRequest(req.ProviderKey, req.Name, typesStr); err != nil {
 		return nil, err
 	}
+	if err := s.validateVisibleMethodEnablementConflicts(ctx, 0, req.ProviderKey, typesStr, req.Enabled); err != nil {
+		return nil, err
+	}
+	if req.Enabled {
+		if err := s.validateProviderConfig(req.ProviderKey, req.Config); err != nil {
+			return nil, err
+		}
+	}
 	enc, err := s.encryptConfig(req.Config)
 	if err != nil {
 		return nil, err
@@ -166,26 +186,25 @@ func validateProviderRequest(providerKey, name, supportedTypes string) error {
 // NOTE: This function exceeds 30 lines due to per-field nil-check patch update
 // boilerplate and pending-order safety checks.
 func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id int64, req UpdateProviderInstanceRequest) (*dbent.PaymentProviderInstance, error) {
-	var cachedInst *dbent.PaymentProviderInstance
-	loadInst := func() (*dbent.PaymentProviderInstance, error) {
-		if cachedInst != nil {
-			return cachedInst, nil
-		}
-		inst, err := s.entClient.PaymentProviderInstance.Get(ctx, id)
-		if err != nil {
-			return nil, fmt.Errorf("load provider instance: %w", err)
-		}
-		cachedInst = inst
-		return inst, nil
+	current, err := s.entClient.PaymentProviderInstance.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("load provider instance: %w", err)
+	}
+	nextEnabled := current.Enabled
+	if req.Enabled != nil {
+		nextEnabled = *req.Enabled
+	}
+	nextSupportedTypes := current.SupportedTypes
+	if req.SupportedTypes != nil {
+		nextSupportedTypes = joinTypes(req.SupportedTypes)
+	}
+	if err := s.validateVisibleMethodEnablementConflicts(ctx, id, current.ProviderKey, nextSupportedTypes, nextEnabled); err != nil {
+		return nil, err
 	}
 	if req.Config != nil {
-		inst, err := loadInst()
-		if err != nil {
-			return nil, err
-		}
 		hasSensitive := false
 		for k, v := range req.Config {
-			if v != "" && isSensitiveProviderConfigField(inst.ProviderKey, k) {
+			if v != "" && isSensitiveProviderConfigField(current.ProviderKey, k) {
 				hasSensitive = true
 				break
 			}
@@ -211,16 +230,38 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 				WithMetadata(map[string]string{"count": strconv.Itoa(count)})
 		}
 	}
+	// Validate merged config when the instance will end up enabled.
+	// This surfaces provider-level errors (e.g. wxpay missing certSerial) at save time,
+	// so admins see them in the dialog instead of only when an order is created.
+	finalEnabled := current.Enabled
+	if req.Enabled != nil {
+		finalEnabled = *req.Enabled
+	}
+	var mergedConfig map[string]string
+	if req.Config != nil {
+		mergedConfig, err = s.mergeConfig(ctx, id, req.Config)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if finalEnabled {
+		configToValidate := mergedConfig
+		if configToValidate == nil {
+			configToValidate, err = s.decryptConfig(current.Config)
+			if err != nil {
+				return nil, fmt.Errorf("decrypt existing config: %w", err)
+			}
+		}
+		if err := s.validateProviderConfig(current.ProviderKey, configToValidate); err != nil {
+			return nil, err
+		}
+	}
 	u := s.entClient.PaymentProviderInstance.UpdateOneID(id)
 	if req.Name != nil {
 		u.SetName(*req.Name)
 	}
-	if req.Config != nil {
-		merged, err := s.mergeConfig(ctx, id, req.Config)
-		if err != nil {
-			return nil, err
-		}
-		enc, err := s.encryptConfig(merged)
+	if mergedConfig != nil {
+		enc, err := s.encryptConfig(mergedConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -234,11 +275,7 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 		}
 		if count > 0 {
 			// Load current instance to compare types
-			inst, err := s.entClient.PaymentProviderInstance.Get(ctx, id)
-			if err != nil {
-				return nil, fmt.Errorf("load provider instance: %w", err)
-			}
-			oldTypes := strings.Split(inst.SupportedTypes, ",")
+			oldTypes := strings.Split(current.SupportedTypes, ",")
 			newTypes := req.SupportedTypes
 			for _, ot := range oldTypes {
 				ot = strings.TrimSpace(ot)
@@ -283,10 +320,7 @@ func (s *PaymentConfigService) UpdateProviderInstance(ctx context.Context, id in
 			if req.RefundEnabled != nil {
 				refundEnabled = *req.RefundEnabled
 			} else {
-				inst, err := s.entClient.PaymentProviderInstance.Get(ctx, id)
-				if err == nil {
-					refundEnabled = inst.RefundEnabled
-				}
+				refundEnabled = current.RefundEnabled
 			}
 			if refundEnabled {
 				u.SetAllowUserRefund(true)
