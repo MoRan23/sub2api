@@ -1750,14 +1750,14 @@ func newOpenAIImageStatusError(resp *req.Response, fallback string) error {
 	body := []byte(nil)
 
 	if resp.Response != nil {
-		headers = resp.Response.Header.Clone()
-		requestID = strings.TrimSpace(resp.Response.Header.Get("x-request-id"))
-		if resp.Response.Request != nil && resp.Response.Request.URL != nil {
-			requestURL = resp.Response.Request.URL.String()
+		headers = resp.Header.Clone()
+		requestID = strings.TrimSpace(resp.Header.Get("x-request-id"))
+		if resp.Request != nil && resp.Request.URL != nil {
+			requestURL = resp.Request.URL.String()
 		}
-		if resp.Response.Body != nil {
-			body, _ = io.ReadAll(io.LimitReader(resp.Response.Body, 2<<20))
-			_ = resp.Response.Body.Close()
+		if resp.Body != nil {
+			body, _ = io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+			_ = resp.Body.Close()
 		}
 	}
 
