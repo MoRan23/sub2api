@@ -47,9 +47,9 @@ const (
 
 	openAIImageBackendUserAgent  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 	openAIImageRequirementsDiff  = "0fffff"
-	openAIImageLifecycleTimeout  = 2 * time.Minute
-	openAIImageMaxDownloadBytes  = 20 << 20 // 20MB per image download
-	openAIImageMaxUploadPartSize = 20 << 20 // 20MB per multipart upload part
+	openAIImageLifecycleTimeout  = 3 * time.Minute
+	openAIImageMaxDownloadBytes  = 50 << 20 // 50MB per image download
+	openAIImageMaxUploadPartSize = 50 << 20 // 50MB per multipart upload part
 )
 
 type OpenAIImagesCapability string
