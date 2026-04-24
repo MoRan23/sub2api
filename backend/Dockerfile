@@ -1,6 +1,4 @@
-FROM golang:1.26.2-alpine
-
-ENV GOEXPERIMENT=jsonv2
+FROM golang:1.25.7-alpine
 
 WORKDIR /app
 
