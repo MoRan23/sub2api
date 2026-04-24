@@ -4,7 +4,7 @@ package ent
 
 import (
 	"context"
-	"encoding/json/jsontext"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -33045,8 +33045,8 @@ type UsageCleanupTaskMutation struct {
 	created_at      *time.Time
 	updated_at      *time.Time
 	status          *string
-	filters         *jsontext.Value
-	appendfilters   jsontext.Value
+	filters         *json.RawMessage
+	appendfilters   json.RawMessage
 	created_by      *int64
 	addcreated_by   *int64
 	deleted_rows    *int64
@@ -33270,13 +33270,13 @@ func (m *UsageCleanupTaskMutation) ResetStatus() {
 }
 
 // SetFilters sets the "filters" field.
-func (m *UsageCleanupTaskMutation) SetFilters(j jsontext.Value) {
+func (m *UsageCleanupTaskMutation) SetFilters(j json.RawMessage) {
 	m.filters = &j
 	m.appendfilters = nil
 }
 
 // Filters returns the value of the "filters" field in the mutation.
-func (m *UsageCleanupTaskMutation) Filters() (r jsontext.Value, exists bool) {
+func (m *UsageCleanupTaskMutation) Filters() (r json.RawMessage, exists bool) {
 	v := m.filters
 	if v == nil {
 		return
@@ -33287,7 +33287,7 @@ func (m *UsageCleanupTaskMutation) Filters() (r jsontext.Value, exists bool) {
 // OldFilters returns the old "filters" field's value of the UsageCleanupTask entity.
 // If the UsageCleanupTask object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *UsageCleanupTaskMutation) OldFilters(ctx context.Context) (v jsontext.Value, err error) {
+func (m *UsageCleanupTaskMutation) OldFilters(ctx context.Context) (v json.RawMessage, err error) {
 	if !m.op.Is(OpUpdateOne) {
 		return v, errors.New("OldFilters is only allowed on UpdateOne operations")
 	}
@@ -33302,12 +33302,12 @@ func (m *UsageCleanupTaskMutation) OldFilters(ctx context.Context) (v jsontext.V
 }
 
 // AppendFilters adds j to the "filters" field.
-func (m *UsageCleanupTaskMutation) AppendFilters(j jsontext.Value) {
+func (m *UsageCleanupTaskMutation) AppendFilters(j json.RawMessage) {
 	m.appendfilters = append(m.appendfilters, j...)
 }
 
 // AppendedFilters returns the list of values that were appended to the "filters" field in this mutation.
-func (m *UsageCleanupTaskMutation) AppendedFilters() (jsontext.Value, bool) {
+func (m *UsageCleanupTaskMutation) AppendedFilters() (json.RawMessage, bool) {
 	if len(m.appendfilters) == 0 {
 		return nil, false
 	}
@@ -33858,7 +33858,7 @@ func (m *UsageCleanupTaskMutation) SetField(name string, value ent.Value) error 
 		m.SetStatus(v)
 		return nil
 	case usagecleanuptask.FieldFilters:
-		v, ok := value.(jsontext.Value)
+		v, ok := value.(json.RawMessage)
 		if !ok {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
