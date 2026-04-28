@@ -1661,6 +1661,66 @@ func (s *SettingService) GetDefaultSubscriptions(ctx context.Context) []DefaultS
 	return parseDefaultSubscriptions(value)
 }
 
+func (s *SettingService) GetProfitabilityConfig(ctx context.Context) ProfitabilityConfig {
+	result := ProfitabilityConfig{
+		FXRateUSDCNY:  defaultProfitabilityFXRateUSDCNY,
+		TargetMargin:  defaultProfitabilityTargetMargin,
+		SmoothingAlpha: defaultProfitabilitySmoothingAlpha,
+	}
+
+	values, err := s.settingRepo.GetMultiple(ctx, []string{
+		SettingKeyProfitabilityFXRateUSDCNY,
+		SettingKeyProfitabilityTargetMargin,
+		SettingKeyProfitabilitySmoothingAlpha,
+	})
+	if err != nil {
+		return result
+	}
+
+	if raw := strings.TrimSpace(values[SettingKeyProfitabilityFXRateUSDCNY]); raw != "" {
+		if v, parseErr := strconv.ParseFloat(raw, 64); parseErr == nil && v > 0 {
+			result.FXRateUSDCNY = v
+		}
+	}
+	if raw := strings.TrimSpace(values[SettingKeyProfitabilityTargetMargin]); raw != "" {
+		if v, parseErr := strconv.ParseFloat(raw, 64); parseErr == nil && v >= 0 && v < 1 {
+			result.TargetMargin = v
+		}
+	}
+	if raw := strings.TrimSpace(values[SettingKeyProfitabilitySmoothingAlpha]); raw != "" {
+		if v, parseErr := strconv.ParseFloat(raw, 64); parseErr == nil && v > 0 && v <= 1 {
+			result.SmoothingAlpha = v
+		}
+	}
+
+	return result
+}
+
+func (s *SettingService) UpdateProfitabilityConfig(ctx context.Context, cfg ProfitabilityConfig) error {
+	if cfg.FXRateUSDCNY <= 0 || math.IsNaN(cfg.FXRateUSDCNY) || math.IsInf(cfg.FXRateUSDCNY, 0) {
+		return infraerrors.BadRequest("PROFITABILITY_FX_RATE_INVALID", "profitability fx rate must be > 0")
+	}
+	if cfg.TargetMargin < 0 || cfg.TargetMargin >= 1 || math.IsNaN(cfg.TargetMargin) || math.IsInf(cfg.TargetMargin, 0) {
+		return infraerrors.BadRequest("PROFITABILITY_TARGET_MARGIN_INVALID", "profitability target margin must be in [0,1)")
+	}
+	if cfg.SmoothingAlpha <= 0 || cfg.SmoothingAlpha > 1 || math.IsNaN(cfg.SmoothingAlpha) || math.IsInf(cfg.SmoothingAlpha, 0) {
+		return infraerrors.BadRequest("PROFITABILITY_SMOOTHING_ALPHA_INVALID", "profitability smoothing alpha must be in (0,1]")
+	}
+
+	updates := map[string]string{
+		SettingKeyProfitabilityFXRateUSDCNY:   strconv.FormatFloat(cfg.FXRateUSDCNY, 'f', 6, 64),
+		SettingKeyProfitabilityTargetMargin:   strconv.FormatFloat(cfg.TargetMargin, 'f', 6, 64),
+		SettingKeyProfitabilitySmoothingAlpha: strconv.FormatFloat(cfg.SmoothingAlpha, 'f', 6, 64),
+	}
+	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
+		return fmt.Errorf("update profitability config: %w", err)
+	}
+	if s.onUpdate != nil {
+		s.onUpdate()
+	}
+	return nil
+}
+
 func (s *SettingService) GetAuthSourceDefaultSettings(ctx context.Context) (*AuthSourceDefaultSettings, error) {
 	keys := []string{
 		SettingKeyAuthSourceDefaultEmailBalance,

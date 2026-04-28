@@ -209,6 +209,16 @@ func registerDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		dashboard.POST("/users-usage", h.Admin.Dashboard.GetBatchUsersUsage)
 		dashboard.POST("/api-keys-usage", h.Admin.Dashboard.GetBatchAPIKeysUsage)
 		dashboard.GET("/user-breakdown", h.Admin.Dashboard.GetUserBreakdown)
+		dashboard.GET("/profitability/snapshot", h.Admin.Dashboard.GetProfitabilitySnapshot)
+		dashboard.GET("/profitability/plans", h.Admin.Dashboard.GetProfitabilityPlans)
+		dashboard.GET("/profitability/groups", h.Admin.Dashboard.GetProfitabilityGroups)
+		dashboard.GET("/profitability/users", h.Admin.Dashboard.GetProfitabilityUsers)
+		dashboard.GET("/profitability/accounts/risk", h.Admin.Dashboard.GetProfitabilityAccountRisk)
+		dashboard.GET("/profitability/optimization", h.Admin.Dashboard.GetProfitabilityOptimization)
+		dashboard.GET("/profitability/pricing-recommendations", h.Admin.Dashboard.GetProfitabilityPricingRecommendations)
+		dashboard.GET("/profitability/config", h.Admin.Dashboard.GetProfitabilityConfig)
+		dashboard.PUT("/profitability/config", h.Admin.Dashboard.UpdateProfitabilityConfig)
+		dashboard.POST("/profitability/account-values/batch", h.Admin.Dashboard.UpdateProfitabilityAccountValues)
 		dashboard.POST("/aggregation/backfill", h.Admin.Dashboard.BackfillAggregation)
 	}
 }

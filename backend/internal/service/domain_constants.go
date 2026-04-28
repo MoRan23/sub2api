@@ -280,6 +280,20 @@ const (
 	SettingKeyAvailableChannelsEnabled = "available_channels_enabled"
 
 	// =========================
+	// Profitability Dashboard
+	// =========================
+
+	// SettingKeyProfitabilityFXRateUSDCNY stores the global fixed USD/CNY exchange rate
+	// used by the profitability dashboard for RMB/USD dual-caliber presentation.
+	SettingKeyProfitabilityFXRateUSDCNY = "profitability_fx_rate_usd_cny"
+	// SettingKeyProfitabilityTargetMargin stores the target gross margin ratio (0-1)
+	// used by pricing recommendations.
+	SettingKeyProfitabilityTargetMargin = "profitability_target_margin"
+	// SettingKeyProfitabilitySmoothingAlpha stores the exponential smoothing alpha (0-1)
+	// used by burn-rate forecasting.
+	SettingKeyProfitabilitySmoothingAlpha = "profitability_smoothing_alpha"
+
+	// =========================
 	// Overload Cooldown (529)
 	// =========================
 

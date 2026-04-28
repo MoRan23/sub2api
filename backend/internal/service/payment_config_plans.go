@@ -63,6 +63,7 @@ func validatePlanPatch(req UpdatePlanRequest) error {
 type PlanGroupInfo struct {
 	Platform        string   `json:"platform"`
 	Name            string   `json:"name"`
+	SubscriptionType string  `json:"subscription_type"`
 	RateMultiplier  float64  `json:"rate_multiplier"`
 	DailyLimitUSD   *float64 `json:"daily_limit_usd"`
 	WeeklyLimitUSD  *float64 `json:"weekly_limit_usd"`
@@ -102,6 +103,7 @@ func (s *PaymentConfigService) GetGroupInfoMap(ctx context.Context, plans []*dbe
 		m[int64(g.ID)] = PlanGroupInfo{
 			Platform:        g.Platform,
 			Name:            g.Name,
+			SubscriptionType: g.SubscriptionType,
 			RateMultiplier:  g.RateMultiplier,
 			DailyLimitUSD:   g.DailyLimitUsd,
 			WeeklyLimitUSD:  g.WeeklyLimitUsd,

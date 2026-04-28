@@ -434,6 +434,24 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/profitability',
+    name: 'AdminProfitability',
+    component: () => import('@/views/admin/ProfitabilityView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Profitability',
+      titleKey: 'nav.profitability'
+    }
+  },
+  {
+    path: '/admin/profit-analysis',
+    redirect: (to) => ({
+      path: '/admin/profitability',
+      query: to.query
+    })
+  },
+  {
     path: '/admin/accounts',
     name: 'AdminAccounts',
     component: () => import('@/views/admin/AccountsView.vue'),

@@ -307,6 +307,13 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <button
+                @click="handleProfitability(row)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400"
+              >
+                <Icon name="chart" size="sm" />
+                <span class="text-xs">利润</span>
+              </button>
+              <button
                 @click="handleEdit(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
@@ -2785,6 +2792,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
+import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { useAppStore } from "@/stores/app";
 import { useOnboardingStore } from "@/stores/onboarding";
@@ -2817,8 +2825,18 @@ import {
 } from "./groupsMessagesDispatch";
 
 const { t } = useI18n();
+const router = useRouter();
 const appStore = useAppStore();
 const onboardingStore = useOnboardingStore();
+
+function handleProfitability(group: AdminGroup) {
+  void router.push({
+    path: "/admin/profitability",
+    query: {
+      group_id: String(group.id),
+    },
+  });
+}
 
 const columns = computed<Column[]>(() => [
   { key: "name", label: t("admin.groups.columns.name"), sortable: true },

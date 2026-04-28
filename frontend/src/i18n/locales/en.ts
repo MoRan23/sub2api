@@ -354,6 +354,7 @@ export default {
     channels: 'Channels',
     availableChannels: 'Available Channels',
     subscriptions: 'Subscriptions',
+    profitability: 'Profitability',
     accounts: 'Accounts',
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',

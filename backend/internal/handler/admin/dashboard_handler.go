@@ -18,6 +18,7 @@ import (
 // DashboardHandler handles admin dashboard statistics
 type DashboardHandler struct {
 	dashboardService   *service.DashboardService
+	profitabilityService *service.ProfitabilityService
 	aggregationService *service.DashboardAggregationService
 	startTime          time.Time // Server start time for uptime calculation
 }
@@ -29,6 +30,13 @@ func NewDashboardHandler(dashboardService *service.DashboardService, aggregation
 		aggregationService: aggregationService,
 		startTime:          time.Now(),
 	}
+}
+
+func (h *DashboardHandler) SetProfitabilityService(profitabilityService *service.ProfitabilityService) {
+	if h == nil {
+		return
+	}
+	h.profitabilityService = profitabilityService
 }
 
 // parseTimeRange parses start_date, end_date query parameters

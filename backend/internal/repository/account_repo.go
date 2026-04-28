@@ -57,6 +57,7 @@ var schedulerNeutralExtraKeyPrefixes = []string{
 	"codex_5h_",
 	"codex_7d_",
 	"passive_usage_",
+	"profit_",
 }
 
 var schedulerNeutralExtraKeys = map[string]struct{}{

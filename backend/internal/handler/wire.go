@@ -77,6 +77,17 @@ func ProvideSystemHandler(updateService *service.UpdateService, lockService *ser
 	return admin.NewSystemHandler(updateService, lockService)
 }
 
+// ProvideDashboardHandler wires the admin dashboard handler with the profitability service.
+func ProvideDashboardHandler(
+	dashboardService *service.DashboardService,
+	profitabilityService *service.ProfitabilityService,
+	aggregationService *service.DashboardAggregationService,
+) *admin.DashboardHandler {
+	handler := admin.NewDashboardHandler(dashboardService, aggregationService)
+	handler.SetProfitabilityService(profitabilityService)
+	return handler
+}
+
 // ProvideSettingHandler creates SettingHandler with version from BuildInfo
 func ProvideSettingHandler(settingService *service.SettingService, buildInfo BuildInfo) *SettingHandler {
 	return NewSettingHandler(settingService, buildInfo.Version)
@@ -143,7 +154,7 @@ var ProviderSet = wire.NewSet(
 	NewAvailableChannelHandler,
 
 	// Admin handlers
-	admin.NewDashboardHandler,
+	ProvideDashboardHandler,
 	admin.NewUserHandler,
 	admin.NewGroupHandler,
 	admin.NewAccountHandler,

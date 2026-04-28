@@ -419,6 +419,13 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <button
+                @click="handleProfitability(row)"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400"
+              >
+                <Icon name="chart" size="sm" />
+                <span class="text-xs">利润</span>
+              </button>
+              <button
                 v-if="(row.status === 'active' || row.status === 'expired') && !isTotalQuotaSubscription(row)"
                 @click="handleExtend(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
@@ -778,6 +785,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
@@ -799,6 +807,7 @@ import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import Icon from '@/components/icons/Icon.vue'
 
 const { t } = useI18n()
+const router = useRouter()
 const appStore = useAppStore()
 
 interface GroupOption {
@@ -818,6 +827,16 @@ const guideActionRows = computed(() => [
   { action: t('admin.subscriptions.guide.actions.resetQuota'), desc: t('admin.subscriptions.guide.actions.resetQuotaDesc') },
   { action: t('admin.subscriptions.guide.actions.revoke'), desc: t('admin.subscriptions.guide.actions.revokeDesc') }
 ])
+
+function handleProfitability(subscription: UserSubscription) {
+  void router.push({
+    path: '/admin/profitability',
+    query: {
+      user_id: String(subscription.user_id),
+      group_id: String(subscription.group_id)
+    }
+  })
+}
 
 // User column display mode: 'email' or 'username'
 const userColumnMode = ref<'email' | 'username'>('email')
