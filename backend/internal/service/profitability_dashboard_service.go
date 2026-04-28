@@ -47,13 +47,13 @@ func NewProfitabilityDashboardService(
 }
 
 type ProfitabilityDashboardSnapshot struct {
-	StartDate string                               `json:"start_date"`
-	EndDate   string                               `json:"end_date"`
-	Generated string                               `json:"generated_at"`
-	Summary   ProfitabilitySummary                 `json:"summary"`
-	Accounts  []ProfitabilityAccountItem           `json:"accounts"`
-	Plans     []ProfitabilityPlanItem              `json:"plans"`
-	Formula   ProfitabilityFormula                 `json:"formula"`
+	StartDate string                     `json:"start_date"`
+	EndDate   string                     `json:"end_date"`
+	Generated string                     `json:"generated_at"`
+	Summary   ProfitabilitySummary       `json:"summary"`
+	Accounts  []ProfitabilityAccountItem `json:"accounts"`
+	Plans     []ProfitabilityPlanItem    `json:"plans"`
+	Formula   ProfitabilityFormula       `json:"formula"`
 }
 
 type ProfitabilitySummary struct {
@@ -109,27 +109,27 @@ type ProfitabilityAccountItem struct {
 }
 
 type ProfitabilityPlanItem struct {
-	PlanID                int64    `json:"plan_id"`
-	GroupID               int64    `json:"group_id"`
-	GroupName             string   `json:"group_name"`
-	GroupPlatform         string   `json:"group_platform"`
-	Name                  string   `json:"name"`
-	Price                 float64  `json:"price"`
-	OriginalPrice         *float64 `json:"original_price,omitempty"`
-	ValidityDays          int      `json:"validity_days"`
-	ForSale               bool     `json:"for_sale"`
-	SortOrder             int      `json:"sort_order"`
-	DailyLimitUSD         *float64 `json:"daily_limit_usd,omitempty"`
-	WeeklyLimitUSD        *float64 `json:"weekly_limit_usd,omitempty"`
-	MonthlyLimitUSD       *float64 `json:"monthly_limit_usd,omitempty"`
-	SupportedModelScopes  []string `json:"supported_model_scopes,omitempty"`
-	CompletedOrders       int      `json:"completed_orders"`
-	ActiveSubscriptions   int      `json:"active_subscriptions"`
-	RecognizedRevenueUSD  float64  `json:"recognized_revenue_usd"`
-	UsageRevenueProxyUSD  float64  `json:"usage_revenue_proxy_usd"`
-	UsageAccountCostUSD   float64  `json:"usage_account_cost_usd"`
-	EstimatedProfitUSD    float64  `json:"estimated_profit_usd"`
-	ProfitMarginPercent   float64  `json:"profit_margin_percent"`
+	PlanID               int64    `json:"plan_id"`
+	GroupID              int64    `json:"group_id"`
+	GroupName            string   `json:"group_name"`
+	GroupPlatform        string   `json:"group_platform"`
+	Name                 string   `json:"name"`
+	Price                float64  `json:"price"`
+	OriginalPrice        *float64 `json:"original_price,omitempty"`
+	ValidityDays         int      `json:"validity_days"`
+	ForSale              bool     `json:"for_sale"`
+	SortOrder            int      `json:"sort_order"`
+	DailyLimitUSD        *float64 `json:"daily_limit_usd,omitempty"`
+	WeeklyLimitUSD       *float64 `json:"weekly_limit_usd,omitempty"`
+	MonthlyLimitUSD      *float64 `json:"monthly_limit_usd,omitempty"`
+	SupportedModelScopes []string `json:"supported_model_scopes,omitempty"`
+	CompletedOrders      int      `json:"completed_orders"`
+	ActiveSubscriptions  int      `json:"active_subscriptions"`
+	RecognizedRevenueUSD float64  `json:"recognized_revenue_usd"`
+	UsageRevenueProxyUSD float64  `json:"usage_revenue_proxy_usd"`
+	UsageAccountCostUSD  float64  `json:"usage_account_cost_usd"`
+	EstimatedProfitUSD   float64  `json:"estimated_profit_usd"`
+	ProfitMarginPercent  float64  `json:"profit_margin_percent"`
 }
 
 func (s *ProfitabilityDashboardService) GetSnapshot(ctx context.Context, startTime, endTime time.Time) (*ProfitabilityDashboardSnapshot, error) {
@@ -232,7 +232,6 @@ func (s *ProfitabilityDashboardService) buildAccountItems(
 	}
 
 	rangeHours := math.Max(endTime.Sub(startTime).Hours(), 1)
-	rangeDays := math.Max(rangeHours/24, 1)
 	items := make([]ProfitabilityAccountItem, 0, len(accounts))
 	for i := range accounts {
 		account := &accounts[i]
@@ -430,6 +429,7 @@ func (s *ProfitabilityDashboardService) queryRecognizedRevenueByPlan(
 	orders, err := s.paymentConfigService.entClient.PaymentOrder.Query().
 		Where(
 			paymentorder.PlanIDIn(planIDs...),
+			paymentorder.PlanIDNotNil(),
 			paymentorder.OrderTypeEQ(payment.OrderTypeSubscription),
 			paymentorder.PaidAtNotNil(),
 			paymentorder.PaidAtGTE(startTime),
@@ -441,12 +441,16 @@ func (s *ProfitabilityDashboardService) queryRecognizedRevenueByPlan(
 	}
 
 	for _, order := range orders {
+		if order.PlanID == nil {
+			continue
+		}
+		planID := *order.PlanID
 		netRevenue := order.Amount - order.RefundAmount
 		if netRevenue < 0 {
 			netRevenue = 0
 		}
-		revenueByPlan[order.PlanID] += netRevenue
-		completedByPlan[order.PlanID]++
+		revenueByPlan[planID] += netRevenue
+		completedByPlan[planID]++
 	}
 
 	return revenueByPlan, completedByPlan, nil
@@ -496,6 +500,7 @@ func (s *ProfitabilityDashboardService) getWindowStatsBatch(
 	}
 
 	out := make(map[int64]*usagestats.AccountStats, len(accountIDs))
+	var outMu sync.Mutex
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(profitabilityWorkerLimit)
 	for _, accountID := range accountIDs {
@@ -505,7 +510,9 @@ func (s *ProfitabilityDashboardService) getWindowStatsBatch(
 			if err != nil {
 				return err
 			}
+			outMu.Lock()
 			out[accountID] = stats
+			outMu.Unlock()
 			return nil
 		})
 	}
