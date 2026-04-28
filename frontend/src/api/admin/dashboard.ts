@@ -148,6 +148,90 @@ export interface DashboardSnapshotV2Response {
   users_trend?: UserUsageTrendPoint[]
 }
 
+export interface ProfitabilitySummary {
+  total_accounts: number
+  accounts_with_7day_quota: number
+  accounts_with_5hour_quota: number
+  total_revenue_usd: number
+  total_account_cost_usd: number
+  total_profit_usd: number
+  profit_margin_percent: number
+  total_remaining_7day_usd: number
+  total_remaining_5hour_usd: number
+  estimated_runway_days: number
+  estimated_runway_hours: number
+}
+
+export interface ProfitabilityAccountItem {
+  account_id: number
+  name: string
+  platform: string
+  type: string
+  group_names: string[]
+  rate_multiplier: number
+  configured_7day_total_usd?: number | null
+  configured_account_value_usd?: number | null
+  derived_5hour_total_usd?: number | null
+  derived_7day_total_usd?: number | null
+  used_5hour_percent?: number | null
+  used_7day_percent?: number | null
+  used_5hour_usd?: number | null
+  used_7day_usd?: number | null
+  remaining_5hour_usd?: number | null
+  remaining_7day_usd?: number | null
+  five_hour_reset_at?: string | null
+  seven_day_reset_at?: string | null
+  today_cost_usd: number
+  period_revenue_usd: number
+  period_account_cost_usd: number
+  period_profit_usd: number
+  profit_margin_percent: number
+  revenue_roi_percent?: number | null
+  projected_daily_cost_usd: number
+  projected_hourly_cost_usd: number
+  estimated_runway_days?: number | null
+  estimated_runway_hours?: number | null
+  algorithm: string
+}
+
+export interface ProfitabilityPlanItem {
+  plan_id: number
+  group_id: number
+  group_name: string
+  group_platform: string
+  name: string
+  price: number
+  original_price?: number | null
+  validity_days: number
+  for_sale: boolean
+  sort_order: number
+  daily_limit_usd?: number | null
+  weekly_limit_usd?: number | null
+  monthly_limit_usd?: number | null
+  supported_model_scopes?: string[]
+  completed_orders: number
+  active_subscriptions: number
+  recognized_revenue_usd: number
+  usage_revenue_proxy_usd: number
+  usage_account_cost_usd: number
+  estimated_profit_usd: number
+  profit_margin_percent: number
+}
+
+export interface ProfitabilitySnapshotResponse {
+  start_date: string
+  end_date: string
+  generated_at: string
+  summary: ProfitabilitySummary
+  accounts: ProfitabilityAccountItem[]
+  plans: ProfitabilityPlanItem[]
+  formula: {
+    runway: string
+    margin: string
+    roi: string
+  }
+}
+
 /**
  * Get group usage statistics
  * @param params - Query parameters for filtering
@@ -194,6 +278,13 @@ export async function getUserBreakdown(params: UserBreakdownParams): Promise<Use
  */
 export async function getSnapshotV2(params?: DashboardSnapshotV2Params): Promise<DashboardSnapshotV2Response> {
   const { data } = await apiClient.get<DashboardSnapshotV2Response>('/admin/dashboard/snapshot-v2', {
+    params
+  })
+  return data
+}
+
+export async function getProfitabilitySnapshot(params?: Pick<TrendParams, 'start_date' | 'end_date'>): Promise<ProfitabilitySnapshotResponse> {
+  const { data } = await apiClient.get<ProfitabilitySnapshotResponse>('/admin/dashboard/profitability', {
     params
   })
   return data
@@ -322,6 +413,7 @@ export const dashboardAPI = {
   getModelStats,
   getGroupStats,
   getSnapshotV2,
+  getProfitabilitySnapshot,
   getApiKeyUsageTrend,
   getUserUsageTrend,
   getUserSpendingRanking,

@@ -18,14 +18,20 @@ import (
 // DashboardHandler handles admin dashboard statistics
 type DashboardHandler struct {
 	dashboardService   *service.DashboardService
+	profitabilitySvc   *service.ProfitabilityDashboardService
 	aggregationService *service.DashboardAggregationService
 	startTime          time.Time // Server start time for uptime calculation
 }
 
 // NewDashboardHandler creates a new admin dashboard handler
-func NewDashboardHandler(dashboardService *service.DashboardService, aggregationService *service.DashboardAggregationService) *DashboardHandler {
+func NewDashboardHandler(
+	dashboardService *service.DashboardService,
+	profitabilitySvc *service.ProfitabilityDashboardService,
+	aggregationService *service.DashboardAggregationService,
+) *DashboardHandler {
 	return &DashboardHandler{
 		dashboardService:   dashboardService,
+		profitabilitySvc:   profitabilitySvc,
 		aggregationService: aggregationService,
 		startTime:          time.Now(),
 	}
@@ -126,6 +132,23 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 		"stats_updated_at":    stats.StatsUpdatedAt,
 		"stats_stale":         stats.StatsStale,
 	})
+}
+
+// GetProfitability handles the admin-only profitability dashboard snapshot.
+// GET /api/v1/admin/dashboard/profitability
+func (h *DashboardHandler) GetProfitability(c *gin.Context) {
+	if h.profitabilitySvc == nil {
+		response.InternalError(c, "Profitability service not available")
+		return
+	}
+
+	startTime, endTime := parseTimeRange(c)
+	snapshot, err := h.profitabilitySvc.GetSnapshot(c.Request.Context(), startTime, endTime)
+	if err != nil {
+		response.Error(c, 500, "Failed to get profitability dashboard")
+		return
+	}
+	response.Success(c, snapshot)
 }
 
 type DashboardAggregationBackfillRequest struct {

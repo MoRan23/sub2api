@@ -286,6 +286,8 @@
               </div>
             </div>
           </div>
+
+          <ProfitabilityPanel :start-date="startDate" :end-date="endDate" />
         </div>
       </template>
     </div>
@@ -314,6 +316,7 @@ import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Select from '@/components/common/Select.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
+import ProfitabilityPanel from '@/components/admin/dashboard/ProfitabilityPanel.vue'
 
 import {
   Chart as ChartJS,
