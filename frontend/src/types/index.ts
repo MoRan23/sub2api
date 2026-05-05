@@ -493,7 +493,10 @@ export interface Group {
   weekly_limit_usd: number | null
   monthly_limit_usd: number | null
   total_limit_usd: number | null
-  // 图片生成计费配置（仅 antigravity 平台使用）
+  // 图片生成计费配置
+  allow_image_generation: boolean
+  image_rate_independent: boolean
+  image_rate_multiplier: number
   image_price_1k: number | null
   image_price_2k: number | null
   image_price_4k: number | null
@@ -604,6 +607,9 @@ export interface CreateGroupRequest {
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
   total_limit_usd?: number | null
+  allow_image_generation?: boolean
+  image_rate_independent?: boolean
+  image_rate_multiplier?: number
   image_price_1k?: number | null
   image_price_2k?: number | null
   image_price_4k?: number | null
@@ -630,6 +636,9 @@ export interface UpdateGroupRequest {
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
   total_limit_usd?: number | null
+  allow_image_generation?: boolean
+  image_rate_independent?: boolean
+  image_rate_multiplier?: number
   image_price_1k?: number | null
   image_price_2k?: number | null
   image_price_4k?: number | null
