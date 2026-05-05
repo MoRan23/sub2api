@@ -100,6 +100,9 @@ type CreateGroupRequest struct {
 	MonthlyLimitUSD  optionalLimitField `json:"monthly_limit_usd"`
 	TotalLimitUSD    optionalLimitField `json:"total_limit_usd"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
+	AllowImageGeneration            bool     `json:"allow_image_generation"`
+	ImageRateIndependent            bool     `json:"image_rate_independent"`
+	ImageRateMultiplier             *float64 `json:"image_rate_multiplier"`
 	ImagePrice1K                    *float64 `json:"image_price_1k"`
 	ImagePrice2K                    *float64 `json:"image_price_2k"`
 	ImagePrice4K                    *float64 `json:"image_price_4k"`
@@ -138,6 +141,9 @@ type UpdateGroupRequest struct {
 	MonthlyLimitUSD  optionalLimitField `json:"monthly_limit_usd"`
 	TotalLimitUSD    optionalLimitField `json:"total_limit_usd"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
+	AllowImageGeneration            *bool    `json:"allow_image_generation"`
+	ImageRateIndependent            *bool    `json:"image_rate_independent"`
+	ImageRateMultiplier             *float64 `json:"image_rate_multiplier"`
 	ImagePrice1K                    *float64 `json:"image_price_1k"`
 	ImagePrice2K                    *float64 `json:"image_price_2k"`
 	ImagePrice4K                    *float64 `json:"image_price_4k"`
@@ -270,6 +276,9 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		WeeklyLimitUSD:                  weekLimit,
 		MonthlyLimitUSD:                 monthLimit,
 		TotalLimitUSD:                   req.TotalLimitUSD.ToServiceInput(),
+		AllowImageGeneration:            req.AllowImageGeneration,
+		ImageRateIndependent:            req.ImageRateIndependent,
+		ImageRateMultiplier:             req.ImageRateMultiplier,
 		ImagePrice1K:                    req.ImagePrice1K,
 		ImagePrice2K:                    req.ImagePrice2K,
 		ImagePrice4K:                    req.ImagePrice4K,
@@ -332,6 +341,9 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		WeeklyLimitUSD:                  weekLimit,
 		MonthlyLimitUSD:                 monthLimit,
 		TotalLimitUSD:                   req.TotalLimitUSD.ToServiceInput(),
+		AllowImageGeneration:            req.AllowImageGeneration,
+		ImageRateIndependent:            req.ImageRateIndependent,
+		ImageRateMultiplier:             req.ImageRateMultiplier,
 		ImagePrice1K:                    req.ImagePrice1K,
 		ImagePrice2K:                    req.ImagePrice2K,
 		ImagePrice4K:                    req.ImagePrice4K,
