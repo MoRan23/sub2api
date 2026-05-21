@@ -2,13 +2,15 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
 
-type expiryWorkerUserSubRepoStub struct {
+type subscriptionExpiryRepoStub struct {
 	userSubRepoNoop
 
 	updateResult int64
@@ -20,30 +22,76 @@ type expiryWorkerUserSubRepoStub struct {
 	deleteResults    []int64
 	deleteCutoffs    []time.Time
 	deleteLimits     []int
+	listCalls        int
 }
 
-func (s *expiryWorkerUserSubRepoStub) BatchUpdateExpiredStatus(context.Context) (int64, error) {
-	s.batchUpdateCalls++
-	return s.updateResult, s.updateErr
+func (r *subscriptionExpiryRepoStub) List(context.Context, pagination.PaginationParams, *int64, *int64, string, string, string, string) ([]UserSubscription, *pagination.PaginationResult, error) {
+	r.listCalls++
+	return nil, &pagination.PaginationResult{Page: 1, Pages: 1}, nil
 }
 
-func (s *expiryWorkerUserSubRepoStub) DeleteExpiredQuotaEventsBatch(_ context.Context, now time.Time, limit int) (int64, error) {
-	s.deleteCalls++
-	s.deleteCutoffs = append(s.deleteCutoffs, now)
-	s.deleteLimits = append(s.deleteLimits, limit)
-	if s.deleteErr != nil {
-		return 0, s.deleteErr
+func (r *subscriptionExpiryRepoStub) BatchUpdateExpiredStatus(context.Context) (int64, error) {
+	r.batchUpdateCalls++
+	return r.updateResult, r.updateErr
+}
+
+func (r *subscriptionExpiryRepoStub) DeleteExpiredQuotaEventsBatch(_ context.Context, now time.Time, limit int) (int64, error) {
+	r.deleteCalls++
+	r.deleteCutoffs = append(r.deleteCutoffs, now)
+	r.deleteLimits = append(r.deleteLimits, limit)
+	if r.deleteErr != nil {
+		return 0, r.deleteErr
 	}
-	if len(s.deleteResults) == 0 {
+	if len(r.deleteResults) == 0 {
 		return 0, nil
 	}
-	result := s.deleteResults[0]
-	s.deleteResults = s.deleteResults[1:]
+	result := r.deleteResults[0]
+	r.deleteResults = r.deleteResults[1:]
 	return result, nil
 }
 
+type subscriptionExpirySettingRepoStub struct {
+	values map[string]string
+	err    error
+}
+
+func (r *subscriptionExpirySettingRepoStub) Get(context.Context, string) (*Setting, error) {
+	return nil, ErrSettingNotFound
+}
+
+func (r *subscriptionExpirySettingRepoStub) GetValue(_ context.Context, key string) (string, error) {
+	if r.err != nil {
+		return "", r.err
+	}
+	value, ok := r.values[key]
+	if !ok {
+		return "", ErrSettingNotFound
+	}
+	return value, nil
+}
+
+func (r *subscriptionExpirySettingRepoStub) Set(context.Context, string, string) error {
+	return nil
+}
+
+func (r *subscriptionExpirySettingRepoStub) GetMultiple(context.Context, []string) (map[string]string, error) {
+	return nil, nil
+}
+
+func (r *subscriptionExpirySettingRepoStub) SetMultiple(context.Context, map[string]string) error {
+	return nil
+}
+
+func (r *subscriptionExpirySettingRepoStub) GetAll(context.Context) (map[string]string, error) {
+	return nil, nil
+}
+
+func (r *subscriptionExpirySettingRepoStub) Delete(context.Context, string) error {
+	return nil
+}
+
 func TestSubscriptionExpiryServiceRunOnce_CleansExpiredQuotaEventsInBatches(t *testing.T) {
-	repo := &expiryWorkerUserSubRepoStub{
+	repo := &subscriptionExpiryRepoStub{
 		updateResult: 1,
 		deleteResults: []int64{
 			2,
@@ -66,4 +114,32 @@ func TestSubscriptionExpiryServiceRunOnce_CleansExpiredQuotaEventsInBatches(t *t
 	for i := 1; i < len(repo.deleteCutoffs); i++ {
 		require.True(t, repo.deleteCutoffs[i].Equal(repo.deleteCutoffs[0]), "cleanup cutoff should stay stable within one run")
 	}
+}
+
+func TestSubscriptionExpiryService_ExpiryReminderEnabledDefaultsToTrue(t *testing.T) {
+	svc := NewSubscriptionExpiryService(nil, time.Minute)
+	svc.SetSettingRepository(&subscriptionExpirySettingRepoStub{values: map[string]string{}})
+
+	require.True(t, svc.expiryReminderEnabled(context.Background()))
+}
+
+func TestSubscriptionExpiryService_ExpiryReminderDisabledSkipsSubscriptionScan(t *testing.T) {
+	repo := &subscriptionExpiryRepoStub{}
+	settingRepo := &subscriptionExpirySettingRepoStub{
+		values: map[string]string{SettingKeySubscriptionExpiryNotifyEnabled: "false"},
+	}
+	svc := NewSubscriptionExpiryService(repo, time.Minute)
+	svc.SetSettingRepository(settingRepo)
+	svc.SetNotificationEmailService(NewNotificationEmailService(settingRepo, nil))
+
+	svc.sendExpiryReminders(context.Background())
+
+	require.Zero(t, repo.listCalls)
+}
+
+func TestSubscriptionExpiryService_ExpiryReminderSettingReadErrorFailsClosed(t *testing.T) {
+	svc := NewSubscriptionExpiryService(nil, time.Minute)
+	svc.SetSettingRepository(&subscriptionExpirySettingRepoStub{err: errors.New("db down")})
+
+	require.False(t, svc.expiryReminderEnabled(context.Background()))
 }

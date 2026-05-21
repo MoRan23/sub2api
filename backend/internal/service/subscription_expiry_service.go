@@ -2,20 +2,27 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
+	"strconv"
 	"sync"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 )
 
 const subscriptionQuotaEventCleanupBatchSize = 1000
 
 // SubscriptionExpiryService periodically updates expired subscription status.
 type SubscriptionExpiryService struct {
-	userSubRepo UserSubscriptionRepository
-	interval    time.Duration
-	stopCh      chan struct{}
-	stopOnce    sync.Once
-	wg          sync.WaitGroup
+	userSubRepo              UserSubscriptionRepository
+	settingRepo              SettingRepository
+	notificationEmailService *NotificationEmailService
+	interval                 time.Duration
+	stopCh                   chan struct{}
+	stopOnce                 sync.Once
+	wg                       sync.WaitGroup
 }
 
 func NewSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, interval time.Duration) *SubscriptionExpiryService {
@@ -24,6 +31,14 @@ func NewSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, interv
 		interval:    interval,
 		stopCh:      make(chan struct{}),
 	}
+}
+
+func (s *SubscriptionExpiryService) SetSettingRepository(settingRepo SettingRepository) {
+	s.settingRepo = settingRepo
+}
+
+func (s *SubscriptionExpiryService) SetNotificationEmailService(notificationEmailService *NotificationEmailService) {
+	s.notificationEmailService = notificationEmailService
 }
 
 func (s *SubscriptionExpiryService) Start() {
@@ -70,7 +85,16 @@ func (s *SubscriptionExpiryService) runOnce() {
 	if updated > 0 {
 		log.Printf("[SubscriptionExpiry] Updated %d expired subscriptions", updated)
 	}
+	if !s.cleanupExpiredQuotaEvents(ctx) || ctx.Err() != nil {
+		return
+	}
+	s.sendExpiryReminders(ctx)
+}
 
+func (s *SubscriptionExpiryService) cleanupExpiredQuotaEvents(ctx context.Context) bool {
+	if s == nil || s.userSubRepo == nil {
+		return true
+	}
 	cleanupBefore := time.Now().UTC()
 	var deletedTotal int64
 	for {
@@ -78,13 +102,13 @@ func (s *SubscriptionExpiryService) runOnce() {
 			if deletedTotal > 0 {
 				log.Printf("[SubscriptionExpiry] Deleted %d expired quota events before stop", deletedTotal)
 			}
-			return
+			return false
 		}
 
 		deleted, err := s.userSubRepo.DeleteExpiredQuotaEventsBatch(ctx, cleanupBefore, subscriptionQuotaEventCleanupBatchSize)
 		if err != nil {
 			log.Printf("[SubscriptionExpiry] Delete expired quota events failed: %v", err)
-			return
+			return false
 		}
 		if deleted == 0 {
 			break
@@ -93,5 +117,72 @@ func (s *SubscriptionExpiryService) runOnce() {
 	}
 	if deletedTotal > 0 {
 		log.Printf("[SubscriptionExpiry] Deleted %d expired quota events", deletedTotal)
+	}
+	return true
+}
+
+func (s *SubscriptionExpiryService) sendExpiryReminders(ctx context.Context) {
+	if s == nil || s.userSubRepo == nil || s.notificationEmailService == nil || ctx.Err() != nil {
+		return
+	}
+	if !s.expiryReminderEnabled(ctx) {
+		return
+	}
+	for page := 1; ; page++ {
+		if ctx.Err() != nil {
+			return
+		}
+		subs, pag, err := s.userSubRepo.List(ctx, pagination.PaginationParams{Page: page, PageSize: 200}, nil, nil, SubscriptionStatusActive, "", "expires_at", "asc")
+		if err != nil {
+			log.Printf("[SubscriptionExpiry] List active subscriptions for reminder failed: %v", err)
+			return
+		}
+		for i := range subs {
+			s.sendExpiryReminderIfDue(ctx, &subs[i])
+		}
+		if pag == nil || page >= pag.Pages || len(subs) == 0 {
+			return
+		}
+	}
+}
+
+func (s *SubscriptionExpiryService) expiryReminderEnabled(ctx context.Context) bool {
+	if s == nil || s.settingRepo == nil {
+		return true
+	}
+	value, err := s.settingRepo.GetValue(ctx, SettingKeySubscriptionExpiryNotifyEnabled)
+	if err != nil {
+		if errors.Is(err, ErrSettingNotFound) {
+			return true
+		}
+		log.Printf("[SubscriptionExpiry] Read expiry reminder switch failed: %v", err)
+		return false
+	}
+	return !isFalseSettingValue(value)
+}
+
+func (s *SubscriptionExpiryService) sendExpiryReminderIfDue(ctx context.Context, sub *UserSubscription) {
+	if sub == nil || sub.User == nil || sub.Group == nil || sub.User.Email == "" {
+		return
+	}
+	daysRemaining := sub.DaysRemaining()
+	if daysRemaining != 7 && daysRemaining != 3 && daysRemaining != 1 {
+		return
+	}
+	if err := s.notificationEmailService.Send(ctx, NotificationEmailSendInput{
+		Event:          NotificationEmailEventSubscriptionExpiryReminder,
+		RecipientEmail: sub.User.Email,
+		RecipientName:  firstNonEmpty(sub.User.Username, sub.User.Email),
+		UserID:         sub.UserID,
+		SourceType:     "user_subscription",
+		SourceID:       strconv.FormatInt(sub.ID, 10),
+		ReminderKey:    fmt.Sprintf("%dd", daysRemaining),
+		Variables: map[string]string{
+			"subscription_group": sub.Group.Name,
+			"expiry_time":        sub.ExpiresAt.Format("2006-01-02 15:04"),
+			"days_remaining":     strconv.Itoa(daysRemaining),
+		},
+	}); err != nil {
+		log.Printf("[SubscriptionExpiry] Send expiry reminder failed: subscription=%d user=%d err=%v", sub.ID, sub.UserID, err)
 	}
 }

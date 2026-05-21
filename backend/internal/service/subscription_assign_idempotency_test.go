@@ -243,6 +243,24 @@ func (s *subscriptionUserSubRepoStub) GetByID(_ context.Context, id int64) (*Use
 	return &cp, nil
 }
 
+func (s *subscriptionUserSubRepoStub) Update(_ context.Context, sub *UserSubscription) error {
+	if sub == nil {
+		return ErrSubscriptionNilInput
+	}
+	existing := s.byID[sub.ID]
+	if existing == nil {
+		return ErrSubscriptionNotFound
+	}
+	oldKey := s.key(existing.UserID, existing.GroupID)
+	cp := *sub
+	s.byID[cp.ID] = &cp
+	if oldKey != s.key(cp.UserID, cp.GroupID) {
+		delete(s.byUserGroup, oldKey)
+	}
+	s.byUserGroup[s.key(cp.UserID, cp.GroupID)] = &cp
+	return nil
+}
+
 func (s *subscriptionUserSubRepoStub) ExtendExpiry(_ context.Context, subscriptionID int64, newExpiresAt time.Time) error {
 	sub := s.byID[subscriptionID]
 	if sub == nil {
@@ -372,7 +390,6 @@ func (s *subscriptionUserSubRepoStub) DeleteExpiredQuotaEventsBatch(_ context.Co
 	}
 	return deleted, nil
 }
-
 func TestAssignSubscriptionReuseWhenSemanticsMatch(t *testing.T) {
 	start := time.Date(2026, 2, 20, 10, 0, 0, 0, time.UTC)
 	groupRepo := &subscriptionGroupRepoStub{
