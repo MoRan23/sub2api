@@ -600,8 +600,9 @@ type UserSubscription struct {
 	NextExpiringQuotaUSD float64 `json:"next_expiring_quota_usd"`
 	NextQuotaExpireAt *time.Time `json:"next_quota_expire_at"`
 
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	RevokedAt *time.Time `json:"revoked_at,omitempty"`
 
 	User  *User  `json:"user,omitempty"`
 	Group *Group `json:"group,omitempty"`
