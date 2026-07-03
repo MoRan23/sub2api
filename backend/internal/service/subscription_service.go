@@ -35,6 +35,8 @@ var (
 	ErrSubscriptionSuspended       = infraerrors.Forbidden("SUBSCRIPTION_SUSPENDED", "subscription is suspended")
 	ErrSubscriptionAlreadyExists   = infraerrors.Conflict("SUBSCRIPTION_ALREADY_EXISTS", "subscription already exists for this user and group")
 	ErrSubscriptionAssignConflict  = infraerrors.Conflict("SUBSCRIPTION_ASSIGN_CONFLICT", "subscription exists but request conflicts with existing assignment semantics")
+	ErrSubscriptionNotRevoked      = infraerrors.Conflict("SUBSCRIPTION_NOT_REVOKED", "subscription is not revoked")
+	ErrSubscriptionRestoreConflict = infraerrors.Conflict("SUBSCRIPTION_RESTORE_CONFLICT", "subscription already exists for this user and group")
 	ErrGroupNotSubscriptionType    = infraerrors.BadRequest("GROUP_NOT_SUBSCRIPTION_TYPE", "group is not a subscription type")
 	ErrTotalLimitExceeded          = infraerrors.TooManyRequests("TOTAL_LIMIT_EXCEEDED", "total quota limit exceeded")
 	ErrTotalQuotaLimitRequired     = infraerrors.BadRequest("TOTAL_QUOTA_LIMIT_REQUIRED", "total quota subscription requires total limit")
@@ -758,6 +760,41 @@ func (s *SubscriptionService) RevokeSubscription(ctx context.Context, subscripti
 	}
 
 	return nil
+}
+
+// RestoreSubscription 恢复已撤销订阅
+func (s *SubscriptionService) RestoreSubscription(ctx context.Context, subscriptionID int64) (*UserSubscription, error) {
+	sub, err := s.userSubRepo.GetByIDIncludeDeleted(ctx, subscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	if sub.DeletedAt == nil {
+		return nil, ErrSubscriptionNotRevoked
+	}
+
+	exists, err := s.userSubRepo.ExistsActiveByUserIDAndGroupID(ctx, sub.UserID, sub.GroupID)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, ErrSubscriptionRestoreConflict
+	}
+
+	restoredStatus := sub.Status
+	now := time.Now()
+	if restoredStatus == SubscriptionStatusActive && !sub.ExpiresAt.After(now) {
+		restoredStatus = SubscriptionStatusExpired
+	}
+
+	restored, err := s.userSubRepo.Restore(ctx, subscriptionID, restoredStatus)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.invalidateSubscriptionCaches(restored.UserID, restored.GroupID); err != nil {
+		return nil, err
+	}
+	return restored, nil
 }
 
 // ExtendSubscription 调整订阅时长（正数延长，负数缩短）
