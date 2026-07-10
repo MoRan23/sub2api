@@ -30,6 +30,50 @@ func (r *subscriptionExpiryRepoStub) List(context.Context, pagination.Pagination
 	return nil, &pagination.PaginationResult{Page: 1, Pages: 1}, nil
 }
 
+func (r *subscriptionExpiryRepoStub) ExistsByUserIDAndGroupID(context.Context, int64, int64) (bool, error) {
+	return false, nil
+}
+
+func (r *subscriptionExpiryRepoStub) ExistsActiveByUserIDAndGroupID(context.Context, int64, int64) (bool, error) {
+	return false, nil
+}
+
+func (r *subscriptionExpiryRepoStub) ExtendExpiry(context.Context, int64, time.Time) error {
+	return nil
+}
+
+func (r *subscriptionExpiryRepoStub) UpdateStatus(context.Context, int64, string) error {
+	return nil
+}
+
+func (r *subscriptionExpiryRepoStub) UpdateNotes(context.Context, int64, string) error {
+	return nil
+}
+
+func (r *subscriptionExpiryRepoStub) ActivateWindows(context.Context, int64, time.Time) error {
+	return nil
+}
+
+func (r *subscriptionExpiryRepoStub) ResetUsageWindows(context.Context, int64, bool, bool, bool, time.Time) error {
+	return nil
+}
+
+func (r *subscriptionExpiryRepoStub) ResetDailyUsage(context.Context, int64, *time.Time, time.Time) error {
+	return nil
+}
+
+func (r *subscriptionExpiryRepoStub) ResetWeeklyUsage(context.Context, int64, *time.Time, time.Time) error {
+	return nil
+}
+
+func (r *subscriptionExpiryRepoStub) ResetMonthlyUsage(context.Context, int64, *time.Time, time.Time) error {
+	return nil
+}
+
+func (r *subscriptionExpiryRepoStub) IncrementUsage(context.Context, int64, float64) error {
+	return nil
+}
+
 func (r *subscriptionExpiryRepoStub) BatchUpdateExpiredStatus(context.Context) (int64, error) {
 	r.batchUpdateCalls++
 	return r.updateResult, r.updateErr
