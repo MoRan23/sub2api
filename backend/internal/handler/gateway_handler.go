@@ -448,7 +448,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						h.handleFailoverExhausted(c, failoverErr, service.PlatformGemini, true)
 						return
 					}
-					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 					switch action {
 					case FailoverContinue:
 						continue
@@ -868,7 +868,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						h.handleFailoverExhausted(c, failoverErr, account.Platform, true)
 						return
 					}
-					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 					switch action {
 					case FailoverContinue:
 						continue
@@ -1466,6 +1466,7 @@ func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, 
 				"weekly_limit_usd":        apiKey.Group.WeeklyLimitUSD,
 				"monthly_limit_usd":       apiKey.Group.MonthlyLimitUSD,
 				"total_limit_group_usd":   apiKey.Group.TotalLimitUSD,
+				"weekly_window_start":     subscription.WeeklyWindowStart,
 				"expires_at":              subscription.ExpiresAt,
 			}
 		}
