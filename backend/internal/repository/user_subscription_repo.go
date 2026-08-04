@@ -89,6 +89,18 @@ func (r *userSubscriptionRepository) GetByID(ctx context.Context, id int64) (*se
 	return sub, nil
 }
 
+func (r *userSubscriptionRepository) GetByIDForUpdate(ctx context.Context, id int64) (*service.UserSubscription, error) {
+	client := clientFromContext(ctx, r.client)
+	m, err := client.UserSubscription.Query().
+		Where(usersubscription.IDEQ(id)).
+		ForUpdate().
+		Only(ctx)
+	if err != nil {
+		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	}
+	return userSubscriptionEntityToService(m), nil
+}
+
 func (r *userSubscriptionRepository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*service.UserSubscription, error) {
 	client := clientFromContext(ctx, r.client)
 	queryCtx := mixins.SkipSoftDelete(ctx)
