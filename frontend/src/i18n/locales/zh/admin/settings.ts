@@ -1112,6 +1112,13 @@ export default {
         fallbackActionHint: '当请求模型不在白名单中时的处理方式。',
         fallbackErrorMessagePlaceholder: '未匹配模型被拦截时返回的自定义错误消息'
       },
+      adminUserMultiSelect: {
+        userSearchPlaceholder: '输入用户邮箱搜索',
+        userSearchEmpty: '未找到匹配用户',
+        userDeleted: '（已删除）',
+        userIdFallback: '用户 #{id}',
+        removeUser: '移除用户'
+      },
       wechatConnect: {
         title: '微信登录',
         description: '用于微信开放平台或公众号/小程序的第三方登录配置。',

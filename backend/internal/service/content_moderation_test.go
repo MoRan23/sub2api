@@ -1873,3 +1873,30 @@ func TestContentModerationUpdateConfig_CyberPolicyExcludeFromBanCount(t *testing
 	require.NoError(t, err)
 	require.False(t, view.CyberPolicyExcludeFromBanCount)
 }
+
+func TestContentModerationUpdateConfig_CyberPolicyWhitelistAndNotificationEmails(t *testing.T) {
+	settingRepo := &contentModerationTestSettingRepo{values: map[string]string{}}
+	svc := NewContentModerationService(settingRepo, nil, nil, nil, nil, nil, nil, nil)
+
+	userIDs := []int64{9, -1, 7, 9, 0}
+	emails := []string{" ALERT@Example.com ", "ops@example.com", "alert@example.com", ""}
+	view, err := svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{
+		CyberPolicyWhitelistUserIDs:   &userIDs,
+		CyberPolicyNotificationEmails: &emails,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []int64{7, 9}, view.CyberPolicyWhitelistUserIDs)
+	require.Equal(t, []string{"alert@example.com", "ops@example.com"}, view.CyberPolicyNotificationEmails)
+
+	view, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{})
+	require.NoError(t, err)
+	require.Equal(t, []int64{7, 9}, view.CyberPolicyWhitelistUserIDs)
+	require.Equal(t, []string{"alert@example.com", "ops@example.com"}, view.CyberPolicyNotificationEmails)
+
+	invalidEmails := []string{"Admin <admin@example.com>"}
+	_, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{
+		CyberPolicyNotificationEmails: &invalidEmails,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cyber_policy 通知邮箱无效")
+}

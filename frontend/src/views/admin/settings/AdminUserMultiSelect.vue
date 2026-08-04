@@ -14,13 +14,13 @@
           v-if="selectedUsers[userId]?.deleted"
           class="shrink-0 text-gray-400"
         >
-          {{ t("admin.settings.openaiFastPolicy.userDeleted") }}
+          {{ t("admin.settings.adminUserMultiSelect.userDeleted") }}
         </span>
         <button
           type="button"
           class="shrink-0 rounded text-gray-400 hover:text-red-600 dark:hover:text-red-400"
-          :aria-label="t('admin.settings.openaiFastPolicy.removeUser')"
-          :title="t('admin.settings.openaiFastPolicy.removeUser')"
+          :aria-label="t('admin.settings.adminUserMultiSelect.removeUser')"
+          :title="t('admin.settings.adminUserMultiSelect.removeUser')"
           @click="removeUser(userId)"
         >
           <Icon name="x" size="xs" :stroke-width="2" />
@@ -39,7 +39,7 @@
         type="text"
         autocomplete="off"
         class="input input-sm w-full pl-9"
-        :placeholder="t('admin.settings.openaiFastPolicy.userSearchPlaceholder')"
+        :placeholder="t('admin.settings.adminUserMultiSelect.userSearchPlaceholder')"
         @input="debounceSearch"
         @focus="showDropdown = true"
       />
@@ -56,7 +56,7 @@
         v-else-if="availableResults.length === 0"
         class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400"
       >
-        {{ t("admin.settings.openaiFastPolicy.userSearchEmpty") }}
+        {{ t("admin.settings.adminUserMultiSelect.userSearchEmpty") }}
       </div>
       <template v-else>
         <button
@@ -69,7 +69,7 @@
           <span class="min-w-0 truncate font-medium text-gray-900 dark:text-white">
             {{ user.email }}
             <span v-if="user.deleted" class="ml-1 text-xs font-normal text-gray-400">
-              {{ t("admin.settings.openaiFastPolicy.userDeleted") }}
+              {{ t("admin.settings.adminUserMultiSelect.userDeleted") }}
             </span>
           </span>
           <span class="shrink-0 text-xs text-gray-400">#{{ user.id }}</span>
@@ -86,13 +86,7 @@ import { adminAPI } from "@/api/admin";
 import type { SimpleUser } from "@/api/admin/usage";
 import Icon from "@/components/icons/Icon.vue";
 
-const props = defineProps<{
-  modelValue: number[];
-}>();
-
-const emit = defineEmits<{
-  "update:modelValue": [value: number[]];
-}>();
+const selectedUserIdsModel = defineModel<number[]>({ required: true });
 
 const { t } = useI18n();
 const containerRef = ref<HTMLElement | null>(null);
@@ -105,7 +99,7 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null;
 let searchSequence = 0;
 
 const selectedUserIds = computed(() =>
-  Array.from(new Set(props.modelValue.filter((id) => Number.isInteger(id) && id > 0))),
+  Array.from(new Set(selectedUserIdsModel.value.filter((id) => Number.isInteger(id) && id > 0))),
 );
 
 const availableResults = computed(() => {
@@ -117,7 +111,7 @@ const availableResults = computed(() => {
 
 function selectedUserLabel(userId: number): string {
   return selectedUsers.value[userId]?.email ||
-    t("admin.settings.openaiFastPolicy.userIdFallback", { id: userId });
+    t("admin.settings.adminUserMultiSelect.userIdFallback", { id: userId });
 }
 
 function clearPendingSearch(): void {
@@ -160,7 +154,7 @@ function debounceSearch(): void {
 
 function selectUser(user: SimpleUser): void {
   selectedUsers.value = { ...selectedUsers.value, [user.id]: user };
-  emit("update:modelValue", [...selectedUserIds.value, user.id]);
+  selectedUserIdsModel.value = [...selectedUserIds.value, user.id];
   clearPendingSearch();
   searchQuery.value = "";
   searchResults.value = [];
@@ -169,10 +163,7 @@ function selectUser(user: SimpleUser): void {
 }
 
 function removeUser(userId: number): void {
-  emit(
-    "update:modelValue",
-    selectedUserIds.value.filter((id) => id !== userId),
-  );
+  selectedUserIdsModel.value = selectedUserIds.value.filter((id) => id !== userId);
 }
 
 async function hydrateSelectedUsers(userIds: number[]): Promise<void> {
@@ -196,7 +187,7 @@ async function hydrateSelectedUsers(userIds: number[]): Promise<void> {
 
   const next = { ...selectedUsers.value };
   for (const user of users) {
-    if (user && props.modelValue.includes(user.id)) {
+    if (user && selectedUserIdsModel.value.includes(user.id)) {
       next[user.id] = user;
     }
   }

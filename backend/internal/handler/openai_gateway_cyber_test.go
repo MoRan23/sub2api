@@ -124,6 +124,16 @@ func TestBuildCyberSessionBlockedOpsEntry(t *testing.T) {
 	require.Equal(t, "session_block_key=abc123", entryWithKey.ErrorBody)
 }
 
+func TestMarkCyberSessionBlockedForOpsSkipsGenericOpsCapture(t *testing.T) {
+	c := newTestGinContext()
+	markCyberSessionBlockedForOps(c)
+
+	mark := service.GetOpsCyberPolicy(c)
+	require.NotNil(t, mark)
+	require.Equal(t, "cyber_policy", mark.Code)
+	require.True(t, shouldSkipOpsErrorLogForCyber(c))
+}
+
 // TestRejectIfCyberSessionBlocked_FailOpen verifies fail-open paths: nil handler
 // services, no explicit session signal, and (implicitly) disabled switch all
 // pass the request through.
@@ -149,6 +159,29 @@ func TestRecordCyberPolicyIfMarked_BlockKeyPlumbed(t *testing.T) {
 	require.NotPanics(t, func() {
 		h.recordCyberPolicyIfMarked(c, nil, nil, nil, "gpt-5", true, "deadbeef", service.ChannelUsageFields{}, "")
 	})
+}
+
+func TestEnqueueCyberSessionBlockedOpsEntry_RespectsCyberPolicyGroupScope(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 2)
+	t.Cleanup(func() { resetOpsErrorLoggerStateForTest(t) })
+	settingRepo := &contentModerationHandlerSettingRepo{values: map[string]string{
+		service.SettingKeyContentModerationConfig: `{"all_groups":false,"group_ids":[2]}`,
+	}}
+	moderationService := service.NewContentModerationService(settingRepo, nil, nil, nil, nil, nil, nil, nil)
+	h := &OpenAIGatewayHandler{
+		contentModerationService: moderationService,
+		opsService:               service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil),
+	}
+	c := newTestGinContext()
+	c.Request = httptest.NewRequest("POST", "/openai/v1/responses", strings.NewReader(`{}`))
+	outOfScopeGroupID := int64(1)
+	inScopeGroupID := int64(2)
+
+	h.enqueueCyberSessionBlockedOpsEntry(c, &service.APIKey{ID: 1, GroupID: &outOfScopeGroupID}, "gpt-5", "blocked-session")
+	require.Zero(t, OpsErrorLogEnqueuedTotal())
+
+	h.enqueueCyberSessionBlockedOpsEntry(c, &service.APIKey{ID: 1, GroupID: &inScopeGroupID}, "gpt-5", "blocked-session")
+	require.Equal(t, int64(1), OpsErrorLogEnqueuedTotal())
 }
 
 // TestBuildCyberPolicyOpsErrorEntry_StatusCode verifies F6: the ops error log

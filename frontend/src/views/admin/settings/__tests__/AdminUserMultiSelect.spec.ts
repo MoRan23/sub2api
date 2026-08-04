@@ -1,14 +1,14 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import OpenAIFastPolicyUserSelector from '../OpenAIFastPolicyUserSelector.vue'
+import AdminUserMultiSelect from '../AdminUserMultiSelect.vue'
 
 const messages: Record<string, string> = {
-  'admin.settings.openaiFastPolicy.userDeleted': '(deleted)',
-  'admin.settings.openaiFastPolicy.userIdFallback': 'User #{id}',
-  'admin.settings.openaiFastPolicy.removeUser': 'Remove user',
-  'admin.settings.openaiFastPolicy.userSearchPlaceholder': 'Search users',
-  'admin.settings.openaiFastPolicy.userSearchEmpty': 'No users found',
+  'admin.settings.adminUserMultiSelect.userDeleted': '(deleted)',
+  'admin.settings.adminUserMultiSelect.userIdFallback': 'User #{id}',
+  'admin.settings.adminUserMultiSelect.removeUser': 'Remove user',
+  'admin.settings.adminUserMultiSelect.userSearchPlaceholder': 'Search users',
+  'admin.settings.adminUserMultiSelect.userSearchEmpty': 'No users found',
   'common.loading': 'Loading',
 }
 
@@ -40,7 +40,7 @@ vi.mock('@/api/admin', () => ({
   },
 }))
 
-describe('OpenAIFastPolicyUserSelector', () => {
+describe('AdminUserMultiSelect', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     mockSearchUsers.mockReset()
@@ -58,7 +58,7 @@ describe('OpenAIFastPolicyUserSelector', () => {
       deleted_at: null,
     })
 
-    const wrapper = mount(OpenAIFastPolicyUserSelector, {
+    const wrapper = mount(AdminUserMultiSelect, {
       props: { modelValue: [7] },
       global: { stubs: { Icon: true } },
     })
@@ -75,7 +75,7 @@ describe('OpenAIFastPolicyUserSelector', () => {
       { id: 9, email: 'alice@example.com', deleted: false },
     ])
 
-    const wrapper = mount(OpenAIFastPolicyUserSelector, {
+    const wrapper = mount(AdminUserMultiSelect, {
       props: { modelValue: [] },
       global: { stubs: { Icon: true } },
     })
@@ -99,7 +99,7 @@ describe('OpenAIFastPolicyUserSelector', () => {
   it('keeps an unresolved saved ID visible and removable', async () => {
     mockGetUserById.mockRejectedValue(new Error('not found'))
 
-    const wrapper = mount(OpenAIFastPolicyUserSelector, {
+    const wrapper = mount(AdminUserMultiSelect, {
       props: { modelValue: [42] },
       global: { stubs: { Icon: true } },
     })

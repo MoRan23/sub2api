@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -247,8 +248,12 @@ func TestApplyFlaggedAccountSideEffects_PassesExcludeCyberFlag(t *testing.T) {
 	cfgDefault := defaultContentModerationConfig() // 默认 false
 	svc.applyFlaggedAccountSideEffects(context.Background(), cfgDefault, &ContentModerationLog{Flagged: true, UserID: &userID})
 
-	require.Equal(t, []bool{true, false}, repo.snapshotCountCalls(),
-		"applyFlaggedAccountSideEffects 必须把 cfg.CyberPolicyExcludeFromBanCount 透传给 COUNT 查询")
+	cfgWhitelist := defaultContentModerationConfig()
+	cfgWhitelist.CyberPolicyWhitelistUserIDs = []int64{userID}
+	svc.applyFlaggedAccountSideEffects(context.Background(), cfgWhitelist, &ContentModerationLog{Flagged: true, UserID: &userID})
+
+	require.Equal(t, []bool{true, false, true}, repo.snapshotCountCalls(),
+		"全局开关或用户白名单都必须让历史 cyber_policy 记录退出 COUNT 查询")
 }
 
 func TestRecordCyberPolicyEvent_ExcludeFromBanCount_SkipsBanJudgment(t *testing.T) {
@@ -302,4 +307,126 @@ func TestRecordCyberPolicyEvent_DefaultCountsTowardBan(t *testing.T) {
 	logs := repo.snapshotLogs()
 	require.Len(t, logs, 1)
 	require.GreaterOrEqual(t, logs[0].ViolationCount, 1, "默认路径行为不变（现状回归）")
+}
+
+func TestRecordCyberPolicyEvent_WhitelistUserSkipsBanCountAndKeepsLog(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.CyberPolicyWhitelistUserIDs = []int64{1}
+	raw, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	repo := &banCountArgsTestRepo{}
+	svc := NewContentModerationService(
+		&contentModerationTestSettingRepo{values: map[string]string{
+			SettingKeyRiskControlEnabled:      "true",
+			SettingKeyContentModerationConfig: string(raw),
+		}},
+		repo, nil, nil, nil, nil, nil, nil,
+	)
+
+	svc.RecordCyberPolicyEvent(context.Background(), CyberPolicyRecordInput{
+		UserID: 1, UserEmail: "u@example.com", Model: "gpt-5", UpstreamMessage: "blocked",
+	})
+
+	require.Empty(t, repo.snapshotCountCalls(), "白名单用户不得执行 cyber_policy 封号计数")
+	logs := repo.snapshotLogs()
+	require.Len(t, logs, 1)
+	require.Equal(t, ContentModerationActionCyberPolicy, logs[0].Action)
+	require.Zero(t, logs[0].ViolationCount)
+	require.False(t, logs[0].AutoBanned)
+}
+
+func TestRecordCyberPolicyEvent_GroupOutOfScopeSkipsAllModerationSideEffects(t *testing.T) {
+	smtpServer := startNotificationEmailTestSMTPServer(t)
+	cfg := defaultContentModerationConfig()
+	cfg.AllGroups = false
+	cfg.GroupIDs = []int64{2}
+	cfg.CyberPolicyWhitelistUserIDs = []int64{1}
+	cfg.CyberPolicyNotificationEmails = []string{"ops@example.com"}
+	raw, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	settings := smtpServer.settings()
+	settings[SettingKeyRiskControlEnabled] = "true"
+	settings[SettingKeyContentModerationConfig] = string(raw)
+	settingRepo := &contentModerationTestSettingRepo{values: settings}
+	repo := &banCountArgsTestRepo{}
+	svc := NewContentModerationService(
+		settingRepo,
+		repo, nil, nil, nil, nil, nil, NewEmailService(settingRepo, nil),
+	)
+	groupID := int64(1)
+	selectedGroupID := int64(2)
+
+	require.False(t, svc.CyberPolicyGroupInScope(context.Background(), &groupID))
+	require.False(t, svc.CyberPolicyGroupInScope(context.Background(), nil))
+	require.True(t, svc.CyberPolicyGroupInScope(context.Background(), &selectedGroupID))
+	svc.RecordCyberPolicyEvent(context.Background(), CyberPolicyRecordInput{
+		UserID: 1, GroupID: &groupID, UserEmail: "u@example.com", UpstreamMessage: "blocked",
+	})
+
+	require.Empty(t, repo.snapshotCountCalls())
+	require.Empty(t, repo.snapshotLogs())
+	require.Zero(t, smtpServer.messageCount())
+}
+
+func TestCyberPolicyGroupInScope_AllGroupsIncludesRequestsWithoutGroup(t *testing.T) {
+	svc := NewContentModerationService(
+		&contentModerationTestSettingRepo{values: map[string]string{}},
+		nil, nil, nil, nil, nil, nil, nil,
+	)
+	groupID := int64(9)
+
+	require.True(t, svc.CyberPolicyGroupInScope(context.Background(), &groupID))
+	require.True(t, svc.CyberPolicyGroupInScope(context.Background(), nil))
+}
+
+func TestRecordCyberPolicyEvent_WhitelistSendsUserAndConfiguredRecipients(t *testing.T) {
+	smtpServer := startNotificationEmailTestSMTPServer(t)
+	cfg := defaultContentModerationConfig()
+	cfg.CyberPolicyWhitelistUserIDs = []int64{7}
+	cfg.CyberPolicyNotificationEmails = []string{
+		"USER@example.com",
+		"security@example.com",
+		"ops@example.com",
+	}
+	raw, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	settings := smtpServer.settings()
+	settings[SettingKeyRiskControlEnabled] = "true"
+	settings[SettingKeyContentModerationConfig] = string(raw)
+	settingRepo := &contentModerationTestSettingRepo{values: settings}
+	emailService := NewEmailService(settingRepo, nil)
+	repo := &contentModerationTestRepo{}
+	svc := NewContentModerationService(settingRepo, repo, nil, nil, nil, nil, nil, emailService)
+
+	svc.RecordCyberPolicyEvent(context.Background(), CyberPolicyRecordInput{
+		UserID: 7, UserEmail: "User@example.com", Model: "gpt-5", UpstreamMessage: "blocked",
+	})
+
+	require.Eventually(t, func() bool { return smtpServer.messageCount() == 3 }, 3*time.Second, 20*time.Millisecond)
+	require.Len(t, repo.snapshotLogs(), 1)
+}
+
+func TestRecordCyberPolicyEvent_ContinuesAfterRecipientFailure(t *testing.T) {
+	smtpServer := startNotificationEmailTestSMTPServer(t)
+	smtpServer.rejectRecipient("security@example.com")
+	cfg := defaultContentModerationConfig()
+	cfg.CyberPolicyWhitelistUserIDs = []int64{7}
+	cfg.CyberPolicyNotificationEmails = []string{"security@example.com", "ops@example.com"}
+	raw, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	settings := smtpServer.settings()
+	settings[SettingKeyRiskControlEnabled] = "true"
+	settings[SettingKeyContentModerationConfig] = string(raw)
+	settingRepo := &contentModerationTestSettingRepo{values: settings}
+	repo := &cyberOrderingTestRepo{}
+	svc := NewContentModerationService(
+		settingRepo, repo, nil, nil, nil, nil, nil, NewEmailService(settingRepo, nil),
+	)
+
+	svc.RecordCyberPolicyEvent(context.Background(), CyberPolicyRecordInput{
+		UserID: 7, UserEmail: "user@example.com", Model: "gpt-5", UpstreamMessage: "blocked",
+	})
+
+	require.Eventually(t, func() bool { return smtpServer.messageCount() == 2 }, 3*time.Second, 20*time.Millisecond)
+	require.Contains(t, repo.snapshot(), "update_email_sent", "任一收件人成功时必须回写 email_sent=true")
 }

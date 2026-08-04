@@ -561,6 +561,7 @@ type notificationEmailTestSMTPServer struct {
 	messages      atomic.Int64
 	messageMu     sync.Mutex
 	messageBodies []string
+	rejected      map[string]struct{}
 }
 
 func startNotificationEmailTestSMTPServer(t *testing.T) *notificationEmailTestSMTPServer {
@@ -590,6 +591,27 @@ func (s *notificationEmailTestSMTPServer) settings() map[string]string {
 
 func (s *notificationEmailTestSMTPServer) messageCount() int64 {
 	return s.messages.Load()
+}
+
+func (s *notificationEmailTestSMTPServer) rejectRecipient(email string) {
+	s.messageMu.Lock()
+	defer s.messageMu.Unlock()
+	if s.rejected == nil {
+		s.rejected = make(map[string]struct{})
+	}
+	s.rejected[strings.ToLower(strings.TrimSpace(email))] = struct{}{}
+}
+
+func (s *notificationEmailTestSMTPServer) recipientRejected(command string) bool {
+	s.messageMu.Lock()
+	defer s.messageMu.Unlock()
+	command = strings.ToLower(command)
+	for email := range s.rejected {
+		if strings.Contains(command, "<"+email+">") {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *notificationEmailTestSMTPServer) lastMessage() string {
@@ -649,7 +671,8 @@ func (s *notificationEmailTestSMTPServer) handleConn(conn net.Conn) {
 		if err != nil {
 			return
 		}
-		cmd := strings.ToUpper(strings.TrimRight(line, "\r\n"))
+		rawCmd := strings.TrimRight(line, "\r\n")
+		cmd := strings.ToUpper(rawCmd)
 		switch {
 		case strings.HasPrefix(cmd, "EHLO"), strings.HasPrefix(cmd, "HELO"):
 			if _, err := rw.WriteString("250-localhost\r\n250 AUTH PLAIN\r\n"); err != nil {
@@ -667,6 +690,12 @@ func (s *notificationEmailTestSMTPServer) handleConn(conn net.Conn) {
 				return
 			}
 		case strings.HasPrefix(cmd, "RCPT TO:"):
+			if s.recipientRejected(rawCmd) {
+				if !writeLine("550 5.1.1 Recipient rejected") {
+					return
+				}
+				continue
+			}
 			if !writeLine("250 2.1.5 OK") {
 				return
 			}

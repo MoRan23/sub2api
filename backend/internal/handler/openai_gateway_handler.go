@@ -1735,6 +1735,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// （session_id / conversation_id）；无标识则放行，连接内仍有本地 flag 兜底。
 	cyberBlockKey := service.CyberSessionBlockKey(apiKey.ID, c, nil)
 	if cyberBlockKey != "" && h.gatewayService.IsCyberSessionBlocked(c.Request.Context(), cyberBlockKey) {
+		markCyberSessionBlockedForOps(c)
 		writeCyberSessionBlockedWSError(c.Request.Context(), wsConn)
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "session blocked by cyber-security policy")
 		h.enqueueCyberSessionBlockedOpsEntry(c, apiKey, reqModel, cyberBlockKey)
@@ -3077,6 +3078,7 @@ func (h *OpenAIGatewayHandler) rejectIfCyberSessionBlocked(c *gin.Context, apiKe
 	if !h.gatewayService.IsCyberSessionBlocked(c.Request.Context(), key) {
 		return false
 	}
+	markCyberSessionBlockedForOps(c)
 	// body-signal compact 心跳可能已把响应头提交为 200（cyber 检查在用户槽位
 	// 长等待之后执行）：以 response.failed 终止事件回传；未提交时停拍后照常
 	// 写 JSON（#3887）。
@@ -3104,10 +3106,25 @@ func (h *OpenAIGatewayHandler) rejectIfCyberSessionBlocked(c *gin.Context, apiKe
 	return true
 }
 
+func markCyberSessionBlockedForOps(c *gin.Context) {
+	service.MarkOpsCyberPolicy(c, service.CyberPolicyMark{
+		Code:           "cyber_policy_session_blocked",
+		Message:        cyberSessionBlockedClientMsg,
+		UpstreamStatus: http.StatusForbidden,
+	})
+}
+
 // enqueueCyberSessionBlockedOpsEntry captures request meta and enqueues the
 // ops_error_logs entry for a locally blocked request.
 func (h *OpenAIGatewayHandler) enqueueCyberSessionBlockedOpsEntry(c *gin.Context, apiKey *service.APIKey, model string, sessionBlockKey string) {
 	if h.opsService == nil {
+		return
+	}
+	requestCtx := context.Background()
+	if c.Request != nil {
+		requestCtx = c.Request.Context()
+	}
+	if h.contentModerationService != nil && !h.contentModerationService.CyberPolicyGroupInScope(requestCtx, apiKey.GroupID) {
 		return
 	}
 	meta := cyberPolicyOpsErrorMeta{Model: model, InboundEndpoint: GetInboundEndpoint(c), CreatedAt: time.Now(), SessionBlockKey: sessionBlockKey}
@@ -3119,10 +3136,6 @@ func (h *OpenAIGatewayHandler) enqueueCyberSessionBlockedOpsEntry(c *gin.Context
 		if b, ok := v.(bool); ok {
 			meta.Stream = b
 		}
-	}
-	requestCtx := context.Background()
-	if c.Request != nil {
-		requestCtx = c.Request.Context()
 	}
 	meta.Platform = resolveOpsPlatform(requestCtx, apiKey, guessPlatformFromPath(meta.RequestPath))
 	if c.Request != nil {
@@ -3228,6 +3241,14 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		if cmSvc != nil && !cmSvc.CyberPolicyGroupInScope(ctx, groupID) {
+			// 组范围外的 cyber_policy 仍已由上游返回给客户端；仅保留会话级
+			// 屏蔽，跳过内容审核、计费和 Ops 留痕，避免越过审计范围产生记录。
+			if gwSvc != nil && cyberBlockKey != "" {
+				gwSvc.MarkCyberSessionBlocked(ctx, cyberBlockKey)
+			}
+			return
+		}
 		if cmSvc != nil {
 			cmSvc.RecordCyberPolicyEvent(ctx, service.CyberPolicyRecordInput{
 				RequestID:       requestID,

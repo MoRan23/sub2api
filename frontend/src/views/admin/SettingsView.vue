@@ -1199,7 +1199,7 @@
                   <p class="mb-2 text-xs text-gray-400 dark:text-gray-500">
                     {{ t("admin.settings.openaiFastPolicy.userIdsHint") }}
                   </p>
-                  <OpenAIFastPolicyUserSelector
+                  <AdminUserMultiSelect
                     :model-value="rule.user_ids || []"
                     @update:model-value="rule.user_ids = $event"
                   />
@@ -8109,7 +8109,7 @@ import ProxySelector from "@/components/common/ProxySelector.vue";
 import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
-import OpenAIFastPolicyUserSelector from "@/views/admin/settings/OpenAIFastPolicyUserSelector.vue";
+import AdminUserMultiSelect from "@/views/admin/settings/AdminUserMultiSelect.vue";
 import { useClipboard } from "@/composables/useClipboard";
 import {
   useStepUp,

@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"sort"
 	"strings"
@@ -171,7 +172,9 @@ type ContentModerationConfig struct {
 	// CyberPolicyExcludeFromBanCount 为 true 时，cyber_policy 命中不参与自动封号计数：
 	// 当次不判定封号，且历史 cyber 行在 CountFlaggedByUserSince 中被排除。
 	// 默认 false（计入，与历史行为一致；旧配置 JSON 无此字段时反序列化为 false）。
-	CyberPolicyExcludeFromBanCount bool `json:"cyber_policy_exclude_from_ban_count"`
+	CyberPolicyExcludeFromBanCount bool     `json:"cyber_policy_exclude_from_ban_count"`
+	CyberPolicyWhitelistUserIDs    []int64  `json:"cyber_policy_whitelist_user_ids"`
+	CyberPolicyNotificationEmails  []string `json:"cyber_policy_notification_emails"`
 }
 
 type ContentModerationConfigView struct {
@@ -207,6 +210,8 @@ type ContentModerationConfigView struct {
 	KeywordBlockingMode            string                          `json:"keyword_blocking_mode"`
 	ModelFilter                    ContentModerationModelFilter    `json:"model_filter"`
 	CyberPolicyExcludeFromBanCount bool                            `json:"cyber_policy_exclude_from_ban_count"`
+	CyberPolicyWhitelistUserIDs    []int64                         `json:"cyber_policy_whitelist_user_ids"`
+	CyberPolicyNotificationEmails  []string                        `json:"cyber_policy_notification_emails"`
 }
 
 type ContentModerationAPIKeyStatus struct {
@@ -299,6 +304,8 @@ type UpdateContentModerationConfigInput struct {
 	KeywordBlockingMode            *string                       `json:"keyword_blocking_mode"`
 	ModelFilter                    *ContentModerationModelFilter `json:"model_filter"`
 	CyberPolicyExcludeFromBanCount *bool                         `json:"cyber_policy_exclude_from_ban_count"`
+	CyberPolicyWhitelistUserIDs    *[]int64                      `json:"cyber_policy_whitelist_user_ids"`
+	CyberPolicyNotificationEmails  *[]string                     `json:"cyber_policy_notification_emails"`
 }
 
 type ContentModerationModelFilter struct {
@@ -698,6 +705,12 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	}
 	if input.CyberPolicyExcludeFromBanCount != nil {
 		cfg.CyberPolicyExcludeFromBanCount = *input.CyberPolicyExcludeFromBanCount
+	}
+	if input.CyberPolicyWhitelistUserIDs != nil {
+		cfg.CyberPolicyWhitelistUserIDs = normalizeInt64IDs(*input.CyberPolicyWhitelistUserIDs)
+	}
+	if input.CyberPolicyNotificationEmails != nil {
+		cfg.CyberPolicyNotificationEmails = normalizeContentModerationNotificationEmails(*input.CyberPolicyNotificationEmails)
 	}
 	if input.Thresholds != nil {
 		cfg.Thresholds = mergeContentModerationThresholds(ContentModerationDefaultThresholds(), *input.Thresholds)
@@ -1648,6 +1661,22 @@ func (s *ContentModerationService) isRiskControlEnabled(ctx context.Context) boo
 	return raw == "true"
 }
 
+// CyberPolicyGroupInScope reports whether cyber_policy records for a request
+// belong to the configured content-audit group scope. It deliberately does
+// not consult the content moderation enabled/mode switches: the cyber policy
+// gateway path has its own behavior and only shares the audit group boundary.
+func (s *ContentModerationService) CyberPolicyGroupInScope(ctx context.Context, groupID *int64) bool {
+	if s == nil || s.settingRepo == nil {
+		return true
+	}
+	cfg, err := s.loadConfig(ctx)
+	if err != nil {
+		slog.Warn("content_moderation.cyber_scope_load_failed", "error", err)
+		return true
+	}
+	return cfg.includesGroup(groupID)
+}
+
 func (s *ContentModerationService) validateConfig(ctx context.Context, cfg *ContentModerationConfig) error {
 	if cfg == nil {
 		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_CONFIG", "内容审计配置不能为空")
@@ -1671,6 +1700,11 @@ func (s *ContentModerationService) validateConfig(ctx context.Context, cfg *Cont
 	}
 	if cfg.ModelFilter.Type != ContentModerationModelFilterAll && len(cfg.ModelFilter.Models) == 0 {
 		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_MODEL_FILTER", "指定或排除模型时至少需要配置 1 个模型")
+	}
+	for _, email := range cfg.CyberPolicyNotificationEmails {
+		if err := validateContentModerationNotificationEmail(email); err != nil {
+			return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_EMAIL", fmt.Sprintf("cyber_policy 通知邮箱无效: %s", email))
+		}
 	}
 	if !cfg.AllGroups && len(cfg.GroupIDs) > 0 && s.groupRepo != nil {
 		for _, groupID := range cfg.GroupIDs {
@@ -1915,7 +1949,8 @@ func (s *ContentModerationService) applyFlaggedAccountSideEffects(ctx context.Co
 	count := 1
 	if s.repo != nil && cfg.ViolationWindowHours > 0 {
 		since := time.Now().Add(-time.Duration(cfg.ViolationWindowHours) * time.Hour)
-		if n, err := s.repo.CountFlaggedByUserSince(ctx, *log.UserID, since, cfg.CyberPolicyExcludeFromBanCount); err == nil {
+		excludeCyberPolicy := cfg.CyberPolicyExcludeFromBanCount || contentModerationCyberPolicyWhitelisted(cfg, *log.UserID)
+		if n, err := s.repo.CountFlaggedByUserSince(ctx, *log.UserID, since, excludeCyberPolicy); err == nil {
 			count = n + 1
 		}
 	}
@@ -2107,6 +2142,8 @@ func defaultContentModerationConfig() *ContentModerationConfig {
 			Models: []string{},
 		},
 		CyberPolicyExcludeFromBanCount: false,
+		CyberPolicyWhitelistUserIDs:    []int64{},
+		CyberPolicyNotificationEmails:  []string{},
 	}
 }
 
@@ -2124,6 +2161,8 @@ func cloneContentModerationConfig(cfg *ContentModerationConfig) *ContentModerati
 		Type:   cfg.ModelFilter.Type,
 		Models: append([]string(nil), cfg.ModelFilter.Models...),
 	}
+	clone.CyberPolicyWhitelistUserIDs = append([]int64(nil), cfg.CyberPolicyWhitelistUserIDs...)
+	clone.CyberPolicyNotificationEmails = append([]string(nil), cfg.CyberPolicyNotificationEmails...)
 	return &clone
 }
 
@@ -2204,6 +2243,8 @@ func (cfg *ContentModerationConfig) normalize() {
 		cfg.NonHitRetentionDays = maxContentModerationNonHitRetentionDays
 	}
 	cfg.GroupIDs = normalizeInt64IDs(cfg.GroupIDs)
+	cfg.CyberPolicyWhitelistUserIDs = normalizeInt64IDs(cfg.CyberPolicyWhitelistUserIDs)
+	cfg.CyberPolicyNotificationEmails = normalizeContentModerationNotificationEmails(cfg.CyberPolicyNotificationEmails)
 	cfg.Thresholds = mergeContentModerationThresholds(ContentModerationDefaultThresholds(), cfg.Thresholds)
 	cfg.BlockedKeywords = normalizeBlockedKeywords(cfg.BlockedKeywords)
 	cfg.KeywordBlockingMode = normalizeKeywordBlockingMode(cfg.KeywordBlockingMode)
@@ -2439,6 +2480,8 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 		KeywordBlockingMode:            cfg.KeywordBlockingMode,
 		ModelFilter:                    cloneContentModerationModelFilter(cfg.ModelFilter),
 		CyberPolicyExcludeFromBanCount: cfg.CyberPolicyExcludeFromBanCount,
+		CyberPolicyWhitelistUserIDs:    append([]int64(nil), cfg.CyberPolicyWhitelistUserIDs...),
+		CyberPolicyNotificationEmails:  append([]string(nil), cfg.CyberPolicyNotificationEmails...),
 	}
 }
 
@@ -2743,6 +2786,50 @@ func normalizeInt64IDs(ids []int64) []int64 {
 	return out
 }
 
+func normalizeContentModerationNotificationEmails(emails []string) []string {
+	if len(emails) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, len(emails))
+	out := make([]string, 0, len(emails))
+	for _, raw := range emails {
+		email := strings.ToLower(strings.TrimSpace(raw))
+		if email == "" {
+			continue
+		}
+		if _, ok := seen[email]; ok {
+			continue
+		}
+		seen[email] = struct{}{}
+		out = append(out, email)
+	}
+	return out
+}
+
+func validateContentModerationNotificationEmail(email string) error {
+	email = strings.TrimSpace(email)
+	if email == "" || len(email) > 255 || strings.ContainsAny(email, "\r\n") {
+		return errors.New("invalid email")
+	}
+	address, err := mail.ParseAddress(email)
+	if err != nil || address.Address != email {
+		return errors.New("invalid email")
+	}
+	return nil
+}
+
+func contentModerationCyberPolicyWhitelisted(cfg *ContentModerationConfig, userID int64) bool {
+	if cfg == nil || userID <= 0 {
+		return false
+	}
+	for _, id := range cfg.CyberPolicyWhitelistUserIDs {
+		if id == userID {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeBlockedKeywords(in []string) []string {
 	if len(in) == 0 {
 		return []string{}
@@ -2986,8 +3073,8 @@ type CyberPolicyRecordInput struct {
 }
 
 // RecordCyberPolicyEvent 把一次 cyber_policy 硬阻断写入风控中心日志、计入违规计数、
-// 并给用户发邮件。当前请求已由 gateway 透传给用户；本方法仅做事后记录/通知/计数。
-// 仅受 risk_control_enabled 总开关约束（不受内容审核 Enabled/Mode/scope/sample 约束）。
+// 并发送通知。当前请求已由 gateway 透传给用户；本方法仅做事后记录/通知/计数。
+// 内容审核的 enabled/mode 不影响该路径，但审计分组范围必须生效。
 func (s *ContentModerationService) RecordCyberPolicyEvent(ctx context.Context, in CyberPolicyRecordInput) {
 	if s == nil || s.repo == nil {
 		return
@@ -2998,7 +3085,15 @@ func (s *ContentModerationService) RecordCyberPolicyEvent(ctx context.Context, i
 	cfg, err := s.loadConfig(ctx)
 	if err != nil {
 		slog.Warn("content_moderation.cyber_load_config_failed", "error", err)
-		cfg = &ContentModerationConfig{}
+		cfg = defaultContentModerationConfig()
+	}
+	if !cfg.includesGroup(in.GroupID) {
+		slog.Info("content_moderation.cyber_skip_group_out_of_scope",
+			"user_id", in.UserID,
+			"group_id", contentModerationLogGroupID(in.GroupID),
+			"all_groups", cfg.AllGroups,
+			"configured_group_ids", cfg.GroupIDs)
+		return
 	}
 	var userID *int64
 	if in.UserID > 0 {
@@ -3035,10 +3130,10 @@ func (s *ContentModerationService) RecordCyberPolicyEvent(ctx context.Context, i
 		Error:           trimRunes(redactContentModerationSecrets(errBody), maxModerationExcerptRunes*4),
 		CreatedAt:       time.Now(),
 	}
-	// 开关开时 cyber_policy 不参与封号计数：当次不判定（此处跳过），
-	// 历史行由 CountFlaggedByUserSince 的 excludeCyberPolicy 排除。
+	whitelisted := contentModerationCyberPolicyWhitelisted(cfg, in.UserID)
+	// 白名单用户始终排除 cyber_policy 封号计数；全局开关则继续控制其他用户。
 	autoBanned := false
-	if !cfg.CyberPolicyExcludeFromBanCount {
+	if !whitelisted && !cfg.CyberPolicyExcludeFromBanCount {
 		autoBanned = s.applyFlaggedAccountSideEffects(ctx, cfg, log)
 	}
 	log.EmailSent = false
@@ -3048,14 +3143,18 @@ func (s *ContentModerationService) RecordCyberPolicyEvent(ctx context.Context, i
 		slog.Warn("content_moderation.cyber_create_log_failed", "user_id", in.UserID, "error", err)
 	}
 	emailSent := false
-	if s.emailService != nil && strings.TrimSpace(log.UserEmail) != "" {
-		if err := s.sendCyberPolicyEmail(ctx, log); err != nil {
-			slog.Warn("content_moderation.cyber_email_failed", "user_id", in.UserID, "error", err)
-		} else {
-			emailSent = true
+	if s.emailService != nil {
+		for _, recipient := range s.cyberPolicyRecipients(log, cfg, whitelisted) {
+			if err := s.sendCyberPolicyEmail(ctx, log, recipient); err != nil {
+				slog.Warn("content_moderation.cyber_email_failed", "user_id", in.UserID, "recipient_hash", notificationEmailHash(recipient), "error_type", fmt.Sprintf("%T", err))
+			} else {
+				emailSent = true
+			}
 		}
 		if autoBanned {
-			if err := s.sendAccountDisabledEmail(ctx, cfg, log); err != nil {
+			if strings.TrimSpace(log.UserEmail) == "" {
+				slog.Warn("content_moderation.cyber_ban_email_skipped", "user_id", in.UserID, "reason", "user email is empty")
+			} else if err := s.sendAccountDisabledEmail(ctx, cfg, log); err != nil {
 				slog.Warn("content_moderation.cyber_ban_email_failed", "user_id", in.UserID, "error", err)
 			} else {
 				emailSent = true
@@ -3069,7 +3168,37 @@ func (s *ContentModerationService) RecordCyberPolicyEvent(ctx context.Context, i
 	}
 }
 
-func (s *ContentModerationService) sendCyberPolicyEmail(ctx context.Context, log *ContentModerationLog) error {
+func (s *ContentModerationService) cyberPolicyRecipients(log *ContentModerationLog, cfg *ContentModerationConfig, whitelisted bool) []string {
+	if log == nil {
+		return nil
+	}
+	extraCount := 0
+	if cfg != nil {
+		extraCount = len(cfg.CyberPolicyNotificationEmails)
+	}
+	recipients := make([]string, 0, 1+extraCount)
+	seen := make(map[string]struct{}, 1+extraCount)
+	add := func(raw string) {
+		email := strings.ToLower(strings.TrimSpace(raw))
+		if email == "" {
+			return
+		}
+		if _, ok := seen[email]; ok {
+			return
+		}
+		seen[email] = struct{}{}
+		recipients = append(recipients, email)
+	}
+	add(log.UserEmail)
+	if whitelisted && cfg != nil {
+		for _, email := range cfg.CyberPolicyNotificationEmails {
+			add(email)
+		}
+	}
+	return recipients
+}
+
+func (s *ContentModerationService) sendCyberPolicyEmail(ctx context.Context, log *ContentModerationLog, recipient string) error {
 	siteName := s.siteName(ctx)
 	if s.emailService.notificationEmailService != nil {
 		variables := map[string]string{
@@ -3080,8 +3209,8 @@ func (s *ContentModerationService) sendCyberPolicyEmail(ctx context.Context, log
 		}
 		err := s.emailService.notificationEmailService.Send(ctx, NotificationEmailSendInput{
 			Event:          NotificationEmailEventCyberPolicyNotice,
-			RecipientEmail: log.UserEmail,
-			RecipientName:  emailRecipientName(log.UserEmail),
+			RecipientEmail: recipient,
+			RecipientName:  emailRecipientName(recipient),
 			UserID:         contentModerationEmailUserID(log),
 			SourceType:     "content_moderation",
 			SourceID:       contentModerationEmailSourceID(log),
@@ -3093,8 +3222,8 @@ func (s *ContentModerationService) sendCyberPolicyEmail(ctx context.Context, log
 		if !shouldFallbackNotificationEmail(err) {
 			return err
 		}
-		slog.Warn("template cyber policy email failed; falling back", "err", err.Error())
+		slog.Warn("template cyber policy email failed; falling back", "recipient_hash", notificationEmailHash(recipient), "error_type", fmt.Sprintf("%T", err))
 	}
 	subject := fmt.Sprintf("[%s] 网络安全策略拦截 / Cyber Policy Notice", sanitizeEmailHeader(siteName))
-	return s.emailService.SendEmail(ctx, log.UserEmail, subject, buildCyberPolicyNoticeEmailBody(siteName, log))
+	return s.emailService.SendEmail(ctx, recipient, subject, buildCyberPolicyNoticeEmailBody(siteName, log))
 }

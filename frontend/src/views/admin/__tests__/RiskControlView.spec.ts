@@ -111,6 +111,9 @@ const baseConfig = (): ContentModerationConfig => ({
     type: 'all',
     models: [],
   },
+  cyber_policy_exclude_from_ban_count: false,
+  cyber_policy_whitelist_user_ids: [],
+  cyber_policy_notification_emails: [],
 })
 
 const runtimeStatus = () => ({
@@ -179,6 +182,25 @@ const ModelWhitelistSelectorStub = defineComponent({
         value: (props.modelValue as string[]).join('\n'),
         onInput,
       })
+  },
+})
+const AdminUserSelectorStub = defineComponent({
+  props: {
+    modelValue: {
+      type: Array,
+      default: () => [],
+    },
+  },
+  emits: ['update:modelValue'],
+  setup(props, { emit }) {
+    return () => h('input', {
+      'data-test': 'cyber-policy-whitelist-users-input',
+      value: (props.modelValue as number[]).join(','),
+      onInput: (event: Event) => {
+        const value = (event.target as HTMLInputElement).value
+        emit('update:modelValue', value.split(',').map(Number).filter((id) => Number.isInteger(id) && id > 0))
+      },
+    })
   },
 })
 
@@ -283,6 +305,70 @@ describe('admin RiskControlView', () => {
       }),
     }))
     expect(showError).not.toHaveBeenCalled()
+  })
+
+  it('saves cyber policy whitelist users and additional notification emails', async () => {
+    getConfig.mockResolvedValue({
+      ...baseConfig(),
+      cyber_policy_whitelist_user_ids: [7],
+      cyber_policy_notification_emails: ['ops@example.com'],
+    })
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+          ProxySelector: true,
+          AdminUserMultiSelect: AdminUserSelectorStub,
+        },
+      },
+    })
+    await flushPromises()
+
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.tabs.response').trigger('click')
+    await wrapper.get('[data-test="cyber-policy-whitelist-users"]').setValue('7,9')
+    await wrapper.get('[data-test="cyber-policy-notification-email-input"]').setValue('Security@Example.com')
+    await findButtonByText(wrapper, 'admin.riskControl.cyberPolicyAddNotificationEmail').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+    await flushPromises()
+
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      cyber_policy_whitelist_user_ids: [7, 9],
+      cyber_policy_notification_emails: ['ops@example.com', 'security@example.com'],
+    }))
+  })
+
+  it('rejects an invalid cyber policy notification email', async () => {
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+          ProxySelector: true,
+          AdminUserMultiSelect: AdminUserSelectorStub,
+        },
+      },
+    })
+    await flushPromises()
+
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.tabs.response').trigger('click')
+    await wrapper.get('[data-test="cyber-policy-notification-email-input"]').setValue('not-an-email')
+    await findButtonByText(wrapper, 'admin.riskControl.cyberPolicyAddNotificationEmail').trigger('click')
+
+    expect(showError).toHaveBeenCalledWith('admin.riskControl.cyberPolicyInvalidNotificationEmail')
+    expect(updateConfig).not.toHaveBeenCalled()
   })
 
   it('describes worker runtime as async audit and pre-block record processing', async () => {

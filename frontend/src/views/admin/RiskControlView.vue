@@ -896,6 +896,59 @@
                 </div>
                 <Toggle v-model="configForm.cyber_policy_exclude_from_ban_count" />
               </div>
+              <div class="space-y-5 rounded-lg border border-gray-100 p-4 dark:border-dark-700 lg:col-span-2">
+                <div>
+                  <p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.riskControl.cyberPolicyWhitelist') }}</p>
+                  <p class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.cyberPolicyWhitelistHint') }}</p>
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.riskControl.cyberPolicyWhitelistUsers') }}</label>
+                  <AdminUserMultiSelect
+                    v-model="configForm.cyber_policy_whitelist_user_ids"
+                    data-test="cyber-policy-whitelist-users"
+                  />
+                </div>
+                <div>
+                  <label class="input-label">{{ t('admin.riskControl.cyberPolicyNotificationEmails') }}</label>
+                  <div class="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      v-model.trim="cyberPolicyNotificationEmailInput"
+                      data-test="cyber-policy-notification-email-input"
+                      type="email"
+                      class="input"
+                      :placeholder="t('admin.riskControl.cyberPolicyNotificationEmailPlaceholder')"
+                      @keydown.enter.prevent="addCyberPolicyNotificationEmail"
+                    />
+                    <button
+                      type="button"
+                      class="btn btn-secondary inline-flex items-center justify-center gap-2 sm:w-auto"
+                      @click="addCyberPolicyNotificationEmail"
+                    >
+                      <Icon name="plus" size="sm" />
+                      {{ t('admin.riskControl.cyberPolicyAddNotificationEmail') }}
+                    </button>
+                  </div>
+                  <div v-if="configForm.cyber_policy_notification_emails.length > 0" class="mt-3 flex flex-wrap gap-2">
+                    <span
+                      v-for="email in configForm.cyber_policy_notification_emails"
+                      :key="email"
+                      class="inline-flex max-w-full items-center gap-2 rounded-md bg-gray-100 px-2.5 py-1.5 text-xs text-gray-700 dark:bg-dark-700 dark:text-gray-200"
+                    >
+                      <span class="max-w-72 truncate" :title="email">{{ email }}</span>
+                      <button
+                        type="button"
+                        class="shrink-0 text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                        :aria-label="t('admin.riskControl.cyberPolicyRemoveNotificationEmail')"
+                        :title="t('admin.riskControl.cyberPolicyRemoveNotificationEmail')"
+                        @click="removeCyberPolicyNotificationEmail(email)"
+                      >
+                        <Icon name="x" size="xs" :stroke-width="2" />
+                      </button>
+                    </span>
+                  </div>
+                  <p class="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.cyberPolicyNotificationEmailsHint') }}</p>
+                </div>
+              </div>
               <div>
                 <label class="input-label">{{ t('admin.riskControl.banThreshold') }}</label>
                 <input v-model.number="configForm.ban_threshold" type="number" min="1" max="1000" class="input" />
@@ -1129,6 +1182,7 @@ import Toggle from '@/components/common/Toggle.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
+import AdminUserMultiSelect from '@/views/admin/settings/AdminUserMultiSelect.vue'
 import { adminAPI } from '@/api/admin'
 import type {
   ContentModerationAPIKeyLoad,
@@ -1221,6 +1275,7 @@ const moderationTestPrompt = ref('')
 const moderationTestImages = ref<string[]>([])
 const moderationTestResult = ref<ContentModerationTestAuditResult | null>(null)
 const inputDetailRow = ref<ContentModerationLog | null>(null)
+const cyberPolicyNotificationEmailInput = ref('')
 let statusTimer: number | null = null
 
 const configForm = reactive({
@@ -1250,6 +1305,8 @@ const configForm = reactive({
   email_on_hit: true,
   auto_ban_enabled: true,
   cyber_policy_exclude_from_ban_count: false,
+  cyber_policy_whitelist_user_ids: [] as number[],
+  cyber_policy_notification_emails: [] as string[],
   ban_threshold: 10,
   violation_window_hours: 720,
   hit_retention_days: 180,
@@ -1728,6 +1785,13 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.email_on_hit = config.email_on_hit ?? true
   configForm.auto_ban_enabled = config.auto_ban_enabled ?? true
   configForm.cyber_policy_exclude_from_ban_count = config.cyber_policy_exclude_from_ban_count ?? false
+  configForm.cyber_policy_whitelist_user_ids = Array.isArray(config.cyber_policy_whitelist_user_ids)
+    ? [...config.cyber_policy_whitelist_user_ids]
+    : []
+  configForm.cyber_policy_notification_emails = Array.isArray(config.cyber_policy_notification_emails)
+    ? [...config.cyber_policy_notification_emails]
+    : []
+  cyberPolicyNotificationEmailInput.value = ''
   configForm.ban_threshold = config.ban_threshold || 10
   configForm.violation_window_hours = config.violation_window_hours || 720
   configForm.hit_retention_days = config.hit_retention_days || 180
@@ -1814,6 +1878,8 @@ async function saveConfig() {
       email_on_hit: configForm.email_on_hit,
       auto_ban_enabled: configForm.auto_ban_enabled,
       cyber_policy_exclude_from_ban_count: configForm.cyber_policy_exclude_from_ban_count,
+      cyber_policy_whitelist_user_ids: [...configForm.cyber_policy_whitelist_user_ids],
+      cyber_policy_notification_emails: [...configForm.cyber_policy_notification_emails],
       ban_threshold: Number(configForm.ban_threshold) || 10,
       violation_window_hours: Number(configForm.violation_window_hours) || 720,
       hit_retention_days: Number(configForm.hit_retention_days) || 180,
@@ -1983,6 +2049,23 @@ function setModelFilterType(type: ContentModerationModelFilterType) {
   if (type === 'all') {
     configForm.model_filter_models = []
   }
+}
+
+function addCyberPolicyNotificationEmail() {
+  const email = cyberPolicyNotificationEmailInput.value.trim().toLowerCase()
+  if (!email) return
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    appStore.showError(t('admin.riskControl.cyberPolicyInvalidNotificationEmail'))
+    return
+  }
+  if (!configForm.cyber_policy_notification_emails.includes(email)) {
+    configForm.cyber_policy_notification_emails.push(email)
+  }
+  cyberPolicyNotificationEmailInput.value = ''
+}
+
+function removeCyberPolicyNotificationEmail(email: string) {
+  configForm.cyber_policy_notification_emails = configForm.cyber_policy_notification_emails.filter((item) => item !== email)
 }
 
 async function testApiKeys(useInputKeys: boolean) {

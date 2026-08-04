@@ -1118,6 +1118,13 @@ export default {
         fallbackActionHint: 'Action for models not matching the whitelist.',
         fallbackErrorMessagePlaceholder: 'Custom error message when non-whitelisted models are blocked'
       },
+      adminUserMultiSelect: {
+        userSearchPlaceholder: 'Search by user email',
+        userSearchEmpty: 'No matching users found',
+        userDeleted: '(deleted)',
+        userIdFallback: 'User #{id}',
+        removeUser: 'Remove user'
+      },
       wechatConnect: {
         title: 'WeChat Connect',
         description: 'Third-party login configuration for WeChat Open Platform or Official Account / Mini Program.',
