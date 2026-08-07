@@ -1912,7 +1912,7 @@
         </div>
       </div>
 
-      <!-- OpenAI OAuth installation_id 固定/轮换开关（仅 GPT OAuth 账号） -->
+      <!-- OpenAI OAuth installation_id 固定开关（仅 GPT OAuth 账号） -->
       <div
         v-if="account?.platform === 'openai' && !isSparkShadow && account?.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -1943,32 +1943,33 @@
             />
           </button>
         </div>
-        <div v-if="openAIInstallationPinEnabled" class="mt-3 flex items-center justify-between gap-4">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.installationRotate') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.installationRotateDesc') }}
-            </p>
-          </div>
+        <div class="mt-3 flex items-center gap-2">
+          <label for="openai-pinned-installation-id" class="sr-only">
+            {{ t('admin.accounts.openai.installationID') }}
+          </label>
+          <input
+            v-model="openAIPinnedInstallationID"
+            type="text"
+            readonly
+            class="input min-w-0 flex-1 font-mono text-xs"
+            id="openai-pinned-installation-id"
+            data-testid="openai-pinned-installation-id"
+          />
           <button
             type="button"
-            data-testid="openai-installation-rotate-toggle"
-            role="switch"
-            :aria-checked="openAIInstallationRotateEnabled"
-            @click="openAIInstallationRotateEnabled = !openAIInstallationRotateEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              openAIInstallationRotateEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
+            class="btn btn-secondary shrink-0"
+            :disabled="installationRegenerating || !openAIInstallationPinEnabled || !installationPinSavedEnabled"
+            data-testid="openai-installation-regenerate"
+            :title="t('admin.accounts.openai.installationRegenerate')"
+            @click="regenerateOpenAIInstallationID"
           >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                openAIInstallationRotateEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
+            <Icon name="refresh" size="sm" :class="installationRegenerating ? 'animate-spin' : ''" />
+            <span class="sr-only">{{ t('admin.accounts.openai.installationRegenerate') }}</span>
           </button>
         </div>
+        <p v-if="!installationPinSavedEnabled && openAIInstallationPinEnabled" class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+          {{ t('admin.accounts.openai.installationRegenerateSaveHint') }}
+        </p>
       </div>
 
       <div
@@ -2971,9 +2972,11 @@ const openaiPassthroughEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
-// installation_id 固定/轮换（仅 OpenAI OAuth）。固定默认 ON，轮换默认 OFF。
+// installation_id 固定（仅 OpenAI OAuth）。UUID 由服务端生成。
 const openAIInstallationPinEnabled = ref(true)
-const openAIInstallationRotateEnabled = ref(false)
+const openAIPinnedInstallationID = ref('')
+const installationPinSavedEnabled = ref(true)
+const installationRegenerating = ref(false)
 // OpenAI 订阅档位（Plus/Pro/Free）手动覆盖值,存于 credentials.plan_type;'' 表示清空/自动识别
 const editPlanType = ref<string>('')
 const openAICompactMode = ref<OpenAICompactMode>('auto')
@@ -3426,9 +3429,10 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
-  // 固定默认 ON、轮换默认 OFF；随后按 extra 覆盖。
+  // 固定默认 ON；随后按 extra 覆盖。
   openAIInstallationPinEnabled.value = true
-  openAIInstallationRotateEnabled.value = false
+  openAIPinnedInstallationID.value = ''
+  installationPinSavedEnabled.value = true
   editPlanType.value = ''
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
@@ -3448,9 +3452,12 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       newAccount.type === 'oauth' && extra?.openai_responses_flatten_namespaces === true
     const longContextBillingValue = extra?.openai_long_context_billing_enabled
     openAILongContextBillingEnabled.value = longContextBillingValue === true
-    // installation_id 固定默认 ON：仅显式 false 关闭；轮换默认 OFF：仅显式 true 开启。
+    // installation_id 固定默认 ON：仅显式 false 关闭。
     openAIInstallationPinEnabled.value = extra?.openai_installation_pin_enabled !== false
-    openAIInstallationRotateEnabled.value = extra?.openai_installation_rotate_enabled === true
+    openAIPinnedInstallationID.value = typeof extra?.openai_pinned_installation_id === 'string'
+      ? extra.openai_pinned_installation_id
+      : ''
+    installationPinSavedEnabled.value = openAIInstallationPinEnabled.value
     // plan_type 手动覆盖仅 OAuth 有实际调度语义(IsOpenAIChatGPTSubscription 要求 oauth),故只对 oauth 回填
     editPlanType.value = newAccount.type === 'oauth'
       ? readPlanType(newAccount.credentials as Record<string, unknown> | undefined)
@@ -4159,6 +4166,25 @@ const handleClose = () => {
   emit('close')
 }
 
+const regenerateOpenAIInstallationID = async () => {
+  if (!props.account || props.account.platform !== 'openai' || props.account.type !== 'oauth' || isSparkShadow.value) return
+  if (!openAIInstallationPinEnabled.value || !installationPinSavedEnabled.value) {
+    appStore.showError(t('admin.accounts.openai.installationRegenerateSaveHint'))
+    return
+  }
+  if (!confirm(t('admin.accounts.openai.installationRegenerateConfirm'))) return
+  installationRegenerating.value = true
+  try {
+    const result = await adminAPI.accounts.regenerateInstallationID(props.account.id)
+    openAIPinnedInstallationID.value = result.installation_id
+    appStore.showSuccess(t('admin.accounts.openai.installationRegenerateSuccess'))
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.accounts.openai.installationRegenerateFailed'))
+  } finally {
+    installationRegenerating.value = false
+  }
+}
+
 const submitUpdateAccount = async (accountID: number, updatePayload: Record<string, unknown>) => {
   submitting.value = true
   try {
@@ -4701,19 +4727,13 @@ const handleSubmit = async () => {
       } else {
         newExtra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
       }
-      // installation_id 固定/轮换仅对 OpenAI OAuth 生效。固定关闭即恢复透传；关闭固定时
-      // 轮换无意义，一并清除。pinned 值系统托管（首个请求 seize），前端从不写入，只透传原值。
+      // installation_id 固定仅对 OpenAI OAuth 生效；UUID 和旧轮换字段由服务端管理。
       if (props.account.type === 'oauth' && !isSparkShadow.value) {
         newExtra.openai_installation_pin_enabled = openAIInstallationPinEnabled.value
-        if (openAIInstallationPinEnabled.value) {
-          newExtra.openai_installation_rotate_enabled = openAIInstallationRotateEnabled.value
-        } else {
-          delete newExtra.openai_installation_rotate_enabled
-        }
       } else {
         delete newExtra.openai_installation_pin_enabled
-        delete newExtra.openai_installation_rotate_enabled
       }
+      delete newExtra.openai_installation_rotate_enabled
       if (openAICompactMode.value === 'auto') {
         delete newExtra.openai_compact_mode
       } else {

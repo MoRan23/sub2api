@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"math/rand/v2"
@@ -731,14 +732,10 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	}
 	modelID := openaipkg.DefaultTestModel
 	payload := createOpenAITestPayload(modelID, true)
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("marshal openai probe payload: %w", err)
-	}
 
 	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, chatgptCodexURL, bytes.NewReader(payloadBytes))
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, chatgptCodexURL, bytes.NewReader([]byte("{}")))
 	if err != nil {
 		return nil, fmt.Errorf("create openai probe request: %w", err)
 	}
@@ -772,6 +769,24 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	// 强制统一开启时客户端身份不参与构造，探针与真实转发用同一套规范身份出站。
 	enforceCodexIdentityHeadersWithUA(req.Header, account.GetOpenAIUserAgent())
 	setOpenAIChatGPTAccountHeaders(req.Header, account)
+	if _, err := applyOpenAIInstallationIDForOutbound(
+		reqCtx,
+		nil,
+		s.accountRepo,
+		account,
+		payload,
+		req.Header,
+		false,
+		account.IsOpenAIPassthroughEnabled(),
+	); err != nil {
+		return nil, fmt.Errorf("resolve openai installation_id: %w", err)
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal openai probe payload: %w", err)
+	}
+	req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
+	req.ContentLength = int64(len(payloadBytes))
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

@@ -1144,6 +1144,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 		},
 		Extra: map[string]any{
 			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+			openAIPinnedInstallationIDKey:               transportTestPinnedInstallationID,
 		},
 	}
 
@@ -1166,7 +1167,8 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 		req.Header = req.Header.Clone()
 		req.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
 		req.Header.Set(openAIWSTurnStateHeader, "turn-state-1")
-		req.Header.Set(openAIWSTurnMetadataHeader, "turn-meta-1")
+		req.Header.Set(codexInstallationIDKey, "passthrough-header-installation")
+		req.Header.Set(openAIWSTurnMetadataHeader, `{"installation_id":"passthrough-header-nested","session_id":"header-session"}`)
 		ginCtx.Request = req
 
 		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
@@ -1200,7 +1202,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 		"stream":false,
 		"prompt_cache_key":"pcache_passthrough",
 		"reasoning":{"effort":"medium","context":"current_turn"},
-		"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"},
+		"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true","x-codex-installation-id":"passthrough-frame-installation","x-codex-turn-metadata":"{\"installation_id\":\"passthrough-frame-nested\",\"session_id\":\"frame-session\"}"},
 		"tools":[{"type":"namespace","name":"collaboration","tools":[{"type":"function","name":"spawn_agent"}]}],
 		"input":[{"type":"message","role":"user","content":"hello"}],
 		"tool_choice":{"type":"namespace","name":"collaboration"}
@@ -1226,9 +1228,14 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 
 	require.Equal(t, isolateOpenAISessionID(0, "pcache_passthrough"), captureDialer.lastHeaders.Get("session_id"))
 	require.Equal(t, "turn-state-1", captureDialer.lastHeaders.Get(openAIWSTurnStateHeader))
-	require.Equal(t, "turn-meta-1", captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader))
+	require.Equal(t, "passthrough-header-installation", captureDialer.lastHeaders.Get(codexInstallationIDKey))
+	require.Equal(t, `{"installation_id":"passthrough-header-nested","session_id":"header-session"}`, captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader))
 	require.Len(t, upstreamConn.writes, 1)
 	forwarded := requestToJSONString(upstreamConn.writes[0])
+	require.Equal(t, "passthrough-frame-installation", gjson.Get(forwarded, "client_metadata.x-codex-installation-id").String())
+	forwardedTurnMetadata := gjson.Get(forwarded, "client_metadata.x-codex-turn-metadata").String()
+	require.Equal(t, "passthrough-frame-nested", gjson.Get(forwardedTurnMetadata, "installation_id").String())
+	require.Equal(t, "frame-session", gjson.Get(forwardedTurnMetadata, "session_id").String())
 	require.False(t, gjson.Get(forwarded, `tools.#(type=="namespace")`).Exists())
 	require.Equal(t, "collaboration", gjson.Get(forwarded, `input.#(type=="additional_tools").tools.0.name`).String())
 	require.Equal(t, "namespace", gjson.Get(forwarded, "tool_choice.type").String())

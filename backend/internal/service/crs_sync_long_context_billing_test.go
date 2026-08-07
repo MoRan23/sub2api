@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -126,6 +127,84 @@ func TestCRSSyncOpenAILongContextBilling(t *testing.T) {
 			require.Equal(t, tt.wantEnabled, stored)
 		})
 	}
+}
+
+func TestCRSSyncOpenAIInstallationIDIsSystemManaged(t *testing.T) {
+	sourcePinned := uuid.NewString()
+
+	t.Run("create ignores imported identity and legacy rotation", func(t *testing.T) {
+		repo := newCRSLongContextAccountRepo()
+		result := runCRSOpenAILongContextSync(t, repo, crsOpenAILongContextSource{
+			collection:  "openaiOAuthAccounts",
+			credentials: map[string]any{"access_token": "oauth-token"},
+			extra: map[string]any{
+				openAIPinnedInstallationIDKey:      sourcePinned,
+				openAIInstallationRotateEnabledKey: true,
+			},
+		})
+
+		require.Equal(t, "created", result.Items[0].Action)
+		stored := repo.accounts["crs-openai-1"].Extra
+		installationID, ok := stored[openAIPinnedInstallationIDKey].(string)
+		require.True(t, ok)
+		parsed, err := uuid.Parse(installationID)
+		require.NoError(t, err)
+		require.Equal(t, uuid.Version(4), parsed.Version())
+		require.NotEqual(t, sourcePinned, installationID)
+		_, hasRotation := stored[openAIInstallationRotateEnabledKey]
+		require.False(t, hasRotation)
+	})
+
+	t.Run("update preserves valid local identity", func(t *testing.T) {
+		localPinned := uuid.NewString()
+		repo := newCRSLongContextAccountRepo(&Account{
+			ID:       41,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Extra: map[string]any{
+				"crs_account_id":              "crs-openai-1",
+				openAIPinnedInstallationIDKey: localPinned,
+			},
+		})
+		result := runCRSOpenAILongContextSync(t, repo, crsOpenAILongContextSource{
+			collection:  "openaiOAuthAccounts",
+			credentials: map[string]any{"access_token": "oauth-token"},
+			extra: map[string]any{
+				openAIPinnedInstallationIDKey:      sourcePinned,
+				openAIInstallationRotateEnabledKey: true,
+			},
+		})
+
+		require.Equal(t, "updated", result.Items[0].Action)
+		require.Equal(t, localPinned, repo.accounts["crs-openai-1"].Extra[openAIPinnedInstallationIDKey])
+		_, hasRotation := repo.accounts["crs-openai-1"].Extra[openAIInstallationRotateEnabledKey]
+		require.False(t, hasRotation)
+	})
+
+	t.Run("update repairs invalid local identity", func(t *testing.T) {
+		repo := newCRSLongContextAccountRepo(&Account{
+			ID:       41,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Extra: map[string]any{
+				"crs_account_id":              "crs-openai-1",
+				openAIPinnedInstallationIDKey: "invalid",
+			},
+		})
+		result := runCRSOpenAILongContextSync(t, repo, crsOpenAILongContextSource{
+			collection:  "openaiOAuthAccounts",
+			credentials: map[string]any{"access_token": "oauth-token"},
+			extra:       map[string]any{openAIPinnedInstallationIDKey: sourcePinned},
+		})
+
+		require.Equal(t, "updated", result.Items[0].Action)
+		installationID, ok := repo.accounts["crs-openai-1"].Extra[openAIPinnedInstallationIDKey].(string)
+		require.True(t, ok)
+		parsed, err := uuid.Parse(installationID)
+		require.NoError(t, err)
+		require.Equal(t, uuid.Version(4), parsed.Version())
+		require.NotEqual(t, sourcePinned, installationID)
+	})
 }
 
 func runCRSOpenAILongContextSync(t *testing.T, repo AccountRepository, source crsOpenAILongContextSource) *SyncFromCRSResult {

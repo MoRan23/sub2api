@@ -140,6 +140,8 @@ func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.
 func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()
+	ctx.Request.Header.Set(codexInstallationIDKey, "client-installation")
+	ctx.Request.Header.Set(openAIWSTurnMetadataHeader, `{"installation_id":"client-nested","turn":1}`)
 
 	resp := newJSONResponse(http.StatusOK, "")
 	resp.Body = io.NopCloser(strings.NewReader(`data: {"type":"response.completed"}
@@ -154,6 +156,7 @@ func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {
 		Type:        AccountTypeOAuth,
 		Concurrency: 1,
 		Credentials: map[string]any{"access_token": "test-token"},
+		Extra:       map[string]any{openAIPinnedInstallationIDKey: "11111111-2222-4333-8444-555555555555"},
 	}
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.6", "", "")
@@ -163,6 +166,9 @@ func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {
 	body, err := io.ReadAll(upstream.requests[0].Body)
 	require.NoError(t, err)
 	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(body, "model").String())
+	require.Equal(t, "11111111-2222-4333-8444-555555555555", gjson.GetBytes(body, "client_metadata.x-codex-installation-id").String())
+	require.Equal(t, "11111111-2222-4333-8444-555555555555", upstream.requests[0].Header.Get(codexInstallationIDKey))
+	require.Equal(t, "11111111-2222-4333-8444-555555555555", extractInstallationIDFromTurnMetadata(upstream.requests[0].Header.Get(openAIWSTurnMetadataHeader)))
 }
 
 func TestAccountTestService_OpenAIShadowUsesParentCredentialsAndShadowModel(t *testing.T) {

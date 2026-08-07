@@ -88,11 +88,14 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	setOpenAIWSTurnMetadata(payload, turnMetadata)
 	// installation_id 收口：开启固定时用账号自有值强制改写 WS create 载荷的
 	// client_metadata，与握手头保持一致（共用 gin 上下文缓存的同一次解析）。
-	if account.Type == AccountTypeOAuth {
+	if shouldRewriteOpenAIInstallationID(account, false) {
 		clientInstallationID := extractClientInstallationID(c, payload)
-		pin := s.resolveInstallationIDForRequest(ctx, c, account, clientInstallationID)
+		pin, pinErr := s.resolveInstallationIDForRequest(ctx, c, account, clientInstallationID)
+		if pinErr != nil {
+			return nil, fmt.Errorf("resolve openai installation_id: %w", pinErr)
+		}
 		if pin.Enabled && pin.OutboundID != "" {
-			enforceCodexInstallationIDInBody(payload, pin.OutboundID)
+			rewriteOpenAIInstallationIDInBody(payload, pin.OutboundID)
 		}
 	}
 	payloadEventType := openAIWSPayloadString(payload, "type")
@@ -146,7 +149,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	storeDisabledConnMode := s.openAIWSStoreDisabledConnMode()
 	forceNewConnByPolicy := shouldForceNewConnOnStoreDisabled(storeDisabledConnMode, lastFailureReason)
 	forceNewConn := forceNewConnByPolicy && storeDisabled && previousResponseID == "" && sessionHash != "" && preferredConnID == ""
-	wsHeaders, sessionResolution, buildHdrErr := s.buildOpenAIWSHeaders(ctx, c, account, token, decision, isCodexCLI, turnState, turnMetadata, promptCacheKey)
+	wsHeaders, sessionResolution, buildHdrErr := s.buildOpenAIWSHeaders(ctx, c, account, token, decision, isCodexCLI, turnState, turnMetadata, promptCacheKey, true)
 	if buildHdrErr != nil {
 		return nil, fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}

@@ -657,9 +657,25 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		// 与该账号真实出站的身份不是同一个（issue #3901 的配对不变式由收口保证）。
 		enforceCodexIdentityHeadersWithUA(req.Header, credentialAccount.GetOpenAIUserAgent())
 	}
-
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	credentialAccount.ApplyHeaderOverrides(req.Header)
+	if _, err := applyOpenAIInstallationIDForOutbound(
+		ctx,
+		c,
+		s.accountRepo,
+		account,
+		payload,
+		req.Header,
+		false,
+		account.IsOpenAIPassthroughEnabled(),
+	); err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI installation_id: %s", err.Error()))
+	}
+	if payloadBytes, err = json.Marshal(payload); err != nil {
+		return s.sendErrorAndEnd(c, "Failed to encode OpenAI test payload")
+	}
+	req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
+	req.ContentLength = int64(len(payloadBytes))
 
 	// Get proxy URL
 	proxyURL := ""
@@ -939,7 +955,8 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.Flush()
 
-	payloadBytes, _ := json.Marshal(createOpenAICompactProbePayload(testModelID))
+	payload := createOpenAICompactProbePayload(testModelID)
+	payloadBytes, _ := json.Marshal(payload)
 	if !agentIdentityTaskRecoveryWasTried(ctx) {
 		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
@@ -974,9 +991,25 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		req.Host = "chatgpt.com"
 		setOpenAIChatGPTAccountHeaders(req.Header, credentialAccount)
 	}
-
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
+	if _, err := applyOpenAIInstallationIDForOutbound(
+		ctx,
+		c,
+		s.accountRepo,
+		account,
+		payload,
+		req.Header,
+		true,
+		account.IsOpenAIPassthroughEnabled(),
+	); err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI installation_id: %s", err.Error()))
+	}
+	if payloadBytes, err = json.Marshal(payload); err != nil {
+		return s.sendErrorAndEnd(c, "Failed to encode OpenAI compact payload")
+	}
+	req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
+	req.ContentLength = int64(len(payloadBytes))
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -1837,6 +1870,10 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build image request: %s", err.Error()))
 	}
+	responsesPayload := make(map[string]any)
+	if err := json.Unmarshal(responsesBody, &responsesPayload); err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to decode image request: %s", err.Error()))
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, chatgptCodexAPIURL, bytes.NewReader(responsesBody))
 	if err != nil {
@@ -1870,6 +1907,23 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	// 与真实转发一致：账号级自定义 UA 同样作为管理员显式配置传入，否则测试用的身份
 	// 与该账号真实出站的身份不是同一个（issue #3901 的配对不变式由收口保证）。
 	enforceCodexIdentityHeadersWithUA(req.Header, credentialAccount.GetOpenAIUserAgent())
+	if _, err := applyOpenAIInstallationIDForOutbound(
+		ctx,
+		c,
+		s.accountRepo,
+		account,
+		responsesPayload,
+		req.Header,
+		false,
+		account.IsOpenAIPassthroughEnabled(),
+	); err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI installation_id: %s", err.Error()))
+	}
+	if responsesBody, err = json.Marshal(responsesPayload); err != nil {
+		return s.sendErrorAndEnd(c, "Failed to encode OpenAI image request")
+	}
+	req.Body = io.NopCloser(bytes.NewReader(responsesBody))
+	req.ContentLength = int64(len(responsesBody))
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

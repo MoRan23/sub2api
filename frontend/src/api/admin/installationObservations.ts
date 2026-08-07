@@ -16,7 +16,6 @@ export interface InstallationObservationEntry {
   account_id: number
   account_name: string
   pinned: boolean
-  rotated: boolean
   client_reported_installation_id: string
   outbound_installation_id: string
   user_agent: string

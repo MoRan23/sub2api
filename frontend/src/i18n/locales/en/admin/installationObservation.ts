@@ -11,7 +11,6 @@ export default {
     emptyOff: 'Observation is off; no data',
     modePinned: 'Pinned',
     modePassthrough: 'Passthrough',
-    modeRotated: 'Rotated each request',
     outboundShort: 'out',
     clientShort: 'client',
     columns: {

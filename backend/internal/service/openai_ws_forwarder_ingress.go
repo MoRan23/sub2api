@@ -410,6 +410,31 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}, nil
 	}
 
+	rewriteIngressInstallationID := func(payload *openAIWSClientPayload) error {
+		if payload == nil || !shouldRewriteOpenAIInstallationID(account, false) {
+			return nil
+		}
+		body := make(map[string]any)
+		if err := json.Unmarshal(payload.payloadRaw, &body); err != nil {
+			return fmt.Errorf("decode websocket response.create installation metadata: %w", err)
+		}
+		clientInstallationID := extractClientInstallationID(c, body)
+		pin, err := s.resolveInstallationIDForRequest(ctx, c, account, clientInstallationID)
+		if err != nil {
+			return fmt.Errorf("resolve openai installation_id: %w", err)
+		}
+		if !pin.Enabled || pin.OutboundID == "" || !rewriteOpenAIInstallationIDInBody(body, pin.OutboundID) {
+			return nil
+		}
+		rewritten, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("encode websocket response.create installation metadata: %w", err)
+		}
+		payload.payloadRaw = rewritten
+		payload.payloadBytes = len(rewritten)
+		return nil
+	}
+
 	writeClientMessage := func(message []byte) error {
 		writeCtx, cancel := newOpenAIWSDownstreamWriteContext(ctx, hooks, s.openAIWSWriteTimeout())
 		defer cancel()
@@ -616,8 +641,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			currentBridgePayload = nextPayload
 		}
 	}
+	// HTTP bridge intentionally keeps its existing body/header builder. Only
+	// frames that continue onto a non-passthrough upstream WS are pinned here.
+	if err := rewriteIngressInstallationID(&firstPayload); err != nil {
+		return err
+	}
 
-	wsHeaders, _, buildHdrErr := s.buildOpenAIWSHeaders(ctx, c, account, token, wsDecision, isCodexCLI, turnState, strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)), firstPayload.promptCacheKey)
+	wsHeaders, _, buildHdrErr := s.buildOpenAIWSHeaders(ctx, c, account, token, wsDecision, isCodexCLI, turnState, c.GetHeader(openAIWSTurnMetadataHeader), firstPayload.promptCacheKey, true)
 	if buildHdrErr != nil {
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
@@ -1636,10 +1666,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if parseErr != nil {
 			return parseErr
 		}
+		if rewriteErr := rewriteIngressInstallationID(&nextPayload); rewriteErr != nil {
+			return rewriteErr
+		}
 		if nextPayload.promptCacheKey != "" {
 			// ingress 会话在整个客户端 WS 生命周期内复用同一上游连接；
 			// prompt_cache_key 对握手头的更新仅在未来需要重新建连时生效。
-			updatedHeaders, _, updHdrErr := s.buildOpenAIWSHeaders(ctx, c, account, token, wsDecision, isCodexCLI, turnState, strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)), nextPayload.promptCacheKey)
+			updatedHeaders, _, updHdrErr := s.buildOpenAIWSHeaders(ctx, c, account, token, wsDecision, isCodexCLI, turnState, c.GetHeader(openAIWSTurnMetadataHeader), nextPayload.promptCacheKey, true)
 			if updHdrErr != nil {
 				logOpenAIWSModeInfo("ingress_ws_update_headers_failed account_id=%d err=%v", account.ID, updHdrErr)
 			} else {

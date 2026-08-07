@@ -213,6 +213,10 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 }
 
 func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(ctx context.Context, c *gin.Context, account *Account, alphaBody []byte, body []byte, token string) (*http.Request, error) {
+	responsesPayload := make(map[string]any)
+	if err := json.Unmarshal(body, &responsesPayload); err != nil {
+		return nil, fmt.Errorf("decode alpha search responses body: %w", err)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, chatgptCodexURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -267,6 +271,23 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 	}
 	enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
 	account.ApplyHeaderOverrides(req.Header)
+	if _, err := applyOpenAIInstallationIDForOutbound(
+		ctx,
+		c,
+		s.accountRepo,
+		account,
+		responsesPayload,
+		req.Header,
+		false,
+		account.IsOpenAIPassthroughEnabled(),
+	); err != nil {
+		return nil, fmt.Errorf("resolve openai installation_id: %w", err)
+	}
+	if body, err = json.Marshal(responsesPayload); err != nil {
+		return nil, fmt.Errorf("encode alpha search responses body: %w", err)
+	}
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	req.ContentLength = int64(len(body))
 	return req, nil
 }
 

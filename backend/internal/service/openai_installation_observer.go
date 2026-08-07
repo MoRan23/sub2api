@@ -22,7 +22,6 @@ type InstallationObservationEntry struct {
 	AccountID                    int64     `json:"account_id"`
 	AccountName                  string    `json:"account_name"`
 	Pinned                       bool      `json:"pinned"`
-	Rotated                      bool      `json:"rotated"`
 	ClientReportedInstallationID string    `json:"client_reported_installation_id"`
 	OutboundInstallationID       string    `json:"outbound_installation_id"`
 	UserAgent                    string    `json:"user_agent"`
@@ -123,7 +122,6 @@ func (s *OpenAIGatewayService) recordInstallationObservation(c *gin.Context, acc
 		AccountID:                    account.ID,
 		AccountName:                  account.Name,
 		Pinned:                       pin.Enabled,
-		Rotated:                      pin.Rotated,
 		ClientReportedInstallationID: pin.ClientID,
 		OutboundInstallationID:       pin.OutboundID,
 	}
@@ -132,6 +130,9 @@ func (s *OpenAIGatewayService) recordInstallationObservation(c *gin.Context, acc
 		entry.OutboundInstallationID = pin.ClientID
 	}
 	if outbound != nil {
+		if actualInstallationID := strings.TrimSpace(outbound.Get(codexInstallationIDKey)); actualInstallationID != "" {
+			entry.OutboundInstallationID = actualInstallationID
+		}
 		entry.UserAgent = strings.TrimSpace(outbound.Get("user-agent"))
 		entry.Originator = strings.TrimSpace(outbound.Get("originator"))
 		entry.OpenAIBeta = strings.TrimSpace(outbound.Get("openai-beta"))

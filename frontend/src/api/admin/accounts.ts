@@ -197,6 +197,13 @@ export async function update(id: number, updates: UpdateAccountRequest): Promise
   return data
 }
 
+export async function regenerateInstallationID(id: number): Promise<{ installation_id: string }> {
+  const { data } = await apiClient.post<{ installation_id: string }>(
+    `/admin/accounts/${id}/installation-id/regenerate`
+  )
+  return data
+}
+
 /**
  * Check mixed-channel risk for account-group binding.
  */
@@ -977,6 +984,7 @@ export const accountsAPI = {
   create,
   duplicate,
   update,
+  regenerateInstallationID,
   checkMixedChannelRisk,
   delete: deleteAccount,
   toggleStatus,

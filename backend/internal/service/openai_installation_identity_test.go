@@ -1,205 +1,115 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
 func newOpenAIOAuthPinAccount(id int64, extra map[string]any) *Account {
-	return &Account{
-		ID:       id,
-		Platform: PlatformOpenAI,
-		Type:     AccountTypeOAuth,
-		Extra:    extra,
-	}
+	return &Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: extra}
 }
 
-func resetPinRegistry() {
-	globalInstallationPinRegistry.mu.Lock()
-	globalInstallationPinRegistry.values = make(map[int64]string)
-	globalInstallationPinRegistry.mu.Unlock()
-}
-
-func TestResolveOutboundInstallationID_DisabledFallsBackToPassthrough(t *testing.T) {
-	resetPinRegistry()
-	acct := newOpenAIOAuthPinAccount(101, map[string]any{
-		openAIInstallationPinEnabledKey: false,
-	})
+func TestResolveOutboundInstallationIDDisabledFallsBackToPassthrough(t *testing.T) {
+	acct := newOpenAIOAuthPinAccount(101, map[string]any{openAIInstallationPinEnabledKey: false})
 	res := resolveOutboundInstallationID(acct, "client-abc")
-	if res.Enabled {
-		t.Fatalf("expected pinning disabled, got Enabled=true")
-	}
-	if res.OutboundID != "" {
-		t.Fatalf("disabled pinning must not emit an outbound id, got %q", res.OutboundID)
-	}
-	if res.ClientID != "client-abc" {
-		t.Fatalf("client id should be preserved for observation, got %q", res.ClientID)
+	if res.Enabled || res.OutboundID != "" || res.ClientID != "client-abc" {
+		t.Fatalf("unexpected disabled resolution: %+v", res)
 	}
 }
 
-func TestResolveOutboundInstallationID_NonOpenAIAccountDisabled(t *testing.T) {
-	resetPinRegistry()
-	acct := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth}
-	res := resolveOutboundInstallationID(acct, "client-abc")
-	if res.Enabled {
-		t.Fatalf("non-OpenAI account must never pin")
+func TestResolveOutboundInstallationIDUsesPersistedUUIDAndIgnoresClient(t *testing.T) {
+	const pinned = "11111111-2222-4333-8444-555555555555"
+	acct := newOpenAIOAuthPinAccount(102, map[string]any{openAIPinnedInstallationIDKey: pinned})
+	res := resolveOutboundInstallationID(acct, "99999999-8888-4777-8666-555555555555")
+	if !res.Enabled || res.OutboundID != pinned {
+		t.Fatalf("expected persisted UUID to win: %+v", res)
 	}
 }
 
-func TestResolveOutboundInstallationID_SeizesFirstClientValueAndStaysStable(t *testing.T) {
-	resetPinRegistry()
-	acct := newOpenAIOAuthPinAccount(102, nil) // nil extra => default ON
-
-	// Codex only ever persists a valid UUID, so the value a real client reports
-	// is a canonical v4 UUID. Seizing it must return it verbatim.
-	const clientUUID = "11111111-2222-4333-8444-555555555555"
-	first := resolveOutboundInstallationID(acct, clientUUID)
-	if !first.Enabled {
-		t.Fatalf("default (absent key) should enable pinning")
-	}
-	if first.OutboundID != clientUUID {
-		t.Fatalf("first request should seize client value, got %q", first.OutboundID)
-	}
-	if !first.NeedsPersist {
-		t.Fatalf("first seizure should request persistence")
-	}
-
-	// A later request reporting a DIFFERENT client value must still emit the
-	// seized value from the registry.
-	second := resolveOutboundInstallationID(acct, "99999999-8888-4777-8666-555555555555")
-	if second.OutboundID != clientUUID {
-		t.Fatalf("subsequent request must reuse seized value, got %q", second.OutboundID)
-	}
-	// The DB copy on this in-memory account was never updated (async persist does
-	// not mutate the struct), so reconciliation legitimately still wants a write.
-	if !second.NeedsPersist {
-		t.Fatalf("registry hit with a stale/empty DB copy should reconcile (NeedsPersist)")
-	}
-
-	// Once the account's persisted value matches the registry, no re-persist.
-	acct.Extra = map[string]any{openAIPinnedInstallationIDKey: clientUUID}
-	third := resolveOutboundInstallationID(acct, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
-	if third.OutboundID != clientUUID {
-		t.Fatalf("third request must reuse seized value, got %q", third.OutboundID)
-	}
-	if third.NeedsPersist {
-		t.Fatalf("registry hit with matching DB copy must not re-persist")
+func TestResolveOutboundInstallationIDRejectsNonV4PersistedValue(t *testing.T) {
+	acct := newOpenAIOAuthPinAccount(103, map[string]any{openAIPinnedInstallationIDKey: "not-a-uuid"})
+	res := resolveOutboundInstallationID(acct, "client-value")
+	if !res.Enabled || res.OutboundID != "" || res.ClientID != "client-value" {
+		t.Fatalf("invalid persisted value should require repair: %+v", res)
 	}
 }
 
-func TestResolveOutboundInstallationID_NormalizesSeizedUUIDToLowercase(t *testing.T) {
-	// Codex's resolve_installation_id returns Uuid::parse_str(..).to_string(),
-	// which lowercases. A client that reports an uppercase UUID must be pinned to
-	// the canonical lowercase form so the outbound value matches a real client.
-	resetPinRegistry()
-	acct := newOpenAIOAuthPinAccount(107, nil)
-	res := resolveOutboundInstallationID(acct, "ABCDEF01-2345-4678-8ABC-DEF012345678")
-	want := "abcdef01-2345-4678-8abc-def012345678"
-	if res.OutboundID != want {
-		t.Fatalf("seized UUID should be canonicalized to lowercase, got %q", res.OutboundID)
+func TestNormalizeCodexInstallationIDOnlyAcceptsV4(t *testing.T) {
+	valid := "ABCDEF01-2345-4678-8ABC-DEF012345678"
+	if got := normalizeCodexInstallationID(valid); got != "abcdef01-2345-4678-8abc-def012345678" {
+		t.Fatalf("unexpected normalized UUID: %q", got)
+	}
+	if got := normalizeCodexInstallationID("11111111-2222-4111-8111-222222222222"); got == "" {
+		t.Fatal("valid v4 UUID should be accepted")
+	}
+	if got := normalizeCodexInstallationID("11111111-2222-3111-8111-222222222222"); got != "" {
+		t.Fatalf("v3 UUID should be rejected, got %q", got)
 	}
 }
 
-func TestResolveOutboundInstallationID_RegeneratesWhenClientValueNotUUID(t *testing.T) {
-	// Codex discards non-UUID installation_id file contents and mints a fresh v4
-	// (see resolve_installation_id_rewrites_invalid_file_contents). A junk client
-	// value must therefore NOT be forwarded; a valid v4 UUID must be generated.
-	resetPinRegistry()
-	acct := newOpenAIOAuthPinAccount(108, nil)
-	res := resolveOutboundInstallationID(acct, "not-a-uuid")
-	if res.OutboundID == "not-a-uuid" {
-		t.Fatalf("non-UUID client value must not be seized verbatim")
+func TestInstallationObservationRecordsOnlyWhenEnabled(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	SetInstallationObservationEnabled(false)
+	acct := newOpenAIOAuthPinAccount(201, nil)
+	svc.recordInstallationObservation(nil, acct, installationIDResolution{Enabled: true, OutboundID: "abc"}, http.Header{})
+	if got := SnapshotInstallationObservations(10); len(got) != 0 {
+		t.Fatalf("disabled observation must not record, got %d entries", len(got))
 	}
-	parsed, err := uuid.Parse(res.OutboundID)
-	if err != nil {
-		t.Fatalf("regenerated id must be a valid uuid: %v", err)
+	SetInstallationObservationEnabled(true)
+	defer SetInstallationObservationEnabled(false)
+	hdr := http.Header{}
+	hdr.Set("User-Agent", "codex_cli_rs/2.0")
+	hdr.Set("OpenAI-Beta", "responses=v1")
+	hdr.Set("Originator", "codex_cli_rs")
+	svc.recordInstallationObservation(nil, acct, installationIDResolution{Enabled: true, OutboundID: "outbound-1", ClientID: "client-1"}, hdr)
+	entries := SnapshotInstallationObservations(10)
+	if len(entries) != 1 || entries[0].OutboundInstallationID != "outbound-1" || entries[0].ClientReportedInstallationID != "client-1" {
+		t.Fatalf("observation captured wrong ids: %+v", entries)
 	}
-	if parsed.Version() != 4 {
-		t.Fatalf("regenerated id must be uuid v4, got v%d", parsed.Version())
-	}
-}
-
-func TestResolveOutboundInstallationID_GeneratesUUIDv4WhenClientSendsNothing(t *testing.T) {
-	resetPinRegistry()
-	acct := newOpenAIOAuthPinAccount(103, nil)
-
-	res := resolveOutboundInstallationID(acct, "")
-	if res.OutboundID == "" {
-		t.Fatalf("expected a generated installation id")
-	}
-	parsed, err := uuid.Parse(res.OutboundID)
-	if err != nil {
-		t.Fatalf("generated id must be a valid uuid: %v", err)
-	}
-	if parsed.Version() != 4 {
-		t.Fatalf("generated id must be uuid v4 (matching real Codex), got v%d", parsed.Version())
-	}
-	if !res.NeedsPersist {
-		t.Fatalf("generated seizure should request persistence")
+	if entries[0].UserAgent != "codex_cli_rs/2.0" || entries[0].OpenAIBeta != "responses=v1" || entries[0].Originator != "codex_cli_rs" {
+		t.Fatalf("observation captured wrong headers: %+v", entries[0])
 	}
 }
 
-func TestResolveOutboundInstallationID_PersistedSeedsRegistry(t *testing.T) {
-	resetPinRegistry()
-	acct := newOpenAIOAuthPinAccount(104, map[string]any{
-		openAIPinnedInstallationIDKey: "persisted-xyz",
-	})
-	res := resolveOutboundInstallationID(acct, "ignored-client")
-	if res.OutboundID != "persisted-xyz" {
-		t.Fatalf("persisted value should win over client value, got %q", res.OutboundID)
+func TestInstallationObservationDisableClearsBuffer(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	SetInstallationObservationEnabled(true)
+	acct := newOpenAIOAuthPinAccount(202, nil)
+	svc.recordInstallationObservation(nil, acct, installationIDResolution{Enabled: true, OutboundID: uuid.NewString()}, http.Header{})
+	if len(SnapshotInstallationObservations(10)) == 0 {
+		t.Fatal("expected an entry before disabling")
 	}
-	if v, ok := globalInstallationPinRegistry.get(104); !ok || v != "persisted-xyz" {
-		t.Fatalf("persisted value should seed the registry, got %q ok=%v", v, ok)
-	}
-}
-
-func TestResolveOutboundInstallationID_RotationMintsFreshWithoutTouchingRegistry(t *testing.T) {
-	resetPinRegistry()
-	// Seed a stable pin first.
-	globalInstallationPinRegistry.set(105, "stable-pin")
-	acct := newOpenAIOAuthPinAccount(105, map[string]any{
-		openAIInstallationRotateEnabledKey: true,
-	})
-
-	a := resolveOutboundInstallationID(acct, "client-1")
-	b := resolveOutboundInstallationID(acct, "client-2")
-	if !a.Rotated || !b.Rotated {
-		t.Fatalf("rotation should mark results Rotated")
-	}
-	if a.OutboundID == b.OutboundID {
-		t.Fatalf("rotation should mint distinct values, got %q twice", a.OutboundID)
-	}
-	if _, err := uuid.Parse(a.OutboundID); err != nil {
-		t.Fatalf("rotated id must be a valid uuid: %v", err)
-	}
-	if a.NeedsPersist || b.NeedsPersist {
-		t.Fatalf("rotation must not request persistence")
-	}
-	// The stable pin in the registry must be untouched so turning rotation
-	// back off resumes it.
-	if v, ok := globalInstallationPinRegistry.get(105); !ok || v != "stable-pin" {
-		t.Fatalf("rotation must not disturb the registry, got %q ok=%v", v, ok)
+	SetInstallationObservationEnabled(false)
+	if got := SnapshotInstallationObservations(10); len(got) != 0 {
+		t.Fatalf("disabling observation should clear the buffer, got %d", len(got))
 	}
 }
 
-func TestClearPinnedInstallationIDFromRegistry(t *testing.T) {
-	resetPinRegistry()
-	globalInstallationPinRegistry.set(106, "to-clear")
-	ClearPinnedInstallationIDFromRegistry(106)
-	if _, ok := globalInstallationPinRegistry.get(106); ok {
-		t.Fatalf("expected registry entry cleared")
+func TestInstallationObservationUsesActualPassthroughHeader(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	SetInstallationObservationEnabled(true)
+	defer SetInstallationObservationEnabled(false)
+	acct := newOpenAIOAuthPinAccount(203, map[string]any{openAIInstallationPinEnabledKey: false})
+	hdr := http.Header{}
+	hdr.Set(codexInstallationIDKey, "actual-outbound")
+	svc.recordInstallationObservation(nil, acct, installationIDResolution{
+		ClientID: "client-reported",
+	}, hdr)
+	entries := SnapshotInstallationObservations(1)
+	if len(entries) != 1 || entries[0].OutboundInstallationID != "actual-outbound" {
+		t.Fatalf("observation should use actual passthrough header, got %+v", entries)
 	}
 }
 
-func TestExtractClientInstallationID_HeaderThenBody(t *testing.T) {
-	// Body fallback when no header.
-	body := map[string]any{
-		"client_metadata": map[string]any{
-			codexInstallationIDKey: "from-body",
-		},
-	}
+func TestExtractClientInstallationIDHeaderThenBody(t *testing.T) {
+	body := map[string]any{"client_metadata": map[string]any{codexInstallationIDKey: "from-body"}}
 	if got := extractClientInstallationID(nil, body); got != "from-body" {
 		t.Fatalf("expected body fallback, got %q", got)
 	}
@@ -208,95 +118,307 @@ func TestExtractClientInstallationID_HeaderThenBody(t *testing.T) {
 	}
 }
 
-func TestEnforceCodexInstallationIDInBody_OverwritesClientValue(t *testing.T) {
-	body := map[string]any{
-		"client_metadata": map[string]any{
-			codexInstallationIDKey: "client-sent",
-			"other":                "keep-me",
-		},
-	}
-	mutated := enforceCodexInstallationIDInBody(body, "owned-id")
-	if !mutated {
-		t.Fatalf("expected body mutated")
+func TestEnforceCodexInstallationIDInBody(t *testing.T) {
+	body := map[string]any{"client_metadata": map[string]any{codexInstallationIDKey: "client-sent", "other": "keep-me"}}
+	if !enforceCodexInstallationIDInBody(body, "owned-id") {
+		t.Fatal("expected body mutated")
 	}
 	cm := body["client_metadata"].(map[string]any)
-	if cm[codexInstallationIDKey] != "owned-id" {
-		t.Fatalf("installation id should be overwritten, got %q", cm[codexInstallationIDKey])
+	if cm[codexInstallationIDKey] != "owned-id" || cm["other"] != "keep-me" {
+		t.Fatalf("unexpected client metadata: %#v", cm)
 	}
-	if cm["other"] != "keep-me" {
-		t.Fatalf("sibling client_metadata keys must be preserved")
-	}
-	// Idempotent: calling again with the same value reports no change.
 	if enforceCodexInstallationIDInBody(body, "owned-id") {
-		t.Fatalf("second identical enforce should be a no-op")
+		t.Fatal("same value should be a no-op")
 	}
 }
 
-func TestEnforceCodexInstallationIDInBody_CreatesMetadataWhenAbsent(t *testing.T) {
+func TestShouldRewriteOpenAIInstallationIDBoundaries(t *testing.T) {
+	oauth := newOpenAIOAuthPinAccount(301, nil)
+	if !shouldRewriteOpenAIInstallationID(oauth, false) {
+		t.Fatal("OpenAI OAuth non-passthrough request should be eligible")
+	}
+	if shouldRewriteOpenAIInstallationID(oauth, true) {
+		t.Fatal("passthrough request must not be eligible")
+	}
+	if shouldRewriteOpenAIInstallationID(&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, false) {
+		t.Fatal("API-key account must not be eligible")
+	}
+	if shouldRewriteOpenAIInstallationID(&Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth}, false) {
+		t.Fatal("non-OpenAI account must not be eligible")
+	}
+}
+
+func TestRewriteOpenAIInstallationIDInBodyAlsoRewritesNestedMetadata(t *testing.T) {
+	const pinned = "11111111-2222-4333-8444-555555555555"
+	body := map[string]any{
+		"client_metadata": map[string]any{
+			codexInstallationIDKey:     "client-top",
+			openAIWSTurnMetadataHeader: `{"installation_id":"client-nested","session_id":"session-1","thread_id":"thread-1"}`,
+		},
+	}
+	if !rewriteOpenAIInstallationIDInBody(body, pinned) {
+		t.Fatal("expected body rewrite")
+	}
+	metadata := body["client_metadata"].(map[string]any)
+	if metadata[codexInstallationIDKey] != pinned {
+		t.Fatalf("top-level installation ID was not rewritten: %#v", metadata)
+	}
+	var nested map[string]any
+	if err := json.Unmarshal([]byte(metadata[openAIWSTurnMetadataHeader].(string)), &nested); err != nil {
+		t.Fatalf("nested metadata is not valid JSON: %v", err)
+	}
+	if nested[codexTurnMetadataInstallationIDKey] != pinned || nested["session_id"] != "session-1" || nested["thread_id"] != "thread-1" {
+		t.Fatalf("unexpected nested metadata: %#v", nested)
+	}
+}
+
+func TestRewriteOpenAIInstallationIDPreservesOpaqueOrMissingTurnMetadata(t *testing.T) {
+	const pinned = "11111111-2222-4333-8444-555555555555"
+	body := map[string]any{
+		"client_metadata": map[string]any{openAIWSTurnMetadataHeader: "opaque-turn-metadata"},
+	}
+	if !rewriteOpenAIInstallationIDInBody(body, pinned) {
+		t.Fatal("expected top-level installation ID to be added")
+	}
+	metadata := body["client_metadata"].(map[string]any)
+	if metadata[openAIWSTurnMetadataHeader] != "opaque-turn-metadata" {
+		t.Fatalf("opaque turn metadata was modified: %#v", metadata)
+	}
+
+	withoutTurn := map[string]any{}
+	rewriteOpenAIInstallationIDInBody(withoutTurn, pinned)
+	created := withoutTurn["client_metadata"].(map[string]any)
+	if _, exists := created[openAIWSTurnMetadataHeader]; exists {
+		t.Fatalf("turn metadata must not be synthesized: %#v", created)
+	}
+}
+
+func TestRewriteOpenAIInstallationIDHeaders(t *testing.T) {
+	const pinned = "11111111-2222-4333-8444-555555555555"
+	headers := make(http.Header)
+	headers.Set(codexInstallationIDKey, "client-top")
+	headers.Set(openAIWSTurnMetadataHeader, `{"installation_id":"client-nested","session_id":"session-1"}`)
+	headers.Set("x-codex-window-id", "window-1")
+	if !rewriteOpenAIInstallationIDHeaders(headers, pinned) {
+		t.Fatal("expected header rewrite")
+	}
+	if headers.Get(codexInstallationIDKey) != pinned || headers.Get("x-codex-window-id") != "window-1" {
+		t.Fatalf("unexpected direct headers: %#v", headers)
+	}
+	var nested map[string]any
+	if err := json.Unmarshal([]byte(headers.Get(openAIWSTurnMetadataHeader)), &nested); err != nil {
+		t.Fatalf("nested header is not valid JSON: %v", err)
+	}
+	if nested[codexTurnMetadataInstallationIDKey] != pinned || nested["session_id"] != "session-1" {
+		t.Fatalf("unexpected nested header: %#v", nested)
+	}
+
+	opaque := make(http.Header)
+	opaque.Set(openAIWSTurnMetadataHeader, "opaque-turn-metadata")
+	rewriteOpenAIInstallationIDHeaders(opaque, pinned)
+	if opaque.Get(openAIWSTurnMetadataHeader) != "opaque-turn-metadata" {
+		t.Fatalf("opaque header was modified: %#v", opaque)
+	}
+}
+
+func TestCompactClientMetadataIsRemoved(t *testing.T) {
+	body := map[string]any{"client_metadata": map[string]any{codexInstallationIDKey: "client"}, "model": "gpt-5"}
+	if !stripOpenAICompactClientMetadata(body) {
+		t.Fatal("expected compact metadata removal")
+	}
+	if _, exists := body["client_metadata"]; exists {
+		t.Fatalf("compact body still contains client_metadata: %#v", body)
+	}
+	if stripOpenAICompactClientMetadata(body) {
+		t.Fatal("second removal should be a no-op")
+	}
+}
+
+func TestExtractClientInstallationIDFallsBackToNestedMetadata(t *testing.T) {
+	body := map[string]any{
+		"client_metadata": map[string]any{
+			openAIWSTurnMetadataHeader: `{"installation_id":"nested-client","session_id":"session-1"}`,
+		},
+	}
+	if got := extractClientInstallationID(nil, body); got != "nested-client" {
+		t.Fatalf("expected nested client installation ID, got %q", got)
+	}
+}
+
+func TestInstallationRequestCacheIsScopedToAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	first := newOpenAIOAuthPinAccount(401, map[string]any{
+		openAIPinnedInstallationIDKey: "11111111-2222-4333-8444-555555555555",
+	})
+	second := newOpenAIOAuthPinAccount(402, map[string]any{
+		openAIPinnedInstallationIDKey: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+	})
+	svc := &OpenAIGatewayService{}
+
+	firstResolution, err := svc.resolveInstallationIDForRequest(context.Background(), c, first, "first-client")
+	if err != nil {
+		t.Fatalf("resolve first account: %v", err)
+	}
+	secondResolution, err := svc.resolveInstallationIDForRequest(context.Background(), c, second, "second-client")
+	if err != nil {
+		t.Fatalf("resolve second account: %v", err)
+	}
+	if firstResolution.OutboundID == secondResolution.OutboundID {
+		t.Fatalf("failover account reused cached installation ID: first=%q second=%q", firstResolution.OutboundID, secondResolution.OutboundID)
+	}
+	if secondResolution.OutboundID != second.GetPinnedOpenAIInstallationID() || secondResolution.ClientID != "second-client" {
+		t.Fatalf("unexpected second account resolution: %+v", secondResolution)
+	}
+}
+
+type installationIdentityRepoStub struct {
+	AccountRepository
+	accounts    map[int64]*Account
+	mu          sync.Mutex
+	persisted   map[int64]string
+	ensureCalls int
+}
+
+func (r *installationIdentityRepoStub) GetByID(_ context.Context, id int64) (*Account, error) {
+	if account := r.accounts[id]; account != nil {
+		return account, nil
+	}
+	return nil, nil
+}
+
+func (r *installationIdentityRepoStub) EnsureOpenAIInstallationID(_ context.Context, accountID int64, _ string, generatedID string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ensureCalls++
+	if r.persisted == nil {
+		r.persisted = make(map[int64]string)
+	}
+	if existing := r.persisted[accountID]; existing != "" {
+		return existing, nil
+	}
+	r.persisted[accountID] = generatedID
+	return generatedID, nil
+}
+
+func TestApplyOpenAIInstallationIDForOutboundRegularMaintainsBodyHeaderParity(t *testing.T) {
+	const pinned = "11111111-2222-4333-8444-555555555555"
+	account := newOpenAIOAuthPinAccount(501, map[string]any{openAIPinnedInstallationIDKey: pinned})
+	body := map[string]any{
+		"client_metadata": map[string]any{
+			codexInstallationIDKey:     "body-client",
+			openAIWSTurnMetadataHeader: `{"installation_id":"body-nested","turn":1}`,
+		},
+	}
+	headers := make(http.Header)
+	headers.Set(codexInstallationIDKey, "header-client")
+	headers.Set(openAIWSTurnMetadataHeader, `{"installation_id":"header-nested","session":"s"}`)
+
+	resolution, err := applyOpenAIInstallationIDForOutbound(context.Background(), nil, nil, account, body, headers, false, false)
+	if err != nil {
+		t.Fatalf("apply installation identity: %v", err)
+	}
+	if !resolution.Enabled || resolution.OutboundID != pinned {
+		t.Fatalf("unexpected resolution: %+v", resolution)
+	}
+	metadata := body["client_metadata"].(map[string]any)
+	if metadata[codexInstallationIDKey] != pinned {
+		t.Fatalf("body direct installation ID not pinned: %#v", metadata)
+	}
+	var bodyNested map[string]any
+	if err := json.Unmarshal([]byte(metadata[openAIWSTurnMetadataHeader].(string)), &bodyNested); err != nil {
+		t.Fatalf("decode body nested metadata: %v", err)
+	}
+	if bodyNested[codexTurnMetadataInstallationIDKey] != pinned || bodyNested["turn"] != float64(1) {
+		t.Fatalf("body nested metadata mismatch: %#v", bodyNested)
+	}
+	if headers.Get(codexInstallationIDKey) != pinned {
+		t.Fatalf("header direct installation ID not pinned: %q", headers.Get(codexInstallationIDKey))
+	}
+	var headerNested map[string]any
+	if err := json.Unmarshal([]byte(headers.Get(openAIWSTurnMetadataHeader)), &headerNested); err != nil {
+		t.Fatalf("decode header nested metadata: %v", err)
+	}
+	if headerNested[codexTurnMetadataInstallationIDKey] != pinned || headerNested["session"] != "s" {
+		t.Fatalf("header nested metadata mismatch: %#v", headerNested)
+	}
+}
+
+func TestApplyOpenAIInstallationIDForOutboundCompactStripsBodyMetadata(t *testing.T) {
+	const pinned = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	account := newOpenAIOAuthPinAccount(502, map[string]any{openAIPinnedInstallationIDKey: pinned})
+	body := map[string]any{
+		"model": "gpt-5.4",
+		"client_metadata": map[string]any{codexInstallationIDKey: "body-client"},
+	}
+	headers := make(http.Header)
+	headers.Set(openAIWSTurnMetadataHeader, `{"installation_id":"client-nested","session":"s"}`)
+
+	if _, err := applyOpenAIInstallationIDForOutbound(context.Background(), nil, nil, account, body, headers, true, false); err != nil {
+		t.Fatalf("apply compact installation identity: %v", err)
+	}
+	if _, exists := body["client_metadata"]; exists {
+		t.Fatalf("compact body retained client_metadata: %#v", body)
+	}
+	if headers.Get(codexInstallationIDKey) != pinned {
+		t.Fatalf("compact direct header mismatch: %q", headers.Get(codexInstallationIDKey))
+	}
+	if got := extractInstallationIDFromTurnMetadata(headers.Get(openAIWSTurnMetadataHeader)); got != pinned {
+		t.Fatalf("compact nested header mismatch: %q", got)
+	}
+}
+
+func TestApplyOpenAIInstallationIDForOutboundShadowUsesParentAndRepairsCAS(t *testing.T) {
+	parentID := int64(503)
+	parent := newOpenAIOAuthPinAccount(parentID, map[string]any{openAIPinnedInstallationIDKey: "invalid"})
+	shadow := newOpenAIOAuthPinAccount(504, nil)
+	shadow.ParentAccountID = &parentID
+	repo := &installationIdentityRepoStub{accounts: map[int64]*Account{parentID: parent}}
 	body := map[string]any{}
-	if !enforceCodexInstallationIDInBody(body, "owned-id") {
-		t.Fatalf("expected body mutated")
+	headers := make(http.Header)
+
+	resolution, err := applyOpenAIInstallationIDForOutbound(
+		context.Background(), nil, repo, shadow, body, headers, false, false,
+	)
+	if err != nil {
+		t.Fatalf("apply shadow installation identity: %v", err)
 	}
-	cm, ok := body["client_metadata"].(map[string]any)
-	if !ok || cm[codexInstallationIDKey] != "owned-id" {
-		t.Fatalf("expected client_metadata created with owned id, got %#v", body["client_metadata"])
+	if !resolution.Enabled || resolution.OutboundID == "" || resolution.OutboundID == "invalid" || repo.ensureCalls != 1 {
+		t.Fatalf("shadow CAS resolution mismatch: resolution=%+v ensure_calls=%d", resolution, repo.ensureCalls)
+	}
+	if got := body["client_metadata"].(map[string]any)[codexInstallationIDKey]; got != resolution.OutboundID {
+		t.Fatalf("shadow body used wrong installation ID: %v", got)
+	}
+	if headers.Get(codexInstallationIDKey) != resolution.OutboundID {
+		t.Fatalf("shadow header used wrong installation ID: %q", headers.Get(codexInstallationIDKey))
+	}
+
+	secondBody := map[string]any{}
+	secondHeaders := make(http.Header)
+	second, err := applyOpenAIInstallationIDForOutbound(context.Background(), nil, repo, shadow, secondBody, secondHeaders, false, false)
+	if err != nil || second.OutboundID != resolution.OutboundID {
+		t.Fatalf("shadow CAS value was not stable: first=%+v second=%+v err=%v", resolution, second, err)
 	}
 }
 
-func TestInstallationObservation_RecordsOnlyWhenEnabled(t *testing.T) {
-	svc := &OpenAIGatewayService{}
-	// Disabled: nothing recorded.
-	SetInstallationObservationEnabled(false)
-	acct := newOpenAIOAuthPinAccount(201, nil)
-	hdr := http.Header{}
-	hdr.Set("User-Agent", "codex_cli_rs/1.0")
-	svc.recordInstallationObservation(nil, acct, installationIDResolution{Enabled: true, OutboundID: "abc"}, hdr)
-	if got := SnapshotInstallationObservations(10); len(got) != 0 {
-		t.Fatalf("disabled observation must not record, got %d entries", len(got))
-	}
-
-	// Enabled: records with captured fields.
-	SetInstallationObservationEnabled(true)
-	defer SetInstallationObservationEnabled(false)
-	hdr2 := http.Header{}
-	hdr2.Set("User-Agent", "codex_cli_rs/2.0")
-	hdr2.Set("OpenAI-Beta", "responses=v1")
-	hdr2.Set("Originator", "codex_cli_rs")
-	svc.recordInstallationObservation(nil, acct, installationIDResolution{
-		Enabled:    true,
-		OutboundID: "outbound-1",
-		ClientID:   "client-1",
-	}, hdr2)
-
-	entries := SnapshotInstallationObservations(10)
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 recorded entry, got %d", len(entries))
-	}
-	e := entries[0]
-	if e.OutboundInstallationID != "outbound-1" || e.ClientReportedInstallationID != "client-1" {
-		t.Fatalf("observation captured wrong ids: %+v", e)
-	}
-	if e.UserAgent != "codex_cli_rs/2.0" || e.OpenAIBeta != "responses=v1" {
-		t.Fatalf("observation captured wrong headers: %+v", e)
-	}
-	if e.Originator != "codex_cli_rs" {
-		t.Fatalf("observation captured wrong originator: %+v", e)
-	}
-	if e.AccountID != 201 {
-		t.Fatalf("observation captured wrong account id: %+v", e)
-	}
-}
-
-func TestInstallationObservation_DisableClearsBuffer(t *testing.T) {
-	svc := &OpenAIGatewayService{}
-	SetInstallationObservationEnabled(true)
-	acct := newOpenAIOAuthPinAccount(202, nil)
-	svc.recordInstallationObservation(nil, acct, installationIDResolution{Enabled: true, OutboundID: "x"}, http.Header{})
-	if len(SnapshotInstallationObservations(10)) == 0 {
-		t.Fatalf("expected an entry before disabling")
-	}
-	SetInstallationObservationEnabled(false)
-	if got := SnapshotInstallationObservations(10); len(got) != 0 {
-		t.Fatalf("disabling observation should clear the buffer, got %d", len(got))
+func TestApplyOpenAIInstallationIDForOutboundSkipsAPIKeyAndPassthrough(t *testing.T) {
+	for name, account := range map[string]*Account{
+		"api-key": {ID: 505, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+		"passthrough": newOpenAIOAuthPinAccount(506, map[string]any{
+			openAIPinnedInstallationIDKey: "11111111-2222-4333-8444-555555555555",
+			"openai_passthrough":          true,
+		}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := map[string]any{"client_metadata": map[string]any{codexInstallationIDKey: "client"}}
+			headers := make(http.Header)
+			headers.Set(codexInstallationIDKey, "client")
+			if _, err := applyOpenAIInstallationIDForOutbound(context.Background(), nil, nil, account, body, headers, false, account.IsOpenAIPassthroughEnabled()); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if body["client_metadata"].(map[string]any)[codexInstallationIDKey] != "client" || headers.Get(codexInstallationIDKey) != "client" {
+				t.Fatalf("installation metadata was rewritten for %s: body=%#v headers=%#v", name, body, headers)
+			}
+		})
 	}
 }

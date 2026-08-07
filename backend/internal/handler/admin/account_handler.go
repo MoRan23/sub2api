@@ -1018,6 +1018,27 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
 }
 
+// RegenerateInstallationID generates a new server-owned UUID for an eligible
+// OpenAI OAuth parent account.
+// POST /api/v1/admin/accounts/:id/installation-id/regenerate
+func (h *AccountHandler) RegenerateInstallationID(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	installationID, err := h.adminService.RegenerateOpenAIInstallationID(c.Request.Context(), accountID)
+	if err != nil {
+		if errors.Is(err, service.ErrAccountNotFound) {
+			response.NotFound(c, "Account not found")
+			return
+		}
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"installation_id": installationID})
+}
+
 // scheduleOpenAIResponsesProbe 异步触发 OpenAI APIKey 账号的 Responses API 能力探测。
 //
 // 仅对 platform=openai && type=apikey 账号生效；其他账号无操作。

@@ -510,6 +510,10 @@ func (s *stubAdminService) UpdateAccount(ctx context.Context, id int64, input *s
 	return &account, nil
 }
 
+func (s *stubAdminService) RegenerateOpenAIInstallationID(ctx context.Context, id int64) (string, error) {
+	return "00000000-0000-4000-8000-000000000000", nil
+}
+
 func (s *stubAdminService) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
 	s.updateAccountExtraCalls++
 	return nil

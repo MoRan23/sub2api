@@ -61,10 +61,6 @@ var schedulerNeutralExtraKeyPrefixes = []string{
 	"upstream_billing_probe",
 	"upstream_billing_rate_sync",
 	"ollama_cloud_usage",
-	// Installation pinning captures/rotates the account-owned installation_id on
-	// the request hot path; these writes must not trigger scheduler bucket rebuilds.
-	"openai_installation_",
-	"openai_pinned_installation_id",
 }
 
 var schedulerNeutralExtraKeys = map[string]struct{}{
@@ -2594,6 +2590,99 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		}
 	}
 	return nil
+}
+
+// EnsureOpenAIInstallationID repairs a missing or invalid account-owned UUID
+// with compare-and-swap semantics. Concurrent callers either perform the write
+// or read back the UUID committed by the winner.
+func (r *accountRepository) EnsureOpenAIInstallationID(ctx context.Context, accountID int64, expectedID, generatedID string) (string, error) {
+	expectedID = strings.TrimSpace(expectedID)
+	generatedID = strings.TrimSpace(generatedID)
+	if accountID <= 0 || generatedID == "" {
+		return "", service.ErrAccountNotFound
+	}
+
+	baseCtx := ctx
+	contextTx := dbent.TxFromContext(ctx)
+	client := clientFromContext(ctx, r.client)
+	var tx *dbent.Tx
+	if contextTx == nil {
+		var err error
+		tx, err = r.client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return "", err
+		}
+		if tx != nil {
+			defer func() { _ = tx.Rollback() }()
+			ctx = dbent.NewTxContext(ctx, tx)
+			client = tx.Client()
+		}
+	}
+
+	result, err := client.ExecContext(ctx, `
+		UPDATE accounts
+		SET extra = jsonb_set(
+			COALESCE(extra, '{}'::jsonb),
+			'{openai_pinned_installation_id}',
+			to_jsonb($3::text),
+			true
+		), updated_at = NOW()
+		WHERE id = $1
+			AND deleted_at IS NULL
+			AND platform = 'openai'
+			AND type = 'oauth'
+			AND parent_account_id IS NULL
+			AND (
+				COALESCE(extra ->> 'openai_pinned_installation_id', '') = $2
+				OR jsonb_typeof(extra -> 'openai_pinned_installation_id') <> 'string'
+			)
+	`, accountID, expectedID, generatedID)
+	if err != nil {
+		return "", err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	if affected > 0 {
+		if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
+			return "", err
+		}
+		if tx != nil {
+			if err := tx.Commit(); err != nil {
+				return "", err
+			}
+		}
+		if contextTx == nil {
+			r.syncSchedulerAccountSnapshot(baseCtx, accountID)
+		}
+		return generatedID, nil
+	}
+
+	rows, err := client.QueryContext(ctx, `
+		SELECT COALESCE(extra ->> 'openai_pinned_installation_id', '')
+		FROM accounts
+		WHERE id = $1
+			AND deleted_at IS NULL
+			AND platform = 'openai'
+			AND type = 'oauth'
+			AND parent_account_id IS NULL
+	`, accountID)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return "", err
+		}
+		return "", service.ErrAccountNotFound
+	}
+	var resolved string
+	if err := rows.Scan(&resolved); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(resolved), rows.Err()
 }
 
 // UpdateUpstreamBillingProbeSnapshot stores a probe result only while the

@@ -17,6 +17,7 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/google/uuid"
 )
 
 // Account management implementations
@@ -452,15 +453,13 @@ func normalizeGrokMediaEligibilityUpdateExtra(account *Account, input *UpdateAcc
 	return normalized, nil
 }
 
-// ValidateOpenAIInstallationPinExtra validates the two per-account Codex
-// installation_id pin toggles when present. Both must be booleans; the
-// system-managed pinned value itself is never validated here because it is
-// never accepted from the client (it is seized from the first request).
+// ValidateOpenAIInstallationPinExtra validates the persisted pin toggle. The
+// legacy rotation key is intentionally ignored for backwards compatibility.
 func ValidateOpenAIInstallationPinExtra(platform string, extra map[string]any) error {
 	if platform != PlatformOpenAI || extra == nil {
 		return nil
 	}
-	for _, key := range []string{openAIInstallationPinEnabledKey, openAIInstallationRotateEnabledKey} {
+	for _, key := range []string{openAIInstallationPinEnabledKey} {
 		raw, exists := extra[key]
 		if !exists || raw == nil {
 			continue
@@ -475,39 +474,33 @@ func ValidateOpenAIInstallationPinExtra(platform string, extra map[string]any) e
 	return nil
 }
 
-// normalizeOpenAIInstallationPinUpdateExtra keeps the per-account installation_id
-// pin configuration consistent across a full-object PUT. The two toggles follow
-// the "not provided means keep current" rule (like long-context billing), and
-// the system-managed pinned value is always carried over: the panel never sends
-// it, so without this it would be wiped on every edit, forcing the account to
-// re-seize a new installation_id. Any client-supplied pinned value is ignored on
-// purpose — the runtime registry is authoritative and only the first request may
-// seize the value.
+// normalizeOpenAIInstallationPinUpdateExtra keeps system-managed installation
+// fields out of ordinary account updates. The pin toggle follows the
+// "not provided means keep current" rule; UUID and legacy rotation are never
+// accepted from clients.
 func normalizeOpenAIInstallationPinUpdateExtra(account *Account, input *UpdateAccountInput, normalized map[string]any) (map[string]any, error) {
+	normalized = maps.Clone(normalized)
+	if normalized == nil {
+		normalized = make(map[string]any)
+	}
+	delete(normalized, openAIPinnedInstallationIDKey)
+	delete(normalized, openAIInstallationRotateEnabledKey)
 	if account == nil || account.Platform != PlatformOpenAI {
+		delete(normalized, openAIInstallationPinEnabledKey)
 		return normalized, nil
 	}
 	if err := ValidateOpenAIInstallationPinExtra(account.Platform, input.Extra); err != nil {
 		return nil, err
 	}
-	normalized = maps.Clone(normalized)
-	if normalized == nil {
-		normalized = make(map[string]any)
-	}
-	for _, key := range []string{openAIInstallationPinEnabledKey, openAIInstallationRotateEnabledKey} {
-		if _, provided := input.Extra[key]; provided {
-			continue
-		}
-		if current, ok := account.Extra[key]; ok {
-			normalized[key] = current
+	if _, provided := input.Extra[openAIInstallationPinEnabledKey]; !provided {
+		if current, ok := account.Extra[openAIInstallationPinEnabledKey]; ok {
+			normalized[openAIInstallationPinEnabledKey] = current
 		}
 	}
 	// The pinned value is system-managed; preserve the current one and never let
 	// an incoming payload set or clear it.
 	if current, ok := account.Extra[openAIPinnedInstallationIDKey]; ok {
 		normalized[openAIPinnedInstallationIDKey] = current
-	} else {
-		delete(normalized, openAIPinnedInstallationIDKey)
 	}
 	return normalized, nil
 }
@@ -520,9 +513,15 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, OllamaCloudUsageSessionExtraKey)
 	delete(accountExtra, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(accountExtra, OllamaCloudUsageSnapshotExtraKey)
-	// The pinned installation_id is system-managed: it is seized from the
-	// account's first request, never accepted from the create payload.
+	// The pinned installation_id is system-managed and generated at creation.
 	delete(accountExtra, openAIPinnedInstallationIDKey)
+	delete(accountExtra, openAIInstallationRotateEnabledKey)
+	if input.Platform == PlatformOpenAI && input.Type == AccountTypeOAuth {
+		if accountExtra == nil {
+			accountExtra = make(map[string]any)
+		}
+		accountExtra[openAIPinnedInstallationIDKey] = uuid.NewString()
+	}
 	account := &Account{
 		Name:        input.Name,
 		Notes:       normalizeAccountNotes(input.Notes),
@@ -708,12 +707,30 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 	wasOveragesEnabled := account.IsOveragesEnabled()
+	wasOpenAIOAuthParent := account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth && !account.IsShadow()
 
 	if input.Name != "" {
 		account.Name = input.Name
 	}
 	if input.Type != "" {
 		account.Type = input.Type
+	}
+	// Installation identity is a parent OpenAI OAuth system field. Generate it
+	// when an existing account is converted into that type, and clear all
+	// installation configuration when it leaves the eligible type.
+	if account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth && !account.IsShadow() {
+		if account.Extra == nil {
+			account.Extra = make(map[string]any)
+		}
+		if !wasOpenAIOAuthParent || normalizeCodexInstallationID(account.GetPinnedOpenAIInstallationID()) == "" {
+			delete(account.Extra, openAIPinnedInstallationIDKey)
+			account.Extra[openAIPinnedInstallationIDKey] = uuid.NewString()
+		}
+		delete(account.Extra, openAIInstallationRotateEnabledKey)
+	} else if account.Extra != nil {
+		delete(account.Extra, openAIPinnedInstallationIDKey)
+		delete(account.Extra, openAIInstallationPinEnabledKey)
+		delete(account.Extra, openAIInstallationRotateEnabledKey)
 	}
 	if input.Notes != nil {
 		account.Notes = normalizeAccountNotes(input.Notes)
@@ -971,6 +988,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	delete(updates, openAIPinnedInstallationIDKey)
+	delete(updates, openAIInstallationRotateEnabledKey)
+	delete(updates, openAIInstallationPinEnabledKey)
 	delete(updates, UpstreamBillingProbeEnabledExtraKey)
 	delete(updates, UpstreamBillingRateSyncEnabledExtraKey)
 	delete(updates, UpstreamBillingProbeExtraKey)
@@ -992,9 +1012,39 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	return s.accountRepo.UpdateExtra(ctx, id, updates)
 }
 
+// RegenerateOpenAIInstallationID creates a new server-owned UUID for an
+// eligible parent account. The persisted pin toggle must already be enabled;
+// changing that toggle and regenerating are deliberately separate operations.
+func (s *adminServiceImpl) RegenerateOpenAIInstallationID(ctx context.Context, id int64) (string, error) {
+	account, err := s.accountRepo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrAccountNotFound) {
+			return "", ErrAccountNotFound
+		}
+		return "", err
+	}
+	if account == nil {
+		return "", ErrAccountNotFound
+	}
+	if account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || account.IsShadow() {
+		return "", infraerrors.BadRequest("OPENAI_INSTALLATION_REGENERATE_UNSUPPORTED", "only non-shadow OpenAI OAuth accounts support installation_id regeneration")
+	}
+	if !account.IsOpenAIInstallationPinEnabled() {
+		return "", infraerrors.BadRequest("OPENAI_INSTALLATION_REGENERATE_PIN_DISABLED", "enable fixed installation_id and save the account before regenerating")
+	}
+	installationID := uuid.NewString()
+	if err := s.accountRepo.UpdateExtra(ctx, id, map[string]any{openAIPinnedInstallationIDKey: installationID}); err != nil {
+		return "", err
+	}
+	return installationID, nil
+}
+
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	delete(input.Extra, openAIPinnedInstallationIDKey)
+	delete(input.Extra, openAIInstallationRotateEnabledKey)
+	delete(input.Extra, openAIInstallationPinEnabledKey)
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	delete(input.Extra, UpstreamBillingProbeEnabledExtraKey)
 	delete(input.Extra, UpstreamBillingRateSyncEnabledExtraKey)

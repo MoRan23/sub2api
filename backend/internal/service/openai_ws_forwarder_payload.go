@@ -75,6 +75,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	turnState string,
 	turnMetadata string,
 	promptCacheKey string,
+	rewriteInstallationID bool,
 ) (http.Header, openAIWSSessionHeaderResolution, error) {
 	headers := make(http.Header)
 	if account == nil || !account.IsOpenAIAgentIdentity() {
@@ -92,6 +93,17 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 			}
 		}
 		for _, name := range [...]string{"x-codex-window-id", "x-codex-installation-id"} {
+			values, present := c.Request.Header[http.CanonicalHeaderKey(name)]
+			if !present {
+				continue
+			}
+			if !rewriteInstallationID {
+				headers.Del(name)
+				for _, value := range values {
+					headers.Add(name, value)
+				}
+				continue
+			}
 			if value := c.Request.Header.Get(name); strings.TrimSpace(value) != "" {
 				headers.Set(name, value)
 			}
@@ -117,8 +129,17 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	if state := strings.TrimSpace(turnState); state != "" {
 		headers.Set(openAIWSTurnStateHeader, state)
 	}
-	if metadata := strings.TrimSpace(turnMetadata); metadata != "" {
-		headers.Set(openAIWSTurnMetadataHeader, metadata)
+	if !rewriteInstallationID && c != nil && c.Request != nil {
+		if values, present := c.Request.Header[http.CanonicalHeaderKey(openAIWSTurnMetadataHeader)]; present {
+			headers.Del(openAIWSTurnMetadataHeader)
+			for _, value := range values {
+				headers.Add(openAIWSTurnMetadataHeader, value)
+			}
+		} else if strings.TrimSpace(turnMetadata) != "" {
+			headers.Set(openAIWSTurnMetadataHeader, turnMetadata)
+		}
+	} else if strings.TrimSpace(turnMetadata) != "" {
+		headers.Set(openAIWSTurnMetadataHeader, turnMetadata)
 	}
 
 	if account != nil && account.Type == AccountTypeOAuth {
@@ -154,13 +175,19 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		enforceCodexIdentityHeadersWithUA(headers, s.codexIdentityOverrideUA(account))
 	}
 
-	// installation_id 收口：开启固定时用账号自有值强制改写 WS 握手头，覆盖上面从客户端
-	// 请求透传进来的值；与 HTTP 路径、WS create 载荷共用同一次解析（gin 上下文缓存）。
-	if account != nil && account.Type == AccountTypeOAuth {
-		clientInstallationID := strings.TrimSpace(headers.Get(codexInstallationIDKey))
-		pin := s.resolveInstallationIDForRequest(ctx, c, account, clientInstallationID)
+	// installation_id 收口只用于非 passthrough 的 OpenAI OAuth WS。透传
+	// adapter 明确传 false，因此不会调用 resolver 或改写握手头。
+	if rewriteInstallationID && shouldRewriteOpenAIInstallationID(account, false) {
+		clientInstallationID := extractClientInstallationID(c, nil)
+		if clientInstallationID == "" {
+			clientInstallationID = strings.TrimSpace(headers.Get(codexInstallationIDKey))
+		}
+		pin, pinErr := s.resolveInstallationIDForRequest(ctx, c, account, clientInstallationID)
+		if pinErr != nil {
+			return nil, sessionResolution, fmt.Errorf("resolve openai installation_id: %w", pinErr)
+		}
 		if pin.Enabled && pin.OutboundID != "" {
-			headers.Set(codexInstallationIDKey, pin.OutboundID)
+			rewriteOpenAIInstallationIDHeaders(headers, pin.OutboundID)
 		}
 		s.recordInstallationObservation(c, account, pin, headers)
 	}

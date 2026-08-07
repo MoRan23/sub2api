@@ -2,11 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"strings"
-	"sync"
-	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -16,61 +16,18 @@ import (
 // (upstream) sides.
 const codexInstallationIDKey = "x-codex-installation-id"
 
+const codexTurnMetadataInstallationIDKey = "installation_id"
+
 // installationPinContextKey caches the per-request installation resolution in
-// the gin context so the body-transform stage and the header stage emit the
-// exact same value (essential in rotate mode where each call would otherwise
-// mint a different UUID).
+// the gin context so body and header stages emit the exact same value.
 const installationPinContextKey = "openai_resolved_installation_id"
 
-// installationPinRegistry is the process-level authoritative store of every
-// account's pinned installation_id.
-//
-// Account structs reach the forward path through a scheduler snapshot cache,
-// and pin writes are deliberately scheduler-neutral (they do not bust that
-// cache — see schedulerNeutralExtraKeyPrefixes). The registry therefore shields
-// the pinned value from snapshot staleness: once an account seizes a value the
-// registry serves it consistently for the process lifetime, while the DB copy
-// exists only for restart durability.
-type installationPinRegistry struct {
-	mu     sync.RWMutex
-	values map[int64]string
-}
-
-var globalInstallationPinRegistry = &installationPinRegistry{values: make(map[int64]string)}
-
-func (r *installationPinRegistry) get(id int64) (string, bool) {
-	if r == nil || id <= 0 {
-		return "", false
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	v, ok := r.values[id]
-	return v, ok && v != ""
-}
-
-func (r *installationPinRegistry) set(id int64, value string) {
-	if r == nil || id <= 0 || strings.TrimSpace(value) == "" {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.values[id] = value
-}
-
-func (r *installationPinRegistry) clear(id int64) {
-	if r == nil || id <= 0 {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.values, id)
-}
-
-// ClearPinnedInstallationIDFromRegistry drops an account's runtime pinned value
-// so the next request re-seizes one. Called when an admin clears the persisted
-// pin to force recapture.
-func ClearPinnedInstallationIDFromRegistry(accountID int64) {
-	globalInstallationPinRegistry.clear(accountID)
+// openAIInstallationIDCASRepository is implemented by the production account
+// repository without widening AccountRepository for every gateway test double.
+// It repairs a missing/invalid UUID with compare-and-swap semantics so concurrent
+// requests converge on one persisted value.
+type openAIInstallationIDCASRepository interface {
+	EnsureOpenAIInstallationID(ctx context.Context, accountID int64, expectedID, generatedID string) (string, error)
 }
 
 // installationIDResolution is the resolved outbound installation identity for a
@@ -79,141 +36,171 @@ type installationIDResolution struct {
 	// Enabled reports whether pinning is active for this account. When false the
 	// caller must fall back to the legacy passthrough behavior.
 	Enabled bool
-	// Rotated reports that OutboundID was freshly regenerated this request.
-	Rotated bool
 	// OutboundID is the value to emit upstream (empty when !Enabled).
 	OutboundID string
 	// ClientID is what the inbound client reported (header/body), kept for the
 	// observation panel so operators can see the value being suppressed.
 	ClientID string
-	// NeedsPersist reports that OutboundID should be written back to the account
-	// for restart durability.
-	NeedsPersist bool
+	// BodyModified and HeadersModified report mutations made by the shared
+	// outbound boundary. They let callers preserve their existing serialization
+	// and observation behavior without duplicating rewrite decisions.
+	BodyModified    bool
+	HeadersModified bool
+}
+
+type installationIDRequestCache struct {
+	SourceAccountID int64
+	Resolution      installationIDResolution
+}
+
+// shouldRewriteOpenAIInstallationID freezes the transport boundary for pinned
+// installation identity. Passthrough traffic is deliberately excluded even
+// when the account's pin switch is enabled.
+func shouldRewriteOpenAIInstallationID(account *Account, passthrough bool) bool {
+	return account != nil && account.IsOpenAIOAuth() && !passthrough
 }
 
 // resolveOutboundInstallationID computes the outbound installation_id for an
 // account given whatever the inbound client reported.
 //
-// Precedence when pinning is on and rotation is off:
-//  1. runtime registry (authoritative, snapshot-proof);
-//  2. persisted account value (seeds the registry after a restart);
-//  3. the first request's client-reported value, else a generated UUIDv4.
-//
-// The account's real openai_device_id is intentionally NOT consulted: the pin
-// is defined as "the value from this account's first request" so shared upstream
-// accounts converge on one installation_id regardless of imported device data.
+// The client-reported value is retained only for the observation panel. It never
+// participates in selecting the fixed outbound UUID.
 func resolveOutboundInstallationID(account *Account, clientReportedID string) installationIDResolution {
 	res := installationIDResolution{ClientID: strings.TrimSpace(clientReportedID)}
 	if account == nil || !account.IsOpenAIInstallationPinEnabled() {
 		return res
 	}
 	res.Enabled = true
-
-	if account.IsOpenAIInstallationRotateEnabled() {
-		// Rotation mints a fresh value every request. Intra-request body/header
-		// parity comes from the gin-context cache (installationPinContextKey), so
-		// rotation deliberately does NOT touch the registry or DB: the stable
-		// seized value survives untouched, and turning rotation back off cleanly
-		// resumes it instead of freezing on the last random UUID.
-		res.OutboundID = uuid.NewString()
-		res.Rotated = true
-		return res
-	}
-
-	if v, ok := globalInstallationPinRegistry.get(account.ID); ok {
-		res.OutboundID = v
-		// Reconcile the DB copy if it drifted or was never written.
-		res.NeedsPersist = account.GetPinnedOpenAIInstallationID() != v
-		return res
-	}
-	if persisted := account.GetPinnedOpenAIInstallationID(); persisted != "" {
-		res.OutboundID = persisted
-		globalInstallationPinRegistry.set(account.ID, persisted)
-		return res
-	}
-
-	// First request for this account: seize the client-reported value, or mint a
-	// UUIDv4 when none was usable. This mirrors Codex's resolve_installation_id
-	// (core/src/installation_id.rs): a stored value that parses as a UUID is
-	// returned in canonical lowercase form, and anything that does not parse is
-	// discarded in favor of a fresh Uuid::new_v4(). Normalizing here keeps the
-	// pinned identity indistinguishable from a real Codex client's own file.
-	seized := normalizeCodexInstallationID(res.ClientID)
-	if seized == "" {
-		seized = uuid.NewString()
-	}
-	res.OutboundID = seized
-	res.NeedsPersist = true
-	globalInstallationPinRegistry.set(account.ID, seized)
+	res.OutboundID = normalizeCodexInstallationID(account.GetPinnedOpenAIInstallationID())
 	return res
 }
 
-// normalizeCodexInstallationID mirrors the reuse/normalize half of Codex's
-// resolve_installation_id: a value that parses as a UUID is returned in its
-// canonical lowercase hyphenated form (Rust does Uuid::parse_str(..).to_string()),
-// and anything that does not parse yields "" so the caller mints a fresh v4
-// (Codex's behavior for invalid installation_id file contents).
+// normalizeCodexInstallationID accepts only canonicalizable UUID v4 values.
 func normalizeCodexInstallationID(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return ""
 	}
 	parsed, err := uuid.Parse(raw)
-	if err != nil {
+	if err != nil || parsed.Version() != 4 {
 		return ""
 	}
 	return parsed.String()
 }
 
-// resolveInstallationIDForRequest resolves the outbound installation identity
-// once per request and caches it in the gin context, so every stage (body and
-// header, HTTP and WS) emits the same value. It also persists newly seized
-// values best-effort for restart durability.
-func (s *OpenAIGatewayService) resolveInstallationIDForRequest(ctx context.Context, c *gin.Context, account *Account, clientReportedID string) installationIDResolution {
-	if c != nil {
-		if cached, ok := c.Get(installationPinContextKey); ok {
-			if res, ok := cached.(installationIDResolution); ok {
-				return res
-			}
-		}
+// resolveOpenAIInstallationIdentityAccount resolves a request source account
+// to the account whose credentials and pinned installation identity are used
+// upstream. Shadow accounts never own an installation identity of their own.
+func resolveOpenAIInstallationIdentityAccount(ctx context.Context, repo AccountRepository, account *Account) (*Account, error) {
+	if account == nil || !account.IsShadow() {
+		return account, nil
 	}
-	res := resolveOutboundInstallationID(account, clientReportedID)
-	if c != nil {
-		c.Set(installationPinContextKey, res)
-	}
-	if res.Enabled && res.NeedsPersist && account != nil {
-		s.persistPinnedInstallationID(ctx, account, res.OutboundID)
-	}
-	return res
+	return resolveCredentialAccount(ctx, repo, account)
 }
 
-// persistPinnedInstallationID writes the pinned value to accounts.extra without
-// blocking the request. The write is scheduler-neutral so it does not trigger a
-// scheduler bucket rebuild.
-func (s *OpenAIGatewayService) persistPinnedInstallationID(ctx context.Context, account *Account, id string) {
-	if s == nil || s.accountRepo == nil || account == nil || account.ID <= 0 {
-		return
-	}
-	if strings.TrimSpace(id) == "" {
-		return
-	}
-	accountID := account.ID
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.LegacyPrintf("service.openai_gateway", "[Installation] persist pinned id panic account_id=%d recover=%v", accountID, r)
+// resolveInstallationIDForRequestWithRepo is the shared resolver used by the
+// gateway and auxiliary OAuth requests. It deliberately accepts the
+// repository explicitly so background probes and admin tests use the same CAS
+// persistence path as normal forwarding.
+func resolveInstallationIDForRequestWithRepo(
+	ctx context.Context,
+	c *gin.Context,
+	repo AccountRepository,
+	account *Account,
+	clientReportedID string,
+) (installationIDResolution, error) {
+	if c != nil && account != nil {
+		if cached, ok := c.Get(installationPinContextKey); ok {
+			if requestCache, ok := cached.(installationIDRequestCache); ok && requestCache.SourceAccountID == account.ID {
+				return requestCache.Resolution, nil
 			}
-		}()
-		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		if err := s.accountRepo.UpdateExtra(bg, accountID, map[string]any{openAIPinnedInstallationIDKey: id}); err != nil {
-			logger.LegacyPrintf("service.openai_gateway", "[Installation] persist pinned id failed account_id=%d err=%v", accountID, err)
+		}
+	}
+
+	identityAccount, err := resolveOpenAIInstallationIdentityAccount(ctx, repo, account)
+	if err != nil {
+		return installationIDResolution{}, err
+	}
+	res := resolveOutboundInstallationID(identityAccount, clientReportedID)
+	if res.Enabled && res.OutboundID == "" {
+		generated, ensureErr := ensureOpenAIInstallationID(ctx, repo, identityAccount)
+		if ensureErr != nil {
+			return installationIDResolution{}, ensureErr
+		}
+		res.OutboundID = generated
+	}
+	if c != nil {
+		sourceAccountID := int64(0)
+		if account != nil {
+			sourceAccountID = account.ID
+		}
+		c.Set(installationPinContextKey, installationIDRequestCache{
+			SourceAccountID: sourceAccountID,
+			Resolution:      res,
+		})
+	}
+	return res, nil
+}
+
+// resolveInstallationIDForRequest resolves the outbound installation identity
+// once per request and caches it in the gin context, so every stage (body and
+// header, HTTP and WS) emits the same value. Shadow accounts inherit their
+// credential parent's identity.
+func (s *OpenAIGatewayService) resolveInstallationIDForRequest(ctx context.Context, c *gin.Context, account *Account, clientReportedID string) (installationIDResolution, error) {
+	var repo AccountRepository
+	if s != nil {
+		repo = s.accountRepo
+	}
+	return resolveInstallationIDForRequestWithRepo(ctx, c, repo, account, clientReportedID)
+}
+
+func (s *OpenAIGatewayService) ensureOpenAIInstallationID(ctx context.Context, account *Account) (string, error) {
+	var repo AccountRepository
+	if s != nil {
+		repo = s.accountRepo
+	}
+	return ensureOpenAIInstallationID(ctx, repo, account)
+}
+
+func ensureOpenAIInstallationID(ctx context.Context, repo AccountRepository, account *Account) (string, error) {
+	if account == nil || account.ID <= 0 || !account.IsOpenAIOAuth() || account.IsShadow() {
+		return "", fmt.Errorf("openai installation_id repair requires an OAuth parent account")
+	}
+	expected := strings.TrimSpace(account.GetPinnedOpenAIInstallationID())
+	generated := uuid.NewString()
+	if repo == nil {
+		return generated, nil
+	}
+	if casRepo, ok := repo.(openAIInstallationIDCASRepository); ok {
+		resolved, err := callEnsureOpenAIInstallationID(casRepo, ctx, account.ID, expected, generated)
+		if err != nil {
+			return "", err
+		}
+		normalized := normalizeCodexInstallationID(resolved)
+		if normalized == "" {
+			return "", fmt.Errorf("account %d has invalid persisted openai installation_id", account.ID)
+		}
+		return normalized, nil
+	}
+	// Narrow test doubles may omit persistence. Production repositories implement
+	// the CAS contract; unsupported doubles still receive a request-local UUID
+	// without falling back to the client-reported value.
+	return generated, nil
+}
+
+func callEnsureOpenAIInstallationID(repo openAIInstallationIDCASRepository, ctx context.Context, accountID int64, expectedID, generatedID string) (resolved string, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			resolved = generatedID
+			err = nil
 		}
 	}()
+	return repo.EnsureOpenAIInstallationID(ctx, accountID, expectedID, generatedID)
 }
 
 // extractClientInstallationID reads the installation_id the inbound client
-// reported, preferring the header and falling back to body client_metadata.
+// reported. Direct header/body fields take precedence over values embedded in
+// x-codex-turn-metadata. Opaque turn metadata is ignored without mutation.
 func extractClientInstallationID(c *gin.Context, reqBody map[string]any) string {
 	if c != nil && c.Request != nil {
 		if v := strings.TrimSpace(c.Request.Header.Get(codexInstallationIDKey)); v != "" {
@@ -221,13 +208,235 @@ func extractClientInstallationID(c *gin.Context, reqBody map[string]any) string 
 		}
 	}
 	if reqBody != nil {
-		if cm, ok := reqBody["client_metadata"].(map[string]any); ok {
-			if v, ok := cm[codexInstallationIDKey].(string); ok && strings.TrimSpace(v) != "" {
-				return strings.TrimSpace(v)
-			}
+		if direct, _ := clientInstallationMetadataValues(reqBody); direct != "" {
+			return direct
+		}
+	}
+	if c != nil && c.Request != nil {
+		if v := extractInstallationIDFromTurnMetadata(c.Request.Header.Get(openAIWSTurnMetadataHeader)); v != "" {
+			return v
+		}
+	}
+	if reqBody != nil {
+		if _, turnMetadata := clientInstallationMetadataValues(reqBody); turnMetadata != "" {
+			return extractInstallationIDFromTurnMetadata(turnMetadata)
 		}
 	}
 	return ""
+}
+
+func extractClientInstallationIDFromHeaders(headers http.Header) string {
+	if headers == nil {
+		return ""
+	}
+	if value := strings.TrimSpace(headers.Get(codexInstallationIDKey)); value != "" {
+		return value
+	}
+	return extractInstallationIDFromTurnMetadata(headers.Get(openAIWSTurnMetadataHeader))
+}
+
+func copyOpenAIInstallationIDHeadersFromContext(c *gin.Context, headers http.Header) {
+	if c == nil || c.Request == nil || headers == nil {
+		return
+	}
+	if headers.Get(codexInstallationIDKey) == "" {
+		if value := strings.TrimSpace(c.Request.Header.Get(codexInstallationIDKey)); value != "" {
+			headers.Set(codexInstallationIDKey, value)
+		}
+	}
+	if len(headers.Values(openAIWSTurnMetadataHeader)) == 0 {
+		for _, value := range c.Request.Header.Values(openAIWSTurnMetadataHeader) {
+			headers.Add(openAIWSTurnMetadataHeader, value)
+		}
+	}
+}
+
+// applyOpenAIInstallationIDForOutbound is the common body/header boundary for
+// OpenAI OAuth requests outside the main gateway forwarder. It resolves the
+// source account (including shadows), repairs missing pinned UUIDs through CAS,
+// and applies the compact or regular Responses wire rules consistently.
+func applyOpenAIInstallationIDForOutbound(
+	ctx context.Context,
+	c *gin.Context,
+	repo AccountRepository,
+	account *Account,
+	body map[string]any,
+	headers http.Header,
+	compact bool,
+	passthrough bool,
+) (installationIDResolution, error) {
+	if !shouldRewriteOpenAIInstallationID(account, passthrough) {
+		return installationIDResolution{}, nil
+	}
+	identityAccount, err := resolveOpenAIInstallationIdentityAccount(ctx, repo, account)
+	if err != nil {
+		return installationIDResolution{}, err
+	}
+	if identityAccount != nil && identityAccount.IsOpenAIPassthroughEnabled() {
+		return installationIDResolution{}, nil
+	}
+	copyOpenAIInstallationIDHeadersFromContext(c, headers)
+	clientReportedID := extractClientInstallationID(c, body)
+	if clientReportedID == "" {
+		clientReportedID = extractClientInstallationIDFromHeaders(headers)
+	}
+	resolution, err := resolveInstallationIDForRequestWithRepo(ctx, c, repo, account, clientReportedID)
+	if err != nil {
+		return installationIDResolution{}, err
+	}
+
+	bodyModified := false
+	if compact {
+		bodyModified = stripOpenAICompactClientMetadata(body)
+	} else if resolution.Enabled && resolution.OutboundID != "" {
+		bodyModified = rewriteOpenAIInstallationIDInBody(body, resolution.OutboundID)
+	} else if body != nil {
+		bodyModified = applyCodexClientMetadata(body, identityAccount)
+	}
+	headerModified := false
+	if resolution.Enabled && resolution.OutboundID != "" {
+		headerModified = rewriteOpenAIInstallationIDHeaders(headers, resolution.OutboundID)
+	}
+	resolution.BodyModified = bodyModified
+	resolution.HeadersModified = headerModified
+	return resolution, nil
+}
+
+func clientInstallationMetadataValues(reqBody map[string]any) (direct string, turnMetadata string) {
+	if reqBody == nil {
+		return "", ""
+	}
+	switch metadata := reqBody["client_metadata"].(type) {
+	case map[string]any:
+		if value, ok := metadata[codexInstallationIDKey].(string); ok {
+			direct = strings.TrimSpace(value)
+		}
+		if value, ok := metadata[openAIWSTurnMetadataHeader].(string); ok {
+			turnMetadata = value
+		}
+	case map[string]string:
+		direct = strings.TrimSpace(metadata[codexInstallationIDKey])
+		turnMetadata = metadata[openAIWSTurnMetadataHeader]
+	}
+	return direct, turnMetadata
+}
+
+func extractInstallationIDFromTurnMetadata(raw string) string {
+	var metadata map[string]any
+	if strings.TrimSpace(raw) == "" || json.Unmarshal([]byte(raw), &metadata) != nil || metadata == nil {
+		return ""
+	}
+	value, _ := metadata[codexTurnMetadataInstallationIDKey].(string)
+	return strings.TrimSpace(value)
+}
+
+// rewriteCodexTurnMetadataInstallationID rewrites only installation_id in an
+// existing JSON object. Missing or opaque metadata is preserved byte-for-byte.
+func rewriteCodexTurnMetadataInstallationID(raw, id string) (string, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" || strings.TrimSpace(raw) == "" {
+		return raw, false
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil || metadata == nil {
+		return raw, false
+	}
+	if current, ok := metadata[codexTurnMetadataInstallationIDKey].(string); ok && current == id {
+		return raw, false
+	}
+	metadata[codexTurnMetadataInstallationIDKey] = id
+	rewritten, err := json.Marshal(metadata)
+	if err != nil {
+		return raw, false
+	}
+	return string(rewritten), true
+}
+
+// rewriteOpenAIInstallationIDInBody makes all parseable installation identity
+// fields in a regular Responses body agree with the request-scoped pinned ID.
+// It creates only the top-level client_metadata container; turn metadata is
+// rewritten only when the client supplied it.
+func rewriteOpenAIInstallationIDInBody(reqBody map[string]any, id string) bool {
+	id = strings.TrimSpace(id)
+	if reqBody == nil || id == "" {
+		return false
+	}
+
+	var metadata map[string]any
+	changed := false
+	switch existing := reqBody["client_metadata"].(type) {
+	case map[string]any:
+		metadata = existing
+	case map[string]string:
+		metadata = make(map[string]any, len(existing)+1)
+		for key, value := range existing {
+			metadata[key] = value
+		}
+		changed = true
+	default:
+		metadata = make(map[string]any, 1)
+		changed = true
+	}
+
+	if current, ok := metadata[codexInstallationIDKey].(string); !ok || current != id {
+		metadata[codexInstallationIDKey] = id
+		changed = true
+	}
+	if raw, ok := metadata[openAIWSTurnMetadataHeader].(string); ok {
+		if rewritten, nestedChanged := rewriteCodexTurnMetadataInstallationID(raw, id); nestedChanged {
+			metadata[openAIWSTurnMetadataHeader] = rewritten
+			changed = true
+		}
+	}
+	if changed {
+		reqBody["client_metadata"] = metadata
+	}
+	return changed
+}
+
+// stripOpenAICompactClientMetadata enforces the narrower HTTP compact schema.
+func stripOpenAICompactClientMetadata(reqBody map[string]any) bool {
+	if reqBody == nil {
+		return false
+	}
+	if _, ok := reqBody["client_metadata"]; !ok {
+		return false
+	}
+	delete(reqBody, "client_metadata")
+	return true
+}
+
+// rewriteOpenAIInstallationIDHeaders applies the pinned ID to the direct
+// header and to every parseable turn-metadata header value. It never creates a
+// turn-metadata header when the client did not send one.
+func rewriteOpenAIInstallationIDHeaders(headers http.Header, id string) bool {
+	id = strings.TrimSpace(id)
+	if headers == nil || id == "" {
+		return false
+	}
+	changed := strings.TrimSpace(headers.Get(codexInstallationIDKey)) != id
+	headers.Set(codexInstallationIDKey, id)
+
+	values := headers.Values(openAIWSTurnMetadataHeader)
+	if len(values) == 0 {
+		return changed
+	}
+	rewrittenValues := make([]string, len(values))
+	nestedChanged := false
+	for index, raw := range values {
+		rewrittenValues[index] = raw
+		if rewritten, valueChanged := rewriteCodexTurnMetadataInstallationID(raw, id); valueChanged {
+			rewrittenValues[index] = rewritten
+			nestedChanged = true
+		}
+	}
+	if nestedChanged {
+		headers.Del(openAIWSTurnMetadataHeader)
+		for _, value := range rewrittenValues {
+			headers.Add(openAIWSTurnMetadataHeader, value)
+		}
+	}
+	return changed || nestedChanged
 }
 
 // enforceCodexInstallationIDInBody force-sets client_metadata[installation] to
@@ -235,28 +444,5 @@ func extractClientInstallationID(c *gin.Context, reqBody map[string]any) string 
 // when the body was mutated. Unlike applyCodexClientMetadata (which is additive
 // and never overrides), this is authoritative and used only when pinning is on.
 func enforceCodexInstallationIDInBody(reqBody map[string]any, id string) bool {
-	id = strings.TrimSpace(id)
-	if reqBody == nil || id == "" {
-		return false
-	}
-	switch existing := reqBody["client_metadata"].(type) {
-	case map[string]any:
-		if cur, ok := existing[codexInstallationIDKey].(string); ok && cur == id {
-			return false
-		}
-		existing[codexInstallationIDKey] = id
-		reqBody["client_metadata"] = existing
-		return true
-	case map[string]string:
-		next := make(map[string]any, len(existing)+1)
-		for k, v := range existing {
-			next[k] = v
-		}
-		next[codexInstallationIDKey] = id
-		reqBody["client_metadata"] = next
-		return true
-	default:
-		reqBody["client_metadata"] = map[string]any{codexInstallationIDKey: id}
-		return true
-	}
+	return rewriteOpenAIInstallationIDInBody(reqBody, id)
 }

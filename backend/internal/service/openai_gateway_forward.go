@@ -410,19 +410,23 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if codexResult.Modified {
 			markDecodedModified()
 		}
-		// installation_id 收口：开启固定时，用账号自有的 installation_id 强制覆盖请求体
-		// client_metadata，彻底忽略客户端上报值；未开启固定时保持原有加法式行为（仅在
-		// 账号有真实 device_id 且客户端未带时补齐），等价于恢复透传语义。compact 形态不同，跳过。
-		if !isCompactRequest {
-			clientInstallationID := extractClientInstallationID(c, decoded)
-			pin := s.resolveInstallationIDForRequest(ctx, c, account, clientInstallationID)
-			if pin.Enabled {
-				if enforceCodexInstallationIDInBody(decoded, pin.OutboundID) {
-					markDecodedModified()
-				}
-			} else if applyCodexClientMetadata(decoded, account) {
-				markDecodedModified()
-			}
+		// installation_id 收口仅作用于 OpenAI OAuth 非透传请求。HTTP compact
+		// 使用更窄的 schema，必须移除顶层 client_metadata，并仅通过请求头携带 ID。
+		pin, pinErr := applyOpenAIInstallationIDForOutbound(
+			ctx,
+			c,
+			s.accountRepo,
+			account,
+			decoded,
+			nil,
+			isCompactRequest,
+			passthroughEnabled,
+		)
+		if pinErr != nil {
+			return nil, fmt.Errorf("resolve openai installation_id: %w", pinErr)
+		}
+		if pin.BodyModified {
+			markDecodedModified()
 		}
 		if codexResult.NormalizedModel != "" {
 			upstreamModel = codexResult.NormalizedModel
@@ -1127,15 +1131,23 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
 	}
 
-	// installation_id 收口：开启固定时用账号自有值强制改写出站头，覆盖白名单透传进来的
-	// 客户端上报值；未开启固定时保持透传。与请求体阶段共用同一次解析（gin 上下文缓存），
-	// 保证 body 与 header 出站值一致，重试之间也不漂移。
-	if account.Type == AccountTypeOAuth {
-		clientInstallationID := strings.TrimSpace(req.Header.Get(codexInstallationIDKey))
-		pin := s.resolveInstallationIDForRequest(ctx, c, account, clientInstallationID)
-		if pin.Enabled && pin.OutboundID != "" {
-			req.Header.Set(codexInstallationIDKey, pin.OutboundID)
-		}
+	// installation_id 收口：body 与 header 共用 gin 上下文中的同一次解析，
+	// 重试时不会漂移。Passthrough 请求在 Forward 的早期分支已返回，这里的
+	// 显式标记同时保护未来新增 builder 调用方。
+	pin, pinErr := applyOpenAIInstallationIDForOutbound(
+		ctx,
+		c,
+		s.accountRepo,
+		account,
+		nil,
+		req.Header,
+		isOpenAIResponsesCompactPath(c),
+		account.IsOpenAIPassthroughEnabled(),
+	)
+	if pinErr != nil {
+		return nil, fmt.Errorf("resolve openai installation_id: %w", pinErr)
+	}
+	if account.IsOpenAIOAuth() && !account.IsOpenAIPassthroughEnabled() {
 		s.recordInstallationObservation(c, account, pin, req.Header)
 	}
 

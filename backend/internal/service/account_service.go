@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 )
@@ -240,6 +242,14 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 		Status:      StatusActive,
 		ExpiresAt:   req.ExpiresAt,
 	}
+	if req.Platform == PlatformOpenAI && req.Type == AccountTypeOAuth {
+		if account.Extra == nil {
+			account.Extra = make(map[string]any)
+		}
+		delete(account.Extra, openAIInstallationRotateEnabledKey)
+		delete(account.Extra, openAIPinnedInstallationIDKey)
+		account.Extra[openAIPinnedInstallationIDKey] = uuid.NewString()
+	}
 	if req.AutoPauseOnExpired != nil {
 		account.AutoPauseOnExpired = *req.AutoPauseOnExpired
 	} else {
@@ -336,7 +346,29 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 		delete(extra, OllamaCloudUsageSessionExtraKey)
 		delete(extra, OllamaCloudUsageAutoRefreshExtraKey)
 		delete(extra, OllamaCloudUsageSnapshotExtraKey)
+		delete(extra, openAIInstallationRotateEnabledKey)
+		delete(extra, openAIPinnedInstallationIDKey)
+		if account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth && !account.IsShadow() {
+			if current, ok := account.Extra[openAIPinnedInstallationIDKey]; ok {
+				extra[openAIPinnedInstallationIDKey] = current
+			}
+		} else {
+			delete(extra, openAIInstallationPinEnabledKey)
+		}
 		account.Extra = extra
+	}
+	if account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth && !account.IsShadow() {
+		if account.Extra == nil {
+			account.Extra = make(map[string]any)
+		}
+		if normalizeCodexInstallationID(account.GetPinnedOpenAIInstallationID()) == "" {
+			account.Extra[openAIPinnedInstallationIDKey] = uuid.NewString()
+		}
+		delete(account.Extra, openAIInstallationRotateEnabledKey)
+	} else if account.Extra != nil {
+		delete(account.Extra, openAIPinnedInstallationIDKey)
+		delete(account.Extra, openAIInstallationRotateEnabledKey)
+		delete(account.Extra, openAIInstallationPinEnabledKey)
 	}
 
 	if req.ProxyID != nil {

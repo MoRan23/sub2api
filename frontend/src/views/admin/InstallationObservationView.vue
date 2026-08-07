@@ -64,9 +64,6 @@
               <span :class="pinBadgeClass(row.pinned)">
                 {{ row.pinned ? t('admin.installationObservation.modePinned') : t('admin.installationObservation.modePassthrough') }}
               </span>
-              <span v-if="row.pinned && row.rotated" class="text-xs text-purple-500 dark:text-purple-300">
-                {{ t('admin.installationObservation.modeRotated') }}
-              </span>
             </div>
           </template>
 

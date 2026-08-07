@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
+	"github.com/google/uuid"
 )
 
 type CRSSyncService struct {
@@ -655,6 +656,19 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 			result.Failed++
 			result.Items = append(result.Items, item)
 			continue
+		}
+		// installation_id is a local system-managed identity. Never reuse a
+		// value supplied by CRS; new accounts receive a fresh UUID and existing
+		// accounts retain their valid UUID (or are repaired when it is missing
+		// or invalid). The legacy rotation flag is not imported either.
+		delete(extra, openAIPinnedInstallationIDKey)
+		delete(extra, openAIInstallationRotateEnabledKey)
+		if existing == nil {
+			extra[openAIPinnedInstallationIDKey] = uuid.NewString()
+		} else if pinned := normalizeCodexInstallationID(existing.GetPinnedOpenAIInstallationID()); pinned != "" {
+			extra[openAIPinnedInstallationIDKey] = pinned
+		} else {
+			extra[openAIPinnedInstallationIDKey] = uuid.NewString()
 		}
 		if existing != nil {
 			credentials = mergeMap(existing.Credentials, credentials)

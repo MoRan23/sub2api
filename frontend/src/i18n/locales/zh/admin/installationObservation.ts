@@ -11,7 +11,6 @@ export default {
     emptyOff: '观测未开启，无数据',
     modePinned: '固定',
     modePassthrough: '透传',
-    modeRotated: '每次更换',
     outboundShort: '出站',
     clientShort: '客户端',
     columns: {

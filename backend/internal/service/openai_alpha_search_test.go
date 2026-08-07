@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -118,7 +119,8 @@ func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
 	c.Request.Header.Set("X-Codex-Beta-Features", "feature-a")
 	c.Request.Header.Set("X-Codex-Turn-State", "turn-state")
 	c.Request.Header.Set(responsesLiteHeaderKey, "true")
-	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"turn_id":"turn-1"}`)
+	c.Request.Header.Set("X-Codex-Installation-ID", "client-direct")
+	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"installation_id":"client-turn","turn_id":"turn-1"}`)
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -136,6 +138,9 @@ func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
 			"auth_mode":                  OpenAIAuthModePersonalAccessToken,
 			"chatgpt_account_id":         "chatgpt-account",
 			"chatgpt_account_is_fedramp": true,
+		},
+		Extra: map[string]any{
+			openAIPinnedInstallationIDKey: "11111111-2222-4333-8444-555555555555",
 		},
 	}
 
@@ -155,7 +160,11 @@ func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
 	require.Equal(t, "text/event-stream", upstream.lastReq.Header.Get("Accept"))
 	require.Equal(t, "responses=experimental", upstream.lastReq.Header.Get("OpenAI-Beta"))
 	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("Version"))
-	require.Equal(t, `{"turn_id":"turn-1"}`, upstream.lastReq.Header.Get("X-Codex-Turn-Metadata"))
+	require.Equal(t, "11111111-2222-4333-8444-555555555555", upstream.lastReq.Header.Get(codexInstallationIDKey))
+	var turnMetadata map[string]any
+	require.NoError(t, json.Unmarshal([]byte(upstream.lastReq.Header.Get("X-Codex-Turn-Metadata")), &turnMetadata))
+	require.Equal(t, "11111111-2222-4333-8444-555555555555", turnMetadata[codexTurnMetadataInstallationIDKey])
+	require.Equal(t, "turn-1", turnMetadata["turn_id"])
 	require.Equal(t, openai.CodexDefaultOriginator, upstream.lastReq.Header.Get("Originator"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Codex-Beta-Features"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Codex-Turn-State"))
@@ -164,6 +173,7 @@ func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
 	require.False(t, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "prompt_cache_retention").Exists())
 	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, "11111111-2222-4333-8444-555555555555", gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "store").Bool())
 	require.Equal(t, "web_search", gjson.GetBytes(upstream.lastBody, "tools.0.type").String())
