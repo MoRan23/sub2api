@@ -597,6 +597,9 @@ export interface SystemSettings {
   codex_cli_only_engine_fingerprint_signals: string;
   web_search_emulation_enabled?: boolean;
 
+  // OpenAI installation_id observation (global, in-memory only while on)
+  installation_observation_enabled: boolean;
+
   // Payment configuration
   payment_enabled: boolean;
   risk_control_enabled: boolean;
@@ -899,6 +902,8 @@ export interface UpdateSettingsRequest {
   codex_cli_only_whitelist?: string;
   codex_cli_only_allow_app_server_clients?: boolean;
   codex_cli_only_engine_fingerprint_signals?: string;
+  // OpenAI installation_id observation (global, in-memory only while on)
+  installation_observation_enabled?: boolean;
   // Payment configuration
   payment_enabled?: boolean;
   risk_control_enabled?: boolean;

@@ -61,6 +61,10 @@ var schedulerNeutralExtraKeyPrefixes = []string{
 	"upstream_billing_probe",
 	"upstream_billing_rate_sync",
 	"ollama_cloud_usage",
+	// Installation pinning captures/rotates the account-owned installation_id on
+	// the request hot path; these writes must not trigger scheduler bucket rebuilds.
+	"openai_installation_",
+	"openai_pinned_installation_id",
 }
 
 var schedulerNeutralExtraKeys = map[string]struct{}{

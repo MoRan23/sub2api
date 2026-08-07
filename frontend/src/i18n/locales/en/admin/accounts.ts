@@ -507,6 +507,12 @@ export default {
         longContextBilling: 'API long-context pricing',
         longContextBillingDesc:
           'Disabled by default. Enable only when this account\'s upstream charges OpenAI API long-context rates above the model threshold.',
+        installationPin: 'Pin installation_id',
+        installationPinDesc:
+          'Enabled by default. When on, this account emits only its own installation_id (seized from the account\'s first request, or generated if none) and ignores the client-reported value; turning it off restores passthrough of the client-reported installation_id. OpenAI OAuth accounts only.',
+        installationRotate: 'Rotate installation_id per request',
+        installationRotateDesc:
+          'Disabled by default. When on, a fresh installation_id is generated for every request (only available while pinning is on). When off, the value seized from the first request is reused consistently.',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',

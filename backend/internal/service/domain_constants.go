@@ -555,6 +555,11 @@ const (
 	// SettingKeyOpenAIAllowClaudeCodeCodexPlugin 已废弃：历史全局开关只作为升级迁移输入读取。
 	// 迁移后等价规则写入 SettingKeyCodexCLIOnlyWhitelist，不再参与运行时判定。
 	SettingKeyOpenAIAllowClaudeCodeCodexPlugin = "openai_allow_claude_code_codex_plugin"
+	// SettingKeyInstallationObservationEnabled 是否开启 installation_id 观测（默认 false）。
+	// 开启后网关把每个 OpenAI OAuth 请求出站的 installation_id / User-Agent / originator /
+	// OpenAI-Beta / version 写入进程内环形缓冲，供管理面板实时查看；关闭即停止记录并清空缓冲。
+	// 普通情况下（默认关闭）零记录开销，不落库、不影响转发。
+	SettingKeyInstallationObservationEnabled = "installation_observation_enabled"
 
 	// 余额不足提醒
 	SettingKeyBalanceLowNotifyEnabled     = "balance_low_notify_enabled"      // 全局开关

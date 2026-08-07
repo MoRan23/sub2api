@@ -110,6 +110,25 @@ const openAIEndpointCapabilitiesCredentialKey = "openai_capabilities"
 // absent/null value uses provider observations.
 const GrokMediaEligibleExtraKey = "grok_media_eligible"
 
+// Per-account Codex installation_id pinning (OpenAI OAuth accounts only),
+// persisted in accounts.extra. When pinning is enabled the gateway emits a
+// single account-owned installation_id on every outbound request and ignores
+// whatever the inbound client reported, so shared upstream accounts no longer
+// leak per-device installation signals. The pinned value is seized from the
+// account's first request (client-reported header/body) and falls back to a
+// generated UUIDv4 when the first request carries none.
+const (
+	// openAIInstallationPinEnabledKey gates pinning. Absent means enabled
+	// (default ON): every logged-in GPT account gets its own installation_id.
+	// Only an explicit false restores the legacy passthrough behavior.
+	openAIInstallationPinEnabledKey = "openai_installation_pin_enabled"
+	// openAIInstallationRotateEnabledKey, when true, regenerates the pinned
+	// installation_id on every request instead of reusing the seized value.
+	openAIInstallationRotateEnabledKey = "openai_installation_rotate_enabled"
+	// openAIPinnedInstallationIDKey stores the account-owned installation_id.
+	openAIPinnedInstallationIDKey = "openai_pinned_installation_id"
+)
+
 const (
 	OpenAIAuthModePersonalAccessToken = "personalAccessToken"
 	openAIAuthModeCredentialKey       = "auth_mode"
@@ -1426,6 +1445,79 @@ func (a *Account) GetOpenAISessionID() string {
 		return ""
 	}
 	return strings.TrimSpace(a.GetExtraString("openai_session_id"))
+}
+
+// IsOpenAIInstallationPinEnabled reports whether the gateway should emit this
+// account's own pinned installation_id on every outbound request (ignoring the
+// inbound client value). Only OpenAI OAuth accounts are eligible. Default is ON:
+// an absent key enables pinning, and only an explicit false restores the legacy
+// passthrough behavior.
+func (a *Account) IsOpenAIInstallationPinEnabled() bool {
+	if a == nil || !a.IsOpenAIOAuth() {
+		return false
+	}
+	if a.Extra == nil {
+		return true
+	}
+	raw, ok := a.Extra[openAIInstallationPinEnabledKey]
+	if !ok || raw == nil {
+		return true
+	}
+	enabled, valid := coerceExtraBool(raw)
+	if !valid {
+		return true
+	}
+	return enabled
+}
+
+// IsOpenAIInstallationRotateEnabled reports whether the pinned installation_id
+// should be regenerated on every request. Only meaningful when pinning is on.
+// Default is OFF: absent/invalid values keep the seized value stable.
+func (a *Account) IsOpenAIInstallationRotateEnabled() bool {
+	if a == nil || !a.IsOpenAIOAuth() || a.Extra == nil {
+		return false
+	}
+	enabled, valid := coerceExtraBool(a.Extra[openAIInstallationRotateEnabledKey])
+	return valid && enabled
+}
+
+// GetPinnedOpenAIInstallationID returns the account-owned installation_id that
+// was seized from the account's first request (or generated). Empty means the
+// account has not captured one yet.
+func (a *Account) GetPinnedOpenAIInstallationID() string {
+	if !a.IsOpenAIOAuth() {
+		return ""
+	}
+	return strings.TrimSpace(a.GetExtraString(openAIPinnedInstallationIDKey))
+}
+
+// coerceExtraBool interprets a JSON-decoded accounts.extra value as a boolean.
+// The second return reports whether the value was a recognizable boolean form.
+func coerceExtraBool(v any) (value bool, ok bool) {
+	switch typed := v.(type) {
+	case bool:
+		return typed, true
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(typed))
+		if err != nil {
+			return false, false
+		}
+		return parsed, true
+	case json.Number:
+		parsed, err := strconv.ParseBool(typed.String())
+		if err != nil {
+			return false, false
+		}
+		return parsed, true
+	case float64:
+		return typed != 0, true
+	case int:
+		return typed != 0, true
+	case int64:
+		return typed != 0, true
+	default:
+		return false, false
+	}
 }
 
 func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapability) bool {

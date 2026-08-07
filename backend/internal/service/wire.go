@@ -693,6 +693,12 @@ func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupReposit
 	SetCodexCanonicalUserAgentResolver(func() string {
 		return svc.GetOpenAICodexCanonicalUserAgent(context.Background())
 	})
+	// 启动时把持久化的观测开关发布到进程内 observer，重启后与 DB 保持一致。
+	if all, err := svc.GetAllSettings(context.Background()); err != nil {
+		logger.LegacyPrintf("service.setting", "Warning: load installation observation setting failed: %v", err)
+	} else if all != nil {
+		SetInstallationObservationEnabled(all.InstallationObservationEnabled)
+	}
 	return svc
 }
 

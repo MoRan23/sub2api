@@ -501,6 +501,9 @@ export default {
         codexAllowAppServer: "Codex app-server",
         codexAllowAppServerDesc:
           "Allow third-party clients that embed the Codex engine and connect over the app-server protocol (e.g. Claude Code's codex plugin). Off by default; when on, such clients are allowed once they pass the engine-fingerprint gate (the signal list below); off = only official clients and the whitelist are allowed.",
+        installationObservation: "Installation observation",
+        installationObservationDesc:
+          "Off by default. When on, each OpenAI OAuth outbound request's installation_id / UA / originator / OpenAI-Beta / version is recorded to an in-memory ring buffer (up to 500 entries) and shown on the Installation Observation page; when off nothing is recorded and the buffer is cleared. Diagnostic only, lost on restart.",
         codexBlacklist: "User-Agent/Originator Blacklist",
         codexBlacklistDesc:
           "Deny if any field matches; takes precedence over any allow. originator is exact; User-Agent is a 'contains' match (comma-separated).",

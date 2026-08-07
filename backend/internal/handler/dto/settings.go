@@ -222,6 +222,9 @@ type SystemSettings struct {
 	CodexCLIOnlyAllowAppServerClients    bool   `json:"codex_cli_only_allow_app_server_clients"`
 	CodexCLIOnlyEngineFingerprintSignals string `json:"codex_cli_only_engine_fingerprint_signals"`
 
+	// installation_id 观测开关
+	InstallationObservationEnabled bool `json:"installation_observation_enabled"`
+
 	// Web Search Emulation
 	WebSearchEmulationEnabled bool `json:"web_search_emulation_enabled"`
 

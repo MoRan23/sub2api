@@ -452,6 +452,66 @@ func normalizeGrokMediaEligibilityUpdateExtra(account *Account, input *UpdateAcc
 	return normalized, nil
 }
 
+// ValidateOpenAIInstallationPinExtra validates the two per-account Codex
+// installation_id pin toggles when present. Both must be booleans; the
+// system-managed pinned value itself is never validated here because it is
+// never accepted from the client (it is seized from the first request).
+func ValidateOpenAIInstallationPinExtra(platform string, extra map[string]any) error {
+	if platform != PlatformOpenAI || extra == nil {
+		return nil
+	}
+	for _, key := range []string{openAIInstallationPinEnabledKey, openAIInstallationRotateEnabledKey} {
+		raw, exists := extra[key]
+		if !exists || raw == nil {
+			continue
+		}
+		if _, ok := raw.(bool); !ok {
+			return infraerrors.BadRequest(
+				"OPENAI_INSTALLATION_PIN_INVALID",
+				key+" must be a boolean",
+			)
+		}
+	}
+	return nil
+}
+
+// normalizeOpenAIInstallationPinUpdateExtra keeps the per-account installation_id
+// pin configuration consistent across a full-object PUT. The two toggles follow
+// the "not provided means keep current" rule (like long-context billing), and
+// the system-managed pinned value is always carried over: the panel never sends
+// it, so without this it would be wiped on every edit, forcing the account to
+// re-seize a new installation_id. Any client-supplied pinned value is ignored on
+// purpose — the runtime registry is authoritative and only the first request may
+// seize the value.
+func normalizeOpenAIInstallationPinUpdateExtra(account *Account, input *UpdateAccountInput, normalized map[string]any) (map[string]any, error) {
+	if account == nil || account.Platform != PlatformOpenAI {
+		return normalized, nil
+	}
+	if err := ValidateOpenAIInstallationPinExtra(account.Platform, input.Extra); err != nil {
+		return nil, err
+	}
+	normalized = maps.Clone(normalized)
+	if normalized == nil {
+		normalized = make(map[string]any)
+	}
+	for _, key := range []string{openAIInstallationPinEnabledKey, openAIInstallationRotateEnabledKey} {
+		if _, provided := input.Extra[key]; provided {
+			continue
+		}
+		if current, ok := account.Extra[key]; ok {
+			normalized[key] = current
+		}
+	}
+	// The pinned value is system-managed; preserve the current one and never let
+	// an incoming payload set or clear it.
+	if current, ok := account.Extra[openAIPinnedInstallationIDKey]; ok {
+		normalized[openAIPinnedInstallationIDKey] = current
+	} else {
+		delete(normalized, openAIPinnedInstallationIDKey)
+	}
+	return normalized, nil
+}
+
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
 	// Probe/session state is system-managed. New accounts always start with automatic refresh disabled.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
@@ -460,6 +520,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, OllamaCloudUsageSessionExtraKey)
 	delete(accountExtra, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(accountExtra, OllamaCloudUsageSnapshotExtraKey)
+	// The pinned installation_id is system-managed: it is seized from the
+	// account's first request, never accepted from the create payload.
+	delete(accountExtra, openAIPinnedInstallationIDKey)
 	account := &Account{
 		Name:        input.Name,
 		Notes:       normalizeAccountNotes(input.Notes),
@@ -607,6 +670,10 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			return nil, err
 		}
 		normalizedExtra, err = normalizeGrokMediaEligibilityUpdateExtra(account, input, normalizedExtra)
+		if err != nil {
+			return nil, err
+		}
+		normalizedExtra, err = normalizeOpenAIInstallationPinUpdateExtra(account, input, normalizedExtra)
 		if err != nil {
 			return nil, err
 		}

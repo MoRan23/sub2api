@@ -4516,6 +4516,26 @@
                   />
                 </div>
 
+                <div class="flex items-center justify-between">
+                  <div class="pr-4">
+                    <label
+                      class="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                      {{
+                        t("admin.settings.gatewayForwarding.installationObservation")
+                      }}
+                    </label>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {{
+                        t(
+                          "admin.settings.gatewayForwarding.installationObservationDesc",
+                        )
+                      }}
+                    </p>
+                  </div>
+                  <Toggle v-model="form.installation_observation_enabled" />
+                </div>
+
                 <div>
                   <label
                     class="block text-sm font-medium text-gray-700 dark:text-gray-300"
@@ -9412,6 +9432,8 @@ const form = reactive<SettingsForm>({
   codex_cli_only_whitelist: "",
   codex_cli_only_allow_app_server_clients: false,
   codex_cli_only_engine_fingerprint_signals: "",
+  // OpenAI installation_id 观测（全局，仅开启时在内存留存）
+  installation_observation_enabled: false,
   // 余额、订阅到期与账号限额通知
   balance_low_notify_enabled: false,
   balance_low_notify_threshold: 0,
@@ -10952,6 +10974,7 @@ async function saveSettings() {
       codex_cli_only_engine_fingerprint_signals: serializeFingerprintRowsToJSON(
         codexFingerprintRows.value,
       ),
+      installation_observation_enabled: form.installation_observation_enabled,
       codex_cli_only_blacklist: serializeCodexRowsToJSON(
         codexBlacklistRows.value,
       ),
