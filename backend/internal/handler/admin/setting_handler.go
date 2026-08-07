@@ -288,6 +288,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		BackendModeEnabled:                                     settings.BackendModeEnabled,
 		EnableFingerprintUnification:                           settings.EnableFingerprintUnification,
 		EnableMetadataPassthrough:                              settings.EnableMetadataPassthrough,
+		InstallationObservationEnabled:                         settings.InstallationObservationEnabled,
 		EnableCCHSigning:                                       settings.EnableCCHSigning,
 		EnableClaudeOAuthSystemPromptInjection:                 settings.EnableClaudeOAuthSystemPromptInjection,
 		ClaudeOAuthSystemPrompt:                                settings.ClaudeOAuthSystemPrompt,
