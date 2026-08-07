@@ -52,11 +52,14 @@ func TestResolveOutboundInstallationID_SeizesFirstClientValueAndStaysStable(t *t
 	resetPinRegistry()
 	acct := newOpenAIOAuthPinAccount(102, nil) // nil extra => default ON
 
-	first := resolveOutboundInstallationID(acct, "seized-value")
+	// Codex only ever persists a valid UUID, so the value a real client reports
+	// is a canonical v4 UUID. Seizing it must return it verbatim.
+	const clientUUID = "11111111-2222-4333-8444-555555555555"
+	first := resolveOutboundInstallationID(acct, clientUUID)
 	if !first.Enabled {
 		t.Fatalf("default (absent key) should enable pinning")
 	}
-	if first.OutboundID != "seized-value" {
+	if first.OutboundID != clientUUID {
 		t.Fatalf("first request should seize client value, got %q", first.OutboundID)
 	}
 	if !first.NeedsPersist {
@@ -65,8 +68,8 @@ func TestResolveOutboundInstallationID_SeizesFirstClientValueAndStaysStable(t *t
 
 	// A later request reporting a DIFFERENT client value must still emit the
 	// seized value from the registry.
-	second := resolveOutboundInstallationID(acct, "some-other-value")
-	if second.OutboundID != "seized-value" {
+	second := resolveOutboundInstallationID(acct, "99999999-8888-4777-8666-555555555555")
+	if second.OutboundID != clientUUID {
 		t.Fatalf("subsequent request must reuse seized value, got %q", second.OutboundID)
 	}
 	// The DB copy on this in-memory account was never updated (async persist does
@@ -76,13 +79,45 @@ func TestResolveOutboundInstallationID_SeizesFirstClientValueAndStaysStable(t *t
 	}
 
 	// Once the account's persisted value matches the registry, no re-persist.
-	acct.Extra = map[string]any{openAIPinnedInstallationIDKey: "seized-value"}
-	third := resolveOutboundInstallationID(acct, "yet-another")
-	if third.OutboundID != "seized-value" {
+	acct.Extra = map[string]any{openAIPinnedInstallationIDKey: clientUUID}
+	third := resolveOutboundInstallationID(acct, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
+	if third.OutboundID != clientUUID {
 		t.Fatalf("third request must reuse seized value, got %q", third.OutboundID)
 	}
 	if third.NeedsPersist {
 		t.Fatalf("registry hit with matching DB copy must not re-persist")
+	}
+}
+
+func TestResolveOutboundInstallationID_NormalizesSeizedUUIDToLowercase(t *testing.T) {
+	// Codex's resolve_installation_id returns Uuid::parse_str(..).to_string(),
+	// which lowercases. A client that reports an uppercase UUID must be pinned to
+	// the canonical lowercase form so the outbound value matches a real client.
+	resetPinRegistry()
+	acct := newOpenAIOAuthPinAccount(107, nil)
+	res := resolveOutboundInstallationID(acct, "ABCDEF01-2345-4678-8ABC-DEF012345678")
+	want := "abcdef01-2345-4678-8abc-def012345678"
+	if res.OutboundID != want {
+		t.Fatalf("seized UUID should be canonicalized to lowercase, got %q", res.OutboundID)
+	}
+}
+
+func TestResolveOutboundInstallationID_RegeneratesWhenClientValueNotUUID(t *testing.T) {
+	// Codex discards non-UUID installation_id file contents and mints a fresh v4
+	// (see resolve_installation_id_rewrites_invalid_file_contents). A junk client
+	// value must therefore NOT be forwarded; a valid v4 UUID must be generated.
+	resetPinRegistry()
+	acct := newOpenAIOAuthPinAccount(108, nil)
+	res := resolveOutboundInstallationID(acct, "not-a-uuid")
+	if res.OutboundID == "not-a-uuid" {
+		t.Fatalf("non-UUID client value must not be seized verbatim")
+	}
+	parsed, err := uuid.Parse(res.OutboundID)
+	if err != nil {
+		t.Fatalf("regenerated id must be a valid uuid: %v", err)
+	}
+	if parsed.Version() != 4 {
+		t.Fatalf("regenerated id must be uuid v4, got v%d", parsed.Version())
 	}
 }
 

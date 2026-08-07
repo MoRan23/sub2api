@@ -133,8 +133,12 @@ func resolveOutboundInstallationID(account *Account, clientReportedID string) in
 	}
 
 	// First request for this account: seize the client-reported value, or mint a
-	// UUIDv4 (matching the real Codex Uuid::new_v4() shape) when none was sent.
-	seized := res.ClientID
+	// UUIDv4 when none was usable. This mirrors Codex's resolve_installation_id
+	// (core/src/installation_id.rs): a stored value that parses as a UUID is
+	// returned in canonical lowercase form, and anything that does not parse is
+	// discarded in favor of a fresh Uuid::new_v4(). Normalizing here keeps the
+	// pinned identity indistinguishable from a real Codex client's own file.
+	seized := normalizeCodexInstallationID(res.ClientID)
 	if seized == "" {
 		seized = uuid.NewString()
 	}
@@ -142,6 +146,23 @@ func resolveOutboundInstallationID(account *Account, clientReportedID string) in
 	res.NeedsPersist = true
 	globalInstallationPinRegistry.set(account.ID, seized)
 	return res
+}
+
+// normalizeCodexInstallationID mirrors the reuse/normalize half of Codex's
+// resolve_installation_id: a value that parses as a UUID is returned in its
+// canonical lowercase hyphenated form (Rust does Uuid::parse_str(..).to_string()),
+// and anything that does not parse yields "" so the caller mints a fresh v4
+// (Codex's behavior for invalid installation_id file contents).
+func normalizeCodexInstallationID(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := uuid.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return parsed.String()
 }
 
 // resolveInstallationIDForRequest resolves the outbound installation identity
