@@ -154,6 +154,17 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		enforceCodexIdentityHeadersWithUA(headers, s.codexIdentityOverrideUA(account))
 	}
 
+	// installation_id 收口：开启固定时用账号自有值强制改写 WS 握手头，覆盖上面从客户端
+	// 请求透传进来的值；与 HTTP 路径、WS create 载荷共用同一次解析（gin 上下文缓存）。
+	if account != nil && account.Type == AccountTypeOAuth {
+		clientInstallationID := strings.TrimSpace(headers.Get(codexInstallationIDKey))
+		pin := s.resolveInstallationIDForRequest(ctx, c, account, clientInstallationID)
+		if pin.Enabled && pin.OutboundID != "" {
+			headers.Set(codexInstallationIDKey, pin.OutboundID)
+		}
+		s.recordInstallationObservation(c, account, pin, headers)
+	}
+
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 覆盖所有 WS 模式（ctx_pool/dedicated/passthrough）的握手头。
 	account.ApplyHeaderOverrides(headers)

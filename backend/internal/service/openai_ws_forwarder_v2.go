@@ -85,6 +85,15 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
 	setOpenAIWSTurnMetadata(payload, turnMetadata)
+	// installation_id 收口：开启固定时用账号自有值强制改写 WS create 载荷的
+	// client_metadata，与握手头保持一致（共用 gin 上下文缓存的同一次解析）。
+	if account.Type == AccountTypeOAuth {
+		clientInstallationID := extractClientInstallationID(c, payload)
+		pin := s.resolveInstallationIDForRequest(ctx, c, account, clientInstallationID)
+		if pin.Enabled && pin.OutboundID != "" {
+			enforceCodexInstallationIDInBody(payload, pin.OutboundID)
+		}
+	}
 	payloadEventType := openAIWSPayloadString(payload, "type")
 	if payloadEventType == "" {
 		payloadEventType = "response.create"

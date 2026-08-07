@@ -2948,6 +2948,65 @@
         </div>
       </div>
 
+      <!-- OpenAI OAuth installation_id 固定/轮换开关（仅 GPT OAuth 账号） -->
+      <div
+        v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.installationPin') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.installationPinDesc') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="openai-installation-pin-toggle"
+            role="switch"
+            :aria-checked="openAIInstallationPinEnabled"
+            @click="openAIInstallationPinEnabled = !openAIInstallationPinEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              openAIInstallationPinEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                openAIInstallationPinEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+        <div v-if="openAIInstallationPinEnabled" class="mt-3 flex items-center justify-between gap-4">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.installationRotate') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.installationRotateDesc') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="openai-installation-rotate-toggle"
+            role="switch"
+            :aria-checked="openAIInstallationRotateEnabled"
+            @click="openAIInstallationRotateEnabled = !openAIInstallationRotateEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              openAIInstallationRotateEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                openAIInstallationRotateEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+      </div>
+
       <div
         v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -3827,6 +3886,9 @@ const openaiPassthroughEnabled = ref(false)
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
 const openAILongContextBillingTouched = ref(false)
+// installation_id 固定/轮换（仅 OpenAI OAuth）。固定默认 ON、轮换默认 OFF。
+const openAIInstallationPinEnabled = ref(true)
+const openAIInstallationRotateEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
@@ -4706,6 +4768,8 @@ const resetForm = () => {
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
   openAILongContextBillingTouched.value = false
+  openAIInstallationPinEnabled.value = true
+  openAIInstallationRotateEnabled.value = false
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
@@ -4811,6 +4875,20 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   } else {
     delete extra.codex_cli_only_allow_app_server
   }
+  // installation_id 固定/轮换仅对 OpenAI OAuth 生效。固定关闭即恢复透传上游；轮换仅在固定
+  // 开启时有意义。pinned 值系统托管（首个请求 seize），创建时绝不写入。
+  if (accountCategory.value === 'oauth-based') {
+    extra.openai_installation_pin_enabled = openAIInstallationPinEnabled.value
+    if (openAIInstallationPinEnabled.value) {
+      extra.openai_installation_rotate_enabled = openAIInstallationRotateEnabled.value
+    } else {
+      delete extra.openai_installation_rotate_enabled
+    }
+  } else {
+    delete extra.openai_installation_pin_enabled
+    delete extra.openai_installation_rotate_enabled
+  }
+  delete extra.openai_pinned_installation_id
   if (openAICompactMode.value !== 'auto') {
     extra.openai_compact_mode = openAICompactMode.value
   } else {

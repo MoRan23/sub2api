@@ -238,6 +238,10 @@ type SystemSettings struct {
 	CodexCLIOnlyAllowAppServerClients      bool   // codex_cli_only App Server 开关：对未列名客户端开闸（默认 false）
 	CodexCLIOnlyEngineFingerprintSignals   string // codex_cli_only 引擎指纹门信号列表 JSON（[]EngineFingerprintSignal）
 
+	// installation_id 观测：开启后记录每个 OpenAI OAuth 请求出站的 installation_id /
+	// UA / originator / OpenAI-Beta / version 到进程内环形缓冲（默认 false，关闭即停并清空）
+	InstallationObservationEnabled bool
+
 	// Web Search Emulation
 	WebSearchEmulationEnabled bool // 是否启用 web search 模拟
 

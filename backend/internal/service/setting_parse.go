@@ -862,6 +862,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.CodexCLIOnlyEngineFingerprintSignals = openai.DefaultEngineFingerprintSignalsJSON() // 缺失/空 → 展示默认种子
 	}
 
+	// installation_id 观测（默认 false：普通情况下不记录）
+	result.InstallationObservationEnabled = settings[SettingKeyInstallationObservationEnabled] == "true"
+
 	// Web search emulation: quick enabled check from the JSON config
 	if raw := settings[SettingKeyWebSearchEmulationConfig]; raw != "" {
 		var wsCfg WebSearchEmulationConfig

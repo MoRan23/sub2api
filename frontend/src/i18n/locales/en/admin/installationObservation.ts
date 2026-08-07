@@ -1,0 +1,26 @@
+export default {
+  installationObservation: {
+    title: 'Installation Observation',
+    description: 'Live view of the installation_id and identity headers emitted on every OpenAI OAuth outbound request. Recorded only while "Installation observation" is enabled in system settings; data lives in memory only and is lost on restart.',
+    subtitle: 'Shows the pinned/passthrough installation_id plus the outbound UA / originator / OpenAI-Beta / version for each OpenAI OAuth request. Recorded only while observation is on (in-memory ring buffer, up to 500 entries).',
+    statusOn: 'Observation on',
+    statusOff: 'Observation off',
+    autoRefresh: 'Auto refresh (5s)',
+    disabledHint: 'Observation is off, so no request data is recorded. Enable "Installation observation" under System Settings → Gateway Forwarding to start collecting.',
+    emptyOn: 'Observation is on; no outbound requests recorded yet',
+    emptyOff: 'Observation is off; no data',
+    modePinned: 'Pinned',
+    modePassthrough: 'Passthrough',
+    modeRotated: 'Rotated each request',
+    outboundShort: 'out',
+    clientShort: 'client',
+    columns: {
+      time: 'Time',
+      account: 'Account',
+      mode: 'Mode',
+      installation: 'installation_id (outbound / client)',
+      identity: 'UA / originator / version / beta',
+      endpoint: 'Inbound endpoint',
+    },
+  },
+}
