@@ -391,6 +391,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 				Status:      status,
 				Schedulable: src.Schedulable,
 			}
+			PrepareOpenAIAccountUserAgentForCreate(account)
 			if err := s.accountRepo.Create(ctx, account); err != nil {
 				item.Action = "failed"
 				item.Error = "create failed: " + err.Error()
@@ -527,6 +528,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 				Status:      status,
 				Schedulable: src.Schedulable,
 			}
+			PrepareOpenAIAccountUserAgentForCreate(account)
 			if err := s.accountRepo.Create(ctx, account); err != nil {
 				item.Action = "failed"
 				item.Error = "create failed: " + err.Error()
@@ -695,6 +697,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 				Status:      status,
 				Schedulable: src.Schedulable,
 			}
+			PrepareOpenAIAccountUserAgentForCreate(account)
 			if err := s.accountRepo.Create(ctx, account); err != nil {
 				item.Action = "failed"
 				item.Error = "create failed: " + err.Error()
@@ -846,6 +849,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 				Status:      status,
 				Schedulable: src.Schedulable,
 			}
+			PrepareOpenAIAccountUserAgentForCreate(account)
 			if err := s.accountRepo.Create(ctx, account); err != nil {
 				item.Action = "failed"
 				item.Error = "create failed: " + err.Error()
@@ -976,6 +980,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 				Status:      mapCRSStatus(src.IsActive, src.Status),
 				Schedulable: src.Schedulable,
 			}
+			PrepareOpenAIAccountUserAgentForCreate(account)
 			if err := s.accountRepo.Create(ctx, account); err != nil {
 				item.Action = "failed"
 				item.Error = "create failed: " + err.Error()
@@ -1106,6 +1111,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 				Status:      mapCRSStatus(src.IsActive, src.Status),
 				Schedulable: src.Schedulable,
 			}
+			PrepareOpenAIAccountUserAgentForCreate(account)
 			if err := s.accountRepo.Create(ctx, account); err != nil {
 				item.Action = "failed"
 				item.Error = "create failed: " + err.Error()

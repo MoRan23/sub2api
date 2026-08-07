@@ -1089,6 +1089,7 @@ export interface Account {
   // 改为通过 credentials_status.has_<key> 暴露存在性。
   credentials?: Record<string, unknown>
   credentials_status?: Record<string, boolean>
+  openai_environment_fingerprint?: string
   ollama_cloud_usage?: OllamaCloudUsageState
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
@@ -1391,6 +1392,7 @@ export interface UpdateAccountRequest {
   name?: string
   notes?: string | null
   type?: AccountType
+  openai_environment_fingerprint?: string
   credentials?: Record<string, unknown>
   extra?: Record<string, unknown>
   proxy_id?: number | null

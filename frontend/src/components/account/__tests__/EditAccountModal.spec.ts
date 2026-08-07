@@ -154,6 +154,7 @@ function buildAccount() {
         'gpt-5.2': 'gpt-5.2'
       }
     },
+    openai_environment_fingerprint: '(Ubuntu 22.4.0; x86_64) xterm-256color',
     extra: {},
     proxy_id: null,
     concurrency: 1,
@@ -314,6 +315,58 @@ function mountModal(account = buildAccount()) {
 describe('EditAccountModal', () => {
   beforeEach(() => {
     authIsSimpleMode.value = true
+  })
+
+  it('loads and submits the OpenAI environment fingerprint', async () => {
+    const account = buildAccount()
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const input = wrapper.get<HTMLInputElement>('[data-testid="openai-environment-fingerprint"]')
+    expect(input.element.value).toBe('(Ubuntu 22.4.0; x86_64) xterm-256color')
+
+    await input.setValue('(Mac OS X 15.1.0; arm64) iTerm.app')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.openai_environment_fingerprint).toBe(
+      '(Mac OS X 15.1.0; arm64) iTerm.app'
+    )
+  })
+
+  it.each(['', '终端'])('rejects invalid OpenAI environment fingerprint %j', async (value) => {
+    const account = buildAccount()
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="openai-environment-fingerprint"]').setValue(value)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).not.toHaveBeenCalled()
+  })
+
+  it('shows a disabled inherited fingerprint field for a Spark shadow', async () => {
+    const account = buildOpenAISparkShadowAccount()
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const input = wrapper.get<HTMLInputElement>('[data-testid="openai-environment-fingerprint"]')
+    expect(input.element.disabled).toBe(true)
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty(
+      'openai_environment_fingerprint'
+    )
   })
 
   it('reopening the same account rehydrates the OpenAI whitelist from props', async () => {

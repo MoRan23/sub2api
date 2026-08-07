@@ -253,7 +253,11 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 	} else {
 		req.Header.Set("Originator", openai.CodexDefaultOriginator)
 	}
-	if customUA := account.GetOpenAIUserAgent(); customUA != "" {
+	customUA, err := s.codexIdentityOverrideUA(ctx, account)
+	if err != nil {
+		return nil, fmt.Errorf("resolve OpenAI account User-Agent: %w", err)
+	}
+	if customUA != "" {
 		req.Header.Set("User-Agent", customUA)
 	} else if userAgent := openAIAlphaSearchInboundHeader(c, "User-Agent"); userAgent != "" {
 		req.Header.Set("User-Agent", userAgent)
@@ -269,7 +273,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 		req.Header.Set("Session_ID", isolated)
 		req.Header.Set("Conversation_ID", isolated)
 	}
-	enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
+	enforceCodexIdentityHeadersWithUA(req.Header, customUA)
 	account.ApplyHeaderOverrides(req.Header)
 	if _, err := applyOpenAIInstallationIDForOutbound(
 		ctx,
@@ -395,6 +399,10 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 	req.Header.Set("Accept", "application/json")
 
 	if account.Type == AccountTypeOAuth {
+		customUA, resolveUAErr := s.codexIdentityOverrideUA(ctx, account)
+		if resolveUAErr != nil {
+			return nil, fmt.Errorf("resolve OpenAI account User-Agent: %w", resolveUAErr)
+		}
 		req.Host = "chatgpt.com"
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, req.Header, account); err != nil {
 			return nil, fmt.Errorf("resolve chatgpt account headers: %w", err)
@@ -413,7 +421,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 		} else {
 			req.Header.Set("Originator", openai.CodexDefaultOriginator)
 		}
-		if customUA := account.GetOpenAIUserAgent(); customUA != "" {
+		if customUA != "" {
 			req.Header.Set("User-Agent", customUA)
 		} else if userAgent := openAIAlphaSearchInboundHeader(c, "User-Agent"); userAgent != "" {
 			req.Header.Set("User-Agent", userAgent)
@@ -423,7 +431,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 		if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 			req.Header.Set("User-Agent", codexCLIUserAgent)
 		}
-		enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
+		enforceCodexIdentityHeadersWithUA(req.Header, customUA)
 	}
 
 	account.ApplyHeaderOverrides(req.Header)

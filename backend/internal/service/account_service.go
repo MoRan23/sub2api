@@ -250,6 +250,7 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 		delete(account.Extra, openAIPinnedInstallationIDKey)
 		account.Extra[openAIPinnedInstallationIDKey] = uuid.NewString()
 	}
+	PrepareOpenAIAccountUserAgentForCreate(account)
 	if req.AutoPauseOnExpired != nil {
 		account.AutoPauseOnExpired = *req.AutoPauseOnExpired
 	} else {

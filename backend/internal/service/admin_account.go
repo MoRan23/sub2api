@@ -573,6 +573,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		}
 		account.LoadFactor = input.LoadFactor
 	}
+	PrepareOpenAIAccountUserAgentForCreate(account)
 	return account, nil
 }
 
@@ -662,6 +663,22 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
+	if input.OpenAIEnvironmentFingerprint != nil {
+		targetType := account.Type
+		if input.Type != "" {
+			targetType = input.Type
+		}
+		if account.Platform != PlatformOpenAI || account.IsShadow() ||
+			(targetType != AccountTypeOAuth && targetType != AccountTypeAPIKey) {
+			return nil, infraerrors.BadRequest(
+				"OPENAI_ENVIRONMENT_FINGERPRINT_UNSUPPORTED",
+				"environment fingerprints are supported only by non-shadow OpenAI OAuth/API-key accounts",
+			)
+		}
+		if _, validationErr := NormalizeOpenAIEnvironmentFingerprint(*input.OpenAIEnvironmentFingerprint); validationErr != nil {
+			return nil, infraerrors.BadRequest("OPENAI_ENVIRONMENT_FINGERPRINT_INVALID", validationErr.Error())
+		}
+	}
 	var normalizedExtra map[string]any
 	if input.Extra != nil {
 		normalizedExtra, err = normalizeOpenAILongContextBillingUpdateExtra(account, input)
@@ -679,6 +696,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	previousProbeIdentity := upstreamBillingProbeIdentity(account)
 	previousOllamaUsageIdentity := ollamaCloudUsageIdentity(account)
+	previousOpenAIUserAgent := account.GetOpenAIUserAgent()
 	// 安全/身份不变量(影子账号):通用更新路径被 edit/re-auth/refresh/batch 共用,
 	// 必须在此守住,否则仅在创建时的保证可被这些路径绕过。
 	if account.IsCredentialShadow() {
@@ -746,6 +764,20 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			return nil, err
 		}
 	}
+	if input.OpenAIEnvironmentFingerprint != nil {
+		userAgent, buildErr := BuildOpenAIUserAgentWithEnvironment(
+			previousOpenAIUserAgent,
+			*input.OpenAIEnvironmentFingerprint,
+		)
+		if buildErr != nil {
+			return nil, infraerrors.BadRequest("OPENAI_ENVIRONMENT_FINGERPRINT_INVALID", buildErr.Error())
+		}
+		if account.Credentials == nil {
+			account.Credentials = make(map[string]any)
+		}
+		account.Credentials["user_agent"] = userAgent
+	}
+	EnsureOpenAIAccountUserAgent(account)
 	// Extra 使用 map：需要区分“未提供(nil)”与“显式清空({})”。
 	// 关闭配额限制时前端会删除 quota_* 键并提交 extra:{}，此时也必须落库。
 	requestedProbeEnabledUpdate := input.ProbeEnabled

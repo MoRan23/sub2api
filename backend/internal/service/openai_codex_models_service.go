@@ -18,7 +18,6 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"golang.org/x/net/http2"
 	"golang.org/x/sync/singleflight"
 )
@@ -305,9 +304,12 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 		setOpenAIChatGPTAccountHeaders(headers, credAccount)
 	}
 	headers.Set("Accept", "application/json")
-	headers.Set("Originator", openai.CodexDefaultOriginator)
+	identity := resolveCodexOutboundIdentity(credAccount.GetOpenAIUserAgent())
+	headers.Set("Originator", identity.originator)
+	// The manifest endpoint's query and Version header are selected by the
+	// caller; keep that existing contract while using the account UA suffix.
 	headers.Set("Version", clientVersion)
-	headers.Set("User-Agent", codexCLIUserAgent)
+	headers.Set("User-Agent", identity.userAgent)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

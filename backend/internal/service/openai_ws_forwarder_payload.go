@@ -155,9 +155,9 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	}
 	headers.Set("OpenAI-Beta", betaValue)
 
-	customUA := ""
-	if account != nil {
-		customUA = account.GetOpenAIUserAgent()
+	customUA, err := s.codexIdentityOverrideUA(ctx, account)
+	if err != nil {
+		return nil, sessionResolution, fmt.Errorf("resolve OpenAI account User-Agent: %w", err)
 	}
 	if strings.TrimSpace(customUA) != "" {
 		headers.Set("user-agent", customUA)
@@ -172,7 +172,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	// 终态收口：WS 握手与 HTTP 出站共用同一套身份语义，账号级自定义 UA 同样作为
 	// 管理员显式配置传入（上面写进 headers 的值只在强制统一被关闭时才参与配对）。
 	if account != nil && account.Type == AccountTypeOAuth {
-		enforceCodexIdentityHeadersWithUA(headers, s.codexIdentityOverrideUA(account))
+		enforceCodexIdentityHeadersWithUA(headers, customUA)
 	}
 
 	// installation_id 收口只用于非 passthrough 的 OpenAI OAuth WS。透传

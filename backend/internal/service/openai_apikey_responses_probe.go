@@ -149,6 +149,14 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Accept", "application/json")
 	applyOpenAICodexProbeHeaders(req.Header)
+	// API-key accounts keep the same account-level Codex environment
+	// fingerprint as ordinary Responses/Chat Completions requests. The
+	// probe_ping payload remains unchanged; only its outbound identity is
+	// aligned with the account. Header overrides retain their existing
+	// precedence below.
+	if customUA := account.GetOpenAIOutboundUserAgent(); customUA != "" {
+		req.Header.Set("User-Agent", customUA)
+	}
 
 	// 账号级请求头覆写：能力探测与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)

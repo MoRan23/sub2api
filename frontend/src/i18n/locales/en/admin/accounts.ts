@@ -516,6 +516,13 @@ export default {
         installationRegenerateSuccess: 'installation_id regenerated; subsequent requests will use the new value.',
         installationRegenerateFailed: 'Failed to regenerate installation_id',
         installationRegenerateSaveHint: 'Save the fixed installation_id setting before regenerating.',
+        environmentFingerprint: 'Environment fingerprint',
+        environmentFingerprintDesc:
+          'Edits only the operating system, architecture, and terminal suffix. The client family and version remain system-managed.',
+        environmentFingerprintPlaceholder: '(Ubuntu 22.4.0; x86_64) xterm-256color',
+        environmentFingerprintShadowHint: 'Shadow accounts inherit the parent account fingerprint and cannot edit it independently.',
+        environmentFingerprintRequired: 'Environment fingerprint is required',
+        environmentFingerprintInvalid: 'The environment fingerprint must be single-line printable ASCII and at most 256 characters',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',

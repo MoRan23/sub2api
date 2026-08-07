@@ -439,7 +439,10 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	}
 
 	// 透传模式也支持账户自定义 User-Agent 与 ForceCodexCLI 兜底。
-	customUA := account.GetOpenAIUserAgent()
+	customUA, err := s.codexIdentityOverrideUA(ctx, account)
+	if err != nil {
+		return nil, fmt.Errorf("resolve OpenAI account User-Agent: %w", err)
+	}
 	if customUA != "" {
 		req.Header.Set("user-agent", customUA)
 	}
@@ -449,7 +452,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	// 终态收口：透传路径的 OAuth 与非透传完全一致，同样强制统一出站身份
 	// （User-Agent / originator / version 同源自洽），客户端自报身份不会到达上游。
 	if account.Type == AccountTypeOAuth {
-		enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
+		enforceCodexIdentityHeadersWithUA(req.Header, customUA)
 	}
 
 	if req.Header.Get("content-type") == "" {

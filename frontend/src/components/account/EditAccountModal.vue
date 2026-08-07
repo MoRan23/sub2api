@@ -1972,6 +1972,30 @@
         </p>
       </div>
 
+      <!-- OpenAI account-level environment fingerprint -->
+      <div
+        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'apikey')"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div>
+          <label class="input-label">{{ t('admin.accounts.openai.environmentFingerprint') }}</label>
+          <input
+            v-model="openAIEnvironmentFingerprint"
+            type="text"
+            maxlength="256"
+            class="input font-mono text-sm"
+            :disabled="isSparkShadow"
+            :placeholder="t('admin.accounts.openai.environmentFingerprintPlaceholder')"
+            data-testid="openai-environment-fingerprint"
+          />
+          <p class="input-hint">
+            {{ isSparkShadow
+              ? t('admin.accounts.openai.environmentFingerprintShadowHint')
+              : t('admin.accounts.openai.environmentFingerprintDesc') }}
+          </p>
+        </div>
+      </div>
+
       <div
         v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -2977,6 +3001,7 @@ const openAIInstallationPinEnabled = ref(true)
 const openAIPinnedInstallationID = ref('')
 const installationPinSavedEnabled = ref(true)
 const installationRegenerating = ref(false)
+const openAIEnvironmentFingerprint = ref('')
 // OpenAI 订阅档位（Plus/Pro/Free）手动覆盖值,存于 credentials.plan_type;'' 表示清空/自动识别
 const editPlanType = ref<string>('')
 const openAICompactMode = ref<OpenAICompactMode>('auto')
@@ -3433,6 +3458,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openAIInstallationPinEnabled.value = true
   openAIPinnedInstallationID.value = ''
   installationPinSavedEnabled.value = true
+  openAIEnvironmentFingerprint.value = ''
   editPlanType.value = ''
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
@@ -3458,6 +3484,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       ? extra.openai_pinned_installation_id
       : ''
     installationPinSavedEnabled.value = openAIInstallationPinEnabled.value
+    openAIEnvironmentFingerprint.value = typeof newAccount.openai_environment_fingerprint === 'string'
+      ? newAccount.openai_environment_fingerprint
+      : ''
     // plan_type 手动覆盖仅 OAuth 有实际调度语义(IsOpenAIChatGPTSubscription 要求 oauth),故只对 oauth 回填
     editPlanType.value = newAccount.type === 'oauth'
       ? readPlanType(newAccount.credentials as Record<string, unknown> | undefined)
@@ -4220,6 +4249,23 @@ const handleSubmit = async () => {
 
   const updatePayload: Record<string, unknown> = { ...form }
   try {
+    if (props.account.platform === 'openai' &&
+      (props.account.type === 'oauth' || props.account.type === 'apikey') &&
+      !isSparkShadow.value) {
+      const fingerprint = openAIEnvironmentFingerprint.value.trim()
+      if (!fingerprint) {
+        appStore.showError(t('admin.accounts.openai.environmentFingerprintRequired'))
+        return
+      }
+      if (fingerprint.length > 256 || /[^\x20-\x7e]/.test(fingerprint)) {
+        appStore.showError(t('admin.accounts.openai.environmentFingerprintInvalid'))
+        return
+      }
+      updatePayload.openai_environment_fingerprint = fingerprint
+    } else {
+      delete updatePayload.openai_environment_fingerprint
+    }
+
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
     if (updatePayload.proxy_id === null) {
       updatePayload.proxy_id = 0

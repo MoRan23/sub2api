@@ -585,6 +585,12 @@ export default {
         installationRegenerateSuccess: 'installation_id 已重新生成，后续请求将使用新值。',
         installationRegenerateFailed: '重新生成 installation_id 失败',
         installationRegenerateSaveHint: '请先保存已开启的固定 installation_id 设置，再重新生成。',
+        environmentFingerprint: '环境指纹',
+        environmentFingerprintDesc: '仅编辑 User-Agent 的系统、架构和终端后缀；客户端类型和版本由系统统一维护。',
+        environmentFingerprintPlaceholder: '(Ubuntu 22.4.0; x86_64) xterm-256color',
+        environmentFingerprintShadowHint: '影子账号继承母账号的环境指纹，不能单独修改。',
+        environmentFingerprintRequired: '环境指纹不能为空',
+        environmentFingerprintInvalid: '环境指纹必须是不超过 256 个字符的单行 ASCII 文本',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
           '默认关闭。开启后可启用 responses_websockets_v2 协议能力（受网关全局开关与账号类型开关约束）。',

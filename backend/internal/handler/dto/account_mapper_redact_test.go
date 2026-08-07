@@ -100,3 +100,18 @@ func TestAccountFromServiceShallow_NilCredentialsOmitsStatus(t *testing.T) {
 	require.Nil(t, got.Credentials)
 	require.Nil(t, got.CredentialsStatus)
 }
+
+func TestAccountFromServiceShallowExposesOpenAIEnvironmentFingerprint(t *testing.T) {
+	src := &service.Account{
+		ID:       2,
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Credentials: map[string]any{
+			"user_agent": "codex-tui/0.146.0 (Ubuntu 22.4.0; x86_64) xterm-256color",
+		},
+	}
+
+	got := AccountFromServiceShallow(src)
+	require.Equal(t, "(Ubuntu 22.4.0; x86_64) xterm-256color", got.OpenAIEnvironmentFingerprint)
+	require.Equal(t, src.Credentials["user_agent"], got.Credentials["user_agent"])
+}

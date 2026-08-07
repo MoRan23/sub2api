@@ -1400,6 +1400,26 @@ func (a *Account) GetOpenAIUserAgent() string {
 	return a.GetCredential("user_agent")
 }
 
+// GetOpenAIOutboundUserAgent applies the current globally managed Codex
+// version while preserving the account's stored client family and environment
+// fingerprint.
+func (a *Account) GetOpenAIOutboundUserAgent() string {
+	if a == nil || strings.TrimSpace(a.GetOpenAIUserAgent()) == "" {
+		return ""
+	}
+	return resolveCodexOutboundIdentity(a.GetOpenAIUserAgent()).userAgent
+}
+
+// GetOpenAIEnvironmentFingerprint returns the account-level environment
+// suffix encoded in credentials.user_agent. Shadow accounts intentionally
+// return empty because their outbound identity belongs to the parent account.
+func (a *Account) GetOpenAIEnvironmentFingerprint() string {
+	if !isOpenAIEnvironmentFingerprintAccount(a) {
+		return ""
+	}
+	return OpenAIEnvironmentFingerprintFromUserAgent(a.GetOpenAIUserAgent())
+}
+
 func (a *Account) GetChatGPTAccountID() string {
 	if !a.IsOpenAIOAuth() {
 		return ""
