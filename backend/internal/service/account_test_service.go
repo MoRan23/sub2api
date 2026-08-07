@@ -55,7 +55,6 @@ type TestEvent struct {
 const (
 	defaultGeminiTextTestPrompt  = "hi"
 	defaultGeminiImageTestPrompt = "Generate a cute orange cat astronaut sticker on a clean pastel background."
-	defaultOpenAIImageTestPrompt = "Generate a cute orange cat astronaut sticker on a clean pastel background."
 )
 
 // isOpenAIImageModel checks if the model is an OpenAI image generation model (e.g. gpt-image-2).
@@ -537,7 +536,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	if isOpenAIImageModel(testModelID) {
 		imagePrompt := strings.TrimSpace(prompt)
 		if imagePrompt == "" {
-			imagePrompt = defaultOpenAIImageTestPrompt
+			imagePrompt = randomOpenAIImageTestPrompt()
 		}
 		if account.Type == "apikey" {
 			return s.testOpenAIImageAPIKey(c, ctx, account, testModelID, imagePrompt)
@@ -1497,7 +1496,7 @@ func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
 				"content": []map[string]any{
 					{
 						"type": "input_text",
-						"text": "hi",
+						"text": randomOpenAITextTestPrompt(),
 					},
 				},
 			},
@@ -1511,7 +1510,7 @@ func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
 	}
 
 	// All accounts require instructions for Responses API
-	payload["instructions"] = openai.DefaultInstructions
+	payload["instructions"] = openAITestInstructions()
 
 	return payload
 }
@@ -1519,7 +1518,7 @@ func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
 func createOpenAIChatCompletionsTestPayload(modelID string, prompt string) map[string]any {
 	testPrompt := strings.TrimSpace(prompt)
 	if testPrompt == "" {
-		testPrompt = "hi"
+		testPrompt = randomOpenAITextTestPrompt()
 	}
 
 	return map[string]any{
