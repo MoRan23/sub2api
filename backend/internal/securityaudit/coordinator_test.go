@@ -23,14 +23,25 @@ func (f *fakeLegacyEngine) Check(context.Context, Request) (*LegacyDecision, err
 }
 
 type fakePromptEngine struct {
-	mode      Mode
-	decision  *PromptDecision
-	err       error
-	enqueues  atomic.Int64
-	evaluates atomic.Int64
+	mode       Mode
+	keyword    *PromptDecision
+	decision   *PromptDecision
+	keywordErr error
+	err        error
+	enqueues   atomic.Int64
+	evaluates  atomic.Int64
 }
 
 func (f *fakePromptEngine) EffectiveMode() Mode { return f.mode }
+func (f *fakePromptEngine) CheckKeyword(context.Context, Request) (*PromptDecision, error) {
+	if f.keywordErr != nil {
+		return nil, f.keywordErr
+	}
+	if f.keyword != nil {
+		return f.keyword, nil
+	}
+	return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
+}
 func (f *fakePromptEngine) Enqueue(context.Context, Request) error {
 	f.enqueues.Add(1)
 	return f.err
@@ -81,6 +92,23 @@ func TestCoordinatorDoesNotMutateRequestBody(t *testing.T) {
 	decision := NewCoordinator(&fakeLegacyEngine{}, prompt).Check(context.Background(), Request{Body: body})
 	require.True(t, decision.AllowNextStage)
 	require.Equal(t, original, body)
+}
+
+func TestCoordinatorKeywordBlockShortCircuitsLegacyQueueAndGuard(t *testing.T) {
+	legacy := &fakeLegacyEngine{}
+	prompt := &fakePromptEngine{
+		mode:     ModeAsync,
+		keyword:  &PromptDecision{Kind: DecisionBlock, ErrorCode: ErrorCodeKeywordBlocked, AllowNextStage: false},
+		decision: &PromptDecision{Kind: DecisionBlock},
+	}
+	decision := NewCoordinator(legacy, prompt).Check(context.Background(), Request{Body: []byte(`{"messages":[{"role":"user","content":"blocked"}]}`)})
+	require.Equal(t, DecisionBlock, decision.Kind)
+	require.Equal(t, http.StatusForbidden, decision.HTTPStatus)
+	require.Equal(t, ErrorCodeKeywordBlocked, decision.ErrorCode)
+	require.Equal(t, "提示词包含禁止内容，请调整输入后重试", decision.ClientMessage)
+	require.Zero(t, legacy.calls.Load())
+	require.Zero(t, prompt.enqueues.Load())
+	require.Zero(t, prompt.evaluates.Load())
 }
 
 func TestCoordinatorBlockingPriorityCoversBothEngineDecisionMatrix(t *testing.T) {

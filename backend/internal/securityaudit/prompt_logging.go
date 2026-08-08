@@ -29,6 +29,7 @@ const (
 	EventEvaluationStarted    = "prompt_guard.evaluation_started"
 	EventGuardAllowed         = "prompt_guard.allowed"
 	EventGuardBlocked         = "prompt_guard.blocked"
+	EventKeywordBlocked       = "prompt_audit.keyword_blocked"
 	EventGuardFailed          = "prompt_guard.failed"
 	EventResultRecordFailed   = "prompt_guard.result_record_failed"
 	EventEventDeleted         = "prompt_audit.event_deleted"
@@ -43,7 +44,7 @@ var knownLogEvents = map[string]struct{}{
 	EventJobEnqueued: {}, EventEnqueueSkipped: {}, EventEnqueueDropped: {},
 	EventAuditStarted: {}, EventProcessingReclaimed: {}, EventProcessed: {}, EventProcessFailed: {}, EventFindingRecorded: {},
 	EventChunkStarted: {}, EventChunkCompleted: {}, EventChunkFailed: {}, EventChunksAggregated: {},
-	EventEvaluationStarted: {}, EventGuardAllowed: {}, EventGuardBlocked: {}, EventGuardFailed: {}, EventResultRecordFailed: {},
+	EventEvaluationStarted: {}, EventGuardAllowed: {}, EventGuardBlocked: {}, EventKeywordBlocked: {}, EventGuardFailed: {}, EventResultRecordFailed: {},
 	EventEventDeleted: {}, EventEventsDeleted: {}, EventDeletePreviewed: {}, EventEventsFilterDeleted: {},
 }
 
@@ -56,6 +57,7 @@ var allowedLogFields = map[string]struct{}{
 	"queue_length": {}, "queue_capacity": {}, "stage": {}, "upstream_dispatched": {},
 	"billing_preconsumed": {}, "worker_id": {}, "reclaimed_total": {}, "attempts": {},
 	"max_attempts": {}, "claim_version": {}, "http_status": {}, "retryable": {},
+	"keyword_hash": {},
 }
 
 func LogInfo(event string, fields map[string]any) {
@@ -152,6 +154,8 @@ func stableErrorMessage(code string) string {
 	switch stableErrorCode(code) {
 	case ErrorCodeBlocked:
 		return "Prompt Guard blocked the request"
+	case ErrorCodeKeywordBlocked:
+		return "Prompt Audit keyword policy blocked the request"
 	case ErrorCodeUnavailable, "payload_store_unavailable", "payload_missing":
 		return "Prompt Audit dependency is unavailable"
 	case ErrorCodeInvalidResponse:

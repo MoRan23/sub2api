@@ -51,6 +51,21 @@
             </label>
           </div>
         </fieldset>
+
+        <fieldset class="mt-5 border-t border-gray-100 pt-5 dark:border-dark-800">
+          <legend class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.policy.keywordTitle') }}</legend>
+          <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.policy.keywordDescription') }}</p>
+          <div class="mt-3">
+            <KeywordEditor
+              v-model="keywordModel"
+              :label="t('admin.promptAudit.policy.keywords')"
+              :placeholder="t('admin.promptAudit.policy.keywordsPlaceholder')"
+              :count-label="t('admin.promptAudit.policy.keywordCount', { count: effectiveKeywordCount })"
+              :limit-label="t('admin.promptAudit.policy.keywordLimit')"
+              :error="keywordError"
+            />
+          </div>
+        </fieldset>
       </div>
 
       <div class="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-dark-700/60 dark:bg-dark-900/20 sm:p-5">
@@ -76,6 +91,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { PromptAuditDraft, PromptAuditGroup } from '../types'
 import { cloneData, SCANNER_CATALOG } from '../viewModel'
+import KeywordEditor from './KeywordEditor.vue'
 
 const props = defineProps<{ draft: PromptAuditDraft; groups: PromptAuditGroup[] }>()
 const emit = defineEmits<{ (event: 'update:draft', value: PromptAuditDraft): void }>()
@@ -89,6 +105,26 @@ const filteredGroups = computed(() => {
 })
 const knownGroupIds = computed(() => new Set(props.groups.map((group) => group.id)))
 const missingGroupIds = computed(() => props.draft.group_ids.filter((id) => !knownGroupIds.value.has(id)))
+const keywordModel = computed<string[]>({
+  get: () => props.draft.blocked_keywords,
+  set: (value) => patch({ blocked_keywords: value }),
+})
+const effectiveKeywords = computed(() => {
+  const seen = new Set<string>()
+  return props.draft.blocked_keywords.map((value) => value.trim()).filter((value) => {
+    if (!value) return false
+    const key = value.toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+})
+const effectiveKeywordCount = computed(() => effectiveKeywords.value.length)
+const keywordError = computed(() => {
+  if (effectiveKeywordCount.value > 10000) return t('admin.promptAudit.errors.prompt_audit_too_many_keywords')
+  if (effectiveKeywords.value.some((value) => Array.from(value).length > 200)) return t('admin.promptAudit.errors.prompt_audit_keyword_too_long')
+  return ''
+})
 
 function patch(value: Partial<PromptAuditDraft>) {
   emit('update:draft', { ...cloneData(props.draft), ...value })

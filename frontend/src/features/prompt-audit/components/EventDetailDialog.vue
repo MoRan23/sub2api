@@ -103,6 +103,7 @@ function formatDecisionAction(decision: string, action: string): string {
   return `${decisionLabel} · ${actionLabel}`
 }
 function translateCategory(category: string): string {
+  if (category === 'keyword') return t('admin.promptAudit.keyword.category')
   return SCANNER_CATALOG.some((scanner) => scanner.id === category)
     ? t(`admin.promptAudit.scanners.${category}`)
     : category
@@ -142,6 +143,7 @@ function issueTitle(issue: PromptIssueSummary): string {
   return translateCategory(issue.category || issue.scanner_id) || issue.title
 }
 function issueDescription(issue: PromptIssueSummary): string {
+  if ((issue.category || issue.scanner_id) === 'keyword') return t('admin.promptAudit.keyword.description')
   const category = issue.category || issue.scanner_id
   const key = `admin.promptAudit.scannerDescriptions.${category}`
   const label = t(key)

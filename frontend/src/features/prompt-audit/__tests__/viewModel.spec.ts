@@ -14,6 +14,9 @@ const config = (): PromptAuditConfig => ({
   enabled: true,
   blocking_enabled: false,
   blocking_latest_turn_only: false,
+  keyword_blocking_enabled: false,
+  keyword_blocking_active: false,
+  blocked_keywords: [],
   store_pass_events: false,
   effective_mode: 'async_audit',
   strategy: 'priority',
@@ -61,6 +64,15 @@ describe('Prompt Audit view model', () => {
     const draft = configToDraft(config())
     draft.blocking_latest_turn_only = true
     expect(buildUpdateRequest(draft)).toMatchObject({ blocking_latest_turn_only: true })
+  })
+
+  it('round-trips keyword policy state and includes canonical payload fields', () => {
+    const draft = configToDraft({ ...config(), keyword_blocking_enabled: true, keyword_blocking_active: true, blocked_keywords: ['  Alpha ', '', 'Beta'] })
+    expect(draft.blocked_keywords).toEqual(['  Alpha ', '', 'Beta'])
+    expect(buildUpdateRequest(draft)).toMatchObject({
+      keyword_blocking_enabled: true,
+      blocked_keywords: ['Alpha', 'Beta'],
+    })
   })
 
   it('tracks dirty state from the full normalized save payload', () => {

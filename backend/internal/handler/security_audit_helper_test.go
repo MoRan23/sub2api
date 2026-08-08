@@ -54,6 +54,9 @@ type turnCountingEngine struct {
 }
 
 func (e *turnCountingEngine) EffectiveMode() securityaudit.Mode { return e.mode }
+func (e *turnCountingEngine) CheckKeyword(context.Context, securityaudit.Request) (*securityaudit.PromptDecision, error) {
+	return &securityaudit.PromptDecision{Kind: securityaudit.DecisionAllow, AllowNextStage: true}, nil
+}
 func (e *turnCountingEngine) Enqueue(context.Context, securityaudit.Request) error {
 	e.enqueues.Add(1)
 	return nil

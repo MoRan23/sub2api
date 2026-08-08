@@ -86,6 +86,7 @@ const statusItems = computed(() => {
   return [
     { label: t('admin.promptAudit.runtime.process'), value: t(`admin.promptAudit.status.${runtime.process_status}`), dot: statusDot(runtime.process_status) },
     { label: t('admin.promptAudit.runtime.mode'), value: t(`admin.promptAudit.mode.${runtime.effective_mode}`) },
+    { label: t('admin.promptAudit.runtime.keywordBlocking'), value: runtime.keyword_blocking_active ? t('admin.promptAudit.status.running') : t('admin.promptAudit.status.disabled'), dot: runtime.keyword_blocking_active ? 'bg-emerald-500' : 'bg-gray-400' },
     { label: t('admin.promptAudit.runtime.version'), value: `${runtime.active_config_version} / ${runtime.expected_config_version}` },
     { label: t('admin.promptAudit.runtime.workers'), value: `${runtime.worker_active} / ${runtime.worker_total}` },
     { label: t('admin.promptAudit.runtime.queue'), value: `${runtime.queue.active} / ${runtime.queue_capacity}` },
@@ -101,6 +102,7 @@ const guardMetricItems = computed(() => {
     { label: t('admin.promptAudit.metrics.allowed'), value: metrics.allowed },
     { label: t('admin.promptAudit.metrics.flagged'), value: metrics.flagged },
     { label: t('admin.promptAudit.metrics.blocked'), value: metrics.blocked },
+    { label: t('admin.promptAudit.metrics.keywordBlocked'), value: metrics.keyword_blocked },
     { label: t('admin.promptAudit.metrics.unavailable'), value: metrics.unavailable },
     { label: t('admin.promptAudit.metrics.timeouts'), value: metrics.timeouts },
     { label: t('admin.promptAudit.metrics.failovers'), value: metrics.failovers },

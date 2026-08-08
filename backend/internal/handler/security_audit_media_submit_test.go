@@ -20,15 +20,26 @@ import (
 type handlerPromptEngine struct {
 	mu sync.Mutex
 
-	mode      securityaudit.Mode
-	decision  *securityaudit.PromptDecision
-	err       error
-	evaluated int
-	enqueued  int
-	requests  []securityaudit.Request
+	mode       securityaudit.Mode
+	keyword    *securityaudit.PromptDecision
+	decision   *securityaudit.PromptDecision
+	keywordErr error
+	err        error
+	evaluated  int
+	enqueued   int
+	requests   []securityaudit.Request
 }
 
 func (e *handlerPromptEngine) EffectiveMode() securityaudit.Mode { return e.mode }
+func (e *handlerPromptEngine) CheckKeyword(context.Context, securityaudit.Request) (*securityaudit.PromptDecision, error) {
+	if e.keywordErr != nil {
+		return nil, e.keywordErr
+	}
+	if e.keyword != nil {
+		return e.keyword, nil
+	}
+	return &securityaudit.PromptDecision{Kind: securityaudit.DecisionAllow, AllowNextStage: true}, nil
+}
 func (e *handlerPromptEngine) Enqueue(_ context.Context, req securityaudit.Request) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()

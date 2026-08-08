@@ -3,6 +3,7 @@ package securityaudit
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 )
 
 func BuildIssueSummaries(result NormalizedResult) []IssueSummary {
@@ -12,6 +13,22 @@ func BuildIssueSummaries(result NormalizedResult) []IssueSummary {
 	}
 	summaries := make([]IssueSummary, 0, len(resultCategories)+len(result.UnknownCategories))
 	for _, category := range resultCategories {
+		if category == "keyword" {
+			evidence := RedactPreview(result.ScannerEvidence[category], 160)
+			evidenceHash := strings.TrimPrefix(evidence, "sha256:")
+			if len(evidenceHash) != sha256.Size*2 {
+				digest := sha256.Sum256([]byte(evidence))
+				evidenceHash = hex.EncodeToString(digest[:])
+			}
+			summaries = append(summaries, IssueSummary{
+				Category: category, ScannerID: category, Title: "关键字拦截",
+				Description: "提示词命中管理员配置的关键字规则", Severity: string(RiskCritical),
+				SeverityLabel: riskLabelZH(RiskCritical), Action: string(ActionBlock),
+				ActionLabel: actionLabelZH(ActionBlock), Code: "prompt_audit_keyword",
+				Score: 1, Evidence: evidence, EvidenceHash: evidenceHash,
+			})
+			continue
+		}
 		definition, ok := ScannerCatalog[category]
 		if !ok {
 			continue

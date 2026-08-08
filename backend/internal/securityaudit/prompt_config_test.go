@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -417,6 +418,60 @@ func TestParseLegacyConfigDefaultsMissingFieldsWithoutEnablingBlocking(t *testin
 	require.Equal(t, DefaultQueueCapacity, storage.QueueCapacity)
 	require.Equal(t, AllScannerIDs, storage.Scanners)
 	require.True(t, storage.AllGroups)
+	require.False(t, storage.KeywordBlockingEnabled)
+	require.Empty(t, storage.BlockedKeywords)
+}
+
+func TestKeywordOnlyConfigDoesNotRequireGuardEndpoint(t *testing.T) {
+	request := promptAuditUpdateRequest(1, 1, "")
+	request.Enabled = false
+	request.BlockingEnabled = false
+	request.Endpoints = nil
+	request.KeywordBlockingEnabled = true
+	request.BlockedKeywords = []string{"  Secret ", "", "secret", "内部密钥"}
+
+	manager := &ConfigManager{encryptor: prefixEncryptor{}, encryptionKeyConfigured: true}
+	next, err := manager.buildNextStorage(DefaultStorageConfig(), request, 9)
+	require.NoError(t, err)
+	require.Equal(t, []string{"Secret", "内部密钥"}, next.BlockedKeywords)
+	require.True(t, next.KeywordBlockingEnabled)
+	public := PublicFromStorage(next, true, nil)
+	require.True(t, public.KeywordBlockingEnabled)
+	require.True(t, public.KeywordBlockingActive)
+
+	active, err := ActiveFromStorage(next, true, prefixEncryptor{})
+	require.NoError(t, err)
+	require.True(t, active.KeywordBlockingActive())
+}
+
+func TestKeywordConfigBoundsAreValidatedAfterCanonicalization(t *testing.T) {
+	valid := promptAuditUpdateRequest(1, 1, "")
+	valid.Enabled = false
+	valid.Endpoints = nil
+	valid.KeywordBlockingEnabled = true
+	valid.BlockedKeywords = []string{"first", " FIRST ", "第二"}
+	require.NoError(t, validateUpdateConfigRequest(valid))
+
+	tooMany := valid
+	tooMany.BlockedKeywords = make([]string, MaxBlockedKeywords+1)
+	for index := range tooMany.BlockedKeywords {
+		tooMany.BlockedKeywords[index] = "same"
+	}
+	// Duplicate values collapse before the effective-count limit is applied.
+	require.NoError(t, validateUpdateConfigRequest(tooMany))
+	tooMany.BlockedKeywords = make([]string, MaxBlockedKeywords+1)
+	for index := range tooMany.BlockedKeywords {
+		tooMany.BlockedKeywords[index] = fmt.Sprintf("keyword-%d", index)
+	}
+	require.Equal(t, "prompt_audit_too_many_keywords", infraerrors.Reason(validateUpdateConfigRequest(tooMany)))
+
+	tooLong := valid
+	tooLong.BlockedKeywords = []string{strings.Repeat("a", MaxBlockedKeywordRunes+1)}
+	require.Equal(t, "prompt_audit_keyword_too_long", infraerrors.Reason(validateUpdateConfigRequest(tooLong)))
+
+	empty := valid
+	empty.BlockedKeywords = []string{"", "  "}
+	require.Equal(t, "prompt_audit_keywords_required", infraerrors.Reason(validateUpdateConfigRequest(empty)))
 }
 
 func TestUpdateConfigStrictBoundsAndKnownValues(t *testing.T) {

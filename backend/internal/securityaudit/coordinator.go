@@ -13,6 +13,7 @@ type LegacyEngine interface {
 
 type PromptEngine interface {
 	EffectiveMode() Mode
+	CheckKeyword(ctx context.Context, req Request) (*PromptDecision, error)
 	Enqueue(ctx context.Context, req Request) error
 	Evaluate(ctx context.Context, req Request) (*PromptDecision, error)
 }
@@ -33,6 +34,20 @@ func (c *Coordinator) Check(ctx context.Context, req Request) Decision {
 	mode := ModeOff
 	if c.prompt != nil {
 		mode = c.prompt.EffectiveMode()
+		keyword, err := c.prompt.CheckKeyword(ctx, req.Clone())
+		if err != nil {
+			var guardErr *GuardError
+			if errors.As(err, &guardErr) && guardErr.Code == ErrorCodeInvalidResponse {
+				return prioritize(nil, unavailablePromptDecision(ErrorCodeInvalidResponse))
+			}
+			return prioritize(nil, unavailablePromptDecision(ErrorCodeUnavailable))
+		}
+		if keyword == nil {
+			return prioritize(nil, unavailablePromptDecision(ErrorCodeUnavailable))
+		}
+		if keyword.Kind != DecisionAllow {
+			return prioritize(nil, keyword)
+		}
 	}
 	switch mode {
 	case ModeAsync:
@@ -111,8 +126,16 @@ func prioritize(legacy *LegacyDecision, prompt *PromptDecision) Decision {
 	}
 	switch prompt.Kind {
 	case DecisionBlock:
-		return Decision{Kind: DecisionBlock, HTTPStatus: http.StatusForbidden, ErrorCode: ErrorCodeBlocked,
-			ClientMessage: "提示词安全审计拒绝了该请求，请调整输入后重试", Legacy: legacy, Prompt: prompt}
+		code := prompt.ErrorCode
+		message := "提示词安全审计拒绝了该请求，请调整输入后重试"
+		if code == "" {
+			code = ErrorCodeBlocked
+		}
+		if code == ErrorCodeKeywordBlocked {
+			message = "提示词包含禁止内容，请调整输入后重试"
+		}
+		return Decision{Kind: DecisionBlock, HTTPStatus: http.StatusForbidden, ErrorCode: code,
+			ClientMessage: message, Legacy: legacy, Prompt: prompt}
 	case DecisionInvalid:
 		return Decision{Kind: DecisionInvalid, HTTPStatus: http.StatusServiceUnavailable, ErrorCode: ErrorCodeInvalidResponse,
 			ClientMessage: "提示词安全审计暂时不可用，请稍后重试", Legacy: legacy, Prompt: prompt}

@@ -37,9 +37,8 @@ type ConfigManager struct {
 
 	snapshot atomic.Pointer[activeConfigSnapshot]
 	expected atomic.Int64
-	// expectedBlocking records the last storage intent that could be decoded,
-	// independently of whether endpoint credentials or the full config could be
-	// activated. A config version alone cannot distinguish async from blocking.
+	// expectedBlocking records the last synchronous blocking intent that could
+	// be decoded, including both Guard blocking and local keyword blocking.
 	expectedBlocking atomic.Bool
 	// configUntrusted is set when a load/reload fails before a trustworthy
 	// snapshot is installed. Combined with expectedBlocking, EffectiveMode
@@ -124,7 +123,7 @@ func (m *ConfigManager) Reload(ctx context.Context) error {
 		return err
 	}
 	m.expected.Store(storage.ConfigVersion)
-	m.expectedBlocking.Store(values[SettingKeyRiskControl] == "true" && storage.Enabled && storage.BlockingEnabled)
+	m.expectedBlocking.Store(values[SettingKeyRiskControl] == "true" && storage.synchronousBlockingEnabled())
 	active, err := ActiveFromStorage(storage, values[SettingKeyRiskControl] == "true", m.encryptor)
 	if err != nil {
 		m.recordLoadError(err)
@@ -200,9 +199,10 @@ func (m *ConfigManager) BlockingActivationDegraded() bool {
 	if !ok {
 		return true
 	}
-	// A still-active weaker snapshot after a failed blocking activation must not
-	// keep serving allow decisions under the old off/async mode.
-	return active.EffectiveMode() != ModeBlocking
+	// A still-active weaker snapshot after a failed synchronous policy activation
+	// must not keep serving allow decisions under the previous snapshot.
+	return active.ConfigVersion < m.expected.Load() ||
+		(!active.KeywordBlockingActive() && active.EffectiveMode() != ModeBlocking)
 }
 
 func (m *ConfigManager) EffectiveMode() Mode {
@@ -305,7 +305,7 @@ func (m *ConfigManager) Save(ctx context.Context, req UpdateConfigRequest, actor
 		return PublicConfig{}, err
 	}
 	m.expected.Store(next.ConfigVersion)
-	m.expectedBlocking.Store(active.RiskControlEnabled && next.Enabled && next.BlockingEnabled)
+	m.expectedBlocking.Store(active.RiskControlEnabled && next.synchronousBlockingEnabled())
 	previous := m.snapshot.Load()
 	m.snapshot.Store(&activeConfigSnapshot{storage: cloneStorageConfig(next), active: cloneActiveConfig(active), loadedAt: m.clock.Now()})
 	// A successful admin save installs a trustworthy snapshot; clear any prior
@@ -336,6 +336,7 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 	}
 	next := storageConfig{
 		Enabled: req.Enabled, BlockingEnabled: req.BlockingEnabled, BlockingLatestTurnOnly: req.BlockingLatestTurnOnly, StorePassEvents: req.StorePassEvents,
+		KeywordBlockingEnabled: req.KeywordBlockingEnabled, BlockedKeywords: append([]string(nil), req.BlockedKeywords...),
 		Strategy: strings.TrimSpace(req.Strategy), WorkerCount: req.WorkerCount,
 		QueueCapacity: req.QueueCapacity, Scanners: append([]string(nil), req.Scanners...),
 		AllGroups: req.AllGroups, GroupIDs: append([]int64(nil), req.GroupIDs...),
@@ -417,9 +418,10 @@ func (m *ConfigManager) observeExpectedState(raw string, riskControlEnabled bool
 		return
 	}
 	var intent struct {
-		Enabled         bool  `json:"enabled"`
-		BlockingEnabled bool  `json:"blocking_enabled"`
-		ConfigVersion   int64 `json:"config_version"`
+		Enabled                bool  `json:"enabled"`
+		BlockingEnabled        bool  `json:"blocking_enabled"`
+		KeywordBlockingEnabled bool  `json:"keyword_blocking_enabled"`
+		ConfigVersion          int64 `json:"config_version"`
 	}
 	if err := json.Unmarshal([]byte(raw), &intent); err != nil {
 		return
@@ -428,7 +430,7 @@ func (m *ConfigManager) observeExpectedState(raw string, riskControlEnabled bool
 		intent.ConfigVersion = 1
 	}
 	m.expected.Store(intent.ConfigVersion)
-	m.expectedBlocking.Store(riskControlEnabled && intent.Enabled && intent.BlockingEnabled)
+	m.expectedBlocking.Store(riskControlEnabled && ((intent.Enabled && intent.BlockingEnabled) || intent.KeywordBlockingEnabled))
 }
 
 func (m *ConfigManager) refreshLoop(ctx context.Context) {
@@ -500,6 +502,7 @@ func (m *ConfigManager) clearLoadError() {
 func cloneStorageConfig(cfg storageConfig) storageConfig {
 	cfg.Scanners = append([]string(nil), cfg.Scanners...)
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
+	cfg.BlockedKeywords = append([]string(nil), cfg.BlockedKeywords...)
 	cfg.Endpoints = append([]StorageEndpoint(nil), cfg.Endpoints...)
 	return cfg
 }
@@ -507,6 +510,7 @@ func cloneStorageConfig(cfg storageConfig) storageConfig {
 func cloneActiveConfig(cfg ActiveConfig) ActiveConfig {
 	cfg.Scanners = append([]string(nil), cfg.Scanners...)
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
+	cfg.BlockedKeywords = append([]string(nil), cfg.BlockedKeywords...)
 	cfg.Endpoints = append([]ActiveEndpoint(nil), cfg.Endpoints...)
 	return cfg
 }

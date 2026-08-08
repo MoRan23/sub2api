@@ -9,22 +9,26 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/keywordmatcher"
 )
 
 const (
-	DefaultWorkerCount   = 4
-	MaxWorkerCount       = 32
-	DefaultQueueCapacity = 32768
-	MaxQueueCapacity     = 100000
-	DefaultTimeoutMS     = 3000
-	MinTimeoutMS         = 100
-	MaxTimeoutMS         = 30000
-	DefaultInputLimit    = 4000
-	MinInputLimit        = 128
-	MaxInputLimit        = 100000
-	DefaultPayloadTTL    = 30 * time.Minute
+	DefaultWorkerCount     = 4
+	MaxWorkerCount         = 32
+	DefaultQueueCapacity   = 32768
+	MaxQueueCapacity       = 100000
+	DefaultTimeoutMS       = 3000
+	MinTimeoutMS           = 100
+	MaxTimeoutMS           = 30000
+	DefaultInputLimit      = 4000
+	MinInputLimit          = 128
+	MaxInputLimit          = 100000
+	DefaultPayloadTTL      = 30 * time.Minute
+	MaxBlockedKeywords     = 10000
+	MaxBlockedKeywordRunes = 200
 )
 
 type SecretEncryptor interface {
@@ -67,6 +71,8 @@ type storageConfig struct {
 	Enabled                bool              `json:"enabled"`
 	BlockingEnabled        bool              `json:"blocking_enabled"`
 	BlockingLatestTurnOnly bool              `json:"blocking_latest_turn_only"`
+	KeywordBlockingEnabled bool              `json:"keyword_blocking_enabled"`
+	BlockedKeywords        []string          `json:"blocked_keywords"`
 	StorePassEvents        bool              `json:"store_pass_events"`
 	Strategy               string            `json:"strategy"`
 	WorkerCount            int               `json:"worker_count"`
@@ -103,6 +109,8 @@ type ActiveConfig struct {
 	Enabled                bool
 	BlockingEnabled        bool
 	BlockingLatestTurnOnly bool
+	KeywordBlockingEnabled bool
+	BlockedKeywords        []string
 	StorePassEvents        bool
 	Strategy               string
 	WorkerCount            int
@@ -115,6 +123,7 @@ type ActiveConfig struct {
 	UpdatedAt              time.Time
 	UpdatedBy              int64
 	ChangeSummary          string
+	keywordMatcher         *keywordmatcher.Matcher
 }
 
 type PublicEndpoint struct {
@@ -134,6 +143,9 @@ type PublicConfig struct {
 	Enabled                bool             `json:"enabled"`
 	BlockingEnabled        bool             `json:"blocking_enabled"`
 	BlockingLatestTurnOnly bool             `json:"blocking_latest_turn_only"`
+	KeywordBlockingEnabled bool             `json:"keyword_blocking_enabled"`
+	KeywordBlockingActive  bool             `json:"keyword_blocking_active"`
+	BlockedKeywords        []string         `json:"blocked_keywords"`
 	StorePassEvents        bool             `json:"store_pass_events"`
 	EffectiveMode          Mode             `json:"effective_mode"`
 	Strategy               string           `json:"strategy"`
@@ -167,6 +179,8 @@ type UpdateConfigRequest struct {
 	Enabled                bool             `json:"enabled"`
 	BlockingEnabled        bool             `json:"blocking_enabled"`
 	BlockingLatestTurnOnly bool             `json:"blocking_latest_turn_only"`
+	KeywordBlockingEnabled bool             `json:"keyword_blocking_enabled"`
+	BlockedKeywords        []string         `json:"blocked_keywords"`
 	StorePassEvents        bool             `json:"store_pass_events"`
 	Strategy               string           `json:"strategy"`
 	WorkerCount            int              `json:"worker_count"`
@@ -182,6 +196,8 @@ func DefaultStorageConfig() storageConfig {
 		Enabled:                false,
 		BlockingEnabled:        false,
 		BlockingLatestTurnOnly: false,
+		KeywordBlockingEnabled: false,
+		BlockedKeywords:        []string{},
 		StorePassEvents:        false,
 		Strategy:               "priority",
 		WorkerCount:            DefaultWorkerCount,
@@ -230,6 +246,7 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	}
 	cfg.Scanners = canonicalScannerIDs(cfg.Scanners)
 	cfg.GroupIDs = canonicalInt64s(cfg.GroupIDs)
+	cfg.BlockedKeywords = canonicalBlockedKeywords(cfg.BlockedKeywords)
 	// Preserve an invalid blocking-without-audit combination so validation can
 	// reject it instead of silently changing administrator intent.
 	for i := range cfg.Endpoints {
@@ -257,6 +274,12 @@ func normalizeStorageConfig(cfg *storageConfig) {
 func validateStorageConfig(cfg storageConfig) error {
 	if cfg.BlockingEnabled && !cfg.Enabled {
 		return infraerrors.BadRequest(ErrorCodeRequiresEnabled, "开启同步阻止前必须先启用提示词审计")
+	}
+	if err := validateBlockedKeywords(cfg.BlockedKeywords); err != nil {
+		return err
+	}
+	if cfg.KeywordBlockingEnabled && len(cfg.BlockedKeywords) == 0 {
+		return infraerrors.BadRequest("prompt_audit_keywords_required", "开启关键字拦截前至少需要配置一个关键字")
 	}
 	if cfg.Strategy != "priority" {
 		return infraerrors.BadRequest("prompt_audit_invalid_strategy", "提示词审计策略仅支持 priority")
@@ -306,6 +329,13 @@ func validateStorageConfig(cfg storageConfig) error {
 }
 
 func validateUpdateConfigRequest(req UpdateConfigRequest) error {
+	keywords := canonicalBlockedKeywords(req.BlockedKeywords)
+	if err := validateBlockedKeywords(keywords); err != nil {
+		return err
+	}
+	if req.KeywordBlockingEnabled && len(keywords) == 0 {
+		return infraerrors.BadRequest("prompt_audit_keywords_required", "开启关键字拦截前至少需要配置一个关键字")
+	}
 	if strings.TrimSpace(req.Strategy) != "priority" {
 		return infraerrors.BadRequest("prompt_audit_invalid_strategy", "提示词审计策略仅支持 priority")
 	}
@@ -352,6 +382,21 @@ func (cfg ActiveConfig) EffectiveMode() Mode {
 		return ModeBlocking
 	}
 	return ModeAsync
+}
+
+func (cfg ActiveConfig) KeywordBlockingActive() bool {
+	return cfg.RiskControlEnabled && cfg.KeywordBlockingEnabled && len(cfg.BlockedKeywords) > 0 && cfg.keywordMatcher != nil
+}
+
+func (cfg ActiveConfig) MatchBlockedKeyword(text string) (string, bool) {
+	if !cfg.KeywordBlockingActive() {
+		return "", false
+	}
+	return cfg.keywordMatcher.Match(text)
+}
+
+func (cfg storageConfig) synchronousBlockingEnabled() bool {
+	return (cfg.Enabled && cfg.BlockingEnabled) || cfg.KeywordBlockingEnabled
 }
 
 func (cfg ActiveConfig) IncludesGroup(groupID *int64) bool {
@@ -412,7 +457,10 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 	}
 	active := ActiveConfig{RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled}
 	return PublicConfig{
-		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled, BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly, StorePassEvents: cfg.StorePassEvents,
+		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled, BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly,
+		KeywordBlockingEnabled: cfg.KeywordBlockingEnabled,
+		KeywordBlockingActive:  riskControlEnabled && cfg.KeywordBlockingEnabled && len(cfg.BlockedKeywords) > 0,
+		BlockedKeywords:        append([]string(nil), cfg.BlockedKeywords...), StorePassEvents: cfg.StorePassEvents,
 		EffectiveMode: active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: scanners, AllGroups: cfg.AllGroups,
 		GroupIDs: groupIDs, Endpoints: endpoints, ConfigVersion: cfg.ConfigVersion,
@@ -424,11 +472,14 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 	active := ActiveConfig{
 		RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled,
 		BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly,
+		KeywordBlockingEnabled: cfg.KeywordBlockingEnabled,
+		BlockedKeywords:        append([]string(nil), cfg.BlockedKeywords...),
 		StorePassEvents:        cfg.StorePassEvents, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: append([]string(nil), cfg.Scanners...), AllGroups: cfg.AllGroups,
 		GroupIDs: append([]int64(nil), cfg.GroupIDs...), ConfigVersion: cfg.ConfigVersion,
 		UpdatedAt: cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
-		Endpoints: make([]ActiveEndpoint, 0, len(cfg.Endpoints)),
+		Endpoints:      make([]ActiveEndpoint, 0, len(cfg.Endpoints)),
+		keywordMatcher: keywordmatcher.New(cfg.BlockedKeywords),
 	}
 	for _, ep := range cfg.Endpoints {
 		token := ""
@@ -463,13 +514,17 @@ func changeSummary(cfg storageConfig) string {
 		Enabled                bool   `json:"enabled"`
 		BlockingEnabled        bool   `json:"blocking_enabled"`
 		BlockingLatestTurnOnly bool   `json:"blocking_latest_turn_only"`
+		KeywordBlockingEnabled bool   `json:"keyword_blocking_enabled"`
+		KeywordCount           int    `json:"keyword_count"`
+		KeywordHash            string `json:"keyword_hash"`
 		StorePassEvents        bool   `json:"store_pass_events"`
 		EndpointCount          int    `json:"endpoint_count"`
 		ScannerCount           int    `json:"scanner_count"`
 		AllGroups              bool   `json:"all_groups"`
 		GroupCount             int    `json:"group_count"`
 		GroupHash              string `json:"group_hash"`
-	}{cfg.Enabled, cfg.BlockingEnabled, cfg.BlockingLatestTurnOnly, cfg.StorePassEvents, len(cfg.Endpoints), len(cfg.Scanners), cfg.AllGroups, len(cfg.GroupIDs), ""}
+	}{cfg.Enabled, cfg.BlockingEnabled, cfg.BlockingLatestTurnOnly, cfg.KeywordBlockingEnabled, len(cfg.BlockedKeywords), "", cfg.StorePassEvents, len(cfg.Endpoints), len(cfg.Scanners), cfg.AllGroups, len(cfg.GroupIDs), ""}
+	summary.KeywordHash = blockedKeywordsHash(cfg.BlockedKeywords)
 	rawGroups, _ := json.Marshal(cfg.GroupIDs)
 	digest := sha256.Sum256(rawGroups)
 	summary.GroupHash = hex.EncodeToString(digest[:])
@@ -509,4 +564,40 @@ func canonicalScannerIDs(values []string) []string {
 		}
 	}
 	return result
+}
+
+func canonicalBlockedKeywords(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		keyword := strings.TrimSpace(value)
+		if keyword == "" {
+			continue
+		}
+		key := strings.ToLower(keyword)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, keyword)
+	}
+	return result
+}
+
+func blockedKeywordsHash(values []string) string {
+	rawKeywords, _ := json.Marshal(canonicalBlockedKeywords(values))
+	digest := sha256.Sum256(rawKeywords)
+	return hex.EncodeToString(digest[:])
+}
+
+func validateBlockedKeywords(values []string) error {
+	if len(values) > MaxBlockedKeywords {
+		return infraerrors.BadRequest("prompt_audit_too_many_keywords", "提示词审计关键字数量超出允许范围")
+	}
+	for _, keyword := range values {
+		if utf8.RuneCountInString(keyword) > MaxBlockedKeywordRunes {
+			return infraerrors.BadRequest("prompt_audit_keyword_too_long", "提示词审计关键字长度超出允许范围")
+		}
+	}
+	return nil
 }

@@ -2,6 +2,8 @@ package securityaudit
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -107,6 +109,73 @@ func (s *PromptService) EffectiveMode() Mode {
 	return s.config.EffectiveMode()
 }
 
+func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptDecision, error) {
+	if s == nil || s.config == nil {
+		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
+	}
+	if s.config.BlockingActivationDegraded() {
+		return nil, &GuardError{Code: ErrorCodeUnavailable}
+	}
+	cfg, ok := s.config.Active()
+	if !ok || !cfg.KeywordBlockingActive() || !cfg.IncludesGroup(req.GroupID) {
+		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
+	}
+
+	clock := s.clock
+	if clock == nil {
+		clock = realClock{}
+	}
+	started := clock.Now()
+	snapshot, err := ExtractPromptSnapshot(req)
+	if errors.Is(err, ErrNoPromptText) {
+		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
+	}
+	if err != nil {
+		if s.metrics != nil {
+			s.metrics.Observe(DecisionInvalid, clock.Now().Sub(started))
+		}
+		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: err}
+	}
+	keyword, matched := cfg.MatchBlockedKeyword(snapshot.ScanText)
+	if !matched {
+		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
+	}
+
+	digest := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(keyword))))
+	keywordHash := hex.EncodeToString(digest[:])
+	latency := clock.Now().Sub(started)
+	result := &NormalizedResult{
+		Decision: EventCritical, RiskLevel: RiskCritical, Action: ActionBlock, Safety: "Unsafe",
+		Categories: []string{"keyword"}, MatchedScanners: []string{"keyword"},
+		ScannerScores: map[string]float64{"keyword": 1}, ScannerEvidence: map[string]string{"keyword": "sha256:" + keywordHash},
+		ScannerBackend: "local-keyword", ScannerVersion: "1", PolicyID: "keyword-substring", PolicyVersion: 1,
+		ChunkTotal: 1, LatencyMS: int(latency.Milliseconds()),
+	}
+	if s.metrics != nil {
+		s.metrics.Observe(DecisionBlock, latency)
+		s.metrics.IncKeywordBlocked()
+	}
+	if s.repo != nil {
+		if _, recordErr := s.repo.RecordBlocking(ctx, snapshot, cfg.ConfigVersion, result, cfg.StorePassEvents); recordErr != nil {
+			if s.metrics != nil {
+				s.metrics.IncRecordFailed()
+			}
+			LogWarn(EventResultRecordFailed, mergeLogFields(snapshotLogFields(snapshot), map[string]any{
+				"decision": DecisionBlock, "error_code": "result_record_failed", "status": "failed",
+			}))
+		}
+	}
+	LogWarn(EventKeywordBlocked, mergeLogFields(snapshotLogFields(snapshot), map[string]any{
+		"config_version": cfg.ConfigVersion, "decision": DecisionBlock, "risk_level": RiskCritical,
+		"action": ActionBlock, "latency_ms": latency.Milliseconds(), "status": "blocked",
+		"error_code": ErrorCodeKeywordBlocked, "keyword_hash": keywordHash,
+		"upstream_dispatched": false, "billing_preconsumed": false,
+	}))
+	return &PromptDecision{
+		Kind: DecisionBlock, ErrorCode: ErrorCodeKeywordBlocked, Result: result, AllowNextStage: false,
+	}, nil
+}
+
 func (s *PromptService) Enqueue(_ context.Context, req Request) error {
 	if s == nil || s.enqueuer == nil || s.EffectiveMode() != ModeAsync {
 		return nil
@@ -186,6 +255,9 @@ func (s *PromptService) Runtime(ctx context.Context) RuntimeSnapshot {
 		WorkerTotal: workerTotal, QueueCapacity: queueCapacity, DatabaseStatus: "ok", RedisStatus: "ok",
 		Endpoints: s.probeSnapshot(), GuardMetrics: s.metrics.Snapshot(),
 	}
+	if hasConfig {
+		runtime.KeywordBlockingActive = cfg.KeywordBlockingActive()
+	}
 	if s.repo != nil {
 		stats, err := s.repo.QueueStats(ctx)
 		if err != nil {
@@ -213,7 +285,7 @@ func (s *PromptService) Runtime(ctx context.Context) RuntimeSnapshot {
 	if workerCode != "" {
 		runtime.LastErrorCode, runtime.LastErrorMessage = workerCode, workerMessage
 	}
-	if mode != ModeOff {
+	if mode != ModeOff || runtime.KeywordBlockingActive {
 		runtime.ProcessStatus = "running"
 		if loadError != "" || runtime.DatabaseStatus != "ok" || runtime.RedisStatus != "ok" || activeVersion != expected {
 			runtime.ProcessStatus = "degraded"

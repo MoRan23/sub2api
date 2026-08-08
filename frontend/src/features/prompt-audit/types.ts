@@ -24,6 +24,9 @@ export interface PromptAuditConfig {
   enabled: boolean
   blocking_enabled: boolean
   blocking_latest_turn_only: boolean
+  keyword_blocking_enabled: boolean
+  keyword_blocking_active: boolean
+  blocked_keywords: string[]
   store_pass_events: boolean
   effective_mode: PromptAuditMode
   strategy: 'priority'
@@ -48,6 +51,8 @@ export interface PromptAuditUpdateRequest {
   enabled: boolean
   blocking_enabled: boolean
   blocking_latest_turn_only: boolean
+  keyword_blocking_enabled: boolean
+  blocked_keywords: string[]
   store_pass_events: boolean
   strategy: 'priority'
   worker_count: number
@@ -96,6 +101,7 @@ export interface PromptGuardMetrics {
   allowed: number
   flagged: number
   blocked: number
+  keyword_blocked: number
   unavailable: number
   invalid: number
   timeouts: number
@@ -112,6 +118,7 @@ export interface PromptGuardMetrics {
 export interface PromptAuditRuntime {
   process_status: 'disabled' | 'running' | 'degraded' | 'error' | string
   effective_mode: PromptAuditMode
+  keyword_blocking_active: boolean
   expected_config_version: number
   active_config_version: number
   config_loaded_at?: string

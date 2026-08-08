@@ -13,6 +13,7 @@ const (
 	PayloadKeyPrefix          = "sub2api:prompt_audit:payload:"
 
 	ErrorCodeBlocked               = "prompt_guard_blocked"
+	ErrorCodeKeywordBlocked        = "prompt_keyword_blocked"
 	ErrorCodeUnavailable           = "prompt_guard_unavailable"
 	ErrorCodeInvalidResponse       = "prompt_guard_invalid_response"
 	ErrorCodeConfigConflict        = "prompt_audit_config_conflict"
@@ -196,22 +197,23 @@ type ProbeResult struct {
 }
 
 type GuardMetricsSnapshot struct {
-	Total        int64 `json:"total"`
-	Allowed      int64 `json:"allowed"`
-	Flagged      int64 `json:"flagged"`
-	Blocked      int64 `json:"blocked"`
-	Unavailable  int64 `json:"unavailable"`
-	Invalid      int64 `json:"invalid"`
-	Timeouts     int64 `json:"timeouts"`
-	Failovers    int64 `json:"failovers"`
-	BulkheadFull int64 `json:"bulkhead_full"`
-	RecordFailed int64 `json:"record_failed"`
-	LatencyCount int64 `json:"latency_count"`
-	LatencyAvgMS int64 `json:"latency_avg_ms"`
-	LatencyP50MS int64 `json:"latency_p50_ms"`
-	LatencyP95MS int64 `json:"latency_p95_ms"`
-	LatencyP99MS int64 `json:"latency_p99_ms"`
-	LatencyMaxMS int64 `json:"latency_max_ms"`
+	Total          int64 `json:"total"`
+	Allowed        int64 `json:"allowed"`
+	Flagged        int64 `json:"flagged"`
+	Blocked        int64 `json:"blocked"`
+	KeywordBlocked int64 `json:"keyword_blocked"`
+	Unavailable    int64 `json:"unavailable"`
+	Invalid        int64 `json:"invalid"`
+	Timeouts       int64 `json:"timeouts"`
+	Failovers      int64 `json:"failovers"`
+	BulkheadFull   int64 `json:"bulkhead_full"`
+	RecordFailed   int64 `json:"record_failed"`
+	LatencyCount   int64 `json:"latency_count"`
+	LatencyAvgMS   int64 `json:"latency_avg_ms"`
+	LatencyP50MS   int64 `json:"latency_p50_ms"`
+	LatencyP95MS   int64 `json:"latency_p95_ms"`
+	LatencyP99MS   int64 `json:"latency_p99_ms"`
+	LatencyMaxMS   int64 `json:"latency_max_ms"`
 }
 
 type AuditMetricsSnapshot struct {
@@ -252,6 +254,7 @@ type RuntimeSnapshot struct {
 	RedisStatus           string                 `json:"redis_status"`
 	Endpoints             map[string]ProbeResult `json:"endpoints"`
 	GuardMetrics          GuardMetricsSnapshot   `json:"guard_metrics"`
+	KeywordBlockingActive bool                   `json:"keyword_blocking_active"`
 }
 
 type Clock interface {
@@ -272,6 +275,7 @@ type Metrics interface {
 	IncFailover()
 	IncBulkheadFull()
 	IncRecordFailed()
+	IncKeywordBlocked()
 }
 
 type PromptScanner interface {

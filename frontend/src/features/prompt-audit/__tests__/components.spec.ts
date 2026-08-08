@@ -6,6 +6,7 @@ import PolicyPanel from '../components/PolicyPanel.vue'
 import EventWorkspace from '../components/EventWorkspace.vue'
 import EventDetailDialog from '../components/EventDetailDialog.vue'
 import FilterDeleteDialog from '../components/FilterDeleteDialog.vue'
+import KeywordEditor from '../components/KeywordEditor.vue'
 import type { PromptAuditDraft, PromptAuditEndpointDraft, PromptAuditEvent, PromptEventFilters } from '../types'
 import { emptyEventFilters, resolveDeleteRangeFilters, SCANNER_CATALOG } from '../viewModel'
 
@@ -67,7 +68,7 @@ describe('Prompt Audit components', () => {
 
   it('supports group search, stale configured groups, nine scanners, and bounded worker inputs', async () => {
     const draft: PromptAuditDraft = {
-      enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
+      enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, keyword_blocking_enabled: false, keyword_blocking_active: false, blocked_keywords: [], store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
       worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: false, group_ids: [1, 99],
       endpoints: [endpoint()], config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
     }
@@ -82,6 +83,15 @@ describe('Prompt Audit components', () => {
     await wrapper.get('[aria-label="admin.promptAudit.policy.workerCount"]').setValue('6')
     const emitted = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
     expect(emitted.worker_count).toBe(6)
+  })
+
+  it('normalizes keyword editor lines and exposes validation errors', async () => {
+    const wrapper = mount(KeywordEditor, {
+      props: { modelValue: ['first'], label: 'Keywords', countLabel: '1 configured', limitLabel: 'limits', error: 'keyword error' },
+    })
+    await wrapper.get('textarea').setValue(' Alpha \n\n Beta ')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toEqual(['Alpha', 'Beta'])
+    expect(wrapper.get('[role="alert"]').text()).toBe('keyword error')
   })
 
   it('keeps identity fields separate, supports selection, and opens filter deletion from the toolbar', async () => {
