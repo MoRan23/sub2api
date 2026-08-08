@@ -330,6 +330,12 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 	if err := validateUpdateConfigRequest(req); err != nil {
 		return storageConfig{}, err
 	}
+	keywordAllGroups := current.KeywordAllGroups
+	keywordGroupIDs := append([]int64(nil), current.KeywordGroupIDs...)
+	if req.KeywordAllGroups != nil {
+		keywordAllGroups = *req.KeywordAllGroups
+		keywordGroupIDs = append([]int64(nil), req.KeywordGroupIDs...)
+	}
 	currentByID := make(map[string]StorageEndpoint, len(current.Endpoints))
 	for _, endpoint := range current.Endpoints {
 		currentByID[endpoint.ID] = endpoint
@@ -337,6 +343,7 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 	next := storageConfig{
 		Enabled: req.Enabled, BlockingEnabled: req.BlockingEnabled, BlockingLatestTurnOnly: req.BlockingLatestTurnOnly, StorePassEvents: req.StorePassEvents,
 		KeywordBlockingEnabled: req.KeywordBlockingEnabled, BlockedKeywords: append([]string(nil), req.BlockedKeywords...),
+		KeywordAllGroups: keywordAllGroups, KeywordGroupIDs: keywordGroupIDs,
 		Strategy: strings.TrimSpace(req.Strategy), WorkerCount: req.WorkerCount,
 		QueueCapacity: req.QueueCapacity, Scanners: append([]string(nil), req.Scanners...),
 		AllGroups: req.AllGroups, GroupIDs: append([]int64(nil), req.GroupIDs...),
@@ -502,6 +509,7 @@ func (m *ConfigManager) clearLoadError() {
 func cloneStorageConfig(cfg storageConfig) storageConfig {
 	cfg.Scanners = append([]string(nil), cfg.Scanners...)
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
+	cfg.KeywordGroupIDs = append([]int64(nil), cfg.KeywordGroupIDs...)
 	cfg.BlockedKeywords = append([]string(nil), cfg.BlockedKeywords...)
 	cfg.Endpoints = append([]StorageEndpoint(nil), cfg.Endpoints...)
 	return cfg
@@ -510,6 +518,7 @@ func cloneStorageConfig(cfg storageConfig) storageConfig {
 func cloneActiveConfig(cfg ActiveConfig) ActiveConfig {
 	cfg.Scanners = append([]string(nil), cfg.Scanners...)
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
+	cfg.KeywordGroupIDs = append([]int64(nil), cfg.KeywordGroupIDs...)
 	cfg.BlockedKeywords = append([]string(nil), cfg.BlockedKeywords...)
 	cfg.Endpoints = append([]ActiveEndpoint(nil), cfg.Endpoints...)
 	return cfg

@@ -117,7 +117,7 @@ func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptD
 		return nil, &GuardError{Code: ErrorCodeUnavailable}
 	}
 	cfg, ok := s.config.Active()
-	if !ok || !cfg.KeywordBlockingActive() || !cfg.IncludesGroup(req.GroupID) {
+	if !ok || !cfg.KeywordBlockingActive() || !cfg.KeywordIncludesGroup(req.GroupID) {
 		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
 	}
 

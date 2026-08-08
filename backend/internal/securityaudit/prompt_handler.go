@@ -223,8 +223,12 @@ func setPromptAdminAudit(c *gin.Context, result, errorCode string, fields map[st
 
 func configAuditFields(request UpdateConfigRequest, saved *PublicConfig) map[string]any {
 	version := request.ExpectedConfigVersion
+	keywordAllGroups := request.KeywordAllGroups != nil && *request.KeywordAllGroups
+	keywordGroupIDs := request.KeywordGroupIDs
 	if saved != nil {
 		version = saved.ConfigVersion
+		keywordAllGroups = saved.KeywordAllGroups
+		keywordGroupIDs = saved.KeywordGroupIDs
 	}
 	return map[string]any{
 		"enabled": request.Enabled, "blocking_enabled": request.BlockingEnabled,
@@ -233,7 +237,8 @@ func configAuditFields(request UpdateConfigRequest, saved *PublicConfig) map[str
 		"config_version":            version, "endpoint_count": len(request.Endpoints),
 		"scanner_count": len(request.Scanners), "keyword_count": len(canonicalBlockedKeywords(request.BlockedKeywords)),
 		"keyword_hash": blockedKeywordsHash(request.BlockedKeywords), "all_groups": request.AllGroups,
-		"group_count": len(request.GroupIDs),
+		"group_count": len(request.GroupIDs), "keyword_all_groups": keywordAllGroups,
+		"keyword_group_count": len(keywordGroupIDs), "keyword_group_hash": groupIDsHash(keywordGroupIDs),
 	}
 }
 

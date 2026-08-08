@@ -69,20 +69,34 @@ describe('Prompt Audit components', () => {
   it('supports group search, stale configured groups, nine scanners, and bounded worker inputs', async () => {
     const draft: PromptAuditDraft = {
       enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, keyword_blocking_enabled: false, keyword_blocking_active: false, blocked_keywords: [], store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
+      keyword_all_groups: false, keyword_group_ids: [2, 100],
       worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: false, group_ids: [1, 99],
       endpoints: [endpoint()], config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
     }
     const wrapper = mount(PolicyPanel, {
       props: { draft, groups: [{ id: 1, name: 'Alpha', platform: 'openai', status: 'active' }, { id: 2, name: 'Beta', platform: 'claude', status: 'inactive' }] },
     })
-    expect(wrapper.text()).toContain('99')
+    const guardScope = wrapper.get('[data-test="guard-group-scope"]')
+    const keywordScope = wrapper.get('[data-test="keyword-group-scope"]')
+    expect(guardScope.text()).toContain('99')
+    expect(keywordScope.text()).toContain('100')
     expect(wrapper.findAll('input[type="checkbox"]').filter((input) => SCANNER_CATALOG.some((scanner) => input.attributes('aria-label') === `admin.promptAudit.scanners.${scanner.id}`))).toHaveLength(9)
-    await wrapper.get('[aria-label="admin.promptAudit.policy.searchGroups"]').setValue('Beta')
-    expect(wrapper.text()).toContain('Beta')
-    expect(wrapper.text()).not.toContain('Alpha')
+    await guardScope.get('[aria-label="admin.promptAudit.policy.searchGuardGroups"]').setValue('Beta')
+    expect(guardScope.text()).toContain('Beta')
+    expect(guardScope.text()).not.toContain('Alpha')
     await wrapper.get('[aria-label="admin.promptAudit.policy.workerCount"]').setValue('6')
     const emitted = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
     expect(emitted.worker_count).toBe(6)
+
+    const selectedKeywordGroup = keywordScope.findAll<HTMLInputElement>('input[type="checkbox"]').find((input) => input.element.checked)
+    expect(selectedKeywordGroup).toBeTruthy()
+    await selectedKeywordGroup!.setValue(false)
+    const keywordUpdate = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
+    expect(keywordUpdate.keyword_group_ids).toEqual([100])
+
+    await keywordScope.get('[aria-label="admin.promptAudit.policy.removeMissingGroup"]').trigger('click')
+    const missingRemoved = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
+    expect(missingRemoved.keyword_group_ids).toEqual([2])
   })
 
   it('normalizes keyword editor lines and exposes validation errors', async () => {

@@ -93,6 +93,7 @@ func TestPromptServiceKeywordOnlyBlocksBeforeGuardAndScansAllPromptRoles(t *test
 	active, err := ActiveFromStorage(storageConfig{
 		KeywordBlockingEnabled: true,
 		BlockedKeywords:        []string{"forbidden"},
+		KeywordAllGroups:       true,
 		AllGroups:              true,
 		ConfigVersion:          12,
 	}, true, prefixEncryptor{})
@@ -121,8 +122,9 @@ func TestPromptServiceKeywordPolicySkipsOutOfScopeAndNoTextAndFailsClosedOnInval
 	active, err := ActiveFromStorage(storageConfig{
 		KeywordBlockingEnabled: true,
 		BlockedKeywords:        []string{"forbidden"},
-		AllGroups:              false,
-		GroupIDs:               []int64{9},
+		KeywordAllGroups:       false,
+		KeywordGroupIDs:        []int64{9},
+		AllGroups:              true,
 		ConfigVersion:          12,
 	}, true, prefixEncryptor{})
 	require.NoError(t, err)
@@ -143,6 +145,46 @@ func TestPromptServiceKeywordPolicySkipsOutOfScopeAndNoTextAndFailsClosedOnInval
 	var guardErr *GuardError
 	require.ErrorAs(t, err, &guardErr)
 	require.Equal(t, ErrorCodeInvalidResponse, guardErr.Code)
+}
+
+func TestPromptServiceKeywordAndGuardGroupScopesAreIndependent(t *testing.T) {
+	active, err := ActiveFromStorage(storageConfig{
+		Enabled: true, BlockingEnabled: true,
+		KeywordBlockingEnabled: true, BlockedKeywords: []string{"forbidden"},
+		AllGroups: false, GroupIDs: []int64{4},
+		KeywordAllGroups: false, KeywordGroupIDs: []int64{9},
+		ConfigVersion: 12,
+	}, true, prefixEncryptor{})
+	require.NoError(t, err)
+	service := &PromptService{config: &fakeConfigStore{active: true, cfg: active}, metrics: NewAtomicMetrics(), clock: fixedClock{now: time.Unix(100, 0).UTC()}}
+	body := []byte(`{"messages":[{"role":"user","content":"forbidden"}]}`)
+
+	guardGroup := int64(4)
+	decision, err := service.CheckKeyword(context.Background(), Request{GroupID: &guardGroup, Protocol: "openai_chat_completions", Body: body})
+	require.NoError(t, err)
+	require.Equal(t, DecisionAllow, decision.Kind)
+
+	keywordGroup := int64(9)
+	decision, err = service.CheckKeyword(context.Background(), Request{GroupID: &keywordGroup, Protocol: "openai_chat_completions", Body: body})
+	require.NoError(t, err)
+	require.Equal(t, DecisionBlock, decision.Kind)
+
+	decision, err = service.CheckKeyword(context.Background(), Request{Protocol: "openai_chat_completions", Body: body})
+	require.NoError(t, err)
+	require.Equal(t, DecisionAllow, decision.Kind)
+}
+
+func TestPromptServiceKeywordAllGroupsIncludesRequestsWithoutGroup(t *testing.T) {
+	active, err := ActiveFromStorage(storageConfig{
+		KeywordBlockingEnabled: true, BlockedKeywords: []string{"forbidden"}, KeywordAllGroups: true,
+	}, true, prefixEncryptor{})
+	require.NoError(t, err)
+	service := &PromptService{config: &fakeConfigStore{active: true, cfg: active}, metrics: NewAtomicMetrics(), clock: fixedClock{now: time.Unix(100, 0).UTC()}}
+	decision, err := service.CheckKeyword(context.Background(), Request{
+		Protocol: "openai_chat_completions", Body: []byte(`{"messages":[{"role":"user","content":"forbidden"}]}`),
+	})
+	require.NoError(t, err)
+	require.Equal(t, DecisionBlock, decision.Kind)
 }
 
 func TestPromptServiceRejectsInvalidDeleteConfirmationClaims(t *testing.T) {

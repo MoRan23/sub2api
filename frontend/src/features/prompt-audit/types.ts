@@ -27,6 +27,8 @@ export interface PromptAuditConfig {
   keyword_blocking_enabled: boolean
   keyword_blocking_active: boolean
   blocked_keywords: string[]
+  keyword_all_groups: boolean
+  keyword_group_ids: number[]
   store_pass_events: boolean
   effective_mode: PromptAuditMode
   strategy: 'priority'
@@ -53,6 +55,8 @@ export interface PromptAuditUpdateRequest {
   blocking_latest_turn_only: boolean
   keyword_blocking_enabled: boolean
   blocked_keywords: string[]
+  keyword_all_groups: boolean
+  keyword_group_ids: number[]
   store_pass_events: boolean
   strategy: 'priority'
   worker_count: number

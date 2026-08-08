@@ -41,6 +41,8 @@ func TestDefaultConfigIsOff(t *testing.T) {
 	publicJSON, err := json.Marshal(PublicFromStorage(storage, true, nil))
 	require.NoError(t, err)
 	require.Contains(t, string(publicJSON), `"group_ids":[]`)
+	require.Contains(t, string(publicJSON), `"keyword_all_groups":true`)
+	require.Contains(t, string(publicJSON), `"keyword_group_ids":[]`)
 	require.Contains(t, string(publicJSON), `"endpoints":[]`)
 }
 
@@ -410,16 +412,43 @@ func TestConfigManagerUntrustedWithoutBlockingDoesNotForceBlockingMode(t *testin
 }
 
 func TestParseLegacyConfigDefaultsMissingFieldsWithoutEnablingBlocking(t *testing.T) {
-	storage, err := ParseStorageConfig(`{"enabled":false,"config_version":9}`)
+	storage, err := ParseStorageConfig(`{"enabled":false,"all_groups":false,"group_ids":[7,3,7],"config_version":9}`)
 	require.NoError(t, err)
 	require.False(t, storage.BlockingEnabled)
 	require.Equal(t, "priority", storage.Strategy)
 	require.Equal(t, DefaultWorkerCount, storage.WorkerCount)
 	require.Equal(t, DefaultQueueCapacity, storage.QueueCapacity)
 	require.Equal(t, AllScannerIDs, storage.Scanners)
-	require.True(t, storage.AllGroups)
+	require.False(t, storage.AllGroups)
+	require.Equal(t, []int64{3, 7}, storage.GroupIDs)
 	require.False(t, storage.KeywordBlockingEnabled)
 	require.Empty(t, storage.BlockedKeywords)
+	require.False(t, storage.KeywordAllGroups)
+	require.Equal(t, []int64{3, 7}, storage.KeywordGroupIDs)
+}
+
+func TestKeywordGroupScopeRoundTripAndCanonicalization(t *testing.T) {
+	allGroups := false
+	request := promptAuditUpdateRequest(1, 1, "")
+	request.KeywordAllGroups = &allGroups
+	request.KeywordGroupIDs = []int64{9, 3, 9}
+
+	manager := &ConfigManager{encryptor: prefixEncryptor{}, encryptionKeyConfigured: true}
+	next, err := manager.buildNextStorage(DefaultStorageConfig(), request, 9)
+	require.NoError(t, err)
+	require.False(t, next.KeywordAllGroups)
+	require.Equal(t, []int64{3, 9}, next.KeywordGroupIDs)
+	require.Contains(t, changeSummary(next), `"keyword_all_groups":false`)
+	require.Contains(t, changeSummary(next), `"keyword_group_count":2`)
+	require.NotContains(t, changeSummary(next), `"keyword_group_ids"`)
+
+	active, err := ActiveFromStorage(next, true, prefixEncryptor{})
+	require.NoError(t, err)
+	require.False(t, active.KeywordAllGroups)
+	require.Equal(t, []int64{3, 9}, active.KeywordGroupIDs)
+	public := PublicFromStorage(next, true, nil)
+	require.False(t, public.KeywordAllGroups)
+	require.Equal(t, []int64{3, 9}, public.KeywordGroupIDs)
 }
 
 func TestKeywordOnlyConfigDoesNotRequireGuardEndpoint(t *testing.T) {
@@ -491,6 +520,16 @@ func TestUpdateConfigStrictBoundsAndKnownValues(t *testing.T) {
 		{name: "unknown scanner", mutate: func(req *UpdateConfigRequest) { req.Scanners = []string{"made_up"} }, reason: "prompt_audit_invalid_scanner"},
 		{name: "group required", mutate: func(req *UpdateConfigRequest) { req.AllGroups = false; req.GroupIDs = nil }, reason: "prompt_audit_groups_required"},
 		{name: "group positive", mutate: func(req *UpdateConfigRequest) { req.AllGroups = false; req.GroupIDs = []int64{0} }, reason: "prompt_audit_invalid_group"},
+		{name: "keyword group required", mutate: func(req *UpdateConfigRequest) {
+			value := false
+			req.KeywordAllGroups = &value
+			req.KeywordGroupIDs = nil
+		}, reason: "prompt_audit_keyword_groups_required"},
+		{name: "keyword group positive", mutate: func(req *UpdateConfigRequest) {
+			value := false
+			req.KeywordAllGroups = &value
+			req.KeywordGroupIDs = []int64{0}
+		}, reason: "prompt_audit_invalid_keyword_group"},
 		{name: "timeout low", mutate: func(req *UpdateConfigRequest) { req.Endpoints[0].TimeoutMS = MinTimeoutMS - 1 }, reason: "prompt_audit_invalid_timeout"},
 		{name: "timeout high", mutate: func(req *UpdateConfigRequest) { req.Endpoints[0].TimeoutMS = MaxTimeoutMS + 1 }, reason: "prompt_audit_invalid_timeout"},
 		{name: "input low", mutate: func(req *UpdateConfigRequest) { req.Endpoints[0].InputLimit = MinInputLimit - 1 }, reason: "prompt_audit_invalid_input_limit"},

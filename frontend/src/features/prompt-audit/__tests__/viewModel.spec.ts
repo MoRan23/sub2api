@@ -17,6 +17,8 @@ const config = (): PromptAuditConfig => ({
   keyword_blocking_enabled: false,
   keyword_blocking_active: false,
   blocked_keywords: [],
+  keyword_all_groups: true,
+  keyword_group_ids: [],
   store_pass_events: false,
   effective_mode: 'async_audit',
   strategy: 'priority',
@@ -38,8 +40,20 @@ const config = (): PromptAuditConfig => ({
 
 describe('Prompt Audit view model', () => {
   it('normalizes legacy null collections from the public config', () => {
-    const legacy = { ...config(), group_ids: null, scanners: null, endpoints: null } as unknown as PromptAuditConfig
-    expect(configToDraft(legacy)).toMatchObject({ group_ids: [], scanners: [], endpoints: [] })
+    const legacy = { ...config(), keyword_group_ids: null, group_ids: null, scanners: null, endpoints: null } as unknown as PromptAuditConfig
+    expect(configToDraft(legacy)).toMatchObject({ keyword_group_ids: [], group_ids: [], scanners: [], endpoints: [] })
+  })
+
+  it('inherits the Guard scope when an older server omits keyword scope fields', () => {
+    const { keyword_all_groups: _keywordAllGroups, keyword_group_ids: _keywordGroupIds, ...legacy } = {
+      ...config(), all_groups: false, group_ids: [7, 3],
+    }
+    expect(configToDraft(legacy as PromptAuditConfig)).toMatchObject({
+      all_groups: false,
+      group_ids: [7, 3],
+      keyword_all_groups: false,
+      keyword_group_ids: [7, 3],
+    })
   })
 
   it('models all nine official input scanners', () => {
@@ -67,11 +81,16 @@ describe('Prompt Audit view model', () => {
   })
 
   it('round-trips keyword policy state and includes canonical payload fields', () => {
-    const draft = configToDraft({ ...config(), keyword_blocking_enabled: true, keyword_blocking_active: true, blocked_keywords: ['  Alpha ', '', 'Beta'] })
+    const draft = configToDraft({
+      ...config(), keyword_blocking_enabled: true, keyword_blocking_active: true,
+      blocked_keywords: ['  Alpha ', '', 'Beta'], keyword_all_groups: false, keyword_group_ids: [9, 3],
+    })
     expect(draft.blocked_keywords).toEqual(['  Alpha ', '', 'Beta'])
     expect(buildUpdateRequest(draft)).toMatchObject({
       keyword_blocking_enabled: true,
       blocked_keywords: ['Alpha', 'Beta'],
+      keyword_all_groups: false,
+      keyword_group_ids: [3, 9],
     })
   })
 
