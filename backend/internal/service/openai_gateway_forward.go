@@ -829,6 +829,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			return nil, err
 		}
+		// The request builder has completed all Responses/compact identity and
+		// account-header writes. Record only this final wire view so observation
+		// never captures an intermediate client-derived header set.
+		s.recordFingerprintObservationFromContext(c, account, upstreamReq.Header)
 
 		// Get proxy URL
 		proxyURL := ""
@@ -1015,7 +1019,41 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 }
 
+const openAIOutboundSessionIdentityPostBuildContextKey = "openai_outbound_session_identity_post_build"
+
+func setOpenAIOutboundSessionIdentityPostBuildContext(c *gin.Context) {
+	if c != nil {
+		c.Set(openAIOutboundSessionIdentityPostBuildContextKey, true)
+	}
+}
+
+func isOpenAIOutboundSessionIdentityPostBuildContext(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	value, ok := c.Get(openAIOutboundSessionIdentityPostBuildContextKey)
+	enabled, valid := value.(bool)
+	return ok && valid && enabled
+}
+
+// consumeOpenAIOutboundSessionIdentityPostBuildContext makes the compatibility
+// bridge marker request-local and one-shot. Chat/Messages set it immediately
+// before calling the shared builder so the final pair is resolved after all
+// transforms; leaving it on a reused Gin context would make a later, unrelated
+// builder silently skip its own UUIDv7 resolution.
+func consumeOpenAIOutboundSessionIdentityPostBuildContext(c *gin.Context) bool {
+	if !isOpenAIOutboundSessionIdentityPostBuildContext(c) {
+		return false
+	}
+	// Gin contexts are request-scoped but compatibility retries can reuse one.
+	// Store a typed false value so a subsequent Get cannot recover the marker.
+	c.Set(openAIOutboundSessionIdentityPostBuildContextKey, false)
+	return true
+}
+
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
+	clearFingerprintObservationOutboundIdentity(c)
+	postBuildIdentity := consumeOpenAIOutboundSessionIdentityPostBuildContext(c)
 	// Determine target URL based on account type
 	var targetURL string
 	switch account.Type {
@@ -1044,6 +1082,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		return nil, err
 	}
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
+	var outboundIdentity OpenAIOutboundSessionIdentity
+	outboundIdentityEnabled := false
+	outboundIdentityCompact := false
 
 	// Build authentication for this request. Agent Identity signs a fresh
 	// assertion here; OAuth/PAT/API-key keep their existing Bearer behavior.
@@ -1089,22 +1130,79 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			req.Header.Set("OpenAI-Beta", "responses=experimental")
 			req.Header.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
 		}
-		apiKeyID := getAPIKeyIDFromContext(c)
+		// The legacy compact branch is overridden by prompt_cache_key when both
+		// signals are present. Resolve the final logical seed once so UUIDv7 mode
+		// does not create an unused second mapping in the identity store.
+		compactSession := ""
 		if isOpenAIResponsesCompactPath(c) {
 			req.Header.Set("accept", "application/json")
 			if req.Header.Get("version") == "" {
 				req.Header.Set("version", codexCLIVersion)
 			}
-			compactSession := resolveOpenAICompactSessionID(c)
-			req.Header.Set("session_id", isolateOpenAISessionID(apiKeyID, compactSession))
+			compactSession = resolveOpenAICompactSessionID(c)
 		} else {
 			req.Header.Set("accept", "text/event-stream")
 		}
+		logicalSessionKey := compactSession
 		if promptCacheKey != "" {
-			isolated := isolateOpenAISessionID(apiKeyID, promptCacheKey)
-			req.Header.Set("session_id", isolated)
-			if !compatMessagesBridge || clientConversationID != "" {
-				req.Header.Set("conversation_id", isolated)
+			logicalSessionKey = promptCacheKey
+		}
+		identity := OpenAIOutboundSessionIdentity{}
+		identityEnabled := false
+		// Keep the resolver inside the same OAuth/compact-or-prompt branches that
+		// historically invoked isolateOpenAISessionID. The finalized request body
+		// is supplied so client metadata and turn metadata participate in key
+		// selection.
+		if (isOpenAIResponsesCompactPath(c) || promptCacheKey != "") && !postBuildIdentity {
+			var identityErr error
+			identity, _, identityEnabled, identityErr = s.resolveOpenAIOutboundSessionIdentityForTransport(
+				ctx,
+				c,
+				account,
+				body,
+				logicalSessionKey,
+				// The historical writer chose compactSession first and then
+				// overwrote it with prompt_cache_key when present. Keep that
+				// final seed authoritative even if the copied request body still
+				// contains stale identity metadata. This also preserves the old
+				// prompt-cache override on ordinary Responses requests.
+				strings.TrimSpace(logicalSessionKey) != "",
+			)
+			if identityErr != nil {
+				return nil, fmt.Errorf("resolve openai outbound session identity: %w", identityErr)
+			}
+		}
+		if identityEnabled {
+			outboundIdentity = identity
+			outboundIdentityEnabled = true
+			outboundIdentityCompact = isOpenAIResponsesCompactPath(c)
+			if isOpenAIResponsesCompactPath(c) {
+				applyOpenAIOutboundSessionIdentityCompactHeaders(req.Header, identity)
+			} else {
+				ApplyOpenAIOutboundSessionIdentityHeaders(req.Header, identity)
+			}
+			if !isOpenAIResponsesCompactPath(c) {
+				if mergedBody, mergeErr := MergeOpenAIOutboundSessionIdentityBody(body, identity); mergeErr == nil {
+					req.Body = io.NopCloser(bytes.NewReader(mergedBody))
+					req.ContentLength = int64(len(mergedBody))
+					req.GetBody = func() (io.ReadCloser, error) {
+						return io.NopCloser(bytes.NewReader(mergedBody)), nil
+					}
+				}
+			}
+		} else {
+			apiKeyID := getAPIKeyIDFromContext(c)
+			if isOpenAIResponsesCompactPath(c) {
+				// Preserve the historical compact header write even when the
+				// resolved seed is empty (Header.Get remains empty either way).
+				req.Header.Set("session_id", isolateOpenAISessionID(apiKeyID, compactSession))
+			}
+			if promptCacheKey != "" {
+				isolated := isolateOpenAISessionID(apiKeyID, promptCacheKey)
+				req.Header.Set("session_id", isolated)
+				if !compatMessagesBridge || clientConversationID != "" {
+					req.Header.Set("conversation_id", isolated)
+				}
 			}
 		}
 	} else if isOpenAIResponsesCompactPath(c) {
@@ -1137,7 +1235,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// installation_id 收口：body 与 header 共用 gin 上下文中的同一次解析，
 	// 重试时不会漂移。Passthrough 请求在 Forward 的早期分支已返回，这里的
 	// 显式标记同时保护未来新增 builder 调用方。
-	pin, pinErr := applyOpenAIInstallationIDForOutbound(
+	_, pinErr := applyOpenAIInstallationIDForOutbound(
 		ctx,
 		c,
 		s.accountRepo,
@@ -1150,10 +1248,6 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	if pinErr != nil {
 		return nil, fmt.Errorf("resolve openai installation_id: %w", pinErr)
 	}
-	if account.IsOpenAIOAuth() && !account.IsOpenAIPassthroughEnabled() {
-		s.recordInstallationObservation(c, account, pin, req.Header)
-	}
-
 	// Ensure required headers exist
 	if req.Header.Get("content-type") == "" {
 		req.Header.Set("content-type", "application/json")
@@ -1161,6 +1255,14 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
 	account.ApplyHeaderOverrides(req.Header)
+	if outboundIdentityEnabled {
+		if outboundIdentityCompact {
+			applyOpenAIOutboundSessionIdentityCompactHeaders(req.Header, outboundIdentity)
+		} else {
+			ApplyOpenAIOutboundSessionIdentityHeaders(req.Header, outboundIdentity)
+		}
+		setFingerprintObservationOutboundIdentity(c, outboundIdentity)
+	}
 
 	return req, nil
 }

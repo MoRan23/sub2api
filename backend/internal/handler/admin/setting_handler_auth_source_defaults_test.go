@@ -512,3 +512,15 @@ func TestDiffSettings_IncludesAuthSourceDefaultsAndForceEmail(t *testing.T) {
 	require.Contains(t, changed, "auth_source_default_email_grant_on_first_bind")
 	require.Contains(t, changed, "force_email_on_third_party_signup")
 }
+
+func TestDiffSettings_IncludesOpenAIUUIDv7SessionIdentity(t *testing.T) {
+	changed := diffSettings(
+		&service.SystemSettings{EnableOpenAIUUIDv7SessionIdentity: false},
+		&service.SystemSettings{EnableOpenAIUUIDv7SessionIdentity: true},
+		nil,
+		nil,
+		UpdateSettingsRequest{},
+	)
+
+	require.Contains(t, changed, service.SettingKeyEnableOpenAIUUIDv7SessionIdentity)
+}

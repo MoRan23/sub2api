@@ -93,6 +93,7 @@ type forwardedIPMigrationRepoStub struct {
 	values         map[string]string
 	updates        map[string]string
 	getMultipleErr error
+	getAllErr      error
 	setMultipleErr error
 }
 
@@ -138,7 +139,10 @@ func (s *forwardedIPMigrationRepoStub) SetMultiple(_ context.Context, values map
 }
 
 func (s *forwardedIPMigrationRepoStub) GetAll(context.Context) (map[string]string, error) {
-	panic("unexpected GetAll call")
+	if s.getAllErr == nil {
+		panic("unexpected GetAll call")
+	}
+	return nil, s.getAllErr
 }
 
 func (s *forwardedIPMigrationRepoStub) Delete(context.Context, string) error {
@@ -571,6 +575,30 @@ func TestSettingService_InitializeDefaultSettingsPersistsConfiguredForwardedClie
 
 	require.NoError(t, svc.InitializeDefaultSettings(context.Background()))
 	require.JSONEq(t, `["X-Cdn-Ip","True-Client-Ip"]`, repo.values[SettingKeyForwardedClientIPHeaders])
+	require.Equal(t, "false", repo.values[SettingKeyEnableOpenAIUUIDv7SessionIdentity])
+	require.Equal(t, "false", repo.values[SettingKeyInstallationObservationEnabled])
+}
+
+func TestProvideSettingService_FingerprintObservationFailsClosedOnSettingsLoadError(t *testing.T) {
+	SetFingerprintObservationEnabled(true)
+	t.Cleanup(func() {
+		SetFingerprintObservationEnabled(false)
+		SetCodexCanonicalUserAgentResolver(nil)
+		antigravity.SetUserAgentVersionResolver(nil)
+	})
+
+	repo := &forwardedIPMigrationRepoStub{
+		values: map[string]string{
+			SettingKeyForwardedClientIPHeaders:             "[]",
+			settingKeyForwardedClientIPModeV2:              "true",
+			SettingKeyCodexCLIOnlyEngineFingerprintSignals: "[]",
+		},
+		getAllErr: errors.New("settings unavailable"),
+	}
+
+	ProvideSettingService(repo, nil, nil, &config.Config{})
+
+	require.False(t, IsFingerprintObservationEnabled())
 }
 
 func TestSettingService_UpdateSettings_APIKeyACLTrustForwardedIPRefreshesConfig(t *testing.T) {

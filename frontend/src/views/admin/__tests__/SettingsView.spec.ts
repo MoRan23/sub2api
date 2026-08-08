@@ -464,6 +464,9 @@ const baseSettingsResponse = {
   enable_client_dateline_normalization: true,
   antigravity_user_agent_version: "",
   openai_codex_user_agent: "",
+  openai_codex_client_version: "",
+  openai_codex_version_auto_sync_enabled: true,
+  enable_openai_uuidv7_session_identity: false,
   payment_enabled: true,
   payment_min_amount: 1,
   payment_max_amount: 10000,
@@ -1155,6 +1158,56 @@ describe("admin SettingsView payment visible method controls", () => {
       expect.objectContaining({
         antigravity_user_agent_version: "1.23.2",
       }),
+    );
+  });
+
+  it("loads and submits the OpenAI UUIDv7 session identity switch", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      enable_openai_uuidv7_session_identity: true,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    const toggle = wrapper.get(
+      '[data-testid="openai-uuidv7-session-identity-toggle"]',
+    );
+    expect((toggle.element as HTMLInputElement).checked).toBe(true);
+
+    await toggle.setValue(false);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enable_openai_uuidv7_session_identity: false,
+      }),
+    );
+  });
+
+  it("keeps fingerprint observation out of the general settings form", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      installation_observation_enabled: true,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    expect(
+      wrapper.find('[data-testid="openai-uuidv7-session-identity-settings"]')
+        .exists(),
+    ).toBe(true);
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    expect(updateSettings.mock.calls[0][0]).not.toHaveProperty(
+      "installation_observation_enabled",
     );
   });
 

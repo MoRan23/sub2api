@@ -49,8 +49,6 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
   const opsRealtimeMonitoringEnabled = ref(readCachedBool('ops_realtime_monitoring_enabled_cached', true))
   const opsQueryModeDefault = ref(readCachedString('ops_query_mode_default_cached', 'auto'))
   const paymentEnabled = ref(readCachedBool('payment_enabled_cached', false))
-  // Global OpenAI installation_id observation. Default off; gates the sidebar entry.
-  const installationObservationEnabled = ref(readCachedBool('installation_observation_enabled_cached', false))
   const customMenuItems = ref<CustomMenuItem[]>([])
 
   async function fetch(force = false): Promise<void> {
@@ -71,9 +69,6 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
 
       opsQueryModeDefault.value = settings.ops_query_mode_default || 'auto'
       writeCachedString('ops_query_mode_default_cached', opsQueryModeDefault.value)
-
-      installationObservationEnabled.value = settings.installation_observation_enabled ?? false
-      writeCachedBool('installation_observation_enabled_cached', installationObservationEnabled.value)
 
       customMenuItems.value = Array.isArray(settings.custom_menu_items) ? settings.custom_menu_items : []
 
@@ -105,12 +100,6 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
   function setPaymentEnabledLocal(value: boolean) {
     paymentEnabled.value = value
     writeCachedBool('payment_enabled_cached', value)
-    loaded.value = true
-  }
-
-  function setInstallationObservationEnabledLocal(value: boolean) {
-    installationObservationEnabled.value = value
-    writeCachedBool('installation_observation_enabled_cached', value)
     loaded.value = true
   }
 
@@ -151,13 +140,11 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
     opsRealtimeMonitoringEnabled,
     opsQueryModeDefault,
     paymentEnabled,
-    installationObservationEnabled,
     customMenuItems,
     fetch,
     setOpsMonitoringEnabledLocal,
     setOpsRealtimeMonitoringEnabledLocal,
     setPaymentEnabledLocal,
-    setInstallationObservationEnabledLocal,
     setOpsQueryModeDefaultLocal
   }
 })

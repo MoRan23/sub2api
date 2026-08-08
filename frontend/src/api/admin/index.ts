@@ -34,7 +34,7 @@ import affiliatesAPI from './affiliates'
 import riskControlAPI from './riskControl'
 import adminComplianceAPI from './compliance'
 import auditAPI from './audit'
-import installationObservationsAPI from './installationObservations'
+import fingerprintObservationsAPI from './fingerprintObservations'
 
 /**
  * Unified admin API object for convenient access
@@ -71,7 +71,7 @@ export const adminAPI = {
   riskControl: riskControlAPI,
   compliance: adminComplianceAPI,
   audit: auditAPI,
-  installationObservations: installationObservationsAPI
+  fingerprintObservations: fingerprintObservationsAPI
 }
 
 export {
@@ -106,7 +106,7 @@ export {
   riskControlAPI,
   adminComplianceAPI,
   auditAPI,
-  installationObservationsAPI
+  fingerprintObservationsAPI
 }
 
 export default adminAPI
@@ -114,9 +114,9 @@ export default adminAPI
 // Re-export types used by components
 export type { AuditLog, AuditLogQuery, AuditLogListResponse } from './audit'
 export type {
-  InstallationObservationEntry,
-  InstallationObservationsResponse
-} from './installationObservations'
+  FingerprintObservationEntry,
+  FingerprintObservationsResponse
+} from './fingerprintObservations'
 export type { BalanceHistoryItem } from './users'
 export type { ErrorPassthroughRule, CreateRuleRequest, UpdateRuleRequest } from './errorPassthrough'
 export type { BackupAgentHealth, DataManagementConfig } from './dataManagement'

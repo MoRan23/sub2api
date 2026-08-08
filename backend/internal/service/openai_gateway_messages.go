@@ -295,12 +295,25 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, fmt.Errorf("get access token: %w", err)
 	}
 
+	// Resolve the server-owned identity after all compatibility transforms have
+	// settled the logical prompt-cache key.  Responses-shaped bodies can carry
+	// the same pair in client_metadata; malformed/opaque bodies stay
+	// header-only and do not reject the request.
+	var outboundIdentity OpenAIOutboundSessionIdentity
+	outboundIdentityEnabled := false
+
 	// 6. Build upstream request
 	if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
 		// Messages 兼容桥即使 body 未带 todo-guard/prompt_cache_key 标记（如映射到非
 		// gpt-5/codex 模型），也必须让 buildUpstreamRequest 走 bridge 分支，以保留
 		// 既有 body/session/conversation 行为。身份头在 post-build 阶段统一恢复。
 		setOpenAICompatMessagesBridgeContext(c, true)
+	}
+	if account.Platform != PlatformGrok && promptCacheKey != "" {
+		// This compatibility transport owns the historical post-build session
+		// override. Defer UUIDv7 resolution to that final boundary so the generic
+		// OAuth builder does not allocate an unused mapping first.
+		setOpenAIOutboundSessionIdentityPostBuildContext(c)
 	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	var upstreamReq *http.Request
@@ -313,14 +326,40 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
-
-	// Override session_id with a deterministic UUID derived from the isolated
-	// session key, ensuring different API keys produce different upstream sessions.
+	// Resolve at the historical post-build isolateOpenAISessionID call site.
+	// This override applies to both OAuth and API-key accounts; keeping that
+	// condition intact is required for disabled-mode wire compatibility.
 	if account.Platform != PlatformGrok && promptCacheKey != "" {
-		isolatedSessionID := generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey))
-		upstreamReq.Header.Set("session_id", isolatedSessionID)
-		if upstreamReq.Header.Get("conversation_id") != "" {
-			upstreamReq.Header.Set("conversation_id", isolatedSessionID)
+		var identityErr error
+		outboundIdentity, _, outboundIdentityEnabled, identityErr = s.resolveOpenAIOutboundSessionIdentityForTransport(ctx, c, account, responsesBody, promptCacheKey, true)
+		if identityErr != nil {
+			return nil, fmt.Errorf("resolve openai outbound session identity: %w", identityErr)
+		}
+		if outboundIdentityEnabled {
+			if mergedBody, mergeErr := MergeOpenAIOutboundSessionIdentityBody(responsesBody, outboundIdentity); mergeErr == nil {
+				responsesBody = mergedBody
+				upstreamReq.Body = io.NopCloser(bytes.NewReader(mergedBody))
+				upstreamReq.ContentLength = int64(len(mergedBody))
+				upstreamReq.GetBody = func() (io.ReadCloser, error) {
+					return io.NopCloser(bytes.NewReader(mergedBody)), nil
+				}
+			}
+		}
+	}
+
+	// Override the compatibility headers after request construction.  The
+	// post-build position is intentional: buildUpstreamRequest clears/rebuilds
+	// OAuth bridge identity headers, and API-key accounts do not set them there.
+	if account.Platform != PlatformGrok && promptCacheKey != "" {
+		if outboundIdentityEnabled {
+			ApplyOpenAIOutboundSessionIdentityHeaders(upstreamReq.Header, outboundIdentity)
+			setFingerprintObservationOutboundIdentity(c, outboundIdentity)
+		} else {
+			isolatedSessionID := generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey))
+			upstreamReq.Header.Set("session_id", isolatedSessionID)
+			if upstreamReq.Header.Get("conversation_id") != "" {
+				upstreamReq.Header.Set("conversation_id", isolatedSessionID)
+			}
 		}
 	}
 	if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
@@ -335,12 +374,15 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			zap.Bool("compat_identity_restored", true),
 		)
 	}
-	if account.Type == AccountTypeOAuth && promptCacheKey != "" && strings.TrimSpace(c.GetHeader("conversation_id")) == "" {
+	if !outboundIdentityEnabled && account.Type == AccountTypeOAuth && promptCacheKey != "" && strings.TrimSpace(c.GetHeader("conversation_id")) == "" {
 		upstreamReq.Header.Del("conversation_id")
 	}
 	if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
 		upstreamReq.Header.Set("x-codex-turn-state", compatTurnState)
 	}
+	// Messages compatibility restores/overrides identity headers after the
+	// shared builder, so capture the final upstream header set here.
+	s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, responsesBody)
 
 	// 7. Send request
 	proxyURL := ""

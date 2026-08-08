@@ -647,14 +647,31 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return err
 	}
 
-	wsHeaders, _, buildHdrErr := s.buildOpenAIWSHeaders(ctx, c, account, token, wsDecision, isCodexCLI, turnState, c.GetHeader(openAIWSTurnMetadataHeader), firstPayload.promptCacheKey, true)
+	wsHeaders, wsSessionResolution, buildHdrErr := s.buildOpenAIWSHeadersWithBody(ctx, c, account, token, wsDecision, isCodexCLI, turnState, c.GetHeader(openAIWSTurnMetadataHeader), firstPayload.promptCacheKey, firstPayload.payloadRaw, true)
 	if buildHdrErr != nil {
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
+	// Keep the identity snapshot for the currently leased upstream socket.
+	// Turns without a logical key inherit it; an explicit key change releases
+	// the lease and resolves a new pair before the next frame is sent.
+	pinnedIdentityModeEnabled := wsSessionResolution.OutboundIdentityModeEnabled
+	pinnedIdentityLogicalKey := wsSessionResolution.OutboundIdentityLogicalKey
+	pinnedIdentity := wsSessionResolution.OutboundIdentity
+	pinnedIdentityEnabled := wsSessionResolution.OutboundIdentityEnabled
+	pinnedIdentityDigest := wsSessionResolution.OutboundIdentityDigest
+	lastExplicitIdentityFrameKey := wsSessionResolution.OutboundIdentityFrameKey
+	identityChangedForNextTurn := false
+	if pinnedIdentityEnabled {
+		if mergedPayload, mergeErr := MergeOpenAIOutboundSessionIdentityBody(firstPayload.payloadRaw, pinnedIdentity); mergeErr == nil {
+			firstPayload.payloadRaw = mergedPayload
+			firstPayload.payloadBytes = len(mergedPayload)
+		}
+	}
 	baseAcquireReq := openAIWSAcquireRequest{
-		Account: account,
-		WSURL:   wsURL,
-		Headers: wsHeaders,
+		Account:        account,
+		WSURL:          wsURL,
+		Headers:        wsHeaders,
+		IdentityDigest: pinnedIdentityDigest,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
@@ -707,8 +724,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			normalizeOpenAIWSLogValue(firstPreviousResponseIDKind),
 			truncateOpenAIWSLogValue(preferredConnID, openAIWSIDValueMaxLen),
 			truncateOpenAIWSLogValue(sessionHash, 12),
-			openAIWSHeaderValueForLog(baseAcquireReq.Headers, "session_id"),
-			openAIWSHeaderValueForLog(baseAcquireReq.Headers, "conversation_id"),
+			openAIWSOutboundIdentityHeaderValueForLog(baseAcquireReq.Headers, "session_id", pinnedIdentityDigest),
+			openAIWSOutboundIdentityHeaderValueForLog(baseAcquireReq.Headers, "conversation_id", pinnedIdentityDigest),
 			turnState != "",
 			len(turnState),
 			firstPayload.promptCacheKey != "",
@@ -801,6 +818,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			updatedHeaders.Set(openAIWSTurnStateHeader, handshakeTurnState)
 			baseAcquireReq.Headers = updatedHeaders
 		}
+		// Header construction is intentionally observed only after Acquire has
+		// completed successfully. This excludes pool reuse, failed dials, and
+		// background prewarm while still capturing a logical-key replacement
+		// that required a fresh compatible upstream socket.
+		s.recordFingerprintObservationAfterOpenAIWSHandshake(c, account, lease, baseAcquireReq.Headers)
 		logOpenAIWSModeInfo(
 			"ingress_ws_upstream_connected account_id=%d turn=%d conn_id=%s conn_reused=%v conn_pick_ms=%d queue_wait_ms=%d preferred_conn_id=%s",
 			account.ID,
@@ -1438,7 +1460,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 		}
-		forcePreferredConn := isStrictAffinityTurn(currentPayload)
+		forcePreferredConn := isStrictAffinityTurn(currentPayload) && !identityChangedForNextTurn
 		if sessionLease == nil {
 			acquiredLease, acquireErr := acquireTurnLease(turn, preferredConnID, forcePreferredConn)
 			if acquireErr != nil {
@@ -1446,6 +1468,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			sessionLease = acquiredLease
 			sessionConnID = strings.TrimSpace(sessionLease.ConnID())
+			identityChangedForNextTurn = false
 			if storeDisabled {
 				pinSessionConn(sessionConnID)
 			} else {
@@ -1573,8 +1596,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				truncateOpenAIWSLogValue(expectedPrev, openAIWSIDValueMaxLen),
 				chainedFromLast,
 				truncateOpenAIWSLogValue(preferredConnID, openAIWSIDValueMaxLen),
-				openAIWSHeaderValueForLog(baseAcquireReq.Headers, "session_id"),
-				openAIWSHeaderValueForLog(baseAcquireReq.Headers, "conversation_id"),
+				openAIWSOutboundIdentityHeaderValueForLog(baseAcquireReq.Headers, "session_id", pinnedIdentityDigest),
+				openAIWSOutboundIdentityHeaderValueForLog(baseAcquireReq.Headers, "conversation_id", pinnedIdentityDigest),
 				turnState != "",
 				len(turnState),
 				openAIWSPayloadStringFromRaw(currentPayload, "prompt_cache_key") != "",
@@ -1669,14 +1692,111 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if rewriteErr := rewriteIngressInstallationID(&nextPayload); rewriteErr != nil {
 			return rewriteErr
 		}
-		if nextPayload.promptCacheKey != "" {
-			// ingress 会话在整个客户端 WS 生命周期内复用同一上游连接；
-			// prompt_cache_key 对握手头的更新仅在未来需要重新建连时生效。
-			updatedHeaders, _, updHdrErr := s.buildOpenAIWSHeaders(ctx, c, account, token, wsDecision, isCodexCLI, turnState, c.GetHeader(openAIWSTurnMetadataHeader), nextPayload.promptCacheKey, true)
-			if updHdrErr != nil {
-				logOpenAIWSModeInfo("ingress_ws_update_headers_failed account_id=%d err=%v", account.ID, updHdrErr)
-			} else {
+		if pinnedIdentityModeEnabled {
+			// In UUIDv7 mode an empty result means this turn has no explicit
+			// prompt-cache key and inherits the current socket identity.  This is
+			// the same per-turn signal the legacy WS builder received; body-only
+			// metadata must not expand the old isolate coverage.
+			candidateLogicalKey := resolveOpenAIWSFrameLogicalKey(nextPayload.payloadRaw, nextPayload.promptCacheKey)
+			nextExplicitFrameKey, identityKeyChanged := advanceOpenAIWSFrameLogicalKey(
+				candidateLogicalKey,
+				lastExplicitIdentityFrameKey,
+				pinnedIdentityLogicalKey,
+			)
+			if identityKeyChanged {
+				newIdentity, resolvedKey, newIdentityEnabled, identityErr := s.resolveOpenAIOutboundSessionIdentityForTransportSnapshot(
+					ctx,
+					c,
+					account,
+					nextPayload.payloadRaw,
+					candidateLogicalKey,
+					true,
+					pinnedIdentityModeEnabled,
+				)
+				if identityErr != nil {
+					return fmt.Errorf("resolve openai outbound session identity for websocket turn: %w", identityErr)
+				}
+				if !newIdentityEnabled || resolvedKey == "" {
+					if !pinnedIdentityEnabled {
+						// No UUID pair has been sent on this socket yet. A store or
+						// generation failure must therefore fail open to the historical
+						// handshake/body behavior instead of rejecting the client's first
+						// explicit key. Disable the state machine for the remainder of
+						// this request so a later reconnect cannot repeatedly retry the
+						// unavailable identity store.
+						pinnedIdentityModeEnabled = false
+						pinnedIdentityEnabled = false
+						pinnedIdentityLogicalKey = ""
+						pinnedIdentity = OpenAIOutboundSessionIdentity{}
+						pinnedIdentityDigest = ""
+						lastExplicitIdentityFrameKey = ""
+						if c != nil {
+							c.Set(openAIOutboundSessionIdentityRequestSnapshotKey, false)
+						}
+						// The old ingress path only rebuilt headers for a prompt-cache
+						// seed. Preserve that update when present; body-only metadata
+						// never had a legacy header update to apply.
+						if nextPayload.promptCacheKey != "" {
+							updatedHeaders, _, updHdrErr := s.buildOpenAIWSHeaders(ctx, c, account, token, wsDecision, isCodexCLI, turnState, c.GetHeader(openAIWSTurnMetadataHeader), nextPayload.promptCacheKey, true)
+							if updHdrErr != nil {
+								logOpenAIWSModeInfo("openai_ws_update_headers_failed account_id=%d err=%v", account.ID, updHdrErr)
+							} else {
+								baseAcquireReq.Headers = updatedHeaders
+							}
+						}
+					} else {
+						// Once a pair has been used on the socket, changing the key
+						// cannot be made safe without a new compatible connection.
+						return NewOpenAIWSClientCloseError(
+							coderws.StatusPolicyViolation,
+							"unable to resolve websocket session identity for logical key change",
+							nil,
+						)
+					}
+				}
+				if newIdentityEnabled && resolvedKey != "" {
+					// The old lease has completed its turn. Release it before acquiring
+					// a digest-compatible socket so a changed key can never be written
+					// on the previous handshake.
+					resetSessionLease(false)
+					pinnedIdentityLogicalKey = resolvedKey
+					pinnedIdentity = newIdentity
+					pinnedIdentityEnabled = true
+					pinnedIdentityDigest = openAIWSOutboundIdentityDigest(newIdentity)
+					identityChangedForNextTurn = true
+				}
+			}
+			lastExplicitIdentityFrameKey = nextExplicitFrameKey
+			if identityChangedForNextTurn {
+				// All non-identity handshake headers are connection-scoped and
+				// remain valid for the new logical key. Reuse that finalized
+				// snapshot instead of resolving the static client header again,
+				// which could allocate an unnecessary pair for the old key.
+				updatedHeaders := cloneHeader(baseAcquireReq.Headers)
+				if updatedHeaders == nil {
+					return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to rebuild websocket session identity headers", errors.New("base websocket headers are nil"))
+				}
+				clearOpenAIOutboundSessionIdentityHeaders(updatedHeaders)
+				ApplyOpenAIOutboundSessionIdentityHeaders(updatedHeaders, pinnedIdentity)
+				setFingerprintObservationOutboundIdentity(c, pinnedIdentity)
 				baseAcquireReq.Headers = updatedHeaders
+				baseAcquireReq.IdentityDigest = pinnedIdentityDigest
+			}
+			if pinnedIdentityEnabled {
+				if mergedPayload, mergeErr := MergeOpenAIOutboundSessionIdentityBody(nextPayload.payloadRaw, pinnedIdentity); mergeErr == nil {
+					nextPayload.payloadRaw = mergedPayload
+					nextPayload.payloadBytes = len(mergedPayload)
+				}
+			}
+		} else {
+			// Legacy mode retains its historical per-prompt header update.
+			if nextPayload.promptCacheKey != "" {
+				updatedHeaders, _, updHdrErr := s.buildOpenAIWSHeadersWithBody(ctx, c, account, token, wsDecision, isCodexCLI, turnState, c.GetHeader(openAIWSTurnMetadataHeader), nextPayload.promptCacheKey, nextPayload.payloadRaw, true)
+				if updHdrErr != nil {
+					logOpenAIWSModeInfo("openai_ws_update_headers_failed account_id=%d err=%v", account.ID, updHdrErr)
+				} else {
+					baseAcquireReq.Headers = updatedHeaders
+				}
 			}
 		}
 		if nextPayload.previousResponseID != "" {
@@ -1697,7 +1817,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				storeDisabled,
 			)
 		}
-		if stateStore != nil && nextPayload.previousResponseID != "" {
+		if !identityChangedForNextTurn && stateStore != nil && nextPayload.previousResponseID != "" {
 			if stickyConnID, ok := stateStore.GetResponseConn(nextPayload.previousResponseID); ok {
 				if sessionConnID != "" && stickyConnID != "" && stickyConnID != sessionConnID {
 					logOpenAIWSModeInfo(

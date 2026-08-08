@@ -3,6 +3,7 @@
 package admin
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -37,6 +38,79 @@ func TestUpdateSettingsPartialPayloadKeepsUnsentKeys(t *testing.T) {
 	require.Equal(t, "smtp.example.com", repo.values[service.SettingKeySMTPHost])
 	require.Equal(t, "noreply@example.com", repo.values[service.SettingKeySMTPFrom])
 	require.Equal(t, "true", repo.values[service.SettingKeyTurnstileEnabled])
+}
+
+func TestUpdateSettingsOpenAIUUIDv7SessionIdentityIsPersistedAndOmissionPreservesValue(t *testing.T) {
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{
+		service.SettingKeyEnableOpenAIUUIDv7SessionIdentity: "false",
+	})
+
+	rec := doUpdateSettings(t, h, map[string]any{
+		service.SettingKeyEnableOpenAIUUIDv7SessionIdentity: true,
+	}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyEnableOpenAIUUIDv7SessionIdentity])
+
+	// A legacy client that omits the new pointer field must not reset it.
+	rec = doUpdateSettings(t, h, map[string]any{"risk_control_enabled": true}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyEnableOpenAIUUIDv7SessionIdentity])
+}
+
+func TestUpdateSettingsFingerprintObservationPartialPayloadPublishesRuntimeState(t *testing.T) {
+	service.SetFingerprintObservationEnabled(false)
+	t.Cleanup(func() { service.SetFingerprintObservationEnabled(false) })
+
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{
+		service.SettingKeyInstallationObservationEnabled: "false",
+	})
+
+	enabled := doUpdateSettings(t, h, map[string]any{
+		service.SettingKeyInstallationObservationEnabled: true,
+	}, nil)
+	require.Equal(t, http.StatusOK, enabled.Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyInstallationObservationEnabled])
+	require.True(t, service.IsFingerprintObservationEnabled())
+
+	disabled := doUpdateSettings(t, h, map[string]any{
+		service.SettingKeyInstallationObservationEnabled: false,
+	}, nil)
+	require.Equal(t, http.StatusOK, disabled.Code)
+	require.Equal(t, "false", repo.values[service.SettingKeyInstallationObservationEnabled])
+	require.False(t, service.IsFingerprintObservationEnabled())
+}
+
+func TestUpdateSettingsPartialPayloadOmitsIndependentOpenAIToggles(t *testing.T) {
+	omitted := omittedSettingKeys(map[string]json.RawMessage{
+		"risk_control_enabled": json.RawMessage("true"),
+	})
+
+	require.Contains(t, omitted, service.SettingKeyEnableOpenAIUUIDv7SessionIdentity)
+	require.Contains(t, omitted, service.SettingKeyInstallationObservationEnabled)
+}
+
+func TestUpdateSettingsNullIndependentOpenAITogglesAreOmitted(t *testing.T) {
+	omitted := omittedSettingKeys(map[string]json.RawMessage{
+		service.SettingKeyEnableOpenAIUUIDv7SessionIdentity: json.RawMessage("null"),
+		service.SettingKeyInstallationObservationEnabled:    json.RawMessage(" null "),
+	})
+
+	require.Contains(t, omitted, service.SettingKeyEnableOpenAIUUIDv7SessionIdentity)
+	require.Contains(t, omitted, service.SettingKeyInstallationObservationEnabled)
+}
+
+func TestUpdateSettingsOmittedFingerprintObservationDoesNotPublishStaleRuntimeState(t *testing.T) {
+	service.SetFingerprintObservationEnabled(true)
+	t.Cleanup(func() { service.SetFingerprintObservationEnabled(false) })
+
+	h, _ := newStepUpSwitchTestHandler(t, map[string]string{
+		service.SettingKeyInstallationObservationEnabled: "false",
+	})
+
+	rec := doUpdateSettings(t, h, map[string]any{"risk_control_enabled": true}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.True(t, service.IsFingerprintObservationEnabled(),
+		"an unrelated partial PUT must not publish its stale settings snapshot")
 }
 
 // A full payload keeps whole-document semantics: fields explicitly set to their

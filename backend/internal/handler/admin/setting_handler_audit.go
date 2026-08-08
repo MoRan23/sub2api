@@ -65,6 +65,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.StepUpEnabled != after.StepUpEnabled {
 		changed = append(changed, "step_up_enabled")
 	}
+	if before.EnableOpenAIUUIDv7SessionIdentity != after.EnableOpenAIUUIDv7SessionIdentity {
+		changed = append(changed, "enable_openai_uuidv7_session_identity")
+	}
+	if before.InstallationObservationEnabled != after.InstallationObservationEnabled {
+		changed = append(changed, service.SettingKeyInstallationObservationEnabled)
+	}
 	if before.LoginAgreementEnabled != after.LoginAgreementEnabled {
 		changed = append(changed, "login_agreement_enabled")
 	}

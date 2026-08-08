@@ -58,6 +58,12 @@ func sanitizeSessionID(raw string) string {
 	if trimmed == "" {
 		return ""
 	}
+	// VARCHAR(255) bounds bytes, not Unicode code points. Keep the rune
+	// bound below as an additional defensive limit for callers that treat the
+	// value as a human-readable identifier.
+	if len(trimmed) > maxPersistedSessionIDLength {
+		return ""
+	}
 	count := 0
 	for _, r := range trimmed {
 		if r < 0x20 || r == 0x7f {

@@ -243,6 +243,156 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 	require.Len(t, captureConn.writes, 2, "应向同一上游连接发送两轮 response.create")
 }
 
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7FrameKeyBaselineAndChange(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	enableOpenAIIdentityPathFingerprintObservation(t)
+
+	cfg := &config.Config{}
+	cfg.JWT.Secret = "ws-ingress-identity-test-secret"
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 2
+	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 2
+	cfg.Gateway.OpenAIWS.QueueLimitPerConn = 8
+	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.StoreDisabledConnMode = openAIWSStoreDisabledConnModeOff
+
+	firstConn := &openAIWSCaptureConn{events: [][]byte{
+		[]byte(`{"type":"response.completed","response":{"id":"resp_identity_p_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+		[]byte(`{"type":"response.completed","response":{"id":"resp_identity_p_2","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+	}}
+	secondConn := &openAIWSCaptureConn{events: [][]byte{
+		[]byte(`{"type":"response.completed","response":{"id":"resp_identity_q_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+	}}
+	dialer := &openAIWSQueueDialer{conns: []openAIWSClientConn{firstConn, secondConn}}
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(dialer)
+	settingRepo := &openAIUUIDv7RuntimeRepo{values: map[string]string{
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity: "true",
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:              cfg,
+		settingService:   NewSettingService(settingRepo, nil),
+		httpUpstream:     &httpUpstreamRecorder{},
+		cache:            &stubGatewayCache{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:    NewCodexToolCorrector(),
+		openaiWSPool:     pool,
+	}
+	account := &Account{
+		ID:          810011,
+		Name:        "openai-ingress-uuidv7-frame-key",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 2,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Extra: map[string]any{
+			"responses_websockets_v2_enabled": true,
+			openAIPinnedInstallationIDKey:     transportTestPinnedInstallationID,
+		},
+	}
+
+	serverErrCh := make(chan error, 1)
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+		req := r.Clone(r.Context())
+		req.Header = req.Header.Clone()
+		req.URL.Path = "/v1/responses"
+		req.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
+		req.Header.Set("session_id", "handshake-H")
+		ginCtx.Request = req
+
+		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		msgType, firstMessage, readErr := conn.Read(readCtx)
+		cancel()
+		if readErr != nil {
+			serverErrCh <- readErr
+			return
+		}
+		if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
+			serverErrCh <- errors.New("unsupported websocket client message type")
+			return
+		}
+		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "oauth-token", firstMessage, nil)
+	}))
+	defer wsServer.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
+	cancelDial()
+	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	writeAndRead := func(payload, wantResponseID string) {
+		writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+		require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(payload)))
+		cancelWrite()
+		readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+		_, event, readErr := clientConn.Read(readCtx)
+		cancelRead()
+		require.NoError(t, readErr)
+		require.Equal(t, wantResponseID, gjson.GetBytes(event, "response.id").String())
+	}
+
+	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"P"}`, "resp_identity_p_1")
+	require.Equal(t, 1, dialer.DialCount())
+	require.Len(t, SnapshotFingerprintObservations(0), 1, "the first physical upstream handshake must be observed once")
+	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"P"}`, "resp_identity_p_2")
+	require.Equal(t, 1, dialer.DialCount(), "repeating the first-frame body key must keep the pinned H identity")
+	require.Len(t, SnapshotFingerprintObservations(0), 1, "a second turn on the same upstream socket must not add an observation")
+	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"Q"}`, "resp_identity_q_1")
+	require.Equal(t, 2, dialer.DialCount(), "P -> Q must acquire a digest-compatible socket")
+	require.Len(t, SnapshotFingerprintObservations(0), 2, "the logical-key replacement dial must add one observation")
+
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+	select {
+	case serverErr := <-serverErrCh:
+		require.NoError(t, serverErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("waiting for UUIDv7 ingress websocket shutdown timed out")
+	}
+
+	require.Len(t, firstConn.writes, 2)
+	require.Len(t, secondConn.writes, 1)
+	firstSessionID := gjson.Get(requestToJSONString(firstConn.writes[0]), "client_metadata.session_id").String()
+	repeatedSessionID := gjson.Get(requestToJSONString(firstConn.writes[1]), "client_metadata.session_id").String()
+	changedSessionID := gjson.Get(requestToJSONString(secondConn.writes[0]), "client_metadata.session_id").String()
+	firstThreadID := gjson.Get(requestToJSONString(firstConn.writes[0]), "client_metadata.thread_id").String()
+	repeatedThreadID := gjson.Get(requestToJSONString(firstConn.writes[1]), "client_metadata.thread_id").String()
+	changedThreadID := gjson.Get(requestToJSONString(secondConn.writes[0]), "client_metadata.thread_id").String()
+	require.NotEmpty(t, firstSessionID)
+	require.NotEmpty(t, firstThreadID)
+	require.Equal(t, firstSessionID, repeatedSessionID)
+	require.Equal(t, firstThreadID, repeatedThreadID)
+	require.NotEqual(t, firstSessionID, changedSessionID)
+	require.NotEqual(t, firstThreadID, changedThreadID)
+
+	observations := SnapshotFingerprintObservations(0)
+	require.Len(t, observations, 2)
+	require.Equal(t, changedSessionID, observations[0].SessionID, "newest observation must describe the replacement Q handshake")
+	require.Equal(t, changedThreadID, observations[0].ThreadID, "newest observation must describe the replacement Q handshake")
+	require.Equal(t, firstSessionID, observations[1].SessionID, "older observation must describe the initial H handshake")
+	require.Equal(t, firstThreadID, observations[1].ThreadID, "older observation must describe the initial H handshake")
+	require.Equal(t, http.MethodGet+" /v1/responses", observations[0].InboundEndpoint)
+	require.Equal(t, http.MethodGet+" /v1/responses", observations[1].InboundEndpoint)
+}
+
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_LeaseLossSendsRetryClose(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -693,11 +693,13 @@ func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupReposit
 	SetCodexCanonicalUserAgentResolver(func() string {
 		return svc.GetOpenAICodexCanonicalUserAgent(context.Background())
 	})
-	// 启动时把持久化的观测开关发布到进程内 observer，重启后与 DB 保持一致。
+	// 启动时把持久化的指纹观测开关发布到进程内 observer，重启后与 DB 保持一致。
+	// 先关闭以 fail closed，避免读取失败时沿用同进程中遗留的启用状态。
+	SetFingerprintObservationEnabled(false)
 	if all, err := svc.GetAllSettings(context.Background()); err != nil {
-		logger.LegacyPrintf("service.setting", "Warning: load installation observation setting failed: %v", err)
+		logger.LegacyPrintf("service.setting", "Warning: load fingerprint observation setting failed: %v", err)
 	} else if all != nil {
-		SetInstallationObservationEnabled(all.InstallationObservationEnabled)
+		SetFingerprintObservationEnabled(all.InstallationObservationEnabled)
 	}
 	return svc
 }

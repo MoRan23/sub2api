@@ -553,12 +553,17 @@ const (
 	SettingKeyOpenAICodexClientVersionSynced = "openai_codex_client_version_synced"
 	// SettingKeyOpenAICodexVersionAutoSyncEnabled 是否启用 Codex 客户端版本号自动同步（默认 true）。
 	SettingKeyOpenAICodexVersionAutoSyncEnabled = "openai_codex_version_auto_sync_enabled"
+	// SettingKeyEnableOpenAIUUIDv7SessionIdentity controls whether each logical
+	// OpenAI session reuses a server-managed UUIDv7 session/thread identity pair.
+	// It is opt-in so existing deployments retain their current behavior.
+	SettingKeyEnableOpenAIUUIDv7SessionIdentity = "enable_openai_uuidv7_session_identity"
 	// SettingKeyOpenAIAllowClaudeCodeCodexPlugin 已废弃：历史全局开关只作为升级迁移输入读取。
 	// 迁移后等价规则写入 SettingKeyCodexCLIOnlyWhitelist，不再参与运行时判定。
 	SettingKeyOpenAIAllowClaudeCodeCodexPlugin = "openai_allow_claude_code_codex_plugin"
-	// SettingKeyInstallationObservationEnabled 是否开启 installation_id 观测（默认 false）。
-	// 开启后网关把每个 OpenAI OAuth 请求出站的 installation_id / User-Agent / originator /
-	// OpenAI-Beta / version 写入进程内环形缓冲，供管理面板实时查看；关闭即停止记录并清空缓冲。
+	// SettingKeyInstallationObservationEnabled 是否开启 OpenAI 指纹观测（默认 false）。
+	// 开启后网关把每个 OpenAI OAuth 请求最终出站的 installation_id / session_id /
+	// thread_id / User-Agent / originator / OpenAI-Beta / version 写入进程内环形缓冲，
+	// 供管理面板实时查看；关闭即停止记录并清空缓冲。
 	// 普通情况下（默认关闭）零记录开销，不落库、不影响转发。
 	SettingKeyInstallationObservationEnabled = "installation_observation_enabled"
 

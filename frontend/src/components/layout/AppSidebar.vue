@@ -706,7 +706,6 @@ const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
 const flagAffiliate = makeSidebarFlag(FeatureFlags.affiliate)
 const flagRiskControl = makeSidebarFlag(FeatureFlags.riskControl)
 const flagOpsMonitoring = () => adminSettingsStore.opsMonitoringEnabled
-const flagInstallationObservation = () => adminSettingsStore.installationObservationEnabled
 const flagAdminPayment = () => adminSettingsStore.paymentEnabled
 const flagBatchImageAccess = () => canUseBatchImage.value
 
@@ -834,7 +833,9 @@ const adminNavItems = computed((): NavItem[] => {
     },
     { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon },
     { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: ShieldIcon, hideInSimpleMode: true },
-    { path: '/admin/installation-observation', label: t('nav.installationObservation'), icon: EyeIcon, hideInSimpleMode: true, featureFlag: flagInstallationObservation }
+    // Fingerprint diagnostics are an administrator tool and remain available
+    // in every admin mode, including simple mode and while observation is off.
+    { path: '/admin/fingerprint-observation', label: t('nav.fingerprintObservation'), icon: EyeIcon }
   ]
 
   const visible = applyFeatureFlags(baseItems)

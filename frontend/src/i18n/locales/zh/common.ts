@@ -198,7 +198,7 @@ export default {
     contentModeration: '内容审核',
     promptAudit: '提示词审计',
     auditLogs: '操作日志',
-    installationObservation: 'Installation 观测',
+    fingerprintObservation: '指纹观测',
   },
 
   // Auth

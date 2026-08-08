@@ -438,15 +438,15 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/admin/installation-observation',
-    name: 'AdminInstallationObservation',
-    component: () => import('@/views/admin/InstallationObservationView.vue'),
+    path: '/admin/fingerprint-observation',
+    name: 'AdminFingerprintObservation',
+    component: () => import('@/views/admin/FingerprintObservationView.vue'),
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
-      title: 'Installation Observation',
-      titleKey: 'admin.installationObservation.title',
-      descriptionKey: 'admin.installationObservation.description'
+      title: 'Fingerprint Observation',
+      titleKey: 'admin.fingerprintObservation.title',
+      descriptionKey: 'admin.fingerprintObservation.description'
     }
   },
   {

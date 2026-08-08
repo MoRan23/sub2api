@@ -1,10 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -254,6 +256,14 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		return nil, fmt.Errorf("get access token: %w", err)
 	}
 
+	var outboundIdentity OpenAIOutboundSessionIdentity
+	outboundIdentityEnabled := false
+	if promptCacheKey != "" {
+		// Chat compatibility owns the historical post-build session override.
+		// Resolve the UUIDv7 pair once at that final outbound boundary.
+		setOpenAIOutboundSessionIdentityPostBuildContext(c)
+	}
+
 	// 6. Build upstream request
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, promptCacheKey, false)
@@ -261,11 +271,41 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
+	// Resolve at the historical post-build isolateOpenAISessionID call site.
+	// This override applies to both OAuth and API-key accounts; keeping that
+	// condition intact is required for disabled-mode wire compatibility.
+	if promptCacheKey != "" {
+		var identityErr error
+		outboundIdentity, _, outboundIdentityEnabled, identityErr = s.resolveOpenAIOutboundSessionIdentityForTransport(ctx, c, account, responsesBody, promptCacheKey, true)
+		if identityErr != nil {
+			return nil, fmt.Errorf("resolve openai outbound session identity: %w", identityErr)
+		}
+		if outboundIdentityEnabled {
+			// The converted request is a Responses JSON object. Keep body aliases
+			// in sync; malformed/opaque bodies remain header-only.
+			if mergedBody, mergeErr := MergeOpenAIOutboundSessionIdentityBody(responsesBody, outboundIdentity); mergeErr == nil {
+				responsesBody = mergedBody
+				upstreamReq.Body = io.NopCloser(bytes.NewReader(mergedBody))
+				upstreamReq.ContentLength = int64(len(mergedBody))
+				upstreamReq.GetBody = func() (io.ReadCloser, error) {
+					return io.NopCloser(bytes.NewReader(mergedBody)), nil
+				}
+			}
+		}
+	}
 
 	if promptCacheKey != "" {
-		apiKeyID := getAPIKeyIDFromContext(c)
-		upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
+		if outboundIdentityEnabled {
+			ApplyOpenAIOutboundSessionIdentityHeaders(upstreamReq.Header, outboundIdentity)
+			setFingerprintObservationOutboundIdentity(c, outboundIdentity)
+		} else {
+			apiKeyID := getAPIKeyIDFromContext(c)
+			upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
+		}
 	}
+	// Chat compatibility may apply its server-owned session pair after the
+	// shared Responses builder. Observe only after this final header write.
+	s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, responsesBody)
 
 	// 7. Send request
 	proxyURL := ""

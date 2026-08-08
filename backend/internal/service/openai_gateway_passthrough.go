@@ -340,6 +340,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	body []byte,
 	token string,
 ) (*http.Request, error) {
+	clearFingerprintObservationOutboundIdentity(c)
 	targetURL := openaiPlatformAPIURL
 	switch account.Type {
 	case AccountTypeOAuth:
@@ -361,6 +362,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		return nil, err
 	}
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
+	var outboundIdentity OpenAIOutboundSessionIdentity
+	outboundIdentityEnabled := false
+	outboundIdentityCompact := false
 
 	// 透传客户端请求头（安全白名单）。
 	allowTimeoutHeaders := s.isOpenAIPassthroughTimeoutHeadersAllowed()
@@ -398,9 +402,14 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 			return nil, fmt.Errorf("resolve chatgpt account headers: %w", err)
 		}
 		apiKeyID := getAPIKeyIDFromContext(c)
-		// 先保存客户端原始值，再做 compact 补充，避免后续统一隔离时读到已处理的值。
-		clientSessionID := strings.TrimSpace(req.Header.Get("session_id"))
-		clientConversationID := strings.TrimSpace(req.Header.Get("conversation_id"))
+		// 先保存客户端原始值，再做 compact 补充。旧逻辑分别为 session_id
+		// 与 conversation_id 选择种子；UUIDv7 pair 只能选择一个逻辑键，
+		// 因此必须保留原始优先级，不能让后面的 prompt fallback 覆盖原始
+		// conversation_id。
+		rawClientSessionID := strings.TrimSpace(req.Header.Get("session_id"))
+		rawClientConversationID := strings.TrimSpace(req.Header.Get("conversation_id"))
+		clientSessionID := rawClientSessionID
+		clientConversationID := rawClientConversationID
 		if isOpenAIResponsesCompactPath(c) {
 			req.Header.Set("accept", "application/json")
 			if req.Header.Get("version") == "" {
@@ -418,18 +427,78 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		if req.Header.Get("originator") == "" {
 			req.Header.Set("originator", openai.CodexDefaultOriginator)
 		}
-		// 用隔离后的 session 标识符覆盖客户端透传值，防止跨用户会话碰撞。
+		// 用服务端会话身份覆盖客户端透传值，防止跨用户会话碰撞。UUIDv7
+		// 模式以 session_id 为主键，缺失时回退 conversation_id，再回退
+		// prompt_cache_key；关闭模式继续分别沿用历史哈希值。
 		if clientSessionID == "" {
 			clientSessionID = promptCacheKey
 		}
 		if clientConversationID == "" {
 			clientConversationID = promptCacheKey
 		}
-		if clientSessionID != "" {
-			req.Header.Set("session_id", isolateOpenAISessionID(apiKeyID, clientSessionID))
+		logicalSessionKey := rawClientSessionID
+		if strings.TrimSpace(logicalSessionKey) == "" {
+			logicalSessionKey = rawClientConversationID
 		}
-		if clientConversationID != "" {
-			req.Header.Set("conversation_id", isolateOpenAISessionID(apiKeyID, clientConversationID))
+		if strings.TrimSpace(logicalSessionKey) == "" {
+			// clientSessionID now contains the historical compact/request-local
+			// seed (or prompt_cache_key fallback), so use it only after the
+			// explicit session/conversation headers have been considered.
+			logicalSessionKey = clientSessionID
+		}
+		identityCallerSeed := logicalSessionKey
+		// Passthrough historically materializes the effective session seed before
+		// writing either legacy header: an explicit session header wins, otherwise
+		// the compact request-local seed/prompt_cache_key fills session_id, while a
+		// conversation-only header remains the conversation value.  The UUIDv7
+		// pair uses the original explicit headers first and only then the effective
+		// session fallback, so a prompt key cannot overwrite a conversation header.
+		identityForceCallerSeed := strings.TrimSpace(identityCallerSeed) != ""
+		identity := OpenAIOutboundSessionIdentity{}
+		identityEnabled := false
+		// This is deliberately scoped to the same condition as the two legacy
+		// isolate writes. API-key passthrough requests therefore remain untouched.
+		if clientSessionID != "" || clientConversationID != "" {
+			var identityErr error
+			identity, _, identityEnabled, identityErr = s.resolveOpenAIOutboundSessionIdentityForTransport(
+				ctx,
+				c,
+				account,
+				body,
+				identityCallerSeed,
+				identityForceCallerSeed,
+			)
+			if identityErr != nil {
+				return nil, fmt.Errorf("resolve openai outbound session identity: %w", identityErr)
+			}
+		}
+		if identityEnabled {
+			outboundIdentity = identity
+			outboundIdentityEnabled = true
+			outboundIdentityCompact = isOpenAIResponsesCompactPath(c)
+			if isOpenAIResponsesCompactPath(c) {
+				applyOpenAIOutboundSessionIdentityCompactHeaders(req.Header, identity)
+			} else {
+				ApplyOpenAIOutboundSessionIdentityHeaders(req.Header, identity)
+			}
+			// Passthrough normally carries a Responses object. Preserve the
+			// opaque/header-only behavior for compact or malformed payloads.
+			if !isOpenAIResponsesCompactPath(c) {
+				if mergedBody, mergeErr := MergeOpenAIOutboundSessionIdentityBody(body, identity); mergeErr == nil {
+					req.Body = io.NopCloser(bytes.NewReader(mergedBody))
+					req.ContentLength = int64(len(mergedBody))
+					req.GetBody = func() (io.ReadCloser, error) {
+						return io.NopCloser(bytes.NewReader(mergedBody)), nil
+					}
+				}
+			}
+		} else {
+			if clientSessionID != "" {
+				req.Header.Set("session_id", isolateOpenAISessionID(apiKeyID, clientSessionID))
+			}
+			if clientConversationID != "" {
+				req.Header.Set("conversation_id", isolateOpenAISessionID(apiKeyID, clientConversationID))
+			}
 		}
 	} else if isOpenAIResponsesCompactPath(c) {
 		// 透传白名单会放行客户端的 Accept: text/event-stream；compact 上游是
@@ -461,6 +530,13 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
 	account.ApplyHeaderOverrides(req.Header)
+	if outboundIdentityEnabled {
+		if outboundIdentityCompact {
+			applyOpenAIOutboundSessionIdentityCompactHeaders(req.Header, outboundIdentity)
+		} else {
+			ApplyOpenAIOutboundSessionIdentityHeaders(req.Header, outboundIdentity)
+		}
+	}
 
 	return req, nil
 }

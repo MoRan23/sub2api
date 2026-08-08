@@ -78,6 +78,13 @@ type SettingService struct {
 	// instance owns its own cache, no shared package-level state.
 	openAIQuotaAutoPauseSettingsCache atomic.Value // *cachedOpenAIQuotaAutoPauseSettings
 	openAIQuotaAutoPauseSettingsSF    singleflight.Group
+
+	// openAIUUIDv7SessionIdentityCache caches the opt-in switch for stable,
+	// server-managed OpenAI UUIDv7 session/thread identity pairs. It is kept per
+	// SettingService instance so tests and service wiring do not share state.
+	openAIUUIDv7SessionIdentityCache      atomic.Value // *cachedOpenAIUUIDv7SessionIdentity
+	openAIUUIDv7SessionIdentitySF         singleflight.Group
+	openAIUUIDv7SessionIdentityGeneration atomic.Uint64
 }
 
 // DefaultPlatformQuotaSetting 单 platform 三档限额（nil = 沿用上层；0 = 显式禁用；>0 = 上限）

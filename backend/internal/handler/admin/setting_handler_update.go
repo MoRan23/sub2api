@@ -23,22 +23,23 @@ import (
 // UpdateSettingsRequest 更新设置请求
 type UpdateSettingsRequest struct {
 	// 注册设置
-	RegistrationEnabled              bool                         `json:"registration_enabled"`
-	EmailVerifyEnabled               bool                         `json:"email_verify_enabled"`
-	RegistrationEmailSuffixWhitelist []string                     `json:"registration_email_suffix_whitelist"`
-	PromoCodeEnabled                 bool                         `json:"promo_code_enabled"`
-	PasswordResetEnabled             bool                         `json:"password_reset_enabled"`
-	FrontendURL                      string                       `json:"frontend_url"`
-	InvitationCodeEnabled            bool                         `json:"invitation_code_enabled"`
-	TotpEnabled                      bool                         `json:"totp_enabled"`             // TOTP 双因素认证
-	PasskeyEnabled                   *bool                        `json:"passkey_enabled"`          // Passkey 登录（省略=保持现值）
-	SessionBindingEnabled            *bool                        `json:"session_binding_enabled"`  // 会话 IP/UA 绑定（省略=保持现值）
-	StepUpEnabled                    *bool                        `json:"step_up_enabled"`          // 敏感操作 step-up 2FA（省略=保持现值）
-	AuditLogRetentionDays            int                          `json:"audit_log_retention_days"` // 审计日志保留天数
-	LoginAgreementEnabled            bool                         `json:"login_agreement_enabled"`
-	LoginAgreementMode               string                       `json:"login_agreement_mode"`
-	LoginAgreementUpdatedAt          string                       `json:"login_agreement_updated_at"`
-	LoginAgreementDocuments          []dto.LoginAgreementDocument `json:"login_agreement_documents"`
+	RegistrationEnabled               bool                         `json:"registration_enabled"`
+	EmailVerifyEnabled                bool                         `json:"email_verify_enabled"`
+	RegistrationEmailSuffixWhitelist  []string                     `json:"registration_email_suffix_whitelist"`
+	PromoCodeEnabled                  bool                         `json:"promo_code_enabled"`
+	PasswordResetEnabled              bool                         `json:"password_reset_enabled"`
+	FrontendURL                       string                       `json:"frontend_url"`
+	InvitationCodeEnabled             bool                         `json:"invitation_code_enabled"`
+	TotpEnabled                       bool                         `json:"totp_enabled"`                          // TOTP 双因素认证
+	PasskeyEnabled                    *bool                        `json:"passkey_enabled"`                       // Passkey 登录（省略=保持现值）
+	SessionBindingEnabled             *bool                        `json:"session_binding_enabled"`               // 会话 IP/UA 绑定（省略=保持现值）
+	StepUpEnabled                     *bool                        `json:"step_up_enabled"`                       // 敏感操作 step-up 2FA（省略=保持现值）
+	EnableOpenAIUUIDv7SessionIdentity *bool                        `json:"enable_openai_uuidv7_session_identity"` // OpenAI UUIDv7 session/thread 标识对（省略=保持现值）
+	AuditLogRetentionDays             int                          `json:"audit_log_retention_days"`              // 审计日志保留天数
+	LoginAgreementEnabled             bool                         `json:"login_agreement_enabled"`
+	LoginAgreementMode                string                       `json:"login_agreement_mode"`
+	LoginAgreementUpdatedAt           string                       `json:"login_agreement_updated_at"`
+	LoginAgreementDocuments           []dto.LoginAgreementDocument `json:"login_agreement_documents"`
 
 	// 邮件服务设置
 	SMTPHost     string `json:"smtp_host"`
@@ -264,7 +265,7 @@ type UpdateSettingsRequest struct {
 	CodexCLIOnlyAllowAppServerClients    *bool  `json:"codex_cli_only_allow_app_server_clients"`
 	CodexCLIOnlyEngineFingerprintSignals string `json:"codex_cli_only_engine_fingerprint_signals"`
 
-	// installation_id 观测开关（tri-state：nil 表示不改动）
+	// OpenAI 指纹观测开关（兼容字段名沿用 installation_observation_enabled；nil 表示不改动）
 	InstallationObservationEnabled *bool `json:"installation_observation_enabled"`
 
 	// Payment visible method routing
@@ -424,6 +425,15 @@ var settingKeyJSONAliases = map[string]string{
 // Only the value-typed fields are indistinguishable from a deliberate clear.
 var settingKeyByJSONName = buildSettingKeyByJSONName()
 
+// These pointer-backed switches are owned by separate admin surfaces. Treat an
+// omitted field as an omitted database write as well as a value-merge signal,
+// otherwise two concurrent partial PUTs can replay stale pre-read values over
+// each other.
+var independentlyOmittedPointerSettingKeys = map[string]string{
+	service.SettingKeyEnableOpenAIUUIDv7SessionIdentity: service.SettingKeyEnableOpenAIUUIDv7SessionIdentity,
+	service.SettingKeyInstallationObservationEnabled:    service.SettingKeyInstallationObservationEnabled,
+}
+
 func buildSettingKeyByJSONName() map[string]string {
 	t := reflect.TypeOf(UpdateSettingsRequest{})
 	out := make(map[string]string, t.NumField())
@@ -449,9 +459,17 @@ func buildSettingKeyByJSONName() map[string]string {
 // Saving settings is a whole-document PUT, so without this a client that sends
 // only the one field it cares about resets every other field to a zero value.
 func omittedSettingKeys(sentFields map[string]json.RawMessage) service.OmittedSettingKeys {
-	omitted := make(service.OmittedSettingKeys, len(settingKeyByJSONName))
+	omitted := make(service.OmittedSettingKeys, len(settingKeyByJSONName)+len(independentlyOmittedPointerSettingKeys))
 	for jsonName, settingKey := range settingKeyByJSONName {
 		if _, sent := sentFields[jsonName]; !sent {
+			omitted[settingKey] = struct{}{}
+		}
+	}
+	for jsonName, settingKey := range independentlyOmittedPointerSettingKeys {
+		raw, sent := sentFields[jsonName]
+		// Pointer fields use nil to mean "leave unchanged". JSON null also
+		// decodes to nil, so it must not turn a stale pre-read value into a write.
+		if !sent || strings.TrimSpace(string(raw)) == "null" {
 			omitted[settingKey] = struct{}{}
 		}
 	}
@@ -500,6 +518,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	stepUpEnabled := previousSettings.StepUpEnabled
 	if req.StepUpEnabled != nil {
 		stepUpEnabled = *req.StepUpEnabled
+	}
+	openAIUUIDv7SessionIdentityEnabled := previousSettings.EnableOpenAIUUIDv7SessionIdentity
+	if req.EnableOpenAIUUIDv7SessionIdentity != nil {
+		openAIUUIDv7SessionIdentityEnabled = *req.EnableOpenAIUUIDv7SessionIdentity
 	}
 	passkeyEnabled := previousSettings.PasskeyEnabled
 	if req.PasskeyEnabled != nil {
@@ -1481,44 +1503,45 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		// 系统全局 platform quota 默认值（整体替换语义）
 		DefaultPlatformQuotas: req.DefaultPlatformQuotas,
 
-		RegistrationEnabled:              req.RegistrationEnabled,
-		EmailVerifyEnabled:               req.EmailVerifyEnabled,
-		RegistrationEmailSuffixWhitelist: req.RegistrationEmailSuffixWhitelist,
-		PromoCodeEnabled:                 req.PromoCodeEnabled,
-		PasswordResetEnabled:             req.PasswordResetEnabled,
-		FrontendURL:                      req.FrontendURL,
-		InvitationCodeEnabled:            req.InvitationCodeEnabled,
-		TotpEnabled:                      req.TotpEnabled,
-		PasskeyEnabled:                   passkeyEnabled,
-		SessionBindingEnabled:            sessionBindingEnabled,
-		StepUpEnabled:                    stepUpEnabled,
-		AuditLogRetentionDays:            req.AuditLogRetentionDays,
-		LoginAgreementEnabled:            req.LoginAgreementEnabled,
-		LoginAgreementMode:               loginAgreementMode,
-		LoginAgreementUpdatedAt:          loginAgreementUpdatedAt,
-		LoginAgreementDocuments:          loginAgreementDocuments,
-		SMTPHost:                         req.SMTPHost,
-		SMTPPort:                         req.SMTPPort,
-		SMTPUsername:                     req.SMTPUsername,
-		SMTPPassword:                     req.SMTPPassword,
-		SMTPFrom:                         req.SMTPFrom,
-		SMTPFromName:                     req.SMTPFromName,
-		SMTPUseTLS:                       req.SMTPUseTLS,
-		TurnstileEnabled:                 req.TurnstileEnabled,
-		TurnstileSiteKey:                 req.TurnstileSiteKey,
-		TurnstileSecretKey:               req.TurnstileSecretKey,
-		TencentCaptchaEnabled:            req.TencentCaptchaEnabled,
-		TencentCaptchaAppID:              req.TencentCaptchaAppID,
-		TencentCaptchaAppSecretKey:       req.TencentCaptchaAppSecretKey,
-		TencentCaptchaCloudSecretID:      req.TencentCaptchaCloudSecretID,
-		TencentCaptchaCloudSecretKey:     req.TencentCaptchaCloudSecretKey,
-		TencentCaptchaRegion:             req.TencentCaptchaRegion,
-		AliyunCaptchaEnabled:             req.AliyunCaptchaEnabled,
-		AliyunCaptchaAccessKeyID:         req.AliyunCaptchaAccessKeyID,
-		AliyunCaptchaAccessKeySecret:     req.AliyunCaptchaAccessKeySecret,
-		AliyunCaptchaSceneID:             req.AliyunCaptchaSceneID,
-		AliyunCaptchaPrefix:              req.AliyunCaptchaPrefix,
-		AliyunCaptchaRegion:              req.AliyunCaptchaRegion,
+		RegistrationEnabled:               req.RegistrationEnabled,
+		EmailVerifyEnabled:                req.EmailVerifyEnabled,
+		RegistrationEmailSuffixWhitelist:  req.RegistrationEmailSuffixWhitelist,
+		PromoCodeEnabled:                  req.PromoCodeEnabled,
+		PasswordResetEnabled:              req.PasswordResetEnabled,
+		FrontendURL:                       req.FrontendURL,
+		InvitationCodeEnabled:             req.InvitationCodeEnabled,
+		TotpEnabled:                       req.TotpEnabled,
+		PasskeyEnabled:                    passkeyEnabled,
+		SessionBindingEnabled:             sessionBindingEnabled,
+		StepUpEnabled:                     stepUpEnabled,
+		EnableOpenAIUUIDv7SessionIdentity: openAIUUIDv7SessionIdentityEnabled,
+		AuditLogRetentionDays:             req.AuditLogRetentionDays,
+		LoginAgreementEnabled:             req.LoginAgreementEnabled,
+		LoginAgreementMode:                loginAgreementMode,
+		LoginAgreementUpdatedAt:           loginAgreementUpdatedAt,
+		LoginAgreementDocuments:           loginAgreementDocuments,
+		SMTPHost:                          req.SMTPHost,
+		SMTPPort:                          req.SMTPPort,
+		SMTPUsername:                      req.SMTPUsername,
+		SMTPPassword:                      req.SMTPPassword,
+		SMTPFrom:                          req.SMTPFrom,
+		SMTPFromName:                      req.SMTPFromName,
+		SMTPUseTLS:                        req.SMTPUseTLS,
+		TurnstileEnabled:                  req.TurnstileEnabled,
+		TurnstileSiteKey:                  req.TurnstileSiteKey,
+		TurnstileSecretKey:                req.TurnstileSecretKey,
+		TencentCaptchaEnabled:             req.TencentCaptchaEnabled,
+		TencentCaptchaAppID:               req.TencentCaptchaAppID,
+		TencentCaptchaAppSecretKey:        req.TencentCaptchaAppSecretKey,
+		TencentCaptchaCloudSecretID:       req.TencentCaptchaCloudSecretID,
+		TencentCaptchaCloudSecretKey:      req.TencentCaptchaCloudSecretKey,
+		TencentCaptchaRegion:              req.TencentCaptchaRegion,
+		AliyunCaptchaEnabled:              req.AliyunCaptchaEnabled,
+		AliyunCaptchaAccessKeyID:          req.AliyunCaptchaAccessKeyID,
+		AliyunCaptchaAccessKeySecret:      req.AliyunCaptchaAccessKeySecret,
+		AliyunCaptchaSceneID:              req.AliyunCaptchaSceneID,
+		AliyunCaptchaPrefix:               req.AliyunCaptchaPrefix,
+		AliyunCaptchaRegion:               req.AliyunCaptchaRegion,
 		APIKeyACLTrustForwardedIP: func() bool {
 			if req.APIKeyACLTrustForwardedIP != nil {
 				return *req.APIKeyACLTrustForwardedIP
@@ -1987,8 +2010,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	if h.opsService != nil {
 		h.opsService.SetMonitoringEnabled(settings.OpsMonitoringEnabled)
 	}
-	// 发布 installation_id 观测开关：关闭时进程内环形缓冲立即清空并停止记录。
-	service.SetInstallationObservationEnabled(settings.InstallationObservationEnabled)
+	// 发布指纹观测开关：持久化字段沿用 installation_observation_enabled；
+	// 关闭时进程内环形缓冲立即清空并停止记录。未携带该字段的 partial
+	// PUT 不得用预读取快照覆盖另一条并发设置请求刚发布的运行时状态。
+	if req.InstallationObservationEnabled != nil {
+		service.SetFingerprintObservationEnabled(settings.InstallationObservationEnabled)
+	}
 
 	// Update OpenAI fast policy (stored under dedicated key, only when provided).
 	if req.OpenAIFastPolicySettings != nil {
@@ -2036,8 +2063,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}
 	}
 
-	h.auditSettingsUpdate(c, previousSettings, settings, previousAuthSourceDefaults, authSourceDefaults, auditReq)
-
 	// 重新获取设置返回
 	updatedSettings, err := h.settingService.GetAllSettings(c.Request.Context())
 	if err != nil {
@@ -2050,6 +2075,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	// Partial settings PUTs intentionally omit almost every value-typed field.
+	// Audit the state read back after persistence rather than the request-built
+	// struct, whose omitted fields contain zero values and would be reported as
+	// unrelated changes.
+	h.auditSettingsUpdate(c, previousSettings, updatedSettings, previousAuthSourceDefaults, updatedAuthSourceDefaults, auditReq)
 	updatedDefaultSubscriptions := make([]dto.DefaultSubscriptionSetting, 0, len(updatedSettings.DefaultSubscriptions))
 	for _, sub := range updatedSettings.DefaultSubscriptions {
 		updatedDefaultSubscriptions = append(updatedDefaultSubscriptions, dto.DefaultSubscriptionSetting{
@@ -2084,6 +2114,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PasskeyRPOrigins:                                       passkeyRPOrigins,
 		SessionBindingEnabled:                                  updatedSettings.SessionBindingEnabled,
 		StepUpEnabled:                                          updatedSettings.StepUpEnabled,
+		EnableOpenAIUUIDv7SessionIdentity:                      updatedSettings.EnableOpenAIUUIDv7SessionIdentity,
 		AuditLogRetentionDays:                                  updatedSettings.AuditLogRetentionDays,
 		LoginAgreementEnabled:                                  updatedSettings.LoginAgreementEnabled,
 		LoginAgreementMode:                                     updatedSettings.LoginAgreementMode,
@@ -2240,7 +2271,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		CodexCLIOnlyWhitelist:                                  updatedSettings.CodexCLIOnlyWhitelist,
 		CodexCLIOnlyAllowAppServerClients:                      updatedSettings.CodexCLIOnlyAllowAppServerClients,
 		CodexCLIOnlyEngineFingerprintSignals:                   updatedSettings.CodexCLIOnlyEngineFingerprintSignals,
-		InstallationObservationEnabled:                        updatedSettings.InstallationObservationEnabled,
+		InstallationObservationEnabled:                         updatedSettings.InstallationObservationEnabled,
 		PaymentVisibleMethodAlipaySource:                       updatedSettings.PaymentVisibleMethodAlipaySource,
 		PaymentVisibleMethodWxpaySource:                        updatedSettings.PaymentVisibleMethodWxpaySource,
 		PaymentVisibleMethodAlipayEnabled:                      updatedSettings.PaymentVisibleMethodAlipayEnabled,

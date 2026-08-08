@@ -217,6 +217,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyCodexCLIOnlyWhitelist:                "",
 		SettingKeyCodexCLIOnlyAllowAppServerClients:    "false",
 		SettingKeyCodexCLIOnlyEngineFingerprintSignals: openai.DefaultEngineFingerprintSignalsJSON(),
+		SettingKeyInstallationObservationEnabled:       "false",
 
 		// 分组隔离（默认不允许未分组 Key 调度）
 		SettingKeyAllowUngroupedKeyScheduling:                        "false",
@@ -230,6 +231,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAICodexClientVersion:                           "",
 		SettingKeyOpenAICodexClientVersionSynced:                     "",
 		SettingKeyOpenAICodexVersionAutoSyncEnabled:                  "true",
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity:                  "false",
 		SettingPaymentVisibleMethodAlipaySource:                      "",
 		SettingPaymentVisibleMethodWxpaySource:                       "",
 		SettingPaymentVisibleMethodAlipayEnabled:                     "false",
@@ -851,6 +853,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	} else {
 		result.OpenAICodexVersionAutoSyncEnabled = true
 	}
+	// UUIDv7 session identity is explicitly opt-in; missing or malformed
+	// values remain fail-closed for compatibility with existing deployments.
+	result.EnableOpenAIUUIDv7SessionIdentity = settings[SettingKeyEnableOpenAIUUIDv7SessionIdentity] == "true"
 	// codex_cli_only 加固
 	result.MinCodexVersion = settings[SettingKeyMinCodexVersion]
 	result.MaxCodexVersion = settings[SettingKeyMaxCodexVersion]
@@ -863,7 +868,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.CodexCLIOnlyEngineFingerprintSignals = openai.DefaultEngineFingerprintSignalsJSON() // 缺失/空 → 展示默认种子
 	}
 
-	// installation_id 观测（默认 false：普通情况下不记录）
+	// OpenAI 指纹观测兼容字段（默认 false：普通情况下不记录）
 	result.InstallationObservationEnabled = settings[SettingKeyInstallationObservationEnabled] == "true"
 
 	// Web search emulation: quick enabled check from the JSON config

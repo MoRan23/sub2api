@@ -57,6 +57,16 @@ type openAIWSSessionHeaderResolution struct {
 	ConversationID     string
 	SessionSource      string
 	ConversationSource string
+
+	// UUIDv7 outbound identity is connection-scoped.  Callers retain this
+	// resolved snapshot for payload metadata, reconnects and pool compatibility
+	// instead of resolving again when a later turn changes prompt_cache_key.
+	OutboundIdentityModeEnabled bool
+	OutboundIdentityEnabled     bool
+	OutboundIdentityLogicalKey  string
+	OutboundIdentityFrameKey    string
+	OutboundIdentity            OpenAIOutboundSessionIdentity
+	OutboundIdentityDigest      string
 }
 
 func resolveOpenAIWSSessionHeaders(c *gin.Context, promptCacheKey string) openAIWSSessionHeaderResolution {

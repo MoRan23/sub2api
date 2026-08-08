@@ -476,6 +476,8 @@ export default {
         openaiCodexVersionAutoSync: '自动同步 Codex 版本号',
         openaiCodexVersionAutoSyncHint: '每 6 小时从官方仓库获取最新稳定版客户端版本号，无需为了跟版本而升级本服务。关闭后仅使用上方手填版本或内置版本。',
         openaiCodexVersionSyncedValue: '当前同步到：{version}',
+        openaiUuidv7SessionIdentity: 'OpenAI UUIDv7 会话身份',
+        openaiUuidv7SessionIdentityHint: '开启后，同一 OpenAI 逻辑会话稳定复用一组由服务端管理的 UUIDv7 session/thread 标识。默认关闭，以保持原有身份行为。',
         codexHardeningTitle: 'Codex 设置',
         codexClientRestrictionTitle: 'Codex 客户端限制',
         codexHardeningDesc:
@@ -498,9 +500,6 @@ export default {
         codexAllowAppServer: 'Codex app-server',
         codexAllowAppServerDesc:
           '放行内嵌 Codex 引擎、经 app-server 协议接入的第三方客户端（如 Claude Code 的 codex 插件）。默认关闭；开启后此类客户端通过引擎指纹门（下方信号列表）即放行，关闭则仅放行官方客户端与白名单。',
-        installationObservation: 'Installation 观测',
-        installationObservationDesc:
-          '默认关闭。开启后记录每个 OpenAI OAuth 出站请求的 installation_id / UA / originator / OpenAI-Beta / version 到内存环形缓冲（最多 500 条），并在"Installation 观测"页展示；关闭时不记录且立即清空。仅用于诊断，重启后丢失。',
         codexBlacklist: 'User-Agent/Originator 黑名单',
         codexBlacklistDesc:
           '命中任一字段即拒，优先于一切放行。originator 精确匹配，User-Agent 为包含匹配（多个用逗号分隔）。',

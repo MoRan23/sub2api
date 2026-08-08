@@ -213,6 +213,7 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 }
 
 func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(ctx context.Context, c *gin.Context, account *Account, alphaBody []byte, body []byte, token string) (*http.Request, error) {
+	clearFingerprintObservationOutboundIdentity(c)
 	responsesPayload := make(map[string]any)
 	if err := json.Unmarshal(body, &responsesPayload); err != nil {
 		return nil, fmt.Errorf("decode alpha search responses body: %w", err)
@@ -268,10 +269,33 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 		req.Header.Set("User-Agent", codexCLIUserAgent)
 	}
 	apiKeyID := getAPIKeyIDFromContext(c)
-	if sessionID := strings.TrimSpace(gjson.GetBytes(alphaBody, "id").String()); sessionID != "" {
-		isolated := isolateOpenAISessionID(apiKeyID, sessionID)
-		req.Header.Set("Session_ID", isolated)
-		req.Header.Set("Conversation_ID", isolated)
+	alphaSessionID := strings.TrimSpace(gjson.GetBytes(alphaBody, "id").String())
+	outboundIdentity := OpenAIOutboundSessionIdentity{}
+	outboundIdentityEnabled := false
+	// Alpha historically isolated only when alphaBody.id was present. Keep the
+	// setting gate and identity lookup inside that same hit condition; the final
+	// header write below is intentionally delayed until all account/client
+	// overrides and installation processing have completed.
+	if alphaSessionID != "" {
+		if s.openAIOutboundSessionIdentityTransportEnabledForRequest(ctx, c) {
+			var identityErr error
+			outboundIdentity, _, outboundIdentityEnabled, identityErr = s.resolveOpenAIOutboundSessionIdentityForTransport(
+				ctx,
+				c,
+				account,
+				body,
+				alphaSessionID,
+				true,
+			)
+			if identityErr != nil {
+				return nil, fmt.Errorf("resolve openai outbound session identity: %w", identityErr)
+			}
+		}
+		if !outboundIdentityEnabled {
+			isolated := isolateOpenAISessionID(apiKeyID, alphaSessionID)
+			req.Header.Set("Session_ID", isolated)
+			req.Header.Set("Conversation_ID", isolated)
+		}
 	}
 	enforceCodexIdentityHeadersWithUA(req.Header, customUA)
 	account.ApplyHeaderOverrides(req.Header)
@@ -287,11 +311,33 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 	); err != nil {
 		return nil, fmt.Errorf("resolve openai installation_id: %w", err)
 	}
+	// Final identity writer: client-derived headers, account overrides and
+	// installation handling must not be able to replace the server-owned pair.
+	// The legacy path above stays in its historical position when the switch is
+	// disabled.
+	if outboundIdentityEnabled {
+		ApplyOpenAIOutboundSessionIdentityHeaders(req.Header, outboundIdentity)
+	}
 	if body, err = json.Marshal(responsesPayload); err != nil {
 		return nil, fmt.Errorf("encode alpha search responses body: %w", err)
 	}
+	if outboundIdentityEnabled {
+		// Responses payloads have a well-defined object schema.  If the body
+		// helper cannot merge (for example, due to a future schema change), keep
+		// the already-applied headers and continue sending the payload.
+		if mergedBody, mergeErr := MergeOpenAIOutboundSessionIdentityBody(body, outboundIdentity); mergeErr == nil {
+			body = mergedBody
+		}
+	}
 	req.Body = io.NopCloser(bytes.NewReader(body))
 	req.ContentLength = int64(len(body))
+	// NewRequest initially captured the pre-transform body in GetBody. Keep
+	// redirects/replays byte-for-byte aligned with the final Responses payload,
+	// including the server-owned UUIDv7 client_metadata aliases.
+	finalBody := append([]byte(nil), body...)
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(finalBody)), nil
+	}
 	return req, nil
 }
 

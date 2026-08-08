@@ -149,9 +149,23 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	storeDisabledConnMode := s.openAIWSStoreDisabledConnMode()
 	forceNewConnByPolicy := shouldForceNewConnOnStoreDisabled(storeDisabledConnMode, lastFailureReason)
 	forceNewConn := forceNewConnByPolicy && storeDisabled && previousResponseID == "" && sessionHash != "" && preferredConnID == ""
-	wsHeaders, sessionResolution, buildHdrErr := s.buildOpenAIWSHeaders(ctx, c, account, token, decision, isCodexCLI, turnState, turnMetadata, promptCacheKey, true)
+	payloadBody := payloadAsJSONBytes(payload)
+	wsHeaders, sessionResolution, buildHdrErr := s.buildOpenAIWSHeadersWithBody(ctx, c, account, token, decision, isCodexCLI, turnState, turnMetadata, promptCacheKey, payloadBody, true)
 	if buildHdrErr != nil {
 		return nil, fmt.Errorf("build ws headers: %w", buildHdrErr)
+	}
+	if sessionResolution.OutboundIdentityEnabled {
+		// WS response.create payloads are Responses JSON objects. Merge the body
+		// aliases from the exact identity snapshot used by the handshake; header
+		// identity remains authoritative if a future payload cannot be decoded.
+		if rawPayload := payloadBody; len(rawPayload) > 0 {
+			if mergedPayload, mergeErr := MergeOpenAIOutboundSessionIdentityBody(rawPayload, sessionResolution.OutboundIdentity); mergeErr == nil {
+				var merged map[string]any
+				if json.Unmarshal(mergedPayload, &merged) == nil && merged != nil {
+					payload = merged
+				}
+			}
+		}
 	}
 	logOpenAIWSModeDebug(
 		"acquire_start account_id=%d account_type=%s transport=%s preferred_conn_id=%s has_previous_response_id=%v session_hash=%s has_turn_state=%v turn_state_len=%d has_turn_metadata=%v turn_metadata_len=%d store_disabled=%v store_disabled_conn_mode=%s retry_last_reason=%s force_new_conn=%v header_user_agent=%s header_openai_beta=%s header_originator=%s header_accept_language=%s header_session_id=%s header_conversation_id=%s session_id_source=%s conversation_id_source=%s has_prompt_cache_key=%v has_chatgpt_account_id=%v has_authorization=%v has_session_id=%v has_conversation_id=%v proxy_enabled=%v",
@@ -173,8 +187,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		openAIWSHeaderValueForLog(wsHeaders, "openai-beta"),
 		openAIWSHeaderValueForLog(wsHeaders, "originator"),
 		openAIWSHeaderValueForLog(wsHeaders, "accept-language"),
-		openAIWSHeaderValueForLog(wsHeaders, "session_id"),
-		openAIWSHeaderValueForLog(wsHeaders, "conversation_id"),
+		openAIWSOutboundIdentityHeaderValueForLog(wsHeaders, "session_id", sessionResolution.OutboundIdentityDigest),
+		openAIWSOutboundIdentityHeaderValueForLog(wsHeaders, "conversation_id", sessionResolution.OutboundIdentityDigest),
 		normalizeOpenAIWSLogValue(sessionResolution.SessionSource),
 		normalizeOpenAIWSLogValue(sessionResolution.ConversationSource),
 		promptCacheKey != "",
@@ -189,9 +203,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	defer acquireCancel()
 
 	lease, err := s.getOpenAIWSConnPool().Acquire(acquireCtx, openAIWSAcquireRequest{
-		Account: account,
-		WSURL:   wsURL,
-		Headers: wsHeaders,
+		Account:        account,
+		WSURL:          wsURL,
+		Headers:        wsHeaders,
+		IdentityDigest: sessionResolution.OutboundIdentityDigest,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
@@ -242,6 +257,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 		return nil, wrapOpenAIWSFallback(classifyOpenAIWSAcquireError(err), err)
 	}
+	// Observe only a successful physical handshake. A compatible pooled lease
+	// (including a prewarmed connection) is not a new upstream WS handshake and
+	// must not add a duplicate fingerprint row.
+	s.recordFingerprintObservationAfterOpenAIWSHandshake(c, account, lease, wsHeaders)
 	// cleanExit 标记正常终端事件退出，此时上游不会再发送帧，连接可安全归还复用。
 	// 所有异常路径（读写错误、error 事件等）已在各自分支中提前调用 MarkBroken，
 	// 因此 defer 中只需处理正常退出时不 MarkBroken 即可。
@@ -276,8 +295,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			lease.Reused(),
 			storeDisabled,
 			truncateOpenAIWSLogValue(sessionHash, 12),
-			openAIWSHeaderValueForLog(wsHeaders, "session_id"),
-			openAIWSHeaderValueForLog(wsHeaders, "conversation_id"),
+			openAIWSOutboundIdentityHeaderValueForLog(wsHeaders, "session_id", sessionResolution.OutboundIdentityDigest),
+			openAIWSOutboundIdentityHeaderValueForLog(wsHeaders, "conversation_id", sessionResolution.OutboundIdentityDigest),
 			normalizeOpenAIWSLogValue(sessionResolution.SessionSource),
 			normalizeOpenAIWSLogValue(sessionResolution.ConversationSource),
 			turnState != "",
@@ -625,8 +644,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 					storeDisabled,
 					lease.Reused(),
 					truncateOpenAIWSLogValue(sessionHash, 12),
-					openAIWSHeaderValueForLog(wsHeaders, "session_id"),
-					openAIWSHeaderValueForLog(wsHeaders, "conversation_id"),
+					openAIWSOutboundIdentityHeaderValueForLog(wsHeaders, "session_id", sessionResolution.OutboundIdentityDigest),
+					openAIWSOutboundIdentityHeaderValueForLog(wsHeaders, "conversation_id", sessionResolution.OutboundIdentityDigest),
 					normalizeOpenAIWSLogValue(sessionResolution.SessionSource),
 					normalizeOpenAIWSLogValue(sessionResolution.ConversationSource),
 					turnState != "",

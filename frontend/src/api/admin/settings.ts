@@ -372,6 +372,7 @@ export interface SystemSettings {
   passkey_rp_origins: string[];
   session_binding_enabled: boolean; // 会话 IP/UA 绑定
   step_up_enabled: boolean; // 敏感操作 step-up 2FA
+  enable_openai_uuidv7_session_identity: boolean; // OpenAI UUIDv7 session/thread 标识对
   audit_log_retention_days: number; // 审计日志保留天数
   login_agreement_enabled: boolean;
   login_agreement_mode: "modal" | "checkbox" | string;
@@ -598,7 +599,7 @@ export interface SystemSettings {
   codex_cli_only_engine_fingerprint_signals: string;
   web_search_emulation_enabled?: boolean;
 
-  // OpenAI installation_id observation (global, in-memory only while on)
+  // Fingerprint observation compatibility setting (persisted key retained)
   installation_observation_enabled: boolean;
 
   // Payment configuration
@@ -705,6 +706,7 @@ export interface UpdateSettingsRequest {
   passkey_enabled?: boolean;
   session_binding_enabled?: boolean; // 会话 IP/UA 绑定
   step_up_enabled?: boolean; // 敏感操作 step-up 2FA
+  enable_openai_uuidv7_session_identity?: boolean; // OpenAI UUIDv7 session/thread 标识对
   audit_log_retention_days?: number; // 审计日志保留天数
   login_agreement_enabled?: boolean;
   login_agreement_mode?: "modal" | "checkbox" | string;
@@ -904,7 +906,7 @@ export interface UpdateSettingsRequest {
   codex_cli_only_whitelist?: string;
   codex_cli_only_allow_app_server_clients?: boolean;
   codex_cli_only_engine_fingerprint_signals?: string;
-  // OpenAI installation_id observation (global, in-memory only while on)
+  // Fingerprint observation compatibility setting (persisted key retained)
   installation_observation_enabled?: boolean;
   // Payment configuration
   payment_enabled?: boolean;

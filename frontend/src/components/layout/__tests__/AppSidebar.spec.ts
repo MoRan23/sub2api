@@ -53,3 +53,16 @@ describe('AppSidebar header styles', () => {
     expect(sidebarBrandBlockMatch?.[0]).not.toContain('overflow: hidden;')
   })
 })
+
+describe('AppSidebar fingerprint observation navigation', () => {
+  it('keeps the fingerprint observation page visible in every admin mode', () => {
+    const item = componentSource
+      .split('\n')
+      .find((line) => line.includes("path: '/admin/fingerprint-observation'"))
+
+    expect(item).toBeDefined()
+    expect(item).toContain("label: t('nav.fingerprintObservation')")
+    expect(item).not.toContain('hideInSimpleMode')
+    expect(item).not.toContain('featureFlag')
+  })
+})

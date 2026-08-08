@@ -198,7 +198,7 @@ export default {
     contentModeration: 'Content Moderation',
     promptAudit: 'Prompt Audit',
     auditLogs: 'Audit Logs',
-    installationObservation: 'Installation Observation',
+    fingerprintObservation: 'Fingerprint Observation',
   },
 
   // Auth

@@ -232,6 +232,7 @@ type SystemSettings struct {
 	OpenAICodexClientVersion               string // 出站声明的 Codex 客户端版本号（管理员覆写）；空值跟随自动同步值
 	OpenAICodexClientVersionSynced         string // 自动同步到的官方最新稳定版版本号（只读展示）
 	OpenAICodexVersionAutoSyncEnabled      bool   // 是否启用 Codex 客户端版本号自动同步（默认 true）
+	EnableOpenAIUUIDv7SessionIdentity      bool   // 是否启用稳定复用的 OpenAI UUIDv7 session/thread 标识对（默认 false）
 	MinCodexVersion                        string // codex_cli_only 最低 Codex 引擎版本；空=不检查
 	MaxCodexVersion                        string // codex_cli_only 最高 Codex 引擎版本；空=不检查
 	CodexCLIOnlyBlacklist                  string // codex_cli_only 全局黑名单 JSON（[]AllowedClientEntry，OR deny）
@@ -239,8 +240,8 @@ type SystemSettings struct {
 	CodexCLIOnlyAllowAppServerClients      bool   // codex_cli_only App Server 开关：对未列名客户端开闸（默认 false）
 	CodexCLIOnlyEngineFingerprintSignals   string // codex_cli_only 引擎指纹门信号列表 JSON（[]EngineFingerprintSignal）
 
-	// installation_id 观测：开启后记录每个 OpenAI OAuth 请求出站的 installation_id /
-	// UA / originator / OpenAI-Beta / version 到进程内环形缓冲（默认 false，关闭即停并清空）
+	// OpenAI 指纹观测（兼容字段）：开启后记录每个 OAuth 请求的出站指纹到进程内环形缓冲；
+	// 默认 false，关闭即停止记录并清空。
 	InstallationObservationEnabled bool
 
 	// Web Search Emulation

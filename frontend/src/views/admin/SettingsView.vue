@@ -4552,26 +4552,6 @@
                   />
                 </div>
 
-                <div class="flex items-center justify-between">
-                  <div class="pr-4">
-                    <label
-                      class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                    >
-                      {{
-                        t("admin.settings.gatewayForwarding.installationObservation")
-                      }}
-                    </label>
-                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      {{
-                        t(
-                          "admin.settings.gatewayForwarding.installationObservationDesc",
-                        )
-                      }}
-                    </p>
-                  </div>
-                  <Toggle v-model="form.installation_observation_enabled" />
-                </div>
-
                 <div>
                   <label
                     class="block text-sm font-medium text-gray-700 dark:text-gray-300"
@@ -5566,6 +5546,35 @@
                   </p>
                 </div>
                 <Toggle v-model="form.openai_codex_version_auto_sync_enabled" />
+              </div>
+
+              <!-- OpenAI UUIDv7 session identity -->
+              <div
+                class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
+                data-testid="openai-uuidv7-session-identity-settings"
+              >
+                <div>
+                  <label
+                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.openaiUuidv7SessionIdentity",
+                      )
+                    }}
+                  </label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.openaiUuidv7SessionIdentityHint",
+                      )
+                    }}
+                  </p>
+                </div>
+                <Toggle
+                  v-model="form.enable_openai_uuidv7_session_identity"
+                  data-testid="openai-uuidv7-session-identity-toggle"
+                />
               </div>
 
             </div>
@@ -9176,6 +9185,7 @@ type SettingsForm = Omit<
   | "wechat_connect_open_enabled"
   | "wechat_connect_mp_enabled"
   | "wechat_connect_mobile_enabled"
+  | "installation_observation_enabled"
 > & {
   smtp_password: string;
   turnstile_secret_key: string;
@@ -9462,6 +9472,7 @@ const form = reactive<SettingsForm>({
   // 只读展示：自动同步任务写入的官方最新稳定版，不参与提交（提交载荷按字段显式构造）
   openai_codex_client_version_synced: "",
   openai_codex_version_auto_sync_enabled: true,
+  enable_openai_uuidv7_session_identity: false,
   // codex_cli_only 加固
   min_codex_version: "",
   max_codex_version: "",
@@ -9469,8 +9480,6 @@ const form = reactive<SettingsForm>({
   codex_cli_only_whitelist: "",
   codex_cli_only_allow_app_server_clients: false,
   codex_cli_only_engine_fingerprint_signals: "",
-  // OpenAI installation_id 观测（全局，仅开启时在内存留存）
-  installation_observation_enabled: false,
   // 余额、订阅到期与账号限额通知
   balance_low_notify_enabled: false,
   balance_low_notify_threshold: 0,
@@ -10452,6 +10461,9 @@ async function loadSettings() {
       settings.payment_load_balance_strategy || "round-robin";
     // Only assign non-null values from backend (null means unconfigured, keep defaults)
     for (const [key, value] of Object.entries(settings)) {
+      // This compatibility field is owned by the Fingerprint Observation page;
+      // do not reintroduce it as a hidden SettingsView form property.
+      if (key === "installation_observation_enabled") continue;
       if (value !== null && value !== undefined) {
         (form as Record<string, unknown>)[key] = value;
       }
@@ -10837,6 +10849,8 @@ async function saveSettings() {
       passkey_enabled: form.passkey_enabled,
       session_binding_enabled: form.session_binding_enabled,
       step_up_enabled: form.step_up_enabled,
+      enable_openai_uuidv7_session_identity:
+        form.enable_openai_uuidv7_session_identity,
       // 清空数字框时 v-model.number 会得到空串，后端 int 字段解析空串会 400 拒绝整次保存；
       // 空/非法值回退默认 180（与后端 parseAuditLogRetentionDays("") 语义一致，0 仍表示永久保留）。
       audit_log_retention_days: Number.isFinite(form.audit_log_retention_days)
@@ -11028,7 +11042,6 @@ async function saveSettings() {
       codex_cli_only_engine_fingerprint_signals: serializeFingerprintRowsToJSON(
         codexFingerprintRows.value,
       ),
-      installation_observation_enabled: form.installation_observation_enabled,
       codex_cli_only_blacklist: serializeCodexRowsToJSON(
         codexBlacklistRows.value,
       ),
@@ -11167,7 +11180,12 @@ async function saveSettings() {
       adminAPI.settings.updateSettings(payload),
     );
     for (const [key, value] of Object.entries(updated)) {
-      if (key === "openai_fast_policy_settings") continue;
+      if (
+        key === "openai_fast_policy_settings" ||
+        key === "installation_observation_enabled"
+      ) {
+        continue;
+      }
       if (value !== null && value !== undefined) {
         (form as Record<string, unknown>)[key] = value;
       }

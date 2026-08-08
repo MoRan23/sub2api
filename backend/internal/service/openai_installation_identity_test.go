@@ -54,22 +54,22 @@ func TestNormalizeCodexInstallationIDOnlyAcceptsV4(t *testing.T) {
 	}
 }
 
-func TestInstallationObservationRecordsOnlyWhenEnabled(t *testing.T) {
+func TestFingerprintObservationRecordsOnlyWhenEnabled(t *testing.T) {
 	svc := &OpenAIGatewayService{}
-	SetInstallationObservationEnabled(false)
+	SetFingerprintObservationEnabled(false)
 	acct := newOpenAIOAuthPinAccount(201, nil)
-	svc.recordInstallationObservation(nil, acct, installationIDResolution{Enabled: true, OutboundID: "abc"}, http.Header{})
-	if got := SnapshotInstallationObservations(10); len(got) != 0 {
+	svc.recordFingerprintObservation(nil, acct, installationIDResolution{Enabled: true, OutboundID: "abc"}, http.Header{})
+	if got := SnapshotFingerprintObservations(10); len(got) != 0 {
 		t.Fatalf("disabled observation must not record, got %d entries", len(got))
 	}
-	SetInstallationObservationEnabled(true)
-	defer SetInstallationObservationEnabled(false)
+	SetFingerprintObservationEnabled(true)
+	defer SetFingerprintObservationEnabled(false)
 	hdr := http.Header{}
 	hdr.Set("User-Agent", "codex_cli_rs/2.0")
 	hdr.Set("OpenAI-Beta", "responses=v1")
 	hdr.Set("Originator", "codex_cli_rs")
-	svc.recordInstallationObservation(nil, acct, installationIDResolution{Enabled: true, OutboundID: "outbound-1", ClientID: "client-1"}, hdr)
-	entries := SnapshotInstallationObservations(10)
+	svc.recordFingerprintObservation(nil, acct, installationIDResolution{Enabled: true, OutboundID: "outbound-1", ClientID: "client-1"}, hdr)
+	entries := SnapshotFingerprintObservations(10)
 	if len(entries) != 1 || entries[0].OutboundInstallationID != "outbound-1" || entries[0].ClientReportedInstallationID != "client-1" {
 		t.Fatalf("observation captured wrong ids: %+v", entries)
 	}
@@ -78,33 +78,32 @@ func TestInstallationObservationRecordsOnlyWhenEnabled(t *testing.T) {
 	}
 }
 
-func TestInstallationObservationDisableClearsBuffer(t *testing.T) {
+func TestFingerprintObservationDisableClearsBuffer(t *testing.T) {
 	svc := &OpenAIGatewayService{}
-	SetInstallationObservationEnabled(true)
+	SetFingerprintObservationEnabled(true)
 	acct := newOpenAIOAuthPinAccount(202, nil)
-	svc.recordInstallationObservation(nil, acct, installationIDResolution{Enabled: true, OutboundID: uuid.NewString()}, http.Header{})
-	if len(SnapshotInstallationObservations(10)) == 0 {
+	svc.recordFingerprintObservation(nil, acct, installationIDResolution{Enabled: true, OutboundID: uuid.NewString()}, http.Header{})
+	if len(SnapshotFingerprintObservations(10)) == 0 {
 		t.Fatal("expected an entry before disabling")
 	}
-	SetInstallationObservationEnabled(false)
-	if got := SnapshotInstallationObservations(10); len(got) != 0 {
+	SetFingerprintObservationEnabled(false)
+	if got := SnapshotFingerprintObservations(10); len(got) != 0 {
 		t.Fatalf("disabling observation should clear the buffer, got %d", len(got))
 	}
 }
 
-func TestInstallationObservationUsesActualPassthroughHeader(t *testing.T) {
+func TestFingerprintObservationSkipsPassthrough(t *testing.T) {
 	svc := &OpenAIGatewayService{}
-	SetInstallationObservationEnabled(true)
-	defer SetInstallationObservationEnabled(false)
-	acct := newOpenAIOAuthPinAccount(203, map[string]any{openAIInstallationPinEnabledKey: false})
+	SetFingerprintObservationEnabled(true)
+	defer SetFingerprintObservationEnabled(false)
+	acct := newOpenAIOAuthPinAccount(203, map[string]any{"openai_passthrough": true})
 	hdr := http.Header{}
 	hdr.Set(codexInstallationIDKey, "actual-outbound")
-	svc.recordInstallationObservation(nil, acct, installationIDResolution{
+	svc.recordFingerprintObservation(nil, acct, installationIDResolution{
 		ClientID: "client-reported",
 	}, hdr)
-	entries := SnapshotInstallationObservations(1)
-	if len(entries) != 1 || entries[0].OutboundInstallationID != "actual-outbound" {
-		t.Fatalf("observation should use actual passthrough header, got %+v", entries)
+	if entries := SnapshotFingerprintObservations(1); len(entries) != 0 {
+		t.Fatalf("passthrough observation must be skipped, got %+v", entries)
 	}
 }
 
@@ -348,7 +347,7 @@ func TestApplyOpenAIInstallationIDForOutboundCompactStripsBodyMetadata(t *testin
 	const pinned = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 	account := newOpenAIOAuthPinAccount(502, map[string]any{openAIPinnedInstallationIDKey: pinned})
 	body := map[string]any{
-		"model": "gpt-5.4",
+		"model":           "gpt-5.4",
 		"client_metadata": map[string]any{codexInstallationIDKey: "body-client"},
 	}
 	headers := make(http.Header)

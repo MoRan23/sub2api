@@ -86,6 +86,10 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 // it omitted, so in that case the caches are rebuilt from storage rather than
 // from the request struct.
 func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) {
+	// This switch has a dedicated runtime cache and must take effect immediately
+	// after an admin write, including partial payloads and writes that fail to
+	// rebuild the aggregate cache below.
+	s.InvalidateOpenAIUUIDv7SessionIdentityCache()
 	if len(omitted) == 0 {
 		s.refreshCachedSettings(settings)
 		return
@@ -462,6 +466,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyOpenAICodexUserAgent] = strings.TrimSpace(settings.OpenAICodexUserAgent)
 	updates[SettingKeyOpenAICodexClientVersion] = NormalizeCodexClientVersion(settings.OpenAICodexClientVersion)
 	updates[SettingKeyOpenAICodexVersionAutoSyncEnabled] = strconv.FormatBool(settings.OpenAICodexVersionAutoSyncEnabled)
+	updates[SettingKeyEnableOpenAIUUIDv7SessionIdentity] = strconv.FormatBool(settings.EnableOpenAIUUIDv7SessionIdentity)
 	// SettingKeyOpenAICodexClientVersionSynced 由自动同步任务独占写入，此处不得覆盖，
 	// 否则面板保存会把同步结果清空。
 	// codex_cli_only 加固

@@ -768,6 +768,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	// goroutine）之间同步当前 turn 的 usage metadata。
 	usageMeta.initFromFirstFrame(firstClientMessage, capturedSessionModel)
 	promptCacheKey := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "prompt_cache_key").String())
+	var outboundIdentity OpenAIOutboundSessionIdentity
+	outboundIdentityEnabled := false
+	outboundIdentityModeEnabled := false
+	outboundIdentityLogicalKey := ""
+	lastExplicitIdentityFrameKey := ""
 
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
 	if err != nil {
@@ -800,9 +805,19 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 		turnMetadata = c.GetHeader(openAIWSTurnMetadataHeader)
 	}
-	headers, _, buildHdrErr := s.buildOpenAIWSHeaders(ctx, c, account, token, wsDecision, isCodexCLI, turnState, turnMetadata, promptCacheKey, false)
+	headers, sessionResolution, buildHdrErr := s.buildOpenAIWSHeadersWithBody(ctx, c, account, token, wsDecision, isCodexCLI, turnState, turnMetadata, promptCacheKey, firstClientMessage, false)
 	if buildHdrErr != nil {
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
+	}
+	outboundIdentityModeEnabled = sessionResolution.OutboundIdentityModeEnabled
+	outboundIdentityLogicalKey = sessionResolution.OutboundIdentityLogicalKey
+	lastExplicitIdentityFrameKey = sessionResolution.OutboundIdentityFrameKey
+	if sessionResolution.OutboundIdentityEnabled {
+		outboundIdentity = sessionResolution.OutboundIdentity
+		outboundIdentityEnabled = true
+		if mergedFirst, mergeErr := MergeOpenAIOutboundSessionIdentityBody(firstClientMessage, outboundIdentity); mergeErr == nil {
+			firstClientMessage = mergedFirst
+		}
 	}
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -929,6 +944,32 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 			isResponseCreate := eventType == "response.create"
+			// A runtime/store failure is fail-open: the handshake may still carry
+			// legacy isolated headers while no UUID pair was resolved. Only enforce
+			// the no-in-place-switch rule when this socket actually owns a pair;
+			// otherwise preserve the historical passthrough behavior.
+			if isResponseCreate && outboundIdentityModeEnabled && outboundIdentityEnabled {
+				// Passthrough relays one upstream socket and cannot transparently
+				// redial between frames. A changed explicit key would otherwise
+				// send a new conversation under the old handshake pair, so close
+				// and require a fresh client connection. An empty key inherits.
+				framePromptKey := strings.TrimSpace(gjson.GetBytes(payload, "prompt_cache_key").String())
+				// Connection headers are static. prompt_cache_key is the only
+				// explicit per-turn change signal covered by the legacy WS helper;
+				// body-only metadata means inherit the handshake identity for this
+				// response.create frame.
+				frameLogicalKey := resolveOpenAIWSFrameLogicalKey(payload, framePromptKey)
+				nextExplicitFrameKey, identityKeyChanged := advanceOpenAIWSFrameLogicalKey(
+					frameLogicalKey,
+					lastExplicitIdentityFrameKey,
+					outboundIdentityLogicalKey,
+				)
+				if identityKeyChanged {
+					err := errors.New("websocket outbound session logical key changed on passthrough connection")
+					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+				}
+				lastExplicitIdentityFrameKey = nextExplicitFrameKey
+			}
 			acceptedTurn := false
 			if isResponseCreate {
 				if !turnLifecycle.beginResponseCreate(clientFrameConn.markTurnStarted) {
@@ -1024,6 +1065,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if policyErr == nil && blocked == nil && isResponseCreate {
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
 				acceptedTurn = true
+			}
+			if outboundIdentityEnabled && isResponseCreate {
+				if mergedPayload, mergeErr := MergeOpenAIOutboundSessionIdentityBody(out, outboundIdentity); mergeErr == nil {
+					out = mergedPayload
+				}
 			}
 			return out, blocked, policyErr
 		},

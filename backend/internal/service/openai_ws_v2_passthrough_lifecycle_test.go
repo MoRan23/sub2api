@@ -258,6 +258,92 @@ func TestOpenAIWSPassthroughTurnLifecycle_SerializesTerminalCommitAndNextTurn(t 
 	require.False(t, <-admitted, "failed terminal write must keep the current turn in flight")
 }
 
+func TestPassthroughLifecycle_UUIDv7FrameKeyBaselineAndChange(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	controlCtx := context.Background()
+	upstream := newStagedPassthroughConn()
+	cfg := passthroughLifecycleConfig()
+	cfg.JWT.Secret = "ws-passthrough-identity-test-secret"
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	svc := newPassthroughLifecycleService(cfg, upstream)
+	svc.settingService = NewSettingService(&openAIUUIDv7RuntimeRepo{values: map[string]string{
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity: "true",
+	}}, nil)
+	account := &Account{
+		ID:          810012,
+		Name:        "passthrough-uuidv7-frame-key",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Extra: map[string]any{
+			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+			openAIPinnedInstallationIDKey:               transportTestPinnedInstallationID,
+		},
+	}
+	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, svc, account)
+	defer server.Close()
+
+	dialHeaders := http.Header{"session_id": []string{"handshake-H"}}
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(
+		dialCtx,
+		"ws"+strings.TrimPrefix(server.URL, "http"),
+		&coderws.DialOptions{HTTPHeader: dialHeaders},
+	)
+	cancelDial()
+	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	writeClient := func(payload string) {
+		writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+		require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(payload)))
+		cancelWrite()
+	}
+	readCompleted := func(wantID string) {
+		payload, readErr := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+		require.NoError(t, readErr)
+		require.Equal(t, wantID, gjson.GetBytes(payload, "response.id").String())
+	}
+
+	writeClient(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"P"}`)
+	firstForwarded := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_passthrough_identity_p_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	readCompleted("resp_passthrough_identity_p_1")
+
+	writeClient(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"P"}`)
+	repeatedForwarded := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_passthrough_identity_p_2","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	readCompleted("resp_passthrough_identity_p_2")
+	require.Equal(
+		t,
+		gjson.GetBytes(firstForwarded, "client_metadata.session_id").String(),
+		gjson.GetBytes(repeatedForwarded, "client_metadata.session_id").String(),
+		"repeating P after a header-pinned first frame must retain the H identity",
+	)
+
+	writeClient(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"Q"}`)
+	_, readErr := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+	var closeErr coderws.CloseError
+	require.ErrorAs(t, readErr, &closeErr)
+	require.Equal(t, coderws.StatusPolicyViolation, closeErr.Code)
+	require.Contains(t, closeErr.Reason, "logical key changed")
+	select {
+	case unexpected := <-upstream.writes:
+		t.Fatalf("P -> Q frame was forwarded on the old passthrough socket: %s", unexpected)
+	case <-time.After(100 * time.Millisecond):
+	}
+	select {
+	case err := <-serverErr:
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "logical key changed")
+	case <-time.After(3 * time.Second):
+		t.Fatal("passthrough UUIDv7 key-change reader did not exit")
+	}
+}
+
 func TestPassthroughLifecycle_LeaseLossSendsRetryClose(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	controlCtx, cancelControl := context.WithCancelCause(context.Background())
