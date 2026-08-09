@@ -771,8 +771,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	var outboundIdentity OpenAIOutboundSessionIdentity
 	outboundIdentityEnabled := false
 	outboundIdentityModeEnabled := false
-	outboundIdentityLogicalKey := ""
-	lastExplicitIdentityFrameKey := ""
+	var outboundLogicalIdentity OpenAICodexLogicalTurnIdentity
 
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
 	if err != nil {
@@ -810,8 +809,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
 	outboundIdentityModeEnabled = sessionResolution.OutboundIdentityModeEnabled
-	outboundIdentityLogicalKey = sessionResolution.OutboundIdentityLogicalKey
-	lastExplicitIdentityFrameKey = sessionResolution.OutboundIdentityFrameKey
+	outboundLogicalIdentity = sessionResolution.OutboundLogicalIdentity
 	if sessionResolution.OutboundIdentityEnabled {
 		outboundIdentity = sessionResolution.OutboundIdentity
 		outboundIdentityEnabled = true
@@ -944,31 +942,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 			isResponseCreate := eventType == "response.create"
-			// A runtime/store failure is fail-open: the handshake may still carry
-			// legacy isolated headers while no UUID pair was resolved. Only enforce
-			// the no-in-place-switch rule when this socket actually owns a pair;
-			// otherwise preserve the historical passthrough behavior.
-			if isResponseCreate && outboundIdentityModeEnabled && outboundIdentityEnabled {
-				// Passthrough relays one upstream socket and cannot transparently
-				// redial between frames. A changed explicit key would otherwise
-				// send a new conversation under the old handshake pair, so close
-				// and require a fresh client connection. An empty key inherits.
-				framePromptKey := strings.TrimSpace(gjson.GetBytes(payload, "prompt_cache_key").String())
-				// Connection headers are static. prompt_cache_key is the only
-				// explicit per-turn change signal covered by the legacy WS helper;
-				// body-only metadata means inherit the handshake identity for this
-				// response.create frame.
-				frameLogicalKey := resolveOpenAIWSFrameLogicalKey(payload, framePromptKey)
-				nextExplicitFrameKey, identityKeyChanged := advanceOpenAIWSFrameLogicalKey(
-					frameLogicalKey,
-					lastExplicitIdentityFrameKey,
-					outboundIdentityLogicalKey,
-				)
-				if identityKeyChanged {
+			if isResponseCreate && outboundIdentityModeEnabled {
+				// Passthrough owns one upstream socket. Missing tuple fields inherit.
+				// Before the socket is pinned, the first prompt-cache fallback also
+				// establishes identity and therefore requires a fresh connection; once
+				// pinned, prompt_cache_key changes are identity-neutral.
+				frameLogicalIdentity := resolveOpenAIWSFrameLogicalIdentityForPinnedState(payload, outboundIdentityEnabled)
+				if strings.TrimSpace(frameLogicalIdentity.SessionKey) != "" &&
+					(!outboundIdentityEnabled || !openAICodexLogicalTurnIdentityEqual(frameLogicalIdentity, outboundLogicalIdentity)) {
 					err := errors.New("websocket outbound session logical key changed on passthrough connection")
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
 				}
-				lastExplicitIdentityFrameKey = nextExplicitFrameKey
 			}
 			acceptedTurn := false
 			if isResponseCreate {

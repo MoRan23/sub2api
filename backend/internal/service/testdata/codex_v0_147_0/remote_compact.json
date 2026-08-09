@@ -1,0 +1,14 @@
+{
+  "source": "codex-rs/core/tests/suite/compact_remote.rs",
+  "path": "/v1/responses/compact",
+  "headers": {
+    "session-id": "01989f44-7c00-7000-8000-000000000001",
+    "thread-id": "01989f44-7c00-7000-8000-000000000001",
+    "x-codex-turn-metadata": "{\"request_kind\":\"compaction\",\"session_id\":\"01989f44-7c00-7000-8000-000000000001\",\"thread_id\":\"01989f44-7c00-7000-8000-000000000001\"}"
+  },
+  "body": {
+    "input": [],
+    "model": "gpt-5.4",
+    "prompt_cache_key": "logical-root"
+  }
+}

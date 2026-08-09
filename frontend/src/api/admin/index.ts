@@ -115,6 +115,11 @@ export default adminAPI
 export type { AuditLog, AuditLogQuery, AuditLogListResponse } from './audit'
 export type {
   FingerprintObservationEntry,
+  FingerprintObservationListParams,
+  FingerprintObservationRelation,
+  FingerprintObservationRequestOptions,
+  FingerprintObservationSessionNode,
+  FingerprintObservationThreadNode,
   FingerprintObservationsResponse
 } from './fingerprintObservations'
 export type { BalanceHistoryItem } from './users'

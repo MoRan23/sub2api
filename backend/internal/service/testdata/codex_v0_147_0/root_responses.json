@@ -1,0 +1,19 @@
+{
+  "source": "codex-rs/core/tests/suite/prompt_cache_key.rs",
+  "path": "/v1/responses",
+  "headers": {
+    "session-id": "01989f44-7c00-7000-8000-000000000001",
+    "thread-id": "01989f44-7c00-7000-8000-000000000001",
+    "x-client-request-id": "01989f44-7c00-7000-8000-000000000001",
+    "x-codex-turn-metadata": "{\"request_kind\":\"turn\",\"session_id\":\"01989f44-7c00-7000-8000-000000000001\",\"thread_id\":\"01989f44-7c00-7000-8000-000000000001\"}"
+  },
+  "body": {
+    "client_metadata": {
+      "session_id": "01989f44-7c00-7000-8000-000000000001",
+      "thread_id": "01989f44-7c00-7000-8000-000000000001",
+      "x-codex-turn-metadata": "{\"request_kind\":\"turn\",\"session_id\":\"01989f44-7c00-7000-8000-000000000001\",\"thread_id\":\"01989f44-7c00-7000-8000-000000000001\"}"
+    },
+    "prompt_cache_key": "logical-root",
+    "stream": true
+  }
+}

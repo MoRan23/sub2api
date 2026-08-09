@@ -23,230 +23,412 @@ import (
 	"github.com/google/uuid"
 )
 
-// OpenAIOutboundSessionIdentity is the server-owned pair of identifiers sent
-// on OpenAI/Codex outbound requests.  The pair is generated together and is
-// kept stable for a logical client mapping until the store entry expires.
-type OpenAIOutboundSessionIdentity struct {
-	SessionID string `json:"session_id"`
-	ThreadID  string `json:"thread_id"`
+type OpenAICodexTurnRelation string
+
+const (
+	OpenAICodexTurnRelationRoot       OpenAICodexTurnRelation = "root"
+	OpenAICodexTurnRelationDescendant OpenAICodexTurnRelation = "descendant"
+)
+
+// OpenAICodexTurnIdentity is the server-owned Codex turn identity projected
+// onto an upstream request. A root thread shares its UUIDv7 with the session;
+// descendants keep the session UUID and receive their own thread UUIDv7.
+type OpenAICodexTurnIdentity struct {
+	SessionID          string                  `json:"session_id"`
+	ThreadID           string                  `json:"thread_id"`
+	ParentThreadID     string                  `json:"parent_thread_id,omitempty"`
+	ForkedFromThreadID string                  `json:"forked_from_thread_id,omitempty"`
+	Relation           OpenAICodexTurnRelation `json:"relation,omitempty"`
 }
 
-// ValidateOpenAIOutboundSessionIdentity enforces the wire contract for
-// server-owned identities.  Both values must be RFC 4122 UUIDv7 values and a
-// pair may not reuse the same UUID.
-func ValidateOpenAIOutboundSessionIdentity(identity OpenAIOutboundSessionIdentity) error {
-	sessionRaw := identity.SessionID
-	sessionID, err := uuid.Parse(sessionRaw)
-	if err != nil || sessionRaw != sessionID.String() || sessionID.Version() != uuid.Version(7) || sessionID.Variant() != uuid.RFC4122 {
-		return errors.New("openai outbound session identity session_id must be UUIDv7")
+// OpenAIOutboundSessionIdentity remains as a source-compatible name while the
+// transport call sites migrate to the Codex lifecycle model.
+type OpenAIOutboundSessionIdentity = OpenAICodexTurnIdentity
+
+func canonicalUUIDv7(value string) (string, error) {
+	raw := strings.TrimSpace(value)
+	parsed, err := uuid.Parse(raw)
+	if err != nil || raw != parsed.String() || parsed.Version() != uuid.Version(7) || parsed.Variant() != uuid.RFC4122 {
+		return "", errors.New("value must be a canonical RFC 4122 UUIDv7")
 	}
-	threadRaw := identity.ThreadID
-	threadID, err := uuid.Parse(threadRaw)
-	if err != nil || threadRaw != threadID.String() || threadID.Version() != uuid.Version(7) || threadID.Variant() != uuid.RFC4122 {
-		return errors.New("openai outbound session identity thread_id must be UUIDv7")
+	return raw, nil
+}
+
+func normalizedOpenAICodexTurnRelation(identity OpenAICodexTurnIdentity) OpenAICodexTurnRelation {
+	if identity.Relation != "" {
+		return identity.Relation
 	}
-	if sessionID == threadID {
-		return errors.New("openai outbound session identity pair must contain distinct UUIDs")
+	if identity.SessionID == identity.ThreadID {
+		return OpenAICodexTurnRelationRoot
+	}
+	return OpenAICodexTurnRelationDescendant
+}
+
+func ValidateOpenAICodexTurnIdentity(identity OpenAICodexTurnIdentity) error {
+	sessionID, err := canonicalUUIDv7(identity.SessionID)
+	if err != nil {
+		return errors.New("openai Codex turn identity session_id must be UUIDv7")
+	}
+	threadID, err := canonicalUUIDv7(identity.ThreadID)
+	if err != nil {
+		return errors.New("openai Codex turn identity thread_id must be UUIDv7")
+	}
+	relation := normalizedOpenAICodexTurnRelation(identity)
+	switch relation {
+	case OpenAICodexTurnRelationRoot:
+		if sessionID != threadID {
+			return errors.New("openai Codex root identity must use session_id as thread_id")
+		}
+	case OpenAICodexTurnRelationDescendant:
+		if sessionID == threadID {
+			return errors.New("openai Codex descendant identity must use an independent thread_id")
+		}
+	default:
+		return errors.New("openai Codex turn identity relation is invalid")
+	}
+	for name, value := range map[string]string{
+		"parent_thread_id":      identity.ParentThreadID,
+		"forked_from_thread_id": identity.ForkedFromThreadID,
+	} {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		if _, err := canonicalUUIDv7(value); err != nil {
+			return fmt.Errorf("openai Codex turn identity %s must be UUIDv7", name)
+		}
 	}
 	return nil
 }
 
-// OpenAIOutboundSessionIdentityStore atomically reads or creates a pair for a
-// mapping key.  Implementations must return the existing value when another
-// writer won the race, and should refresh the entry TTL on every successful
-// read/create.
-type OpenAIOutboundSessionIdentityStore interface {
-	GetOrCreate(ctx context.Context, mappingKey string, candidate OpenAIOutboundSessionIdentity, ttl time.Duration) (OpenAIOutboundSessionIdentity, error)
+func ValidateOpenAIOutboundSessionIdentity(identity OpenAIOutboundSessionIdentity) error {
+	return ValidateOpenAICodexTurnIdentity(identity)
+}
+
+// OpenAICodexTurnIdentityStore intentionally stays narrower than GatewayCache.
+// Session resolution is separate because the winning S is part of the thread
+// digest and must be known before a descendant key can be derived.
+type OpenAICodexTurnIdentityStore interface {
+	GetOrCreateCodexSession(ctx context.Context, sessionMappingKey, candidateSessionID string, ttl time.Duration) (string, error)
+	GetOrCreateCodexThread(ctx context.Context, sessionMappingKey, threadMappingKey, sessionID, candidateThreadID string, ttl time.Duration) (OpenAICodexTurnIdentity, error)
 }
 
 const (
-	// OpenAIOutboundSessionIdentityTTL is deliberately longer than normal
-	// request/session caches.  It mirrors a client installation lifetime while
-	// allowing inactive identities to be reclaimed.
 	OpenAIOutboundSessionIdentityTTL = 30 * 24 * time.Hour
 
-	openAIOutboundSessionIdentityDomain               = "sub2api/openai-outbound-session/v1"
-	openAIOutboundSessionIdentityLocalStoreMaxEntries = 64 * 1024
+	openAICodexSessionIdentityDomain = "sub2api/openai-outbound-session/v2/session"
+	openAICodexThreadIdentityDomain  = "sub2api/openai-outbound-session/v2/thread"
+	openAICodexLocalStoreMaxEntries  = 64 * 1024
 )
 
 const (
 	OpenAIOutboundSessionLogicalKeySourceNone               = "none"
+	OpenAIOutboundSessionLogicalKeySourceTurnMetadata       = "x_codex_turn_metadata"
 	OpenAIOutboundSessionLogicalKeySourceHeaderSession      = "header_session"
 	OpenAIOutboundSessionLogicalKeySourceHeaderThread       = "header_thread"
 	OpenAIOutboundSessionLogicalKeySourceHeaderConversation = "header_conversation"
 	OpenAIOutboundSessionLogicalKeySourceHeaderAffinity     = "header_affinity"
 	OpenAIOutboundSessionLogicalKeySourceClientMetadata     = "client_metadata"
-	OpenAIOutboundSessionLogicalKeySourceTurnMetadata       = "x_codex_turn_metadata"
 	OpenAIOutboundSessionLogicalKeySourceCallerSeed         = "caller_seed"
 	OpenAIOutboundSessionLogicalKeySourcePromptCacheKey     = "prompt_cache_key"
 )
 
-// OpenAIOutboundSessionLogicalKeyResolution describes which explicit,
-// session-scoped signal won. Request/message/response/installation identifiers
-// are intentionally absent from the resolver's allowlist.
+type OpenAICodexLogicalTurnIdentity struct {
+	SessionKey          string
+	ThreadKey           string
+	ParentThreadKey     string
+	ForkedFromThreadKey string
+	Relation            OpenAICodexTurnRelation
+	Source              string
+	Explicit            bool
+}
+
 type OpenAIOutboundSessionLogicalKeyResolution struct {
 	LogicalKey string
 	Source     string
 }
 
-var openAIOutboundSessionDirectHeaderGroups = []struct {
-	source string
-	names  []string
-}{
-	{source: OpenAIOutboundSessionLogicalKeySourceHeaderSession, names: []string{"session-id", "session_id"}},
-	{source: OpenAIOutboundSessionLogicalKeySourceHeaderThread, names: []string{"thread-id", "thread_id"}},
-	{source: OpenAIOutboundSessionLogicalKeySourceHeaderConversation, names: []string{"conversation-id", "conversation_id"}},
+type openAICodexLogicalTuple struct {
+	session string
+	thread  string
+	parent  string
+	fork    string
 }
 
-var openAIOutboundSessionAffinityHeaders = []string{
-	openCodeSessionAffinityHeader,
-	openCodeSessionIDHeader,
-	openCodeNativeSessionHeader,
-	codeBuddyConversationHeader,
+var openAICodexIdentityConflictTotal atomic.Int64
+
+func OpenAICodexIdentityConflictCount() int64 {
+	return openAICodexIdentityConflictTotal.Load()
 }
 
-var openAIOutboundSessionJSONFields = []string{
-	"session_id",
-	"session-id",
-	"thread_id",
-	"thread-id",
-	"conversation_id",
-	"conversation-id",
+func tupleFromJSON(object map[string]json.RawMessage) openAICodexLogicalTuple {
+	return openAICodexLogicalTuple{
+		session: firstValidOpenAICodexJSONField(object, "session_id", "session-id"),
+		thread:  firstValidOpenAICodexJSONField(object, "thread_id", "thread-id"),
+		parent: firstValidOpenAICodexJSONField(object,
+			"parent_thread_id", "parent-thread-id", "x-codex-parent-thread-id"),
+		fork: firstValidOpenAICodexJSONField(object,
+			"forked_from_thread_id", "forked-from-thread-id"),
+	}
 }
 
-var (
-	errOpenAIOutboundSessionIdentityKeySecret = errors.New("openai outbound session identity secret is unavailable")
-	errOpenAIOutboundSessionIdentityKeyEmpty  = errors.New("openai outbound session identity mapping key is empty")
-	// errOpenAIOutboundSessionIdentityNamespace marks a credential-owner
-	// resolution failure. Transport callers may fail closed for malformed
-	// shadow-account topology while still treating Redis/UUID failures as
-	// fail-open request-path conditions.
-	errOpenAIOutboundSessionIdentityNamespace = errors.New("openai outbound session identity namespace resolution failed")
-	// ErrOpenAIOutboundSessionIdentityStoredValueInvalid lets the service
-	// distinguish unrepaired Redis corruption from ordinary store outages.
-	ErrOpenAIOutboundSessionIdentityStoredValueInvalid = errors.New("stored OpenAI outbound session identity is invalid")
-)
-
-// ResolveOpenAIOutboundSessionLogicalKey returns the first valid, explicitly
-// session-scoped key in the documented priority order:
-//
-//  1. session/thread/conversation headers (hyphen and underscore aliases)
-//  2. known affinity headers
-//  3. client_metadata session/thread/conversation fields
-//  4. JSON x-codex-turn-metadata fields (header, then client_metadata/body)
-//  5. a caller-selected seed (for compact/alpha paths and already-resolved keys)
-//  6. body prompt_cache_key when no caller seed was selected
-//
-// Every candidate is normalized with sanitizeSessionID: invalid UTF-8,
-// control characters, empty strings, and values longer than 255 characters
-// are skipped. Installation, request, message, and response identifiers are
-// never inspected, even when they are the only IDs present.
-func ResolveOpenAIOutboundSessionLogicalKey(c *gin.Context, body []byte, callerSeed string) string {
-	return ResolveOpenAIOutboundSessionLogicalKeyWithSource(c, body, callerSeed).LogicalKey
-}
-
-// ResolveOpenAIOutboundSessionLogicalKeyWithSource is the diagnostic form of
-// ResolveOpenAIOutboundSessionLogicalKey. Source is a bounded enum-like value
-// and never contains the raw logical key.
-func ResolveOpenAIOutboundSessionLogicalKeyWithSource(c *gin.Context, body []byte, callerSeed string) OpenAIOutboundSessionLogicalKeyResolution {
-	return resolveOpenAIOutboundSessionLogicalKeyWithTurnMetadata(c, body, callerSeed, "")
-}
-
-// ResolveOpenAIOutboundSessionLogicalKeyWithTurnMetadata is the explicit-
-// metadata variant used by WebSocket builders whose caller has already
-// extracted x-codex-turn-metadata but has not yet copied it into the outbound
-// request headers/body. The explicit value follows the normal turn-metadata
-// signals and still precedes callerSeed/prompt_cache_key.
-func ResolveOpenAIOutboundSessionLogicalKeyWithTurnMetadata(c *gin.Context, body []byte, callerSeed, turnMetadata string) string {
-	return resolveOpenAIOutboundSessionLogicalKeyWithTurnMetadata(c, body, callerSeed, turnMetadata).LogicalKey
-}
-
-func resolveOpenAIOutboundSessionLogicalKeyWithTurnMetadata(c *gin.Context, body []byte, callerSeed, explicitTurnMetadata string) OpenAIOutboundSessionLogicalKeyResolution {
-	if c != nil && c.Request != nil {
-		headers := c.Request.Header
-		for _, group := range openAIOutboundSessionDirectHeaderGroups {
-			if value := firstValidOpenAIOutboundSessionHeader(headers, group.names); value != "" {
-				return OpenAIOutboundSessionLogicalKeyResolution{LogicalKey: value, Source: group.source}
-			}
+func firstValidOpenAICodexJSONField(object map[string]json.RawMessage, fields ...string) string {
+	for _, field := range fields {
+		raw, ok := object[field]
+		if !ok {
+			continue
 		}
-		if value := firstValidOpenAIOutboundSessionHeader(headers, openAIOutboundSessionAffinityHeaders); value != "" {
-			return OpenAIOutboundSessionLogicalKeyResolution{LogicalKey: value, Source: OpenAIOutboundSessionLogicalKeySourceHeaderAffinity}
-		}
-	}
-
-	metadata, turnMetadata, promptCacheKey := openAIOutboundSessionBodySignals(body)
-	if value := firstValidOpenAIOutboundSessionJSONField(metadata); value != "" {
-		return OpenAIOutboundSessionLogicalKeyResolution{LogicalKey: value, Source: OpenAIOutboundSessionLogicalKeySourceClientMetadata}
-	}
-
-	if c != nil && c.Request != nil {
-		for _, raw := range c.Request.Header.Values(openAIWSTurnMetadataHeader) {
-			if value := openAIOutboundSessionTurnMetadataKey([]byte(raw)); value != "" {
-				return OpenAIOutboundSessionLogicalKeyResolution{LogicalKey: value, Source: OpenAIOutboundSessionLogicalKeySourceTurnMetadata}
-			}
-		}
-	}
-	if value := openAIOutboundSessionTurnMetadataKey([]byte(strings.TrimSpace(explicitTurnMetadata))); value != "" {
-		return OpenAIOutboundSessionLogicalKeyResolution{LogicalKey: value, Source: OpenAIOutboundSessionLogicalKeySourceTurnMetadata}
-	}
-	for _, raw := range turnMetadata {
-		if value := openAIOutboundSessionTurnMetadataKey(raw); value != "" {
-			return OpenAIOutboundSessionLogicalKeyResolution{LogicalKey: value, Source: OpenAIOutboundSessionLogicalKeySourceTurnMetadata}
-		}
-	}
-
-	// The caller seed precedes the raw body prompt key intentionally. Compact
-	// and alpha paths select request-local seeds before body normalization; a
-	// stale ordinary prompt_cache_key must not overwrite that path decision.
-	if value := sanitizeSessionID(callerSeed); value != "" {
-		return OpenAIOutboundSessionLogicalKeyResolution{LogicalKey: value, Source: OpenAIOutboundSessionLogicalKeySourceCallerSeed}
-	}
-	if value := sanitizeSessionID(promptCacheKey); value != "" {
-		return OpenAIOutboundSessionLogicalKeyResolution{LogicalKey: value, Source: OpenAIOutboundSessionLogicalKeySourcePromptCacheKey}
-	}
-	return OpenAIOutboundSessionLogicalKeyResolution{Source: OpenAIOutboundSessionLogicalKeySourceNone}
-}
-
-func resolveOpenAIOutboundSessionLogicalKey(c *gin.Context, body []byte, callerSeed string) string {
-	return ResolveOpenAIOutboundSessionLogicalKey(c, body, callerSeed)
-}
-
-func firstValidOpenAIOutboundSessionHeader(headers http.Header, names []string) string {
-	if headers == nil {
-		return ""
-	}
-	for _, name := range names {
-		// Normal HTTP requests use canonical map keys and are served by
-		// Header.Values. Bridges/tests can construct Header maps manually with
-		// non-canonical casing, so inspect those keys as a fallback as well.
-		values := headers.Values(name)
-		for _, raw := range values {
-			if value := sanitizeSessionID(raw); value != "" {
+		var value string
+		if json.Unmarshal(raw, &value) == nil {
+			if value = sanitizeSessionID(value); value != "" {
 				return value
-			}
-		}
-		for key, nonCanonicalValues := range headers {
-			if !strings.EqualFold(key, name) || key == http.CanonicalHeaderKey(name) {
-				continue
-			}
-			for _, raw := range nonCanonicalValues {
-				if value := sanitizeSessionID(raw); value != "" {
-					return value
-				}
 			}
 		}
 	}
 	return ""
 }
 
-// openAIOutboundSessionBodySignals parses only the small object maps needed by
-// identity resolution. Unknown IDs remain opaque and cannot become a key.
+func tupleFromTurnMetadata(raw []byte) openAICodexLogicalTuple {
+	if len(raw) == 0 || !utf8.Valid(raw) {
+		return openAICodexLogicalTuple{}
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(raw, &object) != nil || object == nil {
+		return openAICodexLogicalTuple{}
+	}
+	return tupleFromJSON(object)
+}
+
+func normalizeLogicalTuple(tuple openAICodexLogicalTuple, source string, explicit bool) OpenAICodexLogicalTurnIdentity {
+	session := sanitizeSessionID(tuple.session)
+	thread := sanitizeSessionID(tuple.thread)
+	if session == "" && thread != "" {
+		session = thread
+	}
+	if thread == "" && session != "" {
+		thread = session
+	}
+	relation := OpenAICodexTurnRelationRoot
+	if session != "" && thread != "" && session != thread {
+		relation = OpenAICodexTurnRelationDescendant
+	}
+	return OpenAICodexLogicalTurnIdentity{
+		SessionKey:          session,
+		ThreadKey:           thread,
+		ParentThreadKey:     sanitizeSessionID(tuple.parent),
+		ForkedFromThreadKey: sanitizeSessionID(tuple.fork),
+		Relation:            relation,
+		Source:              source,
+		Explicit:            explicit,
+	}
+}
+
+func noteTupleConflict(winner OpenAICodexLogicalTurnIdentity, candidate openAICodexLogicalTuple) {
+	for _, pair := range [][2]string{
+		{winner.SessionKey, sanitizeSessionID(candidate.session)},
+		{winner.ThreadKey, sanitizeSessionID(candidate.thread)},
+		{winner.ParentThreadKey, sanitizeSessionID(candidate.parent)},
+		{winner.ForkedFromThreadKey, sanitizeSessionID(candidate.fork)},
+	} {
+		if pair[0] != "" && pair[1] != "" && pair[0] != pair[1] {
+			openAICodexIdentityConflictTotal.Add(1)
+		}
+	}
+}
+
+func mergeRelatedLogicalKeys(target *OpenAICodexLogicalTurnIdentity, candidate openAICodexLogicalTuple) {
+	if target.ParentThreadKey == "" {
+		target.ParentThreadKey = sanitizeSessionID(candidate.parent)
+	}
+	if target.ForkedFromThreadKey == "" {
+		target.ForkedFromThreadKey = sanitizeSessionID(candidate.fork)
+	}
+}
+
+func ResolveOpenAICodexLogicalTurnIdentity(c *gin.Context, body []byte, callerSeed string) OpenAICodexLogicalTurnIdentity {
+	return ResolveOpenAICodexLogicalTurnIdentityWithTurnMetadata(c, body, callerSeed, "")
+}
+
+func ResolveOpenAICodexLogicalTurnIdentityWithTurnMetadata(c *gin.Context, body []byte, callerSeed, explicitTurnMetadata string) OpenAICodexLogicalTurnIdentity {
+	metadata, bodyTurnMetadata, promptCacheKey := openAIOutboundSessionBodySignals(body)
+	candidates := make([]struct {
+		tuple  openAICodexLogicalTuple
+		source string
+	}, 0, 8)
+
+	// Codex defines the metadata-contained turn snapshot as the canonical source.
+	if raw, ok := metadata[openAIWSTurnMetadataHeader]; ok {
+		if decoded := normalizeOpenAIOutboundTurnMetadataRaw(raw); len(decoded) > 0 {
+			candidates = append(candidates, struct {
+				tuple  openAICodexLogicalTuple
+				source string
+			}{tupleFromTurnMetadata(decoded), OpenAIOutboundSessionLogicalKeySourceTurnMetadata})
+		}
+	}
+	if c != nil && c.Request != nil {
+		for _, raw := range headerValuesCaseInsensitive(c.Request.Header, openAIWSTurnMetadataHeader) {
+			candidates = append(candidates, struct {
+				tuple  openAICodexLogicalTuple
+				source string
+			}{tupleFromTurnMetadata([]byte(strings.TrimSpace(raw))), OpenAIOutboundSessionLogicalKeySourceTurnMetadata})
+		}
+	}
+	if raw := strings.TrimSpace(explicitTurnMetadata); raw != "" {
+		candidates = append(candidates, struct {
+			tuple  openAICodexLogicalTuple
+			source string
+		}{tupleFromTurnMetadata([]byte(raw)), OpenAIOutboundSessionLogicalKeySourceTurnMetadata})
+	}
+	for _, raw := range bodyTurnMetadata {
+		candidates = append(candidates, struct {
+			tuple  openAICodexLogicalTuple
+			source string
+		}{tupleFromTurnMetadata(raw), OpenAIOutboundSessionLogicalKeySourceTurnMetadata})
+	}
+
+	if c != nil && c.Request != nil {
+		headers := c.Request.Header
+		canonical := openAICodexLogicalTuple{
+			session: firstValidOpenAIOutboundSessionHeader(headers, []string{"session-id"}),
+			thread:  firstValidOpenAIOutboundSessionHeader(headers, []string{"thread-id"}),
+			parent:  firstValidOpenAIOutboundSessionHeader(headers, []string{"x-codex-parent-thread-id"}),
+		}
+		canonicalSource := OpenAIOutboundSessionLogicalKeySourceHeaderSession
+		if canonical.session == "" && canonical.thread != "" {
+			canonicalSource = OpenAIOutboundSessionLogicalKeySourceHeaderThread
+		}
+		candidates = append(candidates, struct {
+			tuple  openAICodexLogicalTuple
+			source string
+		}{canonical, canonicalSource})
+	}
+
+	flatTuple := tupleFromJSON(metadata)
+	// conversation aliases are compatibility inputs, not the canonical flat
+	// session/thread projection.
+	flatTuple.session = firstValidOpenAICodexJSONField(metadata, "session_id", "session-id")
+	flatTuple.thread = firstValidOpenAICodexJSONField(metadata, "thread_id", "thread-id")
+	candidates = append(candidates, struct {
+		tuple  openAICodexLogicalTuple
+		source string
+	}{flatTuple, OpenAIOutboundSessionLogicalKeySourceClientMetadata})
+
+	if c != nil && c.Request != nil {
+		headers := c.Request.Header
+		compat := openAICodexLogicalTuple{
+			session: firstValidOpenAIOutboundSessionHeader(headers, []string{"session_id"}),
+			thread:  firstValidOpenAIOutboundSessionHeader(headers, []string{"thread_id"}),
+		}
+		compatSource := OpenAIOutboundSessionLogicalKeySourceHeaderSession
+		if compat.session == "" && compat.thread != "" {
+			compatSource = OpenAIOutboundSessionLogicalKeySourceHeaderThread
+		}
+		if compat.session == "" && compat.thread == "" {
+			if conversation := firstValidOpenAIOutboundSessionHeader(headers, []string{"conversation-id", "conversation_id"}); conversation != "" {
+				compat.session, compat.thread = conversation, conversation
+				compatSource = OpenAIOutboundSessionLogicalKeySourceHeaderConversation
+			}
+		}
+		if compat.session == "" && compat.thread == "" {
+			if affinity := firstValidOpenAIOutboundSessionHeader(headers, []string{
+				openCodeSessionAffinityHeader, openCodeSessionIDHeader, openCodeNativeSessionHeader, codeBuddyConversationHeader,
+			}); affinity != "" {
+				compat.session, compat.thread = affinity, affinity
+				compatSource = OpenAIOutboundSessionLogicalKeySourceHeaderAffinity
+			}
+		}
+		candidates = append(candidates, struct {
+			tuple  openAICodexLogicalTuple
+			source string
+		}{compat, compatSource})
+	}
+	if conversation := firstValidOpenAICodexJSONField(metadata, "conversation_id", "conversation-id"); conversation != "" {
+		candidates = append(candidates, struct {
+			tuple  openAICodexLogicalTuple
+			source string
+		}{openAICodexLogicalTuple{session: conversation, thread: conversation}, OpenAIOutboundSessionLogicalKeySourceClientMetadata})
+	}
+
+	winner := OpenAICodexLogicalTurnIdentity{Source: OpenAIOutboundSessionLogicalKeySourceNone}
+	pendingRelated := OpenAICodexLogicalTurnIdentity{}
+	for _, candidate := range candidates {
+		if winner.SessionKey == "" && (candidate.tuple.session != "" || candidate.tuple.thread != "") {
+			winner = normalizeLogicalTuple(candidate.tuple, candidate.source, true)
+			if pendingRelated.ParentThreadKey != "" {
+				winner.ParentThreadKey = pendingRelated.ParentThreadKey
+			}
+			if pendingRelated.ForkedFromThreadKey != "" {
+				winner.ForkedFromThreadKey = pendingRelated.ForkedFromThreadKey
+			}
+			continue
+		}
+		if winner.SessionKey == "" {
+			mergeRelatedLogicalKeys(&pendingRelated, candidate.tuple)
+			continue
+		}
+		if winner.SessionKey != "" {
+			noteTupleConflict(winner, candidate.tuple)
+			mergeRelatedLogicalKeys(&winner, candidate.tuple)
+		}
+	}
+	if winner.SessionKey != "" {
+		return winner
+	}
+	if seed := sanitizeSessionID(callerSeed); seed != "" {
+		return normalizeLogicalTuple(openAICodexLogicalTuple{session: seed, thread: seed}, OpenAIOutboundSessionLogicalKeySourceCallerSeed, false)
+	}
+	if seed := sanitizeSessionID(promptCacheKey); seed != "" {
+		return normalizeLogicalTuple(openAICodexLogicalTuple{session: seed, thread: seed}, OpenAIOutboundSessionLogicalKeySourcePromptCacheKey, false)
+	}
+	return winner
+}
+
+func ResolveOpenAIOutboundSessionLogicalKey(c *gin.Context, body []byte, callerSeed string) string {
+	return ResolveOpenAICodexLogicalTurnIdentity(c, body, callerSeed).SessionKey
+}
+
+func ResolveOpenAIOutboundSessionLogicalKeyWithSource(c *gin.Context, body []byte, callerSeed string) OpenAIOutboundSessionLogicalKeyResolution {
+	resolved := ResolveOpenAICodexLogicalTurnIdentity(c, body, callerSeed)
+	return OpenAIOutboundSessionLogicalKeyResolution{LogicalKey: resolved.SessionKey, Source: resolved.Source}
+}
+
+func ResolveOpenAIOutboundSessionLogicalKeyWithTurnMetadata(c *gin.Context, body []byte, callerSeed, turnMetadata string) string {
+	return ResolveOpenAICodexLogicalTurnIdentityWithTurnMetadata(c, body, callerSeed, turnMetadata).SessionKey
+}
+
+func resolveOpenAIOutboundSessionLogicalKey(c *gin.Context, body []byte, callerSeed string) string {
+	return ResolveOpenAIOutboundSessionLogicalKey(c, body, callerSeed)
+}
+
+func headerValuesCaseInsensitive(headers http.Header, name string) []string {
+	if headers == nil {
+		return nil
+	}
+	var values []string
+	for key, candidates := range headers {
+		if strings.EqualFold(key, name) {
+			values = append(values, candidates...)
+		}
+	}
+	return values
+}
+
+func firstValidOpenAIOutboundSessionHeader(headers http.Header, names []string) string {
+	for _, name := range names {
+		for _, raw := range headerValuesCaseInsensitive(headers, name) {
+			if value := sanitizeSessionID(raw); value != "" {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
 func openAIOutboundSessionBodySignals(body []byte) (metadata map[string]json.RawMessage, turnMetadata [][]byte, promptCacheKey string) {
 	if len(body) == 0 || !utf8.Valid(body) {
 		return nil, nil, ""
 	}
 	var root map[string]json.RawMessage
-	if err := json.Unmarshal(body, &root); err != nil || root == nil {
+	if json.Unmarshal(body, &root) != nil || root == nil {
 		return nil, nil, ""
 	}
 	if raw, ok := root["prompt_cache_key"]; ok {
@@ -257,14 +439,8 @@ func openAIOutboundSessionBodySignals(body []byte) (metadata map[string]json.Raw
 			turnMetadata = append(turnMetadata, decoded)
 		}
 	}
-	rawMetadata, ok := root["client_metadata"]
-	if !ok || json.Unmarshal(rawMetadata, &metadata) != nil || metadata == nil {
-		return nil, turnMetadata, promptCacheKey
-	}
-	if raw, ok := metadata[openAIWSTurnMetadataHeader]; ok {
-		if decoded := normalizeOpenAIOutboundTurnMetadataRaw(raw); len(decoded) > 0 {
-			turnMetadata = append(turnMetadata, decoded)
-		}
+	if raw, ok := root["client_metadata"]; ok {
+		_ = json.Unmarshal(raw, &metadata)
 	}
 	return metadata, turnMetadata, promptCacheKey
 }
@@ -285,91 +461,311 @@ func normalizeOpenAIOutboundTurnMetadataRaw(raw json.RawMessage) []byte {
 }
 
 func openAIOutboundSessionTurnMetadataKey(raw []byte) string {
-	if len(raw) == 0 || !utf8.Valid(raw) {
-		return ""
+	tuple := tupleFromTurnMetadata(raw)
+	if tuple.session != "" {
+		return tuple.session
 	}
-	var metadata map[string]json.RawMessage
-	if json.Unmarshal(raw, &metadata) != nil || metadata == nil {
-		return ""
-	}
-	return firstValidOpenAIOutboundSessionJSONField(metadata)
+	return tuple.thread
 }
 
-func firstValidOpenAIOutboundSessionJSONField(object map[string]json.RawMessage) string {
-	for _, field := range openAIOutboundSessionJSONFields {
-		raw, ok := object[field]
-		if !ok {
-			continue
-		}
-		var value string
-		if json.Unmarshal(raw, &value) != nil {
-			continue
-		}
-		if value = sanitizeSessionID(value); value != "" {
-			return value
+var (
+	errOpenAIOutboundSessionIdentityKeySecret          = errors.New("openai outbound session identity secret is unavailable")
+	errOpenAIOutboundSessionIdentityKeyEmpty           = errors.New("openai outbound session identity mapping key is empty")
+	errOpenAIOutboundSessionIdentityNamespace          = errors.New("openai outbound session identity namespace resolution failed")
+	ErrOpenAIOutboundSessionIdentityStoredValueInvalid = errors.New("stored OpenAI outbound session identity is invalid")
+	ErrOpenAICodexSessionWinnerChanged                 = errors.New("OpenAI Codex session winner changed")
+)
+
+func openAICodexHMAC(secret, domain string, fields ...string) (string, error) {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return "", errOpenAIOutboundSessionIdentityKeySecret
+	}
+	for _, field := range fields {
+		if sanitizeSessionID(field) == "" {
+			return "", errOpenAIOutboundSessionIdentityKeyEmpty
 		}
 	}
-	return ""
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(domain))
+	for _, field := range fields {
+		_, _ = mac.Write([]byte{0})
+		_, _ = mac.Write([]byte(field))
+	}
+	return hex.EncodeToString(mac.Sum(nil)), nil
 }
 
-// openAIOutboundSessionIdentityLocalStore is intentionally process-local.  It
-// is used when Redis is unavailable (or when a deployment has no Redis cache)
-// so identity handling remains fail-open for the request path.
-type openAIOutboundSessionIdentityLocalStore struct {
-	mu          sync.Mutex
-	entries     map[string]*openAIOutboundSessionIdentityLocalEntry
-	recency     *list.List
-	expirations openAIOutboundSessionIdentityExpiryHeap
-	maxEntries  int
+func OpenAICodexSessionMappingKey(secret, namespace string, apiKeyID int64, logicalSessionKey string) (string, error) {
+	namespace = sanitizeSessionID(namespace)
+	logicalSessionKey = sanitizeSessionID(logicalSessionKey)
+	return openAICodexHMAC(secret, openAICodexSessionIdentityDomain, namespace, strconv.FormatInt(apiKeyID, 10), logicalSessionKey)
 }
 
-type openAIOutboundSessionIdentityLocalEntry struct {
-	mappingKey       string
-	identity         OpenAIOutboundSessionIdentity
+func OpenAICodexThreadMappingKey(secret, namespace string, apiKeyID int64, logicalSessionKey, logicalThreadKey, sessionID string) (string, error) {
+	namespace = sanitizeSessionID(namespace)
+	logicalSessionKey = sanitizeSessionID(logicalSessionKey)
+	logicalThreadKey = sanitizeSessionID(logicalThreadKey)
+	if _, err := canonicalUUIDv7(sessionID); err != nil {
+		return "", errOpenAIOutboundSessionIdentityKeyEmpty
+	}
+	return openAICodexHMAC(secret, openAICodexThreadIdentityDomain, namespace, strconv.FormatInt(apiKeyID, 10), logicalSessionKey, logicalThreadKey, sessionID)
+}
+
+func openAICodexFallbackMappingKey(domain, namespace string, apiKeyID int64, fields ...string) string {
+	parts := []string{domain, "fallback", sanitizeSessionID(namespace), strconv.FormatInt(apiKeyID, 10)}
+	for _, field := range fields {
+		parts = append(parts, sanitizeSessionID(field))
+	}
+	digest := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(digest[:])
+}
+
+// Deprecated helpers now derive V2 root-session keys and never address V1.
+func OpenAIOutboundSessionIdentityKey(secret, namespace string, apiKeyID int64, logicalKey string) (string, error) {
+	return OpenAICodexSessionMappingKey(secret, namespace, apiKeyID, logicalKey)
+}
+
+func OpenAIOutboundSessionIdentityFallbackKey(namespace string, apiKeyID int64, logicalKey string) string {
+	return openAICodexFallbackMappingKey(openAICodexSessionIdentityDomain, namespace, apiKeyID, logicalKey)
+}
+
+func newUUIDv7Except(except string) (string, error) {
+	for attempt := 0; attempt < 4; attempt++ {
+		value, err := uuid.NewV7()
+		if err != nil {
+			return "", err
+		}
+		if value.String() != except {
+			return value.String(), nil
+		}
+	}
+	return "", errors.New("UUIDv7 collision")
+}
+
+func newOpenAICodexRootIdentity() (OpenAICodexTurnIdentity, error) {
+	sessionID, err := newUUIDv7Except("")
+	if err != nil {
+		return OpenAICodexTurnIdentity{}, fmt.Errorf("generate outbound session UUIDv7: %w", err)
+	}
+	return OpenAICodexTurnIdentity{SessionID: sessionID, ThreadID: sessionID, Relation: OpenAICodexTurnRelationRoot}, nil
+}
+
+func newOpenAICodexDescendantIdentity(sessionID string) (OpenAICodexTurnIdentity, error) {
+	threadID, err := newUUIDv7Except(sessionID)
+	if err != nil {
+		return OpenAICodexTurnIdentity{}, fmt.Errorf("generate outbound thread UUIDv7: %w", err)
+	}
+	return OpenAICodexTurnIdentity{SessionID: sessionID, ThreadID: threadID, Relation: OpenAICodexTurnRelationDescendant}, nil
+}
+
+type openAICodexLocalEntry struct {
+	key              string
+	identity         OpenAICodexTurnIdentity
 	expires          time.Time
 	pendingPromotion bool
 	recencyElement   *list.Element
 	expiryIndex      int
 }
 
-type openAIOutboundSessionIdentityExpiryHeap []*openAIOutboundSessionIdentityLocalEntry
+type openAICodexExpiryHeap []*openAICodexLocalEntry
 
-func (h openAIOutboundSessionIdentityExpiryHeap) Len() int { return len(h) }
-
-func (h openAIOutboundSessionIdentityExpiryHeap) Less(i, j int) bool {
+func (h openAICodexExpiryHeap) Len() int { return len(h) }
+func (h openAICodexExpiryHeap) Less(i, j int) bool {
 	if h[i].expires.Equal(h[j].expires) {
-		return h[i].mappingKey < h[j].mappingKey
+		return h[i].key < h[j].key
 	}
 	return h[i].expires.Before(h[j].expires)
 }
-
-func (h openAIOutboundSessionIdentityExpiryHeap) Swap(i, j int) {
+func (h openAICodexExpiryHeap) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
-	h[i].expiryIndex = i
-	h[j].expiryIndex = j
+	h[i].expiryIndex, h[j].expiryIndex = i, j
 }
-
-func (h *openAIOutboundSessionIdentityExpiryHeap) Push(value any) {
-	entry := value.(*openAIOutboundSessionIdentityLocalEntry)
+func (h *openAICodexExpiryHeap) Push(value any) {
+	entry := value.(*openAICodexLocalEntry)
 	entry.expiryIndex = len(*h)
 	*h = append(*h, entry)
 }
-
-func (h *openAIOutboundSessionIdentityExpiryHeap) Pop() any {
+func (h *openAICodexExpiryHeap) Pop() any {
 	old := *h
-	last := len(old) - 1
-	entry := old[last]
-	old[last] = nil
+	entry := old[len(old)-1]
+	old[len(old)-1] = nil
 	entry.expiryIndex = -1
-	*h = old[:last]
+	*h = old[:len(old)-1]
 	return entry
 }
 
-// OpenAIOutboundSessionIdentityRuntimeMetrics is a process snapshot suitable
-// for the existing ops/runtime metric collectors. It carries counters and
-// aggregate latency only; no logical key or identity value is retained.
+type openAICodexIdentityLocalStore struct {
+	mu          sync.Mutex
+	entries     map[string]*openAICodexLocalEntry
+	recency     *list.List
+	expirations openAICodexExpiryHeap
+	maxEntries  int
+}
+
+func newOpenAICodexIdentityLocalStore() *openAICodexIdentityLocalStore {
+	return newOpenAICodexIdentityLocalStoreWithCapacity(openAICodexLocalStoreMaxEntries)
+}
+
+func newOpenAICodexIdentityLocalStoreWithCapacity(capacity int) *openAICodexIdentityLocalStore {
+	if capacity <= 0 {
+		capacity = openAICodexLocalStoreMaxEntries
+	}
+	store := &openAICodexIdentityLocalStore{entries: make(map[string]*openAICodexLocalEntry), recency: list.New(), maxEntries: capacity}
+	heap.Init(&store.expirations)
+	return store
+}
+
+func localSessionEntryKey(mappingKey string) string { return "session:" + mappingKey }
+func localThreadEntryKey(sessionKey, threadKey string) string {
+	return "thread:" + sessionKey + ":" + threadKey
+}
+
+func (s *openAICodexIdentityLocalStore) removeLocked(entry *openAICodexLocalEntry) {
+	if entry == nil || s.entries[entry.key] != entry {
+		return
+	}
+	delete(s.entries, entry.key)
+	if entry.recencyElement != nil {
+		s.recency.Remove(entry.recencyElement)
+		entry.recencyElement = nil
+	}
+	if entry.expiryIndex >= 0 {
+		heap.Remove(&s.expirations, entry.expiryIndex)
+	}
+}
+
+func (s *openAICodexIdentityLocalStore) pruneLocked(now time.Time) {
+	for len(s.expirations) > 0 && !now.Before(s.expirations[0].expires) {
+		s.removeLocked(s.expirations[0])
+	}
+}
+
+func (s *openAICodexIdentityLocalStore) touchLocked(entry *openAICodexLocalEntry, ttl time.Duration) {
+	if ttl <= 0 {
+		ttl = OpenAIOutboundSessionIdentityTTL
+	}
+	entry.expires = time.Now().Add(ttl)
+	heap.Fix(&s.expirations, entry.expiryIndex)
+	s.recency.MoveToFront(entry.recencyElement)
+}
+
+func (s *openAICodexIdentityLocalStore) putLocked(key string, identity OpenAICodexTurnIdentity, ttl time.Duration) *openAICodexLocalEntry {
+	now := time.Now()
+	s.pruneLocked(now)
+	for len(s.entries) >= s.maxEntries {
+		oldest, _ := s.recency.Back().Value.(*openAICodexLocalEntry)
+		s.removeLocked(oldest)
+	}
+	if ttl <= 0 {
+		ttl = OpenAIOutboundSessionIdentityTTL
+	}
+	entry := &openAICodexLocalEntry{key: key, identity: identity, expires: now.Add(ttl), expiryIndex: -1}
+	entry.recencyElement = s.recency.PushFront(entry)
+	s.entries[key] = entry
+	heap.Push(&s.expirations, entry)
+	return entry
+}
+
+func (s *openAICodexIdentityLocalStore) GetOrCreateCodexSession(_ context.Context, sessionMappingKey, candidateSessionID string, ttl time.Duration) (string, error) {
+	if strings.TrimSpace(sessionMappingKey) == "" {
+		return "", errOpenAIOutboundSessionIdentityKeyEmpty
+	}
+	if _, err := canonicalUUIDv7(candidateSessionID); err != nil {
+		return "", err
+	}
+	key := localSessionEntryKey(sessionMappingKey)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneLocked(time.Now())
+	if entry := s.entries[key]; entry != nil {
+		s.touchLocked(entry, ttl)
+		return entry.identity.SessionID, nil
+	}
+	root := OpenAICodexTurnIdentity{SessionID: candidateSessionID, ThreadID: candidateSessionID, Relation: OpenAICodexTurnRelationRoot}
+	s.putLocked(key, root, ttl)
+	return candidateSessionID, nil
+}
+
+func (s *openAICodexIdentityLocalStore) GetOrCreateCodexThread(_ context.Context, sessionMappingKey, threadMappingKey, sessionID, candidateThreadID string, ttl time.Duration) (OpenAICodexTurnIdentity, error) {
+	if strings.TrimSpace(threadMappingKey) == "" {
+		return OpenAICodexTurnIdentity{}, errOpenAIOutboundSessionIdentityKeyEmpty
+	}
+	candidate := OpenAICodexTurnIdentity{SessionID: sessionID, ThreadID: candidateThreadID, Relation: OpenAICodexTurnRelationDescendant}
+	if err := ValidateOpenAICodexTurnIdentity(candidate); err != nil {
+		return OpenAICodexTurnIdentity{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneLocked(time.Now())
+	sessionEntry := s.entries[localSessionEntryKey(sessionMappingKey)]
+	if sessionEntry == nil || sessionEntry.identity.SessionID != sessionID {
+		return OpenAICodexTurnIdentity{}, ErrOpenAICodexSessionWinnerChanged
+	}
+	s.touchLocked(sessionEntry, ttl)
+	key := localThreadEntryKey(sessionMappingKey, threadMappingKey)
+	if entry := s.entries[key]; entry != nil {
+		if entry.identity.SessionID != sessionID {
+			return OpenAICodexTurnIdentity{}, ErrOpenAICodexSessionWinnerChanged
+		}
+		s.touchLocked(entry, ttl)
+		return entry.identity, nil
+	}
+	s.putLocked(key, candidate, ttl)
+	return candidate, nil
+}
+
+func (s *openAICodexIdentityLocalStore) promoteSession(mappingKey, sessionID string, ttl time.Duration) bool {
+	key := localSessionEntryKey(mappingKey)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.entries[key]
+	hadPending := entry != nil && entry.pendingPromotion
+	root := OpenAICodexTurnIdentity{SessionID: sessionID, ThreadID: sessionID, Relation: OpenAICodexTurnRelationRoot}
+	if entry == nil {
+		entry = s.putLocked(key, root, ttl)
+	} else {
+		entry.identity = root
+		s.touchLocked(entry, ttl)
+	}
+	entry.pendingPromotion = false
+	return hadPending
+}
+
+func (s *openAICodexIdentityLocalStore) promoteThread(sessionKey, threadKey string, identity OpenAICodexTurnIdentity, ttl time.Duration) bool {
+	key := localThreadEntryKey(sessionKey, threadKey)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.entries[key]
+	hadPending := entry != nil && entry.pendingPromotion
+	if entry == nil {
+		entry = s.putLocked(key, identity, ttl)
+	} else {
+		entry.identity = identity
+		s.touchLocked(entry, ttl)
+	}
+	entry.pendingPromotion = false
+	return hadPending
+}
+
+func (s *openAICodexIdentityLocalStore) markPending(keys ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, key := range keys {
+		if entry := s.entries[key]; entry != nil {
+			entry.pendingPromotion = true
+		}
+	}
+}
+
+var processOpenAICodexTurnIdentityStore = newOpenAICodexIdentityLocalStore()
+
+func NewLocalOpenAICodexTurnIdentityStore() OpenAICodexTurnIdentityStore {
+	return newOpenAICodexIdentityLocalStore()
+}
+
 type OpenAIOutboundSessionIdentityRuntimeMetrics struct {
 	ResolveTotal             int64
+	ConflictTotal            int64
 	EmptyLogicalKeyTotal     int64
 	PrimaryStoreSuccessTotal int64
 	PrimaryStoreFailureTotal int64
@@ -381,40 +777,26 @@ type OpenAIOutboundSessionIdentityRuntimeMetrics struct {
 	StoreLatencyMaxMicros    int64
 }
 
-type openAIOutboundSessionIdentityRuntimeMetricsStore struct {
-	resolveTotal             atomic.Int64
-	emptyLogicalKeyTotal     atomic.Int64
-	primaryStoreSuccessTotal atomic.Int64
-	primaryStoreFailureTotal atomic.Int64
-	primaryStoreInvalidTotal atomic.Int64
-	localFallbackTotal       atomic.Int64
-	promotionTotal           atomic.Int64
-	storeLatencySamples      atomic.Int64
-	storeLatencyTotalMicros  atomic.Int64
-	storeLatencyMaxMicros    atomic.Int64
+type openAICodexMetrics struct {
+	resolveTotal, emptyLogicalKeyTotal, primaryStoreSuccessTotal                        atomic.Int64
+	primaryStoreFailureTotal, primaryStoreInvalidTotal, localFallbackTotal              atomic.Int64
+	promotionTotal, storeLatencySamples, storeLatencyTotalMicros, storeLatencyMaxMicros atomic.Int64
 }
 
-var openAIOutboundSessionIdentityMetrics openAIOutboundSessionIdentityRuntimeMetricsStore
+var openAIOutboundSessionIdentityMetrics openAICodexMetrics
 
-// SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics returns bounded,
-// label-free process metrics for identity-store health.
 func SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics() OpenAIOutboundSessionIdentityRuntimeMetrics {
 	m := &openAIOutboundSessionIdentityMetrics
 	return OpenAIOutboundSessionIdentityRuntimeMetrics{
-		ResolveTotal:             m.resolveTotal.Load(),
-		EmptyLogicalKeyTotal:     m.emptyLogicalKeyTotal.Load(),
-		PrimaryStoreSuccessTotal: m.primaryStoreSuccessTotal.Load(),
-		PrimaryStoreFailureTotal: m.primaryStoreFailureTotal.Load(),
-		PrimaryStoreInvalidTotal: m.primaryStoreInvalidTotal.Load(),
-		LocalFallbackTotal:       m.localFallbackTotal.Load(),
-		PromotionTotal:           m.promotionTotal.Load(),
-		StoreLatencySamples:      m.storeLatencySamples.Load(),
-		StoreLatencyTotalMicros:  m.storeLatencyTotalMicros.Load(),
-		StoreLatencyMaxMicros:    m.storeLatencyMaxMicros.Load(),
+		ResolveTotal: m.resolveTotal.Load(), ConflictTotal: openAICodexIdentityConflictTotal.Load(), EmptyLogicalKeyTotal: m.emptyLogicalKeyTotal.Load(),
+		PrimaryStoreSuccessTotal: m.primaryStoreSuccessTotal.Load(), PrimaryStoreFailureTotal: m.primaryStoreFailureTotal.Load(),
+		PrimaryStoreInvalidTotal: m.primaryStoreInvalidTotal.Load(), LocalFallbackTotal: m.localFallbackTotal.Load(),
+		PromotionTotal: m.promotionTotal.Load(), StoreLatencySamples: m.storeLatencySamples.Load(),
+		StoreLatencyTotalMicros: m.storeLatencyTotalMicros.Load(), StoreLatencyMaxMicros: m.storeLatencyMaxMicros.Load(),
 	}
 }
 
-func observeOpenAIOutboundSessionIdentityStoreLatency(start time.Time) {
+func observeOpenAICodexStoreLatency(start time.Time) {
 	micros := time.Since(start).Microseconds()
 	if micros < 0 {
 		micros = 0
@@ -430,237 +812,6 @@ func observeOpenAIOutboundSessionIdentityStoreLatency(start time.Time) {
 	}
 }
 
-func newOpenAIOutboundSessionIdentityLocalStore() *openAIOutboundSessionIdentityLocalStore {
-	return newOpenAIOutboundSessionIdentityLocalStoreWithCapacity(openAIOutboundSessionIdentityLocalStoreMaxEntries)
-}
-
-func newOpenAIOutboundSessionIdentityLocalStoreWithCapacity(maxEntries int) *openAIOutboundSessionIdentityLocalStore {
-	if maxEntries <= 0 {
-		maxEntries = openAIOutboundSessionIdentityLocalStoreMaxEntries
-	}
-	store := &openAIOutboundSessionIdentityLocalStore{
-		entries:    make(map[string]*openAIOutboundSessionIdentityLocalEntry),
-		recency:    list.New(),
-		maxEntries: maxEntries,
-	}
-	heap.Init(&store.expirations)
-	return store
-}
-
-func (s *openAIOutboundSessionIdentityLocalStore) removeEntryLocked(entry *openAIOutboundSessionIdentityLocalEntry) {
-	if entry == nil {
-		return
-	}
-	if current, ok := s.entries[entry.mappingKey]; !ok || current != entry {
-		return
-	}
-	delete(s.entries, entry.mappingKey)
-	if entry.recencyElement != nil {
-		s.recency.Remove(entry.recencyElement)
-		entry.recencyElement = nil
-	}
-	if entry.expiryIndex >= 0 && entry.expiryIndex < len(s.expirations) && s.expirations[entry.expiryIndex] == entry {
-		heap.Remove(&s.expirations, entry.expiryIndex)
-	}
-}
-
-func (s *openAIOutboundSessionIdentityLocalStore) pruneExpiredLocked(now time.Time) {
-	for len(s.expirations) > 0 {
-		entry := s.expirations[0]
-		if now.Before(entry.expires) {
-			return
-		}
-		s.removeEntryLocked(entry)
-	}
-}
-
-func (s *openAIOutboundSessionIdentityLocalStore) ensureRoomLocked(now time.Time) {
-	s.pruneExpiredLocked(now)
-	for len(s.entries) >= s.maxEntries {
-		oldest := s.recency.Back()
-		if oldest == nil {
-			return
-		}
-		entry, _ := oldest.Value.(*openAIOutboundSessionIdentityLocalEntry)
-		s.removeEntryLocked(entry)
-	}
-}
-
-func (s *openAIOutboundSessionIdentityLocalStore) addEntryLocked(mappingKey string, identity OpenAIOutboundSessionIdentity, expires time.Time) *openAIOutboundSessionIdentityLocalEntry {
-	entry := &openAIOutboundSessionIdentityLocalEntry{
-		mappingKey:  mappingKey,
-		identity:    identity,
-		expires:     expires,
-		expiryIndex: -1,
-	}
-	entry.recencyElement = s.recency.PushFront(entry)
-	s.entries[mappingKey] = entry
-	heap.Push(&s.expirations, entry)
-	return entry
-}
-
-func (s *openAIOutboundSessionIdentityLocalStore) touchEntryLocked(entry *openAIOutboundSessionIdentityLocalEntry, expires time.Time) {
-	entry.expires = expires
-	if entry.recencyElement == nil {
-		entry.recencyElement = s.recency.PushFront(entry)
-	} else {
-		s.recency.MoveToFront(entry.recencyElement)
-	}
-	if entry.expiryIndex < 0 {
-		heap.Push(&s.expirations, entry)
-	} else {
-		heap.Fix(&s.expirations, entry.expiryIndex)
-	}
-}
-
-func (s *openAIOutboundSessionIdentityLocalStore) GetOrCreate(_ context.Context, mappingKey string, candidate OpenAIOutboundSessionIdentity, ttl time.Duration) (OpenAIOutboundSessionIdentity, error) {
-	mappingKey = strings.TrimSpace(mappingKey)
-	if mappingKey == "" {
-		return OpenAIOutboundSessionIdentity{}, errOpenAIOutboundSessionIdentityKeyEmpty
-	}
-	if ttl <= 0 {
-		ttl = OpenAIOutboundSessionIdentityTTL
-	}
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.pruneExpiredLocked(now)
-	if current, ok := s.entries[mappingKey]; ok {
-		if ValidateOpenAIOutboundSessionIdentity(current.identity) == nil {
-			s.touchEntryLocked(current, now.Add(ttl))
-			return current.identity, nil
-		}
-		s.removeEntryLocked(current)
-	}
-	if err := ValidateOpenAIOutboundSessionIdentity(candidate); err != nil {
-		return OpenAIOutboundSessionIdentity{}, err
-	}
-	s.ensureRoomLocked(now)
-	s.addEntryLocked(mappingKey, candidate, now.Add(ttl))
-	return candidate, nil
-}
-
-// promote makes a primary-store winner authoritative in this process. It is
-// used after a Redis race/recovery so subsequent Redis candidates are the last
-// known winner instead of a newly generated pair.
-func (s *openAIOutboundSessionIdentityLocalStore) promote(mappingKey string, identity OpenAIOutboundSessionIdentity, ttl time.Duration) error {
-	_, err := s.promoteAndConsumePending(mappingKey, identity, ttl)
-	return err
-}
-
-// promoteAndConsumePending makes the primary winner authoritative and consumes
-// the fallback marker in the same critical section. This prevents concurrent
-// recovery requests from counting the same fallback episode more than once.
-func (s *openAIOutboundSessionIdentityLocalStore) promoteAndConsumePending(mappingKey string, identity OpenAIOutboundSessionIdentity, ttl time.Duration) (bool, error) {
-	mappingKey = strings.TrimSpace(mappingKey)
-	if mappingKey == "" {
-		return false, errOpenAIOutboundSessionIdentityKeyEmpty
-	}
-	if err := ValidateOpenAIOutboundSessionIdentity(identity); err != nil {
-		return false, err
-	}
-	if ttl <= 0 {
-		ttl = OpenAIOutboundSessionIdentityTTL
-	}
-	now := time.Now()
-	s.mu.Lock()
-	s.pruneExpiredLocked(now)
-	entry, ok := s.entries[mappingKey]
-	hadPending := ok && entry.pendingPromotion
-	if ok {
-		entry.identity = identity
-		entry.pendingPromotion = false
-		s.touchEntryLocked(entry, now.Add(ttl))
-	} else {
-		s.ensureRoomLocked(now)
-		s.addEntryLocked(mappingKey, identity, now.Add(ttl))
-	}
-	s.mu.Unlock()
-	return hadPending, nil
-}
-
-func (s *openAIOutboundSessionIdentityLocalStore) markPendingPromotion(mappingKey string) {
-	s.mu.Lock()
-	s.pruneExpiredLocked(time.Now())
-	entry, ok := s.entries[mappingKey]
-	if ok {
-		entry.pendingPromotion = true
-		if entry.recencyElement != nil {
-			s.recency.MoveToFront(entry.recencyElement)
-		}
-	}
-	s.mu.Unlock()
-}
-
-func (s *openAIOutboundSessionIdentityLocalStore) hasPendingPromotion(mappingKey string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.pruneExpiredLocked(time.Now())
-	entry, ok := s.entries[mappingKey]
-	return ok && entry.pendingPromotion
-}
-
-var processOpenAIOutboundSessionIdentityStore = newOpenAIOutboundSessionIdentityLocalStore()
-
-// NewLocalOpenAIOutboundSessionIdentityStore creates an isolated in-process
-// store.  The resolver uses a process-wide instance, while tests and callers
-// that need isolation can construct their own instance.
-func NewLocalOpenAIOutboundSessionIdentityStore() OpenAIOutboundSessionIdentityStore {
-	return newOpenAIOutboundSessionIdentityLocalStore()
-}
-
-// OpenAIOutboundSessionIdentityKey derives the versioned, non-reversible
-// mapping key used by the Redis store.  Length-prefixed fields are represented
-// with NUL separators; all fields are canonicalized before HMAC so equivalent
-// inputs cannot create multiple identities accidentally.
-//
-// The returned value is a lowercase SHA-256 HMAC digest and is safe to append
-// to the repository's Redis key prefix.
-func OpenAIOutboundSessionIdentityKey(secret, namespace string, apiKeyID int64, logicalKey string) (string, error) {
-	secret = strings.TrimSpace(secret)
-	namespace = sanitizeSessionID(namespace)
-	logicalKey = sanitizeSessionID(logicalKey)
-	if secret == "" {
-		return "", errOpenAIOutboundSessionIdentityKeySecret
-	}
-	if namespace == "" || logicalKey == "" {
-		return "", errOpenAIOutboundSessionIdentityKeyEmpty
-	}
-	message := openAIOutboundSessionIdentityDomain + "\x00" + namespace + "\x00" + strconv.FormatInt(apiKeyID, 10) + "\x00" + logicalKey
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(message))
-	return hex.EncodeToString(mac.Sum(nil)), nil
-}
-
-// OpenAIOutboundSessionIdentityFallbackKey returns a namespaced process-local
-// key when no configured HMAC secret is available.  It intentionally does not
-// expose this value to Redis or logs.
-func OpenAIOutboundSessionIdentityFallbackKey(namespace string, apiKeyID int64, logicalKey string) string {
-	canonical := openAIOutboundSessionIdentityDomain + "\x00fallback\x00" + sanitizeSessionID(namespace) + "\x00" + strconv.FormatInt(apiKeyID, 10) + "\x00" + sanitizeSessionID(logicalKey)
-	digest := sha256.Sum256([]byte(canonical))
-	return hex.EncodeToString(digest[:])
-}
-
-func newOpenAIOutboundSessionIdentity() (OpenAIOutboundSessionIdentity, error) {
-	// UUIDv7 collisions are extraordinarily unlikely, but the pair is a wire
-	// contract and must be distinct even if a custom UUID source is injected in
-	// a test or a clock/entropy edge case repeats a value.
-	for attempt := 0; attempt < 3; attempt++ {
-		sessionID, err := uuid.NewV7()
-		if err != nil {
-			return OpenAIOutboundSessionIdentity{}, fmt.Errorf("generate outbound session UUIDv7: %w", err)
-		}
-		threadID, err := uuid.NewV7()
-		if err != nil {
-			return OpenAIOutboundSessionIdentity{}, fmt.Errorf("generate outbound thread UUIDv7: %w", err)
-		}
-		if sessionID != threadID {
-			return OpenAIOutboundSessionIdentity{SessionID: sessionID.String(), ThreadID: threadID.String()}, nil
-		}
-	}
-	return OpenAIOutboundSessionIdentity{}, errors.New("generate outbound session identity: UUIDv7 pair collision")
-}
-
 func openAIOutboundSessionIdentityNamespace(account *Account) string {
 	if account == nil {
 		return "account:0"
@@ -668,18 +819,10 @@ func openAIOutboundSessionIdentityNamespace(account *Account) string {
 	return "account:" + strconv.FormatInt(account.ID, 10)
 }
 
-// resolveOpenAIOutboundSessionIdentityNamespace follows the credential-owner
-// boundary for shadow accounts. Production services reuse
-// resolveCredentialAccount's validation; lightweight tests/services without an
-// account repository safely fall back to the already-materialized parent ID.
 func (s *OpenAIGatewayService) resolveOpenAIOutboundSessionIdentityNamespace(ctx context.Context, account *Account) (string, error) {
 	if account == nil || account.Type != AccountTypeOAuth || !account.IsShadow() {
 		return openAIOutboundSessionIdentityNamespace(account), nil
 	}
-	// Production always has an account repository and validates the shadow's
-	// parent through resolveCredentialAccount. Lightweight callers may only have
-	// the materialized parent ID; retain that compatibility fallback, but reject
-	// an unusable zero/negative parent instead of collapsing it into account:0.
 	if account.ParentAccountID == nil || *account.ParentAccountID <= 0 {
 		return "", fmt.Errorf("%w: shadow parent id is invalid", errOpenAIOutboundSessionIdentityNamespace)
 	}
@@ -696,77 +839,49 @@ func (s *OpenAIGatewayService) resolveOpenAIOutboundSessionIdentityNamespace(ctx
 	return openAIOutboundSessionIdentityNamespace(credentialAccount), nil
 }
 
-// resolveOpenAIOutboundSessionIdentity resolves a stable pair for the logical
-// request key.  A blank logical key deliberately leaves the caller's old
-// behavior untouched (ok=false).  Cache failures fall back to the process
-// store and do not reject the request path.
-func (s *OpenAIGatewayService) resolveOpenAIOutboundSessionIdentity(ctx context.Context, c *gin.Context, account *Account, logicalKey string) (OpenAIOutboundSessionIdentity, bool, error) {
-	openAIOutboundSessionIdentityMetrics.resolveTotal.Add(1)
-	// Callers resolve the request's logical key against the final request body
-	// before entering the identity store.  Keep this lower-level operation
-	// deterministic: re-running header/body priority here could replace a
-	// caller-selected compact seed with an unrelated header value.  We still
-	// apply the same validation boundary so direct/internal callers cannot put
-	// unsafe data into the mapping derivation.
-	logicalKey = sanitizeSessionID(logicalKey)
-	if logicalKey == "" {
-		openAIOutboundSessionIdentityMetrics.emptyLogicalKeyTotal.Add(1)
-		return OpenAIOutboundSessionIdentity{}, false, nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	namespace, namespaceErr := s.resolveOpenAIOutboundSessionIdentityNamespace(ctx, account)
-	if namespaceErr != nil {
-		return OpenAIOutboundSessionIdentity{}, true, namespaceErr
-	}
-	apiKeyID := getAPIKeyIDFromContext(c)
-	secret := ""
-	if s != nil && s.cfg != nil {
-		secret = s.cfg.JWT.Secret
-	}
-	mappingKey, keyErr := OpenAIOutboundSessionIdentityKey(secret, namespace, apiKeyID, logicalKey)
-	if keyErr != nil {
-		// A missing JWT secret is a deployment/configuration issue, but keeping
-		// the request usable is preferable to turning it into a gateway error.
-		mappingKey = OpenAIOutboundSessionIdentityFallbackKey(namespace, apiKeyID, logicalKey)
-		slog.WarnContext(ctx, "openai_outbound_session_identity_fallback",
-			"reason", "hmac_secret_unavailable",
-			"account_namespace", namespace,
-			"api_key_id", apiKeyID,
-		)
-	}
-	freshCandidate, err := newOpenAIOutboundSessionIdentity()
-	if err != nil {
-		return OpenAIOutboundSessionIdentity{}, true, err
-	}
-	// Resolve the process winner first. If Redis was previously unavailable,
-	// this is the pair that must be promoted when Redis recovers.
-	localCandidate, err := processOpenAIOutboundSessionIdentityStore.GetOrCreate(ctx, mappingKey, freshCandidate, OpenAIOutboundSessionIdentityTTL)
-	if err != nil {
-		return OpenAIOutboundSessionIdentity{}, true, err
-	}
-	var store OpenAIOutboundSessionIdentityStore
+type openAICodexIdentityResolutionState struct {
+	ctx            context.Context
+	store          OpenAICodexTurnIdentityStore
+	local          *openAICodexIdentityLocalStore
+	namespace      string
+	apiKeyID       int64
+	secret         string
+	usePrimary     bool
+	sessionDigest  string
+	logicalSession string
+	sessionID      string
+}
+
+func resolvePrimaryOpenAICodexStore(s *OpenAIGatewayService) OpenAICodexTurnIdentityStore {
 	if s != nil && s.cache != nil {
-		if candidateStore, ok := s.cache.(OpenAIOutboundSessionIdentityStore); ok {
-			store = candidateStore
+		if store, ok := s.cache.(OpenAICodexTurnIdentityStore); ok {
+			return store
 		}
 	}
-	if store == nil || keyErr != nil {
+	return nil
+}
+
+func (state *openAICodexIdentityResolutionState) resolveSession() error {
+	fresh, err := newOpenAICodexRootIdentity()
+	if err != nil {
+		return err
+	}
+	localID, err := state.local.GetOrCreateCodexSession(state.ctx, state.sessionDigest, fresh.SessionID, OpenAIOutboundSessionIdentityTTL)
+	if err != nil {
+		return err
+	}
+	state.sessionID = localID
+	if !state.usePrimary || state.store == nil {
 		openAIOutboundSessionIdentityMetrics.localFallbackTotal.Add(1)
-		if keyErr == nil {
-			processOpenAIOutboundSessionIdentityStore.markPendingPromotion(mappingKey)
-			slog.WarnContext(ctx, "openai_outbound_session_identity_fallback",
-				"reason", "primary_store_unavailable",
-				"account_namespace", namespace,
-				"api_key_id", apiKeyID,
-			)
+		if state.usePrimary {
+			state.local.markPending(localSessionEntryKey(state.sessionDigest))
+			slog.WarnContext(state.ctx, "openai_codex_turn_identity_fallback", "reason", "primary_store_unavailable", "account_namespace", state.namespace, "api_key_id", state.apiKeyID)
 		}
-		return localCandidate, true, nil
+		return nil
 	}
-	storeStarted := time.Now()
-	identity, err := store.GetOrCreate(ctx, mappingKey, localCandidate, OpenAIOutboundSessionIdentityTTL)
-	observeOpenAIOutboundSessionIdentityStoreLatency(storeStarted)
+	started := time.Now()
+	winner, err := state.store.GetOrCreateCodexSession(state.ctx, state.sessionDigest, localID, OpenAIOutboundSessionIdentityTTL)
+	observeOpenAICodexStoreLatency(started)
 	if err != nil {
 		if errors.Is(err, ErrOpenAIOutboundSessionIdentityStoredValueInvalid) {
 			openAIOutboundSessionIdentityMetrics.primaryStoreInvalidTotal.Add(1)
@@ -774,159 +889,164 @@ func (s *OpenAIGatewayService) resolveOpenAIOutboundSessionIdentity(ctx context.
 			openAIOutboundSessionIdentityMetrics.primaryStoreFailureTotal.Add(1)
 		}
 		openAIOutboundSessionIdentityMetrics.localFallbackTotal.Add(1)
-		processOpenAIOutboundSessionIdentityStore.markPendingPromotion(mappingKey)
-		slog.WarnContext(ctx, "openai_outbound_session_identity_fallback",
-			"reason", "primary_store_error",
-			"stored_value_invalid", errors.Is(err, ErrOpenAIOutboundSessionIdentityStoredValueInvalid),
-			"account_namespace", namespace,
-			"api_key_id", apiKeyID,
-		)
-		return localCandidate, true, nil
+		state.local.markPending(localSessionEntryKey(state.sessionDigest))
+		slog.WarnContext(state.ctx, "openai_codex_turn_identity_fallback", "reason", "primary_store_error", "stored_value_invalid", errors.Is(err, ErrOpenAIOutboundSessionIdentityStoredValueInvalid), "account_namespace", state.namespace, "api_key_id", state.apiKeyID)
+		return nil
 	}
-	if validationErr := ValidateOpenAIOutboundSessionIdentity(identity); validationErr != nil {
+	if _, err := canonicalUUIDv7(winner); err != nil {
 		openAIOutboundSessionIdentityMetrics.primaryStoreInvalidTotal.Add(1)
 		openAIOutboundSessionIdentityMetrics.localFallbackTotal.Add(1)
-		processOpenAIOutboundSessionIdentityStore.markPendingPromotion(mappingKey)
-		slog.WarnContext(ctx, "openai_outbound_session_identity_fallback",
-			"reason", "primary_store_invalid_pair",
-			"account_namespace", namespace,
-			"api_key_id", apiKeyID,
-		)
-		return localCandidate, true, nil
+		state.local.markPending(localSessionEntryKey(state.sessionDigest))
+		return nil
 	}
 	openAIOutboundSessionIdentityMetrics.primaryStoreSuccessTotal.Add(1)
-	// Always synchronize the process-local winner with a healthy primary read.
-	// This matters after process startup: Redis may already contain pair B while
-	// the local store tentatively seeded pair A. Without this promotion, a later
-	// Redis outage would flip the request back to stale A.
-	if hadPendingPromotion, promoteErr := processOpenAIOutboundSessionIdentityStore.promoteAndConsumePending(mappingKey, identity, OpenAIOutboundSessionIdentityTTL); promoteErr == nil && hadPendingPromotion {
+	if state.local.promoteSession(state.sessionDigest, winner, OpenAIOutboundSessionIdentityTTL) {
 		openAIOutboundSessionIdentityMetrics.promotionTotal.Add(1)
+	}
+	state.sessionID = winner
+	return nil
+}
+
+func (state *openAICodexIdentityResolutionState) resolveThread(logicalThread string) (string, error) {
+	return state.resolveThreadAttempt(logicalThread, true)
+}
+
+func (state *openAICodexIdentityResolutionState) resolveThreadAttempt(logicalThread string, retryWinnerChange bool) (string, error) {
+	logicalThread = sanitizeSessionID(logicalThread)
+	if logicalThread == "" || logicalThread == state.logicalSession {
+		return state.sessionID, nil
+	}
+	threadDigest, keyErr := OpenAICodexThreadMappingKey(state.secret, state.namespace, state.apiKeyID, state.logicalSession, logicalThread, state.sessionID)
+	if keyErr != nil {
+		threadDigest = openAICodexFallbackMappingKey(openAICodexThreadIdentityDomain, state.namespace, state.apiKeyID, state.logicalSession, logicalThread, state.sessionID)
+	}
+	fresh, err := newOpenAICodexDescendantIdentity(state.sessionID)
+	if err != nil {
+		return "", err
+	}
+	localIdentity, err := state.local.GetOrCreateCodexThread(state.ctx, state.sessionDigest, threadDigest, state.sessionID, fresh.ThreadID, OpenAIOutboundSessionIdentityTTL)
+	if err != nil {
+		if retryWinnerChange && errors.Is(err, ErrOpenAICodexSessionWinnerChanged) {
+			if sessionErr := state.resolveSession(); sessionErr != nil {
+				return "", sessionErr
+			}
+			return state.resolveThreadAttempt(logicalThread, false)
+		}
+		return "", err
+	}
+	if !state.usePrimary || state.store == nil || keyErr != nil {
+		openAIOutboundSessionIdentityMetrics.localFallbackTotal.Add(1)
+		if state.usePrimary && keyErr == nil {
+			state.local.markPending(localThreadEntryKey(state.sessionDigest, threadDigest))
+			slog.WarnContext(state.ctx, "openai_codex_turn_identity_fallback", "reason", "primary_store_unavailable", "mapping", "thread", "account_namespace", state.namespace, "api_key_id", state.apiKeyID)
+		}
+		return localIdentity.ThreadID, nil
+	}
+	started := time.Now()
+	winner, err := state.store.GetOrCreateCodexThread(state.ctx, state.sessionDigest, threadDigest, state.sessionID, localIdentity.ThreadID, OpenAIOutboundSessionIdentityTTL)
+	observeOpenAICodexStoreLatency(started)
+	if err != nil {
+		if retryWinnerChange && errors.Is(err, ErrOpenAICodexSessionWinnerChanged) {
+			if sessionErr := state.resolveSession(); sessionErr != nil {
+				return "", sessionErr
+			}
+			return state.resolveThreadAttempt(logicalThread, false)
+		}
+		if errors.Is(err, ErrOpenAIOutboundSessionIdentityStoredValueInvalid) {
+			openAIOutboundSessionIdentityMetrics.primaryStoreInvalidTotal.Add(1)
+		} else {
+			openAIOutboundSessionIdentityMetrics.primaryStoreFailureTotal.Add(1)
+		}
+		openAIOutboundSessionIdentityMetrics.localFallbackTotal.Add(1)
+		state.local.markPending(localThreadEntryKey(state.sessionDigest, threadDigest))
+		slog.WarnContext(state.ctx, "openai_codex_turn_identity_fallback", "reason", "primary_store_error", "mapping", "thread", "stored_value_invalid", errors.Is(err, ErrOpenAIOutboundSessionIdentityStoredValueInvalid), "account_namespace", state.namespace, "api_key_id", state.apiKeyID)
+		return localIdentity.ThreadID, nil
+	}
+	if winner.SessionID != state.sessionID || ValidateOpenAICodexTurnIdentity(winner) != nil || normalizedOpenAICodexTurnRelation(winner) != OpenAICodexTurnRelationDescendant {
+		openAIOutboundSessionIdentityMetrics.primaryStoreInvalidTotal.Add(1)
+		openAIOutboundSessionIdentityMetrics.localFallbackTotal.Add(1)
+		state.local.markPending(localThreadEntryKey(state.sessionDigest, threadDigest))
+		return localIdentity.ThreadID, nil
+	}
+	openAIOutboundSessionIdentityMetrics.primaryStoreSuccessTotal.Add(1)
+	if state.local.promoteThread(state.sessionDigest, threadDigest, winner, OpenAIOutboundSessionIdentityTTL) {
+		openAIOutboundSessionIdentityMetrics.promotionTotal.Add(1)
+	}
+	return winner.ThreadID, nil
+}
+
+func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentity(ctx context.Context, c *gin.Context, account *Account, logical OpenAICodexLogicalTurnIdentity) (OpenAICodexTurnIdentity, bool, error) {
+	openAIOutboundSessionIdentityMetrics.resolveTotal.Add(1)
+	logical = normalizeLogicalTuple(openAICodexLogicalTuple{session: logical.SessionKey, thread: logical.ThreadKey, parent: logical.ParentThreadKey, fork: logical.ForkedFromThreadKey}, logical.Source, logical.Explicit)
+	if logical.SessionKey == "" {
+		openAIOutboundSessionIdentityMetrics.emptyLogicalKeyTotal.Add(1)
+		return OpenAICodexTurnIdentity{}, false, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	namespace, err := s.resolveOpenAIOutboundSessionIdentityNamespace(ctx, account)
+	if err != nil {
+		return OpenAICodexTurnIdentity{}, true, err
+	}
+	apiKeyID := getAPIKeyIDFromContext(c)
+	secret := ""
+	if s != nil && s.cfg != nil {
+		secret = s.cfg.JWT.Secret
+	}
+	sessionDigest, keyErr := OpenAICodexSessionMappingKey(secret, namespace, apiKeyID, logical.SessionKey)
+	if keyErr != nil {
+		sessionDigest = openAICodexFallbackMappingKey(openAICodexSessionIdentityDomain, namespace, apiKeyID, logical.SessionKey)
+		slog.WarnContext(ctx, "openai_codex_turn_identity_fallback", "reason", "hmac_secret_unavailable", "account_namespace", namespace, "api_key_id", apiKeyID)
+	}
+	local := processOpenAICodexTurnIdentityStore
+	state := &openAICodexIdentityResolutionState{
+		ctx: ctx, store: resolvePrimaryOpenAICodexStore(s), local: local, namespace: namespace,
+		apiKeyID: apiKeyID, secret: secret, usePrimary: keyErr == nil,
+		sessionDigest: sessionDigest, logicalSession: logical.SessionKey,
+	}
+	if err := state.resolveSession(); err != nil {
+		return OpenAICodexTurnIdentity{}, true, err
+	}
+	threadID, err := state.resolveThread(logical.ThreadKey)
+	if err != nil {
+		return OpenAICodexTurnIdentity{}, true, err
+	}
+	identity := OpenAICodexTurnIdentity{SessionID: state.sessionID, ThreadID: threadID}
+	identity.Relation = OpenAICodexTurnRelationDescendant
+	if identity.SessionID == identity.ThreadID {
+		identity.Relation = OpenAICodexTurnRelationRoot
+	}
+	if logical.ParentThreadKey != "" {
+		if logical.ParentThreadKey == logical.ThreadKey {
+			identity.ParentThreadID = identity.ThreadID
+		} else {
+			identity.ParentThreadID, err = state.resolveThread(logical.ParentThreadKey)
+		}
+		if err != nil {
+			return OpenAICodexTurnIdentity{}, true, err
+		}
+	}
+	if logical.ForkedFromThreadKey != "" {
+		if logical.ForkedFromThreadKey == logical.ThreadKey {
+			identity.ForkedFromThreadID = identity.ThreadID
+		} else {
+			identity.ForkedFromThreadID, err = state.resolveThread(logical.ForkedFromThreadKey)
+		}
+		if err != nil {
+			return OpenAICodexTurnIdentity{}, true, err
+		}
+	}
+	if err := ValidateOpenAICodexTurnIdentity(identity); err != nil {
+		return OpenAICodexTurnIdentity{}, true, err
 	}
 	return identity, true, nil
 }
 
-// ApplyOpenAIOutboundSessionIdentityHeaders applies the pair to the canonical
-// HTTP/WebSocket wire headers. It clears broader inbound aliases first and is
-// the final writer for server-owned identity and request-correlation headers.
-func ApplyOpenAIOutboundSessionIdentityHeaders(headers http.Header, identity OpenAIOutboundSessionIdentity) {
-	applyOpenAIOutboundSessionIdentityHeaders(headers, identity)
+func (s *OpenAIGatewayService) resolveOpenAIOutboundSessionIdentity(ctx context.Context, c *gin.Context, account *Account, logicalKey string) (OpenAIOutboundSessionIdentity, bool, error) {
+	logicalKey = sanitizeSessionID(logicalKey)
+	logical := normalizeLogicalTuple(openAICodexLogicalTuple{session: logicalKey, thread: logicalKey}, OpenAIOutboundSessionLogicalKeySourceCallerSeed, false)
+	return s.resolveOpenAICodexTurnIdentity(ctx, c, account, logical)
 }
 
-func applyOpenAIOutboundSessionIdentityHeaders(headers http.Header, identity OpenAIOutboundSessionIdentity) {
-	if headers == nil {
-		return
-	}
-	// Identity headers are server-owned. Clear every accepted alias first so a
-	// partial/invalid test identity, an account override, or a copied client
-	// header cannot leave a conflicting value behind when this helper is the
-	// final writer.
-	deleteOpenAIOutboundSessionIdentityHeaders(headers)
-	if sessionID := strings.TrimSpace(identity.SessionID); sessionID != "" {
-		headers.Set("session-id", sessionID)
-		headers.Set("session_id", sessionID)
-	}
-	if threadID := strings.TrimSpace(identity.ThreadID); threadID != "" {
-		headers.Set("thread-id", threadID)
-		headers.Set("conversation_id", threadID)
-		// Codex uses the thread identifier as the stable request correlation id
-		// for this outbound identity pair.
-		headers.Set("x-client-request-id", threadID)
-	}
-}
-
-// deleteOpenAIOutboundSessionIdentityHeaders removes identity aliases using
-// case-insensitive map matching. http.Header canonicalization handles normal
-// HTTP traffic, but bridges and tests can construct maps containing variants
-// such as "Session_Id" that Header.Del would otherwise leave behind.
-func deleteOpenAIOutboundSessionIdentityHeaders(headers http.Header) {
-	if headers == nil {
-		return
-	}
-	identityHeaders := [...]string{
-		"session-id",
-		"session_id",
-		"thread-id",
-		"thread_id",
-		"conversation_id",
-		"conversation-id",
-		"x-client-request-id",
-	}
-	for key := range headers {
-		for _, identityHeader := range identityHeaders {
-			if strings.EqualFold(key, identityHeader) {
-				delete(headers, key)
-				break
-			}
-		}
-	}
-}
-
-// MergeOpenAIOutboundSessionIdentityBody merges the pair into
-// client_metadata.session_id/thread_id. Invalid or non-object JSON is
-// returned unchanged with an error so callers can choose a header-only path.
-func MergeOpenAIOutboundSessionIdentityBody(body []byte, identity OpenAIOutboundSessionIdentity) ([]byte, error) {
-	return mergeOpenAIOutboundSessionIdentityBody(body, identity)
-}
-
-func mergeOpenAIOutboundSessionIdentityBody(body []byte, identity OpenAIOutboundSessionIdentity) ([]byte, error) {
-	if len(body) == 0 {
-		return body, nil
-	}
-	if !utf8.Valid(body) {
-		return body, errors.New("decode OpenAI outbound identity body: invalid UTF-8")
-	}
-	if strings.TrimSpace(identity.SessionID) == "" && strings.TrimSpace(identity.ThreadID) == "" {
-		return body, nil
-	}
-	var root map[string]json.RawMessage
-	if err := json.Unmarshal(body, &root); err != nil {
-		return body, fmt.Errorf("decode OpenAI outbound identity body: %w", err)
-	}
-	if root == nil {
-		return body, errors.New("decode OpenAI outbound identity body: expected object")
-	}
-	// Re-encode the parsed object instead of patching raw bytes in place. JSON
-	// permits duplicate object names, while encoding/json (used by the
-	// resolver above) applies last-value-wins semantics. A raw sjson patch can
-	// update only one duplicate path and leave an earlier client_metadata or
-	// identity alias in the final wire body. The structured round-trip makes
-	// that resolver/merge contract explicit for the root and client_metadata
-	// objects: each name in those objects is emitted once.
-	metadata := make(map[string]json.RawMessage)
-	if rawMetadata, ok := root["client_metadata"]; ok {
-		var decoded map[string]json.RawMessage
-		if err := json.Unmarshal(rawMetadata, &decoded); err == nil && decoded != nil {
-			metadata = decoded
-		}
-	}
-	// Remove every accepted client_metadata identity alias before writing the
-	// canonical pair. This prevents a client-supplied conversation_id/thread-id
-	// from disagreeing with the server-owned session/thread values upstream.
-	for _, field := range openAIOutboundSessionJSONFields {
-		delete(metadata, field)
-	}
-	if sid := strings.TrimSpace(identity.SessionID); sid != "" {
-		encoded, err := json.Marshal(sid)
-		if err != nil {
-			return body, fmt.Errorf("encode OpenAI session identity: %w", err)
-		}
-		metadata["session_id"] = encoded
-	}
-	if tid := strings.TrimSpace(identity.ThreadID); tid != "" {
-		encoded, err := json.Marshal(tid)
-		if err != nil {
-			return body, fmt.Errorf("encode OpenAI thread identity: %w", err)
-		}
-		metadata["thread_id"] = encoded
-	}
-	encodedMetadata, err := json.Marshal(metadata)
-	if err != nil {
-		return body, fmt.Errorf("encode OpenAI client metadata: %w", err)
-	}
-	root["client_metadata"] = encodedMetadata
-	out, err := json.Marshal(root)
-	if err != nil {
-		return body, fmt.Errorf("encode OpenAI outbound identity body: %w", err)
-	}
-	return out, nil
-}
+var _ OpenAICodexTurnIdentityStore = (*openAICodexIdentityLocalStore)(nil)

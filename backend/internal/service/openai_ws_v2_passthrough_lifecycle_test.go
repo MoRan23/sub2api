@@ -258,7 +258,7 @@ func TestOpenAIWSPassthroughTurnLifecycle_SerializesTerminalCommitAndNextTurn(t 
 	require.False(t, <-admitted, "failed terminal write must keep the current turn in flight")
 }
 
-func TestPassthroughLifecycle_UUIDv7FrameKeyBaselineAndChange(t *testing.T) {
+func TestPassthroughLifecycle_UUIDv7PromptCacheChangeKeepsPinnedTuple(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	controlCtx := context.Background()
 	upstream := newStagedPassthroughConn()
@@ -325,22 +325,87 @@ func TestPassthroughLifecycle_UUIDv7FrameKeyBaselineAndChange(t *testing.T) {
 	)
 
 	writeClient(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"Q"}`)
-	_, readErr := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+	cacheChangedForwarded := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_passthrough_identity_q_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	readCompleted("resp_passthrough_identity_q_1")
+	firstSessionID := gjson.GetBytes(firstForwarded, "client_metadata.session_id").String()
+	firstThreadID := gjson.GetBytes(firstForwarded, "client_metadata.thread_id").String()
+	require.NotEmpty(t, firstSessionID)
+	require.NotEmpty(t, firstThreadID)
+	require.Equal(t, firstSessionID, gjson.GetBytes(cacheChangedForwarded, "client_metadata.session_id").String())
+	require.Equal(t, firstThreadID, gjson.GetBytes(cacheChangedForwarded, "client_metadata.thread_id").String())
+
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+	select {
+	case err := <-serverErr:
+		var closeErr *OpenAIWSClientCloseError
+		if err != nil {
+			require.ErrorAs(t, err, &closeErr)
+			require.Equal(t, coderws.StatusNormalClosure, closeErr.StatusCode())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("passthrough UUIDv7 prompt-cache test did not exit")
+	}
+}
+
+func TestPassthroughLifecycle_UUIDv7LatePromptCacheRequiresReconnect(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	controlCtx := context.Background()
+	upstream := newStagedPassthroughConn()
+	cfg := passthroughLifecycleConfig()
+	cfg.JWT.Secret = "ws-passthrough-late-identity-test-secret"
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	svc := newPassthroughLifecycleService(cfg, upstream)
+	svc.settingService = NewSettingService(&openAIUUIDv7RuntimeRepo{values: map[string]string{
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity: "true",
+	}}, nil)
+	account := &Account{
+		ID:          810013,
+		Name:        "passthrough-uuidv7-late-prompt",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Extra: map[string]any{
+			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+			openAIPinnedInstallationIDKey:               transportTestPinnedInstallationID,
+		},
+	}
+	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, svc, account)
+	defer server.Close()
+
+	clientConn := dialPassthroughLifecycleClient(t, server)
+	defer func() { _ = clientConn.CloseNow() }()
+	firstForwarded := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+	require.Empty(t, gjson.GetBytes(firstForwarded, "client_metadata.session_id").String())
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_passthrough_identityless_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	firstCompleted, readErr := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+	require.NoError(t, readErr)
+	require.Equal(t, "resp_passthrough_identityless_1", gjson.GetBytes(firstCompleted, "response.id").String())
+
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+	require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"late-P"}`)))
+	cancelWrite()
+	_, readErr = readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
 	var closeErr coderws.CloseError
 	require.ErrorAs(t, readErr, &closeErr)
 	require.Equal(t, coderws.StatusPolicyViolation, closeErr.Code)
-	require.Contains(t, closeErr.Reason, "logical key changed")
+	require.Equal(t, "websocket outbound session logical key changed on passthrough connection", closeErr.Reason)
+
 	select {
-	case unexpected := <-upstream.writes:
-		t.Fatalf("P -> Q frame was forwarded on the old passthrough socket: %s", unexpected)
+	case payload := <-upstream.writes:
+		t.Fatalf("late identity frame reached the identity-less upstream socket: %s", payload)
 	case <-time.After(100 * time.Millisecond):
 	}
 	select {
 	case err := <-serverErr:
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "logical key changed")
+		var clientCloseErr *OpenAIWSClientCloseError
+		require.ErrorAs(t, err, &clientCloseErr)
+		require.Equal(t, coderws.StatusPolicyViolation, clientCloseErr.StatusCode())
 	case <-time.After(3 * time.Second):
-		t.Fatal("passthrough UUIDv7 key-change reader did not exit")
+		t.Fatal("passthrough late identity test did not exit")
 	}
 }
 

@@ -65,6 +65,7 @@ type openAIWSSessionHeaderResolution struct {
 	OutboundIdentityEnabled     bool
 	OutboundIdentityLogicalKey  string
 	OutboundIdentityFrameKey    string
+	OutboundLogicalIdentity     OpenAICodexLogicalTurnIdentity
 	OutboundIdentity            OpenAIOutboundSessionIdentity
 	OutboundIdentityDigest      string
 }

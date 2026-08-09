@@ -982,9 +982,6 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		req.Header.Set("Authorization", "Bearer "+authToken)
 	}
 	applyOpenAICodexProbeHeaders(req.Header)
-	probeSessionID := compactProbeSessionID(account.ID)
-	req.Header.Set("Session_ID", probeSessionID)
-	req.Header.Set("Conversation_ID", probeSessionID)
 
 	if isOAuth {
 		req.Host = "chatgpt.com"
@@ -1004,6 +1001,15 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	); err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI installation_id: %s", err.Error()))
 	}
+	probeIdentity, identityErr := uuid.NewV7()
+	if identityErr != nil {
+		return s.sendErrorAndEnd(c, "Failed to create compact probe identity")
+	}
+	// Compact uses the current Codex root identity: one real UUIDv7 projected
+	// as both session and thread, with no compatibility aliases.
+	deleteOpenAICodexIdentityHeaders(req.Header)
+	req.Header.Set("session-id", probeIdentity.String())
+	req.Header.Set("thread-id", probeIdentity.String())
 	if payloadBytes, err = json.Marshal(payload); err != nil {
 		return s.sendErrorAndEnd(c, "Failed to encode OpenAI compact payload")
 	}

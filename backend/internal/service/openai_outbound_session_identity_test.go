@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,8 +12,8 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/gjson"
 )
 
 const (
@@ -22,485 +21,269 @@ const (
 	testOutboundThreadUUID  = "018f5c3c-6e3a-7abd-8def-1234567890ac"
 )
 
-func TestOpenAIOutboundSessionIdentityKeyIsVersionedAndStable(t *testing.T) {
-	key, err := OpenAIOutboundSessionIdentityKey("jwt-secret", "42", 9, "prompt-cache")
-	require.NoError(t, err)
-	require.Len(t, key, 64)
-	require.Equal(t, key, mustOutboundIdentityKey(t, "jwt-secret", "42", 9, "prompt-cache"))
-	otherNamespace, err := OpenAIOutboundSessionIdentityKey("jwt-secret", "43", 9, "prompt-cache")
-	require.NoError(t, err)
-	require.NotEqual(t, key, otherNamespace)
-	_, err = OpenAIOutboundSessionIdentityKey("", "42", 9, "prompt-cache")
-	require.Error(t, err)
-}
-
-func mustOutboundIdentityKey(t *testing.T, secret, namespace string, apiKeyID int64, logical string) string {
+func resetProcessCodexIdentityStore(t *testing.T) {
 	t.Helper()
-	key, err := OpenAIOutboundSessionIdentityKey(secret, namespace, apiKeyID, logical)
-	require.NoError(t, err)
-	return key
+	previousV2 := processOpenAICodexTurnIdentityStore
+	store := newOpenAICodexIdentityLocalStore()
+	processOpenAICodexTurnIdentityStore = store
+	t.Cleanup(func() {
+		processOpenAICodexTurnIdentityStore = previousV2
+	})
 }
 
-func TestNewOpenAIOutboundSessionIdentityIsUUIDv7Pair(t *testing.T) {
-	first, err := newOpenAIOutboundSessionIdentity()
-	require.NoError(t, err)
-	second, err := newOpenAIOutboundSessionIdentity()
-	require.NoError(t, err)
-	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(first))
-	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(second))
-	require.NotEqual(t, first, second)
-}
-
-func TestValidateOpenAIOutboundSessionIdentityRejectsNonCanonicalUUIDForms(t *testing.T) {
-	identity := OpenAIOutboundSessionIdentity{SessionID: testOutboundSessionUUID, ThreadID: testOutboundThreadUUID}
-	withWhitespace := identity
-	withWhitespace.SessionID = " " + withWhitespace.SessionID + " "
-	require.Error(t, ValidateOpenAIOutboundSessionIdentity(withWhitespace))
-	uppercase := identity
-	uppercase.ThreadID = strings.ToUpper(uppercase.ThreadID)
-	require.Error(t, ValidateOpenAIOutboundSessionIdentity(uppercase))
-	braced := identity
-	braced.SessionID = "{" + braced.SessionID + "}"
-	require.Error(t, ValidateOpenAIOutboundSessionIdentity(braced))
-}
-
-func TestLocalOpenAIOutboundSessionIdentityStoreRefreshesAndWinsAtomically(t *testing.T) {
-	store := NewLocalOpenAIOutboundSessionIdentityStore()
-	candidate := OpenAIOutboundSessionIdentity{SessionID: testOutboundSessionUUID, ThreadID: testOutboundThreadUUID}
-	winner, err := store.GetOrCreate(context.Background(), "same-key", candidate, 30*time.Millisecond)
-	require.NoError(t, err)
-	require.Equal(t, candidate, winner)
-	other := OpenAIOutboundSessionIdentity{SessionID: "018f5c3c-6e3a-7abe-8def-1234567890ad", ThreadID: "018f5c3c-6e3a-7abf-8def-1234567890ae"}
-	gotExisting, err := store.GetOrCreate(context.Background(), "same-key", other, 30*time.Millisecond)
-	require.NoError(t, err)
-	require.Equal(t, candidate, gotExisting)
-
-	const workers = 24
-	results := make([]OpenAIOutboundSessionIdentity, workers)
-	var wg sync.WaitGroup
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			candidate := OpenAIOutboundSessionIdentity{SessionID: "018f5c3c-6e3a-7abc-8def-1234567890ab", ThreadID: "018f5c3c-6e3a-7abd-8def-1234567890ac"}
-			results[i], _ = store.GetOrCreate(context.Background(), "concurrent-key", candidate, time.Minute)
-		}(i)
+func TestValidateOpenAICodexTurnIdentityLifecycle(t *testing.T) {
+	root := OpenAICodexTurnIdentity{
+		SessionID: testOutboundSessionUUID,
+		ThreadID:  testOutboundSessionUUID,
+		Relation:  OpenAICodexTurnRelationRoot,
 	}
-	wg.Wait()
-	for _, got := range results {
-		require.Equal(t, results[0], got)
+	require.NoError(t, ValidateOpenAICodexTurnIdentity(root))
+	descendant := OpenAICodexTurnIdentity{
+		SessionID:          testOutboundSessionUUID,
+		ThreadID:           testOutboundThreadUUID,
+		ParentThreadID:     testOutboundSessionUUID,
+		ForkedFromThreadID: testOutboundSessionUUID,
+		Relation:           OpenAICodexTurnRelationDescendant,
 	}
+	require.NoError(t, ValidateOpenAICodexTurnIdentity(descendant))
 
-	// Expiry permits a new pair to take over.
-	time.Sleep(40 * time.Millisecond)
-	got, err := store.GetOrCreate(context.Background(), "same-key", other, time.Minute)
-	require.NoError(t, err)
-	require.Equal(t, other, got)
+	root.ThreadID = testOutboundThreadUUID
+	require.Error(t, ValidateOpenAICodexTurnIdentity(root))
+	descendant.ThreadID = descendant.SessionID
+	require.Error(t, ValidateOpenAICodexTurnIdentity(descendant))
+	descendant.ThreadID = "11111111-1111-4111-8111-111111111111"
+	require.Error(t, ValidateOpenAICodexTurnIdentity(descendant))
 }
 
-func TestLocalOpenAIOutboundSessionIdentityStoreEvictsLeastRecentlyUsedAtCapacity(t *testing.T) {
-	store := newOpenAIOutboundSessionIdentityLocalStoreWithCapacity(2)
-	first := OpenAIOutboundSessionIdentity{SessionID: testOutboundSessionUUID, ThreadID: testOutboundThreadUUID}
-	second := OpenAIOutboundSessionIdentity{SessionID: "018f5c3c-6e3a-7abe-8def-1234567890ad", ThreadID: "018f5c3c-6e3a-7abf-8def-1234567890ae"}
-	third := OpenAIOutboundSessionIdentity{SessionID: "018f5c3c-6e3a-7ac0-8def-1234567890af", ThreadID: "018f5c3c-6e3a-7ac1-8def-1234567890b0"}
-	replacement := OpenAIOutboundSessionIdentity{SessionID: "018f5c3c-6e3a-7ac2-8def-1234567890b1", ThreadID: "018f5c3c-6e3a-7ac3-8def-1234567890b2"}
+func TestOpenAICodexMappingKeysAreDomainSeparated(t *testing.T) {
+	sessionA, err := OpenAICodexSessionMappingKey("secret", "account:4", 9, "session")
+	require.NoError(t, err)
+	sessionAgain, err := OpenAICodexSessionMappingKey("secret", "account:4", 9, "session")
+	require.NoError(t, err)
+	require.Equal(t, sessionA, sessionAgain)
+	require.Len(t, sessionA, 64)
 
-	_, err := store.GetOrCreate(context.Background(), "first", first, time.Minute)
+	threadA, err := OpenAICodexThreadMappingKey("secret", "account:4", 9, "session", "thread-a", testOutboundSessionUUID)
 	require.NoError(t, err)
-	_, err = store.GetOrCreate(context.Background(), "second", second, time.Minute)
+	threadB, err := OpenAICodexThreadMappingKey("secret", "account:4", 9, "session", "thread-b", testOutboundSessionUUID)
 	require.NoError(t, err)
-	// Refresh first so second is the least recently used live mapping.
-	gotFirst, err := store.GetOrCreate(context.Background(), "first", replacement, time.Minute)
+	require.NotEqual(t, sessionA, threadA)
+	require.NotEqual(t, threadA, threadB)
+	changedAPIKey, err := OpenAICodexSessionMappingKey("secret", "account:4", 10, "session")
 	require.NoError(t, err)
-	require.Equal(t, first, gotFirst)
-	_, err = store.GetOrCreate(context.Background(), "third", third, time.Minute)
-	require.NoError(t, err)
-
-	store.mu.Lock()
-	_, firstPresent := store.entries["first"]
-	_, secondPresent := store.entries["second"]
-	_, thirdPresent := store.entries["third"]
-	entryCount := len(store.entries)
-	store.mu.Unlock()
-	require.True(t, firstPresent)
-	require.False(t, secondPresent)
-	require.True(t, thirdPresent)
-	require.Equal(t, 2, entryCount)
+	require.NotEqual(t, sessionA, changedAPIKey)
 }
 
-func TestLocalOpenAIOutboundSessionIdentityStorePrunesExpiredEntriesAcrossRecencyOrder(t *testing.T) {
-	store := newOpenAIOutboundSessionIdentityLocalStoreWithCapacity(3)
-	identities := []OpenAIOutboundSessionIdentity{
-		{SessionID: testOutboundSessionUUID, ThreadID: testOutboundThreadUUID},
-		{SessionID: "018f5c3c-6e3a-7abe-8def-1234567890ad", ThreadID: "018f5c3c-6e3a-7abf-8def-1234567890ae"},
-		{SessionID: "018f5c3c-6e3a-7ac0-8def-1234567890af", ThreadID: "018f5c3c-6e3a-7ac1-8def-1234567890b0"},
-		{SessionID: "018f5c3c-6e3a-7ac2-8def-1234567890b1", ThreadID: "018f5c3c-6e3a-7ac3-8def-1234567890b2"},
-	}
-	_, err := store.GetOrCreate(context.Background(), "long-lived-oldest", identities[0], time.Minute)
-	require.NoError(t, err)
-	_, err = store.GetOrCreate(context.Background(), "short-lived-middle", identities[1], 10*time.Millisecond)
-	require.NoError(t, err)
-	_, err = store.GetOrCreate(context.Background(), "long-lived-newest", identities[2], time.Minute)
-	require.NoError(t, err)
-	time.Sleep(40 * time.Millisecond)
-	_, err = store.GetOrCreate(context.Background(), "new", identities[3], time.Minute)
-	require.NoError(t, err)
-
-	store.mu.Lock()
-	_, expiredPresent := store.entries["short-lived-middle"]
-	_, oldestPresent := store.entries["long-lived-oldest"]
-	_, newestPresent := store.entries["long-lived-newest"]
-	entryCount := len(store.entries)
-	store.mu.Unlock()
-	require.False(t, expiredPresent)
-	require.True(t, oldestPresent, "expiry pruning must avoid evicting a live LRU entry")
-	require.True(t, newestPresent)
-	require.Equal(t, 3, entryCount)
-}
-
-func TestLocalOpenAIOutboundSessionIdentityStoreCapacityIsConcurrentSafe(t *testing.T) {
-	const capacity = 16
-	store := newOpenAIOutboundSessionIdentityLocalStoreWithCapacity(capacity)
-	var wg sync.WaitGroup
-	for i := 0; i < 128; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			candidate, err := newOpenAIOutboundSessionIdentity()
-			if err != nil {
-				t.Errorf("generate candidate: %v", err)
-				return
-			}
-			if _, err = store.GetOrCreate(context.Background(), fmt.Sprintf("key-%03d", i), candidate, time.Minute); err != nil {
-				t.Errorf("store candidate: %v", err)
-			}
-		}(i)
-	}
-	wg.Wait()
-	store.mu.Lock()
-	entryCount := len(store.entries)
-	heapCount := len(store.expirations)
-	recencyCount := store.recency.Len()
-	storedIdentities := make([]OpenAIOutboundSessionIdentity, 0, entryCount)
-	for _, entry := range store.entries {
-		storedIdentities = append(storedIdentities, entry.identity)
-	}
-	store.mu.Unlock()
-	require.LessOrEqual(t, entryCount, capacity)
-	require.Equal(t, entryCount, heapCount)
-	require.Equal(t, entryCount, recencyCount)
-	for _, identity := range storedIdentities {
-		require.NoError(t, ValidateOpenAIOutboundSessionIdentity(identity))
-	}
-}
-
-func TestResolveOpenAIOutboundSessionIdentityUsesProcessFallback(t *testing.T) {
-	// No cache is injected here; the resolver must remain usable and stable.
-	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "resolver-secret"}}}
-	account := &Account{ID: 918273}
-	first, ok, err := svc.resolveOpenAIOutboundSessionIdentity(context.Background(), nil, account, "logical-fallback-test")
-	require.NoError(t, err)
-	require.True(t, ok)
-	second, ok, err := svc.resolveOpenAIOutboundSessionIdentity(context.Background(), nil, account, "logical-fallback-test")
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, first, second)
-	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(first))
-	_, ok, err = svc.resolveOpenAIOutboundSessionIdentity(context.Background(), nil, account, "   ")
-	require.NoError(t, err)
-	require.False(t, ok)
-}
-
-func TestApplyOpenAIOutboundSessionIdentityHeaders(t *testing.T) {
-	headers := make(http.Header)
-	identity := OpenAIOutboundSessionIdentity{SessionID: testOutboundSessionUUID, ThreadID: testOutboundThreadUUID}
-	applyOpenAIOutboundSessionIdentityHeaders(headers, identity)
-	require.Equal(t, identity.SessionID, headers.Get("session-id"))
-	require.Equal(t, identity.SessionID, headers.Get("session_id"))
-	require.Equal(t, identity.ThreadID, headers.Get("thread-id"))
-	require.Equal(t, identity.ThreadID, headers.Get("conversation_id"))
-	require.Equal(t, identity.ThreadID, headers.Get("x-client-request-id"))
-	require.Empty(t, headers.Get("thread_id"))
-	require.Empty(t, headers.Get("conversation-id"))
-}
-
-func TestApplyOpenAIOutboundSessionIdentityHeadersClearsStaleAliases(t *testing.T) {
-	headers := http.Header{
-		"Session-Id":          []string{"old-session"},
-		"Session_Id":          []string{"old-session-underscore"},
-		"Thread-Id":           []string{"old-thread"},
-		"Thread_Id":           []string{"old-thread-underscore"},
-		"Conversation-Id":     []string{"old-conversation"},
-		"Conversation_Id":     []string{"old-conversation-underscore"},
-		"X-Client-Request-Id": []string{"old-request"},
-	}
-	applyOpenAIOutboundSessionIdentityHeaders(headers, OpenAIOutboundSessionIdentity{SessionID: testOutboundSessionUUID})
-	require.Equal(t, testOutboundSessionUUID, headers.Get("session-id"))
-	require.Equal(t, testOutboundSessionUUID, headers.Get("session_id"))
-	require.Empty(t, headers.Get("thread-id"))
-	require.Empty(t, headers.Get("thread_id"))
-	require.Empty(t, headers.Get("conversation_id"))
-	require.Empty(t, headers.Get("conversation-id"))
-	require.Empty(t, headers.Get("x-client-request-id"))
-}
-
-func TestApplyOpenAIOutboundSessionIdentityHeadersClearsNonCanonicalCaseAliases(t *testing.T) {
-	headers := http.Header{
-		"session-id":          []string{"old-session"},
-		"SESSION_ID":          []string{"old-session-underscore"},
-		"THREAD-ID":           []string{"old-thread"},
-		"Conversation_Id":     []string{"old-conversation"},
-		"X-CLIENT-REQUEST-ID": []string{"old-request"},
-	}
-	applyOpenAIOutboundSessionIdentityHeaders(headers, OpenAIOutboundSessionIdentity{SessionID: testOutboundSessionUUID, ThreadID: testOutboundThreadUUID})
-	for key, values := range headers {
-		for _, alias := range []string{"session-id", "session_id", "thread-id", "thread_id", "conversation_id", "conversation-id", "x-client-request-id"} {
-			if strings.EqualFold(key, alias) {
-				require.NotEqual(t, []string{"old-session"}, values)
-				require.NotEqual(t, []string{"old-session-underscore"}, values)
-				require.NotEqual(t, []string{"old-thread"}, values)
-				require.NotEqual(t, []string{"old-conversation"}, values)
-				require.NotEqual(t, []string{"old-request"}, values)
-			}
-		}
-	}
-}
-
-func TestMergeOpenAIOutboundSessionIdentityBody(t *testing.T) {
-	identity := OpenAIOutboundSessionIdentity{SessionID: testOutboundSessionUUID, ThreadID: testOutboundThreadUUID}
-	body := []byte(`{"model":"gpt-5","client_metadata":{"existing":"keep"},"input":"hello"}`)
-	merged, err := mergeOpenAIOutboundSessionIdentityBody(body, identity)
-	require.NoError(t, err)
-	require.Equal(t, identity.SessionID, gjson.GetBytes(merged, "client_metadata.session_id").String())
-	require.Equal(t, identity.ThreadID, gjson.GetBytes(merged, "client_metadata.thread_id").String())
-	require.Equal(t, "keep", gjson.GetBytes(merged, "client_metadata.existing").String())
-	require.Contains(t, string(merged), `"model"`)
-
-	unchanged, err := mergeOpenAIOutboundSessionIdentityBody([]byte("not-json"), identity)
-	require.Error(t, err)
-	require.Equal(t, "not-json", string(unchanged))
-	invalidUTF8 := []byte{'{', '"', 'x', '"', ':', '"', 0xff, '"', '}'}
-	unchanged, err = mergeOpenAIOutboundSessionIdentityBody(invalidUTF8, identity)
-	require.Error(t, err)
-	require.Equal(t, invalidUTF8, unchanged)
-	require.True(t, strings.Contains(string(merged), "client_metadata"))
-	aliases, err := mergeOpenAIOutboundSessionIdentityBody(
-		[]byte(`{"client_metadata":{"session-id":"client-session","thread-id":"client-thread","conversation_id":"client-conversation","keep":"yes"}}`),
-		identity,
-	)
-	require.NoError(t, err)
-	require.Equal(t, identity.SessionID, gjson.GetBytes(aliases, "client_metadata.session_id").String())
-	require.Equal(t, identity.ThreadID, gjson.GetBytes(aliases, "client_metadata.thread_id").String())
-	require.False(t, gjson.GetBytes(aliases, "client_metadata.session-id").Exists())
-	require.False(t, gjson.GetBytes(aliases, "client_metadata.thread-id").Exists())
-	require.False(t, gjson.GetBytes(aliases, "client_metadata.conversation_id").Exists())
-	require.Equal(t, "yes", gjson.GetBytes(aliases, "client_metadata.keep").String())
-
-	duplicateObjects := []byte(`{"model":"gpt-5","client_metadata":{"session_id":"first-session","keep":"first"},"client_metadata":{"session_id":"last-session","thread-id":"client-thread","keep":"last"},"prompt_cache_key":"first-prompt","prompt_cache_key":"last-prompt"}`)
-	resolved := ResolveOpenAIOutboundSessionLogicalKey(newOutboundIdentityTestContext(t, nil), duplicateObjects, "")
-	require.Equal(t, "last-session", resolved, "logical-key resolution must use the same last-value-wins object semantics as body merging")
-	canonical, err := mergeOpenAIOutboundSessionIdentityBody(duplicateObjects, identity)
-	require.NoError(t, err)
-	canonicalText := string(canonical)
-	// A structured round-trip must collapse duplicate top-level names before
-	// the server-owned pair is written.
-	require.Equal(t, 1, strings.Count(canonicalText, `"client_metadata"`))
-	require.Equal(t, 1, strings.Count(canonicalText, `"prompt_cache_key"`))
-	require.Equal(t, "last-prompt", gjson.GetBytes(canonical, "prompt_cache_key").String())
-	require.Equal(t, "last", gjson.GetBytes(canonical, "client_metadata.keep").String())
-	require.Equal(t, identity.SessionID, gjson.GetBytes(canonical, "client_metadata.session_id").String())
-	require.Equal(t, identity.ThreadID, gjson.GetBytes(canonical, "client_metadata.thread_id").String())
-	require.Equal(t, 1, strings.Count(canonicalText, `"session_id"`))
-	require.Equal(t, 1, strings.Count(canonicalText, `"thread_id"`))
-	require.False(t, gjson.GetBytes(canonical, "client_metadata.thread-id").Exists())
-
-	duplicateFields := []byte(`{"client_metadata":{"session_id":"first-session","session_id":"second-session","thread_id":"first-thread","thread_id":"second-thread","conversation_id":"client-conversation"}}`)
-	canonicalFields, err := mergeOpenAIOutboundSessionIdentityBody(duplicateFields, identity)
-	require.NoError(t, err)
-	canonicalFieldsText := string(canonicalFields)
-	require.Equal(t, 1, strings.Count(canonicalFieldsText, `"client_metadata"`))
-	require.Equal(t, 1, strings.Count(canonicalFieldsText, `"session_id"`))
-	require.Equal(t, 1, strings.Count(canonicalFieldsText, `"thread_id"`))
-	require.Equal(t, identity.SessionID, gjson.GetBytes(canonicalFields, "client_metadata.session_id").String())
-	require.Equal(t, identity.ThreadID, gjson.GetBytes(canonicalFields, "client_metadata.thread_id").String())
-	require.False(t, gjson.GetBytes(canonicalFields, "client_metadata.conversation_id").Exists())
-	unchanged, err = mergeOpenAIOutboundSessionIdentityBody([]byte("null"), identity)
-	require.Error(t, err)
-	require.Equal(t, "null", string(unchanged))
-}
-
-func newOutboundIdentityTestContext(t *testing.T, headers map[string]string) *gin.Context {
+func newCodexLogicalResolverContext(t *testing.T, headers http.Header) *gin.Context {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	for name, value := range headers {
-		c.Request.Header.Set(name, value)
-	}
+	c.Request.Header = headers
 	return c
 }
 
-func TestResolveOpenAIOutboundSessionLogicalKeyHeaderAliases(t *testing.T) {
-	tests := []struct {
-		name   string
-		header string
-		source string
-	}{
-		{name: "session hyphen", header: "session-id", source: OpenAIOutboundSessionLogicalKeySourceHeaderSession},
-		{name: "session underscore", header: "session_id", source: OpenAIOutboundSessionLogicalKeySourceHeaderSession},
-		{name: "thread hyphen", header: "thread-id", source: OpenAIOutboundSessionLogicalKeySourceHeaderThread},
-		{name: "thread underscore", header: "thread_id", source: OpenAIOutboundSessionLogicalKeySourceHeaderThread},
-		{name: "conversation hyphen", header: "conversation-id", source: OpenAIOutboundSessionLogicalKeySourceHeaderConversation},
-		{name: "conversation underscore", header: "conversation_id", source: OpenAIOutboundSessionLogicalKeySourceHeaderConversation},
+func newOutboundIdentityTestContext(t *testing.T, headers map[string]string) *gin.Context {
+	t.Helper()
+	httpHeaders := make(http.Header)
+	for name, value := range headers {
+		httpHeaders.Set(name, value)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ResolveOpenAIOutboundSessionLogicalKeyWithSource(newOutboundIdentityTestContext(t, map[string]string{tt.header: "  value-1  "}), nil, "")
-			require.Equal(t, "value-1", got.LogicalKey)
-			require.Equal(t, tt.source, got.Source)
+	return newCodexLogicalResolverContext(t, httpHeaders)
+}
+
+func TestResolveOpenAICodexLogicalTurnIdentityPriorityAndPromptNeutrality(t *testing.T) {
+	headers := make(http.Header)
+	headers.Set("session-id", "header-session")
+	headers.Set("thread-id", "header-thread")
+	headers.Set(openAIWSTurnMetadataHeader, `{"session_id":"header-meta-session","thread_id":"header-meta-thread"}`)
+	body := []byte(`{
+      "prompt_cache_key":"cache-a",
+      "client_metadata":{
+        "session_id":"flat-session",
+        "thread_id":"flat-thread",
+        "x-codex-turn-metadata":"{\"session_id\":\"canonical-session\",\"thread_id\":\"canonical-thread\",\"parent_thread_id\":\"parent\",\"forked_from_thread_id\":\"fork\"}"
+      }
+    }`)
+	resolved := ResolveOpenAICodexLogicalTurnIdentity(newCodexLogicalResolverContext(t, headers), body, "caller")
+	require.Equal(t, "canonical-session", resolved.SessionKey)
+	require.Equal(t, "canonical-thread", resolved.ThreadKey)
+	require.Equal(t, "parent", resolved.ParentThreadKey)
+	require.Equal(t, "fork", resolved.ForkedFromThreadKey)
+	require.Equal(t, OpenAICodexTurnRelationDescendant, resolved.Relation)
+	require.True(t, resolved.Explicit)
+
+	body = []byte(strings.ReplaceAll(string(body), "cache-a", "cache-b"))
+	changedPrompt := ResolveOpenAICodexLogicalTurnIdentity(newCodexLogicalResolverContext(t, headers), body, "different-caller")
+	require.Equal(t, resolved.SessionKey, changedPrompt.SessionKey)
+	require.Equal(t, resolved.ThreadKey, changedPrompt.ThreadKey)
+}
+
+func TestResolveOpenAICodexLogicalTurnIdentitySingleFieldBecomesRoot(t *testing.T) {
+	for name, headers := range map[string]http.Header{
+		"session": {"session-id": []string{"only-session"}},
+		"thread":  {"thread-id": []string{"only-thread"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resolved := ResolveOpenAICodexLogicalTurnIdentity(newCodexLogicalResolverContext(t, headers), []byte(`{"prompt_cache_key":"ignored"}`), "")
+			require.NotEmpty(t, resolved.SessionKey)
+			require.Equal(t, resolved.SessionKey, resolved.ThreadKey)
+			require.Equal(t, OpenAICodexTurnRelationRoot, resolved.Relation)
+			require.True(t, resolved.Explicit)
 		})
 	}
+	fallback := ResolveOpenAICodexLogicalTurnIdentity(nil, []byte(`{"prompt_cache_key":"cache-only"}`), "")
+	require.Equal(t, "cache-only", fallback.SessionKey)
+	require.Equal(t, fallback.SessionKey, fallback.ThreadKey)
+	require.False(t, fallback.Explicit)
 }
 
-func TestResolveOpenAIOutboundSessionLogicalKeyAffinityHeaders(t *testing.T) {
-	for _, header := range openAIOutboundSessionAffinityHeaders {
-		t.Run(header, func(t *testing.T) {
-			got := ResolveOpenAIOutboundSessionLogicalKeyWithSource(newOutboundIdentityTestContext(t, map[string]string{header: "affinity-key"}), nil, "")
-			require.Equal(t, "affinity-key", got.LogicalKey)
-			require.Equal(t, OpenAIOutboundSessionLogicalKeySourceHeaderAffinity, got.Source)
-		})
+func TestResolveOpenAICodexLogicalTurnIdentityRejectsUnsafeAndExcludedIDs(t *testing.T) {
+	headers := make(http.Header)
+	headers.Set("session-id", "\x01unsafe")
+	headers.Set("thread-id", strings.Repeat("x", 256))
+	headers.Set("x-client-request-id", "must-not-be-identity")
+	body := []byte(`{
+      "installation_id":"installation",
+      "request_id":"request",
+      "message_id":"message",
+      "response_id":"response",
+      "turn_id":"turn",
+      "client_metadata":{"installation_id":"nested-installation"},
+      "prompt_cache_key":"safe-fallback"
+    }`)
+	resolved := ResolveOpenAICodexLogicalTurnIdentity(newCodexLogicalResolverContext(t, headers), body, "")
+	require.Equal(t, "safe-fallback", resolved.SessionKey)
+	require.Equal(t, resolved.SessionKey, resolved.ThreadKey)
+	require.False(t, resolved.Explicit)
+
+	withoutFallback := ResolveOpenAICodexLogicalTurnIdentity(newCodexLogicalResolverContext(t, headers), []byte(`{"installation_id":"only-id"}`), "")
+	require.Empty(t, withoutFallback.SessionKey)
+	require.Empty(t, withoutFallback.ThreadKey)
+}
+
+func TestLocalOpenAICodexStorePreservesHierarchy(t *testing.T) {
+	store := newOpenAICodexIdentityLocalStore()
+	ctx := context.Background()
+	sessionID, err := store.GetOrCreateCodexSession(ctx, "session-key", testOutboundSessionUUID, time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, testOutboundSessionUUID, sessionID)
+
+	childOne, err := store.GetOrCreateCodexThread(ctx, "session-key", "thread-one", sessionID, testOutboundThreadUUID, time.Minute)
+	require.NoError(t, err)
+	otherThread := "018f5c3c-6e3a-7abe-8def-1234567890ad"
+	childTwo, err := store.GetOrCreateCodexThread(ctx, "session-key", "thread-two", sessionID, otherThread, time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, childOne.SessionID, childTwo.SessionID)
+	require.NotEqual(t, childOne.ThreadID, childTwo.ThreadID)
+
+	stable, err := store.GetOrCreateCodexThread(ctx, "session-key", "thread-one", sessionID, otherThread, time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, childOne, stable)
+	_, err = store.GetOrCreateCodexThread(ctx, "session-key", "thread-three", "018f5c3c-6e3a-7abf-8def-1234567890ae", otherThread, time.Minute)
+	require.ErrorIs(t, err, ErrOpenAICodexSessionWinnerChanged)
+}
+
+func TestOpenAICodexResolutionRetriesLocalThreadAfterSessionPromotion(t *testing.T) {
+	local := newOpenAICodexIdentityLocalStore()
+	ctx := context.Background()
+	const sessionDigest = "session-promotion-race"
+	initialSessionID, err := local.GetOrCreateCodexSession(ctx, sessionDigest, testOutboundSessionUUID, time.Minute)
+	require.NoError(t, err)
+
+	state := &openAICodexIdentityResolutionState{
+		ctx:            ctx,
+		local:          local,
+		namespace:      "account:42",
+		apiKeyID:       7,
+		usePrimary:     false,
+		sessionDigest:  sessionDigest,
+		logicalSession: "logical-session",
+		sessionID:      initialSessionID,
 	}
+	sharedWinner := "018f5c3c-6e3a-7abe-8def-1234567890ad"
+	local.promoteSession(sessionDigest, sharedWinner, time.Minute)
+
+	threadID, err := state.resolveThread("logical-child")
+	require.NoError(t, err)
+	require.Equal(t, sharedWinner, state.sessionID)
+	require.NotEqual(t, sharedWinner, threadID)
+	require.NoError(t, ValidateOpenAICodexTurnIdentity(OpenAICodexTurnIdentity{
+		SessionID: sharedWinner,
+		ThreadID:  threadID,
+		Relation:  OpenAICodexTurnRelationDescendant,
+	}))
 }
 
-func TestResolveOpenAIOutboundSessionLogicalKeyPriority(t *testing.T) {
-	c := newOutboundIdentityTestContext(t, map[string]string{
-		"session-id":                  "header-session",
-		"thread_id":                   "header-thread",
-		"conversation-id":             "header-conversation",
-		openCodeSessionAffinityHeader: "header-affinity",
-		openAIWSTurnMetadataHeader:    `{"thread_id":"turn-header"}`,
-	})
-	body := []byte(`{"client_metadata":{"conversation_id":"metadata-conversation","x-codex-turn-metadata":{"session_id":"turn-metadata"}},"x-codex-turn-metadata":{"thread_id":"turn-body"},"prompt_cache_key":"prompt-key"}`)
-	got := ResolveOpenAIOutboundSessionLogicalKeyWithSource(c, body, "caller-seed")
-	require.Equal(t, "header-session", got.LogicalKey)
-	require.Equal(t, OpenAIOutboundSessionLogicalKeySourceHeaderSession, got.Source)
+func TestResolveOpenAICodexTurnIdentityRootChildrenAndRelations(t *testing.T) {
+	resetProcessCodexIdentityStore(t)
+	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "hierarchy-secret"}}}
+	account := &Account{ID: 501, Type: AccountTypeOAuth}
+	rootLogical := normalizeLogicalTuple(openAICodexLogicalTuple{session: "logical-session", thread: "logical-session"}, "test", true)
+	root, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), nil, account, rootLogical)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, root.SessionID, root.ThreadID)
+	require.Equal(t, OpenAICodexTurnRelationRoot, root.Relation)
+
+	childOneLogical := normalizeLogicalTuple(openAICodexLogicalTuple{session: "logical-session", thread: "child-one", parent: "logical-session"}, "test", true)
+	childOne, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), nil, account, childOneLogical)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, root.SessionID, childOne.SessionID)
+	require.NotEqual(t, childOne.SessionID, childOne.ThreadID)
+	require.Equal(t, root.ThreadID, childOne.ParentThreadID)
+
+	childTwoLogical := normalizeLogicalTuple(openAICodexLogicalTuple{session: "logical-session", thread: "child-two", parent: "child-one", fork: "child-one"}, "test", true)
+	childTwo, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), nil, account, childTwoLogical)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, root.SessionID, childTwo.SessionID)
+	require.NotEqual(t, childOne.ThreadID, childTwo.ThreadID)
+	require.Equal(t, childOne.ThreadID, childTwo.ParentThreadID)
+	require.Equal(t, childOne.ThreadID, childTwo.ForkedFromThreadID)
+
+	stable, _, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), nil, account, childTwoLogical)
+	require.NoError(t, err)
+	require.Equal(t, childTwo, stable)
 }
 
-func TestResolveOpenAIOutboundSessionLogicalKeyClientMetadataAndTurnMetadata(t *testing.T) {
-	tests := []struct {
-		name   string
-		body   string
-		header string
-		want   string
-		source string
-	}{
-		{
-			name:   "client metadata direct",
-			body:   `{"client_metadata":{"thread_id":"metadata-thread"}}`,
-			want:   "metadata-thread",
-			source: OpenAIOutboundSessionLogicalKeySourceClientMetadata,
-		},
-		{
-			name:   "turn metadata header json",
-			header: `{"conversation_id":"turn-header"}`,
-			want:   "turn-header",
-			source: OpenAIOutboundSessionLogicalKeySourceTurnMetadata,
-		},
-		{
-			name:   "turn metadata body json string",
-			body:   `{"x-codex-turn-metadata":"{\"session_id\":\"turn-body-string\"}"}`,
-			want:   "turn-body-string",
-			source: OpenAIOutboundSessionLogicalKeySourceTurnMetadata,
-		},
-		{
-			name:   "turn metadata body object",
-			body:   `{"x-codex-turn-metadata":{"thread_id":"turn-body-object"}}`,
-			want:   "turn-body-object",
-			source: OpenAIOutboundSessionLogicalKeySourceTurnMetadata,
-		},
-		{
-			name:   "turn metadata nested client metadata",
-			body:   `{"client_metadata":{"x-codex-turn-metadata":"{\"conversation_id\":\"turn-nested\"}"}}`,
-			want:   "turn-nested",
-			source: OpenAIOutboundSessionLogicalKeySourceTurnMetadata,
-		},
+func TestResolveOpenAICodexTurnIdentityIsolationDimensions(t *testing.T) {
+	resetProcessCodexIdentityStore(t)
+	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "isolation-secret"}}}
+	logical := normalizeLogicalTuple(openAICodexLogicalTuple{session: "shared-client-session", thread: "shared-client-session"}, "test", true)
+
+	contextForAPIKey := func(id int64) *gin.Context {
+		c := newOutboundIdentityTestContext(t, nil)
+		c.Set("api_key", &APIKey{ID: id})
+		return c
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			headers := map[string]string{}
-			if tt.header != "" {
-				headers[openAIWSTurnMetadataHeader] = tt.header
-			}
-			got := ResolveOpenAIOutboundSessionLogicalKeyWithSource(newOutboundIdentityTestContext(t, headers), []byte(tt.body), "")
-			require.Equal(t, tt.want, got.LogicalKey)
-			require.Equal(t, tt.source, got.Source)
-		})
-	}
+	first, _, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), contextForAPIKey(11), &Account{ID: 91, Type: AccountTypeOAuth}, logical)
+	require.NoError(t, err)
+	changedAPIKey, _, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), contextForAPIKey(12), &Account{ID: 91, Type: AccountTypeOAuth}, logical)
+	require.NoError(t, err)
+	changedAccount, _, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), contextForAPIKey(11), &Account{ID: 92, Type: AccountTypeOAuth}, logical)
+	require.NoError(t, err)
+	require.NotEqual(t, first.SessionID, changedAPIKey.SessionID)
+	require.NotEqual(t, first.SessionID, changedAccount.SessionID)
+
+	parentID := int64(91)
+	shadow, _, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), contextForAPIKey(11), &Account{ID: 93, Type: AccountTypeOAuth, ParentAccountID: &parentID}, logical)
+	require.NoError(t, err)
+	require.Equal(t, first, shadow, "OAuth shadow and credential owner must share the namespace")
 }
 
-func TestResolveOpenAIOutboundSessionLogicalKeyInvalidHigherPriorityFallsThrough(t *testing.T) {
-	c := newOutboundIdentityTestContext(t, map[string]string{
-		"session-id": "\x01invalid",
-		"thread-id":  "thread-fallback",
-	})
-	got := ResolveOpenAIOutboundSessionLogicalKeyWithSource(c, nil, "caller-seed")
-	require.Equal(t, "thread-fallback", got.LogicalKey)
-	require.Equal(t, OpenAIOutboundSessionLogicalKeySourceHeaderThread, got.Source)
-
-	// An invalid metadata value must not block a valid turn-metadata value.
-	c = newOutboundIdentityTestContext(t, nil)
-	body := []byte(`{"client_metadata":{"session_id":"\u0001bad"},"x-codex-turn-metadata":{"conversation_id":"turn-fallback"}}`)
-	got = ResolveOpenAIOutboundSessionLogicalKeyWithSource(c, body, "")
-	require.Equal(t, "turn-fallback", got.LogicalKey)
-	require.Equal(t, OpenAIOutboundSessionLogicalKeySourceTurnMetadata, got.Source)
-}
-
-func TestResolveOpenAIOutboundSessionLogicalKeyCallerSeedAndPromptCache(t *testing.T) {
-	c := newOutboundIdentityTestContext(t, nil)
-	body := []byte(`{"prompt_cache_key":"body-prompt"}`)
-	got := ResolveOpenAIOutboundSessionLogicalKeyWithSource(c, body, "caller-seed")
-	require.Equal(t, "caller-seed", got.LogicalKey)
-	require.Equal(t, OpenAIOutboundSessionLogicalKeySourceCallerSeed, got.Source)
-
-	got = ResolveOpenAIOutboundSessionLogicalKeyWithSource(c, body, "")
-	require.Equal(t, "body-prompt", got.LogicalKey)
-	require.Equal(t, OpenAIOutboundSessionLogicalKeySourcePromptCacheKey, got.Source)
-
-	got = ResolveOpenAIOutboundSessionLogicalKeyWithSource(c, []byte(`{"x-codex-turn-metadata":"not-json","prompt_cache_key":"body-prompt"}`), "")
-	require.Equal(t, "body-prompt", got.LogicalKey, "malformed turn metadata should be ignored")
-}
-
-func TestResolveOpenAIOutboundSessionLogicalKeyExcludesNonSessionIDs(t *testing.T) {
-	c := newOutboundIdentityTestContext(t, map[string]string{
-		"x-request-id":         "request-header",
-		"x-message-id":         "message-header",
-		"x-response-id":        "response-header",
-		codexInstallationIDKey: "installation-header",
-	})
-	body := []byte(`{"request_id":"request-body","message_id":"message-body","response_id":"response-body","installation_id":"installation-body","client_metadata":{"request_id":"nested-request","message_id":"nested-message","response_id":"nested-response","installation_id":"nested-installation"},"x-codex-turn-metadata":{"request_id":"turn-request","message_id":"turn-message","response_id":"turn-response","installation_id":"turn-installation"}}`)
-	require.Empty(t, ResolveOpenAIOutboundSessionLogicalKey(c, body, ""))
-}
-
-func TestResolveOpenAIOutboundSessionLogicalKeyRejectsInvalidValues(t *testing.T) {
-	tests := []struct {
-		name string
-		body []byte
-		seed string
-	}{
-		{name: "invalid utf8 seed", seed: string([]byte{0xff, 0xfe})},
-		{name: "control seed", seed: "bad\nseed"},
-		{name: "too long seed", seed: strings.Repeat("x", 256)},
-		{name: "control body prompt", body: []byte(`{"prompt_cache_key":"bad\u0000key"}`)},
-		{name: "too long body prompt", body: []byte(`{"prompt_cache_key":"` + strings.Repeat("x", 256) + `"}`)},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			require.Empty(t, ResolveOpenAIOutboundSessionLogicalKey(newOutboundIdentityTestContext(t, nil), tt.body, tt.seed))
-		})
-	}
-	// Invalid UTF-8 cannot be valid JSON and is ignored without surfacing raw
-	// bytes to logs or metrics.
-	require.Empty(t, ResolveOpenAIOutboundSessionLogicalKey(newOutboundIdentityTestContext(t, nil), []byte{'{', '"', 'p', 'r', 'o', 'm', 'p', 't', '_', 'c', 'a', 'c', 'h', 'e', '_', 'k', 'e', 'y', '"', ':', '"', 0xff, '"', '}'}, ""))
+type outboundIdentityGatewayCacheStub struct {
+	GatewayCache
+	mu          sync.Mutex
+	fail        bool
+	winner      OpenAIOutboundSessionIdentity
+	hasWinner   bool
+	candidates  []OpenAIOutboundSessionIdentity
+	mappingKeys []string
+	callCounter int
+	storeErr    error
+	store       *openAICodexIdentityLocalStore
 }
 
 type outboundIdentityAccountRepoStub struct {
@@ -515,154 +298,96 @@ func (r *outboundIdentityAccountRepoStub) GetByID(_ context.Context, id int64) (
 	return nil, errors.New("account not found")
 }
 
-func TestOpenAIOutboundSessionIdentityNamespaceUsesCredentialOwner(t *testing.T) {
-	parentID := int64(701)
-	shadowID := int64(702)
-	parent := &Account{ID: parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	shadow := &Account{ID: shadowID, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &parentID}
-	repo := &outboundIdentityAccountRepoStub{accounts: map[int64]*Account{parentID: parent}}
-	svc := &OpenAIGatewayService{accountRepo: repo}
-	namespace, err := svc.resolveOpenAIOutboundSessionIdentityNamespace(context.Background(), shadow)
-	require.NoError(t, err)
-	require.Equal(t, "account:701", namespace)
-
-	repo.accounts[parentID] = &Account{ID: parentID, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
-	_, err = svc.resolveOpenAIOutboundSessionIdentityNamespace(context.Background(), shadow)
-	require.Error(t, err)
-	require.ErrorIs(t, err, errOpenAIOutboundSessionIdentityNamespace)
-
-	nestedID := int64(703)
-	nested := &Account{ID: nestedID, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &parentID}
-	repo.accounts[parentID] = nested
-	_, err = svc.resolveOpenAIOutboundSessionIdentityNamespace(context.Background(), shadow)
-	require.Error(t, err)
-	require.ErrorIs(t, err, errOpenAIOutboundSessionIdentityNamespace)
-
-	nilRepoSvc := &OpenAIGatewayService{}
-	namespace, err = nilRepoSvc.resolveOpenAIOutboundSessionIdentityNamespace(context.Background(), shadow)
-	require.NoError(t, err)
-	require.Equal(t, "account:701", namespace)
+func (s *outboundIdentityGatewayCacheStub) identityStore() *openAICodexIdentityLocalStore {
+	if s.store == nil {
+		s.store = newOpenAICodexIdentityLocalStore()
+	}
+	return s.store
 }
 
-func TestOpenAIOutboundSessionIdentityNamespaceUsesCurrentAccountForAPIKeyShadow(t *testing.T) {
-	parentID := int64(711)
-	shadowID := int64(712)
-	shadow := &Account{ID: shadowID, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, ParentAccountID: &parentID}
-	namespace, err := (&OpenAIGatewayService{}).resolveOpenAIOutboundSessionIdentityNamespace(context.Background(), shadow)
-	require.NoError(t, err)
-	require.Equal(t, "account:712", namespace)
-}
-
-func TestResolveOpenAIOutboundSessionIdentityDoesNotReResolveSelectedKey(t *testing.T) {
-	previous := processOpenAIOutboundSessionIdentityStore
-	processOpenAIOutboundSessionIdentityStore = newOpenAIOutboundSessionIdentityLocalStore()
-	t.Cleanup(func() { processOpenAIOutboundSessionIdentityStore = previous })
-	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "selected-key-secret"}}}
-	c := newOutboundIdentityTestContext(t, map[string]string{"session-id": "header-key"})
-	first, ok, err := svc.resolveOpenAIOutboundSessionIdentity(context.Background(), c, &Account{ID: 801}, "selected-seed")
-	require.NoError(t, err)
-	require.True(t, ok)
-	second, ok, err := svc.resolveOpenAIOutboundSessionIdentity(context.Background(), nil, &Account{ID: 801}, "selected-seed")
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, first, second)
-}
-
-type outboundIdentityGatewayCacheStub struct {
-	GatewayCache
-	mu          sync.Mutex
-	fail        bool
-	winner      OpenAIOutboundSessionIdentity
-	hasWinner   bool
-	candidates  []OpenAIOutboundSessionIdentity
-	mappingKeys []string
-	callCounter int
-	storeErr    error
-}
-
-func (s *outboundIdentityGatewayCacheStub) GetOrCreate(_ context.Context, mappingKey string, candidate OpenAIOutboundSessionIdentity, _ time.Duration) (OpenAIOutboundSessionIdentity, error) {
+func (s *outboundIdentityGatewayCacheStub) GetOrCreateCodexSession(ctx context.Context, mappingKey, candidate string, ttl time.Duration) (string, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.callCounter++
 	s.mappingKeys = append(s.mappingKeys, mappingKey)
-	s.candidates = append(s.candidates, candidate)
-	if s.storeErr != nil {
-		return OpenAIOutboundSessionIdentity{}, s.storeErr
+	fail, storeErr := s.fail, s.storeErr
+	store := s.identityStore()
+	s.mu.Unlock()
+	if storeErr != nil {
+		return "", storeErr
 	}
-	if s.fail {
-		return OpenAIOutboundSessionIdentity{}, errors.New("redis unavailable")
+	if fail {
+		return "", errors.New("redis unavailable")
 	}
-	if !s.hasWinner {
-		s.winner = candidate
-		s.hasWinner = true
-	}
-	return s.winner, nil
+	return store.GetOrCreateCodexSession(ctx, mappingKey, candidate, ttl)
 }
 
-func TestResolveOpenAIOutboundSessionIdentityPromotesProcessFallbackOnRecovery(t *testing.T) {
-	previousStore := processOpenAIOutboundSessionIdentityStore
-	processOpenAIOutboundSessionIdentityStore = newOpenAIOutboundSessionIdentityLocalStore()
-	t.Cleanup(func() { processOpenAIOutboundSessionIdentityStore = previousStore })
+func (s *outboundIdentityGatewayCacheStub) GetOrCreateCodexThread(ctx context.Context, sessionKey, threadKey, sessionID, candidate string, ttl time.Duration) (OpenAICodexTurnIdentity, error) {
+	s.mu.Lock()
+	s.callCounter++
+	s.mappingKeys = append(s.mappingKeys, threadKey)
+	fail, storeErr := s.fail, s.storeErr
+	store := s.identityStore()
+	s.mu.Unlock()
+	if storeErr != nil {
+		return OpenAICodexTurnIdentity{}, storeErr
+	}
+	if fail {
+		return OpenAICodexTurnIdentity{}, errors.New("redis unavailable")
+	}
+	identity, err := store.GetOrCreateCodexThread(ctx, sessionKey, threadKey, sessionID, candidate, ttl)
+	if err == nil {
+		s.mu.Lock()
+		s.candidates = append(s.candidates, identity)
+		s.winner, s.hasWinner = identity, true
+		s.mu.Unlock()
+	}
+	return identity, err
+}
+
+func TestResolveOpenAICodexTurnIdentityPromotesFallbackAfterRecovery(t *testing.T) {
+	resetProcessCodexIdentityStore(t)
 	cache := &outboundIdentityGatewayCacheStub{fail: true}
-	svc := &OpenAIGatewayService{cache: cache, cfg: &config.Config{JWT: config.JWTConfig{Secret: "promotion-secret"}}}
-	account := &Account{ID: 802}
-	before := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
-	local, ok, err := svc.resolveOpenAIOutboundSessionIdentity(context.Background(), nil, account, "promotion-key")
+	svc := &OpenAIGatewayService{cache: cache, cfg: &config.Config{JWT: config.JWTConfig{Secret: "recovery-secret"}}}
+	logical := normalizeLogicalTuple(openAICodexLogicalTuple{session: "recovery-session", thread: "recovery-child"}, "test", true)
+	local, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), nil, &Account{ID: 72}, logical)
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(local))
 
 	cache.mu.Lock()
 	cache.fail = false
 	cache.mu.Unlock()
-	recovered, ok, err := svc.resolveOpenAIOutboundSessionIdentity(context.Background(), nil, account, "promotion-key")
+	recovered, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), nil, &Account{ID: 72}, logical)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, local, recovered)
-	stable, ok, err := svc.resolveOpenAIOutboundSessionIdentity(context.Background(), nil, account, "promotion-key")
+	stable, _, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), nil, &Account{ID: 72}, logical)
 	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, local, stable)
-
-	cache.mu.Lock()
-	require.GreaterOrEqual(t, cache.callCounter, 3)
-	require.Equal(t, local, cache.candidates[0])
-	require.Equal(t, local, cache.candidates[1], "recovery must receive the process winner as candidate")
-	require.Equal(t, local, cache.winner, "Redis winner must remain stable")
-	cache.mu.Unlock()
-	after := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
-	require.Equal(t, int64(1), after.PromotionTotal-before.PromotionTotal)
+	require.Equal(t, recovered, stable)
 }
 
-func TestResolveOpenAIOutboundSessionIdentitySeparatesInvalidPrimaryOutputMetric(t *testing.T) {
-	previousStore := processOpenAIOutboundSessionIdentityStore
-	processOpenAIOutboundSessionIdentityStore = newOpenAIOutboundSessionIdentityLocalStore()
-	t.Cleanup(func() { processOpenAIOutboundSessionIdentityStore = previousStore })
-	cache := &outboundIdentityGatewayCacheStub{winner: OpenAIOutboundSessionIdentity{SessionID: "bad", ThreadID: "bad"}, hasWinner: true}
-	svc := &OpenAIGatewayService{cache: cache, cfg: &config.Config{JWT: config.JWTConfig{Secret: "invalid-output-secret"}}}
-	before := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
-	got, ok, err := svc.resolveOpenAIOutboundSessionIdentity(context.Background(), nil, &Account{ID: 803}, "invalid-output-key")
+func TestOpenAICodexIdentityNamespaceUsesOAuthCredentialOwner(t *testing.T) {
+	parentID := int64(84)
+	shadow := &Account{ID: 85, Type: AccountTypeOAuth, ParentAccountID: &parentID}
+	namespace, err := (&OpenAIGatewayService{}).resolveOpenAIOutboundSessionIdentityNamespace(context.Background(), shadow)
 	require.NoError(t, err)
-	require.True(t, ok)
-	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(got))
-	after := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
-	require.Equal(t, int64(1), after.PrimaryStoreInvalidTotal-before.PrimaryStoreInvalidTotal)
-	require.Equal(t, int64(0), after.PrimaryStoreFailureTotal-before.PrimaryStoreFailureTotal)
+	require.Equal(t, "account:84", namespace)
 
-	cache.storeErr = fmt.Errorf("corrupt payload: %w", ErrOpenAIOutboundSessionIdentityStoredValueInvalid)
-	beforeInvalidError := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
-	_, ok, err = svc.resolveOpenAIOutboundSessionIdentity(context.Background(), nil, &Account{ID: 803}, "invalid-error-key")
-	require.NoError(t, err)
-	require.True(t, ok)
-	afterInvalidError := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
-	require.Equal(t, int64(1), afterInvalidError.PrimaryStoreInvalidTotal-beforeInvalidError.PrimaryStoreInvalidTotal)
+	badParent := int64(0)
+	shadow.ParentAccountID = &badParent
+	_, err = (&OpenAIGatewayService{}).resolveOpenAIOutboundSessionIdentityNamespace(context.Background(), shadow)
+	require.ErrorIs(t, err, errOpenAIOutboundSessionIdentityNamespace)
+}
 
-	cache.storeErr = errors.New("ordinary redis outage")
-	beforeOrdinary := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
-	_, ok, err = svc.resolveOpenAIOutboundSessionIdentity(context.Background(), nil, &Account{ID: 803}, "ordinary-error-key")
+func TestNewOpenAICodexIdentitiesUseUUIDv7(t *testing.T) {
+	root, err := newOpenAICodexRootIdentity()
 	require.NoError(t, err)
-	require.True(t, ok)
-	afterOrdinary := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
-	require.Equal(t, int64(1), afterOrdinary.PrimaryStoreFailureTotal-beforeOrdinary.PrimaryStoreFailureTotal)
-	require.Equal(t, int64(0), afterOrdinary.PrimaryStoreInvalidTotal-beforeOrdinary.PrimaryStoreInvalidTotal)
+	require.Equal(t, root.SessionID, root.ThreadID)
+	parsed, err := uuid.Parse(root.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, uuid.Version(7), parsed.Version())
+
+	child, err := newOpenAICodexDescendantIdentity(root.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, root.SessionID, child.SessionID)
+	require.NotEqual(t, child.SessionID, child.ThreadID)
 }

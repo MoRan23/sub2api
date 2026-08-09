@@ -111,10 +111,3 @@ func mergeExtraUpdates(base map[string]any, more map[string]any) map[string]any 
 	}
 	return out
 }
-
-func compactProbeSessionID(accountID int64) string {
-	if accountID <= 0 {
-		return "probe_compact"
-	}
-	return "probe_compact_" + strconv.FormatInt(accountID, 10)
-}

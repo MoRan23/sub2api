@@ -243,7 +243,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 	require.Len(t, captureConn.writes, 2, "应向同一上游连接发送两轮 response.create")
 }
 
-func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7FrameKeyBaselineAndChange(t *testing.T) {
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePromptCacheEstablishesThenKeepsPinnedTuple(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	enableOpenAIIdentityPathFingerprintObservation(t)
 
@@ -265,9 +265,9 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7FrameKeyBa
 
 	firstConn := &openAIWSCaptureConn{events: [][]byte{
 		[]byte(`{"type":"response.completed","response":{"id":"resp_identity_p_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
-		[]byte(`{"type":"response.completed","response":{"id":"resp_identity_p_2","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
 	}}
 	secondConn := &openAIWSCaptureConn{events: [][]byte{
+		[]byte(`{"type":"response.completed","response":{"id":"resp_identity_p_2","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
 		[]byte(`{"type":"response.completed","response":{"id":"resp_identity_q_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
 	}}
 	dialer := &openAIWSQueueDialer{conns: []openAIWSClientConn{firstConn, secondConn}}
@@ -315,7 +315,6 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7FrameKeyBa
 		req.Header = req.Header.Clone()
 		req.URL.Path = "/v1/responses"
 		req.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
-		req.Header.Set("session_id", "handshake-H")
 		ginCtx.Request = req
 
 		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
@@ -350,15 +349,15 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7FrameKeyBa
 		require.Equal(t, wantResponseID, gjson.GetBytes(event, "response.id").String())
 	}
 
-	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"P"}`, "resp_identity_p_1")
+	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false}`, "resp_identity_p_1")
 	require.Equal(t, 1, dialer.DialCount())
-	require.Len(t, SnapshotFingerprintObservations(0), 1, "the first physical upstream handshake must be observed once")
+	require.Len(t, SnapshotFingerprintObservations(0), 1, "the identity-less first physical handshake must be observed once")
 	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"P"}`, "resp_identity_p_2")
-	require.Equal(t, 1, dialer.DialCount(), "repeating the first-frame body key must keep the pinned H identity")
-	require.Len(t, SnapshotFingerprintObservations(0), 1, "a second turn on the same upstream socket must not add an observation")
+	require.Equal(t, 2, dialer.DialCount(), "the first late fallback must acquire a UUID-compatible socket")
+	require.Len(t, SnapshotFingerprintObservations(0), 2, "establishing a late identity must observe the new physical handshake")
 	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"Q"}`, "resp_identity_q_1")
-	require.Equal(t, 2, dialer.DialCount(), "P -> Q must acquire a digest-compatible socket")
-	require.Len(t, SnapshotFingerprintObservations(0), 2, "the logical-key replacement dial must add one observation")
+	require.Equal(t, 2, dialer.DialCount(), "prompt_cache_key is cache policy after the identity is pinned")
+	require.Len(t, SnapshotFingerprintObservations(0), 2, "prompt cache changes on the pinned socket must not add an observation")
 
 	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
 	select {
@@ -368,29 +367,25 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7FrameKeyBa
 		t.Fatal("waiting for UUIDv7 ingress websocket shutdown timed out")
 	}
 
-	require.Len(t, firstConn.writes, 2)
-	require.Len(t, secondConn.writes, 1)
-	firstSessionID := gjson.Get(requestToJSONString(firstConn.writes[0]), "client_metadata.session_id").String()
-	repeatedSessionID := gjson.Get(requestToJSONString(firstConn.writes[1]), "client_metadata.session_id").String()
-	changedSessionID := gjson.Get(requestToJSONString(secondConn.writes[0]), "client_metadata.session_id").String()
-	firstThreadID := gjson.Get(requestToJSONString(firstConn.writes[0]), "client_metadata.thread_id").String()
-	repeatedThreadID := gjson.Get(requestToJSONString(firstConn.writes[1]), "client_metadata.thread_id").String()
-	changedThreadID := gjson.Get(requestToJSONString(secondConn.writes[0]), "client_metadata.thread_id").String()
+	require.Len(t, firstConn.writes, 1)
+	require.Len(t, secondConn.writes, 2)
+	require.Empty(t, gjson.Get(requestToJSONString(firstConn.writes[0]), "client_metadata.session_id").String())
+	firstSessionID := gjson.Get(requestToJSONString(secondConn.writes[0]), "client_metadata.session_id").String()
+	cacheChangedSessionID := gjson.Get(requestToJSONString(secondConn.writes[1]), "client_metadata.session_id").String()
+	firstThreadID := gjson.Get(requestToJSONString(secondConn.writes[0]), "client_metadata.thread_id").String()
+	cacheChangedThreadID := gjson.Get(requestToJSONString(secondConn.writes[1]), "client_metadata.thread_id").String()
 	require.NotEmpty(t, firstSessionID)
 	require.NotEmpty(t, firstThreadID)
-	require.Equal(t, firstSessionID, repeatedSessionID)
-	require.Equal(t, firstThreadID, repeatedThreadID)
-	require.NotEqual(t, firstSessionID, changedSessionID)
-	require.NotEqual(t, firstThreadID, changedThreadID)
+	require.Equal(t, firstSessionID, cacheChangedSessionID)
+	require.Equal(t, firstThreadID, cacheChangedThreadID)
 
 	observations := SnapshotFingerprintObservations(0)
 	require.Len(t, observations, 2)
-	require.Equal(t, changedSessionID, observations[0].SessionID, "newest observation must describe the replacement Q handshake")
-	require.Equal(t, changedThreadID, observations[0].ThreadID, "newest observation must describe the replacement Q handshake")
-	require.Equal(t, firstSessionID, observations[1].SessionID, "older observation must describe the initial H handshake")
-	require.Equal(t, firstThreadID, observations[1].ThreadID, "older observation must describe the initial H handshake")
+	require.Equal(t, firstSessionID, observations[0].SessionID)
+	require.Equal(t, firstThreadID, observations[0].ThreadID)
+	require.Empty(t, observations[1].SessionID)
+	require.Empty(t, observations[1].ThreadID)
 	require.Equal(t, http.MethodGet+" /v1/responses", observations[0].InboundEndpoint)
-	require.Equal(t, http.MethodGet+" /v1/responses", observations[1].InboundEndpoint)
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_LeaseLossSendsRetryClose(t *testing.T) {

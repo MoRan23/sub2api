@@ -2,15 +2,67 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+type codexV01470WireFixture struct {
+	Source  string            `json:"source"`
+	Path    string            `json:"path"`
+	Headers map[string]string `json:"headers"`
+	Body    map[string]any    `json:"body"`
+}
+
+func loadCodexV01470WireFixture(t *testing.T, name string) codexV01470WireFixture {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "codex_v0_147_0", name+".json"))
+	require.NoError(t, err)
+	var fixture codexV01470WireFixture
+	require.NoError(t, json.Unmarshal(raw, &fixture))
+	require.NotEmpty(t, fixture.Source)
+	require.NotEmpty(t, fixture.Path)
+	return fixture
+}
+
+func replaceCodexFixtureIdentityWithLogical(t *testing.T, value any, identity OpenAICodexTurnIdentity) any {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	require.NoError(t, err)
+	replaced := strings.ReplaceAll(string(raw), identity.SessionID, "logical-session")
+	if identity.ThreadID != identity.SessionID {
+		replaced = strings.ReplaceAll(replaced, identity.ThreadID, "logical-thread")
+	}
+	if identity.ParentThreadID != "" && identity.ParentThreadID != identity.SessionID {
+		replaced = strings.ReplaceAll(replaced, identity.ParentThreadID, "logical-parent")
+	}
+	if identity.ForkedFromThreadID != "" && identity.ForkedFromThreadID != identity.SessionID && identity.ForkedFromThreadID != identity.ParentThreadID {
+		replaced = strings.ReplaceAll(replaced, identity.ForkedFromThreadID, "logical-fork")
+	}
+	var logical any
+	require.NoError(t, json.Unmarshal([]byte(replaced), &logical))
+	return logical
+}
+
+func normalizedCodexFixtureHeaders(headers http.Header) map[string]string {
+	normalized := make(map[string]string, len(headers))
+	for name, values := range headers {
+		if len(values) == 0 {
+			continue
+		}
+		normalized[strings.ToLower(name)] = values[0]
+	}
+	return normalized
+}
 
 func newTransportIdentityTestService(t *testing.T, enabled bool) *OpenAIGatewayService {
 	t.Helper()
@@ -76,7 +128,12 @@ func TestBuildUpstreamRequestConsumesPostBuildIdentityMarker(t *testing.T) {
 		context.Background(), c, account, firstBody, "oauth-token", true, "compat-first", false,
 	)
 	require.NoError(t, err)
-	require.Equal(t, isolateOpenAISessionID(0, "compat-first"), firstReq.Header.Get("session_id"))
+	// UUIDv7 mode leaves identity projection to the compatibility bridge's
+	// post-build writer. It must not fall back to the legacy hex headers here.
+	require.Empty(t, firstReq.Header.Get("session-id"))
+	require.Empty(t, firstReq.Header.Get("thread-id"))
+	require.Empty(t, firstReq.Header.Get("session_id"))
+	require.Empty(t, firstReq.Header.Get("conversation_id"))
 	require.False(t, isOpenAIOutboundSessionIdentityPostBuildContext(c))
 
 	secondBody := []byte(`{"model":"gpt-5.4","prompt_cache_key":"ordinary-second"}`)
@@ -86,13 +143,15 @@ func TestBuildUpstreamRequestConsumesPostBuildIdentityMarker(t *testing.T) {
 	require.NoError(t, err)
 	secondWireBody, err := io.ReadAll(secondReq.Body)
 	require.NoError(t, err)
-	require.NotEqual(t, isolateOpenAISessionID(0, "ordinary-second"), secondReq.Header.Get("session_id"))
+	require.NotEqual(t, isolateOpenAISessionID(0, "ordinary-second"), secondReq.Header.Get("session-id"))
 	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(OpenAIOutboundSessionIdentity{
-		SessionID: secondReq.Header.Get("session_id"),
+		SessionID: secondReq.Header.Get("session-id"),
 		ThreadID:  secondReq.Header.Get("thread-id"),
 	}))
-	require.Equal(t, secondReq.Header.Get("thread-id"), secondReq.Header.Get("conversation_id"))
-	require.Equal(t, secondReq.Header.Get("session_id"), gjson.GetBytes(secondWireBody, "client_metadata.session_id").String())
+	require.Equal(t, secondReq.Header.Get("session-id"), secondReq.Header.Get("thread-id"))
+	require.Empty(t, secondReq.Header.Get("session_id"))
+	require.Empty(t, secondReq.Header.Get("conversation_id"))
+	require.Equal(t, secondReq.Header.Get("session-id"), gjson.GetBytes(secondWireBody, "client_metadata.session_id").String())
 	require.Equal(t, secondReq.Header.Get("thread-id"), gjson.GetBytes(secondWireBody, "client_metadata.thread_id").String())
 }
 
@@ -120,7 +179,7 @@ func TestResolveOpenAIOutboundSessionIdentityForTransportUsesFinalBody(t *testin
 	require.NotEmpty(t, first.ThreadID)
 }
 
-func TestResolveOpenAIOutboundSessionIdentityForTransportCompactPromptWins(t *testing.T) {
+func TestResolveOpenAIOutboundSessionIdentityForTransportExplicitTupleWinsPrompt(t *testing.T) {
 	svc := newTransportIdentityTestService(t, true)
 	account := &Account{ID: 810002, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	c := newOutboundIdentityTestContext(t, map[string]string{"session_id": "copied-header"})
@@ -131,7 +190,7 @@ func TestResolveOpenAIOutboundSessionIdentityForTransportCompactPromptWins(t *te
 	)
 	require.NoError(t, err)
 	require.True(t, enabled)
-	require.Equal(t, "prompt-key", key)
+	require.Equal(t, "body-key", key)
 }
 
 func TestResolveOpenAIOutboundSessionIdentityForTransportPinsWSFrameKey(t *testing.T) {
@@ -145,14 +204,24 @@ func TestResolveOpenAIOutboundSessionIdentityForTransportPinsWSFrameKey(t *testi
 		context.Background(), c, account, body, selected, true,
 	)
 	require.NoError(t, err)
-	// Body-only client_metadata was never part of the legacy WS isolate seed,
-	// so enabling UUIDv7 mode must not create a new persistent identity for it.
-	require.False(t, enabled)
-	require.Empty(t, selected)
-	require.Empty(t, key)
+	require.True(t, enabled)
+	require.NotEmpty(t, selected)
+	require.Equal(t, "next-frame-key", key)
 }
 
-func TestBuildOpenAIWSHeadersWithBodyUUIDv7DoesNotExpandLegacyCoverage(t *testing.T) {
+func TestResolveOpenAIWSFrameLogicalIdentityForPinnedStateUsesFallbackOnlyBeforePin(t *testing.T) {
+	body := []byte(`{"prompt_cache_key":"late-root"}`)
+	unpinned := resolveOpenAIWSFrameLogicalIdentityForPinnedState(body, false)
+	require.Equal(t, "late-root", unpinned.SessionKey)
+	require.Equal(t, "late-root", unpinned.ThreadKey)
+	require.False(t, unpinned.Explicit)
+
+	pinned := resolveOpenAIWSFrameLogicalIdentityForPinnedState(body, true)
+	require.Empty(t, pinned.SessionKey)
+	require.Empty(t, pinned.ThreadKey)
+}
+
+func TestBuildOpenAIWSHeadersWithBodyUUIDv7UsesCodexTupleSources(t *testing.T) {
 	svc := newTransportIdentityTestService(t, true)
 	account := &Account{ID: 810008, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	c := newOutboundIdentityTestContext(t, nil)
@@ -165,14 +234,16 @@ func TestBuildOpenAIWSHeadersWithBodyUUIDv7DoesNotExpandLegacyCoverage(t *testin
 		wantIdentity   bool
 	}{
 		{
-			name:    "client metadata",
-			body:    []byte(`{"client_metadata":{"session_id":"frame-metadata-key"}}`),
-			wantKey: "",
+			name:         "client metadata",
+			body:         []byte(`{"client_metadata":{"session_id":"frame-metadata-key"}}`),
+			wantKey:      "frame-metadata-key",
+			wantIdentity: true,
 		},
 		{
-			name:    "turn metadata",
-			body:    []byte(`{"x-codex-turn-metadata":{"thread_id":"frame-turn-key"}}`),
-			wantKey: "",
+			name:         "turn metadata",
+			body:         []byte(`{"x-codex-turn-metadata":{"thread_id":"frame-turn-key"}}`),
+			wantKey:      "frame-turn-key",
+			wantIdentity: true,
 		},
 		{
 			name:           "prompt cache key",
@@ -202,11 +273,17 @@ func TestBuildOpenAIWSHeadersWithBodyUUIDv7DoesNotExpandLegacyCoverage(t *testin
 			require.True(t, resolution.OutboundIdentityModeEnabled)
 			require.Equal(t, tt.wantIdentity, resolution.OutboundIdentityEnabled)
 			require.Equal(t, tt.wantKey, resolution.OutboundIdentityLogicalKey)
-			require.Equal(t, tt.wantKey, resolution.OutboundIdentityFrameKey)
+			if resolution.OutboundLogicalIdentity.Explicit {
+				require.NotEmpty(t, resolution.OutboundIdentityFrameKey)
+			} else {
+				require.Empty(t, resolution.OutboundIdentityFrameKey)
+			}
 			if tt.wantIdentity {
 				require.NoError(t, ValidateOpenAIOutboundSessionIdentity(resolution.OutboundIdentity))
-				require.Equal(t, resolution.OutboundIdentity.SessionID, headers.Get("session_id"))
-				require.Equal(t, resolution.OutboundIdentity.ThreadID, headers.Get("conversation_id"))
+				require.Equal(t, resolution.OutboundIdentity.SessionID, headers.Get("session-id"))
+				require.Equal(t, resolution.OutboundIdentity.ThreadID, headers.Get("thread-id"))
+				require.Empty(t, headers.Get("session_id"))
+				require.Empty(t, headers.Get("conversation_id"))
 				require.NotEmpty(t, resolution.OutboundIdentityDigest)
 			} else {
 				require.Empty(t, headers.Get("session_id"))
@@ -217,7 +294,7 @@ func TestBuildOpenAIWSHeadersWithBodyUUIDv7DoesNotExpandLegacyCoverage(t *testin
 	}
 }
 
-func TestBuildOpenAIWSHeadersWithBodyUUIDv7IgnoresBodyOnlyTurnMetadata(t *testing.T) {
+func TestBuildOpenAIWSHeadersWithBodyUUIDv7UsesExplicitTurnMetadata(t *testing.T) {
 	svc := newTransportIdentityTestService(t, true)
 	account := &Account{ID: 810011, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	c := newOutboundIdentityTestContext(t, nil)
@@ -236,9 +313,38 @@ func TestBuildOpenAIWSHeadersWithBodyUUIDv7IgnoresBodyOnlyTurnMetadata(t *testin
 	)
 	require.NoError(t, err)
 	require.True(t, resolution.OutboundIdentityModeEnabled)
+	require.True(t, resolution.OutboundIdentityEnabled)
+	require.Equal(t, "explicit-turn-key", resolution.OutboundIdentityLogicalKey)
+	require.NotEmpty(t, resolution.OutboundIdentityFrameKey)
+}
+
+func TestBuildOpenAIWSHeadersWithBodyUUIDv7RejectsUnsafeSeedWithoutLegacyFallback(t *testing.T) {
+	svc := newTransportIdentityTestService(t, true)
+	account := &Account{ID: 810012, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	unsafeSeed := strings.Repeat("x", maxPersistedSessionIDLength+1)
+	c := newOutboundIdentityTestContext(t, map[string]string{"session_id": unsafeSeed})
+
+	headers, resolution, err := svc.buildOpenAIWSHeadersWithBody(
+		context.Background(),
+		c,
+		account,
+		"oauth-token",
+		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
+		true,
+		"",
+		"",
+		unsafeSeed,
+		[]byte(`{"model":"gpt-5"}`),
+		false,
+	)
+	require.NoError(t, err)
+	require.True(t, resolution.OutboundIdentityModeEnabled)
 	require.False(t, resolution.OutboundIdentityEnabled)
-	require.Empty(t, resolution.OutboundIdentityLogicalKey)
-	require.Empty(t, resolution.OutboundIdentityFrameKey)
+	require.Empty(t, resolution.OutboundIdentity)
+	require.Empty(t, headers.Get("session-id"))
+	require.Empty(t, headers.Get("thread-id"))
+	require.Empty(t, headers.Get("session_id"))
+	require.Empty(t, headers.Get("conversation_id"))
 }
 
 func TestBuildOpenAIWSHeadersWithBodyUUIDv7KeepsHeaderPriorityAndTracksFrameKey(t *testing.T) {
@@ -263,7 +369,7 @@ func TestBuildOpenAIWSHeadersWithBodyUUIDv7KeepsHeaderPriorityAndTracksFrameKey(
 	require.NoError(t, err)
 	require.True(t, resolution.OutboundIdentityEnabled)
 	require.Equal(t, "handshake-key", resolution.OutboundIdentityLogicalKey)
-	require.Equal(t, "frame-key", resolution.OutboundIdentityFrameKey)
+	require.NotEmpty(t, resolution.OutboundIdentityFrameKey)
 }
 
 func TestAdvanceOpenAIWSFrameLogicalKey(t *testing.T) {
@@ -350,7 +456,7 @@ func TestResolveOpenAIOutboundSessionIdentityForTransportPropagatesNamespaceFail
 	require.True(t, errors.Is(err, errOpenAIOutboundSessionIdentityNamespace))
 }
 
-func TestApplyOpenAIOutboundSessionIdentityCompactHeadersKeepsOnlySessionID(t *testing.T) {
+func TestApplyOpenAIOutboundSessionIdentityCompactHeadersKeepsCanonicalPair(t *testing.T) {
 	headers := http.Header{
 		"Session-Id":          []string{"client-session"},
 		"Thread-Id":           []string{"client-thread"},
@@ -360,11 +466,144 @@ func TestApplyOpenAIOutboundSessionIdentityCompactHeadersKeepsOnlySessionID(t *t
 	}
 	identity := OpenAIOutboundSessionIdentity{SessionID: testOutboundSessionUUID, ThreadID: testOutboundThreadUUID}
 	applyOpenAIOutboundSessionIdentityCompactHeaders(headers, identity)
-	require.Equal(t, identity.SessionID, headers.Get("session_id"))
-	require.Empty(t, headers.Get("session-id"))
-	require.Empty(t, headers.Get("thread-id"))
+	require.Empty(t, headers.Get("session_id"))
+	require.Equal(t, identity.SessionID, headers.Get("session-id"))
+	require.Equal(t, identity.ThreadID, headers.Get("thread-id"))
 	require.Empty(t, headers.Get("conversation_id"))
 	require.Empty(t, headers.Get("x-client-request-id"))
+}
+
+func TestOpenAICodexV01470WireFixtures(t *testing.T) {
+	const fixtureSessionID = "01989f44-7c00-7000-8000-000000000001"
+	const fixtureThreadID = "01989f44-7c00-7000-8000-000000000002"
+
+	tests := []struct {
+		name     string
+		fixture  string
+		compact  bool
+		identity OpenAICodexTurnIdentity
+	}{
+		{
+			name:    "root responses",
+			fixture: "root_responses",
+			identity: OpenAICodexTurnIdentity{
+				SessionID: fixtureSessionID,
+				ThreadID:  fixtureSessionID,
+				Relation:  OpenAICodexTurnRelationRoot,
+			},
+		},
+		{
+			name:    "child responses",
+			fixture: "child_responses",
+			identity: OpenAICodexTurnIdentity{
+				SessionID:      fixtureSessionID,
+				ThreadID:       fixtureThreadID,
+				ParentThreadID: fixtureSessionID,
+				Relation:       OpenAICodexTurnRelationDescendant,
+			},
+		},
+		{
+			name:    "remote compact",
+			fixture: "remote_compact",
+			compact: true,
+			identity: OpenAICodexTurnIdentity{
+				SessionID: fixtureSessionID,
+				ThreadID:  fixtureSessionID,
+				Relation:  OpenAICodexTurnRelationRoot,
+			},
+		},
+		{
+			name:    "websocket response create",
+			fixture: "websocket_response_create",
+			identity: OpenAICodexTurnIdentity{
+				SessionID: fixtureSessionID,
+				ThreadID:  fixtureSessionID,
+				Relation:  OpenAICodexTurnRelationRoot,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := loadCodexV01470WireFixture(t, tt.fixture)
+			require.NoError(t, ValidateOpenAICodexTurnIdentity(tt.identity))
+
+			headers := make(http.Header)
+			if turnMetadata := fixture.Headers[openAIWSTurnMetadataHeader]; turnMetadata != "" {
+				logicalMetadata, ok := replaceCodexFixtureIdentityWithLogical(t, turnMetadata, tt.identity).(string)
+				require.True(t, ok)
+				headers.Set(openAIWSTurnMetadataHeader, logicalMetadata)
+			}
+			// Stale compatibility aliases must not survive either native writer.
+			headers.Set("session_id", "client-session")
+			headers.Set("thread_id", "client-thread")
+			headers.Set("conversation_id", "client-conversation")
+			headers.Set("x-client-request-id", "client-request")
+			if tt.compact {
+				applyOpenAIOutboundSessionIdentityCompactHeaders(headers, tt.identity)
+			} else {
+				ApplyOpenAIOutboundSessionIdentityHeaders(headers, tt.identity)
+			}
+			require.Equal(t, fixture.Headers, normalizedCodexFixtureHeaders(headers))
+
+			logicalBody := replaceCodexFixtureIdentityWithLogical(t, fixture.Body, tt.identity)
+			inputBody, err := json.Marshal(logicalBody)
+			require.NoError(t, err)
+			outboundBody := inputBody
+			if !tt.compact {
+				outboundBody, err = MergeOpenAIOutboundSessionIdentityBody(inputBody, tt.identity)
+				require.NoError(t, err)
+			}
+			var actualBody map[string]any
+			require.NoError(t, json.Unmarshal(outboundBody, &actualBody))
+			require.Equal(t, fixture.Body, actualBody)
+			if tt.compact {
+				_, hasClientMetadata := actualBody["client_metadata"]
+				require.False(t, hasClientMetadata)
+			}
+		})
+	}
+}
+
+func TestOpenAICodexProjectorPreservesMetadataAndEscapesNonASCII(t *testing.T) {
+	const forkThreadID = "018f5c3c-6e3a-7abe-8def-1234567890ad"
+	identity := OpenAICodexTurnIdentity{
+		SessionID:          testOutboundSessionUUID,
+		ThreadID:           testOutboundThreadUUID,
+		ParentThreadID:     testOutboundSessionUUID,
+		ForkedFromThreadID: forkThreadID,
+		Relation:           OpenAICodexTurnRelationDescendant,
+	}
+	require.NoError(t, ValidateOpenAICodexTurnIdentity(identity))
+	logicalMetadata := `{"request_kind":"turn","label":"你好😀","session_id":"logical-session","thread_id":"logical-thread","parent_thread_id":"logical-parent","forked_from_thread_id":"logical-fork"}`
+	headers := http.Header{openAIWSTurnMetadataHeader: []string{logicalMetadata}}
+	ApplyOpenAIOutboundSessionIdentityHeaders(headers, identity)
+
+	require.Equal(t, identity.SessionID, headers.Get("session-id"))
+	require.Equal(t, identity.ThreadID, headers.Get("thread-id"))
+	require.Equal(t, identity.ParentThreadID, headers.Get("x-codex-parent-thread-id"))
+	headerMetadata := headers.Get(openAIWSTurnMetadataHeader)
+	require.NotContains(t, headerMetadata, "你好")
+	require.Contains(t, headerMetadata, `\u4f60\u597d\ud83d\ude00`)
+	require.Equal(t, "turn", gjson.Get(headerMetadata, "request_kind").String())
+	require.Equal(t, "你好😀", gjson.Get(headerMetadata, "label").String())
+	require.Equal(t, identity.SessionID, gjson.Get(headerMetadata, "session_id").String())
+	require.Equal(t, identity.ThreadID, gjson.Get(headerMetadata, "thread_id").String())
+	require.Equal(t, identity.ParentThreadID, gjson.Get(headerMetadata, "parent_thread_id").String())
+	require.Equal(t, identity.ForkedFromThreadID, gjson.Get(headerMetadata, "forked_from_thread_id").String())
+
+	body := []byte(`{"model":"gpt-5.4","client_metadata":{"keep":"value","session_id":"logical-session","thread_id":"logical-thread","x-codex-turn-metadata":"{\"request_kind\":\"turn\",\"label\":\"你好😀\"}"}}`)
+	outboundBody, err := MergeOpenAIOutboundSessionIdentityBody(body, identity)
+	require.NoError(t, err)
+	require.Equal(t, "value", gjson.GetBytes(outboundBody, "client_metadata.keep").String())
+	require.Equal(t, identity.SessionID, gjson.GetBytes(outboundBody, "client_metadata.session_id").String())
+	require.Equal(t, identity.ThreadID, gjson.GetBytes(outboundBody, "client_metadata.thread_id").String())
+	require.Equal(t, identity.ParentThreadID, gjson.GetBytes(outboundBody, "client_metadata.x-codex-parent-thread-id").String())
+	bodyMetadata := gjson.GetBytes(outboundBody, "client_metadata.x-codex-turn-metadata").String()
+	require.NotContains(t, bodyMetadata, "你好")
+	require.Contains(t, bodyMetadata, `\u4f60\u597d\ud83d\ude00`)
+	require.Equal(t, identity.ParentThreadID, gjson.Get(bodyMetadata, "parent_thread_id").String())
+	require.Equal(t, identity.ForkedFromThreadID, gjson.Get(bodyMetadata, "forked_from_thread_id").String())
 }
 
 func TestOpenAIWSOutboundIdentityHeaderValueForLogUsesDigest(t *testing.T) {
@@ -373,11 +612,11 @@ func TestOpenAIWSOutboundIdentityHeaderValueForLogUsesDigest(t *testing.T) {
 	ApplyOpenAIOutboundSessionIdentityHeaders(headers, identity)
 	digest := openAIWSOutboundIdentityDigest(identity)
 
-	logged := openAIWSOutboundIdentityHeaderValueForLog(headers, "session_id", digest)
+	logged := openAIWSOutboundIdentityHeaderValueForLog(headers, "session-id", digest)
 	require.Equal(t, "uuidv7:"+digest[:12], logged)
 	require.NotContains(t, logged, identity.SessionID)
 	require.NotContains(t, logged, identity.ThreadID)
-	require.Equal(t, identity.SessionID, openAIWSOutboundIdentityHeaderValueForLog(headers, "session_id", ""))
+	require.Equal(t, identity.SessionID, openAIWSOutboundIdentityHeaderValueForLog(headers, "session-id", ""))
 }
 
 func TestOpenAIWSConnPoolIdentityDigestScopesReuseAndPreferred(t *testing.T) {

@@ -94,10 +94,9 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 
 // buildOpenAIWSHeadersWithBody is the body-aware variant used by production
 // transports. The compatibility wrapper above keeps existing unit fixtures
-// and narrow callers source-compatible.  The body is still accepted so the
-// caller can merge a resolved pair into a Responses payload, but WS session
-// identity selection intentionally follows the legacy helper's seed domain:
-// handshake session/conversation headers and prompt_cache_key only.
+// and narrow callers source-compatible. V2 uses the finalized Responses body
+// together with canonical turn metadata and headers to resolve the complete
+// Codex tuple; legacy mode keeps its original header/prompt seed behavior.
 func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 	ctx context.Context,
 	c *gin.Context,
@@ -144,73 +143,41 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 			}
 		}
 	}
-	// OAuth 账号：旧模式将 apiKeyID 混入 session 标识符；UUIDv7 模式改为
-	// 以连接级 logical key 解析一个成对的 session/thread 身份，避免把
-	// session_id 与 conversation_id 分别映射而撕裂续链。
+	// OAuth 账号：旧模式继续分别隔离 session/conversation。V2 模式从
+	// canonical turn metadata、header 和 Responses body 一次解析完整 tuple，
+	// 并把该身份固定到物理 upstream socket。
 	if account != nil && account.Type == AccountTypeOAuth {
 		sessionResolution.OutboundIdentityModeEnabled = s.openAIOutboundSessionIdentityTransportEnabledForRequest(ctx, c)
-		// Disabled mode retains the legacy header/prompt selection exactly. In
-		// UUIDv7 mode, select the handshake identity once from that same legacy
-		// seed domain. Body-only client_metadata and turn metadata never created a
-		// 16-hex identity here, so they must not become a new UUIDv7 trigger.
 		logicalSessionKey := strings.TrimSpace(sessionResolution.SessionID)
 		if logicalSessionKey == "" {
 			logicalSessionKey = strings.TrimSpace(sessionResolution.ConversationID)
 		}
-		identityForceCallerSeed := false
 		if sessionResolution.OutboundIdentityModeEnabled {
-			sessionResolution.OutboundIdentityFrameKey = resolveOpenAIWSFrameLogicalKey(body, promptCacheKey)
-			// sessionResolution already contains the old effective seed (including
-			// prompt_cache_key when no handshake header was present). Pin it so the
-			// general resolver cannot replace it with body metadata or an affinity
-			// header on a second pass.
-			identityForceCallerSeed = logicalSessionKey != ""
-		}
-		if logicalSessionKey != "" {
-			identityCallerSeed := logicalSessionKey
-			if isOpenAIResponsesCompactPath(c) && promptCacheKey != "" {
-				identityCallerSeed = promptCacheKey
-				identityForceCallerSeed = true
-			}
-			identity, resolvedLogicalKey, identityEnabled, identityErr := s.resolveOpenAIOutboundSessionIdentityForTransportSnapshot(
+			identity, logicalIdentity, identityEnabled, identityErr := s.resolveOpenAICodexTurnIdentityForTransportSnapshot(
 				ctx,
 				c,
 				account,
-				// The old WS isolate call never inspected response.create body
-				// metadata. Passing no body here makes that coverage boundary
-				// explicit in addition to forcing the selected seed above.
-				nil,
-				identityCallerSeed,
-				identityForceCallerSeed,
+				body,
+				logicalSessionKey,
+				turnMetadata,
 				sessionResolution.OutboundIdentityModeEnabled,
 			)
 			if identityErr != nil {
 				return nil, sessionResolution, fmt.Errorf("resolve openai outbound session identity: %w", identityErr)
 			}
-			sessionResolution.OutboundIdentityLogicalKey = resolvedLogicalKey
+			sessionResolution.OutboundLogicalIdentity = logicalIdentity
+			sessionResolution.OutboundIdentityLogicalKey = logicalIdentity.SessionKey
+			if logicalIdentity.Explicit {
+				sessionResolution.OutboundIdentityFrameKey = openAICodexLogicalTurnIdentityKey(logicalIdentity)
+			}
 			if identityEnabled {
 				ApplyOpenAIOutboundSessionIdentityHeaders(headers, identity)
 				sessionResolution.OutboundIdentityEnabled = true
 				sessionResolution.OutboundIdentity = identity
 				sessionResolution.OutboundIdentityDigest = openAIWSOutboundIdentityDigest(identity)
-			} else {
-				// UUIDv7 resolution is fail-open. If an explicit key was present
-				// but generation/primary storage failed, this connection is using
-				// legacy headers and must not later enter the UUID-only key-change
-				// state machine. Keep mode enabled only for a key-less handshake,
-				// where a later turn may legitimately establish the first pair.
-				if strings.TrimSpace(logicalSessionKey) != "" {
-					sessionResolution.OutboundIdentityModeEnabled = false
-				}
-				apiKeyID := getAPIKeyIDFromContext(c)
-				if sessionResolution.SessionID != "" {
-					headers.Set("session_id", isolateOpenAISessionID(apiKeyID, sessionResolution.SessionID))
-				}
-				if sessionResolution.ConversationID != "" {
-					headers.Set("conversation_id", isolateOpenAISessionID(apiKeyID, sessionResolution.ConversationID))
-				}
 			}
-		} else {
+		}
+		if !sessionResolution.OutboundIdentityModeEnabled {
 			apiKeyID := getAPIKeyIDFromContext(c)
 			if sessionResolution.SessionID != "" {
 				headers.Set("session_id", isolateOpenAISessionID(apiKeyID, sessionResolution.SessionID))

@@ -1,0 +1,21 @@
+{
+  "source": "codex-rs/core/tests/suite/responses_api_proxy_headers.rs",
+  "path": "/v1/responses",
+  "headers": {
+    "session-id": "01989f44-7c00-7000-8000-000000000001",
+    "thread-id": "01989f44-7c00-7000-8000-000000000002",
+    "x-client-request-id": "01989f44-7c00-7000-8000-000000000002",
+    "x-codex-parent-thread-id": "01989f44-7c00-7000-8000-000000000001",
+    "x-codex-turn-metadata": "{\"parent_thread_id\":\"01989f44-7c00-7000-8000-000000000001\",\"request_kind\":\"turn\",\"session_id\":\"01989f44-7c00-7000-8000-000000000001\",\"thread_id\":\"01989f44-7c00-7000-8000-000000000002\"}"
+  },
+  "body": {
+    "client_metadata": {
+      "session_id": "01989f44-7c00-7000-8000-000000000001",
+      "thread_id": "01989f44-7c00-7000-8000-000000000002",
+      "x-codex-parent-thread-id": "01989f44-7c00-7000-8000-000000000001",
+      "x-codex-turn-metadata": "{\"parent_thread_id\":\"01989f44-7c00-7000-8000-000000000001\",\"request_kind\":\"turn\",\"session_id\":\"01989f44-7c00-7000-8000-000000000001\",\"thread_id\":\"01989f44-7c00-7000-8000-000000000002\"}"
+    },
+    "prompt_cache_key": "logical-root",
+    "stream": true
+  }
+}

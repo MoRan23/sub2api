@@ -272,12 +272,13 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 	alphaSessionID := strings.TrimSpace(gjson.GetBytes(alphaBody, "id").String())
 	outboundIdentity := OpenAIOutboundSessionIdentity{}
 	outboundIdentityEnabled := false
+	identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
 	// Alpha historically isolated only when alphaBody.id was present. Keep the
 	// setting gate and identity lookup inside that same hit condition; the final
 	// header write below is intentionally delayed until all account/client
 	// overrides and installation processing have completed.
 	if alphaSessionID != "" {
-		if s.openAIOutboundSessionIdentityTransportEnabledForRequest(ctx, c) {
+		if identityModeEnabled {
 			var identityErr error
 			outboundIdentity, _, outboundIdentityEnabled, identityErr = s.resolveOpenAIOutboundSessionIdentityForTransport(
 				ctx,
@@ -291,7 +292,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 				return nil, fmt.Errorf("resolve openai outbound session identity: %w", identityErr)
 			}
 		}
-		if !outboundIdentityEnabled {
+		if !outboundIdentityEnabled && !identityModeEnabled {
 			isolated := isolateOpenAISessionID(apiKeyID, alphaSessionID)
 			req.Header.Set("Session_ID", isolated)
 			req.Header.Set("Conversation_ID", isolated)

@@ -43,6 +43,11 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if account.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPI(account.Extra) {
 		return s.forwardAnthropicViaRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
+	identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
+	inboundLogicalIdentity := OpenAICodexLogicalTurnIdentity{}
+	if identityModeEnabled && account.Platform != PlatformGrok {
+		inboundLogicalIdentity = ResolveOpenAICodexLogicalTurnIdentity(c, body, "")
+	}
 
 	startTime := time.Now()
 
@@ -331,7 +336,13 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// condition intact is required for disabled-mode wire compatibility.
 	if account.Platform != PlatformGrok && promptCacheKey != "" {
 		var identityErr error
-		outboundIdentity, _, outboundIdentityEnabled, identityErr = s.resolveOpenAIOutboundSessionIdentityForTransport(ctx, c, account, responsesBody, promptCacheKey, true)
+		if identityModeEnabled && inboundLogicalIdentity.Explicit {
+			outboundIdentity, outboundIdentityEnabled, identityErr = s.resolveOpenAICodexLogicalIdentityForTransport(
+				ctx, c, account, inboundLogicalIdentity, true,
+			)
+		} else {
+			outboundIdentity, _, outboundIdentityEnabled, identityErr = s.resolveOpenAIOutboundSessionIdentityForTransport(ctx, c, account, responsesBody, promptCacheKey, true)
+		}
 		if identityErr != nil {
 			return nil, fmt.Errorf("resolve openai outbound session identity: %w", identityErr)
 		}
@@ -354,7 +365,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		if outboundIdentityEnabled {
 			ApplyOpenAIOutboundSessionIdentityHeaders(upstreamReq.Header, outboundIdentity)
 			setFingerprintObservationOutboundIdentity(c, outboundIdentity)
-		} else {
+		} else if !identityModeEnabled {
 			isolatedSessionID := generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey))
 			upstreamReq.Header.Set("session_id", isolatedSessionID)
 			if upstreamReq.Header.Get("conversation_id") != "" {

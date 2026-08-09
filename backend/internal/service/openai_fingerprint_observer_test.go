@@ -1,10 +1,13 @@
 package service
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -49,6 +52,9 @@ func TestFingerprintObserverScrubsRingOnDisable(t *testing.T) {
 	SetFingerprintObservationEnabled(false)
 	if got := SnapshotFingerprintObservations(1); len(got) != 0 {
 		t.Fatalf("disabled observer returned %d stale entries", len(got))
+	}
+	if page := SnapshotFingerprintObservationSessions(1, 20, 0); page.Total != 0 || len(page.Items) != 0 {
+		t.Fatalf("disabled observer returned stale session tree: %+v", page)
 	}
 	globalFingerprintObserver.mu.Lock()
 	defer globalFingerprintObserver.mu.Unlock()
@@ -155,6 +161,81 @@ func TestRecordFingerprintObservationBodyFallbackKeepsHeadersAuthoritative(t *te
 	}
 	if entry.ThreadID != fingerprintObserverThreadV7 {
 		t.Fatalf("valid body fallback was not captured: %+v", entry)
+	}
+}
+
+func TestRecordFingerprintObservationCapturesFinalParentAndForkProjection(t *testing.T) {
+	SetFingerprintObservationEnabled(true)
+	defer SetFingerprintObservationEnabled(false)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	forkedFrom := "018f5c3c-6e3a-7abe-8def-1234567890ad"
+	identity := OpenAICodexTurnIdentity{
+		SessionID:          fingerprintObserverSessionV7,
+		ThreadID:           fingerprintObserverThreadV7,
+		ParentThreadID:     fingerprintObserverSessionV7,
+		ForkedFromThreadID: forkedFrom,
+		Relation:           OpenAICodexTurnRelationDescendant,
+	}
+	setFingerprintObservationOutboundIdentity(c, identity)
+	body := []byte(`{"client_metadata":{"session_id":"` + fingerprintObserverSessionV7 + `","thread_id":"` + fingerprintObserverThreadV7 + `","x-codex-parent-thread-id":"` + fingerprintObserverSessionV7 + `","x-codex-turn-metadata":"{\"session_id\":\"` + fingerprintObserverSessionV7 + `\",\"thread_id\":\"` + fingerprintObserverThreadV7 + `\",\"parent_thread_id\":\"` + fingerprintObserverSessionV7 + `\",\"forked_from_thread_id\":\"` + forkedFrom + `\"}"}}`)
+	(&OpenAIGatewayService{}).recordFingerprintObservationWithBody(
+		c,
+		newOpenAIOAuthPinAccount(9209, nil),
+		installationIDResolution{},
+		http.Header{
+			"session-id":               []string{fingerprintObserverSessionV7},
+			"thread-id":                []string{fingerprintObserverThreadV7},
+			"x-codex-parent-thread-id": []string{fingerprintObserverSessionV7},
+		},
+		body,
+	)
+
+	entry := SnapshotFingerprintObservations(1)[0]
+	if entry.SessionID != identity.SessionID || entry.ThreadID != identity.ThreadID ||
+		entry.ParentThreadID != identity.ParentThreadID || entry.ForkedFromThreadID != identity.ForkedFromThreadID {
+		t.Fatalf("final hierarchical identity was not captured: %+v", entry)
+	}
+}
+
+func TestRecordFingerprintObservationAcceptsRootIdentity(t *testing.T) {
+	SetFingerprintObservationEnabled(true)
+	defer SetFingerprintObservationEnabled(false)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	setFingerprintObservationOutboundIdentity(c, OpenAICodexTurnIdentity{
+		SessionID: fingerprintObserverSessionV7,
+		ThreadID:  fingerprintObserverSessionV7,
+		Relation:  OpenAICodexTurnRelationRoot,
+	})
+	(&OpenAIGatewayService{}).recordFingerprintObservation(
+		c,
+		newOpenAIOAuthPinAccount(9210, nil),
+		installationIDResolution{},
+		http.Header{
+			"session-id": []string{fingerprintObserverSessionV7},
+			"thread-id":  []string{fingerprintObserverSessionV7},
+		},
+	)
+
+	entry := SnapshotFingerprintObservations(1)[0]
+	if entry.SessionID != fingerprintObserverSessionV7 || entry.ThreadID != fingerprintObserverSessionV7 {
+		t.Fatalf("root identity was not observed: %+v", entry)
+	}
+}
+
+func TestFingerprintObservationTurnMetadataUUIDValidation(t *testing.T) {
+	headers := http.Header{
+		"x-codex-turn-metadata": []string{`{"forked_from_thread_id":"` + fingerprintObserverThreadV7 + `"}`},
+	}
+	if got, present := fingerprintObservationTurnMetadataHeaderUUID(headers, fingerprintObserverThreadV7, "forked_from_thread_id"); !present || got != fingerprintObserverThreadV7 {
+		t.Fatalf("valid final turn metadata was rejected: got=%q present=%v", got, present)
+	}
+	headers.Set("x-codex-turn-metadata", `{"forked_from_thread_id":"018f5c3c-6e3a-4abc-8def-1234567890ab"}`)
+	if got, present := fingerprintObservationTurnMetadataHeaderUUID(headers, fingerprintObserverThreadV7, "forked_from_thread_id"); !present || got != "" {
+		t.Fatalf("non-UUIDv7 turn metadata was accepted: got=%q present=%v", got, present)
 	}
 }
 
@@ -349,7 +430,12 @@ func TestFingerprintObserverConcurrentDisableCannotRetainEntries(t *testing.T) {
 		go func() {
 			defer writers.Done()
 			for j := 0; j < 200; j++ {
-				observer.record(FingerprintObservationEntry{AccountName: "must-be-scrubbed"})
+				observer.record(FingerprintObservationEntry{
+					AccountName: "must-be-scrubbed",
+					Username:    "pii-user",
+					Email:       "pii@example.com",
+					APIKeyName:  "pii-key-name",
+				})
 			}
 		}()
 	}
@@ -365,5 +451,137 @@ func TestFingerprintObserverConcurrentDisableCannotRetainEntries(t *testing.T) {
 		if entry != (FingerprintObservationEntry{}) {
 			t.Fatalf("ring slot %d retained data after concurrent disable: %+v", i, entry)
 		}
+	}
+}
+
+func TestFingerprintObservationSessionPaginationUsesStableSnapshot(t *testing.T) {
+	SetFingerprintObservationEnabled(false)
+	SetFingerprintObservationEnabled(true)
+	defer SetFingerprintObservationEnabled(false)
+
+	base := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
+	sessionA := fingerprintObserverSessionV7
+	threadA1 := fingerprintObserverThreadV7
+	threadA2 := "018f5c3c-6e3a-7abe-8def-1234567890ad"
+	sessionB := "018f5c3c-6e3b-7abc-8def-1234567890ae"
+	sessionC := "018f5c3c-6e3c-7abc-8def-1234567890af"
+	actor := FingerprintObservationEntry{
+		UserID: 41, Username: "operator", Email: "operator@example.com",
+		APIKeyID: 73, APIKeyName: "desktop",
+	}
+	record := func(at time.Time, sessionID, threadID, parentID, forkID string) {
+		entry := actor
+		entry.Timestamp = at
+		entry.SessionID = sessionID
+		entry.ThreadID = threadID
+		entry.ParentThreadID = parentID
+		entry.ForkedFromThreadID = forkID
+		globalFingerprintObserver.record(entry)
+	}
+	record(base, sessionA, sessionA, "", "")
+	record(base.Add(time.Second), sessionA, threadA1, sessionA, "")
+	record(base.Add(2*time.Second), sessionB, sessionB, "", "")
+	record(base.Add(3*time.Second), sessionA, threadA2, sessionA, threadA1)
+
+	first := SnapshotFingerprintObservationSessions(1, 1, 0)
+	if first.Total != 2 || first.Pages != 2 || len(first.Items) != 1 {
+		t.Fatalf("unexpected first page: %+v", first)
+	}
+	if first.Items[0].SessionID != sessionA || first.Items[0].ObservationCount != 3 {
+		t.Fatalf("newest session was not first: %+v", first.Items[0])
+	}
+	if first.Items[0].RootThread == nil || first.Items[0].RootThread.ThreadID != sessionA {
+		t.Fatalf("root thread was not grouped: %+v", first.Items[0].RootThread)
+	}
+	if len(first.Items[0].ChildThreads) != 2 || first.Items[0].ChildThreads[0].ThreadID != threadA2 {
+		t.Fatalf("child threads are not unique/newest-first: %+v", first.Items[0].ChildThreads)
+	}
+	if first.Items[0].ChildThreads[0].ParentThreadID != sessionA || first.Items[0].ChildThreads[0].ForkedFromThreadID != threadA1 {
+		t.Fatalf("child relationship was not retained: %+v", first.Items[0].ChildThreads[0])
+	}
+	if first.Items[0].ChildThreads[0].Relation != "descendant" || first.Items[0].RootThread.Relation != "root" {
+		t.Fatalf("unexpected relation projection: root=%q child=%q", first.Items[0].RootThread.Relation, first.Items[0].ChildThreads[0].Relation)
+	}
+
+	record(base.Add(4*time.Second), sessionC, sessionC, "", "")
+	second := SnapshotFingerprintObservationSessions(2, 1, first.SnapshotSeq)
+	if second.SnapshotSeq != first.SnapshotSeq || second.Total != 2 || len(second.Items) != 1 || second.Items[0].SessionID != sessionB {
+		t.Fatalf("new records shifted a bounded snapshot: first=%+v second=%+v", first, second)
+	}
+	fresh := SnapshotFingerprintObservationSessions(1, 20, 0)
+	if fresh.Total != 3 || len(fresh.Items) != 3 || fresh.Items[0].SessionID != sessionC {
+		t.Fatalf("fresh snapshot did not include the new session: %+v", fresh)
+	}
+}
+
+func TestFingerprintObservationGroupingSeparatesActorsAndEmptySessions(t *testing.T) {
+	observer := &fingerprintObserver{ring: make([]FingerprintObservationEntry, 16)}
+	observer.setEnabled(true)
+	base := time.Date(2026, time.August, 9, 13, 0, 0, 0, time.UTC)
+	observer.record(FingerprintObservationEntry{Timestamp: base, UserID: 1, APIKeyID: 10})
+	observer.record(FingerprintObservationEntry{Timestamp: base.Add(time.Second), UserID: 1, APIKeyID: 10})
+	observer.record(FingerprintObservationEntry{
+		Timestamp: base.Add(2 * time.Second), UserID: 1, APIKeyID: 10,
+		SessionID: fingerprintObserverSessionV7,
+	})
+	observer.record(FingerprintObservationEntry{
+		Timestamp: base.Add(3 * time.Second), UserID: 2, APIKeyID: 20,
+		SessionID: fingerprintObserverSessionV7, ThreadID: fingerprintObserverSessionV7,
+	})
+
+	entries, highWater := observer.snapshotThrough(0)
+	sessions := aggregateFingerprintObservationSessions(entries)
+	if highWater != 4 || len(sessions) != 4 {
+		t.Fatalf("empty sessions or actor boundary were merged: highWater=%d sessions=%+v", highWater, sessions)
+	}
+	var compact *FingerprintObservationSessionNode
+	for i := range sessions {
+		if sessions[i].UserID == 1 && sessions[i].SessionID == fingerprintObserverSessionV7 {
+			compact = &sessions[i]
+			break
+		}
+	}
+	if compact == nil || len(compact.UnthreadedObservations) != 1 || compact.RootThread != nil {
+		t.Fatalf("compact observation was not placed in the unthreaded branch: %+v", compact)
+	}
+}
+
+func TestRecordFingerprintObservationCopiesActorWithoutRawAPIKey(t *testing.T) {
+	SetFingerprintObservationEnabled(false)
+	SetFingerprintObservationEnabled(true)
+	defer SetFingerprintObservationEnabled(false)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set("api_key", &APIKey{
+		ID: 808, UserID: 707, Key: "sk-must-never-be-observed", Name: "workstation",
+		User: &User{ID: 707, Username: "alice", Email: "alice@example.com"},
+	})
+
+	(&OpenAIGatewayService{}).recordFingerprintObservation(
+		c,
+		newOpenAIOAuthPinAccount(9401, nil),
+		installationIDResolution{},
+		http.Header{},
+	)
+	entry := SnapshotFingerprintObservations(1)[0]
+	if entry.UserID != 707 || entry.Username != "alice" || entry.Email != "alice@example.com" ||
+		entry.APIKeyID != 808 || entry.APIKeyName != "workstation" {
+		t.Fatalf("actor snapshot mismatch: %+v", entry)
+	}
+	encoded, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("marshal observation: %v", err)
+	}
+	if bytes.Contains(encoded, []byte("sk-must-never-be-observed")) {
+		t.Fatalf("observation leaked raw API key: %s", encoded)
+	}
+}
+
+func TestFingerprintObservationPageNormalizesBounds(t *testing.T) {
+	SetFingerprintObservationEnabled(false)
+	page := SnapshotFingerprintObservationSessions(0, 1000, 0)
+	if page.Page != 1 || page.PageSize != 100 || page.Pages != 1 || page.Items == nil {
+		t.Fatalf("pagination bounds were not normalized: %+v", page)
 	}
 }

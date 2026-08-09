@@ -655,11 +655,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	// Turns without a logical key inherit it; an explicit key change releases
 	// the lease and resolves a new pair before the next frame is sent.
 	pinnedIdentityModeEnabled := wsSessionResolution.OutboundIdentityModeEnabled
-	pinnedIdentityLogicalKey := wsSessionResolution.OutboundIdentityLogicalKey
+	pinnedLogicalIdentity := wsSessionResolution.OutboundLogicalIdentity
 	pinnedIdentity := wsSessionResolution.OutboundIdentity
 	pinnedIdentityEnabled := wsSessionResolution.OutboundIdentityEnabled
 	pinnedIdentityDigest := wsSessionResolution.OutboundIdentityDigest
-	lastExplicitIdentityFrameKey := wsSessionResolution.OutboundIdentityFrameKey
 	identityChangedForNextTurn := false
 	if pinnedIdentityEnabled {
 		if mergedPayload, mergeErr := MergeOpenAIOutboundSessionIdentityBody(firstPayload.payloadRaw, pinnedIdentity); mergeErr == nil {
@@ -1693,94 +1692,67 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return rewriteErr
 		}
 		if pinnedIdentityModeEnabled {
-			// In UUIDv7 mode an empty result means this turn has no explicit
-			// prompt-cache key and inherits the current socket identity.  This is
-			// the same per-turn signal the legacy WS builder received; body-only
-			// metadata must not expand the old isolate coverage.
-			candidateLogicalKey := resolveOpenAIWSFrameLogicalKey(nextPayload.payloadRaw, nextPayload.promptCacheKey)
-			nextExplicitFrameKey, identityKeyChanged := advanceOpenAIWSFrameLogicalKey(
-				candidateLogicalKey,
-				lastExplicitIdentityFrameKey,
-				pinnedIdentityLogicalKey,
+			// A turn without an explicit session/thread tuple inherits the socket's
+			// pinned identity. Before any pair has been sent, the first prompt cache
+			// fallback may establish a root identity on a new compatible socket.
+			// Afterwards prompt_cache_key is cache policy and cannot switch identity.
+			candidateLogicalIdentity := resolveOpenAIWSFrameLogicalIdentityForPinnedState(
+				nextPayload.payloadRaw,
+				pinnedIdentityEnabled,
 			)
-			if identityKeyChanged {
-				newIdentity, resolvedKey, newIdentityEnabled, identityErr := s.resolveOpenAIOutboundSessionIdentityForTransportSnapshot(
-					ctx,
-					c,
-					account,
-					nextPayload.payloadRaw,
-					candidateLogicalKey,
-					true,
-					pinnedIdentityModeEnabled,
+			identityChangedForNextTurn = strings.TrimSpace(candidateLogicalIdentity.SessionKey) != "" &&
+				(!pinnedIdentityEnabled || !openAICodexLogicalTurnIdentityEqual(candidateLogicalIdentity, pinnedLogicalIdentity))
+			if identityChangedForNextTurn {
+				newIdentity, newIdentityEnabled, identityErr := s.resolveOpenAICodexTurnIdentity(
+					ctx, c, account, candidateLogicalIdentity,
 				)
 				if identityErr != nil {
-					return fmt.Errorf("resolve openai outbound session identity for websocket turn: %w", identityErr)
-				}
-				if !newIdentityEnabled || resolvedKey == "" {
-					if !pinnedIdentityEnabled {
-						// No UUID pair has been sent on this socket yet. A store or
-						// generation failure must therefore fail open to the historical
-						// handshake/body behavior instead of rejecting the client's first
-						// explicit key. Disable the state machine for the remainder of
-						// this request so a later reconnect cannot repeatedly retry the
-						// unavailable identity store.
-						pinnedIdentityModeEnabled = false
-						pinnedIdentityEnabled = false
-						pinnedIdentityLogicalKey = ""
-						pinnedIdentity = OpenAIOutboundSessionIdentity{}
-						pinnedIdentityDigest = ""
-						lastExplicitIdentityFrameKey = ""
-						if c != nil {
-							c.Set(openAIOutboundSessionIdentityRequestSnapshotKey, false)
-						}
-						// The old ingress path only rebuilt headers for a prompt-cache
-						// seed. Preserve that update when present; body-only metadata
-						// never had a legacy header update to apply.
-						if nextPayload.promptCacheKey != "" {
-							updatedHeaders, _, updHdrErr := s.buildOpenAIWSHeaders(ctx, c, account, token, wsDecision, isCodexCLI, turnState, c.GetHeader(openAIWSTurnMetadataHeader), nextPayload.promptCacheKey, true)
-							if updHdrErr != nil {
-								logOpenAIWSModeInfo("openai_ws_update_headers_failed account_id=%d err=%v", account.ID, updHdrErr)
-							} else {
-								baseAcquireReq.Headers = updatedHeaders
-							}
-						}
-					} else {
-						// Once a pair has been used on the socket, changing the key
-						// cannot be made safe without a new compatible connection.
-						return NewOpenAIWSClientCloseError(
-							coderws.StatusPolicyViolation,
-							"unable to resolve websocket session identity for logical key change",
-							nil,
-						)
+					if errors.Is(identityErr, errOpenAIOutboundSessionIdentityNamespace) {
+						return fmt.Errorf("resolve openai outbound session identity for websocket turn: %w", identityErr)
 					}
+					// Never forward a client-owned tuple after V2 resolution failed. The
+					// mapper already falls back from Redis to the local hierarchical store,
+					// so any remaining failure requires a fresh client connection.
+					return NewOpenAIWSClientCloseError(
+						coderws.StatusPolicyViolation,
+						"unable to resolve websocket session identity for logical key change",
+						identityErr,
+					)
 				}
-				if newIdentityEnabled && resolvedKey != "" {
+				if identityErr == nil && !newIdentityEnabled {
+					// A non-empty candidate must never be sent without a server-owned pair,
+					// regardless of whether the previous socket was already pinned.
+					return NewOpenAIWSClientCloseError(
+						coderws.StatusPolicyViolation,
+						"unable to resolve websocket session identity for logical key change",
+						nil,
+					)
+				}
+				if identityErr == nil && newIdentityEnabled {
 					// The old lease has completed its turn. Release it before acquiring
 					// a digest-compatible socket so a changed key can never be written
 					// on the previous handshake.
 					resetSessionLease(false)
-					pinnedIdentityLogicalKey = resolvedKey
+					pinnedLogicalIdentity = candidateLogicalIdentity
 					pinnedIdentity = newIdentity
 					pinnedIdentityEnabled = true
 					pinnedIdentityDigest = openAIWSOutboundIdentityDigest(newIdentity)
-					identityChangedForNextTurn = true
 				}
-			}
-			lastExplicitIdentityFrameKey = nextExplicitFrameKey
-			if identityChangedForNextTurn {
-				// All non-identity handshake headers are connection-scoped and
-				// remain valid for the new logical key. Reuse that finalized
-				// snapshot instead of resolving the static client header again,
-				// which could allocate an unnecessary pair for the old key.
-				updatedHeaders := cloneHeader(baseAcquireReq.Headers)
-				if updatedHeaders == nil {
-					return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to rebuild websocket session identity headers", errors.New("base websocket headers are nil"))
+				if identityErr == nil && newIdentityEnabled {
+					// All non-identity handshake headers are connection-scoped and
+					// remain valid for the new logical key. Reuse that finalized
+					// snapshot instead of resolving the static client header again,
+					// which could allocate an unnecessary pair for the old key.
+					updatedHeaders := cloneHeader(baseAcquireReq.Headers)
+					if updatedHeaders == nil {
+						return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to rebuild websocket session identity headers", errors.New("base websocket headers are nil"))
+					}
+					clearOpenAIOutboundSessionIdentityHeaders(updatedHeaders)
+					ApplyOpenAIOutboundSessionIdentityHeaders(updatedHeaders, pinnedIdentity)
+					setFingerprintObservationOutboundIdentity(c, pinnedIdentity)
+					baseAcquireReq.Headers = updatedHeaders
+					baseAcquireReq.IdentityDigest = pinnedIdentityDigest
 				}
-				clearOpenAIOutboundSessionIdentityHeaders(updatedHeaders)
-				ApplyOpenAIOutboundSessionIdentityHeaders(updatedHeaders, pinnedIdentity)
-				setFingerprintObservationOutboundIdentity(c, pinnedIdentity)
-				baseAcquireReq.Headers = updatedHeaders
-				baseAcquireReq.IdentityDigest = pinnedIdentityDigest
 			}
 			if pinnedIdentityEnabled {
 				if mergedPayload, mergeErr := MergeOpenAIOutboundSessionIdentityBody(nextPayload.payloadRaw, pinnedIdentity); mergeErr == nil {

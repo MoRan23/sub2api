@@ -396,6 +396,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 
 	// OAuth 透传到 ChatGPT internal API 时补齐必要头。
 	if account.Type == AccountTypeOAuth {
+		identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
 		promptCacheKey := strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())
 		req.Host = "chatgpt.com"
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, req.Header, account); err != nil {
@@ -492,7 +493,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 					}
 				}
 			}
-		} else {
+		} else if !identityModeEnabled {
 			if clientSessionID != "" {
 				req.Header.Set("session_id", isolateOpenAISessionID(apiKeyID, clientSessionID))
 			}

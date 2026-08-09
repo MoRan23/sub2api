@@ -15,50 +15,37 @@ import (
 )
 
 const (
-	// OpenAIOutboundSessionIdentityKeyPrefix is deliberately versioned so a
-	// future derivation format can coexist without interpreting old values.
-	OpenAIOutboundSessionIdentityKeyPrefix  = "openai-outbound-session:v1:"
-	defaultOpenAIOutboundSessionIdentityTTL = 30 * 24 * time.Hour
+	OpenAICodexTurnIdentityKeyPrefix = "openai-outbound-session:v2:"
+	// Deprecated name retained for diagnostics; it now points exclusively to V2.
+	OpenAIOutboundSessionIdentityKeyPrefix = OpenAICodexTurnIdentityKeyPrefix
+	defaultOpenAICodexTurnIdentityTTL      = 30 * 24 * time.Hour
+	sha256HexLength                        = 64
 )
 
-var openAIOutboundSessionIdentityGetOrCreateScript = redis.NewScript(`
+var openAICodexGetOrCreateScript = redis.NewScript(`
 local key = KEYS[1]
 local candidate = ARGV[1]
 local ttl = tonumber(ARGV[2])
-if ttl == nil or ttl < 1 then
-  ttl = 1
-end
-
+if ttl == nil or ttl < 1 then ttl = 1 end
 local current = redis.call('GET', key)
-if current and current ~= false then
-  return current
+if not current then
+  redis.call('SET', key, candidate, 'EX', ttl, 'NX')
+  current = redis.call('GET', key)
 end
-
--- The script is atomic, so the first writer wins even when many gateway
--- instances miss the key at the same time.
-redis.call('SET', key, candidate, 'EX', ttl, 'NX')
-current = redis.call('GET', key)
-if current and current ~= false then
+if current then
   redis.call('EXPIRE', key, ttl)
   return current
 end
 return candidate
 `)
 
-// Reconcile is a value-CAS, not a blind overwrite. Go validates the observed
-// bytes first. A corrupt value is repaired only while those exact bytes still
-// own the key; a concurrent repair/writer is read back as the winner. Valid
-// reads refresh TTL only while the validated value is still current.
-var openAIOutboundSessionIdentityReconcileScript = redis.NewScript(`
+var openAICodexReconcileScript = redis.NewScript(`
 local key = KEYS[1]
 local expected = ARGV[1]
 local candidate = ARGV[2]
 local ttl = tonumber(ARGV[3])
 local repair = ARGV[4]
-if ttl == nil or ttl < 1 then
-  ttl = 1
-end
-
+if ttl == nil or ttl < 1 then ttl = 1 end
 local current = redis.call('GET', key)
 if current == expected then
   if repair == '1' then
@@ -68,184 +55,314 @@ if current == expected then
   redis.call('EXPIRE', key, ttl)
   return current
 end
-
-if current == false then
+if not current then
   redis.call('SET', key, candidate, 'EX', ttl, 'NX')
   current = redis.call('GET', key)
 end
 return current
 `)
 
-type openAIOutboundSessionIdentityRedisStore struct {
-	rdb *redis.Client
+// Both keys are inspected in one script. The child is created/refreshed only
+// while it is still owned by the exact session winner supplied by the caller.
+var openAICodexThreadGetOrCreateScript = redis.NewScript(`
+local session_key = KEYS[1]
+local thread_key = KEYS[2]
+local expected_session = ARGV[1]
+local candidate = ARGV[2]
+local ttl = tonumber(ARGV[3])
+if ttl == nil or ttl < 1 then ttl = 1 end
+local raw_session = redis.call('GET', session_key)
+if not raw_session then return redis.error_reply('CODEX_SESSION_WINNER_CHANGED') end
+local ok, decoded = pcall(cjson.decode, raw_session)
+local field_count = 0
+if ok and type(decoded) == 'table' then
+  for _ in pairs(decoded) do field_count = field_count + 1 end
+end
+if not ok or type(decoded) ~= 'table' or field_count ~= 1 or type(decoded['session_id']) ~= 'string' or decoded['session_id'] ~= expected_session then
+  return redis.error_reply('CODEX_SESSION_WINNER_CHANGED')
+end
+redis.call('EXPIRE', session_key, ttl)
+local current = redis.call('GET', thread_key)
+if not current then
+  redis.call('SET', thread_key, candidate, 'EX', ttl, 'NX')
+  current = redis.call('GET', thread_key)
+end
+if current then
+  redis.call('EXPIRE', thread_key, ttl)
+  return current
+end
+return candidate
+`)
+
+var openAICodexThreadReconcileScript = redis.NewScript(`
+local session_key = KEYS[1]
+local thread_key = KEYS[2]
+local expected_session = ARGV[1]
+local observed = ARGV[2]
+local candidate = ARGV[3]
+local ttl = tonumber(ARGV[4])
+local repair = ARGV[5]
+if ttl == nil or ttl < 1 then ttl = 1 end
+local raw_session = redis.call('GET', session_key)
+if not raw_session then return redis.error_reply('CODEX_SESSION_WINNER_CHANGED') end
+local ok, decoded = pcall(cjson.decode, raw_session)
+local field_count = 0
+if ok and type(decoded) == 'table' then
+  for _ in pairs(decoded) do field_count = field_count + 1 end
+end
+if not ok or type(decoded) ~= 'table' or field_count ~= 1 or type(decoded['session_id']) ~= 'string' or decoded['session_id'] ~= expected_session then
+  return redis.error_reply('CODEX_SESSION_WINNER_CHANGED')
+end
+redis.call('EXPIRE', session_key, ttl)
+local current = redis.call('GET', thread_key)
+if current == observed then
+  if repair == '1' then
+    redis.call('SET', thread_key, candidate, 'EX', ttl)
+    return candidate
+  end
+  redis.call('EXPIRE', thread_key, ttl)
+  return current
+end
+if not current then
+  redis.call('SET', thread_key, candidate, 'EX', ttl, 'NX')
+  current = redis.call('GET', thread_key)
+end
+return current
+`)
+
+type openAICodexTurnIdentityRedisStore struct{ rdb *redis.Client }
+type openAIOutboundSessionIdentityRedisStore = openAICodexTurnIdentityRedisStore
+
+func NewOpenAICodexTurnIdentityStore(rdb *redis.Client) service.OpenAICodexTurnIdentityStore {
+	return &openAICodexTurnIdentityRedisStore{rdb: rdb}
 }
 
-// NewOpenAIOutboundSessionIdentityStore returns a Redis-backed narrow store.
-// The gateway normally uses gatewayCache directly; this constructor is useful
-// for focused tests and for callers that do not otherwise need GatewayCache.
-func NewOpenAIOutboundSessionIdentityStore(rdb *redis.Client) service.OpenAIOutboundSessionIdentityStore {
-	return &openAIOutboundSessionIdentityRedisStore{rdb: rdb}
+// Deprecated constructors now return the V2 hierarchical store.
+func NewOpenAIOutboundSessionIdentityStore(rdb *redis.Client) service.OpenAICodexTurnIdentityStore {
+	return NewOpenAICodexTurnIdentityStore(rdb)
+}
+func NewRedisOpenAIOutboundSessionIdentityStore(rdb *redis.Client) service.OpenAICodexTurnIdentityStore {
+	return NewOpenAICodexTurnIdentityStore(rdb)
 }
 
-// NewRedisOpenAIOutboundSessionIdentityStore is an explicit alias for callers
-// that prefer the backend type in the constructor name.
-func NewRedisOpenAIOutboundSessionIdentityStore(rdb *redis.Client) service.OpenAIOutboundSessionIdentityStore {
-	return NewOpenAIOutboundSessionIdentityStore(rdb)
-}
-
-func (s *openAIOutboundSessionIdentityRedisStore) GetOrCreate(ctx context.Context, mappingKey string, candidate service.OpenAIOutboundSessionIdentity, ttl time.Duration) (service.OpenAIOutboundSessionIdentity, error) {
+func (s *openAICodexTurnIdentityRedisStore) GetOrCreateCodexSession(ctx context.Context, sessionMappingKey, candidateSessionID string, ttl time.Duration) (string, error) {
 	if s == nil || s.rdb == nil {
-		return service.OpenAIOutboundSessionIdentity{}, errors.New("openai outbound session identity redis store is unavailable")
+		return "", errors.New("openai Codex identity Redis store is unavailable")
 	}
-	return getOrCreateOpenAIOutboundSessionIdentity(ctx, s.rdb, mappingKey, candidate, ttl)
+	return getOrCreateOpenAICodexSession(ctx, s.rdb, sessionMappingKey, candidateSessionID, ttl)
 }
 
-// GetOrCreate implements service.OpenAIOutboundSessionIdentityStore on the
-// shared gateway cache without widening service.GatewayCache.
-func (c *gatewayCache) GetOrCreate(ctx context.Context, mappingKey string, candidate service.OpenAIOutboundSessionIdentity, ttl time.Duration) (service.OpenAIOutboundSessionIdentity, error) {
+func (s *openAICodexTurnIdentityRedisStore) GetOrCreateCodexThread(ctx context.Context, sessionMappingKey, threadMappingKey, sessionID, candidateThreadID string, ttl time.Duration) (service.OpenAICodexTurnIdentity, error) {
+	if s == nil || s.rdb == nil {
+		return service.OpenAICodexTurnIdentity{}, errors.New("openai Codex identity Redis store is unavailable")
+	}
+	return getOrCreateOpenAICodexThread(ctx, s.rdb, sessionMappingKey, threadMappingKey, sessionID, candidateThreadID, ttl)
+}
+
+func (c *gatewayCache) GetOrCreateCodexSession(ctx context.Context, sessionMappingKey, candidateSessionID string, ttl time.Duration) (string, error) {
 	if c == nil || c.rdb == nil {
-		return service.OpenAIOutboundSessionIdentity{}, errors.New("openai outbound session identity redis store is unavailable")
+		return "", errors.New("openai Codex identity Redis store is unavailable")
 	}
-	return getOrCreateOpenAIOutboundSessionIdentity(ctx, c.rdb, mappingKey, candidate, ttl)
+	return getOrCreateOpenAICodexSession(ctx, c.rdb, sessionMappingKey, candidateSessionID, ttl)
 }
 
-func getOrCreateOpenAIOutboundSessionIdentity(ctx context.Context, rdb *redis.Client, mappingKey string, candidate service.OpenAIOutboundSessionIdentity, ttl time.Duration) (service.OpenAIOutboundSessionIdentity, error) {
-	mappingKey = strings.TrimSpace(mappingKey)
-	if !validOpenAIOutboundSessionIdentityMappingKey(mappingKey) {
-		return service.OpenAIOutboundSessionIdentity{}, errors.New("openai outbound session identity mapping key must be a lowercase SHA-256 digest")
+func (c *gatewayCache) GetOrCreateCodexThread(ctx context.Context, sessionMappingKey, threadMappingKey, sessionID, candidateThreadID string, ttl time.Duration) (service.OpenAICodexTurnIdentity, error) {
+	if c == nil || c.rdb == nil {
+		return service.OpenAICodexTurnIdentity{}, errors.New("openai Codex identity Redis store is unavailable")
 	}
-	if err := service.ValidateOpenAIOutboundSessionIdentity(candidate); err != nil {
-		return service.OpenAIOutboundSessionIdentity{}, err
-	}
+	return getOrCreateOpenAICodexThread(ctx, c.rdb, sessionMappingKey, threadMappingKey, sessionID, candidateThreadID, ttl)
+}
+
+func normalizedIdentityTTL(ttl time.Duration) int64 {
 	if ttl <= 0 {
-		ttl = defaultOpenAIOutboundSessionIdentityTTL
+		ttl = defaultOpenAICodexTurnIdentityTTL
 	}
-	seconds := ttl / time.Second
+	seconds := int64(ttl / time.Second)
 	if seconds < 1 {
 		seconds = 1
 	}
-	payload, err := json.Marshal(candidate)
-	if err != nil {
-		return service.OpenAIOutboundSessionIdentity{}, fmt.Errorf("marshal OpenAI outbound session identity: %w", err)
+	return seconds
+}
+
+func getOrCreateOpenAICodexSession(ctx context.Context, rdb *redis.Client, mappingKey, candidateSessionID string, ttl time.Duration) (string, error) {
+	if !validOpenAICodexMappingKey(mappingKey) {
+		return "", errors.New("openai Codex session mapping key must be a lowercase SHA-256 digest")
 	}
+	root := service.OpenAICodexTurnIdentity{SessionID: candidateSessionID, ThreadID: candidateSessionID, Relation: service.OpenAICodexTurnRelationRoot}
+	if err := service.ValidateOpenAICodexTurnIdentity(root); err != nil {
+		return "", err
+	}
+	payload, _ := json.Marshal(struct {
+		SessionID string `json:"session_id"`
+	}{candidateSessionID})
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	result, err := openAIOutboundSessionIdentityGetOrCreateScript.Run(
-		ctx,
-		rdb,
-		[]string{openAIOutboundSessionIdentityRedisKey(mappingKey)},
-		string(payload),
-		seconds,
-	).Text()
+	key := OpenAICodexSessionIdentityRedisKey(mappingKey)
+	observed, err := openAICodexGetOrCreateScript.Run(ctx, rdb, []string{key}, string(payload), normalizedIdentityTTL(ttl)).Text()
 	if err != nil {
-		return service.OpenAIOutboundSessionIdentity{}, fmt.Errorf("get or create OpenAI outbound session identity: %w", err)
+		return "", fmt.Errorf("get or create OpenAI Codex session: %w", err)
 	}
-
-	// A bounded loop handles a writer changing the key between our read and
-	// value-CAS. Normal traffic completes in one reconciliation; corrupt values
-	// complete in two (repair, then validated return).
-	observed := result
 	for attempt := 0; attempt < 6; attempt++ {
-		identity, validationErr := decodeOpenAIOutboundSessionIdentity(observed)
+		sessionID, validationErr := decodeOpenAICodexSession(observed)
 		repair := "0"
 		if validationErr != nil {
 			repair = "1"
 		}
-		next, reconcileErr := openAIOutboundSessionIdentityReconcileScript.Run(
-			ctx,
-			rdb,
-			[]string{openAIOutboundSessionIdentityRedisKey(mappingKey)},
-			observed,
-			string(payload),
-			seconds,
-			repair,
-		).Text()
+		next, reconcileErr := openAICodexReconcileScript.Run(ctx, rdb, []string{key}, observed, string(payload), normalizedIdentityTTL(ttl), repair).Text()
 		if reconcileErr != nil {
-			return service.OpenAIOutboundSessionIdentity{}, fmt.Errorf("reconcile OpenAI outbound session identity: %w", reconcileErr)
+			return "", fmt.Errorf("reconcile OpenAI Codex session: %w", reconcileErr)
+		}
+		if validationErr == nil && next == observed {
+			return sessionID, nil
+		}
+		observed = next
+	}
+	if _, err := decodeOpenAICodexSession(observed); err != nil {
+		return "", fmt.Errorf("%w after session CAS repair: %v", service.ErrOpenAIOutboundSessionIdentityStoredValueInvalid, err)
+	}
+	return decodeOpenAICodexSession(observed)
+}
+
+func getOrCreateOpenAICodexThread(ctx context.Context, rdb *redis.Client, sessionMappingKey, threadMappingKey, sessionID, candidateThreadID string, ttl time.Duration) (service.OpenAICodexTurnIdentity, error) {
+	if !validOpenAICodexMappingKey(sessionMappingKey) || !validOpenAICodexMappingKey(threadMappingKey) {
+		return service.OpenAICodexTurnIdentity{}, errors.New("openai Codex thread mapping keys must be lowercase SHA-256 digests")
+	}
+	candidate := service.OpenAICodexTurnIdentity{SessionID: sessionID, ThreadID: candidateThreadID, Relation: service.OpenAICodexTurnRelationDescendant}
+	if err := service.ValidateOpenAICodexTurnIdentity(candidate); err != nil {
+		return service.OpenAICodexTurnIdentity{}, err
+	}
+	payload, _ := json.Marshal(struct {
+		SessionID string `json:"session_id"`
+		ThreadID  string `json:"thread_id"`
+	}{sessionID, candidateThreadID})
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	keys := []string{OpenAICodexSessionIdentityRedisKey(sessionMappingKey), OpenAICodexThreadIdentityRedisKey(sessionMappingKey, threadMappingKey)}
+	observed, err := openAICodexThreadGetOrCreateScript.Run(ctx, rdb, keys, sessionID, string(payload), normalizedIdentityTTL(ttl)).Text()
+	if err != nil {
+		return service.OpenAICodexTurnIdentity{}, mapOpenAICodexRedisError("get or create OpenAI Codex thread", err)
+	}
+	for attempt := 0; attempt < 6; attempt++ {
+		identity, validationErr := decodeOpenAICodexThread(observed, sessionID)
+		repair := "0"
+		if validationErr != nil {
+			repair = "1"
+		}
+		next, reconcileErr := openAICodexThreadReconcileScript.Run(ctx, rdb, keys, sessionID, observed, string(payload), normalizedIdentityTTL(ttl), repair).Text()
+		if reconcileErr != nil {
+			return service.OpenAICodexTurnIdentity{}, mapOpenAICodexRedisError("reconcile OpenAI Codex thread", reconcileErr)
 		}
 		if validationErr == nil && next == observed {
 			return identity, nil
 		}
 		observed = next
 	}
-	identity, err := decodeOpenAIOutboundSessionIdentity(observed)
+	identity, err := decodeOpenAICodexThread(observed, sessionID)
 	if err != nil {
-		return service.OpenAIOutboundSessionIdentity{}, fmt.Errorf("%w after CAS repair: %v", service.ErrOpenAIOutboundSessionIdentityStoredValueInvalid, err)
+		return service.OpenAICodexTurnIdentity{}, fmt.Errorf("%w after thread CAS repair: %v", service.ErrOpenAIOutboundSessionIdentityStoredValueInvalid, err)
 	}
 	return identity, nil
 }
 
-func decodeOpenAIOutboundSessionIdentity(raw string) (service.OpenAIOutboundSessionIdentity, error) {
+func mapOpenAICodexRedisError(operation string, err error) error {
+	if strings.Contains(err.Error(), "CODEX_SESSION_WINNER_CHANGED") {
+		return fmt.Errorf("%s: %w", operation, service.ErrOpenAICodexSessionWinnerChanged)
+	}
+	return fmt.Errorf("%s: %w", operation, err)
+}
+
+func decodeStrictOpenAICodexObject(raw string, allowed map[string]struct{}) (map[string]json.RawMessage, error) {
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	start, err := decoder.Token()
 	if err != nil {
-		return service.OpenAIOutboundSessionIdentity{}, fmt.Errorf("decode OpenAI outbound session identity: %w", err)
+		return nil, err
 	}
 	if delim, ok := start.(json.Delim); !ok || delim != '{' {
-		return service.OpenAIOutboundSessionIdentity{}, errors.New("decode OpenAI outbound session identity: expected object")
+		return nil, errors.New("expected object")
 	}
-	fields := make(map[string]json.RawMessage, 2)
+	fields := make(map[string]json.RawMessage, len(allowed))
 	for decoder.More() {
-		keyToken, tokenErr := decoder.Token()
+		nameToken, tokenErr := decoder.Token()
 		if tokenErr != nil {
-			return service.OpenAIOutboundSessionIdentity{}, fmt.Errorf("decode OpenAI outbound session identity field: %w", tokenErr)
+			return nil, tokenErr
 		}
-		key, ok := keyToken.(string)
+		name, ok := nameToken.(string)
 		if !ok {
-			return service.OpenAIOutboundSessionIdentity{}, errors.New("decode OpenAI outbound session identity: non-string field name")
+			return nil, errors.New("non-string field name")
 		}
-		if key != "session_id" && key != "thread_id" {
-			return service.OpenAIOutboundSessionIdentity{}, errors.New("decode OpenAI outbound session identity: unexpected fields")
+		if _, ok := allowed[name]; !ok {
+			return nil, fmt.Errorf("unexpected field %q", name)
 		}
-		if _, duplicate := fields[key]; duplicate {
-			return service.OpenAIOutboundSessionIdentity{}, fmt.Errorf("decode OpenAI outbound session identity: duplicate field %q", key)
+		if _, duplicate := fields[name]; duplicate {
+			return nil, fmt.Errorf("duplicate field %q", name)
 		}
 		var value json.RawMessage
-		if decodeErr := decoder.Decode(&value); decodeErr != nil {
-			return service.OpenAIOutboundSessionIdentity{}, fmt.Errorf("decode OpenAI outbound session identity field %q: %w", key, decodeErr)
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
 		}
-		fields[key] = value
+		fields[name] = value
 	}
 	end, err := decoder.Token()
 	if err != nil {
-		return service.OpenAIOutboundSessionIdentity{}, fmt.Errorf("decode OpenAI outbound session identity: %w", err)
+		return nil, err
 	}
 	if delim, ok := end.(json.Delim); !ok || delim != '}' {
-		return service.OpenAIOutboundSessionIdentity{}, errors.New("decode OpenAI outbound session identity: unterminated object")
+		return nil, errors.New("unterminated object")
 	}
 	var trailing json.RawMessage
-	if trailingErr := decoder.Decode(&trailing); !errors.Is(trailingErr, io.EOF) {
-		if trailingErr == nil {
-			return service.OpenAIOutboundSessionIdentity{}, errors.New("decode OpenAI outbound session identity: trailing value")
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return nil, errors.New("trailing value")
 		}
-		return service.OpenAIOutboundSessionIdentity{}, fmt.Errorf("decode OpenAI outbound session identity trailing data: %w", trailingErr)
+		return nil, err
 	}
-	if len(fields) != 2 {
-		return service.OpenAIOutboundSessionIdentity{}, errors.New("decode OpenAI outbound session identity: unexpected fields")
+	if len(fields) != len(allowed) {
+		return nil, errors.New("missing or unexpected fields")
 	}
-	sessionRaw, ok := fields["session_id"]
-	if !ok {
-		return service.OpenAIOutboundSessionIdentity{}, errors.New("decode OpenAI outbound session identity: session_id is missing")
+	return fields, nil
+}
+
+func decodeOpenAICodexSession(raw string) (string, error) {
+	fields, err := decodeStrictOpenAICodexObject(raw, map[string]struct{}{"session_id": {}})
+	if err != nil {
+		return "", err
 	}
-	threadRaw, ok := fields["thread_id"]
-	if !ok {
-		return service.OpenAIOutboundSessionIdentity{}, errors.New("decode OpenAI outbound session identity: thread_id is missing")
+	var sessionID string
+	if err := json.Unmarshal(fields["session_id"], &sessionID); err != nil {
+		return "", err
 	}
-	var identity service.OpenAIOutboundSessionIdentity
-	if err := json.Unmarshal(sessionRaw, &identity.SessionID); err != nil {
-		return service.OpenAIOutboundSessionIdentity{}, fmt.Errorf("decode OpenAI outbound session identity session_id: %w", err)
+	identity := service.OpenAICodexTurnIdentity{SessionID: sessionID, ThreadID: sessionID, Relation: service.OpenAICodexTurnRelationRoot}
+	if err := service.ValidateOpenAICodexTurnIdentity(identity); err != nil {
+		return "", err
 	}
-	if err := json.Unmarshal(threadRaw, &identity.ThreadID); err != nil {
-		return service.OpenAIOutboundSessionIdentity{}, fmt.Errorf("decode OpenAI outbound session identity thread_id: %w", err)
+	return sessionID, nil
+}
+
+func decodeOpenAICodexThread(raw, expectedSessionID string) (service.OpenAICodexTurnIdentity, error) {
+	fields, err := decodeStrictOpenAICodexObject(raw, map[string]struct{}{"session_id": {}, "thread_id": {}})
+	if err != nil {
+		return service.OpenAICodexTurnIdentity{}, err
 	}
-	if err := service.ValidateOpenAIOutboundSessionIdentity(identity); err != nil {
-		return service.OpenAIOutboundSessionIdentity{}, fmt.Errorf("validate OpenAI outbound session identity: %w", err)
+	identity := service.OpenAICodexTurnIdentity{Relation: service.OpenAICodexTurnRelationDescendant}
+	if err := json.Unmarshal(fields["session_id"], &identity.SessionID); err != nil {
+		return service.OpenAICodexTurnIdentity{}, err
+	}
+	if err := json.Unmarshal(fields["thread_id"], &identity.ThreadID); err != nil {
+		return service.OpenAICodexTurnIdentity{}, err
+	}
+	if identity.SessionID != expectedSessionID {
+		return service.OpenAICodexTurnIdentity{}, errors.New("thread belongs to a different session")
+	}
+	if err := service.ValidateOpenAICodexTurnIdentity(identity); err != nil {
+		return service.OpenAICodexTurnIdentity{}, err
 	}
 	return identity, nil
 }
 
-func validOpenAIOutboundSessionIdentityMappingKey(mappingKey string) bool {
+func validOpenAICodexMappingKey(mappingKey string) bool {
+	mappingKey = strings.TrimSpace(mappingKey)
 	if len(mappingKey) != sha256HexLength || strings.ToLower(mappingKey) != mappingKey {
 		return false
 	}
@@ -253,21 +370,23 @@ func validOpenAIOutboundSessionIdentityMappingKey(mappingKey string) bool {
 	return err == nil
 }
 
-const sha256HexLength = 64
-
-func openAIOutboundSessionIdentityRedisKey(mappingKey string) string {
-	return OpenAIOutboundSessionIdentityKeyPrefix + strings.TrimSpace(mappingKey)
-}
-
-// OpenAIOutboundSessionIdentityRedisKey exposes key construction for
-// integration tests and operational diagnostics without exposing identity
-// values themselves.
-func OpenAIOutboundSessionIdentityRedisKey(mappingKey string) string {
-	if !validOpenAIOutboundSessionIdentityMappingKey(strings.TrimSpace(mappingKey)) {
+func OpenAICodexSessionIdentityRedisKey(sessionMappingKey string) string {
+	if !validOpenAICodexMappingKey(sessionMappingKey) {
 		return ""
 	}
-	return openAIOutboundSessionIdentityRedisKey(mappingKey)
+	return OpenAICodexTurnIdentityKeyPrefix + strings.TrimSpace(sessionMappingKey) + ":session"
 }
 
-var _ service.OpenAIOutboundSessionIdentityStore = (*openAIOutboundSessionIdentityRedisStore)(nil)
-var _ service.OpenAIOutboundSessionIdentityStore = (*gatewayCache)(nil)
+func OpenAICodexThreadIdentityRedisKey(sessionMappingKey, threadMappingKey string) string {
+	if !validOpenAICodexMappingKey(sessionMappingKey) || !validOpenAICodexMappingKey(threadMappingKey) {
+		return ""
+	}
+	return OpenAICodexTurnIdentityKeyPrefix + strings.TrimSpace(sessionMappingKey) + ":thread:" + strings.TrimSpace(threadMappingKey)
+}
+
+func OpenAIOutboundSessionIdentityRedisKey(mappingKey string) string {
+	return OpenAICodexSessionIdentityRedisKey(mappingKey)
+}
+
+var _ service.OpenAICodexTurnIdentityStore = (*openAICodexTurnIdentityRedisStore)(nil)
+var _ service.OpenAICodexTurnIdentityStore = (*gatewayCache)(nil)

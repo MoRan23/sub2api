@@ -1117,6 +1117,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		}
 	}
 	if account.Type == AccountTypeOAuth {
+		identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
 		compatMessagesBridge := isOpenAICompatMessagesBridgeContext(c) || isOpenAICompatMessagesBridgeBody(body)
 		// 清除客户端透传的 session 头，后续用隔离后的值重新设置，防止跨用户会话碰撞。
 		clientConversationID := strings.TrimSpace(req.Header.Get("conversation_id"))
@@ -1190,7 +1191,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 					}
 				}
 			}
-		} else {
+		} else if !identityModeEnabled {
 			apiKeyID := getAPIKeyIDFromContext(c)
 			if isOpenAIResponsesCompactPath(c) {
 				// Preserve the historical compact header write even when the

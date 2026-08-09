@@ -2,6 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 
+import type {
+  FingerprintObservationEntry,
+  FingerprintObservationsResponse,
+  FingerprintObservationSessionNode,
+} from '@/api/admin/fingerprintObservations'
 import FingerprintObservationView from '../FingerprintObservationView.vue'
 
 const { listObservations, updateSettings, showError, showSuccess } = vi.hoisted(() => ({
@@ -35,17 +40,26 @@ vi.mock('vue-i18n', async () => {
 })
 
 const sessionID = '018f5c3c-6e3a-7abc-8def-1234567890ab'
-const threadID = '018f5c3c-6e3a-7abd-8def-1234567890ac'
+const childThreadID = '018f5c3c-6e3a-7abd-8def-1234567890ac'
+const forkedFromThreadID = '018f5c3c-6e3a-7abe-8def-1234567890ad'
 
-const observation = {
+const rootObservation: FingerprintObservationEntry = {
+  sequence_id: 10,
   timestamp: '2026-08-08T12:00:00Z',
+  user_id: 7,
+  username: 'alice',
+  email: 'alice@example.com',
+  api_key_id: 9,
+  api_key_name: 'Codex workstation',
   account_id: 42,
   account_name: 'OpenAI OAuth',
   pinned: true,
   client_reported_installation_id: 'client-installation',
   outbound_installation_id: 'outbound-installation',
   session_id: sessionID,
-  thread_id: threadID,
+  thread_id: sessionID,
+  parent_thread_id: '',
+  forked_from_thread_id: '',
   user_agent: 'codex_cli_rs/1.0',
   originator: 'codex_cli_rs',
   openai_beta: 'responses=experimental',
@@ -53,15 +67,87 @@ const observation = {
   inbound_endpoint: 'POST /v1/responses',
 }
 
-const DataTableStub = defineComponent({
-  name: 'DataTable',
-  props: {
-    columns: { type: Array, default: () => [] },
-    data: { type: Array, default: () => [] },
-    loading: Boolean,
-    rowKey: String,
+const childObservation: FingerprintObservationEntry = {
+  ...rootObservation,
+  sequence_id: 11,
+  timestamp: '2026-08-08T12:01:00Z',
+  thread_id: childThreadID,
+  parent_thread_id: sessionID,
+  forked_from_thread_id: forkedFromThreadID,
+  inbound_endpoint: 'POST /v1/responses/compact',
+}
+
+const sessionNode: FingerprintObservationSessionNode = {
+  user_id: 7,
+  username: 'alice',
+  email: 'alice@example.com',
+  api_key_id: 9,
+  api_key_name: 'Codex workstation',
+  session_id: sessionID,
+  first_observed_at: rootObservation.timestamp,
+  last_observed_at: childObservation.timestamp,
+  observation_count: 2,
+  root_thread: {
+    thread_id: sessionID,
+    parent_thread_id: '',
+    forked_from_thread_id: '',
+    relation: 'root',
+    first_observed_at: rootObservation.timestamp,
+    last_observed_at: rootObservation.timestamp,
+    observation_count: 1,
+    observations: [rootObservation],
   },
-  template: '<div data-testid="fingerprint-table">{{ JSON.stringify(data) }}</div>',
+  child_threads: [
+    {
+      thread_id: childThreadID,
+      parent_thread_id: sessionID,
+      forked_from_thread_id: forkedFromThreadID,
+      relation: 'descendant',
+      first_observed_at: childObservation.timestamp,
+      last_observed_at: childObservation.timestamp,
+      observation_count: 1,
+      observations: [childObservation],
+    },
+  ],
+  unthreaded_observations: [],
+}
+
+function response(
+  overrides: Partial<FingerprintObservationsResponse> = {}
+): FingerprintObservationsResponse {
+  return {
+    enabled: true,
+    items: [sessionNode],
+    total: 2,
+    page: 1,
+    page_size: 20,
+    pages: 2,
+    snapshot_seq: 77,
+    ...overrides,
+  }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+const PaginationStub = defineComponent({
+  name: 'Pagination',
+  props: ['total', 'page', 'pageSize'],
+  emits: ['update:page', 'update:pageSize'],
+  template: `
+    <nav aria-label="test-pagination">
+      <span>visible-page-{{ page }}</span>
+      <button type="button" aria-label="go-page-2" @click="$emit('update:page', 2)">page 2</button>
+      <button type="button" aria-label="set-page-size-50" @click="$emit('update:pageSize', 50)">50 per page</button>
+    </nav>
+  `,
 })
 
 function mountView() {
@@ -70,15 +156,17 @@ function mountView() {
       stubs: {
         AppLayout: { template: '<div><slot /></div>' },
         TablePageLayout: {
-          template: '<section><slot name="filters" /><slot name="table" /></section>',
+          template:
+            '<section><slot name="filters" /><slot name="table" /><slot name="pagination" /></section>',
         },
-        DataTable: DataTableStub,
+        Pagination: PaginationStub,
         AutoRefreshButton: {
           props: ['enabled', 'intervalSeconds', 'countdown', 'intervals'],
           emits: ['update:enabled', 'update:interval'],
-          template: '<button data-testid="auto-refresh" @click="$emit(\'update:enabled\', true)">auto</button>',
+          template:
+            '<button type="button" aria-label="auto-refresh" @click="$emit(\'update:enabled\', true)">auto</button>',
         },
-        Icon: true,
+        Icon: { template: '<span aria-hidden="true"></span>' },
       },
     },
   })
@@ -98,49 +186,191 @@ describe('FingerprintObservationView', () => {
     vi.useRealTimers()
   })
 
-  it('renders the existing fingerprint columns plus independent UUID fields', async () => {
-    listObservations.mockResolvedValue({ enabled: true, entries: [observation] })
+  it('reveals user, API key, thread lineage, and concrete wire observations through the tree', async () => {
+    listObservations.mockResolvedValue(response())
     const wrapper = mountView()
     await flushPromises()
 
-    const table = wrapper.findComponent(DataTableStub)
-    const columnKeys = (table.props('columns') as Array<{ key: string }>).map((column) => column.key)
-    expect(columnKeys).toEqual([
-      'timestamp',
-      'account',
-      'mode',
-      'installation',
-      'session_id',
-      'thread_id',
-      'identity',
-      'inbound_endpoint',
-    ])
-    expect(table.text()).toContain(sessionID)
-    expect(table.text()).toContain(threadID)
+    expect(wrapper.text()).toContain('alice')
+    expect(wrapper.find('[title="alice@example.com"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Codex workstation')
+    expect(wrapper.find(`[title="${sessionID}"]`).exists()).toBe(true)
+    expect(wrapper.text()).not.toContain(childThreadID)
+
+    const sessionButton = wrapper.get('button[aria-controls="fingerprint-session-0"]')
+    expect(sessionButton.attributes('aria-expanded')).toBe('false')
+    await sessionButton.trigger('click')
+
+    expect(sessionButton.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.text()).toContain(childThreadID)
+    expect(wrapper.find(`[title="${forkedFromThreadID}"]`).exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('POST /v1/responses/compact')
+
+    const childThreadButton = wrapper.get(
+      'button[aria-controls="fingerprint-session-0-thread-1"]'
+    )
+    await childThreadButton.trigger('click')
+
+    expect(childThreadButton.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.text()).toContain('OpenAI OAuth')
+    expect(wrapper.text()).toContain('outbound-installation')
+    expect(wrapper.text()).toContain('codex_cli_rs/1.0')
+    expect(wrapper.text()).toContain('POST /v1/responses/compact')
 
     wrapper.unmount()
   })
 
-  it('persists the page toggle and clears rows after disabling observation', async () => {
+  it('pins later pages to page-one snapshot and manual refresh starts a new page-one snapshot', async () => {
+    const pageTwoSession = { ...sessionNode, username: 'page-two-user' }
+    const refreshedSession = { ...sessionNode, username: 'fresh-page-one-user' }
     listObservations
-      .mockResolvedValueOnce({ enabled: true, entries: [observation] })
-      .mockResolvedValueOnce({ enabled: false, entries: [] })
+      .mockResolvedValueOnce(response())
+      .mockResolvedValueOnce(response({ items: [pageTwoSession], page: 2 }))
+      .mockResolvedValueOnce(
+        response({ items: [refreshedSession], page: 1, snapshot_seq: 91 })
+      )
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(listObservations).toHaveBeenNthCalledWith(
+      1,
+      { page: 1, page_size: 20, snapshot_seq: 0 },
+      { signal: expect.any(AbortSignal) }
+    )
+
+    await wrapper.get('button[aria-label="go-page-2"]').trigger('click')
+    await flushPromises()
+    expect(listObservations).toHaveBeenNthCalledWith(
+      2,
+      { page: 2, page_size: 20, snapshot_seq: 77 },
+      { signal: expect.any(AbortSignal) }
+    )
+    expect(wrapper.text()).toContain('page-two-user')
+    expect(wrapper.text()).toContain('visible-page-2')
+
+    await wrapper.get('button[aria-label="common.refresh"]').trigger('click')
+    await flushPromises()
+    expect(listObservations).toHaveBeenNthCalledWith(
+      3,
+      { page: 1, page_size: 20, snapshot_seq: 0 },
+      { signal: expect.any(AbortSignal) }
+    )
+    expect(wrapper.text()).toContain('fresh-page-one-user')
+    expect(wrapper.text()).toContain('visible-page-1')
+
+    wrapper.unmount()
+  })
+
+  it('starts a new page-one snapshot when page size changes', async () => {
+    listObservations
+      .mockResolvedValueOnce(response())
+      .mockResolvedValueOnce(response({ page_size: 50, pages: 1 }))
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.get('button[aria-label="set-page-size-50"]').trigger('click')
+    await flushPromises()
+
+    expect(listObservations).toHaveBeenNthCalledWith(
+      2,
+      { page: 1, page_size: 50, snapshot_seq: 0 },
+      { signal: expect.any(AbortSignal) }
+    )
+
+    wrapper.unmount()
+  })
+
+  it('auto-refreshes page one with a new snapshot and pauses on later pages', async () => {
+    vi.useFakeTimers()
+    localStorage.setItem(
+      'admin-fingerprint-observation-auto-refresh',
+      JSON.stringify({ enabled: true, interval_seconds: 5 })
+    )
+    listObservations.mockResolvedValue(response())
+    const wrapper = mountView()
+    await flushPromises()
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    await flushPromises()
+    expect(listObservations).toHaveBeenCalledTimes(2)
+    expect(listObservations).toHaveBeenNthCalledWith(
+      2,
+      { page: 1, page_size: 20, snapshot_seq: 0 },
+      { signal: expect.any(AbortSignal) }
+    )
+
+    listObservations.mockResolvedValueOnce(response({ page: 2 }))
+    await wrapper.get('button[aria-label="go-page-2"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('visible-page-2')
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    await flushPromises()
+    expect(listObservations).toHaveBeenCalledTimes(3)
+
+    wrapper.unmount()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(listObservations).toHaveBeenCalledTimes(3)
+  })
+
+  it('aborts and ignores a stale page response when manual refresh wins', async () => {
+    const stalePage = deferred<FingerprintObservationsResponse>()
+    const freshSession = { ...sessionNode, username: 'manual-refresh-winner' }
+    listObservations
+      .mockResolvedValueOnce(response())
+      .mockReturnValueOnce(stalePage.promise)
+      .mockResolvedValueOnce(response({ items: [freshSession], snapshot_seq: 88 }))
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.get('button[aria-label="go-page-2"]').trigger('click')
+    const staleSignal = listObservations.mock.calls[1][1].signal as AbortSignal
+    await wrapper.get('button[aria-label="common.refresh"]').trigger('click')
+    await flushPromises()
+
+    expect(staleSignal.aborted).toBe(true)
+    expect(wrapper.text()).toContain('manual-refresh-winner')
+
+    stalePage.resolve(response({ items: [{ ...sessionNode, username: 'stale-page' }], page: 2 }))
+    await flushPromises()
+    expect(wrapper.text()).toContain('manual-refresh-winner')
+    expect(wrapper.text()).not.toContain('stale-page')
+    expect(wrapper.text()).toContain('visible-page-1')
+
+    wrapper.unmount()
+  })
+
+  it('clears visible data immediately on disable and stale reads cannot repopulate it', async () => {
+    const stalePage = deferred<FingerprintObservationsResponse>()
+    listObservations
+      .mockResolvedValueOnce(response())
+      .mockReturnValueOnce(stalePage.promise)
     updateSettings.mockResolvedValue({ installation_observation_enabled: false })
     const wrapper = mountView()
     await flushPromises()
 
+    await wrapper.get('button[aria-label="go-page-2"]').trigger('click')
+    const staleSignal = listObservations.mock.calls[1][1].signal as AbortSignal
     await wrapper.get('[role="switch"]').trigger('click')
+
+    expect(wrapper.text()).not.toContain(sessionID)
+    expect(wrapper.find('[aria-label="test-pagination"]').exists()).toBe(false)
+    expect(staleSignal.aborted).toBe(true)
+
+    stalePage.resolve(response({ items: [{ ...sessionNode, username: 'stale-after-disable' }], page: 2 }))
     await flushPromises()
 
     expect(updateSettings).toHaveBeenCalledWith({ installation_observation_enabled: false })
-    expect(wrapper.findComponent(DataTableStub).props('data')).toEqual([])
+    expect(wrapper.get('[role="switch"]').attributes('aria-checked')).toBe('false')
+    expect(wrapper.text()).not.toContain('stale-after-disable')
     expect(showSuccess).toHaveBeenCalledOnce()
 
     wrapper.unmount()
   })
 
-  it('restores the toggle state and reports an update failure', async () => {
-    listObservations.mockResolvedValue({ enabled: false, entries: [] })
+  it('restores the visible snapshot when disabling fails', async () => {
+    listObservations.mockResolvedValue(response())
     updateSettings.mockRejectedValue(new Error('write failed'))
     const wrapper = mountView()
     await flushPromises()
@@ -148,64 +378,52 @@ describe('FingerprintObservationView', () => {
     await wrapper.get('[role="switch"]').trigger('click')
     await flushPromises()
 
-    expect(wrapper.get('[role="switch"]').attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('[role="switch"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.text()).toContain(sessionID)
     expect(showError).toHaveBeenCalledWith('request failed')
 
     wrapper.unmount()
   })
 
-  it('ignores an older poll and performs a fresh read after toggling', async () => {
-    let resolveStalePoll: ((value: { enabled: boolean; entries: (typeof observation)[] }) => void) | undefined
-    const stalePoll = new Promise<{ enabled: boolean; entries: (typeof observation)[] }>((resolve) => {
-      resolveStalePoll = resolve
-    })
+  it('loads a fresh page-one snapshot after enabling observation', async () => {
     listObservations
-      .mockResolvedValueOnce({ enabled: true, entries: [observation] })
-      .mockReturnValueOnce(stalePoll)
-      .mockResolvedValueOnce({ enabled: false, entries: [] })
-    updateSettings.mockResolvedValue({ installation_observation_enabled: false })
-
+      .mockResolvedValueOnce(
+        response({ enabled: false, items: [], total: 0, pages: 1, snapshot_seq: 0 })
+      )
+      .mockResolvedValueOnce(response())
+    updateSettings.mockResolvedValue({ installation_observation_enabled: true })
     const wrapper = mountView()
     await flushPromises()
 
-    await wrapper.get('button[aria-label="common.refresh"]').trigger('click')
     await wrapper.get('[role="switch"]').trigger('click')
     await flushPromises()
-    expect(updateSettings).toHaveBeenCalledWith({ installation_observation_enabled: false })
 
-    resolveStalePoll?.({ enabled: true, entries: [observation] })
-    await flushPromises()
-
-    expect(listObservations).toHaveBeenCalledTimes(3)
-    expect(wrapper.get('[role="switch"]').attributes('aria-checked')).toBe('false')
-    expect(wrapper.findComponent(DataTableStub).props('data')).toEqual([])
+    expect(listObservations).toHaveBeenNthCalledWith(
+      2,
+      { page: 1, page_size: 20, snapshot_seq: 0 },
+      { signal: expect.any(AbortSignal) }
+    )
+    expect(wrapper.get('[role="switch"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.text()).toContain(sessionID)
     expect(showSuccess).toHaveBeenCalledOnce()
 
     wrapper.unmount()
   })
 
-  it('polls every five seconds, pauses while hidden, and stops after unmount', async () => {
-    vi.useFakeTimers()
-    localStorage.setItem(
-      'admin-fingerprint-observation-auto-refresh',
-      JSON.stringify({ enabled: true, interval_seconds: 5 }),
-    )
-    listObservations.mockResolvedValue({ enabled: true, entries: [] })
+  it('ignores a toggle response that arrives after the view is disposed', async () => {
+    const staleToggle = deferred<{ installation_observation_enabled: boolean }>()
+    listObservations.mockResolvedValue(response())
+    updateSettings.mockReturnValue(staleToggle.promise)
     const wrapper = mountView()
     await flushPromises()
-    expect(listObservations).toHaveBeenCalledTimes(1)
 
-    Object.defineProperty(document, 'hidden', { configurable: true, value: true })
-    await vi.advanceTimersByTimeAsync(5_000)
-    expect(listObservations).toHaveBeenCalledTimes(1)
-
-    Object.defineProperty(document, 'hidden', { configurable: true, value: false })
-    await vi.advanceTimersByTimeAsync(5_000)
-    await flushPromises()
-    expect(listObservations).toHaveBeenCalledTimes(2)
-
+    await wrapper.get('[role="switch"]').trigger('click')
     wrapper.unmount()
-    await vi.advanceTimersByTimeAsync(10_000)
-    expect(listObservations).toHaveBeenCalledTimes(2)
+    staleToggle.resolve({ installation_observation_enabled: false })
+    await flushPromises()
+
+    expect(listObservations).toHaveBeenCalledOnce()
+    expect(showSuccess).not.toHaveBeenCalled()
+    expect(showError).not.toHaveBeenCalled()
   })
 })

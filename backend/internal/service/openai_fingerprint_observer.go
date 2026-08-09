@@ -20,12 +20,17 @@ const fingerprintObservationCapacity = 500
 const fingerprintObservationOutboundIdentityContextKey = "fingerprint_observation_outbound_identity"
 
 // FingerprintObservationEntry captures the final OpenAI OAuth identity emitted
-// for one request while fingerprint observation is enabled. SessionID and
-// ThreadID are intentionally normalized independently: compact requests only
-// have a session ID, while full Responses/compatibility/WS requests normally
-// carry both values. Invalid or legacy (non-UUIDv7) values are returned empty.
+// for one request while fingerprint observation is enabled. Every hierarchical
+// field is normalized independently so malformed, legacy, and unprojected
+// values stay empty rather than being presented as a server-owned UUIDv7.
 type FingerprintObservationEntry struct {
+	SequenceID                   uint64    `json:"sequence_id"`
 	Timestamp                    time.Time `json:"timestamp"`
+	UserID                       int64     `json:"user_id"`
+	Username                     string    `json:"username"`
+	Email                        string    `json:"email"`
+	APIKeyID                     int64     `json:"api_key_id"`
+	APIKeyName                   string    `json:"api_key_name"`
 	AccountID                    int64     `json:"account_id"`
 	AccountName                  string    `json:"account_name"`
 	Pinned                       bool      `json:"pinned"`
@@ -33,11 +38,57 @@ type FingerprintObservationEntry struct {
 	OutboundInstallationID       string    `json:"outbound_installation_id"`
 	SessionID                    string    `json:"session_id"`
 	ThreadID                     string    `json:"thread_id"`
+	ParentThreadID               string    `json:"parent_thread_id"`
+	ForkedFromThreadID           string    `json:"forked_from_thread_id"`
 	UserAgent                    string    `json:"user_agent"`
 	Originator                   string    `json:"originator"`
 	OpenAIBeta                   string    `json:"openai_beta"`
 	Version                      string    `json:"version"`
 	InboundEndpoint              string    `json:"inbound_endpoint"`
+}
+
+// FingerprintObservationThreadNode groups final wire observations for one
+// UUIDv7 thread. Observations and child threads are ordered newest first.
+type FingerprintObservationThreadNode struct {
+	ThreadID           string                        `json:"thread_id"`
+	ParentThreadID     string                        `json:"parent_thread_id"`
+	ForkedFromThreadID string                        `json:"forked_from_thread_id"`
+	Relation           OpenAICodexTurnRelation       `json:"relation"`
+	FirstObservedAt    time.Time                     `json:"first_observed_at"`
+	LastObservedAt     time.Time                     `json:"last_observed_at"`
+	ObservationCount   int                           `json:"observation_count"`
+	Observations       []FingerprintObservationEntry `json:"observations"`
+}
+
+// FingerprintObservationSessionNode is the pagination unit exposed by the
+// admin fingerprint view. Actor fields are snapshots from the newest record in
+// the group; the grouping key itself uses only immutable numeric IDs plus the
+// outbound session UUID.
+type FingerprintObservationSessionNode struct {
+	UserID                 int64                               `json:"user_id"`
+	Username               string                              `json:"username"`
+	Email                  string                              `json:"email"`
+	APIKeyID               int64                               `json:"api_key_id"`
+	APIKeyName             string                              `json:"api_key_name"`
+	SessionID              string                              `json:"session_id"`
+	FirstObservedAt        time.Time                           `json:"first_observed_at"`
+	LastObservedAt         time.Time                           `json:"last_observed_at"`
+	ObservationCount       int                                 `json:"observation_count"`
+	RootThread             *FingerprintObservationThreadNode   `json:"root_thread"`
+	ChildThreads           []*FingerprintObservationThreadNode `json:"child_threads"`
+	UnthreadedObservations []FingerprintObservationEntry       `json:"unthreaded_observations"`
+}
+
+// FingerprintObservationPage is a stable, sequence-bounded session snapshot.
+// SnapshotSeq is returned by page one and can be supplied for later pages so
+// newly arriving records cannot move existing groups between pages.
+type FingerprintObservationPage struct {
+	Items       []FingerprintObservationSessionNode `json:"items"`
+	Total       int                                 `json:"total"`
+	Page        int                                 `json:"page"`
+	PageSize    int                                 `json:"page_size"`
+	Pages       int                                 `json:"pages"`
+	SnapshotSeq uint64                              `json:"snapshot_seq"`
 }
 
 // fingerprintObserver is a process-level ring buffer gated by an atomic
@@ -52,6 +103,7 @@ type fingerprintObserver struct {
 	ring []FingerprintObservationEntry
 	head int
 	size int
+	seq  uint64
 }
 
 var globalFingerprintObserver = &fingerprintObserver{
@@ -73,6 +125,46 @@ func IsFingerprintObservationEnabled() bool {
 // limit caps the result; a non-positive limit returns all buffered entries.
 func SnapshotFingerprintObservations(limit int) []FingerprintObservationEntry {
 	return globalFingerprintObserver.snapshot(limit)
+}
+
+// SnapshotFingerprintObservationSessions returns a page of root sessions.
+// Invalid pagination values are normalized here as well as in the HTTP
+// handler so internal callers receive the same bounded behavior.
+func SnapshotFingerprintObservationSessions(page, pageSize int, snapshotSeq uint64) FingerprintObservationPage {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	} else if pageSize > 100 {
+		pageSize = 100
+	}
+
+	entries, highWater := globalFingerprintObserver.snapshotThrough(snapshotSeq)
+	sessions := aggregateFingerprintObservationSessions(entries)
+	total := len(sessions)
+	pages := (total + pageSize - 1) / pageSize
+	if pages < 1 {
+		pages = 1
+	}
+	start := total
+	if page <= pages {
+		start = (page - 1) * pageSize
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	items := make([]FingerprintObservationSessionNode, end-start)
+	copy(items, sessions[start:end])
+	return FingerprintObservationPage{
+		Items:       items,
+		Total:       total,
+		Page:        page,
+		PageSize:    pageSize,
+		Pages:       pages,
+		SnapshotSeq: highWater,
+	}
 }
 
 func (o *fingerprintObserver) setEnabled(enabled bool) {
@@ -107,11 +199,146 @@ func (o *fingerprintObserver) record(entry FingerprintObservationEntry) {
 	if !o.enabled.Load() || len(o.ring) == 0 {
 		return
 	}
+	o.seq++
+	entry.SequenceID = o.seq
 	o.ring[o.head] = entry
 	o.head = (o.head + 1) % len(o.ring)
 	if o.size < len(o.ring) {
 		o.size++
 	}
+}
+
+func (o *fingerprintObserver) snapshotThrough(snapshotSeq uint64) ([]FingerprintObservationEntry, uint64) {
+	if o == nil {
+		return []FingerprintObservationEntry{}, 0
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	highWater := snapshotSeq
+	if highWater == 0 || highWater > o.seq {
+		highWater = o.seq
+	}
+	if len(o.ring) == 0 || o.size == 0 {
+		return []FingerprintObservationEntry{}, highWater
+	}
+	out := make([]FingerprintObservationEntry, 0, o.size)
+	for i := 0; i < o.size; i++ {
+		idx := (o.head - 1 - i + len(o.ring)) % len(o.ring)
+		entry := o.ring[idx]
+		if entry.SequenceID <= highWater {
+			out = append(out, entry)
+		}
+	}
+	return out, highWater
+}
+
+type fingerprintObservationSessionGroupKey struct {
+	UserID    int64
+	APIKeyID  int64
+	SessionID string
+	UniqueSeq uint64
+}
+
+type fingerprintObservationSessionAccumulator struct {
+	node     FingerprintObservationSessionNode
+	threads  map[string]*FingerprintObservationThreadNode
+	root     *FingerprintObservationThreadNode
+	children []*FingerprintObservationThreadNode
+}
+
+func aggregateFingerprintObservationSessions(entries []FingerprintObservationEntry) []FingerprintObservationSessionNode {
+	if len(entries) == 0 {
+		return []FingerprintObservationSessionNode{}
+	}
+	groups := make(map[fingerprintObservationSessionGroupKey]*fingerprintObservationSessionAccumulator, len(entries))
+	ordered := make([]*fingerprintObservationSessionAccumulator, 0, len(entries))
+	for _, entry := range entries {
+		key := fingerprintObservationSessionGroupKey{
+			UserID:    entry.UserID,
+			APIKeyID:  entry.APIKeyID,
+			SessionID: entry.SessionID,
+		}
+		if entry.SessionID == "" {
+			// Legacy/disabled identity rows must remain distinct. Coalescing all
+			// empty IDs would create a synthetic shared session that never existed.
+			key.UniqueSeq = entry.SequenceID
+		}
+		group := groups[key]
+		if group == nil {
+			group = &fingerprintObservationSessionAccumulator{
+				node: FingerprintObservationSessionNode{
+					UserID:                 entry.UserID,
+					Username:               entry.Username,
+					Email:                  entry.Email,
+					APIKeyID:               entry.APIKeyID,
+					APIKeyName:             entry.APIKeyName,
+					SessionID:              entry.SessionID,
+					FirstObservedAt:        entry.Timestamp,
+					LastObservedAt:         entry.Timestamp,
+					ChildThreads:           []*FingerprintObservationThreadNode{},
+					UnthreadedObservations: []FingerprintObservationEntry{},
+				},
+				threads: make(map[string]*FingerprintObservationThreadNode),
+			}
+			groups[key] = group
+			ordered = append(ordered, group)
+		}
+		group.node.ObservationCount++
+		if entry.Timestamp.Before(group.node.FirstObservedAt) {
+			group.node.FirstObservedAt = entry.Timestamp
+		}
+		if entry.Timestamp.After(group.node.LastObservedAt) {
+			group.node.LastObservedAt = entry.Timestamp
+		}
+		if entry.ThreadID == "" {
+			group.node.UnthreadedObservations = append(group.node.UnthreadedObservations, entry)
+			continue
+		}
+		thread := group.threads[entry.ThreadID]
+		if thread == nil {
+			relation := OpenAICodexTurnRelationDescendant
+			if entry.SessionID != "" && entry.ThreadID == entry.SessionID {
+				relation = OpenAICodexTurnRelationRoot
+			}
+			thread = &FingerprintObservationThreadNode{
+				ThreadID:           entry.ThreadID,
+				ParentThreadID:     entry.ParentThreadID,
+				ForkedFromThreadID: entry.ForkedFromThreadID,
+				Relation:           relation,
+				FirstObservedAt:    entry.Timestamp,
+				LastObservedAt:     entry.Timestamp,
+				Observations:       []FingerprintObservationEntry{},
+			}
+			group.threads[entry.ThreadID] = thread
+			if relation == OpenAICodexTurnRelationRoot {
+				group.root = thread
+			} else {
+				group.children = append(group.children, thread)
+			}
+		}
+		thread.ObservationCount++
+		thread.Observations = append(thread.Observations, entry)
+		if thread.ParentThreadID == "" {
+			thread.ParentThreadID = entry.ParentThreadID
+		}
+		if thread.ForkedFromThreadID == "" {
+			thread.ForkedFromThreadID = entry.ForkedFromThreadID
+		}
+		if entry.Timestamp.Before(thread.FirstObservedAt) {
+			thread.FirstObservedAt = entry.Timestamp
+		}
+		if entry.Timestamp.After(thread.LastObservedAt) {
+			thread.LastObservedAt = entry.Timestamp
+		}
+	}
+
+	out := make([]FingerprintObservationSessionNode, 0, len(ordered))
+	for _, group := range ordered {
+		group.node.RootThread = group.root
+		group.node.ChildThreads = group.children
+		out = append(out, group.node)
+	}
+	return out
 }
 
 func (o *fingerprintObserver) snapshot(limit int) []FingerprintObservationEntry {
@@ -156,17 +383,17 @@ func ValidateFingerprintObservationUUIDv7(raw string) bool {
 	return NormalizeFingerprintObservationUUIDv7(raw) != ""
 }
 
-// setFingerprintObservationOutboundIdentity marks the UUID pair owned by the
-// final server-side writer for this request. The observer uses the pair only as
+// setFingerprintObservationOutboundIdentity marks the hierarchical UUIDs owned
+// by the final server-side writer for this request. The observer uses them only as
 // provenance: values are still read back from the finalized wire headers/body.
 // This prevents a client-supplied UUIDv7 from being retained while legacy mode
 // is active or when no server-owned identity was created.
-func setFingerprintObservationOutboundIdentity(c *gin.Context, identity OpenAIOutboundSessionIdentity) {
+func setFingerprintObservationOutboundIdentity(c *gin.Context, identity OpenAICodexTurnIdentity) {
 	if c == nil {
 		return
 	}
-	if ValidateOpenAIOutboundSessionIdentity(identity) != nil {
-		// An invalid replacement must not leave a trusted pair from an earlier
+	if ValidateOpenAICodexTurnIdentity(identity) != nil {
+		// An invalid replacement must not leave trusted identity from an earlier
 		// build on a reused context.
 		clearFingerprintObservationOutboundIdentity(c)
 		return
@@ -179,24 +406,24 @@ func setFingerprintObservationOutboundIdentity(c *gin.Context, identity OpenAIOu
 // normally request-scoped, but Responses retries, compatibility bridges, and
 // WS reconnects can reuse one context for multiple final wire builds. Without
 // clearing, a later legacy/fallback build could accidentally use an earlier
-// UUID pair for client_metadata observation fallback.
+// identity for client_metadata observation fallback.
 func clearFingerprintObservationOutboundIdentity(c *gin.Context) {
 	if c != nil {
 		c.Set(fingerprintObservationOutboundIdentityContextKey, nil)
 	}
 }
 
-func fingerprintObservationOutboundIdentityFromContext(c *gin.Context) (OpenAIOutboundSessionIdentity, bool) {
+func fingerprintObservationOutboundIdentityFromContext(c *gin.Context) (OpenAICodexTurnIdentity, bool) {
 	if c == nil {
-		return OpenAIOutboundSessionIdentity{}, false
+		return OpenAICodexTurnIdentity{}, false
 	}
 	raw, ok := c.Get(fingerprintObservationOutboundIdentityContextKey)
 	if !ok {
-		return OpenAIOutboundSessionIdentity{}, false
+		return OpenAICodexTurnIdentity{}, false
 	}
-	identity, ok := raw.(OpenAIOutboundSessionIdentity)
-	if !ok || ValidateOpenAIOutboundSessionIdentity(identity) != nil {
-		return OpenAIOutboundSessionIdentity{}, false
+	identity, ok := raw.(OpenAICodexTurnIdentity)
+	if !ok || ValidateOpenAICodexTurnIdentity(identity) != nil {
+		return OpenAICodexTurnIdentity{}, false
 	}
 	return identity, true
 }
@@ -225,15 +452,21 @@ func (s *OpenAIGatewayService) recordFingerprintObservation(c *gin.Context, acco
 // recordFingerprintObservationWithBody is used by the compatibility bridges,
 // where the final Responses body is available alongside the finalized headers.
 // Headers remain authoritative; client_metadata is only a fallback for a
-// schema path that carries the server-owned pair in the body but not aliases
+// schema path that carries server-owned identity in the body but not aliases
 // in the wire header set.
 func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Context, account *Account, pin installationIDResolution, outbound http.Header, body []byte) {
 	if !globalFingerprintObserver.enabled.Load() || account == nil || !account.IsOpenAIOAuth() || account.IsOpenAIPassthroughEnabled() {
 		return
 	}
 	trustedIdentity, hasTrustedIdentity := fingerprintObservationOutboundIdentityFromContext(c)
+	actor := fingerprintObservationActorFromContext(c)
 	entry := FingerprintObservationEntry{
 		Timestamp:                    time.Now(),
+		UserID:                       actor.UserID,
+		Username:                     actor.Username,
+		Email:                        actor.Email,
+		APIKeyID:                     actor.APIKeyID,
+		APIKeyName:                   actor.APIKeyName,
 		AccountID:                    account.ID,
 		AccountName:                  account.Name,
 		Pinned:                       pin.Enabled,
@@ -248,6 +481,8 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 	}
 	sessionHeaderPresent := false
 	threadHeaderPresent := false
+	parentHeaderPresent := false
+	forkHeaderPresent := false
 	if outbound != nil {
 		if actual := strings.TrimSpace(outbound.Get(codexInstallationIDKey)); actual != "" {
 			entry.OutboundInstallationID = actual
@@ -257,20 +492,43 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 				"session-id", "session_id")
 			entry.ThreadID, threadHeaderPresent = fingerprintObservationHeaderUUID(outbound, trustedIdentity.ThreadID,
 				"thread-id", "thread_id", "conversation_id", "conversation-id", "x-client-request-id")
+			entry.ParentThreadID, parentHeaderPresent = fingerprintObservationHeaderUUID(outbound, trustedIdentity.ParentThreadID,
+				"x-codex-parent-thread-id", "parent-thread-id", "parent_thread_id")
+			entry.ForkedFromThreadID, forkHeaderPresent = fingerprintObservationHeaderUUID(outbound, trustedIdentity.ForkedFromThreadID,
+				"x-codex-forked-from-thread-id", "forked-from-thread-id", "forked_from_thread_id")
+			if !sessionHeaderPresent {
+				entry.SessionID, sessionHeaderPresent = fingerprintObservationTurnMetadataHeaderUUID(outbound, trustedIdentity.SessionID, "session_id")
+			}
+			if !threadHeaderPresent {
+				entry.ThreadID, threadHeaderPresent = fingerprintObservationTurnMetadataHeaderUUID(outbound, trustedIdentity.ThreadID, "thread_id")
+			}
+			if !parentHeaderPresent {
+				entry.ParentThreadID, parentHeaderPresent = fingerprintObservationTurnMetadataHeaderUUID(outbound, trustedIdentity.ParentThreadID, "parent_thread_id")
+			}
+			if !forkHeaderPresent {
+				entry.ForkedFromThreadID, forkHeaderPresent = fingerprintObservationTurnMetadataHeaderUUID(outbound, trustedIdentity.ForkedFromThreadID, "forked_from_thread_id")
+			}
 		}
 		entry.UserAgent = strings.TrimSpace(outbound.Get("user-agent"))
 		entry.Originator = strings.TrimSpace(outbound.Get("originator"))
 		entry.OpenAIBeta = strings.TrimSpace(outbound.Get("openai-beta"))
 		entry.Version = strings.TrimSpace(outbound.Get("version"))
 	}
-	if hasTrustedIdentity && len(body) > 0 &&
-		((entry.SessionID == "" && !sessionHeaderPresent) || (entry.ThreadID == "" && !threadHeaderPresent)) {
-		bodySessionID, bodyThreadID := fingerprintObservationBodyUUIDs(body)
-		if entry.SessionID == "" && !sessionHeaderPresent && bodySessionID == trustedIdentity.SessionID {
-			entry.SessionID = bodySessionID
+	if hasTrustedIdentity && len(body) > 0 {
+		bodyIdentity := parseFingerprintObservationBodyIdentity(body)
+		if entry.SessionID == "" && !sessionHeaderPresent {
+			entry.SessionID, _ = bodyIdentity.uuid(trustedIdentity.SessionID, "session_id", "session_id")
 		}
-		if entry.ThreadID == "" && !threadHeaderPresent && bodyThreadID == trustedIdentity.ThreadID {
-			entry.ThreadID = bodyThreadID
+		if entry.ThreadID == "" && !threadHeaderPresent {
+			entry.ThreadID, _ = bodyIdentity.uuid(trustedIdentity.ThreadID, "thread_id", "thread_id")
+		}
+		if entry.ParentThreadID == "" && !parentHeaderPresent {
+			entry.ParentThreadID, _ = bodyIdentity.uuid(trustedIdentity.ParentThreadID, "parent_thread_id",
+				"x-codex-parent-thread-id", "parent_thread_id")
+		}
+		if entry.ForkedFromThreadID == "" && !forkHeaderPresent {
+			entry.ForkedFromThreadID, _ = bodyIdentity.uuid(trustedIdentity.ForkedFromThreadID, "forked_from_thread_id",
+				"forked_from_thread_id")
 		}
 	}
 	if c != nil && c.Request != nil {
@@ -281,6 +539,37 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 		entry.InboundEndpoint = c.Request.Method + " " + path
 	}
 	globalFingerprintObserver.record(entry)
+}
+
+type fingerprintObservationActor struct {
+	UserID     int64
+	Username   string
+	Email      string
+	APIKeyID   int64
+	APIKeyName string
+}
+
+func fingerprintObservationActorFromContext(c *gin.Context) fingerprintObservationActor {
+	if c == nil {
+		return fingerprintObservationActor{}
+	}
+	apiKey := getAPIKeyFromContext(c)
+	if apiKey == nil {
+		return fingerprintObservationActor{}
+	}
+	actor := fingerprintObservationActor{
+		UserID:     apiKey.UserID,
+		APIKeyID:   apiKey.ID,
+		APIKeyName: apiKey.Name,
+	}
+	if apiKey.User != nil {
+		if actor.UserID == 0 {
+			actor.UserID = apiKey.User.ID
+		}
+		actor.Username = apiKey.User.Username
+		actor.Email = apiKey.User.Email
+	}
+	return actor
 }
 
 // recordFingerprintObservationFromContext obtains the installation resolver's
@@ -369,18 +658,112 @@ func fingerprintObservationHeaderUUID(headers http.Header, expected string, name
 	return "", false
 }
 
-func fingerprintObservationBodyUUIDs(body []byte) (sessionID, threadID string) {
+func fingerprintObservationTurnMetadataHeaderUUID(headers http.Header, expected, field string) (string, bool) {
+	expected = NormalizeFingerprintObservationUUIDv7(expected)
+	if headers == nil || expected == "" {
+		return "", false
+	}
+	fieldPresent := false
+	for key, values := range headers {
+		if !strings.EqualFold(key, "x-codex-turn-metadata") {
+			continue
+		}
+		for _, value := range values {
+			if strings.TrimSpace(value) == "" {
+				continue
+			}
+			var metadata map[string]any
+			if json.Unmarshal([]byte(value), &metadata) != nil || metadata == nil {
+				return "", true
+			}
+			raw, exists := metadata[field]
+			if !exists {
+				continue
+			}
+			fieldPresent = true
+			value, ok := raw.(string)
+			if !ok || NormalizeFingerprintObservationUUIDv7(value) != expected {
+				return "", true
+			}
+		}
+	}
+	if fieldPresent {
+		return expected, true
+	}
+	return "", false
+}
+
+type fingerprintObservationBodyIdentity struct {
+	metadata            map[string]any
+	turnMetadata        map[string]any
+	turnMetadataPresent bool
+	turnMetadataInvalid bool
+}
+
+func parseFingerprintObservationBodyIdentity(body []byte) fingerprintObservationBodyIdentity {
 	var root map[string]any
 	if len(body) == 0 || json.Unmarshal(body, &root) != nil || root == nil {
-		return "", ""
+		return fingerprintObservationBodyIdentity{}
 	}
 	metadata, ok := root["client_metadata"].(map[string]any)
-	if !ok {
-		return "", ""
+	if !ok || metadata == nil {
+		return fingerprintObservationBodyIdentity{}
 	}
-	rawSessionID, _ := metadata["session_id"].(string)
-	rawThreadID, _ := metadata["thread_id"].(string)
-	return NormalizeFingerprintObservationUUIDv7(rawSessionID), NormalizeFingerprintObservationUUIDv7(rawThreadID)
+	parsed := fingerprintObservationBodyIdentity{metadata: metadata}
+	rawTurnMetadata, exists := metadata["x-codex-turn-metadata"]
+	if !exists {
+		return parsed
+	}
+	parsed.turnMetadataPresent = true
+	switch value := rawTurnMetadata.(type) {
+	case string:
+		if strings.TrimSpace(value) == "" || json.Unmarshal([]byte(value), &parsed.turnMetadata) != nil || parsed.turnMetadata == nil {
+			parsed.turnMetadataInvalid = true
+		}
+	case map[string]any:
+		parsed.turnMetadata = value
+	default:
+		parsed.turnMetadataInvalid = true
+	}
+	return parsed
+}
+
+func (b fingerprintObservationBodyIdentity) uuid(expected, turnField string, flatFields ...string) (string, bool) {
+	expected = NormalizeFingerprintObservationUUIDv7(expected)
+	if expected == "" || b.metadata == nil {
+		return "", false
+	}
+	if b.turnMetadataPresent {
+		if b.turnMetadataInvalid {
+			return "", true
+		}
+		if raw, exists := b.turnMetadata[turnField]; exists {
+			value, ok := raw.(string)
+			if !ok || NormalizeFingerprintObservationUUIDv7(value) != expected {
+				return "", true
+			}
+			return expected, true
+		}
+	}
+	present := false
+	for _, field := range flatFields {
+		raw, exists := b.metadata[field]
+		if !exists {
+			continue
+		}
+		value, ok := raw.(string)
+		if ok && strings.TrimSpace(value) == "" {
+			continue
+		}
+		present = true
+		if !ok || NormalizeFingerprintObservationUUIDv7(value) != expected {
+			return "", true
+		}
+	}
+	if present {
+		return expected, true
+	}
+	return "", false
 }
 
 // shouldRecordFingerprintObservationRequest deliberately keeps the observer
