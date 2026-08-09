@@ -114,12 +114,16 @@ export default adminAPI
 // Re-export types used by components
 export type { AuditLog, AuditLogQuery, AuditLogListResponse } from './audit'
 export type {
+  FingerprintObservationAPIKeySummary,
+  FingerprintObservationChildrenParams,
+  FingerprintObservationChildrenResponse,
   FingerprintObservationEntry,
   FingerprintObservationListParams,
   FingerprintObservationRelation,
   FingerprintObservationRequestOptions,
-  FingerprintObservationSessionNode,
-  FingerprintObservationThreadNode,
+  FingerprintObservationSessionSummary,
+  FingerprintObservationThreadSummary,
+  FingerprintObservationUserSummary,
   FingerprintObservationsResponse
 } from './fingerprintObservations'
 export type { BalanceHistoryItem } from './users'

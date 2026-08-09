@@ -76,6 +76,7 @@ export default {
       title: 'Auto Refresh',
       enable: 'Enable auto refresh',
       countdown: 'Auto refresh: {seconds}s',
+      paused: 'Auto refresh paused',
       seconds: '{n} seconds',
     },
     view: 'View',

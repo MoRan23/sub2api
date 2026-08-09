@@ -76,6 +76,7 @@ export default {
       title: '自动刷新',
       enable: '启用自动刷新',
       countdown: '自动刷新: {seconds}s',
+      paused: '自动刷新已暂停',
       seconds: '{n} 秒',
     },
     view: '查看',

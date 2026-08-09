@@ -1,13 +1,13 @@
 /**
- * Admin OpenAI fingerprint observation API (read-only).
+ * Admin OpenAI fingerprint observation API.
  *
- * Sessions are the pagination unit. A positive snapshot sequence pins later
- * pages to the same ring-buffer high-water mark as page one.
+ * The top-level endpoint pages by user. Each lower level is loaded lazily
+ * against the opaque snapshot token returned by the top-level request.
  */
 
 import { apiClient } from '../client'
 
-export type FingerprintObservationRelation = 'root' | 'descendant'
+export type FingerprintObservationRelation = 'root' | 'descendant' | 'unthreaded'
 
 export interface FingerprintObservationEntry {
   sequence_id: number
@@ -33,53 +33,98 @@ export interface FingerprintObservationEntry {
   inbound_endpoint: string
 }
 
-export interface FingerprintObservationThreadNode {
+export interface FingerprintObservationUserSummary {
+  node_id: string
+  user_id: number
+  username: string
+  email: string
+  unattributed: boolean
+  api_key_count: number
+  session_count: number
+  thread_count: number
+  observation_count: number
+  unattributed_observation_count: number
+  first_observed_at: string
+  last_observed_at: string
+}
+
+export interface FingerprintObservationAPIKeySummary {
+  node_id: string
+  user_id: number
+  api_key_id: number
+  api_key_name: string
+  unattributed: boolean
+  session_count: number
+  thread_count: number
+  observation_count: number
+  unattributed_observation_count: number
+  first_observed_at: string
+  last_observed_at: string
+}
+
+export interface FingerprintObservationSessionSummary {
+  node_id: string
+  user_id: number
+  api_key_id: number
+  session_id: string
+  unattributed: boolean
+  child_thread_count: number
+  has_root_thread: boolean
+  has_unthreaded: boolean
+  unthreaded_observation_count: number
+  thread_count: number
+  observation_count: number
+  first_observed_at: string
+  last_observed_at: string
+}
+
+export interface FingerprintObservationThreadSummary {
+  node_id: string
+  session_id: string
   thread_id: string
   parent_thread_id: string
   forked_from_thread_id: string
   relation: FingerprintObservationRelation
+  unthreaded: boolean
+  observation_count: number
   first_observed_at: string
   last_observed_at: string
-  observation_count: number
-  observations: FingerprintObservationEntry[]
-}
-
-export interface FingerprintObservationSessionNode {
-  user_id: number
-  username: string
-  email: string
-  api_key_id: number
-  api_key_name: string
-  session_id: string
-  first_observed_at: string
-  last_observed_at: string
-  observation_count: number
-  root_thread: FingerprintObservationThreadNode | null
-  child_threads: FingerprintObservationThreadNode[]
-  unthreaded_observations: FingerprintObservationEntry[]
 }
 
 export interface FingerprintObservationsResponse {
   enabled: boolean
-  items: FingerprintObservationSessionNode[]
+  snapshot_token: string
+  items: FingerprintObservationUserSummary[]
   total: number
   page: number
   page_size: number
   pages: number
-  snapshot_seq: number
+}
+
+export interface FingerprintObservationChildrenResponse<T> {
+  items: T[]
+  total: number
+  next_cursor: string
 }
 
 export interface FingerprintObservationListParams {
   page?: number
   page_size?: number
-  snapshot_seq?: number
+  snapshot_token?: string
+}
+
+export interface FingerprintObservationChildrenParams {
+  snapshot_token: string
+  parent_node_id: string
+  cursor?: string
+  limit?: number
 }
 
 export interface FingerprintObservationRequestOptions {
   signal?: AbortSignal
 }
 
-export async function list(
+async function list(
   params: FingerprintObservationListParams = {},
   options: FingerprintObservationRequestOptions = {}
 ): Promise<FingerprintObservationsResponse> {
@@ -93,8 +138,52 @@ export async function list(
   return data
 }
 
+async function listChildren<T>(
+  path: string,
+  params: FingerprintObservationChildrenParams,
+  options: FingerprintObservationRequestOptions
+): Promise<FingerprintObservationChildrenResponse<T>> {
+  const { data } = await apiClient.get<FingerprintObservationChildrenResponse<T>>(path, {
+    params,
+    signal: options.signal,
+  })
+  return data
+}
+
+function listAPIKeys(
+  params: FingerprintObservationChildrenParams,
+  options: FingerprintObservationRequestOptions = {}
+): Promise<FingerprintObservationChildrenResponse<FingerprintObservationAPIKeySummary>> {
+  return listChildren('/admin/openai/fingerprint-observations/api-keys', params, options)
+}
+
+function listSessions(
+  params: FingerprintObservationChildrenParams,
+  options: FingerprintObservationRequestOptions = {}
+): Promise<FingerprintObservationChildrenResponse<FingerprintObservationSessionSummary>> {
+  return listChildren('/admin/openai/fingerprint-observations/sessions', params, options)
+}
+
+function listThreads(
+  params: FingerprintObservationChildrenParams,
+  options: FingerprintObservationRequestOptions = {}
+): Promise<FingerprintObservationChildrenResponse<FingerprintObservationThreadSummary>> {
+  return listChildren('/admin/openai/fingerprint-observations/threads', params, options)
+}
+
+function listEntries(
+  params: FingerprintObservationChildrenParams,
+  options: FingerprintObservationRequestOptions = {}
+): Promise<FingerprintObservationChildrenResponse<FingerprintObservationEntry>> {
+  return listChildren('/admin/openai/fingerprint-observations/entries', params, options)
+}
+
 export const fingerprintObservationsAPI = {
   list,
+  listAPIKeys,
+  listSessions,
+  listThreads,
+  listEntries,
 }
 
 export default fingerprintObservationsAPI

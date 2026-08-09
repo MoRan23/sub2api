@@ -3,19 +3,22 @@
     <button
       @click="showDropdown = !showDropdown"
       class="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300 dark:hover:bg-dark-700"
-      :title="t('common.autoRefresh.title')"
+      :title="enabled && paused ? t('common.autoRefresh.paused') : t('common.autoRefresh.title')"
     >
       <svg
         class="h-3.5 w-3.5"
-        :class="enabled ? 'animate-spin' : ''"
+        :class="enabled && !paused ? 'animate-spin' : ''"
         xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
       >
         <path fill-rule="evenodd" d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H4.598a.75.75 0 00-.75.75v3.634a.75.75 0 001.5 0v-2.033l.312.312a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm-10.624-2.848a5.5 5.5 0 019.201-2.466l.312.311H11.768a.75.75 0 000 1.5h3.634a.75.75 0 00.75-.75V3.537a.75.75 0 00-1.5 0v2.034l-.312-.312A7 7 0 002.628 8.397a.75.75 0 001.449.39z" clip-rule="evenodd" />
       </svg>
       <span>
-        {{ enabled
-          ? t('common.autoRefresh.countdown', { seconds: countdown })
-          : t('common.autoRefresh.title')
+        {{
+          enabled
+            ? paused
+              ? t('common.autoRefresh.paused')
+              : t('common.autoRefresh.countdown', { seconds: countdown })
+            : t('common.autoRefresh.title')
         }}
       </span>
     </button>
@@ -55,12 +58,15 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-defineProps<{
+withDefaults(defineProps<{
   enabled: boolean
+  paused?: boolean
   intervalSeconds: number
   countdown: number
   intervals: readonly number[]
-}>()
+}>(), {
+  paused: false,
+})
 
 defineEmits<{
   (e: 'update:enabled', value: boolean): void

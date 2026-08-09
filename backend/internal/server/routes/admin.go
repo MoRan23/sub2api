@@ -444,6 +444,10 @@ func registerOpenAIOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		openai.POST("/accounts/:id/quota/refresh", h.Admin.OpenAIOAuth.RefreshQuota)
 		openai.POST("/accounts/:id/reset-quota", h.Admin.OpenAIOAuth.ResetQuota)
 		openai.GET("/fingerprint-observations", h.Admin.OpenAIOAuth.ListFingerprintObservations)
+		openai.GET("/fingerprint-observations/api-keys", h.Admin.OpenAIOAuth.ListFingerprintObservationAPIKeys)
+		openai.GET("/fingerprint-observations/sessions", h.Admin.OpenAIOAuth.ListFingerprintObservationSessions)
+		openai.GET("/fingerprint-observations/threads", h.Admin.OpenAIOAuth.ListFingerprintObservationThreads)
+		openai.GET("/fingerprint-observations/entries", h.Admin.OpenAIOAuth.ListFingerprintObservationEntries)
 	}
 }
 

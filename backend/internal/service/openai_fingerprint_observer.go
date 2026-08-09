@@ -113,7 +113,22 @@ var globalFingerprintObserver = &fingerprintObserver{
 // SetFingerprintObservationEnabled publishes the observation toggle. Disabling
 // observation synchronously clears and scrubs the ring buffer.
 func SetFingerprintObservationEnabled(enabled bool) {
-	globalFingerprintObserver.setEnabled(enabled)
+	o := globalFingerprintObserver
+	if o == nil {
+		if !enabled {
+			globalFingerprintObservationSnapshotStore.clear()
+		}
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.setEnabledLocked(enabled)
+	if !enabled {
+		// Keep the observer lock held while clearing snapshots. Snapshot creation
+		// takes the locks in the same order, so a concurrent creator cannot copy
+		// old ring entries and install them after this scrub has completed.
+		globalFingerprintObservationSnapshotStore.clear()
+	}
 }
 
 // IsFingerprintObservationEnabled reports the current observation state.
@@ -177,6 +192,10 @@ func (o *fingerprintObserver) setEnabled(enabled bool) {
 	// clearing a newer enable's state after it returns.
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	o.setEnabledLocked(enabled)
+}
+
+func (o *fingerprintObserver) setEnabledLocked(enabled bool) {
 	o.enabled.Store(enabled)
 	if !enabled {
 		var zero FingerprintObservationEntry
@@ -347,6 +366,10 @@ func (o *fingerprintObserver) snapshot(limit int) []FingerprintObservationEntry 
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	return o.snapshotLocked(limit)
+}
+
+func (o *fingerprintObserver) snapshotLocked(limit int) []FingerprintObservationEntry {
 	if len(o.ring) == 0 || o.size == 0 {
 		return []FingerprintObservationEntry{}
 	}
