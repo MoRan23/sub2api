@@ -647,7 +647,22 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return err
 	}
 
-	wsHeaders, wsSessionResolution, buildHdrErr := s.buildOpenAIWSHeadersWithBody(ctx, c, account, token, wsDecision, isCodexCLI, turnState, c.GetHeader(openAIWSTurnMetadataHeader), firstPayload.promptCacheKey, firstPayload.payloadRaw, true)
+	firstRoutingFields := gjson.GetManyBytes(firstPayload.payloadRaw, "model", "service_tier")
+	wsHeaders, wsSessionResolution, buildHdrErr := s.buildOpenAIWSHeadersWithBody(
+		ctx,
+		c,
+		account,
+		token,
+		wsDecision,
+		isCodexCLI,
+		turnState,
+		strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)),
+		firstPayload.promptCacheKey,
+		firstPayload.payloadRaw,
+		true,
+		firstRoutingFields[0].String(),
+		firstRoutingFields[1].String(),
+	)
 	if buildHdrErr != nil {
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
@@ -1691,6 +1706,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if rewriteErr := rewriteIngressInstallationID(&nextPayload); rewriteErr != nil {
 			return rewriteErr
 		}
+		nextRoutingFields := gjson.GetManyBytes(nextPayload.payloadRaw, "model", "service_tier")
 		if pinnedIdentityModeEnabled {
 			// A turn without an explicit session/thread tuple inherits the socket's
 			// pinned identity. Before any pair has been sent, the first prompt cache
@@ -1763,14 +1779,29 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		} else {
 			// Legacy mode retains its historical per-prompt header update.
 			if nextPayload.promptCacheKey != "" {
-				updatedHeaders, _, updHdrErr := s.buildOpenAIWSHeadersWithBody(ctx, c, account, token, wsDecision, isCodexCLI, turnState, c.GetHeader(openAIWSTurnMetadataHeader), nextPayload.promptCacheKey, nextPayload.payloadRaw, true)
+				updatedHeaders, _, updHdrErr := s.buildOpenAIWSHeadersWithBody(
+					ctx,
+					c,
+					account,
+					token,
+					wsDecision,
+					isCodexCLI,
+					turnState,
+					strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader)),
+					nextPayload.promptCacheKey,
+					nextPayload.payloadRaw,
+					true,
+					nextRoutingFields[0].String(),
+					nextRoutingFields[1].String(),
+				)
 				if updHdrErr != nil {
-					logOpenAIWSModeInfo("openai_ws_update_headers_failed account_id=%d err=%v", account.ID, updHdrErr)
+					logOpenAIWSModeInfo("ingress_ws_update_headers_failed account_id=%d err=%v", account.ID, updHdrErr)
 				} else {
 					baseAcquireReq.Headers = updatedHeaders
 				}
 			}
 		}
+		setOpenAICodexRoutingHint(baseAcquireReq.Headers, account, nextRoutingFields[0].String(), nextRoutingFields[1].String())
 		if nextPayload.previousResponseID != "" {
 			expectedPrev := strings.TrimSpace(lastTurnResponseID)
 			chainedFromLast := expectedPrev != "" && nextPayload.previousResponseID == expectedPrev

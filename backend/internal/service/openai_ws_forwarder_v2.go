@@ -150,7 +150,21 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	forceNewConnByPolicy := shouldForceNewConnOnStoreDisabled(storeDisabledConnMode, lastFailureReason)
 	forceNewConn := forceNewConnByPolicy && storeDisabled && previousResponseID == "" && sessionHash != "" && preferredConnID == ""
 	payloadBody := payloadAsJSONBytes(payload)
-	wsHeaders, sessionResolution, buildHdrErr := s.buildOpenAIWSHeadersWithBody(ctx, c, account, token, decision, isCodexCLI, turnState, turnMetadata, promptCacheKey, payloadBody, true)
+	wsHeaders, sessionResolution, buildHdrErr := s.buildOpenAIWSHeadersWithBody(
+		ctx,
+		c,
+		account,
+		token,
+		decision,
+		isCodexCLI,
+		turnState,
+		turnMetadata,
+		promptCacheKey,
+		payloadBody,
+		true,
+		openAIWSPayloadString(payload, "model"),
+		openAIWSPayloadString(payload, "service_tier"),
+	)
 	if buildHdrErr != nil {
 		return nil, fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}

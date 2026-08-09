@@ -804,7 +804,21 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 		turnMetadata = c.GetHeader(openAIWSTurnMetadataHeader)
 	}
-	headers, sessionResolution, buildHdrErr := s.buildOpenAIWSHeadersWithBody(ctx, c, account, token, wsDecision, isCodexCLI, turnState, turnMetadata, promptCacheKey, firstClientMessage, false)
+	headers, sessionResolution, buildHdrErr := s.buildOpenAIWSHeadersWithBody(
+		ctx,
+		c,
+		account,
+		token,
+		wsDecision,
+		isCodexCLI,
+		turnState,
+		turnMetadata,
+		promptCacheKey,
+		firstClientMessage,
+		false,
+		gjson.GetBytes(firstClientMessage, "model").String(),
+		gjson.GetBytes(firstClientMessage, "service_tier").String(),
+	)
 	if buildHdrErr != nil {
 		return fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}

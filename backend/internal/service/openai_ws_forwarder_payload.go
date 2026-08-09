@@ -75,8 +75,27 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	turnState string,
 	turnMetadata string,
 	promptCacheKey string,
-	rewriteInstallationID bool,
+	options ...any,
 ) (http.Header, openAIWSSessionHeaderResolution, error) {
+	// Keep both historical call shapes source-compatible while the production
+	// transports use the body-aware builder below:
+	//   (..., promptCacheKey, rewriteInstallationID)
+	//   (..., promptCacheKey, routingModel, routingServiceTier)
+	rewriteInstallationID := false
+	routingModel := ""
+	routingServiceTier := ""
+	if len(options) > 0 {
+		if value, ok := options[0].(bool); ok {
+			rewriteInstallationID = value
+		}
+	}
+	if len(options) == 2 {
+		routingModel, _ = options[0].(string)
+		routingServiceTier, _ = options[1].(string)
+	} else if len(options) >= 3 {
+		routingModel, _ = options[1].(string)
+		routingServiceTier, _ = options[2].(string)
+	}
 	return s.buildOpenAIWSHeadersWithBody(
 		ctx,
 		c,
@@ -89,6 +108,8 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		promptCacheKey,
 		nil,
 		rewriteInstallationID,
+		routingModel,
+		routingServiceTier,
 	)
 }
 
@@ -109,7 +130,16 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 	promptCacheKey string,
 	body []byte,
 	rewriteInstallationID bool,
+	routingFields ...string,
 ) (http.Header, openAIWSSessionHeaderResolution, error) {
+	routingModel := ""
+	routingServiceTier := ""
+	if len(routingFields) > 0 {
+		routingModel = routingFields[0]
+	}
+	if len(routingFields) > 1 {
+		routingServiceTier = routingFields[1]
+	}
 	clearFingerprintObservationOutboundIdentity(c)
 	headers := make(http.Header)
 	if account == nil || !account.IsOpenAIAgentIdentity() {
@@ -262,6 +292,16 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 覆盖所有 WS 模式（ctx_pool/dedicated/passthrough）的握手头。
 	account.ApplyHeaderOverrides(headers)
+	setOpenAICodexRoutingHint(headers, account, routingModel, routingServiceTier)
+	logOpenAIRoutingDiagnostics(
+		ctx,
+		account,
+		string(decision.Transport),
+		routingModel,
+		routingServiceTier,
+		strings.TrimSpace(headers.Get(openAICodexRoutingHintHeader)) != "",
+		"soft_routing_hint",
+	)
 	if sessionResolution.OutboundIdentityEnabled {
 		// Identity is server-owned and must be the final writer after account
 		// overrides, including custom test/admin overrides on OAuth accounts.
