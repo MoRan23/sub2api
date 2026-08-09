@@ -193,11 +193,30 @@ describe('FingerprintObservationView', () => {
 
     expect(wrapper.text()).toContain('alice')
     expect(wrapper.find('[title="alice@example.com"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('Codex workstation')
+    expect(wrapper.find(`[title="${sessionID}"]`).exists()).toBe(false)
+
+    const userButton = wrapper.get('button[aria-controls="fingerprint-user-0"]')
+    expect(userButton.attributes('aria-expanded')).toBe('false')
+    await userButton.trigger('click')
+
+    expect(userButton.attributes('aria-expanded')).toBe('true')
     expect(wrapper.text()).toContain('Codex workstation')
+    expect(wrapper.find(`[title="${sessionID}"]`).exists()).toBe(false)
+
+    const apiKeyButton = wrapper.get(
+      'button[aria-controls="fingerprint-user-0-api-key-0"]'
+    )
+    expect(apiKeyButton.attributes('aria-expanded')).toBe('false')
+    await apiKeyButton.trigger('click')
+
+    expect(apiKeyButton.attributes('aria-expanded')).toBe('true')
     expect(wrapper.find(`[title="${sessionID}"]`).exists()).toBe(true)
     expect(wrapper.text()).not.toContain(childThreadID)
 
-    const sessionButton = wrapper.get('button[aria-controls="fingerprint-session-0"]')
+    const sessionButton = wrapper.get(
+      'button[aria-controls="fingerprint-user-0-api-key-0-session-0"]'
+    )
     expect(sessionButton.attributes('aria-expanded')).toBe('false')
     await sessionButton.trigger('click')
 
@@ -207,7 +226,7 @@ describe('FingerprintObservationView', () => {
     expect(wrapper.text()).not.toContain('POST /v1/responses/compact')
 
     const childThreadButton = wrapper.get(
-      'button[aria-controls="fingerprint-session-0-thread-1"]'
+      'button[aria-controls="fingerprint-user-0-api-key-0-session-0-thread-1"]'
     )
     await childThreadButton.trigger('click')
 
@@ -216,6 +235,69 @@ describe('FingerprintObservationView', () => {
     expect(wrapper.text()).toContain('outbound-installation')
     expect(wrapper.text()).toContain('codex_cli_rs/1.0')
     expect(wrapper.text()).toContain('POST /v1/responses/compact')
+
+    wrapper.unmount()
+  })
+
+  it('groups root sessions by user and then by API key with independent disclosure controls', async () => {
+    const sameKeySession = {
+      ...sessionNode,
+      session_id: '018f5c3c-6e3a-7abf-8def-1234567890b1',
+    }
+    const secondKeySession = {
+      ...sessionNode,
+      api_key_id: 10,
+      api_key_name: 'Second workstation',
+      session_id: '018f5c3c-6e3a-7abf-8def-1234567890b2',
+    }
+    const secondUserSession = {
+      ...sessionNode,
+      user_id: 8,
+      username: 'bob',
+      email: 'bob@example.com',
+      api_key_id: 11,
+      api_key_name: 'Bob workstation',
+      session_id: '018f5c3c-6e3a-7abf-8def-1234567890b3',
+    }
+    listObservations.mockResolvedValue(
+      response({
+        items: [sessionNode, sameKeySession, secondKeySession, secondUserSession],
+        total: 4,
+        pages: 1,
+      })
+    )
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.findAll('button[aria-controls="fingerprint-user-0"]')).toHaveLength(1)
+    expect(wrapper.findAll('button[aria-controls="fingerprint-user-1"]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('alice')
+    expect(wrapper.text()).toContain('bob')
+    expect(wrapper.text()).not.toContain('Codex workstation')
+
+    await wrapper.get('button[aria-controls="fingerprint-user-0"]').trigger('click')
+    expect(wrapper.text().match(/Codex workstation/g)).toHaveLength(1)
+    expect(wrapper.text()).toContain('Second workstation')
+    expect(wrapper.findAll('button[aria-controls="fingerprint-user-0-api-key-0"]')).toHaveLength(1)
+    expect(wrapper.findAll('button[aria-controls="fingerprint-user-0-api-key-1"]')).toHaveLength(1)
+
+    await wrapper.get('button[aria-controls="fingerprint-user-0-api-key-0"]').trigger('click')
+    expect(wrapper.find(`[title="${sessionID}"]`).exists()).toBe(true)
+    expect(wrapper.find(`[title="${sameKeySession.session_id}"]`).exists()).toBe(true)
+    expect(wrapper.find(`[title="${secondKeySession.session_id}"]`).exists()).toBe(false)
+
+    await wrapper.get('button[aria-controls="fingerprint-user-0-api-key-1"]').trigger('click')
+    expect(wrapper.find(`[title="${secondKeySession.session_id}"]`).exists()).toBe(true)
+
+    const controlIDs = wrapper
+      .findAll('button[aria-controls]')
+      .map((button) => button.attributes('aria-controls'))
+    expect(controlIDs.every((id) => !id.includes('undefined'))).toBe(true)
+    expect(new Set(controlIDs).size).toBe(controlIDs.length)
+
+    await wrapper.get('button[aria-controls="fingerprint-user-0"]').trigger('click')
+    expect(wrapper.text()).not.toContain('Codex workstation')
+    expect(wrapper.find(`[title="${sessionID}"]`).exists()).toBe(false)
 
     wrapper.unmount()
   })
@@ -375,11 +457,27 @@ describe('FingerprintObservationView', () => {
     const wrapper = mountView()
     await flushPromises()
 
+    await wrapper.get('button[aria-controls="fingerprint-user-0"]').trigger('click')
+    await wrapper.get('button[aria-controls="fingerprint-user-0-api-key-0"]').trigger('click')
+    await wrapper
+      .get('button[aria-controls="fingerprint-user-0-api-key-0-session-0"]')
+      .trigger('click')
+    expect(wrapper.text()).toContain(childThreadID)
+
     await wrapper.get('[role="switch"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.get('[role="switch"]').attributes('aria-checked')).toBe('true')
+    expect(
+      wrapper.get('button[aria-controls="fingerprint-user-0"]').attributes('aria-expanded')
+    ).toBe('true')
+    expect(
+      wrapper
+        .get('button[aria-controls="fingerprint-user-0-api-key-0"]')
+        .attributes('aria-expanded')
+    ).toBe('true')
     expect(wrapper.text()).toContain(sessionID)
+    expect(wrapper.text()).toContain(childThreadID)
     expect(showError).toHaveBeenCalledWith('request failed')
 
     wrapper.unmount()
@@ -404,7 +502,12 @@ describe('FingerprintObservationView', () => {
       { signal: expect.any(AbortSignal) }
     )
     expect(wrapper.get('[role="switch"]').attributes('aria-checked')).toBe('true')
-    expect(wrapper.text()).toContain(sessionID)
+    expect(wrapper.text()).toContain('alice')
+    expect(
+      wrapper.get('button[aria-controls="fingerprint-user-0"]').attributes('aria-expanded')
+    ).toBe('false')
+    expect(wrapper.text()).not.toContain('Codex workstation')
+    expect(wrapper.text()).not.toContain(sessionID)
     expect(showSuccess).toHaveBeenCalledOnce()
 
     wrapper.unmount()
