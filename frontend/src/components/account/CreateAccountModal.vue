@@ -3890,7 +3890,7 @@ const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OF
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 type CodexFingerprintMode = 'off' | 'device' | 'session' | 'full'
-const codexFingerprintMode = ref<CodexFingerprintMode>('session')
+const codexFingerprintMode = ref<CodexFingerprintMode>('off')
 const codexFingerprintModeOptions = computed(() => [
   { value: 'off' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintOff') },
   { value: 'device' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintDevice') },
@@ -4777,7 +4777,7 @@ const resetForm = () => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
-  codexFingerprintMode.value = 'session'
+  codexFingerprintMode.value = 'off'
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
   webSearchEmulationMode.value = 'default'
@@ -4879,8 +4879,10 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   // installation_id 固定仅对 OpenAI OAuth 生效；UUID 由服务端在创建时生成。
   if (accountCategory.value === 'oauth-based') {
     extra.openai_installation_pin_enabled = openAIInstallationPinEnabled.value
+    extra.codex_fingerprint_mode = codexFingerprintMode.value
   } else {
     delete extra.openai_installation_pin_enabled
+    delete extra.codex_fingerprint_mode
   }
   delete extra.openai_installation_rotate_enabled
   delete extra.openai_pinned_installation_id
