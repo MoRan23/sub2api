@@ -3074,25 +3074,22 @@ type CyberPolicyRecordInput struct {
 
 // RecordCyberPolicyEvent 把一次 cyber_policy 硬阻断写入风控中心日志、计入违规计数、
 // 并发送通知。当前请求已由 gateway 透传给用户；本方法仅做事后记录/通知/计数。
-// 内容审核的 enabled/mode 不影响该路径，但审计分组范围必须生效。
+// 受 risk_control_enabled 总开关和内容审核 group/model scope 约束，
+// 不受内容审核 Enabled/Mode/sample 约束。
 func (s *ContentModerationService) RecordCyberPolicyEvent(ctx context.Context, in CyberPolicyRecordInput) {
 	if s == nil || s.repo == nil {
 		return
 	}
-	if !s.isRiskControlEnabled(ctx) {
+	runtimeSnapshot, err := s.loadRuntimeSnapshot(ctx)
+	if err != nil {
+		slog.Warn("content_moderation.cyber_runtime_snapshot_load_failed", "error", err)
 		return
 	}
-	cfg, err := s.loadConfig(ctx)
-	if err != nil {
-		slog.Warn("content_moderation.cyber_load_config_failed", "error", err)
-		cfg = defaultContentModerationConfig()
+	if !runtimeSnapshot.riskControlEnabled {
+		return
 	}
-	if !cfg.includesGroup(in.GroupID) {
-		slog.Info("content_moderation.cyber_skip_group_out_of_scope",
-			"user_id", in.UserID,
-			"group_id", contentModerationLogGroupID(in.GroupID),
-			"all_groups", cfg.AllGroups,
-			"configured_group_ids", cfg.GroupIDs)
+	cfg := runtimeSnapshot.config
+	if !cfg.includesGroup(in.GroupID) || !cfg.includesModel(in.Model) {
 		return
 	}
 	var userID *int64
