@@ -466,8 +466,8 @@ func validateFingerprintUUIDv7(raw string) bool {
 }
 
 // recordFingerprintObservation writes a finalized per-request entry. Callers
-// must invoke it only at the last header-writing boundary for the covered
-// OpenAI Responses, Messages/Chat, or OAuth WebSocket transports.
+// must invoke it only at the last header-writing boundary for a physical
+// OpenAI OAuth send.
 func (s *OpenAIGatewayService) recordFingerprintObservation(c *gin.Context, account *Account, pin installationIDResolution, outbound http.Header) {
 	s.recordFingerprintObservationWithBody(c, account, pin, outbound, nil)
 }
@@ -478,7 +478,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservation(c *gin.Context, acco
 // schema path that carries server-owned identity in the body but not aliases
 // in the wire header set.
 func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Context, account *Account, pin installationIDResolution, outbound http.Header, body []byte) {
-	if !globalFingerprintObserver.enabled.Load() || account == nil || !account.IsOpenAIOAuth() || account.IsOpenAIPassthroughEnabled() {
+	if !globalFingerprintObserver.enabled.Load() || account == nil || !account.IsOpenAIOAuth() {
 		return
 	}
 	trustedIdentity, hasTrustedIdentity := fingerprintObservationOutboundIdentityFromContext(c)
@@ -639,6 +639,14 @@ func installationIDResolutionFromContext(c *gin.Context, account *Account) insta
 			return requestCache.Resolution
 		}
 	}
+	// Preserve-client projections deliberately do not invoke the account pin
+	// resolver. The immutable plan still carries the captured client value, so
+	// observations can report body-only/nested installation IDs without
+	// populating the resolver cache or changing later pin decisions.
+	if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok &&
+		plan.InstallationPolicy == OpenAIOAuthInstallationPreserve {
+		return installationIDResolution{ClientID: plan.Capture.ClientInstallationID}
+	}
 	return installationIDResolution{}
 }
 
@@ -790,10 +798,11 @@ func (b fingerprintObservationBodyIdentity) uuid(expected, turnField string, fla
 }
 
 // shouldRecordFingerprintObservationRequest deliberately keeps the observer
-// narrow: Images, embeddings, alpha/search, and unrelated gateway transports
-// must not add rows merely because they happen to use OpenAI OAuth.
+// narrow: only turn-carrying Codex OAuth transports participate. Images,
+// embeddings, Live/profile probes, and unrelated gateway transports remain
+// outside the observation ring.
 func shouldRecordFingerprintObservationRequest(c *gin.Context, account *Account) bool {
-	if c == nil || c.Request == nil || account == nil || !account.IsOpenAIOAuth() || account.IsOpenAIPassthroughEnabled() {
+	if c == nil || c.Request == nil || account == nil || !account.IsOpenAIOAuth() {
 		return false
 	}
 	path := ""
@@ -814,10 +823,22 @@ func shouldRecordFingerprintObservationRequest(c *gin.Context, account *Account)
 		path == "/v1/chat/completions" || path == "/openai/v1/chat/completions" || path == "/chat/completions" {
 		return true
 	}
+	if isFingerprintObservationAlphaSearchPath(path) {
+		return true
+	}
 	if isFingerprintObservationResponsesRoot(path) || isFingerprintObservationCompactPath(path) {
 		return true
 	}
 	return false
+}
+
+func isFingerprintObservationAlphaSearchPath(path string) bool {
+	switch path {
+	case "/alpha/search", "/v1/alpha/search", "/openai/v1/alpha/search", "/backend-api/codex/alpha/search":
+		return true
+	default:
+		return false
+	}
 }
 
 func isFingerprintObservationResponsesRoot(path string) bool {

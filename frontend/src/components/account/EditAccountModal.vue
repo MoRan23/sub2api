@@ -1946,88 +1946,144 @@
         </div>
       </div>
 
-      <!-- OpenAI OAuth installation_id 固定开关（仅 GPT OAuth 账号） -->
-      <div
-        v-if="account?.platform === 'openai' && !isSparkShadow && account?.type === 'oauth'"
+      <!-- OpenAI OAuth account-level Codex fingerprint normalization -->
+      <section
+        v-if="account?.platform === 'openai' && account?.type === 'oauth'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="openai-codex-fingerprint-section"
       >
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.installationPin') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.installationPinDesc') }}
-            </p>
-          </div>
-          <button
-            type="button"
-            data-testid="openai-installation-pin-toggle"
-            role="switch"
-            :aria-checked="openAIInstallationPinEnabled"
-            @click="openAIInstallationPinEnabled = !openAIInstallationPinEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              openAIInstallationPinEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
+        <div class="mb-4">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
+            {{ t('admin.accounts.openai.codexFingerprintNormalization') }}
+          </h3>
+          <p
+            v-if="isSparkShadow"
+            class="mt-1 text-xs text-gray-500 dark:text-gray-400"
+            data-testid="openai-codex-fingerprint-shadow-inherited"
           >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                openAIInstallationPinEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
-        </div>
-        <div class="mt-3 flex items-center gap-2">
-          <label for="openai-pinned-installation-id" class="sr-only">
-            {{ t('admin.accounts.openai.installationID') }}
-          </label>
-          <input
-            v-model="openAIPinnedInstallationID"
-            type="text"
-            readonly
-            class="input min-w-0 flex-1 font-mono text-xs"
-            id="openai-pinned-installation-id"
-            data-testid="openai-pinned-installation-id"
-          />
-          <button
-            type="button"
-            class="btn btn-secondary shrink-0"
-            :disabled="installationRegenerating || !openAIInstallationPinEnabled || !installationPinSavedEnabled"
-            data-testid="openai-installation-regenerate"
-            :title="t('admin.accounts.openai.installationRegenerate')"
-            @click="regenerateOpenAIInstallationID"
+            {{ t('admin.accounts.openai.codexFingerprintShadowHint') }}
+          </p>
+          <p v-else class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.openai.codexFingerprintEditDesc') }}
+          </p>
+          <p
+            v-if="!isSparkShadow && !codexFingerprintNormalizationEnabled"
+            class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+            data-testid="openai-codex-fingerprint-paused"
           >
-            <Icon name="refresh" size="sm" :class="installationRegenerating ? 'animate-spin' : ''" />
-            <span class="sr-only">{{ t('admin.accounts.openai.installationRegenerate') }}</span>
-          </button>
-        </div>
-        <p v-if="!installationPinSavedEnabled && openAIInstallationPinEnabled" class="mt-1 text-xs text-amber-600 dark:text-amber-400">
-          {{ t('admin.accounts.openai.installationRegenerateSaveHint') }}
-        </p>
-      </div>
-
-      <!-- OpenAI account-level environment fingerprint -->
-      <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'apikey')"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div>
-          <label class="input-label">{{ t('admin.accounts.openai.environmentFingerprint') }}</label>
-          <input
-            v-model="openAIEnvironmentFingerprint"
-            type="text"
-            maxlength="256"
-            class="input font-mono text-sm"
-            :disabled="isSparkShadow"
-            :placeholder="t('admin.accounts.openai.environmentFingerprintPlaceholder')"
-            data-testid="openai-environment-fingerprint"
-          />
-          <p class="input-hint">
-            {{ isSparkShadow
-              ? t('admin.accounts.openai.environmentFingerprintShadowHint')
-              : t('admin.accounts.openai.environmentFingerprintDesc') }}
+            {{ t('admin.accounts.openai.codexFingerprintPaused') }}
           </p>
         </div>
+
+        <template v-if="!isSparkShadow">
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <label class="input-label mb-0">{{ t('admin.accounts.openai.installationPin') }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.openai.installationPinDesc') }}
+              </p>
+              <p
+                v-if="!codexFingerprintNormalizationEnabled || !codexInstallationIDNormalizationEnabled"
+                class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+              >
+                {{ t('admin.accounts.openai.installationNormalizationPaused') }}
+              </p>
+            </div>
+            <button
+              type="button"
+              data-testid="openai-installation-pin-toggle"
+              role="switch"
+              :aria-label="t('admin.accounts.openai.installationPin')"
+              :aria-checked="openAIInstallationPinEnabled"
+              @click="openAIInstallationPinEnabled = !openAIInstallationPinEnabled"
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                openAIInstallationPinEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+              ]"
+            >
+              <span
+                :class="[
+                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                  openAIInstallationPinEnabled ? 'translate-x-5' : 'translate-x-0'
+                ]"
+              />
+            </button>
+          </div>
+          <div class="mt-3 flex items-center gap-2">
+            <label for="openai-pinned-installation-id" class="sr-only">
+              {{ t('admin.accounts.openai.installationID') }}
+            </label>
+            <input
+              id="openai-pinned-installation-id"
+              v-model="openAIPinnedInstallationID"
+              type="text"
+              readonly
+              class="input min-w-0 flex-1 font-mono text-xs"
+              data-testid="openai-pinned-installation-id"
+            />
+            <button
+              type="button"
+              class="btn btn-secondary shrink-0"
+              :disabled="installationRegenerating || !openAIInstallationPinEnabled || !installationPinSavedEnabled"
+              data-testid="openai-installation-regenerate"
+              :title="t('admin.accounts.openai.installationRegenerate')"
+              @click="regenerateOpenAIInstallationID"
+            >
+              <Icon name="refresh" size="sm" :class="installationRegenerating ? 'animate-spin' : ''" />
+              <span class="sr-only">{{ t('admin.accounts.openai.installationRegenerate') }}</span>
+            </button>
+          </div>
+          <p v-if="!installationPinSavedEnabled && openAIInstallationPinEnabled" class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+            {{ t('admin.accounts.openai.installationRegenerateSaveHint') }}
+          </p>
+
+          <div class="mt-4 border-t border-gray-100 pt-4 dark:border-dark-700">
+            <label for="openai-environment-fingerprint" class="input-label">
+              {{ t('admin.accounts.openai.environmentFingerprint') }}
+            </label>
+            <input
+              id="openai-environment-fingerprint"
+              v-model="openAIEnvironmentFingerprint"
+              type="text"
+              maxlength="256"
+              class="input font-mono text-sm"
+              :aria-label="t('admin.accounts.openai.environmentFingerprint')"
+              :placeholder="t('admin.accounts.openai.environmentFingerprintPlaceholder')"
+              data-testid="openai-environment-fingerprint"
+            />
+            <p class="input-hint">
+              {{ t('admin.accounts.openai.environmentFingerprintDesc') }}
+            </p>
+            <p
+              v-if="!codexFingerprintNormalizationEnabled || !codexClientIdentityNormalizationEnabled"
+              class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+              data-testid="openai-client-identity-normalization-paused"
+            >
+              {{ t('admin.accounts.openai.clientIdentityNormalizationPaused') }}
+            </p>
+          </div>
+        </template>
+      </section>
+
+      <!-- API-key environment UA remains outside OAuth Codex normalization. -->
+      <div
+        v-if="account?.platform === 'openai' && account?.type === 'apikey'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <label for="openai-environment-fingerprint" class="input-label">
+          {{ t('admin.accounts.openai.environmentFingerprint') }}
+        </label>
+        <input
+          id="openai-environment-fingerprint"
+          v-model="openAIEnvironmentFingerprint"
+          type="text"
+          maxlength="256"
+          class="input font-mono text-sm"
+          :aria-label="t('admin.accounts.openai.environmentFingerprint')"
+          :placeholder="t('admin.accounts.openai.environmentFingerprintPlaceholder')"
+          data-testid="openai-environment-fingerprint"
+        />
+        <p class="input-hint">{{ t('admin.accounts.openai.environmentFingerprintDesc') }}</p>
       </div>
 
       <div
@@ -3042,6 +3098,9 @@ const openAIPinnedInstallationID = ref('')
 const installationPinSavedEnabled = ref(true)
 const installationRegenerating = ref(false)
 const openAIEnvironmentFingerprint = ref('')
+const codexFingerprintNormalizationEnabled = ref(true)
+const codexInstallationIDNormalizationEnabled = ref(true)
+const codexClientIdentityNormalizationEnabled = ref(true)
 // OpenAI 订阅档位（Plus/Pro/Free）手动覆盖值,存于 credentials.plan_type;'' 表示清空/自动识别
 const editPlanType = ref<string>('')
 const openAICompactMode = ref<OpenAICompactMode>('auto')
@@ -3071,6 +3130,19 @@ const {
 adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
   webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
 }).catch(() => { webSearchGlobalEnabled.value = false })
+
+adminAPI.settings.getSettings().then(settings => {
+  codexFingerprintNormalizationEnabled.value =
+    settings?.enable_openai_codex_fingerprint_normalization !== false
+  codexInstallationIDNormalizationEnabled.value =
+    settings?.enable_openai_codex_installation_id_normalization !== false
+  codexClientIdentityNormalizationEnabled.value =
+    settings?.enable_openai_codex_client_identity_normalization !== false
+}).catch(() => {
+  codexFingerprintNormalizationEnabled.value = true
+  codexInstallationIDNormalizationEnabled.value = true
+  codexClientIdentityNormalizationEnabled.value = true
+})
 
 loadQuotaNotifyGlobal()
 const editQuotaLimit = ref<number | null>(null)
@@ -4882,12 +4954,13 @@ const handleSubmit = async () => {
       } else {
         newExtra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
       }
-      // installation_id 固定仅对 OpenAI OAuth 生效；UUID 和旧轮换字段由服务端管理。
+      // installation_id 固定仅对 OpenAI OAuth 母账号生效；UUID 和旧轮换字段由服务端管理。
       if (props.account.type === 'oauth' && !isSparkShadow.value) {
         newExtra.openai_installation_pin_enabled = openAIInstallationPinEnabled.value
       } else {
         delete newExtra.openai_installation_pin_enabled
       }
+      delete newExtra.openai_pinned_installation_id
       delete newExtra.openai_installation_rotate_enabled
       if (openAICompactMode.value === 'auto') {
         delete newExtra.openai_compact_mode

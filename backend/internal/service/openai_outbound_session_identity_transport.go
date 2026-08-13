@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -16,18 +18,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const openAIWSOutboundIdentityDigestDomain = "sub2api/openai-ws-outbound-identity/v2"
+const (
+	openAIWSOutboundIdentityDigestDomain     = "sub2api/openai-ws-outbound-identity/v2"
+	openAIWSOutboundIdentityPlanDigestDomain = "sub2api/openai-ws-outbound-identity-plan/v2"
+)
 
 const openAIOutboundSessionIdentityRequestSnapshotKey = "openai_outbound_session_identity_enabled_snapshot"
 
 func (s *OpenAIGatewayService) openAIOutboundSessionIdentityTransportEnabled(ctx context.Context) bool {
-	if s == nil || s.settingService == nil {
-		return false
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return s.settingService.IsOpenAIUUIDv7SessionIdentityEnabled(ctx)
+	return s.openAICodexFingerprintPolicyForRequest(ctx, nil).TurnIdentityNormalizationEnabled()
 }
 
 // openAIOutboundSessionIdentityTransportEnabledForRequest snapshots the
@@ -42,7 +41,7 @@ func (s *OpenAIGatewayService) openAIOutboundSessionIdentityTransportEnabledForR
 			return enabled
 		}
 	}
-	enabled := s.openAIOutboundSessionIdentityTransportEnabled(ctx)
+	enabled := s.openAICodexFingerprintPolicyForRequest(ctx, c).TurnIdentityNormalizationEnabled()
 	c.Set(openAIOutboundSessionIdentityRequestSnapshotKey, enabled)
 	return enabled
 }
@@ -228,6 +227,63 @@ func openAIWSOutboundIdentityDigest(identity OpenAICodexTurnIdentity) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// openAIWSOutboundIdentityPlanDigest scopes pooled sockets to the identity
+// values that will actually be sent in the upstream handshake. In particular,
+// SafePair may preserve a valid client User-Agent instead of the plan's
+// fallback triplet, so pre-projection plan fields are not a reliable pool key.
+func openAIWSOutboundIdentityPlanDigest(headers http.Header, plan OpenAIOAuthIdentityPlan) string {
+	parts := []string{
+		openAIWSOutboundIdentityPlanDigestDomain,
+		string(plan.InstallationPolicy),
+		fmt.Sprintf("%t", plan.InstallationEnabled),
+		fmt.Sprintf("%t", plan.TurnIdentityRequested),
+		fmt.Sprintf("%t", plan.TurnIdentityEnabled),
+		fmt.Sprintf("%t", plan.ClientIdentityEnabled),
+	}
+	for _, name := range [...]string{
+		"user-agent",
+		"originator",
+		"version",
+		codexInstallationIDKey,
+		"x-codex-window-id",
+		"session-id",
+		"thread-id",
+		"x-client-request-id",
+		"x-codex-parent-thread-id",
+		"session_id",
+		"thread_id",
+		"conversation_id",
+		"conversation-id",
+		openAIWSTurnMetadataHeader,
+	} {
+		parts = append(parts, name)
+		values := openAIWSFinalIdentityHeaderValues(headers, name)
+		parts = append(parts, strconv.Itoa(len(values)))
+		parts = append(parts, values...)
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(sum[:])
+}
+
+func openAIWSFinalIdentityHeaderValues(headers http.Header, name string) []string {
+	if headers == nil {
+		return nil
+	}
+	canonicalName := http.CanonicalHeaderKey(name)
+	values := append([]string(nil), headers[canonicalName]...)
+	variantNames := make([]string, 0)
+	for candidate := range headers {
+		if candidate != canonicalName && strings.EqualFold(candidate, name) {
+			variantNames = append(variantNames, candidate)
+		}
+	}
+	sort.Strings(variantNames)
+	for _, candidate := range variantNames {
+		values = append(values, headers[candidate]...)
+	}
+	return values
+}
+
 func openAIWSOutboundIdentityHeaderValueForLog(headers http.Header, key, identityDigest string) string {
 	identityDigest = strings.TrimSpace(identityDigest)
 	if identityDigest == "" {
@@ -258,7 +314,6 @@ func applyOpenAICodexTurnIdentityHeaders(headers http.Header, identity OpenAICod
 	if headers == nil {
 		return
 	}
-	turnMetadata := firstHeaderValueCaseInsensitive(headers, openAIWSTurnMetadataHeader)
 	deleteOpenAICodexIdentityHeaders(headers)
 	if sessionID := strings.TrimSpace(identity.SessionID); sessionID != "" {
 		headers.Set("session-id", sessionID)
@@ -272,11 +327,7 @@ func applyOpenAICodexTurnIdentityHeaders(headers http.Header, identity OpenAICod
 	if parentThreadID := strings.TrimSpace(identity.ParentThreadID); parentThreadID != "" {
 		headers.Set("x-codex-parent-thread-id", parentThreadID)
 	}
-	if strings.TrimSpace(turnMetadata) != "" {
-		if rewritten, err := rewriteOpenAICodexTurnMetadata(turnMetadata, identity); err == nil {
-			headers.Set(openAIWSTurnMetadataHeader, rewritten)
-		}
-	}
+	applyOpenAICodexExistingTurnMetadataHeader(headers, identity)
 }
 
 func deleteOpenAICodexIdentityHeaders(headers http.Header) {
@@ -303,23 +354,6 @@ func deleteOpenAICodexIdentityHeaders(headers http.Header) {
 	}
 }
 
-func firstHeaderValueCaseInsensitive(headers http.Header, name string) string {
-	if headers == nil {
-		return ""
-	}
-	for key, values := range headers {
-		if !strings.EqualFold(key, name) {
-			continue
-		}
-		for _, value := range values {
-			if strings.TrimSpace(value) != "" {
-				return value
-			}
-		}
-	}
-	return ""
-}
-
 // MergeOpenAIOutboundSessionIdentityBody projects the complete identity into
 // a Responses/WS body. Compact callers deliberately never invoke it.
 func MergeOpenAIOutboundSessionIdentityBody(body []byte, identity OpenAIOutboundSessionIdentity) ([]byte, error) {
@@ -344,48 +378,61 @@ func mergeOpenAICodexTurnIdentityBody(body []byte, identity OpenAICodexTurnIdent
 		return body, fmt.Errorf("decode OpenAI Codex turn identity body: %w", err)
 	}
 	metadata := make(map[string]json.RawMessage)
+	metadataWritable := true
 	if raw, ok := root["client_metadata"]; ok {
 		var decoded map[string]json.RawMessage
 		if json.Unmarshal(raw, &decoded) == nil && decoded != nil {
 			metadata = decoded
+		} else {
+			metadataWritable = false
 		}
 	}
-	for _, field := range []string{
-		"session_id", "session-id", "thread_id", "thread-id",
-		"conversation_id", "conversation-id", "parent_thread_id",
-		"forked_from_thread_id", "x-codex-parent-thread-id",
-	} {
-		delete(metadata, field)
-	}
-	metadata["session_id"] = mustMarshalJSONString(identity.SessionID)
-	metadata["thread_id"] = mustMarshalJSONString(identity.ThreadID)
-	if identity.ParentThreadID != "" {
-		metadata["x-codex-parent-thread-id"] = mustMarshalJSONString(identity.ParentThreadID)
-	}
+	if metadataWritable {
+		for _, field := range []string{
+			"session_id", "session-id", "thread_id", "thread-id",
+			"conversation_id", "conversation-id", "parent_thread_id",
+			"forked_from_thread_id", "x-codex-parent-thread-id",
+		} {
+			delete(metadata, field)
+		}
+		metadata["session_id"] = mustMarshalJSONString(identity.SessionID)
+		metadata["thread_id"] = mustMarshalJSONString(identity.ThreadID)
+		if identity.ParentThreadID != "" {
+			metadata["x-codex-parent-thread-id"] = mustMarshalJSONString(identity.ParentThreadID)
+		}
 
-	turnMetadata := ""
-	if raw, ok := metadata[openAIWSTurnMetadataHeader]; ok {
-		turnMetadata = normalizeOpenAICodexTurnMetadataRaw(raw)
-	}
-	if turnMetadata == "" {
-		if raw, ok := root[openAIWSTurnMetadataHeader]; ok {
+		turnMetadata := ""
+		if raw, ok := metadata[openAIWSTurnMetadataHeader]; ok {
 			turnMetadata = normalizeOpenAICodexTurnMetadataRaw(raw)
+			if rewritten, rewriteErr := rewriteOpenAICodexTurnMetadata(turnMetadata, identity); rewriteErr == nil {
+				metadata[openAIWSTurnMetadataHeader] = mustMarshalJSONString(rewritten)
+			}
+		} else {
+			raw, rootMetadataPresent := root[openAIWSTurnMetadataHeader]
+			if rootMetadataPresent {
+				turnMetadata = normalizeOpenAICodexTurnMetadataRaw(raw)
+			}
+			rewritten, rewriteErr := rewriteOpenAICodexTurnMetadata(turnMetadata, identity)
+			if rewriteErr != nil && !rootMetadataPresent {
+				return body, rewriteErr
+			}
+			if rewriteErr == nil {
+				metadata[openAIWSTurnMetadataHeader] = mustMarshalJSONString(rewritten)
+			}
+		}
+
+		encodedMetadata, err := marshalJSONWithoutHTMLEscape(metadata)
+		if err != nil {
+			return body, fmt.Errorf("encode OpenAI Codex client metadata: %w", err)
+		}
+		root["client_metadata"] = encodedMetadata
+	}
+	if raw, present := root[openAIWSTurnMetadataHeader]; present {
+		turnMetadata := normalizeOpenAICodexTurnMetadataRaw(raw)
+		if rewritten, rewriteErr := rewriteOpenAICodexTurnMetadata(turnMetadata, identity); rewriteErr == nil {
+			root[openAIWSTurnMetadataHeader] = mustMarshalJSONString(rewritten)
 		}
 	}
-	rewrittenTurnMetadata, err := rewriteOpenAICodexTurnMetadata(turnMetadata, identity)
-	if err != nil {
-		return body, err
-	}
-	metadata[openAIWSTurnMetadataHeader] = mustMarshalJSONString(rewrittenTurnMetadata)
-	if _, present := root[openAIWSTurnMetadataHeader]; present {
-		root[openAIWSTurnMetadataHeader] = mustMarshalJSONString(rewrittenTurnMetadata)
-	}
-
-	encodedMetadata, err := marshalJSONWithoutHTMLEscape(metadata)
-	if err != nil {
-		return body, fmt.Errorf("encode OpenAI Codex client metadata: %w", err)
-	}
-	root["client_metadata"] = encodedMetadata
 	out, err := marshalJSONWithoutHTMLEscape(root)
 	if err != nil {
 		return body, fmt.Errorf("encode OpenAI Codex turn identity body: %w", err)
@@ -397,15 +444,15 @@ func normalizeOpenAICodexTurnMetadataRaw(raw json.RawMessage) string {
 	if len(raw) == 0 || !utf8.Valid(raw) {
 		return ""
 	}
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return ""
+	}
 	var encoded string
-	if json.Unmarshal(raw, &encoded) == nil {
+	if strings.HasPrefix(trimmed, `"`) && json.Unmarshal(raw, &encoded) == nil {
 		return strings.TrimSpace(encoded)
 	}
-	trimmed := strings.TrimSpace(string(raw))
-	if strings.HasPrefix(trimmed, "{") {
-		return trimmed
-	}
-	return ""
+	return trimmed
 }
 
 func rewriteOpenAICodexTurnMetadata(raw string, identity OpenAICodexTurnIdentity) (string, error) {
@@ -413,7 +460,7 @@ func rewriteOpenAICodexTurnMetadata(raw string, identity OpenAICodexTurnIdentity
 	trimmed := strings.TrimSpace(raw)
 	if trimmed != "" {
 		if err := json.Unmarshal([]byte(trimmed), &metadata); err != nil || metadata == nil {
-			metadata = make(map[string]json.RawMessage)
+			return "", errors.New("decode OpenAI Codex turn metadata: expected JSON object")
 		}
 	}
 	for _, field := range []string{

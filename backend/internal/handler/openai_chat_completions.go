@@ -68,6 +68,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
+	service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentity(c, body, ""))
 
 	modelResult := gjson.GetBytes(body, "model")
 	if !modelResult.Exists() || modelResult.Type != gjson.String || modelResult.String() == "" {
@@ -137,8 +138,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 
-	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
+	sessionHash := h.gatewayService.GenerateSessionHashForOpenAIOAuthIdentity(c, body, "")
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
+	ensureOpenAIOAuthIdentityCaptureFallback(c, promptCacheKey, sessionHash)
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0

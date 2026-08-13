@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
 
 const transportTestPinnedInstallationID = "11111111-2222-4333-8444-555555555555"
@@ -55,6 +56,17 @@ func decodeInstallationTestMetadata(t *testing.T, raw string) map[string]any {
 	return metadata
 }
 
+func requireInstallationTestRootIdentity(t *testing.T, metadata map[string]any) string {
+	t.Helper()
+	sessionID, _ := metadata["session_id"].(string)
+	threadID, _ := metadata["thread_id"].(string)
+	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(OpenAIOutboundSessionIdentity{
+		SessionID: sessionID,
+		ThreadID:  threadID,
+	}))
+	return sessionID
+}
+
 func TestOpenAIInstallationNormalHTTPRewritesBodyAndHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-5.4","stream":false,"instructions":"test","input":"hello","client_metadata":{"x-codex-installation-id":"client-body","x-codex-turn-metadata":"{\"installation_id\":\"client-nested-body\",\"session_id\":\"body-session\"}"}}`)
@@ -84,16 +96,20 @@ func TestOpenAIInstallationNormalHTTPRewritesBodyAndHeaders(t *testing.T) {
 		t.Fatalf("unexpected body installation ID: %#v", clientMetadata)
 	}
 	bodyTurn := decodeInstallationTestMetadata(t, clientMetadata[openAIWSTurnMetadataHeader].(string))
-	if bodyTurn[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID || bodyTurn["session_id"] != "body-session" {
+	if bodyTurn[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID {
 		t.Fatalf("unexpected body turn metadata: %#v", bodyTurn)
 	}
+	turnSessionID := requireInstallationTestRootIdentity(t, bodyTurn)
 	if upstream.lastReq.Header.Get(codexInstallationIDKey) != transportTestPinnedInstallationID {
 		t.Fatalf("unexpected header installation ID: %#v", upstream.lastReq.Header)
 	}
 	headerTurn := decodeInstallationTestMetadata(t, upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader))
-	if headerTurn[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID || headerTurn["session_id"] != "header-session" {
+	if headerTurn[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID {
 		t.Fatalf("unexpected header turn metadata: %#v", headerTurn)
 	}
+	require.Equal(t, turnSessionID, requireInstallationTestRootIdentity(t, headerTurn))
+	require.Equal(t, turnSessionID, upstream.lastReq.Header.Get("session-id"))
+	require.Equal(t, turnSessionID, upstream.lastReq.Header.Get("thread-id"))
 }
 
 func TestOpenAIInstallationCompactUsesHeadersOnly(t *testing.T) {
@@ -123,10 +139,15 @@ func TestOpenAIInstallationCompactUsesHeadersOnly(t *testing.T) {
 		t.Fatalf("unexpected compact installation header: %#v", upstream.lastReq.Header)
 	}
 	headerTurn := decodeInstallationTestMetadata(t, upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader))
-	if headerTurn[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID || headerTurn["thread_id"] != "thread-1" {
+	if headerTurn[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID {
 		t.Fatalf("unexpected compact turn metadata: %#v", headerTurn)
 	}
-	if upstream.lastReq.Header.Get("x-codex-window-id") != "window-1" || upstream.lastReq.Header.Get("session_id") == "" {
+	turnSessionID := requireInstallationTestRootIdentity(t, headerTurn)
+	if upstream.lastReq.Header.Get("x-codex-window-id") != "window-1" ||
+		upstream.lastReq.Header.Get("session-id") != turnSessionID ||
+		upstream.lastReq.Header.Get("thread-id") != turnSessionID ||
+		upstream.lastReq.Header.Get("session_id") != "" ||
+		upstream.lastReq.Header.Get("x-client-request-id") != "" {
 		t.Fatalf("compact compatibility headers were not preserved: %#v", upstream.lastReq.Header)
 	}
 }
@@ -259,9 +280,14 @@ func TestBuildOpenAIWSHeadersSkipsInstallationRewriteForPassthrough(t *testing.T
 	if err != nil {
 		t.Fatalf("build passthrough headers: %v", err)
 	}
-	if passthroughHeaders.Get(codexInstallationIDKey) != "client-header" || passthroughHeaders.Get(openAIWSTurnMetadataHeader) != c.GetHeader(openAIWSTurnMetadataHeader) {
+	if passthroughHeaders.Get(codexInstallationIDKey) != "client-header" {
 		t.Fatalf("passthrough WS headers were rewritten: %#v", passthroughHeaders)
 	}
+	passthroughNested := decodeInstallationTestMetadata(t, passthroughHeaders.Get(openAIWSTurnMetadataHeader))
+	require.Equal(t, "client-nested", passthroughNested[codexTurnMetadataInstallationIDKey])
+	passthroughSessionID := requireInstallationTestRootIdentity(t, passthroughNested)
+	require.Equal(t, passthroughSessionID, passthroughHeaders.Get("session-id"))
+	require.Equal(t, passthroughSessionID, passthroughHeaders.Get("thread-id"))
 
 	pinnedHeaders, _, err := svc.buildOpenAIWSHeaders(
 		context.Background(), c, account, "oauth-token", decision, true, "",
@@ -274,9 +300,53 @@ func TestBuildOpenAIWSHeadersSkipsInstallationRewriteForPassthrough(t *testing.T
 		t.Fatalf("non-passthrough WS header was not pinned: %#v", pinnedHeaders)
 	}
 	nested := decodeInstallationTestMetadata(t, pinnedHeaders.Get(openAIWSTurnMetadataHeader))
-	if nested[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID || nested["session_id"] != "session-1" {
+	if nested[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID {
 		t.Fatalf("non-passthrough WS turn metadata was not pinned: %#v", nested)
 	}
+	pinnedSessionID := requireInstallationTestRootIdentity(t, nested)
+	require.Equal(t, pinnedSessionID, pinnedHeaders.Get("session-id"))
+	require.Equal(t, pinnedSessionID, pinnedHeaders.Get("thread-id"))
+}
+
+func TestBuildOpenAIWSHeadersIdentityPlanReuseRequiresCredentialOwnerMatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	capture := CaptureOpenAIOAuthIdentity(c, []byte(`{"type":"response.create","model":"gpt-5.1"}`), "")
+	SetOpenAIOAuthIdentityCapture(c, capture)
+	decision := OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}
+	svc := &OpenAIGatewayService{}
+	firstAccount := installationTestOAuthAccount(nil)
+	secondAccount := installationTestOAuthAccount(nil)
+	secondAccount.ID = firstAccount.ID + 1
+
+	firstPlan := OpenAIOAuthIdentityPlan{
+		Capture:                  capture,
+		PolicySnapshot:           defaultOpenAICodexFingerprintPolicy(0),
+		TurnIdentityRequested:    true,
+		ClientIdentityEnabled:    true,
+		ClientIdentity:           resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, ""),
+		InstallationID:           "first-plan-installation",
+		InstallationEnabled:      true,
+		ProjectionMode:           OpenAIOAuthIdentityProjectionRegular,
+		InstallationPolicy:       OpenAIOAuthInstallationAccountPin,
+		CredentialOwnerNamespace: openAIOutboundSessionIdentityNamespace(firstAccount),
+	}
+	SetOpenAIOAuthIdentityPlan(c, firstPlan)
+	_, reused, err := svc.buildOpenAIWSHeadersWithBody(
+		context.Background(), c, firstAccount, "oauth-token", decision, true, "", "", "", nil, true, "gpt-5.1", "",
+	)
+	require.NoError(t, err)
+	require.Equal(t, "first-plan-installation", reused.OutboundIdentityPlan.InstallationID)
+
+	SetOpenAIOAuthIdentityPlan(c, firstPlan)
+	_, rematerialized, err := svc.buildOpenAIWSHeadersWithBody(
+		context.Background(), c, secondAccount, "oauth-token", decision, true, "", "", "", nil, true, "gpt-5.1", "",
+	)
+	require.NoError(t, err)
+	require.Equal(t, openAIOutboundSessionIdentityNamespace(secondAccount), rematerialized.OutboundIdentityPlan.CredentialOwnerNamespace)
+	require.Equal(t, transportTestPinnedInstallationID, rematerialized.OutboundIdentityPlan.InstallationID)
 }
 
 func TestOpenAIInstallationIngressWSRewritesEveryResponseCreate(t *testing.T) {
@@ -380,21 +450,30 @@ func TestOpenAIInstallationIngressWSRewritesEveryResponseCreate(t *testing.T) {
 	if len(upstreamConn.writes) != 2 {
 		t.Fatalf("expected two upstream response.create frames, got %d", len(upstreamConn.writes))
 	}
+	var turnSessionID string
 	for index, write := range upstreamConn.writes {
 		metadata, _ := write["client_metadata"].(map[string]any)
 		if metadata[codexInstallationIDKey] != transportTestPinnedInstallationID {
 			t.Fatalf("turn %d top-level installation ID not pinned: %#v", index+1, metadata)
 		}
 		nested := decodeInstallationTestMetadata(t, metadata[openAIWSTurnMetadataHeader].(string))
-		if nested[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID || nested["session_id"] != "handshake-session" {
+		if nested[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID {
 			t.Fatalf("turn %d nested metadata not pinned: %#v", index+1, nested)
 		}
+		currentSessionID := requireInstallationTestRootIdentity(t, nested)
+		if turnSessionID == "" {
+			turnSessionID = currentSessionID
+		}
+		require.Equal(t, turnSessionID, currentSessionID)
 	}
 	if captureDialer.lastHeaders.Get(codexInstallationIDKey) != transportTestPinnedInstallationID {
 		t.Fatalf("ingress handshake installation ID not pinned: %#v", captureDialer.lastHeaders)
 	}
 	handshakeNested := decodeInstallationTestMetadata(t, captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader))
-	if handshakeNested[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID || handshakeNested["session_id"] != "handshake-session" {
+	if handshakeNested[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID {
 		t.Fatalf("ingress handshake turn metadata not pinned: %#v", handshakeNested)
 	}
+	require.Equal(t, turnSessionID, requireInstallationTestRootIdentity(t, handshakeNested))
+	require.Equal(t, turnSessionID, captureDialer.lastHeaders.Get("session-id"))
+	require.Equal(t, turnSessionID, captureDialer.lastHeaders.Get("thread-id"))
 }

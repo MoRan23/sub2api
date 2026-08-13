@@ -1,10 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 
-const { updateAccountMock, checkMixedChannelRiskMock, authIsSimpleMode } = vi.hoisted(() => ({
+const {
+  updateAccountMock,
+  checkMixedChannelRiskMock,
+  regenerateInstallationIDMock,
+  getSettingsMock,
+  authIsSimpleMode,
+} = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
+  regenerateInstallationIDMock: vi.fn(),
+  getSettingsMock: vi.fn(),
   authIsSimpleMode: { value: true }
 }))
 
@@ -28,11 +36,12 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       update: updateAccountMock,
-      checkMixedChannelRisk: checkMixedChannelRiskMock
+      checkMixedChannelRisk: checkMixedChannelRiskMock,
+      regenerateInstallationID: regenerateInstallationIDMock,
     },
     settings: {
       getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
-      getSettings: vi.fn().mockResolvedValue({})
+      getSettings: getSettingsMock
     },
     tlsFingerprintProfiles: {
       list: vi.fn().mockResolvedValue([])
@@ -187,7 +196,29 @@ function buildOpenAISparkShadowAccount() {
         'gpt-5.3-codex-spark': 'gpt-5.3-codex-spark-compact'
       }
     },
+    openai_environment_fingerprint: '(Shadow OS; x86_64) shadow-terminal',
+    extra: {
+      openai_installation_pin_enabled: false,
+      openai_pinned_installation_id: '0191d95a-3b41-7bb2-8ae7-733dd9845c20',
+    },
     group_ids: []
+  } as any
+}
+
+function buildOpenAIOAuthAccount() {
+  return {
+    ...buildAccount(),
+    name: 'OpenAI OAuth',
+    type: 'oauth',
+    credentials: {
+      access_token: 'access-token',
+      refresh_token: 'refresh-token',
+      api_key: 'sk-oauth',
+    },
+    extra: {
+      openai_installation_pin_enabled: true,
+      openai_pinned_installation_id: '0191d95a-3b41-7bb2-8ae7-733dd9845c21',
+    },
   } as any
 }
 
@@ -315,6 +346,86 @@ function mountModal(account = buildAccount()) {
 describe('EditAccountModal', () => {
   beforeEach(() => {
     authIsSimpleMode.value = true
+    getSettingsMock.mockReset().mockResolvedValue({
+      enable_openai_codex_fingerprint_normalization: true,
+      enable_openai_codex_installation_id_normalization: true,
+      enable_openai_codex_client_identity_normalization: true,
+    })
+    regenerateInstallationIDMock.mockReset().mockResolvedValue({
+      installation_id: '0191d95a-3b41-7bb2-8ae7-733dd9845c22',
+    })
+  })
+
+  it('keeps OAuth fingerprint values editable while global normalization is paused', async () => {
+    const account = buildOpenAIOAuthAccount()
+    getSettingsMock.mockResolvedValueOnce({
+      enable_openai_codex_fingerprint_normalization: false,
+      enable_openai_codex_installation_id_normalization: false,
+    })
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="openai-codex-fingerprint-paused"]').exists()).toBe(true)
+    const pinToggle = wrapper.get(
+      '[role="switch"][aria-label="admin.accounts.openai.installationPin"]'
+    )
+    expect(pinToggle.attributes('disabled')).toBeUndefined()
+    await pinToggle.trigger('click')
+    await wrapper.get(
+      'input[aria-label="admin.accounts.openai.environmentFingerprint"]'
+    ).setValue(
+      '(Mac OS X 15.1.0; arm64) iTerm.app'
+    )
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_installation_pin_enabled).toBe(false)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty(
+      'openai_pinned_installation_id'
+    )
+    expect(updateAccountMock.mock.calls[0]?.[1]?.openai_environment_fingerprint).toBe(
+      '(Mac OS X 15.1.0; arm64) iTerm.app'
+    )
+  })
+
+  it('keeps the environment fingerprint editable while only client identity normalization is paused', async () => {
+    const account = buildOpenAIOAuthAccount()
+    getSettingsMock.mockResolvedValueOnce({
+      enable_openai_codex_fingerprint_normalization: true,
+      enable_openai_codex_installation_id_normalization: true,
+      enable_openai_codex_client_identity_normalization: false,
+    })
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+
+    const wrapper = mountModal(account)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="openai-client-identity-normalization-paused"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="openai-codex-fingerprint-paused"]').exists()).toBe(false)
+    const input = wrapper.get<HTMLInputElement>('[data-testid="openai-environment-fingerprint"]')
+    expect(input.element.disabled).toBe(false)
+    await input.setValue('(Mac OS X 15.1.0; arm64) iTerm.app')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.openai_environment_fingerprint).toBe(
+      '(Mac OS X 15.1.0; arm64) iTerm.app'
+    )
+  })
+
+  it('shows only an inheritance notice for a Spark shadow Codex fingerprint', async () => {
+    const wrapper = mountModal(buildOpenAISparkShadowAccount())
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="openai-codex-fingerprint-section"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="openai-codex-fingerprint-shadow-inherited"]').text()).toBe(
+      'admin.accounts.openai.codexFingerprintShadowHint'
+    )
+    expect(wrapper.find('[role="switch"][aria-label="admin.accounts.openai.installationPin"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="openai-pinned-installation-id"]').exists()).toBe(false)
+    expect(wrapper.find('input[aria-label="admin.accounts.openai.environmentFingerprint"]').exists()).toBe(false)
   })
 
   it('loads and submits the OpenAI environment fingerprint', async () => {
@@ -325,6 +436,7 @@ describe('EditAccountModal', () => {
     updateAccountMock.mockResolvedValue(account)
 
     const wrapper = mountModal(account)
+    expect(wrapper.find('[data-testid="openai-codex-fingerprint-section"]').exists()).toBe(false)
     const input = wrapper.get<HTMLInputElement>('[data-testid="openai-environment-fingerprint"]')
     expect(input.element.value).toBe('(Ubuntu 22.4.0; x86_64) xterm-256color')
 
@@ -350,7 +462,7 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock).not.toHaveBeenCalled()
   })
 
-  it('shows a disabled inherited fingerprint field for a Spark shadow', async () => {
+  it('does not submit inherited Codex fingerprint fields for a Spark shadow', async () => {
     const account = buildOpenAISparkShadowAccount()
     updateAccountMock.mockReset()
     checkMixedChannelRiskMock.mockReset()
@@ -358,15 +470,13 @@ describe('EditAccountModal', () => {
     updateAccountMock.mockResolvedValue(account)
 
     const wrapper = mountModal(account)
-    const input = wrapper.get<HTMLInputElement>('[data-testid="openai-environment-fingerprint"]')
-    expect(input.element.disabled).toBe(true)
-
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty(
-      'openai_environment_fingerprint'
-    )
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload).not.toHaveProperty('openai_environment_fingerprint')
+    expect(payload?.extra).not.toHaveProperty('openai_installation_pin_enabled')
+    expect(payload?.extra).not.toHaveProperty('openai_pinned_installation_id')
   })
 
   it('reopening the same account rehydrates the OpenAI whitelist from props', async () => {

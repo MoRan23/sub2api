@@ -907,17 +907,10 @@ type GatewayConfig struct {
 	// ForceCodexCLI: 强制将 OpenAI `/v1/responses` 请求按 Codex CLI 处理。
 	// 用于网关未透传/改写 User-Agent 时的兼容兜底（默认关闭，避免影响其他客户端）。
 	ForceCodexCLI bool `mapstructure:"force_codex_cli"`
-	// DisableCodexIdentityEnforcement: 关闭「强制统一 Codex 出站身份」。上游 /backend-api/codex
-	// 在容量紧张时按客户端身份分优先级降载，被降载的请求会拿到 HTTP 200 + 流内
-	// server_is_overloaded，该次请求失败。默认强制统一出口：所有 OAuth 出站的
-	// User-Agent / originator / version 都改写为网关规范身份，确保没有请求带着第三方或陈旧身份
-	// 出站。置 true 后退回「仅按最终 User-Agent 配对 originator」的收口语义，供上游策略变动时回滚。
-	//
-	// 取反义命名是为了让零值安全：该开关会发布为进程级快照，未经 viper 加载而手工构造的
-	// Config（测试、工具）其零值必须落在「强制统一开启」这一侧，否则会静默丢掉这层保护。
+	// Deprecated: retained only so old configuration can be detected and
+	// warned about. Runtime policy is owned by Codex fingerprint settings.
 	DisableCodexIdentityEnforcement bool `mapstructure:"disable_codex_identity_enforcement"`
-	// DisableCodexOriginatorNormalization: 已废弃，等价于 DisableCodexIdentityEnforcement。
-	// 保留以兼容既有配置文件；加载时会折叠进新键，不要在新代码里直接读取。
+	// Deprecated: retained only for startup diagnostics.
 	DisableCodexOriginatorNormalization bool `mapstructure:"disable_codex_originator_normalization"`
 	// CodexImageGenerationBridgeEnabled: 是否为 Codex `/v1/responses` 自动注入 image_generation 工具和桥接指令。
 	// 默认关闭，避免纯文本 Codex 请求被意外改写；显式携带 image_generation 工具的请求仍按分组能力转发。
@@ -1811,11 +1804,10 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 		cfg.Gateway.ForcedCodexInstructionsTemplate = string(content)
 	}
 
-	// 兼容旧键 gateway.disable_codex_originator_normalization：语义已被
-	// disable_codex_identity_enforcement 取代（身份改写升级为强制统一出口），
-	// 任一为 true 即关闭强制统一。
-	if cfg.Gateway.DisableCodexOriginatorNormalization {
-		cfg.Gateway.DisableCodexIdentityEnforcement = true
+	if cfg.Gateway.DisableCodexIdentityEnforcement || cfg.Gateway.DisableCodexOriginatorNormalization {
+		slog.Warn("deprecated Codex identity disable config is ignored; use Codex fingerprint normalization settings")
+		cfg.Gateway.DisableCodexIdentityEnforcement = false
+		cfg.Gateway.DisableCodexOriginatorNormalization = false
 	}
 
 	// 兼容旧键 gateway.openai_ws.sticky_previous_response_ttl_seconds。

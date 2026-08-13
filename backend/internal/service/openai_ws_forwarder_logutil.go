@@ -68,6 +68,7 @@ type openAIWSSessionHeaderResolution struct {
 	OutboundLogicalIdentity     OpenAICodexLogicalTurnIdentity
 	OutboundIdentity            OpenAIOutboundSessionIdentity
 	OutboundIdentityDigest      string
+	OutboundIdentityPlan        OpenAIOAuthIdentityPlan
 }
 
 func resolveOpenAIWSSessionHeaders(c *gin.Context, promptCacheKey string) openAIWSSessionHeaderResolution {

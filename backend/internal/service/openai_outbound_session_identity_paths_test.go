@@ -143,6 +143,11 @@ func identityPathCacheCalls(cache *outboundIdentityGatewayCacheStub) int {
 	return cache.callCounter
 }
 
+func requireOpenAIIdentityPathRequestPair(t *testing.T, req *http.Request, body []byte) OpenAIOutboundSessionIdentity {
+	t.Helper()
+	return requireOpenAIIdentityPathPair(t, req.Header, body)
+}
+
 func (s *outboundIdentityGatewayCacheStub) SetSessionAccountID(context.Context, int64, string, int64, time.Duration) error {
 	return nil
 }
@@ -168,6 +173,43 @@ func TestOpenAIOutboundIdentityPathsResponsesBuilder(t *testing.T) {
 				requireOpenAIIdentityPathNoBodyPair(t, outboundBody)
 			}
 			require.Equal(t, map[bool]int{false: 0, true: 1}[enabled], identityPathCacheCalls(cache))
+		})
+	}
+}
+
+func TestOpenAIOutboundIdentityPathsResponsesBuilderUsesExplicitTupleWithoutPromptKey(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    []byte
+		headers map[string]string
+	}{
+		{
+			name: "client metadata",
+			body: []byte(`{"model":"gpt-5.4","input":"hello","client_metadata":{"session_id":"responses-metadata-session","thread_id":"responses-metadata-thread"}}`),
+		},
+		{
+			name: "canonical headers",
+			body: []byte(`{"model":"gpt-5.4","input":"hello"}`),
+			headers: map[string]string{
+				"session-id": "responses-header-session",
+				"thread-id":  "responses-header-thread",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", tt.body, 311)
+			for key, value := range tt.headers {
+				c.Request.Header.Set(key, value)
+			}
+			svc, cache := newOpenAIIdentityPathService(t, true, nil)
+			account := newOpenAIIdentityPathOAuthAccount(910032)
+
+			req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, tt.body, "oauth-token", true, "", false)
+			require.NoError(t, err)
+			requireOpenAIIdentityPathPair(t, req.Header, readOpenAIIdentityPathRequestBody(t, req))
+			require.Equal(t, 2, identityPathCacheCalls(cache))
 		})
 	}
 }
@@ -350,6 +392,128 @@ func TestOpenAIOutboundIdentityPathsAPIKeyTransportIsNotObserved(t *testing.T) {
 	require.Equal(t, 0, identityPathCacheCalls(cache))
 }
 
+func TestOpenAIOutboundIdentityPlanReusedAcrossSameAccountTransportRetry(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		body       []byte
+		setup      func(*gin.Context)
+		configure  func(*Account)
+		response   func() *http.Response
+		invoke     func(*OpenAIGatewayService, *gin.Context, *Account, []byte) error
+		assertPair func(*testing.T, *http.Request, []byte) OpenAIOutboundSessionIdentity
+	}{
+		{
+			name: "responses", path: "/v1/responses",
+			body:     []byte(`{"model":"gpt-5.4","stream":false,"input":"hello","prompt_cache_key":"same-account-retry"}`),
+			response: successfulInstallationTestResponse,
+			invoke: func(svc *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) error {
+				_, err := svc.Forward(context.Background(), c, account, body)
+				return err
+			},
+			assertPair: requireOpenAIIdentityPathRequestPair,
+		},
+		{
+			name: "passthrough", path: "/v1/responses",
+			body: []byte(`{"model":"gpt-5.4","stream":true,"input":"hello","prompt_cache_key":"same-account-retry"}`),
+			configure: func(account *Account) {
+				account.Extra = map[string]any{"openai_passthrough": true}
+			},
+			response: func() *http.Response {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
+				}
+			},
+			invoke: func(svc *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) error {
+				_, err := svc.Forward(context.Background(), c, account, body)
+				return err
+			},
+			assertPair: requireOpenAIIdentityPathRequestPair,
+		},
+		{
+			name: "chat", path: "/v1/chat/completions",
+			body: []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}],"stream":false}`),
+			response: func() *http.Response {
+				return openAICompatSSECompletedResponse("resp_same_account_chat", "gpt-4o")
+			},
+			invoke: func(svc *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) error {
+				_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "same-account-retry", "gpt-4o")
+				return err
+			},
+			assertPair: requireOpenAIIdentityPathRequestPair,
+		},
+		{
+			name: "messages", path: "/v1/messages",
+			body: []byte(`{"model":"gpt-4o","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`),
+			response: func() *http.Response {
+				return openAICompatSSECompletedResponse("resp_same_account_messages", "gpt-4o")
+			},
+			invoke: func(svc *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) error {
+				_, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "same-account-retry", "gpt-4o")
+				return err
+			},
+			assertPair: requireOpenAIIdentityPathRequestPair,
+		},
+		{
+			name: "alpha", path: "/v1/alpha/search",
+			body: []byte(`{"id":"same-account-retry","model":"gpt-5.4","commands":{"search_query":[{"q":"hello"}]}}`),
+			setup: func(c *gin.Context) {
+				c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"session_id":"same-account-retry","thread_id":"same-account-retry"}`)
+			},
+			response: func() *http.Response {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"output":"ok"}`)),
+				}
+			},
+			invoke: func(svc *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) error {
+				_, err := svc.ForwardAlphaSearch(context.Background(), c, account, body)
+				return err
+			},
+			assertPair: func(t *testing.T, req *http.Request, _ []byte) OpenAIOutboundSessionIdentity {
+				t.Helper()
+				metadata := req.Header.Get(openAIWSTurnMetadataHeader)
+				identity := OpenAIOutboundSessionIdentity{
+					SessionID: gjson.Get(metadata, "session_id").String(),
+					ThreadID:  gjson.Get(metadata, "thread_id").String(),
+				}
+				require.NoError(t, ValidateOpenAIOutboundSessionIdentity(identity))
+				return identity
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := newOpenAIIdentityPathContext(t, tt.path, tt.body, 450)
+			if tt.setup != nil {
+				tt.setup(c)
+			}
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{tt.response(), tt.response()}}
+			svc, cache := newOpenAIIdentityPathService(t, true, upstream)
+			account := newOpenAIIdentityPathOAuthAccount(910050)
+			if tt.configure != nil {
+				tt.configure(account)
+			}
+
+			require.NoError(t, tt.invoke(svc, c, account, tt.body))
+			require.Len(t, upstream.requests, 1)
+			firstIdentity := tt.assertPair(t, upstream.requests[0], upstream.bodies[0])
+			firstStoreCalls := identityPathCacheCalls(cache)
+			require.Positive(t, firstStoreCalls)
+
+			require.NoError(t, tt.invoke(svc, c, account, tt.body))
+			require.Len(t, upstream.requests, 2)
+			secondIdentity := tt.assertPair(t, upstream.requests[1], upstream.bodies[1])
+			require.Equal(t, firstIdentity, secondIdentity)
+			require.Equal(t, firstStoreCalls, identityPathCacheCalls(cache), "same-account retry must not rematerialize the V2 plan")
+		})
+	}
+}
+
 func TestOpenAIOutboundIdentityPathsOAuthPassthrough(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "disabled", true: "enabled"}[enabled], func(t *testing.T) {
@@ -373,6 +537,67 @@ func TestOpenAIOutboundIdentityPathsOAuthPassthrough(t *testing.T) {
 			require.Equal(t, map[bool]int{false: 0, true: 1}[enabled], identityPathCacheCalls(cache))
 		})
 	}
+}
+
+func TestOpenAIOutboundIdentityPathsOAuthPassthroughObservesEachPhysicalSend(t *testing.T) {
+	enableOpenAIIdentityPathFingerprintObservation(t)
+	body := []byte(`{"model":"gpt-5.4","stream":true,"prompt_cache_key":"passthrough-observation-key","input":"hello","client_metadata":{"x-codex-installation-id":"client-body-installation"}}`)
+	c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 334)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid-passthrough-observation"}},
+		Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
+	}}
+	svc, _ := newOpenAIIdentityPathService(t, true, upstream)
+	account := newOpenAIIdentityPathOAuthAccount(910034)
+	account.Extra = map[string]any{"openai_passthrough": true}
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	identity := requireOpenAIIdentityPathPair(t, upstream.lastReq.Header, upstream.lastBody)
+	entry := requireOpenAIIdentityPathSingleFingerprintObservation(t, identity, http.MethodPost+" /v1/responses")
+	require.False(t, entry.Pinned)
+	require.Equal(t, "client-body-installation", entry.ClientReportedInstallationID)
+	require.Equal(t, "client-body-installation", entry.OutboundInstallationID)
+}
+
+func TestOpenAIOutboundIdentityPathsOAuthPassthroughUsesMetadataWithoutLegacySeed(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","input":"hello","client_metadata":{"session_id":"passthrough-metadata-session","thread_id":"passthrough-metadata-thread"}}`)
+	c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 331)
+	svc, cache := newOpenAIIdentityPathService(t, true, nil)
+	account := newOpenAIIdentityPathOAuthAccount(910033)
+	account.Extra = map[string]any{"openai_passthrough": true}
+
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, "oauth-token")
+	require.NoError(t, err)
+	requireOpenAIIdentityPathPair(t, req.Header, readOpenAIIdentityPathRequestBody(t, req))
+	require.Equal(t, 2, identityPathCacheCalls(cache))
+}
+
+func TestOpenAIOutboundIdentityPassthroughPreservesInstallationVerbatim(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","input":"hello","prompt_cache_key":"passthrough-install-session","client_metadata":{"x-codex-installation-id":"client-body-install","x-codex-turn-metadata":"{\"installation_id\":\"client-nested-install\",\"label\":\"keep\"}"}}`)
+	c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 332)
+	c.Request.Header.Set(codexInstallationIDKey, "client-header-install")
+	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"installation_id":"client-header-nested","label":"keep"}`)
+	svc, _ := newOpenAIIdentityPathService(t, true, nil)
+	account := newOpenAIIdentityPathOAuthAccount(910035)
+	account.Extra = map[string]any{
+		"openai_passthrough":          true,
+		openAIPinnedInstallationIDKey: "11111111-2222-4333-8444-555555555555",
+	}
+
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, "oauth-token")
+	require.NoError(t, err)
+	outboundBody := readOpenAIIdentityPathRequestBody(t, req)
+	require.Equal(t, "client-header-install", req.Header.Get(codexInstallationIDKey))
+	headerMetadata := req.Header.Get(openAIWSTurnMetadataHeader)
+	require.Equal(t, "client-header-nested", gjson.Get(headerMetadata, "installation_id").String())
+	require.Equal(t, "keep", gjson.Get(headerMetadata, "label").String())
+	require.Equal(t, "client-body-install", gjson.GetBytes(outboundBody, "client_metadata.x-codex-installation-id").String())
+	bodyMetadata := gjson.GetBytes(outboundBody, "client_metadata.x-codex-turn-metadata").String()
+	require.Equal(t, "client-nested-install", gjson.Get(bodyMetadata, "installation_id").String())
+	require.Equal(t, "keep", gjson.Get(bodyMetadata, "label").String())
 }
 
 func TestOpenAIOutboundIdentityPassthroughConversationHeaderKeepsPairSeed(t *testing.T) {
@@ -541,6 +766,40 @@ func TestOpenAIOutboundIdentityCompatUsesPreConversionTuple(t *testing.T) {
 	}
 }
 
+func TestOpenAIOutboundIdentityCompatUsesExplicitTupleWithoutPromptKey(t *testing.T) {
+	const turnMetadata = `{"session_id":"compat-no-prompt-session","thread_id":"compat-no-prompt-thread"}`
+	encodedTurnMetadata := string(mustMarshalJSONString(turnMetadata))
+
+	for _, route := range []string{"chat", "messages"} {
+		t.Run(route, func(t *testing.T) {
+			var body []byte
+			var endpoint string
+			if route == "chat" {
+				body = []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}],"stream":false,"client_metadata":{"x-codex-turn-metadata":` + encodedTurnMetadata + `}}`)
+				endpoint = "/v1/chat/completions"
+			} else {
+				body = []byte(`{"model":"gpt-4o","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false,"client_metadata":{"x-codex-turn-metadata":` + encodedTurnMetadata + `}}`)
+				endpoint = "/v1/messages"
+			}
+			c, _ := newOpenAIIdentityPathContext(t, endpoint, body, 371)
+			upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_no_prompt_"+route, "gpt-4o")}
+			svc, cache := newOpenAIIdentityPathService(t, true, upstream)
+			account := newOpenAIIdentityPathOAuthAccount(910051 + int64(len(route)))
+
+			var err error
+			if route == "chat" {
+				_, err = svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-4o")
+			} else {
+				_, err = svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-4o")
+			}
+			require.NoError(t, err)
+			require.NotNil(t, upstream.lastReq)
+			requireOpenAIIdentityPathPair(t, upstream.lastReq.Header, upstream.lastBody)
+			require.Equal(t, 2, identityPathCacheCalls(cache))
+		})
+	}
+}
+
 func TestOpenAIOutboundIdentityPathsAPIKeyCompatibilityKeepsHistoricalCoverage(t *testing.T) {
 	for _, route := range []string{"chat", "messages"} {
 		t.Run(route, func(t *testing.T) {
@@ -680,4 +939,50 @@ func TestOpenAIOutboundIdentityPathsAlphaWithoutIDIsUntouched(t *testing.T) {
 	requireOpenAIIdentityPathNoIdentityHeaders(t, req.Header)
 	requireOpenAIIdentityPathNoBodyPair(t, outboundBody)
 	require.Equal(t, 0, identityPathCacheCalls(cache))
+}
+
+func TestOpenAIOutboundIdentityPathsAlphaWithoutIDUsesExplicitTurnMetadata(t *testing.T) {
+	alphaBody := []byte(`{"model":"gpt-5.4","query":"search"}`)
+	c, _ := newOpenAIIdentityPathContext(t, "/v1/alpha/search", alphaBody, 411)
+	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"session_id":"alpha-metadata-session","thread_id":"alpha-metadata-thread"}`)
+	svc, cache := newOpenAIIdentityPathService(t, true, nil)
+	account := newOpenAIIdentityPathOAuthAccount(910034)
+	responsesBody, err := buildOpenAIAlphaSearchResponsesWebSearchBody(alphaBody, "gpt-5.4")
+	require.NoError(t, err)
+
+	req, err := svc.buildOpenAIAlphaSearchResponsesWebSearchRequest(c.Request.Context(), c, account, alphaBody, responsesBody, "oauth-token")
+	require.NoError(t, err)
+	requireOpenAIIdentityPathPair(t, req.Header, readOpenAIIdentityPathRequestBody(t, req))
+	require.Equal(t, 2, identityPathCacheCalls(cache))
+}
+
+func TestOpenAIOutboundIdentityDirectAlphaOnlyRewritesExistingTurnMetadata(t *testing.T) {
+	body := []byte(`{"id":"direct-alpha-id","model":"gpt-5.4","query":"search","future_field":{"keep":true}}`)
+	c, _ := newOpenAIIdentityPathContext(t, "/v1/alpha/search", body, 412)
+	const opaqueMetadata = "  opaque-turn-metadata\t"
+	c.Request.Header[http.CanonicalHeaderKey(openAIWSTurnMetadataHeader)] = []string{
+		opaqueMetadata,
+		`{"session_id":"direct-alpha-session","thread_id":"direct-alpha-thread","label":"keep"}`,
+	}
+	svc, _ := newOpenAIIdentityPathService(t, true, nil)
+	account := newOpenAIIdentityPathOAuthAccount(910036)
+	account.Extra = map[string]any{openAIPinnedInstallationIDKey: "11111111-2222-4333-8444-555555555555"}
+
+	req, err := svc.buildOpenAIAlphaSearchRequest(c.Request.Context(), c, account, body, "oauth-token")
+	require.NoError(t, err)
+	outboundBody := readOpenAIIdentityPathRequestBody(t, req)
+	require.Equal(t, body, outboundBody)
+	require.Empty(t, req.Header.Get("session-id"))
+	require.Empty(t, req.Header.Get("thread-id"))
+	require.Empty(t, req.Header.Get("x-client-request-id"))
+	require.Empty(t, req.Header.Get(codexInstallationIDKey))
+	require.False(t, gjson.GetBytes(outboundBody, "client_metadata").Exists())
+	metadataValues := req.Header.Values(openAIWSTurnMetadataHeader)
+	require.Len(t, metadataValues, 2)
+	require.Equal(t, opaqueMetadata, metadataValues[0])
+	rewritten := metadataValues[1]
+	require.Equal(t, "keep", gjson.Get(rewritten, "label").String())
+	require.True(t, ValidateFingerprintObservationUUIDv7(gjson.Get(rewritten, "session_id").String()))
+	require.True(t, ValidateFingerprintObservationUUIDv7(gjson.Get(rewritten, "thread_id").String()))
+	require.False(t, gjson.Get(rewritten, "installation_id").Exists())
 }

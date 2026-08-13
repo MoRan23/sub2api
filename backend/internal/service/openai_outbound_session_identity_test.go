@@ -344,6 +344,127 @@ func (s *outboundIdentityGatewayCacheStub) GetOrCreateCodexThread(ctx context.Co
 	return identity, err
 }
 
+func (s *outboundIdentityGatewayCacheStub) GetOrCreateCodexSessionAliases(ctx context.Context, mappingKeys []string, candidate string, ttl time.Duration) (OpenAICodexAliasStoreResolution, error) {
+	s.mu.Lock()
+	s.callCounter++
+	s.mappingKeys = append(s.mappingKeys, mappingKeys...)
+	fail, storeErr := s.fail, s.storeErr
+	store := s.identityStore()
+	s.mu.Unlock()
+	if storeErr != nil {
+		return OpenAICodexAliasStoreResolution{}, storeErr
+	}
+	if fail {
+		return OpenAICodexAliasStoreResolution{}, errors.New("redis unavailable")
+	}
+	return store.GetOrCreateCodexSessionAliases(ctx, mappingKeys, candidate, ttl)
+}
+
+func (s *outboundIdentityGatewayCacheStub) GetOrCreateCodexThreadAliases(ctx context.Context, mappings []OpenAICodexThreadAliasMapping, sessionID, candidate string, ttl time.Duration) (OpenAICodexAliasStoreResolution, error) {
+	s.mu.Lock()
+	s.callCounter++
+	for _, mapping := range mappings {
+		s.mappingKeys = append(s.mappingKeys, mapping.ThreadMappingKey)
+	}
+	fail, storeErr := s.fail, s.storeErr
+	store := s.identityStore()
+	s.mu.Unlock()
+	if storeErr != nil {
+		return OpenAICodexAliasStoreResolution{}, storeErr
+	}
+	if fail {
+		return OpenAICodexAliasStoreResolution{}, errors.New("redis unavailable")
+	}
+	return store.GetOrCreateCodexThreadAliases(ctx, mappings, sessionID, candidate, ttl)
+}
+
+func TestResolveOpenAICodexAliasesDoNotBindConflictingLowerPriorityTuple(t *testing.T) {
+	resetProcessCodexIdentityStore(t)
+	const secret = "cross-alias-secret"
+	const logicalSessionA = "logical-session-a"
+
+	cache := &outboundIdentityGatewayCacheStub{}
+	account := &Account{ID: 173, Type: AccountTypeOAuth}
+	svc := &OpenAIGatewayService{cache: cache, cfg: &config.Config{JWT: config.JWTConfig{Secret: secret}}}
+
+	firstContext := newOutboundIdentityTestContext(t, map[string]string{
+		openAIWSTurnMetadataHeader: `{"session_id":"logical-session-b","thread_id":"logical-thread-b"}`,
+	})
+	firstCapture := CaptureOpenAIOAuthIdentity(firstContext, []byte(`{"client_metadata":{"x-codex-turn-metadata":"{\"session_id\":\"logical-session-a\",\"thread_id\":\"logical-thread-a\"}"}}`), "")
+	require.Equal(t, logicalSessionA, firstCapture.Logical.SessionKey)
+	require.Len(t, firstCapture.Aliases, 1)
+	first, ok, err := svc.resolveOpenAICodexTurnIdentityWithAliases(context.Background(), firstContext, account, firstCapture.Logical, firstCapture.Aliases)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	secondContext := newOutboundIdentityTestContext(t, map[string]string{
+		openAIWSTurnMetadataHeader: `{"session_id":"logical-session-b","thread_id":"logical-thread-b"}`,
+	})
+	secondCapture := CaptureOpenAIOAuthIdentity(secondContext, nil, "")
+	second, ok, err := svc.resolveOpenAICodexTurnIdentityWithAliases(context.Background(), secondContext, account, secondCapture.Logical, secondCapture.Aliases)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NotEqual(t, first, second)
+}
+
+func TestResolveOpenAICodexEndpointAliasReusesLegacyV2Mapping(t *testing.T) {
+	resetProcessCodexIdentityStore(t)
+	const (
+		secret           = "compact-alias-secret"
+		namespace        = "account:175"
+		legacySeed       = "compact-legacy-seed"
+		canonicalSession = "compact-canonical-session"
+	)
+	cache := &outboundIdentityGatewayCacheStub{}
+	account := &Account{ID: 175, Type: AccountTypeOAuth}
+	svc := &OpenAIGatewayService{cache: cache, cfg: &config.Config{JWT: config.JWTConfig{Secret: secret}}}
+
+	legacyDigest, err := OpenAICodexSessionMappingKey(secret, namespace, 0, legacySeed)
+	require.NoError(t, err)
+	_, err = cache.identityStore().GetOrCreateCodexSession(context.Background(), legacyDigest, testOutboundSessionUUID, time.Hour)
+	require.NoError(t, err)
+
+	body := []byte(`{"client_metadata":{"session_id":"compact-canonical-session","thread_id":"compact-canonical-session"}}`)
+	capture := CaptureOpenAIOAuthIdentityWithEndpointAlias(nil, body, legacySeed)
+	require.Equal(t, canonicalSession, capture.Logical.SessionKey)
+	require.Len(t, capture.Aliases, 2)
+	require.False(t, capture.Aliases[1].Explicit)
+
+	identity, ok, err := svc.resolveOpenAICodexTurnIdentityWithAliases(context.Background(), nil, account, capture.Logical, capture.Aliases)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, testOutboundSessionUUID, identity.SessionID)
+	require.Equal(t, testOutboundSessionUUID, identity.ThreadID)
+
+	canonicalDigest, err := OpenAICodexSessionMappingKey(secret, namespace, 0, canonicalSession)
+	require.NoError(t, err)
+	bound, err := cache.identityStore().GetOrCreateCodexSession(context.Background(), canonicalDigest, "018f5c3c-6e3a-7abe-8def-1234567890ad", time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, testOutboundSessionUUID, bound)
+}
+
+func TestResolveOpenAICodexAliasesDoNotReuseConflictingTupleWithoutHMACSecret(t *testing.T) {
+	resetProcessCodexIdentityStore(t)
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 174, Type: AccountTypeOAuth}
+	firstContext := newOutboundIdentityTestContext(t, map[string]string{
+		openAIWSTurnMetadataHeader: `{"session_id":"fallback-session-b","thread_id":"fallback-thread-b"}`,
+	})
+	firstCapture := CaptureOpenAIOAuthIdentity(firstContext, []byte(`{"client_metadata":{"x-codex-turn-metadata":"{\"session_id\":\"fallback-session-a\",\"thread_id\":\"fallback-thread-a\"}"}}`), "")
+	first, ok, err := svc.resolveOpenAICodexTurnIdentityWithAliases(context.Background(), firstContext, account, firstCapture.Logical, firstCapture.Aliases)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	secondContext := newOutboundIdentityTestContext(t, map[string]string{
+		openAIWSTurnMetadataHeader: `{"session_id":"fallback-session-b","thread_id":"fallback-thread-b"}`,
+	})
+	secondCapture := CaptureOpenAIOAuthIdentity(secondContext, nil, "")
+	second, ok, err := svc.resolveOpenAICodexTurnIdentityWithAliases(context.Background(), secondContext, account, secondCapture.Logical, secondCapture.Aliases)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NotEqual(t, first, second)
+}
+
 func TestResolveOpenAICodexTurnIdentityPromotesFallbackAfterRecovery(t *testing.T) {
 	resetProcessCodexIdentityStore(t)
 	cache := &outboundIdentityGatewayCacheStub{fail: true}

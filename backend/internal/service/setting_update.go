@@ -44,10 +44,11 @@ func (s *SettingService) UpdateSettingsOmitting(ctx context.Context, settings *S
 	}
 	omitted.dropFrom(updates)
 
-	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
+	stored, err := s.persistSettingsAndRefreshCodexPolicy(ctx, updates, omitted)
+	if err != nil {
 		return err
 	}
-	s.refreshCachedSettingsAfterWrite(ctx, settings, omitted)
+	s.refreshCachedSettingsAfterWrite(settings, omitted, stored)
 	return nil
 }
 
@@ -74,32 +75,72 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 	}
 	omitted.dropFrom(updates)
 
-	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
+	stored, err := s.persistSettingsAndRefreshCodexPolicy(ctx, updates, omitted)
+	if err != nil {
 		return err
 	}
-	s.refreshCachedSettingsAfterWrite(ctx, settings, omitted)
+	s.refreshCachedSettingsAfterWrite(settings, omitted, stored)
 	return nil
 }
 
-// refreshCachedSettingsAfterWrite keeps the in-process caches in step with the
-// write that just landed. A partial payload carries zero values for the fields
-// it omitted, so in that case the caches are rebuilt from storage rather than
-// from the request struct.
-func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) {
-	// This switch has a dedicated runtime cache and must take effect immediately
-	// after an admin write, including partial payloads and writes that fail to
-	// rebuild the aggregate cache below.
-	s.InvalidateOpenAIUUIDv7SessionIdentityCache()
+// persistSettingsAndRefreshCodexPolicy serializes the settings write with the
+// authoritative policy read and publish. Without this boundary, a writer can
+// read an older policy, another writer can persist and publish a newer one,
+// and then the first writer can publish its stale read last.
+//
+// Partial updates already need a full readback to refresh the other caches, so
+// that same result is reused. Whole-document updates contain all four policy
+// rows in the successfully persisted update map and need no extra read. A
+// failed or malformed partial read invalidates the cache while preserving its
+// last-known-good snapshot; the next request retries after the short error TTL.
+func (s *SettingService) persistSettingsAndRefreshCodexPolicy(
+	ctx context.Context,
+	updates map[string]string,
+	omitted OmittedSettingKeys,
+) (*SystemSettings, error) {
+	s.settingsUpdateMu.Lock()
+	defer s.settingsUpdateMu.Unlock()
+
+	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
+		return nil, err
+	}
+
+	if len(omitted) > 0 {
+		values, err := s.settingRepo.GetAll(ctx)
+		if err != nil {
+			s.InvalidateOpenAIUUIDv7SessionIdentityCache()
+			slog.Warn("refresh Codex fingerprint policy after partial settings update failed", "error", err)
+			return nil, nil
+		}
+		s.publishAuthoritativeCodexFingerprintPolicy(values)
+		return s.parseSettings(values), nil
+	}
+
+	s.publishAuthoritativeCodexFingerprintPolicy(updates)
+	return nil, nil
+}
+
+func (s *SettingService) publishAuthoritativeCodexFingerprintPolicy(values map[string]string) {
+	policy, valid := parseOpenAICodexFingerprintPolicy(values, 0)
+	if !valid {
+		s.InvalidateOpenAIUUIDv7SessionIdentityCache()
+		slog.Warn("invalid Codex fingerprint policy after settings update; preserving last-known-good snapshot")
+		return
+	}
+	s.PublishOpenAICodexFingerprintPolicy(policy)
+}
+
+// refreshCachedSettingsAfterWrite keeps the other in-process caches in step
+// with the write that just landed. A partial payload carries zero values for
+// omitted fields, so it uses the authoritative read performed above.
+func (s *SettingService) refreshCachedSettingsAfterWrite(settings *SystemSettings, omitted OmittedSettingKeys, stored *SystemSettings) {
 	if len(omitted) == 0 {
 		s.refreshCachedSettings(settings)
 		return
 	}
-	stored, err := s.GetAllSettings(ctx)
-	if err != nil {
-		slog.Warn("refresh cached settings after partial update failed", "error", err)
-		return
+	if stored != nil {
+		s.refreshCachedSettings(stored)
 	}
-	s.refreshCachedSettings(stored)
 }
 
 func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings) (map[string]string, error) {
@@ -478,7 +519,10 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyOpenAICodexUserAgent] = strings.TrimSpace(settings.OpenAICodexUserAgent)
 	updates[SettingKeyOpenAICodexClientVersion] = NormalizeCodexClientVersion(settings.OpenAICodexClientVersion)
 	updates[SettingKeyOpenAICodexVersionAutoSyncEnabled] = strconv.FormatBool(settings.OpenAICodexVersionAutoSyncEnabled)
+	updates[SettingKeyEnableOpenAICodexFingerprintNormalization] = strconv.FormatBool(settings.EnableOpenAICodexFingerprintNormalization)
+	updates[SettingKeyEnableOpenAICodexInstallationIDNormalization] = strconv.FormatBool(settings.EnableOpenAICodexInstallationIDNormalization)
 	updates[SettingKeyEnableOpenAIUUIDv7SessionIdentity] = strconv.FormatBool(settings.EnableOpenAIUUIDv7SessionIdentity)
+	updates[SettingKeyEnableOpenAICodexClientIdentityNormalization] = strconv.FormatBool(settings.EnableOpenAICodexClientIdentityNormalization)
 	// SettingKeyOpenAICodexClientVersionSynced 由自动同步任务独占写入，此处不得覆盖，
 	// 否则面板保存会把同步结果清空。
 	// codex_cli_only 加固

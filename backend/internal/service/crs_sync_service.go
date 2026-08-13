@@ -659,12 +659,18 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 			result.Items = append(result.Items, item)
 			continue
 		}
-		// installation_id is a local system-managed identity. Never reuse a
-		// value supplied by CRS; new accounts receive a fresh UUID and existing
-		// accounts retain their valid UUID (or are repaired when it is missing
-		// or invalid). The legacy rotation flag is not imported either.
+		// installation identity is local system-managed state. Never reuse values
+		// supplied by CRS: new accounts explicitly enable pinning and receive a
+		// fresh UUID, while existing OAuth accounts retain an explicit local false
+		// and their valid UUID (or are repaired when it is missing or invalid).
 		delete(extra, openAIPinnedInstallationIDKey)
+		delete(extra, openAIInstallationPinEnabledKey)
 		delete(extra, openAIInstallationRotateEnabledKey)
+		pinEnabled := true
+		if existing != nil && existing.IsOpenAIOAuth() {
+			pinEnabled = existing.IsOpenAIInstallationPinEnabled()
+		}
+		extra[openAIInstallationPinEnabledKey] = pinEnabled
 		if existing == nil {
 			extra[openAIPinnedInstallationIDKey] = uuid.NewString()
 		} else if pinned := normalizeCodexInstallationID(existing.GetPinnedOpenAIInstallationID()); pinned != "" {

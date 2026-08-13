@@ -7,11 +7,13 @@ const {
   probeUpstreamBillingMock,
   importCodexSessionMock,
   createOpenAICodexPATMock,
+  getSettingsMock,
 } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
   probeUpstreamBillingMock: vi.fn(),
   importCodexSessionMock: vi.fn(),
   createOpenAICodexPATMock: vi.fn(),
+  getSettingsMock: vi.fn(),
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -37,7 +39,7 @@ vi.mock('@/api/admin', () => ({
     },
     settings: {
       getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
-      getSettings: vi.fn().mockResolvedValue({}),
+      getSettings: getSettingsMock,
     },
     tlsFingerprintProfiles: {
       list: vi.fn().mockResolvedValue([]),
@@ -158,6 +160,11 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       warnings: [],
     })
     createOpenAICodexPATMock.mockReset().mockResolvedValue({})
+    getSettingsMock.mockReset().mockResolvedValue({
+      enable_openai_codex_fingerprint_normalization: true,
+      enable_openai_codex_installation_id_normalization: true,
+      enable_openai_codex_client_identity_normalization: true,
+    })
   })
 
   it('sends false explicitly for normal OpenAI account creation by default', async () => {
@@ -296,6 +303,60 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
     expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
     expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBeUndefined()
+  })
+
+  it('creates OAuth accounts with installation pin enabled and no client-supplied UUID', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="openai-codex-fingerprint-section"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="openai-installation-pin-toggle"]').attributes('aria-checked')).toBe('true')
+
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex import')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+
+    const extra = importCodexSessionMock.mock.calls[0]?.[0]?.extra
+    expect(extra?.openai_installation_pin_enabled).toBe(true)
+    expect(extra).not.toHaveProperty('openai_pinned_installation_id')
+  })
+
+  it('allows installation preconfiguration while Codex normalization is globally paused', async () => {
+    getSettingsMock.mockResolvedValueOnce({
+      enable_openai_codex_fingerprint_normalization: false,
+      enable_openai_codex_installation_id_normalization: false,
+    })
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="openai-codex-fingerprint-paused"]').exists()).toBe(true)
+    const toggle = wrapper.get('[data-testid="openai-installation-pin-toggle"]')
+    expect(toggle.attributes('disabled')).toBeUndefined()
+    await toggle.trigger('click')
+
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex import')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.openai_installation_pin_enabled).toBe(false)
+  })
+
+  it('shows the environment fingerprint as retained when client identity normalization is paused', async () => {
+    getSettingsMock.mockResolvedValueOnce({
+      enable_openai_codex_fingerprint_normalization: true,
+      enable_openai_codex_installation_id_normalization: true,
+      enable_openai_codex_client_identity_normalization: false,
+    })
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="openai-client-identity-normalization-paused"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="openai-codex-fingerprint-paused"]').exists()).toBe(false)
   })
 
   it('leaves Codex PAT import billing ownership to the backend', async () => {

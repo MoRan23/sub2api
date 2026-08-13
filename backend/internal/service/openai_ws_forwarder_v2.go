@@ -86,18 +86,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
 	setOpenAIWSTurnMetadata(payload, turnMetadata)
-	// installation_id 收口：开启固定时用账号自有值强制改写 WS create 载荷的
-	// client_metadata，与握手头保持一致（共用 gin 上下文缓存的同一次解析）。
-	if shouldRewriteOpenAIInstallationID(account, false) {
-		clientInstallationID := extractClientInstallationID(c, payload)
-		pin, pinErr := s.resolveInstallationIDForRequest(ctx, c, account, clientInstallationID)
-		if pinErr != nil {
-			return nil, fmt.Errorf("resolve openai installation_id: %w", pinErr)
-		}
-		if pin.Enabled && pin.OutboundID != "" {
-			rewriteOpenAIInstallationIDInBody(payload, pin.OutboundID)
-		}
-	}
 	payloadEventType := openAIWSPayloadString(payload, "type")
 	if payloadEventType == "" {
 		payloadEventType = "response.create"
@@ -168,12 +156,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if buildHdrErr != nil {
 		return nil, fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
-	if sessionResolution.OutboundIdentityEnabled {
-		// WS response.create payloads are Responses JSON objects. Merge the body
-		// aliases from the exact identity snapshot used by the handshake; header
-		// identity remains authoritative if a future payload cannot be decoded.
+	if account.IsOpenAIOAuth() {
+		// Apply the exact post-selection plan used by the handshake. This projects
+		// installation and turn identity without consulting either store again.
 		if rawPayload := payloadBody; len(rawPayload) > 0 {
-			if mergedPayload, mergeErr := MergeOpenAIOutboundSessionIdentityBody(rawPayload, sessionResolution.OutboundIdentity); mergeErr == nil {
+			if mergedPayload, mergeErr := ApplyOpenAIOAuthIdentityPlan(nil, rawPayload, sessionResolution.OutboundIdentityPlan); mergeErr == nil {
 				var merged map[string]any
 				if json.Unmarshal(mergedPayload, &merged) == nil && merged != nil {
 					payload = merged
@@ -220,7 +207,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		Account:        account,
 		WSURL:          wsURL,
 		Headers:        wsHeaders,
-		IdentityDigest: sessionResolution.OutboundIdentityDigest,
+		IdentityDigest: sessionResolution.OutboundIdentityPlan.SocketDigest,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},

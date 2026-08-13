@@ -768,10 +768,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	// goroutine）之间同步当前 turn 的 usage metadata。
 	usageMeta.initFromFirstFrame(firstClientMessage, capturedSessionModel)
 	promptCacheKey := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "prompt_cache_key").String())
-	var outboundIdentity OpenAIOutboundSessionIdentity
 	outboundIdentityEnabled := false
 	outboundIdentityModeEnabled := false
 	var outboundLogicalIdentity OpenAICodexLogicalTurnIdentity
+	var outboundIdentityPlan OpenAIOAuthIdentityPlan
 
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
 	if err != nil {
@@ -824,10 +824,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	outboundIdentityModeEnabled = sessionResolution.OutboundIdentityModeEnabled
 	outboundLogicalIdentity = sessionResolution.OutboundLogicalIdentity
+	outboundIdentityPlan = sessionResolution.OutboundIdentityPlan
 	if sessionResolution.OutboundIdentityEnabled {
-		outboundIdentity = sessionResolution.OutboundIdentity
 		outboundIdentityEnabled = true
-		if mergedFirst, mergeErr := MergeOpenAIOutboundSessionIdentityBody(firstClientMessage, outboundIdentity); mergeErr == nil {
+		if mergedFirst, mergeErr := ApplyOpenAIOAuthIdentityPlan(nil, firstClientMessage, outboundIdentityPlan); mergeErr == nil {
 			firstClientMessage = mergedFirst
 		}
 	}
@@ -958,11 +958,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			isResponseCreate := eventType == "response.create"
 			if isResponseCreate && outboundIdentityModeEnabled {
 				// Passthrough owns one upstream socket. Missing tuple fields inherit.
-				// Before the socket is pinned, the first prompt-cache fallback also
-				// establishes identity and therefore requires a fresh connection; once
-				// pinned, prompt_cache_key changes are identity-neutral.
-				frameLogicalIdentity := resolveOpenAIWSFrameLogicalIdentityForPinnedState(payload, outboundIdentityEnabled)
-				if strings.TrimSpace(frameLogicalIdentity.SessionKey) != "" &&
+				// Only explicit logical identity signals can invalidate this socket.
+				// prompt_cache_key is cache policy and inherits the connection snapshot.
+				frameLogicalIdentity := CaptureOpenAIOAuthIdentity(nil, payload, "").Logical
+				if frameLogicalIdentity.Explicit && strings.TrimSpace(frameLogicalIdentity.SessionKey) != "" &&
 					(!outboundIdentityEnabled || !openAICodexLogicalTurnIdentityEqual(frameLogicalIdentity, outboundLogicalIdentity)) {
 					err := errors.New("websocket outbound session logical key changed on passthrough connection")
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
@@ -1064,8 +1063,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
 				acceptedTurn = true
 			}
-			if outboundIdentityEnabled && isResponseCreate {
-				if mergedPayload, mergeErr := MergeOpenAIOutboundSessionIdentityBody(out, outboundIdentity); mergeErr == nil {
+			if account.IsOpenAIOAuth() && isResponseCreate {
+				if mergedPayload, mergeErr := ApplyOpenAIOAuthIdentityPlan(nil, out, outboundIdentityPlan); mergeErr == nil {
 					out = mergedPayload
 				}
 			}

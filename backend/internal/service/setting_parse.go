@@ -240,7 +240,10 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAICodexClientVersion:                           "",
 		SettingKeyOpenAICodexClientVersionSynced:                     "",
 		SettingKeyOpenAICodexVersionAutoSyncEnabled:                  "true",
-		SettingKeyEnableOpenAIUUIDv7SessionIdentity:                  "false",
+		SettingKeyEnableOpenAICodexFingerprintNormalization:          "true",
+		SettingKeyEnableOpenAICodexInstallationIDNormalization:       "true",
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity:                  "true",
+		SettingKeyEnableOpenAICodexClientIdentityNormalization:       "true",
 		SettingPaymentVisibleMethodAlipaySource:                      "",
 		SettingPaymentVisibleMethodWxpaySource:                       "",
 		SettingPaymentVisibleMethodAlipayEnabled:                     "false",
@@ -877,9 +880,25 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	} else {
 		result.OpenAICodexVersionAutoSyncEnabled = true
 	}
-	// UUIDv7 session identity is explicitly opt-in; missing or malformed
-	// values remain fail-closed for compatibility with existing deployments.
-	result.EnableOpenAIUUIDv7SessionIdentity = settings[SettingKeyEnableOpenAIUUIDv7SessionIdentity] == "true"
+	result.EnableOpenAICodexFingerprintNormalization = parseDefaultTrueSetting(
+		settings, SettingKeyEnableOpenAICodexFingerprintNormalization,
+	)
+	result.EnableOpenAICodexInstallationIDNormalization = parseDefaultTrueSetting(
+		settings, SettingKeyEnableOpenAICodexInstallationIDNormalization,
+	)
+	// UUIDv7 turn identity is enabled by default. A persisted false remains the
+	// emergency rollback path; missing or malformed values use the compiled
+	// default so a partial settings row cannot silently disable identity.
+	result.EnableOpenAIUUIDv7SessionIdentity, _ = parseOpenAIUUIDv7SessionIdentitySetting(
+		settings[SettingKeyEnableOpenAIUUIDv7SessionIdentity],
+		func() bool {
+			_, ok := settings[SettingKeyEnableOpenAIUUIDv7SessionIdentity]
+			return ok
+		}(),
+	)
+	result.EnableOpenAICodexClientIdentityNormalization = parseDefaultTrueSetting(
+		settings, SettingKeyEnableOpenAICodexClientIdentityNormalization,
+	)
 	// codex_cli_only 加固
 	result.MinCodexVersion = settings[SettingKeyMinCodexVersion]
 	result.MaxCodexVersion = settings[SettingKeyMaxCodexVersion]

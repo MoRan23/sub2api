@@ -68,6 +68,8 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
+	searchID := strings.TrimSpace(gjson.GetBytes(body, "id").String())
+	service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentityWithEndpointAlias(c, body, searchID))
 
 	modelResult := gjson.GetBytes(body, "model")
 	if !modelResult.Exists() || modelResult.Type != gjson.String || strings.TrimSpace(modelResult.String()) == "" {
@@ -105,8 +107,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		return
 	}
 
-	searchID := strings.TrimSpace(gjson.GetBytes(body, "id").String())
-	sessionHash := h.gatewayService.GenerateSessionHashWithFallback(c, nil, searchID)
+	sessionHash := h.gatewayService.GenerateSessionHashForOpenAIOAuthIdentity(c, nil, searchID)
 	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
 	var lastFailoverErr *service.UpstreamFailoverError

@@ -48,4 +48,45 @@ func TestBuildAccountForCreateGeneratesUniqueOpenAIOAuthInstallationIDs(t *testi
 	if _, exists := first.Extra[openAIInstallationRotateEnabledKey]; exists {
 		t.Fatal("legacy rotation option must be discarded")
 	}
+	if enabled, ok := first.Extra[openAIInstallationPinEnabledKey].(bool); !ok || !enabled {
+		t.Fatalf("new OpenAI OAuth account must explicitly persist installation pin=true: %#v", first.Extra)
+	}
+}
+
+func TestBuildAccountForCreatePreservesExplicitInstallationPinDisabled(t *testing.T) {
+	account, err := buildAccountForCreate(&CreateAccountInput{
+		Name:     "OpenAI OAuth",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+	}, map[string]any{openAIInstallationPinEnabledKey: false})
+	if err != nil {
+		t.Fatalf("build account: %v", err)
+	}
+	if enabled, ok := account.Extra[openAIInstallationPinEnabledKey].(bool); !ok || enabled {
+		t.Fatalf("explicit installation pin=false must be preserved: %#v", account.Extra)
+	}
+}
+
+func TestBuildAccountForCreateStripsInstallationPolicyFromNonOAuthAccount(t *testing.T) {
+	account, err := buildAccountForCreate(&CreateAccountInput{
+		Name:     "OpenAI API key",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+	}, map[string]any{
+		openAIInstallationPinEnabledKey:    true,
+		openAIPinnedInstallationIDKey:      "client-supplied",
+		openAIInstallationRotateEnabledKey: true,
+	})
+	if err != nil {
+		t.Fatalf("build account: %v", err)
+	}
+	for _, key := range []string{
+		openAIInstallationPinEnabledKey,
+		openAIPinnedInstallationIDKey,
+		openAIInstallationRotateEnabledKey,
+	} {
+		if _, exists := account.Extra[key]; exists {
+			t.Fatalf("non-OAuth account must not persist %s: %#v", key, account.Extra)
+		}
+	}
 }

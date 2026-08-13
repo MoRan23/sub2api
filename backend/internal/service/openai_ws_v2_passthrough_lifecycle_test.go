@@ -348,7 +348,7 @@ func TestPassthroughLifecycle_UUIDv7PromptCacheChangeKeepsPinnedTuple(t *testing
 	}
 }
 
-func TestPassthroughLifecycle_UUIDv7LatePromptCacheRequiresReconnect(t *testing.T) {
+func TestPassthroughLifecycle_UUIDv7LatePromptCacheInheritsUntilExplicitSessionChange(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	controlCtx := context.Background()
 	upstream := newStagedPassthroughConn()
@@ -379,7 +379,10 @@ func TestPassthroughLifecycle_UUIDv7LatePromptCacheRequiresReconnect(t *testing.
 	clientConn := dialPassthroughLifecycleClient(t, server)
 	defer func() { _ = clientConn.CloseNow() }()
 	firstForwarded := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
-	require.Empty(t, gjson.GetBytes(firstForwarded, "client_metadata.session_id").String())
+	firstSessionID := gjson.GetBytes(firstForwarded, "client_metadata.session_id").String()
+	firstThreadID := gjson.GetBytes(firstForwarded, "client_metadata.thread_id").String()
+	require.NotEmpty(t, firstSessionID)
+	require.NotEmpty(t, firstThreadID)
 	upstream.Send(`{"type":"response.completed","response":{"id":"resp_passthrough_identityless_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
 	firstCompleted, readErr := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
 	require.NoError(t, readErr)
@@ -388,15 +391,25 @@ func TestPassthroughLifecycle_UUIDv7LatePromptCacheRequiresReconnect(t *testing.
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
 	require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"late-P"}`)))
 	cancelWrite()
+	lateForwarded := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+	require.Equal(t, firstSessionID, gjson.GetBytes(lateForwarded, "client_metadata.session_id").String())
+	require.Equal(t, firstThreadID, gjson.GetBytes(lateForwarded, "client_metadata.thread_id").String())
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_passthrough_late_prompt","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	lateCompleted, readErr := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+	require.NoError(t, readErr)
+	require.Equal(t, "resp_passthrough_late_prompt", gjson.GetBytes(lateCompleted, "response.id").String())
+
+	writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
+	require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"client_metadata":{"session_id":"explicit-root-2","thread_id":"explicit-root-2"}}`)))
+	cancelWrite()
 	_, readErr = readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
 	var closeErr coderws.CloseError
 	require.ErrorAs(t, readErr, &closeErr)
 	require.Equal(t, coderws.StatusPolicyViolation, closeErr.Code)
 	require.Equal(t, "websocket outbound session logical key changed on passthrough connection", closeErr.Reason)
-
 	select {
 	case payload := <-upstream.writes:
-		t.Fatalf("late identity frame reached the identity-less upstream socket: %s", payload)
+		t.Fatalf("explicit session transition reached the old passthrough socket: %s", payload)
 	case <-time.After(100 * time.Millisecond):
 	}
 	select {

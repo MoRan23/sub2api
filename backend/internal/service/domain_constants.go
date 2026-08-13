@@ -594,10 +594,19 @@ const (
 	SettingKeyOpenAICodexClientVersionSynced = "openai_codex_client_version_synced"
 	// SettingKeyOpenAICodexVersionAutoSyncEnabled 是否启用 Codex 客户端版本号自动同步（默认 true）。
 	SettingKeyOpenAICodexVersionAutoSyncEnabled = "openai_codex_version_auto_sync_enabled"
+	// SettingKeyEnableOpenAICodexFingerprintNormalization is the master switch
+	// for the OAuth Codex installation, turn and client-identity policy.
+	SettingKeyEnableOpenAICodexFingerprintNormalization = "enable_openai_codex_fingerprint_normalization"
+	// SettingKeyEnableOpenAICodexInstallationIDNormalization controls account-
+	// pinned OAuth installation_id projection under the master switch.
+	SettingKeyEnableOpenAICodexInstallationIDNormalization = "enable_openai_codex_installation_id_normalization"
 	// SettingKeyEnableOpenAIUUIDv7SessionIdentity controls whether each logical
 	// OpenAI session reuses a server-managed UUIDv7 session/thread identity pair.
-	// It is opt-in so existing deployments retain their current behavior.
+	// It defaults on; an explicitly persisted false is the rollback path.
 	SettingKeyEnableOpenAIUUIDv7SessionIdentity = "enable_openai_uuidv7_session_identity"
+	// SettingKeyEnableOpenAICodexClientIdentityNormalization controls the Codex
+	// User-Agent/originator/version triplet under the master switch.
+	SettingKeyEnableOpenAICodexClientIdentityNormalization = "enable_openai_codex_client_identity_normalization"
 	// SettingKeyOpenAIAllowClaudeCodeCodexPlugin 已废弃：历史全局开关只作为升级迁移输入读取。
 	// 迁移后等价规则写入 SettingKeyCodexCLIOnlyWhitelist，不再参与运行时判定。
 	SettingKeyOpenAIAllowClaudeCodeCodexPlugin = "openai_allow_claude_code_codex_plugin"

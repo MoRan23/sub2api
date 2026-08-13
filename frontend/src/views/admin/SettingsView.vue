@@ -5613,124 +5613,150 @@
                 </p>
               </div>
 
-              <!-- OpenAI Codex UA -->
-              <div>
-                <label
-                  class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
-                >
-                  {{
-                    t(
-                      "admin.settings.gatewayForwarding.openaiCodexUserAgent",
-                    )
-                  }}
-                </label>
-                <input
-                  v-model="form.openai_codex_user_agent"
-                  type="text"
-                  class="input w-full font-mono text-sm"
-                  :placeholder="
-                    t(
-                      'admin.settings.gatewayForwarding.openaiCodexUserAgentPlaceholder',
-                    )
-                  "
-                />
-                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                  {{
-                    t(
-                      "admin.settings.gatewayForwarding.openaiCodexUserAgentHint",
-                    )
-                  }}
-                </p>
-              </div>
+            </div>
+          </div>
 
-              <!-- Codex 客户端版本号 -->
-              <div>
-                <label
-                  class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
-                >
-                  {{
-                    t(
-                      "admin.settings.gatewayForwarding.openaiCodexClientVersion",
-                    )
-                  }}
-                </label>
-                <input
-                  v-model="form.openai_codex_client_version"
-                  type="text"
-                  class="input w-full font-mono text-sm"
-                  :placeholder="
-                    t(
-                      'admin.settings.gatewayForwarding.openaiCodexClientVersionPlaceholder',
-                    )
-                  "
-                />
-                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                  {{
-                    t(
-                      "admin.settings.gatewayForwarding.openaiCodexClientVersionHint",
-                    )
-                  }}
-                </p>
-              </div>
-
-              <!-- Codex 版本号自动同步 -->
-              <div class="flex items-center justify-between">
+          <!-- OpenAI OAuth Codex fingerprint normalization -->
+          <div class="card" data-testid="codex-fingerprint-normalization-settings">
+            <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+              <div class="flex items-start justify-between gap-5">
                 <div>
-                  <label
-                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >
-                    {{
-                      t(
-                        "admin.settings.gatewayForwarding.openaiCodexVersionAutoSync",
-                      )
-                    }}
-                  </label>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{
-                      t(
-                        "admin.settings.gatewayForwarding.openaiCodexVersionAutoSyncHint",
-                      )
-                    }}
-                  </p>
-                  <p
-                    v-if="codexSyncedVersionLabel"
-                    class="mt-0.5 text-xs text-gray-500 dark:text-gray-400"
-                  >
-                    {{ codexSyncedVersionLabel }}
-                  </p>
-                </div>
-                <Toggle v-model="form.openai_codex_version_auto_sync_enabled" />
-              </div>
-
-              <!-- OpenAI UUIDv7 session identity -->
-              <div
-                class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
-                data-testid="openai-uuidv7-session-identity-settings"
-              >
-                <div>
-                  <label
-                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                  >
-                    {{
-                      t(
-                        "admin.settings.gatewayForwarding.openaiUuidv7SessionIdentity",
-                      )
-                    }}
-                  </label>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    {{
-                      t(
-                        "admin.settings.gatewayForwarding.openaiUuidv7SessionIdentityHint",
-                      )
-                    }}
+                  <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                    {{ t("admin.settings.codexFingerprintNormalization.title") }}
+                  </h2>
+                  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.codexFingerprintNormalization.description") }}
                   </p>
                 </div>
                 <Toggle
-                  v-model="form.enable_openai_uuidv7_session_identity"
-                  data-testid="openai-uuidv7-session-identity-toggle"
+                  v-model="form.enable_openai_codex_fingerprint_normalization"
+                  data-testid="codex-fingerprint-normalization-toggle"
                 />
               </div>
+              <p
+                v-if="!form.enable_openai_codex_fingerprint_normalization"
+                class="mt-3 text-xs text-amber-600 dark:text-amber-400"
+                data-testid="codex-fingerprint-normalization-paused"
+              >
+                {{ t("admin.settings.codexFingerprintNormalization.paused") }}
+              </p>
+            </div>
 
+            <div class="divide-y divide-gray-100 px-6 dark:divide-dark-700">
+              <section class="py-5">
+                <div class="flex items-start justify-between gap-5">
+                  <div>
+                    <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
+                      {{ t("admin.settings.codexFingerprintNormalization.installationTitle") }}
+                    </h3>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.codexFingerprintNormalization.installationHint") }}
+                    </p>
+                    <router-link
+                      to="/admin/accounts"
+                      class="mt-2 inline-flex text-xs text-primary-600 hover:underline dark:text-primary-400"
+                    >
+                      {{ t("admin.settings.codexFingerprintNormalization.manageAccounts") }}
+                    </router-link>
+                  </div>
+                  <Toggle
+                    v-model="form.enable_openai_codex_installation_id_normalization"
+                    :disabled="!form.enable_openai_codex_fingerprint_normalization"
+                    data-testid="codex-installation-id-normalization-toggle"
+                  />
+                </div>
+              </section>
+
+              <section
+                class="py-5"
+                data-testid="openai-uuidv7-session-identity-settings"
+              >
+                <div class="flex items-start justify-between gap-5">
+                  <div>
+                    <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
+                      {{ t("admin.settings.gatewayForwarding.openaiUuidv7SessionIdentity") }}
+                    </h3>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.gatewayForwarding.openaiUuidv7SessionIdentityHint") }}
+                    </p>
+                  </div>
+                  <Toggle
+                    v-model="form.enable_openai_uuidv7_session_identity"
+                    :disabled="!form.enable_openai_codex_fingerprint_normalization"
+                    data-testid="openai-uuidv7-session-identity-toggle"
+                  />
+                </div>
+              </section>
+
+              <section class="space-y-5 py-5">
+                <div class="flex items-start justify-between gap-5">
+                  <div>
+                    <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
+                      {{ t("admin.settings.codexFingerprintNormalization.clientIdentityTitle") }}
+                    </h3>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.codexFingerprintNormalization.clientIdentityHint") }}
+                    </p>
+                  </div>
+                  <Toggle
+                    v-model="form.enable_openai_codex_client_identity_normalization"
+                    :disabled="!form.enable_openai_codex_fingerprint_normalization"
+                    data-testid="codex-client-identity-normalization-toggle"
+                  />
+                </div>
+
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t("admin.settings.gatewayForwarding.openaiCodexUserAgent") }}
+                  </label>
+                  <input
+                    v-model="form.openai_codex_user_agent"
+                    type="text"
+                    class="input w-full font-mono text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                    :disabled="!form.enable_openai_codex_fingerprint_normalization || !form.enable_openai_codex_client_identity_normalization"
+                    :placeholder="t('admin.settings.gatewayForwarding.openaiCodexUserAgentPlaceholder')"
+                    data-testid="codex-user-agent-input"
+                  />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayForwarding.openaiCodexUserAgentHint") }}
+                  </p>
+                </div>
+
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t("admin.settings.gatewayForwarding.openaiCodexClientVersion") }}
+                  </label>
+                  <input
+                    v-model="form.openai_codex_client_version"
+                    type="text"
+                    class="input w-full font-mono text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                    :disabled="!form.enable_openai_codex_fingerprint_normalization || !form.enable_openai_codex_client_identity_normalization"
+                    :placeholder="t('admin.settings.gatewayForwarding.openaiCodexClientVersionPlaceholder')"
+                    data-testid="codex-client-version-input"
+                  />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayForwarding.openaiCodexClientVersionHint") }}
+                  </p>
+                </div>
+
+                <div class="flex items-start justify-between gap-5">
+                  <div>
+                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.gatewayForwarding.openaiCodexVersionAutoSync") }}
+                    </label>
+                    <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.gatewayForwarding.openaiCodexVersionAutoSyncHint") }}
+                    </p>
+                    <p v-if="codexSyncedVersionLabel" class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {{ codexSyncedVersionLabel }}
+                    </p>
+                  </div>
+                  <Toggle
+                    v-model="form.openai_codex_version_auto_sync_enabled"
+                    data-testid="codex-version-auto-sync-toggle"
+                  />
+                </div>
+              </section>
             </div>
           </div>
 
@@ -9460,6 +9486,9 @@ const form = reactive<SettingsForm>({
   passkey_rp_origins: [],
   session_binding_enabled: false,
   step_up_enabled: false,
+  enable_openai_codex_fingerprint_normalization: true,
+  enable_openai_codex_installation_id_normalization: true,
+  enable_openai_codex_client_identity_normalization: true,
   audit_log_retention_days: 180,
   login_agreement_enabled: false,
   login_agreement_mode: "modal",
@@ -9695,7 +9724,7 @@ const form = reactive<SettingsForm>({
   // 只读展示：自动同步任务写入的官方最新稳定版，不参与提交（提交载荷按字段显式构造）
   openai_codex_client_version_synced: "",
   openai_codex_version_auto_sync_enabled: true,
-  enable_openai_uuidv7_session_identity: false,
+  enable_openai_uuidv7_session_identity: true,
   // codex_cli_only 加固
   min_codex_version: "",
   max_codex_version: "",
@@ -11084,8 +11113,14 @@ async function saveSettings() {
       passkey_enabled: form.passkey_enabled,
       session_binding_enabled: form.session_binding_enabled,
       step_up_enabled: form.step_up_enabled,
+      enable_openai_codex_fingerprint_normalization:
+        form.enable_openai_codex_fingerprint_normalization,
+      enable_openai_codex_installation_id_normalization:
+        form.enable_openai_codex_installation_id_normalization,
       enable_openai_uuidv7_session_identity:
         form.enable_openai_uuidv7_session_identity,
+      enable_openai_codex_client_identity_normalization:
+        form.enable_openai_codex_client_identity_normalization,
       // 清空数字框时 v-model.number 会得到空串，后端 int 字段解析空串会 400 拒绝整次保存；
       // 空/非法值回退默认 180（与后端 parseAuditLogRetentionDays("") 语义一致，0 仍表示永久保留）。
       audit_log_retention_days: Number.isFinite(form.audit_log_retention_days)

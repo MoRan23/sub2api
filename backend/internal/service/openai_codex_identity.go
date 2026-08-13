@@ -21,6 +21,19 @@ const codexClientVersionMaxLen = 64
 // codexClientVersionPattern 允许 0.146.0 与 0.147.0-alpha.4 两类官方形态。
 var codexClientVersionPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,3}(-[0-9A-Za-z.]+)?$`)
 
+// Legacy adapter state is retained for narrow non-plan callers and tests.
+// Production OAuth transports never consult it; their immutable fingerprint
+// policy snapshot selects Normalize or SafePair explicitly.
+var codexIdentityEnforcement = func() *atomic.Bool {
+	v := &atomic.Bool{}
+	v.Store(true)
+	return v
+}()
+
+func SetCodexIdentityEnforcementEnabled(enabled bool) {
+	codexIdentityEnforcement.Store(enabled)
+}
+
 // NormalizeCodexClientVersion 校验并归一化 Codex 客户端版本号，非法值返回空串。
 // 该值会被拼进出站 User-Agent 与 version 头，必须拒绝任意字节，避免管理员误填或
 // 自动同步拿到异常值时把不可控内容透给上游。
@@ -39,24 +52,6 @@ func buildCodexCLIUserAgent(version string) string {
 		return codexCLIUserAgent
 	}
 	return openai.CodexDefaultOriginator + "/" + version + codexCLIUserAgentSuffix
-}
-
-// codexIdentityEnforcement 控制 enforceCodexIdentityHeaders 是否强制统一出站身份，
-// 由 gateway.disable_codex_identity_enforcement 在服务构造时取反发布。
-// 默认开启：上游在容量紧张时按客户端身份分优先级降载，被降载的请求会拿到
-// HTTP 200 + 流内 server_is_overloaded，本次请求即失败；强制统一出口可确保没有
-// 请求带着第三方或陈旧身份出站。关闭后退回「仅按最终 UA 配对 originator」的收口语义。
-var codexIdentityEnforcement = func() *atomic.Bool {
-	v := &atomic.Bool{}
-	v.Store(true)
-	return v
-}()
-
-// SetCodexIdentityEnforcementEnabled 发布 Codex 出站身份强制统一开关。
-// enforceCodexIdentityHeaders 是所有出站路径共用的纯函数收口点，无法在热路径注入配置，
-// 故由持有配置的服务在构造时发布进程级快照。
-func SetCodexIdentityEnforcementEnabled(enabled bool) {
-	codexIdentityEnforcement.Store(enabled)
 }
 
 // codexCanonicalUserAgentResolver 返回当前生效的规范 Codex User-Agent（后台设置 / 自动同步版本号）。
@@ -98,6 +93,49 @@ type codexOutboundIdentity struct {
 	version    string
 }
 
+// CodexClientIdentityMode selects how the immutable OAuth outbound plan
+// projects the Codex client identity triplet at the final wire boundary.
+// Normalize uses the gateway/account canonical identity. SafePair preserves a
+// recognized client identity while keeping originator and version coherent.
+type CodexClientIdentityMode string
+
+const (
+	CodexClientIdentityNormalize CodexClientIdentityMode = "normalize"
+	CodexClientIdentitySafePair  CodexClientIdentityMode = "safe_pair"
+)
+
+// CodexClientIdentityPlan is resolved after credential selection. Apply is a
+// pure operation and never needs to look up an account or settings again.
+type CodexClientIdentityPlan struct {
+	Mode       CodexClientIdentityMode
+	UserAgent  string
+	Originator string
+	Version    string
+}
+
+// resolveCodexClientIdentityPlan snapshots the complete client identity while
+// the credential account and request policy are being resolved. The final
+// projector must not consult the process-wide canonical UA resolver because a
+// settings refresh between Resolve and Apply would otherwise split one HTTP
+// request or WebSocket connection across two client identities.
+func resolveCodexClientIdentityPlan(mode CodexClientIdentityMode, overrideUA string) CodexClientIdentityPlan {
+	return resolveCodexClientIdentityPlanFromSnapshot(mode, overrideUA, resolveCodexOutboundIdentity(""))
+}
+
+func resolveCodexClientIdentityPlanFromSnapshot(
+	mode CodexClientIdentityMode,
+	overrideUA string,
+	canonical codexOutboundIdentity,
+) CodexClientIdentityPlan {
+	identity := resolveCodexOutboundIdentityFromSnapshot(overrideUA, canonical)
+	return CodexClientIdentityPlan{
+		Mode:       mode,
+		UserAgent:  identity.userAgent,
+		Originator: identity.originator,
+		Version:    identity.version,
+	}
+}
+
 // resolveCodexOutboundIdentity 由候选 User-Agent 推导自洽的出站身份。
 // candidateUA 为空时使用规范 User-Agent；推导不出官方身份时整体回退为规范 TUI 身份。
 //
@@ -107,19 +145,36 @@ type codexOutboundIdentity struct {
 // 需要固定版本请填「Codex 客户端版本号」并关闭自动同步。
 func resolveCodexOutboundIdentity(candidateUA string) codexOutboundIdentity {
 	canonical := codexCanonicalUserAgent()
+	canonicalOriginator, canonicalUA, ok := openai.PairCodexClientIdentity(canonical)
+	if !ok {
+		canonicalOriginator, canonicalUA = openai.CodexDefaultOriginator, codexCLIUserAgent
+	}
+	canonicalIdentity := codexOutboundIdentity{
+		userAgent:  canonicalUA,
+		originator: canonicalOriginator,
+		version:    codexClientVersionFromUA(canonical),
+	}
+	if rebuilt := openai.SetCodexUserAgentVersion(canonicalIdentity.userAgent, canonicalIdentity.version); rebuilt != "" {
+		canonicalIdentity.userAgent = rebuilt
+	}
+	return resolveCodexOutboundIdentityFromSnapshot(candidateUA, canonicalIdentity)
+}
+
+func resolveCodexOutboundIdentityFromSnapshot(candidateUA string, canonical codexOutboundIdentity) codexOutboundIdentity {
 	ua := strings.TrimSpace(candidateUA)
 	if ua == "" {
-		ua = canonical
+		ua = canonical.userAgent
 	}
 	originator, pairedUA, ok := openai.PairCodexClientIdentity(ua)
 	if !ok {
-		if originator, pairedUA, ok = openai.PairCodexClientIdentity(canonical); !ok {
-			originator, pairedUA = openai.CodexDefaultOriginator, codexCLIUserAgent
-		}
+		originator, pairedUA = canonical.originator, canonical.userAgent
 	}
 	// 生效版本只有一个来源：规范身份（面板版本号 → 自动同步值 → 内置常量，见
 	// SettingService.GetOpenAICodexClientVersion）。UA 与 version 头由此同源派生。
-	version := codexClientVersionFromUA(canonical)
+	version := canonical.version
+	if version == "" {
+		version = codexCLIVersion
+	}
 	if rebuilt := openai.SetCodexUserAgentVersion(pairedUA, version); rebuilt != "" {
 		pairedUA = rebuilt
 	}
@@ -201,15 +256,45 @@ func enforceCodexIdentityHeadersWithUA(h http.Header, overrideUA string) {
 // pairCodexIdentityHeaders 是关闭强制统一后的兜底收口：保留客户端真实身份，
 // 仅保证 originator 与最终 User-Agent 首段配套、version 不低于上游门槛（issue #3901）。
 func pairCodexIdentityHeaders(h http.Header) {
+	pairCodexIdentityHeadersWithFallback(h, resolveCodexOutboundIdentity(""))
+}
+
+// pairCodexIdentityHeadersWithFallback retains SafePair's client-preserving
+// behavior while making its fallback immutable for an OAuth outbound plan.
+// Recognized client identities still pass through exactly as before; only an
+// invalid or missing client UA consumes the frozen fallback triplet.
+func pairCodexIdentityHeadersWithFallback(h http.Header, fallback codexOutboundIdentity) {
 	originator, pairedUA, ok := openai.PairCodexClientIdentity(h.Get("user-agent"))
 	if !ok {
-		identity := resolveCodexOutboundIdentity("")
-		originator, pairedUA = identity.originator, identity.userAgent
-		h.Set("version", identity.version)
+		originator, pairedUA = fallback.originator, fallback.userAgent
+		h.Set("version", fallback.version)
 	}
 	h.Set("user-agent", pairedUA)
 	h.Set("originator", originator)
 	if v := strings.TrimSpace(h.Get("version")); v != "" && CompareVersions(v, codexUpstreamMinVersion) < 0 {
 		h.Set("version", codexCLIVersion)
 	}
+}
+
+// applyCodexClientIdentityPlan is the single final projector used by OAuth
+// outbound plans. An intentionally absent originator (for example while a
+// compat builder is still transforming the request) remains absent; the
+// compatibility layer applies the same immutable plan after restoring the
+// required Codex headers.
+func applyCodexClientIdentityPlan(h http.Header, plan CodexClientIdentityPlan) {
+	if h == nil || strings.TrimSpace(h.Get("originator")) == "" {
+		return
+	}
+	identity := codexOutboundIdentity{
+		userAgent:  plan.UserAgent,
+		originator: plan.Originator,
+		version:    plan.Version,
+	}
+	if plan.Mode == CodexClientIdentitySafePair {
+		pairCodexIdentityHeadersWithFallback(h, identity)
+		return
+	}
+	h.Set("user-agent", identity.userAgent)
+	h.Set("originator", identity.originator)
+	h.Set("version", identity.version)
 }

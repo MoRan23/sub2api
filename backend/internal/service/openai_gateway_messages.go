@@ -34,6 +34,20 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	return s.forwardAsAnthropic(ctx, c, account, body, promptCacheKey, defaultMappedModel)
+}
+
+func (s *OpenAIGatewayService) forwardAsAnthropic(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	promptCacheKey string,
+	defaultMappedModel string,
+) (*OpenAIForwardResult, error) {
+	if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
+		SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, body, promptCacheKey))
+	}
 	beginUpstreamResponseModelObservation(c)
 
 	// 入口分流：APIKey 账号 + 上游不支持 Responses API → 走 CC 直转（与
@@ -44,10 +58,6 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return s.forwardAnthropicViaRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
 	identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
-	inboundLogicalIdentity := OpenAICodexLogicalTurnIdentity{}
-	if identityModeEnabled && account.Platform != PlatformGrok {
-		inboundLogicalIdentity = ResolveOpenAICodexLogicalTurnIdentity(c, body, "")
-	}
 
 	startTime := time.Now()
 
@@ -293,6 +303,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			return nil, fmt.Errorf("apply grok Free function-tool cache route: %w", patchErr)
 		}
 	}
+	setOpenAIOAuthIdentityCaptureCallerSeed(c, promptCacheKey)
 
 	// 5. Get access token
 	token, _, err := s.getRequestCredential(ctx, c, account)
@@ -304,20 +315,12 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// settled the logical prompt-cache key.  Responses-shaped bodies can carry
 	// the same pair in client_metadata; malformed/opaque bodies stay
 	// header-only and do not reject the request.
-	var outboundIdentity OpenAIOutboundSessionIdentity
-	outboundIdentityEnabled := false
-
 	// 6. Build upstream request
 	if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
 		// Messages 兼容桥即使 body 未带 todo-guard/prompt_cache_key 标记（如映射到非
 		// gpt-5/codex 模型），也必须让 buildUpstreamRequest 走 bridge 分支，以保留
 		// 既有 body/session/conversation 行为。身份头在 post-build 阶段统一恢复。
 		setOpenAICompatMessagesBridgeContext(c, true)
-	}
-	if account.Platform != PlatformGrok && promptCacheKey != "" {
-		// This compatibility transport owns the historical post-build session
-		// override. Defer UUIDv7 resolution to that final boundary so the generic
-		// OAuth builder does not allocate an unused mapping first.
 		setOpenAIOutboundSessionIdentityPostBuildContext(c)
 	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
@@ -331,41 +334,38 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
-	// Resolve at the historical post-build isolateOpenAISessionID call site.
-	// This override applies to both OAuth and API-key accounts; keeping that
-	// condition intact is required for disabled-mode wire compatibility.
-	if account.Platform != PlatformGrok && promptCacheKey != "" {
-		var identityErr error
-		if identityModeEnabled && inboundLogicalIdentity.Explicit {
-			outboundIdentity, outboundIdentityEnabled, identityErr = s.resolveOpenAICodexLogicalIdentityForTransport(
-				ctx, c, account, inboundLogicalIdentity, true,
-			)
-		} else {
-			outboundIdentity, _, outboundIdentityEnabled, identityErr = s.resolveOpenAIOutboundSessionIdentityForTransport(ctx, c, account, responsesBody, promptCacheKey, true)
+	if account.Platform != PlatformGrok {
+		responsesBody = openAIUpstreamRequestBodySnapshot(upstreamReq, responsesBody)
+	}
+	if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
+		capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
+		if !captured {
+			capture = CaptureOpenAIOAuthIdentity(c, responsesBody, promptCacheKey)
+			SetOpenAIOAuthIdentityCapture(c, capture)
 		}
-		if identityErr != nil {
-			return nil, fmt.Errorf("resolve openai outbound session identity: %w", identityErr)
+		planOptions := OpenAIOAuthIdentityPlanOptions{
+			TurnIdentityEnabled: identityModeEnabled,
+			ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
+			InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
 		}
-		if outboundIdentityEnabled {
-			if mergedBody, mergeErr := MergeOpenAIOutboundSessionIdentityBody(responsesBody, outboundIdentity); mergeErr == nil {
-				responsesBody = mergedBody
-				upstreamReq.Body = io.NopCloser(bytes.NewReader(mergedBody))
-				upstreamReq.ContentLength = int64(len(mergedBody))
-				upstreamReq.GetBody = func() (io.ReadCloser, error) {
-					return io.NopCloser(bytes.NewReader(mergedBody)), nil
-				}
+		plan, planned := OpenAIOAuthIdentityPlanFromContext(c)
+		if !planned || !s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, plan, planOptions) {
+			var planErr error
+			plan, planErr = s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, planOptions)
+			if planErr != nil {
+				return nil, fmt.Errorf("resolve final messages OAuth identity plan: %w", planErr)
 			}
 		}
+		SetOpenAIOAuthIdentityPlan(c, plan)
+		if plan.TurnIdentityEnabled {
+			setFingerprintObservationOutboundIdentity(c, plan.TurnIdentity)
+		}
 	}
-
-	// Override the compatibility headers after request construction.  The
-	// post-build position is intentional: buildUpstreamRequest clears/rebuilds
-	// OAuth bridge identity headers, and API-key accounts do not set them there.
-	if account.Platform != PlatformGrok && promptCacheKey != "" {
-		if outboundIdentityEnabled {
-			ApplyOpenAIOutboundSessionIdentityHeaders(upstreamReq.Header, outboundIdentity)
-			setFingerprintObservationOutboundIdentity(c, outboundIdentity)
-		} else if !identityModeEnabled {
+	outboundIdentityEnabled := false
+	if account.Platform != PlatformGrok {
+		if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && plan.TurnIdentityEnabled {
+			outboundIdentityEnabled = true
+		} else if promptCacheKey != "" && !identityModeEnabled {
 			isolatedSessionID := generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey))
 			upstreamReq.Header.Set("session_id", isolatedSessionID)
 			if upstreamReq.Header.Get("conversation_id") != "" {
@@ -378,7 +378,21 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		// 清除身份头。真正发送前恢复完整 Codex 身份，避免 ChatGPT Codex 上游因缺失
 		// originator/OpenAI-Beta 返回 404（issue #3901）。
 		ensureCodexIdentityHeaders(upstreamReq.Header)
-		enforceCodexIdentityHeaders(upstreamReq.Header)
+		if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok {
+			projectedBody, applyErr := ApplyOpenAIOAuthIdentityPlan(upstreamReq.Header, responsesBody, plan)
+			if applyErr != nil {
+				return nil, fmt.Errorf("apply final messages OAuth identity plan: %w", applyErr)
+			}
+			if !bytes.Equal(projectedBody, responsesBody) {
+				responsesBody = projectedBody
+				upstreamReq.Body = io.NopCloser(bytes.NewReader(projectedBody))
+				upstreamReq.ContentLength = int64(len(projectedBody))
+				upstreamReq.GetBody = func() (io.ReadCloser, error) {
+					return io.NopCloser(bytes.NewReader(projectedBody)), nil
+				}
+			}
+			SetOpenAIOAuthIdentityPlan(c, plan)
+		}
 		logger.L().Debug("openai messages: upstream identity restored",
 			zap.Int64("account_id", account.ID),
 			zap.String("upstream_model", upstreamModel),
@@ -461,7 +475,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
 				return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
 			}
-			return s.ForwardAsAnthropic(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel)
+			return s.forwardAsAnthropic(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel)
 		}
 		if previousResponseID != "" && (isOpenAICompatPreviousResponseNotFound(resp.StatusCode, upstreamMsg, respBody) || isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody)) {
 			if isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody) {
@@ -474,7 +488,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				zap.String("previous_response_id", truncateOpenAIWSLogValue(previousResponseID, openAIWSIDValueMaxLen)),
 				zap.String("upstream_model", upstreamModel),
 			)
-			return s.ForwardAsAnthropic(ctx, c, account, body, promptCacheKey, defaultMappedModel)
+			return s.forwardAsAnthropic(ctx, c, account, body, promptCacheKey, defaultMappedModel)
 		}
 		// Grok account-switched history often fails decrypt; strip encrypted
 		// reasoning once at the client-body level so failover accounts can accept
@@ -486,7 +500,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				logger.L().Info("openai messages: stripping thinking signatures for Grok failover retry",
 					zap.Int64("account_id", account.ID),
 				)
-				return s.ForwardAsAnthropic(markGrokEncryptedContentStripRetried(ctx), c, account, strippedBody, promptCacheKey, defaultMappedModel)
+				return s.forwardAsAnthropic(markGrokEncryptedContentStripRetried(ctx), c, account, strippedBody, promptCacheKey, defaultMappedModel)
 			}
 		}
 		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {

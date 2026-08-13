@@ -405,7 +405,10 @@ export interface SystemSettings {
   passkey_rp_origins: string[];
   session_binding_enabled: boolean; // 会话 IP/UA 绑定
   step_up_enabled: boolean; // 敏感操作 step-up 2FA
+  enable_openai_codex_fingerprint_normalization: boolean; // OpenAI OAuth Codex 指纹归一总开关
+  enable_openai_codex_installation_id_normalization: boolean; // installation_id 账号固定
   enable_openai_uuidv7_session_identity: boolean; // OpenAI UUIDv7 session/thread 标识对
+  enable_openai_codex_client_identity_normalization: boolean; // UA/originator/version 归一
   audit_log_retention_days: number; // 审计日志保留天数
   login_agreement_enabled: boolean;
   login_agreement_mode: "modal" | "checkbox" | string;
@@ -748,7 +751,10 @@ export interface UpdateSettingsRequest {
   passkey_enabled?: boolean;
   session_binding_enabled?: boolean; // 会话 IP/UA 绑定
   step_up_enabled?: boolean; // 敏感操作 step-up 2FA
+  enable_openai_codex_fingerprint_normalization?: boolean;
+  enable_openai_codex_installation_id_normalization?: boolean;
   enable_openai_uuidv7_session_identity?: boolean; // OpenAI UUIDv7 session/thread 标识对
+  enable_openai_codex_client_identity_normalization?: boolean;
   audit_log_retention_days?: number; // 审计日志保留天数
   login_agreement_enabled?: boolean;
   login_agreement_mode?: "modal" | "checkbox" | string;

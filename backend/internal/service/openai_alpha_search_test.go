@@ -95,6 +95,57 @@ func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
 	require.JSONEq(t, string(body), string(upstream.lastBody))
 }
 
+func TestForwardAlphaSearchOAuthPreservesOpaqueTurnMetadataHeaderBytes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
+	const opaque = "  opaque-turn-metadata\t"
+	c.Request.Header["X-Codex-Turn-Metadata"] = []string{opaque}
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"output":"ok"}`)),
+	}}
+	service := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{ID: 420, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"}}
+
+	_, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.Equal(t, opaque, upstream.lastReq.Header.Values("X-Codex-Turn-Metadata")[0])
+}
+
+func TestForwardAlphaSearchOAuthObservesFinalPhysicalWireOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	enableOpenAIIdentityPathFingerprintObservation(t)
+	body := []byte(`{"id":"search-observation-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
+	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"session_id":"alpha-session","thread_id":"alpha-thread"}`)
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"output":"ok"}`)),
+	}}
+	service := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{ID: 421, Name: "alpha-observation", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"}}
+
+	_, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
+	require.NoError(t, err)
+	entries := SnapshotFingerprintObservations(0)
+	require.Len(t, entries, 1)
+	require.Equal(t, http.MethodPost+" /v1/alpha/search", entries[0].InboundEndpoint)
+	require.Equal(t, upstream.lastReq.Header.Get("User-Agent"), entries[0].UserAgent)
+	require.NotEmpty(t, entries[0].SessionID)
+	require.NotEmpty(t, entries[0].ThreadID)
+}
+
 func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{

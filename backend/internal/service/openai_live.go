@@ -302,7 +302,9 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	upstreamReq.Header.Set("Content-Type", "application/json")
 	upstreamReq.Header.Set("Accept", "application/sdp")
 	upstreamReq.Header.Set(liveAttestationHeader, attestation)
-	applyLiveUpstreamIdentityHeaders(upstreamReq.Header)
+	if err := s.applyLiveUpstreamIdentityHeaders(ctx, account, upstreamReq.Header); err != nil {
+		return nil, err
+	}
 
 	resp, err := s.httpUpstream.Do(upstreamReq, resolveAccountProxyURL(account), account.ID, account.Concurrency)
 	if err != nil {
@@ -399,18 +401,19 @@ func liveCallIDFromLocation(location string) (string, error) {
 	return callID, nil
 }
 
-func applyLiveUpstreamIdentityHeaders(headers http.Header) {
+func (s *OpenAIGatewayService) applyLiveUpstreamIdentityHeaders(ctx context.Context, account *Account, headers http.Header) error {
 	headers.Set("OpenAI-Alpha", "quicksilver=v2")
 	ensureCodexIdentityHeaders(headers)
-	enforceCodexIdentityHeaders(headers)
-	if strings.TrimSpace(headers.Get("session-id")) == "" {
-		headers.Set("session-id", uuid.NewString())
+	plan, err := s.ResolveOpenAIOAuthProfileIdentityPlan(ctx, nil, account, OpenAIOAuthInstallationPreserve)
+	if err != nil {
+		return fmt.Errorf("resolve live OAuth profile identity: %w", err)
 	}
-	if strings.TrimSpace(headers.Get("thread-id")) == "" {
-		headers.Set("thread-id", uuid.NewString())
+	if _, err = ApplyOpenAIOAuthIdentityPlan(headers, nil, plan); err != nil {
+		return fmt.Errorf("apply live OAuth profile identity: %w", err)
 	}
 	// Realtime/Live 不使用 Responses 的实验头。
 	headers.Del("OpenAI-Beta")
+	return nil
 }
 
 func (s *OpenAIGatewayService) liveSidebandHeaders(
@@ -434,7 +437,9 @@ func (s *OpenAIGatewayService) liveSidebandHeaders(
 		return nil, err
 	}
 	headers.Set(liveAttestationHeader, attestation)
-	applyLiveUpstreamIdentityHeaders(headers)
+	if err := s.applyLiveUpstreamIdentityHeaders(ctx, account, headers); err != nil {
+		return nil, err
+	}
 	return headers, nil
 }
 

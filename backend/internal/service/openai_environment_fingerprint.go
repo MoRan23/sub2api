@@ -121,6 +121,21 @@ func resolveOpenAIAccountUserAgent(ctx context.Context, repo AccountRepository, 
 	return strings.TrimSpace(credentialAccount.GetOpenAIOutboundUserAgent()), nil
 }
 
+// resolveOpenAIAccountStoredUserAgent returns the credential owner's persisted
+// candidate without consulting the process-wide canonical UA resolver. OAuth
+// identity plans must combine this raw value with their request/connection
+// snapshot so a settings refresh cannot change an already-open connection.
+func resolveOpenAIAccountStoredUserAgent(ctx context.Context, repo AccountRepository, account *Account) (string, error) {
+	credentialAccount, err := resolveCredentialAccount(ctx, repo, account)
+	if err != nil {
+		return "", err
+	}
+	if credentialAccount == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(credentialAccount.GetOpenAIUserAgent()), nil
+}
+
 func isOpenAIEnvironmentFingerprintAccount(account *Account) bool {
 	return account != nil && account.Platform == PlatformOpenAI &&
 		(account.Type == AccountTypeOAuth || account.Type == AccountTypeAPIKey) &&

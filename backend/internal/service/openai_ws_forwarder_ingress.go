@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -63,6 +64,16 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
+	}
+	// A handler may retry the same client connection on a different selected
+	// account. Keep the immutable pre-selection capture, but never reuse the
+	// previous account's generated plan.
+	ClearOpenAIOAuthIdentityPlan(c)
+	// Direct callers do not pass through the handler's pre-selection capture.
+	// Give each accepted client connection a stable, non-shared fallback seed;
+	// explicit Codex session/thread signals still win inside Capture.
+	if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
+		SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, firstClientMessage, "openai_ws_connection:"+uuid.NewString()))
 	}
 
 	// 预取一次 OpenAI Fast Policy settings，绑定到 ctx，让该 WS session
@@ -410,31 +421,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}, nil
 	}
 
-	rewriteIngressInstallationID := func(payload *openAIWSClientPayload) error {
-		if payload == nil || !shouldRewriteOpenAIInstallationID(account, false) {
-			return nil
-		}
-		body := make(map[string]any)
-		if err := json.Unmarshal(payload.payloadRaw, &body); err != nil {
-			return fmt.Errorf("decode websocket response.create installation metadata: %w", err)
-		}
-		clientInstallationID := extractClientInstallationID(c, body)
-		pin, err := s.resolveInstallationIDForRequest(ctx, c, account, clientInstallationID)
-		if err != nil {
-			return fmt.Errorf("resolve openai installation_id: %w", err)
-		}
-		if !pin.Enabled || pin.OutboundID == "" || !rewriteOpenAIInstallationIDInBody(body, pin.OutboundID) {
-			return nil
-		}
-		rewritten, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("encode websocket response.create installation metadata: %w", err)
-		}
-		payload.payloadRaw = rewritten
-		payload.payloadBytes = len(rewritten)
-		return nil
-	}
-
 	writeClientMessage := func(message []byte) error {
 		writeCtx, cancel := newOpenAIWSDownstreamWriteContext(ctx, hooks, s.openAIWSWriteTimeout())
 		defer cancel()
@@ -504,6 +490,28 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	refreshIngressRouteState(firstPayload)
 
 	if forceHTTPBridge || s.shouldBridgeOpenAIWSHTTP(account, firstPayload.payloadBytes, firstPayload.previousResponseID) {
+		var bridgeIdentityPlan *OpenAIOAuthIdentityPlan
+		var bridgeLogicalIdentity OpenAICodexLogicalTurnIdentity
+		installationPolicy := OpenAIOAuthInstallationPreserve
+		if account.IsOpenAIOAuth() {
+			installationPolicy = openAIWSHTTPBridgeInstallationPolicy(account)
+			capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
+			if !captured {
+				capture = CaptureOpenAIOAuthIdentity(c, firstPayload.payloadRaw, "")
+				SetOpenAIOAuthIdentityCapture(c, capture)
+			}
+			plan, planErr := s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, OpenAIOAuthIdentityPlanOptions{
+				TurnIdentityEnabled: s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account),
+				ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
+				InstallationPolicy:  installationPolicy,
+			})
+			if planErr != nil {
+				return fmt.Errorf("resolve websocket http bridge identity plan: %w", planErr)
+			}
+			bridgeIdentityPlan = &plan
+			bridgeLogicalIdentity = capture.Logical
+			SetOpenAIOAuthIdentityPlan(c, plan)
+		}
 		logOpenAIWSModeInfo(
 			"ingress_ws_http_bridge_start account_id=%d account_type=%s payload_bytes=%d threshold_bytes=%d has_session_hash=%v store_disabled=%v",
 			account.ID,
@@ -521,6 +529,23 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		var bridgeReplayInput []json.RawMessage
 		bridgeReplayInputExists := false
 		for turn := 1; ; turn++ {
+			if turn > 1 && bridgeIdentityPlan != nil {
+				frameCapture := CaptureOpenAIOAuthIdentity(nil, currentBridgePayload.payloadRaw, "")
+				if frameCapture.Logical.Explicit && strings.TrimSpace(frameCapture.Logical.SessionKey) != "" &&
+					!openAICodexLogicalTurnIdentityEqual(frameCapture.Logical, bridgeLogicalIdentity) {
+					plan, planErr := s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, frameCapture, OpenAIOAuthIdentityPlanOptions{
+						TurnIdentityEnabled: bridgeIdentityPlan.TurnIdentityRequested,
+						ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
+						InstallationPolicy:  installationPolicy,
+					})
+					if planErr != nil {
+						return fmt.Errorf("resolve websocket http bridge identity transition: %w", planErr)
+					}
+					bridgeLogicalIdentity = frameCapture.Logical
+					bridgeIdentityPlan = &plan
+					SetOpenAIOAuthIdentityPlan(c, plan)
+				}
+			}
 			if turn > 1 && hooks != nil && hooks.BeforeRequest != nil {
 				if err := hooks.BeforeRequest(turn, currentBridgePayload.payloadRaw, currentBridgePayload.originalModel); err != nil {
 					return err
@@ -593,6 +618,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				grokCacheIdentity,
 				turn,
 				writeClientMessage,
+				bridgeIdentityPlan,
 			)
 			if hooks != nil && hooks.AfterTurn != nil {
 				hooks.AfterTurn(turn, result, bridgeErr)
@@ -641,12 +667,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			currentBridgePayload = nextPayload
 		}
 	}
-	// HTTP bridge intentionally keeps its existing body/header builder. Only
-	// frames that continue onto a non-passthrough upstream WS are pinned here.
-	if err := rewriteIngressInstallationID(&firstPayload); err != nil {
-		return err
-	}
-
 	firstRoutingFields := gjson.GetManyBytes(firstPayload.payloadRaw, "model", "service_tier")
 	wsHeaders, wsSessionResolution, buildHdrErr := s.buildOpenAIWSHeadersWithBody(
 		ctx,
@@ -674,9 +694,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	pinnedIdentity := wsSessionResolution.OutboundIdentity
 	pinnedIdentityEnabled := wsSessionResolution.OutboundIdentityEnabled
 	pinnedIdentityDigest := wsSessionResolution.OutboundIdentityDigest
+	pinnedIdentityPlan := wsSessionResolution.OutboundIdentityPlan
+	pinnedSocketDigest := pinnedIdentityPlan.SocketDigest
 	identityChangedForNextTurn := false
-	if pinnedIdentityEnabled {
-		if mergedPayload, mergeErr := MergeOpenAIOutboundSessionIdentityBody(firstPayload.payloadRaw, pinnedIdentity); mergeErr == nil {
+	if account.IsOpenAIOAuth() {
+		if mergedPayload, mergeErr := ApplyOpenAIOAuthIdentityPlan(nil, firstPayload.payloadRaw, pinnedIdentityPlan); mergeErr == nil {
 			firstPayload.payloadRaw = mergedPayload
 			firstPayload.payloadBytes = len(mergedPayload)
 		}
@@ -685,7 +707,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		Account:        account,
 		WSURL:          wsURL,
 		Headers:        wsHeaders,
-		IdentityDigest: pinnedIdentityDigest,
+		IdentityDigest: pinnedSocketDigest,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
@@ -1703,25 +1725,22 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if parseErr != nil {
 			return parseErr
 		}
-		if rewriteErr := rewriteIngressInstallationID(&nextPayload); rewriteErr != nil {
-			return rewriteErr
-		}
 		nextRoutingFields := gjson.GetManyBytes(nextPayload.payloadRaw, "model", "service_tier")
 		if pinnedIdentityModeEnabled {
 			// A turn without an explicit session/thread tuple inherits the socket's
-			// pinned identity. Before any pair has been sent, the first prompt cache
-			// fallback may establish a root identity on a new compatible socket.
-			// Afterwards prompt_cache_key is cache policy and cannot switch identity.
-			candidateLogicalIdentity := resolveOpenAIWSFrameLogicalIdentityForPinnedState(
-				nextPayload.payloadRaw,
-				pinnedIdentityEnabled,
-			)
-			identityChangedForNextTurn = strings.TrimSpace(candidateLogicalIdentity.SessionKey) != "" &&
+			// pinned identity. prompt_cache_key is cache policy and can never switch
+			// a connection snapshot, including an initially identity-less snapshot.
+			frameCapture := CaptureOpenAIOAuthIdentity(nil, nextPayload.payloadRaw, "")
+			candidateLogicalIdentity := frameCapture.Logical
+			identityChangedForNextTurn = candidateLogicalIdentity.Explicit && strings.TrimSpace(candidateLogicalIdentity.SessionKey) != "" &&
 				(!pinnedIdentityEnabled || !openAICodexLogicalTurnIdentityEqual(candidateLogicalIdentity, pinnedLogicalIdentity))
 			if identityChangedForNextTurn {
-				newIdentity, newIdentityEnabled, identityErr := s.resolveOpenAICodexTurnIdentity(
-					ctx, c, account, candidateLogicalIdentity,
-				)
+				newPlan, identityErr := s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, frameCapture, OpenAIOAuthIdentityPlanOptions{
+					TurnIdentityEnabled: pinnedIdentityPlan.TurnIdentityRequested,
+					ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
+					InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
+				})
+				newIdentity, newIdentityEnabled := newPlan.TurnIdentity, newPlan.TurnIdentityEnabled
 				if identityErr != nil {
 					if errors.Is(identityErr, errOpenAIOutboundSessionIdentityNamespace) {
 						return fmt.Errorf("resolve openai outbound session identity for websocket turn: %w", identityErr)
@@ -1752,7 +1771,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					pinnedLogicalIdentity = candidateLogicalIdentity
 					pinnedIdentity = newIdentity
 					pinnedIdentityEnabled = true
-					pinnedIdentityDigest = openAIWSOutboundIdentityDigest(newIdentity)
 				}
 				if identityErr == nil && newIdentityEnabled {
 					// All non-identity handshake headers are connection-scoped and
@@ -1763,17 +1781,17 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					if updatedHeaders == nil {
 						return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to rebuild websocket session identity headers", errors.New("base websocket headers are nil"))
 					}
-					clearOpenAIOutboundSessionIdentityHeaders(updatedHeaders)
-					ApplyOpenAIOutboundSessionIdentityHeaders(updatedHeaders, pinnedIdentity)
+					if _, applyErr := ApplyOpenAIOAuthIdentityPlan(updatedHeaders, nil, newPlan); applyErr != nil {
+						return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to rebuild websocket session identity headers", applyErr)
+					}
+					newPlan.SocketDigest = openAIWSOutboundIdentityPlanDigest(updatedHeaders, newPlan)
+					pinnedIdentityDigest = newPlan.SocketDigest
+					pinnedSocketDigest = newPlan.SocketDigest
+					pinnedIdentityPlan = newPlan
+					SetOpenAIOAuthIdentityPlan(c, newPlan)
 					setFingerprintObservationOutboundIdentity(c, pinnedIdentity)
 					baseAcquireReq.Headers = updatedHeaders
-					baseAcquireReq.IdentityDigest = pinnedIdentityDigest
-				}
-			}
-			if pinnedIdentityEnabled {
-				if mergedPayload, mergeErr := MergeOpenAIOutboundSessionIdentityBody(nextPayload.payloadRaw, pinnedIdentity); mergeErr == nil {
-					nextPayload.payloadRaw = mergedPayload
-					nextPayload.payloadBytes = len(mergedPayload)
+					baseAcquireReq.IdentityDigest = pinnedSocketDigest
 				}
 			}
 		} else {
@@ -1799,6 +1817,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				} else {
 					baseAcquireReq.Headers = updatedHeaders
 				}
+			}
+		}
+		if account.IsOpenAIOAuth() {
+			if mergedPayload, mergeErr := ApplyOpenAIOAuthIdentityPlan(nil, nextPayload.payloadRaw, pinnedIdentityPlan); mergeErr == nil {
+				nextPayload.payloadRaw = mergedPayload
+				nextPayload.payloadBytes = len(mergedPayload)
 			}
 		}
 		setOpenAICodexRoutingHint(baseAcquireReq.Headers, account, nextRoutingFields[0].String(), nextRoutingFields[1].String())

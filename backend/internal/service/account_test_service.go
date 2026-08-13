@@ -146,6 +146,7 @@ type AccountTestService struct {
 	cfg                       *config.Config
 	settingService            *SettingService
 	tlsFPProfileService       *TLSFingerprintProfileService
+	openAIGatewayService      *OpenAIGatewayService
 	agentIdentityTaskMu       sync.Mutex
 	agentIdentityWS           agentIdentityWSConnectionInvalidator
 	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
@@ -156,6 +157,12 @@ type AccountTestService struct {
 func (s *AccountTestService) SetSettingService(settingService *SettingService) {
 	if s != nil {
 		s.settingService = settingService
+	}
+}
+
+func (s *AccountTestService) SetOpenAIGatewayService(openAIGatewayService *OpenAIGatewayService) {
+	if s != nil {
+		s.openAIGatewayService = openAIGatewayService
 	}
 }
 
@@ -737,26 +744,28 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			req.Header.Set("User-Agent", codexCLIUserAgent)
 		}
 		setOpenAIChatGPTAccountHeaders(req.Header, credentialAccount)
-		// 与真实转发一致：账号级自定义 UA 同样作为管理员显式配置传入，否则测试用的身份
-		// 与该账号真实出站的身份不是同一个（issue #3901 的配对不变式由收口保证）。
-		enforceCodexIdentityHeadersWithUA(req.Header, credentialAccount.GetOpenAIOutboundUserAgent())
 	}
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	credentialAccount.ApplyHeaderOverrides(req.Header)
-	if _, err := applyOpenAIInstallationIDForOutbound(
-		ctx,
-		c,
-		s.accountRepo,
-		account,
-		payload,
-		req.Header,
-		false,
-		account.IsOpenAIPassthroughEnabled(),
-	); err != nil {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI installation_id: %s", err.Error()))
-	}
-	if payloadBytes, err = json.Marshal(payload); err != nil {
-		return s.sendErrorAndEnd(c, "Failed to encode OpenAI test payload")
+	if isOAuth {
+		gateway := s.openAIGatewayService
+		if gateway == nil {
+			gateway = &OpenAIGatewayService{accountRepo: s.accountRepo, cfg: s.cfg, settingService: s.settingService}
+		}
+		installationPolicy := OpenAIOAuthInstallationAccountPin
+		if account.IsOpenAIPassthroughEnabled() {
+			installationPolicy = OpenAIOAuthInstallationPreserve
+		}
+		plan, planErr := gateway.ResolveOpenAIOAuthProfileIdentityPlan(ctx, c, account, installationPolicy)
+		if planErr != nil {
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth profile identity: %s", planErr.Error()))
+		}
+		copyOpenAIInstallationIDHeadersFromContext(c, req.Header)
+		var applyErr error
+		payloadBytes, applyErr = ApplyOpenAIOAuthIdentityPlan(req.Header, payloadBytes, plan)
+		if applyErr != nil {
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to apply OpenAI OAuth profile identity: %s", applyErr.Error()))
+		}
 	}
 	req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
 	req.ContentLength = int64(len(payloadBytes))
@@ -2078,28 +2087,36 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	}
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
-	if _, err := applyOpenAIInstallationIDForOutbound(
-		ctx,
-		c,
-		s.accountRepo,
-		account,
-		payload,
-		req.Header,
-		true,
-		account.IsOpenAIPassthroughEnabled(),
-	); err != nil {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI installation_id: %s", err.Error()))
-	}
-	probeIdentity, identityErr := uuid.NewV7()
-	if identityErr != nil {
-		return s.sendErrorAndEnd(c, "Failed to create compact probe identity")
-	}
-	// Compact uses the current Codex root identity: one real UUIDv7 projected
-	// as both session and thread, with no compatibility aliases.
-	deleteOpenAICodexIdentityHeaders(req.Header)
-	req.Header.Set("session-id", probeIdentity.String())
-	req.Header.Set("thread-id", probeIdentity.String())
-	if payloadBytes, err = json.Marshal(payload); err != nil {
+	if isOAuth {
+		copyOpenAIInstallationIDHeadersFromContext(c, req.Header)
+		gateway := s.openAIGatewayService
+		if gateway == nil {
+			settings := s.settingService
+			if settings == nil {
+				settings = &SettingService{}
+			}
+			gateway = &OpenAIGatewayService{
+				accountRepo: s.accountRepo, cfg: s.cfg, settingService: settings,
+			}
+		}
+		capture := CaptureOpenAIOAuthIdentity(c, payloadBytes, "compact-probe")
+		installationPolicy := OpenAIOAuthInstallationAccountPin
+		if account.IsOpenAIPassthroughEnabled() {
+			installationPolicy = OpenAIOAuthInstallationPreserve
+		}
+		plan, planErr := gateway.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, OpenAIOAuthIdentityPlanOptions{
+			TurnIdentityEnabled: gateway.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account),
+			ProjectionMode:      OpenAIOAuthIdentityProjectionCompact,
+			InstallationPolicy:  installationPolicy,
+		})
+		if planErr != nil {
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth identity: %s", planErr.Error()))
+		}
+		payloadBytes, err = ApplyOpenAIOAuthIdentityPlan(req.Header, payloadBytes, plan)
+		if err != nil {
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to apply OpenAI OAuth identity: %s", err.Error()))
+		}
+	} else if payloadBytes, err = json.Marshal(payload); err != nil {
 		return s.sendErrorAndEnd(c, "Failed to encode OpenAI compact payload")
 	}
 	req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
@@ -2964,11 +2981,6 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build image request: %s", err.Error()))
 	}
-	responsesPayload := make(map[string]any)
-	if err := json.Unmarshal(responsesBody, &responsesPayload); err != nil {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to decode image request: %s", err.Error()))
-	}
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, chatgptCodexAPIURL, bytes.NewReader(responsesBody))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create request")
@@ -2998,23 +3010,22 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 		req.Header.Set("User-Agent", codexCLIUserAgent)
 	}
 	setOpenAIChatGPTAccountHeaders(req.Header, credentialAccount)
-	// 与真实转发一致：账号级自定义 UA 同样作为管理员显式配置传入，否则测试用的身份
-	// 与该账号真实出站的身份不是同一个（issue #3901 的配对不变式由收口保证）。
-	enforceCodexIdentityHeadersWithUA(req.Header, credentialAccount.GetOpenAIOutboundUserAgent())
-	if _, err := applyOpenAIInstallationIDForOutbound(
-		ctx,
-		c,
-		s.accountRepo,
-		account,
-		responsesPayload,
-		req.Header,
-		false,
-		account.IsOpenAIPassthroughEnabled(),
-	); err != nil {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI installation_id: %s", err.Error()))
+	gateway := s.openAIGatewayService
+	if gateway == nil {
+		gateway = &OpenAIGatewayService{accountRepo: s.accountRepo, cfg: s.cfg, settingService: s.settingService}
 	}
-	if responsesBody, err = json.Marshal(responsesPayload); err != nil {
-		return s.sendErrorAndEnd(c, "Failed to encode OpenAI image request")
+	installationPolicy := OpenAIOAuthInstallationAccountPin
+	if account.IsOpenAIPassthroughEnabled() {
+		installationPolicy = OpenAIOAuthInstallationPreserve
+	}
+	profilePlan, planErr := gateway.ResolveOpenAIOAuthProfileIdentityPlan(ctx, c, account, installationPolicy)
+	if planErr != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth profile identity: %s", planErr.Error()))
+	}
+	copyOpenAIInstallationIDHeadersFromContext(c, req.Header)
+	responsesBody, err = ApplyOpenAIOAuthIdentityPlan(req.Header, responsesBody, profilePlan)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to apply OpenAI OAuth profile identity: %s", err.Error()))
 	}
 	req.Body = io.NopCloser(bytes.NewReader(responsesBody))
 	req.ContentLength = int64(len(responsesBody))

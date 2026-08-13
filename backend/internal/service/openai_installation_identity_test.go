@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func newOpenAIOAuthPinAccount(id int64, extra map[string]any) *Account {
@@ -92,7 +95,7 @@ func TestFingerprintObservationDisableClearsBuffer(t *testing.T) {
 	}
 }
 
-func TestFingerprintObservationSkipsPassthrough(t *testing.T) {
+func TestFingerprintObservationIncludesPassthroughPhysicalSend(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	SetFingerprintObservationEnabled(true)
 	defer SetFingerprintObservationEnabled(false)
@@ -102,8 +105,12 @@ func TestFingerprintObservationSkipsPassthrough(t *testing.T) {
 	svc.recordFingerprintObservation(nil, acct, installationIDResolution{
 		ClientID: "client-reported",
 	}, hdr)
-	if entries := SnapshotFingerprintObservations(1); len(entries) != 0 {
-		t.Fatalf("passthrough observation must be skipped, got %+v", entries)
+	entries := SnapshotFingerprintObservations(1)
+	if len(entries) != 1 {
+		t.Fatalf("passthrough physical send must be observed once, got %+v", entries)
+	}
+	if entries[0].ClientReportedInstallationID != "client-reported" || entries[0].OutboundInstallationID != "actual-outbound" {
+		t.Fatalf("passthrough observation captured wrong installation ids: %+v", entries[0])
 	}
 }
 
@@ -171,6 +178,22 @@ func TestRewriteOpenAIInstallationIDInBodyAlsoRewritesNestedMetadata(t *testing.
 	}
 }
 
+func TestRewriteCodexTurnMetadataInstallationIDPreservesLargeIntegers(t *testing.T) {
+	const (
+		pinned         = "11111111-2222-4333-8444-555555555555"
+		sequence       = "900719925474099312345678901234567890"
+		nestedSequence = "900719925474099312345678901234567891"
+	)
+	raw := `{"installation_id":"client","sequence":` + sequence + `,"nested":{"sequence":` + nestedSequence + `}}`
+
+	rewritten, changed := rewriteCodexTurnMetadataInstallationID(raw, pinned)
+
+	require.True(t, changed)
+	require.Equal(t, pinned, gjson.Get(rewritten, "installation_id").String())
+	require.Equal(t, sequence, gjson.Get(rewritten, "sequence").Raw)
+	require.Equal(t, nestedSequence, gjson.Get(rewritten, "nested.sequence").Raw)
+}
+
 func TestRewriteOpenAIInstallationIDPreservesOpaqueOrMissingTurnMetadata(t *testing.T) {
 	const pinned = "11111111-2222-4333-8444-555555555555"
 	body := map[string]any{
@@ -189,6 +212,25 @@ func TestRewriteOpenAIInstallationIDPreservesOpaqueOrMissingTurnMetadata(t *test
 	created := withoutTurn["client_metadata"].(map[string]any)
 	if _, exists := created[openAIWSTurnMetadataHeader]; exists {
 		t.Fatalf("turn metadata must not be synthesized: %#v", created)
+	}
+}
+
+func TestRewriteOpenAIInstallationIDPreservesOpaqueClientMetadataContainer(t *testing.T) {
+	const pinned = "11111111-2222-4333-8444-555555555555"
+	for name, opaque := range map[string]any{
+		"string": "opaque",
+		"array":  []any{"opaque"},
+		"null":   nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := map[string]any{"client_metadata": opaque}
+			if rewriteOpenAIInstallationIDInBody(body, pinned) {
+				t.Fatal("opaque client_metadata must not be replaced")
+			}
+			if !reflect.DeepEqual(opaque, body["client_metadata"]) {
+				t.Fatalf("opaque client_metadata changed: got %#v, want %#v", body["client_metadata"], opaque)
+			}
+		})
 	}
 }
 

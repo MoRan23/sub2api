@@ -139,6 +139,7 @@ func TestCRSSyncOpenAIInstallationIDIsSystemManaged(t *testing.T) {
 			credentials: map[string]any{"access_token": "oauth-token"},
 			extra: map[string]any{
 				openAIPinnedInstallationIDKey:      sourcePinned,
+				openAIInstallationPinEnabledKey:    false,
 				openAIInstallationRotateEnabledKey: true,
 			},
 		})
@@ -151,6 +152,7 @@ func TestCRSSyncOpenAIInstallationIDIsSystemManaged(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, uuid.Version(4), parsed.Version())
 		require.NotEqual(t, sourcePinned, installationID)
+		require.Equal(t, true, stored[openAIInstallationPinEnabledKey])
 		_, hasRotation := stored[openAIInstallationRotateEnabledKey]
 		require.False(t, hasRotation)
 	})
@@ -177,7 +179,38 @@ func TestCRSSyncOpenAIInstallationIDIsSystemManaged(t *testing.T) {
 
 		require.Equal(t, "updated", result.Items[0].Action)
 		require.Equal(t, localPinned, repo.accounts["crs-openai-1"].Extra[openAIPinnedInstallationIDKey])
+		require.Equal(t, true, repo.accounts["crs-openai-1"].Extra[openAIInstallationPinEnabledKey])
 		_, hasRotation := repo.accounts["crs-openai-1"].Extra[openAIInstallationRotateEnabledKey]
+		require.False(t, hasRotation)
+	})
+
+	t.Run("update preserves explicit local pin disable", func(t *testing.T) {
+		localPinned := uuid.NewString()
+		repo := newCRSLongContextAccountRepo(&Account{
+			ID:       41,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Extra: map[string]any{
+				"crs_account_id":                   "crs-openai-1",
+				openAIInstallationPinEnabledKey:    false,
+				openAIPinnedInstallationIDKey:      localPinned,
+				openAIInstallationRotateEnabledKey: true,
+			},
+		})
+		result := runCRSOpenAILongContextSync(t, repo, crsOpenAILongContextSource{
+			collection:  "openaiOAuthAccounts",
+			credentials: map[string]any{"access_token": "oauth-token"},
+			extra: map[string]any{
+				openAIInstallationPinEnabledKey: true,
+				openAIPinnedInstallationIDKey:   sourcePinned,
+			},
+		})
+
+		require.Equal(t, "updated", result.Items[0].Action)
+		stored := repo.accounts["crs-openai-1"].Extra
+		require.Equal(t, false, stored[openAIInstallationPinEnabledKey])
+		require.Equal(t, localPinned, stored[openAIPinnedInstallationIDKey])
+		_, hasRotation := stored[openAIInstallationRotateEnabledKey]
 		require.False(t, hasRotation)
 	})
 
@@ -204,6 +237,7 @@ func TestCRSSyncOpenAIInstallationIDIsSystemManaged(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, uuid.Version(4), parsed.Version())
 		require.NotEqual(t, sourcePinned, installationID)
+		require.Equal(t, true, repo.accounts["crs-openai-1"].Extra[openAIInstallationPinEnabledKey])
 	})
 }
 

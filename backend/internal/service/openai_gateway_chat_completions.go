@@ -1,12 +1,10 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -60,6 +58,20 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	return s.forwardAsChatCompletions(ctx, c, account, body, promptCacheKey, defaultMappedModel)
+}
+
+func (s *OpenAIGatewayService) forwardAsChatCompletions(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	promptCacheKey string,
+	defaultMappedModel string,
+) (*OpenAIForwardResult, error) {
+	if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
+		SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, body, promptCacheKey))
+	}
 	beginUpstreamResponseModelObservation(c)
 
 	restrictionResult := s.detectCodexClientRestriction(c, account, body)
@@ -95,10 +107,6 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
 	identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
-	inboundLogicalIdentity := OpenAICodexLogicalTurnIdentity{}
-	if identityModeEnabled {
-		inboundLogicalIdentity = ResolveOpenAICodexLogicalTurnIdentity(c, body, "")
-	}
 
 	startTime := time.Now()
 
@@ -254,19 +262,12 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		return nil, policyErr
 	}
 	responsesBody = updatedBody
+	setOpenAIOAuthIdentityCaptureCallerSeed(c, promptCacheKey)
 
 	// 5. Get access token
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, fmt.Errorf("get access token: %w", err)
-	}
-
-	var outboundIdentity OpenAIOutboundSessionIdentity
-	outboundIdentityEnabled := false
-	if promptCacheKey != "" {
-		// Chat compatibility owns the historical post-build session override.
-		// Resolve the UUIDv7 pair once at that final outbound boundary.
-		setOpenAIOutboundSessionIdentityPostBuildContext(c)
 	}
 
 	// 6. Build upstream request
@@ -276,43 +277,13 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
-	// Resolve at the historical post-build isolateOpenAISessionID call site.
-	// This override applies to both OAuth and API-key accounts; keeping that
-	// condition intact is required for disabled-mode wire compatibility.
-	if promptCacheKey != "" {
-		var identityErr error
-		if identityModeEnabled && inboundLogicalIdentity.Explicit {
-			outboundIdentity, outboundIdentityEnabled, identityErr = s.resolveOpenAICodexLogicalIdentityForTransport(
-				ctx, c, account, inboundLogicalIdentity, true,
-			)
-		} else {
-			outboundIdentity, _, outboundIdentityEnabled, identityErr = s.resolveOpenAIOutboundSessionIdentityForTransport(ctx, c, account, responsesBody, promptCacheKey, true)
-		}
-		if identityErr != nil {
-			return nil, fmt.Errorf("resolve openai outbound session identity: %w", identityErr)
-		}
-		if outboundIdentityEnabled {
-			// The converted request is a Responses JSON object. Keep body aliases
-			// in sync; malformed/opaque bodies remain header-only.
-			if mergedBody, mergeErr := MergeOpenAIOutboundSessionIdentityBody(responsesBody, outboundIdentity); mergeErr == nil {
-				responsesBody = mergedBody
-				upstreamReq.Body = io.NopCloser(bytes.NewReader(mergedBody))
-				upstreamReq.ContentLength = int64(len(mergedBody))
-				upstreamReq.GetBody = func() (io.ReadCloser, error) {
-					return io.NopCloser(bytes.NewReader(mergedBody)), nil
-				}
-			}
-		}
-	}
-
-	if promptCacheKey != "" {
-		if outboundIdentityEnabled {
-			ApplyOpenAIOutboundSessionIdentityHeaders(upstreamReq.Header, outboundIdentity)
-			setFingerprintObservationOutboundIdentity(c, outboundIdentity)
-		} else if !identityModeEnabled {
-			apiKeyID := getAPIKeyIDFromContext(c)
-			upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
-		}
+	responsesBody = openAIUpstreamRequestBodySnapshot(upstreamReq, responsesBody)
+	// The shared builder has already applied the immutable OAuth plan after
+	// account overrides. Do not project it a second time at this compatibility
+	// layer; only retain the flag-off legacy write below.
+	if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); !(ok && plan.TurnIdentityEnabled) && promptCacheKey != "" && !identityModeEnabled {
+		apiKeyID := getAPIKeyIDFromContext(c)
+		upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
 	}
 	// Chat compatibility may apply its server-owned session pair after the
 	// shared Responses builder. Observe only after this final header write.
@@ -337,7 +308,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
 				return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
 			}
-			return s.ForwardAsChatCompletions(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel)
+			return s.forwardAsChatCompletions(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel)
 		}
 		if account.Type == AccountTypeAPIKey &&
 			openai_compat.ResolveResponsesSupport(account.Extra) == openai_compat.ResponsesSupportUnknown &&

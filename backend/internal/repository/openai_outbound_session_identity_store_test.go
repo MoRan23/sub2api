@@ -50,6 +50,93 @@ func TestOpenAICodexRedisStoreRootWinnerAndSlidingTTL(t *testing.T) {
 	require.JSONEq(t, `{"session_id":"`+repositoryCodexSessionUUID+`"}`, stored)
 }
 
+func TestOpenAICodexRedisStoreSessionAliasesClaimAndReuseOldWinner(t *testing.T) {
+	store, _, _ := newCodexIdentityRedisTestStore(t)
+	ctx := context.Background()
+	aliasDigest := strings.Repeat("c", 64)
+	oldWinner, err := store.GetOrCreateCodexSession(ctx, aliasDigest, repositoryCodexSessionUUID, time.Minute)
+	require.NoError(t, err)
+
+	resolution, err := store.GetOrCreateCodexSessionAliases(ctx, []string{repositorySessionDigest, aliasDigest}, "018f5c3c-6e3a-7abe-8def-1234567890ad", time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, oldWinner, resolution.Identity.SessionID)
+	require.True(t, resolution.Reused)
+	require.Equal(t, 1, resolution.AliasesClaimed)
+
+	canonical, err := store.GetOrCreateCodexSession(ctx, repositorySessionDigest, "018f5c3c-6e3a-7abf-8def-1234567890ae", time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, oldWinner, canonical)
+}
+
+func TestOpenAICodexRedisStoreSessionAliasesConvergeConflictingWinnersAtomically(t *testing.T) {
+	store, mr, _ := newCodexIdentityRedisTestStore(t)
+	ctx := context.Background()
+	otherDigest := strings.Repeat("d", 64)
+	otherWinner := "018f5c3c-6e3a-7abe-8def-1234567890ad"
+	_, err := store.GetOrCreateCodexSession(ctx, repositorySessionDigest, repositoryCodexSessionUUID, time.Minute)
+	require.NoError(t, err)
+	_, err = store.GetOrCreateCodexSession(ctx, otherDigest, otherWinner, time.Minute)
+	require.NoError(t, err)
+
+	resolution, err := store.GetOrCreateCodexSessionAliases(ctx, []string{repositorySessionDigest, otherDigest}, repositoryCodexSessionUUID, time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, repositoryCodexSessionUUID, resolution.Identity.SessionID)
+	require.Equal(t, 1, resolution.ConflictsResolved)
+	first, _ := mr.Get(OpenAICodexSessionIdentityRedisKey(repositorySessionDigest))
+	second, _ := mr.Get(OpenAICodexSessionIdentityRedisKey(otherDigest))
+	require.Contains(t, first, repositoryCodexSessionUUID)
+	require.Contains(t, second, repositoryCodexSessionUUID)
+}
+
+func TestOpenAICodexRedisStoreSessionAliasesRepairMalformedAndNonCanonicalUUIDsAtomically(t *testing.T) {
+	store, mr, rdb := newCodexIdentityRedisTestStore(t)
+	ctx := context.Background()
+	validDigest := strings.Repeat("c", 64)
+	malformedDigest := strings.Repeat("d", 64)
+	require.NoError(t, rdb.Set(ctx, OpenAICodexSessionIdentityRedisKey(repositorySessionDigest), `{"session_id":"`+strings.ToUpper(repositoryCodexSessionUUID)+`"}`, time.Minute).Err())
+	require.NoError(t, rdb.Set(ctx, OpenAICodexSessionIdentityRedisKey(validDigest), `{"session_id":"`+repositoryCodexSessionUUID+`"}`, time.Minute).Err())
+	require.NoError(t, rdb.Set(ctx, OpenAICodexSessionIdentityRedisKey(malformedDigest), `{bad-json`, time.Minute).Err())
+
+	resolution, err := store.GetOrCreateCodexSessionAliases(ctx, []string{repositorySessionDigest, validDigest, malformedDigest}, "018f5c3c-6e3a-7abe-8def-1234567890ad", time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, repositoryCodexSessionUUID, resolution.Identity.SessionID)
+	require.True(t, resolution.Reused)
+	for _, digest := range []string{repositorySessionDigest, validDigest, malformedDigest} {
+		stored, getErr := mr.Get(OpenAICodexSessionIdentityRedisKey(digest))
+		require.NoError(t, getErr)
+		require.JSONEq(t, `{"session_id":"`+repositoryCodexSessionUUID+`"}`, stored)
+	}
+}
+
+func TestOpenAICodexRedisStoreThreadAliasesRepairMalformedAndNonCanonicalUUIDsAtomically(t *testing.T) {
+	store, mr, rdb := newCodexIdentityRedisTestStore(t)
+	ctx := context.Background()
+	aliasSessionDigest := strings.Repeat("c", 64)
+	malformedSessionDigest := strings.Repeat("d", 64)
+	aliasThreadDigest := strings.Repeat("e", 64)
+	malformedThreadDigest := strings.Repeat("f", 64)
+	_, err := store.GetOrCreateCodexSessionAliases(ctx, []string{repositorySessionDigest, aliasSessionDigest, malformedSessionDigest}, repositoryCodexSessionUUID, time.Minute)
+	require.NoError(t, err)
+	require.NoError(t, rdb.Set(ctx, OpenAICodexThreadIdentityRedisKey(repositorySessionDigest, repositoryThreadDigest), `{"session_id":"`+repositoryCodexSessionUUID+`","thread_id":"`+strings.ToUpper(repositoryCodexThreadUUID)+`"}`, time.Minute).Err())
+	require.NoError(t, rdb.Set(ctx, OpenAICodexThreadIdentityRedisKey(aliasSessionDigest, aliasThreadDigest), `{"session_id":"`+repositoryCodexSessionUUID+`","thread_id":"`+repositoryCodexThreadUUID+`"}`, time.Minute).Err())
+	require.NoError(t, rdb.Set(ctx, OpenAICodexThreadIdentityRedisKey(malformedSessionDigest, malformedThreadDigest), `{bad-json`, time.Minute).Err())
+
+	mappings := []service.OpenAICodexThreadAliasMapping{
+		{SessionMappingKey: repositorySessionDigest, ThreadMappingKey: repositoryThreadDigest},
+		{SessionMappingKey: aliasSessionDigest, ThreadMappingKey: aliasThreadDigest},
+		{SessionMappingKey: malformedSessionDigest, ThreadMappingKey: malformedThreadDigest},
+	}
+	resolution, err := store.GetOrCreateCodexThreadAliases(ctx, mappings, repositoryCodexSessionUUID, "018f5c3c-6e3a-7abe-8def-1234567890ad", time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, repositoryCodexThreadUUID, resolution.Identity.ThreadID)
+	require.True(t, resolution.Reused)
+	for _, mapping := range mappings {
+		stored, getErr := mr.Get(OpenAICodexThreadIdentityRedisKey(mapping.SessionMappingKey, mapping.ThreadMappingKey))
+		require.NoError(t, getErr)
+		require.JSONEq(t, `{"session_id":"`+repositoryCodexSessionUUID+`","thread_id":"`+repositoryCodexThreadUUID+`"}`, stored)
+	}
+}
+
 func TestOpenAICodexRedisStoreDescendantsShareSession(t *testing.T) {
 	store, mr, _ := newCodexIdentityRedisTestStore(t)
 	ctx := context.Background()

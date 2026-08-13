@@ -243,12 +243,22 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 		ExpiresAt:   req.ExpiresAt,
 	}
 	if req.Platform == PlatformOpenAI && req.Type == AccountTypeOAuth {
+		if err := ValidateOpenAIInstallationPinExtra(req.Platform, account.Extra); err != nil {
+			return nil, err
+		}
 		if account.Extra == nil {
 			account.Extra = make(map[string]any)
 		}
 		delete(account.Extra, openAIInstallationRotateEnabledKey)
 		delete(account.Extra, openAIPinnedInstallationIDKey)
+		if _, provided := account.Extra[openAIInstallationPinEnabledKey]; !provided {
+			account.Extra[openAIInstallationPinEnabledKey] = true
+		}
 		account.Extra[openAIPinnedInstallationIDKey] = uuid.NewString()
+	} else if account.Extra != nil {
+		delete(account.Extra, openAIInstallationRotateEnabledKey)
+		delete(account.Extra, openAIPinnedInstallationIDKey)
+		delete(account.Extra, openAIInstallationPinEnabledKey)
 	}
 	PrepareOpenAIAccountUserAgentForCreate(account)
 	if req.AutoPauseOnExpired != nil {

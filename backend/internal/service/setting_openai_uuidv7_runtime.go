@@ -2,113 +2,256 @@ package service
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"strconv"
 	"time"
 )
 
-// cachedOpenAIUUIDv7SessionIdentity is the in-process representation of the
-// global UUIDv7 session identity switch. expiresAt is a Unix nanosecond value
-// so reads can stay lock-free on the OpenAI request hot path.
-type cachedOpenAIUUIDv7SessionIdentity struct {
-	generation uint64
-	enabled    bool
-	expiresAt  int64
+// CodexFingerprintPolicySnapshot freezes the global OAuth Codex identity
+// policy for one request or WebSocket connection.
+type CodexFingerprintPolicySnapshot struct {
+	Generation            uint64
+	MasterEnabled         bool
+	InstallationIDEnabled bool
+	TurnIdentityEnabled   bool
+	ClientIdentityEnabled bool
+}
+
+func (p CodexFingerprintPolicySnapshot) InstallationIDNormalizationEnabled() bool {
+	return p.MasterEnabled && p.InstallationIDEnabled
+}
+
+func (p CodexFingerprintPolicySnapshot) TurnIdentityNormalizationEnabled() bool {
+	return p.MasterEnabled && p.TurnIdentityEnabled
+}
+
+func (p CodexFingerprintPolicySnapshot) ClientIdentityNormalizationEnabled() bool {
+	return p.MasterEnabled && p.ClientIdentityEnabled
+}
+
+type cachedOpenAICodexFingerprintPolicy struct {
+	policy            CodexFingerprintPolicySnapshot
+	expiresAt         int64
+	hasLastSuccessful bool
+	lastSuccessful    CodexFingerprintPolicySnapshot
 }
 
 const (
 	openAIUUIDv7SessionIdentityCacheTTL  = 60 * time.Second
 	openAIUUIDv7SessionIdentityErrorTTL  = 5 * time.Second
 	openAIUUIDv7SessionIdentityDBTimeout = 5 * time.Second
-	openAIUUIDv7SessionIdentitySFKey     = "openai_uuidv7_session_identity"
+	openAIUUIDv7SessionIdentitySFKey     = "openai_codex_fingerprint_policy"
+	openAIUUIDv7SessionIdentityDefault   = true
 )
 
-// IsOpenAIUUIDv7SessionIdentityEnabled returns the effective runtime switch.
-// The setting is opt-in: a missing row, malformed value, or database error is
-// fail-closed (false). Successful reads are cached for 60 seconds and joined
-// through singleflight when the cache expires.
-func (s *SettingService) IsOpenAIUUIDv7SessionIdentityEnabled(ctx context.Context) bool {
+var openAICodexFingerprintPolicySettingKeys = []string{
+	SettingKeyEnableOpenAICodexFingerprintNormalization,
+	SettingKeyEnableOpenAICodexInstallationIDNormalization,
+	SettingKeyEnableOpenAIUUIDv7SessionIdentity,
+	SettingKeyEnableOpenAICodexClientIdentityNormalization,
+}
+
+func defaultOpenAICodexFingerprintPolicy(generation uint64) CodexFingerprintPolicySnapshot {
+	return CodexFingerprintPolicySnapshot{
+		Generation:            generation,
+		MasterEnabled:         true,
+		InstallationIDEnabled: true,
+		TurnIdentityEnabled:   true,
+		ClientIdentityEnabled: true,
+	}
+}
+
+func parseOpenAIUUIDv7SessionIdentitySetting(raw string, present bool) (enabled, valid bool) {
+	if !present {
+		return openAIUUIDv7SessionIdentityDefault, false
+	}
+	switch raw {
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	default:
+		return openAIUUIDv7SessionIdentityDefault, false
+	}
+}
+
+func parseDefaultTrueSetting(settings map[string]string, key string) bool {
+	raw, present := settings[key]
+	value, valid := parseOpenAIUUIDv7SessionIdentitySetting(raw, present)
+	if !present || valid {
+		return value
+	}
+	return true
+}
+
+func parseOpenAICodexFingerprintPolicy(settings map[string]string, generation uint64) (CodexFingerprintPolicySnapshot, bool) {
+	policy := defaultOpenAICodexFingerprintPolicy(generation)
+	bindings := []struct {
+		key    string
+		target *bool
+	}{
+		{SettingKeyEnableOpenAICodexFingerprintNormalization, &policy.MasterEnabled},
+		{SettingKeyEnableOpenAICodexInstallationIDNormalization, &policy.InstallationIDEnabled},
+		{SettingKeyEnableOpenAIUUIDv7SessionIdentity, &policy.TurnIdentityEnabled},
+		{SettingKeyEnableOpenAICodexClientIdentityNormalization, &policy.ClientIdentityEnabled},
+	}
+	for _, binding := range bindings {
+		raw, present := settings[binding.key]
+		if !present {
+			continue
+		}
+		value, valid := parseOpenAIUUIDv7SessionIdentitySetting(raw, true)
+		if !valid {
+			return policy, false
+		}
+		*binding.target = value
+	}
+	return policy, true
+}
+
+// GetOpenAICodexFingerprintPolicy returns one atomic, default-on policy
+// generation. A failed or malformed read uses the last-known-good snapshot and
+// retries after a short TTL.
+func (s *SettingService) GetOpenAICodexFingerprintPolicy(ctx context.Context) CodexFingerprintPolicySnapshot {
 	if s == nil || s.settingRepo == nil {
-		return false
+		return defaultOpenAICodexFingerprintPolicy(0)
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// Generation-specific cache entries and singleflight keys prevent an old
-	// database read from publishing stale state after an admin write invalidates
-	// the switch. A small retry bound keeps an update storm fail-closed.
 	for attempt := 0; attempt < 3; attempt++ {
 		generation := s.openAIUUIDv7SessionIdentityGeneration.Load()
-		now := time.Now().UnixNano()
-		if cached, ok := s.openAIUUIDv7SessionIdentityCache.Load().(*cachedOpenAIUUIDv7SessionIdentity); ok &&
-			cached != nil && cached.generation == generation && now < cached.expiresAt {
+		if cached, ok := s.openAIUUIDv7SessionIdentityCache.Load().(*cachedOpenAICodexFingerprintPolicy); ok &&
+			cached != nil && cached.policy.Generation == generation && time.Now().UnixNano() < cached.expiresAt {
 			if generation == s.openAIUUIDv7SessionIdentityGeneration.Load() {
-				return cached.enabled
+				return cached.policy
 			}
 			continue
 		}
 
-		singleflightKey := openAIUUIDv7SessionIdentitySFKey + ":" + strconv.FormatUint(generation, 10)
-		value, _, _ := s.openAIUUIDv7SessionIdentitySF.Do(singleflightKey, func() (any, error) {
-			if cached, ok := s.openAIUUIDv7SessionIdentityCache.Load().(*cachedOpenAIUUIDv7SessionIdentity); ok &&
-				cached != nil && cached.generation == generation && time.Now().UnixNano() < cached.expiresAt {
+		key := openAIUUIDv7SessionIdentitySFKey + ":" + strconv.FormatUint(generation, 10)
+		value, _, _ := s.openAIUUIDv7SessionIdentitySF.Do(key, func() (any, error) {
+			if cached, ok := s.openAIUUIDv7SessionIdentityCache.Load().(*cachedOpenAICodexFingerprintPolicy); ok &&
+				cached != nil && cached.policy.Generation == generation && time.Now().UnixNano() < cached.expiresAt {
 				return cached, nil
 			}
 
 			dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAIUUIDv7SessionIdentityDBTimeout)
 			defer cancel()
-			raw, err := s.settingRepo.GetValue(dbCtx, SettingKeyEnableOpenAIUUIDv7SessionIdentity)
+			previous, _ := s.openAIUUIDv7SessionIdentityCache.Load().(*cachedOpenAICodexFingerprintPolicy)
+			policy := defaultOpenAICodexFingerprintPolicy(generation)
 			ttl := openAIUUIDv7SessionIdentityCacheTTL
-			enabled := raw == "true"
-			if err != nil {
-				// A missing row is the normal state before the default initializer
-				// has run. Transient failures use a short TTL for prompt recovery.
-				enabled = false
-				if !errors.Is(err, ErrSettingNotFound) {
+			hasLastSuccessful := previous != nil && previous.hasLastSuccessful
+			lastSuccessful := defaultOpenAICodexFingerprintPolicy(generation)
+			if hasLastSuccessful {
+				lastSuccessful = previous.lastSuccessful
+				lastSuccessful.Generation = generation
+			}
+			values, err := s.settingRepo.GetMultiple(dbCtx, openAICodexFingerprintPolicySettingKeys)
+			if err == nil {
+				if parsed, valid := parseOpenAICodexFingerprintPolicy(values, generation); valid {
+					policy = parsed
+					hasLastSuccessful = true
+					lastSuccessful = parsed
+				} else {
 					ttl = openAIUUIDv7SessionIdentityErrorTTL
-					slog.Warn("failed to get OpenAI UUIDv7 session identity setting", "error", err)
+					policy = lastSuccessful
+					slog.Warn("invalid OpenAI Codex fingerprint policy; using last-known-good snapshot")
 				}
+			} else {
+				ttl = openAIUUIDv7SessionIdentityErrorTTL
+				policy = lastSuccessful
+				slog.Warn("failed to get OpenAI Codex fingerprint policy; using last-known-good snapshot", "error", err)
 			}
-			resolved := &cachedOpenAIUUIDv7SessionIdentity{
-				generation: generation,
-				enabled:    enabled,
-				expiresAt:  time.Now().Add(ttl).UnixNano(),
+			resolved := &cachedOpenAICodexFingerprintPolicy{
+				policy: policy, expiresAt: time.Now().Add(ttl).UnixNano(),
+				hasLastSuccessful: hasLastSuccessful, lastSuccessful: lastSuccessful,
 			}
-			// The generation on the value makes a late store harmless. Avoid it
-			// when possible so the current generation remains the common fast path.
 			if generation == s.openAIUUIDv7SessionIdentityGeneration.Load() {
-				s.openAIUUIDv7SessionIdentityCache.Store(resolved)
+				if hook := s.openAIUUIDv7SessionIdentityBeforeCommit; hook != nil {
+					hook()
+				}
+				s.openAIUUIDv7SessionIdentityMu.Lock()
+				if generation == s.openAIUUIDv7SessionIdentityGeneration.Load() {
+					s.openAIUUIDv7SessionIdentityCache.Store(resolved)
+				}
+				s.openAIUUIDv7SessionIdentityMu.Unlock()
 			}
 			return resolved, nil
 		})
-		resolved, ok := value.(*cachedOpenAIUUIDv7SessionIdentity)
+		resolved, ok := value.(*cachedOpenAICodexFingerprintPolicy)
 		if !ok || resolved == nil {
-			return false
+			return defaultOpenAICodexFingerprintPolicy(generation)
 		}
-		if resolved.generation != s.openAIUUIDv7SessionIdentityGeneration.Load() {
+		if resolved.policy.Generation != s.openAIUUIDv7SessionIdentityGeneration.Load() {
 			continue
 		}
-		return resolved.enabled
+		return resolved.policy
 	}
-	return false
+	if cached, ok := s.openAIUUIDv7SessionIdentityCache.Load().(*cachedOpenAICodexFingerprintPolicy); ok && cached != nil && cached.hasLastSuccessful {
+		policy := cached.lastSuccessful
+		policy.Generation = s.openAIUUIDv7SessionIdentityGeneration.Load()
+		return policy
+	}
+	return defaultOpenAICodexFingerprintPolicy(s.openAIUUIDv7SessionIdentityGeneration.Load())
 }
 
-// GetOpenAIUUIDv7SessionIdentityEnabled is a getter-named alias for callers
-// that use the Get* convention for runtime settings.
+func (s *SettingService) IsOpenAIUUIDv7SessionIdentityEnabled(ctx context.Context) bool {
+	return s.GetOpenAICodexFingerprintPolicy(ctx).TurnIdentityNormalizationEnabled()
+}
+
 func (s *SettingService) GetOpenAIUUIDv7SessionIdentityEnabled(ctx context.Context) bool {
 	return s.IsOpenAIUUIDv7SessionIdentityEnabled(ctx)
 }
 
-// InvalidateOpenAIUUIDv7SessionIdentityCache drops the runtime switch cache.
-// Settings writes call this synchronously; the next getter therefore observes
-// the newly persisted value instead of waiting for the 60-second TTL.
 func (s *SettingService) InvalidateOpenAIUUIDv7SessionIdentityCache() {
 	if s == nil {
 		return
 	}
-	generation := s.openAIUUIDv7SessionIdentityGeneration.Add(1)
-	// Store an expired typed entry rather than an untyped nil so concurrent
-	// readers can safely load while the next request refreshes the value.
-	s.openAIUUIDv7SessionIdentityCache.Store(&cachedOpenAIUUIDv7SessionIdentity{generation: generation, expiresAt: 0})
+	s.openAIUUIDv7SessionIdentityMu.Lock()
+	defer s.openAIUUIDv7SessionIdentityMu.Unlock()
+	generation := s.openAIUUIDv7SessionIdentityGeneration.Load() + 1
+	previous, _ := s.openAIUUIDv7SessionIdentityCache.Load().(*cachedOpenAICodexFingerprintPolicy)
+	invalidated := &cachedOpenAICodexFingerprintPolicy{policy: defaultOpenAICodexFingerprintPolicy(generation)}
+	if previous != nil {
+		invalidated.hasLastSuccessful = previous.hasLastSuccessful
+		invalidated.lastSuccessful = previous.lastSuccessful
+		invalidated.lastSuccessful.Generation = generation
+	}
+	s.openAIUUIDv7SessionIdentityCache.Store(invalidated)
+	if hook := s.openAIUUIDv7SessionIdentityBeforeGenerationStore; hook != nil {
+		hook()
+	}
+	s.openAIUUIDv7SessionIdentityGeneration.Store(generation)
+}
+
+// PublishOpenAICodexFingerprintPolicy publishes a successfully persisted full
+// policy generation without another database read.
+func (s *SettingService) PublishOpenAICodexFingerprintPolicy(policy CodexFingerprintPolicySnapshot) {
+	if s == nil {
+		return
+	}
+	s.openAIUUIDv7SessionIdentityMu.Lock()
+	defer s.openAIUUIDv7SessionIdentityMu.Unlock()
+	generation := s.openAIUUIDv7SessionIdentityGeneration.Load() + 1
+	policy.Generation = generation
+	s.openAIUUIDv7SessionIdentityCache.Store(&cachedOpenAICodexFingerprintPolicy{
+		policy: policy, expiresAt: time.Now().Add(openAIUUIDv7SessionIdentityCacheTTL).UnixNano(),
+		hasLastSuccessful: true, lastSuccessful: policy,
+	})
+	if hook := s.openAIUUIDv7SessionIdentityBeforeGenerationStore; hook != nil {
+		hook()
+	}
+	s.openAIUUIDv7SessionIdentityGeneration.Store(generation)
+}
+
+func (s *SettingService) PublishOpenAIUUIDv7SessionIdentity(enabled bool) {
+	policy := defaultOpenAICodexFingerprintPolicy(0)
+	if s != nil {
+		if cached, ok := s.openAIUUIDv7SessionIdentityCache.Load().(*cachedOpenAICodexFingerprintPolicy); ok && cached != nil {
+			policy = cached.policy
+		}
+	}
+	policy.TurnIdentityEnabled = enabled
+	s.PublishOpenAICodexFingerprintPolicy(policy)
 }

@@ -472,7 +472,10 @@ const baseSettingsResponse = {
   openai_codex_user_agent: "",
   openai_codex_client_version: "",
   openai_codex_version_auto_sync_enabled: true,
-  enable_openai_uuidv7_session_identity: false,
+  enable_openai_codex_fingerprint_normalization: true,
+  enable_openai_codex_installation_id_normalization: true,
+  enable_openai_uuidv7_session_identity: true,
+  enable_openai_codex_client_identity_normalization: true,
   payment_enabled: true,
   payment_min_amount: 1,
   payment_max_amount: 10000,
@@ -1213,6 +1216,51 @@ describe("admin SettingsView payment visible method controls", () => {
         enable_openai_uuidv7_session_identity: false,
       }),
     );
+  });
+
+  it("pauses Codex fingerprint children without clearing their saved values", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      enable_openai_codex_fingerprint_normalization: false,
+      enable_openai_codex_installation_id_normalization: false,
+      enable_openai_uuidv7_session_identity: true,
+      enable_openai_codex_client_identity_normalization: true,
+      openai_codex_user_agent: "codex-tui/0.200.0 (Ubuntu 24.04.0; x86_64) xterm-256color",
+      openai_codex_client_version: "0.200.0",
+      openai_codex_version_auto_sync_enabled: true,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    expect(wrapper.get('[data-testid="codex-fingerprint-normalization-paused"]').isVisible()).toBe(true);
+    expect(wrapper.get('[data-testid="codex-installation-id-normalization-toggle"]').attributes('disabled')).toBeDefined();
+    expect(wrapper.get('[data-testid="openai-uuidv7-session-identity-toggle"]').attributes('disabled')).toBeDefined();
+    expect(wrapper.get('[data-testid="codex-client-identity-normalization-toggle"]').attributes('disabled')).toBeDefined();
+    expect(wrapper.get('[data-testid="codex-user-agent-input"]').attributes('disabled')).toBeDefined();
+    expect(wrapper.get('[data-testid="codex-client-version-input"]').attributes('disabled')).toBeDefined();
+    expect(wrapper.get('[data-testid="codex-version-auto-sync-toggle"]').attributes('disabled')).toBeUndefined();
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      enable_openai_codex_fingerprint_normalization: false,
+      enable_openai_codex_installation_id_normalization: false,
+      enable_openai_uuidv7_session_identity: true,
+      enable_openai_codex_client_identity_normalization: true,
+      openai_codex_user_agent: "codex-tui/0.200.0 (Ubuntu 24.04.0; x86_64) xterm-256color",
+      openai_codex_client_version: "0.200.0",
+      openai_codex_version_auto_sync_enabled: true,
+    }));
+  });
+
+  it("labels X-Stainless unification as independent from Codex fingerprints", () => {
+    expect(zhSettings.settings.gatewayForwarding.fingerprintUnification).toContain('X-Stainless');
+    expect(zhSettings.settings.gatewayForwarding.fingerprintUnificationHint).toContain('无关');
+    expect(enSettings.settings.gatewayForwarding.fingerprintUnification).toContain('X-Stainless');
+    expect(enSettings.settings.gatewayForwarding.fingerprintUnificationHint).toContain('independent');
   });
 
   it("keeps fingerprint observation out of the general settings form", async () => {

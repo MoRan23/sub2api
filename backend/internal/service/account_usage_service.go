@@ -305,6 +305,8 @@ type AccountUsageService struct {
 	tlsFPProfileService     *TLSFingerprintProfileService
 	agentIdentityTaskMu     sync.Mutex
 	agentIdentityWS         agentIdentityWSConnectionInvalidator
+	openAIGatewayService    *OpenAIGatewayService
+	settingService          *SettingService
 }
 
 // NewAccountUsageService 创建AccountUsageService实例
@@ -865,30 +867,23 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 			req.Header.Set("User-Agent", strings.TrimSpace(fp.UserAgent))
 		}
 	}
-	// 与真实转发一致：账号级自定义 UA 同样作为管理员显式配置传入。
-	// 上面写进 header 的指纹缓存 UA 只在强制统一被关闭时才参与配对（保持回滚后的历史语义）；
-	// 强制统一开启时客户端身份不参与构造，探针与真实转发用同一套规范身份出站。
-	outboundUA, resolveUAErr := resolveOpenAIAccountUserAgent(reqCtx, s.accountRepo, account)
-	if resolveUAErr != nil {
-		return nil, fmt.Errorf("resolve OpenAI account User-Agent: %w", resolveUAErr)
-	}
-	enforceCodexIdentityHeadersWithUA(req.Header, outboundUA)
 	setOpenAIChatGPTAccountHeaders(req.Header, account)
-	if _, err := applyOpenAIInstallationIDForOutbound(
-		reqCtx,
-		nil,
-		s.accountRepo,
-		account,
-		payload,
-		req.Header,
-		false,
-		account.IsOpenAIPassthroughEnabled(),
-	); err != nil {
-		return nil, fmt.Errorf("resolve openai installation_id: %w", err)
-	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal openai probe payload: %w", err)
+	}
+	gateway := s.openAIGatewayForProfileIdentity()
+	installationPolicy := OpenAIOAuthInstallationAccountPin
+	if account.IsOpenAIPassthroughEnabled() {
+		installationPolicy = OpenAIOAuthInstallationPreserve
+	}
+	profilePlan, planErr := gateway.ResolveOpenAIOAuthProfileIdentityPlan(reqCtx, nil, account, installationPolicy)
+	if planErr != nil {
+		return nil, fmt.Errorf("resolve OpenAI OAuth profile identity: %w", planErr)
+	}
+	payloadBytes, err = ApplyOpenAIOAuthIdentityPlan(req.Header, payloadBytes, profilePlan)
+	if err != nil {
+		return nil, fmt.Errorf("apply OpenAI OAuth profile identity: %w", err)
 	}
 	req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
 	req.ContentLength = int64(len(payloadBytes))
@@ -920,6 +915,19 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 		return updates, nil
 	}
 	return nil, nil
+}
+
+func (s *AccountUsageService) openAIGatewayForProfileIdentity() *OpenAIGatewayService {
+	if s != nil && s.openAIGatewayService != nil {
+		return s.openAIGatewayService
+	}
+	if s == nil {
+		return &OpenAIGatewayService{}
+	}
+	return &OpenAIGatewayService{
+		accountRepo:    s.accountRepo,
+		settingService: s.settingService,
+	}
 }
 
 func (s *AccountUsageService) persistOpenAICodexProbeSnapshot(accountID int64, updates map[string]any) {

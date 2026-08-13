@@ -466,6 +466,123 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
 }
 
+func TestProxyOpenAIWSHTTPBridgeTurnUsesConnectionIdentityPlan(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const sessionID = "01989f44-7c00-7000-8000-000000000001"
+	const threadID = "01989f44-7c00-7000-8000-000000000002"
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`data: {"type":"response.completed","response":{"id":"resp_bridge_plan","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`,
+			"",
+		}, "\n"))),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, toolCorrector: NewCodexToolCorrector()}
+	account := &Account{
+		ID: 20, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	plan := OpenAIOAuthIdentityPlan{
+		TurnIdentity: OpenAICodexTurnIdentity{
+			SessionID: sessionID, ThreadID: threadID, ParentThreadID: sessionID,
+			Relation: OpenAICodexTurnRelationDescendant,
+		},
+		TurnIdentityEnabled: true,
+		ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
+		InstallationPolicy:  OpenAIOAuthInstallationPreserve,
+	}
+	payload := []byte(`{"type":"response.create","model":"gpt-5.1","stream":true,"client_metadata":{"session_id":"client-session","thread_id":"client-thread"}}`)
+
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+		context.Background(), c, account, "oauth-token", payload, len(payload),
+		"gpt-5.1", "", "", "", "", 1, func([]byte) error { return nil }, &plan,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, sessionID, upstream.lastReq.Header.Get("session-id"))
+	require.Equal(t, threadID, upstream.lastReq.Header.Get("thread-id"))
+	require.Equal(t, sessionID, gjson.GetBytes(upstream.lastBody, "client_metadata.session_id").String())
+	require.Equal(t, threadID, gjson.GetBytes(upstream.lastBody, "client_metadata.thread_id").String())
+}
+
+func TestOpenAIWSHTTPBridgeInstallationPolicyPreservesOnlyPassthrough(t *testing.T) {
+	account := installationTestOAuthAccount(nil)
+	require.Equal(t, OpenAIOAuthInstallationAccountPin, openAIWSHTTPBridgeInstallationPolicy(account))
+
+	account.Extra["openai_passthrough"] = true
+	require.Equal(t, OpenAIOAuthInstallationPreserve, openAIWSHTTPBridgeInstallationPolicy(account))
+}
+
+func TestProxyOpenAIWSHTTPBridgeTurnPinsAndObservesFinalOAuthWireOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	enableOpenAIIdentityPathFingerprintObservation(t)
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`data: {"type":"response.completed","response":{"id":"resp_bridge_observed","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`,
+			"",
+		}, "\n"))),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, toolCorrector: NewCodexToolCorrector()}
+	account := installationTestOAuthAccount(nil)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	c.Request.Header.Set(codexInstallationIDKey, "client-installation")
+	c.Set(installationPinContextKey, installationIDRequestCache{
+		SourceAccountID: account.ID,
+		Resolution: installationIDResolution{
+			Enabled:    true,
+			ClientID:   "client-installation",
+			OutboundID: transportTestPinnedInstallationID,
+		},
+	})
+	identity := OpenAICodexTurnIdentity{
+		SessionID: testOutboundSessionUUID,
+		ThreadID:  testOutboundThreadUUID,
+		Relation:  OpenAICodexTurnRelationDescendant,
+	}
+	plan := OpenAIOAuthIdentityPlan{
+		Capture:                  OpenAIOAuthIdentityCapture{ClientInstallationID: "client-installation"},
+		TurnIdentity:             identity,
+		TurnIdentityEnabled:      true,
+		InstallationID:           transportTestPinnedInstallationID,
+		InstallationEnabled:      true,
+		InstallationPolicy:       OpenAIOAuthInstallationAccountPin,
+		ProjectionMode:           OpenAIOAuthIdentityProjectionRegular,
+		ClientIdentityEnabled:    true,
+		ClientIdentity:           resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, ""),
+		CredentialOwnerNamespace: openAIOutboundSessionIdentityNamespace(account),
+	}
+	payload := []byte(`{"type":"response.create","model":"gpt-5.1","stream":true,"client_metadata":{"x-codex-installation-id":"client-installation","session_id":"client-session","thread_id":"client-thread"}}`)
+
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+		context.Background(), c, account, "oauth-token", payload, len(payload),
+		"gpt-5.1", "", "", "", "", 1, func([]byte) error { return nil }, &plan,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, transportTestPinnedInstallationID, upstream.lastReq.Header.Get(codexInstallationIDKey))
+	require.Equal(t, transportTestPinnedInstallationID, gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
+	require.Equal(t, identity.SessionID, gjson.GetBytes(upstream.lastBody, "client_metadata.session_id").String())
+	require.Equal(t, identity.ThreadID, gjson.GetBytes(upstream.lastBody, "client_metadata.thread_id").String())
+
+	entries := SnapshotFingerprintObservations(0)
+	require.Len(t, entries, 1)
+	require.True(t, entries[0].Pinned)
+	require.Equal(t, "client-installation", entries[0].ClientReportedInstallationID)
+	require.Equal(t, transportTestPinnedInstallationID, entries[0].OutboundInstallationID)
+	require.Equal(t, identity.SessionID, entries[0].SessionID)
+	require.Equal(t, identity.ThreadID, entries[0].ThreadID)
+}
+
 func TestProxyOpenAIWSHTTPBridgeTurnForGrokDefaultsEmptyModelTo45(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

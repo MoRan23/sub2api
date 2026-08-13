@@ -31,6 +31,10 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	if s == nil || c == nil || account == nil {
 		return nil, fmt.Errorf("service, context, and account are required")
 	}
+	alphaSessionID := strings.TrimSpace(gjson.GetBytes(body, "id").String())
+	if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
+		SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentityWithEndpointAlias(c, body, alphaSessionID))
+	}
 	modelResult := gjson.GetBytes(body, "model")
 	requestedModel := strings.TrimSpace(modelResult.String())
 	if modelResult.Type != gjson.String || requestedModel == "" {
@@ -72,6 +76,12 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	if err != nil {
 		return nil, err
 	}
+	s.recordFingerprintObservationFromContextWithBody(
+		c,
+		account,
+		req.Header,
+		openAIUpstreamRequestBodySnapshot(req, body),
+	)
 
 	upstreamStart := time.Now()
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
@@ -152,6 +162,12 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 		return nil, err
 	}
 	SetActualOpenAIUpstreamEndpoint(c, "/v1/responses")
+	s.recordFingerprintObservationFromContextWithBody(
+		c,
+		account,
+		req.Header,
+		openAIUpstreamRequestBodySnapshot(req, responsesBody),
+	)
 
 	upstreamStart := time.Now()
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
@@ -241,9 +257,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("OpenAI-Beta", "responses=experimental")
-	if turnMetadata := openAIAlphaSearchInboundHeader(c, "X-Codex-Turn-Metadata"); turnMetadata != "" {
-		req.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
-	}
+	copyOpenAIAlphaSearchInboundOpaqueHeaders(c, req.Header, "X-Codex-Turn-Metadata")
 	if version := openAIAlphaSearchInboundHeader(c, "Version"); version != "" {
 		req.Header.Set("Version", version)
 	} else {
@@ -254,13 +268,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 	} else {
 		req.Header.Set("Originator", openai.CodexDefaultOriginator)
 	}
-	customUA, err := s.codexIdentityOverrideUA(ctx, account)
-	if err != nil {
-		return nil, fmt.Errorf("resolve OpenAI account User-Agent: %w", err)
-	}
-	if customUA != "" {
-		req.Header.Set("User-Agent", customUA)
-	} else if userAgent := openAIAlphaSearchInboundHeader(c, "User-Agent"); userAgent != "" {
+	if userAgent := openAIAlphaSearchInboundHeader(c, "User-Agent"); userAgent != "" {
 		req.Header.Set("User-Agent", userAgent)
 	} else {
 		req.Header.Set("User-Agent", codexCLIUserAgent)
@@ -268,67 +276,43 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 		req.Header.Set("User-Agent", codexCLIUserAgent)
 	}
-	apiKeyID := getAPIKeyIDFromContext(c)
 	alphaSessionID := strings.TrimSpace(gjson.GetBytes(alphaBody, "id").String())
-	outboundIdentity := OpenAIOutboundSessionIdentity{}
-	outboundIdentityEnabled := false
 	identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
-	// Alpha historically isolated only when alphaBody.id was present. Keep the
-	// setting gate and identity lookup inside that same hit condition; the final
-	// header write below is intentionally delayed until all account/client
-	// overrides and installation processing have completed.
-	if alphaSessionID != "" {
-		if identityModeEnabled {
-			var identityErr error
-			outboundIdentity, _, outboundIdentityEnabled, identityErr = s.resolveOpenAIOutboundSessionIdentityForTransport(
-				ctx,
-				c,
-				account,
-				body,
-				alphaSessionID,
-				true,
-			)
-			if identityErr != nil {
-				return nil, fmt.Errorf("resolve openai outbound session identity: %w", identityErr)
-			}
-		}
-		if !outboundIdentityEnabled && !identityModeEnabled {
-			isolated := isolateOpenAISessionID(apiKeyID, alphaSessionID)
-			req.Header.Set("Session_ID", isolated)
-			req.Header.Set("Conversation_ID", isolated)
+	capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
+	if !captured {
+		capture = CaptureOpenAIOAuthIdentityWithEndpointAlias(c, alphaBody, alphaSessionID)
+		SetOpenAIOAuthIdentityCapture(c, capture)
+	}
+	planOptions := OpenAIOAuthIdentityPlanOptions{
+		TurnIdentityEnabled: identityModeEnabled,
+		ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
+		InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
+	}
+	plan, planned := OpenAIOAuthIdentityPlanFromContext(c)
+	if !planned || !s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, plan, planOptions) {
+		var planErr error
+		plan, planErr = s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, planOptions)
+		if planErr != nil {
+			return nil, fmt.Errorf("resolve alpha search OAuth identity plan: %w", planErr)
 		}
 	}
-	enforceCodexIdentityHeadersWithUA(req.Header, customUA)
+	if !plan.TurnIdentityEnabled && !identityModeEnabled && alphaSessionID != "" {
+		apiKeyID := getAPIKeyIDFromContext(c)
+		isolated := isolateOpenAISessionID(apiKeyID, alphaSessionID)
+		req.Header.Set("Session_ID", isolated)
+		req.Header.Set("Conversation_ID", isolated)
+	}
 	account.ApplyHeaderOverrides(req.Header)
-	if _, err := applyOpenAIInstallationIDForOutbound(
-		ctx,
-		c,
-		s.accountRepo,
-		account,
-		responsesPayload,
-		req.Header,
-		false,
-		account.IsOpenAIPassthroughEnabled(),
-	); err != nil {
-		return nil, fmt.Errorf("resolve openai installation_id: %w", err)
-	}
-	// Final identity writer: client-derived headers, account overrides and
-	// installation handling must not be able to replace the server-owned pair.
-	// The legacy path above stays in its historical position when the switch is
-	// disabled.
-	if outboundIdentityEnabled {
-		ApplyOpenAIOutboundSessionIdentityHeaders(req.Header, outboundIdentity)
-	}
 	if body, err = json.Marshal(responsesPayload); err != nil {
 		return nil, fmt.Errorf("encode alpha search responses body: %w", err)
 	}
-	if outboundIdentityEnabled {
-		// Responses payloads have a well-defined object schema.  If the body
-		// helper cannot merge (for example, due to a future schema change), keep
-		// the already-applied headers and continue sending the payload.
-		if mergedBody, mergeErr := MergeOpenAIOutboundSessionIdentityBody(body, outboundIdentity); mergeErr == nil {
-			body = mergedBody
-		}
+	body, err = ApplyOpenAIOAuthIdentityPlan(req.Header, body, plan)
+	if err != nil {
+		return nil, fmt.Errorf("apply alpha search OAuth identity plan: %w", err)
+	}
+	SetOpenAIOAuthIdentityPlan(c, plan)
+	if plan.TurnIdentityEnabled {
+		setFingerprintObservationOutboundIdentity(c, plan.TurnIdentity)
 	}
 	req.Body = io.NopCloser(bytes.NewReader(body))
 	req.ContentLength = int64(len(body))
@@ -445,19 +429,36 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
+	directIdentityPlan := OpenAIOAuthIdentityPlan{}
+	directIdentityPlanned := false
 	if account.Type == AccountTypeOAuth {
-		customUA, resolveUAErr := s.codexIdentityOverrideUA(ctx, account)
-		if resolveUAErr != nil {
-			return nil, fmt.Errorf("resolve OpenAI account User-Agent: %w", resolveUAErr)
+		identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
+		capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
+		if !captured {
+			capture = CaptureOpenAIOAuthIdentityWithEndpointAlias(c, body, strings.TrimSpace(gjson.GetBytes(body, "id").String()))
+			SetOpenAIOAuthIdentityCapture(c, capture)
 		}
+		planOptions := OpenAIOAuthIdentityPlanOptions{
+			TurnIdentityEnabled: identityModeEnabled,
+			ProjectionMode:      OpenAIOAuthIdentityProjectionExistingTurnMetadataOnly,
+			InstallationPolicy:  OpenAIOAuthInstallationPreserve,
+		}
+		plan, planned := OpenAIOAuthIdentityPlanFromContext(c)
+		if !planned || !s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, plan, planOptions) {
+			var planErr error
+			plan, planErr = s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, planOptions)
+			if planErr != nil {
+				return nil, fmt.Errorf("resolve direct alpha search OAuth identity plan: %w", planErr)
+			}
+		}
+		directIdentityPlan = plan
+		directIdentityPlanned = true
 		req.Host = "chatgpt.com"
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, req.Header, account); err != nil {
 			return nil, fmt.Errorf("resolve chatgpt account headers: %w", err)
 		}
 
-		if turnMetadata := openAIAlphaSearchInboundHeader(c, "X-Codex-Turn-Metadata"); turnMetadata != "" {
-			req.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
-		}
+		copyOpenAIAlphaSearchInboundOpaqueHeaders(c, req.Header, "X-Codex-Turn-Metadata")
 		if version := openAIAlphaSearchInboundHeader(c, "Version"); version != "" {
 			req.Header.Set("Version", version)
 		} else {
@@ -468,9 +469,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 		} else {
 			req.Header.Set("Originator", openai.CodexDefaultOriginator)
 		}
-		if customUA != "" {
-			req.Header.Set("User-Agent", customUA)
-		} else if userAgent := openAIAlphaSearchInboundHeader(c, "User-Agent"); userAgent != "" {
+		if userAgent := openAIAlphaSearchInboundHeader(c, "User-Agent"); userAgent != "" {
 			req.Header.Set("User-Agent", userAgent)
 		} else {
 			req.Header.Set("User-Agent", codexCLIUserAgent)
@@ -478,10 +477,26 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 		if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 			req.Header.Set("User-Agent", codexCLIUserAgent)
 		}
-		enforceCodexIdentityHeadersWithUA(req.Header, customUA)
 	}
 
 	account.ApplyHeaderOverrides(req.Header)
+	if directIdentityPlanned {
+		projectedBody, applyErr := ApplyOpenAIOAuthIdentityPlan(req.Header, body, directIdentityPlan)
+		if applyErr != nil {
+			return nil, fmt.Errorf("apply direct alpha search OAuth identity plan: %w", applyErr)
+		}
+		if !bytes.Equal(projectedBody, body) {
+			req.Body = io.NopCloser(bytes.NewReader(projectedBody))
+			req.ContentLength = int64(len(projectedBody))
+			req.GetBody = func() (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(projectedBody)), nil
+			}
+		}
+		SetOpenAIOAuthIdentityPlan(c, directIdentityPlan)
+		if directIdentityPlan.TurnIdentityEnabled {
+			setFingerprintObservationOutboundIdentity(c, directIdentityPlan.TurnIdentity)
+		}
+	}
 	stripOpenAIAlphaSearchResponsesHeaders(req.Header)
 	return req, nil
 }
@@ -505,6 +520,11 @@ func stripOpenAIAlphaSearchResponsesHeaders(headers http.Header) {
 		"Conversation_ID",
 		"X-Codex-Beta-Features",
 		"X-Codex-Turn-State",
+		codexInstallationIDKey,
+		"Session-ID",
+		"Thread-ID",
+		"X-Client-Request-ID",
+		"X-Codex-Parent-Thread-ID",
 		responsesLiteHeaderKey,
 	} {
 		headers.Del(key)
@@ -516,6 +536,24 @@ func openAIAlphaSearchInboundHeader(c *gin.Context, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(c.GetHeader(key))
+}
+
+func copyOpenAIAlphaSearchInboundOpaqueHeaders(c *gin.Context, dst http.Header, key string) {
+	if c == nil || c.Request == nil || dst == nil {
+		return
+	}
+	values := headerValuesCaseInsensitive(c.Request.Header, key)
+	if len(values) == 0 {
+		return
+	}
+	for headerKey := range dst {
+		if strings.EqualFold(headerKey, key) {
+			delete(dst, headerKey)
+		}
+	}
+	for _, value := range values {
+		dst.Add(key, value)
+	}
 }
 
 var openAIAlphaSearchUnsupportedBodyFields = [...]string{

@@ -122,6 +122,18 @@ func seedOpenAIForwardImageIntentHint(c *gin.Context, channelMapped bool, imageI
 	service.SetOpenAIImageIntentHint(c, imageIntent)
 }
 
+func ensureOpenAIOAuthIdentityCaptureFallback(c *gin.Context, fallbackSeeds ...string) {
+	capture, captured := service.OpenAIOAuthIdentityCaptureFromContext(c)
+	if captured && strings.TrimSpace(capture.Logical.SessionKey) != "" {
+		return
+	}
+	for _, candidate := range fallbackSeeds {
+		if service.FillOpenAIOAuthIdentityCaptureFallback(c, candidate) {
+			return
+		}
+	}
+}
+
 func newOpenAIModelMappedBodyCache(body []byte, replace openAIModelBodyReplaceFunc) func(bool, string) []byte {
 	replacedBodies := make(map[string][]byte)
 	return func(mapped bool, mappedModel string) []byte {
@@ -416,7 +428,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// Generate session hash (header first; fallback to prompt_cache_key)
-	sessionHash := h.gatewayService.GenerateSessionHash(c, sessionHashBody)
+	sessionHash := h.gatewayService.GenerateSessionHashForOpenAIOAuthIdentity(c, sessionHashBody, "")
+	ensureOpenAIOAuthIdentityCaptureFallback(c, sessionHash)
 	if h.rejectIfCyberSessionBlocked(c, apiKey, sessionHashBody, reqModel, cyberBlockFormatResponses) {
 		return
 	}
@@ -775,17 +788,17 @@ func isOpenAIRemoteCompactionV2Request(c *gin.Context, body []byte) bool {
 func (h *OpenAIGatewayHandler) normalizeOpenAIResponsesCompactRequest(c *gin.Context, reqLog *zap.Logger, body []byte) ([]byte, bool) {
 	isCompactRequest := service.IsOpenAIResponsesCompactPathForTest(c)
 	if !isCompactRequest && isBareOpenAIResponsesPath(c) && service.HasCompactionTriggerInInput(body) {
-		if isOpenAIRemoteCompactionV2Request(c, body) {
-			return body, true
+		if !isOpenAIRemoteCompactionV2Request(c, body) {
+			c.Request.URL.Path = strings.TrimRight(c.Request.URL.Path, "/") + "/compact"
+			isCompactRequest = true
+			clientStream := gjson.GetBytes(body, "stream").Bool()
+			if clientStream {
+				service.MarkOpenAICompactClientStream(c)
+			}
+			reqLog.Info("codex.remote_compact.detected_body_signal", zap.Bool("client_stream", clientStream))
 		}
-		c.Request.URL.Path = strings.TrimRight(c.Request.URL.Path, "/") + "/compact"
-		isCompactRequest = true
-		clientStream := gjson.GetBytes(body, "stream").Bool()
-		if clientStream {
-			service.MarkOpenAICompactClientStream(c)
-		}
-		reqLog.Info("codex.remote_compact.detected_body_signal", zap.Bool("client_stream", clientStream))
 	}
+	captureOpenAIResponsesIdentityInput(c, body, isCompactRequest)
 	if !isCompactRequest {
 		return body, true
 	}
@@ -801,6 +814,35 @@ func (h *OpenAIGatewayHandler) normalizeOpenAIResponsesCompactRequest(c *gin.Con
 		body = normalizedCompactBody
 	}
 	return body, true
+}
+
+func captureOpenAIResponsesIdentityInput(c *gin.Context, body []byte, compact bool) {
+	if compact {
+		service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentityWithEndpointAlias(
+			c, body, stableOpenAICompactLegacySeed(c, body),
+		))
+		return
+	}
+	// prompt_cache_key is parsed from the untouched ingress body by the unified
+	// capture facade. Passing it again as a caller seed would give it the wrong
+	// source/priority and hide prompt-cache fallback metrics.
+	service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentity(c, body, ""))
+}
+
+// stableOpenAICompactLegacySeed reproduces the pre-V2 compact seed priority
+// without invoking resolveOpenAICompactSessionID, whose final fallback creates
+// a request-local random UUID. Only stable client-owned values may become a
+// persistent endpoint alias.
+func stableOpenAICompactLegacySeed(c *gin.Context, body []byte) string {
+	if c != nil {
+		if sessionID := strings.TrimSpace(c.GetHeader("session_id")); sessionID != "" {
+			return sessionID
+		}
+		if conversationID := strings.TrimSpace(c.GetHeader("conversation_id")); conversationID != "" {
+			return conversationID
+		}
+	}
+	return strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())
 }
 
 func (h *OpenAIGatewayHandler) logOpenAIRemoteCompactOutcome(c *gin.Context, startedAt time.Time) {
@@ -939,6 +981,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
+	service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentity(c, body, ""))
 
 	modelResult := gjson.GetBytes(body, "model")
 	if !modelResult.Exists() || modelResult.Type != gjson.String || modelResult.String() == "" {
@@ -999,9 +1042,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
-	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
+	sessionHash := h.gatewayService.GenerateSessionHashForOpenAIOAuthIdentity(c, body, "")
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
 	sessionHash, promptCacheKey = resolveOpenAIMessagesMetadataSession(sessionHash, promptCacheKey, reqModel, body)
+	ensureOpenAIOAuthIdentityCaptureFallback(c, promptCacheKey, sessionHash)
 	if h.rejectIfCyberSessionBlocked(c, apiKey, body, reqModel, cyberBlockFormatAnthropic) {
 		return
 	}
@@ -1698,6 +1742,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "model is required in first response.create payload")
 		return
 	}
+	// Capture client-owned Codex identity signals before account selection or
+	// compatibility rewrites. Resolution remains account-bound and happens only
+	// after the scheduler has selected the upstream OAuth account.
+	service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentity(c, firstMessage, "openai_ws_connection:"+uuid.NewString()))
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	ctx = c.Request.Context()
 	if apiKey.Group != nil && apiKey.Group.Platform == service.PlatformComposite {
@@ -1810,7 +1858,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 
-	sessionHash := h.gatewayService.GenerateSessionHashWithFallback(
+	sessionHash := h.gatewayService.GenerateSessionHashForOpenAIOAuthIdentity(
 		c,
 		firstMessage,
 		openAIWSIngressFallbackSessionSeed(subject.UserID, apiKey.ID, apiKey.GroupID),

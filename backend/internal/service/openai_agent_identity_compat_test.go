@@ -131,10 +131,13 @@ func TestOpenAIAgentIdentityPassthroughKeepsSessionAndPromptCacheHeaders(t *test
 	require.NoError(t, err)
 	require.Equal(t, "AgentAssertion", strings.SplitN(req.Header.Get("Authorization"), " ", 2)[0])
 	require.Equal(t, "account-agent-passthrough", req.Header.Get("chatgpt-account-id"))
-	require.NotEqual(t, "client-session", req.Header.Get("session_id"))
-	require.NotEqual(t, "client-conversation", req.Header.Get("conversation_id"))
-	require.Equal(t, isolateOpenAISessionID(0, "client-session"), req.Header.Get("session_id"))
-	require.Equal(t, isolateOpenAISessionID(0, "client-conversation"), req.Header.Get("conversation_id"))
+	agentIdentity := OpenAIOutboundSessionIdentity{
+		SessionID: req.Header.Get("session-id"),
+		ThreadID:  req.Header.Get("thread-id"),
+	}
+	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(agentIdentity))
+	require.Empty(t, req.Header.Get("session_id"))
+	require.Empty(t, req.Header.Get("conversation_id"))
 	requestBody, err := io.ReadAll(req.Body)
 	require.NoError(t, err)
 	require.Contains(t, string(requestBody), `"prompt_cache_key":"cache-agent"`)
@@ -143,11 +146,11 @@ func TestOpenAIAgentIdentityPassthroughKeepsSessionAndPromptCacheHeaders(t *test
 	// behavior. Compare the same request with the existing OAuth path instead
 	// of pinning this test to an implementation-specific hash.
 	oauthAccount := &Account{
-		ID:       26,
+		ID:       account.ID,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Credentials: map[string]any{
-			"chatgpt_account_id": "account-oauth-passthrough",
+			"chatgpt_account_id": "account-agent-passthrough",
 		},
 	}
 	oauthRecorder := httptest.NewRecorder()
@@ -157,8 +160,12 @@ func TestOpenAIAgentIdentityPassthroughKeepsSessionAndPromptCacheHeaders(t *test
 	oauthContext.Request.Header.Set("conversation_id", "client-conversation")
 	oauthReq, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), oauthContext, oauthAccount, body, "oauth-token")
 	require.NoError(t, err)
-	require.Equal(t, oauthReq.Header.Get("session_id"), req.Header.Get("session_id"))
-	require.Equal(t, oauthReq.Header.Get("conversation_id"), req.Header.Get("conversation_id"))
+	oauthIdentity := OpenAIOutboundSessionIdentity{
+		SessionID: oauthReq.Header.Get("session-id"),
+		ThreadID:  oauthReq.Header.Get("thread-id"),
+	}
+	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(oauthIdentity))
+	require.Equal(t, agentIdentity, oauthIdentity)
 }
 
 func TestOpenAIAgentIdentityErrorRedactionDoesNotLeakCredentialValues(t *testing.T) {
@@ -365,6 +372,8 @@ func TestOpenAIAgentIdentityTaskInvalidRetriesExactlyOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 3, registerCalls)
 	require.Len(t, upstream.requests, 6)
+	require.Equal(t, upstream.requests[4].Header.Get("session-id"), upstream.requests[5].Header.Get("session-id"))
+	require.Equal(t, upstream.requests[4].Header.Get("thread-id"), upstream.requests[5].Header.Get("thread-id"))
 }
 
 func TestOpenAIAgentIdentityCompatRoutesRecoverInvalidTaskOnce(t *testing.T) {
@@ -427,16 +436,28 @@ func TestOpenAIAgentIdentityCompatRoutesRecoverInvalidTaskOnce(t *testing.T) {
 				{StatusCode: http.StatusUnauthorized, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"invalid_task_id"}}`))},
 				{StatusCode: http.StatusUnauthorized, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"invalid_task_id"}}`))},
 			}}
-			svc := &OpenAIGatewayService{cfg: &config.Config{}, accountRepo: repo, httpUpstream: upstream}
+			identityCache := &outboundIdentityGatewayCacheStub{}
+			svc := &OpenAIGatewayService{
+				cfg: &config.Config{JWT: config.JWTConfig{
+					Secret: "agent-identity-compat-retry-plan-secret",
+				}},
+				accountRepo:  repo,
+				httpUpstream: upstream,
+				cache:        identityCache,
+			}
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, tt.path, bytes.NewReader(tt.body))
+			c.Request.Header.Set("session-id", "agent-identity-compat-retry-session")
 
 			_, err := tt.call(svc, context.Background(), c, account, tt.body)
 			require.Error(t, err)
 			require.Equal(t, 1, registerCalls)
 			require.Len(t, upstream.requests, 2)
 			require.Equal(t, "task-compat-new", account.GetCredential("task_id"))
+			require.Equal(t, 1, identityPathCacheCalls(identityCache), "same-account recovery must reuse the immutable identity plan")
+			require.Equal(t, upstream.requests[0].Header.Get("session-id"), upstream.requests[1].Header.Get("session-id"))
+			require.Equal(t, upstream.requests[0].Header.Get("thread-id"), upstream.requests[1].Header.Get("thread-id"))
 		})
 	}
 }

@@ -221,7 +221,12 @@ func TestOpenAIGatewayService_OAuthMessagesBridgeDoesNotInjectDefaultInstruction
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "", gjson.GetBytes(upstream.lastBody, "instructions").String())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").Exists())
-	require.NotEmpty(t, upstream.lastReq.Header.Get("Session_Id"))
+	identity := OpenAIOutboundSessionIdentity{
+		SessionID: upstream.lastReq.Header.Get("session-id"),
+		ThreadID:  upstream.lastReq.Header.Get("thread-id"),
+	}
+	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(identity))
+	require.Empty(t, upstream.lastReq.Header.Get("Session_Id"))
 	require.Empty(t, upstream.lastReq.Header.Get("Conversation_Id"))
 	require.Empty(t, upstream.lastReq.Header.Get("OpenAI-Beta"))
 	require.Empty(t, upstream.lastReq.Header.Get("originator"))
@@ -720,7 +725,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_CompactUsesJSONAndKeepsNonStreami
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	originalBody := []byte(`{"model":"gpt-5.1-codex","stream":true,"store":true,"instructions":"local-test-instructions","input":[{"type":"text","text":"compact me"}]}`)
+	originalBody := []byte(`{"model":"gpt-5.1-codex","stream":true,"store":true,"prompt_cache_key":"compact-session","instructions":"local-test-instructions","input":[{"type":"text","text":"compact me"}]}`)
 
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
@@ -759,7 +764,12 @@ func TestOpenAIGatewayService_OAuthPassthrough_CompactUsesJSONAndKeepsNonStreami
 	require.Equal(t, "local-test-instructions", strings.TrimSpace(gjson.GetBytes(upstream.lastBody, "instructions").String()))
 	require.Equal(t, "application/json", upstream.lastReq.Header.Get("Accept"))
 	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("Version"))
-	require.NotEmpty(t, upstream.lastReq.Header.Get("Session_Id"))
+	identity := OpenAIOutboundSessionIdentity{
+		SessionID: upstream.lastReq.Header.Get("session-id"),
+		ThreadID:  upstream.lastReq.Header.Get("thread-id"),
+	}
+	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(identity))
+	require.Empty(t, upstream.lastReq.Header.Get("Session_Id"))
 	require.Equal(t, "chatgpt.com", upstream.lastReq.Host)
 	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
 	require.Contains(t, rec.Body.String(), `"id":"cmp_123"`)

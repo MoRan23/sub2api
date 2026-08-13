@@ -182,30 +182,40 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 		if logicalSessionKey == "" {
 			logicalSessionKey = strings.TrimSpace(sessionResolution.ConversationID)
 		}
+		capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
+		if !captured {
+			capture = CaptureOpenAIOAuthIdentityWithTurnMetadata(c, body, logicalSessionKey, turnMetadata)
+		}
+		installationPolicy := OpenAIOAuthInstallationPreserve
+		if rewriteInstallationID {
+			installationPolicy = OpenAIOAuthInstallationAccountPin
+		}
+		planOptions := OpenAIOAuthIdentityPlanOptions{
+			TurnIdentityEnabled: sessionResolution.OutboundIdentityModeEnabled,
+			ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
+			InstallationPolicy:  installationPolicy,
+		}
+		plan, planned := OpenAIOAuthIdentityPlanFromContext(c)
+		var identityErr error
+		if !planned || !s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, plan, planOptions) {
+			plan, identityErr = s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, planOptions)
+		}
+		if identityErr != nil {
+			return nil, sessionResolution, fmt.Errorf("resolve openai oauth identity plan: %w", identityErr)
+		}
+		sessionResolution.OutboundIdentityPlan = plan
+		SetOpenAIOAuthIdentityPlan(c, plan)
 		if sessionResolution.OutboundIdentityModeEnabled {
-			identity, logicalIdentity, identityEnabled, identityErr := s.resolveOpenAICodexTurnIdentityForTransportSnapshot(
-				ctx,
-				c,
-				account,
-				body,
-				logicalSessionKey,
-				turnMetadata,
-				sessionResolution.OutboundIdentityModeEnabled,
-			)
-			if identityErr != nil {
-				return nil, sessionResolution, fmt.Errorf("resolve openai outbound session identity: %w", identityErr)
+			sessionResolution.OutboundLogicalIdentity = capture.Logical
+			sessionResolution.OutboundIdentityLogicalKey = capture.Logical.SessionKey
+			if capture.Logical.Explicit {
+				sessionResolution.OutboundIdentityFrameKey = openAICodexLogicalTurnIdentityKey(capture.Logical)
 			}
-			sessionResolution.OutboundLogicalIdentity = logicalIdentity
-			sessionResolution.OutboundIdentityLogicalKey = logicalIdentity.SessionKey
-			if logicalIdentity.Explicit {
-				sessionResolution.OutboundIdentityFrameKey = openAICodexLogicalTurnIdentityKey(logicalIdentity)
-			}
-			if identityEnabled {
-				ApplyOpenAIOutboundSessionIdentityHeaders(headers, identity)
-				sessionResolution.OutboundIdentityEnabled = true
-				sessionResolution.OutboundIdentity = identity
-				sessionResolution.OutboundIdentityDigest = openAIWSOutboundIdentityDigest(identity)
-			}
+		}
+		if plan.TurnIdentityEnabled {
+			sessionResolution.OutboundIdentityEnabled = true
+			sessionResolution.OutboundIdentity = plan.TurnIdentity
+			sessionResolution.OutboundIdentityDigest = plan.SocketDigest
 		}
 		if !sessionResolution.OutboundIdentityModeEnabled {
 			apiKeyID := getAPIKeyIDFromContext(c)
@@ -253,13 +263,18 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 	}
 	headers.Set("OpenAI-Beta", betaValue)
 
-	customUA, err := s.codexIdentityOverrideUA(ctx, account)
-	if err != nil {
-		return nil, sessionResolution, fmt.Errorf("resolve OpenAI account User-Agent: %w", err)
+	// OAuth client identity is projected once from the connection-scoped plan.
+	// API-key sockets keep the legacy account-level User-Agent override.
+	if account == nil || account.Type != AccountTypeOAuth {
+		customUA, err := s.codexIdentityOverrideUA(ctx, account)
+		if err != nil {
+			return nil, sessionResolution, fmt.Errorf("resolve OpenAI account User-Agent: %w", err)
+		}
+		if strings.TrimSpace(customUA) != "" {
+			headers.Set("user-agent", customUA)
+		}
 	}
-	if strings.TrimSpace(customUA) != "" {
-		headers.Set("user-agent", customUA)
-	} else if c != nil {
+	if strings.TrimSpace(headers.Get("user-agent")) == "" && c != nil {
 		if ua := strings.TrimSpace(c.GetHeader("User-Agent")); ua != "" {
 			headers.Set("user-agent", ua)
 		}
@@ -267,28 +282,6 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 	if s != nil && s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 		headers.Set("user-agent", codexCLIUserAgent)
 	}
-	// 终态收口：WS 握手与 HTTP 出站共用同一套身份语义，账号级自定义 UA 同样作为
-	// 管理员显式配置传入（上面写进 headers 的值只在强制统一被关闭时才参与配对）。
-	if account != nil && account.Type == AccountTypeOAuth {
-		enforceCodexIdentityHeadersWithUA(headers, customUA)
-	}
-
-	// installation_id 收口只用于非 passthrough 的 OpenAI OAuth WS。透传
-	// adapter 明确传 false，因此不会调用 resolver 或改写握手头。
-	if rewriteInstallationID && shouldRewriteOpenAIInstallationID(account, false) {
-		clientInstallationID := extractClientInstallationID(c, nil)
-		if clientInstallationID == "" {
-			clientInstallationID = strings.TrimSpace(headers.Get(codexInstallationIDKey))
-		}
-		pin, pinErr := s.resolveInstallationIDForRequest(ctx, c, account, clientInstallationID)
-		if pinErr != nil {
-			return nil, sessionResolution, fmt.Errorf("resolve openai installation_id: %w", pinErr)
-		}
-		if pin.Enabled && pin.OutboundID != "" {
-			rewriteOpenAIInstallationIDHeaders(headers, pin.OutboundID)
-		}
-	}
-
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 覆盖所有 WS 模式（ctx_pool/dedicated/passthrough）的握手头。
 	account.ApplyHeaderOverrides(headers)
@@ -302,10 +295,21 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 		strings.TrimSpace(headers.Get(openAICodexRoutingHintHeader)) != "",
 		"soft_routing_hint",
 	)
+	if account != nil && account.Type == AccountTypeOAuth {
+		// The resolved plan is the final writer after account overrides. Apply is
+		// pure and cannot allocate a different identity during a reconnect.
+		if _, applyErr := ApplyOpenAIOAuthIdentityPlan(headers, nil, sessionResolution.OutboundIdentityPlan); applyErr != nil {
+			return nil, sessionResolution, fmt.Errorf("apply openai oauth identity plan to websocket headers: %w", applyErr)
+		}
+		plan := sessionResolution.OutboundIdentityPlan
+		plan.SocketDigest = openAIWSOutboundIdentityPlanDigest(headers, plan)
+		sessionResolution.OutboundIdentityPlan = plan
+		if sessionResolution.OutboundIdentityEnabled {
+			sessionResolution.OutboundIdentityDigest = plan.SocketDigest
+		}
+		SetOpenAIOAuthIdentityPlan(c, plan)
+	}
 	if sessionResolution.OutboundIdentityEnabled {
-		// Identity is server-owned and must be the final writer after account
-		// overrides, including custom test/admin overrides on OAuth accounts.
-		ApplyOpenAIOutboundSessionIdentityHeaders(headers, sessionResolution.OutboundIdentity)
 		setFingerprintObservationOutboundIdentity(c, sessionResolution.OutboundIdentity)
 	}
 	return headers, sessionResolution, nil

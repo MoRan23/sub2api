@@ -243,7 +243,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 	require.Len(t, captureConn.writes, 2, "应向同一上游连接发送两轮 response.create")
 }
 
-func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePromptCacheEstablishesThenKeepsPinnedTuple(t *testing.T) {
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePromptCacheInheritsUntilExplicitSessionChange(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	enableOpenAIIdentityPathFingerprintObservation(t)
 
@@ -265,12 +265,16 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePrompt
 
 	firstConn := &openAIWSCaptureConn{events: [][]byte{
 		[]byte(`{"type":"response.completed","response":{"id":"resp_identity_p_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
-	}}
-	secondConn := &openAIWSCaptureConn{events: [][]byte{
 		[]byte(`{"type":"response.completed","response":{"id":"resp_identity_p_2","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
 		[]byte(`{"type":"response.completed","response":{"id":"resp_identity_q_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
 	}}
-	dialer := &openAIWSQueueDialer{conns: []openAIWSClientConn{firstConn, secondConn}}
+	secondConn := &openAIWSCaptureConn{events: [][]byte{
+		[]byte(`{"type":"response.completed","response":{"id":"resp_identity_explicit_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+	}}
+	thirdConn := &openAIWSCaptureConn{events: [][]byte{
+		[]byte(`{"type":"response.completed","response":{"id":"resp_identity_connection_2","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+	}}
+	dialer := &openAIWSQueueDialer{conns: []openAIWSClientConn{firstConn, secondConn, thirdConn}}
 	pool := newOpenAIWSConnPool(cfg)
 	pool.setClientDialerForTest(dialer)
 	settingRepo := &openAIUUIDv7RuntimeRepo{values: map[string]string{
@@ -351,13 +355,16 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePrompt
 
 	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false}`, "resp_identity_p_1")
 	require.Equal(t, 1, dialer.DialCount())
-	require.Len(t, SnapshotFingerprintObservations(0), 1, "the identity-less first physical handshake must be observed once")
+	require.Len(t, SnapshotFingerprintObservations(0), 1, "the affinity-backed first physical handshake must be observed once")
 	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"P"}`, "resp_identity_p_2")
-	require.Equal(t, 2, dialer.DialCount(), "the first late fallback must acquire a UUID-compatible socket")
-	require.Len(t, SnapshotFingerprintObservations(0), 2, "establishing a late identity must observe the new physical handshake")
+	require.Equal(t, 1, dialer.DialCount(), "a late prompt cache fallback must inherit the connection snapshot")
+	require.Len(t, SnapshotFingerprintObservations(0), 1, "a late prompt cache fallback must not add a physical handshake")
 	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"Q"}`, "resp_identity_q_1")
-	require.Equal(t, 2, dialer.DialCount(), "prompt_cache_key is cache policy after the identity is pinned")
-	require.Len(t, SnapshotFingerprintObservations(0), 2, "prompt cache changes on the pinned socket must not add an observation")
+	require.Equal(t, 1, dialer.DialCount(), "prompt_cache_key changes never switch the connection snapshot")
+	require.Len(t, SnapshotFingerprintObservations(0), 1, "prompt cache changes must not add an observation")
+	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false,"client_metadata":{"session_id":"explicit-root-2","thread_id":"explicit-root-2"}}`, "resp_identity_explicit_1")
+	require.Equal(t, 2, dialer.DialCount(), "an explicit root session change must acquire a new compatible socket")
+	require.Len(t, SnapshotFingerprintObservations(0), 2, "the explicit session transition must observe its new physical handshake")
 
 	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
 	select {
@@ -367,25 +374,61 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePrompt
 		t.Fatal("waiting for UUIDv7 ingress websocket shutdown timed out")
 	}
 
-	require.Len(t, firstConn.writes, 1)
-	require.Len(t, secondConn.writes, 2)
-	require.Empty(t, gjson.Get(requestToJSONString(firstConn.writes[0]), "client_metadata.session_id").String())
-	firstSessionID := gjson.Get(requestToJSONString(secondConn.writes[0]), "client_metadata.session_id").String()
-	cacheChangedSessionID := gjson.Get(requestToJSONString(secondConn.writes[1]), "client_metadata.session_id").String()
-	firstThreadID := gjson.Get(requestToJSONString(secondConn.writes[0]), "client_metadata.thread_id").String()
-	cacheChangedThreadID := gjson.Get(requestToJSONString(secondConn.writes[1]), "client_metadata.thread_id").String()
+	require.Len(t, firstConn.writes, 3)
+	firstSessionID := gjson.Get(requestToJSONString(firstConn.writes[0]), "client_metadata.session_id").String()
+	firstThreadID := gjson.Get(requestToJSONString(firstConn.writes[0]), "client_metadata.thread_id").String()
 	require.NotEmpty(t, firstSessionID)
 	require.NotEmpty(t, firstThreadID)
-	require.Equal(t, firstSessionID, cacheChangedSessionID)
-	require.Equal(t, firstThreadID, cacheChangedThreadID)
+	require.Equal(t, firstSessionID, gjson.Get(requestToJSONString(firstConn.writes[1]), "client_metadata.session_id").String())
+	require.Equal(t, firstThreadID, gjson.Get(requestToJSONString(firstConn.writes[1]), "client_metadata.thread_id").String())
+	require.Equal(t, firstSessionID, gjson.Get(requestToJSONString(firstConn.writes[2]), "client_metadata.session_id").String())
+	require.Equal(t, firstThreadID, gjson.Get(requestToJSONString(firstConn.writes[2]), "client_metadata.thread_id").String())
+	require.Len(t, secondConn.writes, 1)
+	transitionSessionID := gjson.Get(requestToJSONString(secondConn.writes[0]), "client_metadata.session_id").String()
+	transitionThreadID := gjson.Get(requestToJSONString(secondConn.writes[0]), "client_metadata.thread_id").String()
+	require.NotEmpty(t, transitionSessionID)
+	require.NotEmpty(t, transitionThreadID)
 
 	observations := SnapshotFingerprintObservations(0)
 	require.Len(t, observations, 2)
-	require.Equal(t, firstSessionID, observations[0].SessionID)
-	require.Equal(t, firstThreadID, observations[0].ThreadID)
-	require.Empty(t, observations[1].SessionID)
-	require.Empty(t, observations[1].ThreadID)
+	// Observation snapshots are newest-first: the transition handshake precedes
+	// the initial affinity-backed handshake in this result slice.
+	require.Equal(t, transitionSessionID, observations[0].SessionID)
+	require.Equal(t, transitionThreadID, observations[0].ThreadID)
+	require.Equal(t, firstSessionID, observations[1].SessionID)
+	require.Equal(t, firstThreadID, observations[1].ThreadID)
 	require.Equal(t, http.MethodGet+" /v1/responses", observations[0].InboundEndpoint)
+
+	secondClient := func() *coderws.Conn {
+		dialCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		conn, _, dialErr := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
+		require.NoError(t, dialErr)
+		return conn
+	}()
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+	require.NoError(t, secondClient.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false}`)))
+	cancelWrite()
+	readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+	_, event, readErr := secondClient.Read(readCtx)
+	cancelRead()
+	require.NoError(t, readErr)
+	require.Equal(t, "resp_identity_connection_2", gjson.GetBytes(event, "response.id").String())
+	require.NoError(t, secondClient.Close(coderws.StatusNormalClosure, "done"))
+	select {
+	case serverErr := <-serverErrCh:
+		require.NoError(t, serverErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("waiting for second UUIDv7 ingress websocket shutdown timed out")
+	}
+	require.Equal(t, 3, dialer.DialCount(), "a new client connection must use a distinct identity digest/socket")
+	require.Len(t, thirdConn.writes, 1)
+	connection2SessionID := gjson.Get(requestToJSONString(thirdConn.writes[0]), "client_metadata.session_id").String()
+	connection2ThreadID := gjson.Get(requestToJSONString(thirdConn.writes[0]), "client_metadata.thread_id").String()
+	require.NotEmpty(t, connection2SessionID)
+	require.NotEmpty(t, connection2ThreadID)
+	require.NotEqual(t, firstSessionID, connection2SessionID)
+	require.NotEqual(t, firstThreadID, connection2ThreadID)
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_LeaseLossSendsRetryClose(t *testing.T) {
@@ -1371,16 +1414,25 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 		t.Fatal("等待 passthrough websocket 结束超时")
 	}
 
-	require.Equal(t, isolateOpenAISessionID(0, "pcache_passthrough"), captureDialer.lastHeaders.Get("session_id"))
+	handshakeIdentity := OpenAIOutboundSessionIdentity{
+		SessionID: captureDialer.lastHeaders.Get("session-id"),
+		ThreadID:  captureDialer.lastHeaders.Get("thread-id"),
+	}
+	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(handshakeIdentity))
+	require.Empty(t, captureDialer.lastHeaders.Get("session_id"))
 	require.Equal(t, "turn-state-1", captureDialer.lastHeaders.Get(openAIWSTurnStateHeader))
 	require.Equal(t, "passthrough-header-installation", captureDialer.lastHeaders.Get(codexInstallationIDKey))
-	require.Equal(t, `{"installation_id":"passthrough-header-nested","session_id":"header-session"}`, captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader))
+	handshakeTurnMetadata := captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader)
+	require.Equal(t, "passthrough-header-nested", gjson.Get(handshakeTurnMetadata, "installation_id").String())
+	require.Equal(t, handshakeIdentity.SessionID, gjson.Get(handshakeTurnMetadata, "session_id").String())
+	require.Equal(t, handshakeIdentity.ThreadID, gjson.Get(handshakeTurnMetadata, "thread_id").String())
 	require.Len(t, upstreamConn.writes, 1)
 	forwarded := requestToJSONString(upstreamConn.writes[0])
 	require.Equal(t, "passthrough-frame-installation", gjson.Get(forwarded, "client_metadata.x-codex-installation-id").String())
 	forwardedTurnMetadata := gjson.Get(forwarded, "client_metadata.x-codex-turn-metadata").String()
 	require.Equal(t, "passthrough-frame-nested", gjson.Get(forwardedTurnMetadata, "installation_id").String())
-	require.Equal(t, "frame-session", gjson.Get(forwardedTurnMetadata, "session_id").String())
+	require.Equal(t, handshakeIdentity.SessionID, gjson.Get(forwardedTurnMetadata, "session_id").String())
+	require.Equal(t, handshakeIdentity.ThreadID, gjson.Get(forwardedTurnMetadata, "thread_id").String())
 	require.False(t, gjson.Get(forwarded, `tools.#(type=="namespace")`).Exists())
 	require.Equal(t, "collaboration", gjson.Get(forwarded, `input.#(type=="additional_tools").tools.0.name`).String())
 	require.Equal(t, "namespace", gjson.Get(forwarded, "tool_choice.type").String())

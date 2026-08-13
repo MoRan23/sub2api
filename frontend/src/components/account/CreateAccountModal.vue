@@ -2948,16 +2948,38 @@
         </div>
       </div>
 
-      <!-- OpenAI OAuth installation_id 固定开关（仅 GPT OAuth 账号） -->
-      <div
+      <!-- OpenAI OAuth account-level Codex fingerprint normalization -->
+      <section
         v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="openai-codex-fingerprint-section"
       >
+        <div class="mb-4">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
+            {{ t('admin.accounts.openai.codexFingerprintNormalization') }}
+          </h3>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.openai.codexFingerprintCreateDesc') }}
+          </p>
+          <p
+            v-if="!codexFingerprintNormalizationEnabled"
+            class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+            data-testid="openai-codex-fingerprint-paused"
+          >
+            {{ t('admin.accounts.openai.codexFingerprintPaused') }}
+          </p>
+        </div>
         <div class="flex items-center justify-between gap-4">
           <div>
             <label class="input-label mb-0">{{ t('admin.accounts.openai.installationPin') }}</label>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.openai.installationPinDesc') }}
+            </p>
+            <p
+              v-if="!codexFingerprintNormalizationEnabled || !codexInstallationIDNormalizationEnabled"
+              class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+            >
+              {{ t('admin.accounts.openai.installationNormalizationPaused') }}
             </p>
           </div>
           <button
@@ -2979,7 +3001,20 @@
             />
           </button>
         </div>
-      </div>
+        <div class="mt-4 border-t border-gray-100 pt-4 dark:border-dark-700">
+          <p class="input-label mb-0">{{ t('admin.accounts.openai.environmentFingerprint') }}</p>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.openai.environmentFingerprintCreateDesc') }}
+          </p>
+          <p
+            v-if="!codexFingerprintNormalizationEnabled || !codexClientIdentityNormalizationEnabled"
+            class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+            data-testid="openai-client-identity-normalization-paused"
+          >
+            {{ t('admin.accounts.openai.clientIdentityNormalizationPaused') }}
+          </p>
+        </div>
+      </section>
 
       <div
         v-if="form.platform === 'openai' && accountCategory === 'oauth-based'"
@@ -3864,6 +3899,9 @@ const openAILongContextBillingEnabled = ref(false)
 const openAILongContextBillingTouched = ref(false)
 // installation_id 固定（仅 OpenAI OAuth），服务端在创建时生成 UUID。
 const openAIInstallationPinEnabled = ref(true)
+const codexFingerprintNormalizationEnabled = ref(true)
+const codexInstallationIDNormalizationEnabled = ref(true)
+const codexClientIdentityNormalizationEnabled = ref(true)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
@@ -3892,6 +3930,19 @@ const {
 adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
   webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
 }).catch(() => { webSearchGlobalEnabled.value = false })
+
+adminAPI.settings.getSettings().then(settings => {
+  codexFingerprintNormalizationEnabled.value =
+    settings?.enable_openai_codex_fingerprint_normalization !== false
+  codexInstallationIDNormalizationEnabled.value =
+    settings?.enable_openai_codex_installation_id_normalization !== false
+  codexClientIdentityNormalizationEnabled.value =
+    settings?.enable_openai_codex_client_identity_normalization !== false
+}).catch(() => {
+  codexFingerprintNormalizationEnabled.value = true
+  codexInstallationIDNormalizationEnabled.value = true
+  codexClientIdentityNormalizationEnabled.value = true
+})
 
 loadQuotaNotifyGlobal()
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling

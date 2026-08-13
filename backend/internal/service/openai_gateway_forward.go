@@ -19,6 +19,12 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	if account != nil && account.IsOpenAIOAuth() {
+		if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
+			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, body,
+				strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())))
+		}
+	}
 	beginUpstreamResponseModelObservation(c)
 	clearGrokResponsesClientToolMapping(c)
 	clearOpenAIResponsesNamespaceNames(c)
@@ -408,24 +414,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			codexResult = applyCodexOAuthTransform(decoded, isCodexCLI, isCompactRequest)
 		}
 		if codexResult.Modified {
-			markDecodedModified()
-		}
-		// installation_id 收口仅作用于 OpenAI OAuth 非透传请求。HTTP compact
-		// 使用更窄的 schema，必须移除顶层 client_metadata，并仅通过请求头携带 ID。
-		pin, pinErr := applyOpenAIInstallationIDForOutbound(
-			ctx,
-			c,
-			s.accountRepo,
-			account,
-			decoded,
-			nil,
-			isCompactRequest,
-			passthroughEnabled,
-		)
-		if pinErr != nil {
-			return nil, fmt.Errorf("resolve openai installation_id: %w", pinErr)
-		}
-		if pin.BodyModified {
 			markDecodedModified()
 		}
 		if codexResult.NormalizedModel != "" {
@@ -1060,6 +1048,33 @@ func consumeOpenAIOutboundSessionIdentityPostBuildContext(c *gin.Context) bool {
 	return true
 }
 
+// setOpenAIOAuthIdentityCaptureCallerSeed fills the deferred compatibility
+// fallback without parsing the transformed body a second time. Explicit
+// identity captured from the original ingress body always keeps priority.
+func setOpenAIOAuthIdentityCaptureCallerSeed(c *gin.Context, callerSeed string) {
+	FillOpenAIOAuthIdentityCaptureFallback(c, callerSeed)
+}
+
+// openAIUpstreamRequestBodySnapshot returns the finalized body without
+// consuming req.Body. Compatibility callers use it after the shared builder's
+// single identity projection so observations and request-size accounting see
+// the bytes that will actually be sent.
+func openAIUpstreamRequestBodySnapshot(req *http.Request, fallback []byte) []byte {
+	if req == nil || req.GetBody == nil {
+		return fallback
+	}
+	reader, err := req.GetBody()
+	if err != nil {
+		return fallback
+	}
+	defer func() { _ = reader.Close() }()
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return fallback
+	}
+	return body
+}
+
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
 	clearFingerprintObservationOutboundIdentity(c)
 	postBuildIdentity := consumeOpenAIOutboundSessionIdentityPostBuildContext(c)
@@ -1093,7 +1108,6 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
 	var outboundIdentity OpenAIOutboundSessionIdentity
 	outboundIdentityEnabled := false
-	outboundIdentityCompact := false
 
 	// Build authentication for this request. Agent Identity signs a fresh
 	// assertion here; OAuth/PAT/API-key keep their existing Bearer behavior.
@@ -1125,8 +1139,31 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			}
 		}
 	}
-	if account.Type == AccountTypeOAuth {
+	if account.Type == AccountTypeOAuth && !postBuildIdentity {
 		identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
+		projectionMode := OpenAIOAuthIdentityProjectionRegular
+		if isOpenAIResponsesCompactPath(c) {
+			projectionMode = OpenAIOAuthIdentityProjectionCompact
+		}
+		capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
+		if !captured {
+			capture = CaptureOpenAIOAuthIdentity(c, body, promptCacheKey)
+			SetOpenAIOAuthIdentityCapture(c, capture)
+		}
+		planOptions := OpenAIOAuthIdentityPlanOptions{
+			TurnIdentityEnabled: identityModeEnabled,
+			ProjectionMode:      projectionMode,
+			InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
+		}
+		plan, planned := OpenAIOAuthIdentityPlanFromContext(c)
+		if !planned || !s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, plan, planOptions) {
+			var planErr error
+			plan, planErr = s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, planOptions)
+			if planErr != nil {
+				return nil, fmt.Errorf("resolve openai OAuth identity plan: %w", planErr)
+			}
+			SetOpenAIOAuthIdentityPlan(c, plan)
+		}
 		compatMessagesBridge := isOpenAICompatMessagesBridgeContext(c) || isOpenAICompatMessagesBridgeBody(body)
 		// 清除客户端透传的 session 头，后续用隔离后的值重新设置，防止跨用户会话碰撞。
 		clientConversationID := strings.TrimSpace(req.Header.Get("conversation_id"))
@@ -1148,57 +1185,15 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			if req.Header.Get("version") == "" {
 				req.Header.Set("version", codexCLIVersion)
 			}
-			compactSession = resolveOpenAICompactSessionID(c)
+			if !identityModeEnabled {
+				compactSession = resolveOpenAICompactSessionID(c)
+			}
 		} else {
 			req.Header.Set("accept", "text/event-stream")
 		}
-		logicalSessionKey := compactSession
-		if promptCacheKey != "" {
-			logicalSessionKey = promptCacheKey
-		}
-		identity := OpenAIOutboundSessionIdentity{}
-		identityEnabled := false
-		// Keep the resolver inside the same OAuth/compact-or-prompt branches that
-		// historically invoked isolateOpenAISessionID. The finalized request body
-		// is supplied so client metadata and turn metadata participate in key
-		// selection.
-		if (isOpenAIResponsesCompactPath(c) || promptCacheKey != "") && !postBuildIdentity {
-			var identityErr error
-			identity, _, identityEnabled, identityErr = s.resolveOpenAIOutboundSessionIdentityForTransport(
-				ctx,
-				c,
-				account,
-				body,
-				logicalSessionKey,
-				// The historical writer chose compactSession first and then
-				// overwrote it with prompt_cache_key when present. Keep that
-				// final seed authoritative even if the copied request body still
-				// contains stale identity metadata. This also preserves the old
-				// prompt-cache override on ordinary Responses requests.
-				strings.TrimSpace(logicalSessionKey) != "",
-			)
-			if identityErr != nil {
-				return nil, fmt.Errorf("resolve openai outbound session identity: %w", identityErr)
-			}
-		}
-		if identityEnabled {
-			outboundIdentity = identity
+		if plan.TurnIdentityEnabled {
+			outboundIdentity = plan.TurnIdentity
 			outboundIdentityEnabled = true
-			outboundIdentityCompact = isOpenAIResponsesCompactPath(c)
-			if isOpenAIResponsesCompactPath(c) {
-				applyOpenAIOutboundSessionIdentityCompactHeaders(req.Header, identity)
-			} else {
-				ApplyOpenAIOutboundSessionIdentityHeaders(req.Header, identity)
-			}
-			if !isOpenAIResponsesCompactPath(c) {
-				if mergedBody, mergeErr := MergeOpenAIOutboundSessionIdentityBody(body, identity); mergeErr == nil {
-					req.Body = io.NopCloser(bytes.NewReader(mergedBody))
-					req.ContentLength = int64(len(mergedBody))
-					req.GetBody = func() (io.ReadCloser, error) {
-						return io.NopCloser(bytes.NewReader(mergedBody)), nil
-					}
-				}
-			}
 		} else if !identityModeEnabled {
 			apiKeyID := getAPIKeyIDFromContext(c)
 			if isOpenAIResponsesCompactPath(c) {
@@ -1220,13 +1215,16 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		req.Header.Set("accept", "application/json")
 	}
 
-	// Apply custom User-Agent if configured
-	customUA, err := s.codexIdentityOverrideUA(ctx, account)
-	if err != nil {
-		return nil, fmt.Errorf("resolve OpenAI account User-Agent: %w", err)
-	}
-	if customUA != "" {
-		req.Header.Set("user-agent", customUA)
+	// OAuth client identity is resolved once into the immutable outbound plan.
+	// API-key accounts retain the legacy account-level User-Agent behavior.
+	if account.Type != AccountTypeOAuth {
+		customUA, err := s.codexIdentityOverrideUA(ctx, account)
+		if err != nil {
+			return nil, fmt.Errorf("resolve OpenAI account User-Agent: %w", err)
+		}
+		if customUA != "" {
+			req.Header.Set("user-agent", customUA)
+		}
 	}
 
 	// 若开启 ForceCodexCLI，则强制将上游 User-Agent 伪装为 Codex CLI。
@@ -1235,28 +1233,6 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		req.Header.Set("user-agent", codexCLIUserAgent)
 	}
 
-	// 终态收口：强制统一 OAuth 出站身份（User-Agent / originator / version 同源自洽）。
-	// 客户端自报身份不参与构造，浏览器型 UA 也因此不会再到达上游（原浏览器 UA 兜底已被吸收）。
-	if account.Type == AccountTypeOAuth {
-		enforceCodexIdentityHeadersWithUA(req.Header, customUA)
-	}
-
-	// installation_id 收口：body 与 header 共用 gin 上下文中的同一次解析，
-	// 重试时不会漂移。Passthrough 请求在 Forward 的早期分支已返回，这里的
-	// 显式标记同时保护未来新增 builder 调用方。
-	_, pinErr := applyOpenAIInstallationIDForOutbound(
-		ctx,
-		c,
-		s.accountRepo,
-		account,
-		nil,
-		req.Header,
-		isOpenAIResponsesCompactPath(c),
-		account.IsOpenAIPassthroughEnabled(),
-	)
-	if pinErr != nil {
-		return nil, fmt.Errorf("resolve openai installation_id: %w", pinErr)
-	}
 	// Ensure required headers exist
 	if req.Header.Get("content-type") == "" {
 		req.Header.Set("content-type", "application/json")
@@ -1264,12 +1240,22 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
 	account.ApplyHeaderOverrides(req.Header)
-	if outboundIdentityEnabled {
-		if outboundIdentityCompact {
-			applyOpenAIOutboundSessionIdentityCompactHeaders(req.Header, outboundIdentity)
-		} else {
-			ApplyOpenAIOutboundSessionIdentityHeaders(req.Header, outboundIdentity)
+	if account.Type == AccountTypeOAuth && !postBuildIdentity {
+		if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok {
+			projectedBody, applyErr := ApplyOpenAIOAuthIdentityPlan(req.Header, body, plan)
+			if applyErr != nil {
+				return nil, fmt.Errorf("apply openai OAuth identity plan: %w", applyErr)
+			}
+			if !bytes.Equal(projectedBody, body) {
+				req.Body = io.NopCloser(bytes.NewReader(projectedBody))
+				req.ContentLength = int64(len(projectedBody))
+				req.GetBody = func() (io.ReadCloser, error) {
+					return io.NopCloser(bytes.NewReader(projectedBody)), nil
+				}
+			}
 		}
+	}
+	if outboundIdentityEnabled {
 		setFingerprintObservationOutboundIdentity(c, outboundIdentity)
 	}
 	setOpenAICodexRoutingHintFromBody(req.Header, account, body)

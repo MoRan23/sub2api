@@ -575,8 +575,20 @@ func TestSettingService_InitializeDefaultSettingsPersistsConfiguredForwardedClie
 
 	require.NoError(t, svc.InitializeDefaultSettings(context.Background()))
 	require.JSONEq(t, `["X-Cdn-Ip","True-Client-Ip"]`, repo.values[SettingKeyForwardedClientIPHeaders])
-	require.Equal(t, "false", repo.values[SettingKeyEnableOpenAIUUIDv7SessionIdentity])
+	require.Equal(t, "true", repo.values[SettingKeyEnableOpenAIUUIDv7SessionIdentity])
 	require.Equal(t, "false", repo.values[SettingKeyInstallationObservationEnabled])
+}
+
+func TestParseSettingsOpenAIUUIDv7IdentityDefaultsOnAndPreservesExplicitFalse(t *testing.T) {
+	svc := NewSettingService(nil, &config.Config{})
+
+	require.True(t, svc.parseSettings(map[string]string{}).EnableOpenAIUUIDv7SessionIdentity)
+	require.False(t, svc.parseSettings(map[string]string{
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity: "false",
+	}).EnableOpenAIUUIDv7SessionIdentity)
+	require.True(t, svc.parseSettings(map[string]string{
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity: "malformed",
+	}).EnableOpenAIUUIDv7SessionIdentity)
 }
 
 func TestProvideSettingService_FingerprintObservationFailsClosedOnSettingsLoadError(t *testing.T) {

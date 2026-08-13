@@ -426,6 +426,8 @@ func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {
 	require.Equal(t, "Bearer test-access-token", dialer.headers.Get("Authorization"))
 	require.Equal(t, "acct_test", dialer.headers.Get("Chatgpt-Account-Id"))
 	require.Equal(t, `{"v":1,"s":0,"t":"v1.sideband"}`, dialer.headers.Get(liveAttestationHeader))
+	require.Empty(t, dialer.headers.Get("Session-Id"))
+	require.Empty(t, dialer.headers.Get("Thread-Id"))
 	upstream.reads <- liveTestFrame{err: coderws.CloseError{Code: coderws.StatusNormalClosure}}
 	require.ErrorIs(t, <-proxyResult, ErrLiveCallNotFound)
 }

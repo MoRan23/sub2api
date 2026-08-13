@@ -337,14 +337,21 @@ func rewriteCodexTurnMetadataInstallationID(raw, id string) (string, bool) {
 	if id == "" || strings.TrimSpace(raw) == "" {
 		return raw, false
 	}
-	var metadata map[string]any
+	var metadata map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &metadata); err != nil || metadata == nil {
 		return raw, false
 	}
-	if current, ok := metadata[codexTurnMetadataInstallationIDKey].(string); ok && current == id {
+	if encoded, ok := metadata[codexTurnMetadataInstallationIDKey]; ok {
+		var current string
+		if json.Unmarshal(encoded, &current) == nil && current == id {
+			return raw, false
+		}
+	}
+	encodedID, err := json.Marshal(id)
+	if err != nil {
 		return raw, false
 	}
-	metadata[codexTurnMetadataInstallationIDKey] = id
+	metadata[codexTurnMetadataInstallationIDKey] = encodedID
 	rewritten, err := json.Marshal(metadata)
 	if err != nil {
 		return raw, false
@@ -364,7 +371,8 @@ func rewriteOpenAIInstallationIDInBody(reqBody map[string]any, id string) bool {
 
 	var metadata map[string]any
 	changed := false
-	switch existing := reqBody["client_metadata"].(type) {
+	existingValue, present := reqBody["client_metadata"]
+	switch existing := existingValue.(type) {
 	case map[string]any:
 		metadata = existing
 	case map[string]string:
@@ -374,6 +382,9 @@ func rewriteOpenAIInstallationIDInBody(reqBody map[string]any, id string) bool {
 		}
 		changed = true
 	default:
+		if present {
+			return false
+		}
 		metadata = make(map[string]any, 1)
 		changed = true
 	}

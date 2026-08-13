@@ -461,10 +461,18 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, openAIPinnedInstallationIDKey)
 	delete(accountExtra, openAIInstallationRotateEnabledKey)
 	if input.Platform == PlatformOpenAI && input.Type == AccountTypeOAuth {
+		if err := ValidateOpenAIInstallationPinExtra(input.Platform, accountExtra); err != nil {
+			return nil, err
+		}
 		if accountExtra == nil {
 			accountExtra = make(map[string]any)
 		}
+		if _, provided := accountExtra[openAIInstallationPinEnabledKey]; !provided {
+			accountExtra[openAIInstallationPinEnabledKey] = true
+		}
 		accountExtra[openAIPinnedInstallationIDKey] = uuid.NewString()
+	} else {
+		delete(accountExtra, openAIInstallationPinEnabledKey)
 	}
 	account := &Account{
 		Name:        input.Name,

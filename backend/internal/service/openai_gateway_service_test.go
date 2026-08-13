@@ -3118,8 +3118,13 @@ func TestOpenAIBuildUpstreamRequestOAuthOfficialClientOriginatorCompatibility(t 
 
 			svc := &OpenAIGatewayService{}
 			account := &Account{
+				ID:          8801,
+				Platform:    PlatformOpenAI,
 				Type:        AccountTypeOAuth,
 				Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
+				Extra: map[string]any{
+					openAIPinnedInstallationIDKey: "8ddf352b-5052-4d24-89b5-d55dc097240f",
+				},
 			}
 
 			isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))

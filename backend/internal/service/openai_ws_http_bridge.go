@@ -167,6 +167,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	grokCacheIdentity string,
 	turn int,
 	writeClientMessage func([]byte) error,
+	identityPlans ...*OpenAIOAuthIdentityPlan,
 ) (*OpenAIForwardResult, error) {
 	if s == nil {
 		return nil, errors.New("service is nil")
@@ -181,6 +182,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		return nil, errors.New("client websocket writer is nil")
 	}
 	responseModelObserver := &upstreamResponseModelObserver{}
+	var identityPlan *OpenAIOAuthIdentityPlan
+	if len(identityPlans) > 0 {
+		identityPlan = identityPlans[0]
+	}
 
 	body, err := prepareOpenAIWSHTTPBridgeBody(payload)
 	if err != nil {
@@ -210,7 +215,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		upstreamReq, err = buildGrokResponsesRequest(upstreamCtx, c, account, body, token, grokCacheIdentity, s.cfg, s.settingService)
 	} else {
-		upstreamReq, err = s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, token)
+		upstreamReq, err = s.buildUpstreamRequestOpenAIPassthroughWithIdentityPlan(upstreamCtx, c, account, body, token, identityPlan)
 	}
 	releaseUpstreamCtx()
 	if err != nil {
@@ -219,6 +224,22 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if account.Platform != PlatformGrok && isOpenAIResponsesLiteWebSocketPayload(payload) {
 		upstreamReq.Header.Set(responsesLiteHeader, "true")
 	}
+	// The passthrough request builder clears request-local observation provenance
+	// before its final projection. Restore the exact connection plan and observe
+	// the finalized HTTP wire request once, immediately before the physical send.
+	if identityPlan != nil && identityPlan.TurnIdentityEnabled {
+		setFingerprintObservationOutboundIdentity(c, identityPlan.TurnIdentity)
+	}
+	observationBody := body
+	if upstreamReq.GetBody != nil {
+		if snapshot, snapshotErr := upstreamReq.GetBody(); snapshotErr == nil {
+			if finalizedBody, readErr := io.ReadAll(snapshot); readErr == nil {
+				observationBody = finalizedBody
+			}
+			_ = snapshot.Close()
+		}
+	}
+	s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, observationBody)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -502,6 +523,13 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, terminalErr, true)
 	}
 	return resultWithUsage(), terminalErr
+}
+
+func openAIWSHTTPBridgeInstallationPolicy(account *Account) OpenAIOAuthInstallationPolicy {
+	if account != nil && account.IsOpenAIPassthroughEnabled() {
+		return OpenAIOAuthInstallationPreserve
+	}
+	return OpenAIOAuthInstallationAccountPin
 }
 
 func resolveGrokWSCacheIdentity(c *gin.Context, account *Account, seedPayload, currentPayload []byte, originalModel string) (string, error) {

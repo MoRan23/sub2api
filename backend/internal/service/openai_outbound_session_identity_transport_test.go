@@ -619,6 +619,90 @@ func TestOpenAIWSOutboundIdentityHeaderValueForLogUsesDigest(t *testing.T) {
 	require.Equal(t, identity.SessionID, openAIWSOutboundIdentityHeaderValueForLog(headers, "session-id", ""))
 }
 
+func TestOpenAIWSOutboundIdentityPlanDigestCoversCompleteHandshakeFingerprint(t *testing.T) {
+	materialize := func(t *testing.T, input http.Header, plan OpenAIOAuthIdentityPlan) (http.Header, string) {
+		t.Helper()
+		headers := input.Clone()
+		_, err := ApplyOpenAIOAuthIdentityPlan(headers, nil, plan)
+		require.NoError(t, err)
+		return headers, openAIWSOutboundIdentityPlanDigest(headers, plan)
+	}
+
+	base := OpenAIOAuthIdentityPlan{
+		TurnIdentity: OpenAICodexTurnIdentity{
+			SessionID: testOutboundSessionUUID,
+			ThreadID:  testOutboundThreadUUID,
+			Relation:  OpenAICodexTurnRelationDescendant,
+		},
+		TurnIdentityEnabled:   true,
+		InstallationPolicy:    OpenAIOAuthInstallationAccountPin,
+		InstallationEnabled:   true,
+		InstallationID:        "11111111-2222-4333-8444-555555555555",
+		ClientIdentityEnabled: true,
+		ClientIdentity: CodexClientIdentityPlan{
+			Mode:       CodexClientIdentityNormalize,
+			UserAgent:  "codex_cli_rs/0.200.1 (Ubuntu 24.04; x86_64) xterm-256color",
+			Originator: "codex_cli_rs",
+			Version:    "0.200.1",
+		},
+	}
+	baseInput := http.Header{
+		"User-Agent": []string{"unrecognized-client/1.0"},
+		"Originator": []string{"client"},
+		"Version":    []string{"1.0"},
+	}
+	baseHeaders, baseDigest := materialize(t, baseInput, base)
+	require.Len(t, baseDigest, 64)
+	require.Equal(t, baseDigest, openAIWSOutboundIdentityPlanDigest(baseHeaders, base))
+
+	installationChanged := base
+	installationChanged.InstallationID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	_, installationDigest := materialize(t, baseInput, installationChanged)
+	require.NotEqual(t, baseDigest, installationDigest)
+
+	clientChanged := base
+	clientChanged.ClientIdentity.UserAgent = "codex_vscode/0.200.1 (Mac OS X 15.0; arm64) vscode"
+	clientChanged.ClientIdentity.Originator = "codex_vscode"
+	_, clientDigest := materialize(t, baseInput, clientChanged)
+	require.NotEqual(t, baseDigest, clientDigest)
+
+	safePair := base
+	safePair.ClientIdentity.Mode = CodexClientIdentitySafePair
+	cliInput := http.Header{
+		"User-Agent": []string{"codex_cli_rs/0.200.1 (Windows 11.0.26100; x86_64) WindowsTerminal"},
+		"Originator": []string{"codex_cli_rs"},
+		"Version":    []string{"0.200.1"},
+	}
+	vscodeInput := http.Header{
+		"User-Agent": []string{"codex_vscode/0.200.1 (Mac OS X 15.0; arm64) vscode"},
+		"Originator": []string{"codex_vscode"},
+		"Version":    []string{"0.200.1"},
+	}
+	cliHeaders, cliDigest := materialize(t, cliInput, safePair)
+	_, vscodeDigest := materialize(t, vscodeInput, safePair)
+	require.NotEqual(t, cliDigest, vscodeDigest, "recognized SafePair client identities must not share a socket")
+
+	fallbackChanged := safePair
+	fallbackChanged.ClientIdentity.UserAgent = "codex_vscode/0.200.1 (Linux; x86_64) vscode"
+	fallbackChanged.ClientIdentity.Originator = "codex_vscode"
+	_, sameWireDigest := materialize(t, cliInput, fallbackChanged)
+	require.Equal(t, cliDigest, sameWireDigest, "unused SafePair fallback changes must not split identical wire identities")
+	require.Equal(t, cliDigest, openAIWSOutboundIdentityPlanDigest(cliHeaders, safePair))
+
+	turnDisabled := safePair
+	turnDisabled.TurnIdentityEnabled = false
+	turnDisabled.TurnIdentityRequested = false
+	turnDisabled.TurnIdentity = OpenAICodexTurnIdentity{}
+	_, flagOffCLI := materialize(t, cliInput, turnDisabled)
+	_, flagOffVSCode := materialize(t, vscodeInput, turnDisabled)
+	require.NotEqual(t, flagOffCLI, flagOffVSCode, "client identity still scopes a UUIDv7-disabled OAuth socket")
+
+	flagOffInstallationChanged := turnDisabled
+	flagOffInstallationChanged.InstallationID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	_, flagOffInstallationDigest := materialize(t, cliInput, flagOffInstallationChanged)
+	require.NotEqual(t, flagOffCLI, flagOffInstallationDigest, "installation identity still scopes a UUIDv7-disabled OAuth socket")
+}
+
 func TestOpenAIWSConnPoolIdentityDigestScopesReuseAndPreferred(t *testing.T) {
 	p := newOpenAIWSConnPool(&config.Config{})
 	account := &Account{ID: 810004, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 2}

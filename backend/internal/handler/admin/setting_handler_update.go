@@ -23,24 +23,27 @@ import (
 // UpdateSettingsRequest 更新设置请求
 type UpdateSettingsRequest struct {
 	// 注册设置
-	RegistrationEnabled                 bool                         `json:"registration_enabled"`
-	EmailVerifyEnabled                  bool                         `json:"email_verify_enabled"`
-	RegistrationEmailSuffixWhitelist    []string                     `json:"registration_email_suffix_whitelist"`
-	RegistrationEmailDomainQuotaEnabled *bool                        `json:"registration_email_domain_quota_enabled"` // 非白名单域名限量注册开关（省略=保持现值）
-	PromoCodeEnabled                    bool                         `json:"promo_code_enabled"`
-	PasswordResetEnabled                bool                         `json:"password_reset_enabled"`
-	FrontendURL                         string                       `json:"frontend_url"`
-	InvitationCodeEnabled               bool                         `json:"invitation_code_enabled"`
-	TotpEnabled                         bool                         `json:"totp_enabled"`                          // TOTP 双因素认证
-	PasskeyEnabled                      *bool                        `json:"passkey_enabled"`                       // Passkey 登录（省略=保持现值）
-	SessionBindingEnabled               *bool                        `json:"session_binding_enabled"`               // 会话 IP/UA 绑定（省略=保持现值）
-	StepUpEnabled                       *bool                        `json:"step_up_enabled"`                       // 敏感操作 step-up 2FA（省略=保持现值）
-	EnableOpenAIUUIDv7SessionIdentity   *bool                        `json:"enable_openai_uuidv7_session_identity"` // OpenAI UUIDv7 session/thread 标识对（省略=保持现值）
-	AuditLogRetentionDays               int                          `json:"audit_log_retention_days"`              // 审计日志保留天数
-	LoginAgreementEnabled               bool                         `json:"login_agreement_enabled"`
-	LoginAgreementMode                  string                       `json:"login_agreement_mode"`
-	LoginAgreementUpdatedAt             string                       `json:"login_agreement_updated_at"`
-	LoginAgreementDocuments             []dto.LoginAgreementDocument `json:"login_agreement_documents"`
+	RegistrationEnabled                          bool                         `json:"registration_enabled"`
+	EmailVerifyEnabled                           bool                         `json:"email_verify_enabled"`
+	RegistrationEmailSuffixWhitelist             []string                     `json:"registration_email_suffix_whitelist"`
+	RegistrationEmailDomainQuotaEnabled          *bool                        `json:"registration_email_domain_quota_enabled"` // 非白名单域名限量注册开关（省略=保持现值）
+	PromoCodeEnabled                             bool                         `json:"promo_code_enabled"`
+	PasswordResetEnabled                         bool                         `json:"password_reset_enabled"`
+	FrontendURL                                  string                       `json:"frontend_url"`
+	InvitationCodeEnabled                        bool                         `json:"invitation_code_enabled"`
+	TotpEnabled                                  bool                         `json:"totp_enabled"`                          // TOTP 双因素认证
+	PasskeyEnabled                               *bool                        `json:"passkey_enabled"`                       // Passkey 登录（省略=保持现值）
+	SessionBindingEnabled                        *bool                        `json:"session_binding_enabled"`               // 会话 IP/UA 绑定（省略=保持现值）
+	StepUpEnabled                                *bool                        `json:"step_up_enabled"`                       // 敏感操作 step-up 2FA（省略=保持现值）
+	EnableOpenAIUUIDv7SessionIdentity            *bool                        `json:"enable_openai_uuidv7_session_identity"` // OpenAI UUIDv7 session/thread 标识对（省略=保持现值）
+	EnableOpenAICodexFingerprintNormalization    *bool                        `json:"enable_openai_codex_fingerprint_normalization"`
+	EnableOpenAICodexInstallationIDNormalization *bool                        `json:"enable_openai_codex_installation_id_normalization"`
+	EnableOpenAICodexClientIdentityNormalization *bool                        `json:"enable_openai_codex_client_identity_normalization"`
+	AuditLogRetentionDays                        int                          `json:"audit_log_retention_days"` // 审计日志保留天数
+	LoginAgreementEnabled                        bool                         `json:"login_agreement_enabled"`
+	LoginAgreementMode                           string                       `json:"login_agreement_mode"`
+	LoginAgreementUpdatedAt                      string                       `json:"login_agreement_updated_at"`
+	LoginAgreementDocuments                      []dto.LoginAgreementDocument `json:"login_agreement_documents"`
 
 	// 邮件服务设置
 	SMTPHost     string `json:"smtp_host"`
@@ -441,8 +444,11 @@ var settingKeyByJSONName = buildSettingKeyByJSONName()
 // otherwise two concurrent partial PUTs can replay stale pre-read values over
 // each other.
 var independentlyOmittedPointerSettingKeys = map[string]string{
-	service.SettingKeyEnableOpenAIUUIDv7SessionIdentity: service.SettingKeyEnableOpenAIUUIDv7SessionIdentity,
-	service.SettingKeyInstallationObservationEnabled:    service.SettingKeyInstallationObservationEnabled,
+	service.SettingKeyEnableOpenAICodexFingerprintNormalization:    service.SettingKeyEnableOpenAICodexFingerprintNormalization,
+	service.SettingKeyEnableOpenAICodexInstallationIDNormalization: service.SettingKeyEnableOpenAICodexInstallationIDNormalization,
+	service.SettingKeyEnableOpenAIUUIDv7SessionIdentity:            service.SettingKeyEnableOpenAIUUIDv7SessionIdentity,
+	service.SettingKeyEnableOpenAICodexClientIdentityNormalization: service.SettingKeyEnableOpenAICodexClientIdentityNormalization,
+	service.SettingKeyInstallationObservationEnabled:               service.SettingKeyInstallationObservationEnabled,
 }
 
 func buildSettingKeyByJSONName() map[string]string {
@@ -533,6 +539,18 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	openAIUUIDv7SessionIdentityEnabled := previousSettings.EnableOpenAIUUIDv7SessionIdentity
 	if req.EnableOpenAIUUIDv7SessionIdentity != nil {
 		openAIUUIDv7SessionIdentityEnabled = *req.EnableOpenAIUUIDv7SessionIdentity
+	}
+	openAICodexFingerprintNormalizationEnabled := previousSettings.EnableOpenAICodexFingerprintNormalization
+	if req.EnableOpenAICodexFingerprintNormalization != nil {
+		openAICodexFingerprintNormalizationEnabled = *req.EnableOpenAICodexFingerprintNormalization
+	}
+	openAICodexInstallationIDNormalizationEnabled := previousSettings.EnableOpenAICodexInstallationIDNormalization
+	if req.EnableOpenAICodexInstallationIDNormalization != nil {
+		openAICodexInstallationIDNormalizationEnabled = *req.EnableOpenAICodexInstallationIDNormalization
+	}
+	openAICodexClientIdentityNormalizationEnabled := previousSettings.EnableOpenAICodexClientIdentityNormalization
+	if req.EnableOpenAICodexClientIdentityNormalization != nil {
+		openAICodexClientIdentityNormalizationEnabled = *req.EnableOpenAICodexClientIdentityNormalization
 	}
 	passkeyEnabled := previousSettings.PasskeyEnabled
 	if req.PasskeyEnabled != nil {
@@ -1519,46 +1537,49 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		DefaultPlatformQuotas:       req.DefaultPlatformQuotas,
 		AccountSchedulingThresholds: req.AccountSchedulingThresholds,
 
-		RegistrationEnabled:                 req.RegistrationEnabled,
-		EmailVerifyEnabled:                  req.EmailVerifyEnabled,
-		RegistrationEmailSuffixWhitelist:    req.RegistrationEmailSuffixWhitelist,
-		RegistrationEmailDomainQuotaEnabled: registrationEmailDomainQuotaEnabled,
-		PromoCodeEnabled:                    req.PromoCodeEnabled,
-		PasswordResetEnabled:                req.PasswordResetEnabled,
-		FrontendURL:                         req.FrontendURL,
-		InvitationCodeEnabled:               req.InvitationCodeEnabled,
-		TotpEnabled:                         req.TotpEnabled,
-		PasskeyEnabled:                      passkeyEnabled,
-		SessionBindingEnabled:               sessionBindingEnabled,
-		StepUpEnabled:                       stepUpEnabled,
-		EnableOpenAIUUIDv7SessionIdentity:   openAIUUIDv7SessionIdentityEnabled,
-		AuditLogRetentionDays:               req.AuditLogRetentionDays,
-		LoginAgreementEnabled:               req.LoginAgreementEnabled,
-		LoginAgreementMode:                  loginAgreementMode,
-		LoginAgreementUpdatedAt:             loginAgreementUpdatedAt,
-		LoginAgreementDocuments:             loginAgreementDocuments,
-		SMTPHost:                            req.SMTPHost,
-		SMTPPort:                            req.SMTPPort,
-		SMTPUsername:                        req.SMTPUsername,
-		SMTPPassword:                        req.SMTPPassword,
-		SMTPFrom:                            req.SMTPFrom,
-		SMTPFromName:                        req.SMTPFromName,
-		SMTPUseTLS:                          req.SMTPUseTLS,
-		TurnstileEnabled:                    req.TurnstileEnabled,
-		TurnstileSiteKey:                    req.TurnstileSiteKey,
-		TurnstileSecretKey:                  req.TurnstileSecretKey,
-		TencentCaptchaEnabled:               req.TencentCaptchaEnabled,
-		TencentCaptchaAppID:                 req.TencentCaptchaAppID,
-		TencentCaptchaAppSecretKey:          req.TencentCaptchaAppSecretKey,
-		TencentCaptchaCloudSecretID:         req.TencentCaptchaCloudSecretID,
-		TencentCaptchaCloudSecretKey:        req.TencentCaptchaCloudSecretKey,
-		TencentCaptchaRegion:                req.TencentCaptchaRegion,
-		AliyunCaptchaEnabled:                req.AliyunCaptchaEnabled,
-		AliyunCaptchaAccessKeyID:            req.AliyunCaptchaAccessKeyID,
-		AliyunCaptchaAccessKeySecret:        req.AliyunCaptchaAccessKeySecret,
-		AliyunCaptchaSceneID:                req.AliyunCaptchaSceneID,
-		AliyunCaptchaPrefix:                 req.AliyunCaptchaPrefix,
-		AliyunCaptchaRegion:                 req.AliyunCaptchaRegion,
+		RegistrationEnabled:                          req.RegistrationEnabled,
+		EmailVerifyEnabled:                           req.EmailVerifyEnabled,
+		RegistrationEmailSuffixWhitelist:             req.RegistrationEmailSuffixWhitelist,
+		RegistrationEmailDomainQuotaEnabled:          registrationEmailDomainQuotaEnabled,
+		PromoCodeEnabled:                             req.PromoCodeEnabled,
+		PasswordResetEnabled:                         req.PasswordResetEnabled,
+		FrontendURL:                                  req.FrontendURL,
+		InvitationCodeEnabled:                        req.InvitationCodeEnabled,
+		TotpEnabled:                                  req.TotpEnabled,
+		PasskeyEnabled:                               passkeyEnabled,
+		SessionBindingEnabled:                        sessionBindingEnabled,
+		StepUpEnabled:                                stepUpEnabled,
+		EnableOpenAIUUIDv7SessionIdentity:            openAIUUIDv7SessionIdentityEnabled,
+		EnableOpenAICodexFingerprintNormalization:    openAICodexFingerprintNormalizationEnabled,
+		EnableOpenAICodexInstallationIDNormalization: openAICodexInstallationIDNormalizationEnabled,
+		EnableOpenAICodexClientIdentityNormalization: openAICodexClientIdentityNormalizationEnabled,
+		AuditLogRetentionDays:                        req.AuditLogRetentionDays,
+		LoginAgreementEnabled:                        req.LoginAgreementEnabled,
+		LoginAgreementMode:                           loginAgreementMode,
+		LoginAgreementUpdatedAt:                      loginAgreementUpdatedAt,
+		LoginAgreementDocuments:                      loginAgreementDocuments,
+		SMTPHost:                                     req.SMTPHost,
+		SMTPPort:                                     req.SMTPPort,
+		SMTPUsername:                                 req.SMTPUsername,
+		SMTPPassword:                                 req.SMTPPassword,
+		SMTPFrom:                                     req.SMTPFrom,
+		SMTPFromName:                                 req.SMTPFromName,
+		SMTPUseTLS:                                   req.SMTPUseTLS,
+		TurnstileEnabled:                             req.TurnstileEnabled,
+		TurnstileSiteKey:                             req.TurnstileSiteKey,
+		TurnstileSecretKey:                           req.TurnstileSecretKey,
+		TencentCaptchaEnabled:                        req.TencentCaptchaEnabled,
+		TencentCaptchaAppID:                          req.TencentCaptchaAppID,
+		TencentCaptchaAppSecretKey:                   req.TencentCaptchaAppSecretKey,
+		TencentCaptchaCloudSecretID:                  req.TencentCaptchaCloudSecretID,
+		TencentCaptchaCloudSecretKey:                 req.TencentCaptchaCloudSecretKey,
+		TencentCaptchaRegion:                         req.TencentCaptchaRegion,
+		AliyunCaptchaEnabled:                         req.AliyunCaptchaEnabled,
+		AliyunCaptchaAccessKeyID:                     req.AliyunCaptchaAccessKeyID,
+		AliyunCaptchaAccessKeySecret:                 req.AliyunCaptchaAccessKeySecret,
+		AliyunCaptchaSceneID:                         req.AliyunCaptchaSceneID,
+		AliyunCaptchaPrefix:                          req.AliyunCaptchaPrefix,
+		AliyunCaptchaRegion:                          req.AliyunCaptchaRegion,
 		APIKeyACLTrustForwardedIP: func() bool {
 			if req.APIKeyACLTrustForwardedIP != nil {
 				return *req.APIKeyACLTrustForwardedIP
@@ -2163,6 +2184,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		SessionBindingEnabled:                                  updatedSettings.SessionBindingEnabled,
 		StepUpEnabled:                                          updatedSettings.StepUpEnabled,
 		EnableOpenAIUUIDv7SessionIdentity:                      updatedSettings.EnableOpenAIUUIDv7SessionIdentity,
+		EnableOpenAICodexFingerprintNormalization:              updatedSettings.EnableOpenAICodexFingerprintNormalization,
+		EnableOpenAICodexInstallationIDNormalization:           updatedSettings.EnableOpenAICodexInstallationIDNormalization,
+		EnableOpenAICodexClientIdentityNormalization:           updatedSettings.EnableOpenAICodexClientIdentityNormalization,
 		AuditLogRetentionDays:                                  updatedSettings.AuditLogRetentionDays,
 		LoginAgreementEnabled:                                  updatedSettings.LoginAgreementEnabled,
 		LoginAgreementMode:                                     updatedSettings.LoginAgreementMode,

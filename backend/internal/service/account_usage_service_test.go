@@ -206,6 +206,37 @@ func TestAccountUsageService_GetOpenAIUsage_DoesNotPromoteCodexExtraToRateLimit(
 	}
 }
 
+func TestAccountUsageService_ProfileIdentityFallbackUsesConfiguredFingerprintPolicy(t *testing.T) {
+	repo := &openAIUUIDv7RuntimeRepo{values: map[string]string{
+		SettingKeyEnableOpenAICodexFingerprintNormalization:    "false",
+		SettingKeyEnableOpenAICodexInstallationIDNormalization: "false",
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity:            "false",
+		SettingKeyEnableOpenAICodexClientIdentityNormalization: "false",
+	}}
+	settings := NewSettingService(repo, nil)
+	svc := &AccountUsageService{settingService: settings}
+	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	plan, err := svc.openAIGatewayForProfileIdentity().ResolveOpenAIOAuthProfileIdentityPlan(
+		context.Background(), nil, account, OpenAIOAuthInstallationAccountPin,
+	)
+	if err != nil {
+		t.Fatalf("ResolveOpenAIOAuthProfileIdentityPlan() error = %v", err)
+	}
+	if plan.PolicySnapshot.MasterEnabled ||
+		plan.PolicySnapshot.InstallationIDEnabled ||
+		plan.PolicySnapshot.TurnIdentityEnabled ||
+		plan.PolicySnapshot.ClientIdentityEnabled {
+		t.Fatalf("fallback gateway ignored the configured disabled policy: %#v", plan.PolicySnapshot)
+	}
+	if plan.InstallationEnabled {
+		t.Fatal("profile-only fallback must not normalize installation_id while disabled")
+	}
+	if plan.ClientIdentity.Mode != CodexClientIdentitySafePair {
+		t.Fatalf("client identity mode = %q, want %q", plan.ClientIdentity.Mode, CodexClientIdentitySafePair)
+	}
+}
+
 func TestBuildCodexUsageProgressFromExtra_ZerosExpiredWindow(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)

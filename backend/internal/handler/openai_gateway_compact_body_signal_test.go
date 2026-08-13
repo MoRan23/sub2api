@@ -204,3 +204,41 @@ func TestNormalizeOpenAIResponsesCompactRequest_PathBasedStreamTrueNotMarked(t *
 	_, exists := c.Get(service.OpenAICompactClientStreamKeyForTest())
 	require.False(t, exists)
 }
+
+func TestNormalizeOpenAIResponsesCompactRequest_CapturesStableLegacyEndpointAlias(t *testing.T) {
+	h := &OpenAIGatewayHandler{}
+	body := []byte(`{"model":"gpt-5.5","prompt_cache_key":"body-seed","client_metadata":{"session_id":"canonical-session","thread_id":"canonical-thread"},"input":[{"type":"message","role":"user","content":"hello"}]}`)
+	c := newCompactBodySignalTestContext(t, "/v1/responses/compact", body)
+	c.Request.Header.Set("conversation_id", "conversation-seed")
+	c.Request.Header.Set("session_id", "session-seed")
+
+	_, ok := h.normalizeOpenAIResponsesCompactRequest(c, zap.NewNop(), body)
+	require.True(t, ok)
+	capture, captured := service.OpenAIOAuthIdentityCaptureFromContext(c)
+	require.True(t, captured)
+	require.Equal(t, "canonical-session", capture.Logical.SessionKey)
+	require.Len(t, capture.Aliases, 2)
+	require.Equal(t, "session-seed", capture.Aliases[1].SessionKey)
+	require.False(t, capture.Aliases[1].Explicit)
+}
+
+func TestNormalizeOpenAIResponsesCompactRequest_UsesBodySeedWithoutRandomAlias(t *testing.T) {
+	h := &OpenAIGatewayHandler{}
+	body := []byte(`{"model":"gpt-5.5","prompt_cache_key":"body-seed","client_metadata":{"session_id":"canonical-session","thread_id":"canonical-thread"},"input":[{"type":"compaction_trigger"}]}`)
+	c := newCompactBodySignalTestContext(t, "/v1/responses", body)
+
+	_, ok := h.normalizeOpenAIResponsesCompactRequest(c, zap.NewNop(), body)
+	require.True(t, ok)
+	capture, captured := service.OpenAIOAuthIdentityCaptureFromContext(c)
+	require.True(t, captured)
+	require.Len(t, capture.Aliases, 2)
+	require.Equal(t, "body-seed", capture.Aliases[1].SessionKey)
+
+	bodyWithoutSeed := []byte(`{"model":"gpt-5.5","client_metadata":{"session_id":"canonical-session","thread_id":"canonical-thread"},"input":[{"type":"message","role":"user","content":"hello"}]}`)
+	c = newCompactBodySignalTestContext(t, "/v1/responses/compact", bodyWithoutSeed)
+	_, ok = h.normalizeOpenAIResponsesCompactRequest(c, zap.NewNop(), bodyWithoutSeed)
+	require.True(t, ok)
+	capture, captured = service.OpenAIOAuthIdentityCaptureFromContext(c)
+	require.True(t, captured)
+	require.Len(t, capture.Aliases, 1, "missing stable seed must not create a random endpoint alias")
+}

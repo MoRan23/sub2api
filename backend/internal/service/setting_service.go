@@ -118,6 +118,7 @@ type WebSearchManagerBuilder func(cfg *WebSearchEmulationConfig, proxyURLs map[i
 // SettingService 系统设置服务
 type SettingService struct {
 	settingRepo                 SettingRepository
+	settingsUpdateMu            sync.Mutex
 	defaultSubGroupReader       DefaultSubscriptionGroupReader
 	proxyRepo                   ProxyRepository // for resolving websearch provider proxy URLs
 	cfg                         *config.Config
@@ -150,12 +151,15 @@ type SettingService struct {
 	openAIQuotaAutoPauseSettingsCache atomic.Value // *cachedOpenAIQuotaAutoPauseSettings
 	openAIQuotaAutoPauseSettingsSF    singleflight.Group
 
-	// openAIUUIDv7SessionIdentityCache caches the opt-in switch for stable,
-	// server-managed OpenAI UUIDv7 session/thread identity pairs. It is kept per
-	// SettingService instance so tests and service wiring do not share state.
-	openAIUUIDv7SessionIdentityCache      atomic.Value // *cachedOpenAIUUIDv7SessionIdentity
-	openAIUUIDv7SessionIdentitySF         singleflight.Group
-	openAIUUIDv7SessionIdentityGeneration atomic.Uint64
+	// The Codex fingerprint policy is loaded and published as one immutable
+	// generation so a request cannot observe a mixture of independently updated
+	// installation, turn and client-identity switches.
+	openAIUUIDv7SessionIdentityMu                    sync.Mutex
+	openAIUUIDv7SessionIdentityCache                 atomic.Value // *cachedOpenAICodexFingerprintPolicy
+	openAIUUIDv7SessionIdentitySF                    singleflight.Group
+	openAIUUIDv7SessionIdentityGeneration            atomic.Uint64
+	openAIUUIDv7SessionIdentityBeforeCommit          func()
+	openAIUUIDv7SessionIdentityBeforeGenerationStore func()
 
 	channelMonitorRuntimeListenersMu sync.Mutex
 	channelMonitorRuntimeListeners   []func()

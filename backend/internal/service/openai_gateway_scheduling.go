@@ -203,6 +203,26 @@ func (s *OpenAIGatewayService) GenerateSessionHashWithFallback(c *gin.Context, b
 	return currentHash
 }
 
+// GenerateSessionHashForOpenAIOAuthIdentity makes account affinity consume
+// the same pre-transform identity capture as outbound UUID resolution. This is
+// important for metadata-only and canonical-header-only clients, whose stable
+// session signals are intentionally broader than the legacy scheduler input.
+// When capture has no usable identity, all existing scheduling fallbacks stay
+// unchanged.
+func (s *OpenAIGatewayService) GenerateSessionHashForOpenAIOAuthIdentity(c *gin.Context, body []byte, fallbackSeed string) string {
+	if capture, ok := OpenAIOAuthIdentityCaptureFromContext(c); ok {
+		if sessionID := sanitizeSessionID(capture.Logical.SessionKey); sessionID != "" {
+			if isGrokRequestContext(c) {
+				sessionID = grokStickyAffinitySeed(sessionID, body)
+			}
+			currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)
+			attachOpenAILegacySessionHashToGin(c, legacyHash)
+			return currentHash
+		}
+	}
+	return s.GenerateSessionHashWithFallback(c, body, fallbackSeed)
+}
+
 func resolveOpenAIUpstreamOriginator(c *gin.Context, isOfficialClient bool) string {
 	if c != nil {
 		if originator := strings.TrimSpace(c.GetHeader("originator")); originator != "" {

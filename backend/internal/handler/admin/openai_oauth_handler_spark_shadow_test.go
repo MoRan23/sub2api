@@ -49,6 +49,17 @@ func TestCreateShadow_ReturnsCreatedShadow(t *testing.T) {
 
 	// name round-trips
 	require.Equal(t, "p-spark", data["name"])
+
+	// A shadow never owns or receives its parent's Codex fingerprint. The
+	// create response must therefore expose neither account Extra identity
+	// fields nor a derived environment fingerprint.
+	extra, ok := data["extra"].(map[string]any)
+	require.True(t, ok, "shadow response should contain an empty extra object")
+	require.Empty(t, extra)
+	_, hasEnvironmentFingerprint := data["openai_environment_fingerprint"]
+	require.False(t, hasEnvironmentFingerprint)
+	require.NotContains(t, rec.Body.String(), "openai_pinned_installation_id")
+	require.NotContains(t, rec.Body.String(), "openai_installation_pin_enabled")
 }
 
 func TestCreateShadow_InvalidID(t *testing.T) {
