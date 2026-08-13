@@ -1518,6 +1518,15 @@
           </div>
         </div>
 
+        <div class="border-t border-gray-200 pt-4 mt-4 dark:border-dark-400">
+          <div class="flex items-start justify-between gap-4">
+            <div><h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.title") }}</h4><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t("admin.groups.modelPricing.description") }}</p></div>
+            <button type="button" class="btn btn-secondary" @click="addGroupPricing(createForm.model_pricing)"><Icon name="plus" size="sm" class="mr-1" />{{ t("admin.groups.modelPricing.add") }}</button>
+          </div>
+          <label class="mt-3 flex items-start gap-2"><input v-model="createForm.long_context_pricing_enabled" type="checkbox" class="mt-0.5" /><span><span class="block text-sm text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.longContext") }}</span><span class="block text-xs text-gray-500">{{ t("admin.groups.modelPricing.longContextHint") }}</span></span></label>
+          <div class="mt-3 space-y-2"><PricingEntryCard v-for="(entry, index) in createForm.model_pricing" :key="index" :entry="entry" :platform="createForm.platform" hide-token-intervals @update="createForm.model_pricing[index] = $event" @remove="createForm.model_pricing.splice(index, 1)" /></div>
+        </div>
+
 
         <!-- Grok Voice 显式定价（仅 grok 平台） -->
         <div
@@ -3239,6 +3248,15 @@
           </div>
         </div>
 
+        <div class="border-t border-gray-200 pt-4 mt-4 dark:border-dark-400">
+          <div class="flex items-start justify-between gap-4">
+            <div><h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.title") }}</h4><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t("admin.groups.modelPricing.description") }}</p></div>
+            <button type="button" class="btn btn-secondary" @click="addGroupPricing(editForm.model_pricing)"><Icon name="plus" size="sm" class="mr-1" />{{ t("admin.groups.modelPricing.add") }}</button>
+          </div>
+          <label class="mt-3 flex items-start gap-2"><input v-model="editForm.long_context_pricing_enabled" type="checkbox" class="mt-0.5" /><span><span class="block text-sm text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.longContext") }}</span><span class="block text-xs text-gray-500">{{ t("admin.groups.modelPricing.longContextHint") }}</span></span></label>
+          <div class="mt-3 space-y-2"><PricingEntryCard v-for="(entry, index) in editForm.model_pricing" :key="index" :entry="entry" :platform="editForm.platform" hide-token-intervals @update="editForm.model_pricing[index] = $event" @remove="editForm.model_pricing.splice(index, 1)" /></div>
+        </div>
+
 
         <!-- Grok Voice 显式定价（仅 grok 平台） -->
         <div
@@ -4430,6 +4448,16 @@ import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipl
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
+import PricingEntryCard from "@/components/admin/channel/PricingEntryCard.vue";
+import type { PricingFormEntry } from "@/components/admin/channel/types";
+import {
+  apiIntervalsToForm,
+  formIntervalsToAPI,
+  mTokToPerToken,
+  perTokenToMTok,
+  toNullableNumber,
+} from "@/components/admin/channel/types";
+import type { ChannelModelPricing } from "@/api/admin/channels";
 import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
 import { extractApiErrorMessage } from "@/utils/apiError";
@@ -4482,6 +4510,30 @@ import {
   serializeVideoModelPrices,
   videoModelPriceFamilyRows,
 } from "./groupsVideoModelPricing";
+
+const emptyGroupPricing = (): PricingFormEntry => ({
+  models: [], billing_mode: "token", input_price: null, output_price: null,
+  cache_write_price: null, cache_read_price: null, image_input_price: null,
+  image_output_price: null, per_request_price: null, intervals: [],
+});
+const addGroupPricing = (entries: PricingFormEntry[]) => entries.push(emptyGroupPricing());
+const groupPricingFromAPI = (pricing: ChannelModelPricing[] | undefined): PricingFormEntry[] =>
+  (pricing || []).map((entry) => ({
+    models: entry.models || [], billing_mode: entry.billing_mode || "token",
+    input_price: perTokenToMTok(entry.input_price), output_price: perTokenToMTok(entry.output_price),
+    cache_write_price: perTokenToMTok(entry.cache_write_price), cache_read_price: perTokenToMTok(entry.cache_read_price),
+    image_input_price: perTokenToMTok(entry.image_input_price), image_output_price: perTokenToMTok(entry.image_output_price),
+    per_request_price: entry.per_request_price, intervals: apiIntervalsToForm(entry.intervals || []),
+  }));
+const groupPricingToAPI = (pricing: PricingFormEntry[], platform: string): ChannelModelPricing[] =>
+  pricing.filter((entry) => entry.models.length > 0).map((entry) => ({
+    platform, models: entry.models, billing_mode: entry.billing_mode,
+    input_price: mTokToPerToken(entry.input_price), output_price: mTokToPerToken(entry.output_price),
+    cache_write_price: mTokToPerToken(entry.cache_write_price), cache_read_price: mTokToPerToken(entry.cache_read_price),
+    image_input_price: mTokToPerToken(entry.image_input_price), image_output_price: mTokToPerToken(entry.image_output_price),
+    per_request_price: toNullableNumber(entry.per_request_price),
+    intervals: entry.billing_mode === "token" ? [] : formIntervalsToAPI(entry.intervals || []),
+  }));
 
 const { t } = useI18n();
 const appStore = useAppStore();
@@ -4971,6 +5023,8 @@ const createForm = reactive({
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
   total_limit_usd: null as number | null,
+  long_context_pricing_enabled: true,
+  model_pricing: [] as PricingFormEntry[],
   // 图片生成计费配置
   allow_image_generation: false,
   allow_batch_image_generation: false,
@@ -5331,6 +5385,8 @@ const editForm = reactive({
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
   total_limit_usd: null as number | null,
+  long_context_pricing_enabled: true,
+  model_pricing: [] as PricingFormEntry[],
   // 图片生成计费配置
   allow_image_generation: false,
   allow_batch_image_generation: false,
@@ -5789,6 +5845,8 @@ const closeCreateModal = () => {
   createForm.weekly_limit_usd = null;
   createForm.monthly_limit_usd = null;
   createForm.total_limit_usd = null;
+  createForm.long_context_pricing_enabled = true;
+  createForm.model_pricing = [];
   createForm.allow_image_generation = false;
   createForm.allow_batch_image_generation = false;
   createForm.image_rate_independent = false;
@@ -5915,6 +5973,7 @@ const handleCreateGroup = async () => {
       total_limit_usd: normalizeOptionalLimit(
         createForm.total_limit_usd as number | string | null,
       ),
+      model_pricing: groupPricingToAPI(createForm.model_pricing, createForm.platform),
       ...(Object.keys(videoModelPrices).length > 0
         ? { video_model_prices: videoModelPrices }
         : {}),
@@ -6030,6 +6089,8 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.weekly_limit_usd = group.weekly_limit_usd;
   editForm.monthly_limit_usd = group.monthly_limit_usd;
   editForm.total_limit_usd = group.total_limit_usd;
+  editForm.long_context_pricing_enabled = group.long_context_pricing_enabled ?? true;
+  editForm.model_pricing = groupPricingFromAPI(group.model_pricing);
   editForm.allow_image_generation = group.allow_image_generation ?? false;
   editForm.allow_batch_image_generation =
     group.allow_batch_image_generation ?? false;
@@ -6178,6 +6239,7 @@ const handleUpdateGroup = async () => {
       total_limit_usd: normalizeOptionalLimit(
         editForm.total_limit_usd as number | string | null,
       ),
+      model_pricing: groupPricingToAPI(editForm.model_pricing, editForm.platform),
       video_model_prices: serializeVideoModelPrices(
         editForm.video_model_prices,
       ),
