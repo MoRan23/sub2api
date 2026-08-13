@@ -48,19 +48,4 @@ func TestBuildAccountForCreateGeneratesUniqueOpenAIOAuthInstallationIDs(t *testi
 	if _, exists := first.Extra[openAIInstallationRotateEnabledKey]; exists {
 		t.Fatal("legacy rotation option must be discarded")
 	}
-	if mode := first.Extra[codexFingerprintModeExtraKey]; mode != string(codexFingerprintOff) {
-		t.Fatalf("new OpenAI OAuth account fingerprint mode = %#v, want off", mode)
-	}
-}
-
-func TestBuildAccountForCreatePreservesExplicitCodexFingerprintMode(t *testing.T) {
-	account, err := buildAccountForCreate(&CreateAccountInput{
-		Name: "OpenAI OAuth", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
-	}, map[string]any{codexFingerprintModeExtraKey: string(codexFingerprintSession)})
-	if err != nil {
-		t.Fatalf("build account: %v", err)
-	}
-	if mode := account.Extra[codexFingerprintModeExtraKey]; mode != string(codexFingerprintSession) {
-		t.Fatalf("explicit fingerprint mode = %#v, want session", mode)
-	}
 }

@@ -249,7 +249,6 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 		delete(account.Extra, openAIInstallationRotateEnabledKey)
 		delete(account.Extra, openAIPinnedInstallationIDKey)
 		account.Extra[openAIPinnedInstallationIDKey] = uuid.NewString()
-		ensureCodexFingerprintModeForCreate(account.Extra)
 	}
 	PrepareOpenAIAccountUserAgentForCreate(account)
 	if req.AutoPauseOnExpired != nil {

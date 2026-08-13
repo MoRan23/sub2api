@@ -465,7 +465,6 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 			accountExtra = make(map[string]any)
 		}
 		accountExtra[openAIPinnedInstallationIDKey] = uuid.NewString()
-		ensureCodexFingerprintModeForCreate(accountExtra)
 	}
 	account := &Account{
 		Name:        input.Name,
