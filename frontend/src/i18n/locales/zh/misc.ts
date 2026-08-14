@@ -73,6 +73,9 @@ export default {
   customPage: {
     title: '自定义页面',
     openInNewTab: '新窗口打开',
+    purchaseGuideTitle: '付款后去兑换',
+    purchaseGuideDescription: '这里只负责买码。支付完成后复制兑换码，打开「兑换」页粘贴，余额才会到账。',
+    goToRedeem: '去兑换页',
     notFoundTitle: '页面不存在',
     notFoundDesc: '该自定义页面不存在或已被删除。',
     notConfiguredTitle: '页面链接未配置',

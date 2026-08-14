@@ -94,8 +94,57 @@
         </div>
 
         <!-- Iframe embed mode -->
-        <div v-else class="custom-embed-shell">
+        <div
+          v-else
+          class="custom-embed-shell"
+          :class="{ 'custom-purchase-shell': isPurchaseMode }"
+        >
+          <section
+            v-if="isPurchaseMode"
+            class="custom-purchase-guide"
+            data-testid="purchase-guide"
+          >
+            <div class="flex min-w-0 items-start gap-3">
+              <div
+                class="flex h-9 w-9 flex-none items-center justify-center rounded-md bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300"
+              >
+                <Icon name="creditCard" size="md" :stroke-width="2" />
+              </div>
+              <div class="min-w-0">
+                <h2 class="text-sm font-semibold text-gray-900 dark:text-white">
+                  {{ t('customPage.purchaseGuideTitle') }}
+                </h2>
+                <p class="mt-1 text-sm leading-5 text-gray-600 dark:text-dark-300">
+                  {{ t('customPage.purchaseGuideDescription') }}
+                </p>
+              </div>
+            </div>
+
+            <div class="custom-purchase-actions">
+              <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                data-testid="purchase-redeem-button"
+                @click="goToRedeem"
+              >
+                <Icon name="gift" size="sm" class="mr-1.5" :stroke-width="2" />
+                {{ t('customPage.goToRedeem') }}
+              </button>
+              <a
+                :href="embeddedUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="btn btn-secondary btn-sm"
+                data-testid="purchase-open-new-window"
+              >
+                <Icon name="externalLink" size="sm" class="mr-1.5" :stroke-width="2" />
+                {{ t('customPage.openInNewTab') }}
+              </a>
+            </div>
+          </section>
+
           <a
+            v-if="!isPurchaseMode"
             :href="embeddedUrl"
             target="_blank"
             rel="noopener noreferrer"
@@ -107,6 +156,9 @@
           <iframe
             :src="embeddedUrl"
             class="custom-embed-frame"
+            :referrerpolicy="isPurchaseMode ? 'no-referrer' : undefined"
+            :allow="isPurchaseMode ? 'payment; clipboard-write' : undefined"
+            data-testid="custom-page-iframe"
             allowfullscreen
           ></iframe>
         </div>
@@ -117,7 +169,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
 import { useAuthStore } from '@/stores/auth'
@@ -137,6 +189,7 @@ interface TocItem {
 
 const { t, locale } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const adminSettingsStore = useAdminSettingsStore()
@@ -173,8 +226,13 @@ const markdownSlug = computed(() => {
 
 const isMarkdownMode = computed(() => !!markdownSlug.value)
 
+const isPurchaseMode = computed(() => {
+  return menuItem.value?.purchase_mode === true && !isMarkdownMode.value
+})
+
 const embeddedUrl = computed(() => {
   if (!menuItem.value || isMarkdownMode.value) return ''
+  if (isPurchaseMode.value) return menuItem.value.url
   return buildEmbeddedUrl(
     menuItem.value.url,
     authStore.user?.id,
@@ -189,6 +247,10 @@ const isValidUrl = computed(() => {
   const url = embeddedUrl.value
   return url.startsWith('http://') || url.startsWith('https://')
 })
+
+function goToRedeem() {
+  void router.push('/redeem')
+}
 
 function generateHeadingId(text: string, index: number): string {
   const base = text
@@ -376,7 +438,23 @@ onUnmounted(() => {
 <style scoped>
 .custom-page-layout {
   @apply flex flex-col;
-  height: calc(100vh - 64px - 4rem);
+  height: calc(100vh - 64px - 2rem);
+  height: calc(100dvh - 64px - 2rem);
+  min-height: 360px;
+}
+
+@media (min-width: 768px) {
+  .custom-page-layout {
+    height: calc(100vh - 64px - 3rem);
+    height: calc(100dvh - 64px - 3rem);
+  }
+}
+
+@media (min-width: 1024px) {
+  .custom-page-layout {
+    height: calc(100vh - 64px - 4rem);
+    height: calc(100dvh - 64px - 4rem);
+  }
 }
 
 .toc-sidebar {
@@ -442,6 +520,35 @@ onUnmounted(() => {
   @apply h-full w-full overflow-hidden rounded-2xl;
   @apply bg-gradient-to-b from-gray-50 to-white dark:from-dark-900 dark:to-dark-950;
   @apply p-0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.custom-purchase-shell {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.custom-purchase-guide {
+  @apply flex items-center justify-between gap-5 border-b border-gray-200 bg-white px-4 py-3 dark:border-dark-600 dark:bg-dark-800;
+}
+
+.custom-purchase-actions {
+  @apply flex flex-none items-center gap-2;
+}
+
+@media (max-width: 640px) {
+  .custom-purchase-guide {
+    @apply flex-col items-stretch gap-3 px-3 py-3;
+  }
+
+  .custom-purchase-actions {
+    @apply w-full;
+  }
+
+  .custom-purchase-actions > * {
+    @apply min-w-0 flex-1 justify-center;
+  }
 }
 
 .custom-open-fab {
@@ -454,6 +561,7 @@ onUnmounted(() => {
   margin: 0;
   width: 100%;
   height: 100%;
+  min-height: 0;
   border: 0;
   border-radius: 0;
   box-shadow: none;

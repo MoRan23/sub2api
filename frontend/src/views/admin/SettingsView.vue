@@ -6613,6 +6613,7 @@
               <div
                 v-for="(item, index) in form.custom_menu_items"
                 :key="item.id || index"
+                :data-testid="`custom-menu-item-${index}`"
                 class="rounded-lg border border-gray-200 p-4 dark:border-dark-600"
               >
                 <div class="mb-3 flex items-center justify-between">
@@ -6744,6 +6745,25 @@
                     />
                   </div>
 
+                  <!-- Purchase / redeem guidance -->
+                  <div
+                    class="flex items-center justify-between gap-4 rounded-md border border-gray-200 px-3 py-3 dark:border-dark-600 sm:col-span-2"
+                  >
+                    <div class="min-w-0">
+                      <label class="text-sm font-medium text-gray-800 dark:text-gray-200">
+                        {{ t("admin.settings.customMenu.purchaseMode") }}
+                      </label>
+                      <p class="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">
+                        {{ t("admin.settings.customMenu.purchaseModeHint") }}
+                      </p>
+                    </div>
+                    <Toggle
+                      :model-value="item.purchase_mode ?? false"
+                      :data-testid="`custom-menu-purchase-mode-${index}`"
+                      @update:model-value="item.purchase_mode = $event"
+                    />
+                  </div>
+
                   <!-- SVG Icon (full width) -->
                   <div class="sm:col-span-2">
                     <label
@@ -6766,6 +6786,7 @@
               <!-- Add button -->
               <button
                 type="button"
+                data-testid="custom-menu-add"
                 class="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gray-300 py-3 text-sm text-gray-500 transition-colors hover:border-primary-400 hover:text-primary-600 dark:border-dark-600 dark:text-gray-400 dark:hover:border-primary-500 dark:hover:text-primary-400"
                 @click="addMenuItem"
               >
@@ -9551,6 +9572,7 @@ const form = reactive<SettingsForm>({
     url: string;
     visibility: "user" | "admin";
     sort_order: number;
+    purchase_mode?: boolean;
   }>,
   custom_endpoints: [] as Array<{
     name: string;
@@ -10522,6 +10544,7 @@ function addMenuItem() {
     url: "",
     visibility: "user",
     sort_order: form.custom_menu_items.length,
+    purchase_mode: false,
   });
 }
 

@@ -740,6 +740,96 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
+  it("defaults new custom menu items to purchase guidance off", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="custom-menu-add"]').trigger("click");
+
+    const toggle = wrapper.get('[data-testid="custom-menu-purchase-mode-0"]');
+    expect((toggle.element as HTMLInputElement).checked).toBe(false);
+    expect(wrapper.text()).toContain("admin.settings.customMenu.purchaseModeHint");
+  });
+
+  it("preserves custom menu purchase mode while reordering and saving", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      custom_menu_items: [
+        {
+          id: "store",
+          label: "Store",
+          icon_svg: "",
+          url: "https://pay.example.com/store",
+          visibility: "user",
+          sort_order: 0,
+          purchase_mode: true,
+        },
+        {
+          id: "docs",
+          label: "Docs",
+          icon_svg: "",
+          url: "https://docs.example.com",
+          visibility: "user",
+          sort_order: 1,
+          purchase_mode: false,
+        },
+      ],
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(
+      (wrapper.get('[data-testid="custom-menu-purchase-mode-0"]').element as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+    expect(
+      (wrapper.get('[data-testid="custom-menu-purchase-mode-1"]').element as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+
+    const firstMenuCard = wrapper.get('[data-testid="custom-menu-item-0"]');
+    const moveDown = firstMenuCard
+      .findAll("button")
+      .find((node) => node.attributes("title") === "admin.settings.customMenu.moveDown");
+    expect(moveDown).toBeDefined();
+    await moveDown!.trigger("click");
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    const payload = updateSettings.mock.calls.at(-1)![0] as {
+      custom_menu_items: Array<{
+        id: string;
+        purchase_mode?: boolean;
+        sort_order: number;
+      }>;
+    };
+    expect(payload.custom_menu_items).toEqual([
+      expect.objectContaining({ id: "docs", purchase_mode: false, sort_order: 0 }),
+      expect.objectContaining({ id: "store", purchase_mode: true, sort_order: 1 }),
+    ]);
+
+    const reloadedToggle = wrapper.get('[data-testid="custom-menu-purchase-mode-0"]');
+    await reloadedToggle.setValue(true);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    const reloadedPayload = updateSettings.mock.calls.at(-1)![0] as {
+      custom_menu_items: Array<{ id: string; purchase_mode?: boolean }>;
+    };
+    expect(reloadedPayload.custom_menu_items[0]).toEqual(
+      expect.objectContaining({ id: "docs", purchase_mode: true }),
+    );
+  });
+
+  it("documents purchase-mode identity isolation in both locales", () => {
+    expect(zhSettings.settings.customMenu.purchaseModeHint).toContain("不会向商城传递平台身份参数");
+    expect(enSettings.settings.customMenu.purchaseModeHint).toContain(
+      "without passing platform identity parameters",
+    );
+  });
+
   it("renders panel rate limit card and saves settings", async () => {
     getPanelRateLimitSettings.mockClear();
     updatePanelRateLimitSettings.mockClear();

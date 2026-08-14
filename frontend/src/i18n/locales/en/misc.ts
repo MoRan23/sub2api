@@ -75,6 +75,9 @@ export default {
   customPage: {
     title: 'Custom Page',
     openInNewTab: 'Open in new tab',
+    purchaseGuideTitle: 'Redeem after payment',
+    purchaseGuideDescription: 'This page only sells codes. After payment, copy the redemption code, open the Redeem page, and paste it there before your balance is credited.',
+    goToRedeem: 'Go to Redeem',
     notFoundTitle: 'Page not found',
     notFoundDesc: 'This custom page does not exist or has been removed.',
     notConfiguredTitle: 'Page URL not configured',

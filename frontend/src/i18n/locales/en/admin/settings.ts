@@ -687,6 +687,8 @@ export default {
         visibility: 'Visible To',
         visibilityUser: 'Regular Users',
         visibilityAdmin: 'Administrators',
+        purchaseMode: 'Purchase / Redeem Guidance',
+        purchaseModeHint: 'Shows purchase guidance and an in-app redeem button without passing platform identity parameters to the storefront.',
         add: 'Add Menu Item',
         remove: 'Remove',
         moveUp: 'Move Up',

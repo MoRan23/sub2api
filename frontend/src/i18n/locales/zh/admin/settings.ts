@@ -682,6 +682,8 @@ export default {
         visibility: '可见角色',
         visibilityUser: '普通用户',
         visibilityAdmin: '管理员',
+        purchaseMode: '购买/兑换引导',
+        purchaseModeHint: '开启后显示购买提示和站内兑换按钮，且不会向商城传递平台身份参数。',
         add: '添加菜单项',
         remove: '删除',
         moveUp: '上移',
