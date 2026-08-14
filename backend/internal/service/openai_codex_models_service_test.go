@@ -160,12 +160,14 @@ func newCodexModelsTestAccount() *Account {
 func TestFetchCodexModelsManifestPassthrough(t *testing.T) {
 	manifestBody := `{"models":[{"slug":"gpt-5.5","display_name":"GPT-5.5"}]}`
 
-	var gotAuth, gotAccountID, gotOriginator, gotClientVersion string
+	var gotAuth, gotAccountID, gotOriginator, gotClientVersion, gotVersion, gotUserAgent string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotAccountID = r.Header.Get("chatgpt-account-id")
 		gotOriginator = r.Header.Get("Originator")
 		gotClientVersion = r.URL.Query().Get("client_version")
+		gotVersion = r.Header.Get("Version")
+		gotUserAgent = r.Header.Get("User-Agent")
 		w.Header().Set("ETag", `W/"abc123"`)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(manifestBody))
@@ -175,6 +177,10 @@ func TestFetchCodexModelsManifestPassthrough(t *testing.T) {
 	original := chatgptCodexModelsURL
 	chatgptCodexModelsURL = server.URL
 	defer func() { chatgptCodexModelsURL = original }()
+	SetCodexCanonicalUserAgentResolver(func() string {
+		return "codex_vscode/0.200.1 (Mac OS X 15.1.0; arm64) iTerm.app"
+	})
+	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
 
 	s := &OpenAIGatewayService{}
 	manifest, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsTestAccount(), "0.137.0", "")
@@ -197,8 +203,14 @@ func TestFetchCodexModelsManifestPassthrough(t *testing.T) {
 	if gotOriginator != openai.CodexDefaultOriginator {
 		t.Errorf("originator header: got %q", gotOriginator)
 	}
-	if gotClientVersion != "0.137.0" {
+	if gotClientVersion != "0.200.1" {
 		t.Errorf("client_version query: got %q", gotClientVersion)
+	}
+	if gotVersion != "0.200.1" {
+		t.Errorf("version header: got %q", gotVersion)
+	}
+	if gotUserAgent != "codex-tui/0.200.1 (Mac OS X 15.1.0; arm64) iTerm.app (codex-tui; 0.200.1)" {
+		t.Errorf("user-agent header: got %q", gotUserAgent)
 	}
 }
 

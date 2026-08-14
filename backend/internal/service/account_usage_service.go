@@ -861,7 +861,6 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	req.Header.Set("OpenAI-Beta", "responses=experimental")
 	req.Header.Set("Originator", openaipkg.CodexDefaultOriginator)
 	req.Header.Set("Version", openAICodexProbeVersion)
-	req.Header.Set("User-Agent", codexCLIUserAgent)
 	if s.identityCache != nil {
 		if fp, fpErr := s.identityCache.GetFingerprint(reqCtx, account.ID); fpErr == nil && fp != nil && strings.TrimSpace(fp.UserAgent) != "" {
 			req.Header.Set("User-Agent", strings.TrimSpace(fp.UserAgent))
@@ -880,6 +879,11 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	profilePlan, planErr := gateway.ResolveOpenAIOAuthProfileIdentityPlan(reqCtx, nil, account, installationPolicy)
 	if planErr != nil {
 		return nil, fmt.Errorf("resolve OpenAI OAuth profile identity: %w", planErr)
+	}
+	if gateway.cfg != nil && gateway.cfg.Gateway.ForceCodexCLI {
+		req.Header.Set("User-Agent", profilePlan.ClientIdentity.UserAgent)
+		req.Header.Set("Originator", profilePlan.ClientIdentity.Originator)
+		req.Header.Set("Version", profilePlan.ClientIdentity.Version)
 	}
 	payloadBytes, err = ApplyOpenAIOAuthIdentityPlan(req.Header, payloadBytes, profilePlan)
 	if err != nil {

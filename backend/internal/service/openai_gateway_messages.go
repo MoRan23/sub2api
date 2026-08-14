@@ -319,16 +319,26 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
 		// Messages 兼容桥即使 body 未带 todo-guard/prompt_cache_key 标记（如映射到非
 		// gpt-5/codex 模型），也必须让 buildUpstreamRequest 走 bridge 分支，以保留
-		// 既有 body/session/conversation 行为。身份头在 post-build 阶段统一恢复。
+		// 既有 body/session/conversation 行为。公共 builder 只负责一次 resolve，最终
+		// 投影在账号覆写与兼容头恢复之后执行。
 		setOpenAICompatMessagesBridgeContext(c, true)
-		setOpenAIOutboundSessionIdentityPostBuildContext(c)
 	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	var upstreamReq *http.Request
 	if account.Platform == PlatformGrok {
 		upstreamReq, err = buildGrokResponsesRequest(upstreamCtx, c, account, responsesBody, token, grokCacheIdentity, s.cfg, s.settingService)
 	} else {
-		upstreamReq, err = s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, isStream, promptCacheKey, false)
+		upstreamReq, err = s.buildUpstreamRequestWithOptions(
+			upstreamCtx,
+			c,
+			account,
+			responsesBody,
+			token,
+			isStream,
+			promptCacheKey,
+			false,
+			openAIUpstreamRequestBuildOptions{deferOAuthIdentityProjection: account.Type == AccountTypeOAuth},
+		)
 	}
 	releaseUpstreamCtx()
 	if err != nil {
@@ -336,30 +346,6 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	}
 	if account.Platform != PlatformGrok {
 		responsesBody = openAIUpstreamRequestBodySnapshot(upstreamReq, responsesBody)
-	}
-	if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
-		capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
-		if !captured {
-			capture = CaptureOpenAIOAuthIdentity(c, responsesBody, promptCacheKey)
-			SetOpenAIOAuthIdentityCapture(c, capture)
-		}
-		planOptions := OpenAIOAuthIdentityPlanOptions{
-			TurnIdentityEnabled: identityModeEnabled,
-			ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
-			InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
-		}
-		plan, planned := OpenAIOAuthIdentityPlanFromContext(c)
-		if !planned || !s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, plan, planOptions) {
-			var planErr error
-			plan, planErr = s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, planOptions)
-			if planErr != nil {
-				return nil, fmt.Errorf("resolve final messages OAuth identity plan: %w", planErr)
-			}
-		}
-		SetOpenAIOAuthIdentityPlan(c, plan)
-		if plan.TurnIdentityEnabled {
-			setFingerprintObservationOutboundIdentity(c, plan.TurnIdentity)
-		}
 	}
 	outboundIdentityEnabled := false
 	if account.Platform != PlatformGrok {
@@ -377,21 +363,22 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 		// buildUpstreamRequest 保留 Messages bridge 的 body/session 兼容行为，并会先
 		// 清除身份头。真正发送前恢复完整 Codex 身份，避免 ChatGPT Codex 上游因缺失
 		// originator/OpenAI-Beta 返回 404（issue #3901）。
-		ensureCodexIdentityHeaders(upstreamReq.Header)
-		if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok {
-			projectedBody, applyErr := ApplyOpenAIOAuthIdentityPlan(upstreamReq.Header, responsesBody, plan)
-			if applyErr != nil {
-				return nil, fmt.Errorf("apply final messages OAuth identity plan: %w", applyErr)
+		plan, ok := OpenAIOAuthIdentityPlanFromContext(c)
+		if !ok {
+			return nil, errors.New("final messages OAuth identity plan is missing")
+		}
+		ensureCodexIdentityHeadersFromPlan(upstreamReq.Header, plan.ClientIdentity)
+		projectedBody, applyErr := ApplyOpenAIOAuthIdentityPlan(upstreamReq.Header, responsesBody, plan)
+		if applyErr != nil {
+			return nil, fmt.Errorf("apply final messages OAuth identity plan: %w", applyErr)
+		}
+		if !bytes.Equal(projectedBody, responsesBody) {
+			responsesBody = projectedBody
+			upstreamReq.Body = io.NopCloser(bytes.NewReader(projectedBody))
+			upstreamReq.ContentLength = int64(len(projectedBody))
+			upstreamReq.GetBody = func() (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(projectedBody)), nil
 			}
-			if !bytes.Equal(projectedBody, responsesBody) {
-				responsesBody = projectedBody
-				upstreamReq.Body = io.NopCloser(bytes.NewReader(projectedBody))
-				upstreamReq.ContentLength = int64(len(projectedBody))
-				upstreamReq.GetBody = func() (io.ReadCloser, error) {
-					return io.NopCloser(bytes.NewReader(projectedBody)), nil
-				}
-			}
-			SetOpenAIOAuthIdentityPlan(c, plan)
 		}
 		logger.L().Debug("openai messages: upstream identity restored",
 			zap.Int64("account_id", account.ID),

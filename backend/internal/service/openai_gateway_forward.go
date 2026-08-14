@@ -1016,38 +1016,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 }
 
-const openAIOutboundSessionIdentityPostBuildContextKey = "openai_outbound_session_identity_post_build"
-
-func setOpenAIOutboundSessionIdentityPostBuildContext(c *gin.Context) {
-	if c != nil {
-		c.Set(openAIOutboundSessionIdentityPostBuildContextKey, true)
-	}
-}
-
-func isOpenAIOutboundSessionIdentityPostBuildContext(c *gin.Context) bool {
-	if c == nil {
-		return false
-	}
-	value, ok := c.Get(openAIOutboundSessionIdentityPostBuildContextKey)
-	enabled, valid := value.(bool)
-	return ok && valid && enabled
-}
-
-// consumeOpenAIOutboundSessionIdentityPostBuildContext makes the compatibility
-// bridge marker request-local and one-shot. Chat/Messages set it immediately
-// before calling the shared builder so the final pair is resolved after all
-// transforms; leaving it on a reused Gin context would make a later, unrelated
-// builder silently skip its own UUIDv7 resolution.
-func consumeOpenAIOutboundSessionIdentityPostBuildContext(c *gin.Context) bool {
-	if !isOpenAIOutboundSessionIdentityPostBuildContext(c) {
-		return false
-	}
-	// Gin contexts are request-scoped but compatibility retries can reuse one.
-	// Store a typed false value so a subsequent Get cannot recover the marker.
-	c.Set(openAIOutboundSessionIdentityPostBuildContextKey, false)
-	return true
-}
-
 // setOpenAIOAuthIdentityCaptureCallerSeed fills the deferred compatibility
 // fallback without parsing the transformed body a second time. Explicit
 // identity captured from the original ingress body always keeps priority.
@@ -1075,9 +1043,29 @@ func openAIUpstreamRequestBodySnapshot(req *http.Request, fallback []byte) []byt
 	return body
 }
 
+type openAIUpstreamRequestBuildOptions struct {
+	deferOAuthIdentityProjection bool
+}
+
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
+	return s.buildUpstreamRequestWithOptions(
+		ctx, c, account, body, token, isStream, promptCacheKey, isCodexCLI,
+		openAIUpstreamRequestBuildOptions{},
+	)
+}
+
+func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	token string,
+	isStream bool,
+	promptCacheKey string,
+	isCodexCLI bool,
+	options openAIUpstreamRequestBuildOptions,
+) (*http.Request, error) {
 	clearFingerprintObservationOutboundIdentity(c)
-	postBuildIdentity := consumeOpenAIOutboundSessionIdentityPostBuildContext(c)
 	// Determine target URL based on account type
 	var targetURL string
 	switch account.Type {
@@ -1108,6 +1096,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
 	var outboundIdentity OpenAIOutboundSessionIdentity
 	outboundIdentityEnabled := false
+	compatMessagesBridge := false
 
 	// Build authentication for this request. Agent Identity signs a fresh
 	// assertion here; OAuth/PAT/API-key keep their existing Bearer behavior.
@@ -1139,7 +1128,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			}
 		}
 	}
-	if account.Type == AccountTypeOAuth && !postBuildIdentity {
+	if account.Type == AccountTypeOAuth {
 		identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
 		projectionMode := OpenAIOAuthIdentityProjectionRegular
 		if isOpenAIResponsesCompactPath(c) {
@@ -1155,16 +1144,11 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			ProjectionMode:      projectionMode,
 			InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
 		}
-		plan, planned := OpenAIOAuthIdentityPlanFromContext(c)
-		if !planned || !s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, plan, planOptions) {
-			var planErr error
-			plan, planErr = s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, planOptions)
-			if planErr != nil {
-				return nil, fmt.Errorf("resolve openai OAuth identity plan: %w", planErr)
-			}
-			SetOpenAIOAuthIdentityPlan(c, plan)
+		plan, planErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, planOptions, nil)
+		if planErr != nil {
+			return nil, fmt.Errorf("resolve openai OAuth identity plan: %w", planErr)
 		}
-		compatMessagesBridge := isOpenAICompatMessagesBridgeContext(c) || isOpenAICompatMessagesBridgeBody(body)
+		compatMessagesBridge = isOpenAICompatMessagesBridgeContext(c) || isOpenAICompatMessagesBridgeBody(body)
 		// 清除客户端透传的 session 头，后续用隔离后的值重新设置，防止跨用户会话碰撞。
 		clientConversationID := strings.TrimSpace(req.Header.Get("conversation_id"))
 		req.Header.Del("conversation_id")
@@ -1230,7 +1214,15 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// 若开启 ForceCodexCLI，则强制将上游 User-Agent 伪装为 Codex CLI。
 	// 用于网关未透传/改写 User-Agent 时，仍能命中 Codex 侧识别逻辑。
 	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
-		req.Header.Set("user-agent", codexCLIUserAgent)
+		if account.Type == AccountTypeOAuth {
+			if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok {
+				req.Header.Set("user-agent", plan.ClientIdentity.UserAgent)
+				req.Header.Set("originator", plan.ClientIdentity.Originator)
+				req.Header.Set("version", plan.ClientIdentity.Version)
+			}
+		} else {
+			req.Header.Set("user-agent", resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, "").UserAgent)
+		}
 	}
 
 	// Ensure required headers exist
@@ -1240,7 +1232,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
 	account.ApplyHeaderOverrides(req.Header)
-	if account.Type == AccountTypeOAuth && !postBuildIdentity {
+	if account.Type == AccountTypeOAuth && !options.deferOAuthIdentityProjection {
 		if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok {
 			projectedBody, applyErr := ApplyOpenAIOAuthIdentityPlan(req.Header, body, plan)
 			if applyErr != nil {

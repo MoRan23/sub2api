@@ -740,8 +740,6 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		req.Header.Set("Originator", openai.CodexDefaultOriginator)
 		if customUA := strings.TrimSpace(credentialAccount.GetOpenAIOutboundUserAgent()); customUA != "" {
 			req.Header.Set("User-Agent", customUA)
-		} else {
-			req.Header.Set("User-Agent", codexCLIUserAgent)
 		}
 		setOpenAIChatGPTAccountHeaders(req.Header, credentialAccount)
 	}
@@ -761,6 +759,11 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth profile identity: %s", planErr.Error()))
 		}
 		copyOpenAIInstallationIDHeadersFromContext(c, req.Header)
+		if gateway.cfg != nil && gateway.cfg.Gateway.ForceCodexCLI {
+			req.Header.Set("User-Agent", plan.ClientIdentity.UserAgent)
+			req.Header.Set("Originator", plan.ClientIdentity.Originator)
+			req.Header.Set("Version", plan.ClientIdentity.Version)
+		}
 		var applyErr error
 		payloadBytes, applyErr = ApplyOpenAIOAuthIdentityPlan(req.Header, payloadBytes, plan)
 		if applyErr != nil {
@@ -2104,11 +2107,11 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		if account.IsOpenAIPassthroughEnabled() {
 			installationPolicy = OpenAIOAuthInstallationPreserve
 		}
-		plan, planErr := gateway.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, OpenAIOAuthIdentityPlanOptions{
+		plan, planErr := gateway.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, OpenAIOAuthIdentityPlanOptions{
 			TurnIdentityEnabled: gateway.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account),
 			ProjectionMode:      OpenAIOAuthIdentityProjectionCompact,
 			InstallationPolicy:  installationPolicy,
-		})
+		}, nil)
 		if planErr != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth identity: %s", planErr.Error()))
 		}
@@ -3006,8 +3009,6 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	req.Header.Set("originator", openai.CodexDefaultOriginator)
 	if customUA := strings.TrimSpace(credentialAccount.GetOpenAIOutboundUserAgent()); customUA != "" {
 		req.Header.Set("User-Agent", customUA)
-	} else {
-		req.Header.Set("User-Agent", codexCLIUserAgent)
 	}
 	setOpenAIChatGPTAccountHeaders(req.Header, credentialAccount)
 	gateway := s.openAIGatewayService
@@ -3023,6 +3024,11 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth profile identity: %s", planErr.Error()))
 	}
 	copyOpenAIInstallationIDHeadersFromContext(c, req.Header)
+	if gateway.cfg != nil && gateway.cfg.Gateway.ForceCodexCLI {
+		req.Header.Set("User-Agent", profilePlan.ClientIdentity.UserAgent)
+		req.Header.Set("Originator", profilePlan.ClientIdentity.Originator)
+		req.Header.Set("Version", profilePlan.ClientIdentity.Version)
+	}
 	responsesBody, err = ApplyOpenAIOAuthIdentityPlan(req.Header, responsesBody, profilePlan)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to apply OpenAI OAuth profile identity: %s", err.Error()))

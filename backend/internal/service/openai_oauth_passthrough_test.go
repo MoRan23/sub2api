@@ -1909,7 +1909,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_OfficialIdentityUnified(t *testin
 	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("version"))
 }
 
-// 透传模式下真实 TUI 客户端的身份同样被统一：被优先降载的身份不会带到上游。
+// 透传模式下真实 TUI 客户端的身份同样由最终 OAuth plan 统一。
 func TestOpenAIGatewayService_OAuthPassthrough_CodexTuiIdentityUnified(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

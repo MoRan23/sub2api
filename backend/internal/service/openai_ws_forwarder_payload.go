@@ -195,16 +195,11 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 			ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
 			InstallationPolicy:  installationPolicy,
 		}
-		plan, planned := OpenAIOAuthIdentityPlanFromContext(c)
-		var identityErr error
-		if !planned || !s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, plan, planOptions) {
-			plan, identityErr = s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, planOptions)
-		}
+		plan, identityErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, planOptions, nil)
 		if identityErr != nil {
 			return nil, sessionResolution, fmt.Errorf("resolve openai oauth identity plan: %w", identityErr)
 		}
 		sessionResolution.OutboundIdentityPlan = plan
-		SetOpenAIOAuthIdentityPlan(c, plan)
 		if sessionResolution.OutboundIdentityModeEnabled {
 			sessionResolution.OutboundLogicalIdentity = capture.Logical
 			sessionResolution.OutboundIdentityLogicalKey = capture.Logical.SessionKey
@@ -280,7 +275,14 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 		}
 	}
 	if s != nil && s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
-		headers.Set("user-agent", codexCLIUserAgent)
+		if account != nil && account.Type == AccountTypeOAuth {
+			plan := sessionResolution.OutboundIdentityPlan.ClientIdentity
+			headers.Set("user-agent", plan.UserAgent)
+			headers.Set("originator", plan.Originator)
+			headers.Set("version", plan.Version)
+		} else {
+			headers.Set("user-agent", resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, "").UserAgent)
+		}
 	}
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 覆盖所有 WS 模式（ctx_pool/dedicated/passthrough）的握手头。

@@ -43,6 +43,24 @@ func TestUpdateSettingsPartialPayloadKeepsUnsentKeys(t *testing.T) {
 	require.Equal(t, "true", repo.values[service.SettingKeyTurnstileEnabled])
 }
 
+func TestUpdateSettingsResponseIncludesReadOnlyBuiltinCodexVersion(t *testing.T) {
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{})
+
+	rec := doUpdateSettings(t, h, map[string]any{
+		"risk_control_enabled":                true,
+		"openai_codex_client_version_builtin": "9.9.9",
+	}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var body struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Equal(t, "0.147.0", body.Data["openai_codex_client_version_builtin"])
+	require.NotContains(t, repo.values, "openai_codex_client_version_builtin")
+	require.NotContains(t, repo.lastUpdates, "openai_codex_client_version_builtin")
+}
+
 func TestUpdateSettingsCodexFingerprintPolicyExplicitFieldsArePersistedAndPublished(t *testing.T) {
 	tests := []struct {
 		name string

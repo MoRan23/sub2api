@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -271,6 +272,89 @@ func TestOpenAIOutboundIdentityPathsCompactUsesCanonicalPair(t *testing.T) {
 			} else {
 				require.Equal(t, isolateOpenAISessionID(32, "compact-path-key"), req.Header.Get("session_id"))
 				require.Equal(t, 0, identityPathCacheCalls(cache))
+			}
+		})
+	}
+}
+
+func TestOpenAIOutboundIdentityPathsResponsesThenCompactReuseCanonicalIdentity(t *testing.T) {
+	tests := []struct {
+		name          string
+		responsesBody []byte
+		compactBody   []byte
+		setupHeaders  func(http.Header)
+		compactAlias  string
+	}{
+		{
+			name:          "canonical tuple",
+			responsesBody: []byte(`{"model":"gpt-5.4","stream":false,"input":"hello","client_metadata":{"session_id":"continuity-canonical","thread_id":"continuity-canonical"}}`),
+			compactBody:   []byte(`{"model":"gpt-5.4","stream":false,"input":"hello","client_metadata":{"session_id":"continuity-canonical","thread_id":"continuity-canonical"}}`),
+		},
+		{
+			name:          "prompt cache fallback",
+			responsesBody: []byte(`{"model":"gpt-5.4","stream":false,"input":"hello","prompt_cache_key":"continuity-prompt"}`),
+			compactBody:   []byte(`{"model":"gpt-5.4","stream":false,"input":"hello","prompt_cache_key":"continuity-prompt"}`),
+			compactAlias:  "continuity-prompt",
+		},
+		{
+			name:          "compact legacy alias",
+			responsesBody: []byte(`{"model":"gpt-5.4","stream":false,"input":"hello"}`),
+			compactBody:   []byte(`{"model":"gpt-5.4","stream":false,"input":"hello"}`),
+			setupHeaders: func(headers http.Header) {
+				headers.Set("session_id", "continuity-legacy")
+			},
+			compactAlias: "continuity-legacy",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{
+				successfulInstallationTestResponse(),
+				successfulInstallationTestResponse(),
+			}}
+			svc, _ := newOpenAIIdentityPathService(t, true, upstream)
+			account := newOpenAIIdentityPathOAuthAccount(910073)
+			account.Extra = map[string]any{openAIPinnedInstallationIDKey: transportTestPinnedInstallationID}
+
+			responsesContext, _ := newOpenAIIdentityPathContext(t, "/v1/responses", tt.responsesBody, 73)
+			if tt.setupHeaders != nil {
+				tt.setupHeaders(responsesContext.Request.Header)
+			}
+			SetOpenAIOAuthIdentityCapture(responsesContext, CaptureOpenAIOAuthIdentity(responsesContext, tt.responsesBody, ""))
+			result, err := svc.Forward(context.Background(), responsesContext, account, tt.responsesBody)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			compactContext, _ := newOpenAIIdentityPathContext(t, "/v1/responses/compact", tt.compactBody, 73)
+			if tt.setupHeaders != nil {
+				tt.setupHeaders(compactContext.Request.Header)
+			}
+			SetOpenAIOAuthIdentityCapture(compactContext, CaptureOpenAIOAuthIdentityWithEndpointAlias(
+				compactContext, tt.compactBody, tt.compactAlias,
+			))
+			result, err = svc.Forward(context.Background(), compactContext, account, tt.compactBody)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			require.Len(t, upstream.requests, 2)
+			require.Len(t, upstream.bodies, 2)
+			responsesIdentity := requireOpenAIIdentityPathPair(t, upstream.requests[0].Header, upstream.bodies[0])
+			compactIdentity := OpenAIOutboundSessionIdentity{
+				SessionID: upstream.requests[1].Header.Get("session-id"),
+				ThreadID:  upstream.requests[1].Header.Get("thread-id"),
+			}
+			require.NoError(t, ValidateOpenAIOutboundSessionIdentity(compactIdentity))
+			require.Equal(t, responsesIdentity.SessionID, compactIdentity.SessionID)
+			require.Equal(t, responsesIdentity.ThreadID, compactIdentity.ThreadID)
+			requireOpenAIIdentityPathNoBodyPair(t, upstream.bodies[1])
+			require.False(t, gjson.GetBytes(upstream.bodies[1], "client_metadata").Exists())
+
+			for _, req := range upstream.requests {
+				require.Equal(t, transportTestPinnedInstallationID, req.Header.Get(codexInstallationIDKey))
+				require.Equal(t, openai.CodexDefaultOriginator, req.Header.Get("originator"))
+				require.Equal(t, codexCLIVersion, req.Header.Get("version"))
+				require.Equal(t, buildCodexCLIUserAgent(codexCLIVersion), req.Header.Get("user-agent"))
 			}
 		})
 	}
@@ -956,7 +1040,7 @@ func TestOpenAIOutboundIdentityPathsAlphaWithoutIDUsesExplicitTurnMetadata(t *te
 	require.Equal(t, 2, identityPathCacheCalls(cache))
 }
 
-func TestOpenAIOutboundIdentityDirectAlphaOnlyRewritesExistingTurnMetadata(t *testing.T) {
+func TestOpenAIOutboundIdentityDirectAlphaProjectsCanonicalMetadata(t *testing.T) {
 	body := []byte(`{"id":"direct-alpha-id","model":"gpt-5.4","query":"search","future_field":{"keep":true}}`)
 	c, _ := newOpenAIIdentityPathContext(t, "/v1/alpha/search", body, 412)
 	const opaqueMetadata = "  opaque-turn-metadata\t"
@@ -984,5 +1068,5 @@ func TestOpenAIOutboundIdentityDirectAlphaOnlyRewritesExistingTurnMetadata(t *te
 	require.Equal(t, "keep", gjson.Get(rewritten, "label").String())
 	require.True(t, ValidateFingerprintObservationUUIDv7(gjson.Get(rewritten, "session_id").String()))
 	require.True(t, ValidateFingerprintObservationUUIDv7(gjson.Get(rewritten, "thread_id").String()))
-	require.False(t, gjson.Get(rewritten, "installation_id").Exists())
+	require.Equal(t, "11111111-2222-4333-8444-555555555555", gjson.Get(rewritten, "installation_id").String())
 }

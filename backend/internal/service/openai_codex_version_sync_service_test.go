@@ -39,6 +39,19 @@ func (r *codexVersionSyncSettingRepoStub) GetValue(_ context.Context, key string
 	return r.values[key], nil
 }
 
+func (r *codexVersionSyncSettingRepoStub) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+	out := make(map[string]string, len(keys))
+	for _, key := range keys {
+		out[key] = r.values[key]
+	}
+	return out, nil
+}
+
 func (r *codexVersionSyncSettingRepoStub) Set(_ context.Context, key, value string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -123,6 +136,36 @@ func TestOpenAICodexVersionSyncWritesLatestStableVersion(t *testing.T) {
 	newCodexVersionSyncService(repo, github).runOnce()
 
 	require.Equal(t, []string{"0.146.0"}, repo.syncedWrites())
+}
+
+func TestOpenAICodexVersionSyncRefreshesCompleteRuntimeIdentity(t *testing.T) {
+	repo := newCodexVersionSyncSettingRepoStub(map[string]string{
+		SettingKeyOpenAICodexUserAgent:           "codex_vscode/0.120.0 (Mac OS X 15.1.0; arm64) iTerm.app",
+		SettingKeyOpenAICodexClientVersionSynced: "0.147.0",
+	})
+	settings := NewSettingService(repo, nil)
+	ctx := context.Background()
+	require.Equal(t,
+		"codex-tui/0.147.0 (Mac OS X 15.1.0; arm64) iTerm.app (codex-tui; 0.147.0)",
+		settings.GetOpenAICodexCanonicalUserAgent(ctx),
+	)
+
+	syncService := NewOpenAICodexVersionSyncService(
+		repo,
+		settings,
+		&codexVersionSyncGitHubStub{latest: &GitHubRelease{TagName: "rust-v0.148.0"}},
+		openAICodexVersionSyncInterval,
+	)
+	syncService.runOnce()
+
+	wantUA := "codex-tui/0.148.0 (Mac OS X 15.1.0; arm64) iTerm.app (codex-tui; 0.148.0)"
+	require.Equal(t, wantUA, settings.GetOpenAICodexCanonicalUserAgent(ctx))
+	SetCodexCanonicalUserAgentResolver(func() string { return settings.GetOpenAICodexCanonicalUserAgent(ctx) })
+	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
+	identity := resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, "")
+	require.Equal(t, wantUA, identity.UserAgent)
+	require.Equal(t, "0.148.0", identity.Version)
+	require.Equal(t, "codex-tui", identity.Originator)
 }
 
 // 只向前推进：上游偶发返回旧数据或重新发布历史 tag 时不把已同步版本降级。
@@ -334,14 +377,13 @@ func TestGetOpenAICodexCanonicalUserAgentBuildsFromVersion(t *testing.T) {
 	}}, nil)
 
 	require.Equal(t,
-		"codex-tui/0.200.1"+codexCLIUserAgentSuffix,
+		"codex-tui/0.200.1 "+codexCLIEnvironmentFingerprint+" (codex-tui; 0.200.1)",
 		svc.GetOpenAICodexCanonicalUserAgent(context.Background()),
 	)
 }
 
-// 回归：面板完整 UA 是唯一能改 OS / 架构 / 终端指纹的地方，必须保留；但它填写于某个
-// 历史版本，逐字沿用会绕过版本自动同步、把出站身份永久钉死在陈旧版本上——而陈旧身份
-// 正是上游优先降载的那一侧。因此只借它的指纹，版本段一律用生效版本重建。
+// 回归：面板完整 UA 只贡献 OS / 架构 / 终端指纹。客户端家族、首尾版本和
+// originator 均由规范 TUI 身份重建。
 func TestGetOpenAICodexCanonicalUserAgentRebuildsPanelUAVersion(t *testing.T) {
 	t.Run("陈旧面板 UA 跟随生效版本", func(t *testing.T) {
 		svc := NewSettingService(&codexVersionSettingRepoStub{values: map[string]string{
@@ -351,7 +393,7 @@ func TestGetOpenAICodexCanonicalUserAgentRebuildsPanelUAVersion(t *testing.T) {
 		}}, nil)
 
 		require.Equal(t,
-			"codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color",
+			"codex-tui/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.200.1)",
 			svc.GetOpenAICodexCanonicalUserAgent(context.Background()),
 		)
 	})
@@ -363,7 +405,7 @@ func TestGetOpenAICodexCanonicalUserAgentRebuildsPanelUAVersion(t *testing.T) {
 		}}, nil)
 
 		require.Equal(t,
-			"codex_cli_rs/0.200.1 (Mac OS X 15.1.0; arm64) iTerm.app",
+			"codex-tui/0.200.1 (Mac OS X 15.1.0; arm64) iTerm.app (codex-tui; 0.200.1)",
 			svc.GetOpenAICodexCanonicalUserAgent(context.Background()),
 		)
 	})
@@ -389,18 +431,17 @@ func TestGetOpenAICodexCanonicalUserAgentRebuildsPanelUAVersion(t *testing.T) {
 		}}, nil)
 
 		require.Equal(t,
-			"codex_cli_rs/0.150.0 (Ubuntu 22.4.0; x86_64) xterm-256color",
+			"codex-tui/0.150.0 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.150.0)",
 			svc.GetOpenAICodexCanonicalUserAgent(context.Background()),
 		)
 	})
 
-	// 非 `{client}/{version}` 形态无法重建，原样返回，由收口整体回退规范身份。
-	t.Run("非 Codex 形态原样返回", func(t *testing.T) {
+	t.Run("非 Codex 形态回退完整标准身份", func(t *testing.T) {
 		svc := NewSettingService(&codexVersionSettingRepoStub{values: map[string]string{
 			SettingKeyOpenAICodexUserAgent: "not-a-codex-client",
 		}}, nil)
 
-		require.Equal(t, "not-a-codex-client", svc.GetOpenAICodexCanonicalUserAgent(context.Background()))
+		require.Equal(t, codexCLIUserAgent, svc.GetOpenAICodexCanonicalUserAgent(context.Background()))
 	})
 }
 

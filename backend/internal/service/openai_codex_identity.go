@@ -46,12 +46,22 @@ func NormalizeCodexClientVersion(version string) string {
 }
 
 // buildCodexCLIUserAgent 按版本号拼出规范 Codex TUI User-Agent。
-// UA 形态只在 codexCLIUserAgentSuffix 一处定义，避免多处拼装漂移。
+// 完整形态由 openai.EnsureCodexTUIUserAgent 唯一构造。
 func buildCodexCLIUserAgent(version string) string {
 	if version = NormalizeCodexClientVersion(version); version == "" {
-		return codexCLIUserAgent
+		version = codexCLIVersion
 	}
-	return openai.CodexDefaultOriginator + "/" + version + codexCLIUserAgentSuffix
+	ua, ok := openai.EnsureCodexTUIUserAgent(codexCLIEnvironmentFingerprint, version)
+	if !ok {
+		panic("invalid built-in Codex TUI identity")
+	}
+	return ua
+}
+
+// BuiltinOpenAICodexClientVersion exposes the single compile-time fallback to
+// read-only settings views without duplicating the version in handlers or UI.
+func BuiltinOpenAICodexClientVersion() string {
+	return codexCLIVersion
 }
 
 // codexCanonicalUserAgentResolver 返回当前生效的规范 Codex User-Agent（后台设置 / 自动同步版本号）。
@@ -128,6 +138,9 @@ func resolveCodexClientIdentityPlanFromSnapshot(
 	canonical codexOutboundIdentity,
 ) CodexClientIdentityPlan {
 	identity := resolveCodexOutboundIdentityFromSnapshot(overrideUA, canonical)
+	if mode == CodexClientIdentityNormalize {
+		identity = resolveCodexTUIOutboundIdentityFromSnapshot(overrideUA, canonical)
+	}
 	return CodexClientIdentityPlan{
 		Mode:       mode,
 		UserAgent:  identity.userAgent,
@@ -141,23 +154,41 @@ func resolveCodexClientIdentityPlanFromSnapshot(
 //
 // 候选 UA（面板 / 账号级的管理员显式配置）只贡献客户端名与 OS / 架构 / 终端指纹，
 // 其自带的版本段一律用当前生效版本重建：一条填写于某个历史版本的 UA 否则会把出站身份
-// 永久钉死在陈旧版本上，绕过版本自动同步，落回上游优先降载的那一侧。
+// 永久钉死在陈旧版本上并绕过版本自动同步。
 // 需要固定版本请填「Codex 客户端版本号」并关闭自动同步。
 func resolveCodexOutboundIdentity(candidateUA string) codexOutboundIdentity {
 	canonical := codexCanonicalUserAgent()
-	canonicalOriginator, canonicalUA, ok := openai.PairCodexClientIdentity(canonical)
+	version := codexClientVersionFromUA(canonical)
+	canonicalUA, ok := openai.EnsureCodexTUIUserAgent(canonical, version)
 	if !ok {
-		canonicalOriginator, canonicalUA = openai.CodexDefaultOriginator, codexCLIUserAgent
+		canonicalUA = buildCodexCLIUserAgent(version)
 	}
 	canonicalIdentity := codexOutboundIdentity{
 		userAgent:  canonicalUA,
-		originator: canonicalOriginator,
-		version:    codexClientVersionFromUA(canonical),
-	}
-	if rebuilt := openai.SetCodexUserAgentVersion(canonicalIdentity.userAgent, canonicalIdentity.version); rebuilt != "" {
-		canonicalIdentity.userAgent = rebuilt
+		originator: openai.CodexDefaultOriginator,
+		version:    version,
 	}
 	return resolveCodexOutboundIdentityFromSnapshot(candidateUA, canonicalIdentity)
+}
+
+func resolveCodexTUIOutboundIdentityFromSnapshot(candidateUA string, canonical codexOutboundIdentity) codexOutboundIdentity {
+	version := NormalizeCodexClientVersion(canonical.version)
+	if version == "" {
+		version = codexCLIVersion
+	}
+	ua := strings.TrimSpace(candidateUA)
+	if ua == "" {
+		ua = canonical.userAgent
+	}
+	ua, ok := openai.EnsureCodexTUIUserAgent(ua, version)
+	if !ok {
+		ua = buildCodexCLIUserAgent(version)
+	}
+	return codexOutboundIdentity{
+		userAgent:  ua,
+		originator: openai.CodexDefaultOriginator,
+		version:    version,
+	}
 }
 
 func resolveCodexOutboundIdentityFromSnapshot(candidateUA string, canonical codexOutboundIdentity) codexOutboundIdentity {
@@ -198,14 +229,28 @@ func ensureCodexIdentityHeaders(h http.Header) {
 		return
 	}
 	identity := resolveCodexOutboundIdentity("")
+	ensureCodexIdentityHeadersFromPlan(h, CodexClientIdentityPlan{
+		UserAgent:  identity.userAgent,
+		Originator: identity.originator,
+		Version:    identity.version,
+	})
+}
+
+// ensureCodexIdentityHeadersFromPlan fills compatibility headers from the
+// immutable request/connection snapshot. In particular, Messages must not
+// consult the hot global UA resolver again after its OAuth plan was resolved.
+func ensureCodexIdentityHeadersFromPlan(h http.Header, plan CodexClientIdentityPlan) {
+	if h == nil {
+		return
+	}
 	if strings.TrimSpace(h.Get("user-agent")) == "" {
-		h.Set("user-agent", identity.userAgent)
+		h.Set("user-agent", plan.UserAgent)
 	}
 	if strings.TrimSpace(h.Get("originator")) == "" {
-		h.Set("originator", identity.originator)
+		h.Set("originator", plan.Originator)
 	}
 	if strings.TrimSpace(h.Get("version")) == "" {
-		h.Set("version", identity.version)
+		h.Set("version", plan.Version)
 	}
 	h.Set("OpenAI-Beta", "responses=experimental")
 }
@@ -226,9 +271,7 @@ func enforceCodexIdentityHeaders(h http.Header) {
 }
 
 // enforceCodexIdentityHeadersWithUA 强制统一 OAuth 出站身份：User-Agent / originator / version
-// 一律改写为网关的规范身份，客户端自报身份不参与构造。上游在容量紧张时按客户端身份分优先级
-// 降载，被降载的请求会拿到 HTTP 200 + 流内 server_is_overloaded；统一出口可确保没有请求带着
-// 第三方或陈旧身份出站，也天然满足 originator 与 UA 首段配套的上游校验（issue #3901）。
+// 一律改写为网关的规范身份，客户端自报身份不参与构造，并保证 originator 与 UA 首段配套。
 //
 // overrideUA 是账号级自定义 User-Agent：管理员的显式配置仍然生效，但只贡献客户端名与
 // OS / 架构 / 终端指纹——版本段与 originator 都由规范身份重建，不允许出现自相矛盾或陈旧的身份。
@@ -247,7 +290,12 @@ func enforceCodexIdentityHeadersWithUA(h http.Header, overrideUA string) {
 		pairCodexIdentityHeaders(h)
 		return
 	}
-	identity := resolveCodexOutboundIdentity(overrideUA)
+	plan := resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, overrideUA)
+	identity := codexOutboundIdentity{
+		userAgent:  plan.UserAgent,
+		originator: plan.Originator,
+		version:    plan.Version,
+	}
 	h.Set("user-agent", identity.userAgent)
 	h.Set("originator", identity.originator)
 	h.Set("version", identity.version)

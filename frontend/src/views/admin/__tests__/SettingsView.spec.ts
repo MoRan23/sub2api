@@ -221,6 +221,8 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.openaiExperimentalScheduler.upstreamCostWeight": "计费倍率",
     "admin.settings.openaiExperimentalScheduler.previousResponseWeight": "previous_response 粘性",
     "admin.settings.openaiExperimentalScheduler.sessionStickyWeight": "session_hash 粘性",
+    "admin.settings.gatewayForwarding.openaiCodexUserAgentPlaceholder":
+      "codex-tui/{version} (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; {version})",
     "admin.settings.upstreamBillingProbe.title": "上游倍率自动探测",
     "admin.settings.upstreamBillingProbe.description": "定期获取 OpenAI API Key 所连接上游 Sub2API 站点声明的计费倍率。",
     "admin.settings.upstreamBillingProbe.enabled": "启用全局自动探测",
@@ -471,6 +473,8 @@ const baseSettingsResponse = {
   antigravity_user_agent_version: "",
   openai_codex_user_agent: "",
   openai_codex_client_version: "",
+  openai_codex_client_version_synced: "",
+  openai_codex_client_version_builtin: "0.147.0",
   openai_codex_version_auto_sync_enabled: true,
   enable_openai_codex_fingerprint_normalization: true,
   enable_openai_codex_installation_id_normalization: true,
@@ -1215,6 +1219,87 @@ describe("admin SettingsView payment visible method controls", () => {
       expect.objectContaining({
         enable_openai_uuidv7_session_identity: false,
       }),
+    );
+  });
+
+  it("builds the Codex UA placeholder from the manual version and falls back live to the synced version", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_codex_user_agent: "",
+      openai_codex_client_version: "0.200.0",
+      openai_codex_client_version_synced: "0.199.0",
+      openai_codex_client_version_builtin: "0.147.0",
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    const userAgentInput = wrapper.get(
+      '[data-testid="codex-user-agent-input"]',
+    );
+    const versionInput = wrapper.get(
+      '[data-testid="codex-client-version-input"]',
+    );
+    expect(userAgentInput.attributes("placeholder")).toBe(
+      "codex-tui/0.200.0 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.200.0)",
+    );
+
+    await versionInput.setValue("");
+
+    expect(userAgentInput.attributes("placeholder")).toBe(
+      "codex-tui/0.199.0 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.199.0)",
+    );
+  });
+
+  it("uses the backend built-in Codex version in the UA placeholder without submitting read-only versions", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_codex_user_agent: "",
+      openai_codex_client_version: "",
+      openai_codex_client_version_synced: "",
+      openai_codex_client_version_builtin: "0.147.0",
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    expect(
+      wrapper
+        .get('[data-testid="codex-user-agent-input"]')
+        .attributes("placeholder"),
+    ).toBe(
+      "codex-tui/0.147.0 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.147.0)",
+    );
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    const payload = updateSettings.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("openai_codex_client_version_synced");
+    expect(payload).not.toHaveProperty("openai_codex_client_version_builtin");
+  });
+
+  it("describes the custom Codex UA as environment-only without unsupported capacity claims", () => {
+    const zhGateway = zhSettings.settings.gatewayForwarding;
+    const enGateway = enSettings.settings.gatewayForwarding;
+
+    expect(zhGateway.openaiCodexUserAgentHint).toContain("OS、架构和终端");
+    expect(enGateway.openaiCodexUserAgentHint).toContain(
+      "OS, architecture, and terminal",
+    );
+    expect(zhGateway.openaiCodexUserAgentHint).not.toContain("优先降载");
+    expect(enGateway.openaiCodexUserAgentHint).not.toContain("capacity pressure");
+    expect(zhGateway.openaiCodexUserAgentHint).not.toContain(
+      "server_is_overloaded",
+    );
+    expect(enGateway.openaiCodexUserAgentHint).not.toContain(
+      "server_is_overloaded",
+    );
+    expect(zhGateway.openaiCodexVersionAutoSyncHint).toContain("最后一次有效同步值");
+    expect(enGateway.openaiCodexVersionAutoSyncHint).toContain(
+      "last valid synced version",
     );
   });
 

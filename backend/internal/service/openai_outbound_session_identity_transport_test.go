@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -106,7 +105,7 @@ func TestOpenAIOutboundSessionIdentityTransportEnabledRequestSnapshot(t *testing
 	require.True(t, svc.openAIOutboundSessionIdentityTransportEnabledForRequest(context.Background(), nil))
 }
 
-func TestBuildUpstreamRequestConsumesPostBuildIdentityMarker(t *testing.T) {
+func TestBuildUpstreamRequestCompatBridgeMaterializesPlanAndDefersProjection(t *testing.T) {
 	svc := newTransportIdentityTestService(t, true)
 	account := &Account{
 		ID:       810011,
@@ -119,40 +118,37 @@ func TestBuildUpstreamRequestConsumesPostBuildIdentityMarker(t *testing.T) {
 	}
 	c := newOutboundIdentityTestContext(t, nil)
 
-	// Compatibility bridges set this marker before entering the shared builder;
-	// their post-build phase owns the final UUID pair. The marker must not leak
-	// into a later build reusing the same Gin context.
-	setOpenAIOutboundSessionIdentityPostBuildContext(c)
 	firstBody := []byte(`{"model":"gpt-5.4","prompt_cache_key":"compat-first"}`)
-	firstReq, err := svc.buildUpstreamRequest(
+	SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, firstBody, "compat-first"))
+	setOpenAICompatMessagesBridgeContext(c, true)
+	firstReq, err := svc.buildUpstreamRequestWithOptions(
 		context.Background(), c, account, firstBody, "oauth-token", true, "compat-first", false,
+		openAIUpstreamRequestBuildOptions{deferOAuthIdentityProjection: true},
 	)
 	require.NoError(t, err)
-	// UUIDv7 mode leaves identity projection to the compatibility bridge's
-	// post-build writer. It must not fall back to the legacy hex headers here.
+	// The facade must materialize a plan before the shared builder returns, while
+	// the compatibility bridge owns the one final projection after restoring its
+	// required headers.
 	require.Empty(t, firstReq.Header.Get("session-id"))
 	require.Empty(t, firstReq.Header.Get("thread-id"))
 	require.Empty(t, firstReq.Header.Get("session_id"))
 	require.Empty(t, firstReq.Header.Get("conversation_id"))
-	require.False(t, isOpenAIOutboundSessionIdentityPostBuildContext(c))
-
-	secondBody := []byte(`{"model":"gpt-5.4","prompt_cache_key":"ordinary-second"}`)
-	secondReq, err := svc.buildUpstreamRequest(
-		context.Background(), c, account, secondBody, "oauth-token", true, "ordinary-second", false,
-	)
+	plan, planned := OpenAIOAuthIdentityPlanFromContext(c)
+	require.True(t, planned)
+	require.True(t, plan.TurnIdentityEnabled)
+	ensureCodexIdentityHeadersFromPlan(firstReq.Header, plan.ClientIdentity)
+	projectedBody, err := ApplyOpenAIOAuthIdentityPlan(firstReq.Header, firstBody, plan)
 	require.NoError(t, err)
-	secondWireBody, err := io.ReadAll(secondReq.Body)
-	require.NoError(t, err)
-	require.NotEqual(t, isolateOpenAISessionID(0, "ordinary-second"), secondReq.Header.Get("session-id"))
+	require.NotEqual(t, isolateOpenAISessionID(0, "compat-first"), firstReq.Header.Get("session-id"))
 	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(OpenAIOutboundSessionIdentity{
-		SessionID: secondReq.Header.Get("session-id"),
-		ThreadID:  secondReq.Header.Get("thread-id"),
+		SessionID: firstReq.Header.Get("session-id"),
+		ThreadID:  firstReq.Header.Get("thread-id"),
 	}))
-	require.Equal(t, secondReq.Header.Get("session-id"), secondReq.Header.Get("thread-id"))
-	require.Empty(t, secondReq.Header.Get("session_id"))
-	require.Empty(t, secondReq.Header.Get("conversation_id"))
-	require.Equal(t, secondReq.Header.Get("session-id"), gjson.GetBytes(secondWireBody, "client_metadata.session_id").String())
-	require.Equal(t, secondReq.Header.Get("thread-id"), gjson.GetBytes(secondWireBody, "client_metadata.thread_id").String())
+	require.Equal(t, firstReq.Header.Get("session-id"), firstReq.Header.Get("thread-id"))
+	require.Empty(t, firstReq.Header.Get("session_id"))
+	require.Empty(t, firstReq.Header.Get("conversation_id"))
+	require.Equal(t, firstReq.Header.Get("session-id"), gjson.GetBytes(projectedBody, "client_metadata.session_id").String())
+	require.Equal(t, firstReq.Header.Get("thread-id"), gjson.GetBytes(projectedBody, "client_metadata.thread_id").String())
 }
 
 func TestResolveOpenAIOutboundSessionIdentityForTransportUsesFinalBody(t *testing.T) {

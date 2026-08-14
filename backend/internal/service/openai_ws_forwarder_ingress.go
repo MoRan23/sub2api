@@ -500,17 +500,16 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				capture = CaptureOpenAIOAuthIdentity(c, firstPayload.payloadRaw, "")
 				SetOpenAIOAuthIdentityCapture(c, capture)
 			}
-			plan, planErr := s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, OpenAIOAuthIdentityPlanOptions{
+			plan, planErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, OpenAIOAuthIdentityPlanOptions{
 				TurnIdentityEnabled: s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account),
 				ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
 				InstallationPolicy:  installationPolicy,
-			})
+			}, nil)
 			if planErr != nil {
 				return fmt.Errorf("resolve websocket http bridge identity plan: %w", planErr)
 			}
 			bridgeIdentityPlan = &plan
 			bridgeLogicalIdentity = capture.Logical
-			SetOpenAIOAuthIdentityPlan(c, plan)
 		}
 		logOpenAIWSModeInfo(
 			"ingress_ws_http_bridge_start account_id=%d account_type=%s payload_bytes=%d threshold_bytes=%d has_session_hash=%v store_disabled=%v",
@@ -533,17 +532,16 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				frameCapture := CaptureOpenAIOAuthIdentity(nil, currentBridgePayload.payloadRaw, "")
 				if frameCapture.Logical.Explicit && strings.TrimSpace(frameCapture.Logical.SessionKey) != "" &&
 					!openAICodexLogicalTurnIdentityEqual(frameCapture.Logical, bridgeLogicalIdentity) {
-					plan, planErr := s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, frameCapture, OpenAIOAuthIdentityPlanOptions{
+					plan, planErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, frameCapture, OpenAIOAuthIdentityPlanOptions{
 						TurnIdentityEnabled: bridgeIdentityPlan.TurnIdentityRequested,
 						ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
 						InstallationPolicy:  installationPolicy,
-					})
+					}, bridgeIdentityPlan)
 					if planErr != nil {
 						return fmt.Errorf("resolve websocket http bridge identity transition: %w", planErr)
 					}
 					bridgeLogicalIdentity = frameCapture.Logical
 					bridgeIdentityPlan = &plan
-					SetOpenAIOAuthIdentityPlan(c, plan)
 				}
 			}
 			if turn > 1 && hooks != nil && hooks.BeforeRequest != nil {
@@ -1735,11 +1733,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			identityChangedForNextTurn = candidateLogicalIdentity.Explicit && strings.TrimSpace(candidateLogicalIdentity.SessionKey) != "" &&
 				(!pinnedIdentityEnabled || !openAICodexLogicalTurnIdentityEqual(candidateLogicalIdentity, pinnedLogicalIdentity))
 			if identityChangedForNextTurn {
-				newPlan, identityErr := s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, frameCapture, OpenAIOAuthIdentityPlanOptions{
+				newPlan, identityErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, frameCapture, OpenAIOAuthIdentityPlanOptions{
 					TurnIdentityEnabled: pinnedIdentityPlan.TurnIdentityRequested,
 					ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
 					InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
-				})
+				}, &pinnedIdentityPlan)
 				newIdentity, newIdentityEnabled := newPlan.TurnIdentity, newPlan.TurnIdentityEnabled
 				if identityErr != nil {
 					if errors.Is(identityErr, errOpenAIOutboundSessionIdentityNamespace) {

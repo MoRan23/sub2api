@@ -403,11 +403,14 @@ func liveCallIDFromLocation(location string) (string, error) {
 
 func (s *OpenAIGatewayService) applyLiveUpstreamIdentityHeaders(ctx context.Context, account *Account, headers http.Header) error {
 	headers.Set("OpenAI-Alpha", "quicksilver=v2")
-	ensureCodexIdentityHeaders(headers)
 	plan, err := s.ResolveOpenAIOAuthProfileIdentityPlan(ctx, nil, account, OpenAIOAuthInstallationPreserve)
 	if err != nil {
 		return fmt.Errorf("resolve live OAuth profile identity: %w", err)
 	}
+	// Apply intentionally leaves requests without an originator untouched. Seed
+	// that marker from the same immutable plan instead of consulting the runtime
+	// canonical identity a second time through ensureCodexIdentityHeaders.
+	headers.Set("originator", plan.ClientIdentity.Originator)
 	if _, err = ApplyOpenAIOAuthIdentityPlan(headers, nil, plan); err != nil {
 		return fmt.Errorf("apply live OAuth profile identity: %w", err)
 	}

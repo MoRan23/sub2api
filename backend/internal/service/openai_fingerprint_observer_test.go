@@ -136,6 +136,27 @@ func TestRecordFingerprintObservationUsesFinalHeaderAliases(t *testing.T) {
 	}
 }
 
+func TestFingerprintObservationAlphaInstallationUsesFinalParseableMetadata(t *testing.T) {
+	const installationID = "11111111-2222-4333-8444-555555555555"
+	tests := []struct {
+		name     string
+		values   []string
+		expected string
+	}{
+		{name: "opaque only", values: []string{"opaque"}},
+		{name: "mixed opaque and canonical", values: []string{"opaque", `{"installation_id":"` + installationID + `"}`}, expected: installationID},
+		{name: "conflicting parseable values", values: []string{`{"installation_id":"first"}`, `{"installation_id":"second"}`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			headers := http.Header{openAIWSTurnMetadataHeader: tt.values}
+			if got := fingerprintObservationTurnMetadataHeaderInstallationID(headers); got != tt.expected {
+				t.Fatalf("installation ID = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestRecordFingerprintObservationBodyFallbackKeepsHeadersAuthoritative(t *testing.T) {
 	SetFingerprintObservationEnabled(true)
 	defer SetFingerprintObservationEnabled(false)

@@ -241,14 +241,12 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	}
 
 	clientVersion = strings.TrimSpace(clientVersion)
-	if clientVersion == "" {
-		clientVersion = openAICodexProbeVersion
-	}
 
 	requestEndpoint := chatgptCodexModelsURL
 	authToken := ""
 	useAPIKeyUpstream := false
 	appendModelsPath := false
+	var clientIdentity CodexClientIdentityPlan
 	switch {
 	case credAccount.IsOpenAIOAuth():
 		authToken = strings.TrimSpace(credAccount.GetOpenAIAccessToken())
@@ -278,6 +276,25 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	default:
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_ACCOUNT_TYPE_UNSUPPORTED", "account type %q cannot fetch the Codex models manifest", credAccount.Type)
 	}
+	if useAPIKeyUpstream {
+		if clientVersion == "" {
+			clientVersion = openAICodexProbeVersion
+		}
+	} else {
+		profilePlan, planErr := s.ResolveOpenAIOAuthProfileIdentityPlan(
+			ctx, nil, credAccount, OpenAIOAuthInstallationPreserve,
+		)
+		if planErr != nil {
+			return nil, infraerrors.Newf(
+				http.StatusBadGateway,
+				"OPENAI_CODEX_MODELS_IDENTITY_FAILED",
+				"resolve Codex models client identity: %v",
+				planErr,
+			)
+		}
+		clientIdentity = profilePlan.ClientIdentity
+		clientVersion = clientIdentity.Version
+	}
 
 	requestURL, err := buildCodexModelsManifestURL(requestEndpoint, appendModelsPath, clientVersion)
 	if err != nil {
@@ -304,12 +321,16 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 		setOpenAIChatGPTAccountHeaders(headers, credAccount)
 	}
 	headers.Set("Accept", "application/json")
-	identity := resolveCodexOutboundIdentity(credAccount.GetOpenAIUserAgent())
-	headers.Set("Originator", identity.originator)
-	// The manifest endpoint's query and Version header are selected by the
-	// caller; keep that existing contract while using the account UA suffix.
-	headers.Set("Version", clientVersion)
-	headers.Set("User-Agent", identity.userAgent)
+	if useAPIKeyUpstream {
+		identity := resolveCodexOutboundIdentity(credAccount.GetOpenAIUserAgent())
+		headers.Set("Originator", identity.originator)
+		headers.Set("Version", clientVersion)
+		headers.Set("User-Agent", identity.userAgent)
+	} else {
+		headers.Set("Originator", clientIdentity.Originator)
+		headers.Set("Version", clientIdentity.Version)
+		headers.Set("User-Agent", clientIdentity.UserAgent)
+	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

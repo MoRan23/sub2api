@@ -300,6 +300,115 @@ func SetCodexUserAgentVersion(userAgent, version string) string {
 	return rewriteCodexUATrailerVersion(client+"/"+version+tail, version)
 }
 
+// EnsureCodexTUIUserAgent converts a complete official Codex User-Agent, or a
+// standalone environment fingerprint supplied by the canonical builder, into
+// the canonical TUI shape. Invalid input returns false so the caller can fall
+// back to its standard environment fingerprint.
+//
+// Existing official client trailers are removed before the canonical trailer
+// is appended. This makes the operation idempotent and collapses duplicate or
+// stale trailers without mistaking the leading OS group for client metadata.
+func EnsureCodexTUIUserAgent(userAgent, version string) (string, bool) {
+	version = strings.TrimSpace(version)
+	if len(version) > codexUserAgentVersionMaxLen || !codexUserAgentVersionPattern.MatchString(version) {
+		return "", false
+	}
+
+	candidate := strings.TrimSpace(userAgent)
+	environment := candidate
+	if !strings.HasPrefix(candidate, "(") {
+		_, pairedUA, ok := PairCodexClientIdentity(candidate)
+		if !ok || !isPrintableASCII(pairedUA) {
+			return "", false
+		}
+		slash := strings.IndexByte(pairedUA, '/')
+		if slash <= 0 {
+			return "", false
+		}
+		rest := pairedUA[slash+1:]
+		space := strings.IndexByte(rest, ' ')
+		if space <= 0 {
+			return "", false
+		}
+		environment = strings.TrimSpace(rest[space+1:])
+	}
+	for {
+		trimmed, removed := trimTrailingCodexClientTrailer(environment)
+		if !removed {
+			break
+		}
+		environment = trimmed
+	}
+	if !isCodexEnvironmentFingerprint(environment) {
+		return "", false
+	}
+
+	return CodexDefaultOriginator + "/" + version + " " + environment +
+		" (" + CodexDefaultOriginator + "; " + version + ")", true
+}
+
+const codexUserAgentVersionMaxLen = 64
+
+var codexUserAgentVersionPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,3}(-[0-9A-Za-z.]+)?$`)
+
+func trimTrailingCodexClientTrailer(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if !strings.HasSuffix(value, ")") {
+		return value, false
+	}
+	open := strings.LastIndexByte(value, '(')
+	if open < 0 {
+		return value, false
+	}
+	inner := value[open+1 : len(value)-1]
+	semi := strings.IndexByte(inner, ';')
+	if semi < 0 {
+		return value, false
+	}
+	name := strings.TrimSpace(inner[:semi])
+	if name == "" || !IsCodexOfficialClientOriginator(name) {
+		return value, false
+	}
+	return strings.TrimSpace(value[:open]), true
+}
+
+// isCodexEnvironmentFingerprint accepts the wire shape emitted by codex-rs:
+// `(<OS> <version>; <arch>) <terminal>`. The terminal token is deliberately
+// narrow so malformed or unknown client trailers cannot be retained as part of
+// the environment fingerprint.
+func isCodexEnvironmentFingerprint(value string) bool {
+	value = strings.TrimSpace(value)
+	if !isPrintableASCII(value) || !strings.HasPrefix(value, "(") {
+		return false
+	}
+	closeIdx := strings.IndexByte(value, ')')
+	if closeIdx <= 1 || closeIdx+1 >= len(value) {
+		return false
+	}
+	osArch := value[1:closeIdx]
+	semi := strings.IndexByte(osArch, ';')
+	if semi <= 0 || semi+1 >= len(osArch) || strings.ContainsRune(osArch[semi+1:], ';') {
+		return false
+	}
+	if strings.TrimSpace(osArch[:semi]) == "" || strings.TrimSpace(osArch[semi+1:]) == "" {
+		return false
+	}
+	terminal := strings.TrimSpace(value[closeIdx+1:])
+	return terminal != "" && !strings.ContainsAny(terminal, " \t()")
+}
+
+func isPrintableASCII(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] < 0x20 || value[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
 // rewriteCodexUATrailerVersion 把尾部官方客户端标识组 `(name; version)` 的版本改成 version。
 // 括号组缺少 `;` 分隔的版本、或 name 不是官方 originator 时原样返回。
 func rewriteCodexUATrailerVersion(ua, version string) string {

@@ -44,3 +44,73 @@ func TestSetCodexUserAgentVersion(t *testing.T) {
 	require.Empty(t, SetCodexUserAgentVersion("/0.1.0", "0.146.0"))
 	require.Empty(t, SetCodexUserAgentVersion("codex_cli_rs/0.1.0", ""))
 }
+
+func TestEnsureCodexTUIUserAgent(t *testing.T) {
+	const version = "0.147.0"
+	const canonical = "codex-tui/0.147.0 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.147.0)"
+	tests := []struct {
+		name string
+		ua   string
+		want string
+	}{
+		{
+			name: "missing trailer",
+			ua:   "codex-tui/0.140.0 (Ubuntu 22.4.0; x86_64) xterm-256color",
+			want: canonical,
+		},
+		{
+			name: "old trailer and non-TUI family",
+			ua:   "codex_vscode/0.140.0 (Ubuntu 22.4.0; x86_64) xterm-256color (codex_vscode; 0.140.0)",
+			want: canonical,
+		},
+		{
+			name: "duplicate trailers",
+			ua:   "codex-tui/0.140.0 (Ubuntu 22.4.0; x86_64) xterm-256color (codex_vscode; 0.139.0) (codex-tui; broken)",
+			want: canonical,
+		},
+		{
+			name: "leading and trailer versions disagree",
+			ua:   "codex-tui/0.120.0 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.140.0)",
+			want: canonical,
+		},
+		{
+			name: "macOS environment",
+			ua:   "codex_cli_rs/0.140.0 (Mac OS X 15.1.0; arm64) iTerm.app",
+			want: "codex-tui/0.147.0 (Mac OS X 15.1.0; arm64) iTerm.app (codex-tui; 0.147.0)",
+		},
+		{
+			name: "Windows environment",
+			ua:   "codex-tui/0.140.0 (Windows 11.0.26100; x86_64) WindowsTerminal",
+			want: "codex-tui/0.147.0 (Windows 11.0.26100; x86_64) WindowsTerminal (codex-tui; 0.147.0)",
+		},
+		{name: "third-party UA", ua: "curl/8.0 (Ubuntu 22.4.0; x86_64) xterm-256color"},
+		{name: "third-party trailer", ua: "codex-tui/0.140.0 (Ubuntu 22.4.0; x86_64) xterm-256color (other-client; 0.140.0)"},
+		{name: "missing environment", ua: "codex-tui/0.140.0"},
+		{name: "missing terminal", ua: "codex-tui/0.140.0 (Ubuntu 22.4.0; x86_64)"},
+		{name: "malformed trailer", ua: "codex-tui/0.140.0 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.140.0"},
+		{name: "control character", ua: "codex-tui/0.140.0 (Ubuntu 22.4.0; x86_64) xterm\nother"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := EnsureCodexTUIUserAgent(tt.ua, version)
+			require.Equal(t, tt.want != "", ok)
+			require.Equal(t, tt.want, got)
+		})
+	}
+
+	got, ok := EnsureCodexTUIUserAgent(canonical, version)
+	require.True(t, ok)
+	require.Equal(t, canonical, got)
+	got, ok = EnsureCodexTUIUserAgent("(Ubuntu 22.4.0; x86_64) xterm-256color", version)
+	require.True(t, ok)
+	require.Equal(t, canonical, got)
+	got, ok = EnsureCodexTUIUserAgent(canonical, "0.148.0-alpha.4")
+	require.True(t, ok)
+	require.Equal(t, "codex-tui/0.148.0-alpha.4 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.148.0-alpha.4)", got)
+	for _, invalidVersion := range []string{"bogus", "0.147.0\r\nX-Injected: 1", "v0.147.0", ""} {
+		got, ok = EnsureCodexTUIUserAgent(canonical, invalidVersion)
+		require.False(t, ok, "version %q", invalidVersion)
+		require.Empty(t, got)
+	}
+}

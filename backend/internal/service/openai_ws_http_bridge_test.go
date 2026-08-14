@@ -488,13 +488,16 @@ func TestProxyOpenAIWSHTTPBridgeTurnUsesConnectionIdentityPlan(t *testing.T) {
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	plan := OpenAIOAuthIdentityPlan{
+		PolicySnapshot: defaultOpenAICodexFingerprintPolicy(0),
 		TurnIdentity: OpenAICodexTurnIdentity{
 			SessionID: sessionID, ThreadID: threadID, ParentThreadID: sessionID,
 			Relation: OpenAICodexTurnRelationDescendant,
 		},
-		TurnIdentityEnabled: true,
-		ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
-		InstallationPolicy:  OpenAIOAuthInstallationPreserve,
+		TurnIdentityEnabled:      true,
+		TurnIdentityRequested:    true,
+		ProjectionMode:           OpenAIOAuthIdentityProjectionRegular,
+		InstallationPolicy:       OpenAIOAuthInstallationPreserve,
+		CredentialOwnerNamespace: openAIOutboundSessionIdentityNamespace(account),
 	}
 	payload := []byte(`{"type":"response.create","model":"gpt-5.1","stream":true,"client_metadata":{"session_id":"client-session","thread_id":"client-thread"}}`)
 
@@ -551,8 +554,10 @@ func TestProxyOpenAIWSHTTPBridgeTurnPinsAndObservesFinalOAuthWireOnce(t *testing
 	}
 	plan := OpenAIOAuthIdentityPlan{
 		Capture:                  OpenAIOAuthIdentityCapture{ClientInstallationID: "client-installation"},
+		PolicySnapshot:           defaultOpenAICodexFingerprintPolicy(0),
 		TurnIdentity:             identity,
 		TurnIdentityEnabled:      true,
+		TurnIdentityRequested:    true,
 		InstallationID:           transportTestPinnedInstallationID,
 		InstallationEnabled:      true,
 		InstallationPolicy:       OpenAIOAuthInstallationAccountPin,

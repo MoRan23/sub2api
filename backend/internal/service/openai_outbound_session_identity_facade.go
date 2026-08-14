@@ -28,6 +28,7 @@ const (
 	OpenAIOAuthIdentityProjectionCompact                  OpenAIOAuthIdentityProjectionMode = "compact"
 	OpenAIOAuthIdentityProjectionHeadersOnly              OpenAIOAuthIdentityProjectionMode = "headers_only"
 	OpenAIOAuthIdentityProjectionExistingTurnMetadataOnly OpenAIOAuthIdentityProjectionMode = "existing_turn_metadata_only"
+	OpenAIOAuthIdentityProjectionAlphaSearch              OpenAIOAuthIdentityProjectionMode = "alpha_search"
 )
 
 type OpenAIOAuthInstallationPolicy string
@@ -81,11 +82,11 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthProfileIdentityPlan(
 	account *Account,
 	installationPolicy OpenAIOAuthInstallationPolicy,
 ) (OpenAIOAuthIdentityPlan, error) {
-	return s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, OpenAIOAuthIdentityCapture{}, OpenAIOAuthIdentityPlanOptions{
+	return s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, OpenAIOAuthIdentityCapture{}, OpenAIOAuthIdentityPlanOptions{
 		TurnIdentityEnabled: false,
 		ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
 		InstallationPolicy:  installationPolicy,
-	})
+	}, nil)
 }
 
 // OpenAIOAuthIdentityPlan contains every generated identity needed by the
@@ -188,7 +189,8 @@ func FillOpenAIOAuthIdentityCaptureFallback(c *gin.Context, callerSeed string) b
 func normalizeOpenAIOAuthIdentityPlanOptions(options OpenAIOAuthIdentityPlanOptions) OpenAIOAuthIdentityPlanOptions {
 	switch options.ProjectionMode {
 	case OpenAIOAuthIdentityProjectionRegular, OpenAIOAuthIdentityProjectionCompact,
-		OpenAIOAuthIdentityProjectionHeadersOnly, OpenAIOAuthIdentityProjectionExistingTurnMetadataOnly:
+		OpenAIOAuthIdentityProjectionHeadersOnly, OpenAIOAuthIdentityProjectionExistingTurnMetadataOnly,
+		OpenAIOAuthIdentityProjectionAlphaSearch:
 	default:
 		options.ProjectionMode = OpenAIOAuthIdentityProjectionRegular
 	}
@@ -226,11 +228,16 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 	plan.ClientIdentity = resolveCodexClientIdentityPlanFromSnapshot(
 		CodexClientIdentitySafePair, "", canonicalClientIdentity,
 	)
-	if policy.ClientIdentityNormalizationEnabled() {
+	forceCodexCLI := s != nil && s.cfg != nil && s.cfg.Gateway.ForceCodexCLI
+	if policy.ClientIdentityNormalizationEnabled() || forceCodexCLI {
 		overrideUA := ""
 		var err error
-		if s == nil || s.cfg == nil || !s.cfg.Gateway.ForceCodexCLI {
-			overrideUA, err = resolveOpenAIAccountStoredUserAgent(ctx, s.accountRepo, account)
+		if !forceCodexCLI {
+			var accountRepo AccountRepository
+			if s != nil {
+				accountRepo = s.accountRepo
+			}
+			overrideUA, err = resolveOpenAIAccountStoredUserAgent(ctx, accountRepo, account)
 		}
 		if err != nil {
 			return plan, fmt.Errorf("resolve OpenAI account User-Agent: %w", err)
@@ -287,6 +294,56 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthOutboundIdentity(
 	return s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, options)
 }
 
+// GetOrResolveOpenAIOAuthOutboundIdentity is the only production materialize
+// entrypoint. A cached plan is reusable only for the exact immutable capture,
+// credential owner, downstream API key, policy snapshot, and projection
+// options. Account failover therefore rematerializes from the same capture.
+func (s *OpenAIGatewayService) GetOrResolveOpenAIOAuthOutboundIdentity(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	capture OpenAICodexIdentityInput,
+	options OpenAIOAuthIdentityPlanOptions,
+	pinnedPlan *OpenAIOAuthOutboundIdentityPlan,
+) (OpenAIOAuthOutboundIdentityPlan, error) {
+	options = normalizeOpenAIOAuthIdentityPlanOptions(options)
+	if pinnedPlan != nil &&
+		openAIOAuthIdentityCapturesEqual(pinnedPlan.Capture, capture) &&
+		s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, *pinnedPlan, options) {
+		plan := *pinnedPlan
+		SetOpenAIOAuthIdentityPlan(c, plan)
+		return plan, nil
+	}
+	if cached, ok := OpenAIOAuthIdentityPlanFromContext(c); ok &&
+		openAIOAuthIdentityCapturesEqual(cached.Capture, capture) &&
+		s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, cached, options) {
+		return cached, nil
+	}
+
+	plan, err := s.ResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, options)
+	if err != nil {
+		return plan, err
+	}
+	SetOpenAIOAuthIdentityPlan(c, plan)
+	return plan, nil
+}
+
+func openAIOAuthIdentityCapturesEqual(left, right OpenAIOAuthIdentityCapture) bool {
+	if left.Logical != right.Logical ||
+		left.ClientInstallationID != right.ClientInstallationID ||
+		left.ConflictCount != right.ConflictCount ||
+		left.InvalidMetadataCount != right.InvalidMetadataCount ||
+		len(left.Aliases) != len(right.Aliases) {
+		return false
+	}
+	for i := range left.Aliases {
+		if left.Aliases[i] != right.Aliases[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func openAICodexClientIdentityForRequest(c *gin.Context) codexOutboundIdentity {
 	if c != nil {
 		if value, ok := c.Get(openAICodexClientIdentityContextKey); ok {
@@ -336,6 +393,13 @@ func ApplyOpenAIOAuthIdentityPlan(headers http.Header, body []byte, plan OpenAIO
 	mode := normalizeOpenAIOAuthIdentityPlanOptions(OpenAIOAuthIdentityPlanOptions{
 		ProjectionMode: plan.ProjectionMode, InstallationPolicy: plan.InstallationPolicy,
 	}).ProjectionMode
+	if mode == OpenAIOAuthIdentityProjectionAlphaSearch {
+		applyOpenAICodexAlphaSearchIdentityHeader(headers, plan)
+		if plan.ClientIdentityEnabled {
+			applyCodexClientIdentityPlan(headers, plan.ClientIdentity)
+		}
+		return body, nil
+	}
 	out := body
 	// Compact has a deliberately narrow Rust request schema. Strip the regular
 	// Responses metadata carrier independently of the installation switch so a
@@ -417,6 +481,60 @@ installationBodyDone:
 		applyCodexClientIdentityPlan(headers, plan.ClientIdentity)
 	}
 	return out, nil
+}
+
+// applyOpenAICodexAlphaSearchIdentityHeader projects the account-owned
+// identity into the one carrier used by Codex SearchClient. Parseable objects
+// retain unknown fields; opaque values remain byte-for-byte intact. A canonical
+// object is created only when the client did not send this carrier at all.
+func applyOpenAICodexAlphaSearchIdentityHeader(headers http.Header, plan OpenAIOAuthIdentityPlan) {
+	if headers == nil {
+		return
+	}
+	deleteOpenAICodexIdentityHeaders(headers)
+	deleteOpenAIHeaderEqualFold(headers, codexInstallationIDKey)
+
+	projectTurn := plan.TurnIdentityEnabled
+	projectInstallation := plan.InstallationPolicy == OpenAIOAuthInstallationAccountPin &&
+		plan.InstallationEnabled && strings.TrimSpace(plan.InstallationID) != ""
+	if !projectTurn && !projectInstallation {
+		return
+	}
+
+	values := headerValuesCaseInsensitive(headers, openAIWSTurnMetadataHeader)
+	projected := make([]string, 0, len(values)+1)
+	for _, value := range values {
+		var metadata map[string]json.RawMessage
+		if json.Unmarshal([]byte(strings.TrimSpace(value)), &metadata) != nil || metadata == nil {
+			projected = append(projected, value)
+			continue
+		}
+		rewritten := value
+		if projectTurn {
+			rewritten, _ = rewriteOpenAICodexTurnMetadata(rewritten, plan.TurnIdentity)
+		}
+		if projectInstallation {
+			if withInstallation, changed := rewriteCodexTurnMetadataInstallationID(rewritten, plan.InstallationID); changed {
+				rewritten = withInstallation
+			}
+		}
+		projected = append(projected, rewritten)
+	}
+	if len(values) == 0 {
+		canonical := "{}"
+		if projectTurn {
+			canonical, _ = rewriteOpenAICodexTurnMetadata(canonical, plan.TurnIdentity)
+		}
+		if projectInstallation {
+			canonical, _ = rewriteCodexTurnMetadataInstallationID(canonical, plan.InstallationID)
+		}
+		projected = append(projected, canonical)
+	}
+
+	deleteOpenAIHeaderEqualFold(headers, openAIWSTurnMetadataHeader)
+	for _, value := range projected {
+		headers.Add(openAIWSTurnMetadataHeader, value)
+	}
 }
 
 func (s *OpenAIGatewayService) openAICodexFingerprintPolicyForRequest(
@@ -568,6 +686,10 @@ func SetOpenAIOAuthIdentityCapture(c *gin.Context, capture OpenAIOAuthIdentityCa
 		// unconditional invalidation boundary for a materialized plan; transport
 		// retries on the same Gin request keep the capture and let PlanMatches
 		// decide whether the selected credential owner may reuse the plan.
+		if current, ok := OpenAIOAuthIdentityCaptureFromContext(c); ok &&
+			openAIOAuthIdentityCapturesEqual(current, capture) {
+			return
+		}
 		ClearOpenAIOAuthIdentityPlan(c)
 		c.Set(openAIOAuthIdentityCaptureContextKey, cloneOpenAIOAuthIdentityCapture(capture))
 	}

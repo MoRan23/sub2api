@@ -537,6 +537,13 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 		entry.OpenAIBeta = strings.TrimSpace(outbound.Get("openai-beta"))
 		entry.Version = strings.TrimSpace(outbound.Get("version"))
 	}
+	if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok &&
+		plan.ProjectionMode == OpenAIOAuthIdentityProjectionAlphaSearch {
+		// Native alpha/search strips every standalone installation header. Its
+		// final turn-metadata header is authoritative even when account pinning is
+		// disabled and the legacy observer fallback selected the client value.
+		entry.OutboundInstallationID = fingerprintObservationTurnMetadataHeaderInstallationID(outbound)
+	}
 	if hasTrustedIdentity && len(body) > 0 {
 		bodyIdentity := parseFingerprintObservationBodyIdentity(body)
 		if entry.SessionID == "" && !sessionHeaderPresent {
@@ -608,6 +615,38 @@ func (s *OpenAIGatewayService) recordFingerprintObservationFromContextWithBody(c
 	}
 	pin := installationIDResolutionFromContext(c, account)
 	s.recordFingerprintObservationWithBody(c, account, pin, outbound, body)
+}
+
+func fingerprintObservationTurnMetadataHeaderInstallationID(headers http.Header) string {
+	if headers == nil {
+		return ""
+	}
+	resolved := ""
+	for key, values := range headers {
+		if !strings.EqualFold(key, openAIWSTurnMetadataHeader) {
+			continue
+		}
+		for _, value := range values {
+			var metadata map[string]any
+			if json.Unmarshal([]byte(value), &metadata) != nil || metadata == nil {
+				continue
+			}
+			raw, exists := metadata[codexTurnMetadataInstallationIDKey]
+			if !exists {
+				continue
+			}
+			installationID, ok := raw.(string)
+			installationID = strings.TrimSpace(installationID)
+			if !ok || installationID == "" {
+				continue
+			}
+			if resolved != "" && resolved != installationID {
+				return ""
+			}
+			resolved = installationID
+		}
+	}
+	return resolved
 }
 
 // recordFingerprintObservationAfterOpenAIWSHandshake records only a successful

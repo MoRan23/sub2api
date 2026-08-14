@@ -80,7 +80,7 @@ func TestProbeOpenAIAPIKeyResponsesSupportUsesAccountEnvironmentFingerprint(t *t
 	svc.ProbeOpenAIAPIKeyResponsesSupport(context.Background(), account.ID)
 
 	require.NotNil(t, upstream.lastReq)
-	require.Equal(t, "codex_cli_rs/0.146.0 (Windows 11.0.26100; x86_64) WindowsTerminal", upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, "codex_cli_rs/"+codexCLIVersion+" (Windows 11.0.26100; x86_64) WindowsTerminal", upstream.lastReq.Header.Get("User-Agent"))
 	<-updateCalls
 }
 

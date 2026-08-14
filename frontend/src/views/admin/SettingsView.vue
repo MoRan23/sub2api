@@ -5714,7 +5714,7 @@
                     type="text"
                     class="input w-full font-mono text-sm disabled:cursor-not-allowed disabled:opacity-60"
                     :disabled="!form.enable_openai_codex_fingerprint_normalization || !form.enable_openai_codex_client_identity_normalization"
-                    :placeholder="t('admin.settings.gatewayForwarding.openaiCodexUserAgentPlaceholder')"
+                    :placeholder="codexUserAgentPlaceholder"
                     data-testid="codex-user-agent-input"
                   />
                   <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
@@ -9721,8 +9721,9 @@ const form = reactive<SettingsForm>({
   antigravity_user_agent_version: "",
   openai_codex_user_agent: "",
   openai_codex_client_version: "",
-  // 只读展示：自动同步任务写入的官方最新稳定版，不参与提交（提交载荷按字段显式构造）
+  // 只读展示：同步值与内置兜底版本不参与提交（提交载荷按字段显式构造）
   openai_codex_client_version_synced: "",
+  openai_codex_client_version_builtin: "",
   openai_codex_version_auto_sync_enabled: true,
   enable_openai_uuidv7_session_identity: true,
   // codex_cli_only 加固
@@ -10697,6 +10698,17 @@ function addCodexWhitelistRow(): void {
 function removeCodexWhitelistRow(i: number): void {
   codexWhitelistRows.value.splice(i, 1);
 }
+
+const codexUserAgentPlaceholder = computed(() => {
+  const version =
+    form.openai_codex_client_version?.trim() ||
+    form.openai_codex_client_version_synced?.trim() ||
+    form.openai_codex_client_version_builtin?.trim();
+  if (!version) return "";
+  return t("admin.settings.gatewayForwarding.openaiCodexUserAgentPlaceholder", {
+    version,
+  });
+});
 
 const codexSyncedVersionLabel = computed(() => {
   const synced = form.openai_codex_client_version_synced?.trim();

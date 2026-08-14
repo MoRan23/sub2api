@@ -95,6 +95,11 @@ func TestValidateLiveCallRequestDoesNotRequireDelegation(t *testing.T) {
 }
 
 func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
+	SetCodexCanonicalUserAgentResolver(func() string {
+		return "codex-tui/0.200.1 (Mac OS X 15.1.0; arm64) iTerm.app (codex-tui; 0.200.1)"
+	})
+	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
+
 	upstream := &liveHTTPUpstreamStub{}
 	service := &OpenAIGatewayService{
 		cfg:          &config.Config{},
@@ -134,6 +139,9 @@ func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
 	require.Equal(t, "Bearer test-access-token", upstream.request.Header.Get("Authorization"))
 	require.Equal(t, "acct_test", upstream.request.Header.Get("Chatgpt-Account-Id"))
 	require.Equal(t, "quicksilver=v2", upstream.request.Header.Get("OpenAI-Alpha"))
+	require.Equal(t, "codex-tui", upstream.request.Header.Get("originator"))
+	require.Equal(t, "0.200.1", upstream.request.Header.Get("version"))
+	require.Equal(t, "codex-tui/0.200.1 (Mac OS X 15.1.0; arm64) iTerm.app (codex-tui; 0.200.1)", upstream.request.Header.Get("User-Agent"))
 	require.Equal(t, `{"v":1,"s":0,"t":"v1.test"}`, upstream.request.Header.Get(liveAttestationHeader))
 	require.Empty(t, upstream.request.Header.Get("Session-Id"))
 	require.Empty(t, upstream.request.Header.Get("Thread-Id"))

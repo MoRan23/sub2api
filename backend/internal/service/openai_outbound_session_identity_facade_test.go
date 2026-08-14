@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -140,6 +142,120 @@ func TestApplyOpenAIOAuthIdentityPlanExistingTurnMetadataOnlyDoesNotCreateBodyMe
 	require.NoError(t, err)
 	require.Equal(t, body, out)
 	require.Equal(t, "77777777-7777-4777-8777-777777777777", headers.Get("x-codex-installation-id"))
+}
+
+func TestApplyOpenAIOAuthIdentityPlanAlphaSearchCreatesCanonicalHeaderWithoutTouchingBody(t *testing.T) {
+	id, err := newOpenAICodexRootIdentity()
+	require.NoError(t, err)
+	const installationID = "77777777-7777-4777-8777-777777777777"
+	body := []byte(" { \"id\" : \"native-alpha\", \"commands\" : [] } \n")
+	headers := http.Header{
+		"Session-Id":              {"client-session"},
+		"Thread-Id":               {"client-thread"},
+		"X-Client-Request-Id":     {"client-request"},
+		"X-Codex-Installation-Id": {"client-installation"},
+	}
+
+	out, err := ApplyOpenAIOAuthIdentityPlan(headers, body, OpenAIOAuthIdentityPlan{
+		TurnIdentity: id, TurnIdentityEnabled: true,
+		InstallationID: installationID, InstallationEnabled: true,
+		ProjectionMode:     OpenAIOAuthIdentityProjectionAlphaSearch,
+		InstallationPolicy: OpenAIOAuthInstallationAccountPin,
+	})
+	require.NoError(t, err)
+	require.Equal(t, body, out)
+	require.Empty(t, headers.Get("session-id"))
+	require.Empty(t, headers.Get("thread-id"))
+	require.Empty(t, headers.Get("x-client-request-id"))
+	require.Empty(t, headers.Get(codexInstallationIDKey))
+
+	values := headers.Values(openAIWSTurnMetadataHeader)
+	require.Len(t, values, 1)
+	var metadata map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(values[0]), &metadata))
+	require.JSONEq(t, `"`+id.SessionID+`"`, string(metadata["session_id"]))
+	require.JSONEq(t, `"`+id.ThreadID+`"`, string(metadata["thread_id"]))
+	require.JSONEq(t, `"`+installationID+`"`, string(metadata[codexTurnMetadataInstallationIDKey]))
+}
+
+func TestApplyOpenAIOAuthIdentityPlanAlphaSearchRewritesObjectAndPreservesUnknownFields(t *testing.T) {
+	id, err := newOpenAICodexRootIdentity()
+	require.NoError(t, err)
+	const installationID = "88888888-8888-4888-8888-888888888888"
+	body := []byte(`{"id":"native-alpha","commands":[{"type":"search"}]}`)
+	headers := http.Header{openAIWSTurnMetadataHeader: {
+		`{"session_id":"client-session","thread_id":"client-thread","installation_id":"client-installation","mcp_request_meta":{"request_id":"keep-me"},"unknown":7}`,
+	}}
+
+	out, err := ApplyOpenAIOAuthIdentityPlan(headers, body, OpenAIOAuthIdentityPlan{
+		TurnIdentity: id, TurnIdentityEnabled: true,
+		InstallationID: installationID, InstallationEnabled: true,
+		ProjectionMode:     OpenAIOAuthIdentityProjectionAlphaSearch,
+		InstallationPolicy: OpenAIOAuthInstallationAccountPin,
+	})
+	require.NoError(t, err)
+	require.Equal(t, body, out)
+	var metadata map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(headers.Get(openAIWSTurnMetadataHeader)), &metadata))
+	require.JSONEq(t, `"`+id.SessionID+`"`, string(metadata["session_id"]))
+	require.JSONEq(t, `"`+id.ThreadID+`"`, string(metadata["thread_id"]))
+	require.JSONEq(t, `"`+installationID+`"`, string(metadata[codexTurnMetadataInstallationIDKey]))
+	require.JSONEq(t, `{"request_id":"keep-me"}`, string(metadata["mcp_request_meta"]))
+	require.JSONEq(t, `7`, string(metadata["unknown"]))
+}
+
+func TestApplyOpenAIOAuthIdentityPlanAlphaSearchPreservesOpaqueValues(t *testing.T) {
+	id, err := newOpenAICodexRootIdentity()
+	require.NoError(t, err)
+	const installationID = "99999999-9999-4999-8999-999999999999"
+	const firstOpaque = "  opaque-alpha\t"
+	const secondOpaque = `["not-an-object"]`
+	headers := http.Header{openAIWSTurnMetadataHeader: {firstOpaque, secondOpaque}}
+
+	_, err = ApplyOpenAIOAuthIdentityPlan(headers, nil, OpenAIOAuthIdentityPlan{
+		TurnIdentity: id, TurnIdentityEnabled: true,
+		InstallationID: installationID, InstallationEnabled: true,
+		ProjectionMode:     OpenAIOAuthIdentityProjectionAlphaSearch,
+		InstallationPolicy: OpenAIOAuthInstallationAccountPin,
+	})
+	require.NoError(t, err)
+	values := headers.Values(openAIWSTurnMetadataHeader)
+	require.Len(t, values, 2)
+	require.Equal(t, firstOpaque, values[0])
+	require.Equal(t, secondOpaque, values[1])
+}
+
+func TestApplyOpenAIOAuthIdentityPlanAlphaSearchHonorsComponentSwitches(t *testing.T) {
+	id, err := newOpenAICodexRootIdentity()
+	require.NoError(t, err)
+	const installationID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+	tests := []struct {
+		name                string
+		turnEnabled         bool
+		installationEnabled bool
+		wantSession         bool
+		wantInstallation    bool
+	}{
+		{name: "turn only", turnEnabled: true, wantSession: true},
+		{name: "installation only", installationEnabled: true, wantInstallation: true},
+		{name: "both disabled"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			headers := http.Header{}
+			_, applyErr := ApplyOpenAIOAuthIdentityPlan(headers, nil, OpenAIOAuthIdentityPlan{
+				TurnIdentity: id, TurnIdentityEnabled: tt.turnEnabled,
+				InstallationID: installationID, InstallationEnabled: tt.installationEnabled,
+				ProjectionMode:     OpenAIOAuthIdentityProjectionAlphaSearch,
+				InstallationPolicy: OpenAIOAuthInstallationAccountPin,
+			})
+			require.NoError(t, applyErr)
+			metadata := headers.Get(openAIWSTurnMetadataHeader)
+			require.Equal(t, tt.wantSession, strings.Contains(metadata, id.SessionID))
+			require.Equal(t, tt.wantInstallation, strings.Contains(metadata, installationID))
+		})
+	}
 }
 
 func TestApplyOpenAIOAuthIdentityPlanPreservesInvalidTurnMetadata(t *testing.T) {
@@ -282,8 +398,8 @@ func TestApplyOpenAIOAuthIdentityPlanProjectsNormalizedClientIdentityLast(t *tes
 		),
 	})
 	require.NoError(t, err)
-	require.Equal(t, "codex_vscode", headers.Get("originator"))
-	require.Equal(t, "codex_vscode/"+codexCLIVersion+" (Ubuntu 22.4.0; x86_64) vscode", headers.Get("user-agent"))
+	require.Equal(t, openai.CodexDefaultOriginator, headers.Get("originator"))
+	require.Equal(t, "codex-tui/"+codexCLIVersion+" (Ubuntu 22.4.0; x86_64) vscode (codex-tui; "+codexCLIVersion+")", headers.Get("user-agent"))
 	require.Equal(t, codexCLIVersion, headers.Get("version"))
 }
 
@@ -304,13 +420,70 @@ func TestApplyOpenAIOAuthIdentityPlanSafePairPreservesRecognizedClient(t *testin
 	require.Equal(t, "0.145.2", headers.Get("version"))
 }
 
+// ForceCodexCLI is an explicit gateway override, so it must still produce the
+// runtime TUI triplet when fingerprint normalization (or only its client
+// identity child) is disabled. Do not run this test in parallel: it replaces
+// the process-wide canonical resolver.
+func TestResolveOpenAIOAuthIdentityPlanForceCodexCLINormalizesWhenPolicyDisabled(t *testing.T) {
+	const (
+		resolvedUA = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
+		wantUA     = "codex-tui/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.200.1)"
+		clientUA   = "codex_vscode/0.145.2 (Mac OS X 14.0; arm64) vscode (codex_vscode; 0.145.2)"
+	)
+	SetCodexCanonicalUserAgentResolver(func() string { return resolvedUA })
+	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
+
+	policies := map[string]CodexFingerprintPolicySnapshot{
+		"master disabled": {},
+		"client identity child disabled": {
+			MasterEnabled: true, InstallationIDEnabled: true, TurnIdentityEnabled: true,
+		},
+	}
+	for name, policy := range policies {
+		t.Run(name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			c.Set(openAICodexFingerprintPolicyContextKey, policy)
+			account := &Account{
+				ID: 902, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+				Credentials: map[string]any{"user_agent": "codex-tui/0.100.0 (Windows 11; x86_64) WindowsTerminal"},
+			}
+			svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: true}}}
+			plan, err := svc.ResolveOpenAIOAuthIdentityPlan(
+				context.Background(), c, account, OpenAIOAuthIdentityCapture{}, OpenAIOAuthIdentityPlanOptions{
+					ProjectionMode:     OpenAIOAuthIdentityProjectionRegular,
+					InstallationPolicy: OpenAIOAuthInstallationPreserve,
+				},
+			)
+			require.NoError(t, err)
+			require.Equal(t, CodexClientIdentityNormalize, plan.ClientIdentity.Mode)
+			require.Equal(t, wantUA, plan.ClientIdentity.UserAgent)
+			require.Equal(t, openai.CodexDefaultOriginator, plan.ClientIdentity.Originator)
+			require.Equal(t, "0.200.1", plan.ClientIdentity.Version)
+
+			headers := http.Header{
+				"Originator": {"codex_vscode"},
+				"User-Agent": {clientUA},
+				"Version":    {"0.145.2"},
+			}
+			_, err = ApplyOpenAIOAuthIdentityPlan(headers, nil, plan)
+			require.NoError(t, err)
+			require.Equal(t, wantUA, headers.Get("user-agent"))
+			require.Equal(t, openai.CodexDefaultOriginator, headers.Get("originator"))
+			require.Equal(t, "0.200.1", headers.Get("version"))
+		})
+	}
+}
+
 // Resolve owns the HTTP request snapshot. A version refresh after resolution
 // must only affect the next request, never the final projection of this one.
 // Do not run this test in parallel: it replaces the process-wide resolver.
 func TestResolveOpenAIOAuthIdentityPlanFreezesHTTPClientIdentity(t *testing.T) {
 	const (
-		resolvedUA = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
-		updatedUA  = "codex_cli_rs/0.201.2 (Mac OS X 15.1.0; arm64) iTerm.app"
+		resolvedUA     = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
+		wantResolvedUA = "codex-tui/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.200.1)"
+		updatedUA      = "codex_cli_rs/0.201.2 (Mac OS X 15.1.0; arm64) iTerm.app"
 	)
 	SetCodexCanonicalUserAgentResolver(func() string { return resolvedUA })
 	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
@@ -326,8 +499,8 @@ func TestResolveOpenAIOAuthIdentityPlanFreezesHTTPClientIdentity(t *testing.T) {
 		},
 	)
 	require.NoError(t, err)
-	require.Equal(t, resolvedUA, plan.ClientIdentity.UserAgent)
-	require.Equal(t, "codex_cli_rs", plan.ClientIdentity.Originator)
+	require.Equal(t, wantResolvedUA, plan.ClientIdentity.UserAgent)
+	require.Equal(t, openai.CodexDefaultOriginator, plan.ClientIdentity.Originator)
 	require.Equal(t, "0.200.1", plan.ClientIdentity.Version)
 
 	SetCodexCanonicalUserAgentResolver(func() string { return updatedUA })
@@ -338,8 +511,8 @@ func TestResolveOpenAIOAuthIdentityPlanFreezesHTTPClientIdentity(t *testing.T) {
 	}
 	_, err = ApplyOpenAIOAuthIdentityPlan(headers, nil, plan)
 	require.NoError(t, err)
-	require.Equal(t, resolvedUA, headers.Get("user-agent"))
-	require.Equal(t, "codex_cli_rs", headers.Get("originator"))
+	require.Equal(t, wantResolvedUA, headers.Get("user-agent"))
+	require.Equal(t, openai.CodexDefaultOriginator, headers.Get("originator"))
 	require.Equal(t, "0.200.1", headers.Get("version"))
 }
 
@@ -348,8 +521,9 @@ func TestResolveOpenAIOAuthIdentityPlanFreezesHTTPClientIdentity(t *testing.T) {
 // Do not run this test in parallel: it replaces the process-wide resolver.
 func TestResolveOpenAIOAuthIdentityPlanReusesWSConnectionClientIdentitySnapshot(t *testing.T) {
 	const (
-		resolvedUA = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
-		updatedUA  = "codex_cli_rs/0.201.2 (Mac OS X 15.1.0; arm64) iTerm.app"
+		resolvedUA     = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
+		wantResolvedUA = "codex-tui/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.200.1)"
+		updatedUA      = "codex_cli_rs/0.201.2 (Mac OS X 15.1.0; arm64) iTerm.app"
 	)
 	SetCodexCanonicalUserAgentResolver(func() string { return resolvedUA })
 	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
@@ -370,7 +544,7 @@ func TestResolveOpenAIOAuthIdentityPlanReusesWSConnectionClientIdentitySnapshot(
 		options,
 	)
 	require.NoError(t, err)
-	require.Equal(t, resolvedUA, first.ClientIdentity.UserAgent)
+	require.Equal(t, wantResolvedUA, first.ClientIdentity.UserAgent)
 
 	SetCodexCanonicalUserAgentResolver(func() string { return updatedUA })
 	second, err := svc.ResolveOpenAIOAuthIdentityPlan(
@@ -384,12 +558,13 @@ func TestResolveOpenAIOAuthIdentityPlanReusesWSConnectionClientIdentitySnapshot(
 
 // Invalid historical account UAs must be interpreted against the connection's
 // canonical snapshot. Re-reading the hot global fallback here would let a
-// lineage transition change the client family/environment mid-connection.
+// lineage transition change the environment/version mid-connection.
 // Do not run this test in parallel: it replaces the process-wide resolver.
 func TestResolveOpenAIOAuthIdentityPlanInvalidStoredUAUsesFrozenConnectionFallback(t *testing.T) {
 	const (
-		resolvedUA = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
-		updatedUA  = "codex_vscode/0.201.2 (Mac OS X 15.1.0; arm64) vscode"
+		resolvedUA     = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
+		wantResolvedUA = "codex-tui/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.200.1)"
+		updatedUA      = "codex_vscode/0.201.2 (Mac OS X 15.1.0; arm64) vscode"
 	)
 	SetCodexCanonicalUserAgentResolver(func() string { return resolvedUA })
 	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
@@ -413,7 +588,7 @@ func TestResolveOpenAIOAuthIdentityPlanInvalidStoredUAUsesFrozenConnectionFallba
 		options,
 	)
 	require.NoError(t, err)
-	require.Equal(t, resolvedUA, first.ClientIdentity.UserAgent)
+	require.Equal(t, wantResolvedUA, first.ClientIdentity.UserAgent)
 
 	SetCodexCanonicalUserAgentResolver(func() string { return updatedUA })
 	second, err := svc.ResolveOpenAIOAuthIdentityPlan(
@@ -425,7 +600,7 @@ func TestResolveOpenAIOAuthIdentityPlanInvalidStoredUAUsesFrozenConnectionFallba
 	require.Equal(t, first.ClientIdentity, second.ClientIdentity)
 }
 
-// Credential failover rematerializes account-owned family/environment data,
+// Credential failover rematerializes account-owned environment data,
 // while the canonical version remains the immutable request snapshot.
 // Do not run this test in parallel: it replaces the process-wide resolver.
 func TestResolveOpenAIOAuthIdentityPlanFailoverUsesTargetAccountWithFrozenCanonicalVersion(t *testing.T) {
@@ -461,15 +636,15 @@ func TestResolveOpenAIOAuthIdentityPlanFailoverUsesTargetAccountWithFrozenCanoni
 		context.Background(), c, firstAccount, OpenAIOAuthIdentityCapture{}, options,
 	)
 	require.NoError(t, err)
-	require.Equal(t, "codex_cli_rs/0.200.1 (Windows 11.0.26100; x86_64) WindowsTerminal", first.ClientIdentity.UserAgent)
+	require.Equal(t, "codex-tui/0.200.1 (Windows 11.0.26100; x86_64) WindowsTerminal (codex-tui; 0.200.1)", first.ClientIdentity.UserAgent)
 
 	SetCodexCanonicalUserAgentResolver(func() string { return updatedUA })
 	second, err := svc.ResolveOpenAIOAuthIdentityPlan(
 		context.Background(), c, secondAccount, OpenAIOAuthIdentityCapture{}, options,
 	)
 	require.NoError(t, err)
-	require.Equal(t, "codex_vscode/0.200.1 (Mac OS X 14.0; arm64) vscode", second.ClientIdentity.UserAgent)
-	require.Equal(t, "codex_vscode", second.ClientIdentity.Originator)
+	require.Equal(t, "codex-tui/0.200.1 (Mac OS X 14.0; arm64) vscode (codex-tui; 0.200.1)", second.ClientIdentity.UserAgent)
+	require.Equal(t, openai.CodexDefaultOriginator, second.ClientIdentity.Originator)
 	require.Equal(t, "0.200.1", second.ClientIdentity.Version)
 	require.NotEqual(t, first.ClientIdentity, second.ClientIdentity)
 }
@@ -499,13 +674,111 @@ func TestOpenAIOAuthIdentityPlanMatchesCredentialOwner(t *testing.T) {
 	require.False(t, svc.OpenAIOAuthIdentityPlanMatches(context.Background(), c, firstAccount, plan, options))
 }
 
+func TestGetOrResolveOpenAIOAuthOutboundIdentityUsesExactCaptureAndCredentialScope(t *testing.T) {
+	newContext := func(apiKeyID int64) *gin.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		c.Set("api_key", &APIKey{ID: apiKeyID})
+		return c
+	}
+	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "get-or-resolve-secret"}}}
+	firstAccount := &Account{ID: 920, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	secondAccount := &Account{ID: 921, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	firstCapture := CaptureOpenAIOAuthIdentity(nil, []byte(`{"client_metadata":{"session_id":"first"}}`), "")
+	secondCapture := CaptureOpenAIOAuthIdentity(nil, []byte(`{"client_metadata":{"session_id":"second"}}`), "")
+	regular := OpenAIOAuthIdentityPlanOptions{
+		ProjectionMode:     OpenAIOAuthIdentityProjectionRegular,
+		InstallationPolicy: OpenAIOAuthInstallationPreserve,
+	}
+
+	t.Run("exact match reuses cached plan", func(t *testing.T) {
+		c := newContext(81)
+		first, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), c, firstAccount, firstCapture, regular, nil)
+		require.NoError(t, err)
+		first.SocketDigest = "cached-marker"
+		SetOpenAIOAuthIdentityPlan(c, first)
+		second, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), c, firstAccount, firstCapture, regular, nil)
+		require.NoError(t, err)
+		require.Equal(t, "cached-marker", second.SocketDigest)
+	})
+
+	t.Run("validated pinned plan wins over context cache", func(t *testing.T) {
+		c := newContext(81)
+		pinned, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), c, firstAccount, firstCapture, regular, nil)
+		require.NoError(t, err)
+		cached := pinned
+		cached.SocketDigest = "context-marker"
+		SetOpenAIOAuthIdentityPlan(c, cached)
+		pinned.SocketDigest = "pinned-marker"
+		resolved, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), c, firstAccount, firstCapture, regular, &pinned)
+		require.NoError(t, err)
+		require.Equal(t, "pinned-marker", resolved.SocketDigest)
+	})
+
+	tests := []struct {
+		name       string
+		capture    OpenAIOAuthIdentityCapture
+		account    *Account
+		options    OpenAIOAuthIdentityPlanOptions
+		mutate     func(*gin.Context)
+		assertPlan func(*testing.T, OpenAIOAuthIdentityPlan)
+	}{
+		{
+			name: "capture change", capture: secondCapture, account: firstAccount, options: regular,
+			assertPlan: func(t *testing.T, plan OpenAIOAuthIdentityPlan) {
+				require.Equal(t, secondCapture.Logical, plan.Capture.Logical)
+			},
+		},
+		{
+			name: "credential owner change", capture: firstCapture, account: secondAccount, options: regular,
+			assertPlan: func(t *testing.T, plan OpenAIOAuthIdentityPlan) {
+				require.NotEmpty(t, plan.CredentialOwnerNamespace)
+			},
+		},
+		{
+			name: "api key change", capture: firstCapture, account: firstAccount, options: regular,
+			mutate: func(c *gin.Context) { c.Set("api_key", &APIKey{ID: 82}) },
+			assertPlan: func(t *testing.T, plan OpenAIOAuthIdentityPlan) {
+				require.Equal(t, int64(82), plan.APIKeyID)
+			},
+		},
+		{
+			name: "projection change", capture: firstCapture, account: firstAccount,
+			options: OpenAIOAuthIdentityPlanOptions{
+				ProjectionMode: OpenAIOAuthIdentityProjectionAlphaSearch, InstallationPolicy: OpenAIOAuthInstallationAccountPin,
+			},
+			assertPlan: func(t *testing.T, plan OpenAIOAuthIdentityPlan) {
+				require.Equal(t, OpenAIOAuthIdentityProjectionAlphaSearch, plan.ProjectionMode)
+				require.Equal(t, OpenAIOAuthInstallationAccountPin, plan.InstallationPolicy)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newContext(81)
+			cached, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), c, firstAccount, firstCapture, regular, nil)
+			require.NoError(t, err)
+			cached.SocketDigest = "stale-marker"
+			SetOpenAIOAuthIdentityPlan(c, cached)
+			if tt.mutate != nil {
+				tt.mutate(c)
+			}
+			resolved, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), c, tt.account, tt.capture, tt.options, nil)
+			require.NoError(t, err)
+			require.NotEqual(t, "stale-marker", resolved.SocketDigest)
+			tt.assertPlan(t, resolved)
+		})
+	}
+}
+
 // SafePair still preserves recognized clients. Its canonical fallback is the
 // only setting-derived part, and that fallback must share the plan snapshot.
 // Do not run this test in parallel: it replaces the process-wide resolver.
 func TestApplyOpenAIOAuthIdentityPlanSafePairFreezesFallback(t *testing.T) {
 	const (
-		resolvedUA = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
-		updatedUA  = "codex_vscode/0.201.2 (Mac OS X 15.1.0; arm64) vscode"
+		resolvedUA     = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
+		wantResolvedUA = "codex-tui/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.200.1)"
+		updatedUA      = "codex_vscode/0.201.2 (Mac OS X 15.1.0; arm64) vscode"
 	)
 	SetCodexCanonicalUserAgentResolver(func() string { return resolvedUA })
 	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
@@ -522,8 +795,8 @@ func TestApplyOpenAIOAuthIdentityPlanSafePairFreezesFallback(t *testing.T) {
 		ClientIdentity:        clientPlan,
 	})
 	require.NoError(t, err)
-	require.Equal(t, resolvedUA, headers.Get("user-agent"))
-	require.Equal(t, "codex_cli_rs", headers.Get("originator"))
+	require.Equal(t, wantResolvedUA, headers.Get("user-agent"))
+	require.Equal(t, openai.CodexDefaultOriginator, headers.Get("originator"))
 	require.Equal(t, "0.200.1", headers.Get("version"))
 }
 
@@ -533,8 +806,9 @@ func TestApplyOpenAIOAuthIdentityPlanSafePairFreezesFallback(t *testing.T) {
 // Do not run this test in parallel: it replaces the process-wide resolver.
 func TestBuildOpenAIWSHeadersReusesFrozenClientIdentityPlan(t *testing.T) {
 	const (
-		resolvedUA = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
-		updatedUA  = "codex_cli_rs/0.201.2 (Mac OS X 15.1.0; arm64) iTerm.app"
+		resolvedUA     = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
+		wantResolvedUA = "codex-tui/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.200.1)"
+		updatedUA      = "codex_cli_rs/0.201.2 (Mac OS X 15.1.0; arm64) iTerm.app"
 	)
 	SetCodexCanonicalUserAgentResolver(func() string { return resolvedUA })
 	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
@@ -568,8 +842,8 @@ func TestBuildOpenAIWSHeadersReusesFrozenClientIdentityPlan(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.Equal(t, plan.ClientIdentity, resolution.OutboundIdentityPlan.ClientIdentity)
-	require.Equal(t, resolvedUA, headers.Get("user-agent"))
-	require.Equal(t, "codex_cli_rs", headers.Get("originator"))
+	require.Equal(t, wantResolvedUA, headers.Get("user-agent"))
+	require.Equal(t, openai.CodexDefaultOriginator, headers.Get("originator"))
 	require.Equal(t, "0.200.1", headers.Get("version"))
 }
 

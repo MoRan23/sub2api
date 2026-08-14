@@ -270,11 +270,6 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 	}
 	if userAgent := openAIAlphaSearchInboundHeader(c, "User-Agent"); userAgent != "" {
 		req.Header.Set("User-Agent", userAgent)
-	} else {
-		req.Header.Set("User-Agent", codexCLIUserAgent)
-	}
-	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
-		req.Header.Set("User-Agent", codexCLIUserAgent)
 	}
 	alphaSessionID := strings.TrimSpace(gjson.GetBytes(alphaBody, "id").String())
 	identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
@@ -288,13 +283,14 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 		ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
 		InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
 	}
-	plan, planned := OpenAIOAuthIdentityPlanFromContext(c)
-	if !planned || !s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, plan, planOptions) {
-		var planErr error
-		plan, planErr = s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, planOptions)
-		if planErr != nil {
-			return nil, fmt.Errorf("resolve alpha search OAuth identity plan: %w", planErr)
-		}
+	plan, planErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, planOptions, nil)
+	if planErr != nil {
+		return nil, fmt.Errorf("resolve alpha search OAuth identity plan: %w", planErr)
+	}
+	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
+		req.Header.Set("User-Agent", plan.ClientIdentity.UserAgent)
+		req.Header.Set("Originator", plan.ClientIdentity.Originator)
+		req.Header.Set("Version", plan.ClientIdentity.Version)
 	}
 	if !plan.TurnIdentityEnabled && !identityModeEnabled && alphaSessionID != "" {
 		apiKeyID := getAPIKeyIDFromContext(c)
@@ -310,7 +306,6 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 	if err != nil {
 		return nil, fmt.Errorf("apply alpha search OAuth identity plan: %w", err)
 	}
-	SetOpenAIOAuthIdentityPlan(c, plan)
 	if plan.TurnIdentityEnabled {
 		setFingerprintObservationOutboundIdentity(c, plan.TurnIdentity)
 	}
@@ -440,16 +435,12 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 		}
 		planOptions := OpenAIOAuthIdentityPlanOptions{
 			TurnIdentityEnabled: identityModeEnabled,
-			ProjectionMode:      OpenAIOAuthIdentityProjectionExistingTurnMetadataOnly,
-			InstallationPolicy:  OpenAIOAuthInstallationPreserve,
+			ProjectionMode:      OpenAIOAuthIdentityProjectionAlphaSearch,
+			InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
 		}
-		plan, planned := OpenAIOAuthIdentityPlanFromContext(c)
-		if !planned || !s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, plan, planOptions) {
-			var planErr error
-			plan, planErr = s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, planOptions)
-			if planErr != nil {
-				return nil, fmt.Errorf("resolve direct alpha search OAuth identity plan: %w", planErr)
-			}
+		plan, planErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, planOptions, nil)
+		if planErr != nil {
+			return nil, fmt.Errorf("resolve direct alpha search OAuth identity plan: %w", planErr)
 		}
 		directIdentityPlan = plan
 		directIdentityPlanned = true
@@ -471,11 +462,11 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 		}
 		if userAgent := openAIAlphaSearchInboundHeader(c, "User-Agent"); userAgent != "" {
 			req.Header.Set("User-Agent", userAgent)
-		} else {
-			req.Header.Set("User-Agent", codexCLIUserAgent)
 		}
 		if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
-			req.Header.Set("User-Agent", codexCLIUserAgent)
+			req.Header.Set("User-Agent", plan.ClientIdentity.UserAgent)
+			req.Header.Set("Originator", plan.ClientIdentity.Originator)
+			req.Header.Set("Version", plan.ClientIdentity.Version)
 		}
 	}
 
@@ -492,7 +483,6 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 				return io.NopCloser(bytes.NewReader(projectedBody)), nil
 			}
 		}
-		SetOpenAIOAuthIdentityPlan(c, directIdentityPlan)
 		if directIdentityPlan.TurnIdentityEnabled {
 			setFingerprintObservationOutboundIdentity(c, directIdentityPlan.TurnIdentity)
 		}

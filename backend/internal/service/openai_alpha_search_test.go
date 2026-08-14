@@ -75,6 +75,7 @@ func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
 			"access_token":       "oauth-token",
 			"chatgpt_account_id": "chatgpt-account",
 		},
+		Extra: map[string]any{openAIPinnedInstallationIDKey: transportTestPinnedInstallationID},
 	}
 
 	result, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
@@ -92,11 +93,25 @@ func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
 	require.Equal(t, "application/json", upstream.lastReq.Header.Get("Accept"))
 	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("Version"))
 	require.Empty(t, upstream.lastReq.Header.Get("OpenAI-Beta"))
-	require.JSONEq(t, string(body), string(upstream.lastBody))
+	require.Equal(t, body, upstream.lastBody)
+	var metadata map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader)), &metadata))
+	var sessionID, threadID, installationID string
+	require.NoError(t, json.Unmarshal(metadata["session_id"], &sessionID))
+	require.NoError(t, json.Unmarshal(metadata["thread_id"], &threadID))
+	require.NoError(t, json.Unmarshal(metadata[codexTurnMetadataInstallationIDKey], &installationID))
+	require.True(t, ValidateFingerprintObservationUUIDv7(sessionID))
+	require.Equal(t, sessionID, threadID)
+	require.Equal(t, transportTestPinnedInstallationID, installationID)
+	require.Empty(t, upstream.lastReq.Header.Get("session-id"))
+	require.Empty(t, upstream.lastReq.Header.Get("thread-id"))
+	require.Empty(t, upstream.lastReq.Header.Get("x-client-request-id"))
+	require.Empty(t, upstream.lastReq.Header.Get(codexInstallationIDKey))
 }
 
 func TestForwardAlphaSearchOAuthPreservesOpaqueTurnMetadataHeaderBytes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	enableOpenAIIdentityPathFingerprintObservation(t)
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -111,11 +126,95 @@ func TestForwardAlphaSearchOAuthPreservesOpaqueTurnMetadataHeaderBytes(t *testin
 	}}
 	service := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
 	account := &Account{ID: 420, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
-		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"}}
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
+		Extra:       map[string]any{openAIPinnedInstallationIDKey: transportTestPinnedInstallationID}}
 
 	_, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
 	require.NoError(t, err)
-	require.Equal(t, opaque, upstream.lastReq.Header.Values("X-Codex-Turn-Metadata")[0])
+	require.Equal(t, []string{opaque}, upstream.lastReq.Header.Values("X-Codex-Turn-Metadata"))
+	require.Equal(t, body, upstream.lastBody)
+	entries := SnapshotFingerprintObservations(0)
+	require.Len(t, entries, 1)
+	require.Empty(t, entries[0].OutboundInstallationID)
+	require.Empty(t, entries[0].SessionID)
+	require.Empty(t, entries[0].ThreadID)
+}
+
+func TestForwardAlphaSearchOAuthObservationDoesNotReportStrippedClientInstallation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	enableOpenAIIdentityPathFingerprintObservation(t)
+	body := []byte(`{"id":"search-unpinned","model":"gpt-5.6-sol","commands":{}}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
+	c.Request.Header.Set(codexInstallationIDKey, "client-only-installation")
+	c.Request.Header.Set(openAIWSTurnMetadataHeader, "opaque-turn-metadata")
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"output":"ok"}`)),
+	}}
+	service := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID: 423, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
+		Extra:       map[string]any{openAIInstallationPinEnabledKey: false},
+	}
+
+	_, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.Empty(t, upstream.lastReq.Header.Get(codexInstallationIDKey))
+	require.Equal(t, "opaque-turn-metadata", upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader))
+	entries := SnapshotFingerprintObservations(0)
+	require.Len(t, entries, 1)
+	require.Equal(t, "client-only-installation", entries[0].ClientReportedInstallationID)
+	require.Empty(t, entries[0].OutboundInstallationID)
+}
+
+func TestForwardAlphaSearchOAuthNormalizesTurnMetadataAndPinsInstallation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(" { \"id\" : \"search-session\", \"model\" : \"gpt-5.6-sol\", \"commands\" : {} } \n")
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
+	c.Request.Header.Set(openAIWSTurnMetadataHeader,
+		`{"session_id":"client-session","thread_id":"client-thread","installation_id":"client-installation","mcp_request_meta":{"request_id":"keep-me"},"future_field":true}`)
+	c.Request.Header.Set("session-id", "standalone-session")
+	c.Request.Header.Set("thread-id", "standalone-thread")
+	c.Request.Header.Set("x-client-request-id", "standalone-request")
+	c.Request.Header.Set(codexInstallationIDKey, "standalone-installation")
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"output":"ok"}`)),
+	}}
+	service := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID: 422, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
+		Extra:       map[string]any{openAIPinnedInstallationIDKey: transportTestPinnedInstallationID},
+	}
+
+	_, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.Equal(t, body, upstream.lastBody)
+	var metadata map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader)), &metadata))
+	var sessionID, threadID, installationID string
+	require.NoError(t, json.Unmarshal(metadata["session_id"], &sessionID))
+	require.NoError(t, json.Unmarshal(metadata["thread_id"], &threadID))
+	require.NoError(t, json.Unmarshal(metadata[codexTurnMetadataInstallationIDKey], &installationID))
+	require.True(t, ValidateFingerprintObservationUUIDv7(sessionID))
+	require.True(t, ValidateFingerprintObservationUUIDv7(threadID))
+	require.Equal(t, transportTestPinnedInstallationID, installationID)
+	require.JSONEq(t, `{"request_id":"keep-me"}`, string(metadata["mcp_request_meta"]))
+	require.JSONEq(t, `true`, string(metadata["future_field"]))
+	require.Empty(t, upstream.lastReq.Header.Get("session-id"))
+	require.Empty(t, upstream.lastReq.Header.Get("thread-id"))
+	require.Empty(t, upstream.lastReq.Header.Get("x-client-request-id"))
+	require.Empty(t, upstream.lastReq.Header.Get(codexInstallationIDKey))
 }
 
 func TestForwardAlphaSearchOAuthObservesFinalPhysicalWireOnce(t *testing.T) {
@@ -134,7 +233,8 @@ func TestForwardAlphaSearchOAuthObservesFinalPhysicalWireOnce(t *testing.T) {
 	}}
 	service := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
 	account := &Account{ID: 421, Name: "alpha-observation", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
-		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"}}
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
+		Extra:       map[string]any{openAIPinnedInstallationIDKey: transportTestPinnedInstallationID}}
 
 	_, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
 	require.NoError(t, err)
@@ -144,6 +244,7 @@ func TestForwardAlphaSearchOAuthObservesFinalPhysicalWireOnce(t *testing.T) {
 	require.Equal(t, upstream.lastReq.Header.Get("User-Agent"), entries[0].UserAgent)
 	require.NotEmpty(t, entries[0].SessionID)
 	require.NotEmpty(t, entries[0].ThreadID)
+	require.Equal(t, transportTestPinnedInstallationID, entries[0].OutboundInstallationID)
 }
 
 func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {

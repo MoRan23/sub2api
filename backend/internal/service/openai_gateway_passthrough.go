@@ -427,31 +427,36 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 		if isOpenAIResponsesCompactPath(c) {
 			projectionMode = OpenAIOAuthIdentityProjectionCompact
 		}
+		installationPolicy := OpenAIOAuthInstallationPreserve
+		capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
 		if explicitPlan != nil {
-			identityPlan = *explicitPlan
-			identityPlanned = true
-		} else {
-			capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
-			if !captured {
-				capture = CaptureOpenAIOAuthIdentity(c, body, "")
-				SetOpenAIOAuthIdentityCapture(c, capture)
-			}
-			planOptions := OpenAIOAuthIdentityPlanOptions{
-				TurnIdentityEnabled: identityModeEnabled,
-				ProjectionMode:      projectionMode,
-				InstallationPolicy:  OpenAIOAuthInstallationPreserve,
-			}
-			identityPlan, identityPlanned = OpenAIOAuthIdentityPlanFromContext(c)
-			if !identityPlanned || !s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, identityPlan, planOptions) {
-				var planErr error
-				identityPlan, planErr = s.ResolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, planOptions)
-				if planErr != nil {
-					return nil, fmt.Errorf("resolve openai OAuth passthrough identity plan: %w", planErr)
-				}
-			}
-			identityPlanned = true
+			// HTTP-bridged WebSocket turns and physical retries carry an immutable
+			// connection/request plan. Its snapshot is authoritative even when the
+			// Gin context still contains an earlier frame's capture or the runtime
+			// setting changes while the connection is alive.
+			capture = explicitPlan.Capture
+			captured = true
+			identityModeEnabled = explicitPlan.TurnIdentityRequested
+			projectionMode = explicitPlan.ProjectionMode
+			installationPolicy = explicitPlan.InstallationPolicy
 		}
-		SetOpenAIOAuthIdentityPlan(c, identityPlan)
+		if !captured {
+			capture = CaptureOpenAIOAuthIdentity(c, body, "")
+		}
+		SetOpenAIOAuthIdentityCapture(c, capture)
+		planOptions := OpenAIOAuthIdentityPlanOptions{
+			TurnIdentityEnabled: identityModeEnabled,
+			ProjectionMode:      projectionMode,
+			InstallationPolicy:  installationPolicy,
+		}
+		var planErr error
+		identityPlan, planErr = s.GetOrResolveOpenAIOAuthOutboundIdentity(
+			ctx, c, account, capture, planOptions, explicitPlan,
+		)
+		if planErr != nil {
+			return nil, fmt.Errorf("resolve openai OAuth passthrough identity plan: %w", planErr)
+		}
+		identityPlanned = true
 		// Current Codex OAuth HTTP no longer negotiates the legacy Responses
 		// experiment. Passthrough may receive it from an older client, so remove
 		// only that token while preserving any independent beta negotiation.
@@ -520,7 +525,13 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 		}
 	}
 	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
-		req.Header.Set("user-agent", codexCLIUserAgent)
+		if account.Type == AccountTypeOAuth && identityPlanned {
+			req.Header.Set("user-agent", identityPlan.ClientIdentity.UserAgent)
+			req.Header.Set("originator", identityPlan.ClientIdentity.Originator)
+			req.Header.Set("version", identityPlan.ClientIdentity.Version)
+		} else {
+			req.Header.Set("user-agent", resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, "").UserAgent)
+		}
 	}
 	if req.Header.Get("content-type") == "" {
 		req.Header.Set("content-type", "application/json")
