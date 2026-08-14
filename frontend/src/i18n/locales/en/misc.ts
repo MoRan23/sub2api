@@ -77,6 +77,7 @@ export default {
     openInNewTab: 'Open in new tab',
     purchaseGuideTitle: 'Redeem after payment',
     purchaseGuideDescription: 'This page only sells codes. After payment, copy the redemption code, open the Redeem page, and paste it there before your balance is credited.',
+    purchaseGuideUsdtNotice: 'For USDT payments, please use Recharge / Subscription in this site.',
     goToRedeem: 'Go to Redeem',
     notFoundTitle: 'Page not found',
     notFoundDesc: 'This custom page does not exist or has been removed.',

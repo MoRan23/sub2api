@@ -149,6 +149,9 @@ describe('CustomPageView purchase mode', () => {
     expect(wrapper.get('[data-testid="purchase-guide"]').text()).toContain(
       '这里只负责买码。支付完成后复制兑换码，打开「兑换」页粘贴，余额才会到账。',
     )
+    expect(wrapper.get('[data-testid="purchase-usdt-notice"]').text()).toBe(
+      '如需使用USDT支付请使用站内充值/订阅处',
+    )
 
     const iframe = wrapper.get('[data-testid="custom-page-iframe"]')
     expect(iframe.attributes('referrerpolicy')).toBe('no-referrer')
@@ -172,6 +175,9 @@ describe('CustomPageView purchase mode', () => {
     const guide = wrapper.get('[data-testid="purchase-guide"]').text()
     expect(guide).toContain('Redeem after payment')
     expect(guide).toContain('This page only sells codes.')
+    expect(wrapper.get('[data-testid="purchase-usdt-notice"]').text()).toBe(
+      'For USDT payments, please use Recharge / Subscription in this site.',
+    )
     expect(wrapper.get('[data-testid="purchase-redeem-button"]').text()).toContain('Go to Redeem')
     expect(zhMisc.customPage.purchaseGuideTitle).toBe('付款后去兑换')
     expect(enMisc.customPage.purchaseGuideTitle).toBe('Redeem after payment')

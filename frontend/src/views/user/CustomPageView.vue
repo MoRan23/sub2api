@@ -117,6 +117,12 @@
                 <p class="mt-1 text-sm leading-5 text-gray-600 dark:text-dark-300">
                   {{ t('customPage.purchaseGuideDescription') }}
                 </p>
+                <p
+                  class="mt-1.5 text-xs font-medium leading-5 text-amber-700 dark:text-amber-300"
+                  data-testid="purchase-usdt-notice"
+                >
+                  {{ t('customPage.purchaseGuideUsdtNotice') }}
+                </p>
               </div>
             </div>
 
