@@ -271,9 +271,22 @@
                 </span>
               </div>
               <div
-                v-if="getOpenAICompactMeta(row)"
+                v-if="getOpenAIRemoteCompactionV2Meta(row)"
+                data-testid="openai-remote-compaction-v2-status"
                 :class="[
                   'inline-flex items-center gap-1.5 pl-0.5 text-[11px] font-medium leading-4',
+                  getOpenAIRemoteCompactionV2Meta(row)?.className
+                ]"
+                :title="getOpenAIRemoteCompactionV2Title(row)"
+              >
+                <span :class="['h-1.5 w-1.5 rounded-full', getOpenAIRemoteCompactionV2Meta(row)?.dotClass]" />
+                <span>{{ getOpenAIRemoteCompactionV2Meta(row)?.label }}</span>
+              </div>
+              <div
+                v-if="getOpenAICompactMeta(row)"
+                data-testid="openai-legacy-compact-status"
+                :class="[
+                  'inline-flex items-center gap-1.5 pl-0.5 text-[10px] font-normal leading-4 opacity-80',
                   getOpenAICompactMeta(row)?.className
                 ]"
                 :title="getOpenAICompactTitle(row)"
@@ -1631,6 +1644,64 @@ function accountHomepageUrl(row: Account): string {
 
 type OpenAICompactBadgeState = 'active' | 'blocked' | 'auto'
 
+type OpenAICompactBadgeMeta = {
+  label: string
+  className: string
+  dotClass: string
+}
+
+function getOpenAIRemoteCompactionV2State(row: any): OpenAICompactBadgeState | null {
+  if (row.platform !== 'openai' || (row.type !== 'oauth' && row.type !== 'apikey')) return null
+  const supported = row.extra?.openai_remote_compaction_v2_supported
+  if (supported === true) return 'active'
+  if (supported === false) return 'blocked'
+  return 'auto'
+}
+
+function getOpenAIRemoteCompactionV2Meta(row: any): OpenAICompactBadgeMeta | null {
+  const state = getOpenAIRemoteCompactionV2State(row)
+  if (!state) return null
+  const prefix = t('admin.accounts.openai.remoteCompactionV2')
+  switch (state) {
+    case 'active':
+      return {
+        label: `${prefix}: ${t('admin.accounts.openai.remoteCompactionV2Supported')}`,
+        className: 'text-emerald-600 dark:text-emerald-300',
+        dotClass: 'bg-emerald-500 shadow-[0_0_0_2px_rgba(16,185,129,0.14)]'
+      }
+    case 'blocked':
+      return {
+        label: `${prefix}: ${t('admin.accounts.openai.remoteCompactionV2Unsupported')}`,
+        className: 'text-rose-600 dark:text-rose-300',
+        dotClass: 'bg-rose-500 shadow-[0_0_0_2px_rgba(244,63,94,0.14)]'
+      }
+    case 'auto':
+      return {
+        label: `${prefix}: ${t('admin.accounts.openai.remoteCompactionV2Unknown')}`,
+        className: 'text-slate-500 dark:text-slate-400',
+        dotClass: 'bg-slate-300 dark:bg-slate-500'
+      }
+  }
+}
+
+function getOpenAIRemoteCompactionV2Title(row: any): string {
+  const extra = row.extra as Record<string, unknown> | undefined
+  const checkedAt = typeof extra?.openai_remote_compaction_v2_checked_at === 'string'
+    ? extra.openai_remote_compaction_v2_checked_at
+    : ''
+  const lastError = typeof extra?.openai_remote_compaction_v2_last_error === 'string'
+    ? extra.openai_remote_compaction_v2_last_error.trim()
+    : ''
+  const details = [getOpenAIRemoteCompactionV2Meta(row)?.label || '']
+  if (checkedAt) {
+    details.push(`${t('admin.accounts.openai.remoteCompactionV2LastChecked')}: ${formatDateTime(new Date(checkedAt))}`)
+  }
+  if (lastError) {
+    details.push(`${t('admin.accounts.openai.remoteCompactionV2LastError')}: ${lastError}`)
+  }
+  return details.filter(Boolean).join(' | ')
+}
+
 function getOpenAICompactState(row: any): OpenAICompactBadgeState | null {
   if (row.platform !== 'openai' || (row.type !== 'oauth' && row.type !== 'apikey')) return null
   const extra = row.extra as Record<string, unknown> | undefined
@@ -1643,7 +1714,7 @@ function getOpenAICompactState(row: any): OpenAICompactBadgeState | null {
   return 'auto'
 }
 
-function getOpenAICompactMeta(row: any): { label: string; className: string; dotClass: string } | null {
+function getOpenAICompactMeta(row: any): OpenAICompactBadgeMeta | null {
   const state = getOpenAICompactState(row)
   if (!state) return null
   switch (state) {

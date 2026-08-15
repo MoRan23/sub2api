@@ -348,6 +348,89 @@ describe('admin AccountsView — 账号行展示', () => {
     wrapper.unmount()
   })
 
+  it('账号列表优先显示 Remote compaction v2 探测并保留独立的 Legacy 状态', async () => {
+    listAccounts.mockResolvedValue({
+      items: [
+        {
+          id: 110,
+          name: 'remote-supported',
+          platform: 'openai',
+          type: 'oauth',
+          extra: {
+            openai_remote_compaction_v2_supported: true,
+            openai_remote_compaction_v2_checked_at: '2026-08-16T02:00:00Z',
+            openai_compact_supported: false,
+            openai_compact_checked_at: '2026-08-15T02:00:00Z',
+          },
+        },
+        {
+          id: 111,
+          name: 'remote-unsupported',
+          platform: 'openai',
+          type: 'apikey',
+          extra: {
+            openai_remote_compaction_v2_supported: false,
+            openai_remote_compaction_v2_last_error: 'no compaction item',
+            openai_compact_supported: true,
+          },
+        },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+
+    const wrapper = mountViewWithRow()
+    await flushPromises()
+
+    const remoteStatuses = wrapper.findAll('[data-testid="openai-remote-compaction-v2-status"]')
+    const legacyStatuses = wrapper.findAll('[data-testid="openai-legacy-compact-status"]')
+    expect(remoteStatuses).toHaveLength(2)
+    expect(legacyStatuses).toHaveLength(2)
+    expect(remoteStatuses[0].text()).toContain('admin.accounts.openai.remoteCompactionV2Supported')
+    expect(legacyStatuses[0].text()).toContain('admin.accounts.openai.compactUnsupported')
+    expect(remoteStatuses[1].text()).toContain('admin.accounts.openai.remoteCompactionV2Unsupported')
+    expect(legacyStatuses[1].text()).toContain('admin.accounts.openai.compactSupported')
+    expect(remoteStatuses[0].element.compareDocumentPosition(legacyStatuses[0].element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(remoteStatuses[0].attributes('title')).toContain('admin.accounts.openai.remoteCompactionV2LastChecked')
+    expect(remoteStatuses[1].attributes('title')).toContain('admin.accounts.openai.remoteCompactionV2LastError: no compaction item')
+    expect(legacyStatuses[0].attributes('title')).toContain('admin.accounts.openai.compactLastChecked')
+
+    wrapper.unmount()
+  })
+
+  it('未探测 Remote v2 时不会被 Legacy 强制模式伪装为支持', async () => {
+    listAccounts.mockResolvedValue({
+      items: [
+        {
+          id: 112,
+          name: 'legacy-force-on',
+          platform: 'openai',
+          type: 'oauth',
+          extra: { openai_compact_mode: 'force_on' },
+        },
+        { id: 113, name: 'anthropic', platform: 'anthropic', type: 'oauth', extra: {} },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+
+    const wrapper = mountViewWithRow()
+    await flushPromises()
+
+    const remoteStatuses = wrapper.findAll('[data-testid="openai-remote-compaction-v2-status"]')
+    const legacyStatuses = wrapper.findAll('[data-testid="openai-legacy-compact-status"]')
+    expect(remoteStatuses).toHaveLength(1)
+    expect(legacyStatuses).toHaveLength(1)
+    expect(remoteStatuses[0].text()).toContain('admin.accounts.openai.remoteCompactionV2Unknown')
+    expect(legacyStatuses[0].text()).toContain('admin.accounts.openai.compactSupported')
+
+    wrapper.unmount()
+  })
+
   it('prefers persisted Grok JWT tier over lagging billing/quota snapshots', async () => {
     const grokAccounts = [
       {
