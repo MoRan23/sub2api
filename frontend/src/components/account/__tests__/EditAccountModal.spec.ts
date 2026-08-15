@@ -558,6 +558,24 @@ describe('EditAccountModal', () => {
     })
   })
 
+  it('shows legacy compact and remote compaction v2 status independently', async () => {
+    const account = buildOpenAIOAuthAccount()
+    account.extra = {
+      ...account.extra,
+      openai_compact_supported: false,
+      openai_compact_checked_at: '2026-08-15T01:00:00Z',
+      openai_remote_compaction_v2_supported: true,
+      openai_remote_compaction_v2_checked_at: '2026-08-16T02:00:00Z',
+    }
+
+    const wrapper = mountModal(account)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.accounts.openai.compactUnsupported')
+    expect(wrapper.text()).toContain('admin.accounts.openai.remoteCompactionV2')
+    expect(wrapper.text()).toContain('admin.accounts.openai.remoteCompactionV2Supported')
+  })
+
   it('loads and submits the per-account OpenAI long-context billing toggle', async () => {
     const account = buildAccount()
     account.extra = {

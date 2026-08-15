@@ -493,8 +493,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		var bridgeIdentityPlan *OpenAIOAuthIdentityPlan
 		var bridgeLogicalIdentity OpenAICodexLogicalTurnIdentity
 		installationPolicy := OpenAIOAuthInstallationPreserve
+		projectionMode := OpenAIOAuthIdentityProjectionRegular
 		if account.IsOpenAIOAuth() {
 			installationPolicy = openAIWSHTTPBridgeInstallationPolicy(account)
+			if account.IsOpenAIPassthroughEnabled() {
+				projectionMode = OpenAIOAuthIdentityProjectionPassthrough
+			}
 			capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
 			if !captured {
 				capture = CaptureOpenAIOAuthIdentity(c, firstPayload.payloadRaw, "")
@@ -502,7 +506,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			plan, planErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, OpenAIOAuthIdentityPlanOptions{
 				TurnIdentityEnabled: s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account),
-				ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
+				ProjectionMode:      projectionMode,
 				InstallationPolicy:  installationPolicy,
 			}, nil)
 			if planErr != nil {
@@ -534,7 +538,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					!openAICodexLogicalTurnIdentityEqual(frameCapture.Logical, bridgeLogicalIdentity) {
 					plan, planErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, frameCapture, OpenAIOAuthIdentityPlanOptions{
 						TurnIdentityEnabled: bridgeIdentityPlan.TurnIdentityRequested,
-						ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
+						ProjectionMode:      projectionMode,
 						InstallationPolicy:  installationPolicy,
 					}, bridgeIdentityPlan)
 					if planErr != nil {
@@ -554,8 +558,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					return err
 				}
 			}
-			if turnState != "" && c != nil && c.Request != nil {
-				c.Request.Header.Set(openAIWSTurnStateHeader, turnState)
+			if c != nil && c.Request != nil {
+				if turnState == "" {
+					c.Request.Header.Del(openAIWSTurnStateHeader)
+				} else {
+					c.Request.Header.Set(openAIWSTurnStateHeader, turnState)
+				}
 			}
 			bridgePayloadRaw := currentBridgePayload.payloadRaw
 			bridgePayloadBytes := currentBridgePayload.payloadBytes
@@ -633,12 +641,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				bridgeReplayInput = append(bridgeReplayInput, cloneOpenAIWSRawMessages(result.wsReplayInput)...)
 				bridgeReplayInputExists = true
 			}
-			if bridgeTurnState := strings.TrimSpace(result.ResponseHeaders.Get(openAIWSTurnStateHeader)); bridgeTurnState != "" {
-				turnState = bridgeTurnState
-				if stateStore != nil && sessionHash != "" {
-					stateStore.BindSessionTurnState(groupID, sessionHash, bridgeTurnState, s.openAIWSSessionStickyTTL())
-				}
-			}
+			turnState = s.applyOpenAIWSHTTPBridgeDeliveredTurnState(c, account, stateStore, groupID, sessionHash, turnState, result)
 			responseID := strings.TrimSpace(result.RequestID)
 			if responseID != "" && stateStore != nil {
 				ttl := s.openAIWSResponseStickyTTL()
@@ -840,18 +843,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return nil, acquireErr
 		}
 		connID := strings.TrimSpace(lease.ConnID())
-		if handshakeTurnState := strings.TrimSpace(lease.HandshakeHeader(openAIWSTurnStateHeader)); handshakeTurnState != "" {
-			turnState = handshakeTurnState
-			if stateStore != nil && sessionHash != "" {
-				stateStore.BindSessionTurnState(groupID, sessionHash, handshakeTurnState, s.openAIWSSessionStickyTTL())
-			}
-			updatedHeaders := cloneHeader(baseAcquireReq.Headers)
-			if updatedHeaders == nil {
-				updatedHeaders = make(http.Header)
-			}
-			updatedHeaders.Set(openAIWSTurnStateHeader, handshakeTurnState)
-			baseAcquireReq.Headers = updatedHeaders
-		}
 		// Header construction is intentionally observed only after Acquire has
 		// completed successfully. This excludes pool reuse, failed dials, and
 		// background prewarm while still capturing a logical-key replacement
@@ -877,6 +868,31 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		turnStart := time.Now()
 		wroteDownstream := false
+		turnStateCommitted := false
+		commitTurnState := func() {
+			if turnStateCommitted {
+				return
+			}
+			handshakeTurnState := strings.TrimSpace(lease.HandshakeHeader(openAIWSTurnStateHeader))
+			turnState = handshakeTurnState
+			updatedHeaders := cloneHeader(baseAcquireReq.Headers)
+			if updatedHeaders == nil {
+				updatedHeaders = make(http.Header)
+			}
+			relayOpenAICodexTurnStateHeader(updatedHeaders, lease.HandshakeHeaders())
+			baseAcquireReq.Headers = updatedHeaders
+			if stateStore != nil && sessionHash != "" {
+				if handshakeTurnState == "" {
+					stateStore.DeleteSessionTurnState(groupID, sessionHash)
+				} else {
+					stateStore.BindSessionTurnState(groupID, sessionHash, handshakeTurnState, s.openAIWSSessionStickyTTL())
+				}
+			}
+			if handshakeTurnState != "" {
+				s.noteOpenAICodexTurnStateProvenance(c, account, handshakeTurnState)
+			}
+			turnStateCommitted = true
+		}
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
@@ -1082,6 +1098,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					}
 				} else {
 					wroteDownstream = true
+					commitTurnState()
 				}
 			}
 			if isTerminalEvent {
@@ -1735,8 +1752,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if identityChangedForNextTurn {
 				newPlan, identityErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, frameCapture, OpenAIOAuthIdentityPlanOptions{
 					TurnIdentityEnabled: pinnedIdentityPlan.TurnIdentityRequested,
-					ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
-					InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
+					ProjectionMode:      pinnedIdentityPlan.ProjectionMode,
+					InstallationPolicy:  pinnedIdentityPlan.InstallationPolicy,
 				}, &pinnedIdentityPlan)
 				newIdentity, newIdentityEnabled := newPlan.TurnIdentity, newPlan.TurnIdentityEnabled
 				if identityErr != nil {
@@ -1782,6 +1799,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					if _, applyErr := ApplyOpenAIOAuthIdentityPlan(updatedHeaders, nil, newPlan); applyErr != nil {
 						return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to rebuild websocket session identity headers", applyErr)
 					}
+					s.guardOpenAICodexTurnStateEcho(c, account, updatedHeaders)
 					newPlan.SocketDigest = openAIWSOutboundIdentityPlanDigest(updatedHeaders, newPlan)
 					pinnedIdentityDigest = newPlan.SocketDigest
 					pinnedSocketDigest = newPlan.SocketDigest
@@ -1870,4 +1888,30 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		turn++
 	}
+}
+
+func (s *OpenAIGatewayService) applyOpenAIWSHTTPBridgeDeliveredTurnState(
+	c *gin.Context,
+	account *Account,
+	stateStore OpenAIWSStateStore,
+	groupID int64,
+	sessionHash string,
+	currentTurnState string,
+	result *OpenAIForwardResult,
+) string {
+	if result == nil || !result.wsClientOutputDelivered {
+		return currentTurnState
+	}
+	bridgeTurnState := strings.TrimSpace(result.ResponseHeaders.Get(openAIWSTurnStateHeader))
+	if stateStore != nil && sessionHash != "" {
+		if bridgeTurnState == "" {
+			stateStore.DeleteSessionTurnState(groupID, sessionHash)
+		} else {
+			stateStore.BindSessionTurnState(groupID, sessionHash, bridgeTurnState, s.openAIWSSessionStickyTTL())
+		}
+	}
+	if bridgeTurnState != "" {
+		s.noteOpenAICodexTurnStateProvenance(c, account, bridgeTurnState)
+	}
+	return bridgeTurnState
 }

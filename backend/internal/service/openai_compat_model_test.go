@@ -163,7 +163,6 @@ func TestForwardAsAnthropic_UsesExactFableMessagesDispatchModel(t *testing.T) {
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
-
 	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.6-sol")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -971,6 +970,7 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
 		firstResp,
 		openAICompatSSECompletedResponse("resp_oauth_second", "gpt-5.4"),
+		openAICompatSSECompletedResponse("resp_oauth_third", "gpt-5.4"),
 	}}
 	svc := &OpenAIGatewayService{
 		httpUpstream: upstream,
@@ -987,6 +987,7 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = &installationIdentityRepoStub{accounts: map[int64]*Account{account.ID: account}}
 
 	firstBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"}],"stream":false}`)
 	firstRec := httptest.NewRecorder()
@@ -1017,6 +1018,20 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	requireOpenAIMessagesCodexIdentity(t, upstream.requests[1], codexCLIUserAgent, openai.CodexDefaultOriginator)
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").Exists())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
+
+	thirdBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"},{"role":"assistant","content":"ok again"},{"role":"user","content":"third"}],"stream":false}`)
+	thirdRec := httptest.NewRecorder()
+	thirdCtx, _ := gin.CreateTestContext(thirdRec)
+	thirdCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(thirdBody))
+	thirdCtx.Request.Header.Set("Content-Type", "application/json")
+
+	thirdResult, err := svc.ForwardAsAnthropic(context.Background(), thirdCtx, account, thirdBody, "stable-cache-key", "gpt-5.4")
+	require.NoError(t, err)
+	require.NotNil(t, thirdResult)
+	require.Len(t, upstream.requests, 3)
+	require.Empty(t, upstream.requests[2].Header.Get("x-codex-turn-state"), "successful response without turn-state must clear the compat raw binding")
+	thirdIdentity := requireOpenAIIdentityPathPair(t, upstream.requests[2].Header, upstream.bodies[2])
+	require.Equal(t, firstIdentity, thirdIdentity)
 }
 
 func TestForwardAsAnthropic_OAuthRestoresCodexIdentityHeaders(t *testing.T) {
@@ -1095,6 +1110,7 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = &installationIdentityRepoStub{accounts: map[int64]*Account{account.ID: account}}
 
 	firstBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"}],"stream":false}`)
 	firstRec := httptest.NewRecorder()
@@ -1153,6 +1169,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = &installationIdentityRepoStub{accounts: map[int64]*Account{account.ID: account}}
 	metadata := `{"user_id":"{\"device_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"account_uuid\":\"\",\"session_id\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\"}"}`
 
 	firstBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"metadata":` + metadata + `,"messages":[{"role":"user","content":"first plan"}],"stream":false}`)
@@ -1210,6 +1227,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = &installationIdentityRepoStub{accounts: map[int64]*Account{account.ID: account}}
 	metadata := `{"user_id":"{\"device_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"account_uuid\":\"\",\"session_id\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"}`
 
 	firstBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"metadata":` + metadata + `,"system":[{"type":"text","text":"anchor one","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"first"}],"stream":false}`)

@@ -641,9 +641,10 @@ func TestOpenAIOutboundIdentityPathsOAuthPassthroughObservesEachPhysicalSend(t *
 	require.NotNil(t, result)
 	identity := requireOpenAIIdentityPathPair(t, upstream.lastReq.Header, upstream.lastBody)
 	entry := requireOpenAIIdentityPathSingleFingerprintObservation(t, identity, http.MethodPost+" /v1/responses")
-	require.False(t, entry.Pinned)
+	require.True(t, entry.Pinned)
 	require.Equal(t, "client-body-installation", entry.ClientReportedInstallationID)
-	require.Equal(t, "client-body-installation", entry.OutboundInstallationID)
+	require.NotEqual(t, "client-body-installation", entry.OutboundInstallationID)
+	require.Equal(t, upstream.lastReq.Header.Get(codexInstallationIDKey), entry.OutboundInstallationID)
 }
 
 func TestOpenAIOutboundIdentityPathsOAuthPassthroughUsesMetadataWithoutLegacySeed(t *testing.T) {
@@ -659,7 +660,7 @@ func TestOpenAIOutboundIdentityPathsOAuthPassthroughUsesMetadataWithoutLegacySee
 	require.Equal(t, 2, identityPathCacheCalls(cache))
 }
 
-func TestOpenAIOutboundIdentityPassthroughPreservesInstallationVerbatim(t *testing.T) {
+func TestOpenAIOutboundIdentityPassthroughPinsInstallationAcrossCarriers(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","input":"hello","prompt_cache_key":"passthrough-install-session","client_metadata":{"x-codex-installation-id":"client-body-install","x-codex-turn-metadata":"{\"installation_id\":\"client-nested-install\",\"label\":\"keep\"}"}}`)
 	c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 332)
 	c.Request.Header.Set(codexInstallationIDKey, "client-header-install")
@@ -674,14 +675,45 @@ func TestOpenAIOutboundIdentityPassthroughPreservesInstallationVerbatim(t *testi
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, "oauth-token")
 	require.NoError(t, err)
 	outboundBody := readOpenAIIdentityPathRequestBody(t, req)
-	require.Equal(t, "client-header-install", req.Header.Get(codexInstallationIDKey))
+	const pinnedInstallationID = "11111111-2222-4333-8444-555555555555"
+	require.Equal(t, pinnedInstallationID, req.Header.Get(codexInstallationIDKey))
 	headerMetadata := req.Header.Get(openAIWSTurnMetadataHeader)
-	require.Equal(t, "client-header-nested", gjson.Get(headerMetadata, "installation_id").String())
+	require.Equal(t, pinnedInstallationID, gjson.Get(headerMetadata, "installation_id").String())
 	require.Equal(t, "keep", gjson.Get(headerMetadata, "label").String())
-	require.Equal(t, "client-body-install", gjson.GetBytes(outboundBody, "client_metadata.x-codex-installation-id").String())
+	require.Equal(t, pinnedInstallationID, gjson.GetBytes(outboundBody, "client_metadata.x-codex-installation-id").String())
 	bodyMetadata := gjson.GetBytes(outboundBody, "client_metadata.x-codex-turn-metadata").String()
-	require.Equal(t, "client-nested-install", gjson.Get(bodyMetadata, "installation_id").String())
+	require.Equal(t, pinnedInstallationID, gjson.Get(bodyMetadata, "installation_id").String())
 	require.Equal(t, "keep", gjson.Get(bodyMetadata, "label").String())
+	plan, ok := OpenAIOAuthIdentityPlanFromContext(c)
+	require.True(t, ok)
+	require.Equal(t, OpenAIOAuthIdentityProjectionPassthrough, plan.ProjectionMode)
+	require.Equal(t, OpenAIOAuthInstallationAccountPin, plan.InstallationPolicy)
+}
+
+func TestOpenAIOutboundIdentityPassthroughCompactPinsHeaderAndStripsClientMetadata(t *testing.T) {
+	const pinnedInstallationID = "11111111-2222-4333-8444-555555555555"
+	body := []byte(`{"model":"gpt-5.4","prompt_cache_key":"passthrough-compact-session","client_metadata":{"x-codex-installation-id":"client-body-install","keep":"remove"}}`)
+	c, _ := newOpenAIIdentityPathContext(t, "/v1/responses/compact", body, 333)
+	c.Request.Header.Set(codexInstallationIDKey, "client-header-install")
+	svc, _ := newOpenAIIdentityPathService(t, true, nil)
+	account := newOpenAIIdentityPathOAuthAccount(910036)
+	account.Extra = map[string]any{
+		"openai_passthrough":          true,
+		openAIPinnedInstallationIDKey: pinnedInstallationID,
+	}
+
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, "oauth-token")
+	require.NoError(t, err)
+	outboundBody := readOpenAIIdentityPathRequestBody(t, req)
+	require.Equal(t, pinnedInstallationID, req.Header.Get(codexInstallationIDKey))
+	require.True(t, ValidateFingerprintObservationUUIDv7(req.Header.Get("session-id")))
+	require.Equal(t, req.Header.Get("session-id"), req.Header.Get("thread-id"))
+	require.Empty(t, req.Header.Get("x-client-request-id"))
+	require.False(t, gjson.GetBytes(outboundBody, "client_metadata").Exists())
+	plan, ok := OpenAIOAuthIdentityPlanFromContext(c)
+	require.True(t, ok)
+	require.Equal(t, OpenAIOAuthIdentityProjectionCompact, plan.ProjectionMode)
+	require.Equal(t, OpenAIOAuthInstallationAccountPin, plan.InstallationPolicy)
 }
 
 func TestOpenAIOutboundIdentityPassthroughConversationHeaderKeepsPairSeed(t *testing.T) {

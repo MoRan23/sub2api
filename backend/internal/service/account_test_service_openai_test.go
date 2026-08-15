@@ -156,7 +156,10 @@ func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {
 		Type:        AccountTypeOAuth,
 		Concurrency: 1,
 		Credentials: map[string]any{"access_token": "test-token"},
-		Extra:       map[string]any{openAIPinnedInstallationIDKey: "11111111-2222-4333-8444-555555555555"},
+		Extra: map[string]any{
+			"openai_passthrough":          true,
+			openAIPinnedInstallationIDKey: "11111111-2222-4333-8444-555555555555",
+		},
 	}
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.6", "", "")

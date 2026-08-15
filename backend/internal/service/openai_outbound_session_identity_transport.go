@@ -16,6 +16,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const (
@@ -438,6 +440,127 @@ func mergeOpenAICodexTurnIdentityBody(body []byte, identity OpenAICodexTurnIdent
 		return body, fmt.Errorf("encode OpenAI Codex turn identity body: %w", err)
 	}
 	return out, nil
+}
+
+// mergeOpenAIOAuthPassthroughIdentityBody applies the account-owned identity
+// without re-encoding the entire Responses payload. Only client_metadata and
+// an existing top-level turn-metadata carrier may change; all other bytes are
+// left as produced by the passthrough normalizer.
+func mergeOpenAIOAuthPassthroughIdentityBody(body []byte, plan OpenAIOAuthIdentityPlan) ([]byte, error) {
+	if len(body) == 0 || !utf8.Valid(body) || !gjson.ParseBytes(body).IsObject() {
+		return body, nil
+	}
+
+	projectInstallation := plan.InstallationPolicy == OpenAIOAuthInstallationAccountPin &&
+		plan.InstallationEnabled && strings.TrimSpace(plan.InstallationID) != ""
+	projectTurn := plan.TurnIdentityEnabled &&
+		strings.TrimSpace(plan.TurnIdentity.SessionID) != "" &&
+		strings.TrimSpace(plan.TurnIdentity.ThreadID) != ""
+	if !projectInstallation && !projectTurn {
+		return body, nil
+	}
+
+	out := body
+	clientMetadata := gjson.GetBytes(out, "client_metadata")
+	metadataWritable := !clientMetadata.Exists() || clientMetadata.IsObject()
+	if metadataWritable {
+		metadata := make(map[string]json.RawMessage)
+		if clientMetadata.IsObject() {
+			if err := json.Unmarshal([]byte(clientMetadata.Raw), &metadata); err != nil {
+				return body, fmt.Errorf("decode OpenAI OAuth passthrough client_metadata: %w", err)
+			}
+		}
+
+		if projectInstallation {
+			metadata[codexInstallationIDKey] = mustMarshalJSONString(plan.InstallationID)
+		}
+		if projectTurn {
+			for _, field := range []string{
+				"session_id", "session-id", "thread_id", "thread-id",
+				"conversation_id", "conversation-id", "parent_thread_id",
+				"forked_from_thread_id", "x-codex-parent-thread-id",
+			} {
+				delete(metadata, field)
+			}
+			metadata["session_id"] = mustMarshalJSONString(plan.TurnIdentity.SessionID)
+			metadata["thread_id"] = mustMarshalJSONString(plan.TurnIdentity.ThreadID)
+			if plan.TurnIdentity.ParentThreadID != "" {
+				metadata["x-codex-parent-thread-id"] = mustMarshalJSONString(plan.TurnIdentity.ParentThreadID)
+			}
+		}
+
+		if raw, present := metadata[openAIWSTurnMetadataHeader]; present {
+			if rewritten, changed := rewriteOpenAIOAuthPassthroughTurnMetadata(
+				normalizeOpenAICodexTurnMetadataRaw(raw), plan, projectInstallation, projectTurn,
+			); changed {
+				metadata[openAIWSTurnMetadataHeader] = mustMarshalJSONString(rewritten)
+			}
+		} else if projectTurn {
+			turnMetadata := ""
+			rootMetadata := gjson.GetBytes(out, openAIWSTurnMetadataHeader)
+			rootMetadataPresent := rootMetadata.Exists()
+			if rootMetadataPresent {
+				turnMetadata = normalizeOpenAICodexTurnMetadataRaw(json.RawMessage(rootMetadata.Raw))
+			}
+			if rewritten, changed := rewriteOpenAIOAuthPassthroughTurnMetadata(
+				turnMetadata, plan, projectInstallation, true,
+			); changed || !rootMetadataPresent {
+				metadata[openAIWSTurnMetadataHeader] = mustMarshalJSONString(rewritten)
+			}
+		}
+
+		encodedMetadata, err := marshalJSONWithoutHTMLEscape(metadata)
+		if err != nil {
+			return body, fmt.Errorf("encode OpenAI OAuth passthrough client_metadata: %w", err)
+		}
+		out, err = sjson.SetRawBytes(out, "client_metadata", encodedMetadata)
+		if err != nil {
+			return body, fmt.Errorf("splice OpenAI OAuth passthrough client_metadata: %w", err)
+		}
+	}
+
+	if projectTurn || projectInstallation {
+		rootMetadata := gjson.GetBytes(out, openAIWSTurnMetadataHeader)
+		if rootMetadata.Exists() {
+			raw := normalizeOpenAICodexTurnMetadataRaw(json.RawMessage(rootMetadata.Raw))
+			if rewritten, changed := rewriteOpenAIOAuthPassthroughTurnMetadata(
+				raw, plan, projectInstallation, projectTurn,
+			); changed {
+				var setErr error
+				out, setErr = sjson.SetBytes(out, openAIWSTurnMetadataHeader, rewritten)
+				if setErr != nil {
+					return body, fmt.Errorf("splice OpenAI OAuth passthrough turn metadata: %w", setErr)
+				}
+			}
+		}
+	}
+
+	return out, nil
+}
+
+func rewriteOpenAIOAuthPassthroughTurnMetadata(
+	raw string,
+	plan OpenAIOAuthIdentityPlan,
+	projectInstallation bool,
+	projectTurn bool,
+) (string, bool) {
+	rewritten := raw
+	changed := false
+	if projectTurn {
+		withTurn, err := rewriteOpenAICodexTurnMetadata(rewritten, plan.TurnIdentity)
+		if err != nil {
+			return raw, false
+		}
+		rewritten = withTurn
+		changed = true
+	}
+	if projectInstallation {
+		if withInstallation, installationChanged := rewriteCodexTurnMetadataInstallationID(rewritten, plan.InstallationID); installationChanged {
+			rewritten = withInstallation
+			changed = true
+		}
+	}
+	return rewritten, changed
 }
 
 func normalizeOpenAICodexTurnMetadataRaw(raw json.RawMessage) string {

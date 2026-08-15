@@ -64,6 +64,26 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	} else if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
+	// Keep turn-state attempt-local until this response really commits. Other
+	// filtered headers may be stable across retries, but an abandoned account's
+	// opaque continuation token must never leak into the next attempt.
+	c.Writer.Header().Del(openAICodexTurnStateHeader)
+	// x-codex-turn-state 不在通用响应头白名单内，按 Codex 协议显式回传。
+	// 首输出守卫模式下只暂存；只有响应真正 flush 给客户端后才绑定溯源，
+	// 避免被首输出超时丢弃的 attempt 污染后续回带判断。
+	turnState := extractOpenAICodexTurnState(resp.Header)
+	turnStateHeadersReady := false
+	turnStateCommitted := false
+	if guardFirstOutput {
+		stageOpenAICodexTurnState(&attemptResponseHeaders, account, resp.Header)
+	}
+	commitTurnState := func() {
+		if turnStateCommitted || !turnStateHeadersReady || turnState == "" {
+			return
+		}
+		s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
+		turnStateCommitted = true
+	}
 
 	// Set SSE response headers
 	c.Header("Content-Type", "text/event-stream")
@@ -77,14 +97,19 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		c.Header("x-request-id", v)
 	}
 	applyAttemptResponseHeaders := func() {
-		if !guardFirstOutput || len(attemptResponseHeaders) == 0 || c.Writer.Written() {
+		if c.Writer.Written() {
 			return
 		}
-		for key, values := range attemptResponseHeaders {
-			for _, value := range values {
-				c.Writer.Header().Add(key, value)
+		if guardFirstOutput {
+			for key, values := range attemptResponseHeaders {
+				for _, value := range values {
+					c.Writer.Header().Add(key, value)
+				}
 			}
+		} else {
+			s.relayOpenAICodexTurnState(c, account, resp.Header)
 		}
+		turnStateHeadersReady = true
 		// These headers describe this gateway's SSE stream and are stable across
 		// account attempts. Keep them authoritative over upstream values.
 		c.Header("Content-Type", "text/event-stream")
@@ -127,6 +152,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		return int64(bufferedWriter.Buffered())
 	}
 	flushBuffered := func() error {
+		applyAttemptResponseHeaders()
 		if firstOutputStage != nil && !firstOutputProgressObserved && !firstOutputStage.closed {
 			if err := firstOutputStage.CommitTo(w); err != nil {
 				return err
@@ -137,6 +163,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 		}
 		flusher.Flush()
+		commitTurnState()
 		return nil
 	}
 
@@ -260,9 +287,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		shouldFlush := eventShouldFlush || (queueDrained && clientOutputStarted)
 		eventInProgress = false
 		if !clientDisconnected {
-			if completedProgressEvent {
-				applyAttemptResponseHeaders()
-			}
 			if shouldFlush {
 				if err := flushBuffered(); err != nil {
 					clientDisconnected = true
@@ -467,6 +491,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 						// antigravity 先例），否则透传命中的 failed 在监控中不可见。
 						s.recordOpenAIStreamUpstreamError(c, account, false, upstreamRequestID, "http_error", dataBytes, failedMessage)
 						MarkResponseCommitted(c)
+						applyAttemptResponseHeaders()
 						c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 						c.JSON(status, gin.H{
 							"error": gin.H{
@@ -474,6 +499,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 								"message": errMsg,
 							},
 						})
+						if c.Writer.Written() {
+							commitTurnState()
+						}
 						streamEarlyErr = fmt.Errorf("upstream response failed: passthrough rule matched message=%s", errMsg)
 						return
 					}
@@ -1219,7 +1247,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	// Some OpenAI-compatible upstreams (including other sub2api instances)
 	// may return SSE even when stream=false was requested.
 	if isEventStreamResponse(resp.Header) {
-		return s.handleSSEToJSON(resp, c, body, originalModel, mappedModel)
+		return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
 	}
 	// bodyLooksLikeSSE is a line-level heuristic: real SSE framing requires
 	// "data:"/"event:" field names at the very start of a physical line. A
@@ -1235,7 +1263,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	// positives on JSON responses that coincidentally contain "data:" or
 	// "event:" in their text content.
 	if account.Type == AccountTypeOAuth && bodyLooksLikeSSE {
-		return s.handleSSEToJSON(resp, c, body, originalModel, mappedModel)
+		return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
 	}
 	if account != nil && account.IsGrok() && isOpenAIResponsesCompactPath(c) {
 		body, err = convertGrokResponseToOpenAICompact(body)
@@ -1247,7 +1275,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	usageValue, usageOK := extractOpenAIUsageFromJSONBytes(body)
 	if !usageOK {
 		if bodyLooksLikeSSE {
-			return s.handleSSEToJSON(resp, c, body, originalModel, mappedModel)
+			return s.handleSSEToJSON(resp, c, account, body, originalModel, mappedModel)
 		}
 		return nil, fmt.Errorf("parse response: invalid json response")
 	}
@@ -1266,6 +1294,10 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		return nil, fmt.Errorf("restore OpenAI namespace response: %w", err)
 	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	// Codex 协议要求 /responses/compact JSON 响应携带 x-codex-turn-state
+	// （codex-api/src/endpoint/compact.rs 从响应头捕获），显式回传。
+	turnState := s.relayOpenAICodexTurnState(c, account, resp.Header)
+	turnStateCanCommit := !c.Writer.Written()
 
 	contentType := "application/json"
 	if s.cfg != nil && !s.cfg.Security.ResponseHeaders.Enabled {
@@ -1276,6 +1308,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		c.Data(resp.StatusCode, contentType, body)
+	}
+	if turnStateCanCommit && c.Writer.Written() {
+		s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
 	}
 
 	return &openaiNonStreamingResult{
@@ -1309,7 +1344,7 @@ func bodyHasSSEFraming(body []byte) bool {
 	return false
 }
 
-func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Context, body []byte, originalModel, mappedModel string) (*openaiNonStreamingResult, error) {
+func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel, mappedModel string) (*openaiNonStreamingResult, error) {
 	bodyText := string(body)
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 
@@ -1361,6 +1396,8 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	}
 
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	turnState := s.relayOpenAICodexTurnState(c, account, resp.Header)
+	turnStateCanCommit := !c.Writer.Written()
 
 	contentType := "application/json; charset=utf-8"
 	if !ok {
@@ -1371,6 +1408,9 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 	}
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		c.Data(resp.StatusCode, contentType, body)
+	}
+	if turnStateCanCommit && c.Writer.Written() {
+		s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
 	}
 
 	return &openaiNonStreamingResult{

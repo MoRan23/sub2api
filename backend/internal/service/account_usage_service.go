@@ -872,11 +872,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 		return nil, fmt.Errorf("marshal openai probe payload: %w", err)
 	}
 	gateway := s.openAIGatewayForProfileIdentity()
-	installationPolicy := OpenAIOAuthInstallationAccountPin
-	if account.IsOpenAIPassthroughEnabled() {
-		installationPolicy = OpenAIOAuthInstallationPreserve
-	}
-	profilePlan, planErr := gateway.ResolveOpenAIOAuthProfileIdentityPlan(reqCtx, nil, account, installationPolicy)
+	profilePlan, planErr := gateway.ResolveOpenAIOAuthProfileIdentityPlan(reqCtx, nil, account, OpenAIOAuthInstallationAccountPin)
 	if planErr != nil {
 		return nil, fmt.Errorf("resolve OpenAI OAuth profile identity: %w", planErr)
 	}

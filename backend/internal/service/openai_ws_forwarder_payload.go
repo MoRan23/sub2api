@@ -186,14 +186,14 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 		if !captured {
 			capture = CaptureOpenAIOAuthIdentityWithTurnMetadata(c, body, logicalSessionKey, turnMetadata)
 		}
-		installationPolicy := OpenAIOAuthInstallationPreserve
-		if rewriteInstallationID {
-			installationPolicy = OpenAIOAuthInstallationAccountPin
+		projectionMode := OpenAIOAuthIdentityProjectionRegular
+		if !rewriteInstallationID || account.IsOpenAIPassthroughEnabled() {
+			projectionMode = OpenAIOAuthIdentityProjectionPassthrough
 		}
 		planOptions := OpenAIOAuthIdentityPlanOptions{
 			TurnIdentityEnabled: sessionResolution.OutboundIdentityModeEnabled,
-			ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
-			InstallationPolicy:  installationPolicy,
+			ProjectionMode:      projectionMode,
+			InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
 		}
 		plan, identityErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, planOptions, nil)
 		if identityErr != nil {
@@ -287,6 +287,9 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 覆盖所有 WS 模式（ctx_pool/dedicated/passthrough）的握手头。
 	account.ApplyHeaderOverrides(headers)
+	// Session-level beta features participate in WS pool compatibility, so
+	// finalize them before applying the identity plan and computing the digest.
+	applyOpenAICodexBetaFeatures(c, account, headers)
 	setOpenAICodexRoutingHint(headers, account, routingModel, routingServiceTier)
 	logOpenAIRoutingDiagnostics(
 		ctx,
@@ -303,6 +306,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 		if _, applyErr := ApplyOpenAIOAuthIdentityPlan(headers, nil, sessionResolution.OutboundIdentityPlan); applyErr != nil {
 			return nil, sessionResolution, fmt.Errorf("apply openai oauth identity plan to websocket headers: %w", applyErr)
 		}
+		s.guardOpenAICodexTurnStateEcho(c, account, headers)
 		plan := sessionResolution.OutboundIdentityPlan
 		plan.SocketDigest = openAIWSOutboundIdentityPlanDigest(headers, plan)
 		sessionResolution.OutboundIdentityPlan = plan

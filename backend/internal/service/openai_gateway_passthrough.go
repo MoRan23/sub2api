@@ -271,7 +271,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		imageCount = result.imageCount
 		imageOutputSizes = result.imageOutputSizes
 	} else {
-		result, err := s.handleNonStreamingResponsePassthrough(ctx, resp, c, reqModel, upstreamPassthroughModel)
+		result, err := s.handleNonStreamingResponsePassthrough(ctx, resp, c, account, reqModel, upstreamPassthroughModel)
 		if err != nil {
 			return nil, err
 		}
@@ -423,11 +423,11 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 	// OAuth 透传到 ChatGPT internal API 时补齐必要头。
 	if account.Type == AccountTypeOAuth {
 		identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
-		projectionMode := OpenAIOAuthIdentityProjectionRegular
+		projectionMode := OpenAIOAuthIdentityProjectionPassthrough
 		if isOpenAIResponsesCompactPath(c) {
 			projectionMode = OpenAIOAuthIdentityProjectionCompact
 		}
-		installationPolicy := OpenAIOAuthInstallationPreserve
+		installationPolicy := OpenAIOAuthInstallationAccountPin
 		capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
 		if explicitPlan != nil {
 			// HTTP-bridged WebSocket turns and physical retries carry an immutable
@@ -539,6 +539,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
 	account.ApplyHeaderOverrides(req.Header)
+	// x-codex-beta-features follows the real Codex session-level behavior and
+	// must be added after account overrides so an override cannot drop it.
+	applyOpenAICodexBetaFeatures(c, account, req.Header)
 	if account.Type == AccountTypeOAuth && identityPlanned {
 		projectedBody, applyErr := ApplyOpenAIOAuthIdentityPlan(req.Header, body, identityPlan)
 		if applyErr != nil {
@@ -551,6 +554,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 				return io.NopCloser(bytes.NewReader(projectedBody)), nil
 			}
 		}
+		// Validate the opaque state against the credential owner and the final
+		// installation/turn identity that will actually be sent upstream.
+		s.guardOpenAICodexTurnStateEcho(c, account, req.Header)
 		if identityPlan.TurnIdentityEnabled {
 			setFingerprintObservationOutboundIdentity(c, identityPlan.TurnIdentity)
 		}
@@ -1292,6 +1298,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		observer = beginUpstreamResponseModelObservation(c)
 	}
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	turnState := extractOpenAICodexTurnState(resp.Header)
+	// This header belongs to the current account attempt. Delay it until the
+	// first downstream event is written so a pre-output failover cannot leak it.
+	c.Writer.Header().Del(openAICodexTurnStateHeader)
 
 	// SSE headers
 	c.Header("Content-Type", "text/event-stream")
@@ -1319,6 +1329,17 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	semanticOutputSeen := false
 	failedMessage := ""
 	clientOutputStarted := false
+	turnStateHeaderStaged := false
+	turnStateCommitted := false
+	stageTurnStateHeader := func() {
+		if turnStateHeaderStaged || c.Writer.Written() {
+			return
+		}
+		if account != nil && account.IsOpenAIOAuth() {
+			relayOpenAICodexTurnStateHeader(c.Writer.Header(), resp.Header)
+		}
+		turnStateHeaderStaged = true
+	}
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
 	// pendingLines 在首个可见输出前保留前导事件，确保无输出失败仍可安全 failover。
 	pendingLines := make([]string, 0, 8)
@@ -1329,10 +1350,17 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			return
 		}
 		flusher.Flush()
+		if !turnStateCommitted && turnState != "" {
+			s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
+			turnStateCommitted = true
+		}
 		flushPending = false
 	}
 	defer flushPendingOutput()
 	writePendingLines := func() bool {
+		if len(pendingLines) > 0 {
+			stageTurnStateHeader()
+		}
 		for _, pending := range pendingLines {
 			if _, err := fmt.Fprintln(w, pending); err != nil {
 				clientDisconnected = true
@@ -1426,12 +1454,17 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 						s.recordOpenAIStreamUpstreamError(c, account, true, upstreamRequestID, "http_error", dataBytes, failedMessage)
 						MarkResponseCommitted(c)
 						c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+						stageTurnStateHeader()
 						c.JSON(status, gin.H{
 							"error": gin.H{
 								"type":    errType,
 								"message": errMsg,
 							},
 						})
+						if turnState != "" {
+							s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
+							turnStateCommitted = true
+						}
 						return resultWithUsage(), fmt.Errorf("upstream response failed: passthrough rule matched message=%s", errMsg)
 					}
 					if openAIStreamFailedEventShouldFailover(dataBytes, failedMessage) {
@@ -1491,6 +1524,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 					continue
 				}
 			}
+			stageTurnStateHeader()
 			if _, err := fmt.Fprintln(w, line); err != nil {
 				clientDisconnected = true
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
@@ -1565,6 +1599,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	ctx context.Context,
 	resp *http.Response,
 	c *gin.Context,
+	account *Account,
 	originalModel string,
 	mappedModel string,
 ) (*openaiNonStreamingResultPassthrough, error) {
@@ -1587,7 +1622,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	// stream=false was requested. Without this conversion the client would
 	// receive raw SSE text or a terminal event with empty output.
 	if isEventStreamResponse(resp.Header) {
-		return s.handlePassthroughSSEToJSON(resp, c, body, originalModel, mappedModel)
+		return s.handlePassthroughSSEToJSON(resp, c, account, body, originalModel, mappedModel)
 	}
 
 	usage := &OpenAIUsage{}
@@ -1603,8 +1638,6 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 		usage = s.parseSSEUsageFromBody(string(body))
 	}
 
-	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/json"
@@ -1616,8 +1649,18 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	if err != nil {
 		return nil, fmt.Errorf("restore OpenAI passthrough namespace response: %w", err)
 	}
+	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	turnState := ""
+	turnStateCanCommit := false
+	if account != nil && account.IsOpenAIOAuth() {
+		turnState = relayOpenAICodexTurnStateHeader(c.Writer.Header(), resp.Header)
+		turnStateCanCommit = !c.Writer.Written()
+	}
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		c.Data(resp.StatusCode, contentType, body)
+	}
+	if turnStateCanCommit && c.Writer.Written() {
+		s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
 	}
 	return &openaiNonStreamingResultPassthrough{
 		OpenAIUsage:      usage,
@@ -1632,7 +1675,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 // response for the passthrough path. It mirrors handleSSEToJSON while
 // preserving passthrough payloads, except compact-only model remapping may
 // rewrite model fields back to the original requested model.
-func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c *gin.Context, body []byte, originalModel string, mappedModel string) (*openaiNonStreamingResultPassthrough, error) {
+func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel string, mappedModel string) (*openaiNonStreamingResultPassthrough, error) {
 	bodyText := string(body)
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 
@@ -1679,6 +1722,12 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 	}
 
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	turnState := ""
+	turnStateCanCommit := false
+	if account != nil && account.IsOpenAIOAuth() {
+		turnState = relayOpenAICodexTurnStateHeader(c.Writer.Header(), resp.Header)
+		turnStateCanCommit = !c.Writer.Written()
+	}
 
 	contentType := "application/json; charset=utf-8"
 	if !ok {
@@ -1689,6 +1738,9 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 	}
 	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
 		c.Data(resp.StatusCode, contentType, body)
+	}
+	if turnStateCanCommit && c.Writer.Written() {
+		s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
 	}
 
 	return &openaiNonStreamingResultPassthrough{
@@ -1746,4 +1798,5 @@ func writeOpenAIPassthroughResponseHeaders(dst http.Header, src http.Header, fil
 			dst.Add(key, v)
 		}
 	}
+
 }

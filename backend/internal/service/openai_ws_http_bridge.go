@@ -320,6 +320,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 
 	resultWithUsage := func() *OpenAIForwardResult {
 		imageCount := imageCounter.Count()
+		deliveredHeaders := cloneHeader(resp.Header)
+		if !wroteDownstream {
+			deliveredHeaders.Del(openAICodexTurnStateHeader)
+		}
 		result := &OpenAIForwardResult{
 			RequestID:                     responseID,
 			Usage:                         usage,
@@ -332,9 +336,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			Stream:                        reqStream,
 			OpenAIWSMode:                  true,
 			UpstreamTerminalEvent:         upstreamTerminalEvent,
-			ResponseHeaders:               cloneHeader(resp.Header),
+			ResponseHeaders:               deliveredHeaders,
 			Duration:                      time.Since(turnStart),
 			FirstTokenMs:                  firstTokenMs,
+			wsClientOutputDelivered:       wroteDownstream,
 		}
 		if replayInput := replayCollector.Items(); len(replayInput) > 0 {
 			result.wsReplayInput = replayInput
@@ -526,9 +531,6 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 }
 
 func openAIWSHTTPBridgeInstallationPolicy(account *Account) OpenAIOAuthInstallationPolicy {
-	if account != nil && account.IsOpenAIPassthroughEnabled() {
-		return OpenAIOAuthInstallationPreserve
-	}
 	return OpenAIOAuthInstallationAccountPin
 }
 

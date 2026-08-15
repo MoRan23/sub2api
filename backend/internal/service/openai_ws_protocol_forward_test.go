@@ -693,7 +693,8 @@ func TestOpenAIGatewayService_Forward_WSv2StreamEarlyCloseFallbackHTTP(t *testin
 
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
+		respHeader := http.Header{openAIWSTurnStateHeader: []string{"abandoned-ws-state"}}
+		conn, err := upgrader.Upgrade(w, r, respHeader)
 		if err != nil {
 			t.Errorf("upgrade websocket failed: %v", err)
 			return
@@ -779,6 +780,7 @@ func TestOpenAIGatewayService_Forward_WSv2StreamEarlyCloseFallbackHTTP(t *testin
 	require.Nil(t, result)
 	require.Nil(t, upstream.lastReq, "WS 早期断连后不应再回退 HTTP")
 	require.Empty(t, rec.Body.String(), "未产出 token 前上游断连时不应写入下游半截流")
+	require.Empty(t, rec.Header().Get(openAIWSTurnStateHeader), "放弃的 WS attempt 不得泄漏握手 turn-state")
 }
 
 func TestOpenAIGatewayService_Forward_WSv2RetryFiveTimesThenFallbackHTTP(t *testing.T) {

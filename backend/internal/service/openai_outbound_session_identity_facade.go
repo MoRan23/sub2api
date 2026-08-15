@@ -25,6 +25,7 @@ type OpenAIOAuthIdentityProjectionMode string
 
 const (
 	OpenAIOAuthIdentityProjectionRegular                  OpenAIOAuthIdentityProjectionMode = "regular"
+	OpenAIOAuthIdentityProjectionPassthrough              OpenAIOAuthIdentityProjectionMode = "passthrough"
 	OpenAIOAuthIdentityProjectionCompact                  OpenAIOAuthIdentityProjectionMode = "compact"
 	OpenAIOAuthIdentityProjectionHeadersOnly              OpenAIOAuthIdentityProjectionMode = "headers_only"
 	OpenAIOAuthIdentityProjectionExistingTurnMetadataOnly OpenAIOAuthIdentityProjectionMode = "existing_turn_metadata_only"
@@ -188,7 +189,8 @@ func FillOpenAIOAuthIdentityCaptureFallback(c *gin.Context, callerSeed string) b
 
 func normalizeOpenAIOAuthIdentityPlanOptions(options OpenAIOAuthIdentityPlanOptions) OpenAIOAuthIdentityPlanOptions {
 	switch options.ProjectionMode {
-	case OpenAIOAuthIdentityProjectionRegular, OpenAIOAuthIdentityProjectionCompact,
+	case OpenAIOAuthIdentityProjectionRegular, OpenAIOAuthIdentityProjectionPassthrough,
+		OpenAIOAuthIdentityProjectionCompact,
 		OpenAIOAuthIdentityProjectionHeadersOnly, OpenAIOAuthIdentityProjectionExistingTurnMetadataOnly,
 		OpenAIOAuthIdentityProjectionAlphaSearch:
 	default:
@@ -399,6 +401,23 @@ func ApplyOpenAIOAuthIdentityPlan(headers http.Header, body []byte, plan OpenAIO
 			applyCodexClientIdentityPlan(headers, plan.ClientIdentity)
 		}
 		return body, nil
+	}
+	if mode == OpenAIOAuthIdentityProjectionPassthrough {
+		if plan.InstallationPolicy == OpenAIOAuthInstallationAccountPin &&
+			plan.InstallationEnabled && strings.TrimSpace(plan.InstallationID) != "" {
+			rewriteOpenAIInstallationIDHeaders(headers, plan.InstallationID)
+		}
+		if plan.TurnIdentityEnabled {
+			applyOpenAICodexTurnIdentityHeaders(headers, plan.TurnIdentity, false)
+		}
+		out, err := mergeOpenAIOAuthPassthroughIdentityBody(body, plan)
+		if err != nil {
+			return body, err
+		}
+		if plan.ClientIdentityEnabled {
+			applyCodexClientIdentityPlan(headers, plan.ClientIdentity)
+		}
+		return out, nil
 	}
 	out := body
 	// Compact has a deliberately narrow Rust request schema. Strip the regular

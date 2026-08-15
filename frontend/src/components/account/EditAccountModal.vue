@@ -2174,15 +2174,37 @@
             <Select v-model="openAICompactMode" :options="openAICompactModeOptions" />
           </div>
         </div>
-        <div class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300">
-          <span class="font-medium">{{ t(openAICompactStatusKey) }}</span>
-          <span
-            v-if="account?.extra?.openai_compact_checked_at"
-            class="ml-2 text-gray-500 dark:text-gray-400"
-          >
-            {{ t('admin.accounts.openai.compactLastChecked') }}:
-            {{ formatDateTime(new Date(String(account.extra.openai_compact_checked_at))) }}
-          </span>
+        <div class="space-y-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300">
+          <div>
+            <span class="font-medium">{{ t(openAICompactStatusKey) }}</span>
+            <span
+              v-if="account?.extra?.openai_compact_checked_at"
+              class="ml-2 text-gray-500 dark:text-gray-400"
+            >
+              {{ t('admin.accounts.openai.compactLastChecked') }}:
+              {{ formatDateTime(new Date(String(account.extra.openai_compact_checked_at))) }}
+            </span>
+          </div>
+          <div class="border-t border-gray-200 pt-2 dark:border-dark-600">
+            <span class="font-medium">
+              {{ t('admin.accounts.openai.remoteCompactionV2') }}:
+              {{ t(openAIRemoteCompactionV2StatusKey) }}
+            </span>
+            <span
+              v-if="account?.extra?.openai_remote_compaction_v2_checked_at"
+              class="ml-2 text-gray-500 dark:text-gray-400"
+            >
+              {{ t('admin.accounts.openai.remoteCompactionV2LastChecked') }}:
+              {{ formatDateTime(new Date(String(account.extra.openai_remote_compaction_v2_checked_at))) }}
+            </span>
+            <p
+              v-if="account?.extra?.openai_remote_compaction_v2_last_error"
+              class="mt-1 break-words text-red-600 dark:text-red-400"
+            >
+              {{ t('admin.accounts.openai.remoteCompactionV2LastError') }}:
+              {{ String(account.extra.openai_remote_compaction_v2_last_error) }}
+            </p>
+          </div>
         </div>
         <div>
           <label class="input-label">{{ t('admin.accounts.openai.compactModelMapping') }}</label>
@@ -3368,6 +3390,16 @@ const openAICompactStatusKey = computed(() => {
       : 'admin.accounts.openai.compactUnsupported'
   }
   return 'admin.accounts.openai.compactAuto'
+})
+const openAIRemoteCompactionV2StatusKey = computed(() => {
+  const extra = props.account?.extra as Record<string, unknown> | undefined
+  if (extra?.openai_remote_compaction_v2_supported === true) {
+    return 'admin.accounts.openai.remoteCompactionV2Supported'
+  }
+  if (extra?.openai_remote_compaction_v2_supported === false) {
+    return 'admin.accounts.openai.remoteCompactionV2Unsupported'
+  }
+  return 'admin.accounts.openai.remoteCompactionV2Unknown'
 })
 
 // Computed: current preset mappings based on platform

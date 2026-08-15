@@ -152,7 +152,7 @@ func TestOpenAIInstallationCompactUsesHeadersOnly(t *testing.T) {
 	}
 }
 
-func TestOpenAIInstallationHTTPPassthroughDoesNotRewrite(t *testing.T) {
+func TestOpenAIInstallationHTTPPassthroughPinsAllCarriers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-5.4","stream":false,"instructions":"test","input":"hello","client_metadata":{"x-codex-installation-id":"client-body","x-codex-turn-metadata":"{\"installation_id\":\"client-nested-body\"}"}}`)
 	recorder := httptest.NewRecorder()
@@ -180,14 +180,19 @@ func TestOpenAIInstallationHTTPPassthroughDoesNotRewrite(t *testing.T) {
 	if _, err := svc.Forward(context.Background(), c, account, body); err != nil {
 		t.Fatalf("forward passthrough request: %v", err)
 	}
-	if got := strings.TrimSpace(jsonStringPath(t, upstream.lastBody, "client_metadata", codexInstallationIDKey)); got != "client-body" {
-		t.Fatalf("passthrough body installation ID changed to %q", got)
+	if got := strings.TrimSpace(jsonStringPath(t, upstream.lastBody, "client_metadata", codexInstallationIDKey)); got != transportTestPinnedInstallationID {
+		t.Fatalf("passthrough body installation ID was not pinned: %q", got)
 	}
-	if got := upstream.lastReq.Header.Get(codexInstallationIDKey); got != "client-header" {
-		t.Fatalf("passthrough header installation ID changed to %q", got)
+	if got := upstream.lastReq.Header.Get(codexInstallationIDKey); got != transportTestPinnedInstallationID {
+		t.Fatalf("passthrough header installation ID was not pinned: %q", got)
 	}
-	if got := upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader); got != `{"installation_id":"client-nested-header"}` {
-		t.Fatalf("passthrough turn metadata changed to %q", got)
+	headerTurn := decodeInstallationTestMetadata(t, upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader))
+	if headerTurn[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID {
+		t.Fatalf("passthrough header turn metadata was not pinned: %#v", headerTurn)
+	}
+	bodyTurn := decodeInstallationTestMetadata(t, jsonStringPath(t, upstream.lastBody, "client_metadata", openAIWSTurnMetadataHeader))
+	if bodyTurn[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID {
+		t.Fatalf("passthrough body turn metadata was not pinned: %#v", bodyTurn)
 	}
 }
 
@@ -262,14 +267,14 @@ func gjsonGetString(raw, path string) string {
 	return value
 }
 
-func TestBuildOpenAIWSHeadersSkipsInstallationRewriteForPassthrough(t *testing.T) {
+func TestBuildOpenAIWSHeadersPinsInstallationForPassthrough(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	c.Request.Header.Set(codexInstallationIDKey, "client-header")
 	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"installation_id":"client-nested","session_id":"session-1"}`)
-	account := installationTestOAuthAccount(nil)
+	account := installationTestOAuthAccount(map[string]any{"openai_passthrough": true})
 	svc := &OpenAIGatewayService{}
 	decision := OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}
 
@@ -280,22 +285,24 @@ func TestBuildOpenAIWSHeadersSkipsInstallationRewriteForPassthrough(t *testing.T
 	if err != nil {
 		t.Fatalf("build passthrough headers: %v", err)
 	}
-	if passthroughHeaders.Get(codexInstallationIDKey) != "client-header" {
-		t.Fatalf("passthrough WS headers were rewritten: %#v", passthroughHeaders)
+	if passthroughHeaders.Get(codexInstallationIDKey) != transportTestPinnedInstallationID {
+		t.Fatalf("passthrough WS header was not pinned: %#v", passthroughHeaders)
 	}
 	passthroughNested := decodeInstallationTestMetadata(t, passthroughHeaders.Get(openAIWSTurnMetadataHeader))
-	require.Equal(t, "client-nested", passthroughNested[codexTurnMetadataInstallationIDKey])
+	require.Equal(t, transportTestPinnedInstallationID, passthroughNested[codexTurnMetadataInstallationIDKey])
 	passthroughSessionID := requireInstallationTestRootIdentity(t, passthroughNested)
 	require.Equal(t, passthroughSessionID, passthroughHeaders.Get("session-id"))
 	require.Equal(t, passthroughSessionID, passthroughHeaders.Get("thread-id"))
 
-	pinnedHeaders, _, err := svc.buildOpenAIWSHeaders(
+	pinnedHeaders, pinnedResolution, err := svc.buildOpenAIWSHeaders(
 		context.Background(), c, account, "oauth-token", decision, true, "",
 		c.GetHeader(openAIWSTurnMetadataHeader), "", true,
 	)
 	if err != nil {
 		t.Fatalf("build pinned headers: %v", err)
 	}
+	require.Equal(t, OpenAIOAuthIdentityProjectionPassthrough, pinnedResolution.OutboundIdentityPlan.ProjectionMode)
+	require.Equal(t, OpenAIOAuthInstallationAccountPin, pinnedResolution.OutboundIdentityPlan.InstallationPolicy)
 	if pinnedHeaders.Get(codexInstallationIDKey) != transportTestPinnedInstallationID {
 		t.Fatalf("non-passthrough WS header was not pinned: %#v", pinnedHeaders)
 	}

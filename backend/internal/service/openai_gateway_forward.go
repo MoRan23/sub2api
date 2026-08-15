@@ -114,7 +114,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return s.forwardGrokResponses(ctx, c, account, body, originalModel, reqStream, startTime)
 	}
 
-	if account.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPI(account.Extra) {
+	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body)
 	}
 	if account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey {
@@ -1047,6 +1047,12 @@ type openAIUpstreamRequestBuildOptions struct {
 	deferOAuthIdentityProjection bool
 }
 
+func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
+	return account != nil &&
+		account.Type == AccountTypeAPIKey &&
+		!openai_compat.ShouldUseResponsesAPI(account.Extra)
+}
+
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
 	return s.buildUpstreamRequestWithOptions(
 		ctx, c, account, body, token, isStream, promptCacheKey, isCodexCLI,
@@ -1232,6 +1238,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
 	account.ApplyHeaderOverrides(req.Header)
+	// Codex beta features are a session-level capability and must be finalized
+	// after account overrides but before the identity/socket snapshot is sealed.
+	applyOpenAICodexBetaFeatures(c, account, req.Header)
 	if account.Type == AccountTypeOAuth && !options.deferOAuthIdentityProjection {
 		if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok {
 			projectedBody, applyErr := ApplyOpenAIOAuthIdentityPlan(req.Header, body, plan)
@@ -1246,6 +1255,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 				}
 			}
 		}
+		// The opaque turn-state is valid only for the credential owner and stable
+		// outbound turn identity that minted it. Guard after the final projection.
+		s.guardOpenAICodexTurnStateEcho(c, account, req.Header)
 	}
 	if outboundIdentityEnabled {
 		setFingerprintObservationOutboundIdentity(c, outboundIdentity)

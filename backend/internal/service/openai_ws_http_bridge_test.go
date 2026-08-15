@@ -220,6 +220,50 @@ func TestProxyOpenAIWSHTTPBridgeTurnSSEErrorFailoverSafety(t *testing.T) {
 	}
 }
 
+func TestProxyOpenAIWSHTTPBridgeTurnDoesNotExposeUndeliveredTurnState(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type":       []string{"text/event-stream"},
+			"X-Codex-Turn-State": []string{"undelivered-bridge-state"},
+		},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_bridge\",\"model\":\"gpt-5\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n",
+		)),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{ID: 10, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
+
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+		context.Background(), c, account, "sk-test", payload, len(payload),
+		"gpt-5", "", "", "", "", 1,
+		func([]byte) error { return io.EOF },
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Empty(t, result.ResponseHeaders.Get(openAICodexTurnStateHeader))
+	require.False(t, result.wsClientOutputDelivered)
+
+	stateStore := NewOpenAIWSStateStore(nil)
+	const (
+		groupID     = int64(7)
+		sessionHash = "bridge-session"
+		oldState    = "previously-delivered-state"
+	)
+	stateStore.BindSessionTurnState(groupID, sessionHash, oldState, time.Minute)
+	retained := svc.applyOpenAIWSHTTPBridgeDeliveredTurnState(c, account, stateStore, groupID, sessionHash, oldState, result)
+	require.Equal(t, oldState, retained)
+	stored, ok := stateStore.GetSessionTurnState(groupID, sessionHash)
+	require.True(t, ok)
+	require.Equal(t, oldState, stored, "undelivered bridge response must not clear the prior raw turn-state")
+}
+
 // 桥接转发 error / response.failed 给 WS 客户端前必须把容量降载码改写为可重试
 // 的 server_error：Codex 对 server_is_overloaded/slow_down 判致命并终止会话。
 // 账号状态判定使用改写前的原始事件，不受影响。
@@ -470,6 +514,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnUsesConnectionIdentityPlan(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	const sessionID = "01989f44-7c00-7000-8000-000000000001"
 	const threadID = "01989f44-7c00-7000-8000-000000000002"
+	const installationID = "01989f44-7c00-4000-8000-000000000003"
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -493,10 +538,12 @@ func TestProxyOpenAIWSHTTPBridgeTurnUsesConnectionIdentityPlan(t *testing.T) {
 			SessionID: sessionID, ThreadID: threadID, ParentThreadID: sessionID,
 			Relation: OpenAICodexTurnRelationDescendant,
 		},
+		InstallationID:           installationID,
+		InstallationEnabled:      true,
 		TurnIdentityEnabled:      true,
 		TurnIdentityRequested:    true,
-		ProjectionMode:           OpenAIOAuthIdentityProjectionRegular,
-		InstallationPolicy:       OpenAIOAuthInstallationPreserve,
+		ProjectionMode:           OpenAIOAuthIdentityProjectionPassthrough,
+		InstallationPolicy:       OpenAIOAuthInstallationAccountPin,
 		CredentialOwnerNamespace: openAIOutboundSessionIdentityNamespace(account),
 	}
 	payload := []byte(`{"type":"response.create","model":"gpt-5.1","stream":true,"client_metadata":{"session_id":"client-session","thread_id":"client-thread"}}`)
@@ -507,18 +554,20 @@ func TestProxyOpenAIWSHTTPBridgeTurnUsesConnectionIdentityPlan(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.Equal(t, installationID, upstream.lastReq.Header.Get(codexInstallationIDKey))
 	require.Equal(t, sessionID, upstream.lastReq.Header.Get("session-id"))
 	require.Equal(t, threadID, upstream.lastReq.Header.Get("thread-id"))
+	require.Equal(t, installationID, gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
 	require.Equal(t, sessionID, gjson.GetBytes(upstream.lastBody, "client_metadata.session_id").String())
 	require.Equal(t, threadID, gjson.GetBytes(upstream.lastBody, "client_metadata.thread_id").String())
 }
 
-func TestOpenAIWSHTTPBridgeInstallationPolicyPreservesOnlyPassthrough(t *testing.T) {
+func TestOpenAIWSHTTPBridgeInstallationPolicyPinsPassthrough(t *testing.T) {
 	account := installationTestOAuthAccount(nil)
 	require.Equal(t, OpenAIOAuthInstallationAccountPin, openAIWSHTTPBridgeInstallationPolicy(account))
 
 	account.Extra["openai_passthrough"] = true
-	require.Equal(t, OpenAIOAuthInstallationPreserve, openAIWSHTTPBridgeInstallationPolicy(account))
+	require.Equal(t, OpenAIOAuthInstallationAccountPin, openAIWSHTTPBridgeInstallationPolicy(account))
 }
 
 func TestProxyOpenAIWSHTTPBridgeTurnPinsAndObservesFinalOAuthWireOnce(t *testing.T) {

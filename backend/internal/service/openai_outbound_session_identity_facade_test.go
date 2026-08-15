@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestCaptureOpenAIOAuthIdentityKeepsFixedPriorityAndExplicitAliases(t *testing.T) {
@@ -359,6 +360,128 @@ func TestApplyOpenAIOAuthIdentityPlanPreserveIsByteExactWithoutTurnProjection(t 
 	require.NoError(t, err)
 	require.Equal(t, body, out)
 	require.Equal(t, "client", headers.Get("X-Codex-Installation-Id"))
+}
+
+func TestApplyOpenAIOAuthIdentityPlanPassthroughPinsRawClientMetadata(t *testing.T) {
+	id, err := newOpenAICodexRootIdentity()
+	require.NoError(t, err)
+	const installationID = "77777777-7777-4777-8777-777777777777"
+	headers := http.Header{
+		codexInstallationIDKey:     {"client-header-installation"},
+		openAIWSTurnMetadataHeader: {`{"installation_id":"client-header-installation","session_id":"client-header-session","label":"header-keep"}`},
+	}
+	body := []byte(" { \"sequence\" : 9007199254740993, \"client_metadata\" : {\"keep\":{\"raw\":true},\"session_id\":\"client-session\",\"thread_id\":\"client-thread\",\"x-codex-installation-id\":\"client-installation\",\"x-codex-turn-metadata\":\"{\\\"installation_id\\\":\\\"client-nested-installation\\\",\\\"session_id\\\":\\\"client-nested-session\\\",\\\"thread_id\\\":\\\"client-nested-thread\\\",\\\"label\\\":\\\"nested-keep\\\"}\"}, \"tail\" : \"keep\" }\n")
+
+	out, err := ApplyOpenAIOAuthIdentityPlan(headers, body, OpenAIOAuthIdentityPlan{
+		TurnIdentity: id, TurnIdentityEnabled: true,
+		ProjectionMode:      OpenAIOAuthIdentityProjectionPassthrough,
+		InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
+		InstallationEnabled: true,
+		InstallationID:      installationID,
+	})
+	require.NoError(t, err)
+	require.Contains(t, string(out), `"sequence" : 9007199254740993`)
+	require.Contains(t, string(out), `"tail" : "keep"`)
+	require.Equal(t, installationID, headers.Get(codexInstallationIDKey))
+	require.Equal(t, id.SessionID, headers.Get("session-id"))
+	require.Equal(t, id.ThreadID, headers.Get("thread-id"))
+	require.Equal(t, "header-keep", gjson.Get(headers.Get(openAIWSTurnMetadataHeader), "label").String())
+	require.Equal(t, installationID, gjson.Get(headers.Get(openAIWSTurnMetadataHeader), "installation_id").String())
+
+	require.Equal(t, installationID, gjson.GetBytes(out, "client_metadata.x-codex-installation-id").String())
+	require.Equal(t, id.SessionID, gjson.GetBytes(out, "client_metadata.session_id").String())
+	require.Equal(t, id.ThreadID, gjson.GetBytes(out, "client_metadata.thread_id").String())
+	require.True(t, gjson.GetBytes(out, "client_metadata.keep.raw").Bool())
+	nested := gjson.GetBytes(out, "client_metadata.x-codex-turn-metadata").String()
+	require.Equal(t, installationID, gjson.Get(nested, "installation_id").String())
+	require.Equal(t, id.SessionID, gjson.Get(nested, "session_id").String())
+	require.Equal(t, id.ThreadID, gjson.Get(nested, "thread_id").String())
+	require.Equal(t, "nested-keep", gjson.Get(nested, "label").String())
+}
+
+func TestApplyOpenAIOAuthIdentityPlanPassthroughPinsTopLevelTurnMetadata(t *testing.T) {
+	id, err := newOpenAICodexRootIdentity()
+	require.NoError(t, err)
+	const installationID = "77777777-7777-4777-8777-777777777777"
+	body := []byte(`{"model":"gpt","x-codex-turn-metadata":"{\"installation_id\":\"client-installation\",\"session_id\":\"client-session\",\"thread_id\":\"client-thread\",\"label\":\"keep\"}"}`)
+
+	out, err := ApplyOpenAIOAuthIdentityPlan(http.Header{}, body, OpenAIOAuthIdentityPlan{
+		TurnIdentity: id, TurnIdentityEnabled: true,
+		ProjectionMode:      OpenAIOAuthIdentityProjectionPassthrough,
+		InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
+		InstallationEnabled: true,
+		InstallationID:      installationID,
+	})
+	require.NoError(t, err)
+	metadata := gjson.GetBytes(out, openAIWSTurnMetadataHeader).String()
+	require.Equal(t, installationID, gjson.Get(metadata, "installation_id").String())
+	require.Equal(t, id.SessionID, gjson.Get(metadata, "session_id").String())
+	require.Equal(t, id.ThreadID, gjson.Get(metadata, "thread_id").String())
+	require.Equal(t, "keep", gjson.Get(metadata, "label").String())
+}
+
+func TestApplyOpenAIOAuthIdentityPlanPassthroughPinsTopLevelInstallationWithoutTurnIdentity(t *testing.T) {
+	const installationID = "77777777-7777-4777-8777-777777777777"
+	body := []byte(`{"model":"gpt","x-codex-turn-metadata":"{\"installation_id\":\"client-installation\",\"label\":\"keep\"}"}`)
+
+	out, err := ApplyOpenAIOAuthIdentityPlan(http.Header{}, body, OpenAIOAuthIdentityPlan{
+		ProjectionMode:      OpenAIOAuthIdentityProjectionPassthrough,
+		InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
+		InstallationEnabled: true,
+		InstallationID:      installationID,
+	})
+	require.NoError(t, err)
+	metadata := gjson.GetBytes(out, openAIWSTurnMetadataHeader).String()
+	require.Equal(t, installationID, gjson.Get(metadata, "installation_id").String())
+	require.Equal(t, "keep", gjson.Get(metadata, "label").String())
+	require.False(t, gjson.Get(metadata, "session_id").Exists())
+	require.False(t, gjson.Get(metadata, "thread_id").Exists())
+}
+
+func TestApplyOpenAIOAuthIdentityPlanPassthroughCreatesMissingClientMetadata(t *testing.T) {
+	id, err := newOpenAICodexRootIdentity()
+	require.NoError(t, err)
+	const installationID = "77777777-7777-4777-8777-777777777777"
+	body := []byte(`{"model":"gpt","input":[]}`)
+
+	out, err := ApplyOpenAIOAuthIdentityPlan(http.Header{}, body, OpenAIOAuthIdentityPlan{
+		TurnIdentity: id, TurnIdentityEnabled: true,
+		ProjectionMode:      OpenAIOAuthIdentityProjectionPassthrough,
+		InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
+		InstallationEnabled: true,
+		InstallationID:      installationID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, installationID, gjson.GetBytes(out, "client_metadata.x-codex-installation-id").String())
+	require.Equal(t, id.SessionID, gjson.GetBytes(out, "client_metadata.session_id").String())
+	require.Equal(t, id.ThreadID, gjson.GetBytes(out, "client_metadata.thread_id").String())
+	nested := gjson.GetBytes(out, "client_metadata.x-codex-turn-metadata").String()
+	require.Equal(t, installationID, gjson.Get(nested, "installation_id").String())
+	require.Equal(t, id.SessionID, gjson.Get(nested, "session_id").String())
+}
+
+func TestApplyOpenAIOAuthIdentityPlanPassthroughPreservesOpaqueMetadata(t *testing.T) {
+	id, err := newOpenAICodexRootIdentity()
+	require.NoError(t, err)
+	plan := OpenAIOAuthIdentityPlan{
+		TurnIdentity: id, TurnIdentityEnabled: true,
+		ProjectionMode:      OpenAIOAuthIdentityProjectionPassthrough,
+		InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
+		InstallationEnabled: true,
+		InstallationID:      "77777777-7777-4777-8777-777777777777",
+	}
+
+	body := []byte(`{"client_metadata":{"keep":"value","x-codex-turn-metadata":"  opaque-nested  "}}`)
+	out, err := ApplyOpenAIOAuthIdentityPlan(http.Header{}, body, plan)
+	require.NoError(t, err)
+	require.Equal(t, "  opaque-nested  ", gjson.GetBytes(out, "client_metadata.x-codex-turn-metadata").String())
+	require.Equal(t, "value", gjson.GetBytes(out, "client_metadata.keep").String())
+	require.Equal(t, id.SessionID, gjson.GetBytes(out, "client_metadata.session_id").String())
+
+	opaqueContainer := []byte(" { \"client_metadata\" : \"opaque-container\", \"keep\" : 1 } \n")
+	opaqueOut, err := ApplyOpenAIOAuthIdentityPlan(http.Header{}, opaqueContainer, plan)
+	require.NoError(t, err)
+	require.Equal(t, opaqueContainer, opaqueOut)
 }
 
 func TestApplyOpenAIOAuthIdentityPlanPreservesLargeJSONInteger(t *testing.T) {

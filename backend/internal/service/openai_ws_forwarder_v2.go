@@ -322,14 +322,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		handshakeTurnState != "",
 		len(handshakeTurnState),
 	)
-	if handshakeTurnState != "" {
-		if stateStore != nil && sessionHash != "" {
-			stateStore.BindSessionTurnState(groupID, sessionHash, handshakeTurnState, s.openAIWSSessionStickyTTL())
-		}
-		if c != nil {
-			c.Header(http.CanonicalHeaderKey(openAIWSTurnStateHeader), handshakeTurnState)
-		}
-	}
 
 	if err := s.performOpenAIWSGeneratePrewarm(
 		ctx,
@@ -387,6 +379,31 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	firstEventType := ""
 	lastEventType := ""
 	upstreamTerminalEvent := ""
+	turnStateHeaderStaged := false
+	turnStateCommitted := false
+	stageTurnStateHeader := func() {
+		if turnStateHeaderStaged || c == nil || c.Writer == nil {
+			return
+		}
+		relayOpenAICodexTurnStateHeader(c.Writer.Header(), lease.HandshakeHeaders())
+		turnStateHeaderStaged = true
+	}
+	commitTurnState := func() {
+		if turnStateCommitted {
+			return
+		}
+		if stateStore != nil && sessionHash != "" {
+			if handshakeTurnState == "" {
+				stateStore.DeleteSessionTurnState(groupID, sessionHash)
+			} else {
+				stateStore.BindSessionTurnState(groupID, sessionHash, handshakeTurnState, s.openAIWSSessionStickyTTL())
+			}
+		}
+		if handshakeTurnState != "" {
+			s.noteOpenAICodexTurnStateProvenance(c, account, handshakeTurnState)
+		}
+		turnStateCommitted = true
+	}
 
 	var flusher http.Flusher
 	if reqStream {
@@ -427,6 +444,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		if clientDisconnected {
 			return
 		}
+		firstDelivery := !wroteDownstream
+		if firstDelivery {
+			stageTurnStateHeader()
+		}
 		frame := make([]byte, 0, len(message)+8)
 		frame = append(frame, "data: "...)
 		frame = append(frame, message...)
@@ -435,8 +456,15 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		if wErr == nil {
 			wroteDownstream = true
 			pendingFlushEvents++
-			flushStreamWriter(forceFlush)
+			flushStreamWriter(forceFlush || firstDelivery)
+			if firstDelivery {
+				commitTurnState()
+			}
 			return
+		}
+		if firstDelivery && c != nil && c.Writer != nil && !c.Writer.Written() {
+			c.Writer.Header().Del(openAICodexTurnStateHeader)
+			turnStateHeaderStaged = false
 		}
 		clientDisconnected = true
 		logger.LegacyPrintf("service.openai_gateway", "[OpenAI WS Mode] client disconnected, continue draining upstream: account=%d", account.ID)
@@ -669,12 +697,16 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 				emitStreamMessage(message, true)
 			}
 			if !reqStream {
+				stageTurnStateHeader()
 				c.JSON(statusCode, gin.H{
 					"error": gin.H{
 						"type":    "upstream_error",
 						"message": errMsg,
 					},
 				})
+				if c.Writer.Written() {
+					commitTurnState()
+				}
 			}
 			return nil, fmt.Errorf("openai ws error event: %s", errMsg)
 		}
@@ -745,7 +777,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			responseID = strings.TrimSpace(gjson.GetBytes(finalResponse, "id").String())
 		}
 
+		stageTurnStateHeader()
 		c.Data(http.StatusOK, "application/json", finalResponse)
+		if c.Writer.Written() {
+			commitTurnState()
+		}
 	} else {
 		flushStreamWriter(true)
 	}

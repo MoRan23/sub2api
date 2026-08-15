@@ -617,10 +617,11 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 
 	// Align test routing with gateway behavior: OpenAI accounts apply normal
-	// account model mapping, and compact mode applies compact-only mapping on top.
+	// account model mapping. Native remote compaction v2 rides the ordinary
+	// /responses wire and does NOT apply the legacy compact-only mapping
+	// (post-#5641 semantics: compact_model_mapping is /responses/compact-only).
 	testModelID = account.GetMappedModel(testModelID)
 	if mode == AccountTestModeCompact {
-		testModelID = resolveOpenAICompactForwardModel(account, testModelID)
 		return s.testOpenAICompactConnection(c, account, testModelID)
 	}
 
@@ -750,11 +751,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		if gateway == nil {
 			gateway = &OpenAIGatewayService{accountRepo: s.accountRepo, cfg: s.cfg, settingService: s.settingService}
 		}
-		installationPolicy := OpenAIOAuthInstallationAccountPin
-		if account.IsOpenAIPassthroughEnabled() {
-			installationPolicy = OpenAIOAuthInstallationPreserve
-		}
-		plan, planErr := gateway.ResolveOpenAIOAuthProfileIdentityPlan(ctx, c, account, installationPolicy)
+		plan, planErr := gateway.ResolveOpenAIOAuthProfileIdentityPlan(ctx, c, account, OpenAIOAuthInstallationAccountPin)
 		if planErr != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth profile identity: %s", planErr.Error()))
 		}
@@ -2004,8 +2001,10 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	return s.processOpenAIChatCompletionsStream(c, resp.Body)
 }
 
-// testOpenAICompactConnection probes /responses/compact and persists the
-// resulting capability state on the account.
+// testOpenAICompactConnection probes native remote compaction v2 (streaming
+// /responses with a compaction_trigger input item) and persists the resulting
+// capability state on the account. The legacy unary /responses/compact
+// endpoint has been sunset upstream (404, #5598/#5624) and is no longer probed.
 func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account *Account, testModelID string) error {
 	ctx := c.Request.Context()
 	credentialAccount := account
@@ -2030,7 +2029,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		if authToken == "" && !credentialAccount.IsOpenAIAgentIdentity() {
 			return s.sendErrorAndEnd(c, "No access token available")
 		}
-		apiURL = chatgptCodexAPIURL + "/compact"
+		apiURL = chatgptCodexAPIURL
 	case account.Type == AccountTypeAPIKey:
 		authToken = account.GetOpenAIApiKey()
 		if authToken == "" {
@@ -2044,7 +2043,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
 		}
-		apiURL = appendOpenAIResponsesRequestPathSuffix(buildOpenAIResponsesURL(normalizedBaseURL), "/compact")
+		apiURL = buildOpenAIResponsesURL(normalizedBaseURL)
 	default:
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
 	}
@@ -2055,8 +2054,11 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.Flush()
 
-	payload := createOpenAICompactProbePayload(testModelID)
-	payloadBytes, _ := json.Marshal(payload)
+	// 原生 v2 走普通 /responses 线：OAuth 与真实转发一致做上游模型归一化。
+	if isOAuth {
+		testModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
+	}
+	payloadBytes, _ := json.Marshal(createOpenAICompactProbePayload(testModelID, isOAuth))
 	if !agentIdentityTaskRecoveryWasTried(ctx) {
 		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
@@ -2068,7 +2070,8 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
+	// v2 probe uses the streaming Responses wire.
+	req.Header.Set("Accept", "text/event-stream")
 	if credentialAccount.IsOpenAIAgentIdentity() {
 		authHeaders, authErr := buildAgentIdentityAuthenticationHeaders(ctx, s.accountRepo, s.agentIdentityWS, &s.agentIdentityTaskMu, credentialAccount)
 		if authErr != nil {
@@ -2087,11 +2090,12 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	if isOAuth {
 		req.Host = "chatgpt.com"
 		setOpenAIChatGPTAccountHeaders(req.Header, credentialAccount)
+		copyOpenAIInstallationIDHeadersFromContext(c, req.Header)
 	}
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
+	ensureOpenAIRemoteCompactionV2BetaFeature(req.Header)
 	if isOAuth {
-		copyOpenAIInstallationIDHeadersFromContext(c, req.Header)
 		gateway := s.openAIGatewayService
 		if gateway == nil {
 			settings := s.settingService
@@ -2103,14 +2107,10 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 			}
 		}
 		capture := CaptureOpenAIOAuthIdentity(c, payloadBytes, "compact-probe")
-		installationPolicy := OpenAIOAuthInstallationAccountPin
-		if account.IsOpenAIPassthroughEnabled() {
-			installationPolicy = OpenAIOAuthInstallationPreserve
-		}
 		plan, planErr := gateway.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, OpenAIOAuthIdentityPlanOptions{
 			TurnIdentityEnabled: gateway.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account),
-			ProjectionMode:      OpenAIOAuthIdentityProjectionCompact,
-			InstallationPolicy:  installationPolicy,
+			ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
+			InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
 		}, nil)
 		if planErr != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth identity: %s", planErr.Error()))
@@ -2119,8 +2119,6 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to apply OpenAI OAuth identity: %s", err.Error()))
 		}
-	} else if payloadBytes, err = json.Marshal(payload); err != nil {
-		return s.sendErrorAndEnd(c, "Failed to encode OpenAI compact payload")
 	}
 	req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
 	req.ContentLength = int64(len(payloadBytes))
@@ -2133,7 +2131,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		if s.accountRepo != nil {
-			updates := buildOpenAICompactProbeExtraUpdates(nil, nil, err, time.Now())
+			updates := buildOpenAIRemoteCompactionV2ProbeExtraUpdates(nil, nil, err, false, time.Now())
 			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
 			mergeAccountExtra(account, updates)
 		}
@@ -2152,8 +2150,9 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		return s.testOpenAICompactConnection(c, account, testModelID)
 	}
 
+	compactionFound := openAICompactProbeFoundCompactionItem(body)
 	if s.accountRepo != nil {
-		updates := buildOpenAICompactProbeExtraUpdates(resp, body, nil, time.Now())
+		updates := buildOpenAIRemoteCompactionV2ProbeExtraUpdates(resp, body, nil, compactionFound, time.Now())
 		if codexUpdates, err := extractOpenAICodexProbeUpdates(resp); err == nil && len(codexUpdates) > 0 {
 			updates = mergeExtraUpdates(updates, codexUpdates)
 		}
@@ -2175,7 +2174,11 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
-	s.sendEvent(c, TestEvent{Type: "content", Text: "Compact probe succeeded"})
+	if !compactionFound {
+		return s.sendErrorAndEnd(c, "Upstream returned 2xx without a compaction output item (native remote compaction v2 unsupported on this chain)")
+	}
+
+	s.sendEvent(c, TestEvent{Type: "content", Text: "Compact probe succeeded (native remote compaction v2)"})
 	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 	return nil
 }
@@ -3015,11 +3018,7 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	if gateway == nil {
 		gateway = &OpenAIGatewayService{accountRepo: s.accountRepo, cfg: s.cfg, settingService: s.settingService}
 	}
-	installationPolicy := OpenAIOAuthInstallationAccountPin
-	if account.IsOpenAIPassthroughEnabled() {
-		installationPolicy = OpenAIOAuthInstallationPreserve
-	}
-	profilePlan, planErr := gateway.ResolveOpenAIOAuthProfileIdentityPlan(ctx, c, account, installationPolicy)
+	profilePlan, planErr := gateway.ResolveOpenAIOAuthProfileIdentityPlan(ctx, c, account, OpenAIOAuthInstallationAccountPin)
 	if planErr != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth profile identity: %s", planErr.Error()))
 	}

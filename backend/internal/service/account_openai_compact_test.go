@@ -1,6 +1,10 @@
 package service
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestAccountGetOpenAICompactMode(t *testing.T) {
 	tests := []struct {
@@ -151,6 +155,28 @@ func TestAccountOpenAICompactSupportKnown(t *testing.T) {
 			if gotSupported != tt.wantSupported || gotKnown != tt.wantKnown {
 				t.Fatalf("OpenAICompactSupportKnown() = (%v, %v), want (%v, %v)", gotSupported, gotKnown, tt.wantSupported, tt.wantKnown)
 			}
+		})
+	}
+}
+
+func TestAccountRemoteCompactionV2CapabilityIsIndependentFromLegacy(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra map[string]any
+		want  bool
+	}{
+		{name: "unprobed_allowed", extra: map[string]any{"openai_responses_supported": true}, want: true},
+		{name: "native_supported", extra: map[string]any{OpenAIRemoteCompactionV2SupportedExtraKey: true}, want: true},
+		{name: "native_unsupported", extra: map[string]any{OpenAIRemoteCompactionV2SupportedExtraKey: false}, want: false},
+		{name: "legacy_unsupported_ignored", extra: map[string]any{"openai_compact_supported": false}, want: true},
+		{name: "legacy_force_off_ignored", extra: map[string]any{"openai_compact_mode": OpenAICompactModeForceOff}, want: true},
+		{name: "responses_unsupported_wins", extra: map[string]any{"openai_responses_supported": false, OpenAIRemoteCompactionV2SupportedExtraKey: true}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: tt.extra}
+			require.Equal(t, tt.want, account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityRemoteCompactionV2))
 		})
 	}
 }

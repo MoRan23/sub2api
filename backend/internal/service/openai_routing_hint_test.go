@@ -150,10 +150,14 @@ func TestOpenAIHTTPPassthroughStripsOnlyOAuthLegacyResponsesBeta(t *testing.T) {
 	}
 
 	oauth := &Account{
+		ID:       1,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Credentials: map[string]any{
 			"chatgpt_account_id": "test-account",
+		},
+		Extra: map[string]any{
+			openAIPinnedInstallationIDKey: transportTestPinnedInstallationID,
 		},
 	}
 	apiKey := &Account{
@@ -210,10 +214,14 @@ func TestBuildOpenAIWSHeadersSendsOAuthRoutingHintOnly(t *testing.T) {
 	}
 
 	oauthAccount := &Account{
+		ID:       2,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Credentials: map[string]any{
 			"chatgpt_account_id": "test-account",
+		},
+		Extra: map[string]any{
+			openAIPinnedInstallationIDKey: transportTestPinnedInstallationID,
 		},
 	}
 	require.Equal(t, "model=gpt-5.6-codex;tier=priority", build(t, oauthAccount, "fast").Get(openAICodexRoutingHintHeader))

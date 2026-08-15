@@ -157,6 +157,29 @@ func openAICompatSessionResponseKey(c *gin.Context, account *Account, promptCach
 	}, "\x00")
 }
 
+func openAICompatSessionTurnStateKey(c *gin.Context, account *Account, promptCacheKey string) string {
+	key := strings.TrimSpace(promptCacheKey)
+	if account == nil || !account.IsOpenAIOAuth() || key == "" {
+		return ""
+	}
+	plan, ok := OpenAIOAuthIdentityPlanFromContext(c)
+	if !ok {
+		return ""
+	}
+	namespace := strings.TrimSpace(plan.CredentialOwnerNamespace)
+	identityDigest := strings.TrimSpace(OpenAICodexTurnStateIdentityDigest(plan))
+	if namespace == "" || identityDigest == "" {
+		return ""
+	}
+	return strings.Join([]string{
+		"turn-state-v2",
+		namespace,
+		strconv.FormatInt(plan.APIKeyID, 10),
+		identityDigest,
+		key,
+	}, "\x00")
+}
+
 func (s *OpenAIGatewayService) getOpenAICompatSessionResponseID(_ context.Context, c *gin.Context, account *Account, promptCacheKey string) string {
 	if s == nil {
 		return ""
@@ -289,7 +312,7 @@ func (s *OpenAIGatewayService) getOpenAICompatSessionTurnState(_ context.Context
 	if s == nil {
 		return ""
 	}
-	key := openAICompatSessionResponseKey(c, account, promptCacheKey)
+	key := openAICompatSessionTurnStateKey(c, account, promptCacheKey)
 	if key == "" {
 		return ""
 	}
@@ -312,20 +335,22 @@ func (s *OpenAIGatewayService) bindOpenAICompatSessionTurnState(_ context.Contex
 	if s == nil {
 		return
 	}
-	key := openAICompatSessionResponseKey(c, account, promptCacheKey)
+	key := openAICompatSessionTurnStateKey(c, account, promptCacheKey)
 	state := strings.TrimSpace(turnState)
-	if key == "" || state == "" {
+	if key == "" {
+		return
+	}
+	if state == "" {
+		s.openaiCompatSessionResponses.Delete(key)
 		return
 	}
 	binding := openAICompatSessionResponseBinding{
 		TurnState: state,
 		ExpiresAt: time.Now().Add(s.openAIWSResponseStickyTTL()),
 	}
-	if raw, ok := s.openaiCompatSessionResponses.Load(key); ok {
-		if existing, ok := raw.(openAICompatSessionResponseBinding); ok {
-			binding.ResponseID = existing.ResponseID
-			binding.ContinuationDisabled = existing.ContinuationDisabled
-		}
-	}
 	s.openaiCompatSessionResponses.Store(key, binding)
+	// The caller invokes this only after the compat response has been
+	// successfully committed. Keep the raw continuation binding and the
+	// cross-path identity provenance in lockstep.
+	s.noteOpenAICodexTurnStateProvenance(c, account, state)
 }

@@ -91,6 +91,8 @@ type OpenAIOutboundSessionV1CleanupWorker struct {
 	retryMin   time.Duration
 	retryMax   time.Duration
 
+	beforeVerifyScan func(context.Context) error
+
 	startOnce sync.Once
 	stopOnce  sync.Once
 	cancel    context.CancelFunc
@@ -215,6 +217,11 @@ func (w *OpenAIOutboundSessionV1CleanupWorker) cleanupOnce(ctx context.Context) 
 			timer.Stop()
 			return false, deleted, ctx.Err()
 		case <-timer.C:
+		}
+	}
+	if w.beforeVerifyScan != nil {
+		if hookErr := w.beforeVerifyScan(ctx); hookErr != nil {
+			return false, deleted, hookErr
 		}
 	}
 	remaining, scanErr := w.hasV1Keys(ctx)

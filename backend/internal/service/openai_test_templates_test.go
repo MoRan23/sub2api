@@ -102,15 +102,25 @@ func TestOpenAIChatCompletionsTestPayloadPreservesExplicitPrompt(t *testing.T) {
 }
 
 func TestOpenAICompactProbePayloadUsesRandomDefaults(t *testing.T) {
-	payload := createOpenAICompactProbePayload("gpt-test")
+	payload := createOpenAICompactProbePayload("gpt-test", true)
 	if got := payload["instructions"].(string); got != openai.DefaultInstructions {
 		t.Fatalf("compact instructions = %q, want openai.DefaultInstructions", got)
+	}
+	if stream, _ := payload["stream"].(bool); !stream {
+		t.Fatal("native compact probe must use the streaming Responses wire")
+	}
+	if store, ok := payload["store"].(bool); !ok || store {
+		t.Fatal("OAuth native compact probe must set store=false")
 	}
 	input := payload["input"].([]any)
 	message := input[0].(map[string]any)
 	content := message["content"].(string)
 	if !containsOpenAITestTemplate(openAICompactTestTemplates, content) {
 		t.Fatalf("compact prompt %q is not randomized from configured templates", content)
+	}
+	trigger := input[len(input)-1].(map[string]any)
+	if trigger["type"] != "compaction_trigger" {
+		t.Fatalf("compact probe terminal input = %#v, want compaction_trigger", trigger)
 	}
 }
 

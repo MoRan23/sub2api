@@ -44,7 +44,10 @@ func TestAccountTestService_OpenAIImageOAuthHandlesOutputItemDoneFallback(t *tes
 		Credentials: map[string]any{
 			"access_token": "token-123",
 		},
-		Extra: map[string]any{openAIPinnedInstallationIDKey: "22222222-3333-4333-8444-555555555555"},
+		Extra: map[string]any{
+			"openai_passthrough":          true,
+			openAIPinnedInstallationIDKey: "22222222-3333-4333-8444-555555555555",
+		},
 	}
 
 	err := svc.testOpenAIImageOAuth(c, context.Background(), account, "gpt-image-2", "draw a cat")

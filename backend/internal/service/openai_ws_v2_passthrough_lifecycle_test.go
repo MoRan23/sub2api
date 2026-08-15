@@ -348,6 +348,73 @@ func TestPassthroughLifecycle_UUIDv7PromptCacheChangeKeepsPinnedTuple(t *testing
 	}
 }
 
+func TestPassthroughLifecycle_FirstFramePinsInstallationWhenTurnIdentityDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	controlCtx := context.Background()
+	upstream := newStagedPassthroughConn()
+	cfg := passthroughLifecycleConfig()
+	cfg.JWT.Secret = "ws-passthrough-installation-only-test-secret"
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	svc := newPassthroughLifecycleService(cfg, upstream)
+	svc.settingService = NewSettingService(&openAIUUIDv7RuntimeRepo{values: map[string]string{
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity: "false",
+	}}, nil)
+	account := &Account{
+		ID:          810014,
+		Name:        "passthrough-installation-only",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Extra: map[string]any{
+			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+			openAIPinnedInstallationIDKey:               transportTestPinnedInstallationID,
+		},
+	}
+	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, svc, account)
+	defer server.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	cancelDial()
+	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	firstPayload := `{"type":"response.create","model":"gpt-5.1","stream":false,"client_metadata":{"x-codex-installation-id":"client-flat","x-codex-turn-metadata":"{\"installation_id\":\"client-nested\",\"label\":\"nested-keep\"}"},"x-codex-turn-metadata":"{\"installation_id\":\"client-top\",\"label\":\"top-keep\"}"}`
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+	require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(firstPayload)))
+	cancelWrite()
+
+	forwarded := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+	require.Equal(t, transportTestPinnedInstallationID, gjson.GetBytes(forwarded, "client_metadata.x-codex-installation-id").String())
+	nested := gjson.GetBytes(forwarded, "client_metadata.x-codex-turn-metadata").String()
+	require.Equal(t, transportTestPinnedInstallationID, gjson.Get(nested, "installation_id").String())
+	require.Equal(t, "nested-keep", gjson.Get(nested, "label").String())
+	topLevel := gjson.GetBytes(forwarded, openAIWSTurnMetadataHeader).String()
+	require.Equal(t, transportTestPinnedInstallationID, gjson.Get(topLevel, "installation_id").String())
+	require.Equal(t, "top-keep", gjson.Get(topLevel, "label").String())
+	require.False(t, gjson.GetBytes(forwarded, "client_metadata.session_id").Exists())
+	require.False(t, gjson.GetBytes(forwarded, "client_metadata.thread_id").Exists())
+
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_passthrough_installation_only","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	completed, readErr := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+	require.NoError(t, readErr)
+	require.Equal(t, "resp_passthrough_installation_only", gjson.GetBytes(completed, "response.id").String())
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+	select {
+	case proxyErr := <-serverErr:
+		var closeErr *OpenAIWSClientCloseError
+		if proxyErr != nil {
+			require.ErrorAs(t, proxyErr, &closeErr)
+			require.Equal(t, coderws.StatusNormalClosure, closeErr.StatusCode())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("passthrough installation-only test did not exit")
+	}
+}
+
 func TestPassthroughLifecycle_UUIDv7LatePromptCacheInheritsUntilExplicitSessionChange(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	controlCtx := context.Background()

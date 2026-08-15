@@ -231,9 +231,6 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 			promptCacheKey = codexResult.PromptCacheKey
 		}
 		delete(reqBody, "prompt_cache_key")
-		if shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
-			compatTurnState = s.getOpenAICompatSessionTurnState(ctx, c, account, promptCacheKey)
-		}
 		// OAuth codex transform forces stream=true upstream, so always use
 		// the streaming response handler regardless of what the client asked.
 		isStream = true
@@ -347,6 +344,11 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	if account.Platform != PlatformGrok {
 		responsesBody = openAIUpstreamRequestBodySnapshot(upstreamReq, responsesBody)
 	}
+	if account.IsOpenAIOAuth() && shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
+		// The raw continuation is identity-scoped. Resolve it only after the
+		// shared builder has installed the final credential-owner plan.
+		compatTurnState = s.getOpenAICompatSessionTurnState(ctx, c, account, promptCacheKey)
+	}
 	outboundIdentityEnabled := false
 	if account.Platform != PlatformGrok {
 		if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && plan.TurnIdentityEnabled {
@@ -391,6 +393,9 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	}
 	if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
 		upstreamReq.Header.Set("x-codex-turn-state", compatTurnState)
+	}
+	if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
+		s.guardOpenAICodexTurnStateEcho(c, account, upstreamReq.Header)
 	}
 	// Messages compatibility restores/overrides identity headers after the
 	// shared builder, so capture the final upstream header set here.
@@ -500,10 +505,9 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 		s.updateGrokUsageFromResponse(withGrokTeamRateLimitModel(ctx, upstreamModel), account, resp.Header, resp.StatusCode)
 	}
 
+	compatResponseTurnState := ""
 	if account.Type == AccountTypeOAuth && promptCacheKey != "" {
-		if turnState := strings.TrimSpace(resp.Header.Get("x-codex-turn-state")); turnState != "" {
-			s.bindOpenAICompatSessionTurnState(ctx, c, account, promptCacheKey, turnState)
-		}
+		compatResponseTurnState = strings.TrimSpace(resp.Header.Get("x-codex-turn-state"))
 	}
 
 	// 9. Handle normal response
@@ -515,6 +519,12 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	} else {
 		// Client wants JSON: buffer the streaming response and assemble a JSON reply.
 		result, handleErr = s.handleAnthropicBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
+	}
+	if handleErr == nil && account.IsOpenAIOAuth() && promptCacheKey != "" {
+		// A successful response without turn-state explicitly retires the prior
+		// identity-scoped compat continuation. Otherwise the next request would
+		// keep replaying a stale opaque state that upstream stopped returning.
+		s.bindOpenAICompatSessionTurnState(ctx, c, account, promptCacheKey, compatResponseTurnState)
 	}
 
 	// cyber_policy：标记已设、error 已按 Anthropic 格式发给客户端。丢弃 result、返回哨兵，

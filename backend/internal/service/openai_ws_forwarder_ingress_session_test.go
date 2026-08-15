@@ -300,6 +300,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePrompt
 		Credentials: map[string]any{"access_token": "oauth-token"},
 		Extra: map[string]any{
 			"responses_websockets_v2_enabled": true,
+			"openai_passthrough":              true,
 			openAIPinnedInstallationIDKey:     transportTestPinnedInstallationID,
 		},
 	}
@@ -362,7 +363,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePrompt
 	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"Q"}`, "resp_identity_q_1")
 	require.Equal(t, 1, dialer.DialCount(), "prompt_cache_key changes never switch the connection snapshot")
 	require.Len(t, SnapshotFingerprintObservations(0), 1, "prompt cache changes must not add an observation")
-	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false,"client_metadata":{"session_id":"explicit-root-2","thread_id":"explicit-root-2"}}`, "resp_identity_explicit_1")
+	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false,"client_metadata":{"session_id":"explicit-root-2","thread_id":"explicit-root-2"},"x-codex-turn-metadata":"{\"installation_id\":\"client-transition-installation\",\"label\":\"transition-keep\"}"}`, "resp_identity_explicit_1")
 	require.Equal(t, 2, dialer.DialCount(), "an explicit root session change must acquire a new compatible socket")
 	require.Len(t, SnapshotFingerprintObservations(0), 2, "the explicit session transition must observe its new physical handshake")
 
@@ -388,6 +389,9 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePrompt
 	transitionThreadID := gjson.Get(requestToJSONString(secondConn.writes[0]), "client_metadata.thread_id").String()
 	require.NotEmpty(t, transitionSessionID)
 	require.NotEmpty(t, transitionThreadID)
+	transitionMetadata := gjson.Get(requestToJSONString(secondConn.writes[0]), openAIWSTurnMetadataHeader).String()
+	require.Equal(t, transportTestPinnedInstallationID, gjson.Get(transitionMetadata, "installation_id").String())
+	require.Equal(t, "transition-keep", gjson.Get(transitionMetadata, "label").String())
 
 	observations := SnapshotFingerprintObservations(0)
 	require.Len(t, observations, 2)
@@ -1421,16 +1425,16 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(handshakeIdentity))
 	require.Empty(t, captureDialer.lastHeaders.Get("session_id"))
 	require.Equal(t, "turn-state-1", captureDialer.lastHeaders.Get(openAIWSTurnStateHeader))
-	require.Equal(t, "passthrough-header-installation", captureDialer.lastHeaders.Get(codexInstallationIDKey))
+	require.Equal(t, transportTestPinnedInstallationID, captureDialer.lastHeaders.Get(codexInstallationIDKey))
 	handshakeTurnMetadata := captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader)
-	require.Equal(t, "passthrough-header-nested", gjson.Get(handshakeTurnMetadata, "installation_id").String())
+	require.Equal(t, transportTestPinnedInstallationID, gjson.Get(handshakeTurnMetadata, "installation_id").String())
 	require.Equal(t, handshakeIdentity.SessionID, gjson.Get(handshakeTurnMetadata, "session_id").String())
 	require.Equal(t, handshakeIdentity.ThreadID, gjson.Get(handshakeTurnMetadata, "thread_id").String())
 	require.Len(t, upstreamConn.writes, 1)
 	forwarded := requestToJSONString(upstreamConn.writes[0])
-	require.Equal(t, "passthrough-frame-installation", gjson.Get(forwarded, "client_metadata.x-codex-installation-id").String())
+	require.Equal(t, transportTestPinnedInstallationID, gjson.Get(forwarded, "client_metadata.x-codex-installation-id").String())
 	forwardedTurnMetadata := gjson.Get(forwarded, "client_metadata.x-codex-turn-metadata").String()
-	require.Equal(t, "passthrough-frame-nested", gjson.Get(forwardedTurnMetadata, "installation_id").String())
+	require.Equal(t, transportTestPinnedInstallationID, gjson.Get(forwardedTurnMetadata, "installation_id").String())
 	require.Equal(t, handshakeIdentity.SessionID, gjson.Get(forwardedTurnMetadata, "session_id").String())
 	require.Equal(t, handshakeIdentity.ThreadID, gjson.Get(forwardedTurnMetadata, "thread_id").String())
 	require.False(t, gjson.Get(forwarded, `tools.#(type=="namespace")`).Exists())

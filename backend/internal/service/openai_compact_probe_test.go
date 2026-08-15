@@ -28,95 +28,174 @@ func TestNormalizeAccountTestMode(t *testing.T) {
 
 func TestBuildOpenAICompactProbeExtraUpdates_SuccessMarksSupported(t *testing.T) {
 	now := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
-	updates := buildOpenAICompactProbeExtraUpdates(&http.Response{StatusCode: http.StatusOK}, []byte(`{"id":"cmp_1"}`), nil, now)
+	updates := buildOpenAIRemoteCompactionV2ProbeExtraUpdates(&http.Response{StatusCode: http.StatusOK}, []byte(`{"id":"cmp_1"}`), nil, true, now)
 
-	if got := updates["openai_compact_supported"]; got != true {
-		t.Fatalf("openai_compact_supported = %v, want true", got)
+	if got := updates[OpenAIRemoteCompactionV2SupportedExtraKey]; got != true {
+		t.Fatalf("%s = %v, want true", OpenAIRemoteCompactionV2SupportedExtraKey, got)
 	}
-	if got := updates["openai_compact_last_status"]; got != http.StatusOK {
-		t.Fatalf("openai_compact_last_status = %v, want %d", got, http.StatusOK)
+	if got := updates[OpenAIRemoteCompactionV2LastStatusExtraKey]; got != http.StatusOK {
+		t.Fatalf("%s = %v, want %d", OpenAIRemoteCompactionV2LastStatusExtraKey, got, http.StatusOK)
 	}
-	if got := updates["openai_compact_last_error"]; got != "" {
-		t.Fatalf("openai_compact_last_error = %v, want empty string", got)
+	if got := updates[OpenAIRemoteCompactionV2LastErrorExtraKey]; got != "" {
+		t.Fatalf("%s = %v, want empty string", OpenAIRemoteCompactionV2LastErrorExtraKey, got)
 	}
-	if got := updates["openai_compact_checked_at"]; got != now.Format(time.RFC3339) {
-		t.Fatalf("openai_compact_checked_at = %v, want %s", got, now.Format(time.RFC3339))
+	if got := updates[OpenAIRemoteCompactionV2CheckedAtExtraKey]; got != now.Format(time.RFC3339) {
+		t.Fatalf("%s = %v, want %s", OpenAIRemoteCompactionV2CheckedAtExtraKey, got, now.Format(time.RFC3339))
+	}
+	if _, legacyTouched := updates["openai_compact_supported"]; legacyTouched {
+		t.Fatal("native-v2 probe must not overwrite legacy compact capability")
 	}
 }
 
 func TestBuildOpenAICompactProbeExtraUpdates_404MarksUnsupported(t *testing.T) {
 	now := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
 	body := []byte(`404 page not found`)
-	updates := buildOpenAICompactProbeExtraUpdates(&http.Response{StatusCode: http.StatusNotFound}, body, nil, now)
+	updates := buildOpenAIRemoteCompactionV2ProbeExtraUpdates(&http.Response{StatusCode: http.StatusNotFound}, body, nil, false, now)
 
-	if got := updates["openai_compact_supported"]; got != false {
-		t.Fatalf("openai_compact_supported = %v, want false", got)
+	if got := updates[OpenAIRemoteCompactionV2SupportedExtraKey]; got != false {
+		t.Fatalf("%s = %v, want false", OpenAIRemoteCompactionV2SupportedExtraKey, got)
 	}
-	if got := updates["openai_compact_last_status"]; got != http.StatusNotFound {
-		t.Fatalf("openai_compact_last_status = %v, want %d", got, http.StatusNotFound)
+	if got := updates[OpenAIRemoteCompactionV2LastStatusExtraKey]; got != http.StatusNotFound {
+		t.Fatalf("%s = %v, want %d", OpenAIRemoteCompactionV2LastStatusExtraKey, got, http.StatusNotFound)
 	}
 }
 
 func TestBuildOpenAICompactProbeExtraUpdates_502DoesNotMarkUnsupported(t *testing.T) {
 	now := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
-	updates := buildOpenAICompactProbeExtraUpdates(&http.Response{StatusCode: http.StatusBadGateway}, []byte(`Upstream request failed`), nil, now)
+	updates := buildOpenAIRemoteCompactionV2ProbeExtraUpdates(&http.Response{StatusCode: http.StatusBadGateway}, []byte(`Upstream request failed`), nil, false, now)
 
-	if _, exists := updates["openai_compact_supported"]; exists {
-		t.Fatalf("did not expect openai_compact_supported for 502 response")
+	if _, exists := updates[OpenAIRemoteCompactionV2SupportedExtraKey]; exists {
+		t.Fatalf("did not expect %s for 502 response", OpenAIRemoteCompactionV2SupportedExtraKey)
 	}
-	if got := updates["openai_compact_last_status"]; got != http.StatusBadGateway {
-		t.Fatalf("openai_compact_last_status = %v, want %d", got, http.StatusBadGateway)
+	if got := updates[OpenAIRemoteCompactionV2LastStatusExtraKey]; got != http.StatusBadGateway {
+		t.Fatalf("%s = %v, want %d", OpenAIRemoteCompactionV2LastStatusExtraKey, got, http.StatusBadGateway)
 	}
 }
 
 func TestBuildOpenAICompactProbeExtraUpdates_RequestErrorDoesNotMarkUnsupported(t *testing.T) {
 	now := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
-	updates := buildOpenAICompactProbeExtraUpdates(nil, nil, errors.New("dial tcp timeout"), now)
+	updates := buildOpenAIRemoteCompactionV2ProbeExtraUpdates(nil, nil, errors.New("dial tcp timeout"), false, now)
 
-	if _, exists := updates["openai_compact_supported"]; exists {
-		t.Fatalf("did not expect openai_compact_supported for request error")
+	if _, exists := updates[OpenAIRemoteCompactionV2SupportedExtraKey]; exists {
+		t.Fatalf("did not expect %s for request error", OpenAIRemoteCompactionV2SupportedExtraKey)
 	}
-	if got, exists := updates["openai_compact_last_status"]; !exists || got != nil {
-		t.Fatalf("openai_compact_last_status = %v, want nil key", got)
+	if got, exists := updates[OpenAIRemoteCompactionV2LastStatusExtraKey]; !exists || got != nil {
+		t.Fatalf("%s = %v, want nil key", OpenAIRemoteCompactionV2LastStatusExtraKey, got)
 	}
-	if got := updates["openai_compact_last_error"]; got == "" {
-		t.Fatalf("expected openai_compact_last_error to be populated")
+	if got := updates[OpenAIRemoteCompactionV2LastErrorExtraKey]; got == "" {
+		t.Fatalf("expected %s to be populated", OpenAIRemoteCompactionV2LastErrorExtraKey)
 	}
 }
 
 func TestBuildOpenAICompactProbeExtraUpdates_NoResponseClearsLastStatus(t *testing.T) {
 	now := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
-	updates := buildOpenAICompactProbeExtraUpdates(nil, nil, nil, now)
+	updates := buildOpenAIRemoteCompactionV2ProbeExtraUpdates(nil, nil, nil, false, now)
 
-	if got, exists := updates["openai_compact_last_status"]; !exists || got != nil {
-		t.Fatalf("openai_compact_last_status = %v, want nil key", got)
+	if got, exists := updates[OpenAIRemoteCompactionV2LastStatusExtraKey]; !exists || got != nil {
+		t.Fatalf("%s = %v, want nil key", OpenAIRemoteCompactionV2LastStatusExtraKey, got)
 	}
-	if got := updates["openai_compact_last_error"]; got != "compact probe failed" {
-		t.Fatalf("openai_compact_last_error = %v, want compact probe failed", got)
+	if got := updates[OpenAIRemoteCompactionV2LastErrorExtraKey]; got != "remote compaction v2 probe failed" {
+		t.Fatalf("%s = %v, want remote compaction v2 probe failed", OpenAIRemoteCompactionV2LastErrorExtraKey, got)
 	}
 }
 
 func TestBuildOpenAICompactProbeExtraUpdates_UnknownModelDoesNotMarkUnsupported(t *testing.T) {
 	now := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
 	body := []byte(`{"error":{"message":"unknown model gpt-5.4-openai-compact"}}`)
-	updates := buildOpenAICompactProbeExtraUpdates(&http.Response{StatusCode: http.StatusBadRequest}, body, nil, now)
+	updates := buildOpenAIRemoteCompactionV2ProbeExtraUpdates(&http.Response{StatusCode: http.StatusBadRequest}, body, nil, false, now)
 
-	if _, exists := updates["openai_compact_supported"]; exists {
-		t.Fatalf("did not expect openai_compact_supported for unknown-model diagnostics")
+	if _, exists := updates[OpenAIRemoteCompactionV2SupportedExtraKey]; exists {
+		t.Fatalf("did not expect %s for unknown-model diagnostics", OpenAIRemoteCompactionV2SupportedExtraKey)
 	}
-	if got := updates["openai_compact_last_status"]; got != http.StatusBadRequest {
-		t.Fatalf("openai_compact_last_status = %v, want %d", got, http.StatusBadRequest)
+	if got := updates[OpenAIRemoteCompactionV2LastStatusExtraKey]; got != http.StatusBadRequest {
+		t.Fatalf("%s = %v, want %d", OpenAIRemoteCompactionV2LastStatusExtraKey, got, http.StatusBadRequest)
 	}
 }
 
 func TestBuildOpenAICompactProbeExtraUpdates_EmptyFailureBodyFallsBackToHTTPStatus(t *testing.T) {
 	now := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
-	updates := buildOpenAICompactProbeExtraUpdates(&http.Response{StatusCode: http.StatusServiceUnavailable}, nil, nil, now)
+	updates := buildOpenAIRemoteCompactionV2ProbeExtraUpdates(&http.Response{StatusCode: http.StatusServiceUnavailable}, nil, nil, false, now)
 
-	if got := updates["openai_compact_last_status"]; got != http.StatusServiceUnavailable {
-		t.Fatalf("openai_compact_last_status = %v, want %d", got, http.StatusServiceUnavailable)
+	if got := updates[OpenAIRemoteCompactionV2LastStatusExtraKey]; got != http.StatusServiceUnavailable {
+		t.Fatalf("%s = %v, want %d", OpenAIRemoteCompactionV2LastStatusExtraKey, got, http.StatusServiceUnavailable)
 	}
-	if got := updates["openai_compact_last_error"]; got != "HTTP 503" {
-		t.Fatalf("openai_compact_last_error = %v, want HTTP 503", got)
+	if got := updates[OpenAIRemoteCompactionV2LastErrorExtraKey]; got != "HTTP 503" {
+		t.Fatalf("%s = %v, want HTTP 503", OpenAIRemoteCompactionV2LastErrorExtraKey, got)
+	}
+}
+
+func TestBuildOpenAICompactProbeExtraUpdates_2xxWithoutCompactionItemMarksUnsupported(t *testing.T) {
+	now := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	updates := buildOpenAIRemoteCompactionV2ProbeExtraUpdates(&http.Response{StatusCode: http.StatusOK}, []byte(`{"id":"resp_1","output":[]}`), nil, false, now)
+
+	if got := updates[OpenAIRemoteCompactionV2SupportedExtraKey]; got != false {
+		t.Fatalf("%s = %v, want false（2xx 无 compaction item = v2 不可用）", OpenAIRemoteCompactionV2SupportedExtraKey, got)
+	}
+	if got := updates[OpenAIRemoteCompactionV2LastErrorExtraKey]; got == "" {
+		t.Fatalf("expected %s to explain the missing compaction item", OpenAIRemoteCompactionV2LastErrorExtraKey)
+	}
+}
+
+func TestCreateOpenAICompactProbePayload_NativeV2Shape(t *testing.T) {
+	payload := createOpenAICompactProbePayload("gpt-5.6-sol", true)
+	if payload["stream"] != true {
+		t.Fatalf("v2 probe payload must be streaming")
+	}
+	if payload["store"] != false {
+		t.Fatalf("OAuth probe payload must carry store:false")
+	}
+	input, ok := payload["input"].([]any)
+	if !ok || len(input) != 2 {
+		t.Fatalf("expected 2 input items, got %v", payload["input"])
+	}
+	last, ok := input[len(input)-1].(map[string]any)
+	if !ok || last["type"] != "compaction_trigger" {
+		t.Fatalf("last input item must be compaction_trigger, got %v", input[len(input)-1])
+	}
+
+	apiKeyPayload := createOpenAICompactProbePayload("gpt-5.6-sol", false)
+	if _, has := apiKeyPayload["store"]; has {
+		t.Fatalf("API-key probe payload must not force store")
+	}
+}
+
+func TestOpenAICompactProbeFoundCompactionItem(t *testing.T) {
+	sseWithItem := []byte("event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"compaction\",\"id\":\"cmp_1\",\"encrypted_content\":\"blob\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[]}}\n\n")
+	if !openAICompactProbeFoundCompactionItem(sseWithItem) {
+		t.Fatalf("SSE output_item.done 携带 compaction item 应判定为支持")
+	}
+
+	sseAlias := []byte("data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"compaction_summary\",\"id\":\"cmp_2\"}}\n\n")
+	if !openAICompactProbeFoundCompactionItem(sseAlias) {
+		t.Fatalf("compaction_summary 别名应判定为支持")
+	}
+
+	sseNoItem := []byte("data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"id\":\"msg_1\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2\",\"output\":[]}}\n\n")
+	if openAICompactProbeFoundCompactionItem(sseNoItem) {
+		t.Fatalf("无 compaction item 的流不应判定为支持")
+	}
+
+	jsonWithItem := []byte(`{"id":"resp_3","output":[{"type":"compaction","id":"cmp_3"}]}`)
+	if !openAICompactProbeFoundCompactionItem(jsonWithItem) {
+		t.Fatalf("JSON output[] 携带 compaction item 应判定为支持（降级链兜底）")
+	}
+
+	if openAICompactProbeFoundCompactionItem(nil) {
+		t.Fatalf("空响应不应判定为支持")
+	}
+}
+
+func TestOpenAICompactProbeFoundCompactionItem_TerminalResponseOutput(t *testing.T) {
+	// 部分上游只在终态 response.completed 的 output[] 给出 compaction item，
+	// 事件流里没有 output_item.done——探针同样必须判定为支持。
+	sseTerminalOnly := []byte("data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"id\":\"msg_1\"}}\n\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_t\",\"output\":[{\"type\":\"compaction\",\"id\":\"cmp_t\"}]}}\n\n")
+	if !openAICompactProbeFoundCompactionItem(sseTerminalOnly) {
+		t.Fatalf("终态 response.output 中的 compaction item 应判定为支持")
+	}
+
+	sseTerminalEmpty := []byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_e\",\"output\":[]}}\n\n")
+	if openAICompactProbeFoundCompactionItem(sseTerminalEmpty) {
+		t.Fatalf("终态 output 为空且无 item 事件时不应判定为支持")
 	}
 }

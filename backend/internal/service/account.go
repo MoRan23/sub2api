@@ -92,6 +92,11 @@ const (
 	OpenAIEndpointCapabilityEmbeddings      OpenAIEndpointCapability = "embeddings"
 	OpenAIEndpointCapabilityAlphaSearch     OpenAIEndpointCapability = "alpha_search"
 	OpenAIEndpointCapabilityLive            OpenAIEndpointCapability = "live"
+	// OpenAIEndpointCapabilityRemoteCompactionV2 requires a usable Responses
+	// endpoint and excludes accounts whose native compaction probe explicitly
+	// reported unsupported. Missing probe state remains eligible for upgrade
+	// compatibility.
+	OpenAIEndpointCapabilityRemoteCompactionV2 OpenAIEndpointCapability = "remote_compaction_v2"
 	// OpenAIEndpointCapabilityGrokMediaGeneration keeps image/video generation
 	// away from Grok accounts that are explicitly disabled or whose billing
 	// entitlement probe was forbidden. Video status lookups intentionally do not
@@ -912,6 +917,36 @@ func (a *Account) AllowsOpenAICompact() bool {
 	return supported
 }
 
+const (
+	OpenAIRemoteCompactionV2SupportedExtraKey  = "openai_remote_compaction_v2_supported"
+	OpenAIRemoteCompactionV2CheckedAtExtraKey  = "openai_remote_compaction_v2_checked_at"
+	OpenAIRemoteCompactionV2LastStatusExtraKey = "openai_remote_compaction_v2_last_status"
+	OpenAIRemoteCompactionV2LastErrorExtraKey  = "openai_remote_compaction_v2_last_error"
+)
+
+// OpenAIRemoteCompactionV2SupportKnown reports the independent native-v2
+// probe result. It deliberately does not consult legacy compact mode/state.
+func (a *Account) OpenAIRemoteCompactionV2SupportKnown() (supported bool, known bool) {
+	if a == nil || !a.IsOpenAI() || a.Extra == nil {
+		return false, false
+	}
+	supported, ok := a.Extra[OpenAIRemoteCompactionV2SupportedExtraKey].(bool)
+	if !ok {
+		return false, false
+	}
+	return supported, true
+}
+
+// AllowsOpenAIRemoteCompactionV2 keeps unprobed accounts eligible but rejects
+// an explicit negative native-v2 probe result.
+func (a *Account) AllowsOpenAIRemoteCompactionV2() bool {
+	if a == nil || !a.IsOpenAI() {
+		return false
+	}
+	supported, known := a.OpenAIRemoteCompactionV2SupportKnown()
+	return !known || supported
+}
+
 // GetCompactModelMapping returns compact-only model remapping configuration.
 // This mapping is intended for /responses/compact only and does not affect
 // normal /responses traffic.
@@ -1599,6 +1634,17 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 		}
 		// 支持 Responses 的上游同样需具备 chat 能力：复用下方 chat_completions
 		// 配置集校验。
+		capability = OpenAIEndpointCapabilityChatCompletions
+	case OpenAIEndpointCapabilityRemoteCompactionV2:
+		// Native v2 rides the ordinary Responses endpoint. Keep the established
+		// unknown-is-eligible Responses policy, then apply only the independent
+		// native-v2 probe result; legacy compact flags must not affect this path.
+		if a.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPI(a.Extra) {
+			return false
+		}
+		if !a.AllowsOpenAIRemoteCompactionV2() {
+			return false
+		}
 		capability = OpenAIEndpointCapabilityChatCompletions
 	case OpenAIEndpointCapabilityAlphaSearch:
 		// alpha/search 的转发按账号类型分流：OAuth/PAT 走

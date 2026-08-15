@@ -827,6 +827,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	outboundIdentityPlan = sessionResolution.OutboundIdentityPlan
 	if sessionResolution.OutboundIdentityEnabled {
 		outboundIdentityEnabled = true
+	}
+	if account.IsOpenAIOAuth() {
 		if mergedFirst, mergeErr := ApplyOpenAIOAuthIdentityPlan(nil, firstClientMessage, outboundIdentityPlan); mergeErr == nil {
 			firstClientMessage = mergedFirst
 		}

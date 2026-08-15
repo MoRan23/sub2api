@@ -61,12 +61,10 @@ func TestOpenAIOutboundSessionV1CleanupRespectsDistributedLock(t *testing.T) {
 
 func TestOpenAIOutboundSessionV1CleanupDoesNotMarkWhenKeyAppearsDuringVerify(t *testing.T) {
 	worker, _, rdb := newOpenAIV1CleanupTestWorker(t)
-	worker.verifyWait = 20 * time.Millisecond
 	ctx := context.Background()
-	go func() {
-		time.Sleep(5 * time.Millisecond)
-		_ = rdb.Set(ctx, "openai-outbound-session:v1:late-writer", "legacy", 0).Err()
-	}()
+	worker.beforeVerifyScan = func(ctx context.Context) error {
+		return rdb.Set(ctx, "openai-outbound-session:v1:late-writer", "legacy", 0).Err()
+	}
 	complete, _, err := worker.cleanupOnce(ctx)
 	require.ErrorIs(t, err, errOpenAIOutboundSessionV1KeysRemain)
 	require.False(t, complete)

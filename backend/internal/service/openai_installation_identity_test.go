@@ -143,8 +143,8 @@ func TestShouldRewriteOpenAIInstallationIDBoundaries(t *testing.T) {
 	if !shouldRewriteOpenAIInstallationID(oauth, false) {
 		t.Fatal("OpenAI OAuth non-passthrough request should be eligible")
 	}
-	if shouldRewriteOpenAIInstallationID(oauth, true) {
-		t.Fatal("passthrough request must not be eligible")
+	if !shouldRewriteOpenAIInstallationID(oauth, true) {
+		t.Fatal("OpenAI OAuth passthrough request should use the same account pin")
 	}
 	if shouldRewriteOpenAIInstallationID(&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, false) {
 		t.Fatal("API-key account must not be eligible")
@@ -442,24 +442,35 @@ func TestApplyOpenAIInstallationIDForOutboundShadowUsesParentAndRepairsCAS(t *te
 	}
 }
 
-func TestApplyOpenAIInstallationIDForOutboundSkipsAPIKeyAndPassthrough(t *testing.T) {
-	for name, account := range map[string]*Account{
-		"api-key": {ID: 505, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
-		"passthrough": newOpenAIOAuthPinAccount(506, map[string]any{
-			openAIPinnedInstallationIDKey: "11111111-2222-4333-8444-555555555555",
-			"openai_passthrough":          true,
-		}),
-	} {
-		t.Run(name, func(t *testing.T) {
-			body := map[string]any{"client_metadata": map[string]any{codexInstallationIDKey: "client"}}
-			headers := make(http.Header)
-			headers.Set(codexInstallationIDKey, "client")
-			if _, err := applyOpenAIInstallationIDForOutbound(context.Background(), nil, nil, account, body, headers, false, account.IsOpenAIPassthroughEnabled()); err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if body["client_metadata"].(map[string]any)[codexInstallationIDKey] != "client" || headers.Get(codexInstallationIDKey) != "client" {
-				t.Fatalf("installation metadata was rewritten for %s: body=%#v headers=%#v", name, body, headers)
-			}
-		})
+func TestApplyOpenAIInstallationIDForOutboundSkipsAPIKeyAndPinsPassthrough(t *testing.T) {
+	apiKey := &Account{ID: 505, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	body := map[string]any{"client_metadata": map[string]any{codexInstallationIDKey: "client"}}
+	headers := make(http.Header)
+	headers.Set(codexInstallationIDKey, "client")
+	if _, err := applyOpenAIInstallationIDForOutbound(context.Background(), nil, nil, apiKey, body, headers, false, false); err != nil {
+		t.Fatalf("apply API-key installation identity: %v", err)
+	}
+	if body["client_metadata"].(map[string]any)[codexInstallationIDKey] != "client" || headers.Get(codexInstallationIDKey) != "client" {
+		t.Fatalf("API-key installation metadata changed: body=%#v headers=%#v", body, headers)
+	}
+
+	const pinned = "11111111-2222-4333-8444-555555555555"
+	passthrough := newOpenAIOAuthPinAccount(506, map[string]any{
+		openAIPinnedInstallationIDKey: pinned,
+		"openai_passthrough":          true,
+	})
+	body = map[string]any{"client_metadata": map[string]any{codexInstallationIDKey: "client"}}
+	headers = make(http.Header)
+	headers.Set(codexInstallationIDKey, "client")
+	resolution, err := applyOpenAIInstallationIDForOutbound(
+		context.Background(), nil, nil, passthrough, body, headers, false, true,
+	)
+	if err != nil {
+		t.Fatalf("apply passthrough installation identity: %v", err)
+	}
+	if !resolution.Enabled || resolution.OutboundID != pinned ||
+		body["client_metadata"].(map[string]any)[codexInstallationIDKey] != pinned ||
+		headers.Get(codexInstallationIDKey) != pinned {
+		t.Fatalf("passthrough installation metadata was not pinned: resolution=%+v body=%#v headers=%#v", resolution, body, headers)
 	}
 }

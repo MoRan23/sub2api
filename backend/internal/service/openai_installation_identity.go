@@ -54,10 +54,10 @@ type installationIDRequestCache struct {
 }
 
 // shouldRewriteOpenAIInstallationID freezes the transport boundary for pinned
-// installation identity. Passthrough traffic is deliberately excluded even
-// when the account's pin switch is enabled.
-func shouldRewriteOpenAIInstallationID(account *Account, passthrough bool) bool {
-	return account != nil && account.IsOpenAIOAuth() && !passthrough
+// installation identity. OAuth passthrough uses the same account-owned value
+// as transformed Responses traffic.
+func shouldRewriteOpenAIInstallationID(account *Account, _ bool) bool {
+	return account != nil && account.IsOpenAIOAuth()
 }
 
 // resolveOutboundInstallationID computes the outbound installation_id for an
@@ -272,9 +272,6 @@ func applyOpenAIInstallationIDForOutbound(
 	if err != nil {
 		return installationIDResolution{}, err
 	}
-	if identityAccount != nil && identityAccount.IsOpenAIPassthroughEnabled() {
-		return installationIDResolution{}, nil
-	}
 	copyOpenAIInstallationIDHeadersFromContext(c, headers)
 	clientReportedID := extractClientInstallationID(c, body)
 	if clientReportedID == "" {
@@ -425,10 +422,12 @@ func rewriteOpenAIInstallationIDHeaders(headers http.Header, id string) bool {
 	if headers == nil || id == "" {
 		return false
 	}
-	changed := strings.TrimSpace(headers.Get(codexInstallationIDKey)) != id
+	directValues := headerValuesCaseInsensitive(headers, codexInstallationIDKey)
+	changed := len(directValues) != 1 || strings.TrimSpace(directValues[0]) != id
+	deleteOpenAIHeaderEqualFold(headers, codexInstallationIDKey)
 	headers.Set(codexInstallationIDKey, id)
 
-	values := headers.Values(openAIWSTurnMetadataHeader)
+	values := headerValuesCaseInsensitive(headers, openAIWSTurnMetadataHeader)
 	if len(values) == 0 {
 		return changed
 	}
@@ -441,8 +440,8 @@ func rewriteOpenAIInstallationIDHeaders(headers http.Header, id string) bool {
 			nestedChanged = true
 		}
 	}
-	if nestedChanged {
-		headers.Del(openAIWSTurnMetadataHeader)
+	if nestedChanged || len(values) > 0 {
+		deleteOpenAIHeaderEqualFold(headers, openAIWSTurnMetadataHeader)
 		for _, value := range rewrittenValues {
 			headers.Add(openAIWSTurnMetadataHeader, value)
 		}

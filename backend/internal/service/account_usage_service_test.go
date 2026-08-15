@@ -215,7 +215,12 @@ func TestAccountUsageService_ProfileIdentityFallbackUsesConfiguredFingerprintPol
 	}}
 	settings := NewSettingService(repo, nil)
 	svc := &AccountUsageService{settingService: settings}
-	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	account := &Account{
+		ID:       42,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{"openai_passthrough": true},
+	}
 
 	plan, err := svc.openAIGatewayForProfileIdentity().ResolveOpenAIOAuthProfileIdentityPlan(
 		context.Background(), nil, account, OpenAIOAuthInstallationAccountPin,
