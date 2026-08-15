@@ -583,6 +583,11 @@ func normalizeKnownCodexModel(model string) (string, bool) {
 	if normalized := canonicalizeOpenAIModelAliasSpelling(modelID); normalized != "" {
 		modelID = normalized
 	}
+	// This explicit upstream slug must survive OAuth Codex family normalization.
+	// Billing still classifies it through normalizeKnownOpenAICodexModel.
+	if modelID == "gpt-5.6-sol-wm" {
+		return modelID, true
+	}
 	if mapped := normalizeKnownOpenAICodexModel(modelID); mapped != "" {
 		return mapped, true
 	}

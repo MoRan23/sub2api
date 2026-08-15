@@ -231,6 +231,8 @@ func TestNormalizeCodexModel(t *testing.T) {
 		"gpt-image-2":               "gpt-image-2",
 		"gpt-5.4-nano":              "gpt-5.4-nano",
 		"gpt-5.4-nano-high":         "gpt-5.4-nano",
+		"gpt-5.6-sol-wm":            "gpt-5.6-sol-wm",
+		"openai/gpt-5.6-sol-wm":     "gpt-5.6-sol-wm",
 		"gpt6":                      "gpt6",
 		"claude-opus-4-6":           "claude-opus-4-6",
 	}
@@ -260,6 +262,18 @@ func TestNormalizeOpenAIModelForUpstream(t *testing.T) {
 			account: &Account{Type: AccountTypeOAuth},
 			model:   "openai/gpt-5.6",
 			want:    "gpt-5.6-sol",
+		},
+		{
+			name:    "oauth preserves explicit Sol WM upstream slug",
+			account: &Account{Type: AccountTypeOAuth},
+			model:   "gpt-5.6-sol-wm",
+			want:    "gpt-5.6-sol-wm",
+		},
+		{
+			name:    "oauth preserves provider-prefixed Sol WM upstream slug",
+			account: &Account{Type: AccountTypeOAuth},
+			model:   "openai/gpt-5.6-sol-wm",
+			want:    "gpt-5.6-sol-wm",
 		},
 		{
 			name:    "oauth preserves unknown non codex model",
@@ -317,6 +331,36 @@ func TestNormalizeOpenAIModelForUpstream(t *testing.T) {
 				t.Fatalf("normalizeOpenAIModelForUpstream(...) = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestOpenAIOAuthExplicitSolWMModelMappingSurvivesNormalization(t *testing.T) {
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{
+				"gpt-5.6-sol": "gpt-5.6-sol-wm",
+			},
+		},
+	}
+
+	mappedModel := account.GetMappedModel("gpt-5.6-sol")
+	if mappedModel != "gpt-5.6-sol-wm" {
+		t.Fatalf("GetMappedModel() = %q, want %q", mappedModel, "gpt-5.6-sol-wm")
+	}
+	if got := normalizeOpenAIModelForUpstream(account, mappedModel); got != "gpt-5.6-sol-wm" {
+		t.Fatalf("normalizeOpenAIModelForUpstream() = %q, want %q", got, "gpt-5.6-sol-wm")
+	}
+	billingCandidates := usageBillingModelCandidates(mappedModel)
+	wantBillingCandidates := []string{"gpt-5.6-sol-wm", "gpt-5.6-sol"}
+	if len(billingCandidates) != len(wantBillingCandidates) {
+		t.Fatalf("usageBillingModelCandidates() = %#v, want %#v", billingCandidates, wantBillingCandidates)
+	}
+	for i := range wantBillingCandidates {
+		if billingCandidates[i] != wantBillingCandidates[i] {
+			t.Fatalf("usageBillingModelCandidates() = %#v, want %#v", billingCandidates, wantBillingCandidates)
+		}
 	}
 }
 
