@@ -988,12 +988,14 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 		},
 	}
 	svc.accountRepo = &installationIdentityRepoStub{accounts: map[int64]*Account{account.ID: account}}
+	const turnMetadata = `{"turn_id":"01916d9b-bb60-7c4a-8e04-32e9c8bf1234"}`
 
 	firstBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"}],"stream":false}`)
 	firstRec := httptest.NewRecorder()
 	firstCtx, _ := gin.CreateTestContext(firstRec)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
+	firstCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
 
 	firstResult, err := svc.ForwardAsAnthropic(context.Background(), firstCtx, account, firstBody, "stable-cache-key", "gpt-5.4")
 	require.NoError(t, err)
@@ -1006,6 +1008,7 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	secondCtx, _ := gin.CreateTestContext(secondRec)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
+	secondCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
 
 	secondResult, err := svc.ForwardAsAnthropic(context.Background(), secondCtx, account, secondBody, "stable-cache-key", "gpt-5.4")
 	require.NoError(t, err)
@@ -1024,6 +1027,7 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	thirdCtx, _ := gin.CreateTestContext(thirdRec)
 	thirdCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(thirdBody))
 	thirdCtx.Request.Header.Set("Content-Type", "application/json")
+	thirdCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
 
 	thirdResult, err := svc.ForwardAsAnthropic(context.Background(), thirdCtx, account, thirdBody, "stable-cache-key", "gpt-5.4")
 	require.NoError(t, err)
@@ -1111,12 +1115,14 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 		},
 	}
 	svc.accountRepo = &installationIdentityRepoStub{accounts: map[int64]*Account{account.ID: account}}
+	const turnMetadata = `{"turn_id":"01916d9b-bb60-7c4a-8e04-32e9c8bf1235"}`
 
 	firstBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"}],"stream":false}`)
 	firstRec := httptest.NewRecorder()
 	firstCtx, _ := gin.CreateTestContext(firstRec)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
+	firstCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
 
 	firstResult, err := svc.ForwardAsAnthropic(context.Background(), firstCtx, account, firstBody, "", "gpt-5.4")
 	require.NoError(t, err)
@@ -1131,6 +1137,7 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	secondCtx, _ := gin.CreateTestContext(secondRec)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
+	secondCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
 
 	secondResult, err := svc.ForwardAsAnthropic(context.Background(), secondCtx, account, secondBody, "", "gpt-5.4")
 	require.NoError(t, err)
@@ -1170,6 +1177,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 		},
 	}
 	svc.accountRepo = &installationIdentityRepoStub{accounts: map[int64]*Account{account.ID: account}}
+	const turnMetadata = `{"turn_id":"01916d9b-bb60-7c4a-8e04-32e9c8bf1236"}`
 	metadata := `{"user_id":"{\"device_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"account_uuid\":\"\",\"session_id\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\"}"}`
 
 	firstBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"metadata":` + metadata + `,"messages":[{"role":"user","content":"first plan"}],"stream":false}`)
@@ -1177,6 +1185,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 	firstCtx, _ := gin.CreateTestContext(firstRec)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
+	firstCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
 
 	firstResult, err := svc.ForwardAsAnthropic(context.Background(), firstCtx, account, firstBody, "", "gpt-5.5")
 	require.NoError(t, err)
@@ -1190,6 +1199,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 	secondCtx, _ := gin.CreateTestContext(secondRec)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
+	secondCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
 
 	secondResult, err := svc.ForwardAsAnthropic(context.Background(), secondCtx, account, secondBody, "", "gpt-5.5")
 	require.NoError(t, err)
@@ -1228,6 +1238,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 		},
 	}
 	svc.accountRepo = &installationIdentityRepoStub{accounts: map[int64]*Account{account.ID: account}}
+	const turnMetadata = `{"turn_id":"01916d9b-bb60-7c4a-8e04-32e9c8bf1237"}`
 	metadata := `{"user_id":"{\"device_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"account_uuid\":\"\",\"session_id\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"}`
 
 	firstBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"metadata":` + metadata + `,"system":[{"type":"text","text":"anchor one","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"first"}],"stream":false}`)
@@ -1235,6 +1246,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 	firstCtx, _ := gin.CreateTestContext(firstRec)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
+	firstCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
 
 	firstResult, err := svc.ForwardAsAnthropic(context.Background(), firstCtx, account, firstBody, "", "gpt-5.5")
 	require.NoError(t, err)
@@ -1248,6 +1260,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 	secondCtx, _ := gin.CreateTestContext(secondRec)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
+	secondCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
 
 	secondResult, err := svc.ForwardAsAnthropic(context.Background(), secondCtx, account, secondBody, "", "gpt-5.5")
 	require.NoError(t, err)

@@ -19,6 +19,8 @@ const (
 	turnStateSessionA = "018f5c3c-6e3a-7abc-8def-1234567890ab"
 	turnStateThreadA  = "018f5c3c-6e3a-7abd-8def-1234567890ac"
 	turnStateSessionB = "018f5c3c-6e3a-7abe-8def-1234567890ad"
+	turnStateTurnA    = "018f5c3c-6e3a-7abf-8def-1234567890ae"
+	turnStateTurnB    = "018f5c3c-6e3a-7ac0-8def-1234567890af"
 )
 
 func newTurnStateTestContext(t *testing.T, apiKeyID int64, sessionID string) (*gin.Context, *httptest.ResponseRecorder) {
@@ -47,6 +49,12 @@ func newTurnStateIdentityTestContext(t *testing.T, apiKeyID int64, namespace, in
 		InstallationID:           installationID,
 		TurnIdentityRequested:    sessionID != "",
 		TurnIdentityEnabled:      sessionID != "",
+		RequestTurn: OpenAICodexRequestTurnSnapshot{
+			ID:              turnStateTurnA,
+			StartedAtUnixMS: 1723000000000,
+			Source:          openAICodexRequestTurnSourceGenerated,
+			Generated:       true,
+		},
 		TurnIdentity: OpenAICodexTurnIdentity{
 			SessionID: sessionID,
 			ThreadID:  threadID,
@@ -105,6 +113,12 @@ func TestOpenAICodexTurnStateIdentityDigestStableAcrossTransports(t *testing.T) 
 		InstallationID:        "11111111-1111-4111-8111-111111111111",
 		TurnIdentityRequested: true,
 		TurnIdentityEnabled:   true,
+		RequestTurn: OpenAICodexRequestTurnSnapshot{
+			ID:              turnStateTurnA,
+			StartedAtUnixMS: 1723000000000,
+			Source:          openAICodexRequestTurnSourceGenerated,
+			Generated:       true,
+		},
 		TurnIdentity: OpenAICodexTurnIdentity{
 			SessionID: turnStateSessionA,
 			ThreadID:  turnStateThreadA,
@@ -123,6 +137,12 @@ func TestOpenAICodexTurnStateIdentityDigestStableAcrossTransports(t *testing.T) 
 	threadVariant := base
 	threadVariant.TurnIdentity.ThreadID = turnStateSessionB
 	require.NotEqual(t, digest, OpenAICodexTurnStateIdentityDigest(threadVariant))
+	turnVariant := base
+	turnVariant.RequestTurn.ID = turnStateTurnB
+	require.NotEqual(t, digest, OpenAICodexTurnStateIdentityDigest(turnVariant))
+	timestampVariant := base
+	timestampVariant.RequestTurn.StartedAtUnixMS++
+	require.Equal(t, digest, OpenAICodexTurnStateIdentityDigest(timestampVariant))
 	disabledVariant := base
 	disabledVariant.TurnIdentityEnabled = false
 	require.NotEqual(t, digest, OpenAICodexTurnStateIdentityDigest(disabledVariant))
@@ -168,6 +188,14 @@ func TestGuardOpenAICodexTurnStateEchoUsesCredentialOwnerAndIdentity(t *testing.
 	changedIdentity, _ := newTurnStateIdentityTestContext(t, 7, "owner:parent-42", "22222222-2222-4222-8222-222222222222", turnStateSessionA, turnStateThreadA)
 	h.Set(openAICodexTurnStateHeader, "opaque-A")
 	svc.guardOpenAICodexTurnStateEcho(changedIdentity, account, h)
+	require.Empty(t, h.Get(openAICodexTurnStateHeader))
+	changedTurn, _ := newTurnStateIdentityTestContext(t, 7, "owner:parent-42", "11111111-1111-4111-8111-111111111111", turnStateSessionA, turnStateThreadA)
+	changedTurnPlan, ok := OpenAIOAuthIdentityPlanFromContext(changedTurn)
+	require.True(t, ok)
+	changedTurnPlan.RequestTurn.ID = turnStateTurnB
+	SetOpenAIOAuthIdentityPlan(changedTurn, changedTurnPlan)
+	h.Set(openAICodexTurnStateHeader, "opaque-A")
+	svc.guardOpenAICodexTurnStateEcho(changedTurn, account, h)
 	require.Empty(t, h.Get(openAICodexTurnStateHeader))
 	unknown := http.Header{"X-Codex-Turn-State": []string{"externally-minted"}}
 	svc.guardOpenAICodexTurnStateEcho(foreignContext, oauthTurnStateAccount(43), unknown)

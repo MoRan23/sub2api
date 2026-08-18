@@ -38,6 +38,37 @@ type openAIWSSingleConnDialer struct {
 	conn openAIWSClientConn
 }
 
+func TestCaptureOpenAIWSFrameIdentityTurnLifecycle(t *testing.T) {
+	first := CaptureOpenAIOAuthIdentity(nil, []byte(`{
+		"client_metadata":{
+			"session_id":"ws-session",
+			"thread_id":"ws-session",
+			"x-codex-turn-metadata":"{\"turn_id\":\"018f5c3c-6e3a-7abf-8def-1234567890ae\",\"turn_started_at_unix_ms\":1723000000000}"
+		}
+	}`), "")
+	require.True(t, first.RequestTurn.Explicit)
+	plan := OpenAIOAuthIdentityPlan{Capture: first, RequestTurn: first.RequestTurn}
+
+	next := captureOpenAIWSFrameIdentity([]byte(`{"type":"response.create","model":"gpt-5.1","prompt_cache_key":"cache-only-next"}`), &plan)
+	require.Equal(t, first.Logical, next.Logical)
+	require.True(t, next.RequestTurn.Generated)
+	require.NotEqual(t, first.RequestTurn.ID, next.RequestTurn.ID)
+
+	continuation := captureOpenAIWSFrameIdentity([]byte(`{"type":"response.create","previous_response_id":"resp_1"}`), &plan)
+	require.Equal(t, first.RequestTurn, continuation.RequestTurn)
+
+	compaction := captureOpenAIWSFrameIdentity([]byte(`{"type":"response.create","input":[{"type":"compaction_trigger"}]}`), &plan)
+	require.Equal(t, first.RequestTurn, compaction.RequestTurn)
+
+	explicit := captureOpenAIWSFrameIdentity([]byte(`{
+		"type":"response.create",
+		"previous_response_id":"resp_1",
+		"client_metadata":{"x-codex-turn-metadata":"{\"turn_id\":\"018f5c3c-6e3a-7ac0-8def-1234567890af\"}"}
+	}`), &plan)
+	require.True(t, explicit.RequestTurn.Explicit)
+	require.Equal(t, turnStateTurnB, explicit.RequestTurn.ID)
+}
+
 func (d *openAIWSSingleConnDialer) Dial(
 	ctx context.Context,
 	wsURL string,
@@ -378,12 +409,22 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePrompt
 	require.Len(t, firstConn.writes, 3)
 	firstSessionID := gjson.Get(requestToJSONString(firstConn.writes[0]), "client_metadata.session_id").String()
 	firstThreadID := gjson.Get(requestToJSONString(firstConn.writes[0]), "client_metadata.thread_id").String()
+	firstTurnMetadata := gjson.Get(requestToJSONString(firstConn.writes[0]), "client_metadata."+openAIWSTurnMetadataHeader).String()
+	firstTurnID := gjson.Get(firstTurnMetadata, "turn_id").String()
 	require.NotEmpty(t, firstSessionID)
 	require.NotEmpty(t, firstThreadID)
+	require.NotEmpty(t, firstTurnID)
+	initialHandshakeMetadata := dialer.DialHeaders(0).Get(openAIWSTurnMetadataHeader)
+	require.Equal(t, firstTurnID, gjson.Get(initialHandshakeMetadata, "turn_id").String(), "the immutable handshake represents the first turn snapshot")
 	require.Equal(t, firstSessionID, gjson.Get(requestToJSONString(firstConn.writes[1]), "client_metadata.session_id").String())
 	require.Equal(t, firstThreadID, gjson.Get(requestToJSONString(firstConn.writes[1]), "client_metadata.thread_id").String())
 	require.Equal(t, firstSessionID, gjson.Get(requestToJSONString(firstConn.writes[2]), "client_metadata.session_id").String())
 	require.Equal(t, firstThreadID, gjson.Get(requestToJSONString(firstConn.writes[2]), "client_metadata.thread_id").String())
+	secondTurnMetadata := gjson.Get(requestToJSONString(firstConn.writes[1]), "client_metadata."+openAIWSTurnMetadataHeader).String()
+	thirdTurnMetadata := gjson.Get(requestToJSONString(firstConn.writes[2]), "client_metadata."+openAIWSTurnMetadataHeader).String()
+	require.NotEqual(t, firstTurnID, gjson.Get(secondTurnMetadata, "turn_id").String(), "ordinary next turn gets a new UUIDv7 without changing sockets")
+	require.NotEqual(t, gjson.Get(initialHandshakeMetadata, "turn_id").String(), gjson.Get(secondTurnMetadata, "turn_id").String(), "later turns are canonicalized in the frame body because a physical handshake cannot change")
+	require.NotEqual(t, gjson.Get(secondTurnMetadata, "turn_id").String(), gjson.Get(thirdTurnMetadata, "turn_id").String())
 	require.Len(t, secondConn.writes, 1)
 	transitionSessionID := gjson.Get(requestToJSONString(secondConn.writes[0]), "client_metadata.session_id").String()
 	transitionThreadID := gjson.Get(requestToJSONString(secondConn.writes[0]), "client_metadata.thread_id").String()
@@ -4369,6 +4410,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_RejectsMessageID
 type openAIWSQueueDialer struct {
 	mu        sync.Mutex
 	conns     []openAIWSClientConn
+	headers   []http.Header
 	dialCount int
 }
 
@@ -4380,11 +4422,11 @@ func (d *openAIWSQueueDialer) Dial(
 ) (openAIWSClientConn, int, http.Header, error) {
 	_ = ctx
 	_ = wsURL
-	_ = headers
 	_ = proxyURL
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.dialCount++
+	d.headers = append(d.headers, cloneHeader(headers))
 	if len(d.conns) == 0 {
 		return nil, 503, nil, errors.New("no test conn")
 	}
@@ -4399,6 +4441,15 @@ func (d *openAIWSQueueDialer) DialCount() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.dialCount
+}
+
+func (d *openAIWSQueueDialer) DialHeaders(index int) http.Header {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if index < 0 || index >= len(d.headers) {
+		return nil
+	}
+	return cloneHeader(d.headers[index])
 }
 
 type openAIWSPreflightFailConn struct {

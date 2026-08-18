@@ -62,6 +62,13 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 
 	payload := s.buildOpenAIWSCreatePayload(reqBody, account)
 	payloadStrategy, removedKeys := applyOpenAIWSRetryPayloadStrategy(payload, attempt)
+	turnState := ""
+	turnMetadata := ""
+	if c != nil && c.Request != nil {
+		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
+		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
+	}
+	setOpenAIWSTurnMetadata(payload, turnMetadata)
 	previousResponseID := openAIWSPayloadString(payload, "previous_response_id")
 	previousResponseIDKind := ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 	promptCacheKey := openAIWSPayloadString(payload, "prompt_cache_key")
@@ -79,13 +86,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if raw, ok := payload["stream"]; ok {
 		streamValue = normalizeOpenAIWSLogValue(strings.TrimSpace(fmt.Sprintf("%v", raw)))
 	}
-	turnState := ""
-	turnMetadata := ""
-	if c != nil && c.Request != nil {
-		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
-		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
-	}
-	setOpenAIWSTurnMetadata(payload, turnMetadata)
 	payloadEventType := openAIWSPayloadString(payload, "type")
 	if payloadEventType == "" {
 		payloadEventType = "response.create"
@@ -314,7 +314,12 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 	}
 
-	handshakeTurnState := strings.TrimSpace(lease.HandshakeHeader(openAIWSTurnStateHeader))
+	turnStateIdentityDigest := OpenAICodexTurnStateIdentityDigest(sessionResolution.OutboundIdentityPlan)
+	handshakeHeadersForTurn := lease.HandshakeHeaders()
+	if !lease.HandshakeTurnStateCompatible(turnStateIdentityDigest) {
+		handshakeHeadersForTurn.Del(openAIWSTurnStateHeader)
+	}
+	handshakeTurnState := strings.TrimSpace(handshakeHeadersForTurn.Get(openAIWSTurnStateHeader))
 	logOpenAIWSModeDebug(
 		"handshake account_id=%d conn_id=%s has_turn_state=%v turn_state_len=%d",
 		account.ID,
@@ -385,12 +390,18 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		if turnStateHeaderStaged || c == nil || c.Writer == nil {
 			return
 		}
-		relayOpenAICodexTurnStateHeader(c.Writer.Header(), lease.HandshakeHeaders())
+		relayOpenAICodexTurnStateHeader(c.Writer.Header(), handshakeHeadersForTurn)
 		turnStateHeaderStaged = true
 	}
 	commitTurnState := func() {
 		if turnStateCommitted {
 			return
+		}
+		if handshakeTurnState != "" && !lease.CommitHandshakeTurnStateIdentity(turnStateIdentityDigest) {
+			handshakeTurnState = ""
+			if c != nil && c.Writer != nil {
+				c.Writer.Header().Del(openAIWSTurnStateHeader)
+			}
 		}
 		if stateStore != nil && sessionHash != "" {
 			if handshakeTurnState == "" {

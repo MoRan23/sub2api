@@ -113,6 +113,226 @@ func TestCaptureOpenAIOAuthIdentityCountsAndIgnoresInvalidTurnMetadataCarriers(t
 	require.Equal(t, "canonical-session", capture.Aliases[0].SessionKey)
 	after := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
 	require.Equal(t, int64(4), after.InvalidMetadataTotal-before.InvalidMetadataTotal)
+	require.Equal(t, int64(1), after.MetadataInvalidByCarrier.ClientTurnMetadata-before.MetadataInvalidByCarrier.ClientTurnMetadata)
+	require.Equal(t, int64(1), after.MetadataInvalidByCarrier.HeaderTurnMetadata-before.MetadataInvalidByCarrier.HeaderTurnMetadata)
+	require.Equal(t, int64(1), after.MetadataInvalidByCarrier.WSTurnMetadata-before.MetadataInvalidByCarrier.WSTurnMetadata)
+	require.Equal(t, int64(1), after.MetadataInvalidByCarrier.BodyTurnMetadata-before.MetadataInvalidByCarrier.BodyTurnMetadata)
+}
+
+func TestCaptureOpenAIOAuthIdentityCountsEachInvalidMetadataCarrierOnce(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     []byte
+		header   string
+		explicit string
+		delta    func(after, before OpenAICodexMetadataCarrierRuntimeMetrics) int64
+	}{
+		{
+			name: "client metadata turn metadata", body: []byte(`{"client_metadata":{"x-codex-turn-metadata":"opaque"}}`),
+			delta: func(after, before OpenAICodexMetadataCarrierRuntimeMetrics) int64 {
+				return after.ClientTurnMetadata - before.ClientTurnMetadata
+			},
+		},
+		{
+			name: "header turn metadata", body: []byte(`{}`), header: "opaque",
+			delta: func(after, before OpenAICodexMetadataCarrierRuntimeMetrics) int64 {
+				return after.HeaderTurnMetadata - before.HeaderTurnMetadata
+			},
+		},
+		{
+			name: "ws turn metadata", body: []byte(`{}`), explicit: `["opaque"]`,
+			delta: func(after, before OpenAICodexMetadataCarrierRuntimeMetrics) int64 {
+				return after.WSTurnMetadata - before.WSTurnMetadata
+			},
+		},
+		{
+			name: "body turn metadata", body: []byte(`{"x-codex-turn-metadata":null}`),
+			delta: func(after, before OpenAICodexMetadataCarrierRuntimeMetrics) int64 {
+				return after.BodyTurnMetadata - before.BodyTurnMetadata
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			if tt.header != "" {
+				c.Request.Header.Set(openAIWSTurnMetadataHeader, tt.header)
+			}
+			before := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
+			capture := CaptureOpenAIOAuthIdentityWithTurnMetadata(c, tt.body, "fallback", tt.explicit)
+			after := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
+
+			require.Equal(t, 1, capture.InvalidMetadataCount)
+			require.Equal(t, int64(1), after.InvalidMetadataTotal-before.InvalidMetadataTotal)
+			require.Equal(t, int64(1), tt.delta(after.MetadataInvalidByCarrier, before.MetadataInvalidByCarrier))
+		})
+	}
+}
+
+func TestCaptureOpenAIOAuthIdentityRequestTurnUsesCanonicalPriorityAndFreezesTimestamp(t *testing.T) {
+	before := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
+	const (
+		canonicalTurn = "01989f44-7c00-7000-8000-000000000011"
+		headerTurn    = "01989f44-7c00-7000-8000-000000000012"
+		rootTurn      = "01989f44-7c00-7000-8000-000000000017"
+		startedAt     = int64(1777777777123)
+	)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	c.Request, _ = http.NewRequest(http.MethodPost, "/", nil)
+	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"turn_id":"`+headerTurn+`","turn_started_at_unix_ms":1}`)
+	body := []byte(`{"client_metadata":{"x-codex-turn-metadata":"{\"turn_id\":\"` + canonicalTurn + `\",\"turn_started_at_unix_ms\":` +
+		`1777777777123,\"keep\":true}","turn_id":"` + headerTurn + `"},"turn_id":"` + rootTurn + `"}`)
+
+	capture := CaptureOpenAIOAuthIdentity(c, body, "")
+	require.Equal(t, canonicalTurn, capture.RequestTurn.ID)
+	require.Equal(t, startedAt, capture.RequestTurn.StartedAtUnixMS)
+	require.Equal(t, openAICodexRequestTurnSourceClientMetadata, capture.RequestTurn.Source)
+	require.True(t, capture.RequestTurn.Explicit)
+	require.False(t, capture.RequestTurn.Generated)
+	require.Equal(t, 3, capture.ConflictCount)
+	after := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
+	require.Equal(t, int64(1), after.MetadataConflictByCarrier.HeaderTurnMetadata-before.MetadataConflictByCarrier.HeaderTurnMetadata)
+	require.Equal(t, int64(1), after.MetadataConflictByCarrier.ClientMetadataFlat-before.MetadataConflictByCarrier.ClientMetadataFlat)
+	require.Equal(t, int64(1), after.MetadataConflictByCarrier.BodyFlat-before.MetadataConflictByCarrier.BodyFlat)
+}
+
+func TestCaptureOpenAIOAuthIdentityCountsInvalidFlatAndContainerCarriers(t *testing.T) {
+	before := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
+	first := CaptureOpenAIOAuthIdentity(nil, []byte(`{"client_metadata":"opaque"}`), "")
+	second := CaptureOpenAIOAuthIdentity(nil, []byte(`{"client_metadata":{"turn_id":"invalid"},"turn_id":7}`), "")
+	third := CaptureOpenAIOAuthIdentity(nil, []byte(`{"client_metadata":{"x-codex-turn-metadata":{"turn_id":"01989f44-7c00-7000-8000-000000000019"}}}`), "")
+
+	require.Equal(t, 1, first.InvalidMetadataCount)
+	require.Equal(t, 2, second.InvalidMetadataCount)
+	require.Equal(t, 1, third.InvalidMetadataCount)
+	require.True(t, third.RequestTurn.Generated)
+	after := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
+	require.Equal(t, int64(1), after.MetadataInvalidByCarrier.ClientMetadataContainer-before.MetadataInvalidByCarrier.ClientMetadataContainer)
+	require.Equal(t, int64(1), after.MetadataInvalidByCarrier.ClientTurnMetadata-before.MetadataInvalidByCarrier.ClientTurnMetadata)
+	require.Equal(t, int64(1), after.MetadataInvalidByCarrier.ClientMetadataFlat-before.MetadataInvalidByCarrier.ClientMetadataFlat)
+	require.Equal(t, int64(1), after.MetadataInvalidByCarrier.BodyFlat-before.MetadataInvalidByCarrier.BodyFlat)
+}
+
+func TestOpenAICodexMetadataCarrierMetricsIgnoreUnknownDimensions(t *testing.T) {
+	before := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
+
+	observeOpenAICodexMetadataInvalid(openAICodexMetadataCarrierNone)
+	observeOpenAICodexMetadataInvalid(openAICodexMetadataCarrierCount)
+	observeOpenAICodexMetadataRebuilt(openAICodexMetadataCarrierNone)
+	observeOpenAICodexMetadataRebuilt(openAICodexMetadataCarrierCount)
+	observeOpenAICodexMetadataConflict(openAICodexMetadataCarrierNone, 1)
+	observeOpenAICodexMetadataConflict(openAICodexMetadataCarrierCount, 1)
+
+	after := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
+	require.Equal(t, before.InvalidMetadataTotal, after.InvalidMetadataTotal)
+	require.Equal(t, before.MetadataRebuiltTotal, after.MetadataRebuiltTotal)
+	require.Equal(t, before.MetadataInvalidByCarrier, after.MetadataInvalidByCarrier)
+	require.Equal(t, before.MetadataRebuiltByCarrier, after.MetadataRebuiltByCarrier)
+	require.Equal(t, before.MetadataConflictByCarrier, after.MetadataConflictByCarrier)
+}
+
+func TestCaptureOpenAIOAuthIdentityGeneratesOneEphemeralUUIDv7PerCapture(t *testing.T) {
+	first := CaptureOpenAIOAuthIdentity(nil, []byte(`{"model":"gpt-5.6"}`), "")
+	second := CaptureOpenAIOAuthIdentity(nil, []byte(`{"model":"gpt-5.6"}`), "")
+
+	require.NoError(t, func() error { _, err := canonicalUUIDv7(first.RequestTurn.ID); return err }())
+	require.Positive(t, first.RequestTurn.StartedAtUnixMS)
+	require.True(t, first.RequestTurn.Generated)
+	require.False(t, first.RequestTurn.Explicit)
+	require.Equal(t, openAICodexRequestTurnSourceGenerated, first.RequestTurn.Source)
+	require.NotEqual(t, first.RequestTurn.ID, second.RequestTurn.ID)
+
+	plan, err := (&OpenAIGatewayService{}).ResolveOpenAIOAuthIdentityPlan(
+		context.Background(), nil, nil, first, OpenAIOAuthIdentityPlanOptions{},
+	)
+	require.NoError(t, err)
+	require.Equal(t, first.RequestTurn, plan.RequestTurn)
+}
+
+func TestApplyOpenAIOAuthIdentityPlanProjectsRequestTurnAndCanonicalizesReservedCarriers(t *testing.T) {
+	before := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
+	id, err := newOpenAICodexRootIdentity()
+	require.NoError(t, err)
+	requestTurn := OpenAICodexRequestTurnSnapshot{
+		ID: "01989f44-7c00-7000-8000-000000000013", StartedAtUnixMS: 1777777777124,
+		Source: openAICodexRequestTurnSourceGenerated, Generated: true,
+	}
+	headers := http.Header{openAIWSTurnMetadataHeader: {"opaque", `["invalid"]`}}
+	body := []byte(`{"model":"gpt-5.6","client_metadata":"opaque","x-codex-turn-metadata":null,"turn_id":"old","turn_started_at_unix_ms":1}`)
+	out, err := ApplyOpenAIOAuthIdentityPlan(headers, body, OpenAIOAuthIdentityPlan{
+		RequestTurn: requestTurn, TurnIdentityRequested: true,
+		TurnIdentity: id, TurnIdentityEnabled: true,
+		InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
+		InstallationEnabled: true, InstallationID: "77777777-7777-4777-8777-777777777777",
+		ProjectionMode: OpenAIOAuthIdentityProjectionRegular,
+	})
+	require.NoError(t, err)
+	require.Len(t, headers.Values(openAIWSTurnMetadataHeader), 1)
+	headerMetadata := headers.Get(openAIWSTurnMetadataHeader)
+	require.Equal(t, requestTurn.ID, gjson.Get(headerMetadata, "turn_id").String())
+	require.Equal(t, requestTurn.StartedAtUnixMS, gjson.Get(headerMetadata, "turn_started_at_unix_ms").Int())
+	require.False(t, gjson.Get(headerMetadata, "window_id").Exists())
+	require.Empty(t, headers.Get("x-codex-window-id"))
+
+	require.Equal(t, requestTurn.ID, gjson.GetBytes(out, "client_metadata.turn_id").String())
+	require.Equal(t, requestTurn.StartedAtUnixMS, gjson.GetBytes(out, "client_metadata.turn_started_at_unix_ms").Int())
+	nested := gjson.GetBytes(out, "client_metadata.x-codex-turn-metadata").String()
+	require.Equal(t, requestTurn.ID, gjson.Get(nested, "turn_id").String())
+	require.Equal(t, requestTurn.StartedAtUnixMS, gjson.Get(nested, "turn_started_at_unix_ms").Int())
+	require.Equal(t, id.SessionID, gjson.Get(nested, "session_id").String())
+	require.Equal(t, "77777777-7777-4777-8777-777777777777", gjson.Get(nested, "installation_id").String())
+	require.Equal(t, requestTurn.ID, gjson.Get(gjson.GetBytes(out, openAIWSTurnMetadataHeader).String(), "turn_id").String())
+	require.Equal(t, requestTurn.ID, gjson.GetBytes(out, "turn_id").String())
+	require.Equal(t, requestTurn.StartedAtUnixMS, gjson.GetBytes(out, "turn_started_at_unix_ms").Int())
+	after := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
+	require.Equal(t, int64(3), after.MetadataRebuiltTotal-before.MetadataRebuiltTotal)
+	require.Equal(t, int64(1), after.MetadataRebuiltByCarrier.HeaderTurnMetadata-before.MetadataRebuiltByCarrier.HeaderTurnMetadata)
+	require.Equal(t, int64(1), after.MetadataRebuiltByCarrier.ClientMetadataContainer-before.MetadataRebuiltByCarrier.ClientMetadataContainer)
+	require.Equal(t, int64(1), after.MetadataRebuiltByCarrier.BodyTurnMetadata-before.MetadataRebuiltByCarrier.BodyTurnMetadata)
+}
+
+func TestApplyOpenAIOAuthIdentityPlanPreservesUnknownMetadataAndDoesNotRewriteWindowID(t *testing.T) {
+	id, err := newOpenAICodexRootIdentity()
+	require.NoError(t, err)
+	requestTurn := OpenAICodexRequestTurnSnapshot{
+		ID: "01989f44-7c00-7000-8000-000000000014", StartedAtUnixMS: 1777777777125,
+		Explicit: true,
+	}
+	headers := http.Header{openAIWSTurnMetadataHeader: {
+		`{"turn_id":"01989f44-7c00-7000-8000-000000000015","turn_started_at_unix_ms":1,"window_id":"client-window","sandbox":"seatbelt"}`,
+	}}
+	_, err = ApplyOpenAIOAuthIdentityPlan(headers, nil, OpenAIOAuthIdentityPlan{
+		RequestTurn: requestTurn, TurnIdentityRequested: true,
+		TurnIdentity: id, TurnIdentityEnabled: true,
+		ProjectionMode:     OpenAIOAuthIdentityProjectionHeadersOnly,
+		InstallationPolicy: OpenAIOAuthInstallationPreserve,
+	})
+	require.NoError(t, err)
+	metadata := headers.Get(openAIWSTurnMetadataHeader)
+	require.Equal(t, requestTurn.ID, gjson.Get(metadata, "turn_id").String())
+	require.Equal(t, "client-window", gjson.Get(metadata, "window_id").String())
+	require.Equal(t, "seatbelt", gjson.Get(metadata, "sandbox").String())
+	require.Empty(t, headers.Get("x-codex-window-id"))
+}
+
+func TestApplyOpenAIOAuthIdentityPlanFlagOffDoesNotProjectCapturedRequestTurn(t *testing.T) {
+	requestTurn := OpenAICodexRequestTurnSnapshot{
+		ID: "01989f44-7c00-7000-8000-000000000016", StartedAtUnixMS: 1777777777126,
+	}
+	headers := make(http.Header)
+	headers.Set(openAIWSTurnMetadataHeader, "opaque")
+	body := []byte(" { \"client_metadata\" : \"opaque\" } \n")
+	out, err := ApplyOpenAIOAuthIdentityPlan(headers, body, OpenAIOAuthIdentityPlan{
+		RequestTurn:        requestTurn,
+		ProjectionMode:     OpenAIOAuthIdentityProjectionRegular,
+		InstallationPolicy: OpenAIOAuthInstallationPreserve,
+	})
+	require.NoError(t, err)
+	require.Equal(t, body, out)
+	require.Equal(t, []string{"opaque"}, headers.Values(openAIWSTurnMetadataHeader))
 }
 
 func TestApplyOpenAIOAuthIdentityPlanExistingTurnMetadataOnly(t *testing.T) {
@@ -205,7 +425,7 @@ func TestApplyOpenAIOAuthIdentityPlanAlphaSearchRewritesObjectAndPreservesUnknow
 	require.JSONEq(t, `7`, string(metadata["unknown"]))
 }
 
-func TestApplyOpenAIOAuthIdentityPlanAlphaSearchPreservesOpaqueValues(t *testing.T) {
+func TestApplyOpenAIOAuthIdentityPlanAlphaSearchRebuildsOpaqueValues(t *testing.T) {
 	id, err := newOpenAICodexRootIdentity()
 	require.NoError(t, err)
 	const installationID = "99999999-9999-4999-8999-999999999999"
@@ -221,9 +441,10 @@ func TestApplyOpenAIOAuthIdentityPlanAlphaSearchPreservesOpaqueValues(t *testing
 	})
 	require.NoError(t, err)
 	values := headers.Values(openAIWSTurnMetadataHeader)
-	require.Len(t, values, 2)
-	require.Equal(t, firstOpaque, values[0])
-	require.Equal(t, secondOpaque, values[1])
+	require.Len(t, values, 1)
+	require.Equal(t, id.SessionID, gjson.Get(values[0], "session_id").String())
+	require.Equal(t, id.ThreadID, gjson.Get(values[0], "thread_id").String())
+	require.Equal(t, installationID, gjson.Get(values[0], "installation_id").String())
 }
 
 func TestApplyOpenAIOAuthIdentityPlanAlphaSearchHonorsComponentSwitches(t *testing.T) {
@@ -259,7 +480,7 @@ func TestApplyOpenAIOAuthIdentityPlanAlphaSearchHonorsComponentSwitches(t *testi
 	}
 }
 
-func TestApplyOpenAIOAuthIdentityPlanPreservesInvalidTurnMetadata(t *testing.T) {
+func TestApplyOpenAIOAuthIdentityPlanRebuildsInvalidTurnMetadata(t *testing.T) {
 	id, err := newOpenAICodexRootIdentity()
 	require.NoError(t, err)
 	const invalidHeader = "  opaque-header\t"
@@ -273,23 +494,26 @@ func TestApplyOpenAIOAuthIdentityPlanPreservesInvalidTurnMetadata(t *testing.T) 
 	})
 	require.NoError(t, err)
 	projectedHeaderValues := headers.Values(openAIWSTurnMetadataHeader)
-	require.Len(t, projectedHeaderValues, 2)
-	require.Equal(t, invalidHeader, projectedHeaderValues[0])
-	require.Contains(t, projectedHeaderValues[1], id.SessionID)
+	require.Len(t, projectedHeaderValues, 1)
+	require.Contains(t, projectedHeaderValues[0], id.SessionID)
 	require.Equal(t, id.SessionID, headers.Get("session-id"))
 	require.Equal(t, id.ThreadID, headers.Get("thread-id"))
 
 	var root map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(out, &root))
-	require.Equal(t, json.RawMessage(`null`), root[openAIWSTurnMetadataHeader])
+	var topLevel string
+	require.NoError(t, json.Unmarshal(root[openAIWSTurnMetadataHeader], &topLevel))
+	require.Equal(t, id.SessionID, gjson.Get(topLevel, "session_id").String())
 	var metadata map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(root["client_metadata"], &metadata))
-	require.JSONEq(t, `"  opaque-body  "`, string(metadata[openAIWSTurnMetadataHeader]))
+	var nested string
+	require.NoError(t, json.Unmarshal(metadata[openAIWSTurnMetadataHeader], &nested))
+	require.Equal(t, id.SessionID, gjson.Get(nested, "session_id").String())
 	require.JSONEq(t, `"`+id.SessionID+`"`, string(metadata["session_id"]))
 	require.JSONEq(t, `"`+id.ThreadID+`"`, string(metadata["thread_id"]))
 }
 
-func TestApplyOpenAIOAuthIdentityPlanPreservesOpaqueClientMetadataContainer(t *testing.T) {
+func TestApplyOpenAIOAuthIdentityPlanRebuildsOpaqueClientMetadataContainer(t *testing.T) {
 	id, err := newOpenAICodexRootIdentity()
 	require.NoError(t, err)
 	headers := http.Header{}
@@ -308,13 +532,16 @@ func TestApplyOpenAIOAuthIdentityPlanPreservesOpaqueClientMetadataContainer(t *t
 
 	var root map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(out, &root))
-	require.JSONEq(t, `"opaque-container"`, string(root["client_metadata"]))
+	var metadata map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(root["client_metadata"], &metadata))
+	require.JSONEq(t, `"`+id.SessionID+`"`, string(metadata["session_id"]))
+	require.JSONEq(t, `"77777777-7777-4777-8777-777777777777"`, string(metadata[codexInstallationIDKey]))
 	var rewritten string
 	require.NoError(t, json.Unmarshal(root[openAIWSTurnMetadataHeader], &rewritten))
 	require.Contains(t, rewritten, id.SessionID)
 }
 
-func TestApplyOpenAIOAuthIdentityPlanInvalidTopLevelMetadataDoesNotCreateNestedCarrier(t *testing.T) {
+func TestApplyOpenAIOAuthIdentityPlanInvalidTopLevelMetadataCreatesCanonicalNestedCarrier(t *testing.T) {
 	id, err := newOpenAICodexRootIdentity()
 	require.NoError(t, err)
 	body := []byte(`{"model":"gpt","x-codex-turn-metadata":["opaque"],"client_metadata":{"keep":"value"}}`)
@@ -326,15 +553,19 @@ func TestApplyOpenAIOAuthIdentityPlanInvalidTopLevelMetadataDoesNotCreateNestedC
 	require.NoError(t, err)
 	var root map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(out, &root))
-	require.Equal(t, json.RawMessage(`["opaque"]`), root[openAIWSTurnMetadataHeader])
+	var topLevel string
+	require.NoError(t, json.Unmarshal(root[openAIWSTurnMetadataHeader], &topLevel))
+	require.Equal(t, id.SessionID, gjson.Get(topLevel, "session_id").String())
 	var metadata map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(root["client_metadata"], &metadata))
-	require.NotContains(t, metadata, openAIWSTurnMetadataHeader)
+	var nested string
+	require.NoError(t, json.Unmarshal(metadata[openAIWSTurnMetadataHeader], &nested))
+	require.Equal(t, id.SessionID, gjson.Get(nested, "session_id").String())
 	require.JSONEq(t, `"`+id.SessionID+`"`, string(metadata["session_id"]))
 	require.JSONEq(t, `"`+id.ThreadID+`"`, string(metadata["thread_id"]))
 }
 
-func TestApplyOpenAIOAuthIdentityPlanExistingOnlyLeavesInvalidMetadataByteExact(t *testing.T) {
+func TestApplyOpenAIOAuthIdentityPlanExistingOnlyRebuildsInvalidMetadata(t *testing.T) {
 	id, err := newOpenAICodexRootIdentity()
 	require.NoError(t, err)
 	const invalidHeader = "  opaque-alpha-header\t"
@@ -346,8 +577,9 @@ func TestApplyOpenAIOAuthIdentityPlanExistingOnlyLeavesInvalidMetadataByteExact(
 		InstallationPolicy: OpenAIOAuthInstallationPreserve,
 	})
 	require.NoError(t, err)
-	require.Equal(t, []string{invalidHeader}, headers.Values(openAIWSTurnMetadataHeader))
-	require.Equal(t, body, out)
+	require.Len(t, headers.Values(openAIWSTurnMetadataHeader), 1)
+	require.Equal(t, id.SessionID, gjson.Get(headers.Get(openAIWSTurnMetadataHeader), "session_id").String())
+	require.Equal(t, id.SessionID, gjson.Get(gjson.GetBytes(out, openAIWSTurnMetadataHeader).String(), "session_id").String())
 }
 
 func TestApplyOpenAIOAuthIdentityPlanPreserveIsByteExactWithoutTurnProjection(t *testing.T) {
@@ -397,6 +629,57 @@ func TestApplyOpenAIOAuthIdentityPlanPassthroughPinsRawClientMetadata(t *testing
 	require.Equal(t, id.SessionID, gjson.Get(nested, "session_id").String())
 	require.Equal(t, id.ThreadID, gjson.Get(nested, "thread_id").String())
 	require.Equal(t, "nested-keep", gjson.Get(nested, "label").String())
+}
+
+func TestApplyOpenAIOAuthIdentityPlanPassthroughProjectsFlatRequestTurnAsPair(t *testing.T) {
+	id, err := newOpenAICodexRootIdentity()
+	require.NoError(t, err)
+	requestTurn := OpenAICodexRequestTurnSnapshot{
+		ID: "01989f44-7c00-7000-8000-000000000018", StartedAtUnixMS: 1777777777128,
+		Explicit: true,
+	}
+	body := []byte(" { \"keep\" : 9007199254740993, \"turn_id\" : \"old\", \"client_metadata\" : {\"turn_id\":\"old\",\"turn_started_at_unix_ms\":1} } \n")
+	out, err := ApplyOpenAIOAuthIdentityPlan(http.Header{}, body, OpenAIOAuthIdentityPlan{
+		RequestTurn: requestTurn, TurnIdentityRequested: true,
+		TurnIdentity: id, TurnIdentityEnabled: true,
+		ProjectionMode:     OpenAIOAuthIdentityProjectionPassthrough,
+		InstallationPolicy: OpenAIOAuthInstallationPreserve,
+	})
+	require.NoError(t, err)
+	require.Contains(t, string(out), `"keep" : 9007199254740993`)
+	require.Equal(t, requestTurn.ID, gjson.GetBytes(out, "turn_id").String())
+	require.Equal(t, requestTurn.StartedAtUnixMS, gjson.GetBytes(out, "turn_started_at_unix_ms").Int())
+	require.Equal(t, requestTurn.ID, gjson.GetBytes(out, "client_metadata.turn_id").String())
+	require.Equal(t, requestTurn.StartedAtUnixMS, gjson.GetBytes(out, "client_metadata.turn_started_at_unix_ms").Int())
+}
+
+func TestApplyOpenAIOAuthIdentityPlanCanonicalizesFlatLineageAliases(t *testing.T) {
+	identity := OpenAICodexTurnIdentity{
+		SessionID:          "01989f44-7c00-7000-8000-000000000031",
+		ThreadID:           "01989f44-7c00-7000-8000-000000000032",
+		ParentThreadID:     "01989f44-7c00-7000-8000-000000000033",
+		ForkedFromThreadID: "01989f44-7c00-7000-8000-000000000034",
+		Relation:           OpenAICodexTurnRelationDescendant,
+	}
+	require.NoError(t, ValidateOpenAICodexTurnIdentity(identity))
+	input := []byte(`{"client_metadata":{"parent_thread_id":"old","parent-thread-id":"old","x-codex-parent-thread-id":"old","forked_from_thread_id":"old","forked-from-thread-id":"old"}}`)
+	for _, mode := range []OpenAIOAuthIdentityProjectionMode{
+		OpenAIOAuthIdentityProjectionRegular,
+		OpenAIOAuthIdentityProjectionPassthrough,
+	} {
+		t.Run(string(mode), func(t *testing.T) {
+			out, err := ApplyOpenAIOAuthIdentityPlan(http.Header{}, input, OpenAIOAuthIdentityPlan{
+				TurnIdentity: identity, TurnIdentityEnabled: true,
+				ProjectionMode: mode, InstallationPolicy: OpenAIOAuthInstallationPreserve,
+			})
+			require.NoError(t, err)
+			require.Equal(t, identity.ParentThreadID, gjson.GetBytes(out, "client_metadata.parent_thread_id").String())
+			require.Equal(t, identity.ForkedFromThreadID, gjson.GetBytes(out, "client_metadata.forked_from_thread_id").String())
+			for _, alias := range []string{"parent-thread-id", "x-codex-parent-thread-id", "forked-from-thread-id"} {
+				require.False(t, gjson.GetBytes(out, "client_metadata."+alias).Exists(), alias)
+			}
+		})
+	}
 }
 
 func TestApplyOpenAIOAuthIdentityPlanPassthroughPinsTopLevelTurnMetadata(t *testing.T) {
@@ -460,7 +743,7 @@ func TestApplyOpenAIOAuthIdentityPlanPassthroughCreatesMissingClientMetadata(t *
 	require.Equal(t, id.SessionID, gjson.Get(nested, "session_id").String())
 }
 
-func TestApplyOpenAIOAuthIdentityPlanPassthroughPreservesOpaqueMetadata(t *testing.T) {
+func TestApplyOpenAIOAuthIdentityPlanPassthroughRebuildsOpaqueMetadata(t *testing.T) {
 	id, err := newOpenAICodexRootIdentity()
 	require.NoError(t, err)
 	plan := OpenAIOAuthIdentityPlan{
@@ -474,14 +757,15 @@ func TestApplyOpenAIOAuthIdentityPlanPassthroughPreservesOpaqueMetadata(t *testi
 	body := []byte(`{"client_metadata":{"keep":"value","x-codex-turn-metadata":"  opaque-nested  "}}`)
 	out, err := ApplyOpenAIOAuthIdentityPlan(http.Header{}, body, plan)
 	require.NoError(t, err)
-	require.Equal(t, "  opaque-nested  ", gjson.GetBytes(out, "client_metadata.x-codex-turn-metadata").String())
+	require.Equal(t, id.SessionID, gjson.Get(gjson.GetBytes(out, "client_metadata.x-codex-turn-metadata").String(), "session_id").String())
 	require.Equal(t, "value", gjson.GetBytes(out, "client_metadata.keep").String())
 	require.Equal(t, id.SessionID, gjson.GetBytes(out, "client_metadata.session_id").String())
 
 	opaqueContainer := []byte(" { \"client_metadata\" : \"opaque-container\", \"keep\" : 1 } \n")
 	opaqueOut, err := ApplyOpenAIOAuthIdentityPlan(http.Header{}, opaqueContainer, plan)
 	require.NoError(t, err)
-	require.Equal(t, opaqueContainer, opaqueOut)
+	require.Equal(t, id.SessionID, gjson.GetBytes(opaqueOut, "client_metadata.session_id").String())
+	require.Equal(t, plan.InstallationID, gjson.GetBytes(opaqueOut, "client_metadata.x-codex-installation-id").String())
 }
 
 func TestApplyOpenAIOAuthIdentityPlanPreservesLargeJSONInteger(t *testing.T) {

@@ -147,6 +147,14 @@ func (l *openAIWSConnLease) HandshakeHeaders() http.Header {
 	return cloneHeader(l.conn.handshakeHeaders)
 }
 
+func (l *openAIWSConnLease) HandshakeTurnStateCompatible(identityDigest string) bool {
+	return l != nil && l.conn != nil && l.conn.handshakeTurnStateCompatible(identityDigest)
+}
+
+func (l *openAIWSConnLease) CommitHandshakeTurnStateIdentity(identityDigest string) bool {
+	return l != nil && l.conn != nil && l.conn.commitHandshakeTurnStateIdentity(identityDigest)
+}
+
 func (l *openAIWSConnLease) IsPrewarmed() bool {
 	if l == nil || l.conn == nil {
 		return false
@@ -252,6 +260,8 @@ type openAIWSConn struct {
 	handshakeHeaders       http.Header
 	handshakeCompatibility openAIWSHandshakeCompatibilityKey
 	routingAffinity        string
+	turnStateMu            sync.Mutex
+	turnStateIdentity      string
 	// Retained as mirrors for narrow in-package tests and compatibility helpers.
 	// Production matching uses handshakeCompatibility.
 	betaFeatures   string
@@ -545,6 +555,33 @@ func (c *openAIWSConn) handshakeHeader(name string) string {
 		return ""
 	}
 	return strings.TrimSpace(c.handshakeHeaders.Get(strings.TrimSpace(name)))
+}
+
+// handshakeTurnStateCompatible reports whether the physical handshake's
+// opaque turn-state may be delivered under identityDigest. The association is
+// committed separately after the first downstream output succeeds.
+func (c *openAIWSConn) handshakeTurnStateCompatible(identityDigest string) bool {
+	if c == nil || stringsTrim(identityDigest) == "" {
+		return false
+	}
+	identityDigest = stringsTrim(identityDigest)
+	c.turnStateMu.Lock()
+	compatible := c.turnStateIdentity == "" || c.turnStateIdentity == identityDigest
+	c.turnStateMu.Unlock()
+	return compatible
+}
+
+func (c *openAIWSConn) commitHandshakeTurnStateIdentity(identityDigest string) bool {
+	if c == nil || stringsTrim(identityDigest) == "" {
+		return false
+	}
+	identityDigest = stringsTrim(identityDigest)
+	c.turnStateMu.Lock()
+	defer c.turnStateMu.Unlock()
+	if c.turnStateIdentity == "" {
+		c.turnStateIdentity = identityDigest
+	}
+	return c.turnStateIdentity == identityDigest
 }
 
 func (c *openAIWSConn) matchesHandshakeCompatibility(compatibility openAIWSHandshakeCompatibilityKey) bool {
@@ -1046,37 +1083,39 @@ retryAcquire:
 			p.ensureTargetIdleAsync(accountID)
 			return lease, nil
 		}
-		for _, conn := range ap.conns {
-			if conn == nil || conn == best || !conn.matchesHandshakeCompatibility(compatibility) || !conn.matchesRoutingAffinity(routingAffinity) {
-				continue
-			}
-			if conn.tryAcquire() {
-				connPick := time.Since(pickStartedAt)
-				p.recordConnPickDuration(connPick)
-				ap.mu.Unlock()
-				closeOpenAIWSConns(evicted)
-				if p.shouldHealthCheckConn(conn) {
-					if err := conn.pingWithTimeout(openAIWSConnHealthCheckTO); err != nil {
-						conn.close()
-						p.evictConn(accountID, conn.id)
-						if retry < 1 {
-							return p.acquire(ctx, req, retry+1)
-						}
-						return nil, err
-					}
+		if routingAffinity == "" || len(ap.conns)+ap.creating >= effectiveMaxConns {
+			for _, conn := range ap.conns {
+				if conn == nil || conn == best || !conn.matchesHandshakeCompatibility(compatibility) {
+					continue
 				}
-				lease := &openAIWSConnLease{pool: p, accountID: accountID, conn: conn, connPick: connPick, reused: true}
-				p.metrics.acquireReuseTotal.Add(1)
-				p.recordLastSuccessfulAcquire(accountID, acquireGeneration, req)
-				p.ensureTargetIdleAsync(accountID)
-				return lease, nil
+				if conn.tryAcquire() {
+					connPick := time.Since(pickStartedAt)
+					p.recordConnPickDuration(connPick)
+					ap.mu.Unlock()
+					closeOpenAIWSConns(evicted)
+					if p.shouldHealthCheckConn(conn) {
+						if err := conn.pingWithTimeout(openAIWSConnHealthCheckTO); err != nil {
+							conn.close()
+							p.evictConn(accountID, conn.id)
+							if retry < 1 {
+								return p.acquire(ctx, req, retry+1)
+							}
+							return nil, err
+						}
+					}
+					lease := &openAIWSConnLease{pool: p, accountID: accountID, conn: conn, connPick: connPick, reused: true}
+					p.metrics.acquireReuseTotal.Add(1)
+					p.recordLastSuccessfulAcquire(accountID, acquireGeneration, req)
+					p.ensureTargetIdleAsync(accountID)
+					return lease, nil
+				}
 			}
 		}
 	}
 
 	if !req.ForceNewConn && len(ap.conns)+ap.creating >= effectiveMaxConns {
 		affine := p.pickLeastBusyConnWithRoutingAffinityLocked(ap, compatibility, routingAffinity)
-		if idle := p.pickOldestIdleConnWithoutHandshakeCompatibilityOrRoutingAffinityLocked(ap, compatibility, routingAffinity); idle != nil {
+		if idle := p.pickOldestIdleConnWithoutHandshakeCompatibilityLocked(ap, compatibility); idle != nil {
 			delete(ap.conns, idle.id)
 			evicted = append(evicted, idle)
 			p.metrics.scaleDownTotal.Add(1)
@@ -1272,10 +1311,9 @@ func (p *openAIWSConnPool) pickOldestIdleConnLocked(ap *openAIWSAccountPool) *op
 	return oldest
 }
 
-func (p *openAIWSConnPool) pickOldestIdleConnWithoutHandshakeCompatibilityOrRoutingAffinityLocked(
+func (p *openAIWSConnPool) pickOldestIdleConnWithoutHandshakeCompatibilityLocked(
 	ap *openAIWSAccountPool,
 	compatibility openAIWSHandshakeCompatibilityKey,
-	routingAffinity string,
 ) *openAIWSConn {
 	if ap == nil || len(ap.conns) == 0 {
 		return nil
@@ -1283,7 +1321,7 @@ func (p *openAIWSConnPool) pickOldestIdleConnWithoutHandshakeCompatibilityOrRout
 	var oldest *openAIWSConn
 	for _, conn := range ap.conns {
 		if conn == nil ||
-			(conn.matchesHandshakeCompatibility(compatibility) && conn.matchesRoutingAffinity(routingAffinity)) ||
+			conn.matchesHandshakeCompatibility(compatibility) ||
 			conn.isLeased() || conn.waiters.Load() > 0 || p.isConnPinnedLocked(ap, conn.id) {
 			continue
 		}

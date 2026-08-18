@@ -623,6 +623,126 @@ func TestOpenAIWSConnPool_AcquireReusesOnlyMatchingBetaFeatures(t *testing.T) {
 	require.Equal(t, 2, dialer.DialCount())
 }
 
+func TestOpenAIWSConnPool_AcquireReusesSameStableIdentityWithDifferentTurnMetadata(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+
+	pool := newOpenAIWSConnPool(cfg)
+	dialer := &openAIWSCountingDialer{}
+	pool.setClientDialerForTest(dialer)
+	account := &Account{ID: 132, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	headers := make(http.Header)
+	headers.Set("X-Codex-Beta-Features", "remote_compaction_v2,responses_websockets_v2")
+	headers.Set("Authorization", "Bearer token-a")
+	headers.Set("x-codex-turn-metadata", `{"turn_id":"turn-a"}`)
+
+	first, err := pool.Acquire(context.Background(), openAIWSAcquireRequest{
+		Account:        account,
+		WSURL:          "wss://example.com/v1/responses",
+		Headers:        headers,
+		IdentityDigest: "stable-identity-a",
+	})
+	require.NoError(t, err)
+	firstConnID := first.ConnID()
+	first.Release()
+
+	nextHeaders := make(http.Header)
+	nextHeaders.Set("X-Codex-Beta-Features", "responses_websockets_v2,remote_compaction_v2")
+	nextHeaders.Set("Authorization", "Bearer token-b")
+	nextHeaders.Set("x-codex-turn-metadata", `{"turn_id":"turn-b"}`)
+	nextHeaders.Set(openAICodexRoutingHintHeader, "model=gpt-5.6-codex;tier=priority")
+	second, err := pool.Acquire(context.Background(), openAIWSAcquireRequest{
+		Account:        account,
+		WSURL:          "wss://example.com/v1/responses",
+		Headers:        nextHeaders,
+		IdentityDigest: "stable-identity-a",
+	})
+	require.NoError(t, err)
+	require.True(t, second.Reused())
+	require.Equal(t, firstConnID, second.ConnID())
+	second.Release()
+	require.Equal(t, 1, dialer.DialCount(), "stable digest match should ignore auth, turn metadata, and soft routing hints")
+}
+
+func TestOpenAIWSConnPool_AcquireDoesNotReuseDifferentStableIdentity(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 2
+	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 2
+	pool := newOpenAIWSConnPool(cfg)
+	dialer := &openAIWSCountingDialer{}
+	pool.setClientDialerForTest(dialer)
+	account := &Account{ID: 133, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	first, err := pool.Acquire(context.Background(), openAIWSAcquireRequest{
+		Account: account, WSURL: "wss://example.com/v1/responses", IdentityDigest: "stable-identity-a",
+	})
+	require.NoError(t, err)
+	firstConnID := first.ConnID()
+	first.Release()
+
+	second, err := pool.Acquire(context.Background(), openAIWSAcquireRequest{
+		Account: account, WSURL: "wss://example.com/v1/responses", IdentityDigest: "stable-identity-b",
+	})
+	require.NoError(t, err)
+	require.False(t, second.Reused())
+	require.NotEqual(t, firstConnID, second.ConnID())
+	second.Release()
+	require.Equal(t, 2, dialer.DialCount())
+}
+
+func TestOpenAIWSConnHandshakeTurnStateBindsToFirstDeliveredTurn(t *testing.T) {
+	conn := newOpenAIWSConn("conn-turn-state", 1, nil, http.Header{
+		openAIWSTurnStateHeader: {"opaque-state"},
+	})
+	require.True(t, conn.handshakeTurnStateCompatible("turn-digest-a"))
+	require.True(t, conn.handshakeTurnStateCompatible("turn-digest-b"), "uncommitted handshake may serve the first delivered attempt")
+	require.True(t, conn.commitHandshakeTurnStateIdentity("turn-digest-a"))
+	require.True(t, conn.handshakeTurnStateCompatible("turn-digest-a"))
+	require.False(t, conn.handshakeTurnStateCompatible("turn-digest-b"))
+	require.False(t, conn.commitHandshakeTurnStateIdentity("turn-digest-b"))
+}
+
+func TestOpenAIWSConnPool_AcquireRoutingHintRemainsSoftAffinity(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+
+	pool := newOpenAIWSConnPool(cfg)
+	dialer := &openAIWSCountingDialer{}
+	pool.setClientDialerForTest(dialer)
+	account := &Account{ID: 134, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	firstHeaders := make(http.Header)
+	firstHeaders.Set(openAICodexRoutingHintHeader, "model=gpt-5.6-codex")
+	first, err := pool.Acquire(context.Background(), openAIWSAcquireRequest{
+		Account:        account,
+		WSURL:          "wss://example.com/v1/responses",
+		Headers:        firstHeaders,
+		IdentityDigest: "stable-identity-a",
+	})
+	require.NoError(t, err)
+	firstConnID := first.ConnID()
+	first.Release()
+
+	secondHeaders := make(http.Header)
+	secondHeaders.Set(openAICodexRoutingHintHeader, "model=gpt-5.6-codex;tier=priority")
+	second, err := pool.Acquire(context.Background(), openAIWSAcquireRequest{
+		Account:        account,
+		WSURL:          "wss://example.com/v1/responses",
+		Headers:        secondHeaders,
+		IdentityDigest: "stable-identity-a",
+	})
+	require.NoError(t, err)
+	require.True(t, second.Reused())
+	require.Equal(t, firstConnID, second.ConnID())
+	second.Release()
+	require.Equal(t, 1, dialer.DialCount())
+}
+
 func TestOpenAIWSConnPool_AcquireReplacesIdleConnWithDifferentBetaFeatures(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1

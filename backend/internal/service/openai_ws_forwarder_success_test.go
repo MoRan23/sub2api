@@ -400,6 +400,9 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersPreservesCodexIdentity(t *test
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.144.1")
 	c.Request.Header.Set("X-Codex-Window-ID", "window-ws")
 	c.Request.Header.Set("X-Codex-Installation-ID", "installation-ws")
+	c.Request.Header.Set("session-id", "session-ws")
+	c.Request.Header.Set("thread-id", "thread-ws")
+	c.Request.Header.Set("x-client-request-id", "client-request-ws")
 	c.Request.Header.Set("X-Test", "blocked")
 
 	svc := &OpenAIGatewayService{}
@@ -422,6 +425,9 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersPreservesCodexIdentity(t *test
 	require.NoError(t, err)
 	require.Equal(t, "window-ws", headers.Get("X-Codex-Window-ID"))
 	require.Equal(t, "installation-ws", headers.Get("X-Codex-Installation-ID"))
+	require.Equal(t, "session-ws", headers.Get("session-id"))
+	require.Equal(t, "thread-ws", headers.Get("thread-id"))
+	require.Equal(t, "client-request-ws", headers.Get("x-client-request-id"))
 	require.Empty(t, headers.Get("X-Test"))
 }
 

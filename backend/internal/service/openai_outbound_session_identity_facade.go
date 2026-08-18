@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 const (
@@ -52,11 +55,34 @@ type OpenAICodexLogicalTurnAlias struct {
 	Priority            int
 }
 
+// OpenAICodexRequestTurnSnapshot is the request-scoped Codex turn instance.
+// Unlike the account-scoped session/thread mapping, it is never persisted:
+// retries and credential failover reuse the capture while a new ingress turn
+// receives a new UUIDv7.
+type OpenAICodexRequestTurnSnapshot struct {
+	ID              string
+	StartedAtUnixMS int64
+	Source          string
+	Explicit        bool
+	Generated       bool
+}
+
+const (
+	openAICodexRequestTurnSourceClientMetadata = "client_metadata.x_codex_turn_metadata"
+	openAICodexRequestTurnSourceHeader         = "header.x_codex_turn_metadata"
+	openAICodexRequestTurnSourceWS             = "ws.x_codex_turn_metadata"
+	openAICodexRequestTurnSourceBody           = "body.x_codex_turn_metadata"
+	openAICodexRequestTurnSourceFlatMetadata   = "client_metadata.turn_id"
+	openAICodexRequestTurnSourceCompatBody     = "body.turn_id"
+	openAICodexRequestTurnSourceGenerated      = "generated"
+)
+
 // OpenAIOAuthIdentityCapture is immutable request input captured before any
 // compatibility or compact body transformation.
 type OpenAIOAuthIdentityCapture struct {
 	Logical              OpenAICodexLogicalTurnIdentity
 	Aliases              []OpenAICodexLogicalTurnAlias
+	RequestTurn          OpenAICodexRequestTurnSnapshot
 	ClientInstallationID string
 	ConflictCount        int
 	InvalidMetadataCount int
@@ -94,6 +120,7 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthProfileIdentityPlan(
 // final projector. Apply never consults a store and never resolves again.
 type OpenAIOAuthIdentityPlan struct {
 	Capture                  OpenAIOAuthIdentityCapture
+	RequestTurn              OpenAICodexRequestTurnSnapshot
 	PolicySnapshot           CodexFingerprintPolicySnapshot
 	ClientIdentity           CodexClientIdentityPlan
 	ClientIdentityEnabled    bool
@@ -150,6 +177,13 @@ func CaptureOpenAIOAuthIdentityWithEndpointAlias(c *gin.Context, body []byte, en
 
 func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explicitTurnMetadata string, appendEndpointAlias bool) OpenAIOAuthIdentityCapture {
 	capture := captureOpenAICodexLogicalTurnIdentity(c, body, callerSeed, explicitTurnMetadata, appendEndpointAlias)
+	requestTurn, conflicts, invalid := captureOpenAICodexRequestTurn(c, body, explicitTurnMetadata)
+	capture.RequestTurn = requestTurn
+	capture.ConflictCount += conflicts
+	capture.InvalidMetadataCount += invalid
+	if conflicts > 0 {
+		openAICodexIdentityConflictTotal.Add(int64(conflicts))
+	}
 	var decoded map[string]any
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
 	decoder.UseNumber()
@@ -159,6 +193,180 @@ func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explici
 		capture.ClientInstallationID = extractClientInstallationID(c, nil)
 	}
 	return capture
+}
+
+func captureOpenAICodexRequestTurn(c *gin.Context, body []byte, explicitTurnMetadata string) (OpenAICodexRequestTurnSnapshot, int, int) {
+	type candidate struct {
+		snapshot OpenAICodexRequestTurnSnapshot
+		valid    bool
+		invalid  bool
+		carrier  openAICodexMetadataCarrier
+	}
+	candidates := make([]candidate, 0, 8)
+	appendMetadata := func(raw []byte, source string, carrier openAICodexMetadataCarrier, requireString bool) {
+		snapshot, present, valid := parseOpenAICodexRequestTurnMetadata(raw, source, requireString)
+		if !present {
+			return
+		}
+		candidates = append(candidates, candidate{snapshot: snapshot, valid: valid, invalid: !valid, carrier: carrier})
+	}
+	appendFlat := func(rawID, rawStartedAt json.RawMessage, source string, carrier openAICodexMetadataCarrier) {
+		snapshot, present, valid := parseOpenAICodexRequestTurnFields(rawID, rawStartedAt, source)
+		if !present {
+			return
+		}
+		candidates = append(candidates, candidate{snapshot: snapshot, valid: valid, invalid: !valid, carrier: carrier})
+	}
+
+	var root map[string]json.RawMessage
+	var clientMetadata map[string]json.RawMessage
+	if len(body) > 0 && utf8.Valid(body) && json.Unmarshal(body, &root) == nil && root != nil {
+		if raw, ok := root["client_metadata"]; ok {
+			if json.Unmarshal(raw, &clientMetadata) == nil && clientMetadata != nil {
+				if rawMetadata, ok := clientMetadata[openAIWSTurnMetadataHeader]; ok {
+					appendMetadata(rawMetadata, openAICodexRequestTurnSourceClientMetadata, openAICodexMetadataCarrierClientTurnMetadata, true)
+				}
+			} else {
+				candidates = append(candidates, candidate{invalid: true, carrier: openAICodexMetadataCarrierClientMetadataContainer})
+			}
+		}
+	}
+	if c != nil && c.Request != nil {
+		for _, raw := range headerValuesCaseInsensitive(c.Request.Header, openAIWSTurnMetadataHeader) {
+			appendMetadata([]byte(raw), openAICodexRequestTurnSourceHeader, openAICodexMetadataCarrierHeaderTurnMetadata, false)
+		}
+	}
+	if raw := strings.TrimSpace(explicitTurnMetadata); raw != "" {
+		appendMetadata([]byte(raw), openAICodexRequestTurnSourceWS, openAICodexMetadataCarrierWSTurnMetadata, false)
+	}
+	if root != nil {
+		if raw, ok := root[openAIWSTurnMetadataHeader]; ok {
+			appendMetadata(raw, openAICodexRequestTurnSourceBody, openAICodexMetadataCarrierBodyTurnMetadata, false)
+		}
+	}
+	if clientMetadata != nil {
+		appendFlat(clientMetadata["turn_id"], clientMetadata["turn_started_at_unix_ms"], openAICodexRequestTurnSourceFlatMetadata, openAICodexMetadataCarrierClientMetadataFlat)
+	}
+	if root != nil {
+		appendFlat(root["turn_id"], root["turn_started_at_unix_ms"], openAICodexRequestTurnSourceCompatBody, openAICodexMetadataCarrierBodyFlat)
+	}
+
+	winner := OpenAICodexRequestTurnSnapshot{}
+	conflicts := 0
+	invalid := 0
+	for _, candidate := range candidates {
+		if candidate.invalid {
+			invalid++
+			observeOpenAICodexMetadataInvalid(candidate.carrier)
+			continue
+		}
+		if !candidate.valid {
+			continue
+		}
+		if winner.ID == "" {
+			winner = candidate.snapshot
+			continue
+		}
+		if winner.ID != candidate.snapshot.ID {
+			conflicts++
+			observeOpenAICodexMetadataConflict(candidate.carrier, 1)
+		}
+	}
+	if winner.ID != "" {
+		return winner, conflicts, invalid
+	}
+	generated, err := uuid.NewV7()
+	if err != nil {
+		return OpenAICodexRequestTurnSnapshot{}, conflicts, invalid
+	}
+	id := generated.String()
+	return OpenAICodexRequestTurnSnapshot{
+		ID:              id,
+		StartedAtUnixMS: openAICodexRequestTurnUUIDUnixMilli(generated),
+		Source:          openAICodexRequestTurnSourceGenerated,
+		Generated:       true,
+	}, conflicts, invalid
+}
+
+func parseOpenAICodexRequestTurnMetadata(raw []byte, source string, requireString bool) (OpenAICodexRequestTurnSnapshot, bool, bool) {
+	if len(raw) == 0 || !utf8.Valid(raw) {
+		return OpenAICodexRequestTurnSnapshot{}, false, false
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return OpenAICodexRequestTurnSnapshot{}, false, false
+	}
+	if requireString {
+		var encoded string
+		if json.Unmarshal(raw, &encoded) != nil {
+			// The logical metadata parser owns invalid accounting for this
+			// carrier, including non-string values.
+			return OpenAICodexRequestTurnSnapshot{}, false, false
+		}
+		trimmed = strings.TrimSpace(encoded)
+	} else if strings.HasPrefix(trimmed, `"`) {
+		var encoded string
+		if json.Unmarshal(raw, &encoded) == nil {
+			trimmed = strings.TrimSpace(encoded)
+		}
+	}
+	var metadata map[string]json.RawMessage
+	if json.Unmarshal([]byte(trimmed), &metadata) != nil || metadata == nil {
+		// Malformed carriers are already counted by logical identity capture.
+		return OpenAICodexRequestTurnSnapshot{}, false, false
+	}
+	return parseOpenAICodexRequestTurnFields(metadata["turn_id"], metadata["turn_started_at_unix_ms"], source)
+}
+
+func parseOpenAICodexRequestTurnFields(rawID, rawStartedAt json.RawMessage, source string) (OpenAICodexRequestTurnSnapshot, bool, bool) {
+	if len(rawID) == 0 {
+		return OpenAICodexRequestTurnSnapshot{}, false, false
+	}
+	var id string
+	if json.Unmarshal(rawID, &id) != nil {
+		return OpenAICodexRequestTurnSnapshot{}, true, false
+	}
+	id, err := canonicalUUIDv7(id)
+	if err != nil {
+		return OpenAICodexRequestTurnSnapshot{}, true, false
+	}
+	parsed, _ := uuid.Parse(id)
+	startedAt := parseOpenAICodexRequestTurnStartedAt(rawStartedAt)
+	if startedAt <= 0 {
+		startedAt = openAICodexRequestTurnUUIDUnixMilli(parsed)
+	}
+	return OpenAICodexRequestTurnSnapshot{
+		ID: id, StartedAtUnixMS: startedAt, Source: source, Explicit: true,
+	}, true, true
+}
+
+func parseOpenAICodexRequestTurnStartedAt(raw json.RawMessage) int64 {
+	if len(raw) == 0 {
+		return 0
+	}
+	var number json.Number
+	if json.Unmarshal(raw, &number) == nil {
+		if value, err := strconv.ParseInt(string(number), 10, 64); err == nil && value > 0 {
+			return value
+		}
+	}
+	var encoded string
+	if json.Unmarshal(raw, &encoded) == nil {
+		if value, err := strconv.ParseInt(strings.TrimSpace(encoded), 10, 64); err == nil && value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func openAICodexRequestTurnUUIDUnixMilli(value uuid.UUID) int64 {
+	seconds, nanoseconds := value.Time().UnixTime()
+	return seconds*int64(time.Second/time.Millisecond) + nanoseconds/int64(time.Millisecond)
+}
+
+func openAICodexRequestTurnSnapshotValid(snapshot OpenAICodexRequestTurnSnapshot) bool {
+	_, err := canonicalUUIDv7(snapshot.ID)
+	return err == nil && snapshot.StartedAtUnixMS > 0
 }
 
 // FillOpenAIOAuthIdentityCaptureFallback adds a deferred affinity seed without
@@ -213,6 +421,7 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 	policy := s.openAICodexFingerprintPolicyForRequest(ctx, c)
 	plan := OpenAIOAuthIdentityPlan{
 		Capture: capture, ProjectionMode: options.ProjectionMode,
+		RequestTurn:        capture.RequestTurn,
 		InstallationPolicy: options.InstallationPolicy,
 		PolicySnapshot:     policy,
 		APIKeyID:           getAPIKeyIDFromContext(c), ResolveSource: capture.Logical.Source,
@@ -332,6 +541,7 @@ func (s *OpenAIGatewayService) GetOrResolveOpenAIOAuthOutboundIdentity(
 
 func openAIOAuthIdentityCapturesEqual(left, right OpenAIOAuthIdentityCapture) bool {
 	if left.Logical != right.Logical ||
+		left.RequestTurn != right.RequestTurn ||
 		left.ClientInstallationID != right.ClientInstallationID ||
 		left.ConflictCount != right.ConflictCount ||
 		left.InvalidMetadataCount != right.InvalidMetadataCount ||
@@ -403,13 +613,7 @@ func ApplyOpenAIOAuthIdentityPlan(headers http.Header, body []byte, plan OpenAIO
 		return body, nil
 	}
 	if mode == OpenAIOAuthIdentityProjectionPassthrough {
-		if plan.InstallationPolicy == OpenAIOAuthInstallationAccountPin &&
-			plan.InstallationEnabled && strings.TrimSpace(plan.InstallationID) != "" {
-			rewriteOpenAIInstallationIDHeaders(headers, plan.InstallationID)
-		}
-		if plan.TurnIdentityEnabled {
-			applyOpenAICodexTurnIdentityHeaders(headers, plan.TurnIdentity, false)
-		}
+		applyOpenAICodexIdentityHeadersForPlan(headers, plan, false)
 		out, err := mergeOpenAIOAuthPassthroughIdentityBody(body, plan)
 		if err != nil {
 			return body, err
@@ -440,60 +644,29 @@ func ApplyOpenAIOAuthIdentityPlan(headers http.Header, body []byte, plan OpenAIO
 			out = encoded
 		}
 	}
-	if plan.InstallationPolicy != OpenAIOAuthInstallationPreserve && plan.InstallationEnabled && plan.InstallationID != "" {
-		if headers != nil {
-			rewriteOpenAIInstallationIDHeaders(headers, plan.InstallationID)
+	projection := openAICodexMetadataProjectionFromPlan(plan)
+	switch mode {
+	case OpenAIOAuthIdentityProjectionExistingTurnMetadataOnly:
+		if projection.installation && headers != nil {
+			deleteOpenAIHeaderEqualFold(headers, codexInstallationIDKey)
+			headers.Set(codexInstallationIDKey, projection.installationID)
 		}
-		if mode != OpenAIOAuthIdentityProjectionHeadersOnly && mode != OpenAIOAuthIdentityProjectionCompact && len(out) > 0 {
-			var root map[string]any
-			decoder := json.NewDecoder(strings.NewReader(string(out)))
-			decoder.UseNumber()
-			if err := decoder.Decode(&root); err != nil {
-				return body, fmt.Errorf("decode OpenAI OAuth installation body: %w", err)
-			}
-			modified := false
-			if mode == OpenAIOAuthIdentityProjectionExistingTurnMetadataOnly {
-				modified = rewriteExistingOpenAITurnMetadataInstallationInBody(root, plan.InstallationID)
-			} else {
-				// A non-object client_metadata value is opaque client input. The
-				// installation header is still pinned, but the body container is
-				// not replaced merely to create an installation field.
-				if clientMetadata, present := root["client_metadata"]; !present || isJSONObject(clientMetadata) {
-					modified = rewriteOpenAIInstallationIDInBody(root, plan.InstallationID)
-				}
-			}
-			if !modified {
-				goto installationBodyDone
-			}
-			encoded, err := marshalJSONWithoutHTMLEscape(root)
-			if err != nil {
-				return body, fmt.Errorf("encode OpenAI OAuth installation body: %w", err)
-			}
-			out = encoded
+		applyOpenAICodexCanonicalTurnMetadataHeader(headers, projection, false)
+		var err error
+		out, err = mergeOpenAICodexIdentityBodyForPlan(out, plan, true)
+		if err != nil {
+			return body, err
 		}
-	}
-
-installationBodyDone:
-	if plan.TurnIdentityEnabled {
-		switch mode {
-		case OpenAIOAuthIdentityProjectionCompact:
-			applyOpenAICodexTurnIdentityHeaders(headers, plan.TurnIdentity, true)
-		case OpenAIOAuthIdentityProjectionHeadersOnly:
-			applyOpenAICodexTurnIdentityHeaders(headers, plan.TurnIdentity, false)
-		case OpenAIOAuthIdentityProjectionExistingTurnMetadataOnly:
-			applyOpenAICodexExistingTurnMetadataHeader(headers, plan.TurnIdentity)
-			var err error
-			out, err = mergeOpenAICodexExistingTurnMetadataBody(out, plan.TurnIdentity)
-			if err != nil {
-				return body, err
-			}
-		default:
-			applyOpenAICodexTurnIdentityHeaders(headers, plan.TurnIdentity, false)
-			var err error
-			out, err = mergeOpenAICodexTurnIdentityBody(out, plan.TurnIdentity)
-			if err != nil {
-				return body, err
-			}
+	case OpenAIOAuthIdentityProjectionCompact:
+		applyOpenAICodexIdentityHeadersForPlan(headers, plan, true)
+	case OpenAIOAuthIdentityProjectionHeadersOnly:
+		applyOpenAICodexIdentityHeadersForPlan(headers, plan, false)
+	default:
+		applyOpenAICodexIdentityHeadersForPlan(headers, plan, false)
+		var err error
+		out, err = mergeOpenAICodexIdentityBodyForPlan(out, plan, false)
+		if err != nil {
+			return body, err
 		}
 	}
 	if plan.ClientIdentityEnabled {
@@ -503,9 +676,8 @@ installationBodyDone:
 }
 
 // applyOpenAICodexAlphaSearchIdentityHeader projects the account-owned
-// identity into the one carrier used by Codex SearchClient. Parseable objects
-// retain unknown fields; opaque values remain byte-for-byte intact. A canonical
-// object is created only when the client did not send this carrier at all.
+// identity into the one carrier used by Codex SearchClient. Alpha keeps its
+// native body byte-exact and never emits the independent identity headers.
 func applyOpenAICodexAlphaSearchIdentityHeader(headers http.Header, plan OpenAIOAuthIdentityPlan) {
 	if headers == nil {
 		return
@@ -513,47 +685,7 @@ func applyOpenAICodexAlphaSearchIdentityHeader(headers http.Header, plan OpenAIO
 	deleteOpenAICodexIdentityHeaders(headers)
 	deleteOpenAIHeaderEqualFold(headers, codexInstallationIDKey)
 
-	projectTurn := plan.TurnIdentityEnabled
-	projectInstallation := plan.InstallationPolicy == OpenAIOAuthInstallationAccountPin &&
-		plan.InstallationEnabled && strings.TrimSpace(plan.InstallationID) != ""
-	if !projectTurn && !projectInstallation {
-		return
-	}
-
-	values := headerValuesCaseInsensitive(headers, openAIWSTurnMetadataHeader)
-	projected := make([]string, 0, len(values)+1)
-	for _, value := range values {
-		var metadata map[string]json.RawMessage
-		if json.Unmarshal([]byte(strings.TrimSpace(value)), &metadata) != nil || metadata == nil {
-			projected = append(projected, value)
-			continue
-		}
-		rewritten := value
-		if projectTurn {
-			rewritten, _ = rewriteOpenAICodexTurnMetadata(rewritten, plan.TurnIdentity)
-		}
-		if projectInstallation {
-			if withInstallation, changed := rewriteCodexTurnMetadataInstallationID(rewritten, plan.InstallationID); changed {
-				rewritten = withInstallation
-			}
-		}
-		projected = append(projected, rewritten)
-	}
-	if len(values) == 0 {
-		canonical := "{}"
-		if projectTurn {
-			canonical, _ = rewriteOpenAICodexTurnMetadata(canonical, plan.TurnIdentity)
-		}
-		if projectInstallation {
-			canonical, _ = rewriteCodexTurnMetadataInstallationID(canonical, plan.InstallationID)
-		}
-		projected = append(projected, canonical)
-	}
-
-	deleteOpenAIHeaderEqualFold(headers, openAIWSTurnMetadataHeader)
-	for _, value := range projected {
-		headers.Add(openAIWSTurnMetadataHeader, value)
-	}
+	applyOpenAICodexCanonicalTurnMetadataHeader(headers, openAICodexMetadataProjectionFromPlan(plan), true)
 }
 
 func (s *OpenAIGatewayService) openAICodexFingerprintPolicyForRequest(
@@ -585,37 +717,6 @@ func (s *OpenAIGatewayService) openAICodexFingerprintPolicyForRequest(
 		c.Set(openAICodexFingerprintPolicyContextKey, snapshot)
 	}
 	return snapshot
-}
-
-func isJSONObject(value any) bool {
-	switch value.(type) {
-	case map[string]any, map[string]string:
-		return true
-	default:
-		return false
-	}
-}
-
-func rewriteExistingOpenAITurnMetadataInstallationInBody(root map[string]any, installationID string) bool {
-	if root == nil || strings.TrimSpace(installationID) == "" {
-		return false
-	}
-	modified := false
-	if raw, ok := root[openAIWSTurnMetadataHeader].(string); ok {
-		if rewritten, changed := rewriteCodexTurnMetadataInstallationID(raw, installationID); changed {
-			root[openAIWSTurnMetadataHeader] = rewritten
-			modified = true
-		}
-	}
-	if metadata, ok := root["client_metadata"].(map[string]any); ok {
-		if raw, exists := metadata[openAIWSTurnMetadataHeader].(string); exists {
-			if rewritten, changed := rewriteCodexTurnMetadataInstallationID(raw, installationID); changed {
-				metadata[openAIWSTurnMetadataHeader] = rewritten
-				modified = true
-			}
-		}
-	}
-	return modified
 }
 
 func applyOpenAICodexExistingTurnMetadataHeader(headers http.Header, identity OpenAICodexTurnIdentity) {

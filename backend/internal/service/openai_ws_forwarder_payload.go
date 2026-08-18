@@ -42,7 +42,7 @@ func (s *OpenAIGatewayService) buildOpenAIResponsesWSURL(account *Account) (stri
 			if err != nil {
 				return "", err
 			}
-			targetURL = buildOpenAIResponsesURL(validatedURL)
+			targetURL = buildOpenAIResponsesURLForPlatform(account.Platform, validatedURL)
 		}
 	default:
 		targetURL = openaiPlatformAPIURL
@@ -156,7 +156,13 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 				headers.Add("x-codex-beta-features", value)
 			}
 		}
-		for _, name := range [...]string{"x-codex-window-id", "x-codex-installation-id"} {
+		for _, name := range [...]string{
+			"x-codex-window-id",
+			"x-codex-installation-id",
+			"session-id",
+			"thread-id",
+			"x-client-request-id",
+		} {
 			values, present := c.Request.Header[http.CanonicalHeaderKey(name)]
 			if !present {
 				continue
@@ -244,7 +250,6 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 	} else if strings.TrimSpace(turnMetadata) != "" {
 		headers.Set(openAIWSTurnMetadataHeader, turnMetadata)
 	}
-
 	if account != nil && account.Type == AccountTypeOAuth {
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, headers, account); err != nil {
 			return nil, sessionResolution, fmt.Errorf("resolve chatgpt account headers: %w", err)
@@ -367,6 +372,44 @@ func setOpenAIWSTurnMetadata(payload map[string]any, turnMetadata string) {
 			openAIWSTurnMetadataHeader: metadata,
 		}
 	}
+}
+
+// captureOpenAIWSFrameIdentity keeps connection-scoped identity inputs pinned
+// while allowing turn_id to follow the lifecycle of response.create frames.
+// A continuation without an explicit turn_id inherits the current turn;
+// otherwise Capture's request-scoped UUIDv7 becomes the next turn snapshot.
+func captureOpenAIWSFrameIdentity(payload []byte, currentPlan *OpenAIOAuthIdentityPlan) OpenAIOAuthIdentityCapture {
+	capture := CaptureOpenAIOAuthIdentity(nil, payload, "")
+	if currentPlan == nil {
+		return capture
+	}
+
+	// prompt_cache_key and other fallbacks are cache/routing inputs after the
+	// connection has pinned a stable tuple. Only an explicit frame tuple may
+	// replace that tuple.
+	if !capture.Logical.Explicit {
+		stable := cloneOpenAIOAuthIdentityCapture(currentPlan.Capture)
+		stable.RequestTurn = capture.RequestTurn
+		stable.ConflictCount = capture.ConflictCount
+		stable.InvalidMetadataCount = capture.InvalidMetadataCount
+		if strings.TrimSpace(capture.ClientInstallationID) != "" {
+			stable.ClientInstallationID = capture.ClientInstallationID
+		}
+		capture = stable
+	}
+
+	if !capture.RequestTurn.Explicit &&
+		openAIWSFrameContinuesCurrentTurn(payload) &&
+		openAICodexRequestTurnSnapshotValid(currentPlan.RequestTurn) {
+		capture.RequestTurn = currentPlan.RequestTurn
+	}
+	return capture
+}
+
+func openAIWSFrameContinuesCurrentTurn(payload []byte) bool {
+	return strings.TrimSpace(gjson.GetBytes(payload, "previous_response_id").String()) != "" ||
+		openAIWSRawPayloadHasToolCallOutput(payload) ||
+		HasCompactionTriggerInInput(payload)
 }
 
 func (s *OpenAIGatewayService) isOpenAIWSStoreRecoveryAllowed(account *Account) bool {

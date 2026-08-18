@@ -1094,9 +1094,8 @@ func TestOpenAIOutboundIdentityDirectAlphaProjectsCanonicalMetadata(t *testing.T
 	require.Empty(t, req.Header.Get(codexInstallationIDKey))
 	require.False(t, gjson.GetBytes(outboundBody, "client_metadata").Exists())
 	metadataValues := req.Header.Values(openAIWSTurnMetadataHeader)
-	require.Len(t, metadataValues, 2)
-	require.Equal(t, opaqueMetadata, metadataValues[0])
-	rewritten := metadataValues[1]
+	require.Len(t, metadataValues, 1)
+	rewritten := metadataValues[0]
 	require.Equal(t, "keep", gjson.Get(rewritten, "label").String())
 	require.True(t, ValidateFingerprintObservationUUIDv7(gjson.Get(rewritten, "session_id").String()))
 	require.True(t, ValidateFingerprintObservationUUIDv7(gjson.Get(rewritten, "thread_id").String()))

@@ -109,7 +109,7 @@ func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
 	require.Empty(t, upstream.lastReq.Header.Get(codexInstallationIDKey))
 }
 
-func TestForwardAlphaSearchOAuthPreservesOpaqueTurnMetadataHeaderBytes(t *testing.T) {
+func TestForwardAlphaSearchOAuthRebuildsOpaqueTurnMetadataHeader(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	enableOpenAIIdentityPathFingerprintObservation(t)
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
@@ -131,13 +131,19 @@ func TestForwardAlphaSearchOAuthPreservesOpaqueTurnMetadataHeaderBytes(t *testin
 
 	_, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
 	require.NoError(t, err)
-	require.Equal(t, []string{opaque}, upstream.lastReq.Header.Values("X-Codex-Turn-Metadata"))
+	require.Len(t, upstream.lastReq.Header.Values("X-Codex-Turn-Metadata"), 1)
+	metadata := upstream.lastReq.Header.Get("X-Codex-Turn-Metadata")
+	require.True(t, ValidateFingerprintObservationUUIDv7(gjson.Get(metadata, "session_id").String()))
+	require.True(t, ValidateFingerprintObservationUUIDv7(gjson.Get(metadata, "thread_id").String()))
+	require.True(t, ValidateFingerprintObservationUUIDv7(gjson.Get(metadata, "turn_id").String()))
+	require.Positive(t, gjson.Get(metadata, "turn_started_at_unix_ms").Int())
+	require.Equal(t, transportTestPinnedInstallationID, gjson.Get(metadata, "installation_id").String())
 	require.Equal(t, body, upstream.lastBody)
 	entries := SnapshotFingerprintObservations(0)
 	require.Len(t, entries, 1)
-	require.Empty(t, entries[0].OutboundInstallationID)
-	require.Empty(t, entries[0].SessionID)
-	require.Empty(t, entries[0].ThreadID)
+	require.Equal(t, transportTestPinnedInstallationID, entries[0].OutboundInstallationID)
+	require.NotEmpty(t, entries[0].SessionID)
+	require.NotEmpty(t, entries[0].ThreadID)
 }
 
 func TestForwardAlphaSearchOAuthObservationDoesNotReportStrippedClientInstallation(t *testing.T) {
@@ -165,7 +171,10 @@ func TestForwardAlphaSearchOAuthObservationDoesNotReportStrippedClientInstallati
 	_, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.Empty(t, upstream.lastReq.Header.Get(codexInstallationIDKey))
-	require.Equal(t, "opaque-turn-metadata", upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader))
+	metadata := upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader)
+	require.True(t, ValidateFingerprintObservationUUIDv7(gjson.Get(metadata, "session_id").String()))
+	require.True(t, ValidateFingerprintObservationUUIDv7(gjson.Get(metadata, "turn_id").String()))
+	require.False(t, gjson.Get(metadata, "installation_id").Exists())
 	entries := SnapshotFingerprintObservations(0)
 	require.Len(t, entries, 1)
 	require.Equal(t, "client-only-installation", entries[0].ClientReportedInstallationID)
@@ -272,7 +281,7 @@ func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
 	c.Request.Header.Set("X-Codex-Turn-State", "turn-state")
 	c.Request.Header.Set(responsesLiteHeaderKey, "true")
 	c.Request.Header.Set("X-Codex-Installation-ID", "client-direct")
-	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"installation_id":"client-turn","turn_id":"turn-1"}`)
+	c.Request.Header.Set("X-Codex-Turn-Metadata", `{"installation_id":"client-turn","turn_id":"01916d9b-bb60-7c4a-8e04-32e9c8bf1234"}`)
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -316,7 +325,7 @@ func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
 	var turnMetadata map[string]any
 	require.NoError(t, json.Unmarshal([]byte(upstream.lastReq.Header.Get("X-Codex-Turn-Metadata")), &turnMetadata))
 	require.Equal(t, "11111111-2222-4333-8444-555555555555", turnMetadata[codexTurnMetadataInstallationIDKey])
-	require.Equal(t, "turn-1", turnMetadata["turn_id"])
+	require.Equal(t, "01916d9b-bb60-7c4a-8e04-32e9c8bf1234", turnMetadata["turn_id"])
 	require.Equal(t, openai.CodexDefaultOriginator, upstream.lastReq.Header.Get("Originator"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Codex-Beta-Features"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Codex-Turn-State"))

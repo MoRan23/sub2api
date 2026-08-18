@@ -315,45 +315,48 @@ func ResolveOpenAICodexLogicalTurnIdentityWithTurnMetadata(c *gin.Context, body 
 
 func captureOpenAICodexLogicalTurnIdentity(c *gin.Context, body []byte, callerSeed, explicitTurnMetadata string, appendEndpointAlias bool) OpenAIOAuthIdentityCapture {
 	metadata, bodyTurnMetadata, promptCacheKey := openAIOutboundSessionBodySignals(body)
-	candidates := make([]struct {
-		tuple  openAICodexLogicalTuple
-		source string
-	}, 0, 8)
+	type logicalCandidate struct {
+		tuple   openAICodexLogicalTuple
+		source  string
+		carrier openAICodexMetadataCarrier
+	}
+	candidates := make([]logicalCandidate, 0, 8)
 	invalidMetadataCount := 0
-	appendTurnMetadataCandidate := func(raw []byte) {
+	appendTurnMetadataCandidate := func(raw []byte, carrier openAICodexMetadataCarrier) {
 		if len(strings.TrimSpace(string(raw))) == 0 {
 			return
 		}
 		tuple, valid := parseOpenAICodexTurnMetadata(raw)
 		if !valid {
 			invalidMetadataCount++
+			observeOpenAICodexMetadataInvalid(carrier)
 			return
 		}
-		candidates = append(candidates, struct {
-			tuple  openAICodexLogicalTuple
-			source string
-		}{tuple, OpenAIOutboundSessionLogicalKeySourceTurnMetadata})
+		candidates = append(candidates, logicalCandidate{
+			tuple: tuple, source: OpenAIOutboundSessionLogicalKeySourceTurnMetadata, carrier: carrier,
+		})
 	}
 
 	// Codex defines the metadata-contained turn snapshot as the canonical source.
 	if raw, ok := metadata[openAIWSTurnMetadataHeader]; ok {
-		if decoded := normalizeOpenAIOutboundTurnMetadataRaw(raw); len(decoded) > 0 {
-			appendTurnMetadataCandidate(decoded)
+		var encoded string
+		if json.Unmarshal(raw, &encoded) != nil {
+			invalidMetadataCount++
+			observeOpenAICodexMetadataInvalid(openAICodexMetadataCarrierClientTurnMetadata)
+		} else if decoded := strings.TrimSpace(encoded); decoded != "" {
+			appendTurnMetadataCandidate([]byte(decoded), openAICodexMetadataCarrierClientTurnMetadata)
 		}
 	}
 	if c != nil && c.Request != nil {
 		for _, raw := range headerValuesCaseInsensitive(c.Request.Header, openAIWSTurnMetadataHeader) {
-			appendTurnMetadataCandidate([]byte(strings.TrimSpace(raw)))
+			appendTurnMetadataCandidate([]byte(strings.TrimSpace(raw)), openAICodexMetadataCarrierHeaderTurnMetadata)
 		}
 	}
 	if raw := strings.TrimSpace(explicitTurnMetadata); raw != "" {
-		appendTurnMetadataCandidate([]byte(raw))
+		appendTurnMetadataCandidate([]byte(raw), openAICodexMetadataCarrierWSTurnMetadata)
 	}
 	for _, raw := range bodyTurnMetadata {
-		appendTurnMetadataCandidate(raw)
-	}
-	if invalidMetadataCount > 0 {
-		openAIOutboundSessionIdentityMetrics.invalidMetadataTotal.Add(int64(invalidMetadataCount))
+		appendTurnMetadataCandidate(raw, openAICodexMetadataCarrierBodyTurnMetadata)
 	}
 
 	if c != nil && c.Request != nil {
@@ -367,10 +370,7 @@ func captureOpenAICodexLogicalTurnIdentity(c *gin.Context, body []byte, callerSe
 		if canonical.session == "" && canonical.thread != "" {
 			canonicalSource = OpenAIOutboundSessionLogicalKeySourceHeaderThread
 		}
-		candidates = append(candidates, struct {
-			tuple  openAICodexLogicalTuple
-			source string
-		}{canonical, canonicalSource})
+		candidates = append(candidates, logicalCandidate{tuple: canonical, source: canonicalSource})
 	}
 
 	flatTuple := tupleFromJSON(metadata)
@@ -378,10 +378,10 @@ func captureOpenAICodexLogicalTurnIdentity(c *gin.Context, body []byte, callerSe
 	// session/thread projection.
 	flatTuple.session = firstValidOpenAICodexJSONField(metadata, "session_id", "session-id")
 	flatTuple.thread = firstValidOpenAICodexJSONField(metadata, "thread_id", "thread-id")
-	candidates = append(candidates, struct {
-		tuple  openAICodexLogicalTuple
-		source string
-	}{flatTuple, OpenAIOutboundSessionLogicalKeySourceClientMetadata})
+	candidates = append(candidates, logicalCandidate{
+		tuple: flatTuple, source: OpenAIOutboundSessionLogicalKeySourceClientMetadata,
+		carrier: openAICodexMetadataCarrierClientMetadataFlat,
+	})
 
 	if c != nil && c.Request != nil {
 		headers := c.Request.Header
@@ -407,16 +407,14 @@ func captureOpenAICodexLogicalTurnIdentity(c *gin.Context, body []byte, callerSe
 				compatSource = OpenAIOutboundSessionLogicalKeySourceHeaderAffinity
 			}
 		}
-		candidates = append(candidates, struct {
-			tuple  openAICodexLogicalTuple
-			source string
-		}{compat, compatSource})
+		candidates = append(candidates, logicalCandidate{tuple: compat, source: compatSource})
 	}
 	if conversation := firstValidOpenAICodexJSONField(metadata, "conversation_id", "conversation-id"); conversation != "" {
-		candidates = append(candidates, struct {
-			tuple  openAICodexLogicalTuple
-			source string
-		}{openAICodexLogicalTuple{session: conversation, thread: conversation}, OpenAIOutboundSessionLogicalKeySourceClientMetadata})
+		candidates = append(candidates, logicalCandidate{
+			tuple:   openAICodexLogicalTuple{session: conversation, thread: conversation},
+			source:  OpenAIOutboundSessionLogicalKeySourceClientMetadata,
+			carrier: openAICodexMetadataCarrierClientMetadataFlat,
+		})
 	}
 
 	winner := OpenAICodexLogicalTurnIdentity{Source: OpenAIOutboundSessionLogicalKeySourceNone}
@@ -446,11 +444,12 @@ func captureOpenAICodexLogicalTurnIdentity(c *gin.Context, body []byte, callerSe
 	conflicts := 0
 	for _, candidate := range candidates {
 		candidateIdentity := logicalTupleIdentityOnly(candidate.tuple, candidate.source)
+		candidateConflicts := noteTupleConflict(winner, candidate.tuple)
+		conflicts += candidateConflicts
+		observeOpenAICodexMetadataConflict(candidate.carrier, candidateConflicts)
 		if !logicalTupleIdentityCompatible(winner, candidate.tuple, candidate.source) {
-			conflicts += noteTupleConflict(winner, candidate.tuple)
 			continue
 		}
-		conflicts += noteTupleConflict(winner, candidate.tuple)
 		mergeRelatedLogicalKeys(&winner, candidate.tuple)
 		if candidateIdentity.SessionKey != "" {
 			aliasKey := candidateIdentity.SessionKey + "\x00" + candidateIdentity.ThreadKey
@@ -1042,7 +1041,38 @@ type OpenAIOutboundSessionIdentityRuntimeMetrics struct {
 	SourceCallerSeedTotal     int64
 	SourcePromptCacheKeyTotal int64
 	InvalidMetadataTotal      int64
+	MetadataRebuiltTotal      int64
+	MetadataInvalidByCarrier  OpenAICodexMetadataCarrierRuntimeMetrics
+	MetadataRebuiltByCarrier  OpenAICodexMetadataCarrierRuntimeMetrics
+	MetadataConflictByCarrier OpenAICodexMetadataCarrierRuntimeMetrics
 }
+
+// OpenAICodexMetadataCarrierRuntimeMetrics exposes a closed set of carrier
+// dimensions. It deliberately uses fields instead of arbitrary labels so raw
+// metadata values can never become metric keys.
+type OpenAICodexMetadataCarrierRuntimeMetrics struct {
+	ClientMetadataContainer int64
+	ClientTurnMetadata      int64
+	HeaderTurnMetadata      int64
+	WSTurnMetadata          int64
+	BodyTurnMetadata        int64
+	ClientMetadataFlat      int64
+	BodyFlat                int64
+}
+
+type openAICodexMetadataCarrier uint8
+
+const (
+	openAICodexMetadataCarrierNone openAICodexMetadataCarrier = iota
+	openAICodexMetadataCarrierClientMetadataContainer
+	openAICodexMetadataCarrierClientTurnMetadata
+	openAICodexMetadataCarrierHeaderTurnMetadata
+	openAICodexMetadataCarrierWSTurnMetadata
+	openAICodexMetadataCarrierBodyTurnMetadata
+	openAICodexMetadataCarrierClientMetadataFlat
+	openAICodexMetadataCarrierBodyFlat
+	openAICodexMetadataCarrierCount
+)
 
 type openAICodexMetrics struct {
 	resolveTotal, emptyLogicalKeyTotal, primaryStoreSuccessTotal                             atomic.Int64
@@ -1052,7 +1082,8 @@ type openAICodexMetrics struct {
 	resolvePrimaryTotal, resolveFallbackTotal, resolveAliasJumpTotal, resolveStoreErrorTotal atomic.Int64
 	sourceTurnMetadataTotal, sourceHeaderTotal, sourceClientMetadataTotal                    atomic.Int64
 	sourceCallerSeedTotal, sourcePromptCacheKeyTotal                                         atomic.Int64
-	invalidMetadataTotal                                                                     atomic.Int64
+	invalidMetadataTotal, metadataRebuiltTotal                                               atomic.Int64
+	metadataInvalidByCarrier, metadataRebuiltByCarrier, metadataConflictByCarrier            [openAICodexMetadataCarrierCount]atomic.Int64
 }
 
 var openAIOutboundSessionIdentityMetrics openAICodexMetrics
@@ -1072,7 +1103,55 @@ func SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics() OpenAIOutboundSession
 		SourceClientMetadataTotal: m.sourceClientMetadataTotal.Load(), SourceCallerSeedTotal: m.sourceCallerSeedTotal.Load(),
 		SourcePromptCacheKeyTotal: m.sourcePromptCacheKeyTotal.Load(),
 		InvalidMetadataTotal:      m.invalidMetadataTotal.Load(),
+		MetadataRebuiltTotal:      m.metadataRebuiltTotal.Load(),
+		MetadataInvalidByCarrier:  snapshotOpenAICodexMetadataCarrierMetrics(&m.metadataInvalidByCarrier),
+		MetadataRebuiltByCarrier:  snapshotOpenAICodexMetadataCarrierMetrics(&m.metadataRebuiltByCarrier),
+		MetadataConflictByCarrier: snapshotOpenAICodexMetadataCarrierMetrics(&m.metadataConflictByCarrier),
 	}
+}
+
+func snapshotOpenAICodexMetadataCarrierMetrics(counters *[openAICodexMetadataCarrierCount]atomic.Int64) OpenAICodexMetadataCarrierRuntimeMetrics {
+	if counters == nil {
+		return OpenAICodexMetadataCarrierRuntimeMetrics{}
+	}
+	return OpenAICodexMetadataCarrierRuntimeMetrics{
+		ClientMetadataContainer: counters[openAICodexMetadataCarrierClientMetadataContainer].Load(),
+		ClientTurnMetadata:      counters[openAICodexMetadataCarrierClientTurnMetadata].Load(),
+		HeaderTurnMetadata:      counters[openAICodexMetadataCarrierHeaderTurnMetadata].Load(),
+		WSTurnMetadata:          counters[openAICodexMetadataCarrierWSTurnMetadata].Load(),
+		BodyTurnMetadata:        counters[openAICodexMetadataCarrierBodyTurnMetadata].Load(),
+		ClientMetadataFlat:      counters[openAICodexMetadataCarrierClientMetadataFlat].Load(),
+		BodyFlat:                counters[openAICodexMetadataCarrierBodyFlat].Load(),
+	}
+}
+
+func validOpenAICodexMetadataCarrier(carrier openAICodexMetadataCarrier) bool {
+	return carrier > openAICodexMetadataCarrierNone && carrier < openAICodexMetadataCarrierCount
+}
+
+func observeOpenAICodexMetadataInvalid(carrier openAICodexMetadataCarrier) {
+	if !validOpenAICodexMetadataCarrier(carrier) {
+		return
+	}
+	m := &openAIOutboundSessionIdentityMetrics
+	m.invalidMetadataTotal.Add(1)
+	m.metadataInvalidByCarrier[carrier].Add(1)
+}
+
+func observeOpenAICodexMetadataRebuilt(carrier openAICodexMetadataCarrier) {
+	if !validOpenAICodexMetadataCarrier(carrier) {
+		return
+	}
+	m := &openAIOutboundSessionIdentityMetrics
+	m.metadataRebuiltTotal.Add(1)
+	m.metadataRebuiltByCarrier[carrier].Add(1)
+}
+
+func observeOpenAICodexMetadataConflict(carrier openAICodexMetadataCarrier, count int) {
+	if !validOpenAICodexMetadataCarrier(carrier) || count <= 0 {
+		return
+	}
+	openAIOutboundSessionIdentityMetrics.metadataConflictByCarrier[carrier].Add(int64(count))
 }
 
 func observeOpenAIOAuthIdentityResolveSource(source string) {

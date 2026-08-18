@@ -25,7 +25,7 @@ const openAICodexTurnStateHeader = "x-codex-turn-state"
 
 const (
 	openAICodexTurnStateKeyDomain       = "sub2api/openai-codex-turn-state/v1"
-	openAICodexTurnStateIdentityDomain  = "sub2api/openai-codex-turn-state-identity/v1"
+	openAICodexTurnStateIdentityDomain  = "sub2api/openai-codex-turn-state-identity/v2"
 	openAICodexTurnStateLocalMaxEntries = 64 * 1024
 	openAICodexTurnStateStoreTimeout    = 500 * time.Millisecond
 )
@@ -208,7 +208,8 @@ func OpenAICodexTurnStateProvenanceKey(secret string, apiKeyID int64, state stri
 // OpenAICodexTurnStateIdentityDigest intentionally excludes projection mode,
 // endpoint aliases, beta features, and User-Agent/version. A state minted on a
 // normal Responses request must remain valid for compact and WS reconnects
-// when the installation and UUID turn tuple are unchanged.
+// when the installation, UUID session/thread tuple, and request turn_id are
+// unchanged. The timestamp is diagnostic and deliberately excluded.
 func OpenAICodexTurnStateIdentityDigest(plan OpenAIOAuthIdentityPlan) string {
 	effectiveInstallation := ""
 	if plan.InstallationEnabled {
@@ -220,6 +221,7 @@ func OpenAICodexTurnStateIdentityDigest(plan OpenAIOAuthIdentityPlan) string {
 		openAICodexTurnStateIdentityDomain,
 		effectiveInstallation,
 		strconv.FormatBool(plan.TurnIdentityEnabled),
+		strconv.FormatBool(plan.TurnIdentityRequested && openAICodexRequestTurnSnapshotValid(plan.RequestTurn)),
 	}
 	if plan.TurnIdentityEnabled {
 		parts = append(parts,
@@ -229,6 +231,9 @@ func OpenAICodexTurnStateIdentityDigest(plan OpenAIOAuthIdentityPlan) string {
 			strings.TrimSpace(plan.TurnIdentity.ForkedFromThreadID),
 			string(plan.TurnIdentity.Relation),
 		)
+	}
+	if plan.TurnIdentityRequested && openAICodexRequestTurnSnapshotValid(plan.RequestTurn) {
+		parts = append(parts, strings.TrimSpace(plan.RequestTurn.ID))
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(sum[:])

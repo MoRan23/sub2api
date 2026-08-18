@@ -241,22 +241,28 @@ func openAIWSOutboundIdentityPlanDigest(headers http.Header, plan OpenAIOAuthIde
 		fmt.Sprintf("%t", plan.TurnIdentityRequested),
 		fmt.Sprintf("%t", plan.TurnIdentityEnabled),
 		fmt.Sprintf("%t", plan.ClientIdentityEnabled),
+		normalizeOpenAIWSBetaFeatures(headers),
+		strings.TrimSpace(plan.TurnIdentity.SessionID),
+		strings.TrimSpace(plan.TurnIdentity.ThreadID),
+		strings.TrimSpace(plan.TurnIdentity.ParentThreadID),
+		strings.TrimSpace(plan.TurnIdentity.ForkedFromThreadID),
+		string(plan.TurnIdentity.Relation),
 	}
 	for _, name := range [...]string{
 		"user-agent",
 		"originator",
 		"version",
 		codexInstallationIDKey,
-		"x-codex-window-id",
 		"session-id",
 		"thread-id",
 		"x-client-request-id",
 		"x-codex-parent-thread-id",
+		"parent-thread-id",
+		"forked-from-thread-id",
 		"session_id",
 		"thread_id",
 		"conversation_id",
 		"conversation-id",
-		openAIWSTurnMetadataHeader,
 	} {
 		parts = append(parts, name)
 		values := openAIWSFinalIdentityHeaderValues(headers, name)
@@ -330,6 +336,94 @@ func applyOpenAICodexTurnIdentityHeaders(headers http.Header, identity OpenAICod
 		headers.Set("x-codex-parent-thread-id", parentThreadID)
 	}
 	applyOpenAICodexExistingTurnMetadataHeader(headers, identity)
+}
+
+type openAICodexMetadataProjection struct {
+	installationID    string
+	turnIdentity      OpenAICodexTurnIdentity
+	requestTurn       OpenAICodexRequestTurnSnapshot
+	installation      bool
+	stableTurn        bool
+	requestTurnActive bool
+}
+
+func openAICodexMetadataProjectionFromPlan(plan OpenAIOAuthIdentityPlan) openAICodexMetadataProjection {
+	return openAICodexMetadataProjection{
+		installationID: plan.InstallationID,
+		turnIdentity:   plan.TurnIdentity,
+		requestTurn:    plan.RequestTurn,
+		installation: plan.InstallationPolicy == OpenAIOAuthInstallationAccountPin &&
+			plan.InstallationEnabled && strings.TrimSpace(plan.InstallationID) != "",
+		stableTurn: plan.TurnIdentityEnabled &&
+			strings.TrimSpace(plan.TurnIdentity.SessionID) != "" &&
+			strings.TrimSpace(plan.TurnIdentity.ThreadID) != "",
+		requestTurnActive: plan.TurnIdentityRequested && openAICodexRequestTurnSnapshotValid(plan.RequestTurn),
+	}
+}
+
+func (projection openAICodexMetadataProjection) enabled() bool {
+	return projection.installation || projection.stableTurn || projection.requestTurnActive
+}
+
+func (projection openAICodexMetadataProjection) createsTurnMetadata() bool {
+	return projection.stableTurn || projection.requestTurnActive
+}
+
+func applyOpenAICodexIdentityHeadersForPlan(headers http.Header, plan OpenAIOAuthIdentityPlan, compact bool) {
+	if headers == nil {
+		return
+	}
+	projection := openAICodexMetadataProjectionFromPlan(plan)
+	if projection.installation {
+		deleteOpenAIHeaderEqualFold(headers, codexInstallationIDKey)
+		headers.Set(codexInstallationIDKey, projection.installationID)
+	}
+	if projection.stableTurn {
+		deleteOpenAICodexIdentityHeaders(headers)
+		headers.Set("session-id", projection.turnIdentity.SessionID)
+		headers.Set("thread-id", projection.turnIdentity.ThreadID)
+		if !compact {
+			headers.Set("x-client-request-id", projection.turnIdentity.ThreadID)
+		}
+		if projection.turnIdentity.ParentThreadID != "" {
+			headers.Set("x-codex-parent-thread-id", projection.turnIdentity.ParentThreadID)
+		}
+	}
+	applyOpenAICodexCanonicalTurnMetadataHeader(headers, projection, projection.createsTurnMetadata())
+}
+
+func applyOpenAICodexCanonicalTurnMetadataHeader(headers http.Header, projection openAICodexMetadataProjection, create bool) {
+	if headers == nil || !projection.enabled() {
+		return
+	}
+	values := headerValuesCaseInsensitive(headers, openAIWSTurnMetadataHeader)
+	if len(values) == 0 && !create {
+		return
+	}
+	base := "{}"
+	validValues := 0
+	for _, value := range values {
+		if isOpenAICodexTurnMetadataObject(value) {
+			validValues++
+			if validValues == 1 {
+				base = value
+			}
+		}
+	}
+	if len(values) > 0 && (validValues != len(values) || len(values) != 1) {
+		observeOpenAICodexMetadataRebuilt(openAICodexMetadataCarrierHeaderTurnMetadata)
+	}
+	rewritten, err := rewriteOpenAICodexTurnMetadataProjection(base, projection, true)
+	if err != nil {
+		return
+	}
+	deleteOpenAIHeaderEqualFold(headers, openAIWSTurnMetadataHeader)
+	headers.Set(openAIWSTurnMetadataHeader, rewritten)
+}
+
+func isOpenAICodexTurnMetadataObject(raw string) bool {
+	var metadata map[string]json.RawMessage
+	return json.Unmarshal([]byte(strings.TrimSpace(raw)), &metadata) == nil && metadata != nil
 }
 
 func deleteOpenAICodexIdentityHeaders(headers http.Header) {
@@ -442,6 +536,140 @@ func mergeOpenAICodexTurnIdentityBody(body []byte, identity OpenAICodexTurnIdent
 	return out, nil
 }
 
+func mergeOpenAICodexIdentityBodyForPlan(body []byte, plan OpenAIOAuthIdentityPlan, existingOnly bool) ([]byte, error) {
+	if len(body) == 0 || !utf8.Valid(body) {
+		return body, nil
+	}
+	projection := openAICodexMetadataProjectionFromPlan(plan)
+	if !projection.enabled() {
+		return body, nil
+	}
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(body, &root); err != nil || root == nil {
+		if existingOnly {
+			return body, nil
+		}
+		if err == nil {
+			err = errors.New("expected object")
+		}
+		return body, fmt.Errorf("decode OpenAI Codex identity body: %w", err)
+	}
+
+	metadata := make(map[string]json.RawMessage)
+	metadataPresent := false
+	metadataObject := false
+	if raw, present := root["client_metadata"]; present {
+		metadataPresent = true
+		if json.Unmarshal(raw, &metadata) == nil && metadata != nil {
+			metadataObject = true
+		} else {
+			metadata = make(map[string]json.RawMessage)
+			if !existingOnly {
+				observeOpenAICodexMetadataRebuilt(openAICodexMetadataCarrierClientMetadataContainer)
+			}
+		}
+	}
+	metadataWritable := metadataObject || (!existingOnly && (metadataPresent || projection.enabled()))
+	metadataModified := metadataWritable && !metadataObject
+	if metadataWritable {
+		if !existingOnly {
+			if projection.installation {
+				metadata[codexInstallationIDKey] = mustMarshalJSONString(projection.installationID)
+				metadataModified = true
+			}
+			if projection.stableTurn {
+				deleteOpenAICodexFlatTurnAliases(metadata)
+				metadata["session_id"] = mustMarshalJSONString(projection.turnIdentity.SessionID)
+				metadata["thread_id"] = mustMarshalJSONString(projection.turnIdentity.ThreadID)
+				if projection.turnIdentity.ParentThreadID != "" {
+					metadata["parent_thread_id"] = mustMarshalJSONString(projection.turnIdentity.ParentThreadID)
+				}
+				if projection.turnIdentity.ForkedFromThreadID != "" {
+					metadata["forked_from_thread_id"] = mustMarshalJSONString(projection.turnIdentity.ForkedFromThreadID)
+				}
+				metadataModified = true
+			}
+			if projection.requestTurnActive {
+				metadata["turn_id"] = mustMarshalJSONString(projection.requestTurn.ID)
+				metadata["turn_started_at_unix_ms"] = json.RawMessage(strconv.FormatInt(projection.requestTurn.StartedAtUnixMS, 10))
+				metadataModified = true
+			}
+		}
+
+		rawNested, nestedPresent := metadata[openAIWSTurnMetadataHeader]
+		if nestedPresent || (!existingOnly && projection.createsTurnMetadata()) {
+			base := "{}"
+			if nestedPresent {
+				if candidate, valid := normalizeOpenAICodexNestedTurnMetadataObject(rawNested); valid {
+					base = candidate
+				} else {
+					observeOpenAICodexMetadataRebuilt(openAICodexMetadataCarrierClientTurnMetadata)
+				}
+			} else if rawRoot, present := root[openAIWSTurnMetadataHeader]; present {
+				if candidate := normalizeOpenAICodexTurnMetadataRaw(rawRoot); candidate != "" && isOpenAICodexTurnMetadataObject(candidate) {
+					base = candidate
+				}
+			}
+			rewritten, err := rewriteOpenAICodexTurnMetadataProjection(base, projection, true)
+			if err != nil {
+				return body, err
+			}
+			metadata[openAIWSTurnMetadataHeader] = mustMarshalJSONString(rewritten)
+			metadataModified = true
+		}
+	}
+
+	rootModified := false
+	if projection.requestTurnActive {
+		_, hasTurnID := root["turn_id"]
+		_, hasTurnStartedAt := root["turn_started_at_unix_ms"]
+		if hasTurnID || hasTurnStartedAt {
+			root["turn_id"] = mustMarshalJSONString(projection.requestTurn.ID)
+			root["turn_started_at_unix_ms"] = json.RawMessage(strconv.FormatInt(projection.requestTurn.StartedAtUnixMS, 10))
+			rootModified = true
+		}
+	}
+	if rawRoot, present := root[openAIWSTurnMetadataHeader]; present {
+		base := normalizeOpenAICodexTurnMetadataRaw(rawRoot)
+		if !isOpenAICodexTurnMetadataObject(base) {
+			base = "{}"
+			observeOpenAICodexMetadataRebuilt(openAICodexMetadataCarrierBodyTurnMetadata)
+		}
+		rewritten, err := rewriteOpenAICodexTurnMetadataProjection(base, projection, true)
+		if err != nil {
+			return body, err
+		}
+		root[openAIWSTurnMetadataHeader] = mustMarshalJSONString(rewritten)
+		rootModified = true
+	}
+	if metadataModified {
+		encodedMetadata, err := marshalJSONWithoutHTMLEscape(metadata)
+		if err != nil {
+			return body, fmt.Errorf("encode OpenAI Codex client metadata: %w", err)
+		}
+		root["client_metadata"] = encodedMetadata
+		rootModified = true
+	}
+	if !rootModified {
+		return body, nil
+	}
+	out, err := marshalJSONWithoutHTMLEscape(root)
+	if err != nil {
+		return body, fmt.Errorf("encode OpenAI Codex identity body: %w", err)
+	}
+	return out, nil
+}
+
+func deleteOpenAICodexFlatTurnAliases(metadata map[string]json.RawMessage) {
+	for _, field := range []string{
+		"session_id", "session-id", "thread_id", "thread-id",
+		"conversation_id", "conversation-id", "parent_thread_id", "parent-thread-id",
+		"forked_from_thread_id", "forked-from-thread-id", "x-codex-parent-thread-id",
+	} {
+		delete(metadata, field)
+	}
+}
+
 // mergeOpenAIOAuthPassthroughIdentityBody applies the account-owned identity
 // without re-encoding the entire Responses payload. Only client_metadata and
 // an existing top-level turn-metadata carrier may change; all other bytes are
@@ -451,116 +679,105 @@ func mergeOpenAIOAuthPassthroughIdentityBody(body []byte, plan OpenAIOAuthIdenti
 		return body, nil
 	}
 
-	projectInstallation := plan.InstallationPolicy == OpenAIOAuthInstallationAccountPin &&
-		plan.InstallationEnabled && strings.TrimSpace(plan.InstallationID) != ""
-	projectTurn := plan.TurnIdentityEnabled &&
-		strings.TrimSpace(plan.TurnIdentity.SessionID) != "" &&
-		strings.TrimSpace(plan.TurnIdentity.ThreadID) != ""
-	if !projectInstallation && !projectTurn {
+	projection := openAICodexMetadataProjectionFromPlan(plan)
+	if !projection.enabled() {
 		return body, nil
 	}
 
 	out := body
 	clientMetadata := gjson.GetBytes(out, "client_metadata")
-	metadataWritable := !clientMetadata.Exists() || clientMetadata.IsObject()
-	if metadataWritable {
-		metadata := make(map[string]json.RawMessage)
-		if clientMetadata.IsObject() {
-			if err := json.Unmarshal([]byte(clientMetadata.Raw), &metadata); err != nil {
-				return body, fmt.Errorf("decode OpenAI OAuth passthrough client_metadata: %w", err)
-			}
+	metadata := make(map[string]json.RawMessage)
+	if clientMetadata.IsObject() {
+		if err := json.Unmarshal([]byte(clientMetadata.Raw), &metadata); err != nil {
+			return body, fmt.Errorf("decode OpenAI OAuth passthrough client_metadata: %w", err)
 		}
-
-		if projectInstallation {
-			metadata[codexInstallationIDKey] = mustMarshalJSONString(plan.InstallationID)
-		}
-		if projectTurn {
-			for _, field := range []string{
-				"session_id", "session-id", "thread_id", "thread-id",
-				"conversation_id", "conversation-id", "parent_thread_id",
-				"forked_from_thread_id", "x-codex-parent-thread-id",
-			} {
-				delete(metadata, field)
-			}
-			metadata["session_id"] = mustMarshalJSONString(plan.TurnIdentity.SessionID)
-			metadata["thread_id"] = mustMarshalJSONString(plan.TurnIdentity.ThreadID)
-			if plan.TurnIdentity.ParentThreadID != "" {
-				metadata["x-codex-parent-thread-id"] = mustMarshalJSONString(plan.TurnIdentity.ParentThreadID)
-			}
-		}
-
-		if raw, present := metadata[openAIWSTurnMetadataHeader]; present {
-			if rewritten, changed := rewriteOpenAIOAuthPassthroughTurnMetadata(
-				normalizeOpenAICodexTurnMetadataRaw(raw), plan, projectInstallation, projectTurn,
-			); changed {
-				metadata[openAIWSTurnMetadataHeader] = mustMarshalJSONString(rewritten)
-			}
-		} else if projectTurn {
-			turnMetadata := ""
-			rootMetadata := gjson.GetBytes(out, openAIWSTurnMetadataHeader)
-			rootMetadataPresent := rootMetadata.Exists()
-			if rootMetadataPresent {
-				turnMetadata = normalizeOpenAICodexTurnMetadataRaw(json.RawMessage(rootMetadata.Raw))
-			}
-			if rewritten, changed := rewriteOpenAIOAuthPassthroughTurnMetadata(
-				turnMetadata, plan, projectInstallation, true,
-			); changed || !rootMetadataPresent {
-				metadata[openAIWSTurnMetadataHeader] = mustMarshalJSONString(rewritten)
-			}
-		}
-
-		encodedMetadata, err := marshalJSONWithoutHTMLEscape(metadata)
-		if err != nil {
-			return body, fmt.Errorf("encode OpenAI OAuth passthrough client_metadata: %w", err)
-		}
-		out, err = sjson.SetRawBytes(out, "client_metadata", encodedMetadata)
-		if err != nil {
-			return body, fmt.Errorf("splice OpenAI OAuth passthrough client_metadata: %w", err)
-		}
+	} else if clientMetadata.Exists() {
+		observeOpenAICodexMetadataRebuilt(openAICodexMetadataCarrierClientMetadataContainer)
 	}
 
-	if projectTurn || projectInstallation {
-		rootMetadata := gjson.GetBytes(out, openAIWSTurnMetadataHeader)
-		if rootMetadata.Exists() {
-			raw := normalizeOpenAICodexTurnMetadataRaw(json.RawMessage(rootMetadata.Raw))
-			if rewritten, changed := rewriteOpenAIOAuthPassthroughTurnMetadata(
-				raw, plan, projectInstallation, projectTurn,
-			); changed {
-				var setErr error
-				out, setErr = sjson.SetBytes(out, openAIWSTurnMetadataHeader, rewritten)
-				if setErr != nil {
-					return body, fmt.Errorf("splice OpenAI OAuth passthrough turn metadata: %w", setErr)
+	if projection.installation {
+		metadata[codexInstallationIDKey] = mustMarshalJSONString(projection.installationID)
+	}
+	if projection.stableTurn {
+		deleteOpenAICodexFlatTurnAliases(metadata)
+		metadata["session_id"] = mustMarshalJSONString(projection.turnIdentity.SessionID)
+		metadata["thread_id"] = mustMarshalJSONString(projection.turnIdentity.ThreadID)
+		if projection.turnIdentity.ParentThreadID != "" {
+			metadata["parent_thread_id"] = mustMarshalJSONString(projection.turnIdentity.ParentThreadID)
+		}
+		if projection.turnIdentity.ForkedFromThreadID != "" {
+			metadata["forked_from_thread_id"] = mustMarshalJSONString(projection.turnIdentity.ForkedFromThreadID)
+		}
+	}
+	if projection.requestTurnActive {
+		metadata["turn_id"] = mustMarshalJSONString(projection.requestTurn.ID)
+		metadata["turn_started_at_unix_ms"] = json.RawMessage(strconv.FormatInt(projection.requestTurn.StartedAtUnixMS, 10))
+	}
+
+	rawNested, nestedPresent := metadata[openAIWSTurnMetadataHeader]
+	if nestedPresent || projection.createsTurnMetadata() {
+		base := "{}"
+		if nestedPresent {
+			if candidate, valid := normalizeOpenAICodexNestedTurnMetadataObject(rawNested); valid {
+				base = candidate
+			} else {
+				observeOpenAICodexMetadataRebuilt(openAICodexMetadataCarrierClientTurnMetadata)
+			}
+		} else {
+			rootMetadata := gjson.GetBytes(out, openAIWSTurnMetadataHeader)
+			if rootMetadata.Exists() {
+				if candidate := normalizeOpenAICodexTurnMetadataRaw(json.RawMessage(rootMetadata.Raw)); isOpenAICodexTurnMetadataObject(candidate) {
+					base = candidate
 				}
 			}
 		}
-	}
-
-	return out, nil
-}
-
-func rewriteOpenAIOAuthPassthroughTurnMetadata(
-	raw string,
-	plan OpenAIOAuthIdentityPlan,
-	projectInstallation bool,
-	projectTurn bool,
-) (string, bool) {
-	rewritten := raw
-	changed := false
-	if projectTurn {
-		withTurn, err := rewriteOpenAICodexTurnMetadata(rewritten, plan.TurnIdentity)
+		rewritten, err := rewriteOpenAICodexTurnMetadataProjection(base, projection, true)
 		if err != nil {
-			return raw, false
+			return body, err
 		}
-		rewritten = withTurn
-		changed = true
+		metadata[openAIWSTurnMetadataHeader] = mustMarshalJSONString(rewritten)
 	}
-	if projectInstallation {
-		if withInstallation, installationChanged := rewriteCodexTurnMetadataInstallationID(rewritten, plan.InstallationID); installationChanged {
-			rewritten = withInstallation
-			changed = true
+
+	encodedMetadata, err := marshalJSONWithoutHTMLEscape(metadata)
+	if err != nil {
+		return body, fmt.Errorf("encode OpenAI OAuth passthrough client_metadata: %w", err)
+	}
+	out, err = sjson.SetRawBytes(out, "client_metadata", encodedMetadata)
+	if err != nil {
+		return body, fmt.Errorf("splice OpenAI OAuth passthrough client_metadata: %w", err)
+	}
+	if projection.requestTurnActive {
+		rootTurnID := gjson.GetBytes(out, "turn_id")
+		rootTurnStartedAt := gjson.GetBytes(out, "turn_started_at_unix_ms")
+		if rootTurnID.Exists() || rootTurnStartedAt.Exists() {
+			out, err = sjson.SetBytes(out, "turn_id", projection.requestTurn.ID)
+			if err != nil {
+				return body, fmt.Errorf("splice OpenAI OAuth passthrough turn_id: %w", err)
+			}
+			out, err = sjson.SetBytes(out, "turn_started_at_unix_ms", projection.requestTurn.StartedAtUnixMS)
+			if err != nil {
+				return body, fmt.Errorf("splice OpenAI OAuth passthrough turn_started_at_unix_ms: %w", err)
+			}
 		}
 	}
-	return rewritten, changed
+
+	rootMetadata := gjson.GetBytes(out, openAIWSTurnMetadataHeader)
+	if rootMetadata.Exists() {
+		base := normalizeOpenAICodexTurnMetadataRaw(json.RawMessage(rootMetadata.Raw))
+		if !isOpenAICodexTurnMetadataObject(base) {
+			base = "{}"
+			observeOpenAICodexMetadataRebuilt(openAICodexMetadataCarrierBodyTurnMetadata)
+		}
+		rewritten, rewriteErr := rewriteOpenAICodexTurnMetadataProjection(base, projection, true)
+		if rewriteErr != nil {
+			return body, rewriteErr
+		}
+		out, err = sjson.SetBytes(out, openAIWSTurnMetadataHeader, rewritten)
+		if err != nil {
+			return body, fmt.Errorf("splice OpenAI OAuth passthrough turn metadata: %w", err)
+		}
+	}
+	return out, nil
 }
 
 func normalizeOpenAICodexTurnMetadataRaw(raw json.RawMessage) string {
@@ -578,27 +795,60 @@ func normalizeOpenAICodexTurnMetadataRaw(raw json.RawMessage) string {
 	return trimmed
 }
 
+func normalizeOpenAICodexNestedTurnMetadataObject(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 || !utf8.Valid(raw) {
+		return "", false
+	}
+	var encoded string
+	if json.Unmarshal(raw, &encoded) != nil {
+		return "", false
+	}
+	encoded = strings.TrimSpace(encoded)
+	return encoded, isOpenAICodexTurnMetadataObject(encoded)
+}
+
 func rewriteOpenAICodexTurnMetadata(raw string, identity OpenAICodexTurnIdentity) (string, error) {
+	return rewriteOpenAICodexTurnMetadataProjection(raw, openAICodexMetadataProjection{
+		turnIdentity: identity,
+		stableTurn:   strings.TrimSpace(identity.SessionID) != "" && strings.TrimSpace(identity.ThreadID) != "",
+	}, false)
+}
+
+func rewriteOpenAICodexTurnMetadataProjection(raw string, projection openAICodexMetadataProjection, rebuildInvalid bool) (string, error) {
 	metadata := make(map[string]json.RawMessage)
 	trimmed := strings.TrimSpace(raw)
 	if trimmed != "" {
 		if err := json.Unmarshal([]byte(trimmed), &metadata); err != nil || metadata == nil {
-			return "", errors.New("decode OpenAI Codex turn metadata: expected JSON object")
+			if !rebuildInvalid {
+				return "", errors.New("decode OpenAI Codex turn metadata: expected JSON object")
+			}
+			metadata = make(map[string]json.RawMessage)
 		}
 	}
-	for _, field := range []string{
-		"session_id", "session-id", "thread_id", "thread-id",
-		"conversation_id", "conversation-id", "parent_thread_id", "forked_from_thread_id",
-	} {
-		delete(metadata, field)
+	if projection.installation {
+		delete(metadata, codexInstallationIDKey)
+		metadata[codexTurnMetadataInstallationIDKey] = mustMarshalJSONString(projection.installationID)
 	}
-	metadata["session_id"] = mustMarshalJSONString(identity.SessionID)
-	metadata["thread_id"] = mustMarshalJSONString(identity.ThreadID)
-	if identity.ParentThreadID != "" {
-		metadata["parent_thread_id"] = mustMarshalJSONString(identity.ParentThreadID)
+	if projection.stableTurn {
+		for _, field := range []string{
+			"session_id", "session-id", "thread_id", "thread-id",
+			"conversation_id", "conversation-id", "parent_thread_id", "parent-thread-id",
+			"forked_from_thread_id", "forked-from-thread-id", "x-codex-parent-thread-id",
+		} {
+			delete(metadata, field)
+		}
+		metadata["session_id"] = mustMarshalJSONString(projection.turnIdentity.SessionID)
+		metadata["thread_id"] = mustMarshalJSONString(projection.turnIdentity.ThreadID)
+		if projection.turnIdentity.ParentThreadID != "" {
+			metadata["parent_thread_id"] = mustMarshalJSONString(projection.turnIdentity.ParentThreadID)
+		}
+		if projection.turnIdentity.ForkedFromThreadID != "" {
+			metadata["forked_from_thread_id"] = mustMarshalJSONString(projection.turnIdentity.ForkedFromThreadID)
+		}
 	}
-	if identity.ForkedFromThreadID != "" {
-		metadata["forked_from_thread_id"] = mustMarshalJSONString(identity.ForkedFromThreadID)
+	if projection.requestTurnActive {
+		metadata["turn_id"] = mustMarshalJSONString(projection.requestTurn.ID)
+		metadata["turn_started_at_unix_ms"] = json.RawMessage(strconv.FormatInt(projection.requestTurn.StartedAtUnixMS, 10))
 	}
 	encoded, err := marshalJSONWithoutHTMLEscape(metadata)
 	if err != nil {

@@ -615,6 +615,38 @@ func TestOpenAIWSOutboundIdentityHeaderValueForLogUsesDigest(t *testing.T) {
 	require.Equal(t, identity.SessionID, openAIWSOutboundIdentityHeaderValueForLog(headers, "session-id", ""))
 }
 
+func TestOpenAIWSOutboundIdentityPlanDigestIgnoresRequestTurnFields(t *testing.T) {
+	first := http.Header{openAIWSTurnMetadataHeader: {
+		`{"installation_id":"stable-install","session_id":"stable-session","thread_id":"stable-thread","turn_id":"01989f44-7c00-7000-8000-000000000021","turn_started_at_unix_ms":1777777777001,"sandbox":"seatbelt","unknown":"one"}`,
+	}}
+	second := http.Header{openAIWSTurnMetadataHeader: {
+		`{"installation_id":"other-raw-install","session_id":"other-raw-session","thread_id":"other-raw-thread","turn_id":"01989f44-7c00-7000-8000-000000000022","turn_started_at_unix_ms":1777777777002,"sandbox":"different","unknown":"two"}`,
+	}}
+	first.Set("x-codex-window-id", "window-a")
+	second.Set("x-codex-window-id", "window-b")
+	plan := OpenAIOAuthIdentityPlan{
+		TurnIdentityRequested: true,
+		InstallationPolicy:    OpenAIOAuthInstallationAccountPin,
+		TurnIdentityEnabled:   true,
+		TurnIdentity: OpenAICodexTurnIdentity{
+			SessionID: "stable-session",
+			ThreadID:  "stable-thread",
+			Relation:  OpenAICodexTurnRelationRoot,
+		},
+	}
+	require.Equal(t,
+		openAIWSOutboundIdentityPlanDigest(first, plan),
+		openAIWSOutboundIdentityPlanDigest(second, plan),
+	)
+
+	stableChanged := plan
+	stableChanged.TurnIdentity.ThreadID = "other-stable-thread"
+	require.NotEqual(t,
+		openAIWSOutboundIdentityPlanDigest(first, plan),
+		openAIWSOutboundIdentityPlanDigest(second, stableChanged),
+	)
+}
+
 func TestOpenAIWSOutboundIdentityPlanDigestCoversCompleteHandshakeFingerprint(t *testing.T) {
 	materialize := func(t *testing.T, input http.Header, plan OpenAIOAuthIdentityPlan) (http.Header, string) {
 		t.Helper()

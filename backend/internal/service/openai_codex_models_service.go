@@ -322,10 +322,10 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	}
 	headers.Set("Accept", "application/json")
 	if useAPIKeyUpstream {
-		identity := resolveCodexOutboundIdentity(credAccount.GetOpenAIUserAgent())
-		headers.Set("Originator", identity.originator)
+		identity := resolveCodexClientIdentityPlan(CodexClientIdentitySafePair, credAccount.GetOpenAIUserAgent())
+		headers.Set("Originator", identity.Originator)
 		headers.Set("Version", clientVersion)
-		headers.Set("User-Agent", identity.userAgent)
+		headers.Set("User-Agent", identity.UserAgent)
 	} else {
 		headers.Set("Originator", clientIdentity.Originator)
 		headers.Set("Version", clientIdentity.Version)
