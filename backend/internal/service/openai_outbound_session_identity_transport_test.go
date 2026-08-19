@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -103,6 +104,53 @@ func TestOpenAIOutboundSessionIdentityTransportEnabledRequestSnapshot(t *testing
 	repo.mu.Unlock()
 	settings.InvalidateOpenAIUUIDv7SessionIdentityCache()
 	require.True(t, svc.openAIOutboundSessionIdentityTransportEnabledForRequest(context.Background(), nil))
+}
+
+func TestApplyOpenAIOAuthIdentityPlanInstallationOnlyPreservesMemoryTurnMetadata(t *testing.T) {
+	const installationID = "77777777-7777-4777-8777-777777777777"
+	nested := `{"installation_id":"client-installation","request_kind":"memory","session_id":"client-session","thread_id":"client-thread","turn_id":"` + codexWireTestTurn + `","turn_started_at_unix_ms":1777777777123,"parent_thread_id":"client-parent","forked_from_thread_id":"client-fork","custom":"keep"}`
+	body := []byte(`{"model":"gpt-5.6-sol","client_metadata":{"x-codex-installation-id":"client-installation","turn_id":"` + codexWireTestTurn + `","x-codex-turn-metadata":` + strconv.Quote(nested) + `},"x-codex-turn-metadata":` + strconv.Quote(nested) + `}`)
+	headers := http.Header{
+		codexInstallationIDKey:     {"client-installation"},
+		openAIWSTurnMetadataHeader: {nested},
+	}
+	capture := CaptureOpenAIOAuthIdentity(nil, body, "")
+	require.Equal(t, CodexWireRequestMemory, capture.WireProfile.RequestKind)
+	plan := OpenAIOAuthIdentityPlan{
+		Capture:               capture,
+		WireProfile:           capture.WireProfile,
+		ProjectionMode:        OpenAIOAuthIdentityProjectionRegular,
+		InstallationPolicy:    OpenAIOAuthInstallationAccountPin,
+		InstallationEnabled:   true,
+		InstallationID:        installationID,
+		TurnIdentityRequested: false,
+		TurnIdentityEnabled:   false,
+	}
+
+	out, err := ApplyOpenAIOAuthIdentityPlan(headers, body, plan)
+	require.NoError(t, err)
+	require.Equal(t, installationID, headers.Get(codexInstallationIDKey))
+	headerMetadata := gjson.Parse(headers.Get(openAIWSTurnMetadataHeader))
+	require.Equal(t, installationID, headerMetadata.Get("installation_id").String())
+	require.Equal(t, "memory", headerMetadata.Get("request_kind").String())
+	require.Equal(t, codexWireTestTurn, headerMetadata.Get("turn_id").String())
+	require.Equal(t, int64(1777777777123), headerMetadata.Get("turn_started_at_unix_ms").Int())
+	require.Equal(t, "client-parent", headerMetadata.Get("parent_thread_id").String())
+	require.Equal(t, "client-fork", headerMetadata.Get("forked_from_thread_id").String())
+	require.Equal(t, "keep", headerMetadata.Get("custom").String())
+
+	require.Equal(t, installationID, gjson.GetBytes(out, "client_metadata.x-codex-installation-id").String())
+	require.Equal(t, codexWireTestTurn, gjson.GetBytes(out, "client_metadata.turn_id").String())
+	for _, path := range []string{"client_metadata.x-codex-turn-metadata", "x-codex-turn-metadata"} {
+		projected := gjson.GetBytes(out, path).String()
+		require.Equal(t, installationID, gjson.Get(projected, "installation_id").String(), path)
+		require.Equal(t, "memory", gjson.Get(projected, "request_kind").String(), path)
+		require.Equal(t, codexWireTestTurn, gjson.Get(projected, "turn_id").String(), path)
+		require.Equal(t, int64(1777777777123), gjson.Get(projected, "turn_started_at_unix_ms").Int(), path)
+		require.Equal(t, "client-parent", gjson.Get(projected, "parent_thread_id").String(), path)
+		require.Equal(t, "client-fork", gjson.Get(projected, "forked_from_thread_id").String(), path)
+		require.Equal(t, "keep", gjson.Get(projected, "custom").String(), path)
+	}
 }
 
 func TestBuildUpstreamRequestCompatBridgeMaterializesPlanAndDefersProjection(t *testing.T) {
@@ -644,6 +692,32 @@ func TestOpenAIWSOutboundIdentityPlanDigestIgnoresRequestTurnFields(t *testing.T
 	require.NotEqual(t,
 		openAIWSOutboundIdentityPlanDigest(first, plan),
 		openAIWSOutboundIdentityPlanDigest(second, stableChanged),
+	)
+}
+
+func TestOpenAIWSOutboundIdentityPlanDigestIncludesMemoryHandshakeHeaders(t *testing.T) {
+	plan := OpenAIOAuthIdentityPlan{
+		TurnIdentityRequested: true,
+		TurnIdentityEnabled:   true,
+		TurnIdentity: OpenAICodexTurnIdentity{
+			SessionID: "stable-session", ThreadID: "stable-thread", Relation: OpenAICodexTurnRelationRoot,
+		},
+	}
+	base := http.Header{}
+	memgen := base.Clone()
+	memgen.Set("x-openai-memgen-request", "true")
+	require.NotEqual(t,
+		openAIWSOutboundIdentityPlanDigest(base, plan),
+		openAIWSOutboundIdentityPlanDigest(memgen, plan),
+	)
+
+	guardian := memgen.Clone()
+	guardian.Set("x-openai-subagent", "guardian")
+	memory := memgen.Clone()
+	memory.Set("x-openai-subagent", "memory_consolidation")
+	require.NotEqual(t,
+		openAIWSOutboundIdentityPlanDigest(guardian, plan),
+		openAIWSOutboundIdentityPlanDigest(memory, plan),
 	)
 }
 

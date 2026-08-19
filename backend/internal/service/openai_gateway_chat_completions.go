@@ -70,7 +70,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
 	if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
-		SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, body, promptCacheKey))
+		SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentityForCompatTurn(c, body, promptCacheKey))
 	}
 	beginUpstreamResponseModelObservation(c)
 

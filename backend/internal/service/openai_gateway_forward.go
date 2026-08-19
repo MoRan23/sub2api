@@ -25,6 +25,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			// again as callerSeed would misclassify its source and priority.
 			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, body, ""))
 		}
+		if kindErr := s.validateOpenAICodexHTTPMemoryRequestShapeForAccount(ctx, c, account); kindErr != nil {
+			setOpsUpstreamError(c, http.StatusBadRequest, kindErr.Error(), "")
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+				"type": "invalid_request_error", "message": kindErr.Error(), "param": "client_metadata",
+			}})
+			return nil, kindErr
+		}
 	}
 	beginUpstreamResponseModelObservation(c)
 	clearGrokResponsesClientToolMapping(c)
@@ -1247,15 +1254,15 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 			return nil, errors.New("final openai OAuth identity plan is missing")
 		}
 		fields := gjson.GetManyBytes(body, "model", "service_tier")
-		requestKind := "turn"
-		if identityPlan.ProjectionMode == OpenAIOAuthIdentityProjectionCompact {
-			requestKind = "compaction"
+		requestKind, kindErr := openAICodexHTTPWireRequestKind(c, identityPlan)
+		if kindErr != nil {
+			return nil, kindErr
 		}
 		finalBody, finalizeErr := s.FinalizeOpenAIOAuthResponsesRequest(c, account, req, body, OpenAIOAuthResponsesFinalizeOptions{
 			Plan:             identityPlan,
 			FinalModel:       fields[0].String(),
 			FinalServiceTier: fields[1].String(),
-			RequestKind:      requestKind,
+			RequestKind:      string(requestKind),
 			Transport:        "http",
 		})
 		if finalizeErr != nil {
@@ -1267,6 +1274,62 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 	}
 
 	return req, nil
+}
+
+func (s *OpenAIGatewayService) validateOpenAICodexHTTPMemoryRequestShapeForAccount(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+) error {
+	if !s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account) {
+		return nil
+	}
+	return validateOpenAICodexHTTPMemoryRequestShape(c)
+}
+
+func validateOpenAICodexHTTPMemoryRequestShape(c *gin.Context) error {
+	capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
+	if !captured || capture.WireProfile.RequestKind != CodexWireRequestMemory {
+		return nil
+	}
+	forced := CodexWireRequestKind("")
+	if isOpenAIResponsesCompactPath(c) || isOpenAINativeCompactionV2(c) {
+		forced = CodexWireRequestCompaction
+	}
+	_, err := resolveOpenAICodexWireRequestKind(CodexWireRequestMemory, CodexWireRequestTurn, forced)
+	return err
+}
+
+func openAICodexHTTPWireRequestKind(c *gin.Context, plan OpenAIOAuthIdentityPlan) (CodexWireRequestKind, error) {
+	captured := CodexWireRequestKind("")
+	if plan.TurnIdentityRequested &&
+		(isBareOpenAICodexResponsesPath(c) || isOpenAIResponsesCompactPath(c)) &&
+		plan.WireProfile.RequestKind == CodexWireRequestMemory {
+		captured = CodexWireRequestMemory
+	}
+	forced := CodexWireRequestKind("")
+	if plan.ProjectionMode == OpenAIOAuthIdentityProjectionCompact ||
+		isOpenAIResponsesCompactPath(c) || isOpenAINativeCompactionV2(c) {
+		forced = CodexWireRequestCompaction
+	} else if !isBareOpenAICodexResponsesPath(c) {
+		// Messages/Chat compatibility bridges and synthetic callers have their
+		// own explicit request kind. Never promote compatibility metadata from
+		// those routes into a memory request.
+		forced = CodexWireRequestTurn
+	}
+	return resolveOpenAICodexWireRequestKind(captured, CodexWireRequestTurn, forced)
+}
+
+func isBareOpenAICodexResponsesPath(c *gin.Context) bool {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return false
+	}
+	switch strings.TrimRight(strings.TrimSpace(c.Request.URL.Path), "/") {
+	case "/v1/responses", "/openai/v1/responses", "/responses", "/backend-api/codex/responses":
+		return true
+	default:
+		return false
+	}
 }
 
 // codexIdentityOverrideUA 返回账号级显式配置的出站 User-Agent，供强制统一身份时作为覆写来源。

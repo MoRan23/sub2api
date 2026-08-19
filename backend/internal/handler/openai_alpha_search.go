@@ -69,7 +69,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		return
 	}
 	searchID := strings.TrimSpace(gjson.GetBytes(body, "id").String())
-	service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentityWithEndpointAlias(c, body, searchID))
+	service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentityForAlphaSearch(c, body, searchID))
 
 	modelResult := gjson.GetBytes(body, "model")
 	if !modelResult.Exists() || modelResult.Type != gjson.String || strings.TrimSpace(modelResult.String()) == "" {

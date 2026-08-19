@@ -8,6 +8,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestEnsureOpenAIOAuthIdentityCaptureFallback(t *testing.T) {
@@ -58,4 +59,46 @@ func TestEnsureOpenAIOAuthIdentityCaptureFallback(t *testing.T) {
 		require.Equal(t, before.InvalidMetadataCount, after.InvalidMetadataCount)
 		require.Equal(t, "gateway-hash", after.Logical.SessionKey)
 	})
+}
+
+func TestCompatHandlerPreCaptureForcesTurnBeforeFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.6-sol","client_metadata":{"x-codex-turn-metadata":"{\"request_kind\":\"memory\",\"custom\":\"keep\"}"}}`)
+
+	for _, endpoint := range []string{"/v1/chat/completions", "/v1/messages"} {
+		t.Run(endpoint, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, endpoint, nil)
+			service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentityForCompatTurn(c, body, ""))
+
+			before, ok := service.OpenAIOAuthIdentityCaptureFromContext(c)
+			require.True(t, ok)
+			require.Equal(t, service.CodexWireRequestTurn, before.WireProfile.RequestKind)
+			typedTurnID, valid := service.ResolveCodexTurnID(before.RequestTurn.ID, service.CodexWireRequestTurn)
+			require.True(t, valid)
+			require.Equal(t, service.CodexTurnIDUserUUIDv7, typedTurnID.Kind)
+
+			ensureOpenAIOAuthIdentityCaptureFallback(c, "derived-prompt-seed")
+			after, ok := service.OpenAIOAuthIdentityCaptureFromContext(c)
+			require.True(t, ok)
+			require.Equal(t, "derived-prompt-seed", after.Logical.SessionKey)
+			require.Equal(t, before.RequestTurn, after.RequestTurn)
+			require.Equal(t, service.CodexWireRequestTurn, after.WireProfile.RequestKind)
+
+			plan, err := service.FinalizeOpenAICodexWirePlan(service.OpenAIOAuthIdentityPlan{
+				Capture:               after,
+				RequestTurn:           after.RequestTurn,
+				WireProfile:           after.WireProfile,
+				TurnIdentityRequested: true,
+				ProjectionMode:        service.OpenAIOAuthIdentityProjectionRegular,
+				InstallationPolicy:    service.OpenAIOAuthInstallationPreserve,
+			}, string(service.CodexWireRequestTurn), service.CodexModelCapabilities{})
+			require.NoError(t, err)
+			out, err := service.ApplyOpenAIOAuthIdentityPlan(http.Header{}, body, plan)
+			require.NoError(t, err)
+			nested := gjson.GetBytes(out, "client_metadata.x-codex-turn-metadata").String()
+			require.Equal(t, "turn", gjson.Get(nested, "request_kind").String())
+			require.Equal(t, after.RequestTurn.ID, gjson.Get(nested, "turn_id").String())
+		})
+	}
 }

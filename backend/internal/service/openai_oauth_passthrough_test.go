@@ -220,12 +220,12 @@ func TestOpenAIGatewayService_OAuthMessagesBridgeDoesNotInjectDefaultInstruction
 	require.Nil(t, result)
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "", gjson.GetBytes(upstream.lastBody, "instructions").String())
-	require.False(t, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").Exists())
 	identity := OpenAIOutboundSessionIdentity{
 		SessionID: upstream.lastReq.Header.Get("session-id"),
 		ThreadID:  upstream.lastReq.Header.Get("thread-id"),
 	}
 	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(identity))
+	require.Equal(t, identity.SessionID, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
 	require.Empty(t, upstream.lastReq.Header.Get("Session_Id"))
 	require.Empty(t, upstream.lastReq.Header.Get("Conversation_Id"))
 	require.Empty(t, upstream.lastReq.Header.Get("OpenAI-Beta"))

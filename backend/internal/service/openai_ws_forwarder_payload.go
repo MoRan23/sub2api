@@ -176,6 +176,8 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 			"session-id",
 			"thread-id",
 			"x-client-request-id",
+			"x-openai-memgen-request",
+			"x-openai-subagent",
 		} {
 			values, present := c.Request.Header[http.CanonicalHeaderKey(name)]
 			if !present {
@@ -424,6 +426,18 @@ func captureOpenAIWSFrameIdentity(payload []byte, currentPlan *OpenAIOAuthIdenti
 		stable := cloneOpenAIOAuthIdentityCapture(currentPlan.Capture)
 		stable.RequestTurn = capture.RequestTurn
 		stable.WireProfile = frameWireProfile
+		// The initial frame parser may have classified a prompt-only frame as a
+		// default because it temporarily used that key as its logical fallback.
+		// Once the connection tuple is inherited, classify the same raw frame
+		// again against the stable session/aliases so a real override keeps its
+		// owner-scoped semantics.
+		stable.PromptCacheKey = captureOpenAICodexPromptCacheKey(
+			payload,
+			stable.Logical,
+			stable.Aliases,
+			frameWireProfile,
+			capture.PromptCacheKey.Applicable,
+		)
 		stable.ConflictCount = capture.ConflictCount
 		stable.InvalidMetadataCount = capture.InvalidMetadataCount
 		if strings.TrimSpace(capture.ClientInstallationID) != "" {

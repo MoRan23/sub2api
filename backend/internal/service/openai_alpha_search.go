@@ -33,7 +33,7 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	}
 	alphaSessionID := strings.TrimSpace(gjson.GetBytes(body, "id").String())
 	if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
-		SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentityWithEndpointAlias(c, body, alphaSessionID))
+		SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentityForAlphaSearch(c, body, alphaSessionID))
 	}
 	modelResult := gjson.GetBytes(body, "model")
 	requestedModel := strings.TrimSpace(modelResult.String())
@@ -275,7 +275,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 	identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
 	capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
 	if !captured {
-		capture = CaptureOpenAIOAuthIdentityWithEndpointAlias(c, alphaBody, alphaSessionID)
+		capture = CaptureOpenAIOAuthIdentityForAlphaSearch(c, alphaBody, alphaSessionID)
 		SetOpenAIOAuthIdentityCapture(c, capture)
 	}
 	planOptions := OpenAIOAuthIdentityPlanOptions{
@@ -426,7 +426,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 		identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
 		capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
 		if !captured {
-			capture = CaptureOpenAIOAuthIdentityWithEndpointAlias(c, body, strings.TrimSpace(gjson.GetBytes(body, "id").String()))
+			capture = CaptureOpenAIOAuthIdentityForAlphaSearch(c, body, strings.TrimSpace(gjson.GetBytes(body, "id").String()))
 			SetOpenAIOAuthIdentityCapture(c, capture)
 		}
 		planOptions := OpenAIOAuthIdentityPlanOptions{

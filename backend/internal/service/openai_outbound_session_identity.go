@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -139,6 +140,7 @@ const (
 
 	openAICodexSessionIdentityDomain = "sub2api/openai-outbound-session/v2/session"
 	openAICodexThreadIdentityDomain  = "sub2api/openai-outbound-session/v2/thread"
+	openAICodexPromptCacheKeyDomain  = "sub2api/openai-codex-prompt-cache/v1/override"
 	openAICodexLocalStoreMaxEntries  = 64 * 1024
 )
 
@@ -310,10 +312,10 @@ func ResolveOpenAICodexLogicalTurnIdentity(c *gin.Context, body []byte, callerSe
 }
 
 func ResolveOpenAICodexLogicalTurnIdentityWithTurnMetadata(c *gin.Context, body []byte, callerSeed, explicitTurnMetadata string) OpenAICodexLogicalTurnIdentity {
-	return captureOpenAICodexLogicalTurnIdentity(c, body, callerSeed, explicitTurnMetadata, false).Logical
+	return captureOpenAICodexLogicalTurnIdentity(c, body, callerSeed, explicitTurnMetadata, false, false).Logical
 }
 
-func captureOpenAICodexLogicalTurnIdentity(c *gin.Context, body []byte, callerSeed, explicitTurnMetadata string, appendEndpointAlias bool) OpenAIOAuthIdentityCapture {
+func captureOpenAICodexLogicalTurnIdentity(c *gin.Context, body []byte, callerSeed, explicitTurnMetadata string, appendEndpointAlias, preferEndpointAlias bool) OpenAIOAuthIdentityCapture {
 	metadata, bodyTurnMetadata, promptCacheKey := openAIOutboundSessionBodySignals(body)
 	type logicalCandidate struct {
 		tuple   openAICodexLogicalTuple
@@ -428,12 +430,21 @@ func captureOpenAICodexLogicalTurnIdentity(c *gin.Context, body []byte, callerSe
 		}
 	}
 	if winnerIndex < 0 {
-		if seed := sanitizeSessionID(callerSeed); seed != "" {
+		// Endpoint aliases (currently alpha/search) are protocol-native and keep
+		// priority over a body field that the endpoint does not forward. For all
+		// other paths, Codex's prompt_cache_key is the session fallback of record;
+		// a generic caller seed is only an affinity fallback when that key is
+		// absent or invalid.
+		if seed := sanitizeSessionID(callerSeed); preferEndpointAlias && seed != "" {
 			winner = normalizeLogicalTuple(openAICodexLogicalTuple{session: seed, thread: seed}, OpenAIOutboundSessionLogicalKeySourceCallerSeed, false)
 			return OpenAIOAuthIdentityCapture{Logical: winner, Aliases: []OpenAICodexLogicalTurnAlias{{SessionKey: seed, ThreadKey: seed, Source: winner.Source}}, InvalidMetadataCount: invalidMetadataCount}
 		}
 		if seed := sanitizeSessionID(promptCacheKey); seed != "" {
 			winner = normalizeLogicalTuple(openAICodexLogicalTuple{session: seed, thread: seed}, OpenAIOutboundSessionLogicalKeySourcePromptCacheKey, false)
+			return OpenAIOAuthIdentityCapture{Logical: winner, Aliases: []OpenAICodexLogicalTurnAlias{{SessionKey: seed, ThreadKey: seed, Source: winner.Source}}, InvalidMetadataCount: invalidMetadataCount}
+		}
+		if seed := sanitizeSessionID(callerSeed); seed != "" {
+			winner = normalizeLogicalTuple(openAICodexLogicalTuple{session: seed, thread: seed}, OpenAIOutboundSessionLogicalKeySourceCallerSeed, false)
 			return OpenAIOAuthIdentityCapture{Logical: winner, Aliases: []OpenAICodexLogicalTurnAlias{{SessionKey: seed, ThreadKey: seed, Source: winner.Source}}, InvalidMetadataCount: invalidMetadataCount}
 		}
 		return OpenAIOAuthIdentityCapture{Logical: winner, InvalidMetadataCount: invalidMetadataCount}
@@ -611,6 +622,46 @@ func OpenAICodexThreadMappingKey(secret, namespace string, apiKeyID int64, logic
 		return "", errOpenAIOutboundSessionIdentityKeyEmpty
 	}
 	return openAICodexHMAC(secret, openAICodexThreadIdentityDomain, namespace, strconv.FormatInt(apiKeyID, 10), logicalSessionKey, logicalThreadKey, sessionID)
+}
+
+// OpenAICodexPromptCacheOverrideKey maps an intentional opaque override into
+// the selected credential owner's namespace. The result is deterministic and
+// stateless: retries and compact requests carrying the same override reuse it,
+// while credential failover cannot correlate the original value across owners.
+func OpenAICodexPromptCacheOverrideKey(secret, namespace string, apiKeyID int64, override string) (string, error) {
+	namespace = sanitizeSessionID(namespace)
+	override = sanitizeSessionID(override)
+	if namespace == "" || override == "" {
+		return "", errOpenAIOutboundSessionIdentityKeyEmpty
+	}
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return "", errOpenAIOutboundSessionIdentityKeySecret
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(openAICodexPromptCacheKeyDomain))
+	for _, field := range []string{namespace, strconv.FormatInt(apiKeyID, 10), override} {
+		_, _ = mac.Write([]byte{0})
+		_, _ = mac.Write([]byte(field))
+	}
+	return "pc_" + base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
+}
+
+func openAICodexPromptCacheOverrideFallbackKey(namespace string, apiKeyID int64, override string) (string, error) {
+	namespace = sanitizeSessionID(namespace)
+	override = sanitizeSessionID(override)
+	if namespace == "" || override == "" {
+		return "", errOpenAIOutboundSessionIdentityKeyEmpty
+	}
+	parts := []string{
+		openAICodexPromptCacheKeyDomain,
+		"fallback",
+		namespace,
+		strconv.FormatInt(apiKeyID, 10),
+		override,
+	}
+	digest := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return "pc_" + base64.RawURLEncoding.EncodeToString(digest[:]), nil
 }
 
 func openAICodexFallbackMappingKey(domain, namespace string, apiKeyID int64, fields ...string) string {
@@ -1040,6 +1091,7 @@ type OpenAIOutboundSessionIdentityRuntimeMetrics struct {
 	SourceClientMetadataTotal int64
 	SourceCallerSeedTotal     int64
 	SourcePromptCacheKeyTotal int64
+	PromptCacheFallbackTotal  int64
 	InvalidMetadataTotal      int64
 	MetadataRebuiltTotal      int64
 	MetadataInvalidByCarrier  OpenAICodexMetadataCarrierRuntimeMetrics
@@ -1082,6 +1134,7 @@ type openAICodexMetrics struct {
 	resolvePrimaryTotal, resolveFallbackTotal, resolveAliasJumpTotal, resolveStoreErrorTotal atomic.Int64
 	sourceTurnMetadataTotal, sourceHeaderTotal, sourceClientMetadataTotal                    atomic.Int64
 	sourceCallerSeedTotal, sourcePromptCacheKeyTotal                                         atomic.Int64
+	promptCacheFallbackTotal                                                                 atomic.Int64
 	invalidMetadataTotal, metadataRebuiltTotal                                               atomic.Int64
 	metadataInvalidByCarrier, metadataRebuiltByCarrier, metadataConflictByCarrier            [openAICodexMetadataCarrierCount]atomic.Int64
 }
@@ -1102,6 +1155,7 @@ func SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics() OpenAIOutboundSession
 		SourceTurnMetadataTotal: m.sourceTurnMetadataTotal.Load(), SourceHeaderTotal: m.sourceHeaderTotal.Load(),
 		SourceClientMetadataTotal: m.sourceClientMetadataTotal.Load(), SourceCallerSeedTotal: m.sourceCallerSeedTotal.Load(),
 		SourcePromptCacheKeyTotal: m.sourcePromptCacheKeyTotal.Load(),
+		PromptCacheFallbackTotal:  m.promptCacheFallbackTotal.Load(),
 		InvalidMetadataTotal:      m.invalidMetadataTotal.Load(),
 		MetadataRebuiltTotal:      m.metadataRebuiltTotal.Load(),
 		MetadataInvalidByCarrier:  snapshotOpenAICodexMetadataCarrierMetrics(&m.metadataInvalidByCarrier),

@@ -68,6 +68,40 @@ type OpenAICodexRequestTurnSnapshot struct {
 	Generated       bool
 }
 
+// OpenAICodexPromptCacheKeyKind records the semantic role of the inbound
+// prompt_cache_key. Codex normally uses the logical session id, while
+// guardian reviews and future callers may intentionally provide an override.
+type OpenAICodexPromptCacheKeyKind string
+
+const (
+	OpenAICodexPromptCacheKeyMissing  OpenAICodexPromptCacheKeyKind = "missing"
+	OpenAICodexPromptCacheKeyDefault  OpenAICodexPromptCacheKeyKind = "default"
+	OpenAICodexPromptCacheKeyGuardian OpenAICodexPromptCacheKeyKind = "guardian"
+	OpenAICodexPromptCacheKeyOverride OpenAICodexPromptCacheKeyKind = "override"
+	OpenAICodexPromptCacheKeyInvalid  OpenAICodexPromptCacheKeyKind = "invalid"
+)
+
+// OpenAICodexPromptCacheKeySnapshot is captured from the untouched ingress
+// body. It remains account-independent so retries and credential failover can
+// materialize a new owner-scoped outbound value without reparsing a narrowed
+// compact body.
+type OpenAICodexPromptCacheKeySnapshot struct {
+	Value      string
+	Kind       OpenAICodexPromptCacheKeyKind
+	Present    bool
+	Valid      bool
+	Applicable bool
+}
+
+// OpenAICodexPromptCacheKeyPlan is the immutable final wire value. Generic
+// overrides are mapped with an owner-scoped HMAC; no prompt-cache mapping is
+// persisted in Redis or the UUIDv7 identity store.
+type OpenAICodexPromptCacheKeyPlan struct {
+	Value   string
+	Kind    OpenAICodexPromptCacheKeyKind
+	Enabled bool
+}
+
 const (
 	openAICodexRequestTurnSourceClientMetadata = "client_metadata.x_codex_turn_metadata"
 	openAICodexRequestTurnSourceHeader         = "header.x_codex_turn_metadata"
@@ -84,6 +118,7 @@ type OpenAIOAuthIdentityCapture struct {
 	Logical              OpenAICodexLogicalTurnIdentity
 	Aliases              []OpenAICodexLogicalTurnAlias
 	RequestTurn          OpenAICodexRequestTurnSnapshot
+	PromptCacheKey       OpenAICodexPromptCacheKeySnapshot
 	WireProfile          CodexWireProfile
 	ClientInstallationID string
 	ConflictCount        int
@@ -123,6 +158,7 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthProfileIdentityPlan(
 type OpenAIOAuthIdentityPlan struct {
 	Capture                  OpenAIOAuthIdentityCapture
 	RequestTurn              OpenAICodexRequestTurnSnapshot
+	PromptCacheKey           OpenAICodexPromptCacheKeyPlan
 	WireProfile              CodexWireProfile
 	Window                   OpenAICodexWindowSnapshot
 	WindowMappingKey         string
@@ -180,18 +216,39 @@ func CaptureOpenAICodexIdentityInput(c *gin.Context, body []byte, callerSeed str
 }
 
 func CaptureOpenAIOAuthIdentityWithTurnMetadata(c *gin.Context, body []byte, callerSeed, explicitTurnMetadata string) OpenAIOAuthIdentityCapture {
-	return captureOpenAIOAuthIdentity(c, body, callerSeed, explicitTurnMetadata, false)
+	return captureOpenAIOAuthIdentity(c, body, callerSeed, explicitTurnMetadata, false, false, true, "")
+}
+
+// CaptureOpenAIOAuthIdentityForCompatTurn freezes compatibility conversions as
+// ordinary turns before request-turn capture. Inbound Responses metadata must
+// not be able to suppress the UUIDv7 that Chat/Messages conversion later needs.
+func CaptureOpenAIOAuthIdentityForCompatTurn(c *gin.Context, body []byte, callerSeed string) OpenAIOAuthIdentityCapture {
+	return captureOpenAIOAuthIdentity(c, body, callerSeed, "", false, false, true, CodexWireRequestTurn)
 }
 
 // CaptureOpenAIOAuthIdentityWithEndpointAlias captures an endpoint-native
 // legacy identifier as the lowest-priority compatibility alias.
 func CaptureOpenAIOAuthIdentityWithEndpointAlias(c *gin.Context, body []byte, endpointAlias string) OpenAIOAuthIdentityCapture {
-	return captureOpenAIOAuthIdentity(c, body, endpointAlias, "", true)
+	return captureOpenAIOAuthIdentity(c, body, endpointAlias, "", true, false, true, "")
 }
 
-func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explicitTurnMetadata string, appendEndpointAlias bool) OpenAIOAuthIdentityCapture {
-	capture := captureOpenAICodexLogicalTurnIdentity(c, body, callerSeed, explicitTurnMetadata, appendEndpointAlias)
+// CaptureOpenAIOAuthIdentityForAlphaSearch retains the endpoint alias while
+// marking alpha's unsupported inbound prompt_cache_key as non-applicable. If
+// alpha falls back to Responses, resolution emits the mapped session key.
+func CaptureOpenAIOAuthIdentityForAlphaSearch(c *gin.Context, body []byte, endpointAlias string) OpenAIOAuthIdentityCapture {
+	return captureOpenAIOAuthIdentity(c, body, endpointAlias, "", true, true, false, "")
+}
+
+func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explicitTurnMetadata string, appendEndpointAlias, preferEndpointAlias, promptCacheKeyApplicable bool, forcedRequestKind CodexWireRequestKind) OpenAIOAuthIdentityCapture {
+	capture := captureOpenAICodexLogicalTurnIdentity(c, body, callerSeed, explicitTurnMetadata, appendEndpointAlias, preferEndpointAlias)
 	capture.WireProfile = captureCodexWireProfile(c, body, explicitTurnMetadata)
+	if forcedRequestKind.valid() {
+		capture.WireProfile.RequestKind = forcedRequestKind
+		capture.WireProfile.resolveTurnIDs(forcedRequestKind)
+	}
+	capture.PromptCacheKey = captureOpenAICodexPromptCacheKey(
+		body, capture.Logical, capture.Aliases, capture.WireProfile, promptCacheKeyApplicable,
+	)
 	requestTurn, conflicts, invalid := captureOpenAICodexRequestTurn(c, body, explicitTurnMetadata, capture.WireProfile.RequestKind)
 	if strings.HasPrefix(capture.WireProfile.InvalidReason, "turn_id ") {
 		requestTurn = OpenAICodexRequestTurnSnapshot{}
@@ -303,6 +360,12 @@ func captureOpenAICodexRequestTurn(c *gin.Context, body []byte, explicitTurnMeta
 			observeOpenAICodexMetadataConflict(candidate.carrier, 1)
 		}
 	}
+	// Memory consolidation deliberately has no request-turn identity. Keep the
+	// scan above for invalid/conflict metrics, but do not retain an explicit
+	// value or generate a hidden UUID for this request kind.
+	if requestKind == CodexWireRequestMemory {
+		return OpenAICodexRequestTurnSnapshot{}, conflicts, invalid
+	}
 	if winner.ID != "" {
 		return winner, conflicts, invalid
 	}
@@ -318,6 +381,63 @@ func captureOpenAICodexRequestTurn(c *gin.Context, body []byte, explicitTurnMeta
 		Source:          openAICodexRequestTurnSourceGenerated,
 		Generated:       true,
 	}, conflicts, invalid
+}
+
+func captureOpenAICodexPromptCacheKey(
+	body []byte,
+	logical OpenAICodexLogicalTurnIdentity,
+	aliases []OpenAICodexLogicalTurnAlias,
+	profile CodexWireProfile,
+	applicable bool,
+) OpenAICodexPromptCacheKeySnapshot {
+	snapshot := OpenAICodexPromptCacheKeySnapshot{
+		Kind: OpenAICodexPromptCacheKeyMissing, Applicable: applicable,
+	}
+	if len(body) == 0 || !utf8.Valid(body) {
+		return snapshot
+	}
+	var root map[string]json.RawMessage
+	if json.Unmarshal(body, &root) != nil || root == nil {
+		return snapshot
+	}
+	raw, present := root["prompt_cache_key"]
+	if !present {
+		return snapshot
+	}
+	snapshot.Present = true
+	var value string
+	if json.Unmarshal(raw, &value) != nil {
+		snapshot.Kind = OpenAICodexPromptCacheKeyInvalid
+		return snapshot
+	}
+	value = sanitizeSessionID(value)
+	if value == "" {
+		snapshot.Kind = OpenAICodexPromptCacheKeyInvalid
+		return snapshot
+	}
+	snapshot.Value = value
+	snapshot.Valid = true
+
+	subagent := strings.ToLower(strings.TrimSpace(profile.SubagentHeader))
+	if (subagent == "review" || subagent == "guardian") && strings.HasPrefix(value, "guardian:") {
+		parent := sanitizeSessionID(strings.TrimPrefix(value, "guardian:"))
+		if parent != "" && (parent == logical.ParentThreadKey || parent == logical.ForkedFromThreadKey) {
+			snapshot.Kind = OpenAICodexPromptCacheKeyGuardian
+			return snapshot
+		}
+	}
+	if value == logical.SessionKey || logical.Source == OpenAIOutboundSessionLogicalKeySourcePromptCacheKey {
+		snapshot.Kind = OpenAICodexPromptCacheKeyDefault
+		return snapshot
+	}
+	for _, alias := range aliases {
+		if value == alias.SessionKey {
+			snapshot.Kind = OpenAICodexPromptCacheKeyDefault
+			return snapshot
+		}
+	}
+	snapshot.Kind = OpenAICodexPromptCacheKeyOverride
+	return snapshot
 }
 
 func parseOpenAICodexRequestTurnMetadata(raw []byte, source string, requireString bool, requestKind CodexWireRequestKind) (OpenAICodexRequestTurnSnapshot, bool, bool) {
@@ -554,8 +674,81 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 			plan.WireProfile.InstallationID = plan.InstallationID
 		}
 	}
+	var err error
+	plan.PromptCacheKey, err = s.resolveOpenAICodexPromptCacheKeyPlan(plan)
+	if err != nil {
+		return plan, err
+	}
 	plan = s.resolveOpenAICodexWindowForPlan(ctx, plan)
 	return plan, nil
+}
+
+func openAICodexProjectionCarriesPromptCacheKey(mode OpenAIOAuthIdentityProjectionMode) bool {
+	switch mode {
+	case OpenAIOAuthIdentityProjectionRegular,
+		OpenAIOAuthIdentityProjectionPassthrough,
+		OpenAIOAuthIdentityProjectionCompact:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *OpenAIGatewayService) resolveOpenAICodexPromptCacheKeyPlan(plan OpenAIOAuthIdentityPlan) (OpenAICodexPromptCacheKeyPlan, error) {
+	snapshot := plan.Capture.PromptCacheKey
+	result := OpenAICodexPromptCacheKeyPlan{Kind: snapshot.Kind}
+	if !openAICodexProjectionCarriesPromptCacheKey(plan.ProjectionMode) ||
+		!plan.TurnIdentityRequested || !plan.TurnIdentityEnabled {
+		return result, nil
+	}
+	sessionID := strings.TrimSpace(plan.TurnIdentity.SessionID)
+	if sessionID == "" {
+		return result, nil
+	}
+	result.Enabled = true
+	if !snapshot.Applicable {
+		result.Kind = OpenAICodexPromptCacheKeyDefault
+		result.Value = sessionID
+		return result, nil
+	}
+	switch snapshot.Kind {
+	case OpenAICodexPromptCacheKeyGuardian:
+		if parentThreadID := strings.TrimSpace(plan.TurnIdentity.ParentThreadID); parentThreadID != "" {
+			result.Value = "guardian:" + parentThreadID
+			return result, nil
+		}
+		// A guardian-shaped key without a resolved parent cannot preserve the
+		// parent-scoped contract, so isolate it as a generic override instead.
+		fallthrough
+	case OpenAICodexPromptCacheKeyOverride:
+		secret := ""
+		if s != nil && s.cfg != nil {
+			secret = s.cfg.JWT.Secret
+		}
+		var mapped string
+		var err error
+		if strings.TrimSpace(secret) == "" {
+			mapped, err = openAICodexPromptCacheOverrideFallbackKey(
+				plan.CredentialOwnerNamespace, plan.APIKeyID, snapshot.Value,
+			)
+			if err == nil {
+				openAIOutboundSessionIdentityMetrics.promptCacheFallbackTotal.Add(1)
+			}
+		} else {
+			mapped, err = OpenAICodexPromptCacheOverrideKey(
+				secret, plan.CredentialOwnerNamespace, plan.APIKeyID, snapshot.Value,
+			)
+		}
+		if err != nil {
+			return OpenAICodexPromptCacheKeyPlan{}, fmt.Errorf("map OpenAI Codex prompt_cache_key override: %w", err)
+		}
+		result.Value = mapped
+	default:
+		// Missing, invalid, and normal Codex values all converge on the mapped
+		// session id. This restores the official session/cache-key invariant.
+		result.Value = sessionID
+	}
+	return result, nil
 }
 
 func (s *OpenAIGatewayService) resolveOpenAICodexWindowForPlan(ctx context.Context, plan OpenAIOAuthIdentityPlan) OpenAIOAuthIdentityPlan {
@@ -640,6 +833,7 @@ func (s *OpenAIGatewayService) GetOrResolveOpenAIOAuthOutboundIdentity(
 func openAIOAuthIdentityCapturesEqual(left, right OpenAIOAuthIdentityCapture) bool {
 	if left.Logical != right.Logical ||
 		left.RequestTurn != right.RequestTurn ||
+		left.PromptCacheKey != right.PromptCacheKey ||
 		!codexWireProfilesEqual(left.WireProfile, right.WireProfile) ||
 		left.ClientInstallationID != right.ClientInstallationID ||
 		left.ConflictCount != right.ConflictCount ||
@@ -717,6 +911,10 @@ func ApplyOpenAIOAuthIdentityPlan(headers http.Header, body []byte, plan OpenAIO
 		if err != nil {
 			return body, err
 		}
+		out, err = applyOpenAICodexPromptCacheKeyBody(out, plan)
+		if err != nil {
+			return body, err
+		}
 		if plan.ClientIdentityEnabled {
 			applyCodexClientIdentityPlan(headers, plan.ClientIdentity)
 		}
@@ -767,6 +965,11 @@ func ApplyOpenAIOAuthIdentityPlan(headers http.Header, body []byte, plan OpenAIO
 		if err != nil {
 			return body, err
 		}
+	}
+	var err error
+	out, err = applyOpenAICodexPromptCacheKeyBody(out, plan)
+	if err != nil {
+		return body, err
 	}
 	if plan.ClientIdentityEnabled {
 		applyCodexClientIdentityPlan(headers, plan.ClientIdentity)

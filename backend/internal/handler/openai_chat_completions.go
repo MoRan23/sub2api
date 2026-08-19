@@ -68,7 +68,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
-	service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentity(c, body, ""))
+	service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentityForCompatTurn(c, body, ""))
 
 	modelResult := gjson.GetBytes(body, "model")
 	if !modelResult.Exists() || modelResult.Type != gjson.String || modelResult.String() == "" {

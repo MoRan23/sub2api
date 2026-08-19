@@ -29,13 +29,13 @@ func (s *OpenAIGatewayService) finalizeOpenAIOAuthWSWirePlan(
 	payload []byte,
 	options openAIOAuthWSWireFinalizeOptions,
 ) (OpenAIOAuthIdentityPlan, error) {
-	if account == nil || !account.IsOpenAIOAuth() {
+	if account == nil || !account.IsOpenAIOAuth() || !plan.TurnIdentityRequested {
 		return plan, nil
 	}
 
-	kind := options.RequestKind
-	if !kind.valid() {
-		kind = openAICodexWSWireRequestKind(payload, plan)
+	kind, kindErr := openAICodexWSWireRequestKind(payload, plan, options.RequestKind)
+	if kindErr != nil {
+		return plan, kindErr
 	}
 	model := strings.TrimSpace(options.FinalModel)
 	serviceTier := strings.TrimSpace(options.FinalServiceTier)
@@ -97,20 +97,23 @@ func (s *OpenAIGatewayService) finalizeOpenAIOAuthWSWirePlan(
 	return finalPlan, nil
 }
 
-func openAICodexWSWireRequestKind(payload []byte, plan OpenAIOAuthIdentityPlan) CodexWireRequestKind {
-	if len(payload) > 0 {
+func openAICodexWSWireRequestKind(payload []byte, plan OpenAIOAuthIdentityPlan, explicit ...CodexWireRequestKind) (CodexWireRequestKind, error) {
+	forced := CodexWireRequestKind("")
+	if len(explicit) > 0 && explicit[0].valid() {
+		forced = explicit[0]
+	} else if len(payload) > 0 {
 		generate := gjson.GetBytes(payload, "generate")
-		if generate.Exists() && generate.Type == gjson.False {
-			return CodexWireRequestPrewarm
-		}
 		if HasCompactionTriggerInInput(payload) {
-			return CodexWireRequestCompaction
+			forced = CodexWireRequestCompaction
+		} else if generate.Exists() && generate.Type == gjson.False {
+			forced = CodexWireRequestPrewarm
 		}
 	}
-	if plan.WireProfile.RequestKind.valid() {
-		return plan.WireProfile.RequestKind
+	captured := CodexWireRequestKind("")
+	if plan.WireProfile.RequestKind == CodexWireRequestMemory {
+		captured = CodexWireRequestMemory
 	}
-	return CodexWireRequestTurn
+	return resolveOpenAICodexWireRequestKind(captured, CodexWireRequestTurn, forced)
 }
 
 // applyOpenAICodexWSRoutingHint projects only the value frozen by the final

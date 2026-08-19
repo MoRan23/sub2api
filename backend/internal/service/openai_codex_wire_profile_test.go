@@ -164,6 +164,185 @@ func TestCodexWireProfileOfficialGoldenProjection(t *testing.T) {
 	require.Equal(t, "review", headers.Get("x-openai-subagent"))
 }
 
+func TestCodexWireMemoryRequestKindUsesNestedCarrierPriority(t *testing.T) {
+	canonical := CaptureOpenAIOAuthIdentity(nil, codexWireTestBody(t,
+		`{"request_kind":"memory","sandbox":"workspace-write"}`, nil), "")
+	require.Equal(t, CodexWireRequestMemory, canonical.WireProfile.RequestKind)
+	require.Empty(t, canonical.RequestTurn.ID)
+
+	newContext := func() *gin.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		return c
+	}
+	assertMemory := func(t *testing.T, capture OpenAIOAuthIdentityCapture) {
+		t.Helper()
+		require.Equal(t, CodexWireRequestMemory, capture.WireProfile.RequestKind)
+		require.Empty(t, capture.RequestTurn.ID)
+	}
+
+	t.Run("header nested", func(t *testing.T) {
+		c := newContext()
+		c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"request_kind":"memory","sandbox":"danger-full-access"}`)
+		capture := CaptureOpenAIOAuthIdentity(c, []byte(`{"model":"gpt-5.4"}`), "")
+		assertMemory(t, capture)
+		require.Equal(t, "danger-full-access", capture.WireProfile.Sandbox)
+	})
+	t.Run("root nested", func(t *testing.T) {
+		capture := CaptureOpenAIOAuthIdentity(nil,
+			[]byte(`{"model":"gpt-5.4","x-codex-turn-metadata":"{\"request_kind\":\"memory\"}"}`), "")
+		assertMemory(t, capture)
+	})
+	t.Run("flat client metadata", func(t *testing.T) {
+		capture := CaptureOpenAIOAuthIdentity(nil,
+			[]byte(`{"model":"gpt-5.4","client_metadata":{"request_kind":"memory"}}`), "")
+		require.NotEqual(t, CodexWireRequestMemory, capture.WireProfile.RequestKind)
+		require.NotEmpty(t, capture.RequestTurn.ID)
+	})
+	t.Run("explicit websocket nested", func(t *testing.T) {
+		capture := CaptureOpenAIOAuthIdentityWithTurnMetadata(nil, []byte(`{"model":"gpt-5.4"}`), "",
+			`{"request_kind":"memory"}`)
+		assertMemory(t, capture)
+	})
+	t.Run("body nested wins over header nested", func(t *testing.T) {
+		c := newContext()
+		c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"request_kind":"memory"}`)
+		capture := CaptureOpenAIOAuthIdentity(c, codexWireTestBody(t,
+			`{"request_kind":"turn","turn_id":"`+codexWireTestTurn+`"}`, nil), "")
+		require.Equal(t, CodexWireRequestTurn, capture.WireProfile.RequestKind)
+		require.Equal(t, codexWireTestTurn, capture.RequestTurn.ID)
+	})
+	t.Run("stage two memgen remains a turn", func(t *testing.T) {
+		c := newContext()
+		c.Request.Header.Set("x-openai-memgen-request", "true")
+		c.Request.Header.Set("x-openai-subagent", "memory_consolidation")
+		capture := CaptureOpenAIOAuthIdentity(c, codexWireTestBody(t,
+			`{"request_kind":"turn","thread_source":"subagent"}`, nil), "")
+		require.Equal(t, CodexWireRequestTurn, capture.WireProfile.RequestKind)
+		require.Equal(t, "memory_consolidation", capture.WireProfile.SubagentHeader)
+		require.NotEmpty(t, capture.RequestTurn.ID)
+	})
+}
+
+func TestResolveOpenAICodexWireRequestKindMemoryConflicts(t *testing.T) {
+	kind, err := resolveOpenAICodexWireRequestKind(CodexWireRequestMemory, CodexWireRequestTurn, "")
+	require.NoError(t, err)
+	require.Equal(t, CodexWireRequestMemory, kind)
+
+	for _, forced := range []CodexWireRequestKind{
+		CodexWireRequestTurn,
+		CodexWireRequestPrewarm,
+		CodexWireRequestCompaction,
+	} {
+		t.Run(string(forced), func(t *testing.T) {
+			_, kindErr := resolveOpenAICodexWireRequestKind(CodexWireRequestMemory, CodexWireRequestTurn, forced)
+			require.ErrorIs(t, kindErr, ErrOpenAICodexRequestKindConflict)
+		})
+	}
+
+	kind, err = resolveOpenAICodexWireRequestKind("", CodexWireRequestTurn, CodexWireRequestCompaction)
+	require.NoError(t, err)
+	require.Equal(t, CodexWireRequestCompaction, kind)
+}
+
+func TestCodexWireMemoryProjectionKeepsStableTupleWithoutTurnIdentity(t *testing.T) {
+	plan := codexWireProjectionTestPlan(t)
+	plan.WireProfile.RequestKind = CodexWireRequestMemory
+	plan.WireProfile.SubagentHeader = "memory_consolidation"
+	plan.WireProfile.SubagentKind = ""
+	plan.WireProfile.Compaction = json.RawMessage(`{"trigger":"auto"}`)
+	finalPlan, err := FinalizeOpenAICodexWirePlanWithOptions(plan, FinalizeOpenAICodexWirePlanOptions{
+		RequestKind:       string(CodexWireRequestMemory),
+		ModelCapabilities: CodexModelCapabilities{Known: true, UseResponsesLite: true, NodeREPLAutoReviewRequired: true, NodeREPLDisabled: true},
+		MetadataProfile:   CodexMetadataProfile{TurnMetadataIncludesToolInfo: true},
+		FinalModel:        "gpt-5.4",
+	})
+	require.NoError(t, err)
+	require.Empty(t, finalPlan.RequestTurn.ID)
+	require.Equal(t, CodexWireRequestMemory, finalPlan.WireProfile.RequestKind)
+	require.Equal(t, codexWireTestSession, finalPlan.WireProfile.SessionID)
+	require.Equal(t, codexWireTestThread, finalPlan.WireProfile.ThreadID)
+	require.Equal(t, codexWireTestThread+":0", finalPlan.WireProfile.WindowID)
+	require.Empty(t, finalPlan.WireProfile.AgentName)
+	require.Empty(t, finalPlan.WireProfile.TurnID.Value)
+	require.Empty(t, finalPlan.WireProfile.TurnLineage)
+	require.False(t, finalPlan.WireProfile.TurnStartedAtSet)
+	require.Empty(t, finalPlan.WireProfile.Compaction)
+
+	headers := http.Header{
+		"Session-Id":               {"stale-session"},
+		"Thread-Id":                {"stale-thread"},
+		"X-Client-Request-Id":      {"stale-request"},
+		"X-Codex-Parent-Thread-Id": {"stale-parent"},
+		"X-Openai-Memgen-Request":  {"true"},
+		"X-Openai-Subagent":        {"memory_consolidation"},
+		openAIWSTurnMetadataHeader: {`{"request_kind":"memory","turn_id":"internal:stale","header_extra":"keep"}`},
+	}
+	body := codexWireTestBody(t,
+		`{"request_kind":"memory","turn_id":"internal:stale","turn_started_at_unix_ms":1,"parent_turn_id":"internal:parent","incoming_extra":"keep"}`,
+		map[string]any{
+			"turn_id":                       "stale-flat-turn",
+			"turn_started_at_unix_ms":       1,
+			"parent_turn_id":                "stale-flat-parent",
+			"root_turn_id":                  "stale-flat-root",
+			"x-codex-parent-thread-id":      "stale-flat-parent-thread",
+			"unrelated_compatibility_field": "keep",
+		},
+	)
+	out, err := ApplyOpenAIOAuthIdentityPlan(headers, body, finalPlan)
+	require.NoError(t, err)
+
+	var root map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(out, &root))
+	var flat map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(root["client_metadata"], &flat))
+	require.Equal(t, "installation-pin", jsonStringRaw(t, flat[codexInstallationIDKey]))
+	require.Equal(t, codexWireTestSession, jsonStringRaw(t, flat["session_id"]))
+	require.Equal(t, codexWireTestThread, jsonStringRaw(t, flat["thread_id"]))
+	require.Equal(t, codexWireTestThread+":0", jsonStringRaw(t, flat["x-codex-window-id"]))
+	require.Equal(t, "memory_consolidation", jsonStringRaw(t, flat["x-openai-subagent"]))
+	require.Equal(t, "keep", jsonStringRaw(t, flat["unrelated_compatibility_field"]))
+	for _, key := range []string{"turn_id", "turn_started_at_unix_ms", "parent_turn_id", "root_turn_id", "x-codex-parent-thread-id"} {
+		require.NotContains(t, flat, key)
+	}
+
+	var nestedRaw string
+	require.NoError(t, json.Unmarshal(flat[openAIWSTurnMetadataHeader], &nestedRaw))
+	var nested map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(nestedRaw), &nested))
+	require.Equal(t, "memory", jsonStringRaw(t, nested["request_kind"]))
+	require.Equal(t, "keep", jsonStringRaw(t, nested["incoming_extra"]))
+	for _, key := range []string{
+		"installation_id", "session_id", "thread_id", "agent_name", "turn_id", "window_id",
+		"forked_from_thread_id", "parent_thread_id", "parent_turn_id", "root_turn_id",
+		"turn_started_at_unix_ms", "compaction",
+	} {
+		require.NotContains(t, nested, key)
+	}
+
+	require.Equal(t, "installation-pin", headers.Get(codexInstallationIDKey))
+	require.Equal(t, codexWireTestSession, headers.Get("session-id"))
+	require.Equal(t, codexWireTestThread, headers.Get("thread-id"))
+	require.Equal(t, codexWireTestThread, headers.Get("x-client-request-id"))
+	require.Equal(t, codexWireTestThread+":0", headers.Get("x-codex-window-id"))
+	require.Empty(t, headers.Get("x-codex-parent-thread-id"))
+	require.Equal(t, "true", headers.Get("x-openai-memgen-request"))
+	require.Equal(t, "memory_consolidation", headers.Get("x-openai-subagent"))
+	var headerNested map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(headers.Get(openAIWSTurnMetadataHeader)), &headerNested))
+	require.Equal(t, "memory", jsonStringRaw(t, headerNested["request_kind"]))
+	for _, key := range []string{"installation_id", "session_id", "thread_id", "agent_name", "turn_id", "window_id", "parent_thread_id", "turn_started_at_unix_ms"} {
+		require.NotContains(t, headerNested, key)
+	}
+}
+
+func jsonStringRaw(t *testing.T, raw json.RawMessage) string {
+	t.Helper()
+	var value string
+	require.NoError(t, json.Unmarshal(raw, &value))
+	return value
+}
+
 func isASCIIString(value string) bool {
 	for index := 0; index < len(value); index++ {
 		if value[index] >= 0x80 {

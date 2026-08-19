@@ -259,6 +259,8 @@ func openAIWSOutboundIdentityPlanDigest(headers http.Header, plan OpenAIOAuthIde
 		"thread-id",
 		"x-client-request-id",
 		"x-codex-parent-thread-id",
+		"x-openai-memgen-request",
+		"x-openai-subagent",
 		"parent-thread-id",
 		"forked-from-thread-id",
 		"session_id",
@@ -361,21 +363,31 @@ func openAICodexMetadataProjectionFromPlan(plan OpenAIOAuthIdentityPlan) openAIC
 	if installation {
 		profile.InstallationID = plan.InstallationID
 	}
+	memoryRequest := plan.TurnIdentityRequested && profile.RequestKind == CodexWireRequestMemory
+	projectedTurnIdentity := plan.TurnIdentity
+	if memoryRequest {
+		projectedTurnIdentity.ParentThreadID = ""
+		projectedTurnIdentity.ForkedFromThreadID = ""
+		profile.TurnID = CodexTurnID{}
+		profile.TurnStartedAtUnixMS = 0
+		profile.TurnStartedAtSet = false
+		profile.TurnLineage = CodexTurnLineage{}
+	}
 	stableTurn := plan.TurnIdentityEnabled &&
 		strings.TrimSpace(plan.TurnIdentity.SessionID) != "" &&
-		strings.TrimSpace(plan.TurnIdentity.ThreadID) != "" &&
-		(!profile.Finalized || profile.RequestKind != CodexWireRequestMemory)
+		strings.TrimSpace(plan.TurnIdentity.ThreadID) != ""
 	if plan.TurnIdentityEnabled {
 		profile.SessionID = plan.TurnIdentity.SessionID
 		profile.ThreadID = plan.TurnIdentity.ThreadID
-		profile.TurnLineage.ParentThreadID = plan.TurnIdentity.ParentThreadID
-		profile.TurnLineage.ForkedFromThreadID = plan.TurnIdentity.ForkedFromThreadID
+		if !memoryRequest {
+			profile.TurnLineage.ParentThreadID = plan.TurnIdentity.ParentThreadID
+			profile.TurnLineage.ForkedFromThreadID = plan.TurnIdentity.ForkedFromThreadID
+		}
 	}
 	if ValidateOpenAICodexWindowSnapshot(plan.Window) == nil && plan.Window.ThreadID == plan.TurnIdentity.ThreadID {
 		profile.WindowID = plan.Window.WindowID()
 	}
-	requestTurnActive := plan.TurnIdentityRequested &&
-		(!profile.Finalized || profile.RequestKind != CodexWireRequestMemory) &&
+	requestTurnActive := plan.TurnIdentityRequested && !memoryRequest &&
 		(openAICodexRequestTurnSnapshotValid(plan.RequestTurn) ||
 			(profile.RequestKind.valid() && openAICodexRequestTurnSnapshotValidForWire(plan.RequestTurn, profile.RequestKind)))
 	if requestTurnActive {
@@ -391,7 +403,7 @@ func openAICodexMetadataProjectionFromPlan(plan OpenAIOAuthIdentityPlan) openAIC
 	}
 	return openAICodexMetadataProjection{
 		installationID:    plan.InstallationID,
-		turnIdentity:      plan.TurnIdentity,
+		turnIdentity:      projectedTurnIdentity,
 		requestTurn:       plan.RequestTurn,
 		wireProfile:       profile,
 		installation:      installation,
@@ -401,12 +413,36 @@ func openAICodexMetadataProjectionFromPlan(plan OpenAIOAuthIdentityPlan) openAIC
 	}
 }
 
+// applyOpenAICodexPromptCacheKeyBody is intentionally the final body splice.
+// Compact normalization may remove the field as part of its narrow schema,
+// and passthrough must retain all unrelated bytes, so the immutable plan is
+// projected only after those transforms have completed.
+func applyOpenAICodexPromptCacheKeyBody(body []byte, plan OpenAIOAuthIdentityPlan) ([]byte, error) {
+	if !plan.PromptCacheKey.Enabled || strings.TrimSpace(plan.PromptCacheKey.Value) == "" ||
+		!openAICodexProjectionCarriesPromptCacheKey(plan.ProjectionMode) || len(body) == 0 {
+		return body, nil
+	}
+	if !utf8.Valid(body) || !gjson.ParseBytes(body).IsObject() {
+		return body, nil
+	}
+	out, err := sjson.SetBytes(body, "prompt_cache_key", plan.PromptCacheKey.Value)
+	if err != nil {
+		return body, fmt.Errorf("splice OpenAI Codex prompt_cache_key: %w", err)
+	}
+	return out, nil
+}
+
 func (projection openAICodexMetadataProjection) enabled() bool {
 	return projection.installation || projection.stableTurn || projection.requestTurnActive || projection.wireActive
 }
 
 func (projection openAICodexMetadataProjection) createsTurnMetadata() bool {
 	return projection.stableTurn || projection.requestTurnActive || projection.wireActive
+}
+
+func (projection openAICodexMetadataProjection) installationOnly() bool {
+	return projection.installation && !projection.stableTurn &&
+		!projection.requestTurnActive && !projection.wireActive
 }
 
 func applyOpenAICodexIdentityHeadersForPlan(headers http.Header, plan OpenAIOAuthIdentityPlan, compact bool) {
@@ -946,6 +982,18 @@ func rewriteOpenAICodexTurnMetadataProjectionForCarrier(
 		} else {
 			baseProfile = ParseCodexWireProfile(trimmed)
 		}
+	}
+	if projection.installationOnly() {
+		if baseMetadata == nil {
+			baseMetadata = make(map[string]json.RawMessage)
+		}
+		delete(baseMetadata, codexInstallationIDKey)
+		baseMetadata["installation_id"] = mustMarshalJSONString(projection.installationID)
+		encoded, err := marshalJSONWithoutHTMLEscape(baseMetadata)
+		if err != nil {
+			return "", fmt.Errorf("encode OpenAI Codex installation metadata: %w", err)
+		}
+		return escapeNonASCIIJSON(encoded), nil
 	}
 	profile := cloneCodexWireProfile(projection.wireProfile)
 	if profile.Revision == "" {

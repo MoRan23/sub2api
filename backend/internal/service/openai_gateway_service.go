@@ -79,6 +79,8 @@ var openaiAllowedHeaders = map[string]bool{
 	"x-codex-turn-state":      true,
 	"x-codex-turn-metadata":   true,
 	"x-codex-window-id":       true,
+	"x-openai-memgen-request": true,
+	"x-openai-subagent":       true,
 	responsesLiteHeaderKey:    true,
 }
 
@@ -98,6 +100,8 @@ var openaiPassthroughAllowedHeaders = map[string]bool{
 	"x-codex-turn-state":      true,
 	"x-codex-turn-metadata":   true,
 	"x-codex-window-id":       true,
+	"x-openai-memgen-request": true,
+	"x-openai-subagent":       true,
 	responsesLiteHeaderKey:    true,
 }
 

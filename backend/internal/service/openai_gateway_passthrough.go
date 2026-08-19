@@ -650,12 +650,15 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 	applyOpenAICodexBetaFeatures(c, account, req.Header)
 	if account.Type == AccountTypeOAuth && identityPlanned {
 		fields := gjson.GetManyBytes(body, "model", "service_tier")
-		requestKind := string(openAIPassthroughWireRequestKind(c))
+		requestKind, kindErr := openAICodexHTTPWireRequestKind(c, identityPlan)
+		if kindErr != nil {
+			return nil, kindErr
+		}
 		finalBody, finalizeErr := s.FinalizeOpenAIOAuthResponsesRequest(c, account, req, body, OpenAIOAuthResponsesFinalizeOptions{
 			Plan:             identityPlan,
 			FinalModel:       fields[0].String(),
 			FinalServiceTier: fields[1].String(),
-			RequestKind:      requestKind,
+			RequestKind:      string(requestKind),
 			Transport:        "http_passthrough",
 		})
 		if finalizeErr != nil {
@@ -727,13 +730,6 @@ func (s *OpenAIGatewayService) prepareOpenAIPassthroughCompactWindow(
 		plan:       plan,
 	})
 	return body
-}
-
-func openAIPassthroughWireRequestKind(c *gin.Context) CodexWireRequestKind {
-	if isOpenAIResponsesCompactPath(c) || isOpenAINativeCompactionV2(c) {
-		return CodexWireRequestCompaction
-	}
-	return CodexWireRequestTurn
 }
 
 func openAICodexTurnMetadataWithCompactWindow(raw string, windowID string) (string, bool) {

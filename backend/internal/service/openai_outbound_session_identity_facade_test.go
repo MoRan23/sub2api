@@ -54,7 +54,8 @@ func TestCaptureOpenAIOAuthIdentityWithEndpointAliasAppendsNonExplicitLowestPrio
 
 func TestCaptureOpenAIOAuthIdentityFallbackAliasIsNotExplicit(t *testing.T) {
 	capture := CaptureOpenAIOAuthIdentity(nil, []byte(`{"prompt_cache_key":"prompt"}`), "caller")
-	require.Equal(t, "caller", capture.Logical.SessionKey)
+	require.Equal(t, "prompt", capture.Logical.SessionKey)
+	require.Equal(t, OpenAIOutboundSessionLogicalKeySourcePromptCacheKey, capture.Logical.Source)
 	require.False(t, capture.Logical.Explicit)
 	require.Len(t, capture.Aliases, 1)
 	require.False(t, capture.Aliases[0].Explicit)

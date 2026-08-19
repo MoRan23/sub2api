@@ -27,7 +27,7 @@ const openAICodexTurnStateHeader = "x-codex-turn-state"
 
 const (
 	openAICodexTurnStateKeyDomain       = "sub2api/openai-codex-turn-state/v1"
-	openAICodexTurnStateIdentityDomain  = "sub2api/openai-codex-turn-state-identity/v3"
+	openAICodexTurnStateIdentityDomain  = "sub2api/openai-codex-turn-state-identity/v4"
 	openAICodexTurnStateLocalMaxEntries = 64 * 1024
 	openAICodexTurnStateStoreTimeout    = 500 * time.Millisecond
 )
@@ -219,6 +219,9 @@ func OpenAICodexTurnStateIdentityDigest(plan OpenAIOAuthIdentityPlan) string {
 	if !requestKind.valid() {
 		requestKind = CodexWireRequestTurn
 	}
+	memoryRequest := requestKind == CodexWireRequestMemory
+	requestTurnActive := !memoryRequest && plan.TurnIdentityRequested &&
+		openAICodexRequestTurnSnapshotValidForWire(plan.RequestTurn, requestKind)
 	effectiveInstallation := ""
 	if plan.InstallationEnabled {
 		effectiveInstallation = strings.TrimSpace(plan.InstallationID)
@@ -232,19 +235,27 @@ func OpenAICodexTurnStateIdentityDigest(plan OpenAIOAuthIdentityPlan) string {
 		strings.TrimSpace(plan.WireProfile.Revision),
 		strings.TrimSpace(plan.WireProfile.Commit),
 		strconv.FormatBool(plan.TurnIdentityEnabled),
-		strconv.FormatBool(plan.TurnIdentityRequested && openAICodexRequestTurnSnapshotValidForWire(plan.RequestTurn, requestKind)),
+		strconv.FormatBool(requestTurnActive),
 	}
 	if plan.TurnIdentityEnabled {
+		parentThreadID := strings.TrimSpace(plan.TurnIdentity.ParentThreadID)
+		forkedFromThreadID := strings.TrimSpace(plan.TurnIdentity.ForkedFromThreadID)
+		relation := string(plan.TurnIdentity.Relation)
+		if memoryRequest {
+			parentThreadID = ""
+			forkedFromThreadID = ""
+			relation = ""
+		}
 		parts = append(parts,
 			strings.TrimSpace(plan.TurnIdentity.SessionID),
 			strings.TrimSpace(plan.TurnIdentity.ThreadID),
-			strings.TrimSpace(plan.TurnIdentity.ParentThreadID),
-			strings.TrimSpace(plan.TurnIdentity.ForkedFromThreadID),
-			string(plan.TurnIdentity.Relation),
+			parentThreadID,
+			forkedFromThreadID,
+			relation,
 			strings.TrimSpace(plan.Window.WindowID()),
 		)
 	}
-	if plan.TurnIdentityRequested && openAICodexRequestTurnSnapshotValidForWire(plan.RequestTurn, requestKind) {
+	if requestTurnActive {
 		parts = append(parts,
 			strings.TrimSpace(plan.RequestTurn.ID),
 			strings.TrimSpace(plan.WireProfile.TurnLineage.ParentTurnID.Value),

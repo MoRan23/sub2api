@@ -222,7 +222,26 @@ type CodexWireProfile struct {
 	rootTurnIDMalformed    bool
 }
 
-var ErrInvalidOpenAICodexWireProfile = errors.New("invalid OpenAI Codex wire profile")
+var (
+	ErrInvalidOpenAICodexWireProfile  = errors.New("invalid OpenAI Codex wire profile")
+	ErrOpenAICodexRequestKindConflict = errors.New("OpenAI Codex request kind conflicts with the physical request shape")
+)
+
+func resolveOpenAICodexWireRequestKind(captured, fallback, forced CodexWireRequestKind) (CodexWireRequestKind, error) {
+	if captured == CodexWireRequestMemory && forced.valid() && forced != CodexWireRequestMemory {
+		return "", fmt.Errorf("%w: request_kind memory cannot be used for %s", ErrOpenAICodexRequestKindConflict, forced)
+	}
+	if forced.valid() {
+		return forced, nil
+	}
+	if captured.valid() {
+		return captured, nil
+	}
+	if fallback.valid() {
+		return fallback, nil
+	}
+	return CodexWireRequestTurn, nil
+}
 
 func (profile CodexWireProfile) Validate() error {
 	if profile.InvalidReason == "" {
@@ -741,7 +760,7 @@ func (profile CodexWireProfile) withDefaults(metadataProfile CodexMetadataProfil
 		profile.RequestKind = CodexWireRequestTurn
 	}
 	profile.resolveTurnIDs(profile.RequestKind)
-	if profile.AgentName == "" {
+	if profile.RequestKind != CodexWireRequestMemory && profile.AgentName == "" {
 		profile.AgentName = metadataProfile.AgentName
 	}
 	if profile.Sandbox == "" {
@@ -750,13 +769,13 @@ func (profile CodexWireProfile) withDefaults(metadataProfile CodexMetadataProfil
 	if profile.SandboxMode == "" {
 		profile.SandboxMode = metadataProfile.SandboxMode
 	}
-	if profile.AutoReviewEnabled == nil {
+	if profile.RequestKind != CodexWireRequestMemory && profile.AutoReviewEnabled == nil {
 		profile.AutoReviewEnabled = boolPointer(metadataProfile.AutoReviewEnabled)
 	}
-	if profile.NodeREPLAutoReviewRequired == nil {
+	if profile.RequestKind != CodexWireRequestMemory && profile.NodeREPLAutoReviewRequired == nil {
 		profile.NodeREPLAutoReviewRequired = boolPointer(false)
 	}
-	if profile.NodeREPLDisabled == nil {
+	if profile.RequestKind != CodexWireRequestMemory && profile.NodeREPLDisabled == nil {
 		profile.NodeREPLDisabled = boolPointer(false)
 	}
 	if profile.RequestKind != CodexWireRequestCompaction {
@@ -1012,6 +1031,9 @@ func FinalizeOpenAICodexWirePlanWithOptions(plan OpenAIOAuthIdentityPlan, option
 	}
 	profile.RequestKind = kind
 	profile.resolveTurnIDs(kind)
+	if kind == CodexWireRequestMemory {
+		clearOpenAICodexMemoryTurnIdentity(&plan, &profile)
+	}
 	if err := profile.Validate(); err != nil {
 		return plan, err
 	}
@@ -1065,8 +1087,10 @@ func FinalizeOpenAICodexWirePlanWithOptions(plan OpenAIOAuthIdentityPlan, option
 	if plan.TurnIdentityEnabled {
 		profile.SessionID = plan.TurnIdentity.SessionID
 		profile.ThreadID = plan.TurnIdentity.ThreadID
-		profile.TurnLineage.ParentThreadID = plan.TurnIdentity.ParentThreadID
-		profile.TurnLineage.ForkedFromThreadID = plan.TurnIdentity.ForkedFromThreadID
+		if kind != CodexWireRequestMemory {
+			profile.TurnLineage.ParentThreadID = plan.TurnIdentity.ParentThreadID
+			profile.TurnLineage.ForkedFromThreadID = plan.TurnIdentity.ForkedFromThreadID
+		}
 	}
 	profile.WindowID = ""
 	if ValidateOpenAICodexWindowSnapshot(plan.Window) == nil && plan.Window.ThreadID == plan.TurnIdentity.ThreadID {
@@ -1086,7 +1110,7 @@ func FinalizeOpenAICodexWirePlanWithOptions(plan OpenAIOAuthIdentityPlan, option
 	profile.ToolNamespacesAllowed = modelCapabilities.UseResponsesLite
 	metadataProfile := options.MetadataProfile.normalized()
 	profile.ToolNamespacesInfoAllowed = modelCapabilities.UseResponsesLite && metadataProfile.TurnMetadataIncludesToolInfo
-	if modelCapabilities.Known {
+	if modelCapabilities.Known && kind != CodexWireRequestMemory {
 		profile.NodeREPLAutoReviewRequired = boolPointer(modelCapabilities.NodeREPLAutoReviewRequired)
 		profile.NodeREPLDisabled = boolPointer(modelCapabilities.NodeREPLDisabled)
 	}
@@ -1112,4 +1136,29 @@ func FinalizeOpenAICodexWirePlanWithOptions(plan OpenAIOAuthIdentityPlan, option
 	}
 	plan.WireProfile = profile
 	return plan, nil
+}
+
+func clearOpenAICodexMemoryTurnIdentity(plan *OpenAIOAuthIdentityPlan, profile *CodexWireProfile) {
+	if plan != nil {
+		plan.RequestTurn = OpenAICodexRequestTurnSnapshot{}
+	}
+	if profile == nil {
+		return
+	}
+	profile.AgentName = ""
+	profile.TurnID = CodexTurnID{}
+	profile.TurnLineage = CodexTurnLineage{}
+	profile.TurnStartedAtUnixMS = 0
+	profile.TurnStartedAtSet = false
+	profile.Compaction = nil
+	profile.turnIDCandidates = nil
+	profile.parentTurnIDCandidates = nil
+	profile.rootTurnIDCandidates = nil
+	profile.turnIDPresent = false
+	profile.parentTurnIDPresent = false
+	profile.rootTurnIDPresent = false
+	profile.turnIDMalformed = false
+	profile.parentTurnIDMalformed = false
+	profile.rootTurnIDMalformed = false
+	profile.InvalidReason = ""
 }

@@ -103,6 +103,150 @@ func TestFinalizeOpenAIOAuthWSWirePlanPrewarmClearsDynamicTurnFields(t *testing.
 	}
 }
 
+func TestFinalizeOpenAIOAuthWSWirePlanMemoryAndPhysicalConflicts(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{Type: AccountTypeOAuth, Platform: PlatformOpenAI}
+	base := openAIMemoryRoutingTestPlan(t)
+	base.WireProfile.SubagentHeader = "memory_consolidation"
+	base.Capture.WireProfile.SubagentHeader = "memory_consolidation"
+	payload := []byte(`{"type":"response.create","model":"gpt-5.4","client_metadata":{"x-codex-turn-metadata":"{\"request_kind\":\"memory\",\"sandbox\":\"workspace-write\"}"},"input":"hi"}`)
+
+	plan, err := svc.finalizeOpenAIOAuthWSWirePlan(nil, account, base, payload, openAIOAuthWSWireFinalizeOptions{})
+	require.NoError(t, err)
+	require.Equal(t, CodexWireRequestMemory, plan.WireProfile.RequestKind)
+	require.Empty(t, plan.RequestTurn.ID)
+	require.Empty(t, plan.WireProfile.TurnID.Value)
+	require.Empty(t, plan.WireProfile.TurnLineage)
+	require.False(t, plan.WireProfile.TurnStartedAtSet)
+	require.Equal(t, base.TurnIdentity.SessionID, plan.WireProfile.SessionID)
+	require.Equal(t, base.TurnIdentity.ThreadID, plan.WireProfile.ThreadID)
+	require.Equal(t, base.Window.WindowID(), plan.WireProfile.WindowID)
+
+	projected, err := svc.projectOpenAIOAuthWSFrame(nil, account, plan, payload)
+	require.NoError(t, err)
+	nested := gjson.GetBytes(projected, "client_metadata.x-codex-turn-metadata").String()
+	require.Equal(t, "memory", gjson.Get(nested, "request_kind").String())
+	for _, key := range []string{
+		"installation_id", "session_id", "thread_id", "agent_name", "turn_id", "window_id",
+		"forked_from_thread_id", "parent_thread_id", "parent_turn_id", "root_turn_id",
+		"turn_started_at_unix_ms", "compaction",
+	} {
+		require.False(t, gjson.Get(nested, key).Exists(), key)
+	}
+	require.Equal(t, base.TurnIdentity.SessionID, gjson.GetBytes(projected, "client_metadata.session_id").String())
+	require.Equal(t, base.TurnIdentity.ThreadID, gjson.GetBytes(projected, "client_metadata.thread_id").String())
+	require.Equal(t, base.Window.WindowID(), gjson.GetBytes(projected, "client_metadata.x-codex-window-id").String())
+	require.False(t, gjson.GetBytes(projected, "client_metadata.turn_id").Exists())
+
+	conflicts := []struct {
+		name    string
+		payload []byte
+	}{
+		{name: "prewarm", payload: []byte(`{"type":"response.create","generate":false,"model":"gpt-5.4"}`)},
+		{name: "compaction", payload: []byte(`{"type":"response.create","model":"gpt-5.4","input":[{"type":"compaction_trigger"}]}`)},
+	}
+	for _, conflict := range conflicts {
+		t.Run(conflict.name, func(t *testing.T) {
+			_, conflictErr := svc.finalizeOpenAIOAuthWSWirePlan(nil, account, base, conflict.payload, openAIOAuthWSWireFinalizeOptions{})
+			require.ErrorIs(t, conflictErr, ErrOpenAICodexRequestKindConflict)
+		})
+	}
+}
+
+func TestFinalizeOpenAIOAuthWSWirePlanMemgenSubagentDoesNotImplyMemory(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{Type: AccountTypeOAuth, Platform: PlatformOpenAI}
+	base := codexWireProjectionTestPlan(t)
+	base.WireProfile.SubagentHeader = "memory_consolidation"
+	payload := []byte(`{"type":"response.create","model":"gpt-5.4","input":"consolidate"}`)
+
+	plan, err := svc.finalizeOpenAIOAuthWSWirePlan(nil, account, base, payload, openAIOAuthWSWireFinalizeOptions{})
+	require.NoError(t, err)
+	require.Equal(t, CodexWireRequestTurn, plan.WireProfile.RequestKind)
+	require.NotEmpty(t, plan.RequestTurn.ID)
+	require.Equal(t, "memory_consolidation", plan.WireProfile.SubagentHeader)
+}
+
+func TestFinalizeOpenAIOAuthWSWirePlanIgnoresSpoofedInternalRequestKind(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{Type: AccountTypeOAuth, Platform: PlatformOpenAI}
+	payload := []byte(`{"type":"response.create","model":"gpt-5.4","input":"ordinary turn"}`)
+
+	for _, spoofed := range []CodexWireRequestKind{CodexWireRequestCompaction, CodexWireRequestPrewarm} {
+		t.Run(string(spoofed), func(t *testing.T) {
+			base := codexWireProjectionTestPlan(t)
+			base.WireProfile.RequestKind = spoofed
+			base.Capture.WireProfile.RequestKind = spoofed
+			plan, err := svc.finalizeOpenAIOAuthWSWirePlan(nil, account, base, payload, openAIOAuthWSWireFinalizeOptions{})
+			require.NoError(t, err)
+			require.Equal(t, CodexWireRequestTurn, plan.WireProfile.RequestKind)
+			require.NotEmpty(t, plan.RequestTurn.ID)
+			require.Nil(t, openAICodexWSCompactionDeliveryForPlan(account, plan), "spoofed metadata must not arm compaction CAS")
+		})
+	}
+}
+
+func TestOpenAICodexWSWireRequestKindPhysicalCompactionPrecedesGenerateFalse(t *testing.T) {
+	plan := codexWireProjectionTestPlan(t)
+	payload := []byte(`{"type":"response.create","generate":false,"input":[{"type":"compaction_trigger"}]}`)
+	kind, err := openAICodexWSWireRequestKind(payload, plan)
+	require.NoError(t, err)
+	require.Equal(t, CodexWireRequestCompaction, kind)
+}
+
+func TestCaptureOpenAIWSFrameIdentityUsesCurrentFramePromptCacheSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set("api_key", &APIKey{ID: int64(994)})
+	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "ws-prompt-cache-secret"}}}
+	account := &Account{ID: 9194, Type: AccountTypeOAuth, Platform: PlatformOpenAI}
+	options := OpenAIOAuthIdentityPlanOptions{
+		TurnIdentityEnabled: true,
+		ProjectionMode:      OpenAIOAuthIdentityProjectionPassthrough,
+		InstallationPolicy:  OpenAIOAuthInstallationPreserve,
+	}
+	initialBody := []byte(`{"type":"response.create","model":"gpt-5.4","client_metadata":{"session_id":"ws-prompt-root"},"prompt_cache_key":"ws-prompt-root","input":"first"}`)
+	initialCapture := CaptureOpenAIOAuthIdentity(c, initialBody, "")
+	current, err := svc.ResolveOpenAIOAuthIdentityPlan(context.Background(), c, account, initialCapture, options)
+	require.NoError(t, err)
+	require.Equal(t, current.TurnIdentity.SessionID, current.PromptCacheKey.Value)
+	initialDigest := openAIWSOutboundIdentityPlanDigest(http.Header{}, current)
+
+	overrideBody := []byte(`{"type":"response.create","model":"gpt-5.4","prompt_cache_key":"review-scope","input":"override"}`)
+	overrideCapture := captureOpenAIWSFrameIdentity(
+		overrideBody,
+		&current,
+	)
+	require.Equal(t, current.Capture.Logical, overrideCapture.Logical, "the socket tuple remains pinned")
+	require.Equal(t, "review-scope", overrideCapture.PromptCacheKey.Value)
+	require.Equal(t, OpenAICodexPromptCacheKeyOverride, overrideCapture.PromptCacheKey.Kind)
+	require.True(t, overrideCapture.PromptCacheKey.Present)
+	require.True(t, overrideCapture.PromptCacheKey.Valid)
+	overridePlan, err := svc.ResolveOpenAIOAuthIdentityPlan(context.Background(), c, account, overrideCapture, options)
+	require.NoError(t, err)
+	require.Equal(t, current.TurnIdentity, overridePlan.TurnIdentity)
+	require.Len(t, overridePlan.PromptCacheKey.Value, 46)
+	require.Equal(t, "pc_", overridePlan.PromptCacheKey.Value[:3])
+	overrideProjected, err := ApplyOpenAIOAuthIdentityPlan(http.Header{}, overrideBody, overridePlan)
+	require.NoError(t, err)
+	require.Equal(t, overridePlan.PromptCacheKey.Value, gjson.GetBytes(overrideProjected, "prompt_cache_key").String())
+	require.Equal(t, initialDigest, openAIWSOutboundIdentityPlanDigest(http.Header{}, overridePlan), "per-frame override must not change socket affinity")
+
+	defaultBody := []byte(`{"type":"response.create","model":"gpt-5.4","prompt_cache_key":"ws-prompt-root","input":"default"}`)
+	defaultCapture := captureOpenAIWSFrameIdentity(defaultBody, &current)
+	require.Equal(t, current.Capture.Logical, defaultCapture.Logical)
+	require.Equal(t, OpenAICodexPromptCacheKeyDefault, defaultCapture.PromptCacheKey.Kind)
+	defaultPlan, err := svc.ResolveOpenAIOAuthIdentityPlan(context.Background(), c, account, defaultCapture, options)
+	require.NoError(t, err)
+	require.Equal(t, current.TurnIdentity, defaultPlan.TurnIdentity)
+	require.Equal(t, current.TurnIdentity.SessionID, defaultPlan.PromptCacheKey.Value)
+	defaultProjected, err := ApplyOpenAIOAuthIdentityPlan(http.Header{}, defaultBody, defaultPlan)
+	require.NoError(t, err)
+	require.Equal(t, current.TurnIdentity.SessionID, gjson.GetBytes(defaultProjected, "prompt_cache_key").String())
+	require.Equal(t, initialDigest, openAIWSOutboundIdentityPlanDigest(http.Header{}, defaultPlan))
+}
+
 func TestCaptureOpenAIWSFrameIdentityKeepsFrameWireProfile(t *testing.T) {
 	base := codexWireProjectionTestPlan(t)
 	base.Capture.WireProfile.AgentName = "connection-agent"
@@ -171,6 +315,39 @@ func TestFinalizeOpenAIOAuthWSWirePlanAPIKeyNoop(t *testing.T) {
 	projected, err := svc.projectOpenAIOAuthWSFrame(nil, account, plan, payload)
 	require.NoError(t, err)
 	require.Equal(t, payload, projected)
+}
+
+func TestFinalizeOpenAIOAuthWSWirePlanTurnIdentityDisabledDoesNotClassifyMemory(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{Type: AccountTypeOAuth, Platform: PlatformOpenAI}
+	base := openAIMemoryRoutingTestPlan(t)
+	base.TurnIdentityRequested = false
+	base.TurnIdentityEnabled = false
+	base.TurnIdentity = OpenAICodexTurnIdentity{}
+	base.InstallationEnabled = false
+	base.ClientIdentityEnabled = false
+	base.PromptCacheKey = OpenAICodexPromptCacheKeyPlan{}
+
+	tests := []struct {
+		name    string
+		payload []byte
+		options openAIOAuthWSWireFinalizeOptions
+	}{
+		{name: "ordinary turn", payload: []byte(`{"type":"response.create","model":"gpt-5.6-sol"}`)},
+		{name: "compaction trigger", payload: []byte(`{"type":"response.create","input":[{"type":"compaction_trigger"}]}`)},
+		{name: "prewarm", payload: []byte(`{"type":"response.create","generate":false}`)},
+		{name: "explicit compaction", payload: []byte(`{"type":"response.create"}`), options: openAIOAuthWSWireFinalizeOptions{RequestKind: CodexWireRequestCompaction}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			plan, err := svc.finalizeOpenAIOAuthWSWirePlan(nil, account, base, test.payload, test.options)
+			require.NoError(t, err)
+			require.Equal(t, base, plan)
+			projected, err := svc.projectOpenAIOAuthWSFrame(nil, account, plan, test.payload)
+			require.NoError(t, err)
+			require.Equal(t, test.payload, projected)
+		})
+	}
 }
 
 func TestFinalizeOpenAIOAuthWSWirePlanUsesEffectiveResponsesLiteCapability(t *testing.T) {

@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestAccountTestServiceOpenAICompactAgentIdentityUsesFreshAssertion(t *testing.T) {
@@ -140,7 +141,9 @@ func TestOpenAIAgentIdentityPassthroughKeepsSessionAndPromptCacheHeaders(t *test
 	require.Empty(t, req.Header.Get("conversation_id"))
 	requestBody, err := io.ReadAll(req.Body)
 	require.NoError(t, err)
-	require.Contains(t, string(requestBody), `"prompt_cache_key":"cache-agent"`)
+	agentPromptCacheKey := gjson.GetBytes(requestBody, "prompt_cache_key").String()
+	require.Len(t, agentPromptCacheKey, 46)
+	require.True(t, strings.HasPrefix(agentPromptCacheKey, "pc_"))
 
 	// Authentication mode must not affect session isolation or prompt-cache
 	// behavior. Compare the same request with the existing OAuth path instead
@@ -166,6 +169,9 @@ func TestOpenAIAgentIdentityPassthroughKeepsSessionAndPromptCacheHeaders(t *test
 	}
 	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(oauthIdentity))
 	require.Equal(t, agentIdentity, oauthIdentity)
+	oauthBody, err := io.ReadAll(oauthReq.Body)
+	require.NoError(t, err)
+	require.Equal(t, agentPromptCacheKey, gjson.GetBytes(oauthBody, "prompt_cache_key").String())
 }
 
 func TestOpenAIAgentIdentityErrorRedactionDoesNotLeakCredentialValues(t *testing.T) {
