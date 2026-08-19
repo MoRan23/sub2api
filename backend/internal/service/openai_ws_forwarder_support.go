@@ -30,6 +30,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	account *Account,
 	stateStore OpenAIWSStateStore,
 	groupID int64,
+	identityArgs ...any,
 ) error {
 	if s == nil {
 		return nil
@@ -77,8 +78,57 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	}
 	prewarmPayload["generate"] = false
 	prewarmPayloadJSON := payloadAsJSONBytes(prewarmPayload)
+	prewarmWirePayload := any(prewarmPayload)
+	if account.IsOpenAIOAuth() {
+		var c *gin.Context
+		var identityPlan OpenAIOAuthIdentityPlan
+		for _, arg := range identityArgs {
+			switch value := arg.(type) {
+			case *gin.Context:
+				c = value
+			case OpenAIOAuthIdentityPlan:
+				identityPlan = value
+			case *OpenAIOAuthIdentityPlan:
+				if value != nil {
+					identityPlan = *value
+				}
+			}
+		}
+		if strings.TrimSpace(identityPlan.CredentialOwnerNamespace) == "" {
+			return wrapOpenAIWSFallback("prewarm_metadata", errOpenAIOAuthWSWirePlanUnavailable)
+		}
+		fields := gjson.GetManyBytes(prewarmPayloadJSON, "model", "service_tier")
+		finalPlan, finalizeErr := s.finalizeOpenAIOAuthWSWirePlan(c, account, identityPlan, prewarmPayloadJSON, openAIOAuthWSWireFinalizeOptions{
+			RequestKind:      CodexWireRequestPrewarm,
+			FinalModel:       fields[0].String(),
+			FinalServiceTier: fields[1].String(),
+		})
+		if finalizeErr != nil {
+			return wrapOpenAIWSFallback("prewarm_metadata", finalizeErr)
+		}
+		// The prewarm plan describes only this physical generate=false frame.
+		// Restore the connection's ordinary-turn snapshot before the real request
+		// is sent, including on a prewarm read/write failure.
+		if c != nil {
+			defer SetOpenAIOAuthIdentityPlan(c, identityPlan)
+		}
+		projected, projectErr := s.projectOpenAIOAuthWSFrame(c, account, finalPlan, prewarmPayloadJSON)
+		if projectErr != nil {
+			return wrapOpenAIWSFallback("prewarm_metadata", projectErr)
+		}
+		prewarmPayloadJSON, projectErr = stripOpenAICodexPrewarmWorkspaces(projected)
+		if projectErr != nil {
+			return wrapOpenAIWSFallback("prewarm_metadata", projectErr)
+		}
+		stamped, stampErr := stampOpenAICodexWSStreamRequestStart(prewarmPayloadJSON, time.Now())
+		if stampErr != nil {
+			return wrapOpenAIWSFallback("prewarm_metadata", stampErr)
+		}
+		prewarmPayloadJSON = stamped
+		prewarmWirePayload = json.RawMessage(stamped)
+	}
 
-	if err := lease.WriteJSONWithContextTimeout(ctx, prewarmPayload, s.openAIWSWriteTimeout()); err != nil {
+	if err := lease.WriteJSONWithContextTimeout(ctx, prewarmWirePayload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
 			"prewarm_write_fail account_id=%d conn_id=%s cause=%s",

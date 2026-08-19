@@ -65,19 +65,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if toolSchemaSanitized {
 		body = sanitizedToolBody
 	}
-	if account.IsOpenAIOAuth() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) {
-		liteBody, changed, liteErr := normalizeOpenAIResponsesLiteToolsPayload(body)
-		if liteErr != nil {
-			setOpsUpstreamError(c, http.StatusBadRequest, liteErr.Error(), "")
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
-				"type": "invalid_request_error", "message": liteErr.Error(), "param": "tools",
-			}})
-			return nil, liteErr
-		}
-		if changed {
-			body = liteBody
-		}
-	}
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	// 仅允许 WS 入站请求走 WS 上游，避免出现 HTTP -> WS 协议混用。
 	wsDecision = resolveOpenAIWSDecisionByClientTransport(wsDecision, GetOpenAIClientTransport(c))
@@ -1115,8 +1102,8 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 		return nil, err
 	}
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
-	var outboundIdentity OpenAIOutboundSessionIdentity
-	outboundIdentityEnabled := false
+	identityPlan := OpenAIOAuthIdentityPlan{}
+	identityPlanned := false
 	compatMessagesBridge := false
 
 	// Build authentication for this request. Agent Identity signs a fresh
@@ -1169,6 +1156,8 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 		if planErr != nil {
 			return nil, fmt.Errorf("resolve openai OAuth identity plan: %w", planErr)
 		}
+		identityPlan = plan
+		identityPlanned = true
 		compatMessagesBridge = isOpenAICompatMessagesBridgeContext(c) || isOpenAICompatMessagesBridgeBody(body)
 		// 清除客户端透传的 session 头，后续用隔离后的值重新设置，防止跨用户会话碰撞。
 		clientConversationID := strings.TrimSpace(req.Header.Get("conversation_id"))
@@ -1196,10 +1185,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 		} else {
 			req.Header.Set("accept", "text/event-stream")
 		}
-		if plan.TurnIdentityEnabled {
-			outboundIdentity = plan.TurnIdentity
-			outboundIdentityEnabled = true
-		} else if !identityModeEnabled {
+		if !plan.TurnIdentityEnabled && !identityModeEnabled {
 			apiKeyID := getAPIKeyIDFromContext(c)
 			if isOpenAIResponsesCompactPath(c) {
 				// Preserve the historical compact header write even when the
@@ -1236,10 +1222,10 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 	// 用于网关未透传/改写 User-Agent 时，仍能命中 Codex 侧识别逻辑。
 	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 		if account.Type == AccountTypeOAuth {
-			if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok {
-				req.Header.Set("user-agent", plan.ClientIdentity.UserAgent)
-				req.Header.Set("originator", plan.ClientIdentity.Originator)
-				req.Header.Set("version", plan.ClientIdentity.Version)
+			if identityPlanned {
+				req.Header.Set("user-agent", identityPlan.ClientIdentity.UserAgent)
+				req.Header.Set("originator", identityPlan.ClientIdentity.Originator)
+				req.Header.Set("version", identityPlan.ClientIdentity.Version)
 			}
 		} else {
 			req.Header.Set("user-agent", resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, "").UserAgent)
@@ -1257,28 +1243,28 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 	// after account overrides but before the identity/socket snapshot is sealed.
 	applyOpenAICodexBetaFeatures(c, account, req.Header)
 	if account.Type == AccountTypeOAuth && !options.deferOAuthIdentityProjection {
-		if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok {
-			projectedBody, applyErr := ApplyOpenAIOAuthIdentityPlan(req.Header, body, plan)
-			if applyErr != nil {
-				return nil, fmt.Errorf("apply openai OAuth identity plan: %w", applyErr)
-			}
-			if !bytes.Equal(projectedBody, body) {
-				req.Body = io.NopCloser(bytes.NewReader(projectedBody))
-				req.ContentLength = int64(len(projectedBody))
-				req.GetBody = func() (io.ReadCloser, error) {
-					return io.NopCloser(bytes.NewReader(projectedBody)), nil
-				}
-			}
+		if !identityPlanned {
+			return nil, errors.New("final openai OAuth identity plan is missing")
 		}
-		// The opaque turn-state is valid only for the credential owner and stable
-		// outbound turn identity that minted it. Guard after the final projection.
-		s.guardOpenAICodexTurnStateEcho(c, account, req.Header)
+		fields := gjson.GetManyBytes(body, "model", "service_tier")
+		requestKind := "turn"
+		if identityPlan.ProjectionMode == OpenAIOAuthIdentityProjectionCompact {
+			requestKind = "compaction"
+		}
+		finalBody, finalizeErr := s.FinalizeOpenAIOAuthResponsesRequest(c, account, req, body, OpenAIOAuthResponsesFinalizeOptions{
+			Plan:             identityPlan,
+			FinalModel:       fields[0].String(),
+			FinalServiceTier: fields[1].String(),
+			RequestKind:      requestKind,
+			Transport:        "http",
+		})
+		if finalizeErr != nil {
+			return nil, fmt.Errorf("finalize openai OAuth Responses request: %w", finalizeErr)
+		}
+		body = finalBody
+	} else if account.Type != AccountTypeOAuth {
+		logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http", req.Header, body, "not_applicable")
 	}
-	if outboundIdentityEnabled {
-		setFingerprintObservationOutboundIdentity(c, outboundIdentity)
-	}
-	setOpenAICodexRoutingHintFromBody(req.Header, account, body)
-	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http", req.Header, body, "not_applicable")
 
 	return req, nil
 }

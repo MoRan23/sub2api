@@ -1038,6 +1038,50 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	require.Equal(t, firstIdentity, thirdIdentity)
 }
 
+func TestForwardAsAnthropic_GuardsCompositeTurnStateAfterFinalProjection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_messages_guard", "gpt-5.4")}
+	svc := &OpenAIGatewayService{
+		httpUpstream: upstream,
+		cfg: &config.Config{
+			JWT:      config.JWTConfig{Secret: "messages-turn-state-guard"},
+			Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}},
+		},
+	}
+	resetTurnStateLocalStore(t, 32)
+	account := &Account{
+		ID: 7001, Name: "messages-turn-state-guard", Platform: PlatformOpenAI,
+		Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+	}
+	svc.accountRepo = &installationIdentityRepoStub{accounts: map[int64]*Account{account.ID: account}}
+
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"turn_id":"`+turnStateTurnB+`"}`)
+	c.Request.Header.Set(openAICodexTurnStateHeader, "known-messages-state")
+	SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, body, "messages-guard-session"))
+	plan, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), c, account,
+		func() OpenAIOAuthIdentityCapture {
+			capture, _ := OpenAIOAuthIdentityCaptureFromContext(c)
+			return capture
+		}(),
+		OpenAIOAuthIdentityPlanOptions{TurnIdentityEnabled: true, ProjectionMode: OpenAIOAuthIdentityProjectionRegular, InstallationPolicy: OpenAIOAuthInstallationAccountPin}, nil)
+	require.NoError(t, err)
+	originPlan := plan
+	originPlan.RequestTurn.ID = turnStateTurnA
+	svc.noteOpenAICodexTurnStateProvenanceForPlan(c, account, "known-messages-state", originPlan)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "messages-guard-session", "gpt-5.4")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Empty(t, upstream.lastReq.Header.Get(openAICodexTurnStateHeader))
+	require.False(t, gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-turn-state").Exists())
+}
+
 func TestForwardAsAnthropic_OAuthRestoresCodexIdentityHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1452,7 +1496,7 @@ func requireOpenAIMessagesCodexIdentity(t *testing.T, req *http.Request, wantUse
 	require.Equal(t, wantUserAgent, req.Header.Get("User-Agent"))
 	require.Equal(t, wantOriginator, req.Header.Get("originator"))
 	require.Equal(t, codexCLIVersion, req.Header.Get("version"))
-	require.Equal(t, "responses=experimental", req.Header.Get("OpenAI-Beta"))
+	require.Empty(t, req.Header.Get("OpenAI-Beta"), "OAuth Responses must not synthesize the retired beta token")
 }
 
 func openAICompatSSEResponseWithoutUsage(responseID, model string) *http.Response {

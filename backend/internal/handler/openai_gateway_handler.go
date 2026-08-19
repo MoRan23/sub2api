@@ -202,6 +202,8 @@ const (
 
 const openAICompactionRouteContextKey = "openai_compaction_route"
 
+const compactionTriggerUnsupportedPathMessage = "compaction_trigger is only supported on /responses or /responses/compact"
+
 // openAIResponsesRequiredCapabilityForRequest keeps native v2 independent
 // from the legacy compact capability and mapping path.
 func openAIResponsesRequiredCapabilityForRequest(imageIntent bool, route openAICompactionRoute, platform string) service.OpenAIEndpointCapability {
@@ -860,6 +862,26 @@ func openAICompactionRouteFromContext(c *gin.Context) openAICompactionRoute {
 // promotion for non-streaming requests.
 // 返回归一化后的 body；ok=false 表示错误响应已写出，调用方应直接 return。
 func (h *OpenAIGatewayHandler) normalizeOpenAIResponsesCompactRequest(c *gin.Context, reqLog *zap.Logger, body []byte) ([]byte, bool) {
+	// Validate the untouched ingress body before inspecting compact signals or
+	// narrowing a legacy compact request. gjson otherwise treats malformed JSON
+	// and non-boolean stream values as false, which can incorrectly promote the
+	// request to the legacy compact route.
+	if !gjson.ValidBytes(body) {
+		logRequestBodyParseFailure(reqLog, body, nil)
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+		return nil, false
+	}
+	if _, valid := parseOpenAICompatibleStream(body); !valid {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", invalidStreamFieldTypeMessage)
+		return nil, false
+	}
+
+	legacyCompactPath := isOpenAILegacyCompactPath(c)
+	if service.HasCompactionTriggerInInput(body) && !legacyCompactPath && !isBareOpenAIResponsesPath(c) {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", compactionTriggerUnsupportedPathMessage)
+		return nil, false
+	}
+
 	route := classifyOpenAICompactionRoute(c, body)
 	setOpenAICompactionRoute(c, route)
 

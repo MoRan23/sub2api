@@ -278,7 +278,8 @@ func TestApplyOpenAIOAuthIdentityPlanProjectsRequestTurnAndCanonicalizesReserved
 	require.Empty(t, headers.Get("x-codex-window-id"))
 
 	require.Equal(t, requestTurn.ID, gjson.GetBytes(out, "client_metadata.turn_id").String())
-	require.Equal(t, requestTurn.StartedAtUnixMS, gjson.GetBytes(out, "client_metadata.turn_started_at_unix_ms").Int())
+	require.Equal(t, gjson.String, gjson.GetBytes(out, "client_metadata.turn_id").Type)
+	require.False(t, gjson.GetBytes(out, "client_metadata.turn_started_at_unix_ms").Exists())
 	nested := gjson.GetBytes(out, "client_metadata.x-codex-turn-metadata").String()
 	require.Equal(t, requestTurn.ID, gjson.Get(nested, "turn_id").String())
 	require.Equal(t, requestTurn.StartedAtUnixMS, gjson.Get(nested, "turn_started_at_unix_ms").Int())
@@ -631,7 +632,7 @@ func TestApplyOpenAIOAuthIdentityPlanPassthroughPinsRawClientMetadata(t *testing
 	require.Equal(t, "nested-keep", gjson.Get(nested, "label").String())
 }
 
-func TestApplyOpenAIOAuthIdentityPlanPassthroughProjectsFlatRequestTurnAsPair(t *testing.T) {
+func TestApplyOpenAIOAuthIdentityPlanPassthroughProjectsFlatRequestTurnIDOnly(t *testing.T) {
 	id, err := newOpenAICodexRootIdentity()
 	require.NoError(t, err)
 	requestTurn := OpenAICodexRequestTurnSnapshot{
@@ -650,7 +651,8 @@ func TestApplyOpenAIOAuthIdentityPlanPassthroughProjectsFlatRequestTurnAsPair(t 
 	require.Equal(t, requestTurn.ID, gjson.GetBytes(out, "turn_id").String())
 	require.Equal(t, requestTurn.StartedAtUnixMS, gjson.GetBytes(out, "turn_started_at_unix_ms").Int())
 	require.Equal(t, requestTurn.ID, gjson.GetBytes(out, "client_metadata.turn_id").String())
-	require.Equal(t, requestTurn.StartedAtUnixMS, gjson.GetBytes(out, "client_metadata.turn_started_at_unix_ms").Int())
+	require.Equal(t, gjson.String, gjson.GetBytes(out, "client_metadata.turn_id").Type)
+	require.False(t, gjson.GetBytes(out, "client_metadata.turn_started_at_unix_ms").Exists())
 }
 
 func TestApplyOpenAIOAuthIdentityPlanCanonicalizesFlatLineageAliases(t *testing.T) {
@@ -673,13 +675,30 @@ func TestApplyOpenAIOAuthIdentityPlanCanonicalizesFlatLineageAliases(t *testing.
 				ProjectionMode: mode, InstallationPolicy: OpenAIOAuthInstallationPreserve,
 			})
 			require.NoError(t, err)
-			require.Equal(t, identity.ParentThreadID, gjson.GetBytes(out, "client_metadata.parent_thread_id").String())
-			require.Equal(t, identity.ForkedFromThreadID, gjson.GetBytes(out, "client_metadata.forked_from_thread_id").String())
-			for _, alias := range []string{"parent-thread-id", "x-codex-parent-thread-id", "forked-from-thread-id"} {
+			require.Equal(t, identity.ParentThreadID, gjson.GetBytes(out, "client_metadata.x-codex-parent-thread-id").String())
+			for _, alias := range []string{"parent_thread_id", "parent-thread-id", "forked_from_thread_id", "forked-from-thread-id"} {
 				require.False(t, gjson.GetBytes(out, "client_metadata."+alias).Exists(), alias)
 			}
+			nested := gjson.GetBytes(out, "client_metadata.x-codex-turn-metadata").String()
+			require.Equal(t, identity.ParentThreadID, gjson.Get(nested, "parent_thread_id").String())
+			require.Equal(t, identity.ForkedFromThreadID, gjson.Get(nested, "forked_from_thread_id").String())
 		})
 	}
+}
+
+func TestApplyOpenAIOAuthIdentityPlanStableTurnOnlyPreservesFlatRequestTurn(t *testing.T) {
+	identity, err := newOpenAICodexRootIdentity()
+	require.NoError(t, err)
+	body := []byte(`{"client_metadata":{"turn_id":"client-turn","turn_started_at_unix_ms":123,"unknown":"keep"}}`)
+
+	out, err := ApplyOpenAIOAuthIdentityPlan(http.Header{}, body, OpenAIOAuthIdentityPlan{
+		TurnIdentity: identity, TurnIdentityEnabled: true,
+		ProjectionMode: OpenAIOAuthIdentityProjectionRegular, InstallationPolicy: OpenAIOAuthInstallationPreserve,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "client-turn", gjson.GetBytes(out, "client_metadata.turn_id").String())
+	require.Equal(t, int64(123), gjson.GetBytes(out, "client_metadata.turn_started_at_unix_ms").Int())
+	require.Equal(t, "keep", gjson.GetBytes(out, "client_metadata.unknown").String())
 }
 
 func TestApplyOpenAIOAuthIdentityPlanPassthroughPinsTopLevelTurnMetadata(t *testing.T) {

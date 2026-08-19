@@ -3,6 +3,8 @@
 package handler
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -38,13 +40,16 @@ func loggedFields(t *testing.T, logs *observer.ObservedLogs) map[string]any {
 func TestLogRequestBodyParseFailure_DerivesErrorWhenNil(t *testing.T) {
 	log, logs := newObservedLogger(t)
 	body := []byte(`{"model": bad}`)
+	var raw json.RawMessage
+	var syntaxErr *json.SyntaxError
+	require.ErrorAs(t, json.Unmarshal(body, &raw), &syntaxErr)
 
 	logRequestBodyParseFailure(log, body, nil)
 
 	fields := loggedFields(t, logs)
 	require.Equal(t, len(body), fields["body_len"])
 	require.Contains(t, fields["error"], "invalid json")
-	require.Contains(t, fields["error"], "offset=11")
+	require.Contains(t, fields["error"], fmt.Sprintf("offset=%d", syntaxErr.Offset))
 }
 
 func TestLogRequestBodyParseFailure_ShortBodyHasNoTail(t *testing.T) {

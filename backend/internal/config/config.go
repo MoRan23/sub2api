@@ -879,6 +879,47 @@ const (
 	ImageConcurrencyOverflowModeWait   = "wait"
 )
 
+const (
+	DefaultGatewayCodexMetadataAgentName   = "/root"
+	DefaultGatewayCodexMetadataSandbox     = "none"
+	DefaultGatewayCodexMetadataSandboxMode = "danger-full-access"
+)
+
+// GatewayCodexMetadataConfig defines the process-level defaults used only
+// when a valid inbound Codex turn-metadata field is absent. The gateway copies
+// these values into an immutable request snapshot before wire finalization.
+type GatewayCodexMetadataConfig struct {
+	AgentName                    string `mapstructure:"agent_name"`
+	Sandbox                      string `mapstructure:"sandbox"`
+	SandboxMode                  string `mapstructure:"sandbox_mode"`
+	AutoReviewEnabled            bool   `mapstructure:"auto_review_enabled"`
+	TurnMetadataIncludesToolInfo bool   `mapstructure:"turn_metadata_includes_tool_info"`
+}
+
+func DefaultGatewayCodexMetadataConfig() GatewayCodexMetadataConfig {
+	return GatewayCodexMetadataConfig{
+		AgentName:   DefaultGatewayCodexMetadataAgentName,
+		Sandbox:     DefaultGatewayCodexMetadataSandbox,
+		SandboxMode: DefaultGatewayCodexMetadataSandboxMode,
+	}
+}
+
+func (c GatewayCodexMetadataConfig) Normalized() GatewayCodexMetadataConfig {
+	c.AgentName = strings.TrimSpace(c.AgentName)
+	c.Sandbox = strings.TrimSpace(c.Sandbox)
+	c.SandboxMode = strings.TrimSpace(c.SandboxMode)
+	if c.AgentName == "" {
+		c.AgentName = DefaultGatewayCodexMetadataAgentName
+	}
+	if c.Sandbox == "" {
+		c.Sandbox = DefaultGatewayCodexMetadataSandbox
+	}
+	if c.SandboxMode == "" {
+		c.SandboxMode = DefaultGatewayCodexMetadataSandboxMode
+	}
+	return c
+}
+
 // GatewayConfig API网关相关配置
 type GatewayConfig struct {
 	// 等待上游响应头的超时时间（秒），0表示无超时
@@ -915,6 +956,9 @@ type GatewayConfig struct {
 	// CodexImageGenerationBridgeEnabled: 是否为 Codex `/v1/responses` 自动注入 image_generation 工具和桥接指令。
 	// 默认关闭，避免纯文本 Codex 请求被意外改写；显式携带 image_generation 工具的请求仍按分组能力转发。
 	CodexImageGenerationBridgeEnabled bool `mapstructure:"codex_image_generation_bridge_enabled"`
+	// CodexMetadata: OAuth Codex turn metadata 的进程级兼容默认值。
+	// 合法入站字段优先；该配置只补齐缺失字段。
+	CodexMetadata GatewayCodexMetadataConfig `mapstructure:"codex_metadata"`
 	// ForcedCodexInstructionsTemplateFile: 服务端强制附加到 Codex 顶层 instructions 的模板文件路径。
 	// 模板渲染后会直接覆盖最终 instructions；若需要保留客户端 system 转换结果，请在模板中显式引用 {{ .ExistingInstructions }}。
 	ForcedCodexInstructionsTemplateFile string `mapstructure:"forced_codex_instructions_template_file"`
@@ -1815,6 +1859,7 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.Log.Environment = strings.TrimSpace(cfg.Log.Environment)
 	cfg.Log.StacktraceLevel = strings.ToLower(strings.TrimSpace(cfg.Log.StacktraceLevel))
 	cfg.Log.Output.FilePath = strings.TrimSpace(cfg.Log.Output.FilePath)
+	cfg.Gateway.CodexMetadata = cfg.Gateway.CodexMetadata.Normalized()
 	cfg.Gateway.ForcedCodexInstructionsTemplateFile = strings.TrimSpace(cfg.Gateway.ForcedCodexInstructionsTemplateFile)
 	if cfg.Gateway.ForcedCodexInstructionsTemplateFile != "" {
 		content, err := os.ReadFile(cfg.Gateway.ForcedCodexInstructionsTemplateFile)
@@ -2284,6 +2329,11 @@ func setDefaults() {
 	viper.SetDefault("gateway.disable_codex_identity_enforcement", false)
 	viper.SetDefault("gateway.disable_codex_originator_normalization", false)
 	viper.SetDefault("gateway.codex_image_generation_bridge_enabled", false)
+	viper.SetDefault("gateway.codex_metadata.agent_name", DefaultGatewayCodexMetadataAgentName)
+	viper.SetDefault("gateway.codex_metadata.sandbox", DefaultGatewayCodexMetadataSandbox)
+	viper.SetDefault("gateway.codex_metadata.sandbox_mode", DefaultGatewayCodexMetadataSandboxMode)
+	viper.SetDefault("gateway.codex_metadata.auto_review_enabled", false)
+	viper.SetDefault("gateway.codex_metadata.turn_metadata_includes_tool_info", false)
 	viper.SetDefault("gateway.openai_passthrough_allow_timeout_headers", false)
 	viper.SetDefault("gateway.openai_compact_model", "gpt-5.4")
 	viper.SetDefault("gateway.live.max_session_duration_seconds", 3600)

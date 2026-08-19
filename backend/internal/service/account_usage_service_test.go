@@ -242,6 +242,79 @@ func TestAccountUsageService_ProfileIdentityFallbackUsesConfiguredFingerprintPol
 	}
 }
 
+func TestAccountUsageService_UsageProbeIdentityUsesStableLogicalSeedAndFreshRequestTurn(t *testing.T) {
+	gateway := &OpenAIGatewayService{}
+	svc := &AccountUsageService{openAIGatewayService: gateway}
+	account := &Account{
+		ID:       9042,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Extra: map[string]any{
+			openAIPinnedInstallationIDKey: "33333333-4444-4555-8666-777777777777",
+		},
+	}
+	payload := []byte(`{"model":"gpt-5.4","stream":true}`)
+
+	first, err := svc.resolveOpenAICodexUsageProbeIdentityPlan(context.Background(), account, payload)
+	if err != nil {
+		t.Fatalf("resolve first usage probe identity: %v", err)
+	}
+	second, err := svc.resolveOpenAICodexUsageProbeIdentityPlan(context.Background(), account, payload)
+	if err != nil {
+		t.Fatalf("resolve second usage probe identity: %v", err)
+	}
+	if first.Capture.Logical.SessionKey != "usage-probe" {
+		t.Fatalf("logical seed = %q, want usage-probe", first.Capture.Logical.SessionKey)
+	}
+	if !first.TurnIdentityEnabled || first.TurnIdentity.SessionID == "" || first.TurnIdentity.ThreadID == "" {
+		t.Fatalf("missing stable usage probe identity: %#v", first)
+	}
+	if first.TurnIdentity != second.TurnIdentity {
+		t.Fatalf("stable identity changed across probes: first=%#v second=%#v", first.TurnIdentity, second.TurnIdentity)
+	}
+	if first.RequestTurn.ID == "" || first.RequestTurn.ID == second.RequestTurn.ID {
+		t.Fatalf("independent probes must get fresh request turns: first=%#v second=%#v", first.RequestTurn, second.RequestTurn)
+	}
+	if first.InstallationID != "33333333-4444-4555-8666-777777777777" || !first.InstallationEnabled {
+		t.Fatalf("installation identity not pinned: %#v", first)
+	}
+	if first.ClientIdentity.UserAgent == "" || first.ClientIdentity.Originator == "" || first.ClientIdentity.Version == "" {
+		t.Fatalf("client identity is incomplete: %#v", first.ClientIdentity)
+	}
+}
+
+func TestAccountUsageService_UsageProbeIdentityFlagOffDoesNotProjectTurnStoreIdentity(t *testing.T) {
+	repo := &openAIUUIDv7RuntimeRepo{values: map[string]string{
+		SettingKeyEnableOpenAICodexFingerprintNormalization:    "false",
+		SettingKeyEnableOpenAICodexInstallationIDNormalization: "false",
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity:            "false",
+		SettingKeyEnableOpenAICodexClientIdentityNormalization: "false",
+	}}
+	settings := NewSettingService(repo, nil)
+	svc := &AccountUsageService{
+		settingService:       settings,
+		openAIGatewayService: &OpenAIGatewayService{settingService: settings},
+	}
+	account := &Account{ID: 9043, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	body := []byte(`{"model":"gpt-5.4","stream":true}`)
+
+	plan, err := svc.resolveOpenAICodexUsageProbeIdentityPlan(context.Background(), account, body)
+	if err != nil {
+		t.Fatalf("resolve disabled usage probe identity: %v", err)
+	}
+	if plan.TurnIdentityRequested || plan.TurnIdentityEnabled || plan.InstallationEnabled {
+		t.Fatalf("disabled policy projected fingerprint identity: %#v", plan)
+	}
+	headers := make(http.Header)
+	out, err := ApplyOpenAIOAuthIdentityPlan(headers, body, plan)
+	if err != nil {
+		t.Fatalf("apply disabled usage probe identity: %v", err)
+	}
+	if string(out) != string(body) || headers.Get("session-id") != "" || headers.Get(codexInstallationIDKey) != "" {
+		t.Fatalf("disabled policy changed turn wire: headers=%v body=%s", headers, out)
+	}
+}
+
 func TestBuildCodexUsageProgressFromExtra_ZerosExpiredWindow(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)

@@ -54,8 +54,12 @@ func TestCaptureOpenAIWSFrameIdentityTurnLifecycle(t *testing.T) {
 	require.True(t, next.RequestTurn.Generated)
 	require.NotEqual(t, first.RequestTurn.ID, next.RequestTurn.ID)
 
-	continuation := captureOpenAIWSFrameIdentity([]byte(`{"type":"response.create","previous_response_id":"resp_1"}`), &plan)
-	require.Equal(t, first.RequestTurn, continuation.RequestTurn)
+	responseChain := captureOpenAIWSFrameIdentity([]byte(`{"type":"response.create","previous_response_id":"resp_1"}`), &plan)
+	require.True(t, responseChain.RequestTurn.Generated)
+	require.NotEqual(t, first.RequestTurn.ID, responseChain.RequestTurn.ID)
+
+	toolContinuation := captureOpenAIWSFrameIdentity([]byte(`{"type":"response.create","previous_response_id":"resp_1","input":[{"type":"function_call_output","call_id":"call_1","output":"ok"}]}`), &plan)
+	require.Equal(t, first.RequestTurn, toolContinuation.RequestTurn)
 
 	compaction := captureOpenAIWSFrameIdentity([]byte(`{"type":"response.create","input":[{"type":"compaction_trigger"}]}`), &plan)
 	require.Equal(t, first.RequestTurn, compaction.RequestTurn)

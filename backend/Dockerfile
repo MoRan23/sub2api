@@ -1,5 +1,7 @@
 FROM golang:1.26.6-alpine
 
+ENV GOEXPERIMENT=jsonv2
+
 WORKDIR /app
 
 # 安装必要的工具

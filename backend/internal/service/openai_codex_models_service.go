@@ -500,6 +500,10 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotModified {
+		if !request.useAPIKeyUpstream {
+			namespace := openAIOutboundSessionIdentityNamespace(request.credentialAccount)
+			s.codexModelCapabilities.refreshNamespace(namespace, time.Now())
+		}
 		return &CodexModelsManifest{ETag: resp.Header.Get("ETag"), NotModified: true}, nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -555,6 +559,9 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 				retryable: true,
 			}
 		}
+	} else {
+		namespace := openAIOutboundSessionIdentityNamespace(request.credentialAccount)
+		s.codexModelCapabilities.observeManifest(namespace, body, time.Now())
 	}
 	etag := resp.Header.Get("ETag")
 	manifest := &CodexModelsManifest{Body: body, ETag: etag}

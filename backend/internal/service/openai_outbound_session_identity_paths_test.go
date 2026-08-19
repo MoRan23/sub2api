@@ -660,6 +660,73 @@ func TestOpenAIOutboundIdentityPathsOAuthPassthroughUsesMetadataWithoutLegacySee
 	require.Equal(t, 2, identityPathCacheCalls(cache))
 }
 
+func TestOpenAIHTTPIdentityBuildersGuardCompositeTurnStateAfterProjection(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		passthrough bool
+	}{
+		{name: "regular"},
+		{name: "passthrough", passthrough: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetTurnStateLocalStore(t, 32)
+			svc, _ := newOpenAIIdentityPathService(t, true, nil)
+			account := newOpenAIIdentityPathOAuthAccount(920100)
+			if tc.passthrough {
+				account.Extra = map[string]any{"openai_passthrough": true}
+			}
+			build := func(c *gin.Context, body []byte) (*http.Request, error) {
+				if tc.passthrough {
+					return svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, "oauth-token")
+				}
+				return svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "oauth-token", true, "guard-session", true)
+			}
+
+			firstBody := []byte(`{"model":"gpt-5.4","input":"hello","client_metadata":{"session_id":"guard-session","thread_id":"guard-session","keep":{"nested":true},"x-codex-turn-state":"known-state","x-codex-turn-metadata":"{\"turn_id\":\"` + turnStateTurnA + `\"}"}}`)
+			c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", firstBody, 707)
+			c.Request.Header.Set(openAICodexTurnStateHeader, "known-state")
+			firstReq, err := build(c, firstBody)
+			require.NoError(t, err)
+			firstOutboundBody := readOpenAIIdentityPathRequestBody(t, firstReq)
+			require.Equal(t, "known-state", gjson.GetBytes(firstOutboundBody, "client_metadata.x-codex-turn-state").String())
+			firstPlan, ok := OpenAIOAuthIdentityPlanFromContext(c)
+			require.True(t, ok)
+			svc.noteOpenAICodexTurnStateProvenanceForPlan(c, account, "known-state", firstPlan)
+
+			mismatchBody := []byte(`{"sequence":9007199254740993,"model":"gpt-5.4","input":"hello","client_metadata":{"session_id":"guard-session","thread_id":"guard-session","keep":{"nested":true},"x-codex-turn-state":"known-state","x-codex-turn-metadata":"{\"turn_id\":\"` + turnStateTurnB + `\"}"},"tail":"preserved"}`)
+			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, mismatchBody, ""))
+			c.Request.Header.Set(openAICodexTurnStateHeader, "known-state")
+			mismatchReq, err := build(c, mismatchBody)
+			require.NoError(t, err)
+			mismatchOutboundBody := readOpenAIIdentityPathRequestBody(t, mismatchReq)
+			require.Empty(t, mismatchReq.Header.Get(openAICodexTurnStateHeader))
+			require.False(t, gjson.GetBytes(mismatchOutboundBody, "client_metadata.x-codex-turn-state").Exists())
+			require.True(t, gjson.GetBytes(mismatchOutboundBody, "client_metadata.keep.nested").Bool())
+			require.Equal(t, "preserved", gjson.GetBytes(mismatchOutboundBody, "tail").String())
+			require.Contains(t, string(mismatchOutboundBody), "9007199254740993")
+			require.Equal(t, int64(len(mismatchOutboundBody)), mismatchReq.ContentLength)
+			replay, replayErr := mismatchReq.GetBody()
+			require.NoError(t, replayErr)
+			replayedBody, replayErr := io.ReadAll(replay)
+			require.NoError(t, replayErr)
+			require.NoError(t, replay.Close())
+			require.Equal(t, mismatchOutboundBody, replayedBody)
+
+			unknownBody := []byte(`{"sequence":9007199254740993,"model":"gpt-5.4","client_metadata":{"session_id":"guard-session","thread_id":"guard-session","keep":{"nested":true},"x-codex-turn-state":"external-state","x-codex-turn-metadata":"{\"turn_id\":\"` + turnStateTurnB + `\"}"},"tail":"preserved"}`)
+			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, unknownBody, ""))
+			c.Request.Header.Set(openAICodexTurnStateHeader, "external-state")
+			unknownReq, err := build(c, unknownBody)
+			require.NoError(t, err)
+			unknownOutboundBody := readOpenAIIdentityPathRequestBody(t, unknownReq)
+			require.Equal(t, "external-state", unknownReq.Header.Get(openAICodexTurnStateHeader))
+			require.Equal(t, "external-state", gjson.GetBytes(unknownOutboundBody, "client_metadata.x-codex-turn-state").String())
+			require.True(t, gjson.GetBytes(unknownOutboundBody, "client_metadata.keep.nested").Bool())
+			require.Equal(t, "preserved", gjson.GetBytes(unknownOutboundBody, "tail").String())
+			require.Contains(t, string(unknownOutboundBody), "9007199254740993")
+		})
+	}
+}
+
 func TestOpenAIOutboundIdentityPassthroughPinsInstallationAcrossCarriers(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","input":"hello","prompt_cache_key":"passthrough-install-session","client_metadata":{"x-codex-installation-id":"client-body-install","x-codex-turn-metadata":"{\"installation_id\":\"client-nested-install\",\"label\":\"keep\"}"}}`)
 	c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 332)

@@ -585,6 +585,18 @@ func openAIWSPassthroughIsTerminalOutput(payload []byte) bool {
 	}
 }
 
+func openAIWSPassthroughOutputCommitsTurnState(payload []byte) bool {
+	eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+	switch eventType {
+	case "", "error", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
+		return false
+	case "response.completed", "response.done":
+		return true
+	default:
+		return openAIWSPassthroughStartsSemanticOutput(payload)
+	}
+}
+
 var _ openaiwsv2.FrameConn = (*openAIWSClientFrameConn)(nil)
 var _ openaiwsv2.FrameConn = (*openAIWSPassthroughFirstOutputFrameConn)(nil)
 
@@ -674,12 +686,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
 	}
-	if account.IsOpenAIOAuth() && isOpenAIResponsesLiteWebSocketPayload(firstClientMessage) {
-		liteFirstMessage, _, liteErr := normalizeOpenAIResponsesLiteToolsPayload(firstClientMessage)
-		if liteErr != nil {
-			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, liteErr.Error(), liteErr)
+	rawFirstClientMessage := append([]byte(nil), firstClientMessage...)
+	if account.IsOpenAIOAuth() {
+		if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
+			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, rawFirstClientMessage, ""))
 		}
-		firstClientMessage = liteFirstMessage
 	}
 	if hooks != nil && (hooks.MaxReasoningEffort != "" || len(hooks.ReasoningEffortMappings) > 0) {
 		if capped, changed := ApplyOpenAIReasoningEffortPolicy(firstClientMessage, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings); changed {
@@ -800,9 +811,20 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	turnState := ""
 	turnMetadata := ""
+	stateStore := s.getOpenAIWSStateStore()
+	groupID := getOpenAIGroupIDFromContext(c)
+	sessionHash := ""
 	if c != nil {
 		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 		turnMetadata = c.GetHeader(openAIWSTurnMetadataHeader)
+	}
+	if account.IsOpenAIOAuth() {
+		sessionHash = s.GenerateSessionHashForOpenAIOAuthIdentity(c, rawFirstClientMessage, "")
+		if turnState == "" && stateStore != nil && sessionHash != "" {
+			if savedTurnState, ok := stateStore.GetSessionTurnState(groupID, sessionHash); ok {
+				turnState = savedTurnState
+			}
+		}
 	}
 	headers, sessionResolution, buildHdrErr := s.buildOpenAIWSHeadersWithBody(
 		ctx,
@@ -825,13 +847,25 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	outboundIdentityModeEnabled = sessionResolution.OutboundIdentityModeEnabled
 	outboundLogicalIdentity = sessionResolution.OutboundLogicalIdentity
 	outboundIdentityPlan = sessionResolution.OutboundIdentityPlan
+	handshakeIdentityPlan := outboundIdentityPlan
+	var outboundIdentityMu sync.Mutex
+	activeCompactionPlan := outboundIdentityPlan
+	activeCompactionDelivery := openAICodexWSCompactionDeliveryForPlan(account, outboundIdentityPlan)
+	beginCompactionDelivery := func(plan OpenAIOAuthIdentityPlan) {
+		outboundIdentityMu.Lock()
+		activeCompactionPlan = plan
+		activeCompactionDelivery = openAICodexWSCompactionDeliveryForPlan(account, plan)
+		outboundIdentityMu.Unlock()
+	}
 	if sessionResolution.OutboundIdentityEnabled {
 		outboundIdentityEnabled = true
 	}
 	if account.IsOpenAIOAuth() {
-		if mergedFirst, mergeErr := ApplyOpenAIOAuthIdentityPlan(nil, firstClientMessage, outboundIdentityPlan); mergeErr == nil {
-			firstClientMessage = mergedFirst
+		mergedFirst, mergeErr := s.projectOpenAIOAuthWSFrame(c, account, outboundIdentityPlan, firstClientMessage)
+		if mergeErr != nil {
+			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to project websocket turn identity", mergeErr)
 		}
+		firstClientMessage = mergedFirst
 	}
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -896,6 +930,25 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		statusCode,
 		openAIWSHeaderValueForLog(handshakeHeaders, "x-request-id"),
 	)
+	handshakeTurnState := strings.TrimSpace(handshakeHeaders.Get(openAIWSTurnStateHeader))
+	var commitHandshakeTurnStateOnce sync.Once
+	commitHandshakeTurnState := func() {
+		commitHandshakeTurnStateOnce.Do(func() {
+			if stateStore != nil && sessionHash != "" {
+				if handshakeTurnState == "" {
+					stateStore.DeleteSessionTurnState(groupID, sessionHash)
+				} else {
+					stateStore.BindSessionTurnState(groupID, sessionHash, handshakeTurnState, s.openAIWSSessionStickyTTL())
+				}
+			}
+			if handshakeTurnState != "" {
+				outboundIdentityMu.Lock()
+				plan := handshakeIdentityPlan
+				outboundIdentityMu.Unlock()
+				s.noteOpenAICodexTurnStateProvenanceForPlan(c, account, handshakeTurnState, plan)
+			}
+		})
+	}
 
 	upstreamFrameConn, ok := upstreamConn.(openaiwsv2.FrameConn)
 	if !ok {
@@ -959,26 +1012,37 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 			isResponseCreate := eventType == "response.create"
+			var frameIdentityPlan OpenAIOAuthIdentityPlan
 			if isResponseCreate && outboundIdentityModeEnabled {
+				outboundIdentityMu.Lock()
+				currentIdentityPlan := outboundIdentityPlan
 				// Passthrough owns one upstream socket. Missing tuple fields inherit.
 				// Only explicit logical identity signals can invalidate this socket.
 				// prompt_cache_key is cache policy and inherits the connection snapshot.
-				frameCapture := captureOpenAIWSFrameIdentity(payload, &outboundIdentityPlan)
+				frameCapture := captureOpenAIWSFrameIdentity(payload, &currentIdentityPlan)
 				frameLogicalIdentity := frameCapture.Logical
 				if frameLogicalIdentity.Explicit && strings.TrimSpace(frameLogicalIdentity.SessionKey) != "" &&
 					(!outboundIdentityEnabled || !openAICodexLogicalTurnIdentityEqual(frameLogicalIdentity, outboundLogicalIdentity)) {
 					err := errors.New("websocket outbound session logical key changed on passthrough connection")
+					outboundIdentityMu.Unlock()
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
 				}
 				framePlan, identityErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, frameCapture, OpenAIOAuthIdentityPlanOptions{
 					TurnIdentityEnabled: outboundIdentityPlan.TurnIdentityRequested,
 					ProjectionMode:      outboundIdentityPlan.ProjectionMode,
 					InstallationPolicy:  outboundIdentityPlan.InstallationPolicy,
-				}, &outboundIdentityPlan)
+				}, &currentIdentityPlan)
 				if identityErr != nil {
+					outboundIdentityMu.Unlock()
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to resolve websocket turn identity", identityErr)
 				}
 				outboundIdentityPlan = framePlan
+				frameIdentityPlan = framePlan
+				outboundIdentityMu.Unlock()
+			} else if isResponseCreate {
+				outboundIdentityMu.Lock()
+				frameIdentityPlan = outboundIdentityPlan
+				outboundIdentityMu.Unlock()
 			}
 			responseCreateAt := time.Time{}
 			acceptedTurn := false
@@ -995,13 +1059,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}()
 			}
 			if isResponseCreate {
-				if account.IsOpenAIOAuth() && isOpenAIResponsesLiteWebSocketPayload(payload) {
-					litePayload, _, liteErr := normalizeOpenAIResponsesLiteToolsPayload(payload)
-					if liteErr != nil {
-						return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, liteErr.Error(), liteErr)
-					}
-					payload = litePayload
-				}
 				if hooks != nil && (hooks.MaxReasoningEffort != "" || len(hooks.ReasoningEffortMappings) > 0) {
 					if capped, changed := ApplyOpenAIReasoningEffortPolicy(payload, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings); changed {
 						payload = capped
@@ -1081,9 +1138,39 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				acceptedTurn = true
 			}
 			if account.IsOpenAIOAuth() && isResponseCreate {
-				if mergedPayload, mergeErr := ApplyOpenAIOAuthIdentityPlan(nil, out, outboundIdentityPlan); mergeErr == nil {
-					out = mergedPayload
+				finalFields := gjson.GetManyBytes(out, "model", "service_tier")
+				finalizedPlan, finalizeErr := s.finalizeOpenAIOAuthWSWirePlan(c, account, frameIdentityPlan, out, openAIOAuthWSWireFinalizeOptions{
+					FinalModel:       finalFields[0].String(),
+					FinalServiceTier: finalFields[1].String(),
+				})
+				if finalizeErr != nil {
+					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to finalize websocket turn identity", finalizeErr)
 				}
+				frameIdentityPlan = finalizedPlan
+				outboundIdentityMu.Lock()
+				outboundIdentityPlan = finalizedPlan
+				outboundIdentityMu.Unlock()
+				mergedPayload, mergeErr := s.projectOpenAIOAuthWSFrame(c, account, frameIdentityPlan, out)
+				if mergeErr != nil {
+					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to project websocket turn identity", mergeErr)
+				}
+				out = mergedPayload
+				stamped, stampErr := stampOpenAICodexWSStreamRequestStart(out, time.Now())
+				if stampErr != nil {
+					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to stamp websocket request metadata", stampErr)
+				}
+				out = stamped
+			} else if account.IsOpenAIOAuth() {
+				// Control frames are not turn requests and must not receive identity
+				// metadata, but an echoed turn-state carrier still crosses the same
+				// provenance boundary before its physical upstream write.
+				outboundIdentityMu.Lock()
+				controlPlan := outboundIdentityPlan
+				outboundIdentityMu.Unlock()
+				out = s.guardOpenAICodexTurnStateEchoForPlan(c, account, controlPlan, nil, out)
+			}
+			if isResponseCreate && acceptedTurn && policyErr == nil && blocked == nil {
+				beginCompactionDelivery(frameIdentityPlan)
 			}
 			return out, blocked, policyErr
 		},
@@ -1102,6 +1189,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		},
 	}
 	upstreamFirstMessageSent := false
+	if account.IsOpenAIOAuth() {
+		stamped, stampErr := stampOpenAICodexWSStreamRequestStart(firstClientMessage, time.Now())
+		if stampErr != nil {
+			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to stamp websocket request metadata", stampErr)
+		}
+		firstClientMessage = stamped
+	}
 	firstWriteCtx, cancelFirstWrite := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
 	firstWriteErr := relayUpstreamFrameConn.WriteFrame(firstWriteCtx, coderws.MessageText, firstClientMessage)
 	cancelFirstWrite()
@@ -1215,6 +1309,31 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 			},
 			AfterClientWrite: func(msgType coderws.MessageType, payload []byte, writeErr error) {
+				isDataFrame := msgType == coderws.MessageText || msgType == coderws.MessageBinary
+				isTerminal := isDataFrame && openAIWSPassthroughIsTerminalOutput(payload)
+				if writeErr == nil && isDataFrame {
+					outboundIdentityMu.Lock()
+					observeOpenAICodexWSCompactionDelivery(activeCompactionDelivery, payload)
+					if isTerminal {
+						postWindowPlan := activeCompactionPlan
+						if s.commitOpenAICodexWSCompactionAfterDelivery(
+							ctx,
+							c,
+							account,
+							&postWindowPlan,
+							activeCompactionDelivery,
+							handshakeTurnState,
+						) {
+							outboundIdentityPlan = postWindowPlan
+							handshakeIdentityPlan = postWindowPlan
+						}
+						activeCompactionDelivery = nil
+					}
+					outboundIdentityMu.Unlock()
+				}
+				if writeErr == nil && isDataFrame && openAIWSPassthroughOutputCommitsTurnState(payload) {
+					commitHandshakeTurnState()
+				}
 				if msgType == coderws.MessageText && openAIWSPassthroughIsTerminalOutput(payload) {
 					turnLifecycle.finishTerminalWrite(writeErr == nil, clientFrameConn.markTurnCompleted)
 				}

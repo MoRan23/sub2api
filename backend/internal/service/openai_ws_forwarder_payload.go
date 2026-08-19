@@ -8,12 +8,26 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+const openAICodexWSStreamRequestStartMSKey = "x-codex-ws-stream-request-start-ms"
+
+// stampOpenAICodexWSStreamRequestStart records physical response.create send
+// time. It is deliberately frame-scoped and must not enter the immutable turn
+// snapshot or the pooled-socket compatibility digest.
+func stampOpenAICodexWSStreamRequestStart(payload []byte, now time.Time) ([]byte, error) {
+	if len(payload) == 0 || strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "response.create" {
+		return payload, nil
+	}
+	return sjson.SetBytes(payload, "client_metadata."+openAICodexWSStreamRequestStartMSKey, strconv.FormatInt(now.UnixMilli(), 10))
+}
 
 func validateOpenAIWSBearerToken(account *Account, token string) error {
 	if account == nil {
@@ -295,7 +309,20 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 	// Session-level beta features participate in WS pool compatibility, so
 	// finalize them before applying the identity plan and computing the digest.
 	applyOpenAICodexBetaFeatures(c, account, headers)
-	setOpenAICodexRoutingHint(headers, account, routingModel, routingServiceTier)
+	if account != nil && account.Type == AccountTypeOAuth {
+		finalPlan, finalizeErr := s.finalizeOpenAIOAuthWSWirePlan(c, account, sessionResolution.OutboundIdentityPlan, body, openAIOAuthWSWireFinalizeOptions{
+			FinalModel:       routingModel,
+			FinalServiceTier: routingServiceTier,
+		})
+		if finalizeErr != nil {
+			return nil, sessionResolution, fmt.Errorf("finalize openai oauth websocket wire plan: %w", finalizeErr)
+		}
+		sessionResolution.OutboundIdentityPlan = finalPlan
+		stripOpenAILegacyResponsesBeta(headers)
+		applyOpenAICodexWSRoutingHint(headers, account, finalPlan)
+	} else {
+		setOpenAICodexRoutingHint(headers, account, routingModel, routingServiceTier)
+	}
 	logOpenAIRoutingDiagnostics(
 		ctx,
 		account,
@@ -311,7 +338,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 		if _, applyErr := ApplyOpenAIOAuthIdentityPlan(headers, nil, sessionResolution.OutboundIdentityPlan); applyErr != nil {
 			return nil, sessionResolution, fmt.Errorf("apply openai oauth identity plan to websocket headers: %w", applyErr)
 		}
-		s.guardOpenAICodexTurnStateEcho(c, account, headers)
+		s.guardOpenAICodexTurnStateEchoForPlan(c, account, sessionResolution.OutboundIdentityPlan, headers, nil)
 		plan := sessionResolution.OutboundIdentityPlan
 		plan.SocketDigest = openAIWSOutboundIdentityPlanDigest(headers, plan)
 		sessionResolution.OutboundIdentityPlan = plan
@@ -376,20 +403,27 @@ func setOpenAIWSTurnMetadata(payload map[string]any, turnMetadata string) {
 
 // captureOpenAIWSFrameIdentity keeps connection-scoped identity inputs pinned
 // while allowing turn_id to follow the lifecycle of response.create frames.
-// A continuation without an explicit turn_id inherits the current turn;
-// otherwise Capture's request-scoped UUIDv7 becomes the next turn snapshot.
+// A tool-output or in-turn compaction continuation without an explicit
+// turn_id inherits the current turn. previous_response_id only links response
+// history/socket affinity and does not by itself extend a request turn.
 func captureOpenAIWSFrameIdentity(payload []byte, currentPlan *OpenAIOAuthIdentityPlan) OpenAIOAuthIdentityCapture {
 	capture := CaptureOpenAIOAuthIdentity(nil, payload, "")
 	if currentPlan == nil {
 		return capture
 	}
+	// Environment attributes are connection-stable defaults. A frame may
+	// override them explicitly, but omission must not erase the frozen Codex
+	// environment while resolving a new request turn.
+	inheritOpenAICodexWSWireEnvironment(&capture.WireProfile, currentPlan.Capture.WireProfile)
 
 	// prompt_cache_key and other fallbacks are cache/routing inputs after the
 	// connection has pinned a stable tuple. Only an explicit frame tuple may
 	// replace that tuple.
 	if !capture.Logical.Explicit {
+		frameWireProfile := cloneCodexWireProfile(capture.WireProfile)
 		stable := cloneOpenAIOAuthIdentityCapture(currentPlan.Capture)
 		stable.RequestTurn = capture.RequestTurn
+		stable.WireProfile = frameWireProfile
 		stable.ConflictCount = capture.ConflictCount
 		stable.InvalidMetadataCount = capture.InvalidMetadataCount
 		if strings.TrimSpace(capture.ClientInstallationID) != "" {
@@ -402,13 +436,35 @@ func captureOpenAIWSFrameIdentity(payload []byte, currentPlan *OpenAIOAuthIdenti
 		openAIWSFrameContinuesCurrentTurn(payload) &&
 		openAICodexRequestTurnSnapshotValid(currentPlan.RequestTurn) {
 		capture.RequestTurn = currentPlan.RequestTurn
+		if turnID, valid := currentPlan.RequestTurn.codexTurnID(capture.WireProfile.RequestKind); valid {
+			capture.WireProfile.TurnID = turnID
+			capture.WireProfile.turnIDPresent = true
+			capture.WireProfile.turnIDMalformed = false
+			capture.WireProfile.turnIDCandidates = []string{turnID.Value}
+		}
+		capture.WireProfile.TurnStartedAtUnixMS = currentPlan.RequestTurn.StartedAtUnixMS
+		capture.WireProfile.TurnStartedAtSet = currentPlan.RequestTurn.StartedAtUnixMS > 0
+		// Parent/root turn lineage describes the current request turn, so an
+		// implicit tool or compaction continuation inherits it together with the
+		// turn ID. Frame-explicit values remain authoritative.
+		if !capture.WireProfile.parentTurnIDPresent && currentPlan.WireProfile.parentTurnIDPresent {
+			capture.WireProfile.TurnLineage.ParentTurnID = currentPlan.WireProfile.TurnLineage.ParentTurnID
+			capture.WireProfile.parentTurnIDPresent = true
+			capture.WireProfile.parentTurnIDMalformed = false
+			capture.WireProfile.parentTurnIDCandidates = append([]string(nil), currentPlan.WireProfile.parentTurnIDCandidates...)
+		}
+		if !capture.WireProfile.rootTurnIDPresent && currentPlan.WireProfile.rootTurnIDPresent {
+			capture.WireProfile.TurnLineage.RootTurnID = currentPlan.WireProfile.TurnLineage.RootTurnID
+			capture.WireProfile.rootTurnIDPresent = true
+			capture.WireProfile.rootTurnIDMalformed = false
+			capture.WireProfile.rootTurnIDCandidates = append([]string(nil), currentPlan.WireProfile.rootTurnIDCandidates...)
+		}
 	}
 	return capture
 }
 
 func openAIWSFrameContinuesCurrentTurn(payload []byte) bool {
-	return strings.TrimSpace(gjson.GetBytes(payload, "previous_response_id").String()) != "" ||
-		openAIWSRawPayloadHasToolCallOutput(payload) ||
+	return openAIWSRawPayloadHasToolCallOutput(payload) ||
 		HasCompactionTriggerInInput(payload)
 }
 

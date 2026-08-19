@@ -57,6 +57,13 @@ func TestAccountTestService_OpenAIImageOAuthHandlesOutputItemDoneFallback(t *tes
 	require.Equal(t, "22222222-3333-4333-8444-555555555555", upstream.lastReq.Header.Get(codexInstallationIDKey))
 	require.Equal(t, "22222222-3333-4333-8444-555555555555", gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
 	require.Equal(t, "22222222-3333-4333-8444-555555555555", extractInstallationIDFromTurnMetadata(upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader)))
+	require.NotEmpty(t, upstream.lastReq.Header.Get("session-id"))
+	require.Equal(t, upstream.lastReq.Header.Get("session-id"), gjson.GetBytes(upstream.lastBody, "client_metadata.session_id").String())
+	require.NotEmpty(t, gjson.GetBytes(upstream.lastBody, "client_metadata.turn_id").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "client_metadata.turn_started_at_unix_ms").Exists())
+	require.NotEmpty(t, upstream.lastReq.Header.Get("User-Agent"))
+	require.NotEmpty(t, upstream.lastReq.Header.Get("Originator"))
+	require.NotEmpty(t, upstream.lastReq.Header.Get("Version"))
 	require.Contains(t, rec.Body.String(), "Calling Codex /responses image tool")
 	require.Contains(t, rec.Body.String(), "data:image/png;base64,aGVsbG8=")
 	require.Contains(t, rec.Body.String(), "\"success\":true")
@@ -100,4 +107,25 @@ func TestAccountTestService_OpenAIImageAPIKeyUsesConfiguredV1BaseURL(t *testing.
 	require.Equal(t, "Bearer test-api-key", upstream.lastReq.Header.Get("Authorization"))
 	require.Contains(t, rec.Body.String(), "data:image/png;base64,aGVsbG8=")
 	require.Contains(t, rec.Body.String(), "\"success\":true")
+}
+
+func TestCaptureOpenAIOAuthSyntheticRequestIgnoresAdminHeadersAndReusesRetrySnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/1/test", nil)
+	const adminTurnID = "01989f44-7c00-7000-8000-000000000051"
+	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"turn_id":"`+adminTurnID+`","turn_started_at_unix_ms":1}`)
+	c.Request.Header.Set(codexInstallationIDKey, "admin-installation")
+
+	first := captureOpenAIOAuthSyntheticRequest(c, []byte(`{"model":"gpt-5.6"}`), "account-test")
+	retry := captureOpenAIOAuthSyntheticRequest(c, []byte(`{"model":"gpt-5.6","retry":true}`), "account-test")
+
+	require.Equal(t, "account-test", first.Logical.SessionKey)
+	require.Equal(t, first.RequestTurn, retry.RequestTurn)
+	require.NotEqual(t, adminTurnID, first.RequestTurn.ID)
+	require.Empty(t, first.ClientInstallationID)
+
+	next := captureOpenAIOAuthSyntheticRequest(c, []byte(`{"model":"gpt-image-2"}`), "account-image-test")
+	require.Equal(t, "account-image-test", next.Logical.SessionKey)
+	require.NotEqual(t, first.RequestTurn.ID, next.RequestTurn.ID)
 }

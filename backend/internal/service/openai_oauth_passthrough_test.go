@@ -229,7 +229,7 @@ func TestOpenAIGatewayService_OAuthMessagesBridgeDoesNotInjectDefaultInstruction
 	require.Empty(t, upstream.lastReq.Header.Get("Session_Id"))
 	require.Empty(t, upstream.lastReq.Header.Get("Conversation_Id"))
 	require.Empty(t, upstream.lastReq.Header.Get("OpenAI-Beta"))
-	require.Empty(t, upstream.lastReq.Header.Get("originator"))
+	require.Equal(t, openai.CodexDefaultOriginator, upstream.lastReq.Header.Get("originator"))
 }
 
 type openAIPassthroughFailoverRepo struct {
@@ -804,6 +804,328 @@ func TestOpenAIGatewayService_OAuthPassthrough_CompactUsesJSONAndKeepsNonStreami
 	require.Equal(t, "chatgpt.com", upstream.lastReq.Host)
 	require.Equal(t, "chatgpt-acc", upstream.lastReq.Header.Get("chatgpt-account-id"))
 	require.Contains(t, rec.Body.String(), `"id":"cmp_123"`)
+}
+
+type passthroughCompactWindowCache struct {
+	outboundIdentityGatewayCacheStub
+	mu          sync.Mutex
+	windowStore *openAICodexWindowLocalStore
+	commitErr   error
+	commitCalls int
+	lastResult  OpenAICodexWindowCommitResult
+}
+
+func (c *passthroughCompactWindowCache) compactWindowStore() *openAICodexWindowLocalStore {
+	if c.windowStore == nil {
+		c.windowStore = newOpenAICodexWindowLocalStore(32)
+	}
+	return c.windowStore
+}
+
+func (c *passthroughCompactWindowCache) ResolveOpenAICodexWindow(ctx context.Context, mappingKey string, candidate OpenAICodexWindowSnapshot, ttl time.Duration) (OpenAICodexWindowSnapshot, error) {
+	c.mu.Lock()
+	store := c.compactWindowStore()
+	c.mu.Unlock()
+	return store.ResolveOpenAICodexWindow(ctx, mappingKey, candidate, ttl)
+}
+
+func (c *passthroughCompactWindowCache) CommitOpenAICodexWindow(ctx context.Context, mappingKey, threadID string, expected uint64, compactDigest string, ttl time.Duration) (OpenAICodexWindowCommitResult, error) {
+	c.mu.Lock()
+	c.commitCalls++
+	commitErr := c.commitErr
+	store := c.compactWindowStore()
+	c.mu.Unlock()
+	if commitErr != nil {
+		return OpenAICodexWindowCommitResult{}, commitErr
+	}
+	result, err := store.CommitOpenAICodexWindow(ctx, mappingKey, threadID, expected, compactDigest, ttl)
+	c.mu.Lock()
+	c.lastResult = result
+	c.mu.Unlock()
+	return result, err
+}
+
+func newOpenAIPassthroughCompactWindowTest(
+	t *testing.T,
+	upstreamBody string,
+	contentType string,
+) (*OpenAIGatewayService, *gin.Context, *httptest.ResponseRecorder, *httpUpstreamRecorder, *passthroughCompactWindowCache, []byte) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader(nil))
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set(codexInstallationIDKey, "client-installation")
+	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"session_id":"01989f44-7c00-7000-8000-000000000101","thread_id":"01989f44-7c00-7000-8000-000000000101","turn_id":"01989f44-7c00-7000-8000-000000000102","turn_started_at_unix_ms":1}`)
+
+	responseHeaders := make(http.Header)
+	responseHeaders.Set("Content-Type", contentType)
+	responseHeaders.Set("x-request-id", "rid-compact-window")
+	responseHeaders.Set(openAICodexTurnStateHeader, "turn-state-after-compact")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     responseHeaders,
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}
+	upstream := &httpUpstreamRecorder{resp: resp}
+	cache := &passthroughCompactWindowCache{}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{JWT: config.JWTConfig{Secret: "compact-window-secret-" + t.Name()}, Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+		httpUpstream: upstream,
+		cache:        cache,
+	}
+	account := &Account{
+		ID:          123,
+		Name:        "acc",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Extra:       map[string]any{"openai_passthrough": true},
+		Status:      StatusActive, Schedulable: true, RateMultiplier: f64p(1),
+	}
+	c.Set("test_account", account)
+	body := []byte(`{"model":"gpt-5.1-codex","stream":true,"store":true,"instructions":"local-test-instructions","input":[{"type":"text","text":"compact me"}]}`)
+	return svc, c, rec, upstream, cache, body
+}
+
+func openAIPassthroughCompactWindowTestAccount(c *gin.Context) *Account {
+	account, _ := c.Get("test_account")
+	typed, _ := account.(*Account)
+	return typed
+}
+
+func TestOpenAIGatewayService_OAuthPassthrough_CompactJSONCommitsWindowAfterDeliveredSuccess(t *testing.T) {
+	svc, c, rec, upstream, cache, body := newOpenAIPassthroughCompactWindowTest(t,
+		`{"id":"resp_compact","status":"completed","output":[{"id":"cmp_1","type":"compaction","encrypted_content":"blob"}],"usage":{"input_tokens":1,"output_tokens":1}}`,
+		"application/json",
+	)
+
+	result, err := svc.Forward(context.Background(), c, openAIPassthroughCompactWindowTestAccount(c), body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 1, cache.commitCalls)
+	require.Equal(t, OpenAICodexWindowCommitAdvanced, cache.lastResult.Status)
+	require.Equal(t, uint64(1), cache.lastResult.Snapshot.Number)
+	require.Contains(t, upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader), `"request_kind":"compaction"`)
+	metadata := gjson.Parse(upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader))
+	require.Equal(t, metadata.Get("thread_id").String()+":0", metadata.Get("window_id").String())
+	require.NotEqual(t, "client-installation", upstream.lastReq.Header.Get(codexInstallationIDKey))
+	require.Equal(t, "turn-state-after-compact", rec.Header().Get(openAICodexTurnStateHeader))
+}
+
+func TestCommitDeliveredOpenAIPassthroughCompactWindowSurvivesPostDeliveryCancellation(t *testing.T) {
+	cache := &passthroughCompactWindowCache{}
+	svc := &OpenAIGatewayService{cache: cache}
+	account := &Account{ID: 123, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil).WithContext(requestCtx)
+	threadID := "01989f44-7c00-7000-8000-000000000201"
+	state := openAIPassthroughCompactWindowContext{
+		mappingKey: strings.Repeat("a", 64),
+		threadID:   threadID,
+		expected:   0,
+		digest:     strings.Repeat("b", 64),
+		plan: OpenAIOAuthIdentityPlan{
+			TurnIdentityRequested: true,
+			TurnIdentityEnabled:   true,
+			TurnIdentity:          OpenAICodexTurnIdentity{SessionID: threadID, ThreadID: threadID, Relation: OpenAICodexTurnRelationRoot},
+			Window:                OpenAICodexWindowSnapshot{ThreadID: threadID},
+		},
+	}
+	c.Set(openAIPassthroughCompactWindowContextKey, state)
+	delivery := openAIJSONCompactionDelivery([]byte(`{"status":"completed","output":[{"id":"cmp_cancel_race","type":"compaction"}]}`))
+	cancelRequest()
+	workCtx, cancelWork := context.WithCancel(context.Background())
+	cancelWork()
+
+	svc.commitDeliveredOpenAIPassthroughCompactWindow(workCtx, c, account, http.StatusOK, &delivery, "")
+	require.Equal(t, 1, cache.commitCalls)
+	require.Equal(t, uint64(1), cache.lastResult.Snapshot.Number)
+}
+
+func TestOpenAIGatewayService_OAuthPassthrough_CompactSSEToJSONCommitsWindow(t *testing.T) {
+	upstreamSSE := strings.Join([]string{
+		`data: {"type":"response.output_item.done","item":{"id":"cmp_sse_json","type":"compaction","encrypted_content":"blob"}}`,
+		"",
+		`data: {"type":"response.completed","response":{"id":"resp_sse_json","status":"completed","output":[{"id":"cmp_sse_json","type":"compaction","encrypted_content":"blob"}],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+		"",
+	}, "\n")
+	svc, c, _, _, cache, body := newOpenAIPassthroughCompactWindowTest(t, upstreamSSE, "text/event-stream")
+
+	result, err := svc.Forward(context.Background(), c, openAIPassthroughCompactWindowTestAccount(c), body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 1, cache.commitCalls)
+	require.Equal(t, uint64(1), cache.lastResult.Snapshot.Number)
+}
+
+func TestOpenAIGatewayService_OAuthPassthrough_CompactSSEToJSONCommitsAddedOnlyItem(t *testing.T) {
+	upstreamSSE := strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"cmp_added_only","type":"compaction","encrypted_content":"blob"}}`,
+		"",
+		`data: {"type":"response.completed","response":{"id":"resp_added_only","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+		"",
+	}, "\n")
+	svc, c, rec, _, cache, body := newOpenAIPassthroughCompactWindowTest(t, upstreamSSE, "text/event-stream")
+
+	result, err := svc.Forward(context.Background(), c, openAIPassthroughCompactWindowTestAccount(c), body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 1, cache.commitCalls)
+	require.Equal(t, uint64(1), cache.lastResult.Snapshot.Number)
+	require.Equal(t, "cmp_added_only", gjson.GetBytes(rec.Body.Bytes(), "output.0.id").String())
+	require.Equal(t, "compaction", gjson.GetBytes(rec.Body.Bytes(), "output.0.type").String())
+}
+
+func TestOpenAIGatewayService_OAuthPassthrough_NativeCompactionTrueSSECommitsWindow(t *testing.T) {
+	upstreamSSE := strings.Join([]string{
+		`data: {"type":"response.output_item.done","item":{"id":"cmp_stream","type":"compaction","encrypted_content":"blob"}}`,
+		"",
+		`data: {"type":"response.completed","response":{"id":"resp_stream","status":"completed","output":[{"id":"cmp_stream","type":"compaction","encrypted_content":"blob"}],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	svc, c, _, upstream, cache, body := newOpenAIPassthroughCompactWindowTest(t, upstreamSSE, "text/event-stream")
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"request_kind":"compaction","session_id":"01989f44-7c00-7000-8000-000000000111","thread_id":"01989f44-7c00-7000-8000-000000000111","turn_id":"01989f44-7c00-7000-8000-000000000112","turn_started_at_unix_ms":1}`)
+	MarkOpenAINativeCompactionV2(c)
+
+	_, err := svc.Forward(context.Background(), c, openAIPassthroughCompactWindowTestAccount(c), body)
+	require.NoError(t, err)
+	require.Equal(t, 1, cache.commitCalls)
+	require.Equal(t, uint64(1), cache.lastResult.Snapshot.Number)
+	require.Contains(t, strings.TrimSpace(c.Request.Header.Get(openAIWSTurnMetadataHeader)), `"request_kind":"compaction"`)
+	metadata := gjson.Parse(upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader))
+	require.Equal(t, metadata.Get("thread_id").String()+":0", metadata.Get("window_id").String())
+}
+
+func TestOpenAIGatewayService_OAuthPassthrough_CompactDoesNotCommitFailedOrAmbiguousOrDisconnected(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		contentType string
+		statusCode  int
+		disconnect  bool
+		cancel      bool
+	}{
+		{
+			name:        "failed",
+			contentType: "application/json",
+			body:        `{"id":"resp_failed","status":"failed","output":[{"id":"cmp_1","type":"compaction"}]}`,
+		},
+		{
+			name:        "zero items",
+			contentType: "application/json",
+			body:        `{"id":"resp_empty","status":"completed","output":[]}`,
+		},
+		{
+			name:        "two items",
+			contentType: "application/json",
+			body:        `{"id":"resp_two","status":"completed","output":[{"id":"cmp_1","type":"compaction"},{"id":"cmp_2","type":"compaction"}]}`,
+		},
+		{
+			name:        "stream disconnect before terminal",
+			contentType: "text/event-stream",
+			body: strings.Join([]string{
+				`data: {"type":"response.output_item.done","item":{"id":"cmp_1","type":"compaction"}}`,
+				"",
+			}, "\n"),
+			disconnect: true,
+		},
+		{
+			name:        "successful JSON body write fails",
+			contentType: "application/json",
+			body:        `{"id":"resp_disconnected","status":"completed","output":[{"id":"cmp_1","type":"compaction"}]}`,
+			disconnect:  true,
+		},
+		{
+			name:        "non 2xx successful payload",
+			contentType: "application/json",
+			body:        `{"id":"resp_redirect","status":"completed","output":[{"id":"cmp_1","type":"compaction"}],"usage":{"input_tokens":1,"output_tokens":1}}`,
+			statusCode:  http.StatusTemporaryRedirect,
+		},
+		{
+			name:        "abandoned request",
+			contentType: "application/json",
+			body:        `{"id":"resp_abandoned","status":"completed","output":[{"id":"cmp_1","type":"compaction"}]}`,
+			cancel:      true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, c, _, upstream, cache, body := newOpenAIPassthroughCompactWindowTest(t, tt.body, tt.contentType)
+			if tt.statusCode != 0 {
+				upstream.resp.StatusCode = tt.statusCode
+			}
+			if tt.disconnect {
+				c.Writer = &failingGinWriter{ResponseWriter: c.Writer, failAfter: 0}
+			}
+			ctx := context.Background()
+			if tt.cancel {
+				reqCtx, cancel := context.WithCancel(context.Background())
+				c.Request = c.Request.WithContext(reqCtx)
+				cancel()
+				ctx = reqCtx
+			}
+			_, _ = svc.Forward(ctx, c, openAIPassthroughCompactWindowTestAccount(c), body)
+			require.Equal(t, 0, cache.commitCalls)
+		})
+	}
+}
+
+func TestOpenAIGatewayService_OAuthCompactNormalHandlerRequires2xxDeliveredBody(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		statusCode int
+		failWrite  bool
+	}{
+		{name: "body write fails", statusCode: http.StatusOK, failWrite: true},
+		{name: "redirect is not success", statusCode: http.StatusTemporaryRedirect},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, c, _, _, cache, requestBody := newOpenAIPassthroughCompactWindowTest(t, `{}`, "application/json")
+			account := openAIPassthroughCompactWindowTestAccount(c)
+			_, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, requestBody, "oauth-token")
+			require.NoError(t, err)
+			if tt.failWrite {
+				c.Writer = &failingGinWriter{ResponseWriter: c.Writer, failAfter: 0}
+			}
+
+			resp := &http.Response{
+				StatusCode: tt.statusCode,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body: io.NopCloser(strings.NewReader(
+					`{"id":"resp_compact","status":"completed","output":[{"id":"cmp_1","type":"compaction"}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`,
+				)),
+			}
+			_, _ = svc.handleNonStreamingResponse(context.Background(), resp, c, account, "gpt-5.1-codex", "gpt-5.1-codex")
+			require.Equal(t, 0, cache.commitCalls)
+		})
+	}
+}
+
+func TestOpenAIGatewayService_OAuthPassthrough_CompactStoreFailureKeepsSuccessResponse(t *testing.T) {
+	svc, c, rec, _, cache, body := newOpenAIPassthroughCompactWindowTest(t,
+		`{"id":"resp_compact","status":"completed","output":[{"id":"cmp_1","type":"compaction","encrypted_content":"blob"}],"usage":{"input_tokens":1,"output_tokens":1}}`,
+		"application/json",
+	)
+	cache.commitErr = errors.New("redis unavailable")
+
+	result, err := svc.Forward(context.Background(), c, openAIPassthroughCompactWindowTestAccount(c), body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 1, cache.commitCalls)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"id":"resp_compact"`)
 }
 
 func TestOpenAIGatewayService_OAuthPassthrough_UpstreamRequestIgnoresClientCancel(t *testing.T) {

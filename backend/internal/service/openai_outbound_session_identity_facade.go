@@ -61,6 +61,7 @@ type OpenAICodexLogicalTurnAlias struct {
 // receives a new UUIDv7.
 type OpenAICodexRequestTurnSnapshot struct {
 	ID              string
+	TypedID         CodexTurnID
 	StartedAtUnixMS int64
 	Source          string
 	Explicit        bool
@@ -83,6 +84,7 @@ type OpenAIOAuthIdentityCapture struct {
 	Logical              OpenAICodexLogicalTurnIdentity
 	Aliases              []OpenAICodexLogicalTurnAlias
 	RequestTurn          OpenAICodexRequestTurnSnapshot
+	WireProfile          CodexWireProfile
 	ClientInstallationID string
 	ConflictCount        int
 	InvalidMetadataCount int
@@ -121,6 +123,10 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthProfileIdentityPlan(
 type OpenAIOAuthIdentityPlan struct {
 	Capture                  OpenAIOAuthIdentityCapture
 	RequestTurn              OpenAICodexRequestTurnSnapshot
+	WireProfile              CodexWireProfile
+	Window                   OpenAICodexWindowSnapshot
+	WindowMappingKey         string
+	WindowResolveOutcome     OpenAICodexWindowResolveOutcome
 	PolicySnapshot           CodexFingerprintPolicySnapshot
 	ClientIdentity           CodexClientIdentityPlan
 	ClientIdentityEnabled    bool
@@ -137,6 +143,14 @@ type OpenAIOAuthIdentityPlan struct {
 	ResolveOutcome           OpenAIOAuthIdentityResolveOutcome
 	SocketDigest             string
 }
+
+type OpenAICodexWindowResolveOutcome string
+
+const (
+	OpenAICodexWindowResolveNone     OpenAICodexWindowResolveOutcome = "none"
+	OpenAICodexWindowResolveResolved OpenAICodexWindowResolveOutcome = "resolved"
+	OpenAICodexWindowResolveError    OpenAICodexWindowResolveOutcome = "error"
+)
 
 // OpenAIOAuthOutboundIdentityPlan is the immutable outbound-plan name used by
 // the unified Codex fingerprint pipeline. Keep OpenAIOAuthIdentityPlan as the
@@ -177,8 +191,25 @@ func CaptureOpenAIOAuthIdentityWithEndpointAlias(c *gin.Context, body []byte, en
 
 func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explicitTurnMetadata string, appendEndpointAlias bool) OpenAIOAuthIdentityCapture {
 	capture := captureOpenAICodexLogicalTurnIdentity(c, body, callerSeed, explicitTurnMetadata, appendEndpointAlias)
-	requestTurn, conflicts, invalid := captureOpenAICodexRequestTurn(c, body, explicitTurnMetadata)
+	capture.WireProfile = captureCodexWireProfile(c, body, explicitTurnMetadata)
+	requestTurn, conflicts, invalid := captureOpenAICodexRequestTurn(c, body, explicitTurnMetadata, capture.WireProfile.RequestKind)
+	if strings.HasPrefix(capture.WireProfile.InvalidReason, "turn_id ") {
+		requestTurn = OpenAICodexRequestTurnSnapshot{}
+	}
 	capture.RequestTurn = requestTurn
+	if capture.WireProfile.InvalidReason == "" {
+		if typedID, ok := requestTurn.codexTurnID(capture.WireProfile.RequestKind); ok {
+			capture.WireProfile.TurnID = typedID
+			if !capture.WireProfile.turnIDPresent {
+				capture.WireProfile.turnIDPresent = true
+				capture.WireProfile.turnIDCandidates = appendCodexTurnIDCandidate(capture.WireProfile.turnIDCandidates, typedID.Value)
+			}
+			if !capture.WireProfile.TurnStartedAtSet && requestTurn.StartedAtUnixMS > 0 {
+				capture.WireProfile.TurnStartedAtUnixMS = requestTurn.StartedAtUnixMS
+				capture.WireProfile.TurnStartedAtSet = true
+			}
+		}
+	}
 	capture.ConflictCount += conflicts
 	capture.InvalidMetadataCount += invalid
 	if conflicts > 0 {
@@ -195,7 +226,7 @@ func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explici
 	return capture
 }
 
-func captureOpenAICodexRequestTurn(c *gin.Context, body []byte, explicitTurnMetadata string) (OpenAICodexRequestTurnSnapshot, int, int) {
+func captureOpenAICodexRequestTurn(c *gin.Context, body []byte, explicitTurnMetadata string, requestKind CodexWireRequestKind) (OpenAICodexRequestTurnSnapshot, int, int) {
 	type candidate struct {
 		snapshot OpenAICodexRequestTurnSnapshot
 		valid    bool
@@ -204,14 +235,14 @@ func captureOpenAICodexRequestTurn(c *gin.Context, body []byte, explicitTurnMeta
 	}
 	candidates := make([]candidate, 0, 8)
 	appendMetadata := func(raw []byte, source string, carrier openAICodexMetadataCarrier, requireString bool) {
-		snapshot, present, valid := parseOpenAICodexRequestTurnMetadata(raw, source, requireString)
+		snapshot, present, valid := parseOpenAICodexRequestTurnMetadata(raw, source, requireString, requestKind)
 		if !present {
 			return
 		}
 		candidates = append(candidates, candidate{snapshot: snapshot, valid: valid, invalid: !valid, carrier: carrier})
 	}
 	appendFlat := func(rawID, rawStartedAt json.RawMessage, source string, carrier openAICodexMetadataCarrier) {
-		snapshot, present, valid := parseOpenAICodexRequestTurnFields(rawID, rawStartedAt, source)
+		snapshot, present, valid := parseOpenAICodexRequestTurnFields(rawID, rawStartedAt, source, requestKind)
 		if !present {
 			return
 		}
@@ -282,13 +313,14 @@ func captureOpenAICodexRequestTurn(c *gin.Context, body []byte, explicitTurnMeta
 	id := generated.String()
 	return OpenAICodexRequestTurnSnapshot{
 		ID:              id,
+		TypedID:         CodexTurnID{Kind: CodexTurnIDUserUUIDv7, Value: id},
 		StartedAtUnixMS: openAICodexRequestTurnUUIDUnixMilli(generated),
 		Source:          openAICodexRequestTurnSourceGenerated,
 		Generated:       true,
 	}, conflicts, invalid
 }
 
-func parseOpenAICodexRequestTurnMetadata(raw []byte, source string, requireString bool) (OpenAICodexRequestTurnSnapshot, bool, bool) {
+func parseOpenAICodexRequestTurnMetadata(raw []byte, source string, requireString bool, requestKind CodexWireRequestKind) (OpenAICodexRequestTurnSnapshot, bool, bool) {
 	if len(raw) == 0 || !utf8.Valid(raw) {
 		return OpenAICodexRequestTurnSnapshot{}, false, false
 	}
@@ -315,10 +347,10 @@ func parseOpenAICodexRequestTurnMetadata(raw []byte, source string, requireStrin
 		// Malformed carriers are already counted by logical identity capture.
 		return OpenAICodexRequestTurnSnapshot{}, false, false
 	}
-	return parseOpenAICodexRequestTurnFields(metadata["turn_id"], metadata["turn_started_at_unix_ms"], source)
+	return parseOpenAICodexRequestTurnFields(metadata["turn_id"], metadata["turn_started_at_unix_ms"], source, requestKind)
 }
 
-func parseOpenAICodexRequestTurnFields(rawID, rawStartedAt json.RawMessage, source string) (OpenAICodexRequestTurnSnapshot, bool, bool) {
+func parseOpenAICodexRequestTurnFields(rawID, rawStartedAt json.RawMessage, source string, requestKind CodexWireRequestKind) (OpenAICodexRequestTurnSnapshot, bool, bool) {
 	if len(rawID) == 0 {
 		return OpenAICodexRequestTurnSnapshot{}, false, false
 	}
@@ -326,17 +358,17 @@ func parseOpenAICodexRequestTurnFields(rawID, rawStartedAt json.RawMessage, sour
 	if json.Unmarshal(rawID, &id) != nil {
 		return OpenAICodexRequestTurnSnapshot{}, true, false
 	}
-	id, err := canonicalUUIDv7(id)
-	if err != nil {
+	typedID, valid := ResolveCodexTurnID(id, requestKind)
+	if !valid {
 		return OpenAICodexRequestTurnSnapshot{}, true, false
 	}
-	parsed, _ := uuid.Parse(id)
 	startedAt := parseOpenAICodexRequestTurnStartedAt(rawStartedAt)
-	if startedAt <= 0 {
+	if startedAt <= 0 && typedID.Kind == CodexTurnIDUserUUIDv7 {
+		parsed, _ := uuid.Parse(typedID.Value)
 		startedAt = openAICodexRequestTurnUUIDUnixMilli(parsed)
 	}
 	return OpenAICodexRequestTurnSnapshot{
-		ID: id, StartedAtUnixMS: startedAt, Source: source, Explicit: true,
+		ID: typedID.Value, TypedID: typedID, StartedAtUnixMS: startedAt, Source: source, Explicit: true,
 	}, true, true
 }
 
@@ -367,6 +399,18 @@ func openAICodexRequestTurnUUIDUnixMilli(value uuid.UUID) int64 {
 func openAICodexRequestTurnSnapshotValid(snapshot OpenAICodexRequestTurnSnapshot) bool {
 	_, err := canonicalUUIDv7(snapshot.ID)
 	return err == nil && snapshot.StartedAtUnixMS > 0
+}
+
+func (snapshot OpenAICodexRequestTurnSnapshot) codexTurnID(kind CodexWireRequestKind) (CodexTurnID, bool) {
+	if snapshot.TypedID.Value == snapshot.ID && snapshot.TypedID.ValidFor(kind) {
+		return snapshot.TypedID, true
+	}
+	return ResolveCodexTurnID(snapshot.ID, kind)
+}
+
+func openAICodexRequestTurnSnapshotValidForWire(snapshot OpenAICodexRequestTurnSnapshot, kind CodexWireRequestKind) bool {
+	_, valid := snapshot.codexTurnID(kind)
+	return valid
 }
 
 // FillOpenAIOAuthIdentityCaptureFallback adds a deferred affinity seed without
@@ -420,12 +464,14 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 	options = normalizeOpenAIOAuthIdentityPlanOptions(options)
 	policy := s.openAICodexFingerprintPolicyForRequest(ctx, c)
 	plan := OpenAIOAuthIdentityPlan{
-		Capture: capture, ProjectionMode: options.ProjectionMode,
+		Capture: cloneOpenAIOAuthIdentityCapture(capture), ProjectionMode: options.ProjectionMode,
 		RequestTurn:        capture.RequestTurn,
+		WireProfile:        cloneCodexWireProfile(capture.WireProfile),
 		InstallationPolicy: options.InstallationPolicy,
 		PolicySnapshot:     policy,
 		APIKeyID:           getAPIKeyIDFromContext(c), ResolveSource: capture.Logical.Source,
-		ResolveOutcome: OpenAIOAuthIdentityResolveNone,
+		ResolveOutcome:       OpenAIOAuthIdentityResolveNone,
+		WindowResolveOutcome: OpenAICodexWindowResolveNone,
 	}
 	if account == nil || !account.IsOpenAIOAuth() {
 		return plan, nil
@@ -435,6 +481,16 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 	}
 	plan.ClientIdentityEnabled = true
 	plan.TurnIdentityRequested = options.TurnIdentityEnabled && policy.TurnIdentityNormalizationEnabled()
+	if plan.TurnIdentityRequested {
+		validationKind := plan.WireProfile.RequestKind
+		if !validationKind.valid() {
+			validationKind = CodexWireRequestTurn
+		}
+		plan.WireProfile.resolveTurnIDs(validationKind)
+		if err := plan.WireProfile.Validate(); err != nil {
+			return plan, err
+		}
+	}
 	canonicalClientIdentity := openAICodexClientIdentityForRequest(c)
 	plan.ClientIdentity = resolveCodexClientIdentityPlanFromSnapshot(
 		CodexClientIdentitySafePair, "", canonicalClientIdentity,
@@ -476,6 +532,11 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 		} else if ok {
 			plan.TurnIdentity = identity
 			plan.TurnIdentityEnabled = true
+			plan.WireProfile.SessionID = identity.SessionID
+			plan.WireProfile.ThreadID = identity.ThreadID
+			plan.WireProfile.TurnLineage.ParentThreadID = identity.ParentThreadID
+			plan.WireProfile.TurnLineage.ForkedFromThreadID = identity.ForkedFromThreadID
+			plan.WireProfile.WindowID = ""
 			if plan.ResolveOutcome == OpenAIOAuthIdentityResolveNone {
 				plan.ResolveOutcome = OpenAIOAuthIdentityResolvePrimary
 			}
@@ -489,8 +550,45 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 		}
 		plan.InstallationEnabled = resolution.Enabled && resolution.OutboundID != ""
 		plan.InstallationID = resolution.OutboundID
+		if plan.InstallationEnabled {
+			plan.WireProfile.InstallationID = plan.InstallationID
+		}
 	}
+	plan = s.resolveOpenAICodexWindowForPlan(ctx, plan)
 	return plan, nil
+}
+
+func (s *OpenAIGatewayService) resolveOpenAICodexWindowForPlan(ctx context.Context, plan OpenAIOAuthIdentityPlan) OpenAIOAuthIdentityPlan {
+	if !plan.TurnIdentityRequested || !plan.TurnIdentityEnabled ||
+		strings.TrimSpace(plan.CredentialOwnerNamespace) == "" ||
+		strings.TrimSpace(plan.TurnIdentity.ThreadID) == "" {
+		return plan
+	}
+	secret := ""
+	if s != nil && s.cfg != nil {
+		secret = s.cfg.JWT.Secret
+	}
+	mappingKey, err := OpenAICodexWindowMappingKey(
+		secret,
+		plan.CredentialOwnerNamespace,
+		plan.APIKeyID,
+		plan.TurnIdentity.ThreadID,
+	)
+	if err != nil {
+		plan.WindowResolveOutcome = OpenAICodexWindowResolveError
+		return plan
+	}
+	snapshot, err := s.ResolveOpenAICodexWindowSnapshot(ctx, mappingKey, plan.TurnIdentity.ThreadID)
+	if err != nil {
+		plan.WindowResolveOutcome = OpenAICodexWindowResolveError
+		return plan
+	}
+	bound, err := BindOpenAICodexWindowToPlan(plan, snapshot, mappingKey)
+	if err != nil {
+		plan.WindowResolveOutcome = OpenAICodexWindowResolveError
+		return plan
+	}
+	return bound
 }
 
 // ResolveOpenAIOAuthOutboundIdentity exposes the credential-aware materialize
@@ -521,7 +619,7 @@ func (s *OpenAIGatewayService) GetOrResolveOpenAIOAuthOutboundIdentity(
 	if pinnedPlan != nil &&
 		openAIOAuthIdentityCapturesEqual(pinnedPlan.Capture, capture) &&
 		s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, *pinnedPlan, options) {
-		plan := *pinnedPlan
+		plan := cloneOpenAIOAuthIdentityPlan(*pinnedPlan)
 		SetOpenAIOAuthIdentityPlan(c, plan)
 		return plan, nil
 	}
@@ -542,6 +640,7 @@ func (s *OpenAIGatewayService) GetOrResolveOpenAIOAuthOutboundIdentity(
 func openAIOAuthIdentityCapturesEqual(left, right OpenAIOAuthIdentityCapture) bool {
 	if left.Logical != right.Logical ||
 		left.RequestTurn != right.RequestTurn ||
+		!codexWireProfilesEqual(left.WireProfile, right.WireProfile) ||
 		left.ClientInstallationID != right.ClientInstallationID ||
 		left.ConflictCount != right.ConflictCount ||
 		left.InvalidMetadataCount != right.InvalidMetadataCount ||
@@ -684,6 +783,13 @@ func applyOpenAICodexAlphaSearchIdentityHeader(headers http.Header, plan OpenAIO
 	}
 	deleteOpenAICodexIdentityHeaders(headers)
 	deleteOpenAIHeaderEqualFold(headers, codexInstallationIDKey)
+	// When installation normalization is disabled, an independent inbound
+	// installation header must not be promoted into SearchClient turn metadata.
+	// A valid installation already present in that metadata remains available
+	// to the carrier merge below, preserving the legacy passthrough behavior.
+	if !plan.InstallationEnabled {
+		plan.WireProfile.InstallationID = ""
+	}
 
 	applyOpenAICodexCanonicalTurnMetadataHeader(headers, openAICodexMetadataProjectionFromPlan(plan), true)
 }
@@ -730,7 +836,7 @@ func applyOpenAICodexExistingTurnMetadataHeader(headers http.Header, identity Op
 		}
 		for _, value := range values {
 			if strings.TrimSpace(value) != "" {
-				if rewritten, err := rewriteOpenAICodexTurnMetadata(value, identity); err == nil {
+				if rewritten, err := rewriteOpenAICodexTurnMetadataForCarrier(value, identity, false); err == nil {
 					value = rewritten
 				}
 			}
@@ -797,7 +903,14 @@ func mergeOpenAICodexExistingTurnMetadataBody(body []byte, identity OpenAICodexT
 
 func cloneOpenAIOAuthIdentityCapture(capture OpenAIOAuthIdentityCapture) OpenAIOAuthIdentityCapture {
 	capture.Aliases = append([]OpenAICodexLogicalTurnAlias(nil), capture.Aliases...)
+	capture.WireProfile = cloneCodexWireProfile(capture.WireProfile)
 	return capture
+}
+
+func cloneOpenAIOAuthIdentityPlan(plan OpenAIOAuthIdentityPlan) OpenAIOAuthIdentityPlan {
+	plan.Capture = cloneOpenAIOAuthIdentityCapture(plan.Capture)
+	plan.WireProfile = cloneCodexWireProfile(plan.WireProfile)
+	return plan
 }
 
 func SetOpenAIOAuthIdentityCapture(c *gin.Context, capture OpenAIOAuthIdentityCapture) {
@@ -833,8 +946,7 @@ func ClearOpenAIOAuthIdentityCapture(c *gin.Context) {
 
 func SetOpenAIOAuthIdentityPlan(c *gin.Context, plan OpenAIOAuthIdentityPlan) {
 	if c != nil {
-		plan.Capture = cloneOpenAIOAuthIdentityCapture(plan.Capture)
-		c.Set(openAIOAuthIdentityPlanContextKey, plan)
+		c.Set(openAIOAuthIdentityPlanContextKey, cloneOpenAIOAuthIdentityPlan(plan))
 	}
 }
 
@@ -844,8 +956,7 @@ func OpenAIOAuthIdentityPlanFromContext(c *gin.Context) (OpenAIOAuthIdentityPlan
 	}
 	value, ok := c.Get(openAIOAuthIdentityPlanContextKey)
 	plan, valid := value.(OpenAIOAuthIdentityPlan)
-	plan.Capture = cloneOpenAIOAuthIdentityCapture(plan.Capture)
-	return plan, ok && valid
+	return cloneOpenAIOAuthIdentityPlan(plan), ok && valid
 }
 
 func ClearOpenAIOAuthIdentityPlan(c *gin.Context) {

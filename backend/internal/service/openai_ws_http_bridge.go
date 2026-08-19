@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -192,6 +193,17 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if err != nil {
 		return nil, fmt.Errorf("prepare http bridge body: %w", err)
 	}
+	bridgeNativeCompaction := false
+	bridgeResponsesLite := false
+	if identityPlan != nil && account.IsOpenAIOAuth() {
+		finalPlan, finalizeErr := s.finalizeOpenAIOAuthWSWirePlan(c, account, *identityPlan, body, openAIOAuthWSWireFinalizeOptions{})
+		if finalizeErr != nil {
+			return nil, fmt.Errorf("finalize websocket http bridge wire plan: %w", finalizeErr)
+		}
+		*identityPlan = finalPlan
+		bridgeNativeCompaction = HasCompactionTriggerInInput(body) || finalPlan.WireProfile.RequestKind == CodexWireRequestCompaction
+		bridgeResponsesLite = finalPlan.WireProfile.ToolNamespacesAllowed
+	}
 	var clientToolMapping apicompat.ResponsesClientToolMapping
 	if account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey {
 		body, clientToolMapping, err = adaptResponsesClientToolsForFunctionUpstream(body, "OpenAI WS HTTP bridge")
@@ -223,13 +235,61 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		upstreamReq, err = buildGrokResponsesRequest(upstreamCtx, c, account, body, token, grokCacheIdentity, s.cfg, s.settingService)
 	} else {
+		wasNativeCompaction := isOpenAINativeCompactionV2(c)
+		if bridgeNativeCompaction && c != nil {
+			c.Set(openAINativeCompactionV2Key, true)
+		}
+		var originalClientHeaders http.Header
+		responsesLiteHintInjected := false
+		if bridgeResponsesLite && c != nil && c.Request != nil {
+			// Carry the finalized WS capability into the HTTP finalizer without
+			// persisting a marker on the connection's client headers.
+			originalClientHeaders = c.Request.Header
+			bridgeHeaders := originalClientHeaders.Clone()
+			if bridgeHeaders == nil {
+				bridgeHeaders = make(http.Header)
+			}
+			bridgeHeaders.Set(responsesLiteHeader, "true")
+			c.Request.Header = bridgeHeaders
+			responsesLiteHintInjected = true
+		}
 		upstreamReq, err = s.buildUpstreamRequestOpenAIPassthroughWithIdentityPlan(upstreamCtx, c, account, body, token, identityPlan)
+		if responsesLiteHintInjected {
+			c.Request.Header = originalClientHeaders
+		}
+		if bridgeNativeCompaction && !wasNativeCompaction && c != nil {
+			c.Set(openAINativeCompactionV2Key, false)
+		}
 	}
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, err
 	}
-	if account.Platform != PlatformGrok && isOpenAIResponsesLiteWebSocketPayload(payload) {
+	if identityPlan != nil && account.IsOpenAIOAuth() {
+		if finalizedPlan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok {
+			*identityPlan = finalizedPlan
+		}
+		finalizedBody := body
+		if upstreamReq.GetBody != nil {
+			if snapshot, snapshotErr := upstreamReq.GetBody(); snapshotErr == nil {
+				if requestBody, readErr := io.ReadAll(snapshot); readErr == nil {
+					finalizedBody = requestBody
+				}
+				_ = snapshot.Close()
+			}
+		}
+		guardedBody := s.guardOpenAICodexTurnStateEchoForPlan(c, account, *identityPlan, upstreamReq.Header, finalizedBody)
+		if !bytes.Equal(guardedBody, finalizedBody) {
+			bodySnapshot := append([]byte(nil), guardedBody...)
+			upstreamReq.Body = io.NopCloser(bytes.NewReader(bodySnapshot))
+			upstreamReq.ContentLength = int64(len(bodySnapshot))
+			upstreamReq.GetBody = func() (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(bodySnapshot)), nil
+			}
+		}
+		body = guardedBody
+	}
+	if account.Platform != PlatformGrok && !account.IsOpenAIOAuth() && isOpenAIResponsesLiteWebSocketPayload(payload) {
 		upstreamReq.Header.Set(responsesLiteHeader, "true")
 	}
 	// The passthrough request builder clears request-local observation provenance
@@ -312,6 +372,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	sawDone := false
 	wroteDownstream := false
 	clientDisconnected := false
+	var compactionDelivery *openAICodexCompactionDelivery
+	if identityPlan != nil {
+		compactionDelivery = openAICodexWSCompactionDeliveryForPlan(account, *identityPlan)
+	}
 	mappedModel := ""
 	needModelReplace := false
 	var mappedModelBytes []byte
@@ -493,6 +557,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				}
 			} else {
 				wroteDownstream = true
+				observeOpenAICodexWSCompactionDelivery(compactionDelivery, clientMessage)
 			}
 		}
 
@@ -502,6 +567,16 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if isOpenAIWSTerminalEvent(eventType) {
 			upstreamTerminalEvent = s.handleOpenAIWSTerminalTransientFailure(ctx, account, canonicalOpenAIAccountSchedulingModel(account, originalModel), resp.Header, upstreamMessage)
 			terminalEventCount++
+			if identityPlan != nil {
+				s.commitOpenAICodexWSCompactionAfterDelivery(
+					ctx,
+					c,
+					account,
+					identityPlan,
+					compactionDelivery,
+					extractOpenAICodexTurnState(resp.Header),
+				)
+			}
 			firstTokenMsValue := -1
 			if firstTokenMs != nil {
 				firstTokenMsValue = *firstTokenMs

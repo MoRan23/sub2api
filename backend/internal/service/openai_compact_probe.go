@@ -69,29 +69,6 @@ func openAICompactProbeFoundCompactionItem(body []byte) bool {
 	return responsesOutputHasCompactionItem(body)
 }
 
-func shouldMarkOpenAIRemoteCompactionV2Unsupported(status int, body []byte) bool {
-	switch status {
-	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
-		return true
-	case http.StatusBadRequest, http.StatusForbidden, http.StatusUnprocessableEntity:
-		lower := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(body) + " " + string(body)))
-		if strings.Contains(lower, "compact") {
-			for _, keyword := range []string{
-				"unsupported",
-				"not support",
-				"does not support",
-				"not available",
-				"disabled",
-			} {
-				if strings.Contains(lower, keyword) {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
 // buildOpenAIRemoteCompactionV2ProbeExtraUpdates computes the independent
 // native-v2 capability observation. Legacy /responses/compact state is never
 // read or written here.
@@ -130,9 +107,6 @@ func buildOpenAIRemoteCompactionV2ProbeExtraUpdates(resp *http.Response, body []
 			updates[OpenAIRemoteCompactionV2SupportedExtraKey] = false
 			updates[OpenAIRemoteCompactionV2LastErrorExtraKey] = "upstream returned 2xx without a compaction output item (native remote compaction v2 unsupported)"
 		default:
-			if shouldMarkOpenAIRemoteCompactionV2Unsupported(resp.StatusCode, body) {
-				updates[OpenAIRemoteCompactionV2SupportedExtraKey] = false
-			}
 			updates[OpenAIRemoteCompactionV2LastErrorExtraKey] = errMsg
 		}
 	}

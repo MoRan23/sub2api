@@ -96,11 +96,45 @@ func (c *stagedPassthroughConn) Close() error {
 }
 
 type stagedPassthroughDialer struct {
-	conn openAIWSClientConn
+	conn    openAIWSClientConn
+	headers http.Header
+}
+
+type passthroughTurnStateGatewayCache struct {
+	*stubGatewayCache
+	mu      sync.Mutex
+	origins map[string]OpenAICodexTurnStateOrigin
+}
+
+func (c *passthroughTurnStateGatewayCache) GetOpenAICodexTurnStateOrigin(_ context.Context, key string) (OpenAICodexTurnStateOrigin, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	origin, ok := c.origins[key]
+	if !ok {
+		return OpenAICodexTurnStateOrigin{}, ErrOpenAICodexTurnStateOriginNotFound
+	}
+	return origin, nil
+}
+
+func (c *passthroughTurnStateGatewayCache) SetOpenAICodexTurnStateOrigin(_ context.Context, key string, origin OpenAICodexTurnStateOrigin, _ time.Duration) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.origins == nil {
+		c.origins = make(map[string]OpenAICodexTurnStateOrigin)
+	}
+	c.origins[key] = origin
+	return nil
+}
+
+func (c *passthroughTurnStateGatewayCache) DeleteOpenAICodexTurnStateOrigin(_ context.Context, key string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.origins, key)
+	return nil
 }
 
 func (d *stagedPassthroughDialer) Dial(context.Context, string, http.Header, string) (openAIWSClientConn, int, http.Header, error) {
-	return d.conn, http.StatusSwitchingProtocols, http.Header{}, nil
+	return d.conn, http.StatusSwitchingProtocols, cloneHeader(d.headers), nil
 }
 
 func newPassthroughLifecycleService(cfg *config.Config, upstream *stagedPassthroughConn) *OpenAIGatewayService {
@@ -256,6 +290,179 @@ func TestOpenAIWSPassthroughTurnLifecycle_SerializesTerminalCommitAndNextTurn(t 
 		t.Error("failed terminal write must not commit idle state")
 	})
 	require.False(t, <-admitted, "failed terminal write must keep the current turn in flight")
+}
+
+func TestPassthroughLifecycle_TurnStateCommitsOnlyAfterFirstDeliveredOutput(t *testing.T) {
+	const (
+		sessionID = "direct-turn-state-session"
+		oldState  = "direct-turn-state-old"
+		newState  = "direct-turn-state-new"
+	)
+
+	newHarness := func(t *testing.T, handshakeState string) (*OpenAIGatewayService, *stagedPassthroughConn, *httptest.Server, <-chan error, string, *passthroughTurnStateGatewayCache) {
+		t.Helper()
+		upstream := newStagedPassthroughConn()
+		cfg := passthroughLifecycleConfig()
+		cfg.JWT.Secret = "direct-turn-state-secret"
+		cfg.Gateway.OpenAIWS.OAuthEnabled = true
+		svc := newPassthroughLifecycleService(cfg, upstream)
+		cache := &passthroughTurnStateGatewayCache{stubGatewayCache: &stubGatewayCache{}}
+		svc.cache = cache
+		dialer := svc.openaiWSPassthroughDialer.(*stagedPassthroughDialer)
+		if handshakeState != "" {
+			dialer.headers = make(http.Header)
+			dialer.headers.Set(openAICodexTurnStateHeader, handshakeState)
+		}
+		account := &Account{
+			ID: 902, Name: "passthrough-turn-state", Platform: PlatformOpenAI,
+			Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1,
+			Credentials: map[string]any{"access_token": "oauth-token"},
+			Extra: map[string]any{
+				"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+				openAIPinnedInstallationIDKey:               transportTestPinnedInstallationID,
+			},
+		}
+		server, serverErr := startPassthroughLifecycleServer(t, context.Background(), svc, account)
+		sessionHash, _ := deriveOpenAISessionHashes(sessionID)
+		svc.getOpenAIWSStateStore().BindSessionTurnState(0, sessionHash, oldState, time.Minute)
+		return svc, upstream, server, serverErr, sessionHash, cache
+	}
+
+	dialAndWrite := func(t *testing.T, server *httptest.Server) *coderws.Conn {
+		t.Helper()
+		dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+		client, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(server.URL, "http"), &coderws.DialOptions{
+			HTTPHeader: http.Header{"session_id": []string{sessionID}},
+		})
+		cancelDial()
+		require.NoError(t, err)
+		writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+		require.NoError(t, client.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"client_metadata":{"session_id":"direct-turn-state-session","thread_id":"direct-turn-state-session"}}`)))
+		cancelWrite()
+		return client
+	}
+
+	t.Run("successful first output binds raw state and provenance", func(t *testing.T) {
+		svc, upstream, server, serverErr, sessionHash, provenanceStore := newHarness(t, newState)
+		defer server.Close()
+		client := dialAndWrite(t, server)
+		defer func() { _ = client.CloseNow() }()
+		require.NotEmpty(t, requirePassthroughUpstreamWrite(t, upstream, 3*time.Second))
+		state, ok := svc.getOpenAIWSStateStore().GetSessionTurnState(0, sessionHash)
+		require.True(t, ok)
+		require.Equal(t, oldState, state, "handshake state must not bind before downstream delivery")
+
+		upstream.Send(`{"type":"response.completed","response":{"id":"resp_state_bound","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+		payload, readErr := readPassthroughLifecycleFrame(t, client, 3*time.Second)
+		require.NoError(t, readErr)
+		require.Equal(t, "resp_state_bound", gjson.GetBytes(payload, "response.id").String())
+		require.Eventually(t, func() bool {
+			state, ok = svc.getOpenAIWSStateStore().GetSessionTurnState(0, sessionHash)
+			return ok && state == newState
+		}, time.Second, 10*time.Millisecond)
+		key, keyErr := OpenAICodexTurnStateProvenanceKey(svc.cfg.JWT.Secret, 0, newState)
+		require.NoError(t, keyErr)
+		require.Eventually(t, func() bool {
+			_, provenanceErr := provenanceStore.GetOpenAICodexTurnStateOrigin(context.Background(), key)
+			return provenanceErr == nil
+		}, time.Second, 10*time.Millisecond)
+		require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
+		select {
+		case <-serverErr:
+		case <-time.After(3 * time.Second):
+			t.Fatal("successful direct turn-state session did not exit")
+		}
+	})
+
+	t.Run("no downstream output retains old state", func(t *testing.T) {
+		svc, upstream, server, serverErr, sessionHash, provenanceStore := newHarness(t, newState)
+		defer server.Close()
+		client := dialAndWrite(t, server)
+		require.NotEmpty(t, requirePassthroughUpstreamWrite(t, upstream, 3*time.Second))
+		require.NoError(t, client.CloseNow())
+		select {
+		case <-serverErr:
+		case <-time.After(3 * time.Second):
+			t.Fatal("failed direct turn-state session did not exit")
+		}
+		state, ok := svc.getOpenAIWSStateStore().GetSessionTurnState(0, sessionHash)
+		require.True(t, ok)
+		require.Equal(t, oldState, state)
+		key, keyErr := OpenAICodexTurnStateProvenanceKey(svc.cfg.JWT.Secret, 0, newState)
+		require.NoError(t, keyErr)
+		_, provenanceErr := provenanceStore.GetOpenAICodexTurnStateOrigin(context.Background(), key)
+		require.ErrorIs(t, provenanceErr, ErrOpenAICodexTurnStateOriginNotFound)
+	})
+
+	t.Run("failed terminal output retains old state", func(t *testing.T) {
+		svc, upstream, server, serverErr, sessionHash, provenanceStore := newHarness(t, newState)
+		defer server.Close()
+		client := dialAndWrite(t, server)
+		defer func() { _ = client.CloseNow() }()
+		require.NotEmpty(t, requirePassthroughUpstreamWrite(t, upstream, 3*time.Second))
+
+		upstream.Send(`{"type":"response.failed","response":{"id":"resp_state_failed","model":"gpt-5.1","error":{"message":"failed"}}}`)
+		payload, readErr := readPassthroughLifecycleFrame(t, client, 3*time.Second)
+		require.NoError(t, readErr)
+		require.Equal(t, "response.failed", gjson.GetBytes(payload, "type").String())
+		state, ok := svc.getOpenAIWSStateStore().GetSessionTurnState(0, sessionHash)
+		require.True(t, ok)
+		require.Equal(t, oldState, state)
+		key, keyErr := OpenAICodexTurnStateProvenanceKey(svc.cfg.JWT.Secret, 0, newState)
+		require.NoError(t, keyErr)
+		_, provenanceErr := provenanceStore.GetOpenAICodexTurnStateOrigin(context.Background(), key)
+		require.ErrorIs(t, provenanceErr, ErrOpenAICodexTurnStateOriginNotFound)
+
+		require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
+		select {
+		case <-serverErr:
+		case <-time.After(3 * time.Second):
+			t.Fatal("failed-output direct turn-state session did not exit")
+		}
+	})
+
+	t.Run("successful output with empty handshake clears old state", func(t *testing.T) {
+		svc, upstream, server, serverErr, sessionHash, _ := newHarness(t, "")
+		defer server.Close()
+		client := dialAndWrite(t, server)
+		defer func() { _ = client.CloseNow() }()
+		require.NotEmpty(t, requirePassthroughUpstreamWrite(t, upstream, 3*time.Second))
+		upstream.Send(`{"type":"response.completed","response":{"id":"resp_state_cleared","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+		_, readErr := readPassthroughLifecycleFrame(t, client, 3*time.Second)
+		require.NoError(t, readErr)
+		require.Eventually(t, func() bool {
+			_, ok := svc.getOpenAIWSStateStore().GetSessionTurnState(0, sessionHash)
+			return !ok
+		}, time.Second, 10*time.Millisecond)
+		require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
+		select {
+		case <-serverErr:
+		case <-time.After(3 * time.Second):
+			t.Fatal("empty-handshake direct turn-state session did not exit")
+		}
+	})
+}
+
+func TestOpenAIWSPassthroughOutputCommitsTurnState(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{name: "text delta", payload: `{"type":"response.output_text.delta","delta":"ok"}`, want: true},
+		{name: "completed", payload: `{"type":"response.completed"}`, want: true},
+		{name: "done", payload: `{"type":"response.done"}`, want: true},
+		{name: "protocol error", payload: `{"type":"error","error":{"message":"failed"}}`},
+		{name: "failed", payload: `{"type":"response.failed"}`},
+		{name: "incomplete", payload: `{"type":"response.incomplete"}`},
+		{name: "cancelled", payload: `{"type":"response.cancelled"}`},
+		{name: "canceled", payload: `{"type":"response.canceled"}`},
+		{name: "created only", payload: `{"type":"response.created"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, openAIWSPassthroughOutputCommitsTurnState([]byte(tc.payload)))
+		})
+	}
 }
 
 func TestPassthroughLifecycle_UUIDv7PromptCacheChangeKeepsPinnedTuple(t *testing.T) {

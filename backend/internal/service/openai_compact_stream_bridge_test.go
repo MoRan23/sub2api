@@ -92,6 +92,23 @@ func TestBuildOpenAICompactSSEPayload_EmitsItemsAndCompleted(t *testing.T) {
 	require.Len(t, gjson.Get(completed, "response.output").Array(), 2)
 }
 
+func TestOpenAICodexSuccessfulJSONCompactionResponseRequiresCompletedStatus(t *testing.T) {
+	base := `{"output":[{"id":"cmp_1","type":"compaction"}]}`
+	require.False(t, openAICodexSuccessfulJSONCompactionResponse([]byte(base)))
+	require.False(t, openAICodexSuccessfulJSONCompactionResponse([]byte(`{"status":"incomplete","output":[{"id":"cmp_1","type":"compaction"}]}`)))
+	require.True(t, openAICodexSuccessfulJSONCompactionResponse([]byte(`{"status":"completed","output":[{"id":"cmp_1","type":"compaction"}]}`)))
+	require.True(t, openAICodexSuccessfulJSONCompactionResponse([]byte(`{"status":"done","output":[{"id":"cmp_1","type":"compaction_summary"}]}`)))
+}
+
+func TestOpenAICodexCompactionDeliveryStateCountsOnlyFlushedEvents(t *testing.T) {
+	state := &openAICodexCompactionDeliveryState{delivery: &openAICodexCompactionDelivery{}}
+	state.enqueue([]byte(`{"type":"response.output_item.done","item":{"id":"cmp_1","type":"compaction"}}`))
+	state.enqueue([]byte(`{"type":"response.completed","response":{"status":"completed","output":[{"id":"cmp_1","type":"compaction"}]}}`))
+	require.False(t, state.delivery.Valid(), "queued events are not delivered before flush")
+	state.flushDelivered()
+	require.True(t, state.delivery.Valid())
+}
+
 func TestBuildOpenAICompactSSEPayload_InjectsMissingResponseID(t *testing.T) {
 	payload, ok := buildOpenAICompactSSEPayload([]byte(`{"output":[{"type":"compaction","encrypted_content":"x"}]}`))
 	require.True(t, ok)
@@ -165,6 +182,28 @@ func TestWriteOpenAICompactSSEBridge_RequiresMarkAndSuccessStatus(t *testing.T) 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"))
 	require.Contains(t, rec.Body.String(), "event: response.completed")
+}
+
+func TestCompactResponseDeliveryRequiresCompleteWriterSuccess(t *testing.T) {
+	finalResponse := []byte(`{"id":"resp_1","status":"completed","output":[{"type":"compaction","encrypted_content":"x"}]}`)
+
+	t.Run("SSE bridge write failure", func(t *testing.T) {
+		c, _ := newCompactBridgeTestContext(t, true)
+		c.Writer = &failingGinWriter{ResponseWriter: c.Writer, failAfter: 0}
+
+		handled, delivered := writeOpenAICompactSSEBridgeWithDelivery(c, http.StatusOK, finalResponse)
+		require.True(t, handled)
+		require.False(t, delivered)
+		require.True(t, c.Writer.Written(), "a committed response header is not proof of body delivery")
+	})
+
+	t.Run("JSON write failure", func(t *testing.T) {
+		c, _ := newCompactBridgeTestContext(t, false)
+		c.Writer = &failingGinWriter{ResponseWriter: c.Writer, failAfter: 0}
+
+		delivered := writeOpenAIResponseDataWithDelivery(c, http.StatusOK, "application/json", finalResponse)
+		require.False(t, delivered)
+	})
 }
 
 // 回归 #3875：body-signal 提升后的 compact 请求，上游返回 unary JSON，

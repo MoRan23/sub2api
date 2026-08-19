@@ -154,6 +154,18 @@ type AccountTestService struct {
 	grokWSDialer openAIWSClientDialer
 }
 
+func captureOpenAIOAuthSyntheticRequest(c *gin.Context, body []byte, callerSeed string) OpenAIOAuthIdentityCapture {
+	seed := sanitizeSessionID(callerSeed)
+	if current, ok := OpenAIOAuthIdentityCaptureFromContext(c); ok &&
+		current.Logical.Source == OpenAIOutboundSessionLogicalKeySourceCallerSeed &&
+		current.Logical.SessionKey == seed {
+		return current
+	}
+	capture := CaptureOpenAIOAuthIdentity(nil, body, callerSeed)
+	SetOpenAIOAuthIdentityCapture(c, capture)
+	return capture
+}
+
 func (s *AccountTestService) SetSettingService(settingService *SettingService) {
 	if s != nil {
 		s.settingService = settingService
@@ -751,24 +763,37 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		if gateway == nil {
 			gateway = &OpenAIGatewayService{accountRepo: s.accountRepo, cfg: s.cfg, settingService: s.settingService}
 		}
-		plan, planErr := gateway.ResolveOpenAIOAuthProfileIdentityPlan(ctx, c, account, OpenAIOAuthInstallationAccountPin)
+		capture := captureOpenAIOAuthSyntheticRequest(c, payloadBytes, "account-test")
+		plan, planErr := gateway.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, OpenAIOAuthIdentityPlanOptions{
+			TurnIdentityEnabled: gateway.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account),
+			ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
+			InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
+		}, nil)
 		if planErr != nil {
-			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth profile identity: %s", planErr.Error()))
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth identity: %s", planErr.Error()))
 		}
-		copyOpenAIInstallationIDHeadersFromContext(c, req.Header)
 		if gateway.cfg != nil && gateway.cfg.Gateway.ForceCodexCLI {
 			req.Header.Set("User-Agent", plan.ClientIdentity.UserAgent)
 			req.Header.Set("Originator", plan.ClientIdentity.Originator)
 			req.Header.Set("Version", plan.ClientIdentity.Version)
 		}
-		var applyErr error
-		payloadBytes, applyErr = ApplyOpenAIOAuthIdentityPlan(req.Header, payloadBytes, plan)
-		if applyErr != nil {
-			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to apply OpenAI OAuth profile identity: %s", applyErr.Error()))
+		fields := gjson.GetManyBytes(payloadBytes, "model", "service_tier")
+		var finalizeErr error
+		payloadBytes, finalizeErr = gateway.FinalizeOpenAIOAuthResponsesRequest(c, account, req, payloadBytes, OpenAIOAuthResponsesFinalizeOptions{
+			Plan:             plan,
+			FinalModel:       fields[0].String(),
+			FinalServiceTier: fields[1].String(),
+			RequestKind:      "turn",
+			Transport:        "account_test",
+		})
+		if finalizeErr != nil {
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to finalize OpenAI OAuth request: %s", finalizeErr.Error()))
 		}
 	}
-	req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
-	req.ContentLength = int64(len(payloadBytes))
+	if !isOAuth {
+		req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
+		req.ContentLength = int64(len(payloadBytes))
+	}
 
 	// Get proxy URL
 	proxyURL := ""
@@ -2106,7 +2131,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 				accountRepo: s.accountRepo, cfg: s.cfg, settingService: settings,
 			}
 		}
-		capture := CaptureOpenAIOAuthIdentity(c, payloadBytes, "compact-probe")
+		capture := captureOpenAIOAuthSyntheticRequest(c, payloadBytes, "compact-probe")
 		plan, planErr := gateway.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, OpenAIOAuthIdentityPlanOptions{
 			TurnIdentityEnabled: gateway.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account),
 			ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
@@ -2115,13 +2140,22 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		if planErr != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth identity: %s", planErr.Error()))
 		}
-		payloadBytes, err = ApplyOpenAIOAuthIdentityPlan(req.Header, payloadBytes, plan)
+		fields := gjson.GetManyBytes(payloadBytes, "model", "service_tier")
+		payloadBytes, err = gateway.FinalizeOpenAIOAuthResponsesRequest(c, account, req, payloadBytes, OpenAIOAuthResponsesFinalizeOptions{
+			Plan:             plan,
+			FinalModel:       fields[0].String(),
+			FinalServiceTier: fields[1].String(),
+			RequestKind:      "compaction",
+			Transport:        "remote_compaction_v2_probe",
+		})
 		if err != nil {
-			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to apply OpenAI OAuth identity: %s", err.Error()))
+			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to finalize OpenAI OAuth request: %s", err.Error()))
 		}
 	}
-	req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
-	req.ContentLength = int64(len(payloadBytes))
+	if !isOAuth {
+		req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
+		req.ContentLength = int64(len(payloadBytes))
+	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -3014,26 +3048,36 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 		req.Header.Set("User-Agent", customUA)
 	}
 	setOpenAIChatGPTAccountHeaders(req.Header, credentialAccount)
+	credentialAccount.ApplyHeaderOverrides(req.Header)
 	gateway := s.openAIGatewayService
 	if gateway == nil {
 		gateway = &OpenAIGatewayService{accountRepo: s.accountRepo, cfg: s.cfg, settingService: s.settingService}
 	}
-	profilePlan, planErr := gateway.ResolveOpenAIOAuthProfileIdentityPlan(ctx, c, account, OpenAIOAuthInstallationAccountPin)
+	capture := captureOpenAIOAuthSyntheticRequest(c, responsesBody, "account-image-test")
+	profilePlan, planErr := gateway.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, OpenAIOAuthIdentityPlanOptions{
+		TurnIdentityEnabled: gateway.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account),
+		ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
+		InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
+	}, nil)
 	if planErr != nil {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth profile identity: %s", planErr.Error()))
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth identity: %s", planErr.Error()))
 	}
-	copyOpenAIInstallationIDHeadersFromContext(c, req.Header)
 	if gateway.cfg != nil && gateway.cfg.Gateway.ForceCodexCLI {
 		req.Header.Set("User-Agent", profilePlan.ClientIdentity.UserAgent)
 		req.Header.Set("Originator", profilePlan.ClientIdentity.Originator)
 		req.Header.Set("Version", profilePlan.ClientIdentity.Version)
 	}
-	responsesBody, err = ApplyOpenAIOAuthIdentityPlan(req.Header, responsesBody, profilePlan)
+	fields := gjson.GetManyBytes(responsesBody, "model", "service_tier")
+	responsesBody, err = gateway.FinalizeOpenAIOAuthResponsesRequest(c, account, req, responsesBody, OpenAIOAuthResponsesFinalizeOptions{
+		Plan:             profilePlan,
+		FinalModel:       fields[0].String(),
+		FinalServiceTier: fields[1].String(),
+		RequestKind:      "turn",
+		Transport:        "account_image_test",
+	})
 	if err != nil {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to apply OpenAI OAuth profile identity: %s", err.Error()))
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to finalize OpenAI OAuth request: %s", err.Error()))
 	}
-	req.Body = io.NopCloser(bytes.NewReader(responsesBody))
-	req.ContentLength = int64(len(responsesBody))
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

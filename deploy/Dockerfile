@@ -51,6 +51,7 @@ ARG GOSUMDB
 
 ENV GOPROXY=${GOPROXY}
 ENV GOSUMDB=${GOSUMDB}
+ENV GOEXPERIMENT=jsonv2
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata

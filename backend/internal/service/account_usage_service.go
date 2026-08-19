@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"log/slog"
 	"math/rand/v2"
@@ -21,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
+	"github.com/tidwall/gjson"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 )
@@ -867,26 +867,32 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 		}
 	}
 	setOpenAIChatGPTAccountHeaders(req.Header, account)
+	account.ApplyHeaderOverrides(req.Header)
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal openai probe payload: %w", err)
 	}
 	gateway := s.openAIGatewayForProfileIdentity()
-	profilePlan, planErr := gateway.ResolveOpenAIOAuthProfileIdentityPlan(reqCtx, nil, account, OpenAIOAuthInstallationAccountPin)
+	plan, planErr := s.resolveOpenAICodexUsageProbeIdentityPlan(reqCtx, account, payloadBytes)
 	if planErr != nil {
-		return nil, fmt.Errorf("resolve OpenAI OAuth profile identity: %w", planErr)
+		return nil, fmt.Errorf("resolve OpenAI OAuth identity: %w", planErr)
 	}
 	if gateway.cfg != nil && gateway.cfg.Gateway.ForceCodexCLI {
-		req.Header.Set("User-Agent", profilePlan.ClientIdentity.UserAgent)
-		req.Header.Set("Originator", profilePlan.ClientIdentity.Originator)
-		req.Header.Set("Version", profilePlan.ClientIdentity.Version)
+		req.Header.Set("User-Agent", plan.ClientIdentity.UserAgent)
+		req.Header.Set("Originator", plan.ClientIdentity.Originator)
+		req.Header.Set("Version", plan.ClientIdentity.Version)
 	}
-	payloadBytes, err = ApplyOpenAIOAuthIdentityPlan(req.Header, payloadBytes, profilePlan)
+	fields := gjson.GetManyBytes(payloadBytes, "model", "service_tier")
+	payloadBytes, err = gateway.FinalizeOpenAIOAuthResponsesRequest(nil, account, req, payloadBytes, OpenAIOAuthResponsesFinalizeOptions{
+		Plan:             plan,
+		FinalModel:       fields[0].String(),
+		FinalServiceTier: fields[1].String(),
+		RequestKind:      "turn",
+		Transport:        "usage_probe",
+	})
 	if err != nil {
-		return nil, fmt.Errorf("apply OpenAI OAuth profile identity: %w", err)
+		return nil, fmt.Errorf("finalize OpenAI OAuth Responses request: %w", err)
 	}
-	req.Body = io.NopCloser(bytes.NewReader(payloadBytes))
-	req.ContentLength = int64(len(payloadBytes))
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -915,6 +921,20 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 		return updates, nil
 	}
 	return nil, nil
+}
+
+func (s *AccountUsageService) resolveOpenAICodexUsageProbeIdentityPlan(
+	ctx context.Context,
+	account *Account,
+	payload []byte,
+) (OpenAIOAuthIdentityPlan, error) {
+	gateway := s.openAIGatewayForProfileIdentity()
+	capture := CaptureOpenAIOAuthIdentity(nil, payload, "usage-probe")
+	return gateway.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, nil, account, capture, OpenAIOAuthIdentityPlanOptions{
+		TurnIdentityEnabled: gateway.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, nil, account),
+		ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
+		InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
+	}, nil)
 }
 
 func (s *AccountUsageService) openAIGatewayForProfileIdentity() *OpenAIGatewayService {

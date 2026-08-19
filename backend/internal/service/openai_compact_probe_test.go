@@ -47,16 +47,31 @@ func TestBuildOpenAICompactProbeExtraUpdates_SuccessMarksSupported(t *testing.T)
 	}
 }
 
-func TestBuildOpenAICompactProbeExtraUpdates_404MarksUnsupported(t *testing.T) {
+func TestBuildOpenAICompactProbeExtraUpdates_Non2xxDoesNotChangeSupported(t *testing.T) {
 	now := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
-	body := []byte(`404 page not found`)
-	updates := buildOpenAIRemoteCompactionV2ProbeExtraUpdates(&http.Response{StatusCode: http.StatusNotFound}, body, nil, false, now)
-
-	if got := updates[OpenAIRemoteCompactionV2SupportedExtraKey]; got != false {
-		t.Fatalf("%s = %v, want false", OpenAIRemoteCompactionV2SupportedExtraKey, got)
+	statuses := []int{
+		http.StatusBadRequest,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusMethodNotAllowed,
+		http.StatusUnprocessableEntity,
+		http.StatusTooManyRequests,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
 	}
-	if got := updates[OpenAIRemoteCompactionV2LastStatusExtraKey]; got != http.StatusNotFound {
-		t.Fatalf("%s = %v, want %d", OpenAIRemoteCompactionV2LastStatusExtraKey, got, http.StatusNotFound)
+	for _, status := range statuses {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			body := []byte(`{"error":{"message":"remote compaction unsupported"}}`)
+			updates := buildOpenAIRemoteCompactionV2ProbeExtraUpdates(&http.Response{StatusCode: status}, body, nil, false, now)
+
+			if _, exists := updates[OpenAIRemoteCompactionV2SupportedExtraKey]; exists {
+				t.Fatalf("did not expect %s for HTTP %d", OpenAIRemoteCompactionV2SupportedExtraKey, status)
+			}
+			if got := updates[OpenAIRemoteCompactionV2LastStatusExtraKey]; got != status {
+				t.Fatalf("%s = %v, want %d", OpenAIRemoteCompactionV2LastStatusExtraKey, got, status)
+			}
+		})
 	}
 }
 

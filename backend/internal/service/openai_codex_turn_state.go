@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // openAICodexTurnStateHeader is an opaque turn-continuation token minted by
@@ -25,7 +27,7 @@ const openAICodexTurnStateHeader = "x-codex-turn-state"
 
 const (
 	openAICodexTurnStateKeyDomain       = "sub2api/openai-codex-turn-state/v1"
-	openAICodexTurnStateIdentityDomain  = "sub2api/openai-codex-turn-state-identity/v2"
+	openAICodexTurnStateIdentityDomain  = "sub2api/openai-codex-turn-state-identity/v3"
 	openAICodexTurnStateLocalMaxEntries = 64 * 1024
 	openAICodexTurnStateStoreTimeout    = 500 * time.Millisecond
 )
@@ -207,10 +209,16 @@ func OpenAICodexTurnStateProvenanceKey(secret string, apiKeyID int64, state stri
 
 // OpenAICodexTurnStateIdentityDigest intentionally excludes projection mode,
 // endpoint aliases, beta features, and User-Agent/version. A state minted on a
-// normal Responses request must remain valid for compact and WS reconnects
-// when the installation, UUID session/thread tuple, and request turn_id are
-// unchanged. The timestamp is diagnostic and deliberately excluded.
+// normal Responses request must remain valid for retries and WS reconnects
+// when the owner, stable tuple, context window and turn lineage are unchanged.
+// Timestamp, request kind, projection, UA and endpoint are deliberately
+// excluded; an inline compact request belongs to the current turn/window until
+// its successful response atomically advances the window.
 func OpenAICodexTurnStateIdentityDigest(plan OpenAIOAuthIdentityPlan) string {
+	requestKind := plan.WireProfile.RequestKind
+	if !requestKind.valid() {
+		requestKind = CodexWireRequestTurn
+	}
 	effectiveInstallation := ""
 	if plan.InstallationEnabled {
 		effectiveInstallation = strings.TrimSpace(plan.InstallationID)
@@ -219,9 +227,12 @@ func OpenAICodexTurnStateIdentityDigest(plan OpenAIOAuthIdentityPlan) string {
 	}
 	parts := []string{
 		openAICodexTurnStateIdentityDomain,
+		strings.TrimSpace(plan.CredentialOwnerNamespace),
 		effectiveInstallation,
+		strings.TrimSpace(plan.WireProfile.Revision),
+		strings.TrimSpace(plan.WireProfile.Commit),
 		strconv.FormatBool(plan.TurnIdentityEnabled),
-		strconv.FormatBool(plan.TurnIdentityRequested && openAICodexRequestTurnSnapshotValid(plan.RequestTurn)),
+		strconv.FormatBool(plan.TurnIdentityRequested && openAICodexRequestTurnSnapshotValidForWire(plan.RequestTurn, requestKind)),
 	}
 	if plan.TurnIdentityEnabled {
 		parts = append(parts,
@@ -230,10 +241,15 @@ func OpenAICodexTurnStateIdentityDigest(plan OpenAIOAuthIdentityPlan) string {
 			strings.TrimSpace(plan.TurnIdentity.ParentThreadID),
 			strings.TrimSpace(plan.TurnIdentity.ForkedFromThreadID),
 			string(plan.TurnIdentity.Relation),
+			strings.TrimSpace(plan.Window.WindowID()),
 		)
 	}
-	if plan.TurnIdentityRequested && openAICodexRequestTurnSnapshotValid(plan.RequestTurn) {
-		parts = append(parts, strings.TrimSpace(plan.RequestTurn.ID))
+	if plan.TurnIdentityRequested && openAICodexRequestTurnSnapshotValidForWire(plan.RequestTurn, requestKind) {
+		parts = append(parts,
+			strings.TrimSpace(plan.RequestTurn.ID),
+			strings.TrimSpace(plan.WireProfile.TurnLineage.ParentTurnID.Value),
+			strings.TrimSpace(plan.WireProfile.TurnLineage.RootTurnID.Value),
+		)
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(sum[:])
@@ -246,11 +262,20 @@ type openAICodexTurnStateRequestOrigin struct {
 }
 
 func openAICodexTurnStateRequestOriginFromContext(c *gin.Context, account *Account) (openAICodexTurnStateRequestOrigin, bool) {
-	if account == nil || !account.IsOpenAIOAuth() {
+	plan, ok := OpenAIOAuthIdentityPlanFromContext(c)
+	if !ok {
 		return openAICodexTurnStateRequestOrigin{}, false
 	}
-	plan, ok := OpenAIOAuthIdentityPlanFromContext(c)
-	if !ok || strings.TrimSpace(plan.CredentialOwnerNamespace) == "" {
+	return openAICodexTurnStateRequestOriginFromPlan(account, plan)
+}
+
+func openAICodexTurnStateRequestOriginFromPlan(account *Account, plan OpenAIOAuthIdentityPlan) (openAICodexTurnStateRequestOrigin, bool) {
+	// Turn-state provenance belongs to the normalized turn identity contract.
+	// When that contract is disabled, retain the legacy wire byte-for-byte and
+	// do not touch Redis/local provenance state even if installation or client
+	// identity normalization remains independently enabled.
+	if account == nil || !account.IsOpenAIOAuth() || !plan.TurnIdentityRequested ||
+		strings.TrimSpace(plan.CredentialOwnerNamespace) == "" {
 		return openAICodexTurnStateRequestOrigin{}, false
 	}
 	return openAICodexTurnStateRequestOrigin{
@@ -417,7 +442,20 @@ func stageOpenAICodexTurnState(dst *http.Header, account *Account, upstream http
 // noteOpenAICodexTurnStateProvenance binds an explicitly committed state to
 // the final credential owner and normalized identity used for this request.
 func (s *OpenAIGatewayService) noteOpenAICodexTurnStateProvenance(c *gin.Context, account *Account, state string) {
-	requestOrigin, ok := openAICodexTurnStateRequestOriginFromContext(c, account)
+	plan, ok := OpenAIOAuthIdentityPlanFromContext(c)
+	if !ok {
+		return
+	}
+	s.noteOpenAICodexTurnStateProvenanceForPlan(c, account, state, plan)
+}
+
+func (s *OpenAIGatewayService) noteOpenAICodexTurnStateProvenanceForPlan(
+	c *gin.Context,
+	account *Account,
+	state string,
+	plan OpenAIOAuthIdentityPlan,
+) {
+	requestOrigin, ok := openAICodexTurnStateRequestOriginFromPlan(account, plan)
 	if !ok {
 		return
 	}
@@ -450,37 +488,109 @@ func (s *OpenAIGatewayService) noteStagedOpenAICodexTurnStateCommitted(c *gin.Co
 // provenance. Unknown, expired, or unavailable provenance remains fail-open to
 // preserve pre-upgrade and externally minted state.
 func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEcho(c *gin.Context, account *Account, h http.Header) {
-	if s == nil || h == nil {
-		return
-	}
-	state := strings.TrimSpace(h.Get(openAICodexTurnStateHeader))
-	if state == "" {
-		return
-	}
-	requestOrigin, ok := openAICodexTurnStateRequestOriginFromContext(c, account)
+	plan, ok := OpenAIOAuthIdentityPlanFromContext(c)
 	if !ok {
 		return
 	}
-	key, ok := s.openAICodexTurnStateMappingKey(requestOrigin, state)
+	s.guardOpenAICodexTurnStateEchoForPlan(c, account, plan, h, nil)
+}
+
+// guardOpenAICodexTurnStateEchoForPlan validates both protocol carriers
+// against the exact immutable identity plan that will be sent upstream. Body
+// mutation uses sjson so unrelated request bytes are not re-encoded. Unknown
+// state, non-string metadata, and unavailable provenance remain fail-open.
+func (s *OpenAIGatewayService) guardOpenAICodexTurnStateEchoForPlan(
+	c *gin.Context,
+	account *Account,
+	plan OpenAIOAuthIdentityPlan,
+	h http.Header,
+	body []byte,
+) []byte {
+	if s == nil {
+		return body
+	}
+	requestOrigin, ok := openAICodexTurnStateRequestOriginFromPlan(account, plan)
 	if !ok {
-		return
+		return body
 	}
-	origin, found := s.getOpenAICodexTurnStateOrigin(c, key)
-	if !found {
-		openAICodexTurnStateMetrics.guardUnknownTotal.Add(1)
-		return
+
+	type guardDecision uint8
+	const (
+		guardKeep guardDecision = iota
+		guardStrip
+	)
+	decisions := make(map[string]guardDecision, 2)
+	shouldStrip := func(state string) bool {
+		state = strings.TrimSpace(state)
+		if state == "" {
+			return false
+		}
+		if decision, exists := decisions[state]; exists {
+			return decision == guardStrip
+		}
+		key, valid := s.openAICodexTurnStateMappingKey(requestOrigin, state)
+		if !valid {
+			decisions[state] = guardKeep
+			return false
+		}
+		origin, found := s.getOpenAICodexTurnStateOrigin(c, key)
+		if !found {
+			openAICodexTurnStateMetrics.guardUnknownTotal.Add(1)
+			decisions[state] = guardKeep
+			return false
+		}
+		if origin.CredentialOwnerNamespace != requestOrigin.namespace {
+			openAICodexTurnStateMetrics.guardStripOwner.Add(1)
+			decisions[state] = guardStrip
+			return true
+		}
+		if origin.TurnIdentityDigest != requestOrigin.digest {
+			openAICodexTurnStateMetrics.guardStripIdentity.Add(1)
+			decisions[state] = guardStrip
+			return true
+		}
+		openAICodexTurnStateMetrics.guardKeepTotal.Add(1)
+		decisions[state] = guardKeep
+		return false
 	}
-	if origin.CredentialOwnerNamespace != requestOrigin.namespace {
-		h.Del(openAICodexTurnStateHeader)
-		openAICodexTurnStateMetrics.guardStripOwner.Add(1)
-		return
+
+	if h != nil {
+		headerStates := make([]string, 0, 2)
+		for key, values := range h {
+			if !strings.EqualFold(key, openAICodexTurnStateHeader) {
+				continue
+			}
+			for _, value := range values {
+				if value = strings.TrimSpace(value); value != "" {
+					headerStates = append(headerStates, value)
+				}
+			}
+		}
+		stripHeader := false
+		for _, state := range headerStates {
+			if shouldStrip(state) {
+				stripHeader = true
+			}
+		}
+		deleteOpenAIHeaderEqualFold(h, openAICodexTurnStateHeader)
+		if !stripHeader && len(headerStates) > 0 {
+			h.Set(openAICodexTurnStateHeader, headerStates[0])
+		}
 	}
-	if origin.TurnIdentityDigest != requestOrigin.digest {
-		h.Del(openAICodexTurnStateHeader)
-		openAICodexTurnStateMetrics.guardStripIdentity.Add(1)
-		return
+	if len(body) == 0 || !openAICodexMetadataProjectionFromPlan(plan).enabled() {
+		return body
 	}
-	openAICodexTurnStateMetrics.guardKeepTotal.Add(1)
+	state := gjson.GetBytes(body, "client_metadata.x-codex-turn-state")
+	if !state.Exists() || state.Type != gjson.String || !shouldStrip(state.String()) {
+		return body
+	}
+	updated, err := sjson.DeleteBytes(body, "client_metadata.x-codex-turn-state")
+	if err != nil {
+		// A malformed container must retain its original bytes rather than risk
+		// deleting or re-encoding unrelated client metadata.
+		return body
+	}
+	return updated
 }
 
 var _ OpenAICodexTurnStateOriginStore = (*openAICodexTurnStateLocalStore)(nil)

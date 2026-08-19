@@ -271,17 +271,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				normalized = next
 			}
 		}
-		if account.IsOpenAIOAuth() && isOpenAIResponsesLiteWebSocketPayload(normalized) {
-			litePayload, _, liteErr := normalizeOpenAIResponsesLiteToolsPayload(normalized)
-			if liteErr != nil {
-				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
-					coderws.StatusPolicyViolation,
-					liteErr.Error(),
-					liteErr,
-				)
-			}
-			normalized = litePayload
-		}
 		apiKey := getAPIKeyFromContext(c)
 		imageGenerationAllowed := GroupAllowsImageGeneration(apiKeyGroup(apiKey))
 		codexImageGenerationExplicitToolPolicy := codexImageGenerationExplicitToolPolicyAllow
@@ -469,7 +458,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	preferredConnID := ""
 	storeDisabled := false
 	refreshIngressRouteState := func(payload openAIWSClientPayload) {
-		sessionHash = s.GenerateSessionHash(c, payload.rawForHash)
+		if account.IsOpenAIOAuth() {
+			sessionHash = s.GenerateSessionHashForOpenAIOAuthIdentity(c, payload.rawForHash, "")
+		} else {
+			sessionHash = s.GenerateSessionHash(c, payload.rawForHash)
+		}
 		if turnState == "" && stateStore != nil && sessionHash != "" {
 			if savedTurnState, ok := stateStore.GetSessionTurnState(groupID, sessionHash); ok {
 				turnState = savedTurnState
@@ -646,7 +639,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				bridgeReplayInput = append(bridgeReplayInput, cloneOpenAIWSRawMessages(result.wsReplayInput)...)
 				bridgeReplayInputExists = true
 			}
-			turnState = s.applyOpenAIWSHTTPBridgeDeliveredTurnState(c, account, stateStore, groupID, sessionHash, turnState, result)
+			turnState = s.applyOpenAIWSHTTPBridgeDeliveredTurnState(c, account, stateStore, groupID, sessionHash, turnState, result, bridgeIdentityPlan)
 			responseID := strings.TrimSpace(result.RequestID)
 			if responseID != "" && stateStore != nil {
 				ttl := s.openAIWSResponseStickyTTL()
@@ -704,10 +697,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	pinnedSocketDigest := pinnedIdentityPlan.SocketDigest
 	identityChangedForNextTurn := false
 	if account.IsOpenAIOAuth() {
-		if mergedPayload, mergeErr := ApplyOpenAIOAuthIdentityPlan(nil, firstPayload.payloadRaw, pinnedIdentityPlan); mergeErr == nil {
-			firstPayload.payloadRaw = mergedPayload
-			firstPayload.payloadBytes = len(mergedPayload)
+		mergedPayload, mergeErr := s.projectOpenAIOAuthWSFrame(c, account, pinnedIdentityPlan, firstPayload.payloadRaw)
+		if mergeErr != nil {
+			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to project websocket turn identity", mergeErr)
 		}
+		firstPayload.payloadRaw = mergedPayload
+		firstPayload.payloadBytes = len(mergedPayload)
 	}
 	baseAcquireReq := openAIWSAcquireRequest{
 		Account:        account,
@@ -872,6 +867,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return nil, errors.New("upstream websocket lease is nil")
 		}
 		turnStart := time.Now()
+		compactionDelivery := openAICodexWSCompactionDeliveryForPlan(account, pinnedIdentityPlan)
 		turnStateIdentityDigest := OpenAICodexTurnStateIdentityDigest(pinnedIdentityPlan)
 		handshakeHeadersForTurn := lease.HandshakeHeaders()
 		if !lease.HandshakeTurnStateCompatible(turnStateIdentityDigest) {
@@ -884,7 +880,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				return
 			}
 			handshakeTurnState := strings.TrimSpace(handshakeHeadersForTurn.Get(openAIWSTurnStateHeader))
-			if handshakeTurnState != "" && !lease.CommitHandshakeTurnStateIdentity(turnStateIdentityDigest) {
+			commitIdentityDigest := OpenAICodexTurnStateIdentityDigest(pinnedIdentityPlan)
+			if handshakeTurnState != "" && !lease.CommitHandshakeTurnStateIdentity(commitIdentityDigest) {
 				handshakeTurnState = ""
 			}
 			turnState = handshakeTurnState
@@ -902,9 +899,17 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 			if handshakeTurnState != "" {
-				s.noteOpenAICodexTurnStateProvenance(c, account, handshakeTurnState)
+				s.noteOpenAICodexTurnStateProvenanceForPlan(c, account, handshakeTurnState, pinnedIdentityPlan)
 			}
 			turnStateCommitted = true
+		}
+		if account.IsOpenAIOAuth() {
+			stamped, stampErr := stampOpenAICodexWSStreamRequestStart(payload, time.Now())
+			if stampErr != nil {
+				return nil, wrapOpenAIWSIngressTurnError("write_upstream_metadata", stampErr, false)
+			}
+			payload = stamped
+			payloadBytes = len(stamped)
 		}
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
@@ -1111,6 +1116,18 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					}
 				} else {
 					wroteDownstream = true
+					observeOpenAICodexWSCompactionDelivery(compactionDelivery, upstreamMessage)
+					if isTerminalEvent && s.commitOpenAICodexWSCompactionAfterDelivery(
+						ctx,
+						c,
+						account,
+						&pinnedIdentityPlan,
+						compactionDelivery,
+						extractOpenAICodexTurnState(handshakeHeadersForTurn),
+					) {
+						pinnedIdentity = pinnedIdentityPlan.TurnIdentity
+						pinnedIdentityEnabled = pinnedIdentityPlan.TurnIdentityEnabled
+					}
 					commitTurnState()
 				}
 			}
@@ -1781,14 +1798,23 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					nil,
 				)
 			}
+			newPlan, identityErr = s.finalizeOpenAIOAuthWSWirePlan(c, account, newPlan, nextPayload.payloadRaw, openAIOAuthWSWireFinalizeOptions{
+				FinalModel:       nextRoutingFields[0].String(),
+				FinalServiceTier: nextRoutingFields[1].String(),
+			})
+			if identityErr != nil {
+				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to finalize websocket turn identity", identityErr)
+			}
 			updatedHeaders := cloneHeader(baseAcquireReq.Headers)
 			if updatedHeaders == nil {
 				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to rebuild websocket session identity headers", errors.New("base websocket headers are nil"))
 			}
+			stripOpenAILegacyResponsesBeta(updatedHeaders)
+			applyOpenAICodexWSRoutingHint(updatedHeaders, account, newPlan)
 			if _, applyErr := ApplyOpenAIOAuthIdentityPlan(updatedHeaders, nil, newPlan); applyErr != nil {
 				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to rebuild websocket session identity headers", applyErr)
 			}
-			s.guardOpenAICodexTurnStateEcho(c, account, updatedHeaders)
+			s.guardOpenAICodexTurnStateEchoForPlan(c, account, newPlan, updatedHeaders, nil)
 			newPlan.SocketDigest = openAIWSOutboundIdentityPlanDigest(updatedHeaders, newPlan)
 			identityChangedForNextTurn = newPlan.SocketDigest != pinnedSocketDigest
 			if identityChangedForNextTurn {
@@ -1833,13 +1859,27 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 		}
-		if account.IsOpenAIOAuth() {
-			if mergedPayload, mergeErr := ApplyOpenAIOAuthIdentityPlan(nil, nextPayload.payloadRaw, pinnedIdentityPlan); mergeErr == nil {
-				nextPayload.payloadRaw = mergedPayload
-				nextPayload.payloadBytes = len(mergedPayload)
+		if account.IsOpenAIOAuth() && !pinnedIdentityModeEnabled {
+			finalPlan, finalizeErr := s.finalizeOpenAIOAuthWSWirePlan(c, account, pinnedIdentityPlan, nextPayload.payloadRaw, openAIOAuthWSWireFinalizeOptions{
+				FinalModel:       nextRoutingFields[0].String(),
+				FinalServiceTier: nextRoutingFields[1].String(),
+			})
+			if finalizeErr != nil {
+				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to finalize websocket routing identity", finalizeErr)
 			}
+			pinnedIdentityPlan = finalPlan
+			stripOpenAILegacyResponsesBeta(baseAcquireReq.Headers)
+			applyOpenAICodexWSRoutingHint(baseAcquireReq.Headers, account, finalPlan)
+			SetOpenAIOAuthIdentityPlan(c, finalPlan)
 		}
-		setOpenAICodexRoutingHint(baseAcquireReq.Headers, account, nextRoutingFields[0].String(), nextRoutingFields[1].String())
+		if account.IsOpenAIOAuth() {
+			mergedPayload, mergeErr := s.projectOpenAIOAuthWSFrame(c, account, pinnedIdentityPlan, nextPayload.payloadRaw)
+			if mergeErr != nil {
+				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to project websocket turn identity", mergeErr)
+			}
+			nextPayload.payloadRaw = mergedPayload
+			nextPayload.payloadBytes = len(mergedPayload)
+		}
 		if nextPayload.previousResponseID != "" {
 			expectedPrev := strings.TrimSpace(lastTurnResponseID)
 			chainedFromLast := expectedPrev != "" && nextPayload.previousResponseID == expectedPrev
@@ -1896,6 +1936,7 @@ func (s *OpenAIGatewayService) applyOpenAIWSHTTPBridgeDeliveredTurnState(
 	sessionHash string,
 	currentTurnState string,
 	result *OpenAIForwardResult,
+	identityPlan *OpenAIOAuthIdentityPlan,
 ) string {
 	if result == nil || !result.wsClientOutputDelivered {
 		return currentTurnState
@@ -1909,7 +1950,104 @@ func (s *OpenAIGatewayService) applyOpenAIWSHTTPBridgeDeliveredTurnState(
 		}
 	}
 	if bridgeTurnState != "" {
-		s.noteOpenAICodexTurnStateProvenance(c, account, bridgeTurnState)
+		if identityPlan != nil {
+			s.noteOpenAICodexTurnStateProvenanceForPlan(c, account, bridgeTurnState, *identityPlan)
+		} else {
+			s.noteOpenAICodexTurnStateProvenance(c, account, bridgeTurnState)
+		}
 	}
 	return bridgeTurnState
+}
+
+func openAICodexWSCompactionDeliveryForPlan(account *Account, plan OpenAIOAuthIdentityPlan) *openAICodexCompactionDelivery {
+	if account == nil || !account.IsOpenAIOAuth() ||
+		plan.WireProfile.RequestKind != CodexWireRequestCompaction ||
+		!plan.TurnIdentityRequested || !plan.TurnIdentityEnabled ||
+		ValidateOpenAICodexWindowSnapshot(plan.Window) != nil ||
+		!validOpenAICodexWindowMappingKey(plan.WindowMappingKey) ||
+		!openAICodexRequestTurnSnapshotValidForWire(plan.RequestTurn, CodexWireRequestCompaction) {
+		return nil
+	}
+	return &openAICodexCompactionDelivery{}
+}
+
+// observeOpenAICodexWSCompactionDelivery is called only after the payload was
+// successfully written downstream. A completed envelope with a non-success
+// response status is terminal failure even if it happens to contain a compact
+// item, so it must never advance the window.
+func observeOpenAICodexWSCompactionDelivery(delivery *openAICodexCompactionDelivery, payload []byte) {
+	if delivery == nil || len(payload) == 0 {
+		return
+	}
+	eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+	if eventType == "response.completed" || eventType == "response.done" {
+		status := strings.TrimSpace(gjson.GetBytes(payload, "response.status").String())
+		if status != "" && status != "completed" && status != "done" {
+			delivery.terminalFailed = true
+			return
+		}
+	}
+	delivery.ObserveDeliveredEvent(payload)
+}
+
+// commitOpenAICodexWSCompactionAfterDelivery advances the durable window only
+// after a successful terminal event and exactly one compact item have reached
+// the client. The caller-owned plan is rebound to the CAS winner before the
+// next response.create can be accepted. A delivered turn-state is rebound to
+// that post-window plan as well.
+func (s *OpenAIGatewayService) commitOpenAICodexWSCompactionAfterDelivery(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	plan *OpenAIOAuthIdentityPlan,
+	delivery *openAICodexCompactionDelivery,
+	turnState string,
+) bool {
+	if s == nil || plan == nil || delivery == nil || !delivery.Valid() ||
+		openAICodexWSCompactionDeliveryForPlan(account, *plan) == nil {
+		return false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	secret := ""
+	if s.cfg != nil {
+		secret = strings.TrimSpace(s.cfg.JWT.Secret)
+	}
+	digest, err := OpenAICodexCompactTurnDigest(
+		secret,
+		plan.CredentialOwnerNamespace,
+		plan.APIKeyID,
+		plan.Window.ThreadID,
+		plan.Window.Number,
+		plan.RequestTurn.ID,
+	)
+	if err != nil {
+		logOpenAIWSModeInfo("codex_compact_window_digest_failed account_id=%d cause=%s", account.ID, truncateOpenAIWSLogValue(err.Error(), openAIWSLogValueMaxLen))
+		return false
+	}
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAICodexWindowStoreTimeout)
+	result, err := s.CommitOpenAICodexWindowSnapshot(
+		commitCtx,
+		plan.WindowMappingKey,
+		plan.Window.ThreadID,
+		plan.Window.Number,
+		digest,
+	)
+	cancel()
+	if err != nil {
+		logOpenAIWSModeInfo("codex_compact_window_commit_failed account_id=%d mapping_digest=%s cause=%s", account.ID, openAICodexMappingLogDigest(plan.WindowMappingKey), truncateOpenAIWSLogValue(err.Error(), openAIWSLogValueMaxLen))
+		return false
+	}
+	bound, err := BindOpenAICodexWindowToPlan(*plan, result.Snapshot, plan.WindowMappingKey)
+	if err != nil {
+		logOpenAIWSModeInfo("codex_compact_window_bind_failed account_id=%d mapping_digest=%s cause=%s", account.ID, openAICodexMappingLogDigest(plan.WindowMappingKey), truncateOpenAIWSLogValue(err.Error(), openAIWSLogValueMaxLen))
+		return false
+	}
+	*plan = bound
+	SetOpenAIOAuthIdentityPlan(c, bound)
+	if turnState = strings.TrimSpace(turnState); turnState != "" {
+		s.noteOpenAICodexTurnStateProvenanceForPlan(c, account, turnState, bound)
+	}
+	return true
 }

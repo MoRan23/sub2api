@@ -302,21 +302,17 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 	if body, err = json.Marshal(responsesPayload); err != nil {
 		return nil, fmt.Errorf("encode alpha search responses body: %w", err)
 	}
-	body, err = ApplyOpenAIOAuthIdentityPlan(req.Header, body, plan)
+	fields := gjson.GetManyBytes(body, "model", "service_tier")
+	body, err = s.FinalizeOpenAIOAuthResponsesRequest(c, account, req, body, OpenAIOAuthResponsesFinalizeOptions{
+		Plan:                 plan,
+		FinalModel:           fields[0].String(),
+		FinalServiceTier:     fields[1].String(),
+		RequestKind:          "turn",
+		Transport:            "alpha_responses_fallback",
+		DisableResponsesLite: true,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("apply alpha search OAuth identity plan: %w", err)
-	}
-	if plan.TurnIdentityEnabled {
-		setFingerprintObservationOutboundIdentity(c, plan.TurnIdentity)
-	}
-	req.Body = io.NopCloser(bytes.NewReader(body))
-	req.ContentLength = int64(len(body))
-	// NewRequest initially captured the pre-transform body in GetBody. Keep
-	// redirects/replays byte-for-byte aligned with the final Responses payload,
-	// including the server-owned UUIDv7 client_metadata aliases.
-	finalBody := append([]byte(nil), body...)
-	req.GetBody = func() (io.ReadCloser, error) {
-		return io.NopCloser(bytes.NewReader(finalBody)), nil
+		return nil, fmt.Errorf("finalize alpha search Responses fallback: %w", err)
 	}
 	return req, nil
 }

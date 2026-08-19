@@ -391,6 +391,32 @@ func TestFetchCodexModelsManifestNotModified(t *testing.T) {
 	}
 }
 
+func TestFetchCodexModelsManifestNotModifiedRefreshesKnownModelCapabilities(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", `W/"responses-lite"`)
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer server.Close()
+
+	original := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	defer func() { chatgptCodexModelsURL = original }()
+
+	account := newCodexModelsTestAccount()
+	namespace := openAIOutboundSessionIdentityNamespace(account)
+	s := &OpenAIGatewayService{}
+	expiredAt := time.Now().Add(-codexModelCapabilityCacheTTL - time.Second)
+	s.codexModelCapabilities.observeManifest(namespace, []byte(`{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":true}]}`), expiredAt)
+	require.False(t, s.openAICodexModelCapabilities(namespace, "gpt-5.6-sol").Known)
+
+	manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.147.0", `W/"responses-lite"`)
+	require.NoError(t, err)
+	require.True(t, manifest.NotModified)
+	capabilities := s.openAICodexModelCapabilities(namespace, "gpt-5.6-sol")
+	require.True(t, capabilities.Known)
+	require.True(t, capabilities.UseResponsesLite)
+}
+
 func TestFetchCodexModelsManifestUpstreamError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"detail":"boom"}`, http.StatusInternalServerError)

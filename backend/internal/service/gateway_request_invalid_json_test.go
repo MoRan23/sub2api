@@ -3,6 +3,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -24,11 +25,14 @@ func TestDescribeInvalidJSON_TruncatedBody(t *testing.T) {
 
 func TestDescribeInvalidJSON_InvalidCharacterWithOffset(t *testing.T) {
 	body := []byte(`{"model": bad}`)
+	var raw json.RawMessage
+	var syntaxErr *json.SyntaxError
+	require.ErrorAs(t, json.Unmarshal(body, &raw), &syntaxErr)
 
 	err := DescribeInvalidJSON(body)
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "offset=11")
+	require.Contains(t, err.Error(), fmt.Sprintf("offset=%d", syntaxErr.Offset))
 	require.Contains(t, err.Error(), "invalid character")
 }
 

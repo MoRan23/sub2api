@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
@@ -306,6 +307,76 @@ func TestOpenAIGatewayServiceForward_NormalizesResponsesLiteToolsForOAuth(t *tes
 			require.Equal(t, "collaboration", gjson.GetBytes(upstream.lastBody, `input.#(type=="additional_tools").tools.0.name`).String())
 			require.Equal(t, "namespace", gjson.GetBytes(upstream.lastBody, "tool_choice.type").String())
 			require.Equal(t, "collaboration", gjson.GetBytes(upstream.lastBody, "tool_choice.name").String())
+		})
+	}
+}
+
+func TestOpenAIGatewayServiceForward_UsesManifestResponsesLiteCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name           string
+		manifest       string
+		explicitMarker bool
+		wantLite       bool
+	}{
+		{
+			name:           "known false overrides explicit marker",
+			manifest:       `{"models":[{"slug":"gpt-5.6-terra","use_responses_lite":false}]}`,
+			explicitMarker: true,
+			wantLite:       false,
+		},
+		{
+			name:     "known true enables Lite without marker",
+			manifest: `{"models":[{"slug":"gpt-5.6-terra","use_responses_lite":true}]}`,
+			wantLite: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.144.1")
+			if tt.explicitMarker {
+				c.Request.Header.Set(responsesLiteHeader, "true")
+			}
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body: io.NopCloser(strings.NewReader(
+					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_lite\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n" +
+						"data: [DONE]\n\n",
+				)),
+			},
+			}
+			account := &Account{
+				ID: 502, Name: "responses-lite-manifest", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+				Concurrency: 1, Status: StatusActive, Schedulable: true, RateMultiplier: f64p(1),
+				Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
+			}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			svc.codexModelCapabilities.observeManifest(openAIOutboundSessionIdentityNamespace(account), []byte(tt.manifest), time.Now())
+			body := []byte(`{
+				"model":"gpt-5.6-terra","stream":true,
+				"reasoning":{"context":"current_turn"},
+				"tools":[{"type":"namespace","name":"collaboration"}],
+				"input":"hello"
+			}`)
+
+			result, err := svc.Forward(context.Background(), c, account, body)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			if tt.wantLite {
+				require.Equal(t, "true", upstream.lastReq.Header.Get(responsesLiteHeader))
+				require.Equal(t, "all_turns", gjson.GetBytes(upstream.lastBody, "reasoning.context").String())
+				require.False(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="namespace")`).Exists())
+				require.Equal(t, "collaboration", gjson.GetBytes(upstream.lastBody, `input.#(type=="additional_tools").tools.0.name`).String())
+				return
+			}
+			require.Empty(t, upstream.lastReq.Header.Get(responsesLiteHeader))
+			require.Equal(t, "current_turn", gjson.GetBytes(upstream.lastBody, "reasoning.context").String())
+			require.True(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="namespace")`).Exists())
 		})
 	}
 }

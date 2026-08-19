@@ -143,7 +143,7 @@ func TestOpenAIInstallationCompactUsesHeadersOnly(t *testing.T) {
 		t.Fatalf("unexpected compact turn metadata: %#v", headerTurn)
 	}
 	turnSessionID := requireInstallationTestRootIdentity(t, headerTurn)
-	if upstream.lastReq.Header.Get("x-codex-window-id") != "window-1" ||
+	if upstream.lastReq.Header.Get("x-codex-window-id") != "" ||
 		upstream.lastReq.Header.Get("session-id") != turnSessionID ||
 		upstream.lastReq.Header.Get("thread-id") != turnSessionID ||
 		upstream.lastReq.Header.Get("session_id") != "" ||

@@ -180,18 +180,6 @@ func TestOpenAIResponsesCompactionRoutingFlags(t *testing.T) {
 			wantPathAfter:       "/v1/responses/compact/detail",
 		},
 		{
-			name:                "responses_subpath_with_native_signal",
-			body:                []byte(`{"model":"gpt-5.6-sol","stream":true,"input":[{"type":"compaction_trigger"}]}`),
-			path:                "/v1/responses/resp_123/responses",
-			wantLegacyBefore:    false,
-			wantNativeBefore:    false,
-			wantLegacyAfter:     false,
-			wantNativeAfter:     false,
-			wantCapabilityAfter: service.OpenAIEndpointCapabilityChatCompletions,
-			wantPathAfter:       "/v1/responses/resp_123/responses",
-			wantBodyUnchanged:   true,
-		},
-		{
 			name:                "stream_false_promotes",
 			body:                []byte(`{"model":"gpt-5.6-sol","stream":false,"input":[{"type":"compaction_trigger"}]}`),
 			path:                "/v1/responses",
@@ -332,15 +320,76 @@ func TestNormalizeOpenAIResponsesCompactRequest_PathBasedNoDoubleSuffix(t *testi
 	require.False(t, gjson.GetBytes(normalized, "store").Exists())
 }
 
-func TestNormalizeOpenAIResponsesCompactRequest_SubpathNotPromoted(t *testing.T) {
+func TestNormalizeOpenAIResponsesCompactRequest_SubpathTriggerRejected(t *testing.T) {
 	h := &OpenAIGatewayHandler{}
-	body := []byte(`{"model":"gpt-5.5","input":[{"type":"compaction_trigger"}]}`)
-	c := newCompactBodySignalTestContext(t, "/v1/responses/resp_123/cancel", body)
+	tests := []struct {
+		path string
+		body []byte
+	}{
+		{path: "/v1/responses/resp_123/cancel", body: []byte(`{"model":"gpt-5.5","input":[{"type":"compaction_trigger"}]}`)},
+		{path: "/v1/responses/resp_123/responses", body: []byte(`{"model":"gpt-5.5","stream":true,"input":[{"type":"compaction_trigger"}]}`)},
+		{path: "/v1/responses/resp_123/input_items", body: []byte(`{"model":"gpt-5.5","stream":false,"input":[{"type":"compaction_trigger"}]}`)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			c := newCompactBodySignalTestContext(t, tt.path, tt.body)
+
+			normalized, ok := h.normalizeOpenAIResponsesCompactRequest(c, zap.NewNop(), tt.body)
+
+			require.False(t, ok)
+			require.Nil(t, normalized)
+			require.Equal(t, http.StatusBadRequest, c.Writer.Status())
+			require.Contains(t, c.Writer.Header().Get("Content-Type"), "application/json")
+			require.Equal(t, tt.path, c.Request.URL.Path)
+			_, captured := service.OpenAIOAuthIdentityCaptureFromContext(c)
+			require.False(t, captured)
+		})
+	}
+}
+
+func TestNormalizeOpenAIResponsesCompactRequest_ValidatesIngressBeforeClassification(t *testing.T) {
+	h := &OpenAIGatewayHandler{}
+	tests := []struct {
+		name string
+		path string
+		body []byte
+	}{
+		{name: "malformed_json", path: "/v1/responses", body: []byte(`{"model":"gpt-5.5","stream":false,"input":[{"type":"compaction_trigger"}]`)},
+		{name: "malformed_json_explicit_compact", path: "/v1/responses/compact", body: []byte(`{"model":"gpt-5.5","stream":true`)},
+		{name: "stream_string", path: "/v1/responses", body: []byte(`{"model":"gpt-5.5","stream":"false","input":[{"type":"compaction_trigger"}]}`)},
+		{name: "stream_null", path: "/v1/responses", body: []byte(`{"model":"gpt-5.5","stream":null,"input":[{"type":"compaction_trigger"}]}`)},
+		{name: "stream_number", path: "/v1/responses", body: []byte(`{"model":"gpt-5.5","stream":1,"input":[{"type":"compaction_trigger"}]}`)},
+		{name: "stream_string_explicit_compact", path: "/v1/responses/compact", body: []byte(`{"model":"gpt-5.5","stream":"true","input":[]}`)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newCompactBodySignalTestContext(t, tt.path, tt.body)
+
+			normalized, ok := h.normalizeOpenAIResponsesCompactRequest(c, zap.NewNop(), tt.body)
+
+			require.False(t, ok)
+			require.Nil(t, normalized)
+			require.Equal(t, http.StatusBadRequest, c.Writer.Status())
+			require.Equal(t, tt.path, c.Request.URL.Path, "invalid ingress must not be promoted or narrowed")
+			_, captured := service.OpenAIOAuthIdentityCaptureFromContext(c)
+			require.False(t, captured, "invalid ingress must not produce an identity capture")
+		})
+	}
+}
+
+func TestNormalizeOpenAIResponsesCompactRequest_ExplicitCompactTriggerRemainsLegacy(t *testing.T) {
+	h := &OpenAIGatewayHandler{}
+	body := []byte(`{"model":"gpt-5.5","stream":true,"input":[{"type":"compaction_trigger"}]}`)
+	c := newCompactBodySignalTestContext(t, "/v1/responses/compact/detail", body)
 
 	normalized, ok := h.normalizeOpenAIResponsesCompactRequest(c, zap.NewNop(), body)
+
 	require.True(t, ok)
-	require.Equal(t, "/v1/responses/resp_123/cancel", c.Request.URL.Path)
-	require.Equal(t, body, normalized)
+	require.NotNil(t, normalized)
+	require.Equal(t, openAICompactionRouteLegacy, openAICompactionRouteFromContext(c))
+	require.Equal(t, "/v1/responses/compact/detail", c.Request.URL.Path)
 }
 
 // path-based compact（Codex v1 unary 协议）即使 body 带 stream:true 也不标记，

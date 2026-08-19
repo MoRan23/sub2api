@@ -406,6 +406,40 @@ func TestLoadDefaultOpenAIFirstOutputTimeoutsDisabled(t *testing.T) {
 	require.Zero(t, cfg.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds)
 }
 
+func TestLoadGatewayCodexMetadataConfig(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+
+		cfg, err := Load()
+		require.NoError(t, err)
+		require.Equal(t, DefaultGatewayCodexMetadataConfig(), cfg.Gateway.CodexMetadata)
+	})
+
+	t.Run("yaml override", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		configFile := filepath.Join(t.TempDir(), "codex-metadata.yaml")
+		require.NoError(t, os.WriteFile(configFile, []byte(`gateway:
+  codex_metadata:
+    agent_name: "  codex-reviewer  "
+    sandbox: "workspace-write"
+    sandbox_mode: "read-only"
+    auto_review_enabled: true
+    turn_metadata_includes_tool_info: true
+`), 0o600))
+		t.Setenv("CONFIG_FILE", configFile)
+
+		cfg, err := Load()
+		require.NoError(t, err)
+		require.Equal(t, GatewayCodexMetadataConfig{
+			AgentName:                    "codex-reviewer",
+			Sandbox:                      "workspace-write",
+			SandboxMode:                  "read-only",
+			AutoReviewEnabled:            true,
+			TurnMetadataIncludesToolInfo: true,
+		}, cfg.Gateway.CodexMetadata)
+	})
+}
+
 func TestLoadOpenAIFirstOutputTimeoutsFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_OPENAI_FIRST_OUTPUT_TIMEOUT_SECONDS", "90")

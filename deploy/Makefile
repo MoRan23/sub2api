@@ -2,6 +2,7 @@
 
 VERSION ?= $(shell ./scripts/resolve-version.sh)
 LDFLAGS ?= -s -w -X main.Version=$(VERSION)
+export GOEXPERIMENT ?= jsonv2
 
 wire:
 	@echo "生成 Wire 代码..."

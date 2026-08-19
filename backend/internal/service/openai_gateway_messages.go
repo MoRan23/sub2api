@@ -199,6 +199,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 		return nil, fmt.Errorf("marshal responses request: %w", err)
 	}
 
+	var messagesOAuthIdentityPlan *OpenAIOAuthIdentityPlan
 	if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
 		var reqBody map[string]any
 		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
@@ -353,11 +354,6 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	if account.Platform != PlatformGrok {
 		responsesBody = openAIUpstreamRequestBodySnapshot(upstreamReq, responsesBody)
 	}
-	if account.IsOpenAIOAuth() && shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
-		// The raw continuation is identity-scoped. Resolve it only after the
-		// shared builder has installed the final credential-owner plan.
-		compatTurnState = s.getOpenAICompatSessionTurnState(ctx, c, account, promptCacheKey)
-	}
 	outboundIdentityEnabled := false
 	if account.Platform != PlatformGrok {
 		if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && plan.TurnIdentityEnabled {
@@ -371,40 +367,52 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 		}
 	}
 	if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
-		// buildUpstreamRequest 保留 Messages bridge 的 body/session 兼容行为，并会先
-		// 清除身份头。真正发送前恢复完整 Codex 身份，避免 ChatGPT Codex 上游因缺失
-		// originator/OpenAI-Beta 返回 404（issue #3901）。
+		// The shared builder resolves and freezes identity before compat conversion,
+		// while final wire projection remains deferred until continuation state and
+		// the final mapped model/tier are known below.
 		plan, ok := OpenAIOAuthIdentityPlanFromContext(c)
 		if !ok {
 			return nil, errors.New("final messages OAuth identity plan is missing")
 		}
-		ensureCodexIdentityHeadersFromPlan(upstreamReq.Header, plan.ClientIdentity)
-		projectedBody, applyErr := ApplyOpenAIOAuthIdentityPlan(upstreamReq.Header, responsesBody, plan)
-		if applyErr != nil {
-			return nil, fmt.Errorf("apply final messages OAuth identity plan: %w", applyErr)
-		}
-		if !bytes.Equal(projectedBody, responsesBody) {
-			responsesBody = projectedBody
-			upstreamReq.Body = io.NopCloser(bytes.NewReader(projectedBody))
-			upstreamReq.ContentLength = int64(len(projectedBody))
-			upstreamReq.GetBody = func() (io.ReadCloser, error) {
-				return io.NopCloser(bytes.NewReader(projectedBody)), nil
-			}
-		}
-		logger.L().Debug("openai messages: upstream identity restored",
-			zap.Int64("account_id", account.ID),
-			zap.String("upstream_model", upstreamModel),
-			zap.Bool("compat_identity_restored", true),
-		)
+		planSnapshot := plan
+		messagesOAuthIdentityPlan = &planSnapshot
 	}
 	if !outboundIdentityEnabled && account.Type == AccountTypeOAuth && promptCacheKey != "" && strings.TrimSpace(c.GetHeader("conversation_id")) == "" {
 		upstreamReq.Header.Del("conversation_id")
 	}
-	if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
-		upstreamReq.Header.Set("x-codex-turn-state", compatTurnState)
-	}
-	if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
-		s.guardOpenAICodexTurnStateEcho(c, account, upstreamReq.Header)
+	if messagesOAuthIdentityPlan != nil {
+		fields := gjson.GetManyBytes(responsesBody, "model", "service_tier")
+		finalBody, finalizeErr := s.FinalizeOpenAIOAuthResponsesRequest(c, account, upstreamReq, responsesBody, OpenAIOAuthResponsesFinalizeOptions{
+			Plan:             *messagesOAuthIdentityPlan,
+			FinalModel:       fields[0].String(),
+			FinalServiceTier: fields[1].String(),
+			RequestKind:      "turn",
+			Transport:        "messages_compat",
+		})
+		if finalizeErr != nil {
+			return nil, fmt.Errorf("finalize messages OAuth Responses request: %w", finalizeErr)
+		}
+		responsesBody = finalBody
+		finalPlan, ok := OpenAIOAuthIdentityPlanFromContext(c)
+		if !ok {
+			return nil, errors.New("final messages OAuth wire plan is missing")
+		}
+		if shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
+			// Compat raw state is keyed by the finalized identity digest. Looking
+			// it up before finalization would miss fields such as canonical root
+			// lineage and the current context window, while binding the response
+			// with the post-finalization key.
+			compatTurnState = s.getOpenAICompatSessionTurnState(ctx, c, account, promptCacheKey)
+			if compatTurnState != "" && upstreamReq.Header.Get(openAICodexTurnStateHeader) == "" {
+				upstreamReq.Header.Set(openAICodexTurnStateHeader, compatTurnState)
+			}
+			responsesBody = s.guardOpenAIMessagesTurnStateForPlan(c, account, upstreamReq, responsesBody, finalPlan)
+		}
+		logger.L().Debug("openai messages: upstream identity finalized",
+			zap.Int64("account_id", account.ID),
+			zap.String("upstream_model", upstreamModel),
+			zap.Bool("compat_identity_restored", true),
+		)
 	}
 	// Messages compatibility restores/overrides identity headers after the
 	// shared builder, so capture the final upstream header set here.
@@ -572,6 +580,29 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	}
 
 	return result, handleErr
+}
+
+func (s *OpenAIGatewayService) guardOpenAIMessagesTurnStateForPlan(
+	c *gin.Context,
+	account *Account,
+	req *http.Request,
+	body []byte,
+	plan OpenAIOAuthIdentityPlan,
+) []byte {
+	if req == nil {
+		return body
+	}
+	guardedBody := s.guardOpenAICodexTurnStateEchoForPlan(c, account, plan, req.Header, body)
+	if bytes.Equal(guardedBody, body) {
+		return body
+	}
+	bodySnapshot := append([]byte(nil), guardedBody...)
+	req.Body = io.NopCloser(bytes.NewReader(bodySnapshot))
+	req.ContentLength = int64(len(bodySnapshot))
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(bodySnapshot)), nil
+	}
+	return bodySnapshot
 }
 
 func ensureCodexOAuthInstructionsField(reqBody map[string]any) {

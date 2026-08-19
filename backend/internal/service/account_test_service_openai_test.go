@@ -172,6 +172,15 @@ func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {
 	require.Equal(t, "11111111-2222-4333-8444-555555555555", gjson.GetBytes(body, "client_metadata.x-codex-installation-id").String())
 	require.Equal(t, "11111111-2222-4333-8444-555555555555", upstream.requests[0].Header.Get(codexInstallationIDKey))
 	require.Equal(t, "11111111-2222-4333-8444-555555555555", extractInstallationIDFromTurnMetadata(upstream.requests[0].Header.Get(openAIWSTurnMetadataHeader)))
+	require.NotEmpty(t, upstream.requests[0].Header.Get("session-id"))
+	require.NotEmpty(t, upstream.requests[0].Header.Get("thread-id"))
+	require.NotEmpty(t, gjson.GetBytes(body, "client_metadata.turn_id").String())
+	require.False(t, gjson.GetBytes(body, "client_metadata.turn_started_at_unix_ms").Exists())
+	require.NotEmpty(t, gjson.Get(upstream.requests[0].Header.Get(openAIWSTurnMetadataHeader), "turn_id").String())
+	require.NotEmpty(t, upstream.requests[0].Header.Get("User-Agent"))
+	require.NotEmpty(t, upstream.requests[0].Header.Get("Originator"))
+	require.NotEmpty(t, upstream.requests[0].Header.Get("Version"))
+	require.Equal(t, upstream.requests[0].Header.Get("session-id"), gjson.GetBytes(body, "client_metadata.session_id").String())
 }
 
 func TestAccountTestService_OpenAIShadowUsesParentCredentialsAndShadowModel(t *testing.T) {

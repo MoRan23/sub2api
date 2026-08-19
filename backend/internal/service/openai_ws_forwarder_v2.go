@@ -111,7 +111,13 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 
 	stateStore := s.getOpenAIWSStateStore()
 	groupID := getOpenAIGroupIDFromContext(c)
-	sessionHash := s.GenerateSessionHash(c, nil)
+	payloadBody := payloadAsJSONBytes(payload)
+	sessionHash := ""
+	if account.IsOpenAIOAuth() {
+		sessionHash = s.GenerateSessionHashForOpenAIOAuthIdentity(c, payloadBody, "")
+	} else {
+		sessionHash = s.GenerateSessionHash(c, nil)
+	}
 	if sessionHash == "" {
 		var legacySessionHash string
 		sessionHash, legacySessionHash = openAIWSSessionHashesFromID(promptCacheKey)
@@ -137,7 +143,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	storeDisabledConnMode := s.openAIWSStoreDisabledConnMode()
 	forceNewConnByPolicy := shouldForceNewConnOnStoreDisabled(storeDisabledConnMode, lastFailureReason)
 	forceNewConn := forceNewConnByPolicy && storeDisabled && previousResponseID == "" && sessionHash != "" && preferredConnID == ""
-	payloadBody := payloadAsJSONBytes(payload)
 	wsHeaders, sessionResolution, buildHdrErr := s.buildOpenAIWSHeadersWithBody(
 		ctx,
 		c,
@@ -156,15 +161,21 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if buildHdrErr != nil {
 		return nil, fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
+	outboundIdentityPlan := sessionResolution.OutboundIdentityPlan
+	if finalizedPlan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && account.IsOpenAIOAuth() {
+		outboundIdentityPlan = finalizedPlan
+	}
 	if account.IsOpenAIOAuth() {
 		// Apply the exact post-selection plan used by the handshake. This projects
 		// installation and turn identity without consulting either store again.
 		if rawPayload := payloadBody; len(rawPayload) > 0 {
-			if mergedPayload, mergeErr := ApplyOpenAIOAuthIdentityPlan(nil, rawPayload, sessionResolution.OutboundIdentityPlan); mergeErr == nil {
-				var merged map[string]any
-				if json.Unmarshal(mergedPayload, &merged) == nil && merged != nil {
-					payload = merged
-				}
+			mergedPayload, mergeErr := s.projectOpenAIOAuthWSFrame(c, account, outboundIdentityPlan, rawPayload)
+			if mergeErr != nil {
+				return nil, wrapOpenAIWSFallback("request_metadata", mergeErr)
+			}
+			var merged map[string]any
+			if json.Unmarshal(mergedPayload, &merged) == nil && merged != nil {
+				payload = merged
 			}
 		}
 	}
@@ -207,7 +218,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		Account:        account,
 		WSURL:          wsURL,
 		Headers:        wsHeaders,
-		IdentityDigest: sessionResolution.OutboundIdentityPlan.SocketDigest,
+		IdentityDigest: outboundIdentityPlan.SocketDigest,
 		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
 			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
 		},
@@ -314,7 +325,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 	}
 
-	turnStateIdentityDigest := OpenAICodexTurnStateIdentityDigest(sessionResolution.OutboundIdentityPlan)
+	turnStateIdentityDigest := OpenAICodexTurnStateIdentityDigest(outboundIdentityPlan)
 	handshakeHeadersForTurn := lease.HandshakeHeaders()
 	if !lease.HandshakeTurnStateCompatible(turnStateIdentityDigest) {
 		handshakeHeadersForTurn.Del(openAIWSTurnStateHeader)
@@ -338,11 +349,23 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		account,
 		stateStore,
 		groupID,
+		c,
+		outboundIdentityPlan,
 	); err != nil {
 		return nil, err
 	}
 
-	if err := lease.WriteJSONWithContextTimeout(ctx, payload, s.openAIWSWriteTimeout()); err != nil {
+	wirePayload := any(payload)
+	if account.IsOpenAIOAuth() {
+		payloadJSON := payloadAsJSONBytes(payload)
+		stamped, stampErr := stampOpenAICodexWSStreamRequestStart(payloadJSON, time.Now())
+		if stampErr != nil {
+			lease.MarkBroken()
+			return nil, wrapOpenAIWSFallback("write_request_metadata", stampErr)
+		}
+		wirePayload = json.RawMessage(stamped)
+	}
+	if err := lease.WriteJSONWithContextTimeout(ctx, wirePayload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
 			"write_request_fail account_id=%d conn_id=%s cause=%s payload_bytes=%d",
@@ -369,7 +392,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	var firstTokenMs *int
 	responseID := ""
 	var finalResponse []byte
+	var finalTerminalMessage []byte
 	wroteDownstream := false
+	compactionDelivery := openAICodexWSCompactionDeliveryForPlan(account, outboundIdentityPlan)
 	needModelReplace := originalModel != mappedModel
 	var mappedModelBytes []byte
 	if needModelReplace && mappedModel != "" {
@@ -397,7 +422,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		if turnStateCommitted {
 			return
 		}
-		if handshakeTurnState != "" && !lease.CommitHandshakeTurnStateIdentity(turnStateIdentityDigest) {
+		commitIdentityDigest := OpenAICodexTurnStateIdentityDigest(outboundIdentityPlan)
+		if handshakeTurnState != "" && !lease.CommitHandshakeTurnStateIdentity(commitIdentityDigest) {
 			handshakeTurnState = ""
 			if c != nil && c.Writer != nil {
 				c.Writer.Header().Del(openAIWSTurnStateHeader)
@@ -411,7 +437,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			}
 		}
 		if handshakeTurnState != "" {
-			s.noteOpenAICodexTurnStateProvenance(c, account, handshakeTurnState)
+			s.noteOpenAICodexTurnStateProvenanceForPlan(c, account, handshakeTurnState, outboundIdentityPlan)
 		}
 		turnStateCommitted = true
 	}
@@ -466,6 +492,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		_, wErr := c.Writer.Write(frame)
 		if wErr == nil {
 			wroteDownstream = true
+			observeOpenAICodexWSCompactionDelivery(compactionDelivery, message)
 			pendingFlushEvents++
 			flushStreamWriter(forceFlush || firstDelivery)
 			if firstDelivery {
@@ -753,6 +780,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 
 		if isTerminalEvent {
+			finalTerminalMessage = append(finalTerminalMessage[:0], message...)
 			upstreamTerminalEvent = s.handleOpenAIWSTerminalTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), message)
 			// A terminal event must be the final JSON document in its WS message.
 			// Ignore any tail for the completed client turn, but never reuse the
@@ -791,10 +819,27 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		stageTurnStateHeader()
 		c.Data(http.StatusOK, "application/json", finalResponse)
 		if c.Writer.Written() {
+			observeOpenAICodexWSCompactionDelivery(compactionDelivery, finalTerminalMessage)
+			s.commitOpenAICodexWSCompactionAfterDelivery(
+				ctx,
+				c,
+				account,
+				&outboundIdentityPlan,
+				compactionDelivery,
+				handshakeTurnState,
+			)
 			commitTurnState()
 		}
 	} else {
 		flushStreamWriter(true)
+		s.commitOpenAICodexWSCompactionAfterDelivery(
+			ctx,
+			c,
+			account,
+			&outboundIdentityPlan,
+			compactionDelivery,
+			handshakeTurnState,
+		)
 	}
 
 	if responseID != "" && stateStore != nil {

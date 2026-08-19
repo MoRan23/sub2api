@@ -5,7 +5,7 @@ project_name: sub2api
 
 before:
   hooks:
-    - go mod tidy -C backend
+    - GOEXPERIMENT=jsonv2 go mod tidy -C backend
 
 builds:
   - id: sub2api
@@ -16,6 +16,7 @@ builds:
       - -tags=embed
     env:
       - CGO_ENABLED=0
+      - GOEXPERIMENT=jsonv2
     goos:
       - linux
     goarch:

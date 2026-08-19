@@ -386,7 +386,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnDoesNotExposeUndeliveredTurnState(t *testing
 		oldState    = "previously-delivered-state"
 	)
 	stateStore.BindSessionTurnState(groupID, sessionHash, oldState, time.Minute)
-	retained := svc.applyOpenAIWSHTTPBridgeDeliveredTurnState(c, account, stateStore, groupID, sessionHash, oldState, result)
+	retained := svc.applyOpenAIWSHTTPBridgeDeliveredTurnState(c, account, stateStore, groupID, sessionHash, oldState, result, nil)
 	require.Equal(t, oldState, retained)
 	stored, ok := stateStore.GetSessionTurnState(groupID, sessionHash)
 	require.True(t, ok)
@@ -689,6 +689,81 @@ func TestProxyOpenAIWSHTTPBridgeTurnUsesConnectionIdentityPlan(t *testing.T) {
 	require.Equal(t, installationID, gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
 	require.Equal(t, sessionID, gjson.GetBytes(upstream.lastBody, "client_metadata.session_id").String())
 	require.Equal(t, threadID, gjson.GetBytes(upstream.lastBody, "client_metadata.thread_id").String())
+}
+
+func TestProxyOpenAIWSHTTPBridgeTurnUsesFinalizedResponsesLiteCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const model = "gpt-5.6-sol"
+
+	tests := []struct {
+		name           string
+		manifest       string
+		explicitMarker bool
+		wantHeader     string
+	}{
+		{
+			name:           "known false overrides explicit websocket marker",
+			manifest:       `{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":false}]}`,
+			explicitMarker: true,
+		},
+		{
+			name:       "known true enables bridge header without marker",
+			manifest:   `{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":true}]}`,
+			wantHeader: "true",
+		},
+		{
+			name:           "unknown manifest honors explicit websocket marker",
+			explicitMarker: true,
+			wantHeader:     "true",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+					`data: {"type":"response.completed","response":{"id":"resp_bridge_lite","model":"gpt-5.6-sol","usage":{"input_tokens":1,"output_tokens":1}}}`,
+					"",
+				}, "\n"))),
+			}}
+			svc := &OpenAIGatewayService{
+				cfg:           &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}},
+				httpUpstream:  upstream,
+				toolCorrector: NewCodexToolCorrector(),
+			}
+			account := &Account{
+				ID: 4242, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+				Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
+			}
+			if tt.manifest != "" {
+				svc.codexModelCapabilities.observeManifest(openAIOutboundSessionIdentityNamespace(account), []byte(tt.manifest), time.Now())
+			}
+
+			payload := `{"type":"response.create","model":"` + model + `","stream":true,"input":"hi"}`
+			if tt.explicitMarker {
+				payload = `{"type":"response.create","model":"` + model + `","stream":true,"client_metadata":{"` + responsesLiteWSMetadataKey + `":"true"},"input":"hi"}`
+			}
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			plan := codexWireProjectionTestPlan(t)
+			plan.PolicySnapshot = defaultOpenAICodexFingerprintPolicy(0)
+			plan.ProjectionMode = OpenAIOAuthIdentityProjectionPassthrough
+			plan.CredentialOwnerNamespace = openAIOutboundSessionIdentityNamespace(account)
+
+			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+				context.Background(), c, account, "oauth-token", []byte(payload), len(payload),
+				model, "", "", "", "", 1, func([]byte) error { return nil }, &plan,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.NotNil(t, upstream.lastReq)
+			require.Equal(t, tt.wantHeader, upstream.lastReq.Header.Get(responsesLiteHeader))
+			require.Equal(t, tt.wantHeader == "true", plan.WireProfile.ToolNamespacesAllowed)
+		})
+	}
 }
 
 func TestOpenAIWSHTTPBridgeInstallationPolicyPinsPassthrough(t *testing.T) {

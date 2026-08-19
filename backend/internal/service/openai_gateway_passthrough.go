@@ -26,6 +26,15 @@ import (
 )
 
 const openAIResponsesClientToolMappingContextKey = "openai_responses_client_tool_mapping"
+const openAIPassthroughCompactWindowContextKey = "openai_passthrough_compact_window"
+
+type openAIPassthroughCompactWindowContext struct {
+	mappingKey string
+	threadID   string
+	expected   uint64
+	digest     string
+	plan       OpenAIOAuthIdentityPlan
+}
 
 func hasOpenAIResponsesClientToolMapping(mapping apicompat.ResponsesClientToolMapping) bool {
 	return len(mapping.CustomTools) > 0 || mapping.ToolSearch || len(mapping.NamespaceTools) > 0
@@ -536,7 +545,10 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 			captured = true
 			identityModeEnabled = explicitPlan.TurnIdentityRequested
 			projectionMode = explicitPlan.ProjectionMode
-			installationPolicy = explicitPlan.InstallationPolicy
+			// HTTP passthrough always pins installation identity to the selected
+			// OAuth account. A retry/bridge plan must never re-enable client
+			// installation passthrough, even if it originated from another path.
+			installationPolicy = OpenAIOAuthInstallationAccountPin
 		}
 		if !captured {
 			capture = CaptureOpenAIOAuthIdentity(c, body, "")
@@ -555,10 +567,6 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 			return nil, fmt.Errorf("resolve openai OAuth passthrough identity plan: %w", planErr)
 		}
 		identityPlanned = true
-		// Current Codex OAuth HTTP no longer negotiates the legacy Responses
-		// experiment. Passthrough may receive it from an older client, so remove
-		// only that token while preserving any independent beta negotiation.
-		stripOpenAILegacyResponsesBeta(req.Header)
 		promptCacheKey := strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())
 		req.Host = "chatgpt.com"
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, req.Header, account); err != nil {
@@ -641,59 +649,234 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 	// must be added after account overrides so an override cannot drop it.
 	applyOpenAICodexBetaFeatures(c, account, req.Header)
 	if account.Type == AccountTypeOAuth && identityPlanned {
-		projectedBody, applyErr := ApplyOpenAIOAuthIdentityPlan(req.Header, body, identityPlan)
-		if applyErr != nil {
-			return nil, fmt.Errorf("apply openai OAuth passthrough identity plan: %w", applyErr)
+		fields := gjson.GetManyBytes(body, "model", "service_tier")
+		requestKind := string(openAIPassthroughWireRequestKind(c))
+		finalBody, finalizeErr := s.FinalizeOpenAIOAuthResponsesRequest(c, account, req, body, OpenAIOAuthResponsesFinalizeOptions{
+			Plan:             identityPlan,
+			FinalModel:       fields[0].String(),
+			FinalServiceTier: fields[1].String(),
+			RequestKind:      requestKind,
+			Transport:        "http_passthrough",
+		})
+		if finalizeErr != nil {
+			return nil, fmt.Errorf("finalize openai OAuth passthrough request: %w", finalizeErr)
 		}
-		if !bytes.Equal(projectedBody, body) {
-			req.Body = io.NopCloser(bytes.NewReader(projectedBody))
-			req.ContentLength = int64(len(projectedBody))
-			req.GetBody = func() (io.ReadCloser, error) {
-				return io.NopCloser(bytes.NewReader(projectedBody)), nil
-			}
-		}
-		// Validate the opaque state against the credential owner and the final
-		// installation/turn identity that will actually be sent upstream.
-		s.guardOpenAICodexTurnStateEcho(c, account, req.Header)
-		if identityPlan.TurnIdentityEnabled {
-			setFingerprintObservationOutboundIdentity(c, identityPlan.TurnIdentity)
-		}
+		body = finalBody
+		finalPlan, _ := OpenAIOAuthIdentityPlanFromContext(c)
+		body = s.prepareOpenAIPassthroughCompactWindow(ctx, c, account, req, body, finalPlan)
+	} else if account.Type != AccountTypeOAuth {
+		logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http_passthrough", req.Header, body, "not_applicable")
 	}
-	setOpenAICodexRoutingHintFromBody(req.Header, account, body)
-	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http_passthrough", req.Header, body, "not_applicable")
 
 	return req, nil
 }
 
-func stripOpenAILegacyResponsesBeta(headers http.Header) {
-	if headers == nil {
-		return
+func (s *OpenAIGatewayService) prepareOpenAIPassthroughCompactWindow(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	req *http.Request,
+	body []byte,
+	plan OpenAIOAuthIdentityPlan,
+) []byte {
+	if s == nil || c == nil || req == nil || account == nil || !account.IsOpenAIOAuth() ||
+		!plan.TurnIdentityEnabled ||
+		!openAICodexRequestTurnSnapshotValidForWire(plan.RequestTurn, CodexWireRequestCompaction) {
+		clearOpenAIPassthroughCompactWindow(c)
+		return body
 	}
+	if plan.WireProfile.RequestKind != CodexWireRequestCompaction ||
+		(!isOpenAIResponsesCompactPath(c) && !isOpenAINativeCompactionV2(c)) {
+		clearOpenAIPassthroughCompactWindow(c)
+		return body
+	}
+	threadID := strings.TrimSpace(plan.Window.ThreadID)
+	if threadID == "" || strings.TrimSpace(plan.CredentialOwnerNamespace) == "" ||
+		ValidateOpenAICodexWindowSnapshot(plan.Window) != nil ||
+		!validOpenAICodexWindowMappingKey(plan.WindowMappingKey) {
+		clearOpenAIPassthroughCompactWindow(c)
+		return body
+	}
+	secret := ""
+	if s.cfg != nil {
+		secret = s.cfg.JWT.Secret
+	}
+	mappingKey := plan.WindowMappingKey
+	snapshot := plan.Window
+	digest, err := OpenAICodexCompactTurnDigest(secret, plan.CredentialOwnerNamespace, plan.APIKeyID, threadID, snapshot.Number, plan.RequestTurn.ID)
+	if err != nil {
+		clearOpenAIPassthroughCompactWindow(c)
+		return body
+	}
+	windowID := snapshot.WindowID()
+	if windowID == "" {
+		clearOpenAIPassthroughCompactWindow(c)
+		return body
+	}
+	if updated, ok := openAICodexTurnMetadataWithCompactWindow(req.Header.Get(openAIWSTurnMetadataHeader), windowID); ok {
+		deleteOpenAIHeaderEqualFold(req.Header, openAIWSTurnMetadataHeader)
+		req.Header.Set(openAIWSTurnMetadataHeader, updated)
+	}
+	body = openAIPassthroughBodyWithCompactWindow(body, windowID)
+	setOpenAIRequestBodySnapshot(req, body)
+	c.Set(openAIPassthroughCompactWindowContextKey, openAIPassthroughCompactWindowContext{
+		mappingKey: mappingKey,
+		threadID:   threadID,
+		expected:   snapshot.Number,
+		digest:     digest,
+		plan:       plan,
+	})
+	return body
+}
 
-	preserved := make([]string, 0)
-	for key, values := range headers {
-		if !strings.EqualFold(strings.TrimSpace(key), "OpenAI-Beta") {
+func openAIPassthroughWireRequestKind(c *gin.Context) CodexWireRequestKind {
+	if isOpenAIResponsesCompactPath(c) || isOpenAINativeCompactionV2(c) {
+		return CodexWireRequestCompaction
+	}
+	return CodexWireRequestTurn
+}
+
+func openAICodexTurnMetadataWithCompactWindow(raw string, windowID string) (string, bool) {
+	windowID = strings.TrimSpace(windowID)
+	if windowID == "" {
+		return raw, false
+	}
+	base := strings.TrimSpace(raw)
+	if !isOpenAICodexTurnMetadataObject(base) {
+		base = "{}"
+	}
+	profile := ParseCodexWireProfile(base)
+	profile.RequestKind = CodexWireRequestCompaction
+	profile.WindowID = windowID
+	updated, err := sjson.Set(base, "request_kind", string(profile.RequestKind))
+	if err != nil {
+		return raw, false
+	}
+	updated, err = sjson.Set(updated, "window_id", profile.WindowID)
+	if err != nil {
+		return raw, false
+	}
+	return updated, true
+}
+
+func openAIPassthroughBodyWithCompactWindow(body []byte, windowID string) []byte {
+	if len(body) == 0 || !gjson.ParseBytes(body).IsObject() {
+		return body
+	}
+	updated := body
+	for _, path := range []string{"client_metadata." + openAIWSTurnMetadataHeader, openAIWSTurnMetadataHeader} {
+		value := gjson.GetBytes(updated, path)
+		if !value.Exists() || value.Type != gjson.String {
 			continue
 		}
-		delete(headers, key)
-		for _, value := range values {
-			parts := strings.Split(value, ",")
-			kept := parts[:0]
-			for _, part := range parts {
-				part = strings.TrimSpace(part)
-				if part == "" || strings.EqualFold(part, "responses=experimental") {
-					continue
-				}
-				kept = append(kept, part)
-			}
-			if len(kept) > 0 {
-				preserved = append(preserved, strings.Join(kept, ", "))
-			}
+		metadata, ok := openAICodexTurnMetadataWithCompactWindow(value.String(), windowID)
+		if !ok {
+			continue
 		}
+		next, err := sjson.SetBytes(updated, path, metadata)
+		if err != nil {
+			return body
+		}
+		updated = next
 	}
-	for _, value := range preserved {
-		headers.Add("OpenAI-Beta", value)
+	return updated
+}
+
+func clearOpenAIPassthroughCompactWindow(c *gin.Context) {
+	if c != nil {
+		c.Set(openAIPassthroughCompactWindowContextKey, nil)
 	}
+}
+
+func openAIPassthroughCompactWindowFromContext(c *gin.Context) (openAIPassthroughCompactWindowContext, bool) {
+	if c == nil {
+		return openAIPassthroughCompactWindowContext{}, false
+	}
+	value, ok := c.Get(openAIPassthroughCompactWindowContextKey)
+	state, valid := value.(openAIPassthroughCompactWindowContext)
+	return state, ok && valid && strings.TrimSpace(state.mappingKey) != "" &&
+		strings.TrimSpace(state.threadID) != "" && strings.TrimSpace(state.digest) != ""
+}
+
+func openAIPassthroughCompactWindowActive(c *gin.Context) bool {
+	_, ok := openAIPassthroughCompactWindowFromContext(c)
+	return ok
+}
+
+func (s *OpenAIGatewayService) commitDeliveredOpenAIPassthroughCompactWindow(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	statusCode int,
+	delivery *openAICodexCompactionDelivery,
+	turnState string,
+) {
+	if statusCode < 200 || statusCode >= 300 || delivery == nil || !delivery.Valid() || s == nil || account == nil || !account.IsOpenAIOAuth() {
+		return
+	}
+	state, ok := openAIPassthroughCompactWindowFromContext(c)
+	if !ok {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// The compact output is already installed downstream. Commit with a short
+	// detached context so a client/request cancellation racing immediately
+	// after the successful write cannot leave the durable window behind.
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAICodexWindowStoreTimeout)
+	result, err := s.CommitOpenAICodexWindowSnapshot(commitCtx, state.mappingKey, state.threadID, state.expected, state.digest)
+	cancel()
+	if err != nil {
+		logger.FromContext(ctx).Warn("OpenAI passthrough compact window commit failed",
+			zap.Int64("account_id", account.ID),
+			zap.String("mapping_digest", openAICodexMappingLogDigest(state.mappingKey)),
+			zap.Uint64("expected_window", state.expected),
+			zap.Error(err),
+		)
+		return
+	}
+	switch result.Status {
+	case OpenAICodexWindowCommitAdvanced, OpenAICodexWindowCommitAlreadyCommitted, OpenAICodexWindowCommitStale:
+		committedPlan := state.plan
+		committedPlan.Window = result.Snapshot
+		committedPlan.WireProfile.WindowID = result.Snapshot.WindowID()
+		SetOpenAIOAuthIdentityPlan(c, committedPlan)
+		if strings.TrimSpace(turnState) != "" {
+			s.noteOpenAICodexTurnStateProvenanceForPlan(c, account, turnState, committedPlan)
+		}
+	default:
+		logger.FromContext(ctx).Warn("OpenAI passthrough compact window commit skipped",
+			zap.Int64("account_id", account.ID),
+			zap.String("mapping_digest", openAICodexMappingLogDigest(state.mappingKey)),
+			zap.Uint64("expected_window", state.expected),
+			zap.String("status", string(result.Status)),
+		)
+	}
+}
+
+func openAIDeliveredSSECompactionDelivery(bodyText string) openAICodexCompactionDelivery {
+	var delivery openAICodexCompactionDelivery
+	forEachOpenAISSEDataPayload(bodyText, func(data []byte) {
+		delivery.ObserveDeliveredEvent(data)
+	})
+	return delivery
+}
+
+func openAIJSONCompactionDelivery(body []byte) openAICodexCompactionDelivery {
+	var delivery openAICodexCompactionDelivery
+	if !openAICodexJSONCompactionOutputValid(body) {
+		return delivery
+	}
+	status := strings.TrimSpace(gjson.GetBytes(body, "status").String())
+	eventType := strings.TrimSpace(gjson.GetBytes(body, "type").String())
+	switch {
+	case status == "completed":
+		delivery.ObserveDeliveredEvent([]byte(`{"type":"response.completed","response":` + string(body) + `}`))
+	case eventType == "response.completed" || eventType == "response.done":
+		delivery.ObserveDeliveredEvent(body)
+	}
+	return delivery
 }
 
 func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, responseBody []byte) bool {
@@ -1429,6 +1612,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	clientOutputStarted := false
 	turnStateHeaderStaged := false
 	turnStateCommitted := false
+	var compactionDelivery openAICodexCompactionDelivery
 	stageTurnStateHeader := func() {
 		if turnStateHeaderStaged || c.Writer.Written() {
 			return
@@ -1448,7 +1632,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			return
 		}
 		flusher.Flush()
-		if !turnStateCommitted && turnState != "" {
+		if !turnStateCommitted && turnState != "" && !openAIPassthroughCompactWindowActive(c) {
 			s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
 			turnStateCommitted = true
 		}
@@ -1464,6 +1648,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				clientDisconnected = true
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
 				return false
+			}
+			if data, ok := extractOpenAISSEDataLine(pending); ok {
+				compactionDelivery.ObserveDeliveredEvent([]byte(data))
 			}
 		}
 		pendingLines = pendingLines[:0]
@@ -1559,7 +1746,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 								"message": errMsg,
 							},
 						})
-						if turnState != "" {
+						if turnState != "" && !openAIPassthroughCompactWindowActive(c) {
 							s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
 							turnStateCommitted = true
 						}
@@ -1627,6 +1814,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				clientDisconnected = true
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
 			} else {
+				if data, ok := extractOpenAISSEDataLine(line); ok {
+					compactionDelivery.ObserveDeliveredEvent([]byte(data))
+				}
 				clientOutputStarted = true
 				flushPending = true
 				if line == "" {
@@ -1638,6 +1828,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	if err := documentScanner.Err(); err != nil {
 		if (sawDone || sawTerminalEvent) && !sawFailedEvent {
 			s.clearOpenAIProxyStreamDisconnect(account)
+			flushPendingOutput()
+			s.commitDeliveredOpenAIPassthroughCompactWindow(ctx, c, account, resp.StatusCode, &compactionDelivery, turnState)
 			return resultWithUsage(), nil
 		}
 		if sawFailedEvent {
@@ -1690,6 +1882,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		s.clearOpenAIProxyStreamDisconnect(account)
 	}
 
+	flushPendingOutput()
+	s.commitDeliveredOpenAIPassthroughCompactWindow(ctx, c, account, resp.StatusCode, &compactionDelivery, turnState)
 	return resultWithUsage(), nil
 }
 
@@ -1720,7 +1914,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 	// stream=false was requested. Without this conversion the client would
 	// receive raw SSE text or a terminal event with empty output.
 	if isEventStreamResponse(resp.Header) {
-		return s.handlePassthroughSSEToJSON(resp, c, account, body, originalModel, mappedModel)
+		return s.handlePassthroughSSEToJSON(ctx, resp, c, account, body, originalModel, mappedModel)
 	}
 
 	usage := &OpenAIUsage{}
@@ -1760,11 +1954,17 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 		turnState = relayOpenAICodexTurnStateHeader(c.Writer.Header(), resp.Header)
 		turnStateCanCommit = !c.Writer.Written()
 	}
-	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
-		c.Data(resp.StatusCode, contentType, body)
+	delivered := writeOpenAIResponseWithOptionalDeliveryTracking(
+		c, resp.StatusCode, contentType, body, openAIPassthroughCompactWindowActive(c),
+	)
+	if delivered {
+		delivery := openAIJSONCompactionDelivery(body)
+		s.commitDeliveredOpenAIPassthroughCompactWindow(ctx, c, account, resp.StatusCode, &delivery, turnState)
 	}
-	if turnStateCanCommit && c.Writer.Written() {
-		s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
+	if turnStateCanCommit && delivered {
+		if !openAIPassthroughCompactWindowActive(c) {
+			s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
+		}
 	}
 	return &openaiNonStreamingResultPassthrough{
 		OpenAIUsage:      usage,
@@ -1779,9 +1979,10 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 // response for the passthrough path. It mirrors handleSSEToJSON while
 // preserving passthrough payloads, except compact-only model remapping may
 // rewrite model fields back to the original requested model.
-func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel string, mappedModel string) (*openaiNonStreamingResultPassthrough, error) {
+func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel string, mappedModel string) (*openaiNonStreamingResultPassthrough, error) {
 	bodyText := string(body)
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
+	var delivery openAICodexCompactionDelivery
 
 	usage := &OpenAIUsage{}
 	if ok {
@@ -1840,11 +2041,23 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 			contentType = "text/event-stream"
 		}
 	}
-	if !writeOpenAICompactSSEBridge(c, resp.StatusCode, body) {
-		c.Data(resp.StatusCode, contentType, body)
+	delivered := writeOpenAIResponseWithOptionalDeliveryTracking(
+		c, resp.StatusCode, contentType, body, openAIPassthroughCompactWindowActive(c),
+	)
+	if ok {
+		// The final JSON may contain a compaction item reconstructed from an
+		// output_item.added event even when the terminal response output was
+		// empty. Commit from the exact representation delivered downstream so
+		// accepted compact output and window advancement cannot diverge.
+		delivery = openAIJSONCompactionDelivery(body)
 	}
-	if turnStateCanCommit && c.Writer.Written() {
-		s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
+	if delivered {
+		s.commitDeliveredOpenAIPassthroughCompactWindow(ctx, c, account, resp.StatusCode, &delivery, turnState)
+	}
+	if turnStateCanCommit && delivered {
+		if !openAIPassthroughCompactWindowActive(c) {
+			s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
+		}
 	}
 
 	return &openaiNonStreamingResultPassthrough{

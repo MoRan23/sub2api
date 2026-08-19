@@ -23,7 +23,8 @@ func isOpenAIResponsesLiteWebSocketPayload(body []byte) bool {
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return false
 	}
-	return isOpenAIResponsesLiteHeader(gjson.GetBytes(body, "client_metadata."+responsesLiteWSMetadataKey).String())
+	marker := gjson.GetBytes(body, "client_metadata."+responsesLiteWSMetadataKey)
+	return marker.Type == gjson.String && isOpenAIResponsesLiteHeader(marker.String())
 }
 
 // ImageGenerationPermissionMessage returns the stable end-user error text for disabled groups.

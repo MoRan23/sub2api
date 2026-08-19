@@ -13,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -200,6 +201,115 @@ func TestGuardOpenAICodexTurnStateEchoUsesCredentialOwnerAndIdentity(t *testing.
 	unknown := http.Header{"X-Codex-Turn-State": []string{"externally-minted"}}
 	svc.guardOpenAICodexTurnStateEcho(foreignContext, oauthTurnStateAccount(43), unknown)
 	require.Equal(t, "externally-minted", unknown.Get(openAICodexTurnStateHeader))
+}
+
+func TestGuardOpenAICodexTurnStateEchoForPlanGuardsHeaderAndBody(t *testing.T) {
+	resetTurnStateLocalStore(t, 32)
+	svc := newTurnStateTestService()
+	account := oauthTurnStateAccount(42)
+	c, _ := newTurnStateIdentityTestContext(t, 7, "owner:42", "11111111-1111-4111-8111-111111111111", turnStateSessionA, turnStateThreadA)
+	plan, ok := OpenAIOAuthIdentityPlanFromContext(c)
+	require.True(t, ok)
+	svc.noteOpenAICodexTurnStateProvenanceForPlan(c, account, "valid-state", plan)
+
+	matchingHeader := http.Header{"X-Codex-Turn-State": []string{"valid-state"}}
+	matchingBody := []byte(`{"client_metadata":{"keep":true,"x-codex-turn-state":"valid-state"}}`)
+	require.Equal(t, matchingBody, svc.guardOpenAICodexTurnStateEchoForPlan(c, account, plan, matchingHeader, matchingBody))
+	require.Equal(t, "valid-state", matchingHeader.Get(openAICodexTurnStateHeader))
+
+	compatibleDuplicates := http.Header{}
+	compatibleDuplicates.Add(openAICodexTurnStateHeader, " valid-state ")
+	compatibleDuplicates.Add(openAICodexTurnStateHeader, "valid-state")
+	svc.guardOpenAICodexTurnStateEchoForPlan(c, account, plan, compatibleDuplicates, nil)
+	require.Equal(t, []string{"valid-state"}, compatibleDuplicates.Values(openAICodexTurnStateHeader))
+
+	changed := plan
+	changed.RequestTurn.ID = turnStateTurnB
+	mixedDuplicates := http.Header{}
+	mixedDuplicates.Add(openAICodexTurnStateHeader, "externally-minted")
+	mixedDuplicates.Add(openAICodexTurnStateHeader, "valid-state")
+	svc.guardOpenAICodexTurnStateEchoForPlan(c, account, changed, mixedDuplicates, nil)
+	require.Empty(t, mixedDuplicates.Values(openAICodexTurnStateHeader))
+	header := http.Header{"X-Codex-Turn-State": []string{"valid-state"}}
+	body := []byte(` { "model":"gpt", "client_metadata": {"keep":true,"x-codex-turn-state":"valid-state"}, "tail":1 } `)
+	guarded := svc.guardOpenAICodexTurnStateEchoForPlan(c, account, changed, header, body)
+	require.Empty(t, header.Get(openAICodexTurnStateHeader))
+	require.False(t, gjson.GetBytes(guarded, "client_metadata.x-codex-turn-state").Exists())
+	require.True(t, gjson.GetBytes(guarded, "client_metadata.keep").Bool())
+	require.Equal(t, int64(1), gjson.GetBytes(guarded, "tail").Int())
+
+	foreignOwner := plan
+	foreignOwner.CredentialOwnerNamespace = "owner:foreign"
+	foreignBody := []byte(`{"client_metadata":{"x-codex-turn-state":"valid-state"}}`)
+	require.False(t, gjson.GetBytes(svc.guardOpenAICodexTurnStateEchoForPlan(c, account, foreignOwner, nil, foreignBody), "client_metadata.x-codex-turn-state").Exists())
+
+	unknownHeader := http.Header{"X-Codex-Turn-State": []string{"external-state"}}
+	unknownBody := []byte(`{"client_metadata":{"x-codex-turn-state":"external-state"}}`)
+	require.Equal(t, unknownBody, svc.guardOpenAICodexTurnStateEchoForPlan(c, account, changed, unknownHeader, unknownBody))
+	require.Equal(t, "external-state", unknownHeader.Get(openAICodexTurnStateHeader))
+
+	nonString := []byte(`{"client_metadata":{"x-codex-turn-state":{"opaque":true}}}`)
+	require.Equal(t, nonString, svc.guardOpenAICodexTurnStateEchoForPlan(c, account, changed, nil, nonString))
+
+	failingSvc := newTurnStateTestService()
+	failingSvc.cache = failingTurnStateGatewayCache{}
+	storeErrorBody := []byte(`{"client_metadata":{"x-codex-turn-state":"store-error-state"}}`)
+	require.Equal(t, storeErrorBody, failingSvc.guardOpenAICodexTurnStateEchoForPlan(c, account, changed, nil, storeErrorBody))
+
+	disabledPlan := changed
+	disabledPlan.InstallationEnabled = false
+	disabledPlan.TurnIdentityEnabled = false
+	disabledPlan.TurnIdentityRequested = false
+	disabledPlan.ClientIdentityEnabled = false
+	disabledHeader := http.Header{"X-Codex-Turn-State": []string{"valid-state"}}
+	disabledBody := []byte(" { \"client_metadata\" : { \"keep\" : true, \"x-codex-turn-state\" : \"valid-state\" } } \n")
+	require.Equal(t, disabledBody, svc.guardOpenAICodexTurnStateEchoForPlan(c, account, disabledPlan, disabledHeader, disabledBody))
+	require.Equal(t, "valid-state", disabledHeader.Get(openAICodexTurnStateHeader))
+}
+
+func TestOpenAICodexTurnStateFlagOffDoesNotAccessProvenanceStore(t *testing.T) {
+	store := &countingTurnStateGatewayCache{}
+	svc := newTurnStateTestService()
+	svc.cache = store
+	account := oauthTurnStateAccount(92)
+	c, _ := newTurnStateIdentityTestContext(t, 7, "owner:92", "11111111-1111-4111-8111-111111111111", turnStateSessionA, turnStateSessionA)
+	plan, ok := OpenAIOAuthIdentityPlanFromContext(c)
+	require.True(t, ok)
+	plan.TurnIdentityRequested = false
+	plan.TurnIdentityEnabled = false
+	plan.PolicySnapshot.MasterEnabled = false
+	header := http.Header{}
+	header.Set(openAICodexTurnStateHeader, "opaque-state")
+	body := []byte(`{"client_metadata":{"x-codex-turn-state":"opaque-state"}}`)
+
+	require.Equal(t, body, svc.guardOpenAICodexTurnStateEchoForPlan(c, account, plan, header, body))
+	require.Equal(t, "opaque-state", header.Get(openAICodexTurnStateHeader))
+	svc.noteOpenAICodexTurnStateProvenanceForPlan(c, account, "opaque-state", plan)
+	require.Zero(t, store.getCalls)
+	require.Zero(t, store.setCalls)
+	require.Zero(t, store.deleteCalls)
+}
+
+type countingTurnStateGatewayCache struct {
+	GatewayCache
+	getCalls    int
+	setCalls    int
+	deleteCalls int
+}
+
+func (c *countingTurnStateGatewayCache) GetOpenAICodexTurnStateOrigin(context.Context, string) (OpenAICodexTurnStateOrigin, error) {
+	c.getCalls++
+	return OpenAICodexTurnStateOrigin{}, ErrOpenAICodexTurnStateOriginNotFound
+}
+
+func (c *countingTurnStateGatewayCache) SetOpenAICodexTurnStateOrigin(context.Context, string, OpenAICodexTurnStateOrigin, time.Duration) error {
+	c.setCalls++
+	return nil
+}
+
+func (c *countingTurnStateGatewayCache) DeleteOpenAICodexTurnStateOrigin(context.Context, string) error {
+	c.deleteCalls++
+	return nil
 }
 
 type failingTurnStateGatewayCache struct{ GatewayCache }
