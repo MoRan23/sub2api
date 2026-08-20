@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -201,4 +202,45 @@ func TestCoordinatorAsyncEnqueueFailuresNeverChangeResponseOrDownstreamDispatch(
 		require.Equal(t, int64(1), prompt.enqueues.Load())
 		require.Zero(t, prompt.evaluates.Load())
 	}
+}
+
+func TestCoordinatorContentModerationWhitelistDoesNotBypassPromptAuditOrCyberPolicy(t *testing.T) {
+	t.Run("prompt audit block wins over content moderation whitelist", func(t *testing.T) {
+		legacyDecision := &LegacyDecision{
+			Allowed: true, StatusCode: http.StatusOK, Action: service.ContentModerationActionWhitelistAllow,
+		}
+		promptDecision := &PromptDecision{
+			Kind: DecisionBlock, ErrorCode: ErrorCodeBlocked, AllowNextStage: false,
+		}
+		legacy := &fakeLegacyEngine{decision: legacyDecision}
+		prompt := &fakePromptEngine{mode: ModeBlocking, decision: promptDecision}
+
+		decision := NewCoordinator(legacy, prompt).Check(context.Background(), Request{UserID: 7})
+
+		require.Equal(t, DecisionBlock, decision.Kind)
+		require.False(t, decision.AllowNextStage)
+		require.Equal(t, ErrorCodeBlocked, decision.ErrorCode)
+		require.Same(t, legacyDecision, decision.Legacy)
+		require.Equal(t, service.ContentModerationActionWhitelistAllow, decision.Legacy.Action)
+		require.Same(t, promptDecision, decision.Prompt)
+		require.Equal(t, int64(1), legacy.calls.Load())
+		require.Equal(t, int64(1), prompt.evaluates.Load())
+	})
+
+	t.Run("cyber policy remains blocking", func(t *testing.T) {
+		legacyDecision := &LegacyDecision{
+			Blocked: true, StatusCode: http.StatusForbidden, ErrorCode: "content_policy_violation",
+			Message: "cyber policy", Action: service.ContentModerationActionCyberPolicy,
+		}
+		legacy := &fakeLegacyEngine{decision: legacyDecision}
+
+		decision := NewCoordinator(legacy, nil).Check(context.Background(), Request{UserID: 7})
+
+		require.Equal(t, DecisionBlock, decision.Kind)
+		require.False(t, decision.AllowNextStage)
+		require.Equal(t, "content_policy_violation", decision.ErrorCode)
+		require.Same(t, legacyDecision, decision.Legacy)
+		require.Equal(t, service.ContentModerationActionCyberPolicy, decision.Legacy.Action)
+		require.Equal(t, int64(1), legacy.calls.Load())
+	})
 }

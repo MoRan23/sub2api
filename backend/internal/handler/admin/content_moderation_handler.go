@@ -47,16 +47,17 @@ type contentModerationConfigRequest struct {
 	ViolationWindowHours *int                `json:"violation_window_hours"`
 	// cyber_policy 命中是否排除出自动封号计数；前端 RiskControlView 已发送该字段，
 	// service.UpdateContentModerationConfigInput 已支持，此前 handler 层缺透传导致开关静默失效。
-	CyberPolicyExcludeFromBanCount *bool                                 `json:"cyber_policy_exclude_from_ban_count"`
-	RetryCount                     *int                                  `json:"retry_count"`
-	HitRetentionDays               *int                                  `json:"hit_retention_days"`
-	NonHitRetentionDays            *int                                  `json:"non_hit_retention_days"`
-	PreHashCheckEnabled            *bool                                 `json:"pre_hash_check_enabled"`
-	BlockedKeywords                *[]string                             `json:"blocked_keywords"`
-	KeywordBlockingMode            *string                               `json:"keyword_blocking_mode"`
-	ModelFilter                    *service.ContentModerationModelFilter `json:"model_filter"`
-	CyberPolicyWhitelistUserIDs    *[]int64                              `json:"cyber_policy_whitelist_user_ids"`
-	CyberPolicyNotificationEmails  *[]string                             `json:"cyber_policy_notification_emails"`
+	CyberPolicyExcludeFromBanCount    *bool                                 `json:"cyber_policy_exclude_from_ban_count"`
+	RetryCount                        *int                                  `json:"retry_count"`
+	HitRetentionDays                  *int                                  `json:"hit_retention_days"`
+	NonHitRetentionDays               *int                                  `json:"non_hit_retention_days"`
+	PreHashCheckEnabled               *bool                                 `json:"pre_hash_check_enabled"`
+	BlockedKeywords                   *[]string                             `json:"blocked_keywords"`
+	KeywordBlockingMode               *string                               `json:"keyword_blocking_mode"`
+	ModelFilter                       *service.ContentModerationModelFilter `json:"model_filter"`
+	ContentModerationWhitelistUserIDs *[]int64                              `json:"content_moderation_whitelist_user_ids"`
+	CyberPolicyWhitelistUserIDs       *[]int64                              `json:"cyber_policy_whitelist_user_ids"`
+	CyberPolicyNotificationEmails     *[]string                             `json:"cyber_policy_notification_emails"`
 }
 
 type contentModerationAPIKeyTestRequest struct {
@@ -89,40 +90,41 @@ func (h *ContentModerationHandler) UpdateConfig(c *gin.Context) {
 		return
 	}
 	cfg, err := h.service.UpdateConfig(c.Request.Context(), service.UpdateContentModerationConfigInput{
-		Enabled:                        req.Enabled,
-		Mode:                           req.Mode,
-		BaseURL:                        req.BaseURL,
-		Model:                          req.Model,
-		ProxyID:                        req.ProxyID,
-		APIKey:                         req.APIKey,
-		APIKeys:                        req.APIKeys,
-		APIKeysMode:                    req.APIKeysMode,
-		DeleteAPIKeyHashes:             req.DeleteAPIKeyHashes,
-		ClearAPIKey:                    req.ClearAPIKey,
-		TimeoutMS:                      req.TimeoutMS,
-		SampleRate:                     req.SampleRate,
-		AllGroups:                      req.AllGroups,
-		GroupIDs:                       req.GroupIDs,
-		RecordNonHits:                  req.RecordNonHits,
-		Thresholds:                     req.Thresholds,
-		WorkerCount:                    req.WorkerCount,
-		QueueSize:                      req.QueueSize,
-		BlockStatus:                    req.BlockStatus,
-		BlockMessage:                   req.BlockMessage,
-		EmailOnHit:                     req.EmailOnHit,
-		AutoBanEnabled:                 req.AutoBanEnabled,
-		BanThreshold:                   req.BanThreshold,
-		ViolationWindowHours:           req.ViolationWindowHours,
-		CyberPolicyExcludeFromBanCount: req.CyberPolicyExcludeFromBanCount,
-		RetryCount:                     req.RetryCount,
-		HitRetentionDays:               req.HitRetentionDays,
-		NonHitRetentionDays:            req.NonHitRetentionDays,
-		PreHashCheckEnabled:            req.PreHashCheckEnabled,
-		BlockedKeywords:                req.BlockedKeywords,
-		KeywordBlockingMode:            req.KeywordBlockingMode,
-		ModelFilter:                    req.ModelFilter,
-		CyberPolicyWhitelistUserIDs:    req.CyberPolicyWhitelistUserIDs,
-		CyberPolicyNotificationEmails:  req.CyberPolicyNotificationEmails,
+		Enabled:                           req.Enabled,
+		Mode:                              req.Mode,
+		BaseURL:                           req.BaseURL,
+		Model:                             req.Model,
+		ProxyID:                           req.ProxyID,
+		APIKey:                            req.APIKey,
+		APIKeys:                           req.APIKeys,
+		APIKeysMode:                       req.APIKeysMode,
+		DeleteAPIKeyHashes:                req.DeleteAPIKeyHashes,
+		ClearAPIKey:                       req.ClearAPIKey,
+		TimeoutMS:                         req.TimeoutMS,
+		SampleRate:                        req.SampleRate,
+		AllGroups:                         req.AllGroups,
+		GroupIDs:                          req.GroupIDs,
+		RecordNonHits:                     req.RecordNonHits,
+		Thresholds:                        req.Thresholds,
+		WorkerCount:                       req.WorkerCount,
+		QueueSize:                         req.QueueSize,
+		BlockStatus:                       req.BlockStatus,
+		BlockMessage:                      req.BlockMessage,
+		EmailOnHit:                        req.EmailOnHit,
+		AutoBanEnabled:                    req.AutoBanEnabled,
+		BanThreshold:                      req.BanThreshold,
+		ViolationWindowHours:              req.ViolationWindowHours,
+		CyberPolicyExcludeFromBanCount:    req.CyberPolicyExcludeFromBanCount,
+		RetryCount:                        req.RetryCount,
+		HitRetentionDays:                  req.HitRetentionDays,
+		NonHitRetentionDays:               req.NonHitRetentionDays,
+		PreHashCheckEnabled:               req.PreHashCheckEnabled,
+		BlockedKeywords:                   req.BlockedKeywords,
+		KeywordBlockingMode:               req.KeywordBlockingMode,
+		ModelFilter:                       req.ModelFilter,
+		ContentModerationWhitelistUserIDs: req.ContentModerationWhitelistUserIDs,
+		CyberPolicyWhitelistUserIDs:       req.CyberPolicyWhitelistUserIDs,
+		CyberPolicyNotificationEmails:     req.CyberPolicyNotificationEmails,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

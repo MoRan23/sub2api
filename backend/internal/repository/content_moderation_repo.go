@@ -182,7 +182,7 @@ func (r *contentModerationRepository) CountFlaggedByUserSince(ctx context.Contex
 	if userID <= 0 {
 		return 0, nil
 	}
-	// SQL 中的 'cyber_policy' 字面量须与 service.ContentModerationActionCyberPolicy 保持一致。
+	// SQL 中的 action 字面量须与 service 层对应常量保持一致。
 	var count int
 	err := r.db.QueryRowContext(ctx, `
 WITH last_auto_ban AS (
@@ -195,6 +195,7 @@ FROM content_moderation_logs
 WHERE user_id = $1
   AND flagged = TRUE
   AND action <> 'hash_block'
+  AND action <> 'whitelist_allow'
   AND ($3::bool IS FALSE OR action <> 'cyber_policy')
   AND created_at >= $2
   AND created_at > COALESCE((SELECT at FROM last_auto_ban), '-infinity'::timestamptz)

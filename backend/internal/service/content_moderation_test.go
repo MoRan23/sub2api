@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -81,6 +82,62 @@ type contentModerationTestRepo struct {
 	logs []ContentModerationLog
 }
 
+type whitelistOrderingTestRepo struct {
+	contentModerationTestRepo
+	orderMu          sync.Mutex
+	calls            []string
+	createEmailSents []bool
+	updateIDs        []int64
+	updateContextErr []error
+	updateDeadline   []bool
+	createErr        error
+}
+
+func (r *whitelistOrderingTestRepo) CreateLog(ctx context.Context, log *ContentModerationLog) error {
+	r.orderMu.Lock()
+	r.calls = append(r.calls, "create")
+	if log != nil {
+		r.createEmailSents = append(r.createEmailSents, log.EmailSent)
+	}
+	err := r.createErr
+	r.orderMu.Unlock()
+	if err != nil {
+		return err
+	}
+	if log != nil {
+		log.ID = 77
+	}
+	return r.contentModerationTestRepo.CreateLog(ctx, log)
+}
+
+func (r *whitelistOrderingTestRepo) UpdateLogEmailSent(ctx context.Context, id int64, sent bool) error {
+	r.orderMu.Lock()
+	r.calls = append(r.calls, "update_email_sent")
+	r.updateIDs = append(r.updateIDs, id)
+	r.updateContextErr = append(r.updateContextErr, ctx.Err())
+	_, hasDeadline := ctx.Deadline()
+	r.updateDeadline = append(r.updateDeadline, hasDeadline)
+	r.orderMu.Unlock()
+	r.contentModerationTestRepo.mu.Lock()
+	defer r.contentModerationTestRepo.mu.Unlock()
+	for i := range r.contentModerationTestRepo.logs {
+		if r.contentModerationTestRepo.logs[i].ID == id {
+			r.contentModerationTestRepo.logs[i].EmailSent = sent
+		}
+	}
+	return nil
+}
+
+func (r *whitelistOrderingTestRepo) orderingSnapshot() ([]string, []bool, []int64, []error, []bool) {
+	r.orderMu.Lock()
+	defer r.orderMu.Unlock()
+	return append([]string(nil), r.calls...),
+		append([]bool(nil), r.createEmailSents...),
+		append([]int64(nil), r.updateIDs...),
+		append([]error(nil), r.updateContextErr...),
+		append([]bool(nil), r.updateDeadline...)
+}
+
 func (r *contentModerationTestRepo) CreateLog(ctx context.Context, log *ContentModerationLog) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -99,7 +156,7 @@ func (r *contentModerationTestRepo) CountFlaggedByUserSince(ctx context.Context,
 	defer r.mu.Unlock()
 	count := 0
 	for _, log := range r.logs {
-		if log.UserID == nil || *log.UserID != userID || !log.Flagged || log.Action == ContentModerationActionHashBlock {
+		if log.UserID == nil || *log.UserID != userID || !log.Flagged || log.Action == ContentModerationActionHashBlock || log.Action == ContentModerationActionWhitelistAllow {
 			continue
 		}
 		if excludeCyberPolicy && log.Action == ContentModerationActionCyberPolicy {
@@ -1899,4 +1956,486 @@ func TestContentModerationUpdateConfig_CyberPolicyWhitelistAndNotificationEmails
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cyber_policy 通知邮箱无效")
+}
+
+func TestContentModerationUpdateConfig_WhitelistNormalizesAndStaysIndependentFromCyber(t *testing.T) {
+	settingRepo := &contentModerationTestSettingRepo{values: map[string]string{}}
+	svc := NewContentModerationService(settingRepo, nil, nil, nil, nil, nil, nil, nil)
+	defaultView, err := svc.GetConfig(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, defaultView.ContentModerationWhitelistUserIDs)
+
+	contentWhitelist := []int64{9, -1, 7, 9, 0}
+	cyberWhitelist := []int64{42}
+	view, err := svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{
+		ContentModerationWhitelistUserIDs: &contentWhitelist,
+		CyberPolicyWhitelistUserIDs:       &cyberWhitelist,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []int64{7, 9}, view.ContentModerationWhitelistUserIDs)
+	require.Equal(t, []int64{42}, view.CyberPolicyWhitelistUserIDs)
+
+	var saved ContentModerationConfig
+	require.NoError(t, json.Unmarshal([]byte(settingRepo.values[SettingKeyContentModerationConfig]), &saved))
+	require.Equal(t, []int64{7, 9}, saved.ContentModerationWhitelistUserIDs)
+	require.Equal(t, []int64{42}, saved.CyberPolicyWhitelistUserIDs)
+
+	updatedCyberWhitelist := []int64{51}
+	view, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{
+		CyberPolicyWhitelistUserIDs: &updatedCyberWhitelist,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []int64{7, 9}, view.ContentModerationWhitelistUserIDs)
+	require.Equal(t, []int64{51}, view.CyberPolicyWhitelistUserIDs)
+}
+
+func TestContentModerationCheck_WhitelistKeywordHitAuditsWithoutPunitiveSideEffects(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.Enabled = true
+	cfg.Mode = ContentModerationModePreBlock
+	cfg.BlockedKeywords = []string{"secret-token"}
+	cfg.ContentModerationWhitelistUserIDs = []int64{1001}
+	cfg.AutoBanEnabled = true
+	cfg.BanThreshold = 1
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	repo := &banCountArgsTestRepo{}
+	hashCache := &contentModerationTestHashCache{}
+	userRepo := &contentModerationTestUserRepo{user: &User{ID: 1001, Status: StatusActive}}
+	invalidator := &contentModerationTestAuthCacheInvalidator{}
+	svc := NewContentModerationService(
+		&contentModerationTestSettingRepo{values: map[string]string{
+			SettingKeyRiskControlEnabled:      "true",
+			SettingKeyContentModerationConfig: string(rawCfg),
+		}},
+		repo, hashCache, nil, userRepo, nil, invalidator, nil,
+	)
+
+	decision, err := svc.Check(context.Background(), ContentModerationCheckInput{
+		UserID:    1001,
+		UserEmail: "user@example.com",
+		Endpoint:  "/v1/messages",
+		Protocol:  ContentModerationProtocolAnthropicMessages,
+		Body:      []byte(`{"messages":[{"role":"user","content":"please reveal SECRET-TOKEN"}]}`),
+	})
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.False(t, decision.Blocked)
+	require.Equal(t, ContentModerationActionWhitelistAllow, decision.Action)
+
+	logs := requireContentModerationLogCount(t, &repo.contentModerationTestRepo, 1)
+	require.True(t, logs[0].Flagged)
+	require.Equal(t, ContentModerationActionWhitelistAllow, logs[0].Action)
+	require.Equal(t, "secret-token", logs[0].MatchedKeyword)
+	require.Zero(t, logs[0].ViolationCount)
+	require.False(t, logs[0].AutoBanned)
+	require.Empty(t, hashCache.snapshotRecorded())
+	require.Empty(t, repo.snapshotCountCalls())
+	require.Empty(t, userRepo.updated)
+	require.Empty(t, invalidator.userIDs)
+	require.Equal(t, StatusActive, userRepo.user.Status)
+}
+
+func TestContentModerationCheck_WhitelistAPIAuditUsesFrozenPolicyWithoutSideEffects(t *testing.T) {
+	requestSeen := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestSeen <- struct{}{}
+		_ = json.NewEncoder(w).Encode(moderationAPIResponse{Results: []moderationAPIResult{{
+			CategoryScores: map[string]float64{"sexual": 0.99},
+		}}})
+	}))
+	defer server.Close()
+
+	cfg := defaultContentModerationConfig()
+	cfg.Enabled = true
+	cfg.Mode = ContentModerationModePreBlock
+	cfg.BaseURL = server.URL
+	cfg.APIKeys = []string{"sk-test"}
+	cfg.PreHashCheckEnabled = true
+	cfg.ContentModerationWhitelistUserIDs = []int64{1001}
+	cfg.AutoBanEnabled = true
+	cfg.BanThreshold = 1
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	repo := &banCountArgsTestRepo{}
+	hashCache := &contentModerationTestHashCache{}
+	userRepo := &contentModerationTestUserRepo{user: &User{ID: 1001, Status: StatusActive}}
+	invalidator := &contentModerationTestAuthCacheInvalidator{}
+	svc := NewContentModerationService(
+		&contentModerationTestSettingRepo{values: map[string]string{
+			SettingKeyRiskControlEnabled:      "true",
+			SettingKeyContentModerationConfig: string(rawCfg),
+		}},
+		repo, hashCache, nil, userRepo, nil, invalidator, nil,
+	)
+
+	decision, err := svc.Check(context.Background(), ContentModerationCheckInput{
+		UserID:    1001,
+		UserEmail: "user@example.com",
+		Endpoint:  "/responses",
+		Protocol:  ContentModerationProtocolOpenAIResponses,
+		Body:      []byte(`{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"audit me"}]}]}`),
+	})
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.Equal(t, ContentModerationActionWhitelistAllow, decision.Action)
+
+	select {
+	case <-requestSeen:
+	case <-time.After(time.Second):
+		t.Fatal("whitelisted request was not asynchronously audited")
+	}
+	logs := requireContentModerationLogCount(t, &repo.contentModerationTestRepo, 1)
+	require.True(t, logs[0].Flagged)
+	require.Equal(t, ContentModerationActionWhitelistAllow, logs[0].Action)
+	require.Zero(t, logs[0].ViolationCount)
+	require.False(t, logs[0].AutoBanned)
+	require.Len(t, hashCache.snapshotChecked(), 1)
+	require.Empty(t, hashCache.snapshotRecorded())
+	require.Empty(t, repo.snapshotCountCalls())
+	require.Empty(t, userRepo.updated)
+	require.Empty(t, invalidator.userIDs)
+}
+
+func TestContentModerationCheck_WhitelistQueueFullStillAllows(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.Enabled = true
+	cfg.QueueSize = 1
+	cfg.ContentModerationWhitelistUserIDs = []int64{1001}
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	svc := &ContentModerationService{
+		settingRepo: &contentModerationTestSettingRepo{values: map[string]string{
+			SettingKeyRiskControlEnabled:      "true",
+			SettingKeyContentModerationConfig: string(rawCfg),
+		}},
+		repo:       &contentModerationTestRepo{},
+		asyncQueue: make(chan contentModerationTask, 1),
+		keyHealth:  make(map[string]*contentModerationKeyHealth),
+	}
+	svc.asyncQueue <- contentModerationTask{}
+
+	decision, err := svc.Check(context.Background(), ContentModerationCheckInput{
+		UserID:   1001,
+		Protocol: ContentModerationProtocolOpenAIChat,
+		Body:     []byte(`{"messages":[{"role":"user","content":"audit me"}]}`),
+	})
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.Equal(t, ContentModerationActionWhitelistAllow, decision.Action)
+	require.Equal(t, int64(1), svc.asyncDropped.Load())
+}
+
+func TestContentModerationAuditOnly_ErrorAndNonHitLogsUseWhitelistAction(t *testing.T) {
+	t.Run("non_hit", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(moderationAPIResponse{Results: []moderationAPIResult{{
+				CategoryScores: map[string]float64{"sexual": 0.01},
+			}}})
+		}))
+		defer server.Close()
+
+		cfg := defaultContentModerationConfig()
+		cfg.BaseURL = server.URL
+		cfg.APIKeys = []string{"sk-test"}
+		cfg.RecordNonHits = true
+		repo := &contentModerationTestRepo{}
+		svc := NewContentModerationService(nil, repo, nil, nil, nil, nil, nil, nil)
+		svc.runAuditOnly(context.Background(), ContentModerationCheckInput{UserID: 1001}, cfg, ContentModerationInput{Text: "clean"}, ContentModerationInput{Text: "clean"}.Hash(), contentModerationIntPtr(1))
+
+		logs := requireContentModerationLogCount(t, repo, 1)
+		require.False(t, logs[0].Flagged)
+		require.Empty(t, logs[0].Error)
+		require.Equal(t, ContentModerationActionWhitelistAllow, logs[0].Action)
+	})
+
+	t.Run("error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "temporary failure", http.StatusInternalServerError)
+		}))
+		defer server.Close()
+
+		cfg := defaultContentModerationConfig()
+		cfg.BaseURL = server.URL
+		cfg.APIKeys = []string{"sk-test"}
+		cfg.RecordNonHits = true
+		cfg.RetryCount = 0
+		repo := &contentModerationTestRepo{}
+		svc := NewContentModerationService(nil, repo, nil, nil, nil, nil, nil, nil)
+		svc.runAuditOnly(context.Background(), ContentModerationCheckInput{UserID: 1001}, cfg, ContentModerationInput{Text: "clean"}, ContentModerationInput{Text: "clean"}.Hash(), contentModerationIntPtr(1))
+
+		logs := requireContentModerationLogCount(t, repo, 1)
+		require.False(t, logs[0].Flagged)
+		require.Contains(t, logs[0].Error, "status 500")
+		require.Equal(t, ContentModerationActionWhitelistAllow, logs[0].Action)
+	})
+}
+
+func TestContentModerationCheck_WhitelistObserveModeAllowsThenRecords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(moderationAPIResponse{Results: []moderationAPIResult{{
+			CategoryScores: map[string]float64{"sexual": 0.99},
+		}}})
+	}))
+	defer server.Close()
+
+	cfg := defaultContentModerationConfig()
+	cfg.Enabled = true
+	cfg.Mode = ContentModerationModeObserve
+	cfg.BaseURL = server.URL
+	cfg.APIKeys = []string{"sk-test"}
+	cfg.ContentModerationWhitelistUserIDs = []int64{1001}
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	repo := &contentModerationTestRepo{}
+	svc := NewContentModerationService(
+		&contentModerationTestSettingRepo{values: map[string]string{
+			SettingKeyRiskControlEnabled:      "true",
+			SettingKeyContentModerationConfig: string(rawCfg),
+		}},
+		repo, nil, nil, nil, nil, nil, nil,
+	)
+
+	decision, err := svc.Check(context.Background(), ContentModerationCheckInput{
+		UserID:   1001,
+		Protocol: ContentModerationProtocolOpenAIChat,
+		Body:     []byte(`{"messages":[{"role":"user","content":"audit me"}]}`),
+	})
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.Equal(t, ContentModerationActionWhitelistAllow, decision.Action)
+	logs := requireContentModerationLogCount(t, repo, 1)
+	require.True(t, logs[0].Flagged)
+	require.Equal(t, ContentModerationActionWhitelistAllow, logs[0].Action)
+	require.Equal(t, ContentModerationModeObserve, logs[0].Mode)
+}
+
+func TestContentModerationAuditOnly_FreezesRequestConfig(t *testing.T) {
+	svc := &ContentModerationService{asyncQueue: make(chan contentModerationTask, 1)}
+	cfg := defaultContentModerationConfig()
+	cfg.BlockedKeywords = []string{"original"}
+	cfg.ContentModerationWhitelistUserIDs = []int64{1001}
+	groupID := int64(7)
+	content := ContentModerationInput{Text: "original"}
+
+	svc.enqueueAuditOnly(ContentModerationCheckInput{UserID: 1001, GroupID: &groupID}, cfg, content, content.Hash())
+	cfg.BlockedKeywords[0] = "mutated"
+	cfg.ContentModerationWhitelistUserIDs[0] = 2002
+	groupID = 9
+
+	task := <-svc.asyncQueue
+	require.True(t, task.auditOnly)
+	require.Equal(t, []string{"original"}, task.config.BlockedKeywords)
+	require.Equal(t, []int64{1001}, task.config.ContentModerationWhitelistUserIDs)
+	require.NotNil(t, task.input.GroupID)
+	require.Equal(t, int64(7), *task.input.GroupID)
+}
+
+func TestContentModerationAuditOnly_KeywordHashAndAPIHitsSendEmailWithoutPunishment(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(t *testing.T, cfg *ContentModerationConfig, cache *contentModerationTestHashCache, content ContentModerationInput)
+		wantKind  string
+	}{
+		{
+			name: "keyword",
+			configure: func(t *testing.T, cfg *ContentModerationConfig, cache *contentModerationTestHashCache, content ContentModerationInput) {
+				cfg.BlockedKeywords = []string{"risky"}
+			},
+			wantKind: contentModerationKeywordCategory,
+		},
+		{
+			name: "hash",
+			configure: func(t *testing.T, cfg *ContentModerationConfig, cache *contentModerationTestHashCache, content ContentModerationInput) {
+				cfg.PreHashCheckEnabled = true
+				cache.hashes = map[string]struct{}{content.Hash(): {}}
+			},
+			wantKind: "hash",
+		},
+		{
+			name: "api",
+			configure: func(t *testing.T, cfg *ContentModerationConfig, cache *contentModerationTestHashCache, content ContentModerationInput) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_ = json.NewEncoder(w).Encode(moderationAPIResponse{Results: []moderationAPIResult{{
+						CategoryScores: map[string]float64{"sexual": 0.99},
+					}}})
+				}))
+				t.Cleanup(server.Close)
+				cfg.BaseURL = server.URL
+				cfg.APIKeys = []string{"sk-test"}
+			},
+			wantKind: "sexual",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			smtpServer := startNotificationEmailTestSMTPServer(t)
+			settings := smtpServer.settings()
+			settingRepo := &contentModerationTestSettingRepo{values: settings}
+			cfg := defaultContentModerationConfig()
+			cfg.EmailOnHit = true
+			cfg.AutoBanEnabled = true
+			cfg.BanThreshold = 1
+			content := ContentModerationInput{Text: "risky prompt"}
+			content.Normalize()
+			hashCache := &contentModerationTestHashCache{}
+			tt.configure(t, cfg, hashCache, content)
+			repo := &banCountArgsTestRepo{}
+			userRepo := &contentModerationTestUserRepo{user: &User{ID: 1001, Status: StatusActive}}
+			invalidator := &contentModerationTestAuthCacheInvalidator{}
+			svc := NewContentModerationService(settingRepo, repo, hashCache, nil, userRepo, nil, invalidator, NewEmailService(settingRepo, nil))
+
+			svc.runAuditOnly(context.Background(), ContentModerationCheckInput{
+				UserID:    1001,
+				UserEmail: "user@example.com",
+				Endpoint:  "/responses",
+			}, cfg, content, content.Hash(), contentModerationIntPtr(1))
+
+			logs := requireContentModerationLogCount(t, &repo.contentModerationTestRepo, 1)
+			require.True(t, logs[0].Flagged)
+			require.Equal(t, ContentModerationActionWhitelistAllow, logs[0].Action)
+			require.Equal(t, tt.wantKind, logs[0].HighestCategory)
+			require.False(t, logs[0].EmailSent, "日志先以 email_sent=false 落库，成功邮件由 repository 回写")
+			require.Zero(t, logs[0].ViolationCount)
+			require.False(t, logs[0].AutoBanned)
+			require.Eventually(t, func() bool { return smtpServer.messageCount() == 1 }, 3*time.Second, 20*time.Millisecond)
+			require.Empty(t, hashCache.snapshotRecorded())
+			require.Empty(t, repo.snapshotCountCalls())
+			require.Empty(t, userRepo.updated)
+			require.Empty(t, invalidator.userIDs)
+		})
+	}
+}
+
+func TestContentModerationWhitelist_DoesNotActAsCyberWhitelist(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.ContentModerationWhitelistUserIDs = []int64{7}
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	repo := &banCountArgsTestRepo{}
+	svc := NewContentModerationService(
+		&contentModerationTestSettingRepo{values: map[string]string{
+			SettingKeyRiskControlEnabled:      "true",
+			SettingKeyContentModerationConfig: string(rawCfg),
+		}},
+		repo, nil, nil, nil, nil, nil, nil,
+	)
+
+	svc.RecordCyberPolicyEvent(context.Background(), CyberPolicyRecordInput{UserID: 7})
+
+	require.Equal(t, []bool{false}, repo.snapshotCountCalls())
+	logs := repo.snapshotLogs()
+	require.Len(t, logs, 1)
+	require.Equal(t, ContentModerationActionCyberPolicy, logs[0].Action)
+}
+
+func TestPersistContentModerationLog_WhitelistActionDefensivelySuppressesPunishment(t *testing.T) {
+	userID := int64(1001)
+	cfg := defaultContentModerationConfig()
+	cfg.AutoBanEnabled = true
+	cfg.BanThreshold = 1
+	repo := &banCountArgsTestRepo{}
+	hashCache := &contentModerationTestHashCache{}
+	userRepo := &contentModerationTestUserRepo{user: &User{ID: userID, Status: StatusActive}}
+	invalidator := &contentModerationTestAuthCacheInvalidator{}
+	svc := NewContentModerationService(nil, repo, hashCache, nil, userRepo, nil, invalidator, nil)
+	log := &ContentModerationLog{
+		UserID:  &userID,
+		Action:  ContentModerationActionWhitelistAllow,
+		Flagged: true,
+	}
+
+	svc.persistContentModerationLog(context.Background(), cfg, log, strings.Repeat("a", 64), true, true)
+
+	logs := requireContentModerationLogCount(t, &repo.contentModerationTestRepo, 1)
+	require.Zero(t, logs[0].ViolationCount)
+	require.False(t, logs[0].AutoBanned)
+	require.Empty(t, hashCache.snapshotRecorded())
+	require.Empty(t, repo.snapshotCountCalls())
+	require.Empty(t, userRepo.updated)
+	require.Empty(t, invalidator.userIDs)
+}
+
+func TestPersistWhitelistAuditLog_CreateBeforeEmailUsesSourceIDAndPatchesStatus(t *testing.T) {
+	smtpServer := startNotificationEmailTestSMTPServer(t)
+	settingRepo := &contentModerationTestSettingRepo{values: smtpServer.settings()}
+	emailService := NewEmailService(settingRepo, nil)
+	_ = NewNotificationEmailService(settingRepo, emailService)
+	repo := &whitelistOrderingTestRepo{}
+	svc := NewContentModerationService(nil, repo, nil, nil, nil, nil, nil, emailService)
+	cfg := defaultContentModerationConfig()
+	cfg.EmailOnHit = true
+	userID := int64(1001)
+	log := &ContentModerationLog{
+		UserID:    &userID,
+		UserEmail: "user@example.com",
+		Endpoint:  "/responses",
+		Action:    ContentModerationActionWhitelistAllow,
+		Flagged:   true,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	svc.persistContentModerationLog(ctx, cfg, log, strings.Repeat("a", 64), true, true)
+
+	calls, createEmailSents, updateIDs, updateContextErr, updateDeadline := repo.orderingSnapshot()
+	require.Equal(t, []string{"create", "update_email_sent"}, calls)
+	require.Equal(t, []bool{false}, createEmailSents)
+	require.Equal(t, []int64{77}, updateIDs)
+	require.Len(t, updateContextErr, 1)
+	require.NoError(t, updateContextErr[0], "email status update must detach from an exhausted worker context")
+	require.Equal(t, []bool{true}, updateDeadline)
+	require.Equal(t, int64(1), smtpServer.messageCount())
+
+	deliveryKey := notificationEmailDeliveryKey(
+		NotificationEmailEventContentModerationViolation,
+		"content_moderation",
+		"77",
+		"user@example.com",
+		"",
+	)
+	require.NotEmpty(t, deliveryKey)
+	require.Contains(t, settingRepo.values, deliveryKey, "notification delivery key must use the persisted log ID as SourceID")
+	emptySourceKey := notificationEmailDeliveryKey(
+		NotificationEmailEventContentModerationViolation,
+		"content_moderation",
+		"",
+		"user@example.com",
+		"",
+	)
+	if emptySourceKey != "" {
+		require.NotContains(t, settingRepo.values, emptySourceKey)
+	}
+	logs := repo.snapshotLogs()
+	require.Len(t, logs, 1)
+	require.True(t, logs[0].EmailSent)
+}
+
+func TestPersistWhitelistAuditLog_CreateFailureSkipsEmail(t *testing.T) {
+	smtpServer := startNotificationEmailTestSMTPServer(t)
+	settingRepo := &contentModerationTestSettingRepo{values: smtpServer.settings()}
+	repo := &whitelistOrderingTestRepo{createErr: errors.New("database unavailable")}
+	svc := NewContentModerationService(nil, repo, nil, nil, nil, nil, nil, NewEmailService(settingRepo, nil))
+	cfg := defaultContentModerationConfig()
+	cfg.EmailOnHit = true
+	userID := int64(1001)
+	log := &ContentModerationLog{
+		UserID:    &userID,
+		UserEmail: "user@example.com",
+		Action:    ContentModerationActionWhitelistAllow,
+		Flagged:   true,
+	}
+
+	svc.persistContentModerationLog(context.Background(), cfg, log, strings.Repeat("a", 64), true, true)
+
+	calls, createEmailSents, updateIDs, _, _ := repo.orderingSnapshot()
+	require.Equal(t, []string{"create"}, calls)
+	require.Equal(t, []bool{false}, createEmailSents)
+	require.Empty(t, updateIDs)
+	require.Zero(t, smtpServer.messageCount())
+	require.Empty(t, repo.snapshotLogs())
 }

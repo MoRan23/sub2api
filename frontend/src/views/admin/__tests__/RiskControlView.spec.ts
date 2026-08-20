@@ -88,6 +88,7 @@ const baseConfig = (): ContentModerationConfig => ({
   sample_rate: 100,
   all_groups: true,
   group_ids: [],
+  content_moderation_whitelist_user_ids: [],
   record_non_hits: false,
   worker_count: 4,
   queue_size: 32768,
@@ -273,6 +274,41 @@ describe('admin RiskControlView', () => {
     expect(showError).not.toHaveBeenCalled()
   })
 
+  it('saves content moderation allowlist users independently from the cyber policy whitelist', async () => {
+    getConfig.mockResolvedValue({
+      ...baseConfig(),
+      content_moderation_whitelist_user_ids: [3],
+      cyber_policy_whitelist_user_ids: [7],
+    })
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+          ProxySelector: true,
+          AdminUserMultiSelect: AdminUserSelectorStub,
+        },
+      },
+    })
+    await flushPromises()
+
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.tabs.scope').trigger('click')
+    await wrapper.get('[data-test="content-moderation-whitelist-users"]').setValue('3,5')
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+    await flushPromises()
+
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      content_moderation_whitelist_user_ids: [3, 5],
+      cyber_policy_whitelist_user_ids: [7],
+    }))
+  })
+
   it('submits edited risk control thresholds when saving moderation config', async () => {
     const wrapper = mount(RiskControlView, {
       global: {
@@ -339,9 +375,86 @@ describe('admin RiskControlView', () => {
     await flushPromises()
 
     expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      content_moderation_whitelist_user_ids: [],
       cyber_policy_whitelist_user_ids: [7, 9],
       cyber_policy_notification_emails: ['ops@example.com', 'security@example.com'],
     }))
+  })
+
+  it('renders whitelist allow logs as a distinct non-blocking hit action while preserving audit errors', async () => {
+    const whitelistAllowLog = {
+      id: 41,
+      request_id: 'req-whitelist',
+      user_id: 3,
+      user_email: 'allowed@example.com',
+      api_key_id: 2,
+      api_key_name: 'key',
+      group_id: 1,
+      group_name: 'default',
+      endpoint: '/v1/responses',
+      provider: 'openai',
+      model: 'gpt-5.4',
+      mode: 'pre_block',
+      action: 'whitelist_allow',
+      flagged: true,
+      highest_category: 'violence',
+      highest_score: 0.99,
+      matched_keyword: '',
+      category_scores: { violence: 0.99 },
+      threshold_snapshot: { violence: 0.8 },
+      input_excerpt: 'redacted',
+      upstream_latency_ms: 12,
+      error: '',
+      violation_count: 0,
+      auto_banned: false,
+      email_sent: true,
+      user_status: 'active',
+      queue_delay_ms: 1,
+      created_at: '2026-08-20T00:00:00Z',
+    }
+    listLogs.mockResolvedValue({
+      items: [
+        whitelistAllowLog,
+        {
+          ...whitelistAllowLog,
+          id: 42,
+          request_id: 'req-whitelist-error',
+          flagged: false,
+          highest_category: '',
+          highest_score: 0,
+          error: 'moderation API unavailable',
+        },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+          ProxySelector: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    const badge = wrapper.get('[data-test="moderation-result-41"]')
+    expect(badge.text()).toBe('admin.riskControl.action.whitelistAllow')
+    expect(badge.classes()).toEqual(expect.arrayContaining(['bg-sky-100', 'text-sky-700']))
+    expect(badge.classes()).not.toContain('bg-red-100')
+
+    const errorBadge = wrapper.get('[data-test="moderation-result-42"]')
+    expect(errorBadge.text()).toBe('admin.riskControl.action.error')
+    expect(errorBadge.classes()).toEqual(expect.arrayContaining(['bg-amber-100', 'text-amber-700']))
+    expect(errorBadge.classes()).not.toContain('bg-sky-100')
   })
 
   it('rejects an invalid cyber policy notification email', async () => {

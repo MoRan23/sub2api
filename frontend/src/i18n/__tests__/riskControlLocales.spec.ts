@@ -21,4 +21,13 @@ describe('risk control locale copy', () => {
     expect(zh.admin.riskControl.preBlockAPIKeyLoadHint).not.toContain('Worker 池')
     expect(en.admin.riskControl.preBlockAPIKeyLoadHint).not.toContain('worker pool')
   })
+
+  it('describes the content moderation allowlist as independent audit-only behavior', () => {
+    expect(zh.admin.riskControl.contentModerationWhitelistHint).toContain('仍会异步接受内容审核')
+    expect(zh.admin.riskControl.contentModerationWhitelistHint).toContain('提示词审计和网络安全策略不受影响')
+    expect(en.admin.riskControl.contentModerationWhitelistHint).toContain('still audited asynchronously')
+    expect(en.admin.riskControl.contentModerationWhitelistHint).toContain('Prompt audit and cyber policy are unaffected')
+    expect(zh.admin.riskControl.action.whitelistAllow).toBe('白名单放行')
+    expect(en.admin.riskControl.action.whitelistAllow).toBe('Allowlisted')
+  })
 })

@@ -198,6 +198,34 @@ func TestContentModerationRuntimeSnapshotUpdateConfigIsImmediate(t *testing.T) {
 	require.Equal(t, 1, getMultiple)
 }
 
+func TestContentModerationRuntimeSnapshotWhitelistUpdateIsImmediate(t *testing.T) {
+	repo := &contentModerationRuntimeSettingRepo{values: map[string]string{
+		SettingKeyRiskControlEnabled:      "true",
+		SettingKeyContentModerationConfig: runtimeCacheTestConfig(t, "blocked"),
+	}}
+	svc := runtimeCacheTestService(repo, time.Hour)
+	input := runtimeCacheTestInput("blocked")
+	input.UserID = 1001
+
+	decision, err := svc.Check(context.Background(), input)
+	require.NoError(t, err)
+	require.True(t, decision.Blocked)
+
+	whitelist := []int64{1001}
+	_, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{
+		ContentModerationWhitelistUserIDs: &whitelist,
+	})
+	require.NoError(t, err)
+
+	decision, err = svc.Check(context.Background(), input)
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.Equal(t, ContentModerationActionWhitelistAllow, decision.Action)
+
+	_, getMultiple := repo.calls()
+	require.Equal(t, 1, getMultiple)
+}
+
 func TestContentModerationRuntimeSnapshotUpdateWinsOverInitialLoad(t *testing.T) {
 	repo := &contentModerationRuntimeSettingRepo{values: map[string]string{
 		SettingKeyRiskControlEnabled:      "true",

@@ -310,7 +310,11 @@
                       <div class="text-xs text-gray-400">{{ row.provider || '-' }} / {{ row.model || '-' }}</div>
                     </td>
                     <td class="whitespace-nowrap px-5 py-4">
-                      <span class="inline-flex rounded-md px-2 py-1 text-xs font-medium" :class="resultBadgeClass(row)">
+                      <span
+                        :data-test="`moderation-result-${row.id}`"
+                        class="inline-flex rounded-md px-2 py-1 text-xs font-medium"
+                        :class="resultBadgeClass(row)"
+                      >
                         {{ resultLabel(row) }}
                       </span>
                     </td>
@@ -798,6 +802,24 @@
                 <p class="text-xs text-gray-500 dark:text-gray-400">
                   {{ t('admin.riskControl.modelFilterModelCount', { count: modelFilterModelCount }) }}
                 </p>
+              </div>
+            </div>
+
+            <div class="space-y-3 rounded-lg border border-gray-100 p-4 dark:border-dark-700">
+              <div>
+                <h3 class="text-base font-semibold text-gray-900 dark:text-white">
+                  {{ t('admin.riskControl.contentModerationWhitelist') }}
+                </h3>
+                <p class="mt-1 text-sm leading-5 text-gray-500 dark:text-gray-400">
+                  {{ t('admin.riskControl.contentModerationWhitelistHint') }}
+                </p>
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.riskControl.contentModerationWhitelistUsers') }}</label>
+                <AdminUserMultiSelect
+                  v-model="configForm.content_moderation_whitelist_user_ids"
+                  data-test="content-moderation-whitelist-users"
+                />
               </div>
             </div>
           </div>
@@ -1297,6 +1319,7 @@ const configForm = reactive({
   sample_rate: 100,
   all_groups: true,
   group_ids: [] as number[],
+  content_moderation_whitelist_user_ids: [] as number[],
   record_non_hits: false,
   worker_count: 4,
   queue_size: 32768,
@@ -1777,6 +1800,9 @@ function applyConfig(config: ContentModerationConfig) {
   configForm.sample_rate = config.sample_rate ?? 100
   configForm.all_groups = config.all_groups
   configForm.group_ids = Array.isArray(config.group_ids) ? [...config.group_ids] : []
+  configForm.content_moderation_whitelist_user_ids = Array.isArray(config.content_moderation_whitelist_user_ids)
+    ? [...config.content_moderation_whitelist_user_ids]
+    : []
   configForm.record_non_hits = config.record_non_hits
   configForm.worker_count = config.worker_count || 4
   configForm.queue_size = config.queue_size || 32768
@@ -1869,6 +1895,7 @@ async function saveConfig() {
       sample_rate: Number(configForm.sample_rate) || 0,
       all_groups: configForm.all_groups,
       group_ids: configForm.all_groups ? [] : [...configForm.group_ids],
+      content_moderation_whitelist_user_ids: [...configForm.content_moderation_whitelist_user_ids],
       record_non_hits: configForm.record_non_hits,
       clear_api_key: configForm.clear_api_key,
       worker_count: Number(configForm.worker_count) || 4,
@@ -2218,6 +2245,7 @@ function resultLabel(row: ContentModerationLog): string {
   if (row.action === 'keyword_block') return t('admin.riskControl.action.keywordBlock')
   if (row.action === 'block') return t('admin.riskControl.action.block')
   if (row.action === 'error' || row.error) return t('admin.riskControl.action.error')
+  if (row.action === 'whitelist_allow') return t('admin.riskControl.action.whitelistAllow')
   if (row.flagged) return t('admin.riskControl.result.hit')
   return t('admin.riskControl.result.pass')
 }
@@ -2225,6 +2253,7 @@ function resultLabel(row: ContentModerationLog): string {
 function resultBadgeClass(row: ContentModerationLog): string {
   if (row.action === 'block' || row.action === 'keyword_block' || row.action === 'cyber_policy') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
   if (row.action === 'error' || row.error) return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+  if (row.action === 'whitelist_allow') return 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300'
   if (row.flagged) return 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300'
   return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
 }
