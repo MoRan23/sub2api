@@ -284,8 +284,9 @@ type OpenAIForwardResult struct {
 	// AudioUsage carries Voice billing units when present.
 	AudioUsage *AudioUsage
 
-	wsReplayInput       []json.RawMessage
-	wsReplayInputExists bool
+	wsReplayInput                []json.RawMessage
+	wsReplayInputExists          bool
+	wsAccountFailoverReplayInput []json.RawMessage
 	// wsClientOutputDelivered is set only by the HTTP-to-WebSocket bridge after
 	// at least one response frame has been written to the downstream client.
 	// It keeps an undelivered upstream handshake/header snapshot from mutating

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -71,6 +72,170 @@ func TestCaptureOpenAIWSFrameIdentityTurnLifecycle(t *testing.T) {
 	}`), &plan)
 	require.True(t, explicit.RequestTurn.Explicit)
 	require.Equal(t, turnStateTurnB, explicit.RequestTurn.ID)
+}
+
+func TestOpenAIWSCurrentTurnFailoverCarriesClonedFrameCapture(t *testing.T) {
+	first := CaptureOpenAIOAuthIdentity(nil, []byte(`{
+		"client_metadata":{
+			"session_id":"ws-root",
+			"thread_id":"ws-root",
+			"x-codex-turn-metadata":"{\"turn_id\":\"018f5c3c-6e3a-7abf-8def-1234567890ae\"}"
+		},
+		"prompt_cache_key":"ws-root"
+	}`), "")
+	plan := OpenAIOAuthIdentityPlan{Capture: first, RequestTurn: first.RequestTurn}
+
+	tests := []struct {
+		name   string
+		body   string
+		assert func(*testing.T, OpenAIOAuthIdentityCapture)
+	}{
+		{
+			name: "ordinary turn",
+			body: `{"type":"response.create","input":"next"}`,
+			assert: func(t *testing.T, capture OpenAIOAuthIdentityCapture) {
+				require.Equal(t, first.Logical, capture.Logical)
+				require.True(t, capture.RequestTurn.Generated)
+				require.NotEqual(t, first.RequestTurn.ID, capture.RequestTurn.ID)
+			},
+		},
+		{
+			name: "memory",
+			body: `{"type":"response.create","client_metadata":{"x-codex-turn-metadata":"{\"request_kind\":\"memory\"}"},"input":"consolidate"}`,
+			assert: func(t *testing.T, capture OpenAIOAuthIdentityCapture) {
+				require.Equal(t, CodexWireRequestMemory, capture.WireProfile.RequestKind)
+				require.Empty(t, capture.RequestTurn.ID)
+			},
+		},
+		{
+			name: "prompt override",
+			body: `{"type":"response.create","prompt_cache_key":"review-scope","input":"review"}`,
+			assert: func(t *testing.T, capture OpenAIOAuthIdentityCapture) {
+				require.Equal(t, OpenAICodexPromptCacheKeyOverride, capture.PromptCacheKey.Kind)
+				require.Equal(t, "review-scope", capture.PromptCacheKey.Value)
+			},
+		},
+		{
+			name: "explicit tuple",
+			body: `{"type":"response.create","client_metadata":{"session_id":"explicit-session","thread_id":"explicit-thread"},"input":"branch"}`,
+			assert: func(t *testing.T, capture OpenAIOAuthIdentityCapture) {
+				require.True(t, capture.Logical.Explicit)
+				require.Equal(t, "explicit-session", capture.Logical.SessionKey)
+				require.Equal(t, "explicit-thread", capture.Logical.ThreadKey)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			frameCapture := captureOpenAIWSFrameIdentity([]byte(test.body), &plan)
+			frameCapture.Aliases = append(frameCapture.Aliases, OpenAICodexLogicalTurnAlias{SessionKey: "clone-sentinel"})
+			retryErr := fmt.Errorf("wrapped: %w", newOpenAIWSCurrentTurnFailoverError(errors.New("limited"), []byte(test.body), frameCapture))
+
+			// Mutating either the constructor input or a returned value must not
+			// alter the capture retained by the failover error.
+			frameCapture.Aliases[len(frameCapture.Aliases)-1].SessionKey = "mutated-input"
+			captured, ok := OpenAIWSCurrentTurnRetryIdentityCapture(retryErr)
+			require.True(t, ok)
+			require.Equal(t, "clone-sentinel", captured.Aliases[len(captured.Aliases)-1].SessionKey)
+			test.assert(t, captured)
+
+			captured.Aliases[len(captured.Aliases)-1].SessionKey = "mutated-output"
+			again, ok := OpenAIWSCurrentTurnRetryIdentityCapture(retryErr)
+			require.True(t, ok)
+			require.Equal(t, "clone-sentinel", again.Aliases[len(again.Aliases)-1].SessionKey)
+		})
+	}
+}
+
+func TestOpenAIWSCurrentTurnFailoverRematerializesForReplacementOwner(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set("api_key", &APIKey{ID: 88031})
+	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "ws-owner-failover-secret"}}}
+	accountA := &Account{ID: 88041, Type: AccountTypeOAuth, Platform: PlatformOpenAI}
+	accountB := &Account{ID: 88042, Type: AccountTypeOAuth, Platform: PlatformOpenAI}
+	options := OpenAIOAuthIdentityPlanOptions{
+		TurnIdentityEnabled: true,
+		ProjectionMode:      OpenAIOAuthIdentityProjectionPassthrough,
+		InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
+	}
+	body := []byte(`{
+		"type":"response.create",
+		"client_metadata":{
+			"session_id":"explicit-session",
+			"thread_id":"explicit-thread",
+			"x-codex-turn-metadata":"{\"turn_id\":\"018f5c3c-6e3a-7ac1-8def-1234567890b0\"}"
+		},
+		"prompt_cache_key":"review-scope",
+		"input":"review"
+	}`)
+	capture := CaptureOpenAIOAuthIdentity(c, body, "")
+	planA, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), c, accountA, capture, options, nil)
+	require.NoError(t, err)
+
+	retryErr := newOpenAIWSCurrentTurnFailoverError(errors.New("limited"), body, capture)
+	retryCapture, ok := OpenAIWSCurrentTurnRetryIdentityCapture(retryErr)
+	require.True(t, ok)
+	require.True(t, openAIOAuthIdentityCapturesEqual(capture, retryCapture))
+	SetOpenAIOAuthIdentityCapture(c, retryCapture)
+	planB, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), c, accountB, retryCapture, options, &planA)
+	require.NoError(t, err)
+
+	require.True(t, openAIOAuthIdentityCapturesEqual(planB.Capture, retryCapture))
+	require.Equal(t, planA.RequestTurn, planB.RequestTurn, "one logical turn keeps its request UUID across credential failover")
+	require.NotEqual(t, planA.CredentialOwnerNamespace, planB.CredentialOwnerNamespace)
+	require.NotEqual(t, planA.InstallationID, planB.InstallationID)
+	require.NotEqual(t, planA.TurnIdentity.SessionID, planB.TurnIdentity.SessionID)
+	require.NotEqual(t, planA.TurnIdentity.ThreadID, planB.TurnIdentity.ThreadID)
+	require.NotEqual(t, planA.PromptCacheKey.Value, planB.PromptCacheKey.Value)
+	require.Equal(t, "review-scope", planB.Capture.PromptCacheKey.Value, "only the outbound override mapping is owner-scoped")
+}
+
+func TestOpenAIWSCurrentTurnFailoverCapturesFrameWithoutOldOwnerPlan(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set("api_key", &APIKey{ID: 88032})
+	connectionCapture := CaptureOpenAIOAuthIdentity(c, []byte(`{
+		"type":"response.create",
+		"client_metadata":{"session_id":"api-key-connection","thread_id":"api-key-connection"},
+		"prompt_cache_key":"api-key-connection",
+		"input":"first"
+	}`), "")
+	// API-key attempts do not have a materialized OAuth plan. The ingress keeps
+	// this raw capture-only state so omitted tuple fields on later frames still
+	// inherit the connection identity.
+	captureState := OpenAIOAuthIdentityPlan{
+		Capture:     connectionCapture,
+		RequestTurn: connectionCapture.RequestTurn,
+		WireProfile: cloneCodexWireProfile(connectionCapture.WireProfile),
+	}
+	currentBody := []byte(`{"type":"response.create","prompt_cache_key":"review-scope","input":"second"}`)
+	currentCapture := captureOpenAIWSFrameIdentity(currentBody, &captureState)
+	require.Equal(t, connectionCapture.Logical, currentCapture.Logical)
+	require.Equal(t, OpenAICodexPromptCacheKeyOverride, currentCapture.PromptCacheKey.Kind)
+	require.NotEqual(t, connectionCapture.RequestTurn.ID, currentCapture.RequestTurn.ID)
+
+	retryErr := newOpenAIWSCurrentTurnFailoverError(errors.New("limited"), currentBody, currentCapture)
+	retryCapture, ok := OpenAIWSCurrentTurnRetryIdentityCapture(retryErr)
+	require.True(t, ok)
+	SetOpenAIOAuthIdentityCapture(c, retryCapture)
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "ws-api-key-oauth-failover-secret"}}}
+	replacement := &Account{ID: 88043, Type: AccountTypeOAuth, Platform: PlatformOpenAI}
+	plan, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), c, replacement, retryCapture, OpenAIOAuthIdentityPlanOptions{
+		TurnIdentityEnabled: true,
+		ProjectionMode:      OpenAIOAuthIdentityProjectionPassthrough,
+		InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
+	}, nil)
+	require.NoError(t, err)
+	require.Equal(t, "account:88043", plan.CredentialOwnerNamespace)
+	require.True(t, openAIOAuthIdentityCapturesEqual(retryCapture, plan.Capture))
+	require.Equal(t, retryCapture.RequestTurn, plan.RequestTurn)
+	require.Equal(t, OpenAICodexPromptCacheKeyOverride, plan.PromptCacheKey.Kind)
+	require.NotEqual(t, "review-scope", plan.PromptCacheKey.Value)
 }
 
 func (d *openAIWSSingleConnDialer) Dial(

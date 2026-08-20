@@ -96,6 +96,64 @@ type openAIWSIngressTurnError struct {
 	wroteDownstream bool
 }
 
+type openAIWSCurrentTurnFailoverError struct {
+	cause                   error
+	retryPayload            []byte
+	retryIdentityCapture    OpenAIOAuthIdentityCapture
+	retryIdentityCaptureSet bool
+}
+
+func (e *openAIWSCurrentTurnFailoverError) Error() string {
+	if e == nil || e.cause == nil {
+		return "openai websocket current-turn failover"
+	}
+	return e.cause.Error()
+}
+
+func (e *openAIWSCurrentTurnFailoverError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+func newOpenAIWSCurrentTurnFailoverError(
+	cause error,
+	retryPayload []byte,
+	retryIdentityCaptures ...OpenAIOAuthIdentityCapture,
+) error {
+	retryErr := &openAIWSCurrentTurnFailoverError{
+		cause:        cause,
+		retryPayload: append([]byte(nil), retryPayload...),
+	}
+	if len(retryIdentityCaptures) > 0 {
+		retryErr.retryIdentityCapture = cloneOpenAIOAuthIdentityCapture(retryIdentityCaptures[0])
+		retryErr.retryIdentityCaptureSet = true
+	}
+	return retryErr
+}
+
+// OpenAIWSCurrentTurnRetryPayload returns an isolated copy of the payload that
+// may be retried on a replacement account without replaying the first turn.
+func OpenAIWSCurrentTurnRetryPayload(err error) ([]byte, bool) {
+	var retryErr *openAIWSCurrentTurnFailoverError
+	if !errors.As(err, &retryErr) || retryErr == nil {
+		return nil, false
+	}
+	return append([]byte(nil), retryErr.retryPayload...), true
+}
+
+// OpenAIWSCurrentTurnRetryIdentityCapture returns the account-independent
+// capture for the logical frame being retried. It never exposes the old
+// credential owner's materialized plan or projected request body.
+func OpenAIWSCurrentTurnRetryIdentityCapture(err error) (OpenAIOAuthIdentityCapture, bool) {
+	var retryErr *openAIWSCurrentTurnFailoverError
+	if !errors.As(err, &retryErr) || retryErr == nil || !retryErr.retryIdentityCaptureSet {
+		return OpenAIOAuthIdentityCapture{}, false
+	}
+	return cloneOpenAIOAuthIdentityCapture(retryErr.retryIdentityCapture), true
+}
+
 func (e *openAIWSIngressTurnError) Error() string {
 	if e == nil {
 		return ""

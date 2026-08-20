@@ -487,7 +487,17 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 	if forceHTTPBridge || s.shouldBridgeOpenAIWSHTTP(account, firstPayload.payloadBytes, firstPayload.previousResponseID) {
 		var bridgeIdentityPlan *OpenAIOAuthIdentityPlan
-		var bridgeLogicalIdentity OpenAICodexLogicalTurnIdentity
+		bridgeConnectionCapture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
+		if !captured {
+			bridgeConnectionCapture = CaptureOpenAIOAuthIdentity(c, firstPayload.payloadRaw, "")
+			SetOpenAIOAuthIdentityCapture(c, bridgeConnectionCapture)
+		}
+		bridgeLogicalIdentity := bridgeConnectionCapture.Logical
+		bridgeCaptureState := OpenAIOAuthIdentityPlan{
+			Capture:     cloneOpenAIOAuthIdentityCapture(bridgeConnectionCapture),
+			RequestTurn: bridgeConnectionCapture.RequestTurn,
+			WireProfile: cloneCodexWireProfile(bridgeConnectionCapture.WireProfile),
+		}
 		installationPolicy := OpenAIOAuthInstallationPreserve
 		projectionMode := OpenAIOAuthIdentityProjectionRegular
 		if account.IsOpenAIOAuth() {
@@ -495,12 +505,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if account.IsOpenAIPassthroughEnabled() {
 				projectionMode = OpenAIOAuthIdentityProjectionPassthrough
 			}
-			capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
-			if !captured {
-				capture = CaptureOpenAIOAuthIdentity(c, firstPayload.payloadRaw, "")
-				SetOpenAIOAuthIdentityCapture(c, capture)
-			}
-			plan, planErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, OpenAIOAuthIdentityPlanOptions{
+			plan, planErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, bridgeConnectionCapture, OpenAIOAuthIdentityPlanOptions{
 				TurnIdentityEnabled: s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account),
 				ProjectionMode:      projectionMode,
 				InstallationPolicy:  installationPolicy,
@@ -509,7 +514,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				return fmt.Errorf("resolve websocket http bridge identity plan: %w", planErr)
 			}
 			bridgeIdentityPlan = &plan
-			bridgeLogicalIdentity = capture.Logical
 		}
 		logOpenAIWSModeInfo(
 			"ingress_ws_http_bridge_start account_id=%d account_type=%s payload_bytes=%d threshold_bytes=%d has_session_hash=%v store_disabled=%v",
@@ -527,10 +531,22 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		grokCacheSeedPayload := firstPayload.payloadRaw
 		var bridgeReplayInput []json.RawMessage
 		bridgeReplayInputExists := false
+		var bridgeAccountFailoverInput []json.RawMessage
+		bridgeAccountFailoverInputExists := false
 		for turn := 1; ; turn++ {
+			bridgeFrameCapture := cloneOpenAIOAuthIdentityCapture(bridgeCaptureState.Capture)
+			if turn > 1 {
+				bridgeFrameCapture = captureOpenAIWSFrameIdentity(currentBridgePayload.payloadRaw, &bridgeCaptureState)
+				// Advance only the account-independent frame state. A materialized
+				// owner plan is kept separately and never crosses a failover error.
+				bridgeCaptureState = OpenAIOAuthIdentityPlan{
+					Capture:     cloneOpenAIOAuthIdentityCapture(bridgeFrameCapture),
+					RequestTurn: bridgeFrameCapture.RequestTurn,
+					WireProfile: cloneCodexWireProfile(bridgeFrameCapture.WireProfile),
+				}
+			}
 			if turn > 1 && bridgeIdentityPlan != nil && bridgeIdentityPlan.TurnIdentityRequested {
-				frameCapture := captureOpenAIWSFrameIdentity(currentBridgePayload.payloadRaw, bridgeIdentityPlan)
-				plan, planErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, frameCapture, OpenAIOAuthIdentityPlanOptions{
+				plan, planErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, bridgeFrameCapture, OpenAIOAuthIdentityPlanOptions{
 					TurnIdentityEnabled: bridgeIdentityPlan.TurnIdentityRequested,
 					ProjectionMode:      projectionMode,
 					InstallationPolicy:  installationPolicy,
@@ -538,12 +554,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				if planErr != nil {
 					return fmt.Errorf("resolve websocket http bridge turn identity: %w", planErr)
 				}
-				explicitLogicalChange := frameCapture.Logical.Explicit && strings.TrimSpace(frameCapture.Logical.SessionKey) != "" &&
-					!openAICodexLogicalTurnIdentityEqual(frameCapture.Logical, bridgeLogicalIdentity)
+				explicitLogicalChange := bridgeFrameCapture.Logical.Explicit && strings.TrimSpace(bridgeFrameCapture.Logical.SessionKey) != "" &&
+					!openAICodexLogicalTurnIdentityEqual(bridgeFrameCapture.Logical, bridgeLogicalIdentity)
 				if explicitLogicalChange && !plan.TurnIdentityEnabled {
 					return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to resolve websocket http bridge session identity", nil)
 				}
-				bridgeLogicalIdentity = frameCapture.Logical
+				bridgeLogicalIdentity = bridgeFrameCapture.Logical
 				bridgeIdentityPlan = &plan
 			}
 			if turn > 1 && hooks != nil && hooks.BeforeRequest != nil {
@@ -574,6 +590,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			)
 			if replayInputErr != nil {
 				return fmt.Errorf("build websocket http bridge replay input: %w", replayInputErr)
+			}
+			turnAccountFailoverInput, turnAccountFailoverInputExists, failoverInputErr := buildOpenAIWSReplayInputSequence(
+				bridgeAccountFailoverInput,
+				bridgeAccountFailoverInputExists,
+				currentBridgePayload.payloadRaw,
+				needsBridgeReplay,
+			)
+			if failoverInputErr != nil {
+				return fmt.Errorf("build websocket account failover input: %w", failoverInputErr)
 			}
 			if needsBridgeReplay && turnReplayInputExists {
 				updatedPayload, setInputErr := setOpenAIWSPayloadInputSequence(
@@ -628,6 +653,22 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				hooks.AfterTurn(turn, result, bridgeErr)
 			}
 			if bridgeErr != nil {
+				var failoverErr *UpstreamFailoverError
+				if turn > 1 && errors.As(bridgeErr, &failoverErr) && failoverErr != nil {
+					retryPayload, retrySafe, retryPayloadErr := buildOpenAIWSCurrentTurnRetryPayload(
+						bridgePayloadRaw,
+						turnAccountFailoverInput,
+						turnAccountFailoverInputExists,
+						currentBridgePayload.originalModel,
+					)
+					if retryPayloadErr != nil {
+						return fmt.Errorf("build websocket current-turn failover payload: %w", retryPayloadErr)
+					}
+					if !retrySafe {
+						retryPayload = nil
+					}
+					return newOpenAIWSCurrentTurnFailoverError(bridgeErr, retryPayload, bridgeFrameCapture)
+				}
 				return bridgeErr
 			}
 			if result == nil {
@@ -638,6 +679,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if result.wsReplayInputExists {
 				bridgeReplayInput = append(bridgeReplayInput, cloneOpenAIWSRawMessages(result.wsReplayInput)...)
 				bridgeReplayInputExists = true
+			}
+			bridgeAccountFailoverInput = cloneOpenAIWSRawMessages(turnAccountFailoverInput)
+			bridgeAccountFailoverInputExists = turnAccountFailoverInputExists
+			if len(result.wsAccountFailoverReplayInput) > 0 {
+				bridgeAccountFailoverInput = append(
+					bridgeAccountFailoverInput,
+					cloneOpenAIWSRawMessages(result.wsAccountFailoverReplayInput)...,
+				)
+				bridgeAccountFailoverInputExists = true
 			}
 			turnState = s.applyOpenAIWSHTTPBridgeDeliveredTurnState(c, account, stateStore, groupID, sessionHash, turnState, result, bridgeIdentityPlan)
 			responseID := strings.TrimSpace(result.RequestID)
