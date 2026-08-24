@@ -56,7 +56,7 @@ func TestUpdateSettingsResponseIncludesReadOnlyBuiltinCodexVersion(t *testing.T)
 		Data map[string]any `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-	require.Equal(t, "0.147.0", body.Data["openai_codex_client_version_builtin"])
+	require.Equal(t, "0.149.1", body.Data["openai_codex_client_version_builtin"])
 	require.NotContains(t, repo.values, "openai_codex_client_version_builtin")
 	require.NotContains(t, repo.lastUpdates, "openai_codex_client_version_builtin")
 }

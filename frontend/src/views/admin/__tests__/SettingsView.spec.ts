@@ -479,7 +479,7 @@ const baseSettingsResponse = {
   openai_codex_user_agent: "",
   openai_codex_client_version: "",
   openai_codex_client_version_synced: "",
-  openai_codex_client_version_builtin: "0.147.0",
+  openai_codex_client_version_builtin: "0.149.1",
   openai_codex_version_auto_sync_enabled: true,
   enable_openai_codex_fingerprint_normalization: true,
   enable_openai_codex_installation_id_normalization: true,
@@ -1323,7 +1323,7 @@ describe("admin SettingsView payment visible method controls", () => {
       openai_codex_user_agent: "",
       openai_codex_client_version: "0.200.0",
       openai_codex_client_version_synced: "0.199.0",
-      openai_codex_client_version_builtin: "0.147.0",
+      openai_codex_client_version_builtin: "0.149.1",
     });
 
     const wrapper = mountView();
@@ -1353,7 +1353,7 @@ describe("admin SettingsView payment visible method controls", () => {
       openai_codex_user_agent: "",
       openai_codex_client_version: "",
       openai_codex_client_version_synced: "",
-      openai_codex_client_version_builtin: "0.147.0",
+      openai_codex_client_version_builtin: "0.149.1",
     });
 
     const wrapper = mountView();
@@ -1365,7 +1365,7 @@ describe("admin SettingsView payment visible method controls", () => {
         .get('[data-testid="codex-user-agent-input"]')
         .attributes("placeholder"),
     ).toBe(
-      "codex-tui/0.147.0 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.147.0)",
+      "codex-tui/0.149.1 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.149.1)",
     );
 
     await wrapper.find("form").trigger("submit.prevent");
