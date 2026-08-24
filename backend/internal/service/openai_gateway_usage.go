@@ -228,6 +228,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		longContextBillingGate,
 		pricingAt,
 	)
+	requestedTierCostKnown := err == nil
 	if err != nil {
 		if !isUsagePricingUnavailableError(err) {
 			return err
@@ -243,6 +244,34 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		).Warn("openai_usage.pricing_missing_record_zero_cost", zap.Error(err))
 		cost = &CostBreakdown{BillingMode: string(BillingModeToken)}
 	}
+	// Resolve the response-observed tier against the exact pricing inputs used by
+	// this request. Channel multipliers can make any named tier cheaper or more
+	// expensive than another, so enum order is not a billing signal.
+	serviceTierResolution := ResolveBillingServiceTier(serviceTier, result.UpstreamResponseServiceTier)
+	if requestedTierCostKnown && serviceTierResolution.Observed != "" && serviceTierResolution.Observed != serviceTierResolution.Requested {
+		observedCost, observedErr := s.calculateOpenAIRecordUsageCost(
+			ctx,
+			result,
+			apiKey,
+			billingModels,
+			multiplier,
+			imageMultiplier,
+			videoMultiplier,
+			baseMultiplier,
+			tokens,
+			serviceTierResolution.Observed,
+			longContextBillingGate,
+			pricingAt,
+		)
+		if observedErr == nil {
+			serviceTierResolution = ApplyOpenAIServiceTierBillingResolution(result, cost, observedCost)
+			if serviceTierResolution.Billing != serviceTierResolution.Requested {
+				serviceTier = serviceTierResolution.Billing
+				cost = observedCost
+			}
+		}
+	}
+	logServiceTierBillingDowngrade("service.openai_gateway", account, result.RequestID, serviceTierResolution)
 	// response_model：按上游成功响应自报的模型计费（渠道显式开启才生效）。
 	// 采纳条件见 responseModelBillingDeclaration + hasIdentifiedOpenAIResponsePricing
 	// + responseModelBillingAdoptable。任一条件不满足都静默回落基线，即开启本模式前的
@@ -1074,7 +1103,9 @@ func (s *OpenAIGatewayService) updateCodexUsageSnapshot(ctx context.Context, acc
 	go func() {
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = s.accountRepo.UpdateExtra(updateCtx, accountID, updates)
+		if err := s.accountRepo.UpdateExtra(updateCtx, accountID, updates); err == nil {
+			notifyOpenAIAutoReset(accountID)
+		}
 	}()
 }
 

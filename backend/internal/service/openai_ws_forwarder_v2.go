@@ -22,6 +22,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	c *gin.Context,
 	account *Account,
 	reqBody map[string]any,
+	clientPromptCacheKey string,
 	token string,
 	decision OpenAIWSProtocolDecision,
 	isCodexCLI bool,
@@ -71,7 +72,12 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	setOpenAIWSTurnMetadata(payload, turnMetadata)
 	previousResponseID := openAIWSPayloadString(payload, "previous_response_id")
 	previousResponseIDKind := ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
-	promptCacheKey := openAIWSPayloadString(payload, "prompt_cache_key")
+	promptCacheKey := strings.TrimSpace(clientPromptCacheKey)
+	if promptCacheKey == "" {
+		// Fingerprint convergence may inject a default key when the client did
+		// not send one; retain that fallback without replacing an explicit raw key.
+		promptCacheKey = openAIWSPayloadString(payload, "prompt_cache_key")
+	}
 	_, hasTools := payload["tools"]
 	debugEnabled := isOpenAIWSModeDebugEnabled()
 	payloadBytes := -1
@@ -113,7 +119,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	groupID := getOpenAIGroupIDFromContext(c)
 	payloadBody := payloadAsJSONBytes(payload)
 	sessionHash := ""
-	if account.IsOpenAIOAuth() {
+	if account.UsesOpenAICodexProtocol() {
 		sessionHash = s.GenerateSessionHashForOpenAIOAuthIdentity(c, payloadBody, "")
 	} else {
 		sessionHash = s.GenerateSessionHash(c, nil)
@@ -162,10 +168,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		return nil, fmt.Errorf("build ws headers: %w", buildHdrErr)
 	}
 	outboundIdentityPlan := sessionResolution.OutboundIdentityPlan
-	if finalizedPlan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && account.IsOpenAIOAuth() {
+	if finalizedPlan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && account.UsesOpenAICodexProtocol() {
 		outboundIdentityPlan = finalizedPlan
 	}
-	if account.IsOpenAIOAuth() {
+	if account.UsesOpenAICodexProtocol() {
 		// Apply the exact post-selection plan used by the handshake. This projects
 		// installation and turn identity without consulting either store again.
 		if rawPayload := payloadBody; len(rawPayload) > 0 {
@@ -356,8 +362,14 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 
 	wirePayload := any(payload)
-	if account.IsOpenAIOAuth() {
+	if account.UsesOpenAICodexProtocol() {
 		payloadJSON := payloadAsJSONBytes(payload)
+		projected, projectErr := s.projectOpenAIOAuthWSFrame(c, account, outboundIdentityPlan, payloadJSON)
+		if projectErr != nil {
+			lease.MarkBroken()
+			return nil, wrapOpenAIWSFallback("write_request_metadata", projectErr)
+		}
+		payloadJSON = projected
 		stamped, stampErr := stampOpenAICodexWSStreamRequestStart(payloadJSON, time.Now())
 		if stampErr != nil {
 			lease.MarkBroken()
@@ -489,8 +501,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		frame = append(frame, "data: "...)
 		frame = append(frame, message...)
 		frame = append(frame, '\n', '\n')
-		_, wErr := c.Writer.Write(frame)
-		if wErr == nil {
+		n, wErr := c.Writer.Write(frame)
+		if wErr == nil && n == len(frame) {
 			wroteDownstream = true
 			observeOpenAICodexWSCompactionDelivery(compactionDelivery, message)
 			pendingFlushEvents++
@@ -657,8 +669,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 					message = corrected
 				}
 			}
+			message = restoreCodexToolNamesFromContext(c, message)
 		}
-		if openAIWSEventShouldParseUsage(eventType) {
+		if openAIWSMessageShouldParseUsage(eventType, message) {
 			parseOpenAIWSResponseUsageFromCompletedEvent(message, usage)
 		}
 		imageCounter.AddSSEData(message)
@@ -736,13 +749,16 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			}
 			if !reqStream {
 				stageTurnStateHeader()
-				c.JSON(statusCode, gin.H{
+				errorBody, marshalErr := json.Marshal(gin.H{
 					"error": gin.H{
 						"type":    "upstream_error",
 						"message": errMsg,
 					},
 				})
-				if c.Writer.Written() {
+				if marshalErr != nil {
+					return nil, fmt.Errorf("marshal openai ws error response: %w", marshalErr)
+				}
+				if writeOpenAIResponseDataWithDelivery(c, statusCode, "application/json; charset=utf-8", errorBody) {
 					commitTurnState()
 				}
 			}
@@ -781,6 +797,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 
 		if isTerminalEvent {
 			finalTerminalMessage = append(finalTerminalMessage[:0], message...)
+			if !clientDisconnected {
+				markOpenAIWSClientVisibleFailure(c, eventType, message)
+			}
 			upstreamTerminalEvent = s.handleOpenAIWSTerminalTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), message)
 			// A terminal event must be the final JSON document in its WS message.
 			// Ignore any tail for the completed client turn, but never reuse the
@@ -817,8 +836,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 
 		stageTurnStateHeader()
-		c.Data(http.StatusOK, "application/json", finalResponse)
-		if c.Writer.Written() {
+		if writeOpenAIResponseDataWithDelivery(c, http.StatusOK, "application/json", finalResponse) {
 			observeOpenAICodexWSCompactionDelivery(compactionDelivery, finalTerminalMessage)
 			s.commitOpenAICodexWSCompactionAfterDelivery(
 				ctx,
@@ -880,9 +898,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		UpstreamModel:                 mappedModel,
 		UpstreamResponseModel:         responseModelObserver.Model(),
 		UpstreamResponseModelConflict: responseModelObserver.Conflict(),
+		UpstreamResponseServiceTier:   responseModelObserver.ServiceTier(),
 		ImageCount:                    imageCounter.Count(),
 		ImageOutputSizes:              imageCounter.Sizes(),
-		ServiceTier:                   extractOpenAIServiceTier(reqBody),
+		ServiceTier:                   resolvedOpenAIUpstreamServiceTierFromObserver(responseModelObserver, extractOpenAIServiceTier(reqBody)),
 		ReasoningEffort:               extractOpenAIReasoningEffort(reqBody, mappedModel, originalModel),
 		Stream:                        reqStream,
 		OpenAIWSMode:                  true,

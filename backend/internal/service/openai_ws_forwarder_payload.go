@@ -47,6 +47,12 @@ func (s *OpenAIGatewayService) buildOpenAIResponsesWSURL(account *Account) (stri
 	switch account.Type {
 	case AccountTypeOAuth:
 		targetURL = chatgptCodexURL
+	case AccountTypeSetupToken:
+		if account.IsOpenAIOAuthLike() {
+			targetURL = chatgptCodexURL
+		} else {
+			targetURL = openaiPlatformAPIURL
+		}
 	case AccountTypeAPIKey:
 		baseURL := account.GetOpenAIBaseURL()
 		if baseURL == "" {
@@ -195,10 +201,13 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 			}
 		}
 	}
-	// OAuth 账号：旧模式继续分别隔离 session/conversation。V2 模式从
+	// Codex-protocol accounts resolve one immutable tuple from canonical turn
+	// metadata, headers, and the Responses body, then pin it to the physical
+	// upstream socket. Setup tokens share this wire contract but not the OAuth
+	// refresh lifecycle.
 	// canonical turn metadata、header 和 Responses body 一次解析完整 tuple，
 	// 并把该身份固定到物理 upstream socket。
-	if account != nil && account.Type == AccountTypeOAuth {
+	if account != nil && account.UsesOpenAICodexProtocol() {
 		sessionResolution.OutboundIdentityModeEnabled = s.openAIOutboundSessionIdentityTransportEnabledForRequest(ctx, c)
 		logicalSessionKey := strings.TrimSpace(sessionResolution.SessionID)
 		if logicalSessionKey == "" {
@@ -266,7 +275,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 	} else if strings.TrimSpace(turnMetadata) != "" {
 		headers.Set(openAIWSTurnMetadataHeader, turnMetadata)
 	}
-	if account != nil && account.Type == AccountTypeOAuth {
+	if account != nil && account.UsesOpenAICodexProtocol() {
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, headers, account); err != nil {
 			return nil, sessionResolution, fmt.Errorf("resolve chatgpt account headers: %w", err)
 		}
@@ -281,7 +290,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 
 	// OAuth client identity is projected once from the connection-scoped plan.
 	// API-key sockets keep the legacy account-level User-Agent override.
-	if account == nil || account.Type != AccountTypeOAuth {
+	if account == nil || !account.UsesOpenAICodexProtocol() {
 		customUA, err := s.codexIdentityOverrideUA(ctx, account)
 		if err != nil {
 			return nil, sessionResolution, fmt.Errorf("resolve OpenAI account User-Agent: %w", err)
@@ -296,7 +305,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 		}
 	}
 	if s != nil && s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
-		if account != nil && account.Type == AccountTypeOAuth {
+		if account != nil && account.UsesOpenAICodexProtocol() {
 			plan := sessionResolution.OutboundIdentityPlan.ClientIdentity
 			headers.Set("user-agent", plan.UserAgent)
 			headers.Set("originator", plan.Originator)
@@ -311,7 +320,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 	// Session-level beta features participate in WS pool compatibility, so
 	// finalize them before applying the identity plan and computing the digest.
 	applyOpenAICodexBetaFeatures(c, account, headers)
-	if account != nil && account.Type == AccountTypeOAuth {
+	if account != nil && account.UsesOpenAICodexProtocol() {
 		finalPlan, finalizeErr := s.finalizeOpenAIOAuthWSWirePlan(c, account, sessionResolution.OutboundIdentityPlan, body, openAIOAuthWSWireFinalizeOptions{
 			FinalModel:       routingModel,
 			FinalServiceTier: routingServiceTier,
@@ -334,7 +343,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 		strings.TrimSpace(headers.Get(openAICodexRoutingHintHeader)) != "",
 		"soft_routing_hint",
 	)
-	if account != nil && account.Type == AccountTypeOAuth {
+	if account != nil && account.UsesOpenAICodexProtocol() {
 		// The resolved plan is the final writer after account overrides. Apply is
 		// pure and cannot allocate a different identity during a reconnect.
 		if _, applyErr := ApplyOpenAIOAuthIdentityPlan(headers, nil, sessionResolution.OutboundIdentityPlan); applyErr != nil {
@@ -370,7 +379,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any
 	payload["type"] = "response.create"
 
 	// OAuth 默认保持 store=false，避免误依赖服务端历史。
-	if account != nil && account.Type == AccountTypeOAuth && !s.isOpenAIWSStoreRecoveryAllowed(account) {
+	if account != nil && account.UsesOpenAICodexProtocol() && !s.isOpenAIWSStoreRecoveryAllowed(account) {
 		payload["store"] = false
 	}
 	return payload
@@ -493,7 +502,7 @@ func (s *OpenAIGatewayService) isOpenAIWSStoreRecoveryAllowed(account *Account) 
 }
 
 func (s *OpenAIGatewayService) isOpenAIWSStoreDisabledInRequest(reqBody map[string]any, account *Account) bool {
-	if account != nil && account.Type == AccountTypeOAuth && !s.isOpenAIWSStoreRecoveryAllowed(account) {
+	if account != nil && account.UsesOpenAICodexProtocol() && !s.isOpenAIWSStoreRecoveryAllowed(account) {
 		return true
 	}
 	if len(reqBody) == 0 {
@@ -511,7 +520,7 @@ func (s *OpenAIGatewayService) isOpenAIWSStoreDisabledInRequest(reqBody map[stri
 }
 
 func (s *OpenAIGatewayService) isOpenAIWSStoreDisabledInRequestRaw(reqBody []byte, account *Account) bool {
-	if account != nil && account.Type == AccountTypeOAuth && !s.isOpenAIWSStoreRecoveryAllowed(account) {
+	if account != nil && account.UsesOpenAICodexProtocol() && !s.isOpenAIWSStoreRecoveryAllowed(account) {
 		return true
 	}
 	if len(reqBody) == 0 {
@@ -604,7 +613,7 @@ func setPreviousResponseIDToRawPayload(payload []byte, previousResponseID string
 	}
 
 	var reqBody map[string]any
-	if unmarshalErr := json.Unmarshal(payload, &reqBody); unmarshalErr != nil {
+	if unmarshalErr := decodeOpenAIJSONUseNumber(payload, &reqBody); unmarshalErr != nil {
 		return nil, err
 	}
 	reqBody["previous_response_id"] = normalizedPrevID
@@ -698,7 +707,7 @@ func normalizeOpenAIWSJSONForCompare(raw []byte) ([]byte, error) {
 		return nil, errors.New("json is empty")
 	}
 	var decoded any
-	if err := json.Unmarshal(trimmed, &decoded); err != nil {
+	if err := decodeOpenAIJSONUseNumber(trimmed, &decoded); err != nil {
 		return nil, err
 	}
 	return json.Marshal(decoded)
@@ -717,7 +726,7 @@ func normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(payload []byte) (
 		return nil, errors.New("payload is empty")
 	}
 	var decoded map[string]any
-	if err := json.Unmarshal(payload, &decoded); err != nil {
+	if err := decodeOpenAIJSONUseNumber(payload, &decoded); err != nil {
 		return nil, err
 	}
 	delete(decoded, "input")
@@ -852,6 +861,40 @@ func openAIWSRawItemsHaveToolCallContextForOutputs(items []json.RawMessage) bool
 	return true
 }
 
+func sanitizeOpenAIWSHistoricalReplayToolCalls(
+	previousItems []json.RawMessage,
+	currentItems []json.RawMessage,
+) []json.RawMessage {
+	if len(previousItems) == 0 {
+		return cloneOpenAIWSRawMessages(previousItems)
+	}
+	outputCallIDs := make(map[string]struct{})
+	collectOutputCallIDs := func(items []json.RawMessage) {
+		for _, item := range items {
+			if !isCodexToolCallOutputItemType(gjson.GetBytes(item, "type").String()) {
+				continue
+			}
+			if callID := strings.TrimSpace(gjson.GetBytes(item, "call_id").String()); callID != "" {
+				outputCallIDs[callID] = struct{}{}
+			}
+		}
+	}
+	collectOutputCallIDs(previousItems)
+	collectOutputCallIDs(currentItems)
+
+	sanitized := make([]json.RawMessage, 0, len(previousItems))
+	for _, item := range previousItems {
+		if isCodexToolCallContextItemType(gjson.GetBytes(item, "type").String()) {
+			callID := strings.TrimSpace(gjson.GetBytes(item, "call_id").String())
+			if _, paired := outputCallIDs[callID]; !paired {
+				continue
+			}
+		}
+		sanitized = append(sanitized, append(json.RawMessage(nil), item...))
+	}
+	return sanitized
+}
+
 func openAIWSRawPayloadHasToolCallOutput(payload []byte) bool {
 	if len(payload) == 0 {
 		return false
@@ -890,6 +933,7 @@ func buildOpenAIWSReplayInputSequence(
 	if !previousFullInputExists {
 		return cloneOpenAIWSRawMessages(currentItems), currentExists, nil
 	}
+	previousFullInput = sanitizeOpenAIWSHistoricalReplayToolCalls(previousFullInput, currentItems)
 	if !currentExists || len(currentItems) == 0 {
 		return cloneOpenAIWSRawMessages(previousFullInput), true, nil
 	}

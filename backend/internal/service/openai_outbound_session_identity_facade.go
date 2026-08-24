@@ -234,9 +234,12 @@ func CaptureOpenAIOAuthIdentityWithEndpointAlias(c *gin.Context, body []byte, en
 
 // CaptureOpenAIOAuthIdentityForAlphaSearch retains the endpoint alias while
 // marking alpha's unsupported inbound prompt_cache_key as non-applicable. If
-// alpha falls back to Responses, resolution emits the mapped session key.
+// alpha falls back to Responses, resolution emits the mapped session key. The
+// native SearchClient metadata carrier is opaque: malformed typed turn IDs are
+// replaced locally instead of rejecting an otherwise valid alpha request.
 func CaptureOpenAIOAuthIdentityForAlphaSearch(c *gin.Context, body []byte, endpointAlias string) OpenAIOAuthIdentityCapture {
-	return captureOpenAIOAuthIdentity(c, body, endpointAlias, "", true, true, false, "")
+	capture := captureOpenAIOAuthIdentity(c, body, endpointAlias, "", true, true, false, "")
+	return normalizeOpenAIOAuthAlphaSearchCapture(capture)
 }
 
 func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explicitTurnMetadata string, appendEndpointAlias, preferEndpointAlias, promptCacheKeyApplicable bool, forcedRequestKind CodexWireRequestKind) OpenAIOAuthIdentityCapture {
@@ -254,19 +257,7 @@ func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explici
 		requestTurn = OpenAICodexRequestTurnSnapshot{}
 	}
 	capture.RequestTurn = requestTurn
-	if capture.WireProfile.InvalidReason == "" {
-		if typedID, ok := requestTurn.codexTurnID(capture.WireProfile.RequestKind); ok {
-			capture.WireProfile.TurnID = typedID
-			if !capture.WireProfile.turnIDPresent {
-				capture.WireProfile.turnIDPresent = true
-				capture.WireProfile.turnIDCandidates = appendCodexTurnIDCandidate(capture.WireProfile.turnIDCandidates, typedID.Value)
-			}
-			if !capture.WireProfile.TurnStartedAtSet && requestTurn.StartedAtUnixMS > 0 {
-				capture.WireProfile.TurnStartedAtUnixMS = requestTurn.StartedAtUnixMS
-				capture.WireProfile.TurnStartedAtSet = true
-			}
-		}
-	}
+	applyOpenAICodexRequestTurnToWireProfile(&capture.WireProfile, requestTurn)
 	capture.ConflictCount += conflicts
 	capture.InvalidMetadataCount += invalid
 	if conflicts > 0 {
@@ -281,6 +272,62 @@ func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explici
 		capture.ClientInstallationID = extractClientInstallationID(c, nil)
 	}
 	return capture
+}
+
+func normalizeOpenAIOAuthAlphaSearchCapture(capture OpenAIOAuthIdentityCapture) OpenAIOAuthIdentityCapture {
+	profile := &capture.WireProfile
+	validationKind := profile.RequestKind
+	if !validationKind.valid() {
+		validationKind = CodexWireRequestTurn
+	}
+	for profile.InvalidReason != "" {
+		switch {
+		case strings.HasPrefix(profile.InvalidReason, "turn_id "):
+			profile.TurnID = CodexTurnID{}
+			profile.turnIDCandidates = nil
+			profile.turnIDPresent = false
+			profile.turnIDMalformed = false
+			profile.TurnStartedAtUnixMS = 0
+			profile.TurnStartedAtSet = false
+		case strings.HasPrefix(profile.InvalidReason, "parent_turn_id "):
+			profile.TurnLineage.ParentTurnID = CodexTurnID{}
+			profile.parentTurnIDCandidates = nil
+			profile.parentTurnIDPresent = false
+			profile.parentTurnIDMalformed = false
+		case strings.HasPrefix(profile.InvalidReason, "root_turn_id "):
+			profile.TurnLineage.RootTurnID = CodexTurnID{}
+			profile.rootTurnIDCandidates = nil
+			profile.rootTurnIDPresent = false
+			profile.rootTurnIDMalformed = false
+		default:
+			return capture
+		}
+		profile.resolveTurnIDs(validationKind)
+	}
+	if capture.RequestTurn.ID == "" && validationKind != CodexWireRequestMemory {
+		capture.RequestTurn = newOpenAICodexRequestTurnSnapshot()
+	}
+	applyOpenAICodexRequestTurnToWireProfile(profile, capture.RequestTurn)
+	return capture
+}
+
+func applyOpenAICodexRequestTurnToWireProfile(profile *CodexWireProfile, requestTurn OpenAICodexRequestTurnSnapshot) {
+	if profile == nil || profile.InvalidReason != "" {
+		return
+	}
+	typedID, ok := requestTurn.codexTurnID(profile.RequestKind)
+	if !ok {
+		return
+	}
+	profile.TurnID = typedID
+	if !profile.turnIDPresent {
+		profile.turnIDPresent = true
+		profile.turnIDCandidates = appendCodexTurnIDCandidate(profile.turnIDCandidates, typedID.Value)
+	}
+	if !profile.TurnStartedAtSet && requestTurn.StartedAtUnixMS > 0 {
+		profile.TurnStartedAtUnixMS = requestTurn.StartedAtUnixMS
+		profile.TurnStartedAtSet = true
+	}
 }
 
 func captureOpenAICodexRequestTurn(c *gin.Context, body []byte, explicitTurnMetadata string, requestKind CodexWireRequestKind) (OpenAICodexRequestTurnSnapshot, int, int) {
@@ -369,9 +416,17 @@ func captureOpenAICodexRequestTurn(c *gin.Context, body []byte, explicitTurnMeta
 	if winner.ID != "" {
 		return winner, conflicts, invalid
 	}
+	generated := newOpenAICodexRequestTurnSnapshot()
+	if generated.ID == "" {
+		return OpenAICodexRequestTurnSnapshot{}, conflicts, invalid
+	}
+	return generated, conflicts, invalid
+}
+
+func newOpenAICodexRequestTurnSnapshot() OpenAICodexRequestTurnSnapshot {
 	generated, err := uuid.NewV7()
 	if err != nil {
-		return OpenAICodexRequestTurnSnapshot{}, conflicts, invalid
+		return OpenAICodexRequestTurnSnapshot{}
 	}
 	id := generated.String()
 	return OpenAICodexRequestTurnSnapshot{
@@ -380,7 +435,7 @@ func captureOpenAICodexRequestTurn(c *gin.Context, body []byte, explicitTurnMeta
 		StartedAtUnixMS: openAICodexRequestTurnUUIDUnixMilli(generated),
 		Source:          openAICodexRequestTurnSourceGenerated,
 		Generated:       true,
-	}, conflicts, invalid
+	}
 }
 
 func captureOpenAICodexPromptCacheKey(
@@ -593,7 +648,7 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 		ResolveOutcome:       OpenAIOAuthIdentityResolveNone,
 		WindowResolveOutcome: OpenAICodexWindowResolveNone,
 	}
-	if account == nil || !account.IsOpenAIOAuth() {
+	if account == nil || !account.UsesOpenAICodexProtocol() {
 		return plan, nil
 	}
 	if ctx == nil {
@@ -874,7 +929,7 @@ func (s *OpenAIGatewayService) OpenAIOAuthIdentityPlanMatches(
 	plan OpenAIOAuthIdentityPlan,
 	options OpenAIOAuthIdentityPlanOptions,
 ) bool {
-	if account == nil || !account.IsOpenAIOAuth() {
+	if account == nil || !account.UsesOpenAICodexProtocol() {
 		return false
 	}
 	options = normalizeOpenAIOAuthIdentityPlanOptions(options)

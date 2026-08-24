@@ -2525,7 +2525,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PreservesBodyAndUsesResponsesEnd
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid"}},
-		Body:       io.NopCloser(strings.NewReader(`{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"model":"gpt-5.2-account","service_tier":"priority","output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`)),
 	}
 	upstream := &httpUpstreamRecorder{resp: resp}
 
@@ -2556,6 +2556,9 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PreservesBodyAndUsesResponsesEnd
 	require.NotNil(t, result)
 	require.NotNil(t, result.ServiceTier)
 	require.Equal(t, "flex", *result.ServiceTier)
+	require.Equal(t, "priority", result.UpstreamResponseServiceTier)
+	require.False(t, ApplyOpenAIServiceTierBillingResolution(result).Downgraded)
+	require.Equal(t, "flex", *result.ServiceTier, "observed priority must not raise passthrough billing")
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, originalBody, upstream.lastBody)
 	require.Equal(t, "https://api.openai.com/v1/responses", upstream.lastReq.URL.String())

@@ -1270,7 +1270,7 @@ func openAIOutboundSessionIdentityNamespace(account *Account) string {
 }
 
 func (s *OpenAIGatewayService) resolveOpenAIOutboundSessionIdentityNamespace(ctx context.Context, account *Account) (string, error) {
-	if account == nil || account.Type != AccountTypeOAuth || !account.IsShadow() {
+	if account == nil || !account.UsesOpenAICodexProtocol() || !account.IsShadow() {
 		return openAIOutboundSessionIdentityNamespace(account), nil
 	}
 	if account.ParentAccountID == nil || *account.ParentAccountID <= 0 {

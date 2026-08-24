@@ -23,6 +23,30 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+type shortOpenAIWSGinWriter struct {
+	gin.ResponseWriter
+	maxBytes int
+}
+
+func (w *shortOpenAIWSGinWriter) Write(p []byte) (int, error) {
+	if w.maxBytes >= len(p) {
+		return w.ResponseWriter.Write(p)
+	}
+	if w.maxBytes <= 0 {
+		return 0, nil
+	}
+	return w.ResponseWriter.Write(p[:w.maxBytes])
+}
+
+type committedErrorOpenAIWSGinWriter struct {
+	gin.ResponseWriter
+}
+
+func (w *committedErrorOpenAIWSGinWriter) Write([]byte) (int, error) {
+	w.ResponseWriter.WriteHeaderNow()
+	return 0, errors.New("write failed after headers committed")
+}
+
 func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1240,6 +1264,160 @@ func TestOpenAIGatewayService_Forward_WSv2_TurnStateAndMetadataReplayOnReconnect
 	require.Equal(t, "turn_state_first", secondHandshakeHeaders.Get("X-Codex-Turn-State"))
 }
 
+func TestOpenAIGatewayService_Forward_WSv2_NonStreamingDeliveryControlsTurnStateCommit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const turnState = "turn_state_delivery_test"
+	completedEvent := []byte(`{"type":"response.completed","response":{"id":"resp_delivery_test","model":"gpt-5.1","usage":{"input_tokens":2,"output_tokens":1}}}`)
+	errorEvent := []byte(`{"type":"error","error":{"code":"bad_input","type":"invalid_request_error","message":"upstream rejected the request"}}`)
+
+	tests := []struct {
+		name             string
+		event            []byte
+		wrapWriter       func(gin.ResponseWriter) gin.ResponseWriter
+		wantForwardError bool
+		wantStatus       int
+		wantContentType  string
+		wantCommit       bool
+	}{
+		{
+			name:            "completed full write commits",
+			event:           completedEvent,
+			wantStatus:      http.StatusOK,
+			wantContentType: "application/json",
+			wantCommit:      true,
+		},
+		{
+			name:  "completed short write does not commit",
+			event: completedEvent,
+			wrapWriter: func(writer gin.ResponseWriter) gin.ResponseWriter {
+				return &shortOpenAIWSGinWriter{ResponseWriter: writer, maxBytes: 1}
+			},
+			wantStatus:      http.StatusOK,
+			wantContentType: "application/json",
+		},
+		{
+			name:  "completed write error does not commit",
+			event: completedEvent,
+			wrapWriter: func(writer gin.ResponseWriter) gin.ResponseWriter {
+				return &committedErrorOpenAIWSGinWriter{ResponseWriter: writer}
+			},
+			wantStatus:      http.StatusOK,
+			wantContentType: "application/json",
+		},
+		{
+			name:             "error event full write commits",
+			event:            errorEvent,
+			wantForwardError: true,
+			wantStatus:       http.StatusBadRequest,
+			wantContentType:  "application/json; charset=utf-8",
+			wantCommit:       true,
+		},
+		{
+			name:  "error event short write does not commit",
+			event: errorEvent,
+			wrapWriter: func(writer gin.ResponseWriter) gin.ResponseWriter {
+				return &shortOpenAIWSGinWriter{ResponseWriter: writer, maxBytes: 1}
+			},
+			wantForwardError: true,
+			wantStatus:       http.StatusBadRequest,
+			wantContentType:  "application/json; charset=utf-8",
+		},
+		{
+			name:  "error event write error does not commit",
+			event: errorEvent,
+			wrapWriter: func(writer gin.ResponseWriter) gin.ResponseWriter {
+				return &committedErrorOpenAIWSGinWriter{ResponseWriter: writer}
+			},
+			wantForwardError: true,
+			wantStatus:       http.StatusBadRequest,
+			wantContentType:  "application/json; charset=utf-8",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			cfg.Security.URLAllowlist.Enabled = false
+			cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+			cfg.Gateway.OpenAIWS.Enabled = true
+			cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+			cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+			cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+			cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+			cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 0
+
+			captureConn := &openAIWSCaptureConn{events: [][]byte{append([]byte(nil), tt.event...)}}
+			captureDialer := &openAIWSCaptureDialer{
+				conn:      captureConn,
+				handshake: http.Header{"X-Codex-Turn-State": []string{turnState}},
+			}
+			pool := newOpenAIWSConnPool(cfg)
+			pool.setClientDialerForTest(captureDialer)
+			svc := &OpenAIGatewayService{
+				cfg:              cfg,
+				openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+				toolCorrector:    NewCodexToolCorrector(),
+				openaiWSPool:     pool,
+			}
+			account := &Account{
+				ID:          4901,
+				Name:        "openai-delivery-test",
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Credentials: map[string]any{"api_key": "sk-test"},
+			}
+
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+			c.Request.Header.Set("session_id", "session_delivery_"+strings.ReplaceAll(tt.name, " ", "_"))
+			if tt.wrapWriter != nil {
+				c.Writer = tt.wrapWriter(c.Writer)
+			}
+
+			result, err := svc.forwardOpenAIWSV2(
+				context.Background(),
+				c,
+				account,
+				map[string]any{"model": "gpt-5.1", "stream": false, "input": "hello"},
+				"",
+				"sk-test",
+				OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
+				false,
+				false,
+				"gpt-5.1",
+				"gpt-5.1",
+				time.Now(),
+				1,
+				"",
+				new(bool),
+			)
+			if tt.wantForwardError {
+				require.Error(t, err)
+				require.Nil(t, result)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, result)
+			}
+			require.Equal(t, tt.wantStatus, recorder.Code)
+			require.Equal(t, tt.wantContentType, recorder.Header().Get("Content-Type"))
+			require.True(t, c.Writer.Written(), "fixture must commit headers so Written alone cannot prove delivery")
+
+			sessionHash := svc.GenerateSessionHash(c, nil)
+			require.NotEmpty(t, sessionHash)
+			savedTurnState, committed := svc.getOpenAIWSStateStore().GetSessionTurnState(0, sessionHash)
+			require.Equal(t, tt.wantCommit, committed)
+			if tt.wantCommit {
+				require.Equal(t, turnState, savedTurnState)
+			}
+		})
+	}
+}
+
 func TestOpenAIGatewayService_Forward_WSv2_GeneratePrewarm(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1779,13 +1957,13 @@ func (c *openAIWSCaptureConn) WriteJSON(ctx context.Context, value any) error {
 		c.writes = append(c.writes, cloneMapStringAny(payload))
 	case json.RawMessage:
 		var parsed map[string]any
-		if err := json.Unmarshal(payload, &parsed); err == nil {
+		if err := decodeOpenAIJSONUseNumber(payload, &parsed); err == nil {
 			c.lastWrite = cloneMapStringAny(parsed)
 			c.writes = append(c.writes, cloneMapStringAny(parsed))
 		}
 	case []byte:
 		var parsed map[string]any
-		if err := json.Unmarshal(payload, &parsed); err == nil {
+		if err := decodeOpenAIJSONUseNumber(payload, &parsed); err == nil {
 			c.lastWrite = cloneMapStringAny(parsed)
 			c.writes = append(c.writes, cloneMapStringAny(parsed))
 		}

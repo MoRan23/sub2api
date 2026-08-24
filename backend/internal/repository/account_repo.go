@@ -2592,6 +2592,69 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	return nil
 }
 
+// CompareAndUpdateOpenAIAutoResetPreflight atomically persists an observational
+// usage/state snapshot only while the account remains eligible and the durable
+// auto-reset state is exactly the state observed by the caller. A zero-row
+// update is an expected lost race or eligibility change, not a repository error.
+func (r *accountRepository) CompareAndUpdateOpenAIAutoResetPreflight(
+	ctx context.Context,
+	accountID int64,
+	expectedState *service.OpenAIAutoResetCreditState,
+	updates map[string]any,
+) (bool, error) {
+	if accountID <= 0 || len(updates) == 0 {
+		return false, nil
+	}
+	payload, err := json.Marshal(updates)
+	if err != nil {
+		return false, err
+	}
+	expectedStateJSON, err := json.Marshal(expectedState)
+	if err != nil {
+		return false, err
+	}
+
+	exec := r.sql
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		exec = tx.Client()
+	}
+	result, err := exec.ExecContext(ctx, `
+		UPDATE accounts
+		SET extra = COALESCE(extra, '{}'::jsonb) || $1::jsonb,
+			updated_at = NOW()
+		WHERE id = $2
+			AND deleted_at IS NULL
+			AND platform = 'openai'
+			AND type = 'oauth'
+			AND parent_account_id IS NULL
+			AND status = 'active'
+			AND schedulable = TRUE
+			AND CASE jsonb_typeof(COALESCE(extra, '{}'::jsonb) -> 'auto_reset_credit_enabled')
+				WHEN 'boolean' THEN (extra ->> 'auto_reset_credit_enabled')::boolean
+				WHEN 'string' THEN lower(btrim(extra ->> 'auto_reset_credit_enabled')) IN ('1', 't', 'true')
+				WHEN 'number' THEN (extra ->> 'auto_reset_credit_enabled')::numeric <> 0
+				ELSE FALSE
+			END
+			AND COALESCE(extra -> 'codex_auto_reset_credit_state', 'null'::jsonb) = $3::jsonb
+	`, string(payload), accountID, string(expectedStateJSON))
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if affected == 0 {
+		return false, nil
+	}
+	if dbent.TxFromContext(ctx) == nil {
+		// These fields are scheduler-neutral, but the per-account snapshot must see
+		// the new usage/state before a sticky lookup can serve stale quota data.
+		r.syncSchedulerAccountSnapshot(ctx, accountID)
+	}
+	return true, nil
+}
+
 // EnsureOpenAIInstallationID repairs a missing or invalid account-owned UUID
 // with compare-and-swap semantics. Concurrent callers either perform the write
 // or read back the UUID committed by the winner.
@@ -2630,7 +2693,7 @@ func (r *accountRepository) EnsureOpenAIInstallationID(ctx context.Context, acco
 		WHERE id = $1
 			AND deleted_at IS NULL
 			AND platform = 'openai'
-			AND type = 'oauth'
+			AND type IN ('oauth', 'setup-token')
 			AND parent_account_id IS NULL
 			AND (
 				COALESCE(extra ->> 'openai_pinned_installation_id', '') = $2
@@ -2665,7 +2728,7 @@ func (r *accountRepository) EnsureOpenAIInstallationID(ctx context.Context, acco
 		WHERE id = $1
 			AND deleted_at IS NULL
 			AND platform = 'openai'
-			AND type = 'oauth'
+			AND type IN ('oauth', 'setup-token')
 			AND parent_account_id IS NULL
 	`, accountID)
 	if err != nil {

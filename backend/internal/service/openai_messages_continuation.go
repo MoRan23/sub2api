@@ -159,7 +159,7 @@ func openAICompatSessionResponseKey(c *gin.Context, account *Account, promptCach
 
 func openAICompatSessionTurnStateKey(c *gin.Context, account *Account, promptCacheKey string) string {
 	key := strings.TrimSpace(promptCacheKey)
-	if account == nil || !account.IsOpenAIOAuth() || key == "" {
+	if account == nil || !account.UsesOpenAICodexProtocol() || key == "" {
 		return ""
 	}
 	plan, ok := OpenAIOAuthIdentityPlanFromContext(c)

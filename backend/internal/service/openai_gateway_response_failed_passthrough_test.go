@@ -5,13 +5,16 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/model"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -48,6 +51,133 @@ func bindPassthroughRule(c *gin.Context, platform string, keywords []string, res
 	BindErrorPassthroughService(c, svc)
 }
 
+type shortOpenAIPassthroughRuleWriter struct {
+	gin.ResponseWriter
+	maxBytes int
+}
+
+func (w *shortOpenAIPassthroughRuleWriter) Write(p []byte) (int, error) {
+	if w.maxBytes >= len(p) {
+		return w.ResponseWriter.Write(p)
+	}
+	if w.maxBytes <= 0 {
+		return 0, nil
+	}
+	return w.ResponseWriter.Write(p[:w.maxBytes])
+}
+
+type errorOpenAIPassthroughRuleWriter struct {
+	gin.ResponseWriter
+}
+
+func (w *errorOpenAIPassthroughRuleWriter) Write([]byte) (int, error) {
+	w.ResponseWriter.WriteHeaderNow()
+	return 0, errors.New("write failed after headers committed")
+}
+
+type passthroughRuleTurnStateCache struct {
+	GatewayCache
+	setCalls int
+}
+
+var _ OpenAICodexTurnStateOriginStore = (*passthroughRuleTurnStateCache)(nil)
+
+func (c *passthroughRuleTurnStateCache) SetOpenAICodexTurnStateOrigin(context.Context, string, OpenAICodexTurnStateOrigin, time.Duration) error {
+	c.setCalls++
+	return nil
+}
+
+func (c *passthroughRuleTurnStateCache) GetOpenAICodexTurnStateOrigin(context.Context, string) (OpenAICodexTurnStateOrigin, error) {
+	return OpenAICodexTurnStateOrigin{}, ErrOpenAICodexTurnStateOriginNotFound
+}
+
+func (c *passthroughRuleTurnStateCache) DeleteOpenAICodexTurnStateOrigin(context.Context, string) error {
+	return nil
+}
+
+func TestHandleStreamingResponsePassthroughRuleTurnStateCommitRequiresDelivery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name       string
+		wrapWriter func(gin.ResponseWriter) gin.ResponseWriter
+		wantCommit bool
+	}{
+		{name: "full write commits", wantCommit: true},
+		{
+			name: "short write does not commit",
+			wrapWriter: func(writer gin.ResponseWriter) gin.ResponseWriter {
+				return &shortOpenAIPassthroughRuleWriter{ResponseWriter: writer, maxBytes: 1}
+			},
+		},
+		{
+			name: "write error does not commit",
+			wrapWriter: func(writer gin.ResponseWriter) gin.ResponseWriter {
+				return &errorOpenAIPassthroughRuleWriter{ResponseWriter: writer}
+			},
+		},
+	}
+
+	for index, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			if tt.wrapWriter != nil {
+				c.Writer = tt.wrapWriter(c.Writer)
+			}
+			bindPassthroughRule(c, PlatformOpenAI, []string{"context_length_exceeded"}, http.StatusBadRequest)
+
+			plan := OpenAIOAuthIdentityPlan{
+				APIKeyID:                 int64(7100 + index),
+				CredentialOwnerNamespace: fmt.Sprintf("account:%d", 7200+index),
+				TurnIdentityRequested:    true,
+				TurnIdentityEnabled:      true,
+				TurnIdentity: OpenAICodexTurnIdentity{
+					SessionID: "018f5c3c-6e3a-7abc-8def-1234567890ab",
+					ThreadID:  "018f5c3c-6e3a-7abc-8def-1234567890ab",
+					Relation:  OpenAICodexTurnRelationRoot,
+				},
+			}
+			SetOpenAIOAuthIdentityPlan(c, plan)
+
+			turnStateCache := &passthroughRuleTurnStateCache{}
+			svc := &OpenAIGatewayService{
+				cfg:   &config.Config{JWT: config.JWTConfig{Secret: "passthrough-rule-delivery-secret"}},
+				cache: turnStateCache,
+			}
+			require.Same(t, turnStateCache, svc.primaryOpenAICodexTurnStateOriginStore())
+			account := &Account{
+				ID:       int64(7200 + index),
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeOAuth,
+			}
+			upstreamHeaders := http.Header{"Content-Type": {"text/event-stream"}}
+			upstreamHeaders.Set(openAIWSTurnStateHeader, fmt.Sprintf("passthrough-rule-state-%d", index))
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     upstreamHeaders,
+				Body:       io.NopCloser(strings.NewReader(buildContextLengthFailedSSE())),
+			}
+
+			_, err := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, account, time.Now(), "gpt-5.4", "gpt-5.4")
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "passthrough rule matched")
+			require.True(t, c.Writer.Written(), "fixture must commit headers so Written alone cannot prove delivery")
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			if tt.wantCommit {
+				require.NotEmpty(t, recorder.Body.Bytes())
+			}
+			require.Equal(t, fmt.Sprintf("passthrough-rule-state-%d", index), recorder.Header().Get(openAIWSTurnStateHeader))
+			storedPlan, ok := OpenAIOAuthIdentityPlanFromContext(c)
+			require.True(t, ok)
+			_, originOK := openAICodexTurnStateRequestOriginFromPlan(account, storedPlan)
+			require.True(t, originOK)
+			require.Equal(t, map[bool]int{false: 0, true: 1}[tt.wantCommit], turnStateCache.setCalls)
+		})
+	}
+}
+
 func TestForwardAsChatCompletions_ResponseFailed_PassthroughRule(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -82,6 +212,101 @@ func TestForwardAsChatCompletions_ResponseFailed_PassthroughRule(t *testing.T) {
 	errMsg := gjson.Get(respBody, "error.message").String()
 	require.NotEmpty(t, errMsg, "passthrough should preserve error message")
 	require.Contains(t, errMsg, "context window")
+}
+
+func TestResponsesStreamAccessStateFailoverPrecedesPassthroughRule(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stream := "event: response.failed\n" +
+		`data: {"type":"response.failed","response":{"status":"failed","error":{"code":"account_disabled","message":"Your account is disabled"}}}` + "\n\n"
+	tests := []struct {
+		name string
+		run  func(*OpenAIGatewayService, *gin.Context, *http.Response, *Account) error
+	}{
+		{
+			name: "native",
+			run: func(svc *OpenAIGatewayService, c *gin.Context, resp *http.Response, account *Account) error {
+				_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "gpt-5", "gpt-5")
+				return err
+			},
+		},
+		{
+			name: "passthrough",
+			run: func(svc *OpenAIGatewayService, c *gin.Context, resp *http.Response, account *Account) error {
+				_, err := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, account, time.Now(), "gpt-5", "gpt-5")
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			bindPassthroughRule(c, PlatformOpenAI, []string{"account is disabled"}, http.StatusTeapot)
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(stream)),
+			}
+			svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
+			err := tt.run(svc, c, resp, &Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth})
+
+			var failoverErr *UpstreamFailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			require.True(t, failoverErr.IsCredentialFailure())
+			require.Equal(t, OpenAIUpstreamAccessStateReason, failoverErr.Reason)
+			require.False(t, failoverErr.RetryableOnSameAccount)
+			require.Equal(t, http.StatusBadGateway, failoverErr.ClientStatusCode)
+			require.False(t, c.Writer.Written(), "passthrough rule must not commit a response before account failover")
+		})
+	}
+}
+
+func TestResponsesStreamCyberPolicyPrecedesPassthroughRule(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	stream := "event: error\n" +
+		`data: {"type":"error","error":{"code":"cyber_policy","message":"blocked by cyber policy"}}` + "\n\n"
+	tests := []struct {
+		name string
+		run  func(*OpenAIGatewayService, *gin.Context, *http.Response, *Account) error
+	}{
+		{
+			name: "native",
+			run: func(svc *OpenAIGatewayService, c *gin.Context, resp *http.Response, account *Account) error {
+				_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "gpt-5", "gpt-5")
+				return err
+			},
+		},
+		{
+			name: "passthrough",
+			run: func(svc *OpenAIGatewayService, c *gin.Context, resp *http.Response, account *Account) error {
+				_, err := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, account, time.Now(), "gpt-5", "gpt-5")
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			bindPassthroughRule(c, PlatformOpenAI, []string{"cyber policy"}, http.StatusTeapot)
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(stream)),
+			}
+			svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
+			err := tt.run(svc, c, resp, &Account{ID: 12, Platform: PlatformOpenAI, Type: AccountTypeOAuth})
+
+			require.Error(t, err)
+			var failoverErr *UpstreamFailoverError
+			require.False(t, errors.As(err, &failoverErr))
+			require.NotNil(t, GetOpsCyberPolicy(c))
+			require.NotEqual(t, http.StatusTeapot, rec.Code)
+			require.Contains(t, rec.Body.String(), "cyber_policy")
+		})
+	}
 }
 
 func TestForwardAsAnthropic_ResponseFailed_PassthroughRule(t *testing.T) {

@@ -67,6 +67,28 @@ func TestBuildAccountForCreatePreservesExplicitInstallationPinDisabled(t *testin
 	}
 }
 
+func TestBuildAccountForCreateGeneratesOpenAISetupTokenInstallationID(t *testing.T) {
+	account, err := buildAccountForCreate(&CreateAccountInput{
+		Name:     "OpenAI setup token",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeSetupToken,
+	}, map[string]any{
+		openAIPinnedInstallationIDKey:      "client-supplied",
+		openAIInstallationRotateEnabledKey: true,
+	})
+	if err != nil {
+		t.Fatalf("build account: %v", err)
+	}
+	pinned, _ := account.Extra[openAIPinnedInstallationIDKey].(string)
+	parsed, err := uuid.Parse(pinned)
+	if err != nil || parsed.Version() != 4 {
+		t.Fatalf("SetupToken installation_id must be UUID v4, got %q (err=%v)", pinned, err)
+	}
+	if enabled, ok := account.Extra[openAIInstallationPinEnabledKey].(bool); !ok || !enabled {
+		t.Fatalf("new OpenAI SetupToken account must explicitly persist installation pin=true: %#v", account.Extra)
+	}
+}
+
 func TestBuildAccountForCreateStripsInstallationPolicyFromNonOAuthAccount(t *testing.T) {
 	account, err := buildAccountForCreate(&CreateAccountInput{
 		Name:     "OpenAI API key",
@@ -87,6 +109,30 @@ func TestBuildAccountForCreateStripsInstallationPolicyFromNonOAuthAccount(t *tes
 	} {
 		if _, exists := account.Extra[key]; exists {
 			t.Fatalf("non-OAuth account must not persist %s: %#v", key, account.Extra)
+		}
+	}
+}
+
+func TestBuildAccountForCreateStripsInstallationPolicyFromForeignOAuthAccount(t *testing.T) {
+	account, err := buildAccountForCreate(&CreateAccountInput{
+		Name:     "Anthropic OAuth",
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+	}, map[string]any{
+		openAIInstallationPinEnabledKey:    true,
+		openAIPinnedInstallationIDKey:      "client-supplied",
+		openAIInstallationRotateEnabledKey: true,
+	})
+	if err != nil {
+		t.Fatalf("build account: %v", err)
+	}
+	for _, key := range []string{
+		openAIInstallationPinEnabledKey,
+		openAIPinnedInstallationIDKey,
+		openAIInstallationRotateEnabledKey,
+	} {
+		if _, exists := account.Extra[key]; exists {
+			t.Fatalf("foreign OAuth account must not persist %s: %#v", key, account.Extra)
 		}
 	}
 }

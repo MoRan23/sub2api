@@ -46,7 +46,7 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 	body []byte,
 	options OpenAIOAuthResponsesFinalizeOptions,
 ) ([]byte, error) {
-	if account == nil || !account.IsOpenAIOAuth() {
+	if account == nil || !account.UsesOpenAICodexProtocol() {
 		return body, nil
 	}
 	if req == nil {

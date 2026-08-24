@@ -53,11 +53,19 @@ type installationIDRequestCache struct {
 	Resolution      installationIDResolution
 }
 
+// isOpenAICodexInstallationOwner identifies accounts that may own the
+// server-managed installation UUID. Spark shadows inherit their credential
+// owner's UUID, and implicit/foreign OAuth accounts must not persist this
+// OpenAI-specific account state.
+func isOpenAICodexInstallationOwner(account *Account) bool {
+	return account != nil && account.IsOpenAI() && account.UsesOpenAICodexProtocol() && !account.IsShadow()
+}
+
 // shouldRewriteOpenAIInstallationID freezes the transport boundary for pinned
 // installation identity. OAuth passthrough uses the same account-owned value
 // as transformed Responses traffic.
 func shouldRewriteOpenAIInstallationID(account *Account, _ bool) bool {
-	return account != nil && account.IsOpenAIOAuth()
+	return account != nil && account.UsesOpenAICodexProtocol()
 }
 
 // resolveOutboundInstallationID computes the outbound installation_id for an
@@ -163,12 +171,12 @@ func (s *OpenAIGatewayService) ensureOpenAIInstallationID(ctx context.Context, a
 }
 
 func ensureOpenAIInstallationID(ctx context.Context, repo AccountRepository, account *Account) (string, error) {
-	if account == nil || account.ID <= 0 || !account.IsOpenAIOAuth() || account.IsShadow() {
-		return "", fmt.Errorf("openai installation_id repair requires an OAuth parent account")
+	if !isOpenAICodexInstallationOwner(account) {
+		return "", fmt.Errorf("openai installation_id repair requires a Codex credential owner account")
 	}
 	expected := strings.TrimSpace(account.GetPinnedOpenAIInstallationID())
 	generated := uuid.NewString()
-	if repo == nil {
+	if repo == nil || account.ID <= 0 {
 		return generated, nil
 	}
 	if casRepo, ok := repo.(openAIInstallationIDCASRepository); ok {

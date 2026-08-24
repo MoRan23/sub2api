@@ -242,7 +242,7 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 		Status:      StatusActive,
 		ExpiresAt:   req.ExpiresAt,
 	}
-	if req.Platform == PlatformOpenAI && req.Type == AccountTypeOAuth {
+	if isOpenAICodexInstallationOwner(account) {
 		if err := ValidateOpenAIInstallationPinExtra(req.Platform, account.Extra); err != nil {
 			return nil, err
 		}
@@ -359,7 +359,7 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 		delete(extra, OllamaCloudUsageSnapshotExtraKey)
 		delete(extra, openAIInstallationRotateEnabledKey)
 		delete(extra, openAIPinnedInstallationIDKey)
-		if account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth && !account.IsShadow() {
+		if isOpenAICodexInstallationOwner(account) {
 			if current, ok := account.Extra[openAIPinnedInstallationIDKey]; ok {
 				extra[openAIPinnedInstallationIDKey] = current
 			}
@@ -368,7 +368,7 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 		}
 		account.Extra = extra
 	}
-	if account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth && !account.IsShadow() {
+	if isOpenAICodexInstallationOwner(account) {
 		if account.Extra == nil {
 			account.Extra = make(map[string]any)
 		}

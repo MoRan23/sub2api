@@ -285,7 +285,7 @@ func openAICodexTurnStateRequestOriginFromPlan(account *Account, plan OpenAIOAut
 	// When that contract is disabled, retain the legacy wire byte-for-byte and
 	// do not touch Redis/local provenance state even if installation or client
 	// identity normalization remains independently enabled.
-	if account == nil || !account.IsOpenAIOAuth() || !plan.TurnIdentityRequested ||
+	if account == nil || !account.UsesOpenAICodexProtocol() || !plan.TurnIdentityRequested ||
 		strings.TrimSpace(plan.CredentialOwnerNamespace) == "" {
 		return openAICodexTurnStateRequestOrigin{}, false
 	}
@@ -412,7 +412,7 @@ func extractOpenAICodexTurnState(upstream http.Header) string {
 // not bind provenance. The caller must bind only after the response is really
 // committed; this keeps abandoned first-output attempts out of the store.
 func (s *OpenAIGatewayService) relayOpenAICodexTurnState(c *gin.Context, account *Account, upstream http.Header) string {
-	if account == nil || !account.IsOpenAIOAuth() || c == nil || c.Writer == nil {
+	if account == nil || !account.UsesOpenAICodexProtocol() || c == nil || c.Writer == nil {
 		return ""
 	}
 	return relayOpenAICodexTurnStateHeader(c.Writer.Header(), upstream)
@@ -433,7 +433,7 @@ func relayOpenAICodexTurnStateHeader(dst http.Header, upstream http.Header) stri
 }
 
 func stageOpenAICodexTurnState(dst *http.Header, account *Account, upstream http.Header) {
-	if dst == nil || account == nil || !account.IsOpenAIOAuth() {
+	if dst == nil || account == nil || !account.UsesOpenAICodexProtocol() {
 		return
 	}
 	canonical := http.CanonicalHeaderKey(openAICodexTurnStateHeader)

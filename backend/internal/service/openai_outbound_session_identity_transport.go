@@ -49,11 +49,11 @@ func (s *OpenAIGatewayService) openAIOutboundSessionIdentityTransportEnabledForR
 }
 
 func (s *OpenAIGatewayService) openAIOutboundSessionIdentityModeEnabledForAccount(ctx context.Context, c *gin.Context, account *Account) bool {
-	return account != nil && account.IsOpenAIOAuth() &&
+	return account != nil && account.UsesOpenAICodexProtocol() &&
 		s.openAIOutboundSessionIdentityTransportEnabledForRequest(ctx, c)
 }
 
-// resolveOpenAICodexTurnIdentityForTransport applies the OAuth-only V2 gate,
+// resolveOpenAICodexTurnIdentityForTransport applies the Codex-protocol V2 gate,
 // resolves the complete logical tuple once, and maps it to the hierarchical
 // UUIDv7 identity. API-key transports return before reading the setting or
 // touching either identity store.
@@ -64,7 +64,7 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityForTransport(
 	body []byte,
 	callerSeed string,
 ) (OpenAICodexTurnIdentity, OpenAICodexLogicalTurnIdentity, bool, error) {
-	if account == nil || !account.IsOpenAIOAuth() {
+	if account == nil || !account.UsesOpenAICodexProtocol() {
 		return OpenAICodexTurnIdentity{}, OpenAICodexLogicalTurnIdentity{}, false, nil
 	}
 	return s.resolveOpenAICodexTurnIdentityForTransportSnapshot(
@@ -90,7 +90,7 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityForTransportSnapsho
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if !enabled || account == nil || !account.IsOpenAIOAuth() {
+	if !enabled || account == nil || !account.UsesOpenAICodexProtocol() {
 		return OpenAICodexTurnIdentity{}, OpenAICodexLogicalTurnIdentity{}, false, nil
 	}
 	logical := ResolveOpenAICodexLogicalTurnIdentityWithTurnMetadata(c, body, callerSeed, explicitTurnMetadata)
@@ -105,7 +105,7 @@ func (s *OpenAIGatewayService) resolveOpenAICodexLogicalIdentityForTransport(
 	logical OpenAICodexLogicalTurnIdentity,
 	enabled bool,
 ) (OpenAICodexTurnIdentity, bool, error) {
-	if !enabled || account == nil || !account.IsOpenAIOAuth() {
+	if !enabled || account == nil || !account.UsesOpenAICodexProtocol() {
 		return OpenAICodexTurnIdentity{}, false, nil
 	}
 	if strings.TrimSpace(logical.SessionKey) == "" {

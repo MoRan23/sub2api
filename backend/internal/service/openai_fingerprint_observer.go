@@ -478,7 +478,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservation(c *gin.Context, acco
 // schema path that carries server-owned identity in the body but not aliases
 // in the wire header set.
 func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Context, account *Account, pin installationIDResolution, outbound http.Header, body []byte) {
-	if !globalFingerprintObserver.enabled.Load() || account == nil || !account.IsOpenAIOAuth() {
+	if !globalFingerprintObserver.enabled.Load() || account == nil || !account.UsesOpenAICodexProtocol() {
 		return
 	}
 	trustedIdentity, hasTrustedIdentity := fingerprintObservationOutboundIdentityFromContext(c)
@@ -837,11 +837,11 @@ func (b fingerprintObservationBodyIdentity) uuid(expected, turnField string, fla
 }
 
 // shouldRecordFingerprintObservationRequest deliberately keeps the observer
-// narrow: only turn-carrying Codex OAuth transports participate. Images,
+// narrow: only turn-carrying Codex protocol transports participate. Images,
 // embeddings, Live/profile probes, and unrelated gateway transports remain
 // outside the observation ring.
 func shouldRecordFingerprintObservationRequest(c *gin.Context, account *Account) bool {
-	if c == nil || c.Request == nil || account == nil || !account.IsOpenAIOAuth() {
+	if c == nil || c.Request == nil || account == nil || !account.UsesOpenAICodexProtocol() {
 		return false
 	}
 	path := ""
