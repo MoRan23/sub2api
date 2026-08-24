@@ -735,13 +735,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, rawFirstClientMessage, ""))
 		}
 	}
-	if account.IsOpenAIOAuthLike() && isOpenAIResponsesLiteWebSocketPayload(firstClientMessage) {
-		liteFirstMessage, _, liteErr := normalizeOpenAIResponsesLiteToolsPayload(firstClientMessage)
-		if liteErr != nil {
-			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, liteErr.Error(), liteErr)
-		}
-		firstClientMessage = liteFirstMessage
-	}
+	// The physical-frame finalizer owns Responses Lite normalization after the
+	// final model and manifest capability have been frozen.
 	if hooks != nil && (hooks.MaxReasoningEffort != "" || len(hooks.ReasoningEffortMappings) > 0) {
 		if capped, changed := ApplyOpenAIReasoningEffortPolicy(firstClientMessage, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings); changed {
 			firstClientMessage = capped
@@ -1155,17 +1150,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				updateCodexToolNameReverseForWSFrame(c, payload, reverse)
 				if aliased {
 					payload = aliasedBody
-				}
-			}
-			if isResponseCreate {
-				if account.IsOpenAIOAuthLike() && isOpenAIResponsesLiteWebSocketPayload(payload) {
-					litePayload, _, liteErr := normalizeOpenAIResponsesLiteToolsPayload(payload)
-					if liteErr != nil {
-						return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, liteErr.Error(), liteErr)
 					}
-					payload = litePayload
 				}
-				if hooks != nil && (hooks.MaxReasoningEffort != "" || len(hooks.ReasoningEffortMappings) > 0) {
+				if isResponseCreate {
+					// Keep follow-up payloads in their non-Lite shape until the same
+					// final capability decision used by the first physical write.
+					if hooks != nil && (hooks.MaxReasoningEffort != "" || len(hooks.ReasoningEffortMappings) > 0) {
 					if capped, changed := ApplyOpenAIReasoningEffortPolicy(payload, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings); changed {
 						payload = capped
 					}
@@ -1252,7 +1242,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					FinalServiceTier: finalFields[1].String(),
 				})
 				if finalizeErr != nil {
-					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to finalize websocket turn identity", finalizeErr)
+					return payload, nil, NewOpenAIWSClientCloseError(
+						coderws.StatusPolicyViolation,
+						openAIOAuthWSWireFinalizeErrorReason("unable to finalize websocket turn identity", finalizeErr),
+						finalizeErr,
+					)
 				}
 				frameIdentityPlan = finalizedPlan
 				outboundIdentityMu.Lock()

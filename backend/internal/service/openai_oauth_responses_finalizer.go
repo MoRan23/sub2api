@@ -94,6 +94,7 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 	if modelCapabilities.UseResponsesLite {
 		finalInputBody, _, err = normalizeOpenAIResponsesLiteToolsPayload(body)
 		if err != nil {
+			writeOpenAIResponsesLiteValidationError(c, err)
 			return body, err
 		}
 	}
@@ -120,6 +121,21 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 		"not_applicable",
 	)
 	return finalBody, nil
+}
+
+func writeOpenAIResponsesLiteValidationError(c *gin.Context, err error) {
+	if c == nil || err == nil {
+		return
+	}
+	param := "tools"
+	var validationErr *openAIResponsesLiteValidationError
+	if errors.As(err, &validationErr) {
+		param = validationErr.param
+	}
+	setOpsUpstreamError(c, http.StatusBadRequest, err.Error(), "")
+	c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+		"type": "invalid_request_error", "message": err.Error(), "param": param,
+	}})
 }
 
 func explicitOpenAIResponsesLiteHTTP(c *gin.Context, headers http.Header) bool {

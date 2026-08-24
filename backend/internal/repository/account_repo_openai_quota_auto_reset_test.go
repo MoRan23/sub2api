@@ -48,6 +48,11 @@ func TestCompareAndUpdateOpenAIAutoResetPreflightUsesEligibilityAndStateCAS(t *t
 			).
 				WithArgs(sqlmock.AnyArg(), int64(17), string(expectedJSON)).
 				WillReturnResult(sqlmock.NewResult(0, test.affected))
+			if test.affected > 0 {
+				mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
+					WithArgs(service.SchedulerOutboxEventAccountChanged, int64(17), nil, nil, sqlmock.AnyArg()).
+					WillReturnResult(sqlmock.NewResult(1, 1))
+			}
 
 			repo := newAccountRepositoryWithSQL(nil, db, nil)
 			updated, err := repo.CompareAndUpdateOpenAIAutoResetPreflight(

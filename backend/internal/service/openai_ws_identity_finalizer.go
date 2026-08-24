@@ -29,13 +29,8 @@ func (s *OpenAIGatewayService) finalizeOpenAIOAuthWSWirePlan(
 	payload []byte,
 	options openAIOAuthWSWireFinalizeOptions,
 ) (OpenAIOAuthIdentityPlan, error) {
-	if account == nil || !account.UsesOpenAICodexProtocol() || !plan.TurnIdentityRequested {
+	if account == nil || !account.UsesOpenAICodexProtocol() {
 		return plan, nil
-	}
-
-	kind, kindErr := openAICodexWSWireRequestKind(payload, plan, options.RequestKind)
-	if kindErr != nil {
-		return plan, kindErr
 	}
 	model := strings.TrimSpace(options.FinalModel)
 	serviceTier := strings.TrimSpace(options.FinalServiceTier)
@@ -54,6 +49,27 @@ func (s *OpenAIGatewayService) finalizeOpenAIOAuthWSWirePlan(
 		observedCapabilities,
 		explicitOpenAIResponsesLiteWS(c, payload),
 	)
+	if modelCapabilities.UseResponsesLite {
+		// Validate before a WS connection is acquired or dialed. The physical
+		// frame projector below remains the only place that mutates the payload.
+		if _, _, err := normalizeOpenAIResponsesLiteToolsPayload(payload); err != nil {
+			return plan, err
+		}
+	}
+	if !plan.TurnIdentityRequested {
+		// Responses Lite is a model transport capability, not a fingerprint
+		// feature. Preserve it when turn identity is disabled while leaving the
+		// caller-owned identity and metadata plan untouched.
+		plan.WireProfile.ToolNamespacesAllowed = modelCapabilities.UseResponsesLite
+		plan.WireProfile.ToolNamespacesInfoAllowed = false
+		SetOpenAIOAuthIdentityPlan(c, plan)
+		return plan, nil
+	}
+
+	kind, kindErr := openAICodexWSWireRequestKind(payload, plan, options.RequestKind)
+	if kindErr != nil {
+		return plan, kindErr
+	}
 	finalizeOptions := FinalizeOpenAICodexWirePlanOptions{
 		RequestKind:       string(kind),
 		ModelCapabilities: modelCapabilities,
@@ -95,6 +111,14 @@ func (s *OpenAIGatewayService) finalizeOpenAIOAuthWSWirePlan(
 	}
 	SetOpenAIOAuthIdentityPlan(c, finalPlan)
 	return finalPlan, nil
+}
+
+func openAIOAuthWSWireFinalizeErrorReason(fallback string, err error) string {
+	var validationErr *openAIResponsesLiteValidationError
+	if errors.As(err, &validationErr) {
+		return validationErr.Error()
+	}
+	return fallback
 }
 
 func openAICodexWSWireRequestKind(payload []byte, plan OpenAIOAuthIdentityPlan, explicit ...CodexWireRequestKind) (CodexWireRequestKind, error) {

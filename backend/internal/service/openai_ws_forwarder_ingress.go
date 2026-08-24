@@ -326,17 +326,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 		}
 		accountIdentitySourceRaw := append([]byte(nil), normalized...)
-		if account.IsOpenAIOAuthLike() && isOpenAIResponsesLiteWebSocketPayload(normalized) {
-			litePayload, _, liteErr := normalizeOpenAIResponsesLiteToolsPayload(normalized)
-			if liteErr != nil {
-				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
-					coderws.StatusPolicyViolation,
-					liteErr.Error(),
-					liteErr,
-				)
-			}
-			normalized = litePayload
-		}
+		// Preserve the pre-Lite body until the shared finalizer has resolved the
+		// mapped model's authoritative manifest capability.
 		apiKey := getAPIKeyFromContext(c)
 		imageGenerationAllowed := GroupAllowsImageGeneration(apiKeyGroup(apiKey))
 		codexImageGenerationExplicitToolPolicy := codexImageGenerationExplicitToolPolicyAllow
@@ -1974,7 +1965,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				FinalServiceTier: nextRoutingFields[1].String(),
 			})
 			if identityErr != nil {
-				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to finalize websocket turn identity", identityErr)
+				return NewOpenAIWSClientCloseError(
+					coderws.StatusPolicyViolation,
+					openAIOAuthWSWireFinalizeErrorReason("unable to finalize websocket turn identity", identityErr),
+					identityErr,
+				)
 			}
 			updatedHeaders := cloneHeader(baseAcquireReq.Headers)
 			if updatedHeaders == nil {
@@ -2036,7 +2031,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				FinalServiceTier: nextRoutingFields[1].String(),
 			})
 			if finalizeErr != nil {
-				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to finalize websocket routing identity", finalizeErr)
+				return NewOpenAIWSClientCloseError(
+					coderws.StatusPolicyViolation,
+					openAIOAuthWSWireFinalizeErrorReason("unable to finalize websocket routing identity", finalizeErr),
+					finalizeErr,
+				)
 			}
 			pinnedIdentityPlan = finalPlan
 			stripOpenAILegacyResponsesBeta(baseAcquireReq.Headers)

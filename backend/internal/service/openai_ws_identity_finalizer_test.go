@@ -350,6 +350,27 @@ func TestFinalizeOpenAIOAuthWSWirePlanTurnIdentityDisabledDoesNotClassifyMemory(
 	}
 }
 
+func TestFinalizeOpenAIOAuthWSWirePlanTurnIdentityDisabledStillFinalizesResponsesLite(t *testing.T) {
+	account := &Account{ID: 42, Type: AccountTypeOAuth, Platform: PlatformOpenAI}
+	base := openAIMemoryRoutingTestPlan(t)
+	base.TurnIdentityRequested = false
+	base.TurnIdentityEnabled = false
+	base.TurnIdentity = OpenAICodexTurnIdentity{}
+	base.CredentialOwnerNamespace = "account:42"
+	payload := []byte(`{"type":"response.create","model":"gpt-5.6-sol","reasoning":{"context":"current_turn"},"tools":[{"type":"namespace","name":"collaboration"}],"input":"hi","client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"}}`)
+
+	plan, err := (&OpenAIGatewayService{}).finalizeOpenAIOAuthWSWirePlan(nil, account, base, payload, openAIOAuthWSWireFinalizeOptions{})
+	require.NoError(t, err)
+	require.True(t, plan.WireProfile.ToolNamespacesAllowed)
+	require.False(t, plan.WireProfile.ToolNamespacesInfoAllowed)
+
+	projected, err := (&OpenAIGatewayService{}).projectOpenAIOAuthWSFrame(nil, account, plan, payload)
+	require.NoError(t, err)
+	require.Equal(t, "all_turns", gjson.GetBytes(projected, "reasoning.context").String())
+	require.False(t, gjson.GetBytes(projected, `tools.#(type=="namespace")`).Exists())
+	require.Equal(t, "collaboration", gjson.GetBytes(projected, `input.#(type=="additional_tools").tools.0.name`).String())
+}
+
 func TestFinalizeOpenAIOAuthWSWirePlanUsesEffectiveResponsesLiteCapability(t *testing.T) {
 	account := &Account{ID: 42, Type: AccountTypeOAuth, Platform: PlatformOpenAI}
 	const model = "gpt-5.6-sol"
@@ -413,18 +434,29 @@ func TestFinalizeOpenAIOAuthWSWirePlanUsesEffectiveResponsesLiteCapability(t *te
 	t.Run("known false overrides explicit marker", func(t *testing.T) {
 		svc := &OpenAIGatewayService{}
 		svc.codexModelCapabilities.observeManifest("account:42", []byte(`{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":false}]}`), time.Now())
-		payload := newPayload(`"true"`)
-		plan, err := svc.finalizeOpenAIOAuthWSWirePlan(nil, account, newPlan(t), payload, openAIOAuthWSWireFinalizeOptions{})
-		require.NoError(t, err)
-		require.False(t, plan.WireProfile.ToolNamespacesAllowed)
+		payloads := []struct {
+			name    string
+			payload []byte
+		}{
+			{name: "first frame", payload: newPayload(`"true"`)},
+			{name: "follow-up frame", payload: []byte(`{"type":"response.create","model":"gpt-5.6-sol","previous_response_id":"resp_previous","reasoning":{"context":"current_turn"},"tools":[{"type":"namespace","name":"collaboration"}],"input":[{"type":"message","role":"user","content":"next"}],"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"}}`)},
+		}
+		for _, test := range payloads {
+			t.Run(test.name, func(t *testing.T) {
+				plan, err := svc.finalizeOpenAIOAuthWSWirePlan(nil, account, newPlan(t), test.payload, openAIOAuthWSWireFinalizeOptions{})
+				require.NoError(t, err)
+				require.False(t, plan.WireProfile.ToolNamespacesAllowed)
 
-		projected, err := svc.projectOpenAIOAuthWSFrame(nil, account, plan, payload)
-		require.NoError(t, err)
-		require.False(t, gjson.GetBytes(projected, "client_metadata."+responsesLiteWSMetadataKey).Exists())
-		require.Equal(t, "current_turn", gjson.GetBytes(projected, "reasoning.context").String())
-		require.True(t, gjson.GetBytes(projected, `tools.#(type=="namespace")`).Exists())
-		nested := gjson.GetBytes(projected, "client_metadata.x-codex-turn-metadata").String()
-		require.False(t, gjson.Get(nested, "tool_namespaces_info").Exists())
+				projected, err := svc.projectOpenAIOAuthWSFrame(nil, account, plan, test.payload)
+				require.NoError(t, err)
+				require.False(t, gjson.GetBytes(projected, "client_metadata."+responsesLiteWSMetadataKey).Exists())
+				require.Equal(t, "current_turn", gjson.GetBytes(projected, "reasoning.context").String())
+				require.True(t, gjson.GetBytes(projected, `tools.#(type=="namespace")`).Exists())
+				require.False(t, gjson.GetBytes(projected, `input.#(type=="additional_tools")`).Exists())
+				nested := gjson.GetBytes(projected, "client_metadata.x-codex-turn-metadata").String()
+				require.False(t, gjson.Get(nested, "tool_namespaces_info").Exists())
+			})
+		}
 	})
 
 	t.Run("known true enables Lite without marker", func(t *testing.T) {

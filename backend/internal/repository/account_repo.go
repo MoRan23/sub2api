@@ -2614,9 +2614,22 @@ func (r *accountRepository) CompareAndUpdateOpenAIAutoResetPreflight(
 		return false, err
 	}
 
+	baseCtx := ctx
+	contextTx := dbent.TxFromContext(ctx)
 	exec := r.sql
-	if tx := dbent.TxFromContext(ctx); tx != nil {
-		exec = tx.Client()
+	var tx *dbent.Tx
+	if contextTx != nil {
+		exec = contextTx.Client()
+	} else if r.client != nil {
+		tx, err = r.client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return false, err
+		}
+		if tx != nil {
+			defer func() { _ = tx.Rollback() }()
+			ctx = dbent.NewTxContext(ctx, tx)
+			exec = tx.Client()
+		}
 	}
 	result, err := exec.ExecContext(ctx, `
 		UPDATE accounts
@@ -2647,10 +2660,18 @@ func (r *accountRepository) CompareAndUpdateOpenAIAutoResetPreflight(
 	if affected == 0 {
 		return false, nil
 	}
-	if dbent.TxFromContext(ctx) == nil {
-		// These fields are scheduler-neutral, but the per-account snapshot must see
-		// the new usage/state before a sticky lookup can serve stale quota data.
-		r.syncSchedulerAccountSnapshot(ctx, accountID)
+	if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
+		return false, err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+	}
+	if contextTx == nil {
+		// The state participates in quota scheduling, so keep the durable outbox and
+		// the low-latency local scheduler snapshot semantics of UpdateExtra.
+		r.syncSchedulerAccountSnapshot(baseCtx, accountID)
 	}
 	return true, nil
 }
