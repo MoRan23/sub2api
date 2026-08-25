@@ -29,6 +29,8 @@ const (
 	AntigravityCredentialRejectedReason GatewayFailureReason = "antigravity_oauth_credential_rejected"
 )
 
+const antigravityCompatMaxTokens = 64000
+
 type antigravityCompatRequest struct {
 	protocol        antigravityCompatProtocol
 	originalBody    []byte
@@ -78,6 +80,7 @@ func (s *AntigravityGatewayService) ForwardAsChatCompletions(
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
 	preserveChatCompletionTokenLimit(&request, claudeRequest)
+	clampAntigravityCompatTokenLimit(claudeRequest)
 	claudeRequest.Stream = request.Stream
 	claudeBody, err := json.Marshal(claudeRequest)
 	if err != nil {
@@ -120,6 +123,7 @@ func (s *AntigravityGatewayService) ForwardAsResponses(
 	if err != nil {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
+	clampAntigravityCompatTokenLimit(claudeRequest)
 	claudeRequest.Stream = request.Stream
 	claudeBody, err := json.Marshal(claudeRequest)
 	if err != nil {
@@ -159,6 +163,12 @@ func preserveChatCompletionTokenLimit(request *apicompat.ChatCompletionsRequest,
 	}
 	if limit != nil && *limit > 0 {
 		claudeRequest.MaxTokens = *limit
+	}
+}
+
+func clampAntigravityCompatTokenLimit(claudeRequest *apicompat.AnthropicRequest) {
+	if claudeRequest != nil && claudeRequest.MaxTokens > antigravityCompatMaxTokens {
+		claudeRequest.MaxTokens = antigravityCompatMaxTokens
 	}
 }
 

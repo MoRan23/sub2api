@@ -389,41 +389,16 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	previousResponseID := strings.TrimSpace(req.PreviousResponseID)
 	if previousResponseID != "" && NormalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI &&
 		(!req.StickyWeighted || !req.PreviousResponseCanMove) {
-		selection, err := s.service.selectAccountByPreviousResponseIDForCapability(
-			ctx,
-			req.GroupID,
-			previousResponseID,
-			req.RequestedModel,
-			req.ExcludedIDs,
-			req.RequiredCapability,
-			req.RequireCompact,
-		)
+		selection, err := s.selectByPreviousResponseID(ctx, req)
 		if err != nil {
 			return nil, decision, err
-		}
-		if selection != nil && selection.Account != nil {
-			compatible, _ := s.isAccountRequestCompatibleReason(ctx, selection.Account, req)
-			hasGroupMetadata := len(selection.Account.GroupIDs) > 0 || len(selection.Account.AccountGroups) > 0
-			groupCompatible := !hasGroupMetadata || openAIStickyAccountMatchesGroup(selection.Account, req.GroupID)
-			if hasGroupMetadata && s.service != nil {
-				groupCompatible = s.service.openAIAccountMatchesSchedulingGroup(selection.Account, req.GroupID)
-			}
-			if !groupCompatible ||
-				!compatible || !s.isAccountTransportCompatible(selection.Account, req.RequiredTransport) {
-				if selection.ReleaseFunc != nil {
-					selection.ReleaseFunc()
-				}
-				selection = nil
-			}
 		}
 		if selection != nil && selection.Account != nil {
 			decision.Layer = openAIAccountScheduleLayerPreviousResponse
 			decision.StickyPreviousHit = true
 			decision.SelectedAccountID = selection.Account.ID
 			decision.SelectedAccountType = selection.Account.Type
-			if req.SessionHash != "" {
-				_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, selection.Account.ID)
-			}
+			s.service.bindOpenAIPreviousResponseSessionDuringSelection(ctx, req.GroupID, req.SessionHash, selection)
 			return selection, decision, nil
 		}
 	}
@@ -446,7 +421,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	}
 
 	if !req.StickyWeighted {
-		selection, escapedSticky, err := s.selectBySessionHash(ctx, req)
+		selection, capacitySpillover, err := s.selectBySessionHash(ctx, req)
 		if err != nil {
 			return nil, decision, err
 		}
@@ -457,7 +432,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			decision.SelectedAccountType = selection.Account.Type
 			return selection, decision, nil
 		}
-		if escapedSticky {
+		if capacitySpillover {
 			req.PreserveStickyBinding = true
 		}
 	}
@@ -471,6 +446,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		return nil, decision, err
 	}
 	if selection != nil && selection.Account != nil {
+		selection.PreserveStickyBinding = req.PreserveStickyBinding
 		decision.SelectedAccountID = selection.Account.ID
 		decision.SelectedAccountType = selection.Account.Type
 		if req.StickyWeighted {
@@ -483,6 +459,73 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		}
 	}
 	return selection, decision, nil
+}
+
+// selectByPreviousResponseID resolves and validates a hard response-chain
+// affinity independently of whether the advanced scheduler is enabled. The
+// response owner is account-scoped upstream, so a non-movable continuation
+// must never fall back to a different session-sticky account.
+func (s *defaultOpenAIAccountScheduler) selectByPreviousResponseID(
+	ctx context.Context,
+	req OpenAIAccountScheduleRequest,
+) (*AccountSelectionResult, error) {
+	if s == nil || s.service == nil {
+		return nil, nil
+	}
+	previousResponseID := strings.TrimSpace(req.PreviousResponseID)
+	if previousResponseID == "" {
+		return nil, nil
+	}
+	selection, err := s.service.selectAccountByPreviousResponseIDForCapability(
+		ctx,
+		req.GroupID,
+		previousResponseID,
+		req.RequestedModel,
+		req.ExcludedIDs,
+		req.RequiredCapability,
+		req.RequireCompact,
+	)
+	if err != nil || selection == nil || selection.Account == nil {
+		return selection, err
+	}
+
+	compatible, _ := s.isAccountRequestCompatibleReason(ctx, selection.Account, req)
+	hasGroupMetadata := len(selection.Account.GroupIDs) > 0 || len(selection.Account.AccountGroups) > 0
+	groupCompatible := !hasGroupMetadata || openAIStickyAccountMatchesGroup(selection.Account, req.GroupID)
+	if hasGroupMetadata {
+		groupCompatible = s.service.openAIAccountMatchesSchedulingGroup(selection.Account, req.GroupID)
+	}
+	if groupCompatible && compatible && s.isAccountTransportCompatible(selection.Account, req.RequiredTransport) {
+		return selection, nil
+	}
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+	return nil, nil
+}
+
+// bindOpenAIPreviousResponseSessionDuringSelection keeps a response chain on
+// its upstream owner without turning a temporary capacity spillover into a
+// durable session migration. When the response owner already matches (or no
+// durable binding exists), the usual binding behavior remains unchanged.
+func (s *OpenAIGatewayService) bindOpenAIPreviousResponseSessionDuringSelection(
+	ctx context.Context,
+	groupID *int64,
+	sessionHash string,
+	selection *AccountSelectionResult,
+) {
+	if s == nil || selection == nil || selection.Account == nil || strings.TrimSpace(sessionHash) == "" {
+		return
+	}
+	existingAccountID, err := s.getStickySessionAccountID(ctx, groupID, sessionHash)
+	if err == nil && existingAccountID > 0 && existingAccountID != selection.Account.ID {
+		selection.PreserveStickyBinding = true
+		return
+	}
+	if selection.PreserveStickyBinding {
+		return
+	}
+	_ = s.bindOpenAIStickySessionDuringSelection(ctx, groupID, sessionHash, selection.Account.ID)
 }
 
 func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
@@ -562,7 +605,10 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 			"error_rate", errorRate,
 			"ttft", ttft,
 		)
-		return nil, true, nil
+		// A health-triggered failover is a real migration. Only a healthy account's
+		// saturated wait queue is a temporary spillover that preserves the old
+		// durable binding.
+		return nil, false, nil
 	}
 	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
 	if acquireErr == nil && result != nil && result.Acquired {
@@ -579,15 +625,16 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	cfg := s.service.schedulingConfig()
 	// WaitPlan.MaxConcurrency 使用 Concurrency（非 EffectiveLoadFactor），因为 WaitPlan 控制的是 Redis 实际并发槽位等待。
 	if s.service.concurrencyService != nil {
-		if escapeCfg.enabled && acquireErr == nil && result != nil && !result.Acquired {
-			errorRate, ttft, _ := s.stats.snapshot(accountID)
-			slog.Info("sticky_escape_triggered",
-				"account_id", accountID,
-				"reason", "concurrency_full",
-				"error_rate", errorRate,
-				"ttft", ttft,
-			)
-			return nil, true, nil
+		if acquireErr == nil && result != nil && !result.Acquired {
+			waitingCount, _ := s.service.concurrencyService.GetAccountWaitingCount(ctx, accountID)
+			if waitingCount >= cfg.StickySessionMaxWaiting {
+				slog.Info("sticky_capacity_spillover_triggered",
+					"account_id", accountID,
+					"waiting_count", waitingCount,
+					"max_waiting", cfg.StickySessionMaxWaiting,
+				)
+				return nil, true, nil
+			}
 		}
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 			Account: account,
@@ -2243,6 +2290,36 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	if strings.TrimSpace(previousResponseID) == "" {
 		guardianParentAccountID = s.resolveOpenAIGuardianParentAccountID(ctx, groupID)
 	}
+	hardPreviousTried := false
+	if strings.TrimSpace(previousResponseID) != "" && platform == PlatformOpenAI && !previousResponseCanMove {
+		hardPreviousTried = true
+		previousScheduler := &defaultOpenAIAccountScheduler{service: s}
+		selection, err := previousScheduler.selectByPreviousResponseID(ctx, OpenAIAccountScheduleRequest{
+			GroupID:                 groupID,
+			Platform:                platform,
+			SessionHash:             sessionHash,
+			RequirePrivacySet:       s.openAIGroupRequiresPrivacySet(ctx, groupID),
+			PreviousResponseID:      previousResponseID,
+			PreviousResponseCanMove: false,
+			RequestedModel:          requestedModel,
+			RequiredTransport:       requiredTransport,
+			RequiredCapability:      requiredCapability,
+			RequiredImageCapability: requiredImageCapability,
+			RequireCompact:          requireCompact,
+			ExcludedIDs:             excludedIDs,
+		})
+		if err != nil {
+			return nil, decision, err
+		}
+		if selection != nil && selection.Account != nil {
+			decision.Layer = openAIAccountScheduleLayerPreviousResponse
+			decision.StickyPreviousHit = true
+			decision.SelectedAccountID = selection.Account.ID
+			decision.SelectedAccountType = selection.Account.Type
+			s.bindOpenAIPreviousResponseSessionDuringSelection(ctx, groupID, sessionHash, selection)
+			return selection, decision, nil
+		}
+	}
 	scheduler := s.getOpenAIAccountScheduler(ctx)
 	if scheduler == nil {
 		decision.Layer = openAIAccountScheduleLayerLoadBalance
@@ -2351,6 +2428,13 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	if stickyWeighted && previousResponseCanMove && strings.TrimSpace(previousResponseID) != "" && platform == PlatformOpenAI {
 		stickyPreviousAccountID = s.ResolveAccountIDByPreviousResponseIDForScheduler(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
 	}
+	effectivePreviousResponseID := previousResponseID
+	if hardPreviousTried {
+		// The common hard-affinity probe above is authoritative. If its binding was
+		// unusable, continue with normal scheduling instead of repeating the same
+		// lookup inside the advanced scheduler.
+		effectivePreviousResponseID = ""
+	}
 
 	return scheduler.Select(ctx, OpenAIAccountScheduleRequest{
 		GroupID:                 groupID,
@@ -2363,7 +2447,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		SubscriptionPriority:    subscriptionPriority,
 		PreserveStickyBinding:   preserveGuardianParentBinding,
 		RequirePrivacySet:       s.openAIGroupRequiresPrivacySet(ctx, groupID),
-		PreviousResponseID:      previousResponseID,
+		PreviousResponseID:      effectivePreviousResponseID,
 		PreviousResponseCanMove: previousResponseCanMove,
 		UseUpstreamTokenCost:    useUpstreamTokenCost,
 		RequestedModel:          requestedModel,

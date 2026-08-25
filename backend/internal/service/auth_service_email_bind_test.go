@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/authidentity"
 	"github.com/Wei-Shaw/sub2api/ent/enttest"
+	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
@@ -51,6 +53,91 @@ func (s *flakyEmailBindDefaultSubAssignerStub) AssignOrExtendSubscription(
 	return nil, false, s.err
 }
 
+type emailBindGuardRepositoryForTest interface {
+	AcquireEmailIdentityUpdateGuard(ctx context.Context, userID int64, email string) (func(), error)
+	UpdateEmailWithAliasGuard(ctx context.Context, userID int64, email string, passwordHash string) (string, error)
+}
+
+type concurrentEmailBindRepo struct {
+	service.UserRepository
+	guard emailBindGuardRepositoryForTest
+
+	mu                 sync.Mutex
+	getByIDWaiters     int
+	updateCalls        int
+	getByIDArrived     chan struct{}
+	releaseGetByID     chan struct{}
+	acquireStarted     chan struct{}
+	acquireCompleted   chan struct{}
+	firstUpdateDone    chan struct{}
+	releaseFirstUpdate chan struct{}
+}
+
+func newConcurrentEmailBindRepo(repo service.UserRepository) *concurrentEmailBindRepo {
+	return &concurrentEmailBindRepo{
+		UserRepository:     repo,
+		guard:              repo.(emailBindGuardRepositoryForTest),
+		getByIDArrived:     make(chan struct{}, 2),
+		releaseGetByID:     make(chan struct{}),
+		acquireStarted:     make(chan struct{}, 2),
+		acquireCompleted:   make(chan struct{}, 2),
+		firstUpdateDone:    make(chan struct{}, 1),
+		releaseFirstUpdate: make(chan struct{}),
+	}
+}
+
+func (r *concurrentEmailBindRepo) GetByID(ctx context.Context, userID int64) (*service.User, error) {
+	user, err := r.UserRepository.GetByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	r.mu.Lock()
+	r.getByIDWaiters++
+	wait := r.getByIDWaiters <= 2
+	r.mu.Unlock()
+	if wait {
+		r.getByIDArrived <- struct{}{}
+		<-r.releaseGetByID
+	}
+	return user, nil
+}
+
+func (r *concurrentEmailBindRepo) AcquireEmailIdentityUpdateGuard(
+	ctx context.Context,
+	userID int64,
+	email string,
+) (func(), error) {
+	r.acquireStarted <- struct{}{}
+	release, err := r.guard.AcquireEmailIdentityUpdateGuard(ctx, userID, email)
+	if err == nil {
+		r.acquireCompleted <- struct{}{}
+	}
+	return release, err
+}
+
+func (r *concurrentEmailBindRepo) UpdateEmailWithAliasGuard(
+	ctx context.Context,
+	userID int64,
+	email string,
+	passwordHash string,
+) (string, error) {
+	oldEmail, err := r.guard.UpdateEmailWithAliasGuard(ctx, userID, email, passwordHash)
+	if err != nil {
+		return "", err
+	}
+
+	r.mu.Lock()
+	r.updateCalls++
+	first := r.updateCalls == 1
+	r.mu.Unlock()
+	if first {
+		r.firstUpdateDone <- struct{}{}
+		<-r.releaseFirstUpdate
+	}
+	return oldEmail, nil
+}
+
 func newAuthServiceForEmailBind(
 	t *testing.T,
 	settings map[string]string,
@@ -67,9 +154,28 @@ func newAuthServiceForEmailBindWithRefreshCache(
 	defaultSubAssigner service.DefaultSubscriptionAssigner,
 	refreshTokenCache service.RefreshTokenCache,
 ) (*service.AuthService, service.UserRepository, *dbent.Client) {
+	return newAuthServiceForEmailBindWithRepoDecorator(
+		t,
+		settings,
+		emailCache,
+		defaultSubAssigner,
+		refreshTokenCache,
+		nil,
+	)
+}
+
+func newAuthServiceForEmailBindWithRepoDecorator(
+	t *testing.T,
+	settings map[string]string,
+	emailCache service.EmailCache,
+	defaultSubAssigner service.DefaultSubscriptionAssigner,
+	refreshTokenCache service.RefreshTokenCache,
+	decorate func(service.UserRepository) service.UserRepository,
+) (*service.AuthService, service.UserRepository, *dbent.Client) {
 	t.Helper()
 
-	db, err := sql.Open("sqlite", "file:auth_service_email_bind?mode=memory&cache=shared")
+	dbName := fmt.Sprintf("file:auth_service_email_bind_%d?mode=memory&cache=shared", time.Now().UnixNano())
+	db, err := sql.Open("sqlite", dbName)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
@@ -91,6 +197,9 @@ CREATE TABLE IF NOT EXISTS user_provider_default_grants (
 	t.Cleanup(func() { _ = client.Close() })
 
 	repo := repository.NewUserRepository(client, db)
+	if decorate != nil {
+		repo = decorate(repo)
+	}
 	cfg := &config.Config{
 		JWT: config.JWTConfig{
 			Secret:     "test-bind-email-secret",
@@ -212,6 +321,248 @@ func TestAuthServiceBindEmailIdentity_RejectsExistingEmailOnAnotherUser(t *testi
 	require.NoError(t, err)
 	require.Equal(t, "source-user"+service.OIDCConnectSyntheticEmailDomain, storedUser.Email)
 	require.Equal(t, 0, countProviderGrantRecords(t, client, sourceUser.ID, "email", "first_bind"))
+}
+
+func TestAuthServiceBindEmailIdentity_RejectsAliasOfExistingEmailOnAnotherUser(t *testing.T) {
+	cache := &emailBindCacheStub{
+		data: &service.VerificationCodeData{
+			Code:      "123456",
+			CreatedAt: time.Now().UTC().Add(-10 * time.Minute),
+			ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
+		},
+	}
+	svc, _, client := newAuthServiceForEmailBind(t, nil, cache, nil)
+
+	ctx := context.Background()
+	sourceUser := createEmailBindTestUser(
+		t,
+		client,
+		"source-user"+service.OIDCConnectSyntheticEmailDomain,
+		"source-user",
+		"old-hash",
+	)
+	createEmailBindTestUser(t, client, "zck.ioio123@gmail.com", "inbox-owner", "hash")
+
+	err := svc.SendEmailIdentityBindCode(ctx, sourceUser.ID, "zckioio123+new@gmail.com")
+	require.ErrorIs(t, err, service.ErrEmailExists)
+	require.Empty(t, cache.setEmails)
+
+	updatedUser, err := svc.BindEmailIdentity(
+		ctx,
+		sourceUser.ID,
+		"zckioio123+new@gmail.com",
+		"123456",
+		"new-password",
+	)
+	require.ErrorIs(t, err, service.ErrEmailExists)
+	require.Nil(t, updatedUser)
+
+	storedUser, err := client.User.Get(ctx, sourceUser.ID)
+	require.NoError(t, err)
+	require.Equal(t, "source-user"+service.OIDCConnectSyntheticEmailDomain, storedUser.Email)
+	require.Equal(t, "old-hash", storedUser.PasswordHash)
+}
+
+func TestAuthServiceBindEmailIdentity_AllowsOnlyOneConcurrentAliasVariant(t *testing.T) {
+	cache := &emailBindCacheStub{
+		data: &service.VerificationCodeData{
+			Code:      "123456",
+			CreatedAt: time.Now().UTC(),
+			ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
+		},
+	}
+	svc, _, client := newAuthServiceForEmailBind(t, nil, cache, nil)
+
+	ctx := context.Background()
+	unique := fmt.Sprintf("%d", time.Now().UnixNano())
+	first := createEmailBindTestUser(
+		t,
+		client,
+		"first-"+unique+service.OIDCConnectSyntheticEmailDomain,
+		"first-"+unique,
+		"old-hash",
+	)
+	second := createEmailBindTestUser(
+		t,
+		client,
+		"second-"+unique+service.OIDCConnectSyntheticEmailDomain,
+		"second-"+unique,
+		"old-hash",
+	)
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	go func() {
+		<-start
+		_, err := svc.BindEmailIdentity(ctx, first.ID, "inbox-"+unique+"+one@gmail.com", "123456", "new-password")
+		results <- err
+	}()
+	go func() {
+		<-start
+		_, err := svc.BindEmailIdentity(ctx, second.ID, "inbox-"+unique+"+two@gmail.com", "123456", "new-password")
+		results <- err
+	}()
+	close(start)
+
+	var successes, conflicts int
+	for range 2 {
+		err := <-results
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, service.ErrEmailExists):
+			conflicts++
+		default:
+			t.Fatalf("unexpected bind error: %v", err)
+		}
+	}
+	require.Equal(t, 1, successes)
+	require.Equal(t, 1, conflicts)
+
+	boundCount, err := client.User.Query().
+		Where(dbuser.EmailIn(
+			"inbox-"+unique+"+one@gmail.com",
+			"inbox-"+unique+"+two@gmail.com",
+		)).
+		Count(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, boundCount)
+}
+
+func TestAuthServiceBindEmailIdentity_ConcurrentChangesKeepCanonicalIdentityInSync(t *testing.T) {
+	cache := &emailBindCacheStub{
+		data: &service.VerificationCodeData{
+			Code:      "123456",
+			CreatedAt: time.Now().UTC(),
+			ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
+		},
+	}
+	var guardedRepo *concurrentEmailBindRepo
+	svc, _, client := newAuthServiceForEmailBindWithRepoDecorator(
+		t,
+		nil,
+		cache,
+		nil,
+		nil,
+		func(repo service.UserRepository) service.UserRepository {
+			guardedRepo = newConcurrentEmailBindRepo(repo)
+			return guardedRepo
+		},
+	)
+
+	ctx := context.Background()
+	passwordHash, err := svc.HashPassword("current-password")
+	require.NoError(t, err)
+	user := createEmailBindTestUser(t, client, "current@example.com", "concurrent-bind", passwordHash)
+	require.NoError(t, client.AuthIdentity.Create().
+		SetUserID(user.ID).
+		SetProviderType("email").
+		SetProviderKey("email").
+		SetProviderSubject(user.Email).
+		SetVerifiedAt(time.Now().UTC()).
+		SetMetadata(map[string]any{"source": "test"}).
+		Exec(ctx))
+
+	results := make(chan error, 2)
+	getByIDReleased := false
+	firstUpdateReleased := false
+	defer func() {
+		if !getByIDReleased {
+			close(guardedRepo.releaseGetByID)
+		}
+		if !firstUpdateReleased {
+			close(guardedRepo.releaseFirstUpdate)
+		}
+	}()
+	waitForSignal := func(ch <-chan struct{}, name string) {
+		t.Helper()
+		select {
+		case <-ch:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for %s", name)
+		}
+	}
+	for _, target := range []string{"next-a@example.com", "next-b@example.com"} {
+		target := target
+		go func() {
+			_, bindErr := svc.BindEmailIdentity(ctx, user.ID, target, "123456", "current-password")
+			results <- bindErr
+		}()
+	}
+
+	// Both requests must capture the same pre-lock user snapshot to exercise the stale-old-email race.
+	waitForSignal(guardedRepo.getByIDArrived, "first pre-lock user snapshot")
+	waitForSignal(guardedRepo.getByIDArrived, "second pre-lock user snapshot")
+	close(guardedRepo.releaseGetByID)
+	getByIDReleased = true
+
+	// Pause the winner after its row update. The loser has started acquiring the
+	// same user guard, but cannot acquire it until the winner commits and releases.
+	waitForSignal(guardedRepo.firstUpdateDone, "first guarded email update")
+	waitForSignal(guardedRepo.acquireStarted, "first guard acquisition start")
+	waitForSignal(guardedRepo.acquireStarted, "second guard acquisition start")
+	waitForSignal(guardedRepo.acquireCompleted, "first guard acquisition completion")
+	select {
+	case <-guardedRepo.acquireCompleted:
+		t.Fatal("second email identity guard acquired before the first transaction completed")
+	default:
+	}
+	close(guardedRepo.releaseFirstUpdate)
+	firstUpdateReleased = true
+
+	for range 2 {
+		select {
+		case bindErr := <-results:
+			require.NoError(t, bindErr)
+		case <-time.After(5 * time.Second):
+			t.Fatal("concurrent email identity bind did not complete")
+		}
+	}
+
+	storedUser, err := client.User.Get(ctx, user.ID)
+	require.NoError(t, err)
+	require.Contains(t, []string{"next-a@example.com", "next-b@example.com"}, storedUser.Email)
+	identities, err := client.AuthIdentity.Query().
+		Where(
+			authidentity.UserIDEQ(user.ID),
+			authidentity.ProviderTypeEQ("email"),
+			authidentity.ProviderKeyEQ("email"),
+		).
+		All(ctx)
+	require.NoError(t, err)
+	require.Len(t, identities, 1)
+	require.Equal(t, storedUser.Email, identities[0].ProviderSubject)
+}
+
+func TestAuthServiceBindEmailIdentity_RejectsNewAliasWhenAnotherUserSharesCurrentUserInbox(t *testing.T) {
+	cache := &emailBindCacheStub{
+		data: &service.VerificationCodeData{
+			Code:      "123456",
+			CreatedAt: time.Now().UTC(),
+			ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
+		},
+	}
+	svc, _, client := newAuthServiceForEmailBind(t, nil, cache, nil)
+
+	ctx := context.Background()
+	hashedPassword, err := svc.HashPassword("current-password")
+	require.NoError(t, err)
+	currentUser := createEmailBindTestUser(t, client, "inbox+own@gmail.com", "current", hashedPassword)
+	createEmailBindTestUser(t, client, "inbox+legacy@gmail.com", "legacy", "hash")
+
+	updatedUser, err := svc.BindEmailIdentity(
+		ctx,
+		currentUser.ID,
+		"inbox+new@gmail.com",
+		"123456",
+		"current-password",
+	)
+	require.ErrorIs(t, err, service.ErrEmailExists)
+	require.Nil(t, updatedUser)
+
+	storedUser, err := client.User.Get(ctx, currentUser.ID)
+	require.NoError(t, err)
+	require.Equal(t, "inbox+own@gmail.com", storedUser.Email)
 }
 
 func TestAuthServiceBindEmailIdentity_RollsBackWhenFirstBindDefaultsFail(t *testing.T) {

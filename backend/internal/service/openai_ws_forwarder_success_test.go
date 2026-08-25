@@ -450,6 +450,7 @@ func TestOpenAIGatewayService_BuildOpenAIWSHeadersPreservesCodexIdentity(t *test
 	require.Equal(t, "window-ws", headers.Get("X-Codex-Window-ID"))
 	require.Equal(t, "installation-ws", headers.Get("X-Codex-Installation-ID"))
 	require.Equal(t, "session-ws", headers.Get("session-id"))
+	require.Empty(t, headers.Get("session_id"))
 	require.Equal(t, "thread-ws", headers.Get("thread-id"))
 	require.Equal(t, "client-request-ws", headers.Get("x-client-request-id"))
 	require.Empty(t, headers.Get("X-Test"))

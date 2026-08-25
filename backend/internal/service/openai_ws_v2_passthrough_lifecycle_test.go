@@ -1006,6 +1006,39 @@ func TestPassthroughLifecycle_FirstOutputTimeoutRemainsBounded(t *testing.T) {
 	}
 }
 
+func TestPassthroughLifecycle_Semantic429IgnoresSuccessfulHandshakeQuotaHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	controlCtx, cancelControl := context.WithCancelCause(context.Background())
+	defer cancelControl(context.Canceled)
+
+	cfg := passthroughLifecycleConfig()
+	upstream := newStagedPassthroughConn()
+	upstream.Send(`{"type":"error","error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"try again"}}`)
+	repo := &openAIWSRateLimitSignalRepo{}
+	svc := newPassthroughLifecycleService(cfg, upstream)
+	svc.rateLimitService = NewRateLimitService(repo, nil, cfg, nil, nil)
+	dialer := svc.openaiWSPassthroughDialer.(*stagedPassthroughDialer)
+	dialer.headers = successfulOpenAIWSQuotaHeaders()
+
+	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, svc, passthroughLifecycleAccount())
+	defer server.Close()
+	clientConn := dialPassthroughLifecycleClient(t, server)
+	defer func() { _ = clientConn.CloseNow() }()
+	require.Equal(t, "response.create", gjson.GetBytes(requirePassthroughUpstreamWrite(t, upstream, 3*time.Second), "type").String())
+
+	select {
+	case err := <-serverErr:
+		var failoverErr *UpstreamFailoverError
+		require.ErrorAs(t, err, &failoverErr)
+		require.Equal(t, "604800", failoverErr.ResponseHeaders.Get("X-Codex-Primary-Reset-After-Seconds"))
+		require.Len(t, repo.rateLimitCalls, 1)
+		require.Less(t, time.Until(repo.rateLimitCalls[0]), time.Hour,
+			"a semantic 429 must not inherit the successful handshake's seven-day reset")
+	case <-time.After(3 * time.Second):
+		t.Fatal("passthrough semantic 429 did not terminate")
+	}
+}
+
 func TestPassthroughLifecycle_ResponseCreatedTimeoutClosesWithoutFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	controlCtx, cancelControl := context.WithCancelCause(context.Background())

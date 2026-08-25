@@ -245,7 +245,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 		}
 		if !sessionResolution.OutboundIdentityModeEnabled {
 			apiKeyID := getAPIKeyIDFromContext(c)
-			if sessionResolution.SessionID != "" {
+			if sessionResolution.SessionID != "" && sessionResolution.SessionSource != "header_session-id" {
 				headers.Set("session_id", isolateOpenAISessionID(apiKeyID, sessionResolution.SessionID))
 			}
 			if sessionResolution.ConversationID != "" {
@@ -253,7 +253,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 			}
 		}
 	} else {
-		if sessionResolution.SessionID != "" {
+		if sessionResolution.SessionID != "" && sessionResolution.SessionSource != "header_session-id" {
 			headers.Set("session_id", sessionResolution.SessionID)
 		}
 		if sessionResolution.ConversationID != "" {

@@ -181,7 +181,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 
 		if eventType == "error" {
 			errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(message)
-			s.persistOpenAIWSRateLimitSignal(ctx, account, lease.HandshakeHeaders(), message, errCodeRaw, errTypeRaw, errMsgRaw)
+			s.persistOpenAIWSSemanticRateLimitSignal(ctx, account, message, errCodeRaw, errTypeRaw, errMsgRaw)
 			errMsg := strings.TrimSpace(errMsgRaw)
 			if errMsg == "" {
 				errMsg = "OpenAI websocket prewarm error"
@@ -743,11 +743,31 @@ func (s *OpenAIGatewayService) persistOpenAIWSRateLimitSignal(ctx context.Contex
 	s.handleOpenAIAccountUpstreamError(ctx, account, http.StatusTooManyRequests, headers, responseBody)
 }
 
+// A post-handshake WS error is transported over an already-successful
+// connection. Handshake quota headers describe that successful connection,
+// not the semantic 429 event, so only the event body may classify the limit.
+func (s *OpenAIGatewayService) persistOpenAIWSSemanticRateLimitSignal(ctx context.Context, account *Account, responseBody []byte, codeRaw, errTypeRaw, msgRaw string) {
+	s.persistOpenAIWSRateLimitSignal(ctx, account, nil, responseBody, codeRaw, errTypeRaw, msgRaw)
+}
+
 func (s *OpenAIGatewayService) newOpenAIWSRateLimitFailoverError(account *Account, headers http.Header, responseBody []byte, message string) *UpstreamFailoverError {
 	return s.newOpenAIAccountFailoverError(
 		account,
 		http.StatusTooManyRequests,
 		headers,
+		responseBody,
+		strings.TrimSpace(message),
+		false,
+		false,
+	)
+}
+
+func (s *OpenAIGatewayService) newOpenAIWSSemanticRateLimitFailoverError(account *Account, handshakeHeaders http.Header, responseBody []byte, message string) *UpstreamFailoverError {
+	return s.newOpenAIAccountFailoverErrorWithClassificationHeaders(
+		account,
+		http.StatusTooManyRequests,
+		handshakeHeaders,
+		nil,
 		responseBody,
 		strings.TrimSpace(message),
 		false,

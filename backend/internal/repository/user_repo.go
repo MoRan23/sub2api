@@ -1134,23 +1134,23 @@ func (r *userRepository) ExistsByEmail(ctx context.Context, email string) (bool,
 	return r.client.User.Query().Where(userEmailLookupPredicate(email)).Exist(ctx)
 }
 
-// emailAliasCandidateLimit 限制一次别名查重最多取回的候选行数。探针都以去点后的
-// 本地部分为前缀锚定（见 dotStrippedEmailExpr），正常收件箱的变体只有个位数；
-// 上限只是兜底，避免公开未鉴权的注册/发码端点把大表整张读进内存。
-const emailAliasCandidateLimit = 50
-
 // ExistsByEmailAlias 见 service.UserRepository。软删除过滤沿用 ExistsByEmail 的默认行为。
 func (r *userRepository) ExistsByEmailAlias(ctx context.Context, email string) (bool, error) {
 	return existsByEmailAliasWithClient(ctx, clientFromContext(ctx, r.client), email)
 }
 
 func existsByEmailAliasWithClient(ctx context.Context, client *dbent.Client, email string) (bool, error) {
+	_, exists, err := emailAliasOwnerIDWithClient(ctx, client, email, 0)
+	return exists, err
+}
+
+func emailAliasOwnerIDWithClient(ctx context.Context, client *dbent.Client, email string, currentUserID int64) (int64, bool, error) {
 	if client == nil {
-		return false, nil
+		return 0, false, nil
 	}
 	probes := service.EmailAliasDedupProbes(email)
 	if len(probes) == 0 {
-		return false, nil
+		return 0, false, nil
 	}
 
 	preds := make([]predicate.User, 0, 2*len(probes))
@@ -1163,21 +1163,102 @@ func existsByEmailAliasWithClient(ctx context.Context, client *dbent.Client, ema
 	}
 	candidates, err := client.User.Query().
 		Where(dbuser.Or(preds...)).
-		Limit(emailAliasCandidateLimit).
-		Select(dbuser.FieldEmail).
-		Strings(ctx)
+		Select(dbuser.FieldID, dbuser.FieldEmail).
+		All(ctx)
 	if err != nil {
-		return false, err
+		return 0, false, err
 	}
 
 	// 探针会有过度匹配（点号只在 Gmail 家族无意义），最终判定必须回到完整归一化规则。
+	// 必须检查全部候选：在非 Gmail 域中可以合法存在任意数量的点号变体，提前截断会让
+	// 真正的 plus alias owner 落在结果集之外，从而绕过收件箱唯一性约束。
+	// 返回“其他用户”优先于当前用户，避免历史重复数据让调用方误判为仅当前用户占用。
 	identity := service.NormalizeEmailForAliasDedup(email)
+	var selfID int64
+	selfExists := false
 	for _, candidate := range candidates {
-		if service.NormalizeEmailForAliasDedup(candidate) == identity {
-			return true, nil
+		if service.NormalizeEmailForAliasDedup(candidate.Email) != identity {
+			continue
+		}
+		if candidate.ID != 0 && candidate.ID != currentUserID {
+			return candidate.ID, true, nil
+		}
+		if candidate.ID == currentUserID {
+			selfID = candidate.ID
+			selfExists = true
 		}
 	}
-	return false, nil
+	return selfID, selfExists, nil
+}
+
+// AcquireEmailIdentityUpdateGuard 在调用方事务内获取邮箱换绑所需的全部锁。
+// release 必须由调用方在事务提交或回滚后执行，确保非 PostgreSQL 的进程内锁也覆盖
+// 整个事务生命周期；PostgreSQL advisory lock 本身仍由数据库持有到事务结束。
+func (r *userRepository) AcquireEmailIdentityUpdateGuard(
+	ctx context.Context,
+	userID int64,
+	email string,
+) (func(), error) {
+	if userID <= 0 {
+		return nil, service.ErrUserNotFound
+	}
+	tx := dbent.TxFromContext(ctx)
+	if tx == nil {
+		return nil, fmt.Errorf("email identity update guard requires a transaction")
+	}
+	client := tx.Client()
+	return lockRepositoryScopedKeys(
+		ctx,
+		client,
+		txAwareSQLExecutor(ctx, r.sql, r.client),
+		emailIdentityUserLockKey(userID),
+		normalizedEmailUniquenessLockKey(email),
+		emailAliasUniquenessLockKey(email),
+	)
+}
+
+// UpdateEmailWithAliasGuard 在调用方持有 AcquireEmailIdentityUpdateGuard 返回的锁时，
+// 复查收件箱所有权并更新主邮箱与密码哈希。返回锁后从事务内读取的真实旧邮箱，供
+// 调用方同步替换 canonical email identity，不能使用事务外的用户快照代替。
+func (r *userRepository) UpdateEmailWithAliasGuard(
+	ctx context.Context,
+	userID int64,
+	email string,
+	passwordHash string,
+) (string, error) {
+	if userID <= 0 {
+		return "", service.ErrUserNotFound
+	}
+	if strings.TrimSpace(email) == "" || passwordHash == "" {
+		return "", fmt.Errorf("email identity update requires email and password hash")
+	}
+	tx := dbent.TxFromContext(ctx)
+	if tx == nil {
+		return "", fmt.Errorf("email identity update requires a transaction")
+	}
+	client := tx.Client()
+
+	currentUser, err := client.User.Get(ctx, userID)
+	if err != nil {
+		return "", translatePersistenceError(err, service.ErrUserNotFound, nil)
+	}
+	oldEmail := currentUser.Email
+
+	ownerID, exists, err := emailAliasOwnerIDWithClient(ctx, client, email, userID)
+	if err != nil {
+		return "", err
+	}
+	if exists && ownerID != userID {
+		return "", service.ErrEmailExists
+	}
+
+	if _, err := client.User.UpdateOneID(userID).
+		SetEmail(email).
+		SetPasswordHash(passwordHash).
+		Save(ctx); err != nil {
+		return "", translatePersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
+	}
+	return oldEmail, nil
 }
 
 // dotStrippedEmailExpr 渲染下面的表达式：去掉存量邮箱的大小写、首尾空白（与
@@ -1261,6 +1342,13 @@ func normalizedEmailUniquenessLockKey(email string) string {
 		return ""
 	}
 	return "users:normalized-email:" + normalized
+}
+
+func emailIdentityUserLockKey(userID int64) string {
+	if userID <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("users:email-identity:%d", userID)
 }
 
 func registrationEmailDomainLockKey(domain string) string {

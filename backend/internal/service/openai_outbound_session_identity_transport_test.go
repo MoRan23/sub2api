@@ -470,6 +470,63 @@ func TestBuildOpenAIWSHeadersWithBodyDisabledPreservesLegacyHeaderSelection(t *t
 	require.Equal(t, isolateOpenAISessionID(0, "legacy-handshake-conversation"), headers.Get("conversation_id"))
 }
 
+func TestBuildOpenAIWSHeadersWithBodyDisabledPreservesCanonicalSessionHeaderOnly(t *testing.T) {
+	svc := newTransportIdentityTestService(t, false)
+	account := &Account{ID: 810010, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	c := newOutboundIdentityTestContext(t, map[string]string{
+		"session-id": "canonical-handshake-session",
+	})
+
+	headers, resolution, err := svc.buildOpenAIWSHeadersWithBody(
+		context.Background(),
+		c,
+		account,
+		"oauth-token",
+		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
+		true,
+		"",
+		"",
+		"",
+		[]byte(`{"type":"response.create","input":"hello"}`),
+		false,
+	)
+	require.NoError(t, err)
+	require.False(t, resolution.OutboundIdentityModeEnabled)
+	require.Equal(t, "header_session-id", resolution.SessionSource)
+	require.Equal(t, "canonical-handshake-session", headers.Get("session-id"))
+	require.Empty(t, headers.Get("session_id"))
+}
+
+func TestBuildOpenAIWSHeadersWithBodyUUIDv7UsesFrozenCanonicalIdentity(t *testing.T) {
+	svc := newTransportIdentityTestService(t, true)
+	account := &Account{ID: 810013, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	c := newOutboundIdentityTestContext(t, map[string]string{
+		"session-id": "stale-handshake-session",
+	})
+	body := []byte(`{"type":"response.create","client_metadata":{"x-codex-turn-metadata":"{\"session_id\":\"canonical-body-session\",\"thread_id\":\"canonical-body-thread\"}"},"input":"hello"}`)
+	SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, body, ""))
+
+	headers, resolution, err := svc.buildOpenAIWSHeadersWithBody(
+		context.Background(),
+		c,
+		account,
+		"oauth-token",
+		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
+		true,
+		"",
+		"",
+		"",
+		body,
+		false,
+	)
+	require.NoError(t, err)
+	require.True(t, resolution.OutboundIdentityModeEnabled)
+	require.Equal(t, "canonical-body-session", resolution.OutboundIdentityLogicalKey)
+	require.NotEqual(t, "stale-handshake-session", headers.Get("session-id"))
+	require.Equal(t, resolution.OutboundIdentity.SessionID, headers.Get("session-id"))
+	require.Empty(t, headers.Get("session_id"))
+}
+
 func TestResolveOpenAIOutboundSessionIdentityForTransportDisabledDoesNotResolve(t *testing.T) {
 	svc := newTransportIdentityTestService(t, false)
 	before := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()

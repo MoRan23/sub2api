@@ -89,7 +89,7 @@ func TestOpenAIGatewayService_Forward_WSv2ErrorEventUsageLimitPersistsRateLimit(
 	resetAt := time.Now().Add(2 * time.Hour).Unix()
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
+		conn, err := upgrader.Upgrade(w, r, successfulOpenAIWSQuotaHeaders())
 		if err != nil {
 			t.Errorf("upgrade websocket failed: %v", err)
 			return
@@ -306,7 +306,10 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_ErrorEventUsageL
 		},
 	}
 	captureConn.events[0] = []byte(strings.ReplaceAll(string(captureConn.events[0]), "PLACEHOLDER", strconv.FormatInt(resetAt, 10)))
-	captureDialer := &openAIWSCaptureDialer{conn: captureConn}
+	captureDialer := &openAIWSCaptureDialer{
+		conn:      captureConn,
+		handshake: successfulOpenAIWSQuotaHeaders(),
+	}
 	pool := newOpenAIWSConnPool(cfg)
 	pool.setClientDialerForTest(captureDialer)
 

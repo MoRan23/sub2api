@@ -60,7 +60,7 @@ func (s *OpenAIGatewayService) BeginOpenAIWSIngressSessionPreemption(
 	preemptSessionHash := ""
 	preemptGroupID := getOpenAIGroupIDFromContext(c)
 	if account != nil && account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth {
-		preemptSessionHash = s.GenerateSessionHash(c, firstClientMessage)
+		preemptSessionHash = s.GenerateSessionHashForOpenAIOAuthIdentity(c, firstClientMessage, "")
 	}
 	preemptCtx, cleanup, armed, preemptedPrevious := s.beginOpenAIWSSessionPreemptContext(
 		ctx,

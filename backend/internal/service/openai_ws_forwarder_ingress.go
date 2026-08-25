@@ -891,7 +891,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			normalizeOpenAIWSLogValue(firstPreviousResponseIDKind),
 			truncateOpenAIWSLogValue(preferredConnID, openAIWSIDValueMaxLen),
 			truncateOpenAIWSLogValue(sessionHash, 12),
-			openAIWSOutboundIdentityHeaderValueForLog(baseAcquireReq.Headers, "session_id", pinnedIdentityDigest),
+			openAIWSSessionHeaderValueForLog(baseAcquireReq.Headers, pinnedIdentityDigest),
 			openAIWSOutboundIdentityHeaderValueForLog(baseAcquireReq.Headers, "conversation_id", pinnedIdentityDigest),
 			turnState != "",
 			len(turnState),
@@ -1151,7 +1151,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						}
 					}
 				}
-				s.persistOpenAIWSRateLimitSignal(ctx, account, lease.HandshakeHeaders(), upstreamMessage, errCodeRaw, errTypeRaw, errMsgRaw)
+				s.persistOpenAIWSSemanticRateLimitSignal(ctx, account, upstreamMessage, errCodeRaw, errTypeRaw, errMsgRaw)
 				fallbackReason, _ := classifyOpenAIWSErrorEventFromRaw(errCodeRaw, errTypeRaw, errMsgRaw)
 				errCode, errType, errMessage := summarizeOpenAIWSErrorEventFieldsFromRaw(errCodeRaw, errTypeRaw, errMsgRaw)
 				recoverablePrevNotFound := fallbackReason == openAIWSIngressStagePreviousResponseNotFound &&
@@ -1211,7 +1211,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 				if !wroteDownstream && isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw) {
 					lease.MarkBroken()
-					return nil, s.newOpenAIWSRateLimitFailoverError(account, lease.HandshakeHeaders(), upstreamMessage, errMsgRaw)
+					return nil, s.newOpenAIWSSemanticRateLimitFailoverError(account, lease.HandshakeHeaders(), upstreamMessage, errMsgRaw)
 				}
 			}
 			isTokenEvent := isOpenAIWSTokenEvent(eventType)
@@ -1837,7 +1837,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				truncateOpenAIWSLogValue(expectedPrev, openAIWSIDValueMaxLen),
 				chainedFromLast,
 				truncateOpenAIWSLogValue(preferredConnID, openAIWSIDValueMaxLen),
-				openAIWSOutboundIdentityHeaderValueForLog(baseAcquireReq.Headers, "session_id", pinnedIdentityDigest),
+				openAIWSSessionHeaderValueForLog(baseAcquireReq.Headers, pinnedIdentityDigest),
 				openAIWSOutboundIdentityHeaderValueForLog(baseAcquireReq.Headers, "conversation_id", pinnedIdentityDigest),
 				turnState != "",
 				len(turnState),

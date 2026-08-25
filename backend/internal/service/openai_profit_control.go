@@ -87,6 +87,12 @@ const (
 
 type openAIProfitControlGateCtxKey struct{}
 
+// openAIPreserveStickyBindingCtxKey carries a selection's temporary-affinity
+// decision across the handler admission boundary. It is independent of the
+// profit gate: a capacity spillover must preserve the durable binding even
+// when profit control is disabled.
+type openAIPreserveStickyBindingCtxKey struct{}
+
 // openAIProfitControlSuppressCtxKey 标记本请求显式跳过利润门（独立图片/视频
 // 端点、Grok 媒体、count_tokens、live 等利润门范围外流量）。所有装门点看到该
 // 标记后一律不装门，防止 service 层防御性装门把边界外流量重新拉回利润过滤。
@@ -288,7 +294,21 @@ func attachSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult)
 // （ProfitControlVetoLatest / GatewayProfitControlVetoLatest）与准入后粘性
 // 绑定，否则这两步会因为看不到调度栈内安装的门而退化为空操作。
 func ContextWithSelectionProfitGate(ctx context.Context, sel *AccountSelectionResult) context.Context {
-	if sel == nil || sel.profitGate == nil {
+	if sel == nil {
+		return ctx
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if sel.PreserveStickyBinding {
+		ctx = context.WithValue(ctx, openAIPreserveStickyBindingCtxKey{}, true)
+	} else if inherited, _ := ctx.Value(openAIPreserveStickyBindingCtxKey{}).(bool); inherited {
+		// A Responses WS connection carries the admission context into retries.
+		// Shadow a prior turn's spillover marker so a later genuine failover can
+		// migrate, without allocating a context on the ordinary false path.
+		ctx = context.WithValue(ctx, openAIPreserveStickyBindingCtxKey{}, false)
+	}
+	if sel.profitGate == nil {
 		return ctx
 	}
 	if existing, ok := ctx.Value(openAIProfitControlGateCtxKey{}).(*openAIProfitControlGate); ok && existing == sel.profitGate {
@@ -357,6 +377,11 @@ func (s *OpenAIGatewayService) bindOpenAIStickySessionDuringSelection(ctx contex
 func (s *OpenAIGatewayService) BindStickySessionAfterProfitAdmission(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
 	if sessionHash == "" || accountID <= 0 {
 		return nil
+	}
+	if ctx != nil {
+		if preserve, _ := ctx.Value(openAIPreserveStickyBindingCtxKey{}).(bool); preserve {
+			return nil
+		}
 	}
 	if preserveOpenAIGuardianParentBinding(ctx, sessionHash) {
 		return nil

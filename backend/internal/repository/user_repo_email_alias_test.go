@@ -65,6 +65,34 @@ func TestUserRepositoryExistsByEmailAliasIgnoresMalformedInput(t *testing.T) {
 	require.False(t, got)
 }
 
+func TestUserRepositoryExistsByEmailAliasScansPastNonGmailDotOvermatches(t *testing.T) {
+	repo, _ := newUserEntRepo(t)
+	ctx := context.Background()
+	const (
+		local  = "abcdefghijkl"
+		domain = "example.com"
+	)
+
+	// Non-Gmail dots are significant, but the SQL probe deliberately removes dots
+	// to find Gmail-style legacy variants. Seed more than the former 50-row cap so
+	// the real plus-alias owner is only reachable after all false-positive rows.
+	seeded := 0
+	for first := 1; first < len(local)-1 && seeded < 51; first++ {
+		for second := first + 1; second < len(local) && seeded < 51; second++ {
+			variant := local[:first] + "." + local[first:second] + "." + local[second:] + "@" + domain
+			seedUserForAliasTest(t, repo, variant)
+			seeded++
+		}
+	}
+	require.Equal(t, 51, seeded)
+	seedUserForAliasTest(t, repo, local+"@"+domain)
+
+	got, err := repo.ExistsByEmailAlias(ctx, local+"+tag@"+domain)
+
+	require.NoError(t, err)
+	require.True(t, got)
+}
+
 func TestUserRepositoryCreateWithEmailAliasGuard(t *testing.T) {
 	repo, _ := newUserEntRepo(t)
 	ctx := context.Background()

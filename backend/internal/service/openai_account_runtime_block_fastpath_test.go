@@ -14,7 +14,7 @@ import (
 )
 
 type oauth429RateLimitRepo struct {
-	AccountRepository
+	mockAccountRepoForGemini
 	setRateLimitedCalls  int
 	lastRateLimitedUntil time.Time
 }
@@ -60,6 +60,38 @@ func TestOpenAI429FastPath_BlocksOAuthOnlyAfterRetryWindow(t *testing.T) {
 
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 	require.False(t, svc.shouldRetryOpenAIOAuth429OnSameAccount(account, http.StatusTooManyRequests, false))
+}
+
+func TestOpenAI429FastPath_BlocksOAuthImmediatelyWhenSevenDayQuotaIsExhausted(t *testing.T) {
+	repo := &oauth429RateLimitRepo{}
+	rateLimits := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	svc := &OpenAIGatewayService{rateLimitService: rateLimits}
+	rateLimits.SetAccountRuntimeBlocker(svc)
+	account := &Account{ID: 423, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	headers := http.Header{}
+	headers.Set("x-codex-primary-used-percent", "100")
+	headers.Set("x-codex-primary-reset-after-seconds", "604800")
+	headers.Set("x-codex-primary-window-minutes", "10080")
+	headers.Set("x-codex-secondary-used-percent", "20")
+	headers.Set("x-codex-secondary-reset-after-seconds", "3600")
+	headers.Set("x-codex-secondary-window-minutes", "300")
+
+	shouldDisable := svc.handleOpenAIAccountUpstreamError(context.Background(), account, http.StatusTooManyRequests, headers, []byte(`{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded"}}`))
+
+	require.False(t, shouldDisable)
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+	require.Equal(t, 1, repo.setRateLimitedCalls)
+	require.Greater(t, time.Until(repo.lastRateLimitedUntil), 6*24*time.Hour)
+	require.False(t, svc.ShouldRetryOpenAIOAuth429(account, headers, nil))
+}
+
+func TestOpenAI429FastPath_RetriesOAuthWhenNoQuotaSignalExists(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 424, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	headers := http.Header{"Retry-After": []string{"1"}}
+
+	require.True(t, svc.ShouldRetryOpenAIOAuth429(account, headers, []byte(`{"error":{"type":"rate_limit_error","message":"try again"}}`)))
+	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
 }
 
 func TestOpenAIStream429IgnoresSuccessfulQuotaSnapshotHeaders(t *testing.T) {
@@ -164,7 +196,7 @@ func TestOpenAI429FastPath_SkipsSparkShadow(t *testing.T) {
 	svc.markOpenAIOAuth429RateLimited(context.Background(), normal, headers, nil)
 
 	require.False(t, svc.isOpenAIAccountRuntimeBlocked(shadow), "spark shadow must not be runtime-blocked by /responses global 429")
-	require.False(t, svc.isOpenAIAccountRuntimeBlocked(normal), "normal OpenAI OAuth account stays schedulable during its retry window")
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(normal), "normal OpenAI OAuth account with an exhausted 5h window must be paused")
 }
 
 func TestOpenAIRuntimeBlock_AppliesToOpenAIAPIKeyWhenRateLimitServiceStopsScheduling(t *testing.T) {
@@ -174,6 +206,39 @@ func TestOpenAIRuntimeBlock_AppliesToOpenAIAPIKeyWhenRateLimitServiceStopsSchedu
 	svc.BlockAccountScheduling(account, time.Time{}, "custom_error_code")
 
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+}
+
+func TestOpenAIRuntimeBlock_AppliesToCNOpenAICompatiblePlatforms(t *testing.T) {
+	for i, platform := range []string{PlatformKimi, PlatformZhipu, PlatformDeepseek} {
+		t.Run(platform, func(t *testing.T) {
+			svc := &OpenAIGatewayService{}
+			account := &Account{ID: int64(440 + i), Platform: platform, Type: AccountTypeAPIKey}
+
+			svc.BlockAccountScheduling(account, time.Now().Add(time.Minute), "cn_provider_cooldown")
+
+			require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+		})
+	}
+}
+
+func TestOpenAIRuntimeBlocker_KimiConcurrencySurvivesRepositoryFailure(t *testing.T) {
+	gateway := &OpenAIGatewayService{}
+	repo := &rateLimitAccountRepoStub{tempErr: errors.New("repository unavailable")}
+	rateLimitService := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	rateLimitService.SetAccountRuntimeBlocker(gateway)
+	account := &Account{ID: 449, Platform: PlatformKimi, Type: AccountTypeAPIKey}
+
+	shouldDisable := rateLimitService.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		http.Header{},
+		[]byte(`{"error":{"message":"You've reached your concurrent request limit. Please wait for your ongoing requests to finish and try again."}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.tempCalls)
+	require.True(t, gateway.isOpenAIAccountRuntimeBlocked(account))
 }
 
 func TestOpenAIRuntimeBlock_DoesNotApplyToOtherPlatforms(t *testing.T) {

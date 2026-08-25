@@ -52,6 +52,17 @@ func hasOpenAIWSHeader(headers http.Header, key string) bool {
 	return strings.TrimSpace(headers.Get(key)) != ""
 }
 
+func openAIWSSessionHeaderValueForLog(headers http.Header, identityDigest string) string {
+	if hasOpenAIWSHeader(headers, "session-id") {
+		return openAIWSOutboundIdentityHeaderValueForLog(headers, "session-id", identityDigest)
+	}
+	return openAIWSOutboundIdentityHeaderValueForLog(headers, "session_id", identityDigest)
+}
+
+func hasOpenAIWSSessionHeader(headers http.Header) bool {
+	return hasOpenAIWSHeader(headers, "session-id") || hasOpenAIWSHeader(headers, "session_id")
+}
+
 type openAIWSSessionHeaderResolution struct {
 	SessionID          string
 	ConversationID     string
@@ -77,7 +88,10 @@ func resolveOpenAIWSSessionHeaders(c *gin.Context, promptCacheKey string) openAI
 		ConversationSource: "none",
 	}
 	if c != nil && c.Request != nil {
-		if sessionID := strings.TrimSpace(c.Request.Header.Get("session_id")); sessionID != "" {
+		if sessionID := strings.TrimSpace(c.Request.Header.Get("session-id")); sessionID != "" {
+			resolution.SessionID = sessionID
+			resolution.SessionSource = "header_session-id"
+		} else if sessionID := strings.TrimSpace(c.Request.Header.Get("session_id")); sessionID != "" {
 			resolution.SessionID = sessionID
 			resolution.SessionSource = "header_session_id"
 		}

@@ -12,6 +12,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/authidentity"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+
+	"entgo.io/ent/dialect"
 )
 
 // BindEmailIdentity verifies and binds a local email/password identity to the
@@ -56,12 +58,8 @@ func (s *AuthService) BindEmailIdentity(
 		return nil, ErrPasswordIncorrect
 	}
 
-	existingUser, err := s.userRepo.GetByEmail(ctx, normalizedEmail)
-	switch {
-	case err == nil && existingUser != nil && existingUser.ID != userID:
-		return nil, ErrEmailExists
-	case err != nil && !errors.Is(err, ErrUserNotFound):
-		return nil, ErrServiceUnavailable
+	if err := s.ensureEmailIdentityAvailableForUser(ctx, currentUser, normalizedEmail); err != nil {
+		return nil, err
 	}
 
 	hashedPassword, err := s.HashPassword(password)
@@ -115,19 +113,16 @@ func (s *AuthService) SendEmailIdentityBindCode(ctx context.Context, userID int6
 	if s.emailService == nil {
 		return ErrServiceUnavailable
 	}
-	if _, err := s.userRepo.GetByID(ctx, userID); err != nil {
+	currentUser, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
 			return ErrUserNotFound
 		}
 		return ErrServiceUnavailable
 	}
 
-	existingUser, err := s.userRepo.GetByEmail(ctx, normalizedEmail)
-	switch {
-	case err == nil && existingUser != nil && existingUser.ID != userID:
-		return ErrEmailExists
-	case err != nil && !errors.Is(err, ErrUserNotFound):
-		return ErrServiceUnavailable
+	if err := s.ensureEmailIdentityAvailableForUser(ctx, currentUser, normalizedEmail); err != nil {
+		return err
 	}
 
 	siteName := "Sub2API"
@@ -135,6 +130,45 @@ func (s *AuthService) SendEmailIdentityBindCode(ctx context.Context, userID int6
 		siteName = s.settingService.GetSiteName(ctx)
 	}
 	return s.emailService.SendVerifyCode(ctx, normalizedEmail, siteName, firstEmailLocale(locale))
+}
+
+// ensureEmailIdentityAvailableForUser 在发码 / 提交换绑前做快速查重。
+// 精确地址或 provider alias 若已指向其他用户的收件箱则直接拒绝；
+// 当前用户自己的收件箱允许继续，便于其更换自身的 alias 变体。
+func (s *AuthService) ensureEmailIdentityAvailableForUser(
+	ctx context.Context,
+	currentUser *User,
+	email string,
+) error {
+	if currentUser == nil {
+		return ErrUserNotFound
+	}
+
+	existingUser, err := s.userRepo.GetByEmail(ctx, email)
+	switch {
+	case err == nil:
+		if existingUser == nil || existingUser.ID == currentUser.ID {
+			break
+		}
+		return ErrEmailExists
+	case errors.Is(err, ErrUserNotFound):
+		// Continue to alias lookup below.
+	default:
+		return ErrServiceUnavailable
+	}
+
+	if NormalizeEmailForAliasDedup(currentUser.Email) == NormalizeEmailForAliasDedup(email) {
+		return nil
+	}
+
+	aliasExists, err := s.userRepo.ExistsByEmailAlias(ctx, email)
+	if err != nil {
+		return ErrServiceUnavailable
+	}
+	if aliasExists {
+		return ErrEmailExists
+	}
+	return nil
 }
 
 func normalizeEmailForIdentityBinding(email string) (string, error) {
@@ -153,6 +187,13 @@ func hasBindableEmailIdentitySubject(email string) bool {
 	return normalized != "" && !isReservedEmail(normalized)
 }
 
+// emailIdentityAliasGuardRepository 是主邮箱替换所需的事务内原子仓储能力，
+// 用于关闭服务层前置查重与实际写入之间的并发窗口。
+type emailIdentityAliasGuardRepository interface {
+	AcquireEmailIdentityUpdateGuard(ctx context.Context, userID int64, email string) (func(), error)
+	UpdateEmailWithAliasGuard(ctx context.Context, userID int64, email string, passwordHash string) (oldEmail string, err error)
+}
+
 func (s *AuthService) updateBoundEmailIdentityTx(
 	ctx context.Context,
 	currentUser *User,
@@ -160,18 +201,44 @@ func (s *AuthService) updateBoundEmailIdentityTx(
 	hashedPassword string,
 	applyFirstBindDefaults bool,
 ) error {
+	guard, ok := s.userRepo.(emailIdentityAliasGuardRepository)
+	if !ok {
+		return ErrServiceUnavailable
+	}
+
 	if tx := dbent.TxFromContext(ctx); tx != nil {
-		return s.updateBoundEmailIdentityWithClient(ctx, tx.Client(), currentUser, email, hashedPassword, applyFirstBindDefaults)
+		client := tx.Client()
+		// PostgreSQL transaction advisory locks survive this function and remain held
+		// until the caller commits. A non-PostgreSQL outer transaction has no hook that
+		// lets us retain the process lock through its eventual commit, so fail closed.
+		if client.Driver().Dialect() != dialect.Postgres {
+			return ErrServiceUnavailable
+		}
+		releaseGuard, err := guard.AcquireEmailIdentityUpdateGuard(ctx, currentUser.ID, email)
+		if err != nil {
+			return mapEmailIdentityGuardError(err)
+		}
+		defer releaseGuard()
+		return s.updateBoundEmailIdentityWithClient(ctx, client, guard, currentUser, email, hashedPassword, applyFirstBindDefaults)
 	}
 
 	tx, err := s.entClient.Tx(ctx)
 	if err != nil {
 		return ErrServiceUnavailable
 	}
-	defer func() { _ = tx.Rollback() }()
 
 	txCtx := dbent.NewTxContext(ctx, tx)
-	if err := s.updateBoundEmailIdentityWithClient(txCtx, tx.Client(), currentUser, email, hashedPassword, applyFirstBindDefaults); err != nil {
+	releaseGuard, err := guard.AcquireEmailIdentityUpdateGuard(txCtx, currentUser.ID, email)
+	if err != nil {
+		_ = tx.Rollback()
+		return mapEmailIdentityGuardError(err)
+	}
+	// Defers execute in reverse order: rollback/transaction cleanup always completes
+	// before the non-PostgreSQL process lock is released.
+	defer releaseGuard()
+	defer func() { _ = tx.Rollback() }()
+
+	if err := s.updateBoundEmailIdentityWithClient(txCtx, tx.Client(), guard, currentUser, email, hashedPassword, applyFirstBindDefaults); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -183,24 +250,19 @@ func (s *AuthService) updateBoundEmailIdentityTx(
 func (s *AuthService) updateBoundEmailIdentityWithClient(
 	ctx context.Context,
 	client *dbent.Client,
+	guard emailIdentityAliasGuardRepository,
 	currentUser *User,
 	email string,
 	hashedPassword string,
 	applyFirstBindDefaults bool,
 ) error {
-	if client == nil || currentUser == nil || currentUser.ID <= 0 {
+	if client == nil || guard == nil || currentUser == nil || currentUser.ID <= 0 {
 		return ErrServiceUnavailable
 	}
 
-	oldEmail := currentUser.Email
-	if _, err := client.User.UpdateOneID(currentUser.ID).
-		SetEmail(email).
-		SetPasswordHash(hashedPassword).
-		Save(ctx); err != nil {
-		if dbent.IsConstraintError(err) {
-			return ErrEmailExists
-		}
-		return ErrServiceUnavailable
+	oldEmail, err := guard.UpdateEmailWithAliasGuard(ctx, currentUser.ID, email, hashedPassword)
+	if err != nil {
+		return mapEmailIdentityGuardError(err)
 	}
 
 	if err := replaceBoundEmailAuthIdentityWithClient(ctx, client, currentUser.ID, oldEmail, email, "auth_service_email_bind"); err != nil {
@@ -226,6 +288,13 @@ func (s *AuthService) updateBoundEmailIdentityWithClient(
 	currentUser.Concurrency = updatedUser.Concurrency
 	currentUser.UpdatedAt = updatedUser.UpdatedAt
 	return nil
+}
+
+func mapEmailIdentityGuardError(err error) error {
+	if errors.Is(err, ErrEmailExists) || errors.Is(err, ErrUserNotFound) {
+		return err
+	}
+	return ErrServiceUnavailable
 }
 
 func (s *AuthService) revokeEmailIdentitySessions(ctx context.Context, userID int64) {

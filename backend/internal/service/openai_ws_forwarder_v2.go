@@ -205,14 +205,14 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		openAIWSHeaderValueForLog(wsHeaders, "openai-beta"),
 		openAIWSHeaderValueForLog(wsHeaders, "originator"),
 		openAIWSHeaderValueForLog(wsHeaders, "accept-language"),
-		openAIWSOutboundIdentityHeaderValueForLog(wsHeaders, "session_id", sessionResolution.OutboundIdentityDigest),
+		openAIWSSessionHeaderValueForLog(wsHeaders, sessionResolution.OutboundIdentityDigest),
 		openAIWSOutboundIdentityHeaderValueForLog(wsHeaders, "conversation_id", sessionResolution.OutboundIdentityDigest),
 		normalizeOpenAIWSLogValue(sessionResolution.SessionSource),
 		normalizeOpenAIWSLogValue(sessionResolution.ConversationSource),
 		promptCacheKey != "",
 		hasOpenAIWSHeader(wsHeaders, "chatgpt-account-id"),
 		hasOpenAIWSHeader(wsHeaders, "authorization"),
-		hasOpenAIWSHeader(wsHeaders, "session_id"),
+		hasOpenAIWSSessionHeader(wsHeaders),
 		hasOpenAIWSHeader(wsHeaders, "conversation_id"),
 		account.ProxyID != nil && account.Proxy != nil,
 	)
@@ -313,7 +313,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			lease.Reused(),
 			storeDisabled,
 			truncateOpenAIWSLogValue(sessionHash, 12),
-			openAIWSOutboundIdentityHeaderValueForLog(wsHeaders, "session_id", sessionResolution.OutboundIdentityDigest),
+			openAIWSSessionHeaderValueForLog(wsHeaders, sessionResolution.OutboundIdentityDigest),
 			openAIWSOutboundIdentityHeaderValueForLog(wsHeaders, "conversation_id", sessionResolution.OutboundIdentityDigest),
 			normalizeOpenAIWSLogValue(sessionResolution.SessionSource),
 			normalizeOpenAIWSLogValue(sessionResolution.ConversationSource),
@@ -692,7 +692,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		if eventType == "error" {
 			s.handleOpenAIWSErrorEventTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), message)
 			errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(message)
-			s.persistOpenAIWSRateLimitSignal(ctx, account, lease.HandshakeHeaders(), message, errCodeRaw, errTypeRaw, errMsgRaw)
+			s.persistOpenAIWSSemanticRateLimitSignal(ctx, account, message, errCodeRaw, errTypeRaw, errMsgRaw)
 			errMsg := strings.TrimSpace(errMsgRaw)
 			if errMsg == "" {
 				errMsg = "Upstream websocket error"
@@ -724,7 +724,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 					storeDisabled,
 					lease.Reused(),
 					truncateOpenAIWSLogValue(sessionHash, 12),
-					openAIWSOutboundIdentityHeaderValueForLog(wsHeaders, "session_id", sessionResolution.OutboundIdentityDigest),
+					openAIWSSessionHeaderValueForLog(wsHeaders, sessionResolution.OutboundIdentityDigest),
 					openAIWSOutboundIdentityHeaderValueForLog(wsHeaders, "conversation_id", sessionResolution.OutboundIdentityDigest),
 					normalizeOpenAIWSLogValue(sessionResolution.SessionSource),
 					normalizeOpenAIWSLogValue(sessionResolution.ConversationSource),

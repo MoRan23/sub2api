@@ -575,6 +575,11 @@ type AccountSelectionResult struct {
 	Acquired    bool
 	ReleaseFunc func()
 	WaitPlan    *AccountWaitPlan // nil means no wait allowed
+	// PreserveStickyBinding marks a temporary selection that must not replace
+	// the durable session -> account binding after admission. Capacity
+	// spillover uses this flag; genuine unhealthy failover leaves it false so
+	// the replacement account can become sticky.
+	PreserveStickyBinding bool
 	// profitGate 携带本次选号真实生效的利润门（无门为 nil）。门安装在调度栈的
 	// 局部 ctx 上，handler 必须经 ContextWithSelectionProfitGate 重放后才能在
 	// 调度栈之外做抢槽后终检与准入后粘性绑定。

@@ -936,6 +936,13 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 	if account.Platform == PlatformAntigravity {
 		return s.handleAntigravity403(ctx, account, upstreamMsg, responseBody)
 	}
+	// Kimi reports its transient per-account concurrency/business limit as a 403.
+	// Keep the normal 403 failover signal (true), but never feed this exact message
+	// into the escalating 403 counter that can permanently mark the account error.
+	if isCNProviderConcurrencyLimit403(account, upstreamMsg) {
+		s.handleCNProviderConcurrencyLimit403(ctx, account)
+		return true
+	}
 	// 国产供应商与 openai 同口径:HTML 403(CDN/代理拦截页)不构成账号失效证据,
 	// 且 403 在 failover 状态集里会被逐账号重放——直接 SetError 会让一个坏请求/
 	// 一层坏代理连环永久禁用整组账号。走 HTML 豁免 + N 次累计 + 临时冷却。
@@ -1658,19 +1665,15 @@ func (s *RateLimitService) persistOpenAICodexSnapshot(ctx context.Context, accou
 //	  }
 //	}
 func parseOpenAIRateLimitResetTime(body []byte) *int64 {
-	var parsed map[string]any
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return nil
-	}
-
-	errObj, ok := parsed["error"].(map[string]any)
+	errObj, ok := parseOpenAIRateLimitErrorObject(body)
 	if !ok {
 		return nil
 	}
 
-	// 检查是否为已知的账号用量限制类型。
-	errType, _ := errObj["type"].(string)
-	if errType != "usage_limit_reached" && errType != "rate_limit_exceeded" && errType != "GoUsageLimitError" {
+	// 检查是否为已知的账号用量限制类型或错误码。
+	errType := strings.ToLower(strings.TrimSpace(stringValue(errObj["type"])))
+	errCode := strings.ToLower(strings.TrimSpace(stringValue(errObj["code"])))
+	if !isOpenAIRateLimitResetSignal(errType) && !isOpenAIRateLimitResetSignal(errCode) {
 		return nil
 	}
 
@@ -1699,7 +1702,7 @@ func parseOpenAIRateLimitResetTime(body []byte) *int64 {
 
 	// OpenCode Go subscriptions expose the reset only in a human-readable message,
 	// for example: "Weekly usage limit reached. Resets in 2 days."
-	if errType == "GoUsageLimitError" {
+	if errType == "gousagelimiterror" {
 		message, _ := errObj["message"].(string)
 		if resetAfter := parseOpenCodeGoUsageLimitResetDuration(message); resetAfter > 0 {
 			ts := time.Now().Add(resetAfter).Unix()
@@ -1708,6 +1711,47 @@ func parseOpenAIRateLimitResetTime(body []byte) *int64 {
 	}
 
 	return nil
+}
+
+// parseOpenAIRateLimitErrorObject accepts both ordinary HTTP error envelopes
+// and the canonical Responses response.failed carrier used by SSE and WS.
+func parseOpenAIRateLimitErrorObject(body []byte) (map[string]any, bool) {
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, false
+	}
+	if errObj, ok := parsed["error"].(map[string]any); ok {
+		return errObj, true
+	}
+	response, ok := parsed["response"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	errObj, ok := response["error"].(map[string]any)
+	return errObj, ok
+}
+
+func isOpenAIRateLimitResetSignal(value string) bool {
+	switch value {
+	case "usage_limit_reached", "rate_limit_exceeded", "insufficient_quota", "gousagelimiterror":
+		return true
+	default:
+		return false
+	}
+}
+
+func isOpenAIQuotaExhaustionErrorBody(body []byte) bool {
+	errObj, ok := parseOpenAIRateLimitErrorObject(body)
+	if !ok {
+		return false
+	}
+	for _, field := range []string{"type", "code"} {
+		signal := strings.ToLower(strings.TrimSpace(stringValue(errObj[field])))
+		if signal == "usage_limit_reached" || signal == "insufficient_quota" {
+			return true
+		}
+	}
+	return false
 }
 
 func parseOpenCodeGoUsageLimitResetDuration(message string) time.Duration {
@@ -1768,18 +1812,14 @@ func openCodeGoUsageLimitDurationUnit(raw string) time.Duration {
 }
 
 func parseOpenAIRateLimitPlanType(body []byte) string {
-	var parsed map[string]any
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return ""
-	}
-
-	errObj, ok := parsed["error"].(map[string]any)
+	errObj, ok := parseOpenAIRateLimitErrorObject(body)
 	if !ok {
 		return ""
 	}
 
-	errType, _ := errObj["type"].(string)
-	if errType != "usage_limit_reached" && errType != "rate_limit_exceeded" {
+	errType := strings.ToLower(strings.TrimSpace(stringValue(errObj["type"])))
+	errCode := strings.ToLower(strings.TrimSpace(stringValue(errObj["code"])))
+	if !isOpenAIRateLimitResetSignal(errType) && !isOpenAIRateLimitResetSignal(errCode) {
 		return ""
 	}
 

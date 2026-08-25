@@ -391,6 +391,7 @@ func TestOpenAIGatewayService_ClientSessionHeaderPriority(t *testing.T) {
 		name  string
 		value string
 	}{
+		{name: "session-id", value: "codex-session"},
 		{name: "session_id", value: "generic-session"},
 		{name: "conversation_id", value: "generic-conversation"},
 		{name: openCodeSessionAffinityHeader, value: "opencode-affinity"},
@@ -414,6 +415,31 @@ func TestOpenAIGatewayService_ClientSessionHeaderPriority(t *testing.T) {
 		c.Request.Header.Del(header.name)
 	}
 	require.Equal(t, "body-session", svc.ExtractSessionID(c, body))
+}
+
+func TestOpenAIGatewayService_CodexSessionIDKeepsReconnectHashStable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	c.Request.Header.Set("session-id", "codex-reconnect-session")
+
+	svc := &OpenAIGatewayService{}
+	warmup := []byte(`{
+		"type":"response.create",
+		"model":"gpt-5.6-sol",
+		"generate":false,
+		"tools":[{"type":"custom","name":"exec"}],
+		"input":[{"role":"user","content":"warmup"}]
+	}`)
+	business := []byte(`{
+		"type":"response.create",
+		"model":"gpt-5.6-sol",
+		"input":[{"role":"user","content":"install codex"}]
+	}`)
+
+	require.Equal(t, svc.GenerateSessionHash(c, warmup), svc.GenerateSessionHash(c, business))
+	require.Equal(t, "codex-reconnect-session", svc.ExtractSessionID(c, business))
 }
 
 func TestOpenAIGatewayService_ClientSessionHeadersIgnorePerRequestIDs(t *testing.T) {
@@ -1181,6 +1207,56 @@ func TestOpenAISelectAccountWithLoadAwareness_StickyWaitPlan(t *testing.T) {
 	}
 }
 
+func TestOpenAISelectAccountWithLoadAwareness_StickyCapacitySpilloverKeepsBinding(t *testing.T) {
+	sessionHash := "sticky-spillover"
+	groupID := int64(1)
+	repo := stubOpenAIAccountRepo{
+		accounts: []Account{
+			{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Concurrency: 6, Priority: 1, GroupIDs: []int64{groupID}},
+			{ID: 2, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Concurrency: 6, Priority: 1, GroupIDs: []int64{groupID}},
+		},
+	}
+	cache := &stubGatewayCache{
+		sessionBindings: map[string]int64{"openai:" + sessionHash: 1},
+	}
+	concurrencyCache := stubConcurrencyCache{
+		acquireResults: map[int64]bool{1: false, 2: true},
+		waitCounts:     map[int64]int{1: 1},
+		loadMap: map[int64]*AccountLoadInfo{
+			1: {AccountID: 1, LoadRate: 100},
+			2: {AccountID: 2, LoadRate: 10},
+		},
+	}
+	cfg := &config.Config{RunMode: config.RunModeStandard}
+	cfg.Gateway.Scheduling.LoadBatchEnabled = true
+	cfg.Gateway.Scheduling.StickySessionMaxWaiting = 1
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        repo,
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, sessionHash, "gpt-4", nil)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(2), selection.Account.ID, "capacity spillover should use the other account for this request")
+	require.True(t, selection.Acquired)
+	require.True(t, selection.PreserveStickyBinding)
+	require.Equal(t, int64(1), cache.sessionBindings["openai:"+sessionHash], "capacity spillover must not migrate the durable sticky binding")
+	admissionCtx := ContextWithSelectionProfitGate(context.Background(), selection)
+	require.NoError(t, svc.BindStickySessionAfterProfitAdmission(admissionCtx, &groupID, sessionHash, selection.Account.ID))
+	require.Equal(t, int64(1), cache.sessionBindings["openai:"+sessionHash], "post-admission binding must also preserve the durable sticky account")
+	migrationCtx := ContextWithSelectionProfitGate(admissionCtx, &AccountSelectionResult{})
+	require.NoError(t, svc.BindStickySessionAfterProfitAdmission(migrationCtx, &groupID, sessionHash, selection.Account.ID))
+	require.Equal(t, int64(2), cache.sessionBindings["openai:"+sessionHash], "a later genuine failover must clear an inherited spillover marker")
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
 func TestOpenAISelectAccountWithLoadAwareness_PrefersLowerLoad(t *testing.T) {
 	groupID := int64(1)
 	repo := stubOpenAIAccountRepo{
@@ -1855,6 +1931,61 @@ func TestOpenAIStreamingResponseFailedBeforeOutputRateLimitUsesPoolRetryPolicy(t
 	require.True(t, ok)
 	require.NotEmpty(t, opsEvents)
 	require.Equal(t, http.StatusTooManyRequests, opsEvents[len(opsEvents)-1].UpstreamStatusCode)
+}
+
+func TestOpenAIStreamingResponseFailedBeforeOutputExplicitQuotaIs429(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name   string
+		field  string
+		signal string
+	}{
+		{name: "usage limit type", field: "type", signal: "usage_limit_reached"},
+		{name: "insufficient quota code", field: "code", signal: "insufficient_quota"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Gateway: config.GatewayConfig{
+					StreamDataIntervalTimeout: 0,
+					StreamKeepaliveInterval:   0,
+					MaxLineSize:               defaultMaxLineSize,
+				},
+			}
+			svc := &OpenAIGatewayService{cfg: cfg}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+			failed := fmt.Sprintf(
+				`{"type":"response.failed","response":{"id":"resp_quota","status":"failed","error":{%q:%q,"message":"quota exhausted"}}}`,
+				tt.field,
+				tt.signal,
+			)
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+					"event: response.created",
+					`data: {"type":"response.created","response":{"id":"resp_quota"}}`,
+					"",
+					"event: response.failed",
+					"data: " + failed,
+					"",
+				}, "\n"))),
+				Header: successfulOpenAIWSQuotaHeaders(),
+			}
+			account := &Account{ID: 21, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Name: "quota-account"}
+
+			_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "model", "model")
+
+			require.Error(t, err)
+			var failoverErr *UpstreamFailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
+			require.Equal(t, "604800", failoverErr.ResponseHeaders.Get("X-Codex-Primary-Reset-After-Seconds"))
+			require.False(t, c.Writer.Written())
+			require.Empty(t, rec.Body.String())
+		})
+	}
 }
 
 // 流内 rate limit 进入 OAuth 同账号重试窗口，但不立即写账号级限流/封禁状态：

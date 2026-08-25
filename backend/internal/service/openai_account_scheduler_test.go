@@ -409,7 +409,7 @@ func TestOpenAIGatewayService_OpenAIAdvancedSchedulerRuntimeSettings_InvalidWeig
 	}
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_DefaultDisabledUsesLegacyLoadAwareness(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_DefaultDisabledHardRoutesNonMovablePreviousResponse(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	ctx := context.Background()
@@ -436,7 +436,9 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_DefaultDisabledUsesLega
 	}
 	cfg := &config.Config{}
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false
-	cache := &schedulerTestGatewayCache{}
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{
+		"openai:session_disabled_001": 36002,
+	}}
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
 		cache:              cache,
@@ -452,7 +454,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_DefaultDisabledUsesLega
 		ctx,
 		&groupID,
 		"resp_disabled_001",
-		"",
+		"session_disabled_001",
 		"gpt-5.1",
 		nil,
 		OpenAIUpstreamTransportAny,
@@ -461,9 +463,34 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_DefaultDisabledUsesLega
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
-	require.Equal(t, int64(36002), selection.Account.ID)
-	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
-	require.False(t, decision.StickyPreviousHit)
+	require.Equal(t, int64(36001), selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerPreviousResponse, decision.Layer)
+	require.True(t, decision.StickyPreviousHit)
+	require.True(t, selection.PreserveStickyBinding, "a spillover response chain must not replace a different durable session binding")
+	admissionCtx := ContextWithSelectionProfitGate(ctx, selection)
+	require.NoError(t, svc.BindStickySessionAfterProfitAdmission(admissionCtx, &groupID, "session_disabled_001", selection.Account.ID))
+	require.Equal(t, int64(36002), cache.sessionBindings["openai:session_disabled_001"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+
+	rootSelection, _, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"session_disabled_001",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+		false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, rootSelection)
+	require.NotNil(t, rootSelection.Account)
+	require.Equal(t, int64(36002), rootSelection.Account.ID, "a new root turn should return to the durable sticky account")
+	if rootSelection.ReleaseFunc != nil {
+		rootSelection.ReleaseFunc()
+	}
 }
 
 // Regression: the legacy load-batch path had two bare ErrNoAvailableAccounts
@@ -2331,10 +2358,10 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyKeepsS
 	concurrencyCache := schedulerTestConcurrencyCache{
 		acquireResults: map[int64]bool{
 			21001: false, // sticky 账号已满
-			21002: true,  // 若回退负载均衡会命中该账号（本测试要求不能切换）
+			21002: true,  // 队列未到阈值时不得切换
 		},
 		waitCounts: map[int64]int{
-			21001: 999,
+			21001: 1,
 		},
 		loadMap: map[int64]*AccountLoadInfo{
 			21001: {AccountID: 21001, LoadRate: 90, WaitingCount: 9},
@@ -2438,7 +2465,8 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyEscapeByTT
 	require.Equal(t, int64(21102), selection.Account.ID)
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 	require.False(t, decision.StickySessionHit)
-	require.Equal(t, int64(21101), cache.sessionBindings["openai:session_hash_sticky_ttft"])
+	require.False(t, selection.PreserveStickyBinding)
+	require.Equal(t, int64(21102), cache.sessionBindings["openai:session_hash_sticky_ttft"], "unhealthy TTFT failover should migrate the durable binding")
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}
@@ -2488,13 +2516,14 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyEscapeByEr
 	require.Equal(t, int64(21202), selection.Account.ID)
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 	require.False(t, decision.StickySessionHit)
-	require.Equal(t, int64(21201), cache.sessionBindings["openai:session_hash_sticky_error_rate"])
+	require.False(t, selection.PreserveStickyBinding)
+	require.Equal(t, int64(21202), cache.sessionBindings["openai:session_hash_sticky_error_rate"], "unhealthy error-rate failover should migrate the durable binding")
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyEscapes(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyCapacitySpillover(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10103)
 	accounts := []Account{
@@ -2532,12 +2561,17 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyEscape
 	require.Nil(t, selection.WaitPlan)
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 	require.False(t, decision.StickySessionHit)
+	require.True(t, selection.PreserveStickyBinding)
+	require.Equal(t, int64(21301), cache.sessionBindings["openai:session_hash_sticky_busy_escape"])
+	admissionCtx := ContextWithSelectionProfitGate(ctx, selection)
+	require.NoError(t, svc.BindStickySessionAfterProfitAdmission(admissionCtx, &groupID, "session_hash_sticky_busy_escape", selection.Account.ID))
+	require.Equal(t, int64(21301), cache.sessionBindings["openai:session_hash_sticky_busy_escape"], "post-admission binding must not migrate a capacity spillover")
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyEscapeDisabledKeepsLegacyBehavior(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyCapacitySpilloverIgnoresHealthEscapeToggle(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10104)
 	accounts := []Account{
@@ -2573,11 +2607,15 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyEscapeDisa
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
-	require.Equal(t, int64(21401), selection.Account.ID)
-	require.NotNil(t, selection.WaitPlan)
-	require.Equal(t, int64(21401), selection.WaitPlan.AccountID)
-	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
-	require.True(t, decision.StickySessionHit)
+	require.Equal(t, int64(21402), selection.Account.ID)
+	require.Nil(t, selection.WaitPlan)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.False(t, decision.StickySessionHit)
+	require.True(t, selection.PreserveStickyBinding)
+	require.Equal(t, int64(21401), cache.sessionBindings["openai:session_hash_sticky_disabled"])
+	admissionCtx := ContextWithSelectionProfitGate(ctx, selection)
+	require.NoError(t, svc.BindStickySessionAfterProfitAdmission(admissionCtx, &groupID, "session_hash_sticky_disabled", selection.Account.ID))
+	require.Equal(t, int64(21401), cache.sessionBindings["openai:session_hash_sticky_disabled"], "capacity spillover must remain temporary when health escape is disabled")
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SubscriptionPriorityChoosesSubscriptionPoolFirst(t *testing.T) {

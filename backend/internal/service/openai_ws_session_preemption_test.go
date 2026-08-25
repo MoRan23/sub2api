@@ -151,6 +151,82 @@ func TestOpenAIWSIngressSessionPreemptionSurvivesNestedForwardCleanup(t *testing
 	require.True(t, IsOpenAIWSSessionPreemptedError(context.Cause(firstCtx)))
 }
 
+func TestOpenAIWSIngressSessionPreemptionUsesFrozenCanonicalIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	groupID := int64(7)
+	newContext := func(headerSession string, body []byte) *gin.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+		c.Request.Header.Set("session-id", headerSession)
+		c.Set("api_key", &APIKey{ID: 11, GroupID: &groupID})
+		SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, body, ""))
+		return c
+	}
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	firstBody := []byte(`{"type":"response.create","client_metadata":{"x-codex-turn-metadata":"{\"session_id\":\"canonical-session\",\"thread_id\":\"canonical-thread\"}"},"input":"first"}`)
+	secondBody := []byte(`{"type":"response.create","client_metadata":{"x-codex-turn-metadata":"{\"session_id\":\"canonical-session\",\"thread_id\":\"canonical-thread\"}"},"input":"second"}`)
+	firstRequest := newContext("stale-header-a", firstBody)
+	secondRequest := newContext("stale-header-b", secondBody)
+
+	firstCtx, firstCleanup, armed := svc.BeginOpenAIWSIngressSessionPreemption(
+		context.Background(), firstRequest, account, firstBody,
+	)
+	require.True(t, armed)
+	defer firstCleanup()
+	expectedHash := DeriveSessionHashFromSeed("canonical-session")
+	svc.openaiWSSessionPreemptions.mu.Lock()
+	_, registeredByCanonicalHash := svc.openaiWSSessionPreemptions.active[openAIWSSessionPreemptKey{
+		groupID: groupID, apiKeyID: 11, sessionHash: expectedHash,
+	}]
+	_, registeredByStaleHeader := svc.openaiWSSessionPreemptions.active[openAIWSSessionPreemptKey{
+		groupID: groupID, apiKeyID: 11, sessionHash: DeriveSessionHashFromSeed("stale-header-a"),
+	}]
+	svc.openaiWSSessionPreemptions.mu.Unlock()
+	require.True(t, registeredByCanonicalHash)
+	require.False(t, registeredByStaleHeader)
+
+	_, secondCleanup, armed := svc.BeginOpenAIWSIngressSessionPreemption(
+		context.Background(), secondRequest, account, secondBody,
+	)
+	require.True(t, armed)
+	defer secondCleanup()
+	require.True(t, IsOpenAIWSSessionPreemptedError(context.Cause(firstCtx)))
+}
+
+func TestOpenAIWSIngressSessionPreemptionDoesNotMergeDifferentFrozenIdentities(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	groupID := int64(7)
+	newContext := func(canonicalSession string) (*gin.Context, []byte) {
+		body := []byte(fmt.Sprintf(`{"type":"response.create","client_metadata":{"x-codex-turn-metadata":"{\"session_id\":\"%s\",\"thread_id\":\"%s\"}"},"input":"hello"}`, canonicalSession, canonicalSession))
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+		c.Request.Header.Set("session-id", "shared-stale-header")
+		c.Set("api_key", &APIKey{ID: 11, GroupID: &groupID})
+		SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, body, ""))
+		return c, body
+	}
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	firstRequest, firstBody := newContext("canonical-session-a")
+	secondRequest, secondBody := newContext("canonical-session-b")
+
+	firstCtx, firstCleanup, armed := svc.BeginOpenAIWSIngressSessionPreemption(
+		context.Background(), firstRequest, account, firstBody,
+	)
+	require.True(t, armed)
+	defer firstCleanup()
+
+	_, secondCleanup, armed := svc.BeginOpenAIWSIngressSessionPreemption(
+		context.Background(), secondRequest, account, secondBody,
+	)
+	require.True(t, armed)
+	defer secondCleanup()
+	require.NoError(t, firstCtx.Err())
+}
+
 func TestOpenAIWSSessionPreemptRemoteClaimAndStaleReleaseAreAtomic(t *testing.T) {
 	cache := &openAIWSSessionPreemptCacheStub{}
 	svc := &OpenAIGatewayService{cache: cache}
