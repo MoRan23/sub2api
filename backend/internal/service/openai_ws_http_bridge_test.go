@@ -1287,7 +1287,7 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 		Concurrency: 1,
 		Status:      StatusActive,
 	}
-	payload := []byte(`{"type":"response.create","generate":true,"model":"gpt-5","stream":true,"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"},"input":"hi"}`)
+	payload := []byte(`{"type":"response.create","generate":true,"model":"gpt-5","stream":true,"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"},"input":"hi","parallel_tool_calls":true}`)
 
 	type bridgeResult struct {
 		result *OpenAIForwardResult
@@ -1373,6 +1373,8 @@ func TestOpenAIWSHTTPBridgeRelaysSSEFramesAsWebSocketMessages(t *testing.T) {
 	require.False(t, gjson.GetBytes(upstream.lastBody, "type").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "generate").Exists())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
+	require.True(t, gjson.GetBytes(upstream.lastBody, "parallel_tool_calls").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "parallel_tool_calls").Bool())
 }
 
 func TestProxyOpenAIWSHTTPBridgeTurnUsesConnectionIdentityPlan(t *testing.T) {
@@ -1477,9 +1479,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnUsesFinalizedResponsesLiteCapability(t *test
 				svc.codexModelCapabilities.observeManifest(openAIOutboundSessionIdentityNamespace(account), []byte(tt.manifest), time.Now())
 			}
 
-			payload := `{"type":"response.create","model":"` + model + `","stream":true,"input":"hi"}`
+			payload := `{"type":"response.create","model":"` + model + `","stream":true,"reasoning":{"context":"current_turn"},"parallel_tool_calls":true,"tools":[{"type":"namespace","name":"collaboration"}],"input":"hi"}`
 			if tt.explicitMarker {
-				payload = `{"type":"response.create","model":"` + model + `","stream":true,"client_metadata":{"` + responsesLiteWSMetadataKey + `":"true"},"input":"hi"}`
+				payload = `{"type":"response.create","model":"` + model + `","stream":true,"reasoning":{"context":"current_turn"},"parallel_tool_calls":true,"tools":[{"type":"namespace","name":"collaboration"}],"client_metadata":{"` + responsesLiteWSMetadataKey + `":"true"},"input":"hi"}`
 			}
 			recorder := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(recorder)
@@ -1498,6 +1500,16 @@ func TestProxyOpenAIWSHTTPBridgeTurnUsesFinalizedResponsesLiteCapability(t *test
 			require.NotNil(t, upstream.lastReq)
 			require.Equal(t, tt.wantHeader, upstream.lastReq.Header.Get(responsesLiteHeader))
 			require.Equal(t, tt.wantHeader == "true", plan.WireProfile.ToolNamespacesAllowed)
+			if tt.wantHeader == "true" {
+				require.Equal(t, "all_turns", gjson.GetBytes(upstream.lastBody, "reasoning.context").String())
+				require.Equal(t, gjson.False, gjson.GetBytes(upstream.lastBody, "parallel_tool_calls").Type)
+				require.False(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="namespace")`).Exists())
+				require.Equal(t, "collaboration", gjson.GetBytes(upstream.lastBody, `input.#(type=="additional_tools").tools.0.name`).String())
+				return
+			}
+			require.Equal(t, "current_turn", gjson.GetBytes(upstream.lastBody, "reasoning.context").String())
+			require.True(t, gjson.GetBytes(upstream.lastBody, "parallel_tool_calls").Bool())
+			require.True(t, gjson.GetBytes(upstream.lastBody, `tools.#(type=="namespace")`).Exists())
 		})
 	}
 }

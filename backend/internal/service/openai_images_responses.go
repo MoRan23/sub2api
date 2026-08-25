@@ -332,10 +332,10 @@ func buildOpenAIImagesResponsesRequest(parsed *OpenAIImagesRequest, toolModel st
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed images request is required")
 	}
-	prompt := strings.TrimSpace(parsed.Prompt)
-	if prompt == "" {
+	if strings.TrimSpace(parsed.Prompt) == "" {
 		return nil, fmt.Errorf("prompt is required")
 	}
+	prompt := parsed.Prompt
 
 	inputImages := make([]string, 0, len(parsed.InputImageURLs)+len(parsed.Uploads))
 	for _, imageURL := range parsed.InputImageURLs {
@@ -356,6 +356,7 @@ func buildOpenAIImagesResponsesRequest(parsed *OpenAIImagesRequest, toolModel st
 
 	req := []byte(`{"instructions":"","stream":true,"reasoning":{"effort":"medium","summary":"auto"},"parallel_tool_calls":true,"include":["reasoning.encrypted_content"],"model":"","store":false,"tool_choice":{"type":"image_generation"}}`)
 	req, _ = sjson.SetBytes(req, "model", openAIImagesResponsesMainModel)
+	req, _ = sjson.SetBytes(req, "instructions", openAIImagesVerbatimPromptInstructions)
 
 	input := []byte(`[{"type":"message","role":"user","content":[{"type":"input_text","text":""}]}]`)
 	input, _ = sjson.SetBytes(input, "0.content.0.text", prompt)

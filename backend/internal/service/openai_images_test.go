@@ -100,6 +100,41 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_MultipartEdit(t *testing.T
 	require.Equal(t, OpenAIImagesCapabilityNative, parsed.RequiredCapability)
 }
 
+func TestOpenAIGatewayServiceParseOpenAIImagesRequest_PreservesPromptWhitespace(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const prompt = "  preserve this prompt exactly\n"
+
+	t.Run("json", func(t *testing.T) {
+		body := []byte(`{"model":"gpt-image-2","prompt":"  preserve this prompt exactly\n"}`)
+		req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = req
+
+		parsed, err := (&OpenAIGatewayService{}).ParseOpenAIImagesRequest(c, body)
+
+		require.NoError(t, err)
+		require.Equal(t, prompt, parsed.Prompt)
+	})
+
+	t.Run("multipart", func(t *testing.T) {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		require.NoError(t, writer.WriteField("model", "gpt-image-2"))
+		require.NoError(t, writer.WriteField("prompt", prompt))
+		require.NoError(t, writer.Close())
+		req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body.Bytes()))
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = req
+
+		parsed, err := (&OpenAIGatewayService{}).ParseOpenAIImagesRequest(c, body.Bytes())
+
+		require.NoError(t, err)
+		require.Equal(t, prompt, parsed.Prompt)
+	})
+}
+
 func TestOpenAIImagesRequestModerationBody_JSONEditIncludesInputImageURLs(t *testing.T) {
 	parsed := &OpenAIImagesRequest{
 		Endpoint:       openAIImagesEditsEndpoint,
@@ -2009,6 +2044,21 @@ func TestBuildOpenAIImagesResponsesRequest_StripsInputFidelity(t *testing.T) {
 	require.NotNil(t, body)
 	require.False(t, gjson.GetBytes(body, "tools.0.input_fidelity").Exists())
 	require.Equal(t, "edit", gjson.GetBytes(body, "tools.0.action").String())
+}
+
+func TestBuildOpenAIImagesResponsesRequest_RequiresVerbatimUserPrompt(t *testing.T) {
+	prompt := "  画一个蓝色马克杯，杯身只写“SkelOT”，保持大小写；白色背景，不要增加其他文字。\n"
+	parsed := &OpenAIImagesRequest{
+		Endpoint: openAIImagesGenerationsEndpoint,
+		Model:    "gpt-image-2",
+		Prompt:   prompt,
+		N:        1,
+	}
+
+	body, err := buildOpenAIImagesResponsesRequest(parsed, "gpt-image-2")
+	require.NoError(t, err)
+	require.Equal(t, openAIImagesVerbatimPromptInstructions, gjson.GetBytes(body, "instructions").String())
+	require.Equal(t, prompt, gjson.GetBytes(body, "input.0.content.0.text").String())
 }
 
 func TestCollectOpenAIImagesFromResponsesBody_FallsBackToOutputItemDone(t *testing.T) {

@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -117,6 +118,49 @@ func TestCalculateOpenAI429ResetTime_NoCodexHeaders(t *testing.T) {
 	}
 }
 
+func TestParseOpenAIRateLimitResetTime_OpenCodeGoUsageLimit(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want time.Duration
+	}{
+		{
+			name: "days",
+			body: `{"type":"error","error":{"type":"GoUsageLimitError","message":"Weekly usage limit reached. Resets in 2 days."}}`,
+			want: 48 * time.Hour,
+		},
+		{
+			name: "hours",
+			body: `{"type":"error","error":{"type":"GoUsageLimitError","message":"Weekly usage limit reached. Resets in 18 hours."}}`,
+			want: 18 * time.Hour,
+		},
+		{
+			name: "hours and minutes",
+			body: `{"type":"error","error":{"type":"GoUsageLimitError","message":"5-hour usage limit reached. Resets in 4hr 59min."}}`,
+			want: 4*time.Hour + 59*time.Minute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := time.Now()
+			resetAt := parseOpenAIRateLimitResetTime([]byte(tt.body))
+			after := time.Now()
+
+			require.NotNil(t, resetAt)
+			actual := time.Unix(*resetAt, 0)
+			require.False(t, actual.Before(before.Add(tt.want).Truncate(time.Second)))
+			require.False(t, actual.After(after.Add(tt.want)))
+		})
+	}
+}
+
+func TestParseOpenAIRateLimitResetTime_DoesNotParseUnknownErrorMessage(t *testing.T) {
+	body := []byte(`{"error":{"type":"rate_limit_error","message":"Resets in 2 days."}}`)
+
+	require.Nil(t, parseOpenAIRateLimitResetTime(body))
+}
+
 func TestCalculateOpenAI429ResetTime_ReversedWindowOrder(t *testing.T) {
 	svc := &RateLimitService{}
 
@@ -153,6 +197,27 @@ type openAI429SnapshotRepo struct {
 	updatedExtra       map[string]any
 	bulkUpdatedIDs     []int64
 	bulkUpdatedPayload AccountBulkUpdate
+}
+
+type openAI429MonotonicRepo struct {
+	openAI429SnapshotRepo
+	legacyCalls    int
+	extendingCalls int
+	resetAt        time.Time
+}
+
+func (r *openAI429MonotonicRepo) SetRateLimited(_ context.Context, _ int64, resetAt time.Time) error {
+	r.legacyCalls++
+	r.resetAt = resetAt
+	return nil
+}
+
+func (r *openAI429MonotonicRepo) SetRateLimitedIfLater(_ context.Context, _ int64, resetAt time.Time) error {
+	r.extendingCalls++
+	if resetAt.After(r.resetAt) {
+		r.resetAt = resetAt
+	}
+	return nil
 }
 
 func (r *openAI429SnapshotRepo) SetRateLimited(_ context.Context, id int64, _ time.Time) error {
@@ -217,6 +282,59 @@ func TestHandle429_OpenAISyncsObservedPlanType(t *testing.T) {
 	require.Equal(t, "free", repo.bulkUpdatedPayload.Credentials["plan_type"])
 	require.Equal(t, "free", account.Credentials["plan_type"])
 	require.Equal(t, account.ID, repo.rateLimitedID)
+}
+
+func TestHandle429_OpenAIUsesMonotonicRateLimitPersistence(t *testing.T) {
+	account := &Account{ID: 125, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	longReset := time.Now().Add(5 * time.Hour).UTC().Truncate(time.Second)
+
+	tests := []struct {
+		name    string
+		headers http.Header
+		body    []byte
+	}{
+		{
+			name: "codex headers",
+			headers: http.Header{
+				"X-Codex-Primary-Used-Percent":        []string{"100"},
+				"X-Codex-Primary-Reset-After-Seconds": []string{"18000"},
+				"X-Codex-Primary-Window-Minutes":      []string{"300"},
+			},
+		},
+		{
+			name: "usage limit body",
+			body: []byte(fmt.Sprintf(`{"error":{"type":"usage_limit_reached","resets_at":%d}}`, longReset.Unix())),
+		},
+		{name: "fallback"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &openAI429MonotonicRepo{}
+			svc := NewRateLimitService(repo, nil, nil, nil, nil)
+
+			svc.handle429(context.Background(), account, tt.headers, tt.body)
+
+			require.Equal(t, 1, repo.extendingCalls)
+			require.Zero(t, repo.legacyCalls)
+			require.False(t, repo.resetAt.IsZero())
+		})
+	}
+}
+
+func TestHandle429_OpenAIFallbackDoesNotShortenObservedReset(t *testing.T) {
+	repo := &openAI429MonotonicRepo{}
+	svc := NewRateLimitService(repo, nil, nil, nil, nil)
+	account := &Account{ID: 126, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	longReset := time.Now().Add(5 * time.Hour).UTC().Truncate(time.Second)
+	body := []byte(fmt.Sprintf(`{"error":{"type":"usage_limit_reached","resets_at":%d}}`, longReset.Unix()))
+
+	svc.handle429(context.Background(), account, http.Header{}, body)
+	svc.handle429(context.Background(), account, http.Header{}, nil)
+
+	require.Equal(t, 2, repo.extendingCalls)
+	require.Zero(t, repo.legacyCalls)
+	require.True(t, repo.resetAt.Equal(longReset))
 }
 
 // TestHandle429_SkipsSparkShadow 外审第8轮 P1:spark 影子的限流状态只由 QueryUsage(/wham/usage

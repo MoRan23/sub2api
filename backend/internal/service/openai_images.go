@@ -34,12 +34,13 @@ const (
 	openAIImagesGenerationsURL = "https://api.openai.com/v1/images/generations"
 	openAIImagesEditsURL       = "https://api.openai.com/v1/images/edits"
 
-	openAIChatGPTStartURL          = "https://chatgpt.com/"
-	openAIChatGPTFilesURL          = "https://chatgpt.com/backend-api/files"
-	openAIImageBackendUserAgent    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-	openAIImageMaxDownloadBytes    = 50 << 20 // 50MB per image download
-	openAIImageMaxUploadPartSize   = 50 << 20 // 50MB per multipart upload part
-	openAIImagesResponsesMainModel = "gpt-5.4-mini"
+	openAIChatGPTStartURL                  = "https://chatgpt.com/"
+	openAIChatGPTFilesURL                  = "https://chatgpt.com/backend-api/files"
+	openAIImageBackendUserAgent            = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+	openAIImageMaxDownloadBytes            = 50 << 20 // 50MB per image download
+	openAIImageMaxUploadPartSize           = 50 << 20 // 50MB per multipart upload part
+	openAIImagesResponsesMainModel         = "gpt-5.4-mini"
+	openAIImagesVerbatimPromptInstructions = "When invoking the image_generation tool, use the user's image prompt verbatim. Do not rewrite, expand, summarize, embellish, translate, normalize punctuation, or add or remove visual details or constraints. Preserve the original language, wording, capitalization, quotes, and punctuation exactly."
 )
 
 type OpenAIImagesCapability string
@@ -228,7 +229,7 @@ func parseOpenAIImagesJSONRequest(body []byte, req *OpenAIImagesRequest) error {
 		req.Model = strings.TrimSpace(modelResult.String())
 		req.ExplicitModel = req.Model != ""
 	}
-	req.Prompt = strings.TrimSpace(gjson.GetBytes(body, "prompt").String())
+	req.Prompt = gjson.GetBytes(body, "prompt").String()
 
 	if streamResult := gjson.GetBytes(body, "stream"); streamResult.Exists() {
 		if streamResult.Type != gjson.True && streamResult.Type != gjson.False {
@@ -367,13 +368,14 @@ func parseOpenAIImagesMultipartRequest(body []byte, contentType string, req *Ope
 			continue
 		}
 
-		value := strings.TrimSpace(string(data))
+		rawValue := string(data)
+		value := strings.TrimSpace(rawValue)
 		switch name {
 		case "model":
 			req.Model = value
 			req.ExplicitModel = value != ""
 		case "prompt":
-			req.Prompt = value
+			req.Prompt = rawValue
 		case "size":
 			req.Size = value
 			req.ExplicitSize = value != ""
