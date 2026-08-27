@@ -8,6 +8,7 @@ vi.mock("vue-i18n", async (importOriginal) => {
     "common.retry": "Retry",
     "common.loading": "Loading",
     "admin.groupApplications.emailHistory": "Email conversation history",
+    "admin.groupApplications.refreshEmailHistory": "Refresh email conversation history",
     "admin.groupApplications.exportEmailHistory": "Export email conversation history",
     "admin.groupApplications.noEmailHistory": "No email history",
     "admin.groupApplications.outboundEmail": "Sent",
@@ -55,9 +56,10 @@ const communications = [
 describe("GroupApplicationCommunicationTimeline", () => {
   it("shows both directions, sanitizes HTML, and exposes export and retry commands", async () => {
     const onExport = vi.fn();
+    const onRefresh = vi.fn();
     const onRetry = vi.fn();
     const { container } = render(GroupApplicationCommunicationTimeline, {
-      props: { communications, onExport, onRetry },
+      props: { communications, onExport, onRefresh, onRetry },
     });
 
     expect(screen.getByText("Application approved")).toBeTruthy();
@@ -67,9 +69,13 @@ describe("GroupApplicationCommunicationTimeline", () => {
     expect(container.querySelector("img")).toBeNull();
 
     await fireEvent.click(
+      screen.getByRole("button", { name: "Refresh email conversation history" }),
+    );
+    await fireEvent.click(
       screen.getByRole("button", { name: "Export email conversation history" }),
     );
     await fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
     expect(onExport).toHaveBeenCalledTimes(1);
     expect(onRetry).toHaveBeenCalledWith(1);
   });

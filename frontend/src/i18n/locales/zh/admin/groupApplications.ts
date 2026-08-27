@@ -67,6 +67,8 @@ export default {
 	mailboxPlaceholder: "选择或输入邮箱目录",
 	mailboxHint: "先测试 IMAP 可自动列出目录；也可手工输入服务器提供的目录名。大多数邮箱使用 INBOX。",
 	saveEmailConfig: "保存邮件设置",
+	lastMailError: "最近一次发件队列处理失败：{error}",
+	lastIMAPError: "最近一次 IMAP 回信轮询失败：{error}",
 	workflowRunning: "申请、发件和回信处理已启用",
 	workflowPaused: "工作流已暂停，已有记录和交流历史仍可查看、导出",
 	workflowConfigError: "邮件配置无效，工作流无法运行",
@@ -78,6 +80,7 @@ export default {
     decisionReason: "决定理由",
     emailDeliveries: "邮件投递记录",
     emailHistory: "邮件交流历史",
+    refreshEmailHistory: "刷新邮件交流历史",
     exportEmailHistory: "导出邮件交流历史",
     noEmailHistory: "暂无邮件交流记录",
     outboundEmail: "出站",
@@ -88,6 +91,7 @@ export default {
     attempts: "尝试 {count} 次",
     emailContentUnavailable: "该历史记录没有可查看的正文（可能创建于交流历史功能启用前）。",
     emailContentTruncated: "正文过长，历史记录仅保留前 8000 个字符。",
+    approvalAlreadyQueued: "已有一封批准邮件正在等待发送，请勿重复提交",
     communicationResults: {
       completed: "确认匹配并完成",
       reply_mismatch: "确认内容不匹配",
@@ -101,6 +105,8 @@ export default {
         "IMAP 登录失败，请确认使用完整邮箱地址、账号已启用 IMAP；开启安全登录时请使用客户端专用密码。",
       GROUP_APPLICATION_IMAP_LIST_FAILED:
         "IMAP 登录成功，但无法读取邮箱目录，请检查该账号的 IMAP 目录访问权限。",
+      GROUP_APPLICATION_IMAP_TIMEOUT:
+        "IMAP 服务器在 10 秒内没有响应，请检查网络连通性、防火墙和中转服务。",
       GROUP_APPLICATION_IMAP_TEST_FAILED: "IMAP 测试失败，请检查服务器设置和账号权限。",
     },
   },

@@ -59,6 +59,12 @@ type GroupApplicationEmailConfig struct {
 	LegacyImported bool                       `json:"legacy_imported,omitempty"`
 }
 
+const (
+	groupApplicationIMAPDialTimeout = 8 * time.Second
+	groupApplicationIMAPTestTimeout = 10 * time.Second
+	groupApplicationIMAPPollTimeout = 60 * time.Second
+)
+
 type storedGroupApplicationSMTPConfig struct {
 	Host              string `json:"host"`
 	Port              int    `json:"port"`
@@ -452,6 +458,8 @@ type GroupApplicationWorkerHealth struct {
 	MailFailures       uint64    `json:"mail_failures"`
 	RepliesProcessed   uint64    `json:"replies_processed"`
 	ReplyFailures      uint64    `json:"reply_failures"`
+	LastMailCheckAt    time.Time `json:"last_mail_check_at,omitempty"`
+	LastMailError      string    `json:"last_mail_error,omitempty"`
 	LastIMAPCheckAt    time.Time `json:"last_imap_check_at,omitempty"`
 	LastIMAPError      string    `json:"last_imap_error,omitempty"`
 	ConfigurationError string    `json:"configuration_error,omitempty"`
@@ -479,15 +487,24 @@ type GroupApplicationWorker struct {
 	replyFailures    atomic.Uint64
 	lastIMAPCheck    atomic.Value // time.Time
 	lastIMAPError    atomic.Value // string
+	lastMailCheck    atomic.Value // time.Time
+	lastMailError    atomic.Value // string
 	configError      atomic.Value // string
 	workflowEnabled  atomic.Bool
+	imapPoller       func(context.Context, *GroupApplicationIMAPConfig) error
 }
 
 func NewGroupApplicationWorker(repo GroupApplicationRepository, service *GroupApplicationService, email *EmailService) *GroupApplicationWorker {
+	return newGroupApplicationWorker(repo, service, email)
+}
+
+func newGroupApplicationWorker(repo GroupApplicationRepository, service *GroupApplicationService, email groupApplicationEmailSender) *GroupApplicationWorker {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &GroupApplicationWorker{repo: repo, service: service, email: email, workerID: uuid.NewString(), ctx: ctx, cancel: cancel}
 	w.lastIMAPCheck.Store(time.Time{})
 	w.lastIMAPError.Store("")
+	w.lastMailCheck.Store(time.Time{})
+	w.lastMailError.Store("")
 	w.configError.Store("")
 	return w
 }
@@ -523,6 +540,12 @@ func (w *GroupApplicationWorker) Health() GroupApplicationWorkerHealth {
 	if value, ok := w.lastIMAPError.Load().(string); ok {
 		health.LastIMAPError = value
 	}
+	if value, ok := w.lastMailCheck.Load().(time.Time); ok {
+		health.LastMailCheckAt = value
+	}
+	if value, ok := w.lastMailError.Load().(string); ok {
+		health.LastMailError = value
+	}
 	if value, ok := w.configError.Load().(string); ok {
 		health.ConfigurationError = value
 	}
@@ -550,29 +573,28 @@ func (w *GroupApplicationWorker) refreshWorkflowState(ctx context.Context) (*Gro
 func (w *GroupApplicationWorker) run() {
 	defer w.wg.Done()
 	defer w.running.Store(false)
+	var loops sync.WaitGroup
+	loops.Add(2)
+	go func() {
+		defer loops.Done()
+		w.runMailLoop()
+	}()
+	go func() {
+		defer loops.Done()
+		w.runIMAPLoop()
+	}()
+	loops.Wait()
+}
+
+func (w *GroupApplicationWorker) runMailLoop() {
 	mailTicker := time.NewTicker(time.Second)
 	defer mailTicker.Stop()
-	nextIMAP := time.Now()
 	for {
-		cfg, configErr := w.refreshWorkflowState(w.ctx)
-		workflowEnabled := configErr == nil && cfg != nil && cfg.Enabled
+		w.lastMailCheck.Store(time.Now().UTC())
 		if err := w.processMailBatch(w.ctx); err != nil && w.ctx.Err() == nil {
 			w.mailFailures.Add(1)
+			w.lastMailError.Store(boundedGroupApplicationError(err))
 			slog.Warn("group application mail outbox failed", "error", err)
-		}
-		if !time.Now().Before(nextIMAP) {
-			interval := 60 * time.Second
-			if workflowEnabled {
-				interval = time.Duration(cfg.IMAP.PollIntervalSeconds) * time.Second
-				if err := w.pollIMAP(w.ctx, &cfg.IMAP); err != nil && w.ctx.Err() == nil {
-					w.replyFailures.Add(1)
-					w.lastIMAPError.Store(boundedGroupApplicationError(err))
-					slog.Warn("group application IMAP poll failed", "error", err)
-				} else {
-					w.lastIMAPError.Store("")
-				}
-			}
-			nextIMAP = time.Now().Add(interval)
 		}
 		select {
 		case <-w.ctx.Done():
@@ -582,11 +604,53 @@ func (w *GroupApplicationWorker) run() {
 	}
 }
 
+func (w *GroupApplicationWorker) runIMAPLoop() {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	nextPoll := time.Now()
+	for {
+		if !time.Now().Before(nextPoll) {
+			interval := 60 * time.Second
+			cfg, configErr := w.refreshWorkflowState(w.ctx)
+			if configErr == nil && cfg != nil && cfg.Enabled {
+				interval = time.Duration(cfg.IMAP.PollIntervalSeconds) * time.Second
+				w.lastIMAPCheck.Store(time.Now().UTC())
+				pollCtx, cancel := context.WithTimeout(w.ctx, groupApplicationIMAPPollTimeout)
+				err := w.pollIMAPOnce(pollCtx, &cfg.IMAP)
+				cancel()
+				if err != nil && w.ctx.Err() == nil {
+					w.replyFailures.Add(1)
+					w.lastIMAPError.Store(boundedGroupApplicationError(err))
+					slog.Warn("group application IMAP poll failed", "error", err)
+				} else if err == nil {
+					w.lastIMAPError.Store("")
+				}
+			} else if configErr == nil {
+				w.lastIMAPError.Store("")
+			}
+			nextPoll = time.Now().Add(interval)
+		}
+		select {
+		case <-w.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (w *GroupApplicationWorker) pollIMAPOnce(ctx context.Context, cfg *GroupApplicationIMAPConfig) error {
+	if w.imapPoller != nil {
+		return w.imapPoller(ctx, cfg)
+	}
+	return w.pollIMAP(ctx, cfg)
+}
+
 func (w *GroupApplicationWorker) processMailBatch(ctx context.Context) error {
 	cfg, err := w.service.LoadEmailConfig(ctx, false)
 	if err != nil {
 		return err
 	}
+	w.lastMailError.Store("")
 	if !cfg.Enabled {
 		return nil
 	}
@@ -617,9 +681,11 @@ func (w *GroupApplicationWorker) processMailBatch(ctx context.Context) error {
 				return ackErr
 			}
 			w.mailProcessed.Add(1)
+			w.lastMailError.Store("")
 			continue
 		}
 		w.mailFailures.Add(1)
+		w.lastMailError.Store(boundedGroupApplicationError(sendErr))
 		attempt := job.Attempts + 1
 		terminal := attempt >= 8
 		if retryErr := w.repo.RetryClaimedMail(ctx, job.ID, w.workerID, time.Now().Add(groupApplicationRetryDelay(attempt)), terminal, boundedGroupApplicationError(sendErr)); retryErr != nil {
@@ -685,11 +751,13 @@ func (w *GroupApplicationWorker) SendTestEmail(ctx context.Context, input GroupA
 }
 
 func (w *GroupApplicationWorker) TestIMAP(ctx context.Context, input GroupApplicationEmailConfig) ([]string, error) {
-	cfg, err := w.service.ResolveEmailConfigForTest(ctx, input, "imap")
+	testCtx, cancel := context.WithTimeout(ctx, groupApplicationIMAPTestTimeout)
+	defer cancel()
+	cfg, err := w.service.ResolveEmailConfigForTest(testCtx, input, "imap")
 	if err != nil {
 		return nil, err
 	}
-	client, err := openGroupApplicationIMAPClient(ctx, &cfg.IMAP)
+	client, err := openGroupApplicationIMAPClient(testCtx, &cfg.IMAP)
 	if client != nil {
 		defer client.Close()
 	}
@@ -698,6 +766,9 @@ func (w *GroupApplicationWorker) TestIMAP(ctx context.Context, input GroupApplic
 	}
 	mailboxes, err := client.List("", "*", nil).Collect()
 	if err != nil {
+		if testCtx.Err() != nil {
+			err = testCtx.Err()
+		}
 		return nil, groupApplicationIMAPTestError(newGroupApplicationIMAPOperationError("list", err))
 	}
 	return groupApplicationMailboxNames(mailboxes), nil
@@ -730,6 +801,13 @@ func (e *groupApplicationIMAPOperationError) Unwrap() error {
 }
 
 func groupApplicationIMAPTestError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return infraerrors.BadRequest(
+			"GROUP_APPLICATION_IMAP_TIMEOUT",
+			"The IMAP server did not respond within the 10-second test window. Verify the host, port, TLS mode, and network route.",
+		).WithCause(err)
+	}
+
 	var operationErr *groupApplicationIMAPOperationError
 	if !errors.As(err, &operationErr) {
 		return infraerrors.BadRequest(
@@ -793,30 +871,63 @@ func groupApplicationMailboxNames(mailboxes []*imap.ListData) []string {
 	return names
 }
 
-func openGroupApplicationIMAPClient(ctx context.Context, cfg *GroupApplicationIMAPConfig) (*imapclient.Client, error) {
+type groupApplicationIMAPClient struct {
+	*imapclient.Client
+	stopContextClose func() bool
+}
+
+func (c *groupApplicationIMAPClient) Close() error {
+	if c == nil || c.Client == nil {
+		return nil
+	}
+	if c.stopContextClose != nil {
+		c.stopContextClose()
+	}
+	return c.Client.Close()
+}
+
+func openGroupApplicationIMAPClient(ctx context.Context, cfg *GroupApplicationIMAPConfig) (*groupApplicationIMAPClient, error) {
 	if cfg == nil {
 		return nil, errors.New("missing IMAP config")
 	}
 	address := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-	options := &imapclient.Options{TLSConfig: &tls.Config{ServerName: cfg.Host, MinVersion: tls.VersionTLS12}, Dialer: &net.Dialer{Timeout: 15 * time.Second}}
-	var client *imapclient.Client
-	var err error
-	if cfg.TLSMode == "starttls" {
-		client, err = imapclient.DialStartTLS(address, options)
-	} else {
-		client, err = imapclient.DialTLS(address, options)
-	}
+	tlsConfig := &tls.Config{ServerName: cfg.Host, MinVersion: tls.VersionTLS12}
+	options := &imapclient.Options{TLSConfig: tlsConfig}
+	rawConn, err := (&net.Dialer{Timeout: groupApplicationIMAPDialTimeout}).DialContext(ctx, "tcp", address)
 	if err != nil {
 		return nil, newGroupApplicationIMAPOperationError("connect", err)
 	}
+	stopContextClose := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
+	var client *imapclient.Client
+	if cfg.TLSMode == "starttls" {
+		client, err = imapclient.NewStartTLS(rawConn, options)
+	} else {
+		tlsConfig.NextProtos = []string{"imap"}
+		tlsConn := tls.Client(rawConn, tlsConfig)
+		if err = tlsConn.HandshakeContext(ctx); err == nil {
+			client = imapclient.New(tlsConn, options)
+		}
+	}
+	if err != nil {
+		stopContextClose()
+		_ = rawConn.Close()
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		return nil, newGroupApplicationIMAPOperationError("connect", err)
+	}
+	wrapped := &groupApplicationIMAPClient{Client: client, stopContextClose: stopContextClose}
 	if err = client.Login(cfg.Username, cfg.Password).Wait(); err != nil {
-		client.Close()
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		wrapped.Close()
 		return nil, newGroupApplicationIMAPOperationError("login", err)
 	}
-	return client, nil
+	return wrapped, nil
 }
 
-func openGroupApplicationMailbox(ctx context.Context, cfg *GroupApplicationIMAPConfig) (*imapclient.Client, *imap.SelectData, error) {
+func openGroupApplicationMailbox(ctx context.Context, cfg *GroupApplicationIMAPConfig) (*groupApplicationIMAPClient, *imap.SelectData, error) {
 	client, err := openGroupApplicationIMAPClient(ctx, cfg)
 	if err != nil {
 		return nil, nil, err
@@ -824,6 +935,9 @@ func openGroupApplicationMailbox(ctx context.Context, cfg *GroupApplicationIMAPC
 	selectData, err := client.Select(cfg.Mailbox, nil).Wait()
 	if err != nil {
 		client.Close()
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
 		return nil, nil, newGroupApplicationIMAPOperationError("select", err)
 	}
 	return client, selectData, nil

@@ -6,8 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -271,6 +275,11 @@ func TestGroupApplicationMailboxNamesDeduplicateAndKeepInboxFirst(t *testing.T) 
 }
 
 func TestGroupApplicationIMAPTestErrorIsActionableAndDoesNotExposeCause(t *testing.T) {
+	timeoutErr := groupApplicationIMAPTestError(newGroupApplicationIMAPOperationError("connect", context.DeadlineExceeded))
+	require.Equal(t, http.StatusBadRequest, infraerrors.Code(timeoutErr))
+	require.Equal(t, "GROUP_APPLICATION_IMAP_TIMEOUT", infraerrors.Reason(timeoutErr))
+	require.Contains(t, infraerrors.Message(timeoutErr), "10-second")
+
 	tests := []struct {
 		operation string
 		reason    string
@@ -390,6 +399,172 @@ func (s *groupApplicationEmailSenderStub) SendEmailWithConfigAndOptions(config *
 }
 
 func (s *groupApplicationEmailSenderStub) TestSMTPConnectionWithConfig(*SMTPConfig) error { return nil }
+
+type groupApplicationWorkerRepoStub struct {
+	GroupApplicationRepository
+	jobs        []GroupApplicationMailJob
+	claimGate   <-chan struct{}
+	claimErr    error
+	claimCalled chan struct{}
+	mailSent    chan struct{}
+	claimOnce   sync.Once
+	mailOnce    sync.Once
+	mu          sync.Mutex
+	claimed     bool
+}
+
+func (s *groupApplicationWorkerRepoStub) ClaimMail(ctx context.Context, _ string, _ int, _ time.Duration) ([]GroupApplicationMailJob, error) {
+	if s.claimCalled != nil {
+		s.claimOnce.Do(func() { close(s.claimCalled) })
+	}
+	if s.claimGate != nil {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-s.claimGate:
+		}
+	}
+	if s.claimErr != nil {
+		return nil, s.claimErr
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.claimed {
+		return nil, nil
+	}
+	s.claimed = true
+	return append([]GroupApplicationMailJob(nil), s.jobs...), nil
+}
+
+func (s *groupApplicationWorkerRepoStub) MarkMailSent(context.Context, int64, string) error {
+	if s.mailSent != nil {
+		s.mailOnce.Do(func() { close(s.mailSent) })
+	}
+	return nil
+}
+
+func TestGroupApplicationWorkerBlockedIMAPDoesNotStarveMailOutbox(t *testing.T) {
+	pollStarted := make(chan struct{})
+	mailSent := make(chan struct{})
+	repo := &groupApplicationWorkerRepoStub{
+		jobs: []GroupApplicationMailJob{{
+			ID: 10, ApplicationID: 1, Kind: GroupApplicationMailApproval,
+			Recipient: "applicant@example.com", Subject: "approved", HTMLBody: "body",
+			MessageID: "<approval@sub2api.local>", RequiredStatus: GroupApplicationStatusAwaitingReply,
+		}},
+		claimGate: pollStarted,
+		mailSent:  mailSent,
+	}
+	settings := configuredGroupApplicationSettings(t)
+	svc := NewGroupApplicationService(repo, settings, groupApplicationEncryptorStub{})
+	sender := &groupApplicationEmailSenderStub{}
+	worker := newGroupApplicationWorker(repo, svc, sender)
+	var pollOnce sync.Once
+	worker.imapPoller = func(ctx context.Context, _ *GroupApplicationIMAPConfig) error {
+		pollOnce.Do(func() { close(pollStarted) })
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	worker.Start()
+	t.Cleanup(worker.Stop)
+
+	select {
+	case <-pollStarted:
+	case <-time.After(time.Second):
+		t.Fatal("IMAP poller did not start")
+	}
+	select {
+	case <-mailSent:
+	case <-time.After(time.Second):
+		t.Fatal("mail outbox was starved by the blocked IMAP poller")
+	}
+
+	worker.Stop()
+	health := worker.Health()
+	require.False(t, health.Running)
+	require.Equal(t, uint64(1), health.MailProcessed)
+	require.False(t, health.LastMailCheckAt.IsZero())
+	require.Empty(t, health.LastMailError)
+	require.Equal(t, 1, sender.sends)
+}
+
+func TestOpenGroupApplicationIMAPClientCancelsStalledTLSConnection(t *testing.T) {
+	for _, tlsMode := range []string{"implicit", "starttls"} {
+		t.Run(tlsMode, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = listener.Close() })
+
+			accepted := make(chan struct{})
+			connectionClosed := make(chan struct{})
+			go func() {
+				conn, acceptErr := listener.Accept()
+				if acceptErr != nil {
+					return
+				}
+				defer conn.Close()
+				close(accepted)
+				_, _ = io.Copy(io.Discard, conn)
+				close(connectionClosed)
+			}()
+
+			host, portValue, err := net.SplitHostPort(listener.Addr().String())
+			require.NoError(t, err)
+			port, err := strconv.Atoi(portValue)
+			require.NoError(t, err)
+			ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+			defer cancel()
+			startedAt := time.Now()
+			client, err := openGroupApplicationIMAPClient(ctx, &GroupApplicationIMAPConfig{
+				Host: host, Port: port, Username: "inbox@example.com", Password: "secret", TLSMode: tlsMode,
+			})
+			elapsed := time.Since(startedAt)
+			if client != nil {
+				_ = client.Close()
+			}
+
+			require.Nil(t, client)
+			require.Error(t, err)
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.Less(t, elapsed, time.Second)
+			select {
+			case <-accepted:
+			case <-time.After(time.Second):
+				t.Fatal("test IMAP server never accepted the connection")
+			}
+			select {
+			case <-connectionClosed:
+			case <-time.After(time.Second):
+				t.Fatal("context cancellation did not close the IMAP connection")
+			}
+		})
+	}
+}
+
+func TestGroupApplicationWorkerHealthExposesMailClaimFailure(t *testing.T) {
+	claimCalled := make(chan struct{})
+	claimErr := errors.New("mail claim failed")
+	repo := &groupApplicationWorkerRepoStub{claimErr: claimErr, claimCalled: claimCalled}
+	settings := configuredGroupApplicationSettings(t)
+	svc := NewGroupApplicationService(repo, settings, groupApplicationEncryptorStub{})
+	worker := newGroupApplicationWorker(repo, svc, &groupApplicationEmailSenderStub{})
+	worker.imapPoller = func(ctx context.Context, _ *GroupApplicationIMAPConfig) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	worker.Start()
+	t.Cleanup(worker.Stop)
+
+	select {
+	case <-claimCalled:
+	case <-time.After(time.Second):
+		t.Fatal("mail outbox was not checked")
+	}
+	require.Eventually(t, func() bool {
+		health := worker.Health()
+		return health.MailFailures > 0 && !health.LastMailCheckAt.IsZero() && strings.Contains(health.LastMailError, claimErr.Error())
+	}, time.Second, 5*time.Millisecond)
+}
 
 func TestGroupApplicationWorkerPausesOutboxWhenWorkflowDisabled(t *testing.T) {
 	repo := &groupApplicationRepositoryStub{jobs: []GroupApplicationMailJob{{

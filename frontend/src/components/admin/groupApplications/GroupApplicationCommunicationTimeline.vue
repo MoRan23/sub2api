@@ -10,16 +10,28 @@
       >
         {{ t("admin.groupApplications.emailHistory") }}
       </h4>
-      <button
-        type="button"
-        class="btn btn-secondary px-2 py-1.5"
-        :disabled="loading || !communications.length"
-        :title="t('admin.groupApplications.exportEmailHistory')"
-        :aria-label="t('admin.groupApplications.exportEmailHistory')"
-        @click="emit('export')"
-      >
-        <Icon name="download" size="sm" />
-      </button>
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          class="btn btn-secondary px-2 py-1.5"
+          :disabled="loading"
+          :title="t('admin.groupApplications.refreshEmailHistory')"
+          :aria-label="t('admin.groupApplications.refreshEmailHistory')"
+          @click="emit('refresh')"
+        >
+          <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
+        </button>
+        <button
+          type="button"
+          class="btn btn-secondary px-2 py-1.5"
+          :disabled="loading || !communications.length"
+          :title="t('admin.groupApplications.exportEmailHistory')"
+          :aria-label="t('admin.groupApplications.exportEmailHistory')"
+          @click="emit('export')"
+        >
+          <Icon name="download" size="sm" />
+        </button>
+      </div>
     </div>
 
     <p v-if="loading" class="py-6 text-center text-sm text-gray-500">
@@ -156,6 +168,7 @@ withDefaults(
 
 const emit = defineEmits<{
   export: [];
+  refresh: [];
   retry: [outboxID: number];
 }>();
 const { t } = useI18n();

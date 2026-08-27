@@ -78,6 +78,8 @@ export default {
 	mailboxHint:
 	  "Test IMAP to list folders automatically, or enter the server's mailbox name manually. Most providers use INBOX.",
 	saveEmailConfig: "Save email settings",
+	lastMailError: "The latest outbox processing attempt failed: {error}",
+	lastIMAPError: "The latest IMAP reply poll failed: {error}",
 	workflowRunning: "Applications, delivery, and reply processing are enabled",
 	workflowPaused: "Workflow paused; existing records and conversation exports remain available",
 	workflowConfigError: "Invalid email configuration prevents the workflow from running",
@@ -89,6 +91,7 @@ export default {
     decisionReason: "Decision reason",
     emailDeliveries: "Email deliveries",
     emailHistory: "Email conversation history",
+    refreshEmailHistory: "Refresh email conversation history",
     exportEmailHistory: "Export email conversation history",
     noEmailHistory: "No email communication has been recorded",
     outboundEmail: "Outbound",
@@ -100,6 +103,7 @@ export default {
     emailContentUnavailable:
       "The message body is unavailable, possibly because this record predates communication history.",
     emailContentTruncated: "Only the first 8,000 characters of this message were retained.",
+    approvalAlreadyQueued: "An approval email is already queued for delivery",
     communicationResults: {
       completed: "Confirmation matched and completed",
       reply_mismatch: "Confirmation did not match",
@@ -113,6 +117,8 @@ export default {
         "IMAP login failed. Verify the full email address, enable IMAP access, and use a client-specific password when secure login is enabled.",
       GROUP_APPLICATION_IMAP_LIST_FAILED:
         "IMAP login succeeded, but mailbox folders could not be listed. Check the account's IMAP folder permissions.",
+      GROUP_APPLICATION_IMAP_TIMEOUT:
+        "The IMAP server did not respond within 10 seconds. Check network connectivity, firewalls, and any relay service.",
       GROUP_APPLICATION_IMAP_TEST_FAILED:
         "IMAP test failed. Check the server settings and account permissions.",
     },

@@ -527,11 +527,29 @@ func (r *groupApplicationRepository) EnqueueMail(ctx context.Context, applicatio
 	}
 	defer tx.Rollback()
 	var status string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM group_applications WHERE id=$1 FOR SHARE`, applicationID).Scan(&status); err != nil {
+	// Serialize all outbox producers for one application. In particular, this
+	// prevents concurrent approval resend requests from both observing an empty
+	// active set and inserting duplicate jobs.
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM group_applications WHERE id=$1 FOR UPDATE`, applicationID).Scan(&status); err != nil {
 		return err
 	}
 	if status != mail.RequiredStatus {
 		return service.ErrGroupApplicationState
+	}
+	if mail.Kind == service.GroupApplicationMailApproval {
+		var active bool
+		if err := tx.QueryRowContext(ctx, `
+			SELECT EXISTS(
+				SELECT 1 FROM group_application_mail_outbox
+				WHERE application_id=$1 AND kind='approval' AND required_application_status=$2
+				  AND status IN ('pending','processing')
+			)
+		`, applicationID, mail.RequiredStatus).Scan(&active); err != nil {
+			return err
+		}
+		if active {
+			return tx.Commit()
+		}
 	}
 	if err := insertGroupApplicationMail(ctx, tx, applicationID, mail); err != nil {
 		return err
@@ -571,6 +589,22 @@ func (r *groupApplicationRepository) ClaimMail(ctx context.Context, workerID str
 	_, err = tx.ExecContext(ctx, `
 		UPDATE group_application_mail_outbox o SET status='cancelled',last_error='application status changed',updated_at=NOW()
 		FROM group_applications a WHERE a.id=o.application_id AND o.status IN ('pending','processing') AND a.status<>o.required_application_status
+	`)
+	if err != nil {
+		return nil, err
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE group_application_mail_outbox dup
+		SET status='cancelled',last_error='duplicate approval mail',claimed_at=NULL,claimed_by=NULL,updated_at=NOW()
+		WHERE dup.kind='approval' AND dup.status='pending'
+		  AND EXISTS (
+			SELECT 1 FROM group_application_mail_outbox earlier
+			WHERE earlier.application_id=dup.application_id
+			  AND earlier.kind='approval'
+			  AND earlier.required_application_status=dup.required_application_status
+			  AND earlier.status IN ('pending','processing')
+			  AND earlier.id<dup.id
+		  )
 	`)
 	if err != nil {
 		return nil, err

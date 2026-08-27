@@ -286,8 +286,23 @@
         <div
           v-if="workerHealth?.configuration_error"
           class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800/60 dark:bg-red-900/20 dark:text-red-200"
+          role="alert"
         >
           {{ workerHealth.configuration_error }}
+        </div>
+        <div
+          v-if="workerHealth?.last_mail_error"
+          class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800/60 dark:bg-red-900/20 dark:text-red-200"
+          role="alert"
+        >
+          {{ t("admin.groupApplications.lastMailError", { error: workerHealth.last_mail_error }) }}
+        </div>
+        <div
+          v-if="workerHealth?.last_imap_error"
+          class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-200"
+          role="alert"
+        >
+          {{ t("admin.groupApplications.lastIMAPError", { error: workerHealth.last_imap_error }) }}
         </div>
 
         <div class="grid items-start gap-6 xl:grid-cols-2">
@@ -525,6 +540,7 @@
           :loading="communicationsLoading"
           :actions-disabled="!emailForm?.enabled"
           @export="exportCommunications"
+          @refresh="refreshApplicationDetails"
           @retry="retryMail"
         />
       </div>
@@ -552,7 +568,12 @@
             v-if="selectedApplication?.status === 'awaiting_reply'"
             type="button"
             class="btn btn-secondary"
-            :disabled="saving || !emailForm?.enabled"
+            :disabled="saving || !emailForm?.enabled || hasQueuedApprovalMail"
+            :title="
+              hasQueuedApprovalMail
+                ? t('admin.groupApplications.approvalAlreadyQueued')
+                : undefined
+            "
             @click="resendApproval"
           >
             <Icon name="mail" size="sm" class="mr-2" />{{ t("admin.groupApplications.resendApproval") }}
@@ -603,7 +624,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import BaseDialog from "@/components/common/BaseDialog.vue";
@@ -661,6 +682,8 @@ const selectedApplication = ref<AdminGroupApplication | null>(null);
 const communications = ref<GroupApplicationCommunication[]>([]);
 const communicationsLoading = ref(false);
 let applicationRequestVersion = 0;
+let applicationRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+let applicationDetailController: AbortController | undefined;
 const policies = ref<GroupApplicationPolicy[]>([]);
 const groups = ref<AdminGroup[]>([]);
 const selectedGroupID = ref(0);
@@ -727,6 +750,14 @@ const workflowStatusClass = computed(() => {
     ? "text-green-600 dark:text-green-300"
     : "text-amber-600 dark:text-amber-300";
 });
+const hasQueuedApprovalMail = computed(() =>
+  communications.value.some(
+    (communication) =>
+      communication.direction === "outbound" &&
+      communication.kind === "approval" &&
+      isPendingMailStatus(communication.status),
+  ),
+);
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -768,25 +799,70 @@ async function changePage(nextPage: number) {
   page.value = nextPage;
   await loadApplications();
 }
-async function openApplication(id: number) {
+function isPendingMailStatus(status?: string) {
+  return status === "pending" || status === "processing";
+}
+function hasPendingOutboundMail(history: GroupApplicationCommunication[]) {
+  return history.some(
+    (communication) =>
+      communication.direction === "outbound" && isPendingMailStatus(communication.status),
+  );
+}
+function stopApplicationRefresh(abortRequest = false) {
+  if (applicationRefreshTimer) {
+    clearTimeout(applicationRefreshTimer);
+    applicationRefreshTimer = undefined;
+  }
+  if (abortRequest) {
+    applicationDetailController?.abort();
+    applicationDetailController = undefined;
+  }
+}
+function scheduleApplicationRefresh(id: number) {
+  stopApplicationRefresh();
+  if (selectedApplication.value?.id !== id || !hasPendingOutboundMail(communications.value)) return;
+  applicationRefreshTimer = setTimeout(() => {
+    applicationRefreshTimer = undefined;
+    void loadApplicationDetails(id, true);
+  }, 3000);
+}
+async function loadApplicationDetails(id: number, silent = false) {
+  stopApplicationRefresh(true);
   const requestVersion = ++applicationRequestVersion;
-  communicationsLoading.value = true;
+  const controller = new AbortController();
+  applicationDetailController = controller;
+  if (!silent) communicationsLoading.value = true;
   try {
     const [application, history] = await Promise.all([
-      groupApplicationsAdminAPI.get(id),
-      groupApplicationsAdminAPI.listCommunications(id),
+      groupApplicationsAdminAPI.get(id, controller.signal),
+      groupApplicationsAdminAPI.listCommunications(id, controller.signal),
     ]);
     if (requestVersion === applicationRequestVersion) {
       selectedApplication.value = application;
       communications.value = history;
+      scheduleApplicationRefresh(id);
     }
   } catch (error) {
-    if (requestVersion === applicationRequestVersion) appStore.showError(errorMessage(error));
+    if (requestVersion === applicationRequestVersion && !controller.signal.aborted) {
+      if (!silent) appStore.showError(errorMessage(error));
+      scheduleApplicationRefresh(id);
+    }
   } finally {
-    if (requestVersion === applicationRequestVersion) communicationsLoading.value = false;
+    if (requestVersion === applicationRequestVersion) {
+      if (applicationDetailController === controller) applicationDetailController = undefined;
+      if (!silent) communicationsLoading.value = false;
+    }
   }
 }
+async function openApplication(id: number) {
+  await loadApplicationDetails(id);
+}
+async function refreshApplicationDetails() {
+  if (!selectedApplication.value) return;
+  await loadApplicationDetails(selectedApplication.value.id);
+}
 function closeApplication() {
+  stopApplicationRefresh(true);
   applicationRequestVersion += 1;
   selectedApplication.value = null;
   communications.value = [];
@@ -1002,7 +1078,7 @@ async function submitDecision() {
   }
 }
 async function resendApproval() {
-  if (!selectedApplication.value) return;
+  if (!selectedApplication.value || hasQueuedApprovalMail.value) return;
   try {
     await groupApplicationsAdminAPI.resendApproval(selectedApplication.value.id);
     await openApplication(selectedApplication.value.id);
@@ -1068,5 +1144,12 @@ function statusClass(status: GroupApplicationStatus) {
 
 onMounted(async () => {
   await Promise.all([loadApplications(), loadPolicies(), loadEmailConfig()]);
+});
+watch(activeTab, () => {
+  if (selectedApplication.value) closeApplication();
+});
+onBeforeUnmount(() => {
+  stopApplicationRefresh(true);
+  applicationRequestVersion += 1;
 });
 </script>

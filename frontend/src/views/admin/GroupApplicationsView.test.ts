@@ -4,9 +4,13 @@ import { createPinia } from "pinia";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import GroupApplicationsView from "./GroupApplicationsView.vue";
+import { apiClient } from "@/api/client";
 import {
   defaultGroupApplicationTemplates,
   groupApplicationsAdminAPI,
+  type AdminGroupApplication,
+  type GroupApplicationCommunication,
+  type GroupApplicationEmailConfig,
   type GroupApplicationPolicy,
 } from "@/api/admin/groupApplications";
 
@@ -54,6 +58,8 @@ vi.mock("vue-i18n", async (importOriginal) => {
     "admin.groupApplications.workflowPaused": "Workflow paused",
     "admin.groupApplications.workerStopped": "Worker stopped",
     "admin.groupApplications.workflowRunning": "Workflow running",
+    "admin.groupApplications.lastMailError": "Latest outbox error: {error}",
+    "admin.groupApplications.lastIMAPError": "Latest IMAP error: {error}",
     "admin.groupApplications.applyableGroup": "Application group",
     "admin.groupApplications.policyDescription": "Configure access policy",
     "admin.groupApplications.enabled": "Allow applications",
@@ -78,6 +84,18 @@ vi.mock("vue-i18n", async (importOriginal) => {
     "admin.groupApplications.noApplications": "No applications",
     "admin.groupApplications.user": "User",
     "admin.groupApplications.email": "Email",
+    "admin.groupApplications.resendApproval": "Resend approval",
+    "admin.groupApplications.approvalAlreadyQueued": "Approval already queued",
+    "admin.groupApplications.emailHistory": "Email conversation history",
+    "admin.groupApplications.refreshEmailHistory": "Refresh email conversation history",
+    "admin.groupApplications.exportEmailHistory": "Export email conversation history",
+    "admin.groupApplications.outboundEmail": "Outbound",
+    "admin.groupApplications.to": "To",
+    "admin.groupApplications.attempts": "{count} attempts",
+    "groupApplications.contactEmail": "Contact email",
+    "groupApplications.reason": "Reason",
+    "groupApplications.group": "Group",
+    "groupApplications.status.awaiting_reply": "Awaiting email reply",
     "common.refresh": "Refresh",
     "common.loading": "Loading",
     "common.enabled": "Enabled",
@@ -87,6 +105,7 @@ vi.mock("vue-i18n", async (importOriginal) => {
     "common.save": "Save",
     "common.saved": "Saved",
     "common.error": "Error",
+    "common.close": "Close",
     "groupApplications.selectGroup": "Select group",
   };
   return {
@@ -104,7 +123,7 @@ vi.mock("vue-i18n", async (importOriginal) => {
   };
 });
 
-const initialConfig = {
+const initialConfig: GroupApplicationEmailConfig = {
   enabled: false,
   smtp: {
     host: "smtp.old.example.com",
@@ -132,6 +151,8 @@ let testedSMTP: typeof initialConfig | null = null;
 let testedIMAP: typeof initialConfig | null = null;
 let savedConfig: typeof initialConfig | null = null;
 let workerWorkflowEnabled = false;
+let workerLastMailError = "";
+let workerLastIMAPError = "";
 
 const server = setupServer(
   http.get("*/api/v1/admin/group-applications/email-config", () =>
@@ -147,6 +168,8 @@ const server = setupServer(
         mail_failures: 0,
         replies_processed: 0,
         reply_failures: 0,
+        last_mail_error: workerLastMailError || undefined,
+        last_imap_error: workerLastIMAPError || undefined,
       },
     }),
   ),
@@ -183,12 +206,29 @@ afterEach(() => {
     testedIMAP = null;
   savedConfig = null;
   workerWorkflowEnabled = false;
+  workerLastMailError = "";
+  workerLastIMAPError = "";
+  vi.useRealTimers();
   vi.restoreAllMocks();
   server.resetHandlers();
 });
 afterAll(() => server.close());
 
 describe("GroupApplicationsView email settings", () => {
+  it("bounds the IMAP test request independently from the global client timeout", async () => {
+    const post = vi.spyOn(apiClient, "post").mockResolvedValue({
+      data: { ok: true, mailboxes: ["INBOX"] },
+    });
+
+    await groupApplicationsAdminAPI.testIMAP(initialConfig);
+
+    expect(post).toHaveBeenCalledWith(
+      "/admin/group-applications/email-config/test-imap",
+      initialConfig,
+      { timeout: 15_000 },
+    );
+  });
+
   it("tests and saves the unsaved standalone configuration and discovers mailboxes", async () => {
     render(GroupApplicationsView, {
       global: {
@@ -221,6 +261,124 @@ describe("GroupApplicationsView email settings", () => {
     expect(savedConfig?.smtp.host).toBe("smtp.unsaved.example.com");
     expect(savedConfig?.imap.host).toBe("imap.example.com");
     expect(await screen.findByText("Workflow running")).toBeTruthy();
+  });
+
+  it("shows independent outbox and IMAP worker failures", async () => {
+    workerLastMailError = "SMTP authentication failed";
+    workerLastIMAPError = "IMAP connection timed out";
+
+    render(GroupApplicationsView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { AppLayout: { template: "<main><slot /></main>" } },
+      },
+    });
+
+    await fireEvent.click(await screen.findByRole("tab", { name: "Email settings" }));
+    expect(await screen.findByText("Latest outbox error: SMTP authentication failed")).toBeTruthy();
+    expect(screen.getByText("Latest IMAP error: IMAP connection timed out")).toBeTruthy();
+  });
+});
+
+describe("GroupApplicationsView communication refresh", () => {
+  const application: AdminGroupApplication = {
+    id: 7,
+    user_id: 42,
+    user_email: "applicant@example.com",
+    group_id: 4,
+    group_name: "Private Pro",
+    contact_email: "applicant@example.com",
+    reason: "Need private access",
+    locale: "en",
+    status: "awaiting_reply",
+    attachment_id: 11,
+    created_at: "2026-08-27T01:00:00Z",
+    updated_at: "2026-08-27T01:00:00Z",
+  };
+
+  function approvalCommunication(status: string): GroupApplicationCommunication {
+    return {
+      id: 11,
+      application_id: application.id,
+      direction: "outbound",
+      kind: "approval",
+      to_address: application.contact_email,
+      subject: "Application approved",
+      status,
+      attempts: 0,
+      occurred_at: "2026-08-27T01:01:00Z",
+    };
+  }
+
+  it("silently refreshes queued mail without overlapping and stops after delivery", async () => {
+    savedConfig = { ...initialConfig, enabled: true };
+    workerWorkflowEnabled = true;
+    server.use(
+      http.get("*/api/v1/admin/group-applications", () =>
+        HttpResponse.json({ code: 0, data: { items: [application], total: 1 } }),
+      ),
+    );
+    const getApplication = vi
+      .spyOn(groupApplicationsAdminAPI, "get")
+      .mockResolvedValue(application);
+    const listCommunications = vi
+      .spyOn(groupApplicationsAdminAPI, "listCommunications")
+      .mockResolvedValueOnce([approvalCommunication("pending")])
+      .mockResolvedValue([approvalCommunication("sent")]);
+
+    render(GroupApplicationsView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { AppLayout: { template: "<main><slot /></main>" } },
+      },
+    });
+
+    const applicationID = await screen.findByText("#7");
+    vi.useFakeTimers();
+    await fireEvent.click(applicationID);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const resend = screen.getByRole("button", { name: "Resend approval" });
+    expect((resend as HTMLButtonElement).disabled).toBe(true);
+    expect(resend.getAttribute("title")).toBe("Approval already queued");
+    expect(listCommunications).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(getApplication).toHaveBeenCalledTimes(2);
+    expect(listCommunications).toHaveBeenCalledTimes(2);
+    expect((resend as HTMLButtonElement).disabled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(listCommunications).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels queued refreshes when the details dialog closes", async () => {
+    server.use(
+      http.get("*/api/v1/admin/group-applications", () =>
+        HttpResponse.json({ code: 0, data: { items: [application], total: 1 } }),
+      ),
+    );
+    vi.spyOn(groupApplicationsAdminAPI, "get").mockResolvedValue(application);
+    const listCommunications = vi
+      .spyOn(groupApplicationsAdminAPI, "listCommunications")
+      .mockResolvedValue([approvalCommunication("pending")]);
+
+    render(GroupApplicationsView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { AppLayout: { template: "<main><slot /></main>" } },
+      },
+    });
+
+    const applicationID = await screen.findByText("#7");
+    vi.useFakeTimers();
+    await fireEvent.click(applicationID);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(listCommunications).toHaveBeenCalledTimes(1);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(listCommunications).toHaveBeenCalledTimes(1);
   });
 });
 

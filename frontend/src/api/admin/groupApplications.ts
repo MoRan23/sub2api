@@ -120,6 +120,8 @@ export interface GroupApplicationWorkerHealth {
   mail_failures: number;
   replies_processed: number;
   reply_failures: number;
+  last_mail_check_at?: string;
+  last_mail_error?: string;
   last_imap_check_at?: string;
   last_imap_error?: string;
   configuration_error?: string;
@@ -337,15 +339,20 @@ export const groupApplicationsAdminAPI = {
     );
     return data;
   },
-  async get(id: number): Promise<AdminGroupApplication> {
+  async get(id: number, signal?: AbortSignal): Promise<AdminGroupApplication> {
     const { data } = await apiClient.get<AdminGroupApplication>(
       `/admin/group-applications/${id}`,
+      { signal },
     );
     return data;
   },
-  async listCommunications(id: number): Promise<GroupApplicationCommunication[]> {
+  async listCommunications(
+    id: number,
+    signal?: AbortSignal,
+  ): Promise<GroupApplicationCommunication[]> {
     const { data } = await apiClient.get<GroupApplicationCommunication[]>(
       `/admin/group-applications/${id}/communications`,
+      { signal },
     );
     return data;
   },
@@ -455,6 +462,7 @@ export const groupApplicationsAdminAPI = {
     const { data } = await apiClient.post<{ ok: boolean; mailboxes: string[] }>(
       "/admin/group-applications/email-config/test-imap",
       input,
+      { timeout: 15_000 },
     );
     return data;
   },
