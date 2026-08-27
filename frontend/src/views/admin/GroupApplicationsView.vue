@@ -305,8 +305,8 @@
           {{ t("admin.groupApplications.lastIMAPError", { error: workerHealth.last_imap_error }) }}
         </div>
 
-        <div class="grid items-start gap-6 xl:grid-cols-2">
-          <article class="card p-5 sm:p-6">
+        <div class="grid gap-6 xl:grid-cols-2">
+          <article class="card flex min-w-0 flex-col p-5 sm:p-6">
             <div class="mb-5 border-b border-gray-200 pb-4 dark:border-dark-700">
               <h3 class="font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.groupApplications.smtpTitle") }}
@@ -315,7 +315,7 @@
                 {{ t("admin.groupApplications.smtpHint") }}
               </p>
             </div>
-            <div class="grid gap-4 sm:grid-cols-2">
+            <div class="grid gap-4 pb-6 sm:grid-cols-2">
               <Input v-model="emailForm.smtp.host" label="Host" placeholder="smtp.example.com" />
               <label class="block">
                 <span class="input-label mb-1.5 block">Port</span>
@@ -326,14 +326,34 @@
                 :label="t('admin.groupApplications.username')"
                 autocomplete="username"
               />
-              <Input
-                v-model="emailForm.smtp.password"
-                type="password"
-                :label="t('admin.groupApplications.password')"
-                autocomplete="new-password"
-                :placeholder="emailForm.smtp.password_configured ? '********' : ''"
-                :hint="passwordHint(emailForm.smtp.password_configured)"
-              />
+              <div class="space-y-2">
+                <Input
+                  v-model="emailForm.smtp.password"
+                  type="password"
+                  :label="t('admin.groupApplications.password')"
+                  autocomplete="new-password"
+                  :disabled="!emailForm.enabled && clearSMTPPassword"
+                  :placeholder="emailForm.smtp.password_configured ? '********' : ''"
+                  :hint="passwordHint(emailForm.smtp.password_configured)"
+                />
+                <label
+                  v-if="!emailForm.enabled && emailForm.smtp.password_configured"
+                  class="flex cursor-pointer items-start gap-2 text-sm text-red-600 dark:text-red-300"
+                >
+                  <input
+                    type="checkbox"
+                    class="mt-0.5 h-4 w-4 flex-none rounded border-gray-300 text-red-600 focus:ring-red-500"
+                    :checked="clearSMTPPassword"
+                    @change="setClearSMTPPassword"
+                  />
+                  <span>
+                    <span class="block font-medium">{{ t("admin.groupApplications.clearSavedSMTPPassword") }}</span>
+                    <span class="mt-0.5 block text-xs text-gray-500 dark:text-dark-400">
+                      {{ t("admin.groupApplications.clearSavedPasswordHint") }}
+                    </span>
+                  </span>
+                </label>
+              </div>
               <Input
                 v-model="emailForm.smtp.from_address"
                 type="email"
@@ -360,7 +380,7 @@
                 </p>
               </div>
             </div>
-            <div class="mt-6 space-y-3 border-t border-gray-200 pt-5 dark:border-dark-700">
+            <div class="mt-auto space-y-3 border-t border-gray-200 pt-5 dark:border-dark-700">
               <Input
                 v-model="testRecipient"
                 type="email"
@@ -371,7 +391,7 @@
                 <button
                   type="button"
                   class="btn btn-secondary"
-                  :disabled="testingAction !== null"
+                  :disabled="emailActionBusy"
                   @click="testSMTP"
                 >
                   <Icon name="shield" size="sm" class="mr-2" />
@@ -380,7 +400,7 @@
                 <button
                   type="button"
                   class="btn btn-secondary"
-                  :disabled="testingAction !== null || !testRecipient"
+                  :disabled="emailActionBusy || !testRecipient"
                   @click="sendTestEmail"
                 >
                   <Icon name="mail" size="sm" class="mr-2" />
@@ -390,7 +410,7 @@
             </div>
           </article>
 
-          <article class="card p-5 sm:p-6">
+          <article class="card flex min-w-0 flex-col p-5 sm:p-6">
             <div class="mb-5 border-b border-gray-200 pb-4 dark:border-dark-700">
               <h3 class="font-semibold text-gray-900 dark:text-white">
                 {{ t("admin.groupApplications.imapTitle") }}
@@ -400,7 +420,7 @@
               </p>
             </div>
             <div class="mb-5 flex items-center justify-between gap-4 rounded-lg bg-gray-50 px-4 py-3 dark:bg-dark-900">
-              <div>
+              <div class="min-w-0">
                 <div class="text-sm font-medium text-gray-900 dark:text-white">
                   {{ t("admin.groupApplications.reuseSMTPCredentials") }}
                 </div>
@@ -408,9 +428,13 @@
                   {{ t("admin.groupApplications.reuseSMTPCredentialsHint") }}
                 </div>
               </div>
-              <Toggle v-model="emailForm.imap.use_smtp_credentials" />
+              <Toggle
+                :model-value="emailForm.imap.use_smtp_credentials"
+                class="flex-none"
+                @update:model-value="setReuseSMTPCredentials"
+              />
             </div>
-            <div class="grid gap-4 sm:grid-cols-2">
+            <div class="grid gap-4 pb-6 sm:grid-cols-2">
               <Input v-model="emailForm.imap.host" label="Host" placeholder="imap.example.com" />
               <label class="block">
                 <span class="input-label mb-1.5 block">Port</span>
@@ -423,15 +447,34 @@
                 :disabled="emailForm.imap.use_smtp_credentials"
                 :placeholder="emailForm.imap.use_smtp_credentials ? emailForm.smtp.username : ''"
               />
-              <Input
-                v-model="emailForm.imap.password"
-                type="password"
-                :label="t('admin.groupApplications.password')"
-                autocomplete="new-password"
-                :disabled="emailForm.imap.use_smtp_credentials"
-                :placeholder="emailForm.imap.password_configured ? '********' : ''"
-                :hint="passwordHint(emailForm.imap.password_configured)"
-              />
+              <div class="space-y-2">
+                <Input
+                  v-model="emailForm.imap.password"
+                  type="password"
+                  :label="t('admin.groupApplications.password')"
+                  autocomplete="new-password"
+                  :disabled="emailForm.imap.use_smtp_credentials || (!emailForm.enabled && clearIMAPPassword)"
+                  :placeholder="emailForm.imap.password_configured ? '********' : ''"
+                  :hint="passwordHint(emailForm.imap.password_configured)"
+                />
+                <label
+                  v-if="!emailForm.enabled && !emailForm.imap.use_smtp_credentials && emailForm.imap.password_configured"
+                  class="flex cursor-pointer items-start gap-2 text-sm text-red-600 dark:text-red-300"
+                >
+                  <input
+                    type="checkbox"
+                    class="mt-0.5 h-4 w-4 flex-none rounded border-gray-300 text-red-600 focus:ring-red-500"
+                    :checked="clearIMAPPassword"
+                    @change="setClearIMAPPassword"
+                  />
+                  <span>
+                    <span class="block font-medium">{{ t("admin.groupApplications.clearSavedIMAPPassword") }}</span>
+                    <span class="mt-0.5 block text-xs text-gray-500 dark:text-dark-400">
+                      {{ t("admin.groupApplications.clearSavedPasswordHint") }}
+                    </span>
+                  </span>
+                </label>
+              </div>
               <Input
                 v-model="emailForm.imap.reply_address"
                 type="email"
@@ -482,11 +525,11 @@
                 />
               </label>
             </div>
-            <div class="mt-6 border-t border-gray-200 pt-5 dark:border-dark-700">
+            <div class="mt-auto border-t border-gray-200 pt-5 dark:border-dark-700">
               <button
                 type="button"
                 class="btn btn-secondary"
-                :disabled="testingAction !== null"
+                :disabled="emailActionBusy"
                 @click="testIMAP"
               >
                 <Icon name="inbox" size="sm" class="mr-2" />
@@ -497,7 +540,7 @@
         </div>
 
         <div class="flex justify-end border-t border-gray-200 pt-5 dark:border-dark-700">
-          <button type="button" class="btn btn-primary" :disabled="saving" @click="saveEmailConfig">
+          <button type="button" class="btn btn-primary" :disabled="emailActionBusy" @click="saveEmailConfig">
             <Icon name="check" size="sm" class="mr-2" />
             {{ t("admin.groupApplications.saveEmailConfig") }}
           </button>
@@ -513,6 +556,8 @@
       :show="Boolean(selectedApplication)"
       :title="selectedApplication ? `#${selectedApplication.id} ${selectedApplication.group_name}` : ''"
       width="wide"
+      :close-on-escape="!saving"
+      :show-close-button="!saving"
       @close="closeApplication"
     >
       <div v-if="selectedApplication" class="space-y-5">
@@ -538,7 +583,7 @@
         <GroupApplicationCommunicationTimeline
           :communications="communications"
           :loading="communicationsLoading"
-          :actions-disabled="!emailForm?.enabled"
+          :actions-disabled="saving || !emailForm?.enabled"
           @export="exportCommunications"
           @refresh="refreshApplicationDetails"
           @retry="retryMail"
@@ -559,7 +604,7 @@
             v-if="selectedApplication?.status === 'pending' || selectedApplication?.status === 'awaiting_reply'"
             type="button"
             class="btn btn-danger"
-            :disabled="saving || !emailForm?.enabled"
+            :disabled="saving"
             @click="openDecision('reject')"
           >
             <Icon name="x" size="sm" class="mr-2" />{{ t("admin.groupApplications.reject") }}
@@ -582,12 +627,12 @@
             v-if="selectedApplication?.status === 'completed'"
             type="button"
             class="btn btn-danger"
-            :disabled="saving || !emailForm?.enabled"
+            :disabled="saving"
             @click="openDecision('revoke')"
           >
             {{ t("admin.groupApplications.revoke") }}
           </button>
-          <button type="button" class="btn btn-secondary" @click="closeApplication">
+          <button type="button" class="btn btn-secondary" :disabled="saving" @click="closeApplication">
             {{ t("common.close") }}
           </button>
         </div>
@@ -620,6 +665,8 @@
         </button>
       </template>
     </BaseDialog>
+
+    <TotpStepUpDialog :controller="emailConfigStepUp" />
   </AppLayout>
 </template>
 
@@ -637,16 +684,24 @@ import Toggle from "@/components/common/Toggle.vue";
 import Icon from "@/components/icons/Icon.vue";
 import GroupApplicationTemplateEditor from "@/components/admin/groupApplications/GroupApplicationTemplateEditor.vue";
 import GroupApplicationCommunicationTimeline from "@/components/admin/groupApplications/GroupApplicationCommunicationTimeline.vue";
+import TotpStepUpDialog from "@/components/auth/TotpStepUpDialog.vue";
 import { adminAPI } from "@/api";
 import { useAppStore } from "@/stores/app";
 import type { AdminGroup } from "@/types";
 import { extractI18nErrorMessage } from "@/utils/apiError";
+import {
+  isStepUpBlocked,
+  isStepUpCancelled,
+  stepUpBlockReason,
+  useStepUp,
+} from "@/composables/useStepUp";
 import {
   groupApplicationsAdminAPI,
   defaultGroupApplicationTemplates,
   type AdminGroupApplication,
   type GroupApplicationCommunication,
   type GroupApplicationEmailConfig,
+  type GroupApplicationPasswordAction,
   type GroupApplicationPolicy,
   type GroupApplicationTLSMode,
   type GroupApplicationWorkerHealth,
@@ -655,12 +710,14 @@ import type { GroupApplicationStatus } from "@/api/groupApplications";
 
 const { t } = useI18n();
 const appStore = useAppStore();
+const emailConfigStepUp = useStepUp();
 type Tab = "applications" | "policies" | "email";
 type TestingAction = "smtp" | "send" | "imap";
 const activeTab = ref<Tab>("applications");
 const loading = ref(false);
 const saving = ref(false);
 const testingAction = ref<TestingAction | null>(null);
+const emailActionBusy = computed(() => saving.value || testingAction.value !== null);
 const tabs = computed(() => [
   { value: "applications" as const, label: t("admin.groupApplications.applications") },
   { value: "policies" as const, label: t("admin.groupApplications.policies") },
@@ -694,6 +751,9 @@ const emailForm = ref<GroupApplicationEmailConfig>();
 const workerHealth = ref<GroupApplicationWorkerHealth>();
 const mailboxes = ref<string[]>(["INBOX"]);
 const testRecipient = ref("");
+const clearSMTPPassword = ref(false);
+const clearIMAPPassword = ref(false);
+const standaloneIMAPPasswordConfigured = ref(false);
 const decisionMode = ref<"reject" | "revoke" | null>(null);
 const decisionReason = ref("");
 
@@ -769,6 +829,18 @@ function errorMessage(error: unknown) {
     "admin.groupApplications.errors",
     t("common.error"),
   );
+}
+function reportEmailConfigActionError(error: unknown) {
+  if (isStepUpCancelled(error)) return;
+  if (isStepUpBlocked(error)) {
+    appStore.showError(
+      stepUpBlockReason(error) === "STEP_UP_ADMIN_API_KEY_FORBIDDEN"
+        ? t("stepUp.adminApiKeyForbidden")
+        : t("stepUp.notEnabled"),
+    );
+    return;
+  }
+  appStore.showError(errorMessage(error));
 }
 async function loadApplications() {
   loading.value = true;
@@ -894,6 +966,7 @@ async function refreshApplicationDetails() {
   await loadApplicationDetails(selectedApplication.value.id);
 }
 function closeApplication() {
+  if (saving.value) return;
   stopApplicationRefresh(true);
   applicationRequestVersion += 1;
   selectedApplication.value = null;
@@ -973,12 +1046,18 @@ async function savePolicy() {
 async function loadEmailConfig() {
   loading.value = true;
   try {
-    [emailForm.value, workerHealth.value] = await Promise.all([
+    const [config, health] = await Promise.all([
       groupApplicationsAdminAPI.getEmailConfig(),
       groupApplicationsAdminAPI.workerStatus(),
     ]);
+    emailForm.value = config;
+    workerHealth.value = health;
+    standaloneIMAPPasswordConfigured.value =
+      !config.imap.use_smtp_credentials && config.imap.password_configured;
     const mailbox = emailForm.value.imap.mailbox || "INBOX";
     mailboxes.value = Array.from(new Set(["INBOX", mailbox]));
+    clearSMTPPassword.value = false;
+    clearIMAPPassword.value = false;
     if (!testRecipient.value) {
       testRecipient.value = emailForm.value.smtp.from_address;
     }
@@ -1017,54 +1096,109 @@ function passwordHint(configured: boolean) {
     ? t("admin.groupApplications.passwordConfiguredHint")
     : t("admin.groupApplications.passwordRequiredHint");
 }
-async function saveEmailConfig() {
+function setClearSMTPPassword(event: Event) {
+  clearSMTPPassword.value = (event.target as HTMLInputElement).checked;
+  if (clearSMTPPassword.value && emailForm.value) emailForm.value.smtp.password = "";
+}
+function setClearIMAPPassword(event: Event) {
+  clearIMAPPassword.value = (event.target as HTMLInputElement).checked;
+  if (clearIMAPPassword.value && emailForm.value) emailForm.value.imap.password = "";
+}
+function setReuseSMTPCredentials(value: boolean) {
   if (!emailForm.value) return;
+  emailForm.value.imap.use_smtp_credentials = value;
+  clearIMAPPassword.value = false;
+  emailForm.value.imap.password_configured = value
+    ? emailForm.value.smtp.password_configured
+    : standaloneIMAPPasswordConfigured.value;
+}
+function passwordAction(password: string | undefined, clear: boolean): GroupApplicationPasswordAction {
+  if (clear) return "clear";
+  return password ? "replace" : "keep";
+}
+function emailConfigPayload(): GroupApplicationEmailConfig | undefined {
+  if (!emailForm.value) return undefined;
+  const payload = clone(emailForm.value);
+  const allowClear = !payload.enabled;
+  payload.smtp.password_action = passwordAction(
+    payload.smtp.password,
+    allowClear && clearSMTPPassword.value,
+  );
+  if (payload.smtp.password_action === "clear") payload.smtp.password = "";
+  if (payload.imap.use_smtp_credentials) {
+    payload.imap.password_action = "keep";
+    payload.imap.password = "";
+  } else {
+    payload.imap.password_action = passwordAction(
+      payload.imap.password,
+      allowClear && clearIMAPPassword.value,
+    );
+    if (payload.imap.password_action === "clear") payload.imap.password = "";
+  }
+  return payload;
+}
+async function saveEmailConfig() {
+  if (emailActionBusy.value) return;
+  const payload = emailConfigPayload();
+  if (!payload) return;
   saving.value = true;
   try {
-    emailForm.value = await groupApplicationsAdminAPI.saveEmailConfig(emailForm.value);
+    emailForm.value = await emailConfigStepUp.run(() =>
+      groupApplicationsAdminAPI.saveEmailConfig(payload),
+    );
     await loadEmailConfig();
     appStore.showSuccess(t("common.saved"));
   } catch (error) {
-    appStore.showError(errorMessage(error));
+    reportEmailConfigActionError(error);
   } finally {
     saving.value = false;
   }
 }
 async function testSMTP() {
-  if (!emailForm.value) return;
+  if (emailActionBusy.value) return;
+  const payload = emailConfigPayload();
+  if (!payload) return;
   testingAction.value = "smtp";
   try {
-    await groupApplicationsAdminAPI.testSMTP(emailForm.value);
+    await emailConfigStepUp.run(() => groupApplicationsAdminAPI.testSMTP(payload));
     appStore.showSuccess(t("admin.groupApplications.smtpConnectionOK"));
   } catch (error) {
-    appStore.showError(errorMessage(error));
+    reportEmailConfigActionError(error);
   } finally {
     testingAction.value = null;
   }
 }
 async function sendTestEmail() {
-  if (!emailForm.value || !testRecipient.value) return;
+  if (emailActionBusy.value) return;
+  const payload = emailConfigPayload();
+  if (!payload || !testRecipient.value) return;
   testingAction.value = "send";
   try {
-    await groupApplicationsAdminAPI.sendTestEmail(emailForm.value, testRecipient.value);
+    await emailConfigStepUp.run(() =>
+      groupApplicationsAdminAPI.sendTestEmail(payload, testRecipient.value),
+    );
     appStore.showSuccess(t("admin.groupApplications.testEmailSent"));
   } catch (error) {
-    appStore.showError(errorMessage(error));
+    reportEmailConfigActionError(error);
   } finally {
     testingAction.value = null;
   }
 }
 async function testIMAP() {
-  if (!emailForm.value) return;
+  if (emailActionBusy.value) return;
+  const payload = emailConfigPayload();
+  if (!payload) return;
   testingAction.value = "imap";
   try {
-    const result = await groupApplicationsAdminAPI.testIMAP(emailForm.value);
+    const result = await emailConfigStepUp.run(() =>
+      groupApplicationsAdminAPI.testIMAP(payload),
+    );
     mailboxes.value = Array.from(new Set(["INBOX", ...result.mailboxes]));
     appStore.showSuccess(
       t("admin.groupApplications.imapConnectionOK", { count: result.mailboxes.length }),
     );
   } catch (error) {
-    appStore.showError(errorMessage(error));
+    reportEmailConfigActionError(error);
   } finally {
     testingAction.value = null;
   }
@@ -1075,11 +1209,14 @@ async function reloadActiveTab() {
   else await loadEmailConfig();
 }
 async function approveSelected() {
-  if (!selectedApplication.value) return;
+  if (!selectedApplication.value || saving.value) return;
+  const applicationID = selectedApplication.value.id;
   saving.value = true;
   try {
-    await groupApplicationsAdminAPI.approve(selectedApplication.value.id);
-    await openApplication(selectedApplication.value.id);
+    await groupApplicationsAdminAPI.approve(applicationID);
+    if (selectedApplication.value?.id === applicationID) {
+      await openApplication(applicationID);
+    }
     await loadApplications();
   } catch (error) {
     appStore.showError(errorMessage(error));
@@ -1092,16 +1229,21 @@ function openDecision(mode: "reject" | "revoke") {
   decisionReason.value = "";
 }
 async function submitDecision() {
-  if (!selectedApplication.value || !decisionMode.value || !decisionReason.value.trim()) return;
+  if (!selectedApplication.value || !decisionMode.value || !decisionReason.value.trim() || saving.value) return;
+  const applicationID = selectedApplication.value.id;
+  const mode = decisionMode.value;
+  const reason = decisionReason.value;
   saving.value = true;
   try {
-    if (decisionMode.value === "reject") {
-      await groupApplicationsAdminAPI.reject(selectedApplication.value.id, decisionReason.value);
+    if (mode === "reject") {
+      await groupApplicationsAdminAPI.reject(applicationID, reason);
     } else {
-      await groupApplicationsAdminAPI.revoke(selectedApplication.value.id, decisionReason.value);
+      await groupApplicationsAdminAPI.revoke(applicationID, reason);
     }
     decisionMode.value = null;
-    await openApplication(selectedApplication.value.id);
+    if (selectedApplication.value?.id === applicationID) {
+      await openApplication(applicationID);
+    }
     await loadApplications();
   } catch (error) {
     appStore.showError(errorMessage(error));
@@ -1110,21 +1252,33 @@ async function submitDecision() {
   }
 }
 async function resendApproval() {
-  if (!selectedApplication.value || hasQueuedApprovalMail.value) return;
+  if (!selectedApplication.value || hasQueuedApprovalMail.value || saving.value) return;
+  const applicationID = selectedApplication.value.id;
+  saving.value = true;
   try {
-    await groupApplicationsAdminAPI.resendApproval(selectedApplication.value.id);
-    await openApplication(selectedApplication.value.id);
+    await groupApplicationsAdminAPI.resendApproval(applicationID);
+    if (selectedApplication.value?.id === applicationID) {
+      await openApplication(applicationID);
+    }
   } catch (error) {
     appStore.showError(errorMessage(error));
+  } finally {
+    saving.value = false;
   }
 }
 async function retryMail(outboxID: number) {
-  if (!selectedApplication.value || !emailForm.value?.enabled) return;
+  if (!selectedApplication.value || !emailForm.value?.enabled || saving.value) return;
+  const applicationID = selectedApplication.value.id;
+  saving.value = true;
   try {
-    await groupApplicationsAdminAPI.retryMail(selectedApplication.value.id, outboxID);
-    await openApplication(selectedApplication.value.id);
+    await groupApplicationsAdminAPI.retryMail(applicationID, outboxID);
+    if (selectedApplication.value?.id === applicationID) {
+      await openApplication(applicationID);
+    }
   } catch (error) {
     appStore.showError(errorMessage(error));
+  } finally {
+    saving.value = false;
   }
 }
 async function downloadAgreement() {
@@ -1180,6 +1334,15 @@ onMounted(async () => {
 watch(activeTab, () => {
   if (selectedApplication.value) closeApplication();
 });
+watch(
+  () => emailForm.value?.enabled,
+  (enabled) => {
+    if (enabled) {
+      clearSMTPPassword.value = false;
+      clearIMAPPassword.value = false;
+    }
+  },
+);
 onBeforeUnmount(() => {
   stopApplicationRefresh(true);
   applicationRequestVersion += 1;

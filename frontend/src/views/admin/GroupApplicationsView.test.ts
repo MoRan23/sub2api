@@ -40,6 +40,9 @@ vi.mock("vue-i18n", async (importOriginal) => {
     "admin.groupApplications.startTLSHint": "STARTTLS {port}",
     "admin.groupApplications.passwordRequiredHint": "Password required",
     "admin.groupApplications.passwordConfiguredHint": "Password saved",
+    "admin.groupApplications.clearSavedSMTPPassword": "Clear saved SMTP password",
+    "admin.groupApplications.clearSavedIMAPPassword": "Clear saved IMAP password",
+    "admin.groupApplications.clearSavedPasswordHint": "Deletes the saved password",
     "admin.groupApplications.testRecipient": "Test message recipient",
     "admin.groupApplications.testSMTP": "Test SMTP connection",
     "admin.groupApplications.sendTest": "Send test message",
@@ -86,6 +89,9 @@ vi.mock("vue-i18n", async (importOriginal) => {
     "admin.groupApplications.email": "Email",
     "admin.groupApplications.resendApproval": "Resend approval",
     "admin.groupApplications.approvalAlreadyQueued": "Approval already queued",
+    "admin.groupApplications.approve": "Approve",
+    "admin.groupApplications.reject": "Reject",
+    "admin.groupApplications.revoke": "Revoke",
     "admin.groupApplications.emailHistory": "Email conversation history",
     "admin.groupApplications.refreshEmailHistory": "Refresh email conversation history",
     "admin.groupApplications.exportEmailHistory": "Export email conversation history",
@@ -106,6 +112,14 @@ vi.mock("vue-i18n", async (importOriginal) => {
     "common.saved": "Saved",
     "common.error": "Error",
     "common.close": "Close",
+    "common.cancel": "Cancel",
+    "common.verifying": "Verifying",
+    "common.retry": "Retry",
+    "stepUp.title": "Two-Factor Verification Required",
+    "stepUp.hint": "Enter the 6-digit code to continue",
+    "stepUp.verifyFailed": "Verification failed",
+    "stepUp.notEnabled": "Enable TOTP first",
+    "stepUp.adminApiKeyForbidden": "Admin API keys cannot perform this action",
     "groupApplications.selectGroup": "Select group",
   };
   return {
@@ -242,6 +256,7 @@ describe("GroupApplicationsView email settings", () => {
 
     const hosts = screen.getAllByLabelText("Host");
     await fireEvent.update(hosts[0], "smtp.unsaved.example.com");
+    await fireEvent.update(screen.getAllByLabelText("Password")[0], "new-smtp-password");
     await fireEvent.click(screen.getByRole("button", { name: "SMTP connection encryption" }));
     await fireEvent.click(await screen.findByRole("option", { name: "Implicit TLS" }));
     expect((screen.getAllByLabelText("Port")[0] as HTMLInputElement).value).toBe("465");
@@ -249,6 +264,8 @@ describe("GroupApplicationsView email settings", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Test SMTP connection" }));
     await waitFor(() => expect(testedSMTP?.smtp.host).toBe("smtp.unsaved.example.com"));
     expect(testedSMTP?.smtp.tls_mode).toBe("implicit");
+    expect(testedSMTP?.smtp.password_action).toBe("replace");
+    expect(testedSMTP?.imap.password_action).toBe("keep");
 
     await fireEvent.click(screen.getByRole("button", { name: "Test IMAP and list folders" }));
     await waitFor(() => expect(testedIMAP?.imap.mailbox).toBe("INBOX"));
@@ -259,8 +276,184 @@ describe("GroupApplicationsView email settings", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Save email settings" }));
     await waitFor(() => expect(savedConfig?.enabled).toBe(true));
     expect(savedConfig?.smtp.host).toBe("smtp.unsaved.example.com");
+    expect(savedConfig?.smtp.password_action).toBe("replace");
     expect(savedConfig?.imap.host).toBe("imap.example.com");
+    expect(savedConfig?.imap.password_action).toBe("keep");
     expect(await screen.findByText("Workflow running")).toBeTruthy();
+  });
+
+  it("keeps unchanged passwords and clears stored credentials only while disabled", async () => {
+    render(GroupApplicationsView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { AppLayout: { template: "<main><slot /></main>" } },
+      },
+    });
+
+    await fireEvent.click(await screen.findByRole("tab", { name: "Email settings" }));
+    const smtpClear = await screen.findByRole("checkbox", { name: /Clear saved SMTP password/ });
+    expect(screen.getByRole("checkbox", { name: /Clear saved IMAP password/ })).toBeTruthy();
+    const reuseCredentials = screen.getAllByRole("switch")[1];
+
+    await fireEvent.click(reuseCredentials);
+    expect(screen.queryByRole("checkbox", { name: /Clear saved IMAP password/ })).toBeNull();
+    await fireEvent.click(reuseCredentials);
+    const imapClear = await screen.findByRole("checkbox", { name: /Clear saved IMAP password/ });
+
+    const save = screen.getByRole("button", { name: "Save email settings" });
+    await fireEvent.click(save);
+    await waitFor(() => expect(savedConfig?.smtp.password_action).toBe("keep"));
+    expect(savedConfig?.imap.password_action).toBe("keep");
+    await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false));
+
+    await fireEvent.click(smtpClear);
+    await fireEvent.click(imapClear);
+    const passwords = screen.getAllByLabelText("Password") as HTMLInputElement[];
+    expect(passwords[0].disabled).toBe(true);
+    expect(passwords[1].disabled).toBe(true);
+
+    await fireEvent.click(save);
+    await waitFor(() => expect(savedConfig?.smtp.password_action).toBe("clear"));
+    expect(savedConfig?.smtp.password).toBe("");
+    expect(savedConfig?.imap.password_action).toBe("clear");
+    expect(savedConfig?.imap.password).toBe("");
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("checkbox", { name: /Clear saved SMTP password/ }) as HTMLInputElement).checked,
+      ).toBe(false),
+    );
+  });
+
+  it("requires a standalone IMAP password after disabling loaded SMTP credential reuse", async () => {
+    savedConfig = {
+      ...initialConfig,
+      imap: {
+        ...initialConfig.imap,
+        use_smtp_credentials: true,
+        password_configured: true,
+      },
+    };
+
+    render(GroupApplicationsView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { AppLayout: { template: "<main><slot /></main>" } },
+      },
+    });
+
+    await fireEvent.click(await screen.findByRole("tab", { name: "Email settings" }));
+    expect(await screen.findByText("SMTP delivery")).toBeTruthy();
+    const reuseCredentials = screen.getAllByRole("switch")[1];
+    const imapPassword = screen.getAllByLabelText("Password")[1] as HTMLInputElement;
+    expect(imapPassword.placeholder).toBe("********");
+    expect(imapPassword.disabled).toBe(true);
+
+    await fireEvent.click(reuseCredentials);
+
+    expect(imapPassword.placeholder).toBe("");
+    expect(imapPassword.disabled).toBe(false);
+    expect(screen.getByText("Password required")).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: /Clear saved IMAP password/ })).toBeNull();
+
+    await fireEvent.update(imapPassword, "standalone-imap-password");
+    await fireEvent.click(screen.getByRole("button", { name: "Save email settings" }));
+
+    await waitFor(() => expect(savedConfig?.imap.password_action).toBe("replace"));
+    expect(savedConfig?.imap.password).toBe("standalone-imap-password");
+    expect(savedConfig?.imap.use_smtp_credentials).toBe(false);
+  });
+
+  it("replays a protected email save after TOTP verification and locks other email actions", async () => {
+    let saveAttempts = 0;
+    let verifiedCode = "";
+    server.use(
+      http.put("*/api/v1/admin/group-applications/email-config", async ({ request }) => {
+        saveAttempts += 1;
+        if (saveAttempts === 1) {
+          return HttpResponse.json(
+            {
+              code: 403,
+              message: "Step-up verification required",
+              reason: "STEP_UP_REQUIRED",
+            },
+            { status: 403 },
+          );
+        }
+        savedConfig = (await request.json()) as typeof initialConfig;
+        return HttpResponse.json({ code: 0, data: savedConfig });
+      }),
+      http.post("*/api/v1/user/totp/step-up", async ({ request }) => {
+        const payload = (await request.json()) as { code: string };
+        verifiedCode = payload.code;
+        return HttpResponse.json({
+          code: 0,
+          data: { granted: true, expires_at: "2026-08-28T03:00:00Z" },
+        });
+      }),
+    );
+
+    render(GroupApplicationsView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { AppLayout: { template: "<main><slot /></main>" } },
+      },
+    });
+
+    await fireEvent.click(await screen.findByRole("tab", { name: "Email settings" }));
+    expect(await screen.findByText("SMTP delivery")).toBeTruthy();
+    const save = screen.getByRole("button", { name: "Save email settings" });
+    const testSMTPButton = screen.getByRole("button", { name: "Test SMTP connection" });
+    await fireEvent.click(save);
+
+    expect(await screen.findByText("Two-Factor Verification Required")).toBeTruthy();
+    expect(saveAttempts).toBe(1);
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    expect((testSMTPButton as HTMLButtonElement).disabled).toBe(true);
+    await fireEvent.click(testSMTPButton);
+    expect(testedSMTP).toBeNull();
+
+    const otpInputs = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[maxlength="1"][inputmode="numeric"]'),
+    );
+    expect(otpInputs).toHaveLength(6);
+    for (const [index, digit] of [..."123456"].entries()) {
+      await fireEvent.update(otpInputs[index], digit);
+    }
+
+    await waitFor(() => expect(verifiedCode).toBe("123456"));
+    await waitFor(() => expect(saveAttempts).toBe(2));
+    await waitFor(() => expect(savedConfig?.smtp.password_action).toBe("keep"));
+    expect(screen.queryByText("Two-Factor Verification Required")).toBeNull();
+  });
+
+  it("prevents saving while an email connection test is still running", async () => {
+    let releaseTest!: () => void;
+    const pendingTest = new Promise<void>((resolve) => {
+      releaseTest = resolve;
+    });
+    const testSMTPRequest = vi
+      .spyOn(groupApplicationsAdminAPI, "testSMTP")
+      .mockReturnValue(pendingTest);
+
+    render(GroupApplicationsView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { AppLayout: { template: "<main><slot /></main>" } },
+      },
+    });
+
+    await fireEvent.click(await screen.findByRole("tab", { name: "Email settings" }));
+    expect(await screen.findByText("SMTP delivery")).toBeTruthy();
+    const save = screen.getByRole("button", { name: "Save email settings" });
+    await fireEvent.click(screen.getByRole("button", { name: "Test SMTP connection" }));
+
+    await waitFor(() => expect(testSMTPRequest).toHaveBeenCalledTimes(1));
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    await fireEvent.click(save);
+    expect(savedConfig).toBeNull();
+
+    releaseTest();
+    await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false));
   });
 
   it("shows independent outbox and IMAP worker failures", async () => {
@@ -315,6 +508,189 @@ describe("GroupApplicationsView communication refresh", () => {
       occurred_at: "2026-08-27T01:01:00Z",
     };
   }
+
+  it("keeps reject and revoke available while disabled but blocks mail-dependent actions", async () => {
+    const completedApplication: AdminGroupApplication = {
+      ...application,
+      id: 8,
+      status: "completed",
+    };
+    const pendingApplication: AdminGroupApplication = {
+      ...application,
+      id: 9,
+      status: "pending",
+    };
+    const applications = [application, completedApplication, pendingApplication];
+    server.use(
+      http.get("*/api/v1/admin/group-applications", () =>
+        HttpResponse.json({ code: 0, data: { items: applications, total: applications.length } }),
+      ),
+    );
+    vi.spyOn(groupApplicationsAdminAPI, "get").mockImplementation(async (id) => {
+      const result = applications.find((item) => item.id === id);
+      if (!result) throw new Error("application not found");
+      return result;
+    });
+    vi.spyOn(groupApplicationsAdminAPI, "listCommunications").mockResolvedValue([]);
+
+    render(GroupApplicationsView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { AppLayout: { template: "<main><slot /></main>" } },
+      },
+    });
+
+    await fireEvent.click(await screen.findByText("#7"));
+    expect((await screen.findByRole("button", { name: "Reject" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Resend approval" }) as HTMLButtonElement).disabled).toBe(true);
+    await fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    await fireEvent.click(screen.getByText("#8"));
+    expect((await screen.findByRole("button", { name: "Revoke" }) as HTMLButtonElement).disabled).toBe(false);
+    await fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    await fireEvent.click(screen.getByText("#9"));
+    expect((await screen.findByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Reject" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("locks concurrent resend approval actions to one request", async () => {
+    savedConfig = { ...initialConfig, enabled: true };
+    workerWorkflowEnabled = true;
+    server.use(
+      http.get("*/api/v1/admin/group-applications", () =>
+        HttpResponse.json({ code: 0, data: { items: [application], total: 1 } }),
+      ),
+    );
+    vi.spyOn(groupApplicationsAdminAPI, "get").mockResolvedValue(application);
+    vi.spyOn(groupApplicationsAdminAPI, "listCommunications").mockResolvedValue([
+      approvalCommunication("sent", "awaiting_reply"),
+    ]);
+    let releaseRequest!: () => void;
+    const pendingRequest = new Promise<void>((resolve) => {
+      releaseRequest = resolve;
+    });
+    const resendApproval = vi
+      .spyOn(groupApplicationsAdminAPI, "resendApproval")
+      .mockReturnValue(pendingRequest);
+
+    render(GroupApplicationsView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { AppLayout: { template: "<main><slot /></main>" } },
+      },
+    });
+
+    await fireEvent.click(await screen.findByText("#7"));
+    const resend = await screen.findByRole("button", { name: "Resend approval" });
+    await Promise.all([fireEvent.click(resend), fireEvent.click(resend)]);
+
+    expect(resendApproval).toHaveBeenCalledTimes(1);
+    expect((resend as HTMLButtonElement).disabled).toBe(true);
+
+    releaseRequest();
+    await waitFor(() => expect((resend as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("keeps the application details locked while approval is pending", async () => {
+    const pendingApplication: AdminGroupApplication = {
+      ...application,
+      id: 10,
+      status: "pending",
+    };
+    savedConfig = { ...initialConfig, enabled: true };
+    workerWorkflowEnabled = true;
+    server.use(
+      http.get("*/api/v1/admin/group-applications", () =>
+        HttpResponse.json({ code: 0, data: { items: [pendingApplication], total: 1 } }),
+      ),
+    );
+    const getApplication = vi
+      .spyOn(groupApplicationsAdminAPI, "get")
+      .mockResolvedValue(pendingApplication);
+    vi.spyOn(groupApplicationsAdminAPI, "listCommunications").mockResolvedValue([]);
+    let releaseRequest!: () => void;
+    const pendingRequest = new Promise<void>((resolve) => {
+      releaseRequest = resolve;
+    });
+    const approve = vi
+      .spyOn(groupApplicationsAdminAPI, "approve")
+      .mockReturnValue(pendingRequest);
+
+    render(GroupApplicationsView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { AppLayout: { template: "<main><slot /></main>" } },
+      },
+    });
+
+    await fireEvent.click(await screen.findByText("#10"));
+    const close = await screen.findByRole("button", { name: "Close" });
+    await fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+
+    await waitFor(() => expect(approve).toHaveBeenCalledWith(pendingApplication.id));
+    expect((close as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Close modal" })).toBeNull();
+
+    await fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "#10 Private Pro" })).toBeTruthy();
+
+    releaseRequest();
+    await waitFor(() => expect(getApplication).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect((close as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("locks concurrent mail retry actions to one request", async () => {
+    savedConfig = { ...initialConfig, enabled: true };
+    workerWorkflowEnabled = true;
+    server.use(
+      http.get("*/api/v1/admin/group-applications", () =>
+        HttpResponse.json({ code: 0, data: { items: [application], total: 1 } }),
+      ),
+    );
+    const failedMail: GroupApplicationCommunication = {
+      id: 12,
+      application_id: application.id,
+      direction: "outbound",
+      kind: "completion",
+      to_address: application.contact_email,
+      subject: "Completion failed",
+      status: "failed",
+      delivery_active: false,
+      retryable: true,
+      attempts: 1,
+      occurred_at: "2026-08-27T01:02:00Z",
+    };
+    vi.spyOn(groupApplicationsAdminAPI, "get").mockResolvedValue(application);
+    vi.spyOn(groupApplicationsAdminAPI, "listCommunications").mockResolvedValue([failedMail]);
+    let releaseRequest!: () => void;
+    const pendingRequest = new Promise<void>((resolve) => {
+      releaseRequest = resolve;
+    });
+    const retryMail = vi
+      .spyOn(groupApplicationsAdminAPI, "retryMail")
+      .mockReturnValue(pendingRequest);
+
+    render(GroupApplicationsView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { AppLayout: { template: "<main><slot /></main>" } },
+      },
+    });
+
+    await fireEvent.click(await screen.findByText("#7"));
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    await Promise.all([fireEvent.click(retry), fireEvent.click(retry)]);
+
+    expect(retryMail).toHaveBeenCalledTimes(1);
+    expect(retryMail).toHaveBeenCalledWith(application.id, failedMail.id);
+    expect((retry as HTMLButtonElement).disabled).toBe(true);
+
+    releaseRequest();
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Retry" }) as HTMLButtonElement).disabled).toBe(false),
+    );
+  });
 
   it("refreshes queued mail and remains live until the reply workflow completes", async () => {
     savedConfig = { ...initialConfig, enabled: true };

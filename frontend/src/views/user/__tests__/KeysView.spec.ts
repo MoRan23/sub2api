@@ -179,6 +179,9 @@ const DataTableStub = {
         >
           <slot name="cell-last_used_ip" :value="row.last_used_ip" :row="row" />
         </div>
+        <div data-test="row-actions">
+          <slot name="cell-actions" :value="row.actions" :row="row" />
+        </div>
       </div>
       <slot name="empty" />
     </div>
@@ -303,6 +306,37 @@ describe('user KeysView column settings', () => {
     expect(visibleColumnKeys(wrapper)).not.toContain('last_used_at')
     expect(visibleColumnKeys(wrapper)).not.toContain('last_used_ip')
     expect(visibleColumnKeys(wrapper)).not.toContain('id')
+  })
+
+  it('keeps the toolbar responsive and the desktop actions column compact', async () => {
+    const wrapper = await mountView()
+
+    expect(wrapper.get('[data-test="keys-toolbar"]').classes()).toEqual(
+      expect.arrayContaining(['flex-col', 'xl:flex-row', 'xl:justify-between'])
+    )
+    expect(wrapper.get('[data-test="keys-toolbar-actions"]').classes()).toEqual(
+      expect.arrayContaining(['flex-wrap', 'xl:flex-none', 'xl:justify-end'])
+    )
+
+    const actionColumn = wrapper.findComponent({ name: 'DataTable' }).props('columns')
+      .find((column: { key: string }) => column.key === 'actions')
+    expect(actionColumn.class).toBe('w-px')
+  })
+
+  it('wraps row actions on mobile and renders compact icon controls on desktop', async () => {
+    const wrapper = await mountView()
+    const actions = wrapper.get('[data-test="key-row-actions"]')
+    const buttons = actions.findAll('button')
+
+    expect(actions.classes()).toEqual(
+      expect.arrayContaining(['grid', 'grid-cols-2', 'sm:grid-cols-3', 'md:flex', 'md:flex-nowrap'])
+    )
+    expect(buttons).toHaveLength(5)
+    for (const button of buttons) {
+      expect(button.classes()).toEqual(expect.arrayContaining(['min-w-0', 'md:h-8', 'md:w-8', 'md:flex-none']))
+      expect(button.attributes('title')).toBeTruthy()
+      expect(button.get('span:last-child').classes()).toContain('md:sr-only')
+    }
   })
 
   it('shows a hidden column when toggled and persists the preference', async () => {

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"strconv"
@@ -79,6 +80,27 @@ func TestExtractNewestGroupApplicationReplyOnlyRemovesQuotedHistory(t *testing.T
 	require.Equal(t, "EXACT-PHRASE", extractNewestGroupApplicationReply("EXACT-PHRASE\n\n张三写道：\n> 历史内容"))
 }
 
+func TestGroupApplicationReplyForValidationAllowsOnlyLeadingPhraseAndSignature(t *testing.T) {
+	tests := []struct {
+		name, value, want string
+	}{
+		{name: "exact", value: "CONFIRM", want: "CONFIRM"},
+		{name: "blank line signature", value: "CONFIRM\r\n\r\nHank\r\nhank@example.com", want: "CONFIRM"},
+		{name: "standard signature delimiter", value: "CONFIRM\n-- \nHank", want: "CONFIRM"},
+		{name: "extra body without separator", value: "CONFIRM\nplease also change the quota", want: "CONFIRM\nplease also change the quota"},
+		{name: "phrase later", value: "Please approve\n\nCONFIRM", want: "Please approve"},
+		{name: "indented delimiter", value: "CONFIRM\n -- \nHank", want: "CONFIRM\n -- \nHank"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, groupApplicationReplyForValidation(test.value))
+		})
+	}
+
+	reply := extractNewestGroupApplicationReply("Not a confirmation\n\n> CONFIRM\n> quoted approval request")
+	require.Equal(t, "Not a confirmation", groupApplicationReplyForValidation(reply))
+}
+
 func TestParseGroupApplicationReplyExtractsCorrelationAndPlainText(t *testing.T) {
 	raw := strings.Join([]string{
 		"From: Applicant <applicant@example.com>",
@@ -115,16 +137,92 @@ func TestParseGroupApplicationReplyMarksHTMLOnlyBodyUnsupported(t *testing.T) {
 	require.Empty(t, parsed.Reply)
 }
 
-type groupApplicationApprovalLookupRepoStub struct {
-	GroupApplicationRepository
-	calls  [][]string
-	lookup func([]string) (*GroupApplicationApprovalMatch, error)
+func TestParseGroupApplicationReplyDecodesRFC2047Subject(t *testing.T) {
+	const want = "回复：审批通过"
+	for _, test := range []struct {
+		name, subject string
+	}{
+		{name: "base64", subject: mime.BEncoding.Encode("UTF-8", want)},
+		{name: "quoted printable", subject: mime.QEncoding.Encode("UTF-8", want)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			raw := strings.Join([]string{
+				"From: Applicant <applicant@example.com>",
+				"Subject: " + test.subject,
+				"Content-Type: text/plain; charset=UTF-8",
+				"", "CONFIRM",
+			}, "\r\n")
+			parsed, err := parseGroupApplicationReply([]byte(raw))
+			require.NoError(t, err)
+			require.Equal(t, want, parsed.Subject)
+		})
+	}
+
+	const malformed = "=?UTF-8?B?%%%?="
+	raw := strings.Join([]string{
+		"From: Applicant <applicant@example.com>",
+		"Subject: " + malformed,
+		"Content-Type: text/plain; charset=UTF-8",
+		"", "CONFIRM",
+	}, "\r\n")
+	parsed, err := parseGroupApplicationReply([]byte(raw))
+	require.NoError(t, err)
+	require.Equal(t, malformed, parsed.Subject)
 }
 
-func (s *groupApplicationApprovalLookupRepoStub) FindApprovalByMessageIDs(_ context.Context, messageIDs []string) (*GroupApplicationApprovalMatch, error) {
-	messageIDs = append([]string(nil), messageIDs...)
-	s.calls = append(s.calls, messageIDs)
-	return s.lookup(messageIDs)
+func TestParseGroupApplicationReplySkipsEmptyPlainMultipartParts(t *testing.T) {
+	raw := strings.Join([]string{
+		"From: Applicant <applicant@example.com>",
+		"Subject: Re: approval",
+		"MIME-Version: 1.0",
+		`Content-Type: multipart/alternative; boundary="boundary"`,
+		"",
+		"--boundary",
+		"Content-Type: text/plain; charset=UTF-8",
+		"",
+		"   ",
+		"--boundary",
+		"Content-Type: text/html; charset=UTF-8",
+		"",
+		"<p>CONFIRM</p>",
+		"--boundary--",
+	}, "\r\n")
+
+	parsed, err := parseGroupApplicationReply([]byte(raw))
+	require.NoError(t, err)
+	require.False(t, parsed.HasPlainText)
+	require.Empty(t, parsed.Reply)
+
+	withLaterPlain := strings.Replace(raw, "--boundary--", strings.Join([]string{
+		"--boundary",
+		"Content-Type: text/plain; charset=UTF-8",
+		"",
+		"CONFIRM",
+		"--boundary--",
+	}, "\r\n"), 1)
+	parsed, err = parseGroupApplicationReply([]byte(withLaterPlain))
+	require.NoError(t, err)
+	require.True(t, parsed.HasPlainText)
+	require.Equal(t, "CONFIRM", parsed.Reply)
+}
+
+type groupApplicationApprovalLookupRepoStub struct {
+	GroupApplicationRepository
+	calls  []groupApplicationApprovalLookupCall
+	lookup func([]string, []string) (*GroupApplicationApprovalMatch, error)
+}
+
+type groupApplicationApprovalLookupCall struct {
+	exact, fallback []string
+}
+
+func (s *groupApplicationApprovalLookupRepoStub) FindApprovalByMessageIDs(_ context.Context, exact, fallback []string) (*GroupApplicationApprovalMatch, error) {
+	call := groupApplicationApprovalLookupCall{
+		exact:    append([]string(nil), exact...),
+		fallback: append([]string(nil), fallback...),
+	}
+	s.calls = append(s.calls, call)
+	return s.lookup(exact, fallback)
 }
 
 func TestFindGroupApplicationApprovalByReplyMessageIDsSupportsEmbeddedInternalID(t *testing.T) {
@@ -148,8 +246,8 @@ func TestFindGroupApplicationApprovalByReplyMessageIDsSupportsEmbeddedInternalID
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			repo := &groupApplicationApprovalLookupRepoStub{
-				lookup: func(messageIDs []string) (*GroupApplicationApprovalMatch, error) {
-					for _, messageID := range messageIDs {
+				lookup: func(_, fallback []string) (*GroupApplicationApprovalMatch, error) {
+					for _, messageID := range fallback {
 						if messageID == canonical {
 							return want, nil
 						}
@@ -161,8 +259,7 @@ func TestFindGroupApplicationApprovalByReplyMessageIDsSupportsEmbeddedInternalID
 			match, err := findGroupApplicationApprovalByReplyMessageIDs(context.Background(), repo, test.rewritten, test.rewritten)
 			require.NoError(t, err)
 			require.Same(t, want, match)
-			expected := append(append([]string(nil), test.exact...), canonical)
-			require.Equal(t, [][]string{expected}, repo.calls)
+			require.Equal(t, []groupApplicationApprovalLookupCall{{exact: test.exact, fallback: []string{canonical}}}, repo.calls)
 		})
 	}
 }
@@ -171,7 +268,7 @@ func TestFindGroupApplicationApprovalByReplyMessageIDsDeduplicatesExactAndEmbedd
 	const canonical = "<group-application-2-approval-3d579da3-3c63-4b1c-9684-954714939bd5@sub2api.local>"
 	want := &GroupApplicationApprovalMatch{Application: &GroupApplication{ID: 2}, MessageID: canonical}
 	repo := &groupApplicationApprovalLookupRepoStub{
-		lookup: func(messageIDs []string) (*GroupApplicationApprovalMatch, error) {
+		lookup: func(_, _ []string) (*GroupApplicationApprovalMatch, error) {
 			return want, nil
 		},
 	}
@@ -179,14 +276,14 @@ func TestFindGroupApplicationApprovalByReplyMessageIDsDeduplicatesExactAndEmbedd
 	match, err := findGroupApplicationApprovalByReplyMessageIDs(context.Background(), repo, canonical, "")
 	require.NoError(t, err)
 	require.Same(t, want, match)
-	require.Equal(t, [][]string{{canonical}}, repo.calls)
+	require.Equal(t, []groupApplicationApprovalLookupCall{{exact: []string{canonical}}}, repo.calls)
 }
 
 func TestFindGroupApplicationApprovalByReplyMessageIDsDoesNotFallbackOnRepositoryError(t *testing.T) {
 	const rewritten = "<prefix+group-application-2-approval-3d579da3-3c63-4b1c-9684-954714939bd5@sub2api.local>"
 	wantErr := errors.New("database unavailable")
 	repo := &groupApplicationApprovalLookupRepoStub{
-		lookup: func(messageIDs []string) (*GroupApplicationApprovalMatch, error) {
+		lookup: func(_, _ []string) (*GroupApplicationApprovalMatch, error) {
 			return nil, wantErr
 		},
 	}
@@ -200,7 +297,7 @@ func TestFindGroupApplicationApprovalByReplyMessageIDsDoesNotFallbackOnRepositor
 func TestFindGroupApplicationApprovalByReplyMessageIDsQueriesDeduplicatedCandidatesOnce(t *testing.T) {
 	const canonical = "<group-application-2-approval-3d579da3-3c63-4b1c-9684-954714939bd5@sub2api.local>"
 	repo := &groupApplicationApprovalLookupRepoStub{
-		lookup: func(messageIDs []string) (*GroupApplicationApprovalMatch, error) {
+		lookup: func(_, _ []string) (*GroupApplicationApprovalMatch, error) {
 			return nil, ErrGroupApplicationNotFound
 		},
 	}
@@ -208,7 +305,7 @@ func TestFindGroupApplicationApprovalByReplyMessageIDsQueriesDeduplicatedCandida
 	match, err := findGroupApplicationApprovalByReplyMessageIDs(context.Background(), repo, canonical, canonical)
 	require.Nil(t, match)
 	require.ErrorIs(t, err, ErrGroupApplicationNotFound)
-	require.Equal(t, [][]string{{canonical}}, repo.calls)
+	require.Equal(t, []groupApplicationApprovalLookupCall{{exact: []string{canonical}}}, repo.calls)
 }
 
 func TestFindGroupApplicationApprovalByReplyMessageIDsAcceptsMultipleEmbeddedIDsForOneApplication(t *testing.T) {
@@ -216,9 +313,9 @@ func TestFindGroupApplicationApprovalByReplyMessageIDsAcceptsMultipleEmbeddedIDs
 	const second = "group-application-2-approval-29aa2182-7493-46a9-9075-118cc82c9203@sub2api.local"
 	want := &GroupApplicationApprovalMatch{Application: &GroupApplication{ID: 2}, MessageID: "<" + second + ">"}
 	repo := &groupApplicationApprovalLookupRepoStub{
-		lookup: func(messageIDs []string) (*GroupApplicationApprovalMatch, error) {
-			require.Contains(t, messageIDs, "<"+first+">")
-			require.Contains(t, messageIDs, "<"+second+">")
+		lookup: func(_, fallback []string) (*GroupApplicationApprovalMatch, error) {
+			require.Contains(t, fallback, "<"+first+">")
+			require.Contains(t, fallback, "<"+second+">")
 			return want, nil
 		},
 	}
@@ -237,9 +334,9 @@ func TestFindGroupApplicationApprovalByReplyMessageIDsPropagatesCrossApplication
 	const first = "group-application-2-approval-3d579da3-3c63-4b1c-9684-954714939bd5@sub2api.local"
 	const second = "group-application-3-approval-29aa2182-7493-46a9-9075-118cc82c9203@sub2api.local"
 	repo := &groupApplicationApprovalLookupRepoStub{
-		lookup: func(messageIDs []string) (*GroupApplicationApprovalMatch, error) {
-			require.Contains(t, messageIDs, "<"+first+">")
-			require.Contains(t, messageIDs, "<"+second+">")
+		lookup: func(_, fallback []string) (*GroupApplicationApprovalMatch, error) {
+			require.Contains(t, fallback, "<"+first+">")
+			require.Contains(t, fallback, "<"+second+">")
 			return nil, ErrGroupApplicationReplyAmbiguous
 		},
 	}
@@ -254,14 +351,16 @@ func TestFindGroupApplicationApprovalByReplyMessageIDsPropagatesCrossApplication
 	require.Len(t, repo.calls, 1)
 }
 
-func TestFindGroupApplicationApprovalByReplyMessageIDsRejectsMixedExactAndEmbeddedCrossApplicationAmbiguity(t *testing.T) {
+func TestFindGroupApplicationApprovalByReplyMessageIDsSeparatesExactAndEmbeddedCandidates(t *testing.T) {
 	const first = "<group-application-2-approval-3d579da3-3c63-4b1c-9684-954714939bd5@sub2api.local>"
 	const second = "<group-application-3-approval-29aa2182-7493-46a9-9075-118cc82c9203@sub2api.local>"
 	providerWrappedSecond := "<provider+" + strings.Trim(second, "<>") + ">"
+	want := &GroupApplicationApprovalMatch{Application: &GroupApplication{ID: 2}, MessageID: first}
 	repo := &groupApplicationApprovalLookupRepoStub{
-		lookup: func(messageIDs []string) (*GroupApplicationApprovalMatch, error) {
-			require.Equal(t, []string{first, providerWrappedSecond, second}, messageIDs)
-			return nil, ErrGroupApplicationReplyAmbiguous
+		lookup: func(exact, fallback []string) (*GroupApplicationApprovalMatch, error) {
+			require.Equal(t, []string{first, providerWrappedSecond}, exact)
+			require.Equal(t, []string{second}, fallback)
+			return want, nil
 		},
 	}
 
@@ -270,15 +369,15 @@ func TestFindGroupApplicationApprovalByReplyMessageIDsRejectsMixedExactAndEmbedd
 		first,
 		providerWrappedSecond,
 	)
-	require.Nil(t, match)
-	require.ErrorIs(t, err, ErrGroupApplicationReplyAmbiguous)
+	require.NoError(t, err)
+	require.Same(t, want, match)
 	require.Len(t, repo.calls, 1)
 }
 
 func TestFindGroupApplicationApprovalByReplyMessageIDsDoesNotFallbackAfterExactAmbiguity(t *testing.T) {
 	const canonical = "<group-application-2-approval-3d579da3-3c63-4b1c-9684-954714939bd5@sub2api.local>"
 	repo := &groupApplicationApprovalLookupRepoStub{
-		lookup: func([]string) (*GroupApplicationApprovalMatch, error) {
+		lookup: func(_, _ []string) (*GroupApplicationApprovalMatch, error) {
 			return nil, ErrGroupApplicationReplyAmbiguous
 		},
 	}
@@ -306,8 +405,8 @@ func TestParseGroupApplicationReplySupportsTrackedReferences(t *testing.T) {
 
 	want := &GroupApplicationApprovalMatch{Application: &GroupApplication{ID: 2}, MessageID: canonical}
 	repo := &groupApplicationApprovalLookupRepoStub{
-		lookup: func(messageIDs []string) (*GroupApplicationApprovalMatch, error) {
-			require.Contains(t, messageIDs, canonical)
+		lookup: func(_, fallback []string) (*GroupApplicationApprovalMatch, error) {
+			require.Contains(t, fallback, canonical)
 			return want, nil
 		},
 	}
@@ -560,6 +659,7 @@ func TestGroupApplicationIMAPTestErrorIsActionableAndDoesNotExposeCause(t *testi
 		{operation: "connect", reason: "GROUP_APPLICATION_IMAP_CONNECT_FAILED", contains: "connect"},
 		{operation: "login", reason: "GROUP_APPLICATION_IMAP_LOGIN_FAILED", contains: "login"},
 		{operation: "list", reason: "GROUP_APPLICATION_IMAP_LIST_FAILED", contains: "login succeeded"},
+		{operation: "select", reason: "GROUP_APPLICATION_IMAP_SELECT_FAILED", contains: "mailbox"},
 	}
 	for _, test := range tests {
 		t.Run(test.operation, func(t *testing.T) {
@@ -584,6 +684,9 @@ type groupApplicationRepositoryStub struct {
 	communications   []GroupApplicationCommunication
 	mails            []GroupApplicationMailStatus
 	claimCalls       int
+	claimLimit       int
+	validateCalls    int
+	validateErr      error
 	markSentCalls    int
 	listOptionsCalls int
 	savedPolicy      *GroupApplicationPolicy
@@ -601,19 +704,25 @@ func (s *groupApplicationRepositoryStub) ListApplicationMails(context.Context, i
 	return append([]GroupApplicationMailStatus(nil), s.mails...), nil
 }
 
-func (s *groupApplicationRepositoryStub) CompleteFromReply(_ context.Context, _ int64, _ GroupApplicationMailJob) (*GroupApplication, error) {
+func (s *groupApplicationRepositoryStub) CompleteFromReply(_ context.Context, _ int64, _ GroupApplicationMailJob, _ *GroupApplicationReceipt) (*GroupApplication, error) {
 	s.completed = true
 	return s.application, nil
 }
 
-func (s *groupApplicationRepositoryStub) RejectReplyMismatch(_ context.Context, _ int64, _ GroupApplicationMailJob) (*GroupApplication, error) {
+func (s *groupApplicationRepositoryStub) RejectReplyMismatch(_ context.Context, _ int64, _ GroupApplicationMailJob, _ *GroupApplicationReceipt) (*GroupApplication, error) {
 	s.rejectedMismatch = true
 	return s.application, nil
 }
 
-func (s *groupApplicationRepositoryStub) ClaimMail(context.Context, string, int, time.Duration) ([]GroupApplicationMailJob, error) {
+func (s *groupApplicationRepositoryStub) ClaimMail(_ context.Context, _ string, limit int, _ time.Duration) ([]GroupApplicationMailJob, error) {
 	s.claimCalls++
+	s.claimLimit = limit
 	return s.jobs, nil
+}
+
+func (s *groupApplicationRepositoryStub) ValidateMailClaim(context.Context, int64, string) error {
+	s.validateCalls++
+	return s.validateErr
 }
 
 func (s *groupApplicationRepositoryStub) MarkMailSent(context.Context, int64, string) error {
@@ -646,14 +755,14 @@ func TestGroupApplicationReplyRequiresExactVisibleText(t *testing.T) {
 	repo := &groupApplicationRepositoryStub{application: application}
 	svc := NewGroupApplicationService(repo, configuredGroupApplicationSettings(t), groupApplicationEncryptorStub{})
 
-	result, err := svc.ProcessInboundReply(context.Background(), application.ID, application.ContactEmail, " CONFIRM ")
+	result, err := svc.ProcessInboundReply(context.Background(), application.ID, application.ContactEmail, " CONFIRM ", nil)
 	require.NoError(t, err)
 	require.Equal(t, "reply_mismatch", result)
 	require.True(t, repo.rejectedMismatch)
 	require.False(t, repo.completed)
 
 	repo.rejectedMismatch = false
-	result, err = svc.ProcessInboundReply(context.Background(), application.ID, application.ContactEmail, "CONFIRM\r\n")
+	result, err = svc.ProcessInboundReply(context.Background(), application.ID, application.ContactEmail, "CONFIRM\r\n", nil)
 	require.NoError(t, err)
 	require.Equal(t, "completed", result)
 	require.True(t, repo.completed)
@@ -741,6 +850,7 @@ type groupApplicationEmailSenderStub struct {
 	to      string
 	options EmailSendOptions
 	sends   int
+	err     error
 }
 
 func (s *groupApplicationEmailSenderStub) SendEmailWithConfigAndOptions(config *SMTPConfig, to, _, _ string, options EmailSendOptions) error {
@@ -748,7 +858,7 @@ func (s *groupApplicationEmailSenderStub) SendEmailWithConfigAndOptions(config *
 	s.to = to
 	s.options = options
 	s.sends++
-	return nil
+	return s.err
 }
 
 func (s *groupApplicationEmailSenderStub) TestSMTPConnectionWithConfig(*SMTPConfig) error { return nil }
@@ -793,6 +903,10 @@ func (s *groupApplicationWorkerRepoStub) MarkMailSent(context.Context, int64, st
 	if s.mailSent != nil {
 		s.mailOnce.Do(func() { close(s.mailSent) })
 	}
+	return nil
+}
+
+func (s *groupApplicationWorkerRepoStub) ValidateMailClaim(context.Context, int64, string) error {
 	return nil
 }
 
@@ -859,28 +973,45 @@ type groupApplicationIMAPPollRepoStub struct {
 	ambiguousMessageID map[string]struct{}
 	receipts           []GroupApplicationReceipt
 	completed          bool
+	rejectedMismatch   bool
+	completeErr        error
+	terminalReceiptErr error
+	completeCalls      int
+	maxUID             uint32
+	cursorExists       bool
 }
 
 func (s *groupApplicationIMAPPollRepoStub) MaxProcessedUID(context.Context, string, uint32) (uint32, bool, error) {
-	return 0, true, nil
+	return s.maxUID, s.cursorExists, nil
 }
 
 func (s *groupApplicationIMAPPollRepoStub) StoreReceipt(_ context.Context, receipt GroupApplicationReceipt) (bool, error) {
 	s.receipts = append(s.receipts, receipt)
+	if receipt.UID > s.maxUID {
+		s.maxUID = receipt.UID
+	}
+	s.cursorExists = true
 	return true, nil
 }
 
-func (s *groupApplicationIMAPPollRepoStub) FindApprovalByMessageIDs(_ context.Context, messageIDs []string) (*GroupApplicationApprovalMatch, error) {
-	if len(messageIDs) == 1 && messageIDs[0] == s.validMessageID {
-		return &GroupApplicationApprovalMatch{Application: s.application, MessageID: s.validMessageID}, nil
+func (s *groupApplicationIMAPPollRepoStub) FindApprovalByMessageIDs(_ context.Context, exact, fallback []string) (*GroupApplicationApprovalMatch, error) {
+	for _, messageID := range exact {
+		if messageID == s.validMessageID {
+			return &GroupApplicationApprovalMatch{Application: s.application, MessageID: s.validMessageID}, nil
+		}
+	}
+	for _, messageID := range fallback {
+		if messageID == s.validMessageID {
+			return &GroupApplicationApprovalMatch{Application: s.application, MessageID: s.validMessageID}, nil
+		}
 	}
 	matchedAmbiguous := 0
-	for _, messageID := range messageIDs {
+	for _, messageID := range fallback {
 		if _, ok := s.ambiguousMessageID[messageID]; ok {
 			matchedAmbiguous++
 		}
 	}
-	if matchedAmbiguous == len(s.ambiguousMessageID) {
+	if len(s.ambiguousMessageID) > 0 && matchedAmbiguous == len(s.ambiguousMessageID) {
 		return nil, ErrGroupApplicationReplyAmbiguous
 	}
 	return nil, ErrGroupApplicationNotFound
@@ -890,8 +1021,33 @@ func (s *groupApplicationIMAPPollRepoStub) GetApplication(context.Context, int64
 	return s.application, nil
 }
 
-func (s *groupApplicationIMAPPollRepoStub) CompleteFromReply(_ context.Context, _ int64, _ GroupApplicationMailJob) (*GroupApplication, error) {
+func (s *groupApplicationIMAPPollRepoStub) CompleteFromReply(ctx context.Context, _ int64, _ GroupApplicationMailJob, receipt *GroupApplicationReceipt) (*GroupApplication, error) {
+	s.completeCalls++
+	if s.completeErr != nil {
+		return nil, s.completeErr
+	}
+	if s.terminalReceiptErr != nil {
+		return nil, s.terminalReceiptErr
+	}
+	if receipt != nil {
+		if _, err := s.StoreReceipt(ctx, *receipt); err != nil {
+			return nil, err
+		}
+	}
 	s.completed = true
+	return s.application, nil
+}
+
+func (s *groupApplicationIMAPPollRepoStub) RejectReplyMismatch(ctx context.Context, _ int64, _ GroupApplicationMailJob, receipt *GroupApplicationReceipt) (*GroupApplication, error) {
+	if s.terminalReceiptErr != nil {
+		return nil, s.terminalReceiptErr
+	}
+	if receipt != nil {
+		if _, err := s.StoreReceipt(ctx, *receipt); err != nil {
+			return nil, err
+		}
+	}
+	s.rejectedMismatch = true
 	return s.application, nil
 }
 
@@ -908,6 +1064,328 @@ func groupApplicationIMAPPollCertificate(t *testing.T) tls.Certificate {
 		x509.SetFallbackRoots(roots)
 	})
 	return groupApplicationIMAPPollTLSCert
+}
+
+type groupApplicationIMAPFetchCall struct {
+	set          string
+	rfc822Size   bool
+	bodySections int
+	partialSizes []int64
+}
+
+type groupApplicationIMAPFetchTrace struct {
+	mu    sync.Mutex
+	calls []groupApplicationIMAPFetchCall
+}
+
+func (t *groupApplicationIMAPFetchTrace) snapshot() []groupApplicationIMAPFetchCall {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	calls := make([]groupApplicationIMAPFetchCall, len(t.calls))
+	for i := range t.calls {
+		calls[i] = t.calls[i]
+		calls[i].partialSizes = append([]int64(nil), t.calls[i].partialSizes...)
+	}
+	return calls
+}
+
+type groupApplicationIMAPTracingSession struct {
+	imapserver.Session
+	trace *groupApplicationIMAPFetchTrace
+}
+
+func (s *groupApplicationIMAPTracingSession) Fetch(w *imapserver.FetchWriter, set imap.NumSet, options *imap.FetchOptions) error {
+	call := groupApplicationIMAPFetchCall{set: set.String()}
+	if options != nil {
+		call.rfc822Size = options.RFC822Size
+		call.bodySections = len(options.BodySection)
+		for _, section := range options.BodySection {
+			if section.Partial != nil {
+				call.partialSizes = append(call.partialSizes, section.Partial.Size)
+			}
+		}
+	}
+	s.trace.mu.Lock()
+	s.trace.calls = append(s.trace.calls, call)
+	s.trace.mu.Unlock()
+	return s.Session.Fetch(w, set, options)
+}
+
+func startGroupApplicationIMAPTestServer(t *testing.T, messages ...string) (GroupApplicationIMAPConfig, *groupApplicationIMAPFetchTrace) {
+	t.Helper()
+	t.Setenv("GODEBUG", "x509usefallbackroots=1")
+	certificate := groupApplicationIMAPPollCertificate(t)
+	backend := imapmemserver.New()
+	user := imapmemserver.NewUser("inbox@example.com", "secret")
+	require.NoError(t, user.Create("INBOX", nil))
+	for _, raw := range messages {
+		_, err := user.Append("INBOX", newGroupApplicationIMAPPollLiteral(raw), &imap.AppendOptions{})
+		require.NoError(t, err)
+	}
+	backend.AddUser(user)
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{certificate},
+		MinVersion:   tls.VersionTLS12,
+		NextProtos:   []string{"imap"},
+	}
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", tlsConfig)
+	require.NoError(t, err)
+	trace := &groupApplicationIMAPFetchTrace{}
+	server := imapserver.New(&imapserver.Options{
+		NewSession: func(*imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
+			return &groupApplicationIMAPTracingSession{Session: backend.NewSession(), trace: trace}, nil, nil
+		},
+		TLSConfig: tlsConfig,
+	})
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- server.Serve(listener) }()
+	t.Cleanup(func() {
+		require.NoError(t, server.Close())
+		require.NoError(t, <-serveDone)
+	})
+
+	return GroupApplicationIMAPConfig{
+		Host: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port,
+		Username: "inbox@example.com", Password: "secret", Mailbox: "INBOX",
+		ReplyAddress: "reply@example.com", TLSMode: "implicit", PollIntervalSeconds: 30,
+	}, trace
+}
+
+func TestGroupApplicationTestIMAPSelectsConfiguredMailbox(t *testing.T) {
+	cfg, _ := startGroupApplicationIMAPTestServer(t)
+	input := validGroupApplicationEmailConfig()
+	input.IMAP = cfg
+	service := NewGroupApplicationService(nil, configuredGroupApplicationSettings(t), groupApplicationEncryptorStub{})
+	worker := &GroupApplicationWorker{service: service}
+
+	names, err := worker.TestIMAP(context.Background(), input)
+	require.NoError(t, err)
+	require.Contains(t, names, "INBOX")
+
+	input.IMAP.Mailbox = "Missing"
+	names, err = worker.TestIMAP(context.Background(), input)
+	require.Nil(t, names)
+	require.Error(t, err)
+	require.Equal(t, "GROUP_APPLICATION_IMAP_SELECT_FAILED", infraerrors.Reason(err))
+}
+
+func TestGroupApplicationIMAPHighestUIDFallsBackWhenUIDNextIsZero(t *testing.T) {
+	raw := "From: sender@example.com\r\nContent-Type: text/plain\r\n\r\nbody"
+	cfg, trace := startGroupApplicationIMAPTestServer(t, raw)
+	client, selected, err := openGroupApplicationMailbox(context.Background(), &cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	selected.UIDNext = 0
+
+	highest, err := groupApplicationIMAPHighestUID(client, selected)
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), highest)
+	require.Contains(t, trace.snapshot(), groupApplicationIMAPFetchCall{set: "1"})
+}
+
+func TestGroupApplicationPollIMAPChecksSizeBeforeFetchingLargeBody(t *testing.T) {
+	raw := "From: sender@example.com\r\nContent-Type: text/plain\r\n\r\n" + strings.Repeat("x", groupApplicationIMAPMaxMessageBytes)
+	cfg, trace := startGroupApplicationIMAPTestServer(t, raw)
+	repo := &groupApplicationIMAPPollRepoStub{}
+	worker := &GroupApplicationWorker{repo: repo}
+
+	require.NoError(t, worker.pollIMAP(context.Background(), &cfg))
+	require.Len(t, repo.receipts, 2)
+	require.Equal(t, GroupApplicationReceipt{MailboxFingerprint: groupApplicationMailboxFingerprint(&cfg), UIDValidity: repo.receipts[0].UIDValidity, UID: 0, Result: "cursor_start"}, repo.receipts[0])
+	require.Equal(t, "too_large", repo.receipts[1].Result)
+	calls := trace.snapshot()
+	require.NotEmpty(t, calls)
+	require.True(t, calls[0].rfc822Size)
+	for _, call := range calls {
+		require.Zero(t, call.bodySections)
+	}
+}
+
+func TestGroupApplicationPollIMAPRecordsAutomatedReplyWithoutCompletingApplication(t *testing.T) {
+	const approvalMessageID = "<group-application-42-approval-b9ac73ed-9a79-40f9-a620-167ae80bdbd7@sub2api.local>"
+	raw := strings.Join([]string{
+		"From: Applicant <applicant@example.com>",
+		"Subject: automatic reply",
+		"Message-ID: <automatic@example.com>",
+		"In-Reply-To: " + approvalMessageID,
+		"Auto-Submitted: auto-replied",
+		"Content-Type: text/plain; charset=UTF-8",
+		"", "CONFIRM",
+	}, "\r\n")
+	cfg, trace := startGroupApplicationIMAPTestServer(t, raw)
+	repo := &groupApplicationIMAPPollRepoStub{
+		application:    &GroupApplication{ID: 42, ContactEmail: "applicant@example.com", ReplyPhraseSnapshot: "CONFIRM"},
+		validMessageID: approvalMessageID,
+	}
+	worker := &GroupApplicationWorker{repo: repo}
+
+	require.NoError(t, worker.pollIMAP(context.Background(), &cfg))
+	require.Len(t, repo.receipts, 2)
+	require.Equal(t, "cursor_start", repo.receipts[0].Result)
+	require.Equal(t, "automated", repo.receipts[1].Result)
+	require.False(t, repo.completed)
+	require.Empty(t, repo.receipts[1].EncryptedContent)
+	var bodyCalls []groupApplicationIMAPFetchCall
+	for _, call := range trace.snapshot() {
+		if call.bodySections > 0 {
+			bodyCalls = append(bodyCalls, call)
+		}
+	}
+	require.Equal(t, []groupApplicationIMAPFetchCall{{set: "1", bodySections: 1, partialSizes: []int64{groupApplicationIMAPMaxMessageBytes + 1}}}, bodyCalls)
+}
+
+func TestGroupApplicationPollIMAPStoresStateConflictAndContinues(t *testing.T) {
+	const approvalMessageID = "<group-application-42-approval-b9ac73ed-9a79-40f9-a620-167ae80bdbd7@sub2api.local>"
+	correlated := strings.Join([]string{
+		"From: Applicant <applicant@example.com>",
+		"Subject: valid reply during state transition",
+		"Message-ID: <state-conflict@example.com>",
+		"In-Reply-To: " + approvalMessageID,
+		"Content-Type: text/plain; charset=UTF-8",
+		"", "CONFIRM",
+	}, "\r\n")
+	unrelated := strings.Join([]string{
+		"From: sender@example.com",
+		"Subject: unrelated",
+		"Message-ID: <unrelated@example.com>",
+		"Content-Type: text/plain; charset=UTF-8",
+		"", "hello",
+	}, "\r\n")
+	cfg, _ := startGroupApplicationIMAPTestServer(t, correlated, unrelated)
+	application := &GroupApplication{
+		ID: 42, ContactEmail: "applicant@example.com", GroupName: "Private Pro",
+		ReplyPhraseSnapshot: "CONFIRM", TemplatesSnapshot: DefaultGroupApplicationTemplates(), CreatedAt: time.Now(),
+	}
+	repo := &groupApplicationIMAPPollRepoStub{
+		application: application, validMessageID: approvalMessageID, completeErr: ErrGroupApplicationState,
+	}
+	service := NewGroupApplicationService(repo, configuredGroupApplicationSettings(t), groupApplicationEncryptorStub{})
+	worker := &GroupApplicationWorker{repo: repo, service: service}
+
+	require.NoError(t, worker.pollIMAP(context.Background(), &cfg))
+	require.Len(t, repo.receipts, 3)
+	require.Equal(t, []string{"cursor_start", "state_conflict", "unrelated"}, []string{repo.receipts[0].Result, repo.receipts[1].Result, repo.receipts[2].Result})
+	require.False(t, repo.completed)
+	require.Equal(t, uint32(2), repo.maxUID)
+}
+
+func TestGroupApplicationPollIMAPRetriesWhenAtomicReceiptStoreFails(t *testing.T) {
+	const approvalMessageID = "<group-application-42-approval-b9ac73ed-9a79-40f9-a620-167ae80bdbd7@sub2api.local>"
+	raw := strings.Join([]string{
+		"From: Applicant <applicant@example.com>",
+		"Subject: valid reply",
+		"Message-ID: <retry-receipt@example.com>",
+		"In-Reply-To: " + approvalMessageID,
+		"Content-Type: text/plain; charset=UTF-8",
+		"", "CONFIRM",
+	}, "\r\n")
+	cfg, _ := startGroupApplicationIMAPTestServer(t, raw)
+	receiptErr := errors.New("receipt database unavailable")
+	application := &GroupApplication{
+		ID: 42, ContactEmail: "applicant@example.com", GroupName: "Private Pro",
+		ReplyPhraseSnapshot: "CONFIRM", TemplatesSnapshot: DefaultGroupApplicationTemplates(), CreatedAt: time.Now(),
+	}
+	repo := &groupApplicationIMAPPollRepoStub{
+		application: application, validMessageID: approvalMessageID, terminalReceiptErr: receiptErr,
+	}
+	service := NewGroupApplicationService(repo, configuredGroupApplicationSettings(t), groupApplicationEncryptorStub{})
+	worker := &GroupApplicationWorker{repo: repo, service: service}
+
+	err := worker.pollIMAP(context.Background(), &cfg)
+	require.ErrorIs(t, err, receiptErr)
+	require.False(t, repo.completed)
+	require.Equal(t, 1, repo.completeCalls)
+	require.Len(t, repo.receipts, 1)
+	require.Equal(t, "cursor_start", repo.receipts[0].Result)
+	require.Equal(t, uint32(0), repo.maxUID)
+
+	repo.terminalReceiptErr = nil
+	require.NoError(t, worker.pollIMAP(context.Background(), &cfg))
+	require.True(t, repo.completed)
+	require.Equal(t, 2, repo.completeCalls)
+	require.Len(t, repo.receipts, 2)
+	require.Equal(t, "completed", repo.receipts[1].Result)
+	require.Equal(t, uint32(1), repo.maxUID)
+}
+
+func TestGroupApplicationPollIMAPLeavesMessagesBeyondPerPollLimitForNextPoll(t *testing.T) {
+	messages := make([]string, groupApplicationIMAPMaxMessagesPerPoll+1)
+	for i := range messages {
+		messages[i] = fmt.Sprintf("From: sender@example.com\r\nSubject: unrelated %d\r\nMessage-ID: <unrelated-%d@example.com>\r\nContent-Type: text/plain\r\n\r\nhello", i, i)
+	}
+	cfg, _ := startGroupApplicationIMAPTestServer(t, messages...)
+	repo := &groupApplicationIMAPPollRepoStub{}
+	worker := &GroupApplicationWorker{repo: repo}
+
+	require.NoError(t, worker.pollIMAP(context.Background(), &cfg))
+	require.Len(t, repo.receipts, groupApplicationIMAPMaxMessagesPerPoll+1)
+	require.Equal(t, "cursor_start", repo.receipts[0].Result)
+	require.Equal(t, uint32(0), repo.receipts[0].UID)
+	require.Equal(t, uint32(1), repo.receipts[1].UID)
+	require.Equal(t, uint32(groupApplicationIMAPMaxMessagesPerPoll), repo.maxUID)
+	require.NoError(t, worker.pollIMAP(context.Background(), &cfg))
+	require.Len(t, repo.receipts, groupApplicationIMAPMaxMessagesPerPoll+2)
+	require.Equal(t, uint32(groupApplicationIMAPMaxMessagesPerPoll+1), repo.maxUID)
+}
+
+func TestGroupApplicationIMAPBootstrapUIDKeepsSmallMailboxAndBoundsLargeMailbox(t *testing.T) {
+	tests := []struct {
+		name    string
+		highest uint32
+		want    uint32
+	}{
+		{name: "empty", highest: 0, want: 0},
+		{name: "small", highest: groupApplicationIMAPBootstrapWindow, want: 0},
+		{name: "first over window", highest: groupApplicationIMAPBootstrapWindow + 1, want: 1},
+		{name: "large", highest: groupApplicationIMAPBootstrapWindow + 400, want: 400},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, groupApplicationIMAPBootstrapUID(test.highest))
+		})
+	}
+}
+
+func TestGroupApplicationPollIMAPBootstrapWindowBoundsLargeMailboxHistory(t *testing.T) {
+	messages := make([]string, int(groupApplicationIMAPBootstrapWindow)+1)
+	for i := range messages {
+		messages[i] = fmt.Sprintf("From: sender@example.com\r\nSubject: historical %d\r\nMessage-ID: <historical-%d@example.com>\r\nContent-Type: text/plain\r\n\r\nhello", i, i)
+	}
+	cfg, trace := startGroupApplicationIMAPTestServer(t, messages...)
+	repo := &groupApplicationIMAPPollRepoStub{}
+	worker := &GroupApplicationWorker{repo: repo}
+
+	require.NoError(t, worker.pollIMAP(context.Background(), &cfg))
+	require.Len(t, repo.receipts, groupApplicationIMAPMaxMessagesPerPoll+1)
+	require.Equal(t, "cursor_start", repo.receipts[0].Result)
+	require.Equal(t, uint32(1), repo.receipts[0].UID)
+	require.Equal(t, uint32(2), repo.receipts[1].UID)
+	require.Equal(t, uint32(groupApplicationIMAPMaxMessagesPerPoll+1), repo.receipts[len(repo.receipts)-1].UID)
+	require.Equal(t, uint32(groupApplicationIMAPMaxMessagesPerPoll+1), repo.maxUID)
+	bodySets := make([]string, 0, groupApplicationIMAPMaxMessagesPerPoll)
+	for _, call := range trace.snapshot() {
+		if call.bodySections > 0 {
+			bodySets = append(bodySets, call.set)
+		}
+	}
+	require.Len(t, bodySets, groupApplicationIMAPMaxMessagesPerPoll)
+	require.Equal(t, "2", bodySets[0])
+	require.NotContains(t, bodySets, "1")
+}
+
+func TestGroupApplicationMailboxFingerprintIncludesPortAndUsernameCase(t *testing.T) {
+	base := GroupApplicationIMAPConfig{Host: "IMAP.EXAMPLE.COM", Port: 993, Username: "MailboxUser", Mailbox: "INBOX"}
+	hostCase := base
+	hostCase.Host = strings.ToLower(hostCase.Host)
+	require.Equal(t, groupApplicationMailboxFingerprint(&base), groupApplicationMailboxFingerprint(&hostCase))
+
+	differentPort := base
+	differentPort.Port++
+	require.NotEqual(t, groupApplicationMailboxFingerprint(&base), groupApplicationMailboxFingerprint(&differentPort))
+	differentUsernameCase := base
+	differentUsernameCase.Username = strings.ToLower(differentUsernameCase.Username)
+	require.NotEqual(t, groupApplicationMailboxFingerprint(&base), groupApplicationMailboxFingerprint(&differentUsernameCase))
 }
 
 func TestGroupApplicationPollIMAPConsumesAmbiguousLongHeaderBeforeValidReply(t *testing.T) {
@@ -938,7 +1416,7 @@ func TestGroupApplicationPollIMAPConsumesAmbiguousLongHeaderBeforeValidReply(t *
 		"Message-ID: <valid-reply@example.com>",
 		"In-Reply-To: " + valid,
 		"Content-Type: text/plain; charset=UTF-8",
-		"", "CONFIRM",
+		"", "CONFIRM", "", "Hank", "hank@example.com",
 	}, "\r\n")
 
 	backend := imapmemserver.New()
@@ -995,16 +1473,22 @@ func TestGroupApplicationPollIMAPConsumesAmbiguousLongHeaderBeforeValidReply(t *
 		Mailbox: "INBOX", TLSMode: "implicit",
 	}))
 
-	require.Len(t, repo.receipts, 2)
-	require.Equal(t, []uint32{1, 2}, []uint32{repo.receipts[0].UID, repo.receipts[1].UID})
-	require.Equal(t, "ambiguous", repo.receipts[0].Result)
-	require.Len(t, []rune(repo.receipts[0].MessageID), groupApplicationMaxStoredMessageIDRunes)
-	require.Len(t, []rune(repo.receipts[0].InReplyTo), groupApplicationMaxStoredMessageIDRunes)
-	require.Equal(t, "completed", repo.receipts[1].Result)
-	require.NotNil(t, repo.receipts[1].ApplicationID)
-	require.Equal(t, application.ID, *repo.receipts[1].ApplicationID)
+	require.Len(t, repo.receipts, 3)
+	require.Equal(t, []uint32{0, 1, 2}, []uint32{repo.receipts[0].UID, repo.receipts[1].UID, repo.receipts[2].UID})
+	require.Equal(t, "cursor_start", repo.receipts[0].Result)
+	require.Equal(t, "ambiguous", repo.receipts[1].Result)
+	require.Len(t, []rune(repo.receipts[1].MessageID), groupApplicationMaxStoredMessageIDRunes)
+	require.Len(t, []rune(repo.receipts[1].InReplyTo), groupApplicationMaxStoredMessageIDRunes)
+	require.Equal(t, "completed", repo.receipts[2].Result)
+	require.NotNil(t, repo.receipts[2].ApplicationID)
+	require.Equal(t, application.ID, *repo.receipts[2].ApplicationID)
 	require.True(t, repo.completed)
 	require.Equal(t, uint64(1), worker.repliesProcessed.Load())
+	decrypted, err := groupApplicationEncryptorStub{}.Decrypt(repo.receipts[2].EncryptedContent)
+	require.NoError(t, err)
+	var stored groupApplicationInboundContent
+	require.NoError(t, json.Unmarshal([]byte(decrypted), &stored))
+	require.Equal(t, "CONFIRM\n\nHank\nhank@example.com", stored.Text)
 }
 
 func newGroupApplicationIMAPAuthTestClient(
@@ -1282,10 +1766,12 @@ func TestGroupApplicationWorkerPausesOutboxWhenWorkflowDisabled(t *testing.T) {
 	settings := &groupApplicationSettingRepoStub{values: map[string]string{}}
 	svc := NewGroupApplicationService(repo, settings, groupApplicationEncryptorStub{})
 	worker := &GroupApplicationWorker{repo: repo, service: svc, email: &groupApplicationEmailSenderStub{}, workerID: "test-worker"}
+	worker.lastMailError.Store("previous transport failure")
 
 	require.NoError(t, worker.processMailBatch(context.Background()))
 	require.Zero(t, repo.claimCalls)
 	require.False(t, repo.retried)
+	require.Empty(t, worker.Health().LastMailError)
 }
 
 func TestGroupApplicationSavePolicyRejectsMissingTemplatePayload(t *testing.T) {
@@ -1320,6 +1806,55 @@ func TestGroupApplicationWorkerRefreshConfigurationUpdatesHealthImmediately(t *t
 	require.NotEmpty(t, worker.Health().ConfigurationError)
 }
 
+func TestGroupApplicationWorkerRefreshConfigurationWakesIMAPPoll(t *testing.T) {
+	firstPoll := make(chan struct{})
+	secondPoll := make(chan struct{})
+	releaseFirstPoll := make(chan struct{})
+	var pollMu sync.Mutex
+	pollCalls := 0
+	repo := &groupApplicationWorkerRepoStub{}
+	service := NewGroupApplicationService(repo, configuredGroupApplicationSettings(t), groupApplicationEncryptorStub{})
+	worker := newGroupApplicationWorker(repo, service, &groupApplicationEmailSenderStub{})
+	worker.imapPoller = func(ctx context.Context, _ *GroupApplicationIMAPConfig) error {
+		pollMu.Lock()
+		pollCalls++
+		call := pollCalls
+		pollMu.Unlock()
+		switch call {
+		case 1:
+			close(firstPoll)
+			select {
+			case <-releaseFirstPoll:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		case 2:
+			close(secondPoll)
+		}
+		return nil
+	}
+	worker.Start()
+	t.Cleanup(worker.Stop)
+
+	select {
+	case <-firstPoll:
+	case <-time.After(time.Second):
+		t.Fatal("initial IMAP poll did not start")
+	}
+	worker.lastIMAPError.Store("old IMAP failure")
+	worker.lastMailError.Store("old SMTP failure")
+	worker.RefreshConfiguration(context.Background())
+	close(releaseFirstPoll)
+	select {
+	case <-secondPoll:
+	case <-time.After(time.Second):
+		t.Fatal("configuration refresh did not wake the IMAP loop")
+	}
+	require.Empty(t, worker.Health().LastIMAPError)
+	require.Empty(t, worker.Health().LastMailError)
+}
+
 func TestGroupApplicationWorkerUsesStandaloneSMTPAndReplyAddress(t *testing.T) {
 	repo := &groupApplicationRepositoryStub{jobs: []GroupApplicationMailJob{{
 		ID: 10, ApplicationID: 1, Kind: GroupApplicationMailApproval,
@@ -1330,15 +1865,97 @@ func TestGroupApplicationWorkerUsesStandaloneSMTPAndReplyAddress(t *testing.T) {
 	svc := NewGroupApplicationService(repo, settings, groupApplicationEncryptorStub{})
 	sender := &groupApplicationEmailSenderStub{}
 	worker := &GroupApplicationWorker{repo: repo, service: svc, email: sender, workerID: "test-worker"}
+	worker.lastMailError.Store("previous transport failure")
 
 	require.NoError(t, worker.processMailBatch(context.Background()))
 	require.Equal(t, 1, repo.claimCalls)
+	require.Equal(t, 1, repo.claimLimit)
+	require.Equal(t, 1, repo.validateCalls)
 	require.Equal(t, 1, repo.markSentCalls)
 	require.Equal(t, 1, sender.sends)
 	require.Equal(t, "smtp.example.com", sender.config.Host)
 	require.Equal(t, "smtp-secret", sender.config.Password)
 	require.Equal(t, "starttls", sender.config.TLSMode)
 	require.Equal(t, "reply@example.com", sender.options.ReplyTo)
+	require.False(t, repo.retried)
+	require.Empty(t, worker.Health().LastMailError)
+}
+
+func TestGroupApplicationWorkerDoesNotClearMailErrorOnEmptyBatch(t *testing.T) {
+	repo := &groupApplicationRepositoryStub{}
+	service := NewGroupApplicationService(repo, configuredGroupApplicationSettings(t), groupApplicationEncryptorStub{})
+	worker := newGroupApplicationWorker(repo, service, &groupApplicationEmailSenderStub{})
+	worker.lastMailError.Store("SMTP remains unavailable")
+
+	require.NoError(t, worker.processMailBatch(context.Background()))
+	require.Equal(t, "SMTP remains unavailable", worker.Health().LastMailError)
+	require.Zero(t, repo.validateCalls)
+}
+
+func TestGroupApplicationWorkerSkipsCancelledClaimWithoutSendingOrRetrying(t *testing.T) {
+	repo := &groupApplicationRepositoryStub{
+		jobs: []GroupApplicationMailJob{{
+			ID: 10, ApplicationID: 1, Kind: GroupApplicationMailApproval,
+			Recipient: "applicant@example.com", Subject: "approved", HTMLBody: "body",
+			MessageID: "<approval@sub2api.local>", RequiredStatus: GroupApplicationStatusAwaitingReply,
+		}},
+		validateErr: ErrGroupApplicationState,
+	}
+	service := NewGroupApplicationService(repo, configuredGroupApplicationSettings(t), groupApplicationEncryptorStub{})
+	sender := &groupApplicationEmailSenderStub{}
+	worker := newGroupApplicationWorker(repo, service, sender)
+	worker.lastMailError.Store("previous transport failure")
+
+	require.NoError(t, worker.processMailBatch(context.Background()))
+	require.Equal(t, 1, repo.validateCalls)
+	require.Zero(t, sender.sends)
+	require.Zero(t, repo.markSentCalls)
+	require.False(t, repo.retried)
+	require.Zero(t, worker.mailFailures.Load())
+	require.Equal(t, "previous transport failure", worker.Health().LastMailError)
+}
+
+func TestGroupApplicationWorkerReturnsClaimValidationInfrastructureErrorWithoutRetry(t *testing.T) {
+	validationErr := errors.New("database unavailable while validating claim")
+	repo := &groupApplicationRepositoryStub{
+		jobs: []GroupApplicationMailJob{{
+			ID: 10, ApplicationID: 1, Kind: GroupApplicationMailApproval,
+			Recipient: "applicant@example.com", Subject: "approved", HTMLBody: "body",
+			MessageID: "<approval@sub2api.local>", RequiredStatus: GroupApplicationStatusAwaitingReply,
+		}},
+		validateErr: validationErr,
+	}
+	service := NewGroupApplicationService(repo, configuredGroupApplicationSettings(t), groupApplicationEncryptorStub{})
+	sender := &groupApplicationEmailSenderStub{}
+	worker := newGroupApplicationWorker(repo, service, sender)
+
+	err := worker.processMailBatch(context.Background())
+	require.ErrorIs(t, err, validationErr)
+	require.Equal(t, 1, repo.validateCalls)
+	require.Zero(t, sender.sends)
+	require.Zero(t, repo.markSentCalls)
+	require.False(t, repo.retried)
+	require.Zero(t, worker.mailFailures.Load())
+}
+
+func TestGroupApplicationWorkerRetriesOnlyActualSenderFailure(t *testing.T) {
+	sendErr := errors.New("SMTP delivery failed")
+	repo := &groupApplicationRepositoryStub{jobs: []GroupApplicationMailJob{{
+		ID: 10, ApplicationID: 1, Kind: GroupApplicationMailApproval,
+		Recipient: "applicant@example.com", Subject: "approved", HTMLBody: "body",
+		MessageID: "<approval@sub2api.local>", RequiredStatus: GroupApplicationStatusAwaitingReply,
+	}}}
+	service := NewGroupApplicationService(repo, configuredGroupApplicationSettings(t), groupApplicationEncryptorStub{})
+	sender := &groupApplicationEmailSenderStub{err: sendErr}
+	worker := newGroupApplicationWorker(repo, service, sender)
+
+	require.NoError(t, worker.processMailBatch(context.Background()))
+	require.Equal(t, 1, repo.validateCalls)
+	require.Equal(t, 1, sender.sends)
+	require.True(t, repo.retried)
+	require.Contains(t, repo.retriedLastError, sendErr.Error())
+	require.Equal(t, uint64(1), worker.mailFailures.Load())
+	require.Contains(t, worker.Health().LastMailError, sendErr.Error())
 }
 
 func TestGroupApplicationOptionsHiddenWhenDisabled(t *testing.T) {
@@ -1357,7 +1974,7 @@ func TestGroupApplicationOptionsHiddenWhenDisabled(t *testing.T) {
 	require.Equal(t, 1, repo.listOptionsCalls)
 }
 
-func TestGroupApplicationWorkflowMutationsAreBlockedWhenDisabled(t *testing.T) {
+func TestGroupApplicationWorkflowEntryMutationsAreBlockedWhenDisabled(t *testing.T) {
 	repo := &groupApplicationRepositoryStub{}
 	svc := NewGroupApplicationService(
 		repo,
@@ -1371,8 +1988,6 @@ func TestGroupApplicationWorkflowMutationsAreBlockedWhenDisabled(t *testing.T) {
 			return err
 		},
 		func() error { _, err := svc.Approve(context.Background(), 1, 2); return err },
-		func() error { _, err := svc.Reject(context.Background(), 1, 2, "reason"); return err },
-		func() error { _, err := svc.Revoke(context.Background(), 1, 2, "reason"); return err },
 		func() error { return svc.ResendApproval(context.Background(), 1) },
 		func() error { return svc.RetryMail(context.Background(), 1, 2) },
 	}

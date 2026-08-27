@@ -178,6 +178,20 @@ WHERE ns.nspname = 'public'
 
 	// user_allowed_groups: created_at should be timestamptz
 	requireColumn(t, tx, "user_allowed_groups", "created_at", "timestamp with time zone", 0, false)
+
+	// Group application state and delivery ownership must be enforced in SQL.
+	requireColumn(t, tx, "group_applications", "access_grant_owned", "boolean", 0, false)
+	requireColumn(t, tx, "group_application_mail_outbox", "claim_expires_at", "timestamp with time zone", 0, true)
+	requireIndex(t, tx, "group_applications", "group_applications_one_open_or_completed_per_user_group")
+	requireIndex(t, tx, "group_application_mail_outbox", "group_application_mail_outbox_one_active_approval")
+	requirePartialUniqueIndexDefinition(
+		t, tx, "group_applications", "group_applications_one_open_or_completed_per_user_group",
+		"user_id", "group_id", "WHERE", "pending", "awaiting_reply", "completed",
+	)
+	requirePartialUniqueIndexDefinition(
+		t, tx, "group_application_mail_outbox", "group_application_mail_outbox_one_active_approval",
+		"application_id", "required_application_status", "WHERE", "approval", "pending", "processing",
+	)
 }
 
 func TestMigrationsRunner_AuthIdentityAndPaymentSchemaStayAligned(t *testing.T) {

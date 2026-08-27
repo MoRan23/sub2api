@@ -66,4 +66,32 @@ describe('EndpointPopover', () => {
     expect(wrapper.text()).toContain('已复制到剪贴板')
     expect(wrapper.find('button[aria-label="已复制到剪贴板"]').exists()).toBe(true)
   })
+
+  it('keeps long endpoints inside a shrinkable responsive row', () => {
+    const longEndpoint = `https://gateway.example.com/${'very-long-path/'.repeat(12)}v1`
+    const wrapper = mount(EndpointPopover, {
+      props: {
+        apiBaseUrl: longEndpoint,
+        customEndpoints: [],
+      },
+    })
+
+    const list = wrapper.get('[data-test="endpoint-list"]')
+    const item = wrapper.get('[data-test="endpoint-item"]')
+    const url = wrapper.get('[data-test="endpoint-url"]')
+    const tooltip = wrapper.get('[data-test="endpoint-tooltip"]')
+
+    expect(list.classes()).toEqual(expect.arrayContaining(['min-w-0', 'max-w-full', 'flex-wrap']))
+    expect(item.classes()).toEqual(
+      expect.arrayContaining(['relative', 'w-full', 'min-w-0', 'max-w-full', 'sm:w-auto'])
+    )
+    expect(url.classes()).toEqual(expect.arrayContaining(['min-w-0', 'flex-1', 'truncate']))
+    expect(tooltip.classes()).toEqual(
+      expect.arrayContaining(['right-0', 'max-w-[min(24rem,100%)]'])
+    )
+    expect(tooltip.classes()).not.toEqual(expect.arrayContaining(['sm:right-auto', 'sm:-translate-x-1/2']))
+    expect(tooltip.element.parentElement?.classList.contains('relative')).toBe(false)
+    expect(url.text()).toBe(longEndpoint)
+    expect(item.findAll('button, a').every((control) => control.classes().includes('shrink-0'))).toBe(true)
+  })
 })

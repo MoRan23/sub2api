@@ -76,6 +76,23 @@ func TestRedactAuditBody_BareSessionKeyRedacted(t *testing.T) {
 	}
 }
 
+func TestRedactAuditBody_GroupApplicationReplyPhraseRedacted(t *testing.T) {
+	raw := []byte(`{"group_id":4,"enabled":true,"reply_phrase":"confirm-secret","templates":{"approval":"visible-template"}}`)
+	out := RedactAuditBody(raw, "application/json")
+
+	if strings.Contains(out, "confirm-secret") {
+		t.Fatalf("redacted body still contains the reply phrase: %s", out)
+	}
+	if !strings.Contains(out, `"reply_phrase":"***"`) {
+		t.Fatalf("reply_phrase should be replaced by the redaction placeholder: %s", out)
+	}
+	for _, accountable := range []string{`"group_id":4`, `"enabled":true`, "visible-template"} {
+		if !strings.Contains(out, accountable) {
+			t.Fatalf("non-sensitive policy field %q should be preserved: %s", accountable, out)
+		}
+	}
+}
+
 // TestRedactAuditBody_AuthoritativeTablesSynced 覆盖曾经漏网的凭证字段：
 // 账号 credentials 敏感子键、支付渠道无分隔符密钥、字符串值内嵌凭证的 proxy_key / custom_key，
 // 以及 camelCase 等命名变体（归一化比对）。

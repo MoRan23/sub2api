@@ -22,6 +22,7 @@ vi.mock("vue-i18n", async (importOriginal) => {
     "admin.groupApplications.communicationResults.completed": "Confirmation matched and completed",
     "admin.groupApplications.emailContentUnavailable": "Content unavailable",
     "admin.groupApplications.emailContentTruncated": "Content truncated",
+    "admin.groupApplications.emailPreview": "Email HTML body preview",
   };
   return {
     ...actual,
@@ -37,7 +38,17 @@ const communications = [
     kind: "approval" as const,
     to_address: "applicant@example.com",
     subject: "Application approved",
-    html_body: '<p>Read the agreement</p><img src="x" onerror="alert(1)">',
+    html_body: `<!doctype html>
+      <html>
+        <head><style>.message { color: #0f766e; }</style></head>
+        <body style="margin: 0; background: #f3f4f6;">
+          <p class="message" style="font-weight: 700;">Read the agreement</p>
+          <a href="https://attacker.example/track">unsafe link</a>
+          <img src="https://attacker.example/pixel.png" onerror="alert(1)">
+          <form action="https://attacker.example/submit"><button>Submit</button></form>
+          <script>alert(1)</script>
+        </body>
+      </html>`,
     status: "failed",
     retryable: true,
     attempts: 1,
@@ -56,7 +67,7 @@ const communications = [
 ];
 
 describe("GroupApplicationCommunicationTimeline", () => {
-  it("shows both directions, sanitizes HTML, and exposes export and retry commands", async () => {
+  it("shows both directions, isolates sanitized HTML, and exposes export and retry commands", async () => {
     const onExport = vi.fn();
     const onRefresh = vi.fn();
     const onRetry = vi.fn();
@@ -67,7 +78,18 @@ describe("GroupApplicationCommunicationTimeline", () => {
     expect(screen.getByText("Application approved")).toBeTruthy();
     expect(screen.getByText("I ACCEPT")).toBeTruthy();
     expect(screen.getByText("Confirmation matched and completed")).toBeTruthy();
-    expect(container.innerHTML).not.toContain("onerror");
+    const preview = screen.getByTitle("Email HTML body preview") as HTMLIFrameElement;
+    const sourceDocument = preview.srcdoc;
+    expect(preview.getAttribute("sandbox")).toBe("");
+    expect(preview.getAttribute("referrerpolicy")).toBe("no-referrer");
+    expect(sourceDocument).toContain("Content-Security-Policy");
+    expect(sourceDocument).toContain("default-src 'none'");
+    expect(sourceDocument).toContain("<style>");
+    expect(sourceDocument).toContain('style="margin: 0; background: #f3f4f6;"');
+    expect(sourceDocument).not.toContain("onerror");
+    expect(sourceDocument).not.toContain("<script");
+    expect(sourceDocument).not.toContain("<form");
+    expect(sourceDocument).not.toContain("attacker.example");
     expect(container.querySelector("img")).toBeNull();
 
     await fireEvent.click(
@@ -80,6 +102,29 @@ describe("GroupApplicationCommunicationTimeline", () => {
     expect(onRefresh).toHaveBeenCalledTimes(1);
     expect(onExport).toHaveBeenCalledTimes(1);
     expect(onRetry).toHaveBeenCalledWith(1);
+  });
+
+  it("allows long sender addresses and subjects to wrap within the timeline", () => {
+    const longSender = `${"very-long-local-part".repeat(6)}@example.com`;
+    const longSubject = "A-subject-without-natural-breaks".repeat(8);
+    render(GroupApplicationCommunicationTimeline, {
+      props: {
+        communications: [
+          {
+            ...communications[1],
+            from_address: longSender,
+            subject: longSubject,
+          },
+        ],
+      },
+    });
+
+    const sender = screen.getByText(
+      (_content, element) =>
+        element?.tagName === "SPAN" && element.textContent?.includes(longSender) === true,
+    );
+    expect(sender.closest(".break-all")).toBeTruthy();
+    expect(screen.getByText(longSubject).classList.contains("break-all")).toBe(true);
   });
 
   it("keeps the delivery result but closes retry after the reply workflow completes", () => {

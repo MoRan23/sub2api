@@ -26,22 +26,25 @@ const (
 			VALUES($1,$2,$3,$4,$5,$6,$7,$8)
 		`
 	cancelStaleApplicationMailSQL = `
-			UPDATE group_application_mail_outbox o SET status='cancelled',last_error='application status changed',updated_at=NOW()
-			FROM group_applications a WHERE a.id=o.application_id AND o.status IN ('pending','processing') AND a.status<>o.required_application_status
-		`
+				UPDATE group_application_mail_outbox o
+				SET status='cancelled',claimed_at=NULL,claimed_by=NULL,claim_expires_at=NULL,
+				    last_error='application status changed',updated_at=NOW()
+				FROM group_applications a WHERE a.id=o.application_id AND o.status IN ('pending','processing') AND a.status<>o.required_application_status
+			`
 	cancelDuplicateApprovalMailSQL = `
-			UPDATE group_application_mail_outbox dup
-			SET status='cancelled',last_error='duplicate approval mail',claimed_at=NULL,claimed_by=NULL,updated_at=NOW()
-			WHERE dup.kind='approval' AND dup.status='pending'
-			  AND EXISTS (
-				SELECT 1 FROM group_application_mail_outbox earlier
-				WHERE earlier.application_id=dup.application_id
-				  AND earlier.kind='approval'
-				  AND earlier.required_application_status=dup.required_application_status
-				  AND earlier.status IN ('pending','processing')
-				  AND earlier.id<dup.id
-			  )
-	`
+				UPDATE group_application_mail_outbox dup
+				SET status='cancelled',last_error='duplicate approval mail',claimed_at=NULL,claimed_by=NULL,claim_expires_at=NULL,updated_at=NOW()
+				WHERE dup.kind='approval' AND dup.status='pending'
+				  AND EXISTS (
+					SELECT 1 FROM group_application_mail_outbox active
+					WHERE active.application_id=dup.application_id
+					  AND active.kind='approval'
+					  AND active.required_application_status=dup.required_application_status
+					  AND active.status IN ('pending','processing')
+					  AND active.id<>dup.id
+					  AND (active.status='processing' OR active.id<dup.id)
+				  )
+		`
 )
 
 func newGroupApplicationOutboxTestRepository(t *testing.T) (*groupApplicationRepository, sqlmock.Sqlmock) {
@@ -128,7 +131,7 @@ func TestGroupApplicationRepositoryEnqueueNonApprovalMailIsNotDeduplicated(t *te
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestGroupApplicationRepositoryClaimMailCancelsOnlyLaterPendingApprovalsBeforeClaim(t *testing.T) {
+func TestGroupApplicationRepositoryClaimMailCancelsDuplicatePendingApprovalsBeforeSingleClaim(t *testing.T) {
 	repo, mock := newGroupApplicationOutboxTestRepository(t)
 
 	mock.ExpectBegin()
@@ -136,8 +139,8 @@ func TestGroupApplicationRepositoryClaimMailCancelsOnlyLaterPendingApprovalsBefo
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta(cancelDuplicateApprovalMailSQL)).
 		WillReturnResult(sqlmock.NewResult(0, 2))
-	mock.ExpectQuery(`(?s)WITH candidates AS .*FOR UPDATE OF o SKIP LOCKED`).
-		WithArgs("worker-1", 20, int64(60)).
+	mock.ExpectQuery(`(?s)WITH candidates AS .*claim_expires_at.*FOR UPDATE OF o SKIP LOCKED`).
+		WithArgs("worker-1", 1, int64(60)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "application_id", "kind", "recipient", "subject", "html_body", "attachment_id",
 			"message_id", "required_application_status", "attempts", "attachment_joined_id",
@@ -152,15 +155,16 @@ func TestGroupApplicationRepositoryClaimMailCancelsOnlyLaterPendingApprovalsBefo
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestGroupApplicationRepositoryFindApprovalOnlyMatchesOpenReplyWorkflow(t *testing.T) {
+func TestGroupApplicationRepositoryFindApprovalOnlyMatchesOpenReplyWorkflowAndDeliveryUncertainty(t *testing.T) {
 	repo, mock := newGroupApplicationOutboxTestRepository(t)
-	mock.ExpectQuery(`(?s)WHERE a\.status='awaiting_reply' AND o\.kind='approval' AND o\.status='sent' AND o\.message_id=ANY\(\$1\)`).
+	mock.ExpectQuery(`(?s)WHERE a\.status='awaiting_reply' AND o\.kind='approval'.*o\.status IN \('processing','sent'\) AND o\.message_id=ANY\(\$1\)`).
 		WithArgs(sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
 	match, err := repo.FindApprovalByMessageIDs(
 		context.Background(),
 		[]string{"<group-application-7-approval-3d579da3-3c63-4b1c-9684-954714939bd5@sub2api.local>"},
+		nil,
 	)
 
 	require.Nil(t, match)
@@ -196,7 +200,7 @@ func TestGroupApplicationRepositoryFindApprovalAcceptsMultipleMessagesForOneAppl
 		WithArgs(sqlmock.AnyArg()).
 		WillReturnRows(rows)
 
-	match, err := repo.FindApprovalByMessageIDs(context.Background(), []string{first, latest})
+	match, err := repo.FindApprovalByMessageIDs(context.Background(), []string{first, latest}, nil)
 
 	require.NoError(t, err)
 	require.Equal(t, int64(7), match.Application.ID)
@@ -213,9 +217,45 @@ func TestGroupApplicationRepositoryFindApprovalRejectsCrossApplicationAmbiguity(
 		WithArgs(sqlmock.AnyArg()).
 		WillReturnRows(rows)
 
-	match, err := repo.FindApprovalByMessageIDs(context.Background(), []string{"<first@sub2api.local>", "<second@sub2api.local>"})
+	match, err := repo.FindApprovalByMessageIDs(context.Background(), []string{"<first@sub2api.local>", "<second@sub2api.local>"}, nil)
 
 	require.Nil(t, match)
 	require.ErrorIs(t, err, service.ErrGroupApplicationReplyAmbiguous)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestGroupApplicationRepositoryFindApprovalExactMatchTakesPriorityOverFallback(t *testing.T) {
+	repo, mock := newGroupApplicationOutboxTestRepository(t)
+	exact := "<exact@sub2api.local>"
+	fallback := "<embedded@sub2api.local>"
+	rows := addGroupApplicationApprovalMatchRow(groupApplicationApprovalMatchRows(), 7, exact)
+	mock.ExpectQuery(`(?s)WITH matched AS .*LIMIT 2`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(rows)
+
+	match, err := repo.FindApprovalByMessageIDs(context.Background(), []string{exact}, []string{fallback})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(7), match.Application.ID)
+	require.Equal(t, exact, match.MessageID)
+	require.NoError(t, mock.ExpectationsWereMet(), "fallback query must not run after an exact match")
+}
+
+func TestGroupApplicationRepositoryFindApprovalFallsBackOnlyAfterExactNotFound(t *testing.T) {
+	repo, mock := newGroupApplicationOutboxTestRepository(t)
+	exact := "<rewritten@provider.example>"
+	fallback := "<embedded@sub2api.local>"
+	mock.ExpectQuery(`(?s)WITH matched AS .*LIMIT 2`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(groupApplicationApprovalMatchRows())
+	mock.ExpectQuery(`(?s)WITH matched AS .*LIMIT 2`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(addGroupApplicationApprovalMatchRow(groupApplicationApprovalMatchRows(), 7, fallback))
+
+	match, err := repo.FindApprovalByMessageIDs(context.Background(), []string{exact}, []string{fallback})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(7), match.Application.ID)
+	require.Equal(t, fallback, match.MessageID)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

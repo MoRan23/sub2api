@@ -24,6 +24,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 
+	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
 )
 
@@ -245,24 +246,23 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 		return nil
 	}
 
-	// 使用 ent 事务包裹用户更新与 allowed_groups 同步，避免跨层事务不一致。
-	tx, err := r.client.Tx(ctx)
-	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-		return err
-	}
-
 	var txClient *dbent.Client
 	txCtx := ctx
-	if err == nil {
-		defer func() { _ = tx.Rollback() }()
-		txClient = tx.Client()
-		txCtx = dbent.NewTxContext(ctx, tx)
+	var ownedTx *dbent.Tx
+	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
+		txClient = existingTx.Client()
 	} else {
-		// 已处于外部事务中（ErrTxStarted），复用当前事务 client 并由调用方负责提交/回滚。
-		if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
-			txClient = existingTx.Client()
-		} else {
+		tx, err := r.client.Tx(ctx)
+		switch {
+		case errors.Is(err, dbent.ErrTxStarted):
 			txClient = r.client
+		case err != nil:
+			return err
+		default:
+			ownedTx = tx
+			defer func() { _ = ownedTx.Rollback() }()
+			txClient = tx.Client()
+			txCtx = dbent.NewTxContext(ctx, tx)
 		}
 	}
 
@@ -353,8 +353,8 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 		return err
 	}
 
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
+	if ownedTx != nil {
+		if err := ownedTx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -1404,17 +1404,54 @@ func emailAliasUniquenessLockKey(email string) string {
 }
 
 func (r *userRepository) AddGroupToAllowedGroups(ctx context.Context, userID int64, groupID int64) error {
-	client := clientFromContext(ctx, r.client)
-	err := client.UserAllowedGroup.Create().
+	var txClient *dbent.Client
+	txCtx := ctx
+	var ownedTx *dbent.Tx
+	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
+		txClient = existingTx.Client()
+	} else {
+		tx, err := r.client.Tx(ctx)
+		switch {
+		case errors.Is(err, dbent.ErrTxStarted):
+			txClient = r.client
+		case err != nil:
+			return err
+		default:
+			ownedTx = tx
+			defer func() { _ = ownedTx.Rollback() }()
+			txClient = tx.Client()
+			txCtx = dbent.NewTxContext(ctx, tx)
+		}
+	}
+
+	userExists, err := lockUserForGroupApplicationGuard(txCtx, txClient, userID)
+	if err != nil {
+		return err
+	}
+	if !userExists {
+		return service.ErrUserNotFound
+	}
+	active, err := r.hasActiveGroupApplication(txCtx, txClient, userID, groupID)
+	if err != nil {
+		return err
+	}
+	if active {
+		return service.ErrGroupApplicationConflict
+	}
+
+	err = txClient.UserAllowedGroup.Create().
 		SetUserID(userID).
 		SetGroupID(groupID).
 		OnConflictColumns(userallowedgroup.FieldUserID, userallowedgroup.FieldGroupID).
 		DoNothing().
-		Exec(ctx)
-	if isSQLNoRowsError(err) {
-		return nil
+		Exec(txCtx)
+	if err != nil && !isSQLNoRowsError(err) {
+		return err
 	}
-	return err
+	if ownedTx != nil {
+		return ownedTx.Commit()
+	}
+	return nil
 }
 
 func (r *userRepository) RemoveGroupFromAllowedGroups(ctx context.Context, groupID int64) (int64, error) {
@@ -1490,6 +1527,10 @@ func (r *userRepository) syncUserAllowedGroupsWithClient(ctx context.Context, cl
 	if client == nil {
 		return nil
 	}
+	userExists, err := lockUserForGroupApplicationGuard(ctx, client, userID)
+	if err != nil {
+		return err
+	}
 
 	existingRows, err := client.UserAllowedGroup.Query().
 		Where(userallowedgroup.UserIDEQ(userID)).
@@ -1514,6 +1555,25 @@ func (r *userRepository) syncUserAllowedGroupsWithClient(ctx context.Context, cl
 			removed = append(removed, row.GroupID)
 		}
 	}
+	added := make([]int64, 0, len(desired))
+	for groupID := range desired {
+		if _, present := existing[groupID]; !present {
+			added = append(added, groupID)
+		}
+	}
+	sort.Slice(added, func(i, j int) bool { return added[i] < added[j] })
+	if userExists {
+		for _, groupID := range added {
+			active, err := r.hasActiveGroupApplication(ctx, client, userID, groupID)
+			if err != nil {
+				return err
+			}
+			if active {
+				return service.ErrGroupApplicationConflict
+			}
+		}
+	}
+
 	if len(removed) > 0 {
 		if _, err := client.UserAllowedGroup.Delete().
 			Where(userallowedgroup.UserIDEQ(userID), userallowedgroup.GroupIDIn(removed...)).
@@ -1522,11 +1582,9 @@ func (r *userRepository) syncUserAllowedGroupsWithClient(ctx context.Context, cl
 		}
 	}
 
-	creates := make([]*dbent.UserAllowedGroupCreate, 0, len(desired))
-	for groupID := range desired {
-		if _, present := existing[groupID]; !present {
-			creates = append(creates, client.UserAllowedGroup.Create().SetUserID(userID).SetGroupID(groupID))
-		}
+	creates := make([]*dbent.UserAllowedGroupCreate, 0, len(added))
+	for _, groupID := range added {
+		creates = append(creates, client.UserAllowedGroup.Create().SetUserID(userID).SetGroupID(groupID))
 	}
 	if len(creates) > 0 {
 		if err := client.UserAllowedGroup.
@@ -1542,6 +1600,52 @@ func (r *userRepository) syncUserAllowedGroupsWithClient(ctx context.Context, cl
 	}
 
 	return nil
+}
+
+func lockUserForGroupApplicationGuard(ctx context.Context, client *dbent.Client, userID int64) (bool, error) {
+	if client == nil {
+		return false, fmt.Errorf("ent client is not configured")
+	}
+	query := client.User.Query().Where(
+		dbuser.IDEQ(userID),
+		predicate.User(func(selector *entsql.Selector) {
+			if selector.Dialect() != dialect.SQLite {
+				selector.ForUpdate()
+			}
+		}),
+	)
+	if _, err := query.OnlyID(ctx); err != nil {
+		if dbent.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *userRepository) hasActiveGroupApplication(ctx context.Context, client *dbent.Client, userID, groupID int64) (bool, error) {
+	exec := sqlExecutorFromEntClient(client)
+	if exec == nil {
+		exec = txAwareSQLExecutor(ctx, r.sql, r.client)
+	}
+	if exec == nil {
+		return false, fmt.Errorf("sql executor is not configured")
+	}
+	rows, err := exec.QueryContext(ctx, `
+		SELECT 1
+		FROM group_applications
+		WHERE user_id=$1 AND group_id=$2
+		  AND status IN ('pending','awaiting_reply')
+		LIMIT 1
+	`, userID, groupID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		return true, nil
+	}
+	return false, rows.Err()
 }
 
 func applyUserEntityToService(dst *service.User, src *dbent.User) {

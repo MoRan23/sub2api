@@ -49,13 +49,15 @@ const (
 )
 
 var (
-	ErrGroupApplicationUnavailable    = infraerrors.BadRequest("GROUP_APPLICATION_UNAVAILABLE", "group is not available for application")
-	ErrGroupApplicationDisabled       = infraerrors.Conflict("GROUP_APPLICATION_DISABLED", "group application workflow is disabled")
-	ErrGroupApplicationConflict       = infraerrors.Conflict("GROUP_APPLICATION_CONFLICT", "an active or completed application already exists for this group")
-	ErrGroupApplicationNotFound       = infraerrors.NotFound("GROUP_APPLICATION_NOT_FOUND", "group application not found")
-	ErrGroupApplicationState          = infraerrors.Conflict("GROUP_APPLICATION_STATE_CONFLICT", "group application status has changed")
-	ErrGroupApplicationEmail          = infraerrors.BadRequest("GROUP_APPLICATION_EMAIL_INVALID", "valid standalone group application email configuration is required")
-	ErrGroupApplicationReplyAmbiguous = errors.New("group application reply references multiple active applications")
+	ErrGroupApplicationUnavailable            = infraerrors.BadRequest("GROUP_APPLICATION_UNAVAILABLE", "group is not available for application")
+	ErrGroupApplicationDisabled               = infraerrors.Conflict("GROUP_APPLICATION_DISABLED", "group application workflow is disabled")
+	ErrGroupApplicationConflict               = infraerrors.Conflict("GROUP_APPLICATION_CONFLICT", "an active or completed application already exists for this group")
+	ErrGroupApplicationNotFound               = infraerrors.NotFound("GROUP_APPLICATION_NOT_FOUND", "group application not found")
+	ErrGroupApplicationState                  = infraerrors.Conflict("GROUP_APPLICATION_STATE_CONFLICT", "group application status has changed")
+	ErrGroupApplicationMailDeliveryInProgress = infraerrors.Conflict("GROUP_APPLICATION_MAIL_DELIVERY_IN_PROGRESS", "group application email delivery is in progress; retry after it finishes")
+	ErrGroupApplicationAccessNotOwned         = infraerrors.Conflict("GROUP_APPLICATION_ACCESS_NOT_OWNED", "group access was granted outside this application and must be removed separately")
+	ErrGroupApplicationEmail                  = infraerrors.BadRequest("GROUP_APPLICATION_EMAIL_INVALID", "valid standalone group application email configuration is required")
+	ErrGroupApplicationReplyAmbiguous         = errors.New("group application reply references multiple active applications")
 )
 
 type GroupApplicationLocalizedTemplate struct {
@@ -235,15 +237,16 @@ type GroupApplicationRepository interface {
 	ListApplicationCommunications(ctx context.Context, applicationID int64) ([]GroupApplicationCommunication, error)
 	Approve(ctx context.Context, applicationID, adminID int64, mail GroupApplicationMailJob) (*GroupApplication, error)
 	Reject(ctx context.Context, applicationID, adminID int64, reason string, mail GroupApplicationMailJob) (*GroupApplication, error)
-	CompleteFromReply(ctx context.Context, applicationID int64, mail GroupApplicationMailJob) (*GroupApplication, error)
-	RejectReplyMismatch(ctx context.Context, applicationID int64, mail GroupApplicationMailJob) (*GroupApplication, error)
+	CompleteFromReply(ctx context.Context, applicationID int64, mail GroupApplicationMailJob, receipt *GroupApplicationReceipt) (*GroupApplication, error)
+	RejectReplyMismatch(ctx context.Context, applicationID int64, mail GroupApplicationMailJob, receipt *GroupApplicationReceipt) (*GroupApplication, error)
 	Revoke(ctx context.Context, applicationID, adminID int64, reason string, mail GroupApplicationMailJob) (*GroupApplication, error)
 	EnqueueMail(ctx context.Context, applicationID int64, mail GroupApplicationMailJob) error
 	RetryMail(ctx context.Context, applicationID, outboxID int64) error
 	ClaimMail(ctx context.Context, workerID string, limit int, lease time.Duration) ([]GroupApplicationMailJob, error)
+	ValidateMailClaim(ctx context.Context, id int64, workerID string) error
 	MarkMailSent(ctx context.Context, id int64, workerID string) error
 	RetryClaimedMail(ctx context.Context, id int64, workerID string, retryAt time.Time, terminal bool, lastError string) error
-	FindApprovalByMessageIDs(ctx context.Context, messageIDs []string) (*GroupApplicationApprovalMatch, error)
+	FindApprovalByMessageIDs(ctx context.Context, exactMessageIDs, fallbackMessageIDs []string) (*GroupApplicationApprovalMatch, error)
 	MaxProcessedUID(ctx context.Context, fingerprint string, uidValidity uint32) (uint32, bool, error)
 	StoreReceipt(ctx context.Context, receipt GroupApplicationReceipt) (bool, error)
 }
@@ -333,7 +336,7 @@ func DefaultGroupApplicationTemplates() GroupApplicationTemplateSet {
               <p style="margin:0 0 14px;font-size:16px;line-height:1.8;">您好，</p>
               <p style="margin:0 0 22px;font-size:16px;line-height:1.8;">您的 <strong>{{group_name}}</strong> 分组申请已获批准。正式开放访问权限前，请完成以下确认步骤。</p>
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;">
-                <tr><td style="padding:18px 20px;color:#065f46;font-size:14px;line-height:1.8;"><strong>1.</strong> 阅读本邮件附件 <strong>{{attachment_name}}</strong><br><strong>2.</strong> 使用当前邮箱直接回复本邮件<br><strong>3.</strong> 回复正文只能包含下方确认词，不得附加签名或其他文字</td></tr>
+                <tr><td style="padding:18px 20px;color:#065f46;font-size:14px;line-height:1.8;"><strong>1.</strong> 阅读本邮件附件 <strong>{{attachment_name}}</strong><br><strong>2.</strong> 使用当前邮箱直接回复本邮件<br><strong>3.</strong> 将下方确认词单独放在回复首段；可保留邮箱自动签名，但不要添加其他正文</td></tr>
               </table>
               <p style="margin:24px 0 10px;color:#4b5563;font-size:13px;font-weight:600;">严格回复词</p>
               <div style="padding:16px 20px;background:#111827;color:#ffffff;border-radius:8px;font-family:ui-monospace,SFMono-Regular,Consolas,'Liberation Mono',monospace;font-size:18px;font-weight:700;line-height:1.5;text-align:center;overflow-wrap:anywhere;">{{reply_phrase}}</div>
@@ -345,7 +348,7 @@ func DefaultGroupApplicationTemplates() GroupApplicationTemplateSet {
               <p style="margin:0 0 14px;font-size:16px;line-height:1.8;">Hello,</p>
               <p style="margin:0 0 22px;font-size:16px;line-height:1.8;">Your application for <strong>{{group_name}}</strong> has been approved. Complete the confirmation below before access is enabled.</p>
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;">
-                <tr><td style="padding:18px 20px;color:#065f46;font-size:14px;line-height:1.8;"><strong>1.</strong> Read the attached agreement <strong>{{attachment_name}}</strong><br><strong>2.</strong> Reply directly from this email address<br><strong>3.</strong> Put only the confirmation phrase below in the reply body, with no signature or other text</td></tr>
+                <tr><td style="padding:18px 20px;color:#065f46;font-size:14px;line-height:1.8;"><strong>1.</strong> Read the attached agreement <strong>{{attachment_name}}</strong><br><strong>2.</strong> Reply directly from this email address<br><strong>3.</strong> Put the confirmation phrase below alone in the first paragraph; automatic email signatures are allowed, but do not add other reply text</td></tr>
               </table>
               <p style="margin:24px 0 10px;color:#4b5563;font-size:13px;font-weight:600;">Exact confirmation phrase</p>
               <div style="padding:16px 20px;background:#111827;color:#ffffff;border-radius:8px;font-family:ui-monospace,SFMono-Regular,Consolas,'Liberation Mono',monospace;font-size:18px;font-weight:700;line-height:1.5;text-align:center;overflow-wrap:anywhere;">{{reply_phrase}}</div>
@@ -396,7 +399,7 @@ func DefaultGroupApplicationTemplates() GroupApplicationTemplateSet {
 				HTML: groupApplicationEmailCard("#b45309", "GROUP ACCESS / 分组申请", "回复验证未通过", `
               <p style="margin:0 0 18px;font-size:16px;line-height:1.8;">系统未能验证您对 <strong>{{group_name}}</strong> 分组申请的邮件回复。</p>
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;">
-                <tr><td style="padding:20px;color:#92400e;font-size:15px;line-height:1.8;">回复正文与要求的严格确认词不完全一致，本次申请已自动拒绝。常见原因包括额外签名、空格或其他文字。</td></tr>
+                <tr><td style="padding:20px;color:#92400e;font-size:15px;line-height:1.8;">系统未能在回复首段识别要求的确认词，本次申请已自动拒绝。可保留邮箱自动签名，但确认词之外不要添加其他正文。</td></tr>
               </table>
               <p style="margin:22px 0 0;color:#6b7280;font-size:13px;line-height:1.7;">申请编号：#{{application_id}}。您可以重新提交申请并再次完成邮件确认。</p>`, "此邮件由 {{site_name}} 的分组申请系统自动发送。"),
 			},
@@ -405,7 +408,7 @@ func DefaultGroupApplicationTemplates() GroupApplicationTemplateSet {
 				HTML: groupApplicationEmailCard("#b45309", "GROUP ACCESS", "Reply verification failed", `
               <p style="margin:0 0 18px;font-size:16px;line-height:1.8;">We could not verify your email reply for the <strong>{{group_name}}</strong> group application.</p>
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;">
-                <tr><td style="padding:20px;color:#92400e;font-size:15px;line-height:1.8;">The reply body did not exactly match the required phrase, so this application was automatically declined. Common causes include signatures, spaces, or extra text.</td></tr>
+                <tr><td style="padding:20px;color:#92400e;font-size:15px;line-height:1.8;">The required confirmation phrase was not found alone in the first paragraph, so this application was automatically declined. Automatic email signatures are allowed, but do not add other reply text.</td></tr>
               </table>
               <p style="margin:22px 0 0;color:#6b7280;font-size:13px;line-height:1.7;">Application #{{application_id}}. You may submit a new application and complete confirmation again.</p>`, "This message was sent automatically by the {{site_name}} group application system."),
 			},
@@ -431,6 +434,41 @@ func DefaultGroupApplicationTemplates() GroupApplicationTemplateSet {
 	}
 }
 
+func previousDefaultGroupApplicationTemplates() GroupApplicationTemplateSet {
+	templates := DefaultGroupApplicationTemplates()
+	replacements := []struct {
+		kind, locale      string
+		current, previous string
+	}{
+		{
+			kind: GroupApplicationMailApproval, locale: "zh",
+			current:  `<strong>3.</strong> 将下方确认词单独放在回复首段；可保留邮箱自动签名，但不要添加其他正文`,
+			previous: `<strong>3.</strong> 回复正文只能包含下方确认词，不得附加签名或其他文字`,
+		},
+		{
+			kind: GroupApplicationMailApproval, locale: "en",
+			current:  `<strong>3.</strong> Put the confirmation phrase below alone in the first paragraph; automatic email signatures are allowed, but do not add other reply text`,
+			previous: `<strong>3.</strong> Put only the confirmation phrase below in the reply body, with no signature or other text`,
+		},
+		{
+			kind: GroupApplicationMailReplyMismatch, locale: "zh",
+			current:  `系统未能在回复首段识别要求的确认词，本次申请已自动拒绝。可保留邮箱自动签名，但确认词之外不要添加其他正文。`,
+			previous: `回复正文与要求的严格确认词不完全一致，本次申请已自动拒绝。常见原因包括额外签名、空格或其他文字。`,
+		},
+		{
+			kind: GroupApplicationMailReplyMismatch, locale: "en",
+			current:  `The required confirmation phrase was not found alone in the first paragraph, so this application was automatically declined. Automatic email signatures are allowed, but do not add other reply text.`,
+			previous: `The reply body did not exactly match the required phrase, so this application was automatically declined. Common causes include signatures, spaces, or extra text.`,
+		},
+	}
+	for _, replacement := range replacements {
+		value := templates[replacement.kind][replacement.locale]
+		value.HTML = strings.Replace(value.HTML, replacement.current, replacement.previous, 1)
+		templates[replacement.kind][replacement.locale] = value
+	}
+	return templates
+}
+
 var groupApplicationTemplateToken = regexp.MustCompile(`\{\{\s*([a-z_]+)\s*\}\}`)
 var groupApplicationTemplateAnyToken = regexp.MustCompile(`\{\{[^{}]*\}\}`)
 var groupApplicationApprovalMessageIDFragment = regexp.MustCompile(`group-application-[1-9][0-9]{0,18}-approval-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}@sub2api\.local`)
@@ -444,6 +482,7 @@ var groupApplicationAllowedTokens = map[string]struct{}{
 func NormalizeGroupApplicationTemplates(in GroupApplicationTemplateSet) (GroupApplicationTemplateSet, error) {
 	defaults := DefaultGroupApplicationTemplates()
 	legacyDefaults := legacyDefaultGroupApplicationTemplates()
+	previousDefaults := previousDefaultGroupApplicationTemplates()
 	out := make(GroupApplicationTemplateSet, len(defaults))
 	for _, kind := range []string{GroupApplicationMailApproval, GroupApplicationMailCompletion, GroupApplicationMailManualRejection, GroupApplicationMailReplyMismatch, GroupApplicationMailRevocation} {
 		out[kind] = map[string]GroupApplicationLocalizedTemplate{}
@@ -452,10 +491,11 @@ func NormalizeGroupApplicationTemplates(in GroupApplicationTemplateSet) (GroupAp
 			if byLocale := in[kind]; byLocale != nil {
 				candidate := byLocale[locale]
 				legacy := legacyDefaults[kind][locale]
-				if strings.TrimSpace(candidate.Subject) != "" && candidate.Subject != legacy.Subject {
+				previous := previousDefaults[kind][locale]
+				if strings.TrimSpace(candidate.Subject) != "" && candidate.Subject != legacy.Subject && candidate.Subject != previous.Subject {
 					value.Subject = strings.TrimSpace(candidate.Subject)
 				}
-				if strings.TrimSpace(candidate.HTML) != "" && candidate.HTML != legacy.HTML {
+				if strings.TrimSpace(candidate.HTML) != "" && candidate.HTML != legacy.HTML && candidate.HTML != previous.HTML {
 					value.HTML = strings.TrimSpace(candidate.HTML)
 				}
 			}

@@ -96,6 +96,9 @@ func (s *GroupApplicationService) SavePolicy(ctx context.Context, policy *GroupA
 	if policy.Templates == nil {
 		return nil, infraerrors.BadRequest("INVALID_GROUP_APPLICATION_TEMPLATES", "mail templates are required")
 	}
+	if strings.ContainsAny(policy.ReplyPhrase, "\r\n") {
+		return nil, infraerrors.BadRequest("INVALID_GROUP_APPLICATION_REPLY_PHRASE", "reply phrase must be a single line")
+	}
 	policy.ReplyPhrase = strings.TrimSpace(NormalizeGroupApplicationReply(policy.ReplyPhrase))
 	if len([]rune(policy.ReplyPhrase)) > 500 || (policy.Enabled && policy.ReplyPhrase == "") {
 		return nil, infraerrors.BadRequest("INVALID_GROUP_APPLICATION_REPLY_PHRASE", "reply phrase is required and must be at most 500 characters")
@@ -285,9 +288,6 @@ func (s *GroupApplicationService) Approve(ctx context.Context, applicationID, ad
 }
 
 func (s *GroupApplicationService) Reject(ctx context.Context, applicationID, adminID int64, reason string) (*GroupApplication, error) {
-	if err := s.requireGroupApplicationWorkflow(ctx); err != nil {
-		return nil, err
-	}
 	reason = strings.TrimSpace(reason)
 	if reason == "" || len([]rune(reason)) > 2000 {
 		return nil, infraerrors.BadRequest("INVALID_GROUP_APPLICATION_REJECTION_REASON", "rejection reason is required and must be at most 2000 characters")
@@ -305,9 +305,6 @@ func (s *GroupApplicationService) Reject(ctx context.Context, applicationID, adm
 }
 
 func (s *GroupApplicationService) Revoke(ctx context.Context, applicationID, adminID int64, reason string) (*GroupApplication, error) {
-	if err := s.requireGroupApplicationWorkflow(ctx); err != nil {
-		return nil, err
-	}
 	reason = strings.TrimSpace(reason)
 	if reason == "" || len([]rune(reason)) > 2000 {
 		return nil, infraerrors.BadRequest("INVALID_GROUP_APPLICATION_REVOCATION_REASON", "revocation reason is required and must be at most 2000 characters")
@@ -352,13 +349,16 @@ func (s *GroupApplicationService) RetryMail(ctx context.Context, applicationID, 
 	return s.repo.RetryMail(ctx, applicationID, outboxID)
 }
 
-func (s *GroupApplicationService) ProcessInboundReply(ctx context.Context, applicationID int64, fromAddress, reply string) (string, error) {
+func (s *GroupApplicationService) ProcessInboundReply(ctx context.Context, applicationID int64, fromAddress, reply string, receipt *GroupApplicationReceipt) (string, error) {
 	if err := s.requireGroupApplicationWorkflow(ctx); err != nil {
 		return "disabled", err
 	}
 	application, err := s.repo.GetApplication(ctx, applicationID)
 	if err != nil {
-		return "not_found", err
+		if result, permanent := groupApplicationInboundReplyErrorResult(err); permanent {
+			return result, err
+		}
+		return "error", err
 	}
 	from, err := NormalizeGroupApplicationEmail(fromAddress)
 	if err != nil || !strings.EqualFold(from, application.ContactEmail) {
@@ -371,8 +371,12 @@ func (s *GroupApplicationService) ProcessInboundReply(ctx context.Context, appli
 			return "error", renderErr
 		}
 		mail.RequiredStatus = GroupApplicationStatusCompleted
-		_, err = s.repo.CompleteFromReply(ctx, applicationID, mail)
+		prepareGroupApplicationTerminalReceipt(receipt, applicationID, "completed")
+		_, err = s.repo.CompleteFromReply(ctx, applicationID, mail, receipt)
 		if err != nil {
+			if result, permanent := groupApplicationInboundReplyErrorResult(err); permanent {
+				return result, err
+			}
 			return "error", err
 		}
 		return "completed", nil
@@ -382,19 +386,53 @@ func (s *GroupApplicationService) ProcessInboundReply(ctx context.Context, appli
 		return "error", renderErr
 	}
 	mail.RequiredStatus = GroupApplicationStatusRejected
-	_, err = s.repo.RejectReplyMismatch(ctx, applicationID, mail)
+	prepareGroupApplicationTerminalReceipt(receipt, applicationID, "reply_mismatch")
+	_, err = s.repo.RejectReplyMismatch(ctx, applicationID, mail, receipt)
 	if err != nil {
+		if result, permanent := groupApplicationInboundReplyErrorResult(err); permanent {
+			return result, err
+		}
 		return "error", err
 	}
 	return "reply_mismatch", nil
+}
+
+func prepareGroupApplicationTerminalReceipt(receipt *GroupApplicationReceipt, applicationID int64, result string) {
+	if receipt == nil {
+		return
+	}
+	receipt.ApplicationID = &applicationID
+	receipt.Result = result
+}
+
+func groupApplicationInboundReplyErrorResult(err error) (string, bool) {
+	switch {
+	case errors.Is(err, ErrGroupApplicationState):
+		return "state_conflict", true
+	case errors.Is(err, ErrGroupApplicationNotFound):
+		return "not_found", true
+	case errors.Is(err, ErrGroupApplicationUnavailable):
+		return "unavailable", true
+	default:
+		return "", false
+	}
+}
+
+func isPermanentGroupApplicationInboundReplyError(err error) bool {
+	_, permanent := groupApplicationInboundReplyErrorResult(err)
+	return permanent
 }
 
 func (s *GroupApplicationService) buildMail(ctx context.Context, application *GroupApplication, kind, decisionReason string) (GroupApplicationMailJob, error) {
 	if application == nil {
 		return GroupApplicationMailJob{}, ErrGroupApplicationNotFound
 	}
+	templates, err := NormalizeGroupApplicationTemplates(application.TemplatesSnapshot)
+	if err != nil {
+		return GroupApplicationMailJob{}, fmt.Errorf("normalize group application templates: %w", err)
+	}
 	locale := NormalizeGroupApplicationLocale(application.Locale)
-	localized := application.TemplatesSnapshot[kind]
+	localized := templates[kind]
 	value, ok := localized[locale]
 	if !ok {
 		value = localized["zh"]

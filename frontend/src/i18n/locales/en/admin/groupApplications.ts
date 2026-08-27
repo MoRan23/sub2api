@@ -16,8 +16,8 @@ export default {
 	policyDescription:
 	  "Configure application requirements, the agreement, and the complete email flow for this exclusive group.",
     replyPhrase: "Exact reply phrase",
-	replyPhraseHint:
-	  "The email body must match this string exactly, including whitespace and letter case.",
+    replyPhraseHint:
+      "The confirmation phrase must be the only content in the first paragraph and match exactly, including whitespace and letter case. Later paragraphs may contain only the email signature, with no other message text.",
     pdfAgreement: "Agreement PDF",
     downloadAgreement: "Download current agreement",
     invalidPDF: "Only PDF files up to 10 MiB are accepted",
@@ -51,7 +51,7 @@ export default {
 	smtpHint: "Sends approval, completion, rejection, reply mismatch, and revocation messages.",
 	imapTitle: "IMAP replies",
     imapHint:
-      "Reads exact-string replies to approval messages. The mailbox is usually INBOX. When secure login is enabled, use a client-specific password instead of the web login password.",
+      "Reads confirmation replies to approval messages. The phrase must occupy the first paragraph by itself; only an email signature may follow. The mailbox is usually INBOX. When secure login is enabled, use a client-specific password instead of the web login password.",
 	reuseSMTPCredentials: "Reuse SMTP username and password",
 	reuseSMTPCredentialsHint: "Use this when one mailbox account handles both sending and replies.",
 	senderAddress: "Sender address",
@@ -64,9 +64,12 @@ export default {
 	  "Encrypted from the first byte of the connection, usually port {port}; TLS 1.2 or newer is required.",
 	startTLSHint:
 	  "Connect first, then require an encrypted upgrade, usually port {port}. The connection fails if upgrade is unavailable.",
-	passwordConfiguredHint:
-	  "Leave blank to keep the saved password. Changing Host or username requires entering it again.",
-	passwordRequiredHint: "No password has been saved.",
+		passwordConfiguredHint:
+		  "Leave blank to keep the saved password. Changing the host, port, connection encryption, or username requires entering it again.",
+		passwordRequiredHint: "No password has been saved.",
+		clearSavedSMTPPassword: "Clear saved SMTP password",
+		clearSavedIMAPPassword: "Clear saved IMAP password",
+		clearSavedPasswordHint: "Deletes this password when saved. Available only while the email workflow is disabled.",
 	testRecipient: "Test message recipient",
 	testSMTP: "Test SMTP connection",
 	sendTest: "Send test message",
@@ -107,12 +110,18 @@ export default {
     emailContentUnavailable:
       "The message body is unavailable, possibly because this record predates communication history.",
     emailContentTruncated: "Only the first 8,000 characters of this message were retained.",
+    emailPreview: "Email HTML body preview",
     approvalAlreadyQueued: "An approval email is already queued for delivery",
     communicationResults: {
       completed: "Confirmation matched and completed",
       reply_mismatch: "Confirmation did not match",
       ignored_sender: "Sender did not match",
+      automated: "Automated reply ignored",
       unsupported_content: "No plain-text reply was available; the application was unchanged",
+      disabled: "Workflow was disabled before the reply was processed",
+      state_conflict: "Application was already finalized",
+      not_found: "Application no longer exists",
+      unavailable: "The requested group is no longer available",
       error: "Processing error",
     },
     errors: {

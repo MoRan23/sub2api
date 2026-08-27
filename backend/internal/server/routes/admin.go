@@ -42,7 +42,7 @@ func RegisterAdminRoutes(
 
 		// 分组管理
 		registerGroupRoutes(admin, h)
-		registerGroupApplicationRoutes(admin, h)
+		registerGroupApplicationRoutes(admin, h, stepUpAuth)
 
 		// 账号管理
 		registerAccountRoutes(admin, h, stepUpAuth)
@@ -355,16 +355,16 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	}
 }
 
-func registerGroupApplicationRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+func registerGroupApplicationRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
 	applications := admin.Group("/group-applications")
 	{
 		applications.GET("", h.Admin.GroupApplication.List)
 		applications.GET("/worker-status", h.Admin.GroupApplication.WorkerStatus)
 		applications.GET("/email-config", h.Admin.GroupApplication.GetEmailConfig)
-		applications.PUT("/email-config", h.Admin.GroupApplication.SaveEmailConfig)
-		applications.POST("/email-config/test-smtp", h.Admin.GroupApplication.TestSMTP)
-		applications.POST("/email-config/send-test", h.Admin.GroupApplication.SendTestEmail)
-		applications.POST("/email-config/test-imap", h.Admin.GroupApplication.TestIMAP)
+		applications.PUT("/email-config", gin.HandlerFunc(stepUpAuth), h.Admin.GroupApplication.SaveEmailConfigSecure)
+		applications.POST("/email-config/test-smtp", gin.HandlerFunc(stepUpAuth), h.Admin.GroupApplication.TestSMTPSecure)
+		applications.POST("/email-config/send-test", gin.HandlerFunc(stepUpAuth), h.Admin.GroupApplication.SendTestEmailSecure)
+		applications.POST("/email-config/test-imap", gin.HandlerFunc(stepUpAuth), h.Admin.GroupApplication.TestIMAPSecure)
 		applications.GET("/:id/communications", h.Admin.GroupApplication.ListCommunications)
 		applications.GET("/:id/communications/export", h.Admin.GroupApplication.ExportCommunications)
 		applications.GET("/:id", h.Admin.GroupApplication.Get)

@@ -61,9 +61,14 @@ type GroupApplicationEmailConfig struct {
 }
 
 const (
-	groupApplicationIMAPDialTimeout = 8 * time.Second
-	groupApplicationIMAPTestTimeout = 10 * time.Second
-	groupApplicationIMAPPollTimeout = 60 * time.Second
+	groupApplicationIMAPDialTimeout        = 8 * time.Second
+	groupApplicationIMAPTestTimeout        = 10 * time.Second
+	groupApplicationIMAPPollTimeout        = 60 * time.Second
+	groupApplicationIMAPMaxMessageBytes    = 5 << 20
+	groupApplicationIMAPUIDBatchSpan       = uint32(500)
+	groupApplicationIMAPBootstrapWindow    = uint32(500)
+	groupApplicationIMAPMaxMessagesPerPoll = 50
+	groupApplicationIMAPMaxBatchesPerPoll  = 32
 )
 
 type storedGroupApplicationSMTPConfig struct {
@@ -493,6 +498,7 @@ type GroupApplicationWorker struct {
 	configError      atomic.Value // string
 	workflowEnabled  atomic.Bool
 	imapPoller       func(context.Context, *GroupApplicationIMAPConfig) error
+	configRefresh    chan struct{}
 }
 
 func NewGroupApplicationWorker(repo GroupApplicationRepository, service *GroupApplicationService, email *EmailService) *GroupApplicationWorker {
@@ -501,7 +507,10 @@ func NewGroupApplicationWorker(repo GroupApplicationRepository, service *GroupAp
 
 func newGroupApplicationWorker(repo GroupApplicationRepository, service *GroupApplicationService, email groupApplicationEmailSender) *GroupApplicationWorker {
 	ctx, cancel := context.WithCancel(context.Background())
-	w := &GroupApplicationWorker{repo: repo, service: service, email: email, workerID: uuid.NewString(), ctx: ctx, cancel: cancel}
+	w := &GroupApplicationWorker{
+		repo: repo, service: service, email: email, workerID: uuid.NewString(),
+		ctx: ctx, cancel: cancel, configRefresh: make(chan struct{}, 1),
+	}
 	w.lastIMAPCheck.Store(time.Time{})
 	w.lastIMAPError.Store("")
 	w.lastMailCheck.Store(time.Time{})
@@ -558,6 +567,12 @@ func (w *GroupApplicationWorker) RefreshConfiguration(ctx context.Context) {
 		return
 	}
 	_, _ = w.refreshWorkflowState(ctx)
+	w.lastIMAPError.Store("")
+	w.lastMailError.Store("")
+	select {
+	case w.configRefresh <- struct{}{}:
+	default:
+	}
 }
 
 func (w *GroupApplicationWorker) refreshWorkflowState(ctx context.Context) (*GroupApplicationEmailConfig, error) {
@@ -634,6 +649,8 @@ func (w *GroupApplicationWorker) runIMAPLoop() {
 		select {
 		case <-w.ctx.Done():
 			return
+		case <-w.configRefresh:
+			nextPoll = time.Now()
 		case <-ticker.C:
 		}
 	}
@@ -651,11 +668,11 @@ func (w *GroupApplicationWorker) processMailBatch(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	w.lastMailError.Store("")
 	if !cfg.Enabled {
+		w.lastMailError.Store("")
 		return nil
 	}
-	jobs, err := w.repo.ClaimMail(ctx, w.workerID, 20, time.Minute)
+	jobs, err := w.repo.ClaimMail(ctx, w.workerID, 1, time.Minute)
 	if err != nil {
 		return err
 	}
@@ -664,19 +681,22 @@ func (w *GroupApplicationWorker) processMailBatch(ctx context.Context) error {
 		if job.Attachment != nil {
 			options.Attachment = &EmailAttachment{Filename: job.Attachment.Filename, ContentType: job.Attachment.ContentType, Data: job.Attachment.Data}
 		}
-		var sendErr error
 		if job.Kind == GroupApplicationMailApproval {
 			options.ReplyTo = cfg.IMAP.ReplyAddress
 		}
-		if sendErr == nil {
-			if w.email == nil {
-				sendErr = errors.New("group application email sender is unavailable")
-			} else if err := ctx.Err(); err != nil {
-				sendErr = err
-			} else {
-				sendErr = w.email.SendEmailWithConfigAndOptions(cfg.SMTPTransportConfig(), job.Recipient, job.Subject, job.HTMLBody, options)
-			}
+		if w.email == nil {
+			return errors.New("group application email sender is unavailable")
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := w.repo.ValidateMailClaim(ctx, job.ID, w.workerID); err != nil {
+			if errors.Is(err, ErrGroupApplicationState) {
+				continue
+			}
+			return err
+		}
+		sendErr := w.email.SendEmailWithConfigAndOptions(cfg.SMTPTransportConfig(), job.Recipient, job.Subject, job.HTMLBody, options)
 		if sendErr == nil {
 			if ackErr := w.repo.MarkMailSent(ctx, job.ID, w.workerID); ackErr != nil {
 				return ackErr
@@ -772,7 +792,14 @@ func (w *GroupApplicationWorker) TestIMAP(ctx context.Context, input GroupApplic
 		}
 		return nil, groupApplicationIMAPTestError(newGroupApplicationIMAPOperationError("list", err))
 	}
-	return groupApplicationMailboxNames(mailboxes), nil
+	names := groupApplicationMailboxNames(mailboxes)
+	if _, err = client.Select(cfg.IMAP.Mailbox, nil).Wait(); err != nil {
+		if testCtx.Err() != nil {
+			err = testCtx.Err()
+		}
+		return nil, groupApplicationIMAPTestError(newGroupApplicationIMAPOperationError("select", err))
+	}
+	return names, nil
 }
 
 type groupApplicationIMAPOperationError struct {
@@ -828,6 +855,9 @@ func groupApplicationIMAPTestError(err error) error {
 	case "list":
 		reason = "GROUP_APPLICATION_IMAP_LIST_FAILED"
 		message = "IMAP login succeeded, but mailbox folders could not be listed. Verify that the account has IMAP folder access."
+	case "select":
+		reason = "GROUP_APPLICATION_IMAP_SELECT_FAILED"
+		message = "IMAP login succeeded, but the configured mailbox could not be opened. Verify that the mailbox exists and is selectable."
 	default:
 		reason = "GROUP_APPLICATION_IMAP_TEST_FAILED"
 		message = "IMAP test failed. Verify the server settings and account permissions."
@@ -966,8 +996,149 @@ func openGroupApplicationMailbox(ctx context.Context, cfg *GroupApplicationIMAPC
 }
 
 func groupApplicationMailboxFingerprint(cfg *GroupApplicationIMAPConfig) string {
-	sum := sha256.Sum256([]byte(strings.ToLower(cfg.Host) + "\n" + strings.ToLower(cfg.Username) + "\n" + cfg.Mailbox))
+	sum := sha256.Sum256([]byte(strings.ToLower(cfg.Host) + "\n" + strconv.Itoa(cfg.Port) + "\n" + cfg.Username + "\n" + cfg.Mailbox))
 	return hex.EncodeToString(sum[:])
+}
+
+func groupApplicationIMAPHighestUID(client *groupApplicationIMAPClient, selected *imap.SelectData) (uint32, error) {
+	if selected == nil || selected.NumMessages == 0 {
+		return 0, nil
+	}
+	if selected.UIDNext > 1 {
+		return uint32(selected.UIDNext) - 1, nil
+	}
+	messages, err := client.Fetch(imap.SeqSetNum(selected.NumMessages), &imap.FetchOptions{UID: true}).Collect()
+	if err != nil {
+		return 0, fmt.Errorf("fetch highest IMAP UID: %w", err)
+	}
+	var highest uint32
+	for _, message := range messages {
+		if uid := uint32(message.UID); uid > highest {
+			highest = uid
+		}
+	}
+	if highest == 0 {
+		return 0, errors.New("selected IMAP mailbox contains messages but did not return a highest UID")
+	}
+	return highest, nil
+}
+
+func groupApplicationIMAPBatchEnd(start, highest uint32) uint32 {
+	end := start + groupApplicationIMAPUIDBatchSpan - 1
+	if end < start || end > highest {
+		return highest
+	}
+	return end
+}
+
+func groupApplicationIMAPBootstrapUID(highest uint32) uint32 {
+	if highest > groupApplicationIMAPBootstrapWindow {
+		return highest - groupApplicationIMAPBootstrapWindow
+	}
+	return 0
+}
+
+func fetchGroupApplicationIMAPBody(client *groupApplicationIMAPClient, uid uint32) ([]byte, error) {
+	section := &imap.FetchItemBodySection{
+		Peek:    true,
+		Partial: &imap.SectionPartial{Offset: 0, Size: groupApplicationIMAPMaxMessageBytes + 1},
+	}
+	messages, err := client.Fetch(
+		imap.UIDSetNum(imap.UID(uid)),
+		&imap.FetchOptions{UID: true, BodySection: []*imap.FetchItemBodySection{section}},
+	).Collect()
+	if err != nil {
+		return nil, fmt.Errorf("fetch IMAP reply UID %d: %w", uid, err)
+	}
+	for _, message := range messages {
+		if uint32(message.UID) != uid {
+			continue
+		}
+		raw := message.FindBodySection(section)
+		if raw == nil {
+			return nil, fmt.Errorf("IMAP reply UID %d did not include the requested body", uid)
+		}
+		return raw, nil
+	}
+	return nil, fmt.Errorf("IMAP reply UID %d disappeared before its body was fetched", uid)
+}
+
+func (w *GroupApplicationWorker) processIMAPReply(
+	ctx context.Context,
+	client *groupApplicationIMAPClient,
+	fingerprint string,
+	uidValidity uint32,
+	message *imapclient.FetchMessageBuffer,
+) error {
+	uid := uint32(message.UID)
+	if uid == 0 {
+		return errors.New("IMAP FETCH response omitted UID")
+	}
+	receipt := GroupApplicationReceipt{MailboxFingerprint: fingerprint, UIDValidity: uidValidity, UID: uid, Result: "ignored"}
+	storeReceipt := func() error {
+		_, err := w.repo.StoreReceipt(ctx, receipt)
+		return err
+	}
+	if message.RFC822Size > groupApplicationIMAPMaxMessageBytes {
+		receipt.Result = "too_large"
+		return storeReceipt()
+	}
+	raw, err := fetchGroupApplicationIMAPBody(client, uid)
+	if err != nil {
+		return err
+	}
+	if int64(len(raw)) > groupApplicationIMAPMaxMessageBytes {
+		receipt.Result = "too_large"
+		return storeReceipt()
+	}
+	parsed, parseErr := parseGroupApplicationReply(raw)
+	if parseErr != nil {
+		receipt.Result = "parse_error"
+		return storeReceipt()
+	}
+	receipt.MessageID = groupApplicationReceiptMetadata(parsed.MessageID, groupApplicationMaxStoredMessageIDRunes)
+	receipt.FromAddress = groupApplicationReceiptMetadata(parsed.From, groupApplicationMaxStoredFromAddressRunes)
+	receipt.InReplyTo = groupApplicationReceiptMetadata(parsed.InReplyTo, groupApplicationMaxStoredMessageIDRunes)
+	receipt.References = groupApplicationReceiptMetadata(parsed.References, groupApplicationMaxStoredReferencesRunes)
+	receipt.ReplySHA256 = GroupApplicationReplyDigest(parsed.Reply)
+	match, matchErr := findGroupApplicationApprovalByReplyMessageIDs(ctx, w.repo, parsed.InReplyTo, parsed.References)
+	if matchErr != nil {
+		if !errors.Is(matchErr, ErrGroupApplicationNotFound) && !errors.Is(matchErr, ErrGroupApplicationReplyAmbiguous) {
+			return matchErr
+		}
+		if errors.Is(matchErr, ErrGroupApplicationReplyAmbiguous) {
+			receipt.Result = "ambiguous"
+		} else {
+			receipt.Result = "unrelated"
+		}
+		return storeReceipt()
+	}
+	receipt.ApplicationID = &match.Application.ID
+	if parsed.Automated {
+		receipt.Result = "automated"
+		return storeReceipt()
+	}
+	if !parsed.HasPlainText {
+		receipt.Result = "unsupported_content"
+		return storeReceipt()
+	}
+	receipt.EncryptedContent, receipt.ContentTruncated, err = w.service.protectInboundCommunication(parsed.Subject, parsed.Reply)
+	if err != nil {
+		return err
+	}
+	result, processErr := w.service.ProcessInboundReply(ctx, match.Application.ID, parsed.From, parsed.ReplyForValidation, &receipt)
+	if processErr != nil && !isPermanentGroupApplicationInboundReplyError(processErr) {
+		return processErr
+	}
+	receipt.Result = result
+	terminalReceiptStored := processErr == nil && (result == "completed" || result == "reply_mismatch")
+	if !terminalReceiptStored {
+		if err = storeReceipt(); err != nil {
+			return err
+		}
+	}
+	w.repliesProcessed.Add(1)
+	return nil
 }
 
 func (w *GroupApplicationWorker) pollIMAP(ctx context.Context, cfg *GroupApplicationIMAPConfig) error {
@@ -978,114 +1149,101 @@ func (w *GroupApplicationWorker) pollIMAP(ctx context.Context, cfg *GroupApplica
 	defer client.Close()
 	w.lastIMAPCheck.Store(time.Now().UTC())
 	fingerprint := groupApplicationMailboxFingerprint(cfg)
-	last, exists, err := w.repo.MaxProcessedUID(ctx, fingerprint, selected.UIDValidity)
+	highest, err := groupApplicationIMAPHighestUID(client, selected)
 	if err != nil {
 		return err
 	}
-	if !exists {
-		start := uint32(0)
-		if selected.UIDNext > 0 {
-			start = uint32(selected.UIDNext) - 1
-		}
-		_, err = w.repo.StoreReceipt(ctx, GroupApplicationReceipt{MailboxFingerprint: fingerprint, UIDValidity: selected.UIDValidity, UID: start, Result: "cursor_start"})
+	last, cursorExists, err := w.repo.MaxProcessedUID(ctx, fingerprint, selected.UIDValidity)
+	if err != nil {
 		return err
 	}
-	if selected.UIDNext == 0 || uint32(selected.UIDNext) <= last+1 {
+	if !cursorExists {
+		last = groupApplicationIMAPBootstrapUID(highest)
+		if _, err = w.repo.StoreReceipt(ctx, GroupApplicationReceipt{
+			MailboxFingerprint: fingerprint,
+			UIDValidity:        selected.UIDValidity,
+			UID:                last,
+			Result:             "cursor_start",
+		}); err != nil {
+			return err
+		}
+	}
+	if highest == 0 || last >= highest {
 		return nil
 	}
-	section := &imap.FetchItemBodySection{Peek: true}
-	set := imap.UIDSet{}
-	set.AddRange(imap.UID(last+1), imap.UID(0))
-	messages, err := client.Fetch(set, &imap.FetchOptions{UID: true, RFC822Size: true, BodySection: []*imap.FetchItemBodySection{section}}).Collect()
-	if err != nil {
-		return fmt.Errorf("fetch IMAP replies: %w", err)
-	}
-	sort.Slice(messages, func(i, j int) bool { return messages[i].UID < messages[j].UID })
-	for _, message := range messages {
-		uid := uint32(message.UID)
-		receipt := GroupApplicationReceipt{MailboxFingerprint: fingerprint, UIDValidity: selected.UIDValidity, UID: uid, Result: "ignored"}
-		if message.RFC822Size > 5<<20 {
-			receipt.Result = "too_large"
-			_, err = w.repo.StoreReceipt(ctx, receipt)
+	processed := 0
+	for batch := 0; batch < groupApplicationIMAPMaxBatchesPerPoll && last < highest && processed < groupApplicationIMAPMaxMessagesPerPoll; batch++ {
+		start := last + 1
+		end := groupApplicationIMAPBatchEnd(start, highest)
+		set := imap.UIDSet{}
+		set.AddRange(imap.UID(start), imap.UID(end))
+		messages, fetchErr := client.Fetch(set, &imap.FetchOptions{UID: true, RFC822Size: true}).Collect()
+		if fetchErr != nil {
+			return fmt.Errorf("fetch IMAP reply sizes: %w", fetchErr)
+		}
+		sort.Slice(messages, func(i, j int) bool { return messages[i].UID < messages[j].UID })
+		remaining := groupApplicationIMAPMaxMessagesPerPoll - processed
+		advanceTo := end
+		if len(messages) > remaining {
+			messages = messages[:remaining]
+			advanceTo = uint32(messages[len(messages)-1].UID)
+		}
+		var lastMessageUID uint32
+		for _, message := range messages {
+			if err := w.processIMAPReply(ctx, client, fingerprint, selected.UIDValidity, message); err != nil {
+				return err
+			}
+			lastMessageUID = uint32(message.UID)
+			processed++
+		}
+		if lastMessageUID < advanceTo {
+			_, err = w.repo.StoreReceipt(ctx, GroupApplicationReceipt{
+				MailboxFingerprint: fingerprint,
+				UIDValidity:        selected.UIDValidity,
+				UID:                advanceTo,
+				Result:             "cursor_advance",
+			})
 			if err != nil {
 				return err
 			}
-			continue
 		}
-		raw := message.FindBodySection(section)
-		parsed, parseErr := parseGroupApplicationReply(raw)
-		if parseErr != nil {
-			receipt.Result = "parse_error"
-			_, err = w.repo.StoreReceipt(ctx, receipt)
-			if err != nil {
-				return err
-			}
-			continue
-		}
-		receipt.MessageID = groupApplicationReceiptMetadata(parsed.MessageID, groupApplicationMaxStoredMessageIDRunes)
-		receipt.FromAddress = groupApplicationReceiptMetadata(parsed.From, groupApplicationMaxStoredFromAddressRunes)
-		receipt.InReplyTo = groupApplicationReceiptMetadata(parsed.InReplyTo, groupApplicationMaxStoredMessageIDRunes)
-		receipt.References = groupApplicationReceiptMetadata(parsed.References, groupApplicationMaxStoredReferencesRunes)
-		receipt.ReplySHA256 = GroupApplicationReplyDigest(parsed.Reply)
-		match, matchErr := findGroupApplicationApprovalByReplyMessageIDs(ctx, w.repo, parsed.InReplyTo, parsed.References)
-		if matchErr != nil {
-			if !errors.Is(matchErr, ErrGroupApplicationNotFound) && !errors.Is(matchErr, ErrGroupApplicationReplyAmbiguous) {
-				return matchErr
-			}
-			if errors.Is(matchErr, ErrGroupApplicationReplyAmbiguous) {
-				receipt.Result = "ambiguous"
-			} else {
-				receipt.Result = "unrelated"
-			}
-			_, err = w.repo.StoreReceipt(ctx, receipt)
-			if err != nil {
-				return err
-			}
-			continue
-		}
-		receipt.ApplicationID = &match.Application.ID
-		if !parsed.HasPlainText {
-			receipt.Result = "unsupported_content"
-			if _, err = w.repo.StoreReceipt(ctx, receipt); err != nil {
-				return err
-			}
-			continue
-		}
-		receipt.EncryptedContent, receipt.ContentTruncated, err = w.service.protectInboundCommunication(parsed.Subject, parsed.Reply)
-		if err != nil {
-			return err
-		}
-		result, processErr := w.service.ProcessInboundReply(ctx, match.Application.ID, parsed.From, parsed.Reply)
-		if processErr != nil && !errors.Is(processErr, ErrGroupApplicationState) {
-			return processErr
-		}
-		receipt.Result = result
-		if _, err = w.repo.StoreReceipt(ctx, receipt); err != nil {
-			return err
-		}
-		w.repliesProcessed.Add(1)
+		last = advanceTo
 	}
 	return nil
 }
 
 func findGroupApplicationApprovalByReplyMessageIDs(ctx context.Context, repo GroupApplicationRepository, inReplyTo, references string) (*GroupApplicationApprovalMatch, error) {
-	messageIDs := messageIDCandidates(inReplyTo, references)
-	seen := make(map[string]struct{}, len(messageIDs))
-	for _, messageID := range messageIDs {
+	exactMessageIDs := messageIDCandidates(inReplyTo, references)
+	seen := make(map[string]struct{}, len(exactMessageIDs))
+	for _, messageID := range exactMessageIDs {
 		seen[messageID] = struct{}{}
 	}
+	fallbackMessageIDs := make([]string, 0)
 	for _, messageID := range embeddedGroupApplicationApprovalMessageIDCandidates(inReplyTo, references) {
 		if _, exists := seen[messageID]; !exists {
-			messageIDs = append(messageIDs, messageID)
+			fallbackMessageIDs = append(fallbackMessageIDs, messageID)
 			seen[messageID] = struct{}{}
 		}
 	}
-	return repo.FindApprovalByMessageIDs(ctx, messageIDs)
+	return repo.FindApprovalByMessageIDs(ctx, exactMessageIDs, fallbackMessageIDs)
 }
 
 type parsedGroupApplicationReply struct {
-	MessageID, From, InReplyTo, References, Subject, Reply string
-	HasPlainText                                           bool
+	MessageID, From, InReplyTo, References, Subject, Reply, ReplyForValidation string
+	HasPlainText, Automated                                                    bool
+}
+
+func isAutomatedGroupApplicationReply(header *mailmessage.Header) bool {
+	autoSubmitted := strings.ToLower(strings.TrimSpace(header.Get("Auto-Submitted")))
+	if autoSubmitted != "" && autoSubmitted != "no" {
+		return true
+	}
+	precedence := strings.ToLower(strings.TrimSpace(header.Get("Precedence")))
+	switch precedence {
+	case "bulk", "junk", "list", "auto_reply":
+		return true
+	}
+	return strings.TrimSpace(header.Get("X-Autoreply")) != "" || strings.TrimSpace(header.Get("X-Autorespond")) != ""
 }
 
 func parseGroupApplicationReply(raw []byte) (parsedGroupApplicationReply, error) {
@@ -1094,11 +1252,17 @@ func parseGroupApplicationReply(raw []byte) (parsedGroupApplicationReply, error)
 		return parsedGroupApplicationReply{}, err
 	}
 	defer reader.Close()
+	rawSubject := strings.TrimSpace(reader.Header.Get("Subject"))
+	subject := rawSubject
+	if decoded, decodeErr := reader.Header.Subject(); decodeErr == nil {
+		subject = strings.TrimSpace(decoded)
+	}
 	result := parsedGroupApplicationReply{
 		MessageID:  strings.TrimSpace(reader.Header.Get("Message-ID")),
 		InReplyTo:  strings.TrimSpace(reader.Header.Get("In-Reply-To")),
 		References: strings.TrimSpace(reader.Header.Get("References")),
-		Subject:    strings.TrimSpace(reader.Header.Get("Subject")),
+		Subject:    subject,
+		Automated:  isAutomatedGroupApplicationReply(&reader.Header),
 	}
 	addresses, err := reader.Header.AddressList("From")
 	if err == nil && len(addresses) > 0 {
@@ -1120,15 +1284,33 @@ func parseGroupApplicationReply(raw []byte) (parsedGroupApplicationReply, error)
 		if !strings.EqualFold(contentType, "text/plain") {
 			continue
 		}
-		result.HasPlainText = true
 		body, readErr := io.ReadAll(io.LimitReader(part.Body, 2<<20))
 		if readErr != nil {
 			return parsedGroupApplicationReply{}, readErr
 		}
+		if strings.TrimSpace(string(body)) == "" {
+			continue
+		}
+		result.HasPlainText = true
 		result.Reply = extractNewestGroupApplicationReply(string(body))
+		result.ReplyForValidation = groupApplicationReplyForValidation(result.Reply)
 		break
 	}
 	return result, nil
+}
+
+func groupApplicationReplyForValidation(value string) string {
+	value = NormalizeGroupApplicationReply(value)
+	lines := strings.Split(value, "\n")
+	if len(lines) <= 1 {
+		return value
+	}
+	signatureDelimiter := strings.TrimRight(lines[1], " \t") == "--" &&
+		!strings.HasPrefix(lines[1], " ") && !strings.HasPrefix(lines[1], "\t")
+	if strings.TrimSpace(lines[1]) == "" || signatureDelimiter {
+		return lines[0]
+	}
+	return value
 }
 
 func extractNewestGroupApplicationReply(value string) string {

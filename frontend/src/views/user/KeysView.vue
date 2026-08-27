@@ -2,89 +2,94 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="flex flex-col gap-3">
-          <div class="flex flex-wrap items-center gap-3">
-            <SearchInput
-              v-model="filterSearch"
-              :placeholder="t('keys.searchPlaceholder')"
-              class="w-full sm:w-64"
-              @search="onFilterChange"
-            />
-            <Select
-              :model-value="filterGroupId"
-              class="w-40"
-              :options="groupFilterOptions"
-              @update:model-value="onGroupFilterChange"
-            />
-            <Select
-              :model-value="filterStatus"
-              class="w-40"
-              :options="statusFilterOptions"
-              @update:model-value="onStatusFilterChange"
-            />
-          </div>
-          <EndpointPopover
-            v-if="publicSettings?.api_base_url || (publicSettings?.custom_endpoints?.length ?? 0) > 0"
-            :api-base-url="publicSettings?.api_base_url || ''"
-            :custom-endpoints="publicSettings?.custom_endpoints || []"
-          />
-        </div>
-      </template>
-
-      <template #actions>
-        <div class="flex justify-end gap-3">
-          <button
-            v-if="groupApplicationSummary && (groupApplicationSummary.available_count > 0 || groupApplicationSummary.has_history)"
-            class="btn btn-secondary"
-            @click="showGroupApplicationDialog = true"
-          >
-            <Icon name="mail" size="md" class="mr-2" />
-            {{ t('groupApplications.apply') }}
-          </button>
-          <button
-            @click="loadApiKeys"
-            :disabled="loading"
-            class="btn btn-secondary"
-            :title="t('common.refresh')"
-          >
-            <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-          </button>
-          <div class="relative" ref="columnDropdownRef">
-            <button
-              @click="showColumnDropdown = !showColumnDropdown"
-              class="btn btn-secondary px-2 md:px-3"
-              :title="t('keys.columnSettings')"
-            >
-              <svg class="h-4 w-4 md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
-              </svg>
-              <span class="hidden md:inline">{{ t('keys.columnSettings') }}</span>
-            </button>
-            <div
-              v-if="showColumnDropdown"
-              class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
-            >
-              <button
-                v-for="col in toggleableColumns"
-                :key="col.key"
-                @click="toggleColumn(col.key)"
-                class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-              >
-                <span>{{ col.label }}</span>
-                <Icon
-                  v-if="isColumnVisible(col.key)"
-                  name="check"
-                  size="sm"
-                  class="text-primary-500"
-                  :stroke-width="2"
-                />
-              </button>
+        <div
+          class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between"
+          data-test="keys-toolbar"
+        >
+          <div class="flex min-w-0 flex-col gap-3">
+            <div class="flex flex-wrap items-center gap-3">
+              <SearchInput
+                v-model="filterSearch"
+                :placeholder="t('keys.searchPlaceholder')"
+                class="w-full sm:w-64"
+                @search="onFilterChange"
+              />
+              <Select
+                :model-value="filterGroupId"
+                class="w-full sm:w-40"
+                :options="groupFilterOptions"
+                @update:model-value="onGroupFilterChange"
+              />
+              <Select
+                :model-value="filterStatus"
+                class="w-full sm:w-40"
+                :options="statusFilterOptions"
+                @update:model-value="onStatusFilterChange"
+              />
             </div>
+            <EndpointPopover
+              v-if="publicSettings?.api_base_url || (publicSettings?.custom_endpoints?.length ?? 0) > 0"
+              :api-base-url="publicSettings?.api_base_url || ''"
+              :custom-endpoints="publicSettings?.custom_endpoints || []"
+            />
           </div>
-          <button @click="showCreateModal = true" class="btn btn-primary" data-tour="keys-create-btn">
-            <Icon name="plus" size="md" class="mr-2" />
-            {{ t('keys.createKey') }}
-          </button>
+          <div
+            class="flex flex-wrap justify-start gap-3 xl:flex-none xl:justify-end"
+            data-test="keys-toolbar-actions"
+          >
+            <button
+              v-if="groupApplicationSummary && (groupApplicationSummary.available_count > 0 || groupApplicationSummary.has_history)"
+              class="btn btn-secondary"
+              @click="showGroupApplicationDialog = true"
+            >
+              <Icon name="mail" size="md" class="mr-2" />
+              {{ t('groupApplications.apply') }}
+            </button>
+            <button
+              @click="loadApiKeys"
+              :disabled="loading"
+              class="btn btn-secondary"
+              :title="t('common.refresh')"
+            >
+              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+            </button>
+            <div class="relative" ref="columnDropdownRef">
+              <button
+                @click="showColumnDropdown = !showColumnDropdown"
+                class="btn btn-secondary px-2 md:px-3"
+                :title="t('keys.columnSettings')"
+              >
+                <svg class="h-4 w-4 md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
+                </svg>
+                <span class="hidden md:inline">{{ t('keys.columnSettings') }}</span>
+              </button>
+              <div
+                v-if="showColumnDropdown"
+                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+              >
+                <button
+                  v-for="col in toggleableColumns"
+                  :key="col.key"
+                  @click="toggleColumn(col.key)"
+                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                >
+                  <span>{{ col.label }}</span>
+                  <Icon
+                    v-if="isColumnVisible(col.key)"
+                    name="check"
+                    size="sm"
+                    class="text-primary-500"
+                    :stroke-width="2"
+                  />
+                </button>
+              </div>
+            </div>
+            <button @click="showCreateModal = true" class="btn btn-primary" data-tour="keys-create-btn">
+              <Icon name="plus" size="md" class="mr-2" />
+              {{ t('keys.createKey') }}
+            </button>
+          </div>
         </div>
       </template>
 
@@ -378,53 +383,61 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <div
+              class="grid w-full grid-cols-2 gap-1 sm:grid-cols-3 md:flex md:w-auto md:flex-nowrap md:items-center md:justify-end"
+              data-test="key-row-actions"
+            >
               <!-- Use Key Button -->
               <button
                 @click="openUseKeyModal(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400"
+                class="flex min-h-11 min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 md:h-8 md:min-h-0 md:w-8 md:flex-none md:p-1.5 dark:hover:bg-green-900/20 dark:hover:text-green-400"
+                :title="t('keys.useKey')"
               >
                 <Icon name="terminal" size="sm" />
-                <span class="text-xs">{{ t('keys.useKey') }}</span>
+                <span class="max-w-full truncate text-xs md:sr-only">{{ t('keys.useKey') }}</span>
               </button>
               <!-- Import to CC Switch Button -->
               <button
                 v-if="!publicSettings?.hide_ccs_import_button"
                 @click="importToCcswitch(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
+                class="flex min-h-11 min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 md:h-8 md:min-h-0 md:w-8 md:flex-none md:p-1.5 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
+                :title="t('keys.importToCcSwitch')"
               >
                 <Icon name="upload" size="sm" />
-                <span class="text-xs">{{ t('keys.importToCcSwitch') }}</span>
+                <span class="max-w-full truncate text-xs md:sr-only">{{ t('keys.importToCcSwitch') }}</span>
               </button>
               <!-- Toggle Status Button -->
               <button
                 @click="toggleKeyStatus(row)"
                 :class="[
-                  'flex flex-col items-center gap-0.5 rounded-lg p-1.5 transition-colors',
+                  'flex min-h-11 min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1 transition-colors md:h-8 md:min-h-0 md:w-8 md:flex-none md:p-1.5',
                   row.status === 'active'
                     ? 'text-gray-500 hover:bg-yellow-50 hover:text-yellow-600 dark:hover:bg-yellow-900/20 dark:hover:text-yellow-400'
                     : 'text-gray-500 hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400'
                 ]"
+                :title="row.status === 'active' ? t('keys.disable') : t('keys.enable')"
               >
                 <Icon v-if="row.status === 'active'" name="ban" size="sm" />
                 <Icon v-else name="checkCircle" size="sm" />
-                <span class="text-xs">{{ row.status === 'active' ? t('keys.disable') : t('keys.enable') }}</span>
+                <span class="max-w-full truncate text-xs md:sr-only">{{ row.status === 'active' ? t('keys.disable') : t('keys.enable') }}</span>
               </button>
               <!-- Edit Button -->
               <button
                 @click="editKey(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="flex min-h-11 min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 md:h-8 md:min-h-0 md:w-8 md:flex-none md:p-1.5 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                :title="t('common.edit')"
               >
                 <Icon name="edit" size="sm" />
-                <span class="text-xs">{{ t('common.edit') }}</span>
+                <span class="max-w-full truncate text-xs md:sr-only">{{ t('common.edit') }}</span>
               </button>
               <!-- Delete Button -->
               <button
                 @click="confirmDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                class="flex min-h-11 min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 md:h-8 md:min-h-0 md:w-8 md:flex-none md:p-1.5 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                :title="t('common.delete')"
               >
                 <Icon name="trash" size="sm" />
-                <span class="text-xs">{{ t('common.delete') }}</span>
+                <span class="max-w-full truncate text-xs md:sr-only">{{ t('common.delete') }}</span>
               </button>
             </div>
           </template>
@@ -1202,7 +1215,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'last_used_at', label: t('keys.lastUsedAt'), sortable: true },
   { key: 'last_used_ip', label: t('keys.lastUsedIP'), sortable: false },
   { key: 'created_at', label: t('keys.created'), sortable: true },
-  { key: 'actions', label: t('common.actions'), sortable: false }
+  { key: 'actions', label: t('common.actions'), sortable: false, class: 'w-px' }
 ])
 
 const ALWAYS_VISIBLE_COLUMNS = new Set(['name', 'actions'])

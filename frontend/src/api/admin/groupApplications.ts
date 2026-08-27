@@ -87,12 +87,14 @@ export interface GroupApplicationListResult {
 }
 
 export type GroupApplicationTLSMode = "implicit" | "starttls";
+export type GroupApplicationPasswordAction = "keep" | "replace" | "clear";
 
 export interface GroupApplicationSMTPConfig {
   host: string;
   port: number;
   username: string;
   password?: string;
+  password_action?: GroupApplicationPasswordAction;
   password_configured: boolean;
   from_address: string;
   from_name: string;
@@ -104,6 +106,7 @@ export interface GroupApplicationIMAPConfig {
   port: number;
   username: string;
   password?: string;
+  password_action?: GroupApplicationPasswordAction;
   password_configured: boolean;
   use_smtp_credentials: boolean;
   mailbox: string;
@@ -185,7 +188,7 @@ export function defaultGroupApplicationTemplates(): GroupApplicationTemplateSet 
           `<p style="margin:0 0 14px;font-size:16px;line-height:1.8;">您好，</p>
               <p style="margin:0 0 22px;font-size:16px;line-height:1.8;">您的 <strong>{{group_name}}</strong> 分组申请已获批准。正式开放访问权限前，请完成以下确认步骤。</p>
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;">
-                <tr><td style="padding:18px 20px;color:#065f46;font-size:14px;line-height:1.8;"><strong>1.</strong> 阅读本邮件附件 <strong>{{attachment_name}}</strong><br><strong>2.</strong> 使用当前邮箱直接回复本邮件<br><strong>3.</strong> 回复正文只能包含下方确认词，不得附加签名或其他文字</td></tr>
+                <tr><td style="padding:18px 20px;color:#065f46;font-size:14px;line-height:1.8;"><strong>1.</strong> 阅读本邮件附件 <strong>{{attachment_name}}</strong><br><strong>2.</strong> 使用当前邮箱直接回复本邮件<br><strong>3.</strong> 将下方确认词单独放在回复正文第一段；后续仅可保留邮箱签名，不得添加其他正文</td></tr>
               </table>
               <p style="margin:24px 0 10px;color:#4b5563;font-size:13px;font-weight:600;">严格回复词</p>
               <div style="padding:16px 20px;background:#111827;color:#ffffff;border-radius:8px;font-family:ui-monospace,SFMono-Regular,Consolas,'Liberation Mono',monospace;font-size:18px;font-weight:700;line-height:1.5;text-align:center;overflow-wrap:anywhere;">{{reply_phrase}}</div>
@@ -202,7 +205,7 @@ export function defaultGroupApplicationTemplates(): GroupApplicationTemplateSet 
           `<p style="margin:0 0 14px;font-size:16px;line-height:1.8;">Hello,</p>
               <p style="margin:0 0 22px;font-size:16px;line-height:1.8;">Your application for <strong>{{group_name}}</strong> has been approved. Complete the confirmation below before access is enabled.</p>
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;">
-                <tr><td style="padding:18px 20px;color:#065f46;font-size:14px;line-height:1.8;"><strong>1.</strong> Read the attached agreement <strong>{{attachment_name}}</strong><br><strong>2.</strong> Reply directly from this email address<br><strong>3.</strong> Put only the confirmation phrase below in the reply body, with no signature or other text</td></tr>
+                <tr><td style="padding:18px 20px;color:#065f46;font-size:14px;line-height:1.8;"><strong>1.</strong> Read the attached agreement <strong>{{attachment_name}}</strong><br><strong>2.</strong> Reply directly from this email address<br><strong>3.</strong> Put the confirmation phrase below by itself in the first paragraph; only your email signature may follow, with no other message text</td></tr>
               </table>
               <p style="margin:24px 0 10px;color:#4b5563;font-size:13px;font-weight:600;">Exact confirmation phrase</p>
               <div style="padding:16px 20px;background:#111827;color:#ffffff;border-radius:8px;font-family:ui-monospace,SFMono-Regular,Consolas,'Liberation Mono',monospace;font-size:18px;font-weight:700;line-height:1.5;text-align:center;overflow-wrap:anywhere;">{{reply_phrase}}</div>
@@ -278,7 +281,7 @@ export function defaultGroupApplicationTemplates(): GroupApplicationTemplateSet 
           "回复验证未通过",
           `<p style="margin:0 0 18px;font-size:16px;line-height:1.8;">系统未能验证您对 <strong>{{group_name}}</strong> 分组申请的邮件回复。</p>
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;">
-                <tr><td style="padding:20px;color:#92400e;font-size:15px;line-height:1.8;">回复正文与要求的严格确认词不完全一致，本次申请已自动拒绝。常见原因包括额外签名、空格或其他文字。</td></tr>
+                <tr><td style="padding:20px;color:#92400e;font-size:15px;line-height:1.8;">回复首段未能与要求的严格确认词完全一致，本次申请已自动拒绝。常见原因包括确认词未独占第一段、空格不一致，或签名之外还包含其他正文。</td></tr>
               </table>
               <p style="margin:22px 0 0;color:#6b7280;font-size:13px;line-height:1.7;">申请编号：#{{application_id}}。您可以重新提交申请并再次完成邮件确认。</p>`,
           "此邮件由 {{site_name}} 的分组申请系统自动发送。",
@@ -292,7 +295,7 @@ export function defaultGroupApplicationTemplates(): GroupApplicationTemplateSet 
           "Reply verification failed",
           `<p style="margin:0 0 18px;font-size:16px;line-height:1.8;">We could not verify your email reply for the <strong>{{group_name}}</strong> group application.</p>
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:separate;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;">
-                <tr><td style="padding:20px;color:#92400e;font-size:15px;line-height:1.8;">The reply body did not exactly match the required phrase, so this application was automatically declined. Common causes include signatures, spaces, or extra text.</td></tr>
+                <tr><td style="padding:20px;color:#92400e;font-size:15px;line-height:1.8;">The first paragraph did not exactly match the required phrase, so this application was automatically declined. Common causes include putting other text in the first paragraph, whitespace differences, or message text beyond the email signature.</td></tr>
               </table>
               <p style="margin:22px 0 0;color:#6b7280;font-size:13px;line-height:1.7;">Application #{{application_id}}. You may submit a new application and complete confirmation again.</p>`,
           "This message was sent automatically by the {{site_name}} group application system.",

@@ -1,6 +1,6 @@
 <template>
   <section
-    class="border-t border-gray-200 pt-4 dark:border-dark-600"
+    class="min-w-0 border-t border-gray-200 pt-4 dark:border-dark-600"
     aria-labelledby="group-application-communications-heading"
   >
     <div class="mb-3 flex items-center justify-between gap-3">
@@ -47,12 +47,14 @@
       <li
         v-for="communication in communications"
         :key="`${communication.direction}-${communication.id}`"
-        class="py-4 first:pt-1"
+        class="min-w-0 py-4 first:pt-1"
       >
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div class="flex min-w-0 items-center gap-2">
+        <div
+          class="flex min-w-0 flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div class="flex min-w-0 max-w-full items-center gap-2">
             <span
-              class="rounded px-2 py-1 text-xs font-medium"
+              class="shrink-0 rounded px-2 py-1 text-xs font-medium"
               :class="
                 communication.direction === 'outbound'
                   ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
@@ -65,17 +67,22 @@
                   : t("admin.groupApplications.inboundEmail")
               }}
             </span>
-            <span class="truncate text-xs font-medium text-gray-600 dark:text-dark-300">
+            <span
+              class="min-w-0 truncate text-xs font-medium text-gray-600 dark:text-dark-300"
+            >
               {{ communicationLabel(communication) }}
             </span>
           </div>
-          <time class="text-xs text-gray-500" :datetime="communication.occurred_at">
+          <time
+            class="shrink-0 text-xs text-gray-500"
+            :datetime="communication.occurred_at"
+          >
             {{ formatDate(communication.occurred_at) }}
           </time>
         </div>
 
-        <div class="mt-3 space-y-2 text-sm">
-          <div class="text-xs text-gray-500">
+        <div class="mt-3 min-w-0 space-y-2 text-sm">
+          <div class="min-w-0 break-all text-xs text-gray-500">
             <span v-if="communication.direction === 'outbound'">
               {{ t("admin.groupApplications.to") }}:
               {{ communication.to_address }}
@@ -85,14 +92,20 @@
               {{ communication.from_address }}
             </span>
           </div>
-          <h5 v-if="communication.subject" class="font-medium text-gray-900 dark:text-white">
+          <h5
+            v-if="communication.subject"
+            class="break-all font-medium text-gray-900 dark:text-white"
+          >
             {{ communication.subject }}
           </h5>
 
-          <div
+          <iframe
             v-if="communication.direction === 'outbound' && communication.html_body"
-            class="max-h-64 overflow-auto border-l-2 border-gray-200 pl-3 text-sm text-gray-700 dark:border-dark-600 dark:text-dark-200"
-            v-html="sanitizeEmailHTML(communication.html_body)"
+            class="h-80 w-full rounded border border-gray-200 bg-white dark:border-dark-600"
+            :srcdoc="sanitizeEmailHTML(communication.html_body)"
+            sandbox=""
+            referrerpolicy="no-referrer"
+            :title="t('admin.groupApplications.emailPreview')"
           />
           <template v-else-if="communication.direction === 'inbound'">
             <p
@@ -188,23 +201,67 @@ function communicationLabel(communication: GroupApplicationCommunication) {
 }
 
 function sanitizeEmailHTML(value: string) {
-  return DOMPurify.sanitize(value, {
+  const sanitized = DOMPurify.sanitize(value, {
     USE_PROFILES: { html: true },
+    WHOLE_DOCUMENT: true,
     FORBID_TAGS: [
-      "style",
+      "script",
       "form",
+      "input",
+      "button",
+      "textarea",
+      "select",
+      "option",
       "iframe",
       "object",
       "embed",
-      "img",
       "video",
       "audio",
       "source",
+      "track",
       "link",
+      "base",
       "meta",
     ],
-    FORBID_ATTR: ["style"],
+    FORBID_ATTR: [
+      "action",
+      "background",
+      "download",
+      "formaction",
+      "href",
+      "ping",
+      "poster",
+      "srcset",
+      "target",
+      "xlink:href",
+    ],
   });
+
+  const previewDocument = new DOMParser().parseFromString(sanitized, "text/html");
+  previewDocument.querySelectorAll("img[src]").forEach((image) => {
+    const source = image.getAttribute("src")?.trim() ?? "";
+    if (!/^data:image\/(?:avif|gif|jpe?g|png|webp);base64,/i.test(source)) {
+      image.removeAttribute("src");
+    }
+  });
+
+  const contentSecurityPolicy = previewDocument.createElement("meta");
+  contentSecurityPolicy.httpEquiv = "Content-Security-Policy";
+  contentSecurityPolicy.content = [
+    "default-src 'none'",
+    "style-src 'unsafe-inline'",
+    "img-src data:",
+    "font-src data:",
+    "media-src 'none'",
+    "connect-src 'none'",
+    "frame-src 'none'",
+    "object-src 'none'",
+    "form-action 'none'",
+    "base-uri 'none'",
+  ].join("; ");
+  previewDocument.head.prepend(contentSecurityPolicy);
+
+  return `<!doctype html>\n${previewDocument.documentElement.outerHTML}`;
 }
 
 function formatDate(value: string) {

@@ -184,26 +184,70 @@ func (r *groupApplicationRepository) GetAttachment(ctx context.Context, id int64
 }
 
 func (r *groupApplicationRepository) CreateApplication(ctx context.Context, application *service.GroupApplication) (*service.GroupApplication, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var lockedUserID int64
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, application.UserID).Scan(&lockedUserID); errors.Is(err, sql.ErrNoRows) {
+		return nil, service.ErrGroupApplicationUnavailable
+	} else if err != nil {
+		return nil, err
+	}
+
 	var id int64
-	err := r.db.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		INSERT INTO group_applications(
 			user_id,group_id,contact_email,reason,locale,status,
 			reply_phrase_snapshot,templates_snapshot,attachment_id)
 		SELECT $1,p.group_id,$3,$4,$5,'pending',p.reply_phrase,p.templates,p.attachment_id
-		FROM group_application_policies p
-		JOIN groups g ON g.id=p.group_id
-		WHERE p.group_id=$2 AND p.enabled=TRUE AND p.attachment_id IS NOT NULL AND p.reply_phrase<>''
-		  AND g.deleted_at IS NULL AND g.status='active' AND g.is_exclusive=TRUE AND g.subscription_type='standard'
-		RETURNING id
-	`, application.UserID, application.GroupID, application.ContactEmail, application.Reason, application.Locale).Scan(&id)
+			FROM group_application_policies p
+			JOIN groups g ON g.id=p.group_id
+			WHERE p.group_id=$2 AND p.enabled=TRUE AND p.attachment_id IS NOT NULL AND p.reply_phrase<>''
+			  AND g.deleted_at IS NULL AND g.status='active' AND g.is_exclusive=TRUE AND g.subscription_type='standard'
+			  AND NOT EXISTS (
+				SELECT 1 FROM group_applications existing
+				WHERE existing.user_id=$1 AND existing.group_id=$2
+				  AND existing.status IN ('pending','awaiting_reply','completed')
+			  )
+			  AND NOT EXISTS (
+				SELECT 1 FROM user_allowed_groups allowed
+				WHERE allowed.user_id=$1 AND allowed.group_id=$2
+			  )
+			RETURNING id
+		`, application.UserID, application.GroupID, application.ContactEmail, application.Reason, application.Locale).Scan(&id)
 	if err != nil {
 		var pqErr *pq.Error
 		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
 			return nil, service.ErrGroupApplicationConflict
 		}
 		if errors.Is(err, sql.ErrNoRows) {
+			var conflict bool
+			conflictErr := tx.QueryRowContext(ctx, `
+				SELECT
+					EXISTS(
+						SELECT 1 FROM group_applications
+						WHERE user_id=$1 AND group_id=$2
+						  AND status IN ('pending','awaiting_reply','completed')
+					)
+					OR EXISTS(
+						SELECT 1 FROM user_allowed_groups
+						WHERE user_id=$1 AND group_id=$2
+					)
+			`, application.UserID, application.GroupID).Scan(&conflict)
+			if conflictErr != nil {
+				return nil, conflictErr
+			}
+			if conflict {
+				return nil, service.ErrGroupApplicationConflict
+			}
 			return nil, service.ErrGroupApplicationUnavailable
 		}
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return r.GetUserApplication(ctx, application.UserID, id)
@@ -450,7 +494,7 @@ func insertGroupApplicationMail(ctx context.Context, tx *sql.Tx, applicationID i
 	return err
 }
 
-func (r *groupApplicationRepository) transition(ctx context.Context, applicationID int64, allowed []string, update string, args []any, mail service.GroupApplicationMailJob, sideEffect func(*sql.Tx, int64, int64) error) (*service.GroupApplication, error) {
+func (r *groupApplicationRepository) transition(ctx context.Context, applicationID int64, allowed []string, update string, args []any, mail service.GroupApplicationMailJob, terminal bool, receipt *service.GroupApplicationReceipt, sideEffect func(*sql.Tx, int64, int64, int64) error) (*service.GroupApplication, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -474,8 +518,13 @@ func (r *groupApplicationRepository) transition(ctx context.Context, application
 	if !valid {
 		return nil, service.ErrGroupApplicationState
 	}
+	if terminal {
+		if err := quiesceGroupApplicationMail(ctx, tx, applicationID); err != nil {
+			return nil, err
+		}
+	}
 	if sideEffect != nil {
-		if err := sideEffect(tx, userID, groupID); err != nil {
+		if err := sideEffect(tx, applicationID, userID, groupID); err != nil {
 			return nil, err
 		}
 	}
@@ -487,22 +536,68 @@ func (r *groupApplicationRepository) transition(ctx context.Context, application
 	if err := insertGroupApplicationMail(ctx, tx, applicationID, mail); err != nil {
 		return nil, err
 	}
+	if receipt != nil {
+		if _, err := storeGroupApplicationReceipt(ctx, tx, *receipt); err != nil {
+			return nil, err
+		}
+	}
+	application, err := scanGroupApplication(tx.QueryRowContext(ctx, applicationSelect+` WHERE a.id=$1`, applicationID))
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return r.GetApplication(ctx, applicationID)
+	return application, nil
+}
+
+func quiesceGroupApplicationMail(ctx context.Context, tx *sql.Tx, applicationID int64) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE group_application_mail_outbox
+		SET status='cancelled',claimed_at=NULL,claimed_by=NULL,claim_expires_at=NULL,
+		    last_error='application status changed',updated_at=NOW()
+		WHERE application_id=$1
+		  AND (
+			status='pending'
+			OR (
+				status='processing'
+				AND COALESCE(claim_expires_at,claimed_at+INTERVAL '1 minute','-infinity'::timestamptz)<=NOW()
+			)
+		  )
+	`, applicationID)
+	if err != nil {
+		return err
+	}
+
+	var activeID int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT id
+		FROM group_application_mail_outbox
+		WHERE application_id=$1 AND status='processing'
+		  AND COALESCE(claim_expires_at,claimed_at+INTERVAL '1 minute','-infinity'::timestamptz)>NOW()
+		ORDER BY id
+		LIMIT 1
+		FOR UPDATE
+	`, applicationID).Scan(&activeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return service.ErrGroupApplicationMailDeliveryInProgress
 }
 
 func (r *groupApplicationRepository) Approve(ctx context.Context, applicationID, adminID int64, mail service.GroupApplicationMailJob) (*service.GroupApplication, error) {
-	return r.transition(ctx, applicationID, []string{service.GroupApplicationStatusPending}, `status='awaiting_reply',reviewed_by=$2,reviewed_at=NOW(),decision_reason=NULL`, []any{adminID}, mail, nil)
+	return r.transition(ctx, applicationID, []string{service.GroupApplicationStatusPending}, `status='awaiting_reply',reviewed_by=$2,reviewed_at=NOW(),decision_reason=NULL`, []any{adminID}, mail, false, nil, nil)
 }
 
 func (r *groupApplicationRepository) Reject(ctx context.Context, applicationID, adminID int64, reason string, mail service.GroupApplicationMailJob) (*service.GroupApplication, error) {
-	return r.transition(ctx, applicationID, []string{service.GroupApplicationStatusPending, service.GroupApplicationStatusAwaitingReply}, `status='rejected',reviewed_by=$2,reviewed_at=NOW(),decision_reason=$3`, []any{adminID, reason}, mail, nil)
+	return r.transition(ctx, applicationID, []string{service.GroupApplicationStatusPending, service.GroupApplicationStatusAwaitingReply}, `status='rejected',reviewed_by=$2,reviewed_at=NOW(),decision_reason=$3`, []any{adminID, reason}, mail, true, nil, nil)
 }
 
-func (r *groupApplicationRepository) CompleteFromReply(ctx context.Context, applicationID int64, mail service.GroupApplicationMailJob) (*service.GroupApplication, error) {
-	return r.transition(ctx, applicationID, []string{service.GroupApplicationStatusAwaitingReply}, `status='completed',completed_at=NOW(),decision_reason=NULL`, nil, mail, func(tx *sql.Tx, userID, groupID int64) error {
+func (r *groupApplicationRepository) CompleteFromReply(ctx context.Context, applicationID int64, mail service.GroupApplicationMailJob, receipt *service.GroupApplicationReceipt) (*service.GroupApplication, error) {
+	return r.transition(ctx, applicationID, []string{service.GroupApplicationStatusAwaitingReply}, `status='completed',completed_at=NOW(),decision_reason=NULL`, nil, mail, true, receipt, func(tx *sql.Tx, applicationID, userID, groupID int64) error {
 		var eligible bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM groups WHERE id=$1 AND deleted_at IS NULL AND status='active' AND is_exclusive=TRUE AND subscription_type='standard')`, groupID).Scan(&eligible); err != nil {
 			return err
@@ -510,19 +605,51 @@ func (r *groupApplicationRepository) CompleteFromReply(ctx context.Context, appl
 		if !eligible {
 			return service.ErrGroupApplicationUnavailable
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO user_allowed_groups(user_id,group_id,created_at) VALUES($1,$2,NOW()) ON CONFLICT(user_id,group_id) DO NOTHING`, userID, groupID)
+		result, err := tx.ExecContext(ctx, `INSERT INTO user_allowed_groups(user_id,group_id,created_at) VALUES($1,$2,NOW()) ON CONFLICT(user_id,group_id) DO NOTHING`, userID, groupID)
+		if err != nil {
+			return err
+		}
+		inserted, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE group_applications SET access_grant_owned=$2 WHERE id=$1`, applicationID, inserted == 1)
 		return err
 	})
 }
 
-func (r *groupApplicationRepository) RejectReplyMismatch(ctx context.Context, applicationID int64, mail service.GroupApplicationMailJob) (*service.GroupApplication, error) {
-	return r.transition(ctx, applicationID, []string{service.GroupApplicationStatusAwaitingReply}, `status='rejected',reviewed_at=COALESCE(reviewed_at,NOW()),decision_reason='reply_mismatch'`, nil, mail, nil)
+func (r *groupApplicationRepository) RejectReplyMismatch(ctx context.Context, applicationID int64, mail service.GroupApplicationMailJob, receipt *service.GroupApplicationReceipt) (*service.GroupApplication, error) {
+	return r.transition(ctx, applicationID, []string{service.GroupApplicationStatusAwaitingReply}, `status='rejected',reviewed_at=COALESCE(reviewed_at,NOW()),decision_reason='reply_mismatch'`, nil, mail, true, receipt, nil)
 }
 
 func (r *groupApplicationRepository) Revoke(ctx context.Context, applicationID, adminID int64, reason string, mail service.GroupApplicationMailJob) (*service.GroupApplication, error) {
-	return r.transition(ctx, applicationID, []string{service.GroupApplicationStatusCompleted}, `status='revoked',revoked_by=$2,revoked_at=NOW(),decision_reason=$3`, []any{adminID, reason}, mail, func(tx *sql.Tx, userID, groupID int64) error {
-		_, err := tx.ExecContext(ctx, `DELETE FROM user_allowed_groups WHERE user_id=$1 AND group_id=$2`, userID, groupID)
-		return err
+	return r.transition(ctx, applicationID, []string{service.GroupApplicationStatusCompleted}, `status='revoked',revoked_by=$2,revoked_at=NOW(),decision_reason=$3,access_grant_owned=FALSE`, []any{adminID, reason}, mail, true, nil, func(tx *sql.Tx, applicationID, userID, groupID int64) error {
+		result, err := tx.ExecContext(ctx, `
+			DELETE FROM user_allowed_groups allowed
+			USING group_applications application
+			WHERE application.id=$3 AND application.access_grant_owned=TRUE
+			  AND application.completed_at IS NOT NULL
+			  AND allowed.user_id=$1 AND allowed.group_id=$2
+			  AND allowed.created_at=application.completed_at
+		`, userID, groupID, applicationID)
+		if err != nil {
+			return err
+		}
+		deleted, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if deleted > 0 {
+			return nil
+		}
+		var grantExists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM user_allowed_groups WHERE user_id=$1 AND group_id=$2)`, userID, groupID).Scan(&grantExists); err != nil {
+			return err
+		}
+		if grantExists {
+			return service.ErrGroupApplicationAccessNotOwned
+		}
+		return nil
 	})
 }
 
@@ -564,25 +691,71 @@ func (r *groupApplicationRepository) EnqueueMail(ctx context.Context, applicatio
 }
 
 func (r *groupApplicationRepository) RetryMail(ctx context.Context, applicationID, outboxID int64) error {
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE group_application_mail_outbox o SET status='pending',attempts=0,available_at=NOW(),claimed_at=NULL,claimed_by=NULL,last_error=NULL,updated_at=NOW()
-		FROM group_applications a WHERE o.id=$1 AND o.application_id=$2 AND a.id=o.application_id
-		  AND o.status='failed' AND a.status=o.required_application_status
-	`, outboxID, applicationID)
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	affected, _ := result.RowsAffected()
-	if affected != 1 {
+	defer tx.Rollback()
+
+	var applicationStatus string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM group_applications WHERE id=$1 FOR UPDATE`, applicationID).Scan(&applicationStatus); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return service.ErrGroupApplicationNotFound
+		}
+		return err
+	}
+
+	var kind, outboxStatus, requiredStatus string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT kind,status,required_application_status
+		FROM group_application_mail_outbox
+		WHERE id=$1 AND application_id=$2
+		FOR UPDATE
+	`, outboxID, applicationID).Scan(&kind, &outboxStatus, &requiredStatus); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return service.ErrGroupApplicationState
+		}
+		return err
+	}
+	if outboxStatus != "failed" || applicationStatus != requiredStatus {
 		return service.ErrGroupApplicationState
 	}
-	return nil
+	if kind == service.GroupApplicationMailApproval {
+		var active bool
+		if err := tx.QueryRowContext(ctx, `
+			SELECT EXISTS(
+				SELECT 1 FROM group_application_mail_outbox
+				WHERE application_id=$1 AND kind='approval'
+				  AND required_application_status=$2 AND id<>$3
+				  AND status IN ('pending','processing')
+			)
+		`, applicationID, requiredStatus, outboxID).Scan(&active); err != nil {
+			return err
+		}
+		if active {
+			return service.ErrGroupApplicationMailDeliveryInProgress
+		}
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE group_application_mail_outbox
+		SET status='pending',attempts=0,available_at=NOW(),claimed_at=NULL,claimed_by=NULL,
+		    claim_expires_at=NULL,last_error=NULL,updated_at=NOW()
+		WHERE id=$1
+	`, outboxID)
+	if err != nil {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" && pqErr.Constraint == "group_application_mail_outbox_one_active_approval" {
+			return service.ErrGroupApplicationMailDeliveryInProgress
+		}
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *groupApplicationRepository) ClaimMail(ctx context.Context, workerID string, limit int, lease time.Duration) ([]service.GroupApplicationMailJob, error) {
-	if limit <= 0 {
-		limit = 20
-	}
+	// A worker sends outside the database transaction. Claiming one job at a
+	// time prevents later jobs in a batch from expiring while SMTP is slow.
+	limit = 1
 	leaseSeconds := int64(lease / time.Second)
 	if leaseSeconds < 1 {
 		leaseSeconds = 60
@@ -593,38 +766,46 @@ func (r *groupApplicationRepository) ClaimMail(ctx context.Context, workerID str
 	}
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `
-		UPDATE group_application_mail_outbox o SET status='cancelled',last_error='application status changed',updated_at=NOW()
-		FROM group_applications a WHERE a.id=o.application_id AND o.status IN ('pending','processing') AND a.status<>o.required_application_status
+			UPDATE group_application_mail_outbox o
+			SET status='cancelled',claimed_at=NULL,claimed_by=NULL,claim_expires_at=NULL,
+			    last_error='application status changed',updated_at=NOW()
+			FROM group_applications a WHERE a.id=o.application_id AND o.status IN ('pending','processing') AND a.status<>o.required_application_status
 	`)
 	if err != nil {
 		return nil, err
 	}
 	_, err = tx.ExecContext(ctx, `
 		UPDATE group_application_mail_outbox dup
-		SET status='cancelled',last_error='duplicate approval mail',claimed_at=NULL,claimed_by=NULL,updated_at=NOW()
-		WHERE dup.kind='approval' AND dup.status='pending'
-		  AND EXISTS (
-			SELECT 1 FROM group_application_mail_outbox earlier
-			WHERE earlier.application_id=dup.application_id
-			  AND earlier.kind='approval'
-			  AND earlier.required_application_status=dup.required_application_status
-			  AND earlier.status IN ('pending','processing')
-			  AND earlier.id<dup.id
-		  )
+			SET status='cancelled',last_error='duplicate approval mail',claimed_at=NULL,claimed_by=NULL,claim_expires_at=NULL,updated_at=NOW()
+			WHERE dup.kind='approval' AND dup.status='pending'
+			  AND EXISTS (
+				SELECT 1 FROM group_application_mail_outbox active
+				WHERE active.application_id=dup.application_id
+				  AND active.kind='approval'
+				  AND active.required_application_status=dup.required_application_status
+				  AND active.status IN ('pending','processing')
+				  AND active.id<>dup.id
+				  AND (active.status='processing' OR active.id<dup.id)
+			  )
 	`)
 	if err != nil {
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `
 		WITH candidates AS (
-			SELECT o.id FROM group_application_mail_outbox o
-			JOIN group_applications a ON a.id=o.application_id AND a.status=o.required_application_status
-			WHERE o.status IN ('pending','processing') AND o.available_at<=NOW()
-			  AND (o.status='pending' OR o.claimed_at < NOW()-($3*INTERVAL '1 second'))
-			ORDER BY o.id LIMIT $2 FOR UPDATE OF o SKIP LOCKED
-		), claimed AS (
-			UPDATE group_application_mail_outbox o SET status='processing',claimed_at=NOW(),claimed_by=$1,updated_at=NOW()
-			FROM candidates c WHERE o.id=c.id
+				SELECT o.id FROM group_application_mail_outbox o
+				JOIN group_applications a ON a.id=o.application_id AND a.status=o.required_application_status
+				WHERE o.status IN ('pending','processing') AND o.available_at<=NOW()
+				  AND (
+					o.status='pending'
+					OR COALESCE(o.claim_expires_at,o.claimed_at+($3*INTERVAL '1 second'),'-infinity'::timestamptz)<=NOW()
+				  )
+				ORDER BY o.id LIMIT $2 FOR UPDATE OF o SKIP LOCKED
+			), claimed AS (
+				UPDATE group_application_mail_outbox o
+				SET status='processing',claimed_at=NOW(),claimed_by=$1,
+				    claim_expires_at=NOW()+($3*INTERVAL '1 second'),updated_at=NOW()
+				FROM candidates c WHERE o.id=c.id
 			RETURNING o.*
 		)
 		SELECT c.id,c.application_id,c.kind,c.recipient,c.subject,c.html_body,c.attachment_id,c.message_id,c.required_application_status,c.attempts,
@@ -664,23 +845,94 @@ func (r *groupApplicationRepository) ClaimMail(ctx context.Context, workerID str
 	return jobs, nil
 }
 
-func (r *groupApplicationRepository) MarkMailSent(ctx context.Context, id int64, workerID string) error {
-	result, err := r.db.ExecContext(ctx, `
-		WITH sent AS (
-			UPDATE group_application_mail_outbox SET status='sent',sent_at=NOW(),last_error=NULL,claimed_at=NULL,claimed_by=NULL,updated_at=NOW()
-			WHERE id=$1 AND claimed_by=$2 AND status='processing' RETURNING application_id,kind,required_application_status
-		)
-		UPDATE group_applications a SET last_email_kind=s.kind,last_email_status='sent',last_email_error=NULL,updated_at=NOW()
-		FROM sent s WHERE a.id=s.application_id AND a.status=s.required_application_status
+func (r *groupApplicationRepository) ValidateMailClaim(ctx context.Context, id int64, workerID string) error {
+	var validatedID int64
+	err := r.db.QueryRowContext(ctx, `
+		UPDATE group_application_mail_outbox o
+		SET claimed_at=NOW(),claim_expires_at=NOW()+INTERVAL '1 minute',updated_at=NOW()
+		FROM group_applications a
+		WHERE o.id=$1 AND o.claimed_by=$2 AND o.status='processing'
+		  AND a.id=o.application_id AND a.status=o.required_application_status
+		RETURNING o.id
+	`, id, workerID).Scan(&validatedID)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	result, cancelErr := r.db.ExecContext(ctx, `
+		UPDATE group_application_mail_outbox o
+		SET status='cancelled',claimed_at=NULL,claimed_by=NULL,claim_expires_at=NULL,
+		    last_error='application status changed',updated_at=NOW()
+		FROM group_applications a
+		WHERE o.id=$1 AND o.claimed_by=$2 AND o.status='processing'
+		  AND a.id=o.application_id AND a.status<>o.required_application_status
 	`, id, workerID)
+	if cancelErr != nil {
+		return cancelErr
+	}
+	if _, affectedErr := result.RowsAffected(); affectedErr != nil {
+		return affectedErr
+	}
+	return service.ErrGroupApplicationState
+}
+
+func lockGroupApplicationForMailOutbox(ctx context.Context, tx *sql.Tx, outboxID int64) (int64, error) {
+	var applicationID int64
+	err := tx.QueryRowContext(ctx, `
+		SELECT a.id
+		FROM group_application_mail_outbox o
+		JOIN group_applications a ON a.id=o.application_id
+		WHERE o.id=$1
+		FOR UPDATE OF a
+	`, outboxID).Scan(&applicationID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("mail outbox claim %d is no longer valid", outboxID)
+	}
+	return applicationID, err
+}
+
+func (r *groupApplicationRepository) MarkMailSent(ctx context.Context, id int64, workerID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	affected, _ := result.RowsAffected()
-	if affected != 1 {
+	defer tx.Rollback()
+
+	applicationID, err := lockGroupApplicationForMailOutbox(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+
+	var returnedApplicationID int64
+	var kind, requiredStatus string
+	err = tx.QueryRowContext(ctx, `
+		UPDATE group_application_mail_outbox
+		SET status='sent',sent_at=NOW(),last_error=NULL,claimed_at=NULL,claimed_by=NULL,
+		    claim_expires_at=NULL,updated_at=NOW()
+		WHERE id=$1 AND claimed_by=$2 AND status='processing'
+		RETURNING application_id,kind,required_application_status
+	`, id, workerID).Scan(&returnedApplicationID, &kind, &requiredStatus)
+	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("mail outbox claim %d is no longer valid", id)
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	if returnedApplicationID != applicationID {
+		return fmt.Errorf("mail outbox %d application changed during claim finalization", id)
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE group_applications
+		SET last_email_kind=$2,last_email_status='sent',last_email_error=NULL,updated_at=NOW()
+		WHERE id=$1 AND status=$3
+	`, applicationID, kind, requiredStatus)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *groupApplicationRepository) RetryClaimedMail(ctx context.Context, id int64, workerID string, retryAt time.Time, terminal bool, lastError string) error {
@@ -688,44 +940,76 @@ func (r *groupApplicationRepository) RetryClaimedMail(ctx context.Context, id in
 	if terminal {
 		status = "failed"
 	}
-	result, err := r.db.ExecContext(ctx, `
-		WITH retried AS (
-			UPDATE group_application_mail_outbox SET status=$3,attempts=attempts+1,available_at=$4,last_error=$5,claimed_at=NULL,claimed_by=NULL,updated_at=NOW()
-			WHERE id=$1 AND claimed_by=$2 AND status='processing' RETURNING application_id,kind,required_application_status
-		)
-		UPDATE group_applications a SET last_email_kind=x.kind,last_email_status=$3,last_email_error=$5,updated_at=NOW()
-		FROM retried x WHERE a.id=x.application_id AND a.status=x.required_application_status
-	`, id, workerID, status, retryAt, lastError)
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	affected, _ := result.RowsAffected()
-	if affected != 1 {
+	defer tx.Rollback()
+
+	applicationID, err := lockGroupApplicationForMailOutbox(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+
+	var returnedApplicationID int64
+	var kind, requiredStatus string
+	err = tx.QueryRowContext(ctx, `
+		UPDATE group_application_mail_outbox
+		SET status=$3,attempts=attempts+1,available_at=$4,last_error=$5,
+		    claimed_at=NULL,claimed_by=NULL,claim_expires_at=NULL,updated_at=NOW()
+		WHERE id=$1 AND claimed_by=$2 AND status='processing'
+		RETURNING application_id,kind,required_application_status
+	`, id, workerID, status, retryAt, lastError).Scan(&returnedApplicationID, &kind, &requiredStatus)
+	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("mail outbox claim %d is no longer valid", id)
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	if returnedApplicationID != applicationID {
+		return fmt.Errorf("mail outbox %d application changed during claim finalization", id)
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE group_applications
+		SET last_email_kind=$2,last_email_status=$3,last_email_error=$4,updated_at=NOW()
+		WHERE id=$1 AND status=$5
+	`, applicationID, kind, status, lastError, requiredStatus)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-func (r *groupApplicationRepository) FindApprovalByMessageIDs(ctx context.Context, messageIDs []string) (*service.GroupApplicationApprovalMatch, error) {
+func (r *groupApplicationRepository) FindApprovalByMessageIDs(ctx context.Context, exactMessageIDs, fallbackMessageIDs []string) (*service.GroupApplicationApprovalMatch, error) {
+	match, err := r.findApprovalByMessageIDs(ctx, exactMessageIDs)
+	if err == nil || !errors.Is(err, service.ErrGroupApplicationNotFound) {
+		return match, err
+	}
+	return r.findApprovalByMessageIDs(ctx, fallbackMessageIDs)
+}
+
+func (r *groupApplicationRepository) findApprovalByMessageIDs(ctx context.Context, messageIDs []string) (*service.GroupApplicationApprovalMatch, error) {
 	if len(messageIDs) == 0 {
 		return nil, service.ErrGroupApplicationNotFound
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		WITH matched AS (
-			SELECT o.application_id,o.message_id,o.sent_at,o.id
-			FROM group_application_mail_outbox o
-			JOIN group_applications a ON a.id=o.application_id
-			WHERE a.status='awaiting_reply' AND o.kind='approval' AND o.status='sent' AND o.message_id=ANY($1)
-		), latest_per_application AS (
-			SELECT DISTINCT ON (application_id) application_id,message_id,sent_at,id
-			FROM matched ORDER BY application_id,sent_at DESC NULLS LAST,id DESC
-		)
-		SELECT base.*,latest.message_id
-		FROM (`+applicationSelect+`) base
-		JOIN latest_per_application latest ON latest.application_id=base.id
-		ORDER BY latest.sent_at DESC NULLS LAST,latest.id DESC
-		LIMIT 2
-	`, pq.Array(messageIDs))
+			WITH matched AS (
+				SELECT o.application_id,o.message_id,o.status,o.sent_at,o.id
+				FROM group_application_mail_outbox o
+				JOIN group_applications a ON a.id=o.application_id
+				WHERE a.status='awaiting_reply' AND o.kind='approval'
+				  AND o.status IN ('processing','sent') AND o.message_id=ANY($1)
+			), latest_per_application AS (
+				SELECT DISTINCT ON (application_id) application_id,message_id,status,sent_at,id
+				FROM matched
+				ORDER BY application_id,(status='sent') DESC,sent_at DESC NULLS LAST,id DESC
+			)
+			SELECT base.*,latest.message_id
+			FROM (`+applicationSelect+`) base
+			JOIN latest_per_application latest ON latest.application_id=base.id
+			ORDER BY (latest.status='sent') DESC,latest.sent_at DESC NULLS LAST,latest.id DESC
+			LIMIT 2
+		`, pq.Array(messageIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -763,15 +1047,60 @@ func (r *groupApplicationRepository) MaxProcessedUID(ctx context.Context, finger
 	return uint32(value.Int64), true, nil
 }
 
+type groupApplicationReceiptExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
 func (r *groupApplicationRepository) StoreReceipt(ctx context.Context, receipt service.GroupApplicationReceipt) (bool, error) {
-	result, err := r.db.ExecContext(ctx, `
-			INSERT INTO group_application_inbound_receipts(mailbox_fingerprint,uid_validity,uid,message_id,from_address,in_reply_to,references_header,application_id,result,reply_sha256,content_encrypted,content_truncated)
-			VALUES($1,$2,$3,NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),$8,$9,NULLIF($10,''),NULLIF($11,''),$12)
-			ON CONFLICT(mailbox_fingerprint,uid_validity,uid) DO NOTHING
-		`, receipt.MailboxFingerprint, int64(receipt.UIDValidity), int64(receipt.UID), receipt.MessageID, receipt.FromAddress, receipt.InReplyTo, receipt.References, receipt.ApplicationID, receipt.Result, receipt.ReplySHA256, receipt.EncryptedContent, receipt.ContentTruncated)
+	return storeGroupApplicationReceipt(ctx, r.db, receipt)
+}
+
+func storeGroupApplicationReceipt(ctx context.Context, execer groupApplicationReceiptExecer, receipt service.GroupApplicationReceipt) (bool, error) {
+	result, err := execer.ExecContext(ctx, `
+		INSERT INTO group_application_inbound_receipts(
+			mailbox_fingerprint,uid_validity,uid,message_id,from_address,in_reply_to,references_header,
+			application_id,result,reply_sha256,content_encrypted,content_truncated)
+		VALUES($1,$2,$3,NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),$8,$9,NULLIF($10,''),NULLIF($11,''),$12)
+		ON CONFLICT(mailbox_fingerprint,uid_validity,uid) DO UPDATE SET
+			message_id=EXCLUDED.message_id,
+			from_address=EXCLUDED.from_address,
+			in_reply_to=EXCLUDED.in_reply_to,
+			references_header=EXCLUDED.references_header,
+			application_id=EXCLUDED.application_id,
+			result=EXCLUDED.result,
+			reply_sha256=EXCLUDED.reply_sha256,
+			content_encrypted=EXCLUDED.content_encrypted,
+			content_truncated=EXCLUDED.content_truncated,
+			processed_at=NOW()
+		WHERE CASE EXCLUDED.result
+				WHEN 'completed' THEN 100
+				WHEN 'reply_mismatch' THEN 100
+				WHEN 'ignored_sender' THEN 80
+				WHEN 'unsupported_content' THEN 70
+				WHEN 'automated' THEN 70
+				WHEN 'state_conflict' THEN 50
+				WHEN 'unavailable' THEN 50
+				WHEN 'not_found' THEN 50
+				ELSE 10
+			END
+			> CASE group_application_inbound_receipts.result
+				WHEN 'completed' THEN 100
+				WHEN 'reply_mismatch' THEN 100
+				WHEN 'ignored_sender' THEN 80
+				WHEN 'unsupported_content' THEN 70
+				WHEN 'automated' THEN 70
+				WHEN 'state_conflict' THEN 50
+				WHEN 'unavailable' THEN 50
+				WHEN 'not_found' THEN 50
+				ELSE 10
+			END
+	`, receipt.MailboxFingerprint, int64(receipt.UIDValidity), int64(receipt.UID), receipt.MessageID, receipt.FromAddress, receipt.InReplyTo, receipt.References, receipt.ApplicationID, receipt.Result, receipt.ReplySHA256, receipt.EncryptedContent, receipt.ContentTruncated)
 	if err != nil {
 		return false, err
 	}
-	affected, _ := result.RowsAffected()
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
 	return affected == 1, nil
 }
