@@ -4,6 +4,11 @@ import { createPinia } from "pinia";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import GroupApplicationsView from "./GroupApplicationsView.vue";
+import {
+  defaultGroupApplicationTemplates,
+  groupApplicationsAdminAPI,
+  type GroupApplicationPolicy,
+} from "@/api/admin/groupApplications";
 
 vi.mock("vue-i18n", async (importOriginal) => {
   const actual = await importOriginal<typeof import("vue-i18n")>();
@@ -48,6 +53,26 @@ vi.mock("vue-i18n", async (importOriginal) => {
     "admin.groupApplications.saveEmailConfig": "Save email settings",
     "admin.groupApplications.workflowPaused": "Workflow paused",
     "admin.groupApplications.workerStopped": "Worker stopped",
+    "admin.groupApplications.workflowRunning": "Workflow running",
+    "admin.groupApplications.applyableGroup": "Application group",
+    "admin.groupApplications.policyDescription": "Configure access policy",
+    "admin.groupApplications.enabled": "Allow applications",
+    "admin.groupApplications.replyPhrase": "Strict reply phrase",
+    "admin.groupApplications.replyPhraseHint": "Must match exactly",
+    "admin.groupApplications.pdfAgreement": "Agreement PDF",
+    "admin.groupApplications.choosePDF": "Choose PDF",
+    "admin.groupApplications.downloadAgreement": "Download agreement",
+    "admin.groupApplications.noPDF": "No PDF selected",
+    "admin.groupApplications.mailTemplates": "Email templates",
+    "admin.groupApplications.templateHint": "Per-group templates",
+    "admin.groupApplications.templateType": "Template type",
+    "admin.groupApplications.subject": "Subject",
+    "admin.groupApplications.subjectPlaceholder": "Enter subject",
+    "admin.groupApplications.templateKinds.approval": "Approval",
+    "admin.groupApplications.templateKinds.completion": "Completion",
+    "admin.groupApplications.templateKinds.manual_rejection": "Manual rejection",
+    "admin.groupApplications.templateKinds.reply_mismatch": "Reply mismatch",
+    "admin.groupApplications.templateKinds.revocation": "Revocation",
     "admin.groupApplications.allStatuses": "All statuses",
     "admin.groupApplications.search": "Search",
     "admin.groupApplications.noApplications": "No applications",
@@ -59,8 +84,10 @@ vi.mock("vue-i18n", async (importOriginal) => {
     "common.disabled": "Disabled",
     "common.status": "Status",
     "common.createdAt": "Created",
+    "common.save": "Save",
     "common.saved": "Saved",
     "common.error": "Error",
+    "groupApplications.selectGroup": "Select group",
   };
   return {
     ...actual,
@@ -104,17 +131,18 @@ const initialConfig = {
 let testedSMTP: typeof initialConfig | null = null;
 let testedIMAP: typeof initialConfig | null = null;
 let savedConfig: typeof initialConfig | null = null;
+let workerWorkflowEnabled = false;
 
 const server = setupServer(
   http.get("*/api/v1/admin/group-applications/email-config", () =>
-    HttpResponse.json({ code: 0, data: initialConfig }),
+    HttpResponse.json({ code: 0, data: savedConfig ?? initialConfig }),
   ),
   http.get("*/api/v1/admin/group-applications/worker-status", () =>
     HttpResponse.json({
       code: 0,
       data: {
         running: true,
-        workflow_enabled: false,
+        workflow_enabled: workerWorkflowEnabled,
         mail_processed: 0,
         mail_failures: 0,
         replies_processed: 0,
@@ -144,6 +172,7 @@ const server = setupServer(
   }),
   http.put("*/api/v1/admin/group-applications/email-config", async ({ request }) => {
     savedConfig = (await request.json()) as typeof initialConfig;
+    workerWorkflowEnabled = savedConfig.enabled;
     return HttpResponse.json({ code: 0, data: savedConfig });
   }),
 );
@@ -151,8 +180,10 @@ const server = setupServer(
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   testedSMTP = null;
-  testedIMAP = null;
+    testedIMAP = null;
   savedConfig = null;
+  workerWorkflowEnabled = false;
+  vi.restoreAllMocks();
   server.resetHandlers();
 });
 afterAll(() => server.close());
@@ -189,5 +220,100 @@ describe("GroupApplicationsView email settings", () => {
     await waitFor(() => expect(savedConfig?.enabled).toBe(true));
     expect(savedConfig?.smtp.host).toBe("smtp.unsaved.example.com");
     expect(savedConfig?.imap.host).toBe("imap.example.com");
+    expect(await screen.findByText("Workflow running")).toBeTruthy();
+  });
+});
+
+describe("GroupApplicationsView policies", () => {
+  it("uploads the agreement as multipart and preserves saved policy fields when reselected", async () => {
+    const policy: GroupApplicationPolicy = {
+      group_id: 4,
+      group_name: "Private Pro",
+      enabled: true,
+      reply_phrase: "EXACT-CONFIRM",
+      templates: defaultGroupApplicationTemplates(),
+      attachment_id: 11,
+      attachment_name: "agreement-v1.pdf",
+      attachment_size: 2048,
+    };
+    let uploadedAttachment: File | undefined;
+    let submittedPolicy: GroupApplicationPolicy | null = null;
+
+    server.use(
+      http.get("*/api/v1/admin/group-application-policies", () =>
+        HttpResponse.json({ code: 0, data: [policy] }),
+      ),
+      http.get("*/api/v1/admin/groups/all", () =>
+        HttpResponse.json({
+          code: 0,
+          data: [
+            {
+              id: 4,
+              name: "Private Pro",
+              is_exclusive: true,
+              subscription_type: "standard",
+              status: "active",
+            },
+          ],
+        }),
+      ),
+    );
+    vi.spyOn(groupApplicationsAdminAPI, "savePolicy").mockImplementation(
+      async (groupID, submitted, uploaded) => {
+        submittedPolicy = submitted;
+        uploadedAttachment = uploaded;
+        return {
+          ...submitted,
+          group_id: groupID,
+          group_name: "Private Pro",
+          attachment_id: 12,
+          attachment_name: uploaded?.name,
+          attachment_size: uploaded?.size,
+        };
+      },
+    );
+
+    const { container } = render(GroupApplicationsView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { AppLayout: { template: "<main><slot /></main>" } },
+      },
+    });
+
+    await fireEvent.click(await screen.findByRole("tab", { name: "Policies" }));
+    const replyPhrase = await screen.findByLabelText("Strict reply phrase");
+    expect((replyPhrase as HTMLInputElement).value).toBe("EXACT-CONFIRM");
+    expect(screen.getByText("agreement-v1.pdf")).toBeTruthy();
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true");
+
+    const groupButtons = screen.getAllByRole("button", { name: "Private Pro" });
+    await fireEvent.click(groupButtons[groupButtons.length - 1]);
+    expect((replyPhrase as HTMLInputElement).value).toBe("EXACT-CONFIRM");
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true");
+
+    const file = new window.File(["%PDF-1.7\nfixture"], "agreement-v2.pdf", {
+      type: "application/pdf",
+    });
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    Object.defineProperty(fileInput!, "files", {
+      configurable: true,
+      value: [file],
+    });
+    await fireEvent.change(fileInput!);
+    expect(await screen.findByText("agreement-v2.pdf")).toBeTruthy();
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(uploadedAttachment?.name).toBe("agreement-v2.pdf"));
+    expect(submittedPolicy?.enabled).toBe(true);
+    expect(submittedPolicy?.reply_phrase).toBe("EXACT-CONFIRM");
+    expect(await screen.findByText("agreement-v2.pdf")).toBeTruthy();
+
+    const savedGroupButtons = screen.getAllByRole("button", { name: "Private Pro" });
+    await fireEvent.click(savedGroupButtons[savedGroupButtons.length - 1]);
+    expect((screen.getByLabelText("Strict reply phrase") as HTMLInputElement).value).toBe(
+      "EXACT-CONFIRM",
+    );
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true");
   });
 });

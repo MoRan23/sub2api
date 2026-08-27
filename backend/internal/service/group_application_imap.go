@@ -529,6 +529,24 @@ func (w *GroupApplicationWorker) Health() GroupApplicationWorkerHealth {
 	return health
 }
 
+func (w *GroupApplicationWorker) RefreshConfiguration(ctx context.Context) {
+	if w == nil || w.service == nil {
+		return
+	}
+	_, _ = w.refreshWorkflowState(ctx)
+}
+
+func (w *GroupApplicationWorker) refreshWorkflowState(ctx context.Context) (*GroupApplicationEmailConfig, error) {
+	cfg, err := w.service.LoadEmailConfig(ctx, false)
+	w.workflowEnabled.Store(err == nil && cfg != nil && cfg.Enabled)
+	if err != nil {
+		w.configError.Store(boundedGroupApplicationError(err))
+	} else {
+		w.configError.Store("")
+	}
+	return cfg, err
+}
+
 func (w *GroupApplicationWorker) run() {
 	defer w.wg.Done()
 	defer w.running.Store(false)
@@ -536,14 +554,8 @@ func (w *GroupApplicationWorker) run() {
 	defer mailTicker.Stop()
 	nextIMAP := time.Now()
 	for {
-		cfg, configErr := w.service.LoadEmailConfig(w.ctx, false)
-		workflowEnabled := configErr == nil && cfg.Enabled
-		w.workflowEnabled.Store(workflowEnabled)
-		if configErr != nil {
-			w.configError.Store(boundedGroupApplicationError(configErr))
-		} else {
-			w.configError.Store("")
-		}
+		cfg, configErr := w.refreshWorkflowState(w.ctx)
+		workflowEnabled := configErr == nil && cfg != nil && cfg.Enabled
 		if err := w.processMailBatch(w.ctx); err != nil && w.ctx.Err() == nil {
 			w.mailFailures.Add(1)
 			slog.Warn("group application mail outbox failed", "error", err)

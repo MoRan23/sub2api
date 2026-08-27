@@ -203,26 +203,38 @@
                 class="sr-only"
                 @change="handleAttachment"
               />
-              <div class="flex min-h-10 items-center gap-2">
-                <button type="button" class="btn btn-secondary" @click="fileInput?.click()">
-                  <Icon name="upload" size="sm" class="mr-2" />
-                  {{ t("admin.groupApplications.choosePDF") }}
-                </button>
-                <button
-                  v-if="policyForm.attachment_id"
-                  type="button"
-                  class="btn btn-secondary px-3"
-                  :title="t('admin.groupApplications.downloadAgreement')"
-                  @click="downloadAgreement"
-                >
-                  <Icon name="download" size="sm" />
-                </button>
+              <div class="flex min-h-16 items-center gap-3 rounded border border-gray-200 bg-gray-50 px-3 py-2 dark:border-dark-600 dark:bg-dark-900">
+                <span class="rounded bg-white p-2 text-gray-500 shadow-sm dark:bg-dark-800 dark:text-dark-300">
+                  <Icon name="document" size="md" />
+                </span>
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-medium text-gray-900 dark:text-white">
+                    {{ attachment?.name || policyForm.attachment_name || t("admin.groupApplications.noPDF") }}
+                  </p>
+                  <p v-if="attachment || policyForm.attachment_size" class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">
+                    {{ formatBytes(attachment?.size || policyForm.attachment_size || 0) }}
+                  </p>
+                </div>
+                <div class="flex flex-none items-center gap-2">
+                  <button
+                    type="button"
+                    class="btn btn-secondary px-3"
+                    :title="t('admin.groupApplications.choosePDF')"
+                    @click="fileInput?.click()"
+                  >
+                    <Icon name="upload" size="sm" />
+                  </button>
+                  <button
+                    v-if="policyForm.attachment_id"
+                    type="button"
+                    class="btn btn-secondary px-3"
+                    :title="t('admin.groupApplications.downloadAgreement')"
+                    @click="downloadAgreement"
+                  >
+                    <Icon name="download" size="sm" />
+                  </button>
+                </div>
               </div>
-              <p class="mt-2 truncate text-xs text-gray-500 dark:text-dark-400">
-                {{ attachment?.name || policyForm.attachment_name || t("admin.groupApplications.noPDF") }}
-                <template v-if="attachment"> · {{ formatBytes(attachment.size) }}</template>
-                <template v-else-if="policyForm.attachment_size"> · {{ formatBytes(policyForm.attachment_size) }}</template>
-              </p>
             </div>
           </div>
 
@@ -787,9 +799,8 @@ async function loadPolicies() {
       groupApplicationsAdminAPI.listPolicies(),
       adminAPI.groups.getAll(),
     ]);
-    if (!selectedGroupID.value) {
-      selectPolicy(policies.value[0]?.group_id ?? eligibleGroups.value[0]?.id ?? 0);
-    }
+    const selectedID = selectedGroupID.value || policies.value[0]?.group_id || eligibleGroups.value[0]?.id || 0;
+    selectPolicy(Number(selectedID), true);
   } catch (error) {
     appStore.showError(errorMessage(error));
   } finally {
@@ -800,10 +811,11 @@ function setSelectedGroup(value: string | number | boolean | null) {
   const groupID = Number(value || 0);
   if (groupID > 0) selectPolicy(groupID);
 }
-function selectPolicy(groupID: number) {
+function selectPolicy(groupID: number, force = false) {
+  if (!force && selectedGroupID.value === groupID && policyForm.value?.group_id === groupID) return;
   selectedGroupID.value = groupID;
-  const existing = policies.value.find((item) => item.group_id === groupID);
-  const group = eligibleGroups.value.find((item) => item.id === groupID);
+  const existing = policies.value.find((item) => Number(item.group_id) === groupID);
+  const group = eligibleGroups.value.find((item) => Number(item.id) === groupID);
   policyForm.value = existing
     ? clone(existing)
     : group

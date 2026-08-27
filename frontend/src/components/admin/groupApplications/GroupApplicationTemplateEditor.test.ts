@@ -24,6 +24,15 @@ vi.mock("vue-i18n", async (importOriginal) => {
 });
 
 describe("GroupApplicationTemplateEditor", () => {
+  it("ships branded responsive defaults with required workflow placeholders", () => {
+    const templates = defaultGroupApplicationTemplates();
+    expect(templates.approval.zh.html).toContain("<!doctype html>");
+    expect(templates.approval.zh.html).toContain("{{reply_phrase}}");
+    expect(templates.approval.en.html).toContain("Exact confirmation phrase");
+    expect(templates.manual_rejection.zh.html).toContain("{{decision_reason}}");
+    expect(templates.revocation.en.html).toContain("{{decision_reason}}");
+  });
+
   it("edits only the selected template kind and locale", async () => {
     const templates = defaultGroupApplicationTemplates();
     render(GroupApplicationTemplateEditor, {

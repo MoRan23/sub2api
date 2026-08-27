@@ -73,12 +73,28 @@ func (s *GroupApplicationService) Submit(ctx context.Context, userID, groupID in
 }
 
 func (s *GroupApplicationService) ListPolicies(ctx context.Context) ([]*GroupApplicationPolicy, error) {
-	return s.repo.ListPolicies(ctx)
+	items, err := s.repo.ListPolicies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		item.Templates, err = NormalizeGroupApplicationTemplates(item.Templates)
+		if err != nil {
+			return nil, fmt.Errorf("normalize group application policy %d: %w", item.GroupID, err)
+		}
+	}
+	return items, nil
 }
 
 func (s *GroupApplicationService) SavePolicy(ctx context.Context, policy *GroupApplicationPolicy, attachment *GroupApplicationAttachment, adminID int64) (*GroupApplicationPolicy, error) {
 	if policy == nil || policy.GroupID <= 0 || adminID <= 0 {
 		return nil, ErrGroupApplicationUnavailable
+	}
+	if policy.Templates == nil {
+		return nil, infraerrors.BadRequest("INVALID_GROUP_APPLICATION_TEMPLATES", "mail templates are required")
 	}
 	policy.ReplyPhrase = strings.TrimSpace(NormalizeGroupApplicationReply(policy.ReplyPhrase))
 	if len([]rune(policy.ReplyPhrase)) > 500 || (policy.Enabled && policy.ReplyPhrase == "") {

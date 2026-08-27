@@ -20,6 +20,7 @@ func TestNormalizeGroupApplicationTemplatesRequiresWorkflowPlaceholders(t *testi
 	templates, err := NormalizeGroupApplicationTemplates(nil)
 	require.NoError(t, err)
 	require.Contains(t, templates[GroupApplicationMailApproval]["zh"].HTML, "{{reply_phrase}}")
+	require.Contains(t, templates[GroupApplicationMailApproval]["zh"].HTML, "<!doctype html>")
 	require.Contains(t, templates[GroupApplicationMailRevocation]["en"].HTML, "{{decision_reason}}")
 
 	templates[GroupApplicationMailApproval]["zh"] = GroupApplicationLocalizedTemplate{Subject: "approved", HTML: "<p>no phrase</p>"}
@@ -39,6 +40,15 @@ func TestNormalizeGroupApplicationTemplatesRequiresWorkflowPlaceholders(t *testi
 	templates[GroupApplicationMailCompletion]["en"] = GroupApplicationLocalizedTemplate{Subject: "{{INVALID-TOKEN}}", HTML: "ok"}
 	_, err = NormalizeGroupApplicationTemplates(templates)
 	require.ErrorContains(t, err, "invalid placeholder")
+}
+
+func TestNormalizeGroupApplicationTemplatesUpgradesLegacyDefaults(t *testing.T) {
+	legacy := legacyDefaultGroupApplicationTemplates()
+	templates, err := NormalizeGroupApplicationTemplates(legacy)
+	require.NoError(t, err)
+	require.Contains(t, templates[GroupApplicationMailApproval]["zh"].HTML, "申请已通过初审")
+	require.Contains(t, templates[GroupApplicationMailCompletion]["en"].HTML, "Access is now enabled")
+	require.NotEqual(t, legacy[GroupApplicationMailApproval]["zh"].HTML, templates[GroupApplicationMailApproval]["zh"].HTML)
 }
 
 func TestRenderGroupApplicationTemplateEscapesVariables(t *testing.T) {
@@ -294,6 +304,7 @@ type groupApplicationRepositoryStub struct {
 	claimCalls       int
 	markSentCalls    int
 	listOptionsCalls int
+	savedPolicy      *GroupApplicationPolicy
 }
 
 func (s *groupApplicationRepositoryStub) GetApplication(context.Context, int64) (*GroupApplication, error) {
@@ -327,6 +338,11 @@ func (s *groupApplicationRepositoryStub) MarkMailSent(context.Context, int64, st
 func (s *groupApplicationRepositoryStub) ListOptions(context.Context, int64) ([]GroupApplicationOption, error) {
 	s.listOptionsCalls++
 	return []GroupApplicationOption{{GroupID: 7, GroupName: "Private"}}, nil
+}
+
+func (s *groupApplicationRepositoryStub) SavePolicy(_ context.Context, policy *GroupApplicationPolicy, _ *GroupApplicationAttachment, _ int64) (*GroupApplicationPolicy, error) {
+	s.savedPolicy = policy
+	return policy, nil
 }
 
 func (s *groupApplicationRepositoryStub) RetryClaimedMail(_ context.Context, _ int64, _ string, _ time.Time, _ bool, lastError string) error {
@@ -388,6 +404,38 @@ func TestGroupApplicationWorkerPausesOutboxWhenWorkflowDisabled(t *testing.T) {
 	require.NoError(t, worker.processMailBatch(context.Background()))
 	require.Zero(t, repo.claimCalls)
 	require.False(t, repo.retried)
+}
+
+func TestGroupApplicationSavePolicyRejectsMissingTemplatePayload(t *testing.T) {
+	repo := &groupApplicationRepositoryStub{}
+	svc := NewGroupApplicationService(repo, nil, nil)
+
+	_, err := svc.SavePolicy(context.Background(), &GroupApplicationPolicy{GroupID: 7}, nil, 1)
+	require.Error(t, err)
+	require.Equal(t, "INVALID_GROUP_APPLICATION_TEMPLATES", infraerrors.Reason(err))
+	require.Nil(t, repo.savedPolicy)
+
+	policy := &GroupApplicationPolicy{GroupID: 7, Templates: DefaultGroupApplicationTemplates()}
+	saved, err := svc.SavePolicy(context.Background(), policy, nil, 1)
+	require.NoError(t, err)
+	require.Same(t, policy, saved)
+	require.Same(t, policy, repo.savedPolicy)
+}
+
+func TestGroupApplicationWorkerRefreshConfigurationUpdatesHealthImmediately(t *testing.T) {
+	settings := configuredGroupApplicationSettings(t)
+	svc := NewGroupApplicationService(&groupApplicationRepositoryStub{}, settings, groupApplicationEncryptorStub{})
+	worker := &GroupApplicationWorker{service: svc}
+	worker.configError.Store("")
+
+	worker.RefreshConfiguration(context.Background())
+	require.True(t, worker.Health().WorkflowEnabled)
+	require.Empty(t, worker.Health().ConfigurationError)
+
+	settings.values[SettingKeyGroupApplicationEmail] = "not-json"
+	worker.RefreshConfiguration(context.Background())
+	require.False(t, worker.Health().WorkflowEnabled)
+	require.NotEmpty(t, worker.Health().ConfigurationError)
 }
 
 func TestGroupApplicationWorkerUsesStandaloneSMTPAndReplyAddress(t *testing.T) {

@@ -321,6 +321,7 @@ func (h *GroupApplicationHandler) SaveEmailConfig(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	h.worker.RefreshConfiguration(c.Request.Context())
 	response.Success(c, item)
 }
 
