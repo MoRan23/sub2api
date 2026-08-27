@@ -6,10 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/emersion/go-imap/v2"
 	"github.com/stretchr/testify/require"
 )
@@ -256,6 +258,28 @@ func TestGroupApplicationMailboxNamesDeduplicateAndKeepInboxFirst(t *testing.T) 
 		{Mailbox: ""},
 	})
 	require.Equal(t, []string{"INBOX", "Archive/Applications", "Sent"}, names)
+}
+
+func TestGroupApplicationIMAPTestErrorIsActionableAndDoesNotExposeCause(t *testing.T) {
+	tests := []struct {
+		operation string
+		reason    string
+		contains  string
+	}{
+		{operation: "connect", reason: "GROUP_APPLICATION_IMAP_CONNECT_FAILED", contains: "connect"},
+		{operation: "login", reason: "GROUP_APPLICATION_IMAP_LOGIN_FAILED", contains: "login"},
+		{operation: "list", reason: "GROUP_APPLICATION_IMAP_LIST_FAILED", contains: "login succeeded"},
+	}
+	for _, test := range tests {
+		t.Run(test.operation, func(t *testing.T) {
+			cause := errors.New("provider response containing sensitive-value")
+			err := groupApplicationIMAPTestError(newGroupApplicationIMAPOperationError(test.operation, cause))
+			require.Equal(t, http.StatusBadRequest, infraerrors.Code(err))
+			require.Equal(t, test.reason, infraerrors.Reason(err))
+			require.Contains(t, strings.ToLower(infraerrors.Message(err)), test.contains)
+			require.NotContains(t, infraerrors.Message(err), "sensitive-value")
+		})
+	}
 }
 
 type groupApplicationRepositoryStub struct {

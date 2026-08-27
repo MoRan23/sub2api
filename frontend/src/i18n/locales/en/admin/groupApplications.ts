@@ -50,7 +50,8 @@ export default {
 	smtpTitle: "SMTP delivery",
 	smtpHint: "Sends approval, completion, rejection, reply mismatch, and revocation messages.",
 	imapTitle: "IMAP replies",
-	imapHint: "Reads exact-string replies to approval messages. The mailbox is usually INBOX.",
+    imapHint:
+      "Reads exact-string replies to approval messages. The mailbox is usually INBOX. When secure login is enabled, use a client-specific password instead of the web login password.",
 	reuseSMTPCredentials: "Reuse SMTP username and password",
 	reuseSMTPCredentialsHint: "Use this when one mailbox account handles both sending and replies.",
 	senderAddress: "Sender address",
@@ -104,6 +105,16 @@ export default {
       reply_mismatch: "Confirmation did not match",
       ignored_sender: "Sender did not match",
       error: "Processing error",
+    },
+    errors: {
+      GROUP_APPLICATION_IMAP_CONNECT_FAILED:
+        "Could not connect to the IMAP server. Check the host, port, TLS mode, DNS, and server outbound network.",
+      GROUP_APPLICATION_IMAP_LOGIN_FAILED:
+        "IMAP login failed. Verify the full email address, enable IMAP access, and use a client-specific password when secure login is enabled.",
+      GROUP_APPLICATION_IMAP_LIST_FAILED:
+        "IMAP login succeeded, but mailbox folders could not be listed. Check the account's IMAP folder permissions.",
+      GROUP_APPLICATION_IMAP_TEST_FAILED:
+        "IMAP test failed. Check the server settings and account permissions.",
     },
   },
 };

@@ -682,13 +682,66 @@ func (w *GroupApplicationWorker) TestIMAP(ctx context.Context, input GroupApplic
 		defer client.Close()
 	}
 	if err != nil {
-		return nil, err
+		return nil, groupApplicationIMAPTestError(err)
 	}
 	mailboxes, err := client.List("", "*", nil).Collect()
 	if err != nil {
-		return nil, fmt.Errorf("list IMAP mailboxes: %w", err)
+		return nil, groupApplicationIMAPTestError(newGroupApplicationIMAPOperationError("list", err))
 	}
 	return groupApplicationMailboxNames(mailboxes), nil
+}
+
+type groupApplicationIMAPOperationError struct {
+	operation string
+	err       error
+}
+
+func newGroupApplicationIMAPOperationError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &groupApplicationIMAPOperationError{operation: operation, err: err}
+}
+
+func (e *groupApplicationIMAPOperationError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%s IMAP: %v", e.operation, e.err)
+}
+
+func (e *groupApplicationIMAPOperationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+func groupApplicationIMAPTestError(err error) error {
+	var operationErr *groupApplicationIMAPOperationError
+	if !errors.As(err, &operationErr) {
+		return infraerrors.BadRequest(
+			"GROUP_APPLICATION_IMAP_TEST_FAILED",
+			"IMAP test failed. Verify the server settings and account permissions.",
+		).WithCause(err)
+	}
+
+	var reason, message string
+	switch operationErr.operation {
+	case "connect":
+		reason = "GROUP_APPLICATION_IMAP_CONNECT_FAILED"
+		message = "Could not connect to the IMAP server. Verify the host, port, TLS mode, DNS, and outbound network access."
+	case "login":
+		reason = "GROUP_APPLICATION_IMAP_LOGIN_FAILED"
+		message = "IMAP login failed. Verify the full email address, enable IMAP access, and use a client-specific password when secure login is enabled."
+	case "list":
+		reason = "GROUP_APPLICATION_IMAP_LIST_FAILED"
+		message = "IMAP login succeeded, but mailbox folders could not be listed. Verify that the account has IMAP folder access."
+	default:
+		reason = "GROUP_APPLICATION_IMAP_TEST_FAILED"
+		message = "IMAP test failed. Verify the server settings and account permissions."
+	}
+	return infraerrors.BadRequest(reason, message).WithCause(err)
 }
 
 func groupApplicationMailboxNames(mailboxes []*imap.ListData) []string {
@@ -742,11 +795,11 @@ func openGroupApplicationIMAPClient(ctx context.Context, cfg *GroupApplicationIM
 		client, err = imapclient.DialTLS(address, options)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("connect IMAP: %w", err)
+		return nil, newGroupApplicationIMAPOperationError("connect", err)
 	}
 	if err = client.Login(cfg.Username, cfg.Password).Wait(); err != nil {
 		client.Close()
-		return nil, fmt.Errorf("login IMAP: %w", err)
+		return nil, newGroupApplicationIMAPOperationError("login", err)
 	}
 	return client, nil
 }
@@ -759,7 +812,7 @@ func openGroupApplicationMailbox(ctx context.Context, cfg *GroupApplicationIMAPC
 	selectData, err := client.Select(cfg.Mailbox, nil).Wait()
 	if err != nil {
 		client.Close()
-		return nil, nil, fmt.Errorf("select IMAP mailbox: %w", err)
+		return nil, nil, newGroupApplicationIMAPOperationError("select", err)
 	}
 	return client, selectData, nil
 }

@@ -607,6 +607,7 @@ import GroupApplicationCommunicationTimeline from "@/components/admin/groupAppli
 import { adminAPI } from "@/api";
 import { useAppStore } from "@/stores/app";
 import type { AdminGroup } from "@/types";
+import { extractI18nErrorMessage } from "@/utils/apiError";
 import {
   groupApplicationsAdminAPI,
   defaultGroupApplicationTemplates,
@@ -719,7 +720,12 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : t("common.error");
+  return extractI18nErrorMessage(
+    error,
+    t,
+    "admin.groupApplications.errors",
+    t("common.error"),
+  );
 }
 async function loadApplications() {
   loading.value = true;

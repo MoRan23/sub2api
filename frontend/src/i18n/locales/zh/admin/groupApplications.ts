@@ -44,7 +44,7 @@ export default {
 	smtpTitle: "SMTP 发信",
 	smtpHint: "用于发送批准、完成、拒绝、回复不匹配和撤销邮件。",
 	imapTitle: "IMAP 回信",
-	imapHint: "用于读取用户对批准邮件的严格字符串回复。邮箱目录通常为 INBOX。",
+		imapHint: "用于读取用户对批准邮件的严格字符串回复。邮箱目录通常为 INBOX；开启安全登录时，请使用客户端专用密码而非网页登录密码。",
 	reuseSMTPCredentials: "复用 SMTP 用户名和密码",
 	reuseSMTPCredentialsHint: "适合同一个邮箱账号同时承担发信和收信。",
 	senderAddress: "发件地址",
@@ -93,6 +93,15 @@ export default {
       reply_mismatch: "确认内容不匹配",
       ignored_sender: "发件人不匹配",
       error: "处理异常",
+    },
+    errors: {
+      GROUP_APPLICATION_IMAP_CONNECT_FAILED:
+        "无法连接 IMAP 服务器，请检查主机、端口、TLS 模式、DNS 和服务器出站网络。",
+      GROUP_APPLICATION_IMAP_LOGIN_FAILED:
+        "IMAP 登录失败，请确认使用完整邮箱地址、账号已启用 IMAP；开启安全登录时请使用客户端专用密码。",
+      GROUP_APPLICATION_IMAP_LIST_FAILED:
+        "IMAP 登录成功，但无法读取邮箱目录，请检查该账号的 IMAP 目录访问权限。",
+      GROUP_APPLICATION_IMAP_TEST_FAILED: "IMAP 测试失败，请检查服务器设置和账号权限。",
     },
   },
 };
