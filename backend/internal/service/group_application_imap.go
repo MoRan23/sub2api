@@ -25,6 +25,7 @@ import (
 	"github.com/emersion/go-imap/v2/imapclient"
 	_ "github.com/emersion/go-message/charset"
 	mailmessage "github.com/emersion/go-message/mail"
+	"github.com/emersion/go-sasl"
 	"github.com/google/uuid"
 )
 
@@ -886,6 +887,20 @@ func (c *groupApplicationIMAPClient) Close() error {
 	return c.Client.Close()
 }
 
+func authenticateGroupApplicationIMAPClient(client *imapclient.Client, username, password string) error {
+	caps := client.Caps()
+	if caps == nil {
+		return errors.New("could not read IMAP server capabilities")
+	}
+	if caps.Has(imap.AuthCap(sasl.Plain)) {
+		return client.Authenticate(sasl.NewPlainClient("", username, password))
+	}
+	if caps.Has(imap.CapLoginDisabled) {
+		return errors.New("IMAP server does not advertise a supported password authentication mechanism")
+	}
+	return client.Login(username, password).Wait()
+}
+
 func openGroupApplicationIMAPClient(ctx context.Context, cfg *GroupApplicationIMAPConfig) (*groupApplicationIMAPClient, error) {
 	if cfg == nil {
 		return nil, errors.New("missing IMAP config")
@@ -917,7 +932,14 @@ func openGroupApplicationIMAPClient(ctx context.Context, cfg *GroupApplicationIM
 		return nil, newGroupApplicationIMAPOperationError("connect", err)
 	}
 	wrapped := &groupApplicationIMAPClient{Client: client, stopContextClose: stopContextClose}
-	if err = client.Login(cfg.Username, cfg.Password).Wait(); err != nil {
+	if err = client.WaitGreeting(); err != nil {
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		wrapped.Close()
+		return nil, newGroupApplicationIMAPOperationError("connect", err)
+	}
+	if err = authenticateGroupApplicationIMAPClient(client, cfg.Username, cfg.Password); err != nil {
 		if ctx.Err() != nil {
 			err = ctx.Err()
 		}

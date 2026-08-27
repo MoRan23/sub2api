@@ -3,9 +3,12 @@
 package service
 
 import (
+	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -17,6 +20,7 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/emersion/go-imap/v2"
+	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/stretchr/testify/require"
 )
 
@@ -486,6 +490,194 @@ func TestGroupApplicationWorkerBlockedIMAPDoesNotStarveMailOutbox(t *testing.T) 
 	require.False(t, health.LastMailCheckAt.IsZero())
 	require.Empty(t, health.LastMailError)
 	require.Equal(t, 1, sender.sends)
+}
+
+func newGroupApplicationIMAPAuthTestClient(
+	t *testing.T,
+	greeting string,
+	serve func(*bufio.Reader, net.Conn) error,
+) (*imapclient.Client, <-chan error) {
+	t.Helper()
+	clientConn, serverConn := net.Pipe()
+	result := make(chan error, 1)
+	go func() {
+		defer serverConn.Close()
+		if _, err := io.WriteString(serverConn, greeting+"\r\n"); err != nil {
+			result <- err
+			return
+		}
+		result <- serve(bufio.NewReader(serverConn), serverConn)
+	}()
+	client := imapclient.New(clientConn, nil)
+	t.Cleanup(func() { _ = client.Close() })
+	return client, result
+}
+
+func readGroupApplicationIMAPAuthTestLine(reader *bufio.Reader) (string, error) {
+	line, err := reader.ReadString('\n')
+	return strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r"), err
+}
+
+func requireGroupApplicationIMAPAuthTestServer(t *testing.T, result <-chan error) {
+	t.Helper()
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("test IMAP server did not finish")
+	}
+}
+
+func expectNoGroupApplicationIMAPAuthFallback(reader *bufio.Reader, conn net.Conn) error {
+	if err := conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		return err
+	}
+	line, err := readGroupApplicationIMAPAuthTestLine(reader)
+	if err == nil {
+		return fmt.Errorf("unexpected authentication fallback: %s", line)
+	}
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		return nil
+	}
+	return err
+}
+
+func TestAuthenticateGroupApplicationIMAPClientPrefersSASLPlain(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		saslIR bool
+	}{
+		{name: "continuation"},
+		{name: "initial_response", saslIR: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capabilities := "IMAP4rev1 AUTH=PLAIN"
+			if test.saslIR {
+				capabilities += " SASL-IR"
+			}
+			client, serverResult := newGroupApplicationIMAPAuthTestClient(
+				t,
+				"* OK [CAPABILITY "+capabilities+"] ready",
+				func(reader *bufio.Reader, conn net.Conn) error {
+					line, err := readGroupApplicationIMAPAuthTestLine(reader)
+					if err != nil {
+						return err
+					}
+					fields := strings.Fields(line)
+					if len(fields) < 3 || fields[1] != "AUTHENTICATE" || fields[2] != "PLAIN" {
+						return fmt.Errorf("unexpected authentication command: %s", line)
+					}
+					var encoded string
+					if test.saslIR {
+						if len(fields) != 4 {
+							return fmt.Errorf("missing SASL initial response: %s", line)
+						}
+						encoded = fields[3]
+					} else {
+						if len(fields) != 3 {
+							return fmt.Errorf("unexpected SASL initial response: %s", line)
+						}
+						if _, err := io.WriteString(conn, "+ \r\n"); err != nil {
+							return err
+						}
+						encoded, err = readGroupApplicationIMAPAuthTestLine(reader)
+						if err != nil {
+							return err
+						}
+					}
+					response, err := base64.StdEncoding.DecodeString(encoded)
+					if err != nil {
+						return err
+					}
+					if string(response) != "\x00inbox@example.com\x00secret" {
+						return errors.New("unexpected SASL PLAIN credentials")
+					}
+					_, err = fmt.Fprintf(conn, "%s OK authenticated\r\n", fields[0])
+					return err
+				},
+			)
+
+			require.NoError(t, authenticateGroupApplicationIMAPClient(client, "inbox@example.com", "secret"))
+			requireGroupApplicationIMAPAuthTestServer(t, serverResult)
+		})
+	}
+}
+
+func TestAuthenticateGroupApplicationIMAPClientFallsBackToLoginWhenPlainIsUnavailable(t *testing.T) {
+	client, serverResult := newGroupApplicationIMAPAuthTestClient(
+		t,
+		"* OK [CAPABILITY IMAP4rev1] ready",
+		func(reader *bufio.Reader, conn net.Conn) error {
+			line, err := readGroupApplicationIMAPAuthTestLine(reader)
+			if err != nil {
+				return err
+			}
+			fields := strings.Fields(line)
+			if len(fields) != 4 || fields[1] != "LOGIN" || fields[2] != `"inbox@example.com"` || fields[3] != `"secret"` {
+				return fmt.Errorf("unexpected authentication command: %s", line)
+			}
+			_, err = fmt.Fprintf(conn, "%s OK authenticated\r\n", fields[0])
+			return err
+		},
+	)
+
+	require.NoError(t, authenticateGroupApplicationIMAPClient(client, "inbox@example.com", "secret"))
+	requireGroupApplicationIMAPAuthTestServer(t, serverResult)
+}
+
+func TestAuthenticateGroupApplicationIMAPClientDoesNotFallbackAfterPlainFailure(t *testing.T) {
+	client, serverResult := newGroupApplicationIMAPAuthTestClient(
+		t,
+		"* OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] ready",
+		func(reader *bufio.Reader, conn net.Conn) error {
+			line, err := readGroupApplicationIMAPAuthTestLine(reader)
+			if err != nil {
+				return err
+			}
+			fields := strings.Fields(line)
+			if len(fields) != 3 || fields[1] != "AUTHENTICATE" || fields[2] != "PLAIN" {
+				return fmt.Errorf("unexpected authentication command: %s", line)
+			}
+			if _, err := io.WriteString(conn, "+ \r\n"); err != nil {
+				return err
+			}
+			if _, err := readGroupApplicationIMAPAuthTestLine(reader); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(conn, "%s NO authentication failed\r\n", fields[0]); err != nil {
+				return err
+			}
+			return expectNoGroupApplicationIMAPAuthFallback(reader, conn)
+		},
+	)
+
+	require.Error(t, authenticateGroupApplicationIMAPClient(client, "inbox@example.com", "secret"))
+	requireGroupApplicationIMAPAuthTestServer(t, serverResult)
+}
+
+func TestAuthenticateGroupApplicationIMAPClientDoesNotLoginWhenCapabilitiesFail(t *testing.T) {
+	client, serverResult := newGroupApplicationIMAPAuthTestClient(
+		t,
+		"* OK ready",
+		func(reader *bufio.Reader, conn net.Conn) error {
+			line, err := readGroupApplicationIMAPAuthTestLine(reader)
+			if err != nil {
+				return err
+			}
+			fields := strings.Fields(line)
+			if len(fields) != 2 || fields[1] != "CAPABILITY" {
+				return fmt.Errorf("unexpected command: %s", line)
+			}
+			if _, err := fmt.Fprintf(conn, "%s BAD unsupported\r\n", fields[0]); err != nil {
+				return err
+			}
+			return expectNoGroupApplicationIMAPAuthFallback(reader, conn)
+		},
+	)
+
+	err := authenticateGroupApplicationIMAPClient(client, "inbox@example.com", "secret")
+	require.ErrorContains(t, err, "capabilities")
+	requireGroupApplicationIMAPAuthTestServer(t, serverResult)
 }
 
 func TestOpenGroupApplicationIMAPClientCancelsStalledTLSConnection(t *testing.T) {
