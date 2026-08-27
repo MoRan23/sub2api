@@ -37,6 +37,7 @@ import adminComplianceAPI from './compliance'
 import auditAPI from './audit'
 import fingerprintObservationsAPI from './fingerprintObservations'
 import pluginsAPI from './plugins'
+import groupApplicationsAPI from './groupApplications'
 
 /**
  * Unified admin API object for convenient access
@@ -75,7 +76,8 @@ export const adminAPI = {
   compliance: adminComplianceAPI,
   audit: auditAPI,
   fingerprintObservations: fingerprintObservationsAPI,
-  plugins: pluginsAPI
+  plugins: pluginsAPI,
+  groupApplications: groupApplicationsAPI
 }
 
 export {
@@ -112,7 +114,8 @@ export {
   adminComplianceAPI,
   auditAPI,
   fingerprintObservationsAPI,
-  pluginsAPI
+  pluginsAPI,
+  groupApplicationsAPI
 }
 
 export default adminAPI

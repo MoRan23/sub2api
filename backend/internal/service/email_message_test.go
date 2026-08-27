@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"io"
 	"mime"
+	"mime/multipart"
 	"mime/quotedprintable"
 	"net/mail"
 	"regexp"
@@ -114,4 +115,31 @@ func TestBuildSMTPMessageUsesUniqueMessageIDs(t *testing.T) {
 	secondParsed, err := mail.ReadMessage(bytes.NewReader(second.data))
 	require.NoError(t, err)
 	require.NotEqual(t, firstParsed.Header.Get("Message-ID"), secondParsed.Header.Get("Message-ID"))
+}
+
+func TestBuildSMTPMessageWithFixedIDReplyToAndPDFAttachment(t *testing.T) {
+	config := &SMTPConfig{Host: "smtp.example.com", From: "sender@example.com"}
+	message, err := buildSMTPMessageWithOptions(config, "user@example.net", "Agreement", "<p>Reply exactly</p>", EmailSendOptions{
+		MessageID: "<fixed@sub2api.local>", ReplyTo: "replies@example.com",
+		Attachment: &EmailAttachment{Filename: "协议.pdf", ContentType: "application/pdf", Data: []byte("%PDF-1.7 test")},
+	})
+	require.NoError(t, err)
+	parsed, err := mail.ReadMessage(bytes.NewReader(message.data))
+	require.NoError(t, err)
+	require.Equal(t, "<fixed@sub2api.local>", parsed.Header.Get("Message-ID"))
+	replyTo, err := mail.ParseAddress(parsed.Header.Get("Reply-To"))
+	require.NoError(t, err)
+	require.Equal(t, "replies@example.com", replyTo.Address)
+	mediaType, params, err := mime.ParseMediaType(parsed.Header.Get("Content-Type"))
+	require.NoError(t, err)
+	require.Equal(t, "multipart/mixed", mediaType)
+	parts := multipart.NewReader(parsed.Body, params["boundary"])
+	bodyPart, err := parts.NextPart()
+	require.NoError(t, err)
+	body, err := io.ReadAll(quotedprintable.NewReader(bodyPart))
+	require.NoError(t, err)
+	require.Contains(t, string(body), "Reply exactly")
+	attachmentPart, err := parts.NextPart()
+	require.NoError(t, err)
+	require.Equal(t, "attachment", strings.Split(attachmentPart.Header.Get("Content-Disposition"), ";")[0])
 }

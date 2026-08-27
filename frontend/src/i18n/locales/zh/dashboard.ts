@@ -64,6 +64,15 @@ export default {
     subscription: '订阅'
   },
 
+  groupApplications: {
+    title: '申请专属分组', apply: '申请分组', newApplication: '提交新申请',
+    emailNotice: '审核结果和协议将发送到联系邮箱；批准后必须从该邮箱严格回复指定内容。',
+    group: '分组', selectGroup: '请选择分组', contactEmail: '联系邮箱', reason: '申请理由', submit: '提交申请', submitted: '申请已提交',
+    history: '申请进度', noHistory: '暂无申请记录', awaitingReplyHint: '批准邮件已进入发送队列。收到后请阅读附件，并仅回复邮件中要求的确认词。',
+    decisionReason: '处理理由', emailFailed: '邮件发送失败，请联系管理员重试',
+    status: { pending: '待审核', awaiting_reply: '等待邮件确认', completed: '已完成', rejected: '已拒绝', revoked: '已撤销' }
+  },
+
   // API Keys
   keys: {
     title: 'API 密钥',

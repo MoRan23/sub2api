@@ -64,6 +64,15 @@ export default {
     subscription: 'Sub'
   },
 
+  groupApplications: {
+    title: 'Apply for a Group', apply: 'Apply for Group', newApplication: 'New application',
+    emailNotice: 'The decision and agreement are sent to the contact email. After approval, the required phrase must be replied from that address exactly.',
+    group: 'Group', selectGroup: 'Select a group', contactEmail: 'Contact email', reason: 'Application reason', submit: 'Submit application', submitted: 'Application submitted',
+    history: 'Application progress', noHistory: 'No applications yet', awaitingReplyHint: 'The approval email is queued. Read the attachment and reply with only the exact confirmation phrase.',
+    decisionReason: 'Decision reason', emailFailed: 'Email delivery failed; contact an administrator to retry',
+    status: { pending: 'Pending', awaiting_reply: 'Awaiting email confirmation', completed: 'Completed', rejected: 'Rejected', revoked: 'Revoked' }
+  },
+
   // API Keys
   keys: {
     title: 'API Keys',

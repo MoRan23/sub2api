@@ -42,6 +42,7 @@ func RegisterAdminRoutes(
 
 		// 分组管理
 		registerGroupRoutes(admin, h)
+		registerGroupApplicationRoutes(admin, h)
 
 		// 账号管理
 		registerAccountRoutes(admin, h, stepUpAuth)
@@ -351,6 +352,31 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		groups.PUT("/:id/rpm-overrides", h.Admin.Group.BatchSetGroupRPMOverrides)
 		groups.DELETE("/:id/rpm-overrides", h.Admin.Group.ClearGroupRPMOverrides)
 		groups.GET("/:id/api-keys", h.Admin.Group.GetGroupAPIKeys)
+	}
+}
+
+func registerGroupApplicationRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	applications := admin.Group("/group-applications")
+	{
+		applications.GET("", h.Admin.GroupApplication.List)
+		applications.GET("/worker-status", h.Admin.GroupApplication.WorkerStatus)
+		applications.GET("/imap", h.Admin.GroupApplication.GetIMAPConfig)
+		applications.PUT("/imap", h.Admin.GroupApplication.SaveIMAPConfig)
+			applications.POST("/imap/test", h.Admin.GroupApplication.TestIMAP)
+			applications.GET("/:id/communications", h.Admin.GroupApplication.ListCommunications)
+			applications.GET("/:id/communications/export", h.Admin.GroupApplication.ExportCommunications)
+			applications.GET("/:id", h.Admin.GroupApplication.Get)
+		applications.POST("/:id/approve", h.Admin.GroupApplication.Approve)
+		applications.POST("/:id/reject", h.Admin.GroupApplication.Reject)
+		applications.POST("/:id/revoke", h.Admin.GroupApplication.Revoke)
+		applications.POST("/:id/resend-approval", h.Admin.GroupApplication.ResendApproval)
+		applications.POST("/:id/mails/:outbox_id/retry", h.Admin.GroupApplication.RetryMail)
+	}
+	policies := admin.Group("/group-application-policies")
+	{
+		policies.GET("", h.Admin.GroupApplication.ListPolicies)
+		policies.PUT("/:group_id", h.Admin.GroupApplication.SavePolicy)
+		policies.GET("/attachments/:attachment_id", h.Admin.GroupApplication.DownloadAttachment)
 	}
 }
 

@@ -34,6 +34,14 @@
       <template #actions>
         <div class="flex justify-end gap-3">
           <button
+            v-if="groupApplicationSummary && (groupApplicationSummary.available_count > 0 || groupApplicationSummary.has_history)"
+            class="btn btn-secondary"
+            @click="showGroupApplicationDialog = true"
+          >
+            <Icon name="mail" size="md" class="mr-2" />
+            {{ t('groupApplications.apply') }}
+          </button>
+          <button
             @click="loadApiKeys"
             :disabled="loading"
             class="btn btn-secondary"
@@ -1113,6 +1121,11 @@
         </div>
       </div>
     </Teleport>
+    <GroupApplicationDialog
+      :show="showGroupApplicationDialog"
+      @close="showGroupApplicationDialog = false"
+      @changed="loadGroupApplicationSummary"
+    />
   </AppLayout>
 </template>
 
@@ -1125,7 +1138,7 @@
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 
 const { t } = useI18n()
-import { keysAPI, authAPI, usageAPI, userGroupsAPI } from '@/api'
+import { keysAPI, authAPI, usageAPI, userGroupsAPI, groupApplicationsAPI, type GroupApplicationSummary } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 	import DataTable from '@/components/common/DataTable.vue'
@@ -1138,6 +1151,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 	import Icon from '@/components/icons/Icon.vue'
 	import UseKeyModal from '@/components/keys/UseKeyModal.vue'
 	import EndpointPopover from '@/components/keys/EndpointPopover.vue'
+	import GroupApplicationDialog from '@/components/keys/GroupApplicationDialog.vue'
 	import GroupBadge from '@/components/common/GroupBadge.vue'
 	import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform, UpdateApiKeyRequest } from '@/types'
@@ -1302,6 +1316,8 @@ const showResetRateLimitDialog = ref(false)
 const showUseKeyModal = ref(false)
 const showCcsClientSelect = ref(false)
 const showColumnDropdown = ref(false)
+const showGroupApplicationDialog = ref(false)
+const groupApplicationSummary = ref<GroupApplicationSummary | null>(null)
 const pendingCcsRow = ref<ApiKey | null>(null)
 const selectedKey = ref<ApiKey | null>(null)
 const copiedKeyId = ref<number | null>(null)
@@ -1953,12 +1969,21 @@ function formatResetTime(resetAt: string | null): string {
   return `${mins}m`
 }
 
+async function loadGroupApplicationSummary() {
+  try {
+    groupApplicationSummary.value = await groupApplicationsAPI.summary()
+  } catch {
+    groupApplicationSummary.value = null
+  }
+}
+
 onMounted(() => {
   loadSavedColumns()
   loadApiKeys()
   loadGroups()
   loadUserGroupRates()
   loadPublicSettings()
+  loadGroupApplicationSummary()
   document.addEventListener('click', closeGroupSelector)
   resetTimer = setInterval(() => { now.value = new Date() }, 60000)
 })

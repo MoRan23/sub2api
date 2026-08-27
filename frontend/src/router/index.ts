@@ -474,6 +474,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/group-applications',
+    name: 'AdminGroupApplications',
+    component: () => import('@/views/admin/GroupApplicationsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Group Applications',
+      titleKey: 'admin.groupApplications.title',
+      descriptionKey: 'admin.groupApplications.description'
+    }
+  },
+  {
     path: '/admin/channels',
     redirect: '/admin/channels/pricing'
   },

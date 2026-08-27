@@ -95,6 +95,15 @@ func RegisterUserRoutes(
 			channels.GET("/available", h.AvailableChannel.List)
 		}
 
+		groupApplications := authenticated.Group("/group-applications")
+		{
+			groupApplications.GET("/summary", h.GroupApplication.Summary)
+			groupApplications.GET("/options", h.GroupApplication.Options)
+			groupApplications.GET("", h.GroupApplication.List)
+			groupApplications.POST("", h.GroupApplication.Create)
+			groupApplications.GET("/:id", h.GroupApplication.Get)
+		}
+
 		// 使用记录（聚合统计属重查询，叠加更严格的按用户限流）
 		usage := authenticated.Group("/usage")
 		usage.Use(panelRateLimiter.Heavy())

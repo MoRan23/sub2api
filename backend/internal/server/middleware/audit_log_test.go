@@ -24,12 +24,24 @@ func TestDeriveAuditAction(t *testing.T) {
 		{"POST", "/api/v1/admin/accounts", "admin.accounts.create"},
 		{"DELETE", "/api/v1/admin/backups/:id", "admin.backups.delete"},
 		{"GET", "/api/v1/admin/users/:id/api-keys", "admin.users.api_keys.read"},
+		{"GET", "/api/v1/admin/group-applications/:id/communications", "admin.group_applications.communications.read"},
+		{"GET", "/api/v1/admin/group-applications/:id/communications/export", "admin.group_applications.communications.export.read"},
 		{"POST", "/api/v1/admin/redeem-codes/batch", "admin.redeem_codes.batch.create"},
 	}
 	for _, tc := range cases {
 		if got := deriveAuditAction(tc.method, tc.path); got != tc.want {
 			t.Fatalf("deriveAuditAction(%q, %q) = %q, want %q", tc.method, tc.path, got, tc.want)
 		}
+	}
+}
+
+func TestGroupApplicationCommunicationReadsHaveStableAuditActions(t *testing.T) {
+	expected := map[string]string{
+		"GET /api/v1/admin/group-applications/:id/communications":        "admin.group_applications.communications.read",
+		"GET /api/v1/admin/group-applications/:id/communications/export": "admin.group_applications.communications.export",
+	}
+	for route, action := range expected {
+		require.Equal(t, action, auditSensitiveReads[route])
 	}
 }
 

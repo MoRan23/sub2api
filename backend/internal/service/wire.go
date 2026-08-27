@@ -905,6 +905,8 @@ var ProviderSet = wire.NewSet(
 	NewEmailService,
 	NewNotificationEmailService,
 	ProvideEmailQueueService,
+	NewGroupApplicationService,
+	ProvideGroupApplicationWorker,
 	NewTurnstileService,
 	NewTencentCaptchaService,
 	NewAliyunCaptchaService,

@@ -183,12 +183,27 @@ func (s *EmailService) SendEmail(ctx context.Context, to, subject, body string) 
 	return s.SendEmailWithConfig(config, to, subject, body)
 }
 
+// SendEmailWithOptions sends an email through the configured SMTP transport.
+// A caller-supplied Message-ID makes durable outbox retries idempotently
+// correlatable, while Attachment is encoded as a MIME part when present.
+func (s *EmailService) SendEmailWithOptions(ctx context.Context, to, subject, body string, options EmailSendOptions) error {
+	config, err := s.GetSMTPConfig(ctx)
+	if err != nil {
+		return err
+	}
+	return s.SendEmailWithConfigAndOptions(config, to, subject, body, options)
+}
+
 const smtpDialTimeout = 10 * time.Second
 const smtpIOTimeout = 20 * time.Second
 
 // SendEmailWithConfig 使用指定配置发送邮件
 func (s *EmailService) SendEmailWithConfig(config *SMTPConfig, to, subject, body string) error {
-	message, err := buildSMTPMessage(config, to, subject, body)
+	return s.SendEmailWithConfigAndOptions(config, to, subject, body, EmailSendOptions{})
+}
+
+func (s *EmailService) SendEmailWithConfigAndOptions(config *SMTPConfig, to, subject, body string, options EmailSendOptions) error {
+	message, err := buildSMTPMessageWithOptions(config, to, subject, body, options)
 	if err != nil {
 		return err
 	}
