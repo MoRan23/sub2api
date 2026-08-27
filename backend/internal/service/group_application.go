@@ -30,23 +30,32 @@ const (
 	GroupApplicationMailReplyMismatch   = "reply_mismatch"
 	GroupApplicationMailRevocation      = "revocation"
 
-	GroupApplicationMaxAttachmentBytes    = 10 << 20
-	GroupApplicationMaxStoredReplyRunes   = 8000
-	GroupApplicationMaxStoredSubjectRunes = 500
-	SettingKeyGroupApplicationEmail       = "group_application_email_config"
-	SettingKeyGroupApplicationIMAP        = "group_application_imap_config" // legacy read-only fallback
+	GroupApplicationReplyStatusAwaitingReply = "awaiting_reply"
+	GroupApplicationReplyStatusCompleted     = "completed"
+
+	GroupApplicationMaxAttachmentBytes        = 10 << 20
+	GroupApplicationMaxStoredReplyRunes       = 8000
+	GroupApplicationMaxStoredSubjectRunes     = 500
+	groupApplicationMaxMessageIDCandidates    = 32
+	groupApplicationMaxMessageIDTokenBytes    = 255
+	groupApplicationMaxStoredMessageIDRunes   = 255
+	groupApplicationMaxStoredFromAddressRunes = 320
+	groupApplicationMaxStoredReferencesRunes  = 8192
+	SettingKeyGroupApplicationEmail           = "group_application_email_config"
+	SettingKeyGroupApplicationIMAP            = "group_application_imap_config" // legacy read-only fallback
 
 	GroupApplicationCommunicationOutbound = "outbound"
 	GroupApplicationCommunicationInbound  = "inbound"
 )
 
 var (
-	ErrGroupApplicationUnavailable = infraerrors.BadRequest("GROUP_APPLICATION_UNAVAILABLE", "group is not available for application")
-	ErrGroupApplicationDisabled    = infraerrors.Conflict("GROUP_APPLICATION_DISABLED", "group application workflow is disabled")
-	ErrGroupApplicationConflict    = infraerrors.Conflict("GROUP_APPLICATION_CONFLICT", "an active or completed application already exists for this group")
-	ErrGroupApplicationNotFound    = infraerrors.NotFound("GROUP_APPLICATION_NOT_FOUND", "group application not found")
-	ErrGroupApplicationState       = infraerrors.Conflict("GROUP_APPLICATION_STATE_CONFLICT", "group application status has changed")
-	ErrGroupApplicationEmail       = infraerrors.BadRequest("GROUP_APPLICATION_EMAIL_INVALID", "valid standalone group application email configuration is required")
+	ErrGroupApplicationUnavailable    = infraerrors.BadRequest("GROUP_APPLICATION_UNAVAILABLE", "group is not available for application")
+	ErrGroupApplicationDisabled       = infraerrors.Conflict("GROUP_APPLICATION_DISABLED", "group application workflow is disabled")
+	ErrGroupApplicationConflict       = infraerrors.Conflict("GROUP_APPLICATION_CONFLICT", "an active or completed application already exists for this group")
+	ErrGroupApplicationNotFound       = infraerrors.NotFound("GROUP_APPLICATION_NOT_FOUND", "group application not found")
+	ErrGroupApplicationState          = infraerrors.Conflict("GROUP_APPLICATION_STATE_CONFLICT", "group application status has changed")
+	ErrGroupApplicationEmail          = infraerrors.BadRequest("GROUP_APPLICATION_EMAIL_INVALID", "valid standalone group application email configuration is required")
+	ErrGroupApplicationReplyAmbiguous = errors.New("group application reply references multiple active applications")
 )
 
 type GroupApplicationLocalizedTemplate struct {
@@ -109,14 +118,18 @@ type GroupApplication struct {
 }
 
 type GroupApplicationMailStatus struct {
-	ID        int64      `json:"id"`
-	Kind      string     `json:"kind"`
-	MessageID string     `json:"message_id"`
-	Status    string     `json:"status"`
-	Attempts  int        `json:"attempts"`
-	LastError string     `json:"last_error,omitempty"`
-	SentAt    *time.Time `json:"sent_at,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
+	ID             int64      `json:"id"`
+	Kind           string     `json:"kind"`
+	MessageID      string     `json:"message_id"`
+	Status         string     `json:"status"`
+	RequiredStatus string     `json:"-"`
+	ReplyStatus    string     `json:"reply_status,omitempty"`
+	DeliveryActive bool       `json:"delivery_active,omitempty"`
+	Retryable      bool       `json:"retryable,omitempty"`
+	Attempts       int        `json:"attempts"`
+	LastError      string     `json:"last_error,omitempty"`
+	SentAt         *time.Time `json:"sent_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 type GroupApplicationCommunication struct {
@@ -140,6 +153,10 @@ type GroupApplicationCommunication struct {
 	AttachmentName     string     `json:"attachment_name,omitempty"`
 	AttachmentSize     int64      `json:"attachment_size,omitempty"`
 	Status             string     `json:"status,omitempty"`
+	RequiredStatus     string     `json:"-"`
+	ReplyStatus        string     `json:"reply_status,omitempty"`
+	DeliveryActive     bool       `json:"delivery_active,omitempty"`
+	Retryable          bool       `json:"retryable,omitempty"`
 	Attempts           int        `json:"attempts,omitempty"`
 	LastError          string     `json:"last_error,omitempty"`
 	SentAt             *time.Time `json:"sent_at,omitempty"`
@@ -416,6 +433,7 @@ func DefaultGroupApplicationTemplates() GroupApplicationTemplateSet {
 
 var groupApplicationTemplateToken = regexp.MustCompile(`\{\{\s*([a-z_]+)\s*\}\}`)
 var groupApplicationTemplateAnyToken = regexp.MustCompile(`\{\{[^{}]*\}\}`)
+var groupApplicationApprovalMessageIDFragment = regexp.MustCompile(`group-application-[1-9][0-9]{0,18}-approval-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}@sub2api\.local`)
 
 var groupApplicationAllowedTokens = map[string]struct{}{
 	"site_name": {}, "recipient": {}, "application_id": {}, "group_name": {},
@@ -546,9 +564,20 @@ func newGroupApplicationMessageID(kind string, applicationID int64) string {
 func messageIDCandidates(inReplyTo, references string) []string {
 	candidates := make(map[string]struct{})
 	for _, source := range []string{inReplyTo, references} {
-		for _, field := range strings.Fields(source) {
+		for offset := 0; offset < len(source) && len(candidates) < groupApplicationMaxMessageIDCandidates; {
+			for offset < len(source) && isGroupApplicationHeaderSpace(source[offset]) {
+				offset++
+			}
+			start := offset
+			for offset < len(source) && !isGroupApplicationHeaderSpace(source[offset]) {
+				offset++
+			}
+			if start == offset {
+				continue
+			}
+			field := source[start:offset]
 			field = strings.TrimSpace(strings.Trim(field, ",;"))
-			if strings.HasPrefix(field, "<") && strings.HasSuffix(field, ">") {
+			if isSafeGroupApplicationMessageIDCandidate(field) {
 				candidates[field] = struct{}{}
 			}
 		}
@@ -559,4 +588,55 @@ func messageIDCandidates(inReplyTo, references string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func isGroupApplicationHeaderSpace(value byte) bool {
+	switch value {
+	case ' ', '\t', '\r', '\n', '\v', '\f':
+		return true
+	default:
+		return false
+	}
+}
+
+func isSafeGroupApplicationMessageIDCandidate(value string) bool {
+	if len(value) < 3 || len(value) > groupApplicationMaxMessageIDTokenBytes || value[0] != '<' || value[len(value)-1] != '>' {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] < 0x21 || value[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+func embeddedGroupApplicationApprovalMessageIDCandidates(sources ...string) []string {
+	candidates := make(map[string]struct{})
+	for _, source := range sources {
+		for offset := 0; offset < len(source) && len(candidates) < groupApplicationMaxMessageIDCandidates; {
+			location := groupApplicationApprovalMessageIDFragment.FindStringIndex(source[offset:])
+			if location == nil {
+				break
+			}
+			fragment := source[offset+location[0] : offset+location[1]]
+			candidates["<"+fragment+">"] = struct{}{}
+			offset += location[1]
+		}
+	}
+	out := make([]string, 0, len(candidates))
+	for value := range candidates {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func groupApplicationReceiptMetadata(value string, maxRunes int) string {
+	value = strings.ReplaceAll(strings.ToValidUTF8(value, "\uFFFD"), "\x00", "")
+	runes := []rune(value)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes])
+	}
+	return value
 }

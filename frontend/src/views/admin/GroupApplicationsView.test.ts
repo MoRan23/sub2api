@@ -296,7 +296,11 @@ describe("GroupApplicationsView communication refresh", () => {
     updated_at: "2026-08-27T01:00:00Z",
   };
 
-  function approvalCommunication(status: string): GroupApplicationCommunication {
+  function approvalCommunication(
+    status: string,
+    replyStatus?: GroupApplicationCommunication["reply_status"],
+    deliveryActive = (status === "pending" || status === "processing") && replyStatus !== "completed",
+  ): GroupApplicationCommunication {
     return {
       id: 11,
       application_id: application.id,
@@ -305,12 +309,14 @@ describe("GroupApplicationsView communication refresh", () => {
       to_address: application.contact_email,
       subject: "Application approved",
       status,
+      reply_status: replyStatus,
+      delivery_active: deliveryActive,
       attempts: 0,
       occurred_at: "2026-08-27T01:01:00Z",
     };
   }
 
-  it("silently refreshes queued mail without overlapping and stops after delivery", async () => {
+  it("refreshes queued mail and remains live until the reply workflow completes", async () => {
     savedConfig = { ...initialConfig, enabled: true };
     workerWorkflowEnabled = true;
     server.use(
@@ -320,11 +326,14 @@ describe("GroupApplicationsView communication refresh", () => {
     );
     const getApplication = vi
       .spyOn(groupApplicationsAdminAPI, "get")
-      .mockResolvedValue(application);
+      .mockResolvedValueOnce(application)
+      .mockResolvedValueOnce(application)
+      .mockResolvedValue({ ...application, status: "completed" });
     const listCommunications = vi
       .spyOn(groupApplicationsAdminAPI, "listCommunications")
       .mockResolvedValueOnce([approvalCommunication("pending")])
-      .mockResolvedValue([approvalCommunication("sent")]);
+      .mockResolvedValueOnce([approvalCommunication("sent", "awaiting_reply")])
+      .mockResolvedValue([approvalCommunication("sent", "completed")]);
 
     render(GroupApplicationsView, {
       global: {
@@ -347,6 +356,117 @@ describe("GroupApplicationsView communication refresh", () => {
     expect(getApplication).toHaveBeenCalledTimes(2);
     expect(listCommunications).toHaveBeenCalledTimes(2);
     expect((resend as HTMLButtonElement).disabled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(getApplication).toHaveBeenCalledTimes(3);
+    expect(listCommunications).toHaveBeenCalledTimes(3);
+
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(listCommunications).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not keep refreshing a queued approval whose reply workflow is complete", async () => {
+    server.use(
+      http.get("*/api/v1/admin/group-applications", () =>
+        HttpResponse.json({ code: 0, data: { items: [application], total: 1 } }),
+      ),
+    );
+    vi.spyOn(groupApplicationsAdminAPI, "get").mockResolvedValue({
+      ...application,
+      status: "completed",
+    });
+    const listCommunications = vi
+      .spyOn(groupApplicationsAdminAPI, "listCommunications")
+      .mockResolvedValue([approvalCommunication("pending", "completed")]);
+
+    render(GroupApplicationsView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { AppLayout: { template: "<main><slot /></main>" } },
+      },
+    });
+
+    const applicationID = await screen.findByText("#7");
+    vi.useFakeTimers();
+    await fireEvent.click(applicationID);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(listCommunications).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(listCommunications).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps refreshing the current terminal notification until delivery finishes", async () => {
+    server.use(
+      http.get("*/api/v1/admin/group-applications", () =>
+        HttpResponse.json({ code: 0, data: { items: [application], total: 1 } }),
+      ),
+    );
+    vi.spyOn(groupApplicationsAdminAPI, "get").mockResolvedValue({
+      ...application,
+      status: "completed",
+    });
+    const notification: GroupApplicationCommunication = {
+      id: 12,
+      application_id: application.id,
+      direction: "outbound",
+      kind: "completion",
+      status: "pending",
+      delivery_active: true,
+      occurred_at: "2026-08-27T01:02:00Z",
+    };
+    const listCommunications = vi
+      .spyOn(groupApplicationsAdminAPI, "listCommunications")
+      .mockResolvedValueOnce([approvalCommunication("sent", "completed"), notification])
+      .mockResolvedValue([
+        approvalCommunication("sent", "completed"),
+        { ...notification, status: "sent", delivery_active: false },
+      ]);
+
+    render(GroupApplicationsView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { AppLayout: { template: "<main><slot /></main>" } },
+      },
+    });
+
+    const applicationID = await screen.findByText("#7");
+    vi.useFakeTimers();
+    await fireEvent.click(applicationID);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(listCommunications).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(listCommunications).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes once more when application and reply snapshots disagree", async () => {
+    server.use(
+      http.get("*/api/v1/admin/group-applications", () =>
+        HttpResponse.json({ code: 0, data: { items: [application], total: 1 } }),
+      ),
+    );
+    const getApplication = vi
+      .spyOn(groupApplicationsAdminAPI, "get")
+      .mockResolvedValueOnce(application)
+      .mockResolvedValue({ ...application, status: "completed" });
+    const listCommunications = vi
+      .spyOn(groupApplicationsAdminAPI, "listCommunications")
+      .mockResolvedValue([approvalCommunication("sent", "completed")]);
+
+    render(GroupApplicationsView, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { AppLayout: { template: "<main><slot /></main>" } },
+      },
+    });
+
+    const applicationID = await screen.findByText("#7");
+    vi.useFakeTimers();
+    await fireEvent.click(applicationID);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(getApplication).toHaveBeenCalledTimes(2);
+    expect(listCommunications).toHaveBeenCalledTimes(2);
 
     await vi.advanceTimersByTimeAsync(6000);
     expect(listCommunications).toHaveBeenCalledTimes(2);

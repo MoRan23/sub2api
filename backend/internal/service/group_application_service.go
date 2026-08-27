@@ -148,7 +148,42 @@ func (s *GroupApplicationService) GetApplication(ctx context.Context, applicatio
 		return nil, err
 	}
 	application.Mails, err = s.repo.ListApplicationMails(ctx, applicationID)
-	return application, err
+	if err != nil {
+		return nil, err
+	}
+	for i := range application.Mails {
+		applyGroupApplicationMailRuntimeState(
+			application.Status,
+			application.Mails[i].Kind,
+			application.Mails[i].RequiredStatus,
+			application.Mails[i].Status,
+			&application.Mails[i].ReplyStatus,
+			&application.Mails[i].DeliveryActive,
+			&application.Mails[i].Retryable,
+		)
+	}
+	return application, nil
+}
+
+func applyGroupApplicationMailRuntimeState(applicationStatus, kind, requiredStatus, deliveryStatus string, replyStatus *string, deliveryActive, retryable *bool) {
+	if kind == GroupApplicationMailApproval {
+		*replyStatus = groupApplicationApprovalReplyStatus(applicationStatus, deliveryStatus)
+	}
+	current := requiredStatus != "" && applicationStatus == requiredStatus
+	*deliveryActive = current && (deliveryStatus == "pending" || deliveryStatus == "processing")
+	*retryable = current && deliveryStatus == "failed"
+}
+
+func groupApplicationApprovalReplyStatus(applicationStatus, deliveryStatus string) string {
+	switch applicationStatus {
+	case GroupApplicationStatusAwaitingReply:
+		if deliveryStatus == "sent" {
+			return GroupApplicationReplyStatusAwaitingReply
+		}
+	case GroupApplicationStatusCompleted, GroupApplicationStatusRejected, GroupApplicationStatusRevoked:
+		return GroupApplicationReplyStatusCompleted
+	}
+	return ""
 }
 
 type groupApplicationInboundContent struct {
@@ -185,7 +220,8 @@ func (s *GroupApplicationService) ListCommunications(ctx context.Context, applic
 	if applicationID <= 0 {
 		return nil, ErrGroupApplicationNotFound
 	}
-	if _, err := s.repo.GetApplication(ctx, applicationID); err != nil {
+	application, err := s.repo.GetApplication(ctx, applicationID)
+	if err != nil {
 		return nil, err
 	}
 	items, err := s.repo.ListApplicationCommunications(ctx, applicationID)
@@ -194,6 +230,17 @@ func (s *GroupApplicationService) ListCommunications(ctx context.Context, applic
 	}
 	for i := range items {
 		item := &items[i]
+		if item.Direction == GroupApplicationCommunicationOutbound {
+			applyGroupApplicationMailRuntimeState(
+				application.Status,
+				item.Kind,
+				item.RequiredStatus,
+				item.Status,
+				&item.ReplyStatus,
+				&item.DeliveryActive,
+				&item.Retryable,
+			)
+		}
 		if item.Direction != GroupApplicationCommunicationInbound {
 			continue
 		}

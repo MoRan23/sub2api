@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"regexp"
 	"testing"
 	"time"
@@ -148,5 +149,73 @@ func TestGroupApplicationRepositoryClaimMailCancelsOnlyLaterPendingApprovalsBefo
 
 	require.NoError(t, err)
 	require.Empty(t, jobs)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestGroupApplicationRepositoryFindApprovalOnlyMatchesOpenReplyWorkflow(t *testing.T) {
+	repo, mock := newGroupApplicationOutboxTestRepository(t)
+	mock.ExpectQuery(`(?s)WHERE a\.status='awaiting_reply' AND o\.kind='approval' AND o\.status='sent' AND o\.message_id=ANY\(\$1\)`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	match, err := repo.FindApprovalByMessageIDs(
+		context.Background(),
+		[]string{"<group-application-7-approval-3d579da3-3c63-4b1c-9684-954714939bd5@sub2api.local>"},
+	)
+
+	require.Nil(t, match)
+	require.ErrorIs(t, err, service.ErrGroupApplicationNotFound)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func groupApplicationApprovalMatchRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"id", "user_id", "user_email", "group_id", "group_name", "contact_email", "reason", "locale", "status",
+		"reply_phrase_snapshot", "templates_snapshot", "attachment_id", "attachment_name", "reviewed_by", "reviewed_at",
+		"decision_reason", "completed_at", "revoked_by", "revoked_at", "last_email_kind", "last_email_status",
+		"last_email_error", "created_at", "updated_at", "matched_message_id",
+	})
+}
+
+func addGroupApplicationApprovalMatchRow(rows *sqlmock.Rows, applicationID int64, messageID string) *sqlmock.Rows {
+	now := time.Date(2026, time.August, 27, 12, 0, 0, 0, time.UTC)
+	templates, _ := json.Marshal(service.DefaultGroupApplicationTemplates())
+	return rows.AddRow(
+		applicationID, int64(9), "user@example.com", int64(4), "Private", "applicant@example.com", "reason", "en",
+		service.GroupApplicationStatusAwaitingReply, "CONFIRM", templates, int64(3), "agreement.pdf", nil, nil, "", nil,
+		nil, nil, service.GroupApplicationMailApproval, "sent", "", now, now, messageID,
+	)
+}
+
+func TestGroupApplicationRepositoryFindApprovalAcceptsMultipleMessagesForOneApplication(t *testing.T) {
+	repo, mock := newGroupApplicationOutboxTestRepository(t)
+	const first = "<group-application-7-approval-3d579da3-3c63-4b1c-9684-954714939bd5@sub2api.local>"
+	const latest = "<group-application-7-approval-29aa2182-7493-46a9-9075-118cc82c9203@sub2api.local>"
+	rows := addGroupApplicationApprovalMatchRow(groupApplicationApprovalMatchRows(), 7, latest)
+	mock.ExpectQuery(`(?s)WITH matched AS .*DISTINCT ON \(application_id\).*LIMIT 2`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(rows)
+
+	match, err := repo.FindApprovalByMessageIDs(context.Background(), []string{first, latest})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(7), match.Application.ID)
+	require.Equal(t, latest, match.MessageID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestGroupApplicationRepositoryFindApprovalRejectsCrossApplicationAmbiguity(t *testing.T) {
+	repo, mock := newGroupApplicationOutboxTestRepository(t)
+	rows := groupApplicationApprovalMatchRows()
+	addGroupApplicationApprovalMatchRow(rows, 7, "<first@sub2api.local>")
+	addGroupApplicationApprovalMatchRow(rows, 8, "<second@sub2api.local>")
+	mock.ExpectQuery(`(?s)WITH matched AS .*DISTINCT ON \(application_id\).*LIMIT 2`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(rows)
+
+	match, err := repo.FindApprovalByMessageIDs(context.Background(), []string{"<first@sub2api.local>", "<second@sub2api.local>"})
+
+	require.Nil(t, match)
+	require.ErrorIs(t, err, service.ErrGroupApplicationReplyAmbiguous)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

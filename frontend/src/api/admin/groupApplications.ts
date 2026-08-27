@@ -39,6 +39,9 @@ export interface GroupApplicationMailStatus {
   kind: GroupApplicationMailKind;
   message_id: string;
   status: string;
+  reply_status?: "awaiting_reply" | "completed";
+  delivery_active?: boolean;
+  retryable?: boolean;
   attempts: number;
   last_error?: string;
   sent_at?: string;
@@ -66,6 +69,9 @@ export interface GroupApplicationCommunication {
   attachment_name?: string;
   attachment_size?: number;
   status?: string;
+  reply_status?: "awaiting_reply" | "completed";
+  delivery_active?: boolean;
+  retryable?: boolean;
   attempts?: number;
   last_error?: string;
   sent_at?: string;

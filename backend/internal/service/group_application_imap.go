@@ -1022,18 +1022,21 @@ func (w *GroupApplicationWorker) pollIMAP(ctx context.Context, cfg *GroupApplica
 			}
 			continue
 		}
-		receipt.MessageID = parsed.MessageID
-		receipt.FromAddress = parsed.From
-		receipt.InReplyTo = parsed.InReplyTo
-		receipt.References = parsed.References
+		receipt.MessageID = groupApplicationReceiptMetadata(parsed.MessageID, groupApplicationMaxStoredMessageIDRunes)
+		receipt.FromAddress = groupApplicationReceiptMetadata(parsed.From, groupApplicationMaxStoredFromAddressRunes)
+		receipt.InReplyTo = groupApplicationReceiptMetadata(parsed.InReplyTo, groupApplicationMaxStoredMessageIDRunes)
+		receipt.References = groupApplicationReceiptMetadata(parsed.References, groupApplicationMaxStoredReferencesRunes)
 		receipt.ReplySHA256 = GroupApplicationReplyDigest(parsed.Reply)
-		ids := messageIDCandidates(parsed.InReplyTo, parsed.References)
-		match, matchErr := w.repo.FindApprovalByMessageIDs(ctx, ids)
+		match, matchErr := findGroupApplicationApprovalByReplyMessageIDs(ctx, w.repo, parsed.InReplyTo, parsed.References)
 		if matchErr != nil {
-			if !errors.Is(matchErr, ErrGroupApplicationNotFound) {
+			if !errors.Is(matchErr, ErrGroupApplicationNotFound) && !errors.Is(matchErr, ErrGroupApplicationReplyAmbiguous) {
 				return matchErr
 			}
-			receipt.Result = "unrelated"
+			if errors.Is(matchErr, ErrGroupApplicationReplyAmbiguous) {
+				receipt.Result = "ambiguous"
+			} else {
+				receipt.Result = "unrelated"
+			}
 			_, err = w.repo.StoreReceipt(ctx, receipt)
 			if err != nil {
 				return err
@@ -1041,6 +1044,13 @@ func (w *GroupApplicationWorker) pollIMAP(ctx context.Context, cfg *GroupApplica
 			continue
 		}
 		receipt.ApplicationID = &match.Application.ID
+		if !parsed.HasPlainText {
+			receipt.Result = "unsupported_content"
+			if _, err = w.repo.StoreReceipt(ctx, receipt); err != nil {
+				return err
+			}
+			continue
+		}
 		receipt.EncryptedContent, receipt.ContentTruncated, err = w.service.protectInboundCommunication(parsed.Subject, parsed.Reply)
 		if err != nil {
 			return err
@@ -1058,7 +1068,25 @@ func (w *GroupApplicationWorker) pollIMAP(ctx context.Context, cfg *GroupApplica
 	return nil
 }
 
-type parsedGroupApplicationReply struct{ MessageID, From, InReplyTo, References, Subject, Reply string }
+func findGroupApplicationApprovalByReplyMessageIDs(ctx context.Context, repo GroupApplicationRepository, inReplyTo, references string) (*GroupApplicationApprovalMatch, error) {
+	messageIDs := messageIDCandidates(inReplyTo, references)
+	seen := make(map[string]struct{}, len(messageIDs))
+	for _, messageID := range messageIDs {
+		seen[messageID] = struct{}{}
+	}
+	for _, messageID := range embeddedGroupApplicationApprovalMessageIDCandidates(inReplyTo, references) {
+		if _, exists := seen[messageID]; !exists {
+			messageIDs = append(messageIDs, messageID)
+			seen[messageID] = struct{}{}
+		}
+	}
+	return repo.FindApprovalByMessageIDs(ctx, messageIDs)
+}
+
+type parsedGroupApplicationReply struct {
+	MessageID, From, InReplyTo, References, Subject, Reply string
+	HasPlainText                                           bool
+}
 
 func parseGroupApplicationReply(raw []byte) (parsedGroupApplicationReply, error) {
 	reader, err := mailmessage.CreateReader(bytes.NewReader(raw))
@@ -1092,6 +1120,7 @@ func parseGroupApplicationReply(raw []byte) (parsedGroupApplicationReply, error)
 		if !strings.EqualFold(contentType, "text/plain") {
 			continue
 		}
+		result.HasPlainText = true
 		body, readErr := io.ReadAll(io.LimitReader(part.Body, 2<<20))
 		if readErr != nil {
 			return parsedGroupApplicationReply{}, readErr

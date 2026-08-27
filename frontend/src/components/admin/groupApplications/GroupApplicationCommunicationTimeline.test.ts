@@ -17,6 +17,7 @@ vi.mock("vue-i18n", async (importOriginal) => {
     "admin.groupApplications.from": "From",
     "admin.groupApplications.attachment": "Attachment",
     "admin.groupApplications.attempts": "1 attempt",
+    "admin.groupApplications.replyStatuses.completed": "Reply workflow completed",
     "admin.groupApplications.templateKinds.approval": "Approval awaiting reply",
     "admin.groupApplications.communicationResults.completed": "Confirmation matched and completed",
     "admin.groupApplications.emailContentUnavailable": "Content unavailable",
@@ -38,6 +39,7 @@ const communications = [
     subject: "Application approved",
     html_body: '<p>Read the agreement</p><img src="x" onerror="alert(1)">',
     status: "failed",
+    retryable: true,
     attempts: 1,
     occurred_at: "2026-08-27T01:00:00Z",
   },
@@ -78,5 +80,39 @@ describe("GroupApplicationCommunicationTimeline", () => {
     expect(onRefresh).toHaveBeenCalledTimes(1);
     expect(onExport).toHaveBeenCalledTimes(1);
     expect(onRetry).toHaveBeenCalledWith(1);
+  });
+
+  it("keeps the delivery result but closes retry after the reply workflow completes", () => {
+    render(GroupApplicationCommunicationTimeline, {
+      props: {
+        communications: [
+          {
+            ...communications[0],
+            reply_status: "completed" as const,
+            retryable: false,
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByText(/failed.*Reply workflow completed/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("hides retry for a failed mail whose required application state has ended", () => {
+    render(GroupApplicationCommunicationTimeline, {
+      props: {
+        communications: [
+          {
+            ...communications[0],
+            kind: "completion" as const,
+            retryable: false,
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByText(/failed/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 });

@@ -132,11 +132,15 @@
             class="flex items-center justify-between gap-3 text-xs text-gray-500"
           >
             <span>
-              {{ communication.status }} ·
+              {{ communication.status }}
+              <template v-if="communication.reply_status">
+                · {{ t(`admin.groupApplications.replyStatuses.${communication.reply_status}`) }}
+              </template>
+              ·
               {{ t("admin.groupApplications.attempts", { count: communication.attempts || 0 }) }}
             </span>
             <button
-              v-if="communication.status === 'failed'"
+              v-if="communication.retryable"
               type="button"
               class="btn btn-secondary px-2 py-1 text-xs"
 			  :disabled="actionsDisabled"

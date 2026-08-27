@@ -100,6 +100,10 @@ export default {
     to: "To",
     attachment: "Attachment",
     attempts: "{count} attempts",
+    replyStatuses: {
+      awaiting_reply: "Awaiting reply",
+      completed: "Reply workflow completed",
+    },
     emailContentUnavailable:
       "The message body is unavailable, possibly because this record predates communication history.",
     emailContentTruncated: "Only the first 8,000 characters of this message were retained.",
@@ -108,6 +112,7 @@ export default {
       completed: "Confirmation matched and completed",
       reply_mismatch: "Confirmation did not match",
       ignored_sender: "Sender did not match",
+      unsupported_content: "No plain-text reply was available; the application was unchanged",
       error: "Processing error",
     },
     errors: {

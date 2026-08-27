@@ -221,16 +221,22 @@ const applicationSelect = `
 	JOIN group_application_attachments att ON att.id=a.attachment_id`
 
 func scanGroupApplication(scanner sqlScanner) (*service.GroupApplication, error) {
+	return scanGroupApplicationWithTrailing(scanner)
+}
+
+func scanGroupApplicationWithTrailing(scanner sqlScanner, trailing ...any) (*service.GroupApplication, error) {
 	var item service.GroupApplication
 	var templates []byte
 	var reviewedBy, revokedBy sql.NullInt64
 	var reviewedAt, completedAt, revokedAt sql.NullTime
-	err := scanner.Scan(
+	destinations := []any{
 		&item.ID, &item.UserID, &item.UserEmail, &item.GroupID, &item.GroupName, &item.ContactEmail,
 		&item.Reason, &item.Locale, &item.Status, &item.ReplyPhraseSnapshot, &templates, &item.AttachmentID,
 		&item.AttachmentName, &reviewedBy, &reviewedAt, &item.DecisionReason, &completedAt, &revokedBy,
 		&revokedAt, &item.LastEmailKind, &item.LastEmailStatus, &item.LastEmailError, &item.CreatedAt, &item.UpdatedAt,
-	)
+	}
+	destinations = append(destinations, trailing...)
+	err := scanner.Scan(destinations...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrGroupApplicationNotFound
 	}
@@ -280,7 +286,7 @@ func (r *groupApplicationRepository) GetApplication(ctx context.Context, applica
 
 func (r *groupApplicationRepository) ListApplicationMails(ctx context.Context, applicationID int64) ([]service.GroupApplicationMailStatus, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id,kind,message_id,status,attempts,COALESCE(last_error,''),sent_at,created_at
+		SELECT id,kind,message_id,status,required_application_status,attempts,COALESCE(last_error,''),sent_at,created_at
 		FROM group_application_mail_outbox WHERE application_id=$1 ORDER BY created_at DESC,id DESC
 	`, applicationID)
 	if err != nil {
@@ -291,7 +297,7 @@ func (r *groupApplicationRepository) ListApplicationMails(ctx context.Context, a
 	for rows.Next() {
 		var item service.GroupApplicationMailStatus
 		var sentAt sql.NullTime
-		if err := rows.Scan(&item.ID, &item.Kind, &item.MessageID, &item.Status, &item.Attempts, &item.LastError, &sentAt, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Kind, &item.MessageID, &item.Status, &item.RequiredStatus, &item.Attempts, &item.LastError, &sentAt, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		if sentAt.Valid {
@@ -307,7 +313,7 @@ func (r *groupApplicationRepository) ListApplicationCommunications(ctx context.C
 	items := make([]service.GroupApplicationCommunication, 0)
 	outboundRows, err := r.db.QueryContext(ctx, `
 		SELECT o.id,o.application_id,o.kind,o.recipient,o.subject,o.html_body,o.attachment_id,
-		       COALESCE(a.filename,''),COALESCE(a.byte_size,0),o.message_id,o.status,o.attempts,
+		       COALESCE(a.filename,''),COALESCE(a.byte_size,0),o.message_id,o.status,o.required_application_status,o.attempts,
 		       COALESCE(o.last_error,''),o.sent_at,COALESCE(o.sent_at,o.created_at)
 		FROM group_application_mail_outbox o
 		LEFT JOIN group_application_attachments a ON a.id=o.attachment_id
@@ -324,7 +330,7 @@ func (r *groupApplicationRepository) ListApplicationCommunications(ctx context.C
 		if err := outboundRows.Scan(
 			&item.ID, &item.ApplicationID, &item.Kind, &item.ToAddress, &item.Subject, &item.HTMLBody,
 			&attachmentID, &item.AttachmentName, &item.AttachmentSize, &item.MessageID, &item.Status,
-			&item.Attempts, &item.LastError, &sentAt, &item.OccurredAt,
+			&item.RequiredStatus, &item.Attempts, &item.LastError, &sentAt, &item.OccurredAt,
 		); err != nil {
 			outboundRows.Close()
 			return nil, err
@@ -704,18 +710,45 @@ func (r *groupApplicationRepository) FindApprovalByMessageIDs(ctx context.Contex
 	if len(messageIDs) == 0 {
 		return nil, service.ErrGroupApplicationNotFound
 	}
-	row := r.db.QueryRowContext(ctx, applicationSelect+`
-		JOIN group_application_mail_outbox o ON o.application_id=a.id
-		WHERE a.status='awaiting_reply' AND o.kind='approval' AND o.status='sent' AND o.message_id=ANY($1)
-		ORDER BY o.sent_at DESC LIMIT 1
+	rows, err := r.db.QueryContext(ctx, `
+		WITH matched AS (
+			SELECT o.application_id,o.message_id,o.sent_at,o.id
+			FROM group_application_mail_outbox o
+			JOIN group_applications a ON a.id=o.application_id
+			WHERE a.status='awaiting_reply' AND o.kind='approval' AND o.status='sent' AND o.message_id=ANY($1)
+		), latest_per_application AS (
+			SELECT DISTINCT ON (application_id) application_id,message_id,sent_at,id
+			FROM matched ORDER BY application_id,sent_at DESC NULLS LAST,id DESC
+		)
+		SELECT base.*,latest.message_id
+		FROM (`+applicationSelect+`) base
+		JOIN latest_per_application latest ON latest.application_id=base.id
+		ORDER BY latest.sent_at DESC NULLS LAST,latest.id DESC
+		LIMIT 2
 	`, pq.Array(messageIDs))
-	application, err := scanGroupApplication(row)
 	if err != nil {
 		return nil, err
 	}
-	var matched string
-	err = r.db.QueryRowContext(ctx, `SELECT message_id FROM group_application_mail_outbox WHERE application_id=$1 AND kind='approval' AND status='sent' AND message_id=ANY($2) ORDER BY sent_at DESC LIMIT 1`, application.ID, pq.Array(messageIDs)).Scan(&matched)
-	return &service.GroupApplicationApprovalMatch{Application: application, MessageID: matched}, err
+	defer rows.Close()
+	var match *service.GroupApplicationApprovalMatch
+	for rows.Next() {
+		if match != nil {
+			return nil, service.ErrGroupApplicationReplyAmbiguous
+		}
+		var matchedMessageID string
+		application, scanErr := scanGroupApplicationWithTrailing(rows, &matchedMessageID)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		match = &service.GroupApplicationApprovalMatch{Application: application, MessageID: matchedMessageID}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if match == nil {
+		return nil, service.ErrGroupApplicationNotFound
+	}
+	return match, nil
 }
 
 func (r *groupApplicationRepository) MaxProcessedUID(ctx context.Context, fingerprint string, uidValidity uint32) (uint32, bool, error) {

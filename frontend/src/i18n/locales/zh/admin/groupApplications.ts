@@ -89,6 +89,10 @@ export default {
     to: "收件人",
     attachment: "附件",
     attempts: "尝试 {count} 次",
+    replyStatuses: {
+      awaiting_reply: "等待回复",
+      completed: "回复流程已完成",
+    },
     emailContentUnavailable: "该历史记录没有可查看的正文（可能创建于交流历史功能启用前）。",
     emailContentTruncated: "正文过长，历史记录仅保留前 8000 个字符。",
     approvalAlreadyQueued: "已有一封批准邮件正在等待发送，请勿重复提交",
@@ -96,6 +100,7 @@ export default {
       completed: "确认匹配并完成",
       reply_mismatch: "确认内容不匹配",
       ignored_sender: "发件人不匹配",
+      unsupported_content: "未找到纯文本回复，申请状态未改变",
       error: "处理异常",
     },
     errors: {

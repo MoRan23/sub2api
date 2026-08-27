@@ -755,7 +755,7 @@ const hasQueuedApprovalMail = computed(() =>
     (communication) =>
       communication.direction === "outbound" &&
       communication.kind === "approval" &&
-      isPendingMailStatus(communication.status),
+      communication.delivery_active === true,
   ),
 );
 
@@ -799,13 +799,38 @@ async function changePage(nextPage: number) {
   page.value = nextPage;
   await loadApplications();
 }
-function isPendingMailStatus(status?: string) {
-  return status === "pending" || status === "processing";
-}
 function hasPendingOutboundMail(history: GroupApplicationCommunication[]) {
   return history.some(
     (communication) =>
-      communication.direction === "outbound" && isPendingMailStatus(communication.status),
+      communication.direction === "outbound" &&
+      communication.delivery_active === true,
+  );
+}
+function hasOpenReplyWorkflow(history: GroupApplicationCommunication[]) {
+  return history.some(
+    (communication) =>
+      communication.direction === "outbound" &&
+      communication.kind === "approval" &&
+      communication.reply_status === "awaiting_reply",
+  );
+}
+function hasReplyWorkflowSnapshotMismatch(
+  application: AdminGroupApplication,
+  history: GroupApplicationCommunication[],
+) {
+  if (application.status !== "awaiting_reply" && !["completed", "rejected", "revoked"].includes(application.status)) {
+    return false;
+  }
+  const approvals = history.filter(
+    (communication) =>
+      communication.direction === "outbound" && communication.kind === "approval",
+  );
+  if (!approvals.length) return false;
+  const shouldBeCompleted = application.status !== "awaiting_reply";
+  return approvals.some((communication) =>
+    shouldBeCompleted
+      ? communication.reply_status !== "completed"
+      : communication.reply_status === "completed",
   );
 }
 function stopApplicationRefresh(abortRequest = false) {
@@ -820,7 +845,14 @@ function stopApplicationRefresh(abortRequest = false) {
 }
 function scheduleApplicationRefresh(id: number) {
   stopApplicationRefresh();
-  if (selectedApplication.value?.id !== id || !hasPendingOutboundMail(communications.value)) return;
+  if (selectedApplication.value?.id !== id) return;
+  if (
+    !hasPendingOutboundMail(communications.value) &&
+    !hasOpenReplyWorkflow(communications.value) &&
+    !hasReplyWorkflowSnapshotMismatch(selectedApplication.value, communications.value)
+  ) {
+    return;
+  }
   applicationRefreshTimer = setTimeout(() => {
     applicationRefreshTimer = undefined;
     void loadApplicationDetails(id, true);
