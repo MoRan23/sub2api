@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/emersion/go-imap/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -114,24 +115,147 @@ func (groupApplicationEncryptorStub) Decrypt(value string) (string, error) {
 	return strings.TrimPrefix(value, "enc:"), nil
 }
 
-func TestGroupApplicationIMAPConfigEncryptsAndMasksPassword(t *testing.T) {
+func validGroupApplicationEmailConfig() GroupApplicationEmailConfig {
+	return GroupApplicationEmailConfig{
+		Enabled: true,
+		SMTP: GroupApplicationSMTPConfig{
+			Host: "smtp.example.com", Port: 587, Username: "sender@example.com", Password: "smtp-secret",
+			FromAddress: "sender@example.com", FromName: "Applications", TLSMode: "starttls",
+		},
+		IMAP: GroupApplicationIMAPConfig{
+			Host: "imap.example.com", Port: 993, Username: "inbox@example.com", Password: "imap-secret",
+			Mailbox: "INBOX", ReplyAddress: "reply@example.com", TLSMode: "implicit", PollIntervalSeconds: 30,
+		},
+	}
+}
+
+func configuredGroupApplicationSettings(t *testing.T) *groupApplicationSettingRepoStub {
+	t.Helper()
 	repo := &groupApplicationSettingRepoStub{values: map[string]string{}}
 	svc := NewGroupApplicationService(nil, repo, groupApplicationEncryptorStub{})
-	public, err := svc.SaveIMAPConfig(context.Background(), GroupApplicationIMAPConfig{Enabled: true, Host: "imap.example.com", Port: 993, Username: "inbox", Password: "secret", Mailbox: "INBOX", ReplyAddress: "reply@example.com", TLSMode: "implicit", PollIntervalSeconds: 30})
+	_, err := svc.SaveEmailConfig(context.Background(), validGroupApplicationEmailConfig())
 	require.NoError(t, err)
-	require.True(t, public.PasswordConfigured)
-	require.Empty(t, public.Password)
-	require.NotContains(t, repo.values[SettingKeyGroupApplicationIMAP], `"secret"`)
+	return repo
+}
 
-	runtime, err := svc.LoadIMAPConfig(context.Background(), true)
+func TestGroupApplicationEmailConfigEncryptsMasksAndPreservesPasswords(t *testing.T) {
+	repo := &groupApplicationSettingRepoStub{values: map[string]string{}}
+	svc := NewGroupApplicationService(nil, repo, groupApplicationEncryptorStub{})
+	public, err := svc.SaveEmailConfig(context.Background(), validGroupApplicationEmailConfig())
 	require.NoError(t, err)
-	require.Equal(t, "secret", runtime.Password)
+	require.True(t, public.SMTP.PasswordConfigured)
+	require.True(t, public.IMAP.PasswordConfigured)
+	require.Empty(t, public.SMTP.Password)
+	require.Empty(t, public.IMAP.Password)
+	require.NotContains(t, repo.values[SettingKeyGroupApplicationEmail], `"password":"smtp-secret"`)
+	require.NotContains(t, repo.values[SettingKeyGroupApplicationEmail], `"password":"imap-secret"`)
 
-	_, err = svc.SaveIMAPConfig(context.Background(), GroupApplicationIMAPConfig{Enabled: true, Host: "imap.example.com", Port: 993, Username: "inbox", Password: "********", Mailbox: "INBOX", ReplyAddress: "reply@example.com", TLSMode: "implicit", PollIntervalSeconds: 30})
+	runtime, err := svc.LoadEmailConfig(context.Background(), true)
 	require.NoError(t, err)
-	runtime, err = svc.LoadIMAPConfig(context.Background(), true)
+	require.Equal(t, "smtp-secret", runtime.SMTP.Password)
+	require.Equal(t, "imap-secret", runtime.IMAP.Password)
+
+	public.SMTP.Password = ""
+	public.IMAP.Password = "********"
+	_, err = svc.SaveEmailConfig(context.Background(), *public)
 	require.NoError(t, err)
-	require.Equal(t, "secret", runtime.Password)
+	runtime, err = svc.LoadEmailConfig(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, "smtp-secret", runtime.SMTP.Password)
+	require.Equal(t, "imap-secret", runtime.IMAP.Password)
+
+	public.SMTP.Host = "smtp2.example.com"
+	_, err = svc.SaveEmailConfig(context.Background(), *public)
+	require.ErrorContains(t, err, "enter the password again")
+}
+
+func TestGroupApplicationEmailConfigReusesSMTPIdentityWithoutDuplicatingPassword(t *testing.T) {
+	repo := &groupApplicationSettingRepoStub{values: map[string]string{}}
+	svc := NewGroupApplicationService(nil, repo, groupApplicationEncryptorStub{})
+	input := validGroupApplicationEmailConfig()
+	input.IMAP.UseSMTPCredentials = true
+	input.IMAP.Username = "ignored"
+	input.IMAP.Password = "ignored-secret"
+	public, err := svc.SaveEmailConfig(context.Background(), input)
+	require.NoError(t, err)
+	require.True(t, public.IMAP.PasswordConfigured)
+
+	var stored storedGroupApplicationEmailConfig
+	require.NoError(t, json.Unmarshal([]byte(repo.values[SettingKeyGroupApplicationEmail]), &stored))
+	require.Empty(t, stored.IMAP.Username)
+	require.Empty(t, stored.IMAP.EncryptedPassword)
+	runtime, err := svc.LoadEmailConfig(context.Background(), true)
+	require.NoError(t, err)
+	require.Equal(t, runtime.SMTP.Username, runtime.IMAP.Username)
+	require.Equal(t, runtime.SMTP.Password, runtime.IMAP.Password)
+}
+
+func TestGroupApplicationEmailConfigImportsLegacyIMAPWithoutEnablingWorkflow(t *testing.T) {
+	legacy := storedGroupApplicationIMAPConfig{
+		Enabled: true, Host: "legacy-imap.example.com", Port: 993, Username: "legacy@example.com",
+		EncryptedPassword: "enc:legacy-secret", Mailbox: "Archive/Replies", ReplyAddress: "reply@example.com",
+		TLSMode: "implicit", PollIntervalSeconds: 45,
+	}
+	raw, err := json.Marshal(legacy)
+	require.NoError(t, err)
+	repo := &groupApplicationSettingRepoStub{values: map[string]string{SettingKeyGroupApplicationIMAP: string(raw)}}
+	svc := NewGroupApplicationService(nil, repo, groupApplicationEncryptorStub{})
+
+	public, err := svc.GetEmailConfig(context.Background())
+	require.NoError(t, err)
+	require.False(t, public.Enabled)
+	require.True(t, public.LegacyImported)
+	require.Equal(t, "legacy-imap.example.com", public.IMAP.Host)
+	require.Equal(t, "Archive/Replies", public.IMAP.Mailbox)
+	require.False(t, public.SMTP.PasswordConfigured)
+	_, exists := repo.values[SettingKeyGroupApplicationEmail]
+	require.False(t, exists)
+}
+
+func TestGroupApplicationEmailConfigRequiresBothTransportsWhenEnabled(t *testing.T) {
+	repo := &groupApplicationSettingRepoStub{values: map[string]string{}}
+	svc := NewGroupApplicationService(nil, repo, groupApplicationEncryptorStub{})
+	input := defaultGroupApplicationEmailConfig()
+	input.Enabled = true
+	_, err := svc.SaveEmailConfig(context.Background(), input)
+	require.ErrorContains(t, err, "SMTP host")
+
+	input.Enabled = false
+	public, err := svc.SaveEmailConfig(context.Background(), input)
+	require.NoError(t, err)
+	require.False(t, public.Enabled)
+}
+
+func TestGroupApplicationTransportTestsIgnoreUnrelatedUnsavedCredentialChanges(t *testing.T) {
+	repo := configuredGroupApplicationSettings(t)
+	svc := NewGroupApplicationService(nil, repo, groupApplicationEncryptorStub{})
+	public, err := svc.GetEmailConfig(context.Background())
+	require.NoError(t, err)
+
+	public.IMAP.Host = "imap.unsaved.example.com"
+	public.IMAP.Password = ""
+	_, err = svc.ResolveEmailConfigForTest(context.Background(), *public, "smtp")
+	require.NoError(t, err)
+
+	public, err = svc.GetEmailConfig(context.Background())
+	require.NoError(t, err)
+	public.SMTP.Host = "smtp.unsaved.example.com"
+	public.SMTP.Password = ""
+	_, err = svc.ResolveEmailConfigForTest(context.Background(), *public, "imap")
+	require.NoError(t, err)
+}
+
+func TestGroupApplicationMailboxNamesDeduplicateAndKeepInboxFirst(t *testing.T) {
+	names := groupApplicationMailboxNames([]*imap.ListData{
+		{Mailbox: "Archive/Applications"},
+		{Mailbox: " INBOX "},
+		{Mailbox: "Archive/Applications"},
+		{Mailbox: "archive/applications"},
+		{Mailbox: "Sent"},
+		{Mailbox: "Container", Attrs: []imap.MailboxAttr{imap.MailboxAttrNoSelect}},
+		{Mailbox: ""},
+	})
+	require.Equal(t, []string{"INBOX", "Archive/Applications", "Sent"}, names)
 }
 
 type groupApplicationRepositoryStub struct {
@@ -143,6 +267,9 @@ type groupApplicationRepositoryStub struct {
 	retried          bool
 	retriedLastError string
 	communications   []GroupApplicationCommunication
+	claimCalls       int
+	markSentCalls    int
+	listOptionsCalls int
 }
 
 func (s *groupApplicationRepositoryStub) GetApplication(context.Context, int64) (*GroupApplication, error) {
@@ -164,7 +291,18 @@ func (s *groupApplicationRepositoryStub) RejectReplyMismatch(_ context.Context, 
 }
 
 func (s *groupApplicationRepositoryStub) ClaimMail(context.Context, string, int, time.Duration) ([]GroupApplicationMailJob, error) {
+	s.claimCalls++
 	return s.jobs, nil
+}
+
+func (s *groupApplicationRepositoryStub) MarkMailSent(context.Context, int64, string) error {
+	s.markSentCalls++
+	return nil
+}
+
+func (s *groupApplicationRepositoryStub) ListOptions(context.Context, int64) ([]GroupApplicationOption, error) {
+	s.listOptionsCalls++
+	return []GroupApplicationOption{{GroupID: 7, GroupName: "Private"}}, nil
 }
 
 func (s *groupApplicationRepositoryStub) RetryClaimedMail(_ context.Context, _ int64, _ string, _ time.Time, _ bool, lastError string) error {
@@ -180,7 +318,7 @@ func TestGroupApplicationReplyRequiresExactVisibleText(t *testing.T) {
 		CreatedAt: time.Now(),
 	}
 	repo := &groupApplicationRepositoryStub{application: application}
-	svc := NewGroupApplicationService(repo, nil, nil)
+	svc := NewGroupApplicationService(repo, configuredGroupApplicationSettings(t), groupApplicationEncryptorStub{})
 
 	result, err := svc.ProcessInboundReply(context.Background(), application.ID, application.ContactEmail, " CONFIRM ")
 	require.NoError(t, err)
@@ -196,7 +334,24 @@ func TestGroupApplicationReplyRequiresExactVisibleText(t *testing.T) {
 	require.False(t, repo.rejectedMismatch)
 }
 
-func TestGroupApplicationApprovalMailWaitsForValidIMAPConfig(t *testing.T) {
+type groupApplicationEmailSenderStub struct {
+	config  *SMTPConfig
+	to      string
+	options EmailSendOptions
+	sends   int
+}
+
+func (s *groupApplicationEmailSenderStub) SendEmailWithConfigAndOptions(config *SMTPConfig, to, _, _ string, options EmailSendOptions) error {
+	s.config = config
+	s.to = to
+	s.options = options
+	s.sends++
+	return nil
+}
+
+func (s *groupApplicationEmailSenderStub) TestSMTPConnectionWithConfig(*SMTPConfig) error { return nil }
+
+func TestGroupApplicationWorkerPausesOutboxWhenWorkflowDisabled(t *testing.T) {
 	repo := &groupApplicationRepositoryStub{jobs: []GroupApplicationMailJob{{
 		ID: 10, ApplicationID: 1, Kind: GroupApplicationMailApproval,
 		Recipient: "applicant@example.com", Subject: "approved", HTMLBody: "body",
@@ -204,11 +359,72 @@ func TestGroupApplicationApprovalMailWaitsForValidIMAPConfig(t *testing.T) {
 	}}}
 	settings := &groupApplicationSettingRepoStub{values: map[string]string{}}
 	svc := NewGroupApplicationService(repo, settings, groupApplicationEncryptorStub{})
-	worker := &GroupApplicationWorker{repo: repo, service: svc, workerID: "test-worker"}
+	worker := &GroupApplicationWorker{repo: repo, service: svc, email: &groupApplicationEmailSenderStub{}, workerID: "test-worker"}
 
 	require.NoError(t, worker.processMailBatch(context.Background()))
-	require.True(t, repo.retried)
-	require.Contains(t, repo.retriedLastError, "IMAP reply processing is disabled")
+	require.Zero(t, repo.claimCalls)
+	require.False(t, repo.retried)
+}
+
+func TestGroupApplicationWorkerUsesStandaloneSMTPAndReplyAddress(t *testing.T) {
+	repo := &groupApplicationRepositoryStub{jobs: []GroupApplicationMailJob{{
+		ID: 10, ApplicationID: 1, Kind: GroupApplicationMailApproval,
+		Recipient: "applicant@example.com", Subject: "approved", HTMLBody: "body",
+		MessageID: "<approval@sub2api.local>", RequiredStatus: GroupApplicationStatusAwaitingReply,
+	}}}
+	settings := configuredGroupApplicationSettings(t)
+	svc := NewGroupApplicationService(repo, settings, groupApplicationEncryptorStub{})
+	sender := &groupApplicationEmailSenderStub{}
+	worker := &GroupApplicationWorker{repo: repo, service: svc, email: sender, workerID: "test-worker"}
+
+	require.NoError(t, worker.processMailBatch(context.Background()))
+	require.Equal(t, 1, repo.claimCalls)
+	require.Equal(t, 1, repo.markSentCalls)
+	require.Equal(t, 1, sender.sends)
+	require.Equal(t, "smtp.example.com", sender.config.Host)
+	require.Equal(t, "smtp-secret", sender.config.Password)
+	require.Equal(t, "starttls", sender.config.TLSMode)
+	require.Equal(t, "reply@example.com", sender.options.ReplyTo)
+}
+
+func TestGroupApplicationOptionsHiddenWhenDisabled(t *testing.T) {
+	repo := &groupApplicationRepositoryStub{}
+	settings := &groupApplicationSettingRepoStub{values: map[string]string{}}
+	svc := NewGroupApplicationService(repo, settings, groupApplicationEncryptorStub{})
+	options, err := svc.ListOptions(context.Background(), 9)
+	require.NoError(t, err)
+	require.Empty(t, options)
+	require.Zero(t, repo.listOptionsCalls)
+
+	svc = NewGroupApplicationService(repo, configuredGroupApplicationSettings(t), groupApplicationEncryptorStub{})
+	options, err = svc.ListOptions(context.Background(), 9)
+	require.NoError(t, err)
+	require.Len(t, options, 1)
+	require.Equal(t, 1, repo.listOptionsCalls)
+}
+
+func TestGroupApplicationWorkflowMutationsAreBlockedWhenDisabled(t *testing.T) {
+	repo := &groupApplicationRepositoryStub{}
+	svc := NewGroupApplicationService(
+		repo,
+		&groupApplicationSettingRepoStub{values: map[string]string{}},
+		groupApplicationEncryptorStub{},
+	)
+
+	checks := []func() error{
+		func() error {
+			_, err := svc.Submit(context.Background(), 1, 2, "user@example.com", "valid reason", "en")
+			return err
+		},
+		func() error { _, err := svc.Approve(context.Background(), 1, 2); return err },
+		func() error { _, err := svc.Reject(context.Background(), 1, 2, "reason"); return err },
+		func() error { _, err := svc.Revoke(context.Background(), 1, 2, "reason"); return err },
+		func() error { return svc.ResendApproval(context.Background(), 1) },
+		func() error { return svc.RetryMail(context.Background(), 1, 2) },
+	}
+	for _, check := range checks {
+		require.ErrorIs(t, check(), ErrGroupApplicationDisabled)
+	}
 }
 
 func TestGroupApplicationCommunicationHistoryProtectsAndDecryptsInboundContent(t *testing.T) {

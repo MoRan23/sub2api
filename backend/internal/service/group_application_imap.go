@@ -28,166 +28,334 @@ import (
 	"github.com/google/uuid"
 )
 
+type GroupApplicationSMTPConfig struct {
+	Host               string `json:"host"`
+	Port               int    `json:"port"`
+	Username           string `json:"username"`
+	Password           string `json:"password,omitempty"`
+	PasswordConfigured bool   `json:"password_configured"`
+	FromAddress        string `json:"from_address"`
+	FromName           string `json:"from_name"`
+	TLSMode            string `json:"tls_mode"`
+}
+
 type GroupApplicationIMAPConfig struct {
-	Enabled             bool   `json:"enabled"`
 	Host                string `json:"host"`
 	Port                int    `json:"port"`
 	Username            string `json:"username"`
 	Password            string `json:"password,omitempty"`
 	PasswordConfigured  bool   `json:"password_configured"`
+	UseSMTPCredentials  bool   `json:"use_smtp_credentials"`
 	Mailbox             string `json:"mailbox"`
 	ReplyAddress        string `json:"reply_address"`
 	TLSMode             string `json:"tls_mode"`
 	PollIntervalSeconds int    `json:"poll_interval_seconds"`
 }
 
+type GroupApplicationEmailConfig struct {
+	Enabled        bool                       `json:"enabled"`
+	SMTP           GroupApplicationSMTPConfig `json:"smtp"`
+	IMAP           GroupApplicationIMAPConfig `json:"imap"`
+	LegacyImported bool                       `json:"legacy_imported,omitempty"`
+}
+
+type storedGroupApplicationSMTPConfig struct {
+	Host              string `json:"host"`
+	Port              int    `json:"port"`
+	Username          string `json:"username"`
+	EncryptedPassword string `json:"encrypted_password"`
+	FromAddress       string `json:"from_address"`
+	FromName          string `json:"from_name"`
+	TLSMode           string `json:"tls_mode"`
+}
+
 type storedGroupApplicationIMAPConfig struct {
-	Enabled             bool   `json:"enabled"`
+	Enabled             bool   `json:"enabled,omitempty"` // legacy field
 	Host                string `json:"host"`
 	Port                int    `json:"port"`
 	Username            string `json:"username"`
 	EncryptedPassword   string `json:"encrypted_password"`
+	UseSMTPCredentials  bool   `json:"use_smtp_credentials"`
 	Mailbox             string `json:"mailbox"`
 	ReplyAddress        string `json:"reply_address"`
 	TLSMode             string `json:"tls_mode"`
 	PollIntervalSeconds int    `json:"poll_interval_seconds"`
 }
 
-func defaultGroupApplicationIMAPConfig() GroupApplicationIMAPConfig {
-	return GroupApplicationIMAPConfig{Port: 993, Mailbox: "INBOX", TLSMode: "implicit", PollIntervalSeconds: 60}
+type storedGroupApplicationEmailConfig struct {
+	Enabled bool                             `json:"enabled"`
+	SMTP    storedGroupApplicationSMTPConfig `json:"smtp"`
+	IMAP    storedGroupApplicationIMAPConfig `json:"imap"`
 }
 
-func (s *GroupApplicationService) GetIMAPConfig(ctx context.Context) (*GroupApplicationIMAPConfig, error) {
-	stored, err := s.loadStoredIMAPConfig(ctx)
+func defaultGroupApplicationEmailConfig() GroupApplicationEmailConfig {
+	return GroupApplicationEmailConfig{
+		SMTP: GroupApplicationSMTPConfig{Port: 587, TLSMode: "starttls"},
+		IMAP: GroupApplicationIMAPConfig{Port: 993, Mailbox: "INBOX", TLSMode: "implicit", PollIntervalSeconds: 60},
+	}
+}
+
+func defaultStoredGroupApplicationEmailConfig() storedGroupApplicationEmailConfig {
+	defaults := defaultGroupApplicationEmailConfig()
+	return storedGroupApplicationEmailConfig{
+		SMTP: storedGroupApplicationSMTPConfig{Port: defaults.SMTP.Port, TLSMode: defaults.SMTP.TLSMode},
+		IMAP: storedGroupApplicationIMAPConfig{Port: defaults.IMAP.Port, Mailbox: defaults.IMAP.Mailbox, TLSMode: defaults.IMAP.TLSMode, PollIntervalSeconds: defaults.IMAP.PollIntervalSeconds},
+	}
+}
+
+func normalizeGroupApplicationEmailConfig(input GroupApplicationEmailConfig) GroupApplicationEmailConfig {
+	defaults := defaultGroupApplicationEmailConfig()
+	input.SMTP.Host = strings.TrimSpace(input.SMTP.Host)
+	input.SMTP.Username = strings.TrimSpace(input.SMTP.Username)
+	input.SMTP.FromAddress = strings.TrimSpace(input.SMTP.FromAddress)
+	input.SMTP.FromName = strings.TrimSpace(input.SMTP.FromName)
+	input.SMTP.TLSMode = strings.ToLower(strings.TrimSpace(input.SMTP.TLSMode))
+	if input.SMTP.Port == 0 {
+		input.SMTP.Port = defaults.SMTP.Port
+	}
+	if input.SMTP.TLSMode == "" {
+		input.SMTP.TLSMode = defaults.SMTP.TLSMode
+	}
+	input.IMAP.Host = strings.TrimSpace(input.IMAP.Host)
+	input.IMAP.Username = strings.TrimSpace(input.IMAP.Username)
+	input.IMAP.Mailbox = strings.TrimSpace(input.IMAP.Mailbox)
+	input.IMAP.ReplyAddress = strings.TrimSpace(input.IMAP.ReplyAddress)
+	input.IMAP.TLSMode = strings.ToLower(strings.TrimSpace(input.IMAP.TLSMode))
+	if input.IMAP.Port == 0 {
+		input.IMAP.Port = defaults.IMAP.Port
+	}
+	if input.IMAP.Mailbox == "" {
+		input.IMAP.Mailbox = defaults.IMAP.Mailbox
+	}
+	if input.IMAP.TLSMode == "" {
+		input.IMAP.TLSMode = defaults.IMAP.TLSMode
+	}
+	if input.IMAP.PollIntervalSeconds == 0 {
+		input.IMAP.PollIntervalSeconds = defaults.IMAP.PollIntervalSeconds
+	}
+	return input
+}
+
+func applyStoredGroupApplicationEmailDefaults(stored *storedGroupApplicationEmailConfig) {
+	defaults := defaultStoredGroupApplicationEmailConfig()
+	if stored.SMTP.Port == 0 {
+		stored.SMTP.Port = defaults.SMTP.Port
+	}
+	if stored.SMTP.TLSMode == "" {
+		stored.SMTP.TLSMode = defaults.SMTP.TLSMode
+	}
+	if stored.IMAP.Port == 0 {
+		stored.IMAP.Port = defaults.IMAP.Port
+	}
+	if stored.IMAP.Mailbox == "" {
+		stored.IMAP.Mailbox = defaults.IMAP.Mailbox
+	}
+	if stored.IMAP.TLSMode == "" {
+		stored.IMAP.TLSMode = defaults.IMAP.TLSMode
+	}
+	if stored.IMAP.PollIntervalSeconds == 0 {
+		stored.IMAP.PollIntervalSeconds = defaults.IMAP.PollIntervalSeconds
+	}
+}
+
+func (s *GroupApplicationService) loadStoredEmailConfig(ctx context.Context) (storedGroupApplicationEmailConfig, bool, error) {
+	stored := defaultStoredGroupApplicationEmailConfig()
+	if s.settingRepo == nil {
+		return stored, false, nil
+	}
+	raw, err := s.settingRepo.GetValue(ctx, SettingKeyGroupApplicationEmail)
+	if err != nil && !errors.Is(err, ErrSettingNotFound) {
+		return storedGroupApplicationEmailConfig{}, false, fmt.Errorf("read group application email settings: %w", err)
+	}
+	if err == nil && strings.TrimSpace(raw) != "" {
+		if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+			return storedGroupApplicationEmailConfig{}, false, fmt.Errorf("decode group application email settings: %w", err)
+		}
+		applyStoredGroupApplicationEmailDefaults(&stored)
+		return stored, false, nil
+	}
+
+	// The pre-module IMAP setting is imported only when the new setting does not
+	// exist. It never enables the workflow and never supplies SMTP credentials.
+	raw, err = s.settingRepo.GetValue(ctx, SettingKeyGroupApplicationIMAP)
+	if err != nil && !errors.Is(err, ErrSettingNotFound) {
+		return storedGroupApplicationEmailConfig{}, false, fmt.Errorf("read legacy group application IMAP settings: %w", err)
+	}
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return stored, false, nil
+	}
+	var legacy storedGroupApplicationIMAPConfig
+	if err := json.Unmarshal([]byte(raw), &legacy); err != nil {
+		return storedGroupApplicationEmailConfig{}, false, fmt.Errorf("decode legacy group application IMAP settings: %w", err)
+	}
+	stored.IMAP = legacy
+	stored.IMAP.Enabled = false
+	stored.Enabled = false
+	applyStoredGroupApplicationEmailDefaults(&stored)
+	return stored, true, nil
+}
+
+func publicGroupApplicationEmailConfig(stored storedGroupApplicationEmailConfig, legacy bool) *GroupApplicationEmailConfig {
+	return &GroupApplicationEmailConfig{
+		Enabled: stored.Enabled,
+		SMTP: GroupApplicationSMTPConfig{
+			Host: stored.SMTP.Host, Port: stored.SMTP.Port, Username: stored.SMTP.Username,
+			PasswordConfigured: stored.SMTP.EncryptedPassword != "", FromAddress: stored.SMTP.FromAddress,
+			FromName: stored.SMTP.FromName, TLSMode: stored.SMTP.TLSMode,
+		},
+		IMAP: GroupApplicationIMAPConfig{
+			Host: stored.IMAP.Host, Port: stored.IMAP.Port, Username: stored.IMAP.Username,
+			PasswordConfigured: stored.IMAP.EncryptedPassword != "" || stored.IMAP.UseSMTPCredentials && stored.SMTP.EncryptedPassword != "",
+			UseSMTPCredentials: stored.IMAP.UseSMTPCredentials, Mailbox: stored.IMAP.Mailbox,
+			ReplyAddress: stored.IMAP.ReplyAddress, TLSMode: stored.IMAP.TLSMode,
+			PollIntervalSeconds: stored.IMAP.PollIntervalSeconds,
+		},
+		LegacyImported: legacy,
+	}
+}
+
+func (s *GroupApplicationService) GetEmailConfig(ctx context.Context) (*GroupApplicationEmailConfig, error) {
+	stored, legacy, err := s.loadStoredEmailConfig(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &GroupApplicationIMAPConfig{
-		Enabled: stored.Enabled, Host: stored.Host, Port: stored.Port, Username: stored.Username,
-		PasswordConfigured: stored.EncryptedPassword != "", Mailbox: stored.Mailbox,
-		ReplyAddress: stored.ReplyAddress, TLSMode: stored.TLSMode,
-		PollIntervalSeconds: stored.PollIntervalSeconds,
-	}, nil
+	return publicGroupApplicationEmailConfig(stored, legacy), nil
 }
 
-func (s *GroupApplicationService) SaveIMAPConfig(ctx context.Context, input GroupApplicationIMAPConfig) (*GroupApplicationIMAPConfig, error) {
-	if s.settingRepo == nil || s.encryptor == nil {
-		return nil, errors.New("group application IMAP settings are unavailable")
+func sameGroupApplicationCredentialIdentity(oldHost, oldUsername, host, username string) bool {
+	return strings.EqualFold(strings.TrimSpace(oldHost), strings.TrimSpace(host)) && strings.EqualFold(strings.TrimSpace(oldUsername), strings.TrimSpace(username))
+}
+
+func (s *GroupApplicationService) resolveGroupApplicationPassword(label, password, existingCiphertext string, identityUnchanged bool) (string, error) {
+	if password == "********" {
+		password = ""
 	}
-	existing, err := s.loadStoredIMAPConfig(ctx)
+	if password == "" {
+		if existingCiphertext != "" && !identityUnchanged {
+			return "", fmt.Errorf("%s host or username changed; enter the password again", label)
+		}
+		return existingCiphertext, nil
+	}
+	if s.encryptor == nil {
+		return "", errors.New("group application email encryption is unavailable")
+	}
+	encrypted, err := s.encryptor.Encrypt(password)
 	if err != nil {
-		return nil, err
+		return "", fmt.Errorf("encrypt %s password: %w", label, err)
 	}
-	input.Host = strings.TrimSpace(input.Host)
-	input.Username = strings.TrimSpace(input.Username)
-	input.Mailbox = strings.TrimSpace(input.Mailbox)
-	input.ReplyAddress = strings.TrimSpace(input.ReplyAddress)
-	input.TLSMode = strings.ToLower(strings.TrimSpace(input.TLSMode))
-	if input.Port == 0 {
-		input.Port = 993
+	return encrypted, nil
+}
+
+func (s *GroupApplicationService) buildStoredEmailConfig(ctx context.Context, input GroupApplicationEmailConfig, passwordScope string) (storedGroupApplicationEmailConfig, error) {
+	input = normalizeGroupApplicationEmailConfig(input)
+	existing, _, err := s.loadStoredEmailConfig(ctx)
+	if err != nil {
+		return storedGroupApplicationEmailConfig{}, err
 	}
-	if input.Mailbox == "" {
-		input.Mailbox = "INBOX"
+	stored := storedGroupApplicationEmailConfig{
+		Enabled: input.Enabled,
+		SMTP: storedGroupApplicationSMTPConfig{
+			Host: input.SMTP.Host, Port: input.SMTP.Port, Username: input.SMTP.Username,
+			FromAddress: input.SMTP.FromAddress, FromName: input.SMTP.FromName, TLSMode: input.SMTP.TLSMode,
+		},
+		IMAP: storedGroupApplicationIMAPConfig{
+			Host: input.IMAP.Host, Port: input.IMAP.Port, Username: input.IMAP.Username,
+			UseSMTPCredentials: input.IMAP.UseSMTPCredentials, Mailbox: input.IMAP.Mailbox,
+			ReplyAddress: input.IMAP.ReplyAddress, TLSMode: input.IMAP.TLSMode,
+			PollIntervalSeconds: input.IMAP.PollIntervalSeconds,
+		},
 	}
-	if input.TLSMode == "" {
-		input.TLSMode = "implicit"
-	}
-	if input.PollIntervalSeconds == 0 {
-		input.PollIntervalSeconds = 60
-	}
-	password := strings.TrimSpace(input.Password)
-	encryptedPassword := existing.EncryptedPassword
-	if password != "" && password != "********" {
-		encryptedPassword, err = s.encryptor.Encrypt(password)
+	resolveSMTP := passwordScope == "" || passwordScope == "smtp" || passwordScope == "imap" && stored.IMAP.UseSMTPCredentials
+	if resolveSMTP {
+		stored.SMTP.EncryptedPassword, err = s.resolveGroupApplicationPassword(
+			"SMTP", input.SMTP.Password, existing.SMTP.EncryptedPassword,
+			sameGroupApplicationCredentialIdentity(existing.SMTP.Host, existing.SMTP.Username, stored.SMTP.Host, stored.SMTP.Username),
+		)
 		if err != nil {
-			return nil, fmt.Errorf("encrypt IMAP password: %w", err)
+			return storedGroupApplicationEmailConfig{}, err
 		}
 	}
-	stored := storedGroupApplicationIMAPConfig{
-		Enabled: input.Enabled, Host: input.Host, Port: input.Port, Username: input.Username,
-		EncryptedPassword: encryptedPassword, Mailbox: input.Mailbox,
-		ReplyAddress: input.ReplyAddress, TLSMode: input.TLSMode,
-		PollIntervalSeconds: input.PollIntervalSeconds,
+	if stored.IMAP.UseSMTPCredentials {
+		stored.IMAP.Username = ""
+		stored.IMAP.EncryptedPassword = ""
+	} else if passwordScope == "" || passwordScope == "imap" {
+		stored.IMAP.EncryptedPassword, err = s.resolveGroupApplicationPassword(
+			"IMAP", input.IMAP.Password, existing.IMAP.EncryptedPassword,
+			sameGroupApplicationCredentialIdentity(existing.IMAP.Host, existing.IMAP.Username, stored.IMAP.Host, stored.IMAP.Username),
+		)
+		if err != nil {
+			return storedGroupApplicationEmailConfig{}, err
+		}
 	}
-	if err := validateStoredGroupApplicationIMAPConfig(stored, input.Enabled); err != nil {
-		return nil, infraerrors.BadRequest("INVALID_GROUP_APPLICATION_IMAP_CONFIG", err.Error())
+	return stored, nil
+}
+
+func (s *GroupApplicationService) SaveEmailConfig(ctx context.Context, input GroupApplicationEmailConfig) (*GroupApplicationEmailConfig, error) {
+	if s.settingRepo == nil || s.encryptor == nil {
+		return nil, errors.New("group application email settings are unavailable")
+	}
+	stored, err := s.buildStoredEmailConfig(ctx, input, "")
+	if err != nil {
+		return nil, infraerrors.BadRequest("INVALID_GROUP_APPLICATION_EMAIL_CONFIG", err.Error())
+	}
+	if err := validateStoredGroupApplicationEmailConfig(stored, stored.Enabled); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_GROUP_APPLICATION_EMAIL_CONFIG", err.Error())
 	}
 	raw, err := json.Marshal(stored)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.settingRepo.Set(ctx, SettingKeyGroupApplicationIMAP, string(raw)); err != nil {
+	if err := s.settingRepo.Set(ctx, SettingKeyGroupApplicationEmail, string(raw)); err != nil {
 		return nil, err
 	}
-	return s.GetIMAPConfig(ctx)
+	return publicGroupApplicationEmailConfig(stored, false), nil
 }
 
-func (s *GroupApplicationService) loadStoredIMAPConfig(ctx context.Context) (storedGroupApplicationIMAPConfig, error) {
-	defaults := defaultGroupApplicationIMAPConfig()
-	stored := storedGroupApplicationIMAPConfig{Port: defaults.Port, Mailbox: defaults.Mailbox, TLSMode: defaults.TLSMode, PollIntervalSeconds: defaults.PollIntervalSeconds}
-	if s.settingRepo == nil {
-		return stored, nil
+func validateGroupApplicationTLSMode(label, mode string) error {
+	if mode != "implicit" && mode != "starttls" {
+		return fmt.Errorf("%s TLS mode must be implicit or starttls", label)
 	}
-	raw, err := s.settingRepo.GetValue(ctx, SettingKeyGroupApplicationIMAP)
-	if err != nil || strings.TrimSpace(raw) == "" {
-		return stored, nil
-	}
-	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
-		return storedGroupApplicationIMAPConfig{}, fmt.Errorf("decode IMAP settings: %w", err)
-	}
-	if stored.Port == 0 {
-		stored.Port = defaults.Port
-	}
-	if stored.Mailbox == "" {
-		stored.Mailbox = defaults.Mailbox
-	}
-	if stored.TLSMode == "" {
-		stored.TLSMode = defaults.TLSMode
-	}
-	if stored.PollIntervalSeconds == 0 {
-		stored.PollIntervalSeconds = defaults.PollIntervalSeconds
-	}
-	return stored, nil
+	return nil
 }
 
-func (s *GroupApplicationService) LoadIMAPConfig(ctx context.Context, requireEnabled bool) (*GroupApplicationIMAPConfig, error) {
-	stored, err := s.loadStoredIMAPConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateStoredGroupApplicationIMAPConfig(stored, requireEnabled); err != nil {
-		return nil, err
-	}
-	password, err := s.encryptor.Decrypt(stored.EncryptedPassword)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt IMAP password: %w", err)
-	}
-	return &GroupApplicationIMAPConfig{
-		Enabled: stored.Enabled, Host: stored.Host, Port: stored.Port, Username: stored.Username,
-		Password: password, PasswordConfigured: true, Mailbox: stored.Mailbox,
-		ReplyAddress: stored.ReplyAddress, TLSMode: stored.TLSMode,
-		PollIntervalSeconds: stored.PollIntervalSeconds,
-	}, nil
-}
-
-func validateStoredGroupApplicationIMAPConfig(config storedGroupApplicationIMAPConfig, requireEnabled bool) error {
-	if requireEnabled && !config.Enabled {
-		return errors.New("IMAP reply processing is disabled")
-	}
-	if !config.Enabled && !requireEnabled {
+func validateStoredGroupApplicationSMTPConfig(config storedGroupApplicationSMTPConfig, required bool) error {
+	if !required && config.Host == "" && config.Username == "" && config.EncryptedPassword == "" && config.FromAddress == "" {
 		return nil
 	}
-	if config.Host == "" || config.Username == "" || config.EncryptedPassword == "" || config.ReplyAddress == "" {
-		return errors.New("host, username, password and reply address are required")
+	if config.Host == "" || config.Username == "" || config.EncryptedPassword == "" || config.FromAddress == "" {
+		return errors.New("SMTP host, username, password and sender address are required")
+	}
+	if config.Port < 1 || config.Port > 65535 {
+		return errors.New("SMTP port must be between 1 and 65535")
+	}
+	if err := validateGroupApplicationTLSMode("SMTP", config.TLSMode); err != nil {
+		return err
+	}
+	if _, err := NormalizeGroupApplicationEmail(config.FromAddress); err != nil {
+		return errors.New("invalid SMTP sender address")
+	}
+	return nil
+}
+
+func validateStoredGroupApplicationIMAPConfig(config storedGroupApplicationIMAPConfig, smtpConfig storedGroupApplicationSMTPConfig, required bool) error {
+	username, password := config.Username, config.EncryptedPassword
+	if config.UseSMTPCredentials {
+		username, password = smtpConfig.Username, smtpConfig.EncryptedPassword
+	}
+	if !required && config.Host == "" && username == "" && password == "" && config.ReplyAddress == "" {
+		return nil
+	}
+	if config.Host == "" || username == "" || password == "" || config.ReplyAddress == "" || config.Mailbox == "" {
+		return errors.New("IMAP host, username, password, mailbox and reply address are required")
 	}
 	if config.Port < 1 || config.Port > 65535 {
 		return errors.New("IMAP port must be between 1 and 65535")
 	}
-	if config.TLSMode != "implicit" && config.TLSMode != "starttls" {
-		return errors.New("TLS mode must be implicit or starttls")
+	if err := validateGroupApplicationTLSMode("IMAP", config.TLSMode); err != nil {
+		return err
 	}
 	if config.PollIntervalSeconds < 15 || config.PollIntervalSeconds > 300 {
-		return errors.New("poll interval must be between 15 and 300 seconds")
+		return errors.New("IMAP poll interval must be between 15 and 300 seconds")
 	}
 	if _, err := NormalizeGroupApplicationEmail(config.ReplyAddress); err != nil {
 		return errors.New("invalid IMAP reply address")
@@ -195,20 +363,109 @@ func validateStoredGroupApplicationIMAPConfig(config storedGroupApplicationIMAPC
 	return nil
 }
 
+func validateStoredGroupApplicationEmailConfig(config storedGroupApplicationEmailConfig, requireEnabled bool) error {
+	if requireEnabled && !config.Enabled {
+		return errors.New("group application workflow is disabled")
+	}
+	if !config.Enabled && !requireEnabled {
+		return nil
+	}
+	if err := validateStoredGroupApplicationSMTPConfig(config.SMTP, true); err != nil {
+		return err
+	}
+	return validateStoredGroupApplicationIMAPConfig(config.IMAP, config.SMTP, true)
+}
+
+func (s *GroupApplicationService) runtimeEmailConfig(stored storedGroupApplicationEmailConfig, requireEnabled bool) (*GroupApplicationEmailConfig, error) {
+	if err := validateStoredGroupApplicationEmailConfig(stored, requireEnabled); err != nil {
+		return nil, err
+	}
+	public := publicGroupApplicationEmailConfig(stored, false)
+	if s.encryptor == nil {
+		if stored.SMTP.EncryptedPassword != "" || stored.IMAP.EncryptedPassword != "" {
+			return nil, errors.New("group application email encryption is unavailable")
+		}
+		return public, nil
+	}
+	var err error
+	if stored.SMTP.EncryptedPassword != "" {
+		public.SMTP.Password, err = s.encryptor.Decrypt(stored.SMTP.EncryptedPassword)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt SMTP password: %w", err)
+		}
+	}
+	if stored.IMAP.UseSMTPCredentials {
+		public.IMAP.Username = public.SMTP.Username
+		public.IMAP.Password = public.SMTP.Password
+	} else if stored.IMAP.EncryptedPassword != "" {
+		public.IMAP.Password, err = s.encryptor.Decrypt(stored.IMAP.EncryptedPassword)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt IMAP password: %w", err)
+		}
+	}
+	return public, nil
+}
+
+func (s *GroupApplicationService) LoadEmailConfig(ctx context.Context, requireEnabled bool) (*GroupApplicationEmailConfig, error) {
+	stored, _, err := s.loadStoredEmailConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.runtimeEmailConfig(stored, requireEnabled)
+}
+
+func (s *GroupApplicationService) ResolveEmailConfigForTest(ctx context.Context, input GroupApplicationEmailConfig, transport string) (*GroupApplicationEmailConfig, error) {
+	stored, err := s.buildStoredEmailConfig(ctx, input, transport)
+	if err != nil {
+		return nil, infraerrors.BadRequest("INVALID_GROUP_APPLICATION_EMAIL_CONFIG", err.Error())
+	}
+	switch transport {
+	case "smtp":
+		err = validateStoredGroupApplicationSMTPConfig(stored.SMTP, true)
+	case "imap":
+		err = validateStoredGroupApplicationIMAPConfig(stored.IMAP, stored.SMTP, true)
+	default:
+		err = errors.New("unsupported group application email transport")
+	}
+	if err != nil {
+		return nil, infraerrors.BadRequest("INVALID_GROUP_APPLICATION_EMAIL_CONFIG", err.Error())
+	}
+	stored.Enabled = false
+	return s.runtimeEmailConfig(stored, false)
+}
+
+func (config *GroupApplicationEmailConfig) SMTPTransportConfig() *SMTPConfig {
+	if config == nil {
+		return nil
+	}
+	return &SMTPConfig{
+		Host: config.SMTP.Host, Port: config.SMTP.Port, Username: config.SMTP.Username,
+		Password: config.SMTP.Password, From: config.SMTP.FromAddress, FromName: config.SMTP.FromName,
+		TLSMode: config.SMTP.TLSMode,
+	}
+}
+
 type GroupApplicationWorkerHealth struct {
-	Running          bool      `json:"running"`
-	MailProcessed    uint64    `json:"mail_processed"`
-	MailFailures     uint64    `json:"mail_failures"`
-	RepliesProcessed uint64    `json:"replies_processed"`
-	ReplyFailures    uint64    `json:"reply_failures"`
-	LastIMAPCheckAt  time.Time `json:"last_imap_check_at,omitempty"`
-	LastIMAPError    string    `json:"last_imap_error,omitempty"`
+	Running            bool      `json:"running"`
+	WorkflowEnabled    bool      `json:"workflow_enabled"`
+	MailProcessed      uint64    `json:"mail_processed"`
+	MailFailures       uint64    `json:"mail_failures"`
+	RepliesProcessed   uint64    `json:"replies_processed"`
+	ReplyFailures      uint64    `json:"reply_failures"`
+	LastIMAPCheckAt    time.Time `json:"last_imap_check_at,omitempty"`
+	LastIMAPError      string    `json:"last_imap_error,omitempty"`
+	ConfigurationError string    `json:"configuration_error,omitempty"`
+}
+
+type groupApplicationEmailSender interface {
+	SendEmailWithConfigAndOptions(config *SMTPConfig, to, subject, body string, options EmailSendOptions) error
+	TestSMTPConnectionWithConfig(config *SMTPConfig) error
 }
 
 type GroupApplicationWorker struct {
 	repo             GroupApplicationRepository
 	service          *GroupApplicationService
-	email            *EmailService
+	email            groupApplicationEmailSender
 	workerID         string
 	ctx              context.Context
 	cancel           context.CancelFunc
@@ -222,6 +479,8 @@ type GroupApplicationWorker struct {
 	replyFailures    atomic.Uint64
 	lastIMAPCheck    atomic.Value // time.Time
 	lastIMAPError    atomic.Value // string
+	configError      atomic.Value // string
+	workflowEnabled  atomic.Bool
 }
 
 func NewGroupApplicationWorker(repo GroupApplicationRepository, service *GroupApplicationService, email *EmailService) *GroupApplicationWorker {
@@ -229,6 +488,7 @@ func NewGroupApplicationWorker(repo GroupApplicationRepository, service *GroupAp
 	w := &GroupApplicationWorker{repo: repo, service: service, email: email, workerID: uuid.NewString(), ctx: ctx, cancel: cancel}
 	w.lastIMAPCheck.Store(time.Time{})
 	w.lastIMAPError.Store("")
+	w.configError.Store("")
 	return w
 }
 
@@ -256,12 +516,15 @@ func (w *GroupApplicationWorker) Health() GroupApplicationWorkerHealth {
 	if w == nil {
 		return GroupApplicationWorkerHealth{}
 	}
-	health := GroupApplicationWorkerHealth{Running: w.running.Load(), MailProcessed: w.mailProcessed.Load(), MailFailures: w.mailFailures.Load(), RepliesProcessed: w.repliesProcessed.Load(), ReplyFailures: w.replyFailures.Load()}
+	health := GroupApplicationWorkerHealth{Running: w.running.Load(), WorkflowEnabled: w.workflowEnabled.Load(), MailProcessed: w.mailProcessed.Load(), MailFailures: w.mailFailures.Load(), RepliesProcessed: w.repliesProcessed.Load(), ReplyFailures: w.replyFailures.Load()}
 	if value, ok := w.lastIMAPCheck.Load().(time.Time); ok {
 		health.LastIMAPCheckAt = value
 	}
 	if value, ok := w.lastIMAPError.Load().(string); ok {
 		health.LastIMAPError = value
+	}
+	if value, ok := w.configError.Load().(string); ok {
+		health.ConfigurationError = value
 	}
 	return health
 }
@@ -273,15 +536,23 @@ func (w *GroupApplicationWorker) run() {
 	defer mailTicker.Stop()
 	nextIMAP := time.Now()
 	for {
+		cfg, configErr := w.service.LoadEmailConfig(w.ctx, false)
+		workflowEnabled := configErr == nil && cfg.Enabled
+		w.workflowEnabled.Store(workflowEnabled)
+		if configErr != nil {
+			w.configError.Store(boundedGroupApplicationError(configErr))
+		} else {
+			w.configError.Store("")
+		}
 		if err := w.processMailBatch(w.ctx); err != nil && w.ctx.Err() == nil {
 			w.mailFailures.Add(1)
 			slog.Warn("group application mail outbox failed", "error", err)
 		}
 		if !time.Now().Before(nextIMAP) {
 			interval := 60 * time.Second
-			if cfg, err := w.service.LoadIMAPConfig(w.ctx, false); err == nil && cfg.Enabled {
-				interval = time.Duration(cfg.PollIntervalSeconds) * time.Second
-				if err := w.pollIMAP(w.ctx, cfg); err != nil && w.ctx.Err() == nil {
+			if workflowEnabled {
+				interval = time.Duration(cfg.IMAP.PollIntervalSeconds) * time.Second
+				if err := w.pollIMAP(w.ctx, &cfg.IMAP); err != nil && w.ctx.Err() == nil {
 					w.replyFailures.Add(1)
 					w.lastIMAPError.Store(boundedGroupApplicationError(err))
 					slog.Warn("group application IMAP poll failed", "error", err)
@@ -300,6 +571,13 @@ func (w *GroupApplicationWorker) run() {
 }
 
 func (w *GroupApplicationWorker) processMailBatch(ctx context.Context) error {
+	cfg, err := w.service.LoadEmailConfig(ctx, false)
+	if err != nil {
+		return err
+	}
+	if !cfg.Enabled {
+		return nil
+	}
 	jobs, err := w.repo.ClaimMail(ctx, w.workerID, 20, time.Minute)
 	if err != nil {
 		return err
@@ -311,16 +589,16 @@ func (w *GroupApplicationWorker) processMailBatch(ctx context.Context) error {
 		}
 		var sendErr error
 		if job.Kind == GroupApplicationMailApproval {
-			var cfg *GroupApplicationIMAPConfig
-			cfg, sendErr = w.service.LoadIMAPConfig(ctx, true)
-			if sendErr == nil {
-				options.ReplyTo = cfg.ReplyAddress
-			}
+			options.ReplyTo = cfg.IMAP.ReplyAddress
 		}
 		if sendErr == nil {
-			sendCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-			sendErr = w.email.SendEmailWithOptions(sendCtx, job.Recipient, job.Subject, job.HTMLBody, options)
-			cancel()
+			if w.email == nil {
+				sendErr = errors.New("group application email sender is unavailable")
+			} else if err := ctx.Err(); err != nil {
+				sendErr = err
+			} else {
+				sendErr = w.email.SendEmailWithConfigAndOptions(cfg.SMTPTransportConfig(), job.Recipient, job.Subject, job.HTMLBody, options)
+			}
 		}
 		if sendErr == nil {
 			if ackErr := w.repo.MarkMailSent(ctx, job.ID, w.workerID); ackErr != nil {
@@ -363,21 +641,96 @@ func boundedGroupApplicationError(err error) string {
 	return value
 }
 
-func (w *GroupApplicationWorker) TestIMAP(ctx context.Context) error {
-	cfg, err := w.service.LoadIMAPConfig(ctx, true)
+func (w *GroupApplicationWorker) TestSMTP(ctx context.Context, input GroupApplicationEmailConfig) error {
+	cfg, err := w.service.ResolveEmailConfigForTest(ctx, input, "smtp")
 	if err != nil {
 		return err
 	}
-	client, _, err := openGroupApplicationMailbox(ctx, cfg)
+	if w.email == nil {
+		return errors.New("group application email sender is unavailable")
+	}
+	return w.email.TestSMTPConnectionWithConfig(cfg.SMTPTransportConfig())
+}
+
+func (w *GroupApplicationWorker) SendTestEmail(ctx context.Context, input GroupApplicationEmailConfig, recipient string) error {
+	recipient, err := NormalizeGroupApplicationEmail(recipient)
+	if err != nil {
+		return err
+	}
+	cfg, err := w.service.ResolveEmailConfigForTest(ctx, input, "smtp")
+	if err != nil {
+		return err
+	}
+	if w.email == nil {
+		return errors.New("group application email sender is unavailable")
+	}
+	return w.email.SendEmailWithConfigAndOptions(
+		cfg.SMTPTransportConfig(), recipient,
+		"Sub2API - group application email test",
+		"<p>This is a test message from the standalone group application email configuration.</p>",
+		EmailSendOptions{},
+	)
+}
+
+func (w *GroupApplicationWorker) TestIMAP(ctx context.Context, input GroupApplicationEmailConfig) ([]string, error) {
+	cfg, err := w.service.ResolveEmailConfigForTest(ctx, input, "imap")
+	if err != nil {
+		return nil, err
+	}
+	client, err := openGroupApplicationIMAPClient(ctx, &cfg.IMAP)
 	if client != nil {
 		defer client.Close()
 	}
-	return err
+	if err != nil {
+		return nil, err
+	}
+	mailboxes, err := client.List("", "*", nil).Collect()
+	if err != nil {
+		return nil, fmt.Errorf("list IMAP mailboxes: %w", err)
+	}
+	return groupApplicationMailboxNames(mailboxes), nil
 }
 
-func openGroupApplicationMailbox(ctx context.Context, cfg *GroupApplicationIMAPConfig) (*imapclient.Client, *imap.SelectData, error) {
+func groupApplicationMailboxNames(mailboxes []*imap.ListData) []string {
+	unique := make(map[string]string, len(mailboxes))
+	for _, mailbox := range mailboxes {
+		selectable := true
+		for _, attribute := range mailbox.Attrs {
+			if attribute == imap.MailboxAttrNoSelect || attribute == imap.MailboxAttrNonExistent {
+				selectable = false
+				break
+			}
+		}
+		if !selectable {
+			continue
+		}
+		name := strings.TrimSpace(mailbox.Mailbox)
+		if name != "" {
+			key := strings.ToLower(name)
+			if _, exists := unique[key]; !exists {
+				unique[key] = name
+			}
+		}
+	}
+	names := make([]string, 0, len(unique))
+	for name := range unique {
+		names = append(names, unique[name])
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if strings.EqualFold(names[i], "INBOX") {
+			return true
+		}
+		if strings.EqualFold(names[j], "INBOX") {
+			return false
+		}
+		return strings.ToLower(names[i]) < strings.ToLower(names[j])
+	})
+	return names
+}
+
+func openGroupApplicationIMAPClient(ctx context.Context, cfg *GroupApplicationIMAPConfig) (*imapclient.Client, error) {
 	if cfg == nil {
-		return nil, nil, errors.New("missing IMAP config")
+		return nil, errors.New("missing IMAP config")
 	}
 	address := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 	options := &imapclient.Options{TLSConfig: &tls.Config{ServerName: cfg.Host, MinVersion: tls.VersionTLS12}, Dialer: &net.Dialer{Timeout: 15 * time.Second}}
@@ -389,11 +742,19 @@ func openGroupApplicationMailbox(ctx context.Context, cfg *GroupApplicationIMAPC
 		client, err = imapclient.DialTLS(address, options)
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("connect IMAP: %w", err)
+		return nil, fmt.Errorf("connect IMAP: %w", err)
 	}
 	if err = client.Login(cfg.Username, cfg.Password).Wait(); err != nil {
 		client.Close()
-		return nil, nil, fmt.Errorf("login IMAP: %w", err)
+		return nil, fmt.Errorf("login IMAP: %w", err)
+	}
+	return client, nil
+}
+
+func openGroupApplicationMailbox(ctx context.Context, cfg *GroupApplicationIMAPConfig) (*imapclient.Client, *imap.SelectData, error) {
+	client, err := openGroupApplicationIMAPClient(ctx, cfg)
+	if err != nil {
+		return nil, nil, err
 	}
 	selectData, err := client.Select(cfg.Mailbox, nil).Wait()
 	if err != nil {

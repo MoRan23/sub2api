@@ -158,6 +158,19 @@ func TestPromptAuditMutationAuditRoutesHaveStableActionsAndOmitBodies(t *testing
 	}
 }
 
+func TestGroupApplicationEmailRoutesHaveStableActionsAndOmitCredentialBodies(t *testing.T) {
+	expected := map[string]string{
+		"PUT /api/v1/admin/group-applications/email-config":            "admin.group_applications.email_config.update",
+		"POST /api/v1/admin/group-applications/email-config/test-smtp": "admin.group_applications.email_config.test_smtp",
+		"POST /api/v1/admin/group-applications/email-config/send-test": "admin.group_applications.email_config.send_test",
+		"POST /api/v1/admin/group-applications/email-config/test-imap": "admin.group_applications.email_config.test_imap",
+	}
+	for route, action := range expected {
+		require.Equal(t, action, auditActionOverrides[route])
+		require.Contains(t, auditBodyOmittedRoutes, route)
+	}
+}
+
 func TestPasskeyLoginAuditUsesCanonicalLoginActionAndOmitsCredentialBody(t *testing.T) {
 	route := "POST /api/v1/auth/passkey/login/finish"
 	require.Equal(t, service.AuditActionLogin, auditActionOverrides[route])

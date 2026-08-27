@@ -14,7 +14,33 @@ import (
 )
 
 func (s *GroupApplicationService) ListOptions(ctx context.Context, userID int64) ([]GroupApplicationOption, error) {
+	enabled, err := s.GroupApplicationWorkflowEnabled(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !enabled {
+		return []GroupApplicationOption{}, nil
+	}
 	return s.repo.ListOptions(ctx, userID)
+}
+
+func (s *GroupApplicationService) GroupApplicationWorkflowEnabled(ctx context.Context) (bool, error) {
+	config, err := s.LoadEmailConfig(ctx, false)
+	if err != nil {
+		return false, err
+	}
+	return config.Enabled, nil
+}
+
+func (s *GroupApplicationService) requireGroupApplicationWorkflow(ctx context.Context) error {
+	enabled, err := s.GroupApplicationWorkflowEnabled(ctx)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return ErrGroupApplicationDisabled
+	}
+	return nil
 }
 
 func (s *GroupApplicationService) ListUserApplications(ctx context.Context, userID int64) ([]*GroupApplication, error) {
@@ -26,6 +52,9 @@ func (s *GroupApplicationService) GetUserApplication(ctx context.Context, userID
 }
 
 func (s *GroupApplicationService) Submit(ctx context.Context, userID, groupID int64, contactEmail, reason, locale string) (*GroupApplication, error) {
+	if err := s.requireGroupApplicationWorkflow(ctx); err != nil {
+		return nil, err
+	}
 	if userID <= 0 || groupID <= 0 {
 		return nil, ErrGroupApplicationUnavailable
 	}
@@ -175,8 +204,8 @@ func (s *GroupApplicationService) ListCommunications(ctx context.Context, applic
 }
 
 func (s *GroupApplicationService) Approve(ctx context.Context, applicationID, adminID int64) (*GroupApplication, error) {
-	if _, err := s.LoadIMAPConfig(ctx, true); err != nil {
-		return nil, ErrGroupApplicationIMAP
+	if err := s.requireGroupApplicationWorkflow(ctx); err != nil {
+		return nil, err
 	}
 	application, err := s.repo.GetApplication(ctx, applicationID)
 	if err != nil {
@@ -193,6 +222,9 @@ func (s *GroupApplicationService) Approve(ctx context.Context, applicationID, ad
 }
 
 func (s *GroupApplicationService) Reject(ctx context.Context, applicationID, adminID int64, reason string) (*GroupApplication, error) {
+	if err := s.requireGroupApplicationWorkflow(ctx); err != nil {
+		return nil, err
+	}
 	reason = strings.TrimSpace(reason)
 	if reason == "" || len([]rune(reason)) > 2000 {
 		return nil, infraerrors.BadRequest("INVALID_GROUP_APPLICATION_REJECTION_REASON", "rejection reason is required and must be at most 2000 characters")
@@ -210,6 +242,9 @@ func (s *GroupApplicationService) Reject(ctx context.Context, applicationID, adm
 }
 
 func (s *GroupApplicationService) Revoke(ctx context.Context, applicationID, adminID int64, reason string) (*GroupApplication, error) {
+	if err := s.requireGroupApplicationWorkflow(ctx); err != nil {
+		return nil, err
+	}
 	reason = strings.TrimSpace(reason)
 	if reason == "" || len([]rune(reason)) > 2000 {
 		return nil, infraerrors.BadRequest("INVALID_GROUP_APPLICATION_REVOCATION_REASON", "revocation reason is required and must be at most 2000 characters")
@@ -227,8 +262,8 @@ func (s *GroupApplicationService) Revoke(ctx context.Context, applicationID, adm
 }
 
 func (s *GroupApplicationService) ResendApproval(ctx context.Context, applicationID int64) error {
-	if _, err := s.LoadIMAPConfig(ctx, true); err != nil {
-		return ErrGroupApplicationIMAP
+	if err := s.requireGroupApplicationWorkflow(ctx); err != nil {
+		return err
 	}
 	application, err := s.repo.GetApplication(ctx, applicationID)
 	if err != nil {
@@ -248,10 +283,16 @@ func (s *GroupApplicationService) ResendApproval(ctx context.Context, applicatio
 }
 
 func (s *GroupApplicationService) RetryMail(ctx context.Context, applicationID, outboxID int64) error {
+	if err := s.requireGroupApplicationWorkflow(ctx); err != nil {
+		return err
+	}
 	return s.repo.RetryMail(ctx, applicationID, outboxID)
 }
 
 func (s *GroupApplicationService) ProcessInboundReply(ctx context.Context, applicationID int64, fromAddress, reply string) (string, error) {
+	if err := s.requireGroupApplicationWorkflow(ctx); err != nil {
+		return "disabled", err
+	}
 	application, err := s.repo.GetApplication(ctx, applicationID)
 	if err != nil {
 		return "not_found", err

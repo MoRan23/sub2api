@@ -16,44 +16,32 @@
           </p>
         </div>
         <div class="grid gap-4 sm:grid-cols-2">
-          <label class="form-group">
-            <span class="form-label">{{ t("groupApplications.group") }}</span>
-            <select v-model.number="form.group_id" class="form-input">
-              <option :value="0" disabled>
-                {{ t("groupApplications.selectGroup") }}
-              </option>
-              <option
-                v-for="option in selectableOptions"
-                :key="option.group_id"
-                :value="option.group_id"
-              >
-                {{ option.group_name }}
-              </option>
-            </select>
-          </label>
-          <label class="form-group">
-            <span class="form-label">{{
-              t("groupApplications.contactEmail")
-            }}</span>
-            <input
-              v-model.trim="form.contact_email"
-              type="email"
-              class="form-input"
-              autocomplete="email"
+          <div>
+            <label class="input-label mb-1.5 block">{{ t("groupApplications.group") }}</label>
+            <Select
+              v-model="form.group_id"
+              :options="selectableGroupOptions"
+              :placeholder="t('groupApplications.selectGroup')"
+			  :aria-label="t('groupApplications.group')"
+              searchable
             />
-          </label>
-        </div>
-        <label class="form-group">
-          <span class="form-label">{{ t("groupApplications.reason") }}</span>
-          <textarea
-            v-model.trim="form.reason"
-            class="form-input min-h-28"
-            maxlength="5000"
+          </div>
+          <Input
+            v-model="form.contact_email"
+            type="email"
+            :label="t('groupApplications.contactEmail')"
+            autocomplete="email"
           />
-          <span class="text-right text-xs text-gray-400"
-            >{{ form.reason.length }}/5000</span
-          >
-        </label>
+        </div>
+        <div>
+          <TextArea
+            v-model="form.reason"
+            :label="t('groupApplications.reason')"
+            :rows="5"
+			:maxlength="5000"
+          />
+          <div class="mt-1 text-right text-xs text-gray-400">{{ form.reason.length }}/5000</div>
+        </div>
         <div class="flex justify-end">
           <button
             class="btn btn-primary"
@@ -166,6 +154,9 @@ import {
 } from "@/api";
 import { useAppStore } from "@/stores/app";
 import BaseDialog from "@/components/common/BaseDialog.vue";
+import Input from "@/components/common/Input.vue";
+import Select from "@/components/common/Select.vue";
+import TextArea from "@/components/common/TextArea.vue";
 import Icon from "@/components/icons/Icon.vue";
 
 const props = defineProps<{ show: boolean }>();
@@ -180,6 +171,12 @@ const form = reactive({ group_id: 0, contact_email: "", reason: "" });
 
 const selectableOptions = computed(() =>
   options.value.filter((item) => !item.has_active && !item.already_completed),
+);
+const selectableGroupOptions = computed(() =>
+  selectableOptions.value.map((item) => ({
+    value: item.group_id,
+    label: item.group_name,
+  })),
 );
 const canSubmit = computed(
   () =>

@@ -1,504 +1,591 @@
 <template>
   <AppLayout>
-    <div class="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      <div
-        class="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 pb-4 dark:border-dark-600"
-      >
-        <div
-          class="inline-flex overflow-hidden rounded border border-gray-300 dark:border-dark-600"
+    <div class="mx-auto w-full max-w-7xl space-y-6 pb-8">
+      <header class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">
+            {{ t("admin.groupApplications.title") }}
+          </h1>
+          <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">
+            {{ t("admin.groupApplications.description") }}
+          </p>
+        </div>
+        <button
+          type="button"
+          class="btn btn-secondary self-start px-3 sm:self-auto"
+          :title="t('common.refresh')"
+          :aria-label="t('common.refresh')"
+          :disabled="loading"
+          @click="reloadActiveTab"
         >
+          <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
+        </button>
+      </header>
+
+      <nav class="border-b border-gray-200 dark:border-dark-700" aria-label="Group applications">
+        <div class="flex gap-6 overflow-x-auto" role="tablist">
           <button
             v-for="item in tabs"
             :key="item.value"
-            class="px-4 py-2 text-sm font-medium"
+            type="button"
+            role="tab"
+            :aria-selected="activeTab === item.value"
+            class="whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors"
             :class="
               activeTab === item.value
-                ? 'bg-primary-600 text-white'
-                : 'bg-white text-gray-600 dark:bg-dark-800 dark:text-dark-300'
+                ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+                : 'border-transparent text-gray-500 hover:text-gray-800 dark:text-dark-400 dark:hover:text-dark-100'
             "
             @click="activeTab = item.value"
           >
             {{ item.label }}
           </button>
         </div>
-        <button
-          class="btn btn-secondary"
-          :disabled="loading"
-          @click="reloadActiveTab"
-        >
-          <Icon
-            name="refresh"
-            size="sm"
-            :class="loading ? 'animate-spin' : ''"
-          />
-        </button>
-      </div>
+      </nav>
 
-      <section v-if="activeTab === 'applications'">
-        <div class="mb-4 flex flex-wrap gap-3">
-          <input
-            v-model.trim="filters.search"
-            class="form-input w-full sm:w-64"
+      <section v-if="activeTab === 'applications'" class="card overflow-hidden">
+        <div class="flex flex-col gap-3 border-b border-gray-200 p-4 dark:border-dark-700 sm:flex-row">
+          <SearchInput
+            v-model="filters.search"
+            class="sm:max-w-md"
             :placeholder="t('admin.groupApplications.search')"
-            @keyup.enter="applyFilters"
+            @search="applyFilters"
           />
-          <select
-            v-model="filters.status"
-            class="form-input w-48"
-            @change="applyFilters"
-          >
-            <option value="">
-              {{ t("admin.groupApplications.allStatuses") }}
-            </option>
-            <option v-for="status in statuses" :key="status" :value="status">
-              {{ t(`groupApplications.status.${status}`) }}
-            </option>
-          </select>
-          <button class="btn btn-primary" @click="applyFilters">
-            <Icon name="search" size="sm" class="mr-2" />{{
-              t("common.search")
-            }}
-          </button>
+          <div class="w-full sm:w-52">
+            <Select
+              :model-value="filters.status"
+              :options="statusOptions"
+              :searchable="false"
+			  :aria-label="t('admin.groupApplications.allStatuses')"
+              @update:model-value="setStatusFilter"
+            />
+          </div>
         </div>
-        <div
-          class="overflow-x-auto border-y border-gray-200 dark:border-dark-600"
-        >
-          <table
-            class="min-w-full divide-y divide-gray-200 dark:divide-dark-600"
-          >
+
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200 dark:divide-dark-700">
             <thead class="bg-gray-50 dark:bg-dark-800">
               <tr>
                 <th
                   v-for="heading in applicationHeadings"
                   :key="heading"
-                  class="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500"
+                  class="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-500 dark:text-dark-400"
                 >
                   {{ heading }}
                 </th>
               </tr>
             </thead>
-            <tbody
-              class="divide-y divide-gray-200 bg-white dark:divide-dark-600 dark:bg-dark-900"
-            >
+            <tbody class="divide-y divide-gray-200 bg-white dark:divide-dark-700 dark:bg-dark-900">
+              <tr v-if="loading">
+                <td :colspan="7" class="px-4 py-12 text-center text-sm text-gray-500">
+                  {{ t("common.loading") }}
+                </td>
+              </tr>
               <tr
                 v-for="item in applications"
+                v-else
                 :key="item.id"
-                class="cursor-pointer hover:bg-gray-50 dark:hover:bg-dark-800"
+                class="cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-dark-800"
                 @click="openApplication(item.id)"
               >
-                <td class="px-4 py-3 text-sm">#{{ item.id }}</td>
+                <td class="whitespace-nowrap px-4 py-3 text-sm font-medium">#{{ item.id }}</td>
                 <td class="px-4 py-3 text-sm">
-                  <div class="font-medium text-gray-900 dark:text-white">
-                    {{ item.user_email }}
-                  </div>
-                  <div class="text-xs text-gray-500">
-                    UID {{ item.user_id }}
-                  </div>
+                  <div class="font-medium text-gray-900 dark:text-white">{{ item.user_email }}</div>
+                  <div class="text-xs text-gray-500">UID {{ item.user_id }}</div>
                 </td>
-                <td class="px-4 py-3 text-sm">{{ item.group_name }}</td>
+                <td class="whitespace-nowrap px-4 py-3 text-sm">{{ item.group_name }}</td>
                 <td class="px-4 py-3 text-sm">{{ item.contact_email }}</td>
-                <td class="px-4 py-3">
-                  <span
-                    :class="statusClass(item.status)"
-                    class="rounded px-2 py-1 text-xs font-medium"
-                    >{{ t(`groupApplications.status.${item.status}`) }}</span
-                  >
+                <td class="whitespace-nowrap px-4 py-3">
+                  <span :class="statusClass(item.status)" class="rounded px-2 py-1 text-xs font-medium">
+                    {{ t(`groupApplications.status.${item.status}`) }}
+                  </span>
                 </td>
-                <td class="px-4 py-3 text-sm text-gray-500">
+                <td class="whitespace-nowrap px-4 py-3 text-sm text-gray-500">
                   {{ formatDate(item.created_at) }}
                 </td>
-                <td class="px-4 py-3">
+                <td class="whitespace-nowrap px-4 py-3 text-xs">
                   <span
                     v-if="item.last_email_status"
-                    class="text-xs"
-                    :class="
-                      item.last_email_status === 'failed'
-                        ? 'text-red-600'
-                        : 'text-gray-500'
-                    "
-                    >{{ item.last_email_status }}</span
+                    :class="item.last_email_status === 'failed' ? 'text-red-600' : 'text-gray-500'"
                   >
+                    {{ item.last_email_status }}
+                  </span>
                 </td>
               </tr>
               <tr v-if="!loading && !applications.length">
-                <td
-                  :colspan="7"
-                  class="px-4 py-12 text-center text-sm text-gray-500"
-                >
+                <td :colspan="7" class="px-4 py-14 text-center text-sm text-gray-500">
+                  <Icon name="inbox" size="lg" class="mx-auto mb-3 text-gray-300 dark:text-dark-500" />
                   {{ t("admin.groupApplications.noApplications") }}
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
-        <div
+        <Pagination
           v-if="totalApplications > pageSize"
-          class="mt-4 flex items-center justify-end gap-3 text-sm text-gray-500"
-        >
-          <button
-            class="btn btn-secondary px-2"
-            :title="t('common.back')"
-            :disabled="page <= 1 || loading"
-            @click="changePage(page - 1)"
-          >
-            <Icon name="chevronLeft" size="sm" />
-          </button>
-          <span>{{ page }} / {{ totalPages }}</span>
-          <button
-            class="btn btn-secondary px-2"
-            :title="t('common.next')"
-            :disabled="page >= totalPages || loading"
-            @click="changePage(page + 1)"
-          >
-            <Icon name="chevronRight" size="sm" />
-          </button>
-        </div>
+          :total="totalApplications"
+          :page="page"
+          :page-size="pageSize"
+          :show-page-size-selector="false"
+          @update:page="changePage"
+        />
       </section>
 
       <section
         v-else-if="activeTab === 'policies'"
-        class="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]"
+        class="grid items-start gap-6 lg:grid-cols-[300px_minmax(0,1fr)]"
       >
-        <aside
-          class="border-r border-gray-200 pr-0 lg:pr-6 dark:border-dark-600"
-        >
-          <label class="form-group">
-            <span class="form-label">{{
-              t("admin.groupApplications.applyableGroup")
-            }}</span>
-            <select
-              v-model.number="selectedGroupID"
-              class="form-input"
-              @change="selectPolicy(selectedGroupID)"
-            >
-              <option :value="0" disabled>
-                {{ t("groupApplications.selectGroup") }}
-              </option>
-              <option
-                v-for="group in eligibleGroups"
-                :key="group.id"
-                :value="group.id"
-              >
-                {{ group.name }}
-              </option>
-            </select>
+        <aside class="card p-4">
+          <label class="input-label mb-1.5 block">
+            {{ t("admin.groupApplications.applyableGroup") }}
           </label>
-          <div class="mt-4 space-y-1">
+          <Select
+            :model-value="selectedGroupID || null"
+            :options="eligibleGroupOptions"
+            :placeholder="t('groupApplications.selectGroup')"
+			:aria-label="t('admin.groupApplications.applyableGroup')"
+            searchable
+            @update:model-value="setSelectedGroup"
+          />
+          <div class="mt-4 space-y-1 border-t border-gray-200 pt-4 dark:border-dark-700">
             <button
               v-for="policy in policies"
               :key="policy.group_id"
-              class="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-dark-800"
+              type="button"
+              class="flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm transition-colors"
               :class="
                 selectedGroupID === policy.group_id
                   ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300'
-                  : ''
+                  : 'hover:bg-gray-100 dark:hover:bg-dark-800'
               "
               @click="selectPolicy(policy.group_id)"
             >
-              <span>{{ policy.group_name }}</span
-              ><span
-                class="h-2 w-2 rounded-full"
-                :class="policy.enabled ? 'bg-green-500' : 'bg-gray-300'"
+              <span class="truncate">{{ policy.group_name }}</span>
+              <span
+                class="ml-3 h-2 w-2 flex-none rounded-full"
+                :class="policy.enabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-dark-500'"
               />
             </button>
           </div>
         </aside>
-        <div v-if="policyForm" class="space-y-6">
-          <div class="grid gap-4 sm:grid-cols-2">
-            <label class="flex items-center gap-3"
-              ><input
-                v-model="policyForm.enabled"
-                type="checkbox"
-                class="h-4 w-4"
-              /><span class="text-sm font-medium">{{
-                t("admin.groupApplications.enabled")
-              }}</span></label
-            >
-            <label class="form-group"
-              ><span class="form-label">{{
-                t("admin.groupApplications.replyPhrase")
-              }}</span
-              ><input
-                v-model.trim="policyForm.reply_phrase"
-                class="form-input"
-                maxlength="500"
-            /></label>
+
+        <div v-if="policyForm" class="card p-5 sm:p-6">
+          <div class="flex flex-col gap-4 border-b border-gray-200 pb-5 dark:border-dark-700 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 class="text-base font-semibold text-gray-900 dark:text-white">
+                {{ policyForm.group_name }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">
+                {{ t("admin.groupApplications.policyDescription") }}
+              </p>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="text-sm font-medium">{{ t("admin.groupApplications.enabled") }}</span>
+              <Toggle v-model="policyForm.enabled" />
+            </div>
           </div>
-          <div class="grid gap-4 sm:grid-cols-2">
-            <label class="form-group"
-              ><span class="form-label">{{
-                t("admin.groupApplications.pdfAgreement")
-              }}</span
-              ><input
+
+          <div class="mt-6 grid gap-5 md:grid-cols-2">
+            <Input
+              v-model="policyForm.reply_phrase"
+              :label="t('admin.groupApplications.replyPhrase')"
+              :hint="t('admin.groupApplications.replyPhraseHint')"
+			  :maxlength="500"
+            />
+            <div>
+              <label class="input-label mb-1.5 block">
+                {{ t("admin.groupApplications.pdfAgreement") }}
+              </label>
+              <input
                 ref="fileInput"
                 type="file"
                 accept="application/pdf,.pdf"
-                class="form-input"
+                class="sr-only"
                 @change="handleAttachment"
-            /></label>
-            <div
-              v-if="policyForm.attachment_name"
-              class="flex items-center justify-between gap-3 self-end text-sm text-gray-500"
-            >
-              <span>
-                {{ policyForm.attachment_name }} ·
-                {{ formatBytes(policyForm.attachment_size || 0) }}
-              </span>
-              <button
-                v-if="policyForm.attachment_id"
-                class="btn btn-secondary px-2"
-                :title="t('admin.groupApplications.downloadAgreement')"
-                @click="downloadAgreement"
-              >
-                <Icon name="download" size="sm" />
-              </button>
+              />
+              <div class="flex min-h-10 items-center gap-2">
+                <button type="button" class="btn btn-secondary" @click="fileInput?.click()">
+                  <Icon name="upload" size="sm" class="mr-2" />
+                  {{ t("admin.groupApplications.choosePDF") }}
+                </button>
+                <button
+                  v-if="policyForm.attachment_id"
+                  type="button"
+                  class="btn btn-secondary px-3"
+                  :title="t('admin.groupApplications.downloadAgreement')"
+                  @click="downloadAgreement"
+                >
+                  <Icon name="download" size="sm" />
+                </button>
+              </div>
+              <p class="mt-2 truncate text-xs text-gray-500 dark:text-dark-400">
+                {{ attachment?.name || policyForm.attachment_name || t("admin.groupApplications.noPDF") }}
+                <template v-if="attachment"> · {{ formatBytes(attachment.size) }}</template>
+                <template v-else-if="policyForm.attachment_size"> · {{ formatBytes(policyForm.attachment_size) }}</template>
+              </p>
             </div>
           </div>
+
           <GroupApplicationTemplateEditor v-model="policyForm.templates" />
-          <div
-            class="flex justify-end border-t border-gray-200 pt-4 dark:border-dark-600"
-          >
-            <button
-              class="btn btn-primary"
-              :disabled="saving"
-              @click="savePolicy"
-            >
+          <div class="mt-6 flex justify-end border-t border-gray-200 pt-5 dark:border-dark-700">
+            <button type="button" class="btn btn-primary" :disabled="saving" @click="savePolicy">
+              <Icon name="check" size="sm" class="mr-2" />
               {{ t("common.save") }}
             </button>
           </div>
         </div>
+        <div v-else class="card px-6 py-16 text-center text-sm text-gray-500">
+          {{ t("admin.groupApplications.selectPolicyHint") }}
+        </div>
       </section>
 
-      <section v-else-if="imapForm" class="max-w-3xl space-y-6">
-        <div
-          class="flex items-center justify-between border-b border-gray-200 pb-4 dark:border-dark-600"
-        >
-          <label class="flex items-center gap-3"
-            ><input
-              v-model="imapForm.enabled"
-              type="checkbox"
-              class="h-4 w-4"
-            /><span class="font-medium">{{
-              t("admin.groupApplications.enableIMAP")
-            }}</span></label
-          >
-          <span
-            class="text-xs"
-            :class="workerHealth?.running ? 'text-green-600' : 'text-red-600'"
-            >{{
-              workerHealth?.running
-                ? t("admin.groupApplications.workerRunning")
-                : t("admin.groupApplications.workerStopped")
-            }}</span
-          >
+      <section v-else-if="emailForm" class="space-y-6">
+        <div class="flex flex-col gap-4 rounded-lg border border-gray-200 bg-white p-5 dark:border-dark-700 dark:bg-dark-800 sm:flex-row sm:items-center sm:justify-between">
+          <div class="flex items-start gap-3">
+            <div class="mt-0.5 rounded bg-primary-50 p-2 text-primary-600 dark:bg-primary-900/20 dark:text-primary-300">
+              <Icon name="mail" size="md" />
+            </div>
+            <div>
+              <h2 class="font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.groupApplications.emailModule") }}
+              </h2>
+              <p class="mt-1 max-w-3xl text-sm text-gray-500 dark:text-dark-400">
+                {{ t("admin.groupApplications.emailModuleHint") }}
+              </p>
+              <p class="mt-2 flex items-center gap-2 text-xs" :class="workflowStatusClass">
+                <span class="h-2 w-2 rounded-full bg-current" />{{ workflowStatusText }}
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-sm font-medium">
+              {{ emailForm.enabled ? t("common.enabled") : t("common.disabled") }}
+            </span>
+            <Toggle v-model="emailForm.enabled" />
+          </div>
         </div>
-        <div class="grid gap-4 sm:grid-cols-2">
-          <label class="form-group"
-            ><span class="form-label">Host</span
-            ><input v-model.trim="imapForm.host" class="form-input"
-          /></label>
-          <label class="form-group"
-            ><span class="form-label">Port</span
-            ><input
-              v-model.number="imapForm.port"
-              type="number"
-              min="1"
-              max="65535"
-              class="form-input"
-          /></label>
-          <label class="form-group"
-            ><span class="form-label">{{
-              t("admin.groupApplications.username")
-            }}</span
-            ><input
-              v-model.trim="imapForm.username"
-              class="form-input"
-              autocomplete="username"
-          /></label>
-          <label class="form-group"
-            ><span class="form-label">{{
-              t("admin.groupApplications.password")
-            }}</span
-            ><input
-              v-model="imapForm.password"
-              type="password"
-              class="form-input"
-              autocomplete="new-password"
-              :placeholder="imapForm.password_configured ? '********' : ''"
-          /></label>
-          <label class="form-group"
-            ><span class="form-label">{{
-              t("admin.groupApplications.mailbox")
-            }}</span
-            ><input v-model.trim="imapForm.mailbox" class="form-input"
-          /></label>
-          <label class="form-group"
-            ><span class="form-label">{{
-              t("admin.groupApplications.replyAddress")
-            }}</span
-            ><input
-              v-model.trim="imapForm.reply_address"
-              type="email"
-              class="form-input"
-          /></label>
-          <label class="form-group"
-            ><span class="form-label">TLS</span
-            ><select v-model="imapForm.tls_mode" class="form-input">
-              <option value="implicit">Implicit TLS</option>
-              <option value="starttls">STARTTLS</option>
-            </select></label
-          >
-          <label class="form-group"
-            ><span class="form-label">{{
-              t("admin.groupApplications.pollInterval")
-            }}</span
-            ><input
-              v-model.number="imapForm.poll_interval_seconds"
-              type="number"
-              min="15"
-              max="300"
-              class="form-input"
-          /></label>
-        </div>
-        <p v-if="workerHealth?.last_imap_error" class="text-sm text-red-600">
-          {{ workerHealth.last_imap_error }}
-        </p>
+
         <div
-          class="flex justify-end gap-3 border-t border-gray-200 pt-4 dark:border-dark-600"
+          v-if="emailForm.legacy_imported"
+          class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-200"
         >
-          <button
-            class="btn btn-secondary"
-            :disabled="testing"
-            @click="testIMAP"
-          >
-            {{ t("admin.groupApplications.testConnection") }}</button
-          ><button class="btn btn-primary" :disabled="saving" @click="saveIMAP">
-            {{ t("common.save") }}
+          {{ t("admin.groupApplications.legacyImported") }}
+        </div>
+        <div
+          v-if="workerHealth?.configuration_error"
+          class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800/60 dark:bg-red-900/20 dark:text-red-200"
+        >
+          {{ workerHealth.configuration_error }}
+        </div>
+
+        <div class="grid items-start gap-6 xl:grid-cols-2">
+          <article class="card p-5 sm:p-6">
+            <div class="mb-5 border-b border-gray-200 pb-4 dark:border-dark-700">
+              <h3 class="font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.groupApplications.smtpTitle") }}
+              </h3>
+              <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">
+                {{ t("admin.groupApplications.smtpHint") }}
+              </p>
+            </div>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <Input v-model="emailForm.smtp.host" label="Host" placeholder="smtp.example.com" />
+              <label class="block">
+                <span class="input-label mb-1.5 block">Port</span>
+                <input v-model.number="emailForm.smtp.port" class="input w-full" type="number" min="1" max="65535" />
+              </label>
+              <Input
+                v-model="emailForm.smtp.username"
+                :label="t('admin.groupApplications.username')"
+                autocomplete="username"
+              />
+              <Input
+                v-model="emailForm.smtp.password"
+                type="password"
+                :label="t('admin.groupApplications.password')"
+                autocomplete="new-password"
+                :placeholder="emailForm.smtp.password_configured ? '********' : ''"
+                :hint="passwordHint(emailForm.smtp.password_configured)"
+              />
+              <Input
+                v-model="emailForm.smtp.from_address"
+                type="email"
+                :label="t('admin.groupApplications.senderAddress')"
+                placeholder="applications@example.com"
+              />
+              <Input
+                v-model="emailForm.smtp.from_name"
+                :label="t('admin.groupApplications.senderName')"
+              />
+              <div class="sm:col-span-2">
+                <label class="input-label mb-1.5 block">
+                  {{ t("admin.groupApplications.connectionEncryption") }}
+                </label>
+                <Select
+                  :model-value="emailForm.smtp.tls_mode"
+                  :options="tlsOptions"
+                  :searchable="false"
+				  :aria-label="t('admin.groupApplications.smtpEncryption')"
+                  @update:model-value="setSMTPTLSMode"
+                />
+                <p class="mt-2 text-xs text-gray-500 dark:text-dark-400">
+                  {{ tlsHelp(emailForm.smtp.tls_mode, "smtp") }}
+                </p>
+              </div>
+            </div>
+            <div class="mt-6 space-y-3 border-t border-gray-200 pt-5 dark:border-dark-700">
+              <Input
+                v-model="testRecipient"
+                type="email"
+                :label="t('admin.groupApplications.testRecipient')"
+                placeholder="admin@example.com"
+              />
+              <div class="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  :disabled="testingAction !== null"
+                  @click="testSMTP"
+                >
+                  <Icon name="shield" size="sm" class="mr-2" />
+                  {{ t("admin.groupApplications.testSMTP") }}
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  :disabled="testingAction !== null || !testRecipient"
+                  @click="sendTestEmail"
+                >
+                  <Icon name="mail" size="sm" class="mr-2" />
+                  {{ t("admin.groupApplications.sendTest") }}
+                </button>
+              </div>
+            </div>
+          </article>
+
+          <article class="card p-5 sm:p-6">
+            <div class="mb-5 border-b border-gray-200 pb-4 dark:border-dark-700">
+              <h3 class="font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.groupApplications.imapTitle") }}
+              </h3>
+              <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">
+                {{ t("admin.groupApplications.imapHint") }}
+              </p>
+            </div>
+            <div class="mb-5 flex items-center justify-between gap-4 rounded-lg bg-gray-50 px-4 py-3 dark:bg-dark-900">
+              <div>
+                <div class="text-sm font-medium text-gray-900 dark:text-white">
+                  {{ t("admin.groupApplications.reuseSMTPCredentials") }}
+                </div>
+                <div class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">
+                  {{ t("admin.groupApplications.reuseSMTPCredentialsHint") }}
+                </div>
+              </div>
+              <Toggle v-model="emailForm.imap.use_smtp_credentials" />
+            </div>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <Input v-model="emailForm.imap.host" label="Host" placeholder="imap.example.com" />
+              <label class="block">
+                <span class="input-label mb-1.5 block">Port</span>
+                <input v-model.number="emailForm.imap.port" class="input w-full" type="number" min="1" max="65535" />
+              </label>
+              <Input
+                v-model="emailForm.imap.username"
+                :label="t('admin.groupApplications.username')"
+                autocomplete="username"
+                :disabled="emailForm.imap.use_smtp_credentials"
+                :placeholder="emailForm.imap.use_smtp_credentials ? emailForm.smtp.username : ''"
+              />
+              <Input
+                v-model="emailForm.imap.password"
+                type="password"
+                :label="t('admin.groupApplications.password')"
+                autocomplete="new-password"
+                :disabled="emailForm.imap.use_smtp_credentials"
+                :placeholder="emailForm.imap.password_configured ? '********' : ''"
+                :hint="passwordHint(emailForm.imap.password_configured)"
+              />
+              <Input
+                v-model="emailForm.imap.reply_address"
+                type="email"
+                :label="t('admin.groupApplications.replyAddress')"
+                placeholder="applications@example.com"
+              />
+              <div>
+                <label class="input-label mb-1.5 block">
+                  {{ t("admin.groupApplications.mailbox") }}
+                </label>
+                <Select
+                  v-model="emailForm.imap.mailbox"
+                  :options="mailboxOptions"
+                  :placeholder="t('admin.groupApplications.mailboxPlaceholder')"
+				  :aria-label="t('admin.groupApplications.mailbox')"
+                  searchable
+                  creatable
+                />
+                <p class="mt-2 text-xs text-gray-500 dark:text-dark-400">
+                  {{ t("admin.groupApplications.mailboxHint") }}
+                </p>
+              </div>
+              <div>
+                <label class="input-label mb-1.5 block">
+                  {{ t("admin.groupApplications.connectionEncryption") }}
+                </label>
+                <Select
+                  :model-value="emailForm.imap.tls_mode"
+                  :options="tlsOptions"
+                  :searchable="false"
+				  :aria-label="t('admin.groupApplications.imapEncryption')"
+                  @update:model-value="setIMAPTLSMode"
+                />
+                <p class="mt-2 text-xs text-gray-500 dark:text-dark-400">
+                  {{ tlsHelp(emailForm.imap.tls_mode, "imap") }}
+                </p>
+              </div>
+              <label class="block">
+                <span class="input-label mb-1.5 block">
+                  {{ t("admin.groupApplications.pollInterval") }}
+                </span>
+                <input
+                  v-model.number="emailForm.imap.poll_interval_seconds"
+                  class="input w-full"
+                  type="number"
+                  min="15"
+                  max="300"
+                />
+              </label>
+            </div>
+            <div class="mt-6 border-t border-gray-200 pt-5 dark:border-dark-700">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                :disabled="testingAction !== null"
+                @click="testIMAP"
+              >
+                <Icon name="inbox" size="sm" class="mr-2" />
+                {{ t("admin.groupApplications.testIMAP") }}
+              </button>
+            </div>
+          </article>
+        </div>
+
+        <div class="flex justify-end border-t border-gray-200 pt-5 dark:border-dark-700">
+          <button type="button" class="btn btn-primary" :disabled="saving" @click="saveEmailConfig">
+            <Icon name="check" size="sm" class="mr-2" />
+            {{ t("admin.groupApplications.saveEmailConfig") }}
           </button>
         </div>
       </section>
+
+      <div v-else class="py-16 text-center text-sm text-gray-500">
+        {{ t("common.loading") }}
+      </div>
     </div>
 
     <BaseDialog
       :show="Boolean(selectedApplication)"
-      :title="
-        selectedApplication
-          ? `#${selectedApplication.id} ${selectedApplication.group_name}`
-          : ''
-      "
+      :title="selectedApplication ? `#${selectedApplication.id} ${selectedApplication.group_name}` : ''"
       width="wide"
       @close="closeApplication"
     >
       <div v-if="selectedApplication" class="space-y-5">
         <dl class="grid gap-4 text-sm sm:grid-cols-2">
           <div>
-            <dt class="text-gray-500">
-              {{ t("admin.groupApplications.user") }}
-            </dt>
-            <dd>
-              {{ selectedApplication.user_email }} ({{
-                selectedApplication.user_id
-              }})
+            <dt class="text-gray-500">{{ t("admin.groupApplications.user") }}</dt>
+            <dd class="mt-1 font-medium">
+              {{ selectedApplication.user_email }} ({{ selectedApplication.user_id }})
             </dd>
           </div>
           <div>
-            <dt class="text-gray-500">
-              {{ t("groupApplications.contactEmail") }}
-            </dt>
-            <dd>{{ selectedApplication.contact_email }}</dd>
+            <dt class="text-gray-500">{{ t("groupApplications.contactEmail") }}</dt>
+            <dd class="mt-1 font-medium">{{ selectedApplication.contact_email }}</dd>
           </div>
         </dl>
         <div>
-          <div class="text-sm text-gray-500">
-            {{ t("groupApplications.reason") }}
-          </div>
-          <p class="mt-1 whitespace-pre-wrap text-sm">
-            {{ selectedApplication.reason }}
-          </p>
+          <div class="text-sm text-gray-500">{{ t("groupApplications.reason") }}</div>
+          <p class="mt-1 whitespace-pre-wrap text-sm">{{ selectedApplication.reason }}</p>
         </div>
-        <div
-          v-if="selectedApplication.decision_reason"
-          class="text-sm text-red-600"
-        >
+        <div v-if="selectedApplication.decision_reason" class="text-sm text-red-600">
           {{ selectedApplication.decision_reason }}
         </div>
         <GroupApplicationCommunicationTimeline
           :communications="communications"
           :loading="communicationsLoading"
+          :actions-disabled="!emailForm?.enabled"
           @export="exportCommunications"
           @retry="retryMail"
         />
       </div>
-      <template #footer
-        ><div class="flex w-full flex-wrap justify-end gap-2">
+      <template #footer>
+        <div class="flex w-full flex-wrap justify-end gap-2">
           <button
             v-if="selectedApplication?.status === 'pending'"
+            type="button"
             class="btn btn-primary"
+            :disabled="saving || !emailForm?.enabled"
             @click="approveSelected"
           >
-            {{ t("admin.groupApplications.approve") }}</button
-          ><button
-            v-if="
-              selectedApplication?.status === 'pending' ||
-              selectedApplication?.status === 'awaiting_reply'
-            "
+            <Icon name="check" size="sm" class="mr-2" />{{ t("admin.groupApplications.approve") }}
+          </button>
+          <button
+            v-if="selectedApplication?.status === 'pending' || selectedApplication?.status === 'awaiting_reply'"
+            type="button"
             class="btn btn-danger"
+            :disabled="saving || !emailForm?.enabled"
             @click="openDecision('reject')"
           >
-            {{ t("admin.groupApplications.reject") }}</button
-          ><button
+            <Icon name="x" size="sm" class="mr-2" />{{ t("admin.groupApplications.reject") }}
+          </button>
+          <button
             v-if="selectedApplication?.status === 'awaiting_reply'"
+            type="button"
             class="btn btn-secondary"
+            :disabled="saving || !emailForm?.enabled"
             @click="resendApproval"
           >
-            {{ t("admin.groupApplications.resendApproval") }}</button
-          ><button
+            <Icon name="mail" size="sm" class="mr-2" />{{ t("admin.groupApplications.resendApproval") }}
+          </button>
+          <button
             v-if="selectedApplication?.status === 'completed'"
+            type="button"
             class="btn btn-danger"
+            :disabled="saving || !emailForm?.enabled"
             @click="openDecision('revoke')"
           >
-            {{ t("admin.groupApplications.revoke") }}</button
-          ><button
-            class="btn btn-secondary"
-            @click="closeApplication"
-          >
+            {{ t("admin.groupApplications.revoke") }}
+          </button>
+          <button type="button" class="btn btn-secondary" @click="closeApplication">
             {{ t("common.close") }}
           </button>
-        </div></template
-      >
+        </div>
+      </template>
     </BaseDialog>
 
     <BaseDialog
       :show="decisionMode !== null"
-      :title="
-        decisionMode === 'reject'
-          ? t('admin.groupApplications.reject')
-          : t('admin.groupApplications.revoke')
-      "
+      :title="decisionMode === 'reject' ? t('admin.groupApplications.reject') : t('admin.groupApplications.revoke')"
       width="narrow"
       @close="decisionMode = null"
     >
-      <label class="form-group"
-        ><span class="form-label">{{
-          t("admin.groupApplications.decisionReason")
-        }}</span
-        ><textarea
-          v-model.trim="decisionReason"
-          class="form-input min-h-28"
-          maxlength="2000"
-        />
-      </label>
-      <template #footer
-        ><button class="btn btn-secondary" @click="decisionMode = null">
-          {{ t("common.cancel") }}</button
-        ><button
+      <TextArea
+        v-model="decisionReason"
+        :label="t('admin.groupApplications.decisionReason')"
+        :rows="5"
+		:maxlength="2000"
+      />
+      <template #footer>
+        <button type="button" class="btn btn-secondary" @click="decisionMode = null">
+          {{ t("common.cancel") }}
+        </button>
+        <button
+          type="button"
           class="btn btn-danger"
-          :disabled="!decisionReason || saving"
+          :disabled="!decisionReason.trim() || saving"
           @click="submitDecision"
         >
           {{ t("common.confirm") }}
-        </button></template
-      >
+        </button>
+      </template>
     </BaseDialog>
   </AppLayout>
 </template>
@@ -508,6 +595,12 @@ import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import BaseDialog from "@/components/common/BaseDialog.vue";
+import Input from "@/components/common/Input.vue";
+import Pagination from "@/components/common/Pagination.vue";
+import SearchInput from "@/components/common/SearchInput.vue";
+import Select from "@/components/common/Select.vue";
+import TextArea from "@/components/common/TextArea.vue";
+import Toggle from "@/components/common/Toggle.vue";
 import Icon from "@/components/icons/Icon.vue";
 import GroupApplicationTemplateEditor from "@/components/admin/groupApplications/GroupApplicationTemplateEditor.vue";
 import GroupApplicationCommunicationTimeline from "@/components/admin/groupApplications/GroupApplicationCommunicationTimeline.vue";
@@ -519,26 +612,25 @@ import {
   defaultGroupApplicationTemplates,
   type AdminGroupApplication,
   type GroupApplicationCommunication,
-  type GroupApplicationIMAPConfig,
+  type GroupApplicationEmailConfig,
   type GroupApplicationPolicy,
+  type GroupApplicationTLSMode,
   type GroupApplicationWorkerHealth,
 } from "@/api/admin/groupApplications";
 import type { GroupApplicationStatus } from "@/api/groupApplications";
 
 const { t } = useI18n();
 const appStore = useAppStore();
-type Tab = "applications" | "policies" | "imap";
+type Tab = "applications" | "policies" | "email";
+type TestingAction = "smtp" | "send" | "imap";
 const activeTab = ref<Tab>("applications");
 const loading = ref(false);
 const saving = ref(false);
-const testing = ref(false);
+const testingAction = ref<TestingAction | null>(null);
 const tabs = computed(() => [
-  {
-    value: "applications" as const,
-    label: t("admin.groupApplications.applications"),
-  },
+  { value: "applications" as const, label: t("admin.groupApplications.applications") },
   { value: "policies" as const, label: t("admin.groupApplications.policies") },
-  { value: "imap" as const, label: t("admin.groupApplications.imapSettings") },
+  { value: "email" as const, label: t("admin.groupApplications.emailSettings") },
 ]);
 const statuses: GroupApplicationStatus[] = [
   "pending",
@@ -552,9 +644,6 @@ const applications = ref<AdminGroupApplication[]>([]);
 const totalApplications = ref(0);
 const page = ref(1);
 const pageSize = 50;
-const totalPages = computed(() =>
-  Math.max(1, Math.ceil(totalApplications.value / pageSize)),
-);
 const selectedApplication = ref<AdminGroupApplication | null>(null);
 const communications = ref<GroupApplicationCommunication[]>([]);
 const communicationsLoading = ref(false);
@@ -564,10 +653,14 @@ const groups = ref<AdminGroup[]>([]);
 const selectedGroupID = ref(0);
 const policyForm = ref<GroupApplicationPolicy | null>(null);
 const attachment = ref<File>();
-const imapForm = ref<GroupApplicationIMAPConfig>();
+const fileInput = ref<HTMLInputElement>();
+const emailForm = ref<GroupApplicationEmailConfig>();
 const workerHealth = ref<GroupApplicationWorkerHealth>();
+const mailboxes = ref<string[]>(["INBOX"]);
+const testRecipient = ref("");
 const decisionMode = ref<"reject" | "revoke" | null>(null);
 const decisionReason = ref("");
+
 const eligibleGroups = computed(() =>
   groups.value.filter(
     (group) =>
@@ -576,6 +669,25 @@ const eligibleGroups = computed(() =>
       group.status === "active",
   ),
 );
+const eligibleGroupOptions = computed(() =>
+  eligibleGroups.value.map((group) => ({ value: group.id, label: group.name })),
+);
+const statusOptions = computed(() => [
+  { value: "", label: t("admin.groupApplications.allStatuses") },
+  ...statuses.map((status) => ({
+    value: status,
+    label: t(`groupApplications.status.${status}`),
+  })),
+]);
+const tlsOptions = computed(() => [
+  { value: "implicit", label: t("admin.groupApplications.implicitTLS") },
+  { value: "starttls", label: "STARTTLS" },
+]);
+const mailboxOptions = computed(() => {
+  const values = new Set(mailboxes.value);
+  if (emailForm.value?.imap.mailbox) values.add(emailForm.value.imap.mailbox);
+  return Array.from(values).map((value) => ({ value, label: value }));
+});
 const applicationHeadings = computed(() => [
   "ID",
   t("admin.groupApplications.user"),
@@ -585,7 +697,27 @@ const applicationHeadings = computed(() => [
   t("common.createdAt"),
   t("admin.groupApplications.email"),
 ]);
+const workflowStatusText = computed(() => {
+  if (workerHealth.value?.configuration_error) {
+    return t("admin.groupApplications.workflowConfigError");
+  }
+  if (!emailForm.value?.enabled) return t("admin.groupApplications.workflowPaused");
+  if (workerHealth.value?.running && workerHealth.value?.workflow_enabled) {
+    return t("admin.groupApplications.workflowRunning");
+  }
+  return t("admin.groupApplications.workerStopped");
+});
+const workflowStatusClass = computed(() => {
+  if (workerHealth.value?.configuration_error) return "text-red-600 dark:text-red-300";
+  if (!emailForm.value?.enabled) return "text-gray-500 dark:text-dark-400";
+  return workerHealth.value?.workflow_enabled
+    ? "text-green-600 dark:text-green-300"
+    : "text-amber-600 dark:text-amber-300";
+});
 
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : t("common.error");
 }
@@ -609,8 +741,12 @@ async function applyFilters() {
   page.value = 1;
   await loadApplications();
 }
+function setStatusFilter(value: string | number | boolean | null) {
+  filters.value.status = (value || "") as GroupApplicationStatus | "";
+  void applyFilters();
+}
 async function changePage(nextPage: number) {
-  if (nextPage < 1 || nextPage > totalPages.value || nextPage === page.value) return;
+  if (nextPage < 1 || nextPage === page.value) return;
   page.value = nextPage;
   await loadApplications();
 }
@@ -627,13 +763,9 @@ async function openApplication(id: number) {
       communications.value = history;
     }
   } catch (error) {
-    if (requestVersion === applicationRequestVersion) {
-      appStore.showError(errorMessage(error));
-    }
+    if (requestVersion === applicationRequestVersion) appStore.showError(errorMessage(error));
   } finally {
-    if (requestVersion === applicationRequestVersion) {
-      communicationsLoading.value = false;
-    }
+    if (requestVersion === applicationRequestVersion) communicationsLoading.value = false;
   }
 }
 function closeApplication() {
@@ -649,18 +781,18 @@ async function loadPolicies() {
       groupApplicationsAdminAPI.listPolicies(),
       adminAPI.groups.getAll(),
     ]);
-    if (!selectedGroupID.value)
-      selectPolicy(
-        policies.value[0]?.group_id ?? eligibleGroups.value[0]?.id ?? 0,
-      );
+    if (!selectedGroupID.value) {
+      selectPolicy(policies.value[0]?.group_id ?? eligibleGroups.value[0]?.id ?? 0);
+    }
   } catch (error) {
     appStore.showError(errorMessage(error));
   } finally {
     loading.value = false;
   }
 }
-function clone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
+function setSelectedGroup(value: string | number | boolean | null) {
+  const groupID = Number(value || 0);
+  if (groupID > 0) selectPolicy(groupID);
 }
 function selectPolicy(groupID: number) {
   selectedGroupID.value = groupID;
@@ -678,50 +810,17 @@ function selectPolicy(groupID: number) {
         }
       : null;
   attachment.value = undefined;
+  if (fileInput.value) fileInput.value.value = "";
 }
 function handleAttachment(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
-  if (
-    file &&
-    (file.type !== "application/pdf" || file.size > 10 * 1024 * 1024)
-  ) {
+  if (file && (file.type !== "application/pdf" || file.size > 10 * 1024 * 1024)) {
     appStore.showError(t("admin.groupApplications.invalidPDF"));
     input.value = "";
     return;
   }
   attachment.value = file;
-}
-async function downloadAgreement() {
-  if (!policyForm.value?.attachment_id) return;
-  try {
-    const blob = await groupApplicationsAdminAPI.downloadAttachment(
-      policyForm.value.attachment_id,
-    );
-    downloadBlob(blob, policyForm.value.attachment_name || "agreement.pdf");
-  } catch (error) {
-    appStore.showError(errorMessage(error));
-  }
-}
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  queueMicrotask(() => URL.revokeObjectURL(url));
-}
-async function exportCommunications() {
-  if (!selectedApplication.value) return;
-  try {
-    const id = selectedApplication.value.id;
-    const blob = await groupApplicationsAdminAPI.exportCommunications(id);
-    downloadBlob(blob, `group-application-${id}-communications.json`);
-  } catch (error) {
-    appStore.showError(errorMessage(error));
-  }
 }
 async function savePolicy() {
   if (!policyForm.value) return;
@@ -732,13 +831,12 @@ async function savePolicy() {
       policyForm.value,
       attachment.value,
     );
-    const index = policies.value.findIndex(
-      (item) => item.group_id === saved.group_id,
-    );
+    const index = policies.value.findIndex((item) => item.group_id === saved.group_id);
     if (index >= 0) policies.value[index] = saved;
     else policies.value.push(saved);
     policyForm.value = clone(saved);
     attachment.value = undefined;
+    if (fileInput.value) fileInput.value.value = "";
     appStore.showSuccess(t("common.saved"));
   } catch (error) {
     appStore.showError(errorMessage(error));
@@ -746,24 +844,59 @@ async function savePolicy() {
     saving.value = false;
   }
 }
-async function loadIMAP() {
+async function loadEmailConfig() {
   loading.value = true;
   try {
-    [imapForm.value, workerHealth.value] = await Promise.all([
-      groupApplicationsAdminAPI.getIMAP(),
+    [emailForm.value, workerHealth.value] = await Promise.all([
+      groupApplicationsAdminAPI.getEmailConfig(),
       groupApplicationsAdminAPI.workerStatus(),
     ]);
+    const mailbox = emailForm.value.imap.mailbox || "INBOX";
+    mailboxes.value = Array.from(new Set(["INBOX", mailbox]));
+    if (!testRecipient.value) {
+      testRecipient.value = emailForm.value.smtp.from_address;
+    }
   } catch (error) {
     appStore.showError(errorMessage(error));
   } finally {
     loading.value = false;
   }
 }
-async function saveIMAP() {
-  if (!imapForm.value) return;
+function setSMTPTLSMode(value: string | number | boolean | null) {
+  if (!emailForm.value || (value !== "implicit" && value !== "starttls")) return;
+  const oldMode = emailForm.value.smtp.tls_mode;
+  const oldDefault = oldMode === "implicit" ? 465 : 587;
+  if (!emailForm.value.smtp.port || emailForm.value.smtp.port === oldDefault) {
+    emailForm.value.smtp.port = value === "implicit" ? 465 : 587;
+  }
+  emailForm.value.smtp.tls_mode = value;
+}
+function setIMAPTLSMode(value: string | number | boolean | null) {
+  if (!emailForm.value || (value !== "implicit" && value !== "starttls")) return;
+  const oldMode = emailForm.value.imap.tls_mode;
+  const oldDefault = oldMode === "implicit" ? 993 : 143;
+  if (!emailForm.value.imap.port || emailForm.value.imap.port === oldDefault) {
+    emailForm.value.imap.port = value === "implicit" ? 993 : 143;
+  }
+  emailForm.value.imap.tls_mode = value;
+}
+function tlsHelp(mode: GroupApplicationTLSMode, transport: "smtp" | "imap") {
+  const port = transport === "smtp" ? (mode === "implicit" ? 465 : 587) : mode === "implicit" ? 993 : 143;
+  return mode === "implicit"
+    ? t("admin.groupApplications.implicitTLSHint", { port })
+    : t("admin.groupApplications.startTLSHint", { port });
+}
+function passwordHint(configured: boolean) {
+  return configured
+    ? t("admin.groupApplications.passwordConfiguredHint")
+    : t("admin.groupApplications.passwordRequiredHint");
+}
+async function saveEmailConfig() {
+  if (!emailForm.value) return;
   saving.value = true;
   try {
-    imapForm.value = await groupApplicationsAdminAPI.saveIMAP(imapForm.value);
+    emailForm.value = await groupApplicationsAdminAPI.saveEmailConfig(emailForm.value);
+    await loadEmailConfig();
     appStore.showSuccess(t("common.saved"));
   } catch (error) {
     appStore.showError(errorMessage(error));
@@ -771,21 +904,49 @@ async function saveIMAP() {
     saving.value = false;
   }
 }
-async function testIMAP() {
-  testing.value = true;
+async function testSMTP() {
+  if (!emailForm.value) return;
+  testingAction.value = "smtp";
   try {
-    await groupApplicationsAdminAPI.testIMAP();
-    appStore.showSuccess(t("admin.groupApplications.connectionOK"));
+    await groupApplicationsAdminAPI.testSMTP(emailForm.value);
+    appStore.showSuccess(t("admin.groupApplications.smtpConnectionOK"));
   } catch (error) {
     appStore.showError(errorMessage(error));
   } finally {
-    testing.value = false;
+    testingAction.value = null;
+  }
+}
+async function sendTestEmail() {
+  if (!emailForm.value || !testRecipient.value) return;
+  testingAction.value = "send";
+  try {
+    await groupApplicationsAdminAPI.sendTestEmail(emailForm.value, testRecipient.value);
+    appStore.showSuccess(t("admin.groupApplications.testEmailSent"));
+  } catch (error) {
+    appStore.showError(errorMessage(error));
+  } finally {
+    testingAction.value = null;
+  }
+}
+async function testIMAP() {
+  if (!emailForm.value) return;
+  testingAction.value = "imap";
+  try {
+    const result = await groupApplicationsAdminAPI.testIMAP(emailForm.value);
+    mailboxes.value = Array.from(new Set(["INBOX", ...result.mailboxes]));
+    appStore.showSuccess(
+      t("admin.groupApplications.imapConnectionOK", { count: result.mailboxes.length }),
+    );
+  } catch (error) {
+    appStore.showError(errorMessage(error));
+  } finally {
+    testingAction.value = null;
   }
 }
 async function reloadActiveTab() {
   if (activeTab.value === "applications") await loadApplications();
   else if (activeTab.value === "policies") await loadPolicies();
-  else await loadIMAP();
+  else await loadEmailConfig();
 }
 async function approveSelected() {
   if (!selectedApplication.value) return;
@@ -805,24 +966,14 @@ function openDecision(mode: "reject" | "revoke") {
   decisionReason.value = "";
 }
 async function submitDecision() {
-  if (
-    !selectedApplication.value ||
-    !decisionMode.value ||
-    !decisionReason.value
-  )
-    return;
+  if (!selectedApplication.value || !decisionMode.value || !decisionReason.value.trim()) return;
   saving.value = true;
   try {
-    if (decisionMode.value === "reject")
-      await groupApplicationsAdminAPI.reject(
-        selectedApplication.value.id,
-        decisionReason.value,
-      );
-    else
-      await groupApplicationsAdminAPI.revoke(
-        selectedApplication.value.id,
-        decisionReason.value,
-      );
+    if (decisionMode.value === "reject") {
+      await groupApplicationsAdminAPI.reject(selectedApplication.value.id, decisionReason.value);
+    } else {
+      await groupApplicationsAdminAPI.revoke(selectedApplication.value.id, decisionReason.value);
+    }
     decisionMode.value = null;
     await openApplication(selectedApplication.value.id);
     await loadApplications();
@@ -835,44 +986,69 @@ async function submitDecision() {
 async function resendApproval() {
   if (!selectedApplication.value) return;
   try {
-    await groupApplicationsAdminAPI.resendApproval(
-      selectedApplication.value.id,
-    );
+    await groupApplicationsAdminAPI.resendApproval(selectedApplication.value.id);
     await openApplication(selectedApplication.value.id);
   } catch (error) {
     appStore.showError(errorMessage(error));
   }
 }
 async function retryMail(outboxID: number) {
-  if (!selectedApplication.value) return;
+  if (!selectedApplication.value || !emailForm.value?.enabled) return;
   try {
-    await groupApplicationsAdminAPI.retryMail(
-      selectedApplication.value.id,
-      outboxID,
-    );
+    await groupApplicationsAdminAPI.retryMail(selectedApplication.value.id, outboxID);
     await openApplication(selectedApplication.value.id);
   } catch (error) {
     appStore.showError(errorMessage(error));
   }
+}
+async function downloadAgreement() {
+  if (!policyForm.value?.attachment_id) return;
+  try {
+    const blob = await groupApplicationsAdminAPI.downloadAttachment(policyForm.value.attachment_id);
+    downloadBlob(blob, policyForm.value.attachment_name || "agreement.pdf");
+  } catch (error) {
+    appStore.showError(errorMessage(error));
+  }
+}
+async function exportCommunications() {
+  if (!selectedApplication.value) return;
+  try {
+    const id = selectedApplication.value.id;
+    const blob = await groupApplicationsAdminAPI.exportCommunications(id);
+    downloadBlob(blob, `group-application-${id}-communications.json`);
+  } catch (error) {
+    appStore.showError(errorMessage(error));
+  }
+}
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  queueMicrotask(() => URL.revokeObjectURL(url));
 }
 function formatDate(value: string) {
   return new Date(value).toLocaleString();
 }
 function formatBytes(value: number) {
   return value < 1024 * 1024
-    ? `${Math.round(value / 1024)} KiB`
+    ? `${Math.max(1, Math.round(value / 1024))} KiB`
     : `${(value / 1024 / 1024).toFixed(1)} MiB`;
 }
 function statusClass(status: GroupApplicationStatus) {
   return {
-    pending: "bg-blue-100 text-blue-700",
-    awaiting_reply: "bg-amber-100 text-amber-700",
-    completed: "bg-green-100 text-green-700",
-    rejected: "bg-red-100 text-red-700",
-    revoked: "bg-gray-200 text-gray-700",
+    pending: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+    awaiting_reply: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
+    completed: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300",
+    rejected: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300",
+    revoked: "bg-gray-200 text-gray-700 dark:bg-dark-600 dark:text-dark-200",
   }[status];
 }
+
 onMounted(async () => {
-  await Promise.all([loadApplications(), loadPolicies(), loadIMAP()]);
+  await Promise.all([loadApplications(), loadPolicies(), loadEmailConfig()]);
 });
 </script>

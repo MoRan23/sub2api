@@ -127,6 +127,7 @@
               v-if="communication.status === 'failed'"
               type="button"
               class="btn btn-secondary px-2 py-1 text-xs"
+			  :disabled="actionsDisabled"
               @click="emit('retry', communication.id)"
             >
               {{ t("common.retry") }}
@@ -148,8 +149,9 @@ withDefaults(
   defineProps<{
     communications: GroupApplicationCommunication[];
     loading?: boolean;
+	actionsDisabled?: boolean;
   }>(),
-  { loading: false },
+	{ loading: false, actionsDisabled: false },
 );
 
 const emit = defineEmits<{

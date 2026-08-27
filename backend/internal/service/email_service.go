@@ -93,6 +93,9 @@ type SMTPConfig struct {
 	From     string
 	FromName string
 	UseTLS   bool
+	// TLSMode is used by callers that require an explicit encrypted transport.
+	// Empty preserves the legacy global SMTP behavior controlled by UseTLS.
+	TLSMode string
 }
 
 // EmailService 邮件服务
@@ -263,6 +266,21 @@ func (s *EmailService) connectSMTP(config *SMTPConfig) (*smtp.Client, error) {
 	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
 	dialer := &net.Dialer{Timeout: smtpDialTimeout}
 	tlsConfig := smtpTLSConfig(config.Host)
+
+	switch strings.ToLower(strings.TrimSpace(config.TLSMode)) {
+	case "implicit":
+		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
+		if err != nil {
+			return nil, fmt.Errorf("tls dial: %w", err)
+		}
+		return newSMTPClient(conn, config.Host)
+	case "starttls":
+		return s.connectSMTPStartTLS(dialer, addr, config.Host, tlsConfig, true)
+	case "":
+		// Keep the existing global SMTP compatibility behavior below.
+	default:
+		return nil, fmt.Errorf("unsupported SMTP TLS mode %q", config.TLSMode)
+	}
 
 	if config.UseTLS {
 		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)

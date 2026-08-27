@@ -1,6 +1,6 @@
 <template>
   <div class="w-full">
-    <label v-if="label" :for="id" class="input-label mb-1.5 block">
+    <label v-if="label" :for="inputId" class="input-label mb-1.5 block">
       {{ label }}
       <span v-if="required" class="text-red-500">*</span>
     </label>
@@ -14,7 +14,7 @@
       </div>
 
       <input
-        :id="id"
+        :id="inputId"
         ref="inputRef"
         :type="type"
         :value="modelValue"
@@ -23,6 +23,7 @@
         :placeholder="placeholderText"
         :autocomplete="autocomplete"
         :readonly="readonly"
+		:maxlength="maxlength"
         :class="[
           'input w-full transition-all duration-200',
           $slots.prefix ? 'pl-11' : '',
@@ -70,6 +71,7 @@ interface Props {
   hint?: string
   id?: string
   autocomplete?: string
+	maxlength?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -87,6 +89,8 @@ const emit = defineEmits<{
   (e: 'enter', event: KeyboardEvent): void
 }>()
 
+const generatedId = `input-${Math.random().toString(36).slice(2, 10)}`
+const inputId = computed(() => props.id || generatedId)
 const inputRef = ref<HTMLInputElement | null>(null)
 const placeholderText = computed(() => props.placeholder || '')
 

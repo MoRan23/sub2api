@@ -301,34 +301,72 @@ func (h *GroupApplicationHandler) DownloadAttachment(c *gin.Context) {
 	c.Data(http.StatusOK, item.ContentType, item.Data)
 }
 
-func (h *GroupApplicationHandler) GetIMAPConfig(c *gin.Context) {
-	item, err := h.service.GetIMAPConfig(c.Request.Context())
+func (h *GroupApplicationHandler) GetEmailConfig(c *gin.Context) {
+	item, err := h.service.GetEmailConfig(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 	response.Success(c, item)
 }
-func (h *GroupApplicationHandler) SaveIMAPConfig(c *gin.Context) {
-	var input service.GroupApplicationIMAPConfig
+
+func (h *GroupApplicationHandler) SaveEmailConfig(c *gin.Context) {
+	var input service.GroupApplicationEmailConfig
 	if c.ShouldBindJSON(&input) != nil {
 		response.BadRequest(c, "Invalid request body")
 		return
 	}
-	item, err := h.service.SaveIMAPConfig(c.Request.Context(), input)
+	item, err := h.service.SaveEmailConfig(c.Request.Context(), input)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 	response.Success(c, item)
 }
-func (h *GroupApplicationHandler) TestIMAP(c *gin.Context) {
-	if err := h.worker.TestIMAP(c.Request.Context()); err != nil {
+
+func (h *GroupApplicationHandler) TestSMTP(c *gin.Context) {
+	var input service.GroupApplicationEmailConfig
+	if c.ShouldBindJSON(&input) != nil {
+		response.BadRequest(c, "Invalid request body")
+		return
+	}
+	if err := h.worker.TestSMTP(c.Request.Context(), input); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 	response.Success(c, gin.H{"ok": true})
 }
+
+func (h *GroupApplicationHandler) SendTestEmail(c *gin.Context) {
+	var input struct {
+		Config    service.GroupApplicationEmailConfig `json:"config"`
+		Recipient string                              `json:"recipient"`
+	}
+	if c.ShouldBindJSON(&input) != nil {
+		response.BadRequest(c, "Invalid request body")
+		return
+	}
+	if err := h.worker.SendTestEmail(c.Request.Context(), input.Config, input.Recipient); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"ok": true})
+}
+
+func (h *GroupApplicationHandler) TestIMAP(c *gin.Context) {
+	var input service.GroupApplicationEmailConfig
+	if c.ShouldBindJSON(&input) != nil {
+		response.BadRequest(c, "Invalid request body")
+		return
+	}
+	mailboxes, err := h.worker.TestIMAP(c.Request.Context(), input)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"ok": true, "mailboxes": mailboxes})
+}
+
 func (h *GroupApplicationHandler) WorkerStatus(c *gin.Context) {
 	response.Success(c, h.worker.Health())
 }

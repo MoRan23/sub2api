@@ -33,7 +33,8 @@ const (
 	GroupApplicationMaxAttachmentBytes    = 10 << 20
 	GroupApplicationMaxStoredReplyRunes   = 8000
 	GroupApplicationMaxStoredSubjectRunes = 500
-	SettingKeyGroupApplicationIMAP        = "group_application_imap_config"
+	SettingKeyGroupApplicationEmail       = "group_application_email_config"
+	SettingKeyGroupApplicationIMAP        = "group_application_imap_config" // legacy read-only fallback
 
 	GroupApplicationCommunicationOutbound = "outbound"
 	GroupApplicationCommunicationInbound  = "inbound"
@@ -41,10 +42,11 @@ const (
 
 var (
 	ErrGroupApplicationUnavailable = infraerrors.BadRequest("GROUP_APPLICATION_UNAVAILABLE", "group is not available for application")
+	ErrGroupApplicationDisabled    = infraerrors.Conflict("GROUP_APPLICATION_DISABLED", "group application workflow is disabled")
 	ErrGroupApplicationConflict    = infraerrors.Conflict("GROUP_APPLICATION_CONFLICT", "an active or completed application already exists for this group")
 	ErrGroupApplicationNotFound    = infraerrors.NotFound("GROUP_APPLICATION_NOT_FOUND", "group application not found")
 	ErrGroupApplicationState       = infraerrors.Conflict("GROUP_APPLICATION_STATE_CONFLICT", "group application status has changed")
-	ErrGroupApplicationIMAP        = infraerrors.BadRequest("GROUP_APPLICATION_IMAP_INVALID", "valid enabled IMAP configuration is required before approval")
+	ErrGroupApplicationEmail       = infraerrors.BadRequest("GROUP_APPLICATION_EMAIL_INVALID", "valid standalone group application email configuration is required")
 )
 
 type GroupApplicationLocalizedTemplate struct {

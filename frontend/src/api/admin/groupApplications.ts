@@ -80,27 +80,49 @@ export interface GroupApplicationListResult {
   total: number;
 }
 
-export interface GroupApplicationIMAPConfig {
-  enabled: boolean;
+export type GroupApplicationTLSMode = "implicit" | "starttls";
+
+export interface GroupApplicationSMTPConfig {
   host: string;
   port: number;
   username: string;
   password?: string;
   password_configured: boolean;
+  from_address: string;
+  from_name: string;
+  tls_mode: GroupApplicationTLSMode;
+}
+
+export interface GroupApplicationIMAPConfig {
+  host: string;
+  port: number;
+  username: string;
+  password?: string;
+  password_configured: boolean;
+  use_smtp_credentials: boolean;
   mailbox: string;
   reply_address: string;
-  tls_mode: "implicit" | "starttls";
+  tls_mode: GroupApplicationTLSMode;
   poll_interval_seconds: number;
+}
+
+export interface GroupApplicationEmailConfig {
+  enabled: boolean;
+  smtp: GroupApplicationSMTPConfig;
+  imap: GroupApplicationIMAPConfig;
+  legacy_imported?: boolean;
 }
 
 export interface GroupApplicationWorkerHealth {
   running: boolean;
+  workflow_enabled: boolean;
   mail_processed: number;
   mail_failures: number;
   replies_processed: number;
   reply_failures: number;
   last_imap_check_at?: string;
   last_imap_error?: string;
+  configuration_error?: string;
 }
 
 export function defaultGroupApplicationTemplates(): GroupApplicationTemplateSet {
@@ -254,23 +276,44 @@ export const groupApplicationsAdminAPI = {
     );
     return data;
   },
-  async getIMAP(): Promise<GroupApplicationIMAPConfig> {
-    const { data } = await apiClient.get<GroupApplicationIMAPConfig>(
-      "/admin/group-applications/imap",
+  async getEmailConfig(): Promise<GroupApplicationEmailConfig> {
+    const { data } = await apiClient.get<GroupApplicationEmailConfig>(
+      "/admin/group-applications/email-config",
     );
     return data;
   },
-  async saveIMAP(
-    input: GroupApplicationIMAPConfig,
-  ): Promise<GroupApplicationIMAPConfig> {
-    const { data } = await apiClient.put<GroupApplicationIMAPConfig>(
-      "/admin/group-applications/imap",
+  async saveEmailConfig(
+    input: GroupApplicationEmailConfig,
+  ): Promise<GroupApplicationEmailConfig> {
+    const { data } = await apiClient.put<GroupApplicationEmailConfig>(
+      "/admin/group-applications/email-config",
       input,
     );
     return data;
   },
-  async testIMAP(): Promise<void> {
-    await apiClient.post("/admin/group-applications/imap/test");
+  async testSMTP(input: GroupApplicationEmailConfig): Promise<void> {
+    await apiClient.post(
+      "/admin/group-applications/email-config/test-smtp",
+      input,
+    );
+  },
+  async sendTestEmail(
+    input: GroupApplicationEmailConfig,
+    recipient: string,
+  ): Promise<void> {
+    await apiClient.post("/admin/group-applications/email-config/send-test", {
+      config: input,
+      recipient,
+    });
+  },
+  async testIMAP(
+    input: GroupApplicationEmailConfig,
+  ): Promise<{ ok: boolean; mailboxes: string[] }> {
+    const { data } = await apiClient.post<{ ok: boolean; mailboxes: string[] }>(
+      "/admin/group-applications/email-config/test-imap",
+      input,
+    );
+    return data;
   },
   async workerStatus(): Promise<GroupApplicationWorkerHealth> {
     const { data } = await apiClient.get<GroupApplicationWorkerHealth>(

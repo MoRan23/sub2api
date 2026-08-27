@@ -1,12 +1,12 @@
 <template>
   <div class="w-full">
-    <label v-if="label" :for="id" class="input-label mb-1.5 block">
+    <label v-if="label" :for="textAreaId" class="input-label mb-1.5 block">
       {{ label }}
       <span v-if="required" class="text-red-500">*</span>
     </label>
     <div class="relative">
       <textarea
-        :id="id"
+        :id="textAreaId"
         ref="textAreaRef"
         :value="modelValue"
         :disabled="disabled"
@@ -14,6 +14,7 @@
         :placeholder="placeholderText"
         :readonly="readonly"
         :rows="rows"
+		:maxlength="maxlength"
         :class="[
           'input w-full min-h-[80px] transition-all duration-200 resize-y',
           error ? 'input-error ring-2 ring-red-500/20' : '',
@@ -49,6 +50,7 @@ interface Props {
   hint?: string
   id?: string
   rows?: number | string
+	maxlength?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -65,6 +67,8 @@ const emit = defineEmits<{
   (e: 'focus', event: FocusEvent): void
 }>()
 
+const generatedId = `textarea-${Math.random().toString(36).slice(2, 10)}`
+const textAreaId = computed(() => props.id || generatedId)
 const textAreaRef = ref<HTMLTextAreaElement | null>(null)
 const placeholderText = computed(() => props.placeholder || '')
 

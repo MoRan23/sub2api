@@ -324,6 +324,38 @@ func TestSMTPConnectionMandatoryStartTLSRefusesPlaintext(t *testing.T) {
 	}
 }
 
+func TestSMTPConnectionExplicitSTARTTLSUsesSingleMandatoryUpgrade(t *testing.T) {
+	srv, port := startFakeSMTPServer(t, false, true)
+	svc := &EmailService{}
+	config := smtpTestConfig(port, false)
+	config.TLSMode = "starttls"
+
+	if err := svc.TestSMTPConnectionWithConfig(config); err != nil {
+		t.Fatalf("expected explicit STARTTLS connection to succeed, got: %v", err)
+	}
+	if !srv.sawCommand("STARTTLS") {
+		t.Fatal("expected explicit STARTTLS command")
+	}
+	if got := srv.conns.Load(); got != 1 {
+		t.Fatalf("explicit STARTTLS must not probe implicit TLS first, got %d connections", got)
+	}
+}
+
+func TestSMTPConnectionExplicitImplicitTLSNeverFallsBackToPlaintext(t *testing.T) {
+	srv, port := startFakeSMTPServer(t, false, true)
+	svc := &EmailService{}
+	config := smtpTestConfig(port, false)
+	config.TLSMode = "implicit"
+
+	err := svc.TestSMTPConnectionWithConfig(config)
+	if err == nil {
+		t.Fatal("expected implicit TLS against a STARTTLS endpoint to fail")
+	}
+	if srv.sawCommand("STARTTLS") || srv.sawCommand("AUTH") {
+		t.Fatal("explicit implicit TLS must not fall back to plaintext SMTP")
+	}
+}
+
 // UseTLS=false + 服务器支持 STARTTLS：测试连接与发送路径一致，机会式升级后认证成功。
 // 这是 #1488 评论"测试连接不成功，发送测试邮件实际上能发"的回归用例。
 func TestSMTPConnectionOpportunisticStartTLSWhenTLSDisabled(t *testing.T) {
