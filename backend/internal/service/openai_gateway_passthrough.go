@@ -30,8 +30,7 @@ const openAIPassthroughCompactWindowContextKey = "openai_passthrough_compact_win
 
 type openAIPassthroughCompactWindowContext struct {
 	mappingKey string
-	threadID   string
-	expected   uint64
+	expected   OpenAICodexWindowSnapshot
 	digest     string
 	plan       OpenAIOAuthIdentityPlan
 }
@@ -676,9 +675,23 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 			InstallationPolicy:  installationPolicy,
 		}
 		var planErr error
-		identityPlan, planErr = s.GetOrResolveOpenAIOAuthOutboundIdentity(
-			ctx, c, account, capture, planOptions, explicitPlan,
-		)
+		frozenLocalCompaction := false
+		if explicitPlan != nil {
+			mode, valid := OpenAICodexCompactionModeForFinalizedPlan(*explicitPlan)
+			frozenLocalCompaction = valid && mode == CodexCompactionModeLocalResponses
+		}
+		if frozenLocalCompaction {
+			// A WS-to-HTTP bridge and its physical retries already carry the
+			// finalized server-owned plan. Its Capture may intentionally be empty;
+			// rematerializing from that empty capture would erase local compaction
+			// before the HTTP path/body classifier gets a chance to validate it.
+			identityPlan = cloneOpenAIOAuthIdentityPlan(*explicitPlan)
+			SetOpenAIOAuthIdentityPlan(c, identityPlan)
+		} else {
+			identityPlan, planErr = s.GetOrResolveOpenAIOAuthOutboundIdentity(
+				ctx, c, account, capture, planOptions, explicitPlan,
+			)
+		}
 		if planErr != nil {
 			return nil, fmt.Errorf("resolve openai OAuth passthrough identity plan: %w", planErr)
 		}
@@ -766,7 +779,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 	applyOpenAICodexBetaFeatures(c, account, req.Header)
 	if account.UsesOpenAICodexProtocol() && identityPlanned {
 		fields := gjson.GetManyBytes(body, "model", "service_tier")
-		requestKind, kindErr := openAICodexHTTPWireRequestKind(c, identityPlan)
+		requestKind, kindErr := openAICodexHTTPWireRequestKind(c, identityPlan, body)
 		if kindErr != nil {
 			return nil, kindErr
 		}
@@ -804,8 +817,7 @@ func (s *OpenAIGatewayService) prepareOpenAIPassthroughCompactWindow(
 		clearOpenAIPassthroughCompactWindow(c)
 		return body
 	}
-	if plan.WireProfile.RequestKind != CodexWireRequestCompaction ||
-		(!isOpenAIResponsesCompactPath(c) && !isOpenAINativeCompactionV2(c)) {
+	if !isTrustedOpenAICompactionRequest(c, &plan) {
 		clearOpenAIPassthroughCompactWindow(c)
 		return body
 	}
@@ -822,7 +834,7 @@ func (s *OpenAIGatewayService) prepareOpenAIPassthroughCompactWindow(
 	}
 	mappingKey := plan.WindowMappingKey
 	snapshot := plan.Window
-	digest, err := OpenAICodexCompactTurnDigest(secret, plan.CredentialOwnerNamespace, plan.APIKeyID, threadID, snapshot.Number, plan.RequestTurn.ID)
+	digest, err := OpenAICodexCompactTurnDigest(secret, plan.CredentialOwnerNamespace, plan.APIKeyID, snapshot, plan.RequestTurn.ID)
 	if err != nil {
 		clearOpenAIPassthroughCompactWindow(c)
 		return body
@@ -832,25 +844,25 @@ func (s *OpenAIGatewayService) prepareOpenAIPassthroughCompactWindow(
 		clearOpenAIPassthroughCompactWindow(c)
 		return body
 	}
-	if updated, ok := openAICodexTurnMetadataWithCompactWindow(req.Header.Get(openAIWSTurnMetadataHeader), windowID); ok {
+	if updated, ok := openAICodexTurnMetadataWithCompactWindow(req.Header.Get(openAIWSTurnMetadataHeader), snapshot); ok {
 		deleteOpenAIHeaderEqualFold(req.Header, openAIWSTurnMetadataHeader)
 		req.Header.Set(openAIWSTurnMetadataHeader, updated)
 	}
-	body = openAIPassthroughBodyWithCompactWindow(body, windowID)
+	body = openAIPassthroughBodyWithCompactWindow(body, snapshot)
 	setOpenAIRequestBodySnapshot(req, body)
 	c.Set(openAIPassthroughCompactWindowContextKey, openAIPassthroughCompactWindowContext{
 		mappingKey: mappingKey,
-		threadID:   threadID,
-		expected:   snapshot.Number,
+		expected:   snapshot,
 		digest:     digest,
 		plan:       plan,
 	})
 	return body
 }
 
-func openAICodexTurnMetadataWithCompactWindow(raw string, windowID string) (string, bool) {
-	windowID = strings.TrimSpace(windowID)
-	if windowID == "" {
+func openAICodexTurnMetadataWithCompactWindow(raw string, snapshot OpenAICodexWindowSnapshot) (string, bool) {
+	windowID := snapshot.WindowID()
+	contextWindowID := strings.TrimSpace(snapshot.ContextWindowID)
+	if windowID == "" || contextWindowID == "" {
 		return raw, false
 	}
 	base := strings.TrimSpace(raw)
@@ -860,6 +872,7 @@ func openAICodexTurnMetadataWithCompactWindow(raw string, windowID string) (stri
 	profile := ParseCodexWireProfile(base)
 	profile.RequestKind = CodexWireRequestCompaction
 	profile.WindowID = windowID
+	profile.ContextWindowID = contextWindowID
 	updated, err := sjson.Set(base, "request_kind", string(profile.RequestKind))
 	if err != nil {
 		return raw, false
@@ -868,10 +881,14 @@ func openAICodexTurnMetadataWithCompactWindow(raw string, windowID string) (stri
 	if err != nil {
 		return raw, false
 	}
+	updated, err = sjson.Set(updated, "context_window_id", profile.ContextWindowID)
+	if err != nil {
+		return raw, false
+	}
 	return updated, true
 }
 
-func openAIPassthroughBodyWithCompactWindow(body []byte, windowID string) []byte {
+func openAIPassthroughBodyWithCompactWindow(body []byte, snapshot OpenAICodexWindowSnapshot) []byte {
 	if len(body) == 0 || !gjson.ParseBytes(body).IsObject() {
 		return body
 	}
@@ -881,7 +898,7 @@ func openAIPassthroughBodyWithCompactWindow(body []byte, windowID string) []byte
 		if !value.Exists() || value.Type != gjson.String {
 			continue
 		}
-		metadata, ok := openAICodexTurnMetadataWithCompactWindow(value.String(), windowID)
+		metadata, ok := openAICodexTurnMetadataWithCompactWindow(value.String(), snapshot)
 		if !ok {
 			continue
 		}
@@ -907,12 +924,24 @@ func openAIPassthroughCompactWindowFromContext(c *gin.Context) (openAIPassthroug
 	value, ok := c.Get(openAIPassthroughCompactWindowContextKey)
 	state, valid := value.(openAIPassthroughCompactWindowContext)
 	return state, ok && valid && strings.TrimSpace(state.mappingKey) != "" &&
-		strings.TrimSpace(state.threadID) != "" && strings.TrimSpace(state.digest) != ""
+		ValidateOpenAICodexWindowSnapshot(state.expected) == nil && strings.TrimSpace(state.digest) != ""
 }
 
 func openAIPassthroughCompactWindowActive(c *gin.Context) bool {
 	_, ok := openAIPassthroughCompactWindowFromContext(c)
 	return ok
+}
+
+func passthroughCompactionMode(c *gin.Context) CodexCompactionMode {
+	state, ok := openAIPassthroughCompactWindowFromContext(c)
+	if !ok {
+		return CodexCompactionModeNone
+	}
+	mode, trusted := OpenAICodexCompactionModeForFinalizedPlan(state.plan)
+	if !trusted {
+		return CodexCompactionModeNone
+	}
+	return mode
 }
 
 func (s *OpenAIGatewayService) commitDeliveredOpenAIPassthroughCompactWindow(
@@ -923,11 +952,15 @@ func (s *OpenAIGatewayService) commitDeliveredOpenAIPassthroughCompactWindow(
 	delivery *openAICodexCompactionDelivery,
 	turnState string,
 ) {
-	if statusCode < 200 || statusCode >= 300 || delivery == nil || !delivery.Valid() || s == nil || account == nil || !account.UsesOpenAICodexProtocol() {
+	if statusCode < 200 || statusCode >= 300 || delivery == nil || s == nil || account == nil || !account.UsesOpenAICodexProtocol() {
 		return
 	}
 	state, ok := openAIPassthroughCompactWindowFromContext(c)
 	if !ok {
+		return
+	}
+	mode, trusted := OpenAICodexCompactionModeForFinalizedPlan(state.plan)
+	if !trusted || !delivery.ValidForMode(mode) {
 		return
 	}
 	if ctx == nil {
@@ -937,22 +970,29 @@ func (s *OpenAIGatewayService) commitDeliveredOpenAIPassthroughCompactWindow(
 	// detached context so a client/request cancellation racing immediately
 	// after the successful write cannot leave the durable window behind.
 	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAICodexWindowStoreTimeout)
-	result, err := s.CommitOpenAICodexWindowSnapshot(commitCtx, state.mappingKey, state.threadID, state.expected, state.digest)
+	result, err := s.CommitOpenAICodexWindowSnapshot(commitCtx, state.mappingKey, state.expected, state.digest)
 	cancel()
 	if err != nil {
 		logger.FromContext(ctx).Warn("OpenAI passthrough compact window commit failed",
 			zap.Int64("account_id", account.ID),
 			zap.String("mapping_digest", openAICodexMappingLogDigest(state.mappingKey)),
-			zap.Uint64("expected_window", state.expected),
+			zap.Uint64("expected_window", state.expected.Number),
 			zap.Error(err),
 		)
 		return
 	}
 	switch result.Status {
 	case OpenAICodexWindowCommitAdvanced, OpenAICodexWindowCommitAlreadyCommitted, OpenAICodexWindowCommitStale:
-		committedPlan := state.plan
-		committedPlan.Window = result.Snapshot
-		committedPlan.WireProfile.WindowID = result.Snapshot.WindowID()
+		committedPlan, bindErr := BindOpenAICodexWindowToPlan(state.plan, result.Snapshot, state.mappingKey)
+		if bindErr != nil {
+			logger.FromContext(ctx).Warn("OpenAI passthrough compact window bind failed",
+				zap.Int64("account_id", account.ID),
+				zap.String("mapping_digest", openAICodexMappingLogDigest(state.mappingKey)),
+				zap.Uint64("expected_window", state.expected.Number),
+				zap.Error(bindErr),
+			)
+			return
+		}
 		SetOpenAIOAuthIdentityPlan(c, committedPlan)
 		if strings.TrimSpace(turnState) != "" {
 			s.noteOpenAICodexTurnStateProvenanceForPlan(c, account, turnState, committedPlan)
@@ -961,7 +1001,7 @@ func (s *OpenAIGatewayService) commitDeliveredOpenAIPassthroughCompactWindow(
 		logger.FromContext(ctx).Warn("OpenAI passthrough compact window commit skipped",
 			zap.Int64("account_id", account.ID),
 			zap.String("mapping_digest", openAICodexMappingLogDigest(state.mappingKey)),
-			zap.Uint64("expected_window", state.expected),
+			zap.Uint64("expected_window", state.expected.Number),
 			zap.String("status", string(result.Status)),
 		)
 	}
@@ -977,7 +1017,7 @@ func openAIDeliveredSSECompactionDelivery(bodyText string) openAICodexCompaction
 
 func openAIJSONCompactionDelivery(body []byte) openAICodexCompactionDelivery {
 	var delivery openAICodexCompactionDelivery
-	if !openAICodexJSONCompactionOutputValid(body) {
+	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return delivery
 	}
 	status := strings.TrimSpace(gjson.GetBytes(body, "status").String())
@@ -985,9 +1025,61 @@ func openAIJSONCompactionDelivery(body []byte) openAICodexCompactionDelivery {
 	switch {
 	case status == "completed":
 		delivery.ObserveDeliveredEvent([]byte(`{"type":"response.completed","response":` + string(body) + `}`))
+	case status == "done":
+		delivery.ObserveDeliveredEvent([]byte(`{"type":"response.done","response":` + string(body) + `}`))
 	case eventType == "response.completed" || eventType == "response.done":
 		delivery.ObserveDeliveredEvent(body)
 	}
+	return delivery
+}
+
+// openAIJSONCompactionDeliveryForTerminal preserves the terminal event type
+// when an SSE response is materialized as JSON. Local Responses compaction
+// must not reinterpret response.done as response.completed merely because both
+// events carry a response object with status=completed.
+func openAIJSONCompactionDeliveryForTerminal(body []byte, terminalType string) openAICodexCompactionDelivery {
+	var delivery openAICodexCompactionDelivery
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return delivery
+	}
+	terminalType = strings.TrimSpace(terminalType)
+	if terminalType != "response.completed" && terminalType != "response.done" {
+		return delivery
+	}
+	payload := []byte(`{"type":` + strconv.Quote(terminalType) + `,"response":` + string(body) + `}`)
+	delivery.ObserveDeliveredEvent(payload)
+	return delivery
+}
+
+// openAIJSONCompactionDeliveryFromSSE combines the exact terminal event type
+// with sticky failure evidence from the source stream. The client receives the
+// materialized JSON only after the caller confirms its write succeeded, but a
+// malformed stream cannot erase an earlier failure by appending completed.
+func openAIJSONCompactionDeliveryFromSSE(bodyText string, body []byte, terminalType string) openAICodexCompactionDelivery {
+	delivery := openAIJSONCompactionDeliveryForTerminal(body, terminalType)
+	forEachOpenAISSEFrame(bodyText, func(eventType string, data []byte) {
+		payload := []byte(openAICompatPayloadWithEventType(string(data), eventType))
+		if eventType == "response.output_item.done" {
+			// The terminal response comes from the JSON actually delivered
+			// downstream, but every authoritative raw done item must still take
+			// part in the remote exact-one check. Otherwise two distinct done
+			// items can collapse into one materialized output item and advance an
+			// ambiguous compact result.
+			delivery.ObserveDeliveredEvent(payload)
+			return
+		}
+		failure := false
+		switch eventType {
+		case "response.failed", "response.incomplete", "response.cancelled", "response.canceled", "error":
+			failure = true
+		case "response.completed", "response.done":
+			status := strings.TrimSpace(gjson.GetBytes(data, "response.status").String())
+			failure = status != "" && status != "completed" && status != "done"
+		}
+		if failure {
+			delivery.ObserveDeliveredEvent(payload)
+		}
+	})
 	return delivery
 }
 
@@ -1984,6 +2076,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	turnStateHeaderStaged := false
 	turnStateCommitted := false
 	var compactionDelivery openAICodexCompactionDelivery
+	compactionDeliveryState := openAICodexCompactionDeliveryState{delivery: &compactionDelivery}
+	discardCompactionFrame := func() {
+		compactionDeliveryState.pending = compactionDeliveryState.pending[:0]
+	}
 	stageTurnStateHeader := func() {
 		if turnStateHeaderStaged || c.Writer.Written() {
 			return
@@ -2005,9 +2101,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	// flushPending 表示已写入但未到 SSE 空行边界的脏状态；defer 兜底函数退出前的残留，断连后不再 Flush。
 	flushPending := false
 	pendingSSEEventType := ""
-	flushPendingOutput := func() {
+	flushPendingOutput := func() bool {
 		if clientDisconnected || !flushPending {
-			return
+			return false
 		}
 		flusher.Flush()
 		if !turnStateCommitted && turnState != "" && !openAIPassthroughCompactWindowActive(c) {
@@ -2015,20 +2111,38 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			turnStateCommitted = true
 		}
 		flushPending = false
+		return true
 	}
 	defer flushPendingOutput()
+	writeSSELine := func(line string, flushFrame bool) bool {
+		if _, err := fmt.Fprintln(w, line); err != nil {
+			discardCompactionFrame()
+			clientDisconnected = true
+			logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
+			return false
+		}
+		if data, ok := extractOpenAISSEDataLine(line); ok {
+			compactionDeliveryState.enqueue([]byte(data))
+		}
+		flushPending = true
+		if line == "" && flushFrame {
+			if !flushPendingOutput() {
+				discardCompactionFrame()
+				return false
+			}
+			compactionDeliveryState.flushDelivered()
+		}
+		return true
+	}
 	writePendingLines := func() bool {
 		if len(pendingLines) > 0 {
 			stageTurnStateHeader()
 		}
 		for _, pending := range pendingLines {
-			if _, err := fmt.Fprintln(w, pending); err != nil {
-				clientDisconnected = true
-				logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
+			// Preamble frames remain buffered until the first visible output
+			// boundary. Their observations are promoted by that same Flush.
+			if !writeSSELine(pending, false) {
 				return false
-			}
-			if data, ok := extractOpenAISSEDataLine(pending); ok {
-				compactionDelivery.ObserveDeliveredEvent([]byte(data))
 			}
 		}
 		pendingLines = pendingLines[:0]
@@ -2241,6 +2355,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				line = "data: " + string(sanitizedData)
 			}
 			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(trimmedData, eventType)
+			if (eventType == "response.completed" || eventType == "response.done") &&
+				passthroughCompactionMode(c) == CodexCompactionModeLocalResponses {
+				lineStartsClientOutput = true
+			}
 			if lineStartsClientOutput && trimmedData != "[DONE]" && !openAIStreamEventTypeIsTerminal(eventType) {
 				semanticOutputSeen = true
 			}
@@ -2249,6 +2367,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			// to the client) are silent upstream refusals: fail over instead of
 			// recording a successful 0/0 usage turn (issue #5009).
 			if (eventType == "response.completed" || eventType == "response.done") &&
+				passthroughCompactionMode(c) != CodexCompactionModeLocalResponses &&
 				!sawFailedEvent && !semanticOutputSeen && !clientOutputStarted &&
 				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
 				return resultWithUsage(), newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID)
@@ -2262,6 +2381,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		if line == "" {
 			pendingSSEEventType = ""
 			if suppressCurrentEvent {
+				discardCompactionFrame()
 				suppressCurrentEvent = false
 				responseFailedPending = false
 				continue
@@ -2279,18 +2399,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				}
 			}
 			stageTurnStateHeader()
-			if _, err := fmt.Fprintln(w, line); err != nil {
-				clientDisconnected = true
-				logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
-			} else {
-				if data, ok := extractOpenAISSEDataLine(line); ok {
-					compactionDelivery.ObserveDeliveredEvent([]byte(data))
-				}
+			if writeSSELine(line, true) {
 				clientOutputStarted = true
-				flushPending = true
-				if line == "" {
-					flushPendingOutput()
-				}
 			}
 		}
 		if line == "" && responseFailedPending {
@@ -2298,6 +2408,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			failureDelivered = true
 		}
 	}
+	discardCompactionFrame()
 	ensureResponseFailedTerminal()
 	if err := documentScanner.Err(); err != nil {
 		if (sawDone || sawTerminalEvent) && !sawFailedEvent {
@@ -2528,7 +2639,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(ctx context.Context, r
 		// output_item.added event even when the terminal response output was
 		// empty. Commit from the exact representation delivered downstream so
 		// accepted compact output and window advancement cannot diverge.
-		delivery = openAIJSONCompactionDelivery(body)
+		delivery = openAIJSONCompactionDeliveryFromSSE(bodyText, body, terminalType)
 	}
 	if delivered {
 		s.commitDeliveredOpenAIPassthroughCompactWindow(ctx, c, account, resp.StatusCode, &delivery, turnState)

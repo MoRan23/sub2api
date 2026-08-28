@@ -160,6 +160,9 @@ func TestExtractUpstreamModelIDs(t *testing.T) {
 }
 
 func TestBuildUpstreamModelsRequestSupportsOpenAIOAuth(t *testing.T) {
+	SetCodexCanonicalUserAgentResolver(nil)
+	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
+
 	svc := &AccountTestService{cfg: upstreamModelSyncTestConfig()}
 	account := &Account{
 		ID:       11,
@@ -174,12 +177,12 @@ func TestBuildUpstreamModelsRequestSupportsOpenAIOAuth(t *testing.T) {
 	req, err := svc.buildUpstreamModelsRequest(context.Background(), account)
 	require.NoError(t, err)
 	require.Equal(t, chatgptCodexModelsURL, req.URL.Scheme+"://"+req.URL.Host+req.URL.Path)
-	require.NotEmpty(t, req.URL.Query().Get("client_version"))
+	require.Equal(t, codexCLIVersion, req.URL.Query().Get("client_version"))
 	require.Equal(t, "Bearer openai-oauth-token", req.Header.Get("Authorization"))
 	require.Equal(t, "chatgpt-account", req.Header.Get("chatgpt-account-id"))
 	require.NotEmpty(t, req.Header.Get("Originator"))
-	require.NotEmpty(t, req.Header.Get("User-Agent"))
-	require.NotEmpty(t, req.Header.Get("Version"))
+	require.Equal(t, codexCLIUserAgent, req.Header.Get("User-Agent"))
+	require.Equal(t, codexCLIVersion, req.Header.Get("Version"))
 }
 
 func TestFetchUpstreamSupportedModelsParsesOpenAIOAuthManifest(t *testing.T) {

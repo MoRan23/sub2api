@@ -245,12 +245,109 @@ func TestCaptureOpenAIOAuthIdentityGeneratesOneEphemeralUUIDv7PerCapture(t *test
 	require.False(t, first.RequestTurn.Explicit)
 	require.Equal(t, openAICodexRequestTurnSourceGenerated, first.RequestTurn.Source)
 	require.NotEqual(t, first.RequestTurn.ID, second.RequestTurn.ID)
+	require.NoError(t, func() error { _, err := canonicalUUIDv7(first.ContextWindowIDCandidate); return err }())
+	require.NoError(t, func() error { _, err := canonicalUUIDv7(second.ContextWindowIDCandidate); return err }())
+	require.NotEqual(t, first.ContextWindowIDCandidate, second.ContextWindowIDCandidate)
+	require.NotEqual(t, first.RequestTurn.ID, first.ContextWindowIDCandidate)
+
+	memory := CaptureOpenAIOAuthIdentity(nil, []byte(
+		`{"client_metadata":{"x-codex-turn-metadata":"{\"request_kind\":\"memory\"}"}}`,
+	), "")
+	require.Empty(t, memory.ContextWindowIDCandidate)
 
 	plan, err := (&OpenAIGatewayService{}).ResolveOpenAIOAuthIdentityPlan(
 		context.Background(), nil, nil, first, OpenAIOAuthIdentityPlanOptions{},
 	)
 	require.NoError(t, err)
 	require.Equal(t, first.RequestTurn, plan.RequestTurn)
+	require.Equal(t, first.ContextWindowIDCandidate, plan.Capture.ContextWindowIDCandidate)
+}
+
+func TestResolveOpenAIOAuthIdentityPlanMemorySkipsWindowResolution(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set("api_key", &APIKey{ID: 3901500})
+	capture := CaptureOpenAIOAuthIdentity(c, []byte(
+		`{"client_metadata":{"session_id":"memory-root","x-codex-turn-metadata":"{\"request_kind\":\"memory\"}"}}`,
+	), "")
+	require.Equal(t, CodexWireRequestMemory, capture.WireProfile.RequestKind)
+	require.Empty(t, capture.ContextWindowIDCandidate)
+
+	plan, err := (&OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "memory-window-secret"}}}).ResolveOpenAIOAuthIdentityPlan(
+		context.Background(),
+		c,
+		&Account{ID: 3901500, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+		capture,
+		OpenAIOAuthIdentityPlanOptions{
+			TurnIdentityEnabled: true,
+			ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
+			InstallationPolicy:  OpenAIOAuthInstallationPreserve,
+		},
+	)
+	require.NoError(t, err)
+	require.True(t, plan.TurnIdentityEnabled)
+	require.Equal(t, OpenAICodexWindowResolveNone, plan.WindowResolveOutcome)
+	require.Equal(t, OpenAICodexWindowSnapshot{}, plan.Window)
+	require.Empty(t, plan.WindowMappingKey)
+	require.Empty(t, plan.WireProfile.ContextWindowID)
+}
+
+func TestCaptureOpenAIOAuthIdentityIgnoresClientContextWindowID(t *testing.T) {
+	const clientContextWindowID = "01989f44-7c00-7000-8000-000000000091"
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("x-codex-context-window-id", "attacker-header")
+	body := []byte(`{
+		"model":"gpt-5.6",
+		"context_window_id":"attacker-root",
+		"client_metadata":{
+			"context_window_id":"attacker-flat",
+			"x-codex-turn-metadata":"{\"request_kind\":\"turn\",\"context_window_id\":\"` + clientContextWindowID + `\"}"
+		}
+	}`)
+
+	capture := CaptureOpenAIOAuthIdentity(c, body, "")
+	require.NoError(t, func() error { _, err := canonicalUUIDv7(capture.ContextWindowIDCandidate); return err }())
+	require.NotEqual(t, clientContextWindowID, capture.ContextWindowIDCandidate)
+	require.Empty(t, capture.WireProfile.ContextWindowID)
+	require.NotContains(t, capture.WireProfile.ExtraMetadata, "context_window_id")
+}
+
+func TestResolveOpenAIOAuthIdentityPlanReusesCapturedContextWindowCandidate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set("api_key", &APIKey{ID: 3901501})
+	body := []byte(`{"model":"gpt-5.6","prompt_cache_key":"context-window-candidate-retry"}`)
+	capture := CaptureOpenAIOAuthIdentity(c, body, "")
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "context-window-candidate-secret"}}}
+	options := OpenAIOAuthIdentityPlanOptions{
+		TurnIdentityEnabled: true,
+		ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
+		InstallationPolicy:  OpenAIOAuthInstallationPreserve,
+	}
+	firstAccount := &Account{ID: 3901501, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	secondAccount := &Account{ID: 3901502, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	first, err := svc.ResolveOpenAIOAuthIdentityPlan(context.Background(), c, firstAccount, capture, options)
+	require.NoError(t, err)
+	require.Equal(t, OpenAICodexWindowResolveResolved, first.WindowResolveOutcome)
+	require.Equal(t, capture.ContextWindowIDCandidate, first.Window.ContextWindowID)
+	require.Equal(t, capture.ContextWindowIDCandidate, first.WireProfile.ContextWindowID)
+
+	retry, err := svc.ResolveOpenAIOAuthIdentityPlan(context.Background(), c, firstAccount, capture, options)
+	require.NoError(t, err)
+	require.Equal(t, first.Window, retry.Window)
+	require.Equal(t, capture.ContextWindowIDCandidate, retry.Capture.ContextWindowIDCandidate)
+
+	failover, err := svc.ResolveOpenAIOAuthIdentityPlan(context.Background(), c, secondAccount, capture, options)
+	require.NoError(t, err)
+	require.Equal(t, OpenAICodexWindowResolveResolved, failover.WindowResolveOutcome)
+	require.Equal(t, capture.ContextWindowIDCandidate, failover.Window.ContextWindowID)
+	require.Equal(t, capture.ContextWindowIDCandidate, failover.Capture.ContextWindowIDCandidate)
 }
 
 func TestApplyOpenAIOAuthIdentityPlanProjectsRequestTurnAndCanonicalizesReservedCarriers(t *testing.T) {

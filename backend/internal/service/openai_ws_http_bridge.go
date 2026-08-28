@@ -318,12 +318,16 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	bridgeNativeCompaction := false
 	bridgeResponsesLite := false
 	if identityPlan != nil && account.UsesOpenAICodexProtocol() {
-		finalPlan, finalizeErr := s.finalizeOpenAIOAuthWSWirePlan(c, account, *identityPlan, body, openAIOAuthWSWireFinalizeOptions{})
+		// Classify the physical WebSocket request before response.create-only
+		// fields are removed for the HTTP /responses body. In particular, local
+		// Responses compaction is authenticated by the original frame shape and
+		// its frozen mode must survive the subsequent HTTP projection.
+		finalPlan, finalizeErr := s.finalizeOpenAIOAuthWSWirePlan(c, account, *identityPlan, payload, openAIOAuthWSWireFinalizeOptions{})
 		if finalizeErr != nil {
 			return nil, fmt.Errorf("finalize websocket http bridge wire plan: %w", finalizeErr)
 		}
 		*identityPlan = finalPlan
-		bridgeNativeCompaction = HasCompactionTriggerInInput(body) || finalPlan.WireProfile.RequestKind == CodexWireRequestCompaction
+		bridgeNativeCompaction = openAIWSHTTPBridgeUsesNativeCompactionV2(finalPlan)
 		bridgeResponsesLite = finalPlan.WireProfile.ToolNamespacesAllowed
 	}
 	grokIntentSourceBody := append([]byte(nil), body...)
@@ -586,7 +590,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	pendingClientMessageBytes := int64(0)
 	capacityFailoverSuppressedLogged := false
 	clientDisconnected := false
-	var compactionDelivery *openAICodexCompactionDelivery
+	var compactionDelivery *openAICodexWSCompactionDelivery
 	if identityPlan != nil {
 		compactionDelivery = openAICodexWSCompactionDeliveryForPlan(account, *identityPlan)
 	}
@@ -941,6 +945,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, terminalErr, true)
 	}
 	return resultWithUsage(), terminalErr
+}
+
+func openAIWSHTTPBridgeUsesNativeCompactionV2(plan OpenAIOAuthIdentityPlan) bool {
+	mode, ok := OpenAICodexCompactionModeForFinalizedPlan(plan)
+	return ok && mode == CodexCompactionModeRemoteV2
 }
 
 func openAIWSHTTPBridgeInstallationPolicy(account *Account) OpenAIOAuthInstallationPolicy {

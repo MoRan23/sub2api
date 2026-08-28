@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -116,6 +117,93 @@ func TestOpenAICodexHTTPWireRequestKindIgnoresCapturedMemoryWhenTurnIdentityIsDi
 	}
 }
 
+func TestOpenAICodexHTTPWireRequestKindPromotesOnlyBareStreamingLocalResponses(t *testing.T) {
+	makeBody := func(stream any, includeStream bool) []byte {
+		root := map[string]any{
+			"model": "gpt-5.4",
+			"client_metadata": map[string]any{
+				openAIWSTurnMetadataHeader: codexWireTestLocalCompact,
+			},
+		}
+		if includeStream {
+			root["stream"] = stream
+		}
+		body, err := json.Marshal(root)
+		require.NoError(t, err)
+		return body
+	}
+	streamingBody := makeBody(true, true)
+	triggerBody := func() []byte {
+		var root map[string]any
+		require.NoError(t, json.Unmarshal(streamingBody, &root))
+		root["input"] = []any{map[string]any{"type": "compaction_trigger"}}
+		body, err := json.Marshal(root)
+		require.NoError(t, err)
+		return body
+	}()
+	prewarmBody := func() []byte {
+		root := map[string]any{
+			"model": "gpt-5.4", "stream": true, "generate": false,
+			"client_metadata": map[string]any{openAIWSTurnMetadataHeader: codexWireTestLocalCompact},
+		}
+		body, err := json.Marshal(root)
+		require.NoError(t, err)
+		return body
+	}()
+	capture := CaptureOpenAIOAuthIdentity(nil, streamingBody, "")
+	require.Equal(t, CodexCompactionModeLocalResponses, capture.WireProfile.CompactionMode)
+	base := codexWireProjectionTestPlan(t)
+	base.Capture = capture
+	base.WireProfile = capture.WireProfile
+	base.RequestTurn = capture.RequestTurn
+
+	tests := []struct {
+		name       string
+		path       string
+		body       []byte
+		markNative bool
+		projection OpenAIOAuthIdentityProjectionMode
+		requested  *bool
+		want       CodexWireRequestKind
+	}{
+		{name: "bare streaming", path: "/v1/responses", body: streamingBody, want: CodexWireRequestCompaction},
+		{name: "alternate bare streaming", path: "/backend-api/codex/responses", body: streamingBody, want: CodexWireRequestCompaction},
+		{name: "stream false", path: "/v1/responses", body: makeBody(false, true), want: CodexWireRequestTurn},
+		{name: "stream missing", path: "/v1/responses", body: makeBody(nil, false), want: CodexWireRequestTurn},
+		{name: "stream string", path: "/v1/responses", body: makeBody("true", true), want: CodexWireRequestTurn},
+		{name: "generate false prewarm", path: "/v1/responses", body: prewarmBody, want: CodexWireRequestTurn},
+		{name: "trigger without native marker fails closed", path: "/v1/responses", body: triggerBody, want: CodexWireRequestTurn},
+		{name: "invalid body", path: "/v1/responses", body: []byte(`not-json`), want: CodexWireRequestTurn},
+		{name: "compatibility path", path: "/v1/chat/completions", body: streamingBody, want: CodexWireRequestTurn},
+		{name: "native physical mode", path: "/v1/responses", body: streamingBody, markNative: true, want: CodexWireRequestCompaction},
+		{name: "legacy physical path", path: "/v1/responses/compact", body: streamingBody, projection: OpenAIOAuthIdentityProjectionCompact, want: CodexWireRequestCompaction},
+		{name: "normalization disabled", path: "/v1/responses", body: streamingBody, requested: func() *bool { value := false; return &value }(), want: CodexWireRequestTurn},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			c, _ := newOpenAIMemoryRoutingTestContext(test.path)
+			if test.markNative {
+				MarkOpenAINativeCompactionV2(c)
+			}
+			plan := base
+			if test.projection != "" {
+				plan.ProjectionMode = test.projection
+			}
+			if test.requested != nil {
+				plan.TurnIdentityRequested = *test.requested
+			}
+			kind, err := openAICodexHTTPWireRequestKind(c, plan, test.body)
+			require.NoError(t, err)
+			require.Equal(t, test.want, kind)
+		})
+	}
+
+	c, _ := newOpenAIMemoryRoutingTestContext("/v1/responses")
+	kind, err := openAICodexHTTPWireRequestKind(c, base)
+	require.NoError(t, err)
+	require.Equal(t, CodexWireRequestTurn, kind, "missing immutable physical body fails closed")
+}
+
 func TestOpenAIGatewayMemoryConflictValidationIsDisabledWithTurnNormalization(t *testing.T) {
 	body := codexWireTestBody(t, `{"request_kind":"memory","sandbox":"workspace-write"}`, nil)
 	svc := newTransportIdentityTestService(t, false)
@@ -170,6 +258,15 @@ func TestCaptureOpenAIOAuthIdentityForCompatTurnOverridesSpoofedMemoryBeforeUUID
 			require.Equal(t, body, unchanged)
 		})
 	}
+
+	local := CaptureOpenAIOAuthIdentityForCompatTurn(
+		nil,
+		codexWireTestBody(t, codexWireTestLocalCompact, nil),
+		"compat-local-session",
+	)
+	require.Equal(t, CodexWireRequestTurn, local.WireProfile.RequestKind)
+	require.Equal(t, CodexCompactionModeNone, local.WireProfile.CompactionMode)
+	require.Empty(t, local.WireProfile.Compaction)
 }
 
 func TestOpenAIGatewayForwardRejectsMemoryCompactionBeforeUpstreamWork(t *testing.T) {

@@ -574,6 +574,53 @@ func TestApplyOpenAIOutboundSessionIdentityCompactHeadersKeepsCanonicalPair(t *t
 	require.Empty(t, headers.Get("x-client-request-id"))
 }
 
+func TestApplyOpenAIOAuthIdentityPlanContextWindowIsNestedOnlyAndServerOwned(t *testing.T) {
+	plan, err := FinalizeOpenAICodexWirePlan(
+		codexWireProjectionTestPlan(t),
+		string(CodexWireRequestTurn),
+		CodexModelCapabilities{Known: true},
+	)
+	require.NoError(t, err)
+	require.Equal(t, codexWireTestContextWindow, plan.Window.ContextWindowID)
+
+	headers := http.Header{
+		"Context-Window-Id":         {"attacker-header"},
+		"X-Codex-Context-Window-Id": {"attacker-header"},
+		"X-Codex-Context_window_id": {"attacker-header"},
+		openAIWSTurnMetadataHeader:  {`{"context_window_id":"01989f44-7c00-7000-8000-000000000099","keep":"header"}`},
+	}
+	headers["context_window_id"] = []string{"attacker-header"}
+	body := []byte(`{
+		"context_window_id":"attacker-root",
+		"x-codex-context-window-id":"attacker-root",
+		"client_metadata":{
+			"context_window_id":"attacker-flat",
+			"context-window-id":"attacker-flat",
+			"x-codex-context-window-id":"attacker-flat",
+			"x-codex-context_window_id":"attacker-flat",
+			"x-codex-turn-metadata":"{\"context_window_id\":\"01989f44-7c00-7000-8000-000000000099\",\"keep\":\"body\"}"
+		}
+	}`)
+
+	out, err := ApplyOpenAIOAuthIdentityPlan(headers, body, plan)
+	require.NoError(t, err)
+	for _, name := range []string{
+		"context_window_id", "context-window-id",
+		"x-codex-context-window-id", "x-codex-context_window_id",
+	} {
+		require.Empty(t, headerValuesCaseInsensitive(headers, name), name)
+		require.False(t, gjson.GetBytes(out, name).Exists(), name)
+		require.False(t, gjson.GetBytes(out, "client_metadata."+name).Exists(), name)
+	}
+
+	headerNested := headers.Get(openAIWSTurnMetadataHeader)
+	require.Equal(t, codexWireTestContextWindow, gjson.Get(headerNested, "context_window_id").String())
+	require.Equal(t, "header", gjson.Get(headerNested, "keep").String())
+	bodyNested := gjson.GetBytes(out, "client_metadata.x-codex-turn-metadata").String()
+	require.Equal(t, codexWireTestContextWindow, gjson.Get(bodyNested, "context_window_id").String())
+	require.Equal(t, "body", gjson.Get(bodyNested, "keep").String())
+}
+
 func TestOpenAICodexV01470WireFixtures(t *testing.T) {
 	const fixtureSessionID = "01989f44-7c00-7000-8000-000000000001"
 	const fixtureThreadID = "01989f44-7c00-7000-8000-000000000002"
@@ -738,10 +785,21 @@ func TestOpenAIWSOutboundIdentityPlanDigestIgnoresRequestTurnFields(t *testing.T
 			ThreadID:  "stable-thread",
 			Relation:  OpenAICodexTurnRelationRoot,
 		},
+		Window: OpenAICodexWindowSnapshot{
+			ThreadID:        "stable-thread",
+			ContextWindowID: codexWireTestContextWindow,
+		},
 	}
 	require.Equal(t,
 		openAIWSOutboundIdentityPlanDigest(first, plan),
 		openAIWSOutboundIdentityPlanDigest(second, plan),
+	)
+	rotatedWindow := plan
+	rotatedWindow.Window.ContextWindowID = "01989f44-7c00-7000-8000-000000000008"
+	require.Equal(t,
+		openAIWSOutboundIdentityPlanDigest(first, plan),
+		openAIWSOutboundIdentityPlanDigest(first, rotatedWindow),
+		"context window rotation must not split an otherwise reusable websocket",
 	)
 
 	stableChanged := plan

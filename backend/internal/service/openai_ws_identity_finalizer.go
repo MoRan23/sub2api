@@ -78,25 +78,23 @@ func (s *OpenAIGatewayService) finalizeOpenAIOAuthWSWirePlan(
 		FinalServiceTier:  serviceTier,
 	}
 	if kind == CodexWireRequestCompaction && HasCompactionTriggerInInput(payload) {
-		// A compaction_trigger carried by response.create is the official v2
-		// mid-turn shape. Do not let stale or caller-supplied standalone/legacy
-		// metadata describe a different physical request.
+		// compaction_trigger is the server-observed remote-v2 shape. Its physical
+		// implementation is authoritative, while the four bounded analytics fields
+		// remain faithful to a complete client snapshot when one is present.
 		compaction := DefaultCodexCompactionTurnMetadata(CodexCompactionImplementationRemoteV2)
 		compaction.Trigger = "auto"
 		compaction.Reason = "context_limit"
 		compaction.Phase = "mid_turn"
-		if normalized, valid := normalizeCodexCompactionMetadata(plan.WireProfile.Compaction); valid {
-			var inbound CodexCompactionTurnMetadata
-			if json.Unmarshal(normalized, &inbound) == nil {
-				compaction.Trigger = inbound.Trigger
-				compaction.Reason = inbound.Reason
-				compaction.Strategy = inbound.Strategy
-			}
+		if inbound, valid := parseCodexCompactionMetadata(plan.WireProfile.Compaction); valid {
+			compaction = inbound
 		}
 		compaction.Implementation = CodexCompactionImplementationRemoteV2
-		compaction.Phase = "mid_turn"
 		finalizeOptions.Compaction = &compaction
-		plan.WireProfile.Compaction = nil
+		finalizeOptions.CompactionMode = CodexCompactionModeRemoteV2
+	} else if kind == CodexWireRequestCompaction && openAICodexWSLocalResponsesShape(payload) {
+		if _, local := plan.WireProfile.localResponsesCompactionCandidate(); local {
+			finalizeOptions.CompactionMode = CodexCompactionModeLocalResponses
+		}
 	}
 
 	finalPlan, err := FinalizeOpenAICodexWirePlanWithOptions(plan, finalizeOptions)
@@ -136,8 +134,22 @@ func openAICodexWSWireRequestKind(payload []byte, plan OpenAIOAuthIdentityPlan, 
 	captured := CodexWireRequestKind("")
 	if plan.WireProfile.RequestKind == CodexWireRequestMemory {
 		captured = CodexWireRequestMemory
+	} else if plan.TurnIdentityRequested && forced == "" && openAICodexWSLocalResponsesShape(payload) {
+		if _, local := plan.WireProfile.localResponsesCompactionCandidate(); local {
+			captured = CodexWireRequestCompaction
+		}
 	}
 	return resolveOpenAICodexWireRequestKind(captured, CodexWireRequestTurn, forced)
+}
+
+func openAICodexWSLocalResponsesShape(payload []byte) bool {
+	if len(payload) == 0 || !gjson.ValidBytes(payload) ||
+		strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "response.create" ||
+		HasCompactionTriggerInInput(payload) {
+		return false
+	}
+	generate := gjson.GetBytes(payload, "generate")
+	return !generate.Exists() || generate.Type != gjson.False
 }
 
 // applyOpenAICodexWSRoutingHint projects only the value frozen by the final

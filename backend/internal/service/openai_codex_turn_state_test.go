@@ -23,6 +23,8 @@ const (
 	turnStateSessionB = "018f5c3c-6e3a-7abe-8def-1234567890ad"
 	turnStateTurnA    = "018f5c3c-6e3a-7abf-8def-1234567890ae"
 	turnStateTurnB    = "018f5c3c-6e3a-7ac0-8def-1234567890af"
+	turnStateWindowA  = "018f5c3c-6e3a-7ac1-8def-1234567890b0"
+	turnStateWindowB  = "018f5c3c-6e3a-7ac2-8def-1234567890b1"
 )
 
 func newTurnStateTestContext(t *testing.T, apiKeyID int64, sessionID string) (*gin.Context, *httptest.ResponseRecorder) {
@@ -62,6 +64,12 @@ func newTurnStateIdentityTestContext(t *testing.T, apiKeyID int64, namespace, in
 			ThreadID:  threadID,
 			Relation:  OpenAICodexTurnRelationRoot,
 		},
+	}
+	if threadID != "" {
+		plan.Window = OpenAICodexWindowSnapshot{
+			ThreadID:        threadID,
+			ContextWindowID: turnStateWindowA,
+		}
 	}
 	if sessionID != threadID {
 		plan.TurnIdentity.Relation = OpenAICodexTurnRelationDescendant
@@ -126,6 +134,10 @@ func TestOpenAICodexTurnStateIdentityDigestStableAcrossTransports(t *testing.T) 
 			ThreadID:  turnStateThreadA,
 			Relation:  OpenAICodexTurnRelationDescendant,
 		},
+		Window: OpenAICodexWindowSnapshot{
+			ThreadID:        turnStateThreadA,
+			ContextWindowID: turnStateWindowA,
+		},
 	}
 	digest := OpenAICodexTurnStateIdentityDigest(base)
 	transportVariant := base
@@ -142,6 +154,9 @@ func TestOpenAICodexTurnStateIdentityDigestStableAcrossTransports(t *testing.T) 
 	turnVariant := base
 	turnVariant.RequestTurn.ID = turnStateTurnB
 	require.NotEqual(t, digest, OpenAICodexTurnStateIdentityDigest(turnVariant))
+	windowVariant := base
+	windowVariant.Window.ContextWindowID = turnStateWindowB
+	require.NotEqual(t, digest, OpenAICodexTurnStateIdentityDigest(windowVariant))
 	timestampVariant := base
 	timestampVariant.RequestTurn.StartedAtUnixMS++
 	require.Equal(t, digest, OpenAICodexTurnStateIdentityDigest(timestampVariant))

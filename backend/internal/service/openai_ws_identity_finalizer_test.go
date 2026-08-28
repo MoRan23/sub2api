@@ -31,6 +31,8 @@ func TestFinalizeOpenAIOAuthWSWirePlanRegularAndRouting(t *testing.T) {
 	require.True(t, metadata.Exists())
 	require.Equal(t, "turn", gjson.Get(metadata.String(), "request_kind").String())
 	require.Equal(t, plan.RequestTurn.ID, gjson.Get(metadata.String(), "turn_id").String())
+	require.Equal(t, base.Window.ContextWindowID, gjson.Get(metadata.String(), "context_window_id").String())
+	require.False(t, gjson.GetBytes(projected, "client_metadata.context_window_id").Exists())
 	require.False(t, gjson.GetBytes(projected, "client_metadata."+openAICodexWSStreamRequestStartMSKey).Exists())
 
 	headers := http.Header{openAICodexRoutingHintHeader: {"model=caller"}}
@@ -60,10 +62,96 @@ func TestFinalizeOpenAIOAuthWSWirePlanInlineCompaction(t *testing.T) {
 	require.Equal(t, "compaction", gjson.Get(metadata, "request_kind").String())
 	require.Equal(t, "responses_compaction_v2", gjson.Get(metadata, "compaction.implementation").String())
 	require.Equal(t, "mid_turn", gjson.Get(metadata, "compaction.phase").String())
+	require.Equal(t, base.Window.ContextWindowID, gjson.Get(metadata, "context_window_id").String())
+	require.False(t, gjson.GetBytes(projected, "client_metadata.context_window_id").Exists())
 
 	stamped, err := stampOpenAICodexWSStreamRequestStart(projected, time.UnixMilli(1712345678901))
 	require.NoError(t, err)
 	require.Equal(t, "1712345678901", gjson.GetBytes(stamped, "client_metadata."+openAICodexWSStreamRequestStartMSKey).String())
+}
+
+func TestFinalizeOpenAIOAuthWSWirePlanClassifiesLocalResponsesByPhysicalFrame(t *testing.T) {
+	makePayload := func(frameType string, generate *bool, trigger bool) []byte {
+		payload := map[string]any{
+			"type":  frameType,
+			"model": "gpt-5.4",
+			"client_metadata": map[string]any{
+				openAIWSTurnMetadataHeader: codexWireTestLocalCompact,
+			},
+		}
+		if generate != nil {
+			payload["generate"] = *generate
+		}
+		if trigger {
+			payload["input"] = []any{map[string]any{"type": "compaction_trigger"}}
+		}
+		encoded, err := json.Marshal(payload)
+		require.NoError(t, err)
+		return encoded
+	}
+	boolPointer := func(value bool) *bool { return &value }
+	newPlan := func(t *testing.T, payload []byte) OpenAIOAuthIdentityPlan {
+		t.Helper()
+		capture := CaptureOpenAIOAuthIdentity(nil, payload, "")
+		require.Equal(t, CodexCompactionModeLocalResponses, capture.WireProfile.CompactionMode)
+		plan := codexWireProjectionTestPlan(t)
+		plan.Capture = capture
+		plan.WireProfile = capture.WireProfile
+		plan.RequestTurn = capture.RequestTurn
+		return plan
+	}
+	tests := []struct {
+		name       string
+		payload    []byte
+		explicit   CodexWireRequestKind
+		wantKind   CodexWireRequestKind
+		wantMode   CodexCompactionMode
+		wantImpl   string
+		compaction bool
+	}{
+		{name: "response create", payload: makePayload("response.create", nil, false), wantKind: CodexWireRequestCompaction, wantMode: CodexCompactionModeLocalResponses, wantImpl: CodexCompactionImplementationResponses, compaction: true},
+		{name: "generate true", payload: makePayload("response.create", boolPointer(true), false), wantKind: CodexWireRequestCompaction, wantMode: CodexCompactionModeLocalResponses, wantImpl: CodexCompactionImplementationResponses, compaction: true},
+		{name: "generate false prewarm", payload: makePayload("response.create", boolPointer(false), false), wantKind: CodexWireRequestPrewarm},
+		{name: "non create frame", payload: makePayload("response.cancel", nil, false), wantKind: CodexWireRequestTurn},
+		{name: "physical trigger", payload: makePayload("response.create", nil, true), wantKind: CodexWireRequestCompaction, wantMode: CodexCompactionModeRemoteV2, wantImpl: CodexCompactionImplementationRemoteV2, compaction: true},
+		{name: "explicit kind cannot bypass prewarm shape", payload: makePayload("response.create", boolPointer(false), false), explicit: CodexWireRequestCompaction, wantKind: CodexWireRequestCompaction, wantImpl: CodexCompactionImplementationRemoteV2, compaction: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			options := openAIOAuthWSWireFinalizeOptions{}
+			if test.explicit.valid() {
+				options.RequestKind = test.explicit
+			}
+			plan, err := (&OpenAIGatewayService{}).finalizeOpenAIOAuthWSWirePlan(
+				nil,
+				&Account{Type: AccountTypeOAuth, Platform: PlatformOpenAI},
+				newPlan(t, test.payload),
+				test.payload,
+				options,
+			)
+			require.NoError(t, err)
+			require.Equal(t, test.wantKind, plan.WireProfile.RequestKind)
+			require.Equal(t, test.wantMode, plan.WireProfile.CompactionMode)
+			mode, armed := OpenAICodexCompactionModeForFinalizedPlan(plan)
+			if test.wantMode.valid() {
+				require.True(t, armed)
+				require.Equal(t, test.wantMode, mode)
+			} else {
+				require.False(t, armed)
+			}
+			if !test.compaction {
+				require.Empty(t, plan.WireProfile.Compaction)
+				return
+			}
+			metadata, valid := parseCodexCompactionMetadata(plan.WireProfile.Compaction)
+			require.True(t, valid)
+			require.Equal(t, test.wantImpl, metadata.Implementation)
+			require.Equal(t, "auto", metadata.Trigger)
+			require.Equal(t, "model_downshift", metadata.Reason)
+			require.Equal(t, "pre_turn", metadata.Phase)
+			require.Equal(t, "prefix_compaction", metadata.Strategy)
+		})
+	}
 }
 
 func TestFinalizeOpenAIOAuthWSWirePlanPrewarmClearsDynamicTurnFields(t *testing.T) {
@@ -89,6 +177,7 @@ func TestFinalizeOpenAIOAuthWSWirePlanPrewarmClearsDynamicTurnFields(t *testing.
 	require.Equal(t, base.TurnIdentity.SessionID, plan.WireProfile.SessionID)
 	require.Equal(t, base.TurnIdentity.ThreadID, plan.WireProfile.ThreadID)
 	require.Equal(t, base.Window.WindowID(), plan.WireProfile.WindowID)
+	require.Empty(t, plan.WireProfile.ContextWindowID)
 
 	projected, err := svc.projectOpenAIOAuthWSFrame(nil, account, plan, payload)
 	require.NoError(t, err)
@@ -98,9 +187,10 @@ func TestFinalizeOpenAIOAuthWSWirePlanPrewarmClearsDynamicTurnFields(t *testing.
 	require.Equal(t, "prewarm", gjson.Get(metadata, "request_kind").String())
 	require.Equal(t, base.TurnIdentity.SessionID, gjson.Get(metadata, "session_id").String())
 	require.Equal(t, base.TurnIdentity.ThreadID, gjson.Get(metadata, "thread_id").String())
-	for _, key := range []string{"turn_id", "parent_turn_id", "root_turn_id", "turn_started_at_unix_ms", "workspaces"} {
+	for _, key := range []string{"turn_id", "parent_turn_id", "root_turn_id", "turn_started_at_unix_ms", "workspaces", "context_window_id"} {
 		require.False(t, gjson.Get(metadata, key).Exists(), key)
 	}
+	require.False(t, gjson.GetBytes(projected, "client_metadata.context_window_id").Exists())
 }
 
 func TestFinalizeOpenAIOAuthWSWirePlanMemoryAndPhysicalConflicts(t *testing.T) {
@@ -121,13 +211,14 @@ func TestFinalizeOpenAIOAuthWSWirePlanMemoryAndPhysicalConflicts(t *testing.T) {
 	require.Equal(t, base.TurnIdentity.SessionID, plan.WireProfile.SessionID)
 	require.Equal(t, base.TurnIdentity.ThreadID, plan.WireProfile.ThreadID)
 	require.Equal(t, base.Window.WindowID(), plan.WireProfile.WindowID)
+	require.Empty(t, plan.WireProfile.ContextWindowID)
 
 	projected, err := svc.projectOpenAIOAuthWSFrame(nil, account, plan, payload)
 	require.NoError(t, err)
 	nested := gjson.GetBytes(projected, "client_metadata.x-codex-turn-metadata").String()
 	require.Equal(t, "memory", gjson.Get(nested, "request_kind").String())
 	for _, key := range []string{
-		"installation_id", "session_id", "thread_id", "agent_name", "turn_id", "window_id",
+		"installation_id", "session_id", "thread_id", "agent_name", "turn_id", "window_id", "context_window_id",
 		"forked_from_thread_id", "parent_thread_id", "parent_turn_id", "root_turn_id",
 		"turn_started_at_unix_ms", "compaction",
 	} {
@@ -136,6 +227,7 @@ func TestFinalizeOpenAIOAuthWSWirePlanMemoryAndPhysicalConflicts(t *testing.T) {
 	require.Equal(t, base.TurnIdentity.SessionID, gjson.GetBytes(projected, "client_metadata.session_id").String())
 	require.Equal(t, base.TurnIdentity.ThreadID, gjson.GetBytes(projected, "client_metadata.thread_id").String())
 	require.Equal(t, base.Window.WindowID(), gjson.GetBytes(projected, "client_metadata.x-codex-window-id").String())
+	require.False(t, gjson.GetBytes(projected, "client_metadata.context_window_id").Exists())
 	require.False(t, gjson.GetBytes(projected, "client_metadata.turn_id").Exists())
 
 	conflicts := []struct {
@@ -266,6 +358,53 @@ func TestCaptureOpenAIWSFrameIdentityKeepsFrameWireProfile(t *testing.T) {
 	require.Equal(t, base.RequestTurn.ID, capture.WireProfile.TurnID.Value)
 }
 
+func TestCaptureOpenAIWSFrameIdentityKeepsCurrentFrameLocalModeWithoutExplicitTuple(t *testing.T) {
+	current := codexWireProjectionTestPlan(t)
+	connectionCapture := CaptureOpenAIOAuthIdentity(nil, []byte(`{"type":"response.create","client_metadata":{"session_id":"stable-session","thread_id":"stable-thread"},"input":"first"}`), "")
+	connectionCapture.WireProfile.RequestKind = CodexWireRequestCompaction
+	connectionCapture.WireProfile.CompactionMode = CodexCompactionModeRemoteV2
+	connectionCapture.WireProfile.Compaction = marshalCodexCompactionMetadata(
+		DefaultCodexCompactionTurnMetadata(CodexCompactionImplementationRemoteV2),
+	)
+	current.Capture = connectionCapture
+	current.WireProfile = cloneCodexWireProfile(connectionCapture.WireProfile)
+	current.WireProfile.Finalized = true
+
+	payload, err := json.Marshal(map[string]any{
+		"type":   "response.create",
+		"model":  "gpt-5.4",
+		"stream": true,
+		"client_metadata": map[string]any{
+			openAIWSTurnMetadataHeader: codexWireTestLocalCompact,
+		},
+	})
+	require.NoError(t, err)
+	frameOnly := CaptureOpenAIOAuthIdentity(nil, payload, "")
+	require.False(t, frameOnly.Logical.Explicit, "the raw frame deliberately omits a stable tuple")
+	capture := captureOpenAIWSFrameIdentity(payload, &current)
+	require.Equal(t, current.Capture.Logical, capture.Logical, "the non-explicit frame inherits the stable connection tuple")
+	require.Equal(t, CodexCompactionModeLocalResponses, capture.WireProfile.CompactionMode)
+	metadata, local := capture.WireProfile.localResponsesCompactionCandidate()
+	require.True(t, local)
+	require.Equal(t, CodexCompactionImplementationResponses, metadata.Implementation)
+
+	framePlan := current
+	framePlan.Capture = capture
+	framePlan.WireProfile = capture.WireProfile
+	framePlan.RequestTurn = capture.RequestTurn
+	finalPlan, err := (&OpenAIGatewayService{}).finalizeOpenAIOAuthWSWirePlan(
+		nil,
+		&Account{Type: AccountTypeOAuth, Platform: PlatformOpenAI},
+		framePlan,
+		payload,
+		openAIOAuthWSWireFinalizeOptions{},
+	)
+	require.NoError(t, err)
+	mode, armed := OpenAICodexCompactionModeForFinalizedPlan(finalPlan)
+	require.True(t, armed)
+	require.Equal(t, CodexCompactionModeLocalResponses, mode)
+}
+
 func TestOpenAIWSContinuationResolveFinalizeApplyKeepsCurrentTurn(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -301,6 +440,7 @@ func TestOpenAIWSContinuationResolveFinalizeApplyKeepsCurrentTurn(t *testing.T) 
 	require.Equal(t, firstPlan.RequestTurn.ID, gjson.Get(metadata, "turn_id").String())
 	require.Equal(t, "compaction", gjson.Get(metadata, "request_kind").String())
 	require.Equal(t, "responses_compaction_v2", gjson.Get(metadata, "compaction.implementation").String())
+	require.Equal(t, firstPlan.Window.ContextWindowID, gjson.Get(metadata, "context_window_id").String())
 }
 
 func TestFinalizeOpenAIOAuthWSWirePlanAPIKeyNoop(t *testing.T) {

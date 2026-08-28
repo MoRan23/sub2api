@@ -149,6 +149,39 @@ func requireOpenAIIdentityPathRequestPair(t *testing.T, req *http.Request, body 
 	return requireOpenAIIdentityPathPair(t, req.Header, body)
 }
 
+func requireOpenAIIdentityPathContextWindowID(t *testing.T, headers http.Header, body []byte) string {
+	t.Helper()
+	values := make([]string, 0, 2)
+	if nested := strings.TrimSpace(headers.Get(openAIWSTurnMetadataHeader)); nested != "" {
+		if value := gjson.Get(nested, "context_window_id").String(); value != "" {
+			values = append(values, value)
+		}
+	}
+	if nested := gjson.GetBytes(body, "client_metadata.x-codex-turn-metadata").String(); nested != "" {
+		if value := gjson.Get(nested, "context_window_id").String(); value != "" {
+			values = append(values, value)
+		}
+	}
+	require.NotEmpty(t, values, "missing nested context_window_id")
+	for _, value := range values {
+		_, err := canonicalUUIDv7(value)
+		require.NoError(t, err)
+		require.Equal(t, values[0], value)
+	}
+	require.Empty(t, headers.Get("x-codex-context-window-id"), "context_window_id has no independent header")
+	require.False(t, gjson.GetBytes(body, "client_metadata.context_window_id").Exists(), "context_window_id is nested-only")
+	return values[0]
+}
+
+func requireOpenAIIdentityPathNoContextWindowID(t *testing.T, headers http.Header, body []byte) {
+	t.Helper()
+	require.False(t, gjson.Get(headers.Get(openAIWSTurnMetadataHeader), "context_window_id").Exists())
+	nested := gjson.GetBytes(body, "client_metadata.x-codex-turn-metadata").String()
+	require.False(t, gjson.Get(nested, "context_window_id").Exists())
+	require.False(t, gjson.GetBytes(body, "client_metadata.context_window_id").Exists())
+	require.Empty(t, headers.Get("x-codex-context-window-id"))
+}
+
 func (s *outboundIdentityGatewayCacheStub) SetSessionAccountID(context.Context, int64, string, int64, time.Duration) error {
 	return nil
 }
@@ -259,6 +292,7 @@ func TestOpenAIOutboundIdentityPathsCompactUsesCanonicalPair(t *testing.T) {
 				require.True(t, ValidateFingerprintObservationUUIDv7(sessionID))
 				require.Empty(t, req.Header.Get("session_id"))
 				require.Empty(t, req.Header.Get("conversation_id"))
+				requireOpenAIIdentityPathContextWindowID(t, req.Header, outboundBody)
 			} else {
 				require.Empty(t, req.Header.Get("session-id"))
 				require.Empty(t, req.Header.Get("thread-id"))
@@ -340,6 +374,7 @@ func TestOpenAIOutboundIdentityPathsResponsesThenCompactReuseCanonicalIdentity(t
 			require.Len(t, upstream.requests, 2)
 			require.Len(t, upstream.bodies, 2)
 			responsesIdentity := requireOpenAIIdentityPathPair(t, upstream.requests[0].Header, upstream.bodies[0])
+			responsesContextWindowID := requireOpenAIIdentityPathContextWindowID(t, upstream.requests[0].Header, upstream.bodies[0])
 			compactIdentity := OpenAIOutboundSessionIdentity{
 				SessionID: upstream.requests[1].Header.Get("session-id"),
 				ThreadID:  upstream.requests[1].Header.Get("thread-id"),
@@ -347,6 +382,8 @@ func TestOpenAIOutboundIdentityPathsResponsesThenCompactReuseCanonicalIdentity(t
 			require.NoError(t, ValidateOpenAIOutboundSessionIdentity(compactIdentity))
 			require.Equal(t, responsesIdentity.SessionID, compactIdentity.SessionID)
 			require.Equal(t, responsesIdentity.ThreadID, compactIdentity.ThreadID)
+			compactContextWindowID := requireOpenAIIdentityPathContextWindowID(t, upstream.requests[1].Header, upstream.bodies[1])
+			require.Equal(t, responsesContextWindowID, compactContextWindowID, "compact must use the current context window")
 			requireOpenAIIdentityPathNoBodyPair(t, upstream.bodies[1])
 			require.False(t, gjson.GetBytes(upstream.bodies[1], "client_metadata").Exists())
 
@@ -442,6 +479,7 @@ func TestOpenAIOutboundIdentityPathsOAuthWSObservesFinalHandshakePair(t *testing
 	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(resolution.OutboundIdentity))
 	require.Equal(t, resolution.OutboundIdentity.SessionID, headers.Get("session-id"))
 	require.Equal(t, resolution.OutboundIdentity.ThreadID, headers.Get("thread-id"))
+	requireOpenAIIdentityPathContextWindowID(t, headers, nil)
 	require.Empty(t, SnapshotFingerprintObservations(0), "building candidate headers is not a successful upstream handshake")
 	// Header construction alone is not a physical handshake. Simulate the
 	// successful non-reused lease boundary used by the production WS forwarders.
@@ -478,14 +516,15 @@ func TestOpenAIOutboundIdentityPathsAPIKeyTransportIsNotObserved(t *testing.T) {
 
 func TestOpenAIOutboundIdentityPlanReusedAcrossSameAccountTransportRetry(t *testing.T) {
 	tests := []struct {
-		name       string
-		path       string
-		body       []byte
-		setup      func(*gin.Context)
-		configure  func(*Account)
-		response   func() *http.Response
-		invoke     func(*OpenAIGatewayService, *gin.Context, *Account, []byte) error
-		assertPair func(*testing.T, *http.Request, []byte) OpenAIOutboundSessionIdentity
+		name                string
+		path                string
+		body                []byte
+		setup               func(*gin.Context)
+		configure           func(*Account)
+		response            func() *http.Response
+		invoke              func(*OpenAIGatewayService, *gin.Context, *Account, []byte) error
+		assertPair          func(*testing.T, *http.Request, []byte) OpenAIOutboundSessionIdentity
+		expectContextWindow bool
 	}{
 		{
 			name: "responses", path: "/v1/responses",
@@ -495,7 +534,7 @@ func TestOpenAIOutboundIdentityPlanReusedAcrossSameAccountTransportRetry(t *test
 				_, err := svc.Forward(context.Background(), c, account, body)
 				return err
 			},
-			assertPair: requireOpenAIIdentityPathRequestPair,
+			assertPair: requireOpenAIIdentityPathRequestPair, expectContextWindow: true,
 		},
 		{
 			name: "passthrough", path: "/v1/responses",
@@ -514,7 +553,7 @@ func TestOpenAIOutboundIdentityPlanReusedAcrossSameAccountTransportRetry(t *test
 				_, err := svc.Forward(context.Background(), c, account, body)
 				return err
 			},
-			assertPair: requireOpenAIIdentityPathRequestPair,
+			assertPair: requireOpenAIIdentityPathRequestPair, expectContextWindow: true,
 		},
 		{
 			name: "chat", path: "/v1/chat/completions",
@@ -526,7 +565,7 @@ func TestOpenAIOutboundIdentityPlanReusedAcrossSameAccountTransportRetry(t *test
 				_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "same-account-retry", "gpt-4o")
 				return err
 			},
-			assertPair: requireOpenAIIdentityPathRequestPair,
+			assertPair: requireOpenAIIdentityPathRequestPair, expectContextWindow: true,
 		},
 		{
 			name: "messages", path: "/v1/messages",
@@ -538,7 +577,7 @@ func TestOpenAIOutboundIdentityPlanReusedAcrossSameAccountTransportRetry(t *test
 				_, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "same-account-retry", "gpt-4o")
 				return err
 			},
-			assertPair: requireOpenAIIdentityPathRequestPair,
+			assertPair: requireOpenAIIdentityPathRequestPair, expectContextWindow: true,
 		},
 		{
 			name: "alpha", path: "/v1/alpha/search",
@@ -586,6 +625,10 @@ func TestOpenAIOutboundIdentityPlanReusedAcrossSameAccountTransportRetry(t *test
 			require.NoError(t, tt.invoke(svc, c, account, tt.body))
 			require.Len(t, upstream.requests, 1)
 			firstIdentity := tt.assertPair(t, upstream.requests[0], upstream.bodies[0])
+			firstContextWindowID := ""
+			if tt.expectContextWindow {
+				firstContextWindowID = requireOpenAIIdentityPathContextWindowID(t, upstream.requests[0].Header, upstream.bodies[0])
+			}
 			firstStoreCalls := identityPathCacheCalls(cache)
 			require.Positive(t, firstStoreCalls)
 
@@ -593,6 +636,12 @@ func TestOpenAIOutboundIdentityPlanReusedAcrossSameAccountTransportRetry(t *test
 			require.Len(t, upstream.requests, 2)
 			secondIdentity := tt.assertPair(t, upstream.requests[1], upstream.bodies[1])
 			require.Equal(t, firstIdentity, secondIdentity)
+			if tt.expectContextWindow {
+				require.Equal(t, firstContextWindowID,
+					requireOpenAIIdentityPathContextWindowID(t, upstream.requests[1].Header, upstream.bodies[1]),
+					"same physical request retry must keep context_window_id",
+				)
+			}
 			require.Equal(t, firstStoreCalls, identityPathCacheCalls(cache), "same-account retry must not rematerialize the V2 plan")
 		})
 	}

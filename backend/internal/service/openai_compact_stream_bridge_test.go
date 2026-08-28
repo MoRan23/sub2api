@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
@@ -107,6 +108,107 @@ func TestOpenAICodexCompactionDeliveryStateCountsOnlyFlushedEvents(t *testing.T)
 	require.False(t, state.delivery.Valid(), "queued events are not delivered before flush")
 	state.flushDelivered()
 	require.True(t, state.delivery.Valid())
+}
+
+func newRemoteV2CompactionResponseTestContext(t *testing.T) (*OpenAIGatewayService, *gin.Context, *Account, *passthroughCompactWindowCache) {
+	t.Helper()
+	svc, c, _, _, cache, body := newOpenAIPassthroughCompactWindowTest(t, `{}`, "application/json")
+	c.Request.URL.Path = "/v1/responses"
+	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"request_kind":"compaction","session_id":"01989f44-7c00-7000-8000-000000000301","thread_id":"01989f44-7c00-7000-8000-000000000301","turn_id":"01989f44-7c00-7000-8000-000000000302","turn_started_at_unix_ms":1}`)
+	MarkOpenAINativeCompactionV2(c)
+	account := openAIPassthroughCompactWindowTestAccount(c)
+	_, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, "oauth-token")
+	require.NoError(t, err)
+	plan, ok := OpenAIOAuthIdentityPlanFromContext(c)
+	require.True(t, ok)
+	mode, ok := OpenAICodexCompactionModeForFinalizedPlan(plan)
+	require.True(t, ok)
+	require.Equal(t, CodexCompactionModeRemoteV2, mode)
+	return svc, c, account, cache
+}
+
+func remoteV2DoneCardinalitySSE(doneCount int, terminalType string, terminalCompactionID string) string {
+	lines := make([]string, 0, doneCount*2+2)
+	for i := 0; i < doneCount; i++ {
+		lines = append(lines,
+			`data: {"type":"response.output_item.done","item":{"id":"cmp_done_transport","type":"compaction","encrypted_content":"done"}}`,
+			"",
+		)
+	}
+	status := "completed"
+	if terminalType == "response.done" {
+		status = "done"
+	}
+	lines = append(lines,
+		`data: {"type":"`+terminalType+`","response":{"id":"resp_transport","status":"`+status+`","output":[{"id":"`+terminalCompactionID+`","type":"compaction","encrypted_content":"terminal"}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+		"",
+	)
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func TestHandleStreamingResponseRemoteV2DoneCardinalityControlsCommit(t *testing.T) {
+	tests := []struct {
+		name                 string
+		doneCount            int
+		terminalType         string
+		terminalCompactionID string
+		expectedCommitCount  int
+	}{
+		{name: "zero done", terminalType: "response.completed", terminalCompactionID: "cmp_terminal_only"},
+		{name: "single done", doneCount: 1, terminalType: "response.completed", terminalCompactionID: "cmp_done_transport", expectedCommitCount: 1},
+		{name: "single done ignores different terminal item", doneCount: 1, terminalType: "response.completed", terminalCompactionID: "cmp_terminal_other", expectedCommitCount: 1},
+		{name: "same done twice", doneCount: 2, terminalType: "response.completed", terminalCompactionID: "cmp_done_transport"},
+		{name: "response done is not completed", doneCount: 1, terminalType: "response.done", terminalCompactionID: "cmp_done_transport"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, c, account, cache := newRemoteV2CompactionResponseTestContext(t)
+			body := remoteV2DoneCardinalitySSE(tt.doneCount, tt.terminalType, tt.terminalCompactionID)
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(body)),
+			}
+
+			result, err := svc.handleStreamingResponse(context.Background(), resp, c, account, time.Now(), "gpt-5.1-codex", "gpt-5.1-codex")
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, tt.expectedCommitCount, cache.commitCalls)
+		})
+	}
+}
+
+func TestHandleSSEToJSONRemoteV2DoneCardinalityControlsCommit(t *testing.T) {
+	tests := []struct {
+		name                 string
+		doneCount            int
+		terminalType         string
+		terminalCompactionID string
+		expectedCommitCount  int
+	}{
+		{name: "zero done", terminalType: "response.completed", terminalCompactionID: "cmp_terminal_only"},
+		{name: "single done", doneCount: 1, terminalType: "response.completed", terminalCompactionID: "cmp_done_transport", expectedCommitCount: 1},
+		{name: "single done ignores different terminal item", doneCount: 1, terminalType: "response.completed", terminalCompactionID: "cmp_terminal_other", expectedCommitCount: 1},
+		{name: "same done twice", doneCount: 2, terminalType: "response.completed", terminalCompactionID: "cmp_done_transport"},
+		{name: "response done is not completed", doneCount: 1, terminalType: "response.done", terminalCompactionID: "cmp_done_transport"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, c, account, cache := newRemoteV2CompactionResponseTestContext(t)
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			}
+			body := remoteV2DoneCardinalitySSE(tt.doneCount, tt.terminalType, tt.terminalCompactionID)
+
+			result, err := svc.handleSSEToJSON(resp, c, account, []byte(body), "gpt-5.1-codex", "gpt-5.1-codex")
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, tt.expectedCommitCount, cache.commitCalls)
+		})
+	}
 }
 
 func TestBuildOpenAICompactSSEPayload_InjectsMissingResponseID(t *testing.T) {
@@ -519,6 +621,115 @@ func TestSupplementCompactionItemFromSSE_Gating(t *testing.T) {
 	require.Len(t, items, 2)
 	require.Equal(t, "compaction", items[1].Get("type").String())
 	require.Equal(t, "g", items[1].Get("encrypted_content").String())
+
+	// Native /responses uses a server-owned route marker before the wire plan is
+	// finalized. The fallback must recognize it without trusting client metadata.
+	native, _ := gin.CreateTestContext(httptest.NewRecorder())
+	native.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	MarkOpenAINativeCompactionV2(native)
+	patched = supplementCompactionItemFromSSE(native, missing, bodyText)
+	require.Len(t, gjson.GetBytes(patched, "output").Array(), 2)
+
+	// Once a finalized server-owned profile exists, it is authoritative. A turn
+	// profile overrides stale path/marker hints; a compaction profile works even
+	// without either fallback signal.
+	SetOpenAIOAuthIdentityPlan(native, OpenAIOAuthIdentityPlan{WireProfile: CodexWireProfile{
+		Finalized: true, RequestKind: CodexWireRequestTurn,
+	}})
+	require.Equal(t, string(missing), string(supplementCompactionItemFromSSE(native, missing, bodyText)))
+
+	finalizedCompact, _ := gin.CreateTestContext(httptest.NewRecorder())
+	finalizedCompact.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	SetOpenAIOAuthIdentityPlan(finalizedCompact, OpenAIOAuthIdentityPlan{WireProfile: finalizedCodexCompactionTestProfile(CodexCompactionModeRemoteV2)})
+	patched = supplementCompactionItemFromSSE(finalizedCompact, missing, bodyText)
+	require.Len(t, gjson.GetBytes(patched, "output").Array(), 2)
+
+	localCompact, _ := gin.CreateTestContext(httptest.NewRecorder())
+	localCompact.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	SetOpenAIOAuthIdentityPlan(localCompact, OpenAIOAuthIdentityPlan{WireProfile: finalizedCodexCompactionTestProfile(CodexCompactionModeLocalResponses)})
+	require.Equal(t, string(missing), string(supplementCompactionItemFromSSE(localCompact, missing, bodyText)),
+		"local Responses compaction must preserve ordinary output without remote item supplementation")
+}
+
+func TestSupplementCompactionItemFromSSE_RequiresOneDistinctRawItem(t *testing.T) {
+	c, _ := newCompactBridgeTestContext(t, false)
+	missing := []byte(`{"id":"r_distinct","output":[{"type":"message"}]}`)
+
+	twoDistinct := strings.Join([]string{
+		`data: {"type":"response.output_item.done","item":{"id":"cmp_a","type":"compaction","encrypted_content":"a"}}`,
+		`data: {"type":"response.output_item.done","item":{"id":"cmp_b","type":"compaction","encrypted_content":"b"}}`,
+	}, "\n")
+	require.Equal(t, string(missing), string(supplementCompactionItemFromSSE(c, missing, twoDistinct)))
+
+	duplicateID := strings.Join([]string{
+		`data: {"type":"response.output_item.done","item":{"id":"cmp_same","type":"compaction","encrypted_content":"first"}}`,
+		`data: {"type":"response.output_item.done","item":{"id":"cmp_same","type":"compaction","encrypted_content":"duplicate"}}`,
+	}, "\n")
+	patched := supplementCompactionItemFromSSE(c, missing, duplicateID)
+	items := gjson.GetBytes(patched, "output").Array()
+	require.Len(t, items, 2)
+	require.Equal(t, "cmp_same", items[1].Get("id").String())
+	require.Equal(t, "first", items[1].Get("encrypted_content").String())
+
+	addedOnly := `data: {"type":"response.output_item.added","item":{"id":"cmp_added","type":"compaction","encrypted_content":"added"}}` + "\n"
+	patched = supplementCompactionItemFromSSE(c, missing, addedOnly)
+	items = gjson.GetBytes(patched, "output").Array()
+	require.Len(t, items, 2)
+	require.Equal(t, "cmp_added", items[1].Get("id").String())
+}
+
+func TestHandleSSEToJSON_NativeCompactionFinalizedPlanSupplementsNonEmptyTerminalOutput(t *testing.T) {
+	svc := newCompactBridgeTestService()
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	SetOpenAIOAuthIdentityPlan(c, OpenAIOAuthIdentityPlan{WireProfile: finalizedCodexCompactionTestProfile(CodexCompactionModeRemoteV2)})
+	upstreamSSE := strings.Join([]string{
+		`data: {"type":"response.output_item.done","item":{"id":"cmp_native_json","type":"compaction","encrypted_content":"native"}}`,
+		"",
+		`data: {"type":"response.completed","response":{"id":"resp_native_json","status":"completed","output":[{"id":"msg_native_json","type":"message","role":"assistant","content":[]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+		"",
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamSSE)),
+	}
+
+	result, err := svc.handleNonStreamingResponse(context.Background(), resp, c, &Account{ID: 1, Type: AccountTypeOAuth}, "gpt-5.5", "gpt-5.5")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	items := gjson.Get(rec.Body.String(), "output").Array()
+	require.Len(t, items, 2)
+	require.Equal(t, "compaction", items[1].Get("type").String())
+}
+
+func TestHandlePassthroughSSEToJSON_NativeCompactionFinalizedPlanSupplementsNonEmptyTerminalOutput(t *testing.T) {
+	svc := newCompactBridgeTestService()
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	SetOpenAIOAuthIdentityPlan(c, OpenAIOAuthIdentityPlan{WireProfile: finalizedCodexCompactionTestProfile(CodexCompactionModeRemoteV2)})
+	upstreamSSE := strings.Join([]string{
+		`data: {"type":"response.output_item.done","item":{"id":"cmp_native_passthrough","type":"compaction","encrypted_content":"native"}}`,
+		"",
+		`data: {"type":"response.completed","response":{"id":"resp_native_passthrough","status":"completed","output":[{"id":"msg_native_passthrough","type":"message","role":"assistant","content":[]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+		"",
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamSSE)),
+	}
+
+	result, err := svc.handleNonStreamingResponsePassthrough(context.Background(), resp, c, &Account{ID: 1, Type: AccountTypeOAuth}, "gpt-5.5", "gpt-5.5")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	items := gjson.Get(rec.Body.String(), "output").Array()
+	require.Len(t, items, 2)
+	require.Equal(t, "compaction", items[1].Get("type").String())
 }
 
 // 非 compaction 的 output_item.added 不参与回退收集（added 阶段的 message

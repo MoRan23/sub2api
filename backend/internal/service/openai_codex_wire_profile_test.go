@@ -14,15 +14,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 const (
-	codexWireTestSession    = "01989f44-7c00-7000-8000-000000000001"
-	codexWireTestThread     = "01989f44-7c00-7000-8000-000000000002"
-	codexWireTestTurn       = "01989f44-7c00-7000-8000-000000000003"
-	codexWireTestParentTurn = "01989f44-7c00-7000-8000-000000000004"
-	codexWireTestRootTurn   = "01989f44-7c00-7000-8000-000000000005"
-	codexWireTestFork       = "01989f44-7c00-7000-8000-000000000006"
+	codexWireTestSession       = "01989f44-7c00-7000-8000-000000000001"
+	codexWireTestThread        = "01989f44-7c00-7000-8000-000000000002"
+	codexWireTestTurn          = "01989f44-7c00-7000-8000-000000000003"
+	codexWireTestParentTurn    = "01989f44-7c00-7000-8000-000000000004"
+	codexWireTestRootTurn      = "01989f44-7c00-7000-8000-000000000005"
+	codexWireTestFork          = "01989f44-7c00-7000-8000-000000000006"
+	codexWireTestContextWindow = "01989f44-7c00-7000-8000-000000000007"
+	codexWireTestLocalCompact  = `{"request_kind":"compaction","turn_id":"01989f44-7c00-7000-8000-000000000003","compaction":{"trigger":"auto","reason":"model_downshift","implementation":"responses","phase":"pre_turn","strategy":"prefix_compaction"}}`
 )
 
 func readCodex3929Golden(t *testing.T, name string) string {
@@ -46,12 +49,13 @@ func codexWireTestBody(t *testing.T, nested string, flat map[string]any) []byte 
 func codexWireProjectionTestPlan(t *testing.T) OpenAIOAuthIdentityPlan {
 	t.Helper()
 	raw := fmt.Sprintf(`{
-		"installation_id":"client-installation",
-		"session_id":"%s",
-		"thread_id":"%s",
-		"agent_name":"custom-agent",
+			"installation_id":"client-installation",
+			"session_id":"%s",
+			"thread_id":"%s",
+			"agent_name":"custom-agent",
 		"turn_id":"%s",
 		"window_id":"client-window",
+		"context_window_id":"01989f44-7c00-7000-8000-000000000099",
 		"request_kind":"turn",
 		"forked_from_thread_id":"%s",
 		"parent_thread_id":"%s",
@@ -80,7 +84,9 @@ func codexWireProjectionTestPlan(t *testing.T) OpenAIOAuthIdentityPlan {
 			StartedAtUnixMS: 1777777777123, Explicit: true,
 		},
 		WireProfile: profile,
-		Window:      OpenAICodexWindowSnapshot{ThreadID: codexWireTestThread},
+		Window: OpenAICodexWindowSnapshot{
+			ThreadID: codexWireTestThread, ContextWindowID: codexWireTestContextWindow,
+		},
 		TurnIdentity: OpenAICodexTurnIdentity{
 			SessionID: codexWireTestSession, ThreadID: codexWireTestThread,
 			ParentThreadID: codexWireTestSession, ForkedFromThreadID: codexWireTestFork,
@@ -121,6 +127,7 @@ func TestCodexWireProfileOfficialGoldenProjection(t *testing.T) {
 			"installation_id":                "forbidden",
 			"agent_name":                     "forbidden",
 			"request_kind":                   "forbidden",
+			"context_window_id":              "attacker-flat",
 			"compaction":                     map[string]any{"trigger": "auto"},
 			"forked_from_thread_id":          "forbidden",
 			"parent_thread_id":               "forbidden",
@@ -153,15 +160,217 @@ func TestCodexWireProfileOfficialGoldenProjection(t *testing.T) {
 	require.Equal(t, readCodex3929Golden(t, "turn_body_nested.golden.json"), bodyNested)
 	require.True(t, isASCIIString(bodyNested))
 	require.NotContains(t, bodyNested, "routing_hint")
+	require.Equal(t, codexWireTestContextWindow, jsonStringField(t, bodyNested, "context_window_id"))
+	require.NotContains(t, clientMetadata, "context_window_id", "context_window_id is nested-only")
 
 	headerNested := headers.Get(openAIWSTurnMetadataHeader)
 	require.Equal(t, readCodex3929Golden(t, "turn_header_nested.golden.json"), headerNested)
 	require.True(t, isASCIIString(headerNested))
 	require.NotContains(t, headerNested, "tool_namespaces_info")
+	require.Equal(t, codexWireTestContextWindow, jsonStringField(t, headerNested, "context_window_id"))
 	require.Equal(t, codexWireTestSession, headers.Get("session-id"))
 	require.Equal(t, codexWireTestThread, headers.Get("thread-id"))
 	require.Equal(t, codexWireTestThread+":0", headers.Get("x-codex-window-id"))
 	require.Equal(t, "review", headers.Get("x-openai-subagent"))
+}
+
+func TestCodexWireContextWindowIDIsServerOwnedReservedAndNestedOnly(t *testing.T) {
+	metadata := map[string]any{
+		"request_kind":              "turn",
+		"context_window_id":         "01989f44-7c00-7000-8000-000000000099",
+		"context-window-id":         "attacker-alias",
+		"x-codex-context-window-id": "attacker-header-alias",
+		"x-codex-context_window_id": "attacker-mixed-alias",
+	}
+	for index := 0; index < 16; index++ {
+		metadata[fmt.Sprintf("extra_%02d", index)] = fmt.Sprintf("value-%02d", index)
+	}
+	raw, err := json.Marshal(metadata)
+	require.NoError(t, err)
+
+	profile := ParseCodexWireProfile(string(raw))
+	require.Empty(t, profile.ContextWindowID, "client metadata cannot seed the server-owned field")
+	for _, key := range []string{
+		"context_window_id", "context-window-id", "x-codex-context-window-id", "x-codex-context_window_id",
+	} {
+		require.NotContains(t, profile.ExtraMetadata, key)
+	}
+	require.Len(t, profile.ExtraMetadata, 16, "the reserved key must not consume the extra metadata budget")
+
+	plan := OpenAIOAuthIdentityPlan{
+		WireProfile: profile,
+		TurnIdentity: OpenAICodexTurnIdentity{
+			SessionID: codexWireTestSession, ThreadID: codexWireTestThread,
+		},
+		TurnIdentityEnabled: true,
+	}
+	bound, err := BindOpenAICodexWindowToPlan(plan, OpenAICodexWindowSnapshot{
+		ThreadID: codexWireTestThread, ContextWindowID: codexWireTestContextWindow,
+	}, strings.Repeat("a", 64))
+	require.NoError(t, err)
+	require.Equal(t, codexWireTestContextWindow, bound.WireProfile.ContextWindowID)
+
+	encoded, err := bound.WireProfile.MarshalNestedJSON(true)
+	require.NoError(t, err)
+	require.Equal(t, codexWireTestContextWindow, jsonStringField(t, encoded, "context_window_id"))
+
+	for _, kind := range []CodexWireRequestKind{CodexWireRequestPrewarm, CodexWireRequestMemory} {
+		withoutContext := cloneCodexWireProfile(bound.WireProfile)
+		withoutContext.RequestKind = kind
+		encoded, err = withoutContext.MarshalNestedJSON(true)
+		require.NoError(t, err)
+		require.Empty(t, jsonRawField(t, encoded, "context_window_id"), string(kind))
+	}
+
+	malformed := cloneCodexWireProfile(bound.WireProfile)
+	malformed.ContextWindowID = "not-a-uuid"
+	encoded, err = malformed.MarshalNestedJSON(true)
+	require.NoError(t, err)
+	require.Empty(t, jsonRawField(t, encoded, "context_window_id"))
+}
+
+func TestCodexWireGuardianReviewProjection(t *testing.T) {
+	plan := codexWireProjectionTestPlan(t)
+	plan.WireProfile.ThreadSource = "guardian_review"
+	plan.WireProfile.SubagentHeader = "guardian"
+	plan.WireProfile.SubagentKind = ""
+	finalPlan, err := FinalizeOpenAICodexWirePlan(
+		plan,
+		string(CodexWireRequestTurn),
+		CodexModelCapabilities{Known: true, UseResponsesLite: true},
+	)
+	require.NoError(t, err)
+
+	headers := make(http.Header)
+	body := []byte(`{"model":"gpt-5.4","client_metadata":{}}`)
+	out, err := ApplyOpenAIOAuthIdentityPlan(headers, body, finalPlan)
+	require.NoError(t, err)
+	require.Equal(t, "guardian", headers.Get("x-openai-subagent"))
+	nested := gjson.GetBytes(out, "client_metadata.x-codex-turn-metadata").String()
+	require.Equal(t, "guardian_review", gjson.Get(nested, "thread_source").String())
+	require.Equal(t, codexWireTestContextWindow, gjson.Get(nested, "context_window_id").String())
+}
+
+func TestCodexWireCaptureArmsLocalResponsesOnlyFromStrictCanonicalCarrier(t *testing.T) {
+	canonicalBody := codexWireTestBody(t, codexWireTestLocalCompact, nil)
+	capture := CaptureOpenAIOAuthIdentity(nil, canonicalBody, "")
+	require.Equal(t, CodexWireRequestCompaction, capture.WireProfile.RequestKind)
+	require.Equal(t, CodexCompactionModeLocalResponses, capture.WireProfile.CompactionMode)
+	metadata, valid := capture.WireProfile.localResponsesCompactionCandidate()
+	require.True(t, valid)
+	require.Equal(t, "auto", metadata.Trigger)
+	require.Equal(t, "model_downshift", metadata.Reason)
+	require.Equal(t, "pre_turn", metadata.Phase)
+	require.Equal(t, "prefix_compaction", metadata.Strategy)
+
+	t.Run("compatibility carriers cannot arm", func(t *testing.T) {
+		newContext := func() *gin.Context {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			return c
+		}
+		tests := []struct {
+			name    string
+			capture func() OpenAIOAuthIdentityCapture
+		}{
+			{name: "header", capture: func() OpenAIOAuthIdentityCapture {
+				c := newContext()
+				c.Request.Header.Set(openAIWSTurnMetadataHeader, codexWireTestLocalCompact)
+				return CaptureOpenAIOAuthIdentity(c, []byte(`{"model":"gpt-5.4"}`), "")
+			}},
+			{name: "root", capture: func() OpenAIOAuthIdentityCapture {
+				body, err := json.Marshal(map[string]any{openAIWSTurnMetadataHeader: codexWireTestLocalCompact})
+				require.NoError(t, err)
+				return CaptureOpenAIOAuthIdentity(nil, body, "")
+			}},
+			{name: "explicit websocket", capture: func() OpenAIOAuthIdentityCapture {
+				return CaptureOpenAIOAuthIdentityWithTurnMetadata(nil, []byte(`{"model":"gpt-5.4"}`), "", codexWireTestLocalCompact)
+			}},
+			{name: "flat", capture: func() OpenAIOAuthIdentityCapture {
+				return CaptureOpenAIOAuthIdentity(nil, []byte(`{"client_metadata":{"request_kind":"compaction","compaction":{"trigger":"auto","reason":"model_downshift","implementation":"responses","phase":"pre_turn","strategy":"prefix_compaction"}}}`), "")
+			}},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				spoofed := test.capture()
+				require.Equal(t, CodexCompactionModeNone, spoofed.WireProfile.CompactionMode)
+				_, armed := spoofed.WireProfile.localResponsesCompactionCandidate()
+				require.False(t, armed)
+			})
+		}
+	})
+
+	t.Run("canonical schema is exact", func(t *testing.T) {
+		invalid := []struct {
+			name   string
+			nested string
+		}{
+			{name: "missing field", nested: `{"request_kind":"compaction","compaction":{"trigger":"auto","reason":"context_limit","implementation":"responses","phase":"mid_turn"}}`},
+			{name: "unknown field", nested: `{"request_kind":"compaction","compaction":{"trigger":"auto","reason":"context_limit","implementation":"responses","phase":"mid_turn","strategy":"memento","extra":true}}`},
+			{name: "wrong implementation", nested: `{"request_kind":"compaction","compaction":{"trigger":"auto","reason":"context_limit","implementation":"responses_compaction_v2","phase":"mid_turn","strategy":"memento"}}`},
+			{name: "invalid enum", nested: `{"request_kind":"compaction","compaction":{"trigger":"automatic","reason":"context_limit","implementation":"responses","phase":"mid_turn","strategy":"memento"}}`},
+			{name: "missing request kind", nested: `{"compaction":{"trigger":"auto","reason":"context_limit","implementation":"responses","phase":"mid_turn","strategy":"memento"}}`},
+		}
+		for _, test := range invalid {
+			t.Run(test.name, func(t *testing.T) {
+				candidate := CaptureOpenAIOAuthIdentity(nil, codexWireTestBody(t, test.nested, nil), "")
+				require.Equal(t, CodexCompactionModeNone, candidate.WireProfile.CompactionMode)
+			})
+		}
+		objectCarrier := []byte(`{"client_metadata":{"x-codex-turn-metadata":{"request_kind":"compaction","compaction":{"trigger":"auto","reason":"context_limit","implementation":"responses","phase":"mid_turn","strategy":"memento"}}}}`)
+		require.Equal(t, CodexCompactionModeNone, CaptureOpenAIOAuthIdentity(nil, objectCarrier, "").WireProfile.CompactionMode)
+	})
+
+	t.Run("compatibility conflicts fail closed", func(t *testing.T) {
+		newCapture := func(header string) OpenAIOAuthIdentityCapture {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			c.Request.Header.Set(openAIWSTurnMetadataHeader, header)
+			return CaptureOpenAIOAuthIdentity(c, canonicalBody, "")
+		}
+		require.Equal(t, CodexCompactionModeLocalResponses, newCapture(codexWireTestLocalCompact).WireProfile.CompactionMode)
+		require.Equal(t, CodexCompactionModeLocalResponses, newCapture(`{"thread_source":"guardian_review"}`).WireProfile.CompactionMode)
+		for _, header := range []string{
+			`{"request_kind":"compaction","compaction":{"trigger":"manual","reason":"model_downshift","implementation":"responses","phase":"pre_turn","strategy":"prefix_compaction"}}`,
+			`{"request_kind":"compaction"}`,
+			`not-json`,
+		} {
+			require.Equal(t, CodexCompactionModeNone, newCapture(header).WireProfile.CompactionMode, header)
+		}
+
+		var canonicalRoot map[string]any
+		require.NoError(t, json.Unmarshal(canonicalBody, &canonicalRoot))
+		clientMetadata := canonicalRoot["client_metadata"].(map[string]any)
+		clientMetadata["request_kind"] = "compaction"
+		clientMetadata["compaction"] = map[string]any{
+			"trigger": "auto", "reason": "model_downshift", "implementation": "responses",
+			"phase": "pre_turn", "strategy": "prefix_compaction",
+		}
+		consistentFlat, err := json.Marshal(canonicalRoot)
+		require.NoError(t, err)
+		require.Equal(t, CodexCompactionModeLocalResponses, CaptureOpenAIOAuthIdentity(nil, consistentFlat, "").WireProfile.CompactionMode)
+
+		clientMetadata["compaction"].(map[string]any)["reason"] = "context_limit"
+		conflictingFlat, err := json.Marshal(canonicalRoot)
+		require.NoError(t, err)
+		require.Equal(t, CodexCompactionModeNone, CaptureOpenAIOAuthIdentity(nil, conflictingFlat, "").WireProfile.CompactionMode)
+		delete(clientMetadata, "compaction")
+		incompleteFlat, err := json.Marshal(canonicalRoot)
+		require.NoError(t, err)
+		require.Equal(t, CodexCompactionModeNone, CaptureOpenAIOAuthIdentity(nil, incompleteFlat, "").WireProfile.CompactionMode)
+	})
+
+	t.Run("cross carrier assembly cannot arm", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"compaction":{"trigger":"auto","reason":"model_downshift","implementation":"responses","phase":"pre_turn","strategy":"prefix_compaction"}}`)
+		requestKindOnly := codexWireTestBody(t, `{"request_kind":"compaction"}`, nil)
+		require.Equal(t, CodexCompactionModeNone, CaptureOpenAIOAuthIdentity(c, requestKindOnly, "").WireProfile.CompactionMode)
+
+		c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"request_kind":"compaction"}`)
+		compactionOnly := codexWireTestBody(t, `{"compaction":{"trigger":"auto","reason":"model_downshift","implementation":"responses","phase":"pre_turn","strategy":"prefix_compaction"}}`, nil)
+		require.Equal(t, CodexCompactionModeNone, CaptureOpenAIOAuthIdentity(c, compactionOnly, "").WireProfile.CompactionMode)
+	})
 }
 
 func TestCodexWireMemoryRequestKindUsesNestedCarrierPriority(t *testing.T) {
@@ -263,6 +472,7 @@ func TestCodexWireMemoryProjectionKeepsStableTupleWithoutTurnIdentity(t *testing
 	require.Equal(t, codexWireTestSession, finalPlan.WireProfile.SessionID)
 	require.Equal(t, codexWireTestThread, finalPlan.WireProfile.ThreadID)
 	require.Equal(t, codexWireTestThread+":0", finalPlan.WireProfile.WindowID)
+	require.Empty(t, finalPlan.WireProfile.ContextWindowID)
 	require.Empty(t, finalPlan.WireProfile.AgentName)
 	require.Empty(t, finalPlan.WireProfile.TurnID.Value)
 	require.Empty(t, finalPlan.WireProfile.TurnLineage)
@@ -313,7 +523,7 @@ func TestCodexWireMemoryProjectionKeepsStableTupleWithoutTurnIdentity(t *testing
 	require.Equal(t, "memory", jsonStringRaw(t, nested["request_kind"]))
 	require.Equal(t, "keep", jsonStringRaw(t, nested["incoming_extra"]))
 	for _, key := range []string{
-		"installation_id", "session_id", "thread_id", "agent_name", "turn_id", "window_id",
+		"installation_id", "session_id", "thread_id", "agent_name", "turn_id", "window_id", "context_window_id",
 		"forked_from_thread_id", "parent_thread_id", "parent_turn_id", "root_turn_id",
 		"turn_started_at_unix_ms", "compaction",
 	} {
@@ -331,7 +541,7 @@ func TestCodexWireMemoryProjectionKeepsStableTupleWithoutTurnIdentity(t *testing
 	var headerNested map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal([]byte(headers.Get(openAIWSTurnMetadataHeader)), &headerNested))
 	require.Equal(t, "memory", jsonStringRaw(t, headerNested["request_kind"]))
-	for _, key := range []string{"installation_id", "session_id", "thread_id", "agent_name", "turn_id", "window_id", "parent_thread_id", "turn_started_at_unix_ms"} {
+	for _, key := range []string{"installation_id", "session_id", "thread_id", "agent_name", "turn_id", "window_id", "context_window_id", "parent_thread_id", "turn_started_at_unix_ms"} {
 		require.NotContains(t, headerNested, key)
 	}
 }
@@ -433,7 +643,9 @@ func TestFinalizeCodexWireProfileDefaultsAndRootLineage(t *testing.T) {
 		TurnIdentity: OpenAICodexTurnIdentity{
 			SessionID: codexWireTestSession, ThreadID: codexWireTestSession, Relation: OpenAICodexTurnRelationRoot,
 		},
-		Window: OpenAICodexWindowSnapshot{ThreadID: codexWireTestSession},
+		Window: OpenAICodexWindowSnapshot{
+			ThreadID: codexWireTestSession, ContextWindowID: codexWireTestContextWindow,
+		},
 	}, string(CodexWireRequestTurn), CodexModelCapabilities{})
 	require.NoError(t, err)
 	require.Equal(t, "/root", rootPlan.WireProfile.AgentName)
@@ -444,6 +656,7 @@ func TestFinalizeCodexWireProfileDefaultsAndRootLineage(t *testing.T) {
 	require.False(t, *rootPlan.WireProfile.NodeREPLDisabled)
 	require.Equal(t, rootPlan.WireProfile.TurnID, rootPlan.WireProfile.TurnLineage.RootTurnID)
 	require.Equal(t, codexWireTestSession+":0", rootPlan.WireProfile.WindowID)
+	require.Equal(t, codexWireTestContextWindow, rootPlan.WireProfile.ContextWindowID)
 
 	descendantPlan, err := FinalizeOpenAICodexWirePlan(OpenAIOAuthIdentityPlan{
 		RequestTurn: requestTurn, TurnIdentityRequested: true, TurnIdentityEnabled: true,
@@ -532,7 +745,13 @@ func TestFinalizeCodexWireProfilePrewarmOmitsRequestTurnLineage(t *testing.T) {
 			ID: "internal:prewarm", TypedID: CodexTurnID{Kind: CodexTurnIDOpaqueInternal, Value: "internal:prewarm"},
 			StartedAtUnixMS: 123, Explicit: true,
 		},
-		TurnIdentityRequested: true,
+		TurnIdentityRequested: true, TurnIdentityEnabled: true,
+		TurnIdentity: OpenAICodexTurnIdentity{
+			SessionID: codexWireTestSession, ThreadID: codexWireTestThread,
+		},
+		Window: OpenAICodexWindowSnapshot{
+			ThreadID: codexWireTestThread, ContextWindowID: codexWireTestContextWindow,
+		},
 	}, string(CodexWireRequestPrewarm), CodexModelCapabilities{})
 	require.NoError(t, err)
 	encoded, err := plan.WireProfile.MarshalNestedJSON(true)
@@ -540,6 +759,9 @@ func TestFinalizeCodexWireProfilePrewarmOmitsRequestTurnLineage(t *testing.T) {
 	for _, field := range []string{"turn_id", "parent_turn_id", "root_turn_id", "turn_started_at_unix_ms"} {
 		require.Empty(t, jsonRawField(t, encoded, field), field)
 	}
+	require.Equal(t, codexWireTestThread+":0", jsonStringField(t, encoded, "window_id"))
+	require.Empty(t, jsonRawField(t, encoded, "context_window_id"))
+	require.Empty(t, plan.WireProfile.ContextWindowID)
 	require.Equal(t, "internal:prewarm", plan.RequestTurn.ID, "compatible lifecycle snapshot remains available")
 }
 
@@ -548,15 +770,16 @@ func TestFinalizeCodexWireProfileCompactionMetadataByProjection(t *testing.T) {
 	tests := []struct {
 		name           string
 		mode           OpenAIOAuthIdentityProjectionMode
+		compactionMode CodexCompactionMode
 		compaction     string
 		implementation string
 		trigger        string
 	}{
-		{name: "regular default", mode: OpenAIOAuthIdentityProjectionRegular, implementation: CodexCompactionImplementationRemoteV2, trigger: "manual"},
-		{name: "passthrough partial reserved object", mode: OpenAIOAuthIdentityProjectionPassthrough, compaction: `{"trigger":"auto"}`, implementation: CodexCompactionImplementationRemoteV2, trigger: "manual"},
-		{name: "compact invalid reserved object", mode: OpenAIOAuthIdentityProjectionCompact, compaction: `{"trigger":"auto","reason":"context_limit","implementation":"unknown","phase":"mid_turn","strategy":"memento"}`, implementation: CodexCompactionImplementationLegacy, trigger: "manual"},
-		{name: "unknown field rebuilds", mode: OpenAIOAuthIdentityProjectionRegular, compaction: `{"trigger":"auto","reason":"context_limit","implementation":"responses","phase":"mid_turn","strategy":"prefix_compaction","unknown":true}`, implementation: CodexCompactionImplementationRemoteV2, trigger: "manual"},
-		{name: "fully valid inbound preserved", mode: OpenAIOAuthIdentityProjectionRegular, compaction: validInbound, implementation: CodexCompactionImplementationResponses, trigger: "auto"},
+		{name: "regular default", mode: OpenAIOAuthIdentityProjectionRegular, compactionMode: CodexCompactionModeRemoteV2, implementation: CodexCompactionImplementationRemoteV2, trigger: "manual"},
+		{name: "passthrough partial reserved object", mode: OpenAIOAuthIdentityProjectionPassthrough, compactionMode: CodexCompactionModeRemoteV2, compaction: `{"trigger":"auto"}`, implementation: CodexCompactionImplementationRemoteV2, trigger: "manual"},
+		{name: "compact invalid reserved object", mode: OpenAIOAuthIdentityProjectionCompact, compactionMode: CodexCompactionModeLegacy, compaction: `{"trigger":"auto","reason":"context_limit","implementation":"unknown","phase":"mid_turn","strategy":"memento"}`, implementation: CodexCompactionImplementationLegacy, trigger: "manual"},
+		{name: "unknown field rebuilds", mode: OpenAIOAuthIdentityProjectionRegular, compactionMode: CodexCompactionModeRemoteV2, compaction: `{"trigger":"auto","reason":"context_limit","implementation":"responses","phase":"mid_turn","strategy":"prefix_compaction","unknown":true}`, implementation: CodexCompactionImplementationRemoteV2, trigger: "manual"},
+		{name: "fully valid local inbound preserved", mode: OpenAIOAuthIdentityProjectionRegular, compactionMode: CodexCompactionModeLocalResponses, compaction: validInbound, implementation: CodexCompactionImplementationResponses, trigger: "auto"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -566,14 +789,17 @@ func TestFinalizeCodexWireProfileCompactionMetadataByProjection(t *testing.T) {
 			}
 			raw += `}`
 			profile := ParseCodexWireProfile(raw)
-			plan, err := FinalizeOpenAICodexWirePlan(OpenAIOAuthIdentityPlan{
+			plan, err := FinalizeOpenAICodexWirePlanWithOptions(OpenAIOAuthIdentityPlan{
 				WireProfile: profile,
 				RequestTurn: OpenAICodexRequestTurnSnapshot{
 					ID: "internal:compact", TypedID: CodexTurnID{Kind: CodexTurnIDOpaqueInternal, Value: "internal:compact"}, Explicit: true,
 				},
 				TurnIdentityRequested: true, ProjectionMode: test.mode,
-			}, string(CodexWireRequestCompaction), CodexModelCapabilities{})
+			}, FinalizeOpenAICodexWirePlanOptions{
+				RequestKind: string(CodexWireRequestCompaction), CompactionMode: test.compactionMode,
+			})
 			require.NoError(t, err)
+			require.Equal(t, test.compactionMode, plan.WireProfile.CompactionMode)
 			var metadata CodexCompactionTurnMetadata
 			require.NoError(t, json.Unmarshal(plan.WireProfile.Compaction, &metadata))
 			require.True(t, metadata.Valid())
@@ -586,6 +812,94 @@ func TestFinalizeCodexWireProfileCompactionMetadataByProjection(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFinalizeCodexWireProfileAcceptsAllCompactionMetadataValues(t *testing.T) {
+	implementations := []struct {
+		implementation string
+		mode           CodexCompactionMode
+	}{
+		{implementation: CodexCompactionImplementationResponses, mode: CodexCompactionModeLocalResponses},
+		{implementation: CodexCompactionImplementationRemoteV2, mode: CodexCompactionModeRemoteV2},
+		{implementation: CodexCompactionImplementationLegacy, mode: CodexCompactionModeLegacy},
+	}
+	for _, implementationCase := range implementations {
+		implementation := implementationCase.implementation
+		for _, trigger := range []string{"manual", "auto"} {
+			for _, reason := range []string{"user_requested", "context_limit", "model_downshift", "comp_hash_changed"} {
+				for _, phase := range []string{"standalone_turn", "pre_turn", "mid_turn"} {
+					for _, strategy := range []string{"memento", "prefix_compaction"} {
+						metadata := CodexCompactionTurnMetadata{
+							Trigger: trigger, Reason: reason, Implementation: implementation,
+							Phase: phase, Strategy: strategy,
+						}
+						name := strings.Join([]string{implementation, trigger, reason, phase, strategy}, "/")
+						t.Run(name, func(t *testing.T) {
+							require.True(t, metadata.Valid())
+							raw := marshalCodexCompactionMetadata(metadata)
+							profile := ParseCodexWireProfile(
+								`{"request_kind":"compaction","turn_id":"internal:compact-enum","compaction":` + string(raw) + `}`,
+							)
+							plan, err := FinalizeOpenAICodexWirePlanWithOptions(OpenAIOAuthIdentityPlan{
+								WireProfile: profile,
+								RequestTurn: OpenAICodexRequestTurnSnapshot{
+									ID:       "internal:compact-enum",
+									TypedID:  CodexTurnID{Kind: CodexTurnIDOpaqueInternal, Value: "internal:compact-enum"},
+									Explicit: true,
+								},
+								TurnIdentityRequested: true,
+							}, FinalizeOpenAICodexWirePlanOptions{
+								RequestKind: string(CodexWireRequestCompaction), CompactionMode: implementationCase.mode,
+							})
+							require.NoError(t, err)
+							require.Equal(t, implementationCase.mode, plan.WireProfile.CompactionMode)
+							var projected CodexCompactionTurnMetadata
+							require.NoError(t, json.Unmarshal(plan.WireProfile.Compaction, &projected))
+							require.Equal(t, metadata, projected)
+						})
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestFinalizeCodexWireProfileDoesNotArmCompactionWithoutValidServerMode(t *testing.T) {
+	profile := ParseCodexWireProfile(codexWireTestLocalCompact)
+	base := OpenAIOAuthIdentityPlan{
+		WireProfile: profile,
+		RequestTurn: OpenAICodexRequestTurnSnapshot{
+			ID: codexWireTestTurn, TypedID: CodexTurnID{Kind: CodexTurnIDUserUUIDv7, Value: codexWireTestTurn}, Explicit: true,
+		},
+		TurnIdentityRequested: true,
+	}
+	for _, mode := range []CodexCompactionMode{CodexCompactionModeNone, CodexCompactionMode("invalid")} {
+		name := string(mode)
+		if name == "" {
+			name = "missing"
+		}
+		t.Run(name, func(t *testing.T) {
+			plan, err := FinalizeOpenAICodexWirePlanWithOptions(base, FinalizeOpenAICodexWirePlanOptions{
+				RequestKind: string(CodexWireRequestCompaction), CompactionMode: mode,
+			})
+			require.NoError(t, err)
+			require.Equal(t, CodexCompactionModeNone, plan.WireProfile.CompactionMode)
+			_, armed := OpenAICodexCompactionModeForFinalizedPlan(plan)
+			require.False(t, armed)
+		})
+	}
+
+	armed, err := FinalizeOpenAICodexWirePlanWithOptions(base, FinalizeOpenAICodexWirePlanOptions{
+		RequestKind: string(CodexWireRequestCompaction), CompactionMode: CodexCompactionModeLocalResponses,
+	})
+	require.NoError(t, err)
+	mode, valid := OpenAICodexCompactionModeForFinalizedPlan(armed)
+	require.True(t, valid)
+	require.Equal(t, CodexCompactionModeLocalResponses, mode)
+
+	armed.WireProfile.Compaction = marshalCodexCompactionMetadata(DefaultCodexCompactionTurnMetadata(CodexCompactionImplementationRemoteV2))
+	_, valid = OpenAICodexCompactionModeForFinalizedPlan(armed)
+	require.False(t, valid, "mode and nested implementation must agree")
 }
 
 func TestCodexWireProfileToolPolicyUnknownFallbackAndFinalizedExtras(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -2142,52 +2143,90 @@ func (s *OpenAIGatewayService) applyOpenAIWSHTTPBridgeDeliveredTurnState(
 	return bridgeTurnState
 }
 
-func openAICodexWSCompactionDeliveryForPlan(account *Account, plan OpenAIOAuthIdentityPlan) *openAICodexCompactionDelivery {
+type openAICodexWSCompactionDelivery struct {
+	mode               CodexCompactionMode
+	expectedPlan       OpenAIOAuthIdentityPlan
+	delivery           openAICodexCompactionDelivery
+	completedDelivered bool
+	commitMu           sync.Mutex
+	committed          bool
+}
+
+func openAICodexWSCompactionDeliveryForPlan(account *Account, plan OpenAIOAuthIdentityPlan) *openAICodexWSCompactionDelivery {
+	mode, finalizedCompaction := OpenAICodexCompactionModeForFinalizedPlan(plan)
 	if account == nil || !account.UsesOpenAICodexProtocol() ||
-		plan.WireProfile.RequestKind != CodexWireRequestCompaction ||
+		!finalizedCompaction ||
 		!plan.TurnIdentityRequested || !plan.TurnIdentityEnabled ||
 		ValidateOpenAICodexWindowSnapshot(plan.Window) != nil ||
 		!validOpenAICodexWindowMappingKey(plan.WindowMappingKey) ||
 		!openAICodexRequestTurnSnapshotValidForWire(plan.RequestTurn, CodexWireRequestCompaction) {
 		return nil
 	}
-	return &openAICodexCompactionDelivery{}
+	return &openAICodexWSCompactionDelivery{
+		mode:         mode,
+		expectedPlan: cloneOpenAIOAuthIdentityPlan(plan),
+	}
 }
 
 // observeOpenAICodexWSCompactionDelivery is called only after the payload was
-// successfully written downstream. A completed envelope with a non-success
-// response status is terminal failure even if it happens to contain a compact
-// item, so it must never advance the window.
-func observeOpenAICodexWSCompactionDelivery(delivery *openAICodexCompactionDelivery, payload []byte) {
+// successfully written downstream. Local Responses compaction requires a
+// successful response.completed; remote modes retain their exactly-one compact
+// item contract. A non-success terminal must never advance either mode.
+func observeOpenAICodexWSCompactionDelivery(delivery *openAICodexWSCompactionDelivery, payload []byte) {
 	if delivery == nil || len(payload) == 0 {
 		return
 	}
 	eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
-	if eventType == "response.completed" || eventType == "response.done" {
+	if eventType == "response.completed" {
+		status := strings.TrimSpace(gjson.GetBytes(payload, "response.status").String())
+		if status != "" && status != "completed" {
+			delivery.delivery.terminalFailed = true
+			return
+		}
+		delivery.completedDelivered = true
+	}
+	if eventType == "response.done" {
 		status := strings.TrimSpace(gjson.GetBytes(payload, "response.status").String())
 		if status != "" && status != "completed" && status != "done" {
-			delivery.terminalFailed = true
+			delivery.delivery.terminalFailed = true
 			return
 		}
 	}
-	delivery.ObserveDeliveredEvent(payload)
+	delivery.delivery.ObserveDeliveredEvent(payload)
+}
+
+func (delivery *openAICodexWSCompactionDelivery) Valid() bool {
+	if delivery == nil || !delivery.delivery.ValidForMode(delivery.mode) {
+		return false
+	}
+	return delivery.mode != CodexCompactionModeLocalResponses || delivery.completedDelivered
 }
 
 // commitOpenAICodexWSCompactionAfterDelivery advances the durable window only
-// after a successful terminal event and exactly one compact item have reached
-// the client. The caller-owned plan is rebound to the CAS winner before the
-// next response.create can be accepted. A delivered turn-state is rebound to
-// that post-window plan as well.
+// after the frozen physical mode's delivery contract has reached the client.
+// Digest and CAS inputs always come from the immutable plan captured when the
+// delivery was created; the caller-owned plan is used only to receive the CAS
+// winner before the next response.create can be accepted.
 func (s *OpenAIGatewayService) commitOpenAICodexWSCompactionAfterDelivery(
 	ctx context.Context,
 	c *gin.Context,
 	account *Account,
 	plan *OpenAIOAuthIdentityPlan,
-	delivery *openAICodexCompactionDelivery,
+	delivery *openAICodexWSCompactionDelivery,
 	turnState string,
 ) bool {
-	if s == nil || plan == nil || delivery == nil || !delivery.Valid() ||
-		openAICodexWSCompactionDeliveryForPlan(account, *plan) == nil {
+	if s == nil || plan == nil || delivery == nil || !delivery.Valid() {
+		return false
+	}
+	delivery.commitMu.Lock()
+	defer delivery.commitMu.Unlock()
+	if delivery.committed {
+		return false
+	}
+	expectedPlan := delivery.expectedPlan
+	expectedMode, validExpectedPlan := OpenAICodexCompactionModeForFinalizedPlan(expectedPlan)
+	if !validExpectedPlan || expectedMode != delivery.mode ||
+		openAICodexWSCompactionDeliveryForPlan(account, expectedPlan) == nil {
 		return false
 	}
 	if ctx == nil {
@@ -2197,13 +2236,13 @@ func (s *OpenAIGatewayService) commitOpenAICodexWSCompactionAfterDelivery(
 	if s.cfg != nil {
 		secret = strings.TrimSpace(s.cfg.JWT.Secret)
 	}
+	expectedWindow := expectedPlan.Window
 	digest, err := OpenAICodexCompactTurnDigest(
 		secret,
-		plan.CredentialOwnerNamespace,
-		plan.APIKeyID,
-		plan.Window.ThreadID,
-		plan.Window.Number,
-		plan.RequestTurn.ID,
+		expectedPlan.CredentialOwnerNamespace,
+		expectedPlan.APIKeyID,
+		expectedWindow,
+		expectedPlan.RequestTurn.ID,
 	)
 	if err != nil {
 		logOpenAIWSModeInfo("codex_compact_window_digest_failed account_id=%d cause=%s", account.ID, truncateOpenAIWSLogValue(err.Error(), openAIWSLogValueMaxLen))
@@ -2212,22 +2251,22 @@ func (s *OpenAIGatewayService) commitOpenAICodexWSCompactionAfterDelivery(
 	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAICodexWindowStoreTimeout)
 	result, err := s.CommitOpenAICodexWindowSnapshot(
 		commitCtx,
-		plan.WindowMappingKey,
-		plan.Window.ThreadID,
-		plan.Window.Number,
+		expectedPlan.WindowMappingKey,
+		expectedWindow,
 		digest,
 	)
 	cancel()
 	if err != nil {
-		logOpenAIWSModeInfo("codex_compact_window_commit_failed account_id=%d mapping_digest=%s cause=%s", account.ID, openAICodexMappingLogDigest(plan.WindowMappingKey), truncateOpenAIWSLogValue(err.Error(), openAIWSLogValueMaxLen))
+		logOpenAIWSModeInfo("codex_compact_window_commit_failed account_id=%d mapping_digest=%s cause=%s", account.ID, openAICodexMappingLogDigest(expectedPlan.WindowMappingKey), truncateOpenAIWSLogValue(err.Error(), openAIWSLogValueMaxLen))
 		return false
 	}
-	bound, err := BindOpenAICodexWindowToPlan(*plan, result.Snapshot, plan.WindowMappingKey)
+	bound, err := BindOpenAICodexWindowToPlan(*plan, result.Snapshot, expectedPlan.WindowMappingKey)
 	if err != nil {
-		logOpenAIWSModeInfo("codex_compact_window_bind_failed account_id=%d mapping_digest=%s cause=%s", account.ID, openAICodexMappingLogDigest(plan.WindowMappingKey), truncateOpenAIWSLogValue(err.Error(), openAIWSLogValueMaxLen))
+		logOpenAIWSModeInfo("codex_compact_window_bind_failed account_id=%d mapping_digest=%s cause=%s", account.ID, openAICodexMappingLogDigest(expectedPlan.WindowMappingKey), truncateOpenAIWSLogValue(err.Error(), openAIWSLogValueMaxLen))
 		return false
 	}
 	*plan = bound
+	delivery.committed = true
 	SetOpenAIOAuthIdentityPlan(c, bound)
 	if turnState = strings.TrimSpace(turnState); turnState != "" {
 		s.noteOpenAICodexTurnStateProvenanceForPlan(c, account, turnState, bound)

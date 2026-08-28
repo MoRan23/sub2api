@@ -57,13 +57,6 @@ func (d *openAICodexCompactionDeliveryState) enqueue(payload []byte) {
 	if d == nil || d.delivery == nil || len(payload) == 0 {
 		return
 	}
-	eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
-	if eventType == "response.completed" || eventType == "response.done" {
-		status := strings.TrimSpace(gjson.GetBytes(payload, "response.status").String())
-		if status != "" && status != "completed" && status != "done" {
-			return
-		}
-	}
 	d.pending = append(d.pending, append([]byte(nil), payload...))
 }
 
@@ -77,23 +70,50 @@ func (d *openAICodexCompactionDeliveryState) flushDelivered() {
 	d.pending = d.pending[:0]
 }
 
-func openAICodexCompactionPlanForResponse(c *gin.Context, account *Account) (OpenAIOAuthIdentityPlan, bool) {
+func openAICodexCompactionPlanForResponse(c *gin.Context, account *Account) (OpenAIOAuthIdentityPlan, CodexCompactionMode, bool) {
 	if account == nil || !account.UsesOpenAICodexProtocol() {
-		return OpenAIOAuthIdentityPlan{}, false
+		return OpenAIOAuthIdentityPlan{}, CodexCompactionModeNone, false
 	}
 	plan, ok := OpenAIOAuthIdentityPlanFromContext(c)
 	if !ok || ValidateOpenAICodexWindowSnapshot(plan.Window) != nil ||
 		!openAICodexRequestTurnSnapshotValidForWire(plan.RequestTurn, CodexWireRequestCompaction) {
-		return OpenAIOAuthIdentityPlan{}, false
+		return OpenAIOAuthIdentityPlan{}, CodexCompactionModeNone, false
 	}
-	// Native remote compaction v2 remains on /responses, so the finalized wire
-	// profile is authoritative. The path is only a compatibility fallback for
-	// callers whose plan predates request-kind projection.
-	if plan.WireProfile.RequestKind != CodexWireRequestCompaction &&
-		(plan.WireProfile.RequestKind != "" || !isOpenAIResponsesCompactPath(c)) {
-		return OpenAIOAuthIdentityPlan{}, false
+	mode, trusted := trustedOpenAICompactionMode(c, &plan)
+	if !trusted {
+		return OpenAIOAuthIdentityPlan{}, CodexCompactionModeNone, false
 	}
-	return plan, true
+	return plan, mode, true
+}
+
+// isTrustedOpenAICompactionRequest resolves compact intent exclusively from a
+// finalized server-owned wire profile when one is available. Path and native
+// route markers remain compatibility fallbacks for pre-finalizer callers and
+// non-Codex accounts that do not have an OAuth identity plan.
+func isTrustedOpenAICompactionRequest(c *gin.Context, suppliedPlan *OpenAIOAuthIdentityPlan) bool {
+	_, ok := trustedOpenAICompactionMode(c, suppliedPlan)
+	return ok
+}
+
+func isTrustedOpenAIRemoteCompactionRequest(c *gin.Context, suppliedPlan *OpenAIOAuthIdentityPlan) bool {
+	mode, ok := trustedOpenAICompactionMode(c, suppliedPlan)
+	return ok && (mode == CodexCompactionModeRemoteV2 || mode == CodexCompactionModeLegacy)
+}
+
+func trustedOpenAICompactionMode(c *gin.Context, suppliedPlan *OpenAIOAuthIdentityPlan) (CodexCompactionMode, bool) {
+	if suppliedPlan != nil && suppliedPlan.WireProfile.Finalized {
+		return OpenAICodexCompactionModeForFinalizedPlan(*suppliedPlan)
+	}
+	if contextPlan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && contextPlan.WireProfile.Finalized {
+		return OpenAICodexCompactionModeForFinalizedPlan(contextPlan)
+	}
+	if isOpenAIResponsesCompactPath(c) {
+		return CodexCompactionModeLegacy, true
+	}
+	if isOpenAINativeCompactionV2(c) {
+		return CodexCompactionModeRemoteV2, true
+	}
+	return CodexCompactionModeNone, false
 }
 
 func (s *OpenAIGatewayService) commitOpenAICodexCompactionAfterDelivery(
@@ -101,9 +121,11 @@ func (s *OpenAIGatewayService) commitOpenAICodexCompactionAfterDelivery(
 	c *gin.Context,
 	account *Account,
 	plan OpenAIOAuthIdentityPlan,
+	mode CodexCompactionMode,
 	delivery *openAICodexCompactionDelivery,
 ) {
-	if s == nil || delivery == nil || !delivery.Valid() {
+	validatedMode, trusted := OpenAICodexCompactionModeForFinalizedPlan(plan)
+	if s == nil || delivery == nil || !trusted || validatedMode != mode || !delivery.ValidForMode(mode) {
 		return
 	}
 	if s.cfg == nil || strings.TrimSpace(s.cfg.JWT.Secret) == "" {
@@ -119,7 +141,7 @@ func (s *OpenAIGatewayService) commitOpenAICodexCompactionAfterDelivery(
 	}
 	digest, err := OpenAICodexCompactTurnDigest(
 		s.cfg.JWT.Secret, plan.CredentialOwnerNamespace, plan.APIKeyID,
-		plan.Window.ThreadID, plan.Window.Number, plan.RequestTurn.ID,
+		plan.Window, plan.RequestTurn.ID,
 	)
 	if err != nil {
 		logger.LegacyPrintf("service.openai_gateway", "OpenAI Codex compaction digest failed: %v", err)
@@ -129,7 +151,7 @@ func (s *OpenAIGatewayService) commitOpenAICodexCompactionAfterDelivery(
 		ctx = context.Background()
 	}
 	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAICodexWindowStoreTimeout)
-	result, err := s.CommitOpenAICodexWindowSnapshot(commitCtx, mappingKey, plan.Window.ThreadID, plan.Window.Number, digest)
+	result, err := s.CommitOpenAICodexWindowSnapshot(commitCtx, mappingKey, plan.Window, digest)
 	cancel()
 	if err != nil {
 		logger.LegacyPrintf("service.openai_gateway", "OpenAI Codex compaction window commit failed: %v", err)
@@ -137,38 +159,35 @@ func (s *OpenAIGatewayService) commitOpenAICodexCompactionAfterDelivery(
 	}
 	switch result.Status {
 	case OpenAICodexWindowCommitAdvanced, OpenAICodexWindowCommitAlreadyCommitted, OpenAICodexWindowCommitStale:
-		plan.Window = result.Snapshot
-		plan.WireProfile.WindowID = result.Snapshot.WindowID()
-		SetOpenAIOAuthIdentityPlan(c, plan)
+		bound, bindErr := BindOpenAICodexWindowToPlan(plan, result.Snapshot, mappingKey)
+		if bindErr != nil {
+			logger.LegacyPrintf("service.openai_gateway", "OpenAI Codex compaction window bind failed: %v", bindErr)
+			return
+		}
+		SetOpenAIOAuthIdentityPlan(c, bound)
 	}
 }
 
 func openAICodexSuccessfulJSONCompactionResponse(body []byte) bool {
-	if !openAICodexJSONCompactionOutputValid(body) {
-		return false
-	}
-	switch strings.TrimSpace(gjson.GetBytes(body, "status").String()) {
-	case "completed", "done":
-		return true
-	default:
-		return false
-	}
+	delivery := openAIJSONCompactionDelivery(body)
+	return delivery.ValidForMode(CodexCompactionModeLegacy)
 }
 
 func (s *OpenAIGatewayService) commitOpenAICodexJSONCompactionAfterDelivery(
-	ctx context.Context, c *gin.Context, account *Account, statusCode int, body []byte,
+	ctx context.Context, c *gin.Context, account *Account, statusCode int, body []byte, deliveryOverrides ...*openAICodexCompactionDelivery,
 ) {
-	if statusCode < 200 || statusCode >= 300 || !openAICodexSuccessfulJSONCompactionResponse(body) {
+	if statusCode < 200 || statusCode >= 300 {
 		return
 	}
-	plan, ok := openAICodexCompactionPlanForResponse(c, account)
+	plan, mode, ok := openAICodexCompactionPlanForResponse(c, account)
 	if !ok {
 		return
 	}
-	delivery := &openAICodexCompactionDelivery{}
-	responseEvent := []byte(`{"type":"response.completed","response":` + string(body) + `}`)
-	delivery.ObserveDeliveredEvent(responseEvent)
-	s.commitOpenAICodexCompactionAfterDelivery(ctx, c, account, plan, delivery)
+	delivery := openAIJSONCompactionDelivery(body)
+	if len(deliveryOverrides) > 0 && deliveryOverrides[0] != nil {
+		delivery = *deliveryOverrides[0]
+	}
+	s.commitOpenAICodexCompactionAfterDelivery(ctx, c, account, plan, mode, &delivery)
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string) (*openaiStreamingResult, error) {
@@ -176,7 +195,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string) (*openaiStreamingResult, error) {
-	compactionPlan, compactionEligible := openAICodexCompactionPlanForResponse(c, account)
+	compactionPlan, compactionMode, compactionEligible := openAICodexCompactionPlanForResponse(c, account)
 	if resp == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		compactionEligible = false
 	}
@@ -548,8 +567,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			)
 		}
 		flushPending("Client disconnected during final flush, returning collected usage")
-		if compactionEligible && compactionDelivery != nil && compactionDelivery.delivery.Valid() {
-			s.commitOpenAICodexCompactionAfterDelivery(ctx, c, account, compactionPlan, compactionDelivery.delivery)
+		if compactionEligible && compactionDelivery != nil && compactionDelivery.delivery.ValidForMode(compactionMode) {
+			s.commitOpenAICodexCompactionAfterDelivery(ctx, c, account, compactionPlan, compactionMode, compactionDelivery.delivery)
 			// A compact response binds returned turn state to the next window. The
 			// commit updates the context plan first; rebinding here prevents the
 			// next request from treating a successfully delivered state as stale.
@@ -822,6 +841,13 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 			startsClientOutput := forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
 			startsVisibleOutput := openAIStreamDataStartsVisibleOutput(data, eventType)
+			if compactionMode == CodexCompactionModeLocalResponses &&
+				(eventType == "response.completed" || eventType == "response.done") {
+				// Local compact can legitimately produce no semantic output. Treat
+				// its terminal as client output for buffering purposes so an empty
+				// response.completed is physically delivered before commit.
+				startsClientOutput = true
+			}
 			if stageFirstOutput {
 				eventStartsClientOutput = eventStartsClientOutput || startsClientOutput
 				eventStartsVisibleOutput = eventStartsVisibleOutput || startsVisibleOutput
@@ -837,6 +863,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			// to the client) are silent upstream refusals: fail over instead of
 			// recording a successful 0/0 usage turn (issue #5009).
 			if account != nil && account.Platform == PlatformOpenAI &&
+				compactionMode != CodexCompactionModeLocalResponses &&
 				(eventType == "response.completed" || eventType == "response.done") &&
 				!sawFailedEvent && !responsesSemanticOutputSeen && !clientOutputStarted &&
 				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
@@ -1807,7 +1834,7 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		}
 	}
 
-	_, trackCompactDelivery := openAICodexCompactionPlanForResponse(c, account)
+	_, _, trackCompactDelivery := openAICodexCompactionPlanForResponse(c, account)
 	delivered := writeOpenAIResponseWithOptionalDeliveryTracking(c, resp.StatusCode, contentType, body, trackCompactDelivery)
 	if delivered {
 		s.commitOpenAICodexJSONCompactionAfterDelivery(ctx, c, account, resp.StatusCode, body)
@@ -1917,10 +1944,11 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 			contentType = "text/event-stream"
 		}
 	}
-	_, trackCompactDelivery := openAICodexCompactionPlanForResponse(c, account)
+	_, _, trackCompactDelivery := openAICodexCompactionPlanForResponse(c, account)
 	delivered := writeOpenAIResponseWithOptionalDeliveryTracking(c, resp.StatusCode, contentType, body, trackCompactDelivery)
 	if delivered {
-		s.commitOpenAICodexJSONCompactionAfterDelivery(context.Background(), c, account, resp.StatusCode, body)
+		delivery := openAIJSONCompactionDeliveryFromSSE(bodyText, body, terminalType)
+		s.commitOpenAICodexJSONCompactionAfterDelivery(context.Background(), c, account, resp.StatusCode, body, &delivery)
 	}
 	if turnStateCanCommit && delivered {
 		s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
@@ -2373,7 +2401,7 @@ func isResponsesCompactionItemType(itemType string) bool {
 // compaction item——纯流式透传（v0.1.146）下客户端直接读事件流天然拿得到，
 // SSE→JSON 提取链路必须给出等价结果。非 compact 请求原样返回。
 func supplementCompactionItemFromSSE(c *gin.Context, finalResponse []byte, bodyText string) []byte {
-	if !isOpenAIResponsesCompactPath(c) {
+	if !isTrustedOpenAIRemoteCompactionRequest(c, nil) {
 		return finalResponse
 	}
 	if len(gjson.GetBytes(finalResponse, "output").Array()) == 0 {
@@ -2405,15 +2433,15 @@ func responsesOutputHasCompactionItem(response []byte) bool {
 	return false
 }
 
-// findRawCompactionItemFromSSE 从原始 SSE 事件流中提取第一个 compaction 类
-// item 的 raw JSON：output_item.done 优先，output_item.added 兜底。
+// findRawCompactionItemFromSSE extracts exactly one distinct compaction item
+// from the raw SSE stream. output_item.done is authoritative; added is used
+// only when no done event contains a compaction item. Multiple distinct items
+// are intentionally rejected so an ambiguous upstream response cannot be
+// normalized into a valid single-item compact result.
 func findRawCompactionItemFromSSE(bodyText string) (json.RawMessage, bool) {
-	var found json.RawMessage
-	pick := func(eventType string) {
+	pick := func(eventType string) map[string]json.RawMessage {
+		found := make(map[string]json.RawMessage, 1)
 		forEachOpenAISSEFrame(bodyText, func(effectiveType string, data []byte) {
-			if found != nil {
-				return
-			}
 			if effectiveType != eventType {
 				return
 			}
@@ -2421,14 +2449,29 @@ func findRawCompactionItemFromSSE(bodyText string) (json.RawMessage, bool) {
 			if !item.IsObject() || !isResponsesCompactionItemType(item.Get("type").String()) {
 				return
 			}
-			found = json.RawMessage(item.Raw)
+			key := strings.TrimSpace(item.Get("id").String())
+			if key != "" {
+				key = "id:" + key
+			} else {
+				key = "raw:" + item.Raw
+			}
+			if _, exists := found[key]; !exists {
+				found[key] = json.RawMessage(item.Raw)
+			}
 		})
+		return found
 	}
-	pick("response.output_item.done")
-	if found == nil {
-		pick("response.output_item.added")
+	found := pick("response.output_item.done")
+	if len(found) == 0 {
+		found = pick("response.output_item.added")
 	}
-	return found, found != nil
+	if len(found) != 1 {
+		return nil, false
+	}
+	for _, item := range found {
+		return item, true
+	}
+	return nil, false
 }
 
 // reconstructResponseOutputFromSSE scans raw SSE body text and returns a

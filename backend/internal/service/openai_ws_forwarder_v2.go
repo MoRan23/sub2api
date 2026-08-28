@@ -407,6 +407,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	var finalTerminalMessage []byte
 	wroteDownstream := false
 	compactionDelivery := openAICodexWSCompactionDeliveryForPlan(account, outboundIdentityPlan)
+	var pendingNonStreamingRemoteV2DoneEvents [][]byte
 	needModelReplace := originalModel != mappedModel
 	var mappedModelBytes []byte
 	if needModelReplace && mappedModel != "" {
@@ -675,6 +676,20 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			parseOpenAIWSResponseUsageFromCompletedEvent(message, usage)
 		}
 		imageCounter.AddSSEData(message)
+		if !reqStream && compactionDelivery != nil &&
+			compactionDelivery.mode == CodexCompactionModeRemoteV2 &&
+			eventType == "response.output_item.done" &&
+			isResponsesCompactionItemType(gjson.GetBytes(message, "item.type").String()) &&
+			len(pendingNonStreamingRemoteV2DoneEvents) < 2 {
+			// The non-streaming client receives only the materialized terminal
+			// response. Retain enough raw done evidence to enforce RemoteV2's
+			// at-most-one contract, but do not mark it delivered until that final
+			// JSON document has been written successfully.
+			pendingNonStreamingRemoteV2DoneEvents = append(
+				pendingNonStreamingRemoteV2DoneEvents,
+				append([]byte(nil), message...),
+			)
+		}
 
 		if eventType == "response.failed" {
 			if hit, code, msg := detectOpenAICyberPolicy(message); hit {
@@ -837,6 +852,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 
 		stageTurnStateHeader()
 		if writeOpenAIResponseDataWithDelivery(c, http.StatusOK, "application/json", finalResponse) {
+			for _, doneEvent := range pendingNonStreamingRemoteV2DoneEvents {
+				observeOpenAICodexWSCompactionDelivery(compactionDelivery, doneEvent)
+			}
 			observeOpenAICodexWSCompactionDelivery(compactionDelivery, finalTerminalMessage)
 			s.commitOpenAICodexWSCompactionAfterDelivery(
 				ctx,

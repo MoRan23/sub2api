@@ -347,7 +347,7 @@ func TestBuildCodexCLIUserAgent(t *testing.T) {
 	// 非法版本号必须回退到内置 UA，不能拼出畸形身份。
 	require.Equal(t, codexCLIUserAgent, buildCodexCLIUserAgent("bogus version"))
 	require.Equal(t, codexCLIUserAgent, buildCodexCLIUserAgent(""))
-	require.Equal(t, "0.149.1", BuiltinOpenAICodexClientVersion())
+	require.Equal(t, "0.150.1", BuiltinOpenAICodexClientVersion())
 }
 
 func TestCodexCanonicalUserAgentFollowsResolver(t *testing.T) {

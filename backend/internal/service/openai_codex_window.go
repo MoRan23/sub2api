@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -17,7 +19,7 @@ const (
 	openAICodexWindowLocalMaxEntries = 64 * 1024
 	openAICodexWindowStoreTimeout    = 500 * time.Millisecond
 	openAICodexWindowKeyDomain       = "sub2api/openai-codex-window/v1/key"
-	openAICodexCompactTurnDomain     = "sub2api/openai-codex-window/v1/compact"
+	openAICodexCompactTurnDomain     = "sub2api/openai-codex-window/v2/compact"
 
 	// Redis Lua numbers are IEEE-754 doubles. Keeping the persisted counter in
 	// the exact integer range makes CAS comparisons deterministic.
@@ -25,8 +27,9 @@ const (
 )
 
 var (
-	ErrOpenAICodexWindowStoreUnavailable = errors.New("openai Codex window store is unavailable")
-	ErrOpenAICodexWindowStoredInvalid    = errors.New("stored OpenAI Codex window snapshot is invalid")
+	ErrOpenAICodexWindowStoreUnavailable      = errors.New("openai Codex window store is unavailable")
+	ErrOpenAICodexWindowStoredInvalid         = errors.New("stored OpenAI Codex window snapshot is invalid")
+	ErrOpenAICodexWindowLegacyRequiresResolve = errors.New("legacy OpenAI Codex window snapshot requires resolve")
 )
 
 // OpenAICodexWindowSnapshot is the durable state for one resolved Codex
@@ -35,6 +38,7 @@ var (
 type OpenAICodexWindowSnapshot struct {
 	ThreadID          string `json:"thread_id"`
 	Number            uint64 `json:"window_number"`
+	ContextWindowID   string `json:"context_window_id"`
 	LastCompactDigest string `json:"last_compact_digest"`
 }
 
@@ -51,6 +55,9 @@ func ValidateOpenAICodexWindowSnapshot(snapshot OpenAICodexWindowSnapshot) error
 	}
 	if snapshot.Number > OpenAICodexWindowMaxNumber {
 		return errors.New("openai Codex window number is outside the exact CAS range")
+	}
+	if _, err := canonicalUUIDv7(snapshot.ContextWindowID); err != nil {
+		return errors.New("openai Codex window context_window_id must be UUIDv7")
 	}
 	digest := strings.TrimSpace(snapshot.LastCompactDigest)
 	if digest != snapshot.LastCompactDigest || (digest != "" && !validOpenAICodexWindowDigest(digest)) {
@@ -82,7 +89,7 @@ type OpenAICodexWindowCommitResult struct {
 // test doubles do not need to implement Codex-specific persistence.
 type OpenAICodexWindowStore interface {
 	ResolveOpenAICodexWindow(ctx context.Context, mappingKey string, candidate OpenAICodexWindowSnapshot, ttl time.Duration) (OpenAICodexWindowSnapshot, error)
-	CommitOpenAICodexWindow(ctx context.Context, mappingKey, threadID string, expected uint64, compactDigest string, ttl time.Duration) (OpenAICodexWindowCommitResult, error)
+	CommitOpenAICodexWindow(ctx context.Context, mappingKey string, expected OpenAICodexWindowSnapshot, compactDigest, proposedNextContextWindowID string, ttl time.Duration) (OpenAICodexWindowCommitResult, error)
 }
 
 // OpenAICodexWindowMappingKey isolates a window by credential owner, downstream
@@ -102,21 +109,18 @@ func OpenAICodexWindowMappingKey(secret, credentialOwnerNamespace string, apiKey
 }
 
 // OpenAICodexCompactTurnDigest is the idempotency token for one successful
-// compact installation. expectedWindow is part of the domain so the same
-// active turn may legitimately compact again after advancing its window.
-func OpenAICodexCompactTurnDigest(secret, credentialOwnerNamespace string, apiKeyID int64, threadID string, expectedWindow uint64, compactTurnID string) (string, error) {
-	if apiKeyID < 0 || expectedWindow >= OpenAICodexWindowMaxNumber {
+// compact installation. The full immutable pre-window identity is part of the
+// domain so a compact result cannot be installed into a same-number context
+// from another lineage.
+func OpenAICodexCompactTurnDigest(secret, credentialOwnerNamespace string, apiKeyID int64, expected OpenAICodexWindowSnapshot, compactTurnID string) (string, error) {
+	if apiKeyID < 0 || expected.Number >= OpenAICodexWindowMaxNumber || ValidateOpenAICodexWindowSnapshot(expected) != nil {
 		return "", errOpenAIOutboundSessionIdentityKeyEmpty
 	}
 	credentialOwnerNamespace = sanitizeSessionID(credentialOwnerNamespace)
 	compactTurnID = sanitizeSessionID(compactTurnID)
-	threadID, err := canonicalUUIDv7(threadID)
-	if err != nil {
-		return "", errOpenAIOutboundSessionIdentityKeyEmpty
-	}
 	return openAICodexHMAC(secret, openAICodexCompactTurnDomain,
-		credentialOwnerNamespace, strconv.FormatInt(apiKeyID, 10), threadID,
-		strconv.FormatUint(expectedWindow, 10), compactTurnID)
+		credentialOwnerNamespace, strconv.FormatInt(apiKeyID, 10), expected.ThreadID,
+		strconv.FormatUint(expected.Number, 10), expected.ContextWindowID, compactTurnID)
 }
 
 func validOpenAICodexWindowDigest(value string) bool {
@@ -138,21 +142,27 @@ func normalizeOpenAICodexWindowTTL(ttl time.Duration) time.Duration {
 	return ttl
 }
 
-func validateOpenAICodexWindowCommit(mappingKey, threadID string, expected uint64, compactDigest string) (string, error) {
+func validateOpenAICodexWindowCommit(mappingKey string, expected OpenAICodexWindowSnapshot, compactDigest, proposedNextContextWindowID string) (OpenAICodexWindowSnapshot, string, error) {
 	if !validOpenAICodexWindowMappingKey(mappingKey) {
-		return "", errors.New("openai Codex window mapping key must be a lowercase SHA-256 digest")
+		return OpenAICodexWindowSnapshot{}, "", errors.New("openai Codex window mapping key must be a lowercase SHA-256 digest")
 	}
-	canonicalThreadID, err := canonicalUUIDv7(threadID)
-	if err != nil {
-		return "", errors.New("openai Codex window thread_id must be UUIDv7")
+	if err := ValidateOpenAICodexWindowSnapshot(expected); err != nil {
+		return OpenAICodexWindowSnapshot{}, "", fmt.Errorf("openai Codex expected window is invalid: %w", err)
 	}
-	if expected >= OpenAICodexWindowMaxNumber {
-		return "", errors.New("openai Codex window counter is exhausted")
+	if expected.Number >= OpenAICodexWindowMaxNumber {
+		return OpenAICodexWindowSnapshot{}, "", errors.New("openai Codex window counter is exhausted")
 	}
 	if !validOpenAICodexWindowDigest(compactDigest) {
-		return "", errors.New("openai Codex compact digest must be a lowercase SHA-256 digest")
+		return OpenAICodexWindowSnapshot{}, "", errors.New("openai Codex compact digest must be a lowercase SHA-256 digest")
 	}
-	return canonicalThreadID, nil
+	canonicalContextWindowID, err := canonicalUUIDv7(proposedNextContextWindowID)
+	if err != nil {
+		return OpenAICodexWindowSnapshot{}, "", errors.New("openai Codex proposed context_window_id must be UUIDv7")
+	}
+	if canonicalContextWindowID == expected.ContextWindowID {
+		return OpenAICodexWindowSnapshot{}, "", errors.New("openai Codex proposed context_window_id must differ from the expected context window")
+	}
+	return expected, canonicalContextWindowID, nil
 }
 
 type openAICodexWindowLocalEntry struct {
@@ -208,8 +218,8 @@ func (s *openAICodexWindowLocalStore) ResolveOpenAICodexWindow(_ context.Context
 	return entry.snapshot, nil
 }
 
-func (s *openAICodexWindowLocalStore) CommitOpenAICodexWindow(_ context.Context, mappingKey, threadID string, expected uint64, compactDigest string, ttl time.Duration) (OpenAICodexWindowCommitResult, error) {
-	threadID, err := validateOpenAICodexWindowCommit(mappingKey, threadID, expected, compactDigest)
+func (s *openAICodexWindowLocalStore) CommitOpenAICodexWindow(_ context.Context, mappingKey string, expected OpenAICodexWindowSnapshot, compactDigest, proposedNextContextWindowID string, ttl time.Duration) (OpenAICodexWindowCommitResult, error) {
+	expected, proposedNextContextWindowID, err := validateOpenAICodexWindowCommit(mappingKey, expected, compactDigest, proposedNextContextWindowID)
 	if err != nil {
 		return OpenAICodexWindowCommitResult{}, err
 	}
@@ -224,26 +234,38 @@ func (s *openAICodexWindowLocalStore) CommitOpenAICodexWindow(_ context.Context,
 		// exact snapshot used to build this request and advanced in one critical
 		// section. No invalid intermediate generation is exposed.
 		snapshot := OpenAICodexWindowSnapshot{
-			ThreadID:          threadID,
-			Number:            expected + 1,
+			ThreadID:          expected.ThreadID,
+			Number:            expected.Number + 1,
+			ContextWindowID:   proposedNextContextWindowID,
 			LastCompactDigest: compactDigest,
 		}
 		entry = s.insertLocked(mappingKey, snapshot, now.Add(ttl), false)
 		return OpenAICodexWindowCommitResult{Snapshot: entry.snapshot, Status: OpenAICodexWindowCommitAdvanced}, nil
 	}
-	if entry.snapshot.ThreadID != threadID {
+	if entry.snapshot.ThreadID != expected.ThreadID {
 		return OpenAICodexWindowCommitResult{}, ErrOpenAICodexWindowStoredInvalid
 	}
-	entry.expiresAt = now.Add(ttl)
-	s.recency.MoveToFront(entry.recency)
+	if ValidateOpenAICodexWindowSnapshot(entry.snapshot) != nil {
+		return OpenAICodexWindowCommitResult{}, ErrOpenAICodexWindowStoredInvalid
+	}
 	if entry.snapshot.LastCompactDigest == compactDigest {
+		if entry.snapshot.Number != expected.Number+1 || entry.snapshot.ContextWindowID == expected.ContextWindowID {
+			return OpenAICodexWindowCommitResult{}, ErrOpenAICodexWindowStoredInvalid
+		}
+		entry.expiresAt = now.Add(ttl)
+		s.recency.MoveToFront(entry.recency)
 		return OpenAICodexWindowCommitResult{Snapshot: entry.snapshot, Status: OpenAICodexWindowCommitAlreadyCommitted}, nil
 	}
-	if entry.snapshot.Number != expected {
+	if entry.snapshot.Number != expected.Number || entry.snapshot.ContextWindowID != expected.ContextWindowID {
+		entry.expiresAt = now.Add(ttl)
+		s.recency.MoveToFront(entry.recency)
 		return OpenAICodexWindowCommitResult{Snapshot: entry.snapshot, Status: OpenAICodexWindowCommitStale}, nil
 	}
-	entry.snapshot.Number = expected + 1
+	entry.snapshot.Number = expected.Number + 1
+	entry.snapshot.ContextWindowID = proposedNextContextWindowID
 	entry.snapshot.LastCompactDigest = compactDigest
+	entry.expiresAt = now.Add(ttl)
+	s.recency.MoveToFront(entry.recency)
 	return OpenAICodexWindowCommitResult{Snapshot: entry.snapshot, Status: OpenAICodexWindowCommitAdvanced}, nil
 }
 
@@ -364,18 +386,24 @@ func (s *OpenAICodexWindowRuntimeStore) ResolveOpenAICodexWindow(ctx context.Con
 	primaryCtx, cancel := context.WithTimeout(ctx, openAICodexWindowStoreTimeout)
 	primaryWinner, err := s.primary.ResolveOpenAICodexWindow(primaryCtx, mappingKey, localWinner, ttl)
 	cancel()
-	if err != nil || ValidateOpenAICodexWindowSnapshot(primaryWinner) != nil || primaryWinner.ThreadID != localWinner.ThreadID || primaryWinner.Number < localWinner.Number {
+	if err != nil {
+		if !errors.Is(err, ErrOpenAICodexWindowStoreUnavailable) {
+			return OpenAICodexWindowSnapshot{}, err
+		}
 		s.local.markPending(mappingKey, ttl)
 		return localWinner, nil
+	}
+	if ValidateOpenAICodexWindowSnapshot(primaryWinner) != nil || primaryWinner.ThreadID != localWinner.ThreadID || primaryWinner.Number < localWinner.Number {
+		return OpenAICodexWindowSnapshot{}, ErrOpenAICodexWindowStoredInvalid
 	}
 	return s.local.acceptPrimary(mappingKey, primaryWinner, ttl), nil
 }
 
-func (s *OpenAICodexWindowRuntimeStore) CommitOpenAICodexWindow(ctx context.Context, mappingKey, threadID string, expected uint64, compactDigest string, ttl time.Duration) (OpenAICodexWindowCommitResult, error) {
+func (s *OpenAICodexWindowRuntimeStore) CommitOpenAICodexWindow(ctx context.Context, mappingKey string, expected OpenAICodexWindowSnapshot, compactDigest, proposedNextContextWindowID string, ttl time.Duration) (OpenAICodexWindowCommitResult, error) {
 	if s == nil || s.local == nil {
 		return OpenAICodexWindowCommitResult{}, ErrOpenAICodexWindowStoreUnavailable
 	}
-	threadID, err := validateOpenAICodexWindowCommit(mappingKey, threadID, expected, compactDigest)
+	expected, proposedNextContextWindowID, err := validateOpenAICodexWindowCommit(mappingKey, expected, compactDigest, proposedNextContextWindowID)
 	if err != nil {
 		return OpenAICodexWindowCommitResult{}, err
 	}
@@ -387,36 +415,63 @@ func (s *OpenAICodexWindowRuntimeStore) CommitOpenAICodexWindow(ctx context.Cont
 			primaryCtx, cancel := context.WithTimeout(ctx, openAICodexWindowStoreTimeout)
 			primaryWinner, resolveErr := s.primary.ResolveOpenAICodexWindow(primaryCtx, mappingKey, localCandidate, ttl)
 			cancel()
-			primaryReady = resolveErr == nil && ValidateOpenAICodexWindowSnapshot(primaryWinner) == nil && primaryWinner.ThreadID == threadID && primaryWinner.Number >= localCandidate.Number
-			if primaryReady {
+			if resolveErr != nil {
+				if !errors.Is(resolveErr, ErrOpenAICodexWindowStoreUnavailable) {
+					return OpenAICodexWindowCommitResult{}, resolveErr
+				}
+				primaryReady = false
+			} else if ValidateOpenAICodexWindowSnapshot(primaryWinner) != nil || primaryWinner.ThreadID != expected.ThreadID || primaryWinner.Number < localCandidate.Number {
+				return OpenAICodexWindowCommitResult{}, ErrOpenAICodexWindowStoredInvalid
+			} else {
 				s.local.acceptPrimary(mappingKey, primaryWinner, ttl)
 			}
 		}
 		if primaryReady {
 			primaryCtx, cancel := context.WithTimeout(ctx, openAICodexWindowStoreTimeout)
-			result, commitErr := s.primary.CommitOpenAICodexWindow(primaryCtx, mappingKey, threadID, expected, compactDigest, ttl)
+			result, commitErr := s.primary.CommitOpenAICodexWindow(primaryCtx, mappingKey, expected, compactDigest, proposedNextContextWindowID, ttl)
 			cancel()
-			if commitErr == nil && ValidateOpenAICodexWindowSnapshot(result.Snapshot) == nil && result.Snapshot.ThreadID == threadID && validOpenAICodexWindowCommitStatus(result.Status) {
+			if commitErr != nil {
+				if !errors.Is(commitErr, ErrOpenAICodexWindowStoreUnavailable) {
+					return OpenAICodexWindowCommitResult{}, commitErr
+				}
+			} else if validateOpenAICodexWindowCommitResult(expected, compactDigest, proposedNextContextWindowID, result) != nil {
+				return OpenAICodexWindowCommitResult{}, ErrOpenAICodexWindowStoredInvalid
+			} else {
 				s.local.acceptPrimary(mappingKey, result.Snapshot, ttl)
 				return result, nil
 			}
 		}
 	}
 
-	result, err := s.local.CommitOpenAICodexWindow(ctx, mappingKey, threadID, expected, compactDigest, ttl)
+	result, err := s.local.CommitOpenAICodexWindow(ctx, mappingKey, expected, compactDigest, proposedNextContextWindowID, ttl)
 	if err == nil {
 		s.local.markPending(mappingKey, ttl)
 	}
 	return result, err
 }
 
-func validOpenAICodexWindowCommitStatus(status OpenAICodexWindowCommitStatus) bool {
-	switch status {
-	case OpenAICodexWindowCommitAdvanced, OpenAICodexWindowCommitAlreadyCommitted, OpenAICodexWindowCommitStale:
-		return true
-	default:
-		return false
+func validateOpenAICodexWindowCommitResult(expected OpenAICodexWindowSnapshot, compactDigest, proposedNextContextWindowID string, result OpenAICodexWindowCommitResult) error {
+	if ValidateOpenAICodexWindowSnapshot(result.Snapshot) != nil || result.Snapshot.ThreadID != expected.ThreadID {
+		return ErrOpenAICodexWindowStoredInvalid
 	}
+	switch result.Status {
+	case OpenAICodexWindowCommitAdvanced:
+		if result.Snapshot.Number != expected.Number+1 || result.Snapshot.ContextWindowID != proposedNextContextWindowID || result.Snapshot.LastCompactDigest != compactDigest {
+			return ErrOpenAICodexWindowStoredInvalid
+		}
+	case OpenAICodexWindowCommitAlreadyCommitted:
+		if result.Snapshot.Number != expected.Number+1 || result.Snapshot.ContextWindowID == expected.ContextWindowID || result.Snapshot.LastCompactDigest != compactDigest {
+			return ErrOpenAICodexWindowStoredInvalid
+		}
+	case OpenAICodexWindowCommitStale:
+		if result.Snapshot.LastCompactDigest == compactDigest ||
+			(result.Snapshot.Number == expected.Number && result.Snapshot.ContextWindowID == expected.ContextWindowID) {
+			return ErrOpenAICodexWindowStoredInvalid
+		}
+	default:
+		return ErrOpenAICodexWindowStoredInvalid
+	}
+	return nil
 }
 
 func (s *OpenAIGatewayService) openAICodexWindowRuntimeStore() *OpenAICodexWindowRuntimeStore {
@@ -427,16 +482,35 @@ func (s *OpenAIGatewayService) openAICodexWindowRuntimeStore() *OpenAICodexWindo
 	return NewOpenAICodexWindowRuntimeStore(primary)
 }
 
-func (s *OpenAIGatewayService) ResolveOpenAICodexWindowSnapshot(ctx context.Context, mappingKey, threadID string) (OpenAICodexWindowSnapshot, error) {
+func (s *OpenAIGatewayService) ResolveOpenAICodexWindowSnapshot(ctx context.Context, mappingKey, threadID, contextWindowIDCandidate string) (OpenAICodexWindowSnapshot, error) {
 	threadID, err := canonicalUUIDv7(threadID)
 	if err != nil {
 		return OpenAICodexWindowSnapshot{}, fmt.Errorf("resolve openai Codex window: %w", err)
 	}
-	return s.openAICodexWindowRuntimeStore().ResolveOpenAICodexWindow(ctx, mappingKey, OpenAICodexWindowSnapshot{ThreadID: threadID}, OpenAICodexWindowTTL)
+	contextWindowIDCandidate, err = canonicalUUIDv7(contextWindowIDCandidate)
+	if err != nil {
+		return OpenAICodexWindowSnapshot{}, fmt.Errorf("resolve openai Codex window: %w", err)
+	}
+	return s.openAICodexWindowRuntimeStore().ResolveOpenAICodexWindow(ctx, mappingKey, OpenAICodexWindowSnapshot{
+		ThreadID:        threadID,
+		ContextWindowID: contextWindowIDCandidate,
+	}, OpenAICodexWindowTTL)
 }
 
-func (s *OpenAIGatewayService) CommitOpenAICodexWindowSnapshot(ctx context.Context, mappingKey, threadID string, expected uint64, compactDigest string) (OpenAICodexWindowCommitResult, error) {
-	return s.openAICodexWindowRuntimeStore().CommitOpenAICodexWindow(ctx, mappingKey, threadID, expected, compactDigest, OpenAICodexWindowTTL)
+func (s *OpenAIGatewayService) CommitOpenAICodexWindowSnapshot(ctx context.Context, mappingKey string, expected OpenAICodexWindowSnapshot, compactDigest string) (OpenAICodexWindowCommitResult, error) {
+	proposedNextContextWindowID, err := newOpenAICodexContextWindowID()
+	if err != nil {
+		return OpenAICodexWindowCommitResult{}, fmt.Errorf("commit openai Codex window: %w", err)
+	}
+	return s.openAICodexWindowRuntimeStore().CommitOpenAICodexWindow(ctx, mappingKey, expected, compactDigest, proposedNextContextWindowID, OpenAICodexWindowTTL)
+}
+
+func newOpenAICodexContextWindowID() (string, error) {
+	generated, err := uuid.NewV7()
+	if err != nil {
+		return "", errors.New("generate openai Codex context_window_id")
+	}
+	return generated.String(), nil
 }
 
 var _ OpenAICodexWindowStore = (*openAICodexWindowLocalStore)(nil)

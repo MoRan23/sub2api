@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -85,6 +86,125 @@ func TestFinalizeOpenAIOAuthResponsesRequestRejectsNilRequest(t *testing.T) {
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	_, err := (&OpenAIGatewayService{}).FinalizeOpenAIOAuthResponsesRequest(nil, account, nil, nil, OpenAIOAuthResponsesFinalizeOptions{})
 	require.ErrorContains(t, err, "request is nil")
+}
+
+func TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode(t *testing.T) {
+	makeBody := func(stream any, generateFalse, includeTrigger bool) []byte {
+		root := map[string]any{
+			"model":  "gpt-5.4",
+			"stream": stream,
+			"client_metadata": map[string]any{
+				openAIWSTurnMetadataHeader: codexWireTestLocalCompact,
+			},
+		}
+		if generateFalse {
+			root["generate"] = false
+		}
+		if includeTrigger {
+			root["input"] = []any{map[string]any{"type": "compaction_trigger"}}
+		}
+		body, err := json.Marshal(root)
+		require.NoError(t, err)
+		return body
+	}
+	newPlan := func(t *testing.T, body []byte, projection OpenAIOAuthIdentityProjectionMode) OpenAIOAuthIdentityPlan {
+		t.Helper()
+		capture := CaptureOpenAIOAuthIdentity(nil, body, "")
+		require.Equal(t, CodexCompactionModeLocalResponses, capture.WireProfile.CompactionMode)
+		plan := codexWireProjectionTestPlan(t)
+		plan.Capture = capture
+		plan.WireProfile = capture.WireProfile
+		plan.RequestTurn = capture.RequestTurn
+		plan.ProjectionMode = projection
+		return plan
+	}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	tests := []struct {
+		name           string
+		path           string
+		stream         any
+		requestKind    string
+		projection     OpenAIOAuthIdentityProjectionMode
+		markNative     bool
+		generateFalse  bool
+		includeTrigger bool
+		wantMode       CodexCompactionMode
+		wantImpl       string
+	}{
+		{name: "local responses", path: "/v1/responses", stream: true, requestKind: "compaction", projection: OpenAIOAuthIdentityProjectionRegular, wantMode: CodexCompactionModeLocalResponses, wantImpl: CodexCompactionImplementationResponses},
+		{name: "stream false fails closed", path: "/v1/responses", stream: false, requestKind: "compaction", projection: OpenAIOAuthIdentityProjectionRegular, wantMode: CodexCompactionModeNone, wantImpl: CodexCompactionImplementationRemoteV2},
+		{name: "generate false fails closed", path: "/v1/responses", stream: true, generateFalse: true, requestKind: "compaction", projection: OpenAIOAuthIdentityProjectionRegular, wantMode: CodexCompactionModeNone, wantImpl: CodexCompactionImplementationRemoteV2},
+		{name: "trigger without native marker fails closed", path: "/v1/responses", stream: true, includeTrigger: true, requestKind: "compaction", projection: OpenAIOAuthIdentityProjectionRegular, wantMode: CodexCompactionModeNone, wantImpl: CodexCompactionImplementationRemoteV2},
+		{name: "non bare path fails closed", path: "/v1/chat/completions", stream: true, requestKind: "compaction", projection: OpenAIOAuthIdentityProjectionRegular, wantMode: CodexCompactionModeNone, wantImpl: CodexCompactionImplementationRemoteV2},
+		{name: "legacy path", path: "/v1/responses/compact", stream: false, requestKind: "compaction", projection: OpenAIOAuthIdentityProjectionCompact, wantMode: CodexCompactionModeLegacy, wantImpl: CodexCompactionImplementationLegacy},
+		{name: "native v2 marker", path: "/v1/responses", stream: false, requestKind: "turn", projection: OpenAIOAuthIdentityProjectionRegular, markNative: true, wantMode: CodexCompactionModeRemoteV2, wantImpl: CodexCompactionImplementationRemoteV2},
+		{name: "ordinary turn clears candidate", path: "/v1/responses", stream: true, requestKind: "turn", projection: OpenAIOAuthIdentityProjectionRegular, wantMode: CodexCompactionModeNone},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := makeBody(test.stream, test.generateFalse, test.includeTrigger)
+			c, _ := newOpenAIMemoryRoutingTestContext(test.path)
+			if test.markNative {
+				MarkOpenAINativeCompactionV2(c)
+			}
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, chatgptCodexURL, nil)
+			require.NoError(t, err)
+			_, err = (&OpenAIGatewayService{}).FinalizeOpenAIOAuthResponsesRequest(c, account, req, body, OpenAIOAuthResponsesFinalizeOptions{
+				Plan: newPlan(t, body, test.projection), RequestKind: test.requestKind,
+			})
+			require.NoError(t, err)
+			finalPlan, ok := OpenAIOAuthIdentityPlanFromContext(c)
+			require.True(t, ok)
+			require.Equal(t, test.wantMode, finalPlan.WireProfile.CompactionMode)
+			mode, armed := OpenAICodexCompactionModeForFinalizedPlan(finalPlan)
+			if test.wantMode.valid() {
+				require.True(t, armed)
+				require.Equal(t, test.wantMode, mode)
+			} else {
+				require.False(t, armed)
+			}
+			if test.requestKind == "turn" && !test.markNative {
+				require.Empty(t, finalPlan.WireProfile.Compaction)
+				return
+			}
+			metadata, valid := parseCodexCompactionMetadata(finalPlan.WireProfile.Compaction)
+			require.True(t, valid)
+			require.Equal(t, test.wantImpl, metadata.Implementation)
+			require.Equal(t, "auto", metadata.Trigger)
+			require.Equal(t, "model_downshift", metadata.Reason)
+			require.Equal(t, "pre_turn", metadata.Phase)
+			require.Equal(t, "prefix_compaction", metadata.Strategy)
+		})
+	}
+
+	t.Run("frozen local mode survives bridge style second finalization", func(t *testing.T) {
+		body := makeBody(true, false, false)
+		frozen, err := FinalizeOpenAICodexWirePlanWithOptions(
+			newPlan(t, body, OpenAIOAuthIdentityProjectionPassthrough),
+			FinalizeOpenAICodexWirePlanOptions{
+				RequestKind: string(CodexWireRequestCompaction), CompactionMode: CodexCompactionModeLocalResponses,
+			},
+		)
+		require.NoError(t, err)
+		require.True(t, frozen.WireProfile.Finalized)
+		classifierContext, _ := newOpenAIMemoryRoutingTestContext("/v1/responses")
+		kind, err := openAICodexHTTPWireRequestKind(classifierContext, frozen, body)
+		require.NoError(t, err)
+		require.Equal(t, CodexWireRequestCompaction, kind)
+
+		c, _ := newOpenAIMemoryRoutingTestContext("/v1/responses")
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, chatgptCodexURL, nil)
+		require.NoError(t, err)
+		_, err = (&OpenAIGatewayService{}).FinalizeOpenAIOAuthResponsesRequest(c, account, req, body, OpenAIOAuthResponsesFinalizeOptions{
+			Plan: frozen, RequestKind: string(kind),
+		})
+		require.NoError(t, err)
+		second, ok := OpenAIOAuthIdentityPlanFromContext(c)
+		require.True(t, ok)
+		mode, armed := OpenAICodexCompactionModeForFinalizedPlan(second)
+		require.True(t, armed)
+		require.Equal(t, CodexCompactionModeLocalResponses, mode)
+	})
 }
 
 func TestFinalizeOpenAIOAuthResponsesRequestUsesEffectiveResponsesLiteCapability(t *testing.T) {

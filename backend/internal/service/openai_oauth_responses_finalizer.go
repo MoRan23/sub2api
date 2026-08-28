@@ -59,6 +59,22 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 	if isOpenAINativeCompactionV2(c) {
 		requestKind = string(CodexWireRequestCompaction)
 	}
+	compactionMode := CodexCompactionModeNone
+	if requestKind == string(CodexWireRequestCompaction) {
+		switch {
+		case isOpenAINativeCompactionV2(c):
+			compactionMode = CodexCompactionModeRemoteV2
+		case isOpenAIResponsesCompactPath(c) || options.Plan.ProjectionMode == OpenAIOAuthIdentityProjectionCompact:
+			compactionMode = CodexCompactionModeLegacy
+		default:
+			if isBareOpenAICodexResponsesPath(c) && openAICodexHTTPLocalResponsesShape([][]byte{body}) {
+				_, local := options.Plan.WireProfile.localResponsesCompactionCandidate()
+				if local {
+					compactionMode = CodexCompactionModeLocalResponses
+				}
+			}
+		}
+	}
 	observedCapabilities := s.openAICodexModelCapabilities(
 		options.Plan.CredentialOwnerNamespace,
 		strings.TrimSpace(options.FinalModel),
@@ -74,6 +90,7 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 		RequestKind:       requestKind,
 		ModelCapabilities: modelCapabilities,
 		MetadataProfile:   s.codexMetadataProfileSnapshot(),
+		CompactionMode:    compactionMode,
 		FinalModel:        strings.TrimSpace(options.FinalModel),
 		FinalServiceTier:  strings.TrimSpace(options.FinalServiceTier),
 	})

@@ -27,7 +27,7 @@ const openAICodexTurnStateHeader = "x-codex-turn-state"
 
 const (
 	openAICodexTurnStateKeyDomain       = "sub2api/openai-codex-turn-state/v1"
-	openAICodexTurnStateIdentityDomain  = "sub2api/openai-codex-turn-state-identity/v4"
+	openAICodexTurnStateIdentityDomain  = "sub2api/openai-codex-turn-state-identity/v5"
 	openAICodexTurnStateLocalMaxEntries = 64 * 1024
 	openAICodexTurnStateStoreTimeout    = 500 * time.Millisecond
 )
@@ -253,6 +253,7 @@ func OpenAICodexTurnStateIdentityDigest(plan OpenAIOAuthIdentityPlan) string {
 			forkedFromThreadID,
 			relation,
 			strings.TrimSpace(plan.Window.WindowID()),
+			strings.TrimSpace(plan.Window.ContextWindowID),
 		)
 	}
 	if requestTurnActive {

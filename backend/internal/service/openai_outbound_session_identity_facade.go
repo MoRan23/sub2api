@@ -115,14 +115,15 @@ const (
 // OpenAIOAuthIdentityCapture is immutable request input captured before any
 // compatibility or compact body transformation.
 type OpenAIOAuthIdentityCapture struct {
-	Logical              OpenAICodexLogicalTurnIdentity
-	Aliases              []OpenAICodexLogicalTurnAlias
-	RequestTurn          OpenAICodexRequestTurnSnapshot
-	PromptCacheKey       OpenAICodexPromptCacheKeySnapshot
-	WireProfile          CodexWireProfile
-	ClientInstallationID string
-	ConflictCount        int
-	InvalidMetadataCount int
+	Logical                  OpenAICodexLogicalTurnIdentity
+	Aliases                  []OpenAICodexLogicalTurnAlias
+	RequestTurn              OpenAICodexRequestTurnSnapshot
+	ContextWindowIDCandidate string
+	PromptCacheKey           OpenAICodexPromptCacheKeySnapshot
+	WireProfile              CodexWireProfile
+	ClientInstallationID     string
+	ConflictCount            int
+	InvalidMetadataCount     int
 }
 
 // OpenAICodexIdentityInput is the public capture contract named by the unified
@@ -247,7 +248,18 @@ func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explici
 	capture.WireProfile = captureCodexWireProfile(c, body, explicitTurnMetadata)
 	if forcedRequestKind.valid() {
 		capture.WireProfile.RequestKind = forcedRequestKind
+		if forcedRequestKind != CodexWireRequestCompaction {
+			capture.WireProfile.Compaction = nil
+			capture.WireProfile.CompactionMode = CodexCompactionModeNone
+		}
 		capture.WireProfile.resolveTurnIDs(forcedRequestKind)
+	}
+	// context_window_id is gateway-owned. Freeze one candidate on the immutable
+	// ingress capture so account failover and physical retries cannot generate a
+	// different initial window identity. Memory requests intentionally have no
+	// context-window identity.
+	if capture.WireProfile.RequestKind != CodexWireRequestMemory {
+		capture.ContextWindowIDCandidate, _ = newOpenAICodexContextWindowID()
 	}
 	capture.PromptCacheKey = captureOpenAICodexPromptCacheKey(
 		body, capture.Logical, capture.Aliases, capture.WireProfile, promptCacheKeyApplicable,
@@ -808,6 +820,7 @@ func (s *OpenAIGatewayService) resolveOpenAICodexPromptCacheKeyPlan(plan OpenAIO
 
 func (s *OpenAIGatewayService) resolveOpenAICodexWindowForPlan(ctx context.Context, plan OpenAIOAuthIdentityPlan) OpenAIOAuthIdentityPlan {
 	if !plan.TurnIdentityRequested || !plan.TurnIdentityEnabled ||
+		plan.Capture.WireProfile.RequestKind == CodexWireRequestMemory ||
 		strings.TrimSpace(plan.CredentialOwnerNamespace) == "" ||
 		strings.TrimSpace(plan.TurnIdentity.ThreadID) == "" {
 		return plan
@@ -826,7 +839,12 @@ func (s *OpenAIGatewayService) resolveOpenAICodexWindowForPlan(ctx context.Conte
 		plan.WindowResolveOutcome = OpenAICodexWindowResolveError
 		return plan
 	}
-	snapshot, err := s.ResolveOpenAICodexWindowSnapshot(ctx, mappingKey, plan.TurnIdentity.ThreadID)
+	snapshot, err := s.ResolveOpenAICodexWindowSnapshot(
+		ctx,
+		mappingKey,
+		plan.TurnIdentity.ThreadID,
+		plan.Capture.ContextWindowIDCandidate,
+	)
 	if err != nil {
 		plan.WindowResolveOutcome = OpenAICodexWindowResolveError
 		return plan
@@ -888,6 +906,7 @@ func (s *OpenAIGatewayService) GetOrResolveOpenAIOAuthOutboundIdentity(
 func openAIOAuthIdentityCapturesEqual(left, right OpenAIOAuthIdentityCapture) bool {
 	if left.Logical != right.Logical ||
 		left.RequestTurn != right.RequestTurn ||
+		left.ContextWindowIDCandidate != right.ContextWindowIDCandidate ||
 		left.PromptCacheKey != right.PromptCacheKey ||
 		!codexWireProfilesEqual(left.WireProfile, right.WireProfile) ||
 		left.ClientInstallationID != right.ClientInstallationID ||

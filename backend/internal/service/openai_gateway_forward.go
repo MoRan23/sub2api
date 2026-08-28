@@ -1459,7 +1459,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 			return nil, errors.New("final openai OAuth identity plan is missing")
 		}
 		fields := gjson.GetManyBytes(body, "model", "service_tier")
-		requestKind, kindErr := openAICodexHTTPWireRequestKind(c, identityPlan)
+		requestKind, kindErr := openAICodexHTTPWireRequestKind(c, identityPlan, body)
 		if kindErr != nil {
 			return nil, kindErr
 		}
@@ -1505,12 +1505,19 @@ func validateOpenAICodexHTTPMemoryRequestShape(c *gin.Context) error {
 	return err
 }
 
-func openAICodexHTTPWireRequestKind(c *gin.Context, plan OpenAIOAuthIdentityPlan) (CodexWireRequestKind, error) {
+func openAICodexHTTPWireRequestKind(c *gin.Context, plan OpenAIOAuthIdentityPlan, bodies ...[]byte) (CodexWireRequestKind, error) {
 	captured := CodexWireRequestKind("")
 	if plan.TurnIdentityRequested &&
 		(isBareOpenAICodexResponsesPath(c) || isOpenAIResponsesCompactPath(c)) &&
 		plan.WireProfile.RequestKind == CodexWireRequestMemory {
 		captured = CodexWireRequestMemory
+	}
+	if plan.TurnIdentityRequested && isBareOpenAICodexResponsesPath(c) &&
+		!isOpenAINativeCompactionV2(c) && plan.ProjectionMode != OpenAIOAuthIdentityProjectionCompact &&
+		openAICodexHTTPLocalResponsesShape(bodies) {
+		if _, local := plan.WireProfile.localResponsesCompactionCandidate(); local {
+			captured = CodexWireRequestCompaction
+		}
 	}
 	forced := CodexWireRequestKind("")
 	if plan.ProjectionMode == OpenAIOAuthIdentityProjectionCompact ||
@@ -1523,6 +1530,21 @@ func openAICodexHTTPWireRequestKind(c *gin.Context, plan OpenAIOAuthIdentityPlan
 		forced = CodexWireRequestTurn
 	}
 	return resolveOpenAICodexWireRequestKind(captured, CodexWireRequestTurn, forced)
+}
+
+func openAICodexHTTPLocalResponsesShape(bodies [][]byte) bool {
+	if len(bodies) != 1 || len(bodies[0]) == 0 || !gjson.ValidBytes(bodies[0]) {
+		return false
+	}
+	if HasCompactionTriggerInInput(bodies[0]) {
+		return false
+	}
+	stream := gjson.GetBytes(bodies[0], "stream")
+	if !stream.Exists() || stream.Type != gjson.True {
+		return false
+	}
+	generate := gjson.GetBytes(bodies[0], "generate")
+	return !generate.Exists() || generate.Type != gjson.False
 }
 
 func isBareOpenAICodexResponsesPath(c *gin.Context) bool {

@@ -386,6 +386,13 @@ func openAICodexMetadataProjectionFromPlan(plan OpenAIOAuthIdentityPlan) openAIC
 	}
 	if ValidateOpenAICodexWindowSnapshot(plan.Window) == nil && plan.Window.ThreadID == plan.TurnIdentity.ThreadID {
 		profile.WindowID = plan.Window.WindowID()
+		if profile.RequestKind == CodexWireRequestTurn || profile.RequestKind == CodexWireRequestCompaction {
+			profile.ContextWindowID = plan.Window.ContextWindowID
+		} else {
+			profile.ContextWindowID = ""
+		}
+	} else {
+		profile.ContextWindowID = ""
 	}
 	requestTurnActive := plan.TurnIdentityRequested && !memoryRequest &&
 		(openAICodexRequestTurnSnapshotValid(plan.RequestTurn) ||
@@ -453,6 +460,7 @@ func applyOpenAICodexIdentityHeadersForPlan(headers http.Header, plan OpenAIOAut
 	if projection.wireActive {
 		deleteOpenAICodexIdentityHeaders(headers)
 		deleteOpenAIHeaderEqualFold(headers, "x-codex-window-id")
+		deleteOpenAICodexContextWindowHeaders(headers)
 		deleteOpenAIHeaderEqualFold(headers, "x-openai-subagent")
 	}
 	if projection.installation {
@@ -540,6 +548,20 @@ func deleteOpenAICodexIdentityHeaders(headers http.Header) {
 				break
 			}
 		}
+	}
+}
+
+func deleteOpenAICodexContextWindowHeaders(headers http.Header) {
+	if headers == nil {
+		return
+	}
+	for _, name := range []string{
+		"context_window_id",
+		"context-window-id",
+		"x-codex-context-window-id",
+		"x-codex-context_window_id",
+	} {
+		deleteOpenAIHeaderEqualFold(headers, name)
 	}
 }
 
@@ -665,6 +687,9 @@ func mergeOpenAICodexIdentityBodyForPlan(body []byte, plan OpenAIOAuthIdentityPl
 	metadataWritable := metadataObject || (!existingOnly && (metadataPresent || projection.enabled()))
 	metadataModified := metadataWritable && !metadataObject
 	if metadataWritable {
+		if projection.wireActive && deleteOpenAICodexFlatContextWindowAliases(metadata) {
+			metadataModified = true
+		}
 		if !existingOnly {
 			if projection.wireActive {
 				applyOpenAICodexStrictFlatWireProfile(metadata, projection)
@@ -713,6 +738,9 @@ func mergeOpenAICodexIdentityBodyForPlan(body []byte, plan OpenAIOAuthIdentityPl
 	}
 
 	rootModified := false
+	if projection.wireActive && deleteOpenAICodexRootContextWindowAliases(root) {
+		rootModified = true
+	}
 	if projection.requestTurnActive {
 		_, hasTurnID := root["turn_id"]
 		_, hasTurnStartedAt := root["turn_started_at_unix_ms"]
@@ -763,6 +791,34 @@ func deleteOpenAICodexFlatTurnAliases(metadata map[string]json.RawMessage) {
 	}
 }
 
+func deleteOpenAICodexFlatContextWindowAliases(metadata map[string]json.RawMessage) bool {
+	removed := false
+	for _, field := range []string{
+		"context_window_id", "context-window-id",
+		"x-codex-context-window-id", "x-codex-context_window_id",
+	} {
+		if _, exists := metadata[field]; exists {
+			delete(metadata, field)
+			removed = true
+		}
+	}
+	return removed
+}
+
+func deleteOpenAICodexRootContextWindowAliases(root map[string]json.RawMessage) bool {
+	removed := false
+	for _, field := range []string{
+		"context_window_id", "context-window-id",
+		"x-codex-context-window-id", "x-codex-context_window_id",
+	} {
+		if _, exists := root[field]; exists {
+			delete(root, field)
+			removed = true
+		}
+	}
+	return removed
+}
+
 func deleteOpenAICodexFlatRequestTurnAliases(metadata map[string]json.RawMessage) {
 	for _, field := range []string{
 		"turn_id", "turn-id", "turn_started_at_unix_ms", "turn-started-at-unix-ms",
@@ -780,6 +836,7 @@ func applyOpenAICodexStrictFlatWireProfile(metadata map[string]json.RawMessage, 
 		"session_id", "session-id", "thread_id", "thread-id",
 		"conversation_id", "conversation-id", "agent_name",
 		"turn_id", "turn-id", "window_id", "x-codex-window-id",
+		"context_window_id", "context-window-id", "x-codex-context-window-id", "x-codex-context_window_id",
 		"request_kind", "compaction", "code_mode_tool_names", "tool_namespaces_info",
 		"turn_started_at_unix_ms", "turn-started-at-unix-ms",
 		"forked_from_thread_id", "forked-from-thread-id",
@@ -838,6 +895,9 @@ func mergeOpenAIOAuthPassthroughIdentityBody(body []byte, plan OpenAIOAuthIdenti
 	} else if clientMetadata.Exists() {
 		observeOpenAICodexMetadataRebuilt(openAICodexMetadataCarrierClientMetadataContainer)
 	}
+	if projection.wireActive {
+		deleteOpenAICodexFlatContextWindowAliases(metadata)
+	}
 
 	if projection.installation {
 		metadata[codexInstallationIDKey] = mustMarshalJSONString(projection.installationID)
@@ -888,6 +948,17 @@ func mergeOpenAIOAuthPassthroughIdentityBody(body []byte, plan OpenAIOAuthIdenti
 	out, err = sjson.SetRawBytes(out, "client_metadata", encodedMetadata)
 	if err != nil {
 		return body, fmt.Errorf("splice OpenAI OAuth passthrough client_metadata: %w", err)
+	}
+	for _, path := range []string{
+		"context_window_id", "context-window-id",
+		"x-codex-context-window-id", "x-codex-context_window_id",
+	} {
+		if gjson.GetBytes(out, path).Exists() {
+			out, err = sjson.DeleteBytes(out, path)
+			if err != nil {
+				return body, fmt.Errorf("strip OpenAI OAuth passthrough context window alias: %w", err)
+			}
+		}
 	}
 	if projection.requestTurnActive {
 		rootTurnID := gjson.GetBytes(out, "turn_id")

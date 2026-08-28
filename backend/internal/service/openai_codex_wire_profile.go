@@ -100,6 +100,19 @@ type CodexCompactionTurnMetadata struct {
 	Strategy       string `json:"strategy"`
 }
 
+// CodexCompactionMode is server-owned plan state. It is deliberately omitted
+// from every wire projection: request metadata carries the upstream
+// implementation spelling, while this value records how the gateway
+// classified the physical request and response lifecycle.
+type CodexCompactionMode string
+
+const (
+	CodexCompactionModeNone           CodexCompactionMode = ""
+	CodexCompactionModeLocalResponses CodexCompactionMode = "local_responses"
+	CodexCompactionModeRemoteV2       CodexCompactionMode = "remote_v2"
+	CodexCompactionModeLegacy         CodexCompactionMode = "legacy"
+)
+
 const (
 	CodexCompactionImplementationResponses = "responses"
 	CodexCompactionImplementationRemoteV2  = "responses_compaction_v2"
@@ -139,6 +152,28 @@ func validCodexCompactionImplementation(value string) bool {
 	)
 }
 
+func (mode CodexCompactionMode) valid() bool {
+	switch mode {
+	case CodexCompactionModeLocalResponses, CodexCompactionModeRemoteV2, CodexCompactionModeLegacy:
+		return true
+	default:
+		return false
+	}
+}
+
+func (mode CodexCompactionMode) implementation() string {
+	switch mode {
+	case CodexCompactionModeLocalResponses:
+		return CodexCompactionImplementationResponses
+	case CodexCompactionModeRemoteV2:
+		return CodexCompactionImplementationRemoteV2
+	case CodexCompactionModeLegacy:
+		return CodexCompactionImplementationLegacy
+	default:
+		return ""
+	}
+}
+
 func oneOf(value string, candidates ...string) bool {
 	for _, candidate := range candidates {
 		if value == candidate {
@@ -164,6 +199,18 @@ func normalizeCodexCompactionMetadata(raw json.RawMessage) (json.RawMessage, boo
 	return encoded, err == nil
 }
 
+func parseCodexCompactionMetadata(raw json.RawMessage) (CodexCompactionTurnMetadata, bool) {
+	normalized, valid := normalizeCodexCompactionMetadata(raw)
+	if !valid {
+		return CodexCompactionTurnMetadata{}, false
+	}
+	var metadata CodexCompactionTurnMetadata
+	if json.Unmarshal(normalized, &metadata) != nil {
+		return CodexCompactionTurnMetadata{}, false
+	}
+	return metadata, true
+}
+
 func marshalCodexCompactionMetadata(metadata CodexCompactionTurnMetadata) json.RawMessage {
 	if !metadata.Valid() {
 		return nil
@@ -185,12 +232,14 @@ type CodexWireProfile struct {
 	ToolNamespacesAllowed     bool
 	ToolNamespacesInfoAllowed bool
 
-	InstallationID string
-	SessionID      string
-	ThreadID       string
-	WindowID       string
-	RequestKind    CodexWireRequestKind
-	Compaction     json.RawMessage
+	InstallationID  string
+	SessionID       string
+	ThreadID        string
+	WindowID        string
+	ContextWindowID string
+	RequestKind     CodexWireRequestKind
+	Compaction      json.RawMessage
+	CompactionMode  CodexCompactionMode
 
 	TurnID              CodexTurnID
 	TurnStartedAtUnixMS int64
@@ -250,6 +299,34 @@ func (profile CodexWireProfile) Validate() error {
 	return fmt.Errorf("%w: %s", ErrInvalidOpenAICodexWireProfile, profile.InvalidReason)
 }
 
+func (profile CodexWireProfile) localResponsesCompactionCandidate() (CodexCompactionTurnMetadata, bool) {
+	if profile.RequestKind != CodexWireRequestCompaction ||
+		profile.CompactionMode != CodexCompactionModeLocalResponses {
+		return CodexCompactionTurnMetadata{}, false
+	}
+	metadata, valid := parseCodexCompactionMetadata(profile.Compaction)
+	if !valid || metadata.Implementation != CodexCompactionImplementationResponses {
+		return CodexCompactionTurnMetadata{}, false
+	}
+	return metadata, true
+}
+
+// OpenAICodexCompactionModeForFinalizedPlan returns the gateway-owned
+// compaction lifecycle only when the finalized metadata agrees with it. Callers
+// that can advance a window must use this predicate instead of trusting the
+// client-visible request_kind alone.
+func OpenAICodexCompactionModeForFinalizedPlan(plan OpenAIOAuthIdentityPlan) (CodexCompactionMode, bool) {
+	profile := plan.WireProfile
+	if !profile.Finalized || profile.RequestKind != CodexWireRequestCompaction || !profile.CompactionMode.valid() {
+		return CodexCompactionModeNone, false
+	}
+	metadata, valid := parseCodexCompactionMetadata(profile.Compaction)
+	if !valid || metadata.Implementation != profile.CompactionMode.implementation() {
+		return CodexCompactionModeNone, false
+	}
+	return profile.CompactionMode, true
+}
+
 func newCodexWireProfile() CodexWireProfile {
 	return CodexWireProfile{Revision: CodexWireProfileRevision, Commit: CodexWireProfileCommit}
 }
@@ -283,7 +360,9 @@ func parseCodexTurnID(value string, kind CodexWireRequestKind) (CodexTurnID, boo
 
 var codexWireReservedMetadataKeys = map[string]struct{}{
 	"installation_id": {}, "x-codex-installation-id": {}, "session_id": {}, "thread_id": {}, "agent_name": {},
-	"turn_id": {}, "window_id": {}, "x-codex-window-id": {}, "x-codex-turn-metadata": {}, "x-codex-parent-thread-id": {},
+	"turn_id": {}, "window_id": {}, "x-codex-window-id": {}, "context_window_id": {}, "context-window-id": {},
+	"x-codex-context-window-id": {}, "x-codex-context_window_id": {},
+	"x-codex-turn-metadata": {}, "x-codex-parent-thread-id": {},
 	"x-openai-subagent": {}, "request_kind": {}, "compaction": {}, "code_mode_tool_names": {}, "tool_namespaces_info": {},
 	"turn_started_at_unix_ms": {}, "forked_from_thread_id": {}, "parent_thread_id": {}, "parent_turn_id": {}, "root_turn_id": {},
 	"subagent_kind": {}, "thread_source": {}, "sandbox": {}, "sandbox_mode": {}, "auto_review_enabled": {},
@@ -626,23 +705,57 @@ func mergeCodexWireExtras(profile *CodexWireProfile, source map[string]string, o
 	}
 }
 
-func parseCodexWireNestedCarrier(raw json.RawMessage, requireJSONString bool) (CodexWireProfile, bool) {
+func decodeCodexWireNestedCarrier(raw json.RawMessage, requireJSONString bool) (string, map[string]json.RawMessage, bool) {
 	if len(raw) == 0 || !utf8.Valid(raw) {
-		return CodexWireProfile{}, false
+		return "", nil, false
 	}
 	value := strings.TrimSpace(string(raw))
 	if requireJSONString || strings.HasPrefix(value, `"`) {
 		var encoded string
 		if json.Unmarshal(raw, &encoded) != nil {
-			return CodexWireProfile{}, false
+			return "", nil, false
 		}
 		value = strings.TrimSpace(encoded)
 	}
 	var object map[string]json.RawMessage
 	if json.Unmarshal([]byte(value), &object) != nil || object == nil {
+		return "", nil, false
+	}
+	return value, object, true
+}
+
+func parseCodexWireNestedCarrier(raw json.RawMessage, requireJSONString bool) (CodexWireProfile, bool) {
+	value, _, valid := decodeCodexWireNestedCarrier(raw, requireJSONString)
+	if !valid {
 		return CodexWireProfile{}, false
 	}
 	return ParseCodexWireProfile(value), true
+}
+
+func codexWireCarrierMentionsCompaction(object map[string]json.RawMessage) bool {
+	if object == nil {
+		return false
+	}
+	_, hasKind := object["request_kind"]
+	_, hasCompaction := object["compaction"]
+	return hasKind || hasCompaction
+}
+
+func codexWireFlatCompactionMatches(metadata map[string]json.RawMessage, canonical CodexCompactionTurnMetadata) bool {
+	if !codexWireCarrierMentionsCompaction(metadata) {
+		return true
+	}
+	rawKind, hasKind := metadata["request_kind"]
+	rawCompaction, hasCompaction := metadata["compaction"]
+	if !hasKind || !hasCompaction {
+		return false
+	}
+	var kind string
+	if json.Unmarshal(rawKind, &kind) != nil || kind != string(CodexWireRequestCompaction) {
+		return false
+	}
+	compaction, valid := parseCodexCompactionMetadata(rawCompaction)
+	return valid && compaction.Implementation == CodexCompactionImplementationResponses && compaction == canonical
 }
 
 func parseCodexWireFlatMetadata(metadata map[string]json.RawMessage) CodexWireProfile {
@@ -711,27 +824,54 @@ func captureCodexWireProfile(c *gin.Context, body []byte, explicitTurnMetadata s
 			_ = json.Unmarshal(raw, &clientMetadata)
 		}
 	}
+	var canonicalLocalMetadata CodexCompactionTurnMetadata
+	canonicalLocal := false
 	if raw, present := clientMetadata[openAIWSTurnMetadataHeader]; present {
-		if candidate, valid := parseCodexWireNestedCarrier(raw, true); valid {
+		if value, _, valid := decodeCodexWireNestedCarrier(raw, true); valid {
+			candidate := ParseCodexWireProfile(value)
 			mergeCodexWireProfileMissing(&profile, candidate)
-		}
-	}
-	if c != nil && c.Request != nil {
-		for _, raw := range headerValuesCaseInsensitive(c.Request.Header, openAIWSTurnMetadataHeader) {
-			if candidate, valid := parseCodexWireNestedCarrier(json.RawMessage(raw), false); valid {
-				mergeCodexWireProfileMissing(&profile, candidate)
+			if metadata, valid := parseCodexCompactionMetadata(candidate.Compaction); valid &&
+				candidate.RequestKind == CodexWireRequestCompaction &&
+				metadata.Implementation == CodexCompactionImplementationResponses {
+				canonicalLocalMetadata = metadata
+				canonicalLocal = true
+				profile.CompactionMode = CodexCompactionModeLocalResponses
 			}
 		}
 	}
-	if raw := strings.TrimSpace(explicitTurnMetadata); raw != "" {
-		if candidate, valid := parseCodexWireNestedCarrier(json.RawMessage(raw), false); valid {
-			mergeCodexWireProfileMissing(&profile, candidate)
+	mergeCompatibilityCarrier := func(raw json.RawMessage, requireJSONString bool) {
+		value, object, valid := decodeCodexWireNestedCarrier(raw, requireJSONString)
+		if !valid {
+			if canonicalLocal {
+				profile.CompactionMode = CodexCompactionModeNone
+			}
+			return
+		}
+		candidate := ParseCodexWireProfile(value)
+		if canonicalLocal && codexWireCarrierMentionsCompaction(object) {
+			metadata, matching := parseCodexCompactionMetadata(candidate.Compaction)
+			if !matching || candidate.RequestKind != CodexWireRequestCompaction ||
+				metadata.Implementation != CodexCompactionImplementationResponses || metadata != canonicalLocalMetadata {
+				profile.CompactionMode = CodexCompactionModeNone
+			}
+		}
+		mergeCodexWireProfileMissing(&profile, candidate)
+	}
+	if c != nil && c.Request != nil {
+		for _, raw := range headerValuesCaseInsensitive(c.Request.Header, openAIWSTurnMetadataHeader) {
+			mergeCompatibilityCarrier(json.RawMessage(raw), false)
 		}
 	}
+	if raw := strings.TrimSpace(explicitTurnMetadata); raw != "" {
+		mergeCompatibilityCarrier(json.RawMessage(raw), false)
+	}
 	if raw, present := root[openAIWSTurnMetadataHeader]; present {
-		if candidate, valid := parseCodexWireNestedCarrier(raw, false); valid {
-			mergeCodexWireProfileMissing(&profile, candidate)
-		}
+		mergeCompatibilityCarrier(raw, false)
+	}
+	if canonicalLocal &&
+		(!codexWireFlatCompactionMatches(clientMetadata, canonicalLocalMetadata) ||
+			!codexWireFlatCompactionMatches(root, canonicalLocalMetadata)) {
+		profile.CompactionMode = CodexCompactionModeNone
 	}
 	mergeCodexWireProfileMissing(&profile, parseCodexWireHeaderProfile(c))
 	mergeCodexWireProfileMissing(&profile, parseCodexWireFlatMetadata(clientMetadata))
@@ -780,6 +920,7 @@ func (profile CodexWireProfile) withDefaults(metadataProfile CodexMetadataProfil
 	}
 	if profile.RequestKind != CodexWireRequestCompaction {
 		profile.Compaction = nil
+		profile.CompactionMode = CodexCompactionModeNone
 	}
 	profile.Finalized = true
 	return profile
@@ -794,6 +935,11 @@ func (profile CodexWireProfile) nestedObject(includeToolNamespaces bool) map[str
 	if hasRequestIdentity || compatRequestIdentity {
 		putNonEmptyString(metadata, "installation_id", profile.InstallationID)
 		putNonEmptyString(metadata, "window_id", profile.WindowID)
+	}
+	if profile.RequestKind == CodexWireRequestTurn || profile.RequestKind == CodexWireRequestCompaction {
+		if canonical, err := canonicalUUIDv7(profile.ContextWindowID); err == nil {
+			metadata["context_window_id"] = canonical
+		}
 	}
 	if hasTurnIdentity {
 		putNonEmptyString(metadata, "session_id", profile.SessionID)
@@ -874,6 +1020,7 @@ func (profile CodexWireProfile) MarshalNestedJSON(includeToolNamespaces bool) (s
 		"agent_name",
 		"turn_id",
 		"window_id",
+		"context_window_id",
 		"request_kind",
 		"forked_from_thread_id",
 		"parent_thread_id",
@@ -957,6 +1104,7 @@ func BindOpenAICodexWindowToPlan(plan OpenAIOAuthIdentityPlan, snapshot OpenAICo
 	plan.WindowMappingKey = mappingKey
 	plan.WindowResolveOutcome = OpenAICodexWindowResolveResolved
 	plan.WireProfile.WindowID = snapshot.WindowID()
+	plan.WireProfile.ContextWindowID = snapshot.ContextWindowID
 	return plan, nil
 }
 
@@ -965,6 +1113,7 @@ type FinalizeOpenAICodexWirePlanOptions struct {
 	ModelCapabilities CodexModelCapabilities
 	MetadataProfile   CodexMetadataProfile
 	Compaction        *CodexCompactionTurnMetadata
+	CompactionMode    CodexCompactionMode
 	FinalModel        string
 	FinalServiceTier  string
 }
@@ -993,11 +1142,24 @@ func BuildOpenAICodexRoutingHint(model, serviceTier string) string {
 	return hint
 }
 
-func defaultCodexCompactionImplementation(mode OpenAIOAuthIdentityProjectionMode) string {
+func defaultCodexCompactionMode(mode OpenAIOAuthIdentityProjectionMode) CodexCompactionMode {
 	if mode == OpenAIOAuthIdentityProjectionCompact {
-		return CodexCompactionImplementationLegacy
+		return CodexCompactionModeLegacy
 	}
-	return CodexCompactionImplementationRemoteV2
+	return CodexCompactionModeRemoteV2
+}
+
+func codexCompactionMetadataForMode(
+	inbound CodexCompactionTurnMetadata,
+	inboundValid bool,
+	mode CodexCompactionMode,
+) CodexCompactionTurnMetadata {
+	implementation := mode.implementation()
+	if !inboundValid {
+		return DefaultCodexCompactionTurnMetadata(implementation)
+	}
+	inbound.Implementation = implementation
+	return inbound
 }
 
 // FinalizeOpenAICodexWirePlan freezes values that are known only after model
@@ -1093,18 +1255,36 @@ func FinalizeOpenAICodexWirePlanWithOptions(plan OpenAIOAuthIdentityPlan, option
 		}
 	}
 	profile.WindowID = ""
+	profile.ContextWindowID = ""
 	if ValidateOpenAICodexWindowSnapshot(plan.Window) == nil && plan.Window.ThreadID == plan.TurnIdentity.ThreadID {
 		profile.WindowID = plan.Window.WindowID()
+		if kind == CodexWireRequestTurn || kind == CodexWireRequestCompaction {
+			profile.ContextWindowID = plan.Window.ContextWindowID
+		}
 	}
 
 	if kind == CodexWireRequestCompaction {
-		if normalized, valid := normalizeCodexCompactionMetadata(profile.Compaction); valid {
-			profile.Compaction = normalized
-		} else if options.Compaction != nil && options.Compaction.Valid() {
-			profile.Compaction = marshalCodexCompactionMetadata(*options.Compaction)
-		} else {
-			profile.Compaction = marshalCodexCompactionMetadata(DefaultCodexCompactionTurnMetadata(defaultCodexCompactionImplementation(plan.ProjectionMode)))
+		mode := options.CompactionMode
+		if !mode.valid() {
+			// RequestKind is client-visible compatibility metadata, not proof of a
+			// physical compaction lifecycle. Only the transport classifier may arm
+			// a mode. Keep the historical wire default below while leaving the
+			// server-owned mode empty so delivery cannot advance a window.
+			mode = CodexCompactionModeNone
 		}
+		inbound, inboundValid := parseCodexCompactionMetadata(profile.Compaction)
+		if options.Compaction != nil && options.Compaction.Valid() {
+			inbound, inboundValid = *options.Compaction, true
+		}
+		wireMode := mode
+		if !wireMode.valid() {
+			wireMode = defaultCodexCompactionMode(plan.ProjectionMode)
+		}
+		profile.Compaction = marshalCodexCompactionMetadata(codexCompactionMetadataForMode(inbound, inboundValid, wireMode))
+		profile.CompactionMode = mode
+	} else {
+		profile.Compaction = nil
+		profile.CompactionMode = CodexCompactionModeNone
 	}
 	modelCapabilities := options.ModelCapabilities
 	profile.ToolNamespacesAllowed = modelCapabilities.UseResponsesLite
@@ -1151,6 +1331,7 @@ func clearOpenAICodexMemoryTurnIdentity(plan *OpenAIOAuthIdentityPlan, profile *
 	profile.TurnStartedAtUnixMS = 0
 	profile.TurnStartedAtSet = false
 	profile.Compaction = nil
+	profile.CompactionMode = CodexCompactionModeNone
 	profile.turnIDCandidates = nil
 	profile.parentTurnIDCandidates = nil
 	profile.rootTurnIDCandidates = nil
