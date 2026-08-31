@@ -549,10 +549,10 @@ func TestForwardStreaming_ServiceTierPropagatedToResult(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 请求 fast 但上游返回 default：结果分开保存，计费边界再降级。
+// 转发阶段分别保留最终出站 tier 与上游回显 tier
 // ---------------------------------------------------------------------------
 
-func TestForward_ResponsesUpstreamEchoesDefault_OverridesRequestFast(t *testing.T) {
+func TestForward_ResponsesKeepsOutboundAndObservedServiceTiersSeparate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -591,18 +591,14 @@ func TestForward_ResponsesUpstreamEchoesDefault_OverridesRequestFast(t *testing.
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.ServiceTier)
-	require.Equal(t, "priority", *result.ServiceTier,
-		"result must retain the normalized tier carried by the outbound request")
+	require.Equal(t, "priority", *result.ServiceTier)
 	require.Equal(t, "default", result.UpstreamResponseServiceTier)
-	require.True(t, ApplyOpenAIServiceTierBillingResolution(result, serviceTierTestCost(2), serviceTierTestCost(1)).Downgraded)
-	require.Equal(t, "default", *result.ServiceTier,
-		"the billing boundary must lower priority to the upstream-observed default tier")
 	// 非流式响应原样透传：客户端同样看到 default。
 	require.Contains(t, rec.Body.String(), `"service_tier":"default"`)
 	require.NotContains(t, rec.Body.String(), `"service_tier":"priority"`)
 }
 
-func TestForwardStreaming_UpstreamEchoesDefault_OverridesRequestFast(t *testing.T) {
+func TestForwardStreaming_KeepsOutboundAndObservedServiceTiersSeparate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -644,14 +640,11 @@ func TestForwardStreaming_UpstreamEchoesDefault_OverridesRequestFast(t *testing.
 	require.NotNil(t, result.ServiceTier)
 	require.Equal(t, "priority", *result.ServiceTier)
 	require.Equal(t, "default", result.UpstreamResponseServiceTier)
-	require.True(t, ApplyOpenAIServiceTierBillingResolution(result, serviceTierTestCost(2), serviceTierTestCost(1)).Downgraded)
-	require.Equal(t, "default", *result.ServiceTier,
-		"terminal SSE default may lower billing only at the billing boundary")
 	// 流式原样透传：客户端在终止事件里看到 default。
 	require.Contains(t, rec.Body.String(), `"service_tier":"default"`)
 }
 
-func TestForwardAsChatCompletions_UpstreamEchoesDefault_BillsStandard(t *testing.T) {
+func TestForwardAsChatCompletions_KeepsOutboundAndObservedServiceTiersSeparate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -694,9 +687,6 @@ func TestForwardAsChatCompletions_UpstreamEchoesDefault_BillsStandard(t *testing
 	require.NotNil(t, result.ServiceTier)
 	require.Equal(t, "priority", *result.ServiceTier)
 	require.Equal(t, "default", result.UpstreamResponseServiceTier)
-	require.True(t, ApplyOpenAIServiceTierBillingResolution(result, serviceTierTestCost(2), serviceTierTestCost(1)).Downgraded)
-	require.Equal(t, "default", *result.ServiceTier,
-		"CC compatibility billing must lower priority to the observed default tier")
 	// 缓冲转回 Chat Completions：客户端响应里如实回显 default。
 	require.Contains(t, rec.Body.String(), `"service_tier":"default"`)
 	require.NotContains(t, rec.Body.String(), `"service_tier":"priority"`)
@@ -758,7 +748,7 @@ func TestForward_ServiceTierFilteredByPolicyIsNotRaisedByObservedPriority(t *tes
 		"policy filter must strip service_tier from the outbound body")
 	require.Nil(t, result.ServiceTier, "filtered request must remain untiered")
 	require.Equal(t, "priority", result.UpstreamResponseServiceTier)
-	require.False(t, ApplyOpenAIServiceTierBillingResolution(result).Downgraded)
+	require.False(t, ApplyOpenAIServiceTierBillingResolution(account, result).Downgraded)
 	require.Nil(t, result.ServiceTier, "observed priority must not upgrade a filtered request")
 }
 
@@ -817,7 +807,7 @@ func TestResolvedOpenAIUpstreamServiceTier(t *testing.T) {
 		require.Equal(t, "priority", *got)
 	})
 
-	t.Run("upstream priority cannot create a missing outbound tier", func(t *testing.T) {
+	t.Run("observed tier never promotes an untiered request", func(t *testing.T) {
 		gin.SetMode(gin.TestMode)
 		c, _ := gin.CreateTestContext(nil)
 		observer := beginUpstreamResponseModelObservation(c)
@@ -838,7 +828,7 @@ func TestResolvedOpenAIUpstreamServiceTier(t *testing.T) {
 		require.Nil(t, resolvedOpenAIUpstreamServiceTier(nil, nil))
 	})
 
-	t.Run("local observer stays separate without gin context", func(t *testing.T) {
+	t.Run("local observer stays separate from outbound tier", func(t *testing.T) {
 		observer := &upstreamResponseModelObserver{}
 		observer.ObserveOpenAI([]byte(`{"type":"response.completed","response":{"model":"gpt-5.5","service_tier":"default"}}`), "response.completed")
 

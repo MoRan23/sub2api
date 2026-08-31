@@ -253,16 +253,19 @@ type OpenAIForwardResult struct {
 	// UpstreamEndpoint is the actual upstream API path used for this request.
 	// It avoids guessing when one downstream protocol can use multiple upstream endpoints.
 	UpstreamEndpoint string
-	// ServiceTier is the normalized tier carried by the final outbound request.
-	// nil means the request was untiered (including a tier removed by policy).
-	// At the usage-record boundary it may be lowered, never raised, according to
-	// UpstreamResponseServiceTier.
+	// ServiceTier is the normalized tier carried by the final outbound request;
+	// nil means untiered. The observed response tier remains separate until the
+	// usage boundary applies credential-aware, price-aware billing rules.
 	ServiceTier *string
-	// ReasoningEffort is extracted from request body (reasoning.effort) or derived from model suffix.
+	// ReasoningEffort is extracted from request body (reasoning.effort) or derived from model suffix
+	// after group policy rewriting and model-family remapping.
 	// Stored for usage records display; nil means not provided / not applicable.
 	ReasoningEffort *string
-	Stream          bool
-	OpenAIWSMode    bool
+	// RequestedReasoningEffort is the client-requested effort before mapping.
+	// Empty/nil means it should fall back to ReasoningEffort at persistence.
+	RequestedReasoningEffort *string
+	Stream                   bool
+	OpenAIWSMode             bool
 	// UpstreamTerminalEvent is the normalized terminal event observed on an
 	// upstream Responses WebSocket turn. Empty preserves legacy/non-WS success.
 	UpstreamTerminalEvent string
@@ -324,6 +327,16 @@ func SetActualOpenAIUpstreamEndpoint(c *gin.Context, endpoint string) {
 	if endpoint = strings.TrimSpace(endpoint); endpoint != "" {
 		c.Set(openAIUpstreamEndpointContextKey, endpoint)
 	}
+}
+
+// ClearActualOpenAIUpstreamEndpoint 清理当前转发尝试记录的端点。
+// Handler 会在账号 failover 尝试间复用同一个 Gin context，因此每次尝试
+// 都必须从无残留状态开始。
+func ClearActualOpenAIUpstreamEndpoint(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	c.Set(openAIUpstreamEndpointContextKey, "")
 }
 
 // GetActualOpenAIUpstreamEndpoint returns the endpoint recorded by the latest

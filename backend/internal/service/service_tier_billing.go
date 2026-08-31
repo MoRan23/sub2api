@@ -63,11 +63,42 @@ func isValidServiceTierComparisonCost(cost *CostBreakdown) bool {
 	return cost != nil && cost.TotalCost >= 0 && !math.IsInf(cost.TotalCost, 0)
 }
 
-// ApplyOpenAIServiceTierBillingResolution adopts the tier the upstream reports
-// having used only when the supplied costs prove it is no more expensive, so
-// cost calculation and the usage log share one billable tier. The returned
-// resolution is meant for the audit log.
-func ApplyOpenAIServiceTierBillingResolution(result *OpenAIForwardResult, costs ...*CostBreakdown) ServiceTierBillingResolution {
+// ResolveOpenAIServiceTierBilling applies the response-tier contract for the
+// selected credential. Public OpenAI API responses declare the actual tier and
+// may lower billing when resolved pricing proves they are no more expensive.
+// The private ChatGPT Codex endpoint commonly reports default for effective Fast
+// turns, so OAuth-like credentials retain the final outbound tier while still
+// exposing the observed value.
+func ResolveOpenAIServiceTierBilling(account *Account, requested, observed string) ServiceTierBillingResolution {
+	return ResolveOpenAIServiceTierBillingWithCosts(account, requested, observed, nil, nil)
+}
+
+// ResolveOpenAIServiceTierBillingWithCosts combines the selected credential's
+// response contract with the exact channel pricing used for this request.
+func ResolveOpenAIServiceTierBillingWithCosts(account *Account, requested, observed string, requestedCost, observedCost *CostBreakdown) ServiceTierBillingResolution {
+	if account != nil && account.IsOpenAIOAuthLike() && codexOAuthResponseTierIsNonAuthoritative(observed) {
+		return ServiceTierBillingResolution{
+			Requested: normalizeBillingServiceTier(requested),
+			Observed:  normalizeBillingServiceTier(observed),
+			Billing:   normalizeBillingServiceTier(requested),
+		}
+	}
+	return ResolveBillingServiceTierWithCosts(requested, observed, requestedCost, observedCost)
+}
+
+func codexOAuthResponseTierIsNonAuthoritative(observed string) bool {
+	switch normalizeBillingServiceTier(observed) {
+	case "default":
+		return true
+	default:
+		return false
+	}
+}
+
+// ApplyOpenAIServiceTierBillingResolution adopts an authoritative observed tier
+// only when the supplied costs prove it is no more expensive than the outbound
+// request tier. The returned resolution is suitable for the audit log.
+func ApplyOpenAIServiceTierBillingResolution(account *Account, result *OpenAIForwardResult, costs ...*CostBreakdown) ServiceTierBillingResolution {
 	if result == nil {
 		return ServiceTierBillingResolution{}
 	}
@@ -75,7 +106,7 @@ func ApplyOpenAIServiceTierBillingResolution(result *OpenAIForwardResult, costs 
 	if len(costs) == 2 {
 		requestedCost, observedCost = costs[0], costs[1]
 	}
-	resolution := ResolveBillingServiceTierWithCosts(optionalStringValue(result.ServiceTier), result.UpstreamResponseServiceTier, requestedCost, observedCost)
+	resolution := ResolveOpenAIServiceTierBillingWithCosts(account, optionalStringValue(result.ServiceTier), result.UpstreamResponseServiceTier, requestedCost, observedCost)
 	if resolution.Billing != resolution.Requested {
 		billing := resolution.Billing
 		result.ServiceTier = &billing

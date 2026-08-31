@@ -12,10 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// HTTP POST /v1/responses → forwardOpenAIWSV2 共用 stream/non-stream 的
-// OpenAIForwardResult: preserve the outbound requested tier and the upstream
-// response.completed.service_tier separately until the billing boundary.
-func TestForwardOpenAIWSV2_SeparatesRequestedAndObservedServiceTier(t *testing.T) {
+// HTTP POST /v1/responses -> forwardOpenAIWSV2 keeps the canonical outbound
+// tier separate from response.completed.service_tier for usage-time billing.
+func TestForwardOpenAIWSV2_KeepsOutboundAndObservedServiceTiersSeparate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cases := []struct {
@@ -90,8 +89,6 @@ func TestForwardOpenAIWSV2_SeparatesRequestedAndObservedServiceTier(t *testing.T
 			require.NotNil(t, result.ServiceTier)
 			require.Equal(t, "priority", *result.ServiceTier)
 			require.Equal(t, "default", result.UpstreamResponseServiceTier)
-			require.True(t, ApplyOpenAIServiceTierBillingResolution(result, serviceTierTestCost(2), serviceTierTestCost(1)).Downgraded)
-			require.Equal(t, "default", *result.ServiceTier)
 			require.Equal(t, "priority", captureConn.lastWrite["service_tier"],
 				"outbound WS payload still carries the requested Fast tier")
 		})

@@ -60,10 +60,11 @@ func TestOpenAIWSDial429StillClassifiesErrorResponseHeaders(t *testing.T) {
 	svc := newOpenAIWSSemantic429Service(repo)
 	account := &Account{ID: 612, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	headers := successfulOpenAIWSQuotaHeaders()
-	body := []byte(`{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded"}}`)
 
-	svc.persistOpenAIWSRateLimitSignal(context.Background(), account, headers, body, "rate_limit_exceeded", "rate_limit_error", "rate limited")
-	failoverErr := svc.newOpenAIWSRateLimitFailoverError(account, headers, body, "rate limited")
+	// A physical dial 429 has no post-handshake event body. Its HTTP response
+	// headers remain authoritative for account-level reset classification.
+	svc.persistOpenAIWSRateLimitSignal(context.Background(), account, headers, nil, "rate_limit_exceeded", "rate_limit_error", "rate limited")
+	failoverErr := svc.newOpenAIWSRateLimitFailoverError(account, headers, nil, "rate limited")
 
 	require.Len(t, repo.resetTimes, 1)
 	require.Greater(t, time.Until(repo.resetTimes[0]), 6*24*time.Hour)

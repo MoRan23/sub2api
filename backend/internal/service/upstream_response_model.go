@@ -24,7 +24,7 @@ const (
 // The same observer also records the service tier the upstream reports having
 // used (OpenAI service_tier, Anthropic usage.speed). The observed tier stays
 // separate from the final outbound request tier until the usage-record boundary,
-// where ResolveBillingServiceTier may use it to lower, but never raise, billing.
+// where credential and channel pricing rules may lower, but never raise, billing.
 type upstreamResponseModelObserver struct {
 	first    string
 	terminal string
@@ -222,7 +222,7 @@ func observedUpstreamResponseServiceTier(c *gin.Context) string {
 // into the result: its value is stored separately in
 // OpenAIForwardResult.UpstreamResponseServiceTier. Combining the values here
 // would let an observed priority tier upgrade an untiered/default/flex request
-// before ResolveBillingServiceTier gets a chance to enforce its only-lower rule.
+// before usage-time credential and pricing rules enforce their only-lower rule.
 //
 // The name is retained for local call-site compatibility while the result model
 // transitions to the explicit requested/observed split.

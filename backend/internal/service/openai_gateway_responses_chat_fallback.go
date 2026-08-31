@@ -87,9 +87,8 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		}
 		return nil, err
 	}
-	// Requested billing tier = the final outbound body after policy filter/force.
-	// The upstream declaration is captured separately and may only lower this at
-	// the usage-record boundary.
+	// Keep the final outbound tier after policy filter/force for usage-time
+	// reconciliation. A policy that removes the field therefore leaves this nil.
 	serviceTier := extractOpenAIServiceTierFromBody(chatBody)
 
 	logger.L().Debug("openai responses: forwarding via raw chat completions",
@@ -159,8 +158,8 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 		Model:                       originalModel,
 		BillingModel:                billingModel,
 		UpstreamModel:               upstreamModel,
-		UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
 		ReasoningEffort:             reasoningEffort,
+		UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
 		ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 		Stream:                      false,
 		Duration:                    time.Since(startTime),
@@ -230,8 +229,8 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			Model:                       originalModel,
 			BillingModel:                billingModel,
 			UpstreamModel:               upstreamModel,
-			UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
 			ReasoningEffort:             reasoningEffort,
+			UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
 			ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 			Stream:                      true,
 			Duration:                    time.Since(startTime),
@@ -245,8 +244,8 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			Model:                       originalModel,
 			BillingModel:                billingModel,
 			UpstreamModel:               upstreamModel,
-			UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
 			ReasoningEffort:             reasoningEffort,
+			UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
 			ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 			Stream:                      true,
 			Duration:                    time.Since(startTime),
@@ -276,8 +275,8 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		Model:                       originalModel,
 		BillingModel:                billingModel,
 		UpstreamModel:               upstreamModel,
-		UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
 		ReasoningEffort:             reasoningEffort,
+		UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
 		ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 		Stream:                      true,
 		Duration:                    time.Since(startTime),
