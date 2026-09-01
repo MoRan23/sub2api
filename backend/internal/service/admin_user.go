@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -513,74 +514,136 @@ func (s *adminServiceImpl) BatchUpdateLimits(ctx context.Context, userIDs []int6
 	return affected, nil
 }
 
-func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, balance float64, operation string, notes string) (*User, error) {
-	// 余额调整必须走原子接口：先读后整行写回会把并发的计费扣款覆盖掉。
-	var (
-		change BalanceChange
-		err    error
-	)
+func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, balance, giftBalance float64, operation string, notes string) (*User, error) {
+	if math.IsNaN(balance) || math.IsInf(balance, 0) || math.IsNaN(giftBalance) || math.IsInf(giftBalance, 0) || balance < 0 || giftBalance < 0 {
+		return nil, infraerrors.BadRequest("INVALID_BALANCE", "balance and gift_balance must be finite non-negative numbers")
+	}
 	switch operation {
 	case "set":
-		change, err = s.userRepo.SetBalance(ctx, userID, balance)
+		if giftBalance != 0 {
+			return nil, infraerrors.BadRequest("INVALID_BALANCE", "set does not accept gift_balance")
+		}
 	case "add":
-		change, err = s.userRepo.AdjustBalance(ctx, userID, balance)
+		if balance <= 0 && giftBalance <= 0 {
+			return nil, infraerrors.BadRequest("INVALID_BALANCE", "add requires balance or gift_balance to be positive")
+		}
 	case "subtract":
-		change, err = s.userRepo.AdjustBalance(ctx, userID, -balance)
+		if balance <= 0 || giftBalance != 0 {
+			return nil, infraerrors.BadRequest("INVALID_BALANCE", "subtract requires a positive balance and does not accept gift_balance")
+		}
 	default:
 		return nil, fmt.Errorf("unsupported balance operation: %q", operation)
 	}
-	if errors.Is(err, ErrBalanceNegative) {
-		return nil, fmt.Errorf("balance cannot be negative, current balance: %.2f, requested operation would result in: %.2f", change.Old, change.New)
+
+	var (
+		user            *User
+		balanceDiff     float64
+		giftBalanceDiff float64
+		err             error
+	)
+	apply := func(opCtx context.Context) error {
+		user, balanceDiff, giftBalanceDiff, err = s.applyUserBalanceUpdate(opCtx, userID, balance, giftBalance, operation, notes)
+		return err
 	}
-	if err != nil {
+	if s.entClient != nil && dbent.TxFromContext(ctx) == nil {
+		tx, txErr := s.entClient.Tx(ctx)
+		if txErr != nil {
+			return nil, fmt.Errorf("begin balance adjustment transaction: %w", txErr)
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := apply(dbent.NewTxContext(ctx, tx)); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit balance adjustment transaction: %w", err)
+		}
+	} else if err := apply(ctx); err != nil {
 		return nil, err
 	}
 
-	user, err := s.userRepo.GetByID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-
-	balanceDiff := change.New - change.Old
-	if s.authCacheInvalidator != nil && balanceDiff != 0 {
-		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
-	}
-	s.tryAccrueAffiliateRebateForAdminRecharge(ctx, userID, operation, balance)
-
-	if s.billingCacheService != nil {
-		go func() {
-			cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := s.billingCacheService.InvalidateUserBalance(cacheCtx, userID); err != nil {
-				logger.LegacyPrintf("service.admin", "invalidate user balance cache failed: user_id=%d err=%v", userID, err)
-			}
-		}()
-	}
-
-	if balanceDiff != 0 {
-		code, err := GenerateRedeemCode()
-		if err != nil {
-			logger.LegacyPrintf("service.admin", "failed to generate adjustment redeem code: %v", err)
-			return user, nil
+	if balanceDiff != 0 || giftBalanceDiff != 0 {
+		if s.authCacheInvalidator != nil {
+			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
 		}
-
-		adjustmentRecord := &RedeemCode{
-			Code:   code,
-			Type:   AdjustmentTypeAdminBalance,
-			Value:  balanceDiff,
-			Status: StatusUsed,
-			UsedBy: &user.ID,
-			Notes:  notes,
-		}
-		now := time.Now()
-		adjustmentRecord.UsedAt = &now
-
-		if err := s.redeemCodeRepo.Create(ctx, adjustmentRecord); err != nil {
-			logger.LegacyPrintf("service.admin", "failed to create balance adjustment redeem code: %v", err)
+		s.tryAccrueAffiliateRebateForAdminRecharge(ctx, userID, operation, balanceDiff)
+		if s.billingCacheService != nil {
+			go func() {
+				cacheCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := s.billingCacheService.InvalidateUserBalance(cacheCtx, userID); err != nil {
+					logger.LegacyPrintf("service.admin", "invalidate user balance cache failed: user_id=%d err=%v", userID, err)
+				}
+			}()
 		}
 	}
 
 	return user, nil
+}
+
+func (s *adminServiceImpl) applyUserBalanceUpdate(ctx context.Context, userID int64, balance, giftBalance float64, operation, notes string) (*User, float64, float64, error) {
+	// 余额调整必须走原子接口：先读后整行写回会把并发的计费扣款覆盖掉。
+	var (
+		change       BalanceChange
+		walletChange WalletChange
+		err          error
+	)
+	switch operation {
+	case "set":
+		change, err = s.userRepo.SetBalance(ctx, userID, balance)
+		walletChange = WalletChange{OldOrdinary: change.Old, NewOrdinary: change.New}
+	case "add":
+		if walletRepo, ok := s.userRepo.(AdminWalletRepository); ok {
+			walletChange, err = walletRepo.AdjustWallets(ctx, userID, balance, giftBalance)
+		} else if giftBalance == 0 {
+			change, err = s.userRepo.AdjustBalance(ctx, userID, balance)
+			walletChange = WalletChange{OldOrdinary: change.Old, NewOrdinary: change.New}
+		} else {
+			return nil, 0, 0, errors.New("user repository does not support gift balance adjustments")
+		}
+	case "subtract":
+		change, err = s.userRepo.AdjustBalance(ctx, userID, -balance)
+		walletChange = WalletChange{OldOrdinary: change.Old, NewOrdinary: change.New}
+	default:
+		return nil, 0, 0, fmt.Errorf("unsupported balance operation: %q", operation)
+	}
+	if errors.Is(err, ErrBalanceNegative) {
+		return nil, 0, 0, fmt.Errorf("balance cannot be negative, current balance: %.2f, requested operation would result in: %.2f", walletChange.OldOrdinary, walletChange.NewOrdinary)
+	}
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	balanceDiff := calculateWalletDelta(walletChange.OldOrdinary, walletChange.NewOrdinary)
+	giftBalanceDiff := calculateWalletDelta(walletChange.OldGift, walletChange.NewGift)
+	if balanceDiff != 0 || giftBalanceDiff != 0 {
+		code, err := GenerateRedeemCode()
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("generate balance adjustment history code: %w", err)
+		}
+		if s.redeemCodeRepo == nil {
+			return nil, 0, 0, errors.New("redeem code repository is unavailable")
+		}
+		now := time.Now()
+		adjustmentRecord := &RedeemCode{
+			Code:      code,
+			Type:      AdjustmentTypeAdminBalance,
+			Value:     balanceDiff,
+			GiftValue: giftBalanceDiff,
+			Status:    StatusUsed,
+			UsedBy:    &userID,
+			UsedAt:    &now,
+			Notes:     notes,
+		}
+		if err := s.redeemCodeRepo.Create(ctx, adjustmentRecord); err != nil {
+			return nil, 0, 0, fmt.Errorf("create balance adjustment history: %w", err)
+		}
+	}
+
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	return user, balanceDiff, giftBalanceDiff, nil
 }
 
 func (s *adminServiceImpl) tryAccrueAffiliateRebateForAdminRecharge(ctx context.Context, userID int64, operation string, amount float64) {
@@ -841,7 +904,7 @@ LIMIT $3`, userID, params.Offset(), params.Limit())
 			ID:        -id,
 			Code:      fmt.Sprintf("AFF-%d", id),
 			Type:      RedeemTypeAffiliateBalance,
-			Value:     amount,
+			GiftValue: amount,
 			Status:    StatusUsed,
 			UsedBy:    &usedBy,
 			UsedAt:    &usedAt,
@@ -1256,6 +1319,11 @@ func (s *adminServiceImpl) GenerateRedeemCodes(ctx context.Context, input *Gener
 	if input.ExpiresAt != nil && !input.ExpiresAt.After(time.Now()) {
 		return nil, ErrRedeemCodeExpired
 	}
+	if err := validateRedeemGift(input.Type, input.Value, input.GiftRatio); err != nil {
+		return nil, err
+	}
+	giftRatio := normalizeGiftRatio(input.GiftRatio)
+	giftValue := calculateGiftBalance(input.Value, giftRatio)
 
 	// 如果是订阅类型，验证必须有 GroupID
 	if input.Type == RedeemTypeSubscription {
@@ -1282,6 +1350,8 @@ func (s *adminServiceImpl) GenerateRedeemCodes(ctx context.Context, input *Gener
 			Code:      codeValue,
 			Type:      input.Type,
 			Value:     input.Value,
+			GiftRatio: giftRatio,
+			GiftValue: giftValue,
 			Status:    StatusUnused,
 			ExpiresAt: input.ExpiresAt,
 		}

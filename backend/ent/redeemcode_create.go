@@ -58,6 +58,34 @@ func (_c *RedeemCodeCreate) SetNillableValue(v *float64) *RedeemCodeCreate {
 	return _c
 }
 
+// SetGiftRatio sets the "gift_ratio" field.
+func (_c *RedeemCodeCreate) SetGiftRatio(v float64) *RedeemCodeCreate {
+	_c.mutation.SetGiftRatio(v)
+	return _c
+}
+
+// SetNillableGiftRatio sets the "gift_ratio" field if the given value is not nil.
+func (_c *RedeemCodeCreate) SetNillableGiftRatio(v *float64) *RedeemCodeCreate {
+	if v != nil {
+		_c.SetGiftRatio(*v)
+	}
+	return _c
+}
+
+// SetGiftValue sets the "gift_value" field.
+func (_c *RedeemCodeCreate) SetGiftValue(v float64) *RedeemCodeCreate {
+	_c.mutation.SetGiftValue(v)
+	return _c
+}
+
+// SetNillableGiftValue sets the "gift_value" field if the given value is not nil.
+func (_c *RedeemCodeCreate) SetNillableGiftValue(v *float64) *RedeemCodeCreate {
+	if v != nil {
+		_c.SetGiftValue(*v)
+	}
+	return _c
+}
+
 // SetStatus sets the "status" field.
 func (_c *RedeemCodeCreate) SetStatus(v string) *RedeemCodeCreate {
 	_c.mutation.SetStatus(v)
@@ -237,6 +265,14 @@ func (_c *RedeemCodeCreate) defaults() {
 		v := redeemcode.DefaultValue
 		_c.mutation.SetValue(v)
 	}
+	if _, ok := _c.mutation.GiftRatio(); !ok {
+		v := redeemcode.DefaultGiftRatio
+		_c.mutation.SetGiftRatio(v)
+	}
+	if _, ok := _c.mutation.GiftValue(); !ok {
+		v := redeemcode.DefaultGiftValue
+		_c.mutation.SetGiftValue(v)
+	}
 	if _, ok := _c.mutation.Status(); !ok {
 		v := redeemcode.DefaultStatus
 		_c.mutation.SetStatus(v)
@@ -271,6 +307,12 @@ func (_c *RedeemCodeCreate) check() error {
 	}
 	if _, ok := _c.mutation.Value(); !ok {
 		return &ValidationError{Name: "value", err: errors.New(`ent: missing required field "RedeemCode.value"`)}
+	}
+	if _, ok := _c.mutation.GiftRatio(); !ok {
+		return &ValidationError{Name: "gift_ratio", err: errors.New(`ent: missing required field "RedeemCode.gift_ratio"`)}
+	}
+	if _, ok := _c.mutation.GiftValue(); !ok {
+		return &ValidationError{Name: "gift_value", err: errors.New(`ent: missing required field "RedeemCode.gift_value"`)}
 	}
 	if _, ok := _c.mutation.Status(); !ok {
 		return &ValidationError{Name: "status", err: errors.New(`ent: missing required field "RedeemCode.status"`)}
@@ -324,6 +366,14 @@ func (_c *RedeemCodeCreate) createSpec() (*RedeemCode, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Value(); ok {
 		_spec.SetField(redeemcode.FieldValue, field.TypeFloat64, value)
 		_node.Value = value
+	}
+	if value, ok := _c.mutation.GiftRatio(); ok {
+		_spec.SetField(redeemcode.FieldGiftRatio, field.TypeFloat64, value)
+		_node.GiftRatio = value
+	}
+	if value, ok := _c.mutation.GiftValue(); ok {
+		_spec.SetField(redeemcode.FieldGiftValue, field.TypeFloat64, value)
+		_node.GiftValue = value
 	}
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(redeemcode.FieldStatus, field.TypeString, value)
@@ -474,6 +524,42 @@ func (u *RedeemCodeUpsert) UpdateValue() *RedeemCodeUpsert {
 // AddValue adds v to the "value" field.
 func (u *RedeemCodeUpsert) AddValue(v float64) *RedeemCodeUpsert {
 	u.Add(redeemcode.FieldValue, v)
+	return u
+}
+
+// SetGiftRatio sets the "gift_ratio" field.
+func (u *RedeemCodeUpsert) SetGiftRatio(v float64) *RedeemCodeUpsert {
+	u.Set(redeemcode.FieldGiftRatio, v)
+	return u
+}
+
+// UpdateGiftRatio sets the "gift_ratio" field to the value that was provided on create.
+func (u *RedeemCodeUpsert) UpdateGiftRatio() *RedeemCodeUpsert {
+	u.SetExcluded(redeemcode.FieldGiftRatio)
+	return u
+}
+
+// AddGiftRatio adds v to the "gift_ratio" field.
+func (u *RedeemCodeUpsert) AddGiftRatio(v float64) *RedeemCodeUpsert {
+	u.Add(redeemcode.FieldGiftRatio, v)
+	return u
+}
+
+// SetGiftValue sets the "gift_value" field.
+func (u *RedeemCodeUpsert) SetGiftValue(v float64) *RedeemCodeUpsert {
+	u.Set(redeemcode.FieldGiftValue, v)
+	return u
+}
+
+// UpdateGiftValue sets the "gift_value" field to the value that was provided on create.
+func (u *RedeemCodeUpsert) UpdateGiftValue() *RedeemCodeUpsert {
+	u.SetExcluded(redeemcode.FieldGiftValue)
+	return u
+}
+
+// AddGiftValue adds v to the "gift_value" field.
+func (u *RedeemCodeUpsert) AddGiftValue(v float64) *RedeemCodeUpsert {
+	u.Add(redeemcode.FieldGiftValue, v)
 	return u
 }
 
@@ -688,6 +774,48 @@ func (u *RedeemCodeUpsertOne) AddValue(v float64) *RedeemCodeUpsertOne {
 func (u *RedeemCodeUpsertOne) UpdateValue() *RedeemCodeUpsertOne {
 	return u.Update(func(s *RedeemCodeUpsert) {
 		s.UpdateValue()
+	})
+}
+
+// SetGiftRatio sets the "gift_ratio" field.
+func (u *RedeemCodeUpsertOne) SetGiftRatio(v float64) *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.SetGiftRatio(v)
+	})
+}
+
+// AddGiftRatio adds v to the "gift_ratio" field.
+func (u *RedeemCodeUpsertOne) AddGiftRatio(v float64) *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.AddGiftRatio(v)
+	})
+}
+
+// UpdateGiftRatio sets the "gift_ratio" field to the value that was provided on create.
+func (u *RedeemCodeUpsertOne) UpdateGiftRatio() *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.UpdateGiftRatio()
+	})
+}
+
+// SetGiftValue sets the "gift_value" field.
+func (u *RedeemCodeUpsertOne) SetGiftValue(v float64) *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.SetGiftValue(v)
+	})
+}
+
+// AddGiftValue adds v to the "gift_value" field.
+func (u *RedeemCodeUpsertOne) AddGiftValue(v float64) *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.AddGiftValue(v)
+	})
+}
+
+// UpdateGiftValue sets the "gift_value" field to the value that was provided on create.
+func (u *RedeemCodeUpsertOne) UpdateGiftValue() *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.UpdateGiftValue()
 	})
 }
 
@@ -1088,6 +1216,48 @@ func (u *RedeemCodeUpsertBulk) AddValue(v float64) *RedeemCodeUpsertBulk {
 func (u *RedeemCodeUpsertBulk) UpdateValue() *RedeemCodeUpsertBulk {
 	return u.Update(func(s *RedeemCodeUpsert) {
 		s.UpdateValue()
+	})
+}
+
+// SetGiftRatio sets the "gift_ratio" field.
+func (u *RedeemCodeUpsertBulk) SetGiftRatio(v float64) *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.SetGiftRatio(v)
+	})
+}
+
+// AddGiftRatio adds v to the "gift_ratio" field.
+func (u *RedeemCodeUpsertBulk) AddGiftRatio(v float64) *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.AddGiftRatio(v)
+	})
+}
+
+// UpdateGiftRatio sets the "gift_ratio" field to the value that was provided on create.
+func (u *RedeemCodeUpsertBulk) UpdateGiftRatio() *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.UpdateGiftRatio()
+	})
+}
+
+// SetGiftValue sets the "gift_value" field.
+func (u *RedeemCodeUpsertBulk) SetGiftValue(v float64) *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.SetGiftValue(v)
+	})
+}
+
+// AddGiftValue adds v to the "gift_value" field.
+func (u *RedeemCodeUpsertBulk) AddGiftValue(v float64) *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.AddGiftValue(v)
+	})
+}
+
+// UpdateGiftValue sets the "gift_value" field to the value that was provided on create.
+func (u *RedeemCodeUpsertBulk) UpdateGiftValue() *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.UpdateGiftValue()
 	})
 }
 

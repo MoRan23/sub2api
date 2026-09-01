@@ -98,6 +98,7 @@ const DataTableStub = {
       </template>
       <div v-for="row in data" :key="row.id">
         <slot name="cell-last_used_at" :value="row.last_used_at" :row="row" />
+        <slot name="cell-balance" :value="row.balance" :row="row" />
       </div>
     </div>
   `
@@ -197,6 +198,52 @@ describe('admin UsersView', () => {
       }),
       expect.any(Object)
     )
+  })
+
+  it('shows total balance while retaining ordinary and gift wallet details', async () => {
+    listUsers.mockResolvedValue({
+      items: [createAdminUser({ balance: 0.01, gift_balance: 0.00000001, total_balance: 0.01000001 })],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+
+    const wrapper = mount(UsersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: {
+            template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+          },
+          DataTable: DataTableStub,
+          Pagination: true,
+          ConfirmDialog: true,
+          EmptyState: true,
+          GroupBadge: true,
+          Select: true,
+          UserAttributesConfigModal: true,
+          UserConcurrencyCell: true,
+          UserCreateModal: true,
+          UserEditModal: true,
+          BulkEditUserModal: BulkEditUserModalStub,
+          UserPlatformQuotaModal: true,
+          UserApiKeysModal: true,
+          UserAllowedGroupsModal: true,
+          UserBalanceModal: true,
+          UserBalanceHistoryModal: true,
+          GroupReplaceModal: true,
+          Icon: true,
+          Teleport: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="user-total-balance"]').text()).toBe('$0.01000001')
+    expect(wrapper.text()).toContain('admin.users.ordinaryBalance: $0.01')
+    expect(wrapper.text()).toContain('admin.users.giftBalance: $0.00000001')
   })
 
   it('clears usage current-page sort when switching to last_used_at server sort', async () => {

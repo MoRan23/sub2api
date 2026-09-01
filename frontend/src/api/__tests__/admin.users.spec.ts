@@ -13,6 +13,7 @@ vi.mock('@/api/client', () => ({
 import {
   batchUpdateLimits,
   bindUserAuthIdentity,
+  updateBalance,
   type AdminBindAuthIdentityRequest,
   type AdminBoundAuthIdentity,
   type BatchUpdateUserLimitsRequest,
@@ -146,5 +147,18 @@ describe('admin users api auth identity binding', () => {
     expect(result).toEqual({ affected: 2 })
     expect(batchRequestContractExact).toBe(true)
     expect(batchResponseContractExact).toBe(true)
+  })
+
+  it('posts ordinary and gift balance adjustments as independent wallet amounts', async () => {
+    post.mockResolvedValue({ data: { id: 9 } })
+
+    await updateBalance(9, 10, 'add', 'promotion', 2.5)
+
+    expect(post).toHaveBeenCalledWith('/admin/users/9/balance', {
+      balance: 10,
+      gift_balance: 2.5,
+      operation: 'add',
+      notes: 'promotion'
+    })
   })
 })

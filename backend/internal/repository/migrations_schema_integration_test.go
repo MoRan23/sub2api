@@ -45,6 +45,14 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	// users: columns required by repository queries
 	requireColumn(t, tx, "users", "username", "character varying", 100, false)
 	requireColumn(t, tx, "users", "notes", "text", 0, false)
+	requireColumn(t, tx, "users", "gift_balance", "numeric", 0, false)
+	requireColumn(t, tx, "users", "frozen_gift_balance", "numeric", 0, false)
+	requireNumericColumn(t, tx, "users", "gift_balance", 20, 8)
+	requireNumericColumn(t, tx, "users", "frozen_gift_balance", 20, 8)
+	requireColumnDefaultContains(t, tx, "users", "gift_balance", "0")
+	requireColumnDefaultContains(t, tx, "users", "frozen_gift_balance", "0")
+	requireConstraintDefinitionContains(t, tx, "users", "users_gift_balance_nonnegative", "gift_balance")
+	requireConstraintDefinitionContains(t, tx, "users", "users_frozen_gift_balance_nonnegative", "frozen_gift_balance")
 
 	// accounts: schedulable and rate-limit fields
 	requireColumn(t, tx, "accounts", "notes", "text", 0, true)
@@ -64,6 +72,14 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	// redeem_codes: subscription fields
 	requireColumn(t, tx, "redeem_codes", "group_id", "bigint", 0, true)
 	requireColumn(t, tx, "redeem_codes", "validity_days", "integer", 0, false)
+	requireColumn(t, tx, "redeem_codes", "gift_ratio", "numeric", 0, false)
+	requireColumn(t, tx, "redeem_codes", "gift_value", "numeric", 0, false)
+	requireNumericColumn(t, tx, "redeem_codes", "gift_ratio", 10, 4)
+	requireNumericColumn(t, tx, "redeem_codes", "gift_value", 20, 8)
+	requireColumnDefaultContains(t, tx, "redeem_codes", "gift_ratio", "0")
+	requireColumnDefaultContains(t, tx, "redeem_codes", "gift_value", "0")
+	requireConstraintDefinitionContains(t, tx, "redeem_codes", "redeem_codes_gift_ratio_range", "gift_ratio", "100")
+	requireConstraintDefinitionContains(t, tx, "redeem_codes", "redeem_codes_gift_value_nonnegative", "gift_value")
 
 	// usage_logs: billing_type used by filters/stats
 	requireColumn(t, tx, "usage_logs", "billing_type", "smallint", 0, false)
@@ -128,6 +144,17 @@ WHERE ns.nspname = 'public'
 	require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT to_regclass('public.usage_billing_dedup')").Scan(&usageBillingDedupRegclass))
 	require.True(t, usageBillingDedupRegclass.Valid, "expected usage_billing_dedup table to exist")
 	requireColumn(t, tx, "usage_billing_dedup", "request_fingerprint", "character varying", 64, false)
+	requireColumn(t, tx, "usage_billing_dedup", "ordinary_hold_amount", "numeric", 0, false)
+	requireColumn(t, tx, "usage_billing_dedup", "gift_hold_amount", "numeric", 0, false)
+	requireColumn(t, tx, "usage_billing_dedup", "hold_terminal_kind", "character varying", 16, false)
+	requireNumericColumn(t, tx, "usage_billing_dedup", "ordinary_hold_amount", 20, 8)
+	requireNumericColumn(t, tx, "usage_billing_dedup", "gift_hold_amount", 20, 8)
+	requireColumnDefaultContains(t, tx, "usage_billing_dedup", "ordinary_hold_amount", "0")
+	requireColumnDefaultContains(t, tx, "usage_billing_dedup", "gift_hold_amount", "0")
+	requireColumnDefaultContains(t, tx, "usage_billing_dedup", "hold_terminal_kind", "''")
+	requireConstraintDefinitionContains(t, tx, "usage_billing_dedup", "usage_billing_dedup_ordinary_hold_nonnegative", "ordinary_hold_amount")
+	requireConstraintDefinitionContains(t, tx, "usage_billing_dedup", "usage_billing_dedup_gift_hold_nonnegative", "gift_hold_amount")
+	requireConstraintDefinitionContains(t, tx, "usage_billing_dedup", "usage_billing_dedup_hold_terminal_kind_valid", "hold_terminal_kind", "captured", "released")
 	requireIndex(t, tx, "usage_billing_dedup", "idx_usage_billing_dedup_request_api_key")
 	requireIndex(t, tx, "usage_billing_dedup", "idx_usage_billing_dedup_created_at_brin")
 
@@ -135,6 +162,17 @@ WHERE ns.nspname = 'public'
 	require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT to_regclass('public.usage_billing_dedup_archive')").Scan(&usageBillingDedupArchiveRegclass))
 	require.True(t, usageBillingDedupArchiveRegclass.Valid, "expected usage_billing_dedup_archive table to exist")
 	requireColumn(t, tx, "usage_billing_dedup_archive", "request_fingerprint", "character varying", 64, false)
+	requireColumn(t, tx, "usage_billing_dedup_archive", "ordinary_hold_amount", "numeric", 0, false)
+	requireColumn(t, tx, "usage_billing_dedup_archive", "gift_hold_amount", "numeric", 0, false)
+	requireColumn(t, tx, "usage_billing_dedup_archive", "hold_terminal_kind", "character varying", 16, false)
+	requireNumericColumn(t, tx, "usage_billing_dedup_archive", "ordinary_hold_amount", 20, 8)
+	requireNumericColumn(t, tx, "usage_billing_dedup_archive", "gift_hold_amount", 20, 8)
+	requireColumnDefaultContains(t, tx, "usage_billing_dedup_archive", "ordinary_hold_amount", "0")
+	requireColumnDefaultContains(t, tx, "usage_billing_dedup_archive", "gift_hold_amount", "0")
+	requireColumnDefaultContains(t, tx, "usage_billing_dedup_archive", "hold_terminal_kind", "''")
+	requireConstraintDefinitionContains(t, tx, "usage_billing_dedup_archive", "usage_billing_dedup_archive_ordinary_hold_nonnegative", "ordinary_hold_amount")
+	requireConstraintDefinitionContains(t, tx, "usage_billing_dedup_archive", "usage_billing_dedup_archive_gift_hold_nonnegative", "gift_hold_amount")
+	requireConstraintDefinitionContains(t, tx, "usage_billing_dedup_archive", "usage_billing_dedup_archive_hold_terminal_kind_valid", "hold_terminal_kind", "captured", "released")
 	requireIndex(t, tx, "usage_billing_dedup_archive", "usage_billing_dedup_archive_pkey")
 
 	// settings table should exist
@@ -221,6 +259,14 @@ func TestMigrationsRunner_AuthIdentityAndPaymentSchemaStayAligned(t *testing.T) 
 	requireForeignKeyOnDelete(t, tx, "identity_adoption_decisions", "identity_id", "auth_identities", "SET NULL")
 
 	requireIndex(t, tx, "payment_orders", "paymentorder_out_trade_no")
+	requireColumn(t, tx, "payment_orders", "gift_ratio", "numeric", 0, false)
+	requireColumn(t, tx, "payment_orders", "gift_amount", "numeric", 0, false)
+	requireNumericColumn(t, tx, "payment_orders", "gift_ratio", 10, 4)
+	requireNumericColumn(t, tx, "payment_orders", "gift_amount", 20, 8)
+	requireColumnDefaultContains(t, tx, "payment_orders", "gift_ratio", "0")
+	requireColumnDefaultContains(t, tx, "payment_orders", "gift_amount", "0")
+	requireConstraintDefinitionContains(t, tx, "payment_orders", "payment_orders_gift_ratio_range", "gift_ratio", "100")
+	requireConstraintDefinitionContains(t, tx, "payment_orders", "payment_orders_gift_amount_nonnegative", "gift_amount")
 	requirePartialUniqueIndexDefinition(t, tx, "payment_orders", "paymentorder_out_trade_no", "out_trade_no", "WHERE")
 	requireIndexAbsent(t, tx, "payment_orders", "paymentorder_out_trade_no_unique")
 }
@@ -352,6 +398,22 @@ WHERE table_schema = 'public'
 	for _, fragment := range fragments {
 		require.Contains(t, columnDefault.String, fragment, "expected default for %s.%s to contain %q", table, column, fragment)
 	}
+}
+
+func requireNumericColumn(t *testing.T, tx *sql.Tx, table, column string, precision, scale int64) {
+	t.Helper()
+
+	var actualPrecision, actualScale sql.NullInt64
+	err := tx.QueryRowContext(context.Background(), `
+SELECT numeric_precision, numeric_scale
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = $1
+  AND column_name = $2
+`, table, column).Scan(&actualPrecision, &actualScale)
+	require.NoError(t, err, "query numeric precision for %s.%s", table, column)
+	require.Equal(t, sql.NullInt64{Int64: precision, Valid: true}, actualPrecision, "numeric_precision mismatch for %s.%s", table, column)
+	require.Equal(t, sql.NullInt64{Int64: scale, Valid: true}, actualScale, "numeric_scale mismatch for %s.%s", table, column)
 }
 
 func requireColumn(t *testing.T, tx *sql.Tx, table, column, dataType string, maxLen int, nullable bool) {

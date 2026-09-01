@@ -57,8 +57,17 @@
           <span v-if="row.fee_rate > 0" class="ml-1 text-xs text-gray-400" :title="t('payment.orders.fee') + ': ' + row.fee_rate + '%'">
             ({{ row.fee_rate }}%)
           </span>
-          <div v-if="row.amount !== row.pay_amount" class="text-xs text-gray-500">
-            {{ t('payment.orders.creditedAmount') }}: {{ creditedAmountSymbol }}{{ row.amount.toFixed(2) }}
+          <div v-if="row.order_type === 'balance'" class="mt-0.5 text-xs text-gray-500">
+            {{ t('payment.orders.ordinaryCredit') }}: {{ creditedAmountSymbol }}{{ formatWalletAmount(row.amount) }}
+            <div class="text-emerald-600 dark:text-emerald-400">
+              {{ t('payment.orders.giftCredit') }}: {{ creditedAmountSymbol }}{{ formatWalletAmount(paymentOrderGiftAmount(row)) }}
+            </div>
+            <div class="font-medium text-gray-700 dark:text-gray-300">
+              {{ t('payment.orders.totalCredit') }}: {{ creditedAmountSymbol }}{{ formatWalletAmount(paymentOrderTotalCredit(row)) }}
+            </div>
+          </div>
+          <div v-else-if="row.amount !== row.pay_amount" class="text-xs text-gray-500">
+            {{ t('payment.orders.creditedAmount') }}: {{ creditedAmountSymbol }}{{ formatWalletAmount(row.amount) }}
           </div>
         </div>
       </template>
@@ -142,7 +151,14 @@ import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { statusBadgeClass, canRefund, formatOrderDateTime } from '@/components/payment/orderUtils'
+import {
+  statusBadgeClass,
+  canRefund,
+  formatOrderDateTime,
+  formatWalletAmount,
+  paymentOrderGiftAmount,
+  paymentOrderTotalCredit
+} from '@/components/payment/orderUtils'
 import { currencySymbol } from '@/components/payment/currency'
 
 const { t } = useI18n()

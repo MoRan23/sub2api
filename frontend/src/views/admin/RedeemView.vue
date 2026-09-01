@@ -48,7 +48,11 @@
               <Icon name="edit" size="md" class="mr-2" />
               {{ t('admin.redeem.batchUpdate') }}
             </button>
-            <button @click="showGenerateDialog = true" class="btn btn-primary">
+            <button
+              data-test="generate-open"
+              @click="showGenerateDialog = true"
+              class="btn btn-primary"
+            >
               {{ t('admin.redeem.generateCodes') }}
             </button>
           </div>
@@ -129,9 +133,17 @@
           </template>
 
           <template #cell-value="{ value, row }">
-            <span class="text-sm font-medium text-gray-900 dark:text-white">
-              <template v-if="row.type === 'balance'">${{ value.toFixed(2) }}</template>
-              <template v-else-if="row.type === 'subscription'">
+            <div v-if="row.type === 'balance'" class="space-y-0.5 text-sm">
+              <p class="font-medium text-gray-900 dark:text-white">
+                {{ t('admin.redeem.totalAmount') }} ${{ formatMoney(value + getGiftValue(row)) }}
+              </p>
+              <p class="text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.redeem.ordinaryAmount') }} ${{ formatMoney(value) }}
+                · {{ t('admin.redeem.giftAmount') }} ${{ formatMoney(getGiftValue(row)) }}
+              </p>
+            </div>
+            <span v-else class="text-sm font-medium text-gray-900 dark:text-white">
+              <template v-if="row.type === 'subscription'">
                 {{ row.validity_days || 30 }} {{ t('admin.redeem.days') }}
                 <span v-if="row.group" class="ml-1 text-xs text-gray-500 dark:text-gray-400"
                   >({{ row.group.name }})</span
@@ -274,15 +286,18 @@
 
     <!-- Generate Codes Dialog -->
     <Teleport to="body">
-      <div v-if="showGenerateDialog" class="fixed inset-0 z-50 flex items-center justify-center">
+      <div
+        v-if="showGenerateDialog"
+        class="fixed inset-0 z-50 flex items-center justify-center p-4"
+      >
         <div class="fixed inset-0 bg-black/50" @click="showGenerateDialog = false"></div>
         <div
-          class="relative z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-xl dark:bg-dark-800"
+          class="relative z-10 max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-dark-800"
         >
           <h2 class="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
             {{ t('admin.redeem.generateCodesTitle') }}
           </h2>
-          <form @submit.prevent="handleGenerateCodes" class="space-y-4">
+          <form data-test="generate-form" @submit.prevent="handleGenerateCodes" class="space-y-4">
             <div>
               <label class="input-label">{{ t('admin.redeem.codeType') }}</label>
               <Select v-model="generateForm.type" :options="typeOptions" />
@@ -297,6 +312,7 @@
                 }}
               </label>
               <input
+                data-test="generate-value-input"
                 v-model.number="generateForm.value"
                 type="number"
                 :step="generateForm.type === 'balance' ? '0.01' : '1'"
@@ -304,6 +320,37 @@
                 required
                 class="input"
               />
+            </div>
+            <div v-if="generateForm.type === 'balance'">
+              <label class="input-label">{{ t('admin.redeem.giftRatio') }}</label>
+              <div class="relative">
+                <input
+                  data-test="gift-ratio-input"
+                  v-model.number="generateForm.gift_ratio"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.0001"
+                  class="input pr-10"
+                />
+                <span
+                  class="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-gray-500 dark:text-gray-400"
+                  >%</span
+                >
+              </div>
+              <p class="input-hint">{{ t('admin.redeem.giftRatioHint') }}</p>
+              <div
+                v-if="generateForm.value > 0 && generateForm.gift_ratio > 0"
+                class="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300"
+              >
+                {{
+                  t('admin.redeem.giftPreview', {
+                    ordinary: formatMoney(generateForm.value),
+                    gift: formatMoney(generatedGiftValue),
+                    total: formatMoney(generateForm.value + generatedGiftValue)
+                  })
+                }}
+              </div>
             </div>
             <!-- 邀请码类型：显示提示信息 -->
             <div v-if="generateForm.type === 'invitation'" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
@@ -400,7 +447,12 @@
               <button type="button" @click="showGenerateDialog = false" class="btn btn-secondary">
                 {{ t('common.cancel') }}
               </button>
-              <button type="submit" :disabled="generating" class="btn btn-primary">
+              <button
+                data-test="generate-submit"
+                type="submit"
+                :disabled="generating"
+                class="btn btn-primary"
+              >
                 {{ generating ? t('admin.redeem.generating') : t('admin.redeem.generate') }}
               </button>
             </div>
@@ -641,6 +693,7 @@ import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { formatWalletAmount } from '@/components/payment/orderUtils'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -838,6 +891,7 @@ const redeemCodeExpiryOptions = computed<{ value: RedeemCodeExpiryOption; label:
 const generateForm = reactive({
   type: 'balance' as RedeemCodeType,
   value: 10,
+  gift_ratio: 0,
   count: 1,
   group_id: null as number | null,
   validity_days: 30,
@@ -854,7 +908,16 @@ watch(
     } else if (generateForm.value === 0) {
       generateForm.value = 10
     }
+    if (newType !== 'balance') {
+      generateForm.gift_ratio = 0
+    }
   }
+)
+
+const formatMoney = formatWalletAmount
+const getGiftValue = (code: RedeemCode) => Number(code.gift_value || 0)
+const generatedGiftValue = computed(
+  () => Math.round(generateForm.value * (generateForm.gift_ratio / 100) * 1e8) / 1e8
 )
 
 const buildRedeemQueryFilters = () => ({
@@ -1032,6 +1095,18 @@ const handleGenerateCodes = async () => {
     return
   }
 
+  if (
+    generateForm.type === 'balance' &&
+    (!Number.isFinite(generateForm.gift_ratio) ||
+      generateForm.gift_ratio < 0 ||
+      generateForm.gift_ratio > 100 ||
+      Math.abs(Math.round(generateForm.gift_ratio * 10000) - generateForm.gift_ratio * 10000) >
+        1e-8)
+  ) {
+    appStore.showError(t('admin.redeem.giftRatioInvalid'))
+    return
+  }
+
   const expiresInDays = getRedeemCodeExpiresInDays()
   if (expiresInDays === null) {
     appStore.showError(t('admin.redeem.expiryDaysRequired'))
@@ -1046,7 +1121,8 @@ const handleGenerateCodes = async () => {
       generateForm.value,
       generateForm.type === 'subscription' ? generateForm.group_id : undefined,
       generateForm.type === 'subscription' ? generateForm.validity_days : undefined,
-      expiresInDays
+      expiresInDays,
+      generateForm.type === 'balance' ? generateForm.gift_ratio : 0
     )
     showGenerateDialog.value = false
     generatedCodes.value = result
@@ -1054,6 +1130,7 @@ const handleGenerateCodes = async () => {
     // 重置表单
     generateForm.group_id = null
     generateForm.validity_days = 30
+    generateForm.gift_ratio = 0
     generateForm.expiry_option = 'never'
     generateForm.custom_expiry_days = 7
     loadCodes()

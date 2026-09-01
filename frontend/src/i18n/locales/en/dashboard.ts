@@ -667,7 +667,7 @@ export default {
 
   affiliate: {
     title: 'Affiliate Rebates',
-    description: 'Invite new users and convert your rebate quota into account balance',
+    description: 'Invite new users and transfer your rebate quota into gift balance',
     yourCode: 'Your Affiliate Code',
     inviteLink: 'Invite Link',
     copyCode: 'Copy Code',
@@ -675,7 +675,7 @@ export default {
     codeCopied: 'Affiliate code copied',
     linkCopied: 'Invite link copied',
     loadFailed: 'Failed to load affiliate data',
-    transferFailed: 'Failed to transfer affiliate quota',
+    transferFailed: 'Failed to transfer affiliate quota to gift balance',
     stats: {
       rebateRate: 'My Rebate Rate',
       rebateRateHint: 'What you earn each time an invitee recharges',
@@ -686,12 +686,12 @@ export default {
       totalQuota: 'Historical Rebate Quota'
     },
     transfer: {
-      title: 'Transfer Rebate Quota',
-      description: 'Move available rebate quota into your account balance',
-      button: 'Transfer to Balance',
+      title: 'Transfer Rebate Quota to Gift Balance',
+      description: 'Move available rebate quota into your gift balance',
+      button: 'Transfer to Gift Balance',
       transferring: 'Transferring...',
       empty: 'No available rebate quota',
-      success: '{amount} has been transferred to your balance'
+      success: '{amount} has been transferred to your gift balance'
     },
     invitees: {
       title: 'Invited Users',
@@ -707,7 +707,7 @@ export default {
       title: 'How It Works',
       line1: 'Share your affiliate code or invite link with new users.',
       line2: 'When invitees recharge, you receive {rate} of the recharge as rebate quota.',
-      line3: 'Transfer rebate quota to balance at any time.',
+      line3: 'Transfer rebate quota to gift balance at any time.',
       line4: 'Newly earned rebates may have a waiting period before they can be transferred.'
     }
   },
@@ -738,7 +738,7 @@ export default {
     recentActivity: 'Recent Activity',
     historyWillAppear: 'Your redemption history will appear here',
     balanceAddedRedeem: 'Balance Added (Redeem)',
-    balanceAddedAffiliate: 'Balance Added (Affiliate Transfer)',
+    balanceAddedAffiliate: 'Gift Balance (Affiliate Transfer)',
     balanceAddedAdmin: 'Balance Added (Admin)',
     balanceDeductedAdmin: 'Balance Deducted (Admin)',
     concurrencyAddedRedeem: 'Concurrency Added (Redeem)',

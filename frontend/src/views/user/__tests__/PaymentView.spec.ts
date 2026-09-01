@@ -54,7 +54,9 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     user: {
       username: 'demo-user',
-      balance: 0,
+      balance: 10,
+      gift_balance: 5,
+      total_balance: 15,
     },
     refreshUser,
   }),
@@ -110,6 +112,7 @@ function checkoutInfoFixture(overrides: Partial<CheckoutInfoResponse> = {}) {
     plans: [],
     balance_disabled: false,
     balance_recharge_multiplier: 1,
+    balance_gift_ratio: 0,
     subscription_usd_to_cny_rate: 0,
     recharge_fee_rate: 0,
     help_text: '',
@@ -297,6 +300,59 @@ describe('PaymentView subscription plan grid', () => {
 })
 
 describe('PaymentView recharge rate preview', () => {
+  it('previews ordinary, gift, and total credit with the combined current balance', async () => {
+    routeState.path = '/purchase'
+    routeState.query = {}
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture({
+      balance_recharge_multiplier: 2,
+      balance_gift_ratio: 12.5,
+    }))
+
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    wrapper.getComponent(AmountInput).vm.$emit('update:modelValue', 10)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="current-total-balance"]').text()).toContain('$15.00')
+    expect(wrapper.get('[data-testid="ordinary-credit"]').text()).toContain('$20.00')
+    expect(wrapper.get('[data-testid="gift-credit"]').text()).toContain('$2.50')
+    expect(wrapper.get('[data-testid="total-credit"]').text()).toContain('$22.50')
+  })
+
+  it('preserves eight-decimal wallet precision in the recharge preview', async () => {
+    routeState.path = '/purchase'
+    routeState.query = {}
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture({
+      balance_recharge_multiplier: 1,
+      balance_gift_ratio: 0.0001,
+    }))
+
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    wrapper.getComponent(AmountInput).vm.$emit('update:modelValue', 0.01)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="ordinary-credit"]').text()).toContain('$0.01')
+    expect(wrapper.get('[data-testid="gift-credit"]').text()).toContain('$0.00000001')
+    expect(wrapper.get('[data-testid="total-credit"]').text()).toContain('$0.01000001')
+  })
+
   it('uses the selected payment method currency in both locale templates', async () => {
     translate.mockClear()
     routeState.path = '/purchase'

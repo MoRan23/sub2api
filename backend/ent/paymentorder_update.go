@@ -154,6 +154,48 @@ func (_u *PaymentOrderUpdate) AddFeeRate(v float64) *PaymentOrderUpdate {
 	return _u
 }
 
+// SetGiftRatio sets the "gift_ratio" field.
+func (_u *PaymentOrderUpdate) SetGiftRatio(v float64) *PaymentOrderUpdate {
+	_u.mutation.ResetGiftRatio()
+	_u.mutation.SetGiftRatio(v)
+	return _u
+}
+
+// SetNillableGiftRatio sets the "gift_ratio" field if the given value is not nil.
+func (_u *PaymentOrderUpdate) SetNillableGiftRatio(v *float64) *PaymentOrderUpdate {
+	if v != nil {
+		_u.SetGiftRatio(*v)
+	}
+	return _u
+}
+
+// AddGiftRatio adds value to the "gift_ratio" field.
+func (_u *PaymentOrderUpdate) AddGiftRatio(v float64) *PaymentOrderUpdate {
+	_u.mutation.AddGiftRatio(v)
+	return _u
+}
+
+// SetGiftAmount sets the "gift_amount" field.
+func (_u *PaymentOrderUpdate) SetGiftAmount(v float64) *PaymentOrderUpdate {
+	_u.mutation.ResetGiftAmount()
+	_u.mutation.SetGiftAmount(v)
+	return _u
+}
+
+// SetNillableGiftAmount sets the "gift_amount" field if the given value is not nil.
+func (_u *PaymentOrderUpdate) SetNillableGiftAmount(v *float64) *PaymentOrderUpdate {
+	if v != nil {
+		_u.SetGiftAmount(*v)
+	}
+	return _u
+}
+
+// AddGiftAmount adds value to the "gift_amount" field.
+func (_u *PaymentOrderUpdate) AddGiftAmount(v float64) *PaymentOrderUpdate {
+	_u.mutation.AddGiftAmount(v)
+	return _u
+}
+
 // SetRechargeCode sets the "recharge_code" field.
 func (_u *PaymentOrderUpdate) SetRechargeCode(v string) *PaymentOrderUpdate {
 	_u.mutation.SetRechargeCode(v)
@@ -881,6 +923,18 @@ func (_u *PaymentOrderUpdate) sqlSave(ctx context.Context) (_node int, err error
 	if value, ok := _u.mutation.AddedFeeRate(); ok {
 		_spec.AddField(paymentorder.FieldFeeRate, field.TypeFloat64, value)
 	}
+	if value, ok := _u.mutation.GiftRatio(); ok {
+		_spec.SetField(paymentorder.FieldGiftRatio, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedGiftRatio(); ok {
+		_spec.AddField(paymentorder.FieldGiftRatio, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.GiftAmount(); ok {
+		_spec.SetField(paymentorder.FieldGiftAmount, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedGiftAmount(); ok {
+		_spec.AddField(paymentorder.FieldGiftAmount, field.TypeFloat64, value)
+	}
 	if value, ok := _u.mutation.RechargeCode(); ok {
 		_spec.SetField(paymentorder.FieldRechargeCode, field.TypeString, value)
 	}
@@ -1214,6 +1268,48 @@ func (_u *PaymentOrderUpdateOne) SetNillableFeeRate(v *float64) *PaymentOrderUpd
 // AddFeeRate adds value to the "fee_rate" field.
 func (_u *PaymentOrderUpdateOne) AddFeeRate(v float64) *PaymentOrderUpdateOne {
 	_u.mutation.AddFeeRate(v)
+	return _u
+}
+
+// SetGiftRatio sets the "gift_ratio" field.
+func (_u *PaymentOrderUpdateOne) SetGiftRatio(v float64) *PaymentOrderUpdateOne {
+	_u.mutation.ResetGiftRatio()
+	_u.mutation.SetGiftRatio(v)
+	return _u
+}
+
+// SetNillableGiftRatio sets the "gift_ratio" field if the given value is not nil.
+func (_u *PaymentOrderUpdateOne) SetNillableGiftRatio(v *float64) *PaymentOrderUpdateOne {
+	if v != nil {
+		_u.SetGiftRatio(*v)
+	}
+	return _u
+}
+
+// AddGiftRatio adds value to the "gift_ratio" field.
+func (_u *PaymentOrderUpdateOne) AddGiftRatio(v float64) *PaymentOrderUpdateOne {
+	_u.mutation.AddGiftRatio(v)
+	return _u
+}
+
+// SetGiftAmount sets the "gift_amount" field.
+func (_u *PaymentOrderUpdateOne) SetGiftAmount(v float64) *PaymentOrderUpdateOne {
+	_u.mutation.ResetGiftAmount()
+	_u.mutation.SetGiftAmount(v)
+	return _u
+}
+
+// SetNillableGiftAmount sets the "gift_amount" field if the given value is not nil.
+func (_u *PaymentOrderUpdateOne) SetNillableGiftAmount(v *float64) *PaymentOrderUpdateOne {
+	if v != nil {
+		_u.SetGiftAmount(*v)
+	}
+	return _u
+}
+
+// AddGiftAmount adds value to the "gift_amount" field.
+func (_u *PaymentOrderUpdateOne) AddGiftAmount(v float64) *PaymentOrderUpdateOne {
+	_u.mutation.AddGiftAmount(v)
 	return _u
 }
 
@@ -1973,6 +2069,18 @@ func (_u *PaymentOrderUpdateOne) sqlSave(ctx context.Context) (_node *PaymentOrd
 	}
 	if value, ok := _u.mutation.AddedFeeRate(); ok {
 		_spec.AddField(paymentorder.FieldFeeRate, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.GiftRatio(); ok {
+		_spec.SetField(paymentorder.FieldGiftRatio, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedGiftRatio(); ok {
+		_spec.AddField(paymentorder.FieldGiftRatio, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.GiftAmount(); ok {
+		_spec.SetField(paymentorder.FieldGiftAmount, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedGiftAmount(); ok {
+		_spec.AddField(paymentorder.FieldGiftAmount, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.RechargeCode(); ok {
 		_spec.SetField(paymentorder.FieldRechargeCode, field.TypeString, value)

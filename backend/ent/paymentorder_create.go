@@ -81,6 +81,34 @@ func (_c *PaymentOrderCreate) SetNillableFeeRate(v *float64) *PaymentOrderCreate
 	return _c
 }
 
+// SetGiftRatio sets the "gift_ratio" field.
+func (_c *PaymentOrderCreate) SetGiftRatio(v float64) *PaymentOrderCreate {
+	_c.mutation.SetGiftRatio(v)
+	return _c
+}
+
+// SetNillableGiftRatio sets the "gift_ratio" field if the given value is not nil.
+func (_c *PaymentOrderCreate) SetNillableGiftRatio(v *float64) *PaymentOrderCreate {
+	if v != nil {
+		_c.SetGiftRatio(*v)
+	}
+	return _c
+}
+
+// SetGiftAmount sets the "gift_amount" field.
+func (_c *PaymentOrderCreate) SetGiftAmount(v float64) *PaymentOrderCreate {
+	_c.mutation.SetGiftAmount(v)
+	return _c
+}
+
+// SetNillableGiftAmount sets the "gift_amount" field if the given value is not nil.
+func (_c *PaymentOrderCreate) SetNillableGiftAmount(v *float64) *PaymentOrderCreate {
+	if v != nil {
+		_c.SetGiftAmount(*v)
+	}
+	return _c
+}
+
 // SetRechargeCode sets the "recharge_code" field.
 func (_c *PaymentOrderCreate) SetRechargeCode(v string) *PaymentOrderCreate {
 	_c.mutation.SetRechargeCode(v)
@@ -517,6 +545,14 @@ func (_c *PaymentOrderCreate) defaults() {
 		v := paymentorder.DefaultFeeRate
 		_c.mutation.SetFeeRate(v)
 	}
+	if _, ok := _c.mutation.GiftRatio(); !ok {
+		v := paymentorder.DefaultGiftRatio
+		_c.mutation.SetGiftRatio(v)
+	}
+	if _, ok := _c.mutation.GiftAmount(); !ok {
+		v := paymentorder.DefaultGiftAmount
+		_c.mutation.SetGiftAmount(v)
+	}
 	if _, ok := _c.mutation.OutTradeNo(); !ok {
 		v := paymentorder.DefaultOutTradeNo
 		_c.mutation.SetOutTradeNo(v)
@@ -576,6 +612,12 @@ func (_c *PaymentOrderCreate) check() error {
 	}
 	if _, ok := _c.mutation.FeeRate(); !ok {
 		return &ValidationError{Name: "fee_rate", err: errors.New(`ent: missing required field "PaymentOrder.fee_rate"`)}
+	}
+	if _, ok := _c.mutation.GiftRatio(); !ok {
+		return &ValidationError{Name: "gift_ratio", err: errors.New(`ent: missing required field "PaymentOrder.gift_ratio"`)}
+	}
+	if _, ok := _c.mutation.GiftAmount(); !ok {
+		return &ValidationError{Name: "gift_amount", err: errors.New(`ent: missing required field "PaymentOrder.gift_amount"`)}
 	}
 	if _, ok := _c.mutation.RechargeCode(); !ok {
 		return &ValidationError{Name: "recharge_code", err: errors.New(`ent: missing required field "PaymentOrder.recharge_code"`)}
@@ -724,6 +766,14 @@ func (_c *PaymentOrderCreate) createSpec() (*PaymentOrder, *sqlgraph.CreateSpec)
 	if value, ok := _c.mutation.FeeRate(); ok {
 		_spec.SetField(paymentorder.FieldFeeRate, field.TypeFloat64, value)
 		_node.FeeRate = value
+	}
+	if value, ok := _c.mutation.GiftRatio(); ok {
+		_spec.SetField(paymentorder.FieldGiftRatio, field.TypeFloat64, value)
+		_node.GiftRatio = value
+	}
+	if value, ok := _c.mutation.GiftAmount(); ok {
+		_spec.SetField(paymentorder.FieldGiftAmount, field.TypeFloat64, value)
+		_node.GiftAmount = value
 	}
 	if value, ok := _c.mutation.RechargeCode(); ok {
 		_spec.SetField(paymentorder.FieldRechargeCode, field.TypeString, value)
@@ -1027,6 +1077,42 @@ func (u *PaymentOrderUpsert) UpdateFeeRate() *PaymentOrderUpsert {
 // AddFeeRate adds v to the "fee_rate" field.
 func (u *PaymentOrderUpsert) AddFeeRate(v float64) *PaymentOrderUpsert {
 	u.Add(paymentorder.FieldFeeRate, v)
+	return u
+}
+
+// SetGiftRatio sets the "gift_ratio" field.
+func (u *PaymentOrderUpsert) SetGiftRatio(v float64) *PaymentOrderUpsert {
+	u.Set(paymentorder.FieldGiftRatio, v)
+	return u
+}
+
+// UpdateGiftRatio sets the "gift_ratio" field to the value that was provided on create.
+func (u *PaymentOrderUpsert) UpdateGiftRatio() *PaymentOrderUpsert {
+	u.SetExcluded(paymentorder.FieldGiftRatio)
+	return u
+}
+
+// AddGiftRatio adds v to the "gift_ratio" field.
+func (u *PaymentOrderUpsert) AddGiftRatio(v float64) *PaymentOrderUpsert {
+	u.Add(paymentorder.FieldGiftRatio, v)
+	return u
+}
+
+// SetGiftAmount sets the "gift_amount" field.
+func (u *PaymentOrderUpsert) SetGiftAmount(v float64) *PaymentOrderUpsert {
+	u.Set(paymentorder.FieldGiftAmount, v)
+	return u
+}
+
+// UpdateGiftAmount sets the "gift_amount" field to the value that was provided on create.
+func (u *PaymentOrderUpsert) UpdateGiftAmount() *PaymentOrderUpsert {
+	u.SetExcluded(paymentorder.FieldGiftAmount)
+	return u
+}
+
+// AddGiftAmount adds v to the "gift_amount" field.
+func (u *PaymentOrderUpsert) AddGiftAmount(v float64) *PaymentOrderUpsert {
+	u.Add(paymentorder.FieldGiftAmount, v)
 	return u
 }
 
@@ -1708,6 +1794,48 @@ func (u *PaymentOrderUpsertOne) AddFeeRate(v float64) *PaymentOrderUpsertOne {
 func (u *PaymentOrderUpsertOne) UpdateFeeRate() *PaymentOrderUpsertOne {
 	return u.Update(func(s *PaymentOrderUpsert) {
 		s.UpdateFeeRate()
+	})
+}
+
+// SetGiftRatio sets the "gift_ratio" field.
+func (u *PaymentOrderUpsertOne) SetGiftRatio(v float64) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetGiftRatio(v)
+	})
+}
+
+// AddGiftRatio adds v to the "gift_ratio" field.
+func (u *PaymentOrderUpsertOne) AddGiftRatio(v float64) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.AddGiftRatio(v)
+	})
+}
+
+// UpdateGiftRatio sets the "gift_ratio" field to the value that was provided on create.
+func (u *PaymentOrderUpsertOne) UpdateGiftRatio() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateGiftRatio()
+	})
+}
+
+// SetGiftAmount sets the "gift_amount" field.
+func (u *PaymentOrderUpsertOne) SetGiftAmount(v float64) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetGiftAmount(v)
+	})
+}
+
+// AddGiftAmount adds v to the "gift_amount" field.
+func (u *PaymentOrderUpsertOne) AddGiftAmount(v float64) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.AddGiftAmount(v)
+	})
+}
+
+// UpdateGiftAmount sets the "gift_amount" field to the value that was provided on create.
+func (u *PaymentOrderUpsertOne) UpdateGiftAmount() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateGiftAmount()
 	})
 }
 
@@ -2640,6 +2768,48 @@ func (u *PaymentOrderUpsertBulk) AddFeeRate(v float64) *PaymentOrderUpsertBulk {
 func (u *PaymentOrderUpsertBulk) UpdateFeeRate() *PaymentOrderUpsertBulk {
 	return u.Update(func(s *PaymentOrderUpsert) {
 		s.UpdateFeeRate()
+	})
+}
+
+// SetGiftRatio sets the "gift_ratio" field.
+func (u *PaymentOrderUpsertBulk) SetGiftRatio(v float64) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetGiftRatio(v)
+	})
+}
+
+// AddGiftRatio adds v to the "gift_ratio" field.
+func (u *PaymentOrderUpsertBulk) AddGiftRatio(v float64) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.AddGiftRatio(v)
+	})
+}
+
+// UpdateGiftRatio sets the "gift_ratio" field to the value that was provided on create.
+func (u *PaymentOrderUpsertBulk) UpdateGiftRatio() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateGiftRatio()
+	})
+}
+
+// SetGiftAmount sets the "gift_amount" field.
+func (u *PaymentOrderUpsertBulk) SetGiftAmount(v float64) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetGiftAmount(v)
+	})
+}
+
+// AddGiftAmount adds v to the "gift_amount" field.
+func (u *PaymentOrderUpsertBulk) AddGiftAmount(v float64) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.AddGiftAmount(v)
+	})
+}
+
+// UpdateGiftAmount sets the "gift_amount" field to the value that was provided on create.
+func (u *PaymentOrderUpsertBulk) UpdateGiftAmount() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateGiftAmount()
 	})
 }
 

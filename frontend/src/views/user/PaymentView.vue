@@ -39,7 +39,13 @@
             <div class="card p-5">
               <p class="text-xs font-medium text-gray-400 dark:text-gray-500">{{ t('payment.rechargeAccount') }}</p>
               <p class="mt-1 text-base font-semibold text-gray-900 dark:text-white">{{ user?.username || '' }}</p>
-              <p class="mt-0.5 text-sm font-medium text-green-600 dark:text-green-400">{{ t('payment.currentBalance') }}: {{ user?.balance?.toFixed(2) || '0.00' }}</p>
+              <p data-testid="current-total-balance" class="mt-0.5 text-sm font-medium text-green-600 dark:text-green-400">
+                {{ t('common.totalBalance') }}: ${{ formatWalletAmount(totalBalance) }}
+              </p>
+              <div class="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+                <span>{{ t('common.ordinaryBalance') }}: ${{ formatWalletAmount(ordinaryBalance) }}</span>
+                <span>{{ t('common.giftBalance') }}: ${{ formatWalletAmount(giftBalance) }}</span>
+              </div>
             </div>
             <div v-if="enabledMethods.length === 0" class="card py-16 text-center">
               <p class="text-gray-500 dark:text-gray-400">{{ t('payment.notAvailable') }}</p>
@@ -75,9 +81,17 @@
                   <span class="font-medium text-gray-700 dark:text-gray-300">{{ t('payment.actualPay') }}</span>
                   <span class="text-lg font-bold text-primary-600 dark:text-primary-400">{{ formatSelectedPaymentAmount(totalAmount) }}</span>
                 </div>
-                <div v-if="balanceRechargeMultiplier !== 1" class="flex justify-between" :class="{ 'border-t border-gray-200 pt-2 dark:border-dark-600': feeRate <= 0 }">
-                  <span class="text-gray-500 dark:text-gray-400">{{ t('payment.creditedBalance') }}</span>
-                  <span class="text-gray-900 dark:text-white">${{ creditedAmount.toFixed(2) }}</span>
+                <div data-testid="ordinary-credit" class="flex justify-between" :class="{ 'border-t border-gray-200 pt-2 dark:border-dark-600': feeRate <= 0 }">
+                  <span class="text-gray-500 dark:text-gray-400">{{ t('common.ordinaryBalance') }}</span>
+                  <span class="text-gray-900 dark:text-white">${{ formatWalletAmount(ordinaryCreditedAmount) }}</span>
+                </div>
+                <div data-testid="gift-credit" class="flex justify-between">
+                  <span class="text-gray-500 dark:text-gray-400">{{ t('common.giftBalance') }}</span>
+                  <span class="text-gray-900 dark:text-white">${{ formatWalletAmount(giftCreditedAmount) }}</span>
+                </div>
+                <div data-testid="total-credit" class="flex justify-between border-t border-gray-200 pt-2 dark:border-dark-600">
+                  <span class="font-medium text-gray-700 dark:text-gray-300">{{ t('common.totalBalance') }}</span>
+                  <span class="font-semibold text-primary-600 dark:text-primary-400">${{ formatWalletAmount(totalCreditedAmount) }}</span>
                 </div>
                 <p v-if="balanceRechargeMultiplier !== 1" class="border-t border-gray-200 pt-2 text-xs text-gray-500 dark:border-dark-600 dark:text-gray-400">
                   {{ t('payment.rechargeRatePreview', { currency: selectedCurrency, usd: balanceRechargeMultiplier.toFixed(2) }) }}
@@ -288,6 +302,7 @@ import SubscriptionPlanCard from '@/components/payment/SubscriptionPlanCard.vue'
 import PaymentStatusPanel from '@/components/payment/PaymentStatusPanel.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { DEFAULT_PAYMENT_CURRENCY, formatPaymentAmount, normalizePaymentCurrency } from '@/components/payment/currency'
+import { formatWalletAmount } from '@/components/payment/orderUtils'
 import { planValiditySuffix as validitySuffixOf } from '@/components/payment/validity'
 import type { PaymentMethodOption } from '@/components/payment/PaymentMethodSelector.vue'
 import { buildPaymentErrorToastMessage, describePaymentScenarioError } from './paymentUx'
@@ -303,6 +318,14 @@ const subscriptionStore = useSubscriptionStore()
 const appStore = useAppStore()
 
 const user = computed(() => authStore.user)
+const ordinaryBalance = computed(() => Number(user.value?.balance || 0))
+const giftBalance = computed(() => Number(user.value?.gift_balance || 0))
+const totalBalance = computed(() => {
+  const providedTotal = user.value?.total_balance
+  return providedTotal != null && Number.isFinite(Number(providedTotal))
+    ? Number(providedTotal)
+    : ordinaryBalance.value + giftBalance.value
+})
 const activeSubscriptions = computed(() => subscriptionStore.activeSubscriptions)
 
 function getDaysRemaining(expiresAt: string): number {
@@ -502,7 +525,7 @@ function onPaymentSettled() {
 // All checkout data from single API call
 const checkout = ref<CheckoutInfoResponse>({
   methods: {}, global_min: 0, global_max: 0,
-  plans: [], balance_disabled: false, balance_recharge_multiplier: 1, subscription_usd_to_cny_rate: 0, recharge_fee_rate: 0, help_text: '', help_image_url: '', stripe_publishable_key: '',
+  plans: [], balance_disabled: false, balance_recharge_multiplier: 1, balance_gift_ratio: 0, subscription_usd_to_cny_rate: 0, recharge_fee_rate: 0, help_text: '', help_image_url: '', stripe_publishable_key: '',
 })
 
 const tabs = computed(() => {
@@ -519,12 +542,29 @@ const balanceRechargeMultiplier = computed(() => {
   const multiplier = checkout.value.balance_recharge_multiplier
   return Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1
 })
+const balanceGiftRatio = computed(() => {
+  const ratio = Number(checkout.value.balance_gift_ratio)
+  return Number.isFinite(ratio) ? Math.min(100, Math.max(0, ratio)) : 0
+})
 // 订阅 CNY 换算汇率（1 USD = X CNY）。0 = 未配置，订阅保持 price 直付（与后端 opt-in 条件严格镜像）。
 const subscriptionUsdToCnyRate = computed(() => {
   const rate = checkout.value.subscription_usd_to_cny_rate
   return Number.isFinite(rate) && rate > 0 ? rate : 0
 })
-const creditedAmount = computed(() => Math.round((validAmount.value * balanceRechargeMultiplier.value) * 100) / 100)
+function roundBalanceAmount(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.round((value + Number.EPSILON) * 1e8) / 1e8
+}
+
+const ordinaryCreditedAmount = computed(() =>
+  roundBalanceAmount(validAmount.value * balanceRechargeMultiplier.value)
+)
+const giftCreditedAmount = computed(() =>
+  roundBalanceAmount((ordinaryCreditedAmount.value * balanceGiftRatio.value) / 100)
+)
+const totalCreditedAmount = computed(() =>
+  roundBalanceAmount(ordinaryCreditedAmount.value + giftCreditedAmount.value)
+)
 
 // Adaptive grid: center single card, 2-col for 2 plans, 3-col for 3+
 const planGridClass = computed(() => {

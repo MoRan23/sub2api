@@ -169,16 +169,19 @@ export async function deleteUser(id: number): Promise<{ message: string }> {
  * @param balance - New balance
  * @param operation - Operation type ('set', 'add', 'subtract')
  * @param notes - Optional notes for the balance adjustment
+ * @param giftBalance - Gift balance to add (only supported by the add operation)
  * @returns Updated user
  */
 export async function updateBalance(
   id: number,
   balance: number,
   operation: 'set' | 'add' | 'subtract' = 'set',
-  notes?: string
+  notes?: string,
+  giftBalance: number = 0
 ): Promise<AdminUser> {
   const { data } = await apiClient.post<AdminUser>(`/admin/users/${id}/balance`, {
     balance,
+    gift_balance: giftBalance,
     operation,
     notes: notes || ''
   })
@@ -258,6 +261,8 @@ export interface BalanceHistoryItem {
   code: string
   type: string
   value: number
+  gift_ratio?: number
+  gift_value?: number
   status: string
   used_by: number | null
   used_at: string | null

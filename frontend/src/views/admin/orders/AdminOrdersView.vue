@@ -66,7 +66,10 @@
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderId') }}</p><p class="font-mono text-sm font-medium text-gray-900 dark:text-white">#{{ selectedOrder.id }}</p></div>
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderNo') }}</p><p class="text-sm font-medium text-gray-900 dark:text-white">{{ selectedOrder.out_trade_no }}</p></div>
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.status') }}</p><OrderStatusBadge :status="selectedOrder.status" /></div>
-          <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</p><p class="text-sm font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ selectedOrder.amount.toFixed(2) }}</p></div>
+          <div v-if="selectedOrder.order_type === 'balance'"><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.ordinaryCredit') }}</p><p class="text-sm font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ formatWalletAmount(selectedOrder.amount) }}</p></div>
+          <div v-if="selectedOrder.order_type === 'balance'"><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.giftCredit') }}</p><p class="text-sm font-medium text-emerald-600 dark:text-emerald-400">{{ creditedAmountSymbol }}{{ formatWalletAmount(paymentOrderGiftAmount(selectedOrder)) }}</p></div>
+          <div v-if="selectedOrder.order_type === 'balance'"><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.totalCredit') }}</p><p class="text-sm font-semibold text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ formatWalletAmount(paymentOrderTotalCredit(selectedOrder)) }}</p></div>
+          <div v-else><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</p><p class="text-sm font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ formatWalletAmount(selectedOrder.amount) }}</p></div>
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</p><p class="text-sm font-medium text-gray-900 dark:text-white">{{ paymentAmountSymbol(selectedOrder) }}{{ selectedOrder.pay_amount.toFixed(2) }}</p></div>
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.paymentMethod') }}</p><p class="text-sm text-gray-700 dark:text-gray-300">{{ t('payment.methods.' + selectedOrder.payment_type, selectedOrder.payment_type) }}</p></div>
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.admin.feeRate') }}</p><p class="text-sm text-gray-700 dark:text-gray-300">{{ selectedOrder.fee_rate }}%</p></div>
@@ -111,7 +114,18 @@
       </div>
     </BaseDialog>
 
-    <AdminRefundDialog :show="showRefundDialog" :order="selectedOrder" :submitting="refundSubmitting" :require-force="refundRequireForce" :warning="refundWarning" @confirm="handleRefund" @cancel="closeRefundDialog" />
+    <AdminRefundDialog
+      :show="showRefundDialog"
+      :order="selectedOrder"
+      :submitting="refundSubmitting"
+      :require-force="refundRequireForce"
+      :warning="refundWarning"
+      :user-ordinary-balance="refundWallet?.ordinary ?? null"
+      :user-gift-balance="refundWallet?.gift ?? null"
+      :wallet-loading="refundWalletLoading"
+      @confirm="handleRefund"
+      @cancel="closeRefundDialog"
+    />
   </AppLayout>
 </template>
 
@@ -119,9 +133,15 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import { adminPaymentAPI } from '@/api/admin/payment'
+import { adminPaymentAPI, type RefundResult } from '@/api/admin/payment'
+import { getById as getAdminUserByID } from '@/api/admin/users'
 import { extractI18nErrorMessage } from '@/utils/apiError'
-import { formatOrderDateTime } from '@/components/payment/orderUtils'
+import {
+  formatOrderDateTime,
+  formatWalletAmount,
+  paymentOrderGiftAmount,
+  paymentOrderTotalCredit
+} from '@/components/payment/orderUtils'
 import type { PaymentOrder } from '@/types/payment'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Pagination from '@/components/common/Pagination.vue'
@@ -155,9 +175,12 @@ const showRefundDialog = ref(false)
 const refundSubmitting = ref(false)
 const refundRequireForce = ref(false)
 const refundWarning = ref('')
+const refundWallet = ref<{ ordinary: number; gift: number } | null>(null)
+const refundWalletLoading = ref(false)
 const refundQueryingIds = ref(new Set<number>())
 const orderAuditLogs = ref<AuditLog[]>([])
 const creditedAmountSymbol = currencySymbol('USD')
+let refundWalletRequestID = 0
 
 function paymentAmountSymbol(order: PaymentOrder | null | undefined): string {
   return currencySymbol(order?.currency)
@@ -241,17 +264,53 @@ function openRefundDialog(order: PaymentOrder) {
   selectedOrder.value = order
   refundRequireForce.value = false
   refundWarning.value = ''
+  refundWallet.value = null
   showRefundDialog.value = true
+  void loadRefundWallet(order)
+}
+
+async function loadRefundWallet(order: PaymentOrder) {
+  const requestID = ++refundWalletRequestID
+  refundWalletLoading.value = true
+  try {
+    const user = await getAdminUserByID(order.user_id, true)
+    if (requestID !== refundWalletRequestID || selectedOrder.value?.id !== order.id) return
+    refundWallet.value = {
+      ordinary: Number(user.balance || 0),
+      gift: Number(user.gift_balance || 0)
+    }
+  } catch (_err: unknown) {
+    // The backend remains authoritative when a current wallet snapshot is unavailable.
+  } finally {
+    if (requestID === refundWalletRequestID) refundWalletLoading.value = false
+  }
 }
 
 function closeRefundDialog() {
+  refundWalletRequestID += 1
   showRefundDialog.value = false
   refundRequireForce.value = false
   refundWarning.value = ''
+  refundWallet.value = null
+  refundWalletLoading.value = false
 }
 
 function isRefundPendingWarning(warning: string | undefined): boolean {
   return /pending|处理中|待/.test(String(warning || '').toLowerCase())
+}
+
+function showRefundSuccess(result: RefundResult) {
+  if (result.balance_deducted == null && result.gift_balance_deducted == null) {
+    appStore.showSuccess(t('payment.admin.refundSuccess'))
+    return
+  }
+  const ordinary = Number(result.balance_deducted || 0)
+  const gift = Number(result.gift_balance_deducted || 0)
+  appStore.showSuccess(t('payment.admin.refundSuccessWithDeductions', {
+    ordinary: `${creditedAmountSymbol}${formatWalletAmount(ordinary)}`,
+    gift: `${creditedAmountSymbol}${formatWalletAmount(gift)}`,
+    total: `${creditedAmountSymbol}${formatWalletAmount(ordinary + gift)}`
+  }))
 }
 
 async function handleRefund(data: { amount: number; reason: string; deduct_balance: boolean; force: boolean }) {
@@ -260,7 +319,7 @@ async function handleRefund(data: { amount: number; reason: string; deduct_balan
   try {
     const res = await adminPaymentAPI.refundOrder(selectedOrder.value.id, { amount: data.amount, reason: data.reason, deduct_balance: data.deduct_balance, force: data.force })
     if (res.data.success) {
-      appStore.showSuccess(t('payment.admin.refundSuccess'))
+      showRefundSuccess(res.data)
       closeRefundDialog()
       loadOrders()
       return
@@ -289,7 +348,7 @@ async function handleQueryRefund(order: PaymentOrder) {
   try {
     const res = await adminPaymentAPI.queryRefund(order.id)
     if (res.data.success) {
-      appStore.showSuccess(t('payment.admin.refundSuccess'))
+      showRefundSuccess(res.data)
     } else if (isRefundPendingWarning(res.data.warning)) {
       appStore.showSuccess(t('payment.admin.refundPending'))
     } else {

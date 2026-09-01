@@ -495,6 +495,7 @@ const baseSettingsResponse = {
   payment_enabled_types: [],
   payment_balance_disabled: false,
   payment_balance_recharge_multiplier: 1,
+  payment_balance_gift_ratio: 0,
   payment_subscription_usd_to_cny_rate: 0,
   payment_recharge_fee_rate: 0,
   payment_load_balance_strategy: "round-robin",
@@ -882,6 +883,34 @@ describe("admin SettingsView payment visible method controls", () => {
 
     expect(wrapper.text()).not.toContain("可见方式");
     expect(wrapper.text()).not.toContain("支付来源");
+  });
+
+  it("normalizes and submits the balance gift ratio", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      payment_balance_gift_ratio: 12.3456,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+    await openPaymentTab(wrapper);
+
+    const input = wrapper.get('[data-testid="payment-balance-gift-ratio"]');
+    expect((input.element as HTMLInputElement).value).toBe("12.3456");
+    expect(input.attributes("min")).toBe("0");
+    expect(input.attributes("max")).toBe("100");
+    expect(input.attributes("step")).toBe("0.0001");
+
+    await input.setValue("12.34567");
+    await flushPromises();
+    expect((input.element as HTMLInputElement).value).toBe("12.3457");
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ payment_balance_gift_ratio: 12.3457 }),
+    );
   });
 
   it("shows valid passkey RP configuration and persists the sign-in toggle", async () => {

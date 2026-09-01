@@ -347,13 +347,19 @@ func (r *dashboardAggregationRepository) CleanupUsageBillingDedup(ctx context.Co
 	for {
 		res, err := r.sql.ExecContext(ctx, `
 			WITH victims AS (
-				SELECT ctid, request_id, api_key_id, request_fingerprint, created_at
+				SELECT ctid, request_id, api_key_id, request_fingerprint,
+					ordinary_hold_amount, gift_hold_amount, hold_terminal_kind, created_at
 				FROM usage_billing_dedup
 				WHERE created_at < $1
 				LIMIT $2
+				FOR UPDATE SKIP LOCKED
 			), archived AS (
-				INSERT INTO usage_billing_dedup_archive (request_id, api_key_id, request_fingerprint, created_at)
-				SELECT request_id, api_key_id, request_fingerprint, created_at
+				INSERT INTO usage_billing_dedup_archive (
+					request_id, api_key_id, request_fingerprint,
+					ordinary_hold_amount, gift_hold_amount, hold_terminal_kind, created_at
+				)
+				SELECT request_id, api_key_id, request_fingerprint,
+					ordinary_hold_amount, gift_hold_amount, hold_terminal_kind, created_at
 				FROM victims
 				ON CONFLICT (request_id, api_key_id) DO NOTHING
 			)

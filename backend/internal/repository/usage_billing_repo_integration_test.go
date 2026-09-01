@@ -80,6 +80,78 @@ func TestUsageBillingRepositoryApply_DeduplicatesBalanceBilling(t *testing.T) {
 	require.Equal(t, 1, dedupCount)
 }
 
+func TestUsageBillingRepositoryBatchImageHold_TerminalCASPreventsCrossOperation(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := NewUsageBillingRepository(client, integrationDB)
+
+	user := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("usage-billing-terminal-user-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+		Balance:      4,
+	})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{
+		UserID: user.ID,
+		Key:    "sk-usage-billing-terminal-" + uuid.NewString(),
+		Name:   "billing-terminal",
+	})
+
+	reserve := func(batchID string) {
+		t.Helper()
+		result, err := repo.ReserveBatchImageBalance(ctx, &service.BatchImageBalanceHoldCommand{
+			RequestID:  service.BatchImageHoldRequestID(batchID),
+			APIKeyID:   apiKey.ID,
+			UserID:     user.ID,
+			BatchID:    batchID,
+			HoldAmount: 2,
+		})
+		require.NoError(t, err)
+		require.True(t, result.Applied)
+	}
+	reserve("terminal-a")
+	reserve("terminal-b")
+
+	captureCmd := &service.BatchImageBalanceHoldCommand{
+		RequestID:    service.BatchImageCaptureRequestID("terminal-a"),
+		APIKeyID:     apiKey.ID,
+		UserID:       user.ID,
+		BatchID:      "terminal-a",
+		HoldAmount:   2,
+		ActualAmount: 1,
+	}
+	first, err := repo.CaptureBatchImageBalance(ctx, captureCmd)
+	require.NoError(t, err)
+	require.True(t, first.Applied)
+
+	retry, err := repo.CaptureBatchImageBalance(ctx, captureCmd)
+	require.NoError(t, err)
+	require.False(t, retry.Applied)
+
+	_, err = repo.ReleaseBatchImageBalance(ctx, &service.BatchImageBalanceHoldCommand{
+		RequestID:  service.BatchImageReleaseRequestID("terminal-a"),
+		APIKeyID:   apiKey.ID,
+		UserID:     user.ID,
+		BatchID:    "terminal-a",
+		HoldAmount: 2,
+	})
+	require.ErrorIs(t, err, service.ErrUsageBillingRequestConflict)
+
+	var balance, frozen float64
+	require.NoError(t, integrationDB.QueryRowContext(ctx,
+		"SELECT balance, frozen_balance FROM users WHERE id = $1", user.ID,
+	).Scan(&balance, &frozen))
+	require.InDelta(t, 1.0, balance, 0.000001)
+	require.InDelta(t, 2.0, frozen, 0.000001, "the losing release must not consume terminal-b's hold")
+
+	var terminalKind string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+		SELECT hold_terminal_kind
+		FROM usage_billing_dedup
+		WHERE request_id = $1 AND api_key_id = $2
+	`, service.BatchImageHoldRequestID("terminal-a"), apiKey.ID).Scan(&terminalKind))
+	require.Equal(t, batchImageHoldTerminalCaptured, terminalKind)
+}
+
 func TestUsageBillingRepositoryApply_DeduplicatesSubscriptionBilling(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
@@ -515,8 +587,11 @@ func TestDashboardAggregationRepositoryCleanupUsageBillingDedup_BatchDeletesOldR
 	newCreatedAt := time.Now().UTC().Add(-time.Hour)
 
 	_, err := integrationDB.ExecContext(ctx, `
-		INSERT INTO usage_billing_dedup (request_id, api_key_id, request_fingerprint, created_at)
-		VALUES ($1, 1, $2, $3), ($4, 1, $5, $6)
+		INSERT INTO usage_billing_dedup (
+			request_id, api_key_id, request_fingerprint,
+			ordinary_hold_amount, gift_hold_amount, hold_terminal_kind, created_at
+		)
+		VALUES ($1, 1, $2, 0.6, 0.4, 'captured', $3), ($4, 1, $5, 0, 0, '', $6)
 	`,
 		oldRequestID, strings.Repeat("a", 64), oldCreatedAt,
 		newRequestID, strings.Repeat("b", 64), newCreatedAt,
@@ -536,6 +611,17 @@ func TestDashboardAggregationRepositoryCleanupUsageBillingDedup_BatchDeletesOldR
 	var archivedCount int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM usage_billing_dedup_archive WHERE request_id = $1", oldRequestID).Scan(&archivedCount))
 	require.Equal(t, 1, archivedCount)
+
+	var ordinaryHold, giftHold float64
+	var terminalKind string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+		SELECT ordinary_hold_amount, gift_hold_amount, hold_terminal_kind
+		FROM usage_billing_dedup_archive
+		WHERE request_id = $1 AND api_key_id = 1
+	`, oldRequestID).Scan(&ordinaryHold, &giftHold, &terminalKind))
+	require.InDelta(t, 0.6, ordinaryHold, 0.000001)
+	require.InDelta(t, 0.4, giftHold, 0.000001)
+	require.Equal(t, batchImageHoldTerminalCaptured, terminalKind)
 }
 
 func TestUsageBillingRepositoryApply_DeduplicatesAgainstArchivedKey(t *testing.T) {

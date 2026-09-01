@@ -44,7 +44,7 @@ vi.mock('qrcode', () => ({
 
 import PaymentStatusPanel from '../PaymentStatusPanel.vue'
 
-const orderFactory = (status: string) => ({
+const orderFactory = (status: string, overrides: Record<string, unknown> = {}) => ({
   id: 42,
   user_id: 9,
   amount: 88,
@@ -57,6 +57,7 @@ const orderFactory = (status: string) => ({
   created_at: '2026-04-20T12:00:00Z',
   expires_at: '2099-01-01T12:30:00Z',
   refund_amount: 0,
+  ...overrides,
 })
 
 describe('PaymentStatusPanel', () => {
@@ -98,6 +99,31 @@ describe('PaymentStatusPanel', () => {
     expect(pollOrderStatus).toHaveBeenCalledWith(42)
     expect(wrapper.text()).toContain('payment.result.success')
     expect(wrapper.emitted('success')).toHaveLength(1)
+  })
+
+  it('shows the ordinary, gift, and total balance credit without losing wallet precision', async () => {
+    pollOrderStatus.mockResolvedValue(orderFactory('COMPLETED', {
+      amount: 0.01,
+      gift_amount: 0.00000001,
+    }))
+
+    const wrapper = mount(PaymentStatusPanel, {
+      props: {
+        orderId: 42,
+        qrCode: 'https://pay.example.com/qr/42',
+        expiresAt: '2099-01-01T12:30:00Z',
+        paymentType: 'alipay',
+        orderType: 'balance',
+      },
+      global: { stubs: { Icon: true } },
+    })
+
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="ordinary-credit"]').text()).toContain('$0.01')
+    expect(wrapper.get('[data-test="gift-credit"]').text()).toContain('$0.00000001')
+    expect(wrapper.get('[data-test="total-credit"]').text()).toContain('$0.01000001')
   })
 
   it('shows reopen button in QR mode when payUrl is also available', async () => {

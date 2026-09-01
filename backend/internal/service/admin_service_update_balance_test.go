@@ -44,16 +44,49 @@ func (s *balanceUserRepoStub) apply(next func(current float64) float64) (Balance
 
 type balanceRedeemRepoStub struct {
 	*redeemRepoStub
-	created []*RedeemCode
+	created   []*RedeemCode
+	createErr error
 }
 
 func (s *balanceRedeemRepoStub) Create(ctx context.Context, code *RedeemCode) error {
+	if s.createErr != nil {
+		return s.createErr
+	}
 	if code == nil {
 		return nil
 	}
 	clone := *code
 	s.created = append(s.created, &clone)
 	return nil
+}
+
+type giftBalanceUserRepoStub struct {
+	*balanceUserRepoStub
+	changes         []WalletChange
+	ordinaryApplied *float64
+}
+
+func (s *giftBalanceUserRepoStub) AdjustWallets(_ context.Context, _ int64, ordinaryDelta, giftDelta float64) (WalletChange, error) {
+	if s.adjustErr != nil {
+		return WalletChange{}, s.adjustErr
+	}
+	if s.userRepoStub == nil || s.userRepoStub.user == nil {
+		return WalletChange{}, ErrUserNotFound
+	}
+	if s.ordinaryApplied != nil {
+		ordinaryDelta = *s.ordinaryApplied
+	}
+	user := s.userRepoStub.user
+	change := WalletChange{
+		OldOrdinary: user.Balance,
+		NewOrdinary: user.Balance + ordinaryDelta,
+		OldGift:     user.GiftBalance,
+		NewGift:     user.GiftBalance + giftDelta,
+	}
+	user.Balance = change.NewOrdinary
+	user.GiftBalance = change.NewGift
+	s.changes = append(s.changes, change)
+	return change, nil
 }
 
 type authCacheInvalidatorStub struct {
@@ -111,6 +144,7 @@ func TestAdminService_UpdateUserBalance_UsesAtomicPrimitives(t *testing.T) {
 		{name: "add", operation: "add", amount: 5, want: BalanceChange{Old: 10, New: 15}},
 		{name: "subtract", operation: "subtract", amount: 4, want: BalanceChange{Old: 10, New: 6}},
 		{name: "set", operation: "set", amount: 2, want: BalanceChange{Old: 10, New: 2}},
+		{name: "set zero", operation: "set", amount: 0, want: BalanceChange{Old: 10, New: 0}},
 	}
 
 	for _, tt := range tests {
@@ -121,12 +155,95 @@ func TestAdminService_UpdateUserBalance_UsesAtomicPrimitives(t *testing.T) {
 				redeemCodeRepo: &balanceRedeemRepoStub{redeemRepoStub: &redeemRepoStub{}},
 			}
 
-			user, err := svc.UpdateUserBalance(context.Background(), 7, tt.amount, tt.operation, "")
+			user, err := svc.UpdateUserBalance(context.Background(), 7, tt.amount, 0, tt.operation, "")
 			require.NoError(t, err)
 			require.Equal(t, []BalanceChange{tt.want}, repo.changes)
 			require.Equal(t, tt.want.New, user.Balance)
 		})
 	}
+}
+
+func TestAdminService_UpdateUserBalance_GiftOnlyAddPreservesOrdinaryDebt(t *testing.T) {
+	baseRepo := &userRepoStub{user: &User{ID: 7, Balance: -2, GiftBalance: 3}}
+	repo := &giftBalanceUserRepoStub{balanceUserRepoStub: &balanceUserRepoStub{userRepoStub: baseRepo}}
+	redeemRepo := &balanceRedeemRepoStub{redeemRepoStub: &redeemRepoStub{}}
+	affiliate := &adminRechargeAffiliateAccruerStub{}
+	svc := &adminServiceImpl{
+		userRepo:         repo,
+		redeemCodeRepo:   redeemRepo,
+		settingService:   adminRechargeSettingService(true),
+		affiliateService: affiliate,
+	}
+
+	user, err := svc.UpdateUserBalance(context.Background(), 7, 0, 4, "add", "gift only")
+	require.NoError(t, err)
+	require.Equal(t, -2.0, user.Balance)
+	require.Equal(t, 7.0, user.GiftBalance)
+	require.Empty(t, affiliate.calls, "gift credit must not accrue an affiliate rebate")
+	require.Len(t, redeemRepo.created, 1)
+	require.Zero(t, redeemRepo.created[0].Value)
+	require.Equal(t, 4.0, redeemRepo.created[0].GiftValue)
+}
+
+func TestAdminService_UpdateUserBalance_UsesActualOrdinaryDiffForHistoryAndAffiliate(t *testing.T) {
+	applied := 2.0
+	baseRepo := &userRepoStub{user: &User{ID: 7, Balance: 10, GiftBalance: 1}}
+	repo := &giftBalanceUserRepoStub{
+		balanceUserRepoStub: &balanceUserRepoStub{userRepoStub: baseRepo},
+		ordinaryApplied:     &applied,
+	}
+	redeemRepo := &balanceRedeemRepoStub{redeemRepoStub: &redeemRepoStub{}}
+	affiliate := &adminRechargeAffiliateAccruerStub{}
+	svc := &adminServiceImpl{
+		userRepo:         repo,
+		redeemCodeRepo:   redeemRepo,
+		settingService:   adminRechargeSettingService(true),
+		affiliateService: affiliate,
+	}
+
+	user, err := svc.UpdateUserBalance(context.Background(), 7, 5, 3, "add", "actual delta")
+	require.NoError(t, err)
+	require.Equal(t, 12.0, user.Balance)
+	require.Equal(t, 4.0, user.GiftBalance)
+	require.Equal(t, []adminRechargeAffiliateAccrual{{userID: 7, amount: 2}}, affiliate.calls)
+	require.Len(t, redeemRepo.created, 1)
+	require.Equal(t, 2.0, redeemRepo.created[0].Value)
+	require.Equal(t, 3.0, redeemRepo.created[0].GiftValue)
+}
+
+func TestAdminService_UpdateUserBalance_RejectsGiftForSetAndSubtract(t *testing.T) {
+	for _, operation := range []string{"set", "subtract"} {
+		t.Run(operation, func(t *testing.T) {
+			repo := &giftBalanceUserRepoStub{balanceUserRepoStub: &balanceUserRepoStub{userRepoStub: &userRepoStub{user: &User{ID: 7, Balance: 10}}}}
+			svc := &adminServiceImpl{
+				userRepo:       repo,
+				redeemCodeRepo: &balanceRedeemRepoStub{redeemRepoStub: &redeemRepoStub{}},
+			}
+
+			_, err := svc.UpdateUserBalance(context.Background(), 7, 1, 1, operation, "")
+			require.Error(t, err)
+			require.Empty(t, repo.changes)
+		})
+	}
+}
+
+func TestAdminService_UpdateUserBalance_HistoryFailureSkipsPostCommitSideEffects(t *testing.T) {
+	baseRepo := &userRepoStub{user: &User{ID: 7, Balance: 10}}
+	repo := &balanceUserRepoStub{userRepoStub: baseRepo}
+	invalidator := &authCacheInvalidatorStub{}
+	affiliate := &adminRechargeAffiliateAccruerStub{}
+	svc := &adminServiceImpl{
+		userRepo:             repo,
+		redeemCodeRepo:       &balanceRedeemRepoStub{redeemRepoStub: &redeemRepoStub{}, createErr: errors.New("history unavailable")},
+		authCacheInvalidator: invalidator,
+		settingService:       adminRechargeSettingService(true),
+		affiliateService:     affiliate,
+	}
+
+	_, err := svc.UpdateUserBalance(context.Background(), 7, 5, 0, "add", "")
+	require.ErrorContains(t, err, "create balance adjustment history")
+	require.Empty(t, invalidator.userIDs)
+	require.Empty(t, affiliate.calls)
 }
 
 func TestAdminService_UpdateUserBalance_RejectsNegativeResult(t *testing.T) {
@@ -136,7 +253,7 @@ func TestAdminService_UpdateUserBalance_RejectsNegativeResult(t *testing.T) {
 		redeemCodeRepo: &balanceRedeemRepoStub{redeemRepoStub: &redeemRepoStub{}},
 	}
 
-	_, err := svc.UpdateUserBalance(context.Background(), 7, 4, "subtract", "")
+	_, err := svc.UpdateUserBalance(context.Background(), 7, 4, 0, "subtract", "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "balance cannot be negative")
 	require.Empty(t, repo.changes, "refused adjustment must not be applied")
@@ -150,7 +267,7 @@ func TestAdminService_UpdateUserBalance_RejectsUnknownOperation(t *testing.T) {
 		redeemCodeRepo: &balanceRedeemRepoStub{redeemRepoStub: &redeemRepoStub{}},
 	}
 
-	_, err := svc.UpdateUserBalance(context.Background(), 7, 1, "multiply", "")
+	_, err := svc.UpdateUserBalance(context.Background(), 7, 1, 0, "multiply", "")
 	require.Error(t, err)
 	require.Empty(t, repo.changes)
 }
@@ -166,7 +283,7 @@ func TestAdminService_UpdateUserBalance_InvalidatesAuthCache(t *testing.T) {
 		authCacheInvalidator: invalidator,
 	}
 
-	_, err := svc.UpdateUserBalance(context.Background(), 7, 5, "add", "")
+	_, err := svc.UpdateUserBalance(context.Background(), 7, 5, 0, "add", "")
 	require.NoError(t, err)
 	require.Equal(t, []int64{7}, invalidator.userIDs)
 	require.Len(t, redeemRepo.created, 1)
@@ -183,7 +300,7 @@ func TestAdminService_UpdateUserBalance_NoChangeNoInvalidate(t *testing.T) {
 		authCacheInvalidator: invalidator,
 	}
 
-	_, err := svc.UpdateUserBalance(context.Background(), 7, 10, "set", "")
+	_, err := svc.UpdateUserBalance(context.Background(), 7, 10, 0, "set", "")
 	require.NoError(t, err)
 	require.Empty(t, invalidator.userIDs)
 	require.Empty(t, redeemRepo.created)
@@ -236,7 +353,7 @@ func TestAdminService_UpdateUserBalance_AdminRechargeAffiliateRebate(t *testing.
 				affiliateService: affiliate,
 			}
 
-			_, err := svc.UpdateUserBalance(context.Background(), 7, tt.amount, tt.operation, "")
+			_, err := svc.UpdateUserBalance(context.Background(), 7, tt.amount, 0, tt.operation, "")
 			require.NoError(t, err)
 			require.Equal(t, tt.wantCalls, affiliate.calls)
 		})
@@ -255,7 +372,7 @@ func TestAdminService_UpdateUserBalance_AffiliateFailureDoesNotRollbackRecharge(
 		affiliateService: affiliate,
 	}
 
-	user, err := svc.UpdateUserBalance(context.Background(), 7, 5, "add", "")
+	user, err := svc.UpdateUserBalance(context.Background(), 7, 5, 0, "add", "")
 	require.NoError(t, err)
 	require.Equal(t, 15.0, user.Balance)
 	require.Equal(t, []adminRechargeAffiliateAccrual{{userID: 7, amount: 5}}, affiliate.calls)

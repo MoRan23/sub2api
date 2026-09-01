@@ -148,6 +148,9 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		SetPasswordHash(userIn.PasswordHash).
 		SetRole(userIn.Role).
 		SetBalance(userIn.Balance).
+		SetGiftBalance(userIn.GiftBalance).
+		SetFrozenBalance(userIn.FrozenBalance).
+		SetFrozenGiftBalance(userIn.FrozenGiftBalance).
 		SetConcurrency(userIn.Concurrency).
 		SetStatus(userIn.Status).
 		SetSignupSource(userSignupSourceOrDefault(userIn.SignupSource)).
@@ -178,7 +181,7 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 }
 
 func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, error) {
-	m, err := r.client.User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
+	m, err := clientFromContext(ctx, r.client).User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
@@ -196,7 +199,7 @@ func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, 
 
 func (r *userRepository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*service.User, error) {
 	ctx = mixins.SkipSoftDelete(ctx)
-	m, err := r.client.User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
+	m, err := clientFromContext(ctx, r.client).User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
@@ -653,6 +656,9 @@ func userListOrder(params pagination.PaginationParams) []func(*entsql.Selector) 
 	if sortBy == "last_used_at" {
 		return userLastUsedAtOrder(sortOrder)
 	}
+	if sortBy == "balance" {
+		return userTotalBalanceOrder(sortOrder)
+	}
 
 	var field string
 	defaultField := true
@@ -666,9 +672,6 @@ func userListOrder(params pagination.PaginationParams) []func(*entsql.Selector) 
 		defaultField = false
 	case "role":
 		field = dbuser.FieldRole
-		defaultField = false
-	case "balance":
-		field = dbuser.FieldBalance
 		defaultField = false
 	case "concurrency":
 		field = dbuser.FieldConcurrency
@@ -709,6 +712,22 @@ func userListOrder(params pagination.PaginationParams) []func(*entsql.Selector) 
 		}
 	}
 	return []func(*entsql.Selector){dbent.Desc(field), dbent.Desc(dbuser.FieldID)}
+}
+
+func userTotalBalanceOrder(sortOrder string) []func(*entsql.Selector) {
+	direction := "DESC"
+	tieOrder := dbent.Desc(dbuser.FieldID)
+	if sortOrder == pagination.SortOrderAsc {
+		direction = "ASC"
+		tieOrder = dbent.Asc(dbuser.FieldID)
+	}
+	return []func(*entsql.Selector){
+		func(s *entsql.Selector) {
+			expr := fmt.Sprintf("(%s + %s) %s", s.C(dbuser.FieldBalance), s.C(dbuser.FieldGiftBalance), direction)
+			s.OrderExpr(entsql.Expr(expr))
+		},
+		tieOrder,
+	}
 }
 
 func (r *userRepository) GetLatestUsedAtByUserIDs(ctx context.Context, userIDs []int64) (map[int64]*time.Time, error) {
@@ -828,6 +847,9 @@ func (r *userRepository) filterUsersByAttributes(ctx context.Context, attrs map[
 }
 
 func (r *userRepository) UpdateBalance(ctx context.Context, id int64, amount float64) error {
+	if amount < 0 {
+		return r.DeductBalance(ctx, id, -amount)
+	}
 	client := clientFromContext(ctx, r.client)
 	update := client.User.Update().Where(dbuser.IDEQ(id)).AddBalance(amount)
 	// Track cumulative recharge amount for percentage-based notifications
@@ -869,29 +891,186 @@ func (r *userRepository) ApplyRedeemBalanceAdjustment(ctx context.Context, id in
 // 透支策略：允许余额变为负数，确保当前请求能够完成
 // 中间件会阻止余额 <= 0 的用户发起后续请求
 func (r *userRepository) DeductBalance(ctx context.Context, id int64, amount float64) error {
-	client := clientFromContext(ctx, r.client)
-	n, err := client.User.Update().
-		Where(dbuser.IDEQ(id), dbuser.BalanceGTE(amount)).
-		AddBalance(-amount).
-		Save(ctx)
+	if amount < 0 {
+		return fmt.Errorf("deduction amount must be nonnegative")
+	}
+	const updateSQL = `
+		WITH target AS (
+			SELECT id, balance, gift_balance
+			FROM users
+			WHERE id = $2 AND deleted_at IS NULL
+			FOR UPDATE
+		), allocation AS (
+			SELECT id, balance, gift_balance,
+				LEAST(GREATEST(balance, 0), $1) AS ordinary_debit
+			FROM target
+		), allocated AS (
+			SELECT id, balance, gift_balance, ordinary_debit,
+				LEAST(gift_balance, GREATEST($1 - ordinary_debit, 0)) AS gift_debit
+			FROM allocation
+		)
+		UPDATE users AS u
+		SET balance = a.balance - a.ordinary_debit
+				- GREATEST($1 - a.ordinary_debit - a.gift_debit, 0),
+			gift_balance = a.gift_balance - a.gift_debit,
+			updated_at = NOW()
+		FROM allocated AS a
+		WHERE u.id = a.id AND u.deleted_at IS NULL
+		RETURNING u.id
+	`
+	rows, err := clientFromContext(ctx, r.client).QueryContext(ctx, updateSQL, amount, id)
 	if err != nil {
 		return err
 	}
-	if n > 0 {
-		return nil
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return service.ErrUserNotFound
 	}
+	var updatedID int64
+	if err := rows.Scan(&updatedID); err != nil {
+		return err
+	}
+	return rows.Err()
+}
 
-	n, err = client.User.Update().
-		Where(dbuser.IDEQ(id)).
-		AddBalance(-amount).
-		Save(ctx)
+// CreditRedeemWallet atomically credits both wallets and counts only the
+// ordinary amount toward total_recharged.
+func (r *userRepository) CreditRedeemWallet(ctx context.Context, id int64, ordinary, gift float64) error {
+	if ordinary < 0 || gift < 0 {
+		return fmt.Errorf("wallet credit amounts must be nonnegative")
+	}
+	result, err := clientFromContext(ctx, r.client).ExecContext(ctx, `
+		UPDATE users
+		SET balance = balance + $1,
+			gift_balance = gift_balance + $2,
+			total_recharged = total_recharged + $1,
+			updated_at = NOW()
+		WHERE id = $3 AND deleted_at IS NULL
+	`, ordinary, gift, id)
 	if err != nil {
 		return err
 	}
-	if n == 0 {
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
 		return service.ErrUserNotFound
 	}
 	return nil
+}
+
+// RestoreWallets restores exact wallet amounts without changing cumulative recharge.
+func (r *userRepository) RestoreWallets(ctx context.Context, id int64, ordinary, gift float64) error {
+	if ordinary < 0 || gift < 0 {
+		return fmt.Errorf("wallet restore amounts must be nonnegative")
+	}
+	result, err := clientFromContext(ctx, r.client).ExecContext(ctx, `
+		UPDATE users
+		SET balance = balance + $1,
+			gift_balance = gift_balance + $2,
+			updated_at = NOW()
+		WHERE id = $3 AND deleted_at IS NULL
+	`, ordinary, gift, id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrUserNotFound
+	}
+	return nil
+}
+
+// DeductAvailableWallets atomically deducts up to the requested amount from
+// each wallet independently. It never creates debt and is used by refunds.
+func (r *userRepository) DeductAvailableWallets(ctx context.Context, id int64, ordinary, gift float64) (service.WalletAmounts, error) {
+	if ordinary < 0 || gift < 0 {
+		return service.WalletAmounts{}, fmt.Errorf("wallet deduction amounts must be nonnegative")
+	}
+	rows, err := clientFromContext(ctx, r.client).QueryContext(ctx, `
+		WITH target AS (
+			SELECT id, balance, gift_balance
+			FROM users
+			WHERE id = $3 AND deleted_at IS NULL
+			FOR UPDATE
+		), updated AS (
+			UPDATE users AS u
+			SET balance = target.balance - LEAST($1, GREATEST(target.balance, 0)),
+				gift_balance = target.gift_balance - LEAST($2, target.gift_balance),
+				updated_at = NOW()
+			FROM target
+			WHERE u.id = target.id AND u.deleted_at IS NULL
+			RETURNING target.balance - u.balance AS ordinary_deducted,
+				target.gift_balance - u.gift_balance AS gift_deducted
+		)
+		SELECT ordinary_deducted, gift_deducted FROM updated
+	`, ordinary, gift, id)
+	if err != nil {
+		return service.WalletAmounts{}, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return service.WalletAmounts{}, err
+		}
+		return service.WalletAmounts{}, service.ErrUserNotFound
+	}
+	var deducted service.WalletAmounts
+	if err := rows.Scan(&deducted.Ordinary, &deducted.Gift); err != nil {
+		return service.WalletAmounts{}, err
+	}
+	return deducted, rows.Err()
+}
+
+// AdjustWallets applies an administrator add operation atomically. Existing
+// ordinary debt is preserved; both deltas are credits and must be nonnegative.
+func (r *userRepository) AdjustWallets(ctx context.Context, id int64, ordinaryDelta, giftDelta float64) (service.WalletChange, error) {
+	if ordinaryDelta < 0 || giftDelta < 0 {
+		return service.WalletChange{}, fmt.Errorf("wallet adjustment amounts must be nonnegative")
+	}
+	rows, err := clientFromContext(ctx, r.client).QueryContext(ctx, `
+		WITH target AS (
+			SELECT id, balance, gift_balance, total_recharged
+			FROM users
+			WHERE id = $3 AND deleted_at IS NULL
+			FOR UPDATE
+		), updated AS (
+		UPDATE users AS u
+		SET balance = target.balance + $1,
+			gift_balance = target.gift_balance + $2,
+			total_recharged = target.total_recharged + $1,
+			updated_at = NOW()
+			FROM target
+			WHERE u.id = target.id AND u.deleted_at IS NULL
+			RETURNING target.balance AS old_ordinary,
+				u.balance AS new_ordinary,
+				target.gift_balance AS old_gift,
+				u.gift_balance AS new_gift
+		)
+		SELECT old_ordinary, new_ordinary, old_gift, new_gift FROM updated
+	`, ordinaryDelta, giftDelta, id)
+	if err != nil {
+		return service.WalletChange{}, err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var change service.WalletChange
+		if err := rows.Scan(&change.OldOrdinary, &change.NewOrdinary, &change.OldGift, &change.NewGift); err != nil {
+			return service.WalletChange{}, err
+		}
+		return change, rows.Err()
+	}
+	if err := rows.Err(); err != nil {
+		return service.WalletChange{}, err
+	}
+	return service.WalletChange{}, service.ErrUserNotFound
 }
 
 // DeductAvailableBalance atomically deducts min(amount, max(balance, 0)).
@@ -1507,7 +1686,7 @@ func (r *userRepository) loadAllowedGroups(ctx context.Context, userIDs []int64)
 		return out, nil
 	}
 
-	rows, err := r.client.UserAllowedGroup.Query().
+	rows, err := clientFromContext(ctx, r.client).UserAllowedGroup.Query().
 		Where(userallowedgroup.UserIDIn(userIDs...)).
 		All(ctx)
 	if err != nil {
@@ -1657,6 +1836,10 @@ func applyUserEntityToService(dst *service.User, src *dbent.User) {
 		return
 	}
 	dst.ID = src.ID
+	dst.Balance = src.Balance
+	dst.GiftBalance = src.GiftBalance
+	dst.FrozenBalance = src.FrozenBalance
+	dst.FrozenGiftBalance = src.FrozenGiftBalance
 	dst.SignupSource = src.SignupSource
 	dst.LastLoginAt = src.LastLoginAt
 	dst.LastActiveAt = src.LastActiveAt

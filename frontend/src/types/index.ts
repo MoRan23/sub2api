@@ -85,8 +85,12 @@ export interface User {
   oidc_bound?: boolean
   wechat_bound?: boolean
   role: 'admin' | 'user' // User role for authorization
-  balance: number // User balance for API usage
-  frozen_balance?: number // Balance currently held by async batch jobs
+  balance: number // Ordinary balance for API usage
+  gift_balance?: number // Promotional balance, spent after ordinary balance
+  total_balance?: number // Available ordinary + gift balance
+  frozen_balance?: number // Ordinary balance currently held by async batch jobs
+  frozen_gift_balance?: number // Gift balance currently held by async batch jobs
+  total_frozen_balance?: number // Frozen ordinary + gift balance
   concurrency: number // Allowed concurrent requests
   rpm_limit?: number // User-level RPM cap (0 = unlimited); effective as fallback when group has no rpm_limit
   status: 'active' | 'disabled' // Account status
@@ -1782,6 +1786,8 @@ export interface RedeemCode {
   code: string
   type: RedeemCodeType
   value: number
+  gift_ratio?: number
+  gift_value?: number
   status: 'active' | 'used' | 'expired' | 'unused' | 'disabled'
   used_by: number | null
   used_at: string | null
@@ -1799,6 +1805,7 @@ export interface GenerateRedeemCodesRequest {
   count: number
   type: RedeemCodeType
   value: number
+  gift_ratio?: number
   group_id?: number | null // 订阅类型专用
   validity_days?: number // 订阅类型专用
   expires_at?: string | null

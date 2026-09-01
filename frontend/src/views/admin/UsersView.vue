@@ -421,18 +421,21 @@
             </span>
           </template>
 
-          <template #cell-balance="{ value, row }">
+          <template #cell-balance="{ row }">
             <div class="flex items-center gap-2">
               <div class="group relative">
                 <button
+                  data-test="user-total-balance"
                   class="font-medium text-gray-900 underline decoration-dashed decoration-gray-300 underline-offset-4 transition-colors hover:text-primary-600 dark:text-white dark:decoration-dark-500 dark:hover:text-primary-400"
                   @click="handleBalanceHistory(row)"
                 >
-                  ${{ value.toFixed(2) }}
+                  ${{ formatBalanceValue(getTotalBalance(row)) }}
                 </button>
                 <!-- Instant tooltip -->
-                <div class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-xs text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover:opacity-100 dark:bg-dark-600">
-                  {{ t('admin.users.balanceHistoryTip') }}
+                <div class="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-gray-900 px-2.5 py-2 text-xs text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover:opacity-100 dark:bg-dark-600">
+                  <div>{{ t('admin.users.ordinaryBalance') }}: ${{ formatBalanceValue(Number(row.balance || 0)) }}</div>
+                  <div>{{ t('admin.users.giftBalance') }}: ${{ formatBalanceValue(Number(row.gift_balance || 0)) }}</div>
+                  <div class="mt-1 border-t border-white/20 pt-1 text-gray-300">{{ t('admin.users.balanceHistoryTip') }}</div>
                   <div class="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-gray-900 dark:border-t-dark-600"></div>
                 </div>
               </div>
@@ -778,6 +781,7 @@ import { useAppStore } from '@/stores/app'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { formatDateTime } from '@/utils/format'
+import { formatWalletAmount } from '@/components/payment/orderUtils'
 import Icon from '@/components/icons/Icon.vue'
 
 const { t } = useI18n()
@@ -1307,6 +1311,11 @@ const handleSelectedKeysUpdate = (keys: Array<string | number>) => {
 
 const getUserSelectionLabel = (user: AdminUser) =>
   t('admin.users.bulkLimits.selectUser', { email: user.email })
+
+const getTotalBalance = (user: AdminUser) => Number(
+  user.total_balance ?? Number(user.balance || 0) + Number(user.gift_balance || 0)
+)
+const formatBalanceValue = formatWalletAmount
 
 // User attribute definitions and values
 const attributeDefinitions = ref<UserAttributeDefinition[]>([])

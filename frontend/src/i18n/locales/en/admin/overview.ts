@@ -391,7 +391,7 @@ export default {
     affiliates: {
       invitesDescription: 'View site-wide inviter and invitee relationships',
       rebatesDescription: 'View recharge orders that generated affiliate rebates',
-      transfersDescription: 'View affiliate quota transfers into account balance',
+      transfersDescription: 'View affiliate quota transfers into gift balance',
       errors: {
         loadFailed: 'Failed to load affiliate records'
       },
@@ -527,7 +527,7 @@ export default {
         role: 'Role',
         groups: 'Groups',
         subscriptions: 'Subscriptions',
-        balance: 'Balance',
+        balance: 'Total Balance',
         balancePlatformQuota: 'Balance (Platform Quota)',
         usage: 'Usage',
         usageAnthropic: 'Usage (Claude)',
@@ -631,16 +631,21 @@ export default {
       deposit: 'Deposit',
       withdraw: 'Withdraw',
       depositAmount: 'Deposit Amount',
+      ordinaryDepositAmount: 'Ordinary Balance Amount',
+      giftDepositAmount: 'Gift Balance Amount',
+      giftDepositHint: 'Gift balance is credited separately and excluded from total recharge and affiliate rebate bases. Enter an ordinary or gift amount.',
       withdrawAmount: 'Withdraw Amount',
       withdrawAll: 'All',
-      currentBalance: 'Current Balance',
+      currentBalance: 'Current Total Balance',
+      ordinaryBalance: 'Ordinary Balance',
+      giftBalance: 'Gift Balance',
       depositNotesPlaceholder:
         'e.g., New user registration bonus, promotional credit, compensation, etc.',
       withdrawNotesPlaceholder:
         'e.g., Service issue refund, incorrect charge reversal, account closure refund, etc.',
       notesOptional: 'Notes are optional but helpful for record keeping',
       amountHint: 'Please enter a positive amount',
-      newBalance: 'New Balance',
+      newBalance: 'New Total Balance',
       depositing: 'Depositing...',
       withdrawing: 'Withdrawing...',
       confirmDeposit: 'Confirm Deposit',
@@ -663,7 +668,7 @@ export default {
       noBalanceHistory: 'No records found for this user',
       allTypes: 'All Types',
       typeBalance: 'Balance (Redeem)',
-      typeAffiliateBalance: 'Balance (Affiliate Transfer)',
+      typeAffiliateBalance: 'Gift Balance (Affiliate Transfer)',
       typeAdminBalance: 'Balance (Admin)',
       typeConcurrency: 'Concurrency (Redeem)',
       typeAdminConcurrency: 'Concurrency (Admin)',
@@ -671,6 +676,11 @@ export default {
       failedToLoadBalanceHistory: 'Failed to load balance history',
       createdAt: 'Created',
       totalRecharged: 'Total Recharged',
+      ordinaryCredit: 'Ordinary Balance Credit',
+      giftCredit: 'Gift Balance Credit',
+      totalCredit: 'Total Credit',
+      estimatedGiftRecovery: 'Estimated Gift Recovery',
+      estimatedTotalRecovery: 'Estimated Total Recovery',
       roles: {
         admin: 'Admin',
         user: 'User'

@@ -671,7 +671,7 @@ export default {
 
   affiliate: {
     title: '邀请返利',
-    description: '邀请新用户注册，并将返利额度转入账户余额',
+    description: '邀请新用户注册，并将返利额度划转到赠送余额',
     yourCode: '我的邀请码',
     inviteLink: '邀请链接',
     copyCode: '复制邀请码',
@@ -679,7 +679,7 @@ export default {
     codeCopied: '邀请码已复制',
     linkCopied: '邀请链接已复制',
     loadFailed: '加载邀请返利数据失败',
-    transferFailed: '转入余额失败',
+    transferFailed: '划转赠送余额失败',
     stats: {
       rebateRate: '我的返利比例',
       rebateRateHint: '被邀请用户每次充值后你可获得的返利比例',
@@ -690,12 +690,12 @@ export default {
       totalQuota: '历史返利额度'
     },
     transfer: {
-      title: '返利额度转余额',
-      description: '将当前可用返利额度一键转入账户余额',
-      button: '转入余额',
-      transferring: '转入中...',
-      empty: '当前没有可转入额度',
-      success: '已转入余额：{amount}'
+      title: '返利额度划转赠送余额',
+      description: '将当前可用返利额度一键划转到赠送余额',
+      button: '划转赠送余额',
+      transferring: '划转中...',
+      empty: '当前没有可划转额度',
+      success: '已划转到赠送余额：{amount}'
     },
     invitees: {
       title: '已邀请用户',
@@ -711,8 +711,8 @@ export default {
       title: '使用说明',
       line1: '将邀请码或邀请链接分享给新用户。',
       line2: '被邀请用户充值后，你可获得 {rate} 的返利额度。',
-      line3: '返利额度可随时转入账户余额。',
-      line4: '新产生的返利需要经过冻结期后才能提现。'
+      line3: '返利额度可随时划转到赠送余额。',
+      line4: '新产生的返利需要经过冻结期后才能划转。'
     }
   },
 
@@ -742,7 +742,7 @@ export default {
     recentActivity: '最近活动',
     historyWillAppear: '您的兑换历史将显示在这里',
     balanceAddedRedeem: '余额充值（兑换）',
-    balanceAddedAffiliate: '余额充值（返利转入）',
+    balanceAddedAffiliate: '赠送余额（返利划转）',
     balanceAddedAdmin: '余额充值（管理员）',
     balanceDeductedAdmin: '余额扣除（管理员）',
     concurrencyAddedRedeem: '并发增加（兑换）',

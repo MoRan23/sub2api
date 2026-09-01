@@ -90,6 +90,8 @@ type CreateOrderRequest struct {
 type CreateOrderResponse struct {
 	OrderID                       int64                           `json:"order_id"`
 	Amount                        float64                         `json:"amount"`
+	GiftRatio                     float64                         `json:"gift_ratio"`
+	GiftAmount                    float64                         `json:"gift_amount"`
 	PayAmount                     float64                         `json:"pay_amount"`
 	FeeRate                       float64                         `json:"fee_rate"`
 	Status                        string                          `json:"status"`
@@ -122,25 +124,27 @@ type OrderListParams struct {
 }
 
 type RefundPlan struct {
-	OrderID         int64
-	Order           *dbent.PaymentOrder
-	RefundAmount    float64
-	GatewayAmount   float64
-	Reason          string
-	Force           bool
-	DeductBalance   bool
-	DeductionType   string
-	BalanceToDeduct float64
-	SubDaysToDeduct int
-	SubscriptionID  int64
+	OrderID             int64
+	Order               *dbent.PaymentOrder
+	RefundAmount        float64
+	GatewayAmount       float64
+	Reason              string
+	Force               bool
+	DeductBalance       bool
+	DeductionType       string
+	BalanceToDeduct     float64
+	GiftBalanceToDeduct float64
+	SubDaysToDeduct     int
+	SubscriptionID      int64
 }
 
 type RefundResult struct {
-	Success         bool    `json:"success"`
-	Warning         string  `json:"warning,omitempty"`
-	RequireForce    bool    `json:"require_force,omitempty"`
-	BalanceDeducted float64 `json:"balance_deducted,omitempty"`
-	SubDaysDeducted int     `json:"subscription_days_deducted,omitempty"`
+	Success             bool    `json:"success"`
+	Warning             string  `json:"warning,omitempty"`
+	RequireForce        bool    `json:"require_force,omitempty"`
+	BalanceDeducted     float64 `json:"balance_deducted,omitempty"`
+	GiftBalanceDeducted float64 `json:"gift_balance_deducted,omitempty"`
+	SubDaysDeducted     int     `json:"subscription_days_deducted,omitempty"`
 }
 
 type DashboardStats struct {

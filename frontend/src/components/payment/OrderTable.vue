@@ -18,8 +18,17 @@
         <span v-if="row.fee_rate > 0" class="ml-1 text-xs text-gray-400" :title="t('payment.orders.fee') + ': ' + row.fee_rate + '%'">
           ({{ t('payment.orders.fee') }} {{ row.fee_rate }}%)
         </span>
-        <div v-if="row.amount !== row.pay_amount" class="text-xs text-gray-500">
-          {{ t('payment.orders.creditedAmount') }}: {{ creditedAmountSymbol }}{{ row.amount.toFixed(2) }}
+        <div v-if="row.order_type === 'balance'" class="mt-0.5 text-xs text-gray-500">
+          {{ t('payment.orders.ordinaryCredit') }}: {{ creditedAmountSymbol }}{{ formatWalletAmount(row.amount) }}
+          <div class="text-emerald-600 dark:text-emerald-400">
+            {{ t('payment.orders.giftCredit') }}: {{ creditedAmountSymbol }}{{ formatWalletAmount(paymentOrderGiftAmount(row)) }}
+          </div>
+          <div class="font-medium text-gray-700 dark:text-gray-300">
+            {{ t('payment.orders.totalCredit') }}: {{ creditedAmountSymbol }}{{ formatWalletAmount(paymentOrderTotalCredit(row)) }}
+          </div>
+        </div>
+        <div v-else-if="row.amount !== row.pay_amount" class="text-xs text-gray-500">
+          {{ t('payment.orders.creditedAmount') }}: {{ creditedAmountSymbol }}{{ formatWalletAmount(row.amount) }}
         </div>
       </div>
     </template>
@@ -46,6 +55,7 @@ import type { Column } from '@/components/common/types'
 import DataTable from '@/components/common/DataTable.vue'
 import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
 import { currencySymbol } from '@/components/payment/currency'
+import { formatWalletAmount, paymentOrderGiftAmount, paymentOrderTotalCredit } from '@/components/payment/orderUtils'
 
 const { t } = useI18n()
 

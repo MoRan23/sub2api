@@ -7,22 +7,24 @@ import (
 )
 
 type User struct {
-	ID             int64
-	Email          string
-	Username       string
-	Notes          string
-	AvatarURL      string
-	AvatarSource   string
-	AvatarMIME     string
-	AvatarByteSize int
-	AvatarSHA256   string
-	PasswordHash   string
-	Role           string
-	Balance        float64
-	FrozenBalance  float64
-	Concurrency    int
-	Status         string
-	AllowedGroups  []int64
+	ID                int64
+	Email             string
+	Username          string
+	Notes             string
+	AvatarURL         string
+	AvatarSource      string
+	AvatarMIME        string
+	AvatarByteSize    int
+	AvatarSHA256      string
+	PasswordHash      string
+	Role              string
+	Balance           float64
+	GiftBalance       float64
+	FrozenBalance     float64
+	FrozenGiftBalance float64
+	Concurrency       int
+	Status            string
+	AllowedGroups     []int64
 	// RestrictPublicGroups narrows the public groups this user may bind to the
 	// ones listed in AllowedGroups. False keeps the default, where every public
 	// group is bindable.
@@ -66,6 +68,22 @@ type User struct {
 
 	APIKeys       []APIKey
 	Subscriptions []UserSubscription
+}
+
+// TotalBalance is the user's spendable balance across both wallets.
+func (u *User) TotalBalance() float64 {
+	if u == nil {
+		return 0
+	}
+	return u.Balance + u.GiftBalance
+}
+
+// TotalFrozenBalance is the amount currently held across both wallets.
+func (u *User) TotalFrozenBalance() float64 {
+	if u == nil {
+		return 0
+	}
+	return u.FrozenBalance + u.FrozenGiftBalance
 }
 
 func (u *User) IsAdmin() bool {

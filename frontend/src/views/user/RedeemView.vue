@@ -11,7 +11,11 @@
           </div>
           <p class="text-sm font-medium text-primary-100">{{ t('redeem.currentBalance') }}</p>
           <p class="mt-2 text-4xl font-bold text-white">
-            ${{ user?.balance?.toFixed(2) || '0.00' }}
+            ${{ formatWalletAmount(totalBalance) }}
+          </p>
+          <p class="mt-2 text-xs text-primary-100">
+            {{ t('common.ordinaryBalance') }} ${{ formatWalletAmount(ordinaryBalance) }} ·
+            {{ t('common.giftBalance') }} ${{ formatWalletAmount(giftBalance) }}
           </p>
           <p class="mt-2 text-sm text-primary-100">
             {{ t('redeem.concurrency') }}: {{ user?.concurrency || 0 }} {{ t('redeem.requests') }}
@@ -96,18 +100,26 @@
                   {{ t('redeem.redeemSuccess') }}
                 </h3>
                 <div class="mt-2 text-sm text-emerald-700 dark:text-emerald-400">
-                  <p>{{ redeemResult.message }}</p>
+                  <p v-if="redeemResult.message">{{ redeemResult.message }}</p>
                   <div class="mt-3 space-y-1">
-                    <p v-if="redeemResult.type === 'balance'" class="font-medium">
-                      {{ t('redeem.added') }}: ${{ redeemResult.value.toFixed(2) }}
-                    </p>
+                    <template v-if="redeemResult.type === 'balance'">
+                      <p class="font-medium">
+                        {{ t('redeem.added') }}: ${{ formatWalletAmount(redeemResultTotal) }}
+                      </p>
+                      <p>{{ t('common.ordinaryBalance') }}: ${{ formatWalletAmount(redeemResult.value) }}</p>
+                      <p>
+                        {{ t('common.giftBalance') }}: ${{ formatWalletAmount(redeemResultGift) }}
+                      </p>
+                    </template>
                     <p v-else-if="redeemResult.type === 'concurrency'" class="font-medium">
                       {{ t('redeem.added') }}: {{ redeemResult.value }}
                       {{ t('redeem.concurrentRequests') }}
                     </p>
                     <p v-else-if="redeemResult.type === 'subscription'" class="font-medium">
                       {{ t('redeem.subscriptionAssigned') }}
-                      <span v-if="redeemResult.group_name"> - {{ redeemResult.group_name }}</span>
+                      <span v-if="redeemResult.group?.name || redeemResult.group_name">
+                        - {{ redeemResult.group?.name || redeemResult.group_name }}
+                      </span>
                       <span v-if="redeemResult.validity_days">
                         ({{
                           t('redeem.subscriptionDays', { days: redeemResult.validity_days })
@@ -116,7 +128,7 @@
                     </p>
                     <p v-if="redeemResult.new_balance !== undefined">
                       {{ t('redeem.newBalance') }}:
-                      <span class="font-semibold">${{ redeemResult.new_balance.toFixed(2) }}</span>
+                      <span class="font-semibold">${{ formatWalletAmount(redeemResult.new_balance) }}</span>
                     </p>
                     <p v-if="redeemResult.new_concurrency !== undefined">
                       {{ t('redeem.newConcurrency') }}:
@@ -304,6 +316,13 @@
                   {{ formatHistoryValue(item) }}
                 </p>
                 <p
+                  v-if="isBalanceType(item.type)"
+                  class="text-xs text-gray-500 dark:text-gray-400"
+                >
+                  {{ t('common.ordinaryBalance') }} ${{ formatWalletAmount(item.value) }} ·
+                  {{ t('common.giftBalance') }} ${{ formatWalletAmount(getHistoryGiftValue(item)) }}
+                </p>
+                <p
                   v-if="!isAdminAdjustment(item.type)"
                   class="font-mono text-xs text-gray-400 dark:text-dark-500"
                 >
@@ -348,9 +367,11 @@ import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { useSubscriptionStore } from '@/stores/subscriptions'
 import { redeemAPI, authAPI, type RedeemHistoryItem } from '@/api'
+import type { RedeemResult } from '@/api/redeem'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { formatDateTime } from '@/utils/format'
+import { formatWalletAmount } from '@/components/payment/orderUtils'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -358,18 +379,19 @@ const appStore = useAppStore()
 const subscriptionStore = useSubscriptionStore()
 
 const user = computed(() => authStore.user)
+const ordinaryBalance = computed(() => Number(user.value?.balance || 0))
+const giftBalance = computed(() => Number(user.value?.gift_balance || 0))
+const totalBalance = computed(
+  () => Number(user.value?.total_balance ?? ordinaryBalance.value + giftBalance.value)
+)
 
 const redeemCode = ref('')
 const submitting = ref(false)
-const redeemResult = ref<{
-  message: string
-  type: string
-  value: number
-  new_balance?: number
-  new_concurrency?: number
-  group_name?: string
-  validity_days?: number
-} | null>(null)
+const redeemResult = ref<RedeemResult | null>(null)
+const redeemResultGift = computed(() => Number(redeemResult.value?.gift_value || 0))
+const redeemResultTotal = computed(
+  () => Number(redeemResult.value?.value || 0) + redeemResultGift.value
+)
 const errorMessage = ref('')
 
 // History data
@@ -379,7 +401,7 @@ const contactInfo = ref('')
 
 // Helper functions for history display
 const isBalanceType = (type: string) => {
-  return type === 'balance' || type === 'admin_balance'
+  return type === 'balance' || type === 'admin_balance' || type === 'affiliate_balance'
 }
 
 const isSubscriptionType = (type: string) => {
@@ -393,6 +415,8 @@ const isAdminAdjustment = (type: string) => {
 const getHistoryItemTitle = (item: RedeemHistoryItem) => {
   if (item.type === 'balance') {
     return t('redeem.balanceAddedRedeem')
+  } else if (item.type === 'affiliate_balance') {
+    return t('redeem.balanceAddedAffiliate')
   } else if (item.type === 'admin_balance') {
     return item.value >= 0 ? t('redeem.balanceAddedAdmin') : t('redeem.balanceDeductedAdmin')
   } else if (item.type === 'concurrency') {
@@ -407,8 +431,9 @@ const getHistoryItemTitle = (item: RedeemHistoryItem) => {
 
 const formatHistoryValue = (item: RedeemHistoryItem) => {
   if (isBalanceType(item.type)) {
-    const sign = item.value >= 0 ? '+' : ''
-    return `${sign}$${item.value.toFixed(2)}`
+    const total = item.value + getHistoryGiftValue(item)
+    const sign = total >= 0 ? '+' : ''
+    return `${sign}$${formatWalletAmount(total)}`
   } else if (isSubscriptionType(item.type)) {
     // 订阅类型显示有效天数和分组名称
     const days = item.validity_days || Math.round(item.value)
@@ -419,6 +444,8 @@ const formatHistoryValue = (item: RedeemHistoryItem) => {
     return `${sign}${item.value} ${t('redeem.requests')}`
   }
 }
+
+const getHistoryGiftValue = (item: RedeemHistoryItem) => Number(item.gift_value || 0)
 
 const fetchHistory = async () => {
   loadingHistory.value = true

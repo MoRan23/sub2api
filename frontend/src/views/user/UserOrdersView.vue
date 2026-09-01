@@ -60,7 +60,21 @@
             <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderId') }}</span>
             <span class="font-mono text-gray-900 dark:text-white">#{{ refundTarget.id }}</span>
           </div>
-          <div class="mt-2 flex justify-between text-sm">
+          <template v-if="refundTarget.order_type === 'balance'">
+            <div data-test="refund-ordinary-credit" class="mt-2 flex justify-between text-sm">
+              <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.ordinaryCredit') }}</span>
+              <span class="text-gray-900 dark:text-white">${{ formatWalletAmount(refundTarget.amount) }}</span>
+            </div>
+            <div data-test="refund-gift-credit" class="mt-2 flex justify-between text-sm">
+              <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.giftCredit') }}</span>
+              <span class="text-gray-900 dark:text-white">${{ formatWalletAmount(paymentOrderGiftAmount(refundTarget)) }}</span>
+            </div>
+            <div data-test="refund-total-credit" class="mt-2 flex justify-between text-sm">
+              <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.totalCredit') }}</span>
+              <span class="font-medium text-gray-900 dark:text-white">${{ formatWalletAmount(paymentOrderTotalCredit(refundTarget)) }}</span>
+            </div>
+          </template>
+          <div v-else class="mt-2 flex justify-between text-sm">
             <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</span>
             <span class="text-gray-900 dark:text-white">${{ refundTarget.amount.toFixed(2) }}</span>
           </div>
@@ -87,6 +101,11 @@ import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores'
 import { paymentAPI } from '@/api/payment'
 import { extractI18nErrorMessage } from '@/utils/apiError'
+import {
+  formatWalletAmount,
+  paymentOrderGiftAmount,
+  paymentOrderTotalCredit,
+} from '@/components/payment/orderUtils'
 import type { PaymentOrder } from '@/types/payment'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Pagination from '@/components/common/Pagination.vue'

@@ -194,6 +194,11 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 		SetExpiresAt(exp).
 		SetClientIP(req.ClientIP).
 		SetSrcHost(req.SrcHost)
+	if req.OrderType == payment.OrderTypeBalance {
+		giftRatio := normalizeGiftRatio(cfg.BalanceGiftRatio)
+		b.SetGiftRatio(giftRatio).
+			SetGiftAmount(calculateGiftBalance(orderAmount, giftRatio))
+	}
 	if req.SrcURL != "" {
 		b.SetSrcURL(req.SrcURL)
 	}
@@ -471,6 +476,8 @@ func (s *PaymentService) invokeProvider(ctx context.Context, order *dbent.Paymen
 	s.writeAuditLog(ctx, order.ID, "ORDER_CREATED", fmt.Sprintf("user:%d", req.UserID), map[string]any{
 		"paymentAmount":  req.Amount,
 		"creditedAmount": order.Amount,
+		"giftAmount":     order.GiftAmount,
+		"giftRatio":      order.GiftRatio,
 		"payAmount":      order.PayAmount,
 		"paymentType":    req.PaymentType,
 		"orderType":      req.OrderType,
@@ -733,6 +740,8 @@ func buildCreateOrderResponse(order *dbent.PaymentOrder, req CreateOrderRequest,
 	return &CreateOrderResponse{
 		OrderID:      order.ID,
 		Amount:       order.Amount,
+		GiftRatio:    order.GiftRatio,
+		GiftAmount:   order.GiftAmount,
 		PayAmount:    payAmount,
 		FeeRate:      order.FeeRate,
 		Status:       OrderStatusPending,

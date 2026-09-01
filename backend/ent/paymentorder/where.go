@@ -90,6 +90,16 @@ func FeeRate(v float64) predicate.PaymentOrder {
 	return predicate.PaymentOrder(sql.FieldEQ(FieldFeeRate, v))
 }
 
+// GiftRatio applies equality check predicate on the "gift_ratio" field. It's identical to GiftRatioEQ.
+func GiftRatio(v float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldGiftRatio, v))
+}
+
+// GiftAmount applies equality check predicate on the "gift_amount" field. It's identical to GiftAmountEQ.
+func GiftAmount(v float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldGiftAmount, v))
+}
+
 // RechargeCode applies equality check predicate on the "recharge_code" field. It's identical to RechargeCodeEQ.
 func RechargeCode(v string) predicate.PaymentOrder {
 	return predicate.PaymentOrder(sql.FieldEQ(FieldRechargeCode, v))
@@ -588,6 +598,86 @@ func FeeRateLT(v float64) predicate.PaymentOrder {
 // FeeRateLTE applies the LTE predicate on the "fee_rate" field.
 func FeeRateLTE(v float64) predicate.PaymentOrder {
 	return predicate.PaymentOrder(sql.FieldLTE(FieldFeeRate, v))
+}
+
+// GiftRatioEQ applies the EQ predicate on the "gift_ratio" field.
+func GiftRatioEQ(v float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldGiftRatio, v))
+}
+
+// GiftRatioNEQ applies the NEQ predicate on the "gift_ratio" field.
+func GiftRatioNEQ(v float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNEQ(FieldGiftRatio, v))
+}
+
+// GiftRatioIn applies the In predicate on the "gift_ratio" field.
+func GiftRatioIn(vs ...float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIn(FieldGiftRatio, vs...))
+}
+
+// GiftRatioNotIn applies the NotIn predicate on the "gift_ratio" field.
+func GiftRatioNotIn(vs ...float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotIn(FieldGiftRatio, vs...))
+}
+
+// GiftRatioGT applies the GT predicate on the "gift_ratio" field.
+func GiftRatioGT(v float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGT(FieldGiftRatio, v))
+}
+
+// GiftRatioGTE applies the GTE predicate on the "gift_ratio" field.
+func GiftRatioGTE(v float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGTE(FieldGiftRatio, v))
+}
+
+// GiftRatioLT applies the LT predicate on the "gift_ratio" field.
+func GiftRatioLT(v float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLT(FieldGiftRatio, v))
+}
+
+// GiftRatioLTE applies the LTE predicate on the "gift_ratio" field.
+func GiftRatioLTE(v float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLTE(FieldGiftRatio, v))
+}
+
+// GiftAmountEQ applies the EQ predicate on the "gift_amount" field.
+func GiftAmountEQ(v float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldGiftAmount, v))
+}
+
+// GiftAmountNEQ applies the NEQ predicate on the "gift_amount" field.
+func GiftAmountNEQ(v float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNEQ(FieldGiftAmount, v))
+}
+
+// GiftAmountIn applies the In predicate on the "gift_amount" field.
+func GiftAmountIn(vs ...float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIn(FieldGiftAmount, vs...))
+}
+
+// GiftAmountNotIn applies the NotIn predicate on the "gift_amount" field.
+func GiftAmountNotIn(vs ...float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotIn(FieldGiftAmount, vs...))
+}
+
+// GiftAmountGT applies the GT predicate on the "gift_amount" field.
+func GiftAmountGT(v float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGT(FieldGiftAmount, v))
+}
+
+// GiftAmountGTE applies the GTE predicate on the "gift_amount" field.
+func GiftAmountGTE(v float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGTE(FieldGiftAmount, v))
+}
+
+// GiftAmountLT applies the LT predicate on the "gift_amount" field.
+func GiftAmountLT(v float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLT(FieldGiftAmount, v))
+}
+
+// GiftAmountLTE applies the LTE predicate on the "gift_amount" field.
+func GiftAmountLTE(v float64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLTE(FieldGiftAmount, v))
 }
 
 // RechargeCodeEQ applies the EQ predicate on the "recharge_code" field.

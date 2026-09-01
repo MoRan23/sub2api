@@ -123,6 +123,34 @@ type BalanceChange struct {
 	New float64
 }
 
+type WalletAmounts struct {
+	Ordinary float64
+	Gift     float64
+}
+
+type WalletChange struct {
+	OldOrdinary float64
+	NewOrdinary float64
+	OldGift     float64
+	NewGift     float64
+}
+
+func (c WalletChange) OldTotal() float64 { return c.OldOrdinary + c.OldGift }
+func (c WalletChange) NewTotal() float64 { return c.NewOrdinary + c.NewGift }
+
+type RedeemWalletCreditRepository interface {
+	CreditRedeemWallet(ctx context.Context, id int64, ordinary, gift float64) error
+}
+
+type WalletRefundRepository interface {
+	DeductAvailableWallets(ctx context.Context, id int64, ordinary, gift float64) (WalletAmounts, error)
+	RestoreWallets(ctx context.Context, id int64, ordinary, gift float64) error
+}
+
+type AdminWalletRepository interface {
+	AdjustWallets(ctx context.Context, id int64, ordinaryDelta, giftDelta float64) (WalletChange, error)
+}
+
 // IsEmpty 报告该次 Update 是否不写任何列（此时仓储直接返回，不产生写操作）。
 func (f UserUpdateFields) IsEmpty() bool {
 	return f == UserUpdateFields{}

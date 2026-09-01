@@ -330,6 +330,9 @@ func resolveRedeemAction(existing *RedeemCode, lookupErr error) redeemAction {
 func (s *PaymentService) doBalance(ctx context.Context, o *dbent.PaymentOrder, lease *paymentFulfillmentLease) error {
 	// Idempotency: check if redeem code already exists (from a previous partial run)
 	existing, lookupErr := s.redeemService.GetByCode(ctx, o.RechargeCode)
+	if lookupErr == nil && existing != nil && !redeemCodeMatchesBalanceOrder(existing, o) {
+		return infraerrors.Conflict("RECHARGE_CODE_MISMATCH", "existing recharge code does not match payment order wallet amounts")
+	}
 	action := resolveRedeemAction(existing, lookupErr)
 
 	switch action {
@@ -340,7 +343,14 @@ func (s *PaymentService) doBalance(ctx context.Context, o *dbent.PaymentOrder, l
 		// Code already created and redeemed — just mark completed
 		return s.markCompleted(ctx, o, lease, "RECHARGE_SUCCESS")
 	case redeemActionCreate:
-		rc := &RedeemCode{Code: o.RechargeCode, Type: RedeemTypeBalance, Value: o.Amount, Status: StatusUnused}
+		rc := &RedeemCode{
+			Code:      o.RechargeCode,
+			Type:      RedeemTypeBalance,
+			Value:     o.Amount,
+			GiftRatio: o.GiftRatio,
+			GiftValue: o.GiftAmount,
+			Status:    StatusUnused,
+		}
 		if err := s.redeemService.CreateCode(ctx, rc); err != nil {
 			return fmt.Errorf("create redeem code: %w", err)
 		}
@@ -354,6 +364,16 @@ func (s *PaymentService) doBalance(ctx context.Context, o *dbent.PaymentOrder, l
 		return err
 	}
 	return s.markCompleted(ctx, o, lease, "RECHARGE_SUCCESS")
+}
+
+func redeemCodeMatchesBalanceOrder(code *RedeemCode, order *dbent.PaymentOrder) bool {
+	if code == nil || order == nil || code.Type != RedeemTypeBalance {
+		return false
+	}
+	const tolerance = 1e-8
+	return math.Abs(code.Value-order.Amount) <= tolerance &&
+		math.Abs(code.GiftRatio-order.GiftRatio) <= tolerance &&
+		math.Abs(code.GiftValue-order.GiftAmount) <= tolerance
 }
 
 func (s *PaymentService) markCompleted(ctx context.Context, o *dbent.PaymentOrder, lease *paymentFulfillmentLease, auditAction string) error {
@@ -380,6 +400,8 @@ func (s *PaymentService) markCompleted(ctx context.Context, o *dbent.PaymentOrde
 		s.writeAuditLog(ctx, o.ID, auditAction, "system", map[string]any{
 			"rechargeCode":   o.RechargeCode,
 			"creditedAmount": o.Amount,
+			"giftAmount":     o.GiftAmount,
+			"totalCredited":  o.Amount + o.GiftAmount,
 			"payAmount":      o.PayAmount,
 		})
 		s.dispatchPaymentFulfillmentNotification(o, auditAction)
@@ -413,7 +435,7 @@ func (s *PaymentService) sendBalanceRechargeSuccessNotification(ctx context.Cont
 	currentBalance := ""
 	if s.userRepo != nil {
 		if user, err := s.userRepo.GetByID(ctx, o.UserID); err == nil && user != nil {
-			currentBalance = fmt.Sprintf("%.2f", user.Balance)
+			currentBalance = fmt.Sprintf("%.2f", user.TotalBalance())
 		}
 	}
 	return s.notificationEmailService.Send(ctx, NotificationEmailSendInput{
@@ -424,7 +446,7 @@ func (s *PaymentService) sendBalanceRechargeSuccessNotification(ctx context.Cont
 		SourceType:     "payment_order",
 		SourceID:       strconv.FormatInt(o.ID, 10),
 		Variables: map[string]string{
-			"recharge_amount": fmt.Sprintf("%.2f", o.Amount),
+			"recharge_amount": fmt.Sprintf("%.2f", o.Amount+o.GiftAmount),
 			"current_balance": currentBalance,
 			"order_id":        strconv.FormatInt(o.ID, 10),
 		},

@@ -20,7 +20,21 @@
                 <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderNo') }}</span>
                 <span class="font-medium text-gray-900 dark:text-white">{{ paidOrder.out_trade_no }}</span>
               </div>
-              <div class="flex justify-between">
+              <template v-if="paidOrder.order_type === 'balance'">
+                <div data-test="ordinary-credit" class="flex justify-between">
+                  <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.ordinaryCredit') }}</span>
+                  <span class="font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ formatWalletAmount(paidOrder.amount) }}</span>
+                </div>
+                <div data-test="gift-credit" class="flex justify-between">
+                  <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.giftCredit') }}</span>
+                  <span class="font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ formatWalletAmount(paymentOrderGiftAmount(paidOrder)) }}</span>
+                </div>
+                <div data-test="total-credit" class="flex justify-between">
+                  <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.totalCredit') }}</span>
+                  <span class="font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ formatWalletAmount(paymentOrderTotalCredit(paidOrder)) }}</span>
+                </div>
+              </template>
+              <div v-else class="flex justify-between">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</span>
                 <span class="font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ paidOrder.amount.toFixed(2) }}</span>
               </div>
@@ -226,6 +240,11 @@ import { paymentAPI } from '@/api/payment'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { getPaymentPopupFeatures, isBuiltInAlipayMethod, isBuiltInWxpayMethod } from '@/components/payment/providerConfig'
 import { currencySymbol, formatPaymentAmount, normalizePaymentCurrency } from '@/components/payment/currency'
+import {
+  formatWalletAmount,
+  paymentOrderGiftAmount,
+  paymentOrderTotalCredit,
+} from '@/components/payment/orderUtils'
 import type { PaymentOrder } from '@/types/payment'
 import Icon from '@/components/icons/Icon.vue'
 import QRCode from 'qrcode'

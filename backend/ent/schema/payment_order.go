@@ -50,6 +50,12 @@ func (PaymentOrder) Fields() []ent.Field {
 		field.Float("fee_rate").
 			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
 			Default(0),
+		field.Float("gift_ratio").
+			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
+			Default(0),
+		field.Float("gift_amount").
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}).
+			Default(0),
 		field.String("recharge_code").
 			MaxLen(64),
 

@@ -24,6 +24,7 @@ export interface AdminPaymentConfig {
   enabled_payment_types: string[]
   balance_disabled: boolean
   balance_recharge_multiplier: number
+  balance_gift_ratio: number
   subscription_usd_to_cny_rate: number
   recharge_fee_rate: number
   load_balance_strategy: string
@@ -44,6 +45,7 @@ export interface UpdatePaymentConfigRequest {
   enabled_payment_types?: string[]
   balance_disabled?: boolean
   balance_recharge_multiplier?: number
+  balance_gift_ratio?: number
   subscription_usd_to_cny_rate?: number
   recharge_fee_rate?: number
   load_balance_strategy?: string
@@ -58,6 +60,7 @@ export interface RefundResult {
   warning?: string
   require_force?: boolean
   balance_deducted?: number
+  gift_balance_deducted?: number
   subscription_days_deducted?: number
 }
 

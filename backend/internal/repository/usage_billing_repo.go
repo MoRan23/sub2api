@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -13,6 +14,18 @@ import (
 
 type usageBillingRepository struct {
 	db *sql.DB
+}
+
+const (
+	batchImageHoldTerminalCaptured = "captured"
+	batchImageHoldTerminalReleased = "released"
+)
+
+type batchImageHoldReceipt struct {
+	ordinaryHold float64
+	giftHold     float64
+	terminalKind string
+	archived     bool
 }
 
 func NewUsageBillingRepository(_ *dbent.Client, sqlDB *sql.DB) service.UsageBillingRepository {
@@ -218,50 +231,82 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 
 func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) (float64, bool, error) {
 	var newBalance float64
+	var sufficient bool
 	err := tx.QueryRowContext(ctx, `
-		UPDATE users
-		SET balance = balance - $1,
-			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL AND balance >= $1
-		RETURNING balance
-	`, amount, userID).Scan(&newBalance)
-	if err == nil {
-		return newBalance, true, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, false, err
-	}
-
-	err = tx.QueryRowContext(ctx, `
-		UPDATE users
-		SET balance = balance - $1,
-			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL
-		RETURNING balance
-	`, amount, userID).Scan(&newBalance)
+		WITH target AS (
+			SELECT id, balance, gift_balance
+			FROM users
+			WHERE id = $2 AND deleted_at IS NULL
+			FOR UPDATE
+		), allocation AS (
+			SELECT id, balance, gift_balance,
+				LEAST(GREATEST(balance, 0), $1) AS ordinary_debit
+			FROM target
+		), allocated AS (
+			SELECT id, balance, gift_balance, ordinary_debit,
+				LEAST(gift_balance, GREATEST($1 - ordinary_debit, 0)) AS gift_debit
+			FROM allocation
+		), updated AS (
+			UPDATE users AS u
+			SET balance = a.balance - a.ordinary_debit
+					- GREATEST($1 - a.ordinary_debit - a.gift_debit, 0),
+				gift_balance = a.gift_balance - a.gift_debit,
+				updated_at = NOW()
+			FROM allocated AS a
+			WHERE u.id = a.id AND u.deleted_at IS NULL
+			RETURNING u.balance + u.gift_balance AS total_balance,
+				a.balance + a.gift_balance >= $1 AS sufficient
+		)
+		SELECT total_balance, sufficient FROM updated
+	`, amount, userID).Scan(&newBalance, &sufficient)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, service.ErrUserNotFound
 	}
 	if err != nil {
 		return 0, false, err
 	}
-	return newBalance, false, nil
+	return newBalance, sufficient, nil
 }
 
 func reserveUsageBillingBatchImageBalance(ctx context.Context, tx *sql.Tx, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
 	if cmd.HoldAmount <= 0 {
 		return &service.BatchImageBalanceHoldResult{}, nil
 	}
-	var balance, frozen float64
+	var balance, frozen, ordinaryHold, giftHold float64
 	err := tx.QueryRowContext(ctx, `
-		UPDATE users
-		SET balance = balance - $1,
-			frozen_balance = COALESCE(frozen_balance, 0) + $1,
-			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL AND balance >= $1
-		RETURNING balance, frozen_balance
-	`, cmd.HoldAmount, cmd.UserID).Scan(&balance, &frozen)
+		WITH target AS (
+			SELECT id, balance, gift_balance, frozen_balance, frozen_gift_balance
+			FROM users
+			WHERE id = $2 AND deleted_at IS NULL
+			FOR UPDATE
+		), allocation AS (
+			SELECT *, LEAST(GREATEST(balance, 0), $1) AS ordinary_hold
+			FROM target
+		), updated AS (
+			UPDATE users AS u
+			SET balance = a.balance - a.ordinary_hold,
+				gift_balance = a.gift_balance - ($1 - a.ordinary_hold),
+				frozen_balance = a.frozen_balance + a.ordinary_hold,
+				frozen_gift_balance = a.frozen_gift_balance + ($1 - a.ordinary_hold),
+				updated_at = NOW()
+			FROM allocation AS a
+			WHERE u.id = a.id AND u.deleted_at IS NULL
+				AND a.balance + a.gift_balance >= $1
+			RETURNING u.balance + u.gift_balance AS total_balance,
+				u.frozen_balance + u.frozen_gift_balance AS total_frozen,
+				a.ordinary_hold,
+				$1 - a.ordinary_hold AS gift_hold
+		)
+		SELECT total_balance, total_frozen, ordinary_hold, gift_hold FROM updated
+	`, cmd.HoldAmount, cmd.UserID).Scan(&balance, &frozen, &ordinaryHold, &giftHold)
 	if err == nil {
+		if _, updateErr := tx.ExecContext(ctx, `
+			UPDATE usage_billing_dedup
+			SET ordinary_hold_amount = $1, gift_hold_amount = $2
+			WHERE request_id = $3 AND api_key_id = $4
+		`, ordinaryHold, giftHold, cmd.RequestID, cmd.APIKeyID); updateErr != nil {
+			return nil, updateErr
+		}
 		return &service.BatchImageBalanceHoldResult{NewBalance: &balance, FrozenBalance: &frozen}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -282,18 +327,50 @@ func captureUsageBillingBatchImageBalance(ctx context.Context, tx *sql.Tx, cmd *
 	if cmd.ActualAmount-cmd.HoldAmount > 0.00000001 {
 		return nil, service.ErrBatchImageSettlementCostExceedsHold
 	}
+	receipt, held, err := lockBatchImageHoldReceipt(ctx, tx, service.BatchImageHoldRequestID(cmd.BatchID), cmd.APIKeyID)
+	if err != nil {
+		return nil, err
+	}
+	if !held {
+		return nil, errors.New("batch image balance hold was not found")
+	}
+	if done, terminalErr := validateBatchImageHoldTerminal(receipt.terminalKind, batchImageHoldTerminalCaptured); done || terminalErr != nil {
+		return &service.BatchImageBalanceHoldResult{}, terminalErr
+	}
+	ordinaryHold, giftHold := receipt.ordinaryHold, receipt.giftHold
+	if ordinaryHold == 0 && giftHold == 0 {
+		ordinaryHold = cmd.HoldAmount
+	}
+	ordinaryUsed := cmd.ActualAmount
+	if ordinaryUsed > ordinaryHold {
+		ordinaryUsed = ordinaryHold
+	}
+	giftUsed := cmd.ActualAmount - ordinaryUsed
+	ordinaryRelease := ordinaryHold - ordinaryUsed
+	giftRelease := giftHold - giftUsed
+	if giftRelease < -0.00000001 {
+		return nil, service.ErrBatchImageSettlementCostExceedsHold
+	}
+	if giftRelease < 0 {
+		giftRelease = 0
+	}
 	var balance, frozen float64
-	err := tx.QueryRowContext(ctx, `
-		UPDATE users
-		SET balance = balance
-				+ CASE WHEN $1 > $2 THEN $1 - $2 ELSE 0 END
-				- CASE WHEN $2 > $1 THEN $2 - $1 ELSE 0 END,
-			frozen_balance = COALESCE(frozen_balance, 0) - $1,
-			updated_at = NOW()
-		WHERE id = $3 AND deleted_at IS NULL AND COALESCE(frozen_balance, 0) >= $1
-		RETURNING balance, frozen_balance
-	`, cmd.HoldAmount, cmd.ActualAmount, cmd.UserID).Scan(&balance, &frozen)
+	err = tx.QueryRowContext(ctx, `
+			UPDATE users
+			SET balance = balance + $1,
+				gift_balance = gift_balance + $2,
+				frozen_balance = frozen_balance - $3,
+				frozen_gift_balance = frozen_gift_balance - $4,
+				updated_at = NOW()
+			WHERE id = $5 AND deleted_at IS NULL
+				AND frozen_balance >= $3
+				AND frozen_gift_balance >= $4
+			RETURNING balance + gift_balance, frozen_balance + frozen_gift_balance
+	`, ordinaryRelease, giftRelease, ordinaryHold, giftHold, cmd.UserID).Scan(&balance, &frozen)
 	if err == nil {
+		if err := markBatchImageHoldTerminal(ctx, tx, service.BatchImageHoldRequestID(cmd.BatchID), cmd.APIKeyID, receipt.archived, batchImageHoldTerminalCaptured); err != nil {
+			return nil, err
+		}
 		return &service.BatchImageBalanceHoldResult{NewBalance: &balance, FrozenBalance: &frozen}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -313,7 +390,7 @@ func releaseUsageBillingBatchImageBalance(ctx context.Context, tx *sql.Tx, cmd *
 	}
 	// 释放前校验该 job 确实预留过 hold（hold request id 已被 claim），
 	// 防止从未成功冻结的 job 触发"幻影释放"，从其他用户的冻结资金池中凭空生成余额。
-	held, heldErr := batchImageHoldClaimExists(ctx, tx, service.BatchImageHoldRequestID(cmd.BatchID), cmd.APIKeyID)
+	receipt, held, heldErr := lockBatchImageHoldReceipt(ctx, tx, service.BatchImageHoldRequestID(cmd.BatchID), cmd.APIKeyID)
 	if heldErr != nil {
 		return nil, heldErr
 	}
@@ -321,16 +398,30 @@ func releaseUsageBillingBatchImageBalance(ctx context.Context, tx *sql.Tx, cmd *
 		logger.LegacyPrintf("repository.usage_billing", "[BatchImage] release skipped, hold was never reserved: batch=%s", cmd.BatchID)
 		return &service.BatchImageBalanceHoldResult{}, nil
 	}
+	if done, terminalErr := validateBatchImageHoldTerminal(receipt.terminalKind, batchImageHoldTerminalReleased); done || terminalErr != nil {
+		return &service.BatchImageBalanceHoldResult{}, terminalErr
+	}
+	ordinaryHold, giftHold := receipt.ordinaryHold, receipt.giftHold
+	if ordinaryHold == 0 && giftHold == 0 {
+		ordinaryHold = cmd.HoldAmount
+	}
 	var balance, frozen float64
 	err := tx.QueryRowContext(ctx, `
-		UPDATE users
-		SET balance = balance + $1,
-			frozen_balance = COALESCE(frozen_balance, 0) - $1,
-			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL AND COALESCE(frozen_balance, 0) >= $1
-		RETURNING balance, frozen_balance
-	`, cmd.HoldAmount, cmd.UserID).Scan(&balance, &frozen)
+			UPDATE users
+			SET balance = balance + $1,
+				gift_balance = gift_balance + $2,
+				frozen_balance = frozen_balance - $1,
+				frozen_gift_balance = frozen_gift_balance - $2,
+				updated_at = NOW()
+			WHERE id = $3 AND deleted_at IS NULL
+				AND frozen_balance >= $1
+				AND frozen_gift_balance >= $2
+			RETURNING balance + gift_balance, frozen_balance + frozen_gift_balance
+	`, ordinaryHold, giftHold, cmd.UserID).Scan(&balance, &frozen)
 	if err == nil {
+		if err := markBatchImageHoldTerminal(ctx, tx, service.BatchImageHoldRequestID(cmd.BatchID), cmd.APIKeyID, receipt.archived, batchImageHoldTerminalReleased); err != nil {
+			return nil, err
+		}
 		return &service.BatchImageBalanceHoldResult{NewBalance: &balance, FrozenBalance: &frozen}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -344,33 +435,72 @@ func releaseUsageBillingBatchImageBalance(ctx context.Context, tx *sql.Tx, cmd *
 	return nil, errors.New("batch image frozen balance is insufficient")
 }
 
-// batchImageHoldClaimExists 检查 hold request id 是否已在 dedup（或归档）表中被 claim，
-// 即该 batch 的冻结操作确实成功提交过。
-func batchImageHoldClaimExists(ctx context.Context, tx *sql.Tx, holdRequestID string, apiKeyID int64) (bool, error) {
-	var exists int
-	err := tx.QueryRowContext(ctx, `
-		SELECT 1
-		FROM usage_billing_dedup
-		WHERE request_id = $1 AND api_key_id = $2
-	`, holdRequestID, apiKeyID).Scan(&exists)
+// lockBatchImageHoldReceipt serializes capture and release against the same hold.
+func lockBatchImageHoldReceipt(ctx context.Context, tx *sql.Tx, holdRequestID string, apiKeyID int64) (receipt batchImageHoldReceipt, exists bool, err error) {
+	err = tx.QueryRowContext(ctx, `
+				SELECT ordinary_hold_amount, gift_hold_amount, hold_terminal_kind
+				FROM usage_billing_dedup
+				WHERE request_id = $1 AND api_key_id = $2
+				FOR UPDATE
+	`, holdRequestID, apiKeyID).Scan(&receipt.ordinaryHold, &receipt.giftHold, &receipt.terminalKind)
 	if err == nil {
-		return true, nil
+		return receipt, true, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return false, err
+		return batchImageHoldReceipt{}, false, err
 	}
 	err = tx.QueryRowContext(ctx, `
-		SELECT 1
-		FROM usage_billing_dedup_archive
-		WHERE request_id = $1 AND api_key_id = $2
-	`, holdRequestID, apiKeyID).Scan(&exists)
+				SELECT ordinary_hold_amount, gift_hold_amount, hold_terminal_kind
+				FROM usage_billing_dedup_archive
+				WHERE request_id = $1 AND api_key_id = $2
+				FOR UPDATE
+	`, holdRequestID, apiKeyID).Scan(&receipt.ordinaryHold, &receipt.giftHold, &receipt.terminalKind)
 	if err == nil {
-		return true, nil
+		receipt.archived = true
+		return receipt, true, nil
 	}
 	if errors.Is(err, sql.ErrNoRows) {
+		return batchImageHoldReceipt{}, false, nil
+	}
+	return batchImageHoldReceipt{}, false, err
+}
+
+func validateBatchImageHoldTerminal(stored, proposed string) (bool, error) {
+	stored = strings.TrimSpace(stored)
+	if stored == "" {
 		return false, nil
 	}
-	return false, err
+	if stored == proposed {
+		return true, nil
+	}
+	return false, fmt.Errorf("%w: batch image hold already %s", service.ErrUsageBillingRequestConflict, stored)
+}
+
+func markBatchImageHoldTerminal(ctx context.Context, tx *sql.Tx, holdRequestID string, apiKeyID int64, archived bool, terminalKind string) error {
+	query := `
+		UPDATE usage_billing_dedup
+		SET hold_terminal_kind = $1
+		WHERE request_id = $2 AND api_key_id = $3 AND hold_terminal_kind = ''
+	`
+	if archived {
+		query = `
+			UPDATE usage_billing_dedup_archive
+			SET hold_terminal_kind = $1
+			WHERE request_id = $2 AND api_key_id = $3 AND hold_terminal_kind = ''
+		`
+	}
+	result, err := tx.ExecContext(ctx, query, terminalKind, holdRequestID, apiKeyID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return fmt.Errorf("%w: batch image hold terminal CAS lost", service.ErrUsageBillingRequestConflict)
+	}
+	return nil
 }
 
 func userExistsForBilling(ctx context.Context, tx *sql.Tx, userID int64) (bool, error) {

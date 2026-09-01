@@ -10,19 +10,23 @@ import (
 )
 
 type User struct {
-	ID            int64      `json:"id"`
-	Email         string     `json:"email"`
-	Username      string     `json:"username"`
-	Role          string     `json:"role"`
-	Balance       float64    `json:"balance"`
-	FrozenBalance float64    `json:"frozen_balance"`
-	Concurrency   int        `json:"concurrency"`
-	Status        string     `json:"status"`
-	AllowedGroups []int64    `json:"allowed_groups"`
-	LastActiveAt  *time.Time `json:"last_active_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
-	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
+	ID                 int64      `json:"id"`
+	Email              string     `json:"email"`
+	Username           string     `json:"username"`
+	Role               string     `json:"role"`
+	Balance            float64    `json:"balance"`
+	GiftBalance        float64    `json:"gift_balance"`
+	TotalBalance       float64    `json:"total_balance"`
+	FrozenBalance      float64    `json:"frozen_balance"`
+	FrozenGiftBalance  float64    `json:"frozen_gift_balance"`
+	TotalFrozenBalance float64    `json:"total_frozen_balance"`
+	Concurrency        int        `json:"concurrency"`
+	Status             string     `json:"status"`
+	AllowedGroups      []int64    `json:"allowed_groups"`
+	LastActiveAt       *time.Time `json:"last_active_at,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	DeletedAt          *time.Time `json:"deleted_at,omitempty"`
 
 	// 余额不足通知
 	BalanceNotifyEnabled       bool               `json:"balance_notify_enabled"`
@@ -403,6 +407,8 @@ type RedeemCode struct {
 	Code      string     `json:"code"`
 	Type      string     `json:"type"`
 	Value     float64    `json:"value"`
+	GiftRatio float64    `json:"gift_ratio"`
+	GiftValue float64    `json:"gift_value"`
 	Status    string     `json:"status"`
 	UsedBy    *int64     `json:"used_by"`
 	UsedAt    *time.Time `json:"used_at"`

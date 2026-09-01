@@ -3,9 +3,17 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import RedeemView from '../RedeemView.vue'
 
-const { listRedeemCodes, batchUpdateRedeemCodes, getAllGroups, showSuccess, showError, showInfo } =
-  vi.hoisted(() => ({
+const {
+  listRedeemCodes,
+  generateRedeemCodes,
+  batchUpdateRedeemCodes,
+  getAllGroups,
+  showSuccess,
+  showError,
+  showInfo
+} = vi.hoisted(() => ({
     listRedeemCodes: vi.fn(),
+    generateRedeemCodes: vi.fn(),
     batchUpdateRedeemCodes: vi.fn(),
     getAllGroups: vi.fn(),
     showSuccess: vi.fn(),
@@ -17,7 +25,7 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     redeem: {
       list: listRedeemCodes,
-      generate: vi.fn(),
+      generate: generateRedeemCodes,
       delete: vi.fn(),
       batchDelete: vi.fn(),
       batchUpdate: batchUpdateRedeemCodes,
@@ -99,12 +107,34 @@ const SelectStub = {
   `
 }
 
-describe('admin RedeemView batch update', () => {
+const mountView = () =>
+  mount(RedeemView, {
+    attachTo: document.body,
+    global: {
+      stubs: {
+        AppLayout: { template: '<div><slot /></div>' },
+        TablePageLayout: {
+          template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+        },
+        DataTable: DataTableStub,
+        Pagination: true,
+        ConfirmDialog: true,
+        Select: SelectStub,
+        GroupBadge: true,
+        GroupOptionItem: true,
+        Icon: true,
+        Teleport: true
+      }
+    }
+  })
+
+describe('admin RedeemView', () => {
   beforeEach(() => {
     localStorage.clear()
     document.body.innerHTML = ''
 
     listRedeemCodes.mockReset()
+    generateRedeemCodes.mockReset()
     batchUpdateRedeemCodes.mockReset()
     getAllGroups.mockReset()
     showSuccess.mockReset()
@@ -118,6 +148,8 @@ describe('admin RedeemView batch update', () => {
           code: 'CODE-1',
           type: 'balance',
           value: 10,
+          gift_ratio: 25,
+          gift_value: 2.5,
           status: 'unused',
           used_by: null,
           used_at: null,
@@ -142,29 +174,26 @@ describe('admin RedeemView batch update', () => {
       pages: 1
     })
     batchUpdateRedeemCodes.mockResolvedValue({ updated: 1, message: 'ok' })
+    generateRedeemCodes.mockResolvedValue([
+      {
+        id: 3,
+        code: 'GIFT-CODE',
+        type: 'balance',
+        value: 20,
+        gift_ratio: 12.5,
+        gift_value: 2.5,
+        status: 'unused',
+        used_by: null,
+        used_at: null,
+        created_at: '2026-01-01T00:00:00Z',
+        expires_at: null
+      }
+    ])
     getAllGroups.mockResolvedValue([])
   })
 
   it('submits only checked fields for selected redeem codes', async () => {
-    const wrapper = mount(RedeemView, {
-      attachTo: document.body,
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          TablePageLayout: {
-            template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
-          },
-          DataTable: DataTableStub,
-          Pagination: true,
-          ConfirmDialog: true,
-          Select: SelectStub,
-          GroupBadge: true,
-          GroupOptionItem: true,
-          Icon: true,
-          Teleport: true
-        }
-      }
-    })
+    const wrapper = mountView()
 
     await flushPromises()
     await wrapper.findAll('[data-test="select-code"]')[0].setValue(true)
@@ -183,5 +212,62 @@ describe('admin RedeemView batch update', () => {
       notes: 'maintenance'
     })
     expect(showSuccess).toHaveBeenCalledWith('admin.redeem.batchUpdateSuccess')
+  })
+
+  it('shows the wallet split and submits the balance gift ratio', async () => {
+    const wrapper = mountView()
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('$12.50')
+    expect(wrapper.text()).toContain('admin.redeem.ordinaryAmount $10.00')
+    expect(wrapper.text()).toContain('admin.redeem.giftAmount $2.50')
+
+    await wrapper.get('[data-test="generate-open"]').trigger('click')
+    await wrapper.get('[data-test="generate-value-input"]').setValue('20')
+    await wrapper.get('[data-test="gift-ratio-input"]').setValue('12.5')
+    await wrapper.get('[data-test="generate-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(generateRedeemCodes).toHaveBeenCalledWith(
+      1,
+      'balance',
+      20,
+      undefined,
+      undefined,
+      undefined,
+      12.5
+    )
+  })
+
+  it('preserves eight-decimal gift values in the redeem-code wallet split', async () => {
+    listRedeemCodes.mockResolvedValueOnce({
+      items: [
+        {
+          id: 3,
+          code: 'SMALL-GIFT',
+          type: 'balance',
+          value: 0.01,
+          gift_ratio: 0.0001,
+          gift_value: 0.00000001,
+          status: 'unused',
+          used_by: null,
+          used_at: null,
+          created_at: '2026-01-01T00:00:00Z',
+          expires_at: null
+        }
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('$0.01000001')
+    expect(wrapper.text()).toContain('admin.redeem.ordinaryAmount $0.01')
+    expect(wrapper.text()).toContain('admin.redeem.giftAmount $0.00000001')
   })
 })

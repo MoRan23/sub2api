@@ -67,7 +67,16 @@
                   {{ t('profile.accountBalance') }}
                 </p>
                 <p class="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
-                  {{ formatCurrency(user?.balance || 0) }}
+                  {{ formatCurrency(totalBalance) }}
+                </p>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  <span data-testid="profile-overview-ordinary-balance">
+                    {{ t('common.ordinaryBalance') }} {{ formatCurrency(ordinaryBalance) }}
+                  </span>
+                  <span class="mx-1">·</span>
+                  <span data-testid="profile-overview-gift-balance">
+                    {{ t('common.giftBalance') }} {{ formatCurrency(giftBalance) }}
+                  </span>
                 </p>
               </div>
               <div
@@ -234,6 +243,12 @@ function isEmailBound(user: User | null | undefined): boolean {
 
 const avatarUrl = computed(() => props.user?.avatar_url?.trim() || '')
 const displayName = computed(() => props.user?.username?.trim() || props.user?.email?.trim() || t('profile.user'))
+const ordinaryBalance = computed(() => Number(props.user?.balance || 0))
+const giftBalance = computed(() => Number(props.user?.gift_balance || 0))
+const totalBalance = computed(() => {
+  const value = Number(props.user?.total_balance)
+  return Number.isFinite(value) ? value : ordinaryBalance.value + giftBalance.value
+})
 const primaryEmailDisplay = computed(() => {
   const email = props.user?.email?.trim() || ''
   if (!email) {

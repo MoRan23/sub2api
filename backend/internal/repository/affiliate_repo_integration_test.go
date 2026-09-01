@@ -73,7 +73,13 @@ VALUES ($1, $2, $3, $3, NOW(), NOW())`, u.ID, affCode, 12.34)
 
 	persistedBalance := querySingleFloat(t, txCtx, client,
 		"SELECT balance::double precision FROM users WHERE id = $1", u.ID)
-	require.InDelta(t, 17.84, persistedBalance, 1e-9)
+	require.InDelta(t, 5.5, persistedBalance, 1e-9, "affiliate transfer must not credit ordinary balance")
+	persistedGiftBalance := querySingleFloat(t, txCtx, client,
+		"SELECT gift_balance::double precision FROM users WHERE id = $1", u.ID)
+	require.InDelta(t, 12.34, persistedGiftBalance, 1e-9)
+	persistedTotalRecharged := querySingleFloat(t, txCtx, client,
+		"SELECT total_recharged::double precision FROM users WHERE id = $1", u.ID)
+	require.InDelta(t, 0.0, persistedTotalRecharged, 1e-9, "affiliate transfer is not ordinary recharge")
 
 	ledgerCount := querySingleInt(t, txCtx, client,
 		"SELECT COUNT(*) FROM user_affiliate_ledger WHERE user_id = $1 AND action = 'transfer'", u.ID)

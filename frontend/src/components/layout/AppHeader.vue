@@ -82,15 +82,33 @@
             {{ balanceFrozenLabel }}
           </span>
           <div
-            class="pointer-events-none absolute right-0 top-full mt-2 hidden w-56 rounded-lg border border-gray-200 bg-white p-3 text-xs shadow-lg group-hover:block dark:border-dark-700 dark:bg-dark-800"
+            class="pointer-events-none absolute right-0 top-full mt-2 hidden w-64 rounded-lg border border-gray-200 bg-white p-3 text-xs shadow-lg group-hover:block dark:border-dark-700 dark:bg-dark-800"
           >
             <div class="flex items-center justify-between">
               <span class="text-gray-500 dark:text-dark-400">{{ balanceAvailableText }}</span>
               <span class="font-medium text-gray-900 dark:text-white">{{ formatHeaderMoney(availableBalance) }}</span>
             </div>
             <div class="mt-2 flex items-center justify-between">
+              <span class="text-gray-500 dark:text-dark-400">{{ t('common.ordinaryBalance') }}</span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ formatHeaderMoney(ordinaryBalance) }}</span>
+            </div>
+            <div class="mt-2 flex items-center justify-between">
+              <span class="text-gray-500 dark:text-dark-400">{{ t('common.giftBalance') }}</span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ formatHeaderMoney(giftBalance) }}</span>
+            </div>
+            <div class="mt-2 flex items-center justify-between">
               <span class="text-gray-500 dark:text-dark-400">{{ balanceFrozenText }}</span>
               <span class="font-medium text-amber-700 dark:text-amber-200">{{ formatHeaderMoney(frozenBalance) }}</span>
+            </div>
+            <div v-if="frozenBalance > 0" class="mt-1 space-y-1 border-l border-amber-200 pl-2 dark:border-amber-900/60">
+              <div class="flex items-center justify-between">
+                <span class="text-gray-400 dark:text-dark-500">{{ t('common.frozenOrdinaryBalance') }}</span>
+                <span class="text-gray-600 dark:text-dark-300">{{ formatHeaderMoney(frozenOrdinaryBalance) }}</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-gray-400 dark:text-dark-500">{{ t('common.frozenGiftBalance') }}</span>
+                <span class="text-gray-600 dark:text-dark-300">{{ formatHeaderMoney(frozenGiftBalance) }}</span>
+              </div>
             </div>
             <div class="mt-2 border-t border-gray-100 pt-2 dark:border-dark-700">
               <div class="flex items-center justify-between">
@@ -146,6 +164,10 @@
                 </div>
                 <div class="text-sm font-semibold text-primary-600 dark:text-primary-400">
                   {{ formatHeaderMoney(availableBalance) }}
+                </div>
+                <div class="mt-1 text-xs text-gray-500 dark:text-dark-400">
+                  {{ t('common.ordinaryBalance') }} {{ formatHeaderMoney(ordinaryBalance) }} ·
+                  {{ t('common.giftBalance') }} {{ formatHeaderMoney(giftBalance) }}
                 </div>
                 <div v-if="frozenBalance > 0" class="mt-1 text-xs text-amber-600 dark:text-amber-300">
                   {{ balanceFrozenText }} {{ formatHeaderMoney(frozenBalance) }}
@@ -277,12 +299,22 @@ const contactInfo = computed(() => appStore.contactInfo)
 const docUrl = computed(() => sanitizeUrl(appStore.docUrl))
 const modelPlazaEnabled = computed(() => isFeatureFlagEnabled(FeatureFlags.modelPlaza))
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
-const availableBalance = computed(() => Number(user.value?.balance || 0))
-const frozenBalance = computed(() => Number(user.value?.frozen_balance || 0))
+const ordinaryBalance = computed(() => Number(user.value?.balance || 0))
+const giftBalance = computed(() => Number(user.value?.gift_balance || 0))
+const availableBalance = computed(() => {
+  const value = Number(user.value?.total_balance)
+  return Number.isFinite(value) ? value : ordinaryBalance.value + giftBalance.value
+})
+const frozenOrdinaryBalance = computed(() => Number(user.value?.frozen_balance || 0))
+const frozenGiftBalance = computed(() => Number(user.value?.frozen_gift_balance || 0))
+const frozenBalance = computed(() => {
+  const value = Number(user.value?.total_frozen_balance)
+  return Number.isFinite(value) ? value : frozenOrdinaryBalance.value + frozenGiftBalance.value
+})
 const totalBalance = computed(() => availableBalance.value + frozenBalance.value)
 const balanceAvailableText = computed(() => t('common.availableBalance') === 'common.availableBalance' ? '可用余额' : t('common.availableBalance'))
-const balanceFrozenText = computed(() => t('common.frozenBalance') === 'common.frozenBalance' ? '冻结金额' : t('common.frozenBalance'))
-const balanceTotalText = computed(() => t('common.totalBalance') === 'common.totalBalance' ? '总余额' : t('common.totalBalance'))
+const balanceFrozenText = computed(() => t('common.totalFrozenBalance') === 'common.totalFrozenBalance' ? '冻结合计' : t('common.totalFrozenBalance'))
+const balanceTotalText = computed(() => t('common.balanceIncludingFrozen') === 'common.balanceIncludingFrozen' ? '含冻结总额' : t('common.balanceIncludingFrozen'))
 const balanceFrozenLabel = computed(() => `${balanceFrozenText.value} ${formatHeaderMoney(frozenBalance.value)}`)
 
 // 只在标准模式的管理员下显示新手引导按钮

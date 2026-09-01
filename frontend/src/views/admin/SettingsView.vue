@@ -7973,6 +7973,47 @@
                   </div>
                   <div>
                     <label class="input-label">{{
+                      t("admin.settings.payment.balanceGiftRatio")
+                    }}</label>
+                    <div class="relative">
+                      <input
+                        data-testid="payment-balance-gift-ratio"
+                        :value="form.payment_balance_gift_ratio ?? ''"
+                        @input="
+                          form.payment_balance_gift_ratio =
+                            normalizeBalanceGiftRatio(
+                              ($event.target as HTMLInputElement).value,
+                            )
+                        "
+                        type="number"
+                        step="0.0001"
+                        min="0"
+                        max="100"
+                        class="input pr-8"
+                      />
+                      <span
+                        class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400"
+                        >%</span
+                      >
+                    </div>
+                    <p class="mt-0.5 text-xs text-gray-400">
+                      {{ t("admin.settings.payment.balanceGiftRatioHint") }}
+                    </p>
+                    <p
+                      v-if="normalizeBalanceGiftRatio(form.payment_balance_gift_ratio) > 0"
+                      class="mt-1 text-xs font-medium text-primary-600 dark:text-primary-400"
+                    >
+                      {{
+                        t("admin.settings.payment.balanceGiftPreview", {
+                          gift: formatBalanceGiftRatio(
+                            form.payment_balance_gift_ratio,
+                          ),
+                        })
+                      }}
+                    </p>
+                  </div>
+                  <div>
+                    <label class="input-label">{{
                       t("admin.settings.payment.subscriptionUsdToCnyRate")
                     }}</label>
                     <input
@@ -8926,6 +8967,16 @@ function localText(zh: string, en: string): string {
   return isZhLocale.value ? zh : en;
 }
 
+function normalizeBalanceGiftRatio(value: unknown): number {
+  const ratio = Number(value);
+  if (!Number.isFinite(ratio)) return 0;
+  return Math.round(Math.min(100, Math.max(0, ratio)) * 10000) / 10000;
+}
+
+function formatBalanceGiftRatio(value: unknown): string {
+  return normalizeBalanceGiftRatio(value).toFixed(4).replace(/\.?0+$/, "");
+}
+
 const paymentGuideHref = computed(() =>
   locale.value.startsWith("zh")
     ? "https://github.com/Wei-Shaw/sub2api/blob/main/docs/PAYMENT_CN.md"
@@ -9659,6 +9710,7 @@ const form = reactive<SettingsForm>({
   payment_order_timeout_minutes: 30,
   payment_balance_disabled: false,
   payment_balance_recharge_multiplier: 1,
+  payment_balance_gift_ratio: 0,
   payment_subscription_usd_to_cny_rate: 0,
   payment_recharge_fee_rate: 0,
   payment_enabled_types: [],
@@ -11493,6 +11545,9 @@ async function saveSettings() {
       payment_balance_disabled: form.payment_balance_disabled,
       payment_balance_recharge_multiplier:
         Number(form.payment_balance_recharge_multiplier) || 1,
+      payment_balance_gift_ratio: normalizeBalanceGiftRatio(
+        form.payment_balance_gift_ratio,
+      ),
       payment_subscription_usd_to_cny_rate:
         Number(form.payment_subscription_usd_to_cny_rate) || 0,
       payment_recharge_fee_rate: Number(form.payment_recharge_fee_rate) || 0,

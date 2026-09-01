@@ -34,6 +34,7 @@ type APIKeyAuthUserSnapshot struct {
 	Status        string  `json:"status"`
 	Role          string  `json:"role"`
 	Balance       float64 `json:"balance"`
+	GiftBalance   float64 `json:"gift_balance"`
 	Concurrency   int     `json:"concurrency"`
 	AllowedGroups []int64 `json:"allowed_groups,omitempty"`
 

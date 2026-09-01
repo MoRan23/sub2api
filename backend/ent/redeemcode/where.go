@@ -70,6 +70,16 @@ func Value(v float64) predicate.RedeemCode {
 	return predicate.RedeemCode(sql.FieldEQ(FieldValue, v))
 }
 
+// GiftRatio applies equality check predicate on the "gift_ratio" field. It's identical to GiftRatioEQ.
+func GiftRatio(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldEQ(FieldGiftRatio, v))
+}
+
+// GiftValue applies equality check predicate on the "gift_value" field. It's identical to GiftValueEQ.
+func GiftValue(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldEQ(FieldGiftValue, v))
+}
+
 // Status applies equality check predicate on the "status" field. It's identical to StatusEQ.
 func Status(v string) predicate.RedeemCode {
 	return predicate.RedeemCode(sql.FieldEQ(FieldStatus, v))
@@ -278,6 +288,86 @@ func ValueLT(v float64) predicate.RedeemCode {
 // ValueLTE applies the LTE predicate on the "value" field.
 func ValueLTE(v float64) predicate.RedeemCode {
 	return predicate.RedeemCode(sql.FieldLTE(FieldValue, v))
+}
+
+// GiftRatioEQ applies the EQ predicate on the "gift_ratio" field.
+func GiftRatioEQ(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldEQ(FieldGiftRatio, v))
+}
+
+// GiftRatioNEQ applies the NEQ predicate on the "gift_ratio" field.
+func GiftRatioNEQ(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNEQ(FieldGiftRatio, v))
+}
+
+// GiftRatioIn applies the In predicate on the "gift_ratio" field.
+func GiftRatioIn(vs ...float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldIn(FieldGiftRatio, vs...))
+}
+
+// GiftRatioNotIn applies the NotIn predicate on the "gift_ratio" field.
+func GiftRatioNotIn(vs ...float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNotIn(FieldGiftRatio, vs...))
+}
+
+// GiftRatioGT applies the GT predicate on the "gift_ratio" field.
+func GiftRatioGT(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldGT(FieldGiftRatio, v))
+}
+
+// GiftRatioGTE applies the GTE predicate on the "gift_ratio" field.
+func GiftRatioGTE(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldGTE(FieldGiftRatio, v))
+}
+
+// GiftRatioLT applies the LT predicate on the "gift_ratio" field.
+func GiftRatioLT(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldLT(FieldGiftRatio, v))
+}
+
+// GiftRatioLTE applies the LTE predicate on the "gift_ratio" field.
+func GiftRatioLTE(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldLTE(FieldGiftRatio, v))
+}
+
+// GiftValueEQ applies the EQ predicate on the "gift_value" field.
+func GiftValueEQ(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldEQ(FieldGiftValue, v))
+}
+
+// GiftValueNEQ applies the NEQ predicate on the "gift_value" field.
+func GiftValueNEQ(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNEQ(FieldGiftValue, v))
+}
+
+// GiftValueIn applies the In predicate on the "gift_value" field.
+func GiftValueIn(vs ...float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldIn(FieldGiftValue, vs...))
+}
+
+// GiftValueNotIn applies the NotIn predicate on the "gift_value" field.
+func GiftValueNotIn(vs ...float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNotIn(FieldGiftValue, vs...))
+}
+
+// GiftValueGT applies the GT predicate on the "gift_value" field.
+func GiftValueGT(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldGT(FieldGiftValue, v))
+}
+
+// GiftValueGTE applies the GTE predicate on the "gift_value" field.
+func GiftValueGTE(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldGTE(FieldGiftValue, v))
+}
+
+// GiftValueLT applies the LT predicate on the "gift_value" field.
+func GiftValueLT(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldLT(FieldGiftValue, v))
+}
+
+// GiftValueLTE applies the LTE predicate on the "gift_value" field.
+func GiftValueLTE(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldLTE(FieldGiftValue, v))
 }
 
 // StatusEQ applies the EQ predicate on the "status" field.

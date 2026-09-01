@@ -70,9 +70,10 @@ type RedeemCodeRepository interface {
 
 // GenerateCodesRequest 生成兑换码请求
 type GenerateCodesRequest struct {
-	Count int     `json:"count"`
-	Value float64 `json:"value"`
-	Type  string  `json:"type"`
+	Count     int     `json:"count"`
+	Value     float64 `json:"value"`
+	Type      string  `json:"type"`
+	GiftRatio float64 `json:"gift_ratio"`
 }
 
 // RedeemCodeResponse 兑换码响应
@@ -210,6 +211,10 @@ func (s *RedeemService) GenerateCodes(ctx context.Context, req GenerateCodesRequ
 	if codeType == "" {
 		codeType = RedeemTypeBalance
 	}
+	if err := validateRedeemGift(codeType, req.Value, req.GiftRatio); err != nil {
+		return nil, err
+	}
+	giftRatio := normalizeGiftRatio(req.GiftRatio)
 
 	// 邀请码类型的 value 设为 0
 	value := req.Value
@@ -225,10 +230,12 @@ func (s *RedeemService) GenerateCodes(ctx context.Context, req GenerateCodesRequ
 		}
 
 		codes = append(codes, RedeemCode{
-			Code:   code,
-			Type:   codeType,
-			Value:  value,
-			Status: StatusUnused,
+			Code:      code,
+			Type:      codeType,
+			Value:     value,
+			GiftRatio: giftRatio,
+			GiftValue: calculateGiftBalance(value, giftRatio),
+			Status:    StatusUnused,
 		})
 	}
 
@@ -257,6 +264,11 @@ func (s *RedeemService) CreateCode(ctx context.Context, code *RedeemCode) error 
 	if code.Type != RedeemTypeInvitation && code.Value == 0 {
 		return errors.New("value must not be zero")
 	}
+	if err := validateRedeemGift(code.Type, code.Value, code.GiftRatio); err != nil {
+		return err
+	}
+	code.GiftRatio = normalizeGiftRatio(code.GiftRatio)
+	code.GiftValue = calculateGiftBalance(code.Value, code.GiftRatio)
 	if code.Status == "" {
 		code.Status = StatusUnused
 	}
@@ -464,6 +476,12 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 			if err := s.redeemUserRepo.ApplyRedeemBalanceAdjustment(txCtx, userID, amount); err != nil {
 				return nil, fmt.Errorf("update user balance: %w", err)
 			}
+		} else if walletRepo, ok := s.userRepo.(RedeemWalletCreditRepository); ok {
+			if err := walletRepo.CreditRedeemWallet(txCtx, userID, amount, redeemCode.GiftValue); err != nil {
+				return nil, fmt.Errorf("update user wallets: %w", err)
+			}
+		} else if redeemCode.GiftValue > 0 {
+			return nil, errors.New("user repository does not support gift balance credits")
 		} else if err := s.userRepo.UpdateBalance(txCtx, userID, amount); err != nil {
 			return nil, fmt.Errorf("update user balance: %w", err)
 		}
@@ -530,6 +548,16 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 	}
 
 	return redeemCode, nil
+}
+
+func validateRedeemGift(codeType string, value, ratio float64) error {
+	if _, ok := quantizeGiftRatio(ratio); !ok {
+		return infraerrors.BadRequest("INVALID_GIFT_RATIO", "gift ratio must be between 0 and 100 with at most 4 decimal places")
+	}
+	if ratio > 0 && (codeType != RedeemTypeBalance || value <= 0) {
+		return infraerrors.BadRequest("GIFT_RATIO_NOT_ALLOWED", "gift ratio is only allowed for positive balance redeem codes")
+	}
+	return nil
 }
 
 // invalidateRedeemCaches 失效兑换相关的缓存

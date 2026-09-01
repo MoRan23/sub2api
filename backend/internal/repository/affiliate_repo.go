@@ -288,8 +288,7 @@ FROM cleared`, userID)
 
 		affected, err := txClient.User.Update().
 			Where(user.IDEQ(userID)).
-			AddBalance(transferred).
-			AddTotalRecharged(transferred).
+			AddGiftBalance(transferred).
 			Save(txCtx)
 		if err != nil {
 			return fmt.Errorf("credit user balance by affiliate quota: %w", err)
@@ -890,7 +889,7 @@ LIMIT 1`, strings.ToUpper(strings.TrimSpace(code)))
 
 func queryUserBalance(ctx context.Context, client affiliateQueryExecer, userID int64) (float64, error) {
 	rows, err := client.QueryContext(ctx,
-		"SELECT balance::double precision FROM users WHERE id = $1 LIMIT 1",
+		"SELECT (balance + gift_balance)::double precision FROM users WHERE id = $1 LIMIT 1",
 		userID,
 	)
 	if err != nil {
@@ -919,7 +918,7 @@ type affiliateTransferSnapshot struct {
 
 func queryAffiliateTransferSnapshot(ctx context.Context, client affiliateQueryExecer, userID int64) (*affiliateTransferSnapshot, error) {
 	rows, err := client.QueryContext(ctx, `
-SELECT u.balance::double precision,
+SELECT (u.balance + u.gift_balance)::double precision,
        ua.aff_quota::double precision,
        ua.aff_frozen_quota::double precision,
        ua.aff_history_quota::double precision

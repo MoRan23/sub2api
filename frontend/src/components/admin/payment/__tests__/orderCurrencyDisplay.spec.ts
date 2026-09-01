@@ -79,6 +79,7 @@ describe('admin order currency display', () => {
         show: true,
         order: orderFactory({
           currency: 'USD',
+          order_type: 'balance',
           status: 'PARTIALLY_REFUNDED',
           refund_amount: 20,
         }),
@@ -99,11 +100,98 @@ describe('admin order currency display', () => {
     expect(text).toContain('$200.00')
   })
 
+  it('shows gift credit and the proportional gift recovery for balance refunds', async () => {
+    const wrapper = mount(AdminRefundDialog, {
+      props: {
+        show: false,
+        order: orderFactory({
+          order_type: 'balance',
+          amount: 100,
+          refund_amount: 0,
+          gift_amount: 20,
+        } as Partial<PaymentOrder>),
+        userOrdinaryBalance: 200,
+        userGiftBalance: 50,
+      },
+      global: {
+        stubs: {
+          BaseDialog: BaseDialogStub,
+        },
+      },
+    })
+
+    await wrapper.setProps({ show: true })
+    await wrapper.vm.$nextTick()
+
+    const text = wrapper.text()
+    expect(text).toContain('payment.orders.giftCredit')
+    expect(text).toContain('payment.orders.totalCredit')
+    expect(text).toContain('payment.admin.estimatedGiftRecovery')
+    expect(text).toContain('payment.admin.estimatedTotalRecovery')
+    expect(text).toContain('$20')
+    expect(text).toContain('$120')
+  })
+
+  it('prechecks ordinary and gift wallets separately using the current refund amount', async () => {
+    const wrapper = mount(AdminRefundDialog, {
+      props: {
+        show: false,
+        order: orderFactory({
+          order_type: 'balance',
+          amount: 100,
+          refund_amount: 0,
+          gift_amount: 20,
+        }),
+        userOrdinaryBalance: 115,
+        userGiftBalance: 5,
+      },
+      global: {
+        stubs: {
+          BaseDialog: BaseDialogStub,
+        },
+      },
+    })
+
+    await wrapper.setProps({ show: true })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.text()).toContain('payment.admin.giftBalanceInsufficient')
+    expect(wrapper.text()).not.toContain('payment.admin.ordinaryBalanceInsufficient')
+
+    await wrapper.find('input[type="number"]').setValue('20')
+    expect(wrapper.text()).not.toContain('payment.admin.giftBalanceInsufficient')
+    expect(wrapper.text()).toContain('$4.00')
+
+    await wrapper.find('#deduct-balance').setValue(false)
+    expect(wrapper.text()).toContain('payment.admin.noDeduction')
+    expect(wrapper.text()).not.toContain('payment.admin.estimatedGiftRecovery')
+  })
+
+  it('shows ordinary, gift, and total credit in order details', () => {
+    const wrapper = mount(AdminOrderDetail, {
+      props: {
+        show: true,
+        order: orderFactory({ order_type: 'balance', gift_amount: 20 }),
+      },
+      global: {
+        stubs: {
+          BaseDialog: BaseDialogStub,
+        },
+      },
+    })
+
+    const text = wrapper.text()
+    expect(text).toContain('payment.orders.ordinaryCredit')
+    expect(text).toContain('payment.orders.giftCredit')
+    expect(text).toContain('payment.orders.totalCredit')
+    expect(text).toContain('$120.00')
+  })
+
   it('renders payment currency consistently in the shared order table', () => {
     const wrapper = mount(OrderTable, {
       props: {
         orders: [
-          orderFactory({ id: 1, currency: 'USD', amount: 100, pay_amount: 108 }),
+          orderFactory({ id: 1, currency: 'USD', amount: 100, pay_amount: 108, order_type: 'balance', gift_amount: 20 }),
           orderFactory({ id: 2, currency: 'CNY', amount: 100, pay_amount: 108 }),
         ],
         loading: false,
@@ -121,13 +209,15 @@ describe('admin order currency display', () => {
     expect(text).toContain('$108.00')
     expect(text).toContain('¥108.00')
     expect(text).toContain('$100.00')
+    expect(text).toContain('payment.orders.giftCredit')
+    expect(text).toContain('$120.00')
   })
 
   it('renders payment currency consistently in the admin order table', () => {
     const wrapper = mount(AdminOrderTable, {
       props: {
         orders: [
-          orderFactory({ id: 1, currency: 'USD', amount: 100, pay_amount: 108 }),
+          orderFactory({ id: 1, currency: 'USD', amount: 100, pay_amount: 108, order_type: 'balance', gift_amount: 20 }),
           orderFactory({ id: 2, currency: 'CNY', amount: 100, pay_amount: 108 }),
         ],
         loading: false,
@@ -149,5 +239,7 @@ describe('admin order currency display', () => {
     expect(text).toContain('$108.00')
     expect(text).toContain('¥108.00')
     expect(text).toContain('$100.00')
+    expect(text).toContain('payment.orders.giftCredit')
+    expect(text).toContain('$120.00')
   })
 })

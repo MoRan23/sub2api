@@ -333,6 +333,7 @@ func TestFinishRefundPendingMarksOrderPendingAndRollsBackDeduction(t *testing.T)
 	var rolledBack float64
 	userRepo := &mockUserRepo{}
 	userRepo.updateBalanceFn = func(ctx context.Context, id int64, amount float64) error {
+		require.NotNil(t, dbent.TxFromContext(ctx))
 		require.Equal(t, user.ID, id)
 		rolledBack += amount
 		return nil
@@ -456,9 +457,10 @@ func TestQueryAndFinalizeRefundFinalizesProviderStatuses(t *testing.T) {
 		wantStatus string
 		wantDeduct float64
 		available  float64
+		wantError  string
 	}{
 		{name: "success", status: payment.ProviderStatusSuccess, wantStatus: OrderStatusRefunded, wantDeduct: 100, available: 100},
-		{name: "success clamps current balance", status: payment.ProviderStatusSuccess, wantStatus: OrderStatusRefunded, wantDeduct: 35, available: 35},
+		{name: "success rejects current balance shortage", status: payment.ProviderStatusSuccess, wantStatus: OrderStatusRefundPending, wantDeduct: 35, available: 35, wantError: "BALANCE_NOT_ENOUGH"},
 		{name: "failed", status: payment.ProviderStatusFailed, wantStatus: OrderStatusRefundFailed},
 		{name: "pending", status: payment.ProviderStatusPending, wantStatus: OrderStatusRefundPending},
 	} {
@@ -482,6 +484,16 @@ func TestQueryAndFinalizeRefundFinalizesProviderStatuses(t *testing.T) {
 			defer restore()
 
 			result, err := svc.QueryAndFinalizeRefund(ctx, order.ID)
+			if tc.wantError != "" {
+				require.Nil(t, result)
+				require.Error(t, err)
+				require.Equal(t, tc.wantError, infraerrors.Reason(err))
+				require.Equal(t, tc.wantDeduct, deducted)
+				reloaded, reloadErr := client.PaymentOrder.Get(ctx, order.ID)
+				require.NoError(t, reloadErr)
+				require.Equal(t, tc.wantStatus, reloaded.Status)
+				return
+			}
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			require.Equal(t, tc.status == payment.ProviderStatusSuccess, result.Success)
@@ -517,11 +529,11 @@ func TestFinalizePendingRefundSuccessRejectsStaleCallerBeforeSecondDeduction(t *
 		}},
 	}
 
-	first, err := svc.finalizePendingRefundSuccess(ctx, svc.refundFinalizePlan(order))
+	first, err := svc.finalizePendingRefundSuccess(ctx, svc.refundFinalizePlan(order, true))
 	require.NoError(t, err)
 	require.True(t, first.Success)
 
-	second, err := svc.finalizePendingRefundSuccess(ctx, svc.refundFinalizePlan(order))
+	second, err := svc.finalizePendingRefundSuccess(ctx, svc.refundFinalizePlan(order, true))
 	require.Nil(t, second)
 	require.Error(t, err)
 	require.Equal(t, "CONFLICT", infraerrors.Reason(err))
@@ -553,7 +565,7 @@ func TestFinalizePendingRefundSuccessRollsBackPostDeductionFailure(t *testing.T)
 		}},
 	}
 
-	result, err := svc.finalizePendingRefundSuccess(ctx, svc.refundFinalizePlan(order))
+	result, err := svc.finalizePendingRefundSuccess(ctx, svc.refundFinalizePlan(order, true))
 	require.Nil(t, result)
 	require.ErrorContains(t, err, "injected failure after deduction")
 

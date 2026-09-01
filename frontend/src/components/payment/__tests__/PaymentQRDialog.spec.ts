@@ -102,4 +102,40 @@ describe('PaymentQRDialog currency display', () => {
     expect(wrapper.text()).toContain('$100.00')
     expect(wrapper.text()).toContain('¥108.00')
   })
+
+  it('shows the balance credit split without rounding away a small gift', async () => {
+    pollOrderStatus.mockResolvedValue({
+      ...paidOrder,
+      amount: 0.01,
+      gift_amount: 0.00000001,
+      order_type: 'balance',
+    })
+
+    const wrapper = mount(PaymentQRDialog, {
+      props: {
+        show: false,
+        orderId: 42,
+        qrCode: '',
+        expiresAt: '2099-01-01T10:30:00Z',
+        paymentType: 'alipay',
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+          },
+          Icon: true,
+        },
+      },
+    })
+
+    await wrapper.setProps({ show: true })
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="ordinary-credit"]').text()).toContain('$0.01')
+    expect(wrapper.get('[data-test="gift-credit"]').text()).toContain('$0.00000001')
+    expect(wrapper.get('[data-test="total-credit"]').text()).toContain('$0.01000001')
+  })
 })

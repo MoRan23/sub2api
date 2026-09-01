@@ -79,6 +79,48 @@ func (_u *RedeemCodeUpdate) AddValue(v float64) *RedeemCodeUpdate {
 	return _u
 }
 
+// SetGiftRatio sets the "gift_ratio" field.
+func (_u *RedeemCodeUpdate) SetGiftRatio(v float64) *RedeemCodeUpdate {
+	_u.mutation.ResetGiftRatio()
+	_u.mutation.SetGiftRatio(v)
+	return _u
+}
+
+// SetNillableGiftRatio sets the "gift_ratio" field if the given value is not nil.
+func (_u *RedeemCodeUpdate) SetNillableGiftRatio(v *float64) *RedeemCodeUpdate {
+	if v != nil {
+		_u.SetGiftRatio(*v)
+	}
+	return _u
+}
+
+// AddGiftRatio adds value to the "gift_ratio" field.
+func (_u *RedeemCodeUpdate) AddGiftRatio(v float64) *RedeemCodeUpdate {
+	_u.mutation.AddGiftRatio(v)
+	return _u
+}
+
+// SetGiftValue sets the "gift_value" field.
+func (_u *RedeemCodeUpdate) SetGiftValue(v float64) *RedeemCodeUpdate {
+	_u.mutation.ResetGiftValue()
+	_u.mutation.SetGiftValue(v)
+	return _u
+}
+
+// SetNillableGiftValue sets the "gift_value" field if the given value is not nil.
+func (_u *RedeemCodeUpdate) SetNillableGiftValue(v *float64) *RedeemCodeUpdate {
+	if v != nil {
+		_u.SetGiftValue(*v)
+	}
+	return _u
+}
+
+// AddGiftValue adds value to the "gift_value" field.
+func (_u *RedeemCodeUpdate) AddGiftValue(v float64) *RedeemCodeUpdate {
+	_u.mutation.AddGiftValue(v)
+	return _u
+}
+
 // SetStatus sets the "status" field.
 func (_u *RedeemCodeUpdate) SetStatus(v string) *RedeemCodeUpdate {
 	_u.mutation.SetStatus(v)
@@ -326,6 +368,18 @@ func (_u *RedeemCodeUpdate) sqlSave(ctx context.Context) (_node int, err error) 
 	if value, ok := _u.mutation.AddedValue(); ok {
 		_spec.AddField(redeemcode.FieldValue, field.TypeFloat64, value)
 	}
+	if value, ok := _u.mutation.GiftRatio(); ok {
+		_spec.SetField(redeemcode.FieldGiftRatio, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedGiftRatio(); ok {
+		_spec.AddField(redeemcode.FieldGiftRatio, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.GiftValue(); ok {
+		_spec.SetField(redeemcode.FieldGiftValue, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedGiftValue(); ok {
+		_spec.AddField(redeemcode.FieldGiftValue, field.TypeFloat64, value)
+	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(redeemcode.FieldStatus, field.TypeString, value)
 	}
@@ -477,6 +531,48 @@ func (_u *RedeemCodeUpdateOne) SetNillableValue(v *float64) *RedeemCodeUpdateOne
 // AddValue adds value to the "value" field.
 func (_u *RedeemCodeUpdateOne) AddValue(v float64) *RedeemCodeUpdateOne {
 	_u.mutation.AddValue(v)
+	return _u
+}
+
+// SetGiftRatio sets the "gift_ratio" field.
+func (_u *RedeemCodeUpdateOne) SetGiftRatio(v float64) *RedeemCodeUpdateOne {
+	_u.mutation.ResetGiftRatio()
+	_u.mutation.SetGiftRatio(v)
+	return _u
+}
+
+// SetNillableGiftRatio sets the "gift_ratio" field if the given value is not nil.
+func (_u *RedeemCodeUpdateOne) SetNillableGiftRatio(v *float64) *RedeemCodeUpdateOne {
+	if v != nil {
+		_u.SetGiftRatio(*v)
+	}
+	return _u
+}
+
+// AddGiftRatio adds value to the "gift_ratio" field.
+func (_u *RedeemCodeUpdateOne) AddGiftRatio(v float64) *RedeemCodeUpdateOne {
+	_u.mutation.AddGiftRatio(v)
+	return _u
+}
+
+// SetGiftValue sets the "gift_value" field.
+func (_u *RedeemCodeUpdateOne) SetGiftValue(v float64) *RedeemCodeUpdateOne {
+	_u.mutation.ResetGiftValue()
+	_u.mutation.SetGiftValue(v)
+	return _u
+}
+
+// SetNillableGiftValue sets the "gift_value" field if the given value is not nil.
+func (_u *RedeemCodeUpdateOne) SetNillableGiftValue(v *float64) *RedeemCodeUpdateOne {
+	if v != nil {
+		_u.SetGiftValue(*v)
+	}
+	return _u
+}
+
+// AddGiftValue adds value to the "gift_value" field.
+func (_u *RedeemCodeUpdateOne) AddGiftValue(v float64) *RedeemCodeUpdateOne {
+	_u.mutation.AddGiftValue(v)
 	return _u
 }
 
@@ -756,6 +852,18 @@ func (_u *RedeemCodeUpdateOne) sqlSave(ctx context.Context) (_node *RedeemCode, 
 	}
 	if value, ok := _u.mutation.AddedValue(); ok {
 		_spec.AddField(redeemcode.FieldValue, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.GiftRatio(); ok {
+		_spec.SetField(redeemcode.FieldGiftRatio, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedGiftRatio(); ok {
+		_spec.AddField(redeemcode.FieldGiftRatio, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.GiftValue(); ok {
+		_spec.SetField(redeemcode.FieldGiftValue, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedGiftValue(); ok {
+		_spec.AddField(redeemcode.FieldGiftValue, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(redeemcode.FieldStatus, field.TypeString, value)

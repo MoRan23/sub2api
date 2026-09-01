@@ -44,6 +44,30 @@ func (s *UserRepoSuite) TestListWithFilters_SortByEmailAsc() {
 	s.Require().Equal("z-last@example.com", users[1].Email)
 }
 
+func (s *UserRepoSuite) TestListWithFilters_SortByBalanceUsesCombinedWallets() {
+	ordinaryHigh := s.mustCreateUser(&service.User{
+		Email:       "ordinary-high@example.com",
+		Balance:     10,
+		GiftBalance: 0,
+	})
+	giftHigh := s.mustCreateUser(&service.User{
+		Email:       "gift-high@example.com",
+		Balance:     1,
+		GiftBalance: 20,
+	})
+
+	users, _, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{
+		Page:      1,
+		PageSize:  10,
+		SortBy:    "balance",
+		SortOrder: "desc",
+	}, service.UserListFilters{})
+	s.Require().NoError(err)
+	s.Require().Len(users, 2)
+	s.Require().Equal(giftHigh.ID, users[0].ID)
+	s.Require().Equal(ordinaryHigh.ID, users[1].ID)
+}
+
 func (s *UserRepoSuite) TestList_DefaultSortByNewestFirst() {
 	first := s.mustCreateUser(&service.User{Email: "first@example.com"})
 	second := s.mustCreateUser(&service.User{Email: "second@example.com"})

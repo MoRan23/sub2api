@@ -92,9 +92,10 @@ type UpdateUserRequest struct {
 
 // UpdateBalanceRequest represents balance update request
 type UpdateBalanceRequest struct {
-	Balance   float64 `json:"balance" binding:"required,gt=0"`
-	Operation string  `json:"operation" binding:"required,oneof=set add subtract"`
-	Notes     string  `json:"notes"`
+	Balance     float64 `json:"balance"`
+	GiftBalance float64 `json:"gift_balance"`
+	Operation   string  `json:"operation" binding:"required,oneof=set add subtract"`
+	Notes       string  `json:"notes"`
 }
 
 type BindUserAuthIdentityRequest struct {
@@ -399,6 +400,27 @@ func (h *UserHandler) UpdateBalance(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if math.IsNaN(req.Balance) || math.IsInf(req.Balance, 0) || math.IsNaN(req.GiftBalance) || math.IsInf(req.GiftBalance, 0) || req.Balance < 0 || req.GiftBalance < 0 {
+		response.BadRequest(c, "balance and gift_balance must be finite non-negative numbers")
+		return
+	}
+	switch req.Operation {
+	case "add":
+		if req.Balance <= 0 && req.GiftBalance <= 0 {
+			response.BadRequest(c, "balance or gift_balance must be greater than zero")
+			return
+		}
+	case "set":
+		if req.GiftBalance != 0 {
+			response.BadRequest(c, "set does not accept gift_balance")
+			return
+		}
+	case "subtract":
+		if req.Balance <= 0 || req.GiftBalance != 0 {
+			response.BadRequest(c, "subtract requires a positive balance and does not accept gift_balance")
+			return
+		}
+	}
 
 	idempotencyPayload := struct {
 		UserID int64                `json:"user_id"`
@@ -408,7 +430,7 @@ func (h *UserHandler) UpdateBalance(c *gin.Context) {
 		Body:   req,
 	}
 	executeAdminIdempotentJSON(c, "admin.users.balance.update", idempotencyPayload, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
-		user, execErr := h.adminService.UpdateUserBalance(ctx, userID, req.Balance, req.Operation, req.Notes)
+		user, execErr := h.adminService.UpdateUserBalance(ctx, userID, req.Balance, req.GiftBalance, req.Operation, req.Notes)
 		if execErr != nil {
 			return nil, execErr
 		}

@@ -20,6 +20,10 @@ const (
 	FieldType = "type"
 	// FieldValue holds the string denoting the value field in the database.
 	FieldValue = "value"
+	// FieldGiftRatio holds the string denoting the gift_ratio field in the database.
+	FieldGiftRatio = "gift_ratio"
+	// FieldGiftValue holds the string denoting the gift_value field in the database.
+	FieldGiftValue = "gift_value"
 	// FieldStatus holds the string denoting the status field in the database.
 	FieldStatus = "status"
 	// FieldUsedBy holds the string denoting the used_by field in the database.
@@ -64,6 +68,8 @@ var Columns = []string{
 	FieldCode,
 	FieldType,
 	FieldValue,
+	FieldGiftRatio,
+	FieldGiftValue,
 	FieldStatus,
 	FieldUsedBy,
 	FieldUsedAt,
@@ -93,6 +99,10 @@ var (
 	TypeValidator func(string) error
 	// DefaultValue holds the default value on creation for the "value" field.
 	DefaultValue float64
+	// DefaultGiftRatio holds the default value on creation for the "gift_ratio" field.
+	DefaultGiftRatio float64
+	// DefaultGiftValue holds the default value on creation for the "gift_value" field.
+	DefaultGiftValue float64
 	// DefaultStatus holds the default value on creation for the "status" field.
 	DefaultStatus string
 	// StatusValidator is a validator for the "status" field. It is called by the builders before save.
@@ -124,6 +134,16 @@ func ByType(opts ...sql.OrderTermOption) OrderOption {
 // ByValue orders the results by the value field.
 func ByValue(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldValue, opts...).ToFunc()
+}
+
+// ByGiftRatio orders the results by the gift_ratio field.
+func ByGiftRatio(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldGiftRatio, opts...).ToFunc()
+}
+
+// ByGiftValue orders the results by the gift_value field.
+func ByGiftValue(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldGiftValue, opts...).ToFunc()
 }
 
 // ByStatus orders the results by the status field.

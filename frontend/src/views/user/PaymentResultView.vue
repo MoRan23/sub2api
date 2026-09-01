@@ -55,9 +55,21 @@
               <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</span>
               <span class="font-bold text-primary-600 dark:text-primary-400">{{ formatGatewayAmount(order.pay_amount) }}</span>
             </div>
-            <div v-if="hasAmountFields(order) && order.amount !== order.pay_amount" class="flex justify-between">
+            <div v-if="hasAmountFields(order) && order.order_type === 'balance'" class="flex justify-between">
+              <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.ordinaryCredit') }}</span>
+              <span class="font-medium text-gray-900 dark:text-white">${{ formatWalletAmount(order.amount) }}</span>
+            </div>
+            <div v-if="hasAmountFields(order) && order.order_type === 'balance'" class="flex justify-between">
+              <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.giftCredit') }}</span>
+              <span class="font-medium text-emerald-600 dark:text-emerald-400">${{ formatWalletAmount(paymentOrderGiftAmount(order)) }}</span>
+            </div>
+            <div v-if="hasAmountFields(order) && order.order_type === 'balance'" class="flex justify-between border-t border-gray-100 pt-3 dark:border-dark-700">
+              <span class="font-medium text-gray-600 dark:text-gray-300">{{ t('payment.orders.totalCredit') }}</span>
+              <span class="font-bold text-gray-900 dark:text-white">${{ formatWalletAmount(paymentOrderTotalCredit(order)) }}</span>
+            </div>
+            <div v-else-if="hasAmountFields(order) && order.order_type !== 'balance' && order.amount !== order.pay_amount" class="flex justify-between">
               <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.creditedAmount') }}</span>
-              <span class="font-medium text-gray-900 dark:text-white">{{ order.order_type === 'balance' ? '$' + order.amount.toFixed(2) : formatGatewayAmount(order.amount) }}</span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ formatGatewayAmount(order.amount) }}</span>
             </div>
             <div v-if="hasPaymentType(order)" class="flex justify-between">
               <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.paymentMethod') }}</span>
@@ -112,6 +124,7 @@ import { paymentAPI } from '@/api/payment'
 import type { PublicOrderVerifyResult } from '@/api/payment'
 import type { OrderStatus, PaymentOrder } from '@/types/payment'
 import { formatPaymentAmount, normalizePaymentCurrency } from '@/components/payment/currency'
+import { formatWalletAmount, paymentOrderGiftAmount, paymentOrderTotalCredit } from '@/components/payment/orderUtils'
 import { normalizePaymentMethodForDisplay, paymentMethodI18nKey } from './paymentUx'
 
 const i18n = useI18n()

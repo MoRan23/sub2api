@@ -206,6 +206,40 @@ describe('PaymentResultView', () => {
     expect(window.localStorage.getItem(PAYMENT_RECOVERY_STORAGE_KEY)).toBeNull()
   })
 
+  it('shows ordinary, gift, and total balance credit from the completed order snapshot', async () => {
+    routeState.query = {
+      resume_token: 'resume-gift-credit',
+    }
+    resolveOrderPublicByResumeToken.mockResolvedValue({
+      data: {
+        ...orderFactory('COMPLETED'),
+        amount: 100,
+        gift_ratio: 25,
+        gift_amount: 25,
+        pay_amount: 103,
+        fee_rate: 3,
+      },
+    })
+
+    const wrapper = mount(PaymentResultView, {
+      global: {
+        stubs: {
+          OrderStatusBadge: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('payment.orders.ordinaryCredit')
+    expect(text).toContain('payment.orders.giftCredit')
+    expect(text).toContain('payment.orders.totalCredit')
+    expect(text).toContain('$100.00')
+    expect(text).toContain('$25.00')
+    expect(text).toContain('$125.00')
+  })
+
   it('waits for completed fulfillment before refreshing the user balance', async () => {
     vi.useFakeTimers()
     routeState.query = {

@@ -25,6 +25,10 @@ type RedeemCode struct {
 	Type string `json:"type,omitempty"`
 	// Value holds the value of the "value" field.
 	Value float64 `json:"value,omitempty"`
+	// GiftRatio holds the value of the "gift_ratio" field.
+	GiftRatio float64 `json:"gift_ratio,omitempty"`
+	// GiftValue holds the value of the "gift_value" field.
+	GiftValue float64 `json:"gift_value,omitempty"`
 	// Status holds the value of the "status" field.
 	Status string `json:"status,omitempty"`
 	// UsedBy holds the value of the "used_by" field.
@@ -85,7 +89,7 @@ func (*RedeemCode) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case redeemcode.FieldValue:
+		case redeemcode.FieldValue, redeemcode.FieldGiftRatio, redeemcode.FieldGiftValue:
 			values[i] = new(sql.NullFloat64)
 		case redeemcode.FieldID, redeemcode.FieldUsedBy, redeemcode.FieldGroupID, redeemcode.FieldValidityDays:
 			values[i] = new(sql.NullInt64)
@@ -131,6 +135,18 @@ func (_m *RedeemCode) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field value", values[i])
 			} else if value.Valid {
 				_m.Value = value.Float64
+			}
+		case redeemcode.FieldGiftRatio:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field gift_ratio", values[i])
+			} else if value.Valid {
+				_m.GiftRatio = value.Float64
+			}
+		case redeemcode.FieldGiftValue:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field gift_value", values[i])
+			} else if value.Valid {
+				_m.GiftValue = value.Float64
 			}
 		case redeemcode.FieldStatus:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -239,6 +255,12 @@ func (_m *RedeemCode) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("value=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Value))
+	builder.WriteString(", ")
+	builder.WriteString("gift_ratio=")
+	builder.WriteString(fmt.Sprintf("%v", _m.GiftRatio))
+	builder.WriteString(", ")
+	builder.WriteString("gift_value=")
+	builder.WriteString(fmt.Sprintf("%v", _m.GiftValue))
 	builder.WriteString(", ")
 	builder.WriteString("status=")
 	builder.WriteString(_m.Status)

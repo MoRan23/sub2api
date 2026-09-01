@@ -480,7 +480,7 @@ func resolveOldBalance(p *postUsageBillingParams, result *UsageBillingApplyResul
 		return *result.NewBalance + p.Cost.ActualCost
 	}
 	// Legacy fallback: snapshot balance from request context
-	return p.User.Balance
+	return p.User.TotalBalance()
 }
 
 // notifyAccountQuota sends account quota threshold notification after increment.

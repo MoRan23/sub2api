@@ -31,7 +31,11 @@
           <div class="flex-shrink-0 text-right">
             <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.users.currentBalance') }}</p>
             <p class="text-xl font-bold text-gray-900 dark:text-white">
-              ${{ user.balance?.toFixed(2) || '0.00' }}
+              ${{ currentTotalBalance.toFixed(2) }}
+            </p>
+            <p class="text-[11px] text-gray-400 dark:text-dark-500">
+              {{ t('admin.users.ordinaryBalance') }} ${{ currentOrdinaryBalance.toFixed(2) }} ·
+              {{ t('admin.users.giftBalance') }} ${{ currentGiftBalance.toFixed(2) }}
             </p>
           </div>
         </div>
@@ -131,6 +135,12 @@
                 {{ formatValue(item) }}
               </p>
               <p
+                v-if="hasGiftChange(item)"
+                class="mt-0.5 text-[11px] text-gray-400 dark:text-dark-500"
+              >
+                {{ formatWalletBreakdown(item) }}
+              </p>
+              <p
                 v-if="isAdminType(item.type)"
                 class="text-xs text-gray-400 dark:text-dark-500"
               >
@@ -194,6 +204,11 @@ const pageSize = 15
 const typeFilter = ref('')
 
 const totalPages = computed(() => Math.ceil(total.value / pageSize) || 1)
+const currentOrdinaryBalance = computed(() => Number(props.user?.balance || 0))
+const currentGiftBalance = computed(() => Number(props.user?.gift_balance || 0))
+const currentTotalBalance = computed(() => Number(
+  props.user?.total_balance ?? currentOrdinaryBalance.value + currentGiftBalance.value
+))
 
 // Type filter options
 const typeOptions = computed(() => [
@@ -241,6 +256,10 @@ const isAdminType = (type: string) => type === 'admin_balance' || type === 'admi
 // Helper: check if balance type (includes admin_balance)
 const isBalanceType = (type: string) => type === 'balance' || type === 'admin_balance' || type === 'affiliate_balance'
 
+const giftChange = (item: BalanceHistoryItem) => Number(item.gift_value || 0)
+const balanceChangeTotal = (item: BalanceHistoryItem) => Number(item.value || 0) + giftChange(item)
+const hasGiftChange = (item: BalanceHistoryItem) => isBalanceType(item.type) && giftChange(item) !== 0
+
 // Helper: check if subscription type
 const isSubscriptionType = (type: string) => type === 'subscription'
 
@@ -254,7 +273,7 @@ const getIconName = (item: BalanceHistoryItem) => {
 // Icon background color
 const getIconBg = (item: BalanceHistoryItem) => {
   if (isBalanceType(item.type)) {
-    return item.value >= 0
+    return balanceChangeTotal(item) >= 0
       ? 'bg-emerald-100 dark:bg-emerald-900/30'
       : 'bg-red-100 dark:bg-red-900/30'
   }
@@ -267,7 +286,7 @@ const getIconBg = (item: BalanceHistoryItem) => {
 // Icon text color
 const getIconColor = (item: BalanceHistoryItem) => {
   if (isBalanceType(item.type)) {
-    return item.value >= 0
+    return balanceChangeTotal(item) >= 0
       ? 'text-emerald-600 dark:text-emerald-400'
       : 'text-red-600 dark:text-red-400'
   }
@@ -280,7 +299,7 @@ const getIconColor = (item: BalanceHistoryItem) => {
 // Value text color
 const getValueColor = (item: BalanceHistoryItem) => {
   if (isBalanceType(item.type)) {
-    return item.value >= 0
+    return balanceChangeTotal(item) >= 0
       ? 'text-emerald-600 dark:text-emerald-400'
       : 'text-red-600 dark:text-red-400'
   }
@@ -298,7 +317,7 @@ const getItemTitle = (item: BalanceHistoryItem) => {
     case 'affiliate_balance':
       return t('redeem.balanceAddedAffiliate')
     case 'admin_balance':
-      return item.value >= 0 ? t('redeem.balanceAddedAdmin') : t('redeem.balanceDeductedAdmin')
+      return balanceChangeTotal(item) >= 0 ? t('redeem.balanceAddedAdmin') : t('redeem.balanceDeductedAdmin')
     case 'concurrency':
       return t('redeem.concurrencyAddedRedeem')
     case 'admin_concurrency':
@@ -313,8 +332,9 @@ const getItemTitle = (item: BalanceHistoryItem) => {
 // Format display value
 const formatValue = (item: BalanceHistoryItem) => {
   if (isBalanceType(item.type)) {
-    const sign = item.value >= 0 ? '+' : ''
-    return `${sign}$${item.value.toFixed(2)}`
+    const totalValue = balanceChangeTotal(item)
+    const sign = totalValue >= 0 ? '+' : ''
+    return `${sign}$${totalValue.toFixed(2)}`
   }
   if (isSubscriptionType(item.type)) {
     const days = item.validity_days || Math.round(item.value)
@@ -324,5 +344,14 @@ const formatValue = (item: BalanceHistoryItem) => {
   // concurrency types
   const sign = item.value >= 0 ? '+' : ''
   return `${sign}${item.value}`
+}
+
+const formatWalletBreakdown = (item: BalanceHistoryItem) => {
+  const ordinarySign = item.value >= 0 ? '+' : ''
+  const giftValue = giftChange(item)
+  const giftSign = giftValue >= 0 ? '+' : ''
+  const ratio = Number(item.gift_ratio || 0)
+  const ratioText = ratio > 0 ? ` (${ratio.toFixed(4).replace(/\.?0+$/, '')}%)` : ''
+  return `${t('admin.users.ordinaryBalance')} ${ordinarySign}$${item.value.toFixed(2)} · ${t('admin.users.giftBalance')} ${giftSign}$${giftValue.toFixed(2)}${ratioText}`
 }
 </script>

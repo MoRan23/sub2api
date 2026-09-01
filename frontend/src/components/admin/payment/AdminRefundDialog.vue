@@ -34,8 +34,18 @@
           <span class="font-mono text-gray-900 dark:text-white">#{{ order?.id }}</span>
         </div>
         <div class="mt-1 flex justify-between text-sm">
-          <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.creditedAmount') }}</span>
-          <span class="font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ order?.amount?.toFixed(2) }}</span>
+          <span class="text-gray-500 dark:text-gray-400">
+            {{ t(order?.order_type === 'balance' ? 'payment.orders.ordinaryCredit' : 'payment.orders.creditedAmount') }}
+          </span>
+          <span class="font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ formatWalletAmount(order?.amount || 0) }}</span>
+        </div>
+        <div v-if="isBalanceOrder" class="mt-1 flex justify-between text-sm">
+          <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.giftCredit') }}</span>
+          <span class="font-medium text-emerald-600 dark:text-emerald-400">{{ creditedAmountSymbol }}{{ formatWalletAmount(orderGiftAmount) }}</span>
+        </div>
+        <div v-if="isBalanceOrder" class="mt-1 flex justify-between border-t border-gray-200 pt-1 text-sm dark:border-dark-600">
+          <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.totalCredit') }}</span>
+          <span class="font-semibold text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ formatWalletAmount(orderTotalCredit) }}</span>
         </div>
         <div class="mt-1 flex justify-between text-sm">
           <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</span>
@@ -62,24 +72,39 @@
           <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.admin.deductBalanceHint') }}</span>
         </div>
 
-        <!-- User Balance Info (when deduct_balance is checked) -->
-        <div v-if="form.deduct_balance && userBalance != null" class="mt-3 grid grid-cols-2 gap-3">
-          <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
-            <div class="text-gray-500 dark:text-gray-400">{{ t('payment.admin.userBalance') }}</div>
-            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ userBalance.toFixed(2) }}</div>
+        <div v-if="isBalanceOrder && form.deduct_balance && walletLoading" class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+          {{ t('payment.admin.loadingWallet') }}
+        </div>
+
+        <!-- Separate wallet availability; total balance cannot prove either wallet is sufficient. -->
+        <div v-else-if="isBalanceOrder && form.deduct_balance && walletSnapshotAvailable" class="mt-3 grid grid-cols-2 gap-3">
+          <div v-if="availableOrdinaryBalance != null" class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
+            <div class="text-gray-500 dark:text-gray-400">{{ t('payment.admin.userOrdinaryBalance') }}</div>
+            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ formatWalletAmount(availableOrdinaryBalance || 0) }}</div>
           </div>
-          <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
-            <div class="text-gray-500 dark:text-gray-400">{{ t('payment.admin.orderAmount') }}</div>
-            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ order?.amount?.toFixed(2) }}</div>
+          <div v-if="availableGiftBalance != null" class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
+            <div class="text-gray-500 dark:text-gray-400">{{ t('payment.admin.userGiftBalance') }}</div>
+            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ formatWalletAmount(availableGiftBalance || 0) }}</div>
           </div>
         </div>
 
         <!-- Insufficient balance warning -->
         <div
-          v-if="form.deduct_balance && balanceInsufficient"
+          v-if="isBalanceOrder && form.deduct_balance && walletInsufficient"
           class="mt-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
         >
-          {{ t('payment.admin.insufficientBalance') }}
+          <p v-if="ordinaryBalanceInsufficient">
+            {{ t('payment.admin.ordinaryBalanceInsufficient', {
+              available: formatWalletAmount(availableOrdinaryBalance || 0),
+              required: formatWalletAmount(estimatedOrdinaryRecovery)
+            }) }}
+          </p>
+          <p v-if="giftBalanceInsufficient">
+            {{ t('payment.admin.giftBalanceInsufficient', {
+              available: formatWalletAmount(availableGiftBalance || 0),
+              required: formatWalletAmount(estimatedGiftRecovery)
+            }) }}
+          </p>
         </div>
 
         <!-- No deduction info -->
@@ -109,6 +134,20 @@
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
           {{ t('payment.admin.maxRefundable') }}: {{ creditedAmountSymbol }}{{ maxRefundable.toFixed(2) }}
         </p>
+        <div v-if="isBalanceOrder && form.deduct_balance && form.amount > 0" class="mt-2 rounded-lg bg-gray-50 p-3 text-xs dark:bg-dark-700">
+          <div class="flex justify-between text-gray-500 dark:text-gray-400">
+            <span>{{ t('payment.admin.estimatedOrdinaryRecovery') }}</span>
+            <span>{{ creditedAmountSymbol }}{{ formatWalletAmount(estimatedOrdinaryRecovery) }}</span>
+          </div>
+          <div class="flex justify-between text-gray-500 dark:text-gray-400">
+            <span>{{ t('payment.admin.estimatedGiftRecovery') }}</span>
+            <span>{{ creditedAmountSymbol }}{{ formatWalletAmount(estimatedGiftRecovery) }}</span>
+          </div>
+          <div class="mt-1 flex justify-between font-medium text-gray-700 dark:text-gray-200">
+            <span>{{ t('payment.admin.estimatedTotalRecovery') }}</span>
+            <span>{{ creditedAmountSymbol }}{{ formatWalletAmount(estimatedTotalRecovery) }}</span>
+          </div>
+        </div>
       </div>
 
       <!-- Reason -->
@@ -168,8 +207,15 @@ import { reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import type { PaymentOrder } from '@/types/payment'
-import { formatOrderDateTime } from '@/components/payment/orderUtils'
 import { currencySymbol } from '@/components/payment/currency'
+import {
+  calculateRefundGiftAmount,
+  formatOrderDateTime,
+  formatWalletAmount,
+  paymentOrderGiftAmount,
+  paymentOrderTotalCredit,
+  walletAmountLessThan
+} from '@/components/payment/orderUtils'
 
 const { t } = useI18n()
 
@@ -177,7 +223,11 @@ const props = defineProps<{
   show: boolean
   order: PaymentOrder | null
   submitting?: boolean
+  /** Legacy callers may pass ordinary balance through this prop. It is never treated as total balance. */
   userBalance?: number | null
+  userOrdinaryBalance?: number | null
+  userGiftBalance?: number | null
+  walletLoading?: boolean
   requireForce?: boolean
   warning?: string
 }>()
@@ -190,6 +240,10 @@ const emit = defineEmits<{
 const creditedAmountSymbol = currencySymbol('USD')
 
 const paymentAmountSymbol = computed(() => currencySymbol(props.order?.currency))
+
+const isBalanceOrder = computed(() => props.order?.order_type === 'balance')
+const orderGiftAmount = computed(() => paymentOrderGiftAmount(props.order))
+const orderTotalCredit = computed(() => paymentOrderTotalCredit(props.order))
 
 const form = reactive({
   amount: 0,
@@ -212,10 +266,35 @@ const maxRefundable = computed(() => {
   return props.order.amount - actuallyRefunded.value
 })
 
-const balanceInsufficient = computed(() => {
-  if (props.userBalance == null || !props.order) return false
-  return props.userBalance < props.order.amount
+const estimatedGiftRecovery = computed(() => {
+  if (!props.order || !isBalanceOrder.value) return 0
+  return calculateRefundGiftAmount(props.order.amount, orderGiftAmount.value, form.amount)
 })
+
+const estimatedOrdinaryRecovery = computed(() => Math.max(0, Number(form.amount) || 0))
+const estimatedTotalRecovery = computed(() => estimatedOrdinaryRecovery.value + estimatedGiftRecovery.value)
+const availableOrdinaryBalance = computed<number | null>(() => {
+  const value = props.userOrdinaryBalance ?? props.userBalance
+  return value == null ? null : Number(value)
+})
+const availableGiftBalance = computed<number | null>(() => (
+  props.userGiftBalance == null ? null : Number(props.userGiftBalance)
+))
+const walletSnapshotAvailable = computed(() => (
+  availableOrdinaryBalance.value != null || availableGiftBalance.value != null
+))
+const ordinaryBalanceInsufficient = computed(() => (
+  isBalanceOrder.value &&
+  availableOrdinaryBalance.value != null &&
+  walletAmountLessThan(availableOrdinaryBalance.value || 0, estimatedOrdinaryRecovery.value)
+))
+const giftBalanceInsufficient = computed(() => (
+  isBalanceOrder.value &&
+  estimatedGiftRecovery.value > 0 &&
+  availableGiftBalance.value != null &&
+  walletAmountLessThan(availableGiftBalance.value || 0, estimatedGiftRecovery.value)
+))
+const walletInsufficient = computed(() => ordinaryBalanceInsufficient.value || giftBalanceInsufficient.value)
 
 watch(() => props.show, (val) => {
   if (val && props.order) {

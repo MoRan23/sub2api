@@ -285,6 +285,9 @@ func (s *AuthService) updateBoundEmailIdentityWithClient(
 	currentUser.Email = updatedUser.Email
 	currentUser.PasswordHash = updatedUser.PasswordHash
 	currentUser.Balance = updatedUser.Balance
+	currentUser.GiftBalance = updatedUser.GiftBalance
+	currentUser.FrozenBalance = updatedUser.FrozenBalance
+	currentUser.FrozenGiftBalance = updatedUser.FrozenGiftBalance
 	currentUser.Concurrency = updatedUser.Concurrency
 	currentUser.UpdatedAt = updatedUser.UpdatedAt
 	return nil

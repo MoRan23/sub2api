@@ -16,6 +16,17 @@ import type {
 import type { BasePaginationResponse } from '@/types'
 
 export interface PublicOrderVerifyResult {
+  id?: number
+  user_id?: number
+  amount?: number
+  gift_ratio?: number
+  gift_amount?: number
+  pay_amount?: number
+  fee_rate?: number
+  currency?: string
+  payment_type?: string
+  order_type?: PaymentOrder['order_type']
+  refund_amount?: number
   out_trade_no: string
   status: string
   paid: boolean
