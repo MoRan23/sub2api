@@ -724,6 +724,8 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 			plan.WireProfile.TurnLineage.ParentThreadID = identity.ParentThreadID
 			plan.WireProfile.TurnLineage.ForkedFromThreadID = identity.ForkedFromThreadID
 			plan.WireProfile.WindowID = ""
+			plan.WireProfile.WindowNumber = nil
+			plan.WireProfile.ContextWindowID = ""
 			if plan.ResolveOutcome == OpenAIOAuthIdentityResolveNone {
 				plan.ResolveOutcome = OpenAIOAuthIdentityResolvePrimary
 			}
@@ -1018,9 +1020,8 @@ func ApplyOpenAIOAuthIdentityPlan(headers http.Header, body []byte, plan OpenAIO
 	projection := openAICodexMetadataProjectionFromPlan(plan)
 	switch mode {
 	case OpenAIOAuthIdentityProjectionExistingTurnMetadataOnly:
-		if projection.installation && headers != nil {
+		if headers != nil {
 			deleteOpenAIHeaderEqualFold(headers, codexInstallationIDKey)
-			headers.Set(codexInstallationIDKey, projection.installationID)
 		}
 		applyOpenAICodexCanonicalTurnMetadataHeader(headers, projection, false)
 		var err error

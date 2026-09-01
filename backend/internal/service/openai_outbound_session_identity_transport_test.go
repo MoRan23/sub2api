@@ -129,7 +129,7 @@ func TestApplyOpenAIOAuthIdentityPlanInstallationOnlyPreservesMemoryTurnMetadata
 
 	out, err := ApplyOpenAIOAuthIdentityPlan(headers, body, plan)
 	require.NoError(t, err)
-	require.Equal(t, installationID, headers.Get(codexInstallationIDKey))
+	require.Empty(t, headers.Get(codexInstallationIDKey))
 	headerMetadata := gjson.Parse(headers.Get(openAIWSTurnMetadataHeader))
 	require.Equal(t, installationID, headerMetadata.Get("installation_id").String())
 	require.Equal(t, "memory", headerMetadata.Get("request_kind").String())
@@ -574,7 +574,7 @@ func TestApplyOpenAIOutboundSessionIdentityCompactHeadersKeepsCanonicalPair(t *t
 	require.Empty(t, headers.Get("x-client-request-id"))
 }
 
-func TestApplyOpenAIOAuthIdentityPlanContextWindowIsNestedOnlyAndServerOwned(t *testing.T) {
+func TestApplyOpenAIOAuthIdentityPlanWindowAndSpecialFieldsAreNestedOnlyAndServerOwned(t *testing.T) {
 	plan, err := FinalizeOpenAICodexWirePlan(
 		codexWireProjectionTestPlan(t),
 		string(CodexWireRequestTurn),
@@ -584,17 +584,27 @@ func TestApplyOpenAIOAuthIdentityPlanContextWindowIsNestedOnlyAndServerOwned(t *
 	require.Equal(t, codexWireTestContextWindow, plan.Window.ContextWindowID)
 
 	headers := http.Header{
-		"Context-Window-Id":         {"attacker-header"},
-		"X-Codex-Context-Window-Id": {"attacker-header"},
-		"X-Codex-Context_window_id": {"attacker-header"},
-		openAIWSTurnMetadataHeader:  {`{"context_window_id":"01989f44-7c00-7000-8000-000000000099","keep":"header"}`},
+		"Window-Number":                 {"99"},
+		"X-Codex-Window-Number":         {"99"},
+		"Context-Window-Id":             {"attacker-header"},
+		"X-Codex-Context-Window-Id":     {"attacker-header"},
+		"X-Codex-Context_window_id":     {"attacker-header"},
+		"Turn-Trigger":                  {"attacker-header"},
+		"History-Ingest-Requested":      {"false"},
+		"Forked-From-Ordinal-Exclusive": {"99"},
+		openAIWSTurnMetadataHeader:      {`{"context_window_id":"01989f44-7c00-7000-8000-000000000099","keep":"header"}`},
 	}
 	headers["context_window_id"] = []string{"attacker-header"}
 	body := []byte(`{
-		"context_window_id":"attacker-root",
-		"x-codex-context-window-id":"attacker-root",
-		"client_metadata":{
-			"context_window_id":"attacker-flat",
+			"window_number":99,
+			"context_window_id":"attacker-root",
+			"x-codex-context-window-id":"attacker-root",
+			"forked_from_ordinal_exclusive":99,
+			"history_ingest_requested":false,
+			"turn_trigger":"attacker-root",
+			"client_metadata":{
+				"window_number":99,
+				"context_window_id":"attacker-flat",
 			"context-window-id":"attacker-flat",
 			"x-codex-context-window-id":"attacker-flat",
 			"x-codex-context_window_id":"attacker-flat",
@@ -605,8 +615,11 @@ func TestApplyOpenAIOAuthIdentityPlanContextWindowIsNestedOnlyAndServerOwned(t *
 	out, err := ApplyOpenAIOAuthIdentityPlan(headers, body, plan)
 	require.NoError(t, err)
 	for _, name := range []string{
+		"window_number", "window-number", "x-codex-window-number", "x-codex-window_number",
 		"context_window_id", "context-window-id",
 		"x-codex-context-window-id", "x-codex-context_window_id",
+		"forked_from_ordinal_exclusive", "forked-from-ordinal-exclusive",
+		"history_ingest_requested", "history-ingest-requested", "turn_trigger", "turn-trigger",
 	} {
 		require.Empty(t, headerValuesCaseInsensitive(headers, name), name)
 		require.False(t, gjson.GetBytes(out, name).Exists(), name)
@@ -614,9 +627,11 @@ func TestApplyOpenAIOAuthIdentityPlanContextWindowIsNestedOnlyAndServerOwned(t *
 	}
 
 	headerNested := headers.Get(openAIWSTurnMetadataHeader)
+	require.Equal(t, plan.Window.Number, gjson.Get(headerNested, "window_number").Uint())
 	require.Equal(t, codexWireTestContextWindow, gjson.Get(headerNested, "context_window_id").String())
 	require.Equal(t, "header", gjson.Get(headerNested, "keep").String())
 	bodyNested := gjson.GetBytes(out, "client_metadata.x-codex-turn-metadata").String()
+	require.Equal(t, plan.Window.Number, gjson.Get(bodyNested, "window_number").Uint())
 	require.Equal(t, codexWireTestContextWindow, gjson.Get(bodyNested, "context_window_id").String())
 	require.Equal(t, "body", gjson.Get(bodyNested, "keep").String())
 }

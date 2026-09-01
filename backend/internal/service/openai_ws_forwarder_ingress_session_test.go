@@ -1804,7 +1804,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(handshakeIdentity))
 	require.Empty(t, captureDialer.lastHeaders.Get("session_id"))
 	require.Equal(t, "turn-state-1", captureDialer.lastHeaders.Get(openAIWSTurnStateHeader))
-	require.Equal(t, transportTestPinnedInstallationID, captureDialer.lastHeaders.Get(codexInstallationIDKey))
+	require.Empty(t, captureDialer.lastHeaders.Get(codexInstallationIDKey))
 	handshakeTurnMetadata := captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader)
 	require.Equal(t, transportTestPinnedInstallationID, gjson.Get(handshakeTurnMetadata, "installation_id").String())
 	require.Equal(t, handshakeIdentity.SessionID, gjson.Get(handshakeTurnMetadata, "session_id").String())

@@ -54,7 +54,7 @@ func TestAccountTestService_OpenAIImageOAuthHandlesOutputItemDoneFallback(t *tes
 	require.NoError(t, err)
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(upstream.lastReq.Context()))
-	require.Equal(t, "22222222-3333-4333-8444-555555555555", upstream.lastReq.Header.Get(codexInstallationIDKey))
+	require.Empty(t, upstream.lastReq.Header.Get(codexInstallationIDKey))
 	require.Equal(t, "22222222-3333-4333-8444-555555555555", gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
 	require.Equal(t, "22222222-3333-4333-8444-555555555555", extractInstallationIDFromTurnMetadata(upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader)))
 	require.NotEmpty(t, upstream.lastReq.Header.Get("session-id"))

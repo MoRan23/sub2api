@@ -327,7 +327,7 @@ func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
 	require.Empty(t, upstream.lastReq.Header.Get("OpenAI-Beta"))
 	require.NotEmpty(t, upstream.lastReq.Header.Get(openAICodexRoutingHintHeader))
 	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("Version"))
-	require.Equal(t, "11111111-2222-4333-8444-555555555555", upstream.lastReq.Header.Get(codexInstallationIDKey))
+	require.Empty(t, upstream.lastReq.Header.Get(codexInstallationIDKey))
 	var turnMetadata map[string]any
 	require.NoError(t, json.Unmarshal([]byte(upstream.lastReq.Header.Get("X-Codex-Turn-Metadata")), &turnMetadata))
 	require.Equal(t, "11111111-2222-4333-8444-555555555555", turnMetadata[codexTurnMetadataInstallationIDKey])

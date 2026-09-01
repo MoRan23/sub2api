@@ -218,7 +218,8 @@ func TestOpenAISetupTokenUsesUnifiedIdentityPlan(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, plan.TurnIdentity.SessionID, upstreamReq.Header.Get("session-id"))
 	require.Equal(t, plan.TurnIdentity.ThreadID, upstreamReq.Header.Get("thread-id"))
-	require.Equal(t, pinnedInstallationID, upstreamReq.Header.Get(codexInstallationIDKey))
+	require.Empty(t, upstreamReq.Header.Get(codexInstallationIDKey))
+	require.Equal(t, pinnedInstallationID, gjson.Get(upstreamReq.Header.Get(openAIWSTurnMetadataHeader), "installation_id").String())
 	require.Equal(t, plan.TurnIdentity.SessionID, gjson.GetBytes(finalBody, "prompt_cache_key").String())
 	require.Equal(t, plan.TurnIdentity.SessionID, gjson.GetBytes(finalBody, "client_metadata.session_id").String())
 	require.Equal(t, plan.TurnIdentity.ThreadID, gjson.GetBytes(finalBody, "client_metadata.thread_id").String())
@@ -237,7 +238,7 @@ func TestOpenAISetupTokenUsesUnifiedIdentityPlan(t *testing.T) {
 	passthroughHeaders := http.Header{codexInstallationIDKey: {"client-installation"}}
 	passthroughBody, err := ApplyOpenAIOAuthIdentityPlan(passthroughHeaders, body, passthroughPlan)
 	require.NoError(t, err)
-	require.Equal(t, pinnedInstallationID, passthroughHeaders.Get(codexInstallationIDKey))
+	require.Empty(t, passthroughHeaders.Get(codexInstallationIDKey))
 	require.Equal(t, pinnedInstallationID, gjson.GetBytes(passthroughBody, "client_metadata.x-codex-installation-id").String())
 	require.Equal(t, passthroughPlan.TurnIdentity.SessionID, gjson.GetBytes(passthroughBody, "prompt_cache_key").String())
 }

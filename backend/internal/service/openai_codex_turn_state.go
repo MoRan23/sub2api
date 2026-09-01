@@ -27,7 +27,7 @@ const openAICodexTurnStateHeader = "x-codex-turn-state"
 
 const (
 	openAICodexTurnStateKeyDomain       = "sub2api/openai-codex-turn-state/v1"
-	openAICodexTurnStateIdentityDomain  = "sub2api/openai-codex-turn-state-identity/v5"
+	openAICodexTurnStateIdentityDomain  = "sub2api/openai-codex-turn-state-identity/v6"
 	openAICodexTurnStateLocalMaxEntries = 64 * 1024
 	openAICodexTurnStateStoreTimeout    = 500 * time.Millisecond
 )
@@ -240,10 +240,15 @@ func OpenAICodexTurnStateIdentityDigest(plan OpenAIOAuthIdentityPlan) string {
 	if plan.TurnIdentityEnabled {
 		parentThreadID := strings.TrimSpace(plan.TurnIdentity.ParentThreadID)
 		forkedFromThreadID := strings.TrimSpace(plan.TurnIdentity.ForkedFromThreadID)
+		forkedFromOrdinalExclusive := ""
+		if forkedFromThreadID != "" && plan.WireProfile.TurnLineage.ForkedFromOrdinalExclusive != nil {
+			forkedFromOrdinalExclusive = strconv.FormatUint(*plan.WireProfile.TurnLineage.ForkedFromOrdinalExclusive, 10)
+		}
 		relation := string(plan.TurnIdentity.Relation)
 		if memoryRequest {
 			parentThreadID = ""
 			forkedFromThreadID = ""
+			forkedFromOrdinalExclusive = ""
 			relation = ""
 		}
 		parts = append(parts,
@@ -251,6 +256,7 @@ func OpenAICodexTurnStateIdentityDigest(plan OpenAIOAuthIdentityPlan) string {
 			strings.TrimSpace(plan.TurnIdentity.ThreadID),
 			parentThreadID,
 			forkedFromThreadID,
+			forkedFromOrdinalExclusive,
 			relation,
 			strings.TrimSpace(plan.Window.WindowID()),
 			strings.TrimSpace(plan.Window.ContextWindowID),

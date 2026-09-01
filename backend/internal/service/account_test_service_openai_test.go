@@ -170,7 +170,7 @@ func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(body, "model").String())
 	require.Equal(t, "11111111-2222-4333-8444-555555555555", gjson.GetBytes(body, "client_metadata.x-codex-installation-id").String())
-	require.Equal(t, "11111111-2222-4333-8444-555555555555", upstream.requests[0].Header.Get(codexInstallationIDKey))
+	require.Empty(t, upstream.requests[0].Header.Get(codexInstallationIDKey))
 	require.Equal(t, "11111111-2222-4333-8444-555555555555", extractInstallationIDFromTurnMetadata(upstream.requests[0].Header.Get(openAIWSTurnMetadataHeader)))
 	require.NotEmpty(t, upstream.requests[0].Header.Get("session-id"))
 	require.NotEmpty(t, upstream.requests[0].Header.Get("thread-id"))

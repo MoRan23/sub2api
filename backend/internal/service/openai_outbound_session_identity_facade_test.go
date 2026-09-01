@@ -461,7 +461,7 @@ func TestApplyOpenAIOAuthIdentityPlanExistingTurnMetadataOnlyDoesNotCreateBodyMe
 	})
 	require.NoError(t, err)
 	require.Equal(t, body, out)
-	require.Equal(t, "77777777-7777-4777-8777-777777777777", headers.Get("x-codex-installation-id"))
+	require.Empty(t, headers.Get("x-codex-installation-id"))
 }
 
 func TestApplyOpenAIOAuthIdentityPlanAlphaSearchCreatesCanonicalHeaderWithoutTouchingBody(t *testing.T) {
@@ -627,7 +627,7 @@ func TestApplyOpenAIOAuthIdentityPlanRebuildsOpaqueClientMetadataContainer(t *te
 	require.NoError(t, err)
 	require.Equal(t, id.SessionID, headers.Get("session-id"))
 	require.Equal(t, id.ThreadID, headers.Get("thread-id"))
-	require.Equal(t, "77777777-7777-4777-8777-777777777777", headers.Get("x-codex-installation-id"))
+	require.Empty(t, headers.Get("x-codex-installation-id"))
 
 	var root map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(out, &root))
@@ -681,7 +681,7 @@ func TestApplyOpenAIOAuthIdentityPlanExistingOnlyRebuildsInvalidMetadata(t *test
 	require.Equal(t, id.SessionID, gjson.Get(gjson.GetBytes(out, openAIWSTurnMetadataHeader).String(), "session_id").String())
 }
 
-func TestApplyOpenAIOAuthIdentityPlanPreserveIsByteExactWithoutTurnProjection(t *testing.T) {
+func TestApplyOpenAIOAuthIdentityPlanPreserveKeepsBodyButStripsResponsesInstallationHeader(t *testing.T) {
 	body := []byte(" { \"client_metadata\" : { \"x-codex-installation-id\" : \"client\" } } \n")
 	headers := http.Header{"X-Codex-Installation-Id": {"client"}}
 	out, err := ApplyOpenAIOAuthIdentityPlan(headers, body, OpenAIOAuthIdentityPlan{
@@ -690,7 +690,7 @@ func TestApplyOpenAIOAuthIdentityPlanPreserveIsByteExactWithoutTurnProjection(t 
 	})
 	require.NoError(t, err)
 	require.Equal(t, body, out)
-	require.Equal(t, "client", headers.Get("X-Codex-Installation-Id"))
+	require.Empty(t, headers.Get("X-Codex-Installation-Id"))
 }
 
 func TestApplyOpenAIOAuthIdentityPlanPassthroughPinsRawClientMetadata(t *testing.T) {
@@ -713,7 +713,7 @@ func TestApplyOpenAIOAuthIdentityPlanPassthroughPinsRawClientMetadata(t *testing
 	require.NoError(t, err)
 	require.Contains(t, string(out), `"sequence" : 9007199254740993`)
 	require.Contains(t, string(out), `"tail" : "keep"`)
-	require.Equal(t, installationID, headers.Get(codexInstallationIDKey))
+	require.Empty(t, headers.Get(codexInstallationIDKey))
 	require.Equal(t, id.SessionID, headers.Get("session-id"))
 	require.Equal(t, id.ThreadID, headers.Get("thread-id"))
 	require.Equal(t, "header-keep", gjson.Get(headers.Get(openAIWSTurnMetadataHeader), "label").String())

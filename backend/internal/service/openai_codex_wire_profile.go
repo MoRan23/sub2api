@@ -19,7 +19,7 @@ import (
 // serialized onto the wire.
 const (
 	CodexWireProfileRevision = "responses_metadata"
-	CodexWireProfileCommit   = "3929c99a"
+	CodexWireProfileCommit   = "316795b"
 )
 
 type CodexTurnIDKind string
@@ -86,10 +86,11 @@ func (kind CodexWireRequestKind) hasTurnIdentity() bool {
 }
 
 type CodexTurnLineage struct {
-	ForkedFromThreadID string
-	ParentThreadID     string
-	ParentTurnID       CodexTurnID
-	RootTurnID         CodexTurnID
+	ForkedFromThreadID         string
+	ForkedFromOrdinalExclusive *uint64
+	ParentThreadID             string
+	ParentTurnID               CodexTurnID
+	RootTurnID                 CodexTurnID
 }
 
 type CodexCompactionTurnMetadata struct {
@@ -220,7 +221,7 @@ func marshalCodexCompactionMetadata(metadata CodexCompactionTurnMetadata) json.R
 }
 
 // CodexWireProfile is the immutable request metadata snapshot corresponding to
-// codex 3929c99a responses_metadata.rs. Structured inventories stay as JSON so
+// codex 316795b responses_metadata.rs. Structured inventories stay as JSON so
 // accepted client snapshots are not lossy-reencoded before projection.
 type CodexWireProfile struct {
 	Revision  string
@@ -236,6 +237,7 @@ type CodexWireProfile struct {
 	SessionID       string
 	ThreadID        string
 	WindowID        string
+	WindowNumber    *uint64
 	ContextWindowID string
 	RequestKind     CodexWireRequestKind
 	Compaction      json.RawMessage
@@ -248,11 +250,13 @@ type CodexWireProfile struct {
 
 	AgentName                  string
 	ThreadSource               string
+	TurnTrigger                string
 	Sandbox                    string
 	SandboxMode                string
 	AutoReviewEnabled          *bool
 	NodeREPLAutoReviewRequired *bool
 	NodeREPLDisabled           *bool
+	HistoryIngestRequested     *bool
 	SubagentHeader             string
 	SubagentKind               string
 	Workspaces                 json.RawMessage
@@ -360,12 +364,13 @@ func parseCodexTurnID(value string, kind CodexWireRequestKind) (CodexTurnID, boo
 
 var codexWireReservedMetadataKeys = map[string]struct{}{
 	"installation_id": {}, "x-codex-installation-id": {}, "session_id": {}, "thread_id": {}, "agent_name": {},
-	"turn_id": {}, "window_id": {}, "x-codex-window-id": {}, "context_window_id": {}, "context-window-id": {},
+	"turn_id": {}, "window_id": {}, "window_number": {}, "x-codex-window-id": {}, "context_window_id": {}, "context-window-id": {},
 	"x-codex-context-window-id": {}, "x-codex-context_window_id": {},
 	"x-codex-turn-metadata": {}, "x-codex-parent-thread-id": {},
 	"x-openai-subagent": {}, "request_kind": {}, "compaction": {}, "code_mode_tool_names": {}, "tool_namespaces_info": {},
-	"turn_started_at_unix_ms": {}, "forked_from_thread_id": {}, "parent_thread_id": {}, "parent_turn_id": {}, "root_turn_id": {},
-	"subagent_kind": {}, "thread_source": {}, "sandbox": {}, "sandbox_mode": {}, "auto_review_enabled": {},
+	"turn_started_at_unix_ms": {}, "history_ingest_requested": {}, "forked_from_thread_id": {}, "forked_from_ordinal_exclusive": {},
+	"parent_thread_id": {}, "parent_turn_id": {}, "root_turn_id": {},
+	"subagent_kind": {}, "thread_source": {}, "turn_trigger": {}, "sandbox": {}, "sandbox_mode": {}, "auto_review_enabled": {},
 	"node_repl_auto_review_required": {}, "node_repl_disabled": {}, "workspaces": {},
 }
 
@@ -416,11 +421,14 @@ func codexWireString(raw json.RawMessage) string {
 }
 
 func codexWireBool(raw json.RawMessage) *bool {
-	var value bool
-	if json.Unmarshal(raw, &value) != nil {
+	switch strings.TrimSpace(string(raw)) {
+	case "true":
+		return boolPointer(true)
+	case "false":
+		return boolPointer(false)
+	default:
 		return nil
 	}
-	return boolPointer(value)
 }
 
 func codexWireInt64(raw json.RawMessage) (int64, bool) {
@@ -431,7 +439,20 @@ func codexWireInt64(raw json.RawMessage) (int64, bool) {
 	return value, true
 }
 
+func codexWireUint64(raw json.RawMessage) *uint64 {
+	var value uint64
+	if len(raw) == 0 || json.Unmarshal(raw, &value) != nil {
+		return nil
+	}
+	return uint64Pointer(value)
+}
+
 func boolPointer(value bool) *bool {
+	copy := value
+	return &copy
+}
+
+func uint64Pointer(value uint64) *uint64 {
 	copy := value
 	return &copy
 }
@@ -520,6 +541,7 @@ func ParseCodexWireProfile(raw string) CodexWireProfile {
 	profile.AgentName = codexWireString(metadata["agent_name"])
 	profile.WindowID = codexWireString(metadata["window_id"])
 	profile.ThreadSource = codexWireString(metadata["thread_source"])
+	profile.TurnTrigger = codexWireString(metadata["turn_trigger"])
 	profile.Sandbox = codexWireString(metadata["sandbox"])
 	profile.SandboxMode = codexWireString(metadata["sandbox_mode"])
 	profile.SubagentKind = codexWireString(metadata["subagent_kind"])
@@ -527,10 +549,12 @@ func ParseCodexWireProfile(raw string) CodexWireProfile {
 	profile.AutoReviewEnabled = codexWireBool(metadata["auto_review_enabled"])
 	profile.NodeREPLAutoReviewRequired = codexWireBool(metadata["node_repl_auto_review_required"])
 	profile.NodeREPLDisabled = codexWireBool(metadata["node_repl_disabled"])
+	profile.HistoryIngestRequested = codexWireBool(metadata["history_ingest_requested"])
 	profile.Compaction = rawJSONObject(metadata["compaction"])
 	profile.Workspaces = rawJSONObject(metadata["workspaces"])
 	profile.ToolNamespacesInfo = rawJSONObject(metadata["tool_namespaces_info"])
 	profile.TurnLineage.ForkedFromThreadID = codexWireString(metadata["forked_from_thread_id"])
+	profile.TurnLineage.ForkedFromOrdinalExclusive = codexWireUint64(metadata["forked_from_ordinal_exclusive"])
 	profile.TurnLineage.ParentThreadID = codexWireString(metadata["parent_thread_id"])
 	if value, present, malformed := readCodexTurnIDCandidate(metadata, "turn_id"); present {
 		profile.turnIDPresent, profile.turnIDMalformed = true, malformed
@@ -577,6 +601,12 @@ func cloneCodexWireProfile(profile CodexWireProfile) CodexWireProfile {
 	profile.turnIDCandidates = append([]string(nil), profile.turnIDCandidates...)
 	profile.parentTurnIDCandidates = append([]string(nil), profile.parentTurnIDCandidates...)
 	profile.rootTurnIDCandidates = append([]string(nil), profile.rootTurnIDCandidates...)
+	if profile.WindowNumber != nil {
+		profile.WindowNumber = uint64Pointer(*profile.WindowNumber)
+	}
+	if profile.TurnLineage.ForkedFromOrdinalExclusive != nil {
+		profile.TurnLineage.ForkedFromOrdinalExclusive = uint64Pointer(*profile.TurnLineage.ForkedFromOrdinalExclusive)
+	}
 	if profile.AutoReviewEnabled != nil {
 		profile.AutoReviewEnabled = boolPointer(*profile.AutoReviewEnabled)
 	}
@@ -585,6 +615,9 @@ func cloneCodexWireProfile(profile CodexWireProfile) CodexWireProfile {
 	}
 	if profile.NodeREPLDisabled != nil {
 		profile.NodeREPLDisabled = boolPointer(*profile.NodeREPLDisabled)
+	}
+	if profile.HistoryIngestRequested != nil {
+		profile.HistoryIngestRequested = boolPointer(*profile.HistoryIngestRequested)
 	}
 	if profile.ExtraMetadata != nil {
 		profile.ExtraMetadata = cloneCodexWireStringMap(profile.ExtraMetadata)
@@ -630,6 +663,7 @@ func mergeCodexWireProfileMissing(target *CodexWireProfile, source CodexWireProf
 		&target.WindowID:                       source.WindowID,
 		&target.AgentName:                      source.AgentName,
 		&target.ThreadSource:                   source.ThreadSource,
+		&target.TurnTrigger:                    source.TurnTrigger,
 		&target.Sandbox:                        source.Sandbox,
 		&target.SandboxMode:                    source.SandboxMode,
 		&target.SubagentHeader:                 source.SubagentHeader,
@@ -652,6 +686,12 @@ func mergeCodexWireProfileMissing(target *CodexWireProfile, source CodexWireProf
 	}
 	if target.NodeREPLDisabled == nil && source.NodeREPLDisabled != nil {
 		target.NodeREPLDisabled = boolPointer(*source.NodeREPLDisabled)
+	}
+	if target.HistoryIngestRequested == nil && source.HistoryIngestRequested != nil {
+		target.HistoryIngestRequested = boolPointer(*source.HistoryIngestRequested)
+	}
+	if target.TurnLineage.ForkedFromOrdinalExclusive == nil && source.TurnLineage.ForkedFromOrdinalExclusive != nil {
+		target.TurnLineage.ForkedFromOrdinalExclusive = uint64Pointer(*source.TurnLineage.ForkedFromOrdinalExclusive)
 	}
 	if len(target.Compaction) == 0 && len(source.Compaction) > 0 {
 		target.Compaction = append(json.RawMessage(nil), source.Compaction...)
@@ -935,8 +975,9 @@ func (profile CodexWireProfile) nestedObject(includeToolNamespaces bool) map[str
 	if hasRequestIdentity || compatRequestIdentity {
 		putNonEmptyString(metadata, "installation_id", profile.InstallationID)
 		putNonEmptyString(metadata, "window_id", profile.WindowID)
-	}
-	if profile.RequestKind == CodexWireRequestTurn || profile.RequestKind == CodexWireRequestCompaction {
+		if profile.WindowNumber != nil {
+			metadata["window_number"] = *profile.WindowNumber
+		}
 		if canonical, err := canonicalUUIDv7(profile.ContextWindowID); err == nil {
 			metadata["context_window_id"] = canonical
 		}
@@ -953,6 +994,9 @@ func (profile CodexWireProfile) nestedObject(includeToolNamespaces bool) map[str
 		metadata["request_kind"] = string(profile.RequestKind)
 	}
 	putNonEmptyString(metadata, "forked_from_thread_id", profile.TurnLineage.ForkedFromThreadID)
+	if strings.TrimSpace(profile.TurnLineage.ForkedFromThreadID) != "" && profile.TurnLineage.ForkedFromOrdinalExclusive != nil {
+		metadata["forked_from_ordinal_exclusive"] = *profile.TurnLineage.ForkedFromOrdinalExclusive
+	}
 	putNonEmptyString(metadata, "parent_thread_id", profile.TurnLineage.ParentThreadID)
 	if profile.TurnLineage.ParentTurnID.ValidFor(profile.RequestKind) {
 		metadata["parent_turn_id"] = profile.TurnLineage.ParentTurnID.Value
@@ -962,6 +1006,7 @@ func (profile CodexWireProfile) nestedObject(includeToolNamespaces bool) map[str
 	}
 	putNonEmptyString(metadata, "subagent_kind", profile.SubagentKind)
 	putNonEmptyString(metadata, "thread_source", profile.ThreadSource)
+	putNonEmptyString(metadata, "turn_trigger", profile.TurnTrigger)
 	putNonEmptyString(metadata, "sandbox", profile.Sandbox)
 	putNonEmptyString(metadata, "sandbox_mode", profile.SandboxMode)
 	if profile.AutoReviewEnabled != nil {
@@ -983,6 +1028,9 @@ func (profile CodexWireProfile) nestedObject(includeToolNamespaces bool) map[str
 	}
 	if profile.TurnStartedAtSet {
 		metadata["turn_started_at_unix_ms"] = profile.TurnStartedAtUnixMS
+	}
+	if profile.HistoryIngestRequested != nil {
+		metadata["history_ingest_requested"] = *profile.HistoryIngestRequested
 	}
 	if profile.RequestKind == CodexWireRequestCompaction {
 		if object := rawJSONObject(profile.Compaction); len(object) > 0 {
@@ -1020,14 +1068,17 @@ func (profile CodexWireProfile) MarshalNestedJSON(includeToolNamespaces bool) (s
 		"agent_name",
 		"turn_id",
 		"window_id",
+		"window_number",
 		"context_window_id",
 		"request_kind",
 		"forked_from_thread_id",
+		"forked_from_ordinal_exclusive",
 		"parent_thread_id",
 		"parent_turn_id",
 		"root_turn_id",
 		"subagent_kind",
 		"thread_source",
+		"turn_trigger",
 		"sandbox",
 		"sandbox_mode",
 		"auto_review_enabled",
@@ -1036,6 +1087,7 @@ func (profile CodexWireProfile) MarshalNestedJSON(includeToolNamespaces bool) (s
 		"workspaces",
 		"tool_namespaces_info",
 		"turn_started_at_unix_ms",
+		"history_ingest_requested",
 		"compaction",
 	}
 	extraKeys := make([]string, 0, len(profile.ExtraMetadata))
@@ -1104,6 +1156,7 @@ func BindOpenAICodexWindowToPlan(plan OpenAIOAuthIdentityPlan, snapshot OpenAICo
 	plan.WindowMappingKey = mappingKey
 	plan.WindowResolveOutcome = OpenAICodexWindowResolveResolved
 	plan.WireProfile.WindowID = snapshot.WindowID()
+	plan.WireProfile.WindowNumber = uint64Pointer(snapshot.Number)
 	plan.WireProfile.ContextWindowID = snapshot.ContextWindowID
 	return plan, nil
 }
@@ -1255,12 +1308,17 @@ func FinalizeOpenAICodexWirePlanWithOptions(plan OpenAIOAuthIdentityPlan, option
 		}
 	}
 	profile.WindowID = ""
+	profile.WindowNumber = nil
 	profile.ContextWindowID = ""
 	if ValidateOpenAICodexWindowSnapshot(plan.Window) == nil && plan.Window.ThreadID == plan.TurnIdentity.ThreadID {
 		profile.WindowID = plan.Window.WindowID()
-		if kind == CodexWireRequestTurn || kind == CodexWireRequestCompaction {
+		if kind.hasTurnIdentity() {
+			profile.WindowNumber = uint64Pointer(plan.Window.Number)
 			profile.ContextWindowID = plan.Window.ContextWindowID
 		}
+	}
+	if strings.TrimSpace(profile.TurnLineage.ForkedFromThreadID) == "" {
+		profile.TurnLineage.ForkedFromOrdinalExclusive = nil
 	}
 
 	if kind == CodexWireRequestCompaction {

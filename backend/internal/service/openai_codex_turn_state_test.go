@@ -157,6 +157,17 @@ func TestOpenAICodexTurnStateIdentityDigestStableAcrossTransports(t *testing.T) 
 	windowVariant := base
 	windowVariant.Window.ContextWindowID = turnStateWindowB
 	require.NotEqual(t, digest, OpenAICodexTurnStateIdentityDigest(windowVariant))
+	forkOrdinalVariant := base
+	forkOrdinalVariant.TurnIdentity.ForkedFromThreadID = turnStateSessionB
+	forkOrdinalVariant.WireProfile.TurnLineage.ForkedFromThreadID = turnStateSessionB
+	forkOrdinalVariant.WireProfile.TurnLineage.ForkedFromOrdinalExclusive = uint64Pointer(0)
+	forkDigest := OpenAICodexTurnStateIdentityDigest(forkOrdinalVariant)
+	forkOrdinalVariant.WireProfile.TurnLineage.ForkedFromOrdinalExclusive = uint64Pointer(1)
+	require.NotEqual(t, forkDigest, OpenAICodexTurnStateIdentityDigest(forkOrdinalVariant))
+	transientVariant := base
+	transientVariant.WireProfile.TurnTrigger = "retry"
+	transientVariant.WireProfile.HistoryIngestRequested = boolPointer(true)
+	require.Equal(t, digest, OpenAICodexTurnStateIdentityDigest(transientVariant))
 	timestampVariant := base
 	timestampVariant.RequestTurn.StartedAtUnixMS++
 	require.Equal(t, digest, OpenAICodexTurnStateIdentityDigest(timestampVariant))

@@ -153,12 +153,12 @@ func requireOpenAIIdentityPathContextWindowID(t *testing.T, headers http.Header,
 	t.Helper()
 	values := make([]string, 0, 2)
 	if nested := strings.TrimSpace(headers.Get(openAIWSTurnMetadataHeader)); nested != "" {
-		if value := gjson.Get(nested, "context_window_id").String(); value != "" {
+		if value := requireOpenAIIdentityPathWindowTriple(t, nested); value != "" {
 			values = append(values, value)
 		}
 	}
 	if nested := gjson.GetBytes(body, "client_metadata.x-codex-turn-metadata").String(); nested != "" {
-		if value := gjson.Get(nested, "context_window_id").String(); value != "" {
+		if value := requireOpenAIIdentityPathWindowTriple(t, nested); value != "" {
 			values = append(values, value)
 		}
 	}
@@ -169,16 +169,34 @@ func requireOpenAIIdentityPathContextWindowID(t *testing.T, headers http.Header,
 		require.Equal(t, values[0], value)
 	}
 	require.Empty(t, headers.Get("x-codex-context-window-id"), "context_window_id has no independent header")
+	require.Empty(t, headers.Get("window-number"), "window_number has no independent header")
 	require.False(t, gjson.GetBytes(body, "client_metadata.context_window_id").Exists(), "context_window_id is nested-only")
+	require.False(t, gjson.GetBytes(body, "client_metadata.window_number").Exists(), "window_number is nested-only")
 	return values[0]
+}
+
+func requireOpenAIIdentityPathWindowTriple(t *testing.T, nested string) string {
+	t.Helper()
+	contextWindowID := gjson.Get(nested, "context_window_id").String()
+	if contextWindowID == "" {
+		return ""
+	}
+	windowID := gjson.Get(nested, "window_id").String()
+	windowNumber := gjson.Get(nested, "window_number")
+	require.Equal(t, gjson.Number, windowNumber.Type, "window_number must be a JSON number")
+	require.Equal(t, windowID, gjson.Get(nested, "thread_id").String()+":"+windowNumber.Raw)
+	return contextWindowID
 }
 
 func requireOpenAIIdentityPathNoContextWindowID(t *testing.T, headers http.Header, body []byte) {
 	t.Helper()
 	require.False(t, gjson.Get(headers.Get(openAIWSTurnMetadataHeader), "context_window_id").Exists())
+	require.False(t, gjson.Get(headers.Get(openAIWSTurnMetadataHeader), "window_number").Exists())
 	nested := gjson.GetBytes(body, "client_metadata.x-codex-turn-metadata").String()
 	require.False(t, gjson.Get(nested, "context_window_id").Exists())
+	require.False(t, gjson.Get(nested, "window_number").Exists())
 	require.False(t, gjson.GetBytes(body, "client_metadata.context_window_id").Exists())
+	require.False(t, gjson.GetBytes(body, "client_metadata.window_number").Exists())
 	require.Empty(t, headers.Get("x-codex-context-window-id"))
 }
 
@@ -387,8 +405,9 @@ func TestOpenAIOutboundIdentityPathsResponsesThenCompactReuseCanonicalIdentity(t
 			requireOpenAIIdentityPathNoBodyPair(t, upstream.bodies[1])
 			require.False(t, gjson.GetBytes(upstream.bodies[1], "client_metadata").Exists())
 
+			require.Empty(t, upstream.requests[0].Header.Get(codexInstallationIDKey))
+			require.Equal(t, transportTestPinnedInstallationID, upstream.requests[1].Header.Get(codexInstallationIDKey))
 			for _, req := range upstream.requests {
-				require.Equal(t, transportTestPinnedInstallationID, req.Header.Get(codexInstallationIDKey))
 				require.Equal(t, openai.CodexDefaultOriginator, req.Header.Get("originator"))
 				require.Equal(t, codexCLIVersion, req.Header.Get("version"))
 				require.Equal(t, buildCodexCLIUserAgent(codexCLIVersion), req.Header.Get("user-agent"))
@@ -693,7 +712,8 @@ func TestOpenAIOutboundIdentityPathsOAuthPassthroughObservesEachPhysicalSend(t *
 	require.True(t, entry.Pinned)
 	require.Equal(t, "client-body-installation", entry.ClientReportedInstallationID)
 	require.NotEqual(t, "client-body-installation", entry.OutboundInstallationID)
-	require.Equal(t, upstream.lastReq.Header.Get(codexInstallationIDKey), entry.OutboundInstallationID)
+	require.Empty(t, upstream.lastReq.Header.Get(codexInstallationIDKey))
+	require.Equal(t, gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String(), entry.OutboundInstallationID)
 }
 
 func TestOpenAIOutboundIdentityPathsOAuthPassthroughUsesMetadataWithoutLegacySeed(t *testing.T) {
@@ -792,7 +812,7 @@ func TestOpenAIOutboundIdentityPassthroughPinsInstallationAcrossCarriers(t *test
 	require.NoError(t, err)
 	outboundBody := readOpenAIIdentityPathRequestBody(t, req)
 	const pinnedInstallationID = "11111111-2222-4333-8444-555555555555"
-	require.Equal(t, pinnedInstallationID, req.Header.Get(codexInstallationIDKey))
+	require.Empty(t, req.Header.Get(codexInstallationIDKey))
 	headerMetadata := req.Header.Get(openAIWSTurnMetadataHeader)
 	require.Equal(t, pinnedInstallationID, gjson.Get(headerMetadata, "installation_id").String())
 	require.Equal(t, "keep", gjson.Get(headerMetadata, "label").String())

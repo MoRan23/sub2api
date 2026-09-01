@@ -177,7 +177,9 @@ func TestFinalizeOpenAIOAuthWSWirePlanPrewarmClearsDynamicTurnFields(t *testing.
 	require.Equal(t, base.TurnIdentity.SessionID, plan.WireProfile.SessionID)
 	require.Equal(t, base.TurnIdentity.ThreadID, plan.WireProfile.ThreadID)
 	require.Equal(t, base.Window.WindowID(), plan.WireProfile.WindowID)
-	require.Empty(t, plan.WireProfile.ContextWindowID)
+	require.NotNil(t, plan.WireProfile.WindowNumber)
+	require.Equal(t, base.Window.Number, *plan.WireProfile.WindowNumber)
+	require.Equal(t, base.Window.ContextWindowID, plan.WireProfile.ContextWindowID)
 
 	projected, err := svc.projectOpenAIOAuthWSFrame(nil, account, plan, payload)
 	require.NoError(t, err)
@@ -187,9 +189,13 @@ func TestFinalizeOpenAIOAuthWSWirePlanPrewarmClearsDynamicTurnFields(t *testing.
 	require.Equal(t, "prewarm", gjson.Get(metadata, "request_kind").String())
 	require.Equal(t, base.TurnIdentity.SessionID, gjson.Get(metadata, "session_id").String())
 	require.Equal(t, base.TurnIdentity.ThreadID, gjson.Get(metadata, "thread_id").String())
-	for _, key := range []string{"turn_id", "parent_turn_id", "root_turn_id", "turn_started_at_unix_ms", "workspaces", "context_window_id"} {
+	require.Equal(t, base.Window.WindowID(), gjson.Get(metadata, "window_id").String())
+	require.Equal(t, base.Window.Number, gjson.Get(metadata, "window_number").Uint())
+	require.Equal(t, base.Window.ContextWindowID, gjson.Get(metadata, "context_window_id").String())
+	for _, key := range []string{"turn_id", "parent_turn_id", "root_turn_id", "turn_started_at_unix_ms", "workspaces"} {
 		require.False(t, gjson.Get(metadata, key).Exists(), key)
 	}
+	require.False(t, gjson.GetBytes(projected, "client_metadata.window_number").Exists())
 	require.False(t, gjson.GetBytes(projected, "client_metadata.context_window_id").Exists())
 }
 

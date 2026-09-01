@@ -79,7 +79,7 @@ func TestAccountTestService_TestAccountConnection_OpenAICompactOAuthSuccessPersi
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "store").Bool())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "client_metadata").Exists(), "native v2 uses the regular Responses projection")
-	require.Equal(t, "11111111-2222-4333-8444-555555555555", upstream.lastReq.Header.Get(codexInstallationIDKey))
+	require.Empty(t, upstream.lastReq.Header.Get(codexInstallationIDKey))
 	require.Equal(t, "11111111-2222-4333-8444-555555555555", extractInstallationIDFromTurnMetadata(upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader)))
 	inputItems := gjson.GetBytes(upstream.lastBody, "input").Array()
 	require.NotEmpty(t, inputItems)

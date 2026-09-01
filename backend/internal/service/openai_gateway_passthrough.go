@@ -872,12 +872,17 @@ func openAICodexTurnMetadataWithCompactWindow(raw string, snapshot OpenAICodexWi
 	profile := ParseCodexWireProfile(base)
 	profile.RequestKind = CodexWireRequestCompaction
 	profile.WindowID = windowID
+	profile.WindowNumber = uint64Pointer(snapshot.Number)
 	profile.ContextWindowID = contextWindowID
 	updated, err := sjson.Set(base, "request_kind", string(profile.RequestKind))
 	if err != nil {
 		return raw, false
 	}
 	updated, err = sjson.Set(updated, "window_id", profile.WindowID)
+	if err != nil {
+		return raw, false
+	}
+	updated, err = sjson.Set(updated, "window_number", *profile.WindowNumber)
 	if err != nil {
 		return raw, false
 	}

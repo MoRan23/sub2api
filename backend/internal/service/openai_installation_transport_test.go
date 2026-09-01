@@ -100,8 +100,8 @@ func TestOpenAIInstallationNormalHTTPRewritesBodyAndHeaders(t *testing.T) {
 		t.Fatalf("unexpected body turn metadata: %#v", bodyTurn)
 	}
 	turnSessionID := requireInstallationTestRootIdentity(t, bodyTurn)
-	if upstream.lastReq.Header.Get(codexInstallationIDKey) != transportTestPinnedInstallationID {
-		t.Fatalf("unexpected header installation ID: %#v", upstream.lastReq.Header)
+	if upstream.lastReq.Header.Get(codexInstallationIDKey) != "" {
+		t.Fatalf("regular responses emitted standalone installation ID: %#v", upstream.lastReq.Header)
 	}
 	headerTurn := decodeInstallationTestMetadata(t, upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader))
 	if headerTurn[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID {
@@ -183,8 +183,8 @@ func TestOpenAIInstallationHTTPPassthroughPinsAllCarriers(t *testing.T) {
 	if got := strings.TrimSpace(jsonStringPath(t, upstream.lastBody, "client_metadata", codexInstallationIDKey)); got != transportTestPinnedInstallationID {
 		t.Fatalf("passthrough body installation ID was not pinned: %q", got)
 	}
-	if got := upstream.lastReq.Header.Get(codexInstallationIDKey); got != transportTestPinnedInstallationID {
-		t.Fatalf("passthrough header installation ID was not pinned: %q", got)
+	if got := upstream.lastReq.Header.Get(codexInstallationIDKey); got != "" {
+		t.Fatalf("passthrough responses emitted standalone installation ID: %q", got)
 	}
 	headerTurn := decodeInstallationTestMetadata(t, upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader))
 	if headerTurn[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID {
@@ -285,8 +285,8 @@ func TestBuildOpenAIWSHeadersPinsInstallationForPassthrough(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build passthrough headers: %v", err)
 	}
-	if passthroughHeaders.Get(codexInstallationIDKey) != transportTestPinnedInstallationID {
-		t.Fatalf("passthrough WS header was not pinned: %#v", passthroughHeaders)
+	if passthroughHeaders.Get(codexInstallationIDKey) != "" {
+		t.Fatalf("passthrough WS emitted standalone installation ID: %#v", passthroughHeaders)
 	}
 	passthroughNested := decodeInstallationTestMetadata(t, passthroughHeaders.Get(openAIWSTurnMetadataHeader))
 	require.Equal(t, transportTestPinnedInstallationID, passthroughNested[codexTurnMetadataInstallationIDKey])
@@ -303,8 +303,8 @@ func TestBuildOpenAIWSHeadersPinsInstallationForPassthrough(t *testing.T) {
 	}
 	require.Equal(t, OpenAIOAuthIdentityProjectionPassthrough, pinnedResolution.OutboundIdentityPlan.ProjectionMode)
 	require.Equal(t, OpenAIOAuthInstallationAccountPin, pinnedResolution.OutboundIdentityPlan.InstallationPolicy)
-	if pinnedHeaders.Get(codexInstallationIDKey) != transportTestPinnedInstallationID {
-		t.Fatalf("non-passthrough WS header was not pinned: %#v", pinnedHeaders)
+	if pinnedHeaders.Get(codexInstallationIDKey) != "" {
+		t.Fatalf("non-passthrough WS emitted standalone installation ID: %#v", pinnedHeaders)
 	}
 	nested := decodeInstallationTestMetadata(t, pinnedHeaders.Get(openAIWSTurnMetadataHeader))
 	if nested[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID {
@@ -473,8 +473,8 @@ func TestOpenAIInstallationIngressWSRewritesEveryResponseCreate(t *testing.T) {
 		}
 		require.Equal(t, turnSessionID, currentSessionID)
 	}
-	if captureDialer.lastHeaders.Get(codexInstallationIDKey) != transportTestPinnedInstallationID {
-		t.Fatalf("ingress handshake installation ID not pinned: %#v", captureDialer.lastHeaders)
+	if captureDialer.lastHeaders.Get(codexInstallationIDKey) != "" {
+		t.Fatalf("ingress handshake emitted standalone installation ID: %#v", captureDialer.lastHeaders)
 	}
 	handshakeNested := decodeInstallationTestMetadata(t, captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader))
 	if handshakeNested[codexTurnMetadataInstallationIDKey] != transportTestPinnedInstallationID {

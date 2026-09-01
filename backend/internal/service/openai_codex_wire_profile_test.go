@@ -28,9 +28,9 @@ const (
 	codexWireTestLocalCompact  = `{"request_kind":"compaction","turn_id":"01989f44-7c00-7000-8000-000000000003","compaction":{"trigger":"auto","reason":"model_downshift","implementation":"responses","phase":"pre_turn","strategy":"prefix_compaction"}}`
 )
 
-func readCodex3929Golden(t *testing.T, name string) string {
+func readCodex316795bGolden(t *testing.T, name string) string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("testdata", "codex_3929c99a", name))
+	raw, err := os.ReadFile(filepath.Join("testdata", "codex_316795b", name))
 	require.NoError(t, err)
 	return strings.TrimSpace(string(raw))
 }
@@ -55,19 +55,23 @@ func codexWireProjectionTestPlan(t *testing.T) OpenAIOAuthIdentityPlan {
 			"agent_name":"custom-agent",
 		"turn_id":"%s",
 		"window_id":"client-window",
+		"window_number":999,
 		"context_window_id":"01989f44-7c00-7000-8000-000000000099",
 		"request_kind":"turn",
 		"forked_from_thread_id":"%s",
+		"forked_from_ordinal_exclusive":42,
 		"parent_thread_id":"%s",
 		"parent_turn_id":"%s",
 		"root_turn_id":"%s",
 		"subagent_kind":"review",
 		"thread_source":"subagent",
+		"turn_trigger":"retry",
 		"sandbox":"workspace-write",
 		"sandbox_mode":"workspace-write",
 		"auto_review_enabled":true,
 		"node_repl_auto_review_required":false,
 		"node_repl_disabled":true,
+		"history_ingest_requested":true,
 		"workspaces":{"/tmp/\u6771\u4eac":{"associated_remote_urls":{"origin":"https://\u4f8b\u5b50.test/repo"},"latest_git_commit_hash":"abc","has_changes":true}},
 		"tool_namespaces_info":{"shell":{"name":"shell","functions":{"run":{"name":"run","direct":true,"code_mode_name":null,"deferred":false,"source":{"kind":"harness"}}}}},
 		"turn_started_at_unix_ms":1777777777123,
@@ -152,31 +156,37 @@ func TestCodexWireProfileOfficialGoldenProjection(t *testing.T) {
 	}
 	sort.Strings(keys)
 	var wantKeys []string
-	require.NoError(t, json.Unmarshal([]byte(readCodex3929Golden(t, "turn_flat_keys.golden.json")), &wantKeys))
+	require.NoError(t, json.Unmarshal([]byte(readCodex316795bGolden(t, "turn_flat_keys.golden.json")), &wantKeys))
 	require.Equal(t, wantKeys, keys)
 
 	var bodyNested string
 	require.NoError(t, json.Unmarshal(clientMetadata[openAIWSTurnMetadataHeader], &bodyNested))
-	require.Equal(t, readCodex3929Golden(t, "turn_body_nested.golden.json"), bodyNested)
+	require.Equal(t, readCodex316795bGolden(t, "turn_body_nested.golden.json"), bodyNested)
 	require.True(t, isASCIIString(bodyNested))
 	require.NotContains(t, bodyNested, "routing_hint")
 	require.Equal(t, codexWireTestContextWindow, jsonStringField(t, bodyNested, "context_window_id"))
+	require.Equal(t, int64(0), gjson.Get(bodyNested, "window_number").Int())
+	require.Equal(t, gjson.Get(bodyNested, "window_id").String(), codexWireTestThread+":"+gjson.Get(bodyNested, "window_number").Raw)
 	require.NotContains(t, clientMetadata, "context_window_id", "context_window_id is nested-only")
+	require.NotContains(t, clientMetadata, "window_number", "window_number is nested-only")
 
 	headerNested := headers.Get(openAIWSTurnMetadataHeader)
-	require.Equal(t, readCodex3929Golden(t, "turn_header_nested.golden.json"), headerNested)
+	require.Equal(t, readCodex316795bGolden(t, "turn_header_nested.golden.json"), headerNested)
 	require.True(t, isASCIIString(headerNested))
 	require.NotContains(t, headerNested, "tool_namespaces_info")
 	require.Equal(t, codexWireTestContextWindow, jsonStringField(t, headerNested, "context_window_id"))
+	require.Equal(t, int64(0), gjson.Get(headerNested, "window_number").Int())
 	require.Equal(t, codexWireTestSession, headers.Get("session-id"))
 	require.Equal(t, codexWireTestThread, headers.Get("thread-id"))
 	require.Equal(t, codexWireTestThread+":0", headers.Get("x-codex-window-id"))
+	require.Empty(t, headers.Get(codexInstallationIDKey), "regular /responses must not emit a standalone installation header")
 	require.Equal(t, "review", headers.Get("x-openai-subagent"))
 }
 
-func TestCodexWireContextWindowIDIsServerOwnedReservedAndNestedOnly(t *testing.T) {
+func TestCodexWireWindowIdentityIsServerOwnedReservedAndNestedOnly(t *testing.T) {
 	metadata := map[string]any{
 		"request_kind":              "turn",
+		"window_number":             99,
 		"context_window_id":         "01989f44-7c00-7000-8000-000000000099",
 		"context-window-id":         "attacker-alias",
 		"x-codex-context-window-id": "attacker-header-alias",
@@ -189,9 +199,10 @@ func TestCodexWireContextWindowIDIsServerOwnedReservedAndNestedOnly(t *testing.T
 	require.NoError(t, err)
 
 	profile := ParseCodexWireProfile(string(raw))
+	require.Nil(t, profile.WindowNumber, "client metadata cannot seed the server-owned field")
 	require.Empty(t, profile.ContextWindowID, "client metadata cannot seed the server-owned field")
 	for _, key := range []string{
-		"context_window_id", "context-window-id", "x-codex-context-window-id", "x-codex-context_window_id",
+		"window_number", "context_window_id", "context-window-id", "x-codex-context-window-id", "x-codex-context_window_id",
 	} {
 		require.NotContains(t, profile.ExtraMetadata, key)
 	}
@@ -208,18 +219,27 @@ func TestCodexWireContextWindowIDIsServerOwnedReservedAndNestedOnly(t *testing.T
 		ThreadID: codexWireTestThread, ContextWindowID: codexWireTestContextWindow,
 	}, strings.Repeat("a", 64))
 	require.NoError(t, err)
+	require.NotNil(t, bound.WireProfile.WindowNumber)
+	require.Equal(t, uint64(0), *bound.WireProfile.WindowNumber)
 	require.Equal(t, codexWireTestContextWindow, bound.WireProfile.ContextWindowID)
 
 	encoded, err := bound.WireProfile.MarshalNestedJSON(true)
 	require.NoError(t, err)
 	require.Equal(t, codexWireTestContextWindow, jsonStringField(t, encoded, "context_window_id"))
+	require.Equal(t, uint64(0), gjson.Get(encoded, "window_number").Uint())
 
 	for _, kind := range []CodexWireRequestKind{CodexWireRequestPrewarm, CodexWireRequestMemory} {
 		withoutContext := cloneCodexWireProfile(bound.WireProfile)
 		withoutContext.RequestKind = kind
 		encoded, err = withoutContext.MarshalNestedJSON(true)
 		require.NoError(t, err)
-		require.Empty(t, jsonRawField(t, encoded, "context_window_id"), string(kind))
+		if kind == CodexWireRequestPrewarm {
+			require.Equal(t, codexWireTestContextWindow, jsonStringField(t, encoded, "context_window_id"))
+			require.Equal(t, uint64(0), gjson.Get(encoded, "window_number").Uint())
+		} else {
+			require.Empty(t, jsonRawField(t, encoded, "context_window_id"), string(kind))
+			require.Empty(t, jsonRawField(t, encoded, "window_number"), string(kind))
+		}
 	}
 
 	malformed := cloneCodexWireProfile(bound.WireProfile)
@@ -227,6 +247,114 @@ func TestCodexWireContextWindowIDIsServerOwnedReservedAndNestedOnly(t *testing.T
 	encoded, err = malformed.MarshalNestedJSON(true)
 	require.NoError(t, err)
 	require.Empty(t, jsonRawField(t, encoded, "context_window_id"))
+}
+
+func TestCodexWireSpecialMetadataCaptureAndProjection(t *testing.T) {
+	t.Run("zero ordinal false history and open triggers", func(t *testing.T) {
+		for _, trigger := range []string{"user", "retry", "queue", "goal", "realtime", "custom-trigger.v2"} {
+			raw := fmt.Sprintf(`{"request_kind":"turn","forked_from_thread_id":"%s","forked_from_ordinal_exclusive":0,"history_ingest_requested":false,"turn_trigger":%q}`, codexWireTestFork, trigger)
+			profile := ParseCodexWireProfile(raw)
+			require.NotNil(t, profile.TurnLineage.ForkedFromOrdinalExclusive, trigger)
+			require.Equal(t, uint64(0), *profile.TurnLineage.ForkedFromOrdinalExclusive, trigger)
+			require.NotNil(t, profile.HistoryIngestRequested, trigger)
+			require.False(t, *profile.HistoryIngestRequested, trigger)
+			require.Equal(t, trigger, profile.TurnTrigger)
+			encoded, err := profile.MarshalNestedJSON(true)
+			require.NoError(t, err)
+			require.True(t, gjson.Get(encoded, "forked_from_ordinal_exclusive").Exists(), trigger)
+			require.Equal(t, uint64(0), gjson.Get(encoded, "forked_from_ordinal_exclusive").Uint(), trigger)
+			require.True(t, gjson.Get(encoded, "history_ingest_requested").Exists(), trigger)
+			require.False(t, gjson.Get(encoded, "history_ingest_requested").Bool(), trigger)
+			require.Equal(t, trigger, gjson.Get(encoded, "turn_trigger").String(), trigger)
+		}
+	})
+
+	t.Run("maximum ordinal remains an integer", func(t *testing.T) {
+		profile := ParseCodexWireProfile(`{"request_kind":"turn","forked_from_thread_id":"` + codexWireTestFork + `","forked_from_ordinal_exclusive":18446744073709551615}`)
+		require.NotNil(t, profile.TurnLineage.ForkedFromOrdinalExclusive)
+		require.Equal(t, ^uint64(0), *profile.TurnLineage.ForkedFromOrdinalExclusive)
+		encoded, err := profile.MarshalNestedJSON(true)
+		require.NoError(t, err)
+		require.Contains(t, encoded, `"forked_from_ordinal_exclusive":18446744073709551615`)
+	})
+
+	t.Run("invalid values and orphan ordinal are omitted", func(t *testing.T) {
+		for _, raw := range []string{
+			`{"request_kind":"turn","forked_from_thread_id":"` + codexWireTestFork + `","forked_from_ordinal_exclusive":-1,"history_ingest_requested":"true","turn_trigger":7}`,
+			`{"request_kind":"turn","forked_from_thread_id":"` + codexWireTestFork + `","forked_from_ordinal_exclusive":1.5,"history_ingest_requested":null,"turn_trigger":"line\nbreak"}`,
+			`{"request_kind":"turn","forked_from_ordinal_exclusive":7}`,
+		} {
+			profile := ParseCodexWireProfile(raw)
+			encoded, err := profile.MarshalNestedJSON(true)
+			require.NoError(t, err)
+			require.False(t, gjson.Get(encoded, "forked_from_ordinal_exclusive").Exists(), raw)
+			require.False(t, gjson.Get(encoded, "history_ingest_requested").Exists(), raw)
+			require.False(t, gjson.Get(encoded, "turn_trigger").Exists(), raw)
+		}
+	})
+
+	t.Run("canonical full carrier wins", func(t *testing.T) {
+		canonical := `{"request_kind":"turn","forked_from_thread_id":"` + codexWireTestFork + `","forked_from_ordinal_exclusive":4,"history_ingest_requested":false,"turn_trigger":"retry"}`
+		body := codexWireTestBody(t, canonical, map[string]any{
+			"forked_from_ordinal_exclusive": 99,
+			"history_ingest_requested":      true,
+			"turn_trigger":                  "flat",
+		})
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"forked_from_ordinal_exclusive":8,"history_ingest_requested":true,"turn_trigger":"header"}`)
+		capture := CaptureOpenAIOAuthIdentity(c, body, "")
+		require.Equal(t, uint64(4), *capture.WireProfile.TurnLineage.ForkedFromOrdinalExclusive)
+		require.False(t, *capture.WireProfile.HistoryIngestRequested)
+		require.Equal(t, "retry", capture.WireProfile.TurnTrigger)
+	})
+
+	t.Run("flat and root fields cannot seed typed values", func(t *testing.T) {
+		body := []byte(`{"client_metadata":{"forked_from_ordinal_exclusive":1,"history_ingest_requested":true,"turn_trigger":"flat"},"forked_from_ordinal_exclusive":2,"history_ingest_requested":false,"turn_trigger":"root"}`)
+		profile := CaptureOpenAIOAuthIdentity(nil, body, "").WireProfile
+		require.Nil(t, profile.TurnLineage.ForkedFromOrdinalExclusive)
+		require.Nil(t, profile.HistoryIngestRequested)
+		require.Empty(t, profile.TurnTrigger)
+	})
+
+	t.Run("reserved fields do not consume extra quota", func(t *testing.T) {
+		metadata := map[string]any{
+			"request_kind":                  "turn",
+			"forked_from_thread_id":         codexWireTestFork,
+			"forked_from_ordinal_exclusive": 12,
+			"history_ingest_requested":      true,
+			"turn_trigger":                  "queue",
+		}
+		for index := 0; index < 16; index++ {
+			metadata[fmt.Sprintf("extra_%02d", index)] = fmt.Sprintf("value-%02d", index)
+		}
+		raw, err := json.Marshal(metadata)
+		require.NoError(t, err)
+		profile := ParseCodexWireProfile(string(raw))
+		require.Len(t, profile.ExtraMetadata, 16)
+		for _, key := range []string{"forked_from_ordinal_exclusive", "history_ingest_requested", "turn_trigger"} {
+			require.NotContains(t, profile.ExtraMetadata, key)
+		}
+	})
+}
+
+func TestCodexWireSpecialMetadataRemainsNestedOnly(t *testing.T) {
+	plan := codexWireProjectionTestPlan(t)
+	finalPlan, err := FinalizeOpenAICodexWirePlan(plan, string(CodexWireRequestTurn), CodexModelCapabilities{})
+	require.NoError(t, err)
+	body := []byte(`{"model":"gpt-5.4","client_metadata":{"forked_from_ordinal_exclusive":99,"history_ingest_requested":false,"turn_trigger":"flat"},"forked_from_ordinal_exclusive":98,"history_ingest_requested":false,"turn_trigger":"root"}`)
+	out, err := ApplyOpenAIOAuthIdentityPlan(make(http.Header), body, finalPlan)
+	require.NoError(t, err)
+	for _, path := range []string{
+		"client_metadata.forked_from_ordinal_exclusive", "client_metadata.history_ingest_requested", "client_metadata.turn_trigger",
+		"forked_from_ordinal_exclusive", "history_ingest_requested", "turn_trigger",
+	} {
+		require.False(t, gjson.GetBytes(out, path).Exists(), path)
+	}
+	nested := gjson.GetBytes(out, "client_metadata.x-codex-turn-metadata").String()
+	require.Equal(t, uint64(42), gjson.Get(nested, "forked_from_ordinal_exclusive").Uint())
+	require.True(t, gjson.Get(nested, "history_ingest_requested").Bool())
+	require.Equal(t, "retry", gjson.Get(nested, "turn_trigger").String())
 }
 
 func TestCodexWireGuardianReviewProjection(t *testing.T) {
@@ -472,6 +600,7 @@ func TestCodexWireMemoryProjectionKeepsStableTupleWithoutTurnIdentity(t *testing
 	require.Equal(t, codexWireTestSession, finalPlan.WireProfile.SessionID)
 	require.Equal(t, codexWireTestThread, finalPlan.WireProfile.ThreadID)
 	require.Equal(t, codexWireTestThread+":0", finalPlan.WireProfile.WindowID)
+	require.Nil(t, finalPlan.WireProfile.WindowNumber)
 	require.Empty(t, finalPlan.WireProfile.ContextWindowID)
 	require.Empty(t, finalPlan.WireProfile.AgentName)
 	require.Empty(t, finalPlan.WireProfile.TurnID.Value)
@@ -523,14 +652,14 @@ func TestCodexWireMemoryProjectionKeepsStableTupleWithoutTurnIdentity(t *testing
 	require.Equal(t, "memory", jsonStringRaw(t, nested["request_kind"]))
 	require.Equal(t, "keep", jsonStringRaw(t, nested["incoming_extra"]))
 	for _, key := range []string{
-		"installation_id", "session_id", "thread_id", "agent_name", "turn_id", "window_id", "context_window_id",
+		"installation_id", "session_id", "thread_id", "agent_name", "turn_id", "window_id", "window_number", "context_window_id",
 		"forked_from_thread_id", "parent_thread_id", "parent_turn_id", "root_turn_id",
 		"turn_started_at_unix_ms", "compaction",
 	} {
 		require.NotContains(t, nested, key)
 	}
 
-	require.Equal(t, "installation-pin", headers.Get(codexInstallationIDKey))
+	require.Empty(t, headers.Get(codexInstallationIDKey))
 	require.Equal(t, codexWireTestSession, headers.Get("session-id"))
 	require.Equal(t, codexWireTestThread, headers.Get("thread-id"))
 	require.Equal(t, codexWireTestThread, headers.Get("x-client-request-id"))
@@ -541,7 +670,7 @@ func TestCodexWireMemoryProjectionKeepsStableTupleWithoutTurnIdentity(t *testing
 	var headerNested map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal([]byte(headers.Get(openAIWSTurnMetadataHeader)), &headerNested))
 	require.Equal(t, "memory", jsonStringRaw(t, headerNested["request_kind"]))
-	for _, key := range []string{"installation_id", "session_id", "thread_id", "agent_name", "turn_id", "window_id", "context_window_id", "parent_thread_id", "turn_started_at_unix_ms"} {
+	for _, key := range []string{"installation_id", "session_id", "thread_id", "agent_name", "turn_id", "window_id", "window_number", "context_window_id", "parent_thread_id", "turn_started_at_unix_ms"} {
 		require.NotContains(t, headerNested, key)
 	}
 }
@@ -656,6 +785,8 @@ func TestFinalizeCodexWireProfileDefaultsAndRootLineage(t *testing.T) {
 	require.False(t, *rootPlan.WireProfile.NodeREPLDisabled)
 	require.Equal(t, rootPlan.WireProfile.TurnID, rootPlan.WireProfile.TurnLineage.RootTurnID)
 	require.Equal(t, codexWireTestSession+":0", rootPlan.WireProfile.WindowID)
+	require.NotNil(t, rootPlan.WireProfile.WindowNumber)
+	require.Equal(t, uint64(0), *rootPlan.WireProfile.WindowNumber)
 	require.Equal(t, codexWireTestContextWindow, rootPlan.WireProfile.ContextWindowID)
 
 	descendantPlan, err := FinalizeOpenAICodexWirePlan(OpenAIOAuthIdentityPlan{
@@ -760,8 +891,11 @@ func TestFinalizeCodexWireProfilePrewarmOmitsRequestTurnLineage(t *testing.T) {
 		require.Empty(t, jsonRawField(t, encoded, field), field)
 	}
 	require.Equal(t, codexWireTestThread+":0", jsonStringField(t, encoded, "window_id"))
-	require.Empty(t, jsonRawField(t, encoded, "context_window_id"))
-	require.Empty(t, plan.WireProfile.ContextWindowID)
+	require.Equal(t, uint64(0), gjson.Get(encoded, "window_number").Uint())
+	require.Equal(t, codexWireTestContextWindow, jsonStringField(t, encoded, "context_window_id"))
+	require.NotNil(t, plan.WireProfile.WindowNumber)
+	require.Equal(t, uint64(0), *plan.WireProfile.WindowNumber)
+	require.Equal(t, codexWireTestContextWindow, plan.WireProfile.ContextWindowID)
 	require.Equal(t, "internal:prewarm", plan.RequestTurn.ID, "compatible lifecycle snapshot remains available")
 }
 
@@ -942,8 +1076,9 @@ func TestCodexWireCaptureAndPlanContextAreDeeplyImmutable(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	nested := `{"request_kind":"compaction","turn_id":"internal:immutable","compaction":{"trigger":"manual","reason":"user_requested","implementation":"responses","phase":"standalone_turn","strategy":"memento"},"workspaces":{"repo":{"has_changes":true}},"tool_namespaces_info":{"shell":{"name":"shell","functions":{}}},"alpha":"original"}`
+	nested := `{"request_kind":"compaction","turn_id":"internal:immutable","forked_from_thread_id":"` + codexWireTestFork + `","forked_from_ordinal_exclusive":7,"history_ingest_requested":false,"compaction":{"trigger":"manual","reason":"user_requested","implementation":"responses","phase":"standalone_turn","strategy":"memento"},"workspaces":{"repo":{"has_changes":true}},"tool_namespaces_info":{"shell":{"name":"shell","functions":{}}},"alpha":"original"}`
 	capture := CaptureOpenAIOAuthIdentity(c, codexWireTestBody(t, nested, nil), "")
+	capture.WireProfile.WindowNumber = uint64Pointer(3)
 	wantProfile := cloneCodexWireProfile(capture.WireProfile)
 	SetOpenAIOAuthIdentityCapture(c, capture)
 
@@ -951,6 +1086,9 @@ func TestCodexWireCaptureAndPlanContextAreDeeplyImmutable(t *testing.T) {
 	capture.WireProfile.Compaction[0] = 'X'
 	capture.WireProfile.Workspaces[0] = 'X'
 	capture.WireProfile.ToolNamespacesInfo[0] = 'X'
+	*capture.WireProfile.WindowNumber = 4
+	*capture.WireProfile.TurnLineage.ForkedFromOrdinalExclusive = 8
+	*capture.WireProfile.HistoryIngestRequested = true
 	storedCapture, ok := OpenAIOAuthIdentityCaptureFromContext(c)
 	require.True(t, ok)
 	require.True(t, codexWireProfilesEqual(wantProfile, storedCapture.WireProfile))
@@ -959,6 +1097,7 @@ func TestCodexWireCaptureAndPlanContextAreDeeplyImmutable(t *testing.T) {
 	SetOpenAIOAuthIdentityPlan(c, plan)
 	plan.WireProfile.ExtraMetadata["alpha"] = "plan-mutated"
 	plan.WireProfile.Workspaces[0] = 'Y'
+	*plan.WireProfile.WindowNumber = 5
 	storedPlan, ok := OpenAIOAuthIdentityPlanFromContext(c)
 	require.True(t, ok)
 	require.True(t, codexWireProfilesEqual(wantProfile, storedPlan.WireProfile))
@@ -966,6 +1105,7 @@ func TestCodexWireCaptureAndPlanContextAreDeeplyImmutable(t *testing.T) {
 
 	storedPlan.WireProfile.ExtraMetadata["alpha"] = "read-mutated"
 	storedPlan.WireProfile.ToolNamespacesInfo[0] = 'Z'
+	*storedPlan.WireProfile.TurnLineage.ForkedFromOrdinalExclusive = 9
 	secondRead, ok := OpenAIOAuthIdentityPlanFromContext(c)
 	require.True(t, ok)
 	require.True(t, codexWireProfilesEqual(wantProfile, secondRead.WireProfile))
