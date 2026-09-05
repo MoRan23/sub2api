@@ -1181,7 +1181,7 @@ func BuildOpenAICodexRoutingHint(model, serviceTier string) string {
 	}
 	tier := normalizedOpenAIServiceTierValue(serviceTier)
 	switch tier {
-	case OpenAIFastTierPriority, OpenAIFastTierFlex:
+	case OpenAIFastTierPriority, OpenAIFastTierFlex, OpenAIFastTierUltrafast:
 	default:
 		tier = ""
 	}
