@@ -2176,6 +2176,8 @@ func supportsOpenAIReasoningEffortMax(model string) bool {
 	normalized := strings.ToLower(lastOpenAIModelSegment(model))
 	normalized = strings.ReplaceAll(normalized, "_", "-")
 	switch {
+	case normalized == "gpt-daybreak-blue-latest", normalized == "gpt-daybreak-red-latest":
+		return true
 	case strings.HasPrefix(normalized, "deepseek-v4"):
 		return true
 	case strings.HasPrefix(normalized, "glm-"):
