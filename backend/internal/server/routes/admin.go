@@ -2,6 +2,7 @@
 package routes
 
 import (
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -19,6 +20,7 @@ func RegisterAdminRoutes(
 	stepUpAuth middleware.StepUpAuthMiddleware,
 	settingService *service.SettingService,
 	panelRateLimiter *middleware.PanelRateLimiter,
+	cfg *config.Config,
 ) {
 	// 插件 UI 使用短时能力 URL，仅提供经过安装校验的静态资源。
 	v1.GET("/plugin-ui/:token/*path", h.Admin.Plugin.ServeUIAsset)
@@ -42,7 +44,7 @@ func RegisterAdminRoutes(
 
 		// 分组管理
 		registerGroupRoutes(admin, h)
-		registerGroupApplicationRoutes(admin, h, stepUpAuth)
+		registerGroupApplicationRoutes(admin, h, stepUpAuth, cfg)
 
 		// 账号管理
 		registerAccountRoutes(admin, h, stepUpAuth)
@@ -334,7 +336,7 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		groups.GET("/capacity-summary", h.Admin.Group.GetCapacitySummary)
 		groups.GET("/live-capability", h.Admin.Group.GetLiveCapability)
 		groups.PUT("/sort-order", h.Admin.Group.UpdateSortOrder)
-		groups.GET("/:id/models-list-candidates", h.Admin.Group.GetModelsListCandidates)
+		groups.GET("/:id/model-allowlist-candidates", h.Admin.Group.GetGroupModelAllowlistCandidates)
 		groups.GET("/:id/composite-routes", h.Admin.Group.ListCompositeRoutes)
 		groups.POST("/:id/composite-routes", h.Admin.Group.CreateCompositeRoute)
 		groups.POST("/:id/composite-routes/preview", h.Admin.Group.PreviewCompositeRoute)
@@ -355,8 +357,8 @@ func registerGroupRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	}
 }
 
-func registerGroupApplicationRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
-	applications := admin.Group("/group-applications")
+func registerGroupApplicationRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware, cfg *config.Config) {
+	applications := admin.Group("/group-applications", groupApplicationModeGuard(cfg))
 	{
 		applications.GET("", h.Admin.GroupApplication.List)
 		applications.GET("/worker-status", h.Admin.GroupApplication.WorkerStatus)
@@ -374,7 +376,7 @@ func registerGroupApplicationRoutes(admin *gin.RouterGroup, h *handler.Handlers,
 		applications.POST("/:id/resend-approval", h.Admin.GroupApplication.ResendApproval)
 		applications.POST("/:id/mails/:outbox_id/retry", h.Admin.GroupApplication.RetryMail)
 	}
-	policies := admin.Group("/group-application-policies")
+	policies := admin.Group("/group-application-policies", groupApplicationModeGuard(cfg))
 	{
 		policies.GET("", h.Admin.GroupApplication.ListPolicies)
 		policies.PUT("/:group_id", h.Admin.GroupApplication.SavePolicy)

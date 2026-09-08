@@ -33,6 +33,8 @@ func (r *tokenRefreshCandidateRepo) ListActive(context.Context) ([]Account, erro
 }
 
 func (r *tokenRefreshCandidateRepo) ListOAuthRefreshCandidatePage(_ context.Context, options OAuthRefreshPageOptions) (*OAuthRefreshCandidatePage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	candidates := make([]Account, 0, len(r.accounts))
 	now := time.Now()
 	for _, account := range r.accounts {

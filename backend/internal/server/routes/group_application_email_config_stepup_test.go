@@ -35,7 +35,7 @@ func TestGroupApplicationEmailConfigSensitiveRoutesRequireStepUp(t *testing.T) {
 				GroupApplication: adminhandler.NewGroupApplicationHandler(nil, nil),
 			}}
 			router := gin.New()
-			registerGroupApplicationRoutes(router.Group("/admin"), handlers, stepUp)
+			registerGroupApplicationRoutes(router.Group("/admin"), handlers, stepUp, nil)
 
 			request := httptest.NewRequest(test.method, test.path, nil)
 			response := httptest.NewRecorder()

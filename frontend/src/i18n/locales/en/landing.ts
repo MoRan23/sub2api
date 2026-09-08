@@ -157,6 +157,7 @@ export default {
     limitMonthly: 'Monthly Limit',
     // Detail rows
     remainingQuota: 'Remaining Quota',
+    expiringQuota: 'Expiring Quota',
     expiresAt: 'Expires At',
     todayExpires: '(expires today)',
     daysLeft: '({days} days)',

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,6 +25,7 @@ import (
 
 type grokQuotaHandlerAccountRepo struct {
 	service.AccountRepository
+	mu      sync.Mutex
 	account *service.Account
 	updates map[int64]map[string]any
 }
@@ -36,11 +38,22 @@ func (r *grokQuotaHandlerAccountRepo) GetByID(_ context.Context, id int64) (*ser
 }
 
 func (r *grokQuotaHandlerAccountRepo) UpdateExtra(_ context.Context, id int64, updates map[string]any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.updates == nil {
 		r.updates = make(map[int64]map[string]any)
 	}
-	r.updates[id] = updates
+	if r.updates[id] == nil {
+		r.updates[id] = make(map[string]any)
+	}
+	maps.Copy(r.updates[id], updates)
 	return nil
+}
+
+func (r *grokQuotaHandlerAccountRepo) updatedExtra(id int64) map[string]any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return maps.Clone(r.updates[id])
 }
 
 type grokQuotaHandlerUpstream struct {
@@ -71,6 +84,13 @@ func (u *grokQuotaHandlerUpstream) Do(req *http.Request, _ string, _ int64, _ in
 	u.requests = append(u.requests, req)
 	u.bodies = append(u.bodies, body)
 	u.mu.Unlock()
+	if req.URL.Path == "/v1/models" {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"data":[{"id":"grok-4.5"}]}`)),
+		}, nil
+	}
 	if req.URL.Path == "/v1/responses" {
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -159,7 +179,14 @@ func TestGrokOAuthHandlerQueryQuotaProbesUpstream(t *testing.T) {
 	}
 	require.True(t, responsesProbeSeen)
 	require.True(t, modelsSyncSeen)
-	require.NotNil(t, repo.updates[42])
+	require.Eventually(t, func() bool {
+		_, synced := repo.updatedExtra(42)["grok_observed_models"]
+		return synced
+	}, time.Second, 10*time.Millisecond)
+	extra := repo.updatedExtra(42)
+	require.Contains(t, extra, "grok_usage_snapshot")
+	require.Contains(t, extra, "grok_billing_snapshot")
+	require.Contains(t, extra["grok_observed_models"].(map[string]any)["models"], "grok-4.5")
 }
 
 func TestGrokOAuthHandlerResetQuotaReturnsUnsupported(t *testing.T) {

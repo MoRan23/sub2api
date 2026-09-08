@@ -992,11 +992,41 @@ func TestProxyOpenAIWSHTTPBridgeTurnDoesNotExposeUndeliveredTurnState(t *testing
 		oldState    = "previously-delivered-state"
 	)
 	stateStore.BindSessionTurnState(groupID, sessionHash, oldState, time.Minute)
-	retained := svc.applyOpenAIWSHTTPBridgeDeliveredTurnState(c, account, stateStore, groupID, sessionHash, oldState, result, nil)
+	retained := svc.applyOpenAIWSHTTPBridgeDeliveredTurnState(c, account, oldState, result, nil)
 	require.Equal(t, oldState, retained)
 	stored, ok := stateStore.GetSessionTurnState(groupID, sessionHash)
 	require.True(t, ok)
 	require.Equal(t, oldState, stored, "undelivered bridge response must not clear the prior raw turn-state")
+}
+
+func TestOpenAIWSHTTPBridgeTurnStateProvenanceRequiresDelivery(t *testing.T) {
+	const (
+		secret       = "bridge-delivered-provenance-secret"
+		apiKeyID     = int64(7519)
+		currentState = "connection-local-prior-state"
+		nextState    = "connection-local-delivered-state"
+	)
+	svc, account, plan := newOpenAICodexWSCompactWindowTestPlan(t, secret, apiKeyID)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	key, err := OpenAICodexTurnStateProvenanceKey(secret, apiKeyID, nextState)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, processOpenAICodexTurnStateOriginStore.DeleteOpenAICodexTurnStateOrigin(context.Background(), key))
+	})
+	result := &OpenAIForwardResult{ResponseHeaders: make(http.Header)}
+	result.ResponseHeaders.Set(openAIWSTurnStateHeader, nextState)
+	for _, undelivered := range []*OpenAIForwardResult{nil, result} {
+		require.Equal(t, currentState, svc.applyOpenAIWSHTTPBridgeDeliveredTurnState(c, account, currentState, undelivered, &plan))
+		_, err = processOpenAICodexTurnStateOriginStore.GetOpenAICodexTurnStateOrigin(context.Background(), key)
+		require.ErrorIs(t, err, ErrOpenAICodexTurnStateOriginNotFound)
+	}
+	result.wsClientOutputDelivered = true
+	require.Equal(t, nextState, svc.applyOpenAIWSHTTPBridgeDeliveredTurnState(c, account, currentState, result, &plan))
+	origin, err := processOpenAICodexTurnStateOriginStore.GetOpenAICodexTurnStateOrigin(context.Background(), key)
+	require.NoError(t, err)
+	require.Equal(t, OpenAICodexTurnStateIdentityDigest(plan), origin.TurnIdentityDigest)
+	result.ResponseHeaders.Del(openAIWSTurnStateHeader)
+	require.Equal(t, nextState, svc.applyOpenAIWSHTTPBridgeDeliveredTurnState(c, account, nextState, result, &plan))
 }
 
 // 桥接转发 error / response.failed 给 WS 客户端前必须把容量降载码改写为可重试

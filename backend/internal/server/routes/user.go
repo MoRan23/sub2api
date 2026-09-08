@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -16,6 +17,7 @@ func RegisterUserRoutes(
 	auditLog middleware.AuditLogMiddleware,
 	settingService *service.SettingService,
 	panelRateLimiter *middleware.PanelRateLimiter,
+	cfg *config.Config,
 ) {
 	authenticated := v1.Group("")
 	authenticated.Use(gin.HandlerFunc(jwtAuth))
@@ -95,14 +97,7 @@ func RegisterUserRoutes(
 			channels.GET("/available", h.AvailableChannel.List)
 		}
 
-		groupApplications := authenticated.Group("/group-applications")
-		{
-			groupApplications.GET("/summary", h.GroupApplication.Summary)
-			groupApplications.GET("/options", h.GroupApplication.Options)
-			groupApplications.GET("", h.GroupApplication.List)
-			groupApplications.POST("", h.GroupApplication.Create)
-			groupApplications.GET("/:id", h.GroupApplication.Get)
-		}
+		registerUserGroupApplicationRoutes(authenticated, h, cfg)
 
 		// 使用记录（聚合统计属重查询，叠加更严格的按用户限流）
 		usage := authenticated.Group("/usage")

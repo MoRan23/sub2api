@@ -711,10 +711,7 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 				result.Items = append(result.Items, item)
 				continue
 			}
-			// 🔄 Refresh OAuth token after creation
-			if refreshedCreds := s.refreshOAuthToken(ctx, account); refreshedCreds != nil {
-				_ = persistAccountCredentials(ctx, s.accountRepo, account, refreshedCreds)
-			}
+			s.refreshOpenAIOAuthAfterSync(ctx, account)
 			item.Action = "created"
 			result.Created++
 			result.Items = append(result.Items, item)
@@ -742,16 +739,15 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 			continue
 		}
 
-		// 🔄 Refresh OAuth token after update
-		if refreshedCreds := s.refreshOAuthToken(ctx, existing); refreshedCreds != nil {
-			_ = persistAccountCredentials(ctx, s.accountRepo, existing, refreshedCreds)
-		}
+		proxySource := s.refreshOpenAIOAuthAfterSync(ctx, existing)
 
 		// 母账号 proxy 经 CRS 改动后同步到其 spark 影子,避免影子保留旧 proxy 出现出站漂移(外审第8轮)。
 		// 影子 proxy 恒继承母账号(创建即继承、AdminService 编辑也传播)。best-effort:母账号本身已成功
 		// 更新,影子传播失败仅记录告警,不回退该条目状态。
-		if perr := propagateAccountProxyToShadows(ctx, s.accountRepo, existing.ID, existing.ProxyID); perr != nil {
-			slog.Warn("crs_sync_propagate_proxy_to_shadows_failed", "account_id", existing.ID, "error", perr)
+		if proxySource != nil {
+			if perr := propagateAccountProxyToShadows(ctx, s.accountRepo, proxySource.ID, proxySource.ProxyID); perr != nil {
+				slog.Warn("crs_sync_propagate_proxy_to_shadows_failed", "account_id", proxySource.ID, "error", perr)
+			}
 		}
 
 		item.Action = "updated"
@@ -1432,6 +1428,29 @@ func crsExportAccounts(ctx context.Context, client *http.Client, baseURL, adminT
 		return nil, errors.New("crs export failed: " + msg)
 	}
 	return &parsed, nil
+}
+
+func (s *CRSSyncService) refreshOpenAIOAuthAfterSync(ctx context.Context, account *Account) *Account {
+	if s.openaiOAuthService == nil {
+		return account
+	}
+	expected := snapshotOAuthRefreshAccount(account)
+	if credentials := s.refreshOAuthToken(ctx, expected); credentials != nil {
+		credentials["_token_version"] = time.Now().UnixMilli()
+		durable, _, err := persistOpenAIOAuthRefreshCredentials(ctx, s.accountRepo, expected, credentials)
+		if err != nil {
+			slog.Warn("crs_sync_openai_refresh_persist_failed", "account_id", account.ID, "error", err)
+			return nil
+		}
+		return durable
+	}
+	// Even an unsuccessful network refresh may overlap an administrator proxy edit.
+	durable, err := s.accountRepo.GetByID(ctx, account.ID)
+	if err != nil || durable == nil {
+		slog.Warn("crs_sync_openai_refresh_durable_read_failed", "account_id", account.ID, "error", err)
+		return nil
+	}
+	return durable
 }
 
 // refreshOAuthToken attempts to refresh OAuth token for a synced account

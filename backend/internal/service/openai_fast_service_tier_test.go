@@ -781,12 +781,13 @@ func TestUpstreamResponseModelObserver_ObservesServiceTier(t *testing.T) {
 }
 
 func TestResolvedOpenAIUpstreamServiceTier(t *testing.T) {
+	// Gin mode is global; initialize it before parallel tests resume.
+	gin.SetMode(gin.TestMode)
 	t.Parallel()
 
 	priority := func() *string { v := "priority"; return &v }()
 
 	t.Run("upstream echo stays separate from outbound tier", func(t *testing.T) {
-		gin.SetMode(gin.TestMode)
 		c, _ := gin.CreateTestContext(nil)
 		observer := beginUpstreamResponseModelObservation(c)
 		observer.ObserveOpenAI([]byte(`{"type":"response.completed","response":{"model":"gpt-5.5","service_tier":"default"}}`), "response.completed")
@@ -798,7 +799,6 @@ func TestResolvedOpenAIUpstreamServiceTier(t *testing.T) {
 	})
 
 	t.Run("no upstream echo falls back to outbound tier", func(t *testing.T) {
-		gin.SetMode(gin.TestMode)
 		c, _ := gin.CreateTestContext(nil)
 		beginUpstreamResponseModelObservation(c)
 
@@ -808,7 +808,6 @@ func TestResolvedOpenAIUpstreamServiceTier(t *testing.T) {
 	})
 
 	t.Run("observed tier never promotes an untiered request", func(t *testing.T) {
-		gin.SetMode(gin.TestMode)
 		c, _ := gin.CreateTestContext(nil)
 		observer := beginUpstreamResponseModelObservation(c)
 		observer.ObserveOpenAI([]byte(`{"type":"response.completed","response":{"model":"gpt-5.5","service_tier":"fast"}}`), "response.completed")

@@ -898,6 +898,7 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 			if acquireRate != nil {
 				releaseRate, err = acquireRate(attemptCtx)
 			}
+			attemptedAccount := snapshotOAuthRefreshAccount(account)
 			if err == nil {
 				newCredentials, err = refresher.Refresh(attemptCtx, account)
 			}
@@ -907,7 +908,26 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 			attemptTimedOut := errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 			if err == nil && newCredentials != nil && !attemptTimedOut {
 				newCredentials["_token_version"] = time.Now().UnixMilli()
-				if saveErr := persistAccountCredentials(attemptCtx, s.accountRepo, account, newCredentials); saveErr != nil {
+				if account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth {
+					durableAccount, applied, saveErr := persistOpenAIOAuthRefreshCredentials(attemptCtx, s.accountRepo, attemptedAccount, newCredentials)
+					if saveErr != nil {
+						if applied && s.cacheInvalidator != nil {
+							cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(attemptCtx), defaultTokenRefreshCleanupTimeout)
+							if invalidateErr := s.cacheInvalidator.InvalidateToken(cleanupCtx, attemptedAccount); invalidateErr != nil {
+								slog.Warn("token_refresh.invalidate_token_cache_failed", "account_id", attemptedAccount.ID, "error", invalidateErr)
+							}
+							cleanupCancel()
+						}
+						err = fmt.Errorf("failed to save credentials: %w", saveErr)
+					} else {
+						account = durableAccount
+						credentialsPersisted = applied
+						if !applied {
+							err = s.refreshPolicy.handleAlreadyRefreshed()
+							shortCircuit = true
+						}
+					}
+				} else if saveErr := persistAccountCredentials(attemptCtx, s.accountRepo, account, newCredentials); saveErr != nil {
 					err = fmt.Errorf("failed to save credentials: %w", saveErr)
 				} else {
 					credentialsPersisted = true

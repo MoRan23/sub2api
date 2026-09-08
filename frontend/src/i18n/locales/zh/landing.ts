@@ -157,6 +157,7 @@ export default {
     limitMonthly: '月限额',
     // Detail rows
     remainingQuota: '剩余额度',
+    expiringQuota: '即将到期额度',
     expiresAt: '过期时间',
     todayExpires: '(今日到期)',
     daysLeft: '({days} 天)',

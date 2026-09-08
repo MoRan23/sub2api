@@ -18,10 +18,15 @@ import (
 
 // OpenAIOAuthHandler handles OpenAI OAuth-related operations
 type OpenAIOAuthHandler struct {
-	openaiOAuthService *service.OpenAIOAuthService
-	adminService       service.AdminService
-	quotaService       openAIQuotaService
-	rateLimitService   openAIAccountStateRecoverer
+	openaiOAuthService    *service.OpenAIOAuthService
+	adminService          service.AdminService
+	quotaService          openAIQuotaService
+	rateLimitService      openAIAccountStateRecoverer
+	tokenCacheInvalidator service.TokenCacheInvalidator
+}
+
+func (h *OpenAIOAuthHandler) SetTokenCacheInvalidator(invalidator service.TokenCacheInvalidator) {
+	h.tokenCacheInvalidator = invalidator
 }
 
 type openAIQuotaService interface {
@@ -264,8 +269,13 @@ func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
 	}
 
 	// Use OpenAI OAuth service to refresh token
+	expectedAccount := snapshotAdminOpenAIRefreshAccount(account)
 	tokenInfo, err := h.openaiOAuthService.RefreshAccountToken(c.Request.Context(), account)
 	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if err := c.Request.Context().Err(); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -281,9 +291,10 @@ func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
 	}
 	newCredentials = service.NormalizeOpenAIPersonalAccessTokenCredentials(account, tokenInfo, newCredentials)
 
-	updatedAccount, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
-		Credentials: newCredentials,
-	})
+	updatedAccount, applied, err := h.adminService.PersistOpenAIOAuthRefreshCredentials(c.Request.Context(), expectedAccount, newCredentials)
+	if applied {
+		invalidateAdminOpenAIRefreshToken(c.Request.Context(), h.tokenCacheInvalidator, expectedAccount)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

@@ -146,9 +146,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				forceHTTPBridge = true
 				break
 			}
-			// 透传 relay 通过 TurnStarted 记录每个 turn 的开始时刻，但不触发
-			// BeforeTurn；因此仍只有建连时的利润准入门，没有 turn 级复核。
-			// handler 计费在 turn 定价未冻结时回退到对应的 turn 开始时刻。
+			// 首轮准入由握手路径完成；后续 response.create 会在写入上游前
+			// 依次回调 BeforeRequest 和 BeforeTurn，并在终止或失败时回调
+			// AfterTurn，从而覆盖 turn 级利润复核、定价冻结和并发槽位释放。
 			return s.proxyResponsesWebSocketV2Passthrough(
 				ctx,
 				c,
@@ -530,6 +530,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return err
 	}
 
+	useHTTPBridge := forceHTTPBridge || s.shouldBridgeOpenAIWSHTTP(account, firstPayload.payloadBytes, firstPayload.previousResponseID)
 	turnState := strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 	stateStore := s.getOpenAIWSStateStore()
 	groupID := getOpenAIGroupIDFromContext(c)
@@ -543,20 +544,25 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		} else {
 			sessionHash = s.GenerateSessionHash(c, payload.rawForHash)
 		}
+		preferredConnID = ""
+		storeDisabled = s.isOpenAIWSStoreDisabledInRequestRaw(payload.payloadRaw, account)
+		if useHTTPBridge {
+			// Sticky account affinity may be shared, but an HTTP bridge must not
+			// inherit another connection's native WS turn state or socket binding.
+			return
+		}
 		if turnState == "" && stateStore != nil && sessionHash != "" {
 			if savedTurnState, ok := stateStore.GetSessionTurnState(groupID, sessionHash); ok {
 				turnState = savedTurnState
 			}
 		}
 
-		preferredConnID = ""
 		if stateStore != nil && payload.previousResponseID != "" {
 			if connID, ok := stateStore.GetResponseConn(payload.previousResponseID); ok {
 				preferredConnID = connID
 			}
 		}
 
-		storeDisabled = s.isOpenAIWSStoreDisabledInRequestRaw(payload.payloadRaw, account)
 		if stateStore != nil && storeDisabled && payload.previousResponseID == "" && sessionHash != "" {
 			if connID, ok := stateStore.GetSessionConn(groupID, sessionHash); ok {
 				preferredConnID = connID
@@ -565,7 +571,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 	refreshIngressRouteState(firstPayload)
 
-	if forceHTTPBridge || s.shouldBridgeOpenAIWSHTTP(account, firstPayload.payloadBytes, firstPayload.previousResponseID) {
+	if useHTTPBridge {
 		var bridgeIdentityPlan *OpenAIOAuthIdentityPlan
 		bridgeConnectionCapture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
 		if !captured {
@@ -799,7 +805,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				)
 				bridgeAccountFailoverInputExists = true
 			}
-			turnState = s.applyOpenAIWSHTTPBridgeDeliveredTurnState(c, account, stateStore, groupID, sessionHash, turnState, result, bridgeIdentityPlan)
+			turnState = s.applyOpenAIWSHTTPBridgeDeliveredTurnState(c, account, turnState, result, bridgeIdentityPlan)
 			responseID := strings.TrimSpace(result.RequestID)
 			if responseID != "" && stateStore != nil {
 				ttl := s.openAIWSResponseStickyTTL()
@@ -2188,9 +2194,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 func (s *OpenAIGatewayService) applyOpenAIWSHTTPBridgeDeliveredTurnState(
 	c *gin.Context,
 	account *Account,
-	stateStore OpenAIWSStateStore,
-	groupID int64,
-	sessionHash string,
 	currentTurnState string,
 	result *OpenAIForwardResult,
 	identityPlan *OpenAIOAuthIdentityPlan,
@@ -2199,19 +2202,14 @@ func (s *OpenAIGatewayService) applyOpenAIWSHTTPBridgeDeliveredTurnState(
 		return currentTurnState
 	}
 	bridgeTurnState := strings.TrimSpace(result.ResponseHeaders.Get(openAIWSTurnStateHeader))
-	if stateStore != nil && sessionHash != "" {
-		if bridgeTurnState == "" {
-			stateStore.DeleteSessionTurnState(groupID, sessionHash)
-		} else {
-			stateStore.BindSessionTurnState(groupID, sessionHash, bridgeTurnState, s.openAIWSSessionStickyTTL())
-		}
+	if bridgeTurnState == "" {
+		return currentTurnState
 	}
-	if bridgeTurnState != "" {
-		if identityPlan != nil {
-			s.noteOpenAICodexTurnStateProvenanceForPlan(c, account, bridgeTurnState, *identityPlan)
-		} else {
-			s.noteOpenAICodexTurnStateProvenance(c, account, bridgeTurnState)
-		}
+	// Keep bridge state connection-local; only delivered provenance is shared.
+	if identityPlan != nil {
+		s.noteOpenAICodexTurnStateProvenanceForPlan(c, account, bridgeTurnState, *identityPlan)
+	} else {
+		s.noteOpenAICodexTurnStateProvenance(c, account, bridgeTurnState)
 	}
 	return bridgeTurnState
 }

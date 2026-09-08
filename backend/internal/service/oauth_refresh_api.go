@@ -350,6 +350,21 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 			// while the provider call was in flight. Return the durable row so
 			// post-refresh cache publication cannot restore that stale snapshot.
 			freshAccount = durableAccount
+		} else if freshAccount.Platform == PlatformOpenAI && freshAccount.Type == AccountTypeOAuth {
+			durableAccount, applied, updateErr := persistOpenAIOAuthRefreshCredentials(ctx, api.accountRepo, attemptedAccount, newCredentials)
+			if applied {
+				cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), defaultRefreshPostPersistCleanupTimeout)
+				api.invalidateAccessTokenAfterPersist(cleanupCtx, cacheKey, freshAccount.ID)
+				cleanupCancel()
+			}
+			if updateErr != nil {
+				return nil, updateErr
+			}
+			if !applied {
+				return &OAuthRefreshResult{Account: durableAccount}, nil
+			}
+			freshAccount = durableAccount
+			newCredentials = shallowCopyMap(durableAccount.Credentials)
 		} else if updateErr := persistAccountCredentials(ctx, api.accountRepo, freshAccount, newCredentials); updateErr != nil {
 			slog.Error("oauth_refresh_update_failed",
 				"account_id", freshAccount.ID,
@@ -391,7 +406,11 @@ func (api *OAuthRefreshAPI) loadGrokDurableAccountAfterPersist(parent context.Co
 	}
 	ctx, cancel := context.WithTimeout(cleanupParent, defaultRefreshPostPersistCleanupTimeout)
 	defer cancel()
+	api.invalidateAccessTokenAfterPersist(ctx, cacheKey, accountID)
+	return api.accountRepo.GetByID(ctx, accountID)
+}
 
+func (api *OAuthRefreshAPI) invalidateAccessTokenAfterPersist(ctx context.Context, cacheKey string, accountID int64) {
 	// A successful rotation can revoke the access token still cached from the
 	// pre-rotation credential document. Trigger deletion at the commit boundary,
 	// even if the attempt/parent context was canceled immediately after CAS.
@@ -404,8 +423,6 @@ func (api *OAuthRefreshAPI) loadGrokDurableAccountAfterPersist(parent context.Co
 			)
 		}
 	}
-
-	return api.accountRepo.GetByID(ctx, accountID)
 }
 
 // isInvalidGrantError 检查错误是否为 invalid_grant
