@@ -135,10 +135,10 @@ func trimOpenAIResponsesKnownCallIDPrefix(id string) string {
 const codexImageGenerationFunctionToolName = "image_gen.imagegen"
 
 const (
-	codexImageGenerationBridgeMarker = "<sub2api-codex-image-generation>"
-	codexImageGenerationBridgeText   = codexImageGenerationBridgeMarker + "\nWhen the user asks for raster image generation or editing, use the OpenAI Responses native `image_generation` tool attached to this request. The local Codex client may not expose an `image_gen` namespace, but that does not mean image generation is unavailable. Do not ask the user to switch to CLI fallback solely because `image_gen` is absent.\n</sub2api-codex-image-generation>"
-	codexSparkImageUnsupportedMarker = "<sub2api-codex-spark-image-unsupported>"
-	codexSparkImageUnsupportedText   = codexSparkImageUnsupportedMarker + "\nThe current model is gpt-5.3-codex-spark, which does not support image generation, image editing, image input, the `image_generation` tool, or Codex `image_gen`/`$imagegen` workflows. If the user asks for image generation or image editing, clearly explain this model limitation and ask them to switch to a non-Spark Codex model such as gpt-5.3-codex or gpt-5.4. Do not claim that the local environment merely lacks image_gen tooling, and do not suggest CLI fallback as the primary fix while the model remains Spark.\n</sub2api-codex-spark-image-unsupported>"
+	codexImageGenerationBridgeMarker = "<codex-image-generation>"
+	codexImageGenerationBridgeText   = codexImageGenerationBridgeMarker + "\nWhen the user asks for raster image generation or editing, use the OpenAI Responses native `image_generation` tool attached to this request. The local Codex client may not expose an `image_gen` namespace, but that does not mean image generation is unavailable. Do not ask the user to switch to CLI fallback solely because `image_gen` is absent.\n</codex-image-generation>"
+	codexSparkImageUnsupportedMarker = "<codex-spark-image-unsupported>"
+	codexSparkImageUnsupportedText   = codexSparkImageUnsupportedMarker + "\nThe current model is gpt-5.3-codex-spark, which does not support image generation, image editing, image input, the `image_generation` tool, or Codex `image_gen`/`$imagegen` workflows. If the user asks for image generation or image editing, clearly explain this model limitation and ask them to switch to a non-Spark Codex model such as gpt-5.3-codex or gpt-5.4. Do not claim that the local environment merely lacks image_gen tooling, and do not suggest CLI fallback as the primary fix while the model remains Spark.\n</codex-spark-image-unsupported>"
 )
 
 var openAIChatGPTInternalUnsupportedFields = []string{
@@ -1102,16 +1102,17 @@ func ensureOpenAIResponsesImageGenerationToolChoiceAuto(reqBody map[string]any) 
 }
 
 func applyCodexImageGenerationBridgeInstructions(reqBody map[string]any) bool {
+	markersChanged := normalizeCodexImageInstructionMarkers(reqBody)
 	if len(reqBody) == 0 || hasCodexImageGenerationFunctionTool(reqBody) || !hasOpenAIImageGenerationTool(reqBody) {
-		return false
+		return markersChanged
 	}
 	if isCodexSparkModel(firstNonEmptyString(reqBody["model"])) {
-		return false
+		return markersChanged
 	}
 
 	existing, _ := reqBody["instructions"].(string)
 	if strings.Contains(existing, codexImageGenerationBridgeMarker) {
-		return false
+		return markersChanged
 	}
 
 	existing = strings.TrimRight(existing, " \t\r\n")
@@ -1128,9 +1129,10 @@ func applyCodexSparkImageUnsupportedInstructions(reqBody map[string]any) bool {
 	if len(reqBody) == 0 {
 		return false
 	}
+	markersChanged := normalizeCodexImageInstructionMarkers(reqBody)
 	existing, _ := reqBody["instructions"].(string)
 	if strings.Contains(existing, codexSparkImageUnsupportedMarker) {
-		return false
+		return markersChanged
 	}
 	existing = strings.TrimRight(existing, " \t\r\n")
 	if strings.TrimSpace(existing) == "" {
@@ -1138,6 +1140,26 @@ func applyCodexSparkImageUnsupportedInstructions(reqBody map[string]any) bool {
 		return true
 	}
 	reqBody["instructions"] = existing + "\n\n" + codexSparkImageUnsupportedText
+	return true
+}
+
+// Normalize only the known instruction delimiters from older requests. Keeping
+// the existing text lets the usual marker check prevent duplicate guidance.
+func normalizeCodexImageInstructionMarkers(reqBody map[string]any) bool {
+	existing, _ := reqBody["instructions"].(string)
+	if !strings.Contains(existing, "sub2api-codex-") {
+		return false
+	}
+	normalized := strings.NewReplacer(
+		"<sub2api-codex-image-generation>", codexImageGenerationBridgeMarker,
+		"</sub2api-codex-image-generation>", "</codex-image-generation>",
+		"<sub2api-codex-spark-image-unsupported>", codexSparkImageUnsupportedMarker,
+		"</sub2api-codex-spark-image-unsupported>", "</codex-spark-image-unsupported>",
+	).Replace(existing)
+	if normalized == existing {
+		return false
+	}
+	reqBody["instructions"] = normalized
 	return true
 }
 

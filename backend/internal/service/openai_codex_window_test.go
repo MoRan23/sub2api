@@ -98,13 +98,13 @@ func TestOpenAICodexWindowLocalCASIsIdempotentAndConcurrent(t *testing.T) {
 	require.NoError(t, err)
 	_, err = store.CommitOpenAICodexWindow(ctx, key, expected, digest, expected.ContextWindowID, time.Hour)
 	require.Error(t, err)
-	require.Equal(t, expected, store.entries[key].snapshot)
+	require.Equal(t, normalizeOpenAICodexWindowHistory(expected), store.entries[key].snapshot)
 	wrongContext := expected
 	wrongContext.ContextWindowID = testOpenAICodexContextWindowLater
 	contextStale, err := store.CommitOpenAICodexWindow(ctx, key, wrongContext, strings.Repeat("c", 64), testOpenAICodexContextWindowNext, time.Hour)
 	require.NoError(t, err)
 	require.Equal(t, OpenAICodexWindowCommitStale, contextStale.Status)
-	require.Equal(t, expected, contextStale.Snapshot)
+	require.Equal(t, normalizeOpenAICodexWindowHistory(expected), contextStale.Snapshot)
 
 	const workers = 64
 	results := make(chan OpenAICodexWindowCommitResult, workers)
@@ -252,6 +252,8 @@ func TestOpenAICodexWindowRuntimeFallbackAndRecoveryPromotion(t *testing.T) {
 	require.Equal(t, OpenAICodexWindowCommitAdvanced, committed.Status)
 	require.Equal(t, uint64(1), committed.Snapshot.Number)
 	require.Equal(t, testOpenAICodexContextWindowNext, committed.Snapshot.ContextWindowID)
+	require.Equal(t, initial.ContextWindowID, committed.Snapshot.FirstContextWindowID)
+	require.Equal(t, initial.ContextWindowID, committed.Snapshot.PreviousContextWindowID)
 	require.True(t, processLocal.entries[key].pendingPromotion)
 	require.Zero(t, primaryLocal.entries[key].snapshot.Number)
 
@@ -269,6 +271,8 @@ func TestOpenAICodexWindowRuntimeFallbackAndRecoveryPromotion(t *testing.T) {
 	require.Equal(t, OpenAICodexWindowCommitAdvanced, second.Status)
 	require.Equal(t, uint64(2), second.Snapshot.Number)
 	require.Equal(t, testOpenAICodexContextWindowLater, second.Snapshot.ContextWindowID)
+	require.Equal(t, initial.ContextWindowID, second.Snapshot.FirstContextWindowID)
+	require.Equal(t, promoted.ContextWindowID, second.Snapshot.PreviousContextWindowID)
 	require.Equal(t, second.Snapshot, primaryLocal.entries[key].snapshot)
 }
 
@@ -299,8 +303,8 @@ func TestOpenAICodexWindowRuntimeDoesNotFallbackOnSemanticErrors(t *testing.T) {
 		primary.commitErr = fmt.Errorf("legacy: %w", ErrOpenAICodexWindowLegacyRequiresResolve)
 		_, err = runtime.CommitOpenAICodexWindow(context.Background(), key, expected, strings.Repeat("a", 64), testOpenAICodexContextWindowNext, time.Hour)
 		require.ErrorIs(t, err, ErrOpenAICodexWindowLegacyRequiresResolve)
-		require.Equal(t, expected, local.entries[key].snapshot)
-		require.Equal(t, expected, primaryLocal.entries[key].snapshot)
+		require.Equal(t, normalizeOpenAICodexWindowHistory(expected), local.entries[key].snapshot)
+		require.Equal(t, normalizeOpenAICodexWindowHistory(expected), primaryLocal.entries[key].snapshot)
 		require.False(t, local.entries[key].pendingPromotion)
 	})
 }
@@ -349,4 +353,61 @@ func TestOpenAICodexWindowLocalDistinctConcurrentCommitsHaveOneWinner(t *testing
 	require.Equal(t, 1, advanced)
 	require.Equal(t, workers-1, stale)
 	require.Len(t, winnerContextWindowIDs, 1)
+}
+
+func TestOpenAICodexWindowLocalHistoryPersistsAcrossCommits(t *testing.T) {
+	ctx := context.Background()
+	store := newOpenAICodexWindowLocalStore(16)
+	key := strings.Repeat("3", 64)
+	initial, err := store.ResolveOpenAICodexWindow(ctx, key, OpenAICodexWindowSnapshot{
+		ThreadID: testOpenAICodexWindowThread, ContextWindowID: testOpenAICodexContextWindowInitial,
+	}, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, initial.ContextWindowID, initial.FirstContextWindowID)
+	require.Empty(t, initial.PreviousContextWindowID)
+	first, err := store.CommitOpenAICodexWindow(ctx, key, initial, strings.Repeat("a", 64), testOpenAICodexContextWindowNext, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, initial.ContextWindowID, first.Snapshot.FirstContextWindowID)
+	require.Equal(t, initial.ContextWindowID, first.Snapshot.PreviousContextWindowID)
+	second, err := store.CommitOpenAICodexWindow(ctx, key, first.Snapshot, strings.Repeat("b", 64), testOpenAICodexContextWindowLater, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, initial.ContextWindowID, second.Snapshot.FirstContextWindowID)
+	require.Equal(t, first.Snapshot.ContextWindowID, second.Snapshot.PreviousContextWindowID)
+
+	duplicate, err := store.CommitOpenAICodexWindow(ctx, key, first.Snapshot, strings.Repeat("b", 64), initial.ContextWindowID, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, OpenAICodexWindowCommitAlreadyCommitted, duplicate.Status)
+	require.Equal(t, second.Snapshot, duplicate.Snapshot)
+	stale, err := store.CommitOpenAICodexWindow(ctx, key, initial, strings.Repeat("c", 64), first.Snapshot.ContextWindowID, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, OpenAICodexWindowCommitStale, stale.Status)
+	require.Equal(t, second.Snapshot, stale.Snapshot)
+
+	missingKey, err := store.CommitOpenAICodexWindow(ctx, strings.Repeat("4", 64), first.Snapshot, strings.Repeat("b", 64), testOpenAICodexContextWindowLater, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, second.Snapshot, missingKey.Snapshot)
+}
+
+func TestOpenAICodexWindowHistoryValidationAndLegacyUnknown(t *testing.T) {
+	initial := OpenAICodexWindowSnapshot{ThreadID: testOpenAICodexWindowThread, ContextWindowID: testOpenAICodexContextWindowInitial}
+	for _, mutate := range []func(*OpenAICodexWindowSnapshot){
+		func(s *OpenAICodexWindowSnapshot) { s.FirstContextWindowID = "invalid" },
+		func(s *OpenAICodexWindowSnapshot) { s.PreviousContextWindowID = "invalid" },
+		func(s *OpenAICodexWindowSnapshot) { s.FirstContextWindowID = testOpenAICodexContextWindowNext },
+		func(s *OpenAICodexWindowSnapshot) { s.PreviousContextWindowID = testOpenAICodexContextWindowNext },
+	} {
+		invalid := initial
+		mutate(&invalid)
+		require.Error(t, ValidateOpenAICodexWindowSnapshot(invalid))
+	}
+	legacy := OpenAICodexWindowSnapshot{ThreadID: testOpenAICodexWindowThread, Number: 4, ContextWindowID: testOpenAICodexContextWindowNext, LastCompactDigest: strings.Repeat("a", 64)}
+	store := newOpenAICodexWindowLocalStore(16)
+	resolved, err := store.ResolveOpenAICodexWindow(context.Background(), strings.Repeat("5", 64), legacy, time.Hour)
+	require.NoError(t, err)
+	require.Empty(t, resolved.FirstContextWindowID)
+	require.Empty(t, resolved.PreviousContextWindowID)
+	advanced, err := store.CommitOpenAICodexWindow(context.Background(), strings.Repeat("5", 64), resolved, strings.Repeat("b", 64), testOpenAICodexContextWindowLater, time.Hour)
+	require.NoError(t, err)
+	require.Empty(t, advanced.Snapshot.FirstContextWindowID)
+	require.Equal(t, legacy.ContextWindowID, advanced.Snapshot.PreviousContextWindowID)
 }

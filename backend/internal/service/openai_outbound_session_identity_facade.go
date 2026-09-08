@@ -13,6 +13,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const (
@@ -991,6 +993,10 @@ func ApplyOpenAIOAuthIdentityPlan(headers http.Header, body []byte, plan OpenAIO
 		if err != nil {
 			return body, err
 		}
+		out, err = applyOpenAICodexContextWindowBody(out, plan)
+		if err != nil {
+			return body, err
+		}
 		if plan.ClientIdentityEnabled {
 			applyCodexClientIdentityPlan(headers, plan.ClientIdentity)
 		}
@@ -1043,6 +1049,10 @@ func ApplyOpenAIOAuthIdentityPlan(headers http.Header, body []byte, plan OpenAIO
 	}
 	var err error
 	out, err = applyOpenAICodexPromptCacheKeyBody(out, plan)
+	if err != nil {
+		return body, err
+	}
+	out, err = applyOpenAICodexContextWindowBody(out, plan)
 	if err != nil {
 		return body, err
 	}
@@ -1241,4 +1251,115 @@ func ClearOpenAIOAuthIdentityPlan(c *gin.Context) {
 	if c != nil {
 		c.Set(openAIOAuthIdentityPlanContextKey, nil)
 	}
+}
+
+// applyOpenAICodexContextWindowBody aligns client-generated TokenBudget
+// developer text with the frozen gateway-owned window chain. It only splices
+// recognized developer text values, preserving unrelated passthrough bytes.
+func applyOpenAICodexContextWindowBody(body []byte, plan OpenAIOAuthIdentityPlan) ([]byte, error) {
+	projection := openAICodexMetadataProjectionFromPlan(plan)
+	if len(body) == 0 || !utf8.Valid(body) || !projection.wireActive || !projection.stableTurn ||
+		!projection.wireProfile.RequestKind.hasTurnIdentity() || projection.wireProfile.ContextWindowID == "" ||
+		plan.ProjectionMode == OpenAIOAuthIdentityProjectionHeadersOnly ||
+		ValidateOpenAICodexWindowSnapshot(plan.Window) != nil || !gjson.ValidBytes(body) {
+		return body, nil
+	}
+	input := gjson.GetBytes(body, "input")
+	if !input.IsArray() {
+		return body, nil
+	}
+	out := body
+	splice := func(path string, value gjson.Result) error {
+		if value.Type != gjson.String {
+			return nil
+		}
+		updated, changed := rewriteOpenAICodexContextWindowString(value.String(), plan.Window)
+		if !changed {
+			return nil
+		}
+		var err error
+		out, err = sjson.SetBytes(out, path, updated)
+		return err
+	}
+	for i, item := range input.Array() {
+		typ := item.Get("type")
+		if !item.IsObject() || item.Get("role").String() != "developer" ||
+			(typ.Exists() && (typ.Type != gjson.String || typ.String() != "message")) {
+			continue
+		}
+		content := item.Get("content")
+		path := "input." + strconv.Itoa(i) + ".content"
+		if content.Type == gjson.String {
+			if err := splice(path, content); err != nil {
+				return body, fmt.Errorf("splice OpenAI Codex context window text: %w", err)
+			}
+		} else if content.IsArray() {
+			for j, part := range content.Array() {
+				if !part.IsObject() || (part.Get("type").String() != "input_text" && part.Get("type").String() != "text") {
+					continue
+				}
+				if err := splice(path+"."+strconv.Itoa(j)+".text", part.Get("text")); err != nil {
+					return body, fmt.Errorf("splice OpenAI Codex context window text: %w", err)
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+func rewriteOpenAICodexContextWindowString(text string, snapshot OpenAICodexWindowSnapshot) (string, bool) {
+	block := strings.TrimSpace(text)
+	if !strings.HasPrefix(block, "<context_window>\n") && !strings.HasPrefix(block, "<context_window>\r\n") {
+		return text, false
+	}
+	lines := strings.Split(strings.ReplaceAll(block, "\r\n", "\n"), "\n")
+	if len(lines) < 4 || !strings.HasPrefix(lines[1], "Agent name: ") ||
+		strings.TrimSpace(strings.TrimPrefix(lines[1], "Agent name: ")) == "" ||
+		lines[len(lines)-1] != "</context_window>" {
+		return text, false
+	}
+	cursor := 2
+	readID := func(label string, required bool) bool {
+		if cursor >= len(lines)-1 || !strings.HasPrefix(lines[cursor], label) {
+			return !required
+		}
+		if _, err := canonicalUUIDv7(strings.TrimPrefix(lines[cursor], label)); err != nil {
+			return false
+		}
+		cursor++
+		return true
+	}
+	// First may be absent on a previously normalized legacy record whose
+	// original first window predates history persistence.
+	if !readID("First context window id: ", false) ||
+		!readID("Current context window id: ", true) ||
+		!readID("Previous context window id: ", false) {
+		return text, false
+	}
+	for _, line := range lines[cursor : len(lines)-1] {
+		if strings.Contains(line, "<context_window>") || strings.Contains(line, "</context_window>") ||
+			strings.Contains(line, "context window id:") {
+			return text, false
+		}
+	}
+	first := snapshot.FirstContextWindowID
+	if snapshot.Number == 0 {
+		first = snapshot.ContextWindowID
+	}
+	out := append([]string(nil), lines[:2]...)
+	if first != "" {
+		out = append(out, "First context window id: "+first)
+	}
+	out = append(out, "Current context window id: "+snapshot.ContextWindowID)
+	if snapshot.PreviousContextWindowID != "" {
+		out = append(out, "Previous context window id: "+snapshot.PreviousContextWindowID)
+	}
+	out = append(out, lines[cursor:]...)
+	newline := "\n"
+	if strings.Contains(block, "\r\n") {
+		newline = "\r\n"
+	}
+	start := strings.Index(text, block)
+	updated := text[:start] + strings.Join(out, newline) + text[start+len(block):]
+	return updated, updated != text
 }

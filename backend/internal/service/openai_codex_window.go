@@ -36,10 +36,12 @@ var (
 // thread. LastCompactDigest is an HMAC used only for idempotency and is never
 // projected onto an upstream request.
 type OpenAICodexWindowSnapshot struct {
-	ThreadID          string `json:"thread_id"`
-	Number            uint64 `json:"window_number"`
-	ContextWindowID   string `json:"context_window_id"`
-	LastCompactDigest string `json:"last_compact_digest"`
+	ThreadID                string `json:"thread_id"`
+	Number                  uint64 `json:"window_number"`
+	ContextWindowID         string `json:"context_window_id"`
+	FirstContextWindowID    string `json:"first_context_window_id"`
+	PreviousContextWindowID string `json:"previous_context_window_id"`
+	LastCompactDigest       string `json:"last_compact_digest"`
 }
 
 func (s OpenAICodexWindowSnapshot) WindowID() string {
@@ -59,6 +61,22 @@ func ValidateOpenAICodexWindowSnapshot(snapshot OpenAICodexWindowSnapshot) error
 	if _, err := canonicalUUIDv7(snapshot.ContextWindowID); err != nil {
 		return errors.New("openai Codex window context_window_id must be UUIDv7")
 	}
+	if snapshot.FirstContextWindowID != "" {
+		if _, err := canonicalUUIDv7(snapshot.FirstContextWindowID); err != nil {
+			return errors.New("openai Codex window first_context_window_id must be UUIDv7")
+		}
+	}
+	if snapshot.PreviousContextWindowID != "" {
+		if _, err := canonicalUUIDv7(snapshot.PreviousContextWindowID); err != nil {
+			return errors.New("openai Codex window previous_context_window_id must be UUIDv7")
+		}
+		if snapshot.Number == 0 || snapshot.PreviousContextWindowID == snapshot.ContextWindowID {
+			return errors.New("openai Codex previous window must precede the current window")
+		}
+	}
+	if snapshot.Number == 0 && snapshot.FirstContextWindowID != "" && snapshot.FirstContextWindowID != snapshot.ContextWindowID {
+		return errors.New("openai Codex initial window must match the first window")
+	}
 	digest := strings.TrimSpace(snapshot.LastCompactDigest)
 	if digest != snapshot.LastCompactDigest || (digest != "" && !validOpenAICodexWindowDigest(digest)) {
 		return errors.New("openai Codex window compact digest must be a lowercase SHA-256 digest")
@@ -70,6 +88,16 @@ func ValidateOpenAICodexWindowSnapshot(snapshot OpenAICodexWindowSnapshot) error
 		return errors.New("openai Codex advanced window must have a compact digest")
 	}
 	return nil
+}
+
+// Only the initial generation has recoverable history in an older snapshot.
+// Advanced records migrated from the former four-field format keep unknown
+// history empty rather than inventing an earlier window identity.
+func normalizeOpenAICodexWindowHistory(snapshot OpenAICodexWindowSnapshot) OpenAICodexWindowSnapshot {
+	if snapshot.Number == 0 && snapshot.FirstContextWindowID == "" {
+		snapshot.FirstContextWindowID = snapshot.ContextWindowID
+	}
+	return snapshot
 }
 
 type OpenAICodexWindowCommitStatus string
@@ -191,6 +219,7 @@ func newOpenAICodexWindowLocalStore(maxEntries int) *openAICodexWindowLocalStore
 }
 
 func (s *openAICodexWindowLocalStore) ResolveOpenAICodexWindow(_ context.Context, mappingKey string, candidate OpenAICodexWindowSnapshot, ttl time.Duration) (OpenAICodexWindowSnapshot, error) {
+	candidate = normalizeOpenAICodexWindowHistory(candidate)
 	if !validOpenAICodexWindowMappingKey(mappingKey) {
 		return OpenAICodexWindowSnapshot{}, errors.New("openai Codex window mapping key must be a lowercase SHA-256 digest")
 	}
@@ -206,6 +235,10 @@ func (s *openAICodexWindowLocalStore) ResolveOpenAICodexWindow(_ context.Context
 	if entry == nil {
 		entry = s.insertLocked(mappingKey, candidate, now.Add(ttl), false)
 	} else {
+		if ValidateOpenAICodexWindowSnapshot(entry.snapshot) != nil {
+			return OpenAICodexWindowSnapshot{}, ErrOpenAICodexWindowStoredInvalid
+		}
+		entry.snapshot = normalizeOpenAICodexWindowHistory(entry.snapshot)
 		if entry.snapshot.ThreadID != candidate.ThreadID {
 			return OpenAICodexWindowSnapshot{}, ErrOpenAICodexWindowStoredInvalid
 		}
@@ -219,6 +252,7 @@ func (s *openAICodexWindowLocalStore) ResolveOpenAICodexWindow(_ context.Context
 }
 
 func (s *openAICodexWindowLocalStore) CommitOpenAICodexWindow(_ context.Context, mappingKey string, expected OpenAICodexWindowSnapshot, compactDigest, proposedNextContextWindowID string, ttl time.Duration) (OpenAICodexWindowCommitResult, error) {
+	expected = normalizeOpenAICodexWindowHistory(expected)
 	expected, proposedNextContextWindowID, err := validateOpenAICodexWindowCommit(mappingKey, expected, compactDigest, proposedNextContextWindowID)
 	if err != nil {
 		return OpenAICodexWindowCommitResult{}, err
@@ -234,10 +268,12 @@ func (s *openAICodexWindowLocalStore) CommitOpenAICodexWindow(_ context.Context,
 		// exact snapshot used to build this request and advanced in one critical
 		// section. No invalid intermediate generation is exposed.
 		snapshot := OpenAICodexWindowSnapshot{
-			ThreadID:          expected.ThreadID,
-			Number:            expected.Number + 1,
-			ContextWindowID:   proposedNextContextWindowID,
-			LastCompactDigest: compactDigest,
+			ThreadID:                expected.ThreadID,
+			Number:                  expected.Number + 1,
+			ContextWindowID:         proposedNextContextWindowID,
+			FirstContextWindowID:    expected.FirstContextWindowID,
+			PreviousContextWindowID: expected.ContextWindowID,
+			LastCompactDigest:       compactDigest,
 		}
 		entry = s.insertLocked(mappingKey, snapshot, now.Add(ttl), false)
 		return OpenAICodexWindowCommitResult{Snapshot: entry.snapshot, Status: OpenAICodexWindowCommitAdvanced}, nil
@@ -248,6 +284,7 @@ func (s *openAICodexWindowLocalStore) CommitOpenAICodexWindow(_ context.Context,
 	if ValidateOpenAICodexWindowSnapshot(entry.snapshot) != nil {
 		return OpenAICodexWindowCommitResult{}, ErrOpenAICodexWindowStoredInvalid
 	}
+	entry.snapshot = normalizeOpenAICodexWindowHistory(entry.snapshot)
 	if entry.snapshot.LastCompactDigest == compactDigest {
 		if entry.snapshot.Number != expected.Number+1 || entry.snapshot.ContextWindowID == expected.ContextWindowID {
 			return OpenAICodexWindowCommitResult{}, ErrOpenAICodexWindowStoredInvalid
@@ -262,6 +299,7 @@ func (s *openAICodexWindowLocalStore) CommitOpenAICodexWindow(_ context.Context,
 		return OpenAICodexWindowCommitResult{Snapshot: entry.snapshot, Status: OpenAICodexWindowCommitStale}, nil
 	}
 	entry.snapshot.Number = expected.Number + 1
+	entry.snapshot.PreviousContextWindowID = entry.snapshot.ContextWindowID
 	entry.snapshot.ContextWindowID = proposedNextContextWindowID
 	entry.snapshot.LastCompactDigest = compactDigest
 	entry.expiresAt = now.Add(ttl)
@@ -456,7 +494,7 @@ func validateOpenAICodexWindowCommitResult(expected OpenAICodexWindowSnapshot, c
 	}
 	switch result.Status {
 	case OpenAICodexWindowCommitAdvanced:
-		if result.Snapshot.Number != expected.Number+1 || result.Snapshot.ContextWindowID != proposedNextContextWindowID || result.Snapshot.LastCompactDigest != compactDigest {
+		if result.Snapshot.Number != expected.Number+1 || result.Snapshot.ContextWindowID != proposedNextContextWindowID || result.Snapshot.LastCompactDigest != compactDigest || result.Snapshot.PreviousContextWindowID != expected.ContextWindowID {
 			return ErrOpenAICodexWindowStoredInvalid
 		}
 	case OpenAICodexWindowCommitAlreadyCommitted:

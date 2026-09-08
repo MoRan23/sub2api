@@ -40,8 +40,8 @@ local function decode_snapshot(raw, allow_legacy)
   if not ok or type(value) ~= 'table' then return nil end
   local count = 0
   for _ in pairs(value) do count = count + 1 end
-  if (count ~= 4 and (not allow_legacy or count ~= 3)) or
-      type(value['thread_id']) ~= 'string' or
+  if (count ~= 6 and (not allow_legacy or (count ~= 3 and count ~= 4))) or
+      not is_uuid_v7(value['thread_id']) or
       type(value['window_number']) ~= 'number' or
       value['window_number'] < 0 or value['window_number'] > 9007199254740991 or
       value['window_number'] ~= math.floor(value['window_number']) or
@@ -50,8 +50,16 @@ local function decode_snapshot(raw, allow_legacy)
   end
   if value['window_number'] == 0 and value['last_compact_digest'] ~= '' then return nil end
   if value['window_number'] > 0 and not is_lower_digest(value['last_compact_digest']) then return nil end
-  if count == 4 and not is_uuid_v7(value['context_window_id']) then return nil end
-  return value, count == 3
+  if count >= 4 and not is_uuid_v7(value['context_window_id']) then return nil end
+  if count == 6 then
+    local first = value['first_context_window_id']
+    local previous = value['previous_context_window_id']
+    if type(first) ~= 'string' or (first ~= '' and not is_uuid_v7(first)) or
+        type(previous) ~= 'string' or (previous ~= '' and not is_uuid_v7(previous)) then return nil end
+    if value['window_number'] == 0 and (first ~= value['context_window_id'] or previous ~= '') then return nil end
+    if previous ~= '' and previous == value['context_window_id'] then return nil end
+  end
+  return value, count ~= 6
 end
 
 local candidate, candidate_legacy = decode_snapshot(candidate_raw, false)
@@ -72,7 +80,14 @@ if candidate['window_number'] > current['window_number'] then
   return candidate_raw
 end
 if current_legacy then
-  current['context_window_id'] = candidate['context_window_id']
+  if current['context_window_id'] == nil then
+    current['context_window_id'] = candidate['context_window_id']
+  end
+  current['first_context_window_id'] = ''
+  current['previous_context_window_id'] = ''
+  if current['window_number'] == 0 then
+    current['first_context_window_id'] = current['context_window_id']
+  end
   current_raw = cjson.encode(current)
   redis.call('SET', key, current_raw, 'EX', ttl)
 else
@@ -89,6 +104,7 @@ local expected_context_window_id = ARGV[3]
 local compact_digest = ARGV[4]
 local proposed_context_window_id = ARGV[5]
 local ttl = tonumber(ARGV[6])
+local expected_first_context_window_id = ARGV[7]
 if ttl == nil or ttl < 1 then ttl = 1 end
 if expected_number == nil or expected_number < 0 or expected_number >= 9007199254740991 or
     expected_number ~= math.floor(expected_number) then
@@ -111,7 +127,7 @@ local function decode_snapshot(raw)
   if not ok or type(value) ~= 'table' then return nil end
   local count = 0
   for _ in pairs(value) do count = count + 1 end
-  if (count ~= 3 and count ~= 4) or type(value['thread_id']) ~= 'string' or
+  if (count ~= 3 and count ~= 4 and count ~= 6) or not is_uuid_v7(value['thread_id']) or
       type(value['window_number']) ~= 'number' or
       value['window_number'] < 0 or value['window_number'] > 9007199254740991 or
       value['window_number'] ~= math.floor(value['window_number']) or
@@ -120,8 +136,16 @@ local function decode_snapshot(raw)
   end
   if value['window_number'] == 0 and value['last_compact_digest'] ~= '' then return nil end
   if value['window_number'] > 0 and not is_lower_digest(value['last_compact_digest']) then return nil end
-  if count == 4 and not is_uuid_v7(value['context_window_id']) then return nil end
-  return value, count == 3
+  if count >= 4 and not is_uuid_v7(value['context_window_id']) then return nil end
+  if count == 6 then
+    local first = value['first_context_window_id']
+    local previous = value['previous_context_window_id']
+    if type(first) ~= 'string' or (first ~= '' and not is_uuid_v7(first)) or
+        type(previous) ~= 'string' or (previous ~= '' and not is_uuid_v7(previous)) then return nil end
+    if value['window_number'] == 0 and (first ~= value['context_window_id'] or previous ~= '') then return nil end
+    if previous ~= '' and previous == value['context_window_id'] then return nil end
+  end
+  return value, count ~= 6
 end
 
 if not is_lower_digest(compact_digest) then
@@ -129,6 +153,11 @@ if not is_lower_digest(compact_digest) then
 end
 if not is_uuid_v7(expected_context_window_id) then
   return redis.error_reply('CODEX_WINDOW_INVALID_EXPECTED_CONTEXT_WINDOW_ID')
+end
+if not is_uuid_v7(expected_thread) or
+    (expected_first_context_window_id ~= '' and not is_uuid_v7(expected_first_context_window_id)) or
+    (expected_number == 0 and expected_first_context_window_id ~= expected_context_window_id) then
+  return redis.error_reply('CODEX_WINDOW_INVALID_EXPECTED')
 end
 if not is_uuid_v7(proposed_context_window_id) then
   return redis.error_reply('CODEX_WINDOW_INVALID_CONTEXT_WINDOW_ID')
@@ -142,6 +171,8 @@ if not current_raw then
     thread_id=expected_thread,
     window_number=expected_number + 1,
     context_window_id=proposed_context_window_id,
+    first_context_window_id=expected_first_context_window_id,
+    previous_context_window_id=expected_context_window_id,
     last_compact_digest=compact_digest
   })
   redis.call('SET', key, advanced, 'EX', ttl)
@@ -169,6 +200,8 @@ local advanced = cjson.encode({
   thread_id=expected_thread,
   window_number=expected_number + 1,
   context_window_id=proposed_context_window_id,
+  first_context_window_id=current['first_context_window_id'],
+  previous_context_window_id=current['context_window_id'],
   last_compact_digest=compact_digest
 })
 redis.call('SET', key, advanced, 'EX', ttl)
@@ -210,6 +243,9 @@ func (c *gatewayCache) CommitOpenAICodexWindow(ctx context.Context, mappingKey s
 }
 
 func resolveOpenAICodexWindow(ctx context.Context, rdb *redis.Client, mappingKey string, candidate service.OpenAICodexWindowSnapshot, ttl time.Duration) (service.OpenAICodexWindowSnapshot, error) {
+	if candidate.Number == 0 && candidate.FirstContextWindowID == "" {
+		candidate.FirstContextWindowID = candidate.ContextWindowID
+	}
 	redisKey, err := OpenAICodexWindowRedisKey(mappingKey)
 	if err != nil {
 		return service.OpenAICodexWindowSnapshot{}, err
@@ -233,6 +269,9 @@ func resolveOpenAICodexWindow(ctx context.Context, rdb *redis.Client, mappingKey
 }
 
 func commitOpenAICodexWindow(ctx context.Context, rdb *redis.Client, mappingKey string, expected service.OpenAICodexWindowSnapshot, compactDigest, proposedNextContextWindowID string, ttl time.Duration) (service.OpenAICodexWindowCommitResult, error) {
+	if expected.Number == 0 && expected.FirstContextWindowID == "" {
+		expected.FirstContextWindowID = expected.ContextWindowID
+	}
 	redisKey, err := OpenAICodexWindowRedisKey(mappingKey)
 	if err != nil {
 		return service.OpenAICodexWindowCommitResult{}, err
@@ -253,7 +292,7 @@ func commitOpenAICodexWindow(ctx context.Context, rdb *redis.Client, mappingKey 
 	if proposedNextContextWindowID == expected.ContextWindowID {
 		return service.OpenAICodexWindowCommitResult{}, errors.New("openai Codex proposed context_window_id must differ from the expected context window")
 	}
-	result, err := openAICodexWindowCommitScript.Run(ctx, rdb, []string{redisKey}, expected.ThreadID, strconv.FormatUint(expected.Number, 10), expected.ContextWindowID, compactDigest, proposedNextContextWindowID, normalizedOpenAICodexWindowTTLSeconds(ttl)).Slice()
+	result, err := openAICodexWindowCommitScript.Run(ctx, rdb, []string{redisKey}, expected.ThreadID, strconv.FormatUint(expected.Number, 10), expected.ContextWindowID, compactDigest, proposedNextContextWindowID, normalizedOpenAICodexWindowTTLSeconds(ttl), expected.FirstContextWindowID).Slice()
 	if err != nil {
 		return service.OpenAICodexWindowCommitResult{}, classifyOpenAICodexWindowRedisError("commit openai Codex window", err)
 	}
@@ -275,7 +314,7 @@ func commitOpenAICodexWindow(ctx context.Context, rdb *redis.Client, mappingKey 
 	status := service.OpenAICodexWindowCommitStatus(statusRaw)
 	switch status {
 	case service.OpenAICodexWindowCommitAdvanced:
-		if snapshot.Number != expected.Number+1 || snapshot.ContextWindowID != proposedNextContextWindowID || snapshot.LastCompactDigest != compactDigest {
+		if snapshot.Number != expected.Number+1 || snapshot.ContextWindowID != proposedNextContextWindowID || snapshot.LastCompactDigest != compactDigest || snapshot.PreviousContextWindowID != expected.ContextWindowID {
 			return service.OpenAICodexWindowCommitResult{}, service.ErrOpenAICodexWindowStoredInvalid
 		}
 	case service.OpenAICodexWindowCommitAlreadyCommitted:
@@ -335,6 +374,22 @@ func classifyOpenAICodexWindowRedisError(operation string, err error) error {
 }
 
 func decodeStrictOpenAICodexWindowSnapshot(raw []byte) (service.OpenAICodexWindowSnapshot, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return service.OpenAICodexWindowSnapshot{}, err
+	}
+	if len(fields) != 6 || fields["first_context_window_id"] == nil || fields["previous_context_window_id"] == nil {
+		return service.OpenAICodexWindowSnapshot{}, service.ErrOpenAICodexWindowStoredInvalid
+	}
+	for _, field := range []string{"first_context_window_id", "previous_context_window_id"} {
+		var value any
+		if err := json.Unmarshal(fields[field], &value); err != nil {
+			return service.OpenAICodexWindowSnapshot{}, err
+		}
+		if _, ok := value.(string); !ok {
+			return service.OpenAICodexWindowSnapshot{}, service.ErrOpenAICodexWindowStoredInvalid
+		}
+	}
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
 	var snapshot service.OpenAICodexWindowSnapshot
@@ -346,6 +401,9 @@ func decodeStrictOpenAICodexWindowSnapshot(raw []byte) (service.OpenAICodexWindo
 	}
 	if err := service.ValidateOpenAICodexWindowSnapshot(snapshot); err != nil {
 		return service.OpenAICodexWindowSnapshot{}, err
+	}
+	if snapshot.Number == 0 && snapshot.FirstContextWindowID != snapshot.ContextWindowID {
+		return service.OpenAICodexWindowSnapshot{}, service.ErrOpenAICodexWindowStoredInvalid
 	}
 	return snapshot, nil
 }

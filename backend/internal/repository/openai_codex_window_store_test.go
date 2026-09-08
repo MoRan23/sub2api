@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -102,7 +103,9 @@ func TestGatewayCacheOpenAICodexWindowResolveCommitAndTTL(t *testing.T) {
 
 	resolved, err := first.ResolveOpenAICodexWindow(ctx, key, initial, 90*time.Second)
 	require.NoError(t, err)
-	require.Equal(t, initial, resolved)
+	wantInitial := initial
+	wantInitial.FirstContextWindowID = initial.ContextWindowID
+	require.Equal(t, wantInitial, resolved)
 	redisKey, err := OpenAICodexWindowRedisKey(key)
 	require.NoError(t, err)
 	require.Equal(t, 90*time.Second, mr.TTL(redisKey))
@@ -117,7 +120,7 @@ func TestGatewayCacheOpenAICodexWindowResolveCommitAndTTL(t *testing.T) {
 	contextStale, err := first.CommitOpenAICodexWindow(ctx, key, wrongContext, strings.Repeat("c", 64), repositoryOpenAICodexContextWindowNext, time.Minute)
 	require.NoError(t, err)
 	require.Equal(t, service.OpenAICodexWindowCommitStale, contextStale.Status)
-	require.Equal(t, initial, contextStale.Snapshot)
+	require.Equal(t, wantInitial, contextStale.Snapshot)
 
 	digest := strings.Repeat("b", 64)
 	advanced, err := first.CommitOpenAICodexWindow(ctx, key, initial, digest, repositoryOpenAICodexContextWindowNext, 2*time.Minute)
@@ -125,6 +128,8 @@ func TestGatewayCacheOpenAICodexWindowResolveCommitAndTTL(t *testing.T) {
 	require.Equal(t, service.OpenAICodexWindowCommitAdvanced, advanced.Status)
 	require.Equal(t, uint64(1), advanced.Snapshot.Number)
 	require.Equal(t, repositoryOpenAICodexContextWindowNext, advanced.Snapshot.ContextWindowID)
+	require.Equal(t, initial.ContextWindowID, advanced.Snapshot.FirstContextWindowID)
+	require.Equal(t, initial.ContextWindowID, advanced.Snapshot.PreviousContextWindowID)
 	require.Equal(t, digest, advanced.Snapshot.LastCompactDigest)
 	require.Equal(t, 2*time.Minute, mr.TTL(redisKey))
 
@@ -146,6 +151,8 @@ func TestGatewayCacheOpenAICodexWindowResolveCommitAndTTL(t *testing.T) {
 	require.Equal(t, service.OpenAICodexWindowCommitAdvanced, resumed.Status)
 	require.Equal(t, uint64(2), resumed.Snapshot.Number)
 	require.Equal(t, repositoryOpenAICodexContextWindowLater, resumed.Snapshot.ContextWindowID)
+	require.Equal(t, initial.ContextWindowID, resumed.Snapshot.FirstContextWindowID)
+	require.Equal(t, advanced.Snapshot.ContextWindowID, resumed.Snapshot.PreviousContextWindowID)
 }
 
 func TestGatewayCacheOpenAICodexWindowResolvePromotesWithoutRegression(t *testing.T) {
@@ -219,6 +226,105 @@ func TestGatewayCacheOpenAICodexWindowResolveMigratesLegacyStateInPlace(t *testi
 	require.Equal(t, winner, again)
 }
 
+func TestGatewayCacheOpenAICodexWindowHistoryMigration(t *testing.T) {
+	for _, fields := range []int{3, 4} {
+		for _, number := range []uint64{0, 2} {
+			t.Run(fmt.Sprintf("fields_%d_window_%d", fields, number), func(t *testing.T) {
+				mr, _, store := newOpenAICodexWindowRedisTest(t)
+				key := strings.Repeat("6", 64)
+				redisKey, err := OpenAICodexWindowRedisKey(key)
+				require.NoError(t, err)
+				digest := ""
+				if number > 0 {
+					digest = strings.Repeat("a", 64)
+				}
+				record := map[string]any{"thread_id": repositoryOpenAICodexWindowThread, "window_number": number, "last_compact_digest": digest}
+				if fields == 4 {
+					record["context_window_id"] = repositoryOpenAICodexContextWindowNext
+				}
+				raw, err := json.Marshal(record)
+				require.NoError(t, err)
+				mr.Set(redisKey, string(raw))
+				mr.SetTTL(redisKey, 31*time.Second)
+				expected := service.OpenAICodexWindowSnapshot{ThreadID: repositoryOpenAICodexWindowThread, Number: number, ContextWindowID: repositoryOpenAICodexContextWindowNext, LastCompactDigest: digest}
+				// Exact, stale-like and duplicate-like calls cannot migrate or touch TTL.
+				for _, attempted := range []struct {
+					number uint64
+					digest string
+				}{{number, strings.Repeat("b", 64)}, {number + 1, strings.Repeat("c", 64)}, {0, strings.Repeat("a", 64)}} {
+					attemptExpected := expected
+					attemptExpected.Number = attempted.number
+					attemptExpected.LastCompactDigest = ""
+					if attempted.number > 0 {
+						attemptExpected.LastCompactDigest = strings.Repeat("d", 64)
+					}
+					_, err = store.CommitOpenAICodexWindow(context.Background(), key, attemptExpected, attempted.digest, repositoryOpenAICodexContextWindowLater, time.Hour)
+					require.ErrorIs(t, err, service.ErrOpenAICodexWindowLegacyRequiresResolve)
+					unchanged, getErr := mr.Get(redisKey)
+					require.NoError(t, getErr)
+					require.Equal(t, string(raw), unchanged)
+					require.Equal(t, 31*time.Second, mr.TTL(redisKey))
+				}
+				candidate := service.OpenAICodexWindowSnapshot{ThreadID: repositoryOpenAICodexWindowThread, ContextWindowID: repositoryOpenAICodexContextWindowInitial}
+				resolved, err := store.ResolveOpenAICodexWindow(context.Background(), key, candidate, time.Minute)
+				require.NoError(t, err)
+				if fields == 4 {
+					require.Equal(t, repositoryOpenAICodexContextWindowNext, resolved.ContextWindowID)
+				} else {
+					require.Equal(t, candidate.ContextWindowID, resolved.ContextWindowID)
+				}
+				if number == 0 {
+					require.Equal(t, resolved.ContextWindowID, resolved.FirstContextWindowID)
+				} else {
+					require.Empty(t, resolved.FirstContextWindowID)
+				}
+				require.Empty(t, resolved.PreviousContextWindowID)
+				storedRaw, err := mr.Get(redisKey)
+				require.NoError(t, err)
+				stored, err := decodeStrictOpenAICodexWindowSnapshot([]byte(storedRaw))
+				require.NoError(t, err)
+				require.Equal(t, resolved, stored)
+				advanced, err := store.CommitOpenAICodexWindow(context.Background(), key, resolved, strings.Repeat("e", 64), repositoryOpenAICodexContextWindowLater, time.Minute)
+				require.NoError(t, err)
+				require.Equal(t, resolved.FirstContextWindowID, advanced.Snapshot.FirstContextWindowID)
+				require.Equal(t, resolved.ContextWindowID, advanced.Snapshot.PreviousContextWindowID)
+			})
+		}
+	}
+}
+
+func TestGatewayCacheOpenAICodexWindowRejectsCorruptHistory(t *testing.T) {
+	for _, test := range []struct{ name, first, previous string }{
+		{"invalid_first", `"not-a-uuid"`, `""`},
+		{"null_first", `null`, `""`},
+		{"null_previous", `""`, `null`},
+		{"wrong_type", `true`, `""`},
+		{"invalid_previous", `""`, `"not-a-uuid"`},
+		{"previous_is_current", `""`, fmt.Sprintf("%q", repositoryOpenAICodexContextWindowNext)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			mr, _, store := newOpenAICodexWindowRedisTest(t)
+			key := strings.Repeat("7", 64)
+			redisKey, err := OpenAICodexWindowRedisKey(key)
+			require.NoError(t, err)
+			raw := fmt.Sprintf(`{"thread_id":%q,"window_number":2,"context_window_id":%q,"first_context_window_id":%s,"previous_context_window_id":%s,"last_compact_digest":%q}`, repositoryOpenAICodexWindowThread, repositoryOpenAICodexContextWindowNext, test.first, test.previous, strings.Repeat("a", 64))
+			_, err = decodeStrictOpenAICodexWindowSnapshot([]byte(raw))
+			require.Error(t, err)
+			mr.Set(redisKey, raw)
+			mr.SetTTL(redisKey, time.Minute)
+			candidate := service.OpenAICodexWindowSnapshot{ThreadID: repositoryOpenAICodexWindowThread, ContextWindowID: repositoryOpenAICodexContextWindowInitial}
+			_, err = store.ResolveOpenAICodexWindow(context.Background(), key, candidate, time.Hour)
+			require.ErrorIs(t, err, service.ErrOpenAICodexWindowStoredInvalid)
+			_, err = store.CommitOpenAICodexWindow(context.Background(), key, candidate, strings.Repeat("b", 64), repositoryOpenAICodexContextWindowLater, time.Hour)
+			require.ErrorIs(t, err, service.ErrOpenAICodexWindowStoredInvalid)
+			unchanged, err := mr.Get(redisKey)
+			require.NoError(t, err)
+			require.Equal(t, raw, unchanged)
+			require.Equal(t, time.Minute, mr.TTL(redisKey))
+		})
+	}
+}
+
 func TestGatewayCacheOpenAICodexWindowCommitRequiresLegacyResolveWithoutMutation(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -290,7 +396,7 @@ func TestGatewayCacheOpenAICodexWindowCommitRejectsInvalidTransitionWithoutMutat
 		storedSnapshot := service.OpenAICodexWindowSnapshot{
 			ThreadID: repositoryOpenAICodexWindowThread, Number: 2, ContextWindowID: repositoryOpenAICodexContextWindowLater, LastCompactDigest: strings.Repeat("b", 64),
 		}
-		raw := fmt.Sprintf(`{"thread_id":%q,"window_number":2,"context_window_id":%q,"last_compact_digest":%q}`,
+		raw := fmt.Sprintf(`{"thread_id":%q,"window_number":2,"context_window_id":%q,"first_context_window_id":"","previous_context_window_id":"","last_compact_digest":%q}`,
 			storedSnapshot.ThreadID, storedSnapshot.ContextWindowID, storedSnapshot.LastCompactDigest)
 		mr.Set(redisKey, raw)
 		mr.SetTTL(redisKey, 41*time.Second)
