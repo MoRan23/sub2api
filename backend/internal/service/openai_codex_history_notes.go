@@ -46,6 +46,13 @@ func (s *OpenAIGatewayService) ForwardCodexHistoryNotes(ctx context.Context, c *
 	if strings.TrimSpace(key) == "" {
 		key = codexAuxiliaryStickyKey(apiKey, c, body)
 	}
+	// Session capture attaches the legacy hash to the Gin request after the
+	// caller supplied ctx. Preserve the caller's cancellation/deadline while
+	// carrying that hash into the same compatibility helpers used by Responses.
+	stickyCtx := ctx
+	if c != nil && c.Request != nil {
+		stickyCtx = withOpenAILegacySessionHash(ctx, openAILegacySessionHashFromContext(c.Request.Context()))
+	}
 	accounts, err := s.listCodexAuxiliaryAccounts(ctx, apiKey)
 	if err != nil {
 		return nil, err
@@ -53,7 +60,7 @@ func (s *OpenAIGatewayService) ForwardCodexHistoryNotes(ctx context.Context, c *
 	if len(accounts) == 0 {
 		return nil, ErrNoAvailableAccounts
 	}
-	ordered, stickySource := s.orderCodexAuxiliaryAccounts(ctx, key, accounts, derefGroupID(apiKey.GroupID))
+	ordered, stickySource := s.orderCodexAuxiliaryAccounts(stickyCtx, key, accounts, derefGroupID(apiKey.GroupID))
 	var lastErr error
 	for i, account := range ordered {
 		if account == nil {
@@ -90,10 +97,8 @@ func (s *OpenAIGatewayService) ForwardCodexHistoryNotes(ctx context.Context, c *
 		}
 		if reqErr == nil {
 			if resp != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-				s.storeCodexAuxiliarySticky(key, account.ID)
-				if s.cache != nil {
-					_ = s.cache.SetSessionAccountID(ctx, derefGroupID(apiKey.GroupID), key, account.ID, s.openAIWSSessionStickyTTL())
-				}
+				s.storeCodexAuxiliarySticky(key, account.ID, derefGroupID(apiKey.GroupID))
+				_ = s.setStickySessionAccountID(stickyCtx, apiKey.GroupID, key, account.ID, s.openAIWSSessionStickyTTL())
 				return resp, nil
 			}
 			// Permission/validation errors are authoritative and must not rebind.
@@ -120,7 +125,7 @@ func (s *OpenAIGatewayService) ForwardCodexHistoryNotes(ctx context.Context, c *
 	return nil, lastErr
 }
 
-func (s *OpenAIGatewayService) storeCodexAuxiliarySticky(key string, accountID int64) {
+func (s *OpenAIGatewayService) storeCodexAuxiliarySticky(key string, accountID int64, groupID int64) {
 	now := time.Now()
 	// Sweep expired local fallback entries opportunistically. Redis remains the
 	// primary store; this keeps the in-process fallback bounded for deployments
@@ -142,7 +147,8 @@ func (s *OpenAIGatewayService) storeCodexAuxiliarySticky(key string, accountID i
 			return false
 		})
 	}
-	s.codexAuxiliarySticky.Store(key, codexAuxiliaryStickyEntry{accountID: accountID, expiresAt: now.Add(s.openAIWSSessionStickyTTL())})
+	s.codexAuxiliarySticky.Store(codexAuxiliaryLocalStickyKey{groupID: groupID, sessionHash: key},
+		codexAuxiliaryStickyEntry{accountID: accountID, expiresAt: now.Add(s.openAIWSSessionStickyTTL())})
 }
 
 type codexAuxiliaryCancelBody struct {
@@ -188,7 +194,7 @@ func (s *OpenAIGatewayService) listCodexAuxiliaryAccounts(ctx context.Context, a
 
 func (s *OpenAIGatewayService) orderCodexAuxiliaryAccounts(ctx context.Context, key string, accounts []*Account, groupID int64) ([]*Account, string) {
 	if s.cache != nil {
-		if id, err := s.cache.GetSessionAccountID(ctx, groupID, key); err == nil {
+		if id, err := s.getStickySessionAccountID(ctx, &groupID, key); err == nil {
 			for i, account := range accounts {
 				if account != nil && account.ID == id {
 					ordered := make([]*Account, 0, len(accounts))
@@ -200,10 +206,11 @@ func (s *OpenAIGatewayService) orderCodexAuxiliaryAccounts(ctx context.Context, 
 			}
 		}
 	}
-	if value, ok := s.codexAuxiliarySticky.Load(key); ok {
+	localKey := codexAuxiliaryLocalStickyKey{groupID: groupID, sessionHash: key}
+	if value, ok := s.codexAuxiliarySticky.Load(localKey); ok {
 		if entry, ok := value.(codexAuxiliaryStickyEntry); ok {
 			if !entry.expiresAt.IsZero() && time.Now().After(entry.expiresAt) {
-				s.codexAuxiliarySticky.Delete(key)
+				s.codexAuxiliarySticky.Delete(localKey)
 				return accounts, "none"
 			}
 			id := entry.accountID
@@ -219,6 +226,13 @@ func (s *OpenAIGatewayService) orderCodexAuxiliaryAccounts(ctx context.Context, 
 		}
 	}
 	return accounts, "none"
+}
+
+// Match the shared Redis sticky scope; identical session signals in different
+// groups must not influence the in-process auxiliary fallback.
+type codexAuxiliaryLocalStickyKey struct {
+	groupID     int64
+	sessionHash string
 }
 
 type codexAuxiliaryStickyEntry struct {
