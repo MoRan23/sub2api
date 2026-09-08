@@ -3,11 +3,14 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +22,8 @@ import (
 
 const codexAuxiliaryStickyTestSession = "history-notes-shared-session"
 
-var codexAuxiliaryStickyTestBody = []byte(`{"client_metadata":{"x-codex-turn-metadata":"{\"session_id\":\"history-notes-shared-session\",\"thread_id\":\"history-notes-shared-thread\"}"},"context":{"session_id":"history-notes-shared-session"}}`)
+var codexAuxiliaryStickyTestBody = []byte(`{"context":{"session_id":"history-notes-shared-session","current_agent_name":"/root/worker"}}`)
+var codexAuxiliaryResponsesTestBody = []byte(`{"client_metadata":{"x-codex-turn-metadata":"{\"session_id\":\"history-notes-shared-session\",\"thread_id\":\"history-notes-shared-thread\"}"}}`)
 
 type codexAuxiliaryStickyTestCacheKey struct {
 	groupID int64
@@ -81,19 +85,40 @@ func codexAuxiliaryStickyTestResponse(status int) *http.Response {
 
 func TestForwardCodexHistoryNotesReusesResponsesStickyBinding(t *testing.T) {
 	var calls []int64
+	var serverSession string
 	svc, apiKey, cache := newCodexAuxiliaryStickyTestService(t, func(req *http.Request, accountID int64) (*http.Response, error) {
 		calls = append(calls, accountID)
 		require.Equal(t, "/backend-api/codex/alpha/history/v2/list_windows", req.URL.Path)
+		var sent map[string]any
+		require.NoError(t, json.NewDecoder(req.Body).Decode(&sent))
+		require.Equal(t, map[string]any{"context": map[string]any{"session_id": serverSession, "current_agent_name": "/root/worker"}}, sent)
+		replayBody, replayErr := req.GetBody()
+		require.NoError(t, replayErr)
+		var replayed map[string]any
+		require.NoError(t, json.NewDecoder(replayBody).Decode(&replayed))
+		require.NoError(t, replayBody.Close())
+		require.Equal(t, sent, replayed, "transport replay must not restore client identity")
+		require.NotEqual(t, codexAuxiliaryStickyTestSession, serverSession)
+		require.Empty(t, req.Header.Get("x-codex-turn-metadata"))
+		require.Empty(t, req.Header.Get("x-codex-window-id"))
 		return codexAuxiliaryStickyTestResponse(http.StatusOK), nil
 	})
 	modelContext := newCodexAuxiliaryStickyTestContext(context.Background(), apiKey, "/responses")
-	SetOpenAIOAuthIdentityCapture(modelContext, CaptureOpenAIOAuthIdentity(modelContext, codexAuxiliaryStickyTestBody, ""))
-	modelHash := svc.GenerateSessionHashForOpenAIOAuthIdentity(modelContext, codexAuxiliaryStickyTestBody, "")
+	SetOpenAIOAuthIdentityCapture(modelContext, CaptureOpenAIOAuthIdentity(modelContext, codexAuxiliaryResponsesTestBody, ""))
+	modelHash := svc.GenerateSessionHashForOpenAIOAuthIdentity(modelContext, codexAuxiliaryResponsesTestBody, "")
+	accounts, err := svc.listCodexAuxiliaryAccounts(context.Background(), apiKey)
+	require.NoError(t, err)
+	modelCapture, _ := OpenAIOAuthIdentityCaptureFromContext(modelContext)
+	modelPlan, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), modelContext, accounts[1], modelCapture, OpenAIOAuthIdentityPlanOptions{TurnIdentityEnabled: true}, nil)
+	require.NoError(t, err)
+	serverSession = modelPlan.WireProfile.SessionID
 	require.NoError(t, svc.BindStickySession(modelContext.Request.Context(), apiKey.GroupID, modelHash, 22))
 	// A binding for another group must not replace the current group's winner.
 	require.NoError(t, cache.SetSessionAccountID(context.Background(), *apiKey.GroupID+1, svc.openAISessionCacheKey(modelHash), 11, time.Minute))
 
 	c := newCodexAuxiliaryStickyTestContext(context.Background(), apiKey, "/alpha/history/v2/list_windows")
+	c.Request.Header.Set("x-codex-turn-metadata", `{"session_id":"spoofed-session"}`)
+	c.Request.Header.Set("x-codex-window-id", "spoofed-window:9")
 	resp, err := svc.ForwardCodexHistoryNotes(c.Request.Context(), c, apiKey, "/alpha/history/v2/list_windows", codexAuxiliaryStickyTestBody)
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
@@ -101,6 +126,221 @@ func TestForwardCodexHistoryNotesReusesResponsesStickyBinding(t *testing.T) {
 	accountID, err := svc.getStickySessionAccountID(c.Request.Context(), apiKey.GroupID, modelHash)
 	require.NoError(t, err)
 	require.Equal(t, int64(22), accountID)
+}
+
+type codexAuxiliaryReaderFunc func([]byte) (int, error)
+
+func (f codexAuxiliaryReaderFunc) Read(p []byte) (int, error) { return f(p) }
+
+func TestForwardCodexHistoryNotesDoesNotBindIncompleteFallbackResponse(t *testing.T) {
+	for _, failure := range []string{"eof", "timeout", "invalid_json", "oversize"} {
+		t.Run(failure, func(t *testing.T) {
+			var calls []int64
+			svc, apiKey, cache := newCodexAuxiliaryStickyTestService(t, func(_ *http.Request, id int64) (*http.Response, error) {
+				calls = append(calls, id)
+				if id == 22 {
+					return nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+				}
+				resp := codexAuxiliaryStickyTestResponse(http.StatusOK)
+				switch failure {
+				case "eof":
+					resp.Body = io.NopCloser(io.MultiReader(strings.NewReader(`{"items":`), codexAuxiliaryReaderFunc(func([]byte) (int, error) { return 0, io.ErrUnexpectedEOF })))
+				case "timeout":
+					resp.Body = io.NopCloser(codexAuxiliaryReaderFunc(func([]byte) (int, error) { return 0, context.DeadlineExceeded }))
+				case "invalid_json":
+					resp.Body = io.NopCloser(strings.NewReader(`{"items":`))
+				case "oversize":
+					resp.ContentLength = codexAuxiliaryResponseLimit + 1
+				}
+				return resp, nil
+			})
+			hash, _ := deriveOpenAISessionHashes(codexAuxiliaryStickyTestSession)
+			require.NoError(t, svc.BindStickySession(context.Background(), apiKey.GroupID, hash, 22))
+			c := newCodexAuxiliaryStickyTestContext(context.Background(), apiKey, "/alpha/history/v2/list_windows")
+			resp, err := svc.ForwardCodexHistoryNotes(c.Request.Context(), c, apiKey, "/alpha/history/v2/list_windows", codexAuxiliaryStickyTestBody)
+			require.Error(t, err)
+			require.Nil(t, resp)
+			require.Equal(t, []int64{22, 11}, calls)
+			require.Equal(t, int64(22), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, svc.openAISessionCacheKey(hash)}])
+			_, stored := svc.codexAuxiliarySticky.Load(codexAuxiliaryLocalStickyKey{groupID: *apiKey.GroupID, sessionHash: hash})
+			require.False(t, stored)
+		})
+	}
+}
+
+func TestForwardCodexHistoryNotesBindsOnlyAfterCompleteJSON(t *testing.T) {
+	var svc *OpenAIGatewayService
+	var apiKey *APIKey
+	var cache *codexAuxiliaryStickyTestCache
+	var responseContext context.Context
+	var calls []int64
+	hash, _ := deriveOpenAISessionHashes(codexAuxiliaryStickyTestSession)
+	svc, apiKey, cache = newCodexAuxiliaryStickyTestService(t, func(req *http.Request, id int64) (*http.Response, error) {
+		calls = append(calls, id)
+		if id == 22 {
+			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+		}
+		responseContext = req.Context()
+		resp := codexAuxiliaryStickyTestResponse(http.StatusOK)
+		reader := strings.NewReader(`{"encrypted_output":"opaque", "items":[]}`)
+		resp.Body = io.NopCloser(codexAuxiliaryReaderFunc(func(p []byte) (int, error) {
+			require.NoError(t, req.Context().Err(), "deadline remains active until response EOF")
+			require.Equal(t, int64(22), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, svc.openAISessionCacheKey(hash)}], "reading headers or partial body cannot bind")
+			return reader.Read(p)
+		}))
+		return resp, nil
+	})
+	require.NoError(t, svc.BindStickySession(context.Background(), apiKey.GroupID, hash, 22))
+	c := newCodexAuxiliaryStickyTestContext(context.Background(), apiKey, "/alpha/notes/v2/read_file")
+	resp, err := svc.ForwardCodexHistoryNotes(c.Request.Context(), c, apiKey, "/alpha/notes/v2/read_file", codexAuxiliaryStickyTestBody)
+	require.NoError(t, err)
+	require.Equal(t, []int64{22, 11}, calls)
+	require.ErrorIs(t, responseContext.Err(), context.Canceled)
+	require.Equal(t, int64(11), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, svc.openAISessionCacheKey(hash)}])
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, `{"encrypted_output":"opaque", "items":[]}`, string(got))
+	require.NoError(t, resp.Body.Close())
+}
+
+func TestForwardCodexHistoryNotesWritesRetryOnlyBeforeConnection(t *testing.T) {
+	for _, path := range []string{"/alpha/notes/v2/append_to_file", "/alpha/notes/v2/write_file"} {
+		for _, failure := range []string{"dial", "timeout", "eof", "body_eof", "invalid_json", "503", "cancelled", "request_error"} {
+			t.Run(path+"/"+failure, func(t *testing.T) {
+				var calls []int64
+				svc, apiKey, cache := newCodexAuxiliaryStickyTestService(t, func(_ *http.Request, id int64) (*http.Response, error) {
+					calls = append(calls, id)
+					if id == 11 {
+						return codexAuxiliaryStickyTestResponse(http.StatusOK), nil
+					}
+					switch failure {
+					case "dial":
+						return nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+					case "timeout":
+						return nil, context.DeadlineExceeded
+					case "eof":
+						return nil, io.EOF
+					case "cancelled":
+						return nil, context.Canceled
+					case "request_error":
+						return nil, errors.New("invalid request")
+					case "503":
+						return codexAuxiliaryStickyTestResponse(http.StatusServiceUnavailable), nil
+					}
+					resp := codexAuxiliaryStickyTestResponse(http.StatusOK)
+					if failure == "body_eof" {
+						resp.Body = io.NopCloser(codexAuxiliaryReaderFunc(func([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }))
+					} else {
+						resp.Body = io.NopCloser(strings.NewReader(`invalid`))
+					}
+					return resp, nil
+				})
+				hash, _ := deriveOpenAISessionHashes(codexAuxiliaryStickyTestSession)
+				require.NoError(t, svc.BindStickySession(context.Background(), apiKey.GroupID, hash, 22))
+				c := newCodexAuxiliaryStickyTestContext(context.Background(), apiKey, path)
+				resp, err := svc.ForwardCodexHistoryNotes(c.Request.Context(), c, apiKey, path, codexAuxiliaryStickyTestBody)
+				wantAccount := int64(22)
+				if failure == "dial" {
+					require.NoError(t, err)
+					require.Equal(t, []int64{22, 11}, calls)
+					wantAccount = 11
+				} else {
+					require.Equal(t, []int64{22}, calls)
+					if failure == "503" {
+						require.NoError(t, err)
+						require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+					} else {
+						require.Error(t, err)
+					}
+				}
+				if resp != nil {
+					require.NoError(t, resp.Body.Close())
+				}
+				require.Equal(t, wantAccount, cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, svc.openAISessionCacheKey(hash)}])
+			})
+		}
+	}
+}
+
+func TestForwardCodexHistoryNotesSessionMappingIsolatesAPIKeys(t *testing.T) {
+	var sessions []string
+	svc, apiKey, _ := newCodexAuxiliaryStickyTestService(t, func(req *http.Request, _ int64) (*http.Response, error) {
+		var sent struct {
+			Context struct {
+				SessionID string `json:"session_id"`
+			} `json:"context"`
+		}
+		require.NoError(t, json.NewDecoder(req.Body).Decode(&sent))
+		sessions = append(sessions, sent.Context.SessionID)
+		return codexAuxiliaryStickyTestResponse(http.StatusOK), nil
+	})
+	second := *apiKey
+	second.ID++
+	for _, key := range []*APIKey{apiKey, &second, apiKey} {
+		c := newCodexAuxiliaryStickyTestContext(context.Background(), key, "/alpha/history/v2/list_windows")
+		resp, err := svc.ForwardCodexHistoryNotes(c.Request.Context(), c, key, "/alpha/history/v2/list_windows", codexAuxiliaryStickyTestBody)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+	}
+	require.NotEmpty(t, sessions[0])
+	require.NotEqual(t, sessions[0], sessions[1])
+	require.Equal(t, sessions[0], sessions[2])
+}
+
+func TestForwardCodexHistoryNotesReadSemanticFailuresDoNotFallback(t *testing.T) {
+	for _, failure := range []string{"cancelled", "bad_request", "tls", "invalid_json", "missing_context"} {
+		t.Run(failure, func(t *testing.T) {
+			var calls []int64
+			svc, apiKey, _ := newCodexAuxiliaryStickyTestService(t, func(_ *http.Request, id int64) (*http.Response, error) {
+				calls = append(calls, id)
+				switch failure {
+				case "cancelled":
+					return nil, context.Canceled
+				case "bad_request":
+					return nil, errors.New("request configuration invalid")
+				case "tls":
+					return nil, &url.Error{Op: "Post", URL: "https://upstream.invalid", Err: errors.New("certificate verification failed")}
+				default:
+					resp := codexAuxiliaryStickyTestResponse(http.StatusOK)
+					resp.Body = io.NopCloser(strings.NewReader("not json"))
+					return resp, nil
+				}
+			})
+			c := newCodexAuxiliaryStickyTestContext(context.Background(), apiKey, "/alpha/history/v2/list_windows")
+			body := codexAuxiliaryStickyTestBody
+			if failure == "missing_context" {
+				body = []byte(`{"session_id":"root-only"}`)
+			}
+			resp, err := svc.ForwardCodexHistoryNotes(c.Request.Context(), c, apiKey, "/alpha/history/v2/list_windows", body)
+			require.Error(t, err)
+			require.Nil(t, resp)
+			if failure == "missing_context" {
+				require.ErrorIs(t, err, ErrCodexHistoryNotesInvalidContext)
+				require.Empty(t, calls)
+			} else {
+				require.Equal(t, []int64{11}, calls)
+			}
+		})
+	}
+}
+
+func TestBufferCodexAuxiliaryResponseBoundsUnknownLength(t *testing.T) {
+	resp := codexAuxiliaryStickyTestResponse(http.StatusOK)
+	resp.ContentLength = -1
+	remaining := codexAuxiliaryResponseLimit + 4096
+	var read int
+	resp.Body = io.NopCloser(codexAuxiliaryReaderFunc(func(p []byte) (int, error) {
+		if remaining == 0 {
+			return 0, io.EOF
+		}
+		n := min(len(p), remaining)
+		clear(p[:n])
+		remaining -= n
+		read += n
+		return n, nil
+	}))
+	require.ErrorIs(t, bufferCodexAuxiliaryResponse(resp), errCodexAuxiliaryResponseTooLarge)
+	require.Equal(t, codexAuxiliaryResponseLimit+1, read)
 }
 
 func TestForwardCodexHistoryNotesFallbackRebindsResponsesSticky(t *testing.T) {

@@ -31,6 +31,7 @@ func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionS
 // /v1/usage、/v1/sub2api/billing 端点与异步生图任务查询只需鉴权，不需要计费执行。
 // usage 允许过期/配额耗尽的 Key 查询自身用量，billing 用于读取当前 Key 的倍率配置，
 // 异步生图查询允许已耗尽额度的 Key 拉取自身任务结果。
+// Codex History/Notes 免计费，但读写上游资源仍要求 Key 未过期，包括 simple mode。
 func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// ── 1. 提取 API Key ──────────────────────────────────────────
@@ -174,6 +175,13 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			strings.HasPrefix(path, "/v1/alpha/notes/v2/") ||
 			strings.HasPrefix(path, "/backend-api/codex/alpha/history/v2/") ||
 			strings.HasPrefix(path, "/backend-api/codex/alpha/notes/v2/")
+		// Auxiliary resource access bypasses spend enforcement, not credential
+		// expiry. Check before the simple-mode return while preserving the
+		// existing expiry exemptions for identity/usage/billing probes.
+		if codexHistoryNotesRequest && (apiKey.Status == service.StatusAPIKeyExpired || apiKey.IsExpired()) {
+			AbortWithError(c, http.StatusForbidden, "API_KEY_EXPIRED", "API key 已过期")
+			return
+		}
 		// Async image task polling only reads data that already belongs to the
 		// authenticated key and must remain available after the completed
 		// generation consumes the key's remaining balance.

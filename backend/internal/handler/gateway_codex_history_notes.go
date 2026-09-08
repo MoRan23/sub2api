@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -57,6 +58,11 @@ func (h *GatewayHandler) CodexHistoryNotes(c *gin.Context) {
 	}
 	resp, err := h.openAIGatewayService.ForwardCodexHistoryNotes(c.Request.Context(), c, apiKey, path, body)
 	if err != nil {
+		if errors.Is(err, service.ErrCodexHistoryNotesInvalidContext) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": "Invalid History/Notes context"}})
+			service.RecordCodexContextManagementResult(c, kind, path, "rejected", http.StatusBadRequest, 0, "invalid_context")
+			return
+		}
 		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"type": "upstream_error", "message": err.Error()}})
 		service.RecordCodexContextManagementResult(c, kind, path, "failed", http.StatusBadGateway, 0, "upstream_error")
 		return

@@ -121,6 +121,7 @@ type OpenAIOAuthIdentityCapture struct {
 	Aliases                  []OpenAICodexLogicalTurnAlias
 	RequestTurn              OpenAICodexRequestTurnSnapshot
 	ContextWindowIDCandidate string
+	ClientWindow             OpenAICodexClientWindowSignal
 	PromptCacheKey           OpenAICodexPromptCacheKeySnapshot
 	WireProfile              CodexWireProfile
 	ClientInstallationID     string
@@ -262,6 +263,9 @@ func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explici
 	// context-window identity.
 	if capture.WireProfile.RequestKind != CodexWireRequestMemory {
 		capture.ContextWindowIDCandidate, _ = newOpenAICodexContextWindowID()
+	}
+	if forcedRequestKind == "" {
+		capture.ClientWindow = captureOpenAICodexClientWindow(c, body, capture.Logical)
 	}
 	capture.PromptCacheKey = captureOpenAICodexPromptCacheKey(
 		body, capture.Logical, capture.Aliases, capture.WireProfile, promptCacheKeyApplicable,
@@ -751,6 +755,16 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 		return plan, err
 	}
 	plan = s.resolveOpenAICodexWindowForPlan(ctx, plan)
+	if plan.TurnIdentityEnabled && capture.ClientWindow.Valid {
+		resolved, err := s.ResolveOpenAICodexClientWindowSnapshot(ctx, plan.WindowMappingKey, plan.Window, capture.ClientWindow, capture.ContextWindowIDCandidate)
+		if err != nil {
+			return plan, fmt.Errorf("resolve OpenAI Codex client window: %w", err)
+		}
+		plan, err = BindOpenAICodexWindowToPlan(plan, resolved.Snapshot, plan.WindowMappingKey)
+		if err != nil {
+			return plan, err
+		}
+	}
 	return plan, nil
 }
 
@@ -911,6 +925,7 @@ func openAIOAuthIdentityCapturesEqual(left, right OpenAIOAuthIdentityCapture) bo
 	if left.Logical != right.Logical ||
 		left.RequestTurn != right.RequestTurn ||
 		left.ContextWindowIDCandidate != right.ContextWindowIDCandidate ||
+		left.ClientWindow != right.ClientWindow ||
 		left.PromptCacheKey != right.PromptCacheKey ||
 		!codexWireProfilesEqual(left.WireProfile, right.WireProfile) ||
 		left.ClientInstallationID != right.ClientInstallationID ||

@@ -195,6 +195,7 @@ func validateOpenAICodexWindowCommit(mappingKey string, expected OpenAICodexWind
 
 type openAICodexWindowLocalEntry struct {
 	snapshot         OpenAICodexWindowSnapshot
+	clientWindow     *OpenAICodexClientWindowBinding
 	expiresAt        time.Time
 	pendingPromotion bool
 	recency          *list.Element

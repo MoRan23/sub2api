@@ -19,6 +19,7 @@ const OpenAICodexWindowKeyPrefix = "openai:codex:window:v1:"
 
 var openAICodexWindowResolveScript = redis.NewScript(`
 local key = KEYS[1]
+local client_key = KEYS[2]
 local expected_thread = ARGV[1]
 local candidate_raw = ARGV[2]
 local ttl = tonumber(ARGV[3])
@@ -77,6 +78,7 @@ if not current or current['thread_id'] ~= expected_thread then
 end
 if candidate['window_number'] > current['window_number'] then
   redis.call('SET', key, candidate_raw, 'EX', ttl)
+  redis.call('EXPIRE', client_key, ttl)
   return candidate_raw
 end
 if current_legacy then
@@ -93,11 +95,13 @@ if current_legacy then
 else
   redis.call('EXPIRE', key, ttl)
 end
+redis.call('EXPIRE', client_key, ttl)
 return current_raw
 `)
 
 var openAICodexWindowCommitScript = redis.NewScript(`
 local key = KEYS[1]
+local client_key = KEYS[2]
 local expected_thread = ARGV[1]
 local expected_number = tonumber(ARGV[2])
 local expected_context_window_id = ARGV[3]
@@ -176,6 +180,7 @@ if not current_raw then
     last_compact_digest=compact_digest
   })
   redis.call('SET', key, advanced, 'EX', ttl)
+  redis.call('EXPIRE', client_key, ttl)
   return {advanced, 'advanced'}
 end
 local current, current_legacy = decode_snapshot(current_raw)
@@ -190,10 +195,12 @@ if current['last_compact_digest'] == compact_digest then
     return redis.error_reply('CODEX_WINDOW_INVALID_STORED_VALUE')
   end
   redis.call('EXPIRE', key, ttl)
+  redis.call('EXPIRE', client_key, ttl)
   return {current_raw, 'already_committed'}
 end
 if current['window_number'] ~= expected_number or current['context_window_id'] ~= expected_context_window_id then
   redis.call('EXPIRE', key, ttl)
+  redis.call('EXPIRE', client_key, ttl)
   return {current_raw, 'stale'}
 end
 local advanced = cjson.encode({
@@ -205,6 +212,7 @@ local advanced = cjson.encode({
   last_compact_digest=compact_digest
 })
 redis.call('SET', key, advanced, 'EX', ttl)
+redis.call('EXPIRE', client_key, ttl)
 return {advanced, 'advanced'}
 `)
 
@@ -257,7 +265,7 @@ func resolveOpenAICodexWindow(ctx context.Context, rdb *redis.Client, mappingKey
 	if err != nil {
 		return service.OpenAICodexWindowSnapshot{}, err
 	}
-	raw, err := openAICodexWindowResolveScript.Run(ctx, rdb, []string{redisKey}, candidate.ThreadID, string(payload), normalizedOpenAICodexWindowTTLSeconds(ttl)).Text()
+	raw, err := openAICodexWindowResolveScript.Run(ctx, rdb, []string{redisKey, OpenAICodexClientWindowKeyPrefix + mappingKey}, candidate.ThreadID, string(payload), normalizedOpenAICodexWindowTTLSeconds(ttl)).Text()
 	if err != nil {
 		return service.OpenAICodexWindowSnapshot{}, classifyOpenAICodexWindowRedisError("resolve openai Codex window", err)
 	}
@@ -292,7 +300,7 @@ func commitOpenAICodexWindow(ctx context.Context, rdb *redis.Client, mappingKey 
 	if proposedNextContextWindowID == expected.ContextWindowID {
 		return service.OpenAICodexWindowCommitResult{}, errors.New("openai Codex proposed context_window_id must differ from the expected context window")
 	}
-	result, err := openAICodexWindowCommitScript.Run(ctx, rdb, []string{redisKey}, expected.ThreadID, strconv.FormatUint(expected.Number, 10), expected.ContextWindowID, compactDigest, proposedNextContextWindowID, normalizedOpenAICodexWindowTTLSeconds(ttl), expected.FirstContextWindowID).Slice()
+	result, err := openAICodexWindowCommitScript.Run(ctx, rdb, []string{redisKey, OpenAICodexClientWindowKeyPrefix + mappingKey}, expected.ThreadID, strconv.FormatUint(expected.Number, 10), expected.ContextWindowID, compactDigest, proposedNextContextWindowID, normalizedOpenAICodexWindowTTLSeconds(ttl), expected.FirstContextWindowID).Slice()
 	if err != nil {
 		return service.OpenAICodexWindowCommitResult{}, classifyOpenAICodexWindowRedisError("commit openai Codex window", err)
 	}
@@ -381,7 +389,13 @@ func decodeStrictOpenAICodexWindowSnapshot(raw []byte) (service.OpenAICodexWindo
 	if len(fields) != 6 || fields["first_context_window_id"] == nil || fields["previous_context_window_id"] == nil {
 		return service.OpenAICodexWindowSnapshot{}, service.ErrOpenAICodexWindowStoredInvalid
 	}
-	for _, field := range []string{"first_context_window_id", "previous_context_window_id"} {
+	for _, field := range []string{"thread_id", "window_number", "context_window_id", "first_context_window_id", "previous_context_window_id", "last_compact_digest"} {
+		if fields[field] == nil || strings.TrimSpace(string(fields[field])) == "null" {
+			return service.OpenAICodexWindowSnapshot{}, service.ErrOpenAICodexWindowStoredInvalid
+		}
+		if field == "window_number" {
+			continue
+		}
 		var value any
 		if err := json.Unmarshal(fields[field], &value); err != nil {
 			return service.OpenAICodexWindowSnapshot{}, err
