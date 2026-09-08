@@ -153,6 +153,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		EnableOpenAICodexFingerprintNormalization:              settings.EnableOpenAICodexFingerprintNormalization,
 		EnableOpenAICodexInstallationIDNormalization:           settings.EnableOpenAICodexInstallationIDNormalization,
 		EnableOpenAICodexClientIdentityNormalization:           settings.EnableOpenAICodexClientIdentityNormalization,
+		EnableOpenAICodexPATContextManagement:                  settings.EnableOpenAICodexPATContextManagement,
 		AuditLogRetentionDays:                                  settings.AuditLogRetentionDays,
 		LoginAgreementEnabled:                                  settings.LoginAgreementEnabled,
 		LoginAgreementMode:                                     settings.LoginAgreementMode,

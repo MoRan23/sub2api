@@ -19,6 +19,7 @@ const {
   listSessions,
   listThreads,
   listEntries,
+  listContextManagement,
   updateSettings,
   showError,
   showSuccess,
@@ -28,6 +29,7 @@ const {
   listSessions: vi.fn(),
   listThreads: vi.fn(),
   listEntries: vi.fn(),
+  listContextManagement: vi.fn(),
   updateSettings: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
@@ -41,6 +43,7 @@ vi.mock('@/api/admin', () => ({
       listSessions,
       listThreads,
       listEntries,
+      listContextManagement,
     },
     settings: { updateSettings },
   },
@@ -256,6 +259,7 @@ describe('FingerprintObservationView', () => {
       listSessions,
       listThreads,
       listEntries,
+      listContextManagement,
       updateSettings,
       showError,
       showSuccess,
@@ -267,6 +271,15 @@ describe('FingerprintObservationView', () => {
     listSessions.mockResolvedValue(childResponse([sessionSummary]))
     listThreads.mockResolvedValue(childResponse([rootThread, childThread]))
     listEntries.mockResolvedValue(childResponse([childObservation]))
+    listContextManagement.mockResolvedValue({
+      enabled: true,
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+      summary: { total: 0, successes: 0, failures: 0, fallbacks: 0, rewritten: 0 },
+    })
     Object.defineProperty(document, 'hidden', { configurable: true, value: false })
   })
 
@@ -768,6 +781,54 @@ describe('FingerprintObservationView', () => {
     expect(wrapper.text()).toContain('Codex workstation')
     expect(showError).toHaveBeenCalledWith('request failed')
 
+    wrapper.unmount()
+  })
+
+  it('shows context-management monitoring on this page and clears it with the shared switch', async () => {
+    listContextManagement.mockResolvedValueOnce({
+      enabled: true,
+      items: [{
+        sequence_id: 1, timestamp: '2026-09-09T12:00:00Z', user_id: 7, username: 'alice',
+        api_key_id: 9, api_key_name: 'Codex workstation', account_id: 20, account_name: 'Sticky OAuth',
+        kind: 'history', path: '/alpha/history/v2/list_windows', status: 'delivered', http_status: 200, upstream_http_status: 200, upstream_sent: true,
+        sticky_hit: true, sticky_source: 'local', fallback: false, attempt: 1,
+        duration_ms: 12, delivered_bytes: 200, rewrite_fields: ['body.context.session_id'],
+        rewrites: [{ field: 'body.context.session_id', before: sessionID, after: childThreadID }],
+        session_id: childThreadID, thread_id: childThreadID, window_id: `${childThreadID}:0`,
+        context_window_id: forkedFromThreadID, error_kind: '',
+      }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+      summary: { total: 1, successes: 1, failures: 0, fallbacks: 0, rewritten: 1 },
+    })
+    updateSettings.mockResolvedValue({ installation_observation_enabled: false })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(listContextManagement).toHaveBeenCalledWith(
+      { page: 1, page_size: 20 }, { signal: expect.any(AbortSignal) }
+    )
+
+    await wrapper.get('#fingerprint-tab-context').trigger('click')
+    expect(wrapper.text()).toContain('/alpha/history/v2/list_windows')
+    expect(wrapper.text()).toContain('Sticky OAuth')
+    expect(wrapper.text()).toContain('body.context.session_id')
+    expect(wrapper.findAll('[role="switch"]')).toHaveLength(1)
+
+    await wrapper.get('[role="switch"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('/alpha/history/v2/list_windows')
+    expect(wrapper.text()).not.toContain('Sticky OAuth')
+    expect(wrapper.text()).toContain('admin.fingerprintObservation.emptyOff')
+    expect(listContextManagement).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('does not read context-management monitoring while observation is disabled', async () => {
+    listUsers.mockResolvedValueOnce(topResponse({ enabled: false, items: [], total: 0 }))
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('#fingerprint-tab-context').trigger('click')
+    expect(listContextManagement).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('admin.fingerprintObservation.emptyOff')
     wrapper.unmount()
   })
 })

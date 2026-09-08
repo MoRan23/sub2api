@@ -189,6 +189,10 @@ func RegisterGatewayRoutes(
 	gateway.Use(endpointNorm)
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
 	gateway.GET("/sub2api/billing", h.Gateway.KeyBillingInfo)
+	// Codex PAT clients probe this endpoint before opening a Responses
+	// session. It is authenticated by the gateway API-key middleware and is
+	// deliberately placed before model/group request handling.
+	gateway.GET("/user-auth-credential/whoami", h.Gateway.CodexPATWhoami)
 	gateway.Use(groupModelAllowlist)
 	gateway.Use(compositeTarget)
 	gateway.Use(requireGroupAnthropic)
@@ -334,6 +338,12 @@ func RegisterGatewayRoutes(
 			h.Gateway.XSearch(c)
 		})
 	}
+	// Auxiliary History/Notes calls have no model and must bypass model
+	// allowlist/composite routing while retaining normal authentication.
+	gatewayAux := r.Group("/v1")
+	gatewayAux.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth))
+	gatewayAux.POST("/alpha/history/v2/*path", h.Gateway.CodexHistoryNotes)
+	gatewayAux.POST("/alpha/notes/v2/*path", h.Gateway.CodexHistoryNotes)
 
 	// Gemini 原生 API 兼容层（Gemini SDK/CLI 直连）
 	gemini := r.Group("/v1beta")
@@ -386,6 +396,12 @@ func RegisterGatewayRoutes(
 		})
 		codexDirect.GET("/models", codexModelsHandler)
 	}
+	// Auxiliary History/Notes calls have no model and must not pass through
+	// model allowlist, composite routing, account slots, or billing middleware.
+	codexAux := r.Group("/backend-api/codex")
+	codexAux.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth))
+	codexAux.POST("/alpha/history/v2/*path", h.Gateway.CodexHistoryNotes)
+	codexAux.POST("/alpha/notes/v2/*path", h.Gateway.CodexHistoryNotes)
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
 	rootRoute(http.MethodPost, "/chat/completions", bodyLimit, func(c *gin.Context) {
 		if isOpenAIResponsesCompatibleGatewayPlatform(c) {

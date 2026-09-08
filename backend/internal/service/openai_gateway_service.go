@@ -492,6 +492,10 @@ type OpenAIGatewayService struct {
 	codexModelCapabilities              codexModelCapabilityCache
 	openaiCompatSessionResponses        sync.Map
 	openaiCompatAnthropicDigestSessions sync.Map
+	// codexAuxiliarySticky binds History/Notes calls to the first upstream
+	// account used by a logical Codex session. It intentionally does not carry
+	// scheduler slots or rate-limit state.
+	codexAuxiliarySticky sync.Map
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService

@@ -526,6 +526,8 @@ export default {
         openaiCodexVersionSyncedValue: 'Currently synced: {version}',
         openaiUuidv7SessionIdentity: 'OpenAI UUIDv7 session identity',
         openaiUuidv7SessionIdentityHint: 'When enabled, requests in the same logical OpenAI session reuse one server-managed UUIDv7 session/thread pair. Enabled by default; disable it explicitly to roll back to the legacy identity behavior.',
+        openaiCodexPATContextManagement: 'Codex PAT context-management proxy',
+        openaiCodexPATContextManagementHint: 'Enable History/Notes proxying for Codex PAT clients with sticky upstream sessions; disabling it keeps existing window identity normalization only.',
         codexHardeningTitle: "Codex Settings",
         codexClientRestrictionTitle: "Codex client restriction",
         codexHardeningDesc:

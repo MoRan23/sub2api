@@ -166,10 +166,18 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, apiKey.User.ID)
 		c.Request = c.Request.WithContext(ctx)
 		billingInfoRequest := c.Request.URL.Path == "/v1/sub2api/billing"
+		// Codex PAT whoami is an identity probe. It must remain usable while
+		// the key has no spendable balance, just like /usage and billing.
+		whoamiRequest := c.Request.URL.Path == "/v1/user-auth-credential/whoami"
+		path := strings.TrimRight(c.Request.URL.Path, "/")
+		codexHistoryNotesRequest := strings.HasPrefix(path, "/v1/alpha/history/v2/") ||
+			strings.HasPrefix(path, "/v1/alpha/notes/v2/") ||
+			strings.HasPrefix(path, "/backend-api/codex/alpha/history/v2/") ||
+			strings.HasPrefix(path, "/backend-api/codex/alpha/notes/v2/")
 		// Async image task polling only reads data that already belongs to the
 		// authenticated key and must remain available after the completed
 		// generation consumes the key's remaining balance.
-		skipBilling := c.Request.URL.Path == "/v1/usage" || billingInfoRequest || isAsyncImageTaskRead(c.Request.Method, c.Request.URL.Path)
+		skipBilling := c.Request.URL.Path == "/v1/usage" || billingInfoRequest || whoamiRequest || codexHistoryNotesRequest || isAsyncImageTaskRead(c.Request.Method, c.Request.URL.Path)
 
 		// ── 4. SimpleMode → early return ─────────────────────────────
 

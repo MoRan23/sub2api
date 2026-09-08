@@ -679,6 +679,9 @@ const (
 	// SettingKeyEnableOpenAICodexClientIdentityNormalization controls the Codex
 	// User-Agent/originator/version triplet under the master switch.
 	SettingKeyEnableOpenAICodexClientIdentityNormalization = "enable_openai_codex_client_identity_normalization"
+	// SettingKeyEnableOpenAICodexPATContextManagement controls the optional
+	// History/Notes context-management adapter for Codex PAT clients.
+	SettingKeyEnableOpenAICodexPATContextManagement = "enable_openai_codex_pat_context_management"
 	// SettingKeyOpenAIAllowClaudeCodeCodexPlugin 已废弃：历史全局开关只作为升级迁移输入读取。
 	// 迁移后等价规则写入 SettingKeyCodexCLIOnlyWhitelist，不再参与运行时判定。
 	SettingKeyOpenAIAllowClaudeCodeCodexPlugin = "openai_allow_claude_code_codex_plugin"

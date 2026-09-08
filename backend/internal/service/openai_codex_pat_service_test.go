@@ -128,3 +128,21 @@ func TestNormalizeOpenAIPersonalAccessTokenCredentialsRemovesOAuthFields(t *test
 	require.Equal(t, "2026-12-31T00:00:00Z", got["subscription_expires_at"])
 	require.Equal(t, []any{"custom"}, got["openai_usage_channel_fields"])
 }
+
+func TestOpenAIPersonalAccessTokenAccountKeepsCodexProtocolWindowPath(t *testing.T) {
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"auth_mode":         OpenAIAuthModePersonalAccessToken,
+			"openai_auth_mode":  "personal_access_token",
+			"chatgpt_plan_type": "plus",
+			"plan_type":         "plus",
+			"access_token":      "at-window-test",
+		},
+	}
+
+	require.True(t, account.UsesOpenAICodexProtocol())
+	require.True(t, account.IsOpenAIPersonalAccessToken())
+	require.True(t, account.IsOpenAIChatGPTSubscription())
+}

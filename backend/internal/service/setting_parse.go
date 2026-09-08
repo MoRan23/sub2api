@@ -247,6 +247,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyEnableOpenAICodexInstallationIDNormalization:       "true",
 		SettingKeyEnableOpenAIUUIDv7SessionIdentity:                  "true",
 		SettingKeyEnableOpenAICodexClientIdentityNormalization:       "true",
+		SettingKeyEnableOpenAICodexPATContextManagement:              "false",
 		SettingPaymentVisibleMethodAlipaySource:                      "",
 		SettingPaymentVisibleMethodWxpaySource:                       "",
 		SettingPaymentVisibleMethodAlipayEnabled:                     "false",
@@ -907,6 +908,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.EnableOpenAICodexClientIdentityNormalization = parseDefaultTrueSetting(
 		settings, SettingKeyEnableOpenAICodexClientIdentityNormalization,
 	)
+	result.EnableOpenAICodexPATContextManagement = settings[SettingKeyEnableOpenAICodexPATContextManagement] == "true"
 	// codex_cli_only 加固
 	result.MinCodexVersion = settings[SettingKeyMinCodexVersion]
 	result.MaxCodexVersion = settings[SettingKeyMaxCodexVersion]

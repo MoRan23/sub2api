@@ -47,6 +47,18 @@ type fingerprintObservationsResponse struct {
 	Pages         int                                         `json:"pages"`
 }
 
+// ListCodexContextManagementObservations returns the bounded recent PAT and
+// History/Notes activity. It shares the fingerprint capture switch and never
+// exposes request/response content or raw upstream errors.
+// GET /api/v1/admin/openai/fingerprint-observations/context-management
+func (h *OpenAIOAuthHandler) ListCodexContextManagementObservations(c *gin.Context) {
+	page := service.PageCodexContextManagementObservations(
+		parseFingerprintObservationPage(c.Query("page")),
+		parseFingerprintObservationPageSize(c.Query("page_size")),
+	)
+	response.Success(c, page)
+}
+
 // ListFingerprintObservations returns a page of users from an immutable,
 // short-lived observation snapshot. Omitting snapshot_token starts a fresh
 // snapshot; subsequent pages must reuse the returned token.

@@ -48,6 +48,17 @@ func newOpenAIIdentityPathOAuthAccount(id int64) *Account {
 	}
 }
 
+func newOpenAIIdentityPathPATAccount(id int64) *Account {
+	account := newOpenAIIdentityPathOAuthAccount(id)
+	account.Name = "openai-identity-path-pat"
+	account.Credentials["auth_mode"] = OpenAIAuthModePersonalAccessToken
+	account.Credentials["openai_auth_mode"] = OpenAIAuthModePersonalAccessToken
+	account.Credentials["access_token"] = "at-identity-path"
+	account.Credentials["email"] = "pat@example.com"
+	account.Credentials["chatgpt_plan_type"] = "plus"
+	return account
+}
+
 func newOpenAIIdentityPathAPIKeyAccount(id int64) *Account {
 	return &Account{
 		ID:          id,
@@ -227,6 +238,24 @@ func TestOpenAIOutboundIdentityPathsResponsesBuilder(t *testing.T) {
 			require.Equal(t, map[bool]int{false: 0, true: 1}[enabled], identityPathCacheCalls(cache))
 		})
 	}
+}
+
+func TestOpenAIOutboundIdentityPathsPATKeepsWindowConvergence(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","stream":true,"input":"hello","prompt_cache_key":"pat-window-key"}`)
+	c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 3101)
+	svc, cache := newOpenAIIdentityPathService(t, true, nil)
+	account := newOpenAIIdentityPathPATAccount(910101)
+
+	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "at-identity-path", true, "pat-window-key", false)
+	require.NoError(t, err)
+	outboundBody := readOpenAIIdentityPathRequestBody(t, req)
+	requireOpenAIIdentityPathPair(t, req.Header, outboundBody)
+	requireOpenAIIdentityPathContextWindowID(t, req.Header, outboundBody)
+	require.Equal(t, 1, identityPathCacheCalls(cache))
+	plan, ok := OpenAIOAuthIdentityPlanFromContext(c)
+	require.True(t, ok)
+	require.True(t, plan.TurnIdentityEnabled)
+	require.Equal(t, OpenAIAuthModePersonalAccessToken, account.GetCredential("auth_mode"))
 }
 
 func TestOpenAIOutboundIdentityPathsResponsesBuilderUsesExplicitTupleWithoutPromptKey(t *testing.T) {

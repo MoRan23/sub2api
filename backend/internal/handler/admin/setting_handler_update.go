@@ -42,6 +42,7 @@ type UpdateSettingsRequest struct {
 	EnableOpenAICodexFingerprintNormalization    *bool                        `json:"enable_openai_codex_fingerprint_normalization"`
 	EnableOpenAICodexInstallationIDNormalization *bool                        `json:"enable_openai_codex_installation_id_normalization"`
 	EnableOpenAICodexClientIdentityNormalization *bool                        `json:"enable_openai_codex_client_identity_normalization"`
+	EnableOpenAICodexPATContextManagement        *bool                        `json:"enable_openai_codex_pat_context_management"`
 	AuditLogRetentionDays                        int                          `json:"audit_log_retention_days"` // 审计日志保留天数
 	LoginAgreementEnabled                        bool                         `json:"login_agreement_enabled"`
 	LoginAgreementMode                           string                       `json:"login_agreement_mode"`
@@ -457,6 +458,7 @@ var independentlyOmittedPointerSettingKeys = map[string]string{
 	service.SettingKeyEnableOpenAICodexInstallationIDNormalization: service.SettingKeyEnableOpenAICodexInstallationIDNormalization,
 	service.SettingKeyEnableOpenAIUUIDv7SessionIdentity:            service.SettingKeyEnableOpenAIUUIDv7SessionIdentity,
 	service.SettingKeyEnableOpenAICodexClientIdentityNormalization: service.SettingKeyEnableOpenAICodexClientIdentityNormalization,
+	service.SettingKeyEnableOpenAICodexPATContextManagement:        service.SettingKeyEnableOpenAICodexPATContextManagement,
 	service.SettingKeyInstallationObservationEnabled:               service.SettingKeyInstallationObservationEnabled,
 }
 
@@ -576,6 +578,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	openAICodexClientIdentityNormalizationEnabled := previousSettings.EnableOpenAICodexClientIdentityNormalization
 	if req.EnableOpenAICodexClientIdentityNormalization != nil {
 		openAICodexClientIdentityNormalizationEnabled = *req.EnableOpenAICodexClientIdentityNormalization
+	}
+	openAICodexPATContextManagementEnabled := previousSettings.EnableOpenAICodexPATContextManagement
+	if req.EnableOpenAICodexPATContextManagement != nil {
+		openAICodexPATContextManagementEnabled = *req.EnableOpenAICodexPATContextManagement
 	}
 	passkeyEnabled := previousSettings.PasskeyEnabled
 	if req.PasskeyEnabled != nil {
@@ -1578,6 +1584,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableOpenAICodexFingerprintNormalization:    openAICodexFingerprintNormalizationEnabled,
 		EnableOpenAICodexInstallationIDNormalization: openAICodexInstallationIDNormalizationEnabled,
 		EnableOpenAICodexClientIdentityNormalization: openAICodexClientIdentityNormalizationEnabled,
+		EnableOpenAICodexPATContextManagement:        openAICodexPATContextManagementEnabled,
 		AuditLogRetentionDays:                        req.AuditLogRetentionDays,
 		LoginAgreementEnabled:                        req.LoginAgreementEnabled,
 		LoginAgreementMode:                           loginAgreementMode,
@@ -2231,6 +2238,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableOpenAICodexFingerprintNormalization:              updatedSettings.EnableOpenAICodexFingerprintNormalization,
 		EnableOpenAICodexInstallationIDNormalization:           updatedSettings.EnableOpenAICodexInstallationIDNormalization,
 		EnableOpenAICodexClientIdentityNormalization:           updatedSettings.EnableOpenAICodexClientIdentityNormalization,
+		EnableOpenAICodexPATContextManagement:                  updatedSettings.EnableOpenAICodexPATContextManagement,
 		AuditLogRetentionDays:                                  updatedSettings.AuditLogRetentionDays,
 		LoginAgreementEnabled:                                  updatedSettings.LoginAgreementEnabled,
 		LoginAgreementMode:                                     updatedSettings.LoginAgreementMode,

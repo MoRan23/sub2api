@@ -64,11 +64,24 @@
             <Icon name="infoCircle" size="sm" class="mt-0.5 shrink-0" />
             <span>{{ t('admin.fingerprintObservation.disabledHint') }}</span>
           </div>
+          <div class="mt-4 flex flex-wrap gap-2" role="tablist" :aria-label="t('admin.fingerprintObservation.title')">
+            <button
+              v-for="view in observationViews"
+              :id="`fingerprint-tab-${view.key}`"
+              :key="view.key"
+              type="button"
+              role="tab"
+              :aria-selected="activeView === view.key"
+              :aria-controls="`fingerprint-panel-${view.key}`"
+              :class="activeView === view.key ? 'rounded-lg bg-primary-100 px-3 py-2 text-xs font-semibold text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'rounded-lg px-3 py-2 text-xs font-medium text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-dark-700'"
+              @click="selectObservationView(view.key)"
+            >{{ t(view.label) }}</button>
+          </div>
         </div>
       </template>
 
       <template #table>
-        <div class="flex h-full min-h-[320px] flex-col">
+        <div v-if="activeView === 'identity'" id="fingerprint-panel-identity" role="tabpanel" aria-labelledby="fingerprint-tab-identity" class="flex h-full min-h-[320px] flex-col">
           <div
             class="grid shrink-0 grid-cols-[2rem_minmax(0,1.25fr)_minmax(0,1.4fr)_minmax(10rem,0.8fr)] items-center gap-3 border-b border-gray-200 bg-gray-50/80 px-4 py-3 text-xs font-semibold text-gray-500 dark:border-dark-700 dark:bg-dark-800/80 dark:text-gray-400"
           >
@@ -468,17 +481,40 @@
             </div>
           </div>
         </div>
+        <CodexContextManagementObservations
+          v-else
+          :key="contextManagementVersion"
+          id="fingerprint-panel-context"
+          role="tabpanel"
+          aria-labelledby="fingerprint-tab-context"
+          :enabled="observationEnabled"
+          :items="contextManagement?.items ?? []"
+          :summary="contextManagement?.summary ?? null"
+          :loading="contextManagementLoading"
+          :error="contextManagementError"
+          @retry="loadContextManagement(contextManagement?.page ?? 1)"
+          @details-changed="contextDetailsExpanded = $event"
+        />
       </template>
 
       <template #pagination>
         <Pagination
-          v-if="total > 0"
+          v-if="activeView === 'identity' && total > 0"
           :total="total"
           :page="page"
           :page-size="pageSize"
           :page-size-options="[20, 50, 100]"
           @update:page="handlePageChange"
           @update:page-size="handlePageSizeChange"
+        />
+        <Pagination
+          v-else-if="activeView === 'context' && contextManagement && contextManagement.total > 0"
+          :total="contextManagement.total"
+          :page="contextManagement.page"
+          :page-size="contextPageSize"
+          :page-size-options="[20, 50, 100]"
+          @update:page="loadContextManagement"
+          @update:page-size="handleContextPageSizeChange"
         />
       </template>
     </TablePageLayout>
@@ -497,6 +533,7 @@ import {
   type FingerprintObservationSessionSummary,
   type FingerprintObservationThreadSummary,
   type FingerprintObservationUserSummary,
+  type CodexContextManagementResponse,
 } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
@@ -509,6 +546,7 @@ import Pagination from '@/components/common/Pagination.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import LazyStateFooter from './components/FingerprintObservationLazyFooter.vue'
+import CodexContextManagementObservations from './components/CodexContextManagementObservations.vue'
 
 interface LazyCollection<T> {
   items: T[]
@@ -532,6 +570,18 @@ const { t } = useI18n()
 const appStore = useAppStore()
 
 const observationEnabled = ref(false)
+const observationViews = [
+  { key: 'identity', label: 'admin.fingerprintObservation.identityTab' },
+  { key: 'context', label: 'admin.fingerprintObservation.contextManagement.title' },
+] as const
+const activeView = ref<'identity' | 'context'>('identity')
+const contextManagement = ref<CodexContextManagementResponse | null>(null)
+const contextManagementVersion = ref(0)
+const contextManagementLoading = ref(false)
+const contextManagementError = ref('')
+const contextDetailsExpanded = ref(false)
+const contextPageSize = ref(20)
+let contextController: AbortController | null = null
 const toggling = ref(false)
 const rootLoading = ref(false)
 const rootRequestPending = ref(false)
@@ -578,6 +628,10 @@ const childRequestPending = computed(() =>
   )
 )
 
+const activeViewPaused = computed(() => activeView.value === 'identity'
+  ? page.value !== 1 || hasExpandedNodes.value
+  : (contextManagement.value?.page ?? 1) !== 1 || contextDetailsExpanded.value)
+
 const autoRefresh = useAutoRefresh({
   storageKey: 'admin-fingerprint-observation-auto-refresh',
   intervals: [5, 10, 15, 30] as const,
@@ -586,9 +640,9 @@ const autoRefresh = useAutoRefresh({
   shouldPause: () =>
     (typeof document !== 'undefined' && document.hidden) ||
     !observationEnabled.value ||
-    page.value !== 1 ||
-    hasExpandedNodes.value ||
+    activeViewPaused.value ||
     rootRequestPending.value ||
+    contextManagementLoading.value ||
     childRequestPending.value ||
     toggling.value,
 })
@@ -597,9 +651,9 @@ const autoRefreshPaused = computed(
   () =>
     autoRefresh.enabled.value &&
     (!observationEnabled.value ||
-      page.value !== 1 ||
-      hasExpandedNodes.value ||
+      activeViewPaused.value ||
       rootRequestPending.value ||
+      contextManagementLoading.value ||
       childRequestPending.value ||
       toggling.value)
 )
@@ -679,6 +733,10 @@ function clearVisibleData(): void {
   page.value = 1
   pages.value = 1
   snapshotToken.value = ''
+  contextManagement.value = null
+  contextManagementVersion.value += 1
+  contextManagementError.value = ''
+  contextDetailsExpanded.value = false
   clearHierarchy()
 }
 
@@ -697,6 +755,9 @@ function abortAllChildRequests(): void {
 function abortAllRequests(): void {
   rootController?.abort()
   rootController = null
+  contextController?.abort()
+  contextController = null
+  contextManagementLoading.value = false
   abortAllChildRequests()
   rootRequestPending.value = false
   rootLoading.value = false
@@ -895,6 +956,7 @@ async function loadUsers(options: {
     pageSize.value = response.page_size
     pages.value = response.pages
     snapshotToken.value = response.snapshot_token
+    if (!options.requestedSnapshotToken) await loadContextManagement(1)
   } catch (error: unknown) {
     if (
       disposed ||
@@ -924,17 +986,61 @@ function manualRefresh(): Promise<void> {
   return loadUsers({ targetPage: 1, targetPageSize: pageSize.value })
 }
 
+function selectObservationView(view: 'identity' | 'context'): void {
+  if (activeView.value === view) return
+  activeView.value = view
+  contextDetailsExpanded.value = false
+}
+
 function pollFirstPage(): Promise<void> {
   if (
-    page.value !== 1 ||
-    hasExpandedNodes.value ||
+    activeViewPaused.value ||
     rootRequestPending.value ||
+    contextManagementLoading.value ||
     childRequestPending.value ||
     toggling.value
   ) {
     return Promise.resolve()
   }
   return loadUsers({ targetPage: 1, targetPageSize: pageSize.value, silent: true })
+}
+
+async function loadContextManagement(targetPage = 1): Promise<void> {
+  if (!observationEnabled.value || disposed) return
+  contextController?.abort()
+  const controller = new AbortController()
+  contextController = controller
+  contextManagementLoading.value = true
+  contextManagementError.value = ''
+  try {
+    const response = await adminAPI.fingerprintObservations.listContextManagement(
+      { page: targetPage, page_size: contextPageSize.value },
+      { signal: controller.signal }
+    )
+    if (disposed || controller.signal.aborted || contextController !== controller) return
+    if (!response.enabled) {
+      observationEnabled.value = false
+      clearVisibleData()
+      return
+    }
+    contextManagement.value = response
+    contextManagementVersion.value += 1
+    contextDetailsExpanded.value = false
+  } catch (error: unknown) {
+    if (disposed || contextController !== controller || isCanceledRequest(error, controller.signal)) return
+    contextManagementError.value = extractApiErrorMessage(error, t('admin.fingerprintObservation.contextManagement.loadFailed'))
+  } finally {
+    if (contextController === controller) {
+      contextController = null
+      contextManagementLoading.value = false
+    }
+  }
+}
+
+function handleContextPageSizeChange(size: number): void {
+  if (!allowedPageSizes.includes(size as (typeof allowedPageSizes)[number])) return
+  contextPageSize.value = size
+  void loadContextManagement(1)
 }
 
 function handlePageChange(nextPage: number): void {

@@ -579,6 +579,27 @@ func TestSettingService_InitializeDefaultSettingsPersistsConfiguredForwardedClie
 	require.Equal(t, "false", repo.values[SettingKeyInstallationObservationEnabled])
 }
 
+func TestSettingService_PATContextManagementDefaultsDisabled(t *testing.T) {
+	svc := NewSettingService(nil, &config.Config{})
+	got := svc.parseSettings(map[string]string{})
+	require.False(t, got.EnableOpenAICodexPATContextManagement)
+
+	got = svc.parseSettings(map[string]string{
+		SettingKeyEnableOpenAICodexPATContextManagement: "true",
+	})
+	require.True(t, got.EnableOpenAICodexPATContextManagement)
+}
+
+func TestSettingService_PATContextManagementPersistsValue(t *testing.T) {
+	repo := &settingUpdateRepoStub{}
+	svc := NewSettingService(repo, &config.Config{})
+	settings := svc.parseSettings(map[string]string{
+		SettingKeyEnableOpenAICodexPATContextManagement: "true",
+	})
+	require.NoError(t, svc.UpdateSettings(context.Background(), settings))
+	require.Equal(t, "true", repo.updates[SettingKeyEnableOpenAICodexPATContextManagement])
+}
+
 func TestParseSettingsOpenAIUUIDv7IdentityDefaultsOnAndPreservesExplicitFalse(t *testing.T) {
 	svc := NewSettingService(nil, &config.Config{})
 

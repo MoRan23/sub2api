@@ -153,6 +153,9 @@ export default {
         authModeLegacy: '兼容模式',
         authModeApiKey: 'API Key Mode',
         authModeApiKeyRestartNotice: '保存此配置后，必须完全退出并重启 Codex Desktop 或 CLI，然后新建 task，让客户端重新构建工具注册表。',
+        contextManagementTitle: '可选：启用 PAT 上下文管理',
+        contextManagementDescription: '管理员开启 PAT 上下文管理代理后，才按下面方式配置。personal_access_token 必须优先于 OPENAI_API_KEY；Codex 会通过 whoami 完成订阅检测。修改后请重启 Codex。',
+        contextManagementExample: "{'{'}\n  \"personal_access_token\": \"你的 API Key\",\n  \"OPENAI_API_KEY\": \"你的 API Key\"\n{'}'}\n\nopenai_base_url = \"<api地址>/backend-api/codex\"\n\n[features.context_management]\nexperimental_mode = true\n\n[features.token_budget]\nenabled = true\nuse_history_notes_extension = true\n\n# Windows\nsetx CODEX_AUTHAPI_BASE_URL \"https://your-sub2api-host\"\n# macOS/Linux\nexport CODEX_AUTHAPI_BASE_URL=\"https://your-sub2api-host\"",
         configTomlHint: '请确保以下内容位于 config.toml 文件的开头部分',
         note: '请确保配置目录存在。macOS/Linux 用户可运行 mkdir -p ~/.codex 创建目录。',
         noteWindows:

@@ -25,6 +25,7 @@ func TestFingerprintObservationAdminRoutesAreRegistered(t *testing.T) {
 
 	for _, path := range []string{
 		"/api/v1/admin/openai/fingerprint-observations",
+		"/api/v1/admin/openai/fingerprint-observations/context-management",
 		"/api/v1/admin/openai/fingerprint-observations/api-keys",
 		"/api/v1/admin/openai/fingerprint-observations/sessions",
 		"/api/v1/admin/openai/fingerprint-observations/threads",

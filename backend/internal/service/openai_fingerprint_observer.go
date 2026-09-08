@@ -115,6 +115,7 @@ var globalFingerprintObserver = &fingerprintObserver{
 func SetFingerprintObservationEnabled(enabled bool) {
 	o := globalFingerprintObserver
 	if o == nil {
+		syncCodexContextObservationEnabled(enabled)
 		if !enabled {
 			globalFingerprintObservationSnapshotStore.clear()
 		}
@@ -123,6 +124,7 @@ func SetFingerprintObservationEnabled(enabled bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.setEnabledLocked(enabled)
+	syncCodexContextObservationEnabled(enabled)
 	if !enabled {
 		// Keep the observer lock held while clearing snapshots. Snapshot creation
 		// takes the locks in the same order, so a concurrent creator cannot copy

@@ -101,6 +101,55 @@ export interface FingerprintObservationsResponse {
   pages: number
 }
 
+export interface CodexContextManagementEvent {
+  sequence_id: number
+  timestamp: string
+  user_id: number
+  username: string
+  email: string
+  api_key_id: number
+  api_key_name: string
+  account_id: number
+  account_name: string
+  path: string
+  kind: string
+  status: string
+  http_status: number
+  upstream_http_status: number
+  upstream_sent: boolean
+  sticky_hit: boolean
+  sticky_source: string
+  fallback: boolean
+  attempt: number
+  duration_ms: number
+  delivered_bytes: number
+  rewrite_fields?: string[]
+  rewrites?: Array<{ field: string; before?: string; after?: string }>
+  session_id?: string
+  thread_id?: string
+  window_id?: string
+  context_window_id?: string
+  error_kind?: string
+}
+
+export interface CodexContextManagementSummary {
+  total: number
+  successes: number
+  failures: number
+  fallbacks: number
+  rewritten: number
+}
+
+export interface CodexContextManagementResponse {
+  enabled: boolean
+  items: CodexContextManagementEvent[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+  summary: CodexContextManagementSummary
+}
+
 export interface FingerprintObservationChildrenResponse<T> {
   items: T[]
   total: number
@@ -178,12 +227,24 @@ function listEntries(
   return listChildren('/admin/openai/fingerprint-observations/entries', params, options)
 }
 
+async function listContextManagement(
+  params: { page?: number; page_size?: number } = {},
+  options: FingerprintObservationRequestOptions = {}
+): Promise<CodexContextManagementResponse> {
+  const { data } = await apiClient.get<CodexContextManagementResponse>(
+    '/admin/openai/fingerprint-observations/context-management',
+    { params, signal: options.signal }
+  )
+  return data
+}
+
 export const fingerprintObservationsAPI = {
   list,
   listAPIKeys,
   listSessions,
   listThreads,
   listEntries,
+  listContextManagement,
 }
 
 export default fingerprintObservationsAPI

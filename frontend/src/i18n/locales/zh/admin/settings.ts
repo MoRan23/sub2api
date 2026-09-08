@@ -519,6 +519,8 @@ export default {
         openaiCodexVersionSyncedValue: '当前同步到：{version}',
         openaiUuidv7SessionIdentity: 'OpenAI UUIDv7 会话身份',
         openaiUuidv7SessionIdentityHint: '开启后，同一 OpenAI 逻辑会话稳定复用一组由服务端管理的 UUIDv7 session/thread 标识。默认开启，可显式关闭以回退到原有行为。',
+        openaiCodexPATContextManagement: 'Codex PAT 上下文管理代理',
+        openaiCodexPATContextManagementHint: '开启后为 Codex PAT 代理 History/Notes 请求并保持会话上游粘性；关闭时仅保留现有窗口身份归一化。',
         codexHardeningTitle: 'Codex 设置',
         codexClientRestrictionTitle: 'Codex 客户端限制',
         codexHardeningDesc:

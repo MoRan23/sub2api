@@ -110,6 +110,20 @@
           </div>
         </div>
 
+        <div
+          v-if="showCodexAuthMode"
+          data-testid="codex-context-management-guide"
+          class="rounded-lg border border-primary-200 bg-primary-50 p-3 dark:border-primary-900/60 dark:bg-primary-950/20"
+        >
+          <p class="text-sm font-medium text-primary-800 dark:text-primary-200">
+            {{ t('keys.useKeyModal.openai.contextManagementTitle') }}
+          </p>
+          <p class="mt-1 text-xs leading-5 text-primary-700 dark:text-primary-300">
+            {{ t('keys.useKeyModal.openai.contextManagementDescription') }}
+          </p>
+          <pre class="mt-2 overflow-x-auto rounded bg-gray-900 p-3 text-xs leading-5 text-gray-100"><code>{{ t('keys.useKeyModal.openai.contextManagementExample', { baseUrl: props.baseUrl || 'https://your-sub2api-host' }) }}</code></pre>
+        </div>
+
         <!-- OS/Shell Tabs -->
         <div v-if="showShellTabs" class="overflow-x-auto border-b border-gray-200 dark:border-dark-700">
           <nav class="-mb-px flex min-w-max gap-4" aria-label="Tabs">

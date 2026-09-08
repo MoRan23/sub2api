@@ -48,6 +48,7 @@ type SystemSettings struct {
 	EnableOpenAICodexFingerprintNormalization    bool                     `json:"enable_openai_codex_fingerprint_normalization"`
 	EnableOpenAICodexInstallationIDNormalization bool                     `json:"enable_openai_codex_installation_id_normalization"`
 	EnableOpenAICodexClientIdentityNormalization bool                     `json:"enable_openai_codex_client_identity_normalization"`
+	EnableOpenAICodexPATContextManagement        bool                     `json:"enable_openai_codex_pat_context_management"`
 	AuditLogRetentionDays                        int                      `json:"audit_log_retention_days"` // 审计日志保留天数
 	LoginAgreementEnabled                        bool                     `json:"login_agreement_enabled"`
 	LoginAgreementMode                           string                   `json:"login_agreement_mode"`

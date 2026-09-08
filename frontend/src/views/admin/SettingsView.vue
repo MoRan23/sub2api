@@ -4549,6 +4549,18 @@
                   {{ t("admin.settings.gatewayForwarding.codexVersionHint") }}
                 </p>
 
+                <div class="flex items-center justify-between rounded-lg border border-gray-200 p-4 dark:border-dark-700">
+                  <div class="pr-4">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.gatewayForwarding.openaiCodexPATContextManagement") }}
+                    </label>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.gatewayForwarding.openaiCodexPATContextManagementHint") }}
+                    </p>
+                  </div>
+                  <Toggle v-model="form.enable_openai_codex_pat_context_management" data-testid="openai-codex-pat-context-management-toggle" />
+                </div>
+
                 <div>
                   <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     {{ t("admin.settings.gatewayForwarding.codexFingerprintSignals") }}
@@ -9912,6 +9924,7 @@ const form = reactive<SettingsForm>({
   openai_codex_client_version_builtin: "",
   openai_codex_version_auto_sync_enabled: true,
   enable_openai_uuidv7_session_identity: true,
+  enable_openai_codex_pat_context_management: false,
   // codex_cli_only 加固
   min_codex_version: "",
   max_codex_version: "",
@@ -11517,6 +11530,8 @@ async function saveSettings() {
         form.openai_codex_client_version?.trim() || "",
       openai_codex_version_auto_sync_enabled:
         form.openai_codex_version_auto_sync_enabled,
+      enable_openai_codex_pat_context_management:
+        form.enable_openai_codex_pat_context_management,
       min_codex_version: form.min_codex_version?.trim() || "",
       max_codex_version: form.max_codex_version?.trim() || "",
       codex_cli_only_allow_app_server_clients:

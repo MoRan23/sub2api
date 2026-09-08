@@ -98,6 +98,20 @@ func (s *SettingService) IsAffiliateAdminRechargeEnabled(ctx context.Context) bo
 	return value == "true"
 }
 
+// IsOpenAICodexPATContextManagementEnabled reports whether the optional
+// History/Notes adapter for Codex PAT clients is enabled. Existing Codex
+// window identity normalization is controlled by its own switches.
+func (s *SettingService) IsOpenAICodexPATContextManagementEnabled(ctx context.Context) bool {
+	if s == nil || s.settingRepo == nil {
+		return false
+	}
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyEnableOpenAICodexPATContextManagement)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(value), "true")
+}
+
 // GetAffiliateRebateRatePercent 读取并 clamp 全局返利比例。
 // 解析失败、缺失或越界都回退到 AffiliateRebateRateDefault — 该比例从不抛错，
 // 调用方只关心一个可用的数值。

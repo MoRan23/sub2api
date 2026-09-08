@@ -133,7 +133,10 @@ export type {
   FingerprintObservationSessionSummary,
   FingerprintObservationThreadSummary,
   FingerprintObservationUserSummary,
-  FingerprintObservationsResponse
+  FingerprintObservationsResponse,
+  CodexContextManagementEvent,
+  CodexContextManagementSummary,
+  CodexContextManagementResponse
 } from './fingerprintObservations'
 export type { BalanceHistoryItem } from './users'
 export type { ErrorPassthroughRule, CreateRuleRequest, UpdateRuleRequest } from './errorPassthrough'

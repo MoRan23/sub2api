@@ -80,6 +80,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.EnableOpenAICodexClientIdentityNormalization != after.EnableOpenAICodexClientIdentityNormalization {
 		changed = append(changed, service.SettingKeyEnableOpenAICodexClientIdentityNormalization)
 	}
+	if before.EnableOpenAICodexPATContextManagement != after.EnableOpenAICodexPATContextManagement {
+		changed = append(changed, service.SettingKeyEnableOpenAICodexPATContextManagement)
+	}
 	if before.InstallationObservationEnabled != after.InstallationObservationEnabled {
 		changed = append(changed, service.SettingKeyInstallationObservationEnabled)
 	}
