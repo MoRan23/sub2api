@@ -384,6 +384,46 @@ describe('UseKeyModal', () => {
     expect(wrapper.find('[data-testid="codex-api-key-restart-notice"]').exists()).toBe(false)
   })
 
+  it('renders PAT context-management files below the Codex setup and switches them by OS', async () => {
+    const wrapper = mount(UseKeyModal, {
+      props: {
+        show: true,
+        apiKey: 'sk-pat-test',
+        baseUrl: 'https://testwww.smilecodex.space/v1',
+        platform: 'openai'
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            template: '<div><slot /><slot name="footer" /></div>'
+          },
+          Icon: {
+            template: '<span />'
+          }
+        }
+      }
+    })
+
+    const guide = wrapper.get('[data-testid="codex-context-management-guide"]')
+    const guideContents = guide.findAll('pre code').map((code) => code.text())
+    expect(guideContents[0]).toContain('openai_base_url = "https://testwww.smilecodex.space/backend-api/codex"')
+    expect(guideContents[0]).toContain('[features.context_management]')
+    expect(guideContents[1]).toContain('"personal_access_token": "sk-pat-test"')
+    expect(guideContents[2]).toBe('export CODEX_AUTHAPI_BASE_URL="https://testwww.smilecodex.space"')
+    expect(wrapper.findAll('pre').map((pre) => pre.element).indexOf(guide.findAll('pre')[0].element)).toBeGreaterThan(0)
+
+    const windowsTab = wrapper.findAll('button').find((button) => button.text().trim() === 'Windows')
+    expect(windowsTab).toBeDefined()
+    await windowsTab!.trigger('click')
+    await nextTick()
+
+    const windowsContents = wrapper.get('[data-testid="codex-context-management-guide"]')
+      .findAll('pre code')
+      .map((code) => code.text())
+    expect(windowsContents[0]).toContain('model_catalog_json = "%userprofile%\\.codex\\codex-models.json"')
+    expect(windowsContents[2]).toBe('setx CODEX_AUTHAPI_BASE_URL "https://testwww.smilecodex.space"')
+  })
+
   it('renders API Key Mode authorization in OpenAI Codex config', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {

@@ -110,20 +110,6 @@
           </div>
         </div>
 
-        <div
-          v-if="showCodexAuthMode"
-          data-testid="codex-context-management-guide"
-          class="rounded-lg border border-primary-200 bg-primary-50 p-3 dark:border-primary-900/60 dark:bg-primary-950/20"
-        >
-          <p class="text-sm font-medium text-primary-800 dark:text-primary-200">
-            {{ t('keys.useKeyModal.openai.contextManagementTitle') }}
-          </p>
-          <p class="mt-1 text-xs leading-5 text-primary-700 dark:text-primary-300">
-            {{ t('keys.useKeyModal.openai.contextManagementDescription') }}
-          </p>
-          <pre class="mt-2 overflow-x-auto rounded bg-gray-900 p-3 text-xs leading-5 text-gray-100"><code>{{ t('keys.useKeyModal.openai.contextManagementExample', { baseUrl: props.baseUrl || 'https://your-sub2api-host' }) }}</code></pre>
-        </div>
-
         <!-- OS/Shell Tabs -->
         <div v-if="showShellTabs" class="overflow-x-auto border-b border-gray-200 dark:border-dark-700">
           <nav class="-mb-px flex min-w-max gap-4" aria-label="Tabs">
@@ -243,6 +229,43 @@
           >
             {{ t('keys.useKeyModal.codexModelCatalog.errorDescription') }}
           </p>
+        </section>
+
+        <!-- PAT context-management setup follows the complete platform section. -->
+        <section
+          v-if="showCodexAuthMode && codexAuthMode === 'legacy'"
+          data-testid="codex-context-management-guide"
+          class="space-y-3 rounded-lg border border-primary-200 bg-primary-50 p-3 dark:border-primary-900/60 dark:bg-primary-950/20"
+        >
+          <div>
+            <p class="text-sm font-medium text-primary-800 dark:text-primary-200">
+              {{ t('keys.useKeyModal.openai.contextManagementTitle') }}
+            </p>
+            <p class="mt-1 text-xs leading-5 text-primary-700 dark:text-primary-300">
+              {{ t('keys.useKeyModal.openai.contextManagementDescription') }}
+            </p>
+          </div>
+          <div class="space-y-3">
+            <div
+              v-for="(file, index) in contextManagementFiles"
+              :key="file.path"
+              class="relative"
+            >
+              <div class="overflow-hidden rounded-xl bg-gray-900 dark:bg-dark-900">
+                <div class="flex items-center justify-between border-b border-gray-700 bg-gray-800 px-4 py-2 dark:border-dark-700 dark:bg-dark-800">
+                  <span class="min-w-0 truncate text-xs font-mono text-gray-400">{{ file.path }}</span>
+                  <button
+                    type="button"
+                    class="flex flex-shrink-0 items-center gap-1.5 rounded-lg bg-gray-700 px-2.5 py-1 text-xs font-medium text-gray-300 transition-colors hover:bg-gray-600 hover:text-white"
+                    @click="copyContent(file.content, currentFiles.length + index)"
+                  >
+                    {{ copiedIndex === currentFiles.length + index ? t('keys.useKeyModal.copied') : t('keys.useKeyModal.copy') }}
+                  </button>
+                </div>
+                <pre class="overflow-x-auto p-4 text-sm font-mono text-gray-100"><code v-text="file.content" /></pre>
+              </div>
+            </div>
+          </div>
         </section>
 
         <!-- Usage Note -->
@@ -798,6 +821,50 @@ const currentFiles = computed((): FileConfig[] => {
       }
       return generateAnthropicFiles(baseUrl, apiKey)
   }
+})
+
+const contextManagementFiles = computed((): FileConfig[] => {
+  if (!showCodexAuthMode.value || codexAuthMode.value !== 'legacy') return []
+
+  const isWindows = activeTab.value === 'windows'
+  const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
+  const catalogPath = isWindows
+    ? '%userprofile%\\.codex\\codex-models.json'
+    : '~/.codex/codex-models.json'
+  const configuredBase = (props.baseUrl || window.location.origin)
+    .replace(/\/+$/, '')
+    .replace(/\/v1$/, '')
+    .replace(/\/backend-api\/codex$/, '')
+  const codexBaseUrl = `${configuredBase}/backend-api/codex`
+  const configContent = `model_provider = "OpenAI"
+model = "gpt-5.5"
+disable_response_storage = true
+openai_base_url = "${codexBaseUrl}"
+model_catalog_json = "${catalogPath}"
+network_access = "enabled"
+windows_wsl_setup_acknowledged = true
+
+[features]
+goals = true
+
+[features.context_management]
+experimental_mode = true
+
+[analytics]
+enabled = false`
+  const authContent = JSON.stringify({
+    personal_access_token: props.apiKey,
+    OPENAI_API_KEY: props.apiKey
+  }, null, 2)
+  const commandContent = isWindows
+    ? `setx CODEX_AUTHAPI_BASE_URL "${configuredBase}"`
+    : `export CODEX_AUTHAPI_BASE_URL="${configuredBase}"`
+
+  return [
+    { path: `${configDir}/config.toml`, content: configContent },
+    { path: `${configDir}/auth.json`, content: authContent },
+    { path: isWindows ? 'Command Prompt' : 'Terminal', content: commandContent }
+  ]
 })
 
 function generateAnthropicFiles(baseUrl: string, apiKey: string): FileConfig[] {
