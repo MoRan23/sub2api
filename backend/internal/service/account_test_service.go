@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -215,7 +216,63 @@ func (s *AccountTestService) FetchOpenAIAccountModels(ctx context.Context, accou
 			model.Type = "model"
 		}
 	}
+	// The upstream catalog can omit administrator-defined aliases (for example
+	// an image model mapped to a private deployment). The test request accepts
+	// the configured/requested model ID, so keep those entries visible even
+	// when discovery succeeds.
+	payload.Data = AppendOpenAIConfiguredTestModels(payload.Data, account)
 	return payload.Data, nil
+}
+
+// AppendOpenAIConfiguredTestModels adds configured account/group model IDs to
+// a discovered catalog for the administrator's connection-test picker.
+func AppendOpenAIConfiguredTestModels(models []openai.Model, account *Account) []openai.Model {
+	if account == nil {
+		return models
+	}
+	mapping := account.GetModelMapping()
+	configured := make(map[string]struct{}, len(mapping))
+	for requested := range mapping {
+		if requested = strings.TrimSpace(requested); requested != "" {
+			configured[requested] = struct{}{}
+		}
+	}
+	// Group allowlists are also valid requested model IDs. They are enforced by
+	// the gateway but are not necessarily present in an OAuth account manifest.
+	for _, group := range account.Groups {
+		if group == nil || group.Platform != PlatformOpenAI || !group.ModelAllowlist.Enabled {
+			continue
+		}
+		for _, requested := range group.ModelAllowlist.Models {
+			if requested = strings.TrimSpace(requested); requested != "" && !strings.Contains(requested, "*") {
+				configured[requested] = struct{}{}
+			}
+		}
+	}
+	if len(configured) == 0 {
+		return models
+	}
+	seen := make(map[string]struct{}, len(models)+len(configured))
+	for _, model := range models {
+		if id := strings.TrimSpace(model.ID); id != "" {
+			seen[id] = struct{}{}
+		}
+	}
+	requestedModels := make([]string, 0, len(configured))
+	for requested := range configured {
+		if requested != "" {
+			requestedModels = append(requestedModels, requested)
+		}
+	}
+	sort.Strings(requestedModels)
+	for _, requested := range requestedModels {
+		if _, exists := seen[requested]; exists {
+			continue
+		}
+		models = append(models, openai.Model{ID: requested, Object: "model", Type: "model", OwnedBy: "openai", DisplayName: requested})
+		seen[requested] = struct{}{}
+	}
+	return models
 }
 
 // NewAccountTestService creates a new AccountTestService
