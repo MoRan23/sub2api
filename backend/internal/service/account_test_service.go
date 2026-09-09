@@ -232,9 +232,15 @@ func AppendOpenAIConfiguredTestModels(models []openai.Model, account *Account) [
 	}
 	mapping := account.GetModelMapping()
 	configured := make(map[string]struct{}, len(mapping))
-	for requested := range mapping {
-		if requested = strings.TrimSpace(requested); requested != "" {
-			configured[requested] = struct{}{}
+	if !account.IsOpenAIPassthroughEnabled() {
+		for requested := range mapping {
+			requested = strings.TrimSpace(requested)
+			// Mapping keys may be wildcard routing rules, not concrete models
+			// that can be sent by the connection-test picker. Passthrough
+			// accounts also intentionally ignore residual mappings entirely.
+			if requested != "" && !strings.Contains(requested, "*") {
+				configured[requested] = struct{}{}
+			}
 		}
 	}
 	// Group allowlists are also valid requested model IDs. They are enforced by
