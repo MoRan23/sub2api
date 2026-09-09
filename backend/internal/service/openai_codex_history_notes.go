@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	codexAuxiliaryRequestTimeout = 35 * time.Second
-	codexAuxiliaryResponseLimit  = 16 << 20
+	codexAuxiliaryRequestTimeout        = 35 * time.Second
+	codexAuxiliaryResponseLimit         = 16 << 20
+	codexNewSessionThreadHintContextKey = "codex_new_session_thread_hint"
 )
 
 var (
@@ -83,6 +84,11 @@ func (s *OpenAIGatewayService) ForwardCodexHistoryNotes(ctx context.Context, c *
 		}
 		attemptCtx, cancel := context.WithTimeout(ctx, codexAuxiliaryRequestTimeout)
 		resp, reqErr := s.doCodexAuxiliaryRequest(attemptCtx, c, account, path, body)
+		if c != nil && (i > 0 || stickySource != "none") {
+			// A fallback or an established affinity is not a new-session probe,
+			// even if this account had to allocate a different upstream identity.
+			c.Set(codexNewSessionThreadHintContextKey, false)
+		}
 		// A 2xx header alone is insufficient: a truncated/invalid response must
 		// not move affinity. Buffer only a bounded response and keep the upstream
 		// timeout active through EOF. Notes writes may already have taken effect,
@@ -266,6 +272,9 @@ type codexAuxiliaryStickyEntry struct {
 }
 
 func (s *OpenAIGatewayService) doCodexAuxiliaryRequest(ctx context.Context, c *gin.Context, account *Account, path string, body []byte) (*http.Response, error) {
+	if c != nil {
+		c.Set(codexNewSessionThreadHintContextKey, false)
+	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, err
@@ -309,6 +318,9 @@ func (s *OpenAIGatewayService) doCodexAuxiliaryRequest(ctx context.Context, c *g
 		}
 		if !plan.TurnIdentityEnabled || strings.TrimSpace(plan.WireProfile.SessionID) == "" {
 			return nil, errors.New("history/notes session identity unavailable")
+		}
+		if c != nil && path == "/alpha/notes/v2/thread_hint" {
+			c.Set(codexNewSessionThreadHintContextKey, IsNewOpenAICodexSession(c, plan.WireProfile.SessionID))
 		}
 		if plan.ClientIdentityEnabled {
 			applyCodexClientIdentityPlan(req.Header, plan.ClientIdentity)
@@ -354,6 +366,13 @@ func (s *OpenAIGatewayService) doCodexAuxiliaryRequest(ctx context.Context, c *g
 		return resp, &codexAuxiliaryTransportError{err: err}
 	}
 	return resp, nil
+}
+
+// IsNewCodexThreadHintRequest identifies the initial Notes probe for an upstream
+// session allocated by this request. It does not infer freshness from a missing
+// sticky-cache entry or depend on diagnostic observation being enabled.
+func IsNewCodexThreadHintRequest(c *gin.Context) bool {
+	return c != nil && c.GetBool(codexNewSessionThreadHintContextKey)
 }
 
 func captureCodexAuxiliaryIdentity(body []byte) (OpenAIOAuthIdentityCapture, error) {

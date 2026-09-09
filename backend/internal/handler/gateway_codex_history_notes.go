@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -77,19 +80,62 @@ func (h *GatewayHandler) CodexHistoryNotes(c *gin.Context) {
 
 func writeCodexHistoryNotesResponse(c *gin.Context, resp *http.Response, kind, path string) {
 	defer resp.Body.Close()
-	for name, values := range resp.Header {
+	statusCode, headers := resp.StatusCode, resp.Header
+	var body io.Reader = resp.Body
+	var readErr error
+	if path == "/alpha/notes/v2/thread_hint" && resp.StatusCode == http.StatusNotFound && service.IsNewCodexThreadHintRequest(c) &&
+		(resp.Header.Get("Content-Encoding") == "" || resp.Header.Get("Content-Encoding") == "identity") {
+		// A freshly allocated upstream session has no Notes resource yet. Match
+		// only its bounded, empty Not found response; established sessions and
+		// other errors must retain the upstream response and error classification.
+		const maxEmptyHintBody = 1024
+		var prefix []byte
+		prefix, readErr = io.ReadAll(io.LimitReader(resp.Body, maxEmptyHintBody+1))
+		body = io.MultiReader(bytes.NewReader(prefix), resp.Body)
+		if readErr == nil && len(prefix) <= maxEmptyHintBody {
+			if resp.ContentLength > 0 && int64(len(prefix)) != resp.ContentLength {
+				readErr = io.ErrUnexpectedEOF
+			} else if isCodexEmptyThreadHintNotFound(prefix) {
+				const emptyHint = `{"text":""}`
+				statusCode = http.StatusOK
+				body = strings.NewReader(emptyHint)
+				headers = resp.Header.Clone()
+				if headers == nil {
+					headers = make(http.Header)
+				}
+				for _, name := range []string{"Content-Encoding", "Transfer-Encoding", "ETag", "Content-MD5", "Digest"} {
+					headers.Del(name)
+				}
+				headers.Set("Content-Type", "application/json")
+				headers.Set("Content-Length", strconv.Itoa(len(emptyHint)))
+			}
+		}
+	}
+	for name, values := range headers {
 		for _, value := range values {
 			c.Header(name, value)
 		}
 	}
-	c.Status(resp.StatusCode)
-	n, copyErr := io.Copy(c.Writer, resp.Body)
+	c.Status(statusCode)
+	n, copyErr := io.Copy(c.Writer, body)
 	status, errorKind := "delivered", ""
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if statusCode < 200 || statusCode >= 300 {
 		status, errorKind = "rejected", "upstream_rejected"
 	}
-	if copyErr != nil {
+	if copyErr != nil || readErr != nil {
 		status, errorKind = "failed", "delivery_error"
 	}
-	service.RecordCodexContextManagementResult(c, kind, path, status, resp.StatusCode, n, errorKind)
+	service.RecordCodexContextManagementResult(c, kind, path, status, statusCode, n, errorKind)
+}
+
+func isCodexEmptyThreadHintNotFound(body []byte) bool {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return true
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(body, &fields) != nil || len(fields) != 1 {
+		return false
+	}
+	var detail string
+	return json.Unmarshal(fields["detail"], &detail) == nil && strings.EqualFold(strings.TrimSpace(detail), "not found")
 }

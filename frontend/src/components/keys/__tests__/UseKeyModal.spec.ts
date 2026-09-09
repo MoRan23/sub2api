@@ -406,19 +406,12 @@ describe('UseKeyModal', () => {
 
     const guide = wrapper.get('[data-testid="codex-context-management-guide"]')
     const guideContents = guide.findAll('pre code').map((code) => code.text())
-    const httpProviderConfig = [
-      '[model_providers.openai-http]',
-      'name = "OpenAI"',
-      'base_url = "https://testwww.smilecodex.space/backend-api/codex"',
-      'wire_api = "responses"',
-      'requires_openai_auth = true',
-      'supports_websockets = false'
-    ].join('\n')
     expect(guideContents).toHaveLength(4)
-    expect(guideContents[0]).toContain('model_provider = "openai-http"')
-    expect(guideContents[0]).not.toContain('model_provider = "OpenAI"')
-    expect(guideContents[0]).toContain(httpProviderConfig)
-    expect(guideContents[0]).not.toContain('openai_base_url')
+    expect(guideContents[0]).toContain('model_provider = "openai"')
+    expect(guideContents[0]).toContain('openai_base_url = "https://testwww.smilecodex.space/backend-api/codex"')
+    expect(guideContents[0]).not.toContain('[model_providers.openai-http]')
+    expect(guideContents[0]).not.toContain('requires_openai_auth')
+    expect(guideContents[0]).not.toContain('supports_websockets')
     expect(guideContents[0]).not.toContain('responses_websockets')
     expect(guideContents[0]).toContain('[features]\ncontext_management = true\ngoals = true')
     expect(guideContents[0]).toContain('[features.token_budget]\nenabled = true\nuse_history_notes_extension = true')
@@ -438,8 +431,8 @@ describe('UseKeyModal', () => {
     const windowsContents = wrapper.get('[data-testid="codex-context-management-guide"]')
       .findAll('pre code')
       .map((code) => code.text())
-    expect(windowsContents[0]).toContain('model_provider = "openai-http"')
-    expect(windowsContents[0]).toContain(httpProviderConfig)
+    expect(windowsContents[0]).toContain('model_provider = "openai"')
+    expect(windowsContents[0]).toContain('openai_base_url = "https://testwww.smilecodex.space/backend-api/codex"')
     expect(windowsContents[0]).toContain('model_catalog_json = "~/.codex/codex-models.json"')
     expect(windowsContents[2]).toBe('setx CODEX_AUTHAPI_BASE_URL "https://testwww.smilecodex.space"')
     expect(windowsContents[3]).toBe(

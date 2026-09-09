@@ -1301,6 +1301,7 @@ type openAICodexIdentityResolutionState struct {
 	sessionDigests       []string
 	logicalSession       string
 	sessionID            string
+	sessionCreated       bool
 	threadAliases        []OpenAICodexLogicalTurnAlias
 	primaryLogicalThread string
 	resolveOutcome       *OpenAIOAuthIdentityResolveOutcome
@@ -1315,11 +1316,18 @@ func resolvePrimaryOpenAICodexStore(s *OpenAIGatewayService) OpenAICodexTurnIden
 	return nil
 }
 
-func (state *openAICodexIdentityResolutionState) resolveSession() error {
+func (state *openAICodexIdentityResolutionState) resolveSession() (err error) {
+	state.sessionCreated = false
 	fresh, err := newOpenAICodexRootIdentity()
 	if err != nil {
 		return err
 	}
+	creationConfirmed := !state.usePrimary || state.store == nil
+	defer func() {
+		// The local candidate can lose to an existing primary-store mapping.
+		// An unreadable primary store cannot prove that the session is new.
+		state.sessionCreated = err == nil && creationConfirmed && state.sessionID == fresh.SessionID
+	}()
 	localID := ""
 	if len(state.sessionDigests) > 1 {
 		resolution, aliasErr := state.local.GetOrCreateCodexSessionAliases(state.ctx, state.sessionDigests, fresh.SessionID, OpenAIOutboundSessionIdentityTTL)
@@ -1408,6 +1416,7 @@ func (state *openAICodexIdentityResolutionState) resolveSession() error {
 		}
 	}
 	state.sessionID = winner
+	creationConfirmed = true
 	return nil
 }
 
@@ -1555,7 +1564,29 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityWithAliases(ctx con
 	return identity, ok, err
 }
 
+const newOpenAICodexSessionContextKey = "openai_codex_new_session_id"
+
+// IsNewOpenAICodexSession reports whether the last successful identity resolve
+// in this request created the exact upstream session. It does not infer session
+// freshness from account affinity or persist this request-local classification.
+func IsNewOpenAICodexSession(c *gin.Context, sessionID string) bool {
+	if c == nil || sessionID == "" {
+		return false
+	}
+	created, ok := c.Get(newOpenAICodexSessionContextKey)
+	if !ok {
+		return false
+	}
+	createdID, ok := created.(string)
+	return ok && createdID == sessionID
+}
+
 func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityWithAliasesDetailed(ctx context.Context, c *gin.Context, account *Account, logical OpenAICodexLogicalTurnIdentity, aliases []OpenAICodexLogicalTurnAlias) (OpenAICodexTurnIdentity, bool, OpenAIOAuthIdentityResolveOutcome, error) {
+	if c != nil {
+		// A retry may switch credential owners or fail before resolving a new
+		// identity. Neither case may inherit a prior account's freshness marker.
+		c.Set(newOpenAICodexSessionContextKey, "")
+	}
 	outcome := OpenAIOAuthIdentityResolveNone
 	openAIOutboundSessionIdentityMetrics.resolveTotal.Add(1)
 	logical = normalizeLogicalTuple(openAICodexLogicalTuple{session: logical.SessionKey, thread: logical.ThreadKey, parent: logical.ParentThreadKey, fork: logical.ForkedFromThreadKey}, logical.Source, logical.Explicit)
@@ -1648,6 +1679,9 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityWithAliasesDetailed
 	}
 	if err := ValidateOpenAICodexTurnIdentity(identity); err != nil {
 		return OpenAICodexTurnIdentity{}, true, outcome, err
+	}
+	if c != nil && state.sessionCreated {
+		c.Set(newOpenAICodexSessionContextKey, identity.SessionID)
 	}
 	return identity, true, outcome, nil
 }

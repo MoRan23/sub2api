@@ -289,9 +289,12 @@ func codexContextObservationPath(path string) string {
 			switch op {
 			case "list_windows", "list_items", "read_item", "search_contents", "list_files_by_prefix", "read_file", "append_to_file", "write_file":
 				return prefix + op
-			default:
-				return prefix + "[operation]"
+			case "thread_hint":
+				if prefix == "/alpha/notes/v2/" {
+					return prefix + op
+				}
 			}
+			return prefix + "[operation]"
 		}
 	}
 	return "[unknown]"

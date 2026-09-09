@@ -206,3 +206,24 @@ func TestCodexContextObservationOnlyAllowsKnownPath(t *testing.T) {
 	require.Equal(t, "/alpha/history/v2/[operation]", codexContextObservationPath("/alpha/history/v2/private"))
 	require.Equal(t, "[unknown]", codexContextObservationPath("/internal/token"))
 }
+
+func TestCodexContextObservationThreadHintPath(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+		want string
+	}{
+		{"direct", "/alpha/notes/v2/thread_hint", "/alpha/notes/v2/thread_hint"},
+		{"v1_alias", "/v1/alpha/notes/v2/thread_hint", "/alpha/notes/v2/thread_hint"},
+		{"codex_alias", "/backend-api/codex/alpha/notes/v2/thread_hint", "/alpha/notes/v2/thread_hint"},
+		{"query", "/alpha/notes/v2/thread_hint?x=1", "/alpha/notes/v2/[operation]"},
+		{"query_on_alias", "/backend-api/codex/alpha/notes/v2/thread_hint?x=1", "/alpha/notes/v2/[operation]"},
+		{"unknown_operation", "/alpha/notes/v2/thread_hint_extra", "/alpha/notes/v2/[operation]"},
+		{"unknown_suffix", "/v1/alpha/notes/v2/thread_hint/private", "/alpha/notes/v2/[operation]"},
+		{"history", "/alpha/history/v2/thread_hint", "/alpha/history/v2/[operation]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, codexContextObservationPath(tc.path))
+		})
+	}
+}

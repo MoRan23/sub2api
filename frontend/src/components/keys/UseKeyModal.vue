@@ -837,19 +837,13 @@ const contextManagementFiles = computed((): FileConfig[] => {
     .replace(/\/v1$/, '')
     .replace(/\/backend-api\/codex$/, '')
   const codexBaseUrl = `${configuredBase}/backend-api/codex`
-  const configContent = `model_provider = "openai-http"
+  const configContent = `model_provider = "openai"
 model = "gpt-5.5"
 disable_response_storage = true
+openai_base_url = "${codexBaseUrl}"
 model_catalog_json = "${catalogPath}"
 network_access = "enabled"
 windows_wsl_setup_acknowledged = true
-
-[model_providers.openai-http]
-name = "OpenAI"
-base_url = "${codexBaseUrl}"
-wire_api = "responses"
-requires_openai_auth = true
-supports_websockets = false
 
 [features]
 context_management = true
