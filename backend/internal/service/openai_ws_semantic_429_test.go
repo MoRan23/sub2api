@@ -55,21 +55,21 @@ func TestOpenAIWSSemantic429IgnoresSuccessfulHandshakeQuotaHeaders(t *testing.T)
 	require.Equal(t, "604800", failoverErr.ResponseHeaders.Get("X-Codex-Primary-Reset-After-Seconds"), "handshake headers remain available for diagnostics and response propagation")
 }
 
-func TestOpenAIWSDial429StillClassifiesErrorResponseHeaders(t *testing.T) {
+func TestOpenAIWSDial429DoesNotClassifyOAuthHandshakeQuotaHeaders(t *testing.T) {
 	repo := &openAIWSSemantic429Repo{}
 	svc := newOpenAIWSSemantic429Service(repo)
 	account := &Account{ID: 612, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	headers := successfulOpenAIWSQuotaHeaders()
 
-	// A physical dial 429 has no post-handshake event body. Its HTTP response
-	// headers remain authoritative for account-level reset classification.
+	// OAuth handshake quota headers are not authoritative for a physical dial
+	// 429: upstream may return them from a successful quota snapshot, so the
+	// request must remain eligible for retry on the same account.
 	svc.persistOpenAIWSRateLimitSignal(context.Background(), account, headers, nil, "rate_limit_exceeded", "rate_limit_error", "rate limited")
 	failoverErr := svc.newOpenAIWSRateLimitFailoverError(account, headers, nil, "rate limited")
 
-	require.Len(t, repo.resetTimes, 1)
-	require.Greater(t, time.Until(repo.resetTimes[0]), 6*24*time.Hour)
-	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
-	require.False(t, failoverErr.RetryableOnSameAccount)
+	require.Empty(t, repo.resetTimes)
+	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
+	require.True(t, failoverErr.RetryableOnSameAccount)
 	require.Equal(t, "604800", failoverErr.ResponseHeaders.Get("X-Codex-Primary-Reset-After-Seconds"))
 }
 

@@ -26,7 +26,9 @@ import type {
   UpstreamBillingProbeSettings,
   UpstreamBillingRatesResponse,
   OllamaCloudUsageSettings,
-  OllamaCloudUsageState
+  OllamaCloudUsageState,
+  GrokMediaEligibilityMode,
+  GrokMediaEligibilityState
 } from '@/types'
 
 /**
@@ -241,6 +243,24 @@ export async function update(id: number, updates: UpdateAccountRequest): Promise
 export async function regenerateInstallationID(id: number): Promise<{ installation_id: string }> {
   const { data } = await apiClient.post<{ installation_id: string }>(
     `/admin/accounts/${id}/installation-id/regenerate`
+  )
+  return data
+}
+
+export async function getGrokMediaEligibility(id: number): Promise<GrokMediaEligibilityState> {
+  const { data } = await apiClient.get<GrokMediaEligibilityState>(
+    `/admin/accounts/${id}/grok-media-eligibility`
+  )
+  return data
+}
+
+export async function updateGrokMediaEligibility(
+  id: number,
+  mode: GrokMediaEligibilityMode
+): Promise<GrokMediaEligibilityState> {
+  const { data } = await apiClient.put<GrokMediaEligibilityState>(
+    `/admin/accounts/${id}/grok-media-eligibility`,
+    { mode }
   )
   return data
 }
@@ -1062,6 +1082,8 @@ export const accountsAPI = {
   duplicate,
   update,
   regenerateInstallationID,
+  getGrokMediaEligibility,
+  updateGrokMediaEligibility,
   checkMixedChannelRisk,
   delete: deleteAccount,
   toggleStatus,

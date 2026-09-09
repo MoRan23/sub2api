@@ -108,11 +108,14 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 		return nil, fmt.Errorf("插件包不是有效的 ZIP: %w", err)
 	}
 	archiveClosed := false
-	defer func() {
+	closeArchive := func() error {
 		if !archiveClosed {
-			_ = archive.Close()
+			archiveClosed = true
+			return archive.Close()
 		}
-	}()
+		return nil
+	}
+	defer func() { _ = closeArchive() }()
 	manifest, _, signatureStatus, err := i.inspectArchive(&archive.Reader)
 	if err != nil {
 		return nil, err
@@ -142,11 +145,11 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 	if err := i.extractArchive(ctx, &archive.Reader, manifest, extractPath); err != nil {
 		return nil, err
 	}
-	closeErr := archive.Close()
-	archiveClosed = true
+	closeErr := closeArchive()
 	if closeErr != nil {
 		return nil, fmt.Errorf("关闭插件包读取器: %w", closeErr)
 	}
+	// Windows 不允许重命名仍被打开的文件，提交前先释放 ZIP 读取器。
 	if err := os.Rename(extractPath, installPath); err != nil {
 		return nil, fmt.Errorf("提交插件安装目录: %w", err)
 	}
