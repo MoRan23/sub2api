@@ -217,11 +217,14 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				apiKey.Group.ID,
 			)
 			if subErr != nil {
-				if !skipBilling {
+				// History/Notes do not consume balance, concurrency, or RPM,
+				// but they are still gated by an active subscription when the
+				// key belongs to a subscription group.
+				if !skipBilling || codexHistoryNotesRequest {
 					AbortWithError(c, 403, "SUBSCRIPTION_NOT_FOUND", "No active subscription found for this group")
 					return
 				}
-				// skipBilling: 订阅不存在也放行，handler 会返回可用的数据
+				// Other read-only probes may proceed without subscription data.
 			} else {
 				subscription = sub
 			}

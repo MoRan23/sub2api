@@ -4,6 +4,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -72,6 +73,39 @@ func TestAPIKeyAuthCodexHistoryNotesRequiresUnexpiredCredential(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestAPIKeyAuthCodexHistoryNotesRequiresSubscriptionForSubscriptionGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	limit := 1.0
+	group := &service.Group{
+		ID: 42, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true,
+		SubscriptionType: service.SubscriptionTypeSubscription, DailyLimitUSD: &limit,
+	}
+	user := &service.User{ID: 7, Role: service.RoleUser, Status: service.StatusActive, Balance: 0}
+	key := &service.APIKey{ID: 100, UserID: user.ID, Key: "codex-sub-required", Status: service.StatusActive, User: user, Group: group, GroupID: &group.ID}
+	apiKeyRepo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) {
+		clone := *key
+		return &clone, nil
+	}}
+	cfg := &config.Config{RunMode: config.RunModeStandard}
+	apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
+	subscriptionService := service.NewSubscriptionService(nil, &stubUserSubscriptionRepo{
+		getActive: func(context.Context, int64, int64) (*service.UserSubscription, error) {
+			return nil, errors.New("subscription not found")
+		},
+	}, nil, nil, cfg)
+	t.Cleanup(subscriptionService.Stop)
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(apiKeyService, subscriptionService, cfg)))
+	router.POST("/v1/alpha/history/v2/list_windows", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/alpha/history/v2/list_windows", nil)
+	req.Header.Set("Authorization", "Bearer "+key.Key)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusForbidden, w.Code)
+	requireAPIKeyAuthError(t, w, "SUBSCRIPTION_NOT_FOUND", "No active subscription found for this group")
 }
 
 func TestAPIKeyAuthCodexHistoryNotesExpiryPreservesOtherEndpointRules(t *testing.T) {
