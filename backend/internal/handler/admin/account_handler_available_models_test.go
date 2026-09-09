@@ -161,6 +161,7 @@ func TestAccountHandlerGetAvailableModels_OpenAIOAuthUsesExplicitModelMapping(t 
 			Credentials: map[string]any{
 				"model_mapping": map[string]any{
 					"gpt-5": "gpt-5.1",
+					"gpt-*": "gpt-5.1",
 				},
 			},
 		},

@@ -2844,6 +2844,11 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		// Return mapped models
 		var models []openai.Model
 		for requestedModel := range mapping {
+			// Mapping keys may be wildcard routing rules, not concrete model
+			// IDs that can be selected in the connection-test picker.
+			if strings.Contains(requestedModel, "*") {
+				continue
+			}
 			var found bool
 			for _, dm := range openai.DefaultModels {
 				if dm.ID == requestedModel {
