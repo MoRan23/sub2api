@@ -98,6 +98,63 @@ func TestUpdateSettingsCodexFingerprintPolicyExplicitFieldsArePersistedAndPublis
 	}
 }
 
+func TestUpdateSettingsPATContextManagementRequiresIdentityNormalizers(t *testing.T) {
+	for _, prerequisite := range []string{
+		service.SettingKeyEnableOpenAICodexFingerprintNormalization,
+		service.SettingKeyEnableOpenAIUUIDv7SessionIdentity,
+	} {
+		t.Run(prerequisite, func(t *testing.T) {
+			stored := codexFingerprintPolicyValues(true)
+			stored[service.SettingKeyEnableOpenAICodexPATContextManagement] = "false"
+			h, repo := newStepUpSwitchTestHandler(t, stored)
+			before, err := repo.GetAll(context.Background())
+			require.NoError(t, err)
+
+			rec := doUpdateSettings(t, h, map[string]any{
+				service.SettingKeyEnableOpenAICodexPATContextManagement: true,
+				prerequisite:                         false,
+				service.SettingKeyRiskControlEnabled: true,
+			}, nil)
+
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			require.Contains(t, rec.Body.String(), "INVALID_CODEX_PAT_CONTEXT_MANAGEMENT")
+			require.Empty(t, repo.lastUpdates, "invalid dependency combinations must not write any setting")
+			require.Equal(t, before, repo.values)
+		})
+	}
+}
+
+func TestUpdateSettingsPATContextManagementPrerequisiteDisableRequiresAdapterDisable(t *testing.T) {
+	for _, prerequisite := range []string{
+		service.SettingKeyEnableOpenAICodexFingerprintNormalization,
+		service.SettingKeyEnableOpenAIUUIDv7SessionIdentity,
+	} {
+		t.Run(prerequisite, func(t *testing.T) {
+			stored := codexFingerprintPolicyValues(true)
+			stored[service.SettingKeyEnableOpenAICodexPATContextManagement] = "true"
+			h, repo := newStepUpSwitchTestHandler(t, stored)
+			before, err := repo.GetAll(context.Background())
+			require.NoError(t, err)
+
+			rejected := doUpdateSettings(t, h, map[string]any{prerequisite: false}, nil)
+			require.Equal(t, http.StatusBadRequest, rejected.Code, rejected.Body.String())
+			require.Contains(t, rejected.Body.String(), "INVALID_CODEX_PAT_CONTEXT_MANAGEMENT")
+			require.Empty(t, repo.lastUpdates)
+			require.Equal(t, before, repo.values, "an omitted PAT switch must retain the enabled dependency constraint")
+
+			accepted := doUpdateSettings(t, h, map[string]any{
+				service.SettingKeyEnableOpenAICodexPATContextManagement: false,
+				prerequisite: false,
+			}, nil)
+			require.Equal(t, http.StatusOK, accepted.Code, accepted.Body.String())
+			require.Equal(t, "false", repo.values[service.SettingKeyEnableOpenAICodexPATContextManagement])
+			require.Equal(t, "false", repo.values[prerequisite])
+			require.Equal(t, "false", repo.lastUpdates[service.SettingKeyEnableOpenAICodexPATContextManagement])
+			require.Equal(t, "false", repo.lastUpdates[prerequisite])
+		})
+	}
+}
+
 func TestUpdateSettingsCodexFingerprintPolicyOmissionPreservesExplicitFalse(t *testing.T) {
 	h, repo := newStepUpSwitchTestHandler(t, codexFingerprintPolicyValues(false))
 

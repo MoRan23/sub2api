@@ -588,6 +588,11 @@ func TestSettingService_PATContextManagementDefaultsDisabled(t *testing.T) {
 		SettingKeyEnableOpenAICodexPATContextManagement: "true",
 	})
 	require.True(t, got.EnableOpenAICodexPATContextManagement)
+	got = svc.parseSettings(map[string]string{
+		SettingKeyEnableOpenAICodexPATContextManagement:     "true",
+		SettingKeyEnableOpenAICodexFingerprintNormalization: "false",
+	})
+	require.False(t, got.EnableOpenAICodexPATContextManagement)
 }
 
 func TestSettingService_PATContextManagementPersistsValue(t *testing.T) {
@@ -598,6 +603,63 @@ func TestSettingService_PATContextManagementPersistsValue(t *testing.T) {
 	})
 	require.NoError(t, svc.UpdateSettings(context.Background(), settings))
 	require.Equal(t, "true", repo.updates[SettingKeyEnableOpenAICodexPATContextManagement])
+}
+
+func TestValidateOpenAICodexPATContextManagementSettingsRequiresIdentityNormalizers(t *testing.T) {
+	base := &SystemSettings{EnableOpenAICodexPATContextManagement: true}
+
+	err := ValidateOpenAICodexPATContextManagementSettings(base)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "requires Codex fingerprint normalization and UUIDv7 session identity")
+
+	base.EnableOpenAICodexFingerprintNormalization = true
+	err = ValidateOpenAICodexPATContextManagementSettings(base)
+	require.Error(t, err)
+
+	base.EnableOpenAIUUIDv7SessionIdentity = true
+	require.NoError(t, ValidateOpenAICodexPATContextManagementSettings(base))
+}
+
+func TestValidateOpenAICodexPATContextManagementSettingsAllowsDisabledAdapter(t *testing.T) {
+	require.NoError(t, ValidateOpenAICodexPATContextManagementSettings(&SystemSettings{}))
+	require.NoError(t, ValidateOpenAICodexPATContextManagementSettings(nil))
+}
+
+func TestSettingService_PATContextManagementFailsClosedWhenIdentityDependencyIsDisabled(t *testing.T) {
+	for _, dependency := range []string{
+		SettingKeyEnableOpenAICodexFingerprintNormalization,
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity,
+	} {
+		t.Run(dependency, func(t *testing.T) {
+			repo := &forwardedIPMigrationRepoStub{values: map[string]string{
+				SettingKeyEnableOpenAICodexPATContextManagement:     "true",
+				SettingKeyEnableOpenAICodexFingerprintNormalization: "true",
+				SettingKeyEnableOpenAIUUIDv7SessionIdentity:         "true",
+			}}
+			repo.values[dependency] = "false"
+			svc := NewSettingService(repo, &config.Config{})
+			require.False(t, svc.IsOpenAICodexPATContextManagementEnabled(context.Background()))
+		})
+	}
+}
+
+func TestSettingService_PATContextManagementDependencyDefaultsMatchParsedSettings(t *testing.T) {
+	for _, dependency := range []string{SettingKeyEnableOpenAICodexFingerprintNormalization, SettingKeyEnableOpenAIUUIDv7SessionIdentity} {
+		for _, value := range []string{"missing", "", "malformed", "true", "false"} {
+			t.Run(dependency+"/"+value, func(t *testing.T) {
+				repo := &forwardedIPMigrationRepoStub{values: map[string]string{
+					SettingKeyEnableOpenAICodexPATContextManagement: "true",
+				}}
+				if value != "missing" {
+					repo.values[dependency] = value
+				}
+				svc := NewSettingService(repo, &config.Config{})
+				require.Equal(t, value != "false", svc.IsOpenAICodexPATContextManagementEnabled(context.Background()))
+				require.Equal(t, svc.parseSettings(repo.values).EnableOpenAICodexPATContextManagement,
+					svc.IsOpenAICodexPATContextManagementEnabled(context.Background()))
+			})
+		}
+	}
 }
 
 func TestParseSettingsOpenAIUUIDv7IdentityDefaultsOnAndPreservesExplicitFalse(t *testing.T) {

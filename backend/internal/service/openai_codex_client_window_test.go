@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -50,7 +51,61 @@ func TestOpenAICodexClientWindowLocalBindRolloverAndRetry(t *testing.T) {
 	require.Equal(t, OpenAICodexClientWindowUnchanged, retry.Status)
 	require.Equal(t, advanced.Snapshot, retry.Snapshot)
 	_, err = store.ResolveOpenAICodexClientWindow(context.Background(), key, initial, time.Hour)
+	require.ErrorIs(t, err, ErrOpenAICodexClientWindowStale, "a rewind must capture the current server CAS")
+}
+
+func TestOpenAICodexClientWindowJumpAndRollbackUseFreshServerGenerations(t *testing.T) {
+	store, key, initial := newOpenAICodexClientWindowLocalTest(t)
+	_, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, initial, time.Hour)
+	require.NoError(t, err)
+	jump := initial
+	jump.Client.Number = 2
+	jump.Client.PreviousToken = strings.Repeat("2", 64)
+	jump.Client.CurrentToken = strings.Repeat("3", 64)
+	jump.ProposedContextWindowID = testOpenAICodexContextWindowNext
+	jump.RolloverDigest = strings.Repeat("c", 64)
+	jumped, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, jump, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, OpenAICodexClientWindowAdvanced, jumped.Status)
+	require.Equal(t, uint64(1), jumped.Snapshot.Number, "unobserved client windows create one fresh observed server generation")
+	require.Equal(t, jump.ProposedContextWindowID, jumped.Snapshot.ContextWindowID)
+	require.Equal(t, initial.Expected.ContextWindowID, jumped.Snapshot.PreviousContextWindowID)
+	next := jump
+	next.Expected = jumped.Snapshot
+	next.Client.Number = 3
+	next.Client.PreviousToken = jump.Client.CurrentToken
+	next.Client.CurrentToken = strings.Repeat("4", 64)
+	next.ProposedContextWindowID = testOpenAICodexContextWindowLater
+	next.RolloverDigest = strings.Repeat("d", 64)
+	advanced, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, next, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, OpenAICodexClientWindowAdvanced, advanced.Status)
+	require.Equal(t, uint64(2), advanced.Snapshot.Number)
+	require.Equal(t, jumped.Snapshot.ContextWindowID, advanced.Snapshot.PreviousContextWindowID)
+	_, err = store.ResolveOpenAICodexClientWindow(context.Background(), key, initial, time.Hour)
 	require.ErrorIs(t, err, ErrOpenAICodexClientWindowStale)
+	rewind := initial
+	rewind.Expected = advanced.Snapshot
+	rewind.ProposedContextWindowID = "01989f44-7c00-7000-8000-000000000801"
+	rewind.RolloverDigest = strings.Repeat("e", 64)
+	rollback, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, rewind, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, OpenAICodexClientWindowAdvanced, rollback.Status)
+	require.Equal(t, uint64(3), rollback.Snapshot.Number)
+	require.Equal(t, rewind.ProposedContextWindowID, rollback.Snapshot.ContextWindowID)
+	require.Equal(t, advanced.Snapshot.ContextWindowID, rollback.Snapshot.PreviousContextWindowID)
+	resume := nextOpenAICodexClientWindowTest(initial)
+	resume.Expected = rollback.Snapshot
+	resume.Client.Number = 1
+	resume.Client.CurrentToken = strings.Repeat("2", 64)
+	resume.ProposedContextWindowID = "01989f44-7c00-7000-8000-000000000802"
+	resume.RolloverDigest = strings.Repeat("f", 64)
+	resumed, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, resume, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, OpenAICodexClientWindowAdvanced, resumed.Status)
+	require.Equal(t, uint64(4), resumed.Snapshot.Number)
+	require.Equal(t, rollback.Snapshot.ContextWindowID, resumed.Snapshot.PreviousContextWindowID)
+	require.Equal(t, initial.Expected.ContextWindowID, resumed.Snapshot.FirstContextWindowID)
 }
 
 func TestOpenAICodexClientWindowFirstBindingMayResumeAtHigherClientNumber(t *testing.T) {
@@ -73,9 +128,7 @@ func TestOpenAICodexClientWindowRejectsBranchAndExpectedMismatch(t *testing.T) {
 		name   string
 		mutate func(*OpenAICodexClientWindowTransition)
 	}{
-		{"skip", func(s *OpenAICodexClientWindowTransition) { s.Client.Number = 2 }},
 		{"first changed", func(s *OpenAICodexClientWindowTransition) { s.Client.FirstToken = strings.Repeat("3", 64) }},
-		{"wrong previous", func(s *OpenAICodexClientWindowTransition) { s.Client.PreviousToken = strings.Repeat("3", 64) }},
 		{"wrong expected uuid", func(s *OpenAICodexClientWindowTransition) {
 			s.Expected.ContextWindowID = testOpenAICodexContextWindowLater
 			s.Expected.FirstContextWindowID = testOpenAICodexContextWindowLater
@@ -96,6 +149,96 @@ func TestOpenAICodexClientWindowRejectsBranchAndExpectedMismatch(t *testing.T) {
 			require.ErrorIs(t, err, ErrOpenAICodexClientWindowStale)
 			require.Equal(t, initial.Expected, store.entries[key].snapshot)
 			require.Equal(t, before, *store.entries[key].clientWindow)
+		})
+	}
+}
+
+func TestOpenAICodexClientWindowRejectsReusedUUIDWithChangedMetadata(t *testing.T) {
+	store, key, initial := newOpenAICodexClientWindowLocalTest(t)
+	_, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, initial, time.Hour)
+	require.NoError(t, err)
+	next := nextOpenAICodexClientWindowTest(initial)
+	advanced, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, next, time.Hour)
+	require.NoError(t, err)
+	for _, field := range []string{"number", "previous"} {
+		t.Run(field, func(t *testing.T) {
+			conflict := next
+			conflict.Expected = advanced.Snapshot
+			conflict.ProposedContextWindowID = testOpenAICodexContextWindowLater
+			if field == "number" {
+				conflict.Client.Number++
+			} else {
+				conflict.Client.PreviousToken = strings.Repeat("3", 64)
+			}
+			_, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, conflict, time.Hour)
+			require.ErrorIs(t, err, ErrOpenAICodexClientWindowStale)
+			require.Equal(t, advanced.Snapshot, store.entries[key].snapshot)
+			require.Equal(t, next.Client, store.entries[key].clientWindow.Client)
+		})
+	}
+}
+
+func TestOpenAICodexClientWindowRecoveryConcurrentSingleWinner(t *testing.T) {
+	for _, mode := range []string{"gap", "rollback", "same_ordinal", "adjacent_after_unobserved_rollback"} {
+		t.Run(mode, func(t *testing.T) {
+			store, key, initial := newOpenAICodexClientWindowLocalTest(t)
+			initial.Client.Number = 5
+			initial.Client.PreviousToken = strings.Repeat("5", 64)
+			initial.Client.CurrentToken = strings.Repeat("6", 64)
+			_, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, initial, time.Hour)
+			require.NoError(t, err)
+			const workers = 12
+			type outcome struct {
+				result OpenAICodexClientWindowResult
+				err    error
+			}
+			outcomes := make(chan outcome, workers)
+			start := make(chan struct{})
+			var wg sync.WaitGroup
+			for i := range workers {
+				wg.Add(1)
+				go func(index int) {
+					defer wg.Done()
+					tr := initial
+					tr.Client.PreviousToken = strings.Repeat("4", 64)
+					switch mode {
+					case "gap":
+						tr.Client.Number = 8
+					case "rollback":
+						tr.Client.Number = 2
+					case "adjacent_after_unobserved_rollback":
+						tr.Client.Number = 6
+					}
+					tr.Client.CurrentToken = fmt.Sprintf("%064x", index+0x100)
+					tr.ProposedContextWindowID = fmt.Sprintf("01989f44-7c00-7000-8000-%012x", index+0x700)
+					tr.RolloverDigest = fmt.Sprintf("%064x", index+0x200)
+					<-start
+					result, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, tr, time.Hour)
+					outcomes <- outcome{result, err}
+				}(i)
+			}
+			close(start)
+			wg.Wait()
+			close(outcomes)
+			winner := store.entries[key].snapshot
+			require.Equal(t, uint64(1), winner.Number)
+			require.NotEqual(t, initial.Expected.ContextWindowID, winner.ContextWindowID)
+			require.Equal(t, initial.Expected.ContextWindowID, winner.PreviousContextWindowID)
+			require.Equal(t, winner, store.entries[key].clientWindow.Server)
+			advanced, stale := 0, 0
+			for outcome := range outcomes {
+				require.Equal(t, winner, outcome.result.Snapshot)
+				if outcome.result.Status == OpenAICodexClientWindowAdvanced {
+					require.NoError(t, outcome.err)
+					advanced++
+				} else {
+					require.Equal(t, OpenAICodexClientWindowStale, outcome.result.Status)
+					require.ErrorIs(t, outcome.err, ErrOpenAICodexClientWindowStale)
+					stale++
+				}
+			}
+			require.Equal(t, 1, advanced)
+			require.Equal(t, workers-1, stale)
 		})
 	}
 }

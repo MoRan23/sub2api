@@ -181,6 +181,65 @@ func TestOpenAICodexClientWindowPathsTokenBudgetRollover(t *testing.T) {
 	}
 }
 
+func TestOpenAICodexClientWindowPathsGapRollbackAndBranch(t *testing.T) {
+	for _, transport := range []string{"http", "oauth_passthrough", "websocket", "websocket_http_bridge"} {
+		t.Run(transport, func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{}
+			svc, _ := newOpenAIIdentityPathService(t, true, upstream)
+			require.False(t, svc.settingService.IsOpenAICodexPATContextManagementEnabled(context.Background()))
+			account := newOpenAIIdentityPathOAuthAccount(927304)
+			session := codexClientWindowPathUUID(t)
+			first, skipped := codexClientWindowPathUUID(t), codexClientWindowPathUUID(t)
+			gap, branch := codexClientWindowPathUUID(t), codexClientWindowPathUUID(t)
+			clientIDs := []string{first, skipped, gap, branch}
+			isWS := transport == "websocket" || transport == "websocket_http_bridge"
+			steps := []struct {
+				number            uint64
+				current, previous string
+			}{
+				{0, first, ""},
+				{2, gap, skipped},  // Two local compacts without an intervening request.
+				{0, first, ""},     // Rewind restores the old client window.
+				{1, branch, first}, // A new branch from the restored client window.
+			}
+			var plans []OpenAIOAuthIdentityPlan
+			var contexts []*gin.Context
+			var bodies [][]byte
+			for index, step := range steps {
+				body := codexClientWindowPathBody(t, isWS, session, step.number, first, step.current, step.previous, true)
+				original := bytes.Clone(body)
+				c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 927305)
+				outbound, plan := codexClientWindowPathBuild(t, transport, svc, upstream, account, c, body)
+				require.Equal(t, uint64(index), plan.Window.Number, "each accepted changed context advances one server generation, independent of the client ordinal")
+				requireCodexClientWindowPathProjection(t, outbound, plan, clientIDs...)
+				require.Equal(t, original, body)
+				if index == 0 {
+					require.Equal(t, plan.Window.ContextWindowID, plan.Window.FirstContextWindowID)
+					require.Empty(t, plan.Window.PreviousContextWindowID)
+				} else {
+					require.Equal(t, plans[0].Window.FirstContextWindowID, plan.Window.FirstContextWindowID)
+					require.Equal(t, plans[index-1].Window.ContextWindowID, plan.Window.PreviousContextWindowID)
+					require.NotEqual(t, plans[index-1].Window.ContextWindowID, plan.Window.ContextWindowID)
+					require.Equal(t, plans[0].Window.ThreadID, plan.Window.ThreadID)
+					require.Equal(t, plans[0].WindowMappingKey, plan.WindowMappingKey)
+				}
+				plans = append(plans, plan)
+				contexts = append(contexts, c)
+				bodies = append(bodies, body)
+				retry, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 927305)
+				retriedBody, retryPlan := codexClientWindowPathBuild(t, transport, svc, upstream, account, retry, body)
+				require.Equal(t, plan.Window, retryPlan.Window)
+				requireCodexClientWindowPathProjection(t, retriedBody, retryPlan, clientIDs...)
+			}
+			for index, c := range contexts {
+				outbound, retryPlan := codexClientWindowPathBuild(t, transport, svc, upstream, account, c, bodies[index])
+				require.Equal(t, plans[index].Window, retryPlan.Window, "physical retries retain the snapshot captured before later gaps and rewinds")
+				requireCodexClientWindowPathProjection(t, outbound, retryPlan, clientIDs...)
+			}
+		})
+	}
+}
+
 func TestOpenAICodexClientWindowPathsUnmarkedTurnCannotAdvance(t *testing.T) {
 	for _, transport := range []string{"http", "oauth_passthrough", "websocket", "websocket_http_bridge"} {
 		t.Run(transport, func(t *testing.T) {

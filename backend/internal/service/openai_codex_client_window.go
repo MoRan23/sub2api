@@ -167,12 +167,19 @@ func ApplyOpenAICodexClientWindowTransition(current OpenAICodexWindowSnapshot, b
 		}
 		return result, &copy, nil
 	}
-	if binding.Client.Number >= OpenAICodexWindowMaxNumber || transition.Client.Number != binding.Client.Number+1 ||
-		transition.Client.FirstToken != binding.Client.FirstToken || transition.Client.PreviousToken != binding.Client.CurrentToken || transition.Client.CurrentToken == binding.Client.CurrentToken {
+	if transition.Client.FirstToken != binding.Client.FirstToken || transition.Client.CurrentToken == binding.Client.CurrentToken {
 		return stale()
 	}
+	// Codex can compact several times or rewind and create a new branch without
+	// making a model request in between. Client ordinals need not be monotonic;
+	// each observed context change receives a fresh, monotonic server window.
+	// Only an adjacent client successor may reuse a window already committed by
+	// remote/local Responses compact. All other changes must win the main CAS.
+	adjacent := binding.Client.Number < OpenAICodexWindowMaxNumber &&
+		transition.Client.Number == binding.Client.Number+1 &&
+		transition.Client.PreviousToken == binding.Client.CurrentToken
 	status := OpenAICodexClientWindowBound
-	if sameOpenAICodexWindowIdentity(current, binding.Server) {
+	if !(adjacent && directOpenAICodexWindowSuccessor(current, binding.Server)) {
 		if !sameOpenAICodexWindowIdentity(current, transition.Expected) {
 			return stale()
 		}
@@ -184,8 +191,6 @@ func ApplyOpenAICodexClientWindowTransition(current OpenAICodexWindowSnapshot, b
 		current.ContextWindowID = transition.ProposedContextWindowID
 		current.LastCompactDigest = transition.RolloverDigest
 		status = OpenAICodexClientWindowAdvanced
-	} else if binding.Server.Number >= OpenAICodexWindowMaxNumber || current.Number != binding.Server.Number+1 || current.PreviousContextWindowID != binding.Server.ContextWindowID || current.FirstContextWindowID != binding.Server.FirstContextWindowID {
-		return stale()
 	}
 	next := &OpenAICodexClientWindowBinding{Client: transition.Client, Server: current}
 	result := OpenAICodexClientWindowResult{Snapshot: current, Status: status}

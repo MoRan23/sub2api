@@ -144,6 +144,9 @@ func (s *SettingService) refreshCachedSettingsAfterWrite(settings *SystemSetting
 }
 
 func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings) (map[string]string, error) {
+	if err := ValidateOpenAICodexPATContextManagementSettings(settings); err != nil {
+		return nil, err
+	}
 	if err := s.validateDefaultSubscriptionGroups(ctx, settings.DefaultSubscriptions); err != nil {
 		return nil, err
 	}
@@ -596,6 +599,23 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyAllowUserViewErrorRequests] = strconv.FormatBool(settings.AllowUserViewErrorRequests)
 
 	return updates, nil
+}
+
+// ValidateOpenAICodexPATContextManagementSettings prevents enabling the PAT
+// History/Notes adapter without the identity normalizers it relies on.  The
+// adapter must never forward client UUIDs as a fallback, so an invalid
+// combination is rejected before any settings are persisted.
+func ValidateOpenAICodexPATContextManagementSettings(settings *SystemSettings) error {
+	if settings == nil || !settings.EnableOpenAICodexPATContextManagement {
+		return nil
+	}
+	if !settings.EnableOpenAICodexFingerprintNormalization || !settings.EnableOpenAIUUIDv7SessionIdentity {
+		return infraerrors.BadRequest(
+			"INVALID_CODEX_PAT_CONTEXT_MANAGEMENT",
+			"PAT Codex context management requires Codex fingerprint normalization and UUIDv7 session identity to be enabled",
+		)
+	}
+	return nil
 }
 
 func defaultAccountSchedulingThresholds() map[string]int {

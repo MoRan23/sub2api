@@ -109,7 +109,26 @@ func (s *SettingService) IsOpenAICodexPATContextManagementEnabled(ctx context.Co
 	if err != nil {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(value), "true")
+	if !strings.EqualFold(strings.TrimSpace(value), "true") {
+		return false
+	}
+	// The auxiliary adapter relies on the existing server-managed identity
+	// projection. Treat stale/inconsistent persisted settings as disabled rather
+	// than allowing requests to reach a guaranteed 502 or forwarding client IDs.
+	for _, key := range []string{
+		SettingKeyEnableOpenAICodexFingerprintNormalization,
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity,
+	} {
+		dependency, dependencyErr := s.settingRepo.GetValue(ctx, key)
+		if dependencyErr != nil && !errors.Is(dependencyErr, ErrSettingNotFound) {
+			return false
+		}
+		enabled, _ := parseOpenAIUUIDv7SessionIdentitySetting(dependency, dependencyErr == nil)
+		if !enabled {
+			return false
+		}
+	}
+	return true
 }
 
 // GetAffiliateRebateRatePercent 读取并 clamp 全局返利比例。

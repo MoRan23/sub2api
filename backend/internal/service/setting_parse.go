@@ -909,6 +909,14 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		settings, SettingKeyEnableOpenAICodexClientIdentityNormalization,
 	)
 	result.EnableOpenAICodexPATContextManagement = settings[SettingKeyEnableOpenAICodexPATContextManagement] == "true"
+	// Treat an old/inconsistent persisted combination as disabled. The
+	// History/Notes adapter cannot safely operate without both server-managed
+	// identity normalizers, and the effective settings response must agree
+	// with the runtime capability check.
+	if result.EnableOpenAICodexPATContextManagement &&
+		(!result.EnableOpenAICodexFingerprintNormalization || !result.EnableOpenAIUUIDv7SessionIdentity) {
+		result.EnableOpenAICodexPATContextManagement = false
+	}
 	// codex_cli_only 加固
 	result.MinCodexVersion = settings[SettingKeyMinCodexVersion]
 	result.MaxCodexVersion = settings[SettingKeyMaxCodexVersion]

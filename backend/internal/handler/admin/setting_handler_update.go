@@ -583,6 +583,14 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	if req.EnableOpenAICodexPATContextManagement != nil {
 		openAICodexPATContextManagementEnabled = *req.EnableOpenAICodexPATContextManagement
 	}
+	if err := service.ValidateOpenAICodexPATContextManagementSettings(&service.SystemSettings{
+		EnableOpenAICodexPATContextManagement:     openAICodexPATContextManagementEnabled,
+		EnableOpenAICodexFingerprintNormalization: openAICodexFingerprintNormalizationEnabled,
+		EnableOpenAIUUIDv7SessionIdentity:         openAIUUIDv7SessionIdentityEnabled,
+	}); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	passkeyEnabled := previousSettings.PasskeyEnabled
 	if req.PasskeyEnabled != nil {
 		passkeyEnabled = *req.PasskeyEnabled
