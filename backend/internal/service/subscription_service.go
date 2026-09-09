@@ -917,7 +917,13 @@ func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID,
 	if s.subCacheL1 != nil {
 		if v, ok := s.subCacheL1.Get(key); ok {
 			if sub, ok := v.(*UserSubscription); ok {
-				if sub.Group != nil && sub.Group.IsTotalQuotaSubscriptionType() &&
+				// Auxiliary History/Notes requests bypass spend checks, but must
+				// never use a cached subscription after it has expired or been
+				// suspended. Normal requests validate this later in middleware;
+				// the auxiliary path intentionally does not.
+				if sub.Status != SubscriptionStatusActive || !sub.ExpiresAt.After(time.Now()) {
+					s.InvalidateSubCache(userID, groupID)
+				} else if sub.Group != nil && sub.Group.IsTotalQuotaSubscriptionType() &&
 					sub.NextQuotaExpireAt != nil && !time.Now().Before(*sub.NextQuotaExpireAt) {
 					s.InvalidateSubCache(userID, groupID)
 				} else {

@@ -46,27 +46,37 @@ func resolveOpenAICodexClientWindow(ctx context.Context, rdb *redis.Client, mapp
 			return service.OpenAICodexClientWindowResult{}, classifyOpenAICodexWindowRedisError("resolve openai Codex client window", err)
 		}
 		err = rdb.Watch(ctx, func(tx *redis.Tx) error {
-			mainRaw, err := tx.Get(ctx, windowKey).Bytes()
-			if errors.Is(err, redis.Nil) {
-				return service.ErrOpenAICodexWindowStoredInvalid
-			}
+			// Read the main snapshot and client sidecar in one Redis command.
+			// Separate GETs can observe a compact/restore commit between them
+			// and manufacture a mixed-generation pair before WATCH is evaluated.
+			values, err := tx.MGet(ctx, windowKey, clientKey).Result()
 			if err != nil {
 				return err
+			}
+			if len(values) != 2 || values[0] == nil {
+				return service.ErrOpenAICodexWindowStoredInvalid
+			}
+			mainRaw, ok := redisMGetBytes(values[0])
+			if !ok {
+				return service.ErrOpenAICodexWindowStoredInvalid
 			}
 			current, err := decodeStrictOpenAICodexWindowSnapshot(mainRaw)
 			if err != nil {
 				return service.ErrOpenAICodexWindowStoredInvalid
 			}
 			var binding *service.OpenAICodexClientWindowBinding
-			bindingRaw, err := tx.Get(ctx, clientKey).Bytes()
-			if err == nil {
+			var bindingRaw []byte
+			if values[1] != nil {
+				var ok bool
+				bindingRaw, ok = redisMGetBytes(values[1])
+				if !ok {
+					return service.ErrOpenAICodexWindowStoredInvalid
+				}
 				decoded, err := decodeStrictOpenAICodexClientWindowBinding(bindingRaw)
 				if err != nil {
 					return service.ErrOpenAICodexWindowStoredInvalid
 				}
 				binding = &decoded
-			} else if !errors.Is(err, redis.Nil) {
-				return err
 			}
 			result, binding, err = service.ApplyOpenAICodexClientWindowTransition(current, binding, transition)
 			if err != nil {
@@ -102,6 +112,17 @@ func resolveOpenAICodexClientWindow(ctx context.Context, rdb *redis.Client, mapp
 		return result, nil
 	}
 	return service.OpenAICodexClientWindowResult{}, errors.New("openai Codex client window transaction contention limit reached")
+}
+
+func redisMGetBytes(value any) ([]byte, bool) {
+	switch v := value.(type) {
+	case []byte:
+		return v, true
+	case string:
+		return []byte(v), true
+	default:
+		return nil, false
+	}
 }
 
 func decodeStrictOpenAICodexClientWindowBinding(raw []byte) (service.OpenAICodexClientWindowBinding, error) {
