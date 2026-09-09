@@ -852,10 +852,12 @@ requires_openai_auth = true
 supports_websockets = false
 
 [features]
+context_management = true
 goals = true
 
-[features.context_management]
-experimental_mode = true
+[features.token_budget]
+enabled = true
+use_history_notes_extension = true
 
 [analytics]
 enabled = false`
