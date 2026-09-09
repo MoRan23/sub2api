@@ -153,11 +153,8 @@ func ApplyOpenAICodexClientWindowTransition(current OpenAICodexWindowSnapshot, b
 	if ValidateOpenAICodexClientWindowBinding(*binding) != nil || binding.Server.ThreadID != current.ThreadID {
 		return OpenAICodexClientWindowResult{}, nil, ErrOpenAICodexWindowStoredInvalid
 	}
-	if transition.Client == binding.Client {
-		if !sameOpenAICodexWindowIdentity(current, binding.Server) &&
-			(binding.Server.Number >= OpenAICodexWindowMaxNumber || current.Number != binding.Server.Number+1 || current.PreviousContextWindowID != binding.Server.ContextWindowID || current.FirstContextWindowID != binding.Server.FirstContextWindowID) {
-			return stale()
-		}
+	sameClient := transition.Client == binding.Client
+	if sameClient && (sameOpenAICodexWindowIdentity(current, binding.Server) || directOpenAICodexWindowSuccessor(current, binding.Server)) {
 		// Preserve the original mapping after compact has advanced the main
 		// window; a physical retry still belongs to this client window.
 		copy := *binding
@@ -167,7 +164,16 @@ func ApplyOpenAICodexClientWindowTransition(current OpenAICodexWindowSnapshot, b
 		}
 		return result, &copy, nil
 	}
-	if transition.Client.FirstToken != binding.Client.FirstToken || transition.Client.CurrentToken == binding.Client.CurrentToken {
+	if sameClient {
+		// A restored client window may retain the sidecar's identity while normal
+		// compact has advanced the main window several times. A freshly captured
+		// main CAS can recover it into a new generation below. Old physical
+		// attempts keep their frozen plans; an old Expected cannot advance here.
+		if current.Number <= binding.Server.Number || current.Number-binding.Server.Number <= 1 ||
+			current.FirstContextWindowID != binding.Server.FirstContextWindowID {
+			return stale()
+		}
+	} else if transition.Client.FirstToken != binding.Client.FirstToken || transition.Client.CurrentToken == binding.Client.CurrentToken {
 		return stale()
 	}
 	// Codex can compact several times or rewind and create a new branch without
@@ -175,7 +181,7 @@ func ApplyOpenAICodexClientWindowTransition(current OpenAICodexWindowSnapshot, b
 	// each observed context change receives a fresh, monotonic server window.
 	// Only an adjacent client successor may reuse a window already committed by
 	// remote/local Responses compact. All other changes must win the main CAS.
-	adjacent := binding.Client.Number < OpenAICodexWindowMaxNumber &&
+	adjacent := !sameClient && binding.Client.Number < OpenAICodexWindowMaxNumber &&
 		transition.Client.Number == binding.Client.Number+1 &&
 		transition.Client.PreviousToken == binding.Client.CurrentToken
 	status := OpenAICodexClientWindowBound

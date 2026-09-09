@@ -458,6 +458,121 @@ func TestOpenAICodexClientWindowRedisSidecarTTLTracksMain(t *testing.T) {
 	}
 }
 
+func TestOpenAICodexClientWindowRedisRestoresBindingAfterMultipleCompacts(t *testing.T) {
+	f := newCodexClientWindowRedisFixture(t)
+	f.bind(t)
+	first, err := f.main.CommitOpenAICodexWindow(context.Background(), f.key, f.initial, strings.Repeat("c", 64), repositoryOpenAICodexContextWindowNext, time.Minute)
+	require.NoError(t, err)
+	oneAhead := codexClientWindowTransition(first.Snapshot, codexClientWindowInitialIdentity())
+	unchanged, err := f.client.ResolveOpenAICodexClientWindow(context.Background(), f.key, oneAhead, time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, service.OpenAICodexClientWindowUnchanged, unchanged.Status)
+	require.Equal(t, f.initial, unchanged.Snapshot)
+	second, err := f.main.CommitOpenAICodexWindow(context.Background(), f.key, first.Snapshot, strings.Repeat("d", 64), repositoryOpenAICodexContextWindowLater, time.Minute)
+	require.NoError(t, err)
+	mainBefore, err := f.mr.Get(f.mainKey)
+	require.NoError(t, err)
+	clientBefore, err := f.mr.Get(f.clientKey)
+	require.NoError(t, err)
+	otherBranch := second.Snapshot
+	otherBranch.ContextWindowID = "01989f44-7c00-7000-8000-000000000850"
+	for _, expected := range []service.OpenAICodexWindowSnapshot{f.initial, first.Snapshot, otherBranch} {
+		old := codexClientWindowTransition(expected, codexClientWindowInitialIdentity())
+		result, err := f.client.ResolveOpenAICodexClientWindow(context.Background(), f.key, old, time.Hour)
+		require.ErrorIs(t, err, service.ErrOpenAICodexClientWindowStale)
+		require.Equal(t, second.Snapshot, result.Snapshot)
+		mainAfter, err := f.mr.Get(f.mainKey)
+		require.NoError(t, err)
+		clientAfter, err := f.mr.Get(f.clientKey)
+		require.NoError(t, err)
+		require.Equal(t, mainBefore, mainAfter)
+		require.Equal(t, clientBefore, clientAfter)
+		require.Equal(t, time.Minute, f.mr.TTL(f.mainKey))
+		require.Equal(t, time.Minute, f.mr.TTL(f.clientKey))
+	}
+	restore := codexClientWindowTransition(second.Snapshot, codexClientWindowInitialIdentity())
+	restore.ProposedContextWindowID = "01989f44-7c00-7000-8000-000000000851"
+	restore.RolloverDigest = strings.Repeat("e", 64)
+	recovered, err := f.client.ResolveOpenAICodexClientWindow(context.Background(), f.key, restore, 2*time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, service.OpenAICodexClientWindowAdvanced, recovered.Status)
+	require.Equal(t, uint64(3), recovered.Snapshot.Number)
+	require.Equal(t, restore.ProposedContextWindowID, recovered.Snapshot.ContextWindowID)
+	require.Equal(t, second.Snapshot.ContextWindowID, recovered.Snapshot.PreviousContextWindowID)
+	require.Equal(t, f.initial.ContextWindowID, recovered.Snapshot.FirstContextWindowID)
+	require.Equal(t, restore.RolloverDigest, recovered.Snapshot.LastCompactDigest)
+	main, binding := f.stored(t)
+	require.Equal(t, recovered.Snapshot, main)
+	require.Equal(t, main, binding.Server)
+	require.Equal(t, codexClientWindowInitialIdentity(), binding.Client)
+	require.Equal(t, 2*time.Minute, f.mr.TTL(f.mainKey))
+	require.Equal(t, 2*time.Minute, f.mr.TTL(f.clientKey))
+	for _, expected := range []service.OpenAICodexWindowSnapshot{restore.Expected, recovered.Snapshot} {
+		repeated := restore
+		repeated.Expected = expected
+		repeated.ProposedContextWindowID = "01989f44-7c00-7000-8000-000000000852"
+		result, err := f.client.ResolveOpenAICodexClientWindow(context.Background(), f.key, repeated, 2*time.Minute)
+		require.NoError(t, err)
+		require.Equal(t, service.OpenAICodexClientWindowUnchanged, result.Status)
+		require.Equal(t, recovered.Snapshot, result.Snapshot)
+	}
+	_, err = f.client.ResolveOpenAICodexClientWindow(context.Background(), f.key, codexClientWindowTransition(f.initial, codexClientWindowInitialIdentity()), time.Hour)
+	require.ErrorIs(t, err, service.ErrOpenAICodexClientWindowStale)
+	next := codexClientWindowTransition(recovered.Snapshot, codexClientWindowNextIdentity())
+	next.ProposedContextWindowID = "01989f44-7c00-7000-8000-000000000853"
+	advanced, err := f.client.ResolveOpenAICodexClientWindow(context.Background(), f.key, next, time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, service.OpenAICodexClientWindowAdvanced, advanced.Status)
+	require.Equal(t, uint64(4), advanced.Snapshot.Number)
+}
+
+func TestOpenAICodexClientWindowRedisRestoreAfterCompactsConcurrentWinner(t *testing.T) {
+	f := newCodexClientWindowRedisFixture(t)
+	f.bind(t)
+	first, err := f.main.CommitOpenAICodexWindow(context.Background(), f.key, f.initial, strings.Repeat("c", 64), repositoryOpenAICodexContextWindowNext, time.Minute)
+	require.NoError(t, err)
+	second, err := f.main.CommitOpenAICodexWindow(context.Background(), f.key, first.Snapshot, strings.Repeat("d", 64), repositoryOpenAICodexContextWindowLater, time.Minute)
+	require.NoError(t, err)
+	const workers = 12
+	type outcome struct {
+		result service.OpenAICodexClientWindowResult
+		err    error
+	}
+	outcomes := make(chan outcome, workers)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range workers {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			restore := codexClientWindowTransition(second.Snapshot, codexClientWindowInitialIdentity())
+			restore.ProposedContextWindowID = fmt.Sprintf("01989f44-7c00-7000-8000-%012x", index+0x860)
+			restore.RolloverDigest = strings.Repeat("e", 64)
+			<-start
+			result, err := f.client.ResolveOpenAICodexClientWindow(context.Background(), f.key, restore, time.Minute)
+			outcomes <- outcome{result, err}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(outcomes)
+	main, binding := f.stored(t)
+	require.Equal(t, uint64(3), main.Number)
+	require.Equal(t, second.Snapshot.ContextWindowID, main.PreviousContextWindowID)
+	require.Equal(t, main, binding.Server)
+	advanced := 0
+	for outcome := range outcomes {
+		require.NoError(t, outcome.err)
+		require.Equal(t, main, outcome.result.Snapshot)
+		if outcome.result.Status == service.OpenAICodexClientWindowAdvanced {
+			advanced++
+		} else {
+			require.Equal(t, service.OpenAICodexClientWindowUnchanged, outcome.result.Status)
+		}
+	}
+	require.Equal(t, 1, advanced)
+}
+
 func TestOpenAICodexClientWindowRedisMalformedSidecarFailsClosed(t *testing.T) {
 	for _, target := range []string{"client", "server"} {
 		fields := []string{"number", "first_token", "current_token", "previous_token"}

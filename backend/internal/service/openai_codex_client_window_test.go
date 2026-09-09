@@ -273,6 +273,118 @@ func TestOpenAICodexClientWindowCompactInterleaving(t *testing.T) {
 	}
 }
 
+func TestOpenAICodexClientWindowRestoresBindingAfterMultipleCompacts(t *testing.T) {
+	store, key, initial := newOpenAICodexClientWindowLocalTest(t)
+	_, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, initial, time.Hour)
+	require.NoError(t, err)
+	first, err := store.CommitOpenAICodexWindow(context.Background(), key, initial.Expected, strings.Repeat("c", 64), testOpenAICodexContextWindowNext, time.Hour)
+	require.NoError(t, err)
+	oneAhead := initial
+	oneAhead.Expected = first.Snapshot
+	unchanged, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, oneAhead, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, OpenAICodexClientWindowUnchanged, unchanged.Status)
+	require.Equal(t, initial.Expected, unchanged.Snapshot, "one compact still preserves the original retry mapping")
+	second, err := store.CommitOpenAICodexWindow(context.Background(), key, first.Snapshot, strings.Repeat("d", 64), testOpenAICodexContextWindowLater, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, initial.Expected, store.entries[key].clientWindow.Server)
+	otherBranch := second.Snapshot
+	otherBranch.ContextWindowID = "01989f44-7c00-7000-8000-000000000850"
+	for _, expected := range []OpenAICodexWindowSnapshot{initial.Expected, first.Snapshot, otherBranch} {
+		old := initial
+		old.Expected = expected
+		expiresAt := store.entries[key].expiresAt
+		result, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, old, 2*time.Hour)
+		require.ErrorIs(t, err, ErrOpenAICodexClientWindowStale)
+		require.Equal(t, second.Snapshot, result.Snapshot)
+		require.Equal(t, second.Snapshot, store.entries[key].snapshot)
+		require.Equal(t, initial.Expected, store.entries[key].clientWindow.Server)
+		require.Equal(t, expiresAt, store.entries[key].expiresAt, "stale attempts cannot refresh the binding")
+	}
+	restore := initial
+	restore.Expected = second.Snapshot
+	restore.ProposedContextWindowID = "01989f44-7c00-7000-8000-000000000851"
+	restore.RolloverDigest = strings.Repeat("e", 64)
+	recovered, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, restore, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, OpenAICodexClientWindowAdvanced, recovered.Status)
+	require.Equal(t, uint64(3), recovered.Snapshot.Number)
+	require.Equal(t, restore.ProposedContextWindowID, recovered.Snapshot.ContextWindowID)
+	require.Equal(t, second.Snapshot.ContextWindowID, recovered.Snapshot.PreviousContextWindowID)
+	require.Equal(t, initial.Expected.ContextWindowID, recovered.Snapshot.FirstContextWindowID)
+	require.Equal(t, restore.RolloverDigest, recovered.Snapshot.LastCompactDigest)
+	require.Equal(t, recovered.Snapshot, store.entries[key].snapshot)
+	require.Equal(t, recovered.Snapshot, store.entries[key].clientWindow.Server)
+	require.Equal(t, initial.Client, store.entries[key].clientWindow.Client)
+	for _, expected := range []OpenAICodexWindowSnapshot{restore.Expected, recovered.Snapshot} {
+		repeated := restore
+		repeated.Expected = expected
+		repeated.ProposedContextWindowID = "01989f44-7c00-7000-8000-000000000852"
+		result, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, repeated, time.Hour)
+		require.NoError(t, err)
+		require.Equal(t, OpenAICodexClientWindowUnchanged, result.Status)
+		require.Equal(t, recovered.Snapshot, result.Snapshot)
+	}
+	_, err = store.ResolveOpenAICodexClientWindow(context.Background(), key, initial, time.Hour)
+	require.ErrorIs(t, err, ErrOpenAICodexClientWindowStale, "a pre-recovery attempt cannot adopt the newly restored mapping")
+	next := nextOpenAICodexClientWindowTest(restore)
+	next.Expected = recovered.Snapshot
+	next.ProposedContextWindowID = "01989f44-7c00-7000-8000-000000000853"
+	advanced, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, next, time.Hour)
+	require.NoError(t, err)
+	require.Equal(t, OpenAICodexClientWindowAdvanced, advanced.Status)
+	require.Equal(t, uint64(4), advanced.Snapshot.Number)
+}
+
+func TestOpenAICodexClientWindowRestoreAfterCompactsConcurrentWinner(t *testing.T) {
+	store, key, initial := newOpenAICodexClientWindowLocalTest(t)
+	_, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, initial, time.Hour)
+	require.NoError(t, err)
+	first, err := store.CommitOpenAICodexWindow(context.Background(), key, initial.Expected, strings.Repeat("c", 64), testOpenAICodexContextWindowNext, time.Hour)
+	require.NoError(t, err)
+	second, err := store.CommitOpenAICodexWindow(context.Background(), key, first.Snapshot, strings.Repeat("d", 64), testOpenAICodexContextWindowLater, time.Hour)
+	require.NoError(t, err)
+	const workers = 12
+	type outcome struct {
+		result OpenAICodexClientWindowResult
+		err    error
+	}
+	outcomes := make(chan outcome, workers)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range workers {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			restore := initial
+			restore.Expected = second.Snapshot
+			restore.ProposedContextWindowID = fmt.Sprintf("01989f44-7c00-7000-8000-%012x", index+0x860)
+			restore.RolloverDigest = strings.Repeat("e", 64)
+			<-start
+			result, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, restore, time.Hour)
+			outcomes <- outcome{result, err}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(outcomes)
+	winner := store.entries[key].snapshot
+	require.Equal(t, uint64(3), winner.Number)
+	require.Equal(t, second.Snapshot.ContextWindowID, winner.PreviousContextWindowID)
+	require.Equal(t, winner, store.entries[key].clientWindow.Server)
+	advanced := 0
+	for outcome := range outcomes {
+		require.NoError(t, outcome.err)
+		require.Equal(t, winner, outcome.result.Snapshot)
+		if outcome.result.Status == OpenAICodexClientWindowAdvanced {
+			advanced++
+		} else {
+			require.Equal(t, OpenAICodexClientWindowUnchanged, outcome.result.Status)
+		}
+	}
+	require.Equal(t, 1, advanced)
+}
+
 func TestOpenAICodexClientWindowLocalConcurrentWinner(t *testing.T) {
 	store, key, initial := newOpenAICodexClientWindowLocalTest(t)
 	_, err := store.ResolveOpenAICodexClientWindow(context.Background(), key, initial, time.Hour)

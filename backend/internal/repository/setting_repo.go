@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/ent"
@@ -42,6 +44,11 @@ func (r *settingRepository) GetValue(ctx context.Context, key string) (string, e
 }
 
 func (r *settingRepository) Set(ctx context.Context, key, value string) error {
+	for _, dependency := range codexPATSettingsKeys {
+		if key == dependency {
+			return r.setMultipleWithCodexPATValidation(ctx, map[string]string{key: value})
+		}
+	}
 	now := time.Now()
 	return r.client.Setting.
 		Create().
@@ -73,13 +80,59 @@ func (r *settingRepository) SetMultiple(ctx context.Context, settings map[string
 	if len(settings) == 0 {
 		return nil
 	}
+	for _, key := range codexPATSettingsKeys {
+		if _, changesDependency := settings[key]; changesDependency {
+			return r.setMultipleWithCodexPATValidation(ctx, settings)
+		}
+	}
+	return setMultipleSettings(ctx, r.client, settings)
+}
 
+var codexPATSettingsKeys = []string{
+	service.SettingKeyEnableOpenAICodexPATContextManagement,
+	service.SettingKeyEnableOpenAICodexFingerprintNormalization,
+	service.SettingKeyEnableOpenAIUUIDv7SessionIdentity,
+}
+
+// The transaction-scoped lock serializes the three dependent settings even
+// when a row is absent and writers run in different application instances.
+const codexPATSettingsLockID int64 = 0x434f444558504154
+
+func (r *settingRepository) setMultipleWithCodexPATValidation(ctx context.Context, updates map[string]string) error {
+	// A fresh statement snapshot after obtaining the lock must see the previous
+	// writer's commit, including when the database default isolation is stronger.
+	tx, err := r.client.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	client := tx.Client()
+	if _, err := client.ExecContext(ctx, "SELECT pg_advisory_xact_lock($1)", codexPATSettingsLockID); err != nil {
+		return fmt.Errorf("lock Codex PAT settings: %w", err)
+	}
+	current, err := (&settingRepository{client: client}).GetMultiple(ctx, codexPATSettingsKeys)
+	if err != nil {
+		return err
+	}
+	for key, value := range updates {
+		current[key] = value
+	}
+	if err := service.ValidateOpenAICodexPATContextManagementValues(current); err != nil {
+		return err
+	}
+	if err := setMultipleSettings(ctx, client, updates); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func setMultipleSettings(ctx context.Context, client *ent.Client, settings map[string]string) error {
 	now := time.Now()
 	builders := make([]*ent.SettingCreate, 0, len(settings))
 	for key, value := range settings {
-		builders = append(builders, r.client.Setting.Create().SetKey(key).SetValue(value).SetUpdatedAt(now))
+		builders = append(builders, client.Setting.Create().SetKey(key).SetValue(value).SetUpdatedAt(now))
 	}
-	return r.client.Setting.
+	return client.Setting.
 		CreateBulk(builders...).
 		OnConflictColumns(setting.FieldKey).
 		UpdateNewValues().

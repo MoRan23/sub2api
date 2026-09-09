@@ -618,6 +618,21 @@ func ValidateOpenAICodexPATContextManagementSettings(settings *SystemSettings) e
 	return nil
 }
 
+// ValidateOpenAICodexPATContextManagementValues validates raw persisted values
+// before the repository commits a partial write. Unlike parseSettings, it must
+// reject an invalid combination instead of hiding it by disabling the adapter.
+func ValidateOpenAICodexPATContextManagementValues(values map[string]string) error {
+	fingerprintRaw, fingerprintPresent := values[SettingKeyEnableOpenAICodexFingerprintNormalization]
+	fingerprint, _ := parseOpenAIUUIDv7SessionIdentitySetting(fingerprintRaw, fingerprintPresent)
+	uuidRaw, uuidPresent := values[SettingKeyEnableOpenAIUUIDv7SessionIdentity]
+	uuidEnabled, _ := parseOpenAIUUIDv7SessionIdentitySetting(uuidRaw, uuidPresent)
+	return ValidateOpenAICodexPATContextManagementSettings(&SystemSettings{
+		EnableOpenAICodexPATContextManagement:     values[SettingKeyEnableOpenAICodexPATContextManagement] == "true",
+		EnableOpenAICodexFingerprintNormalization: fingerprint,
+		EnableOpenAIUUIDv7SessionIdentity:         uuidEnabled,
+	})
+}
+
 func defaultAccountSchedulingThresholds() map[string]int {
 	return map[string]int{
 		PlatformOpenAI:    100,

@@ -423,6 +423,7 @@ func setOpenAIWSTurnMetadata(payload map[string]any, turnMetadata string) {
 // history/socket affinity and does not by itself extend a request turn.
 func captureOpenAIWSFrameIdentity(payload []byte, currentPlan *OpenAIOAuthIdentityPlan) OpenAIOAuthIdentityCapture {
 	capture := CaptureOpenAIOAuthIdentity(nil, payload, "")
+	capture.ClientWindow = captureOpenAICodexWSClientWindow(payload, capture.Logical)
 	if currentPlan == nil {
 		return capture
 	}
@@ -439,6 +440,11 @@ func captureOpenAIWSFrameIdentity(payload []byte, currentPlan *OpenAIOAuthIdenti
 		stable := cloneOpenAIOAuthIdentityCapture(currentPlan.Capture)
 		stable.RequestTurn = capture.RequestTurn
 		stable.WireProfile = frameWireProfile
+		// Window signals and candidates belong to this physical ingress frame,
+		// never to the connection. An unmarked continuation must not inherit a
+		// previous rollover signal or reuse its proposed server UUID.
+		stable.ClientWindow = capture.ClientWindow
+		stable.ContextWindowIDCandidate = capture.ContextWindowIDCandidate
 		// The initial frame parser may have classified a prompt-only frame as a
 		// default because it temporarily used that key as its logical fallback.
 		// Once the connection tuple is inherited, classify the same raw frame

@@ -181,6 +181,96 @@ func TestOpenAICodexClientWindowPathsTokenBudgetRollover(t *testing.T) {
 	}
 }
 
+func TestOpenAICodexClientWindowPathsSameWSConnectionFrames(t *testing.T) {
+	for _, transport := range []string{"native_ws", "ws_v2_passthrough", "websocket_http_bridge"} {
+		t.Run(transport, func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{}
+			svc, _ := newOpenAIIdentityPathService(t, true, upstream)
+			account := newOpenAIIdentityPathOAuthAccount(927306)
+			session := codexClientWindowPathUUID(t)
+			clientIDs := []string{codexClientWindowPathUUID(t), codexClientWindowPathUUID(t), codexClientWindowPathUUID(t)}
+			frames := []struct {
+				body   []byte
+				number uint64
+				signal bool
+			}{
+				{codexClientWindowPathBody(t, true, session, 0, clientIDs[0], clientIDs[0], "", true), 0, true},
+				{[]byte(`{"type":"response.create","model":"gpt-5.4","input":[{"role":"user","content":"continue"}]}`), 0, false},
+				{codexClientWindowPathBody(t, true, session, 1, clientIDs[0], clientIDs[1], clientIDs[0], true), 1, true},
+				{codexClientWindowPathBody(t, true, session, 2, clientIDs[0], clientIDs[2], clientIDs[1], false), 1, false},
+				{codexClientWindowPathBody(t, true, session, 2, clientIDs[0], clientIDs[2], clientIDs[1], true), 2, true},
+			}
+			// One Gin context and pinned plan represent the established connection;
+			// only the first frame gets the HTTP-aware ingress capture. Subsequent
+			// frames follow the shared helper used by all three production loops.
+			c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", frames[0].body, 927307)
+			c.Request.Method = http.MethodGet
+			mode := OpenAIOAuthIdentityProjectionRegular
+			if transport != "native_ws" {
+				mode = OpenAIOAuthIdentityProjectionPassthrough
+			}
+			options := OpenAIOAuthIdentityPlanOptions{TurnIdentityEnabled: true, ProjectionMode: mode, InstallationPolicy: OpenAIOAuthInstallationAccountPin}
+			project := func(body []byte, plan OpenAIOAuthIdentityPlan) ([]byte, OpenAIOAuthIdentityPlan) {
+				if transport == "websocket_http_bridge" {
+					upstream.resp = openAICompatSSECompletedResponse("resp_client_window_same_connection", "gpt-5.4")
+					delivered := 0
+					result, err := svc.proxyOpenAIWSHTTPBridgeTurn(c.Request.Context(), c, account, "oauth-token", body, len(body), "gpt-5.4", "", "", "", "", 1, func([]byte) error { delivered++; return nil }, &plan)
+					require.NoError(t, err)
+					require.NotNil(t, result)
+					require.Positive(t, delivered)
+					require.NotContains(t, upstream.lastReq.URL.Path, "/compact")
+					return bytes.Clone(upstream.lastBody), plan
+				}
+				final, err := svc.finalizeOpenAIOAuthWSWirePlan(c, account, plan, body, openAIOAuthWSWireFinalizeOptions{FinalModel: "gpt-5.4"})
+				require.NoError(t, err)
+				outbound, err := svc.projectOpenAIOAuthWSFrame(c, account, final, body)
+				require.NoError(t, err)
+				return outbound, final
+			}
+			var current *OpenAIOAuthIdentityPlan
+			var plans []OpenAIOAuthIdentityPlan
+			for index, frame := range frames {
+				var capture OpenAIOAuthIdentityCapture
+				if index == 0 {
+					capture = CaptureOpenAIOAuthIdentity(c, frame.body, "")
+				} else {
+					capture = captureOpenAIWSFrameIdentity(frame.body, current)
+					require.NotEqual(t, current.Capture.ContextWindowIDCandidate, capture.ContextWindowIDCandidate, "the next frame owns a fresh frozen candidate")
+				}
+				require.Equal(t, frame.signal, capture.ClientWindow.Valid)
+				SetOpenAIOAuthIdentityCapture(c, capture)
+				plan, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(c.Request.Context(), c, account, capture, options, current)
+				require.NoError(t, err)
+				outbound, plan := project(frame.body, plan)
+				require.Equal(t, frame.number, plan.Window.Number)
+				if frame.signal {
+					requireCodexClientWindowPathProjection(t, outbound, plan, clientIDs...)
+				} else {
+					require.Equal(t, current.Window, plan.Window, "unmarked follow-up frames cannot replay the preceding signal")
+				}
+				if current != nil && current.Window.Number != plan.Window.Number {
+					require.NotEqual(t, current.Window.ContextWindowID, plan.Window.ContextWindowID)
+					require.Equal(t, current.Window.ContextWindowID, plan.Window.PreviousContextWindowID)
+				}
+				plans = append(plans, plan)
+				current = &plans[len(plans)-1]
+			}
+			// A physical retry reuses the immutable frame capture and pinned plan,
+			// even after subsequent frames advanced the shared server window.
+			for index, frozen := range plans {
+				SetOpenAIOAuthIdentityCapture(c, frozen.Capture)
+				retried, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(c.Request.Context(), c, account, frozen.Capture, options, &frozen)
+				require.NoError(t, err)
+				outbound, retried := project(frames[index].body, retried)
+				require.Equal(t, frozen.Window, retried.Window)
+				if frames[index].signal {
+					requireCodexClientWindowPathProjection(t, outbound, retried, clientIDs...)
+				}
+			}
+		})
+	}
+}
+
 func TestOpenAICodexClientWindowPathsGapRollbackAndBranch(t *testing.T) {
 	for _, transport := range []string{"http", "oauth_passthrough", "websocket", "websocket_http_bridge"} {
 		t.Run(transport, func(t *testing.T) {

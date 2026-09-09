@@ -79,6 +79,7 @@ func TestOpenAICodexClientWindowCaptureRequiresNativeConsistentSignals(t *testin
 			c.Request = httptest.NewRequest(http.MethodPost, path, nil)
 			capture := CaptureOpenAIOAuthIdentity(c, body, "")
 			require.Equal(t, tc.want, capture.ClientWindow.Valid)
+			require.False(t, CaptureOpenAIOAuthIdentity(nil, body, "").ClientWindow.Valid, "context-free general capture is not a native transport entrypoint")
 			if tc.want {
 				require.Equal(t, contextWindowBodyPathClientID, capture.ClientWindow.Current)
 				require.Equal(t, contextWindowBodyPathClientID, capture.ClientWindow.First)
@@ -86,6 +87,69 @@ func TestOpenAICodexClientWindowCaptureRequiresNativeConsistentSignals(t *testin
 				require.NotEqual(t, capture.ClientWindow.Current, capture.ContextWindowIDCandidate)
 				compat := CaptureOpenAIOAuthIdentityForCompatTurn(c, body, "")
 				require.False(t, compat.ClientWindow.Valid)
+			}
+		})
+	}
+}
+
+func TestOpenAICodexClientWindowCaptureWSFrameTransport(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(map[string]any, map[string]any)
+		want bool
+	}{
+		{name: "response_create", want: true},
+		{name: "http_body", edit: func(root, _ map[string]any) { delete(root, "type") }},
+		{name: "session_update", edit: func(root, _ map[string]any) { root["type"] = "session.update" }},
+		{name: "memory", edit: func(_, meta map[string]any) { meta["request_kind"] = "memory" }},
+		{name: "prewarm", edit: func(root, _ map[string]any) { root["generate"] = false }},
+		{name: "unmarked", edit: func(root, _ map[string]any) { delete(root, "input") }},
+		{name: "missing_session", edit: func(_, meta map[string]any) { delete(meta, "session_id") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := clientWindowCaptureFixture(t)
+			root["type"] = "response.create"
+			metadata := root["client_metadata"].(map[string]any)
+			meta := metadata[openAIWSTurnMetadataHeader].(map[string]any)
+			if tc.edit != nil {
+				tc.edit(root, meta)
+			}
+			encoded, err := json.Marshal(meta)
+			require.NoError(t, err)
+			metadata[openAIWSTurnMetadataHeader] = string(encoded)
+			body, err := json.Marshal(root)
+			require.NoError(t, err)
+			require.False(t, CaptureOpenAIOAuthIdentity(nil, body, "").ClientWindow.Valid)
+			capture := captureOpenAIWSFrameIdentity(body, nil)
+			require.Equal(t, tc.want, capture.ClientWindow.Valid)
+		})
+	}
+}
+
+func TestOpenAICodexClientWindowCaptureWSFrameDoesNotInheritTransition(t *testing.T) {
+	first := codexClientWindowPathUUID(t)
+	body := codexClientWindowPathBody(t, true, codexWireTestSession, 0, first, first, "", true)
+	initial := captureOpenAIWSFrameIdentity(body, nil)
+	require.True(t, initial.ClientWindow.Valid)
+	plan := OpenAIOAuthIdentityPlan{Capture: initial, RequestTurn: initial.RequestTurn, WireProfile: initial.WireProfile}
+	for _, tc := range []struct {
+		name, body string
+		memory     bool
+	}{
+		{name: "ordinary", body: `{"type":"response.create","input":"next"}`},
+		{name: "tool_continuation", body: `{"type":"response.create","input":[{"type":"function_call_output","call_id":"call_1","output":"done"}]}`},
+		{name: "memory", body: `{"type":"response.create","client_metadata":{"x-codex-turn-metadata":"{\"request_kind\":\"memory\"}"},"input":"consolidate"}`, memory: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			capture := captureOpenAIWSFrameIdentity([]byte(tc.body), &plan)
+			require.Equal(t, initial.Logical, capture.Logical)
+			require.Zero(t, capture.ClientWindow)
+			require.NotEqual(t, initial.ContextWindowIDCandidate, capture.ContextWindowIDCandidate)
+			if tc.memory {
+				require.Empty(t, capture.ContextWindowIDCandidate)
+			} else {
+				_, err := canonicalUUIDv7(capture.ContextWindowIDCandidate)
+				require.NoError(t, err)
 			}
 		})
 	}

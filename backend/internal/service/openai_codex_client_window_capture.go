@@ -15,8 +15,26 @@ import (
 func captureOpenAICodexClientWindow(c *gin.Context, body []byte, logical OpenAICodexLogicalTurnIdentity) OpenAICodexClientWindowSignal {
 	var none OpenAICodexClientWindowSignal
 	if c == nil || c.Request == nil || c.Request.URL == nil ||
-		!strings.HasSuffix(strings.TrimRight(c.Request.URL.Path, "/"), "/responses") ||
-		!gjson.ValidBytes(body) || HasCompactionTriggerInInput(body) {
+		!strings.HasSuffix(strings.TrimRight(c.Request.URL.Path, "/"), "/responses") {
+		return none
+	}
+	return captureOpenAICodexNativeClientWindow(body, logical)
+}
+
+// Established WS connections capture subsequent frames without an HTTP request
+// context. Keep that transport authority explicit rather than allowing any
+// context-free identity capture to initiate a client window transition.
+func captureOpenAICodexWSClientWindow(body []byte, logical OpenAICodexLogicalTurnIdentity) OpenAICodexClientWindowSignal {
+	kind := gjson.GetBytes(body, "type")
+	if kind.Type != gjson.String || kind.String() != "response.create" {
+		return OpenAICodexClientWindowSignal{}
+	}
+	return captureOpenAICodexNativeClientWindow(body, logical)
+}
+
+func captureOpenAICodexNativeClientWindow(body []byte, logical OpenAICodexLogicalTurnIdentity) OpenAICodexClientWindowSignal {
+	var none OpenAICodexClientWindowSignal
+	if !gjson.ValidBytes(body) || HasCompactionTriggerInInput(body) {
 		return none
 	}
 	root := gjson.ParseBytes(body)
