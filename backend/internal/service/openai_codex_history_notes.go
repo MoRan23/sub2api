@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,8 +31,8 @@ var (
 )
 
 // ForwardCodexHistoryNotes forwards a Codex History/Notes auxiliary request.
-// These calls deliberately bypass model billing, account concurrency slots and
-// RPM accounting; the caller has already passed normal API-key authentication.
+// These calls bypass billing, user/account concurrency and rate limits. Only
+// unexpired paid OAuth accounts may own their durable History/Notes binding.
 func (s *OpenAIGatewayService) ForwardCodexHistoryNotes(ctx context.Context, c *gin.Context, apiKey *APIKey, path string, body []byte) (*http.Response, error) {
 	if s == nil || s.accountRepo == nil || apiKey == nil {
 		return nil, fmt.Errorf("codex history/notes dependencies unavailable")
@@ -48,8 +49,8 @@ func (s *OpenAIGatewayService) ForwardCodexHistoryNotes(ctx context.Context, c *
 		return nil, err
 	}
 	SetOpenAIOAuthIdentityCapture(c, capture)
-	// Reuse the exact session hash used by Responses scheduling so auxiliary
-	// calls follow the account selected by the first model request.
+	// Reuse the Responses session hash to seed the first auxiliary assignment.
+	// Later model requests cannot change the independent History/Notes binding.
 	key := s.GenerateSessionHashForOpenAIOAuthIdentity(c, body, capture.Logical.SessionKey)
 	// Session capture attaches the legacy hash to the Gin request after the
 	// caller supplied ctx. Preserve the caller's cancellation/deadline while
@@ -65,121 +66,97 @@ func (s *OpenAIGatewayService) ForwardCodexHistoryNotes(ctx context.Context, c *
 	if len(accounts) == 0 {
 		return nil, ErrNoAvailableAccounts
 	}
-	ordered, stickySource := s.orderCodexAuxiliaryAccounts(stickyCtx, key, accounts, derefGroupID(apiKey.GroupID))
-	readOnly := codexAuxiliaryReadOnlyPath(path)
-	var lastErr error
-	for i, account := range ordered {
-		if account == nil {
-			continue
+	// Responses affinity is only an initial preference. The independent atomic
+	// binding is established before forwarding, including on concurrent first calls.
+	preferredID := int64(0)
+	if s.cache != nil {
+		if id, lookupErr := s.getStickySessionAccountID(stickyCtx, apiKey.GroupID, key); lookupErr == nil {
+			preferredID = id
 		}
-		kind := "history"
-		if strings.HasPrefix(path, "/alpha/notes/") {
-			kind = "notes"
+	}
+	eligibleIDs := make([]int64, 0, len(accounts))
+	for _, account := range accounts {
+		eligibleIDs = append(eligibleIDs, account.ID)
+	}
+	bindingKey := codexAuxiliaryAccountBindingKey(apiKey, capture.Logical.SessionKey)
+	var binding CodexAuxiliaryAccountBinding
+	stickySource := "local"
+	if s.cache != nil {
+		store, ok := s.cache.(CodexAuxiliaryAccountBindingStore)
+		if !ok {
+			return nil, ErrCodexAuxiliaryAccountBindingStoreUnavailable
 		}
-		BeginCodexContextManagementObservation(c, kind, path)
-		if entry := codexContextObservationFromContext(c); entry != nil {
-			entry.AccountID, entry.AccountName = account.ID, account.Name
-			entry.Attempt, entry.Fallback = i+1, i > 0
-			entry.StickyHit, entry.StickySource = i == 0 && stickySource != "none", stickySource
-		}
-		attemptCtx, cancel := context.WithTimeout(ctx, codexAuxiliaryRequestTimeout)
-		resp, reqErr := s.doCodexAuxiliaryRequest(attemptCtx, c, account, path, body)
-		if c != nil && (i > 0 || stickySource != "none") {
-			// A fallback or an established affinity is not a new-session probe,
-			// even if this account had to allocate a different upstream identity.
-			c.Set(codexNewSessionThreadHintContextKey, false)
-		}
-		// A 2xx header alone is insufficient: a truncated/invalid response must
-		// not move affinity. Buffer only a bounded response and keep the upstream
-		// timeout active through EOF. Notes writes may already have taken effect,
-		// so ambiguous post-send failures must never be retried on another account.
-		if reqErr == nil && resp != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			reqErr = bufferCodexAuxiliaryResponse(resp)
-			cancel()
-		}
-		if entry := codexContextObservationFromContext(c); entry != nil {
-			if resp != nil {
-				entry.HTTPStatus = resp.StatusCode
-				entry.UpstreamHTTPStatus = resp.StatusCode
-			}
-			entry.ErrorKind = codexAuxiliaryObservationErrorKind(reqErr)
-			if reqErr == nil && resp != nil && resp.StatusCode >= 500 {
-				entry.ErrorKind = "upstream_5xx"
-			}
-		}
-		if resp != nil && resp.Body != nil && reqErr == nil && !(resp.StatusCode >= 200 && resp.StatusCode < 300) {
-			// Keep the deadline active while the handler drains the response body;
-			// cancel it as soon as the body is closed.
-			resp.Body = &codexAuxiliaryCancelBody{ReadCloser: resp.Body, cancel: cancel}
-		} else {
-			cancel()
-		}
-		if reqErr == nil {
-			if resp != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-				s.storeCodexAuxiliarySticky(key, account.ID, derefGroupID(apiKey.GroupID))
-				_ = s.setStickySessionAccountID(stickyCtx, apiKey.GroupID, key, account.ID, s.openAIWSSessionStickyTTL())
-				return resp, nil
-			}
-			if resp != nil {
-				// Retry only temporary read failures. Status errors after a Notes
-				// write (including 5xx) cannot prove that the mutation did not run.
-				if !readOnly || !codexAuxiliaryTemporaryStatus(resp.StatusCode) || i == len(ordered)-1 {
-					return resp, nil
-				}
-				lastErr = fmt.Errorf("upstream history/notes status %s", resp.Status)
-				if resp.Body != nil {
-					_ = resp.Body.Close()
-				}
-			} else {
-				lastErr = errCodexAuxiliaryInvalidResponse
-				return nil, lastErr
-			}
-		} else {
-			lastErr = reqErr
-			if resp != nil && resp.Body != nil {
-				_ = resp.Body.Close()
-			}
-			if ctx.Err() != nil || !codexAuxiliaryRetryableError(reqErr, readOnly, resp != nil) {
-				return nil, reqErr
-			}
-		}
-		if i == len(ordered)-1 {
+		binding, err = store.ResolveCodexAuxiliaryAccountBinding(ctx, bindingKey, eligibleIDs, preferredID)
+		stickySource = "redis"
+	} else {
+		binding, err = resolveLocalCodexAuxiliaryAccountBinding(&s.codexAuxiliarySticky, bindingKey, eligibleIDs, preferredID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var account *Account
+	for _, candidate := range accounts {
+		if candidate.ID == binding.AccountID {
+			account = candidate
 			break
 		}
-		if entry := codexContextObservationFromContext(c); entry != nil {
-			RecordCodexContextManagementResult(c, kind, path, "failed", entry.HTTPStatus, 0, entry.ErrorKind)
+	}
+	if account == nil {
+		return nil, ErrCodexAuxiliaryAccountBindingStoredInvalid
+	}
+	seeded := !binding.HadBinding && preferredID == account.ID
+	stickyHit := binding.Reused || seeded
+	if !stickyHit {
+		stickySource = "none"
+	}
+	kind := "history"
+	if strings.HasPrefix(path, "/alpha/notes/") {
+		kind = "notes"
+	}
+	BeginCodexContextManagementObservation(c, kind, path)
+	if entry := codexContextObservationFromContext(c); entry != nil {
+		entry.AccountID, entry.AccountName = account.ID, account.Name
+		entry.Attempt, entry.Fallback = 1, false
+		entry.StickyHit, entry.StickySource = stickyHit, stickySource
+	}
+	attemptCtx, cancel := context.WithTimeout(ctx, codexAuxiliaryRequestTimeout)
+	resp, reqErr := s.doCodexAuxiliaryRequest(attemptCtx, c, account, path, body)
+	if c != nil && (binding.HadBinding || seeded) {
+		// An established task stays old even when its former account lost eligibility.
+		c.Set(codexNewSessionThreadHintContextKey, false)
+	}
+	if reqErr == nil && resp == nil {
+		reqErr = errCodexAuxiliaryInvalidResponse
+	}
+	// Keep the timeout active through EOF and reject incomplete JSON. An upstream
+	// status or transport failure never changes ownership of History/Notes data.
+	if reqErr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		reqErr = bufferCodexAuxiliaryResponse(resp)
+		cancel()
+	}
+	if entry := codexContextObservationFromContext(c); entry != nil {
+		if resp != nil {
+			entry.HTTPStatus = resp.StatusCode
+			entry.UpstreamHTTPStatus = resp.StatusCode
+		}
+		entry.ErrorKind = codexAuxiliaryObservationErrorKind(reqErr)
+		if reqErr == nil && resp.StatusCode >= 500 {
+			entry.ErrorKind = "upstream_5xx"
 		}
 	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("history/notes upstream unavailable")
-	}
-	return nil, lastErr
-}
-
-func (s *OpenAIGatewayService) storeCodexAuxiliarySticky(key string, accountID int64, groupID int64) {
-	now := time.Now()
-	// Sweep expired local fallback entries opportunistically. Redis remains the
-	// primary store; this keeps the in-process fallback bounded for deployments
-	// without a cache backend.
-	count := 0
-	s.codexAuxiliarySticky.Range(func(k, v any) bool {
-		count++
-		if entry, ok := v.(codexAuxiliaryStickyEntry); ok && !entry.expiresAt.IsZero() && now.After(entry.expiresAt) {
-			s.codexAuxiliarySticky.Delete(k)
-			count--
+	if reqErr != nil {
+		cancel()
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
 		}
-		return true
-	})
-	if count >= 4096 {
-		// Drop one arbitrary fallback entry before inserting the new one; Redis
-		// state (when available) is unaffected and has its own TTL.
-		s.codexAuxiliarySticky.Range(func(k, _ any) bool {
-			s.codexAuxiliarySticky.Delete(k)
-			return false
-		})
+		return nil, reqErr
 	}
-	s.codexAuxiliarySticky.Store(codexAuxiliaryLocalStickyKey{groupID: groupID, sessionHash: key},
-		codexAuxiliaryStickyEntry{accountID: accountID, expiresAt: now.Add(s.openAIWSSessionStickyTTL())})
+	if resp.Body != nil && !(resp.StatusCode >= 200 && resp.StatusCode < 300) {
+		resp.Body = &codexAuxiliaryCancelBody{ReadCloser: resp.Body, cancel: cancel}
+	} else {
+		cancel()
+	}
+	return resp, nil
 }
 
 type codexAuxiliaryCancelBody struct {
@@ -210,65 +187,76 @@ func (s *OpenAIGatewayService) listCodexAuxiliaryAccounts(ctx context.Context, a
 		return nil, err
 	}
 	result := make([]*Account, 0, len(accounts))
+	now := time.Now()
+	parents := make(map[int64]*Account)
 	for i := range accounts {
-		account := accounts[i]
-		// History/Notes are Codex backend resources. Restrict candidates to
-		// accounts using that protocol so an ordinary OpenAI API-key account
-		// cannot be selected first and terminate the request with a misleading
-		// 404 before a PAT/OAuth account is tried.
-		if account.UsesOpenAICodexProtocol() {
-			result = append(result, &account)
+		account := &accounts[i]
+		if !account.IsOpenAIOAuth() || !account.Schedulable || !codexAuxiliaryAccountAvailable(account, now) {
+			continue
+		}
+		credentials := account
+		if account.IsShadow() {
+			parentID := *account.ParentAccountID
+			var found bool
+			credentials, found = parents[parentID]
+			if !found {
+				credentials, err = s.accountRepo.GetByID(ctx, parentID)
+				if err != nil && !errors.Is(err, ErrAccountNotFound) {
+					return nil, err
+				}
+				parents[parentID] = credentials
+			}
+			if credentials == nil || credentials.IsShadow() || !codexAuxiliaryAccountAvailable(credentials, now) {
+				continue
+			}
+		}
+		if codexAuxiliaryPaidOAuthAccount(credentials, now) {
+			result = append(result, account)
 		}
 	}
 	return result, nil
 }
 
-func (s *OpenAIGatewayService) orderCodexAuxiliaryAccounts(ctx context.Context, key string, accounts []*Account, groupID int64) ([]*Account, string) {
-	if s.cache != nil {
-		if id, err := s.getStickySessionAccountID(ctx, &groupID, key); err == nil {
-			for i, account := range accounts {
-				if account != nil && account.ID == id {
-					ordered := make([]*Account, 0, len(accounts))
-					ordered = append(ordered, account)
-					ordered = append(ordered, accounts[:i]...)
-					ordered = append(ordered, accounts[i+1:]...)
-					return ordered, "redis"
-				}
-			}
-		}
+// Account state and credential failures still prevent dispatch. Model quota,
+// concurrency, overload and 429 cooldowns do not govern auxiliary resources.
+func codexAuxiliaryAccountAvailable(account *Account, now time.Time) bool {
+	if account == nil || !account.IsActive() {
+		return false
 	}
-	localKey := codexAuxiliaryLocalStickyKey{groupID: groupID, sessionHash: key}
-	if value, ok := s.codexAuxiliarySticky.Load(localKey); ok {
-		if entry, ok := value.(codexAuxiliaryStickyEntry); ok {
-			if !entry.expiresAt.IsZero() && time.Now().After(entry.expiresAt) {
-				s.codexAuxiliarySticky.Delete(localKey)
-				return accounts, "none"
-			}
-			id := entry.accountID
-			for i, account := range accounts {
-				if account != nil && account.ID == id {
-					ordered := make([]*Account, 0, len(accounts))
-					ordered = append(ordered, account)
-					ordered = append(ordered, accounts[:i]...)
-					ordered = append(ordered, accounts[i+1:]...)
-					return ordered, "local"
-				}
-			}
-		}
+	if account.AutoPauseOnExpired && account.ExpiresAt != nil && !now.Before(*account.ExpiresAt) {
+		return false
 	}
-	return accounts, "none"
+	if account.TempUnschedulableUntil != nil && now.Before(*account.TempUnschedulableUntil) &&
+		!IsAccountSchedulingThresholdReason(account.TempUnschedulableReason) &&
+		!wasTempUnschedByStatusCode(account.TempUnschedulableReason, http.StatusTooManyRequests) {
+		return false
+	}
+	return true
 }
 
-// Match the shared Redis sticky scope; identical session signals in different
-// groups must not influence the in-process auxiliary fallback.
-type codexAuxiliaryLocalStickyKey struct {
-	groupID     int64
-	sessionHash string
+func codexAuxiliaryPaidOAuthAccount(account *Account, now time.Time) bool {
+	if account == nil || !account.IsOpenAIOAuth() || account.IsOpenAIPersonalAccessToken() || account.IsOpenAIAgentIdentity() {
+		return false
+	}
+	plan := strings.ToLower(strings.TrimSpace(account.GetCredential("plan_type")))
+	if plan == "" {
+		plan = strings.ToLower(strings.TrimSpace(account.GetCredential("chatgpt_plan_type")))
+	}
+	switch plan {
+	case "plus", "pro", "pro_lite", "prolite", "pro-lite":
+	default:
+		return false
+	}
+	// This is the paid subscription expiry, never the refreshable access token's
+	// expires_at. Unknown or malformed expiry cannot establish paid eligibility.
+	expiresAt := account.GetCredentialAsTime("subscription_expires_at")
+	return expiresAt != nil && now.Before(*expiresAt)
 }
 
-type codexAuxiliaryStickyEntry struct {
-	accountID int64
-	expiresAt time.Time
+func codexAuxiliaryAccountBindingKey(apiKey *APIKey, logicalSession string) string {
+	// Include the API key as well as its group; unrelated clients may submit the
+	// same session string. Do not couple persistent ownership to JWT key rotation.
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%s", derefGroupID(apiKey.GroupID), apiKey.ID, logicalSession))))
 }
 
 func (s *OpenAIGatewayService) doCodexAuxiliaryRequest(ctx context.Context, c *gin.Context, account *Account, path string, body []byte) (*http.Response, error) {
@@ -278,6 +266,26 @@ func (s *OpenAIGatewayService) doCodexAuxiliaryRequest(ctx context.Context, c *g
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, err
+	}
+	// Token acquisition can synchronously refresh and persist a different plan.
+	// Re-read that account before sending so newly confirmed expiry/downgrade
+	// cannot use the eligibility snapshot taken before the refresh.
+	if s.openAITokenProvider != nil {
+		account, err = s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	now := time.Now()
+	if account == nil || !account.Schedulable || !codexAuxiliaryAccountAvailable(account, now) {
+		return nil, ErrNoAvailableAccounts
+	}
+	credentials, err := resolveCredentialAccount(ctx, s.accountRepo, account)
+	if err != nil {
+		return nil, err
+	}
+	if !codexAuxiliaryAccountAvailable(credentials, now) || !codexAuxiliaryPaidOAuthAccount(credentials, now) {
+		return nil, ErrNoAvailableAccounts
 	}
 	target, err := s.codexAuxiliaryURL(account, path)
 	if err != nil {
@@ -359,10 +367,9 @@ func (s *OpenAIGatewayService) doCodexAuxiliaryRequest(ctx context.Context, c *g
 	if entry := codexContextObservationFromContext(c); entry != nil {
 		entry.UpstreamSent = true
 	}
-	resp, err := s.doOpenAIUpstream(req, resolveAccountProxyURL(account), account)
+	resp, err := s.doCodexAuxiliaryUpstream(req, resolveAccountProxyURL(account), account)
 	if err != nil {
-		// Only actual transport failures are eligible for retry. Token refresh,
-		// identity-store and configuration errors above remain authoritative.
+		// Preserve transport error classification without changing account ownership.
 		return resp, &codexAuxiliaryTransportError{err: err}
 	}
 	return resp, nil
@@ -425,46 +432,6 @@ func bufferCodexAuxiliaryResponse(resp *http.Response) error {
 	}
 	resp.Body = io.NopCloser(bytes.NewReader(body))
 	return nil
-}
-
-func codexAuxiliaryReadOnlyPath(path string) bool {
-	switch path {
-	case "/alpha/history/v2/list_windows", "/alpha/history/v2/list_items",
-		"/alpha/history/v2/read_item", "/alpha/history/v2/search_contents",
-		"/alpha/notes/v2/list_files_by_prefix", "/alpha/notes/v2/read_file",
-		"/alpha/notes/v2/search_contents", "/alpha/notes/v2/thread_hint":
-		return true
-	default:
-		return false
-	}
-}
-
-func codexAuxiliaryTemporaryStatus(status int) bool {
-	return status == http.StatusInternalServerError || status == http.StatusBadGateway ||
-		status == http.StatusServiceUnavailable || status == http.StatusGatewayTimeout
-}
-
-func codexAuxiliaryRetryableError(err error, readOnly, responseStarted bool) bool {
-	if errors.Is(err, context.Canceled) {
-		return false
-	}
-	var transport *codexAuxiliaryTransportError
-	var bodyRead *codexAuxiliaryResponseReadError
-	if !errors.As(err, &transport) && !(readOnly && errors.As(err, &bodyRead)) {
-		return false
-	}
-	if !readOnly {
-		// A dial failure proves the write could not reach an upstream. Generic
-		// timeouts/EOFs, even without response headers, do not provide that proof.
-		var op *net.OpError
-		return !responseStarted && errors.As(err, &op) && op.Op == "dial"
-	}
-	var netErr net.Error
-	var op *net.OpError
-	var dns *net.DNSError
-	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) ||
-		errors.Is(err, io.ErrUnexpectedEOF) || errors.As(err, &op) || errors.As(err, &dns) ||
-		(errors.As(err, &netErr) && netErr.Timeout())
 }
 
 func codexAuxiliaryObservationErrorKind(err error) string {

@@ -22,9 +22,10 @@ func TestForwardCodexHistoryNotesThreadHintFreshness(t *testing.T) {
 		{name: "new_session_without_observation", wantNew: true, wantCalls: 1},
 		{name: "new_session_with_observation", observe: true, wantNew: true, wantCalls: 1},
 		{name: "existing_identity_without_sticky", prepare: "identity", wantCalls: 1},
-		{name: "redis_sticky_without_identity", prepare: "redis", wantCalls: 1},
-		{name: "local_sticky_without_identity", prepare: "local", wantCalls: 1},
-		{name: "fallback_to_new_identity", prepare: "fallback", wantCalls: 2},
+		{name: "responses_seed_without_identity", prepare: "responses", wantCalls: 1},
+		{name: "persistent_binding_without_identity", prepare: "binding", wantCalls: 1},
+		{name: "local_binding_without_identity", prepare: "local", wantCalls: 1},
+		{name: "ineligible_binding_reassigned_to_new_identity", prepare: "rebound", wantCalls: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resetProcessCodexIdentityStore(t)
@@ -32,13 +33,10 @@ func TestForwardCodexHistoryNotesThreadHintFreshness(t *testing.T) {
 			SetFingerprintObservationEnabled(tc.observe)
 			t.Cleanup(func() { SetFingerprintObservationEnabled(false) })
 			calls := 0
-			svc, key, cache := newCodexAuxiliaryStickyTestService(t, func(req *http.Request, accountID int64) (*http.Response, error) {
+			svc, key, cache := newCodexAuxiliaryStickyTestService(t, func(req *http.Request, _ int64) (*http.Response, error) {
 				calls++
 				require.Equal(t, "/backend-api/codex"+path, req.URL.Path)
 				status := http.StatusNotFound
-				if tc.prepare == "fallback" && accountID == 11 {
-					status = http.StatusServiceUnavailable
-				}
 				resp := codexAuxiliaryStickyTestResponse(status)
 				resp.Body = io.NopCloser(strings.NewReader(`{"detail":"Not found"}`))
 				return resp, nil
@@ -52,17 +50,26 @@ func TestForwardCodexHistoryNotesThreadHintFreshness(t *testing.T) {
 				_, err = svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), seed, accounts[0], capture, OpenAIOAuthIdentityPlanOptions{TurnIdentityEnabled: true}, nil)
 				require.NoError(t, err)
 			}
-			if tc.prepare == "redis" || tc.prepare == "local" {
+			if tc.prepare == "responses" {
 				seed := newCodexAuxiliaryStickyTestContext(context.Background(), key, path)
 				capture, err := captureCodexAuxiliaryIdentity(codexAuxiliaryStickyTestBody)
 				require.NoError(t, err)
 				SetOpenAIOAuthIdentityCapture(seed, capture)
 				hash := svc.GenerateSessionHashForOpenAIOAuthIdentity(seed, codexAuxiliaryStickyTestBody, capture.Logical.SessionKey)
-				if tc.prepare == "redis" {
-					require.NoError(t, svc.BindStickySession(seed.Request.Context(), key.GroupID, hash, 11))
-				} else {
-					svc.storeCodexAuxiliarySticky(hash, 11, *key.GroupID)
-				}
+				require.NoError(t, svc.BindStickySession(seed.Request.Context(), key.GroupID, hash, 11))
+			}
+			bindingKey := codexAuxiliaryAccountBindingKey(key, codexAuxiliaryStickyTestSession)
+			switch tc.prepare {
+			case "binding":
+				_, err := cache.ResolveCodexAuxiliaryAccountBinding(context.Background(), bindingKey, []int64{11, 22}, 11)
+				require.NoError(t, err)
+			case "rebound":
+				_, err := cache.ResolveCodexAuxiliaryAccountBinding(context.Background(), bindingKey, []int64{99}, 99)
+				require.NoError(t, err)
+			case "local":
+				svc.cache = nil
+				_, err := resolveLocalCodexAuxiliaryAccountBinding(&svc.codexAuxiliarySticky, bindingKey, []int64{11, 22}, 11)
+				require.NoError(t, err)
 			}
 			c := newCodexAuxiliaryStickyTestContext(context.Background(), key, path)
 			resp, err := svc.ForwardCodexHistoryNotes(c.Request.Context(), c, key, path, codexAuxiliaryStickyTestBody)

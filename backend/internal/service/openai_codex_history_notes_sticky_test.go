@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,8 +34,17 @@ type codexAuxiliaryStickyTestCacheKey struct {
 // Preserve the real cache's group isolation while reusing its unrelated stubs.
 type codexAuxiliaryStickyTestCache struct {
 	stubGatewayCache
-	bindings map[codexAuxiliaryStickyTestCacheKey]int64
-	reads    []context.Context
+	bindings          map[codexAuxiliaryStickyTestCacheKey]int64
+	reads             []context.Context
+	auxiliaryBindings sync.Map
+	bindingErr        error
+}
+
+func (c *codexAuxiliaryStickyTestCache) ResolveCodexAuxiliaryAccountBinding(_ context.Context, key string, eligible []int64, preferred int64) (CodexAuxiliaryAccountBinding, error) {
+	if c.bindingErr != nil {
+		return CodexAuxiliaryAccountBinding{}, c.bindingErr
+	}
+	return resolveLocalCodexAuxiliaryAccountBinding(&c.auxiliaryBindings, key, eligible, preferred)
 }
 
 func (c *codexAuxiliaryStickyTestCache) GetSessionAccountID(ctx context.Context, groupID int64, key string) (int64, error) {
@@ -50,9 +60,10 @@ func (c *codexAuxiliaryStickyTestCache) SetSessionAccountID(_ context.Context, g
 func newCodexAuxiliaryStickyTestService(t *testing.T, upstream func(*http.Request, int64) (*http.Response, error)) (*OpenAIGatewayService, *APIKey, *codexAuxiliaryStickyTestCache) {
 	t.Helper()
 	groupID := int64(17)
+	expiresAt := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
 	accounts := []Account{
-		{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "test-first-token", "chatgpt_account_id": "test-first-account"}},
-		{ID: 22, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "test-second-token", "chatgpt_account_id": "test-second-account"}},
+		{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "test-first-token", "chatgpt_account_id": "test-first-account", "plan_type": "plus", "subscription_expires_at": expiresAt}},
+		{ID: 22, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "test-second-token", "chatgpt_account_id": "test-second-account", "plan_type": "pro", "subscription_expires_at": expiresAt}},
 	}
 	cache := &codexAuxiliaryStickyTestCache{bindings: make(map[codexAuxiliaryStickyTestCacheKey]int64)}
 	svc := &OpenAIGatewayService{
@@ -132,15 +143,12 @@ type codexAuxiliaryReaderFunc func([]byte) (int, error)
 
 func (f codexAuxiliaryReaderFunc) Read(p []byte) (int, error) { return f(p) }
 
-func TestForwardCodexHistoryNotesDoesNotBindIncompleteFallbackResponse(t *testing.T) {
+func TestForwardCodexHistoryNotesIncompleteResponsePreservesBinding(t *testing.T) {
 	for _, failure := range []string{"eof", "timeout", "invalid_json", "oversize"} {
 		t.Run(failure, func(t *testing.T) {
 			var calls []int64
 			svc, apiKey, cache := newCodexAuxiliaryStickyTestService(t, func(_ *http.Request, id int64) (*http.Response, error) {
 				calls = append(calls, id)
-				if id == 22 {
-					return nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
-				}
 				resp := codexAuxiliaryStickyTestResponse(http.StatusOK)
 				switch failure {
 				case "eof":
@@ -160,15 +168,17 @@ func TestForwardCodexHistoryNotesDoesNotBindIncompleteFallbackResponse(t *testin
 			resp, err := svc.ForwardCodexHistoryNotes(c.Request.Context(), c, apiKey, "/alpha/history/v2/list_windows", codexAuxiliaryStickyTestBody)
 			require.Error(t, err)
 			require.Nil(t, resp)
-			require.Equal(t, []int64{22, 11}, calls)
+			require.Equal(t, []int64{22}, calls)
 			require.Equal(t, int64(22), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, svc.openAISessionCacheKey(hash)}])
-			_, stored := svc.codexAuxiliarySticky.Load(codexAuxiliaryLocalStickyKey{groupID: *apiKey.GroupID, sessionHash: hash})
-			require.False(t, stored)
+			binding, bindErr := cache.ResolveCodexAuxiliaryAccountBinding(context.Background(), codexAuxiliaryAccountBindingKey(apiKey, codexAuxiliaryStickyTestSession), []int64{11, 22}, 11)
+			require.NoError(t, bindErr)
+			require.Equal(t, int64(22), binding.AccountID)
+			require.True(t, binding.Reused)
 		})
 	}
 }
 
-func TestForwardCodexHistoryNotesBindsOnlyAfterCompleteJSON(t *testing.T) {
+func TestForwardCodexHistoryNotesBindsBeforeRequestAndBuffersCompleteJSON(t *testing.T) {
 	var svc *OpenAIGatewayService
 	var apiKey *APIKey
 	var cache *codexAuxiliaryStickyTestCache
@@ -177,15 +187,16 @@ func TestForwardCodexHistoryNotesBindsOnlyAfterCompleteJSON(t *testing.T) {
 	hash, _ := deriveOpenAISessionHashes(codexAuxiliaryStickyTestSession)
 	svc, apiKey, cache = newCodexAuxiliaryStickyTestService(t, func(req *http.Request, id int64) (*http.Response, error) {
 		calls = append(calls, id)
-		if id == 22 {
-			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
-		}
+		binding, err := cache.ResolveCodexAuxiliaryAccountBinding(req.Context(), codexAuxiliaryAccountBindingKey(apiKey, codexAuxiliaryStickyTestSession), []int64{11, 22}, 11)
+		require.NoError(t, err)
+		require.True(t, binding.Reused, "the account must be bound before any upstream side effect")
+		require.Equal(t, id, binding.AccountID)
 		responseContext = req.Context()
 		resp := codexAuxiliaryStickyTestResponse(http.StatusOK)
 		reader := strings.NewReader(`{"encrypted_output":"opaque", "items":[]}`)
 		resp.Body = io.NopCloser(codexAuxiliaryReaderFunc(func(p []byte) (int, error) {
 			require.NoError(t, req.Context().Err(), "deadline remains active until response EOF")
-			require.Equal(t, int64(22), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, svc.openAISessionCacheKey(hash)}], "reading headers or partial body cannot bind")
+			require.Equal(t, int64(22), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, svc.openAISessionCacheKey(hash)}], "reading a response must not change Responses affinity")
 			return reader.Read(p)
 		}))
 		return resp, nil
@@ -194,23 +205,23 @@ func TestForwardCodexHistoryNotesBindsOnlyAfterCompleteJSON(t *testing.T) {
 	c := newCodexAuxiliaryStickyTestContext(context.Background(), apiKey, "/alpha/notes/v2/read_file")
 	resp, err := svc.ForwardCodexHistoryNotes(c.Request.Context(), c, apiKey, "/alpha/notes/v2/read_file", codexAuxiliaryStickyTestBody)
 	require.NoError(t, err)
-	require.Equal(t, []int64{22, 11}, calls)
+	require.Equal(t, []int64{22}, calls)
 	require.ErrorIs(t, responseContext.Err(), context.Canceled)
-	require.Equal(t, int64(11), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, svc.openAISessionCacheKey(hash)}])
+	require.Equal(t, int64(22), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, svc.openAISessionCacheKey(hash)}])
 	got, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	require.Equal(t, `{"encrypted_output":"opaque", "items":[]}`, string(got))
 	require.NoError(t, resp.Body.Close())
 }
 
-func TestForwardCodexHistoryNotesWritesRetryOnlyBeforeConnection(t *testing.T) {
-	for _, path := range []string{"/alpha/notes/v2/append_to_file", "/alpha/notes/v2/write_file"} {
-		for _, failure := range []string{"dial", "timeout", "eof", "body_eof", "invalid_json", "503", "cancelled", "request_error"} {
+func TestForwardCodexHistoryNotesErrorsNeverSwitchAccounts(t *testing.T) {
+	for _, path := range []string{"/alpha/history/v2/list_windows", "/alpha/notes/v2/read_file", "/alpha/notes/v2/append_to_file", "/alpha/notes/v2/write_file"} {
+		for _, failure := range []string{"dial", "timeout", "eof", "body_eof", "invalid_json", "429", "503", "cancelled", "request_error"} {
 			t.Run(path+"/"+failure, func(t *testing.T) {
 				var calls []int64
 				svc, apiKey, cache := newCodexAuxiliaryStickyTestService(t, func(_ *http.Request, id int64) (*http.Response, error) {
 					calls = append(calls, id)
-					if id == 11 {
+					if len(calls) > 1 {
 						return codexAuxiliaryStickyTestResponse(http.StatusOK), nil
 					}
 					switch failure {
@@ -226,6 +237,8 @@ func TestForwardCodexHistoryNotesWritesRetryOnlyBeforeConnection(t *testing.T) {
 						return nil, errors.New("invalid request")
 					case "503":
 						return codexAuxiliaryStickyTestResponse(http.StatusServiceUnavailable), nil
+					case "429":
+						return codexAuxiliaryStickyTestResponse(http.StatusTooManyRequests), nil
 					}
 					resp := codexAuxiliaryStickyTestResponse(http.StatusOK)
 					if failure == "body_eof" {
@@ -239,24 +252,30 @@ func TestForwardCodexHistoryNotesWritesRetryOnlyBeforeConnection(t *testing.T) {
 				require.NoError(t, svc.BindStickySession(context.Background(), apiKey.GroupID, hash, 22))
 				c := newCodexAuxiliaryStickyTestContext(context.Background(), apiKey, path)
 				resp, err := svc.ForwardCodexHistoryNotes(c.Request.Context(), c, apiKey, path, codexAuxiliaryStickyTestBody)
-				wantAccount := int64(22)
-				if failure == "dial" {
+				require.Equal(t, []int64{22}, calls)
+				if failure == "503" || failure == "429" {
 					require.NoError(t, err)
-					require.Equal(t, []int64{22, 11}, calls)
-					wantAccount = 11
-				} else {
-					require.Equal(t, []int64{22}, calls)
 					if failure == "503" {
-						require.NoError(t, err)
 						require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
 					} else {
-						require.Error(t, err)
+						require.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
 					}
+				} else {
+					require.Error(t, err)
+					require.Nil(t, resp)
 				}
 				if resp != nil {
 					require.NoError(t, resp.Body.Close())
 				}
-				require.Equal(t, wantAccount, cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, svc.openAISessionCacheKey(hash)}])
+				require.Equal(t, int64(22), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, svc.openAISessionCacheKey(hash)}])
+				// A later Responses request can migrate independently after the error.
+				require.NoError(t, svc.BindStickySession(context.Background(), apiKey.GroupID, hash, 11))
+				next := newCodexAuxiliaryStickyTestContext(context.Background(), apiKey, path)
+				resp, err = svc.ForwardCodexHistoryNotes(next.Request.Context(), next, apiKey, path, codexAuxiliaryStickyTestBody)
+				require.NoError(t, err)
+				require.NoError(t, resp.Body.Close())
+				require.Equal(t, []int64{22, 22}, calls, "the next auxiliary request must retain the original account after any upstream error")
+				require.Equal(t, int64(11), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, svc.openAISessionCacheKey(hash)}])
 			})
 		}
 	}
@@ -285,6 +304,62 @@ func TestForwardCodexHistoryNotesSessionMappingIsolatesAPIKeys(t *testing.T) {
 	require.NotEmpty(t, sessions[0])
 	require.NotEqual(t, sessions[0], sessions[1])
 	require.Equal(t, sessions[0], sessions[2])
+}
+
+func TestForwardCodexHistoryNotesBindingIsolatesGroupKeyAndLogicalSession(t *testing.T) {
+	var calls []int64
+	svc, apiKey, cache := newCodexAuxiliaryStickyTestService(t, func(_ *http.Request, id int64) (*http.Response, error) {
+		calls = append(calls, id)
+		return codexAuxiliaryStickyTestResponse(http.StatusOK), nil
+	})
+	otherKey, otherGroup := *apiKey, *apiKey
+	otherKey.ID++
+	groupID := *apiKey.GroupID + 1
+	otherGroup.GroupID = &groupID
+	repo := svc.accountRepo.(codexModelsVisibilityAccountRepo)
+	repo.byGroup[groupID] = repo.byGroup[*apiKey.GroupID]
+	cases := []struct {
+		key       *APIKey
+		session   string
+		accountID int64
+	}{
+		{apiKey, codexAuxiliaryStickyTestSession, 22},
+		{&otherKey, codexAuxiliaryStickyTestSession, 11},
+		{&otherGroup, codexAuxiliaryStickyTestSession, 11},
+		{apiKey, "independent-logical-session", 11},
+	}
+	for _, tc := range cases {
+		_, err := cache.ResolveCodexAuxiliaryAccountBinding(context.Background(), codexAuxiliaryAccountBindingKey(tc.key, tc.session), []int64{11, 22}, tc.accountID)
+		require.NoError(t, err)
+	}
+	for _, tc := range append(cases, cases[0]) {
+		const path = "/alpha/history/v2/list_windows"
+		body := bytes.ReplaceAll(codexAuxiliaryStickyTestBody, []byte(codexAuxiliaryStickyTestSession), []byte(tc.session))
+		c := newCodexAuxiliaryStickyTestContext(context.Background(), tc.key, path)
+		resp, err := svc.ForwardCodexHistoryNotes(c.Request.Context(), c, tc.key, path, body)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+	}
+	require.Equal(t, []int64{22, 11, 11, 11, 22}, calls)
+	require.Empty(t, cache.bindings, "independent auxiliary bindings must not leak into shared Responses affinity")
+}
+
+func TestForwardCodexHistoryNotesBindingStoreFailureDoesNotCreateLocalFallback(t *testing.T) {
+	var calls []int64
+	svc, apiKey, cache := newCodexAuxiliaryStickyTestService(t, func(_ *http.Request, id int64) (*http.Response, error) {
+		calls = append(calls, id)
+		return codexAuxiliaryStickyTestResponse(http.StatusOK), nil
+	})
+	cache.bindingErr = errors.New("binding cache unavailable")
+	const path = "/alpha/notes/v2/append_to_file"
+	c := newCodexAuxiliaryStickyTestContext(context.Background(), apiKey, path)
+	resp, err := svc.ForwardCodexHistoryNotes(c.Request.Context(), c, apiKey, path, codexAuxiliaryStickyTestBody)
+	require.Error(t, err)
+	require.Nil(t, resp)
+	require.Empty(t, calls, "a cache failure cannot authorize a different account for a write")
+	localEntries := 0
+	svc.codexAuxiliarySticky.Range(func(_, _ any) bool { localEntries++; return true })
+	require.Zero(t, localEntries)
 }
 
 func TestForwardCodexHistoryNotesReadSemanticFailuresDoNotFallback(t *testing.T) {
@@ -343,44 +418,77 @@ func TestBufferCodexAuxiliaryResponseBoundsUnknownLength(t *testing.T) {
 	require.Equal(t, codexAuxiliaryResponseLimit+1, read)
 }
 
-func TestForwardCodexHistoryNotesFallbackRebindsResponsesSticky(t *testing.T) {
-	for _, failure := range []string{"connection", "503"} {
-		t.Run(failure, func(t *testing.T) {
+func TestForwardCodexHistoryNotesBindingSurvivesResponsesMigrationAndExpiry(t *testing.T) {
+	var calls []int64
+	upstream := func(_ *http.Request, accountID int64) (*http.Response, error) {
+		calls = append(calls, accountID)
+		return codexAuxiliaryStickyTestResponse(http.StatusOK), nil
+	}
+	svc, apiKey, cache := newCodexAuxiliaryStickyTestService(t, upstream)
+	hash, legacyHash := deriveOpenAISessionHashes(codexAuxiliaryStickyTestSession)
+	ctx := withOpenAILegacySessionHash(context.Background(), legacyHash)
+	require.NoError(t, svc.BindStickySession(ctx, apiKey.GroupID, hash, 22))
+	for i, path := range []string{"/alpha/history/v2/list_windows", "/alpha/notes/v2/list_files_by_prefix", "/alpha/history/v2/search_contents"} {
+		if i == 1 {
+			// Responses migration cannot overwrite the independent auxiliary binding.
+			require.NoError(t, svc.BindStickySession(ctx, apiKey.GroupID, hash, 11))
+		} else if i == 2 {
+			// Model-session TTL expiry and a service restart cannot forget it either.
+			clear(cache.bindings)
+			svc, _, _ = newCodexAuxiliaryStickyTestService(t, upstream)
+			svc.cache = cache
+		}
+		c := newCodexAuxiliaryStickyTestContext(context.Background(), apiKey, path)
+		resp, err := svc.ForwardCodexHistoryNotes(c.Request.Context(), c, apiKey, path, codexAuxiliaryStickyTestBody)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		if i == 1 {
+			require.Equal(t, int64(11), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, "openai:" + hash}])
+			require.Equal(t, int64(11), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, "openai:" + legacyHash}])
+		}
+	}
+	require.Equal(t, []int64{22, 22, 22}, calls)
+	require.Empty(t, cache.bindings, "auxiliary calls must not recreate expired Responses bindings")
+}
+
+func TestForwardCodexHistoryNotesRebindsOnlyWhenAccountLosesEligibility(t *testing.T) {
+	for _, reason := range []string{"subscription_expired", "unschedulable", "disabled", "removed"} {
+		t.Run(reason, func(t *testing.T) {
 			var calls []int64
 			svc, apiKey, cache := newCodexAuxiliaryStickyTestService(t, func(_ *http.Request, accountID int64) (*http.Response, error) {
 				calls = append(calls, accountID)
-				if accountID == 22 {
-					if failure == "connection" {
-						return nil, &net.OpError{Op: "dial", Net: "tcp", Err: fmt.Errorf("test connection refused")}
-					}
-					return codexAuxiliaryStickyTestResponse(http.StatusServiceUnavailable), nil
-				}
 				return codexAuxiliaryStickyTestResponse(http.StatusOK), nil
 			})
-			hash, legacyHash := deriveOpenAISessionHashes(codexAuxiliaryStickyTestSession)
-			require.NoError(t, svc.BindStickySession(withOpenAILegacySessionHash(context.Background(), legacyHash), apiKey.GroupID, hash, 22))
-			c := newCodexAuxiliaryStickyTestContext(context.Background(), apiKey, "/alpha/history/v2/list_windows")
-			resp, err := svc.ForwardCodexHistoryNotes(c.Request.Context(), c, apiKey, "/alpha/history/v2/list_windows", codexAuxiliaryStickyTestBody)
-			require.NoError(t, err)
-			require.NoError(t, resp.Body.Close())
-			require.Equal(t, []int64{22, 11}, calls)
-			accountID, err := svc.getStickySessionAccountID(c.Request.Context(), apiKey.GroupID, hash)
-			require.NoError(t, err)
-			require.Equal(t, int64(11), accountID)
-			require.Equal(t, int64(11), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, "openai:" + legacyHash}])
-
-			// Use a fresh auxiliary service instance to ensure Redis, rather than
-			// the process-local fallback, supplies the next Notes binding.
-			nextSvc, _, _ := newCodexAuxiliaryStickyTestService(t, func(_ *http.Request, accountID int64) (*http.Response, error) {
-				calls = append(calls, accountID)
-				return codexAuxiliaryStickyTestResponse(http.StatusOK), nil
-			})
-			nextSvc.cache = cache
-			next := newCodexAuxiliaryStickyTestContext(context.Background(), apiKey, "/alpha/notes/v2/list_files_by_prefix")
-			resp, err = nextSvc.ForwardCodexHistoryNotes(next.Request.Context(), next, apiKey, "/alpha/notes/v2/list_files_by_prefix", codexAuxiliaryStickyTestBody)
-			require.NoError(t, err)
-			require.NoError(t, resp.Body.Close())
+			hash, _ := deriveOpenAISessionHashes(codexAuxiliaryStickyTestSession)
+			require.NoError(t, svc.BindStickySession(context.Background(), apiKey.GroupID, hash, 22))
+			forward := func() {
+				const path = "/alpha/notes/v2/write_file"
+				c := newCodexAuxiliaryStickyTestContext(context.Background(), apiKey, path)
+				resp, err := svc.ForwardCodexHistoryNotes(c.Request.Context(), c, apiKey, path, codexAuxiliaryStickyTestBody)
+				require.NoError(t, err)
+				require.NoError(t, resp.Body.Close())
+			}
+			forward()
+			repo := svc.accountRepo.(codexModelsVisibilityAccountRepo)
+			accounts := repo.byGroup[*apiKey.GroupID]
+			switch reason {
+			case "subscription_expired":
+				accounts[1].Credentials["subscription_expires_at"] = time.Now().Add(-time.Hour).Format(time.RFC3339)
+			case "unschedulable":
+				accounts[1].Schedulable = false
+			case "disabled":
+				accounts[1].Status = "disabled"
+			case "removed":
+				repo.byGroup[*apiKey.GroupID] = accounts[:1]
+			}
+			forward()
+			// Restoring the former account does not bounce the session back again.
+			accounts[1].Credentials["subscription_expires_at"] = time.Now().Add(time.Hour).Format(time.RFC3339)
+			accounts[1].Schedulable, accounts[1].Status = true, StatusActive
+			repo.byGroup[*apiKey.GroupID] = accounts
+			forward()
 			require.Equal(t, []int64{22, 11, 11}, calls)
+			require.Equal(t, int64(22), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, "openai:" + hash}], "auxiliary rebind must not affect Responses affinity")
 		})
 	}
 }
@@ -405,7 +513,7 @@ func TestForwardCodexHistoryNotesPermissionFailurePreservesResponsesSticky(t *te
 	require.Equal(t, int64(22), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, "openai:" + legacyHash}])
 }
 
-func TestForwardCodexHistoryNotesReadsLegacyBindingAndDualWrites(t *testing.T) {
+func TestForwardCodexHistoryNotesReadsLegacyResponsesSeedWithoutWritingIt(t *testing.T) {
 	type callerContextKey struct{}
 	callerCtx, cancel := context.WithTimeout(context.WithValue(context.Background(), callerContextKey{}, "caller-context"), time.Minute)
 	defer cancel()
@@ -425,7 +533,7 @@ func TestForwardCodexHistoryNotesReadsLegacyBindingAndDualWrites(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	require.Equal(t, []int64{22}, calls)
-	require.Equal(t, int64(22), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, "openai:" + hash}])
+	require.NotContains(t, cache.bindings, codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, "openai:" + hash})
 	require.Equal(t, int64(22), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, "openai:" + legacyHash}])
 	require.Equal(t, int64(11), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, hash}])
 	require.NotEmpty(t, cache.reads)
@@ -455,5 +563,5 @@ func TestForwardCodexHistoryNotesIgnoresFormerUnprefixedBinding(t *testing.T) {
 	require.Equal(t, int64(22), cache.bindings[codexAuxiliaryStickyTestCacheKey{*apiKey.GroupID, hash}])
 	accountID, err := svc.getStickySessionAccountID(c.Request.Context(), apiKey.GroupID, hash)
 	require.NoError(t, err)
-	require.Equal(t, int64(11), accountID)
+	require.Zero(t, accountID, "auxiliary calls must not write Responses affinity")
 }

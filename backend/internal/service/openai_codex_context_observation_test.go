@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
@@ -143,15 +144,15 @@ func TestCodexAuxiliaryObservationErrorKindDoesNotReturnErrorMessage(t *testing.
 	require.Equal(t, "request_error", codexAuxiliaryObservationErrorKind(fmt.Errorf("secret token and URL")))
 }
 
-func TestCodexContextObservationHistoryFallbackWaitsForDelivery(t *testing.T) {
+func TestCodexContextObservationHistoryRejectionWaitsForDeliveryWithoutFallback(t *testing.T) {
 	for _, firstStatus := range []int{http.StatusServiceUnavailable, http.StatusForbidden} {
 		t.Run(fmt.Sprint(firstStatus), func(t *testing.T) {
 			SetFingerprintObservationEnabled(false)
 			SetFingerprintObservationEnabled(true)
 			t.Cleanup(func() { SetFingerprintObservationEnabled(false) })
 			accounts := []Account{
-				{ID: 901, Name: "first", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "not-recorded"}},
-				{ID: 902, Name: "second", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "not-recorded"}},
+				{ID: 901, Name: "first", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "not-recorded", "plan_type": "pro", "subscription_expires_at": time.Now().Add(time.Hour).Format(time.RFC3339)}},
+				{ID: 902, Name: "second", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "not-recorded", "plan_type": "pro", "subscription_expires_at": time.Now().Add(time.Hour).Format(time.RFC3339)}},
 			}
 			calls := 0
 			upstream := codexModelsHTTPUpstreamStub{do: func(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
@@ -177,26 +178,18 @@ func TestCodexContextObservationHistoryFallbackWaitsForDelivery(t *testing.T) {
 			require.NotNil(t, resp)
 			defer resp.Body.Close()
 			before := PageCodexContextManagementObservations(1, 20)
-			if firstStatus == http.StatusForbidden {
-				require.Equal(t, 1, calls)
-				require.Empty(t, before.Items)
-				RecordCodexContextManagementResult(c, "history", "", "rejected", resp.StatusCode, 0, "upstream_rejected")
-				after := PageCodexContextManagementObservations(1, 20)
-				require.Len(t, after.Items, 1)
-				require.Equal(t, 403, after.Items[0].UpstreamHTTPStatus)
-				return
-			}
-			require.Equal(t, 2, calls)
-			require.Len(t, before.Items, 1, "only failed first attempt is recorded before body delivery")
-			require.Equal(t, 503, before.Items[0].UpstreamHTTPStatus)
-			require.True(t, before.Items[0].UpstreamSent)
-			RecordCodexContextManagementResult(c, "history", "", "delivered", 200, 12, "")
+			require.Equal(t, 1, calls, "neither 403 nor 503 can switch the bound account")
+			require.Equal(t, firstStatus, resp.StatusCode)
+			require.Empty(t, before.Items, "the observation is recorded only after handler delivery")
+			RecordCodexContextManagementResult(c, "history", "", "rejected", resp.StatusCode, 0, "upstream_rejected")
 			after := PageCodexContextManagementObservations(1, 20)
-			require.Len(t, after.Items, 2)
-			require.Equal(t, "delivered", after.Items[0].Status)
-			require.Equal(t, int64(902), after.Items[0].AccountID)
-			require.True(t, after.Items[0].Fallback)
-			require.Equal(t, 2, after.Items[0].Attempt)
+			require.Len(t, after.Items, 1)
+			require.Equal(t, firstStatus, after.Items[0].UpstreamHTTPStatus)
+			require.Equal(t, "rejected", after.Items[0].Status)
+			require.Equal(t, int64(901), after.Items[0].AccountID)
+			require.True(t, after.Items[0].UpstreamSent)
+			require.False(t, after.Items[0].Fallback)
+			require.Equal(t, 1, after.Items[0].Attempt)
 		})
 	}
 }
