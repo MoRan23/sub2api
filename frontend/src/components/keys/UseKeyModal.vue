@@ -264,6 +264,9 @@
                 </div>
                 <pre class="overflow-x-auto p-4 text-sm font-mono text-gray-100"><code v-text="file.content" /></pre>
               </div>
+              <p v-if="file.hint" class="mt-2 text-xs leading-5 text-primary-700 dark:text-primary-300">
+                {{ file.hint }}
+              </p>
             </div>
           </div>
         </section>
@@ -836,7 +839,7 @@ const contextManagementFiles = computed((): FileConfig[] => {
     .replace(/\/v1$/, '')
     .replace(/\/backend-api\/codex$/, '')
   const codexBaseUrl = `${configuredBase}/backend-api/codex`
-  const configContent = `model_provider = "OpenAI"
+  const configContent = `model_provider = "openai"
 model = "gpt-5.5"
 disable_response_storage = true
 openai_base_url = "${codexBaseUrl}"
@@ -859,11 +862,22 @@ enabled = false`
   const commandContent = isWindows
     ? `setx CODEX_AUTHAPI_BASE_URL "${configuredBase}"`
     : `export CODEX_AUTHAPI_BASE_URL="${configuredBase}"`
+  const unsetCommandContent = isWindows
+    ? `[Environment]::SetEnvironmentVariable('CODEX_AUTHAPI_BASE_URL', $null, 'User')
+Remove-Item Env:CODEX_AUTHAPI_BASE_URL -ErrorAction SilentlyContinue`
+    : 'unset CODEX_AUTHAPI_BASE_URL'
 
   return [
     { path: `${configDir}/config.toml`, content: configContent },
     { path: `${configDir}/auth.json`, content: authContent },
-    { path: isWindows ? 'Command Prompt' : 'Terminal', content: commandContent }
+    { path: isWindows ? 'Command Prompt' : 'Terminal', content: commandContent },
+    {
+      path: `${t('keys.useKeyModal.openai.contextManagementUnsetTitle')} (${isWindows ? 'PowerShell' : 'Terminal'})`,
+      content: unsetCommandContent,
+      hint: t(isWindows
+        ? 'keys.useKeyModal.openai.contextManagementUnsetHintWindows'
+        : 'keys.useKeyModal.openai.contextManagementUnsetHintUnix')
+    }
   ]
 })
 

@@ -406,10 +406,16 @@ describe('UseKeyModal', () => {
 
     const guide = wrapper.get('[data-testid="codex-context-management-guide"]')
     const guideContents = guide.findAll('pre code').map((code) => code.text())
+    expect(guideContents).toHaveLength(4)
+    expect(guideContents[0]).toContain('model_provider = "openai"')
+    expect(guideContents[0]).not.toContain('model_provider = "OpenAI"')
     expect(guideContents[0]).toContain('openai_base_url = "https://testwww.smilecodex.space/backend-api/codex"')
     expect(guideContents[0]).toContain('[features.context_management]')
     expect(guideContents[1]).toContain('"personal_access_token": "sk-pat-test"')
     expect(guideContents[2]).toBe('export CODEX_AUTHAPI_BASE_URL="https://testwww.smilecodex.space"')
+    expect(guideContents[3]).toBe('unset CODEX_AUTHAPI_BASE_URL')
+    expect(guide.text()).toContain('keys.useKeyModal.openai.contextManagementUnsetTitle (Terminal)')
+    expect(guide.text()).toContain('keys.useKeyModal.openai.contextManagementUnsetHintUnix')
     expect(wrapper.findAll('pre').map((pre) => pre.element).indexOf(guide.findAll('pre')[0].element)).toBeGreaterThan(0)
 
     const windowsTab = wrapper.findAll('button').find((button) => button.text().trim() === 'Windows')
@@ -420,8 +426,15 @@ describe('UseKeyModal', () => {
     const windowsContents = wrapper.get('[data-testid="codex-context-management-guide"]')
       .findAll('pre code')
       .map((code) => code.text())
+    expect(windowsContents[0]).toContain('model_provider = "openai"')
     expect(windowsContents[0]).toContain('model_catalog_json = "%userprofile%\\.codex\\codex-models.json"')
     expect(windowsContents[2]).toBe('setx CODEX_AUTHAPI_BASE_URL "https://testwww.smilecodex.space"')
+    expect(windowsContents[3]).toBe(
+      "[Environment]::SetEnvironmentVariable('CODEX_AUTHAPI_BASE_URL', $null, 'User')\n" +
+      'Remove-Item Env:CODEX_AUTHAPI_BASE_URL -ErrorAction SilentlyContinue'
+    )
+    expect(guide.text()).toContain('keys.useKeyModal.openai.contextManagementUnsetTitle (PowerShell)')
+    expect(guide.text()).toContain('keys.useKeyModal.openai.contextManagementUnsetHintWindows')
   })
 
   it('renders API Key Mode authorization in OpenAI Codex config', async () => {
