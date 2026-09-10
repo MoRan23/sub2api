@@ -188,8 +188,9 @@ func TestOpenAIWSCurrentTurnFailoverRematerializesForReplacementOwner(t *testing
 	require.Equal(t, planA.RequestTurn, planB.RequestTurn, "one logical turn keeps its request UUID across credential failover")
 	require.NotEqual(t, planA.CredentialOwnerNamespace, planB.CredentialOwnerNamespace)
 	require.NotEqual(t, planA.InstallationID, planB.InstallationID)
-	require.NotEqual(t, planA.TurnIdentity.SessionID, planB.TurnIdentity.SessionID)
-	require.NotEqual(t, planA.TurnIdentity.ThreadID, planB.TurnIdentity.ThreadID)
+	require.Equal(t, planA.TurnIdentity, planB.TurnIdentity)
+	require.Equal(t, planA.Window, planB.Window)
+	require.Equal(t, planA.WindowMappingKey, planB.WindowMappingKey)
 	require.NotEqual(t, planA.PromptCacheKey.Value, planB.PromptCacheKey.Value)
 	require.Equal(t, "review-scope", planB.Capture.PromptCacheKey.Value, "only the outbound override mapping is owner-scoped")
 }
@@ -517,6 +518,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePrompt
 
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
+		setOpenAIDownstreamIdentityTestAPIKey(t, ginCtx)
 		req := r.Clone(r.Context())
 		req.Header = req.Header.Clone()
 		req.URL.Path = "/v1/responses"
@@ -1119,6 +1121,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
+		setOpenAIDownstreamIdentityTestAPIKey(t, ginCtx)
 		req := r.Clone(r.Context())
 		req.Header = req.Header.Clone()
 		req.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
@@ -1733,6 +1736,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
+		setOpenAIDownstreamIdentityTestAPIKey(t, ginCtx)
 		req := r.Clone(r.Context())
 		req.Header = req.Header.Clone()
 		req.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
@@ -1922,6 +1926,7 @@ func runOpenAIWSPassthroughRemoteV2DoneCardinalityTest(t *testing.T, doneCount i
 
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
+		setOpenAIDownstreamIdentityTestAPIKey(t, ginCtx)
 		req := r.Clone(r.Context())
 		req.Header = req.Header.Clone()
 		req.URL.Path = "/v1/responses"
@@ -2100,6 +2105,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_LocalCompactionC
 
 				rec := httptest.NewRecorder()
 				ginCtx, _ := gin.CreateTestContext(rec)
+				setOpenAIDownstreamIdentityTestAPIKey(t, ginCtx)
 				req := r.Clone(r.Context())
 				req.Header = req.Header.Clone()
 				req.URL.Path = "/v1/responses"

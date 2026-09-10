@@ -74,6 +74,7 @@ func TestOpenAISetupTokenImagesUsesOAuthResponsesPath(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	c.Set("api_key", &APIKey{ID: 91})
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusTooManyRequests,
@@ -152,6 +153,7 @@ func TestOpenAISetupTokenChatCompletionsUsesCodexTransform(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	c.Set("api_key", &APIKey{ID: 91})
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -243,7 +245,7 @@ func TestOpenAISetupTokenUsesUnifiedIdentityPlan(t *testing.T) {
 	require.Equal(t, passthroughPlan.TurnIdentity.SessionID, gjson.GetBytes(passthroughBody, "prompt_cache_key").String())
 }
 
-func TestOpenAISetupTokenIdentityPlanIsCredentialOwnerScoped(t *testing.T) {
+func TestOpenAISetupTokenIdentityPlanSharesDownstreamIdentityAcrossCredentialOwners(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-5.4","client_metadata":{"session_id":"shared-logical-session"}}`)
 	options := OpenAIOAuthIdentityPlanOptions{
@@ -267,8 +269,11 @@ func TestOpenAISetupTokenIdentityPlanIsCredentialOwnerScoped(t *testing.T) {
 	first := resolve(802)
 	retry := resolve(802)
 	otherOwner := resolve(803)
-	require.Equal(t, first.TurnIdentity.SessionID, retry.TurnIdentity.SessionID)
-	require.NotEqual(t, first.TurnIdentity.SessionID, otherOwner.TurnIdentity.SessionID)
+	require.Equal(t, first.TurnIdentity, retry.TurnIdentity)
+	require.Equal(t, first.TurnIdentity, otherOwner.TurnIdentity)
+	require.Equal(t, first.Window, otherOwner.Window)
+	require.Equal(t, first.WindowMappingKey, otherOwner.WindowMappingKey)
+	require.Equal(t, OpenAICodexDownstreamIdentityNamespace, first.TurnIdentityNamespace)
 	require.Equal(t, "account:802", first.CredentialOwnerNamespace)
 	require.Equal(t, "account:803", otherOwner.CredentialOwnerNamespace)
 }
@@ -316,6 +321,7 @@ func TestOpenAISetupTokenTurnStateUsesUnifiedPlanProvenance(t *testing.T) {
 	plan := OpenAIOAuthIdentityPlan{
 		APIKeyID:                 93,
 		CredentialOwnerNamespace: "account:806",
+		TurnIdentityNamespace:    OpenAICodexDownstreamIdentityNamespace,
 		TurnIdentityRequested:    true,
 		TurnIdentityEnabled:      true,
 		RequestTurn: OpenAICodexRequestTurnSnapshot{
@@ -378,6 +384,7 @@ func TestOpenAISetupTokenMessagesUsesCodexBridgeAndTurnState(t *testing.T) {
 	firstRec := httptest.NewRecorder()
 	firstCtx, _ := gin.CreateTestContext(firstRec)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
+	firstCtx.Set("api_key", &APIKey{ID: 91})
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
 
 	firstResult, err := svc.ForwardAsAnthropic(context.Background(), firstCtx, account, firstBody, "stable-cache-key", "gpt-5.4")
@@ -404,6 +411,7 @@ func TestOpenAISetupTokenMessagesUsesCodexBridgeAndTurnState(t *testing.T) {
 	secondRec := httptest.NewRecorder()
 	secondCtx, _ := gin.CreateTestContext(secondRec)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
+	secondCtx.Set("api_key", &APIKey{ID: 91})
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
 
 	secondResult, err := svc.ForwardAsAnthropic(context.Background(), secondCtx, account, secondBody, "stable-cache-key", "gpt-5.4")

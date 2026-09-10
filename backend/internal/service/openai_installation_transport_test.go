@@ -72,6 +72,7 @@ func TestOpenAIInstallationNormalHTTPRewritesBodyAndHeaders(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","stream":false,"instructions":"test","input":"hello","client_metadata":{"x-codex-installation-id":"client-body","x-codex-turn-metadata":"{\"installation_id\":\"client-nested-body\",\"session_id\":\"body-session\"}"}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Request.Header.Set(codexInstallationIDKey, "client-header")
@@ -117,6 +118,7 @@ func TestOpenAIInstallationCompactUsesHeadersOnly(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","stream":false,"instructions":"test","input":"hello","client_metadata":{"x-codex-installation-id":"client-body","x-codex-turn-metadata":"{\"installation_id\":\"client-nested-body\"}"}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Request.Header.Set(codexInstallationIDKey, "client-header")
@@ -271,6 +273,7 @@ func TestBuildOpenAIWSHeadersPinsInstallationForPassthrough(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	c.Request.Header.Set(codexInstallationIDKey, "client-header")
 	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"installation_id":"client-nested","session_id":"session-1"}`)
@@ -339,6 +342,7 @@ func TestBuildOpenAIWSHeadersIdentityPlanReuseRequiresCredentialOwnerMatch(t *te
 		ProjectionMode:           OpenAIOAuthIdentityProjectionRegular,
 		InstallationPolicy:       OpenAIOAuthInstallationAccountPin,
 		CredentialOwnerNamespace: openAIOutboundSessionIdentityNamespace(firstAccount),
+		TurnIdentityNamespace:    OpenAICodexDownstreamIdentityNamespace,
 	}
 	SetOpenAIOAuthIdentityPlan(c, firstPlan)
 	_, reused, err := svc.buildOpenAIWSHeadersWithBody(
@@ -403,6 +407,7 @@ func TestOpenAIInstallationIngressWSRewritesEveryResponseCreate(t *testing.T) {
 
 		recorder := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(recorder)
+		setOpenAIDownstreamIdentityTestAPIKey(t, ginCtx)
 		ginCtx.Request = r.Clone(r.Context())
 		readCtx, cancelRead := context.WithTimeout(r.Context(), 3*time.Second)
 		messageType, firstMessage, readErr := conn.Read(readCtx)

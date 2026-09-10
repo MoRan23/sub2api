@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"net/http"
 	"testing"
 	"time"
 
@@ -25,7 +24,7 @@ func TestNewOpenAICodexSessionFirstResolutionAndReuse(t *testing.T) {
 			}
 			account := &Account{ID: 301, Type: AccountTypeOAuth}
 			logical := OpenAICodexLogicalTurnIdentity{SessionKey: "fresh-session", ThreadKey: "fresh-session"}
-			c := newCodexLogicalResolverContext(t, http.Header{})
+			c := newAuthenticatedOutboundIdentityTestContext(t, nil)
 			first, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), c, account, logical)
 			require.NoError(t, err)
 			require.True(t, ok)
@@ -33,7 +32,7 @@ func TestNewOpenAICodexSessionFirstResolutionAndReuse(t *testing.T) {
 			require.False(t, IsNewOpenAICodexSession(c, first.SessionID+" "), "the marker requires the exact session ID")
 			require.False(t, IsNewOpenAICodexSession(c, ""))
 
-			next := newCodexLogicalResolverContext(t, http.Header{})
+			next := newAuthenticatedOutboundIdentityTestContext(t, nil)
 			reused, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), next, account, logical)
 			require.NoError(t, err)
 			require.True(t, ok)
@@ -54,12 +53,12 @@ func TestNewOpenAICodexSessionExistingPrimaryWinner(t *testing.T) {
 	svc := &OpenAIGatewayService{cache: cache, cfg: &config.Config{JWT: config.JWTConfig{Secret: secret}}}
 	account := &Account{ID: 302, Type: AccountTypeOAuth}
 	logical := OpenAICodexLogicalTurnIdentity{SessionKey: "existing-session", ThreadKey: "existing-session"}
-	mappingKey, err := OpenAICodexSessionMappingKey(secret, "account:302", 0, logical.SessionKey)
+	mappingKey, err := OpenAICodexSessionMappingKey(secret, "account:302", 41, logical.SessionKey)
 	require.NoError(t, err)
 	_, err = cache.identityStore().GetOrCreateCodexSession(context.Background(), mappingKey, testOutboundSessionUUID, time.Hour)
 	require.NoError(t, err)
 
-	c := newCodexLogicalResolverContext(t, http.Header{})
+	c := newAuthenticatedOutboundIdentityTestContext(t, nil)
 	identity, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), c, account, logical)
 	require.NoError(t, err)
 	require.True(t, ok)
@@ -73,8 +72,8 @@ type codexFreshSessionUnreadablePrimaryCache struct {
 	err    error
 }
 
-func (s *codexFreshSessionUnreadablePrimaryCache) GetOrCreateCodexSession(context.Context, string, string, time.Duration) (string, error) {
-	return s.winner, s.err
+func (s *codexFreshSessionUnreadablePrimaryCache) ResolveCodexDownstreamSession(context.Context, OpenAICodexDownstreamSessionRequest, time.Duration) (OpenAICodexDownstreamSessionResolution, error) {
+	return OpenAICodexDownstreamSessionResolution{SessionID: s.winner}, s.err
 }
 
 func TestNewOpenAICodexSessionUnreadablePrimaryDoesNotMark(t *testing.T) {
@@ -93,17 +92,23 @@ func TestNewOpenAICodexSessionUnreadablePrimaryDoesNotMark(t *testing.T) {
 			svc := &OpenAIGatewayService{cache: cache, cfg: &config.Config{JWT: config.JWTConfig{Secret: secret}}}
 			account := &Account{ID: 307, Type: AccountTypeOAuth}
 			logical := OpenAICodexLogicalTurnIdentity{SessionKey: "existing-session", ThreadKey: "existing-session"}
-			mappingKey, err := OpenAICodexSessionMappingKey(secret, "account:307", 0, logical.SessionKey)
+			mappingKey, err := OpenAICodexSessionMappingKey(secret, "account:307", 41, logical.SessionKey)
 			require.NoError(t, err)
 			_, err = cache.identityStore().GetOrCreateCodexSession(context.Background(), mappingKey, testOutboundSessionUUID, time.Hour)
 			require.NoError(t, err)
 
-			c := newCodexLogicalResolverContext(t, http.Header{})
+			c := newAuthenticatedOutboundIdentityTestContext(t, nil)
 			identity, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), c, account, logical)
-			require.NoError(t, err)
+			if tc.err != nil {
+				require.ErrorIs(t, err, ErrOpenAICodexDownstreamIdentityStoreUnavailable)
+			} else {
+				require.ErrorIs(t, err, ErrOpenAIOutboundSessionIdentityStoredValueInvalid)
+			}
 			require.True(t, ok)
-			require.NotEqual(t, testOutboundSessionUUID, identity.SessionID, "the local fallback cannot read the existing primary mapping")
-			require.False(t, IsNewOpenAICodexSession(c, identity.SessionID), "a new local fallback does not prove that the primary session is new")
+			require.Empty(t, identity, "a cold failure must not invent a competing session")
+			require.False(t, IsNewOpenAICodexSession(c, testOutboundSessionUUID))
+			marker, _ := c.Get(newOpenAICodexSessionContextKey)
+			require.Empty(t, marker)
 		})
 	}
 }
@@ -114,27 +119,26 @@ func TestNewOpenAICodexSessionAccountSwitchClearsMarker(t *testing.T) {
 	firstAccount := &Account{ID: 303, Type: AccountTypeOAuth}
 	secondAccount := &Account{ID: 304, Type: AccountTypeOAuth}
 	logical := OpenAICodexLogicalTurnIdentity{SessionKey: "same-client-session", ThreadKey: "same-client-session"}
-	seed := newCodexLogicalResolverContext(t, http.Header{})
-	existing, _, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), seed, secondAccount, logical)
-	require.NoError(t, err)
-
-	c := newCodexLogicalResolverContext(t, http.Header{})
+	c := newAuthenticatedOutboundIdentityTestContext(t, nil)
 	fresh, _, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), c, firstAccount, logical)
 	require.NoError(t, err)
 	require.True(t, IsNewOpenAICodexSession(c, fresh.SessionID))
-	require.False(t, IsNewOpenAICodexSession(c, existing.SessionID))
 	reused, _, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), c, secondAccount, logical)
 	require.NoError(t, err)
-	require.Equal(t, existing, reused)
-	require.False(t, IsNewOpenAICodexSession(c, existing.SessionID))
+	require.Equal(t, fresh, reused, "account switches reuse the existing downstream session")
 	require.False(t, IsNewOpenAICodexSession(c, fresh.SessionID))
+	next := newAuthenticatedOutboundIdentityTestContext(t, nil)
+	stable, _, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), next, firstAccount, logical)
+	require.NoError(t, err)
+	require.Equal(t, fresh, stable)
+	require.False(t, IsNewOpenAICodexSession(next, stable.SessionID))
 }
 
 type codexFreshSessionThreadFailureCache struct {
 	outboundIdentityGatewayCacheStub
 }
 
-func (*codexFreshSessionThreadFailureCache) GetOrCreateCodexThread(context.Context, string, string, string, string, time.Duration) (OpenAICodexTurnIdentity, error) {
+func (*codexFreshSessionThreadFailureCache) ResolveCodexDownstreamThread(context.Context, OpenAICodexDownstreamThreadRequest, time.Duration) (OpenAICodexTurnIdentity, error) {
 	return OpenAICodexTurnIdentity{}, ErrOpenAICodexAliasConflict
 }
 
@@ -143,7 +147,7 @@ func TestNewOpenAICodexSessionFailedResolutionDoesNotMark(t *testing.T) {
 	cache := &codexFreshSessionThreadFailureCache{}
 	svc := &OpenAIGatewayService{cache: cache, cfg: &config.Config{JWT: config.JWTConfig{Secret: "fresh-session-failure"}}}
 	account := &Account{ID: 305, Type: AccountTypeOAuth}
-	c := newCodexLogicalResolverContext(t, http.Header{})
+	c := newAuthenticatedOutboundIdentityTestContext(t, nil)
 	c.Set(newOpenAICodexSessionContextKey, testOutboundSessionUUID)
 	_, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), c, account, OpenAICodexLogicalTurnIdentity{
 		SessionKey: "new-session-with-failed-thread", ThreadKey: "descendant-thread",
@@ -167,8 +171,9 @@ func TestNewOpenAICodexSessionNilContext(t *testing.T) {
 	identity, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), nil, &Account{ID: 306, Type: AccountTypeOAuth}, OpenAICodexLogicalTurnIdentity{
 		SessionKey: "nil-context-session", ThreadKey: "nil-context-session",
 	})
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrOpenAICodexDownstreamIdentityScopeMissing)
 	require.True(t, ok)
+	require.Empty(t, identity)
 	require.False(t, IsNewOpenAICodexSession(nil, identity.SessionID))
 }
 

@@ -717,6 +717,7 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
 	c.Request.Header.Set("session_id", "sess-oauth-1")
@@ -1025,6 +1026,7 @@ func TestOpenAIGatewayService_Forward_WSv2_HeaderSessionFallbackFromPromptCacheK
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
 

@@ -53,6 +53,7 @@ func TestHandleChatStreamingResponse_ClassifiesHTTP2ReadError(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
@@ -165,6 +166,7 @@ func TestForwardAsChatCompletions_UnknownModelWithoutMessagesDispatchKeepsReques
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt6","messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -204,6 +206,7 @@ func TestForwardAsChatCompletions_APIKeyPropagatesPromptCacheKeyInResponsesBody(
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -266,6 +269,7 @@ func TestForwardAsChatCompletions_APIKeyAutoDerivesStableIsolatedPromptCacheKey(
 	forward := func(apiKeyID int64, body []byte) {
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
+		setOpenAIDownstreamIdentityTestAPIKey(t, c)
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 		c.Request.Header.Set("Content-Type", "application/json")
 		c.Set("api_key", &APIKey{ID: apiKeyID})
@@ -313,6 +317,7 @@ func TestForwardAsChatCompletions_ResponsesShapeDoesNotAutoDerivePromptCacheKey(
 	forward := func(body []byte, promptCacheKey string) {
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
+		setOpenAIDownstreamIdentityTestAPIKey(t, c)
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 		c.Set("api_key", &APIKey{ID: 99})
 		result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, promptCacheKey, "gpt-5.4")
@@ -337,6 +342,7 @@ func TestForwardAsChatCompletions_OAuthDoesNotInjectDefaultInstructions(t *testi
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -379,6 +385,7 @@ func forwardOAuthChatCompletionsForUpstreamBody(t *testing.T, body []byte) []byt
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
@@ -451,6 +458,7 @@ func TestForwardAsChatCompletions_ClientDisconnectDrainsUpstreamUsage(t *testing
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Writer = &openAIChatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
@@ -498,6 +506,7 @@ func TestForwardAsChatCompletions_BufferedContextWindowResponseFailedReturnsErro
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.5","messages":[{"role":"user","content":"large prompt"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -541,6 +550,7 @@ func TestForwardAsChatCompletions_StreamContextWindowResponseFailedReturnsErrorW
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.5","messages":[{"role":"user","content":"` + strings.Repeat("large prompt ", 6000) + `"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -588,6 +598,7 @@ func TestForwardAsChatCompletions_StreamBareErrorAfterOutputDoesNotFailOver(t *t
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.5","messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -628,6 +639,7 @@ func TestForwardAsChatCompletions_PartialUsageErrorKeepsOutboundTierAndReasoning
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.5","messages":[{"role":"user","content":"hello"}],"service_tier":"fast","reasoning_effort":"high","stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -674,6 +686,7 @@ func TestForwardAsChatCompletions_StreamCyberPolicyNoFailover(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.5","messages":[{"role":"user","content":"` + strings.Repeat("large prompt ", 6000) + `"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -719,6 +732,7 @@ func TestForwardAsChatCompletions_StreamsUsageWithoutClientStreamOptions(t *test
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -771,6 +785,7 @@ func TestForwardAsChatCompletions_StreamsTopLevelTerminalUsage(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -823,6 +838,7 @@ func TestForwardAsChatCompletions_BufferedTopLevelTerminalUsage(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -871,6 +887,7 @@ func TestForwardAsChatCompletions_TerminalUsageWithoutUpstreamCloseReturns(t *te
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Writer = &openAIChatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
@@ -927,6 +944,7 @@ func TestForwardAsChatCompletions_EventNamedTerminalWithoutUpstreamCloseReturns(
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -994,6 +1012,7 @@ func TestForwardAsChatCompletions_EventTypeDoesNotLeakAcrossFrames(t *testing.T)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -1041,6 +1060,7 @@ func TestForwardAsChatCompletions_BufferedTerminalWithoutUpstreamCloseReturns(t 
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -1097,6 +1117,7 @@ func TestForwardAsChatCompletions_DoneSentinelWithoutTerminalReturnsError(t *tes
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -1134,6 +1155,7 @@ func TestForwardAsChatCompletions_UpstreamRequestIgnoresClientCancel(t *testing.
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	reqCtx, cancel := context.WithCancel(context.Background())
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(reqCtx)

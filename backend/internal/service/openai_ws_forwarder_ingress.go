@@ -91,10 +91,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
 	}
-	// A handler may retry the same client connection on a different selected
-	// account. Keep the immutable pre-selection capture, but never reuse the
-	// previous account's generated plan.
-	ClearOpenAIOAuthIdentityPlan(c)
+	// Retain the current turn's frozen downstream identity across account
+	// failover. The facade rematerializes credential-specific fields for the
+	// selected owner; replacing the capture invalidates a different turn's plan.
 	// Direct callers do not pass through the handler's pre-selection capture.
 	// Give each accepted client connection a stable, non-shared fallback seed;
 	// explicit Codex session/thread signals still win inside Capture.
@@ -2310,7 +2309,7 @@ func (s *OpenAIGatewayService) commitOpenAICodexWSCompactionAfterDelivery(
 	expectedWindow := expectedPlan.Window
 	digest, err := OpenAICodexCompactTurnDigest(
 		secret,
-		expectedPlan.CredentialOwnerNamespace,
+		expectedPlan.TurnIdentityNamespace,
 		expectedPlan.APIKeyID,
 		expectedWindow,
 		expectedPlan.RequestTurn.ID,

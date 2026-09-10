@@ -288,7 +288,7 @@ func TestOpenAICodexWindowRuntimeDoesNotFallbackOnSemanticErrors(t *testing.T) {
 		candidate := OpenAICodexWindowSnapshot{ThreadID: testOpenAICodexWindowThread, ContextWindowID: testOpenAICodexContextWindowInitial}
 		_, err := runtime.ResolveOpenAICodexWindow(context.Background(), key, candidate, time.Hour)
 		require.ErrorIs(t, err, ErrOpenAICodexWindowStoredInvalid)
-		require.False(t, local.entries[key].pendingPromotion)
+		require.NotContains(t, local.entries, key, "a failed cold resolve must not retain its candidate")
 	})
 
 	t.Run("commit", func(t *testing.T) {

@@ -132,15 +132,15 @@ func (s *OpenAIGatewayService) commitOpenAICodexCompactionAfterDelivery(
 		logger.LegacyPrintf("service.openai_gateway", "OpenAI Codex compaction window commit skipped: identity secret unavailable")
 		return
 	}
-	mappingKey, err := OpenAICodexWindowMappingKey(
-		s.cfg.JWT.Secret, plan.CredentialOwnerNamespace, plan.APIKeyID, plan.Window.ThreadID,
-	)
-	if err != nil {
-		logger.LegacyPrintf("service.openai_gateway", "OpenAI Codex compaction window mapping failed: %v", err)
+	// The frozen key can alias a migrated legacy window. Recomputing it from
+	// the selected credential would split that window during account failover.
+	mappingKey := plan.WindowMappingKey
+	if !validOpenAICodexWindowMappingKey(mappingKey) {
+		logger.LegacyPrintf("service.openai_gateway", "OpenAI Codex compaction window commit skipped: invalid frozen mapping key")
 		return
 	}
 	digest, err := OpenAICodexCompactTurnDigest(
-		s.cfg.JWT.Secret, plan.CredentialOwnerNamespace, plan.APIKeyID,
+		s.cfg.JWT.Secret, plan.TurnIdentityNamespace, plan.APIKeyID,
 		plan.Window, plan.RequestTurn.ID,
 	)
 	if err != nil {

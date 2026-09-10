@@ -108,6 +108,7 @@ func TestOpenAIWSHTTPBridgeLaterTurn429RetriesCurrentTurnOnReplacementAccount(t 
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
+	cfg.JWT.Secret = "ws-later-turn-frozen-window-secret"
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	cfg.Gateway.OpenAIWS.Enabled = true
@@ -161,6 +162,7 @@ func TestOpenAIWSHTTPBridgeLaterTurn429RetriesCurrentTurnOnReplacementAccount(t 
 
 	serverErrCh := make(chan error, 1)
 	failoverCh := make(chan []byte, 1)
+	windowsCh := make(chan [4]OpenAICodexWindowSnapshot, 1)
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
@@ -171,6 +173,7 @@ func TestOpenAIWSHTTPBridgeLaterTurn429RetriesCurrentTurnOnReplacementAccount(t 
 
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
+		setOpenAIDownstreamIdentityTestAPIKey(t, ginCtx)
 		ginCtx.Request = r.Clone(r.Context())
 		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		_, firstMessage, readErr := conn.Read(readCtx)
@@ -196,11 +199,59 @@ func TestOpenAIWSHTTPBridgeLaterTurn429RetriesCurrentTurnOnReplacementAccount(t 
 			serverErrCh <- errors.New("missing current-turn retry identity capture")
 			return
 		}
+		failedPlan, planOK := OpenAIOAuthIdentityPlanFromContext(ginCtx)
+		if !planOK {
+			serverErrCh <- errors.New("missing failed turn identity plan")
+			return
+		}
+		// Another request may finish compaction while this physical request is
+		// waiting for replacement credentials. Its frozen window must survive.
+		compactTurn, compactErr := uuid.NewV7()
+		if compactErr != nil {
+			serverErrCh <- compactErr
+			return
+		}
+		digest, compactErr := OpenAICodexCompactTurnDigest(cfg.JWT.Secret, failedPlan.TurnIdentityNamespace, failedPlan.APIKeyID, failedPlan.Window, compactTurn.String())
+		if compactErr != nil {
+			serverErrCh <- compactErr
+			return
+		}
+		advanced, compactErr := svc.CommitOpenAICodexWindowSnapshot(r.Context(), failedPlan.WindowMappingKey, failedPlan.Window, digest)
+		if compactErr != nil {
+			serverErrCh <- compactErr
+			return
+		}
 		SetOpenAIOAuthIdentityCapture(ginCtx, retryCapture)
 		failoverCh <- retryPayload
-		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(
+		proxyErr = svc.ProxyResponsesWebSocketFromClient(
 			r.Context(), ginCtx, conn, &nextAccount, "access-token-b", retryPayload, nil,
 		)
+		if proxyErr != nil {
+			serverErrCh <- proxyErr
+			return
+		}
+		retriedPlan, planOK := OpenAIOAuthIdentityPlanFromContext(ginCtx)
+		if !planOK {
+			serverErrCh <- errors.New("missing retried turn identity plan")
+			return
+		}
+		freshCapture := CaptureOpenAIOAuthIdentity(ginCtx, retryPayload, "ws-failover-test")
+		SetOpenAIOAuthIdentityCapture(ginCtx, freshCapture)
+		if _, cached := OpenAIOAuthIdentityPlanFromContext(ginCtx); cached {
+			serverErrCh <- errors.New("fresh capture retained the previous turn plan")
+			return
+		}
+		freshPlan, planErr := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), ginCtx, &nextAccount, freshCapture, OpenAIOAuthIdentityPlanOptions{
+			TurnIdentityEnabled: true,
+			ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
+			InstallationPolicy:  OpenAIOAuthInstallationAccountPin,
+		}, nil)
+		if planErr != nil {
+			serverErrCh <- planErr
+			return
+		}
+		windowsCh <- [4]OpenAICodexWindowSnapshot{failedPlan.Window, advanced.Snapshot, retriedPlan.Window, freshPlan.Window}
+		serverErrCh <- nil
 	}))
 	defer wsServer.Close()
 
@@ -274,7 +325,16 @@ func TestOpenAIWSHTTPBridgeLaterTurn429RetriesCurrentTurnOnReplacementAccount(t 
 	}
 	require.NotEqual(t, "client-session", firstSessionID)
 	require.NotEqual(t, "client-thread", firstThreadID)
-	require.NotEqual(t, firstSessionID, nextSessionID)
-	require.NotEqual(t, firstThreadID, nextThreadID)
+	require.Equal(t, firstSessionID, nextSessionID)
+	require.Equal(t, firstThreadID, nextThreadID)
+	windows := <-windowsCh
+	require.Equal(t, windows[0].Number+1, windows[1].Number)
+	require.Equal(t, windows[0], windows[2], "same current turn must keep its frozen window on replacement credentials")
+	require.Equal(t, windows[1], windows[3], "a fresh capture must observe the completed compaction")
+	for _, body := range upstream.bodies[1:] {
+		metadata := gjson.GetBytes(body, "client_metadata.x-codex-turn-metadata").String()
+		require.Equal(t, windows[0].WindowID(), gjson.Get(metadata, "window_id").String())
+		require.Equal(t, windows[0].ContextWindowID, gjson.Get(metadata, "context_window_id").String())
+	}
 	require.Empty(t, upstream.requests[2].Header.Get(openAIWSTurnStateHeader))
 }

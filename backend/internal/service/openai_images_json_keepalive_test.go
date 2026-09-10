@@ -186,6 +186,7 @@ func TestOpenAIImagesJSONKeepalive_HeartbeatBeforeForwardStillFailsOver(t *testi
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
+	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 
 	svc := &OpenAIGatewayService{

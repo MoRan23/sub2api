@@ -25,7 +25,7 @@ func newOpenAICodexWSCompactWindowTestPlan(t *testing.T, secret string, apiKeyID
 	require.NoError(t, err)
 	contextWindowID, err := uuid.NewV7()
 	require.NoError(t, err)
-	mappingKey, err := OpenAICodexWindowMappingKey(secret, "account:4242", apiKeyID, threadID.String())
+	mappingKey, err := OpenAICodexWindowMappingKey(secret, OpenAICodexDownstreamIdentityNamespace, apiKeyID, threadID.String())
 	require.NoError(t, err)
 
 	plan := OpenAIOAuthIdentityPlan{
@@ -53,6 +53,7 @@ func newOpenAICodexWSCompactWindowTestPlan(t *testing.T, secret string, apiKeyID
 		TurnIdentityRequested:    true,
 		TurnIdentityEnabled:      true,
 		CredentialOwnerNamespace: "account:4242",
+		TurnIdentityNamespace:    OpenAICodexDownstreamIdentityNamespace,
 		APIKeyID:                 apiKeyID,
 	}
 	plan, err = BindOpenAICodexWindowToPlan(plan, OpenAICodexWindowSnapshot{
@@ -307,7 +308,7 @@ func TestOpenAICodexWSCompactionDigestBindsCurrentContextWindow(t *testing.T) {
 	_, _, plan := newOpenAICodexWSCompactWindowTestPlan(t, secret, apiKeyID)
 	first, err := OpenAICodexCompactTurnDigest(
 		secret,
-		plan.CredentialOwnerNamespace,
+		plan.TurnIdentityNamespace,
 		plan.APIKeyID,
 		plan.Window,
 		plan.RequestTurn.ID,
@@ -320,7 +321,7 @@ func TestOpenAICodexWSCompactionDigestBindsCurrentContextWindow(t *testing.T) {
 	conflictingWindow.ContextWindowID = otherContextWindowID.String()
 	second, err := OpenAICodexCompactTurnDigest(
 		secret,
-		plan.CredentialOwnerNamespace,
+		plan.TurnIdentityNamespace,
 		plan.APIKeyID,
 		conflictingWindow,
 		plan.RequestTurn.ID,

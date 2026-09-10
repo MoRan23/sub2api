@@ -898,7 +898,7 @@ func TestOpenAIOutboundIdentityPassthroughConversationHeaderKeepsPairSeed(t *tes
 	cache.mu.Unlock()
 	expected, err := OpenAIOutboundSessionIdentityKey(
 		"transport-identity-test-secret",
-		"account:910006",
+		OpenAICodexDownstreamIdentityNamespace,
 		40,
 		"passthrough-conversation",
 	)
@@ -1035,7 +1035,7 @@ func TestOpenAIOutboundIdentityCompatUsesPreConversionTuple(t *testing.T) {
 
 			expected, keyErr := OpenAICodexSessionMappingKey(
 				"transport-identity-test-secret",
-				openAIOutboundSessionIdentityNamespace(account),
+				OpenAICodexDownstreamIdentityNamespace,
 				apiKeyID,
 				logicalSession,
 			)

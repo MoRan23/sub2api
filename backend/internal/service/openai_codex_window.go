@@ -120,34 +120,36 @@ type OpenAICodexWindowStore interface {
 	CommitOpenAICodexWindow(ctx context.Context, mappingKey string, expected OpenAICodexWindowSnapshot, compactDigest, proposedNextContextWindowID string, ttl time.Duration) (OpenAICodexWindowCommitResult, error)
 }
 
-// OpenAICodexWindowMappingKey isolates a window by credential owner, downstream
-// API key and the already-resolved UUIDv7 thread without retaining those raw
-// values in Redis.
-func OpenAICodexWindowMappingKey(secret, credentialOwnerNamespace string, apiKeyID int64, threadID string) (string, error) {
+// OpenAICodexWindowMappingKey isolates a window by the supplied identity scope,
+// downstream API key and resolved UUIDv7 thread. Current turns use a downstream
+// scope; the unchanged HMAC algorithm also locates old account-scoped records
+// during migration without retaining the raw values in Redis.
+func OpenAICodexWindowMappingKey(secret, identityNamespace string, apiKeyID int64, threadID string) (string, error) {
 	if apiKeyID < 0 {
 		return "", errOpenAIOutboundSessionIdentityKeyEmpty
 	}
-	credentialOwnerNamespace = sanitizeSessionID(credentialOwnerNamespace)
+	identityNamespace = sanitizeSessionID(identityNamespace)
 	threadID, err := canonicalUUIDv7(threadID)
 	if err != nil {
 		return "", errOpenAIOutboundSessionIdentityKeyEmpty
 	}
 	return openAICodexHMAC(secret, openAICodexWindowKeyDomain,
-		credentialOwnerNamespace, strconv.FormatInt(apiKeyID, 10), threadID)
+		identityNamespace, strconv.FormatInt(apiKeyID, 10), threadID)
 }
 
 // OpenAICodexCompactTurnDigest is the idempotency token for one successful
 // compact installation. The full immutable pre-window identity is part of the
 // domain so a compact result cannot be installed into a same-number context
-// from another lineage.
-func OpenAICodexCompactTurnDigest(secret, credentialOwnerNamespace string, apiKeyID int64, expected OpenAICodexWindowSnapshot, compactTurnID string) (string, error) {
+// from another lineage. Callers use the downstream identity scope so switching
+// upstream accounts does not change the idempotency token.
+func OpenAICodexCompactTurnDigest(secret, identityNamespace string, apiKeyID int64, expected OpenAICodexWindowSnapshot, compactTurnID string) (string, error) {
 	if apiKeyID < 0 || expected.Number >= OpenAICodexWindowMaxNumber || ValidateOpenAICodexWindowSnapshot(expected) != nil {
 		return "", errOpenAIOutboundSessionIdentityKeyEmpty
 	}
-	credentialOwnerNamespace = sanitizeSessionID(credentialOwnerNamespace)
+	identityNamespace = sanitizeSessionID(identityNamespace)
 	compactTurnID = sanitizeSessionID(compactTurnID)
 	return openAICodexHMAC(secret, openAICodexCompactTurnDomain,
-		credentialOwnerNamespace, strconv.FormatInt(apiKeyID, 10), expected.ThreadID,
+		identityNamespace, strconv.FormatInt(apiKeyID, 10), expected.ThreadID,
 		strconv.FormatUint(expected.Number, 10), expected.ContextWindowID, compactTurnID)
 }
 
@@ -202,10 +204,12 @@ type openAICodexWindowLocalEntry struct {
 }
 
 type openAICodexWindowLocalStore struct {
-	mu         sync.Mutex
-	entries    map[string]*openAICodexWindowLocalEntry
-	recency    *list.List
-	maxEntries int
+	mu             sync.Mutex
+	entries        map[string]*openAICodexWindowLocalEntry
+	recency        *list.List
+	maxEntries     int
+	mappingAliases map[string]*openAICodexWindowMappingLocalEntry
+	mappingRecency *list.List
 }
 
 func newOpenAICodexWindowLocalStore(maxEntries int) *openAICodexWindowLocalStore {
@@ -220,12 +224,17 @@ func newOpenAICodexWindowLocalStore(maxEntries int) *openAICodexWindowLocalStore
 }
 
 func (s *openAICodexWindowLocalStore) ResolveOpenAICodexWindow(_ context.Context, mappingKey string, candidate OpenAICodexWindowSnapshot, ttl time.Duration) (OpenAICodexWindowSnapshot, error) {
+	snapshot, _, err := s.resolveOpenAICodexWindow(mappingKey, candidate, ttl, false)
+	return snapshot, err
+}
+
+func (s *openAICodexWindowLocalStore) resolveOpenAICodexWindow(mappingKey string, candidate OpenAICodexWindowSnapshot, ttl time.Duration, existingOnly bool) (OpenAICodexWindowSnapshot, bool, error) {
 	candidate = normalizeOpenAICodexWindowHistory(candidate)
 	if !validOpenAICodexWindowMappingKey(mappingKey) {
-		return OpenAICodexWindowSnapshot{}, errors.New("openai Codex window mapping key must be a lowercase SHA-256 digest")
+		return OpenAICodexWindowSnapshot{}, false, errors.New("openai Codex window mapping key must be a lowercase SHA-256 digest")
 	}
 	if err := ValidateOpenAICodexWindowSnapshot(candidate); err != nil {
-		return OpenAICodexWindowSnapshot{}, err
+		return OpenAICodexWindowSnapshot{}, false, err
 	}
 	ttl = normalizeOpenAICodexWindowTTL(ttl)
 	now := time.Now()
@@ -234,14 +243,17 @@ func (s *openAICodexWindowLocalStore) ResolveOpenAICodexWindow(_ context.Context
 	defer s.mu.Unlock()
 	entry := s.liveEntryLocked(mappingKey, now)
 	if entry == nil {
+		if existingOnly {
+			return OpenAICodexWindowSnapshot{}, false, nil
+		}
 		entry = s.insertLocked(mappingKey, candidate, now.Add(ttl), false)
 	} else {
 		if ValidateOpenAICodexWindowSnapshot(entry.snapshot) != nil {
-			return OpenAICodexWindowSnapshot{}, ErrOpenAICodexWindowStoredInvalid
+			return OpenAICodexWindowSnapshot{}, false, ErrOpenAICodexWindowStoredInvalid
 		}
 		entry.snapshot = normalizeOpenAICodexWindowHistory(entry.snapshot)
 		if entry.snapshot.ThreadID != candidate.ThreadID {
-			return OpenAICodexWindowSnapshot{}, ErrOpenAICodexWindowStoredInvalid
+			return OpenAICodexWindowSnapshot{}, false, ErrOpenAICodexWindowStoredInvalid
 		}
 		if candidate.Number > entry.snapshot.Number {
 			entry.snapshot = candidate
@@ -249,7 +261,7 @@ func (s *openAICodexWindowLocalStore) ResolveOpenAICodexWindow(_ context.Context
 		entry.expiresAt = now.Add(ttl)
 		s.recency.MoveToFront(entry.recency)
 	}
-	return entry.snapshot, nil
+	return entry.snapshot, true, nil
 }
 
 func (s *openAICodexWindowLocalStore) CommitOpenAICodexWindow(_ context.Context, mappingKey string, expected OpenAICodexWindowSnapshot, compactDigest, proposedNextContextWindowID string, ttl time.Duration) (OpenAICodexWindowCommitResult, error) {
@@ -414,13 +426,41 @@ func (s *OpenAICodexWindowRuntimeStore) ResolveOpenAICodexWindow(ctx context.Con
 		return OpenAICodexWindowSnapshot{}, ErrOpenAICodexWindowStoreUnavailable
 	}
 	ttl = normalizeOpenAICodexWindowTTL(ttl)
-	localWinner, err := s.local.ResolveOpenAICodexWindow(ctx, mappingKey, candidate, ttl)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if s.primary == nil {
+		localWinner, err := s.local.ResolveOpenAICodexWindow(ctx, mappingKey, candidate, ttl)
+		if err != nil {
+			return OpenAICodexWindowSnapshot{}, err
+		}
+		s.local.markPending(mappingKey, ttl)
+		return localWinner, nil
+	}
+	// Lookup, expiry and reuse are one operation: an eviction between a warm
+	// probe and candidate insertion must not turn a failed read into a new window.
+	localWinner, warm, err := s.local.resolveOpenAICodexWindow(mappingKey, candidate, ttl, true)
 	if err != nil {
 		return OpenAICodexWindowSnapshot{}, err
 	}
-	if s.primary == nil {
-		s.local.markPending(mappingKey, ttl)
-		return localWinner, nil
+	if !warm {
+		// A candidate is not proof of an existing lineage. In particular, a
+		// newly inherited alias can point at an advanced remote window. Never
+		// cache its initial candidate after a failed primary read.
+		candidate = normalizeOpenAICodexWindowHistory(candidate)
+		if !validOpenAICodexWindowMappingKey(mappingKey) || ValidateOpenAICodexWindowSnapshot(candidate) != nil {
+			return OpenAICodexWindowSnapshot{}, ErrOpenAICodexWindowStoredInvalid
+		}
+		primaryCtx, cancel := context.WithTimeout(ctx, openAICodexWindowStoreTimeout)
+		winner, err := s.primary.ResolveOpenAICodexWindow(primaryCtx, mappingKey, candidate, ttl)
+		cancel()
+		if err != nil {
+			return OpenAICodexWindowSnapshot{}, err
+		}
+		if ValidateOpenAICodexWindowSnapshot(winner) != nil || winner.ThreadID != candidate.ThreadID || winner.Number < candidate.Number {
+			return OpenAICodexWindowSnapshot{}, ErrOpenAICodexWindowStoredInvalid
+		}
+		return s.local.acceptPrimary(mappingKey, winner, ttl), nil
 	}
 	primaryCtx, cancel := context.WithTimeout(ctx, openAICodexWindowStoreTimeout)
 	primaryWinner, err := s.primary.ResolveOpenAICodexWindow(primaryCtx, mappingKey, localWinner, ttl)
