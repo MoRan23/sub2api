@@ -601,7 +601,7 @@ export default {
         environmentFingerprintDesc:
           'Edits only the operating system, architecture, and terminal suffix. The client family and version remain system-managed.',
         environmentFingerprintCreateDesc: 'The system generates an environment fingerprint when the account is created. You can review and edit it from account details afterward.',
-        environmentFingerprintPlaceholder: '(Ubuntu 22.4.0; x86_64) xterm-256color',
+        environmentFingerprintPlaceholder: '(Ubuntu 24.04.4; x86_64) xterm-256color',
         environmentFingerprintShadowHint: 'The environment fingerprint is inherited from the parent account and is not displayed or submitted here.',
         environmentFingerprintRequired: 'Environment fingerprint is required',
         environmentFingerprintInvalid: 'The environment fingerprint must be single-line printable ASCII and at most 256 characters',

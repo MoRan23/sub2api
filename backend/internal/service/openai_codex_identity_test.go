@@ -341,7 +341,7 @@ func TestNormalizeCodexClientVersion(t *testing.T) {
 
 func TestBuildCodexCLIUserAgent(t *testing.T) {
 	require.Equal(t,
-		"codex-tui/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.200.1)",
+		"codex-tui/0.200.1 (Ubuntu 24.04.4; x86_64) xterm-256color (codex-tui; 0.200.1)",
 		buildCodexCLIUserAgent("0.200.1"),
 	)
 	// 非法版本号必须回退到内置 UA，不能拼出畸形身份。
@@ -356,14 +356,14 @@ func TestCodexCanonicalUserAgentFollowsResolver(t *testing.T) {
 	})
 	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
 
-	require.Equal(t, "codex-tui/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.200.1)", CodexCanonicalUserAgent())
+	require.Equal(t, "codex-tui/0.200.1 (Ubuntu 24.04.4; x86_64) xterm-256color (codex-tui; 0.200.1)", CodexCanonicalUserAgent())
 	require.Equal(t, "0.200.1", CodexCanonicalClientVersion())
 
 	h := make(http.Header)
 	h.Set("version", "0.1.0")
 	ApplyCodexCanonicalAuthIdentity(h)
 	require.Equal(t, openai.CodexDefaultOriginator, h.Get("originator"))
-	require.Equal(t, "codex-tui/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.200.1)", h.Get("user-agent"))
+	require.Equal(t, "codex-tui/0.200.1 (Ubuntu 24.04.4; x86_64) xterm-256color (codex-tui; 0.200.1)", h.Get("user-agent"))
 	// 凭据面不发 version 头（真实客户端在 auth.openai.com 只带 originator + UA）。
 	require.Empty(t, h.Get("version"))
 }

@@ -512,7 +512,7 @@ export default {
         antigravityUserAgentVersionPlaceholder: '1.23.2',
         antigravityUserAgentVersionHint: '留空时使用 ANTIGRAVITY_USER_AGENT_VERSION 或内置默认值 1.23.2；填写后后台设置优先。',
         openaiCodexUserAgent: 'OpenAI Codex UA',
-        openaiCodexUserAgentPlaceholder: 'codex-tui/{version} (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; {version})',
+        openaiCodexUserAgentPlaceholder: 'codex-tui/{version} (Ubuntu 24.04.4; x86_64) xterm-256color (codex-tui; {version})',
         openaiCodexUserAgentHint: '该字段只为 OpenAI OAuth 出站 UA 提供 OS、架构和终端信息。客户端名、originator、首段与尾部版本以及 version 头均由后端按当前生效版本强制规范为 codex-tui；留空时使用占位符所示的标准环境。',
         openaiCodexClientVersion: 'Codex 客户端版本号',
         openaiCodexClientVersionPlaceholder: '留空则跟随自动同步',

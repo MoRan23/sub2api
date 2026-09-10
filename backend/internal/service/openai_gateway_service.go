@@ -37,7 +37,7 @@ const (
 	// {originator}/{version} ({OS} {OS_version}; {arch}) {terminal}
 	// 缺少 OS/架构/终端后缀的形态易被上游指纹识别为非官方客户端。
 	// 这里只定义默认环境；完整 UA 统一由 buildCodexCLIUserAgent 构造。
-	codexCLIEnvironmentFingerprint = "(Ubuntu 22.4.0; x86_64) xterm-256color"
+	codexCLIEnvironmentFingerprint = "(Ubuntu 24.04.4; x86_64) xterm-256color"
 	// codex_cli_only 拒绝时单个请求头日志长度上限（字符）
 	codexCLIOnlyHeaderValueMaxBytes = 256
 

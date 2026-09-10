@@ -519,7 +519,7 @@ export default {
         antigravityUserAgentVersionPlaceholder: '1.23.2',
         antigravityUserAgentVersionHint: 'Leave empty to use ANTIGRAVITY_USER_AGENT_VERSION or the built-in default 1.23.2; when set, the admin setting takes precedence.',
         openaiCodexUserAgent: 'OpenAI Codex UA',
-        openaiCodexUserAgentPlaceholder: 'codex-tui/{version} (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; {version})',
+        openaiCodexUserAgentPlaceholder: 'codex-tui/{version} (Ubuntu 24.04.4; x86_64) xterm-256color (codex-tui; {version})',
         openaiCodexUserAgentHint: 'This field only supplies the OS, architecture, and terminal details for OpenAI OAuth outbound User-Agents. The backend always normalizes the client name, originator, leading and trailing versions, and version header to the active codex-tui identity. Leave it empty to use the standard environment shown in the placeholder.',
         openaiCodexClientVersion: 'Codex client version',
         openaiCodexClientVersionPlaceholder: 'Leave empty to follow auto-sync',
