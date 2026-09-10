@@ -187,11 +187,9 @@ func PrepareOpenAIRequestTimezone(body []byte, policy openai.RequestPolicy, acce
 			report.Status, report.Reason = "disabled", "conversion_disabled"
 		case occurrence.item.Status != "valid":
 			report.Status, report.Reason = "skipped", occurrence.item.Reason
-		case occurrence.environment && !occurrence.item.Current:
-			report.Status, report.Reason = "skipped", "historical"
 		case locationErr != nil:
 			report.Status, report.Reason = "skipped", "target_timezone_unavailable"
-		case occurrence.hasDate && acceptedAt.IsZero():
+		case occurrence.hasDate && occurrence.item.Current && acceptedAt.IsZero():
 			report.Status, report.Reason = "skipped", "accepted_at_unavailable"
 		default:
 			output := OpenAIRequestTimezone
@@ -200,7 +198,9 @@ func PrepareOpenAIRequestTimezone(body []byte, policy openai.RequestPolicy, acce
 				// Apply text replacements backwards so both offsets describe the
 				// original environment block, regardless of tag ordering.
 				replacements := []timezoneTextReplacement{{occurrence.zoneStart, occurrence.zoneEnd, OpenAIRequestTimezone}}
-				if occurrence.hasDate {
+				// History shares the target timezone but retains its recorded date.
+				// Only the frozen current candidate uses this request's ingress date.
+				if occurrence.hasDate && occurrence.item.Current {
 					report.DateAfter = acceptedAt.In(openAIRequestTimezoneLocation.location).Format("2006-01-02")
 					report.TimeBasis = "gateway_received_at"
 					report.ReceivedAt = acceptedAt.UTC().Format(time.RFC3339Nano)
@@ -239,6 +239,9 @@ func PrepareOpenAIRequestTimezone(body []byte, policy openai.RequestPolicy, acce
 			}
 			report.Output = OpenAIRequestTimezone
 			report.Status, report.Reason = "converted", "timezone_converted"
+			if occurrence.environment && !occurrence.item.Current {
+				report.Reason = "historical_timezone_converted"
+			}
 			if report.Original == report.Output && report.DateBefore == report.DateAfter {
 				report.Status, report.Reason = "unchanged", "already_target"
 			}
@@ -359,7 +362,7 @@ func (s *requestTimezoneScanner) scanMessages(messages gjson.Result, path string
 				s.markHistorical(lastCurrent)
 			}
 			// Only the final candidate in the tail is current, even if it is
-			// malformed or quoted; never fall back to an earlier valid block.
+			// malformed or quoted; never refresh an earlier block's date instead.
 			for j := before; j < len(s.occurrences)-1; j++ {
 				s.markHistorical(j)
 			}
@@ -383,9 +386,6 @@ func (s *requestTimezoneScanner) countNode() bool {
 
 func (s *requestTimezoneScanner) markHistorical(index int) {
 	s.occurrences[index].item.Current = false
-	if s.occurrences[index].item.Status == "valid" {
-		s.occurrences[index].item.Reason = "historical"
-	}
 }
 
 func (s *requestTimezoneScanner) countText(value string) bool {
@@ -478,9 +478,6 @@ func (s *requestTimezoneScanner) scanText(text, path string, current bool) {
 	}
 	occurrence.zoneStart, occurrence.zoneEnd, occurrence.dateStart, occurrence.dateEnd, occurrence.hasDate = zoneStart, zoneEnd, dateStart, dateEnd, datePresent
 	occurrence.item.Status, occurrence.item.Reason = "valid", ""
-	if !current {
-		occurrence.item.Reason = "historical"
-	}
 	s.add(occurrence)
 }
 

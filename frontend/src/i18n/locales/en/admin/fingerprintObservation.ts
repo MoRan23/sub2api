@@ -104,6 +104,7 @@ export default {
       reasons: {
         conversion_disabled: 'Conversion is disabled',
         historical: 'Historical environment preserved',
+        historical_timezone_converted: 'Historical environment timezone converted; original date preserved',
         target_timezone_unavailable: 'Target timezone unavailable',
         accepted_at_unavailable: 'Request receipt time unavailable',
         patch_failed: 'Conversion patch could not be applied',

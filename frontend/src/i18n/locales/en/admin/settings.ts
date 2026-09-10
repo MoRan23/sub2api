@@ -571,7 +571,7 @@ export default {
         title: 'OpenAI request timezone and residency',
         description: 'Applies to OAuth and API Key upstreams, independently of fingerprint normalization and observation.',
         timezoneTitle: 'Convert request timezone',
-        timezoneHint: 'Convert supported environment context and web search tool timezones to America/Los_Angeles. The current environment date is calculated from the first gateway receipt time and stays fixed across retries. Historical context and the server global timezone are unchanged.',
+        timezoneHint: 'Convert supported environment context and web search tool timezones to America/Los_Angeles. The current environment date is calculated from the first gateway receipt time and stays fixed across retries. Historical environments have only their timezone converted; their dates are preserved. The server global timezone is unchanged.',
         passthroughTitle: 'Convert timezone in passthrough requests',
         passthroughHint: 'Also convert supported content in passthrough requests. Requires request timezone conversion; disabling the parent switch retains this setting.',
         residencyTitle: 'Force US residency request header',

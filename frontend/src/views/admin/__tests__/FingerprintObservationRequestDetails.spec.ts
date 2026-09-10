@@ -45,16 +45,16 @@ describe('FingerprintObservationRequestDetails', () => {
       inbound_timezone_observations: { scan_status: 'complete', items: [
         { source: 'environment_context', path: 'input.0.content.0.text', value: 'Asia/Shanghai', current: true, current_date: '2026-09-10', status: 'valid' },
         { source: 'web_search', path: 'tools.0.user_location.timezone', value: 'Europe/London', current: false, status: 'valid' },
-        { source: 'environment_context', path: 'input.2.content.0.text', value: 'Asia/Tokyo', current: false, status: 'valid', reason: 'historical' },
+        { source: 'environment_context', path: 'input.2.content.0.text', value: 'Asia/Tokyo', current: false, current_date: '2026-08-01', status: 'valid' },
       ] },
       outbound_timezone_observations: { scan_status: 'complete', items: [
         { source: 'environment_context', path: 'input.0.content.0.text', value: 'America/Los_Angeles', current: true, current_date: '2026-09-09', status: 'valid' },
         { source: 'web_search', path: 'tools.0.user_location.timezone', value: 'America/Los_Angeles', current: false, status: 'valid' },
-        { source: 'environment_context', path: 'input.2.content.0.text', value: 'Asia/Tokyo', current: false, status: 'valid', reason: 'historical' },
+        { source: 'environment_context', path: 'input.2.content.0.text', value: 'America/Los_Angeles', current: false, current_date: '2026-08-01', status: 'valid' },
       ] },
       timezone_conversions: [
         { source: 'environment_context', path: 'input.0.content.0.text', original: 'Asia/Shanghai', output: 'America/Los_Angeles', date_before: '2026-09-10', date_after: '2026-09-09', status: 'converted', time_basis: 'gateway_received_at', received_at: '2026-09-10T05:30:00Z', reason: 'timezone_converted' },
-        { source: 'environment_context', path: 'input.2.content.0.text', original: 'Asia/Tokyo', output: 'Asia/Tokyo', status: 'skipped', reason: 'historical' },
+        { source: 'environment_context', path: 'input.2.content.0.text', original: 'Asia/Tokyo', output: 'America/Los_Angeles', date_before: '2026-08-01', date_after: '2026-08-01', status: 'converted', reason: 'historical_timezone_converted' },
       ],
     })
 
@@ -65,15 +65,31 @@ describe('FingerprintObservationRequestDetails', () => {
     expect(within(inbound).getByText('Asia/Shanghai')).toBeTruthy()
     expect(within(inbound).getByText('Europe/London')).toBeTruthy()
     expect(within(inbound).queryByText('America/Los_Angeles')).toBeNull()
-    expect(within(outbound).getAllByText('America/Los_Angeles')).toHaveLength(2)
-    expect(within(outbound).getByText('Asia/Tokyo')).toBeTruthy()
+    expect(within(outbound).getAllByText('America/Los_Angeles')).toHaveLength(3)
+    expect(within(outbound).queryByText('Asia/Tokyo')).toBeNull()
     expect(within(outbound).getByText('2026-09-09')).toBeTruthy()
     expect(within(report).getByText('Date calculated from gateway receipt time')).toBeTruthy()
     expect(within(report).getByText(/09\/09\/2026, 22:30:00 PDT/)).toBeTruthy()
-    expect(within(report).getByText('Historical environment preserved')).toBeTruthy()
+    expect(within(inbound).getByText('2026-08-01')).toBeTruthy()
+    expect(within(outbound).getByText('2026-08-01')).toBeTruthy()
+    const historicalRow = within(report).getByText('Historical environment timezone converted; original date preserved').closest('tr')!
+    expect(within(historicalRow).getAllByText('2026-08-01')).toHaveLength(2)
+    expect(within(historicalRow).getByText('Converted')).toBeTruthy()
+    expect(within(historicalRow).queryByText('Date calculated from gateway receipt time')).toBeNull()
+    expect(within(historicalRow).queryByText(/Gateway receipt time/)).toBeNull()
 
     await fireEvent.click(screen.getByText('Timezone and residency details'))
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Processing report' })).toBeNull())
+  })
+
+  it('keeps the historical skip explanation for observations created by older versions', async () => {
+    renderDetails({
+      timezone_conversions: [{ source: 'environment_context', path: 'input.0.content', original: 'Asia/Tokyo', output: 'Asia/Tokyo', status: 'skipped', reason: 'historical' }],
+    })
+    const report = await openDetails()
+    expect(within(report).getByText('Historical environment preserved')).toBeTruthy()
+    expect(within(report).getByText('Skipped')).toBeTruthy()
+    expect(within(report).queryByText('Historical environment timezone converted; original date preserved')).toBeNull()
   })
 
   it('keeps legacy missing data separate from a complete empty scan and an absent residency header', async () => {

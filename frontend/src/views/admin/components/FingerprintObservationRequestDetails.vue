@@ -126,7 +126,7 @@ function sourceLabel(source: RequestTimezoneSource): string {
 }
 
 const knownReasons = new Set([
-  'conversion_disabled', 'historical', 'target_timezone_unavailable', 'accepted_at_unavailable',
+  'conversion_disabled', 'historical', 'historical_timezone_converted', 'target_timezone_unavailable', 'accepted_at_unavailable',
   'patch_failed', 'timezone_converted', 'already_target', 'scan_limited', 'scan_parse_failed',
   'scan_not_applicable', 'environment_not_standalone', 'malformed_or_duplicate_tags',
   'timezone_missing', 'invalid_timezone', 'invalid_current_date', 'timezone_null', 'timezone_not_string',

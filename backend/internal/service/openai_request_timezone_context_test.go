@@ -26,7 +26,9 @@ func TestOpenAIRequestTimezoneIngressSnapshotSurvivesBootstrap(t *testing.T) {
 	adapted, err := sjson.SetBytes(body, "input.1", map[string]any{"role": "user", "content": "heartbeat"})
 	require.NoError(t, err)
 	out := svc.prepareOpenAIRequestTimezone(c.Request.Context(), c, newOpenAIIdentityPathAPIKeyAccount(1), adapted, false)
-	require.JSONEq(t, string(adapted), string(out), "bootstrap role changes must not promote a historical environment")
+	expected, err := sjson.SetBytes(adapted, "input.0.content", timezoneTestEnvironment(OpenAIRequestTimezone, "2020-01-01"))
+	require.NoError(t, err)
+	require.JSONEq(t, string(expected), string(out), "bootstrap role changes must not refresh a historical date")
 }
 
 func TestOpenAIRequestTimezoneIngressSnapshotMapsCompactionReorder(t *testing.T) {
@@ -95,7 +97,12 @@ func TestOpenAIRequestTimezoneHTTPWire(t *testing.T) {
 		t.Run(route, func(t *testing.T) {
 			enableOpenAIIdentityPathFingerprintObservation(t)
 			payload := map[string]any{"model": "gpt-5.4", "stream": false, "prompt_cache_key": "timezone-wire-" + route}
-			input := []any{map[string]any{"role": "user", "content": timezoneTestEnvironment("Asia/Shanghai", "2026-09-10")}, map[string]any{"role": "user", "content": "What is today's date?"}}
+			input := []any{
+				map[string]any{"role": "user", "content": timezoneTestEnvironment("Asia/Tokyo", "2026-01-02")},
+				map[string]any{"role": "assistant", "content": "Earlier answer"},
+				map[string]any{"role": "user", "content": timezoneTestEnvironment("Asia/Shanghai", "2026-09-10")},
+				map[string]any{"role": "user", "content": "What is today's date?"},
+			}
 			path := "/custom/responses"
 			if route == "chat" || route == "messages" || route == "raw_chat" {
 				payload["messages"] = input
@@ -169,16 +176,22 @@ func TestOpenAIRequestTimezoneHTTPWire(t *testing.T) {
 				require.Equal(t, []string{"us"}, actual.headers.Values(openai.CodexResidencyHeaderName))
 				scan := ScanOpenAIRequestTimezones(actual.body)
 				require.Equal(t, "complete", scan.ScanStatus)
-				require.Len(t, scan.Items, 1)
+				require.Len(t, scan.Items, 2)
 				require.Equal(t, OpenAIRequestTimezone, scan.Items[0].Value)
-				require.Equal(t, "2026-09-09", scan.Items[0].CurrentDate)
+				require.Equal(t, "2026-01-02", scan.Items[0].CurrentDate)
+				require.False(t, scan.Items[0].Current)
+				require.Equal(t, OpenAIRequestTimezone, scan.Items[1].Value)
+				require.Equal(t, "2026-09-09", scan.Items[1].CurrentDate)
 				entries := SnapshotFingerprintObservations(0)
 				require.NotEmpty(t, entries)
 				require.Equal(t, "us", entries[0].OutboundCodexResidency)
 				require.NotNil(t, entries[0].InboundTimezoneObservations)
-				require.Equal(t, "Asia/Shanghai", entries[0].InboundTimezoneObservations.Items[0].Value)
+				require.Equal(t, "Asia/Tokyo", entries[0].InboundTimezoneObservations.Items[0].Value)
+				require.Equal(t, "Asia/Shanghai", entries[0].InboundTimezoneObservations.Items[1].Value)
 				require.Equal(t, OpenAIRequestTimezone, entries[0].OutboundTimezoneObservations.Items[0].Value)
 				require.Equal(t, "matched", entries[0].TimezoneComparisonStatus)
+				require.Equal(t, "historical_timezone_converted", entries[0].TimezoneConversions[0].Reason)
+				require.Equal(t, "2026-01-02", entries[0].TimezoneConversions[0].DateAfter)
 			case <-time.After(time.Second):
 				t.Fatal("no upstream request received")
 			}

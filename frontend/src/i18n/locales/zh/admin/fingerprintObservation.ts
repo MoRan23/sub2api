@@ -104,6 +104,7 @@ export default {
       reasons: {
         conversion_disabled: '转换开关未开启',
         historical: '历史环境保留原文',
+        historical_timezone_converted: '历史环境时区已转换，日期保留原值',
         target_timezone_unavailable: '目标时区不可用',
         accepted_at_unavailable: '请求接收时刻不可用',
         patch_failed: '转换补丁未能应用',

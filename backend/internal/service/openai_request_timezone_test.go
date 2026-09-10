@@ -47,8 +47,8 @@ func TestOpenAIRequestTimezoneCurrentTailAndUntouchedData(t *testing.T) {
 		"timezone": "Europe/Berlin", "timestamp": json.RawMessage(`9007199254740993`),
 	})
 	out, state := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true)
-	if got := gjson.GetBytes(out, "input.0.content").String(); got != historical {
-		t.Fatalf("historical input changed: %s", got)
+	if got := gjson.GetBytes(out, "input.0.content").String(); got != timezoneTestEnvironment(OpenAIRequestTimezone, "2026-08-01") {
+		t.Fatalf("historical timezone or date is wrong: %s", got)
 	}
 	got := gjson.GetBytes(out, "input.2.content.0.text").String()
 	if !strings.Contains(got, "<current_date>2026-09-09</current_date>") || !strings.Contains(got, "<timezone>America/Los_Angeles</timezone>") {
@@ -65,7 +65,7 @@ func TestOpenAIRequestTimezoneCurrentTailAndUntouchedData(t *testing.T) {
 	if state.Inbound.ScanStatus != "complete" || len(state.Conversions) != 3 {
 		t.Fatalf("unexpected observation: %+v", state)
 	}
-	if state.Conversions[0].Reason != "historical" || state.Conversions[1].TimeBasis != "gateway_received_at" || state.Conversions[1].ReceivedAt != "2026-09-10T02:30:00Z" {
+	if state.Conversions[0].Reason != "historical_timezone_converted" || state.Conversions[0].Status != "converted" || state.Conversions[0].DateAfter != "2026-08-01" || state.Conversions[0].TimeBasis != "" || state.Conversions[0].ReceivedAt != "" || state.Conversions[1].TimeBasis != "gateway_received_at" || state.Conversions[1].ReceivedAt != "2026-09-10T02:30:00Z" {
 		t.Fatalf("wrong conversion reasons: %+v", state.Conversions)
 	}
 	observed := ScanOpenAIRequestTimezones(out)
@@ -74,7 +74,7 @@ func TestOpenAIRequestTimezoneCurrentTailAndUntouchedData(t *testing.T) {
 	}
 }
 
-func TestOpenAIRequestTimezoneDoesNotFallBackToEarlierCandidate(t *testing.T) {
+func TestOpenAIRequestTimezoneDoesNotRefreshEarlierDateForInvalidCurrentCandidate(t *testing.T) {
 	valid := timezoneTestEnvironment("Asia/Shanghai", "2026-09-10")
 	cases := map[string]string{
 		"quoted":           "> " + valid,
@@ -95,8 +95,8 @@ func TestOpenAIRequestTimezoneDoesNotFallBackToEarlierCandidate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			body := timezoneTestBody(t, map[string]any{"messages": []any{map[string]any{"role": "user", "content": valid}, map[string]any{"role": "user", "content": invalid}}})
 			out, state := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true)
-			if !bytes.Equal(out, body) {
-				t.Fatalf("unsafe candidate or earlier block was changed: %s", out)
+			if gjson.GetBytes(out, "messages.0.content").String() != timezoneTestEnvironment(OpenAIRequestTimezone, "2026-09-10") || gjson.GetBytes(out, "messages.1.content").String() != invalid {
+				t.Fatalf("unsafe candidate changed or historical date was refreshed: %s", out)
 			}
 			if state.Inbound.Items[0].Current || !state.Inbound.Items[1].Current {
 				t.Fatalf("incorrect current candidate: %+v", state.Inbound)
@@ -117,14 +117,14 @@ func TestOpenAIRequestTimezoneStringInputAndMessageBlocks(t *testing.T) {
 			t.Fatal("string input not converted")
 		}
 	})
-	t.Run("only last content candidate", func(t *testing.T) {
+	t.Run("only last content candidate date", func(t *testing.T) {
 		body := timezoneTestBody(t, map[string]any{"messages": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": env}, map[string]any{"type": "text", "text": env}}}}})
 		out, state := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true)
-		if gjson.GetBytes(out, "messages.0.content.0.text").String() != env || gjson.GetBytes(out, "messages.0.content.1.text").String() == env {
-			t.Fatal("wrong candidate converted")
+		if gjson.GetBytes(out, "messages.0.content.0.text").String() != timezoneTestEnvironment(OpenAIRequestTimezone, "2026-09-10") || gjson.GetBytes(out, "messages.0.content.1.text").String() != timezoneTestEnvironment(OpenAIRequestTimezone, "2026-09-09") {
+			t.Fatal("wrong candidate date refreshed")
 		}
-		if state.Inbound.Items[0].Reason != "historical" {
-			t.Fatal("earlier tail candidate not historical")
+		if state.Inbound.Items[0].Current || !state.Inbound.Items[1].Current || state.Inbound.Items[0].Reason != "" {
+			t.Fatal("earlier tail candidate classification is wrong")
 		}
 	})
 	t.Run("split content", func(t *testing.T) {
@@ -137,10 +137,47 @@ func TestOpenAIRequestTimezoneStringInputAndMessageBlocks(t *testing.T) {
 	t.Run("assistant tail", func(t *testing.T) {
 		body := timezoneTestBody(t, map[string]any{"messages": []any{map[string]any{"role": "user", "content": env}, map[string]any{"role": "assistant", "content": "answer"}}})
 		out, _ := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true)
-		if !bytes.Equal(out, body) {
-			t.Fatal("old user environment changed")
+		if gjson.GetBytes(out, "messages.0.content").String() != timezoneTestEnvironment(OpenAIRequestTimezone, "2026-09-10") {
+			t.Fatal("old user environment must retain its date while converting timezone")
 		}
 	})
+}
+
+func TestOpenAIRequestTimezoneHistoricalDateDoesNotDependOnIngressClock(t *testing.T) {
+	body := timezoneTestBody(t, map[string]any{"input": []any{
+		map[string]any{"role": "user", "content": timezoneTestEnvironment("Asia/Shanghai", "2026-01-10")},
+		map[string]any{"role": "user", "content": timezoneTestEnvironment("Europe/London", "2026-07-10")},
+		map[string]any{"role": "assistant", "content": "previous answer"},
+	}})
+	var first []byte
+	for _, accepted := range []time.Time{{}, timezoneTestAcceptedAt(), timezoneTestAcceptedAt().Add(48 * time.Hour)} {
+		out, state := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), accepted, false, true)
+		if gjson.GetBytes(out, "input.0.content").String() != timezoneTestEnvironment(OpenAIRequestTimezone, "2026-01-10") || gjson.GetBytes(out, "input.1.content").String() != timezoneTestEnvironment(OpenAIRequestTimezone, "2026-07-10") {
+			t.Fatalf("historical dates changed at %s: %s", accepted, out)
+		}
+		if first != nil && !bytes.Equal(first, out) {
+			t.Fatal("historical dates depend on this request's clock")
+		}
+		first = out
+		for _, report := range state.Conversions {
+			if report.Status != "converted" || report.Reason != "historical_timezone_converted" || report.DateBefore != report.DateAfter || report.TimeBasis != "" || report.ReceivedAt != "" {
+				t.Fatalf("misleading historical conversion report: %+v", report)
+			}
+		}
+		retry, ok := state.ApplyToBody(body)
+		if !ok || !bytes.Equal(retry, out) {
+			t.Fatal("retry did not retain historical patches")
+		}
+		again, repeated := PrepareOpenAIRequestTimezone(out, timezoneTestPolicy(), accepted.Add(24*time.Hour), false, true)
+		if !bytes.Equal(again, out) {
+			t.Fatal("repeated history conversion changed the date")
+		}
+		for _, report := range repeated.Conversions {
+			if report.Status != "unchanged" || report.Reason != "already_target" {
+				t.Fatalf("already converted history not recognized: %+v", report)
+			}
+		}
+	}
 }
 
 func TestOpenAIRequestTimezoneDateAndDST(t *testing.T) {
