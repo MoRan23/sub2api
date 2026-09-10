@@ -25,8 +25,7 @@ var openAIEnvironmentFingerprints = []string{
 	"(Ubuntu 24.04.0; arm64) xterm-256color",
 	"(Mac OS X 14.7.0; arm64) iTerm.app",
 	"(Mac OS X 15.1.0; arm64) iTerm.app",
-	"(Windows 10.0.19045; x86_64) WindowsTerminal",
-	"(Windows 11.0.26100; x86_64) WindowsTerminal",
+	"(Windows 10.0.26200; x86_64) WindowsTerminal",
 }
 
 var openAIEnvironmentFingerprintRandomInt = func(max *big.Int) (*big.Int, error) {
