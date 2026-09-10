@@ -95,7 +95,6 @@ func TestOpenAIGatewayService_ResponsesUnknownModelDoesNotFallbackToGPT54(t *tes
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	originalBody := []byte(`{"model":"gpt6","stream":false,"instructions":"local-test-instructions","input":[{"type":"text","text":"hi"}]}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(originalBody))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -142,7 +141,6 @@ func TestOpenAIGatewayService_OAuthResponsesPromotesSystemMessageWithoutDuplicat
 	body := []byte(`{"model":"gpt-5.4","stream":false,"instructions":"` + existingInstructions + `","input":[{"role":"system","content":"` + systemPrompt + `"},{"role":"user","content":"hello"}]}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
@@ -180,7 +178,6 @@ func TestOpenAIGatewayService_NativeResponsesBodyModificationPreservesHTMLChars(
 	originalBody := []byte(fmt.Sprintf(`{"model":"gpt-5.5","stream":false,"max_output_tokens":100,"previous_response_id":"resp_prev","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":%q}]}]}`, payloadText))
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(originalBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
@@ -230,7 +227,6 @@ func TestOpenAIGatewayService_OAuthMessagesBridgeDoesNotInjectDefaultInstruction
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	originalBody := []byte(`{"model":"gpt-5.5","stream":true,"prompt_cache_key":"anthropic-metadata-session-1","input":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"<sub2api-claude-code-todo-guard>"}]},{"type":"message","role":"user","content":"hello"}]}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(originalBody))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -398,7 +394,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamKeepsToolNameAndBodyNormali
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 	c.Request.Header.Set("Authorization", "Bearer inbound-should-not-forward")
@@ -488,7 +483,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_GroupForceOpenAIFastInjectsMissin
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.144.1")
 	body := []byte(`{"model":"gpt-5.6-sol","stream":true,"instructions":"test","input":"hi"}`)
@@ -525,7 +519,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_PreservesNamespaceRequest(t *test
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.144.1")
 
@@ -593,7 +586,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_FlattenEnabledNamespaceRequestAnd
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.144.1")
 
@@ -667,7 +659,6 @@ func TestOpenAIGatewayService_NativeOAuth_FlattenEnabledNamespaceRequestAndStrea
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.144.1")
 	body := []byte(`{
@@ -712,7 +703,6 @@ func TestOpenAIGatewayService_NativeOAuth_NamespaceNonStreamingResponse(t *testi
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	setOpenAIResponsesNamespaceNames(c, map[string]apicompat.ResponsesNamespaceName{
 		"collaboration__spawn_agent": {Namespace: "collaboration", Name: "spawn_agent"},
@@ -740,7 +730,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_NamespaceNonStreamingResponse(t *
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
@@ -766,7 +755,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_NamespaceRestoreErrorDoesNotStage
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	setOpenAIResponsesNamespaceNames(c, map[string]apicompat.ResponsesNamespaceName{
 		"collaboration__spawn_agent": {Namespace: "collaboration", Name: "spawn_agent"},
@@ -794,7 +782,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_FlattenEnabledNamespaceCollisionR
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.144.1")
 	body := []byte(`{
@@ -831,7 +818,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_CompactUsesJSONAndKeepsNonStreami
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -942,7 +928,6 @@ func newOpenAIPassthroughCompactWindowTest(
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -1317,7 +1302,6 @@ func TestCommitDeliveredOpenAIPassthroughCompactWindowSurvivesPostDeliveryCancel
 	account := &Account{ID: 123, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	requestCtx, cancelRequest := context.WithCancel(context.Background())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil).WithContext(requestCtx)
 	threadID := "01989f44-7c00-7000-8000-000000000201"
@@ -1799,7 +1783,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_UpstreamRequestIgnoresClientCance
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	reqCtx, cancel := context.WithCancel(context.Background())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil)).WithContext(reqCtx)
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
@@ -1848,7 +1831,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsGetsDefau
 		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
-			setOpenAIDownstreamIdentityTestAPIKey(t, c)
 			path := "/v1/responses"
 			responseBody := strings.Join([]string{
 				`data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`,
@@ -1895,7 +1877,6 @@ func TestOpenAIGatewayService_Forward_MissingInstructionsUsesMappedModelTemplate
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
 
@@ -1935,7 +1916,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_DisabledUsesLegacyTransform(t *te
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 
@@ -1980,7 +1960,6 @@ func TestOpenAIGatewayService_OAuthLegacy_GroupForceOpenAIFastInjectsMissingTier
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 	inputBody := []byte(`{"model":"gpt-5.6-sol","stream":false,"input":[{"type":"text","text":"hi"}]}`)
@@ -2015,7 +1994,6 @@ func TestOpenAIGatewayService_OAuthLegacy_GroupForceStillHonorsGlobalFilter(t *t
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 	inputBody := []byte(`{"model":"gpt-5.6-sol","stream":false,"input":[{"type":"text","text":"hi"}]}`)
@@ -2050,7 +2028,6 @@ func TestOpenAIGatewayService_OAuthLegacy_UpstreamRequestIgnoresClientCancel(t *
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	reqCtx, cancel := context.WithCancel(context.Background())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil)).WithContext(reqCtx)
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
@@ -2097,7 +2074,6 @@ func TestOpenAIGatewayService_OAuthLegacy_CompositeCodexUAUsesCodexOriginator(t 
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	// 复合 UA（前缀不是 codex_cli_rs），历史实现会误判为非 Codex 并走 opencode。
 	c.Request.Header.Set("User-Agent", "Mozilla/5.0 codex_cli_rs/0.1.0")
@@ -2144,7 +2120,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_ResponseHeadersAllowXCodex(t *tes
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 
@@ -2203,7 +2178,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_UpstreamErrorIncludesPassthroughF
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 
@@ -2322,7 +2296,6 @@ func TestOpenAIGatewayService_APIKeyPassthrough_RebuildsUpstreamErrors(t *testin
 		t.Run(tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
-			setOpenAIDownstreamIdentityTestAPIKey(t, c)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 
@@ -2431,7 +2404,6 @@ func TestOpenAIGatewayService_APIKeyPassthrough_CompactErrorBeforeKeepaliveIsSin
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader(nil))
 	MarkOpenAICompactClientStream(c)
 	stop := StartOpenAICompactSSEKeepalive(c, time.Hour)
@@ -2466,7 +2438,6 @@ func TestOpenAIGatewayService_APIKeyPassthrough_CompactErrorAfterKeepaliveIsFail
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader(nil))
 	MarkOpenAICompactClientStream(c)
 	stop := StartOpenAICompactSSEKeepalive(c, keepaliveTestInterval)
@@ -2627,7 +2598,6 @@ func TestOpenAIGatewayService_OpenAIPassthrough_RetryableStatusesTriggerFailover
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
-			setOpenAIDownstreamIdentityTestAPIKey(t, c)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 
@@ -2702,7 +2672,6 @@ func TestOpenAIGatewayService_APIKeyPassthrough_Transient5xxTriggersFailover(t *
 		t.Run(fmt.Sprintf("status_%d", statusCode), func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
-			setOpenAIDownstreamIdentityTestAPIKey(t, c)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 
@@ -2762,7 +2731,6 @@ func TestOpenAIGatewayService_APIKeyPassthrough_ContextWindow502DoesNotFailover(
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 
 	const upstreamBody = `{"error":{"message":"Your input exceeds the context window of this model. Please adjust your input and try again.","type":"upstream_error"}}`
@@ -2797,7 +2765,6 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PoolModeConfigured5xxRetriesSame
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 
 	svc := &OpenAIGatewayService{
@@ -2852,7 +2819,6 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PoolModeAuthErrorsTriggerFailove
 		t.Run(tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
-			setOpenAIDownstreamIdentityTestAPIKey(t, c)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 
 			upstreamBody := `{"error":{"message":"upstream credential rejected"}}`
@@ -2920,7 +2886,6 @@ func TestOpenAIGatewayService_OpenAIPassthrough_CompactNetworkErrorsTriggerFailo
 		t.Run(tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
-			setOpenAIDownstreamIdentityTestAPIKey(t, c)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewReader(nil))
 			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 
@@ -2964,7 +2929,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_NonCodexUAFallbackToCodexUA(t *te
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	// Non-Codex UA
 	c.Request.Header.Set("User-Agent", "curl/8.0")
@@ -3013,7 +2977,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_OfficialIdentityUnified(t *testin
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", tuiUA)
 	// 客户端携带错配的 originator，也必须按最终 UA 重配。
@@ -3060,7 +3023,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_CodexTuiIdentityUnified(t *testin
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex-tui/0.140.2 (Mac OS X 14.0; arm64) iTerm (codex-tui; 0.140.2)")
 	c.Request.Header.Set("originator", "codex-tui")
@@ -3104,7 +3066,6 @@ func TestOpenAIGatewayService_CodexCLIOnly_RejectsNonCodexClient(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "curl/8.0")
 
@@ -3152,7 +3113,6 @@ func TestOpenAIGatewayService_CodexCLIOnly_AllowOfficialClientFamilies(t *testin
 		t.Run(tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
-			setOpenAIDownstreamIdentityTestAPIKey(t, c)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 			c.Request.Header.Set("User-Agent", tt.ua)
 			if tt.originator != "" {
@@ -3202,7 +3162,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamingSetsFirstTokenMs(t *test
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 
@@ -3255,7 +3214,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamClientDisconnectStillCollec
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 	// 首次写入成功，后续写入失败，模拟客户端中途断开。
@@ -3311,7 +3269,6 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PreservesBodyAndUsesResponsesEnd
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "curl/8.0")
 	c.Request.Header.Set("X-Test", "keep")
@@ -3376,7 +3333,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_WarnOnTimeoutHeadersForStream(t *
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 	c.Request.Header.Set("x-stainless-timeout", "10000")
@@ -3418,7 +3374,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_InfoWhenStreamEndsWithoutDone(t *
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 
@@ -3459,7 +3414,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_DefaultFiltersTimeoutHeaders(t *t
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 	c.Request.Header.Set("x-stainless-timeout", "120000")
@@ -3506,7 +3460,6 @@ func TestOpenAIGatewayService_OAuthPassthrough_AllowTimeoutHeadersWhenConfigured
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
 	c.Request.Header.Set("x-stainless-timeout", "120000")

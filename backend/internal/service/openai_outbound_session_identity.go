@@ -714,7 +714,6 @@ func newOpenAICodexDescendantIdentity(sessionID string) (OpenAICodexTurnIdentity
 type openAICodexLocalEntry struct {
 	key              string
 	identity         OpenAICodexTurnIdentity
-	legacyNamespace  string
 	expires          time.Time
 	pendingPromotion bool
 	recencyElement   *list.Element
@@ -1582,7 +1581,7 @@ func IsNewOpenAICodexSession(c *gin.Context, sessionID string) bool {
 	return ok && createdID == sessionID
 }
 
-func (s *OpenAIGatewayService) resolveOpenAICodexLegacyTurnIdentityWithAliasesDetailed(ctx context.Context, c *gin.Context, account *Account, logical OpenAICodexLogicalTurnIdentity, aliases []OpenAICodexLogicalTurnAlias) (OpenAICodexTurnIdentity, bool, OpenAIOAuthIdentityResolveOutcome, error) {
+func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityWithAliasesDetailed(ctx context.Context, c *gin.Context, account *Account, logical OpenAICodexLogicalTurnIdentity, aliases []OpenAICodexLogicalTurnAlias) (OpenAICodexTurnIdentity, bool, OpenAIOAuthIdentityResolveOutcome, error) {
 	if c != nil {
 		// A retry may switch credential owners or fail before resolving a new
 		// identity. Neither case may inherit a prior account's freshness marker.

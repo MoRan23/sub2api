@@ -38,25 +38,6 @@ type codexAuxiliaryStickyTestCache struct {
 	reads             []context.Context
 	auxiliaryBindings sync.Map
 	bindingErr        error
-	identityStoreOnce sync.Once
-	identityStore     *openAICodexIdentityLocalStore
-}
-
-func (c *codexAuxiliaryStickyTestCache) downstreamIdentityStore() *openAICodexIdentityLocalStore {
-	c.identityStoreOnce.Do(func() { c.identityStore = newOpenAICodexIdentityLocalStore() })
-	return c.identityStore
-}
-
-func (c *codexAuxiliaryStickyTestCache) ResolveCodexDownstreamSession(ctx context.Context, request OpenAICodexDownstreamSessionRequest, ttl time.Duration) (OpenAICodexDownstreamSessionResolution, error) {
-	return c.downstreamIdentityStore().ResolveCodexDownstreamSession(ctx, request, ttl)
-}
-
-func (c *codexAuxiliaryStickyTestCache) ResolveCodexDownstreamThread(ctx context.Context, request OpenAICodexDownstreamThreadRequest, ttl time.Duration) (OpenAICodexTurnIdentity, error) {
-	return c.downstreamIdentityStore().ResolveCodexDownstreamThread(ctx, request, ttl)
-}
-
-func (c *codexAuxiliaryStickyTestCache) ResolveOpenAICodexWindowMapping(ctx context.Context, canonicalKey, legacyKey, threadID string, ttl time.Duration) (string, error) {
-	return processOpenAICodexWindowLocalStore.ResolveOpenAICodexWindowMapping(ctx, canonicalKey, legacyKey, threadID, ttl)
 }
 
 func (c *codexAuxiliaryStickyTestCache) ResolveCodexAuxiliaryAccountBinding(_ context.Context, key string, eligible []int64, preferred int64) (CodexAuxiliaryAccountBinding, error) {

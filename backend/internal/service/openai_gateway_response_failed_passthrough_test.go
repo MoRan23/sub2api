@@ -131,7 +131,6 @@ func TestHandleStreamingResponsePassthroughRuleTurnStateCommitRequiresDelivery(t
 			plan := OpenAIOAuthIdentityPlan{
 				APIKeyID:                 int64(7100 + index),
 				CredentialOwnerNamespace: fmt.Sprintf("account:%d", 7200+index),
-				TurnIdentityNamespace:    OpenAICodexDownstreamIdentityNamespace,
 				TurnIdentityRequested:    true,
 				TurnIdentityEnabled:      true,
 				TurnIdentity: OpenAICodexTurnIdentity{

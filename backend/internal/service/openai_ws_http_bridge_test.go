@@ -559,7 +559,6 @@ func TestOpenAIWSHTTPBridgeFullCustomToolHistoryWithoutPreviousResponseIDDoesNot
 		}
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
-		setOpenAIDownstreamIdentityTestAPIKey(t, ginCtx)
 		ginCtx.Request = r.Clone(r.Context())
 		errCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "test-token", firstMessage, nil)
 	}))
@@ -659,7 +658,6 @@ func TestOpenAIWSHTTPBridgeObjectToolOutputWithoutPreviousResponseIDReplaysMatch
 		}
 		rec := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(rec)
-		setOpenAIDownstreamIdentityTestAPIKey(t, ginCtx)
 		ginCtx.Request = r.Clone(r.Context())
 		errCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "test-token", firstMessage, nil)
 	}))
@@ -1567,7 +1565,6 @@ func TestProxyOpenAIWSHTTPBridgeTurnUsesConnectionIdentityPlan(t *testing.T) {
 		ProjectionMode:           OpenAIOAuthIdentityProjectionPassthrough,
 		InstallationPolicy:       OpenAIOAuthInstallationAccountPin,
 		CredentialOwnerNamespace: openAIOutboundSessionIdentityNamespace(account),
-		TurnIdentityNamespace:    OpenAICodexDownstreamIdentityNamespace,
 	}
 	payload := []byte(`{"type":"response.create","model":"gpt-5.1","stream":true,"client_metadata":{"session_id":"client-session","thread_id":"client-thread"}}`)
 
@@ -1722,7 +1719,6 @@ func TestProxyOpenAIWSHTTPBridgeTurnPinsAndObservesFinalOAuthWireOnce(t *testing
 		ClientIdentityEnabled:    true,
 		ClientIdentity:           resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, ""),
 		CredentialOwnerNamespace: openAIOutboundSessionIdentityNamespace(account),
-		TurnIdentityNamespace:    OpenAICodexDownstreamIdentityNamespace,
 	}
 	payload := []byte(`{"type":"response.create","model":"gpt-5.1","stream":true,"client_metadata":{"x-codex-installation-id":"client-installation","session_id":"client-session","thread_id":"client-thread"}}`)
 

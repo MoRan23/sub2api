@@ -86,7 +86,6 @@ func TestOpenAIGatewayServiceForwardImages_ImageRateLimitReturnsFailoverAndCools
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 
 	svc := &OpenAIGatewayService{
@@ -136,7 +135,6 @@ func TestOpenAIGatewayServiceForwardImages_TextFallbackDoesNotCoolImageCapabilit
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 
 	svc := &OpenAIGatewayService{
@@ -189,7 +187,6 @@ func TestOpenAIGatewayServiceForwardImages_StructuredUnavailableCoolsImageCapabi
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 
 	svc := &OpenAIGatewayService{
@@ -253,7 +250,6 @@ func TestOpenAIGatewayServiceForwardImages_CapabilityLossCoolsImageScope(t *test
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 
 	svc := &OpenAIGatewayService{

@@ -163,21 +163,11 @@ type AccountTestService struct {
 func captureOpenAIOAuthSyntheticRequest(c *gin.Context, body []byte, callerSeed string) OpenAIOAuthIdentityCapture {
 	seed := sanitizeSessionID(callerSeed)
 	if current, ok := OpenAIOAuthIdentityCaptureFromContext(c); ok &&
-		current.syntheticScope != "" &&
 		current.Logical.Source == OpenAIOutboundSessionLogicalKeySourceCallerSeed &&
 		current.Logical.SessionKey == seed {
 		return current
 	}
 	capture := CaptureOpenAIOAuthIdentity(nil, body, callerSeed)
-	// Synthetic probes have no downstream API key. Isolate each new probe with
-	// a server-generated scope while retaining the capture across retry/failover.
-	scopeID := capture.ContextWindowIDCandidate
-	if scopeID == "" {
-		scopeID, _ = newOpenAICodexContextWindowID()
-	}
-	if scopeID != "" {
-		capture.syntheticScope = "synthetic:" + scopeID
-	}
 	SetOpenAIOAuthIdentityCapture(c, capture)
 	return capture
 }

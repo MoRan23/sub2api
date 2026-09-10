@@ -85,7 +85,7 @@ func TestOpenAIOutboundSessionIdentityTransportEnabledRequestSnapshot(t *testing
 	}}
 	settings := NewSettingService(repo, nil)
 	svc := &OpenAIGatewayService{settingService: settings}
-	requestCtx := newAuthenticatedOutboundIdentityTestContext(t, nil)
+	requestCtx := newOutboundIdentityTestContext(t, nil)
 
 	require.True(t, svc.openAIOutboundSessionIdentityTransportEnabledForRequest(context.Background(), requestCtx))
 	repo.mu.Lock()
@@ -96,7 +96,7 @@ func TestOpenAIOutboundSessionIdentityTransportEnabledRequestSnapshot(t *testing
 	// One HTTP/WS request keeps the first mode even after invalidation.
 	require.True(t, svc.openAIOutboundSessionIdentityTransportEnabledForRequest(context.Background(), requestCtx))
 	// A new request sees the updated value.
-	require.False(t, svc.openAIOutboundSessionIdentityTransportEnabledForRequest(context.Background(), newAuthenticatedOutboundIdentityTestContext(t, nil)))
+	require.False(t, svc.openAIOutboundSessionIdentityTransportEnabledForRequest(context.Background(), newOutboundIdentityTestContext(t, nil)))
 
 	// Callers without a Gin request retain live setting reads.
 	repo.mu.Lock()
@@ -164,7 +164,7 @@ func TestBuildUpstreamRequestCompatBridgeMaterializesPlanAndDefersProjection(t *
 			"chatgpt_account_id": "transport-marker-account",
 		},
 	}
-	c := newAuthenticatedOutboundIdentityTestContext(t, nil)
+	c := newOutboundIdentityTestContext(t, nil)
 
 	firstBody := []byte(`{"model":"gpt-5.4","prompt_cache_key":"compat-first"}`)
 	SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, firstBody, "compat-first"))
@@ -187,7 +187,7 @@ func TestBuildUpstreamRequestCompatBridgeMaterializesPlanAndDefersProjection(t *
 	ensureCodexIdentityHeadersFromPlan(firstReq.Header, plan.ClientIdentity)
 	projectedBody, err := ApplyOpenAIOAuthIdentityPlan(firstReq.Header, firstBody, plan)
 	require.NoError(t, err)
-	require.NotEqual(t, isolateOpenAISessionID(41, "compat-first"), firstReq.Header.Get("session-id"))
+	require.NotEqual(t, isolateOpenAISessionID(0, "compat-first"), firstReq.Header.Get("session-id"))
 	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(OpenAIOutboundSessionIdentity{
 		SessionID: firstReq.Header.Get("session-id"),
 		ThreadID:  firstReq.Header.Get("thread-id"),
@@ -202,7 +202,7 @@ func TestBuildUpstreamRequestCompatBridgeMaterializesPlanAndDefersProjection(t *
 func TestResolveOpenAIOutboundSessionIdentityForTransportUsesFinalBody(t *testing.T) {
 	svc := newTransportIdentityTestService(t, true)
 	account := &Account{ID: 810001, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	c := newAuthenticatedOutboundIdentityTestContext(t, nil)
+	c := newOutboundIdentityTestContext(t, nil)
 	body := []byte(`{"client_metadata":{"thread_id":"body-logical-key"},"prompt_cache_key":"body-prompt"}`)
 
 	first, key, enabled, err := svc.resolveOpenAIOutboundSessionIdentityForTransport(
@@ -226,7 +226,7 @@ func TestResolveOpenAIOutboundSessionIdentityForTransportUsesFinalBody(t *testin
 func TestResolveOpenAIOutboundSessionIdentityForTransportExplicitTupleWinsPrompt(t *testing.T) {
 	svc := newTransportIdentityTestService(t, true)
 	account := &Account{ID: 810002, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	c := newAuthenticatedOutboundIdentityTestContext(t, map[string]string{"session_id": "copied-header"})
+	c := newOutboundIdentityTestContext(t, map[string]string{"session_id": "copied-header"})
 	body := []byte(`{"client_metadata":{"session_id":"body-key"},"prompt_cache_key":"prompt-key"}`)
 
 	_, key, enabled, err := svc.resolveOpenAIOutboundSessionIdentityForTransport(
@@ -240,7 +240,7 @@ func TestResolveOpenAIOutboundSessionIdentityForTransportExplicitTupleWinsPrompt
 func TestResolveOpenAIOutboundSessionIdentityForTransportPinsWSFrameKey(t *testing.T) {
 	svc := newTransportIdentityTestService(t, true)
 	account := &Account{ID: 810007, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	c := newAuthenticatedOutboundIdentityTestContext(t, map[string]string{"session_id": "stale-handshake-key"})
+	c := newOutboundIdentityTestContext(t, map[string]string{"session_id": "stale-handshake-key"})
 	body := []byte(`{"client_metadata":{"session_id":"next-frame-key"}}`)
 	selected := resolveOpenAIWSFrameLogicalKey(body, "")
 
@@ -268,7 +268,7 @@ func TestResolveOpenAIWSFrameLogicalIdentityForPinnedStateUsesFallbackOnlyBefore
 func TestBuildOpenAIWSHeadersWithBodyUUIDv7UsesCodexTupleSources(t *testing.T) {
 	svc := newTransportIdentityTestService(t, true)
 	account := &Account{ID: 810008, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	c := newAuthenticatedOutboundIdentityTestContext(t, nil)
+	c := newOutboundIdentityTestContext(t, nil)
 
 	tests := []struct {
 		name           string
@@ -341,7 +341,7 @@ func TestBuildOpenAIWSHeadersWithBodyUUIDv7UsesCodexTupleSources(t *testing.T) {
 func TestBuildOpenAIWSHeadersWithBodyUUIDv7UsesExplicitTurnMetadata(t *testing.T) {
 	svc := newTransportIdentityTestService(t, true)
 	account := &Account{ID: 810011, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	c := newAuthenticatedOutboundIdentityTestContext(t, nil)
+	c := newOutboundIdentityTestContext(t, nil)
 	_, resolution, err := svc.buildOpenAIWSHeadersWithBody(
 		context.Background(),
 		c,
@@ -366,7 +366,7 @@ func TestBuildOpenAIWSHeadersWithBodyUUIDv7RejectsUnsafeSeedWithoutLegacyFallbac
 	svc := newTransportIdentityTestService(t, true)
 	account := &Account{ID: 810012, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	unsafeSeed := strings.Repeat("x", maxPersistedSessionIDLength+1)
-	c := newAuthenticatedOutboundIdentityTestContext(t, map[string]string{"session_id": unsafeSeed})
+	c := newOutboundIdentityTestContext(t, map[string]string{"session_id": unsafeSeed})
 
 	headers, resolution, err := svc.buildOpenAIWSHeadersWithBody(
 		context.Background(),
@@ -394,7 +394,7 @@ func TestBuildOpenAIWSHeadersWithBodyUUIDv7RejectsUnsafeSeedWithoutLegacyFallbac
 func TestBuildOpenAIWSHeadersWithBodyUUIDv7KeepsHeaderPriorityAndTracksFrameKey(t *testing.T) {
 	svc := newTransportIdentityTestService(t, true)
 	account := &Account{ID: 810010, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	c := newAuthenticatedOutboundIdentityTestContext(t, map[string]string{"session_id": "handshake-key"})
+	c := newOutboundIdentityTestContext(t, map[string]string{"session_id": "handshake-key"})
 	body := []byte(`{"prompt_cache_key":"frame-key"}`)
 
 	_, resolution, err := svc.buildOpenAIWSHeadersWithBody(
@@ -444,7 +444,7 @@ func TestAdvanceOpenAIWSFrameLogicalKey(t *testing.T) {
 func TestBuildOpenAIWSHeadersWithBodyDisabledPreservesLegacyHeaderSelection(t *testing.T) {
 	svc := newTransportIdentityTestService(t, false)
 	account := &Account{ID: 810009, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	c := newAuthenticatedOutboundIdentityTestContext(t, map[string]string{
+	c := newOutboundIdentityTestContext(t, map[string]string{
 		"session_id":      "legacy-handshake-session",
 		"conversation_id": "legacy-handshake-conversation",
 	})
@@ -466,14 +466,14 @@ func TestBuildOpenAIWSHeadersWithBodyDisabledPreservesLegacyHeaderSelection(t *t
 	require.False(t, resolution.OutboundIdentityModeEnabled)
 	require.False(t, resolution.OutboundIdentityEnabled)
 	require.Empty(t, resolution.OutboundIdentityLogicalKey)
-	require.Equal(t, isolateOpenAISessionID(41, "legacy-handshake-session"), headers.Get("session_id"))
-	require.Equal(t, isolateOpenAISessionID(41, "legacy-handshake-conversation"), headers.Get("conversation_id"))
+	require.Equal(t, isolateOpenAISessionID(0, "legacy-handshake-session"), headers.Get("session_id"))
+	require.Equal(t, isolateOpenAISessionID(0, "legacy-handshake-conversation"), headers.Get("conversation_id"))
 }
 
 func TestBuildOpenAIWSHeadersWithBodyDisabledPreservesCanonicalSessionHeaderOnly(t *testing.T) {
 	svc := newTransportIdentityTestService(t, false)
 	account := &Account{ID: 810010, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	c := newAuthenticatedOutboundIdentityTestContext(t, map[string]string{
+	c := newOutboundIdentityTestContext(t, map[string]string{
 		"session-id": "canonical-handshake-session",
 	})
 
@@ -500,7 +500,7 @@ func TestBuildOpenAIWSHeadersWithBodyDisabledPreservesCanonicalSessionHeaderOnly
 func TestBuildOpenAIWSHeadersWithBodyUUIDv7UsesFrozenCanonicalIdentity(t *testing.T) {
 	svc := newTransportIdentityTestService(t, true)
 	account := &Account{ID: 810013, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	c := newAuthenticatedOutboundIdentityTestContext(t, map[string]string{
+	c := newOutboundIdentityTestContext(t, map[string]string{
 		"session-id": "stale-handshake-session",
 	})
 	body := []byte(`{"type":"response.create","client_metadata":{"x-codex-turn-metadata":"{\"session_id\":\"canonical-body-session\",\"thread_id\":\"canonical-body-thread\"}"},"input":"hello"}`)
@@ -531,7 +531,7 @@ func TestResolveOpenAIOutboundSessionIdentityForTransportDisabledDoesNotResolve(
 	svc := newTransportIdentityTestService(t, false)
 	before := SnapshotOpenAIOutboundSessionIdentityRuntimeMetrics()
 	identity, key, enabled, err := svc.resolveOpenAIOutboundSessionIdentityForTransport(
-		context.Background(), newAuthenticatedOutboundIdentityTestContext(t, nil),
+		context.Background(), newOutboundIdentityTestContext(t, nil),
 		&Account{ID: 810003, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
 		[]byte(`{"client_metadata":{"session_id":"disabled-key"}}`), "seed", false,
 	)
@@ -549,7 +549,7 @@ func TestResolveOpenAIOutboundSessionIdentityForTransportPropagatesNamespaceFail
 	parentID := int64(810005)
 	account := &Account{ID: 810006, ParentAccountID: &parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	_, _, enabled, err := svc.resolveOpenAIOutboundSessionIdentityForTransport(
-		context.Background(), newAuthenticatedOutboundIdentityTestContext(t, nil), account,
+		context.Background(), newOutboundIdentityTestContext(t, nil), account,
 		[]byte(`{"prompt_cache_key":"namespace-failure"}`), "namespace-failure", false,
 	)
 	require.False(t, enabled)

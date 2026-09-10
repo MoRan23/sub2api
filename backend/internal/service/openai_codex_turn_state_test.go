@@ -48,7 +48,6 @@ func newTurnStateIdentityTestContext(t *testing.T, apiKeyID int64, namespace, in
 	plan := OpenAIOAuthIdentityPlan{
 		APIKeyID:                 apiKeyID,
 		CredentialOwnerNamespace: namespace,
-		TurnIdentityNamespace:    OpenAICodexDownstreamIdentityNamespace,
 		InstallationPolicy:       OpenAIOAuthInstallationAccountPin,
 		InstallationEnabled:      installationID != "",
 		InstallationID:           installationID,

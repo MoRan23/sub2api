@@ -831,7 +831,7 @@ func (s *OpenAIGatewayService) prepareOpenAIPassthroughCompactWindow(
 		return body
 	}
 	threadID := strings.TrimSpace(plan.Window.ThreadID)
-	if threadID == "" || strings.TrimSpace(plan.TurnIdentityNamespace) == "" ||
+	if threadID == "" || strings.TrimSpace(plan.CredentialOwnerNamespace) == "" ||
 		ValidateOpenAICodexWindowSnapshot(plan.Window) != nil ||
 		!validOpenAICodexWindowMappingKey(plan.WindowMappingKey) {
 		clearOpenAIPassthroughCompactWindow(c)
@@ -843,7 +843,7 @@ func (s *OpenAIGatewayService) prepareOpenAIPassthroughCompactWindow(
 	}
 	mappingKey := plan.WindowMappingKey
 	snapshot := plan.Window
-	digest, err := OpenAICodexCompactTurnDigest(secret, plan.TurnIdentityNamespace, plan.APIKeyID, snapshot, plan.RequestTurn.ID)
+	digest, err := OpenAICodexCompactTurnDigest(secret, plan.CredentialOwnerNamespace, plan.APIKeyID, snapshot, plan.RequestTurn.ID)
 	if err != nil {
 		clearOpenAIPassthroughCompactWindow(c)
 		return body

@@ -939,7 +939,7 @@ func (s *AccountUsageService) resolveOpenAICodexUsageProbeIdentityPlan(
 	payload []byte,
 ) (OpenAIOAuthIdentityPlan, error) {
 	gateway := s.openAIGatewayForProfileIdentity()
-	capture := captureOpenAIOAuthSyntheticRequest(nil, payload, "usage-probe")
+	capture := CaptureOpenAIOAuthIdentity(nil, payload, "usage-probe")
 	return gateway.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, nil, account, capture, OpenAIOAuthIdentityPlanOptions{
 		TurnIdentityEnabled: gateway.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, nil, account),
 		ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,

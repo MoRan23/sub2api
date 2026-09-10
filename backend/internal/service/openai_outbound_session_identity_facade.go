@@ -117,8 +117,6 @@ const (
 // OpenAIOAuthIdentityCapture is immutable request input captured before any
 // compatibility or compact body transformation.
 type OpenAIOAuthIdentityCapture struct {
-	// Set only by internal probe builders, never decoded from client input.
-	syntheticScope           string
 	Logical                  OpenAICodexLogicalTurnIdentity
 	Aliases                  []OpenAICodexLogicalTurnAlias
 	RequestTurn              OpenAICodexRequestTurnSnapshot
@@ -180,9 +178,6 @@ type OpenAIOAuthIdentityPlan struct {
 	ProjectionMode           OpenAIOAuthIdentityProjectionMode
 	InstallationPolicy       OpenAIOAuthInstallationPolicy
 	CredentialOwnerNamespace string
-	TurnIdentityNamespace    string
-	LegacyIdentityNamespace  string
-	TurnIdentityCreated      bool
 	APIKeyID                 int64
 	ResolveSource            string
 	ResolveOutcome           OpenAIOAuthIdentityResolveOutcome
@@ -659,17 +654,6 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 	capture OpenAIOAuthIdentityCapture,
 	options OpenAIOAuthIdentityPlanOptions,
 ) (OpenAIOAuthIdentityPlan, error) {
-	return s.resolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, options, nil)
-}
-
-func (s *OpenAIGatewayService) resolveOpenAIOAuthIdentityPlan(
-	ctx context.Context,
-	c *gin.Context,
-	account *Account,
-	capture OpenAIOAuthIdentityCapture,
-	options OpenAIOAuthIdentityPlanOptions,
-	frozen *OpenAIOAuthIdentityPlan,
-) (OpenAIOAuthIdentityPlan, error) {
 	options = normalizeOpenAIOAuthIdentityPlanOptions(options)
 	policy := s.openAICodexFingerprintPolicyForRequest(ctx, c)
 	plan := OpenAIOAuthIdentityPlan{
@@ -722,55 +706,25 @@ func (s *OpenAIGatewayService) resolveOpenAIOAuthIdentityPlan(
 			CodexClientIdentityNormalize, overrideUA, canonicalClientIdentity,
 		)
 	}
-	namespace, err := s.resolveOpenAIOutboundSessionIdentityNamespace(ctx, account)
-	if err != nil {
-		return plan, err
+	if namespace, err := s.resolveOpenAIOutboundSessionIdentityNamespace(ctx, account); err == nil {
+		plan.CredentialOwnerNamespace = namespace
 	}
-	plan.CredentialOwnerNamespace = namespace
 	if plan.TurnIdentityRequested && strings.TrimSpace(capture.Logical.SessionKey) != "" {
-		plan.TurnIdentityNamespace, err = openAICodexDownstreamScope(capture, plan.APIKeyID)
-		if err != nil {
-			return plan, err
-		}
 		observeOpenAIOAuthIdentityResolveSource(capture.Logical.Source)
-		if frozen != nil {
-			plan.TurnIdentity = frozen.TurnIdentity
-			plan.TurnIdentityEnabled = frozen.TurnIdentityEnabled
-			plan.TurnIdentityCreated = frozen.TurnIdentityCreated
-			plan.LegacyIdentityNamespace = frozen.LegacyIdentityNamespace
-			plan.ResolveOutcome = frozen.ResolveOutcome
-			plan.Window = frozen.Window
-			plan.WindowMappingKey = frozen.WindowMappingKey
-			plan.WindowResolveOutcome = frozen.WindowResolveOutcome
-			if c != nil {
-				createdID := ""
-				if plan.TurnIdentityCreated {
-					createdID = plan.TurnIdentity.SessionID
-				}
-				c.Set(newOpenAICodexSessionContextKey, createdID)
-			}
-		} else {
-			identity, ok, outcome, legacy, resolveErr := s.resolveOpenAICodexDownstreamTurnIdentityDetailed(ctx, c, account, capture.Logical, capture.Aliases, plan.TurnIdentityNamespace)
-			plan.ResolveOutcome = outcome
-			if resolveErr != nil {
-				plan.ResolveOutcome = OpenAIOAuthIdentityResolveStoreError
-				if errors.Is(resolveErr, ErrOpenAICodexAliasConflict) {
-					plan.ResolveOutcome = OpenAIOAuthIdentityResolveAliasConflict
-				}
-				return plan, resolveErr
-			}
-			if ok {
-				plan.TurnIdentity = identity
-				plan.TurnIdentityEnabled = true
-				plan.TurnIdentityCreated = IsNewOpenAICodexSession(c, identity.SessionID)
-				plan.LegacyIdentityNamespace = legacy
-			}
-		}
-		if plan.TurnIdentityEnabled {
-			identity := plan.TurnIdentity
-			if err := ValidateOpenAICodexTurnIdentity(identity); err != nil {
+		identity, ok, outcome, err := s.resolveOpenAICodexTurnIdentityWithAliasesDetailed(ctx, c, account, capture.Logical, capture.Aliases)
+		plan.ResolveOutcome = outcome
+		if err != nil {
+			if errors.Is(err, ErrOpenAICodexAliasConflict) {
+				plan.ResolveOutcome = OpenAIOAuthIdentityResolveAliasConflict
 				return plan, err
 			}
+			if errors.Is(err, errOpenAIOutboundSessionIdentityNamespace) {
+				return plan, err
+			}
+			plan.ResolveOutcome = OpenAIOAuthIdentityResolveStoreError
+		} else if ok {
+			plan.TurnIdentity = identity
+			plan.TurnIdentityEnabled = true
 			plan.WireProfile.SessionID = identity.SessionID
 			plan.WireProfile.ThreadID = identity.ThreadID
 			plan.WireProfile.TurnLineage.ParentThreadID = identity.ParentThreadID
@@ -795,19 +749,13 @@ func (s *OpenAIGatewayService) resolveOpenAIOAuthIdentityPlan(
 			plan.WireProfile.InstallationID = plan.InstallationID
 		}
 	}
+	var err error
 	plan.PromptCacheKey, err = s.resolveOpenAICodexPromptCacheKeyPlan(plan)
 	if err != nil {
 		return plan, err
 	}
-	if frozen != nil && plan.TurnIdentityEnabled && ValidateOpenAICodexWindowSnapshot(frozen.Window) == nil {
-		plan, err = BindOpenAICodexWindowToPlan(plan, frozen.Window, frozen.WindowMappingKey)
-	} else {
-		plan, err = s.resolveOpenAICodexWindowForPlan(ctx, plan)
-	}
-	if err != nil {
-		return plan, err
-	}
-	if frozen == nil && plan.TurnIdentityEnabled && capture.ClientWindow.Valid {
+	plan = s.resolveOpenAICodexWindowForPlan(ctx, plan)
+	if plan.TurnIdentityEnabled && capture.ClientWindow.Valid {
 		resolved, err := s.ResolveOpenAICodexClientWindowSnapshot(ctx, plan.WindowMappingKey, plan.Window, capture.ClientWindow, capture.ContextWindowIDCandidate)
 		if err != nil {
 			return plan, fmt.Errorf("resolve OpenAI Codex client window: %w", err)
@@ -818,21 +766,6 @@ func (s *OpenAIGatewayService) resolveOpenAIOAuthIdentityPlan(
 		}
 	}
 	return plan, nil
-}
-
-func openAICodexDownstreamScope(capture OpenAIOAuthIdentityCapture, apiKeyID int64) (string, error) {
-	if capture.syntheticScope != "" {
-		if strings.HasPrefix(capture.syntheticScope, "synthetic:") {
-			if _, err := canonicalUUIDv7(strings.TrimPrefix(capture.syntheticScope, "synthetic:")); err == nil {
-				return capture.syntheticScope, nil
-			}
-		}
-		return "", ErrOpenAICodexDownstreamIdentityScopeMissing
-	}
-	if apiKeyID <= 0 {
-		return "", ErrOpenAICodexDownstreamIdentityScopeMissing
-	}
-	return OpenAICodexDownstreamIdentityNamespace, nil
 }
 
 func openAICodexProjectionCarriesPromptCacheKey(mode OpenAIOAuthIdentityProjectionMode) bool {
@@ -903,22 +836,26 @@ func (s *OpenAIGatewayService) resolveOpenAICodexPromptCacheKeyPlan(plan OpenAIO
 	return result, nil
 }
 
-func (s *OpenAIGatewayService) resolveOpenAICodexWindowForPlan(ctx context.Context, plan OpenAIOAuthIdentityPlan) (OpenAIOAuthIdentityPlan, error) {
+func (s *OpenAIGatewayService) resolveOpenAICodexWindowForPlan(ctx context.Context, plan OpenAIOAuthIdentityPlan) OpenAIOAuthIdentityPlan {
 	if !plan.TurnIdentityRequested || !plan.TurnIdentityEnabled ||
 		plan.Capture.WireProfile.RequestKind == CodexWireRequestMemory ||
-		strings.TrimSpace(plan.TurnIdentityNamespace) == "" ||
+		strings.TrimSpace(plan.CredentialOwnerNamespace) == "" ||
 		strings.TrimSpace(plan.TurnIdentity.ThreadID) == "" {
-		return plan, nil
+		return plan
 	}
-	mappingKey, err := s.resolveOpenAICodexDownstreamWindowMappingKey(ctx, plan)
+	secret := ""
+	if s != nil && s.cfg != nil {
+		secret = s.cfg.JWT.Secret
+	}
+	mappingKey, err := OpenAICodexWindowMappingKey(
+		secret,
+		plan.CredentialOwnerNamespace,
+		plan.APIKeyID,
+		plan.TurnIdentity.ThreadID,
+	)
 	if err != nil {
 		plan.WindowResolveOutcome = OpenAICodexWindowResolveError
-		// Preserve the existing profile-only fallback for unconfigured internal
-		// gateways. Store and migration failures must never silently reset IDs.
-		if errors.Is(err, errOpenAIOutboundSessionIdentityKeySecret) {
-			return plan, nil
-		}
-		return plan, fmt.Errorf("resolve OpenAI Codex window mapping: %w", err)
+		return plan
 	}
 	snapshot, err := s.ResolveOpenAICodexWindowSnapshot(
 		ctx,
@@ -928,14 +865,14 @@ func (s *OpenAIGatewayService) resolveOpenAICodexWindowForPlan(ctx context.Conte
 	)
 	if err != nil {
 		plan.WindowResolveOutcome = OpenAICodexWindowResolveError
-		return plan, fmt.Errorf("resolve OpenAI Codex window: %w", err)
+		return plan
 	}
 	bound, err := BindOpenAICodexWindowToPlan(plan, snapshot, mappingKey)
 	if err != nil {
 		plan.WindowResolveOutcome = OpenAICodexWindowResolveError
-		return plan, err
+		return plan
 	}
-	return bound, nil
+	return bound
 }
 
 // ResolveOpenAIOAuthOutboundIdentity exposes the credential-aware materialize
@@ -953,8 +890,7 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthOutboundIdentity(
 // GetOrResolveOpenAIOAuthOutboundIdentity is the only production materialize
 // entrypoint. A cached plan is reusable only for the exact immutable capture,
 // credential owner, downstream API key, policy snapshot, and projection
-// options. Account failover rematerializes account-specific fields while
-// retaining the already-frozen downstream identity and window for this capture.
+// options. Account failover therefore rematerializes from the same capture.
 func (s *OpenAIGatewayService) GetOrResolveOpenAIOAuthOutboundIdentity(
 	ctx context.Context,
 	c *gin.Context,
@@ -964,7 +900,6 @@ func (s *OpenAIGatewayService) GetOrResolveOpenAIOAuthOutboundIdentity(
 	pinnedPlan *OpenAIOAuthOutboundIdentityPlan,
 ) (OpenAIOAuthOutboundIdentityPlan, error) {
 	options = normalizeOpenAIOAuthIdentityPlanOptions(options)
-	var frozen *OpenAIOAuthIdentityPlan
 	if pinnedPlan != nil &&
 		openAIOAuthIdentityCapturesEqual(pinnedPlan.Capture, capture) &&
 		s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, *pinnedPlan, options) {
@@ -972,21 +907,13 @@ func (s *OpenAIGatewayService) GetOrResolveOpenAIOAuthOutboundIdentity(
 		SetOpenAIOAuthIdentityPlan(c, plan)
 		return plan, nil
 	}
-	if pinnedPlan != nil && s.openAIOAuthDownstreamSnapshotMatches(ctx, c, capture, *pinnedPlan, options) {
-		copy := cloneOpenAIOAuthIdentityPlan(*pinnedPlan)
-		frozen = &copy
-	}
-	if cached, ok := OpenAIOAuthIdentityPlanFromContext(c); ok {
-		if openAIOAuthIdentityCapturesEqual(cached.Capture, capture) &&
-			s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, cached, options) {
-			return cached, nil
-		}
-		if frozen == nil && s.openAIOAuthDownstreamSnapshotMatches(ctx, c, capture, cached, options) {
-			frozen = &cached
-		}
+	if cached, ok := OpenAIOAuthIdentityPlanFromContext(c); ok &&
+		openAIOAuthIdentityCapturesEqual(cached.Capture, capture) &&
+		s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, cached, options) {
+		return cached, nil
 	}
 
-	plan, err := s.resolveOpenAIOAuthIdentityPlan(ctx, c, account, capture, options, frozen)
+	plan, err := s.ResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, options)
 	if err != nil {
 		return plan, err
 	}
@@ -994,24 +921,8 @@ func (s *OpenAIGatewayService) GetOrResolveOpenAIOAuthOutboundIdentity(
 	return plan, nil
 }
 
-func (s *OpenAIGatewayService) openAIOAuthDownstreamSnapshotMatches(ctx context.Context, c *gin.Context, capture OpenAIOAuthIdentityCapture, plan OpenAIOAuthIdentityPlan, options OpenAIOAuthIdentityPlanOptions) bool {
-	if !openAIOAuthIdentityCapturesEqual(plan.Capture, capture) ||
-		plan.APIKeyID != getAPIKeyIDFromContext(c) ||
-		!options.TurnIdentityEnabled || !plan.TurnIdentityRequested || !plan.TurnIdentityEnabled ||
-		plan.PolicySnapshot != s.openAICodexFingerprintPolicyForRequest(ctx, c) ||
-		ValidateOpenAICodexTurnIdentity(plan.TurnIdentity) != nil {
-		return false
-	}
-	namespace, err := openAICodexDownstreamScope(capture, plan.APIKeyID)
-	if err != nil || namespace != plan.TurnIdentityNamespace {
-		return false
-	}
-	return capture.WireProfile.RequestKind == CodexWireRequestMemory ||
-		(ValidateOpenAICodexWindowSnapshot(plan.Window) == nil && validOpenAICodexWindowMappingKey(plan.WindowMappingKey))
-}
-
 func openAIOAuthIdentityCapturesEqual(left, right OpenAIOAuthIdentityCapture) bool {
-	if left.syntheticScope != right.syntheticScope || left.Logical != right.Logical ||
+	if left.Logical != right.Logical ||
 		left.RequestTurn != right.RequestTurn ||
 		left.ContextWindowIDCandidate != right.ContextWindowIDCandidate ||
 		left.ClientWindow != right.ClientWindow ||
@@ -1315,12 +1226,7 @@ func SetOpenAIOAuthIdentityCapture(c *gin.Context, capture OpenAIOAuthIdentityCa
 			openAIOAuthIdentityCapturesEqual(current, capture) {
 			return
 		}
-		// A multi-frame transport may already have materialized the next frame
-		// before its retry capture is installed on the HTTP context. Preserve that
-		// exact plan so publishing the capture cannot discard its frozen window.
-		if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); !ok || !openAIOAuthIdentityCapturesEqual(plan.Capture, capture) {
-			ClearOpenAIOAuthIdentityPlan(c)
-		}
+		ClearOpenAIOAuthIdentityPlan(c)
 		c.Set(openAIOAuthIdentityCaptureContextKey, cloneOpenAIOAuthIdentityCapture(capture))
 	}
 }

@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"testing"
 	"time"
-
-	"github.com/Wei-Shaw/sub2api/internal/config"
 )
 
 type accountUsageCodexProbeRepo struct {
@@ -244,8 +242,8 @@ func TestAccountUsageService_ProfileIdentityFallbackUsesConfiguredFingerprintPol
 	}
 }
 
-func TestAccountUsageService_UsageProbeIdentityUsesIndependentScopeAndFreshRequestTurn(t *testing.T) {
-	gateway := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "usage-probe-independent-scope"}}}
+func TestAccountUsageService_UsageProbeIdentityUsesStableLogicalSeedAndFreshRequestTurn(t *testing.T) {
+	gateway := &OpenAIGatewayService{}
 	svc := &AccountUsageService{openAIGatewayService: gateway}
 	account := &Account{
 		ID:       9042,
@@ -271,14 +269,8 @@ func TestAccountUsageService_UsageProbeIdentityUsesIndependentScopeAndFreshReque
 	if !first.TurnIdentityEnabled || first.TurnIdentity.SessionID == "" || first.TurnIdentity.ThreadID == "" {
 		t.Fatalf("missing stable usage probe identity: %#v", first)
 	}
-	if first.TurnIdentity.SessionID == second.TurnIdentity.SessionID || first.TurnIdentity.ThreadID == second.TurnIdentity.ThreadID {
-		t.Fatalf("independent probes shared identity: first=%#v second=%#v", first.TurnIdentity, second.TurnIdentity)
-	}
-	if first.Capture.syntheticScope == "" || first.Capture.syntheticScope == second.Capture.syntheticScope {
-		t.Fatalf("independent probes shared scope: first=%q second=%q", first.Capture.syntheticScope, second.Capture.syntheticScope)
-	}
-	if first.Window.WindowID() == second.Window.WindowID() || first.Window.ContextWindowID == second.Window.ContextWindowID {
-		t.Fatalf("independent probes shared window: first=%#v second=%#v", first.Window, second.Window)
+	if first.TurnIdentity != second.TurnIdentity {
+		t.Fatalf("stable identity changed across probes: first=%#v second=%#v", first.TurnIdentity, second.TurnIdentity)
 	}
 	if first.RequestTurn.ID == "" || first.RequestTurn.ID == second.RequestTurn.ID {
 		t.Fatalf("independent probes must get fresh request turns: first=%#v second=%#v", first.RequestTurn, second.RequestTurn)

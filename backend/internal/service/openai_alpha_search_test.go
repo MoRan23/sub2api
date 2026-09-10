@@ -55,7 +55,6 @@ func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
 	}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search?feature=standalone", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Request.Header.Set("User-Agent", codexCLIUserAgent)
@@ -121,7 +120,6 @@ func TestForwardAlphaSearchOAuthRebuildsOpaqueTurnMetadataHeader(t *testing.T) {
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
 	const opaque = "  opaque-turn-metadata\t"
 	c.Request.Header["X-Codex-Turn-Metadata"] = []string{opaque}
@@ -159,7 +157,6 @@ func TestForwardAlphaSearchOAuthObservationDoesNotReportStrippedClientInstallati
 	body := []byte(`{"id":"search-unpinned","model":"gpt-5.6-sol","commands":{}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
 	c.Request.Header.Set(codexInstallationIDKey, "client-only-installation")
 	c.Request.Header.Set(openAIWSTurnMetadataHeader, "opaque-turn-metadata")
@@ -194,7 +191,6 @@ func TestForwardAlphaSearchOAuthNormalizesTurnMetadataAndPinsInstallation(t *tes
 	body := []byte(" { \"id\" : \"search-session\", \"model\" : \"gpt-5.6-sol\", \"commands\" : {} } \n")
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
 	c.Request.Header.Set(openAIWSTurnMetadataHeader,
 		`{"session_id":"client-session","thread_id":"client-thread","installation_id":"client-installation","mcp_request_meta":{"request_id":"keep-me"},"future_field":true}`)
@@ -241,7 +237,6 @@ func TestForwardAlphaSearchOAuthObservesFinalPhysicalWireOnce(t *testing.T) {
 	body := []byte(`{"id":"search-observation-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
 	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"session_id":"alpha-session","thread_id":"alpha-thread"}`)
 
@@ -277,7 +272,6 @@ func TestForwardAlphaSearchPATUsesResponsesWebSearchFallback(t *testing.T) {
 	}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Request.Header.Set("User-Agent", codexCLIUserAgent)
@@ -361,7 +355,6 @@ func TestForwardAlphaSearchPATBackfillsMissingChatGPTAccountMetadata(t *testing.
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"OpenAI news"}]}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
@@ -423,7 +416,6 @@ func TestForwardAlphaSearchAPIKeyMapsModelAndPassesThroughError(t *testing.T) {
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/alpha/search", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
@@ -465,7 +457,6 @@ func TestForwardAlphaSearchReturnsFailoverBeforeWriting(t *testing.T) {
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -505,7 +496,6 @@ func TestForwardAlphaSearchSetupToken429CarriesSameAccountRetryWindow(t *testing
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -547,7 +537,6 @@ func TestForwardAlphaSearchAccessStateUsesTypedFailover(t *testing.T) {
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -583,7 +572,6 @@ func TestForwardAlphaSearchPATFallbackAccessStateUsesTypedFailover(t *testing.T)
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -635,7 +623,6 @@ func TestForwardAlphaSearchUnauthorizedDoesNotMarkAccountError(t *testing.T) {
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -679,7 +666,6 @@ func TestForwardAlphaSearchPATResponsesFallbackUnauthorizedDoesNotMarkAccountErr
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -730,7 +716,6 @@ func TestForwardAlphaSearchAPIKeyEndpointNotFoundFailsOver(t *testing.T) {
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -774,7 +759,6 @@ func TestForwardAlphaSearchOAuthNotFoundPassesThrough(t *testing.T) {
 	body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
 
 	upstreamBody := `{"detail":"Not Found"}`

@@ -233,7 +233,6 @@ func startPassthroughLifecycleServerWithHooks(
 
 		recorder := httptest.NewRecorder()
 		ginCtx, _ := gin.CreateTestContext(recorder)
-		setOpenAIDownstreamIdentityTestAPIKey(t, ginCtx)
 		req := r.Clone(controlCtx)
 		req.Header = req.Header.Clone()
 		ginCtx.Request = req
@@ -644,7 +643,6 @@ func TestOpenAIWSPassthroughTurnLifecycle_SerializesTerminalCommitAndNextTurn(t 
 
 func TestPassthroughLifecycle_TurnStateCommitsOnlyAfterFirstDeliveredOutput(t *testing.T) {
 	const (
-		apiKeyID  = int64(902)
 		sessionID = "direct-turn-state-session"
 		oldState  = "direct-turn-state-old"
 		newState  = "direct-turn-state-new"
@@ -673,10 +671,7 @@ func TestPassthroughLifecycle_TurnStateCommitsOnlyAfterFirstDeliveredOutput(t *t
 				openAIPinnedInstallationIDKey:               transportTestPinnedInstallationID,
 			},
 		}
-		server, serverErr := startPassthroughLifecycleServerWithHooks(t, context.Background(), svc, account, func(c *gin.Context) *OpenAIWSIngressHooks {
-			c.Set("api_key", &APIKey{ID: apiKeyID})
-			return nil
-		})
+		server, serverErr := startPassthroughLifecycleServer(t, context.Background(), svc, account)
 		sessionHash, _ := deriveOpenAISessionHashes(sessionID)
 		svc.getOpenAIWSStateStore().BindSessionTurnState(0, sessionHash, oldState, time.Minute)
 		return svc, upstream, server, serverErr, sessionHash, cache
@@ -714,7 +709,7 @@ func TestPassthroughLifecycle_TurnStateCommitsOnlyAfterFirstDeliveredOutput(t *t
 			state, ok = svc.getOpenAIWSStateStore().GetSessionTurnState(0, sessionHash)
 			return ok && state == newState
 		}, time.Second, 10*time.Millisecond)
-		key, keyErr := OpenAICodexTurnStateProvenanceKey(svc.cfg.JWT.Secret, apiKeyID, newState)
+		key, keyErr := OpenAICodexTurnStateProvenanceKey(svc.cfg.JWT.Secret, 0, newState)
 		require.NoError(t, keyErr)
 		require.Eventually(t, func() bool {
 			_, provenanceErr := provenanceStore.GetOpenAICodexTurnStateOrigin(context.Background(), key)
@@ -742,7 +737,7 @@ func TestPassthroughLifecycle_TurnStateCommitsOnlyAfterFirstDeliveredOutput(t *t
 		state, ok := svc.getOpenAIWSStateStore().GetSessionTurnState(0, sessionHash)
 		require.True(t, ok)
 		require.Equal(t, oldState, state)
-		key, keyErr := OpenAICodexTurnStateProvenanceKey(svc.cfg.JWT.Secret, apiKeyID, newState)
+		key, keyErr := OpenAICodexTurnStateProvenanceKey(svc.cfg.JWT.Secret, 0, newState)
 		require.NoError(t, keyErr)
 		_, provenanceErr := provenanceStore.GetOpenAICodexTurnStateOrigin(context.Background(), key)
 		require.ErrorIs(t, provenanceErr, ErrOpenAICodexTurnStateOriginNotFound)
@@ -762,7 +757,7 @@ func TestPassthroughLifecycle_TurnStateCommitsOnlyAfterFirstDeliveredOutput(t *t
 		state, ok := svc.getOpenAIWSStateStore().GetSessionTurnState(0, sessionHash)
 		require.True(t, ok)
 		require.Equal(t, oldState, state)
-		key, keyErr := OpenAICodexTurnStateProvenanceKey(svc.cfg.JWT.Secret, apiKeyID, newState)
+		key, keyErr := OpenAICodexTurnStateProvenanceKey(svc.cfg.JWT.Secret, 0, newState)
 		require.NoError(t, keyErr)
 		_, provenanceErr := provenanceStore.GetOpenAICodexTurnStateOrigin(context.Background(), key)
 		require.ErrorIs(t, provenanceErr, ErrOpenAICodexTurnStateOriginNotFound)

@@ -121,7 +121,6 @@ func TestOpenAIAgentIdentityPassthroughKeepsSessionAndPromptCacheHeaders(t *test
 	}
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","instructions":"Reply OK","input":[],"stream":true,"prompt_cache_key":"cache-agent"}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Request.Header.Set("session_id", "client-session")
@@ -159,7 +158,6 @@ func TestOpenAIAgentIdentityPassthroughKeepsSessionAndPromptCacheHeaders(t *test
 	}
 	oauthRecorder := httptest.NewRecorder()
 	oauthContext, _ := gin.CreateTestContext(oauthRecorder)
-	setOpenAIDownstreamIdentityTestAPIKey(t, oauthContext)
 	oauthContext.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	oauthContext.Request.Header.Set("session_id", "client-session")
 	oauthContext.Request.Header.Set("conversation_id", "client-conversation")
@@ -343,7 +341,6 @@ func TestOpenAIAgentIdentityTaskInvalidRetriesExactlyOnce(t *testing.T) {
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, accountRepo: repo, httpUpstream: upstream}
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","instructions":"Reply OK","input":[],"stream":false}`))
 
 	_, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.4","instructions":"Reply OK","input":[],"stream":false}`))
@@ -361,7 +358,6 @@ func TestOpenAIAgentIdentityTaskInvalidRetriesExactlyOnce(t *testing.T) {
 	}
 	rec2 := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(rec2)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c2)
 	c2.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","instructions":"Reply OK","input":[],"stream":false}`))
 	_, err = svc.Forward(context.Background(), c2, account, []byte(`{"model":"gpt-5.4","instructions":"Reply OK","input":[],"stream":false}`))
 	require.Error(t, err)
@@ -377,7 +373,6 @@ func TestOpenAIAgentIdentityTaskInvalidRetriesExactlyOnce(t *testing.T) {
 	}
 	rec3 := httptest.NewRecorder()
 	c3, _ := gin.CreateTestContext(rec3)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c3)
 	c3.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","instructions":"Reply OK","input":[],"stream":false}`))
 	_, err = svc.Forward(context.Background(), c3, account, []byte(`{"model":"gpt-5.4","instructions":"Reply OK","input":[],"stream":false}`))
 	require.NoError(t, err)
@@ -458,7 +453,6 @@ func TestOpenAIAgentIdentityCompatRoutesRecoverInvalidTaskOnce(t *testing.T) {
 			}
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
-			setOpenAIDownstreamIdentityTestAPIKey(t, c)
 			c.Request = httptest.NewRequest(http.MethodPost, tt.path, bytes.NewReader(tt.body))
 			c.Request.Header.Set("session-id", "agent-identity-compat-retry-session")
 
@@ -505,7 +499,6 @@ func TestOpenAIAgentIdentityChatRecoveryKeepsAutoDerivedSessionIsolationStable(t
 	body := []byte(`{"model":"gpt-5.4","stream":false,"messages":[{"role":"user","content":"hi"}]}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Set("api_key", &APIKey{ID: 99})
 

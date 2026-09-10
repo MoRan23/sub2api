@@ -132,7 +132,6 @@ func TestForwardAsAnthropic_UsesExactFableMessagesDispatchModel(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"claude-fable-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -181,7 +180,6 @@ func TestForwardAsAnthropic_NormalizesRoutingAndEffortForGpt54XHigh(t *testing.T
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4-xhigh","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -287,7 +285,6 @@ func TestForwardAsAnthropic_PreservesMaxForFinalGPT56ResponsesModel(t *testing.T
 		t.Run(tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
-			setOpenAIDownstreamIdentityTestAPIKey(t, c)
 			body := `{"model":"` + tt.model + `","max_tokens":16,"messages":[{"role":"user","content":"hello"}`
 			if tt.effort != "" {
 				body += `],"output_config":{"effort":"` + tt.effort + `"},"stream":false}`
@@ -352,7 +349,6 @@ func TestForwardAsAnthropic_MappedClaudeModelAcceptsChatUsageShape(t *testing.T)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"claude-opus-4-7","max_tokens":16,"messages":[{"role":"user","content":"compact this"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -410,7 +406,6 @@ func TestForwardAsAnthropic_InjectsPromptCacheKeyForAPIKeyMessagesDispatch(t *te
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"metadata":{"user_id":"claude-session-1"},"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -457,7 +452,6 @@ func TestForwardAsAnthropic_AutoDerivesPromptCacheKeyWhenMessagesDispatchHasNoSe
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"system":"You are helpful.","messages":[{"role":"user","content":"open repo"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -496,7 +490,7 @@ func TestForwardAsAnthropic_AutoDerivesPromptCacheKeyWhenMessagesDispatchHasNoSe
 	cacheKey := gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String()
 	require.NotEmpty(t, cacheKey)
 	require.True(t, strings.HasPrefix(cacheKey, "anthropic-digest-"))
-	require.Equal(t, generateSessionUUID(isolateOpenAISessionID(getAPIKeyIDFromContext(c), cacheKey)), upstream.lastReq.Header.Get("session_id"))
+	require.Equal(t, generateSessionUUID(isolateOpenAISessionID(0, cacheKey)), upstream.lastReq.Header.Get("session_id"))
 }
 
 func TestForwardAsAnthropic_GPT6AstraPromptCacheIdentityStableAcrossAppendedTurns(t *testing.T) {
@@ -535,7 +529,6 @@ func TestForwardAsAnthropic_GPT6AstraPromptCacheIdentityStableAcrossAppendedTurn
 			for _, body := range bodies {
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
-				setOpenAIDownstreamIdentityTestAPIKey(t, c)
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 				c.Request.Header.Set("Content-Type", "application/json")
 
@@ -566,7 +559,6 @@ func TestForwardAsAnthropic_DoesNotAutoDerivePromptCacheKeyForNonCodexModel(t *t
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -621,7 +613,6 @@ func TestForwardAsAnthropic_TrimsFullReplayOnlyForCodexCompatModels(t *testing.T
 
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
-		setOpenAIDownstreamIdentityTestAPIKey(t, c)
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 		c.Request.Header.Set("Content-Type", "application/json")
 
@@ -683,7 +674,6 @@ func TestForwardAsAnthropic_OAuthCompatKeepsFullReplayForCacheGrowth(t *testing.
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
@@ -741,7 +731,6 @@ func TestForwardAsAnthropic_AttachesPreviousResponseIDForCompatContinuation(t *t
 	upstream.resp = openAICompatSSECompletedResponse("resp_first", "gpt-5.3-codex")
 	firstRec := httptest.NewRecorder()
 	firstCtx, _ := gin.CreateTestContext(firstRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, firstCtx)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
 
@@ -755,7 +744,6 @@ func TestForwardAsAnthropic_AttachesPreviousResponseIDForCompatContinuation(t *t
 	upstream.resp = openAICompatSSECompletedResponse("resp_second", "gpt-5.3-codex")
 	secondRec := httptest.NewRecorder()
 	secondCtx, _ := gin.CreateTestContext(secondRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, secondCtx)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
 
@@ -795,7 +783,6 @@ func TestForwardAsAnthropic_PreviousResponseIDKeepsMultiToolCallContext(t *testi
 	upstream.resp = openAICompatSSECompletedResponse("resp_first_tools", "gpt-5.3-codex")
 	firstRec := httptest.NewRecorder()
 	firstCtx, _ := gin.CreateTestContext(firstRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, firstCtx)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
 
@@ -807,7 +794,6 @@ func TestForwardAsAnthropic_PreviousResponseIDKeepsMultiToolCallContext(t *testi
 	upstream.resp = openAICompatSSECompletedResponse("resp_second_tools", "gpt-5.3-codex")
 	secondRec := httptest.NewRecorder()
 	secondCtx, _ := gin.CreateTestContext(secondRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, secondCtx)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
 
@@ -848,6 +834,7 @@ func TestForwardAsAnthropic_ReplaysFullToolHistoryWhenPreviousResponseUnavailabl
 		},
 	}
 
+	svc.bindOpenAICompatSessionResponseID(context.Background(), nil, account, "stable-cache-key", "resp_missing")
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":[{"type":"tool_use","id":"call_1","name":"lookup","input":{"q":"first"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"found"},{"type":"text","text":"second"}]}],"tools":[{"name":"lookup","input_schema":{"type":"object"}}],"stream":false}`)
 	upstream.responses = []*http.Response{
 		{
@@ -860,11 +847,9 @@ func TestForwardAsAnthropic_ReplaysFullToolHistoryWhenPreviousResponseUnavailabl
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	svc.bindOpenAICompatSessionResponseID(context.Background(), c, account, "stable-cache-key", "resp_missing")
 	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, secondBody, "stable-cache-key", "gpt-5.3-codex")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -910,13 +895,12 @@ func TestForwardAsAnthropic_PreviousResponseUnavailableRetryFailureDoesNotLoop(t
 		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
 	}
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://api.openai.com/v1"}}
+	svc.bindOpenAICompatSessionResponseID(context.Background(), nil, account, "stable-cache-key", "resp_missing")
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 
-	svc.bindOpenAICompatSessionResponseID(context.Background(), c, account, "stable-cache-key", "resp_missing")
 	_, _ = svc.ForwardAsAnthropic(context.Background(), c, account, body, "stable-cache-key", "gpt-5.3-codex")
 	require.Len(t, upstream.requests, 2)
 	require.True(t, gjson.GetBytes(upstream.bodies[0], "previous_response_id").Exists())
@@ -944,6 +928,7 @@ func TestForwardAsAnthropic_DisablesAPIKeyContinuationWhenUpstreamRequiresWebSoc
 		},
 	}
 
+	svc.bindOpenAICompatSessionResponseID(context.Background(), nil, account, "stable-cache-key", "resp_http_unsupported")
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	upstream.responses = []*http.Response{
 		{
@@ -957,11 +942,9 @@ func TestForwardAsAnthropic_DisablesAPIKeyContinuationWhenUpstreamRequiresWebSoc
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	svc.bindOpenAICompatSessionResponseID(context.Background(), c, account, "stable-cache-key", "resp_http_unsupported")
 	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "stable-cache-key", "gpt-5.5")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -972,7 +955,6 @@ func TestForwardAsAnthropic_DisablesAPIKeyContinuationWhenUpstreamRequiresWebSoc
 
 	laterRec := httptest.NewRecorder()
 	laterCtx, _ := gin.CreateTestContext(laterRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, laterCtx)
 	laterCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	laterCtx.Request.Header.Set("Content-Type", "application/json")
 
@@ -1019,7 +1001,6 @@ func TestForwardAsAnthropic_APIKeyMetadataSessionSurvivesChangingCacheControlAnc
 
 	firstRec := httptest.NewRecorder()
 	firstCtx, _ := gin.CreateTestContext(firstRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, firstCtx)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
 
@@ -1030,11 +1011,10 @@ func TestForwardAsAnthropic_APIKeyMetadataSessionSurvivesChangingCacheControlAnc
 	require.NotEmpty(t, firstKey)
 	require.True(t, strings.HasPrefix(firstKey, "anthropic-metadata-"))
 
-	svc.disableOpenAICompatSessionContinuation(context.Background(), firstCtx, account, firstKey)
+	svc.disableOpenAICompatSessionContinuation(context.Background(), nil, account, firstKey)
 
 	secondRec := httptest.NewRecorder()
 	secondCtx, _ := gin.CreateTestContext(secondRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, secondCtx)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
 
@@ -1071,14 +1051,14 @@ func TestForwardAsAnthropic_DoesNotAttachPreviousResponseIDForOAuthCompat(t *tes
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.bindOpenAICompatSessionResponseID(context.Background(), nil, account, "stable-cache-key", "resp_oauth_prev")
+
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	svc.bindOpenAICompatSessionResponseID(context.Background(), c, account, "stable-cache-key", "resp_oauth_prev")
 	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "stable-cache-key", "gpt-5.4")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -1117,7 +1097,6 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	firstBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"}],"stream":false}`)
 	firstRec := httptest.NewRecorder()
 	firstCtx, _ := gin.CreateTestContext(firstRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, firstCtx)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
 	firstCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
@@ -1131,7 +1110,6 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()
 	secondCtx, _ := gin.CreateTestContext(secondRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, secondCtx)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
 	secondCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
@@ -1151,7 +1129,6 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	thirdBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"},{"role":"assistant","content":"ok again"},{"role":"user","content":"third"}],"stream":false}`)
 	thirdRec := httptest.NewRecorder()
 	thirdCtx, _ := gin.CreateTestContext(thirdRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, thirdCtx)
 	thirdCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(thirdBody))
 	thirdCtx.Request.Header.Set("Content-Type", "application/json")
 	thirdCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
@@ -1186,7 +1163,6 @@ func TestForwardAsAnthropic_GuardsCompositeTurnStateAfterFinalProjection(t *test
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"turn_id":"`+turnStateTurnB+`"}`)
@@ -1231,7 +1207,6 @@ func TestForwardAsAnthropic_OAuthRestoresCodexIdentityHeaders(t *testing.T) {
 			body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
-			setOpenAIDownstreamIdentityTestAPIKey(t, c)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 			c.Request.Header.Set("Content-Type", "application/json")
 			c.Request.Header.Set("User-Agent", tt.userAgent)
@@ -1293,7 +1268,6 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	firstBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"}],"stream":false}`)
 	firstRec := httptest.NewRecorder()
 	firstCtx, _ := gin.CreateTestContext(firstRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, firstCtx)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
 	firstCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
@@ -1309,7 +1283,6 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()
 	secondCtx, _ := gin.CreateTestContext(secondRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, secondCtx)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
 	secondCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
@@ -1358,7 +1331,6 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 	firstBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"metadata":` + metadata + `,"messages":[{"role":"user","content":"first plan"}],"stream":false}`)
 	firstRec := httptest.NewRecorder()
 	firstCtx, _ := gin.CreateTestContext(firstRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, firstCtx)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
 	firstCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
@@ -1373,7 +1345,6 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"metadata":` + metadata + `,"messages":[{"role":"user","content":"rewritten plan"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()
 	secondCtx, _ := gin.CreateTestContext(secondRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, secondCtx)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
 	secondCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
@@ -1421,7 +1392,6 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 	firstBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"metadata":` + metadata + `,"system":[{"type":"text","text":"anchor one","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"first"}],"stream":false}`)
 	firstRec := httptest.NewRecorder()
 	firstCtx, _ := gin.CreateTestContext(firstRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, firstCtx)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
 	firstCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
@@ -1436,7 +1406,6 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"metadata":` + metadata + `,"system":[{"type":"text","text":"anchor two","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()
 	secondCtx, _ := gin.CreateTestContext(secondRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, secondCtx)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
 	secondCtx.Request.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
@@ -1476,7 +1445,6 @@ func TestForwardAsAnthropic_OAuthKeepsSystemAsDeveloperInput(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"system":[{"type":"text","text":"project instructions","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"first"}],"stream":false}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
@@ -1516,7 +1484,6 @@ func TestForwardAsAnthropic_OAuthAddsClaudeCodeTodoGuardForCompatModel(t *testin
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"system":"project instructions","messages":[{"role":"user","content":"review files"}],"stream":false}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
@@ -1554,7 +1521,6 @@ func TestForwardAsAnthropic_OAuthPreservesClaudeCodeToolCallID(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"list files"},{"role":"assistant","content":[{"type":"tool_use","id":"toolu_123","name":"Bash","input":{"command":"ls"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_123","content":"ok"}]}],"tools":[{"name":"Bash","description":"run shell","input_schema":{"type":"object","properties":{"command":{"type":"string"}}}}],"stream":false}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
@@ -1593,7 +1559,6 @@ func TestForwardAsAnthropic_StoresStreamingResponseIDWithoutUsage(t *testing.T) 
 	upstream.resp = openAICompatSSEResponseWithoutUsage("resp_stream_first", "gpt-5.3-codex")
 	firstRec := httptest.NewRecorder()
 	firstCtx, _ := gin.CreateTestContext(firstRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, firstCtx)
 	firstCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(firstBody))
 	firstCtx.Request.Header.Set("Content-Type", "application/json")
 
@@ -1606,7 +1571,6 @@ func TestForwardAsAnthropic_StoresStreamingResponseIDWithoutUsage(t *testing.T) 
 	upstream.resp = openAICompatSSECompletedResponse("resp_stream_second", "gpt-5.3-codex")
 	secondRec := httptest.NewRecorder()
 	secondCtx, _ := gin.CreateTestContext(secondRec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, secondCtx)
 	secondCtx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(secondBody))
 	secondCtx.Request.Header.Set("Content-Type", "application/json")
 
@@ -1663,7 +1627,6 @@ func TestForwardAsAnthropic_ForcedCodexInstructionsTemplatePrependsRenderedInstr
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"system":"client-system","messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -1711,7 +1674,6 @@ func TestForwardAsAnthropic_ForcedCodexInstructionsTemplateUsesCachedTemplateCon
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"system":"client-system","messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -1758,7 +1720,6 @@ func TestForwardAsAnthropic_ClientDisconnectDrainsUpstreamUsage(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Writer = &openAICompatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
@@ -1806,7 +1767,6 @@ func TestForwardAsAnthropic_TerminalUsageWithoutUpstreamCloseReturns(t *testing.
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Writer = &openAICompatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
@@ -1863,7 +1823,6 @@ func TestForwardAsAnthropic_EventNamedTerminalWithoutUpstreamCloseReturns(t *tes
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Writer = &openAICompatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
@@ -1925,7 +1884,6 @@ func TestForwardAsAnthropic_EventNamedTerminalWithKeepaliveReturns(t *testing.T)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Writer = &openAICompatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
@@ -1994,7 +1952,6 @@ func TestForwardAsAnthropic_BufferedTerminalWithoutUpstreamCloseReturns(t *testi
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -2051,7 +2008,6 @@ func TestHandleAnthropicBufferedStreamingResponse_OverridesUpstreamContentType(t
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
 	resp := &http.Response{
@@ -2089,7 +2045,6 @@ func TestForwardAsAnthropic_BufferedEventNamedTerminalWithoutUpstreamCloseReturn
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -2151,7 +2106,6 @@ func TestForwardAsAnthropic_MissingTerminalBeforeOutputReturnsFailoverAndOps(t *
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -2202,7 +2156,6 @@ func TestForwardAsAnthropic_MissingTerminalAfterOutputRecordsOpsWithoutFailover(
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -2257,7 +2210,6 @@ func TestForwardAsAnthropic_MissingTerminalAfterClientDisconnectSkipsOpsAndFailo
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Writer = &openAICompatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
@@ -2303,7 +2255,6 @@ func TestForwardAsAnthropic_CompleteStreamDoesNotRecordMissingTerminalOps(t *tes
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -2361,7 +2312,6 @@ func TestForwardAsAnthropic_UpstreamRequestIgnoresClientCancel(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	reqCtx, cancel := context.WithCancel(context.Background())
 	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body)).WithContext(reqCtx)
@@ -2415,14 +2365,11 @@ func TestForwardAsAnthropic_AstraContinuationRestoresHistoryAndDisablesUnsupport
 			}}
 			svc := &OpenAIGatewayService{httpUpstream: upstream, cfg: &config.Config{}}
 			account := rawGPT56ResponsesAPIKeyAccount("gpt-6-astra", "gpt-6-astra")
+			svc.bindOpenAICompatSessionResponseID(context.Background(), nil, account, "astra-session", "resp_old")
 			body := []byte(`{"model":"gpt-6-astra","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}]}`)
 			for i := 0; i < 2; i++ {
 				c, _ := gin.CreateTestContext(httptest.NewRecorder())
-				setOpenAIDownstreamIdentityTestAPIKey(t, c)
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
-				if i == 0 {
-					svc.bindOpenAICompatSessionResponseID(context.Background(), c, account, "astra-session", "resp_old")
-				}
 				result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "astra-session", "gpt-6-astra")
 				require.NoError(t, err)
 				require.NotNil(t, result)

@@ -832,7 +832,6 @@ func TestOpenAIGatewayServiceForwardImages_OAuthPassesNAndReturnsAllImages(t *te
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 	c.Set("api_key", &APIKey{ID: 42})
 
@@ -990,7 +989,6 @@ func TestOpenAIGatewayServiceForwardImages_OAuthUpstreamHTTPErrorSurfacesRealErr
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 	c.Set("api_key", &APIKey{ID: 42})
 
@@ -1047,7 +1045,6 @@ func TestOpenAIGatewayServiceForwardImages_OAuthNonStreamModerationBlockedReturn
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 	c.Set("api_key", &APIKey{ID: 42})
 
@@ -1101,7 +1098,6 @@ func TestOpenAIGatewayServiceForwardImages_OAuthNonStreamServerErrorReturnsFailo
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 
 	svc := &OpenAIGatewayService{
@@ -1158,7 +1154,6 @@ func TestOpenAIGatewayServiceForwardImages_OAuth429CarriesSameAccountRetryWindow
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 	svc := &OpenAIGatewayService{httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusTooManyRequests,
@@ -1293,7 +1288,6 @@ func TestOpenAIGatewayServiceForwardImages_OAuthStreamServerErrorAfterFlushDoesN
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 
 	svc := &OpenAIGatewayService{
@@ -1704,7 +1698,6 @@ func TestOpenAIGatewayServiceForwardImages_OAuthStreamingTransformsEvents(t *tes
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 
 	svc := &OpenAIGatewayService{}
@@ -1860,7 +1853,6 @@ func TestOpenAIGatewayServiceForwardImages_OAuthEditsMultipartUsesResponsesAPI(t
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 	c.Set("api_key", &APIKey{ID: 100})
 
@@ -1923,7 +1915,6 @@ func TestOpenAIGatewayServiceForwardImages_OAuthEditsStreamingTransformsEvents(t
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 
 	svc := &OpenAIGatewayService{}
@@ -2114,7 +2105,6 @@ func TestOpenAIGatewayServiceForwardImages_OAuthStreamingHandlesOutputItemDoneFa
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 
 	svc := &OpenAIGatewayService{}
@@ -2172,7 +2162,6 @@ func TestOpenAIGatewayServiceForwardImages_OAuthStreamingHandlesMultilineSSE(t *
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 
 	svc := &OpenAIGatewayService{}
@@ -2228,7 +2217,6 @@ func TestOpenAIGatewayServiceForwardImages_OAuthStreamingDrainsAfterClientDiscon
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	setOpenAIDownstreamIdentityTestAPIKey(t, c)
 	c.Request = req
 	c.Writer = &failingOpenAIImageWriter{ResponseWriter: c.Writer, failAfter: 1}
 

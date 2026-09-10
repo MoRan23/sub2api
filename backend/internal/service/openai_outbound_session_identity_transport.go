@@ -113,9 +113,12 @@ func (s *OpenAIGatewayService) resolveOpenAICodexLogicalIdentityForTransport(
 	}
 	identity, ok, err := s.resolveOpenAICodexTurnIdentity(ctx, c, account, logical)
 	if err != nil {
-		// A failed canonical claim must not leak raw IDs or fork an existing
-		// downstream session into a second identity on another credential owner.
-		return OpenAICodexTurnIdentity{}, false, err
+		if errors.Is(err, errOpenAIOutboundSessionIdentityNamespace) {
+			return OpenAICodexTurnIdentity{}, false, err
+		}
+		// UUID generation and shared-store failures are request-path fail-open
+		// conditions. The mapper has already recorded bounded metrics/log fields.
+		return OpenAICodexTurnIdentity{}, false, nil
 	}
 	return identity, ok, nil
 }

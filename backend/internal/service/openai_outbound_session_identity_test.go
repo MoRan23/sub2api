@@ -92,13 +92,6 @@ func newOutboundIdentityTestContext(t *testing.T, headers map[string]string) *gi
 	return newCodexLogicalResolverContext(t, httpHeaders)
 }
 
-func newAuthenticatedOutboundIdentityTestContext(t *testing.T, headers map[string]string) *gin.Context {
-	t.Helper()
-	c := newOutboundIdentityTestContext(t, headers)
-	c.Set("api_key", &APIKey{ID: 41})
-	return c
-}
-
 func TestResolveOpenAICodexLogicalTurnIdentityPriorityAndPromptNeutrality(t *testing.T) {
 	headers := make(http.Header)
 	headers.Set("session-id", "header-session")
@@ -226,16 +219,15 @@ func TestResolveOpenAICodexTurnIdentityRootChildrenAndRelations(t *testing.T) {
 	resetProcessCodexIdentityStore(t)
 	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "hierarchy-secret"}}}
 	account := &Account{ID: 501, Type: AccountTypeOAuth}
-	c := newAuthenticatedOutboundIdentityTestContext(t, nil)
 	rootLogical := normalizeLogicalTuple(openAICodexLogicalTuple{session: "logical-session", thread: "logical-session"}, "test", true)
-	root, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), c, account, rootLogical)
+	root, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), nil, account, rootLogical)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, root.SessionID, root.ThreadID)
 	require.Equal(t, OpenAICodexTurnRelationRoot, root.Relation)
 
 	childOneLogical := normalizeLogicalTuple(openAICodexLogicalTuple{session: "logical-session", thread: "child-one", parent: "logical-session"}, "test", true)
-	childOne, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), c, account, childOneLogical)
+	childOne, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), nil, account, childOneLogical)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, root.SessionID, childOne.SessionID)
@@ -243,7 +235,7 @@ func TestResolveOpenAICodexTurnIdentityRootChildrenAndRelations(t *testing.T) {
 	require.Equal(t, root.ThreadID, childOne.ParentThreadID)
 
 	childTwoLogical := normalizeLogicalTuple(openAICodexLogicalTuple{session: "logical-session", thread: "child-two", parent: "child-one", fork: "child-one"}, "test", true)
-	childTwo, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), c, account, childTwoLogical)
+	childTwo, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), nil, account, childTwoLogical)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, root.SessionID, childTwo.SessionID)
@@ -251,7 +243,7 @@ func TestResolveOpenAICodexTurnIdentityRootChildrenAndRelations(t *testing.T) {
 	require.Equal(t, childOne.ThreadID, childTwo.ParentThreadID)
 	require.Equal(t, childOne.ThreadID, childTwo.ForkedFromThreadID)
 
-	stable, _, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), c, account, childTwoLogical)
+	stable, _, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), nil, account, childTwoLogical)
 	require.NoError(t, err)
 	require.Equal(t, childTwo, stable)
 }
@@ -273,12 +265,12 @@ func TestResolveOpenAICodexTurnIdentityIsolationDimensions(t *testing.T) {
 	changedAccount, _, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), contextForAPIKey(11), &Account{ID: 92, Type: AccountTypeOAuth}, logical)
 	require.NoError(t, err)
 	require.NotEqual(t, first.SessionID, changedAPIKey.SessionID)
-	require.Equal(t, first, changedAccount, "an upstream change must preserve the downstream identity")
+	require.NotEqual(t, first.SessionID, changedAccount.SessionID)
 
 	parentID := int64(91)
 	shadow, _, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), contextForAPIKey(11), &Account{ID: 93, Type: AccountTypeOAuth, ParentAccountID: &parentID}, logical)
 	require.NoError(t, err)
-	require.Equal(t, first, shadow, "a shadow account must preserve the same downstream identity")
+	require.Equal(t, first, shadow, "OAuth shadow and credential owner must share the namespace")
 }
 
 type outboundIdentityGatewayCacheStub struct {
@@ -395,7 +387,7 @@ func TestResolveOpenAICodexAliasesDoNotBindConflictingLowerPriorityTuple(t *test
 	account := &Account{ID: 173, Type: AccountTypeOAuth}
 	svc := &OpenAIGatewayService{cache: cache, cfg: &config.Config{JWT: config.JWTConfig{Secret: secret}}}
 
-	firstContext := newAuthenticatedOutboundIdentityTestContext(t, map[string]string{
+	firstContext := newOutboundIdentityTestContext(t, map[string]string{
 		openAIWSTurnMetadataHeader: `{"session_id":"logical-session-b","thread_id":"logical-thread-b"}`,
 	})
 	firstCapture := CaptureOpenAIOAuthIdentity(firstContext, []byte(`{"client_metadata":{"x-codex-turn-metadata":"{\"session_id\":\"logical-session-a\",\"thread_id\":\"logical-thread-a\"}"}}`), "")
@@ -405,7 +397,7 @@ func TestResolveOpenAICodexAliasesDoNotBindConflictingLowerPriorityTuple(t *test
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	secondContext := newAuthenticatedOutboundIdentityTestContext(t, map[string]string{
+	secondContext := newOutboundIdentityTestContext(t, map[string]string{
 		openAIWSTurnMetadataHeader: `{"session_id":"logical-session-b","thread_id":"logical-thread-b"}`,
 	})
 	secondCapture := CaptureOpenAIOAuthIdentity(secondContext, nil, "")
@@ -427,39 +419,35 @@ func TestResolveOpenAICodexEndpointAliasReusesLegacyV2Mapping(t *testing.T) {
 	account := &Account{ID: 175, Type: AccountTypeOAuth}
 	svc := &OpenAIGatewayService{cache: cache, cfg: &config.Config{JWT: config.JWTConfig{Secret: secret}}}
 
-	legacyDigest, err := OpenAICodexSessionMappingKey(secret, namespace, 41, legacySeed)
+	legacyDigest, err := OpenAICodexSessionMappingKey(secret, namespace, 0, legacySeed)
 	require.NoError(t, err)
 	_, err = cache.identityStore().GetOrCreateCodexSession(context.Background(), legacyDigest, testOutboundSessionUUID, time.Hour)
 	require.NoError(t, err)
 
 	body := []byte(`{"client_metadata":{"session_id":"compact-canonical-session","thread_id":"compact-canonical-session"}}`)
-	c := newAuthenticatedOutboundIdentityTestContext(t, nil)
-	capture := CaptureOpenAIOAuthIdentityWithEndpointAlias(c, body, legacySeed)
+	capture := CaptureOpenAIOAuthIdentityWithEndpointAlias(nil, body, legacySeed)
 	require.Equal(t, canonicalSession, capture.Logical.SessionKey)
 	require.Len(t, capture.Aliases, 2)
 	require.False(t, capture.Aliases[1].Explicit)
 
-	identity, ok, err := svc.resolveOpenAICodexTurnIdentityWithAliases(context.Background(), c, account, capture.Logical, capture.Aliases)
+	identity, ok, err := svc.resolveOpenAICodexTurnIdentityWithAliases(context.Background(), nil, account, capture.Logical, capture.Aliases)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, testOutboundSessionUUID, identity.SessionID)
 	require.Equal(t, testOutboundSessionUUID, identity.ThreadID)
 
-	canonicalDigest, err := OpenAICodexSessionMappingKey(secret, OpenAICodexDownstreamIdentityNamespace, 41, canonicalSession)
+	canonicalDigest, err := OpenAICodexSessionMappingKey(secret, namespace, 0, canonicalSession)
 	require.NoError(t, err)
-	bound, err := cache.identityStore().ResolveCodexDownstreamSession(context.Background(), OpenAICodexDownstreamSessionRequest{
-		SessionMappingKeys: []string{canonicalDigest}, CandidateSessionID: "018f5c3c-6e3a-7abe-8def-1234567890ad",
-	}, time.Hour)
+	bound, err := cache.identityStore().GetOrCreateCodexSession(context.Background(), canonicalDigest, "018f5c3c-6e3a-7abe-8def-1234567890ad", time.Hour)
 	require.NoError(t, err)
-	require.Equal(t, testOutboundSessionUUID, bound.SessionID)
-	require.Equal(t, namespace, bound.LegacyNamespace)
+	require.Equal(t, testOutboundSessionUUID, bound)
 }
 
 func TestResolveOpenAICodexAliasesDoNotReuseConflictingTupleWithoutHMACSecret(t *testing.T) {
 	resetProcessCodexIdentityStore(t)
 	svc := &OpenAIGatewayService{}
 	account := &Account{ID: 174, Type: AccountTypeOAuth}
-	firstContext := newAuthenticatedOutboundIdentityTestContext(t, map[string]string{
+	firstContext := newOutboundIdentityTestContext(t, map[string]string{
 		openAIWSTurnMetadataHeader: `{"session_id":"fallback-session-b","thread_id":"fallback-thread-b"}`,
 	})
 	firstCapture := CaptureOpenAIOAuthIdentity(firstContext, []byte(`{"client_metadata":{"x-codex-turn-metadata":"{\"session_id\":\"fallback-session-a\",\"thread_id\":\"fallback-thread-a\"}"}}`), "")
@@ -467,7 +455,7 @@ func TestResolveOpenAICodexAliasesDoNotReuseConflictingTupleWithoutHMACSecret(t 
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	secondContext := newAuthenticatedOutboundIdentityTestContext(t, map[string]string{
+	secondContext := newOutboundIdentityTestContext(t, map[string]string{
 		openAIWSTurnMetadataHeader: `{"session_id":"fallback-session-b","thread_id":"fallback-thread-b"}`,
 	})
 	secondCapture := CaptureOpenAIOAuthIdentity(secondContext, nil, "")
@@ -477,31 +465,23 @@ func TestResolveOpenAICodexAliasesDoNotReuseConflictingTupleWithoutHMACSecret(t 
 	require.NotEqual(t, first, second)
 }
 
-func TestResolveOpenAICodexTurnIdentityRetainsWarmFallbackAfterRecovery(t *testing.T) {
+func TestResolveOpenAICodexTurnIdentityPromotesFallbackAfterRecovery(t *testing.T) {
 	resetProcessCodexIdentityStore(t)
-	cache := &outboundIdentityGatewayCacheStub{}
+	cache := &outboundIdentityGatewayCacheStub{fail: true}
 	svc := &OpenAIGatewayService{cache: cache, cfg: &config.Config{JWT: config.JWTConfig{Secret: "recovery-secret"}}}
 	logical := normalizeLogicalTuple(openAICodexLogicalTuple{session: "recovery-session", thread: "recovery-child"}, "test", true)
-	c := newAuthenticatedOutboundIdentityTestContext(t, nil)
-	initial, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), c, &Account{ID: 72}, logical)
+	local, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), nil, &Account{ID: 72}, logical)
 	require.NoError(t, err)
 	require.True(t, ok)
-	cache.mu.Lock()
-	cache.fail = true
-	cache.mu.Unlock()
-	local, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), c, &Account{ID: 73}, logical)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, initial, local, "a warm canonical mapping survives store failure and account change")
 
 	cache.mu.Lock()
 	cache.fail = false
 	cache.mu.Unlock()
-	recovered, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), c, &Account{ID: 73}, logical)
+	recovered, ok, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), nil, &Account{ID: 72}, logical)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, local, recovered)
-	stable, _, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), c, &Account{ID: 72}, logical)
+	stable, _, err := svc.resolveOpenAICodexTurnIdentity(context.Background(), nil, &Account{ID: 72}, logical)
 	require.NoError(t, err)
 	require.Equal(t, recovered, stable)
 }
