@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	coderws "github.com/coder/websocket"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
@@ -130,6 +131,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 	if err := ValidateLiveCallRequest(request); err != nil {
 		return nil, err
 	}
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	store, err := s.liveStore()
 	if err != nil {
 		return nil, err
@@ -264,6 +266,7 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	request *LiveCallRequest,
 	attestation string,
 ) (*LiveCallCreated, error) {
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		logLiveCreateStageFailure(ctx, account.ID, "access_token", err)
@@ -305,6 +308,7 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	if err := s.applyLiveUpstreamIdentityHeaders(ctx, account, upstreamReq.Header); err != nil {
 		return nil, err
 	}
+	upstreamReq = ApplyOpenAIRequestPolicy(upstreamReq, s.settingService)
 
 	resp, err := s.doOpenAIUpstream(upstreamReq, resolveAccountProxyURL(account), account)
 	if err != nil {
@@ -424,6 +428,7 @@ func (s *OpenAIGatewayService) liveSidebandHeaders(
 	account *Account,
 	record *LiveCallRecord,
 ) (http.Header, error) {
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, err
@@ -443,10 +448,15 @@ func (s *OpenAIGatewayService) liveSidebandHeaders(
 	if err := s.applyLiveUpstreamIdentityHeaders(ctx, account, headers); err != nil {
 		return nil, err
 	}
+	policy, _ := openai.RequestPolicyFromContext(ctx)
+	openai.ApplyCodexResidencyHeader(headers, policy.CodexResidencyUS)
 	return headers, nil
 }
 
 func (s *OpenAIGatewayService) dialLiveSideband(ctx context.Context, record *LiveCallRecord) (liveFrameConn, error) {
+	// A physical reconnect picks up the latest policy; established calls continue
+	// using the headers captured in their existing handshake.
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	account, err := s.accountRepo.GetByID(ctx, record.AccountID)
 	if err != nil {
 		return nil, err

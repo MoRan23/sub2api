@@ -156,6 +156,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 	rewriteInstallationID bool,
 	routingFields ...string,
 ) (http.Header, openAIWSSessionHeaderResolution, error) {
+	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	routingModel := ""
 	routingServiceTier := ""
 	if len(routingFields) > 0 {
@@ -362,6 +363,8 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 		}
 		SetOpenAIOAuthIdentityPlan(c, plan)
 	}
+	sessionResolution.ResidencyBeforePolicy = cloneOpenAIWSResidencyHeaders(headers)
+	s.applyOpenAIWSResidencyHeaders(ctx, account, headers)
 	if sessionResolution.OutboundIdentityEnabled {
 		setFingerprintObservationOutboundIdentity(c, sessionResolution.OutboundIdentity)
 	}

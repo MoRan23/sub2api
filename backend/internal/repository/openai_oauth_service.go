@@ -47,7 +47,7 @@ func (s *openaiOAuthService) ExchangeCode(ctx context.Context, code, codeVerifie
 	var tokenResp openai.TokenResponse
 
 	authUA, authOriginator := service.CodexCanonicalAuthIdentity()
-	resp, err := client.R().
+	resp, err := openai.ReqClientWithRequestPolicy(client, ctx).R().
 		SetContext(ctx).
 		SetHeader("User-Agent", authUA).
 		SetHeader("originator", authOriginator).
@@ -97,7 +97,7 @@ func (s *openaiOAuthService) refreshTokenWithClientID(ctx context.Context, refre
 	var tokenResp openai.TokenResponse
 
 	authUA, authOriginator := service.CodexCanonicalAuthIdentity()
-	resp, err := client.R().
+	resp, err := openai.ReqClientWithRequestPolicy(client, ctx).R().
 		SetContext(ctx).
 		SetHeader("User-Agent", authUA).
 		SetHeader("originator", authOriginator).

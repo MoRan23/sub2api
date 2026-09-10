@@ -1,6 +1,7 @@
 package apicompat
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -617,8 +618,9 @@ func convertResponsesToAnthropicTools(tools []ResponsesTool) []AnthropicTool {
 		switch t.Type {
 		case "web_search", "google_search", "web_search_20250305":
 			out = append(out, AnthropicTool{
-				Type: "web_search_20250305",
-				Name: "web_search",
+				Type:         "web_search_20250305",
+				Name:         "web_search",
+				UserLocation: bytes.Clone(t.UserLocation),
 			})
 		case "function":
 			out = append(out, AnthropicTool{

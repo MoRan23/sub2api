@@ -117,6 +117,8 @@ type AnthropicTool struct {
 	Description  string                 `json:"description,omitempty"`
 	InputSchema  json.RawMessage        `json:"input_schema,omitempty"` // JSON Schema object
 	CacheControl *AnthropicCacheControl `json:"cache_control,omitempty"`
+	// Server-side web search location; retain unknown provider-specific fields.
+	UserLocation json.RawMessage `json:"user_location,omitempty"`
 }
 
 // AnthropicCacheControl 对应 Anthropic API 的 cache_control 字段。
@@ -326,6 +328,8 @@ type ResponsesTool struct {
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
 	Strict      *bool           `json:"strict,omitempty"`
+	// Server-side web search location; retain unknown provider-specific fields.
+	UserLocation json.RawMessage `json:"user_location,omitempty"`
 
 	// type=namespace 的子工具列表（tools 与 children 二选一，语义相同）。
 	Tools    []ResponsesTool `json:"tools,omitempty"`
@@ -718,6 +722,8 @@ type ChatFile struct {
 type ChatTool struct {
 	Type     string        `json:"type"` // "function" | "web_search" | "code_execution" | "x_search"
 	Function *ChatFunction `json:"function,omitempty"`
+	// Server-side web search location; retain unknown provider-specific fields.
+	UserLocation json.RawMessage `json:"user_location,omitempty"`
 
 	// type=x_search
 	AllowedXHandles          []string `json:"allowed_x_handles,omitempty"`

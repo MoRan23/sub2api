@@ -10,6 +10,7 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 const openAICodexPATWhoamiURLDefault = "https://auth.openai.com/api/accounts/v1/user-auth-credential/whoami"
@@ -35,6 +36,7 @@ type openAICodexPATWhoamiResponse struct {
 // ValidateCodexPersonalAccessToken validates a Codex at-* token using the same
 // first-class PAT endpoint used by the Codex client.
 func (s *OpenAIOAuthService) ValidateCodexPersonalAccessToken(ctx context.Context, accessToken, proxyURL string) (*OpenAITokenInfo, error) {
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	accessToken = strings.TrimSpace(accessToken)
 	if accessToken == "" {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_CODEX_PAT_REQUIRED", "access token is required")
@@ -60,7 +62,8 @@ func (s *OpenAIOAuthService) ValidateCodexPersonalAccessToken(ctx context.Contex
 	req.Header.Set("accept", "application/json")
 	ApplyCodexCanonicalAuthIdentity(req.Header)
 
-	resp, err := client.Do(req)
+	req = ApplyOpenAIRequestPolicy(req, s.settingService)
+	resp, err := openai.HTTPClientWithCodexResidencyRedirectGuard(client).Do(req)
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_PAT_VALIDATE_FAILED", "failed to validate Codex personal access token: %v", err)
 	}

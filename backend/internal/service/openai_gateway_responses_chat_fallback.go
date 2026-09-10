@@ -57,7 +57,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	// 被 flush / 跨实例漂移后同 id 的 encrypted-only 副本无法再取明文的情况。
 	s.recacheReasoningItemsFromInput(responsesReq.Input)
 
-	chatReq, err := apicompat.ResponsesToChatCompletionsRequestWithOptions(&responsesReq, &apicompat.ResponsesToChatOptions{
+	chatReq, err := responsesToChatCompletionsWithTimezoneObservation(c, &responsesReq, &apicompat.ResponsesToChatOptions{
 		ReasoningContentByID: s.reasoningContentByID,
 	})
 	if err != nil {

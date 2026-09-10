@@ -249,6 +249,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyEnableOpenAIUUIDv7SessionIdentity:                  "true",
 		SettingKeyEnableOpenAICodexClientIdentityNormalization:       "true",
 		SettingKeyEnableOpenAICodexPATContextManagement:              "false",
+		SettingKeyEnableOpenAIRequestTimezoneConversion:              "true",
+		SettingKeyEnableOpenAIPassthroughTimezoneConversion:          "true",
+		SettingKeyEnableOpenAICodexResidencyUS:                       "true",
 		SettingPaymentVisibleMethodAlipaySource:                      "",
 		SettingPaymentVisibleMethodWxpaySource:                       "",
 		SettingPaymentVisibleMethodAlipayEnabled:                     "false",
@@ -911,6 +914,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		settings, SettingKeyEnableOpenAICodexClientIdentityNormalization,
 	)
 	result.EnableOpenAICodexPATContextManagement = settings[SettingKeyEnableOpenAICodexPATContextManagement] == "true"
+	result.EnableOpenAIRequestTimezoneConversion = parseDefaultTrueSetting(settings, SettingKeyEnableOpenAIRequestTimezoneConversion)
+	result.EnableOpenAIPassthroughTimezoneConversion = parseDefaultTrueSetting(settings, SettingKeyEnableOpenAIPassthroughTimezoneConversion)
+	result.EnableOpenAICodexResidencyUS = parseDefaultTrueSetting(settings, SettingKeyEnableOpenAICodexResidencyUS)
 	// Treat an old/inconsistent persisted combination as disabled. The
 	// History/Notes adapter cannot safely operate without both server-managed
 	// identity normalizers, and the effective settings response must agree

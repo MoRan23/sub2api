@@ -25,6 +25,7 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
+	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 
 	originalModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	if originalModel == "" {
@@ -87,6 +88,9 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效）
 	account.ApplyHeaderOverrides(upstreamReq.Header)
+	if account.IsOpenAI() {
+		upstreamReq = ApplyOpenAIRequestPolicy(upstreamReq, s.settingService)
+	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

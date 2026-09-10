@@ -260,6 +260,7 @@ func codexAuxiliaryAccountBindingKey(apiKey *APIKey, logicalSession string) stri
 }
 
 func (s *OpenAIGatewayService) doCodexAuxiliaryRequest(ctx context.Context, c *gin.Context, account *Account, path string, body []byte) (*http.Response, error) {
+	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	if c != nil {
 		c.Set(codexNewSessionThreadHintContextKey, false)
 	}
@@ -367,6 +368,7 @@ func (s *OpenAIGatewayService) doCodexAuxiliaryRequest(ctx context.Context, c *g
 	if entry := codexContextObservationFromContext(c); entry != nil {
 		entry.UpstreamSent = true
 	}
+	req = ApplyOpenAIRequestPolicy(req, s.settingService)
 	resp, err := s.doCodexAuxiliaryUpstream(req, resolveAccountProxyURL(account), account)
 	if err != nil {
 		// Preserve transport error classification without changing account ownership.

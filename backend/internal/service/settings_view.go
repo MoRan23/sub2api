@@ -249,6 +249,9 @@ type SystemSettings struct {
 	EnableOpenAIUUIDv7SessionIdentity            bool   // 是否启用稳定复用的 OpenAI UUIDv7 session/thread 标识对（默认 true）
 	EnableOpenAICodexClientIdentityNormalization bool   // UA/originator/version 归一分项（默认 true）
 	EnableOpenAICodexPATContextManagement        bool   // PAT Codex History/Notes 适配（默认 false）
+	EnableOpenAIRequestTimezoneConversion        bool   // 请求时区及本轮日期转换（默认 true）
+	EnableOpenAIPassthroughTimezoneConversion    bool   // 透传正文时区转换，受请求转换总开关控制（默认 true）
+	EnableOpenAICodexResidencyUS                 bool   // 强制 OpenAI 上游美国地域请求头（默认 true）
 	MinCodexVersion                              string // codex_cli_only 最低 Codex 引擎版本；空=不检查
 	MaxCodexVersion                              string // codex_cli_only 最高 Codex 引擎版本；空=不检查
 	CodexCLIOnlyBlacklist                        string // codex_cli_only 全局黑名单 JSON（[]AllowedClientEntry，OR deny）

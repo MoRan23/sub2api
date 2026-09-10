@@ -615,6 +615,9 @@ func (s *UpstreamBillingProbeService) SetAccountEnabled(ctx context.Context, acc
 }
 
 func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, account *Account, intervalMinutes int) (*UpstreamBillingProbeSnapshot, error) {
+	if account.Platform == PlatformOpenAI {
+		ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
+	}
 	now := s.currentTime().UTC()
 	if s.accountTestService == nil || s.accountTestService.httpUpstream == nil {
 		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "transport_unavailable", 0)
@@ -672,6 +675,9 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	account.ApplyHeaderOverrides(req.Header)
+	if account.Platform == PlatformOpenAI {
+		req = ApplyOpenAIRequestPolicy(req, s.settingService)
+	}
 	var tlsProfile *tlsfingerprint.Profile
 	if s.accountTestService.tlsFPProfileService != nil {
 		tlsProfile = s.accountTestService.tlsFPProfileService.ResolveTLSProfile(account)

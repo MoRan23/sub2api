@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -118,6 +119,26 @@ func (d *coderOpenAIWSClientDialer) Dial(
 		}
 		opts.HTTPClient = proxyClient
 	}
+	client := opts.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	opts.HTTPClient = openai.HTTPClientWithCodexResidencyRedirectGuard(client)
+	originURL, parseErr := url.Parse(targetURL)
+	if parseErr != nil {
+		return nil, 0, nil, parseErr
+	}
+	switch originURL.Scheme {
+	case "ws":
+		originURL.Scheme = "http"
+	case "wss":
+		originURL.Scheme = "https"
+	}
+	originRequest, originErr := http.NewRequestWithContext(ctx, http.MethodGet, originURL.String(), nil)
+	if originErr != nil {
+		return nil, 0, nil, originErr
+	}
+	ctx = openai.MarkCodexResidencyRequest(originRequest).Context()
 
 	conn, resp, err := coderws.Dial(ctx, targetURL, opts)
 	if err != nil {
@@ -141,7 +162,11 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	if resp != nil {
 		respHeaders = cloneHeader(resp.Header)
 	}
-	return &coderOpenAIWSClientConn{conn: conn}, 0, respHeaders, nil
+	actualHeaders := headers
+	if resp != nil && resp.Request != nil {
+		actualHeaders = resp.Request.Header
+	}
+	return &coderOpenAIWSClientConn{conn: conn, observationHeaders: cloneFingerprintObservationHeaders(actualHeaders)}, 0, respHeaders, nil
 }
 
 func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client, error) {
@@ -267,7 +292,15 @@ func (d *coderOpenAIWSClientDialer) SnapshotTransportMetrics() OpenAIWSTransport
 }
 
 type coderOpenAIWSClientConn struct {
-	conn *coderws.Conn
+	conn               *coderws.Conn
+	observationHeaders http.Header
+}
+
+func (c *coderOpenAIWSClientConn) FingerprintObservationHeaders() http.Header {
+	if c == nil {
+		return nil
+	}
+	return cloneHeader(c.observationHeaders)
 }
 
 var _ openaiwsv2.FrameConn = (*coderOpenAIWSClientConn)(nil)

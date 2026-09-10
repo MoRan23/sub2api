@@ -572,6 +572,7 @@ func (s *OpenAIGatewayService) ForwardImages(
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed images request is required")
 	}
+	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	switch account.Type {
 	case AccountTypeAPIKey:
 		return s.forwardOpenAIImagesAPIKey(ctx, c, account, body, parsed, channelMappedModel)
@@ -813,6 +814,9 @@ func (s *OpenAIGatewayService) buildOpenAIImagesRequest(
 	}
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
 	account.ApplyHeaderOverrides(req.Header)
+	if account.IsOpenAI() {
+		req = ApplyOpenAIRequestPolicy(req, s.settingService)
+	}
 	return req, nil
 }
 

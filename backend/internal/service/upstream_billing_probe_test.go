@@ -203,6 +203,18 @@ func (r *upstreamBillingProbeSettingRepo) GetValue(_ context.Context, key string
 	return value, nil
 }
 
+func (r *upstreamBillingProbeSettingRepo) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	values := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, ok := r.values[key]; ok {
+			values[key] = value
+		}
+	}
+	return values, nil
+}
+
 func (r *upstreamBillingProbeSettingRepo) Set(_ context.Context, key, value string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

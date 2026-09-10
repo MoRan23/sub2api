@@ -990,6 +990,7 @@ func (s *AccountTestService) buildAntigravityAPIKeyModelsRequest(ctx context.Con
 }
 
 func (s *AccountTestService) buildOpenAIUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	if account.IsOpenAIOAuth() {
 		return s.buildOpenAIOAuthUpstreamModelsRequest(ctx, account)
 	}
@@ -1028,6 +1029,9 @@ func buildOpenAIAPIKeyModelsRequest(ctx context.Context, account *Account, valid
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	// 账号级请求头覆写：模型列表探测与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
+	if account.IsOpenAI() {
+		req = ApplyOpenAIRequestPolicy(req, nil)
+	}
 	return req, nil
 }
 
@@ -1035,6 +1039,7 @@ func buildOpenAIAPIKeyModelsRequest(ctx context.Context, account *Account, valid
 // OAuth subscriptions do not expose the public Platform API /v1/models endpoint,
 // so treating them like API-key accounts makes the admin sync button fail locally.
 func (s *AccountTestService) buildOpenAIOAuthUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	credentialAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {
 		return nil, newUpstreamModelSyncConfigError("Failed to resolve OpenAI account credentials", err)
@@ -1090,7 +1095,7 @@ func (s *AccountTestService) buildOpenAIOAuthUpstreamModelsRequest(ctx context.C
 	setOpenAIChatGPTAccountHeaders(req.Header, credentialAccount)
 	credentialAccount.ApplyHeaderOverrides(req.Header)
 	enforceCodexIdentityHeadersWithUA(req.Header, credentialAccount.GetOpenAIUserAgent())
-	return req, nil
+	return ApplyOpenAIRequestPolicy(req, s.settingService), nil
 }
 
 func (s *AccountTestService) buildGeminiUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {

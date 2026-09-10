@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -59,7 +60,7 @@ func TestFingerprintObserverScrubsRingOnDisable(t *testing.T) {
 	globalFingerprintObserver.mu.Lock()
 	defer globalFingerprintObserver.mu.Unlock()
 	for i, entry := range globalFingerprintObserver.ring {
-		if entry != (FingerprintObservationEntry{}) {
+		if !reflect.DeepEqual(entry, FingerprintObservationEntry{}) {
 			t.Fatalf("ring slot %d retained data after disable: %+v", i, entry)
 		}
 	}
@@ -418,7 +419,7 @@ func TestShouldRecordFingerprintObservationRequestCoverage(t *testing.T) {
 		{name: "prefixed chat bridge", method: http.MethodPost, path: "/openai/v1/chat/completions", account: oauth, want: true},
 		{name: "websocket handshake", method: http.MethodGet, path: "/v1/responses", account: oauth, want: true},
 		{name: "prefixed websocket handshake", method: http.MethodGet, path: "/openai/v1/responses", account: oauth, want: true},
-		{name: "api key", method: http.MethodPost, path: "/v1/responses", account: apiKey, want: false},
+		{name: "api key", method: http.MethodPost, path: "/v1/responses", account: apiKey, want: true},
 		{name: "passthrough", method: http.MethodPost, path: "/v1/responses", account: passthrough, want: true},
 		{name: "alpha", method: http.MethodPost, path: "/v1/alpha/search", account: oauth, want: true},
 		{name: "bare alpha", method: http.MethodPost, path: "/alpha/search", account: oauth, want: true},
@@ -471,7 +472,7 @@ func TestFingerprintObserverConcurrentDisableCannotRetainEntries(t *testing.T) {
 	observer.mu.Lock()
 	defer observer.mu.Unlock()
 	for i, entry := range observer.ring {
-		if entry != (FingerprintObservationEntry{}) {
+		if !reflect.DeepEqual(entry, FingerprintObservationEntry{}) {
 			t.Fatalf("ring slot %d retained data after concurrent disable: %+v", i, entry)
 		}
 	}

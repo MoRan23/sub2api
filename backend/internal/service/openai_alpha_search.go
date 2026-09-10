@@ -31,6 +31,7 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	if s == nil || c == nil || account == nil {
 		return nil, fmt.Errorf("service, context, and account are required")
 	}
+	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	alphaSessionID := strings.TrimSpace(gjson.GetBytes(body, "id").String())
 	if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
 		SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentityForAlphaSearch(c, body, alphaSessionID))
@@ -327,7 +328,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 	if err != nil {
 		return nil, fmt.Errorf("finalize alpha search Responses fallback: %w", err)
 	}
-	return req, nil
+	return ApplyOpenAIRequestPolicy(req, s.settingService), nil
 }
 
 func buildOpenAIAlphaSearchResponsesWebSearchBody(alphaBody []byte, model string) ([]byte, error) {
@@ -497,7 +498,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 		}
 	}
 	stripOpenAIAlphaSearchResponsesHeaders(req.Header)
-	return req, nil
+	return ApplyOpenAIRequestPolicy(req, s.settingService), nil
 }
 
 // stripOpenAIAlphaSearchResponsesHeaders 让独立搜索请求与官方 Codex

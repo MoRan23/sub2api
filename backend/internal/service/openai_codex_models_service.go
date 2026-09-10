@@ -1525,6 +1525,7 @@ func isRetryableCodexModelsManifestTransportError(err error) bool {
 type openAIModelsRequest struct {
 	url                 string
 	headers             http.Header
+	requestPolicy       *openai.RequestPolicy
 	proxyURL            string
 	accountID           int64
 	credentialAccountID int64
@@ -1623,6 +1624,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
 	}
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	credAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_CREDENTIALS_FAILED", "resolve credential account: %v", err)
@@ -1718,9 +1720,11 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 		proxyURL = account.Proxy.URL()
 	}
 
+	policy, _ := openai.RequestPolicyFromContext(ctx)
 	request := openAIModelsRequest{
 		url:                 requestURL.String(),
 		headers:             headers,
+		requestPolicy:       &policy,
 		proxyURL:            proxyURL,
 		accountID:           account.ID,
 		credentialAccountID: credAccount.ID,
@@ -1856,6 +1860,10 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstreamForRequest(reques
 }
 
 func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, request openAIModelsRequest, ifNoneMatch string) (*OpenAIModelsResponse, error) {
+	if request.requestPolicy != nil {
+		ctx = openai.WithRequestPolicy(ctx, *request.requestPolicy)
+	}
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	reqCtx, cancel := context.WithTimeout(ctx, codexModelsManifestRequestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, request.url, nil)
@@ -1865,6 +1873,9 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 	req.Header = request.headers.Clone()
 	if ifNoneMatch = strings.TrimSpace(ifNoneMatch); ifNoneMatch != "" {
 		req.Header.Set("If-None-Match", ifNoneMatch)
+	}
+	if request.credentialAccount == nil || request.credentialAccount.IsOpenAI() {
+		req = ApplyOpenAIRequestPolicy(req, s.settingService)
 	}
 
 	var resp *http.Response
@@ -1888,7 +1899,7 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 			if clientErr != nil {
 				return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_PROXY_INVALID", "invalid proxy configuration: %v", clientErr)
 			}
-			resp, err = client.Do(req)
+			resp, err = openai.HTTPClientWithCodexResidencyRedirectGuard(client).Do(req)
 		}
 	}
 	if err != nil {
@@ -2504,6 +2515,9 @@ func validateCodexModelsManifestEnvelope(body []byte) error {
 func buildOpenAIModelsCacheKey(request openAIModelsRequest) string {
 	hasher := sha256.New()
 	_, _ = fmt.Fprintf(hasher, "%d\n%d\n%t\n%s\n%s\n", request.accountID, request.credentialAccountID, request.standardModelsList, request.proxyURL, request.url)
+	if request.requestPolicy != nil {
+		_, _ = fmt.Fprintf(hasher, "residency_us=%t\n", request.requestPolicy.CodexResidencyUS)
+	}
 	headerNames := make([]string, 0, len(request.headers))
 	for name := range request.headers {
 		headerNames = append(headerNames, name)

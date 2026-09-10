@@ -735,6 +735,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if account == nil {
 		return errors.New("account is nil")
 	}
+	firstAcceptedAt := time.Now()
+	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
+	SetOpenAIClientTransport(c, OpenAIClientTransportWS)
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
 	}
@@ -744,6 +747,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, rawFirstClientMessage, ""))
 		}
 	}
+	firstClientMessage, currentTimezoneState := s.prepareOpenAIWSFrameTimezone(ctx, c, account, firstClientMessage, true, true, firstAcceptedAt)
+	ctx = openAIWSContextForTimezoneState(ctx, c, currentTimezoneState)
 	if account.IsOpenAIApiKey() && isOpenAIResponsesLiteWebSocketPayload(firstClientMessage) {
 		liteFirstMessage, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(firstClientMessage, account)
 		if liteErr != nil {
@@ -955,7 +960,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	statusCode := 0
 	var handshakeHeaders http.Header
 	for {
-		headers, err = s.refreshOpenAIAgentIdentityHeaders(ctx, account, headers)
+		headers, err = s.refreshOpenAIWSHeadersForDial(ctx, ctx, account, headers)
 		if err != nil {
 			return fmt.Errorf("refresh ws authentication headers: %w", err)
 		}
@@ -994,6 +999,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	defer func() {
 		_ = upstreamConn.Close()
 	}()
+	physicalObservationHeaders := openAIWSPhysicalObservationHeaders(upstreamConn, headers)
+	s.recordFingerprintObservationWSHandshake(c, account, physicalObservationHeaders)
 	logOpenAIWSV2Passthrough(
 		"relay_dial_ok account_id=%d status_code=%d upstream_request_id=%s",
 		account.ID,
@@ -1055,24 +1062,31 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	physicalUpstreamFrameConn := &openAIWSFinalizingUpstreamFrameConn{
 		inner: relayUpstreamFrameConn,
 		finalize: func(msgType coderws.MessageType, payload []byte) ([]byte, error) {
-			if !account.UsesOpenAICodexProtocol() || (msgType != coderws.MessageText && msgType != coderws.MessageBinary) {
+			if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
 				return payload, nil
 			}
 			outboundIdentityMu.Lock()
 			framePlan := outboundIdentityPlan
 			outboundIdentityMu.Unlock()
 			if strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "response.create" {
-				return s.guardOpenAICodexTurnStateEchoForPlan(c, account, framePlan, nil, payload), nil
+				if account.UsesOpenAICodexProtocol() {
+					return s.guardOpenAICodexTurnStateEchoForPlan(c, account, framePlan, nil, payload), nil
+				}
+				return payload, nil
 			}
-			projected, projectErr := s.projectOpenAIOAuthWSFrame(c, account, framePlan, payload)
-			if projectErr != nil {
-				return payload, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to project websocket turn identity", projectErr)
+			if account.UsesOpenAICodexProtocol() {
+				projected, projectErr := s.projectOpenAIOAuthWSFrame(c, account, framePlan, payload)
+				if projectErr != nil {
+					return payload, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to project websocket turn identity", projectErr)
+				}
+				stamped, stampErr := stampOpenAICodexWSStreamRequestStart(projected, time.Now())
+				if stampErr != nil {
+					return payload, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to stamp websocket request metadata", stampErr)
+				}
+				payload = stamped
 			}
-			stamped, stampErr := stampOpenAICodexWSStreamRequestStart(projected, time.Now())
-			if stampErr != nil {
-				return payload, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to stamp websocket request metadata", stampErr)
-			}
-			return stamped, nil
+			s.recordFingerprintObservationWSFrame(c, account, currentTimezoneState, payload, physicalObservationHeaders, openAIWSObservationFramePlan(account, &framePlan))
+			return payload, nil
 		},
 	}
 
@@ -1108,6 +1122,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 			isResponseCreate := eventType == "response.create"
+			responseCreateAt := time.Now()
 			var frameIdentityPlan OpenAIOAuthIdentityPlan
 			if isResponseCreate && outboundIdentityModeEnabled {
 				outboundIdentityMu.Lock()
@@ -1140,10 +1155,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				frameIdentityPlan = outboundIdentityPlan
 				outboundIdentityMu.Unlock()
 			}
-			responseCreateAt := time.Time{}
 			acceptedTurn := false
 			if isResponseCreate {
-				responseCreateAt = time.Now()
 				if !turnLifecycle.beginResponseCreate(clientFrameConn.markTurnStarted) {
 					err := errors.New("overlapping response.create is not supported")
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
@@ -1153,6 +1166,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						turnLifecycle.cancelResponseCreate()
 					}
 				}()
+				payload, currentTimezoneState = s.prepareOpenAIWSFrameTimezone(ctx, c, account, payload, true, false, responseCreateAt)
 			}
 			responsesLite := isResponseCreate && isOpenAIResponsesLiteWebSocketPayload(payload)
 			if isResponseCreate {

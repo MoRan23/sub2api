@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -204,13 +205,15 @@ func TestBackfillOpenAIImagesB64JSON_DownloadRequestShape(t *testing.T) {
 	account.Proxy = &Proxy{Protocol: "http", Host: "127.0.0.1", Port: 7890}
 
 	body := []byte(`{"created":1,"data":[{"url":"https://cdn.example.com/a.png?sig=abc"}]}`)
-	got := svc.backfillOpenAIImagesB64JSON(context.Background(), account, nil, body)
+	ctx := openai.WithRequestPolicy(context.Background(), openai.DefaultRequestPolicy())
+	got := svc.backfillOpenAIImagesB64JSON(ctx, account, nil, body)
 	require.Equal(t, base64.StdEncoding.EncodeToString(b64BackfillPNGBytes), gjson.GetBytes(got, "data.0.b64_json").String())
 
 	require.Len(t, upstream.requests, 1)
 	req := upstream.requests[0]
 	require.Equal(t, http.MethodGet, req.Method)
 	require.Equal(t, "https://cdn.example.com/a.png?sig=abc", req.URL.String())
+	require.Empty(t, req.Header.Get(openai.CodexResidencyHeaderName), "external image downloads must not inherit the OpenAI request policy header")
 	require.Equal(t, "http://127.0.0.1:7890", upstream.lastProxyURL)
 	_, hasDeadline := req.Context().Deadline()
 	require.True(t, hasDeadline)

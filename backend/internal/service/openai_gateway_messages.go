@@ -53,6 +53,10 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
 	}
 	setCodexToolNameReverse(c, nil)
+	if account.Platform == PlatformOpenAI {
+		ctx = s.freezeOpenAIRequestPolicy(ctx, c)
+		body = s.prepareOpenAIRequestTimezone(ctx, c, account, body, account.IsOpenAIPassthroughEnabled())
+	}
 
 	// 入口分流（国产供应商 Anthropic 协议）：上游为供应商原生 Anthropic 端点时，
 	// /v1/messages 请求零转换直通（仅模型名映射 + 少量 body 清洗），完整保留
@@ -133,11 +137,13 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	// sliding 12-message window makes the cached prefix stall at system/tools.
 	// Keep full replay there so upstream prompt caching can grow turn by turn.
 	if compatReplayGuardEnabled && !account.UsesOpenAICodexProtocol() && previousResponseID == "" && !compatContinuationDisabled {
+		beforeMessages := len(anthropicReq.Messages)
 		compatReplayTrimmed = applyAnthropicCompatFullReplayGuard(&anthropicReq)
+		recordOpenAIRequestTimezonePrefixTrim(c, "messages", beforeMessages-len(anthropicReq.Messages))
 	}
 
 	// 3. Convert Anthropic → Responses after compatibility-only replay guard.
-	responsesReq, err := apicompat.AnthropicToResponses(&anthropicReq)
+	responsesReq, err := anthropicToResponsesWithTimezoneObservation(c, &anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("convert anthropic to responses: %w", err)
 	}
@@ -158,7 +164,15 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	}
 	if previousResponseID != "" {
 		responsesReq.PreviousResponseID = previousResponseID
+		var beforeInputCount int64
+		if observeOpenAIRequestTimezoneAdapter(c) {
+			beforeInputCount = gjson.GetBytes(responsesReq.Input, "#").Int()
+		}
 		trimAnthropicCompatResponsesInputToLatestTurn(responsesReq)
+		if beforeInputCount > 0 {
+			recordOpenAIRequestTimezonePrefixTrim(c, "input", int(beforeInputCount-gjson.GetBytes(responsesReq.Input, "#").Int()))
+			captureOpenAIRequestTimezoneObjectCheckpoint(c, responsesReq)
+		}
 	}
 	if compatReplayGuardEnabled && !account.UsesOpenAICodexProtocol() {
 		appendOpenAICompatClaudeCodeTodoGuard(responsesReq)
@@ -432,6 +446,9 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	}
 	// Messages compatibility restores/overrides identity headers after the
 	// shared builder, so capture the final upstream header set here.
+	if account.Platform == PlatformOpenAI {
+		upstreamReq = ApplyOpenAIRequestPolicy(upstreamReq, s.settingService)
+	}
 	s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, responsesBody)
 
 	// 7. Send request

@@ -190,6 +190,19 @@ func (s *AccountTestService) SetPluginManager(pluginManager *PluginManager) {
 	}
 }
 
+func (s *AccountTestService) freezeOpenAIAccountTestPolicy(ctx context.Context, c *gin.Context, account *Account) context.Context {
+	// These protocol helpers also serve CN-compatible accounts. Residency only
+	// applies to the explicitly selected OpenAI business route.
+	if account == nil || account.Platform != PlatformOpenAI {
+		return ctx
+	}
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
+	if c != nil && c.Request != nil {
+		c.Request = c.Request.WithContext(ctx)
+	}
+	return ctx
+}
+
 // FetchOpenAIAccountModels uses the shared cached discovery path for the test picker.
 func (s *AccountTestService) FetchOpenAIAccountModels(ctx context.Context, account *Account) ([]openai.Model, error) {
 	if s == nil || s.openAIGatewayService == nil {
@@ -773,7 +786,7 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 
 // testOpenAIAccountConnection tests an OpenAI account's connection
 func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account *Account, modelID string, prompt string, mode string) error {
-	ctx := c.Request.Context()
+	ctx := s.freezeOpenAIAccountTestPolicy(c.Request.Context(), c, account)
 	mode = normalizeAccountTestMode(mode)
 
 	// Default to openai.DefaultTestModel for OpenAI testing
@@ -930,6 +943,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			req.Header.Set("User-Agent", plan.ClientIdentity.UserAgent)
 			req.Header.Set("Originator", plan.ClientIdentity.Originator)
 			req.Header.Set("Version", plan.ClientIdentity.Version)
+		}
+		if account.Platform == PlatformOpenAI {
+			req = ApplyOpenAIRequestPolicy(req, s.settingService)
 		}
 		fields := gjson.GetManyBytes(payloadBytes, "model", "service_tier")
 		var finalizeErr error
@@ -2127,7 +2143,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	normalizedBaseURL string,
 	authToken string,
 ) error {
-	ctx := c.Request.Context()
+	ctx := s.freezeOpenAIAccountTestPolicy(c.Request.Context(), c, account)
 	apiURL := buildOpenAIChatCompletionsURL(normalizedBaseURL)
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
@@ -2153,6 +2169,9 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
+	if account.Platform == PlatformOpenAI {
+		req = ApplyOpenAIRequestPolicy(req, s.settingService)
+	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -2185,7 +2204,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 // capability state on the account. The legacy unary /responses/compact
 // endpoint has been sunset upstream (404, #5598/#5624) and is no longer probed.
 func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account *Account, testModelID string) error {
-	ctx := c.Request.Context()
+	ctx := s.freezeOpenAIAccountTestPolicy(c.Request.Context(), c, account)
 	credentialAccount := account
 	if account.IsShadow() {
 		resolved, err := resolveCredentialAccount(ctx, s.accountRepo, account)
@@ -2293,6 +2312,9 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		}, nil)
 		if planErr != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth identity: %s", planErr.Error()))
+		}
+		if account.Platform == PlatformOpenAI {
+			req = ApplyOpenAIRequestPolicy(req, s.settingService)
 		}
 		fields := gjson.GetManyBytes(payloadBytes, "model", "service_tier")
 		payloadBytes, err = gateway.FinalizeOpenAIOAuthResponsesRequest(c, account, req, payloadBytes, OpenAIOAuthResponsesFinalizeOptions{
@@ -3044,6 +3066,7 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 
 // testOpenAIImageAPIKey tests OpenAI image generation using an API Key account.
 func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.Context, account *Account, modelID, prompt string) error {
+	ctx = s.freezeOpenAIAccountTestPolicy(ctx, c, account)
 	authToken := account.GetOpenAIApiKey()
 	if authToken == "" {
 		return s.sendErrorAndEnd(c, "No API key available")
@@ -3086,6 +3109,9 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 
 	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
+	if account.Platform == PlatformOpenAI {
+		req = ApplyOpenAIRequestPolicy(req, s.settingService)
+	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -3141,6 +3167,7 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 
 // testOpenAIImageOAuth tests OpenAI image generation using an OAuth account via Codex /responses API.
 func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Context, account *Account, modelID, prompt string) error {
+	ctx = s.freezeOpenAIAccountTestPolicy(ctx, c, account)
 	credentialAccount := account
 	if account.IsShadow() {
 		resolved, err := resolveCredentialAccount(ctx, s.accountRepo, account)
@@ -3225,6 +3252,9 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 		req.Header.Set("User-Agent", profilePlan.ClientIdentity.UserAgent)
 		req.Header.Set("Originator", profilePlan.ClientIdentity.Originator)
 		req.Header.Set("Version", profilePlan.ClientIdentity.Version)
+	}
+	if account.Platform == PlatformOpenAI {
+		req = ApplyOpenAIRequestPolicy(req, s.settingService)
 	}
 	fields := gjson.GetManyBytes(responsesBody, "model", "service_tier")
 	responsesBody, err = gateway.FinalizeOpenAIOAuthResponsesRequest(c, account, req, responsesBody, OpenAIOAuthResponsesFinalizeOptions{

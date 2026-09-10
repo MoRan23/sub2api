@@ -567,6 +567,17 @@ export default {
         codexAddRow: "Add entry",
         codexRemoveRow: "Remove",
       },
+      openaiRequestPolicies: {
+        title: 'OpenAI request timezone and residency',
+        description: 'Applies to OAuth and API Key upstreams, independently of fingerprint normalization and observation.',
+        timezoneTitle: 'Convert request timezone',
+        timezoneHint: 'Convert supported environment context and web search tool timezones to America/Los_Angeles. The current environment date is calculated from the first gateway receipt time and stays fixed across retries. Historical context and the server global timezone are unchanged.',
+        passthroughTitle: 'Convert timezone in passthrough requests',
+        passthroughHint: 'Also convert supported content in passthrough requests. Requires request timezone conversion; disabling the parent switch retains this setting.',
+        residencyTitle: 'Force US residency request header',
+        residencyHint: 'Set x-openai-internal-codex-residency: us on OpenAI upstream requests, replacing any client value. Disabling only stops forced addition or replacement and restores existing header handling.',
+        residencyWebSocketHint: 'WebSocket changes apply on the next connection or reconnect. Existing connections and in-flight requests are not interrupted; the header is sent in the handshake only.',
+      },
       codexFingerprintNormalization: {
         title: 'Codex fingerprint normalization',
         description: 'Manage fixed installation_id, UUIDv7 session identity, and the User-Agent / Originator / Version client identity together for OpenAI OAuth requests. API-key accounts are unaffected by this master switch.',

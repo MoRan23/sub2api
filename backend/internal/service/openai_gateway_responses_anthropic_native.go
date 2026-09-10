@@ -64,7 +64,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 	clientStream := responsesReq.Stream
 
 	// 3. Convert Responses → Anthropic
-	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(&responsesReq)
+	anthropicReq, err := responsesToAnthropicWithTimezoneObservation(c, &responsesReq)
 	if err != nil {
 		writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", "Failed to convert request")
 		return nil, fmt.Errorf("convert responses to anthropic: %w", err)

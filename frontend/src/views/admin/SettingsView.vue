@@ -5702,6 +5702,78 @@
             </div>
           </div>
 
+          <!-- OpenAI request timezone and residency policies -->
+          <div class="card" data-testid="openai-request-policies-settings">
+            <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.openaiRequestPolicies.title") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.openaiRequestPolicies.description") }}
+              </p>
+            </div>
+            <div class="divide-y divide-gray-100 px-6 dark:divide-dark-700">
+              <section class="py-5">
+                <div class="flex items-start justify-between gap-5">
+                  <div>
+                    <h3 id="openai-request-timezone-label" class="text-sm font-semibold text-gray-900 dark:text-white">
+                      {{ t("admin.settings.openaiRequestPolicies.timezoneTitle") }}
+                    </h3>
+                    <p id="openai-request-timezone-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.openaiRequestPolicies.timezoneHint") }}
+                    </p>
+                  </div>
+                  <Toggle
+                    v-model="form.enable_openai_request_timezone_conversion"
+                    aria-labelledby="openai-request-timezone-label"
+                    aria-describedby="openai-request-timezone-hint"
+                    data-testid="openai-request-timezone-toggle"
+                  />
+                </div>
+              </section>
+              <section class="py-5">
+                <div class="flex items-start justify-between gap-5">
+                  <div>
+                    <h3 id="openai-passthrough-timezone-label" class="text-sm font-semibold text-gray-900 dark:text-white">
+                      {{ t("admin.settings.openaiRequestPolicies.passthroughTitle") }}
+                    </h3>
+                    <p id="openai-passthrough-timezone-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.openaiRequestPolicies.passthroughHint") }}
+                    </p>
+                  </div>
+                  <Toggle
+                    v-model="form.enable_openai_passthrough_timezone_conversion"
+                    :disabled="!form.enable_openai_request_timezone_conversion"
+                    aria-labelledby="openai-passthrough-timezone-label"
+                    aria-describedby="openai-passthrough-timezone-hint"
+                    data-testid="openai-passthrough-timezone-toggle"
+                  />
+                </div>
+              </section>
+              <section class="py-5">
+                <div class="flex items-start justify-between gap-5">
+                  <div>
+                    <h3 id="openai-codex-residency-label" class="text-sm font-semibold text-gray-900 dark:text-white">
+                      {{ t("admin.settings.openaiRequestPolicies.residencyTitle") }}
+                    </h3>
+                    <p id="openai-codex-residency-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.openaiRequestPolicies.residencyHint") }}
+                    </p>
+                    <p id="openai-codex-residency-ws-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.openaiRequestPolicies.residencyWebSocketHint") }}
+                    </p>
+                  </div>
+                  <Toggle
+                    v-model="form.enable_openai_codex_residency_us"
+                    aria-labelledby="openai-codex-residency-label"
+                    aria-describedby="openai-codex-residency-hint openai-codex-residency-ws-hint"
+                    data-testid="openai-codex-residency-toggle"
+                  />
+                </div>
+              </section>
+            </div>
+          </div>
+
           <!-- OpenAI OAuth Codex fingerprint normalization -->
           <div class="card" data-testid="codex-fingerprint-normalization-settings">
             <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -9698,6 +9770,9 @@ const form = reactive<SettingsForm>({
   enable_openai_codex_fingerprint_normalization: true,
   enable_openai_codex_installation_id_normalization: true,
   enable_openai_codex_client_identity_normalization: true,
+  enable_openai_request_timezone_conversion: true,
+  enable_openai_passthrough_timezone_conversion: true,
+  enable_openai_codex_residency_us: true,
   audit_log_retention_days: 180,
   login_agreement_enabled: false,
   login_agreement_mode: "modal",
@@ -11357,6 +11432,12 @@ async function saveSettings() {
         form.enable_openai_uuidv7_session_identity,
       enable_openai_codex_client_identity_normalization:
         form.enable_openai_codex_client_identity_normalization,
+      enable_openai_request_timezone_conversion:
+        form.enable_openai_request_timezone_conversion,
+      enable_openai_passthrough_timezone_conversion:
+        form.enable_openai_passthrough_timezone_conversion,
+      enable_openai_codex_residency_us:
+        form.enable_openai_codex_residency_us,
       // 清空数字框时 v-model.number 会得到空串，后端 int 字段解析空串会 400 拒绝整次保存；
       // 空/非法值回退默认 180（与后端 parseAuditLogRetentionDays("") 语义一致，0 仍表示永久保留）。
       audit_log_retention_days: Number.isFinite(form.audit_log_retention_days)

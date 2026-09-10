@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -74,9 +75,12 @@ type openAIWSAcquireRequest struct {
 	// HeadersFactory is evaluated inside dialConn. It exists so credentials
 	// whose authorization is per-dial (Agent Identity) are never cached in
 	// lastAcquire or delayed prewarm state.
-	HeadersFactory  func(context.Context, http.Header) (http.Header, error)
-	ProxyURL        string
-	PreferredConnID string
+	HeadersFactory func(context.Context, http.Header) (http.Header, error)
+	// HandshakeObserver owns only a frozen safe actor/identity snapshot. Keeping
+	// it with delayed prewarm requests records the dial at its actual time.
+	HandshakeObserver func(http.Header)
+	ProxyURL          string
+	PreferredConnID   string
 	// ForceNewConn: 强制本次获取新连接（避免复用导致连接内续链状态互相污染）。
 	ForceNewConn bool
 	// ForcePreferredConn: 强制本次只使用 PreferredConnID，禁止漂移到其它连接。
@@ -86,6 +90,7 @@ type openAIWSAcquireRequest struct {
 type openAIWSHandshakeCompatibilityKey struct {
 	betaFeatures   string
 	identityDigest string
+	residency      string
 }
 
 type openAIWSConnLease struct {
@@ -148,6 +153,19 @@ func (l *openAIWSConnLease) HandshakeHeaders() http.Header {
 		return nil
 	}
 	return cloneHeader(l.conn.handshakeHeaders)
+}
+
+// FingerprintObservationHeaders returns only the safe observation fields from
+// the headers used by this physical dial, including when a lease is reused.
+func (l *openAIWSConnLease) FingerprintObservationHeaders() http.Header {
+	if l == nil || l.conn == nil {
+		return nil
+	}
+	return cloneHeader(l.conn.observationHeaders)
+}
+
+func (l *openAIWSConnLease) HandshakeObserverInstalled() bool {
+	return l != nil && l.conn != nil && l.conn.handshakeObserverInstalled
 }
 
 func (l *openAIWSConnLease) HandshakeTurnStateCompatible(identityDigest string) bool {
@@ -260,11 +278,13 @@ type openAIWSConn struct {
 	id string
 	ws openAIWSClientConn
 
-	handshakeHeaders       http.Header
-	handshakeCompatibility openAIWSHandshakeCompatibilityKey
-	routingAffinity        string
-	turnStateMu            sync.Mutex
-	turnStateIdentity      string
+	handshakeHeaders           http.Header
+	observationHeaders         http.Header
+	handshakeObserverInstalled bool
+	handshakeCompatibility     openAIWSHandshakeCompatibilityKey
+	routingAffinity            string
+	turnStateMu                sync.Mutex
+	turnStateIdentity          string
 	// Retained as mirrors for narrow in-package tests and compatibility helpers.
 	// Production matching uses handshakeCompatibility.
 	betaFeatures   string
@@ -598,7 +618,7 @@ func (c *openAIWSConn) matchesHandshakeCompatibility(compatibility openAIWSHands
 	// pre-V2 mirror fields instead of dialing it through the pool.
 	return c.handshakeCompatibility == (openAIWSHandshakeCompatibilityKey{}) &&
 		c.betaFeatures == compatibility.betaFeatures &&
-		c.identityDigest == compatibility.identityDigest
+		c.identityDigest == compatibility.identityDigest && compatibility.residency == ""
 }
 
 func (c *openAIWSConn) matchesRoutingAffinity(routingAffinity string) bool {
@@ -1922,6 +1942,13 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	}
 	id := p.nextConnID(req.Account.ID)
 	pooledConn := newOpenAIWSConn(id, req.Account.ID, conn, handshakeHeaders)
+	pooledConn.observationHeaders = openAIWSPhysicalObservationHeaders(conn, headers)
+	pooledConn.handshakeObserverInstalled = req.HandshakeObserver != nil
+	if req.HandshakeObserver != nil {
+		// Record every successful physical dial, including background prewarm
+		// connections later discarded by a stale generation/cancellation guard.
+		req.HandshakeObserver(cloneHeader(pooledConn.observationHeaders))
+	}
 	pooledConn.betaFeatures = normalizeOpenAIWSBetaFeatures(req.Headers)
 	pooledConn.identityDigest = stringsTrim(req.IdentityDigest)
 	pooledConn.handshakeCompatibility = normalizeOpenAIWSHandshakeCompatibility(req.Headers, req.IdentityDigest)
@@ -2145,7 +2172,32 @@ func normalizeOpenAIWSHandshakeCompatibility(headers http.Header, identityDigest
 	return openAIWSHandshakeCompatibilityKey{
 		betaFeatures:   normalizeOpenAIWSBetaFeatures(headers),
 		identityDigest: identityDigest,
+		residency:      normalizeOpenAIWSResidency(headers),
 	}
+}
+
+// Residency is a physical handshake property. A policy change can create a
+// new compatible socket without interrupting leases already using the old one.
+func normalizeOpenAIWSResidency(headers http.Header) string {
+	values := make(map[string]struct{})
+	for name, entries := range headers {
+		if !strings.EqualFold(name, "x-openai-internal-codex-residency") {
+			continue
+		}
+		for _, entry := range entries {
+			values[strings.ToLower(strings.TrimSpace(entry))] = struct{}{}
+		}
+	}
+	if len(values) == 0 {
+		return ""
+	}
+	normalized := make([]string, 0, len(values))
+	for value := range values {
+		normalized = append(normalized, value)
+	}
+	sort.Strings(normalized)
+	encoded, _ := json.Marshal(normalized)
+	return string(encoded)
 }
 
 func normalizeOpenAIWSRoutingAffinity(headers http.Header) string {

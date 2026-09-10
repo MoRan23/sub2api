@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/nacl/box"
 )
@@ -207,7 +208,8 @@ func registerAgentIdentityTask(ctx context.Context, account *Account) (string, e
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	resp, err := client.Do(req)
+	req = ApplyOpenAIRequestPolicy(req, nil)
+	resp, err := openai.HTTPClientWithCodexResidencyRedirectGuard(client).Do(req)
 	if err != nil {
 		return "", errors.New("agent task registration request failed")
 	}
@@ -317,6 +319,7 @@ func (s *OpenAIGatewayService) ensureAgentIdentityTask(ctx context.Context, acco
 	if s == nil {
 		return errors.New("openai gateway service is nil")
 	}
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	return ensureAgentIdentityTaskForAccount(ctx, s.accountRepo, s, &s.agentIdentityTaskMu, account, expectedTaskID)
 }
 
@@ -369,6 +372,7 @@ func isAgentIdentityTaskInvalidWSDialError(err *openAIWSDialError) bool {
 }
 
 func (s *OpenAIGatewayService) buildOpenAIAuthenticationHeaders(ctx context.Context, account *Account, token string) (http.Header, error) {
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	if account == nil {
 		return nil, errors.New("account is nil")
 	}
@@ -413,6 +417,7 @@ func buildAgentIdentityAuthenticationHeaders(ctx context.Context, repo AccountRe
 }
 
 func (s *OpenAIGatewayService) refreshOpenAIAgentIdentityHeaders(ctx context.Context, account *Account, headers http.Header) (http.Header, error) {
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	if account == nil {
 		return cloneHeader(headers), nil
 	}

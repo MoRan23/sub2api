@@ -418,6 +418,9 @@ export interface SystemSettings {
   enable_openai_uuidv7_session_identity: boolean; // OpenAI UUIDv7 session/thread 标识对
   enable_openai_codex_pat_context_management: boolean; // Codex PAT History/Notes 代理
   enable_openai_codex_client_identity_normalization: boolean; // UA/originator/version 归一
+  enable_openai_request_timezone_conversion: boolean;
+  enable_openai_passthrough_timezone_conversion: boolean;
+  enable_openai_codex_residency_us: boolean;
   audit_log_retention_days: number; // 审计日志保留天数
   login_agreement_enabled: boolean;
   login_agreement_mode: "modal" | "checkbox" | string;
@@ -771,6 +774,9 @@ export interface UpdateSettingsRequest {
   enable_openai_uuidv7_session_identity?: boolean; // OpenAI UUIDv7 session/thread 标识对
   enable_openai_codex_pat_context_management?: boolean;
   enable_openai_codex_client_identity_normalization?: boolean;
+  enable_openai_request_timezone_conversion?: boolean;
+  enable_openai_passthrough_timezone_conversion?: boolean;
+  enable_openai_codex_residency_us?: boolean;
   audit_log_retention_days?: number; // 审计日志保留天数
   login_agreement_enabled?: boolean;
   login_agreement_mode?: "modal" | "checkbox" | string;

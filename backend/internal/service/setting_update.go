@@ -44,7 +44,7 @@ func (s *SettingService) UpdateSettingsOmitting(ctx context.Context, settings *S
 	}
 	omitted.dropFrom(updates)
 
-	stored, err := s.persistSettingsAndRefreshCodexPolicy(ctx, updates, omitted)
+	stored, err := s.persistSettingsAndRefreshOpenAIPolicies(ctx, updates, omitted)
 	if err != nil {
 		return err
 	}
@@ -75,7 +75,7 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 	}
 	omitted.dropFrom(updates)
 
-	stored, err := s.persistSettingsAndRefreshCodexPolicy(ctx, updates, omitted)
+	stored, err := s.persistSettingsAndRefreshOpenAIPolicies(ctx, updates, omitted)
 	if err != nil {
 		return err
 	}
@@ -83,17 +83,17 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 	return nil
 }
 
-// persistSettingsAndRefreshCodexPolicy serializes the settings write with the
+// persistSettingsAndRefreshOpenAIPolicies serializes the settings write with the
 // authoritative policy read and publish. Without this boundary, a writer can
 // read an older policy, another writer can persist and publish a newer one,
 // and then the first writer can publish its stale read last.
 //
 // Partial updates already need a full readback to refresh the other caches, so
-// that same result is reused. Whole-document updates contain all four policy
+// that same result is reused. Whole-document updates contain all identity and request policy
 // rows in the successfully persisted update map and need no extra read. A
 // failed or malformed partial read invalidates the cache while preserving its
 // last-known-good snapshot; the next request retries after the short error TTL.
-func (s *SettingService) persistSettingsAndRefreshCodexPolicy(
+func (s *SettingService) persistSettingsAndRefreshOpenAIPolicies(
 	ctx context.Context,
 	updates map[string]string,
 	omitted OmittedSettingKeys,
@@ -109,14 +109,17 @@ func (s *SettingService) persistSettingsAndRefreshCodexPolicy(
 		values, err := s.settingRepo.GetAll(ctx)
 		if err != nil {
 			s.InvalidateOpenAIUUIDv7SessionIdentityCache()
-			slog.Warn("refresh Codex fingerprint policy after partial settings update failed", "error", err)
+			s.InvalidateOpenAIRequestPolicyCache()
+			slog.Warn("refresh OpenAI policies after partial settings update failed", "error", err)
 			return nil, nil
 		}
 		s.publishAuthoritativeCodexFingerprintPolicy(values)
+		s.publishAuthoritativeOpenAIRequestPolicy(values)
 		return s.parseSettings(values), nil
 	}
 
 	s.publishAuthoritativeCodexFingerprintPolicy(updates)
+	s.publishAuthoritativeOpenAIRequestPolicy(updates)
 	return nil, nil
 }
 
@@ -535,6 +538,9 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyEnableOpenAIUUIDv7SessionIdentity] = strconv.FormatBool(settings.EnableOpenAIUUIDv7SessionIdentity)
 	updates[SettingKeyEnableOpenAICodexClientIdentityNormalization] = strconv.FormatBool(settings.EnableOpenAICodexClientIdentityNormalization)
 	updates[SettingKeyEnableOpenAICodexPATContextManagement] = strconv.FormatBool(settings.EnableOpenAICodexPATContextManagement)
+	updates[SettingKeyEnableOpenAIRequestTimezoneConversion] = strconv.FormatBool(settings.EnableOpenAIRequestTimezoneConversion)
+	updates[SettingKeyEnableOpenAIPassthroughTimezoneConversion] = strconv.FormatBool(settings.EnableOpenAIPassthroughTimezoneConversion)
+	updates[SettingKeyEnableOpenAICodexResidencyUS] = strconv.FormatBool(settings.EnableOpenAICodexResidencyUS)
 	// SettingKeyOpenAICodexClientVersionSynced 由自动同步任务独占写入，此处不得覆盖，
 	// 否则面板保存会把同步结果清空。
 	// codex_cli_only 加固

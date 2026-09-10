@@ -43,6 +43,9 @@ type UpdateSettingsRequest struct {
 	EnableOpenAICodexInstallationIDNormalization *bool                        `json:"enable_openai_codex_installation_id_normalization"`
 	EnableOpenAICodexClientIdentityNormalization *bool                        `json:"enable_openai_codex_client_identity_normalization"`
 	EnableOpenAICodexPATContextManagement        *bool                        `json:"enable_openai_codex_pat_context_management"`
+	EnableOpenAIRequestTimezoneConversion        *bool                        `json:"enable_openai_request_timezone_conversion"`
+	EnableOpenAIPassthroughTimezoneConversion    *bool                        `json:"enable_openai_passthrough_timezone_conversion"`
+	EnableOpenAICodexResidencyUS                 *bool                        `json:"enable_openai_codex_residency_us"`
 	AuditLogRetentionDays                        int                          `json:"audit_log_retention_days"` // 审计日志保留天数
 	LoginAgreementEnabled                        bool                         `json:"login_agreement_enabled"`
 	LoginAgreementMode                           string                       `json:"login_agreement_mode"`
@@ -460,6 +463,9 @@ var independentlyOmittedPointerSettingKeys = map[string]string{
 	service.SettingKeyEnableOpenAIUUIDv7SessionIdentity:            service.SettingKeyEnableOpenAIUUIDv7SessionIdentity,
 	service.SettingKeyEnableOpenAICodexClientIdentityNormalization: service.SettingKeyEnableOpenAICodexClientIdentityNormalization,
 	service.SettingKeyEnableOpenAICodexPATContextManagement:        service.SettingKeyEnableOpenAICodexPATContextManagement,
+	service.SettingKeyEnableOpenAIRequestTimezoneConversion:        service.SettingKeyEnableOpenAIRequestTimezoneConversion,
+	service.SettingKeyEnableOpenAIPassthroughTimezoneConversion:    service.SettingKeyEnableOpenAIPassthroughTimezoneConversion,
+	service.SettingKeyEnableOpenAICodexResidencyUS:                 service.SettingKeyEnableOpenAICodexResidencyUS,
 	service.SettingKeyInstallationObservationEnabled:               service.SettingKeyInstallationObservationEnabled,
 }
 
@@ -583,6 +589,18 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	openAICodexPATContextManagementEnabled := previousSettings.EnableOpenAICodexPATContextManagement
 	if req.EnableOpenAICodexPATContextManagement != nil {
 		openAICodexPATContextManagementEnabled = *req.EnableOpenAICodexPATContextManagement
+	}
+	openAIRequestTimezoneConversionEnabled := previousSettings.EnableOpenAIRequestTimezoneConversion
+	if req.EnableOpenAIRequestTimezoneConversion != nil {
+		openAIRequestTimezoneConversionEnabled = *req.EnableOpenAIRequestTimezoneConversion
+	}
+	openAIPassthroughTimezoneConversionEnabled := previousSettings.EnableOpenAIPassthroughTimezoneConversion
+	if req.EnableOpenAIPassthroughTimezoneConversion != nil {
+		openAIPassthroughTimezoneConversionEnabled = *req.EnableOpenAIPassthroughTimezoneConversion
+	}
+	openAICodexResidencyUSEnabled := previousSettings.EnableOpenAICodexResidencyUS
+	if req.EnableOpenAICodexResidencyUS != nil {
+		openAICodexResidencyUSEnabled = *req.EnableOpenAICodexResidencyUS
 	}
 	if err := service.ValidateOpenAICodexPATContextManagementSettings(&service.SystemSettings{
 		EnableOpenAICodexPATContextManagement:     openAICodexPATContextManagementEnabled,
@@ -1594,6 +1612,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableOpenAICodexInstallationIDNormalization: openAICodexInstallationIDNormalizationEnabled,
 		EnableOpenAICodexClientIdentityNormalization: openAICodexClientIdentityNormalizationEnabled,
 		EnableOpenAICodexPATContextManagement:        openAICodexPATContextManagementEnabled,
+		EnableOpenAIRequestTimezoneConversion:        openAIRequestTimezoneConversionEnabled,
+		EnableOpenAIPassthroughTimezoneConversion:    openAIPassthroughTimezoneConversionEnabled,
+		EnableOpenAICodexResidencyUS:                 openAICodexResidencyUSEnabled,
 		AuditLogRetentionDays:                        req.AuditLogRetentionDays,
 		LoginAgreementEnabled:                        req.LoginAgreementEnabled,
 		LoginAgreementMode:                           loginAgreementMode,
@@ -2254,6 +2275,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableOpenAICodexInstallationIDNormalization:           updatedSettings.EnableOpenAICodexInstallationIDNormalization,
 		EnableOpenAICodexClientIdentityNormalization:           updatedSettings.EnableOpenAICodexClientIdentityNormalization,
 		EnableOpenAICodexPATContextManagement:                  updatedSettings.EnableOpenAICodexPATContextManagement,
+		EnableOpenAIRequestTimezoneConversion:                  updatedSettings.EnableOpenAIRequestTimezoneConversion,
+		EnableOpenAIPassthroughTimezoneConversion:              updatedSettings.EnableOpenAIPassthroughTimezoneConversion,
+		EnableOpenAICodexResidencyUS:                           updatedSettings.EnableOpenAICodexResidencyUS,
 		AuditLogRetentionDays:                                  updatedSettings.AuditLogRetentionDays,
 		LoginAgreementEnabled:                                  updatedSettings.LoginAgreementEnabled,
 		LoginAgreementMode:                                     updatedSettings.LoginAgreementMode,

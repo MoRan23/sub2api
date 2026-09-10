@@ -320,7 +320,9 @@ func (s *fingerprintObservationSnapshotStore) create(entries []FingerprintObserv
 		s.removeLocked(s.order[0])
 	}
 	ownedEntries := make([]FingerprintObservationEntry, len(entries))
-	copy(ownedEntries, entries)
+	for i := range entries {
+		ownedEntries[i] = cloneFingerprintObservationEntry(entries[i])
+	}
 	snapshot := buildFingerprintObservationSnapshot(token, cursorKey, now, now.Add(s.ttl), ownedEntries)
 	s.snapshots[token] = snapshot
 	s.order = append(s.order, token)
@@ -455,7 +457,9 @@ func (s *fingerprintObservationSnapshotStore) listEntries(token, threadNodeID, c
 	}
 	end := min(start+limit, len(thread.entries))
 	items := make([]FingerprintObservationEntry, end-start)
-	copy(items, thread.entries[start:end])
+	for i := start; i < end; i++ {
+		items[i-start] = cloneFingerprintObservationEntry(thread.entries[i])
+	}
 	return FingerprintObservationEntryPage{Items: items, Total: len(thread.entries), NextCursor: snapshot.nextCursor("entries", threadNodeID, end, len(thread.entries))}, nil
 }
 
@@ -863,9 +867,8 @@ func (s *fingerprintObservationSnapshot) scrub() {
 	if s == nil {
 		return
 	}
-	var zeroEntry FingerprintObservationEntry
 	for i := range s.entries {
-		s.entries[i] = zeroEntry
+		scrubFingerprintObservationEntry(&s.entries[i])
 	}
 	for _, user := range s.users {
 		if user == nil {
@@ -884,7 +887,7 @@ func (s *fingerprintObservationSnapshot) scrub() {
 						continue
 					}
 					for i := range thread.entries {
-						thread.entries[i] = zeroEntry
+						scrubFingerprintObservationEntry(&thread.entries[i])
 					}
 					thread.entries = nil
 					thread.summary = FingerprintObservationThreadSummary{}

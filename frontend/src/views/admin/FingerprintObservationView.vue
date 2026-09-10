@@ -360,13 +360,16 @@
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    <tr
+                                    <template
                                       v-for="observation in entryState(thread.node_id).items"
                                       :key="observation.sequence_id"
-                                      class="align-top"
                                     >
+                                    <tr class="align-top">
                                       <td class="whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
                                         {{ formatTime(observation.timestamp) }}
+                                        <div v-if="observation.event_kind" class="mt-1 text-[11px] text-gray-400">
+                                          {{ t(`admin.fingerprintObservation.request.events.${observation.event_kind}`) }}
+                                        </div>
                                       </td>
                                       <td>
                                         <div class="truncate text-sm font-medium text-gray-900 dark:text-white" :title="observation.account_name">
@@ -433,6 +436,12 @@
                                         </span>
                                       </td>
                                     </tr>
+                                    <tr>
+                                      <td colspan="7" class="pb-3 pt-0">
+                                        <FingerprintObservationRequestDetails :observation="observation" />
+                                      </td>
+                                    </tr>
+                                    </template>
                                   </tbody>
                                 </table>
                               </div>
@@ -547,6 +556,7 @@ import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import LazyStateFooter from './components/FingerprintObservationLazyFooter.vue'
 import CodexContextManagementObservations from './components/CodexContextManagementObservations.vue'
+import FingerprintObservationRequestDetails from './components/FingerprintObservationRequestDetails.vue'
 
 interface LazyCollection<T> {
   items: T[]

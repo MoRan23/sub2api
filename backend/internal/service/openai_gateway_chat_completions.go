@@ -94,6 +94,10 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
 	}
 
+	if account.Platform == PlatformOpenAI {
+		ctx = s.freezeOpenAIRequestPolicy(ctx, c)
+		body = s.prepareOpenAIRequestTimezone(ctx, c, account, body, account.IsOpenAIPassthroughEnabled())
+	}
 	if account.Platform == PlatformGrok {
 		if account.IsGrokOAuth() {
 			if eligible, reason := grokChatResponsesBridgeEligibility(body); eligible {
@@ -125,7 +129,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			if err := json.Unmarshal(body, &responsesReq); err != nil {
 				return nil, fmt.Errorf("parse responses-shaped chat completions request: %w", err)
 			}
-			chatReq, err := apicompat.ResponsesToChatCompletionsRequestWithOptions(
+			chatReq, err := responsesToChatCompletionsWithTimezoneObservation(c,
 				&responsesReq,
 				&apicompat.ResponsesToChatOptions{ReasoningContentByID: s.reasoningContentByID},
 			)
@@ -231,7 +235,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	} else {
 		// Normal path: convert Chat Completions → Responses.
 		// ChatCompletionsToResponses always sets Stream=true (upstream always streams).
-		responsesReq, err = apicompat.ChatCompletionsToResponses(&chatReq)
+		responsesReq, err = chatCompletionsToResponsesWithTimezoneObservation(c, &chatReq)
 		if err != nil {
 			return nil, fmt.Errorf("convert chat completions to responses: %w", err)
 		}
@@ -356,6 +360,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 	// Chat compatibility may apply its server-owned session pair after the
 	// shared Responses builder. Observe only after this final header write.
+	if account.Platform == PlatformOpenAI {
+		upstreamReq = ApplyOpenAIRequestPolicy(upstreamReq, s.settingService)
+	}
 	s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, responsesBody)
 
 	// 7. Send request

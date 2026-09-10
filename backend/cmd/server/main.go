@@ -20,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/setup"
 	"github.com/Wei-Shaw/sub2api/internal/web"
 
@@ -132,6 +133,9 @@ func runSetupServer() {
 }
 
 func runMainServer() {
+	if err := service.InitializeOpenAIRequestTimezone(); err != nil {
+		log.Fatalf("Invalid OpenAI request timezone configuration: %v", err)
+	}
 	cfg, err := config.LoadForBootstrap()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)

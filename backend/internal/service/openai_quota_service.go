@@ -119,6 +119,7 @@ type OpenAIQuotaService struct {
 	proxyRepo            ProxyRepository
 	tokenProvider        *OpenAITokenProvider
 	privacyClientFactory PrivacyClientFactory
+	settingService       *SettingService
 	agentIdentityTaskMu  sync.Mutex
 	agentIdentityWS      agentIdentityWSConnectionInvalidator
 }
@@ -140,10 +141,21 @@ func NewOpenAIQuotaService(
 	}
 }
 
+func (s *OpenAIQuotaService) SetRequestPolicySettingService(settings *SettingService) {
+	if s != nil {
+		s.settingService = settings
+	}
+}
+
 // QueryUsage fetches the latest rate-limit/usage snapshot for the given OpenAI
 // OAuth account. Returns infraerrors so the handler layer can map them to
 // stable error codes / HTTP statuses.
 func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*OpenAIQuotaUsage, error) {
+	var settings *SettingService
+	if s != nil {
+		settings = s.settingService
+	}
+	ctx = FreezeOpenAIRequestPolicy(ctx, settings)
 	accessToken, chatGPTAccountID, proxyURL, fedRAMP, err := s.prepareUpstreamCall(ctx, accountID)
 	if err != nil {
 		return nil, err
@@ -164,7 +176,7 @@ func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*
 		if headerErr != nil {
 			return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_QUOTA_AUTH_FAILED", "failed to build upstream authentication: %v", headerErr)
 		}
-		resp, err := client.R().
+		resp, err := OpenAIReqPolicyClient(client, callCtx).R().
 			SetContext(callCtx).
 			SetHeaders(quotaHeaders).
 			SetSuccessResult(&payload).
@@ -269,7 +281,7 @@ func (s *OpenAIQuotaService) queryResetCreditDetails(ctx context.Context, client
 		slog.Warn("openai_quota_reset_credit_details_auth_failed", "account_id", accountID, "error", headerErr)
 		return nil
 	}
-	resp, err := client.R().
+	resp, err := OpenAIReqPolicyClient(client, ctx).R().
 		SetContext(ctx).
 		SetHeaders(quotaHeaders).
 		Get(chatGPTRateLimitCreditsURL)
@@ -318,6 +330,11 @@ func (s *OpenAIQuotaService) ResetCreditTargeted(ctx context.Context, accountID 
 }
 
 func (s *OpenAIQuotaService) resetCredit(ctx context.Context, accountID int64, creditID, redeemRequestID string, targeted bool) (*OpenAIQuotaResetResult, error) {
+	var settings *SettingService
+	if s != nil {
+		settings = s.settingService
+	}
+	ctx = FreezeOpenAIRequestPolicy(ctx, settings)
 	// Shadow guard: resetting credits via a shadow account would silently
 	// operate on the parent's quota; that is surprising and unwanted. Callers
 	// must reset the parent account directly.
@@ -361,7 +378,7 @@ func (s *OpenAIQuotaService) resetCredit(ctx context.Context, accountID int64, c
 		if targeted {
 			body["credit_id"] = creditID
 		}
-		resp, err := client.R().
+		resp, err := OpenAIReqPolicyClient(client, callCtx).R().
 			SetContext(callCtx).
 			SetHeaders(headers).
 			SetBody(body).

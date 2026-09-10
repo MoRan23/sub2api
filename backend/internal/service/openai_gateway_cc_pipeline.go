@@ -224,6 +224,10 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	// 使配置值获得除共享传输层强制头之外的最高优先级。
 	account.ApplyHeaderOverrides(upstreamReq.Header)
 	applyOpenCodeSessionHeader(c, account, targetURL, upstreamReq.Header)
+	if account.Platform == PlatformOpenAI {
+		upstreamReq = ApplyOpenAIRequestPolicy(upstreamReq, s.settingService)
+		s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, body)
+	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

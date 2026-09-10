@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 // FetchOpenAIModelsList discovers a single account's raw public model catalog.
@@ -19,6 +20,7 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, accoun
 	if s == nil || account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_MODELS_ACCOUNT_REQUIRED", "OpenAI account is required")
 	}
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	credentialAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {
 		return nil, fmt.Errorf("resolve model list credentials: %w", err)
@@ -42,9 +44,11 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, accoun
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_MODELS_REQUEST_INVALID", "cannot build upstream model list request: %v", err)
 	}
+	policy, _ := openai.RequestPolicyFromContext(ctx)
 	request := openAIModelsRequest{
 		url: req.URL.String(), headers: req.Header,
-		proxyURL: upstreamModelsProxyURL(account), accountID: account.ID,
+		requestPolicy: &policy,
+		proxyURL:      upstreamModelsProxyURL(account), accountID: account.ID,
 		credentialAccountID: credentialAccount.ID, credentialAccount: credentialAccount,
 		accountConcurrency: account.Concurrency, useAPIKeyUpstream: true,
 		standardModelsList: true,
@@ -252,6 +256,7 @@ func ApplyPinnedCodexModelsMapping(response *OpenAIModelsResponse, account *Acco
 // FetchPinnedOpenAIModelsList includes explicitly enabled scheduler fallback.
 // An authoritative empty catalog is success, including after group filtering.
 func (s *OpenAIGatewayService) FetchPinnedOpenAIModelsList(ctx context.Context, group *Group, maxAccountSwitches int, ifNoneMatch string) (*OpenAIModelsResponse, *Account, error) {
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	fetch := func(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
 		response, err := s.FetchOpenAIModelsList(ctx, account)
 		if err != nil {

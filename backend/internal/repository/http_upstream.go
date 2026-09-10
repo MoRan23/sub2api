@@ -27,6 +27,7 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
@@ -305,20 +306,23 @@ func (s *httpUpstreamService) httpClientForUpstreamRequest(client *http.Client, 
 		return client
 	}
 	ctx := req.Context()
+	selected := client
 	switch {
 	case service.HTTPUpstreamRedirectsDisabled(ctx):
 		clone := *client
 		clone.CheckRedirect = func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		}
-		return &clone
+		selected = &clone
 	case service.HTTPUpstreamPublicHostsOnly(ctx) && client.CheckRedirect == nil:
 		clone := *client
 		clone.CheckRedirect = s.redirectChecker
-		return &clone
-	default:
-		return client
+		selected = &clone
 	}
+	if openai.IsCodexResidencyRequest(req) {
+		return openai.HTTPClientWithCodexResidencyRedirectGuard(selected)
+	}
+	return selected
 }
 
 // grokAccessDeniedFallbackTransport preserves the subscription CLI proxy as

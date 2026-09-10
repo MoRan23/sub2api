@@ -14,10 +14,15 @@ import (
 
 // OpenAIOAuthService handles OpenAI OAuth authentication flows
 type OpenAIOAuthService struct {
+	settingService       *SettingService
 	sessionStore         *openai.SessionStore
 	proxyRepo            ProxyRepository
 	oauthClient          OpenAIOAuthClient
 	privacyClientFactory PrivacyClientFactory // 用于调用 chatgpt.com/backend-api（ImpersonateChrome）
+}
+
+func (s *OpenAIOAuthService) SetRequestPolicySettingService(settings *SettingService) {
+	s.settingService = settings
 }
 
 // NewOpenAIOAuthService creates a new OpenAI OAuth service
@@ -131,6 +136,7 @@ type OpenAITokenInfo struct {
 
 // ExchangeCode exchanges authorization code for tokens
 func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExchangeCodeInput) (*OpenAITokenInfo, error) {
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	// Get session
 	session, ok := s.sessionStore.Get(input.SessionID)
 	if !ok {
@@ -214,6 +220,7 @@ func (s *OpenAIOAuthService) RefreshToken(ctx context.Context, refreshToken stri
 
 // RefreshTokenWithClientID refreshes an OpenAI OAuth token with optional client_id.
 func (s *OpenAIOAuthService) RefreshTokenWithClientID(ctx context.Context, refreshToken string, proxyURL string, clientID string) (*OpenAITokenInfo, error) {
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	tokenResp, err := s.oauthClient.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)
 	if err != nil {
 		return nil, err
@@ -258,6 +265,7 @@ func (s *OpenAIOAuthService) RefreshTokenWithClientID(ctx context.Context, refre
 // 从 accounts/check 获取最新 plan_type、subscription_expires_at、email，
 // 然后尝试关闭训练数据共享。适用于所有获取/刷新 token 的路径。
 func (s *OpenAIOAuthService) enrichTokenInfo(ctx context.Context, tokenInfo *OpenAITokenInfo, proxyURL string) {
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	if tokenInfo.AccessToken == "" || s.privacyClientFactory == nil {
 		return
 	}

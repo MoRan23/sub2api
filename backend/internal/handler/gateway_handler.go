@@ -167,6 +167,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 	body = parsedReq.Body.Bytes()
+	if h.openAIGatewayService != nil {
+		h.openAIGatewayService.CaptureOpenAIRequestTimezone(c, body)
+	}
 	reqModel := parsedReq.Model
 	reqStream := parsedReq.Stream
 	bindRequestedReasoningEffort(c, body, reqModel)

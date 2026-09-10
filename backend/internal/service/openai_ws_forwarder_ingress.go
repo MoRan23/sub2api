@@ -85,6 +85,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if account == nil {
 		return errors.New("account is nil")
 	}
+	firstAcceptedAt := time.Now()
+	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
+	SetOpenAIClientTransport(c, OpenAIClientTransportWS)
 	// A handler may reuse the same gin context across account failover attempts.
 	// Never let an OAuth attempt's response aliases leak into the next account.
 	setCodexToolNameReverse(c, nil)
@@ -208,6 +211,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		imageInputSize           string
 		payloadBytes             int
 		requestedReasoningEffort *string
+		timezoneState            *RequestTimezoneState
 	}
 	ingressSessionOriginalModel := ""
 
@@ -238,6 +242,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	parseClientPayload := func(turn int, raw []byte) (openAIWSClientPayload, error) {
+		acceptedAt := time.Now()
+		if turn == 1 {
+			acceptedAt = firstAcceptedAt
+		}
 		trimmed := bytes.TrimSpace(raw)
 		if len(trimmed) == 0 {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "empty websocket request payload", nil)
@@ -271,6 +279,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				nil,
 			)
 		}
+		normalized, timezoneState := s.prepareOpenAIWSFrameTimezone(ctx, c, account, normalized, account.IsOpenAIPassthroughEnabled(), turn == 1, acceptedAt)
+		ctx = openAIWSContextForTimezoneState(ctx, c, timezoneState)
 		requestedReasoningEffort := CanonicalRequestedReasoningEffort(normalized, strings.TrimSpace(values[1].String()))
 		if next, policyErr := applyOpenAIWSReasoningEffortPolicy(normalized, hooks); policyErr != nil {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
@@ -489,6 +499,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			imageInputSize:           imageInputSize,
 			payloadBytes:             len(normalized),
 			requestedReasoningEffort: requestedReasoningEffort,
+			timezoneState:            timezoneState,
 		}, nil
 	}
 
@@ -781,7 +792,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					if !retrySafe {
 						retryPayload = nil
 					}
-					return newOpenAIWSCurrentTurnFailoverError(bridgeErr, retryPayload, bridgeFrameCapture)
+					return withOpenAIWSCurrentTurnRetryTimezoneState(
+						newOpenAIWSCurrentTurnFailoverError(bridgeErr, retryPayload, bridgeFrameCapture),
+						currentBridgePayload.timezoneState,
+					)
 				}
 				return bridgeErr
 			}
@@ -874,13 +888,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		firstPayload.payloadBytes = len(mergedPayload)
 	}
 	baseAcquireReq := openAIWSAcquireRequest{
-		Account:        account,
-		WSURL:          wsURL,
-		Headers:        wsHeaders,
-		IdentityDigest: pinnedSocketDigest,
-		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
-			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
-		},
+		Account:           account,
+		WSURL:             wsURL,
+		Headers:           wsHeaders,
+		HandshakeObserver: freezeFingerprintObservationWSHandshake(c, account),
+		IdentityDigest:    pinnedSocketDigest,
+		HeadersFactory:    s.openAIWSHeadersFactory(ctx, account),
 		ProxyURL: func() string {
 			if account.ProxyID != nil && account.Proxy != nil {
 				return account.Proxy.URL()
@@ -1016,7 +1029,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		// completed successfully. This excludes pool reuse, failed dials, and
 		// background prewarm while still capturing a logical-key replacement
 		// that required a fresh compatible upstream socket.
-		s.recordFingerprintObservationAfterOpenAIWSHandshake(c, account, lease, baseAcquireReq.Headers)
+		s.recordFingerprintObservationAfterOpenAIWSHandshake(c, account, lease, lease.FingerprintObservationHeaders())
 		logOpenAIWSModeInfo(
 			"ingress_ws_upstream_connected account_id=%d turn=%d conn_id=%s conn_reused=%v conn_pick_ms=%d queue_wait_ms=%d preferred_conn_id=%s",
 			account.ID,
@@ -1090,6 +1103,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			payload = stamped
 			payloadBytes = len(stamped)
 		}
+		timezoneState, _ := RequestTimezoneStateFromContext(c)
+		s.recordFingerprintObservationWSFrame(c, account, timezoneState, payload, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &pinnedIdentityPlan))
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
@@ -2175,6 +2190,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 		}
+		baseAcquireReq.HandshakeObserver = freezeFingerprintObservationWSHandshake(c, account)
+		// Keep an already borrowed physical socket on its original handshake.
+		// A reconnect or later pool acquire must use this newly accepted frame's
+		// frozen policy, while old prewarms retain their own factory snapshot.
+		s.resetOpenAIWSResidencyHeaders(ctx, account, baseAcquireReq.Headers, wsSessionResolution.ResidencyBeforePolicy)
+		baseAcquireReq.HeadersFactory = s.openAIWSHeadersFactory(ctx, account)
 		currentPayload = nextPayload.payloadRaw
 		currentOriginalModel = nextPayload.originalModel
 		currentImageBillingModel = nextPayload.imageBillingModel

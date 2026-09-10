@@ -37,6 +37,22 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
+	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
+	rawRequest := payloadAsJSONBytes(reqBody)
+	if account.UsesOpenAICodexProtocol() {
+		if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
+			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, rawRequest, ""))
+		}
+	}
+	preparedRequest, timezoneState := s.prepareOpenAIWSFrameTimezone(ctx, c, account, rawRequest, account.IsOpenAIPassthroughEnabled(), true, startTime)
+	ctx = openAIWSContextForTimezoneState(ctx, c, timezoneState)
+	if !bytes.Equal(preparedRequest, rawRequest) {
+		var prepared map[string]any
+		if decodeErr := decodeOpenAIJSONUseNumber(preparedRequest, &prepared); decodeErr != nil {
+			return nil, wrapOpenAIWSFallback("request_timezone", decodeErr)
+		}
+		reqBody = prepared
+	}
 	responseModelObserver := &upstreamResponseModelObserver{}
 
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
@@ -221,15 +237,14 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	defer acquireCancel()
 
 	lease, err := s.getOpenAIWSConnPool().Acquire(acquireCtx, openAIWSAcquireRequest{
-		Account:        account,
-		WSURL:          wsURL,
-		Headers:        wsHeaders,
-		IdentityDigest: outboundIdentityPlan.SocketDigest,
-		HeadersFactory: func(factoryCtx context.Context, headers http.Header) (http.Header, error) {
-			return s.refreshOpenAIAgentIdentityHeaders(factoryCtx, account, headers)
-		},
-		PreferredConnID: preferredConnID,
-		ForceNewConn:    forceNewConn,
+		Account:           account,
+		WSURL:             wsURL,
+		Headers:           wsHeaders,
+		HandshakeObserver: freezeFingerprintObservationWSHandshake(c, account),
+		IdentityDigest:    outboundIdentityPlan.SocketDigest,
+		HeadersFactory:    s.openAIWSHeadersFactory(ctx, account),
+		PreferredConnID:   preferredConnID,
+		ForceNewConn:      forceNewConn,
 		ProxyURL: func() string {
 			if account.ProxyID != nil && account.Proxy != nil {
 				return account.Proxy.URL()
@@ -278,7 +293,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	// Observe only a successful physical handshake. A compatible pooled lease
 	// (including a prewarmed connection) is not a new upstream WS handshake and
 	// must not add a duplicate fingerprint row.
-	s.recordFingerprintObservationAfterOpenAIWSHandshake(c, account, lease, wsHeaders)
+	s.recordFingerprintObservationAfterOpenAIWSHandshake(c, account, lease, lease.FingerprintObservationHeaders())
 	// cleanExit 标记正常终端事件退出，此时上游不会再发送帧，连接可安全归还复用。
 	// 所有异常路径（读写错误、error 事件等）已在各自分支中提前调用 MarkBroken，
 	// 因此 defer 中只需处理正常退出时不 MarkBroken 即可。
@@ -357,6 +372,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		groupID,
 		c,
 		outboundIdentityPlan,
+		lease.FingerprintObservationHeaders(),
 	); err != nil {
 		return nil, err
 	}
@@ -377,6 +393,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 		wirePayload = json.RawMessage(stamped)
 	}
+	observationBody := payloadAsJSONBytes(payload)
+	if raw, ok := wirePayload.(json.RawMessage); ok {
+		observationBody = raw
+	}
+	s.recordFingerprintObservationWSFrame(c, account, timezoneState, observationBody, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &outboundIdentityPlan))
 	if err := lease.WriteJSONWithContextTimeout(ctx, wirePayload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(

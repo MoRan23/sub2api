@@ -19,6 +19,9 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	if account != nil && account.Platform == PlatformOpenAI {
+		ctx = s.freezeOpenAIRequestPolicy(ctx, c)
+	}
 	if account != nil && account.UsesOpenAICodexProtocol() {
 		if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
 			// The facade reads prompt_cache_key from the untouched body. Passing it
@@ -65,6 +68,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
 	}
 
+	body = s.prepareOpenAIRequestTimezone(ctx, c, account, body, account.IsOpenAIPassthroughEnabled())
 	normalizedBody, normalized, err := normalizeOpenAICodexCompactReasoningEffortForAccount(c, account, body)
 	if err != nil {
 		return nil, err
@@ -1011,7 +1015,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// The request builder has completed all Responses/compact identity and
 		// account-header writes. Record only this final wire view so observation
 		// never captures an intermediate client-derived header set.
-		s.recordFingerprintObservationFromContext(c, account, upstreamReq.Header)
+		if account.Platform == PlatformOpenAI {
+			upstreamReq = ApplyOpenAIRequestPolicy(upstreamReq, s.settingService)
+		}
+		s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, openAIUpstreamRequestBodySnapshot(upstreamReq, body))
 
 		// Get proxy URL
 		proxyURL := ""
@@ -1577,6 +1584,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 		logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http", req.Header, body, "not_applicable")
 	}
 
+	if account.Platform == PlatformOpenAI {
+		req = ApplyOpenAIRequestPolicy(req, s.settingService)
+	}
 	return req, nil
 }
 

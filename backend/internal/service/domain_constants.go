@@ -692,6 +692,10 @@ const (
 	// SettingKeyEnableOpenAICodexPATContextManagement controls the optional
 	// History/Notes context-management adapter for Codex PAT clients.
 	SettingKeyEnableOpenAICodexPATContextManagement = "enable_openai_codex_pat_context_management"
+	// OpenAI request content and residency policies are independent of Codex identity normalization.
+	SettingKeyEnableOpenAIRequestTimezoneConversion     = "enable_openai_request_timezone_conversion"
+	SettingKeyEnableOpenAIPassthroughTimezoneConversion = "enable_openai_passthrough_timezone_conversion"
+	SettingKeyEnableOpenAICodexResidencyUS              = "enable_openai_codex_residency_us"
 	// SettingKeyOpenAIAllowClaudeCodeCodexPlugin 已废弃：历史全局开关只作为升级迁移输入读取。
 	// 迁移后等价规则写入 SettingKeyCodexCLIOnlyWhitelist，不再参与运行时判定。
 	SettingKeyOpenAIAllowClaudeCodeCodexPlugin = "openai_allow_claude_code_codex_plugin"

@@ -454,6 +454,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	setOpsRequestContext(c, "", false)
+	if gjson.ValidBytes(body) {
+		h.gatewayService.CaptureOpenAIRequestTimezone(c, body)
+	}
 	sessionHashBody := body
 	body, ok = h.normalizeOpenAIResponsesCompactRequest(c, reqLog, body)
 	if !ok {
@@ -474,6 +477,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 
+	h.gatewayService.CaptureOpenAIRequestTimezone(c, body)
 	// 使用 gjson 只读提取字段做校验，避免完整 Unmarshal
 	modelResult := gjson.GetBytes(body, "model")
 	if !modelResult.Exists() || modelResult.Type != gjson.String || modelResult.String() == "" {
@@ -1097,6 +1101,7 @@ func (h *OpenAIGatewayHandler) normalizeOpenAIResponsesCompactRequest(c *gin.Con
 		if normalized, changed, err := service.NormalizeCompactionTriggerInputOrder(body); err != nil {
 			reqLog.Warn("codex.remote_compact.trigger_order_normalization_failed", zap.Error(err))
 		} else if changed {
+			service.MarkOpenAIRequestTimezoneCompactionReorder(c)
 			body = normalized
 		}
 	}
@@ -1296,6 +1301,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 	service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentityForCompatTurn(c, body, ""))
+	h.gatewayService.CaptureOpenAIRequestTimezone(c, body)
 
 	modelResult := gjson.GetBytes(body, "model")
 	if !modelResult.Exists() || modelResult.Type != gjson.String || modelResult.String() == "" {
@@ -2476,6 +2482,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "invalid JSON payload")
 		return
 	}
+	h.gatewayService.CaptureOpenAIRequestTimezone(c, firstMessage)
 	reqModel := strings.TrimSpace(gjson.GetBytes(firstMessage, "model").String())
 	if reqModel == "" {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "model is required in first response.create payload")
@@ -3132,6 +3139,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				wsAttemptMessage = nextAttemptMessage
 				if retryCurrentTurn {
+					if retryTimezone, ok := service.OpenAIWSCurrentTurnRetryTimezoneState(err); ok {
+						service.SetRequestTimezoneState(c, retryTimezone)
+					}
 					if retryCapture, ok := service.OpenAIWSCurrentTurnRetryIdentityCapture(err); ok {
 						service.SetOpenAIOAuthIdentityCapture(c, retryCapture)
 					} else if account.UsesOpenAICodexProtocol() {

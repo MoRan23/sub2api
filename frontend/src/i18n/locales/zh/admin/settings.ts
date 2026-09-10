@@ -560,6 +560,17 @@ export default {
         codexAddRow: '添加一条',
         codexRemoveRow: '删除',
       },
+      openaiRequestPolicies: {
+        title: 'OpenAI 请求时区与地域',
+        description: '适用于 OAuth 和 API Key 上游，独立于指纹归一与观测开关。',
+        timezoneTitle: '转换请求时区',
+        timezoneHint: '将支持的环境上下文与 Web Search 工具时区转换为 America/Los_Angeles。本轮环境日期按网关首次接收时刻计算，同次重试保持不变；不更新历史上下文，不修改服务器全局时区。',
+        passthroughTitle: '转换透传请求时区',
+        passthroughHint: '同时转换透传请求中的支持位置。仅在请求时区转换开启时生效；关闭总开关仍会保留此配置。',
+        residencyTitle: '强制美国地域请求头',
+        residencyHint: '向 OpenAI 上游发送 x-openai-internal-codex-residency: us，覆盖客户端传入值。关闭仅停止强制添加或覆盖，恢复原有请求头处理。',
+        residencyWebSocketHint: 'WebSocket 在新连接或重连后生效，不会断开现有连接或中断正在进行的请求；该请求头仅在连接握手中发送。',
+      },
       codexFingerprintNormalization: {
         title: 'Codex 指纹归一',
         description: '统一管理 OpenAI OAuth 请求的固定 installation_id、UUIDv7 会话身份，以及 User-Agent / Originator / Version 客户端身份。API Key 账号不受此总开关影响。',

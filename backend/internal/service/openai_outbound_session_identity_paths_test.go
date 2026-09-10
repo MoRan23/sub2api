@@ -546,7 +546,7 @@ func TestOpenAIOutboundIdentityPathsOAuthWSObservesFinalHandshakePair(t *testing
 	require.Equal(t, 1, identityPathCacheCalls(cache))
 }
 
-func TestOpenAIOutboundIdentityPathsAPIKeyTransportIsNotObserved(t *testing.T) {
+func TestOpenAIOutboundIdentityPathsAPIKeyTransportObservesWithoutCodexIdentity(t *testing.T) {
 	enableOpenAIIdentityPathFingerprintObservation(t)
 	body := []byte(`{"model":"gpt-5.4","stream":false,"input":"hello","prompt_cache_key":"apikey-observation-key"}`)
 	c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 45)
@@ -558,7 +558,12 @@ func TestOpenAIOutboundIdentityPathsAPIKeyTransportIsNotObserved(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, upstream.lastReq)
-	require.Empty(t, SnapshotFingerprintObservations(0))
+	entries := SnapshotFingerprintObservations(0)
+	require.Len(t, entries, 1)
+	require.Empty(t, entries[0].SessionID)
+	require.Empty(t, entries[0].ThreadID)
+	require.Equal(t, "http_request", entries[0].EventKind)
+	require.Equal(t, "us", entries[0].OutboundCodexResidency)
 	require.Equal(t, 0, identityPathCacheCalls(cache))
 }
 
@@ -1118,7 +1123,12 @@ func TestOpenAIOutboundIdentityPathsAPIKeyCompatibilityKeepsHistoricalCoverage(t
 			require.Empty(t, upstream.lastReq.Header.Get("thread-id"))
 			requireOpenAIIdentityPathNoBodyPair(t, upstream.lastBody)
 			require.Equal(t, 0, identityPathCacheCalls(cache))
-			require.Empty(t, SnapshotFingerprintObservations(0))
+			entries := SnapshotFingerprintObservations(0)
+			require.Len(t, entries, 1)
+			require.Equal(t, "http_request", entries[0].EventKind)
+			require.Empty(t, entries[0].SessionID)
+			require.Empty(t, entries[0].ThreadID)
+			require.Equal(t, "us", entries[0].OutboundCodexResidency)
 		})
 	}
 }

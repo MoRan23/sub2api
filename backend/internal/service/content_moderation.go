@@ -23,6 +23,7 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
 )
@@ -510,6 +511,7 @@ type ContentModerationHashCache interface {
 }
 
 type ContentModerationService struct {
+	settingService           *SettingService
 	settingRepo              SettingRepository
 	repo                     ContentModerationRepository
 	hashCache                ContentModerationHashCache
@@ -1847,6 +1849,7 @@ func (s *ContentModerationService) validateConfig(ctx context.Context, cfg *Cont
 }
 
 func (s *ContentModerationService) callModeration(ctx context.Context, cfg *ContentModerationConfig, input any, trackKeyLoad ...bool) (*moderationAPIResult, error) {
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	attempts := cfg.RetryCount + 1
 	if attempts <= 0 {
 		attempts = 1
@@ -1898,6 +1901,7 @@ func (s *ContentModerationService) callModeration(ctx context.Context, cfg *Cont
 }
 
 func (s *ContentModerationService) callModerationOnceWithInput(ctx context.Context, cfg *ContentModerationConfig, apiKey string, input any, httpStatus *int) (*moderationAPIResult, error) {
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	base := strings.TrimRight(cfg.BaseURL, "/")
 	endpoint, err := url.JoinPath(base, "/v1/moderations")
 	if err != nil {
@@ -1926,7 +1930,8 @@ func (s *ContentModerationService) callModerationOnceWithInput(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.Do(req)
+	req = ApplyOpenAIRequestPolicy(req, s.settingService)
+	resp, err := openai.HTTPClientWithCodexResidencyRedirectGuard(client).Do(req)
 	if err != nil {
 		return nil, err
 	}

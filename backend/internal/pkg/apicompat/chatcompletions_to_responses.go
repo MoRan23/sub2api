@@ -1,6 +1,7 @@
 package apicompat
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -441,7 +442,11 @@ func convertChatToolsToResponses(tools []ChatTool, functions []ChatFunction) []R
 			})
 			continue
 		}
-		if toolType == "web_search" || toolType == "code_execution" {
+		if toolType == "web_search" {
+			out = append(out, ResponsesTool{Type: toolType, UserLocation: bytes.Clone(t.UserLocation)})
+			continue
+		}
+		if toolType == "code_execution" {
 			out = append(out, ResponsesTool{Type: toolType})
 			continue
 		}

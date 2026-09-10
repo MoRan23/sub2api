@@ -19,32 +19,48 @@ const fingerprintObservationCapacity = 500
 
 const fingerprintObservationOutboundIdentityContextKey = "fingerprint_observation_outbound_identity"
 
-// FingerprintObservationEntry captures the final OpenAI OAuth identity emitted
-// for one request while fingerprint observation is enabled. Every hierarchical
-// field is normalized independently so malformed, legacy, and unprojected
-// values stay empty rather than being presented as a server-owned UUIDv7.
+const fingerprintObservationTimezonePathMappingContextKey = "fingerprint_observation_timezone_path_mapping"
+
+const (
+	FingerprintObservationEventHTTP        = "http_request"
+	FingerprintObservationEventWSHandshake = "ws_handshake"
+	FingerprintObservationEventWSFrame     = "ws_response_create"
+)
+
+// FingerprintObservationEntry captures a final OpenAI request or WS send event
+// while observation is enabled. Hierarchical fields require Codex provenance;
+// ordinary API-key requests can report timezone/header data without inventing
+// a server-owned session or thread UUID.
 type FingerprintObservationEntry struct {
-	SequenceID                   uint64    `json:"sequence_id"`
-	Timestamp                    time.Time `json:"timestamp"`
-	UserID                       int64     `json:"user_id"`
-	Username                     string    `json:"username"`
-	Email                        string    `json:"email"`
-	APIKeyID                     int64     `json:"api_key_id"`
-	APIKeyName                   string    `json:"api_key_name"`
-	AccountID                    int64     `json:"account_id"`
-	AccountName                  string    `json:"account_name"`
-	Pinned                       bool      `json:"pinned"`
-	ClientReportedInstallationID string    `json:"client_reported_installation_id"`
-	OutboundInstallationID       string    `json:"outbound_installation_id"`
-	SessionID                    string    `json:"session_id"`
-	ThreadID                     string    `json:"thread_id"`
-	ParentThreadID               string    `json:"parent_thread_id"`
-	ForkedFromThreadID           string    `json:"forked_from_thread_id"`
-	UserAgent                    string    `json:"user_agent"`
-	Originator                   string    `json:"originator"`
-	OpenAIBeta                   string    `json:"openai_beta"`
-	Version                      string    `json:"version"`
-	InboundEndpoint              string    `json:"inbound_endpoint"`
+	SequenceID                   uint64               `json:"sequence_id"`
+	Timestamp                    time.Time            `json:"timestamp"`
+	UserID                       int64                `json:"user_id"`
+	Username                     string               `json:"username"`
+	Email                        string               `json:"email"`
+	APIKeyID                     int64                `json:"api_key_id"`
+	APIKeyName                   string               `json:"api_key_name"`
+	AccountID                    int64                `json:"account_id"`
+	AccountName                  string               `json:"account_name"`
+	Pinned                       bool                 `json:"pinned"`
+	ClientReportedInstallationID string               `json:"client_reported_installation_id"`
+	OutboundInstallationID       string               `json:"outbound_installation_id"`
+	SessionID                    string               `json:"session_id"`
+	ThreadID                     string               `json:"thread_id"`
+	ParentThreadID               string               `json:"parent_thread_id"`
+	ForkedFromThreadID           string               `json:"forked_from_thread_id"`
+	UserAgent                    string               `json:"user_agent"`
+	Originator                   string               `json:"originator"`
+	OpenAIBeta                   string               `json:"openai_beta"`
+	Version                      string               `json:"version"`
+	InboundEndpoint              string               `json:"inbound_endpoint"`
+	EventKind                    string               `json:"event_kind,omitempty"`
+	TimezoneTarget               string               `json:"timezone_target,omitempty"`
+	InboundTimezoneObservations  *TimezoneScanResult  `json:"inbound_timezone_observations,omitempty"`
+	OutboundTimezoneObservations *TimezoneScanResult  `json:"outbound_timezone_observations,omitempty"`
+	TimezoneConversions          []TimezoneConversion `json:"timezone_conversions,omitempty"`
+	TimezoneComparisonStatus     string               `json:"timezone_comparison_status,omitempty"`
+	OutboundCodexResidency       string               `json:"outbound_codex_residency"`
+	OutboundCodexResidencySource string               `json:"outbound_codex_residency_source,omitempty"`
 }
 
 // FingerprintObservationThreadNode groups final wire observations for one
@@ -200,9 +216,8 @@ func (o *fingerprintObserver) setEnabled(enabled bool) {
 func (o *fingerprintObserver) setEnabledLocked(enabled bool) {
 	o.enabled.Store(enabled)
 	if !enabled {
-		var zero FingerprintObservationEntry
 		for i := range o.ring {
-			o.ring[i] = zero
+			scrubFingerprintObservationEntry(&o.ring[i])
 		}
 		o.head = 0
 		o.size = 0
@@ -222,7 +237,9 @@ func (o *fingerprintObserver) record(entry FingerprintObservationEntry) {
 	}
 	o.seq++
 	entry.SequenceID = o.seq
-	o.ring[o.head] = entry
+	owned := cloneFingerprintObservationEntry(entry)
+	scrubFingerprintObservationEntry(&o.ring[o.head])
+	o.ring[o.head] = owned
 	o.head = (o.head + 1) % len(o.ring)
 	if o.size < len(o.ring) {
 		o.size++
@@ -247,7 +264,7 @@ func (o *fingerprintObserver) snapshotThrough(snapshotSeq uint64) ([]Fingerprint
 		idx := (o.head - 1 - i + len(o.ring)) % len(o.ring)
 		entry := o.ring[idx]
 		if entry.SequenceID <= highWater {
-			out = append(out, entry)
+			out = append(out, cloneFingerprintObservationEntry(entry))
 		}
 	}
 	return out, highWater
@@ -382,7 +399,7 @@ func (o *fingerprintObserver) snapshotLocked(limit int) []FingerprintObservation
 	out := make([]FingerprintObservationEntry, 0, n)
 	for i := 0; i < n; i++ {
 		idx := (o.head - 1 - i + len(o.ring)) % len(o.ring)
-		out = append(out, o.ring[idx])
+		out = append(out, cloneFingerprintObservationEntry(o.ring[idx]))
 	}
 	return out
 }
@@ -469,7 +486,7 @@ func validateFingerprintUUIDv7(raw string) bool {
 
 // recordFingerprintObservation writes a finalized per-request entry. Callers
 // must invoke it only at the last header-writing boundary for a physical
-// OpenAI OAuth send.
+// OpenAI send.
 func (s *OpenAIGatewayService) recordFingerprintObservation(c *gin.Context, account *Account, pin installationIDResolution, outbound http.Header) {
 	s.recordFingerprintObservationWithBody(c, account, pin, outbound, nil)
 }
@@ -480,10 +497,30 @@ func (s *OpenAIGatewayService) recordFingerprintObservation(c *gin.Context, acco
 // schema path that carries server-owned identity in the body but not aliases
 // in the wire header set.
 func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Context, account *Account, pin installationIDResolution, outbound http.Header, body []byte) {
-	if !globalFingerprintObserver.enabled.Load() || account == nil || !account.UsesOpenAICodexProtocol() {
+	if !fingerprintObservationAccountEnabled(account) {
 		return
 	}
 	trustedIdentity, hasTrustedIdentity := fingerprintObservationOutboundIdentityFromContext(c)
+	if !account.UsesOpenAICodexProtocol() {
+		hasTrustedIdentity = false
+		pin = installationIDResolution{}
+	}
+	entry := buildFingerprintObservationEntry(c, account, pin, outbound, body, trustedIdentity, hasTrustedIdentity, true)
+	entry.EventKind = FingerprintObservationEventHTTP
+	entry.OutboundCodexResidencySource = "request_headers"
+	state, _ := RequestTimezoneStateFromContext(c)
+	paths := openAIRequestTimezoneFinalObservationPaths(c, state, body)
+	populateFingerprintObservationTimezones(&entry, state, body, paths)
+	globalFingerprintObserver.record(entry)
+}
+
+func fingerprintObservationAccountEnabled(account *Account) bool {
+	return globalFingerprintObserver != nil && globalFingerprintObserver.enabled.Load() && account != nil &&
+		(account.Platform == PlatformOpenAI || account.UsesOpenAICodexProtocol())
+}
+
+func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin installationIDResolution, outbound http.Header,
+	body []byte, trustedIdentity OpenAICodexTurnIdentity, hasTrustedIdentity, identityHeaders bool) FingerprintObservationEntry {
 	actor := fingerprintObservationActorFromContext(c)
 	entry := FingerprintObservationEntry{
 		Timestamp:                    time.Now(),
@@ -512,7 +549,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 		if actual := strings.TrimSpace(outbound.Get(codexInstallationIDKey)); actual != "" {
 			entry.OutboundInstallationID = actual
 		}
-		if hasTrustedIdentity {
+		if hasTrustedIdentity && identityHeaders {
 			entry.SessionID, sessionHeaderPresent = fingerprintObservationHeaderUUID(outbound, trustedIdentity.SessionID,
 				"session-id", "session_id")
 			entry.ThreadID, threadHeaderPresent = fingerprintObservationHeaderUUID(outbound, trustedIdentity.ThreadID,
@@ -538,6 +575,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 		entry.Originator = strings.TrimSpace(outbound.Get("originator"))
 		entry.OpenAIBeta = strings.TrimSpace(outbound.Get("openai-beta"))
 		entry.Version = strings.TrimSpace(outbound.Get("version"))
+		entry.OutboundCodexResidency = fingerprintObservationHeaderValue(outbound, "x-openai-internal-codex-residency")
 	}
 	if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok &&
 		plan.ProjectionMode == OpenAIOAuthIdentityProjectionAlphaSearch {
@@ -570,7 +608,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 		}
 		entry.InboundEndpoint = c.Request.Method + " " + path
 	}
-	globalFingerprintObserver.record(entry)
+	return entry
 }
 
 type fingerprintObservationActor struct {
@@ -612,7 +650,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationFromContext(c *gin.Co
 }
 
 func (s *OpenAIGatewayService) recordFingerprintObservationFromContextWithBody(c *gin.Context, account *Account, outbound http.Header, body []byte) {
-	if !shouldRecordFingerprintObservationRequest(c, account) {
+	if !fingerprintObservationAccountEnabled(account) || !shouldRecordFingerprintObservationRequest(c, account) {
 		return
 	}
 	pin := installationIDResolutionFromContext(c, account)
@@ -664,10 +702,91 @@ func (s *OpenAIGatewayService) recordFingerprintObservationAfterOpenAIWSHandshak
 	lease *openAIWSConnLease,
 	outbound http.Header,
 ) {
-	if lease == nil || lease.Reused() || lease.IsPrewarmed() {
+	if lease == nil || lease.Reused() || lease.IsPrewarmed() || lease.HandshakeObserverInstalled() {
 		return
 	}
-	s.recordFingerprintObservationFromContext(c, account, outbound)
+	s.recordFingerprintObservationWSHandshake(c, account, outbound)
+}
+
+// freezeFingerprintObservationWSHandshake supplies background pool dials with
+// request attribution without retaining the Gin context, account credentials,
+// inbound body, or the mutable account/API-key objects. It is created even when
+// diagnostics are disabled; only an actual successful dial invokes it, and the
+// live switch decides whether that physical handshake is recorded.
+func freezeFingerprintObservationWSHandshake(c *gin.Context, account *Account) func(http.Header) {
+	if account == nil || (account.Platform != PlatformOpenAI && !account.UsesOpenAICodexProtocol()) {
+		return nil
+	}
+	identity, trusted := fingerprintObservationOutboundIdentityFromContext(c)
+	pin := installationIDResolutionFromContext(c, account)
+	if !account.UsesOpenAICodexProtocol() {
+		identity = OpenAICodexTurnIdentity{}
+		trusted = false
+		pin = installationIDResolution{}
+	}
+	base := buildFingerprintObservationEntry(c, account, pin, nil, nil, identity, trusted, true)
+	safeAccount := Account{ID: account.ID, Name: account.Name}
+	return func(headers http.Header) {
+		if globalFingerprintObserver == nil || !globalFingerprintObserver.enabled.Load() {
+			return
+		}
+		entry := buildFingerprintObservationEntry(nil, &safeAccount, pin, headers, nil, identity, trusted, true)
+		entry.UserID, entry.Username, entry.Email = base.UserID, base.Username, base.Email
+		entry.APIKeyID, entry.APIKeyName = base.APIKeyID, base.APIKeyName
+		entry.InboundEndpoint = base.InboundEndpoint
+		entry.EventKind = FingerprintObservationEventWSHandshake
+		entry.TimezoneComparisonStatus = "not_applicable"
+		entry.OutboundCodexResidencySource = "ws_handshake"
+		globalFingerprintObserver.record(entry)
+	}
+}
+
+// recordFingerprintObservationWSHandshake is called once per successful physical
+// dial. A handshake has no model body; absence of timezone data is not a failed
+// body scan. Callers that use a pool should use the lease-aware helper above.
+func (s *OpenAIGatewayService) recordFingerprintObservationWSHandshake(c *gin.Context, account *Account, outbound http.Header) {
+	if !fingerprintObservationAccountEnabled(account) {
+		return
+	}
+	identity, trusted := fingerprintObservationOutboundIdentityFromContext(c)
+	pin := installationIDResolutionFromContext(c, account)
+	if !account.UsesOpenAICodexProtocol() {
+		trusted = false
+		pin = installationIDResolution{}
+	}
+	entry := buildFingerprintObservationEntry(c, account, pin, outbound, nil, identity, trusted, true)
+	entry.EventKind = FingerprintObservationEventWSHandshake
+	entry.TimezoneComparisonStatus = "not_applicable"
+	entry.OutboundCodexResidencySource = "ws_handshake"
+	globalFingerprintObserver.record(entry)
+}
+
+// recordFingerprintObservationWSFrame observes an attempt to send the current
+// response.create, including on a reused socket. The explicit frame plan is the
+// only identity authority; a reused connection's handshake must never supply
+// the previous frame's session/thread identity.
+func (s *OpenAIGatewayService) recordFingerprintObservationWSFrame(c *gin.Context, account *Account,
+	state *RequestTimezoneState, body []byte, handshakeHeaders http.Header, plan *OpenAIOAuthIdentityPlan) {
+	if !fingerprintObservationAccountEnabled(account) {
+		return
+	}
+	var identity OpenAICodexTurnIdentity
+	var pin installationIDResolution
+	trusted := false
+	if account.UsesOpenAICodexProtocol() && plan != nil {
+		identity = plan.TurnIdentity
+		trusted = plan.TurnIdentityEnabled && ValidateOpenAICodexTurnIdentity(identity) == nil
+		pin = installationIDResolution{Enabled: plan.InstallationEnabled, ClientID: plan.Capture.ClientInstallationID, OutboundID: plan.InstallationID}
+	}
+	entry := buildFingerprintObservationEntry(c, account, pin, handshakeHeaders, body, identity, trusted, false)
+	entry.EventKind = FingerprintObservationEventWSFrame
+	entry.OutboundCodexResidencySource = "ws_handshake"
+	var paths map[string]string
+	if state != nil && body != nil {
+		paths = DeriveOpenAIRequestTimezoneProvenance(state.PreparedBody(), body)
+	}
+	populateFingerprintObservationTimezones(&entry, state, body, paths)
+	globalFingerprintObserver.record(entry)
 }
 
 func installationIDResolutionFromContext(c *gin.Context, account *Account) installationIDResolution {
@@ -838,13 +957,17 @@ func (b fingerprintObservationBodyIdentity) uuid(expected, turnField string, fla
 	return "", false
 }
 
-// shouldRecordFingerprintObservationRequest deliberately keeps the observer
-// narrow: only turn-carrying Codex protocol transports participate. Images,
-// embeddings, Live/profile probes, and unrelated gateway transports remain
-// outside the observation ring.
+// A captured model-request state is an explicit source marker, including for
+// custom routes and ordinary OpenAI API-key accounts. Legacy callers without a
+// state retain their known-route compatibility gate; a URL alone never admits a
+// non-OpenAI account.
 func shouldRecordFingerprintObservationRequest(c *gin.Context, account *Account) bool {
-	if c == nil || c.Request == nil || account == nil || !account.UsesOpenAICodexProtocol() {
+	if c == nil || c.Request == nil || account == nil ||
+		(account.Platform != PlatformOpenAI && !account.UsesOpenAICodexProtocol()) {
 		return false
+	}
+	if state, ok := RequestTimezoneStateFromContext(c); ok && state != nil {
+		return true
 	}
 	path := ""
 	if c.Request.URL != nil {

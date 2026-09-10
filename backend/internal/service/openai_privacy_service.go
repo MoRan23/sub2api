@@ -51,7 +51,7 @@ func disableOpenAITraining(ctx context.Context, clientFactory PrivacyClientFacto
 		return PrivacyModeFailed
 	}
 
-	resp, err := client.R().
+	resp, err := OpenAIReqPolicyClient(client, ctx).R().
 		SetContext(ctx).
 		SetHeader("Authorization", "Bearer "+accessToken).
 		SetHeader("Origin", "https://chatgpt.com").
@@ -121,7 +121,7 @@ func fetchChatGPTAccountInfo(ctx context.Context, clientFactory PrivacyClientFac
 	}
 
 	var result map[string]any
-	resp, err := client.R().
+	resp, err := OpenAIReqPolicyClient(client, ctx).R().
 		SetContext(ctx).
 		SetHeader("Authorization", "Bearer "+accessToken).
 		SetHeader("Origin", "https://chatgpt.com").
@@ -237,7 +237,7 @@ func fetchChatGPTSubscriptionExpiresAt(ctx context.Context, clientFactory Privac
 		WillRenew   bool   `json:"will_renew"`
 		ID          string `json:"id"`
 	}
-	resp, err := client.R().
+	resp, err := OpenAIReqPolicyClient(client, ctx).R().
 		SetContext(ctx).
 		SetHeader("Authorization", "Bearer "+accessToken).
 		SetHeader("Origin", "https://chatgpt.com").

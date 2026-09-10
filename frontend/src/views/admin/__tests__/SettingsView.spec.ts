@@ -1,6 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/vue";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
+import {
+  getSettings as requestSettings,
+  updateSettings as requestSettingsUpdate,
+  type UpdateSettingsRequest,
+} from "@/api/admin/settings";
 
 import enCommon from "@/i18n/locales/en/common";
 import enSettings from "@/i18n/locales/en/admin/settings";
@@ -554,25 +562,23 @@ const baseSettingsResponse = {
   },
 };
 
+const settingsViewStubs = {
+  AppLayout: AppLayoutStub,
+  Select: SelectStub,
+  Toggle: ToggleStub,
+  Icon: true,
+  ConfirmDialog: true,
+  PaymentProviderList: true,
+  PaymentProviderDialog: true,
+  GroupBadge: true,
+  GroupOptionItem: true,
+  ProxySelector: true,
+  ImageUpload: ImageUploadStub,
+  BackupSettings: true,
+};
+
 function mountView() {
-  return mount(SettingsView, {
-    global: {
-      stubs: {
-        AppLayout: AppLayoutStub,
-        Select: SelectStub,
-        Toggle: ToggleStub,
-        Icon: true,
-        ConfirmDialog: true,
-        PaymentProviderList: true,
-        PaymentProviderDialog: true,
-        GroupBadge: true,
-        GroupOptionItem: true,
-        ProxySelector: true,
-        ImageUpload: ImageUploadStub,
-        BackupSettings: true,
-      },
-    },
-  });
+  return mount(SettingsView, { global: { stubs: settingsViewStubs } });
 }
 
 async function openPaymentTab(wrapper: ReturnType<typeof mountView>) {
@@ -1464,6 +1470,127 @@ describe("admin SettingsView payment visible method controls", () => {
       openai_codex_client_version: "0.200.0",
       openai_codex_version_auto_sync_enabled: true,
     }));
+  });
+
+  describe("OpenAI timezone and residency request policies", () => {
+    const server = setupServer();
+    let savedRequests: UpdateSettingsRequest[];
+
+    beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+    afterAll(() => server.close());
+    afterEach(() => {
+      cleanup();
+      server.resetHandlers();
+    });
+    beforeEach(() => {
+      savedRequests = [];
+      getSettings.mockImplementation(requestSettings);
+      updateSettings.mockImplementation(requestSettingsUpdate);
+    });
+
+    function serveSettings(overrides: Record<string, unknown> = {}) {
+      let settings = { ...baseSettingsResponse, ...overrides };
+      server.use(
+        http.get("*/api/v1/admin/settings", () =>
+          HttpResponse.json({ code: 0, data: settings }),
+        ),
+        http.put("*/api/v1/admin/settings", async ({ request }) => {
+          const payload = await request.json() as UpdateSettingsRequest;
+          savedRequests.push(payload);
+          settings = { ...settings, ...payload };
+          return HttpResponse.json({ code: 0, data: settings });
+        }),
+      );
+    }
+
+    async function renderPolicies() {
+      const view = render(SettingsView, {
+        global: { stubs: { ...settingsViewStubs, Toggle: false } },
+      });
+      await fireEvent.click(await view.findByRole("tab", {
+        name: "admin.settings.tabs.gateway",
+      }));
+      return view;
+    }
+
+    it("defaults omitted policies to enabled independently of fingerprint normalization", async () => {
+      serveSettings({ enable_openai_codex_fingerprint_normalization: false });
+      const view = await renderPolicies();
+
+      for (const name of ["timezoneTitle", "passthroughTitle", "residencyTitle"]) {
+        const toggle = view.getByRole("switch", {
+          name: `admin.settings.openaiRequestPolicies.${name}`,
+        }) as HTMLButtonElement;
+        expect(toggle.getAttribute("aria-checked")).toBe("true");
+        expect(toggle.disabled).toBe(false);
+      }
+
+      await fireEvent.click(view.getByRole("button", { name: "admin.settings.saveSettings" }));
+      await waitFor(() => expect(savedRequests).toHaveLength(1));
+      expect(savedRequests[0]).toEqual(expect.objectContaining({
+        enable_openai_request_timezone_conversion: true,
+        enable_openai_passthrough_timezone_conversion: true,
+        enable_openai_codex_residency_us: true,
+        enable_openai_codex_fingerprint_normalization: false,
+      }));
+    });
+
+    it("retains the passthrough choice when timezone conversion is disabled and saves residency independently", async () => {
+      serveSettings({
+        enable_openai_request_timezone_conversion: true,
+        enable_openai_passthrough_timezone_conversion: true,
+        enable_openai_codex_residency_us: true,
+      });
+      const view = await renderPolicies();
+      const timezone = view.getByRole("switch", {
+        name: "admin.settings.openaiRequestPolicies.timezoneTitle",
+      });
+      const passthrough = view.getByRole("switch", {
+        name: "admin.settings.openaiRequestPolicies.passthroughTitle",
+      }) as HTMLButtonElement;
+      const residency = view.getByRole("switch", {
+        name: "admin.settings.openaiRequestPolicies.residencyTitle",
+      }) as HTMLButtonElement;
+
+      await fireEvent.click(timezone);
+      expect(passthrough.disabled).toBe(true);
+      expect(passthrough.getAttribute("aria-checked")).toBe("true");
+      expect(residency.disabled).toBe(false);
+      await fireEvent.click(residency);
+      await fireEvent.click(view.getByRole("button", { name: "admin.settings.saveSettings" }));
+      await waitFor(() => expect(savedRequests).toHaveLength(1));
+      expect(savedRequests[0]).toEqual(expect.objectContaining({
+        enable_openai_request_timezone_conversion: false,
+        enable_openai_passthrough_timezone_conversion: true,
+        enable_openai_codex_residency_us: false,
+      }));
+
+      await waitFor(() => expect(view.getByRole("button", {
+        name: "admin.settings.saveSettings",
+      })).toBeTruthy());
+      await fireEvent.click(timezone);
+      expect(passthrough.disabled).toBe(false);
+      expect(passthrough.getAttribute("aria-checked")).toBe("true");
+    });
+
+    it("loads saved disabled policies without replacing them with defaults", async () => {
+      serveSettings({
+        enable_openai_request_timezone_conversion: false,
+        enable_openai_passthrough_timezone_conversion: false,
+        enable_openai_codex_residency_us: false,
+      });
+      const view = await renderPolicies();
+      for (const name of ["timezoneTitle", "passthroughTitle", "residencyTitle"]) {
+        expect(view.getByRole("switch", {
+          name: `admin.settings.openaiRequestPolicies.${name}`,
+        }).getAttribute("aria-checked")).toBe("false");
+      }
+      const passthrough = view.getByRole("switch", {
+        name: "admin.settings.openaiRequestPolicies.passthroughTitle",
+      }) as HTMLButtonElement;
+      expect(passthrough.disabled).toBe(true);
+      expect(view.getByText("admin.settings.openaiRequestPolicies.residencyWebSocketHint")).toBeTruthy();
+    });
   });
 
   it("labels X-Stainless unification as independent from Codex fingerprints", () => {

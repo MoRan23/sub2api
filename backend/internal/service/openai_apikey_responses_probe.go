@@ -145,6 +145,7 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 		// 仅 OpenAI APIKey 账号需要探测；其他账号类型无能力差异。
 		return
 	}
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 
 	apiKey := account.GetOpenAIApiKey()
 	if apiKey == "" {
@@ -188,6 +189,7 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 
 	// 账号级请求头覆写：能力探测与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
+	req = ApplyOpenAIRequestPolicy(req, s.settingService)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

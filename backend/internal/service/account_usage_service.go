@@ -713,6 +713,7 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 }
 
 func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Account, force bool) (*UsageInfo, error) {
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	now := time.Now()
 	usage := &UsageInfo{UpdatedAt: &now}
 
@@ -836,6 +837,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if account == nil || !account.IsOAuth() {
 		return nil, nil
 	}
+	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	accessToken := ""
 	if !account.IsOpenAIAgentIdentity() {
 		accessToken = account.GetOpenAIAccessToken()
@@ -892,6 +894,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 		req.Header.Set("Originator", plan.ClientIdentity.Originator)
 		req.Header.Set("Version", plan.ClientIdentity.Version)
 	}
+	req = ApplyOpenAIRequestPolicy(req, s.settingService)
 	fields := gjson.GetManyBytes(payloadBytes, "model", "service_tier")
 	payloadBytes, err = gateway.FinalizeOpenAIOAuthResponsesRequest(nil, account, req, payloadBytes, OpenAIOAuthResponsesFinalizeOptions{
 		Plan:             plan,
@@ -916,7 +919,8 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if err != nil {
 		return nil, fmt.Errorf("build openai probe client: %w", err)
 	}
-	resp, err := client.Do(req)
+	req = ApplyOpenAIRequestPolicy(req, s.settingService)
+	resp, err := openaipkg.HTTPClientWithCodexResidencyRedirectGuard(client).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("openai codex probe request failed: %w", err)
 	}

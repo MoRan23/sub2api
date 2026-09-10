@@ -1,6 +1,7 @@
 package apicompat
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -447,7 +448,7 @@ func convertAnthropicToolsToResponses(tools []AnthropicTool) []ResponsesTool {
 	for _, t := range tools {
 		// Anthropic server tools like "web_search_20250305" → OpenAI {"type":"web_search"}
 		if strings.HasPrefix(t.Type, "web_search") {
-			out = append(out, ResponsesTool{Type: "web_search"})
+			out = append(out, ResponsesTool{Type: "web_search", UserLocation: bytes.Clone(t.UserLocation)})
 			continue
 		}
 		out = append(out, ResponsesTool{

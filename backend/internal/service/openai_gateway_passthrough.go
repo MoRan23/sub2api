@@ -809,6 +809,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 		logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http_passthrough", req.Header, body, "not_applicable")
 	}
 
+	if account.Platform == PlatformOpenAI {
+		req = ApplyOpenAIRequestPolicy(req, s.settingService)
+	}
 	return req, nil
 }
 

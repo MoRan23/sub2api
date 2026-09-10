@@ -49,6 +49,9 @@ type SystemSettings struct {
 	EnableOpenAICodexInstallationIDNormalization bool                     `json:"enable_openai_codex_installation_id_normalization"`
 	EnableOpenAICodexClientIdentityNormalization bool                     `json:"enable_openai_codex_client_identity_normalization"`
 	EnableOpenAICodexPATContextManagement        bool                     `json:"enable_openai_codex_pat_context_management"`
+	EnableOpenAIRequestTimezoneConversion        bool                     `json:"enable_openai_request_timezone_conversion"`
+	EnableOpenAIPassthroughTimezoneConversion    bool                     `json:"enable_openai_passthrough_timezone_conversion"`
+	EnableOpenAICodexResidencyUS                 bool                     `json:"enable_openai_codex_residency_us"`
 	AuditLogRetentionDays                        int                      `json:"audit_log_retention_days"` // 审计日志保留天数
 	LoginAgreementEnabled                        bool                     `json:"login_agreement_enabled"`
 	LoginAgreementMode                           string                   `json:"login_agreement_mode"`

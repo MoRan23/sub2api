@@ -162,6 +162,10 @@ type SettingService struct {
 	openAIUUIDv7SessionIdentityBeforeCommit          func()
 	openAIUUIDv7SessionIdentityBeforeGenerationStore func()
 
+	// One immutable request policy snapshot prevents mixed values during updates.
+	openAIRequestPolicyCache atomic.Pointer[cachedOpenAIRequestPolicy]
+	openAIRequestPolicySF    singleflight.Group
+
 	channelMonitorRuntimeListenersMu sync.Mutex
 	channelMonitorRuntimeListeners   []func()
 }

@@ -9,6 +9,46 @@ import { apiClient } from '../client'
 
 export type FingerprintObservationRelation = 'root' | 'descendant' | 'unthreaded'
 
+export type RequestTimezoneScanStatus = 'complete' | 'limited' | 'parse_failed' | 'not_applicable'
+export type RequestTimezoneSource = 'environment_context' | 'web_search'
+
+export interface RequestTimezoneObservation {
+  source: RequestTimezoneSource
+  path: string
+  value: string
+  current: boolean
+  current_date?: string
+  status?: 'valid' | 'invalid'
+  reason?: string
+}
+
+export interface RequestTimezoneScan {
+  scan_status: RequestTimezoneScanStatus
+  items: RequestTimezoneObservation[]
+}
+
+export interface RequestTimezoneConversion {
+  source: RequestTimezoneSource
+  path: string
+  original: string
+  output: string
+  status: 'converted' | 'unchanged' | 'skipped' | 'disabled' | 'not_sent' | 'unmatched'
+  date_before?: string
+  date_after?: string
+  reason?: string
+  time_basis?: 'gateway_received_at'
+  received_at?: string
+}
+
+export type RequestTimezoneComparisonStatus =
+  | 'matched'
+  | 'mismatched'
+  | 'not_sent'
+  | 'unmatched'
+  | 'not_collected'
+  | 'not_applicable'
+  | 'incomplete'
+
 export interface FingerprintObservationEntry {
   sequence_id: number
   timestamp: string
@@ -31,6 +71,14 @@ export interface FingerprintObservationEntry {
   openai_beta: string
   version: string
   inbound_endpoint: string
+  event_kind?: 'http_request' | 'ws_handshake' | 'ws_response_create'
+  timezone_target?: string
+  inbound_timezone_observations?: RequestTimezoneScan
+  outbound_timezone_observations?: RequestTimezoneScan
+  timezone_conversions?: RequestTimezoneConversion[]
+  timezone_comparison_status?: RequestTimezoneComparisonStatus
+  outbound_codex_residency?: string
+  outbound_codex_residency_source?: 'request_headers' | 'ws_handshake'
 }
 
 export interface FingerprintObservationUserSummary {

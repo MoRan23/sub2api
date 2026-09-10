@@ -309,3 +309,61 @@ func TestFingerprintObservationSnapshotNormalizesPagination(t *testing.T) {
 	require.Equal(t, 1, page.Pages)
 	require.NotNil(t, page.Items)
 }
+
+func TestFingerprintObservationSnapshotNestedInputsAndReturnsAreOwned(t *testing.T) {
+	input := fingerprintTimezoneTestEntry()
+	store := newFingerprintObservationSnapshotStore(time.Minute, 2, time.Now, nil)
+	token, err := store.create([]FingerprintObservationEntry{input})
+	require.NoError(t, err)
+	input.InboundTimezoneObservations.Items[0].Value = "mutated-input"
+	input.TimezoneConversions[0].Output = "mutated-input"
+	var threadID string
+	for id := range store.snapshots[token].threadsByID {
+		threadID = id
+	}
+	first, err := store.listEntries(token, threadID, "", 20)
+	require.NoError(t, err)
+	require.Equal(t, "Asia/Shanghai", first.Items[0].InboundTimezoneObservations.Items[0].Value)
+	require.Equal(t, OpenAIRequestTimezone, first.Items[0].TimezoneConversions[0].Output)
+	first.Items[0].InboundTimezoneObservations.Items[0].Value = "mutated-return"
+	first.Items[0].OutboundTimezoneObservations.ScanStatus = "mutated-return"
+	first.Items[0].TimezoneConversions[0].Output = "mutated-return"
+	second, err := store.listEntries(token, threadID, "", 20)
+	require.NoError(t, err)
+	require.Equal(t, "Asia/Shanghai", second.Items[0].InboundTimezoneObservations.Items[0].Value)
+	require.Equal(t, "complete", second.Items[0].OutboundTimezoneObservations.ScanStatus)
+	require.Equal(t, OpenAIRequestTimezone, second.Items[0].TimezoneConversions[0].Output)
+	store.clear()
+	require.Equal(t, "Asia/Shanghai", second.Items[0].InboundTimezoneObservations.Items[0].Value, "clear must not mutate caller-owned response data")
+}
+
+func TestFingerprintObservationSnapshotNestedDataScrubbedOnAllRemovalPaths(t *testing.T) {
+	for _, mode := range []string{"ttl", "eviction", "clear"} {
+		t.Run(mode, func(t *testing.T) {
+			now := time.Now()
+			store := newFingerprintObservationSnapshotStore(time.Minute, 1, func() time.Time { return now }, nil)
+			token, err := store.create([]FingerprintObservationEntry{fingerprintTimezoneTestEntry()})
+			require.NoError(t, err)
+			retained := store.snapshots[token]
+			scan := retained.entries[0].InboundTimezoneObservations
+			items := scan.Items
+			conversions := retained.entries[0].TimezoneConversions
+			switch mode {
+			case "ttl":
+				now = now.Add(time.Minute)
+				_, err = store.pageUsers(token, 1, 20)
+				require.ErrorIs(t, err, ErrFingerprintObservationSnapshotNotFound)
+			case "eviction":
+				_, err = store.create(nil)
+				require.NoError(t, err)
+			case "clear":
+				store.clear()
+			}
+			require.Equal(t, TimezoneScanResult{}, *scan)
+			require.Equal(t, TimezoneScanItem{}, items[0])
+			require.Equal(t, TimezoneConversion{}, conversions[0])
+			require.Nil(t, retained.entries)
+			require.Nil(t, retained.threadsByID)
+		})
+	}
+}

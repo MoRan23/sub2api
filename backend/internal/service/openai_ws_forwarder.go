@@ -101,6 +101,7 @@ type openAIWSCurrentTurnFailoverError struct {
 	retryPayload            []byte
 	retryIdentityCapture    OpenAIOAuthIdentityCapture
 	retryIdentityCaptureSet bool
+	retryTimezoneState      *RequestTimezoneState
 }
 
 func (e *openAIWSCurrentTurnFailoverError) Error() string {
@@ -152,6 +153,25 @@ func OpenAIWSCurrentTurnRetryIdentityCapture(err error) (OpenAIOAuthIdentityCapt
 		return OpenAIOAuthIdentityCapture{}, false
 	}
 	return cloneOpenAIOAuthIdentityCapture(retryErr.retryIdentityCapture), true
+}
+
+// OpenAIWSCurrentTurnRetryTimezoneState carries the accepted frame's frozen
+// clock and conversion report across credential failover, never an account's
+// fully projected request body.
+func OpenAIWSCurrentTurnRetryTimezoneState(err error) (*RequestTimezoneState, bool) {
+	var retryErr *openAIWSCurrentTurnFailoverError
+	if !errors.As(err, &retryErr) || retryErr == nil || retryErr.retryTimezoneState == nil {
+		return nil, false
+	}
+	return CloneRequestTimezoneState(retryErr.retryTimezoneState), true
+}
+
+func withOpenAIWSCurrentTurnRetryTimezoneState(err error, state *RequestTimezoneState) error {
+	var retryErr *openAIWSCurrentTurnFailoverError
+	if errors.As(err, &retryErr) && retryErr != nil {
+		retryErr.retryTimezoneState = CloneRequestTimezoneState(state)
+	}
+	return err
 }
 
 func (e *openAIWSIngressTurnError) Error() string {

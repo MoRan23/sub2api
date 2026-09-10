@@ -1080,14 +1080,14 @@ func TestResolveOpenAIOAuthIdentityPlanReusesWSConnectionClientIdentitySnapshot(
 	require.Equal(t, first.ClientIdentity, second.ClientIdentity)
 }
 
-// Invalid historical account UAs must be interpreted against the connection's
-// canonical snapshot. Re-reading the hot global fallback here would let a
-// lineage transition change the environment/version mid-connection.
+// Invalid historical account UAs use the built-in environment and the
+// connection's frozen canonical version. Re-reading the hot global fallback
+// here would let a lineage transition change the version mid-connection.
 // Do not run this test in parallel: it replaces the process-wide resolver.
 func TestResolveOpenAIOAuthIdentityPlanInvalidStoredUAUsesFrozenConnectionFallback(t *testing.T) {
 	const (
 		resolvedUA     = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
-		wantResolvedUA = "codex-tui/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.200.1)"
+		wantResolvedUA = "codex-tui/0.200.1 (Ubuntu 24.04.4; x86_64) xterm-256color (codex-tui; 0.200.1)"
 		updatedUA      = "codex_vscode/0.201.2 (Mac OS X 15.1.0; arm64) vscode"
 	)
 	SetCodexCanonicalUserAgentResolver(func() string { return resolvedUA })

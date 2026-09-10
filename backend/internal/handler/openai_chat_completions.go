@@ -70,6 +70,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 	service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentityForCompatTurn(c, body, ""))
+	h.gatewayService.CaptureOpenAIRequestTimezone(c, body)
 
 	modelResult := gjson.GetBytes(body, "model")
 	if !modelResult.Exists() || modelResult.Type != gjson.String || modelResult.String() == "" {

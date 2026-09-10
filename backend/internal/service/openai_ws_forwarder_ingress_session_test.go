@@ -555,18 +555,27 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePrompt
 		require.Equal(t, wantResponseID, gjson.GetBytes(event, "response.id").String())
 	}
 
+	handshakeObservations := func() []FingerprintObservationEntry {
+		var handshakes []FingerprintObservationEntry
+		for _, entry := range SnapshotFingerprintObservations(0) {
+			if entry.EventKind == FingerprintObservationEventWSHandshake {
+				handshakes = append(handshakes, entry)
+			}
+		}
+		return handshakes
+	}
 	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false}`, "resp_identity_p_1")
 	require.Equal(t, 1, dialer.DialCount())
-	require.Len(t, SnapshotFingerprintObservations(0), 1, "the affinity-backed first physical handshake must be observed once")
+	require.Len(t, handshakeObservations(), 1, "the affinity-backed first physical handshake must be observed once")
 	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"P"}`, "resp_identity_p_2")
 	require.Equal(t, 1, dialer.DialCount(), "a late prompt cache fallback must inherit the connection snapshot")
-	require.Len(t, SnapshotFingerprintObservations(0), 1, "a late prompt cache fallback must not add a physical handshake")
+	require.Len(t, handshakeObservations(), 1, "a late prompt cache fallback must not add a physical handshake")
 	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false,"prompt_cache_key":"Q"}`, "resp_identity_q_1")
 	require.Equal(t, 1, dialer.DialCount(), "prompt_cache_key changes never switch the connection snapshot")
-	require.Len(t, SnapshotFingerprintObservations(0), 1, "prompt cache changes must not add an observation")
+	require.Len(t, handshakeObservations(), 1, "prompt cache changes must not add a handshake observation")
 	writeAndRead(`{"type":"response.create","model":"gpt-5.1","stream":false,"client_metadata":{"session_id":"explicit-root-2","thread_id":"explicit-root-2"},"x-codex-turn-metadata":"{\"installation_id\":\"client-transition-installation\",\"label\":\"transition-keep\"}"}`, "resp_identity_explicit_1")
 	require.Equal(t, 2, dialer.DialCount(), "an explicit root session change must acquire a new compatible socket")
-	require.Len(t, SnapshotFingerprintObservations(0), 2, "the explicit session transition must observe its new physical handshake")
+	require.Len(t, handshakeObservations(), 2, "the explicit session transition must observe its new physical handshake")
 
 	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
 	select {
@@ -619,7 +628,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePrompt
 	require.Equal(t, transportTestPinnedInstallationID, gjson.Get(transitionMetadata, "installation_id").String())
 	require.Equal(t, "transition-keep", gjson.Get(transitionMetadata, "label").String())
 
-	observations := SnapshotFingerprintObservations(0)
+	observations := handshakeObservations()
 	require.Len(t, observations, 2)
 	// Observation snapshots are newest-first: the transition handshake precedes
 	// the initial affinity-backed handshake in this result slice.
@@ -628,6 +637,17 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePrompt
 	require.Equal(t, firstSessionID, observations[1].SessionID)
 	require.Equal(t, firstThreadID, observations[1].ThreadID)
 	require.Equal(t, http.MethodGet+" /v1/responses", observations[0].InboundEndpoint)
+	var frames []FingerprintObservationEntry
+	for _, entry := range SnapshotFingerprintObservations(0) {
+		if entry.EventKind == FingerprintObservationEventWSFrame {
+			frames = append(frames, entry)
+		}
+	}
+	require.Len(t, frames, 4, "every physical response.create is observed even on the reused socket")
+	require.Equal(t, transitionSessionID, frames[0].SessionID)
+	require.Equal(t, transitionThreadID, frames[0].ThreadID)
+	require.Equal(t, firstSessionID, frames[1].SessionID)
+	require.Equal(t, firstThreadID, frames[1].ThreadID)
 
 	secondClient := func() *coderws.Conn {
 		dialCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

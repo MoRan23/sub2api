@@ -83,6 +83,15 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.EnableOpenAICodexPATContextManagement != after.EnableOpenAICodexPATContextManagement {
 		changed = append(changed, service.SettingKeyEnableOpenAICodexPATContextManagement)
 	}
+	if before.EnableOpenAIRequestTimezoneConversion != after.EnableOpenAIRequestTimezoneConversion {
+		changed = append(changed, service.SettingKeyEnableOpenAIRequestTimezoneConversion)
+	}
+	if before.EnableOpenAIPassthroughTimezoneConversion != after.EnableOpenAIPassthroughTimezoneConversion {
+		changed = append(changed, service.SettingKeyEnableOpenAIPassthroughTimezoneConversion)
+	}
+	if before.EnableOpenAICodexResidencyUS != after.EnableOpenAICodexResidencyUS {
+		changed = append(changed, service.SettingKeyEnableOpenAICodexResidencyUS)
+	}
 	if before.InstallationObservationEnabled != after.InstallationObservationEnabled {
 		changed = append(changed, service.SettingKeyInstallationObservationEnabled)
 	}

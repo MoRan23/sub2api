@@ -79,21 +79,25 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	prewarmPayload["generate"] = false
 	prewarmPayloadJSON := payloadAsJSONBytes(prewarmPayload)
 	prewarmWirePayload := any(prewarmPayload)
-	if account.UsesOpenAICodexProtocol() {
-		var c *gin.Context
-		var identityPlan OpenAIOAuthIdentityPlan
-		for _, arg := range identityArgs {
-			switch value := arg.(type) {
-			case *gin.Context:
-				c = value
-			case OpenAIOAuthIdentityPlan:
-				identityPlan = value
-			case *OpenAIOAuthIdentityPlan:
-				if value != nil {
-					identityPlan = *value
-				}
+	var c *gin.Context
+	var identityPlan OpenAIOAuthIdentityPlan
+	var observationPlan *OpenAIOAuthIdentityPlan
+	var requestHeaders http.Header
+	for _, arg := range identityArgs {
+		switch value := arg.(type) {
+		case *gin.Context:
+			c = value
+		case http.Header:
+			requestHeaders = value
+		case OpenAIOAuthIdentityPlan:
+			identityPlan = value
+		case *OpenAIOAuthIdentityPlan:
+			if value != nil {
+				identityPlan = *value
 			}
 		}
+	}
+	if account.UsesOpenAICodexProtocol() {
 		if strings.TrimSpace(identityPlan.CredentialOwnerNamespace) == "" {
 			return wrapOpenAIWSFallback("prewarm_metadata", errOpenAIOAuthWSWirePlanUnavailable)
 		}
@@ -126,8 +130,11 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 		}
 		prewarmPayloadJSON = stamped
 		prewarmWirePayload = json.RawMessage(stamped)
+		observationPlan = &finalPlan
 	}
 
+	timezoneState, _ := RequestTimezoneStateFromContext(c)
+	s.recordFingerprintObservationWSFrame(c, account, timezoneState, prewarmPayloadJSON, requestHeaders, observationPlan)
 	if err := lease.WriteJSONWithContextTimeout(ctx, prewarmWirePayload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
