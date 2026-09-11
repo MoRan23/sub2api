@@ -29,7 +29,7 @@ func (s *OpenAIGatewayService) finalizeOpenAIOAuthWSWirePlan(
 	payload []byte,
 	options openAIOAuthWSWireFinalizeOptions,
 ) (OpenAIOAuthIdentityPlan, error) {
-	if account == nil || !account.UsesOpenAICodexProtocol() {
+	if !usesOpenAICodexIdentityProtocol(account) {
 		return plan, nil
 	}
 	model := strings.TrimSpace(options.FinalModel)
@@ -160,7 +160,7 @@ func applyOpenAICodexWSRoutingHint(headers http.Header, account *Account, plan O
 		return
 	}
 	deleteOpenAIHeaderEqualFold(headers, openAICodexRoutingHintHeader)
-	if account == nil || !account.UsesOpenAICodexProtocol() {
+	if !usesOpenAICodexIdentityProtocol(account) {
 		return
 	}
 	if hint := strings.TrimSpace(plan.WireProfile.RoutingHint); hint != "" {
@@ -177,7 +177,7 @@ func (s *OpenAIGatewayService) projectOpenAIOAuthWSFrame(
 	plan OpenAIOAuthIdentityPlan,
 	payload []byte,
 ) ([]byte, error) {
-	if account == nil || !account.UsesOpenAICodexProtocol() {
+	if !usesOpenAICodexIdentityProtocol(account) {
 		return payload, nil
 	}
 	finalPayload := payload

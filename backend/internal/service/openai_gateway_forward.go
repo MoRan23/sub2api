@@ -14,15 +14,18 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
+
+func ptrUint64(v uint64) *uint64 { return &v }
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	if account != nil && account.Platform == PlatformOpenAI {
 		ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	}
-	if account != nil && account.UsesOpenAICodexProtocol() {
+	if account != nil && usesOpenAICodexIdentityProtocol(account) {
 		if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
 			// The facade reads prompt_cache_key from the untouched body. Passing it
 			// again as callerSeed would misclassify its source and priority.
@@ -157,6 +160,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	originalBody := body
 	requestView := newOpenAIRequestView(body)
 	reqModel, reqStream, promptCacheKey := requestView.Model, requestView.Stream, requestView.PromptCacheKey
+	setOpenAIClientRequestedStream(c, reqStream)
 	originalModel := reqModel
 
 	if account.Platform == PlatformGrok {
@@ -377,7 +381,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	instructions := gjson.GetBytes(body, "instructions")
 	instructionsEmpty := !instructions.Exists() || instructions.Type != gjson.String || strings.TrimSpace(instructions.String()) == ""
-	if instructionsEmpty && account.UsesOpenAICodexProtocol() && !compatMessagesBridge && !nativeCNResponses {
+	if instructionsEmpty && usesOpenAICodexIdentityProtocol(account) && !compatMessagesBridge && !nativeCNResponses {
 		markPatchSet("instructions", defaultCodexSynthInstructions(upstreamModel))
 	}
 	if billingModel != requestedModel {
@@ -642,7 +646,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 
-	if account.UsesOpenAICodexProtocol() {
+	if usesOpenAICodexIdentityProtocol(account) {
 		decoded, decodeErr := ensureReqBody()
 		if decodeErr != nil {
 			return nil, decodeErr
@@ -1449,8 +1453,29 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 			}
 		}
 	}
-	if account.UsesOpenAICodexProtocol() {
+	if usesOpenAICodexIdentityProtocol(account) {
 		identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
+		// OAuth stream=false requests use one durable account root and a fresh
+		// context-free child thread per request. Resolve the root before the
+		// ordinary logical-session mapper so this path cannot accidentally reuse
+		// a caller's thread or window state.
+		clientSyncRequest := !openAIClientRequestedStream(c, body, isStream)
+		var syncIdentity OpenAICodexTurnIdentity
+		var syncRequest bool
+		var syncErr error
+		if clientSyncRequest {
+			if existing, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && existing.TurnIdentity.Relation == OpenAICodexTurnRelationDescendant && account.IsOpenAIOAuth() {
+				syncIdentity, syncRequest = existing.TurnIdentity, true
+			} else {
+				syncIdentity, syncRequest, syncErr = s.resolveOAuthSynchronousTurnIdentity(ctx, account, false, originalOpenAISyncThread(c, body))
+			}
+		}
+		if syncErr != nil {
+			return nil, syncErr
+		}
+		if syncRequest {
+			identityModeEnabled = false
+		}
 		projectionMode := OpenAIOAuthIdentityProjectionRegular
 		if isOpenAIResponsesCompactPath(c) {
 			projectionMode = OpenAIOAuthIdentityProjectionCompact
@@ -1471,6 +1496,28 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 		}
 		identityPlan = plan
 		identityPlanned = true
+		if syncRequest {
+			identityPlan.TurnIdentityRequested = true
+			identityPlan.TurnIdentityEnabled = true
+			identityPlan.TurnIdentity = syncIdentity
+			identityPlan.WireProfile.SessionID = syncIdentity.SessionID
+			identityPlan.WireProfile.ThreadID = syncIdentity.ThreadID
+			identityPlan.WireProfile.TurnLineage.ParentThreadID = syncIdentity.ParentThreadID
+			identityPlan.WireProfile.TurnLineage.ForkedFromThreadID = syncIdentity.ForkedFromThreadID
+			if existing, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && existing.TurnIdentity.ThreadID == syncIdentity.ThreadID && existing.Window.ContextWindowID != "" {
+				identityPlan.Window = existing.Window
+			} else {
+				contextWindow, windowErr := uuid.NewV7()
+				if windowErr != nil {
+					return nil, windowErr
+				}
+				identityPlan.Window = OpenAICodexWindowSnapshot{ThreadID: syncIdentity.ThreadID, Number: 0, ContextWindowID: contextWindow.String(), FirstContextWindowID: contextWindow.String()}
+			}
+			identityPlan.WireProfile.WindowID = identityPlan.Window.WindowID()
+			identityPlan.WireProfile.WindowNumber = ptrUint64(identityPlan.Window.Number)
+			identityPlan.WireProfile.ContextWindowID = identityPlan.Window.ContextWindowID
+			identityPlan.WindowMappingKey = "oauth-sync:" + syncIdentity.ThreadID
+		}
 		compatMessagesBridge = isOpenAICompatMessagesBridgeContext(c) || isOpenAICompatMessagesBridgeBody(body)
 		// 清除客户端透传的 session 头，后续用隔离后的值重新设置，防止跨用户会话碰撞。
 		clientConversationID := strings.TrimSpace(req.Header.Get("conversation_id"))
@@ -1519,9 +1566,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 		req.Header.Set("accept", "application/json")
 	}
 
-	// OAuth client identity is resolved once into the immutable outbound plan.
-	// API-key accounts retain the legacy account-level User-Agent behavior.
-	if !account.UsesOpenAICodexProtocol() {
+	// Non-Codex API-key accounts retain the legacy account-level User-Agent
+	// behavior; OpenAI API-key accounts now use the shared identity plan.
+	if !usesOpenAICodexIdentityProtocol(account) {
 		customUA, err := s.codexIdentityOverrideUA(ctx, account)
 		if err != nil {
 			return nil, fmt.Errorf("resolve OpenAI account User-Agent: %w", err)
@@ -1534,7 +1581,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 	// 若开启 ForceCodexCLI，则强制将上游 User-Agent 伪装为规范 Codex 身份。
 	// 用于网关未透传/改写 User-Agent 时，仍能命中 Codex 侧识别逻辑。
 	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
-		if account.UsesOpenAICodexProtocol() {
+		if usesOpenAICodexIdentityProtocol(account) {
 			if identityPlanned {
 				req.Header.Set("user-agent", identityPlan.ClientIdentity.UserAgent)
 				req.Header.Set("originator", identityPlan.ClientIdentity.Originator)
@@ -1560,7 +1607,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 	applyOpenAICodexBetaFeatures(c, account, req.Header)
 	setOpenAICodexRoutingHintFromBody(req.Header, account, body)
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http", req.Header, body, "not_applicable")
-	if account.UsesOpenAICodexProtocol() && !options.deferOAuthIdentityProjection {
+	if usesOpenAICodexIdentityProtocol(account) && !options.deferOAuthIdentityProjection {
 		if !identityPlanned {
 			return nil, errors.New("final openai OAuth identity plan is missing")
 		}
@@ -1580,7 +1627,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 			return nil, fmt.Errorf("finalize openai OAuth Responses request: %w", finalizeErr)
 		}
 		body = finalBody
-	} else if !account.UsesOpenAICodexProtocol() {
+	} else if !usesOpenAICodexIdentityProtocol(account) {
 		logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http", req.Header, body, "not_applicable")
 	}
 

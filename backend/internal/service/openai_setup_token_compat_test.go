@@ -303,7 +303,8 @@ func TestOpenAISetupTokenIdentityFlagOffAndAPIKeyStayNoOp(t *testing.T) {
 	out, err := svc.FinalizeOpenAIOAuthResponsesRequest(c, apiKeyAccount, req, body, OpenAIOAuthResponsesFinalizeOptions{Plan: plan})
 	require.NoError(t, err)
 	require.Equal(t, body, out)
-	require.Equal(t, http.Header{"X-Keep": {"unchanged"}}, req.Header)
+	require.Equal(t, "unchanged", req.Header.Get("X-Keep"))
+	require.NotEmpty(t, req.Header.Get("User-Agent"))
 }
 
 func TestOpenAISetupTokenTurnStateUsesUnifiedPlanProvenance(t *testing.T) {

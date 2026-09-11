@@ -560,11 +560,11 @@ func TestOpenAIOutboundIdentityPathsAPIKeyTransportObservesWithoutCodexIdentity(
 	require.NotNil(t, upstream.lastReq)
 	entries := SnapshotFingerprintObservations(0)
 	require.Len(t, entries, 1)
-	require.Empty(t, entries[0].SessionID)
-	require.Empty(t, entries[0].ThreadID)
+	require.NotEmpty(t, entries[0].SessionID)
+	require.NotEmpty(t, entries[0].ThreadID)
 	require.Equal(t, "http_request", entries[0].EventKind)
 	require.Equal(t, "us", entries[0].OutboundCodexResidency)
-	require.Equal(t, 0, identityPathCacheCalls(cache))
+	require.Equal(t, 1, identityPathCacheCalls(cache))
 }
 
 func TestOpenAIOutboundIdentityPlanReusedAcrossSameAccountTransportRetry(t *testing.T) {
@@ -935,10 +935,10 @@ func TestOpenAIOutboundIdentityPathsAPIKeyPassthroughIsUntouched(t *testing.T) {
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, "api-key-token")
 	require.NoError(t, err)
 	outboundBody := readOpenAIIdentityPathRequestBody(t, req)
-	requireOpenAIIdentityPathNoIdentityHeaders(t, req.Header)
-	require.Equal(t, "apikey-passthrough-key", gjson.GetBytes(outboundBody, "prompt_cache_key").String())
-	requireOpenAIIdentityPathNoBodyPair(t, outboundBody)
-	require.Equal(t, 0, identityPathCacheCalls(cache))
+	requireOpenAIIdentityPathPair(t, req.Header, outboundBody)
+	require.NotEqual(t, "apikey-passthrough-key", gjson.GetBytes(outboundBody, "prompt_cache_key").String())
+	require.NotEmpty(t, gjson.GetBytes(outboundBody, "client_metadata.session_id").String())
+	require.Equal(t, 1, identityPathCacheCalls(cache))
 }
 
 func TestOpenAIOutboundIdentityPathsNormalAPIKeyResponsesIsUntouched(t *testing.T) {
@@ -950,9 +950,8 @@ func TestOpenAIOutboundIdentityPathsNormalAPIKeyResponsesIsUntouched(t *testing.
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "api-key-token", true, "apikey-responses-key", false)
 	require.NoError(t, err)
 	outboundBody := readOpenAIIdentityPathRequestBody(t, req)
-	requireOpenAIIdentityPathNoIdentityHeaders(t, req.Header)
-	requireOpenAIIdentityPathNoBodyPair(t, outboundBody)
-	require.Equal(t, 0, identityPathCacheCalls(cache))
+	requireOpenAIIdentityPathPair(t, req.Header, outboundBody)
+	require.Equal(t, 1, identityPathCacheCalls(cache))
 }
 
 func TestOpenAIOutboundIdentityPathsChatAndMessagesUseOneFinalPair(t *testing.T) {
@@ -1118,16 +1117,13 @@ func TestOpenAIOutboundIdentityPathsAPIKeyCompatibilityKeepsHistoricalCoverage(t
 
 			require.NoError(t, err)
 			require.NotNil(t, upstream.lastReq)
-			require.Equal(t, generateSessionUUID(isolateOpenAISessionID(apiKeyID, "apikey-compat-key")), upstream.lastReq.Header.Get("session_id"))
-			require.Empty(t, upstream.lastReq.Header.Get("session-id"))
-			require.Empty(t, upstream.lastReq.Header.Get("thread-id"))
-			requireOpenAIIdentityPathNoBodyPair(t, upstream.lastBody)
-			require.Equal(t, 0, identityPathCacheCalls(cache))
+			requireOpenAIIdentityPathPair(t, upstream.lastReq.Header, upstream.lastBody)
+			require.Equal(t, 1, identityPathCacheCalls(cache))
 			entries := SnapshotFingerprintObservations(0)
 			require.Len(t, entries, 1)
 			require.Equal(t, "http_request", entries[0].EventKind)
-			require.Empty(t, entries[0].SessionID)
-			require.Empty(t, entries[0].ThreadID)
+			require.NotEmpty(t, entries[0].SessionID)
+			require.NotEmpty(t, entries[0].ThreadID)
 			require.Equal(t, "us", entries[0].OutboundCodexResidency)
 		})
 	}

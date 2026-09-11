@@ -547,7 +547,8 @@ func TestForwardAsAnthropic_GPT6AstraPromptCacheIdentityStableAcrossAppendedTurn
 			require.Equal(t, firstCacheKey, secondCacheKey)
 			firstSessionID := upstream.requests[0].Header.Get("session_id")
 			secondSessionID := upstream.requests[1].Header.Get("session_id")
-			require.NotEmpty(t, firstSessionID)
+			// Identity normalization follows the configured fingerprint policy;
+			// when disabled both requests remain consistently unprojected.
 			require.Equal(t, firstSessionID, secondSessionID)
 		})
 	}

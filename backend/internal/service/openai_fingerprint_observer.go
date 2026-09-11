@@ -501,7 +501,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 		return
 	}
 	trustedIdentity, hasTrustedIdentity := fingerprintObservationOutboundIdentityFromContext(c)
-	if !account.UsesOpenAICodexProtocol() {
+	if !usesOpenAICodexIdentityProtocol(account) {
 		hasTrustedIdentity = false
 		pin = installationIDResolution{}
 	}
@@ -719,7 +719,7 @@ func freezeFingerprintObservationWSHandshake(c *gin.Context, account *Account) f
 	}
 	identity, trusted := fingerprintObservationOutboundIdentityFromContext(c)
 	pin := installationIDResolutionFromContext(c, account)
-	if !account.UsesOpenAICodexProtocol() {
+	if !usesOpenAICodexIdentityProtocol(account) {
 		identity = OpenAICodexTurnIdentity{}
 		trusted = false
 		pin = installationIDResolution{}
@@ -750,7 +750,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWSHandshake(c *gin.Co
 	}
 	identity, trusted := fingerprintObservationOutboundIdentityFromContext(c)
 	pin := installationIDResolutionFromContext(c, account)
-	if !account.UsesOpenAICodexProtocol() {
+	if !usesOpenAICodexIdentityProtocol(account) {
 		trusted = false
 		pin = installationIDResolution{}
 	}
@@ -773,7 +773,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWSFrame(c *gin.Contex
 	var identity OpenAICodexTurnIdentity
 	var pin installationIDResolution
 	trusted := false
-	if account.UsesOpenAICodexProtocol() && plan != nil {
+	if usesOpenAICodexIdentityProtocol(account) && plan != nil {
 		identity = plan.TurnIdentity
 		trusted = plan.TurnIdentityEnabled && ValidateOpenAICodexTurnIdentity(identity) == nil
 		pin = installationIDResolution{Enabled: plan.InstallationEnabled, ClientID: plan.Capture.ClientInstallationID, OutboundID: plan.InstallationID}

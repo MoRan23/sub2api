@@ -1270,7 +1270,14 @@ func openAIOutboundSessionIdentityNamespace(account *Account) string {
 }
 
 func (s *OpenAIGatewayService) resolveOpenAIOutboundSessionIdentityNamespace(ctx context.Context, account *Account) (string, error) {
-	if account == nil || !account.UsesOpenAICodexProtocol() || !account.IsShadow() {
+	// API-key identities belong to the downstream API key and logical session,
+	// rather than to whichever upstream account was selected for this attempt.
+	// The API key id is included separately in the mapping digest, so this
+	// namespace must remain stable across account failover.
+	if account != nil && account.IsOpenAIApiKey() {
+		return "openai-api-key", nil
+	}
+	if !usesOpenAICodexIdentityProtocol(account) || !account.IsShadow() {
 		return openAIOutboundSessionIdentityNamespace(account), nil
 	}
 	if account.ParentAccountID == nil || *account.ParentAccountID <= 0 {

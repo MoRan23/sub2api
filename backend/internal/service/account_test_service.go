@@ -153,8 +153,12 @@ type AccountTestService struct {
 	modelMetadataRegistry     map[string]modelsDevProvider
 	modelMetadataRegistryAt   time.Time
 	pluginManager             *PluginManager
-	agentIdentityTaskMu       sync.Mutex
-	agentIdentityWS           agentIdentityWSConnectionInvalidator
+	// oauthSyncSessionRepo provides the account-scoped root session used by
+	// synchronous OAuth account probes. It is optional for narrow unit tests;
+	// production wiring supplies the durable repository implementation.
+	oauthSyncSessionRepo OAuthSyncSessionRepository
+	agentIdentityTaskMu  sync.Mutex
+	agentIdentityWS      agentIdentityWSConnectionInvalidator
 	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
 	// WS dialer when nil (supports proxy + coder/websocket handshake).
 	grokWSDialer openAIWSClientDialer
@@ -188,6 +192,51 @@ func (s *AccountTestService) SetPluginManager(pluginManager *PluginManager) {
 	if s != nil {
 		s.pluginManager = pluginManager
 	}
+}
+
+// SetOAuthSyncSessionRepository wires the durable account-scoped synchronous
+// session store. Account tests intentionally use the root session directly;
+// they must not create a child thread or inherit another request's context.
+func (s *AccountTestService) SetOAuthSyncSessionRepository(repo OAuthSyncSessionRepository) {
+	if s != nil {
+		s.oauthSyncSessionRepo = repo
+	}
+}
+
+// applyOAuthAccountTestRootSession replaces the generated turn identity for
+// an OAuth account probe with its dedicated synchronous root session. Tests
+// are standalone probes, so session_id == thread_id and no parent/fork
+// lineage is emitted. A nil repository preserves the existing unit-test
+// fallback while production always wires the durable store.
+func (s *AccountTestService) applyOAuthAccountTestRootSession(ctx context.Context, account *Account, plan *OpenAIOAuthIdentityPlan) error {
+	if s == nil || account == nil || plan == nil || !account.IsOpenAIOAuth() || s.oauthSyncSessionRepo == nil {
+		return nil
+	}
+	root, err := s.oauthSyncSessionRepo.GetOrCreateOAuthSyncSession(ctx, account.ID)
+	if err != nil {
+		return fmt.Errorf("resolve OAuth synchronous test session: %w", err)
+	}
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return errors.New("resolve OAuth synchronous test session: empty session id")
+	}
+	identity := OpenAICodexTurnIdentity{SessionID: root, ThreadID: root, Relation: OpenAICodexTurnRelationRoot}
+	if err := ValidateOpenAICodexTurnIdentity(identity); err != nil {
+		return fmt.Errorf("resolve OAuth synchronous test session: invalid session id: %w", err)
+	}
+	plan.TurnIdentity = identity
+	plan.TurnIdentityEnabled = true
+	plan.TurnIdentityRequested = true
+	plan.WireProfile.SessionID = root
+	plan.WireProfile.ThreadID = root
+	plan.WireProfile.TurnLineage.ParentThreadID = ""
+	plan.WireProfile.TurnLineage.ForkedFromThreadID = ""
+	plan.WireProfile.WindowID = ""
+	plan.WireProfile.WindowNumber = nil
+	plan.WireProfile.ContextWindowID = ""
+	plan.Window = OpenAICodexWindowSnapshot{}
+	plan.WindowMappingKey = ""
+	return nil
 }
 
 func (s *AccountTestService) freezeOpenAIAccountTestPolicy(ctx context.Context, c *gin.Context, account *Account) context.Context {
@@ -938,6 +987,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		}, nil)
 		if planErr != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth identity: %s", planErr.Error()))
+		}
+		if err := s.applyOAuthAccountTestRootSession(ctx, credentialAccount, &plan); err != nil {
+			return s.sendErrorAndEnd(c, err.Error())
 		}
 		if gateway.cfg != nil && gateway.cfg.Gateway.ForceCodexCLI {
 			req.Header.Set("User-Agent", plan.ClientIdentity.UserAgent)
@@ -2313,6 +2365,9 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		if planErr != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth identity: %s", planErr.Error()))
 		}
+		if err := s.applyOAuthAccountTestRootSession(ctx, credentialAccount, &plan); err != nil {
+			return s.sendErrorAndEnd(c, err.Error())
+		}
 		if account.Platform == PlatformOpenAI {
 			req = ApplyOpenAIRequestPolicy(req, s.settingService)
 		}
@@ -3247,6 +3302,9 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	}, nil)
 	if planErr != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to resolve OpenAI OAuth identity: %s", planErr.Error()))
+	}
+	if err := s.applyOAuthAccountTestRootSession(ctx, account, &profilePlan); err != nil {
+		return s.sendErrorAndEnd(c, err.Error())
 	}
 	if gateway.cfg != nil && gateway.cfg.Gateway.ForceCodexCLI {
 		req.Header.Set("User-Agent", profilePlan.ClientIdentity.UserAgent)

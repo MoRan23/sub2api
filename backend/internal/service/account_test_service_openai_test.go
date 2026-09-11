@@ -73,6 +73,20 @@ type openAIAccountTestRepo struct {
 	setErrorMsg        string
 }
 
+type openAIAccountTestSyncRepo struct {
+	session string
+	calls   int
+}
+
+func (r *openAIAccountTestSyncRepo) GetOrCreateOAuthSyncSession(context.Context, int64) (string, error) {
+	r.calls++
+	return r.session, nil
+}
+func (r *openAIAccountTestSyncRepo) GetOAuthSyncSession(context.Context, int64) (string, error) {
+	return r.session, nil
+}
+func (r *openAIAccountTestSyncRepo) DeleteOAuthSyncSession(context.Context, int64) error { return nil }
+
 func (r *openAIAccountTestRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
 	r.updatedExtra = updates
 	return nil
@@ -135,6 +149,26 @@ func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.
 	require.Equal(t, 42.0, repo.updatedExtra["codex_5h_used_percent"])
 	require.Equal(t, 88.0, repo.updatedExtra["codex_7d_used_percent"])
 	require.Contains(t, recorder.Body.String(), "test_complete")
+}
+
+func TestAccountTestService_OAuthProbeUsesDedicatedRootSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := newTestContext()
+	resp := newJSONResponse(http.StatusOK, "data: {\"type\":\"response.completed\"}\n\n")
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	syncRepo := &openAIAccountTestSyncRepo{session: "01989f44-7c00-7000-8000-000000000321"}
+	svc := &AccountTestService{httpUpstream: upstream, oauthSyncSessionRepo: syncRepo}
+	account := &Account{ID: 91, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "token"}}
+
+	require.NoError(t, svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", ""))
+	require.Equal(t, 1, syncRepo.calls)
+	req := upstream.requests[0]
+	body, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	require.Equal(t, syncRepo.session, req.Header.Get("session-id"))
+	require.Equal(t, syncRepo.session, gjson.GetBytes(body, "client_metadata.session_id").String())
+	require.Equal(t, syncRepo.session, gjson.GetBytes(body, "client_metadata.thread_id").String())
+	require.False(t, gjson.GetBytes(body, "client_metadata.parent_thread_id").Exists())
 }
 
 func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {

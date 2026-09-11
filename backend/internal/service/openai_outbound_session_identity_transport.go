@@ -15,10 +15,72 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
+
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+// originalOpenAISyncThread returns a previously allocated child thread from
+// the request metadata. Only canonical UUIDv7 values are reused; arbitrary
+// client labels are treated as a new turn so they cannot attach to another
+// account's server-side thread.
+func originalOpenAISyncThread(c *gin.Context, body []byte) string {
+	candidates := []string{
+		gjson.GetBytes(body, "client_metadata.thread_id").String(),
+		gjson.GetBytes(body, "thread_id").String(),
+	}
+	if c != nil && c.Request != nil {
+		candidates = append(candidates, c.Request.Header.Get("thread_id"), c.Request.Header.Get("thread-id"))
+		if raw := c.Request.Header.Get(openAIWSTurnMetadataHeader); raw != "" {
+			candidates = append(candidates, gjson.Get(raw, "thread_id").String())
+		}
+	}
+	for _, candidate := range candidates {
+		if canonical, err := canonicalUUIDv7(candidate); err == nil {
+			return canonical
+		}
+	}
+	return ""
+}
+
+// resolveOAuthSynchronousTurnIdentity returns the account's durable root
+// session plus a child thread for one stream=false turn. A valid child from
+// the request is reused; otherwise a fresh context-free child is allocated.
+func (s *OpenAIGatewayService) resolveOAuthSynchronousTurnIdentity(ctx context.Context, account *Account, testModel bool, existingThread string) (OpenAICodexTurnIdentity, bool, error) {
+	if testModel || account == nil || !account.IsOpenAIOAuth() {
+		return OpenAICodexTurnIdentity{}, false, nil
+	}
+	if s == nil || s.oauthSyncSessionRepo == nil {
+		return OpenAICodexTurnIdentity{}, false, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	root, err := s.oauthSyncSessionRepo.GetOrCreateOAuthSyncSession(ctx, account.ID)
+	if err != nil {
+		return OpenAICodexTurnIdentity{}, false, err
+	}
+	root, err = canonicalUUIDv7(root)
+	if err != nil {
+		return OpenAICodexTurnIdentity{}, false, fmt.Errorf("invalid OAuth sync root session: %w", err)
+	}
+	child := uuid.Nil
+	if existing, parseErr := uuid.Parse(strings.TrimSpace(existingThread)); parseErr == nil && existing.Version() == uuid.Version(7) {
+		child = existing
+	} else {
+		child, err = uuid.NewV7()
+		if err != nil {
+			return OpenAICodexTurnIdentity{}, false, err
+		}
+	}
+	identity := OpenAICodexTurnIdentity{
+		SessionID: root, ThreadID: child.String(), ParentThreadID: root,
+		Relation: OpenAICodexTurnRelationDescendant,
+	}
+	return identity, true, nil
+}
 
 const (
 	openAIWSOutboundIdentityDigestDomain     = "sub2api/openai-ws-outbound-identity/v2"
@@ -26,6 +88,33 @@ const (
 )
 
 const openAIOutboundSessionIdentityRequestSnapshotKey = "openai_outbound_session_identity_enabled_snapshot"
+const openAIClientRequestedStreamKey = "openai_client_requested_stream"
+
+func setOpenAIClientRequestedStream(c *gin.Context, stream bool) {
+	if c != nil {
+		c.Set(openAIClientRequestedStreamKey, stream)
+	}
+}
+
+func openAIClientRequestedStream(c *gin.Context, body []byte, fallback bool) bool {
+	if c != nil {
+		if value, ok := c.Get(openAIClientRequestedStreamKey); ok {
+			if stream, valid := value.(bool); valid {
+				return stream
+			}
+		}
+	}
+	if len(body) > 0 {
+		value := gjson.GetBytes(body, "stream")
+		if value.Exists() && value.Type == gjson.False {
+			return false
+		}
+		if value.Exists() && value.Type == gjson.True {
+			return true
+		}
+	}
+	return fallback
+}
 
 func (s *OpenAIGatewayService) openAIOutboundSessionIdentityTransportEnabled(ctx context.Context) bool {
 	return s.openAICodexFingerprintPolicyForRequest(ctx, nil).TurnIdentityNormalizationEnabled()
@@ -49,14 +138,22 @@ func (s *OpenAIGatewayService) openAIOutboundSessionIdentityTransportEnabledForR
 }
 
 func (s *OpenAIGatewayService) openAIOutboundSessionIdentityModeEnabledForAccount(ctx context.Context, c *gin.Context, account *Account) bool {
-	return account != nil && account.UsesOpenAICodexProtocol() &&
+	return usesOpenAICodexIdentityProtocol(account) &&
 		s.openAIOutboundSessionIdentityTransportEnabledForRequest(ctx, c)
+}
+
+// usesOpenAICodexIdentityProtocol identifies OpenAI upstreams that participate
+// in the shared Codex identity projection. API-key accounts use the same
+// session/thread identity machinery as OAuth accounts, while non-OpenAI API
+// key accounts retain their legacy behavior.
+func usesOpenAICodexIdentityProtocol(account *Account) bool {
+	return account != nil && (account.UsesOpenAICodexProtocol() || account.IsOpenAIApiKey())
 }
 
 // resolveOpenAICodexTurnIdentityForTransport applies the Codex-protocol V2 gate,
 // resolves the complete logical tuple once, and maps it to the hierarchical
-// UUIDv7 identity. API-key transports return before reading the setting or
-// touching either identity store.
+// UUIDv7 identity. OpenAI API-key transports use the same identity store;
+// non-OpenAI API-key transports return before reading the setting or store.
 func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityForTransport(
 	ctx context.Context,
 	c *gin.Context,
@@ -64,7 +161,7 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityForTransport(
 	body []byte,
 	callerSeed string,
 ) (OpenAICodexTurnIdentity, OpenAICodexLogicalTurnIdentity, bool, error) {
-	if account == nil || !account.UsesOpenAICodexProtocol() {
+	if !usesOpenAICodexIdentityProtocol(account) {
 		return OpenAICodexTurnIdentity{}, OpenAICodexLogicalTurnIdentity{}, false, nil
 	}
 	return s.resolveOpenAICodexTurnIdentityForTransportSnapshot(
@@ -90,7 +187,7 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityForTransportSnapsho
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if !enabled || account == nil || !account.UsesOpenAICodexProtocol() {
+	if !enabled || !usesOpenAICodexIdentityProtocol(account) {
 		return OpenAICodexTurnIdentity{}, OpenAICodexLogicalTurnIdentity{}, false, nil
 	}
 	logical := ResolveOpenAICodexLogicalTurnIdentityWithTurnMetadata(c, body, callerSeed, explicitTurnMetadata)
@@ -105,7 +202,7 @@ func (s *OpenAIGatewayService) resolveOpenAICodexLogicalIdentityForTransport(
 	logical OpenAICodexLogicalTurnIdentity,
 	enabled bool,
 ) (OpenAICodexTurnIdentity, bool, error) {
-	if !enabled || account == nil || !account.UsesOpenAICodexProtocol() {
+	if !enabled || !usesOpenAICodexIdentityProtocol(account) {
 		return OpenAICodexTurnIdentity{}, false, nil
 	}
 	if strings.TrimSpace(logical.SessionKey) == "" {

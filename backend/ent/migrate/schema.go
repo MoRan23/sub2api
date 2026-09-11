@@ -1098,6 +1098,20 @@ var (
 			},
 		},
 	}
+	// OpenaiOauthSyncSessionsColumns holds the columns for the "openai_oauth_sync_sessions" table.
+	OpenaiOauthSyncSessionsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "account_id", Type: field.TypeInt64, Unique: true},
+		{Name: "session_id", Type: field.TypeString, Unique: true, Size: 64, SchemaType: map[string]string{"postgres": "text"}},
+	}
+	// OpenaiOauthSyncSessionsTable holds the schema information for the "openai_oauth_sync_sessions" table.
+	OpenaiOauthSyncSessionsTable = &schema.Table{
+		Name:       "openai_oauth_sync_sessions",
+		Columns:    OpenaiOauthSyncSessionsColumns,
+		PrimaryKey: []*schema.Column{OpenaiOauthSyncSessionsColumns[0]},
+	}
 	// PaymentAuditLogsColumns holds the columns for the "payment_audit_logs" table.
 	PaymentAuditLogsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -2163,6 +2177,7 @@ var (
 		GroupsTable,
 		IdempotencyRecordsTable,
 		IdentityAdoptionDecisionsTable,
+		OpenaiOauthSyncSessionsTable,
 		PaymentAuditLogsTable,
 		PaymentOrdersTable,
 		PaymentProviderInstancesTable,
@@ -2260,6 +2275,9 @@ func init() {
 	IdentityAdoptionDecisionsTable.ForeignKeys[1].RefTable = PendingAuthSessionsTable
 	IdentityAdoptionDecisionsTable.Annotation = &entsql.Annotation{
 		Table: "identity_adoption_decisions",
+	}
+	OpenaiOauthSyncSessionsTable.Annotation = &entsql.Annotation{
+		Table: "openai_oauth_sync_sessions",
 	}
 	PaymentAuditLogsTable.Annotation = &entsql.Annotation{
 		Table: "payment_audit_logs",

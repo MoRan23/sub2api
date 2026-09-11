@@ -3253,8 +3253,10 @@ func TestOpenAIBuildUpstreamRequestPreservesCodexIdentityHeaders(t *testing.T) {
 
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", false, "", true)
 	require.NoError(t, err)
-	require.Equal(t, "window-http", req.Header.Get("X-Codex-Window-ID"))
-	require.Equal(t, "installation-http", req.Header.Get("X-Codex-Installation-ID"))
+	// API-key OpenAI requests now use the unified identity projector; a
+	// caller-provided window is not carried into a newly resolved plan.
+	require.Empty(t, req.Header.Get("X-Codex-Window-ID"))
+	require.Empty(t, req.Header.Get("X-Codex-Installation-ID"))
 	require.Empty(t, req.Header.Get("X-Test"))
 	require.True(t, openai.EvaluateEngineFingerprint(req.Header, body, openai.DefaultEngineFingerprintSignals))
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/openaioauthsyncsession"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -1286,6 +1287,39 @@ func init() {
 	identityadoptiondecisionDescDecidedAt := identityadoptiondecisionFields[4].Descriptor()
 	// identityadoptiondecision.DefaultDecidedAt holds the default value on creation for the decided_at field.
 	identityadoptiondecision.DefaultDecidedAt = identityadoptiondecisionDescDecidedAt.Default.(func() time.Time)
+	openaioauthsyncsessionMixin := schema.OpenAIOAuthSyncSession{}.Mixin()
+	openaioauthsyncsessionMixinFields0 := openaioauthsyncsessionMixin[0].Fields()
+	_ = openaioauthsyncsessionMixinFields0
+	openaioauthsyncsessionFields := schema.OpenAIOAuthSyncSession{}.Fields()
+	_ = openaioauthsyncsessionFields
+	// openaioauthsyncsessionDescCreatedAt is the schema descriptor for created_at field.
+	openaioauthsyncsessionDescCreatedAt := openaioauthsyncsessionMixinFields0[0].Descriptor()
+	// openaioauthsyncsession.DefaultCreatedAt holds the default value on creation for the created_at field.
+	openaioauthsyncsession.DefaultCreatedAt = openaioauthsyncsessionDescCreatedAt.Default.(func() time.Time)
+	// openaioauthsyncsessionDescUpdatedAt is the schema descriptor for updated_at field.
+	openaioauthsyncsessionDescUpdatedAt := openaioauthsyncsessionMixinFields0[1].Descriptor()
+	// openaioauthsyncsession.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	openaioauthsyncsession.DefaultUpdatedAt = openaioauthsyncsessionDescUpdatedAt.Default.(func() time.Time)
+	// openaioauthsyncsession.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	openaioauthsyncsession.UpdateDefaultUpdatedAt = openaioauthsyncsessionDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// openaioauthsyncsessionDescSessionID is the schema descriptor for session_id field.
+	openaioauthsyncsessionDescSessionID := openaioauthsyncsessionFields[1].Descriptor()
+	// openaioauthsyncsession.SessionIDValidator is a validator for the "session_id" field. It is called by the builders before save.
+	openaioauthsyncsession.SessionIDValidator = func() func(string) error {
+		validators := openaioauthsyncsessionDescSessionID.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(session_id string) error {
+			for _, fn := range fns {
+				if err := fn(session_id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
 	paymentauditlogFields := schema.PaymentAuditLog{}.Fields()
 	_ = paymentauditlogFields
 	// paymentauditlogDescOrderID is the schema descriptor for order_id field.

@@ -36,8 +36,8 @@ type OpenAIOAuthResponsesFinalizeOptions struct {
 // account header overrides, beta-feature injection, model mapping, service-tier
 // policy, and request-kind selection are complete.
 //
-// API-key accounts are an intentional no-op: their headers and body retain the
-// existing byte-for-byte behavior. Native alpha/search does not use this
+// OpenAI API-key accounts use the same identity projection as OAuth accounts.
+// Native alpha/search does not use this
 // finalizer; its Responses fallback does.
 func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 	c *gin.Context,
@@ -46,7 +46,7 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 	body []byte,
 	options OpenAIOAuthResponsesFinalizeOptions,
 ) ([]byte, error) {
-	if account == nil || !account.UsesOpenAICodexProtocol() {
+	if !usesOpenAICodexIdentityProtocol(account) {
 		return body, nil
 	}
 	if req == nil {

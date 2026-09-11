@@ -86,6 +86,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	applyOpenAICompatModelNormalization(&anthropicReq)
 	normalizedModel := anthropicReq.Model
 	clientStream := anthropicReq.Stream // client's original stream preference
+	setOpenAIClientRequestedStream(c, clientStream)
 
 	// 2. Model mapping
 	billingModel := resolveOpenAIForwardModel(account, normalizedModel, defaultMappedModel)
@@ -136,7 +137,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	// ChatGPT/Codex credentials rely on session_id + x-codex-turn-state; trimming to a
 	// sliding 12-message window makes the cached prefix stall at system/tools.
 	// Keep full replay there so upstream prompt caching can grow turn by turn.
-	if compatReplayGuardEnabled && !account.UsesOpenAICodexProtocol() && previousResponseID == "" && !compatContinuationDisabled {
+	if compatReplayGuardEnabled && !usesOpenAICodexIdentityProtocol(account) && previousResponseID == "" && !compatContinuationDisabled {
 		beforeMessages := len(anthropicReq.Messages)
 		compatReplayTrimmed = applyAnthropicCompatFullReplayGuard(&anthropicReq)
 		recordOpenAIRequestTimezonePrefixTrim(c, "messages", beforeMessages-len(anthropicReq.Messages))
@@ -174,7 +175,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 			captureOpenAIRequestTimezoneObjectCheckpoint(c, responsesReq)
 		}
 	}
-	if compatReplayGuardEnabled && !account.UsesOpenAICodexProtocol() {
+	if compatReplayGuardEnabled && !usesOpenAICodexIdentityProtocol(account) {
 		appendOpenAICompatClaudeCodeTodoGuard(responsesReq)
 	}
 
@@ -216,7 +217,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	}
 
 	var messagesOAuthIdentityPlan *OpenAIOAuthIdentityPlan
-	if account.UsesOpenAICodexProtocol() && account.Platform != PlatformGrok {
+	if usesOpenAICodexIdentityProtocol(account) && account.Platform != PlatformGrok {
 		var reqBody map[string]any
 		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
 			return nil, fmt.Errorf("unmarshal for codex transform: %w", err)
@@ -261,7 +262,13 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 		if codexResult.PromptCacheKey != "" {
 			promptCacheKey = codexResult.PromptCacheKey
 		}
-		delete(reqBody, "prompt_cache_key")
+		if account.IsOpenAIApiKey() && strings.TrimSpace(promptCacheKey) != "" {
+			// API-key compatibility keeps prompt_cache_key as a cache strategy
+			// input while using the shared identity projector for the four IDs.
+			reqBody["prompt_cache_key"] = promptCacheKey
+		} else {
+			delete(reqBody, "prompt_cache_key")
+		}
 		// OAuth codex transform forces stream=true upstream, so always use
 		// the streaming response handler regardless of what the client asked.
 		isStream = true
@@ -353,7 +360,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	// the same pair in client_metadata; malformed/opaque bodies stay
 	// header-only and do not reject the request.
 	// 6. Build upstream request
-	if account.UsesOpenAICodexProtocol() && account.Platform != PlatformGrok {
+	if usesOpenAICodexIdentityProtocol(account) && account.Platform != PlatformGrok {
 		// Messages 兼容桥即使 body 未带 todo-guard/prompt_cache_key 标记（如映射到非
 		// gpt-5/codex 模型），也必须让 buildUpstreamRequest 走 bridge 分支，以保留
 		// 既有 body/session/conversation 行为。公共 builder 只负责一次 resolve，最终
@@ -374,7 +381,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 			isStream,
 			promptCacheKey,
 			false,
-			openAIUpstreamRequestBuildOptions{deferOAuthIdentityProjection: account.UsesOpenAICodexProtocol()},
+			openAIUpstreamRequestBuildOptions{deferOAuthIdentityProjection: usesOpenAICodexIdentityProtocol(account)},
 		)
 	}
 	releaseUpstreamCtx()
@@ -388,7 +395,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	if account.Platform != PlatformGrok {
 		if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && plan.TurnIdentityEnabled {
 			outboundIdentityEnabled = true
-		} else if promptCacheKey != "" && !identityModeEnabled {
+		} else if promptCacheKey != "" && !identityModeEnabled && !account.IsOpenAIApiKey() {
 			isolatedSessionID := generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey))
 			upstreamReq.Header.Set("session_id", isolatedSessionID)
 			if upstreamReq.Header.Get("conversation_id") != "" {
@@ -396,7 +403,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 			}
 		}
 	}
-	if account.UsesOpenAICodexProtocol() && account.Platform != PlatformGrok {
+	if usesOpenAICodexIdentityProtocol(account) && account.Platform != PlatformGrok {
 		// The shared builder resolves and freezes identity before compat conversion,
 		// while final wire projection remains deferred until continuation state and
 		// the final mapped model/tier are known below.
@@ -407,7 +414,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 		planSnapshot := plan
 		messagesOAuthIdentityPlan = &planSnapshot
 	}
-	if !outboundIdentityEnabled && account.UsesOpenAICodexProtocol() && promptCacheKey != "" && strings.TrimSpace(c.GetHeader("conversation_id")) == "" {
+	if !outboundIdentityEnabled && usesOpenAICodexIdentityProtocol(account) && promptCacheKey != "" && strings.TrimSpace(c.GetHeader("conversation_id")) == "" {
 		upstreamReq.Header.Del("conversation_id")
 	}
 	if messagesOAuthIdentityPlan != nil {
@@ -556,7 +563,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	}
 
 	compatResponseTurnState := ""
-	if account.UsesOpenAICodexProtocol() && promptCacheKey != "" {
+	if usesOpenAICodexIdentityProtocol(account) && promptCacheKey != "" {
 		compatResponseTurnState = strings.TrimSpace(resp.Header.Get("x-codex-turn-state"))
 	}
 
@@ -570,7 +577,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 		// Client wants JSON: buffer the streaming response and assemble a JSON reply.
 		result, handleErr = s.handleAnthropicBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
 	}
-	if handleErr == nil && account.UsesOpenAICodexProtocol() && promptCacheKey != "" {
+	if handleErr == nil && usesOpenAICodexIdentityProtocol(account) && promptCacheKey != "" {
 		// A successful response without turn-state explicitly retires the prior
 		// identity-scoped compat continuation. Otherwise the next request would
 		// keep replaying a stale opaque state that upstream stopped returning.

@@ -666,7 +666,7 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 		ResolveOutcome:       OpenAIOAuthIdentityResolveNone,
 		WindowResolveOutcome: OpenAICodexWindowResolveNone,
 	}
-	if account == nil || !account.UsesOpenAICodexProtocol() {
+	if !usesOpenAICodexIdentityProtocol(account) {
 		return plan, nil
 	}
 	if ctx == nil {
@@ -967,7 +967,7 @@ func (s *OpenAIGatewayService) OpenAIOAuthIdentityPlanMatches(
 	plan OpenAIOAuthIdentityPlan,
 	options OpenAIOAuthIdentityPlanOptions,
 ) bool {
-	if account == nil || !account.UsesOpenAICodexProtocol() {
+	if !usesOpenAICodexIdentityProtocol(account) {
 		return false
 	}
 	options = normalizeOpenAIOAuthIdentityPlanOptions(options)

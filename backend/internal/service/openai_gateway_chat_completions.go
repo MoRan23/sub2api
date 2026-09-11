@@ -169,6 +169,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 	originalModel := chatReq.Model
 	clientStream := chatReq.Stream
+	setOpenAIClientRequestedStream(c, clientStream)
 
 	// 2. Resolve model mapping early so compat prompt_cache_key injection can
 	// derive a stable seed from the final upstream model family.
@@ -263,7 +264,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 	logger.L().Debug("openai chat_completions: model mapping applied", logFields...)
 
-	if account.UsesOpenAICodexProtocol() {
+	if usesOpenAICodexIdentityProtocol(account) {
 		var reqBody map[string]any
 		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
 			return nil, fmt.Errorf("unmarshal for codex transform: %w", err)
@@ -350,7 +351,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	// The shared builder has already applied the immutable OAuth plan after
 	// account overrides. Do not project it a second time at this compatibility
 	// layer; only retain the flag-off legacy write below.
-	if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); !(ok && plan.TurnIdentityEnabled) && promptCacheKey != "" && !identityModeEnabled {
+	if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); !(ok && plan.TurnIdentityEnabled) && promptCacheKey != "" && !identityModeEnabled && !account.IsOpenAIApiKey() {
 		apiKeyID := getAPIKeyIDFromContext(c)
 		sessionKey := promptCacheKey
 		if !compatPromptCacheTenantIsolated {

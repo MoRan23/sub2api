@@ -34,6 +34,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/openaioauthsyncsession"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -102,6 +103,8 @@ type Client struct {
 	IdempotencyRecord *IdempotencyRecordClient
 	// IdentityAdoptionDecision is the client for interacting with the IdentityAdoptionDecision builders.
 	IdentityAdoptionDecision *IdentityAdoptionDecisionClient
+	// OpenAIOAuthSyncSession is the client for interacting with the OpenAIOAuthSyncSession builders.
+	OpenAIOAuthSyncSession *OpenAIOAuthSyncSessionClient
 	// PaymentAuditLog is the client for interacting with the PaymentAuditLog builders.
 	PaymentAuditLog *PaymentAuditLogClient
 	// PaymentOrder is the client for interacting with the PaymentOrder builders.
@@ -174,6 +177,7 @@ func (c *Client) init() {
 	c.Group = NewGroupClient(c.config)
 	c.IdempotencyRecord = NewIdempotencyRecordClient(c.config)
 	c.IdentityAdoptionDecision = NewIdentityAdoptionDecisionClient(c.config)
+	c.OpenAIOAuthSyncSession = NewOpenAIOAuthSyncSessionClient(c.config)
 	c.PaymentAuditLog = NewPaymentAuditLogClient(c.config)
 	c.PaymentOrder = NewPaymentOrderClient(c.config)
 	c.PaymentProviderInstance = NewPaymentProviderInstanceClient(c.config)
@@ -306,6 +310,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		Group:                         NewGroupClient(cfg),
 		IdempotencyRecord:             NewIdempotencyRecordClient(cfg),
 		IdentityAdoptionDecision:      NewIdentityAdoptionDecisionClient(cfg),
+		OpenAIOAuthSyncSession:        NewOpenAIOAuthSyncSessionClient(cfg),
 		PaymentAuditLog:               NewPaymentAuditLogClient(cfg),
 		PaymentOrder:                  NewPaymentOrderClient(cfg),
 		PaymentProviderInstance:       NewPaymentProviderInstanceClient(cfg),
@@ -365,6 +370,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		Group:                         NewGroupClient(cfg),
 		IdempotencyRecord:             NewIdempotencyRecordClient(cfg),
 		IdentityAdoptionDecision:      NewIdentityAdoptionDecisionClient(cfg),
+		OpenAIOAuthSyncSession:        NewOpenAIOAuthSyncSessionClient(cfg),
 		PaymentAuditLog:               NewPaymentAuditLogClient(cfg),
 		PaymentOrder:                  NewPaymentOrderClient(cfg),
 		PaymentProviderInstance:       NewPaymentProviderInstanceClient(cfg),
@@ -420,11 +426,11 @@ func (c *Client) Use(hooks ...Hook) {
 		c.BatchImageJob, c.ChannelMonitor, c.ChannelMonitorDailyRollup,
 		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
 		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
-		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
-		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.IdentityAdoptionDecision, c.OpenAIOAuthSyncSession, c.PaymentAuditLog,
+		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
+		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
+		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
 		c.UserPlatformQuota, c.UserSubscription, c.UserSubscriptionQuotaEvent,
 	} {
 		n.Use(hooks...)
@@ -440,11 +446,11 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.BatchImageJob, c.ChannelMonitor, c.ChannelMonitorDailyRollup,
 		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
 		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
-		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
-		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.IdentityAdoptionDecision, c.OpenAIOAuthSyncSession, c.PaymentAuditLog,
+		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
+		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
+		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
 		c.UserPlatformQuota, c.UserSubscription, c.UserSubscriptionQuotaEvent,
 	} {
 		n.Intercept(interceptors...)
@@ -492,6 +498,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.IdempotencyRecord.mutate(ctx, m)
 	case *IdentityAdoptionDecisionMutation:
 		return c.IdentityAdoptionDecision.mutate(ctx, m)
+	case *OpenAIOAuthSyncSessionMutation:
+		return c.OpenAIOAuthSyncSession.mutate(ctx, m)
 	case *PaymentAuditLogMutation:
 		return c.PaymentAuditLog.mutate(ctx, m)
 	case *PaymentOrderMutation:
@@ -3585,6 +3593,139 @@ func (c *IdentityAdoptionDecisionClient) mutate(ctx context.Context, m *Identity
 	}
 }
 
+// OpenAIOAuthSyncSessionClient is a client for the OpenAIOAuthSyncSession schema.
+type OpenAIOAuthSyncSessionClient struct {
+	config
+}
+
+// NewOpenAIOAuthSyncSessionClient returns a client for the OpenAIOAuthSyncSession from the given config.
+func NewOpenAIOAuthSyncSessionClient(c config) *OpenAIOAuthSyncSessionClient {
+	return &OpenAIOAuthSyncSessionClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `openaioauthsyncsession.Hooks(f(g(h())))`.
+func (c *OpenAIOAuthSyncSessionClient) Use(hooks ...Hook) {
+	c.hooks.OpenAIOAuthSyncSession = append(c.hooks.OpenAIOAuthSyncSession, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `openaioauthsyncsession.Intercept(f(g(h())))`.
+func (c *OpenAIOAuthSyncSessionClient) Intercept(interceptors ...Interceptor) {
+	c.inters.OpenAIOAuthSyncSession = append(c.inters.OpenAIOAuthSyncSession, interceptors...)
+}
+
+// Create returns a builder for creating a OpenAIOAuthSyncSession entity.
+func (c *OpenAIOAuthSyncSessionClient) Create() *OpenAIOAuthSyncSessionCreate {
+	mutation := newOpenAIOAuthSyncSessionMutation(c.config, OpCreate)
+	return &OpenAIOAuthSyncSessionCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of OpenAIOAuthSyncSession entities.
+func (c *OpenAIOAuthSyncSessionClient) CreateBulk(builders ...*OpenAIOAuthSyncSessionCreate) *OpenAIOAuthSyncSessionCreateBulk {
+	return &OpenAIOAuthSyncSessionCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *OpenAIOAuthSyncSessionClient) MapCreateBulk(slice any, setFunc func(*OpenAIOAuthSyncSessionCreate, int)) *OpenAIOAuthSyncSessionCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &OpenAIOAuthSyncSessionCreateBulk{err: fmt.Errorf("calling to OpenAIOAuthSyncSessionClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*OpenAIOAuthSyncSessionCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &OpenAIOAuthSyncSessionCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for OpenAIOAuthSyncSession.
+func (c *OpenAIOAuthSyncSessionClient) Update() *OpenAIOAuthSyncSessionUpdate {
+	mutation := newOpenAIOAuthSyncSessionMutation(c.config, OpUpdate)
+	return &OpenAIOAuthSyncSessionUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *OpenAIOAuthSyncSessionClient) UpdateOne(_m *OpenAIOAuthSyncSession) *OpenAIOAuthSyncSessionUpdateOne {
+	mutation := newOpenAIOAuthSyncSessionMutation(c.config, OpUpdateOne, withOpenAIOAuthSyncSession(_m))
+	return &OpenAIOAuthSyncSessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *OpenAIOAuthSyncSessionClient) UpdateOneID(id int64) *OpenAIOAuthSyncSessionUpdateOne {
+	mutation := newOpenAIOAuthSyncSessionMutation(c.config, OpUpdateOne, withOpenAIOAuthSyncSessionID(id))
+	return &OpenAIOAuthSyncSessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for OpenAIOAuthSyncSession.
+func (c *OpenAIOAuthSyncSessionClient) Delete() *OpenAIOAuthSyncSessionDelete {
+	mutation := newOpenAIOAuthSyncSessionMutation(c.config, OpDelete)
+	return &OpenAIOAuthSyncSessionDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *OpenAIOAuthSyncSessionClient) DeleteOne(_m *OpenAIOAuthSyncSession) *OpenAIOAuthSyncSessionDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *OpenAIOAuthSyncSessionClient) DeleteOneID(id int64) *OpenAIOAuthSyncSessionDeleteOne {
+	builder := c.Delete().Where(openaioauthsyncsession.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &OpenAIOAuthSyncSessionDeleteOne{builder}
+}
+
+// Query returns a query builder for OpenAIOAuthSyncSession.
+func (c *OpenAIOAuthSyncSessionClient) Query() *OpenAIOAuthSyncSessionQuery {
+	return &OpenAIOAuthSyncSessionQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeOpenAIOAuthSyncSession},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a OpenAIOAuthSyncSession entity by its id.
+func (c *OpenAIOAuthSyncSessionClient) Get(ctx context.Context, id int64) (*OpenAIOAuthSyncSession, error) {
+	return c.Query().Where(openaioauthsyncsession.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *OpenAIOAuthSyncSessionClient) GetX(ctx context.Context, id int64) *OpenAIOAuthSyncSession {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *OpenAIOAuthSyncSessionClient) Hooks() []Hook {
+	return c.hooks.OpenAIOAuthSyncSession
+}
+
+// Interceptors returns the client interceptors.
+func (c *OpenAIOAuthSyncSessionClient) Interceptors() []Interceptor {
+	return c.inters.OpenAIOAuthSyncSession
+}
+
+func (c *OpenAIOAuthSyncSessionClient) mutate(ctx context.Context, m *OpenAIOAuthSyncSessionMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&OpenAIOAuthSyncSessionCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&OpenAIOAuthSyncSessionUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&OpenAIOAuthSyncSessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&OpenAIOAuthSyncSessionDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown OpenAIOAuthSyncSession mutation op: %q", m.Op())
+	}
+}
+
 // PaymentAuditLogClient is a client for the PaymentAuditLog schema.
 type PaymentAuditLogClient struct {
 	config
@@ -4627,7 +4768,7 @@ func (c *ProxyClient) QueryBackupProxy(_m *Proxy) *ProxyQuery {
 		step := sqlgraph.NewStep(
 			sqlgraph.From(proxy.Table, proxy.FieldID, id),
 			sqlgraph.To(proxy.Table, proxy.FieldID),
-			sqlgraph.Edge(sqlgraph.M2O, false, proxy.BackupProxyTable, proxy.BackupProxyColumn),
+			sqlgraph.Edge(sqlgraph.O2O, false, proxy.BackupProxyTable, proxy.BackupProxyColumn),
 		)
 		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
 		return fromV, nil
@@ -7018,24 +7159,25 @@ type (
 		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
 		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
-		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
-		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription, UserSubscriptionQuotaEvent []ent.Hook
+		Group, IdempotencyRecord, IdentityAdoptionDecision, OpenAIOAuthSyncSession,
+		PaymentAuditLog, PaymentOrder, PaymentProviderInstance, PendingAuthSession,
+		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
+		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
+		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription, UserSubscriptionQuotaEvent []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
 		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
 		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
-		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
-		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
-		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
-		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
-		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
-		UserSubscription, UserSubscriptionQuotaEvent []ent.Interceptor
+		Group, IdempotencyRecord, IdentityAdoptionDecision, OpenAIOAuthSyncSession,
+		PaymentAuditLog, PaymentOrder, PaymentProviderInstance, PendingAuthSession,
+		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
+		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
+		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription,
+		UserSubscriptionQuotaEvent []ent.Interceptor
 	}
 )
 

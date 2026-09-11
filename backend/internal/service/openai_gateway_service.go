@@ -456,6 +456,7 @@ type OpenAIGatewayService struct {
 	balanceNotifyService  *BalanceNotifyService
 	settingService        *SettingService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
+	oauthSyncSessionRepo  OAuthSyncSessionRepository
 	liveAttestation       liveattestation.Provider
 	liveAttestationCipher SecretEncryptor
 
@@ -495,6 +496,15 @@ type OpenAIGatewayService struct {
 	// codexAuxiliarySticky stores permanent History/Notes ownership when no
 	// shared cache is configured. Redis-backed services never fall back to it.
 	codexAuxiliarySticky sync.Map
+}
+
+// SetOAuthSyncSessionRepository wires the durable account-scoped root session
+// store used by synchronous OAuth requests. Kept as a setter so existing
+// constructors and narrow tests remain source-compatible.
+func (s *OpenAIGatewayService) SetOAuthSyncSessionRepository(repo OAuthSyncSessionRepository) {
+	if s != nil {
+		s.oauthSyncSessionRepo = repo
+	}
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService

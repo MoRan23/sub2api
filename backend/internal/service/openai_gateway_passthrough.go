@@ -20,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"go.uber.org/zap"
@@ -643,7 +644,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 	}
 
 	// OAuth 透传到 ChatGPT internal API 时补齐必要头。
-	if account.UsesOpenAICodexProtocol() {
+	if usesOpenAICodexIdentityProtocol(account) {
 		// Current Codex HTTP no longer negotiates the legacy Responses
 		// experiment. Preserve independent beta tokens while removing only the
 		// obsolete negotiation before the final projection runs.
@@ -700,6 +701,45 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 			return nil, fmt.Errorf("resolve openai OAuth passthrough identity plan: %w", planErr)
 		}
 		identityPlanned = true
+		// Non-streaming OAuth passthrough requests get a fresh empty child under
+		// the durable account sync root. Retries reuse the frozen plan carried by
+		// explicitPlan; only the first materialization creates the child.
+		if explicitPlan == nil {
+			clientSyncRequest := !openAIClientRequestedStream(c, body, false)
+			var syncIdentity OpenAICodexTurnIdentity
+			var syncRequest bool
+			var syncErr error
+			if clientSyncRequest {
+				if existing, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && existing.TurnIdentity.Relation == OpenAICodexTurnRelationDescendant && account.IsOpenAIOAuth() {
+					syncIdentity, syncRequest = existing.TurnIdentity, true
+				} else {
+					syncIdentity, syncRequest, syncErr = s.resolveOAuthSynchronousTurnIdentity(ctx, account, false, originalOpenAISyncThread(c, body))
+				}
+			}
+			if syncErr != nil {
+				return nil, syncErr
+			} else if syncRequest {
+				identityPlan.TurnIdentityRequested = true
+				identityPlan.TurnIdentityEnabled = true
+				identityPlan.TurnIdentity = syncIdentity
+				identityPlan.WireProfile.SessionID = syncIdentity.SessionID
+				identityPlan.WireProfile.ThreadID = syncIdentity.ThreadID
+				identityPlan.WireProfile.TurnLineage.ParentThreadID = syncIdentity.ParentThreadID
+				if existing, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && existing.TurnIdentity.ThreadID == syncIdentity.ThreadID && existing.Window.ContextWindowID != "" {
+					identityPlan.Window = existing.Window
+				} else {
+					contextWindow, windowErr := uuid.NewV7()
+					if windowErr != nil {
+						return nil, windowErr
+					}
+					identityPlan.Window = OpenAICodexWindowSnapshot{ThreadID: syncIdentity.ThreadID, Number: 0, ContextWindowID: contextWindow.String(), FirstContextWindowID: contextWindow.String()}
+				}
+				identityPlan.WireProfile.WindowID = identityPlan.Window.WindowID()
+				identityPlan.WireProfile.WindowNumber = ptrUint64(identityPlan.Window.Number)
+				identityPlan.WireProfile.ContextWindowID = identityPlan.Window.ContextWindowID
+				identityPlan.WindowMappingKey = "oauth-sync:" + syncIdentity.ThreadID
+			}
+		}
 		promptCacheKey := strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())
 		req.Host = "chatgpt.com"
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, req.Header, account); err != nil {
@@ -754,7 +794,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 
 	// OAuth client identity is projected from the immutable plan below. Keep
 	// the historical account-level User-Agent resolver only for API-key paths.
-	if !account.UsesOpenAICodexProtocol() {
+	if !usesOpenAICodexIdentityProtocol(account) {
 		customUA, err := s.codexIdentityOverrideUA(ctx, account)
 		if err != nil {
 			return nil, fmt.Errorf("resolve OpenAI account User-Agent: %w", err)
@@ -764,7 +804,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 		}
 	}
 	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
-		if account.UsesOpenAICodexProtocol() && identityPlanned {
+		if usesOpenAICodexIdentityProtocol(account) && identityPlanned {
 			req.Header.Set("user-agent", identityPlan.ClientIdentity.UserAgent)
 			req.Header.Set("originator", identityPlan.ClientIdentity.Originator)
 			req.Header.Set("version", identityPlan.ClientIdentity.Version)
@@ -786,7 +826,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 	applyOpenAICodexBetaFeatures(c, account, req.Header)
 	setOpenAICodexRoutingHintFromBody(req.Header, account, body)
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http_passthrough", req.Header, body, "not_applicable")
-	if account.UsesOpenAICodexProtocol() && identityPlanned {
+	if usesOpenAICodexIdentityProtocol(account) && identityPlanned {
 		fields := gjson.GetManyBytes(body, "model", "service_tier")
 		requestKind, kindErr := openAICodexHTTPWireRequestKind(c, identityPlan, body)
 		if kindErr != nil {
@@ -805,7 +845,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 		body = finalBody
 		finalPlan, _ := OpenAIOAuthIdentityPlanFromContext(c)
 		body = s.prepareOpenAIPassthroughCompactWindow(ctx, c, account, req, body, finalPlan)
-	} else if !account.UsesOpenAICodexProtocol() {
+	} else if !usesOpenAICodexIdentityProtocol(account) {
 		logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http_passthrough", req.Header, body, "not_applicable")
 	}
 
