@@ -34,6 +34,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/openaioauthdailysessionaffinity"
+	"github.com/Wei-Shaw/sub2api/ent/openaioauthdailysessionpool"
 	"github.com/Wei-Shaw/sub2api/ent/openaioauthsyncsession"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
@@ -103,6 +105,10 @@ type Client struct {
 	IdempotencyRecord *IdempotencyRecordClient
 	// IdentityAdoptionDecision is the client for interacting with the IdentityAdoptionDecision builders.
 	IdentityAdoptionDecision *IdentityAdoptionDecisionClient
+	// OpenAIOAuthDailySessionAffinity is the client for interacting with the OpenAIOAuthDailySessionAffinity builders.
+	OpenAIOAuthDailySessionAffinity *OpenAIOAuthDailySessionAffinityClient
+	// OpenAIOAuthDailySessionPool is the client for interacting with the OpenAIOAuthDailySessionPool builders.
+	OpenAIOAuthDailySessionPool *OpenAIOAuthDailySessionPoolClient
 	// OpenAIOAuthSyncSession is the client for interacting with the OpenAIOAuthSyncSession builders.
 	OpenAIOAuthSyncSession *OpenAIOAuthSyncSessionClient
 	// PaymentAuditLog is the client for interacting with the PaymentAuditLog builders.
@@ -177,6 +183,8 @@ func (c *Client) init() {
 	c.Group = NewGroupClient(c.config)
 	c.IdempotencyRecord = NewIdempotencyRecordClient(c.config)
 	c.IdentityAdoptionDecision = NewIdentityAdoptionDecisionClient(c.config)
+	c.OpenAIOAuthDailySessionAffinity = NewOpenAIOAuthDailySessionAffinityClient(c.config)
+	c.OpenAIOAuthDailySessionPool = NewOpenAIOAuthDailySessionPoolClient(c.config)
 	c.OpenAIOAuthSyncSession = NewOpenAIOAuthSyncSessionClient(c.config)
 	c.PaymentAuditLog = NewPaymentAuditLogClient(c.config)
 	c.PaymentOrder = NewPaymentOrderClient(c.config)
@@ -289,49 +297,51 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 	cfg := c.config
 	cfg.driver = tx
 	return &Tx{
-		ctx:                           ctx,
-		config:                        cfg,
-		APIKey:                        NewAPIKeyClient(cfg),
-		Account:                       NewAccountClient(cfg),
-		AccountGroup:                  NewAccountGroupClient(cfg),
-		Announcement:                  NewAnnouncementClient(cfg),
-		AnnouncementRead:              NewAnnouncementReadClient(cfg),
-		AuthIdentity:                  NewAuthIdentityClient(cfg),
-		AuthIdentityChannel:           NewAuthIdentityChannelClient(cfg),
-		BatchImageEvent:               NewBatchImageEventClient(cfg),
-		BatchImageItem:                NewBatchImageItemClient(cfg),
-		BatchImageJob:                 NewBatchImageJobClient(cfg),
-		ChannelMonitor:                NewChannelMonitorClient(cfg),
-		ChannelMonitorDailyRollup:     NewChannelMonitorDailyRollupClient(cfg),
-		ChannelMonitorHistory:         NewChannelMonitorHistoryClient(cfg),
-		ChannelMonitorRequestTemplate: NewChannelMonitorRequestTemplateClient(cfg),
-		CompositeModelRoute:           NewCompositeModelRouteClient(cfg),
-		ErrorPassthroughRule:          NewErrorPassthroughRuleClient(cfg),
-		Group:                         NewGroupClient(cfg),
-		IdempotencyRecord:             NewIdempotencyRecordClient(cfg),
-		IdentityAdoptionDecision:      NewIdentityAdoptionDecisionClient(cfg),
-		OpenAIOAuthSyncSession:        NewOpenAIOAuthSyncSessionClient(cfg),
-		PaymentAuditLog:               NewPaymentAuditLogClient(cfg),
-		PaymentOrder:                  NewPaymentOrderClient(cfg),
-		PaymentProviderInstance:       NewPaymentProviderInstanceClient(cfg),
-		PendingAuthSession:            NewPendingAuthSessionClient(cfg),
-		PromoCode:                     NewPromoCodeClient(cfg),
-		PromoCodeUsage:                NewPromoCodeUsageClient(cfg),
-		Proxy:                         NewProxyClient(cfg),
-		RedeemCode:                    NewRedeemCodeClient(cfg),
-		SecuritySecret:                NewSecuritySecretClient(cfg),
-		Setting:                       NewSettingClient(cfg),
-		SubscriptionPlan:              NewSubscriptionPlanClient(cfg),
-		TLSFingerprintProfile:         NewTLSFingerprintProfileClient(cfg),
-		UsageCleanupTask:              NewUsageCleanupTaskClient(cfg),
-		UsageLog:                      NewUsageLogClient(cfg),
-		User:                          NewUserClient(cfg),
-		UserAllowedGroup:              NewUserAllowedGroupClient(cfg),
-		UserAttributeDefinition:       NewUserAttributeDefinitionClient(cfg),
-		UserAttributeValue:            NewUserAttributeValueClient(cfg),
-		UserPlatformQuota:             NewUserPlatformQuotaClient(cfg),
-		UserSubscription:              NewUserSubscriptionClient(cfg),
-		UserSubscriptionQuotaEvent:    NewUserSubscriptionQuotaEventClient(cfg),
+		ctx:                             ctx,
+		config:                          cfg,
+		APIKey:                          NewAPIKeyClient(cfg),
+		Account:                         NewAccountClient(cfg),
+		AccountGroup:                    NewAccountGroupClient(cfg),
+		Announcement:                    NewAnnouncementClient(cfg),
+		AnnouncementRead:                NewAnnouncementReadClient(cfg),
+		AuthIdentity:                    NewAuthIdentityClient(cfg),
+		AuthIdentityChannel:             NewAuthIdentityChannelClient(cfg),
+		BatchImageEvent:                 NewBatchImageEventClient(cfg),
+		BatchImageItem:                  NewBatchImageItemClient(cfg),
+		BatchImageJob:                   NewBatchImageJobClient(cfg),
+		ChannelMonitor:                  NewChannelMonitorClient(cfg),
+		ChannelMonitorDailyRollup:       NewChannelMonitorDailyRollupClient(cfg),
+		ChannelMonitorHistory:           NewChannelMonitorHistoryClient(cfg),
+		ChannelMonitorRequestTemplate:   NewChannelMonitorRequestTemplateClient(cfg),
+		CompositeModelRoute:             NewCompositeModelRouteClient(cfg),
+		ErrorPassthroughRule:            NewErrorPassthroughRuleClient(cfg),
+		Group:                           NewGroupClient(cfg),
+		IdempotencyRecord:               NewIdempotencyRecordClient(cfg),
+		IdentityAdoptionDecision:        NewIdentityAdoptionDecisionClient(cfg),
+		OpenAIOAuthDailySessionAffinity: NewOpenAIOAuthDailySessionAffinityClient(cfg),
+		OpenAIOAuthDailySessionPool:     NewOpenAIOAuthDailySessionPoolClient(cfg),
+		OpenAIOAuthSyncSession:          NewOpenAIOAuthSyncSessionClient(cfg),
+		PaymentAuditLog:                 NewPaymentAuditLogClient(cfg),
+		PaymentOrder:                    NewPaymentOrderClient(cfg),
+		PaymentProviderInstance:         NewPaymentProviderInstanceClient(cfg),
+		PendingAuthSession:              NewPendingAuthSessionClient(cfg),
+		PromoCode:                       NewPromoCodeClient(cfg),
+		PromoCodeUsage:                  NewPromoCodeUsageClient(cfg),
+		Proxy:                           NewProxyClient(cfg),
+		RedeemCode:                      NewRedeemCodeClient(cfg),
+		SecuritySecret:                  NewSecuritySecretClient(cfg),
+		Setting:                         NewSettingClient(cfg),
+		SubscriptionPlan:                NewSubscriptionPlanClient(cfg),
+		TLSFingerprintProfile:           NewTLSFingerprintProfileClient(cfg),
+		UsageCleanupTask:                NewUsageCleanupTaskClient(cfg),
+		UsageLog:                        NewUsageLogClient(cfg),
+		User:                            NewUserClient(cfg),
+		UserAllowedGroup:                NewUserAllowedGroupClient(cfg),
+		UserAttributeDefinition:         NewUserAttributeDefinitionClient(cfg),
+		UserAttributeValue:              NewUserAttributeValueClient(cfg),
+		UserPlatformQuota:               NewUserPlatformQuotaClient(cfg),
+		UserSubscription:                NewUserSubscriptionClient(cfg),
+		UserSubscriptionQuotaEvent:      NewUserSubscriptionQuotaEventClient(cfg),
 	}, nil
 }
 
@@ -349,49 +359,51 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	cfg := c.config
 	cfg.driver = &txDriver{tx: tx, drv: c.driver}
 	return &Tx{
-		ctx:                           ctx,
-		config:                        cfg,
-		APIKey:                        NewAPIKeyClient(cfg),
-		Account:                       NewAccountClient(cfg),
-		AccountGroup:                  NewAccountGroupClient(cfg),
-		Announcement:                  NewAnnouncementClient(cfg),
-		AnnouncementRead:              NewAnnouncementReadClient(cfg),
-		AuthIdentity:                  NewAuthIdentityClient(cfg),
-		AuthIdentityChannel:           NewAuthIdentityChannelClient(cfg),
-		BatchImageEvent:               NewBatchImageEventClient(cfg),
-		BatchImageItem:                NewBatchImageItemClient(cfg),
-		BatchImageJob:                 NewBatchImageJobClient(cfg),
-		ChannelMonitor:                NewChannelMonitorClient(cfg),
-		ChannelMonitorDailyRollup:     NewChannelMonitorDailyRollupClient(cfg),
-		ChannelMonitorHistory:         NewChannelMonitorHistoryClient(cfg),
-		ChannelMonitorRequestTemplate: NewChannelMonitorRequestTemplateClient(cfg),
-		CompositeModelRoute:           NewCompositeModelRouteClient(cfg),
-		ErrorPassthroughRule:          NewErrorPassthroughRuleClient(cfg),
-		Group:                         NewGroupClient(cfg),
-		IdempotencyRecord:             NewIdempotencyRecordClient(cfg),
-		IdentityAdoptionDecision:      NewIdentityAdoptionDecisionClient(cfg),
-		OpenAIOAuthSyncSession:        NewOpenAIOAuthSyncSessionClient(cfg),
-		PaymentAuditLog:               NewPaymentAuditLogClient(cfg),
-		PaymentOrder:                  NewPaymentOrderClient(cfg),
-		PaymentProviderInstance:       NewPaymentProviderInstanceClient(cfg),
-		PendingAuthSession:            NewPendingAuthSessionClient(cfg),
-		PromoCode:                     NewPromoCodeClient(cfg),
-		PromoCodeUsage:                NewPromoCodeUsageClient(cfg),
-		Proxy:                         NewProxyClient(cfg),
-		RedeemCode:                    NewRedeemCodeClient(cfg),
-		SecuritySecret:                NewSecuritySecretClient(cfg),
-		Setting:                       NewSettingClient(cfg),
-		SubscriptionPlan:              NewSubscriptionPlanClient(cfg),
-		TLSFingerprintProfile:         NewTLSFingerprintProfileClient(cfg),
-		UsageCleanupTask:              NewUsageCleanupTaskClient(cfg),
-		UsageLog:                      NewUsageLogClient(cfg),
-		User:                          NewUserClient(cfg),
-		UserAllowedGroup:              NewUserAllowedGroupClient(cfg),
-		UserAttributeDefinition:       NewUserAttributeDefinitionClient(cfg),
-		UserAttributeValue:            NewUserAttributeValueClient(cfg),
-		UserPlatformQuota:             NewUserPlatformQuotaClient(cfg),
-		UserSubscription:              NewUserSubscriptionClient(cfg),
-		UserSubscriptionQuotaEvent:    NewUserSubscriptionQuotaEventClient(cfg),
+		ctx:                             ctx,
+		config:                          cfg,
+		APIKey:                          NewAPIKeyClient(cfg),
+		Account:                         NewAccountClient(cfg),
+		AccountGroup:                    NewAccountGroupClient(cfg),
+		Announcement:                    NewAnnouncementClient(cfg),
+		AnnouncementRead:                NewAnnouncementReadClient(cfg),
+		AuthIdentity:                    NewAuthIdentityClient(cfg),
+		AuthIdentityChannel:             NewAuthIdentityChannelClient(cfg),
+		BatchImageEvent:                 NewBatchImageEventClient(cfg),
+		BatchImageItem:                  NewBatchImageItemClient(cfg),
+		BatchImageJob:                   NewBatchImageJobClient(cfg),
+		ChannelMonitor:                  NewChannelMonitorClient(cfg),
+		ChannelMonitorDailyRollup:       NewChannelMonitorDailyRollupClient(cfg),
+		ChannelMonitorHistory:           NewChannelMonitorHistoryClient(cfg),
+		ChannelMonitorRequestTemplate:   NewChannelMonitorRequestTemplateClient(cfg),
+		CompositeModelRoute:             NewCompositeModelRouteClient(cfg),
+		ErrorPassthroughRule:            NewErrorPassthroughRuleClient(cfg),
+		Group:                           NewGroupClient(cfg),
+		IdempotencyRecord:               NewIdempotencyRecordClient(cfg),
+		IdentityAdoptionDecision:        NewIdentityAdoptionDecisionClient(cfg),
+		OpenAIOAuthDailySessionAffinity: NewOpenAIOAuthDailySessionAffinityClient(cfg),
+		OpenAIOAuthDailySessionPool:     NewOpenAIOAuthDailySessionPoolClient(cfg),
+		OpenAIOAuthSyncSession:          NewOpenAIOAuthSyncSessionClient(cfg),
+		PaymentAuditLog:                 NewPaymentAuditLogClient(cfg),
+		PaymentOrder:                    NewPaymentOrderClient(cfg),
+		PaymentProviderInstance:         NewPaymentProviderInstanceClient(cfg),
+		PendingAuthSession:              NewPendingAuthSessionClient(cfg),
+		PromoCode:                       NewPromoCodeClient(cfg),
+		PromoCodeUsage:                  NewPromoCodeUsageClient(cfg),
+		Proxy:                           NewProxyClient(cfg),
+		RedeemCode:                      NewRedeemCodeClient(cfg),
+		SecuritySecret:                  NewSecuritySecretClient(cfg),
+		Setting:                         NewSettingClient(cfg),
+		SubscriptionPlan:                NewSubscriptionPlanClient(cfg),
+		TLSFingerprintProfile:           NewTLSFingerprintProfileClient(cfg),
+		UsageCleanupTask:                NewUsageCleanupTaskClient(cfg),
+		UsageLog:                        NewUsageLogClient(cfg),
+		User:                            NewUserClient(cfg),
+		UserAllowedGroup:                NewUserAllowedGroupClient(cfg),
+		UserAttributeDefinition:         NewUserAttributeDefinitionClient(cfg),
+		UserAttributeValue:              NewUserAttributeValueClient(cfg),
+		UserPlatformQuota:               NewUserPlatformQuotaClient(cfg),
+		UserSubscription:                NewUserSubscriptionClient(cfg),
+		UserSubscriptionQuotaEvent:      NewUserSubscriptionQuotaEventClient(cfg),
 	}, nil
 }
 
@@ -426,7 +438,8 @@ func (c *Client) Use(hooks ...Hook) {
 		c.BatchImageJob, c.ChannelMonitor, c.ChannelMonitorDailyRollup,
 		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
 		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
-		c.IdentityAdoptionDecision, c.OpenAIOAuthSyncSession, c.PaymentAuditLog,
+		c.IdentityAdoptionDecision, c.OpenAIOAuthDailySessionAffinity,
+		c.OpenAIOAuthDailySessionPool, c.OpenAIOAuthSyncSession, c.PaymentAuditLog,
 		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
 		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
 		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
@@ -446,7 +459,8 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.BatchImageJob, c.ChannelMonitor, c.ChannelMonitorDailyRollup,
 		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
 		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
-		c.IdentityAdoptionDecision, c.OpenAIOAuthSyncSession, c.PaymentAuditLog,
+		c.IdentityAdoptionDecision, c.OpenAIOAuthDailySessionAffinity,
+		c.OpenAIOAuthDailySessionPool, c.OpenAIOAuthSyncSession, c.PaymentAuditLog,
 		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
 		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
 		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
@@ -498,6 +512,10 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.IdempotencyRecord.mutate(ctx, m)
 	case *IdentityAdoptionDecisionMutation:
 		return c.IdentityAdoptionDecision.mutate(ctx, m)
+	case *OpenAIOAuthDailySessionAffinityMutation:
+		return c.OpenAIOAuthDailySessionAffinity.mutate(ctx, m)
+	case *OpenAIOAuthDailySessionPoolMutation:
+		return c.OpenAIOAuthDailySessionPool.mutate(ctx, m)
 	case *OpenAIOAuthSyncSessionMutation:
 		return c.OpenAIOAuthSyncSession.mutate(ctx, m)
 	case *PaymentAuditLogMutation:
@@ -3593,6 +3611,272 @@ func (c *IdentityAdoptionDecisionClient) mutate(ctx context.Context, m *Identity
 	}
 }
 
+// OpenAIOAuthDailySessionAffinityClient is a client for the OpenAIOAuthDailySessionAffinity schema.
+type OpenAIOAuthDailySessionAffinityClient struct {
+	config
+}
+
+// NewOpenAIOAuthDailySessionAffinityClient returns a client for the OpenAIOAuthDailySessionAffinity from the given config.
+func NewOpenAIOAuthDailySessionAffinityClient(c config) *OpenAIOAuthDailySessionAffinityClient {
+	return &OpenAIOAuthDailySessionAffinityClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `openaioauthdailysessionaffinity.Hooks(f(g(h())))`.
+func (c *OpenAIOAuthDailySessionAffinityClient) Use(hooks ...Hook) {
+	c.hooks.OpenAIOAuthDailySessionAffinity = append(c.hooks.OpenAIOAuthDailySessionAffinity, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `openaioauthdailysessionaffinity.Intercept(f(g(h())))`.
+func (c *OpenAIOAuthDailySessionAffinityClient) Intercept(interceptors ...Interceptor) {
+	c.inters.OpenAIOAuthDailySessionAffinity = append(c.inters.OpenAIOAuthDailySessionAffinity, interceptors...)
+}
+
+// Create returns a builder for creating a OpenAIOAuthDailySessionAffinity entity.
+func (c *OpenAIOAuthDailySessionAffinityClient) Create() *OpenAIOAuthDailySessionAffinityCreate {
+	mutation := newOpenAIOAuthDailySessionAffinityMutation(c.config, OpCreate)
+	return &OpenAIOAuthDailySessionAffinityCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of OpenAIOAuthDailySessionAffinity entities.
+func (c *OpenAIOAuthDailySessionAffinityClient) CreateBulk(builders ...*OpenAIOAuthDailySessionAffinityCreate) *OpenAIOAuthDailySessionAffinityCreateBulk {
+	return &OpenAIOAuthDailySessionAffinityCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *OpenAIOAuthDailySessionAffinityClient) MapCreateBulk(slice any, setFunc func(*OpenAIOAuthDailySessionAffinityCreate, int)) *OpenAIOAuthDailySessionAffinityCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &OpenAIOAuthDailySessionAffinityCreateBulk{err: fmt.Errorf("calling to OpenAIOAuthDailySessionAffinityClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*OpenAIOAuthDailySessionAffinityCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &OpenAIOAuthDailySessionAffinityCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for OpenAIOAuthDailySessionAffinity.
+func (c *OpenAIOAuthDailySessionAffinityClient) Update() *OpenAIOAuthDailySessionAffinityUpdate {
+	mutation := newOpenAIOAuthDailySessionAffinityMutation(c.config, OpUpdate)
+	return &OpenAIOAuthDailySessionAffinityUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *OpenAIOAuthDailySessionAffinityClient) UpdateOne(_m *OpenAIOAuthDailySessionAffinity) *OpenAIOAuthDailySessionAffinityUpdateOne {
+	mutation := newOpenAIOAuthDailySessionAffinityMutation(c.config, OpUpdateOne, withOpenAIOAuthDailySessionAffinity(_m))
+	return &OpenAIOAuthDailySessionAffinityUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *OpenAIOAuthDailySessionAffinityClient) UpdateOneID(id int64) *OpenAIOAuthDailySessionAffinityUpdateOne {
+	mutation := newOpenAIOAuthDailySessionAffinityMutation(c.config, OpUpdateOne, withOpenAIOAuthDailySessionAffinityID(id))
+	return &OpenAIOAuthDailySessionAffinityUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for OpenAIOAuthDailySessionAffinity.
+func (c *OpenAIOAuthDailySessionAffinityClient) Delete() *OpenAIOAuthDailySessionAffinityDelete {
+	mutation := newOpenAIOAuthDailySessionAffinityMutation(c.config, OpDelete)
+	return &OpenAIOAuthDailySessionAffinityDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *OpenAIOAuthDailySessionAffinityClient) DeleteOne(_m *OpenAIOAuthDailySessionAffinity) *OpenAIOAuthDailySessionAffinityDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *OpenAIOAuthDailySessionAffinityClient) DeleteOneID(id int64) *OpenAIOAuthDailySessionAffinityDeleteOne {
+	builder := c.Delete().Where(openaioauthdailysessionaffinity.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &OpenAIOAuthDailySessionAffinityDeleteOne{builder}
+}
+
+// Query returns a query builder for OpenAIOAuthDailySessionAffinity.
+func (c *OpenAIOAuthDailySessionAffinityClient) Query() *OpenAIOAuthDailySessionAffinityQuery {
+	return &OpenAIOAuthDailySessionAffinityQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeOpenAIOAuthDailySessionAffinity},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a OpenAIOAuthDailySessionAffinity entity by its id.
+func (c *OpenAIOAuthDailySessionAffinityClient) Get(ctx context.Context, id int64) (*OpenAIOAuthDailySessionAffinity, error) {
+	return c.Query().Where(openaioauthdailysessionaffinity.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *OpenAIOAuthDailySessionAffinityClient) GetX(ctx context.Context, id int64) *OpenAIOAuthDailySessionAffinity {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *OpenAIOAuthDailySessionAffinityClient) Hooks() []Hook {
+	return c.hooks.OpenAIOAuthDailySessionAffinity
+}
+
+// Interceptors returns the client interceptors.
+func (c *OpenAIOAuthDailySessionAffinityClient) Interceptors() []Interceptor {
+	return c.inters.OpenAIOAuthDailySessionAffinity
+}
+
+func (c *OpenAIOAuthDailySessionAffinityClient) mutate(ctx context.Context, m *OpenAIOAuthDailySessionAffinityMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&OpenAIOAuthDailySessionAffinityCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&OpenAIOAuthDailySessionAffinityUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&OpenAIOAuthDailySessionAffinityUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&OpenAIOAuthDailySessionAffinityDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown OpenAIOAuthDailySessionAffinity mutation op: %q", m.Op())
+	}
+}
+
+// OpenAIOAuthDailySessionPoolClient is a client for the OpenAIOAuthDailySessionPool schema.
+type OpenAIOAuthDailySessionPoolClient struct {
+	config
+}
+
+// NewOpenAIOAuthDailySessionPoolClient returns a client for the OpenAIOAuthDailySessionPool from the given config.
+func NewOpenAIOAuthDailySessionPoolClient(c config) *OpenAIOAuthDailySessionPoolClient {
+	return &OpenAIOAuthDailySessionPoolClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `openaioauthdailysessionpool.Hooks(f(g(h())))`.
+func (c *OpenAIOAuthDailySessionPoolClient) Use(hooks ...Hook) {
+	c.hooks.OpenAIOAuthDailySessionPool = append(c.hooks.OpenAIOAuthDailySessionPool, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `openaioauthdailysessionpool.Intercept(f(g(h())))`.
+func (c *OpenAIOAuthDailySessionPoolClient) Intercept(interceptors ...Interceptor) {
+	c.inters.OpenAIOAuthDailySessionPool = append(c.inters.OpenAIOAuthDailySessionPool, interceptors...)
+}
+
+// Create returns a builder for creating a OpenAIOAuthDailySessionPool entity.
+func (c *OpenAIOAuthDailySessionPoolClient) Create() *OpenAIOAuthDailySessionPoolCreate {
+	mutation := newOpenAIOAuthDailySessionPoolMutation(c.config, OpCreate)
+	return &OpenAIOAuthDailySessionPoolCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of OpenAIOAuthDailySessionPool entities.
+func (c *OpenAIOAuthDailySessionPoolClient) CreateBulk(builders ...*OpenAIOAuthDailySessionPoolCreate) *OpenAIOAuthDailySessionPoolCreateBulk {
+	return &OpenAIOAuthDailySessionPoolCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *OpenAIOAuthDailySessionPoolClient) MapCreateBulk(slice any, setFunc func(*OpenAIOAuthDailySessionPoolCreate, int)) *OpenAIOAuthDailySessionPoolCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &OpenAIOAuthDailySessionPoolCreateBulk{err: fmt.Errorf("calling to OpenAIOAuthDailySessionPoolClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*OpenAIOAuthDailySessionPoolCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &OpenAIOAuthDailySessionPoolCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for OpenAIOAuthDailySessionPool.
+func (c *OpenAIOAuthDailySessionPoolClient) Update() *OpenAIOAuthDailySessionPoolUpdate {
+	mutation := newOpenAIOAuthDailySessionPoolMutation(c.config, OpUpdate)
+	return &OpenAIOAuthDailySessionPoolUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *OpenAIOAuthDailySessionPoolClient) UpdateOne(_m *OpenAIOAuthDailySessionPool) *OpenAIOAuthDailySessionPoolUpdateOne {
+	mutation := newOpenAIOAuthDailySessionPoolMutation(c.config, OpUpdateOne, withOpenAIOAuthDailySessionPool(_m))
+	return &OpenAIOAuthDailySessionPoolUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *OpenAIOAuthDailySessionPoolClient) UpdateOneID(id int64) *OpenAIOAuthDailySessionPoolUpdateOne {
+	mutation := newOpenAIOAuthDailySessionPoolMutation(c.config, OpUpdateOne, withOpenAIOAuthDailySessionPoolID(id))
+	return &OpenAIOAuthDailySessionPoolUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for OpenAIOAuthDailySessionPool.
+func (c *OpenAIOAuthDailySessionPoolClient) Delete() *OpenAIOAuthDailySessionPoolDelete {
+	mutation := newOpenAIOAuthDailySessionPoolMutation(c.config, OpDelete)
+	return &OpenAIOAuthDailySessionPoolDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *OpenAIOAuthDailySessionPoolClient) DeleteOne(_m *OpenAIOAuthDailySessionPool) *OpenAIOAuthDailySessionPoolDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *OpenAIOAuthDailySessionPoolClient) DeleteOneID(id int64) *OpenAIOAuthDailySessionPoolDeleteOne {
+	builder := c.Delete().Where(openaioauthdailysessionpool.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &OpenAIOAuthDailySessionPoolDeleteOne{builder}
+}
+
+// Query returns a query builder for OpenAIOAuthDailySessionPool.
+func (c *OpenAIOAuthDailySessionPoolClient) Query() *OpenAIOAuthDailySessionPoolQuery {
+	return &OpenAIOAuthDailySessionPoolQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeOpenAIOAuthDailySessionPool},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a OpenAIOAuthDailySessionPool entity by its id.
+func (c *OpenAIOAuthDailySessionPoolClient) Get(ctx context.Context, id int64) (*OpenAIOAuthDailySessionPool, error) {
+	return c.Query().Where(openaioauthdailysessionpool.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *OpenAIOAuthDailySessionPoolClient) GetX(ctx context.Context, id int64) *OpenAIOAuthDailySessionPool {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *OpenAIOAuthDailySessionPoolClient) Hooks() []Hook {
+	return c.hooks.OpenAIOAuthDailySessionPool
+}
+
+// Interceptors returns the client interceptors.
+func (c *OpenAIOAuthDailySessionPoolClient) Interceptors() []Interceptor {
+	return c.inters.OpenAIOAuthDailySessionPool
+}
+
+func (c *OpenAIOAuthDailySessionPoolClient) mutate(ctx context.Context, m *OpenAIOAuthDailySessionPoolMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&OpenAIOAuthDailySessionPoolCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&OpenAIOAuthDailySessionPoolUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&OpenAIOAuthDailySessionPoolUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&OpenAIOAuthDailySessionPoolDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown OpenAIOAuthDailySessionPool mutation op: %q", m.Op())
+	}
+}
+
 // OpenAIOAuthSyncSessionClient is a client for the OpenAIOAuthSyncSession schema.
 type OpenAIOAuthSyncSessionClient struct {
 	config
@@ -4737,22 +5021,6 @@ func (c *ProxyClient) QueryAccounts(_m *Proxy) *AccountQuery {
 			sqlgraph.From(proxy.Table, proxy.FieldID, id),
 			sqlgraph.To(account.Table, account.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, true, proxy.AccountsTable, proxy.AccountsColumn),
-		)
-		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
-		return fromV, nil
-	}
-	return query
-}
-
-// QueryPrimaryProxies queries the primary_proxies edge of a Proxy.
-func (c *ProxyClient) QueryPrimaryProxies(_m *Proxy) *ProxyQuery {
-	query := (&ProxyClient{config: c.config}).Query()
-	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
-		id := _m.ID
-		step := sqlgraph.NewStep(
-			sqlgraph.From(proxy.Table, proxy.FieldID, id),
-			sqlgraph.To(proxy.Table, proxy.FieldID),
-			sqlgraph.Edge(sqlgraph.O2M, true, proxy.PrimaryProxiesTable, proxy.PrimaryProxiesColumn),
 		)
 		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
 		return fromV, nil
@@ -7159,24 +7427,27 @@ type (
 		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
 		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
-		Group, IdempotencyRecord, IdentityAdoptionDecision, OpenAIOAuthSyncSession,
-		PaymentAuditLog, PaymentOrder, PaymentProviderInstance, PendingAuthSession,
-		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
-		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
-		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
-		UserPlatformQuota, UserSubscription, UserSubscriptionQuotaEvent []ent.Hook
+		Group, IdempotencyRecord, IdentityAdoptionDecision,
+		OpenAIOAuthDailySessionAffinity, OpenAIOAuthDailySessionPool,
+		OpenAIOAuthSyncSession, PaymentAuditLog, PaymentOrder, PaymentProviderInstance,
+		PendingAuthSession, PromoCode, PromoCodeUsage, Proxy, RedeemCode,
+		SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
+		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
+		UserAttributeValue, UserPlatformQuota, UserSubscription,
+		UserSubscriptionQuotaEvent []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
 		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
 		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
-		Group, IdempotencyRecord, IdentityAdoptionDecision, OpenAIOAuthSyncSession,
-		PaymentAuditLog, PaymentOrder, PaymentProviderInstance, PendingAuthSession,
-		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
-		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
-		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
-		UserPlatformQuota, UserSubscription,
+		Group, IdempotencyRecord, IdentityAdoptionDecision,
+		OpenAIOAuthDailySessionAffinity, OpenAIOAuthDailySessionPool,
+		OpenAIOAuthSyncSession, PaymentAuditLog, PaymentOrder, PaymentProviderInstance,
+		PendingAuthSession, PromoCode, PromoCodeUsage, Proxy, RedeemCode,
+		SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
+		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
+		UserAttributeValue, UserPlatformQuota, UserSubscription,
 		UserSubscriptionQuotaEvent []ent.Interceptor
 	}
 )

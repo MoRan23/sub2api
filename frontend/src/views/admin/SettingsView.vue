@@ -5846,6 +5846,27 @@
                 </div>
               </section>
 
+              <section
+                class="py-5"
+                data-testid="openai-oauth-daily-session-rotation-settings"
+              >
+                <div class="flex items-start justify-between gap-5">
+                  <div>
+                    <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
+                      {{ t("admin.settings.gatewayForwarding.openaiOAuthDailySessionRotation") }}
+                    </h3>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.gatewayForwarding.openaiOAuthDailySessionRotationHint") }}
+                    </p>
+                  </div>
+                  <Toggle
+                    v-model="form.enable_openai_oauth_daily_session_rotation"
+                    :disabled="!form.enable_openai_codex_fingerprint_normalization || !form.enable_openai_uuidv7_session_identity"
+                    data-testid="openai-oauth-daily-session-rotation-toggle"
+                  />
+                </div>
+              </section>
+
               <section class="space-y-5 py-5">
                 <div class="flex items-start justify-between gap-5">
                   <div>
@@ -10013,6 +10034,7 @@ const form = reactive<SettingsForm>({
   openai_codex_client_version_builtin: "",
   openai_codex_version_auto_sync_enabled: true,
   enable_openai_uuidv7_session_identity: true,
+  enable_openai_oauth_daily_session_rotation: false,
   enable_openai_codex_pat_context_management: false,
   // codex_cli_only 加固
   min_codex_version: "",
@@ -11430,6 +11452,8 @@ async function saveSettings() {
         form.enable_openai_codex_installation_id_normalization,
       enable_openai_uuidv7_session_identity:
         form.enable_openai_uuidv7_session_identity,
+      enable_openai_oauth_daily_session_rotation:
+        form.enable_openai_oauth_daily_session_rotation,
       enable_openai_codex_client_identity_normalization:
         form.enable_openai_codex_client_identity_normalization,
       enable_openai_request_timezone_conversion:

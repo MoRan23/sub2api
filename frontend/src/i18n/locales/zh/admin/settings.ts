@@ -522,6 +522,8 @@ export default {
         openaiCodexVersionSyncedValue: '当前同步到：{version}',
         openaiUuidv7SessionIdentity: 'OpenAI UUIDv7 会话身份',
         openaiUuidv7SessionIdentityHint: '开启后，同一 OpenAI 逻辑会话稳定复用一组由服务端管理的 UUIDv7 session/thread 标识。默认开启，可显式关闭以回退到原有行为。',
+        openaiOAuthDailySessionRotation: 'OpenAI OAuth 会话每日轮换',
+        openaiOAuthDailySessionRotationHint: '为每个 OAuth 凭据每天生成三个流式根和一个账号同步根，并按 API Key 与逻辑会话保持粘性。默认关闭。',
         openaiCodexPATContextManagement: 'Codex PAT 上下文管理代理',
         openaiCodexPATContextManagementHint: '开启后为 Codex PAT 代理 History/Notes 请求，仅使用已确认订阅有效期且未到期的 Plus、Pro、Prolite OAuth 上游。不计用户或账号并发，不受限流影响；会话固定绑定账号，仅在订阅到期或账号不可调度时换绑。关闭时仅保留现有窗口身份归一化。',
         codexHardeningTitle: 'Codex 设置',

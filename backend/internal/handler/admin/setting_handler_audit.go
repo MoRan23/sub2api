@@ -71,6 +71,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.EnableOpenAIUUIDv7SessionIdentity != after.EnableOpenAIUUIDv7SessionIdentity {
 		changed = append(changed, "enable_openai_uuidv7_session_identity")
 	}
+	if before.EnableOpenAIOAuthDailySessionRotation != after.EnableOpenAIOAuthDailySessionRotation {
+		changed = append(changed, service.SettingKeyEnableOpenAIOAuthDailySessionRotation)
+	}
 	if before.EnableOpenAICodexFingerprintNormalization != after.EnableOpenAICodexFingerprintNormalization {
 		changed = append(changed, service.SettingKeyEnableOpenAICodexFingerprintNormalization)
 	}

@@ -63,6 +63,12 @@ type IdempotencyRecord func(*sql.Selector)
 // IdentityAdoptionDecision is the predicate function for identityadoptiondecision builders.
 type IdentityAdoptionDecision func(*sql.Selector)
 
+// OpenAIOAuthDailySessionAffinity is the predicate function for openaioauthdailysessionaffinity builders.
+type OpenAIOAuthDailySessionAffinity func(*sql.Selector)
+
+// OpenAIOAuthDailySessionPool is the predicate function for openaioauthdailysessionpool builders.
+type OpenAIOAuthDailySessionPool func(*sql.Selector)
+
 // OpenAIOAuthSyncSession is the predicate function for openaioauthsyncsession builders.
 type OpenAIOAuthSyncSession func(*sql.Selector)
 

@@ -1684,6 +1684,38 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityWithAliasesDetailed
 			return OpenAICodexTurnIdentity{}, true, outcome, err
 		}
 	}
+	// OAuth streaming turns use a daily, sticky root session when enabled. The
+	// regular identity store above still resolves thread/lineage IDs, preserving
+	// per-logical-session stickiness while isolating each day's root.
+	if account != nil && account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil &&
+		s.oauthDailySessionRotationEnabled(ctx) && openAIClientRequestedStream(c, nil, false) {
+		affinity, affinityErr := s.oauthDailySessionRepo.GetOrCreateOAuthDailySessionAffinity(
+			ctx, account.ID, apiKeyID, logical.SessionKey, time.Now().UTC(),
+		)
+		if affinityErr != nil {
+			return OpenAICodexTurnIdentity{}, true, OpenAIOAuthIdentityResolveStoreError, affinityErr
+		}
+		root, rootErr := canonicalUUIDv7(affinity.StreamSessionID)
+		if rootErr != nil {
+			return OpenAICodexTurnIdentity{}, true, OpenAIOAuthIdentityResolveStoreError,
+				fmt.Errorf("invalid OAuth daily stream root session: %w", rootErr)
+		}
+		identity.SessionID = root
+		if identity.Relation == OpenAICodexTurnRelationDescendant {
+			identity.ParentThreadID = root
+		} else {
+			// A pooled root must always be represented as a context-free child.
+			// The regular mapper can legitimately return a root for a new logical
+			// session; detach that thread from the old root before projection.
+			child, childErr := uuid.NewV7()
+			if childErr != nil {
+				return OpenAICodexTurnIdentity{}, true, OpenAIOAuthIdentityResolveStoreError, childErr
+			}
+			identity.ThreadID = child.String()
+			identity.ParentThreadID = root
+			identity.Relation = OpenAICodexTurnRelationDescendant
+		}
+	}
 	if err := ValidateOpenAICodexTurnIdentity(identity); err != nil {
 		return OpenAICodexTurnIdentity{}, true, outcome, err
 	}

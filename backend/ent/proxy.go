@@ -55,13 +55,11 @@ type Proxy struct {
 type ProxyEdges struct {
 	// Accounts holds the value of the accounts edge.
 	Accounts []*Account `json:"accounts,omitempty"`
-	// PrimaryProxies holds the value of the primary_proxies edge.
-	PrimaryProxies []*Proxy `json:"primary_proxies,omitempty"`
 	// BackupProxy holds the value of the backup_proxy edge.
 	BackupProxy *Proxy `json:"backup_proxy,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [3]bool
+	loadedTypes [2]bool
 }
 
 // AccountsOrErr returns the Accounts value or an error if the edge
@@ -73,21 +71,12 @@ func (e ProxyEdges) AccountsOrErr() ([]*Account, error) {
 	return nil, &NotLoadedError{edge: "accounts"}
 }
 
-// PrimaryProxiesOrErr returns the PrimaryProxies value or an error if the edge
-// was not loaded in eager-loading.
-func (e ProxyEdges) PrimaryProxiesOrErr() ([]*Proxy, error) {
-	if e.loadedTypes[1] {
-		return e.PrimaryProxies, nil
-	}
-	return nil, &NotLoadedError{edge: "primary_proxies"}
-}
-
 // BackupProxyOrErr returns the BackupProxy value or an error if the edge
 // was not loaded in eager-loading, or loaded but was not found.
 func (e ProxyEdges) BackupProxyOrErr() (*Proxy, error) {
 	if e.BackupProxy != nil {
 		return e.BackupProxy, nil
-	} else if e.loadedTypes[2] {
+	} else if e.loadedTypes[1] {
 		return nil, &NotFoundError{label: proxy.Label}
 	}
 	return nil, &NotLoadedError{edge: "backup_proxy"}
@@ -230,11 +219,6 @@ func (_m *Proxy) Value(name string) (ent.Value, error) {
 // QueryAccounts queries the "accounts" edge of the Proxy entity.
 func (_m *Proxy) QueryAccounts() *AccountQuery {
 	return NewProxyClient(_m.config).QueryAccounts(_m)
-}
-
-// QueryPrimaryProxies queries the "primary_proxies" edge of the Proxy entity.
-func (_m *Proxy) QueryPrimaryProxies() *ProxyQuery {
-	return NewProxyClient(_m.config).QueryPrimaryProxies(_m)
 }
 
 // QueryBackupProxy queries the "backup_proxy" edge of the Proxy entity.

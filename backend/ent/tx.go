@@ -52,6 +52,10 @@ type Tx struct {
 	IdempotencyRecord *IdempotencyRecordClient
 	// IdentityAdoptionDecision is the client for interacting with the IdentityAdoptionDecision builders.
 	IdentityAdoptionDecision *IdentityAdoptionDecisionClient
+	// OpenAIOAuthDailySessionAffinity is the client for interacting with the OpenAIOAuthDailySessionAffinity builders.
+	OpenAIOAuthDailySessionAffinity *OpenAIOAuthDailySessionAffinityClient
+	// OpenAIOAuthDailySessionPool is the client for interacting with the OpenAIOAuthDailySessionPool builders.
+	OpenAIOAuthDailySessionPool *OpenAIOAuthDailySessionPoolClient
 	// OpenAIOAuthSyncSession is the client for interacting with the OpenAIOAuthSyncSession builders.
 	OpenAIOAuthSyncSession *OpenAIOAuthSyncSessionClient
 	// PaymentAuditLog is the client for interacting with the PaymentAuditLog builders.
@@ -246,6 +250,8 @@ func (tx *Tx) init() {
 	tx.Group = NewGroupClient(tx.config)
 	tx.IdempotencyRecord = NewIdempotencyRecordClient(tx.config)
 	tx.IdentityAdoptionDecision = NewIdentityAdoptionDecisionClient(tx.config)
+	tx.OpenAIOAuthDailySessionAffinity = NewOpenAIOAuthDailySessionAffinityClient(tx.config)
+	tx.OpenAIOAuthDailySessionPool = NewOpenAIOAuthDailySessionPoolClient(tx.config)
 	tx.OpenAIOAuthSyncSession = NewOpenAIOAuthSyncSessionClient(tx.config)
 	tx.PaymentAuditLog = NewPaymentAuditLogClient(tx.config)
 	tx.PaymentOrder = NewPaymentOrderClient(tx.config)

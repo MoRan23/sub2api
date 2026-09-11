@@ -529,6 +529,8 @@ export default {
         openaiCodexVersionSyncedValue: 'Currently synced: {version}',
         openaiUuidv7SessionIdentity: 'OpenAI UUIDv7 session identity',
         openaiUuidv7SessionIdentityHint: 'When enabled, requests in the same logical OpenAI session reuse one server-managed UUIDv7 session/thread pair. Enabled by default; disable it explicitly to roll back to the legacy identity behavior.',
+        openaiOAuthDailySessionRotation: 'Daily OpenAI OAuth session rotation',
+        openaiOAuthDailySessionRotationHint: 'Creates three streaming roots and one account sync root per OAuth credential each day, with API key and logical-session stickiness. Disabled by default.',
         openaiCodexPATContextManagement: 'Codex PAT context-management proxy',
         openaiCodexPATContextManagementHint: 'Proxy History/Notes for Codex PAT clients through Plus, Pro, or Prolite OAuth accounts with a confirmed, unexpired subscription. Requests bypass user/account concurrency and rate limits. Sessions stay bound until the subscription expires or the account becomes unavailable for scheduling. Disabling keeps existing window identity normalization only.',
         codexHardeningTitle: "Codex Settings",

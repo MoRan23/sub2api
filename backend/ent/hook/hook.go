@@ -237,6 +237,42 @@ func (f IdentityAdoptionDecisionFunc) Mutate(ctx context.Context, m ent.Mutation
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.IdentityAdoptionDecisionMutation", m)
 }
 
+// The OpenAIOAuthDailySessionAffinityFunc type is an adapter to allow the use of ordinary
+// function as OpenAIOAuthDailySessionAffinity mutator.
+type OpenAIOAuthDailySessionAffinityFunc func(context.Context, *ent.OpenAIOAuthDailySessionAffinityMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f OpenAIOAuthDailySessionAffinityFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.OpenAIOAuthDailySessionAffinityMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.OpenAIOAuthDailySessionAffinityMutation", m)
+}
+
+// The OpenAIOAuthDailySessionPoolFunc type is an adapter to allow the use of ordinary
+// function as OpenAIOAuthDailySessionPool mutator.
+type OpenAIOAuthDailySessionPoolFunc func(context.Context, *ent.OpenAIOAuthDailySessionPoolMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f OpenAIOAuthDailySessionPoolFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.OpenAIOAuthDailySessionPoolMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.OpenAIOAuthDailySessionPoolMutation", m)
+}
+
+// The OpenAIOAuthSyncSessionFunc type is an adapter to allow the use of ordinary
+// function as OpenAIOAuthSyncSession mutator.
+type OpenAIOAuthSyncSessionFunc func(context.Context, *ent.OpenAIOAuthSyncSessionMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f OpenAIOAuthSyncSessionFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.OpenAIOAuthSyncSessionMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.OpenAIOAuthSyncSessionMutation", m)
+}
+
 // The PaymentAuditLogFunc type is an adapter to allow the use of ordinary
 // function as PaymentAuditLog mutator.
 type PaymentAuditLogFunc func(context.Context, *ent.PaymentAuditLogMutation) (ent.Value, error)

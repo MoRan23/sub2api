@@ -416,6 +416,7 @@ export interface SystemSettings {
   enable_openai_codex_fingerprint_normalization: boolean; // OpenAI OAuth Codex 指纹归一总开关
   enable_openai_codex_installation_id_normalization: boolean; // installation_id 账号固定
   enable_openai_uuidv7_session_identity: boolean; // OpenAI UUIDv7 session/thread 标识对
+  enable_openai_oauth_daily_session_rotation: boolean;
   enable_openai_codex_pat_context_management: boolean; // Codex PAT History/Notes 代理
   enable_openai_codex_client_identity_normalization: boolean; // UA/originator/version 归一
   enable_openai_request_timezone_conversion: boolean;
@@ -772,6 +773,7 @@ export interface UpdateSettingsRequest {
   enable_openai_codex_fingerprint_normalization?: boolean;
   enable_openai_codex_installation_id_normalization?: boolean;
   enable_openai_uuidv7_session_identity?: boolean; // OpenAI UUIDv7 session/thread 标识对
+  enable_openai_oauth_daily_session_rotation?: boolean;
   enable_openai_codex_pat_context_management?: boolean;
   enable_openai_codex_client_identity_normalization?: boolean;
   enable_openai_request_timezone_conversion?: boolean;

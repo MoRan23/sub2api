@@ -27,6 +27,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/openaioauthdailysessionaffinity"
+	"github.com/Wei-Shaw/sub2api/ent/openaioauthdailysessionpool"
+	"github.com/Wei-Shaw/sub2api/ent/openaioauthsyncsession"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -618,6 +621,87 @@ func (f TraverseIdentityAdoptionDecision) Traverse(ctx context.Context, q ent.Qu
 		return f(ctx, q)
 	}
 	return fmt.Errorf("unexpected query type %T. expect *ent.IdentityAdoptionDecisionQuery", q)
+}
+
+// The OpenAIOAuthDailySessionAffinityFunc type is an adapter to allow the use of ordinary function as a Querier.
+type OpenAIOAuthDailySessionAffinityFunc func(context.Context, *ent.OpenAIOAuthDailySessionAffinityQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f OpenAIOAuthDailySessionAffinityFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.OpenAIOAuthDailySessionAffinityQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.OpenAIOAuthDailySessionAffinityQuery", q)
+}
+
+// The TraverseOpenAIOAuthDailySessionAffinity type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseOpenAIOAuthDailySessionAffinity func(context.Context, *ent.OpenAIOAuthDailySessionAffinityQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseOpenAIOAuthDailySessionAffinity) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseOpenAIOAuthDailySessionAffinity) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.OpenAIOAuthDailySessionAffinityQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.OpenAIOAuthDailySessionAffinityQuery", q)
+}
+
+// The OpenAIOAuthDailySessionPoolFunc type is an adapter to allow the use of ordinary function as a Querier.
+type OpenAIOAuthDailySessionPoolFunc func(context.Context, *ent.OpenAIOAuthDailySessionPoolQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f OpenAIOAuthDailySessionPoolFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.OpenAIOAuthDailySessionPoolQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.OpenAIOAuthDailySessionPoolQuery", q)
+}
+
+// The TraverseOpenAIOAuthDailySessionPool type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseOpenAIOAuthDailySessionPool func(context.Context, *ent.OpenAIOAuthDailySessionPoolQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseOpenAIOAuthDailySessionPool) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseOpenAIOAuthDailySessionPool) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.OpenAIOAuthDailySessionPoolQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.OpenAIOAuthDailySessionPoolQuery", q)
+}
+
+// The OpenAIOAuthSyncSessionFunc type is an adapter to allow the use of ordinary function as a Querier.
+type OpenAIOAuthSyncSessionFunc func(context.Context, *ent.OpenAIOAuthSyncSessionQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f OpenAIOAuthSyncSessionFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.OpenAIOAuthSyncSessionQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.OpenAIOAuthSyncSessionQuery", q)
+}
+
+// The TraverseOpenAIOAuthSyncSession type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseOpenAIOAuthSyncSession func(context.Context, *ent.OpenAIOAuthSyncSessionQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseOpenAIOAuthSyncSession) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseOpenAIOAuthSyncSession) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.OpenAIOAuthSyncSessionQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.OpenAIOAuthSyncSessionQuery", q)
 }
 
 // The PaymentAuditLogFunc type is an adapter to allow the use of ordinary function as a Querier.
@@ -1228,6 +1312,12 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.IdempotencyRecordQuery, predicate.IdempotencyRecord, idempotencyrecord.OrderOption]{typ: ent.TypeIdempotencyRecord, tq: q}, nil
 	case *ent.IdentityAdoptionDecisionQuery:
 		return &query[*ent.IdentityAdoptionDecisionQuery, predicate.IdentityAdoptionDecision, identityadoptiondecision.OrderOption]{typ: ent.TypeIdentityAdoptionDecision, tq: q}, nil
+	case *ent.OpenAIOAuthDailySessionAffinityQuery:
+		return &query[*ent.OpenAIOAuthDailySessionAffinityQuery, predicate.OpenAIOAuthDailySessionAffinity, openaioauthdailysessionaffinity.OrderOption]{typ: ent.TypeOpenAIOAuthDailySessionAffinity, tq: q}, nil
+	case *ent.OpenAIOAuthDailySessionPoolQuery:
+		return &query[*ent.OpenAIOAuthDailySessionPoolQuery, predicate.OpenAIOAuthDailySessionPool, openaioauthdailysessionpool.OrderOption]{typ: ent.TypeOpenAIOAuthDailySessionPool, tq: q}, nil
+	case *ent.OpenAIOAuthSyncSessionQuery:
+		return &query[*ent.OpenAIOAuthSyncSessionQuery, predicate.OpenAIOAuthSyncSession, openaioauthsyncsession.OrderOption]{typ: ent.TypeOpenAIOAuthSyncSession, tq: q}, nil
 	case *ent.PaymentAuditLogQuery:
 		return &query[*ent.PaymentAuditLogQuery, predicate.PaymentAuditLog, paymentauditlog.OrderOption]{typ: ent.TypePaymentAuditLog, tq: q}, nil
 	case *ent.PaymentOrderQuery:

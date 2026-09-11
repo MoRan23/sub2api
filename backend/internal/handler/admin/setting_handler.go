@@ -150,6 +150,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		SessionBindingEnabled:                                  settings.SessionBindingEnabled,
 		StepUpEnabled:                                          settings.StepUpEnabled,
 		EnableOpenAIUUIDv7SessionIdentity:                      settings.EnableOpenAIUUIDv7SessionIdentity,
+		EnableOpenAIOAuthDailySessionRotation:                  settings.EnableOpenAIOAuthDailySessionRotation,
 		EnableOpenAICodexFingerprintNormalization:              settings.EnableOpenAICodexFingerprintNormalization,
 		EnableOpenAICodexInstallationIDNormalization:           settings.EnableOpenAICodexInstallationIDNormalization,
 		EnableOpenAICodexClientIdentityNormalization:           settings.EnableOpenAICodexClientIdentityNormalization,

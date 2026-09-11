@@ -45,6 +45,7 @@ type SystemSettings struct {
 	SessionBindingEnabled                        bool                     `json:"session_binding_enabled"`               // 会话 IP/UA 绑定
 	StepUpEnabled                                bool                     `json:"step_up_enabled"`                       // 敏感操作 step-up 2FA
 	EnableOpenAIUUIDv7SessionIdentity            bool                     `json:"enable_openai_uuidv7_session_identity"` // OpenAI UUIDv7 session/thread 标识对
+	EnableOpenAIOAuthDailySessionRotation        bool                     `json:"enable_openai_oauth_daily_session_rotation"`
 	EnableOpenAICodexFingerprintNormalization    bool                     `json:"enable_openai_codex_fingerprint_normalization"`
 	EnableOpenAICodexInstallationIDNormalization bool                     `json:"enable_openai_codex_installation_id_normalization"`
 	EnableOpenAICodexClientIdentityNormalization bool                     `json:"enable_openai_codex_client_identity_normalization"`

@@ -457,6 +457,7 @@ type OpenAIGatewayService struct {
 	settingService        *SettingService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 	oauthSyncSessionRepo  OAuthSyncSessionRepository
+	oauthDailySessionRepo OAuthDailySessionRepository
 	liveAttestation       liveattestation.Provider
 	liveAttestationCipher SecretEncryptor
 
@@ -504,6 +505,14 @@ type OpenAIGatewayService struct {
 func (s *OpenAIGatewayService) SetOAuthSyncSessionRepository(repo OAuthSyncSessionRepository) {
 	if s != nil {
 		s.oauthSyncSessionRepo = repo
+	}
+}
+
+// SetOAuthDailySessionRepository wires the optional daily OAuth session pool.
+// Keeping this separate preserves constructor compatibility for existing callers.
+func (s *OpenAIGatewayService) SetOAuthDailySessionRepository(repo OAuthDailySessionRepository) {
+	if s != nil {
+		s.oauthDailySessionRepo = repo
 	}
 }
 

@@ -536,6 +536,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyEnableOpenAICodexFingerprintNormalization] = strconv.FormatBool(settings.EnableOpenAICodexFingerprintNormalization)
 	updates[SettingKeyEnableOpenAICodexInstallationIDNormalization] = strconv.FormatBool(settings.EnableOpenAICodexInstallationIDNormalization)
 	updates[SettingKeyEnableOpenAIUUIDv7SessionIdentity] = strconv.FormatBool(settings.EnableOpenAIUUIDv7SessionIdentity)
+	updates[SettingKeyEnableOpenAIOAuthDailySessionRotation] = strconv.FormatBool(settings.EnableOpenAIOAuthDailySessionRotation)
 	updates[SettingKeyEnableOpenAICodexClientIdentityNormalization] = strconv.FormatBool(settings.EnableOpenAICodexClientIdentityNormalization)
 	updates[SettingKeyEnableOpenAICodexPATContextManagement] = strconv.FormatBool(settings.EnableOpenAICodexPATContextManagement)
 	updates[SettingKeyEnableOpenAIRequestTimezoneConversion] = strconv.FormatBool(settings.EnableOpenAIRequestTimezoneConversion)

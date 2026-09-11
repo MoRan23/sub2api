@@ -674,6 +674,14 @@ func TestParseSettingsOpenAIUUIDv7IdentityDefaultsOnAndPreservesExplicitFalse(t 
 	}).EnableOpenAIUUIDv7SessionIdentity)
 }
 
+func TestParseSettingsOpenAIOAuthDailySessionRotationDefaultsOff(t *testing.T) {
+	svc := NewSettingService(nil, &config.Config{})
+	require.False(t, svc.parseSettings(map[string]string{}).EnableOpenAIOAuthDailySessionRotation)
+	require.True(t, svc.parseSettings(map[string]string{
+		SettingKeyEnableOpenAIOAuthDailySessionRotation: "true",
+	}).EnableOpenAIOAuthDailySessionRotation)
+}
+
 func TestProvideSettingService_FingerprintObservationFailsClosedOnSettingsLoadError(t *testing.T) {
 	SetFingerprintObservationEnabled(true)
 	t.Cleanup(func() {

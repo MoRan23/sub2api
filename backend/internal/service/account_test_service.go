@@ -156,9 +156,10 @@ type AccountTestService struct {
 	// oauthSyncSessionRepo provides the account-scoped root session used by
 	// synchronous OAuth account probes. It is optional for narrow unit tests;
 	// production wiring supplies the durable repository implementation.
-	oauthSyncSessionRepo OAuthSyncSessionRepository
-	agentIdentityTaskMu  sync.Mutex
-	agentIdentityWS      agentIdentityWSConnectionInvalidator
+	oauthSyncSessionRepo  OAuthSyncSessionRepository
+	oauthDailySessionRepo OAuthDailySessionRepository
+	agentIdentityTaskMu   sync.Mutex
+	agentIdentityWS       agentIdentityWSConnectionInvalidator
 	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
 	// WS dialer when nil (supports proxy + coder/websocket handshake).
 	grokWSDialer openAIWSClientDialer
@@ -203,16 +204,34 @@ func (s *AccountTestService) SetOAuthSyncSessionRepository(repo OAuthSyncSession
 	}
 }
 
+func (s *AccountTestService) SetOAuthDailySessionRepository(repo OAuthDailySessionRepository) {
+	if s != nil {
+		s.oauthDailySessionRepo = repo
+	}
+}
+
 // applyOAuthAccountTestRootSession replaces the generated turn identity for
 // an OAuth account probe with its dedicated synchronous root session. Tests
 // are standalone probes, so session_id == thread_id and no parent/fork
 // lineage is emitted. A nil repository preserves the existing unit-test
 // fallback while production always wires the durable store.
 func (s *AccountTestService) applyOAuthAccountTestRootSession(ctx context.Context, account *Account, plan *OpenAIOAuthIdentityPlan) error {
-	if s == nil || account == nil || plan == nil || !account.IsOpenAIOAuth() || s.oauthSyncSessionRepo == nil {
+	if s == nil || account == nil || plan == nil || !account.IsOpenAIOAuth() {
 		return nil
 	}
-	root, err := s.oauthSyncSessionRepo.GetOrCreateOAuthSyncSession(ctx, account.ID)
+	var root string
+	var err error
+	if s.oauthDailySessionRepo != nil && s.settingService != nil && s.settingService.IsOpenAIOAuthDailySessionRotationEnabled(ctx) {
+		pool, e := s.oauthDailySessionRepo.GetOrCreateOAuthDailySessionPool(ctx, account.ID, time.Now())
+		if e != nil {
+			return fmt.Errorf("resolve OAuth daily synchronous test session for account %d: %w", account.ID, e)
+		}
+		root = pool.SyncSessionID
+	} else if s.oauthSyncSessionRepo != nil {
+		root, err = s.oauthSyncSessionRepo.GetOrCreateOAuthSyncSession(ctx, account.ID)
+	} else {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("resolve OAuth synchronous test session: %w", err)
 	}

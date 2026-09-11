@@ -24,6 +24,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/openaioauthdailysessionaffinity"
+	"github.com/Wei-Shaw/sub2api/ent/openaioauthdailysessionpool"
 	"github.com/Wei-Shaw/sub2api/ent/openaioauthsyncsession"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
@@ -1287,6 +1289,94 @@ func init() {
 	identityadoptiondecisionDescDecidedAt := identityadoptiondecisionFields[4].Descriptor()
 	// identityadoptiondecision.DefaultDecidedAt holds the default value on creation for the decided_at field.
 	identityadoptiondecision.DefaultDecidedAt = identityadoptiondecisionDescDecidedAt.Default.(func() time.Time)
+	openaioauthdailysessionaffinityMixin := schema.OpenAIOAuthDailySessionAffinity{}.Mixin()
+	openaioauthdailysessionaffinityMixinFields0 := openaioauthdailysessionaffinityMixin[0].Fields()
+	_ = openaioauthdailysessionaffinityMixinFields0
+	openaioauthdailysessionaffinityFields := schema.OpenAIOAuthDailySessionAffinity{}.Fields()
+	_ = openaioauthdailysessionaffinityFields
+	// openaioauthdailysessionaffinityDescCreatedAt is the schema descriptor for created_at field.
+	openaioauthdailysessionaffinityDescCreatedAt := openaioauthdailysessionaffinityMixinFields0[0].Descriptor()
+	// openaioauthdailysessionaffinity.DefaultCreatedAt holds the default value on creation for the created_at field.
+	openaioauthdailysessionaffinity.DefaultCreatedAt = openaioauthdailysessionaffinityDescCreatedAt.Default.(func() time.Time)
+	// openaioauthdailysessionaffinityDescUpdatedAt is the schema descriptor for updated_at field.
+	openaioauthdailysessionaffinityDescUpdatedAt := openaioauthdailysessionaffinityMixinFields0[1].Descriptor()
+	// openaioauthdailysessionaffinity.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	openaioauthdailysessionaffinity.DefaultUpdatedAt = openaioauthdailysessionaffinityDescUpdatedAt.Default.(func() time.Time)
+	// openaioauthdailysessionaffinity.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	openaioauthdailysessionaffinity.UpdateDefaultUpdatedAt = openaioauthdailysessionaffinityDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// openaioauthdailysessionaffinityDescAPIKeyID is the schema descriptor for api_key_id field.
+	openaioauthdailysessionaffinityDescAPIKeyID := openaioauthdailysessionaffinityFields[1].Descriptor()
+	// openaioauthdailysessionaffinity.DefaultAPIKeyID holds the default value on creation for the api_key_id field.
+	openaioauthdailysessionaffinity.DefaultAPIKeyID = openaioauthdailysessionaffinityDescAPIKeyID.Default.(int64)
+	// openaioauthdailysessionaffinityDescLogicalSessionKey is the schema descriptor for logical_session_key field.
+	openaioauthdailysessionaffinityDescLogicalSessionKey := openaioauthdailysessionaffinityFields[2].Descriptor()
+	// openaioauthdailysessionaffinity.LogicalSessionKeyValidator is a validator for the "logical_session_key" field. It is called by the builders before save.
+	openaioauthdailysessionaffinity.LogicalSessionKeyValidator = openaioauthdailysessionaffinityDescLogicalSessionKey.Validators[0].(func(string) error)
+	// openaioauthdailysessionaffinityDescBusinessDate is the schema descriptor for business_date field.
+	openaioauthdailysessionaffinityDescBusinessDate := openaioauthdailysessionaffinityFields[3].Descriptor()
+	// openaioauthdailysessionaffinity.BusinessDateValidator is a validator for the "business_date" field. It is called by the builders before save.
+	openaioauthdailysessionaffinity.BusinessDateValidator = openaioauthdailysessionaffinityDescBusinessDate.Validators[0].(func(string) error)
+	// openaioauthdailysessionaffinityDescGeneration is the schema descriptor for generation field.
+	openaioauthdailysessionaffinityDescGeneration := openaioauthdailysessionaffinityFields[4].Descriptor()
+	// openaioauthdailysessionaffinity.GenerationValidator is a validator for the "generation" field. It is called by the builders before save.
+	openaioauthdailysessionaffinity.GenerationValidator = openaioauthdailysessionaffinityDescGeneration.Validators[0].(func(string) error)
+	// openaioauthdailysessionaffinityDescStreamSessionID is the schema descriptor for stream_session_id field.
+	openaioauthdailysessionaffinityDescStreamSessionID := openaioauthdailysessionaffinityFields[6].Descriptor()
+	// openaioauthdailysessionaffinity.StreamSessionIDValidator is a validator for the "stream_session_id" field. It is called by the builders before save.
+	openaioauthdailysessionaffinity.StreamSessionIDValidator = openaioauthdailysessionaffinityDescStreamSessionID.Validators[0].(func(string) error)
+	// openaioauthdailysessionaffinityDescLastSeenAt is the schema descriptor for last_seen_at field.
+	openaioauthdailysessionaffinityDescLastSeenAt := openaioauthdailysessionaffinityFields[7].Descriptor()
+	// openaioauthdailysessionaffinity.DefaultLastSeenAt holds the default value on creation for the last_seen_at field.
+	openaioauthdailysessionaffinity.DefaultLastSeenAt = openaioauthdailysessionaffinityDescLastSeenAt.Default.(func() time.Time)
+	// openaioauthdailysessionaffinity.UpdateDefaultLastSeenAt holds the default value on update for the last_seen_at field.
+	openaioauthdailysessionaffinity.UpdateDefaultLastSeenAt = openaioauthdailysessionaffinityDescLastSeenAt.UpdateDefault.(func() time.Time)
+	// openaioauthdailysessionaffinityDescActive is the schema descriptor for active field.
+	openaioauthdailysessionaffinityDescActive := openaioauthdailysessionaffinityFields[8].Descriptor()
+	// openaioauthdailysessionaffinity.DefaultActive holds the default value on creation for the active field.
+	openaioauthdailysessionaffinity.DefaultActive = openaioauthdailysessionaffinityDescActive.Default.(bool)
+	openaioauthdailysessionpoolMixin := schema.OpenAIOAuthDailySessionPool{}.Mixin()
+	openaioauthdailysessionpoolMixinFields0 := openaioauthdailysessionpoolMixin[0].Fields()
+	_ = openaioauthdailysessionpoolMixinFields0
+	openaioauthdailysessionpoolFields := schema.OpenAIOAuthDailySessionPool{}.Fields()
+	_ = openaioauthdailysessionpoolFields
+	// openaioauthdailysessionpoolDescCreatedAt is the schema descriptor for created_at field.
+	openaioauthdailysessionpoolDescCreatedAt := openaioauthdailysessionpoolMixinFields0[0].Descriptor()
+	// openaioauthdailysessionpool.DefaultCreatedAt holds the default value on creation for the created_at field.
+	openaioauthdailysessionpool.DefaultCreatedAt = openaioauthdailysessionpoolDescCreatedAt.Default.(func() time.Time)
+	// openaioauthdailysessionpoolDescUpdatedAt is the schema descriptor for updated_at field.
+	openaioauthdailysessionpoolDescUpdatedAt := openaioauthdailysessionpoolMixinFields0[1].Descriptor()
+	// openaioauthdailysessionpool.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	openaioauthdailysessionpool.DefaultUpdatedAt = openaioauthdailysessionpoolDescUpdatedAt.Default.(func() time.Time)
+	// openaioauthdailysessionpool.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	openaioauthdailysessionpool.UpdateDefaultUpdatedAt = openaioauthdailysessionpoolDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// openaioauthdailysessionpoolDescBusinessDate is the schema descriptor for business_date field.
+	openaioauthdailysessionpoolDescBusinessDate := openaioauthdailysessionpoolFields[1].Descriptor()
+	// openaioauthdailysessionpool.BusinessDateValidator is a validator for the "business_date" field. It is called by the builders before save.
+	openaioauthdailysessionpool.BusinessDateValidator = openaioauthdailysessionpoolDescBusinessDate.Validators[0].(func(string) error)
+	// openaioauthdailysessionpoolDescGeneration is the schema descriptor for generation field.
+	openaioauthdailysessionpoolDescGeneration := openaioauthdailysessionpoolFields[2].Descriptor()
+	// openaioauthdailysessionpool.GenerationValidator is a validator for the "generation" field. It is called by the builders before save.
+	openaioauthdailysessionpool.GenerationValidator = openaioauthdailysessionpoolDescGeneration.Validators[0].(func(string) error)
+	// openaioauthdailysessionpoolDescStreamSession0 is the schema descriptor for stream_session_0 field.
+	openaioauthdailysessionpoolDescStreamSession0 := openaioauthdailysessionpoolFields[3].Descriptor()
+	// openaioauthdailysessionpool.StreamSession0Validator is a validator for the "stream_session_0" field. It is called by the builders before save.
+	openaioauthdailysessionpool.StreamSession0Validator = openaioauthdailysessionpoolDescStreamSession0.Validators[0].(func(string) error)
+	// openaioauthdailysessionpoolDescStreamSession1 is the schema descriptor for stream_session_1 field.
+	openaioauthdailysessionpoolDescStreamSession1 := openaioauthdailysessionpoolFields[4].Descriptor()
+	// openaioauthdailysessionpool.StreamSession1Validator is a validator for the "stream_session_1" field. It is called by the builders before save.
+	openaioauthdailysessionpool.StreamSession1Validator = openaioauthdailysessionpoolDescStreamSession1.Validators[0].(func(string) error)
+	// openaioauthdailysessionpoolDescStreamSession2 is the schema descriptor for stream_session_2 field.
+	openaioauthdailysessionpoolDescStreamSession2 := openaioauthdailysessionpoolFields[5].Descriptor()
+	// openaioauthdailysessionpool.StreamSession2Validator is a validator for the "stream_session_2" field. It is called by the builders before save.
+	openaioauthdailysessionpool.StreamSession2Validator = openaioauthdailysessionpoolDescStreamSession2.Validators[0].(func(string) error)
+	// openaioauthdailysessionpoolDescSyncSession is the schema descriptor for sync_session field.
+	openaioauthdailysessionpoolDescSyncSession := openaioauthdailysessionpoolFields[6].Descriptor()
+	// openaioauthdailysessionpool.SyncSessionValidator is a validator for the "sync_session" field. It is called by the builders before save.
+	openaioauthdailysessionpool.SyncSessionValidator = openaioauthdailysessionpoolDescSyncSession.Validators[0].(func(string) error)
+	// openaioauthdailysessionpoolDescActiveStreams is the schema descriptor for active_streams field.
+	openaioauthdailysessionpoolDescActiveStreams := openaioauthdailysessionpoolFields[7].Descriptor()
+	// openaioauthdailysessionpool.DefaultActiveStreams holds the default value on creation for the active_streams field.
+	openaioauthdailysessionpool.DefaultActiveStreams = openaioauthdailysessionpoolDescActiveStreams.Default.(int)
 	openaioauthsyncsessionMixin := schema.OpenAIOAuthSyncSession{}.Mixin()
 	openaioauthsyncsessionMixinFields0 := openaioauthsyncsessionMixin[0].Fields()
 	_ = openaioauthsyncsessionMixinFields0

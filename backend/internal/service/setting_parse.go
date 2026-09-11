@@ -247,6 +247,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyEnableOpenAICodexFingerprintNormalization:          "true",
 		SettingKeyEnableOpenAICodexInstallationIDNormalization:       "true",
 		SettingKeyEnableOpenAIUUIDv7SessionIdentity:                  "true",
+		SettingKeyEnableOpenAIOAuthDailySessionRotation:              "false",
 		SettingKeyEnableOpenAICodexClientIdentityNormalization:       "true",
 		SettingKeyEnableOpenAICodexPATContextManagement:              "false",
 		SettingKeyEnableOpenAIRequestTimezoneConversion:              "true",
@@ -914,6 +915,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		settings, SettingKeyEnableOpenAICodexClientIdentityNormalization,
 	)
 	result.EnableOpenAICodexPATContextManagement = settings[SettingKeyEnableOpenAICodexPATContextManagement] == "true"
+	result.EnableOpenAIOAuthDailySessionRotation = settings[SettingKeyEnableOpenAIOAuthDailySessionRotation] == "true"
 	result.EnableOpenAIRequestTimezoneConversion = parseDefaultTrueSetting(settings, SettingKeyEnableOpenAIRequestTimezoneConversion)
 	result.EnableOpenAIPassthroughTimezoneConversion = parseDefaultTrueSetting(settings, SettingKeyEnableOpenAIPassthroughTimezoneConversion)
 	result.EnableOpenAICodexResidencyUS = parseDefaultTrueSetting(settings, SettingKeyEnableOpenAICodexResidencyUS)

@@ -31,6 +31,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/openaioauthdailysessionaffinity"
+	"github.com/Wei-Shaw/sub2api/ent/openaioauthdailysessionpool"
 	"github.com/Wei-Shaw/sub2api/ent/openaioauthsyncsession"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
@@ -66,47 +68,49 @@ const (
 	OpUpdateOne = ent.OpUpdateOne
 
 	// Node types.
-	TypeAPIKey                        = "APIKey"
-	TypeAccount                       = "Account"
-	TypeAccountGroup                  = "AccountGroup"
-	TypeAnnouncement                  = "Announcement"
-	TypeAnnouncementRead              = "AnnouncementRead"
-	TypeAuthIdentity                  = "AuthIdentity"
-	TypeAuthIdentityChannel           = "AuthIdentityChannel"
-	TypeBatchImageEvent               = "BatchImageEvent"
-	TypeBatchImageItem                = "BatchImageItem"
-	TypeBatchImageJob                 = "BatchImageJob"
-	TypeChannelMonitor                = "ChannelMonitor"
-	TypeChannelMonitorDailyRollup     = "ChannelMonitorDailyRollup"
-	TypeChannelMonitorHistory         = "ChannelMonitorHistory"
-	TypeChannelMonitorRequestTemplate = "ChannelMonitorRequestTemplate"
-	TypeCompositeModelRoute           = "CompositeModelRoute"
-	TypeErrorPassthroughRule          = "ErrorPassthroughRule"
-	TypeGroup                         = "Group"
-	TypeIdempotencyRecord             = "IdempotencyRecord"
-	TypeIdentityAdoptionDecision      = "IdentityAdoptionDecision"
-	TypeOpenAIOAuthSyncSession        = "OpenAIOAuthSyncSession"
-	TypePaymentAuditLog               = "PaymentAuditLog"
-	TypePaymentOrder                  = "PaymentOrder"
-	TypePaymentProviderInstance       = "PaymentProviderInstance"
-	TypePendingAuthSession            = "PendingAuthSession"
-	TypePromoCode                     = "PromoCode"
-	TypePromoCodeUsage                = "PromoCodeUsage"
-	TypeProxy                         = "Proxy"
-	TypeRedeemCode                    = "RedeemCode"
-	TypeSecuritySecret                = "SecuritySecret"
-	TypeSetting                       = "Setting"
-	TypeSubscriptionPlan              = "SubscriptionPlan"
-	TypeTLSFingerprintProfile         = "TLSFingerprintProfile"
-	TypeUsageCleanupTask              = "UsageCleanupTask"
-	TypeUsageLog                      = "UsageLog"
-	TypeUser                          = "User"
-	TypeUserAllowedGroup              = "UserAllowedGroup"
-	TypeUserAttributeDefinition       = "UserAttributeDefinition"
-	TypeUserAttributeValue            = "UserAttributeValue"
-	TypeUserPlatformQuota             = "UserPlatformQuota"
-	TypeUserSubscription              = "UserSubscription"
-	TypeUserSubscriptionQuotaEvent    = "UserSubscriptionQuotaEvent"
+	TypeAPIKey                          = "APIKey"
+	TypeAccount                         = "Account"
+	TypeAccountGroup                    = "AccountGroup"
+	TypeAnnouncement                    = "Announcement"
+	TypeAnnouncementRead                = "AnnouncementRead"
+	TypeAuthIdentity                    = "AuthIdentity"
+	TypeAuthIdentityChannel             = "AuthIdentityChannel"
+	TypeBatchImageEvent                 = "BatchImageEvent"
+	TypeBatchImageItem                  = "BatchImageItem"
+	TypeBatchImageJob                   = "BatchImageJob"
+	TypeChannelMonitor                  = "ChannelMonitor"
+	TypeChannelMonitorDailyRollup       = "ChannelMonitorDailyRollup"
+	TypeChannelMonitorHistory           = "ChannelMonitorHistory"
+	TypeChannelMonitorRequestTemplate   = "ChannelMonitorRequestTemplate"
+	TypeCompositeModelRoute             = "CompositeModelRoute"
+	TypeErrorPassthroughRule            = "ErrorPassthroughRule"
+	TypeGroup                           = "Group"
+	TypeIdempotencyRecord               = "IdempotencyRecord"
+	TypeIdentityAdoptionDecision        = "IdentityAdoptionDecision"
+	TypeOpenAIOAuthDailySessionAffinity = "OpenAIOAuthDailySessionAffinity"
+	TypeOpenAIOAuthDailySessionPool     = "OpenAIOAuthDailySessionPool"
+	TypeOpenAIOAuthSyncSession          = "OpenAIOAuthSyncSession"
+	TypePaymentAuditLog                 = "PaymentAuditLog"
+	TypePaymentOrder                    = "PaymentOrder"
+	TypePaymentProviderInstance         = "PaymentProviderInstance"
+	TypePendingAuthSession              = "PendingAuthSession"
+	TypePromoCode                       = "PromoCode"
+	TypePromoCodeUsage                  = "PromoCodeUsage"
+	TypeProxy                           = "Proxy"
+	TypeRedeemCode                      = "RedeemCode"
+	TypeSecuritySecret                  = "SecuritySecret"
+	TypeSetting                         = "Setting"
+	TypeSubscriptionPlan                = "SubscriptionPlan"
+	TypeTLSFingerprintProfile           = "TLSFingerprintProfile"
+	TypeUsageCleanupTask                = "UsageCleanupTask"
+	TypeUsageLog                        = "UsageLog"
+	TypeUser                            = "User"
+	TypeUserAllowedGroup                = "UserAllowedGroup"
+	TypeUserAttributeDefinition         = "UserAttributeDefinition"
+	TypeUserAttributeValue              = "UserAttributeValue"
+	TypeUserPlatformQuota               = "UserPlatformQuota"
+	TypeUserSubscription                = "UserSubscription"
+	TypeUserSubscriptionQuotaEvent      = "UserSubscriptionQuotaEvent"
 )
 
 // APIKeyMutation represents an operation that mutates the APIKey nodes in the graph.
@@ -29667,6 +29671,1855 @@ func (m *IdentityAdoptionDecisionMutation) ResetEdge(name string) error {
 	return fmt.Errorf("unknown IdentityAdoptionDecision edge %s", name)
 }
 
+// OpenAIOAuthDailySessionAffinityMutation represents an operation that mutates the OpenAIOAuthDailySessionAffinity nodes in the graph.
+type OpenAIOAuthDailySessionAffinityMutation struct {
+	config
+	op                  Op
+	typ                 string
+	id                  *int64
+	created_at          *time.Time
+	updated_at          *time.Time
+	account_id          *int64
+	addaccount_id       *int64
+	api_key_id          *int64
+	addapi_key_id       *int64
+	logical_session_key *string
+	business_date       *string
+	generation          *string
+	slot_index          *int
+	addslot_index       *int
+	stream_session_id   *string
+	last_seen_at        *time.Time
+	active              *bool
+	clearedFields       map[string]struct{}
+	done                bool
+	oldValue            func(context.Context) (*OpenAIOAuthDailySessionAffinity, error)
+	predicates          []predicate.OpenAIOAuthDailySessionAffinity
+}
+
+var _ ent.Mutation = (*OpenAIOAuthDailySessionAffinityMutation)(nil)
+
+// openaioauthdailysessionaffinityOption allows management of the mutation configuration using functional options.
+type openaioauthdailysessionaffinityOption func(*OpenAIOAuthDailySessionAffinityMutation)
+
+// newOpenAIOAuthDailySessionAffinityMutation creates new mutation for the OpenAIOAuthDailySessionAffinity entity.
+func newOpenAIOAuthDailySessionAffinityMutation(c config, op Op, opts ...openaioauthdailysessionaffinityOption) *OpenAIOAuthDailySessionAffinityMutation {
+	m := &OpenAIOAuthDailySessionAffinityMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeOpenAIOAuthDailySessionAffinity,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withOpenAIOAuthDailySessionAffinityID sets the ID field of the mutation.
+func withOpenAIOAuthDailySessionAffinityID(id int64) openaioauthdailysessionaffinityOption {
+	return func(m *OpenAIOAuthDailySessionAffinityMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *OpenAIOAuthDailySessionAffinity
+		)
+		m.oldValue = func(ctx context.Context) (*OpenAIOAuthDailySessionAffinity, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().OpenAIOAuthDailySessionAffinity.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withOpenAIOAuthDailySessionAffinity sets the old OpenAIOAuthDailySessionAffinity of the mutation.
+func withOpenAIOAuthDailySessionAffinity(node *OpenAIOAuthDailySessionAffinity) openaioauthdailysessionaffinityOption {
+	return func(m *OpenAIOAuthDailySessionAffinityMutation) {
+		m.oldValue = func(context.Context) (*OpenAIOAuthDailySessionAffinity, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m OpenAIOAuthDailySessionAffinityMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m OpenAIOAuthDailySessionAffinityMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().OpenAIOAuthDailySessionAffinity.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the OpenAIOAuthDailySessionAffinity entity.
+// If the OpenAIOAuthDailySessionAffinity object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionAffinityMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the OpenAIOAuthDailySessionAffinity entity.
+// If the OpenAIOAuthDailySessionAffinity object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionAffinityMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetAccountID sets the "account_id" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) SetAccountID(i int64) {
+	m.account_id = &i
+	m.addaccount_id = nil
+}
+
+// AccountID returns the value of the "account_id" field in the mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) AccountID() (r int64, exists bool) {
+	v := m.account_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAccountID returns the old "account_id" field's value of the OpenAIOAuthDailySessionAffinity entity.
+// If the OpenAIOAuthDailySessionAffinity object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionAffinityMutation) OldAccountID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAccountID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAccountID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAccountID: %w", err)
+	}
+	return oldValue.AccountID, nil
+}
+
+// AddAccountID adds i to the "account_id" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) AddAccountID(i int64) {
+	if m.addaccount_id != nil {
+		*m.addaccount_id += i
+	} else {
+		m.addaccount_id = &i
+	}
+}
+
+// AddedAccountID returns the value that was added to the "account_id" field in this mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) AddedAccountID() (r int64, exists bool) {
+	v := m.addaccount_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetAccountID resets all changes to the "account_id" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ResetAccountID() {
+	m.account_id = nil
+	m.addaccount_id = nil
+}
+
+// SetAPIKeyID sets the "api_key_id" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) SetAPIKeyID(i int64) {
+	m.api_key_id = &i
+	m.addapi_key_id = nil
+}
+
+// APIKeyID returns the value of the "api_key_id" field in the mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) APIKeyID() (r int64, exists bool) {
+	v := m.api_key_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAPIKeyID returns the old "api_key_id" field's value of the OpenAIOAuthDailySessionAffinity entity.
+// If the OpenAIOAuthDailySessionAffinity object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionAffinityMutation) OldAPIKeyID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAPIKeyID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAPIKeyID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAPIKeyID: %w", err)
+	}
+	return oldValue.APIKeyID, nil
+}
+
+// AddAPIKeyID adds i to the "api_key_id" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) AddAPIKeyID(i int64) {
+	if m.addapi_key_id != nil {
+		*m.addapi_key_id += i
+	} else {
+		m.addapi_key_id = &i
+	}
+}
+
+// AddedAPIKeyID returns the value that was added to the "api_key_id" field in this mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) AddedAPIKeyID() (r int64, exists bool) {
+	v := m.addapi_key_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetAPIKeyID resets all changes to the "api_key_id" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ResetAPIKeyID() {
+	m.api_key_id = nil
+	m.addapi_key_id = nil
+}
+
+// SetLogicalSessionKey sets the "logical_session_key" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) SetLogicalSessionKey(s string) {
+	m.logical_session_key = &s
+}
+
+// LogicalSessionKey returns the value of the "logical_session_key" field in the mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) LogicalSessionKey() (r string, exists bool) {
+	v := m.logical_session_key
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLogicalSessionKey returns the old "logical_session_key" field's value of the OpenAIOAuthDailySessionAffinity entity.
+// If the OpenAIOAuthDailySessionAffinity object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionAffinityMutation) OldLogicalSessionKey(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLogicalSessionKey is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLogicalSessionKey requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLogicalSessionKey: %w", err)
+	}
+	return oldValue.LogicalSessionKey, nil
+}
+
+// ResetLogicalSessionKey resets all changes to the "logical_session_key" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ResetLogicalSessionKey() {
+	m.logical_session_key = nil
+}
+
+// SetBusinessDate sets the "business_date" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) SetBusinessDate(s string) {
+	m.business_date = &s
+}
+
+// BusinessDate returns the value of the "business_date" field in the mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) BusinessDate() (r string, exists bool) {
+	v := m.business_date
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBusinessDate returns the old "business_date" field's value of the OpenAIOAuthDailySessionAffinity entity.
+// If the OpenAIOAuthDailySessionAffinity object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionAffinityMutation) OldBusinessDate(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBusinessDate is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBusinessDate requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBusinessDate: %w", err)
+	}
+	return oldValue.BusinessDate, nil
+}
+
+// ResetBusinessDate resets all changes to the "business_date" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ResetBusinessDate() {
+	m.business_date = nil
+}
+
+// SetGeneration sets the "generation" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) SetGeneration(s string) {
+	m.generation = &s
+}
+
+// Generation returns the value of the "generation" field in the mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) Generation() (r string, exists bool) {
+	v := m.generation
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGeneration returns the old "generation" field's value of the OpenAIOAuthDailySessionAffinity entity.
+// If the OpenAIOAuthDailySessionAffinity object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionAffinityMutation) OldGeneration(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGeneration is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGeneration requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGeneration: %w", err)
+	}
+	return oldValue.Generation, nil
+}
+
+// ResetGeneration resets all changes to the "generation" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ResetGeneration() {
+	m.generation = nil
+}
+
+// SetSlotIndex sets the "slot_index" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) SetSlotIndex(i int) {
+	m.slot_index = &i
+	m.addslot_index = nil
+}
+
+// SlotIndex returns the value of the "slot_index" field in the mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) SlotIndex() (r int, exists bool) {
+	v := m.slot_index
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSlotIndex returns the old "slot_index" field's value of the OpenAIOAuthDailySessionAffinity entity.
+// If the OpenAIOAuthDailySessionAffinity object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionAffinityMutation) OldSlotIndex(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSlotIndex is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSlotIndex requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSlotIndex: %w", err)
+	}
+	return oldValue.SlotIndex, nil
+}
+
+// AddSlotIndex adds i to the "slot_index" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) AddSlotIndex(i int) {
+	if m.addslot_index != nil {
+		*m.addslot_index += i
+	} else {
+		m.addslot_index = &i
+	}
+}
+
+// AddedSlotIndex returns the value that was added to the "slot_index" field in this mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) AddedSlotIndex() (r int, exists bool) {
+	v := m.addslot_index
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetSlotIndex resets all changes to the "slot_index" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ResetSlotIndex() {
+	m.slot_index = nil
+	m.addslot_index = nil
+}
+
+// SetStreamSessionID sets the "stream_session_id" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) SetStreamSessionID(s string) {
+	m.stream_session_id = &s
+}
+
+// StreamSessionID returns the value of the "stream_session_id" field in the mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) StreamSessionID() (r string, exists bool) {
+	v := m.stream_session_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStreamSessionID returns the old "stream_session_id" field's value of the OpenAIOAuthDailySessionAffinity entity.
+// If the OpenAIOAuthDailySessionAffinity object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionAffinityMutation) OldStreamSessionID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStreamSessionID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStreamSessionID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStreamSessionID: %w", err)
+	}
+	return oldValue.StreamSessionID, nil
+}
+
+// ResetStreamSessionID resets all changes to the "stream_session_id" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ResetStreamSessionID() {
+	m.stream_session_id = nil
+}
+
+// SetLastSeenAt sets the "last_seen_at" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) SetLastSeenAt(t time.Time) {
+	m.last_seen_at = &t
+}
+
+// LastSeenAt returns the value of the "last_seen_at" field in the mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) LastSeenAt() (r time.Time, exists bool) {
+	v := m.last_seen_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastSeenAt returns the old "last_seen_at" field's value of the OpenAIOAuthDailySessionAffinity entity.
+// If the OpenAIOAuthDailySessionAffinity object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionAffinityMutation) OldLastSeenAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastSeenAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastSeenAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastSeenAt: %w", err)
+	}
+	return oldValue.LastSeenAt, nil
+}
+
+// ResetLastSeenAt resets all changes to the "last_seen_at" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ResetLastSeenAt() {
+	m.last_seen_at = nil
+}
+
+// SetActive sets the "active" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) SetActive(b bool) {
+	m.active = &b
+}
+
+// Active returns the value of the "active" field in the mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) Active() (r bool, exists bool) {
+	v := m.active
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldActive returns the old "active" field's value of the OpenAIOAuthDailySessionAffinity entity.
+// If the OpenAIOAuthDailySessionAffinity object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionAffinityMutation) OldActive(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldActive is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldActive requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldActive: %w", err)
+	}
+	return oldValue.Active, nil
+}
+
+// ResetActive resets all changes to the "active" field.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ResetActive() {
+	m.active = nil
+}
+
+// Where appends a list predicates to the OpenAIOAuthDailySessionAffinityMutation builder.
+func (m *OpenAIOAuthDailySessionAffinityMutation) Where(ps ...predicate.OpenAIOAuthDailySessionAffinity) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the OpenAIOAuthDailySessionAffinityMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *OpenAIOAuthDailySessionAffinityMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.OpenAIOAuthDailySessionAffinity, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *OpenAIOAuthDailySessionAffinityMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (OpenAIOAuthDailySessionAffinity).
+func (m *OpenAIOAuthDailySessionAffinityMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *OpenAIOAuthDailySessionAffinityMutation) Fields() []string {
+	fields := make([]string, 0, 11)
+	if m.created_at != nil {
+		fields = append(fields, openaioauthdailysessionaffinity.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, openaioauthdailysessionaffinity.FieldUpdatedAt)
+	}
+	if m.account_id != nil {
+		fields = append(fields, openaioauthdailysessionaffinity.FieldAccountID)
+	}
+	if m.api_key_id != nil {
+		fields = append(fields, openaioauthdailysessionaffinity.FieldAPIKeyID)
+	}
+	if m.logical_session_key != nil {
+		fields = append(fields, openaioauthdailysessionaffinity.FieldLogicalSessionKey)
+	}
+	if m.business_date != nil {
+		fields = append(fields, openaioauthdailysessionaffinity.FieldBusinessDate)
+	}
+	if m.generation != nil {
+		fields = append(fields, openaioauthdailysessionaffinity.FieldGeneration)
+	}
+	if m.slot_index != nil {
+		fields = append(fields, openaioauthdailysessionaffinity.FieldSlotIndex)
+	}
+	if m.stream_session_id != nil {
+		fields = append(fields, openaioauthdailysessionaffinity.FieldStreamSessionID)
+	}
+	if m.last_seen_at != nil {
+		fields = append(fields, openaioauthdailysessionaffinity.FieldLastSeenAt)
+	}
+	if m.active != nil {
+		fields = append(fields, openaioauthdailysessionaffinity.FieldActive)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *OpenAIOAuthDailySessionAffinityMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case openaioauthdailysessionaffinity.FieldCreatedAt:
+		return m.CreatedAt()
+	case openaioauthdailysessionaffinity.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case openaioauthdailysessionaffinity.FieldAccountID:
+		return m.AccountID()
+	case openaioauthdailysessionaffinity.FieldAPIKeyID:
+		return m.APIKeyID()
+	case openaioauthdailysessionaffinity.FieldLogicalSessionKey:
+		return m.LogicalSessionKey()
+	case openaioauthdailysessionaffinity.FieldBusinessDate:
+		return m.BusinessDate()
+	case openaioauthdailysessionaffinity.FieldGeneration:
+		return m.Generation()
+	case openaioauthdailysessionaffinity.FieldSlotIndex:
+		return m.SlotIndex()
+	case openaioauthdailysessionaffinity.FieldStreamSessionID:
+		return m.StreamSessionID()
+	case openaioauthdailysessionaffinity.FieldLastSeenAt:
+		return m.LastSeenAt()
+	case openaioauthdailysessionaffinity.FieldActive:
+		return m.Active()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *OpenAIOAuthDailySessionAffinityMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case openaioauthdailysessionaffinity.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case openaioauthdailysessionaffinity.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case openaioauthdailysessionaffinity.FieldAccountID:
+		return m.OldAccountID(ctx)
+	case openaioauthdailysessionaffinity.FieldAPIKeyID:
+		return m.OldAPIKeyID(ctx)
+	case openaioauthdailysessionaffinity.FieldLogicalSessionKey:
+		return m.OldLogicalSessionKey(ctx)
+	case openaioauthdailysessionaffinity.FieldBusinessDate:
+		return m.OldBusinessDate(ctx)
+	case openaioauthdailysessionaffinity.FieldGeneration:
+		return m.OldGeneration(ctx)
+	case openaioauthdailysessionaffinity.FieldSlotIndex:
+		return m.OldSlotIndex(ctx)
+	case openaioauthdailysessionaffinity.FieldStreamSessionID:
+		return m.OldStreamSessionID(ctx)
+	case openaioauthdailysessionaffinity.FieldLastSeenAt:
+		return m.OldLastSeenAt(ctx)
+	case openaioauthdailysessionaffinity.FieldActive:
+		return m.OldActive(ctx)
+	}
+	return nil, fmt.Errorf("unknown OpenAIOAuthDailySessionAffinity field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *OpenAIOAuthDailySessionAffinityMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case openaioauthdailysessionaffinity.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case openaioauthdailysessionaffinity.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case openaioauthdailysessionaffinity.FieldAccountID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAccountID(v)
+		return nil
+	case openaioauthdailysessionaffinity.FieldAPIKeyID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAPIKeyID(v)
+		return nil
+	case openaioauthdailysessionaffinity.FieldLogicalSessionKey:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLogicalSessionKey(v)
+		return nil
+	case openaioauthdailysessionaffinity.FieldBusinessDate:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBusinessDate(v)
+		return nil
+	case openaioauthdailysessionaffinity.FieldGeneration:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGeneration(v)
+		return nil
+	case openaioauthdailysessionaffinity.FieldSlotIndex:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSlotIndex(v)
+		return nil
+	case openaioauthdailysessionaffinity.FieldStreamSessionID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStreamSessionID(v)
+		return nil
+	case openaioauthdailysessionaffinity.FieldLastSeenAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastSeenAt(v)
+		return nil
+	case openaioauthdailysessionaffinity.FieldActive:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetActive(v)
+		return nil
+	}
+	return fmt.Errorf("unknown OpenAIOAuthDailySessionAffinity field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) AddedFields() []string {
+	var fields []string
+	if m.addaccount_id != nil {
+		fields = append(fields, openaioauthdailysessionaffinity.FieldAccountID)
+	}
+	if m.addapi_key_id != nil {
+		fields = append(fields, openaioauthdailysessionaffinity.FieldAPIKeyID)
+	}
+	if m.addslot_index != nil {
+		fields = append(fields, openaioauthdailysessionaffinity.FieldSlotIndex)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *OpenAIOAuthDailySessionAffinityMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case openaioauthdailysessionaffinity.FieldAccountID:
+		return m.AddedAccountID()
+	case openaioauthdailysessionaffinity.FieldAPIKeyID:
+		return m.AddedAPIKeyID()
+	case openaioauthdailysessionaffinity.FieldSlotIndex:
+		return m.AddedSlotIndex()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *OpenAIOAuthDailySessionAffinityMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case openaioauthdailysessionaffinity.FieldAccountID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddAccountID(v)
+		return nil
+	case openaioauthdailysessionaffinity.FieldAPIKeyID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddAPIKeyID(v)
+		return nil
+	case openaioauthdailysessionaffinity.FieldSlotIndex:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSlotIndex(v)
+		return nil
+	}
+	return fmt.Errorf("unknown OpenAIOAuthDailySessionAffinity numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ClearedFields() []string {
+	return nil
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ClearField(name string) error {
+	return fmt.Errorf("unknown OpenAIOAuthDailySessionAffinity nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ResetField(name string) error {
+	switch name {
+	case openaioauthdailysessionaffinity.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case openaioauthdailysessionaffinity.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case openaioauthdailysessionaffinity.FieldAccountID:
+		m.ResetAccountID()
+		return nil
+	case openaioauthdailysessionaffinity.FieldAPIKeyID:
+		m.ResetAPIKeyID()
+		return nil
+	case openaioauthdailysessionaffinity.FieldLogicalSessionKey:
+		m.ResetLogicalSessionKey()
+		return nil
+	case openaioauthdailysessionaffinity.FieldBusinessDate:
+		m.ResetBusinessDate()
+		return nil
+	case openaioauthdailysessionaffinity.FieldGeneration:
+		m.ResetGeneration()
+		return nil
+	case openaioauthdailysessionaffinity.FieldSlotIndex:
+		m.ResetSlotIndex()
+		return nil
+	case openaioauthdailysessionaffinity.FieldStreamSessionID:
+		m.ResetStreamSessionID()
+		return nil
+	case openaioauthdailysessionaffinity.FieldLastSeenAt:
+		m.ResetLastSeenAt()
+		return nil
+	case openaioauthdailysessionaffinity.FieldActive:
+		m.ResetActive()
+		return nil
+	}
+	return fmt.Errorf("unknown OpenAIOAuthDailySessionAffinity field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *OpenAIOAuthDailySessionAffinityMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown OpenAIOAuthDailySessionAffinity unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *OpenAIOAuthDailySessionAffinityMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown OpenAIOAuthDailySessionAffinity edge %s", name)
+}
+
+// OpenAIOAuthDailySessionPoolMutation represents an operation that mutates the OpenAIOAuthDailySessionPool nodes in the graph.
+type OpenAIOAuthDailySessionPoolMutation struct {
+	config
+	op                Op
+	typ               string
+	id                *int64
+	created_at        *time.Time
+	updated_at        *time.Time
+	account_id        *int64
+	addaccount_id     *int64
+	business_date     *string
+	generation        *string
+	stream_session_0  *string
+	stream_session_1  *string
+	stream_session_2  *string
+	sync_session      *string
+	active_streams    *int
+	addactive_streams *int
+	clearedFields     map[string]struct{}
+	done              bool
+	oldValue          func(context.Context) (*OpenAIOAuthDailySessionPool, error)
+	predicates        []predicate.OpenAIOAuthDailySessionPool
+}
+
+var _ ent.Mutation = (*OpenAIOAuthDailySessionPoolMutation)(nil)
+
+// openaioauthdailysessionpoolOption allows management of the mutation configuration using functional options.
+type openaioauthdailysessionpoolOption func(*OpenAIOAuthDailySessionPoolMutation)
+
+// newOpenAIOAuthDailySessionPoolMutation creates new mutation for the OpenAIOAuthDailySessionPool entity.
+func newOpenAIOAuthDailySessionPoolMutation(c config, op Op, opts ...openaioauthdailysessionpoolOption) *OpenAIOAuthDailySessionPoolMutation {
+	m := &OpenAIOAuthDailySessionPoolMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeOpenAIOAuthDailySessionPool,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withOpenAIOAuthDailySessionPoolID sets the ID field of the mutation.
+func withOpenAIOAuthDailySessionPoolID(id int64) openaioauthdailysessionpoolOption {
+	return func(m *OpenAIOAuthDailySessionPoolMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *OpenAIOAuthDailySessionPool
+		)
+		m.oldValue = func(ctx context.Context) (*OpenAIOAuthDailySessionPool, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().OpenAIOAuthDailySessionPool.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withOpenAIOAuthDailySessionPool sets the old OpenAIOAuthDailySessionPool of the mutation.
+func withOpenAIOAuthDailySessionPool(node *OpenAIOAuthDailySessionPool) openaioauthdailysessionpoolOption {
+	return func(m *OpenAIOAuthDailySessionPoolMutation) {
+		m.oldValue = func(context.Context) (*OpenAIOAuthDailySessionPool, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m OpenAIOAuthDailySessionPoolMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m OpenAIOAuthDailySessionPoolMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *OpenAIOAuthDailySessionPoolMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().OpenAIOAuthDailySessionPool.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the OpenAIOAuthDailySessionPool entity.
+// If the OpenAIOAuthDailySessionPool object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionPoolMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the OpenAIOAuthDailySessionPool entity.
+// If the OpenAIOAuthDailySessionPool object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionPoolMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetAccountID sets the "account_id" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) SetAccountID(i int64) {
+	m.account_id = &i
+	m.addaccount_id = nil
+}
+
+// AccountID returns the value of the "account_id" field in the mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) AccountID() (r int64, exists bool) {
+	v := m.account_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAccountID returns the old "account_id" field's value of the OpenAIOAuthDailySessionPool entity.
+// If the OpenAIOAuthDailySessionPool object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionPoolMutation) OldAccountID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAccountID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAccountID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAccountID: %w", err)
+	}
+	return oldValue.AccountID, nil
+}
+
+// AddAccountID adds i to the "account_id" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) AddAccountID(i int64) {
+	if m.addaccount_id != nil {
+		*m.addaccount_id += i
+	} else {
+		m.addaccount_id = &i
+	}
+}
+
+// AddedAccountID returns the value that was added to the "account_id" field in this mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) AddedAccountID() (r int64, exists bool) {
+	v := m.addaccount_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetAccountID resets all changes to the "account_id" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) ResetAccountID() {
+	m.account_id = nil
+	m.addaccount_id = nil
+}
+
+// SetBusinessDate sets the "business_date" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) SetBusinessDate(s string) {
+	m.business_date = &s
+}
+
+// BusinessDate returns the value of the "business_date" field in the mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) BusinessDate() (r string, exists bool) {
+	v := m.business_date
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBusinessDate returns the old "business_date" field's value of the OpenAIOAuthDailySessionPool entity.
+// If the OpenAIOAuthDailySessionPool object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionPoolMutation) OldBusinessDate(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBusinessDate is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBusinessDate requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBusinessDate: %w", err)
+	}
+	return oldValue.BusinessDate, nil
+}
+
+// ResetBusinessDate resets all changes to the "business_date" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) ResetBusinessDate() {
+	m.business_date = nil
+}
+
+// SetGeneration sets the "generation" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) SetGeneration(s string) {
+	m.generation = &s
+}
+
+// Generation returns the value of the "generation" field in the mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) Generation() (r string, exists bool) {
+	v := m.generation
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGeneration returns the old "generation" field's value of the OpenAIOAuthDailySessionPool entity.
+// If the OpenAIOAuthDailySessionPool object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionPoolMutation) OldGeneration(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGeneration is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGeneration requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGeneration: %w", err)
+	}
+	return oldValue.Generation, nil
+}
+
+// ResetGeneration resets all changes to the "generation" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) ResetGeneration() {
+	m.generation = nil
+}
+
+// SetStreamSession0 sets the "stream_session_0" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) SetStreamSession0(s string) {
+	m.stream_session_0 = &s
+}
+
+// StreamSession0 returns the value of the "stream_session_0" field in the mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) StreamSession0() (r string, exists bool) {
+	v := m.stream_session_0
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStreamSession0 returns the old "stream_session_0" field's value of the OpenAIOAuthDailySessionPool entity.
+// If the OpenAIOAuthDailySessionPool object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionPoolMutation) OldStreamSession0(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStreamSession0 is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStreamSession0 requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStreamSession0: %w", err)
+	}
+	return oldValue.StreamSession0, nil
+}
+
+// ResetStreamSession0 resets all changes to the "stream_session_0" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) ResetStreamSession0() {
+	m.stream_session_0 = nil
+}
+
+// SetStreamSession1 sets the "stream_session_1" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) SetStreamSession1(s string) {
+	m.stream_session_1 = &s
+}
+
+// StreamSession1 returns the value of the "stream_session_1" field in the mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) StreamSession1() (r string, exists bool) {
+	v := m.stream_session_1
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStreamSession1 returns the old "stream_session_1" field's value of the OpenAIOAuthDailySessionPool entity.
+// If the OpenAIOAuthDailySessionPool object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionPoolMutation) OldStreamSession1(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStreamSession1 is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStreamSession1 requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStreamSession1: %w", err)
+	}
+	return oldValue.StreamSession1, nil
+}
+
+// ResetStreamSession1 resets all changes to the "stream_session_1" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) ResetStreamSession1() {
+	m.stream_session_1 = nil
+}
+
+// SetStreamSession2 sets the "stream_session_2" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) SetStreamSession2(s string) {
+	m.stream_session_2 = &s
+}
+
+// StreamSession2 returns the value of the "stream_session_2" field in the mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) StreamSession2() (r string, exists bool) {
+	v := m.stream_session_2
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStreamSession2 returns the old "stream_session_2" field's value of the OpenAIOAuthDailySessionPool entity.
+// If the OpenAIOAuthDailySessionPool object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionPoolMutation) OldStreamSession2(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStreamSession2 is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStreamSession2 requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStreamSession2: %w", err)
+	}
+	return oldValue.StreamSession2, nil
+}
+
+// ResetStreamSession2 resets all changes to the "stream_session_2" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) ResetStreamSession2() {
+	m.stream_session_2 = nil
+}
+
+// SetSyncSession sets the "sync_session" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) SetSyncSession(s string) {
+	m.sync_session = &s
+}
+
+// SyncSession returns the value of the "sync_session" field in the mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) SyncSession() (r string, exists bool) {
+	v := m.sync_session
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSyncSession returns the old "sync_session" field's value of the OpenAIOAuthDailySessionPool entity.
+// If the OpenAIOAuthDailySessionPool object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionPoolMutation) OldSyncSession(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSyncSession is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSyncSession requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSyncSession: %w", err)
+	}
+	return oldValue.SyncSession, nil
+}
+
+// ResetSyncSession resets all changes to the "sync_session" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) ResetSyncSession() {
+	m.sync_session = nil
+}
+
+// SetActiveStreams sets the "active_streams" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) SetActiveStreams(i int) {
+	m.active_streams = &i
+	m.addactive_streams = nil
+}
+
+// ActiveStreams returns the value of the "active_streams" field in the mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) ActiveStreams() (r int, exists bool) {
+	v := m.active_streams
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldActiveStreams returns the old "active_streams" field's value of the OpenAIOAuthDailySessionPool entity.
+// If the OpenAIOAuthDailySessionPool object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *OpenAIOAuthDailySessionPoolMutation) OldActiveStreams(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldActiveStreams is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldActiveStreams requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldActiveStreams: %w", err)
+	}
+	return oldValue.ActiveStreams, nil
+}
+
+// AddActiveStreams adds i to the "active_streams" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) AddActiveStreams(i int) {
+	if m.addactive_streams != nil {
+		*m.addactive_streams += i
+	} else {
+		m.addactive_streams = &i
+	}
+}
+
+// AddedActiveStreams returns the value that was added to the "active_streams" field in this mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) AddedActiveStreams() (r int, exists bool) {
+	v := m.addactive_streams
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetActiveStreams resets all changes to the "active_streams" field.
+func (m *OpenAIOAuthDailySessionPoolMutation) ResetActiveStreams() {
+	m.active_streams = nil
+	m.addactive_streams = nil
+}
+
+// Where appends a list predicates to the OpenAIOAuthDailySessionPoolMutation builder.
+func (m *OpenAIOAuthDailySessionPoolMutation) Where(ps ...predicate.OpenAIOAuthDailySessionPool) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the OpenAIOAuthDailySessionPoolMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *OpenAIOAuthDailySessionPoolMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.OpenAIOAuthDailySessionPool, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *OpenAIOAuthDailySessionPoolMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *OpenAIOAuthDailySessionPoolMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (OpenAIOAuthDailySessionPool).
+func (m *OpenAIOAuthDailySessionPoolMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *OpenAIOAuthDailySessionPoolMutation) Fields() []string {
+	fields := make([]string, 0, 10)
+	if m.created_at != nil {
+		fields = append(fields, openaioauthdailysessionpool.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, openaioauthdailysessionpool.FieldUpdatedAt)
+	}
+	if m.account_id != nil {
+		fields = append(fields, openaioauthdailysessionpool.FieldAccountID)
+	}
+	if m.business_date != nil {
+		fields = append(fields, openaioauthdailysessionpool.FieldBusinessDate)
+	}
+	if m.generation != nil {
+		fields = append(fields, openaioauthdailysessionpool.FieldGeneration)
+	}
+	if m.stream_session_0 != nil {
+		fields = append(fields, openaioauthdailysessionpool.FieldStreamSession0)
+	}
+	if m.stream_session_1 != nil {
+		fields = append(fields, openaioauthdailysessionpool.FieldStreamSession1)
+	}
+	if m.stream_session_2 != nil {
+		fields = append(fields, openaioauthdailysessionpool.FieldStreamSession2)
+	}
+	if m.sync_session != nil {
+		fields = append(fields, openaioauthdailysessionpool.FieldSyncSession)
+	}
+	if m.active_streams != nil {
+		fields = append(fields, openaioauthdailysessionpool.FieldActiveStreams)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *OpenAIOAuthDailySessionPoolMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case openaioauthdailysessionpool.FieldCreatedAt:
+		return m.CreatedAt()
+	case openaioauthdailysessionpool.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case openaioauthdailysessionpool.FieldAccountID:
+		return m.AccountID()
+	case openaioauthdailysessionpool.FieldBusinessDate:
+		return m.BusinessDate()
+	case openaioauthdailysessionpool.FieldGeneration:
+		return m.Generation()
+	case openaioauthdailysessionpool.FieldStreamSession0:
+		return m.StreamSession0()
+	case openaioauthdailysessionpool.FieldStreamSession1:
+		return m.StreamSession1()
+	case openaioauthdailysessionpool.FieldStreamSession2:
+		return m.StreamSession2()
+	case openaioauthdailysessionpool.FieldSyncSession:
+		return m.SyncSession()
+	case openaioauthdailysessionpool.FieldActiveStreams:
+		return m.ActiveStreams()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *OpenAIOAuthDailySessionPoolMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case openaioauthdailysessionpool.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case openaioauthdailysessionpool.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case openaioauthdailysessionpool.FieldAccountID:
+		return m.OldAccountID(ctx)
+	case openaioauthdailysessionpool.FieldBusinessDate:
+		return m.OldBusinessDate(ctx)
+	case openaioauthdailysessionpool.FieldGeneration:
+		return m.OldGeneration(ctx)
+	case openaioauthdailysessionpool.FieldStreamSession0:
+		return m.OldStreamSession0(ctx)
+	case openaioauthdailysessionpool.FieldStreamSession1:
+		return m.OldStreamSession1(ctx)
+	case openaioauthdailysessionpool.FieldStreamSession2:
+		return m.OldStreamSession2(ctx)
+	case openaioauthdailysessionpool.FieldSyncSession:
+		return m.OldSyncSession(ctx)
+	case openaioauthdailysessionpool.FieldActiveStreams:
+		return m.OldActiveStreams(ctx)
+	}
+	return nil, fmt.Errorf("unknown OpenAIOAuthDailySessionPool field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *OpenAIOAuthDailySessionPoolMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case openaioauthdailysessionpool.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case openaioauthdailysessionpool.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case openaioauthdailysessionpool.FieldAccountID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAccountID(v)
+		return nil
+	case openaioauthdailysessionpool.FieldBusinessDate:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBusinessDate(v)
+		return nil
+	case openaioauthdailysessionpool.FieldGeneration:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGeneration(v)
+		return nil
+	case openaioauthdailysessionpool.FieldStreamSession0:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStreamSession0(v)
+		return nil
+	case openaioauthdailysessionpool.FieldStreamSession1:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStreamSession1(v)
+		return nil
+	case openaioauthdailysessionpool.FieldStreamSession2:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStreamSession2(v)
+		return nil
+	case openaioauthdailysessionpool.FieldSyncSession:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSyncSession(v)
+		return nil
+	case openaioauthdailysessionpool.FieldActiveStreams:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetActiveStreams(v)
+		return nil
+	}
+	return fmt.Errorf("unknown OpenAIOAuthDailySessionPool field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) AddedFields() []string {
+	var fields []string
+	if m.addaccount_id != nil {
+		fields = append(fields, openaioauthdailysessionpool.FieldAccountID)
+	}
+	if m.addactive_streams != nil {
+		fields = append(fields, openaioauthdailysessionpool.FieldActiveStreams)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *OpenAIOAuthDailySessionPoolMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case openaioauthdailysessionpool.FieldAccountID:
+		return m.AddedAccountID()
+	case openaioauthdailysessionpool.FieldActiveStreams:
+		return m.AddedActiveStreams()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *OpenAIOAuthDailySessionPoolMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case openaioauthdailysessionpool.FieldAccountID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddAccountID(v)
+		return nil
+	case openaioauthdailysessionpool.FieldActiveStreams:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddActiveStreams(v)
+		return nil
+	}
+	return fmt.Errorf("unknown OpenAIOAuthDailySessionPool numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) ClearedFields() []string {
+	return nil
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *OpenAIOAuthDailySessionPoolMutation) ClearField(name string) error {
+	return fmt.Errorf("unknown OpenAIOAuthDailySessionPool nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *OpenAIOAuthDailySessionPoolMutation) ResetField(name string) error {
+	switch name {
+	case openaioauthdailysessionpool.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case openaioauthdailysessionpool.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case openaioauthdailysessionpool.FieldAccountID:
+		m.ResetAccountID()
+		return nil
+	case openaioauthdailysessionpool.FieldBusinessDate:
+		m.ResetBusinessDate()
+		return nil
+	case openaioauthdailysessionpool.FieldGeneration:
+		m.ResetGeneration()
+		return nil
+	case openaioauthdailysessionpool.FieldStreamSession0:
+		m.ResetStreamSession0()
+		return nil
+	case openaioauthdailysessionpool.FieldStreamSession1:
+		m.ResetStreamSession1()
+		return nil
+	case openaioauthdailysessionpool.FieldStreamSession2:
+		m.ResetStreamSession2()
+		return nil
+	case openaioauthdailysessionpool.FieldSyncSession:
+		m.ResetSyncSession()
+		return nil
+	case openaioauthdailysessionpool.FieldActiveStreams:
+		m.ResetActiveStreams()
+		return nil
+	}
+	return fmt.Errorf("unknown OpenAIOAuthDailySessionPool field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *OpenAIOAuthDailySessionPoolMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *OpenAIOAuthDailySessionPoolMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown OpenAIOAuthDailySessionPool unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *OpenAIOAuthDailySessionPoolMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown OpenAIOAuthDailySessionPool edge %s", name)
+}
+
 // OpenAIOAuthSyncSessionMutation represents an operation that mutates the OpenAIOAuthSyncSession nodes in the graph.
 type OpenAIOAuthSyncSessionMutation struct {
 	config
@@ -38175,36 +40028,33 @@ func (m *PromoCodeUsageMutation) ResetEdge(name string) error {
 // ProxyMutation represents an operation that mutates the Proxy nodes in the graph.
 type ProxyMutation struct {
 	config
-	op                     Op
-	typ                    string
-	id                     *int64
-	created_at             *time.Time
-	updated_at             *time.Time
-	deleted_at             *time.Time
-	name                   *string
-	protocol               *string
-	host                   *string
-	port                   *int
-	addport                *int
-	username               *string
-	password               *string
-	status                 *string
-	expires_at             *time.Time
-	fallback_mode          *string
-	expiry_warn_days       *int
-	addexpiry_warn_days    *int
-	clearedFields          map[string]struct{}
-	accounts               map[int64]struct{}
-	removedaccounts        map[int64]struct{}
-	clearedaccounts        bool
-	primary_proxies        map[int64]struct{}
-	removedprimary_proxies map[int64]struct{}
-	clearedprimary_proxies bool
-	backup_proxy           *int64
-	clearedbackup_proxy    bool
-	done                   bool
-	oldValue               func(context.Context) (*Proxy, error)
-	predicates             []predicate.Proxy
+	op                  Op
+	typ                 string
+	id                  *int64
+	created_at          *time.Time
+	updated_at          *time.Time
+	deleted_at          *time.Time
+	name                *string
+	protocol            *string
+	host                *string
+	port                *int
+	addport             *int
+	username            *string
+	password            *string
+	status              *string
+	expires_at          *time.Time
+	fallback_mode       *string
+	expiry_warn_days    *int
+	addexpiry_warn_days *int
+	clearedFields       map[string]struct{}
+	accounts            map[int64]struct{}
+	removedaccounts     map[int64]struct{}
+	clearedaccounts     bool
+	backup_proxy        *int64
+	clearedbackup_proxy bool
+	done                bool
+	oldValue            func(context.Context) (*Proxy, error)
+	predicates          []predicate.Proxy
 }
 
 var _ ent.Mutation = (*ProxyMutation)(nil)
@@ -38968,60 +40818,6 @@ func (m *ProxyMutation) ResetAccounts() {
 	m.removedaccounts = nil
 }
 
-// AddPrimaryProxyIDs adds the "primary_proxies" edge to the Proxy entity by ids.
-func (m *ProxyMutation) AddPrimaryProxyIDs(ids ...int64) {
-	if m.primary_proxies == nil {
-		m.primary_proxies = make(map[int64]struct{})
-	}
-	for i := range ids {
-		m.primary_proxies[ids[i]] = struct{}{}
-	}
-}
-
-// ClearPrimaryProxies clears the "primary_proxies" edge to the Proxy entity.
-func (m *ProxyMutation) ClearPrimaryProxies() {
-	m.clearedprimary_proxies = true
-}
-
-// PrimaryProxiesCleared reports if the "primary_proxies" edge to the Proxy entity was cleared.
-func (m *ProxyMutation) PrimaryProxiesCleared() bool {
-	return m.clearedprimary_proxies
-}
-
-// RemovePrimaryProxyIDs removes the "primary_proxies" edge to the Proxy entity by IDs.
-func (m *ProxyMutation) RemovePrimaryProxyIDs(ids ...int64) {
-	if m.removedprimary_proxies == nil {
-		m.removedprimary_proxies = make(map[int64]struct{})
-	}
-	for i := range ids {
-		delete(m.primary_proxies, ids[i])
-		m.removedprimary_proxies[ids[i]] = struct{}{}
-	}
-}
-
-// RemovedPrimaryProxies returns the removed IDs of the "primary_proxies" edge to the Proxy entity.
-func (m *ProxyMutation) RemovedPrimaryProxiesIDs() (ids []int64) {
-	for id := range m.removedprimary_proxies {
-		ids = append(ids, id)
-	}
-	return
-}
-
-// PrimaryProxiesIDs returns the "primary_proxies" edge IDs in the mutation.
-func (m *ProxyMutation) PrimaryProxiesIDs() (ids []int64) {
-	for id := range m.primary_proxies {
-		ids = append(ids, id)
-	}
-	return
-}
-
-// ResetPrimaryProxies resets all changes to the "primary_proxies" edge.
-func (m *ProxyMutation) ResetPrimaryProxies() {
-	m.primary_proxies = nil
-	m.clearedprimary_proxies = false
-	m.removedprimary_proxies = nil
-}
-
 // ClearBackupProxy clears the "backup_proxy" edge to the Proxy entity.
 func (m *ProxyMutation) ClearBackupProxy() {
 	m.clearedbackup_proxy = true
@@ -39463,12 +41259,9 @@ func (m *ProxyMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *ProxyMutation) AddedEdges() []string {
-	edges := make([]string, 0, 3)
+	edges := make([]string, 0, 2)
 	if m.accounts != nil {
 		edges = append(edges, proxy.EdgeAccounts)
-	}
-	if m.primary_proxies != nil {
-		edges = append(edges, proxy.EdgePrimaryProxies)
 	}
 	if m.backup_proxy != nil {
 		edges = append(edges, proxy.EdgeBackupProxy)
@@ -39486,12 +41279,6 @@ func (m *ProxyMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
-	case proxy.EdgePrimaryProxies:
-		ids := make([]ent.Value, 0, len(m.primary_proxies))
-		for id := range m.primary_proxies {
-			ids = append(ids, id)
-		}
-		return ids
 	case proxy.EdgeBackupProxy:
 		if id := m.backup_proxy; id != nil {
 			return []ent.Value{*id}
@@ -39502,12 +41289,9 @@ func (m *ProxyMutation) AddedIDs(name string) []ent.Value {
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *ProxyMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 3)
+	edges := make([]string, 0, 2)
 	if m.removedaccounts != nil {
 		edges = append(edges, proxy.EdgeAccounts)
-	}
-	if m.removedprimary_proxies != nil {
-		edges = append(edges, proxy.EdgePrimaryProxies)
 	}
 	return edges
 }
@@ -39522,24 +41306,15 @@ func (m *ProxyMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
-	case proxy.EdgePrimaryProxies:
-		ids := make([]ent.Value, 0, len(m.removedprimary_proxies))
-		for id := range m.removedprimary_proxies {
-			ids = append(ids, id)
-		}
-		return ids
 	}
 	return nil
 }
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *ProxyMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 3)
+	edges := make([]string, 0, 2)
 	if m.clearedaccounts {
 		edges = append(edges, proxy.EdgeAccounts)
-	}
-	if m.clearedprimary_proxies {
-		edges = append(edges, proxy.EdgePrimaryProxies)
 	}
 	if m.clearedbackup_proxy {
 		edges = append(edges, proxy.EdgeBackupProxy)
@@ -39553,8 +41328,6 @@ func (m *ProxyMutation) EdgeCleared(name string) bool {
 	switch name {
 	case proxy.EdgeAccounts:
 		return m.clearedaccounts
-	case proxy.EdgePrimaryProxies:
-		return m.clearedprimary_proxies
 	case proxy.EdgeBackupProxy:
 		return m.clearedbackup_proxy
 	}
@@ -39578,9 +41351,6 @@ func (m *ProxyMutation) ResetEdge(name string) error {
 	switch name {
 	case proxy.EdgeAccounts:
 		m.ResetAccounts()
-		return nil
-	case proxy.EdgePrimaryProxies:
-		m.ResetPrimaryProxies()
 		return nil
 	case proxy.EdgeBackupProxy:
 		m.ResetBackupProxy()

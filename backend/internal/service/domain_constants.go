@@ -685,7 +685,8 @@ const (
 	// SettingKeyEnableOpenAIUUIDv7SessionIdentity controls whether each logical
 	// OpenAI session reuses a server-managed UUIDv7 session/thread identity pair.
 	// It defaults on; an explicitly persisted false is the rollback path.
-	SettingKeyEnableOpenAIUUIDv7SessionIdentity = "enable_openai_uuidv7_session_identity"
+	SettingKeyEnableOpenAIUUIDv7SessionIdentity     = "enable_openai_uuidv7_session_identity"
+	SettingKeyEnableOpenAIOAuthDailySessionRotation = "enable_openai_oauth_daily_session_rotation"
 	// SettingKeyEnableOpenAICodexClientIdentityNormalization controls the Codex
 	// User-Agent/originator/version triplet under the master switch.
 	SettingKeyEnableOpenAICodexClientIdentityNormalization = "enable_openai_codex_client_identity_normalization"

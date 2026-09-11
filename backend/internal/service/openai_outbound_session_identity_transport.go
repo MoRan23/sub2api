@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -52,11 +53,36 @@ func (s *OpenAIGatewayService) resolveOAuthSynchronousTurnIdentity(ctx context.C
 	if testModel || account == nil || !account.IsOpenAIOAuth() {
 		return OpenAICodexTurnIdentity{}, false, nil
 	}
-	if s == nil || s.oauthSyncSessionRepo == nil {
+	if s == nil {
 		return OpenAICodexTurnIdentity{}, false, nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	// When daily rotation is enabled, synchronous requests use the independent
+	// daily root. The legacy repository remains the compatibility path.
+	if s.oauthDailySessionRepo != nil && s.oauthDailySessionRotationEnabled(ctx) {
+		pool, err := s.oauthDailySessionRepo.GetOrCreateOAuthDailySessionPool(ctx, account.ID, time.Now().UTC())
+		if err != nil {
+			return OpenAICodexTurnIdentity{}, false, err
+		}
+		root, err := canonicalUUIDv7(pool.SyncSessionID)
+		if err != nil {
+			return OpenAICodexTurnIdentity{}, false, fmt.Errorf("invalid OAuth daily sync root session: %w", err)
+		}
+		child := uuid.Nil
+		if existing, parseErr := uuid.Parse(strings.TrimSpace(existingThread)); parseErr == nil && existing.Version() == uuid.Version(7) {
+			child = existing
+		} else {
+			child, err = uuid.NewV7()
+			if err != nil {
+				return OpenAICodexTurnIdentity{}, false, err
+			}
+		}
+		return OpenAICodexTurnIdentity{SessionID: root, ThreadID: child.String(), ParentThreadID: root, Relation: OpenAICodexTurnRelationDescendant}, true, nil
+	}
+	if s.oauthSyncSessionRepo == nil {
+		return OpenAICodexTurnIdentity{}, false, nil
 	}
 	root, err := s.oauthSyncSessionRepo.GetOrCreateOAuthSyncSession(ctx, account.ID)
 	if err != nil {
@@ -118,6 +144,23 @@ func openAIClientRequestedStream(c *gin.Context, body []byte, fallback bool) boo
 
 func (s *OpenAIGatewayService) openAIOutboundSessionIdentityTransportEnabled(ctx context.Context) bool {
 	return s.openAICodexFingerprintPolicyForRequest(ctx, nil).TurnIdentityNormalizationEnabled()
+}
+
+func (s *OpenAIGatewayService) oauthDailySessionRotationEnabled(ctx context.Context) bool {
+	if s == nil || s.settingService == nil {
+		return false
+	}
+	if v, ok := any(s.settingService).(interface {
+		IsOpenAIOAuthDailySessionRotationEnabled(context.Context) bool
+	}); ok {
+		return v.IsOpenAIOAuthDailySessionRotationEnabled(ctx)
+	}
+	if v, ok := any(s.settingService).(interface {
+		GetOpenAIOAuthDailySessionRotationEnabled(context.Context) bool
+	}); ok {
+		return v.GetOpenAIOAuthDailySessionRotationEnabled(ctx)
+	}
+	return false
 }
 
 // openAIOutboundSessionIdentityTransportEnabledForRequest snapshots the
@@ -216,6 +259,23 @@ func (s *OpenAIGatewayService) resolveOpenAICodexLogicalIdentityForTransport(
 		// UUID generation and shared-store failures are request-path fail-open
 		// conditions. The mapper has already recorded bounded metrics/log fields.
 		return OpenAICodexTurnIdentity{}, false, nil
+	}
+	if ok && account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil &&
+		s.oauthDailySessionRotationEnabled(ctx) && openAIClientRequestedStream(c, nil, false) {
+		affinity, affinityErr := s.oauthDailySessionRepo.GetOrCreateOAuthDailySessionAffinity(
+			ctx, account.ID, getAPIKeyIDFromContext(c), logical.SessionKey, time.Now().UTC(),
+		)
+		if affinityErr != nil {
+			return OpenAICodexTurnIdentity{}, false, affinityErr
+		}
+		root, rootErr := canonicalUUIDv7(affinity.StreamSessionID)
+		if rootErr != nil {
+			return OpenAICodexTurnIdentity{}, false, fmt.Errorf("invalid OAuth daily stream root session: %w", rootErr)
+		}
+		identity.SessionID = root
+		if identity.Relation == OpenAICodexTurnRelationDescendant {
+			identity.ParentThreadID = root
+		}
 	}
 	return identity, ok, nil
 }

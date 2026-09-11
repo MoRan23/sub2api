@@ -39,6 +39,7 @@ type UpdateSettingsRequest struct {
 	SessionBindingEnabled                        *bool                        `json:"session_binding_enabled"`               // 会话 IP/UA 绑定（省略=保持现值）
 	StepUpEnabled                                *bool                        `json:"step_up_enabled"`                       // 敏感操作 step-up 2FA（省略=保持现值）
 	EnableOpenAIUUIDv7SessionIdentity            *bool                        `json:"enable_openai_uuidv7_session_identity"` // OpenAI UUIDv7 session/thread 标识对（省略=保持现值）
+	EnableOpenAIOAuthDailySessionRotation        *bool                        `json:"enable_openai_oauth_daily_session_rotation"`
 	EnableOpenAICodexFingerprintNormalization    *bool                        `json:"enable_openai_codex_fingerprint_normalization"`
 	EnableOpenAICodexInstallationIDNormalization *bool                        `json:"enable_openai_codex_installation_id_normalization"`
 	EnableOpenAICodexClientIdentityNormalization *bool                        `json:"enable_openai_codex_client_identity_normalization"`
@@ -461,6 +462,7 @@ var independentlyOmittedPointerSettingKeys = map[string]string{
 	service.SettingKeyEnableOpenAICodexFingerprintNormalization:    service.SettingKeyEnableOpenAICodexFingerprintNormalization,
 	service.SettingKeyEnableOpenAICodexInstallationIDNormalization: service.SettingKeyEnableOpenAICodexInstallationIDNormalization,
 	service.SettingKeyEnableOpenAIUUIDv7SessionIdentity:            service.SettingKeyEnableOpenAIUUIDv7SessionIdentity,
+	service.SettingKeyEnableOpenAIOAuthDailySessionRotation:        service.SettingKeyEnableOpenAIOAuthDailySessionRotation,
 	service.SettingKeyEnableOpenAICodexClientIdentityNormalization: service.SettingKeyEnableOpenAICodexClientIdentityNormalization,
 	service.SettingKeyEnableOpenAICodexPATContextManagement:        service.SettingKeyEnableOpenAICodexPATContextManagement,
 	service.SettingKeyEnableOpenAIRequestTimezoneConversion:        service.SettingKeyEnableOpenAIRequestTimezoneConversion,
@@ -573,6 +575,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	openAIUUIDv7SessionIdentityEnabled := previousSettings.EnableOpenAIUUIDv7SessionIdentity
 	if req.EnableOpenAIUUIDv7SessionIdentity != nil {
 		openAIUUIDv7SessionIdentityEnabled = *req.EnableOpenAIUUIDv7SessionIdentity
+	}
+	openAIOAuthDailySessionRotationEnabled := previousSettings.EnableOpenAIOAuthDailySessionRotation
+	if req.EnableOpenAIOAuthDailySessionRotation != nil {
+		openAIOAuthDailySessionRotationEnabled = *req.EnableOpenAIOAuthDailySessionRotation
 	}
 	openAICodexFingerprintNormalizationEnabled := previousSettings.EnableOpenAICodexFingerprintNormalization
 	if req.EnableOpenAICodexFingerprintNormalization != nil {
@@ -1608,6 +1614,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		SessionBindingEnabled:                        sessionBindingEnabled,
 		StepUpEnabled:                                stepUpEnabled,
 		EnableOpenAIUUIDv7SessionIdentity:            openAIUUIDv7SessionIdentityEnabled,
+		EnableOpenAIOAuthDailySessionRotation:        openAIOAuthDailySessionRotationEnabled,
 		EnableOpenAICodexFingerprintNormalization:    openAICodexFingerprintNormalizationEnabled,
 		EnableOpenAICodexInstallationIDNormalization: openAICodexInstallationIDNormalizationEnabled,
 		EnableOpenAICodexClientIdentityNormalization: openAICodexClientIdentityNormalizationEnabled,
@@ -2271,6 +2278,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		SessionBindingEnabled:                                  updatedSettings.SessionBindingEnabled,
 		StepUpEnabled:                                          updatedSettings.StepUpEnabled,
 		EnableOpenAIUUIDv7SessionIdentity:                      updatedSettings.EnableOpenAIUUIDv7SessionIdentity,
+		EnableOpenAIOAuthDailySessionRotation:                  updatedSettings.EnableOpenAIOAuthDailySessionRotation,
 		EnableOpenAICodexFingerprintNormalization:              updatedSettings.EnableOpenAICodexFingerprintNormalization,
 		EnableOpenAICodexInstallationIDNormalization:           updatedSettings.EnableOpenAICodexInstallationIDNormalization,
 		EnableOpenAICodexClientIdentityNormalization:           updatedSettings.EnableOpenAICodexClientIdentityNormalization,
