@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -39,6 +40,19 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			fallbackSeed := s.oauthDailyLogicalSessionFallbackSeed(ctx, c, account, body)
 			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, body, fallbackSeed))
 		}
+		capture, capturePresent := OpenAIOAuthIdentityCaptureFromContext(c)
+		slog.InfoContext(ctx, "openai.oauth_identity_trace",
+			"stage", "forward_capture",
+			"account_id", account.ID,
+			"account_type", account.Type,
+			"platform", account.Platform,
+			"stream_body", newOpenAIRequestView(body).Stream,
+			"stream_marker", openAIClientRequestedStream(c, nil, false),
+			"capture_present", capturePresent,
+			"logical_session_present", strings.TrimSpace(capture.Logical.SessionKey) != "",
+			"logical_thread_present", strings.TrimSpace(capture.Logical.ThreadKey) != "",
+			"logical_source", capture.Logical.Source,
+		)
 		if kindErr := s.validateOpenAICodexHTTPMemoryRequestShapeForAccount(ctx, c, account); kindErr != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, kindErr.Error(), "")
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{

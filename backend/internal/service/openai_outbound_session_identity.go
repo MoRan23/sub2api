@@ -1596,13 +1596,19 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityWithAliasesDetailed
 	}
 	outcome := OpenAIOAuthIdentityResolveNone
 	openAIOutboundSessionIdentityMetrics.resolveTotal.Add(1)
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	logical = normalizeLogicalTuple(openAICodexLogicalTuple{session: logical.SessionKey, thread: logical.ThreadKey, parent: logical.ParentThreadKey, fork: logical.ForkedFromThreadKey}, logical.Source, logical.Explicit)
 	if logical.SessionKey == "" {
 		openAIOutboundSessionIdentityMetrics.emptyLogicalKeyTotal.Add(1)
+		slog.WarnContext(ctx, "openai.oauth_identity_trace",
+			"stage", "resolver_empty_logical",
+			"logical_source", logical.Source,
+			"stream_marker", openAIClientRequestedStream(c, nil, false),
+			"daily_stream_marker", openAIOAuthDailyStreamRequested(c),
+		)
 		return OpenAICodexTurnIdentity{}, false, outcome, nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	namespace, err := s.resolveOpenAIOutboundSessionIdentityNamespace(ctx, account)
 	if err != nil {
@@ -1689,12 +1695,30 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityWithAliasesDetailed
 	// per-logical-session stickiness while isolating each day's root.
 	if account != nil && account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil &&
 		s.oauthDailySessionRotationEnabled(ctx) && (openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c)) {
+		slog.InfoContext(ctx, "openai.oauth_identity_trace",
+			"stage", "resolver_affinity_before",
+			"account_id", account.ID,
+			"api_key_id", apiKeyID,
+			"logical_session", logical.SessionKey,
+		)
 		affinity, affinityErr := s.oauthDailySessionRepo.GetOrCreateOAuthDailySessionAffinity(
 			ctx, account.ID, apiKeyID, logical.SessionKey, time.Now().UTC(),
 		)
 		if affinityErr != nil {
+			slog.ErrorContext(ctx, "openai.oauth_identity_trace",
+				"stage", "resolver_affinity_error",
+				"account_id", account.ID,
+				"error", affinityErr,
+			)
 			return OpenAICodexTurnIdentity{}, true, OpenAIOAuthIdentityResolveStoreError, affinityErr
 		}
+		slog.InfoContext(ctx, "openai.oauth_identity_trace",
+			"stage", "resolver_affinity_after",
+			"account_id", account.ID,
+			"business_date", affinity.BusinessDate,
+			"slot_index", affinity.SlotIndex,
+			"stream_session_id", affinity.StreamSessionID,
+		)
 		root, rootErr := canonicalUUIDv7(affinity.StreamSessionID)
 		if rootErr != nil {
 			return OpenAICodexTurnIdentity{}, true, OpenAIOAuthIdentityResolveStoreError,
