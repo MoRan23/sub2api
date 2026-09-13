@@ -471,6 +471,24 @@ func fingerprintObservationOutboundIdentityFromContext(c *gin.Context) (OpenAICo
 	return identity, true
 }
 
+// fingerprintObservationTrustedIdentity resolves the final server-owned
+// identity for observation. Compatibility bridges may clear the short-lived
+// provenance marker while retaining the immutable finalized plan, so the plan
+// is a safe validated fallback for the same request and account.
+func fingerprintObservationTrustedIdentity(c *gin.Context, account *Account) (OpenAICodexTurnIdentity, bool) {
+	if !usesOpenAICodexIdentityProtocol(account) {
+		return OpenAICodexTurnIdentity{}, false
+	}
+	identity, trusted := fingerprintObservationOutboundIdentityFromContext(c)
+	if trusted {
+		return identity, true
+	}
+	if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && plan.TurnIdentityEnabled && ValidateOpenAICodexTurnIdentity(plan.TurnIdentity) == nil {
+		return plan.TurnIdentity, true
+	}
+	return OpenAICodexTurnIdentity{}, false
+}
+
 // Package-local aliases keep the validator convenient for the observer's
 // focused tests and match the naming style of the surrounding OpenAI helpers.
 func normalizeFingerprintUUIDv7(raw string) string {
@@ -501,7 +519,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 	if !fingerprintObservationAccountEnabled(account) {
 		return
 	}
-	trustedIdentity, hasTrustedIdentity := fingerprintObservationOutboundIdentityFromContext(c)
+	trustedIdentity, hasTrustedIdentity := fingerprintObservationTrustedIdentity(c, account)
 	if !usesOpenAICodexIdentityProtocol(account) {
 		hasTrustedIdentity = false
 		pin = installationIDResolution{}

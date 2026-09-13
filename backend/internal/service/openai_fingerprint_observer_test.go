@@ -137,6 +137,32 @@ func TestRecordFingerprintObservationUsesFinalHeaderAliases(t *testing.T) {
 	}
 }
 
+func TestRecordFingerprintObservationFallsBackToFinalizedPlan(t *testing.T) {
+	SetFingerprintObservationEnabled(true)
+	defer SetFingerprintObservationEnabled(false)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	account := newOpenAIOAuthPinAccount(92031, nil)
+	identity := OpenAICodexTurnIdentity{
+		SessionID: fingerprintObserverSessionV7,
+		ThreadID:  fingerprintObserverThreadV7,
+		Relation:  OpenAICodexTurnRelationDescendant,
+	}
+	SetOpenAIOAuthIdentityPlan(c, OpenAIOAuthIdentityPlan{TurnIdentity: identity, TurnIdentityEnabled: true})
+	// Simulate a compatibility path that cleared the short-lived marker after
+	// finalization while leaving the immutable plan available.
+	clearFingerprintObservationOutboundIdentity(c)
+	(&OpenAIGatewayService{}).recordFingerprintObservation(c, account, installationIDResolution{}, http.Header{
+		"session-id": []string{fingerprintObserverSessionV7},
+		"thread-id":  []string{fingerprintObserverThreadV7},
+	})
+	entry := SnapshotFingerprintObservations(1)[0]
+	if entry.SessionID != fingerprintObserverSessionV7 || entry.ThreadID != fingerprintObserverThreadV7 {
+		t.Fatalf("finalized plan identity was not used after marker clear: %+v", entry)
+	}
+}
+
 func TestFingerprintObservationAlphaInstallationUsesFinalParseableMetadata(t *testing.T) {
 	const installationID = "11111111-2222-4333-8444-555555555555"
 	tests := []struct {
