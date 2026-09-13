@@ -61,15 +61,6 @@ type FingerprintObservationEntry struct {
 	TimezoneComparisonStatus     string               `json:"timezone_comparison_status,omitempty"`
 	OutboundCodexResidency       string               `json:"outbound_codex_residency"`
 	OutboundCodexResidencySource string               `json:"outbound_codex_residency_source,omitempty"`
-
-	// These are request-local provenance bits. They are intentionally unexported
-	// so the admin API never exposes them; they prevent a trusted fallback from
-	// overwriting a malformed/conflicting carrier that was deliberately omitted
-	// from the public observation value.
-	sessionIdentityCarrierPresent bool
-	threadIdentityCarrierPresent  bool
-	parentIdentityCarrierPresent  bool
-	forkIdentityCarrierPresent    bool
 }
 
 // FingerprintObservationThreadNode groups final wire observations for one
@@ -434,6 +425,23 @@ func ValidateFingerprintObservationUUIDv7(raw string) bool {
 	return NormalizeFingerprintObservationUUIDv7(raw) != ""
 }
 
+// normalizeTrustedObservationIdentity accepts canonical UUIDv7 values and
+// opaque legacy identities that were already resolved by the server plan. The
+// observer still records only a value that is present on the final wire; this
+// helper merely avoids dropping a real legacy value because it is not UUIDv7.
+func normalizeTrustedObservationIdentity(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || trimmed != raw || strings.IndexFunc(trimmed, func(r rune) bool {
+		return r < 0x20 || r == 0x7f
+	}) >= 0 {
+		return ""
+	}
+	if canonical := NormalizeFingerprintObservationUUIDv7(trimmed); canonical != "" {
+		return canonical
+	}
+	return trimmed
+}
+
 // setFingerprintObservationOutboundIdentity marks the hierarchical UUIDs owned
 // by the final server-side writer for this request. The observer uses them only as
 // provenance: values are still read back from the finalized wire headers/body.
@@ -484,14 +492,12 @@ func fingerprintObservationOutboundIdentityFromContext(c *gin.Context) (OpenAICo
 // provenance marker while retaining the immutable finalized plan, so the plan
 // is a safe validated fallback for the same request and account.
 func fingerprintObservationTrustedIdentity(c *gin.Context, account *Account) (OpenAICodexTurnIdentity, bool) {
-	if account == nil || !usesOpenAICodexIdentityProtocol(account) {
+	if !usesOpenAICodexIdentityProtocol(account) {
 		return OpenAICodexTurnIdentity{}, false
 	}
 	identity, trusted := fingerprintObservationOutboundIdentityFromContext(c)
-	// For API-key transports, the short-lived marker can be stale when a Gin
-	// context is reused. Only an immutable finalized plan is authoritative there;
-	// OAuth transports may also use the marker because their finalizer installs it
-	// at the last physical wire boundary.
+	// A short-lived marker can survive a reused context on API-key transports;
+	// only the immutable finalized plan is authoritative there.
 	if trusted && account.IsOpenAIOAuth() {
 		return identity, true
 	}
@@ -537,38 +543,12 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 		pin = installationIDResolution{}
 	}
 	entry := buildFingerprintObservationEntry(c, account, pin, outbound, body, trustedIdentity, hasTrustedIdentity, true)
-	s.applyDailyOAuthObservationIdentity(c, account, &entry, trustedIdentity, hasTrustedIdentity)
 	entry.EventKind = FingerprintObservationEventHTTP
 	entry.OutboundCodexResidencySource = "request_headers"
 	state, _ := RequestTimezoneStateFromContext(c)
 	paths := openAIRequestTimezoneFinalObservationPaths(c, state, body)
 	populateFingerprintObservationTimezones(&entry, state, body, paths)
 	globalFingerprintObserver.record(entry)
-}
-
-func (s *OpenAIGatewayService) applyDailyOAuthObservationIdentity(c *gin.Context, account *Account, entry *FingerprintObservationEntry, identity OpenAICodexTurnIdentity, trusted bool) {
-	if s == nil || entry == nil || !trusted || account == nil || !account.IsOpenAIOAuth() {
-		return
-	}
-	// The finalized server-owned OAuth identity is authoritative for observation
-	// regardless of whether daily rotation is enabled. Daily rotation used to gate this fallback,
-	// which left valid OAuth requests unattributed whenever the final carrier
-	// omitted standalone session/thread headers (for example compatibility
-	// bridges and some Responses projections). The identity has already been
-	// validated by fingerprintObservationTrustedIdentity, so filling missing
-	// fields here does not trust client-supplied UUIDs or change routing.
-	if entry.SessionID == "" && !entry.sessionIdentityCarrierPresent {
-		entry.SessionID = NormalizeFingerprintObservationUUIDv7(identity.SessionID)
-	}
-	if entry.ThreadID == "" && !entry.threadIdentityCarrierPresent {
-		entry.ThreadID = NormalizeFingerprintObservationUUIDv7(identity.ThreadID)
-	}
-	if entry.ParentThreadID == "" && !entry.parentIdentityCarrierPresent {
-		entry.ParentThreadID = NormalizeFingerprintObservationUUIDv7(identity.ParentThreadID)
-	}
-	if entry.ForkedFromThreadID == "" && !entry.forkIdentityCarrierPresent {
-		entry.ForkedFromThreadID = NormalizeFingerprintObservationUUIDv7(identity.ForkedFromThreadID)
-	}
 }
 
 func fingerprintObservationAccountEnabled(account *Account) bool {
@@ -641,31 +621,23 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 		// disabled and the legacy observer fallback selected the client value.
 		entry.OutboundInstallationID = fingerprintObservationTurnMetadataHeaderInstallationID(outbound)
 	}
-	sessionBodyPresent := false
-	threadBodyPresent := false
-	parentBodyPresent := false
-	forkBodyPresent := false
 	if hasTrustedIdentity && len(body) > 0 {
 		bodyIdentity := parseFingerprintObservationBodyIdentity(body)
 		if entry.SessionID == "" && !sessionHeaderPresent {
-			entry.SessionID, sessionBodyPresent = bodyIdentity.uuid(trustedIdentity.SessionID, "session_id", "session_id")
+			entry.SessionID, _ = bodyIdentity.uuid(trustedIdentity.SessionID, "session_id", "session_id")
 		}
 		if entry.ThreadID == "" && !threadHeaderPresent {
-			entry.ThreadID, threadBodyPresent = bodyIdentity.uuid(trustedIdentity.ThreadID, "thread_id", "thread_id")
+			entry.ThreadID, _ = bodyIdentity.uuid(trustedIdentity.ThreadID, "thread_id", "thread_id")
 		}
 		if entry.ParentThreadID == "" && !parentHeaderPresent {
-			entry.ParentThreadID, parentBodyPresent = bodyIdentity.uuid(trustedIdentity.ParentThreadID, "parent_thread_id",
+			entry.ParentThreadID, _ = bodyIdentity.uuid(trustedIdentity.ParentThreadID, "parent_thread_id",
 				"x-codex-parent-thread-id", "parent_thread_id")
 		}
 		if entry.ForkedFromThreadID == "" && !forkHeaderPresent {
-			entry.ForkedFromThreadID, forkBodyPresent = bodyIdentity.uuid(trustedIdentity.ForkedFromThreadID, "forked_from_thread_id",
+			entry.ForkedFromThreadID, _ = bodyIdentity.uuid(trustedIdentity.ForkedFromThreadID, "forked_from_thread_id",
 				"forked_from_thread_id")
 		}
 	}
-	entry.sessionIdentityCarrierPresent = sessionHeaderPresent || sessionBodyPresent
-	entry.threadIdentityCarrierPresent = threadHeaderPresent || threadBodyPresent
-	entry.parentIdentityCarrierPresent = parentHeaderPresent || parentBodyPresent
-	entry.forkIdentityCarrierPresent = forkHeaderPresent || forkBodyPresent
 	if c != nil && c.Request != nil {
 		path := strings.TrimSpace(c.FullPath())
 		if path == "" && c.Request.URL != nil {
@@ -820,7 +792,6 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWSHandshake(c *gin.Co
 		pin = installationIDResolution{}
 	}
 	entry := buildFingerprintObservationEntry(c, account, pin, outbound, nil, identity, trusted, true)
-	s.applyDailyOAuthObservationIdentity(c, account, &entry, identity, trusted)
 	entry.EventKind = FingerprintObservationEventWSHandshake
 	entry.TimezoneComparisonStatus = "not_applicable"
 	entry.OutboundCodexResidencySource = "ws_handshake"
@@ -845,7 +816,6 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWSFrame(c *gin.Contex
 		pin = installationIDResolution{Enabled: plan.InstallationEnabled, ClientID: plan.Capture.ClientInstallationID, OutboundID: plan.InstallationID}
 	}
 	entry := buildFingerprintObservationEntry(c, account, pin, handshakeHeaders, body, identity, trusted, false)
-	s.applyDailyOAuthObservationIdentity(c, account, &entry, identity, trusted)
 	entry.EventKind = FingerprintObservationEventWSFrame
 	entry.OutboundCodexResidencySource = "ws_handshake"
 	var paths map[string]string
@@ -881,7 +851,7 @@ func fingerprintObservationHeaderUUID(headers http.Header, expected string, name
 	if headers == nil {
 		return "", false
 	}
-	expected = NormalizeFingerprintObservationUUIDv7(expected)
+	expected = normalizeTrustedObservationIdentity(expected)
 	if expected == "" {
 		return "", false
 	}
@@ -905,7 +875,7 @@ func fingerprintObservationHeaderUUID(headers http.Header, expected string, name
 			// A conflicting or malformed final alias makes the wire ambiguous.
 			// Do not let a different matching alias hide that conflict or allow
 			// client_metadata to fill past it.
-			if NormalizeFingerprintObservationUUIDv7(value) != expected {
+			if normalizeTrustedObservationIdentity(value) != expected {
 				return "", true
 			}
 		}
@@ -917,7 +887,7 @@ func fingerprintObservationHeaderUUID(headers http.Header, expected string, name
 }
 
 func fingerprintObservationTurnMetadataHeaderUUID(headers http.Header, expected, field string) (string, bool) {
-	expected = NormalizeFingerprintObservationUUIDv7(expected)
+	expected = normalizeTrustedObservationIdentity(expected)
 	if headers == nil || expected == "" {
 		return "", false
 	}
@@ -940,7 +910,7 @@ func fingerprintObservationTurnMetadataHeaderUUID(headers http.Header, expected,
 			}
 			fieldPresent = true
 			value, ok := raw.(string)
-			if !ok || NormalizeFingerprintObservationUUIDv7(value) != expected {
+			if !ok || normalizeTrustedObservationIdentity(value) != expected {
 				return "", true
 			}
 		}
@@ -987,7 +957,7 @@ func parseFingerprintObservationBodyIdentity(body []byte) fingerprintObservation
 }
 
 func (b fingerprintObservationBodyIdentity) uuid(expected, turnField string, flatFields ...string) (string, bool) {
-	expected = NormalizeFingerprintObservationUUIDv7(expected)
+	expected = normalizeTrustedObservationIdentity(expected)
 	if expected == "" || b.metadata == nil {
 		return "", false
 	}
@@ -997,7 +967,7 @@ func (b fingerprintObservationBodyIdentity) uuid(expected, turnField string, fla
 		}
 		if raw, exists := b.turnMetadata[turnField]; exists {
 			value, ok := raw.(string)
-			if !ok || NormalizeFingerprintObservationUUIDv7(value) != expected {
+			if !ok || normalizeTrustedObservationIdentity(value) != expected {
 				return "", true
 			}
 			return expected, true
@@ -1014,7 +984,7 @@ func (b fingerprintObservationBodyIdentity) uuid(expected, turnField string, fla
 			continue
 		}
 		present = true
-		if !ok || NormalizeFingerprintObservationUUIDv7(value) != expected {
+		if !ok || normalizeTrustedObservationIdentity(value) != expected {
 			return "", true
 		}
 	}

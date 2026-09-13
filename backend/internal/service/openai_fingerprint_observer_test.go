@@ -163,30 +163,6 @@ func TestRecordFingerprintObservationFallsBackToFinalizedPlan(t *testing.T) {
 	}
 }
 
-func TestRecordFingerprintObservationUsesTrustedPlanWhenCarrierOmitsIdentity(t *testing.T) {
-	SetFingerprintObservationEnabled(true)
-	defer SetFingerprintObservationEnabled(false)
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	account := newOpenAIOAuthPinAccount(92032, nil)
-	identity := OpenAICodexTurnIdentity{
-		SessionID:      fingerprintObserverSessionV7,
-		ThreadID:       fingerprintObserverThreadV7,
-		ParentThreadID: fingerprintObserverSessionV7,
-		Relation:       OpenAICodexTurnRelationDescendant,
-	}
-	// A compatibility projection can leave the final request without standalone
-	// identity headers or a body metadata copy. The finalized plan remains the
-	// server-owned source of truth and must keep the observation attributable.
-	SetOpenAIOAuthIdentityPlan(c, OpenAIOAuthIdentityPlan{TurnIdentity: identity, TurnIdentityEnabled: true})
-	(&OpenAIGatewayService{}).recordFingerprintObservation(c, account, installationIDResolution{}, http.Header{})
-	entry := SnapshotFingerprintObservations(1)[0]
-	if entry.SessionID != identity.SessionID || entry.ThreadID != identity.ThreadID || entry.ParentThreadID != identity.ParentThreadID {
-		t.Fatalf("trusted finalized identity was lost when wire carriers were empty: %+v", entry)
-	}
-}
-
 func TestFingerprintObservationAlphaInstallationUsesFinalParseableMetadata(t *testing.T) {
 	const installationID = "11111111-2222-4333-8444-555555555555"
 	tests := []struct {
