@@ -714,7 +714,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 				if existing, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && existing.TurnIdentity.Relation == OpenAICodexTurnRelationDescendant && account.IsOpenAIOAuth() {
 					syncIdentity, syncRequest = existing.TurnIdentity, true
 				} else {
-					syncIdentity, syncRequest, syncErr = s.resolveOAuthSynchronousTurnIdentity(ctx, account, false, originalOpenAISyncThread(c, body))
+					syncIdentity, syncRequest, syncErr = s.resolveOAuthSynchronousTurnIdentity(ctx, account, false, originalOpenAISyncSession(c, body)+"\x00"+originalOpenAISyncThread(c, body))
 				}
 			}
 			if syncErr != nil {

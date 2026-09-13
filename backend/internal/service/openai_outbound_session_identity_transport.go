@@ -46,6 +46,25 @@ func originalOpenAISyncThread(c *gin.Context, body []byte) string {
 	return ""
 }
 
+func originalOpenAISyncSession(c *gin.Context, body []byte) string {
+	candidates := []string{
+		gjson.GetBytes(body, "client_metadata.session_id").String(),
+		gjson.GetBytes(body, "session_id").String(),
+	}
+	if c != nil && c.Request != nil {
+		candidates = append(candidates, c.Request.Header.Get("session_id"), c.Request.Header.Get("session-id"))
+		if raw := c.Request.Header.Get(openAIWSTurnMetadataHeader); raw != "" {
+			candidates = append(candidates, gjson.Get(raw, "session_id").String())
+		}
+	}
+	for _, candidate := range candidates {
+		if canonical, err := canonicalUUIDv7(candidate); err == nil {
+			return canonical
+		}
+	}
+	return ""
+}
+
 // resolveOAuthSynchronousTurnIdentity returns the account's durable root
 // session plus a child thread for one stream=false turn. A valid child from
 // the request is reused; otherwise a fresh context-free child is allocated.
@@ -93,7 +112,13 @@ func (s *OpenAIGatewayService) resolveOAuthSynchronousTurnIdentity(ctx context.C
 		return OpenAICodexTurnIdentity{}, false, fmt.Errorf("invalid OAuth sync root session: %w", err)
 	}
 	child := uuid.Nil
-	if existing, parseErr := uuid.Parse(strings.TrimSpace(existingThread)); parseErr == nil && existing.Version() == uuid.Version(7) {
+	seedParts := strings.SplitN(existingThread, "\x00", 2)
+	existingSession := ""
+	if len(seedParts) == 2 {
+		existingSession = strings.TrimSpace(seedParts[0])
+		existingThread = seedParts[1]
+	}
+	if existing, parseErr := uuid.Parse(strings.TrimSpace(existingThread)); parseErr == nil && existing.Version() == uuid.Version(7) && (existingSession == "" || existingSession == root) {
 		child = existing
 	} else {
 		child, err = uuid.NewV7()
