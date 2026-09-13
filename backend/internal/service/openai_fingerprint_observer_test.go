@@ -165,6 +165,35 @@ func TestRecordFingerprintObservationUsesFinalizedPlanTrustForWireIdentity(t *te
 	}
 }
 
+func TestRecordFingerprintObservationDoesNotSynthesizeFromPlan(t *testing.T) {
+	SetFingerprintObservationEnabled(true)
+	defer SetFingerprintObservationEnabled(false)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	account := newOpenAIOAuthPinAccount(92033, nil)
+	SetOpenAIOAuthIdentityPlan(c, OpenAIOAuthIdentityPlan{
+		TurnIdentity: OpenAICodexTurnIdentity{
+			SessionID: fingerprintObserverSessionV7,
+			ThreadID:  fingerprintObserverThreadV7,
+			Relation:  OpenAICodexTurnRelationDescendant,
+		},
+		TurnIdentityEnabled: true,
+	})
+	clearFingerprintObservationOutboundIdentity(c)
+	(&OpenAIGatewayService{}).recordFingerprintObservationWithBody(
+		c,
+		account,
+		installationIDResolution{},
+		http.Header{},
+		nil,
+	)
+	entry := SnapshotFingerprintObservations(1)[0]
+	if entry.SessionID != "" || entry.ThreadID != "" || entry.ParentThreadID != "" || entry.ForkedFromThreadID != "" {
+		t.Fatalf("observation synthesized identity from finalized plan: %+v", entry)
+	}
+}
+
 func TestFingerprintObservationAlphaInstallationUsesFinalParseableMetadata(t *testing.T) {
 	const installationID = "11111111-2222-4333-8444-555555555555"
 	tests := []struct {
