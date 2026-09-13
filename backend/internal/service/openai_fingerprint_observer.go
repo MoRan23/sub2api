@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -506,12 +507,38 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 		pin = installationIDResolution{}
 	}
 	entry := buildFingerprintObservationEntry(c, account, pin, outbound, body, trustedIdentity, hasTrustedIdentity, true)
+	s.applyDailyOAuthObservationIdentity(c, account, &entry, trustedIdentity, hasTrustedIdentity)
 	entry.EventKind = FingerprintObservationEventHTTP
 	entry.OutboundCodexResidencySource = "request_headers"
 	state, _ := RequestTimezoneStateFromContext(c)
 	paths := openAIRequestTimezoneFinalObservationPaths(c, state, body)
 	populateFingerprintObservationTimezones(&entry, state, body, paths)
 	globalFingerprintObserver.record(entry)
+}
+
+func (s *OpenAIGatewayService) applyDailyOAuthObservationIdentity(c *gin.Context, account *Account, entry *FingerprintObservationEntry, identity OpenAICodexTurnIdentity, trusted bool) {
+	if s == nil || entry == nil || !trusted || account == nil || !account.IsOpenAIOAuth() {
+		return
+	}
+	ctx := context.Background()
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	if !s.oauthDailySessionRotationEnabled(ctx) {
+		return
+	}
+	if entry.SessionID == "" {
+		entry.SessionID = NormalizeFingerprintObservationUUIDv7(identity.SessionID)
+	}
+	if entry.ThreadID == "" {
+		entry.ThreadID = NormalizeFingerprintObservationUUIDv7(identity.ThreadID)
+	}
+	if entry.ParentThreadID == "" {
+		entry.ParentThreadID = NormalizeFingerprintObservationUUIDv7(identity.ParentThreadID)
+	}
+	if entry.ForkedFromThreadID == "" {
+		entry.ForkedFromThreadID = NormalizeFingerprintObservationUUIDv7(identity.ForkedFromThreadID)
+	}
 }
 
 func fingerprintObservationAccountEnabled(account *Account) bool {
@@ -755,6 +782,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWSHandshake(c *gin.Co
 		pin = installationIDResolution{}
 	}
 	entry := buildFingerprintObservationEntry(c, account, pin, outbound, nil, identity, trusted, true)
+	s.applyDailyOAuthObservationIdentity(c, account, &entry, identity, trusted)
 	entry.EventKind = FingerprintObservationEventWSHandshake
 	entry.TimezoneComparisonStatus = "not_applicable"
 	entry.OutboundCodexResidencySource = "ws_handshake"
@@ -779,6 +807,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWSFrame(c *gin.Contex
 		pin = installationIDResolution{Enabled: plan.InstallationEnabled, ClientID: plan.Capture.ClientInstallationID, OutboundID: plan.InstallationID}
 	}
 	entry := buildFingerprintObservationEntry(c, account, pin, handshakeHeaders, body, identity, trusted, false)
+	s.applyDailyOAuthObservationIdentity(c, account, &entry, identity, trusted)
 	entry.EventKind = FingerprintObservationEventWSFrame
 	entry.OutboundCodexResidencySource = "ws_handshake"
 	var paths map[string]string
