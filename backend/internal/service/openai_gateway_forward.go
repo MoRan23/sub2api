@@ -1386,6 +1386,14 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 	options openAIUpstreamRequestBuildOptions,
 ) (*http.Request, error) {
 	clearFingerprintObservationOutboundIdentity(c)
+	// The handler's request body parser is not the authoritative stream signal:
+	// compatibility transforms can remove or relocate `stream` before this
+	// builder runs.  `isStream` is the routing decision already made by the
+	// ingress handler, so refresh the request-local marker from it immediately
+	// before OAuth identity materialization.  This keeps daily affinity enabled
+	// for metadata-free Responses streams even when the body no longer exposes
+	// the original flag.
+	setOpenAIClientRequestedStream(c, isStream)
 	// Determine target URL based on account type
 	var targetURL string
 	switch account.Type {
