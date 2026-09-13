@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -62,6 +61,15 @@ type FingerprintObservationEntry struct {
 	TimezoneComparisonStatus     string               `json:"timezone_comparison_status,omitempty"`
 	OutboundCodexResidency       string               `json:"outbound_codex_residency"`
 	OutboundCodexResidencySource string               `json:"outbound_codex_residency_source,omitempty"`
+
+	// These are request-local provenance bits. They are intentionally unexported
+	// so the admin API never exposes them; they prevent a trusted fallback from
+	// overwriting a malformed/conflicting carrier that was deliberately omitted
+	// from the public observation value.
+	sessionIdentityCarrierPresent bool
+	threadIdentityCarrierPresent  bool
+	parentIdentityCarrierPresent  bool
+	forkIdentityCarrierPresent    bool
 }
 
 // FingerprintObservationThreadNode groups final wire observations for one
@@ -476,11 +484,15 @@ func fingerprintObservationOutboundIdentityFromContext(c *gin.Context) (OpenAICo
 // provenance marker while retaining the immutable finalized plan, so the plan
 // is a safe validated fallback for the same request and account.
 func fingerprintObservationTrustedIdentity(c *gin.Context, account *Account) (OpenAICodexTurnIdentity, bool) {
-	if !usesOpenAICodexIdentityProtocol(account) {
+	if account == nil || !usesOpenAICodexIdentityProtocol(account) {
 		return OpenAICodexTurnIdentity{}, false
 	}
 	identity, trusted := fingerprintObservationOutboundIdentityFromContext(c)
-	if trusted {
+	// For API-key transports, the short-lived marker can be stale when a Gin
+	// context is reused. Only an immutable finalized plan is authoritative there;
+	// OAuth transports may also use the marker because their finalizer installs it
+	// at the last physical wire boundary.
+	if trusted && account.IsOpenAIOAuth() {
 		return identity, true
 	}
 	if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && plan.TurnIdentityEnabled && ValidateOpenAICodexTurnIdentity(plan.TurnIdentity) == nil {
@@ -538,23 +550,23 @@ func (s *OpenAIGatewayService) applyDailyOAuthObservationIdentity(c *gin.Context
 	if s == nil || entry == nil || !trusted || account == nil || !account.IsOpenAIOAuth() {
 		return
 	}
-	ctx := context.Background()
-	if c != nil && c.Request != nil {
-		ctx = c.Request.Context()
-	}
-	if !s.oauthDailySessionRotationEnabled(ctx) {
-		return
-	}
-	if entry.SessionID == "" {
+	// The finalized server-owned OAuth identity is authoritative for observation
+	// regardless of whether daily rotation is enabled. Daily rotation used to gate this fallback,
+	// which left valid OAuth requests unattributed whenever the final carrier
+	// omitted standalone session/thread headers (for example compatibility
+	// bridges and some Responses projections). The identity has already been
+	// validated by fingerprintObservationTrustedIdentity, so filling missing
+	// fields here does not trust client-supplied UUIDs or change routing.
+	if entry.SessionID == "" && !entry.sessionIdentityCarrierPresent {
 		entry.SessionID = NormalizeFingerprintObservationUUIDv7(identity.SessionID)
 	}
-	if entry.ThreadID == "" {
+	if entry.ThreadID == "" && !entry.threadIdentityCarrierPresent {
 		entry.ThreadID = NormalizeFingerprintObservationUUIDv7(identity.ThreadID)
 	}
-	if entry.ParentThreadID == "" {
+	if entry.ParentThreadID == "" && !entry.parentIdentityCarrierPresent {
 		entry.ParentThreadID = NormalizeFingerprintObservationUUIDv7(identity.ParentThreadID)
 	}
-	if entry.ForkedFromThreadID == "" {
+	if entry.ForkedFromThreadID == "" && !entry.forkIdentityCarrierPresent {
 		entry.ForkedFromThreadID = NormalizeFingerprintObservationUUIDv7(identity.ForkedFromThreadID)
 	}
 }
@@ -629,23 +641,31 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 		// disabled and the legacy observer fallback selected the client value.
 		entry.OutboundInstallationID = fingerprintObservationTurnMetadataHeaderInstallationID(outbound)
 	}
+	sessionBodyPresent := false
+	threadBodyPresent := false
+	parentBodyPresent := false
+	forkBodyPresent := false
 	if hasTrustedIdentity && len(body) > 0 {
 		bodyIdentity := parseFingerprintObservationBodyIdentity(body)
 		if entry.SessionID == "" && !sessionHeaderPresent {
-			entry.SessionID, _ = bodyIdentity.uuid(trustedIdentity.SessionID, "session_id", "session_id")
+			entry.SessionID, sessionBodyPresent = bodyIdentity.uuid(trustedIdentity.SessionID, "session_id", "session_id")
 		}
 		if entry.ThreadID == "" && !threadHeaderPresent {
-			entry.ThreadID, _ = bodyIdentity.uuid(trustedIdentity.ThreadID, "thread_id", "thread_id")
+			entry.ThreadID, threadBodyPresent = bodyIdentity.uuid(trustedIdentity.ThreadID, "thread_id", "thread_id")
 		}
 		if entry.ParentThreadID == "" && !parentHeaderPresent {
-			entry.ParentThreadID, _ = bodyIdentity.uuid(trustedIdentity.ParentThreadID, "parent_thread_id",
+			entry.ParentThreadID, parentBodyPresent = bodyIdentity.uuid(trustedIdentity.ParentThreadID, "parent_thread_id",
 				"x-codex-parent-thread-id", "parent_thread_id")
 		}
 		if entry.ForkedFromThreadID == "" && !forkHeaderPresent {
-			entry.ForkedFromThreadID, _ = bodyIdentity.uuid(trustedIdentity.ForkedFromThreadID, "forked_from_thread_id",
+			entry.ForkedFromThreadID, forkBodyPresent = bodyIdentity.uuid(trustedIdentity.ForkedFromThreadID, "forked_from_thread_id",
 				"forked_from_thread_id")
 		}
 	}
+	entry.sessionIdentityCarrierPresent = sessionHeaderPresent || sessionBodyPresent
+	entry.threadIdentityCarrierPresent = threadHeaderPresent || threadBodyPresent
+	entry.parentIdentityCarrierPresent = parentHeaderPresent || parentBodyPresent
+	entry.forkIdentityCarrierPresent = forkHeaderPresent || forkBodyPresent
 	if c != nil && c.Request != nil {
 		path := strings.TrimSpace(c.FullPath())
 		if path == "" && c.Request.URL != nil {
