@@ -489,8 +489,9 @@ func fingerprintObservationOutboundIdentityFromContext(c *gin.Context) (OpenAICo
 
 // fingerprintObservationTrustedIdentity resolves the final server-owned
 // identity for observation. Compatibility bridges may clear the short-lived
-// provenance marker while retaining the immutable finalized plan, so the plan
-// is a safe validated fallback for the same request and account.
+// provenance marker while retaining the immutable finalized plan. The plan is
+// used only to validate which final-wire values belong to this request; it is
+// never copied into the observation when a carrier is absent.
 func fingerprintObservationTrustedIdentity(c *gin.Context, account *Account) (OpenAICodexTurnIdentity, bool) {
 	if !usesOpenAICodexIdentityProtocol(account) {
 		return OpenAICodexTurnIdentity{}, false

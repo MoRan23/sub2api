@@ -137,7 +137,7 @@ func TestRecordFingerprintObservationUsesFinalHeaderAliases(t *testing.T) {
 	}
 }
 
-func TestRecordFingerprintObservationFallsBackToFinalizedPlan(t *testing.T) {
+func TestRecordFingerprintObservationUsesFinalizedPlanTrustForWireIdentity(t *testing.T) {
 	SetFingerprintObservationEnabled(true)
 	defer SetFingerprintObservationEnabled(false)
 	gin.SetMode(gin.TestMode)
@@ -151,7 +151,9 @@ func TestRecordFingerprintObservationFallsBackToFinalizedPlan(t *testing.T) {
 	}
 	SetOpenAIOAuthIdentityPlan(c, OpenAIOAuthIdentityPlan{TurnIdentity: identity, TurnIdentityEnabled: true})
 	// Simulate a compatibility path that cleared the short-lived marker after
-	// finalization while leaving the immutable plan available.
+	// finalization while leaving the immutable plan available. The values below
+	// are still supplied by the finalized request headers; the plan only
+	// authorizes them for attribution.
 	clearFingerprintObservationOutboundIdentity(c)
 	(&OpenAIGatewayService{}).recordFingerprintObservation(c, account, installationIDResolution{}, http.Header{
 		"session-id": []string{fingerprintObserverSessionV7},
@@ -159,7 +161,7 @@ func TestRecordFingerprintObservationFallsBackToFinalizedPlan(t *testing.T) {
 	})
 	entry := SnapshotFingerprintObservations(1)[0]
 	if entry.SessionID != fingerprintObserverSessionV7 || entry.ThreadID != fingerprintObserverThreadV7 {
-		t.Fatalf("finalized plan identity was not used after marker clear: %+v", entry)
+		t.Fatalf("final wire identity was not attributed after marker clear: %+v", entry)
 	}
 }
 
