@@ -782,6 +782,7 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 					identity.Relation = OpenAICodexTurnRelationDescendant
 				}
 				plan.TurnIdentity = identity
+				setOpenAIDailyRootObservation(c, OpenAIDailyRootObservation{Enabled: true, Kind: "stream", BusinessDate: affinity.BusinessDate, SlotIndex: affinity.SlotIndex, SessionID: root})
 			}
 			plan.WireProfile.SessionID = identity.SessionID
 			plan.WireProfile.ThreadID = identity.ThreadID

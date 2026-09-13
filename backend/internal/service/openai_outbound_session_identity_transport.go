@@ -367,6 +367,7 @@ func (s *OpenAIGatewayService) resolveOpenAICodexLogicalIdentityForTransport(
 			return OpenAICodexTurnIdentity{}, false, fmt.Errorf("invalid OAuth daily stream root session: %w", rootErr)
 		}
 		identity.SessionID = root
+		setOpenAIDailyRootObservation(c, OpenAIDailyRootObservation{Enabled: true, Kind: "stream", BusinessDate: affinity.BusinessDate, SlotIndex: affinity.SlotIndex, SessionID: root})
 		if identity.Relation == OpenAICodexTurnRelationDescendant {
 			identity.ParentThreadID = root
 		}

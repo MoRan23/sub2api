@@ -17,6 +17,9 @@
                       : t('admin.fingerprintObservation.statusOff')
                   }}
                 </span>
+                <span class="rounded-full px-2.5 py-0.5 text-xs font-semibold" :class="dailyFixedRootEnabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-400'">
+                  {{ dailyFixedRootLabel || t('admin.fingerprintObservation.dailyFixedRootOff') }}
+                </span>
               </div>
               <p class="mt-1 max-w-3xl text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.fingerprintObservation.subtitle') }}
@@ -580,6 +583,8 @@ const { t } = useI18n()
 const appStore = useAppStore()
 
 const observationEnabled = ref(false)
+const dailyFixedRootEnabled = ref(false)
+const dailyFixedRootLabel = ref('')
 const observationViews = [
   { key: 'identity', label: 'admin.fingerprintObservation.identityTab' },
   { key: 'context', label: 'admin.fingerprintObservation.contextManagement.title' },
@@ -956,6 +961,8 @@ async function loadUsers(options: {
     abortAllChildRequests()
     clearHierarchy()
     observationEnabled.value = response.enabled
+    dailyFixedRootEnabled.value = response.daily_fixed_root_enabled
+    dailyFixedRootLabel.value = response.daily_fixed_root_label
     if (!response.enabled) {
       clearVisibleData()
       return

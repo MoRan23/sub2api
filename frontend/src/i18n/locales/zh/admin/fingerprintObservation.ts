@@ -28,6 +28,7 @@ export default {
     toggleLabel: '采集指纹',
     statusOn: '观测已开启',
     statusOff: '观测已关闭',
+    dailyFixedRootOff: '每日固定根会话：未开启',
     disabledHint: '当前未开启观测，不记录请求数据。可在此处开启并查看有限的内存快照。',
     enabledSuccess: '指纹观测已开启',
     disabledSuccess: '指纹观测已关闭',
@@ -74,6 +75,7 @@ export default {
     collapseUnthreaded: '收起未归属线程的观测',
     request: {
       details: '时区与地域明细',
+      codexMetadata: 'Codex 出站元数据', disabled: '未启用', dailyRoot: '每日固定根', dailyRootSession: '固定根会话', window: 'Window', windowNumber: 'Window 序号', contextWindow: '上下文 Window', turn: 'Turn', parentTurn: '父 Turn', rootTurn: '根 Turn', parentThread: '父线程', forkedFrom: '分叉来源', agent: 'Agent', subagent: 'Subagent', threadSource: '线程来源', turnTrigger: 'Turn 触发', sandbox: 'Sandbox / 模式', review: '自动审核', workspaces: '工作区',
       event: '事件类型',
       target: '配置目标时区',
       residency: '出站 residency',

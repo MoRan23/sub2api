@@ -255,6 +255,14 @@
             <span v-if="value" :title="value" class="block max-w-xs truncate text-sm text-gray-600 dark:text-gray-300">{{ value }}</span>
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
           </template>
+          <template #cell-daily_fixed_roots="{ row }">
+            <div v-if="dailyFixedRootPools[row.id]" class="max-w-xs text-[11px] leading-4 text-gray-600 dark:text-gray-300">
+              <div>{{ dailyFixedRootPools[row.id].business_date }} · {{ dailyFixedRootPools[row.id].generation }}</div>
+              <div class="break-all font-mono">{{ dailyFixedRootPools[row.id].stream_session_ids.join(' | ') }}</div>
+              <div class="break-all font-mono">{{ dailyFixedRootPools[row.id].sync_session_id }}</div>
+            </div>
+            <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+          </template>
           <template #cell-platform_type="{ row }">
             <div class="flex min-w-0 flex-col gap-1">
               <div class="flex flex-wrap items-center gap-1">
@@ -1105,6 +1113,19 @@ const {
   }
 })
 
+const dailyFixedRootPools = reactive<Record<number, any>>({})
+watch(accounts, async (rows) => {
+  if (!isColumnVisible('daily_fixed_roots')) return
+  const ids = rows.filter((row) => row.platform === 'openai' && row.type === 'oauth').map((row) => row.id)
+  if (!ids.length) return
+  if (typeof adminAPI.accounts.listDailySessionPools !== 'function') return
+  try {
+    const result = await adminAPI.accounts.listDailySessionPools(ids)
+    Object.keys(dailyFixedRootPools).forEach((key) => delete dailyFixedRootPools[Number(key)])
+    if (result.enabled) Object.assign(dailyFixedRootPools, result.items)
+  } catch (error) { console.error('Failed to load daily fixed roots:', error) }
+}, { deep: true, immediate: true })
+
 const {
   selectedSet,
   selectedIds: selIds,
@@ -1858,6 +1879,7 @@ const allColumns = computed(() => {
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
+    { key: 'daily_fixed_roots', label: t('admin.accounts.columns.dailyFixedRoots'), sortable: false },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]

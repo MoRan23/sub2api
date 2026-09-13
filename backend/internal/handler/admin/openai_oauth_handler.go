@@ -23,6 +23,8 @@ type OpenAIOAuthHandler struct {
 	quotaService          openAIQuotaService
 	rateLimitService      openAIAccountStateRecoverer
 	tokenCacheInvalidator service.TokenCacheInvalidator
+	dailySessionPools     service.OAuthDailySessionRepository
+	settingService        *service.SettingService
 }
 
 func (h *OpenAIOAuthHandler) SetTokenCacheInvalidator(invalidator service.TokenCacheInvalidator) {
@@ -87,6 +89,7 @@ func NewOpenAIOAuthHandler(
 	adminService service.AdminService,
 	quotaService *service.OpenAIQuotaService,
 	rateLimitService *service.RateLimitService,
+	extras ...any,
 ) *OpenAIOAuthHandler {
 	h := &OpenAIOAuthHandler{
 		openaiOAuthService: openaiOAuthService,
@@ -101,7 +104,49 @@ func NewOpenAIOAuthHandler(
 	if rateLimitService != nil {
 		h.rateLimitService = rateLimitService
 	}
+	for _, extra := range extras {
+		switch value := extra.(type) {
+		case service.OAuthDailySessionRepository:
+			h.dailySessionPools = value
+		case *service.SettingService:
+			h.settingService = value
+		}
+	}
 	return h
+}
+
+// ListOAuthDailySessionPools is a read-only admin lookup for existing pools.
+func (h *OpenAIOAuthHandler) ListOAuthDailySessionPools(c *gin.Context) {
+	result := struct {
+		Enabled      bool                                    `json:"enabled"`
+		BusinessDate string                                  `json:"business_date"`
+		Items        map[int64]service.OAuthDailySessionPool `json:"items"`
+	}{Items: map[int64]service.OAuthDailySessionPool{}}
+	if h.settingService == nil || !h.settingService.IsOpenAIOAuthDailySessionRotationEnabled(c.Request.Context()) || h.dailySessionPools == nil {
+		response.Success(c, result)
+		return
+	}
+	result.Enabled = true
+	result.BusinessDate = service.OAuthDailyBusinessDate(time.Now().UTC())
+	parts := strings.Split(c.Query("account_ids"), ",")
+	ids := make([]int64, 0, len(parts))
+	for _, part := range parts {
+		if id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64); err == nil && id > 0 {
+			ids = append(ids, id)
+		}
+	}
+	reader, ok := h.dailySessionPools.(service.OAuthDailySessionPoolReader)
+	if !ok {
+		response.Success(c, result)
+		return
+	}
+	pools, err := reader.ListOAuthDailySessionPools(c.Request.Context(), ids, time.Now().UTC())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	result.Items = pools
+	response.Success(c, result)
 }
 
 // OpenAIGenerateAuthURLRequest represents the request for generating OpenAI auth URL

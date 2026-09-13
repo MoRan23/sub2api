@@ -24,6 +24,16 @@
       </dl>
       <p v-if="observation.event_kind === 'ws_response_create'" class="text-gray-500 dark:text-gray-400">{{ t(`${prefix}.frameAttempt`) }}</p>
 
+      <section class="rounded-lg border border-gray-200 p-3 dark:border-dark-700">
+        <h3 class="font-semibold text-gray-800 dark:text-gray-200">{{ t(`${prefix}.codexMetadata`) }}</h3>
+        <dl class="mt-2 grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+          <template v-for="item in metadataItems" :key="item.key">
+            <dt class="text-gray-500 dark:text-gray-400">{{ item.label }}</dt>
+            <dd class="break-all font-mono text-gray-800 dark:text-gray-200">{{ item.value || '—' }}</dd>
+          </template>
+        </dl>
+      </section>
+
       <div class="grid gap-3 lg:grid-cols-2">
         <section v-for="direction in directions" :key="direction.key" :aria-label="t(`${prefix}.${direction.key}`)" class="min-w-0 rounded-lg border border-gray-200 p-3 dark:border-dark-700">
           <h3 class="font-semibold text-gray-800 dark:text-gray-200">{{ t(`${prefix}.${direction.key}`) }}</h3>
@@ -110,6 +120,18 @@ const residencyValue = computed(() => props.observation.outbound_codex_residency
   ? t(`${prefix}.notCollected`)
   : props.observation.outbound_codex_residency || t(`${prefix}.headerAbsent`))
 const eventLabel = computed(() => t(`${prefix}.events.${props.observation.event_kind ?? 'unknown'}`))
+const metadataItems = computed(() => [
+  ['dailyRoot', props.observation.daily_fixed_root_enabled ? `${props.observation.daily_fixed_root_kind || '—'} / ${props.observation.daily_fixed_root_business_date || '—'} / ${props.observation.daily_fixed_root_slot_index ?? '—'}` : t(`${prefix}.disabled`)],
+  ['dailyRootSession', props.observation.daily_fixed_root_session_id], ['window', props.observation.window_id],
+  ['windowNumber', props.observation.window_number?.toString()], ['contextWindow', props.observation.context_window_id],
+  ['turn', props.observation.turn_id], ['parentTurn', props.observation.parent_turn_id], ['rootTurn', props.observation.root_turn_id],
+  ['parentThread', props.observation.parent_thread_id], ['forkedFrom', props.observation.forked_from_thread_id],
+  ['agent', props.observation.agent_name], ['subagent', props.observation.subagent_kind || props.observation.openai_subagent],
+  ['threadSource', props.observation.thread_source], ['turnTrigger', props.observation.turn_trigger],
+  ['sandbox', props.observation.sandbox || props.observation.sandbox_mode],
+  ['review', props.observation.auto_review_enabled === undefined ? undefined : String(props.observation.auto_review_enabled)],
+  ['workspaces', props.observation.workspaces?.join(', ')],
+].map(([key, value]) => ({ key, label: t(`${prefix}.${key}`), value })))
 
 function onDetailsToggle(event: Event): void {
   detailsOpen.value = (event.target as HTMLDetailsElement).open

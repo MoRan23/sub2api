@@ -68,6 +68,19 @@ export async function list(
   return data
 }
 
+export interface OAuthDailySessionPool {
+  account_id: number
+  business_date: string
+  generation: string
+  stream_session_ids: string[]
+  sync_session_id: string
+}
+
+export async function listDailySessionPools(accountIds: number[]): Promise<{ enabled: boolean; business_date: string; items: Record<string, OAuthDailySessionPool> }> {
+  const { data } = await apiClient.get('/admin/openai/daily-session-pools', { params: { account_ids: accountIds.join(',') } })
+  return data
+}
+
 export interface AccountListWithEtagResult {
   notModified: boolean
   etag: string | null
@@ -1075,6 +1088,7 @@ export async function refreshOllamaCloudUsage(id: number): Promise<OllamaCloudUs
 
 export const accountsAPI = {
   list,
+  listDailySessionPools,
   listWithEtag,
   getUpstreamBillingRatesWithEtag,
   getById,

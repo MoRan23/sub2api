@@ -66,6 +66,30 @@ export interface FingerprintObservationEntry {
   thread_id: string
   parent_thread_id: string
   forked_from_thread_id: string
+  forked_from_ordinal_exclusive?: number
+  parent_turn_id: string
+  root_turn_id: string
+  turn_id: string
+  turn_started_at_unix_ms?: number
+  window_id: string
+  window_number?: number
+  context_window_id: string
+  agent_name: string
+  subagent_kind: string
+  openai_subagent: string
+  thread_source: string
+  turn_trigger: string
+  sandbox: string
+  sandbox_mode: string
+  auto_review_enabled?: boolean
+  node_repl_auto_review_required?: boolean
+  node_repl_disabled?: boolean
+  workspaces?: string[]
+  daily_fixed_root_enabled: boolean
+  daily_fixed_root_kind?: 'stream' | 'sync'
+  daily_fixed_root_business_date?: string
+  daily_fixed_root_slot_index?: number
+  daily_fixed_root_session_id?: string
   user_agent: string
   originator: string
   openai_beta: string
@@ -147,6 +171,8 @@ export interface FingerprintObservationsResponse {
   page: number
   page_size: number
   pages: number
+  daily_fixed_root_enabled: boolean
+  daily_fixed_root_label: string
 }
 
 export interface CodexContextManagementEvent {

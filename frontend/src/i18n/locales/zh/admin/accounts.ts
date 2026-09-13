@@ -111,6 +111,7 @@ export default {
         status: '状态',
         schedulable: '调度',
         todayStats: '今日统计',
+        dailyFixedRoots: '每日固定根',
         groups: '分组',
         usageWindows: '用量窗口',
         proxy: '代理',

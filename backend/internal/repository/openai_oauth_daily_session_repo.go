@@ -133,6 +133,22 @@ func (r *openAIOAuthDailySessionRepository) GetOrCreateOAuthDailySessionAffinity
 	return result, nil
 }
 
+func (r *openAIOAuthDailySessionRepository) ListOAuthDailySessionPools(ctx context.Context, accountIDs []int64, now time.Time) (map[int64]service.OAuthDailySessionPool, error) {
+	result := make(map[int64]service.OAuthDailySessionPool)
+	if r == nil || r.client == nil || len(accountIDs) == 0 {
+		return result, nil
+	}
+	date := service.OAuthDailyBusinessDate(now)
+	rows, err := r.client.OpenAIOAuthDailySessionPool.Query().Where(openaioauthdailysessionpool.AccountIDIn(accountIDs...), openaioauthdailysessionpool.BusinessDateEQ(date)).All(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list OAuth daily session pools: %w", err)
+	}
+	for _, row := range rows {
+		result[row.AccountID] = service.OAuthDailySessionPool{AccountID: row.AccountID, BusinessDate: row.BusinessDate, Generation: row.Generation, StreamSessionIDs: [3]string{row.StreamSession0, row.StreamSession1, row.StreamSession2}, SyncSessionID: row.SyncSession}
+	}
+	return result, nil
+}
+
 func (r *openAIOAuthDailySessionRepository) ReleaseOAuthDailySessionGeneration(ctx context.Context, accountID int64, generation string) error {
 	if r == nil || r.client == nil {
 		return fmt.Errorf("nil OpenAI OAuth daily-session repository")

@@ -1491,6 +1491,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 		}
 		if syncRequest {
 			identityModeEnabled = false
+			if account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil && s.oauthDailySessionRotationEnabled(ctx) {
+				setOpenAIDailyRootObservation(c, OpenAIDailyRootObservation{Enabled: true, Kind: "sync", BusinessDate: OAuthDailyBusinessDate(time.Now().UTC()), SlotIndex: -1, SessionID: syncIdentity.SessionID})
+			}
 		}
 		projectionMode := OpenAIOAuthIdentityProjectionRegular
 		if isOpenAIResponsesCompactPath(c) {

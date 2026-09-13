@@ -216,6 +216,7 @@ export default {
         status: 'Status',
         schedulable: 'Schedulable',
         todayStats: 'Today Stats',
+        dailyFixedRoots: 'Daily fixed roots',
         groups: 'Groups',
         usageWindows: 'Usage Windows',
         proxy: 'Proxy',

@@ -21,6 +21,7 @@ const fingerprintObservationOutboundIdentityContextKey = "fingerprint_observatio
 const fingerprintObservationFinalWireIdentityContextKey = "fingerprint_observation_final_wire_identity"
 
 const fingerprintObservationTimezonePathMappingContextKey = "fingerprint_observation_timezone_path_mapping"
+const fingerprintObservationDailyRootContextKey = "fingerprint_observation_daily_root"
 
 const (
 	FingerprintObservationEventHTTP        = "http_request"
@@ -49,6 +50,30 @@ type FingerprintObservationEntry struct {
 	ThreadID                     string               `json:"thread_id"`
 	ParentThreadID               string               `json:"parent_thread_id"`
 	ForkedFromThreadID           string               `json:"forked_from_thread_id"`
+	ForkedFromOrdinalExclusive   *uint64              `json:"forked_from_ordinal_exclusive,omitempty"`
+	ParentTurnID                 string               `json:"parent_turn_id"`
+	RootTurnID                   string               `json:"root_turn_id"`
+	TurnID                       string               `json:"turn_id"`
+	TurnStartedAtUnixMS          int64                `json:"turn_started_at_unix_ms,omitempty"`
+	WindowID                     string               `json:"window_id"`
+	WindowNumber                 *uint64              `json:"window_number,omitempty"`
+	ContextWindowID              string               `json:"context_window_id"`
+	AgentName                    string               `json:"agent_name"`
+	SubagentKind                 string               `json:"subagent_kind"`
+	OpenAISubagent               string               `json:"openai_subagent"`
+	ThreadSource                 string               `json:"thread_source"`
+	TurnTrigger                  string               `json:"turn_trigger"`
+	Sandbox                      string               `json:"sandbox"`
+	SandboxMode                  string               `json:"sandbox_mode"`
+	AutoReviewEnabled            *bool                `json:"auto_review_enabled,omitempty"`
+	NodeREPLAutoReviewRequired   *bool                `json:"node_repl_auto_review_required,omitempty"`
+	NodeREPLDisabled             *bool                `json:"node_repl_disabled,omitempty"`
+	Workspaces                   []string             `json:"workspaces,omitempty"`
+	DailyFixedRootEnabled        bool                 `json:"daily_fixed_root_enabled"`
+	DailyFixedRootKind           string               `json:"daily_fixed_root_kind,omitempty"`
+	DailyFixedRootBusinessDate   string               `json:"daily_fixed_root_business_date,omitempty"`
+	DailyFixedRootSlotIndex      int                  `json:"daily_fixed_root_slot_index,omitempty"`
+	DailyFixedRootSessionID      string               `json:"daily_fixed_root_session_id,omitempty"`
 	UserAgent                    string               `json:"user_agent"`
 	Originator                   string               `json:"originator"`
 	OpenAIBeta                   string               `json:"openai_beta"`
@@ -62,6 +87,37 @@ type FingerprintObservationEntry struct {
 	TimezoneComparisonStatus     string               `json:"timezone_comparison_status,omitempty"`
 	OutboundCodexResidency       string               `json:"outbound_codex_residency"`
 	OutboundCodexResidencySource string               `json:"outbound_codex_residency_source,omitempty"`
+}
+
+// OpenAIDailyRootObservation is request-local provenance written only after a
+// daily root was successfully resolved and projected onto the outbound turn.
+type OpenAIDailyRootObservation struct {
+	Enabled      bool
+	Kind         string
+	BusinessDate string
+	SlotIndex    int
+	SessionID    string
+}
+
+func setOpenAIDailyRootObservation(c *gin.Context, value OpenAIDailyRootObservation) {
+	globalDailyFixedRootEnabled.Store(value.Enabled)
+	if c != nil {
+		c.Set(fingerprintObservationDailyRootContextKey, value)
+	}
+}
+
+func IsOpenAIOAuthDailyFixedRootEnabled() bool { return globalDailyFixedRootEnabled.Load() }
+
+func openAIDailyRootObservationFromContext(c *gin.Context) (OpenAIDailyRootObservation, bool) {
+	if c == nil {
+		return OpenAIDailyRootObservation{}, false
+	}
+	value, ok := c.Get(fingerprintObservationDailyRootContextKey)
+	if !ok {
+		return OpenAIDailyRootObservation{}, false
+	}
+	result, ok := value.(OpenAIDailyRootObservation)
+	return result, ok && result.Enabled
 }
 
 // FingerprintObservationThreadNode groups final wire observations for one
@@ -126,6 +182,7 @@ type fingerprintObserver struct {
 var globalFingerprintObserver = &fingerprintObserver{
 	ring: make([]FingerprintObservationEntry, fingerprintObservationCapacity),
 }
+var globalDailyFixedRootEnabled atomic.Bool
 
 // SetFingerprintObservationEnabled publishes the observation toggle. Disabling
 // observation synchronously clears and scrubs the ring buffer.
@@ -604,6 +661,40 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 		if actual := strings.TrimSpace(outbound.Get(codexInstallationIDKey)); actual != "" {
 			entry.OutboundInstallationID = actual
 		}
+		profile := finalFingerprintCodexWireProfile(outbound, body)
+		entry.WindowID = profile.WindowID
+		entry.WindowNumber = profile.WindowNumber
+		entry.ContextWindowID = profile.ContextWindowID
+		entry.TurnID = profile.TurnID.Value
+		entry.TurnStartedAtUnixMS = profile.TurnStartedAtUnixMS
+		entry.ParentTurnID = profile.TurnLineage.ParentTurnID.Value
+		entry.RootTurnID = profile.TurnLineage.RootTurnID.Value
+		entry.ForkedFromOrdinalExclusive = profile.TurnLineage.ForkedFromOrdinalExclusive
+		entry.AgentName = profile.AgentName
+		entry.SubagentKind = profile.SubagentKind
+		entry.OpenAISubagent = profile.SubagentHeader
+		entry.ThreadSource = profile.ThreadSource
+		entry.TurnTrigger = profile.TurnTrigger
+		entry.Sandbox = profile.Sandbox
+		entry.SandboxMode = profile.SandboxMode
+		entry.AutoReviewEnabled = profile.AutoReviewEnabled
+		entry.NodeREPLAutoReviewRequired = profile.NodeREPLAutoReviewRequired
+		entry.NodeREPLDisabled = profile.NodeREPLDisabled
+		entry.Workspaces = displayableCodexWorkspaces(profile.Workspaces)
+		if !hasTrustedIdentity {
+			entry.TurnID, entry.ParentTurnID, entry.RootTurnID = "", "", ""
+			entry.TurnStartedAtUnixMS, entry.WindowID, entry.ContextWindowID = 0, "", ""
+			entry.WindowNumber, entry.ForkedFromOrdinalExclusive = nil, nil
+		}
+		if daily, ok := openAIDailyRootObservationFromContext(c); ok {
+			entry.DailyFixedRootEnabled = true
+			entry.DailyFixedRootKind = daily.Kind
+			entry.DailyFixedRootBusinessDate = daily.BusinessDate
+			entry.DailyFixedRootSlotIndex = daily.SlotIndex
+			if entry.SessionID == "" || entry.SessionID == daily.SessionID {
+				entry.DailyFixedRootSessionID = entry.SessionID
+			}
+		}
 		if hasTrustedIdentity && identityHeaders {
 			entry.SessionID, sessionHeaderPresent = fingerprintObservationHeaderUUID(outbound, trustedIdentity.SessionID,
 				"session-id", "session_id")
@@ -653,6 +744,14 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 		if entry.SessionID == "" && !sessionHeaderPresent {
 			entry.SessionID, _ = bodyIdentity.uuid(trustedIdentity.SessionID, "session_id", "session_id")
 		}
+		if daily, ok := openAIDailyRootObservationFromContext(c); ok {
+			if entry.SessionID == daily.SessionID {
+				entry.DailyFixedRootSessionID = entry.SessionID
+			} else {
+				entry.DailyFixedRootEnabled = false
+				entry.DailyFixedRootSessionID = ""
+			}
+		}
 		if entry.ThreadID == "" && !threadHeaderPresent {
 			entry.ThreadID, _ = bodyIdentity.uuid(trustedIdentity.ThreadID, "thread_id", "thread_id")
 		}
@@ -672,7 +771,55 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 		}
 		entry.InboundEndpoint = c.Request.Method + " " + path
 	}
+	if !usesOpenAICodexIdentityProtocol(account) {
+		entry.SessionID, entry.ThreadID, entry.ParentThreadID, entry.ForkedFromThreadID = "", "", "", ""
+		entry.TurnID, entry.ParentTurnID, entry.RootTurnID = "", "", ""
+		entry.WindowID, entry.ContextWindowID, entry.AgentName, entry.SubagentKind, entry.OpenAISubagent = "", "", "", "", ""
+		entry.DailyFixedRootEnabled, entry.DailyFixedRootSessionID = false, ""
+	}
 	return entry
+}
+
+func finalFingerprintCodexWireProfile(outbound http.Header, body []byte) CodexWireProfile {
+	profile := captureCodexWireProfile(nil, body, "")
+	if outbound == nil {
+		return profile
+	}
+	for _, raw := range headerValuesCaseInsensitive(outbound, openAIWSTurnMetadataHeader) {
+		value, _, valid := decodeCodexWireNestedCarrier(json.RawMessage(raw), false)
+		if !valid {
+			continue
+		}
+		mergeCodexWireProfileMissing(&profile, ParseCodexWireProfile(value))
+	}
+	return profile
+}
+
+func displayableCodexWorkspaces(raw json.RawMessage) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var values []string
+	if json.Unmarshal(raw, &values) == nil {
+		result := make([]string, 0, len(values))
+		for _, value := range values {
+			if value = strings.TrimSpace(value); value != "" && len(value) <= 256 {
+				result = append(result, value)
+			}
+		}
+		return result
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(raw, &object) != nil {
+		return nil
+	}
+	result := make([]string, 0, len(object))
+	for key := range object {
+		if key = strings.TrimSpace(key); key != "" && len(key) <= 256 {
+			result = append(result, key)
+		}
+	}
+	return result
 }
 
 func fingerprintObservationObservedHeaderUUID(headers http.Header, name string) (string, bool) {

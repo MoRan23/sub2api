@@ -1715,6 +1715,7 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityWithAliasesDetailed
 			identity.ParentThreadID = root
 			identity.Relation = OpenAICodexTurnRelationDescendant
 		}
+		setOpenAIDailyRootObservation(c, OpenAIDailyRootObservation{Enabled: true, Kind: "stream", BusinessDate: affinity.BusinessDate, SlotIndex: affinity.SlotIndex, SessionID: root})
 	}
 	if err := ValidateOpenAICodexTurnIdentity(identity); err != nil {
 		return OpenAICodexTurnIdentity{}, true, outcome, err

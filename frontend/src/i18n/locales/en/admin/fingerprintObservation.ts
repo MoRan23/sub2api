@@ -28,6 +28,7 @@ export default {
     toggleLabel: 'Capture fingerprints',
     statusOn: 'Observation on',
     statusOff: 'Observation off',
+    dailyFixedRootOff: 'Daily fixed root sessions: off',
     disabledHint: 'Observation is off, so no request data is recorded. Turn it on here to start collecting a bounded in-memory snapshot.',
     enabledSuccess: 'Fingerprint observation enabled',
     disabledSuccess: 'Fingerprint observation disabled',
@@ -74,6 +75,7 @@ export default {
     collapseUnthreaded: 'Collapse unthreaded observations',
     request: {
       details: 'Timezone and residency details',
+      codexMetadata: 'Codex outbound metadata', disabled: 'Disabled', dailyRoot: 'Daily fixed root', dailyRootSession: 'Fixed root session', window: 'Window', windowNumber: 'Window number', contextWindow: 'Context window', turn: 'Turn', parentTurn: 'Parent turn', rootTurn: 'Root turn', parentThread: 'Parent thread', forkedFrom: 'Forked from', agent: 'Agent', subagent: 'Subagent', threadSource: 'Thread source', turnTrigger: 'Turn trigger', sandbox: 'Sandbox / mode', review: 'Auto review', workspaces: 'Workspaces',
       event: 'Event type',
       target: 'Configured target timezone',
       residency: 'Outbound residency',

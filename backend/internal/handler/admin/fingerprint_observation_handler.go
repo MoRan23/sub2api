@@ -38,13 +38,15 @@ var fingerprintObservationServiceAPI = struct {
 }
 
 type fingerprintObservationsResponse struct {
-	Enabled       bool                                        `json:"enabled"`
-	SnapshotToken string                                      `json:"snapshot_token"`
-	Items         []service.FingerprintObservationUserSummary `json:"items"`
-	Total         int                                         `json:"total"`
-	Page          int                                         `json:"page"`
-	PageSize      int                                         `json:"page_size"`
-	Pages         int                                         `json:"pages"`
+	Enabled               bool                                        `json:"enabled"`
+	SnapshotToken         string                                      `json:"snapshot_token"`
+	Items                 []service.FingerprintObservationUserSummary `json:"items"`
+	Total                 int                                         `json:"total"`
+	Page                  int                                         `json:"page"`
+	PageSize              int                                         `json:"page_size"`
+	Pages                 int                                         `json:"pages"`
+	DailyFixedRootEnabled bool                                        `json:"daily_fixed_root_enabled"`
+	DailyFixedRootLabel   string                                      `json:"daily_fixed_root_label"`
 }
 
 // ListCodexContextManagementObservations returns the bounded recent PAT and
@@ -108,13 +110,20 @@ func (h *OpenAIOAuthHandler) ListFingerprintObservations(c *gin.Context) {
 	}
 
 	response.Success(c, fingerprintObservationsResponse{
-		Enabled:       true,
-		SnapshotToken: result.SnapshotToken,
-		Items:         result.Items,
-		Total:         result.Total,
-		Page:          result.Page,
-		PageSize:      result.PageSize,
-		Pages:         result.Pages,
+		Enabled:               true,
+		SnapshotToken:         result.SnapshotToken,
+		Items:                 result.Items,
+		Total:                 result.Total,
+		Page:                  result.Page,
+		PageSize:              result.PageSize,
+		Pages:                 result.Pages,
+		DailyFixedRootEnabled: service.IsOpenAIOAuthDailyFixedRootEnabled(),
+		DailyFixedRootLabel: func() string {
+			if service.IsOpenAIOAuthDailyFixedRootEnabled() {
+				return "每日固定根会话：已开启"
+			}
+			return "每日固定根会话：未开启"
+		}(),
 	})
 }
 
@@ -265,13 +274,15 @@ func ensureFingerprintObservationAvailable(c *gin.Context) bool {
 
 func writeDisabledFingerprintObservationPage(c *gin.Context, pageSize int) {
 	response.Success(c, fingerprintObservationsResponse{
-		Enabled:       false,
-		SnapshotToken: "",
-		Items:         []service.FingerprintObservationUserSummary{},
-		Total:         0,
-		Page:          1,
-		PageSize:      pageSize,
-		Pages:         1,
+		Enabled:               false,
+		SnapshotToken:         "",
+		Items:                 []service.FingerprintObservationUserSummary{},
+		Total:                 0,
+		Page:                  1,
+		PageSize:              pageSize,
+		Pages:                 1,
+		DailyFixedRootEnabled: false,
+		DailyFixedRootLabel:   "每日固定根会话",
 	})
 }
 

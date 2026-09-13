@@ -48,3 +48,9 @@ type OAuthDailySessionRepository interface {
 	ReleaseOAuthDailySessionGeneration(ctx context.Context, accountID int64, generation string) error
 	CleanupOAuthDailySessionGenerations(ctx context.Context, before time.Time) (int, error)
 }
+
+// OAuthDailySessionPoolReader exposes a strictly read-only lookup used by
+// administrative views. Implementations must never provision a missing pool.
+type OAuthDailySessionPoolReader interface {
+	ListOAuthDailySessionPools(ctx context.Context, accountIDs []int64, now time.Time) (map[int64]OAuthDailySessionPool, error)
+}
