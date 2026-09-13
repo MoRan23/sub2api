@@ -725,6 +725,31 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 		} else if ok {
 			plan.TurnIdentity = identity
 			plan.TurnIdentityEnabled = true
+			// Daily OAuth rotation assigns the session root from the account's
+			// three-slot pool. The regular identity mapper above still resolves
+			// the logical child/thread lineage; only the root is replaced here.
+			// This facade is the primary HTTP Forward path, so applying the
+			// assignment here is required even when the transport helper is not
+			// called directly.
+			if account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil &&
+				s.oauthDailySessionRotationEnabled(ctx) &&
+				(openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c)) {
+				affinity, affinityErr := s.oauthDailySessionRepo.GetOrCreateOAuthDailySessionAffinity(
+					ctx, account.ID, getAPIKeyIDFromContext(c), capture.Logical.SessionKey, time.Now().UTC(),
+				)
+				if affinityErr != nil {
+					return plan, fmt.Errorf("resolve OAuth daily stream affinity: %w", affinityErr)
+				}
+				root, rootErr := canonicalUUIDv7(affinity.StreamSessionID)
+				if rootErr != nil {
+					return plan, fmt.Errorf("invalid OAuth daily stream root session: %w", rootErr)
+				}
+				identity.SessionID = root
+				if identity.Relation == OpenAICodexTurnRelationDescendant {
+					identity.ParentThreadID = root
+				}
+				plan.TurnIdentity = identity
+			}
 			plan.WireProfile.SessionID = identity.SessionID
 			plan.WireProfile.ThreadID = identity.ThreadID
 			plan.WireProfile.TurnLineage.ParentThreadID = identity.ParentThreadID
