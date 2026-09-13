@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 func TestOAuthDailyBusinessDateUsesUTC8Midnight(t *testing.T) {
@@ -205,6 +207,144 @@ func TestResolveOAuthIdentityPlanAppliesDailyAffinityOnHTTPStream(t *testing.T) 
 	}
 	if !planned.TurnIdentityEnabled || planned.TurnIdentity.SessionID != root || planned.TurnIdentity.ParentThreadID != root {
 		t.Fatalf("daily HTTP affinity was not applied: %+v", planned.TurnIdentity)
+	}
+}
+
+func TestOAuthDailyIdentityProjectsSessionThreadHeadersAndBody(t *testing.T) {
+	settingsRepo := &dailyRotationSettingRepo{values: map[string]string{
+		SettingKeyEnableOpenAICodexFingerprintNormalization: "true",
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity:         "true",
+		SettingKeyEnableOpenAIOAuthDailySessionRotation:     "true",
+	}}
+	root := "018f5c3c-6e3a-7abf-8def-1234567890ae"
+	dailyRepo := &fakeOAuthDailyAffinityRepository{
+		pool:     OAuthDailySessionPool{AccountID: 44, BusinessDate: "2026-09-11", Generation: root},
+		affinity: OAuthDailySessionAffinity{AccountID: 44, APIKeyID: 12, LogicalSessionKey: "logical", BusinessDate: "2026-09-11", Generation: root, SlotIndex: 1, StreamSessionID: root},
+	}
+	svc := &OpenAIGatewayService{settingService: NewSettingService(settingsRepo, nil), oauthDailySessionRepo: dailyRepo}
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/responses", nil)
+	c.Set("api_key", &APIKey{ID: 12})
+	setOpenAIClientRequestedStream(c, true)
+	account := &Account{ID: 44, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	body := []byte(`{"model":"gpt-5.4","stream":true,"input":"hello","client_metadata":{"session_id":"logical","thread_id":"logical"}}`)
+	capture := CaptureOpenAIOAuthIdentity(c, body, "")
+	plan, err := svc.ResolveOpenAIOAuthIdentityPlan(context.Background(), c, account, capture, OpenAIOAuthIdentityPlanOptions{TurnIdentityEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.TurnIdentityEnabled || plan.TurnIdentity.SessionID != root || plan.TurnIdentity.ThreadID == root {
+		t.Fatalf("daily identity was not materialized: %#v", plan.TurnIdentity)
+	}
+	headers := http.Header{}
+	projected, err := ApplyOpenAIOAuthIdentityPlan(headers, body, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headers.Get("session-id") != plan.TurnIdentity.SessionID || headers.Get("thread-id") != plan.TurnIdentity.ThreadID {
+		t.Fatalf("daily identity headers missing: session=%q thread=%q", headers.Get("session-id"), headers.Get("thread-id"))
+	}
+	if headers.Get("x-codex-parent-thread-id") != root || headers.Get("x-client-request-id") != plan.TurnIdentity.ThreadID {
+		t.Fatalf("daily lineage headers missing: parent=%q client=%q", headers.Get("x-codex-parent-thread-id"), headers.Get("x-client-request-id"))
+	}
+	if got := gjson.GetBytes(projected, "client_metadata.session_id").String(); got != root {
+		t.Fatalf("daily body session_id = %q, want %q", got, root)
+	}
+	if got := gjson.GetBytes(projected, "client_metadata.thread_id").String(); got != plan.TurnIdentity.ThreadID {
+		t.Fatalf("daily body thread_id = %q, want %q", got, plan.TurnIdentity.ThreadID)
+	}
+}
+
+func TestOAuthDailyIdentitySurvivesFullHTTPBuilder(t *testing.T) {
+	SetFingerprintObservationEnabled(true)
+	defer SetFingerprintObservationEnabled(false)
+	settingsRepo := &dailyRotationSettingRepo{values: map[string]string{
+		SettingKeyEnableOpenAICodexFingerprintNormalization: "true",
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity:         "true",
+		SettingKeyEnableOpenAIOAuthDailySessionRotation:     "true",
+	}}
+	root := "018f5c3c-6e3a-7abf-8def-1234567890ae"
+	dailyRepo := &fakeOAuthDailyAffinityRepository{
+		pool:     OAuthDailySessionPool{AccountID: 45, BusinessDate: "2026-09-11", Generation: root},
+		affinity: OAuthDailySessionAffinity{AccountID: 45, APIKeyID: 13, LogicalSessionKey: "logical", BusinessDate: "2026-09-11", Generation: root, SlotIndex: 1, StreamSessionID: root},
+	}
+	svc := &OpenAIGatewayService{
+		cfg:            &config.Config{JWT: config.JWTConfig{Secret: "daily-builder-test-secret"}},
+		settingService: NewSettingService(settingsRepo, nil), oauthDailySessionRepo: dailyRepo,
+	}
+	svc.cfg.Security.URLAllowlist.Enabled = false
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/responses", nil)
+	c.Set("api_key", &APIKey{ID: 13})
+	setOpenAIClientRequestedStream(c, true)
+	account := &Account{ID: 45, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "daily-builder"}}
+	body := []byte(`{"model":"gpt-5.4","stream":true,"input":"hello","client_metadata":{"session_id":"logical","thread_id":"logical"}}`)
+	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "oauth-token", true, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Header.Get("session-id") != root || req.Header.Get("thread-id") == "" || req.Header.Get("thread-id") == root {
+		t.Fatalf("full builder dropped daily identity headers: session=%q thread=%q", req.Header.Get("session-id"), req.Header.Get("thread-id"))
+	}
+	if req.Header.Get("x-codex-parent-thread-id") != root || req.Header.Get("x-client-request-id") != req.Header.Get("thread-id") {
+		t.Fatalf("full builder dropped daily lineage headers: parent=%q client=%q", req.Header.Get("x-codex-parent-thread-id"), req.Header.Get("x-client-request-id"))
+	}
+	projected := openAIUpstreamRequestBodySnapshot(req, body)
+	if gjson.GetBytes(projected, "client_metadata.session_id").String() != root || gjson.GetBytes(projected, "client_metadata.thread_id").String() != req.Header.Get("thread-id") {
+		t.Fatalf("full builder dropped daily body identity: %s", string(projected))
+	}
+	svc.recordFingerprintObservationWithBody(c, account, installationIDResolution{}, req.Header, projected)
+	entry := SnapshotFingerprintObservations(1)[0]
+	if entry.SessionID != root || entry.ThreadID != req.Header.Get("thread-id") {
+		t.Fatalf("daily final-wire identity was not observed: session=%q thread=%q", entry.SessionID, entry.ThreadID)
+	}
+}
+
+func TestOAuthDailyIdentitySurvivesPassthroughHTTPBuilder(t *testing.T) {
+	SetFingerprintObservationEnabled(true)
+	defer SetFingerprintObservationEnabled(false)
+	settingsRepo := &dailyRotationSettingRepo{values: map[string]string{
+		SettingKeyEnableOpenAICodexFingerprintNormalization: "true",
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity:         "true",
+		SettingKeyEnableOpenAIOAuthDailySessionRotation:     "true",
+	}}
+	root := "018f5c3c-6e3a-7abf-8def-1234567890ae"
+	dailyRepo := &fakeOAuthDailyAffinityRepository{
+		pool:     OAuthDailySessionPool{AccountID: 46, BusinessDate: "2026-09-11", Generation: root},
+		affinity: OAuthDailySessionAffinity{AccountID: 46, APIKeyID: 14, LogicalSessionKey: "logical", BusinessDate: "2026-09-11", Generation: root, SlotIndex: 1, StreamSessionID: root},
+	}
+	svc := &OpenAIGatewayService{
+		cfg:            &config.Config{JWT: config.JWTConfig{Secret: "daily-passthrough-test-secret"}},
+		settingService: NewSettingService(settingsRepo, nil), oauthDailySessionRepo: dailyRepo,
+	}
+	svc.cfg.Security.URLAllowlist.Enabled = false
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/responses", nil)
+	c.Set("api_key", &APIKey{ID: 14})
+	setOpenAIClientRequestedStream(c, true)
+	account := &Account{ID: 46, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "daily-passthrough"}, Extra: map[string]any{"openai_passthrough": true}}
+	body := []byte(`{"model":"gpt-5.4","stream":true,"input":"hello","client_metadata":{"session_id":"logical","thread_id":"logical"}}`)
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, "oauth-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Header.Get("session-id") != root || req.Header.Get("thread-id") == "" || req.Header.Get("thread-id") == root {
+		t.Fatalf("passthrough builder dropped daily identity headers: session=%q thread=%q", req.Header.Get("session-id"), req.Header.Get("thread-id"))
+	}
+	if req.Header.Get("x-codex-parent-thread-id") != root || req.Header.Get("x-client-request-id") != req.Header.Get("thread-id") {
+		t.Fatalf("passthrough builder dropped daily lineage headers: parent=%q client=%q", req.Header.Get("x-codex-parent-thread-id"), req.Header.Get("x-client-request-id"))
+	}
+	projected := openAIUpstreamRequestBodySnapshot(req, body)
+	if gjson.GetBytes(projected, "client_metadata.session_id").String() != root || gjson.GetBytes(projected, "client_metadata.thread_id").String() != req.Header.Get("thread-id") {
+		t.Fatalf("passthrough builder dropped daily body identity: %s", string(projected))
+	}
+	svc.recordFingerprintObservationWithBody(c, account, installationIDResolution{}, req.Header, projected)
+	entry := SnapshotFingerprintObservations(1)[0]
+	if entry.SessionID != root || entry.ThreadID != req.Header.Get("thread-id") {
+		t.Fatalf("daily passthrough final-wire identity was not observed: session=%q thread=%q", entry.SessionID, entry.ThreadID)
 	}
 }
 
