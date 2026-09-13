@@ -9,7 +9,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/account"
-	"github.com/Wei-Shaw/sub2api/ent/openaioauthdailysessionaffinity"
 	"github.com/Wei-Shaw/sub2api/ent/openaioauthdailysessionpool"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/google/uuid"
@@ -63,22 +62,28 @@ func (r *openAIOAuthDailySessionRepository) GetOrCreateOAuthDailySessionPool(ctx
 			return service.OAuthDailySessionPool{}, fmt.Errorf("generate OAuth daily root: %w", err)
 		}
 	}
-	_, err = r.client.ExecContext(ctx, `
-		INSERT INTO openai_oauth_daily_session_pools
-		(account_id,business_date,generation,stream_session_0,stream_session_1,stream_session_2,sync_session,created_at,updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),NOW())
-		ON CONFLICT (account_id,business_date) DO NOTHING`, owner, date, generation, roots[0], roots[1], roots[2], roots[3])
+	rows, err := r.client.QueryContext(ctx, `
+			INSERT INTO openai_oauth_daily_session_pools
+			(account_id,business_date,generation,stream_session_0,stream_session_1,stream_session_2,sync_session,created_at,updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),NOW())
+			ON CONFLICT (account_id,business_date) DO UPDATE SET updated_at=NOW()
+			RETURNING business_date,generation,stream_session_0,stream_session_1,stream_session_2,sync_session`, owner, date, generation, roots[0], roots[1], roots[2], roots[3])
 	if err != nil {
 		return service.OAuthDailySessionPool{}, fmt.Errorf("create OAuth daily session pool for account %d date %s: %w", owner, date, err)
 	}
-	row, err := r.client.OpenAIOAuthDailySessionPool.Query().Where(
-		openaioauthdailysessionpool.AccountIDEQ(owner), openaioauthdailysessionpool.BusinessDateEQ(date),
-	).Only(ctx)
-	if err != nil {
-		return service.OAuthDailySessionPool{}, fmt.Errorf("read OAuth daily session pool for account %d date %s: %w", owner, date, err)
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return service.OAuthDailySessionPool{}, fmt.Errorf("read OAuth daily session pool for account %d date %s: %w", owner, date, err)
+		}
+		return service.OAuthDailySessionPool{}, fmt.Errorf("read OAuth daily session pool for account %d date %s: query returned no rows", owner, date)
 	}
-	return service.OAuthDailySessionPool{AccountID: owner, BusinessDate: row.BusinessDate, Generation: row.Generation,
-		StreamSessionIDs: [3]string{row.StreamSession0, row.StreamSession1, row.StreamSession2}, SyncSessionID: row.SyncSession}, nil
+	var result service.OAuthDailySessionPool
+	result.AccountID = owner
+	if err := rows.Scan(&result.BusinessDate, &result.Generation, &result.StreamSessionIDs[0], &result.StreamSessionIDs[1], &result.StreamSessionIDs[2], &result.SyncSessionID); err != nil {
+		return service.OAuthDailySessionPool{}, fmt.Errorf("scan OAuth daily session pool for account %d date %s: %w", owner, date, err)
+	}
+	return result, nil
 }
 
 func (r *openAIOAuthDailySessionRepository) GetOrCreateOAuthDailySessionAffinity(ctx context.Context, accountID, apiKeyID int64, logicalKey string, now time.Time) (service.OAuthDailySessionAffinity, error) {
@@ -96,42 +101,36 @@ func (r *openAIOAuthDailySessionRepository) GetOrCreateOAuthDailySessionAffinity
 	if err != nil {
 		return service.OAuthDailySessionAffinity{}, err
 	}
-	existing, qerr := r.client.OpenAIOAuthDailySessionAffinity.Query().Where(
-		openaioauthdailysessionaffinity.AccountIDEQ(owner), openaioauthdailysessionaffinity.APIKeyIDEQ(apiKeyID), openaioauthdailysessionaffinity.LogicalSessionKeyEQ(logicalKey),
-	).Only(ctx)
-	if qerr != nil && !ent.IsNotFound(qerr) {
-		return service.OAuthDailySessionAffinity{}, fmt.Errorf("read OAuth daily session affinity for account %d: %w", owner, qerr)
-	}
-	if qerr == nil && existing.BusinessDate == pool.BusinessDate {
-		_, _ = existing.Update().SetLastSeenAt(now).SetActive(true).Save(ctx)
-		return service.OAuthDailySessionAffinity{AccountID: owner, APIKeyID: apiKeyID, LogicalSessionKey: logicalKey, BusinessDate: existing.BusinessDate, Generation: existing.Generation, SlotIndex: existing.SlotIndex, StreamSessionID: existing.StreamSessionID}, nil
-	}
 	slot, err := cryptorand.Int(cryptorand.Reader, big.NewInt(service.OAuthDailyStreamSessionCount))
 	if err != nil {
 		return service.OAuthDailySessionAffinity{}, fmt.Errorf("choose OAuth daily session slot: %w", err)
 	}
 	idx := int(slot.Int64())
-	if qerr == nil {
-		_, err = r.client.ExecContext(ctx, `UPDATE openai_oauth_daily_session_affinities
-			SET business_date=$1,generation=$2,slot_index=$3,stream_session_id=$4,last_seen_at=$5,active=TRUE,updated_at=NOW()
-			WHERE account_id=$6 AND api_key_id=$7 AND logical_session_key=$8 AND business_date<>$1`,
-			pool.BusinessDate, pool.Generation, idx, pool.StreamSessionIDs[idx], now, owner, apiKeyID, logicalKey)
-		if err == nil {
-			existing, err = r.client.OpenAIOAuthDailySessionAffinity.Query().Where(openaioauthdailysessionaffinity.AccountIDEQ(owner), openaioauthdailysessionaffinity.APIKeyIDEQ(apiKeyID), openaioauthdailysessionaffinity.LogicalSessionKeyEQ(logicalKey)).Only(ctx)
-		}
-	} else {
-		_, err = r.client.ExecContext(ctx, `INSERT INTO openai_oauth_daily_session_affinities
-			(account_id,api_key_id,logical_session_key,business_date,generation,slot_index,stream_session_id,last_seen_at,active,created_at,updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,TRUE,NOW(),NOW())
-			ON CONFLICT (account_id,api_key_id,logical_session_key) DO NOTHING`, owner, apiKeyID, logicalKey, pool.BusinessDate, pool.Generation, idx, pool.StreamSessionIDs[idx], now)
-		if err == nil {
-			existing, err = r.client.OpenAIOAuthDailySessionAffinity.Query().Where(openaioauthdailysessionaffinity.AccountIDEQ(owner), openaioauthdailysessionaffinity.APIKeyIDEQ(apiKeyID), openaioauthdailysessionaffinity.LogicalSessionKeyEQ(logicalKey)).Only(ctx)
-		}
-	}
+	rows, err := r.client.QueryContext(ctx, `INSERT INTO openai_oauth_daily_session_affinities
+		(account_id,api_key_id,logical_session_key,business_date,generation,slot_index,stream_session_id,last_seen_at,active,created_at,updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,TRUE,NOW(),NOW())
+		ON CONFLICT DO UPDATE SET
+			business_date=EXCLUDED.business_date,
+			generation=CASE WHEN openai_oauth_daily_session_affinities.business_date=EXCLUDED.business_date THEN openai_oauth_daily_session_affinities.generation ELSE EXCLUDED.generation END,
+			slot_index=CASE WHEN openai_oauth_daily_session_affinities.business_date=EXCLUDED.business_date THEN openai_oauth_daily_session_affinities.slot_index ELSE EXCLUDED.slot_index END,
+			stream_session_id=CASE WHEN openai_oauth_daily_session_affinities.business_date=EXCLUDED.business_date THEN openai_oauth_daily_session_affinities.stream_session_id ELSE EXCLUDED.stream_session_id END,
+			last_seen_at=EXCLUDED.last_seen_at, active=TRUE, updated_at=NOW()
+		RETURNING business_date,generation,slot_index,stream_session_id`, owner, apiKeyID, logicalKey, pool.BusinessDate, pool.Generation, idx, pool.StreamSessionIDs[idx], now)
 	if err != nil {
 		return service.OAuthDailySessionAffinity{}, fmt.Errorf("persist OAuth daily session affinity for account %d: %w", owner, err)
 	}
-	return service.OAuthDailySessionAffinity{AccountID: owner, APIKeyID: apiKeyID, LogicalSessionKey: logicalKey, BusinessDate: existing.BusinessDate, Generation: existing.Generation, SlotIndex: existing.SlotIndex, StreamSessionID: existing.StreamSessionID}, nil
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return service.OAuthDailySessionAffinity{}, fmt.Errorf("read OAuth daily session affinity for account %d: %w", owner, err)
+		}
+		return service.OAuthDailySessionAffinity{}, fmt.Errorf("read OAuth daily session affinity for account %d: query returned no rows", owner)
+	}
+	result := service.OAuthDailySessionAffinity{AccountID: owner, APIKeyID: apiKeyID, LogicalSessionKey: logicalKey}
+	if err := rows.Scan(&result.BusinessDate, &result.Generation, &result.SlotIndex, &result.StreamSessionID); err != nil {
+		return service.OAuthDailySessionAffinity{}, fmt.Errorf("scan OAuth daily session affinity for account %d: %w", owner, err)
+	}
+	return result, nil
 }
 
 func (r *openAIOAuthDailySessionRepository) ReleaseOAuthDailySessionGeneration(ctx context.Context, accountID int64, generation string) error {
