@@ -1688,7 +1688,7 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityWithAliasesDetailed
 	// regular identity store above still resolves thread/lineage IDs, preserving
 	// per-logical-session stickiness while isolating each day's root.
 	if account != nil && account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil &&
-		s.oauthDailySessionRotationEnabled(ctx) && openAIClientRequestedStream(c, nil, false) {
+		s.oauthDailySessionRotationEnabled(ctx) && (openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c)) {
 		affinity, affinityErr := s.oauthDailySessionRepo.GetOrCreateOAuthDailySessionAffinity(
 			ctx, account.ID, apiKeyID, logical.SessionKey, time.Now().UTC(),
 		)

@@ -115,6 +115,7 @@ const (
 
 const openAIOutboundSessionIdentityRequestSnapshotKey = "openai_outbound_session_identity_enabled_snapshot"
 const openAIClientRequestedStreamKey = "openai_client_requested_stream"
+const openAIOAuthDailyStreamRequestedKey = "openai_oauth_daily_stream_requested"
 
 func setOpenAIClientRequestedStream(c *gin.Context, stream bool) {
 	if c != nil {
@@ -140,6 +141,21 @@ func openAIClientRequestedStream(c *gin.Context, body []byte, fallback bool) boo
 		}
 	}
 	return fallback
+}
+
+func setOpenAIOAuthDailyStreamRequested(c *gin.Context) {
+	if c != nil {
+		c.Set(openAIOAuthDailyStreamRequestedKey, true)
+	}
+}
+
+func openAIOAuthDailyStreamRequested(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	value, ok := c.Get(openAIOAuthDailyStreamRequestedKey)
+	stream, valid := value.(bool)
+	return ok && valid && stream
 }
 
 func (s *OpenAIGatewayService) openAIOutboundSessionIdentityTransportEnabled(ctx context.Context) bool {
@@ -171,6 +187,10 @@ func (s *OpenAIGatewayService) oauthDailyLogicalSessionFallbackSeedForRequest(ct
 	if !s.oauthDailySessionRotationEnabled(ctx) || !openAIClientRequestedStream(c, body, false) {
 		return ""
 	}
+	// The daily resolver runs after account selection and receives only the
+	// immutable request context. Preserve the stream decision made from the
+	// original body so it cannot be lost before identity materialization.
+	setOpenAIOAuthDailyStreamRequested(c)
 	apiKeyID := getAPIKeyIDFromContext(c)
 	installation := ""
 	if c != nil && c.Request != nil {
@@ -301,7 +321,7 @@ func (s *OpenAIGatewayService) resolveOpenAICodexLogicalIdentityForTransport(
 		return OpenAICodexTurnIdentity{}, false, nil
 	}
 	if ok && account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil &&
-		s.oauthDailySessionRotationEnabled(ctx) && openAIClientRequestedStream(c, nil, false) {
+		s.oauthDailySessionRotationEnabled(ctx) && (openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c)) {
 		affinity, affinityErr := s.oauthDailySessionRepo.GetOrCreateOAuthDailySessionAffinity(
 			ctx, account.ID, getAPIKeyIDFromContext(c), logical.SessionKey, time.Now().UTC(),
 		)
