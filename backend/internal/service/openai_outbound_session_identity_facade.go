@@ -672,6 +672,22 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Some Responses compatibility entries arrive here without a logical
+	// session even though the request is streaming. The handler normally seeds
+	// this earlier, but the facade is the authoritative materialization boundary
+	// and must keep daily OAuth affinity from silently degrading to the regular
+	// mapper. Rebuild only the missing logical tuple; explicit client metadata
+	// remains untouched.
+	if options.TurnIdentityEnabled && strings.TrimSpace(capture.Logical.SessionKey) == "" &&
+		account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil &&
+		s.oauthDailySessionRotationEnabled(ctx) &&
+		(openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c)) {
+		if seed := s.oauthDailyLogicalSessionFallbackSeedForRequest(ctx, c, nil); seed != "" {
+			capture = CaptureOpenAIOAuthIdentity(c, nil, seed)
+			plan.Capture = cloneOpenAIOAuthIdentityCapture(capture)
+			plan.RequestTurn = capture.RequestTurn
+		}
+	}
 	plan.ClientIdentityEnabled = true
 	plan.TurnIdentityRequested = options.TurnIdentityEnabled && policy.TurnIdentityNormalizationEnabled()
 	if plan.TurnIdentityRequested {
@@ -747,6 +763,15 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 				identity.SessionID = root
 				if identity.Relation == OpenAICodexTurnRelationDescendant {
 					identity.ParentThreadID = root
+				}
+				if identity.Relation == OpenAICodexTurnRelationRoot {
+					child, childErr := uuid.NewV7()
+					if childErr != nil {
+						return plan, fmt.Errorf("generate OAuth daily stream child thread: %w", childErr)
+					}
+					identity.ThreadID = child.String()
+					identity.ParentThreadID = root
+					identity.Relation = OpenAICodexTurnRelationDescendant
 				}
 				plan.TurnIdentity = identity
 			}

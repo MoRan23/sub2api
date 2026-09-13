@@ -57,6 +57,24 @@ type fakeOAuthDailySessionRepository struct {
 	calls int
 }
 
+type fakeOAuthDailyAffinityRepository struct {
+	pool     OAuthDailySessionPool
+	affinity OAuthDailySessionAffinity
+}
+
+func (r *fakeOAuthDailyAffinityRepository) GetOrCreateOAuthDailySessionPool(context.Context, int64, time.Time) (OAuthDailySessionPool, error) {
+	return r.pool, nil
+}
+func (r *fakeOAuthDailyAffinityRepository) GetOrCreateOAuthDailySessionAffinity(context.Context, int64, int64, string, time.Time) (OAuthDailySessionAffinity, error) {
+	return r.affinity, nil
+}
+func (r *fakeOAuthDailyAffinityRepository) ReleaseOAuthDailySessionGeneration(context.Context, int64, string) error {
+	return nil
+}
+func (r *fakeOAuthDailyAffinityRepository) CleanupOAuthDailySessionGenerations(context.Context, time.Time) (int, error) {
+	return 0, nil
+}
+
 func (r *fakeOAuthDailySessionRepository) GetOrCreateOAuthDailySessionPool(_ context.Context, _ int64, _ time.Time) (OAuthDailySessionPool, error) {
 	r.calls++
 	return r.pool, nil
@@ -160,6 +178,33 @@ func TestResolveOAuthSynchronousTurnIdentityUsesDailyDedicatedRoot(t *testing.T)
 	}
 	if dailyRepo.calls != 1 {
 		t.Fatalf("pool calls = %d, want 1", dailyRepo.calls)
+	}
+}
+
+func TestResolveOAuthIdentityPlanAppliesDailyAffinityOnHTTPStream(t *testing.T) {
+	settingsRepo := &dailyRotationSettingRepo{values: map[string]string{
+		SettingKeyEnableOpenAICodexFingerprintNormalization: "true",
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity:         "true",
+		SettingKeyEnableOpenAIOAuthDailySessionRotation:     "true",
+	}}
+	root := "018f5c3c-6e3a-7abf-8def-1234567890ae"
+	dailyRepo := &fakeOAuthDailyAffinityRepository{
+		pool:     OAuthDailySessionPool{AccountID: 44, BusinessDate: "2026-09-11", Generation: root},
+		affinity: OAuthDailySessionAffinity{AccountID: 44, APIKeyID: 12, LogicalSessionKey: "fallback", BusinessDate: "2026-09-11", Generation: root, SlotIndex: 1, StreamSessionID: root},
+	}
+	svc := &OpenAIGatewayService{settingService: NewSettingService(settingsRepo, nil), oauthDailySessionRepo: dailyRepo}
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/responses", nil)
+	c.Set("api_key", &APIKey{ID: 12})
+	setOpenAIClientRequestedStream(c, true)
+	account := &Account{ID: 44, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	planned, err := svc.ResolveOpenAIOAuthIdentityPlan(context.Background(), c, account, OpenAIOAuthIdentityCapture{}, OpenAIOAuthIdentityPlanOptions{TurnIdentityEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !planned.TurnIdentityEnabled || planned.TurnIdentity.SessionID != root || planned.TurnIdentity.ParentThreadID != root {
+		t.Fatalf("daily HTTP affinity was not applied: %+v", planned.TurnIdentity)
 	}
 }
 
