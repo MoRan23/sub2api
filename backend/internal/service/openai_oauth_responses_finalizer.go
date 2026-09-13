@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/tidwall/gjson"
 )
 
 // OpenAIOAuthResponsesFinalizeOptions contains values that are only known
@@ -131,17 +129,6 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 		setFingerprintObservationOutboundIdentity(c, finalPlan.TurnIdentity)
 		setFingerprintObservationFinalWireIdentity(c)
 	}
-	slog.InfoContext(req.Context(), "openai.oauth_identity_trace",
-		"stage", "final_wire",
-		"account_id", account.ID,
-		"turn_identity_enabled", finalPlan.TurnIdentityEnabled,
-		"session_id", req.Header.Get("session-id"),
-		"thread_id", req.Header.Get("thread-id"),
-		"parent_thread_id", req.Header.Get("x-codex-parent-thread-id"),
-		"client_request_id", req.Header.Get("x-client-request-id"),
-		"body_session_id_present", gjson.GetBytes(finalBody, "session_id").String() != "",
-		"body_thread_id_present", gjson.GetBytes(finalBody, "thread_id").String() != "",
-	)
 	logOpenAIRoutingDiagnostics(
 		req.Context(),
 		account,

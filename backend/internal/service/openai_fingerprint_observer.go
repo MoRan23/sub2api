@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -567,15 +566,6 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 	state, _ := RequestTimezoneStateFromContext(c)
 	paths := openAIRequestTimezoneFinalObservationPaths(c, state, body)
 	populateFingerprintObservationTimezones(&entry, state, body, paths)
-	slog.Info("openai.oauth_identity_trace",
-		"stage", "observation",
-		"account_id", account.ID,
-		"trusted_identity_present", hasTrustedIdentity,
-		"session_id", entry.SessionID,
-		"thread_id", entry.ThreadID,
-		"parent_thread_id", entry.ParentThreadID,
-		"outbound_installation_id", entry.OutboundInstallationID,
-	)
 	globalFingerprintObserver.record(entry)
 }
 

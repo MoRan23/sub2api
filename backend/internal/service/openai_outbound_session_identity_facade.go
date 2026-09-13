@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -676,19 +675,6 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 	dailyOAuthStream := account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil &&
 		s.oauthDailySessionRotationEnabled(ctx) &&
 		(openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c))
-	slog.InfoContext(ctx, "openai.oauth_identity_trace",
-		"stage", "plan_gate",
-		"account_id", account.ID,
-		"account_type", account.Type,
-		"platform", account.Platform,
-		"stream_marker", openAIClientRequestedStream(c, nil, false),
-		"daily_stream_marker", openAIOAuthDailyStreamRequested(c),
-		"daily_stream_selected", dailyOAuthStream,
-		"oauth_daily_repo_present", s.oauthDailySessionRepo != nil,
-		"options_turn_identity_enabled", options.TurnIdentityEnabled,
-		"capture_logical_session_present", strings.TrimSpace(capture.Logical.SessionKey) != "",
-		"capture_logical_source", capture.Logical.Source,
-	)
 	// Daily rotation is an identity mode in its own right. Keep it enabled even
 	// when a broader identity-policy snapshot was captured as disabled earlier
 	// in a compatibility path.
@@ -748,13 +734,6 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 		plan.CredentialOwnerNamespace = namespace
 	}
 	if plan.TurnIdentityRequested && strings.TrimSpace(capture.Logical.SessionKey) != "" {
-		slog.InfoContext(ctx, "openai.oauth_identity_trace",
-			"stage", "resolver_gate",
-			"account_id", account.ID,
-			"logical_session_present", true,
-			"turn_identity_requested", plan.TurnIdentityRequested,
-			"resolve_source", capture.Logical.Source,
-		)
 		observeOpenAIOAuthIdentityResolveSource(capture.Logical.Source)
 		identity, ok, outcome, err := s.resolveOpenAICodexTurnIdentityWithAliasesDetailed(ctx, c, account, capture.Logical, capture.Aliases)
 		plan.ResolveOutcome = outcome
@@ -779,30 +758,12 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 			if account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil &&
 				s.oauthDailySessionRotationEnabled(ctx) &&
 				(openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c)) {
-				slog.InfoContext(ctx, "openai.oauth_identity_trace",
-					"stage", "facade_affinity_before",
-					"account_id", account.ID,
-					"api_key_id", getAPIKeyIDFromContext(c),
-					"logical_session_present", strings.TrimSpace(capture.Logical.SessionKey) != "",
-				)
 				affinity, affinityErr := s.oauthDailySessionRepo.GetOrCreateOAuthDailySessionAffinity(
 					ctx, account.ID, getAPIKeyIDFromContext(c), capture.Logical.SessionKey, time.Now().UTC(),
 				)
 				if affinityErr != nil {
-					slog.ErrorContext(ctx, "openai.oauth_identity_trace",
-						"stage", "facade_affinity_error",
-						"account_id", account.ID,
-						"error", affinityErr,
-					)
 					return plan, fmt.Errorf("resolve OAuth daily stream affinity: %w", affinityErr)
 				}
-				slog.InfoContext(ctx, "openai.oauth_identity_trace",
-					"stage", "facade_affinity_after",
-					"account_id", account.ID,
-					"business_date", affinity.BusinessDate,
-					"slot_index", affinity.SlotIndex,
-					"stream_session_id", affinity.StreamSessionID,
-				)
 				root, rootErr := canonicalUUIDv7(affinity.StreamSessionID)
 				if rootErr != nil {
 					return plan, fmt.Errorf("invalid OAuth daily stream root session: %w", rootErr)
