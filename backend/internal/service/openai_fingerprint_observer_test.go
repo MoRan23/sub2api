@@ -194,6 +194,30 @@ func TestRecordFingerprintObservationDoesNotSynthesizeFromPlan(t *testing.T) {
 	}
 }
 
+func TestRecordFingerprintObservationReadsFinalHeadersAfterPlanContextLoss(t *testing.T) {
+	SetFingerprintObservationEnabled(true)
+	defer SetFingerprintObservationEnabled(false)
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	account := newOpenAIOAuthPinAccount(92034, nil)
+	setFingerprintObservationFinalWireIdentity(c)
+	(&OpenAIGatewayService{}).recordFingerprintObservation(
+		c,
+		account,
+		installationIDResolution{},
+		http.Header{
+			"session-id":               []string{fingerprintObserverSessionV7},
+			"thread-id":                []string{fingerprintObserverThreadV7},
+			"x-codex-parent-thread-id": []string{fingerprintObserverSessionV7},
+		},
+	)
+	entry := SnapshotFingerprintObservations(1)[0]
+	if entry.SessionID != fingerprintObserverSessionV7 || entry.ThreadID != fingerprintObserverThreadV7 || entry.ParentThreadID != fingerprintObserverSessionV7 {
+		t.Fatalf("final headers were not observed after plan context loss: %+v", entry)
+	}
+}
+
 func TestFingerprintObservationAlphaInstallationUsesFinalParseableMetadata(t *testing.T) {
 	const installationID = "11111111-2222-4333-8444-555555555555"
 	tests := []struct {

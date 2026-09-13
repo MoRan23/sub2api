@@ -18,6 +18,7 @@ import (
 const fingerprintObservationCapacity = 500
 
 const fingerprintObservationOutboundIdentityContextKey = "fingerprint_observation_outbound_identity"
+const fingerprintObservationFinalWireIdentityContextKey = "fingerprint_observation_final_wire_identity"
 
 const fingerprintObservationTimezonePathMappingContextKey = "fingerprint_observation_timezone_path_mapping"
 
@@ -460,6 +461,21 @@ func setFingerprintObservationOutboundIdentity(c *gin.Context, identity OpenAICo
 	c.Set(fingerprintObservationOutboundIdentityContextKey, identity)
 }
 
+func setFingerprintObservationFinalWireIdentity(c *gin.Context) {
+	if c != nil {
+		c.Set(fingerprintObservationFinalWireIdentityContextKey, true)
+	}
+}
+
+func fingerprintObservationFinalWireIdentity(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	value, ok := c.Get(fingerprintObservationFinalWireIdentityContextKey)
+	marked, valid := value.(bool)
+	return ok && valid && marked
+}
+
 // clearFingerprintObservationOutboundIdentity removes the request-local
 // provenance marker before a new outbound build starts. Gin contexts are
 // normally request-scoped, but Responses retries, compatibility bridges, and
@@ -469,6 +485,7 @@ func setFingerprintObservationOutboundIdentity(c *gin.Context, identity OpenAICo
 func clearFingerprintObservationOutboundIdentity(c *gin.Context) {
 	if c != nil {
 		c.Set(fingerprintObservationOutboundIdentityContextKey, nil)
+		c.Set(fingerprintObservationFinalWireIdentityContextKey, nil)
 	}
 }
 
@@ -608,6 +625,15 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 			if !forkHeaderPresent {
 				entry.ForkedFromThreadID, forkHeaderPresent = fingerprintObservationTurnMetadataHeaderUUID(outbound, trustedIdentity.ForkedFromThreadID, "forked_from_thread_id")
 			}
+		} else if identityHeaders && fingerprintObservationFinalWireIdentity(c) {
+			// The finalizer writes canonical hyphenated identity headers after
+			// client-header filtering. If a compatibility bridge loses the
+			// request-local plan before observation, these are still real final-wire
+			// values and may be recorded after strict UUIDv7 validation. No value is
+			// synthesized and body-only client metadata is intentionally ignored here.
+			entry.SessionID, sessionHeaderPresent = fingerprintObservationObservedHeaderUUID(outbound, "session-id")
+			entry.ThreadID, threadHeaderPresent = fingerprintObservationObservedHeaderUUID(outbound, "thread-id")
+			entry.ParentThreadID, parentHeaderPresent = fingerprintObservationObservedHeaderUUID(outbound, "x-codex-parent-thread-id")
 		}
 		entry.UserAgent = strings.TrimSpace(outbound.Get("user-agent"))
 		entry.Originator = strings.TrimSpace(outbound.Get("originator"))
@@ -647,6 +673,28 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 		entry.InboundEndpoint = c.Request.Method + " " + path
 	}
 	return entry
+}
+
+func fingerprintObservationObservedHeaderUUID(headers http.Header, name string) (string, bool) {
+	if headers == nil {
+		return "", false
+	}
+	values := headerValuesCaseInsensitive(headers, name)
+	if len(values) == 0 {
+		return "", false
+	}
+	resolved := ""
+	for _, raw := range values {
+		value := NormalizeFingerprintObservationUUIDv7(strings.TrimSpace(raw))
+		if value == "" {
+			return "", true
+		}
+		if resolved != "" && resolved != value {
+			return "", true
+		}
+		resolved = value
+	}
+	return resolved, true
 }
 
 type fingerprintObservationActor struct {

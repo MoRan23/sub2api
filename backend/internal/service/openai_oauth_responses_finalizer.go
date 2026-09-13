@@ -127,6 +127,7 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 
 	if finalPlan.TurnIdentityEnabled {
 		setFingerprintObservationOutboundIdentity(c, finalPlan.TurnIdentity)
+		setFingerprintObservationFinalWireIdentity(c)
 	}
 	logOpenAIRoutingDiagnostics(
 		req.Context(),
