@@ -670,8 +670,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 			// installation passthrough, even if it originated from another path.
 			installationPolicy = OpenAIOAuthInstallationAccountPin
 		}
-		if !captured {
-			capture = CaptureOpenAIOAuthIdentity(c, body, "")
+		if !captured || (capture.Logical.SessionKey == "" && s.oauthDailyLogicalSessionFallbackSeed(ctx, c, account, body) != "") {
+			fallbackSeed := s.oauthDailyLogicalSessionFallbackSeed(ctx, c, account, body)
+			capture = CaptureOpenAIOAuthIdentity(c, body, fallbackSeed)
 		}
 		SetOpenAIOAuthIdentityCapture(c, capture)
 		planOptions := OpenAIOAuthIdentityPlanOptions{

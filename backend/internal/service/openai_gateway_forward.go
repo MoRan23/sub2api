@@ -26,10 +26,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	}
 	if account != nil && usesOpenAICodexIdentityProtocol(account) {
-		if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
+		capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
+		if !captured || (capture.Logical.SessionKey == "" && s.oauthDailyLogicalSessionFallbackSeed(ctx, c, account, body) != "") {
 			// The facade reads prompt_cache_key from the untouched body. Passing it
 			// again as callerSeed would misclassify its source and priority.
-			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, body, ""))
+			fallbackSeed := s.oauthDailyLogicalSessionFallbackSeed(ctx, c, account, body)
+			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, body, fallbackSeed))
 		}
 		if kindErr := s.validateOpenAICodexHTTPMemoryRequestShapeForAccount(ctx, c, account); kindErr != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, kindErr.Error(), "")

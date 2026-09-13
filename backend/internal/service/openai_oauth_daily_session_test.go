@@ -2,8 +2,12 @@ package service
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestOAuthDailyBusinessDateUsesUTC8Midnight(t *testing.T) {
@@ -69,6 +73,52 @@ func (r *fakeOAuthDailySessionRepository) CleanupOAuthDailySessionGenerations(co
 
 type fakeOAuthSyncSessionRepository struct{ root string }
 
+type dailyRotationSettingRepo struct{ values map[string]string }
+
+func (r *dailyRotationSettingRepo) Get(_ context.Context, key string) (*Setting, error) {
+	value, ok := r.values[key]
+	if !ok {
+		return nil, nil
+	}
+	return &Setting{Key: key, Value: value}, nil
+}
+func (r *dailyRotationSettingRepo) GetValue(_ context.Context, key string) (string, error) {
+	if value, ok := r.values[key]; ok {
+		return value, nil
+	}
+	return "", nil
+}
+func (r *dailyRotationSettingRepo) Set(_ context.Context, key, value string) error {
+	r.values[key] = value
+	return nil
+}
+func (r *dailyRotationSettingRepo) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
+	result := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, ok := r.values[key]; ok {
+			result[key] = value
+		}
+	}
+	return result, nil
+}
+func (r *dailyRotationSettingRepo) SetMultiple(_ context.Context, settings map[string]string) error {
+	for key, value := range settings {
+		r.values[key] = value
+	}
+	return nil
+}
+func (r *dailyRotationSettingRepo) GetAll(_ context.Context) (map[string]string, error) {
+	result := make(map[string]string, len(r.values))
+	for key, value := range r.values {
+		result[key] = value
+	}
+	return result, nil
+}
+func (r *dailyRotationSettingRepo) Delete(_ context.Context, key string) error {
+	delete(r.values, key)
+	return nil
+}
+
 func (r *fakeOAuthSyncSessionRepository) GetOrCreateOAuthSyncSession(context.Context, int64) (string, error) {
 	return r.root, nil
 }
@@ -80,7 +130,7 @@ func (r *fakeOAuthSyncSessionRepository) DeleteOAuthSyncSession(context.Context,
 }
 
 func TestResolveOAuthSynchronousTurnIdentityUsesDailyDedicatedRoot(t *testing.T) {
-	settingsRepo := &openAIUUIDv7RuntimeRepo{values: map[string]string{
+	settingsRepo := &dailyRotationSettingRepo{values: map[string]string{
 		SettingKeyEnableOpenAIUUIDv7SessionIdentity:     "true",
 		SettingKeyEnableOpenAIOAuthDailySessionRotation: "true",
 	}}
@@ -129,5 +179,29 @@ func TestResolveOAuthSynchronousTurnIdentityKeepsLegacyRootWhenRotationDisabled(
 	}
 	if dailyRepo.calls != 0 {
 		t.Fatal("daily repository must not be used when the switch is disabled")
+	}
+}
+
+func TestOAuthDailyLogicalSessionFallbackSeedIsStableForMetadataFreeStream(t *testing.T) {
+	settingsRepo := &dailyRotationSettingRepo{values: map[string]string{
+		SettingKeyEnableOpenAICodexFingerprintNormalization: "true",
+		SettingKeyEnableOpenAIUUIDv7SessionIdentity:         "true",
+		SettingKeyEnableOpenAIOAuthDailySessionRotation:     "true",
+	}}
+	svc := &OpenAIGatewayService{settingService: NewSettingService(settingsRepo, nil)}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/responses", nil)
+	c.Request.Header.Set(codexInstallationIDKey, "client-installation")
+	c.Set("api_key", &APIKey{ID: 123})
+	account := &Account{ID: 44, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	body := []byte(`{"model":"gpt-5.6","stream":true,"input":"hello"}`)
+	first := svc.oauthDailyLogicalSessionFallbackSeed(context.Background(), c, account, body)
+	second := svc.oauthDailyLogicalSessionFallbackSeed(context.Background(), c, account, body)
+	if first == "" || first != second {
+		t.Fatalf("fallback seed is not stable: first=%q second=%q", first, second)
+	}
+	if svc.oauthDailyLogicalSessionFallbackSeed(context.Background(), c, account, []byte(`{"stream":false}`)) != "" {
+		t.Fatal("fallback seed must be limited to streaming requests")
 	}
 }

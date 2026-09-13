@@ -163,6 +163,46 @@ func (s *OpenAIGatewayService) oauthDailySessionRotationEnabled(ctx context.Cont
 	return false
 }
 
+// oauthDailyLogicalSessionFallbackSeedForRequest provides a stable logical
+// session seed for metadata-free OAuth streaming requests. It is account
+// independent so scheduler affinity remains stable if an account is replaced;
+// the identity store still namespaces the materialized UUID by credential.
+func (s *OpenAIGatewayService) oauthDailyLogicalSessionFallbackSeedForRequest(ctx context.Context, c *gin.Context, body []byte) string {
+	if !s.oauthDailySessionRotationEnabled(ctx) || !openAIClientRequestedStream(c, body, false) {
+		return ""
+	}
+	apiKeyID := getAPIKeyIDFromContext(c)
+	installation := ""
+	if c != nil && c.Request != nil {
+		installation = strings.TrimSpace(c.Request.Header.Get(codexInstallationIDKey))
+	}
+	if installation == "" && len(body) > 0 {
+		installation = strings.TrimSpace(gjson.GetBytes(body, "client_metadata."+codexInstallationIDKey).String())
+		if installation == "" {
+			var decoded map[string]any
+			if json.Unmarshal(body, &decoded) == nil {
+				installation = extractClientInstallationID(c, decoded)
+			}
+		}
+	}
+	if installation == "" {
+		// Without a client installation signal we cannot distinguish an OAuth
+		// Codex stream from a legacy API-key request at scheduler time. Preserve
+		// the existing stateless scheduling behavior in that case.
+		return ""
+	}
+	return fmt.Sprintf("oauth-daily-fallback:%d:%s", apiKeyID, installation)
+}
+
+// oauthDailyLogicalSessionFallbackSeed is the account-gated form used by
+// outbound identity materialization after account selection.
+func (s *OpenAIGatewayService) oauthDailyLogicalSessionFallbackSeed(ctx context.Context, c *gin.Context, account *Account, body []byte) string {
+	if account == nil || !account.IsOpenAIOAuth() {
+		return ""
+	}
+	return s.oauthDailyLogicalSessionFallbackSeedForRequest(ctx, c, body)
+}
+
 // openAIOutboundSessionIdentityTransportEnabledForRequest snapshots the
 // feature flag so a request cannot mix legacy and V2 projections when an
 // administrator toggles the setting between builder phases.

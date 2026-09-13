@@ -235,6 +235,15 @@ func (s *OpenAIGatewayService) GenerateSessionHashForOpenAIOAuthIdentity(c *gin.
 			return currentHash
 		}
 	}
+	requestCtx := context.Background()
+	if c != nil && c.Request != nil {
+		requestCtx = c.Request.Context()
+	}
+	if seed := s.oauthDailyLogicalSessionFallbackSeedForRequest(requestCtx, c, body); seed != "" {
+		currentHash, legacyHash := deriveOpenAISessionHashes(seed)
+		attachOpenAILegacySessionHashToGin(c, legacyHash)
+		return currentHash
+	}
 	return s.GenerateSessionHashWithFallback(c, body, fallbackSeed)
 }
 
