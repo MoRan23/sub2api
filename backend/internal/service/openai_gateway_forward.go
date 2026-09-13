@@ -25,6 +25,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if account != nil && account.Platform == PlatformOpenAI {
 		ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	}
+	// The handler may reuse a Gin context across account retries and leave a
+	// stale stream=false marker behind.  Refresh it from the immutable ingress
+	// body before any OAuth identity fallback or plan resolution runs.
+	if c != nil {
+		setOpenAIClientRequestedStream(c, newOpenAIRequestView(body).Stream)
+	}
 	if account != nil && usesOpenAICodexIdentityProtocol(account) {
 		capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
 		if !captured || (capture.Logical.SessionKey == "" && s.oauthDailyLogicalSessionFallbackSeed(ctx, c, account, body) != "") {

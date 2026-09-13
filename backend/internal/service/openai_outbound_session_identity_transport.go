@@ -240,8 +240,18 @@ func (s *OpenAIGatewayService) openAIOutboundSessionIdentityTransportEnabledForR
 }
 
 func (s *OpenAIGatewayService) openAIOutboundSessionIdentityModeEnabledForAccount(ctx context.Context, c *gin.Context, account *Account) bool {
-	return usesOpenAICodexIdentityProtocol(account) &&
-		s.openAIOutboundSessionIdentityTransportEnabledForRequest(ctx, c)
+	if !usesOpenAICodexIdentityProtocol(account) {
+		return false
+	}
+	// Daily OAuth rotation is itself an identity mode.  It must remain effective
+	// even when the broader fingerprint policy was cached before the daily switch
+	// was enabled; otherwise the request silently falls back to legacy headers and
+	// no affinity row can ever be materialized.
+	if account.IsOpenAIOAuth() && s.oauthDailySessionRotationEnabled(ctx) &&
+		(openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c)) {
+		return true
+	}
+	return s.openAIOutboundSessionIdentityTransportEnabledForRequest(ctx, c)
 }
 
 // usesOpenAICodexIdentityProtocol identifies OpenAI upstreams that participate

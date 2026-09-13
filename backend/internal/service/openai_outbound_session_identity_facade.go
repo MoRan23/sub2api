@@ -689,7 +689,10 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 		}
 	}
 	plan.ClientIdentityEnabled = true
-	plan.TurnIdentityRequested = options.TurnIdentityEnabled && policy.TurnIdentityNormalizationEnabled()
+	dailyOAuthStream := account.IsOpenAIOAuth() && s.oauthDailySessionRotationEnabled(ctx) &&
+		(openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c))
+	plan.TurnIdentityRequested = options.TurnIdentityEnabled &&
+		(policy.TurnIdentityNormalizationEnabled() || dailyOAuthStream)
 	if plan.TurnIdentityRequested {
 		validationKind := plan.WireProfile.RequestKind
 		if !validationKind.valid() {
@@ -1021,10 +1024,19 @@ func (s *OpenAIGatewayService) OpenAIOAuthIdentityPlanMatches(
 		return false
 	}
 	options = normalizeOpenAIOAuthIdentityPlanOptions(options)
+	dailyOAuthStream := account.IsOpenAIOAuth() && s.oauthDailySessionRotationEnabled(ctx) &&
+		(openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c))
+	// A cached plan may have been materialized before the daily switch was
+	// enabled. Always rematerialize daily OAuth stream plans so the affinity
+	// repository is consulted and the current generation/slot is applied.
+	if dailyOAuthStream {
+		return false
+	}
 	if plan.APIKeyID != getAPIKeyIDFromContext(c) ||
 		plan.ProjectionMode != options.ProjectionMode ||
 		plan.InstallationPolicy != options.InstallationPolicy ||
-		plan.TurnIdentityRequested != (options.TurnIdentityEnabled && plan.PolicySnapshot.TurnIdentityNormalizationEnabled()) {
+		plan.TurnIdentityRequested != (options.TurnIdentityEnabled &&
+			(plan.PolicySnapshot.TurnIdentityNormalizationEnabled() || dailyOAuthStream)) {
 		return false
 	}
 	currentPolicy := s.openAICodexFingerprintPolicyForRequest(ctx, c)
