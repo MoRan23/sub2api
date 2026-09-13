@@ -672,6 +672,13 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	dailyOAuthStream := account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil &&
+		s.oauthDailySessionRotationEnabled(ctx) &&
+		(openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c))
+	// Daily rotation is an identity mode in its own right. Keep it enabled even
+	// when a broader identity-policy snapshot was captured as disabled earlier
+	// in a compatibility path.
+	options.TurnIdentityEnabled = options.TurnIdentityEnabled || dailyOAuthStream
 	// Some Responses compatibility entries arrive here without a logical
 	// session even though the request is streaming. The handler normally seeds
 	// this earlier, but the facade is the authoritative materialization boundary
@@ -689,8 +696,6 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 		}
 	}
 	plan.ClientIdentityEnabled = true
-	dailyOAuthStream := account.IsOpenAIOAuth() && s.oauthDailySessionRotationEnabled(ctx) &&
-		(openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c))
 	plan.TurnIdentityRequested = options.TurnIdentityEnabled &&
 		(policy.TurnIdentityNormalizationEnabled() || dailyOAuthStream)
 	if plan.TurnIdentityRequested {

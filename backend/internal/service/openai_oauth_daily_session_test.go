@@ -210,6 +210,31 @@ func TestResolveOAuthIdentityPlanAppliesDailyAffinityOnHTTPStream(t *testing.T) 
 	}
 }
 
+func TestResolveOAuthIdentityPlanDailyStreamOverridesDisabledPolicySnapshot(t *testing.T) {
+	settingsRepo := &dailyRotationSettingRepo{values: map[string]string{
+		SettingKeyEnableOpenAIOAuthDailySessionRotation: "true",
+	}}
+	root := "018f5c3c-6e3a-7abf-8def-1234567890ae"
+	dailyRepo := &fakeOAuthDailyAffinityRepository{
+		pool:     OAuthDailySessionPool{AccountID: 45, BusinessDate: "2026-09-11", Generation: root},
+		affinity: OAuthDailySessionAffinity{AccountID: 45, APIKeyID: 13, LogicalSessionKey: "fallback", BusinessDate: "2026-09-11", Generation: root, SlotIndex: 1, StreamSessionID: root},
+	}
+	svc := &OpenAIGatewayService{settingService: NewSettingService(settingsRepo, nil), oauthDailySessionRepo: dailyRepo}
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/responses", nil)
+	c.Set("api_key", &APIKey{ID: 13})
+	setOpenAIClientRequestedStream(c, true)
+	account := &Account{ID: 45, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	plan, err := svc.ResolveOpenAIOAuthIdentityPlan(context.Background(), c, account, OpenAIOAuthIdentityCapture{}, OpenAIOAuthIdentityPlanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.TurnIdentityEnabled || plan.TurnIdentity.SessionID != root {
+		t.Fatalf("daily rotation was downgraded by a disabled policy snapshot: %#v", plan.TurnIdentity)
+	}
+}
+
 func TestOAuthDailyIdentityProjectsSessionThreadHeadersAndBody(t *testing.T) {
 	settingsRepo := &dailyRotationSettingRepo{values: map[string]string{
 		SettingKeyEnableOpenAICodexFingerprintNormalization: "true",
