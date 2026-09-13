@@ -109,7 +109,7 @@ func (r *openAIOAuthDailySessionRepository) GetOrCreateOAuthDailySessionAffinity
 	rows, err := r.client.QueryContext(ctx, `INSERT INTO openai_oauth_daily_session_affinities
 		(account_id,api_key_id,logical_session_key,business_date,generation,slot_index,stream_session_id,last_seen_at,active,created_at,updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,TRUE,NOW(),NOW())
-		ON CONFLICT DO UPDATE SET
+		ON CONFLICT (account_id,api_key_id,logical_session_key,business_date) DO UPDATE SET
 			business_date=EXCLUDED.business_date,
 			generation=CASE WHEN openai_oauth_daily_session_affinities.business_date=EXCLUDED.business_date THEN openai_oauth_daily_session_affinities.generation ELSE EXCLUDED.generation END,
 			slot_index=CASE WHEN openai_oauth_daily_session_affinities.business_date=EXCLUDED.business_date THEN openai_oauth_daily_session_affinities.slot_index ELSE EXCLUDED.slot_index END,
