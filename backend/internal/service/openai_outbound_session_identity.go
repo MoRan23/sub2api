@@ -1596,19 +1596,23 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityWithAliasesDetailed
 	}
 	outcome := OpenAIOAuthIdentityResolveNone
 	openAIOutboundSessionIdentityMetrics.resolveTotal.Add(1)
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	logical = normalizeLogicalTuple(openAICodexLogicalTuple{session: logical.SessionKey, thread: logical.ThreadKey, parent: logical.ParentThreadKey, fork: logical.ForkedFromThreadKey}, logical.Source, logical.Explicit)
 	if logical.SessionKey == "" {
 		openAIOutboundSessionIdentityMetrics.emptyLogicalKeyTotal.Add(1)
-		slog.WarnContext(ctx, "openai.oauth_identity_trace",
+		traceCtx := ctx
+		if traceCtx == nil {
+			traceCtx = context.Background()
+		}
+		slog.WarnContext(traceCtx, "openai.oauth_identity_trace",
 			"stage", "resolver_empty_logical",
 			"logical_source", logical.Source,
 			"stream_marker", openAIClientRequestedStream(c, nil, false),
 			"daily_stream_marker", openAIOAuthDailyStreamRequested(c),
 		)
 		return OpenAICodexTurnIdentity{}, false, outcome, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	namespace, err := s.resolveOpenAIOutboundSessionIdentityNamespace(ctx, account)
 	if err != nil {
