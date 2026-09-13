@@ -20,19 +20,6 @@ import (
 
 func ptrUint64(v uint64) *uint64 { return &v }
 
-// openAIOAuthRequestStream detects the wire-level streaming signal used by
-// official Codex Responses requests. Those requests commonly omit JSON
-// stream:true and rely on Accept: text/event-stream instead.
-func openAIOAuthRequestStream(c *gin.Context, body []byte, fallback bool) bool {
-	if value := gjson.GetBytes(body, "stream"); value.Exists() {
-		return value.Bool()
-	}
-	if c != nil && c.Request != nil && strings.Contains(strings.ToLower(c.Request.Header.Get("Accept")), "text/event-stream") {
-		return true
-	}
-	return fallback
-}
-
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	if account != nil && account.Platform == PlatformOpenAI {
@@ -42,11 +29,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// stale stream=false marker behind.  Refresh it from the immutable ingress
 	// body before any OAuth identity fallback or plan resolution runs.
 	if c != nil {
-		stream := newOpenAIRequestView(body).Stream
-		if account != nil && account.IsOpenAIOAuth() {
-			stream = openAIOAuthRequestStream(c, body, stream)
-		}
-		setOpenAIClientRequestedStream(c, stream)
+		setOpenAIClientRequestedStream(c, newOpenAIRequestView(body).Stream)
 	}
 	if account != nil && usesOpenAICodexIdentityProtocol(account) {
 		capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
@@ -184,11 +167,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 	originalBody := body
 	requestView := newOpenAIRequestView(body)
-	reqStream := requestView.Stream
-	if account.IsOpenAIOAuth() {
-		reqStream = openAIOAuthRequestStream(c, body, reqStream)
-	}
-	reqModel, promptCacheKey := requestView.Model, requestView.PromptCacheKey
+	reqModel, reqStream, promptCacheKey := requestView.Model, requestView.Stream, requestView.PromptCacheKey
 	setOpenAIClientRequestedStream(c, reqStream)
 	originalModel := reqModel
 
@@ -216,7 +195,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			originalBody = normalized
 		}
 		requestView = newOpenAIRequestView(body)
-		reqModel, reqStream, promptCacheKey = requestView.Model, openAIClientRequestedStream(c, body, requestView.Stream), requestView.PromptCacheKey
+		reqModel, reqStream, promptCacheKey = requestView.Model, requestView.Stream, requestView.PromptCacheKey
 		originalModel = reqModel
 	}
 
@@ -232,7 +211,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			body = normalizedReasoningBody
 			originalBody = normalizedReasoningBody
 			requestView = newOpenAIRequestView(normalizedReasoningBody)
-			reqModel, reqStream, promptCacheKey = requestView.Model, openAIClientRequestedStream(c, body, requestView.Stream), requestView.PromptCacheKey
+			reqModel, reqStream, promptCacheKey = requestView.Model, requestView.Stream, requestView.PromptCacheKey
 			originalModel = reqModel
 		}
 		sanitizedBody, changed, sanitizeErr := sanitizeOpenAIResponsesInputItemIDs(body)
@@ -243,7 +222,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			body = sanitizedBody
 			originalBody = sanitizedBody
 			requestView = newOpenAIRequestView(sanitizedBody)
-			reqModel, reqStream, promptCacheKey = requestView.Model, openAIClientRequestedStream(c, body, requestView.Stream), requestView.PromptCacheKey
+			reqModel, reqStream, promptCacheKey = requestView.Model, requestView.Stream, requestView.PromptCacheKey
 			originalModel = reqModel
 		}
 	}

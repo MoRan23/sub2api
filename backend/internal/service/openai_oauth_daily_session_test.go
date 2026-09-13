@@ -31,19 +31,6 @@ func TestOAuthDailyBusinessDateUsesUTC8Midnight(t *testing.T) {
 	}
 }
 
-func TestOpenAIClientRequestedStreamUsesAcceptWhenResponsesBodyOmitsStream(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/responses", nil)
-	c.Request.Header.Set("Accept", "text/event-stream")
-	if !openAIOAuthRequestStream(c, []byte(`{"model":"gpt-5.6-sol"}`), false) {
-		t.Fatal("SSE Accept header should mark a stream when the Responses body omits stream")
-	}
-	if openAIOAuthRequestStream(c, []byte(`{"stream":false}`), true) {
-		t.Fatal("explicit stream:false must override the SSE Accept header")
-	}
-}
-
 func TestOAuthDailySessionPoolCarriesThreeStreamRootsAndIndependentSyncRoot(t *testing.T) {
 	pool := OAuthDailySessionPool{
 		AccountID:        1374,
