@@ -204,4 +204,10 @@ func TestOAuthDailyLogicalSessionFallbackSeedIsStableForMetadataFreeStream(t *te
 	if svc.oauthDailyLogicalSessionFallbackSeed(context.Background(), c, account, []byte(`{"stream":false}`)) != "" {
 		t.Fatal("fallback seed must be limited to streaming requests")
 	}
+	noMetadataContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	noMetadataContext.Request = httptest.NewRequest(http.MethodPost, "/responses", nil)
+	noMetadataContext.Set("api_key", &APIKey{ID: 123})
+	if svc.oauthDailyLogicalSessionFallbackSeed(context.Background(), noMetadataContext, account, body) == "" {
+		t.Fatal("fallback seed must remain available without installation metadata")
+	}
 }

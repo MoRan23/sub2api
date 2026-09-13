@@ -205,12 +205,11 @@ func (s *OpenAIGatewayService) oauthDailyLogicalSessionFallbackSeedForRequest(ct
 			}
 		}
 	}
-	if installation == "" {
-		// Without a client installation signal we cannot distinguish an OAuth
-		// Codex stream from a legacy API-key request at scheduler time. Preserve
-		// the existing stateless scheduling behavior in that case.
-		return ""
-	}
+	// Account selection happens after this function, so the scheduler cannot
+	// yet know whether the selected account is OAuth. API Key ID is always
+	// available on authenticated gateway requests and gives metadata-free
+	// streams a stable affinity key; the account-gated materialization below
+	// ensures only OAuth accounts consume the daily pool.
 	return fmt.Sprintf("oauth-daily-fallback:%d:%s", apiKeyID, installation)
 }
 
