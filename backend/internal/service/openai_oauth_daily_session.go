@@ -23,11 +23,11 @@ func OAuthDailyBusinessDate(now time.Time) string {
 // StreamSessionIDs are stable roots; SyncSessionID is an independent root for
 // non-streaming requests and account connection tests.
 type OAuthDailySessionPool struct {
-	AccountID        int64
-	BusinessDate     string
-	Generation       string
-	StreamSessionIDs [OAuthDailyStreamSessionCount]string
-	SyncSessionID    string
+	AccountID        int64                                `json:"account_id"`
+	BusinessDate     string                               `json:"business_date"`
+	Generation       string                               `json:"generation"`
+	StreamSessionIDs [OAuthDailyStreamSessionCount]string `json:"stream_session_ids"`
+	SyncSessionID    string                               `json:"sync_session_id"`
 }
 
 type OAuthDailySessionAffinity struct {

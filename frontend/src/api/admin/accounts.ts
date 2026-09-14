@@ -76,8 +76,16 @@ export interface OAuthDailySessionPool {
   sync_session_id: string
 }
 
-export async function listDailySessionPools(accountIds: number[]): Promise<{ enabled: boolean; business_date: string; items: Record<string, OAuthDailySessionPool> }> {
-  const { data } = await apiClient.get('/admin/openai/daily-session-pools', { params: { account_ids: accountIds.join(',') } })
+export interface OAuthDailySessionPoolsResponse {
+  enabled: boolean
+  business_date: string
+  items: Record<string, OAuthDailySessionPool>
+}
+
+export async function listDailySessionPools(accountIds: number[]): Promise<OAuthDailySessionPoolsResponse> {
+  const { data } = await apiClient.get<OAuthDailySessionPoolsResponse>('/admin/openai/daily-session-pools', {
+    params: { account_ids: accountIds.join(',') }
+  })
   return data
 }
 
