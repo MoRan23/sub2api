@@ -27,10 +27,10 @@
       <section class="rounded-lg border border-gray-200 p-3 dark:border-dark-700">
         <h3 class="font-semibold text-gray-800 dark:text-gray-200">{{ t(`${prefix}.codexMetadata`) }}</h3>
         <dl class="mt-2 grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
-          <template v-for="item in metadataItems" :key="item.key">
+          <div v-for="item in metadataItems" :key="item.key" class="min-w-0">
             <dt class="text-gray-500 dark:text-gray-400">{{ item.label }}</dt>
-            <dd class="break-all font-mono text-gray-800 dark:text-gray-200">{{ item.value || '—' }}</dd>
-          </template>
+            <dd class="mt-1 break-all font-mono text-gray-800 dark:text-gray-200">{{ item.value || '—' }}</dd>
+          </div>
         </dl>
       </section>
 
