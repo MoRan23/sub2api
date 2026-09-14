@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor, within } from '@testing-library/vue'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/vue'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { nextTick } from 'vue'
@@ -108,15 +108,34 @@ afterEach(() => {
 })
 
 describe('AccountsView daily fixed root HTTP contract', () => {
-  it('renders the three stream roots, sync root, date and generation in the real account table', async () => {
+  it('shows a compact summary and reveals the labelled roots only after opening details', async () => {
     const { renderErrors } = renderAccounts()
-    await screen.findByText(pool.sync_session_id)
+    await screen.findByRole('button', { name: 'admin.accounts.dailyFixedRoots.viewDetails' })
     const cell = rootCell(accounts[0]!.name)
-    for (const id of pool.stream_session_ids) expect(cell.textContent).toContain(id)
     expect(cell.textContent).toContain(pool.business_date)
-    expect(cell.textContent).toContain(pool.generation)
+    expect(cell.textContent).toContain('admin.accounts.dailyFixedRoots.summary')
+    const fullIDs = [...pool.stream_session_ids, pool.sync_session_id, pool.generation]
+    for (const id of fullIDs) expect(screen.queryByText(id)).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
     expect(rootCell(accounts[1]!.name).textContent?.trim()).toBe('-')
     expect(rootCell(accounts[2]!.name).textContent?.trim()).toBe('-')
+
+    await fireEvent.click(within(cell).getByRole('button', { name: 'admin.accounts.dailyFixedRoots.viewDetails' }))
+    const dialog = await screen.findByRole('dialog', { name: 'admin.accounts.dailyFixedRoots.title' })
+    expect(within(dialog).getByText(accounts[0]!.name)).toBeTruthy()
+    expect(within(dialog).getByText(pool.business_date)).toBeTruthy()
+    pool.stream_session_ids.forEach((id, index) => {
+      const item = within(dialog).getByText(`admin.accounts.dailyFixedRoots.streamRoot ${index}`).parentElement!
+      expect(within(item).getByText(id)).toBeTruthy()
+    })
+    const syncItem = within(dialog).getByText('admin.accounts.dailyFixedRoots.syncRoot').parentElement!
+    expect(within(syncItem).getByText(pool.sync_session_id)).toBeTruthy()
+    expect(within(dialog).getByText(pool.generation)).toBeTruthy()
+    for (const id of fullIDs) expect(cell.textContent).not.toContain(id)
+
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'common.close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    for (const id of fullIDs) expect(screen.queryByText(id)).toBeNull()
     expect(poolRequests).toEqual(['42,43'])
     expect(renderErrors).not.toHaveBeenCalled()
   })

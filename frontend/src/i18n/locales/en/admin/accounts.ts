@@ -97,6 +97,16 @@ export default {
       schedulableDisabled: 'Scheduling disabled',
       failedToToggleSchedulable: 'Failed to toggle scheduling status',
       groupCountTotal: '{count} groups total',
+      dailyFixedRoots: {
+        title: 'Daily fixed root details',
+        summary: '{stream} streaming · {sync} synchronous',
+        viewDetails: 'View details',
+        businessDate: 'Business date',
+        streamRoot: 'Streaming root',
+        syncRoot: 'Synchronous root',
+        generation: 'Current generation',
+        empty: 'No current fixed roots'
+      },
       platforms: {
         anthropic: 'Anthropic',
         claude: 'Claude',

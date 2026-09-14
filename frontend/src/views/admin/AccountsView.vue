@@ -256,10 +256,15 @@
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
           </template>
           <template #cell-daily_fixed_roots="{ row }">
-            <div v-if="Array.isArray(dailyFixedRootPools[row.id]?.stream_session_ids)" class="max-w-xs text-[11px] leading-4 text-gray-600 dark:text-gray-300">
-              <div>{{ dailyFixedRootPools[row.id].business_date }} · {{ dailyFixedRootPools[row.id].generation }}</div>
-              <div class="break-all font-mono">{{ dailyFixedRootPools[row.id].stream_session_ids.join(' | ') }}</div>
-              <div class="break-all font-mono">{{ dailyFixedRootPools[row.id].sync_session_id }}</div>
+            <div v-if="Array.isArray(dailyFixedRootPools[row.id]?.stream_session_ids)" class="w-40 max-w-full space-y-1 whitespace-normal text-xs text-gray-600 dark:text-gray-300">
+              <div>{{ dailyFixedRootPools[row.id].business_date }}</div>
+              <div class="text-[11px] text-gray-500 dark:text-gray-400">{{ t('admin.accounts.dailyFixedRoots.summary', { stream: dailyFixedRootPools[row.id].stream_session_ids.length, sync: dailyFixedRootPools[row.id].sync_session_id ? 1 : 0 }) }}</div>
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                class="rounded text-primary-600 hover:text-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500 dark:text-primary-400 dark:hover:text-primary-300"
+                @click.stop="dailyFixedRootAccount = { id: row.id, name: row.name }"
+              >{{ t('admin.accounts.dailyFixedRoots.viewDetails') }}</button>
             </div>
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
           </template>
@@ -471,6 +476,12 @@
       </template>
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
+    <AccountDailyFixedRootsModal
+      :show="dailyFixedRootAccount !== null"
+      :account-name="dailyFixedRootAccount?.name ?? ''"
+      :pool="selectedDailyFixedRootPool"
+      @close="dailyFixedRootAccount = null"
+    />
     <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
     <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
@@ -527,6 +538,7 @@ import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrsModal, TempUnschedStatusModal } from '@/components/account'
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
+import AccountDailyFixedRootsModal from '@/components/admin/account/AccountDailyFixedRootsModal.vue'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
@@ -1115,6 +1127,11 @@ const {
 })
 
 const dailyFixedRootPools = reactive<Record<number, OAuthDailySessionPool>>({})
+const dailyFixedRootAccount = ref<Pick<AccountListItem, 'id' | 'name'> | null>(null)
+const selectedDailyFixedRootPool = computed(() => {
+  const pool = dailyFixedRootAccount.value ? dailyFixedRootPools[dailyFixedRootAccount.value.id] : undefined
+  return Array.isArray(pool?.stream_session_ids) ? pool : undefined
+})
 watch(accounts, async (rows) => {
   if (!isColumnVisible('daily_fixed_roots')) return
   const ids = rows.filter((row) => row.platform === 'openai' && row.type === 'oauth').map((row) => row.id)

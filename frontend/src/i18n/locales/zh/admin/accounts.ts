@@ -95,6 +95,16 @@ export default {
       schedulableDisabled: '调度已关闭',
       failedToToggleSchedulable: '切换调度状态失败',
       groupCountTotal: '共 {count} 个分组',
+      dailyFixedRoots: {
+        title: '每日固定根详情',
+        summary: '{stream} 条流式 · {sync} 条同步',
+        viewDetails: '查看详情',
+        businessDate: '业务日期',
+        streamRoot: '流式根',
+        syncRoot: '同步根',
+        generation: '当前代次',
+        empty: '当前无固定根'
+      },
       columns: {
         name: '名称',
         id: '账号ID',
