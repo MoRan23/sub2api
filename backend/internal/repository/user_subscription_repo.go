@@ -94,6 +94,7 @@ func (r *userSubscriptionRepository) GetByIDForUpdate(ctx context.Context, id in
 	m, err := client.UserSubscription.Query().
 		Where(usersubscription.IDEQ(id)).
 		ForUpdate().
+		WithGroup().
 		Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)

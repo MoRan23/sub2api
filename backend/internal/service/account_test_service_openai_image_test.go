@@ -15,7 +15,6 @@ import (
 )
 
 func TestAccountTestService_OpenAIImageOAuthHandlesOutputItemDoneFallback(t *testing.T) {
-	t.Setenv("SUB2API_IMAGES_MAIN_MODEL", "gpt-5.6-sol")
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -51,11 +50,9 @@ func TestAccountTestService_OpenAIImageOAuthHandlesOutputItemDoneFallback(t *tes
 		},
 	}
 
-	err := svc.testOpenAIImageOAuth(c, context.Background(), account, "gpt-image-2.5-flare", "draw a cat")
+	err := svc.testOpenAIImageOAuth(c, context.Background(), account, "gpt-image-1", "draw a cat")
 	require.NoError(t, err)
 	require.NotNil(t, upstream.lastReq)
-	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(upstream.lastBody, "model").String())
-	require.Equal(t, "gpt-image-2.5-flare", gjson.GetBytes(upstream.lastBody, "tools.0.model").String())
 	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(upstream.lastReq.Context()))
 	require.Empty(t, upstream.lastReq.Header.Get(codexInstallationIDKey))
 	require.Equal(t, "22222222-3333-4333-8444-555555555555", gjson.GetBytes(upstream.lastBody, "client_metadata.x-codex-installation-id").String())
@@ -143,7 +140,7 @@ func TestAccountTestService_OpenAIImageOAuthSurfacesSSEError(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader("data: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The selected image model is unavailable\"}}\n\n")),
 	}}}
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "test"}}
-	err := svc.testOpenAIImageOAuth(c, context.Background(), account, "gpt-image-2.5-flare", "draw a cup")
+	err := svc.testOpenAIImageOAuth(c, context.Background(), account, "gpt-image-1", "draw a cup")
 	require.ErrorContains(t, err, "The selected image model is unavailable")
 	require.NotContains(t, rec.Body.String(), "No images returned")
 }

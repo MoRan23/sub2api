@@ -263,7 +263,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewDataManagementHandler,
 	admin.NewBackupHandler,
 	admin.NewOAuthHandler,
-	admin.NewOpenAIOAuthHandler,
+	admin.ProvideOpenAIOAuthHandler,
 	admin.NewGeminiOAuthHandler,
 	admin.NewAntigravityOAuthHandler,
 	admin.NewGrokOAuthHandler,

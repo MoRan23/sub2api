@@ -445,7 +445,7 @@ func TestOpenAIWSRequestPolicyHTTPV2MapAndBridge(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 		c.Set(openAIRequestTimezoneCaptureKey, &openAIRequestTimezoneCapture{acceptedAt: accepted})
 		result, err := svc.forwardOpenAIWSV2(context.Background(), c, account,
-			map[string]any{"model": "gpt-5.1", "input": timezoneWSEnvironment}, "", "test",
+			map[string]any{"model": "gpt-5.1", "input": timezoneWSEnvironment}, "", "", "test",
 			OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, false, false, "gpt-5.1", "gpt-5.1", accepted, 1, "", nil)
 		require.NoError(t, err)
 		require.NotNil(t, result)

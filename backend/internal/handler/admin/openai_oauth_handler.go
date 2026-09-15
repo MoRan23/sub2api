@@ -89,7 +89,6 @@ func NewOpenAIOAuthHandler(
 	adminService service.AdminService,
 	quotaService *service.OpenAIQuotaService,
 	rateLimitService *service.RateLimitService,
-	extras ...any,
 ) *OpenAIOAuthHandler {
 	h := &OpenAIOAuthHandler{
 		openaiOAuthService: openaiOAuthService,
@@ -104,14 +103,21 @@ func NewOpenAIOAuthHandler(
 	if rateLimitService != nil {
 		h.rateLimitService = rateLimitService
 	}
-	for _, extra := range extras {
-		switch value := extra.(type) {
-		case service.OAuthDailySessionRepository:
-			h.dailySessionPools = value
-		case *service.SettingService:
-			h.settingService = value
-		}
-	}
+	return h
+}
+
+// ProvideOpenAIOAuthHandler declares the dependencies used by the admin root-pool lookup.
+func ProvideOpenAIOAuthHandler(
+	openaiOAuthService *service.OpenAIOAuthService,
+	adminService service.AdminService,
+	quotaService *service.OpenAIQuotaService,
+	rateLimitService *service.RateLimitService,
+	dailySessionPools service.OAuthDailySessionRepository,
+	settingService *service.SettingService,
+) *OpenAIOAuthHandler {
+	h := NewOpenAIOAuthHandler(openaiOAuthService, adminService, quotaService, rateLimitService)
+	h.dailySessionPools = dailySessionPools
+	h.settingService = settingService
 	return h
 }
 

@@ -119,7 +119,7 @@ func codexCanonicalUserAgent() string {
 	resolver := codexCanonicalUAResolver
 	codexCanonicalUAMu.RUnlock()
 	if resolver != nil {
-		if ua := strings.TrimSpace(resolver()); ua != "" {
+		if ua := resolver(); strings.TrimSpace(ua) != "" {
 			return ua
 		}
 	}
@@ -190,6 +190,9 @@ func resolveCodexClientIdentityPlanFromSnapshot(
 // 需要固定版本请填「Codex 客户端版本号」并关闭自动同步。
 func resolveCodexOutboundIdentity(candidateUA string) codexOutboundIdentity {
 	canonical := codexCanonicalUserAgent()
+	if _, _, ok := openai.PairCodexClientIdentity(canonical); !ok {
+		canonical = codexCLIUserAgent
+	}
 	version := codexClientVersionFromUA(canonical)
 	canonicalUA, ok := openai.EnsureCodexTUIUserAgent(canonical, version)
 	if !ok {
@@ -208,8 +211,8 @@ func resolveCodexTUIOutboundIdentityFromSnapshot(candidateUA string, canonical c
 	if version == "" {
 		version = codexCLIVersion
 	}
-	ua := strings.TrimSpace(candidateUA)
-	if ua == "" {
+	ua := candidateUA
+	if strings.TrimSpace(ua) == "" {
 		ua = canonical.userAgent
 	}
 	ua, ok := openai.EnsureCodexTUIUserAgent(ua, version)
@@ -224,8 +227,8 @@ func resolveCodexTUIOutboundIdentityFromSnapshot(candidateUA string, canonical c
 }
 
 func resolveCodexOutboundIdentityFromSnapshot(candidateUA string, canonical codexOutboundIdentity) codexOutboundIdentity {
-	ua := strings.TrimSpace(candidateUA)
-	if ua == "" {
+	ua := candidateUA
+	if strings.TrimSpace(ua) == "" {
 		ua = canonical.userAgent
 	}
 	originator, pairedUA, ok := openai.PairCodexClientIdentity(ua)

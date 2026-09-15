@@ -292,7 +292,15 @@ describe('CustomPageView draggable open button', () => {
     return event
   }
 
-  it('preserves secure attributes and treats small movements as clicks', async () => {
+  it.each([undefined, false, true])('honors the per-menu hide button setting %s while keeping the iframe', (hidden) => {
+    Object.assign(testState.appStore.cachedPublicSettings.custom_menu_items[0], { hide_open_button: hidden })
+    const wrapper = mountView()
+    wrappers.push(wrapper)
+    expect(wrapper.find('.custom-open-fab').exists()).toBe(hidden !== true)
+    expect(wrapper.get('iframe').attributes('src')).toContain('https://example.com/docs')
+  })
+
+  it('preserves the embedded URL, secure link attributes, and normal clicks with small pointer movements', async () => {
     const { wrapper, button } = mountEmbed()
     expect(button.href).toBe(wrapper.get('iframe').attributes('src'))
     expect(button.href).toContain('user_id=42')

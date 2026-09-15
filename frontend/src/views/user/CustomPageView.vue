@@ -151,7 +151,7 @@
           </section>
 
           <a
-            v-if="!isPurchaseMode"
+            v-if="!isPurchaseMode && !menuItem?.hide_open_button"
             ref="openButton"
             :href="embeddedUrl"
             target="_blank"

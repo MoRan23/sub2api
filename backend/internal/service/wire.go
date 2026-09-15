@@ -268,6 +268,44 @@ func ProvideAccountUsageService(
 	return service
 }
 
+// ProvideOpenAIGatewayService wires the durable roots for both daily and legacy sync requests.
+func ProvideOpenAIGatewayService(
+	accountRepo AccountRepository,
+	usageLogRepo UsageLogRepository,
+	usageBillingRepo UsageBillingRepository,
+	userRepo UserRepository,
+	userSubRepo UserSubscriptionRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	cache GatewayCache,
+	cfg *config.Config,
+	schedulerSnapshot *SchedulerSnapshotService,
+	concurrencyService *ConcurrencyService,
+	billingService *BillingService,
+	rateLimitService *RateLimitService,
+	billingCacheService *BillingCacheService,
+	httpUpstream HTTPUpstream,
+	deferredService *DeferredService,
+	openAITokenProvider *OpenAITokenProvider,
+	grokTokenProvider *GrokTokenProvider,
+	resolver *ModelPricingResolver,
+	channelService *ChannelService,
+	balanceNotifyService *BalanceNotifyService,
+	settingService *SettingService,
+	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	syncSessionRepo OAuthSyncSessionRepository,
+	dailySessionRepo OAuthDailySessionRepository,
+) *OpenAIGatewayService {
+	svc := NewOpenAIGatewayService(
+		accountRepo, usageLogRepo, usageBillingRepo, userRepo, userSubRepo, userGroupRateRepo,
+		cache, cfg, schedulerSnapshot, concurrencyService, billingService, rateLimitService,
+		billingCacheService, httpUpstream, deferredService, openAITokenProvider, grokTokenProvider,
+		resolver, channelService, balanceNotifyService, settingService, userPlatformQuotaRepo,
+	)
+	svc.SetOAuthSyncSessionRepository(syncSessionRepo)
+	svc.SetOAuthDailySessionRepository(dailySessionRepo)
+	return svc
+}
+
 func ProvideAccountTestService(
 	accountRepo AccountRepository,
 	geminiTokenProvider *GeminiTokenProvider,
@@ -280,6 +318,8 @@ func ProvideAccountTestService(
 	openAIGatewayService *OpenAIGatewayService,
 	settingService *SettingService,
 	pluginManager *PluginManager,
+	syncSessionRepo OAuthSyncSessionRepository,
+	dailySessionRepo OAuthDailySessionRepository,
 ) *AccountTestService {
 	service := NewAccountTestService(
 		accountRepo,
@@ -295,6 +335,8 @@ func ProvideAccountTestService(
 	service.SetOpenAIGatewayService(openAIGatewayService)
 	service.SetSettingService(settingService)
 	service.SetPluginManager(pluginManager)
+	service.SetOAuthSyncSessionRepository(syncSessionRepo)
+	service.SetOAuthDailySessionRepository(dailySessionRepo)
 	return service
 }
 
@@ -511,6 +553,7 @@ func ProvideRateLimitService(
 	openAI403CounterCache OpenAI403CounterCache,
 	settingService *SettingService,
 	tokenCacheInvalidator TokenCacheInvalidator,
+	ollamaCloudUsage *OllamaCloudUsageService,
 ) *RateLimitService {
 	svc := NewRateLimitService(accountRepo, usageRepo, cfg, geminiQuotaService, tempUnschedCache)
 	if healthCache, ok := tempUnschedCache.(OpenAIAPIKeyHealthCache); ok {
@@ -520,6 +563,7 @@ func ProvideRateLimitService(
 	svc.SetOpenAI403CounterCache(openAI403CounterCache)
 	svc.SetSettingService(settingService)
 	svc.SetTokenCacheInvalidator(tokenCacheInvalidator)
+	svc.SetOllamaCloudUsageProbeScheduler(ollamaCloudUsage)
 	return svc
 }
 
@@ -874,7 +918,7 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementService,
 	NewAdminService,
 	NewGatewayService,
-	NewOpenAIGatewayService,
+	ProvideOpenAIGatewayService,
 	ProvideOpenAIOutboundSessionV1CleanupWorker,
 	ProvideImageStorageSettingService,
 	ProvideImageTaskService,
