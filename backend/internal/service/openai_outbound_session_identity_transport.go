@@ -328,6 +328,9 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityForTransportSnapsho
 		return OpenAICodexTurnIdentity{}, OpenAICodexLogicalTurnIdentity{}, false, nil
 	}
 	logical := ResolveOpenAICodexLogicalTurnIdentityWithTurnMetadata(c, body, callerSeed, explicitTurnMetadata)
+	profile := captureCodexWireProfile(c, body, explicitTurnMetadata)
+	logical.GuardianClassifierSourceThreadKey = profile.guardianClassifierSourceThread(logical.ThreadKey)
+	logical.GuardianClassifierParentTurnKey = profile.TurnLineage.ParentTurnID.Value
 	identity, ok, err := s.resolveOpenAICodexLogicalIdentityForTransport(ctx, c, account, logical, enabled)
 	return identity, logical, ok, err
 }
@@ -430,6 +433,7 @@ func openAICodexLogicalTurnIdentityEqual(left, right OpenAICodexLogicalTurnIdent
 		left.ThreadKey == right.ThreadKey &&
 		left.ParentThreadKey == right.ParentThreadKey &&
 		left.ForkedFromThreadKey == right.ForkedFromThreadKey &&
+		left.GuardianClassifierSourceThreadKey == right.GuardianClassifierSourceThreadKey &&
 		left.Relation == right.Relation
 }
 
@@ -443,6 +447,7 @@ func openAICodexLogicalTurnIdentityKey(logical OpenAICodexLogicalTurnIdentity) s
 		logical.ThreadKey,
 		logical.ParentThreadKey,
 		logical.ForkedFromThreadKey,
+		logical.GuardianClassifierSourceThreadKey,
 		string(logical.Relation),
 	}, "\x00")))
 	return hex.EncodeToString(sum[:])
@@ -476,6 +481,7 @@ func openAIWSOutboundIdentityDigest(identity OpenAICodexTurnIdentity) string {
 		identity.ThreadID,
 		identity.ParentThreadID,
 		identity.ForkedFromThreadID,
+		identity.GuardianClassifierSourceThreadID,
 		string(identity.Relation),
 	}, "\x00")))
 	return hex.EncodeToString(sum[:])
@@ -503,6 +509,7 @@ func openAIWSOutboundIdentityPlanDigest(headers http.Header, plan OpenAIOAuthIde
 		strings.TrimSpace(plan.TurnIdentity.ThreadID),
 		strings.TrimSpace(plan.TurnIdentity.ParentThreadID),
 		strings.TrimSpace(plan.TurnIdentity.ForkedFromThreadID),
+		strings.TrimSpace(plan.TurnIdentity.GuardianClassifierSourceThreadID),
 		string(plan.TurnIdentity.Relation),
 		strings.TrimSpace(plan.WireProfile.Revision),
 		strings.TrimSpace(plan.WireProfile.Commit),
@@ -629,6 +636,7 @@ func openAICodexMetadataProjectionFromPlan(plan OpenAIOAuthIdentityPlan) openAIC
 		profile.TurnStartedAtUnixMS = 0
 		profile.TurnStartedAtSet = false
 		profile.TurnLineage = CodexTurnLineage{}
+		profile.GuardianClassifierSourceThreadID = ""
 	}
 	stableTurn := plan.TurnIdentityEnabled &&
 		strings.TrimSpace(plan.TurnIdentity.SessionID) != "" &&
@@ -639,6 +647,7 @@ func openAICodexMetadataProjectionFromPlan(plan OpenAIOAuthIdentityPlan) openAIC
 		if !memoryRequest {
 			profile.TurnLineage.ParentThreadID = plan.TurnIdentity.ParentThreadID
 			profile.TurnLineage.ForkedFromThreadID = plan.TurnIdentity.ForkedFromThreadID
+			profile.GuardianClassifierSourceThreadID = plan.TurnIdentity.GuardianClassifierSourceThreadID
 		}
 	}
 	if ValidateOpenAICodexWindowSnapshot(plan.Window) == nil && plan.Window.ThreadID == plan.TurnIdentity.ThreadID {
@@ -1074,6 +1083,7 @@ func deleteOpenAICodexFlatNestedOnlyFields(metadata map[string]json.RawMessage) 
 		"context_window_id", "context-window-id",
 		"x-codex-context-window-id", "x-codex-context_window_id",
 		"forked_from_ordinal_exclusive", "turn_trigger", "history_ingest_requested",
+		"guardian_classifier_source_thread_id",
 	} {
 		if _, exists := metadata[field]; exists {
 			delete(metadata, field)
@@ -1090,6 +1100,7 @@ func deleteOpenAICodexRootNestedOnlyFields(root map[string]json.RawMessage) bool
 		"context_window_id", "context-window-id",
 		"x-codex-context-window-id", "x-codex-context_window_id",
 		"forked_from_ordinal_exclusive", "turn_trigger", "history_ingest_requested",
+		"guardian_classifier_source_thread_id",
 	} {
 		if _, exists := root[field]; exists {
 			delete(root, field)
@@ -1124,6 +1135,7 @@ func applyOpenAICodexStrictFlatWireProfile(metadata map[string]json.RawMessage, 
 		"parent_turn_id", "root_turn_id", "subagent_kind", "x-openai-subagent",
 		"thread_source", "turn_trigger", "sandbox", "sandbox_mode", "auto_review_enabled",
 		"node_repl_auto_review_required", "node_repl_disabled", "workspaces",
+		"guardian_classifier_source_thread_id",
 	} {
 		delete(metadata, field)
 	}
@@ -1381,6 +1393,7 @@ func rewriteOpenAICodexTurnMetadataProjectionForCarrier(
 		profile.ThreadID = projection.turnIdentity.ThreadID
 		profile.TurnLineage.ParentThreadID = projection.turnIdentity.ParentThreadID
 		profile.TurnLineage.ForkedFromThreadID = projection.turnIdentity.ForkedFromThreadID
+		profile.GuardianClassifierSourceThreadID = projection.turnIdentity.GuardianClassifierSourceThreadID
 	}
 	if projection.requestTurnActive {
 		if turnID, valid := projection.requestTurn.codexTurnID(profile.RequestKind); valid {

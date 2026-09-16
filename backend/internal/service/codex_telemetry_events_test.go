@@ -115,8 +115,8 @@ func TestCodexTelemetryAnalyticsReviewDisabledAndMissingIdentity(t *testing.T) {
 		require.NotEqual(t, "guardian_review", event.EventParams["thread_source"])
 	}
 	turn := codexMainTurnEvent(profile, codexTelemetryTerminal{status: "completed", finished: profile.started.Add(time.Second)}).EventParams
-	require.Equal(t, false, turn["guardian_v2_enabled"])
-	require.Equal(t, "user", turn["approvals_reviewer"])
+	require.NotContains(t, turn, "guardian_v2_enabled", "disabled auto-review does not reveal V2 extension state")
+	require.NotContains(t, turn, "approvals_reviewer", "a policy can disable auto-review while retaining the auto_review reviewer")
 	profile.firstThread = false
 	require.Empty(t, codexInitializationEvents(profile))
 	profile.firstThread = true

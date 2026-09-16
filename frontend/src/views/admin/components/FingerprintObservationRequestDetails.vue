@@ -130,6 +130,8 @@ const metadataItems = computed(() => [
   ['threadSource', props.observation.thread_source], ['turnTrigger', props.observation.turn_trigger],
   ['sandbox', props.observation.sandbox || props.observation.sandbox_mode],
   ['review', props.observation.auto_review_enabled === undefined ? undefined : String(props.observation.auto_review_enabled)],
+  ['nodeReplAutoReviewRequired', props.observation.node_repl_auto_review_required?.toString()],
+  ['nodeReplDisabled', props.observation.node_repl_disabled?.toString()],
   ['workspaces', props.observation.workspaces?.join(', ')],
 ].map(([key, value]) => ({ key, label: t(`${prefix}.${key}`), value })))
 

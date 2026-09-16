@@ -1118,6 +1118,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		timezoneState, _ := RequestTimezoneStateFromContext(c)
 		s.recordFingerprintObservationWSFrame(c, account, timezoneState, payload, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &pinnedIdentityPlan))
+		recordOpenAICodexGuardianSourceThread(pinnedIdentityPlan, nil, payload)
 		telemetry = s.beginCodexTelemetryWS(ctx, account, lease.FingerprintObservationHeaders(), baseAcquireReq.Headers, payload)
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			telemetry.writeFailed()

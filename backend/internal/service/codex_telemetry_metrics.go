@@ -167,7 +167,7 @@ func codexMetricStateKey(profile codexTelemetryProfile) string {
 		profile.client.localID, profile.client.accountID, profile.client.name,
 		profile.client.userAgent, profile.client.originator, profile.client.version,
 		profile.client.proxyURL, profile.model, profile.effort, profile.serviceTier,
-		profile.websocket, codexResourceAttributes(profile),
+		profile.websocket, codexSimulatesClientBehavior(profile), codexResourceAttributes(profile),
 	})
 	return string(key)
 }
@@ -199,6 +199,9 @@ func (s *codexTelemetryMetricStore) state(profile codexTelemetryProfile, now tim
 
 func (s *codexTelemetryMetricStore) touch(profile codexTelemetryProfile) []codexTelemetryMetricBatch {
 	s.state(profile, profile.started)
+	if !codexSimulatesClientBehavior(profile) {
+		return nil
+	}
 	clientKey := codexMetricClientKey(profile)
 	if _, exists := s.clients[clientKey]; exists {
 		s.clients[clientKey] = profile.started
@@ -244,6 +247,12 @@ func (s *codexTelemetryMetricStore) record(profile codexTelemetryProfile, result
 	state, _ := s.state(profile, now)
 	state.turns++
 	for _, descriptor := range codexMetricDescriptors {
+		if !codexSimulatesClientBehavior(profile) && descriptor.name != "codex.turn.e2e_duration_ms" &&
+			descriptor.name != "codex.thread.started" && descriptor.name != "codex.turn.network_proxy" {
+			// Guardian requests contain no evidence of a user's tools, hooks,
+			// skills or local startup activity. Keep only measured request facts.
+			continue
+		}
 		var value float64
 		switch descriptor.name {
 		case "codex.turn.e2e_duration_ms":

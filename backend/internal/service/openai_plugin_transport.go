@@ -12,6 +12,7 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 	if account != nil && account.Platform == PlatformOpenAI {
 		request = ApplyOpenAIRequestPolicy(request, s.settingService)
 	}
+	recordOpenAIGuardianSourceHTTPRequest(request, account)
 	if attempt := s.beginCodexTelemetryHTTPRequest(request, proxyURL, account); attempt != nil {
 		defer func() { observeCodexTelemetryHTTPResponse(attempt, response, err) }()
 	}

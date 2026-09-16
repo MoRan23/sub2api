@@ -59,17 +59,17 @@ func codexInitializationEvents(profile codexTelemetryProfile) []codexAnalyticsEv
 			threadID: profile.threadID, sessionID: profile.sessionID,
 			parentThreadID: codexOptionalString(profile.input.ParentThreadID),
 			forkedFromID:   codexOptionalString(profile.input.ForkedFromThreadID),
-			source:         firstNonEmptyString(profile.input.ThreadSource, "user"),
+			source:         codexTelemetryThreadSource(profile),
 			subagentSource: codexOptionalString(profile.input.SubagentKind), model: profile.model,
 		}))
 	}
-	if codexGuardianEnabled(profile) {
+	if codexSimulatesGuardian(profile) {
 		events = append(events, codexThreadInitialized(profile, codexThreadSpec{
 			threadID: uuid.NewString(), sessionID: profile.sessionID, parentThreadID: profile.threadID,
 			source: "guardian_review", subagentSource: "guardian", model: "codex-auto-review",
 		}))
 	}
-	if profile.firstThread {
+	if profile.firstThread && codexSimulatesClientBehavior(profile) {
 		titleID := uuid.NewString()
 		events = append(events, codexThreadInitialized(profile, codexThreadSpec{
 			threadID: titleID, sessionID: titleID, source: "thread_title", model: "gpt-5.6-luna", ephemeral: true,
@@ -88,7 +88,7 @@ func codexThreadInitialized(profile codexTelemetryProfile, spec codexThreadSpec)
 		"ephemeral": spec.ephemeral, "forked_from_thread_id": spec.forkedFromID, "initialization_mode": "new",
 		"model": spec.model, "parent_thread_id": spec.parentThreadID, "runtime": codexRuntime(profile),
 		"session_id": spec.sessionID, "subagent_source": spec.subagentSource, "thread_id": spec.threadID,
-		"thread_source": spec.source,
+		"thread_source": codexOptionalString(spec.source),
 	}
 	return newCodexAnalyticsEvent(profile, "codex_thread_initialized", params)
 }
@@ -117,6 +117,9 @@ func codexTerminalEvents(profile codexTelemetryProfile, result codexTelemetryTer
 	if profile.sessionID == "" || profile.threadID == "" || profile.turnID == "" {
 		return nil
 	}
+	if !codexSimulatesClientBehavior(profile) {
+		return []codexAnalyticsEvent{codexMainTurnEvent(profile, result)}
+	}
 	events := make([]codexAnalyticsEvent, 0, 9)
 	if profile.command && profile.dynamicTool {
 		events = append(events, codexCommandEvent(profile, result.body))
@@ -141,9 +144,8 @@ func codexMainTurnEvent(profile codexTelemetryProfile, result codexTelemetryTerm
 	params := codexTurnEventBase(profile, codexTurnSpec{profile.threadID, profile.turnID, profile.model, profile.effort})
 	response := codexTerminalResponse(result.body)
 	params["approval_policy"] = firstNonEmptyString(profile.input.ApprovalPolicy, "on-request")
-	params["approvals_reviewer"] = "user"
-	if codexGuardianEnabled(profile) {
-		params["approvals_reviewer"] = "auto_review"
+	if reviewer := codexTelemetryApprovalsReviewer(profile); reviewer != "" {
+		params["approvals_reviewer"] = reviewer
 	}
 	params["completed_at"], params["duration_ms"] = finished.Unix(), elapsedMillis(profile.started, finished, finished)
 	params["before_first_sampling_ms"], params["sampling_ms"] = nil, nil
@@ -157,6 +159,10 @@ func codexMainTurnEvent(profile codexTelemetryProfile, result codexTelemetryTerm
 	params["after_last_sampling_ms"], params["between_sampling_overhead_ms"] = 0, 0
 	params["status"], params["service_tier"] = result.status, firstNonEmptyString(response.Get("service_tier").String(), profile.serviceTier)
 	params["sandbox_policy"] = firstNonEmptyString(profile.input.Sandbox, profile.input.SandboxMode, "workspace_write")
+	if !codexSimulatesClientBehavior(profile) {
+		params["approval_policy"] = codexOptionalString(profile.input.ApprovalPolicy)
+		params["sandbox_policy"] = codexOptionalString(firstNonEmptyString(profile.input.Sandbox, profile.input.SandboxMode))
+	}
 	params["explicit_client_interrupt_requested_at_ms"] = nil
 	if result.explicitClientInterrupt {
 		params["explicit_client_interrupt_requested_at_ms"] = finished.UnixMilli()
@@ -170,13 +176,16 @@ func codexMainTurnEvent(profile codexTelemetryProfile, result codexTelemetryTerm
 
 func codexTurnEventBase(profile codexTelemetryProfile, spec codexTurnSpec) map[string]any {
 	dynamicCount, commandCount, fileCount := boolInt(profile.dynamicTool), boolInt(profile.command && profile.dynamicTool), boolInt(profile.fileChange)
+	if !codexSimulatesClientBehavior(profile) {
+		dynamicCount, commandCount, fileCount = 0, 0, 0
+	}
 	requestCount := max(profile.attemptCount, 1)
-	return map[string]any{
+	params := map[string]any{
 		"app_server_client": codexAppServerClient(profile), "cache_write_input_tokens": 0,
 		"cached_input_tokens": 0, "codex_error_http_status_code": nil, "codex_error_kind": nil,
 		"codex_turn_source": nil, "collaboration_mode": "default", "compaction_ms": 0,
 		"dynamic_tool_call_count": dynamicCount, "ephemeral": false, "file_change_count": fileCount,
-		"guardian_v2_enabled": codexGuardianEnabled(profile), "image_generation_count": 0, "image_preparations": []any{},
+		"image_generation_count": 0, "image_preparations": []any{},
 		"initialization_mode": "new", "input_tokens": 0, "is_first_turn": profile.firstThread,
 		"mcp_tool_call_count": 0, "model": spec.model, "model_provider": "openai", "num_input_images": 0,
 		"output_tokens": 0, "parent_thread_id": codexOptionalString(profile.input.ParentThreadID), "personality": "pragmatic",
@@ -187,10 +196,17 @@ func codexTurnEventBase(profile codexTelemetryProfile, spec codexTurnSpec) map[s
 		"session_id": profile.sessionID, "shell_command_count": commandCount, "started_at": profile.started.Unix(),
 		"steer_count": 0, "subagent_source": codexOptionalString(profile.input.SubagentKind), "subagent_tool_call_count": 0, "submission_type": nil,
 		"agent_name": codexOptionalString(profile.input.AgentName),
-		"thread_id":  spec.threadID, "thread_source": firstNonEmptyString(profile.input.ThreadSource, "user"), "tool_blocking_ms": 0,
+		"thread_id":  spec.threadID, "thread_source": codexOptionalString(codexTelemetryThreadSource(profile)), "tool_blocking_ms": 0,
 		"total_tokens": 0, "total_tool_call_count": dynamicCount + fileCount, "turn_error": nil,
 		"turn_id": spec.turnID, "turn_trigger": firstNonEmptyString(profile.input.TurnTrigger, "composer"), "web_search_count": 0, "workspace_kind": "projectless",
 	}
+	if profile.input.GuardianV2Enabled != nil {
+		params["guardian_v2_enabled"] = *profile.input.GuardianV2Enabled
+	}
+	if !codexSimulatesClientBehavior(profile) {
+		params["turn_trigger"] = codexOptionalString(profile.input.TurnTrigger)
+	}
+	return params
 }
 
 func setCodexTurnUsage(params map[string]any, response gjson.Result) {
@@ -298,8 +314,41 @@ func codexResponseID(terminal []byte) string {
 	return codexTerminalResponse(terminal).Get("id").String()
 }
 
-func codexGuardianEnabled(profile codexTelemetryProfile) bool {
-	return profile.input.AutoReviewEnabled == nil || *profile.input.AutoReviewEnabled
+// Simulation policy is separate from observed feature state. An unspecified
+// auto-review flag may allow a synthetic reviewer, but cannot prove V2 is active.
+func codexSimulatesGuardian(profile codexTelemetryProfile) bool {
+	return codexSimulatesClientBehavior(profile) &&
+		profile.input.ApprovalsReviewer != "user" &&
+		(profile.input.AutoReviewEnabled == nil || *profile.input.AutoReviewEnabled)
+}
+
+func codexSimulatesClientBehavior(profile codexTelemetryProfile) bool {
+	for _, value := range []string{profile.input.ThreadSource, profile.input.SubagentKind, profile.input.OpenAISubagent} {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "guardian", "guardian_review", "guardian_classifier":
+			return false
+		}
+	}
+	return true
+}
+
+func codexTelemetryThreadSource(profile codexTelemetryProfile) string {
+	if !codexSimulatesClientBehavior(profile) {
+		return profile.input.ThreadSource
+	}
+	return firstNonEmptyString(profile.input.ThreadSource, "user")
+}
+
+func codexTelemetryApprovalsReviewer(profile codexTelemetryProfile) string {
+	if reviewer := profile.input.ApprovalsReviewer; reviewer == "user" || reviewer == "auto_review" {
+		return reviewer
+	}
+	// Codex computes auto_review_enabled as an eligible approval policy AND
+	// reviewer=auto_review. True proves the reviewer; false cannot identify it.
+	if profile.input.AutoReviewEnabled != nil && *profile.input.AutoReviewEnabled {
+		return "auto_review"
+	}
+	return ""
 }
 
 func codexOptionalString(value string) any {

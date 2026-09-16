@@ -1100,6 +1100,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				payload = stamped
 			}
 			s.recordFingerprintObservationWSFrame(c, account, currentTimezoneState, payload, physicalObservationHeaders, openAIWSObservationFramePlan(account, &framePlan))
+			recordOpenAICodexGuardianSourceThread(framePlan, nil, payload)
 			currentTelemetry().finish(false)
 			nextTelemetry := s.beginCodexTelemetryWS(ctx, account, physicalObservationHeaders, headers, payload)
 			telemetryMu.Lock()

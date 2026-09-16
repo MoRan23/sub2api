@@ -408,6 +408,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		observationBody = raw
 	}
 	s.recordFingerprintObservationWSFrame(c, account, timezoneState, observationBody, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &outboundIdentityPlan))
+	recordOpenAICodexGuardianSourceThread(outboundIdentityPlan, nil, observationBody)
 	telemetry := s.beginCodexTelemetryWS(ctx, account, lease.FingerprintObservationHeaders(), wsHeaders, observationBody)
 	defer func() {
 		var fallback *openAIWSFallbackError

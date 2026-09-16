@@ -92,6 +92,39 @@ describe('FingerprintObservationRequestDetails', () => {
     expect(within(report).queryByText('Historical environment timezone converted; original date preserved')).toBeNull()
   })
 
+  it('pairs each review flag with its own label and distinguishes false from missing values', async () => {
+    const view = renderDetails({
+      auto_review_enabled: true,
+      node_repl_auto_review_required: false,
+      node_repl_disabled: true,
+    })
+    await openDetails()
+
+    const flagValue = (label: string) => {
+      const term = screen.getByText(label, { selector: 'dt' })
+      expect(term.parentElement?.tagName).toBe('DIV')
+      return term.parentElement?.querySelector('dd')?.textContent
+    }
+    expect(flagValue('Auto review')).toBe('true')
+    expect(flagValue('Node REPL auto review required')).toBe('false')
+    expect(flagValue('Node REPL disabled')).toBe('true')
+
+    await view.rerender({ observation: {
+      ...legacyEntry,
+      auto_review_enabled: false,
+      node_repl_auto_review_required: true,
+      node_repl_disabled: false,
+    } })
+    expect(flagValue('Auto review')).toBe('false')
+    expect(flagValue('Node REPL auto review required')).toBe('true')
+    expect(flagValue('Node REPL disabled')).toBe('false')
+
+    await view.rerender({ observation: legacyEntry })
+    expect(flagValue('Auto review')).toBe('—')
+    expect(flagValue('Node REPL auto review required')).toBe('—')
+    expect(flagValue('Node REPL disabled')).toBe('—')
+  })
+
   it('keeps legacy missing data separate from a complete empty scan and an absent residency header', async () => {
     const view = renderDetails()
     await openDetails()

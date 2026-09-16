@@ -72,6 +72,13 @@ func codexTelemetryInputFromWire(account *Account, headers http.Header, body []b
 	if approval == "" {
 		approval = gjson.GetBytes(body, "approval_policy").String()
 	}
+	reviewer := codexTelemetryReviewField(headers, body, "approvals_reviewer").String()
+	if reviewer != "user" && reviewer != "auto_review" {
+		reviewer = ""
+	}
+	// These fields are independent from auto_review_enabled. Codex's latter
+	// combines the approval policy and reviewer; it carries no V2 extension state.
+	guardianV2 := codexTelemetryOptionalBool(codexTelemetryReviewField(headers, body, "guardian_v2_enabled").String())
 	return CodexTelemetryInput{
 		AccountID: account.ID, AccountName: account.Name,
 		AccessToken: token, ChatGPTAccountID: codexTelemetryHeader(headers, "Chatgpt-Account-Id"), ProxyURL: proxyURL,
@@ -83,9 +90,52 @@ func codexTelemetryInputFromWire(account *Account, headers http.Header, body []b
 		ForkedFromThreadID: codexTelemetryUUID(profile.TurnLineage.ForkedFromThreadID),
 		ThreadSource:       profile.ThreadSource, TurnTrigger: profile.TurnTrigger,
 		AgentName: profile.AgentName, SubagentKind: subagent, Sandbox: profile.Sandbox, SandboxMode: profile.SandboxMode,
-		ApprovalPolicy: approval, AutoReviewEnabled: review,
+		OpenAISubagent: firstNonEmptyString(codexTelemetryHeader(headers, "x-openai-subagent"), profile.SubagentHeader),
+		ApprovalPolicy: approval, ApprovalsReviewer: reviewer, AutoReviewEnabled: review, GuardianV2Enabled: guardianV2,
 		Model: gjson.GetBytes(body, "model").String(), Effort: gjson.GetBytes(body, "reasoning.effort").String(),
 		ServiceTier: gjson.GetBytes(body, "service_tier").String(), WebSocket: websocket, StartedAt: time.Now(),
+	}
+}
+
+// Read only these scalar review fields from the same final carriers as the wire
+// profile. The generic extra-metadata map accepts strings, whereas a final wire
+// boolean is also meaningful here. An explicit malformed value remains unknown.
+func codexTelemetryReviewField(headers http.Header, body []byte, key string) gjson.Result {
+	root := gjson.ParseBytes(body)
+	client := root.Get("client_metadata")
+	for _, carrier := range []gjson.Result{client.Get(openAIWSTurnMetadataHeader), root.Get(openAIWSTurnMetadataHeader)} {
+		if carrier.Type == gjson.String {
+			carrier = gjson.Parse(carrier.String())
+		}
+		if value := carrier.Get(key); value.Exists() {
+			return value
+		}
+	}
+	for _, carrier := range []gjson.Result{client, root} {
+		if value := carrier.Get(key); value.Exists() {
+			return value
+		}
+	}
+	for _, raw := range headerValuesCaseInsensitive(headers, openAIWSTurnMetadataHeader) {
+		carrier := gjson.Parse(raw)
+		if carrier.Type == gjson.String {
+			carrier = gjson.Parse(carrier.String())
+		}
+		if value := carrier.Get(key); value.Exists() {
+			return value
+		}
+	}
+	return gjson.Result{}
+}
+
+func codexTelemetryOptionalBool(value string) *bool {
+	switch value {
+	case "true":
+		return boolPointer(true)
+	case "false":
+		return boolPointer(false)
+	default:
+		return nil
 	}
 }
 

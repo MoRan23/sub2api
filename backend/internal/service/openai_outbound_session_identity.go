@@ -35,11 +35,12 @@ const (
 // onto an upstream request. A root thread shares its UUIDv7 with the session;
 // descendants keep the session UUID and receive their own thread UUIDv7.
 type OpenAICodexTurnIdentity struct {
-	SessionID          string                  `json:"session_id"`
-	ThreadID           string                  `json:"thread_id"`
-	ParentThreadID     string                  `json:"parent_thread_id,omitempty"`
-	ForkedFromThreadID string                  `json:"forked_from_thread_id,omitempty"`
-	Relation           OpenAICodexTurnRelation `json:"relation,omitempty"`
+	SessionID                        string                  `json:"session_id"`
+	ThreadID                         string                  `json:"thread_id"`
+	ParentThreadID                   string                  `json:"parent_thread_id,omitempty"`
+	ForkedFromThreadID               string                  `json:"forked_from_thread_id,omitempty"`
+	GuardianClassifierSourceThreadID string                  `json:"guardian_classifier_source_thread_id,omitempty"`
+	Relation                         OpenAICodexTurnRelation `json:"relation,omitempty"`
 }
 
 // OpenAIOutboundSessionIdentity remains as a source-compatible name while the
@@ -88,8 +89,9 @@ func ValidateOpenAICodexTurnIdentity(identity OpenAICodexTurnIdentity) error {
 		return errors.New("openai Codex turn identity relation is invalid")
 	}
 	for name, value := range map[string]string{
-		"parent_thread_id":      identity.ParentThreadID,
-		"forked_from_thread_id": identity.ForkedFromThreadID,
+		"parent_thread_id":                     identity.ParentThreadID,
+		"forked_from_thread_id":                identity.ForkedFromThreadID,
+		"guardian_classifier_source_thread_id": identity.GuardianClassifierSourceThreadID,
 	} {
 		if strings.TrimSpace(value) == "" {
 			continue
@@ -157,13 +159,15 @@ const (
 )
 
 type OpenAICodexLogicalTurnIdentity struct {
-	SessionKey          string
-	ThreadKey           string
-	ParentThreadKey     string
-	ForkedFromThreadKey string
-	Relation            OpenAICodexTurnRelation
-	Source              string
-	Explicit            bool
+	SessionKey                        string
+	ThreadKey                         string
+	ParentThreadKey                   string
+	ForkedFromThreadKey               string
+	GuardianClassifierSourceThreadKey string
+	GuardianClassifierParentTurnKey   string
+	Relation                          OpenAICodexTurnRelation
+	Source                            string
+	Explicit                          bool
 }
 
 // CodexLogicalTurnKey is the facade-facing name for the captured logical
@@ -1596,7 +1600,11 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityWithAliasesDetailed
 	}
 	outcome := OpenAIOAuthIdentityResolveNone
 	openAIOutboundSessionIdentityMetrics.resolveTotal.Add(1)
+	guardianSource := logical.GuardianClassifierSourceThreadKey
+	guardianParentTurn := logical.GuardianClassifierParentTurnKey
 	logical = normalizeLogicalTuple(openAICodexLogicalTuple{session: logical.SessionKey, thread: logical.ThreadKey, parent: logical.ParentThreadKey, fork: logical.ForkedFromThreadKey}, logical.Source, logical.Explicit)
+	logical.GuardianClassifierSourceThreadKey = guardianSource
+	logical.GuardianClassifierParentTurnKey = guardianParentTurn
 	if logical.SessionKey == "" {
 		openAIOutboundSessionIdentityMetrics.emptyLogicalKeyTotal.Add(1)
 		return OpenAICodexTurnIdentity{}, false, outcome, nil
@@ -1684,6 +1692,12 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityWithAliasesDetailed
 			return OpenAICodexTurnIdentity{}, true, outcome, err
 		}
 	}
+	if guardianSource != "" {
+		identity.GuardianClassifierSourceThreadID, err = state.resolveThread(guardianSource)
+		if err != nil {
+			return OpenAICodexTurnIdentity{}, true, outcome, err
+		}
+	}
 	// OAuth streaming turns use a daily, sticky root session when enabled. The
 	// regular identity store above still resolves thread/lineage IDs, preserving
 	// per-logical-session stickiness while isolating each day's root.
@@ -1701,6 +1715,11 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityWithAliasesDetailed
 				fmt.Errorf("invalid OAuth daily stream root session: %w", rootErr)
 		}
 		identity.SessionID = root
+		if guardianSource == logical.SessionKey {
+			// A logical root becomes a fresh child in daily-root mode. Its old
+			// session mapping is not the source request's outbound thread.
+			identity.GuardianClassifierSourceThreadID = lookupOpenAICodexGuardianSourceThread(namespace, apiKeyID, root, logical)
+		}
 		if identity.Relation == OpenAICodexTurnRelationDescendant {
 			identity.ParentThreadID = root
 		} else {

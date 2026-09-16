@@ -641,6 +641,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if buildErr != nil {
 			return nil, buildErr
 		}
+		upstreamReq = markOpenAIGuardianSourceHTTPRequest(upstreamReq, c, account)
 		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, telemetryTurnCtx)
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		if err != nil {

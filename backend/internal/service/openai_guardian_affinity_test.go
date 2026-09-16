@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -104,6 +105,89 @@ func TestWithOpenAIGuardianParentAffinity_RequiresUnambiguousReviewLineage(t *te
 	}
 }
 
+func guardianClassifierAffinityTestContext(t *testing.T, model, subagent, headerMetadata, bodyMetadata, cacheKey string, websocket bool) context.Context {
+	t.Helper()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	c.Request.Header.Set(openAISubagentHeader, subagent)
+	c.Request.Header.Set(codexTurnMetadataHeader, headerMetadata)
+	payload := map[string]any{
+		"model": model,
+		"client_metadata": map[string]string{
+			"x-openai-subagent":     "guardian",
+			"x-codex-turn-metadata": bodyMetadata,
+		},
+	}
+	if cacheKey != "" {
+		payload["prompt_cache_key"] = cacheKey
+	}
+	if websocket {
+		payload = map[string]any{"type": "response.create", "response": payload}
+	}
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	return WithOpenAIGuardianParentAffinity(context.Background(), c, body, model)
+}
+
+func TestWithOpenAIGuardianParentAffinity_ClassifierUsesExplicitSourceForAnyModel(t *testing.T) {
+	sourceID := "01996d71-4250-7ca4-909a-c9e443ca463e"
+	metadata := `{"thread_source":"guardian_classifier","guardian_classifier_source_thread_id":"` + sourceID + `"}`
+	for _, websocket := range []bool{false, true} {
+		for _, model := range []string{"codex-auto-review", "gpt-5.6-sol", "custom-classifier"} {
+			for _, source := range []string{"header", "body", "both"} {
+				t.Run(model+"/"+source+map[bool]string{false: "/http", true: "/ws"}[websocket], func(t *testing.T) {
+					headerMetadata, bodyMetadata := metadata, metadata
+					switch source {
+					case "header":
+						bodyMetadata = ""
+					case "body":
+						headerMetadata = ""
+					}
+					ctx := guardianClassifierAffinityTestContext(t, model, "", headerMetadata, bodyMetadata, "guardian-v2:"+sourceID, websocket)
+					affinity, ok := openAIGuardianParentAffinityFromContext(ctx)
+					require.True(t, ok)
+					currentHash, legacyHash := deriveOpenAISessionHashes(sourceID)
+					require.Equal(t, currentHash, affinity.currentSessionHash)
+					require.Equal(t, legacyHash, affinity.legacySessionHash)
+				})
+			}
+		}
+	}
+}
+
+func TestWithOpenAIGuardianParentAffinity_ClassifierRejectsAmbiguousOrInvalidLineage(t *testing.T) {
+	sourceID := "01996d71-4250-7ca4-909a-c9e443ca463e"
+	otherID := "01996d71-4250-7ca4-909a-c9e443ca463f"
+	metadata := `{"thread_source":"guardian_classifier","guardian_classifier_source_thread_id":"` + sourceID + `"}`
+	for _, tc := range []struct {
+		name, header, body, cache, subagent string
+	}{
+		{name: "conflicting source", header: `{"guardian_classifier_source_thread_id":"` + otherID + `"}`, body: metadata},
+		{name: "conflicting source type", header: `{"thread_source":"user"}`, body: metadata},
+		{name: "invalid source", body: `{"thread_source":"guardian_classifier","guardian_classifier_source_thread_id":"not-a-uuid"}`},
+		{name: "zero source", body: `{"thread_source":"guardian_classifier","guardian_classifier_source_thread_id":"00000000-0000-0000-0000-000000000000"}`},
+		{name: "wrong source type", body: `{"thread_source":"guardian_classifier","guardian_classifier_source_thread_id":123}`},
+		{name: "null source", header: `{"guardian_classifier_source_thread_id":null}`, body: metadata},
+		{name: "missing source", body: `{"thread_source":"guardian_classifier"}`},
+		{name: "missing classifier source type", body: `{"guardian_classifier_source_thread_id":"` + sourceID + `"}`},
+		{name: "wrong source type json", header: `{"thread_source":123}`, body: metadata},
+		{name: "malformed header", header: `{"thread_source":`, body: metadata},
+		{name: "conflicting cache", body: metadata, cache: "guardian-v2:" + otherID},
+		{name: "invalid cache", body: metadata, cache: "guardian-v2:not-a-uuid"},
+		{name: "ordinary cache", body: metadata, cache: "ordinary-cache-key"},
+		{name: "cache alone", cache: "guardian-v2:" + sourceID},
+		{name: "conflicting subagent", body: metadata, subagent: "review"},
+		{name: "conflicting metadata subagent", header: `{"subagent_kind":"collab_spawn"}`, body: metadata},
+		{name: "invalid classifier cannot fall back to parent", header: `{"parent_thread_id":"` + sourceID + `","subagent_kind":"guardian"}`, body: `{"thread_source":"guardian_classifier","guardian_classifier_source_thread_id":"invalid"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := guardianClassifierAffinityTestContext(t, codexAutoReviewModel, tc.subagent, tc.header, tc.body, tc.cache, false)
+			_, ok := openAIGuardianParentAffinityFromContext(ctx)
+			require.False(t, ok)
+		})
+	}
+}
+
 func TestOpenAIGatewayService_GuardianParentAffinitySelectsParentAccountAcrossSchedulers(t *testing.T) {
 	parentID := "22222222-2222-4222-8222-222222222222"
 	parentHash := DeriveSessionHashFromSeed(parentID)
@@ -113,10 +197,14 @@ func TestOpenAIGatewayService_GuardianParentAffinitySelectsParentAccountAcrossSc
 		name           string
 		advanced       string
 		stickyWeighted string
+		classifier     bool
 	}{
 		{name: "legacy", advanced: "false"},
 		{name: "advanced", advanced: "true"},
 		{name: "advanced sticky weighted", advanced: "true", stickyWeighted: "true"},
+		{name: "classifier legacy", advanced: "false", classifier: true},
+		{name: "classifier advanced", advanced: "true", classifier: true},
+		{name: "classifier advanced sticky weighted", advanced: "true", stickyWeighted: "true", classifier: true},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
 			accounts := []Account{
@@ -143,8 +231,14 @@ func TestOpenAIGatewayService_GuardianParentAffinitySelectsParentAccountAcrossSc
 			}
 
 			ctx := guardianAffinityTestContext(t, codexAutoReviewModel, "guardian", parentID, "")
+			model := codexAutoReviewModel
+			if mode.classifier {
+				model = "gpt-5.6-sol"
+				metadata := `{"thread_source":"guardian_classifier","guardian_classifier_source_thread_id":"` + parentID + `"}`
+				ctx = guardianClassifierAffinityTestContext(t, model, "", "", metadata, "guardian-v2:"+parentID, false)
+			}
 			selection, decision, err := svc.SelectAccountWithScheduler(
-				ctx, &groupID, "", "guardian-child-session", codexAutoReviewModel,
+				ctx, &groupID, "", "guardian-child-session", model,
 				nil, OpenAIUpstreamTransportAny, false,
 			)
 			require.NoError(t, err)

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
 
@@ -22,16 +23,33 @@ type openAIGuardianParentAffinity struct {
 	legacySessionHash  string
 }
 
-// WithOpenAIGuardianParentAffinity records a Codex review request's parent
-// thread as a routing hint. The hint is resolved against the current group's
-// sticky-session namespace later; client headers never carry an account ID.
+// WithOpenAIGuardianParentAffinity records a Codex review request's parent or
+// classifier source thread as a routing hint. The hint is resolved against the
+// current group's sticky-session namespace later; client headers never carry an account ID.
 func WithOpenAIGuardianParentAffinity(ctx context.Context, c *gin.Context, body []byte, requestedModel string) context.Context {
-	if ctx == nil || c == nil || !strings.EqualFold(strings.TrimSpace(requestedModel), codexAutoReviewModel) {
+	if ctx == nil || c == nil {
 		return ctx
 	}
 
 	headerMetadata := c.GetHeader(codexTurnMetadataHeader)
-	bodyMetadata := openAIRequestPayloadView(body).Get("client_metadata.x-codex-turn-metadata").String()
+	payload := openAIRequestPayloadView(body)
+	bodyMetadata := payload.Get("client_metadata.x-codex-turn-metadata").String()
+	cacheKey := strings.TrimSpace(payload.Get("prompt_cache_key").String())
+	if codexHasGuardianClassifierLineage(headerMetadata, bodyMetadata, cacheKey) {
+		sourceID := codexGuardianClassifierSourceThreadID(headerMetadata, bodyMetadata, cacheKey)
+		if sourceID == "" || unambiguousOpenAICodexSubagent(
+			c.GetHeader(openAISubagentHeader),
+			payload.Get("client_metadata.x-openai-subagent").String(),
+			codexSubagentKindFromMetadata(headerMetadata),
+			codexSubagentKindFromMetadata(bodyMetadata),
+		) != "guardian" {
+			return ctx
+		}
+		return withOpenAIGuardianSourceAffinity(ctx, sourceID)
+	}
+	if !strings.EqualFold(strings.TrimSpace(requestedModel), codexAutoReviewModel) {
+		return ctx
+	}
 	if !hasUnambiguousOpenAICodexReviewSubagent(
 		c.GetHeader(openAISubagentHeader),
 		codexSubagentKindFromMetadata(headerMetadata),
@@ -58,7 +76,11 @@ func WithOpenAIGuardianParentAffinity(ctx context.Context, c *gin.Context, body 
 		return ctx
 	}
 
-	currentHash, legacyHash := deriveOpenAISessionHashes(parentID)
+	return withOpenAIGuardianSourceAffinity(ctx, parentID)
+}
+
+func withOpenAIGuardianSourceAffinity(ctx context.Context, sourceID string) context.Context {
+	currentHash, legacyHash := deriveOpenAISessionHashes(sourceID)
 	if currentHash == "" {
 		return ctx
 	}
@@ -66,6 +88,66 @@ func WithOpenAIGuardianParentAffinity(ctx context.Context, c *gin.Context, body 
 		currentSessionHash: currentHash,
 		legacySessionHash:  legacyHash,
 	})
+}
+
+func codexHasGuardianClassifierLineage(headerMetadata, bodyMetadata, cacheKey string) bool {
+	if strings.HasPrefix(cacheKey, "guardian-v2:") {
+		return true
+	}
+	for _, raw := range []string{headerMetadata, bodyMetadata} {
+		if gjson.Get(raw, "guardian_classifier_source_thread_id").Exists() ||
+			gjson.Get(raw, "thread_source").String() == "guardian_classifier" {
+			return true
+		}
+	}
+	return false
+}
+
+// Classifier models are configurable. Their explicit source lineage, rather
+// than a model name or cache key alone, identifies the account routing hint.
+func codexGuardianClassifierSourceThreadID(headerMetadata, bodyMetadata, cacheKey string) string {
+	sourceID := ""
+	classifierSource := false
+	for _, raw := range []string{headerMetadata, bodyMetadata} {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		if !gjson.Valid(raw) || !gjson.Parse(raw).IsObject() {
+			return ""
+		}
+		if source := gjson.Get(raw, "thread_source"); source.Exists() {
+			if source.Type != gjson.String || source.String() != "guardian_classifier" {
+				return ""
+			}
+			classifierSource = true
+		}
+		if source := gjson.Get(raw, "guardian_classifier_source_thread_id"); source.Exists() {
+			candidate := codexGuardianClassifierUUID(source.String())
+			if source.Type != gjson.String || candidate == "" || (sourceID != "" && sourceID != candidate) {
+				return ""
+			}
+			sourceID = candidate
+		}
+	}
+	if !classifierSource || sourceID == "" {
+		return ""
+	}
+	if cacheKey != "" {
+		seed, ok := strings.CutPrefix(cacheKey, "guardian-v2:")
+		if !ok || codexGuardianClassifierUUID(seed) != sourceID {
+			return ""
+		}
+	}
+	return sourceID
+}
+
+func codexGuardianClassifierUUID(raw string) string {
+	raw = strings.TrimSpace(raw)
+	id, err := uuid.Parse(raw)
+	if err != nil || id == uuid.Nil || !strings.EqualFold(raw, id.String()) {
+		return ""
+	}
+	return id.String()
 }
 
 func codexParentThreadIDFromMetadata(raw string) string {
@@ -85,6 +167,11 @@ func codexSubagentKindFromMetadata(raw string) string {
 }
 
 func hasUnambiguousOpenAICodexReviewSubagent(candidates ...string) bool {
+	subagent := unambiguousOpenAICodexSubagent(candidates...)
+	return subagent == "guardian" || subagent == "review"
+}
+
+func unambiguousOpenAICodexSubagent(candidates ...string) string {
 	subagent := ""
 	for _, candidate := range candidates {
 		candidate = strings.ToLower(strings.TrimSpace(candidate))
@@ -92,11 +179,11 @@ func hasUnambiguousOpenAICodexReviewSubagent(candidates ...string) bool {
 			continue
 		}
 		if subagent != "" && subagent != candidate {
-			return false
+			return ""
 		}
 		subagent = candidate
 	}
-	return subagent == "guardian" || subagent == "review"
+	return subagent
 }
 
 func openAIGuardianParentAffinityFromContext(ctx context.Context) (openAIGuardianParentAffinity, bool) {

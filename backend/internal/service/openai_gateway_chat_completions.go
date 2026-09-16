@@ -407,6 +407,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
+	upstreamReq = markOpenAIGuardianSourceHTTPRequest(upstreamReq, c, account)
 	upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, c.Request.Context())
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	if err != nil {

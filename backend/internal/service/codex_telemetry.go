@@ -46,10 +46,13 @@ type CodexTelemetryInput struct {
 	TurnTrigger        string
 	AgentName          string
 	SubagentKind       string
+	OpenAISubagent     string
 	Sandbox            string
 	SandboxMode        string
 	ApprovalPolicy     string
+	ApprovalsReviewer  string
 	AutoReviewEnabled  *bool
+	GuardianV2Enabled  *bool
 	Model              string
 	Effort             string
 	ServiceTier        string
@@ -267,6 +270,10 @@ func (s *CodexTelemetryService) Begin(ctx context.Context, input CodexTelemetryI
 		v := *input.AutoReviewEnabled
 		input.AutoReviewEnabled = &v
 	}
+	if input.GuardianV2Enabled != nil {
+		v := *input.GuardianV2Enabled
+		input.GuardianV2Enabled = &v
+	}
 	if input.StartedAt.IsZero() {
 		input.StartedAt = time.Now()
 	}
@@ -297,9 +304,11 @@ func (s *CodexTelemetryService) Begin(ctx context.Context, input CodexTelemetryI
 	}
 	turn := s.turns[key]
 	if turn == nil {
-		profile.dynamicTool = s.randIntN(5) < 2
-		profile.command = profile.dynamicTool && s.randIntN(2) == 0
-		profile.fileChange = s.randIntN(5) == 0
+		if codexSimulatesClientBehavior(profile) {
+			profile.dynamicTool = s.randIntN(5) < 2
+			profile.command = profile.dynamicTool && s.randIntN(2) == 0
+			profile.fileChange = s.randIntN(5) == 0
+		}
 		if input.SessionID != "" && input.ThreadID != "" {
 			threadKey := strconv.FormatInt(input.AccountID, 10) + ":" + input.ThreadID
 			_, seen := s.threads[threadKey]

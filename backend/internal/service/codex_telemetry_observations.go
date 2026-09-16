@@ -108,7 +108,7 @@ func (s *CodexTelemetryService) newObservationLocked(profile codexTelemetryProfi
 	now := time.Now()
 	entry := &CodexTelemetryObservation{
 		ID: s.nextID, CreatedAt: now, UpdatedAt: now, AccountID: profile.client.localID, AccountName: profile.client.name,
-		Type: kind, Status: "queued", EventNames: append([]string{}, names...), ContainsSimulated: true,
+		Type: kind, Status: "queued", EventNames: append([]string{}, names...), ContainsSimulated: codexSimulatesClientBehavior(profile),
 		AttemptID: attemptID, TurnCount: turns, Model: profile.model,
 		UserAgent: profile.client.userAgent, Originator: profile.client.originator, Version: profile.client.version,
 	}

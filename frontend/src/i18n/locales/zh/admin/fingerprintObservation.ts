@@ -95,6 +95,8 @@ export default {
     request: {
       details: '时区与地域明细',
       codexMetadata: 'Codex 出站元数据', disabled: '未启用', dailyRoot: '每日固定根', dailyRootSession: '固定根会话', window: 'Window', windowNumber: 'Window 序号', contextWindow: '上下文 Window', turn: 'Turn', parentTurn: '父 Turn', rootTurn: '根 Turn', parentThread: '父线程', forkedFrom: '分叉来源', agent: 'Agent', subagent: 'Subagent', threadSource: '线程来源', turnTrigger: 'Turn 触发', sandbox: 'Sandbox / 模式', review: '自动审核', workspaces: '工作区',
+      nodeReplAutoReviewRequired: 'Node REPL 需要自动审核',
+      nodeReplDisabled: 'Node REPL 已禁用',
       event: '事件类型',
       target: '配置目标时区',
       residency: '出站 residency',

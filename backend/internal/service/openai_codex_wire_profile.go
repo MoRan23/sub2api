@@ -243,10 +243,13 @@ type CodexWireProfile struct {
 	Compaction      json.RawMessage
 	CompactionMode  CodexCompactionMode
 
-	TurnID              CodexTurnID
-	TurnStartedAtUnixMS int64
-	TurnStartedAtSet    bool
-	TurnLineage         CodexTurnLineage
+	TurnID                           CodexTurnID
+	TurnStartedAtUnixMS              int64
+	TurnStartedAtSet                 bool
+	TurnLineage                      CodexTurnLineage
+	GuardianClassifierSourceThreadID string
+	guardianSourcePresent            bool
+	guardianSourceInvalid            bool
 
 	AgentName                  string
 	ThreadSource               string
@@ -372,6 +375,7 @@ var codexWireReservedMetadataKeys = map[string]struct{}{
 	"parent_thread_id": {}, "parent_turn_id": {}, "root_turn_id": {},
 	"subagent_kind": {}, "thread_source": {}, "turn_trigger": {}, "sandbox": {}, "sandbox_mode": {}, "auto_review_enabled": {},
 	"node_repl_auto_review_required": {}, "node_repl_disabled": {}, "workspaces": {},
+	"guardian_classifier_source_thread_id": {},
 }
 
 func validCodexExtraMetadata(key, value string) bool {
@@ -556,6 +560,7 @@ func ParseCodexWireProfile(raw string) CodexWireProfile {
 	profile.TurnLineage.ForkedFromThreadID = codexWireString(metadata["forked_from_thread_id"])
 	profile.TurnLineage.ForkedFromOrdinalExclusive = codexWireUint64(metadata["forked_from_ordinal_exclusive"])
 	profile.TurnLineage.ParentThreadID = codexWireString(metadata["parent_thread_id"])
+	profile.captureGuardianClassifierSource(metadata)
 	if value, present, malformed := readCodexTurnIDCandidate(metadata, "turn_id"); present {
 		profile.turnIDPresent, profile.turnIDMalformed = true, malformed
 		profile.turnIDCandidates = appendCodexTurnIDCandidate(profile.turnIDCandidates, value)
@@ -653,6 +658,7 @@ func mergeCodexWireProfileMissing(target *CodexWireProfile, source CodexWireProf
 	if target == nil {
 		return
 	}
+	target.mergeGuardianClassifierSource(source)
 	if !target.RequestKind.valid() && source.RequestKind.valid() {
 		target.RequestKind = source.RequestKind
 	}
@@ -800,6 +806,7 @@ func codexWireFlatCompactionMatches(metadata map[string]json.RawMessage, canonic
 
 func parseCodexWireFlatMetadata(metadata map[string]json.RawMessage) CodexWireProfile {
 	profile := newCodexWireProfile()
+	profile.captureGuardianClassifierSource(metadata)
 	if metadata == nil {
 		return profile
 	}
@@ -998,6 +1005,7 @@ func (profile CodexWireProfile) nestedObject(includeToolNamespaces bool) map[str
 		metadata["forked_from_ordinal_exclusive"] = *profile.TurnLineage.ForkedFromOrdinalExclusive
 	}
 	putNonEmptyString(metadata, "parent_thread_id", profile.TurnLineage.ParentThreadID)
+	putNonEmptyString(metadata, "guardian_classifier_source_thread_id", profile.GuardianClassifierSourceThreadID)
 	if profile.TurnLineage.ParentTurnID.ValidFor(profile.RequestKind) {
 		metadata["parent_turn_id"] = profile.TurnLineage.ParentTurnID.Value
 	}
@@ -1074,6 +1082,7 @@ func (profile CodexWireProfile) MarshalNestedJSON(includeToolNamespaces bool) (s
 		"forked_from_thread_id",
 		"forked_from_ordinal_exclusive",
 		"parent_thread_id",
+		"guardian_classifier_source_thread_id",
 		"parent_turn_id",
 		"root_turn_id",
 		"subagent_kind",
@@ -1305,6 +1314,7 @@ func FinalizeOpenAICodexWirePlanWithOptions(plan OpenAIOAuthIdentityPlan, option
 		if kind != CodexWireRequestMemory {
 			profile.TurnLineage.ParentThreadID = plan.TurnIdentity.ParentThreadID
 			profile.TurnLineage.ForkedFromThreadID = plan.TurnIdentity.ForkedFromThreadID
+			profile.GuardianClassifierSourceThreadID = plan.TurnIdentity.GuardianClassifierSourceThreadID
 		}
 	}
 	profile.WindowID = ""
@@ -1386,6 +1396,7 @@ func clearOpenAICodexMemoryTurnIdentity(plan *OpenAIOAuthIdentityPlan, profile *
 	profile.AgentName = ""
 	profile.TurnID = CodexTurnID{}
 	profile.TurnLineage = CodexTurnLineage{}
+	profile.GuardianClassifierSourceThreadID = ""
 	profile.TurnStartedAtUnixMS = 0
 	profile.TurnStartedAtSet = false
 	profile.Compaction = nil
