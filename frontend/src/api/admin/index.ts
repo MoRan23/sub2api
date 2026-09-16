@@ -36,6 +36,7 @@ import riskControlAPI from './riskControl'
 import adminComplianceAPI from './compliance'
 import auditAPI from './audit'
 import fingerprintObservationsAPI from './fingerprintObservations'
+import codexTelemetryAPI from './codexTelemetry'
 import pluginsAPI from './plugins'
 import groupApplicationsAPI from './groupApplications'
 
@@ -76,6 +77,7 @@ export const adminAPI = {
   compliance: adminComplianceAPI,
   audit: auditAPI,
   fingerprintObservations: fingerprintObservationsAPI,
+  codexTelemetry: codexTelemetryAPI,
   plugins: pluginsAPI,
   groupApplications: groupApplicationsAPI
 }

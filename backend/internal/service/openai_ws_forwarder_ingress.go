@@ -1054,7 +1054,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	var rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState
+	var telemetry *codexTelemetryWSTurn
+	defer func() { telemetry.finish(false) }()
 	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string) (*OpenAIForwardResult, error) {
+		telemetry = nil
 		responseModelObserver := &upstreamResponseModelObserver{}
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
@@ -1115,7 +1118,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		timezoneState, _ := RequestTimezoneStateFromContext(c)
 		s.recordFingerprintObservationWSFrame(c, account, timezoneState, payload, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &pinnedIdentityPlan))
+		telemetry = s.beginCodexTelemetryWS(ctx, account, lease.FingerprintObservationHeaders(), baseAcquireReq.Headers, payload)
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
+			telemetry.writeFailed()
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
 				fmt.Errorf("write upstream websocket request: %w", err),
@@ -1177,6 +1182,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 
 			eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
+			telemetry.observe(upstreamMessage, eventType)
 			responseModelObserver.ObserveOpenAI(upstreamMessage, eventType)
 			if responseID == "" && eventResponseID != "" {
 				responseID = eventResponseID
@@ -1431,6 +1437,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					result.ImageOutputSizes = imageCounter.Sizes()
 					result.BillingModel = imageBillingModel
 				}
+				telemetry.finish(false)
 				return result, nil
 			}
 		}
@@ -1955,17 +1962,22 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			var rejectedFieldErr *openAIWSRejectedFieldRetryError
 			if errors.As(relayErr, &rejectedFieldErr) && rejectedFieldErr != nil && len(rejectedFieldErr.body) > 0 {
+				telemetry.finish(true)
 				currentPayload = append([]byte(nil), rejectedFieldErr.body...)
 				currentPayloadBytes = len(currentPayload)
 				skipBeforeTurn = true
 				continue
 			}
 			if recoverIngressPrevResponseNotFound(relayErr, turn, connID) {
+				telemetry.finish(true)
 				continue
 			}
 			if retryIngressTurn(relayErr, turn, connID) {
+				telemetry.finish(true)
 				continue
 			}
+			var failover *UpstreamFailoverError
+			telemetry.finish(errors.As(relayErr, &failover))
 			finalErr := relayErr
 			if unwrapped := errors.Unwrap(relayErr); unwrapped != nil {
 				finalErr = unwrapped

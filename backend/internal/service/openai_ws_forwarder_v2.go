@@ -34,7 +34,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	attempt int,
 	lastFailureReason string,
 	agentTaskRecoveryTried *bool,
-) (*OpenAIForwardResult, error) {
+) (_ *OpenAIForwardResult, returnErr error) {
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
@@ -408,7 +408,14 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		observationBody = raw
 	}
 	s.recordFingerprintObservationWSFrame(c, account, timezoneState, observationBody, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &outboundIdentityPlan))
+	telemetry := s.beginCodexTelemetryWS(ctx, account, lease.FingerprintObservationHeaders(), wsHeaders, observationBody)
+	defer func() {
+		var fallback *openAIWSFallbackError
+		var failover *UpstreamFailoverError
+		telemetry.finish(errors.As(returnErr, &fallback) || errors.As(returnErr, &failover))
+	}()
 	if err := lease.WriteJSONWithContextTimeout(ctx, wirePayload, s.openAIWSWriteTimeout()); err != nil {
+		telemetry.writeFailed()
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
 			"write_request_fail account_id=%d conn_id=%s cause=%s payload_bytes=%d",
@@ -727,6 +734,8 @@ readLoop:
 		if eventType == "" {
 			continue
 		}
+		// Capture the unmodified upstream result before client model/tool rewrites.
+		telemetry.observe(message, eventType)
 		responseModelObserver.ObserveOpenAI(message, eventType)
 		eventCount++
 		if firstEventType == "" {

@@ -90,8 +90,9 @@ func (c *openAIWSPolicyEnforcingFrameConn) Close() error {
 // boundary. Its finalizer runs after every policy/model/retry mutation and
 // immediately before the physical frame write.
 type openAIWSFinalizingUpstreamFrameConn struct {
-	inner    openaiwsv2.FrameConn
-	finalize func(msgType coderws.MessageType, payload []byte) ([]byte, error)
+	inner      openaiwsv2.FrameConn
+	finalize   func(msgType coderws.MessageType, payload []byte) ([]byte, error)
+	afterWrite func(msgType coderws.MessageType, payload []byte, err error)
 }
 
 var _ openaiwsv2.FrameConn = (*openAIWSFinalizingUpstreamFrameConn)(nil)
@@ -114,7 +115,11 @@ func (c *openAIWSFinalizingUpstreamFrameConn) WriteFrame(ctx context.Context, ms
 		}
 		payload = finalized
 	}
-	return c.inner.WriteFrame(ctx, msgType, payload)
+	err := c.inner.WriteFrame(ctx, msgType, payload)
+	if c.afterWrite != nil {
+		c.afterWrite(msgType, payload, err)
+	}
+	return err
 }
 
 func (c *openAIWSFinalizingUpstreamFrameConn) Close() error {
@@ -1059,6 +1064,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 		},
 	}
+	var telemetryMu sync.Mutex
+	var telemetry *codexTelemetryWSTurn
+	currentTelemetry := func() *codexTelemetryWSTurn {
+		telemetryMu.Lock()
+		defer telemetryMu.Unlock()
+		return telemetry
+	}
+	telemetryMayRetry := true // The initial physical write can be retried by the caller.
+	defer func() { currentTelemetry().finish(telemetryMayRetry) }()
 	physicalUpstreamFrameConn := &openAIWSFinalizingUpstreamFrameConn{
 		inner: relayUpstreamFrameConn,
 		finalize: func(msgType coderws.MessageType, payload []byte) ([]byte, error) {
@@ -1086,7 +1100,21 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				payload = stamped
 			}
 			s.recordFingerprintObservationWSFrame(c, account, currentTimezoneState, payload, physicalObservationHeaders, openAIWSObservationFramePlan(account, &framePlan))
+			currentTelemetry().finish(false)
+			nextTelemetry := s.beginCodexTelemetryWS(ctx, account, physicalObservationHeaders, headers, payload)
+			telemetryMu.Lock()
+			telemetry = nextTelemetry
+			telemetryMu.Unlock()
 			return payload, nil
+		},
+		afterWrite: func(_ coderws.MessageType, payload []byte, err error) {
+			eventType := gjson.GetBytes(payload, "type").String()
+			if err != nil && eventType == "response.create" {
+				currentTelemetry().writeFailed()
+			}
+			if err == nil && eventType == "response.cancel" {
+				currentTelemetry().requestCancel()
+			}
 		},
 	}
 
@@ -1340,6 +1368,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		)
 	}
 	upstreamFirstMessageSent = true
+	telemetryMayRetry = false
 
 	readNextClientFrame := func(readCtx context.Context, conn openaiwsv2.FrameConn) (coderws.MessageType, []byte, error) {
 		for {
@@ -1392,6 +1421,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				)
 			},
 			OnTurnComplete: func(turn openaiwsv2.RelayTurnResult) {
+				currentTelemetry().finish(false)
 				turnNo := int(completedTurns.Add(1))
 				if hooks != nil && hooks.TurnStarted != nil && !turn.StartedAt.IsZero() {
 					hooks.TurnStarted(turnNo, turn.StartedAt)
@@ -1494,6 +1524,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				_ = clientConn.CloseNow()
 			},
 			BeforeWriteClient: func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error {
+				if msgType == coderws.MessageText || msgType == coderws.MessageBinary {
+					eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
+					currentTelemetry().observe(payload, eventType)
+				}
 				if msgType != coderws.MessageText {
 					return nil
 				}
@@ -1676,6 +1710,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		relayErr,
 		relayExit.WroteDownstream,
 	)
+	var telemetryFailover *UpstreamFailoverError
+	telemetryMayRetry = turnCount == 0 && !relayExit.WroteDownstream &&
+		(errors.As(relayErr, &telemetryFailover) || isOpenAIWSIngressTurnRetryable(turnErr))
 	if hooks != nil && hooks.AfterTurn != nil {
 		if hooks.TurnStarted != nil {
 			hooks.TurnStarted(turnCount+1, time.Now().Add(-result.Duration))

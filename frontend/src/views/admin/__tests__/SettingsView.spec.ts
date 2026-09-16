@@ -1378,6 +1378,87 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
+  it("defaults Codex telemetry to enabled independently of fingerprint and daily-root switches", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      enable_openai_codex_fingerprint_normalization: false,
+      enable_openai_oauth_daily_session_rotation: false,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    const toggle = wrapper.get('[data-testid="codex-telemetry-toggle"]');
+    expect((toggle.element as HTMLInputElement).checked).toBe(true);
+    expect((toggle.element as HTMLInputElement).disabled).toBe(false);
+    expect(wrapper.get('[data-testid="codex-telemetry-effective"]').text()).toContain("admin.settings.codexTelemetry.unknown");
+    expect(wrapper.get('[data-testid="codex-fingerprint-normalization-settings"]').find('[data-testid="codex-telemetry-toggle"]').exists()).toBe(false);
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      codex_telemetry_enabled: true,
+      enable_openai_codex_fingerprint_normalization: false,
+      enable_openai_oauth_daily_session_rotation: false,
+    }));
+  });
+
+  it("shows the effective telemetry state and environment override without submitting read-only fields", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      codex_telemetry_enabled: true,
+      codex_telemetry_effective_enabled: false,
+      codex_telemetry_forced_off_reason: "CODEX_TELEMETRY_ENABLED=false",
+    });
+    // A partial save response must retain runtime state instead of restoring defaults.
+    updateSettings.mockResolvedValueOnce({ ...baseSettingsResponse });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    expect(wrapper.get('[data-testid="codex-telemetry-configured"]').text()).toContain("admin.settings.codexTelemetry.enabled");
+    expect(wrapper.get('[data-testid="codex-telemetry-effective"]').text()).toContain("admin.settings.codexTelemetry.disabled");
+    expect(wrapper.find('[data-testid="codex-telemetry-forced-off"]').exists()).toBe(true);
+
+    await wrapper.get('[data-testid="codex-telemetry-toggle"]').setValue(false);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    const payload = updateSettings.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.codex_telemetry_enabled).toBe(false);
+    expect(payload).not.toHaveProperty("codex_telemetry_effective_enabled");
+    expect(payload).not.toHaveProperty("codex_telemetry_forced_off_reason");
+    expect((wrapper.get('[data-testid="codex-telemetry-toggle"]').element as HTMLInputElement).checked).toBe(false);
+    expect(wrapper.get('[data-testid="codex-telemetry-effective"]').text()).toContain("admin.settings.codexTelemetry.disabled");
+    expect(wrapper.find('[data-testid="codex-telemetry-forced-off"]').exists()).toBe(true);
+  });
+
+  it("loads disabled Codex telemetry and updates its effective state after saving", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      codex_telemetry_enabled: false,
+      codex_telemetry_effective_enabled: false,
+      codex_telemetry_forced_off_reason: "",
+    });
+    updateSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      codex_telemetry_enabled: true,
+      codex_telemetry_effective_enabled: true,
+      codex_telemetry_forced_off_reason: "",
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const toggle = wrapper.get('[data-testid="codex-telemetry-toggle"]');
+    expect((toggle.element as HTMLInputElement).checked).toBe(false);
+
+    await toggle.setValue(true);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ codex_telemetry_enabled: true }));
+    expect(wrapper.get('[data-testid="codex-telemetry-effective"]').text()).toContain("admin.settings.codexTelemetry.enabled");
+    expect(wrapper.find('[data-testid="codex-telemetry-forced-off"]').exists()).toBe(false);
+  });
+
   it("builds the Codex UA placeholder from the manual version and falls back live to the synced version", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,

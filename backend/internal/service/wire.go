@@ -294,6 +294,7 @@ func ProvideOpenAIGatewayService(
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
 	syncSessionRepo OAuthSyncSessionRepository,
 	dailySessionRepo OAuthDailySessionRepository,
+	codexTelemetry *CodexTelemetryService,
 ) *OpenAIGatewayService {
 	svc := NewOpenAIGatewayService(
 		accountRepo, usageLogRepo, usageBillingRepo, userRepo, userSubRepo, userGroupRateRepo,
@@ -303,6 +304,13 @@ func ProvideOpenAIGatewayService(
 	)
 	svc.SetOAuthSyncSessionRepository(syncSessionRepo)
 	svc.SetOAuthDailySessionRepository(dailySessionRepo)
+	svc.SetCodexTelemetryService(codexTelemetry)
+	return svc
+}
+
+func ProvideCodexTelemetryService(httpUpstream HTTPUpstream, settings *SettingService) *CodexTelemetryService {
+	svc := NewCodexTelemetryService(httpUpstream)
+	settings.SetCodexTelemetryService(svc)
 	return svc
 }
 
@@ -919,6 +927,7 @@ var ProviderSet = wire.NewSet(
 	NewAdminService,
 	NewGatewayService,
 	ProvideOpenAIGatewayService,
+	ProvideCodexTelemetryService,
 	ProvideOpenAIOutboundSessionV1CleanupWorker,
 	ProvideImageStorageSettingService,
 	ProvideImageTaskService,

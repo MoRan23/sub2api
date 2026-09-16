@@ -9,7 +9,7 @@
                 <h2 class="text-base font-semibold text-gray-900 dark:text-white">
                   {{ t('admin.fingerprintObservation.title') }}
                 </h2>
-                <span :class="statusBadgeClass">
+                <span v-if="activeView !== 'telemetry'" :class="statusBadgeClass">
                   <span class="h-1.5 w-1.5 rounded-full" :class="statusDotClass"></span>
                   {{
                     observationEnabled
@@ -17,17 +17,17 @@
                       : t('admin.fingerprintObservation.statusOff')
                   }}
                 </span>
-                <span class="rounded-full px-2.5 py-0.5 text-xs font-semibold" :class="dailyFixedRootEnabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-400'">
+                <span v-if="activeView !== 'telemetry'" class="rounded-full px-2.5 py-0.5 text-xs font-semibold" :class="dailyFixedRootEnabled ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-400'">
                   {{ dailyFixedRootLabel || t('admin.fingerprintObservation.dailyFixedRootOff') }}
                 </span>
               </div>
               <p class="mt-1 max-w-3xl text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.fingerprintObservation.subtitle') }}
+                {{ t(activeView === 'telemetry' ? 'admin.fingerprintObservation.telemetry.subtitle' : 'admin.fingerprintObservation.subtitle') }}
               </p>
             </div>
 
             <div class="flex flex-wrap items-center gap-3">
-              <div class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+              <div v-if="activeView !== 'telemetry'" class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
                 <span>{{ t('admin.fingerprintObservation.toggleLabel') }}</span>
                 <Toggle
                   :model-value="observationEnabled"
@@ -45,7 +45,7 @@
                 :title="t('common.refresh')"
                 @click="manualRefresh"
               >
-                <Icon name="refresh" size="md" :class="rootRequestPending ? 'animate-spin' : ''" />
+                <Icon name="refresh" size="md" :class="activeRequestPending ? 'animate-spin' : ''" />
               </button>
 
               <AutoRefreshButton
@@ -61,7 +61,7 @@
           </div>
 
           <div
-            v-if="!observationEnabled"
+            v-if="!observationEnabled && activeView !== 'telemetry'"
             class="mt-4 flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
           >
             <Icon name="infoCircle" size="sm" class="mt-0.5 shrink-0" />
@@ -494,7 +494,7 @@
           </div>
         </div>
         <CodexContextManagementObservations
-          v-else
+          v-else-if="activeView === 'context'"
           :key="contextManagementVersion"
           id="fingerprint-panel-context"
           role="tabpanel"
@@ -506,6 +506,14 @@
           :error="contextManagementError"
           @retry="loadContextManagement(contextManagement?.page ?? 1)"
           @details-changed="contextDetailsExpanded = $event"
+        />
+        <CodexTelemetryObservations
+          v-else
+          id="fingerprint-panel-telemetry"
+          ref="telemetryPanel"
+          role="tabpanel"
+          aria-labelledby="fingerprint-tab-telemetry"
+          @state-changed="telemetryState = $event"
         />
       </template>
 
@@ -560,6 +568,7 @@ import Icon from '@/components/icons/Icon.vue'
 import LazyStateFooter from './components/FingerprintObservationLazyFooter.vue'
 import CodexContextManagementObservations from './components/CodexContextManagementObservations.vue'
 import FingerprintObservationRequestDetails from './components/FingerprintObservationRequestDetails.vue'
+import CodexTelemetryObservations from './components/CodexTelemetryObservations.vue'
 
 interface LazyCollection<T> {
   items: T[]
@@ -588,8 +597,12 @@ const dailyFixedRootLabel = ref('')
 const observationViews = [
   { key: 'identity', label: 'admin.fingerprintObservation.identityTab' },
   { key: 'context', label: 'admin.fingerprintObservation.contextManagement.title' },
+  { key: 'telemetry', label: 'admin.fingerprintObservation.telemetry.title' },
 ] as const
-const activeView = ref<'identity' | 'context'>('identity')
+type ObservationView = (typeof observationViews)[number]['key']
+const activeView = ref<ObservationView>('identity')
+const telemetryPanel = ref<InstanceType<typeof CodexTelemetryObservations> | null>(null)
+const telemetryState = ref({ loading: false, paused: false })
 const contextManagement = ref<CodexContextManagementResponse | null>(null)
 const contextManagementVersion = ref(0)
 const contextManagementLoading = ref(false)
@@ -643,9 +656,17 @@ const childRequestPending = computed(() =>
   )
 )
 
-const activeViewPaused = computed(() => activeView.value === 'identity'
-  ? page.value !== 1 || hasExpandedNodes.value
-  : (contextManagement.value?.page ?? 1) !== 1 || contextDetailsExpanded.value)
+const activeViewPaused = computed(() => {
+  if (activeView.value === 'telemetry') return telemetryState.value.paused
+  if (activeView.value === 'identity') return page.value !== 1 || hasExpandedNodes.value
+  return (contextManagement.value?.page ?? 1) !== 1 || contextDetailsExpanded.value
+})
+const activeRequestPending = computed(() => {
+  if (activeView.value === 'telemetry') return telemetryState.value.loading
+  if (activeView.value === 'context') return contextManagementLoading.value
+  return rootRequestPending.value || childRequestPending.value
+})
+const activeCaptureDisabled = computed(() => activeView.value !== 'telemetry' && !observationEnabled.value)
 
 const autoRefresh = useAutoRefresh({
   storageKey: 'admin-fingerprint-observation-auto-refresh',
@@ -654,22 +675,18 @@ const autoRefresh = useAutoRefresh({
   onRefresh: pollFirstPage,
   shouldPause: () =>
     (typeof document !== 'undefined' && document.hidden) ||
-    !observationEnabled.value ||
+    activeCaptureDisabled.value ||
     activeViewPaused.value ||
-    rootRequestPending.value ||
-    contextManagementLoading.value ||
-    childRequestPending.value ||
+    activeRequestPending.value ||
     toggling.value,
 })
 
 const autoRefreshPaused = computed(
   () =>
     autoRefresh.enabled.value &&
-    (!observationEnabled.value ||
+    (activeCaptureDisabled.value ||
       activeViewPaused.value ||
-      rootRequestPending.value ||
-      contextManagementLoading.value ||
-      childRequestPending.value ||
+      activeRequestPending.value ||
       toggling.value)
 )
 
@@ -973,7 +990,6 @@ async function loadUsers(options: {
     pageSize.value = response.page_size
     pages.value = response.pages
     snapshotToken.value = response.snapshot_token
-    if (!options.requestedSnapshotToken) await loadContextManagement(1)
   } catch (error: unknown) {
     if (
       disposed ||
@@ -1000,25 +1016,32 @@ async function loadUsers(options: {
 
 function manualRefresh(): Promise<void> {
   if (toggling.value) return Promise.resolve()
+  if (activeView.value === 'telemetry') return telemetryPanel.value?.refresh() ?? Promise.resolve()
+  if (activeView.value === 'context') return loadContextManagement(1)
   return loadUsers({ targetPage: 1, targetPageSize: pageSize.value })
 }
 
-function selectObservationView(view: 'identity' | 'context'): void {
+function selectObservationView(view: ObservationView): void {
   if (activeView.value === view) return
+  invalidateAllRequests()
   activeView.value = view
   contextDetailsExpanded.value = false
+  telemetryState.value = { loading: false, paused: false }
+  if (view === 'context') void loadContextManagement(contextManagement.value?.page ?? 1)
+  if (view === 'identity' && !snapshotToken.value) void loadUsers({ targetPage: 1, targetPageSize: pageSize.value })
+  autoRefresh.resetCountdown()
 }
 
 function pollFirstPage(): Promise<void> {
   if (
     activeViewPaused.value ||
-    rootRequestPending.value ||
-    contextManagementLoading.value ||
-    childRequestPending.value ||
+    activeRequestPending.value ||
     toggling.value
   ) {
     return Promise.resolve()
   }
+  if (activeView.value === 'telemetry') return telemetryPanel.value?.refresh() ?? Promise.resolve()
+  if (activeView.value === 'context') return loadContextManagement(1)
   return loadUsers({ targetPage: 1, targetPageSize: pageSize.value, silent: true })
 }
 
@@ -1093,6 +1116,7 @@ async function setObservationEnabled(value: boolean): Promise<void> {
     observationEnabled.value = enabled
     if (enabled) {
       await loadUsers({ targetPage: 1, targetPageSize: pageSize.value })
+      if (activeView.value === 'context') await loadContextManagement(1)
     } else {
       invalidateAllRequests()
       clearVisibleData()

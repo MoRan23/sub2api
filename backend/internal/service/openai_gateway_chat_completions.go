@@ -407,6 +407,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
+	upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, c.Request.Context())
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
@@ -446,12 +447,14 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	// 9. Handle normal response
 	var result *OpenAIForwardResult
 	var handleErr error
+	beginCodexTelemetryHTTPParsing(resp)
 	if clientStream {
 		result, handleErr = s.handleChatStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime, len(body))
 	} else {
 		result, handleErr = s.handleChatBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
 	}
 	stampOpenAIResponsesUpstreamEndpoint(c, result)
+	completeCodexTelemetryHTTPResponse(resp, handleErr)
 
 	// cyber_policy：标记已设、error 已按 Chat Completions 格式发给客户端。丢弃 result、
 	// 返回哨兵，使 handler 落入 tokens=0 免费用量行（对齐 /v1/responses），不计费、不 failover。
@@ -776,6 +779,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	}
 
 	processDataLine := func(payload string) bool {
+		observeCodexTelemetryHTTPPayload(resp, []byte(payload), "")
 		payload = string(restoreCodexToolNamesFromContext(c, []byte(payload)))
 		if firstChunk {
 			firstChunk = false

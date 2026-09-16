@@ -119,6 +119,7 @@ type WebSearchManagerBuilder func(cfg *WebSearchEmulationConfig, proxyURLs map[i
 type SettingService struct {
 	settingRepo                 SettingRepository
 	settingsUpdateMu            sync.Mutex
+	codexTelemetry              *CodexTelemetryService // protected by settingsUpdateMu
 	defaultSubGroupReader       DefaultSubscriptionGroupReader
 	proxyRepo                   ProxyRepository // for resolving websearch provider proxy URLs
 	cfg                         *config.Config

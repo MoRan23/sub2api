@@ -131,6 +131,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		paymentCfg = &service.PaymentConfig{}
 	}
 	passkeyConfigured, passkeyRPID, passkeyRPOrigins := h.settingService.PasskeyConfiguration()
+	telemetryEffectiveEnabled, telemetryForcedOffReason := service.CodexTelemetryEffectiveState(settings.CodexTelemetryEnabled)
 
 	payload := dto.SystemSettings{
 		RegistrationEnabled:                                    settings.RegistrationEnabled,
@@ -151,6 +152,9 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		StepUpEnabled:                                          settings.StepUpEnabled,
 		EnableOpenAIUUIDv7SessionIdentity:                      settings.EnableOpenAIUUIDv7SessionIdentity,
 		EnableOpenAIOAuthDailySessionRotation:                  settings.EnableOpenAIOAuthDailySessionRotation,
+		CodexTelemetryEnabled:                                  settings.CodexTelemetryEnabled,
+		CodexTelemetryEffectiveEnabled:                         telemetryEffectiveEnabled,
+		CodexTelemetryForcedOffReason:                          telemetryForcedOffReason,
 		EnableOpenAICodexFingerprintNormalization:              settings.EnableOpenAICodexFingerprintNormalization,
 		EnableOpenAICodexInstallationIDNormalization:           settings.EnableOpenAICodexInstallationIDNormalization,
 		EnableOpenAICodexClientIdentityNormalization:           settings.EnableOpenAICodexClientIdentityNormalization,

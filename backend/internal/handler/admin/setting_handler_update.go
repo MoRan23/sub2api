@@ -40,6 +40,7 @@ type UpdateSettingsRequest struct {
 	StepUpEnabled                                *bool                        `json:"step_up_enabled"`                       // 敏感操作 step-up 2FA（省略=保持现值）
 	EnableOpenAIUUIDv7SessionIdentity            *bool                        `json:"enable_openai_uuidv7_session_identity"` // OpenAI UUIDv7 session/thread 标识对（省略=保持现值）
 	EnableOpenAIOAuthDailySessionRotation        *bool                        `json:"enable_openai_oauth_daily_session_rotation"`
+	CodexTelemetryEnabled                        *bool                        `json:"codex_telemetry_enabled"`
 	EnableOpenAICodexFingerprintNormalization    *bool                        `json:"enable_openai_codex_fingerprint_normalization"`
 	EnableOpenAICodexInstallationIDNormalization *bool                        `json:"enable_openai_codex_installation_id_normalization"`
 	EnableOpenAICodexClientIdentityNormalization *bool                        `json:"enable_openai_codex_client_identity_normalization"`
@@ -466,6 +467,7 @@ var independentlyOmittedPointerSettingKeys = map[string]string{
 	service.SettingKeyEnableOpenAICodexInstallationIDNormalization: service.SettingKeyEnableOpenAICodexInstallationIDNormalization,
 	service.SettingKeyEnableOpenAIUUIDv7SessionIdentity:            service.SettingKeyEnableOpenAIUUIDv7SessionIdentity,
 	service.SettingKeyEnableOpenAIOAuthDailySessionRotation:        service.SettingKeyEnableOpenAIOAuthDailySessionRotation,
+	service.SettingKeyCodexTelemetryEnabled:                        service.SettingKeyCodexTelemetryEnabled,
 	service.SettingKeyEnableOpenAICodexClientIdentityNormalization: service.SettingKeyEnableOpenAICodexClientIdentityNormalization,
 	service.SettingKeyEnableOpenAICodexPATContextManagement:        service.SettingKeyEnableOpenAICodexPATContextManagement,
 	service.SettingKeyEnableOpenAIRequestTimezoneConversion:        service.SettingKeyEnableOpenAIRequestTimezoneConversion,
@@ -582,6 +584,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	openAIOAuthDailySessionRotationEnabled := previousSettings.EnableOpenAIOAuthDailySessionRotation
 	if req.EnableOpenAIOAuthDailySessionRotation != nil {
 		openAIOAuthDailySessionRotationEnabled = *req.EnableOpenAIOAuthDailySessionRotation
+	}
+	codexTelemetryEnabled := previousSettings.CodexTelemetryEnabled
+	if req.CodexTelemetryEnabled != nil {
+		codexTelemetryEnabled = *req.CodexTelemetryEnabled
 	}
 	openAICodexFingerprintNormalizationEnabled := previousSettings.EnableOpenAICodexFingerprintNormalization
 	if req.EnableOpenAICodexFingerprintNormalization != nil {
@@ -1618,6 +1624,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		StepUpEnabled:                                stepUpEnabled,
 		EnableOpenAIUUIDv7SessionIdentity:            openAIUUIDv7SessionIdentityEnabled,
 		EnableOpenAIOAuthDailySessionRotation:        openAIOAuthDailySessionRotationEnabled,
+		CodexTelemetryEnabled:                        codexTelemetryEnabled,
 		EnableOpenAICodexFingerprintNormalization:    openAICodexFingerprintNormalizationEnabled,
 		EnableOpenAICodexInstallationIDNormalization: openAICodexInstallationIDNormalizationEnabled,
 		EnableOpenAICodexClientIdentityNormalization: openAICodexClientIdentityNormalizationEnabled,
@@ -2268,6 +2275,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		updatedPaymentCfg = &service.PaymentConfig{}
 	}
 	passkeyConfigured, passkeyRPID, passkeyRPOrigins := h.settingService.PasskeyConfiguration()
+	telemetryEffectiveEnabled, telemetryForcedOffReason := service.CodexTelemetryEffectiveState(updatedSettings.CodexTelemetryEnabled)
 
 	payload := dto.SystemSettings{
 		RegistrationEnabled:                                    updatedSettings.RegistrationEnabled,
@@ -2288,6 +2296,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		StepUpEnabled:                                          updatedSettings.StepUpEnabled,
 		EnableOpenAIUUIDv7SessionIdentity:                      updatedSettings.EnableOpenAIUUIDv7SessionIdentity,
 		EnableOpenAIOAuthDailySessionRotation:                  updatedSettings.EnableOpenAIOAuthDailySessionRotation,
+		CodexTelemetryEnabled:                                  updatedSettings.CodexTelemetryEnabled,
+		CodexTelemetryEffectiveEnabled:                         telemetryEffectiveEnabled,
+		CodexTelemetryForcedOffReason:                          telemetryForcedOffReason,
 		EnableOpenAICodexFingerprintNormalization:              updatedSettings.EnableOpenAICodexFingerprintNormalization,
 		EnableOpenAICodexInstallationIDNormalization:           updatedSettings.EnableOpenAICodexInstallationIDNormalization,
 		EnableOpenAICodexClientIdentityNormalization:           updatedSettings.EnableOpenAICodexClientIdentityNormalization,

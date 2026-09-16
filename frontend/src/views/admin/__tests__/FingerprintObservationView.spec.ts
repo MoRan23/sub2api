@@ -20,6 +20,7 @@ const {
   listThreads,
   listEntries,
   listContextManagement,
+  listTelemetry,
   updateSettings,
   showError,
   showSuccess,
@@ -30,6 +31,7 @@ const {
   listThreads: vi.fn(),
   listEntries: vi.fn(),
   listContextManagement: vi.fn(),
+  listTelemetry: vi.fn(),
   updateSettings: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
@@ -46,6 +48,7 @@ vi.mock('@/api/admin', () => ({
       listContextManagement,
     },
     settings: { updateSettings },
+    codexTelemetry: { list: listTelemetry },
   },
 }))
 
@@ -260,6 +263,7 @@ describe('FingerprintObservationView', () => {
       listThreads,
       listEntries,
       listContextManagement,
+      listTelemetry,
       updateSettings,
       showError,
       showSuccess,
@@ -279,6 +283,11 @@ describe('FingerprintObservationView', () => {
       page_size: 20,
       pages: 1,
       summary: { total: 0, successes: 0, failures: 0, fallbacks: 0, rewritten: 0 },
+    })
+    listTelemetry.mockResolvedValue({
+      configured_enabled: true, effective_enabled: true, forced_off_reason: '', queue_depth: 0,
+      counters: { attempts: 0, queued: 0, sent: 0, failed: 0, dropped: 0, cancelled: 0, skipped: 0 },
+      items: [], total: 0, page: 1, page_size: 20,
     })
     Object.defineProperty(document, 'hidden', { configurable: true, value: false })
   })
@@ -803,11 +812,13 @@ describe('FingerprintObservationView', () => {
     updateSettings.mockResolvedValue({ installation_observation_enabled: false })
     const wrapper = mountView()
     await flushPromises()
+    expect(listContextManagement).not.toHaveBeenCalled()
+
+    await wrapper.get('#fingerprint-tab-context').trigger('click')
+    await flushPromises()
     expect(listContextManagement).toHaveBeenCalledWith(
       { page: 1, page_size: 20 }, { signal: expect.any(AbortSignal) }
     )
-
-    await wrapper.get('#fingerprint-tab-context').trigger('click')
     expect(wrapper.text()).toContain('/alpha/history/v2/list_windows')
     expect(wrapper.text()).toContain('Sticky OAuth')
     expect(wrapper.text()).toContain('body.context.session_id')
@@ -829,6 +840,48 @@ describe('FingerprintObservationView', () => {
     await wrapper.get('#fingerprint-tab-context').trigger('click')
     expect(listContextManagement).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('admin.fingerprintObservation.emptyOff')
+    wrapper.unmount()
+  })
+
+  it('loads and refreshes telemetry independently while fingerprint capture is off', async () => {
+    vi.useFakeTimers()
+    localStorage.setItem('admin-fingerprint-observation-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
+    listUsers.mockResolvedValue(topResponse({ enabled: false, items: [], total: 0 }))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(listTelemetry).not.toHaveBeenCalled()
+    await wrapper.get('#fingerprint-tab-telemetry').trigger('click')
+    await flushPromises()
+    expect(listTelemetry).toHaveBeenCalledOnce()
+    expect(wrapper.findAll('[role="switch"]')).toHaveLength(0)
+    expect(wrapper.text()).toContain('admin.fingerprintObservation.telemetry.effectiveOn')
+    expect(wrapper.get('button[aria-label="auto-refresh"]').attributes('data-paused')).toBe('false')
+    await vi.advanceTimersByTimeAsync(5_000)
+    await flushPromises()
+    expect(listTelemetry).toHaveBeenCalledTimes(2)
+    expect(listUsers).toHaveBeenCalledTimes(1)
+    expect(listContextManagement).not.toHaveBeenCalled()
+
+    await wrapper.get('#fingerprint-tab-context').trigger('click')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(listTelemetry).toHaveBeenCalledTimes(2)
+    expect(listContextManagement).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('refreshes only context management while its tab is selected', async () => {
+    vi.useFakeTimers()
+    localStorage.setItem('admin-fingerprint-observation-auto-refresh', JSON.stringify({ enabled: true, interval_seconds: 5 }))
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('#fingerprint-tab-context').trigger('click')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(5_000)
+    await flushPromises()
+    expect(listUsers).toHaveBeenCalledTimes(1)
+    expect(listContextManagement).toHaveBeenCalledTimes(2)
+    expect(listTelemetry).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

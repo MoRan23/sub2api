@@ -25,6 +25,7 @@ type OpenAIOAuthHandler struct {
 	tokenCacheInvalidator service.TokenCacheInvalidator
 	dailySessionPools     service.OAuthDailySessionRepository
 	settingService        *service.SettingService
+	codexTelemetry        *service.CodexTelemetryService
 }
 
 func (h *OpenAIOAuthHandler) SetTokenCacheInvalidator(invalidator service.TokenCacheInvalidator) {
@@ -114,10 +115,12 @@ func ProvideOpenAIOAuthHandler(
 	rateLimitService *service.RateLimitService,
 	dailySessionPools service.OAuthDailySessionRepository,
 	settingService *service.SettingService,
+	codexTelemetry *service.CodexTelemetryService,
 ) *OpenAIOAuthHandler {
 	h := NewOpenAIOAuthHandler(openaiOAuthService, adminService, quotaService, rateLimitService)
 	h.dailySessionPools = dailySessionPools
 	h.settingService = settingService
+	h.codexTelemetry = codexTelemetry
 	return h
 }
 

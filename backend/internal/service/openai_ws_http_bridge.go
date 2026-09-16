@@ -422,7 +422,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	turn int,
 	writeClientMessage func([]byte) error,
 	identityPlans ...*OpenAIOAuthIdentityPlan,
-) (*OpenAIForwardResult, error) {
+) (_ *OpenAIForwardResult, returnErr error) {
 	if s == nil {
 		return nil, errors.New("service is nil")
 	}
@@ -435,6 +435,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if writeClientMessage == nil {
 		return nil, errors.New("client websocket writer is nil")
 	}
+	telemetryTurnCtx, finishTelemetryTurn := context.WithCancel(ctx)
+	defer finishTelemetryTurn()
 	responseModelObserver := &upstreamResponseModelObserver{}
 	var identityPlan *OpenAIOAuthIdentityPlan
 	if len(identityPlans) > 0 {
@@ -633,11 +635,13 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	turnStart := time.Now()
 	rejectedFieldRetryState := newOpenAIResponsesRejectedFieldRetryState(body)
 	var resp *http.Response
+	defer func() { completeCodexTelemetryHTTPResponse(resp, returnErr) }()
 	for {
 		upstreamReq, buildErr := buildUpstreamRequest(body)
 		if buildErr != nil {
 			return nil, buildErr
 		}
+		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, telemetryTurnCtx)
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		if err != nil {
 			if turn == 1 {
@@ -703,6 +707,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		return nil, fmt.Errorf("upstream http bridge error: status=%d message=%s", resp.StatusCode, upstreamMsg)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	beginCodexTelemetryHTTPParsing(resp)
 	stopCancelBody := context.AfterFunc(ctx, func() { _ = resp.Body.Close() })
 	defer stopCancelBody()
 	if account.Platform == PlatformGrok {
@@ -854,6 +859,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 
 		upstreamMessage := []byte(openAICompatPayloadWithEventType(trimmedData, pendingSSEEventType))
+		observeCodexTelemetryHTTPPayload(resp, upstreamMessage, pendingSSEEventType)
 		if normalized, changed := normalizeCompletedImageGenerationStatus(upstreamMessage); changed {
 			upstreamMessage = normalized
 		}

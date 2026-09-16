@@ -117,6 +117,7 @@ func provideCleanup(
 	antigravityOAuth *service.AntigravityOAuthService,
 	grokOAuth *service.GrokOAuthService,
 	openAIGateway *service.OpenAIGatewayService,
+	codexTelemetry *service.CodexTelemetryService,
 	openAIOutboundSessionV1Cleanup *service.OpenAIOutboundSessionV1CleanupWorker,
 	scheduledTestRunner *service.ScheduledTestRunnerService,
 	backupSvc *service.BackupService,
@@ -132,6 +133,11 @@ func provideCleanup(
 	pluginManager *service.PluginManager,
 ) func() {
 	return func() {
+		// Cancel telemetry before closing transports and infrastructure. Shutdown
+		// intentionally discards pending batches instead of replaying old turns.
+		if codexTelemetry != nil {
+			codexTelemetry.Stop()
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 

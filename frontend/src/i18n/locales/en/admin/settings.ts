@@ -1,6 +1,12 @@
 export default {
     settings: {
       title: 'System Settings',
+      codexTelemetry: {
+        title: 'Codex client telemetry',
+        description: 'Enabled by default. Sends client telemetry upstream, including simulated behavior, independently of daily fixed roots and fingerprint capture.',
+        configured: 'Configured', effective: 'Effective', enabled: 'Enabled', disabled: 'Disabled', unknown: 'Not reported',
+        forcedOff: 'Forced off by environment: {reason}',
+      },
       description: 'Manage registration, email verification, default values, and SMTP settings',
       tabs: {
         general: 'General',

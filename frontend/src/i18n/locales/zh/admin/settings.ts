@@ -1,6 +1,12 @@
 export default {
     settings: {
       title: '系统设置',
+      codexTelemetry: {
+        title: 'Codex 客户端遥测',
+        description: '默认开启。向上游发送客户端遥测，包含模拟行为；独立于每日固定根会话和指纹采集开关。',
+        configured: '配置状态', effective: '实际生效', enabled: '已开启', disabled: '已关闭', unknown: '尚未获取',
+        forcedOff: '环境变量已强制关闭：{reason}',
+      },
       description: '管理注册、邮箱验证、默认值和 SMTP 设置',
       tabs: {
         general: '通用设置',

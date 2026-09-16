@@ -74,6 +74,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.EnableOpenAIOAuthDailySessionRotation != after.EnableOpenAIOAuthDailySessionRotation {
 		changed = append(changed, service.SettingKeyEnableOpenAIOAuthDailySessionRotation)
 	}
+	if before.CodexTelemetryEnabled != after.CodexTelemetryEnabled {
+		changed = append(changed, service.SettingKeyCodexTelemetryEnabled)
+	}
 	if before.EnableOpenAICodexFingerprintNormalization != after.EnableOpenAICodexFingerprintNormalization {
 		changed = append(changed, service.SettingKeyEnableOpenAICodexFingerprintNormalization)
 	}

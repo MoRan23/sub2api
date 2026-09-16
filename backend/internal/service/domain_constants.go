@@ -719,6 +719,7 @@ const (
 	// It defaults on; an explicitly persisted false is the rollback path.
 	SettingKeyEnableOpenAIUUIDv7SessionIdentity     = "enable_openai_uuidv7_session_identity"
 	SettingKeyEnableOpenAIOAuthDailySessionRotation = "enable_openai_oauth_daily_session_rotation"
+	SettingKeyCodexTelemetryEnabled                 = "codex_telemetry_enabled"
 	// SettingKeyEnableOpenAICodexClientIdentityNormalization controls the Codex
 	// User-Agent/originator/version triplet under the master switch.
 	SettingKeyEnableOpenAICodexClientIdentityNormalization = "enable_openai_codex_client_identity_normalization"

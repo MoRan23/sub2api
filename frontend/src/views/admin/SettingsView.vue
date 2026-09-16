@@ -5940,6 +5940,46 @@
             </div>
           </div>
 
+          <section class="card space-y-3 p-6" data-testid="codex-telemetry-settings">
+            <div class="flex items-start justify-between gap-5">
+              <div>
+                <h2 id="codex-telemetry-label" class="text-lg font-semibold text-gray-900 dark:text-white">
+                  {{ t("admin.settings.codexTelemetry.title") }}
+                </h2>
+                <p id="codex-telemetry-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t("admin.settings.codexTelemetry.description") }}
+                </p>
+              </div>
+              <Toggle
+                v-model="form.codex_telemetry_enabled"
+                aria-labelledby="codex-telemetry-label"
+                aria-describedby="codex-telemetry-hint"
+                data-testid="codex-telemetry-toggle"
+              />
+            </div>
+            <dl class="flex flex-wrap gap-x-6 gap-y-2 text-xs">
+              <div class="flex items-center gap-2" data-testid="codex-telemetry-configured">
+                <dt class="text-gray-500 dark:text-gray-400">{{ t("admin.settings.codexTelemetry.configured") }}</dt>
+                <dd class="font-medium text-gray-900 dark:text-gray-100">
+                  {{ t(form.codex_telemetry_enabled ? "admin.settings.codexTelemetry.enabled" : "admin.settings.codexTelemetry.disabled") }}
+                </dd>
+              </div>
+              <div class="flex items-center gap-2" data-testid="codex-telemetry-effective">
+                <dt class="text-gray-500 dark:text-gray-400">{{ t("admin.settings.codexTelemetry.effective") }}</dt>
+                <dd class="font-medium text-gray-900 dark:text-gray-100">
+                  {{ t(codexTelemetryEffectiveEnabled === null ? "admin.settings.codexTelemetry.unknown" : codexTelemetryEffectiveEnabled ? "admin.settings.codexTelemetry.enabled" : "admin.settings.codexTelemetry.disabled") }}
+                </dd>
+              </div>
+            </dl>
+            <p
+              v-if="codexTelemetryForcedOffReason"
+              class="break-words text-xs text-amber-700 dark:text-amber-400"
+              data-testid="codex-telemetry-forced-off"
+            >
+              {{ t("admin.settings.codexTelemetry.forcedOff", { reason: codexTelemetryForcedOffReason }) }}
+            </p>
+          </section>
+
           <!-- Web Search Emulation -->
           <div class="card">
             <div
@@ -9773,11 +9813,14 @@ type SettingsForm = Omit<
   | "wechat_connect_mp_enabled"
   | "wechat_connect_mobile_enabled"
   | "installation_observation_enabled"
+  | "codex_telemetry_effective_enabled"
+  | "codex_telemetry_forced_off_reason"
 > & {
   /** Form always binds a concrete boolean (SystemSettings marks this optional). */
   channel_monitor_hide_throughput: boolean;
   channel_monitor_show_quota: boolean;
   channel_monitor_hide_user_ranking: boolean;
+  codex_telemetry_enabled: boolean;
   smtp_password: string;
   turnstile_secret_key: string;
   tencent_captcha_app_secret_key: string;
@@ -10084,6 +10127,7 @@ const form = reactive<SettingsForm>({
   openai_codex_version_auto_sync_enabled: true,
   enable_openai_uuidv7_session_identity: true,
   enable_openai_oauth_daily_session_rotation: false,
+  codex_telemetry_enabled: true,
   enable_openai_codex_pat_context_management: false,
   // codex_cli_only 加固
   min_codex_version: "",
@@ -11084,6 +11128,29 @@ const codexSyncedVersionLabel = computed(() => {
   });
 });
 
+const codexTelemetryEffectiveEnabled = ref<boolean | null>(null);
+const codexTelemetryForcedOffReason = ref("");
+
+function syncCodexTelemetrySettings(settings: Partial<SystemSettings>) {
+  // Partial/legacy responses must not reset a saved choice or claim an
+  // effective runtime state that the server has not reported.
+  if (typeof settings.codex_telemetry_enabled === "boolean") {
+    form.codex_telemetry_enabled = settings.codex_telemetry_enabled;
+  }
+  if (typeof settings.codex_telemetry_effective_enabled === "boolean") {
+    codexTelemetryEffectiveEnabled.value = settings.codex_telemetry_effective_enabled;
+  }
+  if (typeof settings.codex_telemetry_forced_off_reason === "string") {
+    codexTelemetryForcedOffReason.value = settings.codex_telemetry_forced_off_reason;
+  }
+}
+
+function isCodexTelemetrySetting(key: string): boolean {
+  return key === "codex_telemetry_enabled" ||
+    key === "codex_telemetry_effective_enabled" ||
+    key === "codex_telemetry_forced_off_reason";
+}
+
 async function loadSettings() {
   loading.value = true;
   loadFailed.value = false;
@@ -11095,11 +11162,12 @@ async function loadSettings() {
     for (const [key, value] of Object.entries(settings)) {
       // This compatibility field is owned by the Fingerprint Observation page;
       // do not reintroduce it as a hidden SettingsView form property.
-      if (key === "installation_observation_enabled") continue;
+      if (key === "installation_observation_enabled" || isCodexTelemetrySetting(key)) continue;
       if (value !== null && value !== undefined) {
         (form as Record<string, unknown>)[key] = value;
       }
     }
+    syncCodexTelemetrySettings(settings);
     syncCaptchaProviderSelection();
     if (!form.claude_oauth_system_prompt_blocks?.trim()) {
       form.claude_oauth_system_prompt_blocks =
@@ -11523,6 +11591,7 @@ async function saveSettings() {
         form.enable_openai_uuidv7_session_identity,
       enable_openai_oauth_daily_session_rotation:
         form.enable_openai_oauth_daily_session_rotation,
+      codex_telemetry_enabled: form.codex_telemetry_enabled,
       enable_openai_codex_client_identity_normalization:
         form.enable_openai_codex_client_identity_normalization,
       enable_openai_request_timezone_conversion:
@@ -11884,7 +11953,8 @@ async function saveSettings() {
     for (const [key, value] of Object.entries(updated)) {
       if (
         key === "openai_fast_policy_settings" ||
-        key === "installation_observation_enabled"
+        key === "installation_observation_enabled" ||
+        isCodexTelemetrySetting(key)
       ) {
         continue;
       }
@@ -11892,6 +11962,7 @@ async function saveSettings() {
         (form as Record<string, unknown>)[key] = value;
       }
     }
+    syncCodexTelemetrySettings(updated);
     Object.assign(authSourceDefaults, buildAuthSourceDefaultsState(updated));
     form.default_platform_quotas = normalizePlatformQuotasMap(updated.default_platform_quotas);
     form.account_scheduling_thresholds = normalizeAccountSchedulingThresholdsMap(

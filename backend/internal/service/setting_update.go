@@ -104,6 +104,12 @@ func (s *SettingService) persistSettingsAndRefreshOpenAIPolicies(
 	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
 		return nil, err
 	}
+	// Publish only a value included in the committed write, under the same lock.
+	// Unrelated partial saves cannot replay an older telemetry state; disabling
+	// still takes effect if the subsequent full settings read fails.
+	if value, present := updates[SettingKeyCodexTelemetryEnabled]; present && s.codexTelemetry != nil {
+		s.codexTelemetry.SetEnabled(parseCodexTelemetryEnabled(value))
+	}
 
 	if len(omitted) > 0 {
 		values, err := s.settingRepo.GetAll(ctx)
@@ -540,6 +546,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyEnableOpenAICodexInstallationIDNormalization] = strconv.FormatBool(settings.EnableOpenAICodexInstallationIDNormalization)
 	updates[SettingKeyEnableOpenAIUUIDv7SessionIdentity] = strconv.FormatBool(settings.EnableOpenAIUUIDv7SessionIdentity)
 	updates[SettingKeyEnableOpenAIOAuthDailySessionRotation] = strconv.FormatBool(settings.EnableOpenAIOAuthDailySessionRotation)
+	updates[SettingKeyCodexTelemetryEnabled] = strconv.FormatBool(settings.CodexTelemetryEnabled)
 	updates[SettingKeyEnableOpenAICodexClientIdentityNormalization] = strconv.FormatBool(settings.EnableOpenAICodexClientIdentityNormalization)
 	updates[SettingKeyEnableOpenAICodexPATContextManagement] = strconv.FormatBool(settings.EnableOpenAICodexPATContextManagement)
 	updates[SettingKeyEnableOpenAIRequestTimezoneConversion] = strconv.FormatBool(settings.EnableOpenAIRequestTimezoneConversion)
