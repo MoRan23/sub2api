@@ -41,6 +41,9 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	if modelResult.Type != gjson.String || requestedModel == "" {
 		return nil, fmt.Errorf("model is required")
 	}
+	// Normalize the search location before either native forwarding or the PAT
+	// adapter copies settings into its hosted tool and prompt.
+	body = s.prepareOpenAIRequestTimezone(ctx, c, account, body, false)
 
 	upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(requestedModel))
 	if upstreamModel != "" && upstreamModel != requestedModel {
@@ -163,6 +166,7 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 	if err != nil {
 		return nil, err
 	}
+	recordOpenAIAlphaSearchResponsesTimezoneMapping(c, alphaBody, responsesBody)
 	req, err := s.buildOpenAIAlphaSearchResponsesWebSearchRequest(ctx, c, account, alphaBody, responsesBody, token)
 	if err != nil {
 		return nil, err

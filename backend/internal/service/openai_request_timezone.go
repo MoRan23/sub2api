@@ -298,6 +298,11 @@ func scanOpenAIRequestTimezones(body []byte) *requestTimezoneScanner {
 			})
 		}
 	}
+	// Standalone alpha/search carries the search location outside tools. Only
+	// inspect a supplied location; commands.time is the requested query timezone.
+	if s.result.ScanStatus == "complete" && root.Get("settings.user_location").Exists() && s.countNode() {
+		s.scanSearchTimezone(root.Get("settings.user_location.timezone"), "settings.user_location.timezone")
+	}
 	for _, occurrence := range s.occurrences {
 		s.result.Items = append(s.result.Items, occurrence.item)
 	}

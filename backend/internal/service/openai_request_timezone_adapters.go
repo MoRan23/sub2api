@@ -7,6 +7,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 const openAIRequestTimezoneProvenanceKey = "openai_request_timezone_provenance"
@@ -77,6 +78,23 @@ func recordOpenAIRequestTimezoneAdapterMapping(c *gin.Context, next map[string]s
 		}
 	}
 	SetFingerprintObservationTimezonePathMapping(c, next)
+}
+
+func recordOpenAIAlphaSearchResponsesTimezoneMapping(c *gin.Context, alphaBody, responsesBody []byte) {
+	if !observeOpenAIRequestTimezoneAdapter(c) {
+		return
+	}
+	paths := make(map[string]string)
+	for _, item := range ScanOpenAIRequestTimezones(alphaBody).Items {
+		// Other structured sources become quoted JSON in the adapter's prompt,
+		// rather than independent environment or search-location fields.
+		paths[item.Path] = ""
+		if item.Path == "settings.user_location.timezone" && gjson.GetBytes(responsesBody, "tools.0.user_location").IsObject() {
+			paths[item.Path] = "tools.0.user_location.timezone"
+		}
+	}
+	recordOpenAIRequestTimezoneAdapterMapping(c, paths)
+	captureOpenAIRequestTimezoneCheckpoint(c, responsesBody)
 }
 
 // Prefix trimming is an explicit adapter operation. Keep removed sources in the

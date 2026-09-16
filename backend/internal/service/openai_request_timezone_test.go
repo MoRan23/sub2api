@@ -290,6 +290,64 @@ func TestOpenAIRequestTimezoneSearchValidation(t *testing.T) {
 	}
 }
 
+func TestOpenAIRequestTimezoneAlphaSearchLocation(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		location string
+		status   string
+		reason   string
+	}{
+		{name: "valid", location: `{"timezone":"Asia/Shanghai","city":"Shanghai","unknown":9007199254740993}`, status: "converted", reason: "timezone_converted"},
+		{name: "already target", location: `{"timezone":"America/Los_Angeles"}`, status: "unchanged", reason: "already_target"},
+		{name: "missing", location: `{"city":"Shanghai"}`, status: "skipped", reason: "timezone_missing"},
+		{name: "null", location: `{"timezone":null}`, status: "skipped", reason: "timezone_null"},
+		{name: "number", location: `{"timezone":8}`, status: "skipped", reason: "timezone_not_string"},
+		{name: "invalid zone", location: `{"timezone":"Not/AZone"}`, status: "skipped", reason: "invalid_timezone"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{"model":"gpt-5.6-sol","commands":{"time":[{"utc_offset":"+08:00"}],"search_query":[{"q":"Beijing time"}]},"settings":{"user_location":` + tc.location + `,"unknown":9007199254740993}}`)
+			out, state := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true)
+			want := body
+			if tc.status == "converted" {
+				var err error
+				want, err = sjson.SetBytes(body, "settings.user_location.timezone", OpenAIRequestTimezone)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !bytes.Equal(want, out) {
+				t.Fatalf("unexpected alpha search body: %s", out)
+			}
+			if len(state.Conversions) != 1 || state.Conversions[0].Path != "settings.user_location.timezone" || state.Conversions[0].Status != tc.status || state.Conversions[0].Reason != tc.reason {
+				t.Fatalf("unexpected alpha search conversion: %+v", state.Conversions)
+			}
+			if len(state.Inbound.Items) != 1 || state.Inbound.Items[0].Source != "web_search" {
+				t.Fatalf("unexpected inbound search observation: %+v", state.Inbound)
+			}
+			actual := ScanOpenAIRequestTimezones(out)
+			wantValue := ""
+			if value := gjson.GetBytes(out, "settings.user_location.timezone"); value.Type == gjson.String {
+				wantValue = value.String()
+			}
+			if len(actual.Items) != 1 || actual.Items[0].Value != wantValue {
+				t.Fatalf("unexpected final search observation: %+v", actual)
+			}
+		})
+	}
+}
+
+func TestOpenAIRequestTimezoneAlphaSearchDoesNotAddLocation(t *testing.T) {
+	for _, body := range [][]byte{
+		[]byte(`{"model":"gpt-5.6-sol","commands":{"time":[{"utc_offset":"+08:00"}]}}`),
+		[]byte(`{"model":"gpt-5.6-sol","commands":{},"settings":{"search_context_size":"high"}}`),
+	} {
+		out, state := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true)
+		if !bytes.Equal(body, out) || len(state.Conversions) != 0 || len(state.Inbound.Items) != 0 {
+			t.Fatalf("missing location was changed or fabricated: %s, %+v", out, state)
+		}
+	}
+}
+
 func TestOpenAIRequestTimezoneNodeBudgetRollsBackTextlessStructures(t *testing.T) {
 	env := timezoneTestEnvironment("UTC", "2026-09-10")
 	for _, kind := range []string{"messages", "content", "tools", "xml"} {
