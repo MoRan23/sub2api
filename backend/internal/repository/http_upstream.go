@@ -6,6 +6,7 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -263,11 +264,7 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	if req != nil && req.URL != nil {
 		targetHost = req.URL.Host
 	}
-	proxyInfo := "direct"
-	if proxyURL != "" {
-		proxyInfo = proxyURL
-	}
-	slog.Debug("tls_fingerprint_enabled", "account_id", accountID, "target", targetHost, "proxy", proxyInfo, "profile", profile.Name)
+	slog.Debug("tls_fingerprint_enabled", "account_id", accountID, "target", targetHost, "proxy", proxyLogIdentity(proxyURL), "profile", profile.Name)
 
 	if err := s.validateRequestHost(req); err != nil {
 		return nil, err
@@ -275,7 +272,8 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 
 	entry, err := s.acquireClientWithTLS(proxyURL, accountID, accountConcurrency, profile, upstreamProfile)
 	if err != nil {
-		slog.Debug("tls_fingerprint_acquire_client_failed", "account_id", accountID, "error", err)
+		// Parser and network errors can embed a proxy URL containing userinfo.
+		slog.Debug("tls_fingerprint_acquire_client_failed", "account_id", accountID, "error_type", fmt.Sprintf("%T", err))
 		return nil, err
 	}
 
@@ -285,7 +283,7 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	if err != nil {
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
-		slog.Debug("tls_fingerprint_request_failed", "account_id", accountID, "error", err)
+		slog.Debug("tls_fingerprint_request_failed", "account_id", accountID, "error_type", fmt.Sprintf("%T", err))
 		return nil, err
 	}
 
@@ -513,9 +511,11 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 	}
 	settings := s.resolvePoolSettings(isolation, accountConcurrency)
 	settings = s.applyProfilePoolSettings(settings, upstreamProfile)
-	// TLS 指纹客户端使用独立的缓存键，加 "tls:" 前缀
-	cacheKey := "tls:" + buildCacheKey(isolation, proxyKey, accountID, upstreamProtocolModeDefault)
-	cacheKey = cacheKeyForHTTPUpstreamProfile(cacheKey, upstreamProfile)
+	// Freeze before deriving the key so a later profile edit cannot alter an
+	// existing transport. Fingerprinted connections always isolate accounts,
+	// proxies and profile contents, even under global proxy-only isolation.
+	profile = profile.Clone()
+	cacheKey := buildTLSFingerprintCacheKey(proxyKey, accountID, profile, upstreamProfile)
 	poolKey := buildPoolKey(settings, upstreamProtocolModeDefault) + ":tls"
 
 	now := time.Now()
@@ -566,7 +566,7 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 	}
 
 	// 创建带 TLS 指纹的 Transport
-	slog.Debug("tls_fingerprint_creating_new_client", "account_id", accountID, "cache_key", cacheKey, "proxy", proxyKey)
+	slog.Debug("tls_fingerprint_creating_new_client", "account_id", accountID, "cache_key", cacheKey, "proxy", proxyLogIdentity(proxyURL))
 	transport, err := buildUpstreamTransportWithTLSFingerprint(settings, parsedProxy, profile)
 	if err != nil {
 		s.mu.Unlock()
@@ -953,6 +953,27 @@ func cacheKeyForHTTPUpstreamProfile(cacheKey string, profile service.HTTPUpstrea
 	return cacheKey
 }
 
+func buildTLSFingerprintCacheKey(proxyKey string, accountID int64, profile *tlsfingerprint.Profile, upstreamProfile service.HTTPUpstreamProfile) string {
+	proxyDigest := sha256.Sum256([]byte(proxyKey))
+	return fmt.Sprintf("tls:account:%d|proxy:%x|profile:%s|upstream:%s", accountID, proxyDigest, profile.CacheKey(), upstreamProfile)
+}
+
+// proxyLogIdentity never includes usernames, passwords, paths or query values.
+func proxyLogIdentity(raw string) string {
+	if strings.TrimSpace(raw) == "" || raw == directProxyKey {
+		return directProxyKey
+	}
+	key, parsed, err := normalizeProxyURL(raw)
+	if err != nil {
+		return "invalid"
+	}
+	if parsed == nil {
+		return directProxyKey
+	}
+	digest := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("%s://%s#%x", parsed.Scheme, parsed.Host, digest)
+}
+
 // buildPoolKey 构建连接池配置键，用于检测连接池配置变更。
 func buildPoolKey(settings poolSettings, protocolMode string) string {
 	base := fmt.Sprintf(
@@ -1152,7 +1173,7 @@ func (s *httpUpstreamService) recordOpenAIHTTP2Failure(profile service.HTTPUpstr
 	activated, until := state.recordFailure(time.Now(), settings.fallbackErrorThreshold, settings.fallbackWindow, settings.fallbackTTL)
 	if activated {
 		slog.Warn("openai_http2_proxy_fallback_activated",
-			"proxy", proxyKey,
+			"proxy", proxyLogIdentity(proxyKey),
 			"fallback_until", until.Format(time.RFC3339))
 	}
 }

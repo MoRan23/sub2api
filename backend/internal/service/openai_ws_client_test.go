@@ -76,11 +76,12 @@ func TestCoderOpenAIWSClientDialer_ProxyClientCacheIdleTTL(t *testing.T) {
 	require.True(t, ok)
 
 	oldProxy := "http://127.0.0.1:28080"
+	oldKey := newOpenAIWSTransportScope(0, "", oldProxy).cacheKey()
 	_, err := impl.proxyHTTPClient(oldProxy)
 	require.NoError(t, err)
 
 	impl.proxyMu.Lock()
-	oldEntry := impl.proxyClients[oldProxy]
+	oldEntry := impl.proxyClients[oldKey]
 	require.NotNil(t, oldEntry)
 	oldEntry.lastUsedUnixNano = time.Now().Add(-openAIWSProxyClientCacheIdleTTL - time.Minute).UnixNano()
 	impl.proxyMu.Unlock()
@@ -90,7 +91,7 @@ func TestCoderOpenAIWSClientDialer_ProxyClientCacheIdleTTL(t *testing.T) {
 	require.NoError(t, err)
 
 	impl.proxyMu.Lock()
-	_, exists := impl.proxyClients[oldProxy]
+	_, exists := impl.proxyClients[oldKey]
 	impl.proxyMu.Unlock()
 
 	require.False(t, exists, "超过空闲 TTL 的代理客户端应被回收")

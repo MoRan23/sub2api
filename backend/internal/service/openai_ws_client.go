@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -133,16 +132,9 @@ func (d *coderOpenAIWSClientDialer) Dial(
 			return true
 		},
 	}
-	if proxy := strings.TrimSpace(proxyURL); proxy != "" {
-		proxyClient, err := d.proxyHTTPClient(proxy)
-		if err != nil {
-			return nil, 0, nil, err
-		}
-		opts.HTTPClient = proxyClient
-	}
-	client := opts.HTTPClient
-	if client == nil {
-		client = http.DefaultClient
+	client, clientErr := d.proxyHTTPClient(proxyURL, openAIWSTransportScopeFromContext(ctx, targetURL, proxyURL))
+	if clientErr != nil {
+		return nil, 0, nil, clientErr
 	}
 	opts.HTTPClient = openai.HTTPClientWithCodexResidencyRedirectGuard(client)
 	originURL, parseErr := url.Parse(targetURL)
@@ -192,38 +184,62 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	return wrapped, 0, respHeaders, nil
 }
 
-func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client, error) {
+func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string, scopes ...openAIWSTransportScope) (*http.Client, error) {
 	if d == nil {
 		return nil, errors.New("openai ws dialer is nil")
 	}
 	normalizedProxy := strings.TrimSpace(proxy)
-	if normalizedProxy == "" {
-		return nil, errors.New("proxy url is empty")
+	var parsedProxyURL *url.URL
+	if normalizedProxy != "" {
+		var err error
+		parsedProxyURL, err = url.Parse(normalizedProxy)
+		if err != nil || parsedProxyURL.Scheme == "" || parsedProxyURL.Host == "" {
+			// url.Parse errors may include the original URL and its credentials.
+			return nil, errors.New("invalid proxy url")
+		}
 	}
-	parsedProxyURL, err := url.Parse(normalizedProxy)
-	if err != nil {
-		return nil, fmt.Errorf("invalid proxy url: %w", err)
+	scope := newOpenAIWSTransportScope(0, "", normalizedProxy)
+	if len(scopes) > 0 {
+		scope = scopes[0]
 	}
+	cacheKey := scope.cacheKey()
 	now := time.Now().UnixNano()
 
 	d.proxyMu.Lock()
 	defer d.proxyMu.Unlock()
-	if entry, ok := d.proxyClients[normalizedProxy]; ok && entry != nil && entry.client != nil {
+	if entry, ok := d.proxyClients[cacheKey]; ok && entry != nil && entry.client != nil {
 		entry.lastUsedUnixNano = now
 		d.proxyHits.Add(1)
 		return entry.client, nil
 	}
 	d.cleanupProxyClientsLocked(now)
-	transport := &http.Transport{
-		Proxy:               http.ProxyURL(parsedProxyURL),
-		MaxIdleConns:        openAIWSProxyTransportMaxIdleConns,
-		MaxIdleConnsPerHost: openAIWSProxyTransportMaxIdleConnsPerHost,
-		IdleConnTimeout:     openAIWSProxyTransportIdleConnTimeout,
-		TLSHandshakeTimeout: 10 * time.Second,
-		ForceAttemptHTTP2:   true,
+	var client *http.Client
+	if parsedProxyURL == nil {
+		// Preserve direct/environment-proxy defaults (including HTTP/2), but do
+		// not share their underlying connection pool across account scopes.
+		base := *http.DefaultClient
+		transport := base.Transport
+		if transport == nil {
+			transport = http.DefaultTransport
+		}
+		standardTransport, ok := transport.(*http.Transport)
+		if !ok {
+			return nil, errors.New("default ws transport cannot be isolated")
+		}
+		base.Transport = standardTransport.Clone()
+		client = &base
+	} else {
+		transport := &http.Transport{
+			Proxy:               http.ProxyURL(parsedProxyURL),
+			MaxIdleConns:        openAIWSProxyTransportMaxIdleConns,
+			MaxIdleConnsPerHost: openAIWSProxyTransportMaxIdleConnsPerHost,
+			IdleConnTimeout:     openAIWSProxyTransportIdleConnTimeout,
+			TLSHandshakeTimeout: 10 * time.Second,
+			ForceAttemptHTTP2:   true,
+		}
+		client = &http.Client{Transport: transport}
 	}
-	client := &http.Client{Transport: transport}
-	d.proxyClients[normalizedProxy] = &openAIWSProxyClientEntry{
+	d.proxyClients[cacheKey] = &openAIWSProxyClientEntry{
 		client:           client,
 		lastUsedUnixNano: now,
 	}

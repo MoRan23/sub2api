@@ -95,6 +95,7 @@ type openAIWSHandshakeCompatibilityKey struct {
 	betaFeatures   string
 	identityDigest string
 	residency      string
+	transportScope openAIWSTransportScope
 }
 
 type openAIWSConnLease struct {
@@ -854,8 +855,7 @@ func (c *openAIWSConn) matchesCompatibility(betaFeatures, identityDigest string)
 }
 
 func openAIWSAcquireRequestsMatchCompatibility(left, right openAIWSAcquireRequest) bool {
-	return normalizeOpenAIWSHandshakeCompatibility(left.Headers, left.IdentityDigest) ==
-		normalizeOpenAIWSHandshakeCompatibility(right.Headers, right.IdentityDigest)
+	return openAIWSAcquireCompatibility(left) == openAIWSAcquireCompatibility(right)
 }
 
 func (c *openAIWSConn) isPrewarmed() bool {
@@ -1227,7 +1227,7 @@ func (p *openAIWSConnPool) acquire(ctx context.Context, req openAIWSAcquireReque
 
 retryAcquire:
 	accountID := req.Account.ID
-	compatibility := normalizeOpenAIWSHandshakeCompatibility(req.Headers, req.IdentityDigest)
+	compatibility := openAIWSAcquireCompatibility(req)
 	routingAffinity := normalizeOpenAIWSRoutingAffinity(req.Headers)
 	effectiveMaxConns := p.effectiveMaxConnsByAccount(req.Account)
 	if effectiveMaxConns <= 0 {
@@ -2247,6 +2247,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 			return nil, err
 		}
 	}
+	ctx = withOpenAIWSTransportAccount(ctx, req.Account.ID)
 	conn, status, handshakeHeaders, err := p.clientDialer.Dial(ctx, req.WSURL, headers, req.ProxyURL)
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError
@@ -2279,7 +2280,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	}
 	pooledConn.betaFeatures = normalizeOpenAIWSBetaFeatures(req.Headers)
 	pooledConn.identityDigest = stringsTrim(req.IdentityDigest)
-	pooledConn.handshakeCompatibility = normalizeOpenAIWSHandshakeCompatibility(req.Headers, req.IdentityDigest)
+	pooledConn.handshakeCompatibility = openAIWSAcquireCompatibility(req)
 	accountID := req.Account.ID
 	evict := func() { p.evictConn(accountID, id) }
 	pooledConn.onPeerClosed.Store(&evict)
@@ -2462,10 +2463,7 @@ func cloneOpenAIWSAcquireRequestPtr(req *openAIWSAcquireRequest) *openAIWSAcquir
 }
 
 func sameOpenAIWSPrewarmTarget(a, b openAIWSAcquireRequest) bool {
-	return stringsTrim(a.WSURL) == stringsTrim(b.WSURL) &&
-		stringsTrim(a.ProxyURL) == stringsTrim(b.ProxyURL) &&
-		normalizeOpenAIWSHandshakeCompatibility(a.Headers, a.IdentityDigest) ==
-			normalizeOpenAIWSHandshakeCompatibility(b.Headers, b.IdentityDigest)
+	return openAIWSAcquireRequestsMatchCompatibility(a, b)
 }
 
 func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
