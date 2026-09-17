@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -34,60 +35,61 @@ const (
 // ordinary API-key requests can report timezone/header data without inventing
 // a server-owned session or thread UUID.
 type FingerprintObservationEntry struct {
-	SequenceID                   uint64                       `json:"sequence_id"`
-	Timestamp                    time.Time                    `json:"timestamp"`
-	UserID                       int64                        `json:"user_id"`
-	Username                     string                       `json:"username"`
-	Email                        string                       `json:"email"`
-	APIKeyID                     int64                        `json:"api_key_id"`
-	APIKeyName                   string                       `json:"api_key_name"`
-	AccountID                    int64                        `json:"account_id"`
-	AccountName                  string                       `json:"account_name"`
-	Pinned                       bool                         `json:"pinned"`
-	ClientReportedInstallationID string                       `json:"client_reported_installation_id"`
-	OutboundInstallationID       string                       `json:"outbound_installation_id"`
-	SessionID                    string                       `json:"session_id"`
-	ThreadID                     string                       `json:"thread_id"`
-	ParentThreadID               string                       `json:"parent_thread_id"`
-	ForkedFromThreadID           string                       `json:"forked_from_thread_id"`
-	ForkedFromOrdinalExclusive   *uint64                      `json:"forked_from_ordinal_exclusive,omitempty"`
-	ParentTurnID                 string                       `json:"parent_turn_id"`
-	RootTurnID                   string                       `json:"root_turn_id"`
-	TurnID                       string                       `json:"turn_id"`
-	TurnStartedAtUnixMS          int64                        `json:"turn_started_at_unix_ms,omitempty"`
-	WindowID                     string                       `json:"window_id"`
-	WindowNumber                 *uint64                      `json:"window_number,omitempty"`
-	ContextWindowID              string                       `json:"context_window_id"`
-	AgentName                    string                       `json:"agent_name"`
-	SubagentKind                 string                       `json:"subagent_kind"`
-	OpenAISubagent               string                       `json:"openai_subagent"`
-	ThreadSource                 string                       `json:"thread_source"`
-	TurnTrigger                  string                       `json:"turn_trigger"`
-	Sandbox                      string                       `json:"sandbox"`
-	SandboxMode                  string                       `json:"sandbox_mode"`
-	AutoReviewEnabled            *bool                        `json:"auto_review_enabled,omitempty"`
-	NodeREPLAutoReviewRequired   *bool                        `json:"node_repl_auto_review_required,omitempty"`
-	NodeREPLDisabled             *bool                        `json:"node_repl_disabled,omitempty"`
-	Workspaces                   []string                     `json:"workspaces,omitempty"`
-	DailyFixedRootEnabled        bool                         `json:"daily_fixed_root_enabled"`
-	DailyFixedRootKind           string                       `json:"daily_fixed_root_kind,omitempty"`
-	DailyFixedRootBusinessDate   string                       `json:"daily_fixed_root_business_date,omitempty"`
-	DailyFixedRootSlotIndex      int                          `json:"daily_fixed_root_slot_index,omitempty"`
-	DailyFixedRootSessionID      string                       `json:"daily_fixed_root_session_id,omitempty"`
-	UserAgent                    string                       `json:"user_agent"`
-	Originator                   string                       `json:"originator"`
-	OpenAIBeta                   string                       `json:"openai_beta"`
-	Version                      string                       `json:"version"`
-	InboundEndpoint              string                       `json:"inbound_endpoint"`
-	EventKind                    string                       `json:"event_kind,omitempty"`
-	TimezoneTarget               string                       `json:"timezone_target,omitempty"`
-	InboundTimezoneObservations  *TimezoneScanResult          `json:"inbound_timezone_observations,omitempty"`
-	OutboundTimezoneObservations *TimezoneScanResult          `json:"outbound_timezone_observations,omitempty"`
-	TimezoneConversions          []TimezoneConversion         `json:"timezone_conversions,omitempty"`
-	TimezoneComparisonStatus     string                       `json:"timezone_comparison_status,omitempty"`
-	OutboundCodexResidency       string                       `json:"outbound_codex_residency"`
-	OutboundCodexResidencySource string                       `json:"outbound_codex_residency_source,omitempty"`
-	RequestIntegrity             *RequestIntegrityObservation `json:"request_integrity,omitempty"`
+	SequenceID                   uint64                         `json:"sequence_id"`
+	Timestamp                    time.Time                      `json:"timestamp"`
+	UserID                       int64                          `json:"user_id"`
+	Username                     string                         `json:"username"`
+	Email                        string                         `json:"email"`
+	APIKeyID                     int64                          `json:"api_key_id"`
+	APIKeyName                   string                         `json:"api_key_name"`
+	AccountID                    int64                          `json:"account_id"`
+	AccountName                  string                         `json:"account_name"`
+	Pinned                       bool                           `json:"pinned"`
+	ClientReportedInstallationID string                         `json:"client_reported_installation_id"`
+	OutboundInstallationID       string                         `json:"outbound_installation_id"`
+	SessionID                    string                         `json:"session_id"`
+	ThreadID                     string                         `json:"thread_id"`
+	ParentThreadID               string                         `json:"parent_thread_id"`
+	ForkedFromThreadID           string                         `json:"forked_from_thread_id"`
+	ForkedFromOrdinalExclusive   *uint64                        `json:"forked_from_ordinal_exclusive,omitempty"`
+	ParentTurnID                 string                         `json:"parent_turn_id"`
+	RootTurnID                   string                         `json:"root_turn_id"`
+	TurnID                       string                         `json:"turn_id"`
+	TurnStartedAtUnixMS          int64                          `json:"turn_started_at_unix_ms,omitempty"`
+	WindowID                     string                         `json:"window_id"`
+	WindowNumber                 *uint64                        `json:"window_number,omitempty"`
+	ContextWindowID              string                         `json:"context_window_id"`
+	AgentName                    string                         `json:"agent_name"`
+	SubagentKind                 string                         `json:"subagent_kind"`
+	OpenAISubagent               string                         `json:"openai_subagent"`
+	ThreadSource                 string                         `json:"thread_source"`
+	TurnTrigger                  string                         `json:"turn_trigger"`
+	Sandbox                      string                         `json:"sandbox"`
+	SandboxMode                  string                         `json:"sandbox_mode"`
+	AutoReviewEnabled            *bool                          `json:"auto_review_enabled,omitempty"`
+	NodeREPLAutoReviewRequired   *bool                          `json:"node_repl_auto_review_required,omitempty"`
+	NodeREPLDisabled             *bool                          `json:"node_repl_disabled,omitempty"`
+	Workspaces                   []string                       `json:"workspaces,omitempty"`
+	DailyFixedRootEnabled        bool                           `json:"daily_fixed_root_enabled"`
+	DailyFixedRootKind           string                         `json:"daily_fixed_root_kind,omitempty"`
+	DailyFixedRootBusinessDate   string                         `json:"daily_fixed_root_business_date,omitempty"`
+	DailyFixedRootSlotIndex      int                            `json:"daily_fixed_root_slot_index,omitempty"`
+	DailyFixedRootSessionID      string                         `json:"daily_fixed_root_session_id,omitempty"`
+	UserAgent                    string                         `json:"user_agent"`
+	Originator                   string                         `json:"originator"`
+	OpenAIBeta                   string                         `json:"openai_beta"`
+	Version                      string                         `json:"version"`
+	InboundEndpoint              string                         `json:"inbound_endpoint"`
+	EventKind                    string                         `json:"event_kind,omitempty"`
+	TimezoneTarget               string                         `json:"timezone_target,omitempty"`
+	InboundTimezoneObservations  *TimezoneScanResult            `json:"inbound_timezone_observations,omitempty"`
+	OutboundTimezoneObservations *TimezoneScanResult            `json:"outbound_timezone_observations,omitempty"`
+	TimezoneConversions          []TimezoneConversion           `json:"timezone_conversions,omitempty"`
+	TimezoneComparisonStatus     string                         `json:"timezone_comparison_status,omitempty"`
+	OutboundCodexResidency       string                         `json:"outbound_codex_residency"`
+	OutboundCodexResidencySource string                         `json:"outbound_codex_residency_source,omitempty"`
+	RequestIntegrity             *RequestIntegrityObservation   `json:"request_integrity,omitempty"`
+	ConversionCheck              *apicompat.ChatConversionCheck `json:"conversion_check,omitempty"`
 }
 
 // OpenAIDailyRootObservation is request-local provenance written only after a
@@ -623,6 +625,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 	entry := buildFingerprintObservationEntry(c, account, pin, outbound, body, trustedIdentity, hasTrustedIdentity, true)
 	entry.EventKind = FingerprintObservationEventHTTP
 	entry.RequestIntegrity = integrity
+	entry.ConversionCheck = GetOpenAIChatConversionCheck(c)
 	entry.OutboundCodexResidencySource = "request_headers"
 	paths := openAIRequestTimezoneFinalObservationPaths(c, state, body)
 	populateFingerprintObservationTimezones(&entry, state, body, paths)
@@ -1018,6 +1021,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWSFrame(c *gin.Contex
 	entry := buildFingerprintObservationEntry(c, account, pin, handshakeHeaders, body, identity, trusted, false)
 	entry.EventKind = FingerprintObservationEventWSFrame
 	entry.RequestIntegrity = integrity
+	entry.ConversionCheck = GetOpenAIChatConversionCheck(c)
 	entry.OutboundCodexResidencySource = "ws_handshake"
 	var paths map[string]string
 	if state != nil && body != nil {

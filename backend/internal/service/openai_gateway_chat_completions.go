@@ -72,6 +72,12 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	compatPromptCacheTenantIsolated bool,
 ) (*OpenAIForwardResult, error) {
 	if account != nil && account.IsOpenAIOAuth() {
+		PrepareOpenAIChatConversionCheck(c, body)
+	}
+	if err := ValidateOpenAIChatConversionForAccount(c, account); err != nil {
+		return nil, err
+	}
+	if account != nil && account.IsOpenAIOAuth() {
 		s.freezeOpenAIRequestIntegrity(ctx, c)
 		if !gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists() {
 			s.captureOpenAIRequestIntegrity(ctx, c, "responses", body)
@@ -279,6 +285,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	} else {
 		// Normal path: convert Chat Completions → Responses.
 		// ChatCompletionsToResponses always sets Stream=true (upstream always streams).
+		if account.IsOpenAIOAuth() {
+			preserveOpenAIChatSystemMessageOrder(&chatReq)
+		}
 		responsesReq, err = chatCompletionsToResponsesWithTimezoneObservation(c, &chatReq)
 		if err != nil {
 			return nil, fmt.Errorf("convert chat completions to responses: %w", err)

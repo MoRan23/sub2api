@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type alphaSearchAccountStateRepo struct {
@@ -95,7 +96,9 @@ func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {
 	require.Equal(t, "application/json", upstream.lastReq.Header.Get("Accept"))
 	require.Equal(t, codexCLIVersion, upstream.lastReq.Header.Get("Version"))
 	require.Empty(t, upstream.lastReq.Header.Get("OpenAI-Beta"))
-	require.Equal(t, body, upstream.lastBody)
+	expectedBody, err := sjson.SetRawBytes(body, "settings.user_location", []byte(`{"city":"Los Angeles","country":"US","region":"California","timezone":"America/Los_Angeles","type":"approximate"}`))
+	require.NoError(t, err)
+	require.Equal(t, expectedBody, upstream.lastBody, "only the explicit search location addition may change the original wire body")
 	var metadata map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal([]byte(upstream.lastReq.Header.Get(openAIWSTurnMetadataHeader)), &metadata))
 	var sessionID, threadID, turnID, installationID string
@@ -143,7 +146,9 @@ func TestForwardAlphaSearchOAuthRebuildsOpaqueTurnMetadataHeader(t *testing.T) {
 	require.True(t, ValidateFingerprintObservationUUIDv7(gjson.Get(metadata, "turn_id").String()))
 	require.Positive(t, gjson.Get(metadata, "turn_started_at_unix_ms").Int())
 	require.Equal(t, transportTestPinnedInstallationID, gjson.Get(metadata, "installation_id").String())
-	require.Equal(t, body, upstream.lastBody)
+	expectedBody, err := sjson.SetRawBytes(body, "settings.user_location", []byte(`{"city":"Los Angeles","country":"US","region":"California","timezone":"America/Los_Angeles","type":"approximate"}`))
+	require.NoError(t, err)
+	require.Equal(t, expectedBody, upstream.lastBody)
 	entries := SnapshotFingerprintObservations(0)
 	require.Len(t, entries, 1)
 	require.Equal(t, transportTestPinnedInstallationID, entries[0].OutboundInstallationID)

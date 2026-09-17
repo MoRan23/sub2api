@@ -167,8 +167,11 @@ func hasChatStyleTools(request map[string]any) bool {
 
 func hasChatStyleToolChoice(request map[string]any) bool {
 	choice, _ := request["tool_choice"].(map[string]any)
-	_, ok := choice["function"].(map[string]any)
-	return ok
+	if _, ok := choice["function"].(map[string]any); ok {
+		return true
+	}
+	_, nested := choice["allowed_tools"].(map[string]any)
+	return choice["type"] == "allowed_tools" && nested
 }
 
 func normalizeLegacyResponsesToolChoice(raw json.RawMessage) (any, error) {

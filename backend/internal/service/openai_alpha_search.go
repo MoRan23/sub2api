@@ -43,6 +43,7 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	}
 	// Normalize the search location before either native forwarding or the PAT
 	// adapter copies settings into its hosted tool and prompt.
+	s.CaptureOpenAIAlphaSearchRequestTimezone(c, body)
 	body = s.prepareOpenAIRequestTimezone(ctx, c, account, body, false)
 
 	upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(requestedModel))

@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/sjson"
 )
 
 func TestCloneFingerprintObservationHeadersKeepsOnlySafePhysicalValues(t *testing.T) {
@@ -72,19 +73,32 @@ func TestFingerprintObserverTimezoneRecordAndSnapshotsAreDeepCopies(t *testing.T
 	observer := &fingerprintObserver{ring: make([]FingerprintObservationEntry, 2)}
 	observer.setEnabled(true)
 	entry := fingerprintTimezoneTestEntry()
+	entry.InboundTimezoneObservations.Items[0].Location = &RequestLocationObservation{Country: "CN", Timezone: "Asia/Shanghai"}
+	location := openAIRequestSearchLocation()
+	entry.OutboundTimezoneObservations.Items[0].Location = &location
+	entry.TimezoneConversions[0].LocationBefore = cloneRequestLocation(entry.InboundTimezoneObservations.Items[0].Location)
+	entry.TimezoneConversions[0].LocationAfter = cloneRequestLocation(&location)
 	observer.record(entry)
 	entry.InboundTimezoneObservations.Items[0].Value = "mutated-input"
 	entry.OutboundTimezoneObservations.ScanStatus = "mutated-status"
 	entry.TimezoneConversions[0].Output = "mutated-output"
+	entry.InboundTimezoneObservations.Items[0].Location.Country = "mutated"
+	entry.TimezoneConversions[0].LocationAfter.City = "mutated"
 	first := observer.snapshot(1)
 	require.Equal(t, "Asia/Shanghai", first[0].InboundTimezoneObservations.Items[0].Value)
 	require.Equal(t, "complete", first[0].OutboundTimezoneObservations.ScanStatus)
 	require.Equal(t, OpenAIRequestTimezone, first[0].TimezoneConversions[0].Output)
+	require.Equal(t, "CN", first[0].InboundTimezoneObservations.Items[0].Location.Country)
+	require.Equal(t, "Los Angeles", first[0].TimezoneConversions[0].LocationAfter.City)
 	first[0].InboundTimezoneObservations.Items[0].Value = "mutated-return"
 	first[0].TimezoneConversions[0].Reason = "mutated-return"
+	first[0].TimezoneConversions[0].LocationBefore.Country = "mutated-return"
+	first[0].OutboundTimezoneObservations.Items[0].Location.City = "mutated-return"
 	through, _ := observer.snapshotThrough(0)
 	require.Equal(t, "Asia/Shanghai", through[0].InboundTimezoneObservations.Items[0].Value)
 	require.Empty(t, through[0].TimezoneConversions[0].Reason)
+	require.Equal(t, "CN", through[0].TimezoneConversions[0].LocationBefore.Country)
+	require.Equal(t, "Los Angeles", through[0].OutboundTimezoneObservations.Items[0].Location.City)
 	through[0].OutboundTimezoneObservations.Items[0].Value = "mutated-through"
 	require.Equal(t, OpenAIRequestTimezone, observer.snapshot(1)[0].OutboundTimezoneObservations.Items[0].Value)
 }
@@ -334,4 +348,54 @@ func TestFingerprintObserverTimezoneSnapshotsCanBeMutatedConcurrentlyWithDisable
 	observer.setEnabled(false)
 	wg.Wait()
 	require.Empty(t, observer.snapshot(0))
+}
+
+func TestFingerprintObservationLocationAdditionUsesActualWire(t *testing.T) {
+	SetFingerprintObservationEnabled(true)
+	t.Cleanup(func() { SetFingerprintObservationEnabled(false) })
+	for _, alpha := range []bool{false, true} {
+		name, body, locationPath := "tool", []byte(`{"tools":[{"type":"web_search"}]}`), "tools.0.user_location"
+		if alpha {
+			name, body, locationPath = "alpha", []byte(`{"commands":{"search_query":[{"q":"local news"}]}}`), "settings.user_location"
+		}
+		t.Run(name, func(t *testing.T) {
+			prepared, state := prepareOpenAIRequestTimezoneBody(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true, alpha)
+			require.Len(t, state.Inbound.Items, 1)
+			require.Nil(t, state.Inbound.Items[0].Location)
+			require.Empty(t, state.Inbound.Items[0].Value)
+			require.Equal(t, "location_missing", state.Inbound.Items[0].Reason)
+			require.True(t, state.Conversions[0].LocationAdded)
+			require.Nil(t, state.Conversions[0].LocationBefore)
+			entry := FingerprintObservationEntry{}
+			populateFingerprintObservationTimezones(&entry, state, prepared, nil)
+			require.Equal(t, "matched", entry.TimezoneComparisonStatus)
+			require.Equal(t, openAIRequestSearchLocation(), *entry.OutboundTimezoneObservations.Items[0].Location)
+
+			changed, err := sjson.SetBytes(prepared, locationPath+".city", "San Francisco")
+			require.NoError(t, err)
+			populateFingerprintObservationTimezones(&entry, state, changed, nil)
+			require.Equal(t, "mismatched", entry.TimezoneComparisonStatus)
+			require.Equal(t, "San Francisco", entry.OutboundTimezoneObservations.Items[0].Location.City)
+			require.Equal(t, "final_location_differs", entry.TimezoneConversions[0].Reason)
+			require.Equal(t, "Los Angeles", state.Conversions[0].LocationAfter.City)
+
+			populateFingerprintObservationTimezones(&entry, state, body, nil)
+			require.NotEqual(t, "matched", entry.TimezoneComparisonStatus)
+			require.Nil(t, entry.OutboundTimezoneObservations.Items[0].Location, "the planned location must never fill an absent wire field")
+		})
+	}
+}
+
+func TestFingerprintObservationEnvironmentAfterMetadataRemoval(t *testing.T) {
+	SetFingerprintObservationEnabled(true)
+	t.Cleanup(func() { SetFingerprintObservationEnabled(false) })
+	body := timezoneTestBody(t, map[string]any{"input": []any{timezoneTestMessage(timezoneTestEnvironment("Asia/Tokyo", "2026-09-10"))}})
+	prepared, state := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true)
+	actual, err := sjson.DeleteBytes(prepared, "input.0.internal_chat_message_metadata_passthrough")
+	require.NoError(t, err)
+	entry := FingerprintObservationEntry{}
+	populateFingerprintObservationTimezones(&entry, state, actual, DeriveOpenAIRequestTimezoneProvenance(prepared, actual))
+	require.Equal(t, "matched", entry.TimezoneComparisonStatus)
+	require.Equal(t, OpenAIRequestTimezone, entry.OutboundTimezoneObservations.Items[0].Value)
+	require.Equal(t, "2026-09-09", entry.OutboundTimezoneObservations.Items[0].CurrentDate)
 }

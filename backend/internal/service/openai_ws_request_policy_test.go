@@ -21,7 +21,7 @@ import (
 )
 
 func timezoneWSBody(text string) []byte {
-	body, _ := json.Marshal(map[string]any{"type": "response.create", "model": "gpt-5.1", "input": text})
+	body, _ := json.Marshal(map[string]any{"type": "response.create", "model": "gpt-5.1", "input": []any{timezoneTestMessage(text)}})
 	return body
 }
 
@@ -39,13 +39,13 @@ func TestOpenAIWSRequestTimezoneFrozenRetryAndNewFrame(t *testing.T) {
 	c.Set(openAIRequestTimezoneCaptureKey, &openAIRequestTimezoneCapture{acceptedAt: accepted})
 	first, state := svc.prepareOpenAIWSFrameTimezone(ctx, c, account, body, false, true, accepted.Add(time.Hour))
 	require.Equal(t, accepted, state.AcceptedAt, "queueing cannot replace ingress time")
-	require.Contains(t, gjson.GetBytes(first, "input").String(), "2026-01-01")
-	require.Contains(t, gjson.GetBytes(first, "input").String(), OpenAIRequestTimezone)
+	require.Contains(t, gjson.GetBytes(first, "input.0.content.0.text").String(), "2026-01-01")
+	require.Contains(t, gjson.GetBytes(first, "input.0.content.0.text").String(), OpenAIRequestTimezone)
 	retry, retryState := svc.prepareOpenAIWSFrameTimezone(ctx, c, account, body, false, true, accepted.Add(2*time.Hour))
 	require.Equal(t, first, retry)
 	require.Equal(t, state.AcceptedAt, retryState.AcceptedAt)
 	next, nextState := svc.prepareOpenAIWSFrameTimezone(ctx, c, account, body, false, false, accepted.Add(2*time.Hour))
-	require.Contains(t, gjson.GetBytes(next, "input").String(), "2026-01-02")
+	require.Contains(t, gjson.GetBytes(next, "input.0.content.0.text").String(), "2026-01-02")
 	require.NotEqual(t, state.AcceptedAt, nextState.AcceptedAt, "tool continuation is also a newly accepted frame")
 	require.Contains(t, string(body), "Asia/Shanghai", "original identity/audit input remains unchanged")
 }
@@ -80,7 +80,7 @@ func TestOpenAIWSRequestPolicyChangesOnlyForNewAcceptedFrame(t *testing.T) {
 	require.Equal(t, next, replay)
 	require.Equal(t, disabled, replayState.Policy)
 	third, thirdState := svc.prepareOpenAIWSFrameTimezone(ctx, c, account, body, false, false, accepted.Add(2*time.Hour))
-	require.Contains(t, gjson.GetBytes(third, "input").String(), OpenAIRequestTimezone)
+	require.Contains(t, gjson.GetBytes(third, "input.0.content.0.text").String(), OpenAIRequestTimezone)
 	require.Equal(t, enabled, thirdState.Policy)
 }
 
@@ -90,7 +90,7 @@ func TestOpenAIWSRequestTimezoneFailoverClonePreservesExpandedReplay(t *testing.
 	prepared, state := PrepareOpenAIRequestTimezone(body, openai.DefaultRequestPolicy(), accepted, false, true)
 	replay, err := json.Marshal(map[string]any{"type": "response.create", "model": "gpt-5.1", "input": []any{
 		map[string]any{"role": "assistant", "content": "retained replay history"},
-		map[string]any{"role": "user", "content": gjson.GetBytes(prepared, "input").String()},
+		map[string]any{"role": "user", "content": gjson.GetBytes(prepared, "input.0.content.0.text").String()},
 	}})
 	require.NoError(t, err)
 	err = withOpenAIWSCurrentTurnRetryTimezoneState(newOpenAIWSCurrentTurnFailoverError(errors.New("limited"), replay), state)
@@ -331,7 +331,7 @@ func TestOpenAIWSRequestPolicyActualHandshakeAndFrames(t *testing.T) {
 				case <-testCtx.Done():
 					t.Fatal(testCtx.Err())
 				}
-				text := gjson.GetBytes(frame, "input").String()
+				text := gjson.GetBytes(frame, "input.0.content.0.text").String()
 				require.NotContains(t, string(frame), openai.CodexResidencyHeaderName)
 				if turn == 1 {
 					require.Contains(t, text, OpenAIRequestTimezone)
@@ -445,12 +445,14 @@ func TestOpenAIWSRequestPolicyHTTPV2MapAndBridge(t *testing.T) {
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 		c.Set(openAIRequestTimezoneCaptureKey, &openAIRequestTimezoneCapture{acceptedAt: accepted})
 		result, err := svc.forwardOpenAIWSV2(context.Background(), c, account,
-			map[string]any{"model": "gpt-5.1", "input": timezoneWSEnvironment}, "", "", "test",
+			map[string]any{"model": "gpt-5.1", "input": []any{timezoneTestMessage(timezoneWSEnvironment)}}, "", "", "test",
 			OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, false, false, "gpt-5.1", "gpt-5.1", accepted, 1, "", nil)
 		require.NoError(t, err)
 		require.NotNil(t, result)
-		require.Contains(t, conn.lastWrite["input"], OpenAIRequestTimezone)
-		require.Contains(t, conn.lastWrite["input"], "2026-01-01")
+		wire, err := json.Marshal(conn.lastWrite)
+		require.NoError(t, err)
+		require.Contains(t, gjson.GetBytes(wire, "input.0.content.0.text").String(), OpenAIRequestTimezone)
+		require.Contains(t, gjson.GetBytes(wire, "input.0.content.0.text").String(), "2026-01-01")
 		require.Equal(t, []string{"us"}, dialer.lastHeaders.Values(openai.CodexResidencyHeaderName))
 	})
 	t.Run("ws_to_http_keeps_replay", func(t *testing.T) {
@@ -463,7 +465,7 @@ func TestOpenAIWSRequestPolicyHTTPV2MapAndBridge(t *testing.T) {
 		prepared, state := PrepareOpenAIRequestTimezone(timezoneWSBody(timezoneWSEnvironment), openai.DefaultRequestPolicy(), accepted, false, true)
 		SetRequestTimezoneState(c, state)
 		replay, err := json.Marshal(map[string]any{"type": "response.create", "model": "gpt-5.1", "input": []any{
-			map[string]any{"role": "assistant", "content": "retained"}, map[string]any{"role": "user", "content": gjson.GetBytes(prepared, "input").String()},
+			map[string]any{"role": "assistant", "content": "retained"}, map[string]any{"role": "user", "content": gjson.GetBytes(prepared, "input.0.content.0.text").String()},
 		}})
 		require.NoError(t, err)
 		result, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "test", replay, len(replay), "gpt-5.1", "", "", "", "", 1, func([]byte) error { return nil })

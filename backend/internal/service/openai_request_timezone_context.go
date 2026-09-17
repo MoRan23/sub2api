@@ -21,15 +21,33 @@ type openAIRequestTimezoneCapture struct {
 	inbound                  *TimezoneScanResult
 	states                   map[bool]*RequestTimezoneState
 	compactionInputReordered bool
+	alphaSearch              bool
 }
 
 // CaptureOpenAIRequestTimezone freezes the ingress clock and optional observation
 // before queuing, channel mapping, or account-specific request adaptation.
 func (s *OpenAIGatewayService) CaptureOpenAIRequestTimezone(c *gin.Context, body []byte) {
+	s.captureOpenAIRequestTimezoneSource(c, body, false)
+}
+
+// CaptureOpenAIAlphaSearchRequestTimezone is called only by the dedicated
+// standalone search entry. JSON shape alone is never authority to add settings.
+func (s *OpenAIGatewayService) CaptureOpenAIAlphaSearchRequestTimezone(c *gin.Context, body []byte) {
+	s.captureOpenAIRequestTimezoneSource(c, body, true)
+}
+
+func (s *OpenAIGatewayService) captureOpenAIRequestTimezoneSource(c *gin.Context, body []byte, alphaSearch bool) {
 	if c == nil {
 		return
 	}
-	if _, exists := c.Get(openAIRequestTimezoneCaptureKey); exists {
+	if raw, exists := c.Get(openAIRequestTimezoneCaptureKey); exists {
+		if capture, ok := raw.(*openAIRequestTimezoneCapture); ok && alphaSearch && !capture.alphaSearch {
+			capture.alphaSearch = true
+			capture.states = make(map[bool]*RequestTimezoneState)
+			if globalFingerprintObserver.enabled.Load() {
+				capture.inbound = &scanOpenAIRequestTimezonesWithSource(capture.body, true).result
+			}
+		}
 		return
 	}
 	acceptedAt := time.Now()
@@ -38,9 +56,9 @@ func (s *OpenAIGatewayService) CaptureOpenAIRequestTimezone(c *gin.Context, body
 		ctx = c.Request.Context()
 	}
 	s.freezeOpenAIRequestPolicy(ctx, c)
-	capture := &openAIRequestTimezoneCapture{acceptedAt: acceptedAt, body: bytes.Clone(body), states: make(map[bool]*RequestTimezoneState)}
+	capture := &openAIRequestTimezoneCapture{acceptedAt: acceptedAt, body: bytes.Clone(body), states: make(map[bool]*RequestTimezoneState), alphaSearch: alphaSearch}
 	if globalFingerprintObserver.enabled.Load() {
-		capture.inbound = ScanOpenAIRequestTimezones(body)
+		capture.inbound = &scanOpenAIRequestTimezonesWithSource(body, alphaSearch).result
 	}
 	c.Set(openAIRequestTimezoneCaptureKey, capture)
 }
@@ -140,6 +158,8 @@ func applyCapturedOpenAIRequestTimezone(c *gin.Context, capture *openAIRequestTi
 				active.Conversions[i].Reason = "source_changed_before_apply"
 				active.Conversions[i].Output = active.Conversions[i].Original
 				active.Conversions[i].DateAfter = active.Conversions[i].DateBefore
+				active.Conversions[i].LocationAfter = cloneRequestLocation(active.Conversions[i].LocationBefore)
+				active.Conversions[i].LocationAdded = false
 			}
 		}
 	}
@@ -172,7 +192,7 @@ func (s *OpenAIGatewayService) prepareOpenAIRequestTimezone(ctx context.Context,
 	if state, ok := capture.states[passthrough]; ok {
 		return applyCapturedOpenAIRequestTimezone(c, capture, state, body)
 	}
-	_, state := PrepareOpenAIRequestTimezone(capture.body, policy, capture.acceptedAt, passthrough, globalFingerprintObserver.enabled.Load())
+	_, state := prepareOpenAIRequestTimezoneBody(capture.body, policy, capture.acceptedAt, passthrough, globalFingerprintObserver.enabled.Load(), capture.alphaSearch)
 	state.Inbound = capture.inbound
 	capture.states[passthrough] = state
 	return applyCapturedOpenAIRequestTimezone(c, capture, state, body)

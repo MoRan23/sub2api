@@ -95,6 +95,12 @@ func canonicalizeRequestIntegrityCodex(body map[string]any, rules map[string]boo
 		if !ok {
 			continue
 		}
+		// This exact input-item field is stripped by the Codex compatibility
+		// adapter. Adjacent or nested unknown fields remain fully comparable.
+		if _, exists := item["internal_chat_message_metadata_passthrough"]; exists {
+			delete(item, "internal_chat_message_metadata_passthrough")
+			rules["codex_input_metadata_removed"] = true
+		}
 		if item["role"] == "tool" && requestIntegrityOnlyKeys(item, "type", "role", "content", "tool_call_id", "call_id", "id") {
 			callID := strings.TrimSpace(firstNonEmptyString(item["call_id"], item["tool_call_id"], item["id"]))
 			if output, lossless := requestIntegrityLosslessText(item["content"]); lossless && callID != "" {

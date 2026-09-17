@@ -48,10 +48,14 @@ func alphaSearchTimezoneResponse(route string) *http.Response {
 
 func requireAlphaSearchTimezoneWire(t *testing.T, route string, body []byte, timezone string) {
 	t.Helper()
-	expected, err := sjson.Set(alphaSearchTimezoneRequest, "settings.user_location.timezone", timezone)
+	expected := alphaSearchTimezoneRequest
+	var err error
+	if timezone == OpenAIRequestTimezone {
+		expected, err = sjson.Set(alphaSearchTimezoneRequest, "settings.user_location", openAIRequestSearchLocation())
+	}
 	require.NoError(t, err)
 	if route != "pat" {
-		require.JSONEq(t, expected, string(body), "only the structured search timezone may change")
+		require.JSONEq(t, expected, string(body), "only the structured search location may change")
 		return
 	}
 	require.JSONEq(t, gjson.Get(expected, "settings.user_location").Raw, gjson.GetBytes(body, "tools.0.user_location").Raw)

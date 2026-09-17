@@ -75,16 +75,20 @@ func cloneFingerprintTimezoneScan(scan *TimezoneScanResult) *TimezoneScanResult 
 	copy := *scan
 	if scan.Items != nil {
 		copy.Items = append([]TimezoneScanItem{}, scan.Items...)
+		for i := range copy.Items {
+			copy.Items[i].Location = cloneRequestLocation(copy.Items[i].Location)
+		}
 	}
 	return &copy
 }
 
 func cloneFingerprintObservationEntry(entry FingerprintObservationEntry) FingerprintObservationEntry {
 	entry.RequestIntegrity = CloneRequestIntegrityObservation(entry.RequestIntegrity)
+	entry.ConversionCheck = cloneOpenAIChatConversionCheck(entry.ConversionCheck)
 	entry.InboundTimezoneObservations = cloneFingerprintTimezoneScan(entry.InboundTimezoneObservations)
 	entry.OutboundTimezoneObservations = cloneFingerprintTimezoneScan(entry.OutboundTimezoneObservations)
 	if entry.TimezoneConversions != nil {
-		entry.TimezoneConversions = append([]TimezoneConversion{}, entry.TimezoneConversions...)
+		entry.TimezoneConversions = cloneTimezoneConversions(entry.TimezoneConversions)
 	}
 	return entry
 }
@@ -141,10 +145,10 @@ func populateFingerprintObservationTimezones(entry *FingerprintObservationEntry,
 	entry.TimezoneTarget = OpenAIRequestTimezone
 	if state != nil {
 		entry.InboundTimezoneObservations = cloneFingerprintTimezoneScan(state.Inbound)
-		entry.TimezoneConversions = append([]TimezoneConversion(nil), state.Conversions...)
+		entry.TimezoneConversions = cloneTimezoneConversions(state.Conversions)
 	}
 	if body != nil {
-		entry.OutboundTimezoneObservations = ScanOpenAIRequestTimezones(body)
+		entry.OutboundTimezoneObservations = &scanOpenAIRequestTimezonesWithSource(body, state != nil && state.alphaSearch).result
 	}
 	entry.TimezoneComparisonStatus = compareFingerprintObservationTimezones(entry, paths)
 }
@@ -166,9 +170,13 @@ func compareFingerprintObservationTimezones(entry *FingerprintObservationEntry, 
 	matchedOutbound := make(map[int]bool, len(outbound.Items))
 	for _, input := range inbound.Items {
 		expectedValue, expectedDate := input.Value, input.CurrentDate
+		expectedLocation := input.Location
+		converted := false
 		for _, conversion := range entry.TimezoneConversions {
 			if conversion.Source == input.Source && conversion.Path == input.Path && conversion.Status == "converted" {
 				expectedValue = conversion.Output
+				expectedLocation = conversion.LocationAfter
+				converted = true
 				if conversion.DateAfter != "" {
 					expectedDate = conversion.DateAfter
 				}
@@ -205,10 +213,13 @@ func compareFingerprintObservationTimezones(entry *FingerprintObservationEntry, 
 			case found >= 0:
 				matchedOutbound[found] = true
 				actual := outbound.Items[found]
-				if (input.Status == "invalid" && input.Value == "") || (actual.Status == "invalid" && actual.Value == "") {
+				missingUnchanged := !converted && input.Reason == "location_missing" && actual.Reason == "location_missing"
+				if !missingUnchanged && ((!converted && input.Status == "invalid" && input.Value == "") || (actual.Status == "invalid" && actual.Value == "")) {
 					status, reason = "unmatched", "value_not_observable"
 				} else if actual.Value != expectedValue || actual.CurrentDate != expectedDate {
 					status, reason = "mismatched", "final_value_differs"
+				} else if expectedLocation != nil && (actual.Location == nil || *actual.Location != *expectedLocation) {
+					status, reason = "mismatched", "final_location_differs"
 				}
 			case sameSource:
 				status, reason = "unmatched", "source_path_changed"

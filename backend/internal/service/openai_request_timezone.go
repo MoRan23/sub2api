@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -32,26 +33,44 @@ type TimezoneScanResult struct {
 }
 
 type TimezoneScanItem struct {
-	Source      string `json:"source"`
-	Path        string `json:"path"`
-	Value       string `json:"value"`
-	CurrentDate string `json:"current_date,omitempty"`
-	Current     bool   `json:"current"`
-	Status      string `json:"status,omitempty"`
-	Reason      string `json:"reason,omitempty"`
+	Source      string                      `json:"source"`
+	Path        string                      `json:"path"`
+	Value       string                      `json:"value"`
+	CurrentDate string                      `json:"current_date,omitempty"`
+	Current     bool                        `json:"current"`
+	Status      string                      `json:"status,omitempty"`
+	Reason      string                      `json:"reason,omitempty"`
+	Location    *RequestLocationObservation `json:"location,omitempty"`
+}
+
+// RequestLocationObservation contains only bounded, displayable location fields.
+// It never retains unknown location extensions or other request content.
+type RequestLocationObservation struct {
+	Type     string `json:"type"`
+	Country  string `json:"country"`
+	Region   string `json:"region"`
+	City     string `json:"city"`
+	Timezone string `json:"timezone"`
+}
+
+func openAIRequestSearchLocation() RequestLocationObservation {
+	return RequestLocationObservation{Type: "approximate", Country: "US", Region: "California", City: "Los Angeles", Timezone: OpenAIRequestTimezone}
 }
 
 type TimezoneConversion struct {
-	Source     string `json:"source"`
-	Path       string `json:"path"`
-	Original   string `json:"original"`
-	Output     string `json:"output"`
-	DateBefore string `json:"date_before,omitempty"`
-	DateAfter  string `json:"date_after,omitempty"`
-	Status     string `json:"status"`
-	Reason     string `json:"reason,omitempty"`
-	TimeBasis  string `json:"time_basis,omitempty"`
-	ReceivedAt string `json:"received_at,omitempty"`
+	Source         string                      `json:"source"`
+	Path           string                      `json:"path"`
+	Original       string                      `json:"original"`
+	Output         string                      `json:"output"`
+	DateBefore     string                      `json:"date_before,omitempty"`
+	DateAfter      string                      `json:"date_after,omitempty"`
+	Status         string                      `json:"status"`
+	Reason         string                      `json:"reason,omitempty"`
+	TimeBasis      string                      `json:"time_basis,omitempty"`
+	ReceivedAt     string                      `json:"received_at,omitempty"`
+	LocationBefore *RequestLocationObservation `json:"location_before,omitempty"`
+	LocationAfter  *RequestLocationObservation `json:"location_after,omitempty"`
+	LocationAdded  bool                        `json:"location_added,omitempty"`
 }
 
 // RequestTimezoneState is frozen at ingress, before account-specific adaptation.
@@ -63,9 +82,15 @@ type RequestTimezoneState struct {
 	Conversions  []TimezoneConversion
 	preparedBody []byte
 	patches      []requestTimezoneBodyPatch
+	alphaSearch  bool
 }
 
-type requestTimezoneBodyPatch struct{ path, original, prepared string }
+type requestTimezoneBodyPatch struct {
+	path, original, prepared string // Canonical JSON, including string quotes.
+	originalExists           bool
+	containerPath            string
+	toolType                 string
+}
 
 func (s *RequestTimezoneState) PreparedBody() []byte {
 	if s == nil {
@@ -85,20 +110,43 @@ func (s *RequestTimezoneState) ApplyToBody(body []byte) ([]byte, bool) {
 		return bytes.Clone(body), false
 	}
 	for _, patch := range s.patches {
+		if patch.containerPath != "" {
+			container := gjson.GetBytes(body, patch.containerPath)
+			if patch.toolType != "" {
+				if !gjson.GetBytes(body, "tools").IsArray() || !container.IsObject() || container.Get("type").String() != patch.toolType {
+					return bytes.Clone(body), false
+				}
+			} else if container.Exists() && !container.IsObject() {
+				return bytes.Clone(body), false
+			}
+		}
 		value := gjson.GetBytes(body, patch.path)
-		if value.Type != gjson.String || (value.String() != patch.original && value.String() != patch.prepared) {
+		if !value.Exists() && !patch.originalExists {
+			continue
+		}
+		canonical, ok := canonicalRequestTimezonePatch(value)
+		if !ok || (canonical != patch.original && canonical != patch.prepared) {
 			return bytes.Clone(body), false
 		}
 	}
 	output := bytes.Clone(body)
 	for _, patch := range s.patches {
 		var err error
-		output, err = sjson.SetBytes(output, patch.path, patch.prepared)
+		output, err = sjson.SetRawBytes(output, patch.path, []byte(patch.prepared))
 		if err != nil {
 			return bytes.Clone(body), false
 		}
 	}
 	return output, true
+}
+
+func canonicalRequestTimezonePatch(value gjson.Result) (string, bool) {
+	if !value.Exists() || len(value.Raw) > openAIRequestTimezoneTextLimit {
+		return "", false
+	}
+	budget := openAIRequestTimezoneProvenanceBudget{}
+	canonical, err := canonicalOpenAIRequestTimezoneProvenanceJSON([]byte(value.Raw), &budget)
+	return string(canonical), err == nil
 }
 
 func CloneRequestTimezoneState(s *RequestTimezoneState) *RequestTimezoneState {
@@ -108,12 +156,8 @@ func CloneRequestTimezoneState(s *RequestTimezoneState) *RequestTimezoneState {
 	copy := *s
 	copy.preparedBody = bytes.Clone(s.preparedBody)
 	copy.patches = append([]requestTimezoneBodyPatch(nil), s.patches...)
-	copy.Conversions = append([]TimezoneConversion(nil), s.Conversions...)
-	if s.Inbound != nil {
-		inbound := *s.Inbound
-		inbound.Items = append([]TimezoneScanItem{}, s.Inbound.Items...)
-		copy.Inbound = &inbound
-	}
+	copy.Conversions = cloneTimezoneConversions(s.Conversions)
+	copy.Inbound = cloneFingerprintTimezoneScan(s.Inbound)
 	return &copy
 }
 
@@ -142,6 +186,10 @@ type requestTimezoneOccurrence struct {
 	zoneStart, zoneEnd int
 	dateStart, dateEnd int
 	hasDate            bool
+	eligible           bool
+	locationPath       string
+	locationRaw        string
+	locationPresent    bool
 }
 
 type requestTimezoneScanner struct {
@@ -161,12 +209,18 @@ func ScanOpenAIRequestTimezones(body []byte) *TimezoneScanResult {
 // PrepareOpenAIRequestTimezone takes its clock from ingress. It is deterministic
 // for a given body, policy and acceptedAt, including during failover at midnight.
 func PrepareOpenAIRequestTimezone(body []byte, policy openai.RequestPolicy, acceptedAt time.Time, passthrough, observe bool) ([]byte, *RequestTimezoneState) {
-	state := &RequestTimezoneState{Policy: policy, AcceptedAt: acceptedAt, preparedBody: bytes.Clone(body)}
+	return prepareOpenAIRequestTimezoneBody(body, policy, acceptedAt, passthrough, observe, false)
+}
+
+// alphaSearch is an explicit ingress classification, not a guess based on JSON
+// shape. Only a search_query may create an absent standalone search location.
+func prepareOpenAIRequestTimezoneBody(body []byte, policy openai.RequestPolicy, acceptedAt time.Time, passthrough, observe, alphaSearch bool) ([]byte, *RequestTimezoneState) {
+	state := &RequestTimezoneState{Policy: policy, AcceptedAt: acceptedAt, preparedBody: bytes.Clone(body), alphaSearch: alphaSearch}
 	enabled := policy.TimezoneConversionEnabled && (!passthrough || policy.PassthroughTimezoneConversionEnabled)
 	if !enabled && !observe {
 		return bytes.Clone(body), state
 	}
-	scan := scanOpenAIRequestTimezones(body)
+	scan := scanOpenAIRequestTimezonesWithSource(body, alphaSearch)
 	if observe {
 		state.Inbound = &scan.result
 	}
@@ -185,16 +239,24 @@ func PrepareOpenAIRequestTimezone(body []byte, policy openai.RequestPolicy, acce
 		switch {
 		case !enabled:
 			report.Status, report.Reason = "disabled", "conversion_disabled"
-		case occurrence.item.Status != "valid":
+		case !occurrence.eligible:
+			report.Status, report.Reason = "skipped", "environment_metadata_missing"
+			if !occurrence.environment {
+				report.Reason = "standalone_search_source_required"
+				if occurrence.item.Reason == "location_container_not_object" {
+					report.Reason = occurrence.item.Reason
+				}
+			}
+		case occurrence.environment && occurrence.item.Status != "valid":
 			report.Status, report.Reason = "skipped", occurrence.item.Reason
 		case locationErr != nil:
 			report.Status, report.Reason = "skipped", "target_timezone_unavailable"
 		case occurrence.hasDate && occurrence.item.Current && acceptedAt.IsZero():
 			report.Status, report.Reason = "skipped", "accepted_at_unavailable"
 		default:
-			output := OpenAIRequestTimezone
+			patch := requestTimezoneBodyPatch{path: occurrence.item.Path, originalExists: true}
 			if occurrence.environment {
-				output = occurrence.text
+				output := occurrence.text
 				// Apply text replacements backwards so both offsets describe the
 				// original environment block, regardless of tag ordering.
 				replacements := []timezoneTextReplacement{{occurrence.zoneStart, occurrence.zoneEnd, OpenAIRequestTimezone}}
@@ -212,14 +274,25 @@ func PrepareOpenAIRequestTimezone(body []byte, policy openai.RequestPolicy, acce
 				for _, replacement := range replacements {
 					output = output[:replacement.start] + replacement.value + output[replacement.end:]
 				}
-			}
-			originalValue := occurrence.item.Value
-			if occurrence.environment {
-				originalValue = occurrence.text
+				original, _ := json.Marshal(occurrence.text)
+				preparedText, _ := json.Marshal(output)
+				patch.original, patch.prepared = string(original), string(preparedText)
+			} else {
+				location := openAIRequestSearchLocation()
+				encoded, _ := json.Marshal(location)
+				canonical, _ := canonicalRequestTimezonePatch(gjson.ParseBytes(encoded))
+				patch.path, patch.originalExists = occurrence.locationPath, occurrence.locationPresent
+				patch.original, patch.prepared = occurrence.locationRaw, canonical
+				patch.containerPath = strings.TrimSuffix(occurrence.locationPath, ".user_location")
+				if strings.HasPrefix(patch.containerPath, "tools.") {
+					patch.toolType = gjson.GetBytes(body, patch.containerPath+".type").String()
+				}
+				report.LocationAfter = &location
+				report.LocationAdded = !occurrence.locationPresent
 			}
 			var err error
-			if originalValue != output {
-				prepared, err = sjson.SetBytes(prepared, occurrence.item.Path, output)
+			if !patch.originalExists || patch.original != patch.prepared {
+				prepared, err = sjson.SetRawBytes(prepared, patch.path, []byte(patch.prepared))
 			}
 			if err != nil {
 				// A partial patch must not escape. This is defensive: all paths
@@ -228,21 +301,30 @@ func PrepareOpenAIRequestTimezone(body []byte, policy openai.RequestPolicy, acce
 					state.Conversions[i].Status, state.Conversions[i].Reason = "skipped", "patch_failed"
 					state.Conversions[i].Output = state.Conversions[i].Original
 					state.Conversions[i].DateAfter = state.Conversions[i].DateBefore
+					state.Conversions[i].LocationAfter = cloneRequestLocation(state.Conversions[i].LocationBefore)
+					state.Conversions[i].LocationAdded = false
 				}
 				report.Status, report.Reason = "skipped", "patch_failed"
+				report.LocationAfter, report.LocationAdded = cloneRequestLocation(report.LocationBefore), false
 				state.Conversions = append(state.Conversions, report)
 				state.patches = nil
 				return bytes.Clone(body), state
 			}
-			if originalValue != output {
-				state.patches = append(state.patches, requestTimezoneBodyPatch{occurrence.item.Path, originalValue, output})
+			if !patch.originalExists || patch.original != patch.prepared {
+				state.patches = append(state.patches, patch)
 			}
 			report.Output = OpenAIRequestTimezone
 			report.Status, report.Reason = "converted", "timezone_converted"
 			if occurrence.environment && !occurrence.item.Current {
 				report.Reason = "historical_timezone_converted"
 			}
-			if report.Original == report.Output && report.DateBefore == report.DateAfter {
+			if !occurrence.environment {
+				report.Reason = "location_normalized"
+				if report.LocationAdded {
+					report.Reason = "location_added"
+				}
+			}
+			if patch.originalExists && patch.original == patch.prepared {
 				report.Status, report.Reason = "unchanged", "already_target"
 			}
 		}
@@ -258,10 +340,14 @@ type timezoneTextReplacement struct {
 }
 
 func newTimezoneConversion(item TimezoneScanItem) TimezoneConversion {
-	return TimezoneConversion{Source: item.Source, Path: item.Path, Original: item.Value, Output: item.Value, DateBefore: item.CurrentDate, DateAfter: item.CurrentDate}
+	return TimezoneConversion{Source: item.Source, Path: item.Path, Original: item.Value, Output: item.Value, DateBefore: item.CurrentDate, DateAfter: item.CurrentDate, LocationBefore: cloneRequestLocation(item.Location), LocationAfter: cloneRequestLocation(item.Location)}
 }
 
 func scanOpenAIRequestTimezones(body []byte) *requestTimezoneScanner {
+	return scanOpenAIRequestTimezonesWithSource(body, false)
+}
+
+func scanOpenAIRequestTimezonesWithSource(body []byte, alphaSearch bool) *requestTimezoneScanner {
 	s := &requestTimezoneScanner{result: TimezoneScanResult{ScanStatus: "complete", Items: []TimezoneScanItem{}}}
 	if !gjson.ValidBytes(body) {
 		s.result.ScanStatus = "parse_failed"
@@ -275,7 +361,7 @@ func scanOpenAIRequestTimezones(body []byte) *requestTimezoneScanner {
 	input := root.Get("input")
 	if input.Exists() {
 		if input.Type == gjson.String {
-			s.scanText(input.String(), "input", true)
+			s.scanText(input.String(), "input", false, false)
 		} else if input.IsArray() {
 			s.scanMessages(input, "input")
 		}
@@ -291,17 +377,25 @@ func scanOpenAIRequestTimezones(body []byte) *requestTimezoneScanner {
 				}
 				typeName := tool.Get("type").String()
 				if isRequestTimezoneWebSearchType(typeName) {
-					s.scanSearchTimezone(tool.Get("user_location.timezone"), fmt.Sprintf("tools.%d.user_location.timezone", index))
+					s.scanSearchLocation(tool.Get("user_location"), fmt.Sprintf("tools.%d.user_location", index), true)
 				}
 				index++
 				return s.result.ScanStatus == "complete"
 			})
 		}
 	}
-	// Standalone alpha/search carries the search location outside tools. Only
-	// inspect a supplied location; commands.time is the requested query timezone.
-	if s.result.ScanStatus == "complete" && root.Get("settings.user_location").Exists() && s.countNode() {
-		s.scanSearchTimezone(root.Get("settings.user_location.timezone"), "settings.user_location.timezone")
+	// Never infer the endpoint from a payload's shape. A pure time query retains
+	// its requested offset and does not acquire a search location.
+	location := root.Get("settings.user_location")
+	queries := root.Get("commands.search_query")
+	addAlphaLocation := alphaSearch && queries.IsArray() && queries.Get("#").Int() > 0
+	if s.result.ScanStatus == "complete" && (location.Exists() || addAlphaLocation) && s.countNode() {
+		settings := root.Get("settings")
+		if alphaSearch && settings.Exists() && !settings.IsObject() {
+			s.add(requestTimezoneOccurrence{locationPath: "settings.user_location", item: TimezoneScanItem{Source: "web_search", Path: "settings.user_location.timezone", Current: true, Status: "invalid", Reason: "location_container_not_object"}})
+		} else {
+			s.scanSearchLocation(location, "settings.user_location", alphaSearch)
+		}
 	}
 	for _, occurrence := range s.occurrences {
 		s.result.Items = append(s.result.Items, occurrence.item)
@@ -344,8 +438,9 @@ func (s *requestTimezoneScanner) scanMessages(messages gjson.Result, path string
 		}
 		before := len(s.occurrences)
 		if content.Type == gjson.String {
-			s.scanText(content.String(), fmt.Sprintf("%s.%d.content", path, i), current)
+			s.scanText(content.String(), fmt.Sprintf("%s.%d.content", path, i), false, false)
 		} else if content.IsArray() {
+			kinds := message.Get("internal_chat_message_metadata_passthrough.content_item_kinds")
 			content.ForEach(func(key, part gjson.Result) bool {
 				if !s.countNode() {
 					return false
@@ -354,7 +449,9 @@ func (s *requestTimezoneScanner) scanMessages(messages gjson.Result, path string
 				if text.Type == gjson.String {
 					kind := part.Get("type").String()
 					if kind == "" || kind == "text" || kind == "input_text" {
-						s.scanText(text.String(), fmt.Sprintf("%s.%d.content.%d.text", path, i, key.Int()), current)
+						marker := kinds.Get(fmt.Sprintf("%d", key.Int()))
+						eligible := current && kind == "input_text" && kinds.IsArray() && marker.Type == gjson.String && marker.String() == "environments.environment_context"
+						s.scanText(text.String(), fmt.Sprintf("%s.%d.content.%d.text", path, i, key.Int()), eligible, eligible)
 					} else {
 						s.countText(text.String())
 					}
@@ -362,16 +459,22 @@ func (s *requestTimezoneScanner) scanMessages(messages gjson.Result, path string
 				return s.result.ScanStatus == "complete"
 			})
 		}
-		if current && len(s.occurrences) > before {
+		candidate := -1
+		for j := before; j < len(s.occurrences); j++ {
+			if s.occurrences[j].eligible {
+				candidate = j
+			}
+		}
+		if current && candidate >= 0 {
 			if lastCurrent >= 0 {
 				s.markHistorical(lastCurrent)
 			}
 			// Only the final candidate in the tail is current, even if it is
 			// malformed or quoted; never refresh an earlier block's date instead.
-			for j := before; j < len(s.occurrences)-1; j++ {
+			for j := before; j < candidate; j++ {
 				s.markHistorical(j)
 			}
-			lastCurrent = len(s.occurrences) - 1
+			lastCurrent = candidate
 		}
 		return s.result.ScanStatus == "complete"
 	})
@@ -410,14 +513,14 @@ func (s *requestTimezoneScanner) add(occurrence requestTimezoneOccurrence) {
 	s.occurrences = append(s.occurrences, occurrence)
 }
 
-func (s *requestTimezoneScanner) scanText(text, path string, current bool) {
+func (s *requestTimezoneScanner) scanText(text, path string, current, eligible bool) {
 	if !s.countText(text) {
 		return
 	}
 	if countRequestTimezoneTag(text, "environment_context", false) == 0 && countRequestTimezoneTag(text, "environment_context", true) == 0 {
 		return
 	}
-	occurrence := requestTimezoneOccurrence{environment: true, text: text, item: TimezoneScanItem{Source: "environment_context", Path: path, Current: current, Status: "invalid", Reason: "environment_not_standalone"}}
+	occurrence := requestTimezoneOccurrence{environment: true, eligible: eligible, text: text, item: TimezoneScanItem{Source: "environment_context", Path: path, Current: current, Status: "invalid", Reason: "environment_not_standalone"}}
 	trimmed := strings.TrimSpace(text)
 	const open, close = "<environment_context>", "</environment_context>"
 	if !strings.HasPrefix(trimmed, open) || !strings.HasSuffix(trimmed, close) || countRequestTimezoneTag(text, "environment_context", false) != 1 || countRequestTimezoneTag(text, "environment_context", true) != 1 {
@@ -563,19 +666,52 @@ func countRequestTimezoneTag(text, name string, closing bool) int {
 	}
 }
 
-func (s *requestTimezoneScanner) scanSearchTimezone(value gjson.Result, path string) {
-	occurrence := requestTimezoneOccurrence{item: TimezoneScanItem{Source: "web_search", Path: path, Current: true, Status: "invalid"}}
+func (s *requestTimezoneScanner) scanSearchLocation(location gjson.Result, path string, eligible bool) {
+	occurrence := requestTimezoneOccurrence{eligible: eligible, locationPath: path, locationPresent: location.Exists(), item: TimezoneScanItem{Source: "web_search", Path: path + ".timezone", Current: true, Status: "invalid"}}
+	if location.Exists() {
+		if !s.countText(location.Raw) {
+			return
+		}
+		budget := openAIRequestTimezoneProvenanceBudget{nodes: s.nodes, textBytes: s.textBytes}
+		canonical, err := canonicalOpenAIRequestTimezoneProvenanceJSON([]byte(location.Raw), &budget)
+		s.nodes = budget.nodes
+		if err != nil {
+			s.result.ScanStatus = "limited"
+			return
+		}
+		occurrence.locationRaw = string(canonical)
+	}
+	if location.IsObject() {
+		observed := &RequestLocationObservation{}
+		for _, field := range []struct {
+			name   string
+			target *string
+		}{
+			{"type", &observed.Type}, {"country", &observed.Country}, {"region", &observed.Region}, {"city", &observed.City}, {"timezone", &observed.Timezone},
+		} {
+			value := location.Get(field.name)
+			if value.Type == gjson.String {
+				if len(value.String()) > openAIRequestTimezoneValueLimit {
+					s.result.ScanStatus = "limited"
+					return
+				}
+				*field.target = value.String()
+			}
+		}
+		occurrence.item.Location = observed
+	}
+	value := location.Get("timezone")
 	if !value.Exists() {
 		occurrence.item.Reason = "timezone_missing"
+		if !location.Exists() {
+			occurrence.item.Reason = "location_missing"
+		}
 	} else if value.Type == gjson.Null {
 		occurrence.item.Reason = "timezone_null"
 	} else if value.Type != gjson.String {
 		occurrence.item.Reason = "timezone_not_string"
 	} else {
 		zone := value.String()
-		if !s.countText(zone) {
-			return
-		}
 		if len(zone) > openAIRequestTimezoneValueLimit {
 			s.result.ScanStatus = "limited"
 			return
@@ -588,6 +724,26 @@ func (s *requestTimezoneScanner) scanSearchTimezone(value gjson.Result, path str
 		}
 	}
 	s.add(occurrence)
+}
+
+func cloneRequestLocation(location *RequestLocationObservation) *RequestLocationObservation {
+	if location == nil {
+		return nil
+	}
+	copy := *location
+	return &copy
+}
+
+func cloneTimezoneConversions(conversions []TimezoneConversion) []TimezoneConversion {
+	if conversions == nil {
+		return nil
+	}
+	result := append([]TimezoneConversion{}, conversions...)
+	for i := range result {
+		result[i].LocationBefore = cloneRequestLocation(result[i].LocationBefore)
+		result[i].LocationAfter = cloneRequestLocation(result[i].LocationAfter)
+	}
+	return result
 }
 
 func validRequestTimezone(zone string) bool {

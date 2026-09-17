@@ -343,7 +343,42 @@ func TestOpenAIRequestIntegrityTimezoneRequiresFrozenExactRewrite(t *testing.T) 
 
 	got = state.Check(integrityTestAccount(), prepared, RequestIntegrityCheckOptions{})
 	require.Equal(t, "difference", got.Status, "a matching target zone is not enough without frozen conversion evidence")
-	changedCountry := bytes.ReplaceAll(prepared, []byte(`"JP"`), []byte(`"US"`))
+	changedCountry := bytes.ReplaceAll(prepared, []byte(`"US"`), []byte(`"FR"`))
 	got = state.Check(integrityTestAccount(), changedCountry, RequestIntegrityCheckOptions{TimezoneState: timezone})
 	require.Equal(t, "difference", got.Status, "timezone evidence must not approve other location changes")
+}
+
+func TestOpenAIRequestIntegrityLocationAdditionRequiresFrozenSource(t *testing.T) {
+	baseline := []byte(`{"input":"hello","tools":[{"type":"web_search_preview"}]}`)
+	prepared, timezone := PrepareOpenAIRequestTimezone(baseline, openai.DefaultRequestPolicy(), time.Now(), false, true)
+	state := NewOpenAIRequestIntegrityState(true, "responses", baseline)
+	require.Equal(t, "expected_transform", state.Check(integrityTestAccount(), prepared, RequestIntegrityCheckOptions{TimezoneState: timezone}).Status)
+	require.Equal(t, "difference", state.Check(integrityTestAccount(), prepared, RequestIntegrityCheckOptions{}).Status)
+	changed := bytes.ReplaceAll(prepared, []byte(`"California"`), []byte(`"Ohio"`))
+	require.Equal(t, "difference", state.Check(integrityTestAccount(), changed, RequestIntegrityCheckOptions{TimezoneState: timezone}).Status)
+	other := bytes.ReplaceAll(baseline, []byte(`"web_search_preview"`), []byte(`"web_search"`))
+	_, unrelated := PrepareOpenAIRequestTimezone(other, openai.DefaultRequestPolicy(), time.Now(), false, true)
+	// A frozen location patch alone does not authorize changing the tool type.
+	changed = bytes.ReplaceAll(prepared, []byte(`"web_search_preview"`), []byte(`"web_search"`))
+	require.Equal(t, "difference", state.Check(integrityTestAccount(), changed, RequestIntegrityCheckOptions{TimezoneState: unrelated}).Status)
+}
+
+func TestOpenAIRequestIntegrityAllowsOnlyKnownInputMetadataRemoval(t *testing.T) {
+	body := timezoneTestBody(t, map[string]any{"input": []any{timezoneTestMessage(timezoneTestEnvironment("Asia/Tokyo", "2026-09-10"))}})
+	prepared, timezone := PrepareOpenAIRequestTimezone(body, openai.DefaultRequestPolicy(), timezoneTestAcceptedAt(), false, true)
+	actual, changed, err := normalizeOpenAIOAuthResponsesCompatibilityBody(prepared)
+	require.NoError(t, err)
+	require.True(t, changed)
+	state := NewOpenAIRequestIntegrityState(true, "responses", body)
+	result := state.Check(integrityTestAccount(), actual, RequestIntegrityCheckOptions{TimezoneState: timezone})
+	require.Equal(t, "expected_transform", result.Status)
+	require.Contains(t, result.RuleCodes, "codex_input_metadata_removed")
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(body, &decoded))
+	decoded["input"].([]any)[0].(map[string]any)["unrelated_private_metadata"] = "must remain"
+	withUnknown, err := json.Marshal(decoded)
+	require.NoError(t, err)
+	_, timezone = PrepareOpenAIRequestTimezone(withUnknown, openai.DefaultRequestPolicy(), timezoneTestAcceptedAt(), false, true)
+	state = NewOpenAIRequestIntegrityState(true, "responses", withUnknown)
+	require.Equal(t, "difference", state.Check(integrityTestAccount(), actual, RequestIntegrityCheckOptions{TimezoneState: timezone}).Status)
 }

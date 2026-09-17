@@ -17,7 +17,7 @@ import (
 
 func TestOpenAIRequestTimezoneIngressSnapshotSurvivesBootstrap(t *testing.T) {
 	body := timezoneTestBody(t, map[string]any{"input": []any{
-		map[string]any{"role": "user", "content": timezoneTestEnvironment("Asia/Shanghai", "2020-01-01")},
+		timezoneTestMessage(timezoneTestEnvironment("Asia/Shanghai", "2020-01-01")),
 		map[string]any{"type": "function_call_output", "output": "heartbeat"},
 	}})
 	c, _ := newOpenAIIdentityPathContext(t, "/responses", body, 10)
@@ -26,7 +26,7 @@ func TestOpenAIRequestTimezoneIngressSnapshotSurvivesBootstrap(t *testing.T) {
 	adapted, err := sjson.SetBytes(body, "input.1", map[string]any{"role": "user", "content": "heartbeat"})
 	require.NoError(t, err)
 	out := svc.prepareOpenAIRequestTimezone(c.Request.Context(), c, newOpenAIIdentityPathAPIKeyAccount(1), adapted, false)
-	expected, err := sjson.SetBytes(adapted, "input.0.content", timezoneTestEnvironment(OpenAIRequestTimezone, "2020-01-01"))
+	expected, err := sjson.SetBytes(adapted, "input.0.content.0.text", timezoneTestEnvironment(OpenAIRequestTimezone, "2020-01-01"))
 	require.NoError(t, err)
 	require.JSONEq(t, string(expected), string(out), "bootstrap role changes must not refresh a historical date")
 }
@@ -34,7 +34,7 @@ func TestOpenAIRequestTimezoneIngressSnapshotSurvivesBootstrap(t *testing.T) {
 func TestOpenAIRequestTimezoneIngressSnapshotMapsCompactionReorder(t *testing.T) {
 	body := timezoneTestBody(t, map[string]any{"input": []any{
 		map[string]any{"type": "compaction_trigger"},
-		map[string]any{"role": "user", "content": timezoneTestEnvironment("Asia/Shanghai", "2020-01-01")},
+		timezoneTestMessage(timezoneTestEnvironment("Asia/Shanghai", "2020-01-01")),
 	}, "model": "original"})
 	c, _ := newOpenAIIdentityPathContext(t, "/responses", body, 11)
 	svc := &OpenAIGatewayService{}
@@ -48,8 +48,8 @@ func TestOpenAIRequestTimezoneIngressSnapshotMapsCompactionReorder(t *testing.T)
 	adapted, err = sjson.SetBytes(adapted, "model", "mapped-account-model")
 	require.NoError(t, err)
 	out := svc.prepareOpenAIRequestTimezone(c.Request.Context(), c, newOpenAIIdentityPathAPIKeyAccount(1), adapted, false)
-	require.Contains(t, gjson.GetBytes(out, "input.0.content").String(), "<current_date>2026-09-09</current_date>")
-	require.Contains(t, gjson.GetBytes(out, "input.0.content").String(), OpenAIRequestTimezone)
+	require.Contains(t, gjson.GetBytes(out, "input.0.content.0.text").String(), "<current_date>2026-09-09</current_date>")
+	require.Contains(t, gjson.GetBytes(out, "input.0.content.0.text").String(), OpenAIRequestTimezone)
 	require.Equal(t, "compaction_trigger", gjson.GetBytes(out, "input.1.type").String())
 	require.Equal(t, "mapped-account-model", gjson.GetBytes(out, "model").String())
 	second := svc.prepareOpenAIRequestTimezone(context.Background(), c, newOpenAIIdentityPathAPIKeyAccount(2), adapted, false)
@@ -57,7 +57,7 @@ func TestOpenAIRequestTimezoneIngressSnapshotMapsCompactionReorder(t *testing.T)
 }
 
 func TestOpenAIRequestTimezonePolicyIsFrozenAndPassthroughIndependent(t *testing.T) {
-	body := timezoneTestBody(t, map[string]any{"input": timezoneTestEnvironment("Asia/Shanghai", "2020-01-01")})
+	body := timezoneTestBody(t, map[string]any{"input": []any{timezoneTestMessage(timezoneTestEnvironment("Asia/Shanghai", "2020-01-01"))}})
 	c, _ := newOpenAIIdentityPathContext(t, "/responses", body, 12)
 	policy := openai.DefaultRequestPolicy()
 	policy.PassthroughTimezoneConversionEnabled = false
@@ -69,7 +69,7 @@ func TestOpenAIRequestTimezonePolicyIsFrozenAndPassthroughIndependent(t *testing
 	account := newOpenAIIdentityPathAPIKeyAccount(1)
 	require.Equal(t, body, svc.prepareOpenAIRequestTimezone(context.Background(), c, account, body, true))
 	out := svc.prepareOpenAIRequestTimezone(context.Background(), c, account, body, false)
-	require.Contains(t, gjson.GetBytes(out, "input").String(), "2026-09-09")
+	require.Contains(t, gjson.GetBytes(out, "input.0.content.0.text").String(), "2026-09-09")
 	state, ok := RequestTimezoneStateFromContext(c)
 	require.True(t, ok)
 	require.Equal(t, timezoneTestAcceptedAt(), state.AcceptedAt)
@@ -108,6 +108,8 @@ func TestOpenAIRequestTimezoneHTTPWire(t *testing.T) {
 				payload["messages"] = input
 				path = "/v1/chat/completions"
 			} else {
+				input[0] = timezoneTestMessage(timezoneTestEnvironment("Asia/Tokyo", "2026-01-02"))
+				input[2] = timezoneTestMessage(timezoneTestEnvironment("Asia/Shanghai", "2026-09-10"))
 				payload["input"] = input
 			}
 			if route == "messages" {
@@ -173,24 +175,29 @@ func TestOpenAIRequestTimezoneHTTPWire(t *testing.T) {
 			require.NoError(t, err)
 			select {
 			case actual := <-received:
+				compat := route == "chat" || route == "messages" || route == "raw_chat"
+				firstZone, lastZone, lastDate, reason := OpenAIRequestTimezone, OpenAIRequestTimezone, "2026-09-09", "historical_timezone_converted"
+				if compat {
+					firstZone, lastZone, lastDate, reason = "Asia/Tokyo", "Asia/Shanghai", "2026-09-10", "environment_metadata_missing"
+				}
 				require.Equal(t, []string{"us"}, actual.headers.Values(openai.CodexResidencyHeaderName))
 				scan := ScanOpenAIRequestTimezones(actual.body)
 				require.Equal(t, "complete", scan.ScanStatus)
 				require.Len(t, scan.Items, 2)
-				require.Equal(t, OpenAIRequestTimezone, scan.Items[0].Value)
+				require.Equal(t, firstZone, scan.Items[0].Value)
 				require.Equal(t, "2026-01-02", scan.Items[0].CurrentDate)
 				require.False(t, scan.Items[0].Current)
-				require.Equal(t, OpenAIRequestTimezone, scan.Items[1].Value)
-				require.Equal(t, "2026-09-09", scan.Items[1].CurrentDate)
+				require.Equal(t, lastZone, scan.Items[1].Value)
+				require.Equal(t, lastDate, scan.Items[1].CurrentDate)
 				entries := SnapshotFingerprintObservations(0)
 				require.NotEmpty(t, entries)
 				require.Equal(t, "us", entries[0].OutboundCodexResidency)
 				require.NotNil(t, entries[0].InboundTimezoneObservations)
 				require.Equal(t, "Asia/Tokyo", entries[0].InboundTimezoneObservations.Items[0].Value)
 				require.Equal(t, "Asia/Shanghai", entries[0].InboundTimezoneObservations.Items[1].Value)
-				require.Equal(t, OpenAIRequestTimezone, entries[0].OutboundTimezoneObservations.Items[0].Value)
+				require.Equal(t, firstZone, entries[0].OutboundTimezoneObservations.Items[0].Value)
 				require.Equal(t, "matched", entries[0].TimezoneComparisonStatus)
-				require.Equal(t, "historical_timezone_converted", entries[0].TimezoneConversions[0].Reason)
+				require.Equal(t, reason, entries[0].TimezoneConversions[0].Reason)
 				require.Equal(t, "2026-01-02", entries[0].TimezoneConversions[0].DateAfter)
 			case <-time.After(time.Second):
 				t.Fatal("no upstream request received")
@@ -199,20 +206,31 @@ func TestOpenAIRequestTimezoneHTTPWire(t *testing.T) {
 	}
 }
 
-func TestOpenAIRequestTimezoneChatObservationTracksRemovedTool(t *testing.T) {
+func TestOpenAIRequestTimezoneChatObservationRejectsUnsupportedTool(t *testing.T) {
 	enableOpenAIIdentityPathFingerprintObservation(t)
 	body := []byte(`{"model":"gpt-5.4","stream":false,"messages":[{"role":"user","content":"hello"}],"tools":[{"type":"web_search_preview","user_location":{"timezone":"Asia/Shanghai"}},{"type":"web_search","user_location":{"timezone":"Europe/London"}}]}`)
 	c, _ := newOpenAIIdentityPathContext(t, "/v1/chat/completions", body, 31)
 	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_timezone_tools", "gpt-5.4")}
 	svc, _ := newOpenAIIdentityPathService(t, true, upstream)
 	_, err := svc.ForwardAsChatCompletions(context.Background(), c, newOpenAIIdentityPathOAuthAccount(73), body, "timezone-tools", "")
+	require.ErrorContains(t, err, "unsupported_tool_type")
+	require.Nil(t, upstream.lastReq, "location normalization must not bypass the compatibility validator")
+}
+
+func TestOpenAIRequestTimezoneChatObservationKeepsLocationAfterAdapter(t *testing.T) {
+	enableOpenAIIdentityPathFingerprintObservation(t)
+	body := []byte(`{"model":"gpt-5.4","stream":false,"messages":[{"role":"user","content":"hello"}],"tools":[{"type":"web_search"}]}`)
+	c, _ := newOpenAIIdentityPathContext(t, "/v1/chat/completions", body, 31)
+	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_timezone_tools", "gpt-5.4")}
+	svc, _ := newOpenAIIdentityPathService(t, true, upstream)
+	_, err := svc.ForwardAsChatCompletions(context.Background(), c, newOpenAIIdentityPathOAuthAccount(73), body, "timezone-tools", "")
 	require.NoError(t, err)
-	require.Equal(t, int64(1), gjson.GetBytes(upstream.lastBody, "tools.#").Int())
-	require.Equal(t, OpenAIRequestTimezone, gjson.GetBytes(upstream.lastBody, "tools.0.user_location.timezone").String())
+	require.Equal(t, "Los Angeles", gjson.GetBytes(upstream.lastBody, "tools.0.user_location.city").String())
 	entries := SnapshotFingerprintObservations(0)
 	require.Len(t, entries, 1)
-	require.Len(t, entries[0].TimezoneConversions, 2)
-	require.Equal(t, "not_sent", entries[0].TimezoneConversions[0].Status)
-	require.Equal(t, "adapter_removed_source", entries[0].TimezoneConversions[0].Reason)
-	require.Equal(t, "converted", entries[0].TimezoneConversions[1].Status)
+	require.Equal(t, "matched", entries[0].TimezoneComparisonStatus)
+	require.Len(t, entries[0].TimezoneConversions, 1)
+	require.True(t, entries[0].TimezoneConversions[0].LocationAdded)
+	require.Nil(t, entries[0].TimezoneConversions[0].LocationBefore)
+	require.Equal(t, openAIRequestSearchLocation(), *entries[0].OutboundTimezoneObservations.Items[0].Location)
 }

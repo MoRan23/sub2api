@@ -88,7 +88,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		h.openAISecurityAuditError(c, decision)
 		return
 	}
-	h.gatewayService.CaptureOpenAIRequestTimezone(c, body)
+	h.gatewayService.CaptureOpenAIAlphaSearchRequestTimezone(c, body)
 
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, requestedModel)
 	forwardBody := openAIModelMappedBody(body, channelMapping.Mapped, channelMapping.MappedModel, h.gatewayService.ReplaceModelInBody)

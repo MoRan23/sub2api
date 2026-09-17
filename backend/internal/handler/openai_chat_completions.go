@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
@@ -69,6 +70,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
+	// Inspect the original Chat shape before policies or typed decoding can drop
+	// semantic fields. Enforcement waits until the selected account is known.
+	service.PrepareOpenAIChatConversionCheck(c, body)
 	service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentityForCompatTurn(c, body, ""))
 	h.gatewayService.CaptureOpenAIRequestTimezone(c, body)
 
@@ -218,6 +222,13 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			return
 		}
 		account := selection.Account
+		if err := service.ValidateOpenAIChatConversionForAccount(c, account); err != nil {
+			if selection.Acquired && selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", err.Error(), streamStarted)
+			return
+		}
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai_chat_completions.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		_ = scheduleDecision
@@ -252,6 +263,12 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			}()
 			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
 		}()
+		// A conversion failure is a client error, including if the user queue has
+		// already emitted an SSE keepalive. Do not account usage or penalize/retry
+		// the selected upstream for a request that was never sent.
+		if h.handleOpenAIChatConversionError(c, err, streamStarted) {
+			return
+		}
 		var cyberBlockBodyChat []byte
 		if service.GetOpsCyberPolicy(c) != nil {
 			cyberBlockBodyChat = body
@@ -413,6 +430,15 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		)
 		return
 	}
+}
+
+func (h *OpenAIGatewayHandler) handleOpenAIChatConversionError(c *gin.Context, err error, streamStarted bool) bool {
+	var conversionErr *apicompat.ChatConversionError
+	if !errors.As(err, &conversionErr) {
+		return false
+	}
+	h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", conversionErr.Error(), streamStarted)
+	return true
 }
 
 // resolveOpenAIUpstreamEndpoint returns the actual upstream endpoint for an
