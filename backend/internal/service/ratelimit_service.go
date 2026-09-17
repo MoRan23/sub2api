@@ -1212,8 +1212,19 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 
 	// 3. 尝试从响应头解析重置时间（Anthropic 聚合头，向后兼容）
 	resetTimestamp := headers.Get("anthropic-ratelimit-unified-reset")
+	var ts int64
+	resetParseFailed := false
+	if resetTimestamp != "" {
+		var err error
+		ts, err = strconv.ParseInt(resetTimestamp, 10, 64)
+		if err != nil {
+			slog.Warn("rate_limit_reset_parse_failed", "reset_timestamp", resetTimestamp, "error", err)
+			resetTimestamp = ""
+			resetParseFailed = true
+		}
+	}
 
-	// 4. 如果响应头没有，尝试从响应体解析（OpenAI usage_limit_reached, Gemini）
+	// 4. 如果响应头没有可用重置时间，尝试从响应体解析（OpenAI usage_limit_reached, Gemini）
 	if resetTimestamp == "" {
 		switch account.Platform {
 		case PlatformOpenAI:
@@ -1242,6 +1253,15 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 			}
 		}
 
+		// Retry-After 是上游明确的等待指令，不受本地默认冷却开关影响。
+		if s.apply429RetryAfterRateLimit(ctx, account, headers) {
+			return
+		}
+		if resetParseFailed {
+			s.apply429FallbackRateLimit(ctx, account, "reset_parse_failed")
+			return
+		}
+
 		// Anthropic 平台：没有限流重置时间的 429 可能是非真实限流（如 Extra usage required），
 		// 不适合按 5h/7d 窗口长时间封禁；但完全不标记会导致账号永不冷却，
 		// 调度器让每个请求反复撞同一批持续 429 的账号（failover 预算被白白烧掉，
@@ -1257,14 +1277,6 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 
 		// 其他平台：没有重置时间，使用可配置的秒级默认回避，避免误伤长时间不可调度。
 		s.apply429FallbackRateLimit(ctx, account, "no_reset_time")
-		return
-	}
-
-	// 解析Unix时间戳
-	ts, err := strconv.ParseInt(resetTimestamp, 10, 64)
-	if err != nil {
-		slog.Warn("rate_limit_reset_parse_failed", "reset_timestamp", resetTimestamp, "error", err)
-		s.apply429FallbackRateLimit(ctx, account, "reset_parse_failed")
 		return
 	}
 
@@ -1285,6 +1297,21 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	}
 
 	slog.Info("account_rate_limited", "account_id", account.ID, "reset_at", resetAt)
+}
+
+func (s *RateLimitService) apply429RetryAfterRateLimit(ctx context.Context, account *Account, headers http.Header) bool {
+	now := time.Now()
+	resetAt := parseRetryAfterResetTime(headers, now)
+	if resetAt == nil || !resetAt.After(now) {
+		return false
+	}
+	s.notifyAccountSchedulingBlocked(account, *resetAt, "429_retry_after")
+	if err := s.setAccountRateLimited(ctx, account, *resetAt); err != nil {
+		slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
+	} else {
+		slog.Info("account_rate_limited", "account_id", account.ID, "platform", account.Platform, "reset_at", *resetAt, "source", "retry_after")
+	}
+	return true
 }
 
 func (s *RateLimitService) apply429FallbackRateLimit(ctx context.Context, account *Account, reason string) {
