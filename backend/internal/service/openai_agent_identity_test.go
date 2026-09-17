@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/nacl/box"
@@ -125,6 +126,45 @@ func TestRegisterAgentIdentityTaskAcceptsPlaintextAndEncryptedResponses(t *testi
 	taskID, err = registerAgentIdentityTask(context.Background(), account)
 	require.NoError(t, err)
 	require.Equal(t, "task-encrypted", taskID)
+}
+
+func TestRegisterAgentIdentityTaskPreservesDefaultUAWithAccountFingerprint(t *testing.T) {
+	key, privateKey := newTestAgentIdentityKey(t)
+	observedUA := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		observedUA <- r.UserAgent()
+		_, _ = w.Write([]byte(`{"task_id":"task-registered"}`))
+	}))
+	defer server.Close()
+	oldBase := openAIAgentIdentityAuthAPIBaseURL
+	openAIAgentIdentityAuthAPIBaseURL = server.URL
+	t.Cleanup(func() { openAIAgentIdentityAuthAPIBaseURL = oldBase })
+	for _, test := range []struct {
+		ua       string
+		platform codexnative.Platform
+	}{
+		{"codex-tui/0.154.0 (Windows 10.0.26100; x86_64)", codexnative.Windows},
+		{"codex-tui/0.154.0 (Mac OS 26.4.1; arm64)", codexnative.MacOS},
+		{"codex-tui/0.154.0 (Ubuntu 24.04.3; x86_64)", codexnative.Linux},
+	} {
+		t.Run(string(test.platform), func(t *testing.T) {
+			account := &Account{ID: 15, Type: AccountTypeOAuth, Platform: PlatformOpenAI, Credentials: map[string]any{
+				"auth_mode": OpenAIAuthModeAgentIdentity, "agent_runtime_id": key.runtimeID,
+				"agent_private_key": privateKey, "user_agent": test.ua,
+			}}
+			ctx := WithOpenAINativeHTTPScope(context.Background(), account, "")
+			taskID, err := registerAgentIdentityTask(ctx, account)
+			require.NoError(t, err)
+			require.Equal(t, "task-registered", taskID)
+			ua := <-observedUA
+			require.Equal(t, "Go-http-client/1.1", ua)
+			scope, ok := codexnative.ScopeFromContext(ctx)
+			require.True(t, ok)
+			selection := codexnative.Resolve(ua, scope)
+			require.Equal(t, test.platform, selection.Platform)
+			require.Equal(t, "account_user_agent", selection.MatchedBy)
+		})
+	}
 }
 
 func TestEnsureAgentIdentityTaskPersistsAndRedactsCredentials(t *testing.T) {

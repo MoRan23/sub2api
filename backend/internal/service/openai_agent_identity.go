@@ -174,6 +174,7 @@ func decryptAgentTaskID(key agentIdentityKey, encoded string) (string, error) {
 }
 
 func registerAgentIdentityTask(ctx context.Context, account *Account) (string, error) {
+	ctx = WithOpenAINativeHTTPScope(ctx, account, "")
 	key, err := agentIdentityKeyFromAccount(account)
 	if err != nil {
 		return "", err
@@ -187,6 +188,7 @@ func registerAgentIdentityTask(ctx context.Context, account *Account) (string, e
 		proxyURL = account.Proxy.URL()
 	}
 	client, err := httpclient.GetClient(httpclient.Options{
+		OpenAINative:          true,
 		ProxyURL:              proxyURL,
 		Timeout:               agentIdentityTaskRegistrationTimeout,
 		ResponseHeaderTimeout: 15 * time.Second,
@@ -208,6 +210,9 @@ func registerAgentIdentityTask(ctx context.Context, account *Account) (string, e
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	// Preserve the prior net/http default; native serialization must not turn
+	// this authentication endpoint's existing User-Agent into an absent header.
+	req.Header.Set("User-Agent", "Go-http-client/1.1")
 	req = ApplyOpenAIRequestPolicy(req, nil)
 	resp, err := openai.HTTPClientWithCodexResidencyRedirectGuard(client).Do(req)
 	if err != nil {

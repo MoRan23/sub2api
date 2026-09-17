@@ -23,6 +23,7 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 			return response, err
 		}
 	}
+	request = withOpenAINativeHTTPRequestScope(request, account, s.accountRepo, "gateway")
 	return s.httpUpstream.Do(request, proxyURL, account.ID, account.Concurrency)
 }
 
@@ -39,6 +40,7 @@ func (s *OpenAIGatewayService) doCodexAuxiliaryUpstream(request *http.Request, p
 			return response, err
 		}
 	}
+	request = withOpenAINativeHTTPRequestScope(request, account, s.accountRepo, "codex-auxiliary")
 	return s.httpUpstream.Do(request, proxyURL, account.ID, 0)
 }
 
@@ -59,6 +61,7 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 			return response, err
 		}
 	}
+	request = withOpenAINativeHTTPRequestScope(request, account, s.accountRepo, "account-test")
 	if useTLSFallback {
 		return s.httpUpstream.DoWithTLS(
 			request,

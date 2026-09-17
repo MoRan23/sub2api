@@ -19,6 +19,7 @@ import (
 	"github.com/imroc/req/v3"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
@@ -343,7 +344,7 @@ func TestResetCreditAgentIdentityReusesConcurrentlyRecoveredTask(t *testing.T) {
 // 和 stubQuotaAccountRepo（同时持有影子+母账号），绕开 /wham/usage HTTP 往返。
 // 这比 httptest 端到端 mock 更轻量且对实现细节的耦合更低。
 func TestPrepareUpstreamCallShadowResolve(t *testing.T) {
-	ctx := context.Background()
+	ctx := codexnative.WithScope(context.Background(), codexnative.Scope{SourceUserAgent: "OTel-Go/1.0", Purpose: "quota"})
 	pid := int64(100)
 
 	// 影子账号：无 chatgpt_account_id credentials
@@ -363,6 +364,7 @@ func TestPrepareUpstreamCallShadowResolve(t *testing.T) {
 		Status:   StatusActive,
 		Credentials: map[string]any{
 			"chatgpt_account_id": "org-parent123",
+			"user_agent":         "codex-tui/0.154.0 (Mac OS 26.4.1; arm64)",
 		},
 	}
 	repo := &stubQuotaAccountRepo{accounts: map[int64]*Account{200: shadow, 100: parent}}
@@ -378,10 +380,17 @@ func TestPrepareUpstreamCallShadowResolve(t *testing.T) {
 		return req.C(), nil
 	})
 
-	_, chatGPTAccountID, _, _, err := svc.prepareUpstreamCall(ctx, 200)
+	prepared, err := svc.prepareUpstreamCall(ctx, 200)
 	require.NoError(t, err, "shadow resolve should succeed; got error: %v", err)
-	require.Equal(t, "org-parent123", chatGPTAccountID,
+	require.Equal(t, "org-parent123", prepared.chatGPTAccountID,
 		"prepareUpstreamCall should use parent's chatgpt_account_id after shadow resolve")
+	scope, ok := codexnative.ScopeFromContext(prepared.ctx)
+	require.True(t, ok)
+	require.Equal(t, parent.ID, scope.AccountID)
+	require.Equal(t, "OTel-Go/1.0", scope.SourceUserAgent)
+	require.Equal(t, codexnative.MacOS, codexnative.Resolve("", scope).Platform)
+	parent.Credentials["user_agent"] = "codex-tui (Windows 10.0.26100)"
+	require.Equal(t, codexnative.MacOS, codexnative.Resolve("", scope).Platform, "prepared platform hints are immutable scalars")
 }
 
 func TestQueryUsageAgentIdentityUsesAssertionWithoutOAuthToken(t *testing.T) {

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -1529,6 +1530,7 @@ type openAIModelsRequest struct {
 	url                 string
 	headers             http.Header
 	requestPolicy       *openai.RequestPolicy
+	nativeScope         *codexnative.Scope
 	proxyURL            string
 	accountID           int64
 	credentialAccountID int64
@@ -1735,6 +1737,11 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 		accountConcurrency:  account.Concurrency,
 		useAPIKeyUpstream:   useAPIKeyUpstream,
 	}
+	if !useAPIKeyUpstream {
+		scope, _ := codexnative.ScopeFromContext(WithOpenAINativeHTTPScope(ctx, credAccount, ""))
+		scope.Purpose = "models"
+		request.nativeScope = &scope
+	}
 	if useAPIKeyUpstream {
 		return s.fetchCachedOpenAIModels(ctx, request, s.fetchCodexModelsManifestUpstreamForRequest(request), ifNoneMatch)
 	}
@@ -1883,6 +1890,7 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 
 	var resp *http.Response
 	if request.useAPIKeyUpstream {
+		req = req.WithContext(codexnative.WithoutScope(req.Context()))
 		if s.httpUpstream == nil {
 			return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_UPSTREAM_NOT_CONFIGURED", "Codex models upstream HTTP client is not configured")
 		}
@@ -1894,7 +1902,13 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 			resp, handled, err = s.pluginManager.RoundTripOpenAIOAuth(reqCtx, req, request.proxyURL, request.credentialAccount)
 		}
 		if !handled {
+			if request.nativeScope != nil {
+				req = req.WithContext(codexnative.WithScope(req.Context(), *request.nativeScope))
+			} else {
+				req = withOpenAINativeHTTPRequestScope(req, request.credentialAccount, s.accountRepo, "models")
+			}
 			client, clientErr := httpclient.GetClient(httpclient.Options{
+				OpenAINative:          true,
 				ProxyURL:              request.proxyURL,
 				Timeout:               codexModelsManifestRequestTimeout,
 				ResponseHeaderTimeout: 10 * time.Second,

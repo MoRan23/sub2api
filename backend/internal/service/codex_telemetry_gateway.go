@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
@@ -28,7 +29,11 @@ func (s *OpenAIGatewayService) beginCodexTelemetryFromWire(
 	if profile.RequestKind.internal() || flatKind.internal() || (generate.Type == gjson.False) || IsExplicitImageGenerationIntent("/responses", "", body) {
 		return nil
 	}
-	return s.codexTelemetry.Begin(ctx, codexTelemetryInputFromWire(account, headers, body, proxyURL, websocket, profile))
+	input := codexTelemetryInputFromWire(account, headers, body, proxyURL, websocket, profile)
+	transportCtx := withOpenAINativeHTTPAccountScope(ctx, account, s.accountRepo, "telemetry")
+	input.nativeHTTPScope, _ = codexnative.ScopeFromContext(transportCtx)
+	input.nativeHTTPScope.SourceUserAgent = input.UserAgent
+	return s.codexTelemetry.Begin(ctx, input)
 }
 
 // codexTelemetryInputFromWire copies scalar values from the already-built wire

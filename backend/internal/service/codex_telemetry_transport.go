@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
 )
 
 func (s *CodexTelemetryService) enqueueAnalyticsLocked(profile codexTelemetryProfile, attemptID uint64, events []codexAnalyticsEvent) {
@@ -102,6 +104,7 @@ func (s *CodexTelemetryService) send(parent context.Context, sender CodexTelemet
 	ctx, cancel := context.WithTimeout(parent, codexTelemetryTimeout)
 	defer cancel()
 	ctx = WithHTTPUpstreamRedirectsDisabled(WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileCodexAuxiliary))
+	ctx = codexnative.WithScope(ctx, job.profile.client.nativeHTTPScope)
 	url := s.analyticsURL
 	if job.metrics {
 		url = s.metricsURL

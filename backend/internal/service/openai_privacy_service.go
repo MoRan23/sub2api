@@ -44,6 +44,7 @@ func disableOpenAITraining(ctx context.Context, clientFactory PrivacyClientFacto
 
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	ctx = WithOpenAINativeHTTPScope(ctx, nil, "")
 
 	client, err := clientFactory(proxyURL)
 	if err != nil {
@@ -122,6 +123,7 @@ func fetchChatGPTAccountInfo(ctx context.Context, clientFactory PrivacyClientFac
 
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	ctx = WithOpenAINativeHTTPScope(ctx, nil, "")
 
 	client, err := clientFactory(proxyURL)
 	if err != nil {
@@ -233,6 +235,7 @@ func fetchChatGPTSubscriptionExpiresAt(ctx context.Context, clientFactory Privac
 
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	ctx = WithOpenAINativeHTTPScope(ctx, nil, "")
 
 	client, err := clientFactory(proxyURL)
 	if err != nil {

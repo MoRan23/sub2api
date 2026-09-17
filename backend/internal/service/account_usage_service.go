@@ -912,6 +912,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 		proxyURL = account.Proxy.URL()
 	}
 	client, err := httppool.GetClient(httppool.Options{
+		OpenAINative:          true,
 		ProxyURL:              proxyURL,
 		Timeout:               15 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
@@ -920,6 +921,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 		return nil, fmt.Errorf("build openai probe client: %w", err)
 	}
 	req = ApplyOpenAIRequestPolicy(req, s.settingService)
+	req = withOpenAINativeHTTPRequestScope(req, account, s.accountRepo, "usage-probe")
 	resp, err := openaipkg.HTTPClientWithCodexResidencyRedirectGuard(client).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("openai codex probe request failed: %w", err)

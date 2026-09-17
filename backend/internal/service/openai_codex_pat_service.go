@@ -37,6 +37,7 @@ type openAICodexPATWhoamiResponse struct {
 // first-class PAT endpoint used by the Codex client.
 func (s *OpenAIOAuthService) ValidateCodexPersonalAccessToken(ctx context.Context, accessToken, proxyURL string) (*OpenAITokenInfo, error) {
 	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
+	ctx = WithOpenAINativeHTTPScope(ctx, nil, "")
 	accessToken = strings.TrimSpace(accessToken)
 	if accessToken == "" {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_CODEX_PAT_REQUIRED", "access token is required")
@@ -46,6 +47,7 @@ func (s *OpenAIOAuthService) ValidateCodexPersonalAccessToken(ctx context.Contex
 	}
 
 	client, err := httpclient.GetClient(httpclient.Options{
+		OpenAINative:          true,
 		ProxyURL:              proxyURL,
 		Timeout:               20 * time.Second,
 		ResponseHeaderTimeout: 15 * time.Second,

@@ -1485,6 +1485,7 @@ func (s *TokenRefreshService) ensureOpenAIPrivacy(ctx context.Context, account *
 	}
 
 	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
+	ctx = WithOpenAINativeHTTPScope(ctx, account, "")
 	mode := disableOpenAITraining(ctx, s.privacyClientFactory, token, proxyURL)
 	if mode == "" {
 		return

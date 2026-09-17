@@ -155,6 +155,7 @@ func codexMetricClientKey(profile codexTelemetryProfile) string {
 		profile.client.localID, profile.client.accountID, profile.client.name,
 		profile.client.userAgent, profile.client.originator, profile.client.version,
 		profile.client.proxyURL, codexResourceAttributes(profile),
+		profile.client.nativeHTTPScope,
 	})
 	return string(key)
 }

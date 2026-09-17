@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
 )
 
 const (
@@ -27,6 +29,8 @@ const (
 // It deliberately contains no request/response body or mutable account pointer.
 // Credentials only live in pending work; they are never returned by Observations.
 type CodexTelemetryInput struct {
+	// Transport-only hints, never emitted as telemetry data or observations.
+	nativeHTTPScope    codexnative.Scope
 	AccountID          int64
 	AccountName        string
 	AccessToken        string `json:"-"`
@@ -77,6 +81,7 @@ type CodexTelemetryResult struct {
 }
 
 type codexTelemetryClient struct {
+	nativeHTTPScope                                                        codexnative.Scope
 	localID                                                                int64
 	name, accessToken, accountID, proxyURL, userAgent, originator, version string
 }
@@ -277,8 +282,17 @@ func (s *CodexTelemetryService) Begin(ctx context.Context, input CodexTelemetryI
 	if input.StartedAt.IsZero() {
 		input.StartedAt = time.Now()
 	}
+	if input.nativeHTTPScope.Purpose == "" {
+		input.nativeHTTPScope, _ = codexnative.ScopeFromContext(ctx)
+		input.nativeHTTPScope.AccountID = input.AccountID
+		input.nativeHTTPScope.SourceUserAgent = input.UserAgent
+		input.nativeHTTPScope.Purpose = "telemetry"
+	}
+	if input.nativeHTTPScope.CanonicalUserAgent == "" {
+		input.nativeHTTPScope.CanonicalUserAgent = CodexCanonicalUserAgent()
+	}
 	profile := codexTelemetryProfile{
-		client: codexTelemetryClient{localID: input.AccountID, name: input.AccountName, accessToken: input.AccessToken,
+		client: codexTelemetryClient{nativeHTTPScope: input.nativeHTTPScope, localID: input.AccountID, name: input.AccountName, accessToken: input.AccessToken,
 			accountID: input.ChatGPTAccountID, proxyURL: input.ProxyURL, userAgent: input.UserAgent, originator: input.Originator, version: input.Version},
 		sessionID: input.SessionID, threadID: input.ThreadID, turnID: input.TurnID, rootTurnID: input.RootTurnID,
 		model: input.Model, effort: input.Effort, serviceTier: input.ServiceTier, started: input.StartedAt,
