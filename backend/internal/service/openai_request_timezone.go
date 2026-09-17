@@ -22,6 +22,13 @@ const (
 	openAIRequestTimezoneItemLimit  = 16
 	openAIRequestTimezoneValueLimit = 128
 	openAIRequestTimezoneNodeLimit  = 16 << 10
+
+	// Environment source classification is separate from parse validity and from
+	// current/history. Text mentioning an environment tag is not an environment
+	// declaration. A mapped source inherits only provenance, never observed values.
+	TimezoneEnvironmentSourceMetadata  = "metadata"
+	TimezoneEnvironmentSourceMapped    = "mapped"
+	TimezoneEnvironmentSourceReference = "reference"
 )
 
 // TimezoneScanResult distinguishes an absent observation from a completed scan
@@ -33,14 +40,15 @@ type TimezoneScanResult struct {
 }
 
 type TimezoneScanItem struct {
-	Source      string                      `json:"source"`
-	Path        string                      `json:"path"`
-	Value       string                      `json:"value"`
-	CurrentDate string                      `json:"current_date,omitempty"`
-	Current     bool                        `json:"current"`
-	Status      string                      `json:"status,omitempty"`
-	Reason      string                      `json:"reason,omitempty"`
-	Location    *RequestLocationObservation `json:"location,omitempty"`
+	Source            string                      `json:"source"`
+	Path              string                      `json:"path"`
+	Value             string                      `json:"value"`
+	CurrentDate       string                      `json:"current_date,omitempty"`
+	Current           bool                        `json:"current"`
+	Status            string                      `json:"status,omitempty"`
+	Reason            string                      `json:"reason,omitempty"`
+	Location          *RequestLocationObservation `json:"location,omitempty"`
+	EnvironmentSource string                      `json:"environment_source,omitempty"`
 }
 
 // RequestLocationObservation contains only bounded, displayable location fields.
@@ -58,19 +66,20 @@ func openAIRequestSearchLocation() RequestLocationObservation {
 }
 
 type TimezoneConversion struct {
-	Source         string                      `json:"source"`
-	Path           string                      `json:"path"`
-	Original       string                      `json:"original"`
-	Output         string                      `json:"output"`
-	DateBefore     string                      `json:"date_before,omitempty"`
-	DateAfter      string                      `json:"date_after,omitempty"`
-	Status         string                      `json:"status"`
-	Reason         string                      `json:"reason,omitempty"`
-	TimeBasis      string                      `json:"time_basis,omitempty"`
-	ReceivedAt     string                      `json:"received_at,omitempty"`
-	LocationBefore *RequestLocationObservation `json:"location_before,omitempty"`
-	LocationAfter  *RequestLocationObservation `json:"location_after,omitempty"`
-	LocationAdded  bool                        `json:"location_added,omitempty"`
+	Source            string                      `json:"source"`
+	Path              string                      `json:"path"`
+	Original          string                      `json:"original"`
+	Output            string                      `json:"output"`
+	DateBefore        string                      `json:"date_before,omitempty"`
+	DateAfter         string                      `json:"date_after,omitempty"`
+	Status            string                      `json:"status"`
+	Reason            string                      `json:"reason,omitempty"`
+	TimeBasis         string                      `json:"time_basis,omitempty"`
+	ReceivedAt        string                      `json:"received_at,omitempty"`
+	LocationBefore    *RequestLocationObservation `json:"location_before,omitempty"`
+	LocationAfter     *RequestLocationObservation `json:"location_after,omitempty"`
+	LocationAdded     bool                        `json:"location_added,omitempty"`
+	EnvironmentSource string                      `json:"environment_source,omitempty"`
 }
 
 // RequestTimezoneState is frozen at ingress, before account-specific adaptation.
@@ -237,6 +246,10 @@ func prepareOpenAIRequestTimezoneBody(body []byte, policy openai.RequestPolicy, 
 	for _, occurrence := range scan.occurrences {
 		report := newTimezoneConversion(occurrence.item)
 		switch {
+		case occurrence.environment && !occurrence.eligible:
+			// Ordinary quoted text is not a conversion source, even when its tags
+			// happen to be well formed. Do not report it as a disabled real source.
+			report.Status, report.Reason = "skipped", "environment_metadata_missing"
 		case !enabled:
 			report.Status, report.Reason = "disabled", "conversion_disabled"
 		case !occurrence.eligible:
@@ -340,7 +353,7 @@ type timezoneTextReplacement struct {
 }
 
 func newTimezoneConversion(item TimezoneScanItem) TimezoneConversion {
-	return TimezoneConversion{Source: item.Source, Path: item.Path, Original: item.Value, Output: item.Value, DateBefore: item.CurrentDate, DateAfter: item.CurrentDate, LocationBefore: cloneRequestLocation(item.Location), LocationAfter: cloneRequestLocation(item.Location)}
+	return TimezoneConversion{Source: item.Source, Path: item.Path, Original: item.Value, Output: item.Value, DateBefore: item.CurrentDate, DateAfter: item.CurrentDate, LocationBefore: cloneRequestLocation(item.Location), LocationAfter: cloneRequestLocation(item.Location), EnvironmentSource: item.EnvironmentSource}
 }
 
 func scanOpenAIRequestTimezones(body []byte) *requestTimezoneScanner {
@@ -445,16 +458,20 @@ func (s *requestTimezoneScanner) scanMessages(messages gjson.Result, path string
 				if !s.countNode() {
 					return false
 				}
+				kind := part.Get("type").String()
+				marker := kinds.Get(fmt.Sprintf("%d", key.Int()))
+				eligible := current && kind == "input_text" && kinds.IsArray() && marker.Type == gjson.String && marker.String() == "environments.environment_context"
 				text := part.Get("text")
 				if text.Type == gjson.String {
-					kind := part.Get("type").String()
 					if kind == "" || kind == "text" || kind == "input_text" {
-						marker := kinds.Get(fmt.Sprintf("%d", key.Int()))
-						eligible := current && kind == "input_text" && kinds.IsArray() && marker.Type == gjson.String && marker.String() == "environments.environment_context"
 						s.scanText(text.String(), fmt.Sprintf("%s.%d.content.%d.text", path, i, key.Int()), eligible, eligible)
 					} else {
 						s.countText(text.String())
 					}
+				} else if eligible {
+					// An explicitly declared but missing/non-string environment must
+					// remain an invalid source, not disappear from the observation.
+					s.scanText("", fmt.Sprintf("%s.%d.content.%d.text", path, i, key.Int()), true, true)
 				}
 				return s.result.ScanStatus == "complete"
 			})
@@ -517,10 +534,14 @@ func (s *requestTimezoneScanner) scanText(text, path string, current, eligible b
 	if !s.countText(text) {
 		return
 	}
-	if countRequestTimezoneTag(text, "environment_context", false) == 0 && countRequestTimezoneTag(text, "environment_context", true) == 0 {
+	if !eligible && countRequestTimezoneTag(text, "environment_context", false) == 0 && countRequestTimezoneTag(text, "environment_context", true) == 0 {
 		return
 	}
-	occurrence := requestTimezoneOccurrence{environment: true, eligible: eligible, text: text, item: TimezoneScanItem{Source: "environment_context", Path: path, Current: current, Status: "invalid", Reason: "environment_not_standalone"}}
+	source := TimezoneEnvironmentSourceReference
+	if eligible {
+		source = TimezoneEnvironmentSourceMetadata
+	}
+	occurrence := requestTimezoneOccurrence{environment: true, eligible: eligible, text: text, item: TimezoneScanItem{Source: "environment_context", Path: path, Current: current, Status: "invalid", Reason: "environment_not_standalone", EnvironmentSource: source}}
 	trimmed := strings.TrimSpace(text)
 	const open, close = "<environment_context>", "</environment_context>"
 	if !strings.HasPrefix(trimmed, open) || !strings.HasSuffix(trimmed, close) || countRequestTimezoneTag(text, "environment_context", false) != 1 || countRequestTimezoneTag(text, "environment_context", true) != 1 {

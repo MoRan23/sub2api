@@ -238,18 +238,18 @@ describe('FingerprintObservationRequestDetails', () => {
       outbound_codex_residency: 'us', outbound_codex_residency_source: 'request_headers',
       timezone_comparison_status: 'matched',
       inbound_timezone_observations: { scan_status: 'complete', items: [
-        { source: 'environment_context', path: 'input.0.content.0.text', value: 'Asia/Shanghai', current: true, current_date: '2026-09-10', status: 'valid' },
+        { source: 'environment_context', environment_source: 'metadata', path: 'input.0.content.0.text', value: 'Asia/Shanghai', current: true, current_date: '2026-09-10', status: 'valid' },
         { source: 'web_search', path: 'tools.0.user_location.timezone', value: 'Europe/London', current: false, status: 'valid' },
-        { source: 'environment_context', path: 'input.2.content.0.text', value: 'Asia/Tokyo', current: false, current_date: '2026-08-01', status: 'valid' },
+        { source: 'environment_context', environment_source: 'metadata', path: 'input.2.content.0.text', value: 'Asia/Tokyo', current: false, current_date: '2026-08-01', status: 'valid' },
       ] },
       outbound_timezone_observations: { scan_status: 'complete', items: [
-        { source: 'environment_context', path: 'input.0.content.0.text', value: 'America/Los_Angeles', current: true, current_date: '2026-09-09', status: 'valid' },
+        { source: 'environment_context', environment_source: 'mapped', path: 'input.0.content.0.text', value: 'America/Los_Angeles', current: true, current_date: '2026-09-09', status: 'valid' },
         { source: 'web_search', path: 'tools.0.user_location.timezone', value: 'America/Los_Angeles', current: false, status: 'valid' },
-        { source: 'environment_context', path: 'input.2.content.0.text', value: 'America/Los_Angeles', current: false, current_date: '2026-08-01', status: 'valid' },
+        { source: 'environment_context', environment_source: 'mapped', path: 'input.2.content.0.text', value: 'America/Los_Angeles', current: false, current_date: '2026-08-01', status: 'valid' },
       ] },
       timezone_conversions: [
-        { source: 'environment_context', path: 'input.0.content.0.text', original: 'Asia/Shanghai', output: 'America/Los_Angeles', date_before: '2026-09-10', date_after: '2026-09-09', status: 'converted', time_basis: 'gateway_received_at', received_at: '2026-09-10T05:30:00Z', reason: 'timezone_converted' },
-        { source: 'environment_context', path: 'input.2.content.0.text', original: 'Asia/Tokyo', output: 'America/Los_Angeles', date_before: '2026-08-01', date_after: '2026-08-01', status: 'converted', reason: 'historical_timezone_converted' },
+        { source: 'environment_context', environment_source: 'mapped', path: 'input.0.content.0.text', original: 'Asia/Shanghai', output: 'America/Los_Angeles', date_before: '2026-09-10', date_after: '2026-09-09', status: 'converted', time_basis: 'gateway_received_at', received_at: '2026-09-10T05:30:00Z', reason: 'timezone_converted' },
+        { source: 'environment_context', environment_source: 'mapped', path: 'input.2.content.0.text', original: 'Asia/Tokyo', output: 'America/Los_Angeles', date_before: '2026-08-01', date_after: '2026-08-01', status: 'converted', reason: 'historical_timezone_converted' },
       ],
     })
 
@@ -285,6 +285,139 @@ describe('FingerprintObservationRequestDetails', () => {
     expect(within(report).getByText('Historical environment preserved')).toBeTruthy()
     expect(within(report).getByText('Skipped')).toBeTruthy()
     expect(within(report).queryByText('Historical environment timezone converted; original date preserved')).toBeNull()
+  })
+
+  it('shows quoted environment text as an unqualified candidate without historical or invalid warnings', async () => {
+    renderDetails({
+      timezone_comparison_status: 'not_applicable',
+      inbound_timezone_observations: { scan_status: 'complete', items: [{
+        source: 'environment_context', environment_source: 'reference', path: 'input.0.content.0.text',
+        value: 'Asia/Tokyo', current: false, current_date: '2026-08-01', status: 'invalid', reason: 'environment_metadata_missing',
+      }] },
+      timezone_conversions: [{
+        source: 'environment_context', environment_source: 'reference', path: 'input.0.content.0.text',
+        original: 'Asia/Tokyo', output: 'Asia/Tokyo', date_before: '2026-08-01', date_after: '2026-08-01',
+        status: 'skipped', reason: 'environment_metadata_missing',
+      }],
+    })
+    expect(screen.getByText('Timezone comparison not applicable')).toBeTruthy()
+    const report = await openDetails()
+    const inbound = screen.getByRole('region', { name: 'Client inbound declarations' })
+    expect(within(inbound).getByText('Text candidate (not an environment source)')).toBeTruthy()
+    expect(within(inbound).getByText('Asia/Tokyo')).toBeTruthy()
+    expect(within(inbound).getByText('2026-08-01')).toBeTruthy()
+    expect(screen.queryByText('Current environment')).toBeNull()
+    expect(screen.queryByText('Historical environment')).toBeNull()
+    expect(screen.queryByText('Invalid value')).toBeNull()
+    expect(screen.queryByText('Environment check incomplete')).toBeNull()
+    expect(within(report).getByText('Skipped')).toBeTruthy()
+    expect(within(report).getByText('Text candidate (not an environment source)')).toBeTruthy()
+    expect(within(report).getByText('This is a text candidate, not a declared environment source; excluded from conversion and comparison')).toBeTruthy()
+    expect(within(report).queryByText('Converted')).toBeNull()
+  })
+
+  it('classifies current and historical environments only when metadata establishes their source', async () => {
+    renderDetails({
+      timezone_comparison_status: 'matched',
+      inbound_timezone_observations: { scan_status: 'complete', items: [
+        { source: 'environment_context', environment_source: 'metadata', path: 'input.0.content.0.text', value: 'Asia/Tokyo', current: false, current_date: '2026-08-01', status: 'valid' },
+        { source: 'environment_context', environment_source: 'metadata', path: 'input.2.content.0.text', value: 'Asia/Shanghai', current: true, current_date: '2026-09-18', status: 'valid' },
+      ] },
+    })
+    await openDetails()
+    const inbound = screen.getByRole('region', { name: 'Client inbound declarations' })
+    const current = within(inbound).getByText('input.2.content.0.text').closest('li')!
+    const historical = within(inbound).getByText('input.0.content.0.text').closest('li')!
+    expect(within(current).getByText('Current environment')).toBeTruthy()
+    expect(within(current).getByText('Asia/Shanghai')).toBeTruthy()
+    expect(within(current).getByText('2026-09-18')).toBeTruthy()
+    expect(within(current).queryByText('Historical environment')).toBeNull()
+    expect(within(historical).getByText('Historical environment')).toBeTruthy()
+    expect(within(historical).getByText('Asia/Tokyo')).toBeTruthy()
+    expect(within(historical).getByText('2026-08-01')).toBeTruthy()
+    expect(within(historical).queryByText('Current environment')).toBeNull()
+    expect(within(inbound).queryByText('Text candidate (not an environment source)')).toBeNull()
+    expect(within(inbound).queryByText('Environment source unclassified')).toBeNull()
+  })
+
+  it('preserves a mapped outbound environment classification after the protocol removes source metadata', async () => {
+    renderDetails({
+      timezone_comparison_status: 'matched',
+      inbound_timezone_observations: { scan_status: 'complete', items: [{
+        source: 'environment_context', environment_source: 'metadata', path: 'messages.1.content.0.text',
+        value: 'Asia/Shanghai', current: true, current_date: '2026-09-18', status: 'valid',
+      }] },
+      outbound_timezone_observations: { scan_status: 'complete', items: [{
+        source: 'environment_context', environment_source: 'mapped', path: 'input.0.content.0.text',
+        value: 'America/Los_Angeles', current: true, current_date: '2026-09-17', status: 'valid',
+      }] },
+      timezone_conversions: [{
+        source: 'environment_context', environment_source: 'mapped', path: 'input.0.content.0.text',
+        original: 'Asia/Shanghai', output: 'America/Los_Angeles', date_before: '2026-09-18', date_after: '2026-09-17',
+        status: 'converted', reason: 'timezone_converted',
+      }],
+    })
+    const report = await openDetails()
+    const outbound = screen.getByRole('region', { name: 'Actual outbound content' })
+    expect(within(outbound).getByText('Current environment')).toBeTruthy()
+    expect(within(outbound).getByText('America/Los_Angeles')).toBeTruthy()
+    expect(within(outbound).getByText('2026-09-17')).toBeTruthy()
+    expect(within(outbound).queryByText('Asia/Shanghai')).toBeNull()
+    expect(within(outbound).queryByText('Text candidate (not an environment source)')).toBeNull()
+    expect(within(outbound).queryByText('Environment source unclassified')).toBeNull()
+    const cells = within(within(report).getByText('input.0.content.0.text').closest('tr')!).getAllByRole('cell')
+    expect(within(cells[1]!).getByText('Asia/Shanghai')).toBeTruthy()
+    expect(within(cells[1]!).getByText('2026-09-18')).toBeTruthy()
+    expect(within(cells[2]!).getByText('America/Los_Angeles')).toBeTruthy()
+    expect(within(cells[2]!).getByText('2026-09-17')).toBeTruthy()
+    expect(within(report).getByText('Converted')).toBeTruthy()
+  })
+
+  it('reports an incomplete real environment check without treating malformed values as successful conversion', async () => {
+    renderDetails({
+      timezone_comparison_status: 'incomplete',
+      inbound_timezone_observations: { scan_status: 'complete', items: [{
+        source: 'environment_context', environment_source: 'metadata', path: 'input.0.content.0.text',
+        value: 'Not/A-Timezone', current: true, current_date: '2026-09-18', status: 'invalid', reason: 'invalid_timezone',
+      }] },
+      timezone_conversions: [{
+        source: 'environment_context', environment_source: 'metadata', path: 'input.0.content.0.text',
+        original: 'Not/A-Timezone', output: 'Not/A-Timezone', date_before: '2026-09-18', date_after: '2026-09-18',
+        status: 'incomplete', reason: 'invalid_timezone',
+      }],
+    })
+    expect(screen.getByText('Timezone comparison incomplete')).toBeTruthy()
+    const report = await openDetails()
+    const inbound = screen.getByRole('region', { name: 'Client inbound declarations' })
+    expect(within(inbound).getByText('Current environment')).toBeTruthy()
+    expect(within(inbound).getByText('Environment check incomplete')).toBeTruthy()
+    expect(within(inbound).getByText('Not/A-Timezone')).toBeTruthy()
+    expect(within(inbound).getByText('2026-09-18')).toBeTruthy()
+    expect(within(inbound).queryByText('Invalid value')).toBeNull()
+    expect(within(inbound).queryByText('Text candidate (not an environment source)')).toBeNull()
+    expect(within(report).getByText('Check incomplete')).toBeTruthy()
+    expect(within(report).queryByText('Converted')).toBeNull()
+    expect(screen.queryByText('Outbound values verified')).toBeNull()
+  })
+
+  it('keeps legacy environments unclassified instead of inferring history from the old current flag', async () => {
+    renderDetails({
+      inbound_timezone_observations: { scan_status: 'complete', items: [
+        { source: 'environment_context', path: 'input.0.content.0.text', value: 'Asia/Tokyo', current: false, current_date: '2026-08-01', status: 'valid' },
+        { source: 'environment_context', path: 'input.1.content.0.text', value: 'Asia/Shanghai', current: true, current_date: '2026-09-18', status: 'valid' },
+      ] },
+    })
+    await openDetails()
+    const inbound = screen.getByRole('region', { name: 'Client inbound declarations' })
+    expect(within(inbound).getAllByText('Environment source unclassified')).toHaveLength(2)
+    expect(within(inbound).getByText('Asia/Tokyo')).toBeTruthy()
+    expect(within(inbound).getByText('2026-08-01')).toBeTruthy()
+    expect(within(inbound).getByText('Asia/Shanghai')).toBeTruthy()
+    expect(within(inbound).getByText('2026-09-18')).toBeTruthy()
+    expect(within(inbound).queryByText('Current environment')).toBeNull()
+    expect(within(inbound).queryByText('Historical environment')).toBeNull()
+    expect(within(inbound).queryByText('Text candidate (not an environment source)')).toBeNull()
+    expect(within(inbound).queryByText('Invalid value')).toBeNull()
   })
 
   it('pairs each review flag with its own label and distinguishes false from missing values', async () => {

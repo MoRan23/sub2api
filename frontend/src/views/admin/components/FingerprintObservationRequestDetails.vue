@@ -87,8 +87,9 @@
             <li v-for="(item, index) in direction.scan.items" :key="`${item.path}-${index}`" class="space-y-1 border-t border-gray-200 pt-2 dark:border-dark-700">
               <div class="flex flex-wrap gap-2 font-medium text-gray-700 dark:text-gray-300">
                 <span>{{ sourceLabel(item.source) }}</span>
-                <span v-if="item.source === 'environment_context'" class="font-normal text-gray-500 dark:text-gray-400">{{ t(`${prefix}.${item.current ? 'currentEnvironment' : 'historicalEnvironment'}`) }}</span>
-                <span v-if="item.status === 'invalid'" class="text-amber-700 dark:text-amber-400">{{ t(`${prefix}.invalidValue`) }}</span>
+                <span v-if="item.source === 'environment_context'" class="font-normal text-gray-500 dark:text-gray-400">{{ environmentLabel(item) }}</span>
+                <span v-if="item.status === 'invalid' && item.source !== 'environment_context'" class="text-amber-700 dark:text-amber-400">{{ t(`${prefix}.invalidValue`) }}</span>
+                <span v-else-if="item.status === 'invalid' && isQualifiedEnvironment(item.environment_source)" class="text-amber-700 dark:text-amber-400">{{ t(`${prefix}.environmentIncomplete`) }}</span>
               </div>
               <div class="break-all font-mono text-gray-500 dark:text-gray-400">{{ item.path }}</div>
               <SearchLocationDetails v-if="item.location" :location="item.location" />
@@ -124,6 +125,7 @@
               <tr v-for="(conversion, index) in observation.timezone_conversions" :key="`${conversion.path}-${index}`" class="border-t border-gray-200 align-top dark:border-dark-700">
                 <td class="max-w-80 space-y-1 break-all px-2 py-2">
                   <div>{{ sourceLabel(conversion.source) }}</div>
+                  <div v-if="conversion.source === 'environment_context' && conversion.environment_source === 'reference'" class="font-normal text-gray-500 dark:text-gray-400">{{ t(`${prefix}.referenceEnvironment`) }}</div>
                   <div class="font-mono text-gray-500 dark:text-gray-400">{{ conversion.path }}</div>
                 </td>
                 <td class="max-w-60 space-y-1 break-all px-2 py-2 font-mono">
@@ -155,7 +157,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { FingerprintObservationEntry, RequestTimezoneScan, RequestTimezoneSource } from '@/api/admin/fingerprintObservations'
+import type { FingerprintObservationEntry, RequestEnvironmentSource, RequestTimezoneObservation, RequestTimezoneScan, RequestTimezoneSource } from '@/api/admin/fingerprintObservations'
 import SearchLocationDetails from './SearchLocationDetails.vue'
 
 const props = defineProps<{ observation: FingerprintObservationEntry }>()
@@ -224,6 +226,16 @@ function sourceLabel(source: RequestTimezoneSource): string {
   return t(`${prefix}.sources.${source}`)
 }
 
+function isQualifiedEnvironment(source: RequestEnvironmentSource | undefined): boolean {
+  return source === 'metadata' || source === 'mapped'
+}
+
+function environmentLabel(item: RequestTimezoneObservation): string {
+  if (item.environment_source === 'reference') return t(`${prefix}.referenceEnvironment`)
+  if (!isQualifiedEnvironment(item.environment_source)) return t(`${prefix}.unclassifiedEnvironment`)
+  return t(`${prefix}.${item.current ? 'currentEnvironment' : 'historicalEnvironment'}`)
+}
+
 const knownReasons = new Set([
   'conversion_disabled', 'historical', 'historical_timezone_converted', 'target_timezone_unavailable', 'accepted_at_unavailable',
   'patch_failed', 'timezone_converted', 'already_target', 'scan_limited', 'scan_parse_failed',
@@ -233,7 +245,7 @@ const knownReasons = new Set([
   'adapter_removed_source', 'source_not_in_final_body', 'source_path_changed',
   'ambiguous_source_mapping', 'final_value_differs',
   'value_not_observable', 'quoted_xml_content', 'source_changed_before_apply',
-  'location_added', 'location_normalized', 'location_missing', 'environment_metadata_missing', 'standalone_search_source_required',
+  'location_added', 'location_normalized', 'location_missing', 'location_container_not_object', 'environment_metadata_missing', 'standalone_search_source_required',
 ])
 
 function reasonLabel(reason: string): string {

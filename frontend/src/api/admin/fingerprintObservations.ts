@@ -11,6 +11,7 @@ export type FingerprintObservationRelation = 'root' | 'descendant' | 'unthreaded
 
 export type RequestTimezoneScanStatus = 'complete' | 'limited' | 'parse_failed' | 'not_applicable'
 export type RequestTimezoneSource = 'environment_context' | 'web_search'
+export type RequestEnvironmentSource = 'metadata' | 'mapped' | 'reference'
 
 export interface RequestSearchLocation {
   type: string
@@ -25,6 +26,7 @@ export interface RequestTimezoneObservation {
   path: string
   value: string
   current: boolean
+  environment_source?: RequestEnvironmentSource
   current_date?: string
   status?: 'valid' | 'invalid'
   reason?: string
@@ -41,7 +43,8 @@ export interface RequestTimezoneConversion {
   path: string
   original: string
   output: string
-  status: 'converted' | 'unchanged' | 'skipped' | 'disabled' | 'not_sent' | 'unmatched'
+  status: 'converted' | 'unchanged' | 'skipped' | 'disabled' | 'not_sent' | 'unmatched' | 'incomplete'
+  environment_source?: RequestEnvironmentSource
   date_before?: string
   date_after?: string
   reason?: string

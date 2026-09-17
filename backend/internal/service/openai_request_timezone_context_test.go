@@ -177,8 +177,10 @@ func TestOpenAIRequestTimezoneHTTPWire(t *testing.T) {
 			case actual := <-received:
 				compat := route == "chat" || route == "messages" || route == "raw_chat"
 				firstZone, lastZone, lastDate, reason := OpenAIRequestTimezone, OpenAIRequestTimezone, "2026-09-09", "historical_timezone_converted"
+				comparison := "matched"
 				if compat {
 					firstZone, lastZone, lastDate, reason = "Asia/Tokyo", "Asia/Shanghai", "2026-09-10", "environment_metadata_missing"
+					comparison = "not_applicable"
 				}
 				require.Equal(t, []string{"us"}, actual.headers.Values(openai.CodexResidencyHeaderName))
 				scan := ScanOpenAIRequestTimezones(actual.body)
@@ -196,7 +198,11 @@ func TestOpenAIRequestTimezoneHTTPWire(t *testing.T) {
 				require.Equal(t, "Asia/Tokyo", entries[0].InboundTimezoneObservations.Items[0].Value)
 				require.Equal(t, "Asia/Shanghai", entries[0].InboundTimezoneObservations.Items[1].Value)
 				require.Equal(t, firstZone, entries[0].OutboundTimezoneObservations.Items[0].Value)
-				require.Equal(t, "matched", entries[0].TimezoneComparisonStatus)
+				require.Equal(t, comparison, entries[0].TimezoneComparisonStatus)
+				if compat {
+					require.Equal(t, TimezoneEnvironmentSourceReference, entries[0].InboundTimezoneObservations.Items[0].EnvironmentSource)
+					require.Equal(t, TimezoneEnvironmentSourceReference, entries[0].OutboundTimezoneObservations.Items[0].EnvironmentSource)
+				}
 				require.Equal(t, reason, entries[0].TimezoneConversions[0].Reason)
 				require.Equal(t, "2026-01-02", entries[0].TimezoneConversions[0].DateAfter)
 			case <-time.After(time.Second):

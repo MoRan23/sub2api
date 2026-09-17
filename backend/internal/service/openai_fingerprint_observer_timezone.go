@@ -167,8 +167,13 @@ func compareFingerprintObservationTimezones(entry *FingerprintObservationEntry, 
 		return "not_applicable"
 	}
 	result := "matched"
+	applicable := false
 	matchedOutbound := make(map[int]bool, len(outbound.Items))
 	for _, input := range inbound.Items {
+		if isReferenceTimezoneEnvironment(input) {
+			continue
+		}
+		applicable = true
 		expectedValue, expectedDate := input.Value, input.CurrentDate
 		expectedLocation := input.Location
 		converted := false
@@ -212,9 +217,23 @@ func compareFingerprintObservationTimezones(entry *FingerprintObservationEntry, 
 				status, reason = "unmatched", "ambiguous_source_mapping"
 			case found >= 0:
 				matchedOutbound[found] = true
+				// Final adapters may remove the metadata that declared the source.
+				// Recover its classification only through the frozen explicit
+				// provenance mapping; every value still comes from the final scan.
+				if hasMapping && input.Source == "environment_context" &&
+					(input.EnvironmentSource == TimezoneEnvironmentSourceMetadata || input.EnvironmentSource == TimezoneEnvironmentSourceMapped) {
+					if outbound.Items[found].EnvironmentSource != TimezoneEnvironmentSourceMetadata {
+						outbound.Items[found].EnvironmentSource = TimezoneEnvironmentSourceMapped
+					}
+					outbound.Items[found].Current = input.Current
+				}
 				actual := outbound.Items[found]
 				missingUnchanged := !converted && input.Reason == "location_missing" && actual.Reason == "location_missing"
-				if !missingUnchanged && ((!converted && input.Status == "invalid" && input.Value == "") || (actual.Status == "invalid" && actual.Value == "")) {
+				if input.Source == "environment_context" && input.Status == "invalid" {
+					status, reason = "incomplete", input.Reason
+				} else if actual.Source == "environment_context" && actual.Status == "invalid" {
+					status, reason = "incomplete", actual.Reason
+				} else if !missingUnchanged && ((!converted && input.Status == "invalid" && input.Value == "") || (actual.Status == "invalid" && actual.Value == "")) {
 					status, reason = "unmatched", "value_not_observable"
 				} else if actual.Value != expectedValue || actual.CurrentDate != expectedDate {
 					status, reason = "mismatched", "final_value_differs"
@@ -239,14 +258,24 @@ func compareFingerprintObservationTimezones(entry *FingerprintObservationEntry, 
 	}
 	// New or relocated final sources without an adapter mapping are not evidence
 	// that an inbound conversion succeeded, even when they use the target zone.
-	if len(matchedOutbound) < len(outbound.Items) {
-		result = fingerprintTimezoneComparisonWorse(result, "unmatched")
+	for i, output := range outbound.Items {
+		if !matchedOutbound[i] && !isReferenceTimezoneEnvironment(output) {
+			applicable = true
+			result = fingerprintTimezoneComparisonWorse(result, "unmatched")
+		}
+	}
+	if !applicable {
+		return "not_applicable"
 	}
 	return result
 }
 
+func isReferenceTimezoneEnvironment(item TimezoneScanItem) bool {
+	return item.Source == "environment_context" && item.EnvironmentSource == TimezoneEnvironmentSourceReference
+}
+
 func fingerprintTimezoneComparisonWorse(current, candidate string) string {
-	priority := map[string]int{"matched": 0, "mismatched": 1, "not_sent": 2, "unmatched": 3}
+	priority := map[string]int{"matched": 0, "mismatched": 1, "not_sent": 2, "incomplete": 3, "unmatched": 4}
 	if priority[candidate] > priority[current] {
 		return candidate
 	}
