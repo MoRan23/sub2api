@@ -17,6 +17,9 @@ type chatMessageContent struct {
 // true. store is always false and reasoning.encrypted_content is always
 // included so that the response translator has full context.
 func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest, error) {
+	if req == nil {
+		return nil, fmt.Errorf("chat completions request is nil")
+	}
 	input, err := convertChatMessagesToResponsesInput(req.Messages)
 	if err != nil {
 		return nil, err
@@ -83,12 +86,12 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 		out.Tools = convertChatToolsToResponses(req.Tools, req.Functions)
 	}
 
-	// tool_choice: already compatible format — pass through directly.
-	// Legacy function_call needs mapping.
-	if len(req.ToolChoice) > 0 {
-		out.ToolChoice = req.ToolChoice
-	} else if len(req.FunctionCall) > 0 {
-		tc, err := convertChatFunctionCallToToolChoice(req.FunctionCall)
+	// Chat nests function selectors and allowed_tools; Responses uses flat
+	// selectors. Keep every declaration: allowed_tools is a selection policy.
+	if choice := normalizedRawJSON(req.ToolChoice); len(choice) > 0 {
+		out.ToolChoice = convertChatToolChoiceToResponses(choice)
+	} else if functionCall := normalizedRawJSON(req.FunctionCall); len(functionCall) > 0 {
+		tc, err := convertChatFunctionCallToToolChoice(functionCall)
 		if err != nil {
 			return nil, fmt.Errorf("convert function_call: %w", err)
 		}
@@ -118,6 +121,12 @@ func chatMessageToResponsesItems(m ChatMessage) ([]ResponsesInputItem, error) {
 	switch m.Role {
 	case "system":
 		return chatSystemToResponses(m)
+	case "developer":
+		items, err := chatSystemToResponses(m)
+		if err == nil {
+			items[0].Role = "developer"
+		}
+		return items, err
 	case "user":
 		return chatUserToResponses(m)
 	case "assistant":
@@ -166,8 +175,12 @@ func chatAssistantToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 	var items []ResponsesInputItem
 	content := ""
 
-	if m.ReasoningContent != "" {
-		content = "<thinking>" + m.ReasoningContent + "</thinking>"
+	reasoning := m.ReasoningContent
+	if reasoning == "" {
+		reasoning = m.Reasoning
+	}
+	if reasoning != "" {
+		content = "<thinking>" + reasoning + "</thinking>"
 	}
 
 	// Emit assistant message with output_text if content is non-empty.
@@ -377,6 +390,7 @@ func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesCont
 				responseParts = append(responseParts, ResponsesContentPart{
 					Type:     "input_image",
 					ImageURL: p.ImageURL.URL,
+					Detail:   p.ImageURL.Detail,
 				})
 			}
 		case "file":
@@ -484,6 +498,55 @@ func defaultStrictFalse(src *bool) *bool {
 		return &value
 	}
 	return src
+}
+
+// convertChatToolChoiceToResponses changes only known Chat shapes. Malformed or
+// provider-specific choices remain untouched here; the OAuth entry point checks
+// unsupported semantics before conversion without changing other providers.
+func convertChatToolChoiceToResponses(raw json.RawMessage) json.RawMessage {
+	var choice map[string]json.RawMessage
+	if json.Unmarshal(raw, &choice) != nil {
+		return bytes.Clone(raw)
+	}
+	var kind string
+	if json.Unmarshal(choice["type"], &kind) != nil {
+		return bytes.Clone(raw)
+	}
+	switch kind {
+	case "function":
+		var function map[string]json.RawMessage
+		if json.Unmarshal(choice["function"], &function) != nil || len(function["name"]) == 0 {
+			return bytes.Clone(raw)
+		}
+		choice["name"] = bytes.Clone(function["name"])
+		delete(choice, "function")
+	case "allowed_tools":
+		var allowed map[string]json.RawMessage
+		if json.Unmarshal(choice["allowed_tools"], &allowed) != nil {
+			return bytes.Clone(raw)
+		}
+		var references []json.RawMessage
+		if json.Unmarshal(allowed["tools"], &references) != nil {
+			return bytes.Clone(raw)
+		}
+		for i := range references {
+			references[i] = convertChatToolChoiceToResponses(references[i])
+		}
+		tools, err := json.Marshal(references)
+		if err != nil {
+			return bytes.Clone(raw)
+		}
+		choice["mode"] = bytes.Clone(allowed["mode"])
+		choice["tools"] = tools
+		delete(choice, "allowed_tools")
+	default:
+		return bytes.Clone(raw)
+	}
+	converted, err := json.Marshal(choice)
+	if err != nil {
+		return bytes.Clone(raw)
+	}
+	return converted
 }
 
 // convertChatFunctionCallToToolChoice maps the legacy function_call field to a

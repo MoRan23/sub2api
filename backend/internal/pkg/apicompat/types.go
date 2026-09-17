@@ -314,6 +314,7 @@ type ResponsesContentPart struct {
 	Type     string `json:"type"` // "input_text" | "output_text" | "input_image" | "input_file"
 	Text     string `json:"text,omitempty"`
 	ImageURL string `json:"image_url,omitempty"` // data URI for input_image
+	Detail   string `json:"detail,omitempty"`    // image fidelity: auto, low, or high
 
 	// input_file fields.
 	Filename string `json:"filename,omitempty"`
