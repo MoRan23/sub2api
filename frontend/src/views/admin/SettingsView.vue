@@ -5940,6 +5940,25 @@
             </div>
           </div>
 
+          <section class="card p-6" data-testid="openai-request-integrity-settings">
+            <div class="flex items-start justify-between gap-5">
+              <div class="min-w-0">
+                <h2 id="openai-request-integrity-label" class="text-lg font-semibold text-gray-900 dark:text-white">
+                  {{ t("admin.settings.requestIntegrity.title") }}
+                </h2>
+                <p id="openai-request-integrity-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t("admin.settings.requestIntegrity.description") }}
+                </p>
+              </div>
+              <Toggle
+                v-model="form.openai_request_integrity_observe_enabled"
+                aria-labelledby="openai-request-integrity-label"
+                aria-describedby="openai-request-integrity-hint"
+                data-testid="openai-request-integrity-toggle"
+              />
+            </div>
+          </section>
+
           <section class="card space-y-3 p-6" data-testid="codex-telemetry-settings">
             <div class="flex items-start justify-between gap-5">
               <div>
@@ -9821,6 +9840,7 @@ type SettingsForm = Omit<
   channel_monitor_show_quota: boolean;
   channel_monitor_hide_user_ranking: boolean;
   codex_telemetry_enabled: boolean;
+  openai_request_integrity_observe_enabled: boolean;
   smtp_password: string;
   turnstile_secret_key: string;
   tencent_captcha_app_secret_key: string;
@@ -10128,6 +10148,7 @@ const form = reactive<SettingsForm>({
   enable_openai_uuidv7_session_identity: true,
   enable_openai_oauth_daily_session_rotation: false,
   codex_telemetry_enabled: true,
+  openai_request_integrity_observe_enabled: true,
   enable_openai_codex_pat_context_management: false,
   // codex_cli_only 加固
   min_codex_version: "",
@@ -11592,6 +11613,7 @@ async function saveSettings() {
       enable_openai_oauth_daily_session_rotation:
         form.enable_openai_oauth_daily_session_rotation,
       codex_telemetry_enabled: form.codex_telemetry_enabled,
+      openai_request_integrity_observe_enabled: form.openai_request_integrity_observe_enabled,
       enable_openai_codex_client_identity_normalization:
         form.enable_openai_codex_client_identity_normalization,
       enable_openai_request_timezone_conversion:

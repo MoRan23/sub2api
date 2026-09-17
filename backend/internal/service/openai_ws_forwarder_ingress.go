@@ -279,6 +279,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				nil,
 			)
 		}
+		if account.IsOpenAIOAuth() {
+			s.beginOpenAIWSRequestIntegrityTurn(ctx, c, trimmed, turn > 1)
+			if turn == 1 {
+				// Account failover preserves the client's baseline, not the prior
+				// account's model decision or content recovery annotations.
+				resetOpenAIRequestIntegrityAttemptRules(c)
+			}
+		}
 		normalized, timezoneState := s.prepareOpenAIWSFrameTimezone(ctx, c, account, normalized, account.IsOpenAIPassthroughEnabled(), turn == 1, acceptedAt)
 		ctx = openAIWSContextForTimezoneState(ctx, c, timezoneState)
 		requestedReasoningEffort := CanonicalRequestedReasoningEffort(normalized, strings.TrimSpace(values[1].String()))
@@ -408,6 +416,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 		}
 		upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(requestModel))
+		setOpenAIRequestIntegrityExpectedModel(c, upstreamModel)
 		if modelMissing || upstreamModel != originalModel {
 			next, setErr := applyPayloadMutation(normalized, "model", upstreamModel)
 			if setErr != nil {
@@ -692,6 +701,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					currentBridgePayload.payloadRaw, invalidDigests, "ingress_ws_http_bridge_invalid_encrypted_lineage_strip", account.ID, turn,
 				)
 				if strippedCount > 0 {
+					setOpenAIRequestIntegrityRecovery(c, "invalid_encrypted_content")
 					currentBridgePayload.payloadRaw = strippedPayload
 					currentBridgePayload.payloadBytes = len(strippedPayload)
 				}
@@ -739,6 +749,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 				bridgePayloadRaw = updatedPayload
 				bridgePayloadBytes = len(updatedPayload)
+				setOpenAIRequestIntegrityRecovery(c, "history_replay")
 				logOpenAIWSModeInfo(
 					"ingress_ws_http_bridge_replay_input account_id=%d turn=%d input_items=%d previous_response_id_present=%v has_tool_output=%v",
 					account.ID,
@@ -1601,6 +1612,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		)
 		currentPayload = updatedWithInput
 		currentPayloadBytes = len(updatedWithInput)
+		setOpenAIRequestIntegrityRecovery(c, "previous_response_not_found")
 		resetSessionLease(true)
 		skipBeforeTurn = true
 		return true
@@ -1650,6 +1662,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				currentPayload, invalidDigests, "ingress_ws_invalid_encrypted_lineage_strip", account.ID, turn,
 			)
 			if strippedCount > 0 {
+				setOpenAIRequestIntegrityRecovery(c, "invalid_encrypted_content")
 				currentPayload = strippedPayload
 				currentPayloadBytes = len(strippedPayload)
 			}
@@ -1794,6 +1807,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					} else {
 						currentPayload = updatedWithInput
 						currentPayloadBytes = len(updatedWithInput)
+						setOpenAIRequestIntegrityRecovery(c, "history_replay")
 						logOpenAIWSModeInfo(
 							"ingress_ws_prev_response_strict_eval account_id=%d turn=%d conn_id=%s action=drop_previous_response_id_full_create reason=%s previous_response_id=%s expected_previous_response_id=%s has_function_call_output=%v",
 							account.ID,
@@ -1890,6 +1904,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 								turnPrevRecoveryTried = true
 								currentPayload = updatedWithInput
 								currentPayloadBytes = len(updatedWithInput)
+								setOpenAIRequestIntegrityRecovery(c, "history_replay")
 								resetSessionLease(true)
 								skipBeforeTurn = true
 								continue

@@ -44,6 +44,10 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	if account != nil && account.IsOpenAIOAuth() {
+		s.freezeOpenAIRequestIntegrity(ctx, c)
+	}
+	resetOpenAIRequestIntegrityAttemptRules(c)
 	if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
 		SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentityForCompatTurn(c, body, promptCacheKey))
 	}
@@ -161,6 +165,10 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	if err != nil {
 		return nil, fmt.Errorf("convert anthropic to responses: %w", err)
 	}
+	if account.IsOpenAIOAuth() {
+		s.captureOpenAIAdapterIntegrity(ctx, c, "messages", responsesReq)
+	}
+	setOpenAIRequestIntegrityExpectedModel(c, upstreamModel)
 
 	// Upstream always uses streaming (upstream may not support sync mode).
 	// The client's original preference determines the response format.
@@ -267,7 +275,9 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 		}
 		ensureCodexOAuthInstructionsField(reqBody)
 		if shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
-			appendOpenAICompatClaudeCodeTodoGuardToRequestBody(reqBody)
+			if appendOpenAICompatClaudeCodeTodoGuardToRequestBody(reqBody) {
+				setOpenAIRequestIntegrityTodoGuard(c)
+			}
 		}
 		if codexResult.NormalizedModel != "" {
 			upstreamModel = codexResult.NormalizedModel
@@ -469,7 +479,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	if account.Platform == PlatformOpenAI {
 		upstreamReq = ApplyOpenAIRequestPolicy(upstreamReq, s.settingService)
 	}
-	s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, responsesBody)
+	s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, openAIUpstreamRequestBodySnapshot(upstreamReq, responsesBody))
 
 	// 7. Send request
 	proxyURL := ""

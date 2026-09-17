@@ -41,6 +41,7 @@ type UpdateSettingsRequest struct {
 	EnableOpenAIUUIDv7SessionIdentity            *bool                        `json:"enable_openai_uuidv7_session_identity"` // OpenAI UUIDv7 session/thread 标识对（省略=保持现值）
 	EnableOpenAIOAuthDailySessionRotation        *bool                        `json:"enable_openai_oauth_daily_session_rotation"`
 	CodexTelemetryEnabled                        *bool                        `json:"codex_telemetry_enabled"`
+	OpenAIRequestIntegrityObserveEnabled         *bool                        `json:"openai_request_integrity_observe_enabled"`
 	EnableOpenAICodexFingerprintNormalization    *bool                        `json:"enable_openai_codex_fingerprint_normalization"`
 	EnableOpenAICodexInstallationIDNormalization *bool                        `json:"enable_openai_codex_installation_id_normalization"`
 	EnableOpenAICodexClientIdentityNormalization *bool                        `json:"enable_openai_codex_client_identity_normalization"`
@@ -468,6 +469,7 @@ var independentlyOmittedPointerSettingKeys = map[string]string{
 	service.SettingKeyEnableOpenAIUUIDv7SessionIdentity:            service.SettingKeyEnableOpenAIUUIDv7SessionIdentity,
 	service.SettingKeyEnableOpenAIOAuthDailySessionRotation:        service.SettingKeyEnableOpenAIOAuthDailySessionRotation,
 	service.SettingKeyCodexTelemetryEnabled:                        service.SettingKeyCodexTelemetryEnabled,
+	service.SettingKeyOpenAIRequestIntegrityObserveEnabled:         service.SettingKeyOpenAIRequestIntegrityObserveEnabled,
 	service.SettingKeyEnableOpenAICodexClientIdentityNormalization: service.SettingKeyEnableOpenAICodexClientIdentityNormalization,
 	service.SettingKeyEnableOpenAICodexPATContextManagement:        service.SettingKeyEnableOpenAICodexPATContextManagement,
 	service.SettingKeyEnableOpenAIRequestTimezoneConversion:        service.SettingKeyEnableOpenAIRequestTimezoneConversion,
@@ -588,6 +590,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	codexTelemetryEnabled := previousSettings.CodexTelemetryEnabled
 	if req.CodexTelemetryEnabled != nil {
 		codexTelemetryEnabled = *req.CodexTelemetryEnabled
+	}
+	openAIRequestIntegrityObserveEnabled := previousSettings.OpenAIRequestIntegrityObserveEnabled
+	if req.OpenAIRequestIntegrityObserveEnabled != nil {
+		openAIRequestIntegrityObserveEnabled = *req.OpenAIRequestIntegrityObserveEnabled
 	}
 	openAICodexFingerprintNormalizationEnabled := previousSettings.EnableOpenAICodexFingerprintNormalization
 	if req.EnableOpenAICodexFingerprintNormalization != nil {
@@ -1625,6 +1631,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableOpenAIUUIDv7SessionIdentity:            openAIUUIDv7SessionIdentityEnabled,
 		EnableOpenAIOAuthDailySessionRotation:        openAIOAuthDailySessionRotationEnabled,
 		CodexTelemetryEnabled:                        codexTelemetryEnabled,
+		OpenAIRequestIntegrityObserveEnabled:         openAIRequestIntegrityObserveEnabled,
 		EnableOpenAICodexFingerprintNormalization:    openAICodexFingerprintNormalizationEnabled,
 		EnableOpenAICodexInstallationIDNormalization: openAICodexInstallationIDNormalizationEnabled,
 		EnableOpenAICodexClientIdentityNormalization: openAICodexClientIdentityNormalizationEnabled,
@@ -2297,6 +2304,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableOpenAIUUIDv7SessionIdentity:                      updatedSettings.EnableOpenAIUUIDv7SessionIdentity,
 		EnableOpenAIOAuthDailySessionRotation:                  updatedSettings.EnableOpenAIOAuthDailySessionRotation,
 		CodexTelemetryEnabled:                                  updatedSettings.CodexTelemetryEnabled,
+		OpenAIRequestIntegrityObserveEnabled:                   updatedSettings.OpenAIRequestIntegrityObserveEnabled,
 		CodexTelemetryEffectiveEnabled:                         telemetryEffectiveEnabled,
 		CodexTelemetryForcedOffReason:                          telemetryForcedOffReason,
 		EnableOpenAICodexFingerprintNormalization:              updatedSettings.EnableOpenAICodexFingerprintNormalization,

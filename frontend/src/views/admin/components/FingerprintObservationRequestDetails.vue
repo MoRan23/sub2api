@@ -4,6 +4,9 @@
       <span class="font-medium">{{ t(`${prefix}.details`) }}</span>
       <span class="ml-3">{{ t(`${prefix}.comparison.${observation.timezone_comparison_status ?? 'not_collected'}`) }}</span>
       <span class="ml-3">{{ t(`${prefix}.residency`) }}: {{ residencyValue }}</span>
+      <span v-if="observation.request_integrity" class="ml-3" data-testid="request-integrity-summary">
+        {{ t(`${integrityPrefix}.title`) }}: {{ t(`${integrityPrefix}.status.${observation.request_integrity.status}`) }}
+      </span>
     </summary>
 
     <div v-if="detailsOpen" class="space-y-4 border-t border-gray-200 p-3 dark:border-dark-700">
@@ -23,6 +26,32 @@
         </div>
       </dl>
       <p v-if="observation.event_kind === 'ws_response_create'" class="text-gray-500 dark:text-gray-400">{{ t(`${prefix}.frameAttempt`) }}</p>
+
+      <section v-if="observation.request_integrity" :aria-label="t(`${integrityPrefix}.title`)" class="min-w-0 rounded-lg border border-gray-200 p-3 dark:border-dark-700" data-testid="request-integrity-details">
+        <h3 class="font-semibold text-gray-800 dark:text-gray-200">{{ t(`${integrityPrefix}.title`) }}</h3>
+        <p class="mt-1 text-gray-500 dark:text-gray-400">{{ t(`${integrityPrefix}.description`) }}</p>
+        <dl class="mt-3 grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div v-for="item in integrityItems" :key="item.key" class="min-w-0">
+            <dt class="text-gray-500 dark:text-gray-400">{{ item.label }}</dt>
+            <dd class="mt-1 break-words text-gray-800 dark:text-gray-200">{{ item.value }}</dd>
+          </div>
+        </dl>
+        <p v-if="observation.request_integrity.baseline_stage === 'responses_adapter_output'" class="mt-3 text-gray-500 dark:text-gray-400">{{ t(`${integrityPrefix}.adapterBoundary`) }}</p>
+        <div v-if="observation.request_integrity.changed_fields?.length" class="mt-3">
+          <h4 class="text-gray-500 dark:text-gray-400">{{ t(`${integrityPrefix}.fields`) }}</h4>
+          <ul class="mt-1 space-y-1 break-all font-mono text-gray-800 dark:text-gray-200">
+            <li v-for="(field, index) in observation.request_integrity.changed_fields" :key="index">{{ field }}</li>
+          </ul>
+        </div>
+        <div v-if="observation.request_integrity.rule_codes?.length" class="mt-3">
+          <h4 class="text-gray-500 dark:text-gray-400">{{ t(`${integrityPrefix}.rules`) }}</h4>
+          <ul class="mt-1 space-y-1 break-words text-gray-800 dark:text-gray-200">
+            <li v-for="(rule, index) in observation.request_integrity.rule_codes" :key="index">{{ integrityReasonLabel(rule) }}</li>
+          </ul>
+        </div>
+        <p v-if="observation.request_integrity.reason" class="mt-3 break-words text-gray-600 dark:text-gray-300">{{ t(`${integrityPrefix}.reason`) }}: {{ integrityReasonLabel(observation.request_integrity.reason) }}</p>
+        <p v-if="observation.request_integrity.truncated" class="mt-3 text-amber-700 dark:text-amber-400">{{ t(`${integrityPrefix}.truncated`) }}</p>
+      </section>
 
       <section class="rounded-lg border border-gray-200 p-3 dark:border-dark-700">
         <h3 class="font-semibold text-gray-800 dark:text-gray-200">{{ t(`${prefix}.codexMetadata`) }}</h3>
@@ -109,8 +138,9 @@ import { useI18n } from 'vue-i18n'
 import type { FingerprintObservationEntry, RequestTimezoneScan, RequestTimezoneSource } from '@/api/admin/fingerprintObservations'
 
 const props = defineProps<{ observation: FingerprintObservationEntry }>()
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 const prefix = 'admin.fingerprintObservation.request'
+const integrityPrefix = `${prefix}.integrity`
 const detailsOpen = ref(false)
 const directions = computed(() => [
   { key: 'inbound', scan: props.observation.inbound_timezone_observations },
@@ -120,6 +150,23 @@ const residencyValue = computed(() => props.observation.outbound_codex_residency
   ? t(`${prefix}.notCollected`)
   : props.observation.outbound_codex_residency || t(`${prefix}.headerAbsent`))
 const eventLabel = computed(() => t(`${prefix}.events.${props.observation.event_kind ?? 'unknown'}`))
+const integrityItems = computed(() => {
+  const entry = props.observation.request_integrity
+  if (!entry) return []
+  return [
+    ['result', t(`${integrityPrefix}.status.${entry.status}`)],
+    ['modeLabel', t(`${integrityPrefix}.modes.${entry.mode}`)],
+    ['protocolLabel', t(`${integrityPrefix}.protocols.${entry.baseline_protocol}`)],
+    ['stageLabel', t(`${integrityPrefix}.stages.${entry.baseline_stage}`)],
+    ['attempt', String(entry.attempt)],
+    ['transport', t(`${integrityPrefix}.transports.${entry.transport}`)],
+  ].map(([key, value]) => ({ key, label: t(`${integrityPrefix}.${key}`), value }))
+})
+
+function integrityReasonLabel(reason: string): string {
+  const key = `${integrityPrefix}.reasons.${reason}`
+  return te(key) ? t(key) : reason
+}
 const metadataItems = computed(() => [
   ['dailyRoot', props.observation.daily_fixed_root_enabled ? `${props.observation.daily_fixed_root_kind || '—'} / ${props.observation.daily_fixed_root_business_date || '—'} / ${props.observation.daily_fixed_root_slot_index ?? '—'}` : t(`${prefix}.disabled`)],
   ['dailyRootSession', props.observation.daily_fixed_root_session_id], ['window', props.observation.window_id],

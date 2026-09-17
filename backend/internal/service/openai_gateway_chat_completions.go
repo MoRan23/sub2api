@@ -71,6 +71,13 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
 ) (*OpenAIForwardResult, error) {
+	if account != nil && account.IsOpenAIOAuth() {
+		s.freezeOpenAIRequestIntegrity(ctx, c)
+		if !gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists() {
+			s.captureOpenAIRequestIntegrity(ctx, c, "responses", body)
+		}
+	}
+	resetOpenAIRequestIntegrityAttemptRules(c)
 	if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
 		SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentityForCompatTurn(c, body, promptCacheKey))
 	}
@@ -276,6 +283,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		if err != nil {
 			return nil, fmt.Errorf("convert chat completions to responses: %w", err)
 		}
+		if account.IsOpenAIOAuth() {
+			s.captureOpenAIAdapterIntegrity(ctx, c, "chat_completions", responsesReq)
+		}
 		responsesReq.Model = upstreamModel
 		normalizeResponsesRequestServiceTier(responsesReq)
 		responsesBody, err = json.Marshal(responsesReq)
@@ -334,6 +344,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	// Codex transforms may normalize the model after the initial mapping pass;
 	// record the final slug immediately before policy/auth/upstream dispatch.
 	SetOpsUpstreamModel(c, upstreamModel)
+	setOpenAIRequestIntegrityExpectedModel(c, upstreamModel)
 
 	if account.Type == AccountTypeAPIKey {
 		if trimmedKey := strings.TrimSpace(promptCacheKey); trimmedKey != "" {
@@ -400,7 +411,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if account.Platform == PlatformOpenAI {
 		upstreamReq = ApplyOpenAIRequestPolicy(upstreamReq, s.settingService)
 	}
-	s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, responsesBody)
+	s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, openAIUpstreamRequestBodySnapshot(upstreamReq, responsesBody))
 
 	// 7. Send request
 	proxyURL := ""

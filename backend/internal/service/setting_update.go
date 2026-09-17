@@ -110,6 +110,9 @@ func (s *SettingService) persistSettingsAndRefreshOpenAIPolicies(
 	if value, present := updates[SettingKeyCodexTelemetryEnabled]; present && s.codexTelemetry != nil {
 		s.codexTelemetry.SetEnabled(parseCodexTelemetryEnabled(value))
 	}
+	if value, present := updates[SettingKeyOpenAIRequestIntegrityObserveEnabled]; present {
+		s.publishOpenAIRequestIntegrityObserveEnabled(value)
+	}
 
 	if len(omitted) > 0 {
 		values, err := s.settingRepo.GetAll(ctx)
@@ -547,6 +550,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyEnableOpenAIUUIDv7SessionIdentity] = strconv.FormatBool(settings.EnableOpenAIUUIDv7SessionIdentity)
 	updates[SettingKeyEnableOpenAIOAuthDailySessionRotation] = strconv.FormatBool(settings.EnableOpenAIOAuthDailySessionRotation)
 	updates[SettingKeyCodexTelemetryEnabled] = strconv.FormatBool(settings.CodexTelemetryEnabled)
+	updates[SettingKeyOpenAIRequestIntegrityObserveEnabled] = strconv.FormatBool(settings.OpenAIRequestIntegrityObserveEnabled)
 	updates[SettingKeyEnableOpenAICodexClientIdentityNormalization] = strconv.FormatBool(settings.EnableOpenAICodexClientIdentityNormalization)
 	updates[SettingKeyEnableOpenAICodexPATContextManagement] = strconv.FormatBool(settings.EnableOpenAICodexPATContextManagement)
 	updates[SettingKeyEnableOpenAIRequestTimezoneConversion] = strconv.FormatBool(settings.EnableOpenAIRequestTimezoneConversion)

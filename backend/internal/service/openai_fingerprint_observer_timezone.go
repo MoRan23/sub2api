@@ -80,6 +80,7 @@ func cloneFingerprintTimezoneScan(scan *TimezoneScanResult) *TimezoneScanResult 
 }
 
 func cloneFingerprintObservationEntry(entry FingerprintObservationEntry) FingerprintObservationEntry {
+	entry.RequestIntegrity = CloneRequestIntegrityObservation(entry.RequestIntegrity)
 	entry.InboundTimezoneObservations = cloneFingerprintTimezoneScan(entry.InboundTimezoneObservations)
 	entry.OutboundTimezoneObservations = cloneFingerprintTimezoneScan(entry.OutboundTimezoneObservations)
 	if entry.TimezoneConversions != nil {

@@ -22,6 +22,10 @@ func ptrUint64(v uint64) *uint64 { return &v }
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	if account != nil && account.IsOpenAIOAuth() {
+		s.captureOpenAIRequestIntegrity(ctx, c, "responses", body)
+	}
+	resetOpenAIRequestIntegrityAttemptRules(c)
 	if account != nil && account.Platform == PlatformOpenAI {
 		ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	}
@@ -774,6 +778,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, err
 	}
 	SetOpsUpstreamModel(c, upstreamModel)
+	setOpenAIRequestIntegrityExpectedModel(c, upstreamModel)
 
 	// 命中 WS 时仅走 WebSocket Mode；不再自动回退 HTTP。
 	if wsDecision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 {
@@ -1129,6 +1134,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 						s.markOpenAIWSInvalidEncryptedContentLineage(lineageGroupID, lineageSessionHash, invalidDigests)
 					}
 					httpInvalidEncryptedContentRetryTried = true
+					setOpenAIRequestIntegrityRecovery(c, "invalid_encrypted_content")
 					rejectedFieldRetryState.remember(body)
 					logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request once after invalid_encrypted_content (account: %s)", account.Name)
 					continue
@@ -1139,6 +1145,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				return nil, fmt.Errorf("normalize rejected Responses field retry body: %w", retryErr)
 			} else if changed && rejectedFieldRetryState.Allow(retryBody) {
 				body = retryBody
+				setOpenAIRequestIntegrityRecovery(c, "rejected_field_recovery")
 				requestView = newOpenAIRequestView(body)
 				reqBody = nil
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request after %s (account: %s)", reason, account.Name)

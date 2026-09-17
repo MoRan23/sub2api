@@ -255,6 +255,7 @@ type SystemSettings struct {
 	EnableOpenAIUUIDv7SessionIdentity            bool   // 是否启用稳定复用的 OpenAI UUIDv7 session/thread 标识对（默认 true）
 	EnableOpenAIOAuthDailySessionRotation        bool   // OAuth 会话根是否按 UTC+8 每日轮换（默认 false）
 	CodexTelemetryEnabled                        bool   // 独立的 Codex 客户端遥测（默认 true，包含模拟行为）
+	OpenAIRequestIntegrityObserveEnabled         bool   // 独立的 OpenAI 请求完整性观察（默认 true，不改变请求）
 	EnableOpenAICodexClientIdentityNormalization bool   // UA/originator/version 归一分项（默认 true）
 	EnableOpenAICodexPATContextManagement        bool   // PAT Codex History/Notes 适配（默认 false）
 	EnableOpenAIRequestTimezoneConversion        bool   // 请求时区及本轮日期转换（默认 true）

@@ -145,6 +145,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	requestedModel := reqModel
+	setOpenAIRequestIntegrityExpectedModel(c, reqModel)
 	upstreamPassthroughModel := ""
 	if isOpenAIResponsesCompactPath(c) {
 		compactMappedModel := s.resolveOpenAICompactFallbackModel(account, reqModel)
@@ -387,6 +388,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				return nil, fmt.Errorf("normalize passthrough rejected Responses field retry body: %w", retryErr)
 			} else if changed && rejectedFieldRetryState.Allow(retryBody) {
 				body = retryBody
+				setOpenAIRequestIntegrityRecovery(c, "rejected_field_recovery")
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying passthrough request after %s (account: %s)", reason, account.Name)
 				continue
 			}

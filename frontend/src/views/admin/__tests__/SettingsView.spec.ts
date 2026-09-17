@@ -1378,6 +1378,44 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
+  it("defaults integrity observation on independently and preserves an explicit disable after a partial save response", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      enable_openai_codex_fingerprint_normalization: false,
+      enable_openai_oauth_daily_session_rotation: false,
+      codex_telemetry_enabled: false,
+    });
+    updateSettings.mockResolvedValueOnce({ ...baseSettingsResponse });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const toggle = wrapper.get('[data-testid="openai-request-integrity-toggle"]');
+    expect((toggle.element as HTMLInputElement).checked).toBe(true);
+    expect((toggle.element as HTMLInputElement).disabled).toBe(false);
+    await toggle.setValue(false);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      openai_request_integrity_observe_enabled: false,
+      codex_telemetry_enabled: false,
+      enable_openai_oauth_daily_session_rotation: false,
+    }));
+    expect((toggle.element as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("loads and saves an explicit integrity observation choice", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, openai_request_integrity_observe_enabled: false });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const toggle = wrapper.get('[data-testid="openai-request-integrity-toggle"]');
+    expect((toggle.element as HTMLInputElement).checked).toBe(false);
+    await toggle.setValue(true);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ openai_request_integrity_observe_enabled: true }));
+  });
+
   it("defaults Codex telemetry to enabled independently of fingerprint and daily-root switches", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,

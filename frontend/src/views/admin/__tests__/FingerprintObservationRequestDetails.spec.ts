@@ -37,6 +37,50 @@ async function openDetails() {
 afterEach(cleanup)
 
 describe('FingerprintObservationRequestDetails', () => {
+  it('shows a compact integrity status and expands fields and safe reasons with the correct baseline boundary', async () => {
+    renderDetails({ request_integrity: {
+      mode: 'observe', status: 'difference', baseline_protocol: 'messages', baseline_stage: 'responses_adapter_output',
+      attempt: 2, transport: 'ws', changed_fields: ['input.0.content', 'reasoning'], rule_codes: ['encrypted_reasoning_removed'], truncated: true,
+    } })
+    expect(screen.getByTestId('request-integrity-summary').textContent).toContain('Differences found')
+    expect(screen.queryByTestId('request-integrity-details')).toBeNull()
+    await openDetails()
+    const detail = screen.getByTestId('request-integrity-details')
+    expect(within(detail).getByText('Observe only')).toBeTruthy()
+    expect(within(detail).getByText('Messages')).toBeTruthy()
+    expect(within(detail).getByText('Converted Responses request')).toBeTruthy()
+    expect(within(detail).getByText('The baseline is the first converted Responses body. The protocol converter itself is outside this comparison.')).toBeTruthy()
+    expect(within(detail).getByText('input.0.content')).toBeTruthy()
+    expect(within(detail).getByText('Encrypted reasoning removed during recovery (lossy)')).toBeTruthy()
+    expect(within(detail).getByText('2')).toBeTruthy()
+    expect(within(detail).getByText('WS')).toBeTruthy()
+    expect(within(detail).getByText('Only the first 32 difference locations are shown; this list is incomplete.')).toBeTruthy()
+    expect(detail.querySelectorAll('dl > div').length).toBe(6)
+  })
+
+  it.each([
+    ['unchanged', 'No differences', undefined],
+    ['expected_transform', 'Matches known transformations', undefined],
+    ['skipped', 'Check incomplete', 'body_too_large'],
+  ] as const)('distinguishes integrity state %s without treating incomplete checks as passes', async (status, label, reason) => {
+    renderDetails({ request_integrity: {
+      mode: 'observe', status, baseline_protocol: 'responses', baseline_stage: 'ingress', attempt: 1, transport: 'http', reason,
+    } })
+    expect(screen.getByTestId('request-integrity-summary').textContent).toContain(label)
+    await openDetails()
+    const detail = screen.getByTestId('request-integrity-details')
+    expect(within(detail).getByText(label)).toBeTruthy()
+    if (reason) expect(within(detail).getByText(/Request body exceeds the check size limit/)).toBeTruthy()
+    expect(within(detail).queryByText('The baseline is the first converted Responses body. The protocol converter itself is outside this comparison.')).toBeNull()
+  })
+
+  it('does not invent integrity results for old observations', async () => {
+    renderDetails()
+    expect(screen.queryByTestId('request-integrity-summary')).toBeNull()
+    await openDetails()
+    expect(screen.queryByTestId('request-integrity-details')).toBeNull()
+  })
+
   it('expands actual inbound and outbound values without confusing the configured target with an observation', async () => {
     renderDetails({
       event_kind: 'http_request', timezone_target: 'America/Los_Angeles',

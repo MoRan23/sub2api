@@ -1,6 +1,10 @@
 export default {
     settings: {
       title: 'System Settings',
+      requestIntegrity: {
+        title: 'OpenAI request integrity observation',
+        description: 'Enabled by default. Compares content fields before account adaptation with the final outbound OpenAI OAuth inference request. Records differences without blocking, rewriting, or changing retries. Independent of daily fixed roots, fingerprint collection, and client telemetry; redacted difference logs remain active when fingerprint collection is off.',
+      },
       codexTelemetry: {
         title: 'Codex client telemetry',
         description: 'Enabled by default. Sends client telemetry upstream, including simulated behavior, independently of daily fixed roots and fingerprint capture.',

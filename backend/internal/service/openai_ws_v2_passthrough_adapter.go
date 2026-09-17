@@ -747,6 +747,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return err
 	}
 	rawFirstClientMessage := append([]byte(nil), firstClientMessage...)
+	if account.IsOpenAIOAuth() {
+		s.beginOpenAIWSRequestIntegrityTurn(ctx, c, rawFirstClientMessage, false)
+		resetOpenAIRequestIntegrityAttemptRules(c)
+	}
 	if account.UsesOpenAICodexProtocol() {
 		if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
 			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, rawFirstClientMessage, ""))
@@ -810,6 +814,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		}
 	}
 	capturedSessionModel := openAIWSPassthroughPolicyModelForFrame(account, firstClientMessage)
+	setOpenAIRequestIntegrityExpectedModel(c, capturedSessionModel)
 	if capturedSessionModel != "" && capturedSessionModel != strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String()) {
 		firstClientMessage = s.ReplaceModelInBody(firstClientMessage, capturedSessionModel)
 	}
@@ -1195,6 +1200,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						turnLifecycle.cancelResponseCreate()
 					}
 				}()
+				// The first frame is sent explicitly below; this filter only receives
+				// follow-up client frames. Capture before any content adaptation.
+				if account.IsOpenAIOAuth() {
+					s.beginOpenAIWSRequestIntegrityTurn(ctx, c, payload, true)
+				}
 				payload, currentTimezoneState = s.prepareOpenAIWSFrameTimezone(ctx, c, account, payload, true, false, responseCreateAt)
 			}
 			responsesLite := isResponseCreate && isOpenAIResponsesLiteWebSocketPayload(payload)
@@ -1285,6 +1295,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			model := openAIWSPassthroughPolicyModelForFrame(account, payload)
 			if model == "" {
 				model = capturedSessionModel
+			}
+			if isResponseCreate {
+				setOpenAIRequestIntegrityExpectedModel(c, model)
 			}
 			if isResponseCreate && model != "" && model != strings.TrimSpace(gjson.GetBytes(payload, "model").String()) {
 				payload = s.ReplaceModelInBody(payload, model)

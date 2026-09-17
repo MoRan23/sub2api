@@ -1,6 +1,10 @@
 export default {
     settings: {
       title: '系统设置',
+      requestIntegrity: {
+        title: 'OpenAI 请求完整性观察',
+        description: '默认开启。对比 OpenAI OAuth 推理请求转换前与最终出站的内容字段，只记录差异，不拦截、改写请求或改变重试。与每日固定根、指纹采集和客户端遥测开关独立；关闭指纹采集时仍记录脱敏差异日志。',
+      },
       codexTelemetry: {
         title: 'Codex 客户端遥测',
         description: '默认开启。向上游发送客户端遥测，包含模拟行为；独立于每日固定根会话和指纹采集开关。',

@@ -48,6 +48,7 @@ type SystemSettings struct {
 	EnableOpenAIUUIDv7SessionIdentity            bool                     `json:"enable_openai_uuidv7_session_identity"` // OpenAI UUIDv7 session/thread 标识对
 	EnableOpenAIOAuthDailySessionRotation        bool                     `json:"enable_openai_oauth_daily_session_rotation"`
 	CodexTelemetryEnabled                        bool                     `json:"codex_telemetry_enabled"`
+	OpenAIRequestIntegrityObserveEnabled         bool                     `json:"openai_request_integrity_observe_enabled"`
 	CodexTelemetryEffectiveEnabled               bool                     `json:"codex_telemetry_effective_enabled"`
 	CodexTelemetryForcedOffReason                string                   `json:"codex_telemetry_forced_off_reason"`
 	EnableOpenAICodexFingerprintNormalization    bool                     `json:"enable_openai_codex_fingerprint_normalization"`

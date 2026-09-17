@@ -49,6 +49,19 @@ export type RequestTimezoneComparisonStatus =
   | 'not_applicable'
   | 'incomplete'
 
+export interface RequestIntegrityObservation {
+  mode: 'off' | 'observe'
+  status: 'unchanged' | 'expected_transform' | 'difference' | 'skipped'
+  baseline_protocol: 'responses' | 'messages' | 'chat_completions' | 'unknown'
+  baseline_stage: 'ingress' | 'responses_adapter_output'
+  attempt: number
+  transport: 'http' | 'ws' | 'http_bridge' | 'http_to_ws' | 'unknown'
+  changed_fields?: string[]
+  rule_codes?: string[]
+  reason?: string
+  truncated?: boolean
+}
+
 export interface FingerprintObservationEntry {
   sequence_id: number
   timestamp: string
@@ -103,6 +116,7 @@ export interface FingerprintObservationEntry {
   timezone_comparison_status?: RequestTimezoneComparisonStatus
   outbound_codex_residency?: string
   outbound_codex_residency_source?: 'request_headers' | 'ws_handshake'
+  request_integrity?: RequestIntegrityObservation
 }
 
 export interface FingerprintObservationUserSummary {
