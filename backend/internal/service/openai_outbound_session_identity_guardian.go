@@ -37,8 +37,8 @@ func guardianSourceThreadBindingKey(namespace string, apiKeyID int64, sessionID,
 // turn to its projected child. HTTP headers are authoritative; WS callers pass
 // nil headers and the final response.create frame instead of an old handshake.
 func recordOpenAICodexGuardianSourceThread(plan OpenAIOAuthIdentityPlan, headers http.Header, body []byte) {
-	// Stable child mappings already live in the identity store. Only a logical
-	// root projected as a fresh child needs this short-lived source-turn binding.
+	// A logical root projected beneath the daily root has a stable child ID,
+	// but this binding still proves the particular source turn was actually sent.
 	if !plan.TurnIdentityEnabled || plan.Capture.Logical.SessionKey != plan.Capture.Logical.ThreadKey ||
 		plan.TurnIdentity.SessionID == plan.TurnIdentity.ThreadID ||
 		strings.EqualFold(plan.WireProfile.ThreadSource, "guardian_classifier") {

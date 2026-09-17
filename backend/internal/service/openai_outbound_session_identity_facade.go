@@ -762,41 +762,8 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 		} else if ok {
 			plan.TurnIdentity = identity
 			plan.TurnIdentityEnabled = true
-			// Daily OAuth rotation assigns the session root from the account's
-			// three-slot pool. The regular identity mapper above still resolves
-			// the logical child/thread lineage; only the root is replaced here.
-			// This facade is the primary HTTP Forward path, so applying the
-			// assignment here is required even when the transport helper is not
-			// called directly.
-			if account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil &&
-				s.oauthDailySessionRotationEnabled(ctx) &&
-				(openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c)) {
-				affinity, affinityErr := s.oauthDailySessionRepo.GetOrCreateOAuthDailySessionAffinity(
-					ctx, account.ID, getAPIKeyIDFromContext(c), capture.Logical.SessionKey, time.Now().UTC(),
-				)
-				if affinityErr != nil {
-					return plan, fmt.Errorf("resolve OAuth daily stream affinity: %w", affinityErr)
-				}
-				root, rootErr := canonicalUUIDv7(affinity.StreamSessionID)
-				if rootErr != nil {
-					return plan, fmt.Errorf("invalid OAuth daily stream root session: %w", rootErr)
-				}
-				identity.SessionID = root
-				if identity.Relation == OpenAICodexTurnRelationDescendant {
-					identity.ParentThreadID = root
-				}
-				if identity.Relation == OpenAICodexTurnRelationRoot {
-					child, childErr := uuid.NewV7()
-					if childErr != nil {
-						return plan, fmt.Errorf("generate OAuth daily stream child thread: %w", childErr)
-					}
-					identity.ThreadID = child.String()
-					identity.ParentThreadID = root
-					identity.Relation = OpenAICodexTurnRelationDescendant
-				}
-				plan.TurnIdentity = identity
-				setOpenAIDailyRootObservation(c, OpenAIDailyRootObservation{Enabled: true, Kind: "stream", BusinessDate: affinity.BusinessDate, SlotIndex: affinity.SlotIndex, SessionID: root})
-			}
+			// The resolver already applied the daily root and mapped lineage.
+			// Re-reading affinity here could mix generations across midnight.
 			plan.WireProfile.SessionID = identity.SessionID
 			plan.WireProfile.ThreadID = identity.ThreadID
 			plan.WireProfile.TurnLineage.ParentThreadID = identity.ParentThreadID

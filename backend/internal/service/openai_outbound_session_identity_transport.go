@@ -357,24 +357,6 @@ func (s *OpenAIGatewayService) resolveOpenAICodexLogicalIdentityForTransport(
 		// conditions. The mapper has already recorded bounded metrics/log fields.
 		return OpenAICodexTurnIdentity{}, false, nil
 	}
-	if ok && account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil &&
-		s.oauthDailySessionRotationEnabled(ctx) && (openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c)) {
-		affinity, affinityErr := s.oauthDailySessionRepo.GetOrCreateOAuthDailySessionAffinity(
-			ctx, account.ID, getAPIKeyIDFromContext(c), logical.SessionKey, time.Now().UTC(),
-		)
-		if affinityErr != nil {
-			return OpenAICodexTurnIdentity{}, false, affinityErr
-		}
-		root, rootErr := canonicalUUIDv7(affinity.StreamSessionID)
-		if rootErr != nil {
-			return OpenAICodexTurnIdentity{}, false, fmt.Errorf("invalid OAuth daily stream root session: %w", rootErr)
-		}
-		identity.SessionID = root
-		setOpenAIDailyRootObservation(c, OpenAIDailyRootObservation{Enabled: true, Kind: "stream", BusinessDate: affinity.BusinessDate, SlotIndex: affinity.SlotIndex, SessionID: root})
-		if identity.Relation == OpenAICodexTurnRelationDescendant {
-			identity.ParentThreadID = root
-		}
-	}
 	return identity, ok, nil
 }
 

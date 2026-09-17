@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 func guardianIdentityBody(t *testing.T, session, thread, turn, source, parentTurn string) []byte {
@@ -87,9 +89,14 @@ func TestGuardianV2IdentityMapsSourceAndCacheAcrossDailyRootModes(t *testing.T) 
 				parent, parentHeaders, parentOut := guardianResolvePlan(t, svc, account, 9972, parentBody)
 				recordOpenAICodexGuardianSourceThread(parent, parentHeaders, parentOut)
 				body := guardianIdentityBody(t, session, uuid.Must(uuid.NewV7()).String(), uuid.Must(uuid.NewV7()).String(), source, parentTurn)
+				metadata, err := sjson.Set(gjson.GetBytes(body, "client_metadata.x-codex-turn-metadata").String(), "parent_thread_id", source)
+				require.NoError(t, err)
+				body, err = sjson.SetBytes(body, "client_metadata.x-codex-turn-metadata", metadata)
+				require.NoError(t, err)
 				plan, headers, out := guardianResolvePlan(t, svc, account, 9972, body)
 				require.Equal(t, OpenAICodexPromptCacheKeyGuardianV2, plan.PromptCacheKey.Kind)
 				require.Equal(t, parent.TurnIdentity.ThreadID, plan.TurnIdentity.GuardianClassifierSourceThreadID)
+				require.Equal(t, parent.TurnIdentity.ThreadID, plan.TurnIdentity.ParentThreadID, "an explicit parent remains the mapped source thread, including beneath a daily root")
 				require.NotEqual(t, plan.TurnIdentity.ThreadID, plan.TurnIdentity.GuardianClassifierSourceThreadID)
 				require.Equal(t, "guardian-v2:"+parent.TurnIdentity.ThreadID, gjson.GetBytes(out, "prompt_cache_key").String())
 				for _, raw := range []string{headers.Get(openAIWSTurnMetadataHeader), gjson.GetBytes(out, "client_metadata.x-codex-turn-metadata").String()} {
@@ -117,7 +124,7 @@ func TestGuardianV2IdentityMissingDailySourceNeverInventsLineage(t *testing.T) {
 	require.NotContains(t, string(out), session)
 }
 
-func TestGuardianV2ReusedWSClassifierUpdatesSourceForEachParentTurn(t *testing.T) {
+func TestGuardianV2ReusedWSClassifierBindsEachParentTurnToStableSource(t *testing.T) {
 	resetProcessCodexIdentityStore(t)
 	svc, account := guardianIdentityService(t, true)
 	session, classifier := uuid.Must(uuid.NewV7()).String(), uuid.Must(uuid.NewV7()).String()
@@ -128,8 +135,10 @@ func TestGuardianV2ReusedWSClassifierUpdatesSourceForEachParentTurn(t *testing.T
 	require.Equal(t, firstSource.TurnIdentity.ThreadID, first.TurnIdentity.GuardianClassifierSourceThreadID)
 
 	secondSource, secondHeaders, secondBody := guardianResolvePlan(t, svc, account, 9972, guardianIdentityBody(t, session, session, secondTurn, "", ""))
+	unbound, _, _ := guardianResolvePlan(t, svc, account, 9972, guardianIdentityBody(t, session, classifier, uuid.Must(uuid.NewV7()).String(), session, secondTurn))
+	require.Empty(t, unbound.TurnIdentity.GuardianClassifierSourceThreadID, "a stable thread does not prove that the new parent turn was physically sent")
 	recordOpenAICodexGuardianSourceThread(secondSource, secondHeaders, secondBody)
-	require.NotEqual(t, firstSource.TurnIdentity.ThreadID, secondSource.TurnIdentity.ThreadID)
+	require.Equal(t, firstSource.TurnIdentity.ThreadID, secondSource.TurnIdentity.ThreadID, "new turns in one logical thread reuse the daily child")
 	body := guardianIdentityBody(t, session, classifier, uuid.Must(uuid.NewV7()).String(), session, secondTurn)
 	var frame map[string]any
 	require.NoError(t, json.Unmarshal(body, &frame))
@@ -137,8 +146,9 @@ func TestGuardianV2ReusedWSClassifierUpdatesSourceForEachParentTurn(t *testing.T
 	body, err := json.Marshal(frame)
 	require.NoError(t, err)
 	capture := captureOpenAIWSFrameIdentity(body, &first)
-	// A new parent turn changes the source binding, not the socket's classifier
-	// thread. The passthrough compatibility gate must continue to accept it.
+	// A new parent turn needs its own physical-send binding while both the source
+	// and socket's classifier thread remain stable. The passthrough compatibility
+	// gate must continue to accept it.
 	require.True(t, openAICodexLogicalTurnIdentityEqual(capture.Logical, first.Capture.Logical))
 	c := newOutboundIdentityTestContext(t, nil)
 	c.Set("api_key", &APIKey{ID: 9972})
@@ -211,8 +221,23 @@ func TestGuardianV2SourceTurnBindingsRejectAmbiguityAndExpire(t *testing.T) {
 	require.Empty(t, lookup(plan.CredentialOwnerNamespace, plan.APIKeyID, plan.TurnIdentity.SessionID))
 	recordOpenAICodexGuardianSourceThread(plan, headers, out)
 	rematerialized, rematHeaders, rematOut := guardianResolvePlan(t, svc, account, 9972, body)
-	require.NotEqual(t, plan.TurnIdentity.ThreadID, rematerialized.TurnIdentity.ThreadID)
+	require.Equal(t, plan.TurnIdentity.ThreadID, rematerialized.TurnIdentity.ThreadID)
 	recordOpenAICodexGuardianSourceThread(rematerialized, rematHeaders, rematOut)
+	require.Equal(t, plan.TurnIdentity.ThreadID, lookup(plan.CredentialOwnerNamespace, plan.APIKeyID, plan.TurnIdentity.SessionID), "normal rematerialization cannot invalidate the physical source binding")
+
+	// Explicitly simulate inconsistent physical identities from separate senders.
+	// Normal daily-root rematerialization must no longer create this conflict.
+	conflicting := cloneOpenAIOAuthIdentityPlan(plan)
+	conflicting.TurnIdentity.ThreadID = uuid.Must(uuid.NewV7()).String()
+	conflicting.WireProfile.ThreadID = conflicting.TurnIdentity.ThreadID
+	conflictHeaders := headers.Clone()
+	for name, values := range conflictHeaders {
+		for i, value := range values {
+			conflictHeaders[name][i] = string(bytes.ReplaceAll([]byte(value), []byte(plan.TurnIdentity.ThreadID), []byte(conflicting.TurnIdentity.ThreadID)))
+		}
+	}
+	conflictBody := bytes.ReplaceAll(out, []byte(plan.TurnIdentity.ThreadID), []byte(conflicting.TurnIdentity.ThreadID))
+	recordOpenAICodexGuardianSourceThread(conflicting, conflictHeaders, conflictBody)
 	require.Empty(t, lookup(plan.CredentialOwnerNamespace, plan.APIKeyID, plan.TurnIdentity.SessionID))
 	// Repeating the old identity cannot erase the recorded ambiguity.
 	recordOpenAICodexGuardianSourceThread(plan, headers, out)
