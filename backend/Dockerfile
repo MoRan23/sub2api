@@ -9,6 +9,7 @@ RUN apk add --no-cache git
 
 # 复制go.mod和go.sum
 COPY go.mod go.sum ./
+COPY third_party/req/go.mod third_party/req/go.sum ./third_party/req/
 
 # 下载依赖
 RUN go mod download

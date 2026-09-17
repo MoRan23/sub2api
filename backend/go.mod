@@ -2,6 +2,9 @@ module github.com/Wei-Shaw/sub2api
 
 go 1.27.0
 
+// Pinned req fork adds opt-in HTTP/1.1 header casing and request-bound dialing.
+replace github.com/imroc/req/v3 v3.59.0 => ./third_party/req
+
 require (
 	entgo.io/ent v0.14.5
 	github.com/DATA-DOG/go-sqlmock v1.5.2
