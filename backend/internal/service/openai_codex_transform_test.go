@@ -9,6 +9,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSupportsVerbosityUnknownModelNamesPreserveClientPreference(t *testing.T) {
+	for _, tc := range []struct {
+		model string
+		want  bool
+	}{
+		{"gpt-daybreak-blue-latest", true},
+		{"gpt-reserve", true},
+		{"gpt-custom-alias", true},
+		{"custom-model", true},
+		{"gpt-4o", false},
+		{"gpt-4", false},
+		{"gpt-4.", false},
+		{"gpt-4.1", false},
+		{"gpt-5", true},
+		{"gpt-5-mini", true},
+		{"gpt-5.", true},
+		{"gpt-5.x", true},
+		{"gpt-5.0", false},
+		{"gpt-5.1", false},
+		{"gpt-5.2-codex", false},
+		{"gpt-5.3-codex", true},
+		{"gpt-5.6-luna", true},
+		{"gpt-6", true},
+		{"gpt-6-astra", true},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			require.Equal(t, tc.want, SupportsVerbosity(tc.model))
+		})
+	}
+}
+
 func TestApplyCodexOAuthTransform_ToolContinuationPreservesInput(t *testing.T) {
 	// 续链场景：保留 item_reference 与 id，但不再强制 store=true。
 

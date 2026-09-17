@@ -73,6 +73,48 @@ func TestOpenAIIntegrityGatewayObservesNativeAndCompatibilityEntrances(t *testin
 	}
 }
 
+func TestOpenAIIntegrityGatewayPreservesVerbosityForNonNumericModelNames(t *testing.T) {
+	for _, model := range []string{"gpt-daybreak-blue-latest", "gpt-reserve"} {
+		for _, stream := range []bool{false, true} {
+			name := model + "/sync"
+			if stream {
+				name = model + "/stream"
+			}
+			t.Run(name, func(t *testing.T) {
+				enableOpenAIIdentityPathFingerprintObservation(t)
+				upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_verbosity", model)}
+				svc, _ := newOpenAIIdentityPathService(t, true, upstream)
+				body := integrityTestJSON(t, map[string]any{
+					"model": model, "stream": stream, "input": "Preserve my output preference.",
+					"text": map[string]any{"verbosity": "high", "format": map[string]any{"type": "text"}},
+				})
+				c, recorder := newOpenAIIdentityPathContext(t, "/responses", body, 9709)
+				account := newOpenAIIdentityPathOAuthAccount(9709)
+				forwardOpenAIIntegrityTestRequest(t, svc, c, account, "responses", body)
+				require.Equal(t, http.StatusOK, recorder.Code)
+				require.Len(t, upstream.bodies, 1)
+				require.Equal(t, model, gjson.GetBytes(upstream.lastBody, "model").String())
+				require.JSONEq(t, gjson.GetBytes(body, "text").Raw, gjson.GetBytes(upstream.lastBody, "text").Raw)
+				entries := SnapshotFingerprintObservations(0)
+				require.Len(t, entries, 1)
+				require.NotNil(t, entries[0].RequestIntegrity)
+				require.Contains(t, []string{"unchanged", "expected_transform"}, entries[0].RequestIntegrity.Status)
+				require.Empty(t, entries[0].RequestIntegrity.ChangedFields)
+
+				// The fix must preserve the preference on the wire, not hide a real loss
+				// by exempting verbosity from the integrity comparison.
+				lostPreference := integrityTestJSON(t, map[string]any{
+					"model": model, "stream": stream, "input": "Preserve my output preference.",
+					"text": map[string]any{"format": map[string]any{"type": "text"}},
+				})
+				observed := NewOpenAIRequestIntegrityState(true, "responses", body).Check(account, lostPreference, RequestIntegrityCheckOptions{})
+				require.Equal(t, "difference", observed.Status)
+				require.Contains(t, observed.ChangedFields, "text.verbosity")
+			})
+		}
+	}
+}
+
 func TestOpenAIIntegrityGatewayReportsEncryptedContentRecoveryPerPhysicalAttempt(t *testing.T) {
 	enableOpenAIIdentityPathFingerprintObservation(t)
 	body := []byte(`{"model":"gpt-5.4","stream":false,"instructions":"Answer briefly.","input":[{"type":"reasoning","encrypted_content":"private-encrypted-replay","summary":[{"type":"summary_text","text":"private-summary"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"Continue please."}]}]}`)

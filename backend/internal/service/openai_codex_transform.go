@@ -1273,6 +1273,12 @@ func SupportsVerbosity(model string) bool {
 
 	var major, minor int
 	n, _ := fmt.Sscanf(model, "gpt-%d.%d", &major, &minor)
+	if n == 0 {
+		// Named models (for example gpt-daybreak-blue-latest) do not encode a
+		// numeric capability version. Preserve the client's preference just as
+		// for other unknown models; a failed parse is not evidence of no support.
+		return true
+	}
 
 	if major > 5 {
 		return true

@@ -260,6 +260,17 @@ func effortsFromManifestModel(t *testing.T, model map[string]any) []string {
 	return efforts
 }
 
+func TestNewConfiguredCodexModelDescriptorPreservesNamedModelVerbosity(t *testing.T) {
+	for _, model := range []string{"gpt-daybreak-blue-latest", "gpt-reserve"} {
+		t.Run(model, func(t *testing.T) {
+			descriptor := newConfiguredCodexModelDescriptor(model)
+			require.True(t, descriptor.SupportVerbosity)
+			require.NotNil(t, descriptor.DefaultVerbosity)
+			require.Equal(t, "low", *descriptor.DefaultVerbosity)
+		})
+	}
+}
+
 func TestNewConfiguredCodexModelDescriptorUsesProviderMetadataAndSafeFallback(t *testing.T) {
 	t.Parallel()
 
