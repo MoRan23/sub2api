@@ -37,6 +37,137 @@ async function openDetails() {
 afterEach(cleanup)
 
 describe('FingerprintObservationRequestDetails', () => {
+  it('keeps compatibility loss separate from an unchanged outbound integrity result and expands only on demand', async () => {
+    const turnID = '01998b93-f718-7000-9000-111122223333'
+    renderDetails({
+      turn_id: turnID,
+      conversion_check: {
+        status: 'known_loss',
+        issues: [{ path: 'messages.1.content.0', reason: 'unsupported_chat_semantics' }],
+      },
+      request_integrity: {
+        mode: 'observe', status: 'unchanged', baseline_protocol: 'chat_completions',
+        baseline_stage: 'responses_adapter_output', attempt: 1, transport: 'http',
+      },
+    })
+
+    expect(screen.getByTestId('conversion-check-summary').textContent).toContain('Known compatibility loss')
+    expect(screen.getByTestId('request-integrity-summary').textContent).toContain('No differences')
+    expect(screen.queryByTestId('conversion-check-details')).toBeNull()
+    expect(screen.queryByText('messages.1.content.0')).toBeNull()
+    expect(screen.queryByText(turnID)).toBeNull()
+
+    await openDetails()
+    const conversion = screen.getByTestId('conversion-check-details')
+    expect(within(conversion).getByText('Known compatibility loss')).toBeTruthy()
+    expect(within(conversion).getByText('messages.1.content.0')).toBeTruthy()
+    expect(within(conversion).getByText('unsupported_chat_semantics')).toBeTruthy()
+    expect(within(conversion).getByText('Checks key semantics of the original Chat request against the converted Responses request; this is not a full-field or lossless check.')).toBeTruthy()
+    expect(within(conversion).queryByText('No differences')).toBeNull()
+    expect(within(screen.getByTestId('request-integrity-details')).getByText('No differences')).toBeTruthy()
+    expect(screen.getByText(turnID)).toBeTruthy()
+  })
+
+  it('describes a checked conversion as a key-semantics check without requiring an integrity observation', async () => {
+    renderDetails({ conversion_check: { status: 'checked' } })
+    expect(screen.getByTestId('conversion-check-summary').textContent).toContain('Key semantics checked')
+    expect(screen.queryByTestId('request-integrity-summary')).toBeNull()
+
+    await openDetails()
+    const detail = screen.getByTestId('conversion-check-details')
+    expect(within(detail).getByText('Key semantics checked')).toBeTruthy()
+    expect(within(detail).queryByText('No differences')).toBeNull()
+    expect(within(detail).getByText('Checks key semantics of the original Chat request against the converted Responses request; this is not a full-field or lossless check.')).toBeTruthy()
+    expect(screen.queryByTestId('request-integrity-details')).toBeNull()
+  })
+
+  it('does not invent a conversion result or a complete location for legacy timezone-only observations', async () => {
+    renderDetails({
+      inbound_timezone_observations: { scan_status: 'complete', items: [
+        { source: 'web_search', path: 'tools.0.user_location.timezone', value: 'Europe/London', current: false, status: 'valid' },
+      ] },
+    })
+    expect(screen.queryByTestId('conversion-check-summary')).toBeNull()
+    await openDetails()
+    expect(screen.queryByTestId('conversion-check-details')).toBeNull()
+    const inbound = screen.getByRole('region', { name: 'Client inbound declarations' })
+    expect(within(inbound).getByText('Europe/London')).toBeTruthy()
+    expect(inbound.querySelector('[data-location-field="country"]')).toBeNull()
+    expect(screen.queryByTestId('search-location-action')).toBeNull()
+  })
+
+  it('shows all five actual location fields and the replaced before/after objects only when expanded', async () => {
+    const before = { type: 'approximate', country: 'CN', region: 'Guangdong', city: 'Shenzhen', timezone: 'Asia/Shanghai' }
+    const after = { type: 'approximate', country: 'US', region: 'California', city: 'Los Angeles', timezone: 'America/Los_Angeles' }
+    renderDetails({
+      inbound_timezone_observations: { scan_status: 'complete', items: [
+        { source: 'web_search', path: 'tools.0.user_location.timezone', value: before.timezone, current: false, status: 'valid', location: before },
+      ] },
+      outbound_timezone_observations: { scan_status: 'complete', items: [
+        { source: 'web_search', path: 'tools.0.user_location.timezone', value: after.timezone, current: false, status: 'valid', location: after },
+      ] },
+      timezone_conversions: [{
+        source: 'web_search', path: 'tools.0.user_location.timezone', original: before.timezone,
+        output: after.timezone, status: 'converted', location_before: before, location_after: after,
+        location_added: false,
+      }],
+    })
+    expect(screen.queryByText('Shenzhen')).toBeNull()
+    expect(screen.queryByText('Los Angeles')).toBeNull()
+
+    const report = await openDetails()
+    const inbound = screen.getByRole('region', { name: 'Client inbound declarations' })
+    const outbound = screen.getByRole('region', { name: 'Actual outbound content' })
+    for (const [field, value] of Object.entries(before)) {
+      expect(inbound.querySelector(`[data-location-field="${field}"]`)?.textContent).toBe(value)
+    }
+    for (const [field, value] of Object.entries(after)) {
+      expect(outbound.querySelector(`[data-location-field="${field}"]`)?.textContent).toBe(value)
+    }
+    for (const label of ['Type', 'Country', 'Region', 'City', 'Timezone']) {
+      expect(within(inbound).getByText(label, { selector: 'dt' })).toBeTruthy()
+      expect(within(outbound).getByText(label, { selector: 'dt' })).toBeTruthy()
+    }
+    const row = within(report).getByText('tools.0.user_location.timezone').closest('tr')!
+    const cells = within(row).getAllByRole('cell')
+    for (const [field, value] of Object.entries(before)) {
+      expect(cells[1]!.querySelector(`[data-location-field="${field}"]`)?.textContent).toBe(value)
+    }
+    for (const [field, value] of Object.entries(after)) {
+      expect(cells[2]!.querySelector(`[data-location-field="${field}"]`)?.textContent).toBe(value)
+    }
+    expect(within(row).getByTestId('search-location-action').textContent).toContain('Location replaced')
+    expect(within(cells[1]!).queryByText('Los Angeles')).toBeNull()
+    expect(within(cells[2]!).queryByText('Shenzhen')).toBeNull()
+  })
+
+  it('distinguishes newly added location data and renders absent fields as empty values', async () => {
+    const after = { country: 'US', timezone: 'America/Los_Angeles' }
+    renderDetails({
+      outbound_timezone_observations: { scan_status: 'complete', items: [
+        { source: 'web_search', path: 'settings.user_location.timezone', value: after.timezone, current: false, status: 'valid', location: after },
+      ] },
+      timezone_conversions: [{
+        source: 'web_search', path: 'settings.user_location.timezone', original: '', output: after.timezone,
+        status: 'converted', location_after: after, location_added: true,
+      }],
+    })
+    const report = await openDetails()
+    const outbound = screen.getByRole('region', { name: 'Actual outbound content' })
+    for (const field of ['type', 'region', 'city']) {
+      expect(outbound.querySelector(`[data-location-field="${field}"]`)?.textContent).toBe('—')
+    }
+    expect(outbound.querySelector('[data-location-field="country"]')?.textContent).toBe('US')
+    expect(outbound.querySelector('[data-location-field="timezone"]')?.textContent).toBe('America/Los_Angeles')
+    const row = within(report).getByText('settings.user_location.timezone').closest('tr')!
+    const cells = within(row).getAllByRole('cell')
+    expect(cells[1]!.textContent?.trim()).toBe('—')
+    expect(within(cells[1]!).queryByText('US')).toBeNull()
+    expect(cells[2]!.querySelector('[data-location-field="country"]')?.textContent).toBe('US')
+    expect(cells[2]!.querySelector('[data-location-field="city"]')?.textContent).toBe('—')
+    expect(within(row).getByTestId('search-location-action').textContent).toContain('Location added')
+  })
+
   it('shows a compact integrity status and expands fields and safe reasons with the correct baseline boundary', async () => {
     renderDetails({ request_integrity: {
       mode: 'observe', status: 'difference', baseline_protocol: 'messages', baseline_stage: 'responses_adapter_output',
@@ -79,6 +210,26 @@ describe('FingerprintObservationRequestDetails', () => {
     expect(screen.queryByTestId('request-integrity-summary')).toBeNull()
     await openDetails()
     expect(screen.queryByTestId('request-integrity-details')).toBeNull()
+  })
+
+  it('keeps unknown conversion issues as escaped text and contains long location values within the detail layout', async () => {
+    const unsafeText = '<img src=x onerror="alert(1)">'
+    const view = renderDetails({
+      conversion_check: { status: 'known_loss', issues: [{ path: unsafeText, reason: unsafeText }] },
+      outbound_timezone_observations: { scan_status: 'complete', items: [{
+        source: 'web_search', path: 'tools.0.user_location.timezone', value: 'America/Los_Angeles', current: false,
+        location: { type: 'approximate', country: 'US', region: 'California', city: 'LosAngeles'.repeat(40), timezone: 'America/Los_Angeles' },
+      }] },
+      timezone_conversions: [{ source: 'web_search', path: 'tools.0.user_location.timezone', original: '', output: 'America/Los_Angeles', status: 'converted' }],
+    })
+    const report = await openDetails()
+    expect(view.container.querySelector('img')).toBeNull()
+    expect(within(screen.getByTestId('conversion-check-details')).getAllByText(unsafeText)).toHaveLength(2)
+    const city = screen.getByTestId('search-location-fields').querySelector('[data-location-field="city"]')!
+    expect(city.textContent).toBe('LosAngeles'.repeat(40))
+    expect(city.classList.contains('break-all')).toBe(true)
+    expect(city.classList.contains('min-w-0')).toBe(true)
+    expect(report.querySelector('table')?.parentElement?.classList.contains('overflow-x-auto')).toBe(true)
   })
 
   it('expands actual inbound and outbound values without confusing the configured target with an observation', async () => {
@@ -173,7 +324,7 @@ describe('FingerprintObservationRequestDetails', () => {
     const view = renderDetails()
     await openDetails()
     expect(within(screen.getByRole('region', { name: 'Client inbound declarations' })).getByText('Not collected')).toBeTruthy()
-    expect(screen.queryByText('Scan complete; no supported timezone fields found')).toBeNull()
+    expect(screen.queryByText('Scan complete; no supported timezone or search location fields found')).toBeNull()
     expect(screen.queryByText('America/Los_Angeles')).toBeNull()
 
     await view.rerender({ observation: {
@@ -181,7 +332,7 @@ describe('FingerprintObservationRequestDetails', () => {
       outbound_timezone_observations: { scan_status: 'complete', items: [] },
       timezone_conversions: [], outbound_codex_residency: '',
     } })
-    expect(screen.getAllByText('Scan complete; no supported timezone fields found')).toHaveLength(2)
+    expect(screen.getAllByText('Scan complete; no supported timezone or search location fields found')).toHaveLength(2)
     expect(screen.getByText('No field processing records')).toBeTruthy()
     expect(screen.getByText('Not sent')).toBeTruthy()
   })
@@ -195,7 +346,7 @@ describe('FingerprintObservationRequestDetails', () => {
     renderDetails({ inbound_timezone_observations: scan, timezone_comparison_status: 'incomplete' })
     await openDetails()
     expect(within(screen.getByRole('region', { name: 'Client inbound declarations' })).getByText(label)).toBeTruthy()
-    expect(screen.queryByText('Scan complete; no supported timezone fields found')).toBeNull()
+    expect(screen.queryByText('Scan complete; no supported timezone or search location fields found')).toBeNull()
     expect(screen.getByText('Timezone comparison incomplete')).toBeTruthy()
   })
 

@@ -7,6 +7,10 @@
       <span v-if="observation.request_integrity" class="ml-3" data-testid="request-integrity-summary">
         {{ t(`${integrityPrefix}.title`) }}: {{ t(`${integrityPrefix}.status.${observation.request_integrity.status}`) }}
       </span>
+      <span v-if="observation.conversion_check" class="ml-3" data-testid="conversion-check-summary">
+        {{ t(`${conversionPrefix}.title`) }}: {{ t(`${conversionPrefix}.status.${observation.conversion_check.status}`) }}
+      </span>
+      <span v-if="hasOutboundSearchLocation" class="ml-3" data-testid="search-location-summary">{{ t(`${prefix}.searchLocation.recorded`) }}</span>
     </summary>
 
     <div v-if="detailsOpen" class="space-y-4 border-t border-gray-200 p-3 dark:border-dark-700">
@@ -26,6 +30,18 @@
         </div>
       </dl>
       <p v-if="observation.event_kind === 'ws_response_create'" class="text-gray-500 dark:text-gray-400">{{ t(`${prefix}.frameAttempt`) }}</p>
+
+      <section v-if="observation.conversion_check" :aria-label="t(`${conversionPrefix}.title`)" class="min-w-0 rounded-lg border border-gray-200 p-3 dark:border-dark-700" data-testid="conversion-check-details">
+        <h3 class="font-semibold text-gray-800 dark:text-gray-200">{{ t(`${conversionPrefix}.title`) }}</h3>
+        <p class="mt-1 text-gray-500 dark:text-gray-400">{{ t(`${conversionPrefix}.description`) }}</p>
+        <p class="mt-2 font-medium" :class="observation.conversion_check.status === 'known_loss' ? 'text-amber-700 dark:text-amber-400' : 'text-gray-800 dark:text-gray-200'">{{ t(`${conversionPrefix}.status.${observation.conversion_check.status}`) }}</p>
+        <ul v-if="observation.conversion_check.issues?.length" class="mt-3 space-y-2">
+          <li v-for="(issue, index) in observation.conversion_check.issues" :key="index" class="min-w-0 rounded-md bg-gray-100 p-2 dark:bg-dark-800">
+            <div class="break-all font-mono text-gray-800 dark:text-gray-200">{{ issue.path || '—' }}</div>
+            <div class="mt-1 break-words text-gray-600 dark:text-gray-300">{{ conversionReasonLabel(issue.reason) }}</div>
+          </li>
+        </ul>
+      </section>
 
       <section v-if="observation.request_integrity" :aria-label="t(`${integrityPrefix}.title`)" class="min-w-0 rounded-lg border border-gray-200 p-3 dark:border-dark-700" data-testid="request-integrity-details">
         <h3 class="font-semibold text-gray-800 dark:text-gray-200">{{ t(`${integrityPrefix}.title`) }}</h3>
@@ -75,7 +91,8 @@
                 <span v-if="item.status === 'invalid'" class="text-amber-700 dark:text-amber-400">{{ t(`${prefix}.invalidValue`) }}</span>
               </div>
               <div class="break-all font-mono text-gray-500 dark:text-gray-400">{{ item.path }}</div>
-              <dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
+              <SearchLocationDetails v-if="item.location" :location="item.location" />
+              <dl v-else class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
                 <dt class="text-gray-500 dark:text-gray-400">{{ t(`${prefix}.timezone`) }}</dt>
                 <dd class="break-all font-mono text-gray-800 dark:text-gray-200">{{ item.value || '—' }}</dd>
                 <template v-if="item.current_date !== undefined">
@@ -110,15 +127,18 @@
                   <div class="font-mono text-gray-500 dark:text-gray-400">{{ conversion.path }}</div>
                 </td>
                 <td class="max-w-60 space-y-1 break-all px-2 py-2 font-mono">
-                  <div>{{ conversion.original || '—' }}</div>
+                  <SearchLocationDetails v-if="conversion.location_before" :location="conversion.location_before" />
+                  <div v-else>{{ conversion.original || '—' }}</div>
                   <div v-if="conversion.date_before !== undefined">{{ conversion.date_before || '—' }}</div>
                 </td>
                 <td class="max-w-60 space-y-1 break-all px-2 py-2 font-mono">
-                  <div>{{ conversion.output || '—' }}</div>
+                  <SearchLocationDetails v-if="conversion.location_after" :location="conversion.location_after" />
+                  <div v-else>{{ conversion.output || '—' }}</div>
                   <div v-if="conversion.date_after !== undefined">{{ conversion.date_after || '—' }}</div>
                 </td>
                 <td class="max-w-96 space-y-1 break-words px-2 py-2">
                   <div>{{ t(`${prefix}.conversionStatus.${conversion.status}`) }}</div>
+                  <div v-if="conversion.location_after && conversion.status === 'converted'" class="text-gray-600 dark:text-gray-300" data-testid="search-location-action">{{ t(`${prefix}.searchLocation.${conversion.location_added === true ? 'added' : 'replaced'}`) }}</div>
                   <div v-if="conversion.reason" class="text-gray-500 dark:text-gray-400">{{ reasonLabel(conversion.reason) }}</div>
                   <div v-if="conversion.time_basis === 'gateway_received_at'" class="text-gray-500 dark:text-gray-400">{{ t(`${prefix}.dateBasis`) }}</div>
                   <div v-if="conversion.received_at" class="text-gray-500 dark:text-gray-400">{{ t(`${prefix}.receivedAt`) }}: {{ formatSeattleTime(conversion.received_at) }}</div>
@@ -136,12 +156,15 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { FingerprintObservationEntry, RequestTimezoneScan, RequestTimezoneSource } from '@/api/admin/fingerprintObservations'
+import SearchLocationDetails from './SearchLocationDetails.vue'
 
 const props = defineProps<{ observation: FingerprintObservationEntry }>()
 const { t, te, locale } = useI18n()
 const prefix = 'admin.fingerprintObservation.request'
 const integrityPrefix = `${prefix}.integrity`
+const conversionPrefix = `${prefix}.conversionCheck`
 const detailsOpen = ref(false)
+const hasOutboundSearchLocation = computed(() => props.observation.outbound_timezone_observations?.items?.some(item => item.source === 'web_search' && item.location))
 const directions = computed(() => [
   { key: 'inbound', scan: props.observation.inbound_timezone_observations },
   { key: 'outbound', scan: props.observation.outbound_timezone_observations },
@@ -165,6 +188,11 @@ const integrityItems = computed(() => {
 
 function integrityReasonLabel(reason: string): string {
   const key = `${integrityPrefix}.reasons.${reason}`
+  return te(key) ? t(key) : reason
+}
+
+function conversionReasonLabel(reason: string): string {
+  const key = `${conversionPrefix}.reasons.${reason}`
   return te(key) ? t(key) : reason
 }
 const metadataItems = computed(() => [
@@ -205,6 +233,7 @@ const knownReasons = new Set([
   'adapter_removed_source', 'source_not_in_final_body', 'source_path_changed',
   'ambiguous_source_mapping', 'final_value_differs',
   'value_not_observable', 'quoted_xml_content', 'source_changed_before_apply',
+  'location_added', 'location_normalized', 'location_missing', 'environment_metadata_missing', 'standalone_search_source_required',
 ])
 
 function reasonLabel(reason: string): string {

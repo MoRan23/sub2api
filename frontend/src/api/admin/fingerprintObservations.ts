@@ -12,6 +12,14 @@ export type FingerprintObservationRelation = 'root' | 'descendant' | 'unthreaded
 export type RequestTimezoneScanStatus = 'complete' | 'limited' | 'parse_failed' | 'not_applicable'
 export type RequestTimezoneSource = 'environment_context' | 'web_search'
 
+export interface RequestSearchLocation {
+  type: string
+  country: string
+  region: string
+  city: string
+  timezone: string
+}
+
 export interface RequestTimezoneObservation {
   source: RequestTimezoneSource
   path: string
@@ -20,6 +28,7 @@ export interface RequestTimezoneObservation {
   current_date?: string
   status?: 'valid' | 'invalid'
   reason?: string
+  location?: RequestSearchLocation
 }
 
 export interface RequestTimezoneScan {
@@ -38,6 +47,9 @@ export interface RequestTimezoneConversion {
   reason?: string
   time_basis?: 'gateway_received_at'
   received_at?: string
+  location_before?: RequestSearchLocation
+  location_after?: RequestSearchLocation
+  location_added?: boolean
 }
 
 export type RequestTimezoneComparisonStatus =
@@ -60,6 +72,11 @@ export interface RequestIntegrityObservation {
   rule_codes?: string[]
   reason?: string
   truncated?: boolean
+}
+
+export interface RequestConversionCheck {
+  status: 'checked' | 'known_loss'
+  issues?: Array<{ path: string; reason: string }>
 }
 
 export interface FingerprintObservationEntry {
@@ -117,6 +134,7 @@ export interface FingerprintObservationEntry {
   outbound_codex_residency?: string
   outbound_codex_residency_source?: 'request_headers' | 'ws_handshake'
   request_integrity?: RequestIntegrityObservation
+  conversion_check?: RequestConversionCheck
 }
 
 export interface FingerprintObservationUserSummary {
