@@ -34,6 +34,13 @@ func (r *openAIInstallationAdminRepoStub) UpdateExtra(_ context.Context, id int6
 	return nil
 }
 
+func (r *openAIInstallationAdminRepoStub) RegenerateOpenAIInstallationID(ctx context.Context, id int64, generated string) (string, error) {
+	if err := r.UpdateExtra(ctx, id, map[string]any{openAIPinnedInstallationIDKey: generated}); err != nil {
+		return "", err
+	}
+	return generated, nil
+}
+
 func (r *openAIInstallationAdminRepoStub) Update(_ context.Context, account *Account) error {
 	if account == nil || r.accounts[account.ID] == nil {
 		return ErrAccountNotFound

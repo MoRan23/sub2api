@@ -346,7 +346,7 @@ func TestUpdateCredentialsAtomicallyClearsProbeForOpenAIAPIKeyIdentityChange(t *
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`(?s)UPDATE accounts.*credentials IS DISTINCT FROM \$1::jsonb.*- 'upstream_billing_probe'`).
+	mock.ExpectExec(`(?s)UPDATE accounts.*credentials IS DISTINCT FROM \(CASE.*\$1::jsonb.*- 'upstream_billing_probe'`).
 		WithArgs(`{"api_key":"sk-new"}`, int64(27)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
@@ -369,6 +369,10 @@ func TestUpdateWithAccountBillingSettingsRollsBackWhenOutboxFails(t *testing.T) 
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
+	mock.ExpectQuery(`(?s)SELECT platform, type, parent_account_id, credentials, extra.*FOR NO KEY UPDATE`).
+		WithArgs(int64(27)).
+		WillReturnRows(sqlmock.NewRows([]string{"platform", "type", "parent_account_id", "credentials", "extra"}).
+			AddRow(service.PlatformOpenAI, service.AccountTypeAPIKey, nil, []byte(`{"api_key":"sk-test"}`), []byte(`{}`)))
 	mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
 		WithArgs(int64(27), service.PlatformOpenAI, service.AccountTypeAPIKey, `{"api_key":"sk-test"}`, nil).
 		WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "rate_sync_enabled", "snapshot", "ollama_session", "ollama_auto", "ollama_snapshot"}).
@@ -436,7 +440,7 @@ func TestUpdateCredentialsRollsBackWhenOutboxFails(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`(?s)UPDATE accounts.*credentials IS DISTINCT FROM \$1::jsonb.*- 'upstream_billing_probe'`).
+	mock.ExpectExec(`(?s)UPDATE accounts.*credentials IS DISTINCT FROM \(CASE.*\$1::jsonb.*- 'upstream_billing_probe'`).
 		WithArgs(`{"api_key":"sk-new"}`, int64(27)).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).WillReturnError(errors.New("outbox failed"))

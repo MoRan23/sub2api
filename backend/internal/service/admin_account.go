@@ -967,6 +967,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
+	configurationCtx := withAccountConfigurationIntent(ctx, []int64{id}, input.Extra, input.OpenAIEnvironmentFingerprint)
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
 	if updater == nil {
@@ -977,7 +978,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	if updater != nil {
 		if err := updater.UpdateWithAccountBillingSettings(
-			ctx,
+			configurationCtx,
 			account,
 			requestedProbeEnabledUpdate,
 			requestedRateSyncEnabledUpdate,
@@ -988,7 +989,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		billingSettingsAppliedAtomically = true
 	}
 	if !billingSettingsAppliedAtomically {
-		if err := s.accountRepo.Update(ctx, account); err != nil {
+		if err := s.accountRepo.Update(configurationCtx, account); err != nil {
 			return nil, err
 		}
 		if (requestedProbeEnabledUpdate != nil || requestedRateSyncEnabledUpdate != nil) &&
@@ -1054,6 +1055,7 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	if len(updates) == 0 {
 		return nil
 	}
+	ctx = withAccountConfigurationIntent(ctx, []int64{id}, updates, nil)
 	return s.accountRepo.UpdateExtra(ctx, id, updates)
 }
 
@@ -1078,10 +1080,10 @@ func (s *adminServiceImpl) RegenerateOpenAIInstallationID(ctx context.Context, i
 		return "", infraerrors.BadRequest("OPENAI_INSTALLATION_REGENERATE_PIN_DISABLED", "enable fixed installation_id and save the account before regenerating")
 	}
 	installationID := uuid.NewString()
-	if err := s.accountRepo.UpdateExtra(ctx, id, map[string]any{openAIPinnedInstallationIDKey: installationID}); err != nil {
-		return "", err
+	if regenerator, ok := s.accountRepo.(AccountInstallationRegenerator); ok {
+		return regenerator.RegenerateOpenAIInstallationID(ctx, id, installationID)
 	}
-	return installationID, nil
+	return "", errors.New("account repository does not support atomic installation_id regeneration")
 }
 
 // BulkUpdateAccounts updates multiple accounts in one request.
@@ -1299,7 +1301,8 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	// Run bulk update for column/jsonb fields first.
-	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
+	configurationCtx := withAccountConfigurationIntent(ctx, input.AccountIDs, input.Extra, nil)
+	if _, err := s.accountRepo.BulkUpdate(configurationCtx, input.AccountIDs, repoUpdates); err != nil {
 		return nil, err
 	}
 

@@ -461,6 +461,92 @@ describe('EditAccountModal', () => {
     )
   })
 
+  it('omits untouched protected fields and raw UA from an old account snapshot', async () => {
+    const account = buildOpenAIOAuthAccount()
+    account.credentials.user_agent = 'stale-user-agent'
+    account.extra.enable_tls_fingerprint = true
+    account.extra.tls_fingerprint_profile_id = 7
+    account.extra.openai_installation_rotate_enabled = true
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload).not.toHaveProperty('openai_environment_fingerprint')
+    expect(payload.credentials).not.toHaveProperty('user_agent')
+    for (const field of ['openai_installation_pin_enabled', 'openai_pinned_installation_id',
+      'openai_installation_rotate_enabled', 'enable_tls_fingerprint', 'tls_fingerprint_profile_id']) {
+      expect(payload.extra).not.toHaveProperty(field)
+    }
+  })
+
+  it('keeps regenerated UUID server-owned and treats edits reverted to the initial value as untouched', async () => {
+    const account = buildOpenAIOAuthAccount()
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('[data-testid="openai-installation-regenerate"]').trigger('click')
+    await flushPromises()
+    expect((wrapper.get('[data-testid="openai-pinned-installation-id"]').element as HTMLInputElement).value).toBe('0191d95a-3b41-7bb2-8ae7-733dd9845c22')
+    await wrapper.get('[data-testid="openai-installation-pin-toggle"]').trigger('click')
+    await wrapper.get('[data-testid="openai-installation-pin-toggle"]').trigger('click')
+    const ua = wrapper.get('[data-testid="openai-environment-fingerprint"]')
+    await ua.setValue('(Mac OS X; arm64) Terminal')
+    await ua.setValue(account.openai_environment_fingerprint)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload).not.toHaveProperty('openai_environment_fingerprint')
+    expect(payload.extra).not.toHaveProperty('openai_installation_pin_enabled')
+    expect(payload.extra).not.toHaveProperty('openai_pinned_installation_id')
+    confirm.mockRestore()
+  })
+
+  it('submits explicit TLS disable and null profile reset only when edited', async () => {
+    const account = {
+      ...buildAccount(), platform: 'anthropic', type: 'oauth',
+      credentials: { access_token: 'test-token' },
+      enable_tls_fingerprint: true, tls_fingerprint_profile_id: -1,
+      extra: { enable_tls_fingerprint: true, tls_fingerprint_profile_id: -1 },
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('enable_tls_fingerprint')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('tls_fingerprint_profile_id')
+
+    const selector = wrapper.get<HTMLSelectElement>('[data-testid="tls-fingerprint-profile"]')
+    selector.element.selectedIndex = 0
+    await selector.trigger('change')
+    await wrapper.get('[data-testid="tls-fingerprint-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    const extra = updateAccountMock.mock.calls[1]?.[1]?.extra
+    expect(extra.enable_tls_fingerprint).toBe(false)
+    expect(extra.tls_fingerprint_profile_id).toBeNull()
+  })
+
+  it('refreshes protected edit baselines when the modal opens for another account', async () => {
+    const original = buildOpenAIOAuthAccount()
+    const next = { ...buildOpenAIOAuthAccount(), id: 99, openai_environment_fingerprint: '(Mac OS X; arm64) Terminal', extra: { openai_installation_pin_enabled: false } }
+    updateAccountMock.mockReset().mockResolvedValue(next)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(original)
+    await wrapper.get('[data-testid="openai-environment-fingerprint"]').setValue('(Unused OS; x86_64) Terminal')
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ account: next, show: true })
+    await flushPromises()
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[0]).toBe(99)
+    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty('openai_environment_fingerprint')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('openai_installation_pin_enabled')
+  })
+
   it.each(['', '终端'])('rejects invalid OpenAI environment fingerprint %j', async (value) => {
     const account = buildAccount()
     updateAccountMock.mockReset()

@@ -2908,6 +2908,7 @@
             </div>
             <button
               type="button"
+              data-testid="tls-fingerprint-toggle"
               @click="tlsFingerprintEnabled = !tlsFingerprintEnabled"
               :class="[
                 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
@@ -2924,7 +2925,7 @@
           </div>
           <!-- Profile selector -->
           <div v-if="tlsFingerprintEnabled" class="mt-3">
-            <select v-model="tlsFingerprintProfileId" class="input">
+            <select v-model="tlsFingerprintProfileId" class="input" data-testid="tls-fingerprint-profile">
               <option :value="null">{{ t('admin.accounts.quotaControl.tlsFingerprint.defaultProfile') }}</option>
               <option v-if="tlsFingerprintProfiles.length > 0" :value="-1">{{ t('admin.accounts.quotaControl.tlsFingerprint.randomProfile') }}</option>
               <option v-for="p in tlsFingerprintProfiles" :key="p.id" :value="p.id">{{ p.name }}</option>
@@ -3665,6 +3666,14 @@ const openAIPinnedInstallationID = ref('')
 const installationPinSavedEnabled = ref(true)
 const installationRegenerating = ref(false)
 const openAIEnvironmentFingerprint = ref('')
+// Snapshot editable protected values when the dialog opens. Absent fields in an
+// update mean "keep the latest server value", never "restore this old form".
+const protectedConfigInitial = ref({
+  installationPin: true,
+  environment: '',
+  tlsEnabled: false,
+  tlsProfileId: null as number | null,
+})
 const codexFingerprintNormalizationEnabled = ref(true)
 const codexInstallationIDNormalizationEnabled = ref(true)
 const codexClientIdentityNormalizationEnabled = ref(true)
@@ -4539,6 +4548,12 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     selectedErrorCodes.value = []
   }
   editApiKey.value = ''
+  protectedConfigInitial.value = {
+    installationPin: openAIInstallationPinEnabled.value,
+    environment: openAIEnvironmentFingerprint.value.trim(),
+    tlsEnabled: tlsFingerprintEnabled.value,
+    tlsProfileId: tlsFingerprintProfileId.value,
+  }
 }
 
 async function loadTLSProfiles() {
@@ -5165,7 +5180,8 @@ const handleSubmit = async () => {
   try {
     if (props.account.platform === 'openai' &&
       (props.account.type === 'oauth' || props.account.type === 'apikey') &&
-      !isSparkShadow.value) {
+      !isSparkShadow.value &&
+      openAIEnvironmentFingerprint.value.trim() !== protectedConfigInitial.value.environment) {
       const fingerprint = openAIEnvironmentFingerprint.value.trim()
       if (!fingerprint) {
         appStore.showError(t('admin.accounts.openai.environmentFingerprintRequired'))
@@ -5632,19 +5648,6 @@ const handleSubmit = async () => {
       }
       delete newExtra.user_msg_queue_enabled  // 清理旧字段
 
-      // TLS fingerprint setting
-      if (tlsFingerprintEnabled.value) {
-        newExtra.enable_tls_fingerprint = true
-        if (tlsFingerprintProfileId.value) {
-          newExtra.tls_fingerprint_profile_id = tlsFingerprintProfileId.value
-        } else {
-          delete newExtra.tls_fingerprint_profile_id
-        }
-      } else {
-        delete newExtra.enable_tls_fingerprint
-        delete newExtra.tls_fingerprint_profile_id
-      }
-
       // Session ID masking setting
       if (sessionIdMaskingEnabled.value) {
         newExtra.session_id_masking_enabled = true
@@ -5726,14 +5729,6 @@ const handleSubmit = async () => {
       } else {
         newExtra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
       }
-      // installation_id 固定仅对 OpenAI OAuth 母账号生效；UUID 和旧轮换字段由服务端管理。
-      if (props.account.type === 'oauth' && !isSparkShadow.value) {
-        newExtra.openai_installation_pin_enabled = openAIInstallationPinEnabled.value
-      } else {
-        delete newExtra.openai_installation_pin_enabled
-      }
-      delete newExtra.openai_pinned_installation_id
-      delete newExtra.openai_installation_rotate_enabled
       if (openAICompactMode.value === 'auto') {
         delete newExtra.openai_compact_mode
       } else {
@@ -5887,6 +5882,37 @@ const handleSubmit = async () => {
         delete newExtra.upstream_request_id_header
       }
       updatePayload.extra = newExtra
+    }
+
+    // Drop protected fields copied from old extra/credentials snapshots, then
+    // add only deliberate edits. Keep all other extra replacement semantics.
+    if (props.account.platform === 'openai' && updatePayload.credentials) {
+      delete (updatePayload.credentials as Record<string, unknown>).user_agent
+    }
+    if (updatePayload.extra) {
+      const extra = updatePayload.extra as Record<string, unknown>
+      delete extra.openai_pinned_installation_id
+      delete extra.openai_installation_rotate_enabled
+      delete extra.openai_installation_pin_enabled
+      delete extra.enable_tls_fingerprint
+      delete extra.tls_fingerprint_profile_id
+    }
+    const protectedEdits: Record<string, unknown> = {}
+    if (props.account.platform === 'openai' && props.account.type === 'oauth' && !isSparkShadow.value &&
+      openAIInstallationPinEnabled.value !== protectedConfigInitial.value.installationPin) {
+      protectedEdits.openai_installation_pin_enabled = openAIInstallationPinEnabled.value
+    }
+    if (props.account.platform === 'anthropic' &&
+      (props.account.type === 'oauth' || props.account.type === 'setup-token')) {
+      if (tlsFingerprintEnabled.value !== protectedConfigInitial.value.tlsEnabled) {
+        protectedEdits.enable_tls_fingerprint = tlsFingerprintEnabled.value
+      }
+      if (tlsFingerprintProfileId.value !== protectedConfigInitial.value.tlsProfileId) {
+        protectedEdits.tls_fingerprint_profile_id = tlsFingerprintProfileId.value
+      }
+    }
+    if (Object.keys(protectedEdits).length > 0) {
+      updatePayload.extra = { ...((updatePayload.extra as Record<string, unknown>) || {}), ...protectedEdits }
     }
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {

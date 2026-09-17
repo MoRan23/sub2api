@@ -487,6 +487,13 @@ func (r *accountRepository) updateLockedAccount(
 	explicitRateSyncEnabled *bool,
 	explicitRateMultiplier *float64,
 ) (*dbent.Account, error) {
+	current, err := lockAccountConfiguration(ctx, client, account.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := service.PreserveAccountConfiguration(current, account, service.AccountConfigurationIntentFromContext(ctx, account.ID)); err != nil {
+		return nil, err
+	}
 	extra, err := lockAndMergeAccountProbeExtra(ctx, client, account, explicitProbeEnabled, explicitRateSyncEnabled)
 	if err != nil {
 		return nil, err
@@ -782,13 +789,13 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 	result, err := client.ExecContext(ctx, `
 		UPDATE accounts
 		SET
-			credentials = $1::jsonb,
+			credentials = `+guardedAccountCredentialsExpression("$1::jsonb")+`,
 			extra = CASE
 				-- 凭证整体未变化 ⇒ Ollama 组身份必然未变化；顶层 DISTINCT 守卫防止
 				-- 非 Ollama 账号的无变化持久化误清探测快照或重写 NULL extra。
 				WHEN platform IN (`+ollamaCloudUsagePlatformsSQL+`)
 					AND type = 'apikey'
-					AND credentials IS DISTINCT FROM $1::jsonb
+					AND credentials IS DISTINCT FROM (`+guardedAccountCredentialsExpression("$1::jsonb")+`)
 					AND (
 						credentials -> 'api_key' IS DISTINCT FROM $1::jsonb -> 'api_key'
 						OR NOT (
@@ -804,7 +811,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 				-- 上游倍率探测已放宽到全部 API-key 平台：凭证变化即视为探测
 				-- 身份变化，丢弃 stale 快照。
 				WHEN type = 'apikey'
-					AND credentials IS DISTINCT FROM $1::jsonb
+					AND credentials IS DISTINCT FROM (`+guardedAccountCredentialsExpression("$1::jsonb")+`)
 				THEN COALESCE(extra, '{}'::jsonb) - 'upstream_billing_probe'
 				ELSE extra
 			END,
@@ -2587,6 +2594,7 @@ func (r *accountRepository) AutoPauseExpiredAccounts(ctx context.Context, now ti
 }
 
 func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
+	updates = accountConfigurationExtraPatch(ctx, []int64{id}, updates)
 	if len(updates) == 0 {
 		return nil
 	}
@@ -2619,6 +2627,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	if clearProbeSnapshot {
 		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 	}
+	extraExpression = guardedAccountExtraExpression(extraExpression)
 	result, err := client.ExecContext(
 		ctx,
 		"UPDATE accounts SET extra = "+extraExpression+", updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL",
@@ -3037,6 +3046,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	if len(ids) == 0 {
 		return 0, nil
 	}
+	updates.Extra = accountConfigurationExtraPatch(ctx, ids, updates.Extra)
 
 	setClauses := make([]string, 0, 8)
 	args := make([]any, 0, 8)
@@ -3109,7 +3119,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			return 0, err
 		}
 		credentialPlaceholder = "$" + itoa(idx)
-		setClauses = append(setClauses, "credentials = COALESCE(credentials, '{}'::jsonb) || "+credentialPlaceholder+"::jsonb")
+		setClauses = append(setClauses, "credentials = "+guardedAccountCredentialsExpression("COALESCE(credentials, '{}'::jsonb) || "+credentialPlaceholder+"::jsonb"))
 		args = append(args, payload)
 		idx++
 	}
@@ -3163,7 +3173,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		} else if snapshotIdentityChanged != "" {
 			extraExpression = "CASE WHEN " + snapshotIdentityChanged + " THEN (" + extraExpression + ") - 'ollama_cloud_usage_snapshot' ELSE " + extraExpression + " END"
 		}
-		setClauses = append(setClauses, "extra = "+extraExpression)
+		setClauses = append(setClauses, "extra = "+guardedAccountExtraExpression(extraExpression))
 	}
 
 	if len(setClauses) == 0 {
