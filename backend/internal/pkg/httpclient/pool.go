@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
@@ -41,6 +42,9 @@ const (
 
 // Options 定义共享 HTTP 客户端的构建参数
 type Options struct {
+	// OpenAINative enables the final-UA dispatcher only for requests carrying
+	// an explicit OAuth scope. Unmarked requests retain their normal transport.
+	OpenAINative          bool
 	ProxyURL              string        // 代理 URL（支持 http/https/socks5/socks5h）
 	Timeout               time.Duration // 请求总超时时间
 	ResponseHeaderTimeout time.Duration // 等待响应头超时时间
@@ -90,8 +94,25 @@ func buildClient(opts Options) (*http.Client, error) {
 	}
 
 	var rt http.RoundTripper = transport
+	if opts.OpenAINative {
+		base := transport.Clone()
+		// Let req handle CONNECT/SOCKS itself, including cancellation, instead of
+		// carrying the ordinary client's already-proxied SOCKS dialer twice.
+		_, parsed, parseErr := proxyurl.Parse(opts.ProxyURL)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		base.DialContext = (&net.Dialer{Timeout: defaultDialTimeout}).DialContext
+		base.Proxy = nil
+		if parsed != nil {
+			base.Proxy = http.ProxyURL(parsed)
+		}
+		rt = codexnative.NewDispatcher(rt, func(platform codexnative.Platform) (http.RoundTripper, error) {
+			return codexnative.NewTransport(platform, base)
+		})
+	}
 	if opts.ValidateResolvedIP && !opts.AllowPrivateHosts {
-		rt = newValidatedTransport(transport)
+		rt = newValidatedTransport(rt)
 	}
 	rt = servertiming.WrapRoundTripper(rt)
 	return &http.Client{
@@ -144,7 +165,7 @@ func buildTransport(opts Options) (*http.Transport, error) {
 }
 
 func buildClientKey(opts Options) string {
-	return fmt.Sprintf("%s|%s|%s|%t|%t|%t|%d|%d|%d",
+	return fmt.Sprintf("%s|%s|%s|%t|%t|%t|%d|%d|%d|native:%t",
 		strings.TrimSpace(opts.ProxyURL),
 		opts.Timeout.String(),
 		opts.ResponseHeaderTimeout.String(),
@@ -154,6 +175,7 @@ func buildClientKey(opts Options) string {
 		opts.MaxIdleConns,
 		opts.MaxIdleConnsPerHost,
 		opts.MaxConnsPerHost,
+		opts.OpenAINative,
 	)
 }
 
@@ -161,6 +183,12 @@ type validatedTransport struct {
 	base           http.RoundTripper
 	validatedHosts sync.Map // map[string]time.Time, value 为过期时间
 	now            func() time.Time
+}
+
+func (t *validatedTransport) CloseIdleConnections() {
+	if closer, ok := t.base.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
 }
 
 func newValidatedTransport(base http.RoundTripper) *validatedTransport {
