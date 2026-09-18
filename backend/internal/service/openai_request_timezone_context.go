@@ -22,6 +22,8 @@ type openAIRequestTimezoneCapture struct {
 	states                   map[bool]*RequestTimezoneState
 	compactionInputReordered bool
 	alphaSearch              bool
+	// Temporary metadata diagnostics: never repeat the ingress snapshot on retries.
+	environmentMetadataTraced bool
 }
 
 // CaptureOpenAIRequestTimezone freezes the ingress clock and optional observation
@@ -189,11 +191,15 @@ func (s *OpenAIGatewayService) prepareOpenAIRequestTimezone(ctx context.Context,
 			capture = value.(*openAIRequestTimezoneCapture)
 		}
 	}
-	if state, ok := capture.states[passthrough]; ok {
-		return applyCapturedOpenAIRequestTimezone(c, capture, state, body)
+	state, ok := capture.states[passthrough]
+	if !ok {
+		_, state = prepareOpenAIRequestTimezoneBody(capture.body, policy, capture.acceptedAt, passthrough, globalFingerprintObserver.enabled.Load(), capture.alphaSearch)
+		state.Inbound = capture.inbound
+		capture.states[passthrough] = state
 	}
-	_, state := prepareOpenAIRequestTimezoneBody(capture.body, policy, capture.acceptedAt, passthrough, globalFingerprintObserver.enabled.Load(), capture.alphaSearch)
-	state.Inbound = capture.inbound
-	capture.states[passthrough] = state
+	if !capture.environmentMetadataTraced && account.IsOpenAIOAuthLike() && IsFingerprintObservationEnabled() {
+		capture.environmentMetadataTraced = true
+		logOpenAIEnvironmentMetadataTrace(ctx, account.ID, "ingress_before_timezone", capture.body, state)
+	}
 	return applyCapturedOpenAIRequestTimezone(c, capture, state, body)
 }
