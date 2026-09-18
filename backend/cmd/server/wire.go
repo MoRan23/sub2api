@@ -118,6 +118,7 @@ func provideCleanup(
 	grokOAuth *service.GrokOAuthService,
 	openAIGateway *service.OpenAIGatewayService,
 	codexTelemetry *service.CodexTelemetryService,
+	egressLocation *service.OpenAIEgressLocationService,
 	openAIOutboundSessionV1Cleanup *service.OpenAIOutboundSessionV1CleanupWorker,
 	scheduledTestRunner *service.ScheduledTestRunnerService,
 	backupSvc *service.BackupService,
@@ -133,6 +134,9 @@ func provideCleanup(
 	pluginManager *service.PluginManager,
 ) func() {
 	return func() {
+		if egressLocation != nil {
+			egressLocation.Stop()
+		}
 		// Cancel telemetry before closing transports and infrastructure. Shutdown
 		// intentionally discards pending batches instead of replaying old turns.
 		if codexTelemetry != nil {

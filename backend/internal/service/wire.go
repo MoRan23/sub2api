@@ -295,6 +295,7 @@ func ProvideOpenAIGatewayService(
 	syncSessionRepo OAuthSyncSessionRepository,
 	dailySessionRepo OAuthDailySessionRepository,
 	codexTelemetry *CodexTelemetryService,
+	egressLocation *OpenAIEgressLocationService,
 ) *OpenAIGatewayService {
 	svc := NewOpenAIGatewayService(
 		accountRepo, usageLogRepo, usageBillingRepo, userRepo, userSubRepo, userGroupRateRepo,
@@ -305,6 +306,32 @@ func ProvideOpenAIGatewayService(
 	svc.SetOAuthSyncSessionRepository(syncSessionRepo)
 	svc.SetOAuthDailySessionRepository(dailySessionRepo)
 	svc.SetCodexTelemetryService(codexTelemetry)
+	svc.egressLocationService = egressLocation
+	return svc
+}
+
+// ProvideAdminService shares the gateway's egress cache with explicit proxy tests.
+// Keep the base constructor unchanged for integrations that do not run workers.
+func ProvideAdminService(
+	cfg *config.Config, userRepo UserRepository, groupRepo AdminGroupRepository,
+	accountRepo AdminAccountRepository, proxyRepo ProxyRepository,
+	apiKeyRepo APIKeyRepository, redeemCodeRepo RedeemCodeRepository,
+	userGroupRateRepo UserGroupRateRepository, userRPMCache UserRPMCache,
+	billingCacheService *BillingCacheService, proxyProber ProxyExitInfoProber,
+	proxyLatencyCache ProxyLatencyCache, authCacheInvalidator APIKeyAuthCacheInvalidator,
+	entClient *dbent.Client, settingService *SettingService,
+	defaultSubAssigner DefaultSubscriptionAssigner, userSubRepo UserSubscriptionRepository,
+	privacyClientFactory PrivacyClientFactory, runtimeBlocker AccountRuntimeBlocker,
+	affiliateService *AffiliateService, compositeRouteRepo CompositeModelRouteRepository,
+	compositeResolver *CompositeRouteResolver, egressLocation *OpenAIEgressLocationService,
+	channelCacheInvalidators []ChannelCacheInvalidator,
+) AdminService {
+	svc := NewAdminService(cfg, userRepo, groupRepo, accountRepo, proxyRepo,
+		apiKeyRepo, redeemCodeRepo, userGroupRateRepo, userRPMCache, billingCacheService,
+		proxyProber, proxyLatencyCache, authCacheInvalidator, entClient, settingService,
+		defaultSubAssigner, userSubRepo, privacyClientFactory, runtimeBlocker,
+		affiliateService, compositeRouteRepo, compositeResolver, channelCacheInvalidators...)
+	svc.(*adminServiceImpl).egressLocationService = egressLocation
 	return svc
 }
 
@@ -924,7 +951,8 @@ var ProviderSet = wire.NewSet(
 	NewBillingService,
 	ProvideBillingCacheService,
 	NewAnnouncementService,
-	NewAdminService,
+	ProvideAdminService,
+	NewOpenAIEgressLocationService,
 	NewGatewayService,
 	ProvideOpenAIGatewayService,
 	ProvideCodexTelemetryService,

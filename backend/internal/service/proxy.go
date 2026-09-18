@@ -61,6 +61,10 @@ type ProxyWithAccountCount struct {
 	CountryCode    string
 	Region         string
 	City           string
+	Timezone       string
+	GeoStatus      string
+	GeoReason      string
+	GeoCheckedAt   *time.Time
 	QualityStatus  string
 	QualityScore   *int
 	QualityGrade   string

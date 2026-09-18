@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -579,14 +580,18 @@ type ProxyBatchDeleteSkipped struct {
 
 // ProxyTestResult represents the result of testing a proxy
 type ProxyTestResult struct {
-	Success     bool   `json:"success"`
-	Message     string `json:"message"`
-	LatencyMs   int64  `json:"latency_ms,omitempty"`
-	IPAddress   string `json:"ip_address,omitempty"`
-	City        string `json:"city,omitempty"`
-	Region      string `json:"region,omitempty"`
-	Country     string `json:"country,omitempty"`
-	CountryCode string `json:"country_code,omitempty"`
+	Success      bool       `json:"success"`
+	Message      string     `json:"message"`
+	LatencyMs    int64      `json:"latency_ms,omitempty"`
+	IPAddress    string     `json:"ip_address,omitempty"`
+	City         string     `json:"city,omitempty"`
+	Region       string     `json:"region,omitempty"`
+	Country      string     `json:"country,omitempty"`
+	CountryCode  string     `json:"country_code,omitempty"`
+	Timezone     string     `json:"timezone,omitempty"`
+	GeoStatus    string     `json:"geo_status,omitempty"`
+	GeoReason    string     `json:"geo_reason,omitempty"`
+	GeoCheckedAt *time.Time `json:"geo_checked_at,omitempty"`
 }
 
 type ProxyQualityCheckResult struct {
@@ -597,6 +602,12 @@ type ProxyQualityCheckResult struct {
 	ExitIP         string                  `json:"exit_ip,omitempty"`
 	Country        string                  `json:"country,omitempty"`
 	CountryCode    string                  `json:"country_code,omitempty"`
+	Region         string                  `json:"region,omitempty"`
+	City           string                  `json:"city,omitempty"`
+	Timezone       string                  `json:"timezone,omitempty"`
+	GeoStatus      string                  `json:"geo_status,omitempty"`
+	GeoReason      string                  `json:"geo_reason,omitempty"`
+	GeoCheckedAt   *time.Time              `json:"geo_checked_at,omitempty"`
 	BaseLatencyMs  int64                   `json:"base_latency_ms,omitempty"`
 	PassedCount    int                     `json:"passed_count"`
 	WarnCount      int                     `json:"warn_count"`
@@ -617,11 +628,15 @@ type ProxyQualityCheckItem struct {
 
 // ProxyExitInfo represents proxy exit information from ip-api.com
 type ProxyExitInfo struct {
-	IP          string
-	City        string
-	Region      string
-	Country     string
-	CountryCode string
+	IP           string
+	City         string
+	Region       string
+	Country      string
+	CountryCode  string
+	Timezone     string
+	GeoStatus    string
+	GeoReason    string
+	GeoCheckedAt time.Time
 }
 
 // ProxyExitInfoProber tests proxy connectivity and retrieves exit information
@@ -705,16 +720,20 @@ type adminServiceImpl struct {
 	billingCacheService  *BillingCacheService
 	proxyProber          ProxyExitInfoProber
 	proxyLatencyCache    ProxyLatencyCache
-	authCacheInvalidator APIKeyAuthCacheInvalidator
-	entClient            *dbent.Client // 用于开启数据库事务
-	settingService       *SettingService
-	defaultSubAssigner   DefaultSubscriptionAssigner
-	userSubRepo          UserSubscriptionRepository
-	privacyClientFactory PrivacyClientFactory
-	runtimeBlocker       AccountRuntimeBlocker
-	affiliateService     adminRechargeAffiliateAccruer
-	compositeRouteRepo   CompositeModelRouteRepository
-	compositeResolver    *CompositeRouteResolver
+	// Serializes cache read/merge/write per proxy shard, never outbound probes.
+	proxySnapshotLockOnce sync.Once
+	proxySnapshotLocks    [32]chan struct{}
+	egressLocationService *OpenAIEgressLocationService
+	authCacheInvalidator  APIKeyAuthCacheInvalidator
+	entClient             *dbent.Client // 用于开启数据库事务
+	settingService        *SettingService
+	defaultSubAssigner    DefaultSubscriptionAssigner
+	userSubRepo           UserSubscriptionRepository
+	privacyClientFactory  PrivacyClientFactory
+	runtimeBlocker        AccountRuntimeBlocker
+	affiliateService      adminRechargeAffiliateAccruer
+	compositeRouteRepo    CompositeModelRouteRepository
+	compositeResolver     *CompositeRouteResolver
 	// 分组平台变更后用来失效渠道缓存；可为 nil（缓存会在 TTL 到期后自然重建）
 	channelCacheInvalidator ChannelCacheInvalidator
 }

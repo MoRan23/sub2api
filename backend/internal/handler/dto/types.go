@@ -456,20 +456,24 @@ type Proxy struct {
 
 type ProxyWithAccountCount struct {
 	Proxy
-	AccountCount   int64  `json:"account_count"`
-	LatencyMs      *int64 `json:"latency_ms,omitempty"`
-	LatencyStatus  string `json:"latency_status,omitempty"`
-	LatencyMessage string `json:"latency_message,omitempty"`
-	IPAddress      string `json:"ip_address,omitempty"`
-	Country        string `json:"country,omitempty"`
-	CountryCode    string `json:"country_code,omitempty"`
-	Region         string `json:"region,omitempty"`
-	City           string `json:"city,omitempty"`
-	QualityStatus  string `json:"quality_status,omitempty"`
-	QualityScore   *int   `json:"quality_score,omitempty"`
-	QualityGrade   string `json:"quality_grade,omitempty"`
-	QualitySummary string `json:"quality_summary,omitempty"`
-	QualityChecked *int64 `json:"quality_checked,omitempty"`
+	AccountCount   int64      `json:"account_count"`
+	LatencyMs      *int64     `json:"latency_ms,omitempty"`
+	LatencyStatus  string     `json:"latency_status,omitempty"`
+	LatencyMessage string     `json:"latency_message,omitempty"`
+	IPAddress      string     `json:"ip_address,omitempty"`
+	Country        string     `json:"country,omitempty"`
+	CountryCode    string     `json:"country_code,omitempty"`
+	Region         string     `json:"region,omitempty"`
+	City           string     `json:"city,omitempty"`
+	Timezone       string     `json:"timezone,omitempty"`
+	GeoStatus      string     `json:"geo_status,omitempty"`
+	GeoReason      string     `json:"geo_reason,omitempty"`
+	GeoCheckedAt   *time.Time `json:"geo_checked_at,omitempty"`
+	QualityStatus  string     `json:"quality_status,omitempty"`
+	QualityScore   *int       `json:"quality_score,omitempty"`
+	QualityGrade   string     `json:"quality_grade,omitempty"`
+	QualitySummary string     `json:"quality_summary,omitempty"`
+	QualityChecked *int64     `json:"quality_checked,omitempty"`
 }
 
 // AdminProxy 是管理员接口使用的 proxy DTO（包含密码等敏感字段）。
@@ -482,20 +486,24 @@ type AdminProxy struct {
 // AdminProxyWithAccountCount 是管理员接口使用的带账号统计的 proxy DTO。
 type AdminProxyWithAccountCount struct {
 	AdminProxy
-	AccountCount   int64  `json:"account_count"`
-	LatencyMs      *int64 `json:"latency_ms,omitempty"`
-	LatencyStatus  string `json:"latency_status,omitempty"`
-	LatencyMessage string `json:"latency_message,omitempty"`
-	IPAddress      string `json:"ip_address,omitempty"`
-	Country        string `json:"country,omitempty"`
-	CountryCode    string `json:"country_code,omitempty"`
-	Region         string `json:"region,omitempty"`
-	City           string `json:"city,omitempty"`
-	QualityStatus  string `json:"quality_status,omitempty"`
-	QualityScore   *int   `json:"quality_score,omitempty"`
-	QualityGrade   string `json:"quality_grade,omitempty"`
-	QualitySummary string `json:"quality_summary,omitempty"`
-	QualityChecked *int64 `json:"quality_checked,omitempty"`
+	AccountCount   int64      `json:"account_count"`
+	LatencyMs      *int64     `json:"latency_ms,omitempty"`
+	LatencyStatus  string     `json:"latency_status,omitempty"`
+	LatencyMessage string     `json:"latency_message,omitempty"`
+	IPAddress      string     `json:"ip_address,omitempty"`
+	Country        string     `json:"country,omitempty"`
+	CountryCode    string     `json:"country_code,omitempty"`
+	Region         string     `json:"region,omitempty"`
+	City           string     `json:"city,omitempty"`
+	Timezone       string     `json:"timezone,omitempty"`
+	GeoStatus      string     `json:"geo_status,omitempty"`
+	GeoReason      string     `json:"geo_reason,omitempty"`
+	GeoCheckedAt   *time.Time `json:"geo_checked_at,omitempty"`
+	QualityStatus  string     `json:"quality_status,omitempty"`
+	QualityScore   *int       `json:"quality_score,omitempty"`
+	QualityGrade   string     `json:"quality_grade,omitempty"`
+	QualitySummary string     `json:"quality_summary,omitempty"`
+	QualityChecked *int64     `json:"quality_checked,omitempty"`
 }
 
 type ProxyAccountSummary struct {

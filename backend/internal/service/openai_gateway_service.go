@@ -463,6 +463,7 @@ type OpenAIGatewayService struct {
 	httpUpstream          HTTPUpstream
 	pluginManager         *PluginManager
 	codexTelemetry        *CodexTelemetryService
+	egressLocationService *OpenAIEgressLocationService
 	deferredService       *DeferredService
 	openAITokenProvider   *OpenAITokenProvider
 	grokTokenProvider     *GrokTokenProvider

@@ -846,12 +846,18 @@ type ProxyFallbackConfig struct {
 	AllowDirectOnError bool `mapstructure:"allow_direct_on_error"`
 }
 
+// DefaultProxyProbeGeoLookupURL is the direct lookup endpoint for an observed exit IP.
+const DefaultProxyProbeGeoLookupURL = "http://ip-api.com/json/{ip}?lang=en"
+
 type ProxyProbeConfig struct {
 	InsecureSkipVerify bool `mapstructure:"insecure_skip_verify"` // 已禁用：禁止跳过 TLS 证书验证
 	// URLs 按优先级排列的自定义探测 URL 列表。
 	// 留空时使用内置默认列表（ip-api → ipify）。
 	// 某些 AI API 专用代理只允许访问特定域名，配置多个备选可提高探测成功率。
 	URLs []ProbeURLConfig `mapstructure:"urls"`
+	// GeoLookupURL 按探测到的出口 IP 查询英文地理信息，路径或查询参数中必须包含一个 {ip} 占位符。
+	// 查询由服务器直连发出，超时为 5 秒，不经过被测代理。
+	GeoLookupURL string `mapstructure:"geo_lookup_url"`
 }
 
 // ProbeURLConfig 描述一个探测端点及其响应解析方式。
@@ -893,6 +899,36 @@ func normalizeProxyProbeURLs(targets []ProbeURLConfig) ([]ProbeURLConfig, error)
 			URL:    rawURL,
 			Parser: parser,
 		})
+	}
+	return normalized, nil
+}
+
+func normalizeProxyProbeGeoLookupURL(rawURL string) (string, error) {
+	normalized := strings.TrimSpace(rawURL)
+	if normalized == "" {
+		normalized = DefaultProxyProbeGeoLookupURL
+	}
+	if strings.Count(normalized, "{ip}") != 1 {
+		return "", fmt.Errorf("url must contain exactly one {ip} placeholder")
+	}
+	template, err := url.Parse(normalized)
+	if err != nil || (!strings.Contains(template.Path, "{ip}") && !strings.Contains(template.RawQuery, "{ip}")) {
+		return "", fmt.Errorf("url must place {ip} in the path or query")
+	}
+
+	// Validate with IPv6 so templates remain valid for either address family.
+	parsed, err := url.Parse(strings.Replace(normalized, "{ip}", "2001:db8::1", 1))
+	if err != nil || parsed.Hostname() == "" {
+		return "", fmt.Errorf("invalid url")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("url scheme must be http or https")
+	}
+	if parsed.User != nil {
+		return "", fmt.Errorf("url must not contain userinfo")
+	}
+	if strings.Contains(normalized, "#") {
+		return "", fmt.Errorf("url must not contain a fragment")
 	}
 	return normalized, nil
 }
@@ -2106,6 +2142,7 @@ func setDefaults() {
 	viper.SetDefault("security.csp.enabled", true)
 	viper.SetDefault("security.csp.policy", DefaultCSPPolicy)
 	viper.SetDefault("security.proxy_probe.insecure_skip_verify", false)
+	viper.SetDefault("security.proxy_probe.geo_lookup_url", DefaultProxyProbeGeoLookupURL)
 	viper.SetDefault("security.trust_forwarded_ip_for_api_key_acl", true)
 
 	// Security - disable direct fallback on proxy error
@@ -2704,6 +2741,11 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("security.proxy_probe.urls: %w", err)
 	}
 	c.Security.ProxyProbe.URLs = proxyProbeURLs
+	proxyProbeGeoLookupURL, err := normalizeProxyProbeGeoLookupURL(c.Security.ProxyProbe.GeoLookupURL)
+	if err != nil {
+		return fmt.Errorf("security.proxy_probe.geo_lookup_url: %w", err)
+	}
+	c.Security.ProxyProbe.GeoLookupURL = proxyProbeGeoLookupURL
 	if c.Plugins.MaxUploadBytes <= 0 || c.Plugins.MaxUploadBytes > 1024*1024*1024 {
 		return fmt.Errorf("plugins.max_upload_bytes must be between 1 and 1073741824")
 	}
