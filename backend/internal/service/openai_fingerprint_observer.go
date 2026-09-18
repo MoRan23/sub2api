@@ -619,6 +619,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservation(c *gin.Context, acco
 // in the wire header set.
 func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Context, account *Account, pin installationIDResolution, outbound http.Header, body []byte) {
 	state, _ := RequestTimezoneStateFromContext(c)
+	s.logOpenAIEnvironmentSourceDiagnostic(c, account, state, body, outbound, "http")
 	integrity := s.observeOpenAIRequestIntegrity(c, account, outbound, body, "http", state)
 	if !fingerprintObservationAccountEnabled(account) {
 		return
@@ -1016,6 +1017,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWSHandshake(c *gin.Co
 // the previous frame's session/thread identity.
 func (s *OpenAIGatewayService) recordFingerprintObservationWSFrame(c *gin.Context, account *Account,
 	state *RequestTimezoneState, body []byte, handshakeHeaders http.Header, plan *OpenAIOAuthIdentityPlan) {
+	s.logOpenAIEnvironmentSourceDiagnostic(c, account, state, body, handshakeHeaders, "ws")
 	integrity := s.observeOpenAIRequestIntegrity(c, account, handshakeHeaders, body, "ws", state)
 	if !fingerprintObservationAccountEnabled(account) {
 		return
