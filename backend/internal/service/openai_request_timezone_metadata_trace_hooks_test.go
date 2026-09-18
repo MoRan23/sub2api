@@ -9,6 +9,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
@@ -30,6 +31,8 @@ func TestEnvironmentMetadataTraceHTTPUsesFrozenIngressOnce(t *testing.T) {
 	// conflicting marker, not a marker replaced after capture.
 	adapted, err := sjson.SetBytes(body, "input.0.internal_chat_message_metadata_passthrough.content_item_kinds", []string{"environments.environment_context"})
 	require.NoError(t, err)
+	adapted, err = sjson.SetBytes(adapted, "input.0.content.0.text", timezoneTestEnvironment("America/Los_Angeles", "2026-09-18"))
+	require.NoError(t, err)
 	result := svc.prepareOpenAIRequestTimezone(ctx, c, newOpenAIIdentityPathOAuthAccount(91), adapted, false)
 	require.Equal(t, adapted, result, "temporary diagnostics cannot change the original eligibility decision")
 	require.Len(t, logs.FilterMessage("openai.environment_metadata_trace").All(), 1)
@@ -40,6 +43,9 @@ func TestEnvironmentMetadataTraceHTTPUsesFrozenIngressOnce(t *testing.T) {
 	encoded, err := json.Marshal(entry.ContextMap())
 	require.NoError(t, err)
 	require.Contains(t, string(encoded), "marker_mismatch")
+	mentions := gjson.GetBytes(encoded, "metadata_trace.items.0.timezone_text.mentions")
+	require.Equal(t, int64(1), mentions.Get(`#(kind=="asia_shanghai").count`).Int(), "diagnostic counts must use the frozen ingress text")
+	require.False(t, mentions.Get(`#(kind=="america_los_angeles")`).Exists())
 	for _, passthrough := range []bool{false, true} {
 		retry := svc.prepareOpenAIRequestTimezone(ctx, c, newOpenAIIdentityPathOAuthAccount(92), adapted, passthrough)
 		require.Equal(t, result, retry)

@@ -47,6 +47,7 @@ type openAIEnvironmentMetadataTraceItem struct {
 	TextBytes         int                                       `json:"text_bytes"`
 	TextShape         *openAIEnvironmentMetadataTextShape       `json:"text_shape,omitempty"`
 	ShapeReason       string                                    `json:"shape_reason,omitempty"`
+	TimezoneText      *openAIEnvironmentTimezoneText            `json:"timezone_text,omitempty"`
 	MetadataPresent   bool                                      `json:"metadata_present"`
 	MetadataType      string                                    `json:"metadata_type"`
 	Kinds             openAIEnvironmentMetadataKindsTrace       `json:"kinds"`
@@ -133,6 +134,11 @@ func buildOpenAIEnvironmentMetadataTrace(body []byte, state *RequestTimezoneStat
 		return trace
 	}
 	trace.Status = "complete"
+	if trace.SourceScanStatus == "limited" {
+		// No candidates after a limited source scan does not mean no environment
+		// or timezone text exists. Keep a diagnostic even when Items is empty.
+		trace.Status, trace.Reason = "limited", "source_scan_limited"
+	}
 	for _, conversion := range state.Conversions {
 		if conversion.Source != "environment_context" {
 			continue
@@ -189,6 +195,8 @@ func buildOpenAIEnvironmentMetadataTraceItem(body []byte, conversion TimezoneCon
 		item.TextBytes = len(value)
 		shape, reason := buildOpenAIEnvironmentMetadataTextShape(value)
 		item.TextShape, item.ShapeReason = &shape, reason
+		timezoneText := buildOpenAIEnvironmentTimezoneText(value)
+		item.TimezoneText = &timezoneText
 	}
 	metadata := message.Get("internal_chat_message_metadata_passthrough")
 	kinds := metadata.Get("content_item_kinds")
