@@ -18,31 +18,31 @@ func TestOpenAIEnvironmentSourceDiagnosticQualification(t *testing.T) {
 	}{
 		{"other memory kind", func(_ map[string]any, msg map[string]any) {
 			msg["internal_chat_message_metadata_passthrough"] = map[string]any{"content_item_kinds": []any{"memories.extraction_evidence"}}
-		}, "message_metadata_present", "marker_mismatch"},
+		}, "message_content_item_kinds_present", "marker_mismatch"},
 		{"wrong index", func(_ map[string]any, msg map[string]any) {
 			msg["internal_chat_message_metadata_passthrough"] = map[string]any{"content_item_kinds": []any{"user.text", "environments.environment_context"}}
-		}, "message_metadata_present", "marker_mismatch"},
-		{"empty metadata", func(_ map[string]any, msg map[string]any) {
-			msg["internal_chat_message_metadata_passthrough"] = map[string]any{}
-		}, "message_metadata_present", "kinds_missing"},
-		{"null metadata", func(_ map[string]any, msg map[string]any) { msg["internal_chat_message_metadata_passthrough"] = nil }, "message_metadata_present", "kinds_missing"},
+		}, "message_content_item_kinds_present", "marker_mismatch"},
+		{"null kinds", func(_ map[string]any, msg map[string]any) {
+			msg["internal_chat_message_metadata_passthrough"] = map[string]any{"content_item_kinds": nil}
+		}, "message_content_item_kinds_present", "kinds_not_array"},
+		{"null metadata", func(_ map[string]any, msg map[string]any) { msg["internal_chat_message_metadata_passthrough"] = nil }, "message_metadata_invalid", "kinds_missing"},
 		{"null marker", func(_ map[string]any, msg map[string]any) {
 			msg["internal_chat_message_metadata_passthrough"] = map[string]any{"content_item_kinds": []any{nil}}
-		}, "message_metadata_present", "marker_not_string"},
+		}, "message_content_item_kinds_present", "marker_not_string"},
 		{"missing index", func(_ map[string]any, msg map[string]any) {
 			msg["internal_chat_message_metadata_passthrough"] = map[string]any{"content_item_kinds": []any{}}
-		}, "message_metadata_present", "index_missing"},
+		}, "message_content_item_kinds_present", "index_missing"},
 		{"object kinds", func(_ map[string]any, msg map[string]any) {
 			msg["internal_chat_message_metadata_passthrough"] = map[string]any{"content_item_kinds": map[string]any{"0": "environments.environment_context"}}
-		}, "message_metadata_present", "kinds_not_array"},
+		}, "message_content_item_kinds_present", "kinds_not_array"},
 		{"developer role", func(_ map[string]any, msg map[string]any) { msg["role"] = "developer" }, "role_not_user", "kinds_missing"},
 		{"text type", func(_ map[string]any, msg map[string]any) {
 			msg["content"].([]any)[0].(map[string]any)["type"] = "text"
 		}, "content_not_input_text", "kinds_missing"},
-		{"request metadata", func(root map[string]any, _ map[string]any) { root["content_item_kinds"] = []any{"user.text"} }, "request_metadata_present", "kinds_missing"},
+		{"request metadata", func(root map[string]any, _ map[string]any) { root["content_item_kinds"] = []any{"user.text"} }, "request_content_item_kinds_present", "kinds_missing"},
 		{"part metadata", func(_ map[string]any, msg map[string]any) {
 			msg["content"].([]any)[0].(map[string]any)["content_item_kinds"] = []any{"user.text"}
-		}, "part_metadata_present", "kinds_missing"},
+		}, "part_content_item_kinds_present", "kinds_missing"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			message := timezoneStructuralFallbackMessage(environment)

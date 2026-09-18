@@ -111,13 +111,13 @@ func environmentDiagnosticMarker(value gjson.Result) string {
 
 func environmentDiagnosticMetadata(object gjson.Result, scope string, index int) []openAIEnvironmentMetadataDiagnostic {
 	var result []openAIEnvironmentMetadataDiagnostic
-	for _, path := range []string{"internal_chat_message_metadata_passthrough", "content_item_kinds", "metadata.content_item_kinds"} {
+	for _, path := range []string{"internal_chat_message_metadata_passthrough", "content_item_kinds", "metadata.content_item_kinds", "metadata"} {
 		value := object.Get(path)
-		if !value.Exists() {
+		if !value.Exists() || (path == "metadata" && value.IsObject()) {
 			continue
 		}
 		kinds := value
-		if path == "internal_chat_message_metadata_passthrough" {
+		if path == "internal_chat_message_metadata_passthrough" || path == "metadata" {
 			kinds = value.Get("content_item_kinds")
 		}
 		entry := openAIEnvironmentMetadataDiagnostic{Location: scope + "." + path, Type: environmentDiagnosticJSONType(value), KindsType: environmentDiagnosticJSONType(kinds), SelectedType: "not_applicable"}
@@ -197,14 +197,20 @@ func (s *requestTimezoneScanner) captureEnvironmentDiagnostic(before int, contai
 		{d.Role != "user", "role_not_user"},
 		{index < 0, "content_not_array"},
 		{d.ContentType != "input_text", "content_not_input_text"},
-		{len(s.diagnosticRootMetadata) != 0, "request_metadata_present"},
-		{len(messageMetadata) != 0, "message_metadata_present"},
-		{len(partMetadata) != 0, "part_metadata_present"},
 		{occurrence.item.Status != "valid", "environment_structure_invalid"},
 		{!occurrence.hasDate, "current_date_not_validated"},
 	} {
 		if gate.blocked {
 			d.FallbackBlockers = append(d.FallbackBlockers, gate.reason)
+		}
+	}
+	for _, gate := range []struct{ scope, reason string }{
+		{"request", s.rootMetadataBlocker},
+		{"message", requestTimezoneEnvironmentMetadataBlocker(message)},
+		{"part", requestTimezoneEnvironmentMetadataBlocker(part)},
+	} {
+		if gate.reason != "" {
+			d.FallbackBlockers = append(d.FallbackBlockers, gate.scope+"_"+gate.reason)
 		}
 	}
 	text := occurrence.text

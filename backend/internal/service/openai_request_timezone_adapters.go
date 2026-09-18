@@ -262,7 +262,7 @@ func freezeDeferredOpenAIRequestTimezoneBaseline(c *gin.Context, converted any, 
 // would appear absent and incorrectly qualify for the strict fallback.
 func constrainConvertedTimezoneSources(state *RequestTimezoneState, original []byte, paths map[string]string) {
 	root := gjson.ParseBytes(original)
-	rootMetadataPresent := root.Get("internal_chat_message_metadata_passthrough").Exists() || root.Get("content_item_kinds").Exists() || root.Get("metadata.content_item_kinds").Exists()
+	rootMetadataPresent := requestTimezoneEnvironmentMetadataBlocker(root) != ""
 	for i := range state.projectionSources {
 		source := &state.projectionSources[i]
 		if !source.occurrence.environment {

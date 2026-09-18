@@ -185,7 +185,9 @@ func TestOpenAIRequestTimezoneRequiresExactContentMetadata(t *testing.T) {
 		name   string
 		modify func(map[string]any)
 	}{
-		{"empty metadata", func(m map[string]any) { m["internal_chat_message_metadata_passthrough"] = map[string]any{} }},
+		{"null kinds", func(m map[string]any) {
+			m["internal_chat_message_metadata_passthrough"] = map[string]any{"content_item_kinds": nil}
+		}},
 		{"scalar metadata", func(m map[string]any) {
 			m["internal_chat_message_metadata_passthrough"] = "environments.environment_context"
 		}},

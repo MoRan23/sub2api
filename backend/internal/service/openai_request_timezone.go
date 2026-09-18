@@ -238,6 +238,7 @@ type requestTimezoneScanner struct {
 	textBytes              int
 	nodes                  int
 	structuralFallback     bool
+	rootMetadataBlocker    string
 	diagnosticRootMetadata []openAIEnvironmentMetadataDiagnostic
 	captureDiagnostics     bool
 }
@@ -417,8 +418,8 @@ func scanOpenAIRequestTimezonesWithOptions(body []byte, alphaSearch, structuralF
 	if s.captureDiagnostics {
 		s.diagnosticRootMetadata = environmentDiagnosticMetadata(root, "request", -1)
 	}
-	s.structuralFallback = structuralFallback && !root.Get("internal_chat_message_metadata_passthrough").Exists() &&
-		!root.Get("content_item_kinds").Exists() && !root.Get("metadata.content_item_kinds").Exists()
+	s.rootMetadataBlocker = requestTimezoneEnvironmentMetadataBlocker(root)
+	s.structuralFallback = structuralFallback && s.rootMetadataBlocker == ""
 	input := root.Get("input")
 	if input.Exists() {
 		if input.Type == gjson.String {
@@ -571,13 +572,31 @@ func (s *requestTimezoneScanner) scanMessages(messages gjson.Result, path string
 	})
 }
 
-// Presence is deliberate: null, malformed and misplaced declarations must not
-// be silently overridden by the missing-metadata fallback.
+// Only a labeling field or an invalid metadata container blocks the missing-tag
+// fallback. Normal metadata objects can contain unrelated information, such as
+// executed_tool_calls, without declaring any content kind. Explicit null, empty,
+// malformed or misplaced content_item_kinds still remain authoritative.
+func requestTimezoneEnvironmentMetadataBlocker(object gjson.Result) string {
+	if object.Get("content_item_kinds").Exists() {
+		return "content_item_kinds_present"
+	}
+	for _, path := range []string{"internal_chat_message_metadata_passthrough", "metadata"} {
+		metadata := object.Get(path)
+		if !metadata.Exists() {
+			continue
+		}
+		if !metadata.IsObject() {
+			return "metadata_invalid"
+		}
+		if metadata.Get("content_item_kinds").Exists() {
+			return "content_item_kinds_present"
+		}
+	}
+	return ""
+}
+
 func hasRequestTimezoneEnvironmentMetadata(message, part gjson.Result) bool {
-	return message.Get("internal_chat_message_metadata_passthrough").Exists() ||
-		message.Get("content_item_kinds").Exists() || message.Get("metadata.content_item_kinds").Exists() ||
-		part.Get("internal_chat_message_metadata_passthrough").Exists() ||
-		part.Get("content_item_kinds").Exists() || part.Get("metadata.content_item_kinds").Exists()
+	return requestTimezoneEnvironmentMetadataBlocker(message) != "" || requestTimezoneEnvironmentMetadataBlocker(part) != ""
 }
 
 func (s *requestTimezoneScanner) countNode() bool {

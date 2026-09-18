@@ -47,7 +47,7 @@ func TestOpenAIRequestTimezoneStructuralFallbackMetadataAuthority(t *testing.T) 
 		name     string
 		metadata any
 	}{
-		{"null", nil}, {"empty object", map[string]any{}},
+		{"null", nil}, {"null kinds", map[string]any{"content_item_kinds": nil}},
 		{"string", "environments.environment_context"}, {"array", []any{"environments.environment_context"}},
 		{"wrong marker", map[string]any{"content_item_kinds": []any{"user_message"}}},
 		{"empty markers", map[string]any{"content_item_kinds": []any{}}},
@@ -86,6 +86,97 @@ func TestOpenAIRequestTimezoneStructuralFallbackMetadataAuthority(t *testing.T) 
 			require.Empty(t, state.patches)
 		})
 	}
+}
+
+func TestOpenAIRequestTimezoneStructuralFallbackUnrelatedMetadata(t *testing.T) {
+	environment := timezoneTestEnvironment("Asia/Shanghai", "2026-09-18")
+	for _, scope := range []string{"request", "message", "part"} {
+		for _, metadataPath := range []string{"internal_chat_message_metadata_passthrough", "metadata"} {
+			for _, populated := range []bool{false, true} {
+				name := scope + "/" + metadataPath + "/empty"
+				if populated {
+					name = scope + "/" + metadataPath + "/unrelated fields"
+				}
+				t.Run(name, func(t *testing.T) {
+					part := map[string]any{"type": "input_text", "text": environment}
+					message := map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "ordinary user text"}, part}}
+					payload := map[string]any{"input": []any{message}}
+					container := map[string]map[string]any{"request": payload, "message": message, "part": part}[scope]
+					metadata := map[string]any{}
+					if populated {
+						metadata["executed_tool_calls"] = []any{map[string]any{"tool_result_metadata": map[string]any{"status": "ok"}}}
+					}
+					container[metadataPath] = metadata
+					body := timezoneTestBody(t, payload)
+					prepared, state := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true)
+					require.Equal(t, "ordinary user text", gjson.GetBytes(prepared, "input.0.content.0.text").String())
+					require.Equal(t, timezoneTestEnvironment(OpenAIRequestTimezone, "2026-09-09"), gjson.GetBytes(prepared, "input.0.content.1.text").String())
+					require.Equal(t, environment, gjson.GetBytes(body, "input.0.content.1.text").String(), "ingress bytes stay unchanged")
+					require.Len(t, state.Inbound.Items, 1)
+					require.Equal(t, "structural_fallback", state.Inbound.Items[0].EnvironmentSource)
+					require.Empty(t, state.projectionSources[0].occurrence.environmentDiagnostic.FallbackBlockers)
+					final := scanOpenAIRequestTimezones(prepared)
+					require.False(t, final.occurrences[0].eligible, "final scan must not grant new authority")
+				})
+			}
+		}
+	}
+}
+
+func TestOpenAIRequestTimezoneStructuralFallbackMalformedMetadataScopes(t *testing.T) {
+	environment := timezoneTestEnvironment("Asia/Shanghai", "2026-09-18")
+	for _, scope := range []string{"request", "message", "part"} {
+		for _, metadataPath := range []string{"internal_chat_message_metadata_passthrough", "metadata", "content_item_kinds"} {
+			for _, tc := range []struct {
+				name  string
+				value any
+			}{
+				{"null", nil}, {"scalar", false}, {"array", []any{}},
+				{"null kinds", map[string]any{"content_item_kinds": nil}},
+				{"empty kinds", map[string]any{"content_item_kinds": []any{}}},
+				{"wrong kinds", map[string]any{"content_item_kinds": []any{"user_message"}}},
+			} {
+				t.Run(scope+"/"+metadataPath+"/"+tc.name, func(t *testing.T) {
+					message := timezoneStructuralFallbackMessage(environment)
+					payload := map[string]any{"input": []any{message}}
+					part := message["content"].([]any)[0].(map[string]any)
+					container := map[string]map[string]any{"request": payload, "message": message, "part": part}[scope]
+					container[metadataPath] = tc.value
+					body := timezoneTestBody(t, payload)
+					prepared, state := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true)
+					require.Equal(t, body, prepared)
+					require.Empty(t, state.patches)
+					require.NotEmpty(t, state.projectionSources[0].occurrence.environmentDiagnostic.FallbackBlockers)
+				})
+			}
+		}
+	}
+}
+
+func TestOpenAIRequestTimezoneStructuralFallbackUnrelatedMetadataIntegrity(t *testing.T) {
+	environment := timezoneTestEnvironment("Asia/Shanghai", "2026-09-18")
+	message := timezoneStructuralFallbackMessage(environment)
+	message["content"] = []any{map[string]any{"type": "input_text", "text": "ordinary user text"}, map[string]any{"type": "input_text", "text": environment}}
+	message["internal_chat_message_metadata_passthrough"] = map[string]any{"executed_tool_calls": []any{}}
+	body := timezoneTestBody(t, map[string]any{"input": []any{message}})
+	prepared, timezone := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true)
+	actual, changed, err := normalizeOpenAIOAuthResponsesCompatibilityBody(prepared)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.False(t, gjson.GetBytes(actual, "input.0.internal_chat_message_metadata_passthrough").Exists())
+	require.Equal(t, timezoneTestEnvironment(OpenAIRequestTimezone, "2026-09-09"), gjson.GetBytes(actual, "input.0.content.1.text").String())
+	integrity := NewOpenAIRequestIntegrityState(true, "responses", body)
+	result := integrity.Check(integrityTestAccount(), actual, RequestIntegrityCheckOptions{TimezoneState: timezone})
+	require.Equal(t, "expected_transform", result.Status)
+	require.Contains(t, result.RuleCodes, "codex_input_metadata_removed")
+	require.Equal(t, "difference", integrity.Check(integrityTestAccount(), actual, RequestIntegrityCheckOptions{}).Status, "conversion requires the frozen source evidence")
+	SetFingerprintObservationEnabled(true)
+	t.Cleanup(func() { SetFingerprintObservationEnabled(false) })
+	entry := FingerprintObservationEntry{}
+	populateFingerprintObservationTimezones(&entry, timezone, actual, DeriveOpenAIRequestTimezoneProvenance(prepared, actual))
+	require.Equal(t, "matched", entry.TimezoneComparisonStatus)
+	require.Equal(t, "structural_fallback", entry.OutboundTimezoneObservations.Items[0].EnvironmentSource)
+	require.Equal(t, OpenAIRequestTimezone, entry.OutboundTimezoneObservations.Items[0].Value)
 }
 
 func TestOpenAIRequestTimezoneStructuralFallbackRejectsOtherShapesAndQuotedXML(t *testing.T) {
@@ -191,7 +282,9 @@ func TestOpenAIRequestTimezoneStructuralFallbackHTTPFrozenSource(t *testing.T) {
 	for _, account := range []*Account{newOpenAIIdentityPathOAuthAccount(1465), newOpenAIIdentityPathAPIKeyAccount(1466)} {
 		t.Run(account.Type, func(t *testing.T) {
 			old := timezoneTestEnvironment("Asia/Shanghai", "2026-08-01")
-			body := timezoneTestBody(t, map[string]any{"model": "original", "input": []any{timezoneStructuralFallbackMessage(old), map[string]any{"type": "function_call_output", "output": "heartbeat"}}})
+			message := timezoneStructuralFallbackMessage(old)
+			message["internal_chat_message_metadata_passthrough"] = map[string]any{"executed_tool_calls": []any{}}
+			body := timezoneTestBody(t, map[string]any{"model": "original", "input": []any{message, map[string]any{"type": "function_call_output", "output": "heartbeat"}}})
 			c, _ := newOpenAIIdentityPathContext(t, "/responses", body, 10)
 			svc := &OpenAIGatewayService{}
 			svc.CaptureOpenAIRequestTimezone(c, body)
@@ -214,7 +307,9 @@ func TestOpenAIRequestTimezoneStructuralFallbackHTTPFrozenSource(t *testing.T) {
 
 func TestOpenAIRequestTimezoneStructuralFallbackWSFrozenSourceAndNewFrame(t *testing.T) {
 	accepted := time.Date(2026, 1, 2, 7, 59, 0, 0, time.UTC)
-	body := timezoneTestBody(t, map[string]any{"type": "response.create", "model": "gpt-5.1", "input": []any{timezoneStructuralFallbackMessage(timezoneWSEnvironment)}})
+	message := timezoneStructuralFallbackMessage(timezoneWSEnvironment)
+	message["internal_chat_message_metadata_passthrough"] = map[string]any{"executed_tool_calls": []any{}}
+	body := timezoneTestBody(t, map[string]any{"type": "response.create", "model": "gpt-5.1", "input": []any{message}})
 	c, _ := newOpenAIIdentityPathContext(t, "/responses", body, 10)
 	svc := &OpenAIGatewayService{}
 	account := newOpenAIIdentityPathOAuthAccount(1465)
