@@ -52,10 +52,10 @@ func TestFingerprintTimezoneOnlyReferencesIsNotApplicable(t *testing.T) {
 	t.Cleanup(func() { SetFingerprintObservationEnabled(false) })
 	for _, enabled := range []bool{true, false} {
 		for name, text := range map[string]string{
-			"quoted":                      "Explain <environment_context><timezone>Asia/Shanghai</timezone></environment_context>",
-			"standalone without metadata": timezoneTestEnvironment("Asia/Shanghai", "2026-09-10"),
-			"fenced":                      "```xml\n<environment_context><timezone>Asia/Shanghai</timezone></environment_context>\n```",
-			"broken":                      "<environment_context><timezone>Asia/Shanghai</timezone>",
+			"quoted":                  "Explain <environment_context><timezone>Asia/Shanghai</timezone></environment_context>",
+			"standalone without date": "<environment_context><timezone>Asia/Shanghai</timezone></environment_context>",
+			"fenced":                  "```xml\n<environment_context><timezone>Asia/Shanghai</timezone></environment_context>\n```",
+			"broken":                  "<environment_context><timezone>Asia/Shanghai</timezone>",
 		} {
 			t.Run(name, func(t *testing.T) {
 				body := timezoneTestBody(t, map[string]any{"input": []any{

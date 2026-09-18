@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"strconv"
 	"strings"
@@ -14,7 +15,7 @@ import (
 // Temporary metadata diagnostics. Keep payloads and arbitrary metadata values
 // out of this file's output so it can be enabled on real requests safely.
 const (
-	openAIEnvironmentMetadataTraceBodyLimit  = 8 << 20
+	openAIEnvironmentMetadataTraceBodyLimit  = 32 << 20
 	openAIEnvironmentMetadataTraceItemLimit  = 8
 	openAIEnvironmentMetadataTraceKindsLimit = 64
 	openAIEnvironmentMetadataMarker          = "environments.environment_context"
@@ -44,6 +45,8 @@ type openAIEnvironmentMetadataTraceItem struct {
 	TextPresent       bool                                      `json:"text_present"`
 	TextType          string                                    `json:"text_type"`
 	TextBytes         int                                       `json:"text_bytes"`
+	TextShape         *openAIEnvironmentMetadataTextShape       `json:"text_shape,omitempty"`
+	ShapeReason       string                                    `json:"shape_reason,omitempty"`
 	MetadataPresent   bool                                      `json:"metadata_present"`
 	MetadataType      string                                    `json:"metadata_type"`
 	Kinds             openAIEnvironmentMetadataKindsTrace       `json:"kinds"`
@@ -70,6 +73,19 @@ type openAIEnvironmentMetadataKindsTrace struct {
 type openAIEnvironmentMetadataAlternateTrace struct {
 	Location string                              `json:"location"`
 	Kinds    openAIEnvironmentMetadataKindsTrace `json:"kinds"`
+}
+
+// TextShape contains only structural facts. In particular it must not retain
+// excerpts, arbitrary tag names, attribute values, or a digest of the text.
+type openAIEnvironmentMetadataTextShape struct {
+	EnvironmentOpenCount   int  `json:"environment_open_count"`
+	EnvironmentCloseCount  int  `json:"environment_close_count"`
+	StartsWithExactOpening bool `json:"starts_with_exact_opening"`
+	EndsWithExactClosing   bool `json:"ends_with_exact_closing"`
+	HasFence               bool `json:"has_fence"`
+	HasBlockquoteLine      bool `json:"has_blockquote_line"`
+	HasXMLComment          bool `json:"has_xml_comment"`
+	HasCDATA               bool `json:"has_cdata"`
 }
 
 // Callers gate OAuth/observation and call once per frozen request or WS turn.
@@ -112,8 +128,7 @@ func buildOpenAIEnvironmentMetadataTrace(body []byte, state *RequestTimezoneStat
 		trace.Reason = "invalid_json"
 		return trace
 	}
-	root := gjson.ParseBytes(body)
-	if !root.IsObject() {
+	if bytes.TrimSpace(body)[0] != '{' {
 		trace.Reason = "root_not_object"
 		return trace
 	}
@@ -127,15 +142,15 @@ func buildOpenAIEnvironmentMetadataTrace(body []byte, state *RequestTimezoneStat
 			trace.ItemsTruncated = true
 			continue
 		}
-		trace.Items = append(trace.Items, buildOpenAIEnvironmentMetadataTraceItem(root, conversion, state.Inbound))
+		trace.Items = append(trace.Items, buildOpenAIEnvironmentMetadataTraceItem(body, conversion, state.Inbound))
 	}
 	return trace
 }
 
-func buildOpenAIEnvironmentMetadataTraceItem(root gjson.Result, conversion TimezoneConversion, inbound *TimezoneScanResult) openAIEnvironmentMetadataTraceItem {
+func buildOpenAIEnvironmentMetadataTraceItem(body []byte, conversion TimezoneConversion, inbound *TimezoneScanResult) openAIEnvironmentMetadataTraceItem {
 	item := openAIEnvironmentMetadataTraceItem{
 		Path: "unsupported", ContentIndex: -1, Eligibility: "unsupported_path",
-		EnvironmentSource: openAIEnvironmentTraceEnum(conversion.EnvironmentSource, "metadata", "mapped", "reference"),
+		EnvironmentSource: openAIEnvironmentTraceEnum(conversion.EnvironmentSource, "metadata", "mapped", "structural_fallback", "reference"),
 		ParseStatus:       "unavailable", PreparationStatus: openAIEnvironmentTraceEnum(conversion.Status, "skipped", "disabled", "converted", "unchanged", "unmatched", "not_sent", "incomplete", "mismatched"),
 		PreparationReason: openAIEnvironmentTraceReason(conversion.Reason),
 	}
@@ -154,13 +169,15 @@ func buildOpenAIEnvironmentMetadataTraceItem(root gjson.Result, conversion Timez
 		return item
 	}
 	item.Path, item.ContentIndex = path, index
-	message := root.Get(messagePath)
+	// Read only the frozen candidate's paths. Parsing the entire request into a
+	// gjson.Result would copy unrelated image/opaque fields into a large string.
+	message := gjson.GetBytes(body, messagePath)
 	content, role := message.Get("content"), message.Get("role")
 	part := gjson.Result{}
 	if index >= 0 && content.IsArray() {
 		part = content.Get(strconv.Itoa(index))
 	}
-	text := root.Get(path)
+	text := gjson.GetBytes(body, path)
 	item.RoleType = openAIEnvironmentTraceJSONType(role)
 	item.Role = openAIEnvironmentTraceStringEnum(role, "user", "assistant", "developer", "system", "tool")
 	item.ContentType = openAIEnvironmentTraceJSONType(content)
@@ -168,7 +185,10 @@ func buildOpenAIEnvironmentMetadataTraceItem(root gjson.Result, conversion Timez
 	item.ContentItemType = openAIEnvironmentTraceStringEnum(part.Get("type"), "input_text", "text", "output_text", "input_image", "input_file", "input_audio")
 	item.TextPresent, item.TextType = text.Exists(), openAIEnvironmentTraceJSONType(text)
 	if text.Type == gjson.String {
-		item.TextBytes = len(text.String())
+		value := text.String()
+		item.TextBytes = len(value)
+		shape, reason := buildOpenAIEnvironmentMetadataTextShape(value)
+		item.TextShape, item.ShapeReason = &shape, reason
 	}
 	metadata := message.Get("internal_chat_message_metadata_passthrough")
 	kinds := metadata.Get("content_item_kinds")
@@ -190,6 +210,9 @@ func buildOpenAIEnvironmentMetadataTraceItem(root gjson.Result, conversion Timez
 	default:
 		item.Eligibility = "eligible"
 	}
+	if item.Eligibility == "metadata_missing" && conversion.EnvironmentSource == TimezoneEnvironmentSourceStructuralFallback {
+		item.Eligibility = "structural_fallback"
+	}
 	for _, alternate := range []struct {
 		location string
 		kinds    gjson.Result
@@ -198,7 +221,7 @@ func buildOpenAIEnvironmentMetadataTraceItem(root gjson.Result, conversion Timez
 		{"message.metadata.content_item_kinds", message.Get("metadata.content_item_kinds")},
 		{"contentpart.internal_chat_message_metadata_passthrough.content_item_kinds", part.Get("internal_chat_message_metadata_passthrough.content_item_kinds")},
 		{"contentpart.metadata.content_item_kinds", part.Get("metadata.content_item_kinds")},
-		{"root.internal_chat_message_metadata_passthrough.content_item_kinds", root.Get("internal_chat_message_metadata_passthrough.content_item_kinds")},
+		{"root.internal_chat_message_metadata_passthrough.content_item_kinds", gjson.GetBytes(body, "internal_chat_message_metadata_passthrough.content_item_kinds")},
 	} {
 		if alternate.kinds.Exists() {
 			item.AlternateKinds = append(item.AlternateKinds, openAIEnvironmentMetadataAlternateTrace{
@@ -207,6 +230,54 @@ func buildOpenAIEnvironmentMetadataTraceItem(root gjson.Result, conversion Timez
 		}
 	}
 	return item
+}
+
+func buildOpenAIEnvironmentMetadataTextShape(text string) (openAIEnvironmentMetadataTextShape, string) {
+	trimmed := strings.TrimSpace(text)
+	shape := openAIEnvironmentMetadataTextShape{
+		EnvironmentOpenCount:   countRequestTimezoneTag(text, "environment_context", false),
+		EnvironmentCloseCount:  countRequestTimezoneTag(text, "environment_context", true),
+		StartsWithExactOpening: strings.HasPrefix(trimmed, "<environment_context>"),
+		EndsWithExactClosing:   strings.HasSuffix(trimmed, "</environment_context>"),
+		HasFence:               strings.Contains(text, "```") || strings.Contains(text, "~~~"),
+		HasXMLComment:          strings.Contains(text, "<!--"),
+		HasCDATA:               strings.Contains(text, "<![CDATA["),
+	}
+	for remaining := text; ; {
+		line, rest, found := strings.Cut(remaining, "\n")
+		if strings.HasPrefix(strings.TrimSpace(line), ">") {
+			shape.HasBlockquoteLine = true
+			break
+		}
+		if !found {
+			break
+		}
+		remaining = rest
+	}
+	// This reason describes tag boundaries, not XML validity. The frozen
+	// parse_status/parse_reason continue to report the actual parser result.
+	switch {
+	case shape.EnvironmentOpenCount == 0 && shape.EnvironmentCloseCount == 0:
+		return shape, "no_environment_tags"
+	case shape.EnvironmentOpenCount == 0:
+		return shape, "missing_open"
+	case shape.EnvironmentCloseCount == 0:
+		return shape, "missing_close"
+	case shape.EnvironmentOpenCount > 1 || shape.EnvironmentCloseCount > 1:
+		return shape, "multiple_tags"
+	case shape.HasFence:
+		return shape, "fenced"
+	case shape.HasBlockquoteLine:
+		return shape, "quoted"
+	case shape.HasXMLComment:
+		return shape, "comment"
+	case shape.HasCDATA:
+		return shape, "cdata"
+	case !shape.StartsWithExactOpening || !shape.EndsWithExactClosing:
+		return shape, "mixed_prefix_or_suffix"
+	default:
+		return shape, "standalone_boundaries"
+	}
 }
 
 // Validate and reconstruct paths before using or logging them. Never accept an

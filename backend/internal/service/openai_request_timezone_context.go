@@ -47,7 +47,7 @@ func (s *OpenAIGatewayService) captureOpenAIRequestTimezoneSource(c *gin.Context
 			capture.alphaSearch = true
 			capture.states = make(map[bool]*RequestTimezoneState)
 			if globalFingerprintObserver.enabled.Load() {
-				capture.inbound = &scanOpenAIRequestTimezonesWithSource(capture.body, true).result
+				capture.inbound = &scanOpenAIRequestTimezoneIngress(capture.body, true).result
 			}
 		}
 		return
@@ -60,7 +60,7 @@ func (s *OpenAIGatewayService) captureOpenAIRequestTimezoneSource(c *gin.Context
 	s.freezeOpenAIRequestPolicy(ctx, c)
 	capture := &openAIRequestTimezoneCapture{acceptedAt: acceptedAt, body: bytes.Clone(body), states: make(map[bool]*RequestTimezoneState), alphaSearch: alphaSearch}
 	if globalFingerprintObserver.enabled.Load() {
-		capture.inbound = &scanOpenAIRequestTimezonesWithSource(body, alphaSearch).result
+		capture.inbound = &scanOpenAIRequestTimezoneIngress(body, alphaSearch).result
 	}
 	c.Set(openAIRequestTimezoneCaptureKey, capture)
 }

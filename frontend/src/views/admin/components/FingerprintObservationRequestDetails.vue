@@ -126,6 +126,7 @@
                 <td class="max-w-80 space-y-1 break-all px-2 py-2">
                   <div>{{ sourceLabel(conversion.source) }}</div>
                   <div v-if="conversion.source === 'environment_context' && conversion.environment_source === 'reference'" class="font-normal text-gray-500 dark:text-gray-400">{{ t(`${prefix}.referenceEnvironment`) }}</div>
+                  <div v-else-if="conversion.source === 'environment_context' && conversion.environment_source === 'structural_fallback'" class="font-normal text-gray-500 dark:text-gray-400">{{ t(`${prefix}.structuralFallbackEnvironment`) }}</div>
                   <div class="font-mono text-gray-500 dark:text-gray-400">{{ conversion.path }}</div>
                 </td>
                 <td class="max-w-60 space-y-1 break-all px-2 py-2 font-mono">
@@ -227,11 +228,14 @@ function sourceLabel(source: RequestTimezoneSource): string {
 }
 
 function isQualifiedEnvironment(source: RequestEnvironmentSource | undefined): boolean {
-  return source === 'metadata' || source === 'mapped'
+  return source === 'metadata' || source === 'mapped' || source === 'structural_fallback'
 }
 
 function environmentLabel(item: RequestTimezoneObservation): string {
   if (item.environment_source === 'reference') return t(`${prefix}.referenceEnvironment`)
+  if (item.environment_source === 'structural_fallback') {
+    return t(`${prefix}.${item.current ? 'structuralFallbackCurrentEnvironment' : 'structuralFallbackHistoricalEnvironment'}`)
+  }
   if (!isQualifiedEnvironment(item.environment_source)) return t(`${prefix}.unclassifiedEnvironment`)
   return t(`${prefix}.${item.current ? 'currentEnvironment' : 'historicalEnvironment'}`)
 }

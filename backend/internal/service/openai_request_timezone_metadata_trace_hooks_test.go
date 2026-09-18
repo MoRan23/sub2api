@@ -20,13 +20,14 @@ func TestEnvironmentMetadataTraceHTTPUsesFrozenIngressOnce(t *testing.T) {
 	ctx := logger.IntoContext(context.Background(), zap.New(core).With(zap.String("request_id", "metadata-trace-request")))
 	body := timezoneTestBody(t, map[string]any{"input": []any{map[string]any{
 		"role": "user", "content": []any{map[string]any{"type": "input_text", "text": timezoneTestEnvironment("Asia/Shanghai", "2026-09-18")}},
+		"internal_chat_message_metadata_passthrough": map[string]any{"content_item_kinds": []string{"user_message"}},
 	}}})
 	c, _ := newOpenAIIdentityPathContext(t, "/responses", body, 10)
 	c.Request = c.Request.WithContext(ctx)
 	svc := &OpenAIGatewayService{}
 	svc.CaptureOpenAIRequestTimezone(c, body)
-	// Simulate later adaptation: diagnostics must describe the original missing
-	// marker, not a marker newly attached after capture.
+	// Simulate later adaptation: diagnostics must describe the original
+	// conflicting marker, not a marker replaced after capture.
 	adapted, err := sjson.SetBytes(body, "input.0.internal_chat_message_metadata_passthrough.content_item_kinds", []string{"environments.environment_context"})
 	require.NoError(t, err)
 	result := svc.prepareOpenAIRequestTimezone(ctx, c, newOpenAIIdentityPathOAuthAccount(91), adapted, false)
@@ -38,7 +39,7 @@ func TestEnvironmentMetadataTraceHTTPUsesFrozenIngressOnce(t *testing.T) {
 	require.Equal(t, "ingress_before_timezone", entry.ContextMap()["stage"])
 	encoded, err := json.Marshal(entry.ContextMap())
 	require.NoError(t, err)
-	require.Contains(t, string(encoded), "metadata_missing")
+	require.Contains(t, string(encoded), "marker_mismatch")
 	for _, passthrough := range []bool{false, true} {
 		retry := svc.prepareOpenAIRequestTimezone(ctx, c, newOpenAIIdentityPathOAuthAccount(92), adapted, passthrough)
 		require.Equal(t, result, retry)

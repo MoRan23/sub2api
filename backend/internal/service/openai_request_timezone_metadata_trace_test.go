@@ -20,7 +20,7 @@ func TestOpenAIEnvironmentMetadataTraceEligibility(t *testing.T) {
 		mutate                    func(map[string]any)
 	}{
 		{"valid", "eligible", "exact", func(map[string]any) {}},
-		{"missing", "metadata_missing", "missing", func(m map[string]any) { delete(m, "internal_chat_message_metadata_passthrough") }},
+		{"missing", "structural_fallback", "missing", func(m map[string]any) { delete(m, "internal_chat_message_metadata_passthrough") }},
 		{"null metadata", "kinds_not_array", "missing", func(m map[string]any) { m["internal_chat_message_metadata_passthrough"] = nil }},
 		{"object kinds", "kinds_not_array", "missing", func(m map[string]any) {
 			m["internal_chat_message_metadata_passthrough"] = map[string]any{"content_item_kinds": map[string]any{"0": openAIEnvironmentMetadataMarker}}
@@ -202,4 +202,102 @@ func TestOpenAIEnvironmentMetadataTraceNeverMutatesBodyOrState(t *testing.T) {
 		_, _, _, ok := openAIEnvironmentTracePath(path)
 		require.False(t, ok, path)
 	}
+}
+
+func TestOpenAIEnvironmentMetadataTraceTextShape(t *testing.T) {
+	const env = "<environment_context><timezone>Asia/Shanghai</timezone><current_date>2026-09-18</current_date></environment_context>"
+	for _, tc := range []struct {
+		name, text, reason                         string
+		open, close                                int
+		starts, ends, fence, quote, comment, cdata bool
+	}{
+		{"standalone", " \n" + env + "\t", "standalone_boundaries", 1, 1, true, true, false, false, false, false},
+		{"missing opening", "truncated</environment_context>", "missing_open", 0, 1, false, true, false, false, false, false},
+		{"missing closing", "<environment_context><timezone>Asia/Shanghai</timezone>", "missing_close", 1, 0, true, false, false, false, false, false},
+		{"multiple", env + env, "multiple_tags", 2, 2, true, true, false, false, false, false},
+		{"prefix", "Example: " + env, "mixed_prefix_or_suffix", 1, 1, false, true, false, false, false, false},
+		{"suffix", env + " this is an example", "mixed_prefix_or_suffix", 1, 1, true, false, false, false, false, false},
+		{"backtick fence", "```xml\n" + env + "\n```", "fenced", 1, 1, false, false, true, false, false, false},
+		{"tilde fence", "~~~xml\n" + env + "\n~~~", "fenced", 1, 1, false, false, true, false, false, false},
+		{"blockquote", "prefix\r\n \t> " + env, "quoted", 1, 1, false, true, false, true, false, false},
+		{"comment", strings.Replace(env, "<timezone>", "<!-- example --><timezone>", 1), "comment", 1, 1, true, true, false, false, true, false},
+		{"CDATA", strings.Replace(env, "<timezone>", "<![CDATA[example]]><timezone>", 1), "cdata", 1, 1, true, true, false, false, false, true},
+		{"no tags", "unrelated text", "no_environment_tags", 0, 0, false, false, false, false, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			shape, reason := buildOpenAIEnvironmentMetadataTextShape(tc.text)
+			require.Equal(t, tc.reason, reason)
+			require.Equal(t, openAIEnvironmentMetadataTextShape{
+				EnvironmentOpenCount: tc.open, EnvironmentCloseCount: tc.close,
+				StartsWithExactOpening: tc.starts, EndsWithExactClosing: tc.ends,
+				HasFence: tc.fence, HasBlockquoteLine: tc.quote, HasXMLComment: tc.comment, HasCDATA: tc.cdata,
+			}, shape)
+			encoded, err := json.Marshal(shape)
+			require.NoError(t, err)
+			var fields map[string]any
+			require.NoError(t, json.Unmarshal(encoded, &fields))
+			for name, value := range fields {
+				switch value.(type) {
+				case bool, float64:
+				default:
+					t.Fatalf("text_shape.%s contains a non-structural value: %T", name, value)
+				}
+			}
+		})
+	}
+}
+
+func TestOpenAIEnvironmentMetadataTraceIncompleteTextStructuredLog(t *testing.T) {
+	const secret = "DO_NOT_LOG_incomplete_environment_credentials"
+	for _, tagged := range []bool{false, true} {
+		message := timezoneTestMessage("<environment_context><timezone>Asia/Shanghai</timezone><private>" + secret + "</private>")
+		if !tagged {
+			delete(message, "internal_chat_message_metadata_passthrough")
+		}
+		body := timezoneTestBody(t, map[string]any{"input": []any{message}})
+		prepared, state := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true)
+		require.Equal(t, body, prepared)
+		var output bytes.Buffer
+		core := zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()), zapcore.AddSync(&output), zap.InfoLevel)
+		ctx := logger.IntoContext(context.Background(), zap.New(core).With(zap.String("request_id", "req-incomplete")))
+		logOpenAIEnvironmentMetadataTrace(ctx, 1466, "ingress_before_timezone", body, state)
+		require.NotContains(t, output.String(), secret)
+		require.NotContains(t, output.String(), "<private>")
+		require.NotContains(t, output.String(), "Asia/Shanghai")
+		logEntry := gjson.Parse(output.String())
+		require.Equal(t, "req-incomplete", logEntry.Get("request_id").String())
+		item := logEntry.Get("metadata_trace.items.0")
+		require.Equal(t, "environment_not_standalone", item.Get("parse_reason").String())
+		require.Equal(t, "missing_close", item.Get("shape_reason").String())
+		require.Equal(t, int64(1), item.Get("text_shape.environment_open_count").Int())
+		require.Equal(t, int64(0), item.Get("text_shape.environment_close_count").Int())
+		require.True(t, item.Get("text_shape.starts_with_exact_opening").Bool())
+		require.False(t, item.Get("text_shape.ends_with_exact_closing").Bool())
+	}
+}
+
+func TestOpenAIEnvironmentMetadataTraceLargeOpaqueRequest(t *testing.T) {
+	const secret = "DO_NOT_LOG_large_opaque_image_payload"
+	body := timezoneTestBody(t, map[string]any{
+		"input":                []any{timezoneStructuralFallbackMessage("<environment_context><timezone>Asia/Shanghai</timezone>")},
+		"opaque_image_payload": secret + strings.Repeat("A", 12<<20),
+	})
+	require.Greater(t, len(body), 8<<20)
+	require.Less(t, len(body), openAIEnvironmentMetadataTraceBodyLimit)
+	_, state := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true)
+	trace := buildOpenAIEnvironmentMetadataTrace(body, state)
+	require.Equal(t, "complete", trace.Status)
+	require.Equal(t, "complete", trace.SourceScanStatus)
+	require.Equal(t, len(body), trace.BodyBytes)
+	require.Len(t, trace.Items, 1)
+	require.Equal(t, "missing_close", trace.Items[0].ShapeReason)
+	var output bytes.Buffer
+	core := zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()), zapcore.AddSync(&output), zap.InfoLevel)
+	ctx := logger.IntoContext(context.Background(), zap.New(core))
+	logOpenAIEnvironmentMetadataTrace(ctx, 1465, "ingress_before_timezone", body, state)
+	require.NotContains(t, output.String(), secret)
+	require.NotContains(t, output.String(), "opaque_image_payload")
+	require.NotContains(t, output.String(), strings.Repeat("A", 100))
+	require.Contains(t, output.String(), "missing_close")
+	require.Less(t, output.Len(), 8192, "large unrelated payloads must not inflate diagnostic output")
 }

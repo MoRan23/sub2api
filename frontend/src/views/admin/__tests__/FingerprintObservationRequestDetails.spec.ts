@@ -316,7 +316,7 @@ describe('FingerprintObservationRequestDetails', () => {
     expect(within(report).queryByText('Converted')).toBeNull()
   })
 
-  it('classifies current and historical environments only when metadata establishes their source', async () => {
+  it('classifies metadata-backed environments as current or historical while retaining their actual values', async () => {
     renderDetails({
       timezone_comparison_status: 'matched',
       inbound_timezone_observations: { scan_status: 'complete', items: [
@@ -373,6 +373,78 @@ describe('FingerprintObservationRequestDetails', () => {
     expect(within(report).getByText('Converted')).toBeTruthy()
   })
 
+  it.each([
+    [true, 'Structural fallback · Current environment', '2026-09-18', '2026-09-17', 'timezone_converted'],
+    [false, 'Structural fallback · Historical environment', '2026-08-01', '2026-08-01', 'historical_timezone_converted'],
+  ] as const)('retains a structural fallback source and actual dates through outbound conversion (current=%s)', async (current, label, beforeDate, afterDate, reason) => {
+    renderDetails({
+      timezone_comparison_status: 'matched',
+      inbound_timezone_observations: { scan_status: 'complete', items: [{
+        source: 'environment_context', environment_source: 'structural_fallback', path: 'messages.0.content.0.text',
+        value: 'Asia/Shanghai', current, current_date: beforeDate, status: 'valid',
+      }] },
+      outbound_timezone_observations: { scan_status: 'complete', items: [{
+        source: 'environment_context', environment_source: 'structural_fallback', path: 'input.0.content.0.text',
+        value: 'America/Los_Angeles', current, current_date: afterDate, status: 'valid',
+      }] },
+      timezone_conversions: [{
+        source: 'environment_context', environment_source: 'structural_fallback', path: 'input.0.content.0.text',
+        original: 'Asia/Shanghai', output: 'America/Los_Angeles', date_before: beforeDate, date_after: afterDate,
+        status: 'converted', reason,
+      }],
+    })
+    const report = await openDetails()
+    const inbound = screen.getByRole('region', { name: 'Client inbound declarations' })
+    const outbound = screen.getByRole('region', { name: 'Actual outbound content' })
+    expect(within(inbound).getByText(label)).toBeTruthy()
+    expect(within(inbound).getByText('Asia/Shanghai')).toBeTruthy()
+    expect(within(inbound).getByText(beforeDate)).toBeTruthy()
+    expect(within(outbound).getByText(label)).toBeTruthy()
+    expect(within(outbound).getByText('America/Los_Angeles')).toBeTruthy()
+    expect(within(outbound).getByText(afterDate)).toBeTruthy()
+    expect(within(outbound).queryByText('Asia/Shanghai')).toBeNull()
+    expect(within(outbound).queryByText('Environment source unclassified')).toBeNull()
+    expect(within(outbound).queryByText('Text candidate (not an environment source)')).toBeNull()
+    const row = within(report).getByText('input.0.content.0.text').closest('tr')!
+    const cells = within(row).getAllByRole('cell')
+    expect(within(cells[0]!).getByText('Structural fallback (strict environment shape)')).toBeTruthy()
+    expect(within(cells[1]!).getByText('Asia/Shanghai')).toBeTruthy()
+    expect(within(cells[1]!).getByText(beforeDate)).toBeTruthy()
+    expect(within(cells[2]!).getByText('America/Los_Angeles')).toBeTruthy()
+    expect(within(cells[2]!).getByText(afterDate)).toBeTruthy()
+    expect(within(row).getByText('Converted')).toBeTruthy()
+  })
+
+  it('does not promote a neighboring text reference to a structural fallback environment', async () => {
+    renderDetails({
+      timezone_comparison_status: 'matched',
+      inbound_timezone_observations: { scan_status: 'complete', items: [
+        { source: 'environment_context', environment_source: 'structural_fallback', path: 'input.0.content.0.text', value: 'Asia/Shanghai', current: true, current_date: '2026-09-18', status: 'valid' },
+        { source: 'environment_context', environment_source: 'reference', path: 'input.1.content.0.text', value: 'Asia/Tokyo', current: false, current_date: '2026-08-01', reason: 'environment_metadata_missing' },
+      ] },
+      timezone_conversions: [
+        { source: 'environment_context', environment_source: 'structural_fallback', path: 'input.0.content.0.text', original: 'Asia/Shanghai', output: 'America/Los_Angeles', status: 'converted', reason: 'timezone_converted' },
+        { source: 'environment_context', environment_source: 'reference', path: 'input.1.content.0.text', original: 'Asia/Tokyo', output: 'Asia/Tokyo', status: 'skipped', reason: 'environment_metadata_missing' },
+      ],
+    })
+    const report = await openDetails()
+    const inbound = screen.getByRole('region', { name: 'Client inbound declarations' })
+    const fallback = within(inbound).getByText('input.0.content.0.text').closest('li')!
+    const reference = within(inbound).getByText('input.1.content.0.text').closest('li')!
+    expect(within(fallback).getByText('Structural fallback · Current environment')).toBeTruthy()
+    expect(within(reference).getByText('Text candidate (not an environment source)')).toBeTruthy()
+    expect(within(reference).getByText('Asia/Tokyo')).toBeTruthy()
+    expect(within(reference).getByText('2026-08-01')).toBeTruthy()
+    expect(within(reference).queryByText(/Structural fallback/)).toBeNull()
+    expect(within(reference).queryByText('Historical environment')).toBeNull()
+    expect(within(reference).queryByText('Invalid value')).toBeNull()
+    const referenceRow = within(report).getByText('input.1.content.0.text').closest('tr')!
+    expect(within(referenceRow).getByText('Text candidate (not an environment source)')).toBeTruthy()
+    expect(within(referenceRow).getByText('Skipped')).toBeTruthy()
+    expect(within(referenceRow).queryByText(/Structural fallback/)).toBeNull()
+    expect(within(referenceRow).queryByText('Converted')).toBeNull()
+  })
+
   it('reports an incomplete real environment check without treating malformed values as successful conversion', async () => {
     renderDetails({
       timezone_comparison_status: 'incomplete',
@@ -397,6 +469,35 @@ describe('FingerprintObservationRequestDetails', () => {
     expect(within(inbound).queryByText('Text candidate (not an environment source)')).toBeNull()
     expect(within(report).getByText('Check incomplete')).toBeTruthy()
     expect(within(report).queryByText('Converted')).toBeNull()
+    expect(screen.queryByText('Outbound values verified')).toBeNull()
+  })
+
+  it('retains structural fallback provenance while warning about an environment corrupted after adaptation', async () => {
+    renderDetails({
+      timezone_comparison_status: 'incomplete',
+      inbound_timezone_observations: { scan_status: 'complete', items: [{
+        source: 'environment_context', environment_source: 'structural_fallback', path: 'input.0.content.0.text',
+        value: 'Asia/Shanghai', current: true, current_date: '2026-09-18', status: 'valid',
+      }] },
+      outbound_timezone_observations: { scan_status: 'complete', items: [{
+        source: 'environment_context', environment_source: 'structural_fallback', path: 'input.0.content.0.text',
+        value: 'broken-zone', current: true, current_date: '2026-09-17', status: 'invalid', reason: 'invalid_timezone',
+      }] },
+      timezone_conversions: [{
+        source: 'environment_context', environment_source: 'structural_fallback', path: 'input.0.content.0.text',
+        original: 'Asia/Shanghai', output: 'broken-zone', status: 'incomplete', reason: 'invalid_timezone',
+      }],
+    })
+    const report = await openDetails()
+    const inbound = screen.getByRole('region', { name: 'Client inbound declarations' })
+    const outbound = screen.getByRole('region', { name: 'Actual outbound content' })
+    expect(within(inbound).queryByText('Environment check incomplete')).toBeNull()
+    expect(within(outbound).getByText('Structural fallback · Current environment')).toBeTruthy()
+    expect(within(outbound).getByText('broken-zone')).toBeTruthy()
+    expect(within(outbound).getByText('Environment check incomplete')).toBeTruthy()
+    expect(within(outbound).queryByText('Text candidate (not an environment source)')).toBeNull()
+    expect(within(report).getByText('Check incomplete')).toBeTruthy()
+    expect(screen.getByText('Timezone comparison incomplete')).toBeTruthy()
     expect(screen.queryByText('Outbound values verified')).toBeNull()
   })
 

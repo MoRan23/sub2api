@@ -11,7 +11,7 @@ export type FingerprintObservationRelation = 'root' | 'descendant' | 'unthreaded
 
 export type RequestTimezoneScanStatus = 'complete' | 'limited' | 'parse_failed' | 'not_applicable'
 export type RequestTimezoneSource = 'environment_context' | 'web_search'
-export type RequestEnvironmentSource = 'metadata' | 'mapped' | 'reference'
+export type RequestEnvironmentSource = 'metadata' | 'mapped' | 'structural_fallback' | 'reference'
 
 export interface RequestSearchLocation {
   type: string

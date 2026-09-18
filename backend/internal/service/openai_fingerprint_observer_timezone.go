@@ -227,6 +227,11 @@ func compareFingerprintObservationTimezones(entry *FingerprintObservationEntry, 
 					}
 					outbound.Items[found].Current = input.Current
 				}
+				if input.Source == "environment_context" && input.EnvironmentSource == TimezoneEnvironmentSourceStructuralFallback &&
+					(hasMapping || paths == nil) {
+					outbound.Items[found].EnvironmentSource = TimezoneEnvironmentSourceStructuralFallback
+					outbound.Items[found].Current = input.Current
+				}
 				actual := outbound.Items[found]
 				missingUnchanged := !converted && input.Reason == "location_missing" && actual.Reason == "location_missing"
 				if input.Source == "environment_context" && input.Status == "invalid" {

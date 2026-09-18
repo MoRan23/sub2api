@@ -26,9 +26,10 @@ const (
 	// Environment source classification is separate from parse validity and from
 	// current/history. Text mentioning an environment tag is not an environment
 	// declaration. A mapped source inherits only provenance, never observed values.
-	TimezoneEnvironmentSourceMetadata  = "metadata"
-	TimezoneEnvironmentSourceMapped    = "mapped"
-	TimezoneEnvironmentSourceReference = "reference"
+	TimezoneEnvironmentSourceMetadata           = "metadata"
+	TimezoneEnvironmentSourceMapped             = "mapped"
+	TimezoneEnvironmentSourceReference          = "reference"
+	TimezoneEnvironmentSourceStructuralFallback = "structural_fallback"
 )
 
 // TimezoneScanResult distinguishes an absent observation from a completed scan
@@ -196,16 +197,18 @@ type requestTimezoneOccurrence struct {
 	dateStart, dateEnd int
 	hasDate            bool
 	eligible           bool
+	currentBoundary    bool
 	locationPath       string
 	locationRaw        string
 	locationPresent    bool
 }
 
 type requestTimezoneScanner struct {
-	result      TimezoneScanResult
-	occurrences []requestTimezoneOccurrence
-	textBytes   int
-	nodes       int
+	result             TimezoneScanResult
+	occurrences        []requestTimezoneOccurrence
+	textBytes          int
+	nodes              int
+	structuralFallback bool
 }
 
 // ScanOpenAIRequestTimezones only inspects the supplied bytes; it never applies
@@ -229,7 +232,7 @@ func prepareOpenAIRequestTimezoneBody(body []byte, policy openai.RequestPolicy, 
 	if !enabled && !observe {
 		return bytes.Clone(body), state
 	}
-	scan := scanOpenAIRequestTimezonesWithSource(body, alphaSearch)
+	scan := scanOpenAIRequestTimezoneIngress(body, alphaSearch)
 	if observe {
 		state.Inbound = &scan.result
 	}
@@ -361,6 +364,16 @@ func scanOpenAIRequestTimezones(body []byte) *requestTimezoneScanner {
 }
 
 func scanOpenAIRequestTimezonesWithSource(body []byte, alphaSearch bool) *requestTimezoneScanner {
+	return scanOpenAIRequestTimezonesWithOptions(body, alphaSearch, false)
+}
+
+// Structural eligibility is decided only on frozen ingress bytes. Final scans
+// must not grant new eligibility after an adapter removed conflicting metadata.
+func scanOpenAIRequestTimezoneIngress(body []byte, alphaSearch bool) *requestTimezoneScanner {
+	return scanOpenAIRequestTimezonesWithOptions(body, alphaSearch, true)
+}
+
+func scanOpenAIRequestTimezonesWithOptions(body []byte, alphaSearch, structuralFallback bool) *requestTimezoneScanner {
 	s := &requestTimezoneScanner{result: TimezoneScanResult{ScanStatus: "complete", Items: []TimezoneScanItem{}}}
 	if !gjson.ValidBytes(body) {
 		s.result.ScanStatus = "parse_failed"
@@ -371,6 +384,8 @@ func scanOpenAIRequestTimezonesWithSource(body []byte, alphaSearch bool) *reques
 		s.result.ScanStatus = "not_applicable"
 		return s
 	}
+	s.structuralFallback = structuralFallback && !root.Get("internal_chat_message_metadata_passthrough").Exists() &&
+		!root.Get("content_item_kinds").Exists() && !root.Get("metadata.content_item_kinds").Exists()
 	input := root.Get("input")
 	if input.Exists() {
 		if input.Type == gjson.String {
@@ -464,7 +479,24 @@ func (s *requestTimezoneScanner) scanMessages(messages gjson.Result, path string
 				text := part.Get("text")
 				if text.Type == gjson.String {
 					if kind == "" || kind == "text" || kind == "input_text" {
+						beforeText := len(s.occurrences)
 						s.scanText(text.String(), fmt.Sprintf("%s.%d.content.%d.text", path, i, key.Int()), eligible, eligible)
+						if s.structuralFallback && path == "input" && current && kind == "input_text" &&
+							!hasRequestTimezoneEnvironmentMetadata(message, part) && len(s.occurrences) > beforeText {
+							occurrence := &s.occurrences[len(s.occurrences)-1]
+							trimmed := strings.TrimSpace(occurrence.text)
+							if occurrence.item.Status == "valid" && occurrence.hasDate {
+								occurrence.eligible = true
+								occurrence.item.Current = true
+								occurrence.item.EnvironmentSource = TimezoneEnvironmentSourceStructuralFallback
+							} else if strings.HasPrefix(trimmed, "<environment_context>") &&
+								(countRequestTimezoneTag(trimmed, "environment_context", true) == 0 || strings.HasSuffix(trimmed, "</environment_context>")) {
+								// An unusable trailing environment cannot make an older one
+								// current. Prose before or after a complete block is a reference,
+								// not a boundary that retires the earlier current environment.
+								occurrence.currentBoundary = true
+							}
+						}
 					} else {
 						s.countText(text.String())
 					}
@@ -478,7 +510,7 @@ func (s *requestTimezoneScanner) scanMessages(messages gjson.Result, path string
 		}
 		candidate := -1
 		for j := before; j < len(s.occurrences); j++ {
-			if s.occurrences[j].eligible {
+			if s.occurrences[j].eligible || s.occurrences[j].currentBoundary {
 				candidate = j
 			}
 		}
@@ -492,9 +524,22 @@ func (s *requestTimezoneScanner) scanMessages(messages gjson.Result, path string
 				s.markHistorical(j)
 			}
 			lastCurrent = candidate
+			if s.occurrences[candidate].currentBoundary {
+				s.markHistorical(candidate)
+				lastCurrent = -1
+			}
 		}
 		return s.result.ScanStatus == "complete"
 	})
+}
+
+// Presence is deliberate: null, malformed and misplaced declarations must not
+// be silently overridden by the missing-metadata fallback.
+func hasRequestTimezoneEnvironmentMetadata(message, part gjson.Result) bool {
+	return message.Get("internal_chat_message_metadata_passthrough").Exists() ||
+		message.Get("content_item_kinds").Exists() || message.Get("metadata.content_item_kinds").Exists() ||
+		part.Get("internal_chat_message_metadata_passthrough").Exists() ||
+		part.Get("content_item_kinds").Exists() || part.Get("metadata.content_item_kinds").Exists()
 }
 
 func (s *requestTimezoneScanner) countNode() bool {
