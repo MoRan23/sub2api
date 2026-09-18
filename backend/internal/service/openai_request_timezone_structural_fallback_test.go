@@ -114,7 +114,6 @@ func TestOpenAIRequestTimezoneStructuralFallbackUnrelatedMetadata(t *testing.T) 
 					require.Equal(t, environment, gjson.GetBytes(body, "input.0.content.1.text").String(), "ingress bytes stay unchanged")
 					require.Len(t, state.Inbound.Items, 1)
 					require.Equal(t, "structural_fallback", state.Inbound.Items[0].EnvironmentSource)
-					require.Empty(t, state.projectionSources[0].occurrence.environmentDiagnostic.FallbackBlockers)
 					final := scanOpenAIRequestTimezones(prepared)
 					require.False(t, final.occurrences[0].eligible, "final scan must not grant new authority")
 				})
@@ -146,7 +145,6 @@ func TestOpenAIRequestTimezoneStructuralFallbackMalformedMetadataScopes(t *testi
 					prepared, state := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true)
 					require.Equal(t, body, prepared)
 					require.Empty(t, state.patches)
-					require.NotEmpty(t, state.projectionSources[0].occurrence.environmentDiagnostic.FallbackBlockers)
 				})
 			}
 		}

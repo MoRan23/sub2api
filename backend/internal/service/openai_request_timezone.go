@@ -228,19 +228,14 @@ type requestTimezoneOccurrence struct {
 	locationPath       string
 	locationRaw        string
 	locationPresent    bool
-	// Immutable, bounded ingress diagnostics; never used to grant conversion authority.
-	environmentDiagnostic *openAIEnvironmentSourceDiagnostic
 }
 
 type requestTimezoneScanner struct {
-	result                 TimezoneScanResult
-	occurrences            []requestTimezoneOccurrence
-	textBytes              int
-	nodes                  int
-	structuralFallback     bool
-	rootMetadataBlocker    string
-	diagnosticRootMetadata []openAIEnvironmentMetadataDiagnostic
-	captureDiagnostics     bool
+	result             TimezoneScanResult
+	occurrences        []requestTimezoneOccurrence
+	textBytes          int
+	nodes              int
+	structuralFallback bool
 }
 
 // ScanOpenAIRequestTimezones only inspects the supplied bytes; it never applies
@@ -414,17 +409,11 @@ func scanOpenAIRequestTimezonesWithOptions(body []byte, alphaSearch, structuralF
 		s.result.ScanStatus = "not_applicable"
 		return s
 	}
-	s.captureDiagnostics = structuralFallback
-	if s.captureDiagnostics {
-		s.diagnosticRootMetadata = environmentDiagnosticMetadata(root, "request", -1)
-	}
-	s.rootMetadataBlocker = requestTimezoneEnvironmentMetadataBlocker(root)
-	s.structuralFallback = structuralFallback && s.rootMetadataBlocker == ""
+	s.structuralFallback = structuralFallback && requestTimezoneEnvironmentMetadataBlocker(root) == ""
 	input := root.Get("input")
 	if input.Exists() {
 		if input.Type == gjson.String {
 			s.scanText(input.String(), "input", false, false)
-			s.captureEnvironmentDiagnostic(0, "input_string", gjson.Result{}, gjson.Result{}, -1, -1)
 		} else if input.IsArray() {
 			s.scanMessages(input, "input")
 		}
@@ -502,7 +491,6 @@ func (s *requestTimezoneScanner) scanMessages(messages gjson.Result, path string
 		before := len(s.occurrences)
 		if content.Type == gjson.String {
 			s.scanText(content.String(), fmt.Sprintf("%s.%d.content", path, i), false, false)
-			s.captureEnvironmentDiagnostic(before, path, message, gjson.Result{}, -1, -1)
 		} else if content.IsArray() {
 			kinds := message.Get("internal_chat_message_metadata_passthrough.content_item_kinds")
 			content.ForEach(func(key, part gjson.Result) bool {
@@ -533,16 +521,13 @@ func (s *requestTimezoneScanner) scanMessages(messages gjson.Result, path string
 								occurrence.currentBoundary = true
 							}
 						}
-						s.captureEnvironmentDiagnostic(beforeText, path, message, part, int(key.Int()), int(content.Get("#").Int()))
 					} else {
 						s.countText(text.String())
 					}
 				} else if eligible {
 					// An explicitly declared but missing/non-string environment must
 					// remain an invalid source, not disappear from the observation.
-					beforeText := len(s.occurrences)
 					s.scanText("", fmt.Sprintf("%s.%d.content.%d.text", path, i, key.Int()), true, true)
-					s.captureEnvironmentDiagnostic(beforeText, path, message, part, int(key.Int()), int(content.Get("#").Int()))
 				}
 				return s.result.ScanStatus == "complete"
 			})
