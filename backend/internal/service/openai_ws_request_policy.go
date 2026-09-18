@@ -115,9 +115,6 @@ func (s *OpenAIGatewayService) prepareOpenAIWSFrameTimezone(ctx context.Context,
 		policy = s.settingService.GetOpenAIRequestPolicy(ctx)
 	}
 	_, state := PrepareOpenAIRequestTimezone(preparationBody, policy, acceptedAt, passthrough, IsFingerprintObservationEnabled())
-	if account.UsesOpenAICodexProtocol() && IsFingerprintObservationEnabled() {
-		logOpenAIEnvironmentMetadataTrace(ctx, account.ID, "ws_frame_before_timezone", preparationBody, state)
-	}
 	converted, _ := state.ApplyToBody(body)
 	SetRequestTimezoneState(c, state)
 	return converted, state
