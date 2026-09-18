@@ -61,10 +61,7 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 		return nil, err
 	}
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
-	}
+	proxyURL := OpenAIOutboundRouteForAccount(c, account).ProxyURL
 	if err := s.ensureOpenAIAlphaSearchAuthMetadata(ctx, account, token, proxyURL); err != nil {
 		return nil, err
 	}

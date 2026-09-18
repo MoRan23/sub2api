@@ -110,7 +110,11 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 
 	if account.Platform == PlatformOpenAI {
 		ctx = s.freezeOpenAIRequestPolicy(ctx, c)
-		body = s.prepareOpenAIRequestTimezone(ctx, c, account, body, account.IsOpenAIPassthroughEnabled())
+		if account.IsOpenAIOAuth() && gjson.GetBytes(body, "messages").Exists() {
+			s.prepareOpenAIRequestTimezoneDeferred(ctx, c, account, body, account.IsOpenAIPassthroughEnabled())
+		} else {
+			body = s.prepareOpenAIRequestTimezone(ctx, c, account, body, account.IsOpenAIPassthroughEnabled())
+		}
 	}
 	if account.Platform == PlatformGrok {
 		if account.IsGrokOAuth() {
@@ -301,6 +305,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		if err != nil {
 			return nil, fmt.Errorf("marshal responses request: %w", err)
 		}
+		responsesBody = applyDeferredOpenAIRequestTimezone(c, responsesBody)
 	}
 
 	logFields := []zap.Field{
@@ -423,10 +428,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, openAIUpstreamRequestBodySnapshot(upstreamReq, responsesBody))
 
 	// 7. Send request
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
-	}
+	proxyURL := OpenAIOutboundRouteForAccount(c, account).ProxyURL
 	upstreamReq = markOpenAIGuardianSourceHTTPRequest(upstreamReq, c, account)
 	upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, c.Request.Context())
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)

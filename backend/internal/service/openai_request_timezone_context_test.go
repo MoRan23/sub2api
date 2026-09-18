@@ -175,7 +175,10 @@ func TestOpenAIRequestTimezoneHTTPWire(t *testing.T) {
 			require.NoError(t, err)
 			select {
 			case actual := <-received:
-				compat := route == "chat" || route == "messages" || route == "raw_chat"
+				// OAuth compatibility entrances normalize user/input_text before
+				// freezing the neutral Responses baseline. API Key raw Chat keeps
+				// its existing protocol and does not gain conversion eligibility.
+				compat := route == "raw_chat"
 				firstZone, lastZone, lastDate, reason := OpenAIRequestTimezone, OpenAIRequestTimezone, "2026-09-09", "historical_timezone_converted"
 				comparison := "matched"
 				if compat {

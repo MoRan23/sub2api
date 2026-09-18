@@ -85,6 +85,10 @@ func cloneFingerprintTimezoneScan(scan *TimezoneScanResult) *TimezoneScanResult 
 
 func cloneFingerprintObservationEntry(entry FingerprintObservationEntry) FingerprintObservationEntry {
 	cloneFingerprintObservationMetadata(&entry)
+	if entry.EgressLocation != nil {
+		snapshot := *entry.EgressLocation
+		entry.EgressLocation = &snapshot
+	}
 	entry.RequestIntegrity = CloneRequestIntegrityObservation(entry.RequestIntegrity)
 	entry.ConversionCheck = cloneOpenAIChatConversionCheck(entry.ConversionCheck)
 	entry.InboundTimezoneObservations = cloneFingerprintTimezoneScan(entry.InboundTimezoneObservations)
@@ -146,6 +150,13 @@ func populateFingerprintObservationTimezones(entry *FingerprintObservationEntry,
 	}
 	entry.TimezoneTarget = OpenAIRequestTimezone
 	if state != nil {
+		if state.Target.Timezone != "" {
+			entry.TimezoneTarget = state.Target.Timezone
+		}
+		if state.EgressLocation != nil {
+			snapshot := *state.EgressLocation
+			entry.EgressLocation = &snapshot
+		}
 		entry.InboundTimezoneObservations = cloneFingerprintTimezoneScan(state.Inbound)
 		entry.TimezoneConversions = cloneTimezoneConversions(state.Conversions)
 	}

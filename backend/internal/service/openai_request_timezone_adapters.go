@@ -8,6 +8,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const openAIRequestTimezoneProvenanceKey = "openai_request_timezone_provenance"
@@ -133,27 +134,185 @@ func recordOpenAIRequestTimezonePrefixTrim(c *gin.Context, array string, removed
 }
 
 func chatCompletionsToResponsesWithTimezoneObservation(c *gin.Context, req *apicompat.ChatCompletionsRequest) (*apicompat.ResponsesRequest, error) {
-	if !observeOpenAIRequestTimezoneAdapter(c) {
+	if !observeOpenAIRequestTimezoneAdapter(c) && !hasDeferredOpenAIRequestTimezone(c) {
 		return apicompat.ChatCompletionsToResponses(req)
 	}
 	out, paths, err := apicompat.ChatCompletionsToResponsesWithPathMapping(req)
 	if err == nil {
-		recordOpenAIRequestTimezoneAdapterMapping(c, paths)
+		if hasDeferredOpenAIRequestTimezone(c) {
+			paths = normalizeDeferredOpenAIChatInput(out, paths)
+			freezeDeferredOpenAIRequestTimezoneBaseline(c, out, paths)
+		} else {
+			recordOpenAIRequestTimezoneAdapterMapping(c, paths)
+		}
 		captureOpenAIRequestTimezoneObjectCheckpoint(c, out)
 	}
 	return out, err
 }
 
+// The shared Chat converter preserves string content. OAuth eventually requires
+// input_text parts, so express that protocol-equivalent shape before freezing
+// the neutral baseline instead of discovering new sources after Codex adapts it.
+// This helper is intentionally exclusive to the OAuth deferred conversion path.
+func normalizeDeferredOpenAIChatInput(out *apicompat.ResponsesRequest, paths map[string]string) map[string]string {
+	if out == nil || !gjson.ValidBytes(out.Input) {
+		return paths
+	}
+	input := out.Input
+	remapped := make(map[string]string, len(paths))
+	for from, to := range paths {
+		remapped[from] = to
+	}
+	valid := true
+	gjson.ParseBytes(out.Input).ForEach(func(index, item gjson.Result) bool {
+		content := item.Get("content")
+		if item.Get("role").String() != "user" || content.Type != gjson.String {
+			return true
+		}
+		path := strconv.FormatInt(index.Int(), 10) + ".content"
+		var err error
+		input, err = sjson.SetBytes(input, path, []map[string]string{{"type": "input_text", "text": content.String()}})
+		if err != nil {
+			valid = false
+			return false
+		}
+		for from, to := range remapped {
+			if to == "input."+path {
+				remapped[from] = to + ".0.text"
+			}
+		}
+		return true
+	})
+	if !valid {
+		return paths
+	}
+	out.Input = input
+	return remapped
+}
+
 func anthropicToResponsesWithTimezoneObservation(c *gin.Context, req *apicompat.AnthropicRequest) (*apicompat.ResponsesRequest, error) {
-	if !observeOpenAIRequestTimezoneAdapter(c) {
+	if !observeOpenAIRequestTimezoneAdapter(c) && !hasDeferredOpenAIRequestTimezone(c) {
 		return apicompat.AnthropicToResponses(req)
 	}
 	out, paths, err := apicompat.AnthropicToResponsesWithPathMapping(req)
 	if err == nil {
-		recordOpenAIRequestTimezoneAdapterMapping(c, paths)
+		if hasDeferredOpenAIRequestTimezone(c) {
+			freezeDeferredOpenAIRequestTimezoneBaseline(c, out, paths)
+		} else {
+			recordOpenAIRequestTimezoneAdapterMapping(c, paths)
+		}
 		captureOpenAIRequestTimezoneObjectCheckpoint(c, out)
 	}
 	return out, err
+}
+
+func hasDeferredOpenAIRequestTimezone(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	value, _ := c.Get(openAIRequestTimezoneDeferredKey)
+	return value == true
+}
+
+func freezeDeferredOpenAIRequestTimezoneBaseline(c *gin.Context, converted any, paths map[string]string) {
+	if !hasDeferredOpenAIRequestTimezone(c) {
+		return
+	}
+	state, ok := RequestTimezoneStateFromContext(c)
+	if !ok {
+		return
+	}
+	encoded, err := json.Marshal(converted)
+	if err != nil {
+		return
+	}
+	var capture *openAIRequestTimezoneCapture
+	if raw, ok := c.Get(openAIRequestTimezoneCaptureKey); ok {
+		capture, _ = raw.(*openAIRequestTimezoneCapture)
+	}
+	var neutral *RequestTimezoneState
+	if capture != nil {
+		neutral = capture.convertedStates[state.passthrough]
+	}
+	if neutral == nil {
+		_, neutral = prepareOpenAIRequestTimezoneBody(encoded, state.Policy, state.AcceptedAt, state.passthrough, IsFingerprintObservationEnabled(), false)
+		if capture != nil {
+			constrainConvertedTimezoneSources(neutral, capture.body, paths)
+		}
+		if prepared, ok := neutral.ApplyToBody(encoded); ok {
+			neutral.preparedBody = prepared
+		}
+		if capture != nil {
+			if capture.convertedStates == nil {
+				capture.convertedStates = make(map[bool]*RequestTimezoneState)
+			}
+			capture.convertedStates[state.passthrough] = neutral
+		}
+	}
+	projected := neutral.WithTarget(state.Target)
+	projected.EgressLocation = state.EgressLocation
+	SetRequestTimezoneState(c, projected)
+	// Both integrity and timezone now describe the exact converted Responses
+	// baseline. No client protocol path is falsely presented as checked here.
+	c.Set(fingerprintObservationTimezonePathMappingContextKey, (map[string]string)(nil))
+}
+
+// Conversion can remove internal metadata. Preserve explicit negative source
+// declarations through the adapter's structural map; otherwise a wrong tag
+// would appear absent and incorrectly qualify for the strict fallback.
+func constrainConvertedTimezoneSources(state *RequestTimezoneState, original []byte, paths map[string]string) {
+	root := gjson.ParseBytes(original)
+	rootMetadataPresent := root.Get("internal_chat_message_metadata_passthrough").Exists() || root.Get("content_item_kinds").Exists() || root.Get("metadata.content_item_kinds").Exists()
+	for i := range state.projectionSources {
+		source := &state.projectionSources[i]
+		if !source.occurrence.environment {
+			continue
+		}
+		origin, matches := "", 0
+		for from, to := range paths {
+			if to == source.occurrence.item.Path && to != "" {
+				origin = from
+				matches++
+			}
+		}
+		allowed := matches == 1
+		parts := strings.Split(origin, ".")
+		if len(parts) < 3 || parts[0] != "messages" {
+			allowed = false
+		}
+		if allowed {
+			message := gjson.GetBytes(original, strings.Join(parts[:2], "."))
+			part := gjson.Result{}
+			if len(parts) >= 5 {
+				part = gjson.GetBytes(original, strings.Join(parts[:4], "."))
+			}
+			if message.Get("role").String() != "user" {
+				allowed = false
+			}
+			if hasRequestTimezoneEnvironmentMetadata(message, part) {
+				kinds := message.Get("internal_chat_message_metadata_passthrough.content_item_kinds")
+				allowed = allowed && len(parts) >= 5 && part.Get("type").String() == "input_text" && kinds.IsArray() && kinds.Get(parts[3]).String() == "environments.environment_context"
+				if allowed {
+					source.occurrence.item.EnvironmentSource = TimezoneEnvironmentSourceMetadata
+				}
+			}
+			if rootMetadataPresent && source.occurrence.item.EnvironmentSource != TimezoneEnvironmentSourceMetadata {
+				allowed = false
+			}
+		}
+		if !allowed {
+			source.occurrence.eligible, source.occurrence.item.Current = false, false
+			source.occurrence.item.EnvironmentSource = TimezoneEnvironmentSourceReference
+		}
+		if state.Inbound != nil {
+			for j := range state.Inbound.Items {
+				if state.Inbound.Items[j].Path == source.occurrence.item.Path {
+					state.Inbound.Items[j] = source.occurrence.item
+				}
+			}
+		}
+	}
+	state.buildTargetProjection()
 }
 
 func responsesToChatCompletionsWithTimezoneObservation(c *gin.Context, req *apicompat.ResponsesRequest, opts *apicompat.ResponsesToChatOptions) (*apicompat.ChatCompletionsRequest, error) {

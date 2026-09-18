@@ -83,16 +83,34 @@ type TimezoneConversion struct {
 	EnvironmentSource string                      `json:"environment_source,omitempty"`
 }
 
-// RequestTimezoneState is frozen at ingress, before account-specific adaptation.
-// Retries reuse PreparedBody; it is never a snapshot of the account's final body.
+// RequestTimezoneState retains immutable sources captured at ingress or at the
+// first neutral Responses conversion. Attempts project those sources onto their
+// frozen egress target; an account's final body is never used as a new baseline.
 type RequestTimezoneState struct {
-	Policy       openai.RequestPolicy
-	AcceptedAt   time.Time
-	Inbound      *TimezoneScanResult
-	Conversions  []TimezoneConversion
-	preparedBody []byte
-	patches      []requestTimezoneBodyPatch
-	alphaSearch  bool
+	Policy               openai.RequestPolicy
+	AcceptedAt           time.Time
+	Inbound              *TimezoneScanResult
+	Conversions          []TimezoneConversion
+	preparedBody         []byte
+	patches              []requestTimezoneBodyPatch
+	alphaSearch          bool
+	Target               RequestLocationObservation
+	EgressLocation       *OpenAIEgressLocationSnapshot
+	projectionSources    []requestTimezoneProjectionSource
+	projectionScanStatus string
+	passthrough          bool
+}
+
+// A source retains ingress eligibility and offsets. Retargeting never scans an
+// account-adapted body, and replay history keeps its original semantic boundary.
+type requestTimezoneProjectionSource struct {
+	occurrence      requestTimezoneOccurrence
+	acceptedAt      time.Time
+	toolType        string
+	fixedDate       string
+	scanStatus      string
+	enabled         bool
+	containerExists bool
 }
 
 type requestTimezoneBodyPatch struct {
@@ -100,6 +118,7 @@ type requestTimezoneBodyPatch struct {
 	originalExists           bool
 	containerPath            string
 	toolType                 string
+	containerExists          bool
 }
 
 func (s *RequestTimezoneState) PreparedBody() []byte {
@@ -168,6 +187,14 @@ func CloneRequestTimezoneState(s *RequestTimezoneState) *RequestTimezoneState {
 	copy.patches = append([]requestTimezoneBodyPatch(nil), s.patches...)
 	copy.Conversions = cloneTimezoneConversions(s.Conversions)
 	copy.Inbound = cloneFingerprintTimezoneScan(s.Inbound)
+	copy.projectionSources = append([]requestTimezoneProjectionSource(nil), s.projectionSources...)
+	for i := range copy.projectionSources {
+		copy.projectionSources[i].occurrence.item.Location = cloneRequestLocation(s.projectionSources[i].occurrence.item.Location)
+	}
+	if s.EgressLocation != nil {
+		value := *s.EgressLocation
+		copy.EgressLocation = &value
+	}
 	return &copy
 }
 
@@ -227,33 +254,49 @@ func PrepareOpenAIRequestTimezone(body []byte, policy openai.RequestPolicy, acce
 // alphaSearch is an explicit ingress classification, not a guess based on JSON
 // shape. Only a search_query may create an absent standalone search location.
 func prepareOpenAIRequestTimezoneBody(body []byte, policy openai.RequestPolicy, acceptedAt time.Time, passthrough, observe, alphaSearch bool) ([]byte, *RequestTimezoneState) {
-	state := &RequestTimezoneState{Policy: policy, AcceptedAt: acceptedAt, preparedBody: bytes.Clone(body), alphaSearch: alphaSearch}
+	state := &RequestTimezoneState{Policy: policy, AcceptedAt: acceptedAt, preparedBody: bytes.Clone(body), alphaSearch: alphaSearch, Target: openAIRequestSearchLocation(), passthrough: passthrough}
 	enabled := policy.TimezoneConversionEnabled && (!passthrough || policy.PassthroughTimezoneConversionEnabled)
 	if !enabled && !observe {
 		return bytes.Clone(body), state
 	}
 	scan := scanOpenAIRequestTimezoneIngress(body, alphaSearch)
+	state.projectionScanStatus = scan.result.ScanStatus
+	for _, occurrence := range scan.occurrences {
+		source := requestTimezoneProjectionSource{occurrence: occurrence, acceptedAt: acceptedAt, scanStatus: scan.result.ScanStatus, enabled: enabled}
+		source.occurrence.item.Location = cloneRequestLocation(occurrence.item.Location)
+		source.containerExists = gjson.GetBytes(body, strings.TrimSuffix(occurrence.locationPath, ".user_location")).Exists()
+		if strings.HasPrefix(occurrence.locationPath, "tools.") {
+			source.toolType = gjson.GetBytes(body, strings.TrimSuffix(occurrence.locationPath, ".user_location")+".type").String()
+		}
+		state.projectionSources = append(state.projectionSources, source)
+	}
 	if observe {
 		state.Inbound = &scan.result
 	}
-	if scan.result.ScanStatus != "complete" {
-		for _, occurrence := range scan.occurrences {
-			report := newTimezoneConversion(occurrence.item)
-			report.Status, report.Reason = "skipped", "scan_"+scan.result.ScanStatus
-			state.Conversions = append(state.Conversions, report)
-		}
+	state.buildTargetProjection()
+	prepared, ok := state.ApplyToBody(body)
+	if !ok {
 		return bytes.Clone(body), state
 	}
-	locationErr := InitializeOpenAIRequestTimezone()
-	prepared := state.preparedBody
-	for _, occurrence := range scan.occurrences {
+	state.preparedBody = prepared
+	return bytes.Clone(prepared), state
+}
+
+func (state *RequestTimezoneState) buildTargetProjection() {
+	state.patches = nil
+	state.Conversions = nil
+	location, locationErr := time.LoadLocation(state.Target.Timezone)
+	for _, source := range state.projectionSources {
+		occurrence, acceptedAt := source.occurrence, source.acceptedAt
 		report := newTimezoneConversion(occurrence.item)
 		switch {
+		case source.scanStatus != "complete":
+			report.Status, report.Reason = "skipped", "scan_"+source.scanStatus
 		case occurrence.environment && !occurrence.eligible:
 			// Ordinary quoted text is not a conversion source, even when its tags
 			// happen to be well formed. Do not report it as a disabled real source.
 			report.Status, report.Reason = "skipped", "environment_metadata_missing"
-		case !enabled:
+		case !source.enabled:
 			report.Status, report.Reason = "disabled", "conversion_disabled"
 		case !occurrence.eligible:
 			report.Status, report.Reason = "skipped", "environment_metadata_missing"
@@ -275,14 +318,17 @@ func prepareOpenAIRequestTimezoneBody(body []byte, policy openai.RequestPolicy, 
 				output := occurrence.text
 				// Apply text replacements backwards so both offsets describe the
 				// original environment block, regardless of tag ordering.
-				replacements := []timezoneTextReplacement{{occurrence.zoneStart, occurrence.zoneEnd, OpenAIRequestTimezone}}
+				replacements := []timezoneTextReplacement{{occurrence.zoneStart, occurrence.zoneEnd, state.Target.Timezone}}
 				// History shares the target timezone but retains its recorded date.
 				// Only the frozen current candidate uses this request's ingress date.
 				if occurrence.hasDate && occurrence.item.Current {
-					report.DateAfter = acceptedAt.In(openAIRequestTimezoneLocation.location).Format("2006-01-02")
+					report.DateAfter = acceptedAt.In(location).Format("2006-01-02")
 					report.TimeBasis = "gateway_received_at"
 					report.ReceivedAt = acceptedAt.UTC().Format(time.RFC3339Nano)
 					replacements = append(replacements, timezoneTextReplacement{occurrence.dateStart, occurrence.dateEnd, report.DateAfter})
+				} else if occurrence.hasDate && source.fixedDate != "" {
+					report.DateAfter = source.fixedDate
+					replacements = append(replacements, timezoneTextReplacement{occurrence.dateStart, occurrence.dateEnd, source.fixedDate})
 				}
 				if len(replacements) == 2 && replacements[0].start < replacements[1].start {
 					replacements[0], replacements[1] = replacements[1], replacements[0]
@@ -294,42 +340,23 @@ func prepareOpenAIRequestTimezoneBody(body []byte, policy openai.RequestPolicy, 
 				preparedText, _ := json.Marshal(output)
 				patch.original, patch.prepared = string(original), string(preparedText)
 			} else {
-				location := openAIRequestSearchLocation()
+				location := state.Target
 				encoded, _ := json.Marshal(location)
 				canonical, _ := canonicalRequestTimezonePatch(gjson.ParseBytes(encoded))
 				patch.path, patch.originalExists = occurrence.locationPath, occurrence.locationPresent
 				patch.original, patch.prepared = occurrence.locationRaw, canonical
 				patch.containerPath = strings.TrimSuffix(occurrence.locationPath, ".user_location")
+				patch.containerExists = source.containerExists
 				if strings.HasPrefix(patch.containerPath, "tools.") {
-					patch.toolType = gjson.GetBytes(body, patch.containerPath+".type").String()
+					patch.toolType = source.toolType
 				}
 				report.LocationAfter = &location
 				report.LocationAdded = !occurrence.locationPresent
 			}
-			var err error
-			if !patch.originalExists || patch.original != patch.prepared {
-				prepared, err = sjson.SetRawBytes(prepared, patch.path, []byte(patch.prepared))
-			}
-			if err != nil {
-				// A partial patch must not escape. This is defensive: all paths
-				// originate in the same valid JSON parsed by this scanner.
-				for i := range state.Conversions {
-					state.Conversions[i].Status, state.Conversions[i].Reason = "skipped", "patch_failed"
-					state.Conversions[i].Output = state.Conversions[i].Original
-					state.Conversions[i].DateAfter = state.Conversions[i].DateBefore
-					state.Conversions[i].LocationAfter = cloneRequestLocation(state.Conversions[i].LocationBefore)
-					state.Conversions[i].LocationAdded = false
-				}
-				report.Status, report.Reason = "skipped", "patch_failed"
-				report.LocationAfter, report.LocationAdded = cloneRequestLocation(report.LocationBefore), false
-				state.Conversions = append(state.Conversions, report)
-				state.patches = nil
-				return bytes.Clone(body), state
-			}
-			if !patch.originalExists || patch.original != patch.prepared {
-				state.patches = append(state.patches, patch)
-			}
-			report.Output = OpenAIRequestTimezone
+			// Track even an unchanged source: another account may have a different
+			// egress timezone and must still project this frozen source.
+			state.patches = append(state.patches, patch)
+			report.Output = state.Target.Timezone
 			report.Status, report.Reason = "converted", "timezone_converted"
 			if occurrence.environment && !occurrence.item.Current {
 				report.Reason = "historical_timezone_converted"
@@ -346,8 +373,6 @@ func prepareOpenAIRequestTimezoneBody(body []byte, policy openai.RequestPolicy, 
 		}
 		state.Conversions = append(state.Conversions, report)
 	}
-	state.preparedBody = prepared
-	return bytes.Clone(prepared), state
 }
 
 type timezoneTextReplacement struct {

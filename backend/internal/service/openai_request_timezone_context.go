@@ -14,12 +14,14 @@ import (
 
 const openAIRequestTimezoneCaptureKey = "openai_request_timezone_capture"
 const openAIRequestTimezoneStateKey = "openai_request_timezone_state"
+const openAIRequestTimezoneDeferredKey = "openai_request_timezone_deferred"
 
 type openAIRequestTimezoneCapture struct {
 	acceptedAt               time.Time
 	body                     []byte
 	inbound                  *TimezoneScanResult
 	states                   map[bool]*RequestTimezoneState
+	convertedStates          map[bool]*RequestTimezoneState
 	compactionInputReordered bool
 	alphaSearch              bool
 }
@@ -117,7 +119,6 @@ func applyCapturedOpenAIRequestTimezone(c *gin.Context, capture *openAIRequestTi
 	}
 	active := state
 	if capture.compactionInputReordered {
-		active = CloneRequestTimezoneState(state)
 		paths := make(map[string]string)
 		for _, report := range state.Conversions {
 			paths[report.Path] = report.Path
@@ -142,11 +143,7 @@ func applyCapturedOpenAIRequestTimezone(c *gin.Context, capture *openAIRequestTi
 			})
 			paths[report.Path] = "input." + strconv.Itoa(index-removed) + "." + parts[2]
 		}
-		for i := range active.patches {
-			if path, ok := paths[active.patches[i].path]; ok {
-				active.patches[i].path = path
-			}
-		}
+		active = RemapRequestTimezoneState(state, paths)
 		SetFingerprintObservationTimezonePathMapping(c, paths)
 	}
 	prepared, applied := active.ApplyToBody(body)
@@ -172,16 +169,39 @@ func (s *OpenAIGatewayService) prepareOpenAIRequestTimezone(ctx context.Context,
 	if account == nil || account.Platform != PlatformOpenAI {
 		return body
 	}
-	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
-	policy, _ := openai.RequestPolicyFromContext(ctx)
 	// WS bridges carry an already frozen frame state. Its patches may apply to
 	// the expanded replay; never replace that replay with the original frame.
 	if state, ok := RequestTimezoneStateFromContext(c); ok && GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
-		if prepared, applied := state.ApplyToBody(body); applied {
+		target, egress := s.resolveOpenAIRequestTimezoneTarget(c, account)
+		if prepared, projected, applied := state.ProjectToTarget(body, target); applied {
+			projected.EgressLocation = egress
+			SetRequestTimezoneState(c, projected)
 			return prepared
 		}
 		return body
 	}
+	capture, state := s.prepareOpenAIRequestTimezoneState(ctx, c, account, body, passthrough)
+	return applyCapturedOpenAIRequestTimezone(c, capture, state, body)
+}
+
+// Compatibility protocols first build an unmodified Responses baseline. Their
+// explicit adapter path map then carries these frozen sources to that baseline.
+func (s *OpenAIGatewayService) prepareOpenAIRequestTimezoneDeferred(ctx context.Context, c *gin.Context, account *Account, body []byte, passthrough bool) {
+	_, state := s.prepareOpenAIRequestTimezoneState(ctx, c, account, body, passthrough)
+	if c != nil {
+		c.Set(openAIRequestTimezoneDeferredKey, true)
+		c.Set(fingerprintObservationTimezonePathMappingContextKey, (map[string]string)(nil))
+	}
+	SetRequestTimezoneState(c, state)
+}
+
+func (s *OpenAIGatewayService) prepareOpenAIRequestTimezoneState(ctx context.Context, c *gin.Context, account *Account, body []byte, passthrough bool) (*openAIRequestTimezoneCapture, *RequestTimezoneState) {
+	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
+	policy, _ := openai.RequestPolicyFromContext(ctx)
+	if GetOpenAIClientTransport(c) != OpenAIClientTransportWS {
+		ClearOpenAIOutboundRoute(c)
+	}
+	FreezeOpenAIOutboundRoute(c, account)
 	s.CaptureOpenAIRequestTimezone(c, body)
 	capture := &openAIRequestTimezoneCapture{acceptedAt: time.Now(), body: body, states: make(map[bool]*RequestTimezoneState)}
 	if c != nil {
@@ -195,5 +215,35 @@ func (s *OpenAIGatewayService) prepareOpenAIRequestTimezone(ctx context.Context,
 		state.Inbound = capture.inbound
 		capture.states[passthrough] = state
 	}
-	return applyCapturedOpenAIRequestTimezone(c, capture, state, body)
+	target, egress := s.resolveOpenAIRequestTimezoneTarget(c, account)
+	state = state.WithTarget(target)
+	state.EgressLocation = egress
+	return capture, state
+}
+
+func applyDeferredOpenAIRequestTimezone(c *gin.Context, body []byte) []byte {
+	if c == nil {
+		return body
+	}
+	deferred, _ := c.Get(openAIRequestTimezoneDeferredKey)
+	if deferred != true {
+		return body
+	}
+	c.Set(openAIRequestTimezoneDeferredKey, false)
+	state, ok := RequestTimezoneStateFromContext(c)
+	if !ok {
+		return body
+	}
+	prepared, applied := state.ApplyToBody(body)
+	if !applied {
+		state = CloneRequestTimezoneState(state)
+		for i := range state.Conversions {
+			if state.Conversions[i].Status == "converted" {
+				state.Conversions[i].Status, state.Conversions[i].Reason = "skipped", "source_changed_before_apply"
+			}
+		}
+		SetRequestTimezoneState(c, state)
+	}
+	captureOpenAIRequestTimezoneCheckpoint(c, prepared)
+	return prepared
 }

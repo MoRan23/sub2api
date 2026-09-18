@@ -88,14 +88,21 @@ func (s *OpenAIGatewayService) prepareOpenAIWSFrameTimezone(ctx context.Context,
 	if account == nil || (account.Platform != "" && account.Platform != PlatformOpenAI) {
 		return body, nil
 	}
+	FreezeOpenAIOutboundRoute(c, account)
+	if !reuse {
+		ResetOpenAIRequestTimezoneTargets(c)
+	}
+	target, egress := s.resolveOpenAIRequestTimezoneTarget(c, account)
 	preparationBody := body
 	if reuse {
 		if state, ok := RequestTimezoneStateFromContext(c); ok && state != nil {
 			// A failover payload can already contain converted replay history and
 			// relocated current input. Never replace it with the original body or
 			// rescan it as a newly accepted turn.
-			converted, _ := state.ApplyToBody(body)
-			return converted, state
+			converted, projected, _ := state.ProjectToTarget(body, target)
+			projected.EgressLocation = egress
+			SetRequestTimezoneState(c, projected)
+			return converted, projected
 		}
 		if c != nil {
 			if value, ok := c.Get(openAIRequestTimezoneCaptureKey); ok {
@@ -115,6 +122,8 @@ func (s *OpenAIGatewayService) prepareOpenAIWSFrameTimezone(ctx context.Context,
 		policy = s.settingService.GetOpenAIRequestPolicy(ctx)
 	}
 	_, state := PrepareOpenAIRequestTimezone(preparationBody, policy, acceptedAt, passthrough, IsFingerprintObservationEnabled())
+	state = state.WithTarget(target)
+	state.EgressLocation = egress
 	converted, _ := state.ApplyToBody(body)
 	SetRequestTimezoneState(c, state)
 	return converted, state
@@ -125,4 +134,11 @@ func openAIWSObservationFramePlan(account *Account, plan *OpenAIOAuthIdentityPla
 		return nil
 	}
 	return plan
+}
+
+func openAIWSTimezoneTarget(state *RequestTimezoneState) RequestLocationObservation {
+	if state == nil {
+		return openAIRequestSearchLocation()
+	}
+	return state.Target
 }

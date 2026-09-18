@@ -955,10 +955,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if sessionResolution.OutboundIdentityEnabled {
 		outboundIdentityEnabled = true
 	}
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
-	}
+	proxyURL := OpenAIOutboundRouteForAccount(c, account).ProxyURL
 
 	dialer := s.getOpenAIWSPassthroughDialer()
 	if dialer == nil {

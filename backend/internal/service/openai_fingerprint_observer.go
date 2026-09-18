@@ -87,6 +87,7 @@ type FingerprintObservationEntry struct {
 	InboundEndpoint              string                         `json:"inbound_endpoint"`
 	EventKind                    string                         `json:"event_kind,omitempty"`
 	TimezoneTarget               string                         `json:"timezone_target,omitempty"`
+	EgressLocation               *OpenAIEgressLocationSnapshot  `json:"egress_location,omitempty"`
 	InboundTimezoneObservations  *TimezoneScanResult            `json:"inbound_timezone_observations,omitempty"`
 	OutboundTimezoneObservations *TimezoneScanResult            `json:"outbound_timezone_observations,omitempty"`
 	TimezoneConversions          []TimezoneConversion           `json:"timezone_conversions,omitempty"`

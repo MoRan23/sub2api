@@ -60,7 +60,11 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	setCodexToolNameReverse(c, nil)
 	if account.Platform == PlatformOpenAI {
 		ctx = s.freezeOpenAIRequestPolicy(ctx, c)
-		body = s.prepareOpenAIRequestTimezone(ctx, c, account, body, account.IsOpenAIPassthroughEnabled())
+		if account.IsOpenAIOAuth() {
+			s.prepareOpenAIRequestTimezoneDeferred(ctx, c, account, body, account.IsOpenAIPassthroughEnabled())
+		} else {
+			body = s.prepareOpenAIRequestTimezone(ctx, c, account, body, account.IsOpenAIPassthroughEnabled())
+		}
 	}
 
 	// OpenCode Go：按模型原生协议分流。规则未命中兜底 Chat Completions。
@@ -236,6 +240,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	if err != nil {
 		return nil, fmt.Errorf("marshal responses request: %w", err)
 	}
+	responsesBody = applyDeferredOpenAIRequestTimezone(c, responsesBody)
 
 	var messagesOAuthIdentityPlan *OpenAIOAuthIdentityPlan
 	if usesOpenAICodexIdentityProtocol(account) && account.Platform != PlatformGrok {
@@ -482,10 +487,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, openAIUpstreamRequestBodySnapshot(upstreamReq, responsesBody))
 
 	// 7. Send request
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
-	}
+	proxyURL := OpenAIOutboundRouteForAccount(c, account).ProxyURL
 	// Grok may reject encrypted reasoning replayed under a different OAuth
 	// account/cache identity. Match forwardGrokResponses: one strip+retry before
 	// treating the 400 as a hard failure / failover trigger.

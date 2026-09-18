@@ -645,6 +645,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		bridgeReplayInputExists := false
 		var bridgeAccountFailoverInput []json.RawMessage
 		bridgeAccountFailoverInputExists := false
+		bridgeTimezoneReplay := newOpenAIWSTimezoneReplayLedger()
 		for turn := 1; ; turn++ {
 			bridgeFrameCapture := cloneOpenAIOAuthIdentityCapture(bridgeCaptureState.Capture)
 			if turn > 1 {
@@ -694,6 +695,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if c != nil && sessionHash != "" {
 				c.Set(openAIWSIngressSessionHashContextKey, sessionHash)
 			}
+			bridgeCurrentItems, bridgeCurrentItemsExist, extractErr := bridgeTimezoneReplay.Record(
+				currentBridgePayload.payloadRaw, currentBridgePayload.timezoneState)
+			if extractErr != nil {
+				return fmt.Errorf("build websocket http bridge replay input: %w", extractErr)
+			}
 			// 剥离本会话已知失效的加密项，阻断同一失效密文随历史反复触发上游拒绝。
 			// 历史序列须同步剥离，否则与已剥离的当前 input 项错位，prefix 复用失配。
 			if invalidDigests := s.sessionInvalidEncryptedContentDigests(groupID, sessionHash); len(invalidDigests) > 0 {
@@ -704,6 +710,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					setOpenAIRequestIntegrityRecovery(c, "invalid_encrypted_content")
 					currentBridgePayload.payloadRaw = strippedPayload
 					currentBridgePayload.payloadBytes = len(strippedPayload)
+					bridgeCurrentItems, _ = stripOpenAIInvalidEncryptedContentFromReplayItems(bridgeCurrentItems, invalidDigests)
 				}
 				if bridgeReplayInputExists {
 					bridgeReplayInput, _ = stripOpenAIInvalidEncryptedContentFromReplayItems(bridgeReplayInput, invalidDigests)
@@ -718,12 +725,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			needsBridgeReplay := currentBridgePayload.previousResponseID != "" ||
 				(toolOutputCoverage.HasFunctionCallOutput && !toolOutputCoverage.ContextCoversAllCallIDs)
 			// 一次解析当前 input，正常 replay 与 account-failover 两份序列共享同一批正文。
-			bridgeCurrentItems, bridgeCurrentItemsExist, extractErr := openAIWSExtractNormalizedInputSequence(
-				currentBridgePayload.payloadRaw,
-			)
-			if extractErr != nil {
-				return fmt.Errorf("build websocket http bridge replay input: %w", extractErr)
-			}
 			turnReplayInput, turnReplayInputExists := buildOpenAIWSReplayInputSequenceFromItems(
 				bridgeReplayInput,
 				bridgeReplayInputExists,
@@ -739,9 +740,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				needsBridgeReplay,
 			)
 			if needsBridgeReplay && turnReplayInputExists {
+				projectedInput, replayState, projected := bridgeTimezoneReplay.ProjectReplay(
+					currentBridgePayload.payloadRaw, turnReplayInput, openAIWSTimezoneTarget(currentBridgePayload.timezoneState), currentBridgePayload.timezoneState)
+				if !projected {
+					return errors.New("project websocket http bridge replay timezone")
+				}
 				updatedPayload, setInputErr := setOpenAIWSPayloadInputSequence(
 					currentBridgePayload.payloadRaw,
-					turnReplayInput,
+					projectedInput,
 					true,
 				)
 				if setInputErr != nil {
@@ -749,6 +755,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 				bridgePayloadRaw = updatedPayload
 				bridgePayloadBytes = len(updatedPayload)
+				SetRequestTimezoneState(c, replayState)
 				setOpenAIRequestIntegrityRecovery(c, "history_replay")
 				logOpenAIWSModeInfo(
 					"ingress_ws_http_bridge_replay_input account_id=%d turn=%d input_items=%d previous_response_id_present=%v has_tool_output=%v",
@@ -797,6 +804,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if bridgeErr != nil {
 				var failoverErr *UpstreamFailoverError
 				if turn > 1 && errors.As(bridgeErr, &failoverErr) && failoverErr != nil {
+					_, retryTimezoneState, projected := bridgeTimezoneReplay.ProjectReplay(
+						currentBridgePayload.payloadRaw, turnAccountFailoverInput, openAIWSTimezoneTarget(currentBridgePayload.timezoneState), currentBridgePayload.timezoneState)
+					if !projected {
+						return fmt.Errorf("project websocket current-turn failover timezone: %w", bridgeErr)
+					}
 					retryPayload, retrySafe, retryPayloadErr := buildOpenAIWSCurrentTurnRetryPayload(
 						currentBridgePayload.accountIdentitySourceRaw,
 						turnAccountFailoverInput,
@@ -811,7 +823,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					}
 					return withOpenAIWSCurrentTurnRetryTimezoneState(
 						newOpenAIWSCurrentTurnFailoverError(bridgeErr, retryPayload, bridgeFrameCapture),
-						currentBridgePayload.timezoneState,
+						retryTimezoneState,
 					)
 				}
 				return bridgeErr
@@ -819,6 +831,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if result == nil {
 				return errors.New("websocket http bridge turn result is nil")
 			}
+			bridgeTimezoneReplay.Commit(turnReplayInput)
+			bridgeTimezoneReplay.Commit(turnAccountFailoverInput)
 			// turnReplayInput/turnAccountFailoverInput 可能共享同一头数组（转移自
 			// bridgeCurrentItems），保存历史必须经 combine 新建头，禁止就地 append。
 			bridgeReplayInput = turnReplayInput
@@ -836,6 +850,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				)
 				bridgeAccountFailoverInputExists = true
 			}
+			bridgeTimezoneReplay.Trim(bridgeReplayInput, bridgeAccountFailoverInput)
 			turnState = s.applyOpenAIWSHTTPBridgeDeliveredTurnState(c, account, turnState, result, bridgeIdentityPlan)
 			responseID := strings.TrimSpace(result.RequestID)
 			if responseID != "" && stateStore != nil {
@@ -911,13 +926,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		HandshakeObserver: freezeFingerprintObservationWSHandshake(c, account),
 		IdentityDigest:    pinnedSocketDigest,
 		HeadersFactory:    s.openAIWSHeadersFactory(ctx, account),
-		ProxyURL: func() string {
-			if account.ProxyID != nil && account.Proxy != nil {
-				return account.Proxy.URL()
-			}
-			return ""
-		}(),
-		ForceNewConn: false,
+		ProxyURL:          OpenAIOutboundRouteForAccount(c, account).ProxyURL,
+		ForceNewConn:      false,
 	}
 	pool := s.getOpenAIWSConnPool()
 	if pool == nil {
@@ -1530,6 +1540,22 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	lastTurnReplayInputExists := false
 	currentTurnReplayInput := []json.RawMessage(nil)
 	currentTurnReplayInputExists := false
+	timezoneReplay := newOpenAIWSTimezoneReplayLedger()
+	setProjectedReplayInput := func(payload []byte, items []json.RawMessage, exists bool) ([]byte, error) {
+		if !exists {
+			return payload, nil
+		}
+		state, _ := RequestTimezoneStateFromContext(c)
+		projected, replayState, ok := timezoneReplay.ProjectReplay(payload, items, openAIWSTimezoneTarget(state), state)
+		if !ok {
+			return nil, errors.New("project websocket replay timezone")
+		}
+		updated, err := setOpenAIWSPayloadInputSequence(payload, projected, true)
+		if err == nil {
+			SetRequestTimezoneState(c, replayState)
+		}
+		return updated, err
+	}
 	skipBeforeTurn := false
 	hasCurrentOrReplayFunctionCallOutput := func(payload []byte) bool {
 		if openAIWSRawPayloadHasToolCallOutput(payload) {
@@ -1589,7 +1615,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			)
 			return false
 		}
-		updatedWithInput, setInputErr := setOpenAIWSPayloadInputSequence(
+		updatedWithInput, setInputErr := setProjectedReplayInput(
 			updatedPayload,
 			currentTurnReplayInput,
 			currentTurnReplayInputExists,
@@ -1655,6 +1681,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 		}
 		skipBeforeTurn = false
+		currentTimezoneState, _ := RequestTimezoneStateFromContext(c)
+		neutralItems, neutralItemsExist, replayInputErr := timezoneReplay.Record(currentPayload, currentTimezoneState)
 		// 剥离本会话已知失效的加密项，阻断同一失效密文随历史反复触发上游拒绝。
 		// 历史序列须同步剥离，否则与已剥离的当前 input 项错位，prefix 复用失配。
 		if invalidDigests := s.sessionInvalidEncryptedContentDigests(groupID, sessionHash); len(invalidDigests) > 0 {
@@ -1665,6 +1693,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				setOpenAIRequestIntegrityRecovery(c, "invalid_encrypted_content")
 				currentPayload = strippedPayload
 				currentPayloadBytes = len(strippedPayload)
+				neutralItems, _ = stripOpenAIInvalidEncryptedContentFromReplayItems(neutralItems, invalidDigests)
 			}
 			if lastTurnReplayInputExists {
 				lastTurnReplayInput, _ = stripOpenAIInvalidEncryptedContentFromReplayItems(lastTurnReplayInput, invalidDigests)
@@ -1714,12 +1743,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				)
 			}
 		}
-		nextReplayInput, nextReplayInputExists, replayInputErr := buildOpenAIWSReplayInputSequence(
-			lastTurnReplayInput,
-			lastTurnReplayInputExists,
-			currentPayload,
-			currentPreviousResponseID != "",
-		)
+		var nextReplayInput []json.RawMessage
+		var nextReplayInputExists bool
+		if replayInputErr == nil {
+			nextReplayInput, nextReplayInputExists = buildOpenAIWSReplayInputSequenceFromItems(
+				lastTurnReplayInput, lastTurnReplayInputExists, neutralItems, neutralItemsExist, currentPreviousResponseID != "")
+		}
 		if replayInputErr != nil {
 			logOpenAIWSModeInfo(
 				"ingress_ws_replay_input_skip account_id=%d turn=%d conn_id=%s reason=build_error cause=%s",
@@ -1787,7 +1816,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						hasFunctionCallOutput,
 					)
 				} else {
-					updatedWithInput, setInputErr := setOpenAIWSPayloadInputSequence(
+					updatedWithInput, setInputErr := setProjectedReplayInput(
 						updatedPayload,
 						currentTurnReplayInput,
 						currentTurnReplayInputExists,
@@ -1877,7 +1906,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 								truncateOpenAIWSLogValue(currentPreviousResponseID, openAIWSIDValueMaxLen),
 							)
 						} else {
-							updatedWithInput, setInputErr := setOpenAIWSPayloadInputSequence(
+							updatedWithInput, setInputErr := setProjectedReplayInput(
 								updatedPayload,
 								currentTurnReplayInput,
 								currentTurnReplayInputExists,
@@ -2016,6 +2045,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		responseID := strings.TrimSpace(result.RequestID)
 		lastTurnResponseID = responseID
+		timezoneReplay.Commit(currentTurnReplayInput)
 		// 正文共享：currentPayload/currentTurnReplayInput 均不可变，历史直接引用；
 		// collector 增量经 combine 合并（新头数组）。
 		lastTurnReplayInput = currentTurnReplayInput
@@ -2024,6 +2054,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			lastTurnReplayInput = combineOpenAIWSReplayItems(lastTurnReplayInput, result.wsReplayInput)
 			lastTurnReplayInputExists = true
 		}
+		timezoneReplay.Trim(lastTurnReplayInput)
 		nextStrictState, strictStateErr := buildOpenAIWSIngressPreviousTurnStrictState(currentPayload)
 		if strictStateErr != nil {
 			lastTurnStrictState = nil

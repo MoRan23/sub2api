@@ -252,12 +252,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		HeadersFactory:    s.openAIWSHeadersFactory(ctx, account),
 		PreferredConnID:   preferredConnID,
 		ForceNewConn:      forceNewConn,
-		ProxyURL: func() string {
-			if account.ProxyID != nil && account.Proxy != nil {
-				return account.Proxy.URL()
-			}
-			return ""
-		}(),
+		ProxyURL:          OpenAIOutboundRouteForAccount(c, account).ProxyURL,
 	})
 	if err != nil {
 		var agentDialErr *openAIWSDialError
