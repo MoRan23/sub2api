@@ -63,9 +63,7 @@ describe('RedeemView gift balance display', () => {
       gift_value: 0.00000001,
       new_balance: 0.01,
     })
-    getHistory.mockReset().mockResolvedValue({
-      items: [balanceHistoryItem], total: 1, page: 1, page_size: 20, pages: 1,
-    })
+    getHistory.mockReset().mockResolvedValue([balanceHistoryItem])
     getPublicSettings.mockReset().mockResolvedValue({ contact_info: '' })
     refreshUser.mockReset().mockResolvedValue(undefined)
     fetchActiveSubscriptions.mockReset().mockResolvedValue(undefined)

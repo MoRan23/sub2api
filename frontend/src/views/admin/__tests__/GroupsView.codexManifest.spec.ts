@@ -1,6 +1,5 @@
 import { defineComponent, h, type PropType } from "vue";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/vue";
-import { createPinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AdminGroup, CodexModelsManifestConfig } from "@/types";
@@ -214,7 +213,6 @@ const CodexManifestAccountsFieldStub = defineComponent({
 const mountView = () =>
   render(GroupsView, {
     global: {
-      plugins: [createPinia()],
       stubs: {
         AppLayout: AppLayoutStub,
         TablePageLayout: TablePageLayoutStub,

@@ -16,12 +16,10 @@ import (
 	mathrand "math/rand"
 	"net/http"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/googleapi"
@@ -483,45 +481,6 @@ func (s *GeminiMessagesCompatService) validateUpstreamBaseURL(raw string) (strin
 		return "", fmt.Errorf("invalid base_url: %w", err)
 	}
 	return normalized, nil
-}
-
-// AntigravityGeminiModelIDs returns the effective Gemini mappings of schedulable
-// Antigravity accounts. Mixed routes must additionally respect the account opt-in.
-func (s *GeminiMessagesCompatService) AntigravityGeminiModelIDs(ctx context.Context, groupID *int64, requireMixed bool) ([]string, error) {
-	accounts, err := s.listSchedulableAccountsOnce(ctx, groupID, PlatformAntigravity, false)
-	if err != nil {
-		return nil, err
-	}
-	seen := make(map[string]struct{})
-	for _, account := range accounts {
-		if account.Platform != PlatformAntigravity || (requireMixed && !account.IsMixedSchedulingEnabled()) {
-			continue
-		}
-		addModel := func(model string) {
-			if isAntigravityGeminiModel(model) && IsSafeGeminiModelPathSegment(model) && strings.TrimSpace(mapAntigravityModel(&account, model)) != "" {
-				seen[model] = struct{}{}
-			}
-		}
-		for model := range account.GetModelMapping() {
-			if strings.Contains(model, "*") {
-				// Mapping patterns are routing rules, not callable model IDs. Expand
-				// them against known models while respecting the account's final mapping.
-				for candidate := range domain.DefaultAntigravityModelMapping {
-					if matchWildcard(model, candidate) {
-						addModel(candidate)
-					}
-				}
-				continue
-			}
-			addModel(model)
-		}
-	}
-	models := make([]string, 0, len(seen))
-	for model := range seen {
-		models = append(models, model)
-	}
-	sort.Strings(models)
-	return models, nil
 }
 
 // HasAntigravityAccounts 检查是否有可用的 antigravity 账户
