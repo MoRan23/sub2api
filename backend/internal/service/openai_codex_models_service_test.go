@@ -2574,6 +2574,8 @@ func TestFetchCodexModelsManifestRejectsInvalidEnvelope(t *testing.T) {
 	}{
 		{name: "OpenAI models list", body: `{"object":"list","data":[]}`},
 		{name: "invalid JSON", body: `{"models":`},
+		{name: "invalid nested array JSON", body: `{"models":[{"slug":"gpt-5.4",}]}`},
+		{name: "trailing JSON value", body: `{"models":[]} {}`},
 		{name: "non-object", body: `[]`},
 		{name: "null object", body: `null`},
 		{name: "missing models", body: `{}`},
@@ -2609,6 +2611,11 @@ func TestFetchCodexModelsManifestRejectsInvalidEnvelope(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateCodexModelsManifestEnvelopeRequiresExactModelsKey(t *testing.T) {
+	require.NoError(t, validateCodexModelsManifestEnvelope([]byte(`{"models":[]}`)))
+	require.Error(t, validateCodexModelsManifestEnvelope([]byte(`{"Models":[]}`)))
 }
 
 func TestFetchCodexModelsManifestAPIKeyDoesNotCacheInvalidEnvelope(t *testing.T) {
