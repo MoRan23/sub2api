@@ -52,6 +52,11 @@ func requireAlphaSearchTimezoneWire(t *testing.T, route string, body []byte, tim
 	var err error
 	if timezone == OpenAIRequestTimezone {
 		expected, err = sjson.Set(alphaSearchTimezoneRequest, "settings.user_location", openAIRequestSearchLocation())
+		locationPath := "settings.user_location"
+		if route == "pat" {
+			locationPath = "tools.0.user_location"
+		}
+		require.JSONEq(t, `{"type":"approximate","country":"US","region":"Washington","city":"Seattle","timezone":"America/Los_Angeles"}`, gjson.GetBytes(body, locationPath).Raw)
 	}
 	require.NoError(t, err)
 	if route != "pat" {

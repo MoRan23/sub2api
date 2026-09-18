@@ -231,7 +231,7 @@ func TestOpenAIRequestTimezoneChatObservationKeepsLocationAfterAdapter(t *testin
 	svc, _ := newOpenAIIdentityPathService(t, true, upstream)
 	_, err := svc.ForwardAsChatCompletions(context.Background(), c, newOpenAIIdentityPathOAuthAccount(73), body, "timezone-tools", "")
 	require.NoError(t, err)
-	require.Equal(t, "Los Angeles", gjson.GetBytes(upstream.lastBody, "tools.0.user_location.city").String())
+	require.Equal(t, "Seattle", gjson.GetBytes(upstream.lastBody, "tools.0.user_location.city").String())
 	entries := SnapshotFingerprintObservations(0)
 	require.Len(t, entries, 1)
 	require.Equal(t, "matched", entries[0].TimezoneComparisonStatus)

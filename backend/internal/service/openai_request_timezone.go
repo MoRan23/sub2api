@@ -63,7 +63,7 @@ type RequestLocationObservation struct {
 }
 
 func openAIRequestSearchLocation() RequestLocationObservation {
-	return RequestLocationObservation{Type: "approximate", Country: "US", Region: "California", City: "Los Angeles", Timezone: OpenAIRequestTimezone}
+	return RequestLocationObservation{Type: "approximate", Country: "US", Region: "Washington", City: "Seattle", Timezone: OpenAIRequestTimezone}
 }
 
 type TimezoneConversion struct {

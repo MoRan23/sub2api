@@ -89,7 +89,7 @@ func TestFingerprintObserverTimezoneRecordAndSnapshotsAreDeepCopies(t *testing.T
 	require.Equal(t, "complete", first[0].OutboundTimezoneObservations.ScanStatus)
 	require.Equal(t, OpenAIRequestTimezone, first[0].TimezoneConversions[0].Output)
 	require.Equal(t, "CN", first[0].InboundTimezoneObservations.Items[0].Location.Country)
-	require.Equal(t, "Los Angeles", first[0].TimezoneConversions[0].LocationAfter.City)
+	require.Equal(t, "Seattle", first[0].TimezoneConversions[0].LocationAfter.City)
 	first[0].InboundTimezoneObservations.Items[0].Value = "mutated-return"
 	first[0].TimezoneConversions[0].Reason = "mutated-return"
 	first[0].TimezoneConversions[0].LocationBefore.Country = "mutated-return"
@@ -98,7 +98,7 @@ func TestFingerprintObserverTimezoneRecordAndSnapshotsAreDeepCopies(t *testing.T
 	require.Equal(t, "Asia/Shanghai", through[0].InboundTimezoneObservations.Items[0].Value)
 	require.Empty(t, through[0].TimezoneConversions[0].Reason)
 	require.Equal(t, "CN", through[0].TimezoneConversions[0].LocationBefore.Country)
-	require.Equal(t, "Los Angeles", through[0].OutboundTimezoneObservations.Items[0].Location.City)
+	require.Equal(t, "Seattle", through[0].OutboundTimezoneObservations.Items[0].Location.City)
 	through[0].OutboundTimezoneObservations.Items[0].Value = "mutated-through"
 	require.Equal(t, OpenAIRequestTimezone, observer.snapshot(1)[0].OutboundTimezoneObservations.Items[0].Value)
 }
@@ -377,7 +377,7 @@ func TestFingerprintObservationLocationAdditionUsesActualWire(t *testing.T) {
 			require.Equal(t, "mismatched", entry.TimezoneComparisonStatus)
 			require.Equal(t, "San Francisco", entry.OutboundTimezoneObservations.Items[0].Location.City)
 			require.Equal(t, "final_location_differs", entry.TimezoneConversions[0].Reason)
-			require.Equal(t, "Los Angeles", state.Conversions[0].LocationAfter.City)
+			require.Equal(t, "Seattle", state.Conversions[0].LocationAfter.City)
 
 			populateFingerprintObservationTimezones(&entry, state, body, nil)
 			require.NotEqual(t, "matched", entry.TimezoneComparisonStatus)

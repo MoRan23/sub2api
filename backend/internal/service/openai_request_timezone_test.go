@@ -49,7 +49,7 @@ func assertTimezoneTestSearchLocation(t testing.TB, body []byte, path string) {
 	if err := json.Unmarshal([]byte(gjson.GetBytes(body, path).Raw), &got); err != nil {
 		t.Fatalf("invalid location at %s: %v", path, err)
 	}
-	want := map[string]string{"type": "approximate", "country": "US", "region": "California", "city": "Los Angeles", "timezone": "America/Los_Angeles"}
+	want := map[string]string{"type": "approximate", "country": "US", "region": "Washington", "city": "Seattle", "timezone": "America/Los_Angeles"}
 	if len(got) != len(want) {
 		t.Fatalf("location must replace the whole object, got %s", gjson.GetBytes(body, path).Raw)
 	}
@@ -392,10 +392,11 @@ func TestOpenAIRequestTimezoneSearchValidation(t *testing.T) {
 		map[string]any{"type": "web_search", "user_location": []any{"UTC"}},
 		map[string]any{"type": "web_search_preview_2025_03_11", "user_location": map[string]any{"timezone": "UTC"}},
 		map[string]any{"type": "web_search_custom", "user_location": map[string]any{"timezone": "UTC"}},
+		map[string]any{"type": "web_search", "user_location": map[string]any{"type": "approximate", "country": "US", "region": "California", "city": "Los Angeles", "timezone": "America/Los_Angeles"}},
 	}
 	body := timezoneTestBody(t, map[string]any{"tools": tools, "user_location": map[string]any{"timezone": "UTC"}})
 	out, state := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true)
-	for _, i := range []int{0, 1, 2, 3, 5, 6, 7, 8} {
+	for _, i := range []int{0, 1, 2, 3, 5, 6, 7, 8, 10} {
 		assertTimezoneTestSearchLocation(t, out, fmt.Sprintf("tools.%d.user_location", i))
 	}
 	for _, path := range []string{"tools.4", "tools.9", "user_location"} {
@@ -403,11 +404,11 @@ func TestOpenAIRequestTimezoneSearchValidation(t *testing.T) {
 			t.Fatalf("unrelated search field %s changed", path)
 		}
 	}
-	if len(state.Conversions) != 8 {
+	if len(state.Conversions) != 9 {
 		t.Fatalf("wrong reports %+v", state.Conversions)
 	}
 	for _, conversion := range state.Conversions {
-		if conversion.Status != "converted" || conversion.LocationAfter == nil || conversion.LocationAfter.City != "Los Angeles" {
+		if conversion.Status != "converted" || conversion.LocationAfter == nil || conversion.LocationAfter.City != "Seattle" {
 			t.Fatalf("incomplete location conversion: %+v", conversion)
 		}
 	}
@@ -420,7 +421,8 @@ func TestOpenAIRequestTimezoneAlphaSearchLocation(t *testing.T) {
 		status   string
 	}{
 		{name: "valid", location: `{"timezone":"Asia/Shanghai","city":"Shanghai","unknown":9007199254740993}`, status: "converted"},
-		{name: "already target", location: `{"type":"approximate","country":"US","region":"California","city":"Los Angeles","timezone":"America/Los_Angeles"}`, status: "unchanged"},
+		{name: "already target", location: `{"type":"approximate","country":"US","region":"Washington","city":"Seattle","timezone":"America/Los_Angeles"}`, status: "unchanged"},
+		{name: "previous Los Angeles target", location: `{"type":"approximate","country":"US","region":"California","city":"Los Angeles","timezone":"America/Los_Angeles"}`, status: "converted"},
 		{name: "only target timezone", location: `{"timezone":"America/Los_Angeles"}`, status: "converted"},
 		{name: "missing timezone", location: `{"city":"Shanghai"}`, status: "converted"},
 		{name: "null timezone", location: `{"timezone":null}`, status: "converted"},
@@ -723,7 +725,7 @@ func TestOpenAIRequestTimezoneSnapshotDeepCopy(t *testing.T) {
 	if state.Inbound.Items[0].Value != "UTC" || state.Conversions[0].Output != OpenAIRequestTimezone || state.preparedBody[0] != '{' || state.patches[0].prepared == "changed" {
 		t.Fatal("snapshot alias escaped")
 	}
-	if state.Inbound.Items[1].Location.City != "London" || state.Conversions[1].LocationBefore.City != "London" || state.Conversions[1].LocationAfter.City != "Los Angeles" {
+	if state.Inbound.Items[1].Location.City != "London" || state.Conversions[1].LocationBefore.City != "London" || state.Conversions[1].LocationAfter.City != "Seattle" {
 		t.Fatal("location observation alias escaped")
 	}
 }

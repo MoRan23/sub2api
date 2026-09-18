@@ -98,7 +98,7 @@ describe('FingerprintObservationRequestDetails', () => {
 
   it('shows all five actual location fields and the replaced before/after objects only when expanded', async () => {
     const before = { type: 'approximate', country: 'CN', region: 'Guangdong', city: 'Shenzhen', timezone: 'Asia/Shanghai' }
-    const after = { type: 'approximate', country: 'US', region: 'California', city: 'Los Angeles', timezone: 'America/Los_Angeles' }
+    const after = { type: 'approximate', country: 'US', region: 'Washington', city: 'Seattle', timezone: 'America/Los_Angeles' }
     renderDetails({
       inbound_timezone_observations: { scan_status: 'complete', items: [
         { source: 'web_search', path: 'tools.0.user_location.timezone', value: before.timezone, current: false, status: 'valid', location: before },
@@ -113,7 +113,7 @@ describe('FingerprintObservationRequestDetails', () => {
       }],
     })
     expect(screen.queryByText('Shenzhen')).toBeNull()
-    expect(screen.queryByText('Los Angeles')).toBeNull()
+    expect(screen.queryByText('Seattle')).toBeNull()
 
     const report = await openDetails()
     const inbound = screen.getByRole('region', { name: 'Client inbound declarations' })
@@ -137,7 +137,7 @@ describe('FingerprintObservationRequestDetails', () => {
       expect(cells[2]!.querySelector(`[data-location-field="${field}"]`)?.textContent).toBe(value)
     }
     expect(within(row).getByTestId('search-location-action').textContent).toContain('Location replaced')
-    expect(within(cells[1]!).queryByText('Los Angeles')).toBeNull()
+    expect(within(cells[1]!).queryByText('Seattle')).toBeNull()
     expect(within(cells[2]!).queryByText('Shenzhen')).toBeNull()
   })
 
