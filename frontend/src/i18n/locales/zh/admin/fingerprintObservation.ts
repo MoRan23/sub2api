@@ -21,7 +21,8 @@ export default {
       multipleTurns: '多个 turn（{count}）', metricBatch: '指标批次（{count} 个 turn）',
       eventCount: '{count} 个事件 / 指标名', details: '身份与发送详情', eventNames: '事件 / 指标名称',
       aggregateIdentityHint: '指标由多个请求汇总，此批次不归属于某一个 session、thread 或 turn。',
-      fields: { session_id: '会话', thread_id: '线程', turn_id: 'Turn', parent_thread_id: '父线程', parent_turn_id: '父 Turn', root_turn_id: '根 Turn', attempt_id: '请求尝试 ID', attempt_count: '请求尝试次数', user_agent: 'User-Agent', originator: 'Originator', version: '客户端版本', updated_at: '更新时间' },
+      worktreeUnknown: '未知', worktreeNotCollected: '未采集',
+      fields: { session_id: '会话', thread_id: '线程', turn_id: 'Turn', parent_thread_id: '父线程', parent_turn_id: '父 Turn', root_turn_id: '根 Turn', attempt_id: '请求尝试 ID', attempt_count: '请求尝试次数', user_agent: 'User-Agent', originator: 'Originator', version: '客户端版本', updated_at: '更新时间', is_worktree: '工作树状态' },
     },
     contextManagement: {
       title: 'PAT 上下文管理',
@@ -93,6 +94,17 @@ export default {
     expandUnthreaded: '展开未归属线程的观测',
     collapseUnthreaded: '收起未归属线程的观测',
     request: {
+      outboundMetadata: {
+        title: '请求与工具元数据',
+        sourceHint: '读取最终出站请求头、正文或 WS 帧中的实际字段；缺失字段不从入站内容补齐。',
+        fields: { request_kind: '请求用途', history_ingest_requested: '请求历史导入', compaction: '压缩信息', tool_namespaces_info: '工具命名空间' },
+        status: { not_collected: '未采集', missing: '未提供', valid: '已记录', invalid: '无法解析', truncated: '已截断' },
+        compactionFields: { trigger: '触发方式', reason: '原因', implementation: '实现', phase: '阶段', strategy: '策略' },
+        toolCounts: '{namespaces} 个命名空间 · {functions} 个函数',
+        toolFields: { namespace: '命名空间键', function: '函数键', name: '名称', direct: '直接调用', deferred: '延迟加载', code_mode_name: '代码模式名称', source: '工具来源', server_name: 'MCP 服务名称' },
+        truncatedHint: '仅保留最多 64 个命名空间、合计 256 个函数，名称字段最多 256 个字符；此清单不完整。',
+        noNamespaces: '已提供空工具命名空间清单', noFunctions: '此命名空间没有函数', functionsNotRecorded: '未记录函数；清单已截断，无法判断是否为空',
+      },
       conversionCheck: {
         title: 'Chat 转换检查',
         description: '检查原始 Chat 请求与转换后的 Responses 请求的关键语义，不代表所有字段均已检查或转换完全无损。',

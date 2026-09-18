@@ -12,6 +12,7 @@ export interface CodexTelemetryEntry {
   type: CodexTelemetryType
   status: CodexTelemetryStatus
   event_names: string[]
+  is_worktree?: boolean | null
   contains_simulated: boolean
   attempt_id: number
   attempt_count: number

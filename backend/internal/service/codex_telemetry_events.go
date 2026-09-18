@@ -86,7 +86,8 @@ func codexThreadInitialized(profile codexTelemetryProfile, spec codexThreadSpec)
 	params := map[string]any{
 		"app_server_client": appServer, "created_at": profile.started.Unix(),
 		"ephemeral": spec.ephemeral, "forked_from_thread_id": spec.forkedFromID, "initialization_mode": "new",
-		"model": spec.model, "parent_thread_id": spec.parentThreadID, "runtime": codexRuntime(profile),
+		"is_worktree": nil,
+		"model":       spec.model, "parent_thread_id": spec.parentThreadID, "runtime": codexRuntime(profile),
 		"session_id": spec.sessionID, "subagent_source": spec.subagentSource, "thread_id": spec.threadID,
 		"thread_source": codexOptionalString(spec.source),
 	}

@@ -199,7 +199,18 @@ function detailFields(entry: CodexTelemetryEntry): Array<{ key: string; value: s
   const keys = entry.type === 'metrics'
     ? ['attempt_count', 'user_agent', 'originator', 'version', 'updated_at'] as const
     : ['session_id', 'thread_id', 'turn_id', 'parent_thread_id', 'parent_turn_id', 'root_turn_id', 'attempt_id', 'attempt_count', 'user_agent', 'originator', 'version', 'updated_at'] as const
-  return keys.map((key) => ({ key, value: key === 'updated_at' ? formatTime(entry[key]) : entry[key] }))
+  const fields: Array<{ key: string; value: string | number }> = keys.map((key) => ({ key, value: key === 'updated_at' ? formatTime(entry[key]) : entry[key] }))
+  if (entry.type === 'analytics' && entry.event_names.includes('codex_thread_initialized')) {
+    fields.push({
+      key: 'is_worktree',
+      value: entry.is_worktree === undefined
+        ? t('admin.fingerprintObservation.telemetry.worktreeNotCollected')
+        : entry.is_worktree === null
+          ? t('admin.fingerprintObservation.telemetry.worktreeUnknown')
+          : String(entry.is_worktree),
+    })
+  }
+  return fields
 }
 function formatTime(value: string): string {
   const date = new Date(value)

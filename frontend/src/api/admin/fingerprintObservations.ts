@@ -82,6 +82,29 @@ export interface RequestConversionCheck {
   issues?: Array<{ path: string; reason: string }>
 }
 
+export type CodexMetadataStatus = 'missing' | 'valid' | 'invalid' | 'truncated'
+
+export interface CodexCompactionMetadata {
+  trigger: string
+  reason: string
+  implementation: string
+  phase: string
+  strategy: string
+}
+
+export interface CodexToolNamespaceMetadata {
+  namespace: string
+  name: string
+  functions: Array<{
+    function: string
+    name: string
+    direct: boolean
+    deferred: boolean
+    code_mode_name?: string
+    source: { kind: 'harness' | 'mcp'; server_name?: string }
+  }>
+}
+
 export interface FingerprintObservationEntry {
   sequence_id: number
   timestamp: string
@@ -118,6 +141,11 @@ export interface FingerprintObservationEntry {
   node_repl_auto_review_required?: boolean
   node_repl_disabled?: boolean
   workspaces?: string[]
+  request_kind?: 'turn' | 'prewarm' | 'compaction' | 'memory'
+  history_ingest_requested?: boolean
+  compaction?: CodexCompactionMetadata
+  tool_namespaces_info?: CodexToolNamespaceMetadata[]
+  metadata_status?: Record<'request_kind' | 'history_ingest_requested' | 'compaction' | 'tool_namespaces_info', CodexMetadataStatus>
   daily_fixed_root_enabled: boolean
   daily_fixed_root_kind?: 'stream' | 'sync'
   daily_fixed_root_business_date?: string

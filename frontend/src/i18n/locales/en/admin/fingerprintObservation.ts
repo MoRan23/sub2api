@@ -22,7 +22,8 @@ export default {
       multipleTurns: 'Multiple turns ({count})', metricBatch: 'Metric batch ({count} turns)',
       eventCount: '{count} event / metric names', details: 'Identity and delivery details', eventNames: 'Event / metric names',
       aggregateIdentityHint: 'Metrics are aggregated across requests. This batch is not attributed to a single session, thread, or turn.',
-      fields: { session_id: 'Session', thread_id: 'Thread', turn_id: 'Turn', parent_thread_id: 'Parent thread', parent_turn_id: 'Parent turn', root_turn_id: 'Root turn', attempt_id: 'Request attempt ID', attempt_count: 'Request attempts', user_agent: 'User-Agent', originator: 'Originator', version: 'Client version', updated_at: 'Last updated' },
+      worktreeUnknown: 'Unknown', worktreeNotCollected: 'Not collected',
+      fields: { session_id: 'Session', thread_id: 'Thread', turn_id: 'Turn', parent_thread_id: 'Parent thread', parent_turn_id: 'Parent turn', root_turn_id: 'Root turn', attempt_id: 'Request attempt ID', attempt_count: 'Request attempts', user_agent: 'User-Agent', originator: 'Originator', version: 'Client version', updated_at: 'Last updated', is_worktree: 'Worktree status' },
     },
     contextManagement: {
       title: 'PAT context management',
@@ -94,6 +95,17 @@ export default {
     expandUnthreaded: 'Expand unthreaded observations',
     collapseUnthreaded: 'Collapse unthreaded observations',
     request: {
+      outboundMetadata: {
+        title: 'Request and tool metadata',
+        sourceHint: 'Reads actual fields from the final outbound headers, body, or WS frame. Missing fields are not filled from inbound content.',
+        fields: { request_kind: 'Request kind', history_ingest_requested: 'History ingest requested', compaction: 'Compaction', tool_namespaces_info: 'Tool namespaces' },
+        status: { not_collected: 'Not collected', missing: 'Not provided', valid: 'Recorded', invalid: 'Unable to parse', truncated: 'Truncated' },
+        compactionFields: { trigger: 'Trigger', reason: 'Reason', implementation: 'Implementation', phase: 'Phase', strategy: 'Strategy' },
+        toolCounts: '{namespaces} namespaces · {functions} functions',
+        toolFields: { namespace: 'Namespace key', function: 'Function key', name: 'Name', direct: 'Direct', deferred: 'Deferred', code_mode_name: 'Code mode name', source: 'Tool source', server_name: 'MCP server name' },
+        truncatedHint: 'Retains at most 64 namespaces and 256 functions in total; name fields are limited to 256 characters. This list is incomplete.',
+        noNamespaces: 'An empty tool namespace list was provided', noFunctions: 'No functions in this namespace', functionsNotRecorded: 'No functions recorded; the truncated list cannot confirm whether this namespace is empty',
+      },
       conversionCheck: {
         title: 'Chat conversion check',
         description: 'Checks key semantics of the original Chat request against the converted Responses request; this is not a full-field or lossless check.',

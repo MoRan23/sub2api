@@ -1,6 +1,9 @@
 package service
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type CodexTelemetryObservationQuery struct {
 	AccountID int64
@@ -59,6 +62,9 @@ type CodexTelemetryObservation struct {
 	Version           string    `json:"version"`
 	HTTPStatus        int       `json:"http_status"`
 	Error             string    `json:"error"`
+	// A missing field means no thread-initialization state was collected. An
+	// explicit JSON null records unknown client worktree state, never host state.
+	IsWorktree json.RawMessage `json:"is_worktree,omitempty"`
 }
 
 func (s *CodexTelemetryService) Observations(query CodexTelemetryObservationQuery) CodexTelemetryObservationSnapshot {
@@ -96,6 +102,7 @@ func (s *CodexTelemetryService) Observations(query CodexTelemetryObservationQuer
 		if result.Total >= offset && len(result.Items) < query.PageSize {
 			copyEntry := *entry
 			copyEntry.EventNames = append([]string{}, entry.EventNames...)
+			copyEntry.IsWorktree = append(json.RawMessage(nil), entry.IsWorktree...)
 			result.Items = append(result.Items, copyEntry)
 		}
 		result.Total++

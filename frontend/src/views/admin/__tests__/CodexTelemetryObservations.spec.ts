@@ -86,7 +86,7 @@ describe('CodexTelemetryObservations', () => {
   })
 
   it('labels metrics as aggregated and never shows a single-turn identity even if one is supplied', async () => {
-    list.mockResolvedValue(response({ items: [{ ...entry, type: 'metrics', turn_count: 3 }] }))
+    list.mockResolvedValue(response({ items: [{ ...entry, type: 'metrics', turn_count: 3, event_names: ['codex_thread_initialized'], is_worktree: null }] }))
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.text()).toContain('多个 turn（3）')
@@ -94,6 +94,31 @@ describe('CodexTelemetryObservations', () => {
     expect(wrapper.text()).toContain('此批次不归属于某一个 session')
     expect(wrapper.text()).not.toContain(entry.session_id)
     expect(wrapper.text()).not.toContain(entry.turn_id)
+    expect(wrapper.text()).not.toContain('工作树状态')
+  })
+
+  it.each([
+    ['zh', null, '工作树状态', '未知'],
+    ['zh', undefined, '工作树状态', '未采集'],
+    ['en', null, 'Worktree status', 'Unknown'],
+    ['en', undefined, 'Worktree status', 'Not collected'],
+  ] as const)('distinguishes unknown worktree from legacy missing values (%s, %s)', async (locale, worktree, label, expected) => {
+    list.mockResolvedValue(response({ items: [{ ...entry, event_names: ['codex_thread_initialized', 'codex_turn_event'], ...(worktree === undefined ? {} : { is_worktree: worktree }) }] }))
+    const wrapper = mountPanel(locale)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain(label)
+    await expand(wrapper)
+    const field = wrapper.findAll('dl > div').find(field => field.get('dt').text() === label)
+    expect(field?.get('dd').text()).toBe(expected)
+    expect(wrapper.text()).not.toContain('admin.fingerprintObservation')
+  })
+
+  it('does not attach a worktree state to analytics without thread initialization', async () => {
+    list.mockResolvedValue(response({ items: [{ ...entry, is_worktree: null }] }))
+    const wrapper = mountPanel()
+    await flushPromises()
+    await expand(wrapper)
+    expect(wrapper.text()).not.toContain('工作树状态')
   })
 
   it('shows configured and effective state separately when the environment forces it off', async () => {

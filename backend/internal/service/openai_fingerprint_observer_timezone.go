@@ -64,6 +64,7 @@ func fingerprintObservationSafeTurnMetadata(value string) string {
 			}
 		}
 	}
+	copyFingerprintObservationSafeMetadata(safe, metadata)
 	encoded, _ := json.Marshal(safe)
 	return string(encoded)
 }
@@ -83,6 +84,7 @@ func cloneFingerprintTimezoneScan(scan *TimezoneScanResult) *TimezoneScanResult 
 }
 
 func cloneFingerprintObservationEntry(entry FingerprintObservationEntry) FingerprintObservationEntry {
+	cloneFingerprintObservationMetadata(&entry)
 	entry.RequestIntegrity = CloneRequestIntegrityObservation(entry.RequestIntegrity)
 	entry.ConversionCheck = cloneOpenAIChatConversionCheck(entry.ConversionCheck)
 	entry.InboundTimezoneObservations = cloneFingerprintTimezoneScan(entry.InboundTimezoneObservations)

@@ -70,6 +70,11 @@ type FingerprintObservationEntry struct {
 	NodeREPLAutoReviewRequired   *bool                          `json:"node_repl_auto_review_required,omitempty"`
 	NodeREPLDisabled             *bool                          `json:"node_repl_disabled,omitempty"`
 	Workspaces                   []string                       `json:"workspaces,omitempty"`
+	RequestKind                  CodexWireRequestKind           `json:"request_kind,omitempty"`
+	HistoryIngestRequested       *bool                          `json:"history_ingest_requested,omitempty"`
+	Compaction                   *CodexCompactionTurnMetadata   `json:"compaction,omitempty"`
+	ToolNamespacesInfo           []FingerprintToolNamespace     `json:"tool_namespaces_info,omitempty"`
+	MetadataStatus               *FingerprintMetadataStatus     `json:"metadata_status,omitempty"`
 	DailyFixedRootEnabled        bool                           `json:"daily_fixed_root_enabled"`
 	DailyFixedRootKind           string                         `json:"daily_fixed_root_kind,omitempty"`
 	DailyFixedRootBusinessDate   string                         `json:"daily_fixed_root_business_date,omitempty"`
@@ -653,6 +658,7 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 		ClientReportedInstallationID: pin.ClientID,
 		OutboundInstallationID:       pin.OutboundID,
 	}
+	populateFingerprintObservationMetadata(&entry, outbound, body)
 	if !pin.Enabled {
 		// Without installation pinning the client-reported value is forwarded
 		// unchanged, including body-only client_metadata values. Preserve the old
@@ -956,7 +962,7 @@ func freezeFingerprintObservationWSHandshake(c *gin.Context, account *Account) f
 	if account == nil || (account.Platform != PlatformOpenAI && !account.UsesOpenAICodexProtocol()) {
 		return nil
 	}
-	identity, trusted := fingerprintObservationOutboundIdentityFromContext(c)
+	identity, trusted := fingerprintObservationTrustedIdentity(c, account)
 	pin := installationIDResolutionFromContext(c, account)
 	if !usesOpenAICodexIdentityProtocol(account) {
 		identity = OpenAICodexTurnIdentity{}
@@ -964,7 +970,10 @@ func freezeFingerprintObservationWSHandshake(c *gin.Context, account *Account) f
 		pin = installationIDResolution{}
 	}
 	base := buildFingerprintObservationEntry(c, account, pin, nil, nil, identity, trusted, true)
-	safeAccount := Account{ID: account.ID, Name: account.Name}
+	// Keep only immutable attribution and protocol classification. Without the
+	// latter the background recorder mistakes a Codex account for a different
+	// protocol and clears the already validated outbound identity.
+	safeAccount := Account{ID: account.ID, Name: account.Name, Platform: account.Platform, Type: account.Type}
 	return func(headers http.Header) {
 		if globalFingerprintObserver == nil || !globalFingerprintObserver.enabled.Load() {
 			return

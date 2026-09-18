@@ -77,6 +77,7 @@
             <dd class="mt-1 break-all font-mono text-gray-800 dark:text-gray-200">{{ item.value || '—' }}</dd>
           </div>
         </dl>
+        <CodexOutboundMetadataDetails :observation="observation" class="mt-3" />
       </section>
 
       <div class="grid gap-3 lg:grid-cols-2">
@@ -160,6 +161,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { FingerprintObservationEntry, RequestEnvironmentSource, RequestTimezoneObservation, RequestTimezoneScan, RequestTimezoneSource } from '@/api/admin/fingerprintObservations'
 import SearchLocationDetails from './SearchLocationDetails.vue'
+import CodexOutboundMetadataDetails from './CodexOutboundMetadataDetails.vue'
 
 const props = defineProps<{ observation: FingerprintObservationEntry }>()
 const { t, te, locale } = useI18n()

@@ -31,6 +31,12 @@ func (s *CodexTelemetryService) enqueueAnalyticsLocked(profile codexTelemetryPro
 		}
 	}
 	entry := s.newObservationLocked(profile, attemptID, "analytics", names, 1)
+	for _, event := range events {
+		if value, present := event.EventParams["is_worktree"]; event.EventType == "codex_thread_initialized" && present && value == nil {
+			entry.IsWorktree = json.RawMessage("null")
+			break
+		}
+	}
 	s.enqueueLocked(codexTelemetryJob{profile: profile, body: body, epoch: s.epoch, entry: entry})
 }
 
