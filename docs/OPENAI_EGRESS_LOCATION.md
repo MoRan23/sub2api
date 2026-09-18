@@ -6,15 +6,19 @@ OpenAI OAuth 的环境时区和搜索工具位置使用账号本次发送路由�
 
 出口 IP 通过账号代理访问已有探测地址获得，支持完整 IPv4 和 IPv6。地理查询由服务实例直连，查询参数是已探测到的明确 IP；不使用代理主机地址或客户端 IP。
 
-可选配置采用 ip-api JSON 响应协议：
+默认使用 IPinfo 旧版公开 JSON 接口，不需要 token。按已发现的完整出口 IP 查询，不使用查询服务看到的本机 IP：
 
 ```yaml
 security:
   proxy_probe:
-    geo_lookup_url: "http://ip-api.com/json/{ip}?lang=en"
+    geo_lookup_url: "https://ipinfo.io/{ip}/json"
 ```
 
-`{ip}` 必须在路径或查询参数中出现一次。查询强制使用英文地区和城市，校验返回 IP、国家代码、完整城市地区以及 IANA 时区。查询有 5 秒超时、响应大小限制和限流冷却；不会跟随重定向。原有 `security.proxy_probe.urls` 继续用于发现出口 IP。
+`{ip}` 必须在路径或查询参数中出现一次。IPinfo 的 `ip`、`country`（两位国家代码）、`region`、`city`、`timezone` 映射为完整地域；国家英文名称由国家代码转换，不额外联网查询。校验返回 IP、国家代码、完整城市地区以及 IANA 时区。查询有 5 秒超时、响应大小限制和限流冷却；不会跟随重定向，也不会把缺失字段拼接到其他来源的地域。
+
+保留显式配置的查询 URL，兼容原有 ip-api JSON 响应结构。若旧部署已经写入 `geo_lookup_url: "http://ip-api.com/json/{ip}?lang=en"`，需改为上述 IPinfo 地址或删除该项以采用新默认值。原有 `security.proxy_probe.urls` 只负责发现出口 IP，其附带的城市不作为最终地域；即使探测接口返回 Portland，地域仍按 IPinfo 对该出口 IP 的查询结果决定。
+
+匿名接口受服务方额度和可用性限制。遇到 HTTP 429 时遵守 `Retry-After` 并进入共享冷却，不自动切换到其他地域数据库。查询失败继续使用下述缓存或 Seattle 兜底，保持代理连通状态与地域查询状态分离。
 
 ## 缓存与回退
 

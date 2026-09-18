@@ -847,7 +847,7 @@ type ProxyFallbackConfig struct {
 }
 
 // DefaultProxyProbeGeoLookupURL is the direct lookup endpoint for an observed exit IP.
-const DefaultProxyProbeGeoLookupURL = "http://ip-api.com/json/{ip}?lang=en"
+const DefaultProxyProbeGeoLookupURL = "https://ipinfo.io/{ip}/json"
 
 type ProxyProbeConfig struct {
 	InsecureSkipVerify bool `mapstructure:"insecure_skip_verify"` // 已禁用：禁止跳过 TLS 证书验证
@@ -857,6 +857,7 @@ type ProxyProbeConfig struct {
 	URLs []ProbeURLConfig `mapstructure:"urls"`
 	// GeoLookupURL 按探测到的出口 IP 查询英文地理信息，路径或查询参数中必须包含一个 {ip} 占位符。
 	// 查询由服务器直连发出，超时为 5 秒，不经过被测代理。
+	// 默认使用无需 token 的 IPinfo 旧版公开接口；兼容显式配置的 ip-api 响应格式。
 	GeoLookupURL string `mapstructure:"geo_lookup_url"`
 }
 

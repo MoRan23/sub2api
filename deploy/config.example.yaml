@@ -200,9 +200,11 @@ security:
     # Query English geo data for the discovered exit IP with a 5-second timeout.
     # The server connects directly for this lookup, without using the tested proxy.
     # Requires exactly one {ip} placeholder in the path or query; custom probe URLs above remain unchanged.
+    # Defaults to the token-free legacy IPinfo API; explicit ip-api-compatible URLs remain supported.
     # 按已探测到的出口 IP 查询英文地理信息，超时 5 秒；由服务器直连，不经过被测代理。
     # 路径或查询参数中必须包含一个 {ip} 占位符；上面的自定义探测 URL 不受影响。
-    geo_lookup_url: "http://ip-api.com/json/{ip}?lang=en"
+    # 默认使用无需 token 的 IPinfo 旧版公开接口；仍兼容显式配置的 ip-api 格式接口。
+    geo_lookup_url: "https://ipinfo.io/{ip}/json"
   proxy_fallback:
     # Allow auxiliary services (update check, pricing data) to fallback to direct
     # connection when proxy initialization fails. Does NOT affect AI gateway connections.

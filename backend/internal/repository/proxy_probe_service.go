@@ -19,6 +19,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"golang.org/x/text/language"
+	"golang.org/x/text/language/display"
 )
 
 func NewProxyExitInfoProber(cfg *config.Config) service.ProxyExitInfoProber {
@@ -228,6 +230,56 @@ func (s *proxyProbeService) parseIPify(body []byte, latencyMs int64) (*service.P
 	}, latencyMs, nil
 }
 
+// parseGeoResponse accepts the legacy IPinfo schema and preserves explicitly
+// configured ip-api-compatible endpoints. Never merge fields between providers.
+func (s *proxyProbeService) parseGeoResponse(body []byte) (*service.ProxyExitInfo, error) {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil || envelope == nil {
+		return nil, errors.New("invalid geo response")
+	}
+	_, hasIP := envelope["ip"]
+	_, hasQuery := envelope["query"]
+	_, hasStatus := envelope["status"]
+	if hasIP && !hasQuery && !hasStatus {
+		return parseIPinfoGeo(body)
+	}
+	if !hasIP && (hasQuery || hasStatus) {
+		info, _, err := s.parseIPAPI(body, 0)
+		return info, err
+	}
+	return nil, errors.New("unrecognized geo response")
+}
+
+func parseIPinfoGeo(body []byte) (*service.ProxyExitInfo, error) {
+	var result struct {
+		IP       string          `json:"ip"`
+		Country  string          `json:"country"`
+		Region   string          `json:"region"`
+		City     string          `json:"city"`
+		Timezone string          `json:"timezone"`
+		Bogon    bool            `json:"bogon"`
+		Error    json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil || result.Bogon || (len(result.Error) != 0 && string(result.Error) != "null") {
+		return nil, errors.New("invalid ipinfo response")
+	}
+	ip, err := canonicalProxyExitIP(result.IP)
+	if err != nil {
+		return nil, err
+	}
+	code := strings.ToUpper(strings.TrimSpace(result.Country))
+	var country string
+	if len(code) == 2 {
+		if region, err := language.ParseRegion(code); err == nil && region.IsCountry() {
+			country = display.English.Regions().Name(region)
+		}
+	}
+	return &service.ProxyExitInfo{
+		IP: ip, Country: country, CountryCode: code,
+		Region: result.Region, City: result.City, Timezone: result.Timezone,
+	}, nil
+}
+
 // parseChatGPTTrace 解析 Cloudflare trace 端点（如 chatgpt.com/cdn-cgi/trace）的纯文本响应。
 // 响应按行给出键值对，其中 ip= 为出口 IP，loc= 为国家代码。
 func (s *proxyProbeService) parseChatGPTTrace(body []byte, latencyMs int64) (*service.ProxyExitInfo, int64, error) {
@@ -308,9 +360,14 @@ func (s *proxyProbeService) enrichExitInfo(ctx context.Context, info *service.Pr
 		info.GeoReason = "invalid_lookup_url"
 		return
 	}
-	query := endpoint.Query()
-	query.Set("lang", "en")
-	endpoint.RawQuery = query.Encode()
+	// The legacy IPinfo endpoint returns English location names without a
+	// language parameter. Keep the existing English override for custom/ip-api
+	// endpoints, including deployments that still explicitly configure ip-api.
+	if !strings.EqualFold(endpoint.Hostname(), "ipinfo.io") {
+		query := endpoint.Query()
+		query.Set("lang", "en")
+		endpoint.RawQuery = query.Encode()
+	}
 	client, err := httpclient.GetClient(httpclient.Options{
 		Timeout: defaultProxyGeoTimeout, ValidateResolvedIP: s.validateResolvedIP, AllowPrivateHosts: s.allowPrivateHosts,
 	})
@@ -350,7 +407,7 @@ func (s *proxyProbeService) enrichExitInfo(ctx context.Context, info *service.Pr
 		info.GeoReason = "response_too_large"
 		return
 	}
-	geo, _, err := s.parseIPAPI(body, 0)
+	geo, err := s.parseGeoResponse(body)
 	if err != nil {
 		info.GeoReason = "invalid_response"
 		return
