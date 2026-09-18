@@ -37,6 +37,9 @@ func TestOpenAIEnvironmentTimezoneTextKinds(t *testing.T) {
 			require.Equal(t, "complete", summary.ScanStatus)
 			require.Empty(t, summary.Reason)
 			require.Equal(t, len(tc.text), summary.ScannedBytes)
+			require.Equal(t, "decoded_text_utf8", summary.LocationBasis)
+			require.Zero(t, summary.UnscannedBytes)
+			require.Equal(t, summary.MentionCount-len(summary.Matches), summary.OmittedMatchCount)
 			got := map[string]int{}
 			total := 0
 			for _, mention := range summary.Mentions {
@@ -102,6 +105,9 @@ func TestOpenAIEnvironmentTimezoneTextScanLimits(t *testing.T) {
 		require.Less(t, summary.ScannedBytes, len(text))
 		require.Zero(t, summary.MentionCount)
 		require.Empty(t, summary.Mentions)
+		require.Equal(t, len(text)-summary.ScannedBytes, summary.UnscannedBytes)
+		require.Positive(t, summary.UnscannedBytes)
+		require.Zero(t, summary.OmittedMatchCount)
 	})
 	for _, prefix := range []string{"UTC", "UTC+08"} {
 		t.Run("truncated token after "+prefix, func(t *testing.T) {
@@ -127,6 +133,9 @@ func TestOpenAIEnvironmentTimezoneTextScanLimits(t *testing.T) {
 		require.Equal(t, "complete", summary.ScanStatus)
 		require.Equal(t, len(text), summary.ScannedBytes)
 		require.Equal(t, openAIEnvironmentTimezoneMatchLimit, summary.MentionCount)
+		require.Len(t, summary.Matches, openAIEnvironmentTimezoneDetailLimit)
+		require.Equal(t, openAIEnvironmentTimezoneMatchLimit-openAIEnvironmentTimezoneDetailLimit, summary.OmittedMatchCount)
+		require.Zero(t, summary.UnscannedBytes)
 	})
 	t.Run("extra match marks summary limited", func(t *testing.T) {
 		text := strings.Repeat("UTC ", openAIEnvironmentTimezoneMatchLimit+1)
@@ -138,6 +147,10 @@ func TestOpenAIEnvironmentTimezoneTextScanLimits(t *testing.T) {
 		require.Len(t, summary.Mentions, 1)
 		require.Equal(t, "utc_or_gmt", summary.Mentions[0].Kind)
 		require.Equal(t, openAIEnvironmentTimezoneMatchLimit, summary.Mentions[0].Count)
+		require.Len(t, summary.Matches, openAIEnvironmentTimezoneDetailLimit)
+		require.Equal(t, openAIEnvironmentTimezoneMatchLimit-openAIEnvironmentTimezoneDetailLimit, summary.OmittedMatchCount)
+		require.Equal(t, len(text)-summary.ScannedBytes, summary.UnscannedBytes)
+		require.Positive(t, summary.UnscannedBytes)
 	})
 }
 
@@ -148,16 +161,17 @@ func TestOpenAIEnvironmentTimezoneTextSummaryDoesNotLeak(t *testing.T) {
 	summary := buildOpenAIEnvironmentTimezoneText(text)
 	encoded, err := json.Marshal(summary)
 	require.NoError(t, err)
-	for _, forbidden := range []string{secret, "<environment_context>", "/private/", "Asia/Shanghai", "America/Los_Angeles", "Europe/", "UTC+08:00"} {
+	for _, forbidden := range []string{secret, "<environment_context>", "/private/", "Europe/" + secret} {
 		require.NotContains(t, string(encoded), forbidden)
 	}
 	allowedKinds := map[string]bool{"asia_shanghai": true, "america_los_angeles": true, "utc_or_gmt": true, "other_iana_candidate": true, "utc_offset_candidate": true, "timezone_marker": true}
 	var fields map[string]any
 	require.NoError(t, json.Unmarshal(encoded, &fields))
-	require.Len(t, fields, 4)
+	require.Len(t, fields, 11)
 	require.Equal(t, "complete", fields["scan_status"])
+	require.Equal(t, "decoded_text_utf8", fields["location_basis"])
 	require.NotContains(t, fields, "reason", "complete scans omit the empty reason")
-	for _, field := range []string{"scanned_bytes", "mention_count"} {
+	for _, field := range []string{"scanned_bytes", "mention_count", "omitted_match_count", "unscanned_bytes", "timezone_tag_open_count", "timezone_tag_close_count"} {
 		require.IsType(t, float64(0), fields[field])
 	}
 	for _, raw := range fields["mentions"].([]any) {
@@ -168,6 +182,13 @@ func TestOpenAIEnvironmentTimezoneTextSummaryDoesNotLeak(t *testing.T) {
 			require.IsType(t, float64(0), mention[field])
 		}
 	}
+	require.Equal(t, map[string]int{"timezone": 2, "time_zone": 0, "utc_offset": 0, "时区": 0}, summary.MarkerCounts)
+	decoded := gjson.ParseBytes(encoded)
+	for kind, token := range map[string]string{"asia_shanghai": "Asia/Shanghai", "america_los_angeles": "America/Los_Angeles", "utc_offset_candidate": "UTC+08:00"} {
+		require.Equal(t, token, decoded.Get("matches.#(kind==\""+kind+"\").token").String())
+	}
+	require.Equal(t, "invalid_iana", decoded.Get("matches.#(kind==\"other_iana_candidate\").value_status").String())
+	require.Empty(t, decoded.Get("matches.#(kind==\"other_iana_candidate\").token").String())
 }
 
 func TestOpenAIEnvironmentTimezoneTextIncompleteStructuredLog(t *testing.T) {
@@ -183,7 +204,7 @@ func TestOpenAIEnvironmentTimezoneTextIncompleteStructuredLog(t *testing.T) {
 	core := zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()), zapcore.AddSync(&output), zap.InfoLevel)
 	ctx := logger.IntoContext(context.Background(), zap.New(core))
 	logOpenAIEnvironmentMetadataTrace(ctx, 1467, "ingress_before_timezone", body, state)
-	for _, forbidden := range []string{secret, "D:\\Code\\sub2api", "Asia/Shanghai", "<private>"} {
+	for _, forbidden := range []string{secret, "sub2api", "<private>"} {
 		require.NotContains(t, output.String(), forbidden)
 	}
 	item := gjson.Parse(output.String()).Get("metadata_trace.items.0")
@@ -194,7 +215,20 @@ func TestOpenAIEnvironmentTimezoneTextIncompleteStructuredLog(t *testing.T) {
 	require.Equal(t, "complete", summary.Get("scan_status").String())
 	require.EqualValues(t, len(text), summary.Get("scanned_bytes").Int())
 	require.Equal(t, int64(1), summary.Get("mentions.#(kind==\"asia_shanghai\").count").Int())
-	require.Positive(t, summary.Get("mentions.#(kind==\"timezone_marker\").count").Int())
+	require.Equal(t, int64(2), summary.Get("mentions.#(kind==\"timezone_marker\").count").Int())
+	require.Equal(t, int64(2), summary.Get("marker_counts.timezone").Int())
+	require.Len(t, summary.Get("matches").Array(), 3)
+	require.Equal(t, "timezone", summary.Get("matches.0.token").String())
+	require.Equal(t, "xml_open_tag", summary.Get("matches.0.syntax").String())
+	require.Equal(t, "Asia/Shanghai", summary.Get("matches.1.token").String())
+	require.Equal(t, "valid_timezone", summary.Get("matches.1.value_status").String())
+	require.Equal(t, "xml_value", summary.Get("matches.1.syntax").String())
+	require.Equal(t, "timezone", summary.Get("matches.2.token").String())
+	require.Equal(t, "xml_close_tag", summary.Get("matches.2.syntax").String())
+	require.Equal(t, int64(1), summary.Get("timezone_tag_open_count").Int())
+	require.Equal(t, int64(1), summary.Get("timezone_tag_close_count").Int())
+	require.Zero(t, summary.Get("omitted_match_count").Int())
+	require.Zero(t, summary.Get("unscanned_bytes").Int())
 	require.Equal(t, beforeBody, body)
 	afterState, err := json.Marshal(state)
 	require.NoError(t, err)
@@ -242,5 +276,8 @@ func TestOpenAIEnvironmentTimezoneTextReferenceStructuredLog(t *testing.T) {
 	require.Equal(t, int64(1), mention.Get("quoted_line_count").Int())
 	require.Zero(t, mention.Get("fenced_line_count").Int())
 	require.Zero(t, mention.Get("other_line_count").Int())
-	require.NotContains(t, output.String(), "America/Los_Angeles")
+	detail := item.Get("timezone_text.matches.#(kind==\"america_los_angeles\")")
+	require.Equal(t, "America/Los_Angeles", detail.Get("token").String())
+	require.Equal(t, "valid_timezone", detail.Get("value_status").String())
+	require.Equal(t, int64(1), detail.Get("quote_depth").Int())
 }

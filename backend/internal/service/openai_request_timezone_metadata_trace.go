@@ -22,6 +22,7 @@ const (
 )
 
 type openAIEnvironmentMetadataTrace struct {
+	SchemaVersion      int                                  `json:"schema_version"`
 	BodyBytes          int                                  `json:"body_bytes"`
 	AcceptedAt         string                               `json:"accepted_at"`
 	ConversionEnabled  bool                                 `json:"conversion_enabled"`
@@ -31,6 +32,7 @@ type openAIEnvironmentMetadataTrace struct {
 	Reason             string                               `json:"reason"`
 	ItemCount          int                                  `json:"item_count"`
 	ItemsTruncated     bool                                 `json:"items_truncated"`
+	OmittedItemCount   int                                  `json:"omitted_item_count"`
 	Items              []openAIEnvironmentMetadataTraceItem `json:"items"`
 }
 
@@ -106,7 +108,7 @@ func logOpenAIEnvironmentMetadataTrace(ctx context.Context, accountID int64, sta
 }
 
 func buildOpenAIEnvironmentMetadataTrace(body []byte, state *RequestTimezoneState) openAIEnvironmentMetadataTrace {
-	trace := openAIEnvironmentMetadataTrace{BodyBytes: len(body), Status: "skipped", SourceScanStatus: "unavailable", Items: []openAIEnvironmentMetadataTraceItem{}}
+	trace := openAIEnvironmentMetadataTrace{SchemaVersion: 2, BodyBytes: len(body), Status: "skipped", SourceScanStatus: "unavailable", Items: []openAIEnvironmentMetadataTraceItem{}}
 	if state != nil {
 		if !state.AcceptedAt.IsZero() {
 			trace.AcceptedAt = state.AcceptedAt.UTC().Format(time.RFC3339Nano)
@@ -146,6 +148,7 @@ func buildOpenAIEnvironmentMetadataTrace(body []byte, state *RequestTimezoneStat
 		trace.ItemCount++
 		if len(trace.Items) == openAIEnvironmentMetadataTraceItemLimit {
 			trace.ItemsTruncated = true
+			trace.OmittedItemCount++
 			continue
 		}
 		trace.Items = append(trace.Items, buildOpenAIEnvironmentMetadataTraceItem(body, conversion, state.Inbound))

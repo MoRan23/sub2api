@@ -6,20 +6,29 @@ import (
 )
 
 const (
-	openAIEnvironmentTimezoneTextLimit  = 1 << 20
-	openAIEnvironmentTimezoneMatchLimit = 4096
+	openAIEnvironmentTimezoneTextLimit   = 1 << 20
+	openAIEnvironmentTimezoneMatchLimit  = 4096
+	openAIEnvironmentTimezoneDetailLimit = 64
 )
 
 // This is a lexical diagnostic of frozen input, not a timezone parser or an
 // environment classifier. A mention (including one in an example) does not
-// make text eligible for conversion. Only fixed categories and counts leave
-// this helper; never retain matched text, offsets, excerpts, or hashes.
+// make text eligible for conversion. Details contain only recognized markers
+// or validated timezone values and their positions, never arbitrary excerpts,
+// unrecognized candidate values, or hashes.
 type openAIEnvironmentTimezoneText struct {
-	ScanStatus   string                             `json:"scan_status"`
-	Reason       string                             `json:"reason,omitempty"`
-	ScannedBytes int                                `json:"scanned_bytes"`
-	MentionCount int                                `json:"mention_count"`
-	Mentions     []openAIEnvironmentTimezoneMention `json:"mentions"`
+	ScanStatus            string                             `json:"scan_status"`
+	Reason                string                             `json:"reason,omitempty"`
+	ScannedBytes          int                                `json:"scanned_bytes"`
+	MentionCount          int                                `json:"mention_count"`
+	Mentions              []openAIEnvironmentTimezoneMention `json:"mentions"`
+	LocationBasis         string                             `json:"location_basis"`
+	MarkerCounts          map[string]int                     `json:"marker_counts"`
+	Matches               []openAIEnvironmentTimezoneDetail  `json:"matches"`
+	OmittedMatchCount     int                                `json:"omitted_match_count"`
+	UnscannedBytes        int                                `json:"unscanned_bytes"`
+	TimezoneTagOpenCount  int                                `json:"timezone_tag_open_count"`
+	TimezoneTagCloseCount int                                `json:"timezone_tag_close_count"`
 }
 
 type openAIEnvironmentTimezoneMention struct {
@@ -35,6 +44,9 @@ var openAIEnvironmentTimezoneTextPattern = regexp.MustCompile(`(?i:timezone|time
 func buildOpenAIEnvironmentTimezoneText(text string) openAIEnvironmentTimezoneText {
 	result := openAIEnvironmentTimezoneText{
 		ScanStatus: "complete", ScannedBytes: len(text), Mentions: []openAIEnvironmentTimezoneMention{},
+		LocationBasis: "decoded_text_utf8",
+		MarkerCounts:  map[string]int{"timezone": 0, "time_zone": 0, "utc_offset": 0, "时区": 0},
+		Matches:       []openAIEnvironmentTimezoneDetail{},
 	}
 	if result.ScannedBytes > openAIEnvironmentTimezoneTextLimit {
 		result.ScannedBytes = openAIEnvironmentTimezoneTextLimit
@@ -48,6 +60,9 @@ func buildOpenAIEnvironmentTimezoneText(text string) openAIEnvironmentTimezoneTe
 	// in other_line_count; fenced content takes precedence over quoted lines.
 	var fence byte
 	fenceWidth := 0
+	fenceStartLine := 0
+	lineNumber := 1
+	validatedZones := make(map[string]bool)
 	end := result.ScannedBytes
 	for start := 0; start < end; {
 		lineEnd := end
@@ -56,17 +71,20 @@ func buildOpenAIEnvironmentTimezoneText(text string) openAIEnvironmentTimezoneTe
 		}
 		line := text[start:lineEnd]
 		content := strings.TrimLeft(line, " \t\r")
-		quoted := false
+		quoteDepth := 0
 		for strings.HasPrefix(content, ">") {
-			quoted = true
+			quoteDepth++
 			content = strings.TrimLeft(content[1:], " \t\r")
 		}
 		marker, width, tail := openAIEnvironmentTimezoneFence(content)
 		fenced := fence != 0
+		activeFenceStartLine := fenceStartLine
 		if fence == 0 && marker != 0 {
 			fence, fenceWidth, fenced = marker, width, true
+			fenceStartLine, activeFenceStartLine = lineNumber, lineNumber
 		} else if fence != 0 && marker == fence && width >= fenceWidth && strings.TrimSpace(tail) == "" {
 			fence, fenceWidth = 0, 0
+			fenceStartLine = 0
 		}
 		for offset := 0; offset < len(line); {
 			span := openAIEnvironmentTimezoneTextPattern.FindStringIndex(line[offset:])
@@ -81,10 +99,13 @@ func buildOpenAIEnvironmentTimezoneText(text string) openAIEnvironmentTimezoneTe
 			}
 			if result.MentionCount == openAIEnvironmentTimezoneMatchLimit {
 				result.ScanStatus, result.Reason, result.ScannedBytes = "limited", "match_limit", from
-				return finishOpenAIEnvironmentTimezoneText(result, counts)
+				return finishOpenAIEnvironmentTimezoneText(result, counts, text)
 			}
 			index := 5
+			canonicalMarker := openAIEnvironmentTimezoneCanonicalMarker(value)
 			switch {
+			case canonicalMarker != "":
+				index = 5
 			case value == "Asia/Shanghai":
 				index = 0
 			case value == "America/Los_Angeles":
@@ -99,27 +120,61 @@ func buildOpenAIEnvironmentTimezoneText(text string) openAIEnvironmentTimezoneTe
 			count := &counts[index]
 			count.Count++
 			result.MentionCount++
+			if index == 5 {
+				result.MarkerCounts[canonicalMarker]++
+			}
+			if len(result.Matches) < openAIEnvironmentTimezoneDetailLimit {
+				result.Matches = append(result.Matches, buildOpenAIEnvironmentTimezoneDetail(text[:end], line, start, lineNumber, from, to, count.Kind, fenced, quoteDepth, activeFenceStartLine, validatedZones))
+			}
 			switch {
 			case fenced:
 				count.FencedLineCount++
-			case quoted:
+			case quoteDepth > 0:
 				count.QuotedLineCount++
 			default:
 				count.OtherLineCount++
 			}
 		}
 		start = lineEnd + 1
+		lineNumber++
 	}
-	return finishOpenAIEnvironmentTimezoneText(result, counts)
+	return finishOpenAIEnvironmentTimezoneText(result, counts, text)
 }
 
-func finishOpenAIEnvironmentTimezoneText(result openAIEnvironmentTimezoneText, counts [6]openAIEnvironmentTimezoneMention) openAIEnvironmentTimezoneText {
+func finishOpenAIEnvironmentTimezoneText(result openAIEnvironmentTimezoneText, counts [6]openAIEnvironmentTimezoneMention, text string) openAIEnvironmentTimezoneText {
 	for _, count := range counts {
 		if count.Count > 0 {
 			result.Mentions = append(result.Mentions, count)
 		}
 	}
+	result.OmittedMatchCount = result.MentionCount - len(result.Matches)
+	result.UnscannedBytes = len(text) - result.ScannedBytes
+	result.TimezoneTagOpenCount = countOpenAIEnvironmentTimezoneTraceTags(text, result.ScannedBytes, false)
+	result.TimezoneTagCloseCount = countOpenAIEnvironmentTimezoneTraceTags(text, result.ScannedBytes, true)
 	return result
+}
+
+func countOpenAIEnvironmentTimezoneTraceTags(text string, end int, closing bool) int {
+	count := countRequestTimezoneTag(text[:end], "timezone", closing)
+	prefix := "<timezone"
+	if closing {
+		prefix = "</timezone"
+	}
+	// The source helper accepts EOF as a boundary. A truncated prefix is not
+	// EOF in the actual text: consult the next byte before counting the tag.
+	if end < len(text) && strings.HasSuffix(text[:end], prefix) && !strings.ContainsRune(">/ \t\r\n", rune(text[end])) {
+		count--
+	}
+	return count
+}
+
+func openAIEnvironmentTimezoneCanonicalMarker(value string) string {
+	for _, marker := range []string{"timezone", "time_zone", "utc_offset", "时区"} {
+		if strings.EqualFold(value, marker) {
+			return marker
+		}
+	}
+	return ""
 }
 
 func openAIEnvironmentTimezoneMentionBoundary(text, value string, from, to int) bool {

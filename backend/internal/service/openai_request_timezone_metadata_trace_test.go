@@ -49,12 +49,15 @@ func TestOpenAIEnvironmentMetadataTraceEligibility(t *testing.T) {
 			body := timezoneTestBody(t, map[string]any{"input": []any{message}})
 			_, state := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true)
 			trace := buildOpenAIEnvironmentMetadataTrace(body, state)
+			require.Equal(t, 2, trace.SchemaVersion)
 			require.Equal(t, "complete", trace.Status)
 			require.Equal(t, "complete", trace.SourceScanStatus)
 			require.NotEmpty(t, trace.AcceptedAt)
 			require.True(t, trace.ConversionEnabled)
 			require.True(t, trace.PassthroughEnabled)
 			require.Len(t, trace.Items, 1)
+			require.Zero(t, trace.OmittedItemCount)
+			require.False(t, trace.ItemsTruncated)
 			item := trace.Items[0]
 			require.Equal(t, tc.eligibility, item.Eligibility)
 			require.Equal(t, tc.marker, item.Kinds.MarkerClass)
@@ -108,13 +111,22 @@ func TestOpenAIEnvironmentMetadataTraceLimits(t *testing.T) {
 	body := timezoneTestBody(t, map[string]any{"input": input})
 	_, state := PrepareOpenAIRequestTimezone(body, timezoneTestPolicy(), timezoneTestAcceptedAt(), false, true)
 	trace := buildOpenAIEnvironmentMetadataTrace(body, state)
+	require.Equal(t, 2, trace.SchemaVersion)
 	require.Equal(t, 12, trace.ItemCount)
 	require.Len(t, trace.Items, openAIEnvironmentMetadataTraceItemLimit)
+	require.Len(t, trace.Items, 8)
+	require.Equal(t, 4, trace.OmittedItemCount)
 	require.True(t, trace.ItemsTruncated)
+	encodedTrace, err := json.Marshal(trace)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), gjson.GetBytes(encodedTrace, "schema_version").Int())
+	require.Equal(t, int64(4), gjson.GetBytes(encodedTrace, "omitted_item_count").Int())
 	large := bytes.Repeat([]byte(" "), openAIEnvironmentMetadataTraceBodyLimit+1)
 	trace = buildOpenAIEnvironmentMetadataTrace(large, state)
+	require.Equal(t, 2, trace.SchemaVersion)
 	require.Equal(t, "body_limit", trace.Reason)
 	require.Empty(t, trace.Items)
+	require.Zero(t, trace.OmittedItemCount)
 	for _, tc := range []struct {
 		body   []byte
 		state  *RequestTimezoneState
@@ -122,7 +134,10 @@ func TestOpenAIEnvironmentMetadataTraceLimits(t *testing.T) {
 	}{
 		{body, nil, "state_missing"}, {[]byte(`{"input":`), state, "invalid_json"}, {[]byte(`[]`), state, "root_not_object"},
 	} {
-		require.Equal(t, tc.reason, buildOpenAIEnvironmentMetadataTrace(tc.body, tc.state).Reason)
+		trace := buildOpenAIEnvironmentMetadataTrace(tc.body, tc.state)
+		require.Equal(t, 2, trace.SchemaVersion)
+		require.Equal(t, tc.reason, trace.Reason)
+		require.Zero(t, trace.OmittedItemCount)
 	}
 	kinds := make([]any, 70)
 	for i := range kinds {
@@ -139,7 +154,9 @@ func TestOpenAIEnvironmentMetadataTraceLimits(t *testing.T) {
 
 func TestOpenAIEnvironmentMetadataTraceStructuredLogDoesNotLeak(t *testing.T) {
 	const secret = "DO_NOT_LOG_request_credentials_private_text"
-	message := timezoneTestMessage(timezoneTestEnvironment("Asia/Shanghai", "2026-09-18") + secret)
+	const privatePath = "/home/private-user/.config/request_credentials.json"
+	originalText := timezoneTestEnvironment("Asia/Shanghai", "2026-09-18") + secret + "\n" + privatePath
+	message := timezoneTestMessage(originalText)
 	message["role"] = secret
 	message["content"].([]any)[0].(map[string]any)["type"] = secret
 	message["internal_chat_message_metadata_passthrough"] = map[string]any{
@@ -149,7 +166,7 @@ func TestOpenAIEnvironmentMetadataTraceStructuredLogDoesNotLeak(t *testing.T) {
 	state := &RequestTimezoneState{
 		Conversions: []TimezoneConversion{
 			{Source: "environment_context", Path: "input.0.content.0.text", Original: secret, Output: secret, Status: secret, Reason: secret, EnvironmentSource: secret},
-			{Source: "environment_context", Path: secret, Status: secret, Reason: secret},
+			{Source: "environment_context", Path: privatePath, Status: secret, Reason: secret},
 		},
 		Inbound: &TimezoneScanResult{Items: []TimezoneScanItem{{Source: "environment_context", Path: "input.0.content.0.text", Value: secret, CurrentDate: secret, Status: secret, Reason: secret}}},
 	}
@@ -158,8 +175,11 @@ func TestOpenAIEnvironmentMetadataTraceStructuredLogDoesNotLeak(t *testing.T) {
 	ctx := logger.IntoContext(context.Background(), zap.New(core).With(zap.String("request_id", "req-test-123")))
 	logOpenAIEnvironmentMetadataTrace(ctx, 1465, "http", body, state)
 	require.NotContains(t, output.String(), secret)
-	require.NotContains(t, output.String(), "Asia/Shanghai")
+	require.NotContains(t, output.String(), privatePath)
 	require.NotContains(t, output.String(), "2026-09-18")
+	encodedOriginalText, err := json.Marshal(originalText)
+	require.NoError(t, err)
+	require.NotContains(t, output.String(), string(encodedOriginalText))
 	var logged map[string]any
 	require.NoError(t, json.Unmarshal(output.Bytes(), &logged))
 	require.Equal(t, "openai.environment_metadata_trace", logged["msg"])
@@ -168,11 +188,14 @@ func TestOpenAIEnvironmentMetadataTraceStructuredLogDoesNotLeak(t *testing.T) {
 	require.Equal(t, "http", logged["stage"])
 	require.Equal(t, true, logged[logger.OpsSystemLogSkipField])
 	trace := logged["metadata_trace"].(map[string]any)
+	require.Equal(t, float64(2), trace["schema_version"])
+	require.Equal(t, float64(0), trace["omitted_item_count"])
 	items := trace["items"].([]any)
 	first := items[0].(map[string]any)
 	require.Equal(t, "other", first["role"])
 	require.Equal(t, "other", first["content_item_type"])
 	require.Equal(t, "other", first["parse_reason"])
+	require.Equal(t, "Asia/Shanghai", gjson.GetBytes(output.Bytes(), `metadata_trace.items.0.timezone_text.matches.#(token=="Asia/Shanghai").token`).String())
 	require.Equal(t, "unsupported", items[1].(map[string]any)["path"])
 	output.Reset()
 	logOpenAIEnvironmentMetadataTrace(ctx, 1465, secret, body, state)
@@ -249,8 +272,10 @@ func TestOpenAIEnvironmentMetadataTraceTextShape(t *testing.T) {
 
 func TestOpenAIEnvironmentMetadataTraceIncompleteTextStructuredLog(t *testing.T) {
 	const secret = "DO_NOT_LOG_incomplete_environment_credentials"
+	const privatePath = "/srv/private-user/request_credentials.json"
 	for _, tagged := range []bool{false, true} {
-		message := timezoneTestMessage("<environment_context><timezone>Asia/Shanghai</timezone><private>" + secret + "</private>")
+		originalText := "<environment_context><timezone>Asia/Shanghai</timezone><private>" + secret + " " + privatePath + "</private>"
+		message := timezoneTestMessage(originalText)
 		if !tagged {
 			delete(message, "internal_chat_message_metadata_passthrough")
 		}
@@ -262,11 +287,17 @@ func TestOpenAIEnvironmentMetadataTraceIncompleteTextStructuredLog(t *testing.T)
 		ctx := logger.IntoContext(context.Background(), zap.New(core).With(zap.String("request_id", "req-incomplete")))
 		logOpenAIEnvironmentMetadataTrace(ctx, 1466, "ingress_before_timezone", body, state)
 		require.NotContains(t, output.String(), secret)
-		require.NotContains(t, output.String(), "<private>")
-		require.NotContains(t, output.String(), "Asia/Shanghai")
+		require.NotContains(t, output.String(), privatePath)
+		encodedOriginalText, err := json.Marshal(originalText)
+		require.NoError(t, err)
+		require.NotContains(t, output.String(), string(encodedOriginalText))
 		logEntry := gjson.Parse(output.String())
 		require.Equal(t, "req-incomplete", logEntry.Get("request_id").String())
+		require.Equal(t, int64(2), logEntry.Get("metadata_trace.schema_version").Int())
+		require.True(t, logEntry.Get("metadata_trace.omitted_item_count").Exists())
+		require.Zero(t, logEntry.Get("metadata_trace.omitted_item_count").Int())
 		item := logEntry.Get("metadata_trace.items.0")
+		require.Equal(t, "Asia/Shanghai", item.Get(`timezone_text.matches.#(token=="Asia/Shanghai").token`).String())
 		require.Equal(t, "environment_not_standalone", item.Get("parse_reason").String())
 		require.Equal(t, "missing_close", item.Get("shape_reason").String())
 		require.Equal(t, int64(1), item.Get("text_shape.environment_open_count").Int())
