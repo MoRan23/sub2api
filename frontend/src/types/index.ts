@@ -940,7 +940,25 @@ export interface ClaudeModel {
   created_at: string
 }
 
-export interface Proxy {
+export interface ProxyGeoInfo {
+  ip_address?: string
+  country?: string
+  country_code?: string
+  region?: string
+  city?: string
+  timezone?: string
+  geo_status?: 'success' | 'failed'
+  geo_reason?: string
+  geo_checked_at?: string
+}
+
+export interface ProxyTestResult extends ProxyGeoInfo {
+  success: boolean
+  message: string
+  latency_ms?: number
+}
+
+export interface Proxy extends ProxyGeoInfo {
   id: number
   name: string
   protocol: ProxyProtocol
@@ -953,11 +971,6 @@ export interface Proxy {
   latency_ms?: number
   latency_status?: 'success' | 'failed'
   latency_message?: string
-  ip_address?: string
-  country?: string
-  country_code?: string
-  region?: string
-  city?: string
   quality_status?: 'healthy' | 'warn' | 'challenge' | 'failed'
   quality_score?: number
   quality_grade?: string
@@ -988,14 +1001,12 @@ export interface ProxyQualityCheckItem {
   cf_ray?: string
 }
 
-export interface ProxyQualityCheckResult {
+export interface ProxyQualityCheckResult extends ProxyGeoInfo {
   proxy_id: number
   score: number
   grade: string
   summary: string
   exit_ip?: string
-  country?: string
-  country_code?: string
   base_latency_ms?: number
   passed_count: number
   warn_count: number

@@ -598,7 +598,7 @@ export default {
         title: 'OpenAI request timezone and residency',
         description: 'Applies to OAuth and API Key upstreams, independently of fingerprint normalization and observation.',
         timezoneTitle: 'Normalize request timezone and search location',
-        timezoneHint: 'Convert supported environment context timezones to America/Los_Angeles and normalize supported search locations to approximate / US / California / Los Angeles / America/Los_Angeles, including adding missing search locations. The current environment date is calculated from the first gateway receipt time and stays fixed across retries. Historical environments have only their timezone converted; their dates are preserved. The server global timezone is unchanged.',
+        timezoneHint: 'Set supported environment timezones and search locations from the exit IP of the account’s actual proxy, or this service instance’s exit IP for direct connections. Unknown locations fall back to US / Washington / Seattle / America/Los_Angeles without blocking requests. Missing search locations are added. The current date uses the first gateway receipt time and stays fixed when retrying the same route; historical dates are preserved. The server global timezone is unchanged.',
         passthroughTitle: 'Normalize timezone and search location in passthrough requests',
         passthroughHint: 'Also process supported locations in passthrough requests. Requires the request timezone and search location switch; disabling the parent switch retains this setting.',
         residencyTitle: 'Force US residency request header',

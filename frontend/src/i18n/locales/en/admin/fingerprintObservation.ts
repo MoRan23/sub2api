@@ -95,6 +95,25 @@ export default {
     expandUnthreaded: 'Expand unthreaded observations',
     collapseUnthreaded: 'Collapse unthreaded observations',
     request: {
+      egressLocation: {
+        title: 'Request location target',
+        status: { fresh: 'Exit location confirmed', stale: 'Recent exit location retained', fallback: 'Seattle fallback' },
+        hints: {
+          fresh: 'The target comes from the actual outbound route’s exit IP lookup and is frozen for this request. See outbound content for the fields actually sent.',
+          stale: 'A new complete location is unavailable. The valid result for this same exit IP from within the last 24 hours is retained; the timestamp belongs to that earlier result.',
+          fallback: 'The complete exit IP location is unconfirmed. Seattle is used as the request target without blocking the request; it is not the measured location of this IP.',
+        },
+        fields: { route: 'Outbound route', ip: 'Exit IP', source: 'Target source', country: 'Country', region: 'Region', city: 'City', timezone: 'Target timezone', checkedAt: 'Location checked at', reason: 'Reason' },
+        routes: { proxy: 'Proxy', direct: 'Direct from this service instance' },
+        sources: { proxy_exit: 'Proxy exit IP', direct_exit: 'This service instance’s exit IP', fallback: 'Preset fallback location' },
+        notCollected: 'Not collected', reasonUnknown: 'Usable location not available',
+        reasons: {
+          cache_miss: 'No cached exit location yet', service_stopped: 'Location service stopped', cache_full: 'Location cache is full',
+          prober_unavailable: 'Exit probe unavailable', queue_full: 'Location refresh queue is full', refresh_pending: 'Location refresh pending',
+          last_good_expired: 'Previous valid location expired', probe_failed: 'Exit probe failed', invalid_exit_ip: 'Invalid exit IP',
+          geo_unavailable: 'Complete location unavailable', ip_changed_geo_unavailable: 'Exit IP changed; the new IP location is unconfirmed', geo_invalid: 'Invalid location result',
+        },
+      },
       outboundMetadata: {
         title: 'Request and tool metadata',
         sourceHint: 'Reads actual fields from the final outbound headers, body, or WS frame. Missing fields are not filled from inbound content.',
@@ -165,7 +184,7 @@ export default {
       nodeReplAutoReviewRequired: 'Node REPL auto review required',
       nodeReplDisabled: 'Node REPL disabled',
       event: 'Event type',
-      target: 'Configured target timezone',
+      target: 'Effective target timezone',
       residency: 'Outbound residency',
       residencyHandshake: 'From the current connection handshake headers; the request frame body does not contain this header.',
       frameAttempt: 'This event records a frame prepared for sending, not confirmation of upstream receipt or response delivery.',
@@ -191,7 +210,7 @@ export default {
       after: 'Timezone / date / search location after',
       result: 'Result / reason',
       dateBasis: 'Date calculated from gateway receipt time',
-      receivedAt: 'Gateway receipt time (Seattle)',
+      receivedAt: 'Gateway receipt time',
       events: { http_request: 'HTTP request', ws_handshake: 'WS handshake', ws_response_create: 'WS request frame', unknown: 'Event type not recorded' },
       sources: { environment_context: 'Environment context', web_search: 'Web Search tool' },
       scan: { complete: 'Scan complete', limited: 'Scan limited; results incomplete', parse_failed: 'Parsing failed; scan incomplete', not_applicable: 'Not applicable' },

@@ -172,19 +172,9 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import Icon from '@/components/icons/Icon.vue'
-import type { Proxy } from '@/types'
+import type { Proxy, ProxyTestResult } from '@/types'
 
 const { t } = useI18n()
-
-interface ProxyTestResult {
-  success: boolean
-  message: string
-  latency_ms?: number
-  ip_address?: string
-  city?: string
-  region?: string
-  country?: string
-}
 
 interface Props {
   modelValue: number | null

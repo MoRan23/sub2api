@@ -21,6 +21,21 @@ export interface RequestSearchLocation {
   timezone: string
 }
 
+export interface OpenAIEgressLocation {
+  route_type: 'proxy' | 'direct'
+  proxy_id?: number
+  ip_address?: string
+  country: string
+  country_code: string
+  region: string
+  city: string
+  timezone: string
+  status: 'fresh' | 'stale' | 'fallback'
+  source: 'proxy_exit' | 'direct_exit' | 'fallback'
+  reason?: string
+  checked_at?: string
+}
+
 export interface RequestTimezoneObservation {
   source: RequestTimezoneSource
   path: string
@@ -158,6 +173,7 @@ export interface FingerprintObservationEntry {
   inbound_endpoint: string
   event_kind?: 'http_request' | 'ws_handshake' | 'ws_response_create'
   timezone_target?: string
+  egress_location?: OpenAIEgressLocation
   inbound_timezone_observations?: RequestTimezoneScan
   outbound_timezone_observations?: RequestTimezoneScan
   timezone_conversions?: RequestTimezoneConversion[]

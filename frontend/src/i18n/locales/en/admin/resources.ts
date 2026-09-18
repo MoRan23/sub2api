@@ -42,6 +42,20 @@ export default {
 
     // Proxies
     proxies: {
+      geo: {
+        timezoneUnknown: 'Timezone unconfirmed',
+        status: { success: 'Location confirmed', failed: 'Location lookup failed', unknown: 'Location not checked' },
+        details: 'Lookup details', ip: 'Exit IP', source: 'Lookup method', sourceValue: 'Lookup by exit IP',
+        notCollected: 'Not collected', checkedAt: 'Location checked at', reason: 'Reason', reasonUnknown: 'Location lookup incomplete',
+        failedHint: 'Connectivity and location lookups have separate results. Any location still shown is a previous result retained by the server; check its timestamp. A new exit IP never inherits an old location.',
+        reasons: {
+          probe_failed: 'Exit probe failed', not_checked: 'No valid location check yet', last_good_expired: 'Previous valid location expired', invalid_checked_at: 'Invalid location check time',
+          timeout: 'Location lookup timed out', canceled: 'Location lookup canceled', rate_limited: 'Location service rate limited',
+          invalid_lookup_url: 'Invalid location lookup URL', client_error: 'Location client initialization failed', http_error: 'Location service returned an error status',
+          network_error: 'Location lookup network failure', response_too_large: 'Location response exceeded the limit', invalid_response: 'Location response could not be parsed',
+          ip_mismatch: 'Location result does not match the exit IP', incomplete_location: 'Required location fields are missing', invalid_timezone: 'Location result has an invalid timezone',
+        },
+      },
       title: 'Proxy Management',
       description: 'Manage proxy servers for accounts',
       createProxy: 'Create Proxy',

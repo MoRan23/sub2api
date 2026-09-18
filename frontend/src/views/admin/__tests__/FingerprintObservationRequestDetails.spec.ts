@@ -37,6 +37,25 @@ async function openDetails() {
 afterEach(cleanup)
 
 describe('FingerprintObservationRequestDetails', () => {
+  it.each([
+    ['Asia/Tokyo', '09/10/2026, 14:30:00 GMT+9'],
+    ['America/New_York', '09/10/2026, 01:30:00 EDT'],
+    ['invalid/timezone', '09/10/2026, 05:30:00 UTC'],
+    [undefined, '09/10/2026, 05:30:00 UTC'],
+  ])('formats gateway receipt time with the frozen target %s, using UTC for unavailable targets', async (target, formatted) => {
+    renderDetails({ timezone_target: target, timezone_conversions: [
+      { source: 'environment_context', path: 'input.0.content.0.text', original: 'Asia/Shanghai', output: target, status: 'converted', received_at: '2026-09-10T05:30:00Z' },
+    ] })
+    const report = await openDetails()
+    expect(within(report).getByText(`Gateway receipt time: ${formatted}`)).toBeTruthy()
+  })
+
+  it('does not invent an egress target for legacy observations', async () => {
+    renderDetails()
+    await openDetails()
+    expect(screen.queryByTestId('egress-location-details')).toBeNull()
+  })
+
   it('keeps compatibility loss separate from an unchanged outbound integrity result and expands only on demand', async () => {
     const turnID = '01998b93-f718-7000-9000-111122223333'
     renderDetails({

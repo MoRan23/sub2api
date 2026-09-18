@@ -184,17 +184,14 @@
           </template>
 
           <template #cell-location="{ row }">
-            <div class="flex items-center gap-2">
+            <div class="flex items-start gap-2">
               <img
                 v-if="row.country_code"
                 :src="flagUrl(row.country_code)"
                 :alt="row.country || row.country_code"
                 class="h-4 w-6 rounded-sm"
               />
-              <span v-if="formatLocation(row)" class="text-sm text-gray-700 dark:text-gray-200">
-                {{ formatLocation(row) }}
-              </span>
-              <span v-else class="text-sm text-gray-400">-</span>
+              <ProxyGeoDetails :geo="row" />
             </div>
           </template>
 
@@ -866,9 +863,9 @@
               </div>
             </div>
           </div>
-          <div class="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-600 dark:text-gray-300">
-            <div>{{ t('admin.proxies.qualityExitIP') }}: {{ qualityReport.exit_ip || '-' }}</div>
-            <div>{{ t('admin.proxies.qualityCountry') }}: {{ qualityReport.country || '-' }}</div>
+          <div class="mt-3 grid grid-cols-1 gap-2 text-xs text-gray-600 dark:text-gray-300 sm:grid-cols-2">
+            <div class="min-w-0 break-all">{{ t('admin.proxies.qualityExitIP') }}: {{ qualityReport.exit_ip || '-' }}</div>
+            <div><ProxyGeoDetails :geo="{ ...qualityReport, ip_address: qualityReport.exit_ip }" /></div>
             <div>
               {{ t('admin.proxies.qualityBaseLatency') }}:
               {{ typeof qualityReport.base_latency_ms === 'number' ? `${qualityReport.base_latency_ms}ms` : '-' }}
@@ -968,7 +965,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
-import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
+import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult, ProxyTestResult } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -978,6 +975,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ImportDataModal from '@/components/admin/proxy/ImportDataModal.vue'
+import ProxyGeoDetails from '@/components/admin/proxy/ProxyGeoDetails.vue'
 import Select from '@/components/common/Select.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -988,6 +986,7 @@ import { useTableSelection } from '@/composables/useTableSelection'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
+import { applyProxyProbeResult } from '@/utils/proxyGeo'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -1488,37 +1487,11 @@ const handleUpdateProxy = async () => {
 
 const applyLatencyResult = (
   proxyId: number,
-  result: {
-    success: boolean
-    latency_ms?: number
-    message?: string
-    ip_address?: string
-    country?: string
-    country_code?: string
-    region?: string
-    city?: string
-  }
+  result: Omit<ProxyTestResult, 'message'> & { message?: string }
 ) => {
   const target = proxies.value.find((proxy) => proxy.id === proxyId)
   if (!target) return
-  if (result.success) {
-    target.latency_status = 'success'
-    target.latency_ms = result.latency_ms
-    target.ip_address = result.ip_address
-    target.country = result.country
-    target.country_code = result.country_code
-    target.region = result.region
-    target.city = result.city
-  } else {
-    target.latency_status = 'failed'
-    target.latency_ms = undefined
-    target.ip_address = undefined
-    target.country = undefined
-    target.country_code = undefined
-    target.region = undefined
-    target.city = undefined
-  }
-  target.latency_message = result.message
+  applyProxyProbeResult(target, result)
 }
 
 const summarizeQualityStatus = (result: ProxyQualityCheckResult): Proxy['quality_status'] => {
@@ -1536,11 +1509,6 @@ const applyQualityResult = (proxyId: number, result: ProxyQualityCheckResult) =>
   target.quality_grade = result.grade
   target.quality_summary = result.summary
   target.quality_checked = result.checked_at
-}
-
-const formatLocation = (proxy: Proxy) => {
-  const parts = [proxy.country, proxy.city].filter(Boolean) as string[]
-  return parts.join(' · ')
 }
 
 const flagUrl = (code: string) =>
@@ -1608,14 +1576,13 @@ const handleQualityCheck = async (proxy: Proxy) => {
     showQualityReportDialog.value = true
 
     const baseStep = result.items.find((item) => item.target === 'base_connectivity')
-    if (baseStep && baseStep.status === 'pass') {
+    if (baseStep) {
       applyLatencyResult(proxy.id, {
-        success: true,
+        ...result,
+        success: baseStep.status === 'pass',
         latency_ms: result.base_latency_ms,
         message: result.summary,
-        ip_address: result.exit_ip,
-        country: result.country,
-        country_code: result.country_code
+        ip_address: result.exit_ip
       })
     }
     applyQualityResult(proxy.id, result)
@@ -1652,14 +1619,13 @@ const runBatchProxyQualityChecks = async (ids: number[]) => {
         const target = proxies.value.find((proxy) => proxy.id === current)
         if (target) {
           const baseStep = result.items.find((item) => item.target === 'base_connectivity')
-          if (baseStep && baseStep.status === 'pass') {
+          if (baseStep) {
             applyLatencyResult(current, {
-              success: true,
+              ...result,
+              success: baseStep.status === 'pass',
               latency_ms: result.base_latency_ms,
               message: result.summary,
-              ip_address: result.exit_ip,
-              country: result.country,
-              country_code: result.country_code
+              ip_address: result.exit_ip
             })
           }
         }

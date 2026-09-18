@@ -94,6 +94,25 @@ export default {
     expandUnthreaded: '展开未归属线程的观测',
     collapseUnthreaded: '收起未归属线程的观测',
     request: {
+      egressLocation: {
+        title: '本次地域目标',
+        status: { fresh: '出口地域已确认', stale: '沿用近期出口地域', fallback: 'Seattle 兜底' },
+        hints: {
+          fresh: '目标来自本次实际出站路由的出口 IP 查询，按请求冻结；实际发送的字段仍以出站内容为准。',
+          stale: '暂未取得新的完整地域，沿用同一出口 IP 最近 24 小时内的有效结果；检测时间是该历史结果的时间。',
+          fallback: '尚未确认出口 IP 的完整地域，使用 Seattle 作为请求目标且不阻断请求；这不是该 IP 的实测位置。',
+        },
+        fields: { route: '出站路由', ip: '出口 IP', source: '目标来源', country: '国家', region: '地区', city: '城市', timezone: '目标时区', checkedAt: '地域检测时间', reason: '原因' },
+        routes: { proxy: '代理', direct: '当前服务实例直连' },
+        sources: { proxy_exit: '代理出口 IP', direct_exit: '当前服务实例出口 IP', fallback: '预设兜底地域' },
+        notCollected: '未采集', reasonUnknown: '尚未取得可用地域',
+        reasons: {
+          cache_miss: '尚无出口地域缓存', service_stopped: '地域服务已停止', cache_full: '地域缓存容量已满',
+          prober_unavailable: '出口探测不可用', queue_full: '地域刷新队列已满', refresh_pending: '等待地域刷新',
+          last_good_expired: '之前的有效地域已过期', probe_failed: '出口探测失败', invalid_exit_ip: '出口 IP 无效',
+          geo_unavailable: '尚未取得完整地域', ip_changed_geo_unavailable: '出口 IP 已改变，新 IP 的地域尚未确认', geo_invalid: '地域结果无效',
+        },
+      },
       outboundMetadata: {
         title: '请求与工具元数据',
         sourceHint: '读取最终出站请求头、正文或 WS 帧中的实际字段；缺失字段不从入站内容补齐。',
@@ -164,7 +183,7 @@ export default {
       nodeReplAutoReviewRequired: 'Node REPL 需要自动审核',
       nodeReplDisabled: 'Node REPL 已禁用',
       event: '事件类型',
-      target: '配置目标时区',
+      target: '本次目标时区',
       residency: '出站 residency',
       residencyHandshake: '来自当前连接的握手请求头；请求帧正文不包含此头。',
       frameAttempt: '此记录表示准备发送请求帧，不代表上游已接收或响应已交付。',
@@ -190,7 +209,7 @@ export default {
       after: '处理后时区 / 日期 / 搜索地域',
       result: '处理结果 / 原因',
       dateBasis: '日期按网关接收时刻计算',
-      receivedAt: '网关接收时间（西雅图）',
+      receivedAt: '网关接收时间',
       events: { http_request: 'HTTP 请求', ws_handshake: 'WS 握手', ws_response_create: 'WS 请求帧', unknown: '未标注事件类型' },
       sources: { environment_context: '环境上下文', web_search: 'Web Search 工具' },
       scan: { complete: '扫描完整', limited: '扫描受限，结果不完整', parse_failed: '解析失败，未完成扫描', not_applicable: '不适用' },

@@ -42,6 +42,20 @@ export default {
 
     // Proxies Management
     proxies: {
+      geo: {
+        timezoneUnknown: '时区未确认',
+        status: { success: '地域已确认', failed: '地域查询失败', unknown: '地域未检测' },
+        details: '检测详情', ip: '出口 IP', source: '地域查询方式', sourceValue: '按出口 IP 查询',
+        notCollected: '未采集', checkedAt: '地域检测时间', reason: '原因', reasonUnknown: '地域查询未完成',
+        failedHint: '连接状态与地域查询分别判断。仍显示的地域是后端保留的历史结果，请结合检测时间判断；新的出口 IP 不沿用旧地域。',
+        reasons: {
+          probe_failed: '出口探测失败', not_checked: '尚无有效地域检测结果', last_good_expired: '之前的有效地域已过期', invalid_checked_at: '地域检测时间无效',
+          timeout: '地域查询超时', canceled: '地域查询已取消', rate_limited: '地域查询服务限流',
+          invalid_lookup_url: '地域查询地址无效', client_error: '无法初始化地域查询客户端', http_error: '地域查询返回异常状态',
+          network_error: '地域查询网络失败', response_too_large: '地域查询响应超过限制', invalid_response: '地域查询响应无法解析',
+          ip_mismatch: '查询结果与出口 IP 不匹配', incomplete_location: '查询结果缺少必要地域字段', invalid_timezone: '查询结果的时区无效',
+        },
+      },
       title: 'IP管理',
       description: '管理代理服务器配置',
       createProxy: '添加代理',

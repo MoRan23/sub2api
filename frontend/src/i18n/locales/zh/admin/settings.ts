@@ -591,7 +591,7 @@ export default {
         title: 'OpenAI 请求时区与地域',
         description: '适用于 OAuth 和 API Key 上游，独立于指纹归一与观测开关。',
         timezoneTitle: '统一请求时区与搜索地域',
-        timezoneHint: '将支持的环境上下文时区转换为 America/Los_Angeles，并将支持的搜索地域统一为 approximate / US / California / Los Angeles / America/Los_Angeles（包括补齐未提供的搜索地域）。本轮环境日期按网关首次接收时刻计算，同次重试保持不变；历史环境仅转换时区，日期保留。不修改服务器全局时区。',
+        timezoneHint: '按账号本次实际使用的代理出口 IP 设置支持的环境时区与搜索地域；直连时使用当前服务实例的出口 IP。地域未知时使用 US / Washington / Seattle / America/Los_Angeles，不阻断请求。支持补齐未提供的搜索地域；本轮日期按网关首次接收时刻换算，同一出口重试保持不变，历史日期保留。不修改服务器全局时区。',
         passthroughTitle: '统一透传请求时区与搜索地域',
         passthroughHint: '同时处理透传请求中的支持位置。仅在请求时区与搜索地域总开关开启时生效；关闭总开关仍会保留此配置。',
         residencyTitle: '强制美国地域请求头',

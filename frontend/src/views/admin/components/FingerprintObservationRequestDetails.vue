@@ -29,6 +29,7 @@
           <dd v-if="observation.outbound_codex_residency_source === 'ws_handshake'" class="mt-1 text-gray-500 dark:text-gray-400">{{ t(`${prefix}.residencyHandshake`) }}</dd>
         </div>
       </dl>
+      <OpenAIEgressLocationDetails v-if="observation.egress_location" :location="observation.egress_location" />
       <p v-if="observation.event_kind === 'ws_response_create'" class="text-gray-500 dark:text-gray-400">{{ t(`${prefix}.frameAttempt`) }}</p>
 
       <section v-if="observation.conversion_check" :aria-label="t(`${conversionPrefix}.title`)" class="min-w-0 rounded-lg border border-gray-200 p-3 dark:border-dark-700" data-testid="conversion-check-details">
@@ -145,7 +146,7 @@
                   <div v-if="conversion.location_after && conversion.status === 'converted'" class="text-gray-600 dark:text-gray-300" data-testid="search-location-action">{{ t(`${prefix}.searchLocation.${conversion.location_added === true ? 'added' : 'replaced'}`) }}</div>
                   <div v-if="conversion.reason" class="text-gray-500 dark:text-gray-400">{{ reasonLabel(conversion.reason) }}</div>
                   <div v-if="conversion.time_basis === 'gateway_received_at'" class="text-gray-500 dark:text-gray-400">{{ t(`${prefix}.dateBasis`) }}</div>
-                  <div v-if="conversion.received_at" class="text-gray-500 dark:text-gray-400">{{ t(`${prefix}.receivedAt`) }}: {{ formatSeattleTime(conversion.received_at) }}</div>
+                  <div v-if="conversion.received_at" class="text-gray-500 dark:text-gray-400">{{ t(`${prefix}.receivedAt`) }}: {{ formatTargetTime(conversion.received_at) }}</div>
                 </td>
               </tr>
             </tbody>
@@ -162,6 +163,7 @@ import { useI18n } from 'vue-i18n'
 import type { FingerprintObservationEntry, RequestEnvironmentSource, RequestTimezoneObservation, RequestTimezoneScan, RequestTimezoneSource } from '@/api/admin/fingerprintObservations'
 import SearchLocationDetails from './SearchLocationDetails.vue'
 import CodexOutboundMetadataDetails from './CodexOutboundMetadataDetails.vue'
+import OpenAIEgressLocationDetails from './OpenAIEgressLocationDetails.vue'
 
 const props = defineProps<{ observation: FingerprintObservationEntry }>()
 const { t, te, locale } = useI18n()
@@ -258,12 +260,18 @@ function reasonLabel(reason: string): string {
   return knownReasons.has(reason) ? t(`${prefix}.reasons.${reason}`) : reason
 }
 
-function formatSeattleTime(iso: string): string {
+function formatTargetTime(iso: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return '—'
-  return new Intl.DateTimeFormat(locale?.value || 'en-US', {
-    timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
+  const options: Intl.DateTimeFormatOptions = {
+    timeZone: props.observation.timezone_target || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZoneName: 'short',
-  }).format(date)
+  }
+  try {
+    return new Intl.DateTimeFormat(locale?.value || 'en-US', options).format(date)
+  } catch {
+    // Legacy or malformed observations must not use the browser's own timezone.
+    return new Intl.DateTimeFormat(locale?.value || 'en-US', { ...options, timeZone: 'UTC' }).format(date)
+  }
 }
 </script>
