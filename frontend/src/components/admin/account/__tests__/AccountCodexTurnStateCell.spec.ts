@@ -19,88 +19,126 @@ const status: CodexTurnStateStatus = {
 function show(overrides: Partial<InstanceType<typeof AccountCodexTurnStateCell>['$props']> = {}) {
   return mount(AccountCodexTurnStateCell, { props: { account, status, models, loading: false, failed: false, now, observedAt: now, ...overrides } })
 }
-function observation(model: string, length: number, shape = 'team_business_extended'): CodexTurnStateObservation {
-  return { model, observed_at: '2026-09-20T12:00:00Z', outbound_length: 0, response_length: length,
-    response_shape: length > 0 ? 'suspect' : 'missing', response_observed_shape: length > 0 ? shape : undefined }
+function observation(overrides: Partial<CodexTurnStateObservation> = {}): CodexTurnStateObservation {
+  return { model: models[0]!, observed_at: '2026-09-20T12:00:00Z', outbound_length: 0, response_length: 332,
+    response_shape: 'target', response_observed_shape: 'team_business_target', ...overrides }
+}
+function colors(wrapper: ReturnType<typeof show>) {
+  return wrapper.findAll('[data-testid="codex-turn-state-dot"]').map(dot => dot.attributes('data-state'))
 }
 
 describe('AccountCodexTurnStateCell', () => {
-  it('shows actual response observations with cache maintenance off without presenting them as cached state', () => {
-    const wrapper = show({ status: { ...status, enabled: false, observation_enabled: true, observation_scope: 'instance', observations: [
-      observation(models[0]!, 292, 'personal_target'), observation(models[1]!, 356), observation(models[2]!, 0),
-    ] } })
-    expect(wrapper.text()).toContain('codexTurnState.disabled')
-    expect(wrapper.text()).toContain('passiveOnly')
-    const summaries = wrapper.findAll('[data-testid="codex-turn-state-observation-summary"]')
-    expect(summaries).toHaveLength(3)
-    expect(summaries[0]!.text()).toContain('characters{"count":292}')
-    expect(summaries[0]!.text()).toContain('compactObservedShapes.personal_target')
-    expect(summaries[1]!.text()).toContain('characters{"count":356}')
-    expect(summaries[2]!.text()).toContain('responseStateMissing')
-    expect(wrapper.find('[data-testid="codex-turn-state-cache-summary"]').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('states.ready')
-    expect(wrapper.text()).not.toContain('columnRemaining')
-  })
-
-  it('separates a ready cached 332 state from the latest observed 356 state', () => {
-    const wrapper = show({ status: { ...status, observation_enabled: true, observations: [observation(models[0]!, 356)] } })
-    const model = wrapper.get(`[data-testid="codex-turn-state-model-${models[0]}"]`)
-    expect(model.get('[data-testid="codex-turn-state-cache-summary"]').text()).toContain('characters{"count":332}')
-    expect(model.get('[data-testid="codex-turn-state-observation-summary"]').text()).toContain('characters{"count":356}')
-    expect(model.text()).toContain('columnRemaining{"minutes":30}')
-  })
-
-  it('prioritizes actual off-list observations when caching is disabled and counts all deduplicated models', () => {
-    const wrapper = show({ status: { ...status, enabled: false, observation_enabled: true, observations: [observation('outside-model', 356)] } })
-    expect(wrapper.text()).toContain('outside-model')
-    expect(wrapper.text()).toContain('characters{"count":356}')
-    expect(wrapper.text()).toContain('columnMore{"count":1}')
-  })
-
-  it.each([false, undefined])('shows summaries independently of a legacy observation flag (%s), and identifies an empty instance', async (available) => {
-    const wrapper = show({ status: { ...status, enabled: false, observation_enabled: available, observations: [observation(models[0]!, 356)] } })
-    expect(wrapper.text()).toContain('characters{"count":356}')
-    expect(wrapper.text()).toContain('passiveOnly')
-    expect(wrapper.text()).not.toContain('observationDisabled')
-    await wrapper.setProps({ status: { ...status, enabled: false, observation_enabled: available, observations: [] } })
-    expect(wrapper.text()).toContain('observationEmpty')
-    expect(wrapper.text()).not.toContain('characters{"count":356}')
-    expect(wrapper.text()).not.toContain('observationDisabled')
-  })
-
-  it('shows three model summaries and opens existing details without exposing runtime secrets', async () => {
+  it('renders only fixed-height model rows and opens details for the entire cell', async () => {
     const wrapper = show()
-    models.forEach(model => expect(wrapper.text()).toContain(model))
-    expect(wrapper.text()).toContain('characters{"count":332}')
-    expect(wrapper.text()).toContain('columnRemaining{"minutes":30}')
-    expect(wrapper.text()).toContain('states.ready')
-    expect(wrapper.text()).toContain('columnNoCache')
-    expect(wrapper.text()).not.toContain('response_source')
-    await wrapper.get('button').trigger('click')
+    expect(wrapper.text()).toBe(models.join(''))
+    expect(wrapper.get('button').classes()).toContain('h-16')
+    const rows = wrapper.findAll('[data-testid^="codex-turn-state-model-"]')
+    expect(rows).toHaveLength(3)
+    expect(rows.every(row => row.classes().includes('h-5'))).toBe(true)
+    expect(colors(wrapper)).toEqual(['green', 'gray', 'gray'])
+    expect(rows[0]!.attributes('title')).toContain('dotCachedTarget')
+    expect(rows[0]!.attributes('aria-label')).toContain(models[0])
+    await rows[0]!.trigger('click')
     expect(wrapper.emitted('open')).toHaveLength(1)
   })
 
-  it('uses the shared clock to expire a formerly ready state without a row timer', async () => {
+  it.each([
+    { response_length: 292, response_observed_shape: 'personal_target' },
+    { response_length: 332, response_observed_shape: 'team_business_target' },
+  ])('shows a green latest target response with cache disabled (%s)', (shape) => {
+    const wrapper = show({ status: { ...status, enabled: false, observations: [observation(shape)] } })
+    expect(colors(wrapper)[0]).toBe('green')
+    const row = wrapper.get(`[data-testid="codex-turn-state-model-${models[0]}"]`)
+    expect(row.attributes('title')).toContain('dotObservedTarget')
+    expect(row.attributes('title')).toContain('passiveOnly')
+    expect(row.attributes('title')).toContain(`characters{"count":${shape.response_length}}`)
+    expect(row.attributes('title')).toContain(new Date('2026-09-20T12:00:00Z').toLocaleString())
+    expect(wrapper.text()).not.toContain('characters')
+  })
+
+  it.each([
+    { response_length: 312, response_shape: 'suspect', response_observed_shape: 'personal_extended' },
+    { response_length: 356, response_shape: 'suspect', response_observed_shape: 'team_business_extended' },
+    { response_shape: 'invalid', response_observed_shape: 'invalid', response_validation_reason: 'invalid_envelope' },
+    { response_validation_reason: 'invalid_encoding' },
+    { response_validation_reason: 'future_issued_at' },
+  ])('shows explicit latest extended or invalid states in red, ahead of a ready cache (%s)', (shape) => {
+    const wrapper = show({ status: { ...status, observations: [observation(shape)] } })
+    expect(colors(wrapper)[0]).toBe('red')
+    expect(wrapper.text()).toBe(models.join(''))
+  })
+
+  it.each([
+    { response_shape: 'unknown', response_validation_reason: 'account_type_unknown' },
+    { response_shape: 'invalid', response_validation_reason: 'unexpected_shape' },
+    { response_shape: 'expired', response_validation_reason: 'expired' },
+    { response_shape: 'unknown' },
+    { response_validation_reason: 'unrecognized_reason' },
+    { response_length: 0, response_shape: 'missing', response_observed_shape: undefined },
+  ])('uses gray for an uncertain or expired latest response instead of falling back to green cache (%s)', (shape) => {
+    const wrapper = show({ status: { ...status, observations: [observation(shape)] } })
+    expect(colors(wrapper)[0]).toBe('gray')
+  })
+
+  it('does not expire an observed shape using its observation time as an invented token issue time', () => {
+    const wrapper = show({ status: { ...status, observations: [observation({ observed_at: '2020-01-01T00:00:00Z' })] } })
+    expect(colors(wrapper)[0]).toBe('green')
+  })
+
+  it('uses gray when a cache expires or is disabled, and green only for a valid fallback cache', async () => {
     const wrapper = show()
+    expect(colors(wrapper)[0]).toBe('green')
     await wrapper.setProps({ now: now + 31 * 60_000 })
-    expect(wrapper.text()).toContain('states.expired')
-    expect(wrapper.text()).not.toContain('states.ready')
-    expect(wrapper.text()).not.toContain('columnRemaining')
+    expect(colors(wrapper)[0]).toBe('gray')
+    await wrapper.setProps({ now, status: { ...status, enabled: false } })
+    expect(colors(wrapper)[0]).toBe('gray')
+    await wrapper.setProps({ status: { ...status, expected_length: 0 } })
+    expect(colors(wrapper)[0]).toBe('gray')
   })
 
-  it('limits rows to three models while keeping the total visible for the details action', () => {
+  it('keeps the first load, refresh and failure in the same three-row frame without loading text', async () => {
+    const wrapper = show({ status: undefined, models: [], loading: true })
+    expect(colors(wrapper)).toEqual(['gray', 'gray', 'gray'])
+    expect(wrapper.text()).toBe(models.join(''))
+    expect(wrapper.text()).not.toContain('loading')
+    await wrapper.setProps({ status, models, loading: true })
+    expect(colors(wrapper)[0]).toBe('green')
+    expect(wrapper.get('button').classes()).toContain('h-16')
+    await wrapper.setProps({ failed: true, loading: false })
+    expect(colors(wrapper)).toEqual(['gray', 'gray', 'gray'])
+    expect(wrapper.get(`[data-testid="codex-turn-state-model-${models[0]}"]`).attributes('title')).toContain('columnUnavailable')
+    expect(wrapper.text()).toBe(models.join(''))
+  })
+
+  it('keeps all exact model IDs accessible while limiting the cell to three rows with an inline count', () => {
     const wrapper = show({ models: [...models, 'custom-4', 'custom-5'] })
-    expect(wrapper.text()).not.toContain('custom-4')
-    expect(wrapper.text()).toContain('columnMore{"count":2}')
+    expect(wrapper.text()).toBe(`${models.join('')}+2`)
+    expect(wrapper.get('[data-testid="codex-turn-state-more"]').attributes('title')).toContain('columnMore{"count":2}')
+    expect(wrapper.findAll('[data-testid="codex-turn-state-dot"]')).toHaveLength(3)
   })
 
-  it('distinguishes disabled caches, unknown subscriptions, and inherited configuration', () => {
-    const disabled = show({ status: { ...status, enabled: false } })
-    expect(disabled.text()).toContain('codexTurnState.disabled')
-    expect(disabled.text()).not.toContain('states.ready')
-    const inherited = show({ status: { ...status, inherited: true, owner_account_id: 45, expected_length: 0, resolved_account_type: '' } })
-    expect(inherited.text()).toContain('columnInherited{"id":45}')
-    expect(inherited.text()).toContain('columnUnknownPlan')
+  it('includes off-list actual observations and inheritance in accessible descriptions', () => {
+    const wrapper = show({ models: [], status: { ...status, models: [], enabled: false, inherited: true, owner_account_id: 45, observations: [observation({ model: 'outside-model' })] } })
+    const row = wrapper.get('[data-testid="codex-turn-state-model-outside-model"]')
+    expect(row.attributes('title')).toContain('columnInherited{"id":45}')
+    expect(colors(wrapper)[0]).toBe('green')
+    expect(wrapper.text()).toContain('outside-model')
+  })
+
+  it('keeps configured model order unchanged when later observations arrive with caching disabled', async () => {
+    const wrapper = show({ status: { ...status, enabled: false, observations: [observation({ model: models[2]! })] } })
+    expect(wrapper.text()).toBe(models.join(''))
+    expect(colors(wrapper)).toEqual(['gray', 'gray', 'green'])
+    await wrapper.setProps({ status: { ...status, enabled: false, observations: [observation({ model: models[0]! }), observation({ model: models[2]! })] } })
+    expect(wrapper.text()).toBe(models.join(''))
+    expect(colors(wrapper)).toEqual(['green', 'gray', 'green'])
+  })
+
+  it('keeps three gray placeholder rows for an explicitly empty policy without inventing model IDs', () => {
+    const wrapper = show({ models: [], status: { ...status, models: [] } })
+    expect(wrapper.text()).toBe('———')
+    expect(colors(wrapper)).toEqual(['gray', 'gray', 'gray'])
+    expect(wrapper.findAll('[data-testid="codex-turn-state-placeholder"]')).toHaveLength(3)
   })
 
   it.each([
@@ -108,26 +146,9 @@ describe('AccountCodexTurnStateCell', () => {
     { ...account, credentials: { auth_mode: 'personalAccessToken' } },
     { ...account, credentials: { openai_auth_mode: 'agent_identity' } },
     { ...account, platform: 'anthropic' }
-  ] as AccountListItem[])('shows unsupported accounts without a status request or details action', (unsupported) => {
+  ] as AccountListItem[])('shows unsupported accounts without a details action', (unsupported) => {
     const wrapper = show({ account: unsupported })
     expect(wrapper.text()).toBe('—')
     expect(wrapper.find('button').exists()).toBe(false)
-  })
-
-  it('does not turn an unavailable or missing response into a disabled account', () => {
-    const wrapper = show({ status: undefined, failed: true })
-    expect(wrapper.text()).toContain('columnUnavailable')
-    expect(wrapper.text()).not.toContain('codexTurnState.disabled')
-  })
-
-  it('shows an explicitly empty model policy as observation only and retains excluded historical models', () => {
-    const empty = show({ models: [], status: { ...status, models: [] } })
-    expect(empty.text()).toContain('columnEmptyList')
-    expect(empty.text()).not.toContain('codexTurnState.disabled')
-    expect(empty.text()).not.toContain('columnUnavailable')
-    const history = show({ models: [], status: { ...status, models: [{ ...status.models[0]!, model_allowed: false, state: 'model_excluded' }] } })
-    expect(history.text()).toContain(models[0]!)
-    expect(history.text()).toContain('states.model_excluded')
-    expect(history.text()).not.toContain('columnRemaining')
   })
 })

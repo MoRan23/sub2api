@@ -49,6 +49,75 @@ describe('useCodexTurnStateBatch', () => {
     expect(fetcher).toHaveBeenCalledTimes(2)
   })
 
+  it('retains same-page results and model names until a refresh completes', async () => {
+    const pending = deferred()
+    const fetcher = vi.fn().mockResolvedValueOnce(result([1])).mockReturnValueOnce(pending.promise)
+    const { accounts, tableLoading, batch } = setup([row(1)], fetcher)
+    await flushPromises()
+    const previous = batch.statuses.value['1']
+    tableLoading.value = true
+    await nextTick()
+    expect(batch.statuses.value['1']).toBe(previous)
+    accounts.value = [row(1, { name: 'Refreshed name' })]
+    tableLoading.value = false
+    await nextTick()
+    expect(batch.loading.value).toBe(true)
+    expect(batch.statuses.value['1']).toBe(previous)
+    expect(batch.models.value).toEqual(['gpt-6-astra'])
+    pending.resolve({ ...result([1]), items: { '1': state(1, false) } })
+    await flushPromises()
+    expect(batch.statuses.value['1']?.enabled).toBe(false)
+    expect(batch.loading.value).toBe(false)
+  })
+
+  it('retains names on refresh failure, marks stale colors unavailable and recovers on success', async () => {
+    const retry = deferred()
+    const fetcher = vi.fn().mockResolvedValueOnce(result([1]))
+      .mockRejectedValueOnce(new Error('offline')).mockReturnValueOnce(retry.promise)
+    const { batch } = setup([row(1)], fetcher)
+    await flushPromises()
+    await batch.refresh()
+    expect(batch.statuses.value['1']).toBeDefined()
+    expect(batch.models.value).toEqual(['gpt-6-astra'])
+    expect(batch.errors.value.has(1)).toBe(true)
+    const refresh = batch.refresh()
+    expect(batch.errors.value.has(1)).toBe(true)
+    retry.resolve(result([1]))
+    await refresh
+    expect(batch.errors.value.has(1)).toBe(false)
+  })
+
+  it('does not reuse retained status after an account changes its credential parent', async () => {
+    const pending = deferred()
+    const fetcher = vi.fn().mockResolvedValueOnce(result([1])).mockReturnValueOnce(pending.promise)
+    const { accounts, batch } = setup([row(1)], fetcher)
+    await flushPromises()
+    accounts.value = [row(1, { parent_account_id: 2, codex_turn_state_inherited_from_account_id: 2 })]
+    await nextTick()
+    expect(batch.statuses.value['1']).toBeUndefined()
+    pending.resolve({ ...result([1]), items: { '1': { ...state(1), owner_account_id: 2 } } })
+    await flushPromises()
+    expect(batch.statuses.value['1']?.owner_account_id).toBe(2)
+  })
+
+  it('ignores superseded responses while retaining the last completed same-page result', async () => {
+    const oldRequest = deferred()
+    const newRequest = deferred()
+    const fetcher = vi.fn().mockResolvedValueOnce(result([1]))
+      .mockReturnValueOnce(oldRequest.promise).mockReturnValueOnce(newRequest.promise)
+    const { batch } = setup([row(1)], fetcher)
+    await flushPromises()
+    const oldRefresh = batch.refresh()
+    const newRefresh = batch.refresh()
+    expect(batch.statuses.value['1']?.enabled).toBe(true)
+    expect((fetcher.mock.calls[1]![1] as AbortSignal).aborted).toBe(true)
+    newRequest.resolve({ ...result([1]), items: { '1': state(1, false) } })
+    await newRefresh
+    oldRequest.resolve(result([1]))
+    await oldRefresh
+    expect(batch.statuses.value['1']?.enabled).toBe(false)
+  })
+
   it('cancels hidden columns and ignores a late response before resuming when shown', async () => {
     const first = deferred()
     const fetcher = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(result([1]))
@@ -89,6 +158,16 @@ describe('useCodexTurnStateBatch', () => {
     await flushPromises()
     expect(batch.errors.value.has(2)).toBe(true)
     expect(batch.statuses.value['2']).toBeUndefined()
+  })
+
+  it('marks an omitted refresh item unavailable while retaining its model names', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(result([1, 2])).mockResolvedValueOnce(result([1]))
+    const { batch } = setup([row(1), row(2)], fetcher)
+    await flushPromises()
+    await batch.refresh()
+    expect(batch.errors.value.has(2)).toBe(true)
+    expect(batch.statuses.value['2']).toBeDefined()
+    expect(batch.errors.value.has(1)).toBe(false)
   })
 
   it('caps batches at 200 IDs and runs at most two requests concurrently', async () => {

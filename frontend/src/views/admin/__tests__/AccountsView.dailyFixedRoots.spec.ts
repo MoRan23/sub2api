@@ -121,16 +121,17 @@ describe('AccountsView daily fixed root HTTP contract', () => {
     turnStateResponse = { models: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'], items: { '42': {
       account_id: 42, owner_account_id: 42, inherited: false, enabled: true,
       account_type: 'auto', resolved_account_type: 'team_business', expected_length: 332,
-      models: [{ model: 'gpt-6-astra', state: 'ready', shape: 'target', source: 'business', token_length: 332, remaining_seconds: 1800 }]
+      models: [{ model: 'gpt-6-astra', state: 'ready', shape: 'target', source: 'business', token_length: 332, cipher_blocks: 12, remaining_seconds: 1800 }]
     } } }
     const { renderErrors } = renderAccounts()
     const cell = await screen.findByTestId('account-codex-turn-state-42')
-    await waitFor(() => expect(cell.textContent).toContain('gpt-6-astra'))
+    await waitFor(() => expect(within(cell).getAllByTestId('codex-turn-state-dot')[0]!.getAttribute('data-state')).toBe('green'))
     expect(screen.getByRole('columnheader', { name: 'admin.accounts.columns.codexTurnState' })).toBeTruthy()
     expect(cell.textContent).toContain('gpt-5.6-sol')
     expect(cell.textContent).toContain('gpt-5.6-terra')
     expect(turnStateRequests).toEqual(['42,43'])
-    expect(screen.getByTestId('account-codex-turn-state-43').textContent).toContain('columnUnavailable')
+    expect(within(screen.getByTestId('account-codex-turn-state-43')).getAllByTestId('codex-turn-state-dot').every(dot => dot.getAttribute('data-state') === 'gray')).toBe(true)
+    expect(within(screen.getByTestId('account-codex-turn-state-43')).getByTestId('codex-turn-state-model-gpt-6-astra').getAttribute('title')).toContain('columnUnavailable')
     expect(screen.getByTestId('account-codex-turn-state-44').textContent).toBe('—')
     await fireEvent.click(within(cell).getByRole('button'))
     const dialog = await screen.findByRole('dialog', { name: 'admin.accounts.codexTurnState.statusTitle' })
@@ -160,9 +161,12 @@ describe('AccountsView daily fixed root HTTP contract', () => {
     } } }
     const { renderErrors } = renderAccounts()
     const cell = await screen.findByTestId('account-codex-turn-state-42')
-    await waitFor(() => expect(within(cell).getAllByTestId('codex-turn-state-observation-summary')).toHaveLength(2))
-    expect(cell.textContent).toContain('passiveOnly')
-    expect(cell.textContent).toContain('outside-list')
+    await waitFor(() => expect(within(cell).getAllByTestId('codex-turn-state-dot').map(dot => dot.getAttribute('data-state'))).toEqual(['green', 'gray', 'gray']))
+    expect(within(cell).getByTestId('codex-turn-state-model-gpt-6-astra').getAttribute('title')).toContain('passiveOnly')
+    expect(within(cell).getByTestId('codex-turn-state-more').textContent).toBe('+1')
+    expect(cell.textContent).not.toContain('outside-list')
+    expect(cell.textContent).not.toContain('passiveOnly')
+    expect(cell.textContent).not.toContain('observationEmpty')
     expect(within(cell).queryByTestId('codex-turn-state-cache-summary')).toBeNull()
     await fireEvent.click(within(cell).getByRole('button'))
     const dialog = await screen.findByRole('dialog', { name: 'admin.accounts.codexTurnState.statusTitle' })

@@ -741,6 +741,14 @@ const autoRefreshIntervalSeconds = ref<(typeof autoRefreshIntervals)[number]>(30
 const autoRefreshCountdown = ref(0)
 const autoRefreshETag = ref<string | null>(null)
 const autoRefreshFetching = ref(false)
+let autoRefreshGeneration = 0
+let autoRefreshAbortController: AbortController | null = null
+const invalidateAutoRefreshRequest = () => {
+  autoRefreshGeneration += 1
+  autoRefreshAbortController?.abort()
+  autoRefreshAbortController = null
+  autoRefreshFetching.value = false
+}
 const AUTO_REFRESH_SILENT_WINDOW_MS = 15000
 const autoRefreshSilentUntil = ref(0)
 const hasPendingListSync = ref(false)
@@ -1070,6 +1078,7 @@ const setAutoRefreshEnabled = (enabled: boolean) => {
     resumeAutoRefresh()
   } else {
     pauseAutoRefresh()
+    invalidateAutoRefreshRequest()
     autoRefreshCountdown.value = 0
   }
 }
@@ -1215,6 +1224,7 @@ useSwipeSelect(accountTableRef, {
 }, swipeVirtualContext)
 
 const resetAutoRefreshCache = () => {
+  invalidateAutoRefreshRequest()
   autoRefreshETag.value = null
   upstreamBillingRateETag.value = null
 }
@@ -1308,6 +1318,8 @@ const applyUpstreamBillingRateSnapshots = async (
   })
 
   if (changed) {
+    invalidateAutoRefreshRequest()
+    autoRefreshETag.value = null
     accounts.value = nextAccounts
     upstreamBillingNow.value = Date.now()
   }
@@ -1509,13 +1521,24 @@ const mergeAccountsIncrementally = (nextRows: Account[]) => {
 const refreshAccountsIncrementally = async () => {
   if (autoRefreshFetching.value) return
   syncAccountListDerivedParams()
+  const controller = new AbortController()
+  const requestGeneration = autoRefreshGeneration
+  const requestPage = pagination.page
+  const requestPageSize = pagination.page_size
+  const requestParams = { ...toRaw(params) }
+  const contextKey = () => JSON.stringify([pagination.page, pagination.page_size, toRaw(params)])
+  const requestContextKey = contextKey()
+  const isCurrent = () => autoRefreshAbortController === controller &&
+    !controller.signal.aborted && requestGeneration === autoRefreshGeneration &&
+    requestContextKey === contextKey()
+  autoRefreshAbortController = controller
   autoRefreshFetching.value = true
   try {
     const rowsBeforeRefresh = accounts.value
     const result = await adminAPI.accounts.listWithEtag(
-      pagination.page,
-      pagination.page_size,
-      toRaw(params) as {
+      requestPage,
+      requestPageSize,
+      requestParams as {
         platform?: string
         type?: string
         status?: string
@@ -1526,8 +1549,9 @@ const refreshAccountsIncrementally = async () => {
         sort_order?: AccountSortOrder
 
       },
-      { etag: autoRefreshETag.value }
+      { etag: autoRefreshETag.value, signal: controller.signal }
     )
+    if (!isCurrent()) return
 
     if (result.etag) {
       autoRefreshETag.value = result.etag
@@ -1542,12 +1566,15 @@ const refreshAccountsIncrementally = async () => {
 
     // Runtime cache state can change even when the account-list ETag is unchanged.
     if (accounts.value === rowsBeforeRefresh) await refreshCodexTurnStateBatch()
-
+    if (!isCurrent()) return
     await refreshTodayStatsBatch()
   } catch (error) {
-    console.error('Auto refresh failed:', error)
+    if (isCurrent()) console.error('Auto refresh failed:', error)
   } finally {
-    autoRefreshFetching.value = false
+    if (autoRefreshAbortController === controller) {
+      autoRefreshAbortController = null
+      autoRefreshFetching.value = false
+    }
   }
 }
 
@@ -2078,6 +2105,7 @@ const handleBulkProbeUpstreamBilling = async () => {
 }
 const updateSchedulableInList = (accountIds: number[], schedulable: boolean) => {
   if (accountIds.length === 0) return
+  resetAutoRefreshCache()
   const idSet = new Set(accountIds)
   accounts.value = accounts.value.map((account) => (idSet.has(account.id) ? { ...account, schedulable } : account))
 }
@@ -2335,6 +2363,7 @@ const syncPaginationAfterLocalRemoval = () => {
 const patchAccountInList = (updatedAccount: Account) => {
   const index = accounts.value.findIndex(account => account.id === updatedAccount.id)
   if (index === -1) return
+  resetAutoRefreshCache()
   const mergedAccount = mergeRuntimeFields(accounts.value[index], updatedAccount)
   if (!accountMatchesCurrentFilters(mergedAccount)) {
     accounts.value = accounts.value.filter(account => account.id !== mergedAccount.id)
@@ -2695,6 +2724,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  invalidateAutoRefreshRequest()
   upstreamBillingRateAbortController?.abort()
   if (usageBatchFlushTimer !== null) {
     clearTimeout(usageBatchFlushTimer)

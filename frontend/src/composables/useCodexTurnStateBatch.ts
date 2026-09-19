@@ -20,13 +20,29 @@ export function useCodexTurnStateBatch(
   async function refresh() {
     controller?.abort()
     const currentGeneration = ++generation
-    statuses.value = {}
-    errors.value = new Set()
-    models.value = []
     loading.value = false
-    if (!visible.value || tableLoading.value) return
-    const ids = [...new Set(accounts.value.filter(supportsCodexTurnState).map(account => account.id))]
-    if (!ids.length) return
+    if (!visible.value) {
+      statuses.value = {}
+      errors.value = new Set()
+      models.value = []
+      return
+    }
+    const rows = accounts.value.filter(supportsCodexTurnState)
+    const ids = [...new Set(rows.map(account => account.id))]
+    // Keep the last result while refreshing the same rows. Prune departed or
+    // reparented accounts before awaiting any response so their state cannot
+    // appear on a different page or credential owner.
+    const retained: Record<string, CodexTurnStateStatus> = {}
+    const retainedErrors = new Set<number>()
+    for (const account of rows) {
+      const previous = statuses.value[String(account.id)]
+      const ownerID = account.codex_turn_state_inherited_from_account_id ?? account.parent_account_id ?? account.id
+      if (previous?.owner_account_id === ownerID) retained[String(account.id)] = previous
+      if (errors.value.has(account.id) && (!previous || previous.owner_account_id === ownerID)) retainedErrors.add(account.id)
+    }
+    statuses.value = retained
+    errors.value = retainedErrors
+    if (!ids.length || tableLoading.value) return
     const currentController = new AbortController()
     controller = currentController
     const isCurrent = () => currentGeneration === generation && !currentController.signal.aborted
@@ -44,8 +60,10 @@ export function useCodexTurnStateBatch(
           const missing = new Set(errors.value)
           for (const id of batch) {
             const status = result.items?.[String(id)]
-            if (status?.account_id === id && typeof status.enabled === 'boolean' && Array.isArray(status.models)) next[String(id)] = status
-            else missing.add(id)
+            if (status?.account_id === id && typeof status.enabled === 'boolean' && Array.isArray(status.models)) {
+              next[String(id)] = status
+              missing.delete(id)
+            } else missing.add(id)
           }
           statuses.value = next
           errors.value = missing
@@ -66,6 +84,8 @@ export function useCodexTurnStateBatch(
   onScopeDispose(() => {
     ++generation
     controller?.abort()
+    statuses.value = {}
+    errors.value = new Set()
   })
   return { statuses, errors, models, loading, observedAt, refresh }
 }
