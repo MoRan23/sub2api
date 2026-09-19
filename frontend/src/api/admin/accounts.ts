@@ -214,6 +214,18 @@ export interface CodexTurnStateModelStatus {
   refresh_reason?: string
 }
 
+export interface CodexTurnStateObservation {
+  model: string
+  observed_at: string
+  outbound_length: number
+  response_length: number
+  response_shape: string
+  response_observed_shape?: string
+  response_cipher_blocks?: number
+  response_validation_reason?: string
+  response_source?: 'header' | 'metadata'
+}
+
 export interface CodexTurnStateStatus {
   account_id: number
   owner_account_id: number
@@ -225,6 +237,9 @@ export interface CodexTurnStateStatus {
   expected_length: number
   reason: string
   models: CodexTurnStateModelStatus[]
+  observation_enabled?: boolean
+  observation_scope?: 'instance'
+  observations?: CodexTurnStateObservation[]
 }
 
 export async function getCodexTurnState(id: number, signal?: AbortSignal): Promise<CodexTurnStateStatus> {

@@ -104,6 +104,7 @@ type CodexTurnStateAttempt struct {
 }
 
 type CodexTurnStateSafeObservation struct {
+	ObservedAt       time.Time
 	TokenLength      int
 	CipherBlocks     int
 	Shape            string
@@ -165,16 +166,33 @@ type CodexTurnStateModelStatus struct {
 }
 
 type CodexTurnStateStatus struct {
-	AccountID           int64                       `json:"account_id"`
-	OwnerAccountID      int64                       `json:"owner_account_id"`
-	Inherited           bool                        `json:"inherited"`
-	Enabled             bool                        `json:"enabled"`
-	AccountType         string                      `json:"account_type"`
-	ResolvedAccountType string                      `json:"resolved_account_type"`
-	ExpectedLength      int                         `json:"expected_length"`
-	Reason              string                      `json:"reason,omitempty"`
-	CollectorProxyID    *int64                      `json:"collector_proxy_id"`
-	Models              []CodexTurnStateModelStatus `json:"models"`
+	AccountID           int64                            `json:"account_id"`
+	OwnerAccountID      int64                            `json:"owner_account_id"`
+	Inherited           bool                             `json:"inherited"`
+	Enabled             bool                             `json:"enabled"`
+	AccountType         string                           `json:"account_type"`
+	ResolvedAccountType string                           `json:"resolved_account_type"`
+	ExpectedLength      int                              `json:"expected_length"`
+	Reason              string                           `json:"reason,omitempty"`
+	CollectorProxyID    *int64                           `json:"collector_proxy_id"`
+	Models              []CodexTurnStateModelStatus      `json:"models"`
+	ObservationEnabled  bool                             `json:"observation_enabled"`
+	ObservationScope    string                           `json:"observation_scope"`
+	Observations        []CodexTurnStateModelObservation `json:"observations"`
+}
+
+// CodexTurnStateModelObservation is a process-local diagnostic summary. It
+// contains no token, ciphertext, hash, or credential/configuration identifier.
+type CodexTurnStateModelObservation struct {
+	Model                    string    `json:"model"`
+	ObservedAt               time.Time `json:"observed_at"`
+	ResponseLength           int       `json:"response_length"`
+	ResponseShape            string    `json:"response_shape"`
+	ResponseObservedShape    string    `json:"response_observed_shape,omitempty"`
+	ResponseCipherBlocks     int       `json:"response_cipher_blocks,omitempty"`
+	ResponseValidationReason string    `json:"response_validation_reason,omitempty"`
+	ResponseSource           string    `json:"response_source,omitempty"`
+	OutboundLength           int       `json:"outbound_length"`
 }
 
 type CodexTurnStateBatchStatus struct {

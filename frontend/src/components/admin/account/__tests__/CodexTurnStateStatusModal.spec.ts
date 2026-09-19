@@ -49,7 +49,7 @@ describe('Codex turn-state status modal', () => {
     expect(wrapper.text()).not.toContain('secret-token')
     await wrapper.findAll('button').find(button => button.text() === 'common.refresh')!.trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('admin.accounts.codexTurnState.empty')
+    expect(wrapper.text()).toContain('admin.accounts.codexTurnState.cacheEmpty')
     wrapper.unmount()
   })
 
@@ -60,6 +60,40 @@ describe('Codex turn-state status modal', () => {
     expect(wrapper.text()).toContain(`admin.accounts.codexTurnState.states.${state}`)
     expect(wrapper.text()).not.toContain('admin.accounts.codexTurnState.disabled')
     expect(wrapper.text()).not.toContain('admin.accounts.codexTurnState.states.ready')
+    wrapper.unmount()
+  })
+
+  it('shows disabled-cache observations, including off-list models, time, shape and validation details separately', async () => {
+    getCodexTurnState.mockResolvedValue({ ...status, enabled: false, observation_enabled: true, observation_scope: 'instance', observations: [
+      { model: 'gpt-outside-list', observed_at: '2026-09-20T12:00:00Z', outbound_length: 292, response_length: 356,
+        response_shape: 'unknown', response_observed_shape: 'team_business_extended', response_cipher_blocks: 13,
+        response_validation_reason: 'account_type_unknown', response_source: 'metadata' },
+      { model: 'gpt-no-response', observed_at: '2026-09-20T11:30:00Z', outbound_length: 0, response_length: 0, response_shape: 'missing' },
+    ] })
+    const wrapper = render()
+    await flushPromises()
+    const observations = wrapper.get('[data-testid="codex-turn-state-observations-section"]')
+    expect(observations.text()).toContain('observationScopeHint')
+    const outside = observations.get('[data-testid="codex-turn-state-observation-gpt-outside-list"]')
+    expect(outside.text()).toContain('characters{"count":356}')
+    expect(outside.text()).toContain('observedShapes.team_business_extended')
+    expect(outside.text()).toContain('validationReasons.account_type_unknown')
+    expect(outside.text()).toContain('sources.response_metadata')
+    expect(outside.text()).toContain(new Date('2026-09-20T12:00:00Z').toLocaleString())
+    expect(outside.text()).toContain('13')
+    expect(observations.text()).toContain('responseStateMissing')
+    expect(wrapper.find('[data-testid="codex-turn-state-cache-section"]').exists()).toBe(false)
+    expect(observations.text()).not.toContain('states.ready')
+    expect(observations.text()).not.toContain('remaining')
+    wrapper.unmount()
+  })
+
+  it.each([true, false])('distinguishes empty instance observation from a disabled global switch (%s)', async (enabled) => {
+    getCodexTurnState.mockResolvedValue({ ...status, enabled: false, observation_enabled: enabled, observation_scope: 'instance', observations: [] })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.text()).toContain(enabled ? 'observationEmpty' : 'observationDisabled')
+    expect(wrapper.text()).not.toContain(enabled ? 'observationDisabled' : 'observationEmpty')
     wrapper.unmount()
   })
 

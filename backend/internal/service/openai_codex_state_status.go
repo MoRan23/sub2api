@@ -132,12 +132,21 @@ func (s *CodexTurnStateService) GetStatuses(ctx context.Context, accountIDs []in
 		}
 	}
 	now := s.statusNow()
+	observationEnabled, observations := globalFingerprintObserver.codexStateObservations(ownerIDs)
 	for _, id := range ids {
 		if owner := owners[id]; owner != nil {
-			result.Items[strconv.FormatInt(id, 10)] = projectCodexTurnStateStatus(id, owner, recordsByOwner[owner.ID], models, nil, now)
+			item := projectCodexTurnStateStatus(id, owner, recordsByOwner[owner.ID], models, nil, now)
+			attachCodexTurnStateObservations(item, observationEnabled, observations[owner.ID])
+			result.Items[strconv.FormatInt(id, 10)] = item
 		}
 	}
 	return result, nil
+}
+
+func attachCodexTurnStateObservations(status *CodexTurnStateStatus, enabled bool, observations []CodexTurnStateModelObservation) {
+	status.ObservationEnabled = enabled
+	status.ObservationScope = "instance"
+	status.Observations = append([]CodexTurnStateModelObservation{}, observations...)
 }
 
 func projectCodexTurnStateStatus(accountID int64, owner *Account, records []CodexTurnStateRecord, allowedModels []string, policyErr error, now time.Time) *CodexTurnStateStatus {

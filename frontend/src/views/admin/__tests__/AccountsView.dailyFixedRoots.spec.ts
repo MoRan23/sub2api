@@ -150,6 +150,27 @@ describe('AccountsView daily fixed root HTTP contract', () => {
     expect(screen.getByRole('columnheader', { name: 'admin.accounts.columns.codexTurnState' })).toBeTruthy()
   })
 
+  it('carries batch observations into the disabled-cache column and full status dialog', async () => {
+    turnStateResponse = { models: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'], items: { '42': {
+      account_id: 42, owner_account_id: 42, inherited: false, enabled: false, expected_length: 332, models: [],
+      observation_enabled: true, observation_scope: 'instance', observations: [
+        { model: 'gpt-6-astra', observed_at: '2026-09-20T12:00:00Z', outbound_length: 0, response_length: 332, response_shape: 'target', response_observed_shape: 'team_business_target' },
+        { model: 'outside-list', observed_at: '2026-09-20T12:00:01Z', outbound_length: 0, response_length: 356, response_shape: 'suspect', response_observed_shape: 'team_business_extended' },
+      ]
+    } } }
+    const { renderErrors } = renderAccounts()
+    const cell = await screen.findByTestId('account-codex-turn-state-42')
+    await waitFor(() => expect(within(cell).getAllByTestId('codex-turn-state-observation-summary')).toHaveLength(2))
+    expect(cell.textContent).toContain('passiveOnly')
+    expect(cell.textContent).toContain('outside-list')
+    expect(within(cell).queryByTestId('codex-turn-state-cache-summary')).toBeNull()
+    await fireEvent.click(within(cell).getByRole('button'))
+    const dialog = await screen.findByRole('dialog', { name: 'admin.accounts.codexTurnState.statusTitle' })
+    expect(await within(dialog).findByTestId('codex-turn-state-observation-outside-list')).toBeTruthy()
+    expect(within(dialog).queryByTestId('codex-turn-state-cache-section')).toBeNull()
+    expect(renderErrors).not.toHaveBeenCalled()
+  })
+
   it('shows a compact summary and reveals the labelled roots only after opening details', async () => {
     const { renderErrors } = renderAccounts()
     await screen.findByRole('button', { name: 'admin.accounts.dailyFixedRoots.viewDetails' })

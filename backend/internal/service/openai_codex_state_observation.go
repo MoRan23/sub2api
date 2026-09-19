@@ -37,9 +37,13 @@ type CodexTurnStateObservation struct {
 }
 
 type codexTurnStateWireObservation struct {
-	mu       sync.Mutex
-	value    CodexTurnStateObservation
-	sequence uint64
+	mu             sync.Mutex
+	value          CodexTurnStateObservation
+	ownerAccountID int64
+	window         uint64
+	sequence       uint64
+	finished       bool
+	observedAt     time.Time
 }
 
 // codexStateBodyPatch is private request-local evidence, never input from a
@@ -103,7 +107,7 @@ func noteOpenAICodexStatePatch(c *gin.Context, attempt *CodexTurnStateAttempt, b
 	if attempt == nil {
 		return
 	}
-	observation := &codexTurnStateWireObservation{value: CodexTurnStateObservation{Enabled: attempt.Enabled, AccountEnabled: attempt.AccountEnabled, MaintenanceReason: attempt.MaintenanceReason, Action: "passthrough", Model: attempt.Model}}
+	observation := &codexTurnStateWireObservation{ownerAccountID: attempt.OwnerAccountID, window: globalFingerprintObserver.codexStateObservationWindow(), value: CodexTurnStateObservation{Enabled: attempt.Enabled, AccountEnabled: attempt.AccountEnabled, MaintenanceReason: attempt.MaintenanceReason, Action: "passthrough", Model: attempt.Model}}
 	if attempt.Snapshot.Token != "" {
 		observation.value.Action = "injected"
 		observation.value.Source = attempt.Snapshot.Source
@@ -203,7 +207,7 @@ func bindCodexTurnStateObservationSequence(observation *codexTurnStateWireObserv
 	observation.mu.Lock()
 	defer observation.mu.Unlock()
 	observation.sequence = seq
-	updateCodexTurnStateObservationEntry(seq, observation.value)
+	globalFingerprintObserver.updateCodexTurnStateObservation(seq, observation.ownerAccountID, observation.value, observation.finished, observation.observedAt, observation.window)
 }
 
 func finishOpenAICodexStateObservation(attempt *CodexTurnStateAttempt) {
@@ -219,6 +223,13 @@ func finishOpenAICodexStateObservation(attempt *CodexTurnStateAttempt) {
 	safe := attempt.SafeObservation()
 	observation.mu.Lock()
 	defer observation.mu.Unlock()
+	if observation.finished {
+		return
+	}
+	observation.finished = true
+	observation.observedAt = safe.ObservedAt
+	// A send error or response without a state must not replace an earlier
+	// actual observation. Only Observe can provide its response timestamp.
 	observation.value.ResponseLength = safe.TokenLength
 	observation.value.ResponseSource = safe.ResponseSource
 	observation.value.ResponseObservedShape = safe.ObservedShape
@@ -236,20 +247,19 @@ func finishOpenAICodexStateObservation(attempt *CodexTurnStateAttempt) {
 		observation.value.ResponseShape = "unknown"
 	}
 	observation.value.RenewalReason = safe.RefreshReason
-	updateCodexTurnStateObservationEntry(observation.sequence, observation.value)
+	globalFingerprintObserver.updateCodexTurnStateObservation(observation.sequence, observation.ownerAccountID, observation.value, true, observation.observedAt, observation.window)
 }
 
 // A fast response can finish between the actual write and binding its observation
 // row. Both publishers hold the snapshot mutex so either ordering retains the
 // latest response summary instead of silently losing or reverting it.
-func updateCodexTurnStateObservationEntry(seq uint64, value CodexTurnStateObservation) {
-	observer := globalFingerprintObserver
+func (observer *fingerprintObserver) updateCodexTurnStateObservation(seq uint64, ownerAccountID int64, value CodexTurnStateObservation, finished bool, observedAt time.Time, window uint64) {
 	if seq == 0 || observer == nil {
 		return
 	}
 	observer.mu.Lock()
 	defer observer.mu.Unlock()
-	if !observer.enabled.Load() {
+	if !observer.enabled.Load() || window == 0 || window != observer.codexStateIndex.window+1 || seq > observer.seq || seq <= observer.codexStateIndex.discardThrough {
 		return
 	}
 	for i := range observer.ring {
@@ -258,6 +268,9 @@ func updateCodexTurnStateObservationEntry(seq uint64, value CodexTurnStateObserv
 			observer.ring[i].CodexTurnState = &copy
 			break
 		}
+	}
+	if finished {
+		observer.codexStateIndex.record(seq, ownerAccountID, value, observedAt)
 	}
 }
 

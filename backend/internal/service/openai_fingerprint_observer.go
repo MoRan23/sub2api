@@ -182,11 +182,12 @@ type FingerprintObservationPage struct {
 type fingerprintObserver struct {
 	enabled atomic.Bool
 
-	mu   sync.Mutex
-	ring []FingerprintObservationEntry
-	head int
-	size int
-	seq  uint64
+	mu              sync.Mutex
+	ring            []FingerprintObservationEntry
+	head            int
+	size            int
+	seq             uint64
+	codexStateIndex codexTurnStateObservationIndex
 }
 
 var globalFingerprintObserver = &fingerprintObserver{
@@ -289,6 +290,7 @@ func (o *fingerprintObserver) setEnabledLocked(enabled bool) {
 		}
 		o.head = 0
 		o.size = 0
+		o.codexStateIndex.clear(o.seq)
 	}
 }
 

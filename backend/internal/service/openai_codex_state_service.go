@@ -266,7 +266,7 @@ func (s *CodexTurnStateService) observe(a *CodexTurnStateAttempt, token, source 
 	now := s.now()
 	envelope, _ := InspectCodexTurnStateEnvelope(token, now)
 	shape, err := ParseCodexTurnState(token, a.accountType, now)
-	a.safeObservation = CodexTurnStateSafeObservation{TokenLength: len(token), CipherBlocks: envelope.CipherBlocks, Shape: shape.Shape, ResponseSource: source,
+	a.safeObservation = CodexTurnStateSafeObservation{ObservedAt: time.Now(), TokenLength: len(token), CipherBlocks: envelope.CipherBlocks, Shape: shape.Shape, ResponseSource: source,
 		ObservedShape: envelope.ObservedShape, ValidationReason: envelope.ValidationReason}
 	if err != nil {
 		if a.safeObservation.ValidationReason == "" {
@@ -782,7 +782,10 @@ func (s *CodexTurnStateService) GetStatus(ctx context.Context, accountID int64) 
 		}
 	}
 	models, policyErr := s.statusModelPolicy(ctx)
-	return projectCodexTurnStateStatus(accountID, owner, records, models, policyErr, s.statusNow()), nil
+	result := projectCodexTurnStateStatus(accountID, owner, records, models, policyErr, s.statusNow())
+	observationEnabled, observations := globalFingerprintObserver.codexStateObservations([]int64{owner.ID})
+	attachCodexTurnStateObservations(result, observationEnabled, observations[owner.ID])
+	return result, nil
 }
 
 func codexStateTimePtr(value time.Time) *time.Time {

@@ -1,7 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import type { AccountListItem } from '@/types'
-import type { CodexTurnStateStatus } from '@/api/admin/accounts'
+import type { CodexTurnStateObservation, CodexTurnStateStatus } from '@/api/admin/accounts'
 import AccountCodexTurnStateCell from '../AccountCodexTurnStateCell.vue'
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({
@@ -19,8 +19,54 @@ const status: CodexTurnStateStatus = {
 function show(overrides: Partial<InstanceType<typeof AccountCodexTurnStateCell>['$props']> = {}) {
   return mount(AccountCodexTurnStateCell, { props: { account, status, models, loading: false, failed: false, now, observedAt: now, ...overrides } })
 }
+function observation(model: string, length: number, shape = 'team_business_extended'): CodexTurnStateObservation {
+  return { model, observed_at: '2026-09-20T12:00:00Z', outbound_length: 0, response_length: length,
+    response_shape: length > 0 ? 'suspect' : 'missing', response_observed_shape: length > 0 ? shape : undefined }
+}
 
 describe('AccountCodexTurnStateCell', () => {
+  it('shows actual response observations with cache maintenance off without presenting them as cached state', () => {
+    const wrapper = show({ status: { ...status, enabled: false, observation_enabled: true, observation_scope: 'instance', observations: [
+      observation(models[0]!, 292, 'personal_target'), observation(models[1]!, 356), observation(models[2]!, 0),
+    ] } })
+    expect(wrapper.text()).toContain('codexTurnState.disabled')
+    expect(wrapper.text()).toContain('passiveOnly')
+    const summaries = wrapper.findAll('[data-testid="codex-turn-state-observation-summary"]')
+    expect(summaries).toHaveLength(3)
+    expect(summaries[0]!.text()).toContain('characters{"count":292}')
+    expect(summaries[0]!.text()).toContain('compactObservedShapes.personal_target')
+    expect(summaries[1]!.text()).toContain('characters{"count":356}')
+    expect(summaries[2]!.text()).toContain('responseStateMissing')
+    expect(wrapper.find('[data-testid="codex-turn-state-cache-summary"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('states.ready')
+    expect(wrapper.text()).not.toContain('columnRemaining')
+  })
+
+  it('separates a ready cached 332 state from the latest observed 356 state', () => {
+    const wrapper = show({ status: { ...status, observation_enabled: true, observations: [observation(models[0]!, 356)] } })
+    const model = wrapper.get(`[data-testid="codex-turn-state-model-${models[0]}"]`)
+    expect(model.get('[data-testid="codex-turn-state-cache-summary"]').text()).toContain('characters{"count":332}')
+    expect(model.get('[data-testid="codex-turn-state-observation-summary"]').text()).toContain('characters{"count":356}')
+    expect(model.text()).toContain('columnRemaining{"minutes":30}')
+  })
+
+  it('prioritizes actual off-list observations when caching is disabled and counts all deduplicated models', () => {
+    const wrapper = show({ status: { ...status, enabled: false, observation_enabled: true, observations: [observation('outside-model', 356)] } })
+    expect(wrapper.text()).toContain('outside-model')
+    expect(wrapper.text()).toContain('characters{"count":356}')
+    expect(wrapper.text()).toContain('columnMore{"count":1}')
+  })
+
+  it('distinguishes global observation off from an enabled instance with no history and removes prior summaries', async () => {
+    const wrapper = show({ status: { ...status, enabled: false, observation_enabled: true, observations: [observation(models[0]!, 356)] } })
+    await wrapper.setProps({ status: { ...status, enabled: false, observation_enabled: false, observations: [] } })
+    expect(wrapper.text()).toContain('observationDisabled')
+    expect(wrapper.text()).not.toContain('characters{"count":356}')
+    await wrapper.setProps({ status: { ...status, enabled: false, observation_enabled: true, observations: [] } })
+    expect(wrapper.text()).toContain('observationEmpty')
+    expect(wrapper.text()).not.toContain('observationDisabled')
+  })
+
   it('shows three model summaries and opens existing details without exposing runtime secrets', async () => {
     const wrapper = show()
     models.forEach(model => expect(wrapper.text()).toContain(model))
