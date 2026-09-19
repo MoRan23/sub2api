@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -276,6 +277,18 @@ func (r *openAICodexStateRepository) ListByAccount(ctx context.Context, ownerID 
 	return r.list(ctx, `SELECT `+codexStateColumns+` FROM openai_codex_state s
 		JOIN accounts a ON a.id=s.owner_account_id WHERE s.owner_account_id=$1 AND `+codexStateLiveAccount+`
 		ORDER BY s.model`, ownerID)
+}
+
+func (r *openAICodexStateRepository) ListByAccounts(ctx context.Context, ownerIDs []int64) ([]service.CodexTurnStateRecord, error) {
+	if len(ownerIDs) == 0 {
+		return []service.CodexTurnStateRecord{}, nil
+	}
+	if err := r.databaseAvailable(); err != nil {
+		return nil, err
+	}
+	return r.list(ctx, `SELECT `+codexStateColumns+` FROM openai_codex_state s
+		JOIN accounts a ON a.id=s.owner_account_id WHERE s.owner_account_id = ANY($1) AND `+codexStateLiveAccount+`
+		ORDER BY s.owner_account_id, s.model`, pq.Array(ownerIDs))
 }
 
 func (r *openAICodexStateRepository) list(ctx context.Context, query string, args ...any) ([]service.CodexTurnStateRecord, error) {

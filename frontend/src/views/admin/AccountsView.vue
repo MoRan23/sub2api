@@ -268,6 +268,14 @@
             </div>
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
           </template>
+          <template #cell-codex_turn_state="{ row }">
+            <AccountCodexTurnStateCell
+              :account="row" :status="codexTurnStateStatuses[String(row.id)]" :models="codexTurnStateModels"
+              :loading="codexTurnStateLoading" :failed="codexTurnStateErrors.has(row.id)"
+              :now="Math.max(upstreamBillingNow, codexTurnStateObservedAt)" :observed-at="codexTurnStateObservedAt"
+              @open="codexTurnStateAccount = { id: row.id, name: row.name }"
+            />
+          </template>
           <template #cell-platform_type="{ row }">
             <div class="flex min-w-0 flex-col gap-1">
               <div class="flex flex-wrap items-center gap-1">
@@ -527,6 +535,7 @@ import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import type { OAuthDailySessionPool } from '@/api/admin/accounts'
 import { useTableLoader } from '@/composables/useTableLoader'
+import { useCodexTurnStateBatch } from '@/composables/useCodexTurnStateBatch'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
@@ -541,6 +550,7 @@ import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrs
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
 import AccountDailyFixedRootsModal from '@/components/admin/account/AccountDailyFixedRootsModal.vue'
 import CodexTurnStateStatusModal from '@/components/admin/account/CodexTurnStateStatusModal.vue'
+import AccountCodexTurnStateCell from '@/components/admin/account/AccountCodexTurnStateCell.vue'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
@@ -1131,6 +1141,11 @@ const {
 const dailyFixedRootPools = reactive<Record<number, OAuthDailySessionPool>>({})
 const dailyFixedRootAccount = ref<Pick<AccountListItem, 'id' | 'name'> | null>(null)
 const codexTurnStateAccount = ref<Pick<AccountListItem, 'id' | 'name'> | null>(null)
+const {
+  statuses: codexTurnStateStatuses, errors: codexTurnStateErrors, models: codexTurnStateModels,
+  loading: codexTurnStateLoading, observedAt: codexTurnStateObservedAt, refresh: refreshCodexTurnStateBatch
+} = useCodexTurnStateBatch(accounts, computed(() => isColumnVisible('codex_turn_state')), loading,
+  (ids, signal) => adminAPI.accounts.getCodexTurnStates(ids, signal))
 const selectedDailyFixedRootPool = computed(() => {
   const pool = dailyFixedRootAccount.value ? dailyFixedRootPools[dailyFixedRootAccount.value.id] : undefined
   return Array.isArray(pool?.stream_session_ids) ? pool : undefined
@@ -1496,6 +1511,7 @@ const refreshAccountsIncrementally = async () => {
   syncAccountListDerivedParams()
   autoRefreshFetching.value = true
   try {
+    const rowsBeforeRefresh = accounts.value
     const result = await adminAPI.accounts.listWithEtag(
       pagination.page,
       pagination.page_size,
@@ -1523,6 +1539,9 @@ const refreshAccountsIncrementally = async () => {
       hasPendingListSync.value = false
     }
     upstreamBillingNow.value = Date.now()
+
+    // Runtime cache state can change even when the account-list ETag is unchanged.
+    if (accounts.value === rowsBeforeRefresh) await refreshCodexTurnStateBatch()
 
     await refreshTodayStatsBatch()
   } catch (error) {
@@ -1901,6 +1920,7 @@ const allColumns = computed(() => {
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'daily_fixed_roots', label: t('admin.accounts.columns.dailyFixedRoots'), sortable: false },
+    { key: 'codex_turn_state', label: t('admin.accounts.columns.codexTurnState'), sortable: false },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]

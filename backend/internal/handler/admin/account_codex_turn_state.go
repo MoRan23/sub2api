@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"strconv"
+	"strings"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -12,10 +13,49 @@ import (
 
 type codexTurnStateStatusService interface {
 	GetStatus(context.Context, int64) (*service.CodexTurnStateStatus, error)
+	GetStatuses(context.Context, []int64) (*service.CodexTurnStateBatchStatus, error)
 }
 
 func (h *AccountHandler) SetCodexTurnStateService(state codexTurnStateStatusService) {
 	h.codexTurnState = state
+}
+
+func (h *AccountHandler) GetCodexTurnStates(c *gin.Context) {
+	const maxAccountIDs = 200
+	const maxAccountIDsQueryBytes = 8192
+	queries, present := c.GetQueryArray("account_ids")
+	if !present || len(queries) != 1 || queries[0] == "" || len(queries[0]) > maxAccountIDsQueryBytes {
+		response.BadRequest(c, "account_ids must contain 1 to 200 unique positive account IDs")
+		return
+	}
+	ids := make([]int64, 0, maxAccountIDs)
+	seen := make(map[int64]struct{}, maxAccountIDs)
+	for _, raw := range strings.Split(queries[0], ",") {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 || raw[0] < '0' || raw[0] > '9' {
+			response.BadRequest(c, "Invalid account ID in account_ids")
+			return
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+		if len(ids) > maxAccountIDs {
+			response.BadRequest(c, "account_ids must contain at most 200 unique account IDs")
+			return
+		}
+	}
+	if h.codexTurnState == nil {
+		response.ErrorFrom(c, infraerrors.New(503, "CODEX_TURN_STATE_UNAVAILABLE", "turn-state storage is unavailable"))
+		return
+	}
+	status, err := h.codexTurnState.GetStatuses(c.Request.Context(), ids)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, status)
 }
 
 func (h *AccountHandler) GetCodexTurnState(c *gin.Context) {

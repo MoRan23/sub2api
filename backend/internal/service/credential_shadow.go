@@ -18,6 +18,15 @@ func resolveCredentialAccount(ctx context.Context, repo AccountRepository, accou
 	if err != nil {
 		return nil, fmt.Errorf("resolve spark shadow parent %d: %w", *account.ParentAccountID, err)
 	}
+	return credentialAccountFromParent(account, parent)
+}
+
+// credentialAccountFromParent shares the same one-level parent validation with
+// read-only batch callers that have already loaded all requested parents.
+func credentialAccountFromParent(account, parent *Account) (*Account, error) {
+	if account == nil || !account.IsShadow() {
+		return account, nil
+	}
 	if parent == nil {
 		return nil, fmt.Errorf("spark shadow parent %d not found", *account.ParentAccountID)
 	}

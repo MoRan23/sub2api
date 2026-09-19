@@ -61,6 +61,7 @@ type CodexTurnStateRepository interface {
 	SaveCAS(context.Context, CodexTurnStateRecord, int64) (bool, error)
 	ListActive(context.Context, time.Time, int) ([]CodexTurnStateRecord, error)
 	ListByAccount(context.Context, int64) ([]CodexTurnStateRecord, error)
+	ListByAccounts(context.Context, []int64) ([]CodexTurnStateRecord, error)
 	HasBusiness(context.Context, CodexTurnStateKey, time.Time) (bool, error)
 	AcquireCollector(context.Context, int64, string, time.Duration) (bool, error)
 	ReleaseCollector(context.Context, int64, string) error
@@ -174,4 +175,9 @@ type CodexTurnStateStatus struct {
 	Reason              string                      `json:"reason,omitempty"`
 	CollectorProxyID    *int64                      `json:"collector_proxy_id"`
 	Models              []CodexTurnStateModelStatus `json:"models"`
+}
+
+type CodexTurnStateBatchStatus struct {
+	Items  map[string]*CodexTurnStateStatus `json:"items"`
+	Models []string                         `json:"models"`
 }

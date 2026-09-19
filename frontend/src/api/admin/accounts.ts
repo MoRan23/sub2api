@@ -232,6 +232,18 @@ export async function getCodexTurnState(id: number, signal?: AbortSignal): Promi
   return data
 }
 
+export interface CodexTurnStateBatch {
+  items: Record<string, CodexTurnStateStatus>
+  models: string[]
+}
+
+export async function getCodexTurnStates(accountIds: number[], signal?: AbortSignal): Promise<CodexTurnStateBatch> {
+  const { data } = await apiClient.get<CodexTurnStateBatch>('/admin/accounts/codex-turn-state', {
+    params: { account_ids: accountIds.join(',') }, signal
+  })
+  return data
+}
+
 /**
  * Create new account
  * @param accountData - Account data
@@ -1142,6 +1154,7 @@ export const accountsAPI = {
   getUpstreamBillingRatesWithEtag,
   getById,
   getCodexTurnState,
+  getCodexTurnStates,
   create,
   duplicate,
   update,

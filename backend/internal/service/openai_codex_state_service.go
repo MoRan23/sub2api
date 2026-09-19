@@ -774,58 +774,15 @@ func (s *CodexTurnStateService) GetStatus(ctx context.Context, accountID int64) 
 	if owner == nil {
 		return nil, errors.New("account_not_found")
 	}
-	cfg := CodexTurnStateConfigForAccount(owner)
-	result := &CodexTurnStateStatus{AccountID: accountID, OwnerAccountID: owner.ID, Inherited: owner.ID != accountID, Enabled: cfg.Enabled && codexTurnStateEligible(owner), AccountType: cfg.AccountType, ResolvedAccountType: CodexTurnStateAccountTypeForAccount(owner), CollectorProxyID: cfg.CollectorProxyID, Models: []CodexTurnStateModelStatus{}}
-	if result.ResolvedAccountType == "personal" {
-		result.ExpectedLength = 292
-	} else if result.ResolvedAccountType == "team_business" {
-		result.ExpectedLength = 332
-	}
-	if !result.Enabled {
-		result.Reason = "disabled"
-	} else if result.ExpectedLength == 0 {
-		result.Reason = "account_type_unknown"
-	} else if cfg.CollectorProxyID == nil {
-		result.Reason = "business_learning_only"
-	}
-	if s.repo == nil {
-		return result, nil
-	}
-	records, err := s.repo.ListByAccount(ctx, owner.ID)
-	if err != nil {
-		return nil, err
-	}
-	now := s.now()
-	for _, record := range records {
-		if record.Generation != CodexTurnStateGenerationForAccount(owner) {
-			continue
+	var records []CodexTurnStateRecord
+	if s.repo != nil {
+		records, err = s.repo.ListByAccount(ctx, owner.ID)
+		if err != nil {
+			return nil, err
 		}
-		item := CodexTurnStateModelStatus{Model: record.Model, State: "missing", Shape: record.Shape, Source: record.Source, TokenLength: record.TokenLength, CipherBlocks: record.CipherBlocks, CollectorPaused: record.CollectorPaused, LastError: record.LastError, RefreshReason: record.RefreshReason}
-		if record.EncryptedToken != "" {
-			item.State = "expired"
-			if record.ExpiresAt.After(now) {
-				item.State = "ready"
-				item.RemainingSeconds = int64(record.ExpiresAt.Sub(now) / time.Second)
-			}
-		}
-		if record.CollectorPaused {
-			item.State = "paused"
-		}
-		allowed, _, policyErr := s.modelAllowed(ctx, record.Model)
-		item.ModelAllowed = allowed && policyErr == nil
-		if !item.ModelAllowed {
-			item.State = "model_excluded"
-			if policyErr != nil {
-				item.State = "model_policy_unavailable"
-			}
-		}
-		item.ExpiresAt = codexStateTimePtr(record.ExpiresAt)
-		item.LastBusinessAt = codexStateTimePtr(record.LastBusinessAt)
-		item.LastCollectedAt = codexStateTimePtr(record.LastCollectedAt)
-		item.NextCollectAt = codexStateTimePtr(record.NextCollectAt)
-		result.Models = append(result.Models, item)
 	}
-	return result, nil
+	models, policyErr := s.statusModelPolicy(ctx)
+	return projectCodexTurnStateStatus(accountID, owner, records, models, policyErr, s.statusNow()), nil
 }
 
 func codexStateTimePtr(value time.Time) *time.Time {

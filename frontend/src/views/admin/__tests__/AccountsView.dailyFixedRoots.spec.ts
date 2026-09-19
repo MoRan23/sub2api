@@ -13,7 +13,7 @@ vi.mock('@/stores/app', () => ({
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ token: 'test-token' }) }))
 vi.mock('vue-i18n', async () => ({
   ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'),
-  useI18n: () => ({ t: (key: string) => key })
+  useI18n: () => ({ t: (key: string) => key, te: () => true })
 }))
 
 const pool = fixture.items['42']
@@ -30,6 +30,8 @@ const accounts = [
 const success = (data: unknown) => HttpResponse.json({ code: 0, data })
 const poolRequests: string[] = []
 let poolResponse: unknown
+const turnStateRequests: string[] = []
+let turnStateResponse = { items: {} as Record<string, unknown>, models: [] as string[] }
 const server = setupServer(
   http.get('*/api/v1/admin/accounts', () => success({
     items: accounts, total: accounts.length, page: 1, page_size: 20, pages: 1
@@ -38,6 +40,11 @@ const server = setupServer(
     poolRequests.push(new URL(request.url).searchParams.get('account_ids') ?? '')
     return success(poolResponse)
   }),
+  http.get('*/api/v1/admin/accounts/codex-turn-state', ({ request }) => {
+    turnStateRequests.push(new URL(request.url).searchParams.get('account_ids') ?? '')
+    return success(turnStateResponse)
+  }),
+  http.get('*/api/v1/admin/accounts/:id/codex-turn-state', ({ params }) => success(turnStateResponse.items[String(params.id)])),
   http.get('*/api/v1/admin/proxies/all', () => success([])),
   http.get('*/api/v1/admin/groups/all', () => success([])),
   http.get('*/api/v1/admin/accounts/upstream-billing-probe/settings', () => success({ enabled: false }))
@@ -100,6 +107,8 @@ beforeEach(() => {
   localStorage.setItem('account-hidden-columns-version', 'scheduler-score-hidden-by-default')
   poolRequests.length = 0
   poolResponse = fixture
+  turnStateRequests.length = 0
+  turnStateResponse = { items: {}, models: [] }
 })
 afterEach(() => {
   cleanup()
@@ -108,6 +117,39 @@ afterEach(() => {
 })
 
 describe('AccountsView daily fixed root HTTP contract', () => {
+  it('shows the turn-state column by default, batches supported rows, and opens existing status details', async () => {
+    turnStateResponse = { models: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'], items: { '42': {
+      account_id: 42, owner_account_id: 42, inherited: false, enabled: true,
+      account_type: 'auto', resolved_account_type: 'team_business', expected_length: 332,
+      models: [{ model: 'gpt-6-astra', state: 'ready', shape: 'target', source: 'business', token_length: 332, remaining_seconds: 1800 }]
+    } } }
+    const { renderErrors } = renderAccounts()
+    const cell = await screen.findByTestId('account-codex-turn-state-42')
+    await waitFor(() => expect(cell.textContent).toContain('gpt-6-astra'))
+    expect(screen.getByRole('columnheader', { name: 'admin.accounts.columns.codexTurnState' })).toBeTruthy()
+    expect(cell.textContent).toContain('gpt-5.6-sol')
+    expect(cell.textContent).toContain('gpt-5.6-terra')
+    expect(turnStateRequests).toEqual(['42,43'])
+    expect(screen.getByTestId('account-codex-turn-state-43').textContent).toContain('columnUnavailable')
+    expect(screen.getByTestId('account-codex-turn-state-44').textContent).toBe('—')
+    await fireEvent.click(within(cell).getByRole('button'))
+    const dialog = await screen.findByRole('dialog', { name: 'admin.accounts.codexTurnState.statusTitle' })
+    expect(await within(dialog).findByText('gpt-6-astra')).toBeTruthy()
+    expect(renderErrors).not.toHaveBeenCalled()
+  })
+
+  it('makes no turn-state request for a saved hidden column and loads it when shown', async () => {
+    localStorage.setItem('account-hidden-columns', JSON.stringify(['today_stats', 'usage', 'scheduler_score', 'codex_turn_state']))
+    renderAccounts()
+    await screen.findByText(accounts[0]!.name)
+    expect(turnStateRequests).toEqual([])
+    expect(screen.queryByRole('columnheader', { name: 'admin.accounts.columns.codexTurnState' })).toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: 'admin.accounts.moreActions' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'admin.accounts.columns.codexTurnState' }))
+    await waitFor(() => expect(turnStateRequests).toEqual(['42,43']))
+    expect(screen.getByRole('columnheader', { name: 'admin.accounts.columns.codexTurnState' })).toBeTruthy()
+  })
+
   it('shows a compact summary and reveals the labelled roots only after opening details', async () => {
     const { renderErrors } = renderAccounts()
     await screen.findByRole('button', { name: 'admin.accounts.dailyFixedRoots.viewDetails' })

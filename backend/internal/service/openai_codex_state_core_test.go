@@ -150,6 +150,21 @@ func (r *codexStateMemoryRepo) ListByAccount(_ context.Context, id int64) ([]Cod
 	}
 	return out, nil
 }
+func (r *codexStateMemoryRepo) ListByAccounts(_ context.Context, ids []int64) ([]CodexTurnStateRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	owners := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		owners[id] = true
+	}
+	var records []CodexTurnStateRecord
+	for _, record := range r.records {
+		if owners[record.OwnerAccountID] {
+			records = append(records, record)
+		}
+	}
+	return records, nil
+}
 func (r *codexStateMemoryRepo) HasBusiness(_ context.Context, k CodexTurnStateKey, now time.Time) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

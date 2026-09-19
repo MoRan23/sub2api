@@ -394,6 +394,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/upstream-billing-probe/batch", h.Admin.Account.ProbeUpstreamBillingBatch)
 		accounts.GET("/ollama-cloud-usage/settings", h.Admin.Account.GetOllamaCloudUsageSettings)
 		accounts.PUT("/ollama-cloud-usage/settings", h.Admin.Account.UpdateOllamaCloudUsageSettings)
+		accounts.GET("/codex-turn-state", h.Admin.Account.GetCodexTurnStates)
 		accounts.GET("/:id", h.Admin.Account.GetByID)
 		accounts.GET("/:id/codex-turn-state", h.Admin.Account.GetCodexTurnState)
 		accounts.POST("", h.Admin.Account.Create)
