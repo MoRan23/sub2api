@@ -379,7 +379,10 @@ const uiLoading = ref(false);
 const uiError = ref("");
 const iframeHeight = ref(640);
 const pluginFrameLoaded = ref(false);
-const pendingBridgeRequests = new Map<string, number>();
+const pendingBridgeRequests = new Map<
+  string,
+  { timeout: number; request: PluginBridgeMessage }
+>();
 
 function errorMessage(error: unknown): string {
   if (typeof error === "object" && error !== null && "message" in error) {
@@ -548,7 +551,7 @@ function closeConfiguration(): void {
 }
 
 function clearPendingBridgeRequests(): void {
-  for (const timeout of pendingBridgeRequests.values()) window.clearTimeout(timeout);
+  for (const { timeout } of pendingBridgeRequests.values()) window.clearTimeout(timeout);
   pendingBridgeRequests.clear();
 }
 
@@ -560,22 +563,30 @@ function handlePluginFrameLoad(): void {
   uiLoading.value = false;
 }
 
-function registerBridgeRequest(requestID: string): void {
+function registerBridgeRequest(requestID: string, request: PluginBridgeMessage): void {
   const timeout = window.setTimeout(() => {
     pendingBridgeRequests.delete(requestID);
   }, 30_000);
-  pendingBridgeRequests.set(requestID, timeout);
+  pendingBridgeRequests.set(requestID, { timeout, request });
 }
 
 function postBridgeResult(
   request: PluginBridgeMessage,
   payload: Record<string, unknown>,
 ): void {
-  if (!pluginFrame.value?.contentWindow || !uiSession.value) return;
+  if (
+    !pluginFrame.value?.contentWindow ||
+    !uiSession.value ||
+    request.bridge_token !== uiSession.value.bridge_token
+  ) {
+    return;
+  }
   const requestID = typeof request.request_id === "string" ? request.request_id.trim() : "";
-  const timeout = pendingBridgeRequests.get(requestID);
-  if (!requestID || timeout === undefined) return;
-  window.clearTimeout(timeout);
+  const pending = pendingBridgeRequests.get(requestID);
+  // Navigation can reuse the same request ID with a new request. Match the exact
+  // registered message so a late result cannot be delivered to that document.
+  if (!requestID || pending?.request !== request) return;
+  window.clearTimeout(pending.timeout);
   pendingBridgeRequests.delete(requestID);
   pluginFrame.value.contentWindow.postMessage(
     {
@@ -611,10 +622,11 @@ async function handleBridgeMessage(event: MessageEvent): Promise<void> {
   const expectsResponse =
     message.type === "config.load" ||
     message.type === "config.save" ||
-    message.type === "config.test";
+    message.type === "config.test" ||
+    message.type === "plugin.status";
   if (expectsResponse) {
     if (!requestID || pendingBridgeRequests.has(requestID)) return;
-    registerBridgeRequest(requestID);
+    registerBridgeRequest(requestID, message);
   }
 
   try {
@@ -650,11 +662,22 @@ async function handleBridgeMessage(event: MessageEvent): Promise<void> {
           adminAPI.plugins.test(configPlugin.value!.id),
         );
         postBridgeResult(message, { ok: result.success, result });
-        if (result.success)
-          appStore.showSuccess(
-            result.message || t("admin.plugins.testSuccess"),
-          );
-        else appStore.showError(result.message || t("common.error"));
+        // A successful result is delivered back to the plugin UI, which owns how it
+        // presents it (inline status, or an explicit ui.notify). Only force a host
+        // toast on failure so genuine errors are never silently dropped — plugins
+        // may call config.test for lightweight status polling, not just as an
+        // explicit "test" action, and those must not spam a success toast.
+        if (!result.success)
+          appStore.showError(result.message || t("common.error"));
+        break;
+      }
+      case "plugin.status": {
+        // Read-only runtime status (the plugin's Health snapshot). It has no side
+        // effects, so it is intentionally NOT step-up gated and never raises a host
+        // toast — the plugin UI renders it however it likes. This is the generic
+        // channel for any plugin to surface live state without abusing config.test.
+        const result = await adminAPI.plugins.status(configPlugin.value!.id);
+        postBridgeResult(message, { ok: true, result });
         break;
       }
       case "ui.resize": {

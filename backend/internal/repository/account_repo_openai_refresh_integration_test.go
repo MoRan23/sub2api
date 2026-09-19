@@ -104,7 +104,8 @@ func (s *AccountRepoSuite) TestPatchOpenAIOAuthCredentialsIfUnchanged_RejectsCha
 		Name: "openai-refresh-parent", Platform: service.PlatformOpenAI,
 		Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true,
 	})
-	_, err = s.repo.sql.ExecContext(s.ctx, "UPDATE accounts SET parent_account_id = $1 WHERE id = $2", parent.ID, account.ID)
+	_, err = s.repo.sql.ExecContext(s.ctx, "UPDATE accounts SET parent_account_id = $1, quota_dimension = $2 WHERE id = $3",
+		parent.ID, service.QuotaDimensionSpark, account.ID)
 	s.Require().NoError(err)
 	applied, err = s.repo.PatchOpenAIOAuthCredentialsIfUnchanged(s.ctx, account.ID,
 		openAIRefreshExpectedAuthForRepoTest(), nil, map[string]any{"access_token": "shadow-refresh"}, nil)

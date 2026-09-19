@@ -229,6 +229,46 @@ func TestNormalizePluginRPCErrorPreservesCallerCancellation(t *testing.T) {
 
 	err := normalizePluginRPCError(ctx, "接收响应", errors.New("rpc error: code = Canceled"), true)
 	require.ErrorIs(t, err, context.Canceled)
+	var transportErr *PluginTransportError
+	require.ErrorAs(t, err, &transportErr)
+	require.True(t, transportErr.RequestSent)
+}
+
+func TestNormalizePluginRPCErrorCancellationRetainsPhysicalSendBoundary(t *testing.T) {
+	for _, deadline := range []bool{false, true} {
+		name := "canceled"
+		if deadline {
+			name = "deadline"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			want := context.Canceled
+			if deadline {
+				ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+				defer cancel()
+				want = context.DeadlineExceeded
+			}
+			beforeSend := normalizePluginRPCError(ctx, "创建插件转发流", errors.New("grpc canceled"), false)
+			require.Equal(t, ctx.Err(), beforeSend, "cancellation before metadata retains the original context error")
+			var notSentErr *PluginTransportError
+			require.False(t, errors.As(beforeSend, &notSentErr))
+
+			afterSend := normalizePluginRPCError(ctx, "接收插件响应头", errors.New("grpc canceled"), true)
+			require.ErrorIs(t, afterSend, want)
+			var sentErr *PluginTransportError
+			require.ErrorAs(t, afterSend, &sentErr)
+			require.True(t, sentErr.RequestSent)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+			account := &Account{ID: 13, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+			result := (&OpenAIGatewayService{}).handleOpenAIUpstreamTransportError(context.Background(), c, account, afterSend, false)
+			require.Same(t, afterSend, result)
+			var failover *UpstreamFailoverError
+			require.False(t, errors.As(result, &failover))
+		})
+	}
 }
 
 func TestPluginStartingStateUsesBoundedCrashRecoveryWindow(t *testing.T) {

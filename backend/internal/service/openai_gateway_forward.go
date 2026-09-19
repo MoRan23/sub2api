@@ -1068,6 +1068,21 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, c.Request.Context())
 		resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
+		// A plugin may report an uncertain physical send at the same instant the
+		// response-header deadline fires. Preserve that stronger no-replay signal
+		// before the header guard converts the outcome into a failover timeout.
+		// Replaying after RequestSent=true could duplicate a completed upstream
+		// operation on another account.
+		var pluginTransportErr *PluginTransportError
+		if err != nil && errors.As(err, &pluginTransportErr) && pluginTransportErr.RequestSent {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			if headerGuard != nil {
+				headerGuard.close()
+			}
+			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
+		}
 		if headerGuard != nil && headerGuard.stopHeaderWait() {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()

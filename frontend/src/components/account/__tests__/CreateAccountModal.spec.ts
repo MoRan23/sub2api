@@ -340,6 +340,49 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createAccountMock.mock.calls[0]?.[0]?.extra?.images_url_to_b64_json).toBe(true)
   })
 
+  it.each([
+    ['left at its default', 0],
+    ['explicitly turned off again', 2],
+  ])('keeps Seedance disabled when %s during account creation', async (_name, toggleClicks) => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    const seedance = wrapper.get<HTMLInputElement>('[data-testid="openai-endpoint-capability-seedance"]')
+    expect(seedance.element.checked).toBe(false)
+    for (let click = 0; click < toggleClicks; click += 1) {
+      await seedance.setValue(!seedance.element.checked)
+    }
+    expect(seedance.element.checked).toBe(false)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('OpenAI without Seedance')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledOnce()
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).not.toHaveProperty('openai_capabilities')
+    wrapper.unmount()
+  })
+
+  it.each([
+    [true, ['chat_completions', 'embeddings', 'seedance']],
+    [false, ['chat_completions', 'seedance']],
+  ])('persists explicitly enabled Seedance with embeddings enabled=%s', async (embeddingsEnabled, capabilities) => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('[data-testid="openai-endpoint-capability-seedance"]').setValue(true)
+    await wrapper.get('[data-testid="openai-endpoint-capability-embeddings"]').setValue(embeddingsEnabled)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="openai-endpoint-capability-seedance"]').element.checked).toBe(true)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('OpenAI with Seedance')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledOnce()
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials?.openai_capabilities).toEqual(capabilities)
+    wrapper.unmount()
+  })
+
   it('persists upstream model metadata after creating an account from preview', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')

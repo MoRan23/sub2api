@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // Reuse the caller's body across the real dispatch paths. Strict raw Chat
@@ -76,6 +77,8 @@ func TestOpenAIChatRolePathsPreserveAccountBoundaries(t *testing.T) {
 					wantMessages := gjson.GetBytes(body, "messages").Raw
 					if path == "strict" {
 						wantMessages = strings.ReplaceAll(wantMessages, `"role":"developer"`, `"role":"system"`)
+						wantMessages, err = sjson.Set(wantMessages, "3.reasoning_content", deepSeekChatReasoningPlaceholderText)
+						require.NoError(t, err)
 					}
 					require.JSONEq(t, wantMessages, gjson.GetBytes(out, "messages").Raw)
 					for _, field := range []string{"tools", "tool_choice"} {

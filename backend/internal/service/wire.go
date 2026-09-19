@@ -343,6 +343,22 @@ func ProvideCodexTelemetryService(httpUpstream HTTPUpstream, settings *SettingSe
 	return svc
 }
 
+// ProvidePluginManager binds host services before main starts plugin runtimes.
+// The gateway itself is constructed independently; handlers later attach this
+// manager to it, so the account directory does not create a Wire dependency cycle.
+func ProvidePluginManager(
+	repo PluginRepository,
+	encryptor SecretEncryptor,
+	cfg *config.Config,
+	hostInfo PluginHostInfo,
+	kvStore PluginKVStore,
+	gateway *OpenAIGatewayService,
+) *PluginManager {
+	manager := NewPluginManager(repo, encryptor, cfg, hostInfo, kvStore)
+	manager.SetAccountDirectory(gateway)
+	return manager
+}
+
 func ProvideAccountTestService(
 	accountRepo AccountRepository,
 	geminiTokenProvider *GeminiTokenProvider,
@@ -1043,7 +1059,7 @@ var ProviderSet = wire.NewSet(
 	NewTotpService,
 	NewErrorPassthroughService,
 	NewTLSFingerprintProfileService,
-	NewPluginManager,
+	ProvidePluginManager,
 	NewDigestSessionStore,
 	ProvideIdempotencyCoordinator,
 	ProvideSystemOperationLockService,

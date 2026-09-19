@@ -6,29 +6,36 @@ import (
 	"context"
 	"time"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/google/uuid"
 )
 
 func (s *AccountRepoSuite) TestConfigurationGuardPreservesRegeneratedIdentityAcrossStaleWriters() {
-	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "configuration-guard", Platform: service.PlatformOpenAI,
+	client := testEntClient(s.T())
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	account := mustCreateAccount(s.T(), client, &service.Account{Name: "configuration-guard", Platform: service.PlatformOpenAI,
 		Type: service.AccountTypeOAuth, Credentials: map[string]any{"user_agent": "codex-tui/0.154.0 (stable)"},
 		Extra: map[string]any{"openai_pinned_installation_id": uuid.NewString(), "enable_tls_fingerprint": true, "tls_fingerprint_profile_id": 12}})
-	stale, err := s.repo.GetByID(s.ctx, account.ID)
+	s.T().Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM scheduler_outbox WHERE account_id = $1", account.ID)
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM accounts WHERE id = $1", account.ID)
+	})
+	stale, err := repo.GetByID(s.ctx, account.ID)
 	s.Require().NoError(err)
 	latest := uuid.NewString()
-	_, err = s.repo.RegenerateOpenAIInstallationID(s.ctx, account.ID, latest)
+	_, err = repo.RegenerateOpenAIInstallationID(s.ctx, account.ID, latest)
 	s.Require().NoError(err)
 	stale.Name = "unrelated edit"
 	stale.Credentials["user_agent"] = "old or spoofed UA"
 	stale.Extra["enable_tls_fingerprint"] = false
-	s.Require().NoError(s.repo.Update(s.ctx, stale))
-	s.Require().NoError(s.repo.UpdateCredentials(s.ctx, account.ID, map[string]any{"access_token": "new token", "user_agent": "stale async UA"}))
-	s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{"openai_pinned_installation_id": uuid.NewString(), "enable_tls_fingerprint": false, "custom": "accepted"}))
-	_, err = s.repo.BulkUpdate(s.ctx, []int64{account.ID}, service.AccountBulkUpdate{
+	s.Require().NoError(repo.Update(s.ctx, stale))
+	s.Require().NoError(repo.UpdateCredentials(s.ctx, account.ID, map[string]any{"access_token": "new token", "user_agent": "stale async UA"}))
+	s.Require().NoError(repo.UpdateExtra(s.ctx, account.ID, map[string]any{"openai_pinned_installation_id": uuid.NewString(), "enable_tls_fingerprint": false, "custom": "accepted"}))
+	_, err = repo.BulkUpdate(s.ctx, []int64{account.ID}, service.AccountBulkUpdate{
 		Credentials: map[string]any{"user_agent": "stale bulk UA"}, Extra: map[string]any{"tls_fingerprint_profile_id": 99}})
 	s.Require().NoError(err)
-	stored, err := s.repo.GetByID(s.ctx, account.ID)
+	stored, err := repo.GetByID(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().Equal(latest, stored.GetPinnedOpenAIInstallationID())
 	s.Require().Equal("codex-tui/0.154.0 (stable)", stored.GetOpenAIUserAgent())
@@ -39,9 +46,15 @@ func (s *AccountRepoSuite) TestConfigurationGuardPreservesRegeneratedIdentityAcr
 }
 
 func (s *AccountRepoSuite) TestRegenerateRechecksPinAfterConcurrentCommit() {
-	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "regenerate-pin-race", Platform: service.PlatformOpenAI,
+	client := testEntClient(s.T())
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	account := mustCreateAccount(s.T(), client, &service.Account{Name: "regenerate-pin-race", Platform: service.PlatformOpenAI,
 		Type: service.AccountTypeOAuth, Extra: map[string]any{"openai_pinned_installation_id": uuid.NewString()}})
-	tx, err := s.client.Tx(s.ctx)
+	s.T().Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM scheduler_outbox WHERE account_id = $1", account.ID)
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM accounts WHERE id = $1", account.ID)
+	})
+	tx, err := client.Tx(s.ctx)
 	s.Require().NoError(err)
 	defer func() { _ = tx.Rollback() }()
 	_, err = tx.Client().ExecContext(s.ctx, `UPDATE accounts SET extra = extra || '{"openai_installation_pin_enabled":false}'::jsonb WHERE id=$1`, account.ID)
@@ -50,12 +63,13 @@ func (s *AccountRepoSuite) TestRegenerateRechecksPinAfterConcurrentCommit() {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := s.repo.RegenerateOpenAIInstallationID(ctx, account.ID, uuid.NewString())
+		_, err := repo.RegenerateOpenAIInstallationID(ctx, account.ID, uuid.NewString())
 		done <- err
 	}()
 	s.Require().NoError(tx.Commit())
-	s.Require().Error(<-done, "regeneration must see the committed pin disable, even if its admin read was earlier")
-	stored, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().Equal("OPENAI_INSTALLATION_REGENERATE_PIN_DISABLED", infraerrors.Reason(<-done),
+		"regeneration must see the committed pin disable, even if its admin read was earlier")
+	stored, err := repo.GetByID(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().Equal(account.Extra["openai_pinned_installation_id"], stored.GetPinnedOpenAIInstallationID())
 }
@@ -118,16 +132,22 @@ func (s *AccountRepoSuite) TestAdminTLSPatchAndBulkRemainExplicit() {
 }
 
 func (s *AccountRepoSuite) TestRegenerateRejectsChangedTypeAndShadow() {
-	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "regenerate-converted", Platform: service.PlatformOpenAI,
+	client := testEntClient(s.T())
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	account := mustCreateAccount(s.T(), client, &service.Account{Name: "regenerate-converted", Platform: service.PlatformOpenAI,
 		Type: service.AccountTypeOAuth, Extra: map[string]any{"openai_pinned_installation_id": uuid.NewString()}})
-	_, err := s.client.Account.UpdateOneID(account.ID).SetType(service.AccountTypeAPIKey).Save(s.ctx)
+	s.T().Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM accounts WHERE parent_account_id=$1", account.ID)
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM accounts WHERE id=$1", account.ID)
+	})
+	_, err := client.Account.UpdateOneID(account.ID).SetType(service.AccountTypeAPIKey).Save(s.ctx)
 	s.Require().NoError(err)
-	_, err = s.repo.RegenerateOpenAIInstallationID(s.ctx, account.ID, uuid.NewString())
-	s.Require().Error(err)
-	shadow := mustCreateAccount(s.T(), s.client, &service.Account{Name: "regenerate-shadow", Platform: service.PlatformOpenAI,
-		Type: service.AccountTypeOAuth, ParentAccountID: &account.ID})
-	_, err = s.repo.RegenerateOpenAIInstallationID(s.ctx, shadow.ID, uuid.NewString())
-	s.Require().Error(err)
+	_, err = repo.RegenerateOpenAIInstallationID(s.ctx, account.ID, uuid.NewString())
+	s.Require().Equal("OPENAI_INSTALLATION_REGENERATE_UNSUPPORTED", infraerrors.Reason(err))
+	shadow := mustCreateAccount(s.T(), client, &service.Account{Name: "regenerate-shadow", Platform: service.PlatformOpenAI,
+		Type: service.AccountTypeOAuth, ParentAccountID: &account.ID, QuotaDimension: service.QuotaDimensionSpark})
+	_, err = repo.RegenerateOpenAIInstallationID(s.ctx, shadow.ID, uuid.NewString())
+	s.Require().Equal("OPENAI_INSTALLATION_REGENERATE_UNSUPPORTED", infraerrors.Reason(err))
 }
 
 // Keep this compile-time assertion next to the integration coverage: generation
