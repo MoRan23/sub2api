@@ -31,10 +31,8 @@
         <p v-if="model.last_error" class="break-words text-xs text-red-600 dark:text-red-400">{{ t(`${prefix}.lastError`) }}: {{ label('reasons', model.last_error) }}</p>
       </section>
       </section>
-      <section v-if="typeof status.observation_enabled === 'boolean'" class="space-y-3" data-testid="codex-turn-state-observations-section">
+      <section class="space-y-3" data-testid="codex-turn-state-observations-section">
         <h3 class="font-semibold text-gray-900 dark:text-gray-100">{{ t(`${prefix}.observationsTitle`) }}</h3>
-        <p v-if="!status.observation_enabled" class="text-gray-500 dark:text-gray-400" data-testid="codex-turn-state-observation-disabled">{{ t(`${prefix}.observationDisabled`) }}</p>
-        <template v-else>
           <p class="text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.observationScopeHint`) }}</p>
           <p v-if="!status.observations?.length" class="text-gray-500 dark:text-gray-400" data-testid="codex-turn-state-observation-empty">{{ t(`${prefix}.observationEmpty`) }}</p>
           <section v-for="observation in status.observations" :key="observation.model" class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600" :data-testid="`codex-turn-state-observation-${observation.model}`">
@@ -51,7 +49,6 @@
             </dl>
           </section>
           <p v-if="status.observations?.length" class="text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.observedShapeHint`) }}</p>
-        </template>
       </section>
     </div>
     <template #footer>

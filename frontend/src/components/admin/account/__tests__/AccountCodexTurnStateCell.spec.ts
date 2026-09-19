@@ -57,13 +57,14 @@ describe('AccountCodexTurnStateCell', () => {
     expect(wrapper.text()).toContain('columnMore{"count":1}')
   })
 
-  it('distinguishes global observation off from an enabled instance with no history and removes prior summaries', async () => {
-    const wrapper = show({ status: { ...status, enabled: false, observation_enabled: true, observations: [observation(models[0]!, 356)] } })
-    await wrapper.setProps({ status: { ...status, enabled: false, observation_enabled: false, observations: [] } })
-    expect(wrapper.text()).toContain('observationDisabled')
-    expect(wrapper.text()).not.toContain('characters{"count":356}')
-    await wrapper.setProps({ status: { ...status, enabled: false, observation_enabled: true, observations: [] } })
+  it.each([false, undefined])('shows summaries independently of a legacy observation flag (%s), and identifies an empty instance', async (available) => {
+    const wrapper = show({ status: { ...status, enabled: false, observation_enabled: available, observations: [observation(models[0]!, 356)] } })
+    expect(wrapper.text()).toContain('characters{"count":356}')
+    expect(wrapper.text()).toContain('passiveOnly')
+    expect(wrapper.text()).not.toContain('observationDisabled')
+    await wrapper.setProps({ status: { ...status, enabled: false, observation_enabled: available, observations: [] } })
     expect(wrapper.text()).toContain('observationEmpty')
+    expect(wrapper.text()).not.toContain('characters{"count":356}')
     expect(wrapper.text()).not.toContain('observationDisabled')
   })
 

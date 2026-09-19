@@ -56,7 +56,7 @@ func (s *CodexTurnStateService) authoritativeModelPolicyMatches(ctx context.Cont
 // guarded request that will still be sent. Never carry a cached token, lease or
 // response candidate into its replacement observation.
 func passiveCodexStateAfterValidationFailure(attempt *CodexTurnStateAttempt) *CodexTurnStateAttempt {
-	if attempt == nil || !IsFingerprintObservationEnabled() {
+	if attempt == nil {
 		return nil
 	}
 	attempt.mu.Lock()

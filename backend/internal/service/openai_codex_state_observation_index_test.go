@@ -3,23 +3,20 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-func newCodexStateIndexTestObserver() *fingerprintObserver {
-	o := &fingerprintObserver{ring: make([]FingerprintObservationEntry, fingerprintObservationCapacity)}
-	o.mu.Lock()
-	o.setEnabledLocked(true)
-	o.mu.Unlock()
-	return o
+func newCodexStateIndexTestStore() *codexTurnStateSummaryStore {
+	return &codexTurnStateSummaryStore{}
 }
 
-func codexStateIndexTestSequence(t *testing.T, o *fingerprintObserver, ownerID int64, observedAt time.Time) uint64 {
+func codexStateIndexTestSequence(t *testing.T, o *codexTurnStateSummaryStore) uint64 {
 	t.Helper()
-	sequence := o.record(FingerprintObservationEntry{AccountID: ownerID, Timestamp: observedAt})
+	sequence := o.nextSequence()
 	require.NotZero(t, sequence)
 	return sequence
 }
@@ -42,12 +39,11 @@ func codexStateIndexTestJSON(t *testing.T, value CodexTurnStateModelObservation)
 }
 
 func TestCodexStateObservationIndexRequiresFinishedRecordedSequence(t *testing.T) {
-	for _, mode := range []string{"unfinished", "zero_sequence", "future_sequence", "zero_window", "future_window", "zero_owner", "empty_model", "blank_model", "disabled"} {
+	for _, mode := range []string{"unfinished", "zero_sequence", "future_sequence", "zero_owner", "empty_model", "blank_model", "zero_time"} {
 		t.Run(mode, func(t *testing.T) {
-			o := newCodexStateIndexTestObserver()
+			o := newCodexStateIndexTestStore()
 			now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
-			sequence := codexStateIndexTestSequence(t, o, 7, now)
-			window := o.codexStateObservationWindow()
+			sequence := codexStateIndexTestSequence(t, o)
 			ownerID, finished := int64(7), true
 			value := codexStateIndexTestValue("gpt-5.4", 332)
 			switch mode {
@@ -57,53 +53,47 @@ func TestCodexStateObservationIndexRequiresFinishedRecordedSequence(t *testing.T
 				sequence = 0
 			case "future_sequence":
 				sequence++
-			case "zero_window":
-				window = 0
-			case "future_window":
-				window++
 			case "zero_owner":
 				ownerID = 0
 			case "empty_model":
 				value.Model = ""
 			case "blank_model":
 				value.Model = " \t"
-			case "disabled":
-				o.mu.Lock()
-				o.setEnabledLocked(false)
-				o.mu.Unlock()
+			case "zero_time":
+				now = time.Time{}
 			}
-			o.updateCodexTurnStateObservation(sequence, ownerID, value, finished, now, window)
-			enabled, observations := o.codexStateObservations([]int64{0, 7})
-			require.Equal(t, mode != "disabled", enabled)
+			o.update(sequence, ownerID, value, finished, now)
+			enabled, observations := o.snapshot([]int64{0, 7})
+			require.True(t, enabled)
 			require.Empty(t, observations)
 		})
 	}
 }
 
 func TestCodexStateObservationIndexUsesObservedTimeAndSequenceThenSortsModels(t *testing.T) {
-	o := newCodexStateIndexTestObserver()
+	o := newCodexStateIndexTestStore()
 	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
-	old := codexStateIndexTestSequence(t, o, 7, now)
-	middle := codexStateIndexTestSequence(t, o, 7, now.Add(time.Second))
-	newest := codexStateIndexTestSequence(t, o, 7, now.Add(2*time.Second))
+	old := codexStateIndexTestSequence(t, o)
+	middle := codexStateIndexTestSequence(t, o)
+	newest := codexStateIndexTestSequence(t, o)
 	observedAt := now.Add(3 * time.Second)
-	o.updateCodexTurnStateObservation(newest, 7, codexStateIndexTestValue("z-model", 332), true, observedAt, o.codexStateObservationWindow())
-	o.updateCodexTurnStateObservation(old, 7, codexStateIndexTestValue("z-model", 312), true, now.Add(2*time.Second), o.codexStateObservationWindow())
-	o.updateCodexTurnStateObservation(middle, 7, codexStateIndexTestValue("z-model", 356), true, observedAt, o.codexStateObservationWindow())
-	_, observations := o.codexStateObservations([]int64{7})
+	o.update(newest, 7, codexStateIndexTestValue("z-model", 332), true, observedAt)
+	o.update(old, 7, codexStateIndexTestValue("z-model", 312), true, now.Add(2*time.Second))
+	o.update(middle, 7, codexStateIndexTestValue("z-model", 356), true, observedAt)
+	_, observations := o.snapshot([]int64{7})
 	require.Len(t, observations[7], 1)
 	require.EqualValues(t, 332, codexStateIndexTestJSON(t, observations[7][0])["response_length"])
 	// Completion time is primary even when an older physical request finishes last.
 	observedAt = now.Add(4 * time.Second)
-	o.updateCodexTurnStateObservation(old, 7, codexStateIndexTestValue("z-model", 356), true, observedAt, o.codexStateObservationWindow())
-	_, observations = o.codexStateObservations([]int64{7})
+	o.update(old, 7, codexStateIndexTestValue("z-model", 356), true, observedAt)
+	_, observations = o.snapshot([]int64{7})
 	require.EqualValues(t, 356, codexStateIndexTestJSON(t, observations[7][0])["response_length"])
-	tieWinner := codexStateIndexTestSequence(t, o, 7, observedAt)
-	o.updateCodexTurnStateObservation(tieWinner, 7, codexStateIndexTestValue("z-model", 292), true, observedAt, o.codexStateObservationWindow())
-	o.updateCodexTurnStateObservation(old, 7, codexStateIndexTestValue("z-model", 312), true, observedAt, o.codexStateObservationWindow())
-	alpha := codexStateIndexTestSequence(t, o, 7, now.Add(5*time.Second))
-	o.updateCodexTurnStateObservation(alpha, 7, codexStateIndexTestValue("a-model", 332), true, now.Add(5*time.Second), o.codexStateObservationWindow())
-	_, observations = o.codexStateObservations([]int64{7})
+	tieWinner := codexStateIndexTestSequence(t, o)
+	o.update(tieWinner, 7, codexStateIndexTestValue("z-model", 292), true, observedAt)
+	o.update(old, 7, codexStateIndexTestValue("z-model", 312), true, observedAt)
+	alpha := codexStateIndexTestSequence(t, o)
+	o.update(alpha, 7, codexStateIndexTestValue("a-model", 332), true, now.Add(5*time.Second))
+	_, observations = o.snapshot([]int64{7})
 	require.Len(t, observations[7], 2)
 	require.Equal(t, "a-model", observations[7][0].Model)
 	require.Equal(t, "z-model", observations[7][1].Model)
@@ -112,42 +102,58 @@ func TestCodexStateObservationIndexUsesObservedTimeAndSequenceThenSortsModels(t 
 	require.Equal(t, observedAt.Format(time.RFC3339Nano), fields["observed_at"])
 }
 
-func TestCodexStateObservationIndexAcceptsFinishedRequestAfterRingEviction(t *testing.T) {
-	o := newCodexStateIndexTestObserver()
+func TestCodexStateObservationIndexIndependentOfFingerprintRingEvictionAndDisable(t *testing.T) {
+	o := newCodexStateIndexTestStore()
 	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
-	sequence := codexStateIndexTestSequence(t, o, 7, now)
+	sequence := codexStateIndexTestSequence(t, o)
+	o.update(sequence, 7, codexStateIndexTestValue("gpt-5.4", 332), true, now)
+	_, original := o.snapshot([]int64{7})
+	fingerprint := &fingerprintObserver{ring: make([]FingerprintObservationEntry, fingerprintObservationCapacity)}
+	fingerprint.mu.Lock()
+	fingerprint.setEnabledLocked(true)
+	fingerprint.mu.Unlock()
+	oldRingSequence := fingerprint.record(FingerprintObservationEntry{AccountID: 7, Timestamp: now})
+	require.NotZero(t, oldRingSequence)
 	for range fingerprintObservationCapacity {
-		codexStateIndexTestSequence(t, o, 9, now)
+		require.NotZero(t, fingerprint.record(FingerprintObservationEntry{AccountID: 9, Timestamp: now}))
 	}
-	ring, _ := o.snapshotThrough(0)
+	ring, _ := fingerprint.snapshotThrough(0)
 	require.Len(t, ring, fingerprintObservationCapacity)
 	for _, entry := range ring {
-		require.NotEqual(t, sequence, entry.SequenceID)
+		require.NotEqual(t, oldRingSequence, entry.SequenceID)
 	}
-	o.updateCodexTurnStateObservation(sequence, 7, codexStateIndexTestValue("gpt-5.4", 332), true, now.Add(time.Minute), o.codexStateObservationWindow())
-	enabled, observations := o.codexStateObservations([]int64{7})
-	require.True(t, enabled)
-	require.Len(t, observations[7], 1, "completion remains useful after the smaller request ring rolls over")
+	fingerprint.mu.Lock()
+	fingerprint.setEnabledLocked(false)
+	fingerprint.mu.Unlock()
+	require.Zero(t, fingerprint.record(FingerprintObservationEntry{AccountID: 7, Timestamp: now}))
+	supported, afterDisable := o.snapshot([]int64{7})
+	require.True(t, supported)
+	require.Equal(t, original, afterDisable, "fingerprint eviction and disabling must not clear independent account summaries")
+	o.update(sequence, 7, codexStateIndexTestValue("gpt-5.4", 332), true, now.Add(time.Minute))
+	supported, observations := o.snapshot([]int64{7})
+	require.True(t, supported)
+	require.Len(t, observations[7], 1, "completion remains useful while fingerprint observation is disabled")
 	require.Equal(t, "gpt-5.4", observations[7][0].Model)
+	require.Equal(t, now.Add(time.Minute).Format(time.RFC3339Nano), codexStateIndexTestJSON(t, observations[7][0])["observed_at"])
 }
 
 func TestCodexStateObservationIndexEvictsLeastRecentlyUpdatedAt4096(t *testing.T) {
-	o := newCodexStateIndexTestObserver()
+	o := newCodexStateIndexTestStore()
 	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
 	var firstSequence uint64
 	for index := range 4096 {
 		observedAt := now.Add(time.Duration(index) * time.Millisecond)
-		sequence := codexStateIndexTestSequence(t, o, 7, observedAt)
+		sequence := codexStateIndexTestSequence(t, o)
 		if index == 0 {
 			firstSequence = sequence
 		}
-		o.updateCodexTurnStateObservation(sequence, 7, codexStateIndexTestValue(fmt.Sprintf("model-%04d", index), 332), true, observedAt, o.codexStateObservationWindow())
+		o.update(sequence, 7, codexStateIndexTestValue(fmt.Sprintf("model-%04d", index), 332), true, observedAt)
 	}
 	// A genuinely newer result refreshes the oldest entry's recency.
-	o.updateCodexTurnStateObservation(firstSequence, 7, codexStateIndexTestValue("model-0000", 356), true, now.Add(time.Minute), o.codexStateObservationWindow())
-	sequence := codexStateIndexTestSequence(t, o, 7, now.Add(2*time.Minute))
-	o.updateCodexTurnStateObservation(sequence, 7, codexStateIndexTestValue("model-4096", 332), true, now.Add(2*time.Minute), o.codexStateObservationWindow())
-	_, observations := o.codexStateObservations([]int64{7})
+	o.update(firstSequence, 7, codexStateIndexTestValue("model-0000", 356), true, now.Add(time.Minute))
+	sequence := codexStateIndexTestSequence(t, o)
+	o.update(sequence, 7, codexStateIndexTestValue("model-4096", 332), true, now.Add(2*time.Minute))
+	_, observations := o.snapshot([]int64{7})
 	require.Len(t, observations[7], 4096)
 	models := make(map[string]bool, len(observations[7]))
 	for _, value := range observations[7] {
@@ -159,77 +165,43 @@ func TestCodexStateObservationIndexEvictsLeastRecentlyUpdatedAt4096(t *testing.T
 }
 
 func TestCodexStateObservationIndexReadsRefreshLRUButStaleResultsDoNot(t *testing.T) {
-	o := newCodexStateIndexTestObserver()
+	o := newCodexStateIndexTestStore()
 	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
 	owners := make([]int64, 0, 4097)
 	var secondSequence uint64
 	for ownerID := int64(1); ownerID <= 4096; ownerID++ {
 		owners = append(owners, ownerID)
-		sequence := codexStateIndexTestSequence(t, o, ownerID, now)
+		sequence := codexStateIndexTestSequence(t, o)
 		if ownerID == 2 {
 			secondSequence = sequence
 		}
-		o.updateCodexTurnStateObservation(sequence, ownerID, codexStateIndexTestValue("gpt-5.4", 332), true, now, o.codexStateObservationWindow())
+		o.update(sequence, ownerID, codexStateIndexTestValue("gpt-5.4", 332), true, now)
 	}
-	_, observed := o.codexStateObservations([]int64{1})
+	_, observed := o.snapshot([]int64{1})
 	require.Len(t, observed[1], 1, "reading an owner refreshes its cached summary's recency")
-	o.updateCodexTurnStateObservation(secondSequence, 2, codexStateIndexTestValue("gpt-5.4", 356), true, now.Add(-time.Minute), o.codexStateObservationWindow())
-	sequence := codexStateIndexTestSequence(t, o, 4097, now.Add(time.Minute))
-	o.updateCodexTurnStateObservation(sequence, 4097, codexStateIndexTestValue("gpt-5.4", 292), true, now.Add(time.Minute), o.codexStateObservationWindow())
+	o.update(secondSequence, 2, codexStateIndexTestValue("gpt-5.4", 356), true, now.Add(-time.Minute))
+	sequence := codexStateIndexTestSequence(t, o)
+	o.update(sequence, 4097, codexStateIndexTestValue("gpt-5.4", 292), true, now.Add(time.Minute))
 	owners = append(owners, 4097)
-	_, observations := o.codexStateObservations(owners)
+	_, observations := o.snapshot(owners)
 	require.Len(t, observations, 4096)
 	require.Len(t, observations[1], 1)
 	require.NotContains(t, observations, int64(2), "a rejected stale result cannot save the least recently used entry from eviction")
 	require.Len(t, observations[4097], 1)
 }
 
-func TestCodexStateObservationIndexDisableClearsAndFencesOldCompletions(t *testing.T) {
-	o := newCodexStateIndexTestObserver()
-	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
-	oldWindow := o.codexStateObservationWindow()
-	require.NotZero(t, oldWindow)
-	old := codexStateIndexTestSequence(t, o, 7, now)
-	o.updateCodexTurnStateObservation(old, 7, codexStateIndexTestValue("old-model", 332), true, now, oldWindow)
-	o.mu.Lock()
-	o.setEnabledLocked(false)
-	o.mu.Unlock()
-	enabled, observations := o.codexStateObservations([]int64{7})
-	require.False(t, enabled)
-	require.Empty(t, observations)
-	require.Zero(t, o.codexStateObservationWindow())
-	o.updateCodexTurnStateObservation(old, 7, codexStateIndexTestValue("old-model", 356), true, now.Add(time.Minute), oldWindow)
-	o.mu.Lock()
-	o.setEnabledLocked(true)
-	o.mu.Unlock()
-	o.updateCodexTurnStateObservation(old, 7, codexStateIndexTestValue("old-model", 356), true, now.Add(2*time.Minute), oldWindow)
-	enabled, observations = o.codexStateObservations([]int64{7})
-	require.True(t, enabled)
-	require.Empty(t, observations, "re-enabling cannot resurrect a pre-disable physical request")
-	fresh := codexStateIndexTestSequence(t, o, 7, now.Add(3*time.Minute))
-	require.Greater(t, fresh, old)
-	o.updateCodexTurnStateObservation(fresh, 7, codexStateIndexTestValue("late-recorded-old-model", 356), true, now.Add(3*time.Minute), oldWindow)
-	_, observations = o.codexStateObservations([]int64{7})
-	require.Empty(t, observations, "a request frozen before disable cannot publish even when its send was recorded after re-enable")
-	require.Greater(t, o.codexStateObservationWindow(), oldWindow)
-	o.updateCodexTurnStateObservation(fresh, 7, codexStateIndexTestValue("new-model", 292), true, now.Add(3*time.Minute), o.codexStateObservationWindow())
-	_, observations = o.codexStateObservations([]int64{7})
-	require.Len(t, observations[7], 1)
-	require.Equal(t, "new-model", observations[7][0].Model)
-}
-
 func TestCodexStateObservationIndexSeparatesOwnersAndReturnsImmutableSnapshots(t *testing.T) {
-	o := newCodexStateIndexTestObserver()
+	o := newCodexStateIndexTestStore()
 	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
-	first := codexStateIndexTestSequence(t, o, 7, now)
-	second := codexStateIndexTestSequence(t, o, 9, now)
-	o.updateCodexTurnStateObservation(first, 7, codexStateIndexTestValue("same-model", 292), true, now, o.codexStateObservationWindow())
-	o.updateCodexTurnStateObservation(second, 9, codexStateIndexTestValue("same-model", 332), true, now, o.codexStateObservationWindow())
-	_, observations := o.codexStateObservations([]int64{9})
+	first := codexStateIndexTestSequence(t, o)
+	second := codexStateIndexTestSequence(t, o)
+	o.update(first, 7, codexStateIndexTestValue("same-model", 292), true, now)
+	o.update(second, 9, codexStateIndexTestValue("same-model", 332), true, now)
+	_, observations := o.snapshot([]int64{9})
 	require.NotContains(t, observations, int64(7))
 	require.Len(t, observations[9], 1)
 	require.EqualValues(t, 332, codexStateIndexTestJSON(t, observations[9][0])["response_length"])
-	_, observations = o.codexStateObservations([]int64{7, 9, 7, 123})
+	_, observations = o.snapshot([]int64{7, 9, 7, 123})
 	require.Len(t, observations, 2)
 	require.Len(t, observations[7], 1)
 	require.Len(t, observations[9], 1)
@@ -237,26 +209,22 @@ func TestCodexStateObservationIndexSeparatesOwnersAndReturnsImmutableSnapshots(t
 	require.NoError(t, err)
 	observations[7][0].Model = "caller-mutated"
 	delete(observations, 9)
-	_, fresh := o.codexStateObservations([]int64{7, 9})
+	_, fresh := o.snapshot([]int64{7, 9})
 	after, err := json.Marshal(fresh)
 	require.NoError(t, err)
 	require.JSONEq(t, string(before), string(after))
-	_, empty := o.codexStateObservations(nil)
+	_, empty := o.snapshot(nil)
 	require.Empty(t, empty, "empty owner selection must not mean all accounts")
 }
 
 func TestCodexStateObservationIndexSerializesOnlySafeSummary(t *testing.T) {
-	o := newCodexStateIndexTestObserver()
+	o := newCodexStateIndexTestStore()
 	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
 	token := codexStateTestToken(12, now)
-	sequence := o.record(FingerprintObservationEntry{
-		AccountID: 7, AccountName: "private account name", Timestamp: now,
-		ClientReportedInstallationID: token, APIKeyName: "private-api-key",
-	})
-	require.NotZero(t, sequence)
+	sequence := codexStateIndexTestSequence(t, o)
 	value := codexStateIndexTestValue("gpt-5.4", len(token))
-	o.updateCodexTurnStateObservation(sequence, 7, value, true, now, o.codexStateObservationWindow())
-	_, observations := o.codexStateObservations([]int64{7})
+	o.update(sequence, 7, value, true, now)
+	_, observations := o.snapshot([]int64{7})
 	require.Len(t, observations[7], 1)
 	fields := codexStateIndexTestJSON(t, observations[7][0])
 	require.Equal(t, "gpt-5.4", fields["model"])
@@ -271,5 +239,72 @@ func TestCodexStateObservationIndexSerializesOnlySafeSummary(t *testing.T) {
 	require.NoError(t, err)
 	for _, secret := range []string{token, "private account name", "private-api-key", "encrypted_token", "access_token", "client_reported_installation_id"} {
 		require.NotContains(t, string(encoded), secret)
+	}
+}
+
+func TestCodexStateObservationIndexConcurrentOwnersRemainIsolated(t *testing.T) {
+	o := newCodexStateIndexTestStore()
+	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	const owners, writersPerOwner, rounds = 8, 3, 40
+	type expectedSummary struct {
+		sequence uint64
+		length   int
+	}
+	var expectedMu sync.Mutex
+	expected := make(map[int64]expectedSummary, owners)
+	sequences := make(chan uint64, owners*writersPerOwner*rounds)
+	errors := make(chan error, owners*writersPerOwner)
+	var writers sync.WaitGroup
+	for ownerID := int64(1); ownerID <= owners; ownerID++ {
+		for writer := range writersPerOwner {
+			writers.Add(1)
+			go func() {
+				defer writers.Done()
+				for range rounds {
+					sequence := o.nextSequence()
+					sequences <- sequence
+					length := 292 + writer*20
+					o.update(sequence, ownerID, codexStateIndexTestValue("shared-model", length), true, now)
+					expectedMu.Lock()
+					if sequence > expected[ownerID].sequence {
+						expected[ownerID] = expectedSummary{sequence: sequence, length: length}
+					}
+					expectedMu.Unlock()
+					supported, snapshot := o.snapshot([]int64{ownerID})
+					if !supported || len(snapshot) != 1 || len(snapshot[ownerID]) != 1 || snapshot[ownerID][0].Model != "shared-model" {
+						errors <- fmt.Errorf("owner %d received an incomplete or cross-owner snapshot", ownerID)
+						return
+					}
+					// Concurrent consumers may edit their snapshot without touching
+					// another reader or the stored per-owner summary.
+					snapshot[ownerID][0].Model = "reader-local-change"
+				}
+			}()
+		}
+	}
+	writers.Wait()
+	close(sequences)
+	close(errors)
+	for err := range errors {
+		require.NoError(t, err)
+	}
+	seen := make(map[uint64]bool, owners*writersPerOwner*rounds)
+	for sequence := range sequences {
+		require.NotZero(t, sequence)
+		require.False(t, seen[sequence], "actual-send sequences must remain unique across concurrent owners")
+		seen[sequence] = true
+	}
+	require.Len(t, seen, owners*writersPerOwner*rounds)
+	ids := make([]int64, 0, owners)
+	for ownerID := int64(1); ownerID <= owners; ownerID++ {
+		ids = append(ids, ownerID)
+	}
+	supported, snapshot := o.snapshot(ids)
+	require.True(t, supported)
+	require.Len(t, snapshot, owners)
+	for ownerID, latest := range expected {
+		require.Len(t, snapshot[ownerID], 1)
+		require.Equal(t, "shared-model", snapshot[ownerID][0].Model)
+		require.EqualValues(t, latest.length, codexStateIndexTestJSON(t, snapshot[ownerID][0])["response_length"])
 	}
 }

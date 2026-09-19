@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,40 +21,42 @@ type codexTurnStateObservationIndexEntry struct {
 	summary  CodexTurnStateModelObservation
 }
 
-// All fields are protected by the containing fingerprintObserver.mu. This
-// separate bounded index outlives ring eviction, but never a disabled observer
-// or process restart. Only safe scalar response facts are retained.
+// All fields are protected by the containing summary store. Its lifetime is
+// independent of full fingerprint diagnostics and ends at process restart.
 type codexTurnStateObservationIndex struct {
-	entries        map[codexTurnStateObservationKey]*list.Element
-	lru            list.List
-	discardThrough uint64
-	window         uint64
+	entries map[codexTurnStateObservationKey]*list.Element
+	lru     list.List
 }
 
-func (index *codexTurnStateObservationIndex) clear(sequence uint64) {
-	for key, element := range index.entries {
-		entry := element.Value.(*codexTurnStateObservationIndexEntry)
-		*entry = codexTurnStateObservationIndexEntry{}
-		delete(index.entries, key)
-	}
-	index.entries = nil
-	index.lru.Init()
-	// Sequences are monotonic across disable/enable. A delayed completion from
-	// an earlier observation window must not recreate cleared history.
-	index.discardThrough = sequence
-	index.window++
+type codexTurnStateSummaryStore struct {
+	mu    sync.Mutex
+	seq   uint64
+	index codexTurnStateObservationIndex
 }
 
-func (observer *fingerprintObserver) codexStateObservationWindow() uint64 {
-	if observer == nil {
+var globalCodexTurnStateSummaryStore = &codexTurnStateSummaryStore{}
+
+// Called at the physical-send boundary, independently of full diagnostics.
+func (store *codexTurnStateSummaryStore) nextSequence() uint64 {
+	if store == nil {
 		return 0
 	}
-	observer.mu.Lock()
-	defer observer.mu.Unlock()
-	if !observer.enabled.Load() {
-		return 0
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.seq++
+	return store.seq
+}
+
+func (store *codexTurnStateSummaryStore) update(sequence uint64, ownerAccountID int64, value CodexTurnStateObservation, finished bool, observedAt time.Time) {
+	if store == nil || sequence == 0 || !finished {
+		return
 	}
-	return observer.codexStateIndex.window + 1
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if sequence > store.seq {
+		return
+	}
+	store.index.record(sequence, ownerAccountID, value, observedAt)
 }
 
 func (index *codexTurnStateObservationIndex) record(sequence uint64, ownerAccountID int64, value CodexTurnStateObservation, observedAt time.Time) {
@@ -101,29 +104,26 @@ func (index *codexTurnStateObservationIndex) record(sequence uint64, ownerAccoun
 	index.lru.MoveToFront(element)
 }
 
-// codexStateObservations takes one read-only, coherent snapshot for all owners
+// snapshot takes one read-only, coherent snapshot for all owners
 // requested by a page. Returned values do not share mutable backing storage.
-func (observer *fingerprintObserver) codexStateObservations(ownerAccountIDs []int64) (bool, map[int64][]CodexTurnStateModelObservation) {
+func (store *codexTurnStateSummaryStore) snapshot(ownerAccountIDs []int64) (bool, map[int64][]CodexTurnStateModelObservation) {
 	result := make(map[int64][]CodexTurnStateModelObservation)
-	if observer == nil {
+	if store == nil {
 		return false, result
 	}
-	observer.mu.Lock()
-	defer observer.mu.Unlock()
-	if !observer.enabled.Load() {
-		return false, result
-	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
 	owners := make(map[int64]bool, len(ownerAccountIDs))
 	for _, id := range ownerAccountIDs {
 		owners[id] = true
 	}
-	for key, element := range observer.codexStateIndex.entries {
+	for key, element := range store.index.entries {
 		if !owners[key.ownerAccountID] {
 			continue
 		}
 		entry := element.Value.(*codexTurnStateObservationIndexEntry)
 		result[key.ownerAccountID] = append(result[key.ownerAccountID], entry.summary)
-		observer.codexStateIndex.lru.MoveToFront(element)
+		store.index.lru.MoveToFront(element)
 	}
 	for _, observations := range result {
 		sort.Slice(observations, func(i, j int) bool { return observations[i].Model < observations[j].Model })

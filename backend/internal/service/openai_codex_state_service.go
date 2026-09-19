@@ -134,17 +134,14 @@ func (s *CodexTurnStateService) Prepare(ctx context.Context, account *Account, f
 		// Observation is independent of cache maintenance. This request-local
 		// attempt has no lease, generation, cached token or collection identity.
 		// It must never enter the runtime store, even when a response is delivered.
-		if IsFingerprintObservationEnabled() {
-			reason := ""
-			if accountEnabled {
-				reason = "model_excluded"
-				if policyErr != nil {
-					reason = "model_policy_unavailable"
-				}
+		reason := ""
+		if accountEnabled {
+			reason = "model_excluded"
+			if policyErr != nil {
+				reason = "model_policy_unavailable"
 			}
-			return &CodexTurnStateAttempt{OwnerAccountID: owner.ID, Model: strings.TrimSpace(finalModel), AccountEnabled: accountEnabled, MaintenanceReason: reason, accountType: CodexTurnStateAccountTypeForAccount(owner)}, nil
 		}
-		return nil, nil
+		return &CodexTurnStateAttempt{OwnerAccountID: owner.ID, Model: strings.TrimSpace(finalModel), AccountEnabled: accountEnabled, MaintenanceReason: reason, accountType: CodexTurnStateAccountTypeForAccount(owner)}, nil
 	}
 	if s.repo == nil || s.encryptor == nil {
 		return nil, nil
@@ -783,7 +780,7 @@ func (s *CodexTurnStateService) GetStatus(ctx context.Context, accountID int64) 
 	}
 	models, policyErr := s.statusModelPolicy(ctx)
 	result := projectCodexTurnStateStatus(accountID, owner, records, models, policyErr, s.statusNow())
-	observationEnabled, observations := globalFingerprintObserver.codexStateObservations([]int64{owner.ID})
+	observationEnabled, observations := globalCodexTurnStateSummaryStore.snapshot([]int64{owner.ID})
 	attachCodexTurnStateObservations(result, observationEnabled, observations[owner.ID])
 	return result, nil
 }

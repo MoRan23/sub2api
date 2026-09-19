@@ -182,12 +182,11 @@ type FingerprintObservationPage struct {
 type fingerprintObserver struct {
 	enabled atomic.Bool
 
-	mu              sync.Mutex
-	ring            []FingerprintObservationEntry
-	head            int
-	size            int
-	seq             uint64
-	codexStateIndex codexTurnStateObservationIndex
+	mu   sync.Mutex
+	ring []FingerprintObservationEntry
+	head int
+	size int
+	seq  uint64
 }
 
 var globalFingerprintObserver = &fingerprintObserver{
@@ -290,7 +289,6 @@ func (o *fingerprintObserver) setEnabledLocked(enabled bool) {
 		}
 		o.head = 0
 		o.size = 0
-		o.codexStateIndex.clear(o.seq)
 	}
 }
 
@@ -622,6 +620,8 @@ func (s *OpenAIGatewayService) recordFingerprintObservation(c *gin.Context, acco
 // schema path that carries server-owned identity in the body but not aliases
 // in the wire header set.
 func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Context, account *Account, pin installationIDResolution, outbound http.Header, body []byte) {
+	stateObservation := populateCodexTurnStateObservation(c, nil, outbound, body, false)
+	bindCodexTurnStateSummarySequence(stateObservation)
 	state, _ := RequestTimezoneStateFromContext(c)
 	integrity := s.observeOpenAIRequestIntegrity(c, account, outbound, body, "http", state)
 	if !fingerprintObservationAccountEnabled(account) {
@@ -639,7 +639,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 	entry.OutboundCodexResidencySource = "request_headers"
 	paths := openAIRequestTimezoneFinalObservationPaths(c, state, body)
 	populateFingerprintObservationTimezones(&entry, state, body, paths)
-	stateObservation := populateCodexTurnStateObservation(c, &entry, outbound, body, false)
+	populateCodexTurnStateObservation(c, &entry, outbound, body, false)
 	bindCodexTurnStateObservationSequence(stateObservation, globalFingerprintObserver.record(entry))
 }
 
@@ -1028,9 +1028,12 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWSFrame(c *gin.Contex
 // succeeds. The closure retains scalar diagnostics rather than the raw token.
 func (s *OpenAIGatewayService) freezeFingerprintObservationWSFrame(c *gin.Context, account *Account,
 	state *RequestTimezoneState, body []byte, handshakeHeaders http.Header, plan *OpenAIOAuthIdentityPlan) func() {
+	// The lightweight summary freezes only lengths and server-resolved owner/model.
+	// Its send marker is committed by this closure only after the frame write.
+	stateObservation := populateCodexTurnStateObservation(c, nil, handshakeHeaders, body, true)
 	integrity := s.observeOpenAIRequestIntegrity(c, account, handshakeHeaders, body, "ws", state)
 	if !fingerprintObservationAccountEnabled(account) {
-		return func() {}
+		return func() { bindCodexTurnStateSummarySequence(stateObservation) }
 	}
 	var identity OpenAICodexTurnIdentity
 	var pin installationIDResolution
@@ -1050,10 +1053,11 @@ func (s *OpenAIGatewayService) freezeFingerprintObservationWSFrame(c *gin.Contex
 		paths = DeriveOpenAIRequestTimezoneProvenance(state.PreparedBody(), body)
 	}
 	populateFingerprintObservationTimezones(&entry, state, body, paths)
-	stateObservation := populateCodexTurnStateObservation(c, &entry, handshakeHeaders, body, true)
+	populateCodexTurnStateObservation(c, &entry, handshakeHeaders, body, true)
 	var once sync.Once
 	return func() {
 		once.Do(func() {
+			bindCodexTurnStateSummarySequence(stateObservation)
 			bindCodexTurnStateObservationSequence(stateObservation, globalFingerprintObserver.record(entry))
 		})
 	}

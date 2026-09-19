@@ -10,12 +10,11 @@
     <span v-else-if="failed || !status" class="block text-amber-700 dark:text-amber-400">{{ t(`${prefix}.columnUnavailable`) }}</span>
     <template v-else>
       <span v-if="status.inherited" class="block text-blue-600 dark:text-blue-400">{{ t(`${prefix}.columnInherited`, { id: status.owner_account_id }) }}</span>
-      <span v-if="!status.enabled" class="block text-gray-500 dark:text-gray-400">{{ t(`${prefix}.disabled`) }}<template v-if="status.observation_enabled"> · {{ t(`${prefix}.passiveOnly`) }}</template></span>
+      <span v-if="!status.enabled" class="block text-gray-500 dark:text-gray-400">{{ t(`${prefix}.disabled`) }} · {{ t(`${prefix}.passiveOnly`) }}</span>
       <span v-else-if="!status.expected_length" class="block text-amber-700 dark:text-amber-400">{{ t(`${prefix}.columnUnknownPlan`) }}</span>
       <span v-if="status.enabled && status.reason === 'model_policy_unavailable'" class="block text-amber-700 dark:text-amber-400">{{ label('states', 'model_policy_unavailable') }}</span>
       <span v-else-if="status.enabled && !models.length" class="block text-gray-500 dark:text-gray-400">{{ t(`${prefix}.columnEmptyList`) }}</span>
-      <span v-if="status.observation_enabled === false" class="block text-gray-500 dark:text-gray-400" data-testid="codex-turn-state-observation-disabled">{{ t(`${prefix}.observationDisabled`) }}</span>
-      <span v-else-if="status.observation_enabled && !observations.length" class="block text-gray-500 dark:text-gray-400" data-testid="codex-turn-state-observation-empty">{{ t(`${prefix}.observationEmpty`) }}</span>
+      <span v-if="!observations.length" class="block text-gray-500 dark:text-gray-400" data-testid="codex-turn-state-observation-empty">{{ t(`${prefix}.observationEmpty`) }}</span>
         <span v-for="model in visibleModels" :key="model.model" class="block space-y-0.5" :data-testid="`codex-turn-state-model-${model.model}`">
           <span class="flex items-start justify-between gap-2">
             <span class="min-w-0 break-all font-mono text-gray-800 dark:text-gray-200">{{ model.model }}</span>
@@ -31,7 +30,7 @@
             <template v-if="model.observation.response_length > 0">{{ t(`${prefix}.characters`, { count: model.observation.response_length }) }} · {{ observedShape(model.observation) }}</template>
             <template v-else>{{ t(`${prefix}.responseStateMissing`) }}</template>
           </span>
-          <span v-else-if="!status.enabled && status.observation_enabled" class="block text-[11px] text-gray-500 dark:text-gray-400">{{ t(`${prefix}.modelNotObserved`) }}</span>
+          <span v-else-if="!status.enabled" class="block text-[11px] text-gray-500 dark:text-gray-400">{{ t(`${prefix}.modelNotObserved`) }}</span>
         </span>
         <span v-if="allModels.length > visibleModels.length" class="block text-primary-600 dark:text-primary-400">{{ t(`${prefix}.columnMore`, { count: allModels.length - visibleModels.length }) }}</span>
       <span v-if="allModels.length <= visibleModels.length" class="block text-[11px] text-primary-600 dark:text-primary-400">{{ t(`${prefix}.columnDetails`) }}</span>
@@ -60,7 +59,7 @@ defineEmits<{ open: [] }>()
 const { t, te } = useI18n()
 const prefix = 'admin.accounts.codexTurnState'
 const supported = computed(() => supportsCodexTurnState(props.account))
-const observations = computed(() => props.status?.observation_enabled ? props.status.observations || [] : [])
+const observations = computed(() => props.status?.observations || [])
 function label(group: string, value: string) {
   const key = `${prefix}.${group}.${value}`
   return te(key) ? t(key) : value

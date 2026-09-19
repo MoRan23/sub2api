@@ -14,18 +14,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func recordCodexStatusObservation(t *testing.T, physicalID, ownerID int64, value CodexTurnStateObservation, observedAt time.Time) {
+func isolateCodexTurnStateSummaryStore(t *testing.T) {
 	t.Helper()
-	window := globalFingerprintObserver.codexStateObservationWindow()
-	sequence := globalFingerprintObserver.record(FingerprintObservationEntry{
-		AccountID: physicalID, Timestamp: observedAt, EventKind: FingerprintObservationEventHTTP, CodexTurnState: &value,
+	previous := globalCodexTurnStateSummaryStore
+	globalCodexTurnStateSummaryStore = &codexTurnStateSummaryStore{}
+	SetFingerprintObservationEnabled(false)
+	t.Cleanup(func() {
+		SetFingerprintObservationEnabled(false)
+		globalCodexTurnStateSummaryStore = previous
 	})
-	require.NotZero(t, sequence, "status summaries must refer to an actual recorded physical send")
-	globalFingerprintObserver.updateCodexTurnStateObservation(sequence, ownerID, value, true, observedAt, window)
+}
+
+func recordCodexStatusObservation(t *testing.T, _ int64, ownerID int64, value CodexTurnStateObservation, observedAt time.Time) {
+	t.Helper()
+	sequence := globalCodexTurnStateSummaryStore.nextSequence()
+	require.NotZero(t, sequence)
+	globalCodexTurnStateSummaryStore.update(sequence, ownerID, value, true, observedAt)
 }
 
 func TestCodexTurnStateStatusObservationsRemainIndependentOfDisabledCache(t *testing.T) {
-	enablePassiveWSFingerprintObservation(t)
+	isolateCodexTurnStateSummaryStore(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
 	ownerOne, ownerTwo := codexStateBatchOwner(1, false), codexStateBatchOwner(2, false)
@@ -106,17 +114,22 @@ func TestCodexTurnStateStatusObservationsRemainIndependentOfDisabledCache(t *tes
 	SetFingerprintObservationEnabled(false)
 	off, err := state.GetStatuses(ctx, []int64{1, 11, 2, 3})
 	require.NoError(t, err)
-	for _, status := range off.Items {
-		require.False(t, status.ObservationEnabled)
+	for id, status := range off.Items {
+		require.True(t, status.ObservationEnabled)
 		require.Equal(t, "instance", status.ObservationScope)
-		require.Equal(t, []CodexTurnStateModelObservation{}, status.Observations)
+		if id == "1" {
+			require.Equal(t, again.Observations, status.Observations)
+		} else {
+			require.Equal(t, batch.Items[id].Observations, status.Observations)
+		}
 	}
+	require.Empty(t, SnapshotFingerprintObservations(0))
 	require.Equal(t, before.Models, off.Items["1"].Models)
 	SetFingerprintObservationEnabled(true)
 	reenabled, err := state.GetStatus(ctx, 1)
 	require.NoError(t, err)
 	require.True(t, reenabled.ObservationEnabled)
-	require.Equal(t, []CodexTurnStateModelObservation{}, reenabled.Observations, "turning observation off must scrub the index, not merely hide it")
+	require.Equal(t, again.Observations, reenabled.Observations, "full fingerprint observation does not control lightweight account summaries")
 	require.Equal(t, beforeRecords, records.records)
 	requirePassiveWSNoMaintenance(t, state)
 }
@@ -124,7 +137,7 @@ func TestCodexTurnStateStatusObservationsRemainIndependentOfDisabledCache(t *tes
 func TestCodexTurnStateStatusObservationUsesFrozenOwnerAcrossBindOrdering(t *testing.T) {
 	for _, finishBeforeBind := range []bool{false, true} {
 		t.Run(fmt.Sprintf("finish_before_bind_%t", finishBeforeBind), func(t *testing.T) {
-			enablePassiveWSFingerprintObservation(t)
+			isolateCodexTurnStateSummaryStore(t)
 			ctx := context.Background()
 			owner, shadow := codexStateBatchOwner(1, false), codexStateBatchShadow(11, 1)
 			accounts := &codexStateBatchAccounts{accounts: map[int64]*Account{1: owner, 11: shadow, 2: codexStateBatchOwner(2, false)}}
@@ -154,9 +167,8 @@ func TestCodexTurnStateStatusObservationUsesFrozenOwnerAcrossBindOrdering(t *tes
 			if finishBeforeBind {
 				finish()
 			}
-			sequence := globalFingerprintObserver.record(entry)
-			require.NotZero(t, sequence)
-			bindCodexTurnStateObservationSequence(observation, sequence)
+			bindCodexTurnStateSummarySequence(observation)
+			bindCodexTurnStateSummarySequence(observation)
 			if !finishBeforeBind {
 				finish()
 			}
@@ -177,6 +189,7 @@ func TestCodexTurnStateStatusObservationUsesFrozenOwnerAcrossBindOrdering(t *tes
 			require.Empty(t, batch.Items["2"].Observations)
 			require.Empty(t, batch.Items["1"].Models)
 			require.Empty(t, records.records)
+			require.Empty(t, SnapshotFingerprintObservations(0))
 			requirePassiveWSNoMaintenance(t, state)
 			serialized, err := json.Marshal(batch)
 			require.NoError(t, err)
@@ -187,8 +200,9 @@ func TestCodexTurnStateStatusObservationUsesFrozenOwnerAcrossBindOrdering(t *tes
 	}
 }
 
-func TestCodexTurnStateStatusObservationOldWindowCannotPublishAfterReenable(t *testing.T) {
-	enablePassiveWSFingerprintObservation(t)
+func TestCodexTurnStateStatusObservationFingerprintSwitchDoesNotDiscardSummary(t *testing.T) {
+	isolateCodexTurnStateSummaryStore(t)
+	SetFingerprintObservationEnabled(true)
 	ctx := context.Background()
 	owner := codexStateBatchOwner(1, false)
 	accounts := &codexStateBatchAccounts{accounts: map[int64]*Account{1: owner}}
@@ -202,29 +216,32 @@ func TestCodexTurnStateStatusObservationOldWindowCannotPublishAfterReenable(t *t
 	noteOpenAICodexStatePatch(c, attempt, nil, nil)
 	entry := FingerprintObservationEntry{AccountID: owner.ID, EventKind: FingerprintObservationEventHTTP}
 	observation := populateCodexTurnStateObservation(c, &entry, nil, nil, false)
-	oldWindow := globalFingerprintObserver.codexStateObservationWindow()
-	SetFingerprintObservationEnabled(false)
-	SetFingerprintObservationEnabled(true)
-	require.NotEqual(t, oldWindow, globalFingerprintObserver.codexStateObservationWindow())
-	// The old physical attempt can finish after observation was reopened and even
-	// receive a valid new sequence; its private original window still disallows it.
 	sequence := globalFingerprintObserver.record(entry)
 	require.NotZero(t, sequence)
 	bindCodexTurnStateObservationSequence(observation, sequence)
+	SetFingerprintObservationEnabled(false)
+	// Closing full fingerprint observation must not suppress an actual send's
+	// response summary, even when that response arrives after the switch change.
+	bindCodexTurnStateSummarySequence(observation)
 	state.ObserveHeaders(attempt, http.Header{"X-Codex-Turn-State": {makeCodexWSStateTestToken(10, time.Now().Add(-time.Minute))}})
 	require.NoError(t, state.Finish(ctx, attempt, true))
 	finishOpenAICodexStateObservation(attempt)
 	status, err := state.GetStatus(ctx, owner.ID)
 	require.NoError(t, err)
 	require.True(t, status.ObservationEnabled)
-	require.Empty(t, status.Observations, "a late old-window attempt cannot repopulate the cleared summaries")
+	require.Len(t, status.Observations, 1)
+	require.Equal(t, "old-window-model", status.Observations[0].Model)
+	require.Empty(t, SnapshotFingerprintObservations(0), "summary publication must not repopulate the disabled full fingerprint ring")
+	SetFingerprintObservationEnabled(true)
 	recordCodexStatusObservation(t, owner.ID, owner.ID, CodexTurnStateObservation{
 		Model: "new-window-model", Action: "passthrough", ResponseLength: 292, ResponseShape: "target", ResponseSource: "header",
 	}, time.Now())
 	status, err = state.GetStatus(ctx, owner.ID)
 	require.NoError(t, err)
-	require.Len(t, status.Observations, 1)
+	require.Len(t, status.Observations, 2)
 	require.Equal(t, "new-window-model", status.Observations[0].Model)
+	require.Equal(t, "old-window-model", status.Observations[1].Model)
+	require.Empty(t, SnapshotFingerprintObservations(0))
 	require.Empty(t, records.records)
 	requirePassiveWSNoMaintenance(t, state)
 }
@@ -233,7 +250,7 @@ func TestCodexTurnStateStatusObservationNoStateDoesNotReplacePriorResponse(t *te
 	for _, withPrior := range []bool{false, true} {
 		for _, delivered := range []bool{false, true} {
 			t.Run(fmt.Sprintf("prior_%t_delivered_%t", withPrior, delivered), func(t *testing.T) {
-				enablePassiveWSFingerprintObservation(t)
+				isolateCodexTurnStateSummaryStore(t)
 				ctx := context.Background()
 				owner := codexStateBatchOwner(1, false)
 				accounts := &codexStateBatchAccounts{accounts: map[int64]*Account{1: owner}}
@@ -256,9 +273,7 @@ func TestCodexTurnStateStatusObservationNoStateDoesNotReplacePriorResponse(t *te
 				noteOpenAICodexStatePatch(c, attempt, nil, nil)
 				entry := FingerprintObservationEntry{AccountID: owner.ID, EventKind: FingerprintObservationEventHTTP}
 				observation := populateCodexTurnStateObservation(c, &entry, nil, nil, false)
-				sequence := globalFingerprintObserver.record(entry)
-				require.NotZero(t, sequence)
-				bindCodexTurnStateObservationSequence(observation, sequence)
+				bindCodexTurnStateSummarySequence(observation)
 				// A successful response without state and a failed/abandoned send both
 				// finish their wire lifecycle without a token observation timestamp.
 				require.NoError(t, state.Finish(ctx, attempt, delivered))

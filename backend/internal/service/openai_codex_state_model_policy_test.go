@@ -80,7 +80,10 @@ func TestCodexTurnStateModelPolicyExactFinalModelAdmission(t *testing.T) {
 				require.True(t, s.ValidateAttempt(context.Background(), attempt))
 				require.NoError(t, s.Finish(context.Background(), attempt, false))
 			} else {
-				require.Nil(t, attempt, "only the exact final model is eligible")
+				require.NotNil(t, attempt)
+				require.False(t, attempt.Enabled, "only the exact final model is eligible for maintenance")
+				require.Empty(t, attempt.Snapshot.Token)
+				require.NoError(t, s.Finish(context.Background(), attempt, true))
 				require.Empty(t, repo.records)
 				require.Empty(t, s.queue)
 			}
@@ -101,7 +104,10 @@ func TestCodexTurnStateModelPolicyUnavailableAndEmptyFailClosed(t *testing.T) {
 				policy.fail(errors.New("settings unavailable"))
 			}
 			attempt, _ := s.Prepare(context.Background(), account, "gpt-5")
-			require.Nil(t, attempt)
+			require.NotNil(t, attempt)
+			require.False(t, attempt.Enabled)
+			require.Empty(t, attempt.Snapshot.Token)
+			require.NoError(t, s.Finish(context.Background(), attempt, true))
 			require.Empty(t, repo.records)
 			require.Empty(t, repo.leases)
 			require.Empty(t, s.business)

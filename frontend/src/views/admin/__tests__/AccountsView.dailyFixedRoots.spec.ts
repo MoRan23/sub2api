@@ -150,10 +150,10 @@ describe('AccountsView daily fixed root HTTP contract', () => {
     expect(screen.getByRole('columnheader', { name: 'admin.accounts.columns.codexTurnState' })).toBeTruthy()
   })
 
-  it('carries batch observations into the disabled-cache column and full status dialog', async () => {
+  it('carries independent batch summaries into the disabled-cache column and dialog despite a legacy observation flag', async () => {
     turnStateResponse = { models: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'], items: { '42': {
       account_id: 42, owner_account_id: 42, inherited: false, enabled: false, expected_length: 332, models: [],
-      observation_enabled: true, observation_scope: 'instance', observations: [
+      observation_enabled: false, observation_scope: 'instance', observations: [
         { model: 'gpt-6-astra', observed_at: '2026-09-20T12:00:00Z', outbound_length: 0, response_length: 332, response_shape: 'target', response_observed_shape: 'team_business_target' },
         { model: 'outside-list', observed_at: '2026-09-20T12:00:01Z', outbound_length: 0, response_length: 356, response_shape: 'suspect', response_observed_shape: 'team_business_extended' },
       ]

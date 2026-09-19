@@ -237,6 +237,7 @@ export interface CodexTurnStateStatus {
   expected_length: number
   reason: string
   models: CodexTurnStateModelStatus[]
+  /** Lightweight instance summaries are available independently of fingerprint capture. */
   observation_enabled?: boolean
   observation_scope?: 'instance'
   observations?: CodexTurnStateObservation[]

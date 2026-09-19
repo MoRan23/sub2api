@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -117,8 +118,18 @@ func TestCodexStateHTTPNaturalResponsePublicationBoundary(t *testing.T) {
 func TestCodexStateHTTPFailsOpenAndIgnoresNonResponses(t *testing.T) {
 	for _, kind := range []string{"disabled", "store_down", "stale_credentials", "auxiliary", "prewarm"} {
 		t.Run(kind, func(t *testing.T) {
+			isolateCodexTurnStateSummaryStore(t)
 			state, repo, account := newCodexStateTestService(t)
 			service := &OpenAIGatewayService{codexTurnStateService: state}
+			// An available cached token makes passthrough assertions meaningful:
+			// the final rejection must discard an already prepared server snapshot.
+			seed, err := state.Prepare(context.Background(), account, "gpt-5")
+			require.NoError(t, err)
+			cachedToken := codexStateTestToken(10, state.now())
+			state.Observe(seed, cachedToken)
+			require.NoError(t, state.Finish(context.Background(), seed, true))
+			before := repo.records[seed.key]
+			require.NotEmpty(t, before.EncryptedToken)
 			body := `{"model":"gpt-5","input":"hello","client_metadata":{"x-codex-turn-state":"guarded-client"}}`
 			req := codexStateHTTPRequest(t, body)
 			req.Header.Set(openAICodexTurnStateHeader, "guarded-client")
@@ -136,11 +147,52 @@ func TestCodexStateHTTPFailsOpenAndIgnoresNonResponses(t *testing.T) {
 				req = codexStateHTTPRequest(t, body)
 				req.Header.Set(openAICodexTurnStateHeader, "guarded-client")
 			}
-			out := service.prepareOpenAICodexStateHTTPRequest(nil, account, req)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			out := service.prepareOpenAICodexStateHTTPRequest(c, account, req)
 			require.Equal(t, "guarded-client", out.Header.Get(openAICodexTurnStateHeader))
-			got, _ := io.ReadAll(out.Body)
+			require.Equal(t, req.Header.Get("Authorization"), out.Header.Get("Authorization"))
+			got, err := io.ReadAll(out.Body)
+			require.NoError(t, err)
 			require.Equal(t, body, string(got))
-			require.Nil(t, out.Context().Value(codexTurnStateHTTPRequestKey{}))
+			collector, _ := out.Context().Value(codexTurnStateHTTPRequestKey{}).(*codexTurnStateHTTPCollector)
+			if kind == "auxiliary" || kind == "prewarm" {
+				require.Nil(t, collector)
+				_, summaries := globalCodexTurnStateSummaryStore.snapshot([]int64{account.ID})
+				require.Empty(t, summaries)
+			} else {
+				require.NotNil(t, collector)
+				require.False(t, collector.attempt.Enabled)
+				require.Equal(t, account.ID, collector.attempt.OwnerAccountID)
+				require.Equal(t, "gpt-5", collector.attempt.Model)
+				require.Empty(t, collector.attempt.Generation)
+				require.Empty(t, collector.attempt.id)
+				require.Empty(t, collector.attempt.Snapshot.Token)
+				service.recordFingerprintObservationWithBody(c, account, installationIDResolution{}, out.Header, got)
+				responseToken := codexStateTestToken(10, state.now().Add(-time.Minute))
+				response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"X-Codex-Turn-State": {responseToken}}, Body: io.NopCloser(strings.NewReader(""))}
+				observeCodexTurnStateHTTPResponse(out, response, nil)
+				require.Empty(t, collector.attempt.candidates, "passive diagnostics must not retain response tokens")
+				markCodexTurnStateHTTPDelivered(response)
+				require.NoError(t, response.Body.Close())
+				_, summaries := globalCodexTurnStateSummaryStore.snapshot([]int64{account.ID})
+				require.Len(t, summaries[account.ID], 1)
+				require.Equal(t, "gpt-5", summaries[account.ID][0].Model)
+				require.Equal(t, 292, summaries[account.ID][0].ResponseLength)
+				require.Equal(t, "header", summaries[account.ID][0].ResponseSource)
+				require.Equal(t, len("guarded-client"), summaries[account.ID][0].OutboundLength)
+				encoded, err := json.Marshal(summaries)
+				require.NoError(t, err)
+				for _, secret := range []string{responseToken, cachedToken, "guarded-client", "Bearer stale", "test-token", before.EncryptedToken} {
+					require.NotContains(t, string(encoded), secret)
+				}
+			}
+			require.Equal(t, before, repo.records[seed.key], "passive completion must not publish or mutate the cached state")
+			for _, leases := range repo.leases {
+				require.Empty(t, leases)
+			}
+			require.Empty(t, state.business)
+			require.Empty(t, state.queue)
+			require.Empty(t, SnapshotFingerprintObservations(0))
 		})
 	}
 }

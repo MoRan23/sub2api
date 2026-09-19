@@ -63,8 +63,8 @@ describe('Codex turn-state status modal', () => {
     wrapper.unmount()
   })
 
-  it('shows disabled-cache observations, including off-list models, time, shape and validation details separately', async () => {
-    getCodexTurnState.mockResolvedValue({ ...status, enabled: false, observation_enabled: true, observation_scope: 'instance', observations: [
+  it('shows disabled-cache summaries regardless of a legacy observation flag, with shape and validation details separately', async () => {
+    getCodexTurnState.mockResolvedValue({ ...status, enabled: false, observation_enabled: false, observation_scope: 'instance', observations: [
       { model: 'gpt-outside-list', observed_at: '2026-09-20T12:00:00Z', outbound_length: 292, response_length: 356,
         response_shape: 'unknown', response_observed_shape: 'team_business_extended', response_cipher_blocks: 13,
         response_validation_reason: 'account_type_unknown', response_source: 'metadata' },
@@ -88,12 +88,12 @@ describe('Codex turn-state status modal', () => {
     wrapper.unmount()
   })
 
-  it.each([true, false])('distinguishes empty instance observation from a disabled global switch (%s)', async (enabled) => {
+  it.each([true, false, undefined])('shows an empty instance without requiring a fingerprint observation flag (%s)', async (enabled) => {
     getCodexTurnState.mockResolvedValue({ ...status, enabled: false, observation_enabled: enabled, observation_scope: 'instance', observations: [] })
     const wrapper = render()
     await flushPromises()
-    expect(wrapper.text()).toContain(enabled ? 'observationEmpty' : 'observationDisabled')
-    expect(wrapper.text()).not.toContain(enabled ? 'observationDisabled' : 'observationEmpty')
+    expect(wrapper.text()).toContain('observationEmpty')
+    expect(wrapper.text()).not.toContain('observationDisabled')
     wrapper.unmount()
   })
 

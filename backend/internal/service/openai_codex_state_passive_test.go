@@ -213,14 +213,24 @@ func TestCodexStatePassiveHTTPBodyOnlyCarrier(t *testing.T) {
 	observeCodexTurnStateHTTPResponse(request, nil, errors.New("send failed"))
 }
 
-func TestCodexStatePassiveObservationSkipsWhenObserverDisabled(t *testing.T) {
+func TestCodexStatePassiveObservationRemainsWhenFingerprintDisabled(t *testing.T) {
 	SetFingerprintObservationEnabled(false)
 	state, repo, account := newCodexStateTestService(t)
 	account.Extra[CodexTurnStateExtraKey].(map[string]any)["enabled"] = false
 	attempt, err := state.Prepare(context.Background(), account, "gpt-5")
 	require.NoError(t, err)
-	require.Nil(t, attempt)
+	require.NotNil(t, attempt)
+	require.False(t, attempt.Enabled)
+	require.Empty(t, attempt.Snapshot.Token)
+	state.ObserveHeaders(attempt, http.Header{"X-Codex-Turn-State": {makeCodexWSStateTestToken(10, time.Now().Add(-time.Minute))}})
+	require.Equal(t, 292, attempt.SafeObservation().TokenLength)
+	require.Empty(t, attempt.candidates)
+	require.NoError(t, state.Finish(context.Background(), attempt, true))
 	require.Empty(t, repo.records)
+	require.Empty(t, repo.leases)
+	require.Empty(t, state.business)
+	require.Empty(t, state.queue)
+	require.Empty(t, SnapshotFingerprintObservations(0))
 }
 
 func TestCodexStatePassiveObservationSendErrorDoesNotInventResponse(t *testing.T) {
