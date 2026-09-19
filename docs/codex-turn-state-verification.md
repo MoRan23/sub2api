@@ -36,3 +36,20 @@ env -u OPENAI_API_KEY GOEXPERIMENT=jsonv2 go test -tags unit \
 - `TestAccountRepoSuite/TestUpdateExtra_SchedulerNeutralSkipsOutboxAndSyncsFreshSnapshot`：组合运行出现 outbox 计数失败；当前树和基线分别单独运行均通过。组合运行问题未归因，未删除或放宽断言。
 
 本记录不宣称后端所有无关测试或全量后端 lint 已通过。模型长度分类只说明可观察封装形态，不验证解密内容或模型质量。
+
+## 采集正文与 SSE 限流调整（基线 `45ebf0935`）
+
+采集正文对齐 `ccodex-sleep-state@b18fabf9`；保留现有账号身份与独立请求隔离。结构化 SSE 限流沿用 HTTP 429 的账号级采集退避，真实 HTTP 状态保持不变。按后续要求，普通失败及无目标状态的最短重试间隔由 10 秒改为 30 秒，更长 Retry-After 和账号冷却优先。
+
+新增测试使用模拟 HTTP transport，覆盖完整正文、18 组限流码/事件/位置组合、字段优先级、SSE event 回退、多行/单字节分块、畸形错误与文本误判防护、失败立即停止及 token 清空、Retry-After，以及 HTTP/SSE 限流后旧缓存保留和跨模型冷却。没有调用真实模型接口。
+
+本轮在 `backend` 目录执行以下相关检查；测试输出保存在 `.git/task-artifacts/codex-collector-sse-limits/`：
+
+普通回归和带 `unit` 标签的竞态测试各通过 484 项测试结果（含子测试），其中新增 56 项；两轮均无失败、无跳过。使用仓库声明的 Go 1.27.0 和 `GOEXPERIMENT=jsonv2`。本轮未改数据库或前端，未重复运行真实存储集成和前端套件。
+
+```bash
+env -u OPENAI_API_KEY GOEXPERIMENT=jsonv2 go test ./internal/service \
+  -run 'Codex(State|TurnState)' -count=1 -json
+env -u OPENAI_API_KEY GOEXPERIMENT=jsonv2 go test -race -tags unit ./internal/service \
+  -run 'Codex(State|TurnState)' -count=1 -json
+```

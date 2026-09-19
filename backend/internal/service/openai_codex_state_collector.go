@@ -19,6 +19,9 @@ type CodexTurnStateHTTPCollector struct{ Do CodexTurnStateCollectorHTTPDo }
 
 var ErrCodexTurnStateCollectorProxyUnavailable = errors.New("collector_proxy_unavailable")
 
+// Stream-level rate limits do not change the actual HTTP response status.
+var errCodexTurnStateCollectorRateLimited = errors.New("collector_rate_limited")
+
 func NewCodexTurnStateHTTPCollector(do CodexTurnStateCollectorHTTPDo) *CodexTurnStateHTTPCollector {
 	return &CodexTurnStateHTTPCollector{Do: do}
 }
@@ -31,9 +34,10 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 		return result, errors.New("collector_not_configured")
 	}
 	body, _ := json.Marshal(map[string]any{
-		"model": input.Model, "stream": true, "store": false, "instructions": "Reply briefly.",
-		"input":     []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "Reply with OK."}}}},
-		"reasoning": map[string]any{"effort": "low"},
+		"model": input.Model, "stream": true, "store": false, "instructions": "Reply with OK.",
+		"input":               []any{map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "Reply with OK."}}}},
+		"parallel_tool_calls": true,
+		"include":             []string{"reasoning.encrypted_content"},
 	})
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, chatgptCodexURL, bytes.NewReader(body))
 	if err != nil {
@@ -97,13 +101,14 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 	scanner := bufio.NewScanner(io.LimitReader(response.Body, 2<<20))
 	scanner.Buffer(make([]byte, 4096), 256<<10)
 	var eventData []byte
+	var eventName string
 	completed := false
 	consume := func() error {
-		if len(eventData) == 0 {
+		data, eventType := eventData, eventName
+		eventData, eventName = nil, ""
+		if len(data) == 0 {
 			return nil
 		}
-		data := eventData
-		eventData = nil
 		if bytes.Equal(data, []byte("[DONE]")) {
 			return nil
 		}
@@ -113,10 +118,41 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 		if json.Unmarshal(data, &event) != nil {
 			return nil
 		}
-		if event.Type == "error" || event.Type == "response.failed" || event.Type == "response.incomplete" {
+		if event.Type != "" {
+			eventType = event.Type
+		}
+		if eventType == "error" || eventType == "response.failed" || eventType == "response.incomplete" {
+			var failure struct {
+				Code  string `json:"code"`
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+				Response struct {
+					Error struct {
+						Code string `json:"code"`
+					} `json:"error"`
+				} `json:"response"`
+			}
+			// Malformed error details cannot turn a recognized failure into a
+			// successful response or provide a reliable rate-limit code.
+			if json.Unmarshal(data, &failure) != nil {
+				return errors.New("collector_response_failed")
+			}
+			code := failure.Response.Error.Code
+			if code == "" {
+				code = failure.Error.Code
+			}
+			if code == "" {
+				code = failure.Code
+			}
+			// Only structured upstream codes classify a limit; error prose is
+			// neither trusted as a signal nor retained in the collection result.
+			if code == "rate_limit_exceeded" || code == "insufficient_quota" {
+				return errCodexTurnStateCollectorRateLimited
+			}
 			return errors.New("collector_response_failed")
 		}
-		if event.Type == "response.completed" {
+		if eventType == "response.completed" {
 			completed = true
 		}
 		for _, token := range CodexTurnStateTokensFromEvent(data) {
@@ -139,12 +175,17 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 			}
 			continue
 		}
+		if bytes.HasPrefix(line, []byte("event:")) {
+			eventName = string(bytes.TrimSpace(line[len("event:"):]))
+			continue
+		}
 		if bytes.HasPrefix(line, []byte("data:")) {
 			if len(eventData) > 0 {
 				eventData = append(eventData, '\n')
 			}
 			eventData = append(eventData, bytes.TrimSpace(line[5:])...)
 			if len(eventData) > 256<<10 {
+				result.Tokens = nil
 				return result, errors.New("collector_event_too_large")
 			}
 		}

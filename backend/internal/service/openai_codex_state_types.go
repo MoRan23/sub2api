@@ -14,7 +14,7 @@ const (
 	CodexTurnStateScanInterval   = 30 * time.Second
 	CodexTurnStateDueInterval    = time.Second
 	CodexTurnStateCollectTimeout = 20 * time.Second
-	CodexTurnStateRetryInterval  = 10 * time.Second
+	CodexTurnStateRetryInterval  = 30 * time.Second
 )
 
 // CodexTurnStateKey always refers to the actual credential owner and final wire model.

@@ -112,10 +112,10 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 		if errors.Is(collectErr, context.Canceled) {
 			record.LastError = "business_preempted"
 		}
-		switch result.StatusCode {
-		case 401, 403:
+		switch {
+		case result.StatusCode == 401 || result.StatusCode == 403:
 			record.CollectorPaused, record.LastError = true, "collector_auth_rejected"
-		case 429:
+		case result.StatusCode == 429 || errors.Is(collectErr, errCodexTurnStateCollectorRateLimited):
 			record.LastError = "collector_rate_limited"
 		}
 		retry := CodexTurnStateRetryInterval

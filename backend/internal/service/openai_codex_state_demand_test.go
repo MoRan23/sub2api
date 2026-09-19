@@ -101,7 +101,7 @@ func TestCodexTurnStateDemandCollectorOutcomeAtomicallyKeepsShapeAndRetry(t *tes
 				require.Equal(t, "idle", record.CollectionStatus)
 			} else {
 				require.Equal(t, "extended_shape", record.DemandReason)
-				retry := 10 * time.Second
+				retry := 30 * time.Second
 				if name == "rate_limited" {
 					retry = time.Minute
 				}
@@ -204,7 +204,7 @@ func TestCodexTurnStateDemandRenewalRetainsValidCacheAndRetriesNearExpiry(t *tes
 			} else {
 				require.Equal(t, "expiring", after.DemandReason)
 				require.Equal(t, "backoff", after.CollectionStatus)
-				require.Equal(t, s.now().Add(10*time.Second), after.NextCollectAt)
+				require.Equal(t, s.now().Add(30*time.Second), after.NextCollectAt)
 			}
 		})
 	}
@@ -247,7 +247,7 @@ func TestCodexTurnStateDemandNaturalNearExpiryPreservesRetry(t *testing.T) {
 	s.collect(ctx, seed.key)
 	before, err := repo.Get(ctx, seed.key)
 	require.NoError(t, err)
-	require.Equal(t, s.now().Add(10*time.Second), before.NextCollectAt)
+	require.Equal(t, s.now().Add(30*time.Second), before.NextCollectAt)
 	natural, err := s.Prepare(ctx, account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, natural)
