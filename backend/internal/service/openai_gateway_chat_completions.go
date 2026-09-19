@@ -425,6 +425,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if account.Platform == PlatformOpenAI {
 		upstreamReq = ApplyOpenAIRequestPolicy(upstreamReq, s.settingService)
 	}
+	upstreamReq = s.prepareOpenAICodexStateHTTPRequest(c, account, upstreamReq)
 	s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, openAIUpstreamRequestBodySnapshot(upstreamReq, responsesBody))
 
 	// 7. Send request
@@ -657,7 +658,17 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	// writeContentType 仅在头不存在时才设置，无法覆盖。这里显式 Set 强制改回 JSON，
 	// 否则下游"看头判流式"的中间层（如 new-api）会把本应聚合的 JSON 当成 SSE 处理。
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	c.JSON(http.StatusOK, chatResp)
+	if codexTurnStateHTTPCollectorFromResponse(resp) != nil {
+		encoded, err := json.Marshal(chatResp)
+		if err != nil {
+			return nil, fmt.Errorf("marshal chat completion response: %w", err)
+		}
+		if writeOpenAIResponseDataWithDelivery(c, http.StatusOK, "application/json; charset=utf-8", encoded) {
+			markCodexTurnStateHTTPDelivered(resp)
+		}
+	} else {
+		c.JSON(http.StatusOK, chatResp)
+	}
 
 	result := &OpenAIForwardResult{
 		RequestID:                     requestID,
@@ -750,6 +761,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	firstChunk := true
 	clientDisconnected := false
 	clientOutputStarted := false
+	turnStateSuccessfulOutputWritten := false
 	pendingSSE := make([]string, 0, 4)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var streamFailoverErr *UpstreamFailoverError
@@ -954,10 +966,16 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					)
 					break
 				}
+				if event.Type == "response.completed" || event.Type == "response.done" || openAIStreamDataStartsVisibleOutput(payload, event.Type) {
+					turnStateSuccessfulOutputWritten = true
+				}
 			}
 		}
 		if len(chunks) > 0 && !clientDisconnected && clientOutputStarted {
 			c.Writer.Flush()
+			if turnStateSuccessfulOutputWritten {
+				markCodexTurnStateHTTPDelivered(resp)
+			}
 		}
 		return isTerminalEvent
 	}
@@ -1041,6 +1059,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 		if !clientDisconnected {
 			c.Writer.Flush()
+			if turnStateSuccessfulOutputWritten || terminalEventType == "response.completed" || terminalEventType == "response.done" {
+				markCodexTurnStateHTTPDelivered(resp)
+			}
 		}
 		logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, &usage, terminalEventType, clientDisconnected)
 		return resultWithUsage(), nil

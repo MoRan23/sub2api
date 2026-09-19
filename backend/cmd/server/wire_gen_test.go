@@ -87,6 +87,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // grokOAuth
 		nil, // openAIGateway
 		nil, // codexTelemetry
+		nil, // codexTurnState
 		nil, // egressLocation
 		nil, // openAIOutboundSessionV1Cleanup
 		nil, // scheduledTestRunner

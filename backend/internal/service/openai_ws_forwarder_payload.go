@@ -355,6 +355,13 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 			return nil, sessionResolution, fmt.Errorf("apply openai oauth identity plan to websocket headers: %w", applyErr)
 		}
 		s.guardOpenAICodexTurnStateEchoForPlan(c, account, sessionResolution.OutboundIdentityPlan, headers, nil)
+		sessionResolution.CodexStateMode = s.openAICodexWSStateMode(ctx, account)
+		if sessionResolution.CodexStateMode.Enabled {
+			// Preserve only a value that passed the existing source guard. It can
+			// migrate to the first response.create, never to later turns.
+			sessionResolution.CodexStateFirstFrameToken = extractOpenAICodexTurnState(headers)
+			deleteOpenAIHeaderEqualFold(headers, openAIWSTurnStateHeader)
+		}
 		plan := sessionResolution.OutboundIdentityPlan
 		plan.SocketDigest = openAIWSOutboundIdentityPlanDigest(headers, plan)
 		sessionResolution.OutboundIdentityPlan = plan

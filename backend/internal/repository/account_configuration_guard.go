@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"maps"
 	"reflect"
+	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -53,7 +53,7 @@ func lockAccountConfiguration(ctx context.Context, client *dbent.Client, id int6
 // managed fields. Admin intent is separate from, and scoped more narrowly than,
 // the map being saved. Every target must have the same explicit intent.
 func accountConfigurationExtraPatch(ctx context.Context, ids []int64, updates map[string]any) map[string]any {
-	filtered := maps.Clone(updates)
+	filtered := service.StripCodexTurnStateManagedExtra(updates)
 	delete(filtered, "openai_pinned_installation_id")
 	delete(filtered, "openai_installation_rotate_enabled")
 	for _, key := range []string{"openai_installation_pin_enabled", "enable_tls_fingerprint", "tls_fingerprint_profile_id"} {
@@ -74,7 +74,57 @@ func accountConfigurationExtraPatch(ctx context.Context, ids []int64, updates ma
 			filtered[key] = value
 		}
 	}
+	if len(ids) > 0 {
+		config := service.AccountConfigurationIntentFromContext(ctx, ids[0]).CodexTurnState
+		for _, id := range ids[1:] {
+			if !reflect.DeepEqual(config, service.AccountConfigurationIntentFromContext(ctx, id).CodexTurnState) {
+				config = nil
+				break
+			}
+		}
+		if config != nil {
+			if filtered == nil {
+				filtered = make(map[string]any)
+			}
+			filtered[service.CodexTurnStateExtraKey] = *config
+		}
+	}
 	return filtered
+}
+
+const codexTurnStateOwnerSQL = "platform = 'openai' AND type = 'oauth' AND parent_account_id IS NULL AND LOWER(COALESCE(credentials ->> 'auth_mode', '')) NOT IN ('personalaccesstoken', 'personal_access_token', 'agentidentity') AND LOWER(COALESCE(credentials ->> 'openai_auth_mode', '')) NOT IN ('personalaccesstoken', 'personal_access_token', 'agentidentity')"
+
+// Both expressions are evaluated against the latest row under UPDATE's lock.
+// The generation is changed in the same statement as its auth/config identity.
+func guardedCodexTurnStateGenerationExpression(extraExpression, credentialsExpression string) string {
+	changes := []string{"extra -> 'codex_turn_state' IS DISTINCT FROM (" + extraExpression + ") -> 'codex_turn_state'"}
+	if credentialsExpression != "" {
+		for _, key := range service.CodexTurnStateCredentialKeys {
+			changes = append(changes, "credentials -> '"+key+"' IS DISTINCT FROM ("+credentialsExpression+") -> '"+key+"'")
+		}
+		changes = append(changes, "(COALESCE(extra #>> '{codex_turn_state,account_type}', 'auto') = 'auto' AND credentials -> 'plan_type' IS DISTINCT FROM ("+credentialsExpression+") -> 'plan_type')")
+	}
+	return "CASE WHEN " + codexTurnStateOwnerSQL + " AND ((" + extraExpression + ") ? 'codex_turn_state') AND (" + strings.Join(changes, " OR ") + ") THEN COALESCE((" + extraExpression + "), '{}'::jsonb) || jsonb_build_object('codex_turn_state_generation', gen_random_uuid()::text) ELSE (" + extraExpression + ") END"
+}
+
+// Collector references use JSONB, so take the same lock used by proxy deletion.
+func lockCodexTurnStateCollectorProxy(ctx context.Context, client *dbent.Client, account *service.Account) error {
+	config := service.CodexTurnStateConfigForAccount(account)
+	if config.CollectorProxyID == nil {
+		return nil
+	}
+	rows, err := client.QueryContext(ctx, `SELECT id FROM proxies WHERE id = $1 AND deleted_at IS NULL FOR KEY SHARE`, *config.CollectorProxyID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return service.ErrProxyNotFound
+	}
+	return rows.Err()
 }
 
 func guardedAccountExtraExpression(expression string) string {

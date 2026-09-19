@@ -1068,6 +1068,22 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	var telemetryMu sync.Mutex
 	var telemetry *codexTelemetryWSTurn
+	var codexStateMu sync.Mutex
+	var codexStateAttempt *CodexTurnStateAttempt
+	codexStateDelivered := false
+	firstCodexStateFrame := true
+	currentCodexStateAttempt := func() *CodexTurnStateAttempt {
+		codexStateMu.Lock()
+		defer codexStateMu.Unlock()
+		return codexStateAttempt
+	}
+	finishCodexStateAttempt := func() {
+		codexStateMu.Lock()
+		attempt, delivered := codexStateAttempt, codexStateDelivered
+		codexStateMu.Unlock()
+		s.finishOpenAICodexWSState(ctx, attempt, delivered)
+	}
+	defer finishCodexStateAttempt()
 	currentTelemetry := func() *codexTelemetryWSTurn {
 		telemetryMu.Lock()
 		defer telemetryMu.Unlock()
@@ -1075,6 +1091,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	telemetryMayRetry := true // The initial physical write can be retried by the caller.
 	defer func() { currentTelemetry().finish(telemetryMayRetry) }()
+	var pendingFrameObservation func()
 	physicalUpstreamFrameConn := &openAIWSFinalizingUpstreamFrameConn{
 		inner: relayUpstreamFrameConn,
 		finalize: func(msgType coderws.MessageType, payload []byte) ([]byte, error) {
@@ -1090,18 +1107,46 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				return payload, nil
 			}
+			if s.openAICodexWSStateModeChanged(ctx, account, sessionResolution.CodexStateMode) {
+				return payload, NewOpenAIWSClientCloseError(coderws.StatusNormalClosure, "account turn-state settings changed; please reconnect", nil)
+			}
 			if account.UsesOpenAICodexProtocol() {
 				projected, projectErr := s.projectOpenAIOAuthWSFrame(c, account, framePlan, payload)
 				if projectErr != nil {
 					return payload, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to project websocket turn identity", projectErr)
 				}
+				// Resolve the state only after the ordinary provenance guard, using
+				// this physical frame's final mapped model. Neither a previous turn
+				// nor the first handshake model may supply a later frame's snapshot.
+				firstHeaderToken := ""
+				if firstCodexStateFrame {
+					firstHeaderToken = sessionResolution.CodexStateFirstFrameToken
+				}
+				prepared, stateAttempt, prepareErr := s.prepareOpenAICodexWSStateFrame(ctx, c, account, projected, firstHeaderToken, openAIWSCodexStateCredentialHeaders(upstreamConn, headers))
+				if prepareErr != nil {
+					return payload, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to prepare websocket turn state", prepareErr)
+				}
+				if firstCodexStateFrame {
+					if gjson.GetBytes(projected, "generate").Type != gjson.False {
+						s.observeOpenAICodexWSStateHeaders(stateAttempt, handshakeHeaders)
+					}
+					firstCodexStateFrame = false
+				}
+				codexStateMu.Lock()
+				previousStateAttempt := codexStateAttempt
+				previousStateDelivered := codexStateDelivered
+				codexStateAttempt = stateAttempt
+				codexStateDelivered = false
+				codexStateMu.Unlock()
+				s.finishOpenAICodexWSState(ctx, previousStateAttempt, previousStateDelivered)
+				projected = prepared
 				stamped, stampErr := stampOpenAICodexWSStreamRequestStart(projected, time.Now())
 				if stampErr != nil {
 					return payload, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to stamp websocket request metadata", stampErr)
 				}
 				payload = stamped
 			}
-			s.recordFingerprintObservationWSFrame(c, account, currentTimezoneState, payload, physicalObservationHeaders, openAIWSObservationFramePlan(account, &framePlan))
+			pendingFrameObservation = s.freezeFingerprintObservationWSFrame(c, account, currentTimezoneState, payload, physicalObservationHeaders, openAIWSObservationFramePlan(account, &framePlan))
 			recordOpenAICodexGuardianSourceThread(framePlan, nil, payload)
 			currentTelemetry().finish(false)
 			nextTelemetry := s.beginCodexTelemetryWS(ctx, account, physicalObservationHeaders, headers, payload)
@@ -1111,6 +1156,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			return payload, nil
 		},
 		afterWrite: func(_ coderws.MessageType, payload []byte, err error) {
+			if err == nil && pendingFrameObservation != nil {
+				pendingFrameObservation()
+			}
+			pendingFrameObservation = nil
 			eventType := gjson.GetBytes(payload, "type").String()
 			if err != nil && eventType == "response.create" {
 				currentTelemetry().writeFailed()
@@ -1153,6 +1202,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 			isResponseCreate := eventType == "response.create"
+			if isResponseCreate && s.openAICodexWSStateModeChanged(ctx, account, sessionResolution.CodexStateMode) {
+				return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusNormalClosure, "account turn-state settings changed; please reconnect", nil)
+			}
 			responseCreateAt := time.Now()
 			var frameIdentityPlan OpenAIOAuthIdentityPlan
 			if isResponseCreate && outboundIdentityModeEnabled {
@@ -1372,6 +1424,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	firstWriteErr := physicalUpstreamFrameConn.WriteFrame(firstWriteCtx, coderws.MessageText, firstClientMessage)
 	cancelFirstWrite()
 	if firstWriteErr != nil {
+		var closeErr *OpenAIWSClientCloseError
+		if errors.As(firstWriteErr, &closeErr) && closeErr.StatusCode() == coderws.StatusNormalClosure {
+			return firstWriteErr // A settings change requests a reconnect, never replay.
+		}
 		return wrapOpenAIWSIngressTurnError(
 			"write_upstream",
 			fmt.Errorf("write first upstream websocket request: %w", firstWriteErr),
@@ -1510,6 +1566,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				if writeErr == nil && isDataFrame && openAIWSPassthroughOutputCommitsTurnState(payload) {
 					commitHandshakeTurnState()
+					codexStateMu.Lock()
+					codexStateDelivered = true
+					codexStateMu.Unlock()
+				}
+				if isTerminal {
+					finishCodexStateAttempt()
 				}
 				if msgType == coderws.MessageText && writeErr == nil {
 					eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
@@ -1517,6 +1579,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				if msgType == coderws.MessageText && openAIWSPassthroughIsTerminalOutput(payload) {
 					turnLifecycle.finishTerminalWrite(writeErr == nil, clientFrameConn.markTurnCompleted)
+					if writeErr == nil && s.openAICodexWSStateModeChanged(ctx, account, sessionResolution.CodexStateMode) {
+						_ = clientConn.Close(coderws.StatusNormalClosure, "account turn-state settings changed; please reconnect")
+						_ = clientConn.CloseNow()
+					}
 				}
 			},
 			BeforeRelayCancel: func(exit openaiwsv2.RelayExit) {
@@ -1536,6 +1602,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			},
 			BeforeWriteClient: func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error {
 				if msgType == coderws.MessageText || msgType == coderws.MessageBinary {
+					s.observeOpenAICodexWSStateEvent(currentCodexStateAttempt(), payload)
 					eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 					currentTelemetry().observe(payload, eventType)
 				}

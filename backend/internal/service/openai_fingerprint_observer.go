@@ -96,6 +96,7 @@ type FingerprintObservationEntry struct {
 	OutboundCodexResidencySource string                         `json:"outbound_codex_residency_source,omitempty"`
 	RequestIntegrity             *RequestIntegrityObservation   `json:"request_integrity,omitempty"`
 	ConversionCheck              *apicompat.ChatConversionCheck `json:"conversion_check,omitempty"`
+	CodexTurnState               *CodexTurnStateObservation     `json:"codex_turn_state,omitempty"`
 }
 
 // OpenAIDailyRootObservation is request-local provenance written only after a
@@ -291,16 +292,16 @@ func (o *fingerprintObserver) setEnabledLocked(enabled bool) {
 	}
 }
 
-func (o *fingerprintObserver) record(entry FingerprintObservationEntry) {
+func (o *fingerprintObserver) record(entry FingerprintObservationEntry) uint64 {
 	if o == nil || !o.enabled.Load() {
-		return
+		return 0
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	// A disable may have raced the fast-path load above. Re-check while holding
 	// the same lock used by setEnabled so a disabled observer stays empty.
 	if !o.enabled.Load() || len(o.ring) == 0 {
-		return
+		return 0
 	}
 	o.seq++
 	entry.SequenceID = o.seq
@@ -311,6 +312,7 @@ func (o *fingerprintObserver) record(entry FingerprintObservationEntry) {
 	if o.size < len(o.ring) {
 		o.size++
 	}
+	return entry.SequenceID
 }
 
 func (o *fingerprintObserver) snapshotThrough(snapshotSeq uint64) ([]FingerprintObservationEntry, uint64) {
@@ -635,7 +637,8 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 	entry.OutboundCodexResidencySource = "request_headers"
 	paths := openAIRequestTimezoneFinalObservationPaths(c, state, body)
 	populateFingerprintObservationTimezones(&entry, state, body, paths)
-	globalFingerprintObserver.record(entry)
+	stateObservation := populateCodexTurnStateObservation(c, &entry, outbound, body, false)
+	bindCodexTurnStateObservationSequence(stateObservation, globalFingerprintObserver.record(entry))
 }
 
 func fingerprintObservationAccountEnabled(account *Account) bool {
@@ -1016,9 +1019,16 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWSHandshake(c *gin.Co
 // the previous frame's session/thread identity.
 func (s *OpenAIGatewayService) recordFingerprintObservationWSFrame(c *gin.Context, account *Account,
 	state *RequestTimezoneState, body []byte, handshakeHeaders http.Header, plan *OpenAIOAuthIdentityPlan) {
+	s.freezeFingerprintObservationWSFrame(c, account, state, body, handshakeHeaders, plan)()
+}
+
+// Freeze the checked wire view before sending, then publish only after Write
+// succeeds. The closure retains scalar diagnostics rather than the raw token.
+func (s *OpenAIGatewayService) freezeFingerprintObservationWSFrame(c *gin.Context, account *Account,
+	state *RequestTimezoneState, body []byte, handshakeHeaders http.Header, plan *OpenAIOAuthIdentityPlan) func() {
 	integrity := s.observeOpenAIRequestIntegrity(c, account, handshakeHeaders, body, "ws", state)
 	if !fingerprintObservationAccountEnabled(account) {
-		return
+		return func() {}
 	}
 	var identity OpenAICodexTurnIdentity
 	var pin installationIDResolution
@@ -1038,7 +1048,13 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWSFrame(c *gin.Contex
 		paths = DeriveOpenAIRequestTimezoneProvenance(state.PreparedBody(), body)
 	}
 	populateFingerprintObservationTimezones(&entry, state, body, paths)
-	globalFingerprintObserver.record(entry)
+	stateObservation := populateCodexTurnStateObservation(c, &entry, handshakeHeaders, body, true)
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			bindCodexTurnStateObservationSequence(stateObservation, globalFingerprintObserver.record(entry))
+		})
+	}
 }
 
 func installationIDResolutionFromContext(c *gin.Context, account *Account) installationIDResolution {

@@ -71,7 +71,7 @@
             @click="selectOption(null)"
             :class="['select-option', modelValue === null && 'select-option-selected']"
           >
-            <span class="select-option-label">{{ t('admin.accounts.noProxy') }}</span>
+            <span class="select-option-label">{{ noProxyLabel || t('admin.accounts.noProxy') }}</span>
             <Icon v-if="modelValue === null" name="check" size="sm" class="text-primary-500" />
           </div>
 
@@ -180,6 +180,7 @@ interface Props {
   modelValue: number | null
   proxies: Proxy[]
   disabled?: boolean
+  noProxyLabel?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -207,7 +208,7 @@ const selectedProxy = computed(() => {
 
 const selectedLabel = computed(() => {
   if (!selectedProxy.value) {
-    return t('admin.accounts.noProxy')
+    return props.noProxyLabel || t('admin.accounts.noProxy')
   }
   const proxy = selectedProxy.value
   return `${proxy.name} (${proxy.protocol}://${proxy.host}:${proxy.port})`

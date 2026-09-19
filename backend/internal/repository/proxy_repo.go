@@ -274,8 +274,43 @@ func enqueueProxyProbeAccountChanges(ctx context.Context, exec sqlExecutor, acco
 }
 
 func (r *proxyRepository) Delete(ctx context.Context, id int64) error {
-	_, err := r.client.Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx)
-	return err
+	client := clientFromContext(ctx, r.client)
+	var tx *dbent.Tx
+	if dbent.TxFromContext(ctx) == nil {
+		var err error
+		tx, err = r.client.Tx(ctx)
+		if err != nil && err != dbent.ErrTxStarted {
+			return err
+		}
+		if tx != nil {
+			defer func() { _ = tx.Rollback() }()
+			ctx = dbent.NewTxContext(ctx, tx)
+			client = tx.Client()
+		}
+	}
+	// Collector references live in JSON, so their writers take FOR KEY SHARE
+	// on this row. Serialize deletion with those writers before checking usage.
+	var lockedID int64
+	if err := scanSingleRow(ctx, client, "SELECT id FROM proxies WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", []any{id}, &lockedID); err != nil {
+		if err == sql.ErrNoRows {
+			return service.ErrProxyNotFound
+		}
+		return err
+	}
+	var count int64
+	if err := scanSingleRow(ctx, client, proxyAccountCountSQL, []any{id}, &count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return service.ErrProxyInUse
+	}
+	if _, err := client.Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx); err != nil {
+		return err
+	}
+	if tx != nil {
+		return tx.Commit()
+	}
+	return nil
 }
 
 func (r *proxyRepository) List(ctx context.Context, params pagination.PaginationParams) ([]service.Proxy, *pagination.PaginationResult, error) {
@@ -469,10 +504,15 @@ func (r *proxyRepository) ExistsByHostPortAuth(ctx context.Context, host string,
 	return count > 0, err
 }
 
-// CountAccountsByProxyID returns the number of accounts using a specific proxy
+// Match JSON numbers without a text-to-bigint cast: malformed historical extra
+// values must not break proxy listing or bypass the deletion usage check.
+const proxyAccountReferenceSQL = "(proxy_id = $1 OR extra #> '{codex_turn_state,collector_proxy_id}' = to_jsonb($1::bigint))"
+const proxyAccountCountSQL = "SELECT COUNT(*) FROM accounts WHERE " + proxyAccountReferenceSQL + " AND deleted_at IS NULL"
+
+// CountAccountsByProxyID counts each account once, including collector-only use.
 func (r *proxyRepository) CountAccountsByProxyID(ctx context.Context, proxyID int64) (int64, error) {
 	var count int64
-	if err := scanSingleRow(ctx, r.sql, "SELECT COUNT(*) FROM accounts WHERE proxy_id = $1 AND deleted_at IS NULL", []any{proxyID}, &count); err != nil {
+	if err := scanSingleRow(ctx, r.sql, proxyAccountCountSQL, []any{proxyID}, &count); err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -482,7 +522,7 @@ func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, pro
 	rows, err := r.sql.QueryContext(ctx, `
 		SELECT id, name, platform, type, notes
 		FROM accounts
-		WHERE proxy_id = $1 AND deleted_at IS NULL
+		WHERE `+proxyAccountReferenceSQL+` AND deleted_at IS NULL
 		ORDER BY id DESC
 	`, proxyID)
 	if err != nil {
@@ -522,7 +562,16 @@ func (r *proxyRepository) ListAccountSummariesByProxyID(ctx context.Context, pro
 
 // GetAccountCountsForProxies returns a map of proxy ID to account count for all proxies
 func (r *proxyRepository) GetAccountCountsForProxies(ctx context.Context) (counts map[int64]int64, err error) {
-	rows, err := r.sql.QueryContext(ctx, "SELECT proxy_id, COUNT(*) AS count FROM accounts WHERE proxy_id IS NOT NULL AND deleted_at IS NULL GROUP BY proxy_id")
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT proxy_id, COUNT(*) AS count FROM (
+			SELECT id AS account_id, proxy_id FROM accounts
+			WHERE proxy_id IS NOT NULL AND deleted_at IS NULL
+			UNION
+			SELECT a.id AS account_id, p.id AS proxy_id
+			FROM accounts a JOIN proxies p
+				ON a.extra #> '{codex_turn_state,collector_proxy_id}' = to_jsonb(p.id)
+			WHERE a.deleted_at IS NULL AND p.deleted_at IS NULL
+		) references_by_account GROUP BY proxy_id`)
 	if err != nil {
 		return nil, err
 	}

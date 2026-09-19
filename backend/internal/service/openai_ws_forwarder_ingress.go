@@ -925,6 +925,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		Headers:           wsHeaders,
 		HandshakeObserver: freezeFingerprintObservationWSHandshake(c, account),
 		IdentityDigest:    pinnedSocketDigest,
+		CodexStateMode:    wsSessionResolution.CodexStateMode.poolKey(),
 		HeadersFactory:    s.openAIWSHeadersFactory(ctx, account),
 		ProxyURL:          OpenAIOutboundRouteForAccount(c, account).ProxyURL,
 		ForceNewConn:      false,
@@ -1091,6 +1092,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			handshakeHeadersForTurn.Del(openAIWSTurnStateHeader)
 		}
 		wroteDownstream := false
+		codexStateDelivered := false
+		var codexStateAttempt *CodexTurnStateAttempt
+		defer func() { s.finishOpenAICodexWSState(ctx, codexStateAttempt, codexStateDelivered) }()
 		turnStateCommitted := false
 		commitTurnState := func() {
 			if turnStateCommitted {
@@ -1107,6 +1111,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				updatedHeaders = make(http.Header)
 			}
 			relayOpenAICodexTurnStateHeader(updatedHeaders, handshakeHeadersForTurn)
+			if wsSessionResolution.CodexStateMode.Enabled {
+				deleteOpenAIHeaderEqualFold(updatedHeaders, openAIWSTurnStateHeader)
+			}
 			baseAcquireReq.Headers = updatedHeaders
 			if stateStore != nil && sessionHash != "" {
 				if handshakeTurnState == "" {
@@ -1137,8 +1144,19 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			payload = stamped
 			payloadBytes = len(stamped)
 		}
+		firstGuardedHeaderToken := ""
+		if turn == 1 {
+			firstGuardedHeaderToken = wsSessionResolution.CodexStateFirstFrameToken
+		}
+		preparedStatePayload, stateAttempt, stateErr := s.prepareOpenAICodexWSStateFrame(ctx, c, account, payload, firstGuardedHeaderToken, lease.CodexStateCredentialHeaders())
+		if stateErr != nil {
+			return nil, wrapOpenAIWSIngressTurnError("write_upstream_turn_state", stateErr, false)
+		}
+		payload, codexStateAttempt = preparedStatePayload, stateAttempt
+		payloadBytes = len(payload)
+		s.observeOpenAICodexWSStateHeaders(codexStateAttempt, lease.ClaimCodexStateHandshakeHeaders())
 		timezoneState, _ := RequestTimezoneStateFromContext(c)
-		s.recordFingerprintObservationWSFrame(c, account, timezoneState, payload, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &pinnedIdentityPlan))
+		recordFrameObservation := s.freezeFingerprintObservationWSFrame(c, account, timezoneState, payload, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &pinnedIdentityPlan))
 		recordOpenAICodexGuardianSourceThread(pinnedIdentityPlan, nil, payload)
 		telemetry = s.beginCodexTelemetryWS(ctx, account, lease.FingerprintObservationHeaders(), baseAcquireReq.Headers, payload)
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
@@ -1149,6 +1167,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				false,
 			)
 		}
+		recordFrameObservation()
 		if debugEnabled {
 			logOpenAIWSModeDebug(
 				"ingress_ws_turn_request_sent account_id=%d turn=%d conn_id=%s payload_bytes=%d",
@@ -1205,6 +1224,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 			eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
 			telemetry.observe(upstreamMessage, eventType)
+			s.observeOpenAICodexWSStateEvent(codexStateAttempt, upstreamMessage)
 			responseModelObserver.ObserveOpenAI(upstreamMessage, eventType)
 			if responseID == "" && eventResponseID != "" {
 				responseID = eventResponseID
@@ -1386,6 +1406,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					}
 				} else {
 					wroteDownstream = true
+					if openAIWSPassthroughOutputCommitsTurnState(upstreamMessage) {
+						codexStateDelivered = true
+					}
 					observeOpenAICodexWSCompactionDelivery(compactionDelivery, upstreamMessage)
 					if isTerminalEvent && s.commitOpenAICodexWSCompactionAfterDelivery(
 						ctx,
@@ -1998,6 +2021,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			)
 		}
 
+		if s.openAICodexWSStateModeChanged(ctx, account, wsSessionResolution.CodexStateMode) {
+			sessionLease.MarkBroken()
+			return NewOpenAIWSClientCloseError(coderws.StatusNormalClosure, "account turn-state configuration changed; reconnect", nil)
+		}
 		result, relayErr := sendAndRelay(turn, sessionLease, currentPayload, currentPayloadBytes, currentOriginalModel, currentImageBillingModel, currentImageSizeTier, currentImageInputSize, currentRequestedReasoningEffort)
 		if relayErr != nil {
 			lastTurnClean = false
@@ -2084,6 +2111,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			preferredConnID = connID
 		}
 
+		if s.openAICodexWSStateModeChanged(ctx, account, wsSessionResolution.CodexStateMode) {
+			sessionLease.MarkBroken()
+			return NewOpenAIWSClientCloseError(coderws.StatusNormalClosure, "account turn-state configuration changed; reconnect", nil)
+		}
 		nextClientMessage, readErr := readClientMessage()
 		if readErr != nil {
 			if isOpenAIWSSessionPreempted(ctx) {

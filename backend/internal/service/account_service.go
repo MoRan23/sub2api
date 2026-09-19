@@ -158,6 +158,7 @@ type AdminAccountRepository interface {
 // AccountBulkUpdate describes the fields that can be updated in a bulk operation.
 // Nil pointers mean "do not change".
 type AccountBulkUpdate struct {
+	CodexTurnState *CodexTurnStateConfig
 	Name           *string
 	ProxyID        *int64
 	Concurrency    *int
@@ -173,6 +174,8 @@ type AccountBulkUpdate struct {
 
 // CreateAccountRequest 创建账号请求
 type CreateAccountRequest struct {
+	CodexTurnState *CodexTurnStateConfig `json:"codex_turn_state"`
+
 	Name               string         `json:"name"`
 	Notes              *string        `json:"notes"`
 	Platform           string         `json:"platform"`
@@ -189,6 +192,8 @@ type CreateAccountRequest struct {
 
 // UpdateAccountRequest 更新账号请求
 type UpdateAccountRequest struct {
+	CodexTurnState *CodexTurnStateConfig `json:"codex_turn_state"`
+
 	Name               *string         `json:"name"`
 	Notes              *string         `json:"notes"`
 	Credentials        *map[string]any `json:"credentials"`
@@ -262,6 +267,9 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 		delete(account.Extra, openAIInstallationPinEnabledKey)
 	}
 	PrepareOpenAIAccountUserAgentForCreate(account)
+	if err := PrepareCodexTurnStateForCreate(account, req.CodexTurnState); err != nil {
+		return nil, err
+	}
 	if req.AutoPauseOnExpired != nil {
 		account.AutoPauseOnExpired = *req.AutoPauseOnExpired
 	} else {
@@ -413,6 +421,7 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	}
 
 	// 执行更新
+	ctx = withAccountConfigurationIntent(ctx, []int64{id}, nil, nil, req.CodexTurnState)
 	if err := s.accountRepo.Update(ctx, account); err != nil {
 		return nil, fmt.Errorf("update account: %w", err)
 	}

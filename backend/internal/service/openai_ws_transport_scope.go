@@ -48,6 +48,7 @@ func (s openAIWSTransportScope) cacheKey() string {
 
 func openAIWSAcquireCompatibility(req openAIWSAcquireRequest) openAIWSHandshakeCompatibilityKey {
 	key := normalizeOpenAIWSHandshakeCompatibility(req.Headers, req.IdentityDigest)
+	key.codexStateMode = req.CodexStateMode
 	accountID := int64(0)
 	if req.Account != nil {
 		accountID = req.Account.ID

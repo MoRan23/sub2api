@@ -181,6 +181,17 @@ export interface FingerprintObservationEntry {
   outbound_codex_residency?: string
   outbound_codex_residency_source?: 'request_headers' | 'ws_handshake'
   request_integrity?: RequestIntegrityObservation
+  codex_turn_state?: {
+    enabled: boolean
+    action: string
+    source?: string
+    model: string
+    outbound_length: number
+    response_length?: number
+    response_shape?: string
+    expires_at?: string
+    renewal_reason?: string
+  }
   conversion_check?: RequestConversionCheck
 }
 

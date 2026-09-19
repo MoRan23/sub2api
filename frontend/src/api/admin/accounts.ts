@@ -196,6 +196,41 @@ export async function getById(id: number): Promise<Account> {
   return data
 }
 
+export interface CodexTurnStateModelStatus {
+  model: string
+  state: 'ready' | 'expired' | 'missing' | 'paused'
+  shape: string
+  source: string
+  token_length: number
+  cipher_blocks: number
+  expires_at?: string
+  remaining_seconds: number
+  last_business_at?: string
+  last_collected_at?: string
+  next_collect_at?: string
+  collector_paused: boolean
+  last_error?: string
+  refresh_reason?: string
+}
+
+export interface CodexTurnStateStatus {
+  account_id: number
+  owner_account_id: number
+  inherited: boolean
+  enabled: boolean
+  account_type: 'auto' | 'personal' | 'team_business'
+  resolved_account_type: string
+  collector_proxy_id: number | null
+  expected_length: number
+  reason: string
+  models: CodexTurnStateModelStatus[]
+}
+
+export async function getCodexTurnState(id: number, signal?: AbortSignal): Promise<CodexTurnStateStatus> {
+  const { data } = await apiClient.get<CodexTurnStateStatus>(`/admin/accounts/${id}/codex-turn-state`, { signal })
+  return data
+}
+
 /**
  * Create new account
  * @param accountData - Account data
@@ -1105,6 +1140,7 @@ export const accountsAPI = {
   listWithEtag,
   getUpstreamBillingRatesWithEtag,
   getById,
+  getCodexTurnState,
   create,
   duplicate,
   update,

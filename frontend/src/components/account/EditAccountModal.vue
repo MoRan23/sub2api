@@ -1651,6 +1651,13 @@
         <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
       </div>
 
+      <CodexTurnStateFields
+        v-if="supportsCodexTurnState(account)"
+        v-model="codexTurnStateConfig"
+        :proxies="proxies"
+        :inherited-from="account.codex_turn_state_inherited_from_account_id ?? account.parent_account_id"
+      />
+
       <UpstreamRequestIdHeaderField
         v-model="upstreamRequestIdHeader"
         :platform="account.platform"
@@ -3191,6 +3198,8 @@ import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestId
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
+import CodexTurnStateFields from './CodexTurnStateFields.vue'
+import { codexTurnStateConfigChanged, defaultCodexTurnStateConfig, readCodexTurnStateConfig, supportsCodexTurnState } from './codexTurnState'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
@@ -4111,6 +4120,9 @@ const applyOpenAIModelMappingCredentials = (credentials: Record<string, unknown>
   }
 }
 
+const codexTurnStateConfig = ref(defaultCodexTurnStateConfig())
+const codexTurnStateInitial = ref(defaultCodexTurnStateConfig())
+
 const syncFormFromAccount = (newAccount: Account | null) => {
   if (!newAccount) {
     return
@@ -4128,6 +4140,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
   form.proxy_id = newAccount.proxy_id
+  codexTurnStateConfig.value = readCodexTurnStateConfig(newAccount.codex_turn_state)
+  codexTurnStateInitial.value = readCodexTurnStateConfig(newAccount.codex_turn_state)
   form.concurrency = newAccount.concurrency
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
@@ -5177,6 +5191,10 @@ const handleSubmit = async () => {
 	}
 
   const updatePayload: Record<string, unknown> = { ...form }
+  if (supportsCodexTurnState(props.account) && !isSparkShadow.value &&
+    codexTurnStateConfigChanged(codexTurnStateConfig.value, codexTurnStateInitial.value)) {
+    updatePayload.codex_turn_state = { ...codexTurnStateConfig.value }
+  }
   try {
     if (props.account.platform === 'openai' &&
       (props.account.type === 'oauth' || props.account.type === 'apikey') &&

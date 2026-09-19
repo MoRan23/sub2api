@@ -598,6 +598,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				_ = snapshot.Close()
 			}
 		}
+		upstreamReq = s.prepareOpenAICodexStateHTTPRequest(c, account, upstreamReq)
+		observationBody = openAIUpstreamRequestBodySnapshot(upstreamReq, observationBody)
 		s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, observationBody)
 		return upstreamReq, nil
 	}
@@ -1021,6 +1023,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 						)
 					}
 					wroteDownstream = true
+					if openAIWSPassthroughOutputCommitsTurnState(message) {
+						markCodexTurnStateHTTPDelivered(resp)
+					}
 					observeOpenAICodexWSCompactionDelivery(compactionDelivery, message)
 				}
 			}

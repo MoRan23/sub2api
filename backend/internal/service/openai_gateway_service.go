@@ -463,6 +463,7 @@ type OpenAIGatewayService struct {
 	httpUpstream          HTTPUpstream
 	pluginManager         *PluginManager
 	codexTelemetry        *CodexTelemetryService
+	codexTurnStateService *CodexTurnStateService
 	egressLocationService *OpenAIEgressLocationService
 	deferredService       *DeferredService
 	openAITokenProvider   *OpenAITokenProvider
@@ -523,6 +524,13 @@ type OpenAIGatewayService struct {
 func (s *OpenAIGatewayService) SetOAuthSyncSessionRepository(repo OAuthSyncSessionRepository) {
 	if s != nil {
 		s.oauthSyncSessionRepo = repo
+	}
+}
+
+// SetCodexTurnStateService keeps construction compatible with narrow gateway tests.
+func (s *OpenAIGatewayService) SetCodexTurnStateService(state *CodexTurnStateService) {
+	if s != nil {
+		s.codexTurnStateService = state
 	}
 }
 

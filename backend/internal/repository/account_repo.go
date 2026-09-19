@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -90,11 +91,28 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
-	if err := createAccountRecord(ctx, r.client, account); err != nil {
+	client := clientFromContext(ctx, r.client)
+	var tx *dbent.Tx
+	if service.CodexTurnStateConfigForAccount(account).CollectorProxyID != nil && dbent.TxFromContext(ctx) == nil {
+		var err error
+		tx, err = r.client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return err
+		}
+		if tx != nil {
+			defer func() { _ = tx.Rollback() }()
+			ctx = dbent.NewTxContext(ctx, tx)
+			client = tx.Client()
+		}
+	}
+	if err := createAccountRecord(ctx, client, account); err != nil {
 		return err
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
+	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, buildSchedulerGroupPayload(account.GroupIDs)); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue account create failed: account=%d err=%v", account.ID, err)
+	}
+	if tx != nil {
+		return tx.Commit()
 	}
 	return nil
 }
@@ -102,6 +120,21 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 func createAccountRecord(ctx context.Context, client *dbent.Client, account *service.Account) error {
 	if account == nil {
 		return service.ErrAccountNilInput
+	}
+	config := service.CodexTurnStateConfigForAccount(account)
+	if service.IsCodexTurnStateAccount(account) {
+		var requested *service.CodexTurnStateConfig
+		if _, configured := account.Extra[service.CodexTurnStateExtraKey]; configured {
+			requested = &config
+		}
+		if err := service.PrepareCodexTurnStateForCreate(account, requested); err != nil {
+			return err
+		}
+	} else {
+		account.Extra = service.StripCodexTurnStateManagedExtra(account.Extra)
+	}
+	if err := lockCodexTurnStateCollectorProxy(ctx, client, account); err != nil {
+		return err
 	}
 
 	builder := client.Account.Create().
@@ -494,6 +527,9 @@ func (r *accountRepository) updateLockedAccount(
 	if err := service.PreserveAccountConfiguration(current, account, service.AccountConfigurationIntentFromContext(ctx, account.ID)); err != nil {
 		return nil, err
 	}
+	if err := lockCodexTurnStateCollectorProxy(ctx, client, account); err != nil {
+		return nil, err
+	}
 	extra, err := lockAndMergeAccountProbeExtra(ctx, client, account, explicitProbeEnabled, explicitRateSyncEnabled)
 	if err != nil {
 		return nil, err
@@ -790,7 +826,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 		UPDATE accounts
 		SET
 			credentials = `+guardedAccountCredentialsExpression("$1::jsonb")+`,
-			extra = CASE
+			extra = `+guardedCodexTurnStateGenerationExpression(`CASE
 				-- 凭证整体未变化 ⇒ Ollama 组身份必然未变化；顶层 DISTINCT 守卫防止
 				-- 非 Ollama 账号的无变化持久化误清探测快照或重写 NULL extra。
 				WHEN platform IN (`+ollamaCloudUsagePlatformsSQL+`)
@@ -814,7 +850,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 					AND credentials IS DISTINCT FROM (`+guardedAccountCredentialsExpression("$1::jsonb")+`)
 				THEN COALESCE(extra, '{}'::jsonb) - 'upstream_billing_probe'
 				ELSE extra
-			END,
+			END`, guardedAccountCredentialsExpression("$1::jsonb"))+`,
 			updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL
 	`, string(payload), id)
@@ -2595,6 +2631,9 @@ func (r *accountRepository) AutoPauseExpiredAccounts(ctx context.Context, now ti
 
 func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
 	updates = accountConfigurationExtraPatch(ctx, []int64{id}, updates)
+	// Turn-state configuration requires the account row lock and generation update
+	// provided by Update/BulkUpdate; a generic observational patch cannot set it.
+	delete(updates, service.CodexTurnStateExtraKey)
 	if len(updates) == 0 {
 		return nil
 	}
@@ -2678,6 +2717,7 @@ func (r *accountRepository) CompareAndUpdateOpenAIAutoResetPreflight(
 	expectedState *service.OpenAIAutoResetCreditState,
 	updates map[string]any,
 ) (bool, error) {
+	updates = service.StripCodexTurnStateManagedExtra(updates)
 	if accountID <= 0 || len(updates) == 0 {
 		return false, nil
 	}
@@ -3134,7 +3174,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 				" AND "+ollamaCloudBaseURLMatchesSQL(credentialPlaceholder+"::jsonb ->> 'base_url'")+")")
 	}
 
-	if len(updates.Extra) > 0 || len(ollamaGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" {
+	if len(updates.Extra) > 0 || len(ollamaGroupIdentityChanges) > 0 || ollamaProxyIdentityChanged != "" || credentialPlaceholder != "" {
 		extraExpression := "COALESCE(extra, '{}'::jsonb)"
 		if len(updates.Extra) > 0 {
 			payload, err := json.Marshal(updates.Extra)
@@ -3173,6 +3213,11 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		} else if snapshotIdentityChanged != "" {
 			extraExpression = "CASE WHEN " + snapshotIdentityChanged + " THEN (" + extraExpression + ") - 'ollama_cloud_usage_snapshot' ELSE " + extraExpression + " END"
 		}
+		credentialsExpression := ""
+		if credentialPlaceholder != "" {
+			credentialsExpression = guardedAccountCredentialsExpression("COALESCE(credentials, '{}'::jsonb) || " + credentialPlaceholder + "::jsonb")
+		}
+		extraExpression = guardedCodexTurnStateGenerationExpression(extraExpression, credentialsExpression)
 		setClauses = append(setClauses, "extra = "+guardedAccountExtraExpression(extraExpression))
 	}
 
@@ -3210,6 +3255,33 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 
+	if updates.CodexTurnState != nil {
+		lockedIDs := append([]int64(nil), ids...)
+		sort.Slice(lockedIDs, func(i, j int) bool { return lockedIDs[i] < lockedIDs[j] })
+		lockClient := clientFromContext(ctx, r.client)
+		for _, id := range lockedIDs {
+			current, err := lockAccountConfiguration(ctx, lockClient, id)
+			if err != nil {
+				return 0, err
+			}
+			if current.Credentials == nil {
+				current.Credentials = make(map[string]any)
+			}
+			for key, value := range updates.Credentials {
+				current.Credentials[key] = value
+			}
+			if err := service.ValidateCodexTurnStateConfig(current, updates.CodexTurnState); err != nil {
+				return 0, err
+			}
+			if service.AccountConfigurationIntentFromContext(ctx, id).CodexTurnState == nil {
+				continue
+			}
+			current.Extra = map[string]any{service.CodexTurnStateExtraKey: updates.CodexTurnState}
+			if err := lockCodexTurnStateCollectorProxy(ctx, lockClient, current); err != nil {
+				return 0, err
+			}
+		}
+	}
 	result, err := exec.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err

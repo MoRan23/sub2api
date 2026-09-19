@@ -210,6 +210,9 @@ type AdminGroup struct {
 }
 
 type Account struct {
+	CodexTurnState                       service.CodexTurnStateConfig `json:"codex_turn_state"`
+	CodexTurnStateInheritedFromAccountID *int64                       `json:"codex_turn_state_inherited_from_account_id,omitempty"`
+
 	ID       int64   `json:"id"`
 	Name     string  `json:"name"`
 	Notes    *string `json:"notes"`
@@ -336,6 +339,9 @@ type Account struct {
 // repeated account_groups and groups object graphs. Fetch /admin/accounts/:id
 // for the complete Account DTO when editing or inspecting an account.
 type AccountListItem struct {
+	CodexTurnState                       service.CodexTurnStateConfig `json:"codex_turn_state"`
+	CodexTurnStateInheritedFromAccountID *int64                       `json:"codex_turn_state_inherited_from_account_id,omitempty"`
+
 	ID       int64   `json:"id"`
 	Name     string  `json:"name"`
 	Notes    *string `json:"notes"`

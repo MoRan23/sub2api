@@ -608,6 +608,12 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
+	if err := s.validateCodexTurnStateConfig(ctx, account, input.CodexTurnState); err != nil {
+		return nil, err
+	}
+	if err := PrepareCodexTurnStateForCreate(account, input.CodexTurnState); err != nil {
+		return nil, err
+	}
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
 		return nil, err
 	}
@@ -655,6 +661,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
+	input.Extra = StripCodexTurnStateManagedExtra(input.Extra)
 	if input.OpenAIEnvironmentFingerprint != nil {
 		targetType := account.Type
 		if input.Type != "" {
@@ -967,7 +974,10 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
-	configurationCtx := withAccountConfigurationIntent(ctx, []int64{id}, input.Extra, input.OpenAIEnvironmentFingerprint)
+	if err := s.validateCodexTurnStateConfig(ctx, account, input.CodexTurnState); err != nil {
+		return nil, err
+	}
+	configurationCtx := withAccountConfigurationIntent(ctx, []int64{id}, input.Extra, input.OpenAIEnvironmentFingerprint, input.CodexTurnState)
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
 	if updater == nil {
@@ -1033,6 +1043,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	updates = StripCodexTurnStateManagedExtra(updates)
 	delete(updates, openAIPinnedInstallationIDKey)
 	delete(updates, openAIInstallationRotateEnabledKey)
 	delete(updates, openAIInstallationPinEnabledKey)
@@ -1089,6 +1100,7 @@ func (s *adminServiceImpl) RegenerateOpenAIInstallationID(ctx context.Context, i
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
+	input.Extra = StripCodexTurnStateManagedExtra(input.Extra)
 	delete(input.Extra, openAIPinnedInstallationIDKey)
 	delete(input.Extra, openAIInstallationRotateEnabledKey)
 	delete(input.Extra, openAIInstallationPinEnabledKey)
@@ -1135,7 +1147,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.CodexTurnState != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1146,6 +1158,17 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	for _, account := range cachedTargets {
 		if account != nil {
 			targetsByID[account.ID] = account
+		}
+	}
+	if input.CodexTurnState != nil {
+		for _, id := range input.AccountIDs {
+			account := targetsByID[id]
+			if account == nil {
+				return nil, ErrAccountNotFound
+			}
+			if err := s.validateCodexTurnStateConfig(ctx, account, input.CodexTurnState); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if openAISettings.any() {
@@ -1248,9 +1271,10 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// Prepare bulk updates for columns and JSONB fields.
 	repoUpdates := AccountBulkUpdate{
-		Credentials:  input.Credentials,
-		Extra:        input.Extra,
-		ProbeEnabled: input.ProbeEnabled,
+		CodexTurnState: input.CodexTurnState,
+		Credentials:    input.Credentials,
+		Extra:          input.Extra,
+		ProbeEnabled:   input.ProbeEnabled,
 	}
 	if input.ProbeEnabled != nil {
 		if repoUpdates.Extra == nil {
@@ -1301,7 +1325,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	// Run bulk update for column/jsonb fields first.
-	configurationCtx := withAccountConfigurationIntent(ctx, input.AccountIDs, input.Extra, nil)
+	configurationCtx := withAccountConfigurationIntent(ctx, input.AccountIDs, input.Extra, nil, input.CodexTurnState)
 	if _, err := s.accountRepo.BulkUpdate(configurationCtx, input.AccountIDs, repoUpdates); err != nil {
 		return nil, err
 	}

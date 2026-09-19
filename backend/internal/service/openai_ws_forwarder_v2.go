@@ -249,6 +249,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		Headers:           wsHeaders,
 		HandshakeObserver: freezeFingerprintObservationWSHandshake(c, account),
 		IdentityDigest:    outboundIdentityPlan.SocketDigest,
+		CodexStateMode:    sessionResolution.CodexStateMode.poolKey(),
 		HeadersFactory:    s.openAIWSHeadersFactory(ctx, account),
 		PreferredConnID:   preferredConnID,
 		ForceNewConn:      forceNewConn,
@@ -301,7 +302,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	// 因此 defer 中只需处理正常退出时不 MarkBroken 即可。
 	cleanExit := false
 	defer func() {
-		if !cleanExit {
+		if !cleanExit || s.openAICodexWSStateModeChanged(context.WithoutCancel(ctx), account, sessionResolution.CodexStateMode) {
 			lease.MarkBroken()
 		}
 		lease.Release()
@@ -402,7 +403,17 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if raw, ok := wirePayload.(json.RawMessage); ok {
 		observationBody = raw
 	}
-	s.recordFingerprintObservationWSFrame(c, account, timezoneState, observationBody, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &outboundIdentityPlan))
+	observationBody, codexStateAttempt, stateErr := s.prepareOpenAICodexWSStateFrame(ctx, c, account, observationBody, sessionResolution.CodexStateFirstFrameToken, lease.CodexStateCredentialHeaders())
+	if stateErr != nil {
+		return nil, wrapOpenAIWSFallback("write_request_turn_state", stateErr)
+	}
+	wirePayload = json.RawMessage(observationBody)
+	codexStateDelivered := false
+	defer func() { s.finishOpenAICodexWSState(ctx, codexStateAttempt, codexStateDelivered) }()
+	// Consume the physical handshake even on a storage miss: a later model on
+	// this socket must never inherit an unclaimed first-frame candidate.
+	s.observeOpenAICodexWSStateHeaders(codexStateAttempt, lease.ClaimCodexStateHandshakeHeaders())
+	recordFrameObservation := s.freezeFingerprintObservationWSFrame(c, account, timezoneState, observationBody, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &outboundIdentityPlan))
 	recordOpenAICodexGuardianSourceThread(outboundIdentityPlan, nil, observationBody)
 	telemetry := s.beginCodexTelemetryWS(ctx, account, lease.FingerprintObservationHeaders(), wsHeaders, observationBody)
 	defer func() {
@@ -422,6 +433,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		)
 		return nil, wrapOpenAIWSFallback("write_request", err)
 	}
+	recordFrameObservation()
 	if debugEnabled {
 		logOpenAIWSModeDebug(
 			"write_request_sent account_id=%d conn_id=%s stream=%v payload_bytes=%d previous_response_id=%s",
@@ -592,6 +604,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		n, wErr := c.Writer.Write(frame)
 		if wErr == nil && n == len(frame) {
 			wroteDownstream = true
+			if openAIWSPassthroughOutputCommitsTurnState(message) {
+				codexStateDelivered = true
+			}
 			observeOpenAICodexWSCompactionDelivery(compactionDelivery, message)
 			pendingFlushEvents++
 			flushStreamWriter(forceFlush || firstDelivery)
@@ -731,6 +746,7 @@ readLoop:
 			continue
 		}
 		// Capture the unmodified upstream result before client model/tool rewrites.
+		s.observeOpenAICodexWSStateEvent(codexStateAttempt, message)
 		telemetry.observe(message, eventType)
 		responseModelObserver.ObserveOpenAI(message, eventType)
 		eventCount++
@@ -957,6 +973,7 @@ readLoop:
 
 		stageTurnStateHeader()
 		if writeOpenAIResponseDataWithDelivery(c, http.StatusOK, "application/json", finalResponse) {
+			codexStateDelivered = openAIWSPassthroughOutputCommitsTurnState(finalTerminalMessage)
 			for _, doneEvent := range pendingNonStreamingRemoteV2DoneEvents {
 				observeOpenAICodexWSCompactionDelivery(compactionDelivery, doneEvent)
 			}

@@ -484,6 +484,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	if account.Platform == PlatformOpenAI {
 		upstreamReq = ApplyOpenAIRequestPolicy(upstreamReq, s.settingService)
 	}
+	upstreamReq = s.prepareOpenAICodexStateHTTPRequest(c, account, upstreamReq)
 	s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, openAIUpstreamRequestBodySnapshot(upstreamReq, responsesBody))
 
 	// 7. Send request
@@ -793,7 +794,17 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
 	c.Header("Content-Type", "application/json; charset=utf-8")
-	c.JSON(http.StatusOK, anthropicResp)
+	if codexTurnStateHTTPCollectorFromResponse(resp) != nil {
+		encoded, err := json.Marshal(anthropicResp)
+		if err != nil {
+			return nil, fmt.Errorf("marshal messages response: %w", err)
+		}
+		if writeOpenAIResponseDataWithDelivery(c, http.StatusOK, "application/json; charset=utf-8", encoded) {
+			markCodexTurnStateHTTPDelivered(resp)
+		}
+	} else {
+		c.JSON(http.StatusOK, anthropicResp)
+	}
 
 	result := &OpenAIForwardResult{
 		RequestID:                     requestID,
@@ -1075,6 +1086,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	firstChunk := true
 	clientDisconnected := false
 	clientOutputStarted := false
+	turnStateSuccessfulOutputWritten := false
 	var streamFailoverErr error
 	var streamNonFailoverErr error
 	terminalEventType := ""
@@ -1254,10 +1266,16 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					break
 				}
 				clientOutputStarted = true
+				if event.Type == "response.completed" || event.Type == "response.done" || openAIStreamDataStartsVisibleOutput(payload, event.Type) {
+					turnStateSuccessfulOutputWritten = true
+				}
 			}
 		}
 		if len(events) > 0 && !clientDisconnected {
 			c.Writer.Flush()
+			if turnStateSuccessfulOutputWritten {
+				markCodexTurnStateHTTPDelivered(resp)
+			}
 		}
 		return isTerminalEvent
 	}
@@ -1288,6 +1306,9 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 			if !clientDisconnected {
 				c.Writer.Flush()
+				if turnStateSuccessfulOutputWritten || terminalEventType == "response.completed" || terminalEventType == "response.done" {
+					markCodexTurnStateHTTPDelivered(resp)
+				}
 			}
 		}
 		logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, &usage, terminalEventType, clientDisconnected)

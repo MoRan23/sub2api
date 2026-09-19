@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -58,18 +59,20 @@ type DataProxy struct {
 // 影子的独立调度配置(priority/并发/分组/status 管理员可单独调)亦不在本备份范围,属已知局限
 // (外审第6轮裁决:保持排除 + 前端警告,而非升级格式做完整往返)。
 type DataAccount struct {
-	Name               string         `json:"name"`
-	Notes              *string        `json:"notes,omitempty"`
-	Platform           string         `json:"platform"`
-	Type               string         `json:"type"`
-	Credentials        map[string]any `json:"credentials"`
-	Extra              map[string]any `json:"extra,omitempty"`
-	ProxyKey           *string        `json:"proxy_key,omitempty"`
-	Concurrency        int            `json:"concurrency"`
-	Priority           int            `json:"priority"`
-	RateMultiplier     *float64       `json:"rate_multiplier,omitempty"`
-	ExpiresAt          *int64         `json:"expires_at,omitempty"`
-	AutoPauseOnExpired *bool          `json:"auto_pause_on_expired,omitempty"`
+	Name                   string                        `json:"name"`
+	Notes                  *string                       `json:"notes,omitempty"`
+	Platform               string                        `json:"platform"`
+	Type                   string                        `json:"type"`
+	Credentials            map[string]any                `json:"credentials"`
+	Extra                  map[string]any                `json:"extra,omitempty"`
+	ProxyKey               *string                       `json:"proxy_key,omitempty"`
+	CodexTurnState         *service.CodexTurnStateConfig `json:"codex_turn_state,omitempty"`
+	CodexTurnStateProxyKey *string                       `json:"codex_turn_state_proxy_key,omitempty"`
+	Concurrency            int                           `json:"concurrency"`
+	Priority               int                           `json:"priority"`
+	RateMultiplier         *float64                      `json:"rate_multiplier,omitempty"`
+	ExpiresAt              *int64                        `json:"expires_at,omitempty"`
+	AutoPauseOnExpired     *bool                         `json:"auto_pause_on_expired,omitempty"`
 }
 
 type DataImportRequest struct {
@@ -136,15 +139,12 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 		return
 	}
 
-	var proxies []service.Proxy
-	if includeProxies {
-		proxies, err = h.resolveExportProxies(ctx, accounts)
-		if err != nil {
-			response.ErrorFrom(c, err)
-			return
-		}
-	} else {
-		proxies = []service.Proxy{}
+	// Resolve collector keys even when proxy records are omitted: the destination
+	// must explicitly match an existing proxy, never reuse the source's local ID.
+	proxies, err := h.resolveExportProxies(ctx, accounts)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
 	}
 
 	// 构建 id→name 映射，用于导出备用代理 name
@@ -184,15 +184,23 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			ExpiryWarnDays:  p.ExpiryWarnDays,
 		})
 	}
+	if !includeProxies {
+		dataProxies = []DataProxy{}
+	}
 
 	dataAccounts := make([]DataAccount, 0, len(accounts))
 	for i := range accounts {
 		acc := accounts[i]
 		var proxyKey *string
-		if acc.ProxyID != nil {
+		if includeProxies && acc.ProxyID != nil {
 			if key, ok := proxyKeyByID[*acc.ProxyID]; ok {
 				proxyKey = &key
 			}
+		}
+		turnState, turnStateProxyKey, err := exportCodexTurnStateConfig(&acc, proxyKeyByID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
 		}
 		var expiresAt *int64
 		if acc.ExpiresAt != nil {
@@ -200,18 +208,20 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			expiresAt = &v
 		}
 		dataAccounts = append(dataAccounts, DataAccount{
-			Name:               acc.Name,
-			Notes:              acc.Notes,
-			Platform:           acc.Platform,
-			Type:               acc.Type,
-			Credentials:        acc.Credentials,
-			Extra:              acc.Extra,
-			ProxyKey:           proxyKey,
-			Concurrency:        acc.Concurrency,
-			Priority:           acc.Priority,
-			RateMultiplier:     acc.RateMultiplier,
-			ExpiresAt:          expiresAt,
-			AutoPauseOnExpired: &acc.AutoPauseOnExpired,
+			Name:                   acc.Name,
+			Notes:                  acc.Notes,
+			Platform:               acc.Platform,
+			Type:                   acc.Type,
+			Credentials:            acc.Credentials,
+			Extra:                  service.StripCodexTurnStateManagedExtra(acc.Extra),
+			ProxyKey:               proxyKey,
+			CodexTurnState:         turnState,
+			CodexTurnStateProxyKey: turnStateProxyKey,
+			Concurrency:            acc.Concurrency,
+			Priority:               acc.Priority,
+			RateMultiplier:         acc.RateMultiplier,
+			ExpiresAt:              expiresAt,
+			AutoPauseOnExpired:     &acc.AutoPauseOnExpired,
 		})
 	}
 
@@ -431,6 +441,14 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			}
 		}
 
+		turnState, err := importCodexTurnStateConfig(item, proxyKeyToID)
+		if err != nil {
+			result.AccountFailed++
+			result.Errors = append(result.Errors, DataImportError{
+				Kind: "account", Name: item.Name, Message: err.Error(),
+			})
+			continue
+		}
 		enrichCredentialsFromIDToken(&item)
 
 		accountInput := &service.CreateAccountInput{
@@ -439,7 +457,8 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			Platform:             item.Platform,
 			Type:                 item.Type,
 			Credentials:          item.Credentials,
-			Extra:                item.Extra,
+			Extra:                service.StripCodexTurnStateManagedExtra(item.Extra),
+			CodexTurnState:       turnState,
 			ProxyID:              proxyID,
 			Concurrency:          item.Concurrency,
 			Priority:             item.Priority,
@@ -574,25 +593,84 @@ func (h *AccountHandler) resolveExportProxies(ctx context.Context, accounts []se
 
 	seen := make(map[int64]struct{})
 	ids := make([]int64, 0)
+	add := func(id *int64) {
+		if id == nil || *id <= 0 {
+			return
+		}
+		if _, ok := seen[*id]; ok {
+			return
+		}
+		seen[*id] = struct{}{}
+		ids = append(ids, *id)
+	}
 	for i := range accounts {
-		if accounts[i].ProxyID == nil {
-			continue
+		add(accounts[i].ProxyID)
+		if service.IsCodexTurnStateAccount(&accounts[i]) {
+			add(service.CodexTurnStateConfigForAccount(&accounts[i]).CollectorProxyID)
 		}
-		id := *accounts[i].ProxyID
-		if id <= 0 {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
 	}
 	if len(ids) == 0 {
 		return []service.Proxy{}, nil
 	}
 
 	return h.adminService.GetProxiesByIDs(ctx, ids)
+}
+
+func exportCodexTurnStateConfig(account *service.Account, proxyKeyByID map[int64]string) (*service.CodexTurnStateConfig, *string, error) {
+	if !service.IsCodexTurnStateAccount(account) {
+		return nil, nil, nil
+	}
+	config := service.CodexTurnStateConfigForAccount(account)
+	var proxyKey *string
+	if config.CollectorProxyID != nil {
+		key, found := proxyKeyByID[*config.CollectorProxyID]
+		if !found {
+			return nil, nil, fmt.Errorf("account %d turn-state collector proxy not found", account.ID)
+		}
+		proxyKey = &key
+		config.CollectorProxyID = nil
+	}
+	return &config, proxyKey, nil
+}
+
+func importCodexTurnStateConfig(item DataAccount, proxyKeyToID map[string]int64) (*service.CodexTurnStateConfig, error) {
+	var config *service.CodexTurnStateConfig
+	if item.CodexTurnState != nil {
+		value := *item.CodexTurnState
+		config = &value
+	} else if raw, exists := item.Extra[service.CodexTurnStateExtraKey]; exists && raw != nil {
+		// Older snapshots stored configuration inside extra. Decode only the
+		// allowed fields; no generation, token, or runtime observation is imported.
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid codex_turn_state: %w", err)
+		}
+		var value service.CodexTurnStateConfig
+		if err := json.Unmarshal(encoded, &value); err != nil {
+			return nil, fmt.Errorf("invalid codex_turn_state: %w", err)
+		}
+		config = &value
+	}
+	if config == nil {
+		if item.CodexTurnStateProxyKey != nil {
+			return nil, errors.New("codex_turn_state_proxy_key requires codex_turn_state configuration")
+		}
+		return nil, nil
+	}
+	if config.AccountType == "" {
+		config.AccountType = "auto"
+	}
+	if item.CodexTurnStateProxyKey != nil {
+		key := *item.CodexTurnStateProxyKey
+		id, found := proxyKeyToID[key]
+		if strings.TrimSpace(key) == "" || !found || id <= 0 {
+			return nil, errors.New("codex_turn_state_proxy_key not found")
+		}
+		config.CollectorProxyID = &id
+	} else if config.CollectorProxyID != nil {
+		return nil, errors.New("codex_turn_state collector_proxy_id requires a portable codex_turn_state_proxy_key")
+	}
+	return config, nil
 }
 
 func parseAccountIDs(c *gin.Context) ([]int64, error) {

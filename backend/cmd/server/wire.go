@@ -118,6 +118,7 @@ func provideCleanup(
 	grokOAuth *service.GrokOAuthService,
 	openAIGateway *service.OpenAIGatewayService,
 	codexTelemetry *service.CodexTelemetryService,
+	codexTurnState *service.CodexTurnStateService,
 	egressLocation *service.OpenAIEgressLocationService,
 	openAIOutboundSessionV1Cleanup *service.OpenAIOutboundSessionV1CleanupWorker,
 	scheduledTestRunner *service.ScheduledTestRunnerService,
@@ -134,6 +135,11 @@ func provideCleanup(
 	pluginManager *service.PluginManager,
 ) func() {
 	return func() {
+		// Cancel collectors and wait for their workers before closing transports,
+		// Redis subscriptions, or the durable runtime database.
+		if codexTurnState != nil {
+			codexTurnState.Stop()
+		}
 		if egressLocation != nil {
 			egressLocation.Stop()
 		}

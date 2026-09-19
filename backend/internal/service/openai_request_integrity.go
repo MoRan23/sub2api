@@ -57,6 +57,7 @@ type RequestIntegrityCheckOptions struct {
 	// CompatTodoGuard is set only when this physical Messages adaptation
 	// actually inserted the exact built-in todo guard into the outgoing body.
 	CompatTodoGuard bool
+	CodexStatePatch *codexStateBodyPatch
 }
 
 // OpenAIRequestIntegrityState belongs to one accepted request or WS turn. The
@@ -129,6 +130,15 @@ func (s *OpenAIRequestIntegrityState) Check(account *Account, wire []byte, opts 
 	before := cloneRequestIntegrityValue(s.parsed).(map[string]any)
 	if requestIntegrityFieldsEqual(before, after) {
 		result.Status = "unchanged"
+		if opts.CodexStatePatch != nil {
+			if codexStatePatchMatches(opts.CodexStatePatch, after) {
+				result.Status = "expected_transform"
+				result.RuleCodes = []string{"codex_turn_state_cache"}
+			} else {
+				result.Status, result.Reason = "difference", "content_changed"
+				result.ChangedFields = []string{"client_metadata.x-codex-turn-state"}
+			}
+		}
 		return result
 	}
 	rules := make(map[string]bool)
@@ -185,6 +195,13 @@ func (s *OpenAIRequestIntegrityState) Check(account *Account, wire []byte, opts 
 		}
 	}
 	collector := requestIntegrityDifferenceCollector{}
+	if opts.CodexStatePatch != nil {
+		if codexStatePatchMatches(opts.CodexStatePatch, after) {
+			rules["codex_turn_state_cache"] = true
+		} else {
+			collector.compare("client_metadata.x-codex-turn-state", "expected", "different", true, true)
+		}
+	}
 	for _, field := range requestIntegrityContentFields {
 		left, leftOK := before[field]
 		right, rightOK := after[field]

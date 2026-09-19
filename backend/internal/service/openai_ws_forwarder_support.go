@@ -134,7 +134,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	}
 
 	timezoneState, _ := RequestTimezoneStateFromContext(c)
-	s.recordFingerprintObservationWSFrame(c, account, timezoneState, prewarmPayloadJSON, requestHeaders, observationPlan)
+	recordFrameObservation := s.freezeFingerprintObservationWSFrame(c, account, timezoneState, prewarmPayloadJSON, requestHeaders, observationPlan)
 	if err := lease.WriteJSONWithContextTimeout(ctx, prewarmWirePayload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
@@ -145,6 +145,10 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 		)
 		return wrapOpenAIWSFallback("prewarm_write", err)
 	}
+	recordFrameObservation()
+	// This physical socket's first frame was a prewarm. Its handshake response
+	// cannot later be attributed to a different business model after pool reuse.
+	lease.ClaimCodexStateHandshakeHeaders()
 	logOpenAIWSModeInfo("prewarm_write_sent account_id=%d conn_id=%s payload_bytes=%d", account.ID, connID, len(prewarmPayloadJSON))
 
 	prewarmResponseID := ""

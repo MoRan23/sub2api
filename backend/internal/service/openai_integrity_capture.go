@@ -17,12 +17,13 @@ const openAIIntegrityCaptureKey = "openai_request_integrity_capture"
 // baseline only when the first Responses adapter output becomes available.
 // Neither a failover nor a retry may replace it with a later, adapted body.
 type openAIIntegrityCapture struct {
-	mu        sync.Mutex
-	enabled   bool
-	state     *OpenAIRequestIntegrityState
-	model     string
-	recovery  string
-	todoGuard bool
+	mu              sync.Mutex
+	enabled         bool
+	state           *OpenAIRequestIntegrityState
+	model           string
+	recovery        string
+	todoGuard       bool
+	codexStatePatch *codexStateBodyPatch
 }
 
 func openAIIntegrityCaptureFromContext(c *gin.Context) *openAIIntegrityCapture {
@@ -121,6 +122,7 @@ func resetOpenAIRequestIntegrityAttemptRules(c *gin.Context) {
 		capture.mu.Lock()
 		capture.model, capture.recovery = "", ""
 		capture.todoGuard = false
+		capture.codexStatePatch = nil
 		capture.mu.Unlock()
 	}
 }
@@ -172,7 +174,7 @@ func (s *OpenAIGatewayService) observeOpenAIRequestIntegrity(c *gin.Context, acc
 			transport = "http_to_ws"
 		}
 	}
-	opts := RequestIntegrityCheckOptions{Transport: transport, ExpectedModel: capture.model, KnownRecovery: capture.recovery, TimezoneState: timezone, CompatTodoGuard: capture.todoGuard}
+	opts := RequestIntegrityCheckOptions{Transport: transport, ExpectedModel: capture.model, KnownRecovery: capture.recovery, TimezoneState: timezone, CompatTodoGuard: capture.todoGuard, CodexStatePatch: capture.codexStatePatch}
 	capture.mu.Unlock()
 	return state.Check(account, body, opts)
 }

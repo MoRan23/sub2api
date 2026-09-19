@@ -295,6 +295,7 @@ func ProvideOpenAIGatewayService(
 	syncSessionRepo OAuthSyncSessionRepository,
 	dailySessionRepo OAuthDailySessionRepository,
 	codexTelemetry *CodexTelemetryService,
+	codexTurnState *CodexTurnStateService,
 	egressLocation *OpenAIEgressLocationService,
 ) *OpenAIGatewayService {
 	svc := NewOpenAIGatewayService(
@@ -306,6 +307,7 @@ func ProvideOpenAIGatewayService(
 	svc.SetOAuthSyncSessionRepository(syncSessionRepo)
 	svc.SetOAuthDailySessionRepository(dailySessionRepo)
 	svc.SetCodexTelemetryService(codexTelemetry)
+	svc.SetCodexTurnStateService(codexTurnState)
 	svc.egressLocationService = egressLocation
 	return svc
 }
@@ -955,6 +957,8 @@ var ProviderSet = wire.NewSet(
 	NewOpenAIEgressLocationService,
 	NewGatewayService,
 	ProvideOpenAIGatewayService,
+	ProvideCodexTurnStateCollectorHTTPDo,
+	ProvideCodexTurnStateService,
 	ProvideCodexTelemetryService,
 	ProvideOpenAIOutboundSessionV1CleanupWorker,
 	ProvideImageStorageSettingService,

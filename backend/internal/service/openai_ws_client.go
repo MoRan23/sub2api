@@ -181,6 +181,7 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	}
 	wrapped.conn = conn
 	wrapped.observationHeaders = cloneFingerprintObservationHeaders(actualHeaders)
+	wrapped.codexStateCredentialHeaders = cloneOpenAICodexWSCredentialHeaders(actualHeaders)
 	return wrapped, 0, respHeaders, nil
 }
 
@@ -331,9 +332,10 @@ func (d *coderOpenAIWSClientDialer) SnapshotTransportMetrics() OpenAIWSTransport
 }
 
 type coderOpenAIWSClientConn struct {
-	conn               *coderws.Conn
-	observationHeaders http.Header
-	upstreamPings      atomic.Int64
+	conn                        *coderws.Conn
+	observationHeaders          http.Header
+	codexStateCredentialHeaders http.Header
+	upstreamPings               atomic.Int64
 }
 
 func (c *coderOpenAIWSClientConn) FingerprintObservationHeaders() http.Header {
@@ -341,6 +343,13 @@ func (c *coderOpenAIWSClientConn) FingerprintObservationHeaders() http.Header {
 		return nil
 	}
 	return cloneHeader(c.observationHeaders)
+}
+
+func (c *coderOpenAIWSClientConn) CodexStateCredentialHeaders() http.Header {
+	if c == nil {
+		return nil
+	}
+	return cloneOpenAICodexWSCredentialHeaders(c.codexStateCredentialHeaders)
 }
 
 func (c *coderOpenAIWSClientConn) UpstreamPingCount() int64 {

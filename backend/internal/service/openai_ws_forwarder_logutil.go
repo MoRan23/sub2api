@@ -64,11 +64,13 @@ func hasOpenAIWSSessionHeader(headers http.Header) bool {
 }
 
 type openAIWSSessionHeaderResolution struct {
-	SessionID             string
-	ConversationID        string
-	SessionSource         string
-	ConversationSource    string
-	ResidencyBeforePolicy http.Header
+	SessionID                 string
+	ConversationID            string
+	SessionSource             string
+	ConversationSource        string
+	ResidencyBeforePolicy     http.Header
+	CodexStateMode            openAICodexWSStateMode
+	CodexStateFirstFrameToken string
 
 	// UUIDv7 outbound identity is connection-scoped.  Callers retain this
 	// resolved snapshot for payload metadata, reconnects and pool compatibility

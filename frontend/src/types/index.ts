@@ -1175,6 +1175,12 @@ export interface OllamaCloudUsageSettings {
   debounce_minutes: number
 }
 
+export interface CodexTurnStateConfig {
+  enabled: boolean
+  account_type: 'auto' | 'personal' | 'team_business'
+  collector_proxy_id: number | null
+}
+
 export interface Account {
   id: number
   name: string
@@ -1188,6 +1194,8 @@ export interface Account {
   credentials?: Record<string, unknown>
   credentials_status?: Record<string, boolean>
   openai_environment_fingerprint?: string
+  codex_turn_state?: CodexTurnStateConfig
+  codex_turn_state_inherited_from_account_id?: number
   ollama_cloud_usage?: OllamaCloudUsageState
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
@@ -1496,6 +1504,7 @@ export interface OpenAIResponsesState {
 }
 
 export interface CreateAccountRequest {
+  codex_turn_state?: CodexTurnStateConfig
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -1515,6 +1524,7 @@ export interface CreateAccountRequest {
 }
 
 export interface UpdateAccountRequest {
+  codex_turn_state?: CodexTurnStateConfig
   name?: string
   notes?: string | null
   type?: AccountType
@@ -1645,6 +1655,7 @@ export interface AdminDataImportResult {
 }
 
 export interface CodexSessionImportRequest {
+  codex_turn_state?: CodexTurnStateConfig
   content?: string
   contents?: string[]
   name?: string

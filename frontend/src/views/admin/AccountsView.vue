@@ -488,7 +488,8 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <CodexTurnStateStatusModal :show="codexTurnStateAccount !== null" :account="codexTurnStateAccount" @close="codexTurnStateAccount = null" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @codex-turn-state="codexTurnStateAccount = $event" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -539,6 +540,7 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrsModal, TempUnschedStatusModal } from '@/components/account'
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
 import AccountDailyFixedRootsModal from '@/components/admin/account/AccountDailyFixedRootsModal.vue'
+import CodexTurnStateStatusModal from '@/components/admin/account/CodexTurnStateStatusModal.vue'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
@@ -1128,6 +1130,7 @@ const {
 
 const dailyFixedRootPools = reactive<Record<number, OAuthDailySessionPool>>({})
 const dailyFixedRootAccount = ref<Pick<AccountListItem, 'id' | 'name'> | null>(null)
+const codexTurnStateAccount = ref<Pick<AccountListItem, 'id' | 'name'> | null>(null)
 const selectedDailyFixedRootPool = computed(() => {
   const pool = dailyFixedRootAccount.value ? dailyFixedRootPools[dailyFixedRootAccount.value.id] : undefined
   return Array.isArray(pool?.stream_session_ids) ? pool : undefined

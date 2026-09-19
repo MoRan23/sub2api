@@ -76,6 +76,8 @@ type openAIWSAcquireRequest struct {
 	// UUIDv7 session/thread pair used by the handshake. Empty preserves the
 	// legacy account+beta-features pooling behavior.
 	IdentityDigest string
+	// CodexStateMode is a server-owned cache generation, not an upstream header.
+	CodexStateMode string
 	// HeadersFactory is evaluated inside dialConn. It exists so credentials
 	// whose authorization is per-dial (Agent Identity) are never cached in
 	// lastAcquire or delayed prewarm state.
@@ -95,6 +97,7 @@ type openAIWSHandshakeCompatibilityKey struct {
 	betaFeatures   string
 	identityDigest string
 	residency      string
+	codexStateMode string
 	transportScope openAIWSTransportScope
 }
 
@@ -183,6 +186,22 @@ func (l *openAIWSConnLease) HandshakeHeaders() http.Header {
 		return nil
 	}
 	return cloneHeader(l.conn.handshakeHeaders)
+}
+
+// ClaimCodexStateHandshakeHeaders binds a handshake response candidate to just
+// the first business frame on this physical socket, even after pool reuse.
+func (l *openAIWSConnLease) ClaimCodexStateHandshakeHeaders() http.Header {
+	if l == nil || l.conn == nil || !l.conn.codexStateHandshakeClaimed.CompareAndSwap(false, true) {
+		return nil
+	}
+	return l.HandshakeHeaders()
+}
+
+func (l *openAIWSConnLease) CodexStateCredentialHeaders() http.Header {
+	if l == nil || l.conn == nil {
+		return nil
+	}
+	return cloneOpenAICodexWSCredentialHeaders(l.conn.codexStateCredentialHeaders)
 }
 
 // FingerprintObservationHeaders returns only the safe observation fields from
@@ -308,13 +327,15 @@ type openAIWSConn struct {
 	id string
 	ws openAIWSClientConn
 
-	handshakeHeaders           http.Header
-	observationHeaders         http.Header
-	handshakeObserverInstalled bool
-	handshakeCompatibility     openAIWSHandshakeCompatibilityKey
-	routingAffinity            string
-	turnStateMu                sync.Mutex
-	turnStateIdentity          string
+	handshakeHeaders            http.Header
+	observationHeaders          http.Header
+	codexStateCredentialHeaders http.Header
+	handshakeObserverInstalled  bool
+	codexStateHandshakeClaimed  atomic.Bool
+	handshakeCompatibility      openAIWSHandshakeCompatibilityKey
+	routingAffinity             string
+	turnStateMu                 sync.Mutex
+	turnStateIdentity           string
 	// Retained as mirrors for narrow in-package tests and compatibility helpers.
 	// Production matching uses handshakeCompatibility.
 	betaFeatures   string
@@ -840,7 +861,7 @@ func (c *openAIWSConn) matchesHandshakeCompatibility(compatibility openAIWSHands
 	// pre-V2 mirror fields instead of dialing it through the pool.
 	return c.handshakeCompatibility == (openAIWSHandshakeCompatibilityKey{}) &&
 		c.betaFeatures == compatibility.betaFeatures &&
-		c.identityDigest == compatibility.identityDigest && compatibility.residency == ""
+		c.identityDigest == compatibility.identityDigest && compatibility.residency == "" && compatibility.codexStateMode == ""
 }
 
 func (c *openAIWSConn) matchesRoutingAffinity(routingAffinity string) bool {
@@ -2272,6 +2293,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	id := p.nextConnID(req.Account.ID)
 	pooledConn := newOpenAIWSConn(id, req.Account.ID, conn, handshakeHeaders)
 	pooledConn.observationHeaders = openAIWSPhysicalObservationHeaders(conn, headers)
+	pooledConn.codexStateCredentialHeaders = openAIWSCodexStateCredentialHeaders(conn, headers)
 	pooledConn.handshakeObserverInstalled = req.HandshakeObserver != nil
 	if req.HandshakeObserver != nil {
 		// Record every successful physical dial, including background prewarm

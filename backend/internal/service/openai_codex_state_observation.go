@@ -1,0 +1,211 @@
+package service
+
+import (
+	"net/http"
+	"reflect"
+	"sync"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+)
+
+const codexStateWireObservationKey = "openai_codex_state_wire_observation"
+
+// CodexTurnStateObservation deliberately contains neither tokens nor fingerprints
+// of tokens. Its outbound length is populated from the actual physical send.
+type CodexTurnStateObservation struct {
+	Enabled        bool       `json:"enabled"`
+	Action         string     `json:"action"`
+	Source         string     `json:"source,omitempty"`
+	Model          string     `json:"model"`
+	OutboundLength int        `json:"outbound_length"`
+	ResponseLength int        `json:"response_length,omitempty"`
+	ResponseShape  string     `json:"response_shape,omitempty"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	RenewalReason  string     `json:"renewal_reason,omitempty"`
+}
+
+type codexTurnStateWireObservation struct {
+	mu       sync.Mutex
+	value    CodexTurnStateObservation
+	sequence uint64
+}
+
+// codexStateBodyPatch is private request-local evidence, never input from a
+// client. The entire adaptation is checked to change only the state carrier.
+type codexStateBodyPatch struct{ expected string }
+
+func newCodexStateBodyPatch(before, after []byte) *codexStateBodyPatch {
+	left, leftErr := decodeRequestIntegrityBody(before)
+	right, rightErr := decodeRequestIntegrityBody(after)
+	if leftErr != "" || rightErr != "" {
+		return nil
+	}
+	state := gjson.GetBytes(after, "client_metadata.x-codex-turn-state")
+	if state.Type != gjson.String {
+		return nil
+	}
+	if gjson.GetBytes(before, "client_metadata.x-codex-turn-state").Raw == state.Raw {
+		return nil
+	}
+	beforeMetadata, beforePresent := left["client_metadata"]
+	afterMetadata, ok := right["client_metadata"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	copyMetadata := make(map[string]any, len(afterMetadata))
+	for key, value := range afterMetadata {
+		copyMetadata[key] = value
+	}
+	if original, ok := beforeMetadata.(map[string]any); ok {
+		if old, existed := original[openAICodexTurnStateHeader]; existed {
+			copyMetadata[openAICodexTurnStateHeader] = old
+		} else {
+			delete(copyMetadata, openAICodexTurnStateHeader)
+		}
+		right["client_metadata"] = copyMetadata
+	} else if !beforePresent {
+		delete(copyMetadata, openAICodexTurnStateHeader)
+		if len(copyMetadata) != 0 {
+			return nil
+		}
+		delete(right, "client_metadata")
+	} else {
+		return nil
+	}
+	if !reflect.DeepEqual(left, right) {
+		return nil
+	}
+	return &codexStateBodyPatch{expected: state.String()}
+}
+
+func noteOpenAICodexStatePatch(c *gin.Context, attempt *CodexTurnStateAttempt, before, after []byte) {
+	if capture := openAIIntegrityCaptureFromContext(c); capture != nil {
+		capture.mu.Lock()
+		capture.codexStatePatch = newCodexStateBodyPatch(before, after)
+		capture.mu.Unlock()
+	}
+	if c == nil {
+		return
+	}
+	c.Set(codexStateWireObservationKey, (*codexTurnStateWireObservation)(nil))
+	if attempt == nil {
+		return
+	}
+	observation := &codexTurnStateWireObservation{value: CodexTurnStateObservation{Enabled: attempt.Enabled, Action: "passthrough", Model: attempt.Model}}
+	if attempt.Snapshot.Token != "" {
+		observation.value.Action = "injected"
+		observation.value.Source = attempt.Snapshot.Source
+		expires := attempt.Snapshot.ExpiresAt
+		observation.value.ExpiresAt = &expires
+	}
+	attempt.mu.Lock()
+	attempt.wireObservation = observation
+	attempt.mu.Unlock()
+	c.Set(codexStateWireObservationKey, observation)
+}
+
+func codexStateWireObservation(c *gin.Context) *codexTurnStateWireObservation {
+	if c == nil {
+		return nil
+	}
+	value, _ := c.Get(codexStateWireObservationKey)
+	observation, _ := value.(*codexTurnStateWireObservation)
+	return observation
+}
+
+func populateCodexTurnStateObservation(c *gin.Context, entry *FingerprintObservationEntry, headers http.Header, body []byte, frame bool) *codexTurnStateWireObservation {
+	observation := codexStateWireObservation(c)
+	if observation == nil {
+		return nil
+	}
+	state := ""
+	if frame {
+		state = gjson.GetBytes(body, "client_metadata.x-codex-turn-state").String()
+	} else {
+		state = headers.Get(openAICodexTurnStateHeader)
+	}
+	observation.mu.Lock()
+	observation.value.OutboundLength = len(state)
+	if observation.value.Action != "injected" && state != "" {
+		observation.value.Source = "client"
+	}
+	copy := observation.value
+	observation.mu.Unlock()
+	entry.CodexTurnState = &copy
+	return observation
+}
+
+func bindCodexTurnStateObservationSequence(observation *codexTurnStateWireObservation, seq uint64) {
+	if observation == nil {
+		return
+	}
+	observation.mu.Lock()
+	defer observation.mu.Unlock()
+	observation.sequence = seq
+	updateCodexTurnStateObservationEntry(seq, observation.value)
+}
+
+func finishOpenAICodexStateObservation(attempt *CodexTurnStateAttempt) {
+	if attempt == nil {
+		return
+	}
+	attempt.mu.Lock()
+	observation := attempt.wireObservation
+	attempt.mu.Unlock()
+	if observation == nil {
+		return
+	}
+	safe := attempt.SafeObservation()
+	observation.mu.Lock()
+	defer observation.mu.Unlock()
+	observation.value.ResponseLength = safe.TokenLength
+	switch safe.Shape {
+	case CodexTurnStateShapeTarget:
+		observation.value.ResponseShape = "target"
+	case CodexTurnStateShapeExtended:
+		observation.value.ResponseShape = "suspect"
+	case "expired":
+		observation.value.ResponseShape = "expired"
+	case "":
+	default:
+		observation.value.ResponseShape = "unknown"
+	}
+	observation.value.RenewalReason = safe.RefreshReason
+	updateCodexTurnStateObservationEntry(observation.sequence, observation.value)
+}
+
+// A fast response can finish between the actual write and binding its observation
+// row. Both publishers hold the snapshot mutex so either ordering retains the
+// latest response summary instead of silently losing or reverting it.
+func updateCodexTurnStateObservationEntry(seq uint64, value CodexTurnStateObservation) {
+	observer := globalFingerprintObserver
+	if seq == 0 || observer == nil {
+		return
+	}
+	observer.mu.Lock()
+	defer observer.mu.Unlock()
+	if !observer.enabled.Load() {
+		return
+	}
+	for i := range observer.ring {
+		if observer.ring[i].SequenceID == seq {
+			copy := value
+			observer.ring[i].CodexTurnState = &copy
+			break
+		}
+	}
+}
+
+func codexStatePatchMatches(patch *codexStateBodyPatch, body map[string]any) bool {
+	if patch == nil {
+		return true
+	}
+	metadata, ok := body["client_metadata"].(map[string]any)
+	if !ok {
+		return false
+	}
+	state, ok := metadata[openAICodexTurnStateHeader].(string)
+	return ok && state == patch.expected
+}

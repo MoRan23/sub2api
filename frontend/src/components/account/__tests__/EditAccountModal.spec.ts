@@ -467,6 +467,7 @@ describe('EditAccountModal', () => {
     account.extra.enable_tls_fingerprint = true
     account.extra.tls_fingerprint_profile_id = 7
     account.extra.openai_installation_rotate_enabled = true
+    account.codex_turn_state = { enabled: true, account_type: 'team_business', collector_proxy_id: 9 }
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
@@ -476,10 +477,41 @@ describe('EditAccountModal', () => {
 
     const payload = updateAccountMock.mock.calls[0]?.[1]
     expect(payload).not.toHaveProperty('openai_environment_fingerprint')
+    expect(payload).not.toHaveProperty('codex_turn_state')
     expect(payload.credentials).not.toHaveProperty('user_agent')
     for (const field of ['openai_installation_pin_enabled', 'openai_pinned_installation_id',
       'openai_installation_rotate_enabled', 'enable_tls_fingerprint', 'tls_fingerprint_profile_id']) {
       expect(payload.extra).not.toHaveProperty(field)
+    }
+  })
+
+  it('saves only deliberate turn-state changes including disable and proxy clearing', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.codex_turn_state = { enabled: true, account_type: 'personal', collector_proxy_id: 9 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const fields = wrapper.getComponent({ name: 'CodexTurnStateFields' })
+    fields.vm.$emit('update:modelValue', { enabled: false, account_type: 'team_business', collector_proxy_id: null })
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.codex_turn_state).toEqual({ enabled: false, account_type: 'team_business', collector_proxy_id: null })
+  })
+
+  it('does not submit reverted turn-state edits or shadow configuration', async () => {
+    for (const account of [buildOpenAIOAuthParentAccount(), buildOpenAISparkShadowAccount()]) {
+      updateAccountMock.mockReset().mockResolvedValue(account)
+      const wrapper = mountModal(account)
+      await flushPromises()
+      const fields = wrapper.getComponent({ name: 'CodexTurnStateFields' })
+      fields.vm.$emit('update:modelValue', { enabled: true, account_type: 'personal', collector_proxy_id: 7 })
+      if (!account.parent_account_id) {
+        fields.vm.$emit('update:modelValue', { enabled: false, account_type: 'auto', collector_proxy_id: null })
+      } else {
+        expect(fields.props('inheritedFrom')).toBe(account.parent_account_id)
+      }
+      await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+      expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty('codex_turn_state')
+      wrapper.unmount()
     }
   })
 

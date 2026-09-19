@@ -676,6 +676,20 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
     expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
     expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBeUndefined()
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.codex_turn_state).toEqual({ enabled: false, account_type: 'auto', collector_proxy_id: null })
+  })
+
+  it('applies configured turn-state classification to standard OAuth session imports', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    const fields = wrapper.get('[data-testid="codex-turn-state-fields"]')
+    await fields.get('input[type="checkbox"]').setValue(true)
+    await fields.get('select').setValue('team_business')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Team account')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.codex_turn_state).toEqual({ enabled: true, account_type: 'team_business', collector_proxy_id: null })
   })
 
   it('creates OAuth accounts with installation pin enabled and no client-supplied UUID', async () => {

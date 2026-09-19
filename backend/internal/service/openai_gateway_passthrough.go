@@ -358,6 +358,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		// Observe the finalized wire once per real physical attempt. An internal
 		// invalid_task retry is another send and therefore receives its own row,
 		// while request construction alone remains invisible.
+		upstreamReq = s.prepareOpenAICodexStateHTTPRequest(c, account, upstreamReq)
 		s.recordFingerprintObservationFromContextWithBody(
 			c,
 			account,
@@ -2325,11 +2326,15 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	// flushPending 表示已写入但未到 SSE 空行边界的脏状态；defer 兜底函数退出前的残留，断连后不再 Flush。
 	flushPending := false
 	pendingSSEEventType := ""
+	turnStateSuccessfulOutputPending := false
 	flushPendingOutput := func() bool {
 		if clientDisconnected || !flushPending {
 			return false
 		}
 		flusher.Flush()
+		if turnStateSuccessfulOutputPending {
+			markCodexTurnStateHTTPDelivered(resp)
+		}
 		if !turnStateCommitted && turnState != "" && !openAIPassthroughCompactWindowActive(c) {
 			s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
 			turnStateCommitted = true
@@ -2347,6 +2352,13 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		}
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			compactionDeliveryState.enqueue([]byte(data))
+			eventType := strings.TrimSpace(gjson.Get(data, "type").String())
+			if eventType == "" {
+				eventType = pendingSSEEventType
+			}
+			if eventType == "response.completed" || eventType == "response.done" || openAIStreamDataStartsVisibleOutput(data, eventType) {
+				turnStateSuccessfulOutputPending = true
+			}
 		}
 		flushPending = true
 		if line == "" && flushFrame {
@@ -2777,11 +2789,14 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 		turnStateCanCommit = !c.Writer.Written()
 	}
 	delivered := writeOpenAIResponseWithOptionalDeliveryTracking(
-		c, resp.StatusCode, contentType, body, openAIPassthroughCompactWindowActive(c),
+		c, resp.StatusCode, contentType, body, openAIPassthroughCompactWindowActive(c) || codexTurnStateHTTPCollectorFromResponse(resp) != nil,
 	)
 	if delivered {
 		delivery := openAIJSONCompactionDelivery(body)
 		s.commitDeliveredOpenAIPassthroughCompactWindow(ctx, c, account, resp.StatusCode, &delivery, turnState)
+		if gjson.GetBytes(body, "status").String() != "failed" && gjson.GetBytes(body, "error").Type != gjson.JSON {
+			markCodexTurnStateHTTPDelivered(resp)
+		}
 	}
 	if turnStateCanCommit && delivered {
 		if !openAIPassthroughCompactWindowActive(c) {
@@ -2871,7 +2886,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(ctx context.Context, r
 		}
 	}
 	delivered := writeOpenAIResponseWithOptionalDeliveryTracking(
-		c, resp.StatusCode, contentType, body, openAIPassthroughCompactWindowActive(c),
+		c, resp.StatusCode, contentType, body, openAIPassthroughCompactWindowActive(c) || codexTurnStateHTTPCollectorFromResponse(resp) != nil,
 	)
 	if ok {
 		// The final JSON may contain a compaction item reconstructed from an
@@ -2882,6 +2897,9 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(ctx context.Context, r
 	}
 	if delivered {
 		s.commitDeliveredOpenAIPassthroughCompactWindow(ctx, c, account, resp.StatusCode, &delivery, turnState)
+		if terminalType == "response.completed" || terminalType == "response.done" {
+			markCodexTurnStateHTTPDelivered(resp)
+		}
 	}
 	if turnStateCanCommit && delivered {
 		if !openAIPassthroughCompactWindowActive(c) {

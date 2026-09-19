@@ -11,8 +11,9 @@ import (
 // AccountConfigurationIntent is an immutable, request-local write intent. Only
 // typed admin entrypoints create it; a credentials/extra snapshot is not intent.
 type AccountConfigurationIntent struct {
-	Extra       map[string]any
-	Environment *string
+	Extra          map[string]any
+	Environment    *string
+	CodexTurnState *CodexTurnStateConfig
 }
 
 type accountConfigurationIntentKey struct{}
@@ -21,8 +22,16 @@ type accountConfigurationIntentScope struct {
 	intent AccountConfigurationIntent
 }
 
-func withAccountConfigurationIntent(ctx context.Context, ids []int64, extra map[string]any, environment *string) context.Context {
+func withAccountConfigurationIntent(ctx context.Context, ids []int64, extra map[string]any, environment *string, codex ...*CodexTurnStateConfig) context.Context {
 	intent := AccountConfigurationIntent{Extra: make(map[string]any)}
+	if len(codex) > 0 && codex[0] != nil {
+		value := *codex[0]
+		if value.CollectorProxyID != nil {
+			proxyID := *value.CollectorProxyID
+			value.CollectorProxyID = &proxyID
+		}
+		intent.CodexTurnState = &value
+	}
 	for _, key := range []string{openAIInstallationPinEnabledKey, "enable_tls_fingerprint", "tls_fingerprint_profile_id"} {
 		if value, exists := extra[key]; exists {
 			intent.Extra[key] = value
@@ -50,6 +59,14 @@ func AccountConfigurationIntentFromContext(ctx context.Context, id int64) Accoun
 	if intent.Environment != nil {
 		value := *intent.Environment
 		intent.Environment = &value
+	}
+	if intent.CodexTurnState != nil {
+		value := *intent.CodexTurnState
+		if value.CollectorProxyID != nil {
+			proxyID := *value.CollectorProxyID
+			value.CollectorProxyID = &proxyID
+		}
+		intent.CodexTurnState = &value
 	}
 	return intent
 }
@@ -114,7 +131,7 @@ func PreserveAccountConfiguration(current, target *Account, intent AccountConfig
 			EnsureOpenAIAccountUserAgent(target)
 		}
 	}
-	return nil
+	return preserveCodexTurnStateConfiguration(current, target, intent.CodexTurnState)
 }
 
 // AccountInstallationRegenerator is deliberately separate from AccountRepository
