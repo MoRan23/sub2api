@@ -173,10 +173,6 @@ func (r *codexStateMemoryRepo) SaveCAS(_ context.Context, v CodexTurnStateRecord
 	if !ok || old.Version != expected {
 		return false, nil
 	}
-	if v.CollectorPublication && r.businessInFlightLocked(v.Key()) {
-		return false, nil
-	}
-	v.CollectorPublication = false
 	v.BusinessInFlight = false
 	v.Version = expected + 1
 	if old.LastBusinessAt.After(v.LastBusinessAt) {
@@ -318,7 +314,7 @@ func TestCodexTurnStateNaturalLearningAvoidsCollector(t *testing.T) {
 	require.NotNil(t, attempt)
 	markCodexStateTestBusinessSent(t, s, attempt)
 	s.collect(ctx, attempt.key)
-	require.Zero(t, calls.Load(), "business attempt holds lease")
+	require.Zero(t, calls.Load(), "a cold cache alone does not create collection demand")
 	token := codexStateTestToken(10, s.now())
 	s.ObserveHeaders(attempt, http.Header{"x-codex-turn-state": {token}})
 	require.NoError(t, s.Finish(ctx, attempt, true))
@@ -459,12 +455,14 @@ func TestCodexTurnStateSlowCollectorLosesToNaturalResponse(t *testing.T) {
 	initial := seedCodexStateTestDemand(t, s, a, "gpt-5")
 	started := make(chan struct{})
 	release := make(chan struct{})
+	cancelled := make(chan struct{})
 	done := make(chan struct{})
 	s.collector = codexStateTestCollector(func(ctx context.Context, _ CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
 		close(started)
 		select {
 		case <-release:
 		case <-ctx.Done():
+			close(cancelled)
 		}
 		return CodexTurnStateCollectResult{StatusCode: 200, Tokens: []string{codexStateTestToken(10, s.now().Add(-time.Minute))}}, nil
 	})
@@ -474,6 +472,11 @@ func TestCodexTurnStateSlowCollectorLosesToNaturalResponse(t *testing.T) {
 	token := codexStateTestToken(10, s.now())
 	s.Observe(natural, token)
 	require.NoError(t, s.Finish(ctx, natural, true))
+	select {
+	case <-cancelled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("a committed natural target must cancel the active collector")
+	}
 	close(release)
 	<-done
 	record, _ := repo.Get(ctx, natural.key)

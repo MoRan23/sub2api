@@ -135,7 +135,7 @@ func TestCodexHistoryDemandPostgresRejectsStaleScopeAndWrongSubscription(t *test
 	require.Nil(t, record, "rejected metadata must not create state")
 }
 
-func TestCodexHistoryDemandPostgresDefersConsumptionDuringBusiness(t *testing.T) {
+func TestCodexHistoryDemandPostgresConsumesDuringBusiness(t *testing.T) {
 	ctx := context.Background()
 	key := createCodexStateFixture(t)
 	r := &openAICodexStateRepository{db: integrationDB, rdb: integrationRedis}
@@ -150,20 +150,22 @@ func TestCodexHistoryDemandPostgresDefersConsumptionDuringBusiness(t *testing.T)
 	require.NoError(t, r.MarkBusinessSent(ctx, key, now))
 	created, err := r.CreateHistoryDemand(ctx, proof, now)
 	require.NoError(t, err)
-	require.False(t, created)
+	require.True(t, created, "trusted historical demand does not wait for in-flight business")
 	during, err := r.Get(ctx, key)
 	require.NoError(t, err)
-	require.Equal(t, before.Version, during.Version, "history cannot invalidate a running physical request's version")
-	require.True(t, during.HistoryProofObservedAt.IsZero(), "busy history proof remains available after the natural request")
-	require.Empty(t, during.DemandReason)
+	require.Equal(t, before.Version+1, during.Version)
+	require.Equal(t, proof.ObservedAt, during.HistoryProofObservedAt)
+	require.Equal(t, "extended_shape", during.DemandReason)
+	require.Equal(t, now, during.LastBusinessAt, "historical activity cannot replace a newer real business send")
 	require.True(t, during.BusinessInFlight)
 	require.NoError(t, r.EndBusiness(ctx, key, "natural"))
 	created, err = r.CreateHistoryDemand(ctx, proof, now)
 	require.NoError(t, err)
-	require.True(t, created)
+	require.False(t, created, "ending a business lease cannot consume the same history twice")
 	after, err := r.Get(ctx, key)
 	require.NoError(t, err)
 	require.Equal(t, proof.ObservedAt, after.HistoryProofObservedAt)
+	require.Equal(t, during.Version, after.Version)
 	require.False(t, after.BusinessInFlight)
 }
 

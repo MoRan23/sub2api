@@ -16,9 +16,11 @@ type codexHistoryTestRepository struct {
 	proofs []CodexTurnStateHistoryProof
 }
 
-func (r *codexHistoryTestRepository) CreateHistoryDemand(ctx context.Context, p CodexTurnStateHistoryProof, now time.Time) (bool, error) {
-	if active, err := r.HasBusiness(ctx, CodexTurnStateKey{OwnerAccountID: p.OwnerAccountID, Model: p.Model, Generation: p.Generation}, now); err != nil || active {
-		return false, err
+func (r *codexHistoryTestRepository) CreateHistoryDemand(_ context.Context, p CodexTurnStateHistoryProof, _ time.Time) (bool, error) {
+	for _, existing := range r.proofs {
+		if existing.OwnerAccountID == p.OwnerAccountID && existing.Model == p.Model && existing.Generation == p.Generation && !p.ObservedAt.After(existing.ObservedAt) {
+			return false, nil
+		}
 	}
 	r.proofs = append(r.proofs, p)
 	return true, nil
@@ -216,7 +218,7 @@ func TestCodexTurnStateLateWSWriteBindingCompletesBusinessActivity(t *testing.T)
 	require.Len(t, repo.proofs, 1, "late binding activates the delivered anomaly immediately")
 }
 
-func TestCodexTurnStateWSWriteBindingDuringFinishActivatesAfterLeaseRelease(t *testing.T) {
+func TestCodexTurnStateWSWriteBindingDuringFinishActivatesWithBusinessLease(t *testing.T) {
 	isolateCodexHistory(t)
 	s, memory, account := newCodexStateTestService(t)
 	now := time.Now()
@@ -231,9 +233,9 @@ func TestCodexTurnStateWSWriteBindingDuringFinishActivatesAfterLeaseRelease(t *t
 	wire := populateCodexTurnStateObservation(c, nil, nil, []byte(`{"type":"response.create","model":"gpt-5"}`), true)
 	repo.beforeEnd = func() {
 		bindCodexTurnStateSummarySequence(wire)
-		require.Empty(t, repo.proofs, "history may not consume or change the version of an in-flight business lease")
+		require.Len(t, repo.proofs, 1, "delivered history may create demand while the business lease is still present")
 	}
 	s.Observe(a, codexStateTestToken(11, now))
 	require.NoError(t, s.Finish(context.Background(), a, true))
-	require.Len(t, repo.proofs, 1, "Finish completes late business activation after releasing its lease")
+	require.Len(t, repo.proofs, 1, "releasing the lease must not consume delivered history twice")
 }

@@ -284,18 +284,6 @@ func (r *openAICodexStateRepository) CreateHistoryDemand(ctx context.Context, pr
 	if err != nil {
 		return false, err
 	}
-	// History is lower priority than the physical request. Use a new statement
-	// after acquiring the state lock so a lease committed while we waited is
-	// visible, and leave its proof unconsumed for a later activation attempt.
-	var historyBusinessInFlight bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM openai_codex_state_business_leases
-		WHERE owner_account_id=$1 AND model=$2 AND generation=$3 AND lease_until>clock_timestamp())`,
-		key.OwnerAccountID, key.Model, key.Generation).Scan(&historyBusinessInFlight); err != nil {
-		return false, err
-	}
-	if historyBusinessInFlight {
-		return false, nil
-	}
 	if record.Generation == key.Generation && !proof.ObservedAt.After(record.HistoryProofObservedAt) {
 		return false, nil
 	}
@@ -407,31 +395,9 @@ func (r *openAICodexStateRepository) SaveCAS(ctx context.Context, record service
 	if err != nil || !live {
 		return false, err
 	}
-	if record.CollectorPublication {
-		// BeginBusiness locks this same state row before inserting its lease. Wait
-		// for that lock before taking a fresh READ COMMITTED lease snapshot: one
-		// UPDATE with NOT EXISTS could retain its pre-wait snapshot and miss the
-		// business lease committed by the transaction that held the row lock.
-		var version int64
-		err = tx.QueryRowContext(ctx, `SELECT version FROM openai_codex_state
-			WHERE owner_account_id=$1 AND model=$2 AND generation=$3 AND version=$4 FOR UPDATE`,
-			record.OwnerAccountID, record.Model, record.Generation, expectedVersion).Scan(&version)
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		var inflight bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM openai_codex_state_business_leases
-			WHERE owner_account_id=$1 AND model=$2 AND generation=$3 AND lease_until>clock_timestamp())`,
-			record.OwnerAccountID, record.Model, record.Generation).Scan(&inflight); err != nil {
-			return false, err
-		}
-		if inflight {
-			return false, nil
-		}
-	}
+	// Business activity may overlap collection. The UPDATE locks the state row
+	// and rechecks its version after any concurrent writer commits, preventing
+	// a late result from replacing a newer publication without waiting for leases.
 	result, err := tx.ExecContext(ctx, `UPDATE openai_codex_state SET
 		version=version+1, encrypted_token=$5, issued_at=$6, expires_at=$7,
 		token_length=$8, cipher_blocks=$9, source=$10, shape=$11, refresh_reason=$12,
@@ -475,9 +441,6 @@ func (r *openAICodexStateRepository) ListActive(ctx context.Context, since time.
 		AND NOT s.collector_paused AND (s.next_collect_at IS NULL OR s.next_collect_at <= NOW())
 		AND (s.demand_reason <> '' OR (s.encrypted_token <> '' AND s.expires_at <= NOW() + ($3 * INTERVAL '1 second')))
 		AND a.extra->'codex_turn_state'->>'collector_proxy_id' ~ '^[1-9][0-9]*$'
-		AND NOT EXISTS (SELECT 1 FROM openai_codex_state_business_leases l
-		 WHERE l.owner_account_id=s.owner_account_id AND l.model=s.model
-		 AND l.generation=s.generation AND l.lease_until>NOW())
 		ORDER BY s.next_collect_at ASC NULLS FIRST, s.expires_at ASC NULLS FIRST,
 		s.last_business_at DESC, s.owner_account_id, s.model LIMIT $2`, since.UTC(), limit, int64(service.CodexTurnStateRefreshAhead/time.Second))
 }

@@ -53,3 +53,25 @@ env -u OPENAI_API_KEY GOEXPERIMENT=jsonv2 go test ./internal/service \
 env -u OPENAI_API_KEY GOEXPERIMENT=jsonv2 go test -race -tags unit ./internal/service \
   -run 'Codex(State|TurnState)' -count=1 -json
 ```
+
+## 采集与业务并行（基线 `cbaa6cf97`）
+
+移除采集启动、运行、历史需求创建、到期扫描及仓储发布中的业务租约拦截。业务开始不再取消采集；业务取得满足需求的新目标后仍取消多余采集，同一临期 token 不取消续期。保留账号级采集单飞、30 秒最短退避、配置代次、模型策略和发布 CAS。
+
+并发回归覆盖业务在采集前后开始、续期与业务并行、调度版本变化不破坏冻结快照、业务异常失效 CAS 冲突重试、重复异常业务期间采集合格结果仍可发布，以及取消通知丢失时新业务缓存仍受保护。真实 PostgreSQL 测试覆盖业务租约存在时扫描和发布、状态行锁等待后业务租约提交、新版本提交后旧 CAS 拒绝，以及历史需求消费幂等性。
+
+本轮使用 Go 1.27.0、`GOEXPERIMENT=jsonv2` 和隔离 PostgreSQL / Redis 测试容器。以下命令在 `backend` 执行，输出保存在 `.git/task-artifacts/codex-collector-parallel/`：
+
+```bash
+env -u OPENAI_API_KEY GOEXPERIMENT=jsonv2 go test ./internal/service ./internal/repository \
+  -run 'Codex(State|TurnState)' -count=1 -json
+env -u OPENAI_API_KEY GOEXPERIMENT=jsonv2 go test -race -tags unit ./internal/service ./internal/repository \
+  -run 'Codex(State|TurnState)' -count=1 -json
+env -u OPENAI_API_KEY CI=true GOEXPERIMENT=jsonv2 go test -tags integration ./internal/repository \
+  -run 'TestCodex(CollectorPublicationPostgres|HistoryDemandPostgres|StatePostgres(ScanSelectsOnlyDueCollectors|ConcurrentCASAndGenerationFence|DisableSerializesWithPublication))' \
+  -count=1 -json
+```
+
+普通回归和带 `unit` 标签的竞态测试各通过 513 项测试结果（含子测试）；真实存储集成通过 14 项。三轮均无失败、无跳过。额外覆盖 PostgreSQL 微秒精度不会误保留本轮防崩溃预留，以及并发更长账号冷却在采集普通失败、自然业务成功后仍有效。
+
+本轮没有前端代码或数据库结构变更，未重复运行前端套件；没有发送真实收费模型请求或部署应用。

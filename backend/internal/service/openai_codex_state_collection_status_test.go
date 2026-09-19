@@ -22,7 +22,7 @@ func TestCodexTurnStateStatusSeparatesUsableCacheFromPausedCollector(t *testing.
 	require.False(t, status.Models[0].CacheAvailable)
 }
 
-func TestCodexTurnStateStatusShowsBusinessPriorityAndOwnerCooldown(t *testing.T) {
+func TestCodexTurnStateStatusShowsParallelCollectionAndOwnerCooldown(t *testing.T) {
 	s, _, account := newCodexStateTestService(t)
 	now := s.now()
 	busy := CodexTurnStateRecord{OwnerAccountID: account.ID, Model: "gpt-5", Generation: "gen1", LastBusinessAt: now,
@@ -30,10 +30,11 @@ func TestCodexTurnStateStatusShowsBusinessPriorityAndOwnerCooldown(t *testing.T)
 	cooldown := CodexTurnStateRecord{OwnerAccountID: account.ID, Model: "gpt-5-mini", Generation: "gen1", LastBusinessAt: now,
 		LastCollectedAt: now, NextCollectAt: now.Add(time.Minute), LastError: "collector_rate_limited"}
 	status := projectCodexTurnStateStatus(account.ID, account, []CodexTurnStateRecord{busy, cooldown}, []string{"gpt-5", "gpt-5-mini"}, nil, now)
-	require.Equal(t, "pending", status.Models[0].CollectionStatus)
-	require.Equal(t, "waiting_business", status.Models[0].CollectionReason)
-	busy.BusinessInFlight, busy.CollectionStatus = false, "pending"
+	require.Equal(t, "collecting", status.Models[0].CollectionStatus)
+	require.Equal(t, "collecting", status.Models[0].CollectionReason)
+	busy.CollectionStatus = "pending"
 	status = projectCodexTurnStateStatus(account.ID, account, []CodexTurnStateRecord{busy, cooldown}, []string{"gpt-5", "gpt-5-mini"}, nil, now)
 	require.Equal(t, "backoff", status.Models[0].CollectionStatus)
+	require.Equal(t, "account_cooldown", status.Models[0].CollectionReason)
 	require.Equal(t, cooldown.NextCollectAt, *status.Models[0].NextCollectAt)
 }

@@ -267,7 +267,7 @@ func TestCodexStatePostgresScanSelectsOnlyDueCollectors(t *testing.T) {
 			models = append(models, record.Model)
 		}
 	}
-	require.ElementsMatch(t, []string{"due", "demand"}, models)
+	require.ElementsMatch(t, []string{"due", "demand", "natural-inflight"}, models, "due collection continues alongside business leases")
 	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,
 		'{codex_turn_state,collector_proxy_id}', 'null'::jsonb) WHERE id=$1`, key.OwnerAccountID)
 	require.NoError(t, err)

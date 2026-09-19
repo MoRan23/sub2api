@@ -240,9 +240,6 @@ func projectCodexStateCollection(status *CodexTurnStateStatus, owner *Account, r
 	if record.LastBusinessAt.Before(now.Add(-CodexTurnStateActiveWindow)) {
 		return "idle", "idle"
 	}
-	if record.DemandReason != "" && record.BusinessInFlight {
-		return "pending", "waiting_business"
-	}
 	if record.CollectionStatus == "collecting" && record.LastCollectedAt.Add(CodexTurnStateCollectTimeout).After(now) {
 		return "collecting", "collecting"
 	}
@@ -263,9 +260,6 @@ func projectCodexStateCollection(status *CodexTurnStateStatus, owner *Account, r
 	}
 	if record.CollectionReason == "collector_proxy_unavailable" {
 		return "blocked", record.CollectionReason
-	}
-	if record.CollectionReason == "waiting_business" {
-		return "pending", "waiting_business"
 	}
 	return "pending", "queued"
 }

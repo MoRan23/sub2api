@@ -28,11 +28,8 @@ type CodexTurnStateKey struct {
 type CodexTurnStateRecord struct {
 	// A transient publication fence, checked transactionally against settings.
 	// It is never persisted as part of a token record or exposed by JSON APIs.
-	ModelPolicyRevision string `json:"-"`
-	// Background scheduling and publication cannot advance a record while a
-	// same-model business lease is active. This marker is never persisted.
-	CollectorPublication   bool `json:"-"`
-	BusinessInFlight       bool `json:"-"`
+	ModelPolicyRevision    string `json:"-"`
+	BusinessInFlight       bool   `json:"-"`
 	OwnerAccountID         int64
 	Model                  string
 	Generation             string
@@ -59,6 +56,26 @@ type CodexTurnStateRecord struct {
 
 func (r CodexTurnStateRecord) Key() CodexTurnStateKey {
 	return CodexTurnStateKey{OwnerAccountID: r.OwnerAccountID, Model: r.Model, Generation: r.Generation}
+}
+
+// Cache identity is private request-local state, independent of scheduling CAS
+// versions. It is never persisted, exported, or used as historical evidence.
+type codexTurnStateCacheIdentity struct {
+	encryptedToken string
+	issuedAt       time.Time
+	expiresAt      time.Time
+	shape          string
+	tokenLength    int
+	cipherBlocks   int
+}
+
+func (r CodexTurnStateRecord) cacheIdentity() codexTurnStateCacheIdentity {
+	return codexTurnStateCacheIdentity{r.EncryptedToken, r.IssuedAt, r.ExpiresAt, r.Shape, r.TokenLength, r.CipherBlocks}
+}
+
+func (i codexTurnStateCacheIdentity) matches(r *CodexTurnStateRecord) bool {
+	return r != nil && i.encryptedToken == r.EncryptedToken && i.issuedAt.Equal(r.IssuedAt) &&
+		i.expiresAt.Equal(r.ExpiresAt) && i.shape == r.Shape && i.tokenLength == r.TokenLength && i.cipherBlocks == r.CipherBlocks
 }
 
 // Implementations must guard writes against the live account generation and
@@ -107,6 +124,7 @@ type CodexTurnStateAttempt struct {
 	id                   string
 	accountType          string
 	baseVersion          int64
+	baseCacheIdentity    codexTurnStateCacheIdentity
 	credentialEpoch      string
 	businessSentAt       time.Time
 	historyProof         *CodexTurnStateHistoryProof

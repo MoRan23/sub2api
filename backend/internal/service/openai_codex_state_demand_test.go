@@ -311,7 +311,7 @@ func TestCodexTurnStateDemandNaturalTargetPreservesOwnerRetryAfter(t *testing.T)
 	require.EqualValues(t, 1, calls.Load(), "a natural target must not erase the credential owner's retry-after fence")
 }
 
-func TestCodexTurnStateDemandCollectorCannotPublishAcrossUnnotifiedBusinessLease(t *testing.T) {
+func TestCodexTurnStateDemandCollectorPublishesAlongsideRemoteBusinessLease(t *testing.T) {
 	s, repo, account := newCodexStateTestService(t)
 	seed := seedCodexStateTestDemand(t, s, account, "gpt-5")
 	started, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
@@ -329,15 +329,21 @@ func TestCodexTurnStateDemandCollectorCannotPublishAcrossUnnotifiedBusinessLease
 	business, err := other.Prepare(context.Background(), account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, other, business)
-	// The mock cancellation channel drops notifications, as Redis can during a
-	// disconnect. The durable lease must still exclude this late publication.
+	// A remote instance's in-flight business does not block a valid collector
+	// publication, even when no cancellation notification can be exchanged.
 	close(release)
 	<-done
 	current, err := repo.Get(context.Background(), seed.key)
 	require.NoError(t, err)
-	require.Equal(t, reserved.Version, current.Version)
-	require.Empty(t, current.EncryptedToken)
+	require.Equal(t, reserved.Version+1, current.Version)
+	require.NotEmpty(t, current.EncryptedToken)
+	require.Equal(t, "collector", current.Source)
+	other.Observe(business, codexStateTestToken(11, s.now()))
 	require.NoError(t, other.Finish(context.Background(), business, true))
+	after, err := repo.Get(context.Background(), seed.key)
+	require.NoError(t, err)
+	require.Equal(t, current.EncryptedToken, after.EncryptedToken, "a late anomaly from the older business snapshot cannot revoke the collector's new target")
+	require.Equal(t, current.Version, after.Version)
 }
 
 type codexStateReservationFenceRepo struct {
@@ -347,14 +353,14 @@ type codexStateReservationFenceRepo struct {
 }
 
 func (r *codexStateReservationFenceRepo) SaveCAS(ctx context.Context, record CodexTurnStateRecord, expected int64) (bool, error) {
-	if record.CollectorPublication && record.CollectionStatus == "collecting" {
+	if record.CollectionStatus == "collecting" {
 		close(r.entered)
 		<-r.release
 	}
 	return r.CodexTurnStateRepository.SaveCAS(ctx, record, expected)
 }
 
-func TestCodexTurnStateDemandReservationCannotAdvanceAcrossBusinessLease(t *testing.T) {
+func TestCodexTurnStateDemandReservationAndOutcomeAdvanceAlongsideBusinessLease(t *testing.T) {
 	s, repo, account := newCodexStateTestService(t)
 	ctx := context.Background()
 	seed := seedCodexStateTestDemand(t, s, account, "gpt-5")
@@ -379,11 +385,13 @@ func TestCodexTurnStateDemandReservationCannotAdvanceAcrossBusinessLease(t *test
 	<-done
 	reserved, err := repo.Get(ctx, seed.key)
 	require.NoError(t, err)
-	require.Equal(t, before.Version, reserved.Version)
-	require.Zero(t, calls.Load())
+	require.Equal(t, before.Version+2, reserved.Version)
+	require.EqualValues(t, 1, calls.Load())
 	other.Observe(business, codexStateTestToken(10, s.now()))
 	require.NoError(t, other.Finish(ctx, business, true))
 	accepted, err := repo.Get(ctx, seed.key)
 	require.NoError(t, err)
-	require.NotEmpty(t, accepted.EncryptedToken, "collector reservation must not cause a same-issued natural target to lose its expected version")
+	require.NotEmpty(t, accepted.EncryptedToken, "reservation and failed collection must not prevent a same-issued natural target from replacing the unchanged anomaly")
+	require.Equal(t, "business", accepted.Source)
+	require.Empty(t, accepted.DemandReason)
 }
