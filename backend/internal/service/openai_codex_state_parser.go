@@ -13,6 +13,11 @@ const (
 	CodexTurnStateShapeTarget   = "target"
 	CodexTurnStateShapeExtended = "extended"
 	CodexTurnStateShapeInvalid  = "invalid"
+
+	CodexTurnStateObservedPersonalTarget       = "personal_target"
+	CodexTurnStateObservedPersonalExtended     = "personal_extended"
+	CodexTurnStateObservedTeamBusinessTarget   = "team_business_target"
+	CodexTurnStateObservedTeamBusinessExtended = "team_business_extended"
 )
 
 type CodexTurnStateShape struct {
@@ -23,45 +28,86 @@ type CodexTurnStateShape struct {
 	ExpiresAt    time.Time
 }
 
-// ParseCodexTurnState checks only the public Fernet envelope. Without the
-// upstream secret it cannot authenticate/decrypt the contents or assess quality.
-func ParseCodexTurnState(token, accountType string, now time.Time) (CodexTurnStateShape, error) {
-	result := CodexTurnStateShape{Shape: CodexTurnStateShapeInvalid, TokenLength: len(token)}
-	if accountType != "personal" && accountType != "team_business" {
-		return result, errors.New("account_type_unknown")
+// CodexTurnStateEnvelope describes observable public fields only. ObservedShape
+// names an envelope shape; it does not identify the account's subscription.
+type CodexTurnStateEnvelope struct {
+	TokenLength      int
+	CipherBlocks     int
+	IssuedAt         time.Time
+	ExpiresAt        time.Time
+	ObservedShape    string
+	ValidationReason string
+}
+
+// InspectCodexTurnStateEnvelope validates the public Fernet envelope without
+// consulting the account type. Without the upstream secret it cannot authenticate
+// or decrypt the contents, infer a subscription, or assess model quality.
+// Time-invalid envelopes retain their structural shape for passive observation.
+func InspectCodexTurnStateEnvelope(token string, now time.Time) (CodexTurnStateEnvelope, error) {
+	result := CodexTurnStateEnvelope{ObservedShape: CodexTurnStateShapeInvalid, TokenLength: len(token)}
+	reject := func(reason string) (CodexTurnStateEnvelope, error) {
+		result.ValidationReason = reason
+		return result, errors.New(reason)
 	}
 	if strings.TrimSpace(token) != token || len(token) > 4096 || len(token) < 100 {
-		return result, errors.New("invalid_encoding")
+		return reject("invalid_encoding")
 	}
 	decoded, err := base64.URLEncoding.Strict().DecodeString(token)
 	if err != nil {
 		decoded, err = base64.RawURLEncoding.Strict().DecodeString(token)
 	}
 	if err != nil || len(decoded) < 73 || decoded[0] != 0x80 || (len(decoded)-57)%16 != 0 {
-		return result, errors.New("invalid_envelope")
+		return reject("invalid_envelope")
 	}
 	// Require canonical padded Base64url; the accepted target lengths include '='.
 	if base64.URLEncoding.EncodeToString(decoded) != token {
-		return result, errors.New("invalid_encoding")
+		return reject("invalid_encoding")
+	}
+	result.CipherBlocks = (len(decoded) - 57) / 16
+	switch {
+	case len(token) == 292 && result.CipherBlocks == 10:
+		result.ObservedShape = CodexTurnStateObservedPersonalTarget
+	case len(token) == 312 && result.CipherBlocks == 11:
+		result.ObservedShape = CodexTurnStateObservedPersonalExtended
+	case len(token) == 332 && result.CipherBlocks == 12:
+		result.ObservedShape = CodexTurnStateObservedTeamBusinessTarget
+	case len(token) == 356 && result.CipherBlocks == 13:
+		result.ObservedShape = CodexTurnStateObservedTeamBusinessExtended
 	}
 	ts := binary.BigEndian.Uint64(decoded[1:9])
 	if ts > uint64(now.Add(30*time.Second).Unix()) {
-		return result, errors.New("future_issued_at")
+		return reject("future_issued_at")
 	}
 	result.IssuedAt = time.Unix(int64(ts), 0).UTC()
 	result.ExpiresAt = result.IssuedAt.Add(CodexTurnStateLifetime)
 	if !result.ExpiresAt.After(now) {
-		return result, errors.New("expired")
+		return reject("expired")
 	}
-	result.CipherBlocks = (len(decoded) - 57) / 16
-	targetLen, targetBlocks, extendedLen := 292, 10, 312
-	if accountType == "team_business" {
-		targetLen, targetBlocks, extendedLen = 332, 12, 356
+	if result.ObservedShape == CodexTurnStateShapeInvalid {
+		return reject("unexpected_shape")
+	}
+	return result, nil
+}
+
+// ParseCodexTurnState applies account-specific cache admission after inspecting
+// the public envelope. Unknown account types remain ineligible regardless of the
+// observed shape, and extended states remain signals rather than cache targets.
+func ParseCodexTurnState(token, accountType string, now time.Time) (CodexTurnStateShape, error) {
+	result := CodexTurnStateShape{Shape: CodexTurnStateShapeInvalid, TokenLength: len(token)}
+	if accountType != "personal" && accountType != "team_business" {
+		return result, errors.New("account_type_unknown")
+	}
+	envelope, err := InspectCodexTurnStateEnvelope(token, now)
+	result.CipherBlocks, result.IssuedAt, result.ExpiresAt = envelope.CipherBlocks, envelope.IssuedAt, envelope.ExpiresAt
+	if err != nil {
+		return result, err
 	}
 	switch {
-	case len(token) == targetLen && result.CipherBlocks == targetBlocks:
+	case accountType == "personal" && envelope.ObservedShape == CodexTurnStateObservedPersonalTarget,
+		accountType == "team_business" && envelope.ObservedShape == CodexTurnStateObservedTeamBusinessTarget:
 		result.Shape = CodexTurnStateShapeTarget
-	case len(token) == extendedLen && result.CipherBlocks == targetBlocks+1:
+	case accountType == "personal" && envelope.ObservedShape == CodexTurnStateObservedPersonalExtended,
+		accountType == "team_business" && envelope.ObservedShape == CodexTurnStateObservedTeamBusinessExtended:
 		result.Shape = CodexTurnStateShapeExtended
 	default:
 		return result, errors.New("unexpected_shape")

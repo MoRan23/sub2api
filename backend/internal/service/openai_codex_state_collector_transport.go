@@ -58,12 +58,25 @@ func ProvideCodexTurnStateCollectorHTTPDo(accounts AccountRepository, proxies Pr
 		}
 		identity := resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, owner.GetOpenAIUserAgent())
 		ensureCodexIdentityHeadersFromPlan(request.Header, identity)
+		if input.validateModelPolicy == nil || !input.validateModelPolicy(ctx) {
+			return nil, errors.New("collector_model_policy_changed")
+		}
 		return upstream.Do(request, proxy.URL(), owner.ID, 1)
 	}
 }
 
-func ProvideCodexTurnStateService(repo CodexTurnStateRepository, accounts AccountRepository, encryptor SecretEncryptor, do CodexTurnStateCollectorHTTPDo) *CodexTurnStateService {
+func ProvideCodexTurnStateService(repo CodexTurnStateRepository, accounts AccountRepository, encryptor SecretEncryptor, do CodexTurnStateCollectorHTTPDo, settings *SettingService) *CodexTurnStateService {
 	svc := NewCodexTurnStateService(repo, accounts, encryptor, NewCodexTurnStateHTTPCollector(do))
+	if settings != nil {
+		svc.modelPolicy = settings
+		settings.AddCodexTurnStateModelsListener(func() {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				svc.CancelExcludedModels(ctx)
+			}()
+		})
+	}
 	svc.Start(context.Background())
 	return svc
 }

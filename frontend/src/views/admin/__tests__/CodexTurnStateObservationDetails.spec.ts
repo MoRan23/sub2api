@@ -5,6 +5,19 @@ import CodexTurnStateObservationDetails from '../components/CodexTurnStateObserv
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, te: () => true }) }))
 
 describe('Codex turn-state wire observation details', () => {
+  it.each(['model_excluded', 'model_policy_unavailable', 'model_policy_changed', 'snapshot_unavailable'])('keeps an enabled account distinct from maintenance paused by %s', (reason) => {
+    const wrapper = mount(CodexTurnStateObservationDetails, {
+      props: { state: { account_enabled: true, enabled: false, maintenance_reason: reason,
+        action: 'passthrough', model: 'gpt-outside', outbound_length: 0, response_length: 332, response_shape: 'target' } }
+    })
+    const values = Object.fromEntries(wrapper.findAll('dl > div').map(item => [item.get('dt').text(), item.get('dd').text()]))
+    expect(values['admin.accounts.codexTurnState.accountCache']).toBe('admin.accounts.codexTurnState.cacheEnabled')
+    expect(values['admin.accounts.codexTurnState.cacheMode']).toBe('admin.accounts.codexTurnState.maintenancePaused')
+    expect(values['admin.accounts.codexTurnState.maintenanceReason']).toBe(`admin.accounts.codexTurnState.reasons.${reason}`)
+    expect(wrapper.text()).not.toContain('admin.accounts.codexTurnState.observationOnly')
+    expect(wrapper.text()).toContain('admin.accounts.codexTurnState.shapes.target (332)')
+  })
+
   it('shows actual wire length, model and response shape without making a quality claim', () => {
     const wrapper = mount(CodexTurnStateObservationDetails, {
       props: { state: { enabled: true, action: 'injected', source: 'business', model: 'gpt-final',

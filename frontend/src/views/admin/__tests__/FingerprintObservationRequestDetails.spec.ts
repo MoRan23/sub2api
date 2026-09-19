@@ -38,6 +38,26 @@ async function openDetails() {
 afterEach(cleanup)
 
 describe('FingerprintObservationRequestDetails', () => {
+  it.each([
+    [332, 12, 'team_business_target', 'Team / Business target shape (332 characters)'],
+    [356, 13, 'team_business_extended', 'Team / Business extended shape (356 characters)'],
+  ] as const)('shows a %s-character envelope separately from unknown subscription eligibility', async (length, blocks, shape, description) => {
+    renderDetails({ codex_turn_state: {
+      enabled: false, account_enabled: true, action: 'passthrough', model: 'gpt-observed', outbound_length: 0,
+      response_length: length, response_shape: 'unknown', response_source: 'header',
+      response_observed_shape: shape, response_cipher_blocks: blocks, response_validation_reason: 'account_type_unknown',
+    } })
+    await openDetails()
+    const observation = within(screen.getByTestId('codex-turn-state-observation'))
+    expect(observation.getByText(description)).toBeTruthy()
+    expect(observation.getByText(String(blocks))).toBeTruthy()
+    expect(observation.getByText('Account target shape match')).toBeTruthy()
+    expect(observation.getByText(`Unclassified shape (${length})`)).toBeTruthy()
+    expect(observation.getByText('Subscription is unknown; cache target eligibility cannot be determined')).toBeTruthy()
+    expect(observation.getByText('Envelope shape describes the actual response; it does not identify the account subscription or model quality.')).toBeTruthy()
+    expect(observation.queryByText('Disabled (observation only)')).toBeNull()
+  })
+
   it('shows the received response length as unclassified when the account subscription is unknown', async () => {
     renderDetails({ codex_turn_state: {
       enabled: false, action: 'passthrough', model: 'gpt-observed', outbound_length: 0,

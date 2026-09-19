@@ -41,7 +41,10 @@ func (s *OpenAIGatewayService) prepareOpenAICodexStateHTTPRequest(c *gin.Context
 	}
 	if attempt.Enabled && !s.codexTurnStateService.ValidateCredentialHeaders(request.Context(), attempt, request.Header) {
 		finishCodexTurnStateHTTPAttempt(s.codexTurnStateService, attempt, false)
-		return request
+		attempt = passiveCodexStateAfterValidationFailure(attempt)
+		if attempt == nil {
+			return request
+		}
 	}
 	finalBody := body
 	if token := attempt.Snapshot.Token; token != "" {

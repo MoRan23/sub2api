@@ -17,7 +17,13 @@ func codexConfigAccount(t *testing.T) *Account {
 
 func TestCodexTurnStateConfigurationClassifiesOnlyKnownPlans(t *testing.T) {
 	a := codexConfigAccount(t)
-	for plan, want := range map[string]string{"plus": "personal", "pro": "personal", "free": "personal", "team": "team_business", "business": "team_business", "enterprise": "", "": "", "future_plan": ""} {
+	for plan, want := range map[string]string{
+		"plus": "personal", "pro": "personal", "free": "personal", "go": "personal", "personal": "personal",
+		"chatgpt_pro": "personal", "CHATGPT--_Pro": "personal", "prolite": "personal", " pro_-lite ": "personal",
+		"team": "team_business", "business": "team_business", "ChatGPT_Team": "team_business", "chatgpt-business": "team_business",
+		"self_serve_business_prolite": "team_business", "SELF--SERVE__BUSINESS_-PROLITE": "team_business", "self\tserve business\nprolite": "team_business",
+		"enterprise": "", "": "", "future_plan": "", "future_business": "", "self_serve_business_prolite_trial": "",
+	} {
 		a.Credentials["plan_type"] = plan
 		require.Equal(t, want, CodexTurnStateAccountTypeForAccount(a), plan)
 	}
@@ -26,6 +32,32 @@ func TestCodexTurnStateConfigurationClassifiesOnlyKnownPlans(t *testing.T) {
 	require.Error(t, ValidateCodexTurnStateConfig(a, &CodexTurnStateConfig{AccountType: "auto"}))
 	a.Credentials["auth_mode"] = OpenAIAuthModeAgentIdentity
 	require.False(t, IsCodexTurnStateAccount(a))
+}
+
+func TestCodexTurnStateConfigurationManualAccountTypeTakesPrecedence(t *testing.T) {
+	a := codexConfigAccount(t)
+	for _, manual := range []string{"personal", "team_business"} {
+		for _, plan := range []string{"enterprise", "self_serve_business_prolite", "chatgpt_pro"} {
+			a.Extra[CodexTurnStateExtraKey] = codexTurnStateConfigMap(CodexTurnStateConfig{AccountType: manual})
+			a.Credentials["plan_type"] = plan
+			require.Equal(t, manual, CodexTurnStateAccountTypeForAccount(a), plan)
+		}
+	}
+}
+
+func TestCodexTurnStateConfigurationPlanAliasesPreserveGeneration(t *testing.T) {
+	current := codexConfigAccount(t)
+	current.Credentials["plan_type"] = "self_serve_business_prolite"
+	generation := CodexTurnStateGenerationForAccount(current)
+	target := *current
+	target.Credentials = maps.Clone(current.Credentials)
+	target.Credentials["plan_type"] = "Self--Serve__Business Prolite"
+	require.NoError(t, PreserveAccountConfiguration(current, &target, AccountConfigurationIntent{}))
+	require.Equal(t, generation, CodexTurnStateGenerationForAccount(&target))
+
+	target.Credentials["plan_type"] = "chatgpt_pro"
+	require.NoError(t, PreserveAccountConfiguration(current, &target, AccountConfigurationIntent{}))
+	require.NotEqual(t, generation, CodexTurnStateGenerationForAccount(&target))
 }
 
 func TestCodexTurnStateConfigurationPreservesLiveConfigAgainstSnapshots(t *testing.T) {

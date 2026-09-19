@@ -153,6 +153,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		EnableOpenAIUUIDv7SessionIdentity:                      settings.EnableOpenAIUUIDv7SessionIdentity,
 		EnableOpenAIOAuthDailySessionRotation:                  settings.EnableOpenAIOAuthDailySessionRotation,
 		CodexTelemetryEnabled:                                  settings.CodexTelemetryEnabled,
+		CodexTurnStateModels:                                   settings.CodexTurnStateModels,
 		OpenAIRequestIntegrityObserveEnabled:                   settings.OpenAIRequestIntegrityObserveEnabled,
 		CodexTelemetryEffectiveEnabled:                         telemetryEffectiveEnabled,
 		CodexTelemetryForcedOffReason:                          telemetryForcedOffReason,

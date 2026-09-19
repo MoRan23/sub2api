@@ -925,6 +925,11 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.EnableOpenAICodexPATContextManagement = settings[SettingKeyEnableOpenAICodexPATContextManagement] == "true"
 	result.EnableOpenAIOAuthDailySessionRotation = settings[SettingKeyEnableOpenAIOAuthDailySessionRotation] == "true"
 	result.CodexTelemetryEnabled = parseCodexTelemetryEnabled(settings[SettingKeyCodexTelemetryEnabled])
+	result.CodexTurnStateModels, _ = parseCodexTurnStateModels(settings)
+	if result.CodexTurnStateModels == nil {
+		// A malformed persisted policy fails closed, including in the admin UI.
+		result.CodexTurnStateModels = []string{}
+	}
 	result.OpenAIRequestIntegrityObserveEnabled = parseOpenAIRequestIntegrityObserveEnabled(settings[SettingKeyOpenAIRequestIntegrityObserveEnabled])
 	result.EnableOpenAIRequestTimezoneConversion = parseDefaultTrueSetting(settings, SettingKeyEnableOpenAIRequestTimezoneConversion)
 	result.EnableOpenAIPassthroughTimezoneConversion = parseDefaultTrueSetting(settings, SettingKeyEnableOpenAIPassthroughTimezoneConversion)

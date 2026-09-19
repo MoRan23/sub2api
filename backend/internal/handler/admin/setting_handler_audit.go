@@ -77,6 +77,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.CodexTelemetryEnabled != after.CodexTelemetryEnabled {
 		changed = append(changed, service.SettingKeyCodexTelemetryEnabled)
 	}
+	if !equalStringSlice(before.CodexTurnStateModels, after.CodexTurnStateModels) {
+		changed = append(changed, service.SettingKeyCodexTurnStateModels)
+	}
 	if before.OpenAIRequestIntegrityObserveEnabled != after.OpenAIRequestIntegrityObserveEnabled {
 		changed = append(changed, service.SettingKeyOpenAIRequestIntegrityObserveEnabled)
 	}

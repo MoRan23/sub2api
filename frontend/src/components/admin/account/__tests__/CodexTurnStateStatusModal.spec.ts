@@ -53,6 +53,16 @@ describe('Codex turn-state status modal', () => {
     wrapper.unmount()
   })
 
+  it.each(['model_excluded', 'model_policy_unavailable'] as const)('shows %s without claiming the account cache is disabled', async (state) => {
+    getCodexTurnState.mockResolvedValue({ ...status, models: [{ ...status.models[0], model_allowed: false, state }] })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.text()).toContain(`admin.accounts.codexTurnState.states.${state}`)
+    expect(wrapper.text()).not.toContain('admin.accounts.codexTurnState.disabled')
+    expect(wrapper.text()).not.toContain('admin.accounts.codexTurnState.states.ready')
+    wrapper.unmount()
+  })
+
   it('ignores a previous account response after selection changes', async () => {
     let resolveFirst!: (value: CodexTurnStateStatus) => void
     getCodexTurnState.mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve }))

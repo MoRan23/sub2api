@@ -159,7 +159,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	codexTelemetryService := service.ProvideCodexTelemetryService(httpUpstream, settingService)
 	codexTurnStateRepository := repository.NewOpenAICodexStateRepository(db, redisClient)
 	codexTurnStateCollectorHTTPDo := service.ProvideCodexTurnStateCollectorHTTPDo(accountRepository, proxyRepository, httpUpstream)
-	codexTurnStateService := service.ProvideCodexTurnStateService(codexTurnStateRepository, accountRepository, secretEncryptor, codexTurnStateCollectorHTTPDo)
+	codexTurnStateService := service.ProvideCodexTurnStateService(codexTurnStateRepository, accountRepository, secretEncryptor, codexTurnStateCollectorHTTPDo, settingService)
 	proxyExitInfoProber := repository.NewProxyExitInfoProber(configConfig)
 	proxyLatencyCache := repository.NewProxyLatencyCache(redisClient, db)
 	openAIEgressLocationService := service.ProvideOpenAIEgressLocationService(proxyExitInfoProber, proxyLatencyCache)

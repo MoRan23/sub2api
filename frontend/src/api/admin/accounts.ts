@@ -198,7 +198,8 @@ export async function getById(id: number): Promise<Account> {
 
 export interface CodexTurnStateModelStatus {
   model: string
-  state: 'ready' | 'expired' | 'missing' | 'paused'
+  state: 'ready' | 'expired' | 'missing' | 'paused' | 'model_excluded' | 'model_policy_unavailable'
+  model_allowed?: boolean
   shape: string
   source: string
   token_length: number

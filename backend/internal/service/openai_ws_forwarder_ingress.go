@@ -1148,6 +1148,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if turn == 1 {
 			firstGuardedHeaderToken = wsSessionResolution.CodexStateFirstFrameToken
 		}
+		// A rejected-field retry is a new physical attempt. Retain the payload
+		// after the client source guard, before this attempt's server cache patch,
+		// so a changed policy/account cannot reuse the previous injected token.
+		guardedRetryPayload := append([]byte(nil), payload...)
 		preparedStatePayload, stateAttempt, stateErr := s.prepareOpenAICodexWSStateFrame(ctx, c, account, payload, firstGuardedHeaderToken, lease.CodexStateCredentialHeaders())
 		if stateErr != nil {
 			return nil, wrapOpenAIWSIngressTurnError("write_upstream_turn_state", stateErr, false)
@@ -1251,7 +1255,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				if !wroteDownstream && statusCode == http.StatusBadRequest && rejectedFieldRetryState != nil {
 					retryBody, retryReason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(
 						statusCode,
-						payload,
+						guardedRetryPayload,
 						upstreamMessage,
 					)
 					if retryErr != nil {

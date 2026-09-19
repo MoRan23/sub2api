@@ -53,6 +53,8 @@ func codexCollectorTransportFixture() (*Account, *Proxy) {
 	return account, proxy
 }
 
+func allowCodexCollectorTestModelPolicy(context.Context) bool { return true }
+
 func TestCodexTurnStateCollectorTransportIsolatedExplicitProxy(t *testing.T) {
 	account, proxy := codexCollectorTransportFixture()
 	upstream := &codexCollectorTransportUpstream{}
@@ -60,7 +62,7 @@ func TestCodexTurnStateCollectorTransportIsolatedExplicitProxy(t *testing.T) {
 	request, err := http.NewRequest(http.MethodPost, chatgptCodexURL, strings.NewReader("{}"))
 	require.NoError(t, err)
 	request.Header["x-Codex-Turn-state"] = []string{"must-not-be-sent"}
-	response, err := do(context.Background(), CodexTurnStateCollectRequest{Account: account, Model: "gpt-5.4", ProxyID: 2}, request)
+	response, err := do(context.Background(), CodexTurnStateCollectRequest{Account: account, Model: "gpt-5.4", ProxyID: 2, validateModelPolicy: allowCodexCollectorTestModelPolicy}, request)
 	require.NoError(t, err)
 	require.NoError(t, response.Body.Close())
 	require.Equal(t, 1, upstream.calls)
@@ -101,7 +103,7 @@ func TestCodexTurnStateCollectorTransportRejectsUnavailableProxyWithoutFallback(
 			do := ProvideCodexTurnStateCollectorHTTPDo(codexCollectorTransportAccounts{account: account}, codexCollectorTransportProxies{proxy: proxy}, upstream)
 			request, err := http.NewRequest(http.MethodPost, chatgptCodexURL, nil)
 			require.NoError(t, err)
-			_, err = do(context.Background(), CodexTurnStateCollectRequest{Account: account, ProxyID: 2}, request)
+			_, err = do(context.Background(), CodexTurnStateCollectRequest{Account: account, ProxyID: 2, validateModelPolicy: allowCodexCollectorTestModelPolicy}, request)
 			require.ErrorIs(t, err, ErrCodexTurnStateCollectorProxyUnavailable)
 			require.Zero(t, upstream.calls)
 		})
@@ -116,10 +118,31 @@ func TestCodexTurnStateCollectorTransportRechecksGenerationAndDestination(t *tes
 	do := ProvideCodexTurnStateCollectorHTTPDo(codexCollectorTransportAccounts{account: account}, codexCollectorTransportProxies{proxy: proxy}, upstream)
 	request, err := http.NewRequest(http.MethodPost, chatgptCodexURL, nil)
 	require.NoError(t, err)
-	_, err = do(context.Background(), CodexTurnStateCollectRequest{Account: &old, ProxyID: 2}, request)
+	_, err = do(context.Background(), CodexTurnStateCollectRequest{Account: &old, ProxyID: 2, validateModelPolicy: allowCodexCollectorTestModelPolicy}, request)
 	require.ErrorContains(t, err, "configuration_changed")
 	request.URL.Host = "unrelated.invalid"
-	_, err = do(context.Background(), CodexTurnStateCollectRequest{Account: account, ProxyID: 2}, request)
+	_, err = do(context.Background(), CodexTurnStateCollectRequest{Account: account, ProxyID: 2, validateModelPolicy: allowCodexCollectorTestModelPolicy}, request)
 	require.ErrorContains(t, err, "invalid_request")
 	require.Zero(t, upstream.calls)
+}
+
+func TestCodexTurnStateCollectorTransportRequiresFinalModelPolicyCheck(t *testing.T) {
+	for _, mode := range []string{"missing", "excluded"} {
+		t.Run(mode, func(t *testing.T) {
+			account, proxy := codexCollectorTransportFixture()
+			upstream := &codexCollectorTransportUpstream{}
+			do := ProvideCodexTurnStateCollectorHTTPDo(codexCollectorTransportAccounts{account: account}, codexCollectorTransportProxies{proxy: proxy}, upstream)
+			request, err := http.NewRequest(http.MethodPost, chatgptCodexURL, nil)
+			require.NoError(t, err)
+			input := CodexTurnStateCollectRequest{Account: account, Model: "gpt-5.4", ProxyID: proxy.ID}
+			checked := false
+			if mode == "excluded" {
+				input.validateModelPolicy = func(context.Context) bool { checked = true; return false }
+			}
+			_, err = do(context.Background(), input, request)
+			require.Error(t, err)
+			require.Equal(t, mode == "excluded", checked)
+			require.Zero(t, upstream.calls, "final policy rejection prevents actual upstream transport")
+		})
+	}
 }

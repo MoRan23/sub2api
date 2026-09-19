@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/ent"
@@ -129,8 +130,15 @@ func (r *settingRepository) setMultipleWithCodexPATValidation(ctx context.Contex
 func setMultipleSettings(ctx context.Context, client *ent.Client, settings map[string]string) error {
 	now := time.Now()
 	builders := make([]*ent.SettingCreate, 0, len(settings))
-	for key, value := range settings {
-		builders = append(builders, client.Setting.Create().SetKey(key).SetValue(value).SetUpdatedAt(now))
+	keys := make([]string, 0, len(settings))
+	for key := range settings {
+		keys = append(keys, key)
+	}
+	// Concurrent multi-key upserts must acquire conflicting row locks in the
+	// same order, including the model list and its server-owned revision.
+	sort.Strings(keys)
+	for _, key := range keys {
+		builders = append(builders, client.Setting.Create().SetKey(key).SetValue(settings[key]).SetUpdatedAt(now))
 	}
 	return client.Setting.
 		CreateBulk(builders...).

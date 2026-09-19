@@ -1,6 +1,13 @@
 export default {
     settings: {
       title: 'System Settings',
+      codexTurnStateModels: {
+        title: 'Codex turn-state models',
+        description: 'Cache injection, learning, and dedicated collection apply only when the account cache is enabled and the final upstream model is listed. Other models remain visible in turn-state fingerprint observations.',
+        formatHint: 'Enter one complete model ID per line. Matching is exact and case-sensitive, without prefixes or wildcards. Defaults: gpt-6-astra, gpt-5.6-sol, gpt-5.6-terra. Leave empty to pause cache maintenance for every model.',
+        emptyHint: 'The list is empty. Saving will keep observation only and pause cache maintenance for every model.',
+        invalidModels: 'Enter up to 64 models, with at most 256 bytes per model ID and no whitespace, control characters, or wildcards.',
+      },
       requestIntegrity: {
         title: 'OpenAI request integrity observation',
         description: 'Enabled by default. Compares content fields before account adaptation with the final outbound OpenAI OAuth inference request. Records differences without blocking, rewriting, or changing retries. Independent of daily fixed roots, fingerprint collection, and client telemetry; redacted difference logs remain active when fingerprint collection is off.',

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"reflect"
 	"strings"
+	"unicode"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/google/uuid"
@@ -78,10 +79,16 @@ func CodexTurnStateAccountTypeForAccount(account *Account) string {
 	if config.AccountType == "personal" || config.AccountType == "team_business" {
 		return config.AccountType
 	}
-	switch strings.ToLower(strings.TrimSpace(account.GetCredential("plan_type"))) {
-	case "free", "go", "plus", "pro", "personal":
+	plan := strings.Map(func(r rune) rune {
+		if r == '_' || r == '-' || unicode.IsSpace(r) {
+			return -1
+		}
+		return unicode.ToLower(r)
+	}, account.GetCredential("plan_type"))
+	switch plan {
+	case "free", "go", "plus", "pro", "personal", "chatgptpro", "prolite":
 		return "personal"
-	case "team", "business", "chatgptteam", "chatgptbusiness":
+	case "team", "business", "chatgptteam", "chatgptbusiness", "selfservebusinessprolite":
 		return "team_business"
 	default:
 		return ""

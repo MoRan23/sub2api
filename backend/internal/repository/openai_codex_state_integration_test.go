@@ -16,6 +16,7 @@ import (
 
 func createCodexStateFixture(t *testing.T) service.CodexTurnStateKey {
 	t.Helper()
+	installCodexStateModelPolicyFixture(t, []string{"gpt-5.4"})
 	var ownerID int64
 	require.NoError(t, integrationDB.QueryRowContext(context.Background(), `INSERT INTO accounts
 		(name, platform, type, credentials, extra) VALUES ($1,'openai','oauth','{}',
@@ -53,6 +54,7 @@ func TestCodexStatePostgresNaturalLeasesDurabilityAndCAS(t *testing.T) {
 	record.IssuedAt, record.ExpiresAt = now, now.Add(time.Hour)
 	record.TokenLength, record.CipherBlocks = 292, 10
 	record.Source, record.Shape = "business", "accepted"
+	record.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
 	saved, err := first.SaveCAS(ctx, *record, record.Version)
 	require.NoError(t, err)
 	require.True(t, saved)
@@ -90,6 +92,7 @@ func TestCodexStatePostgresConcurrentCASAndGenerationFence(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	record, err := repo.BeginBusiness(ctx, key, "attempt", now, now.Add(time.Minute))
 	require.NoError(t, err)
+	record.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
 	const writers = 12
 	var wins atomic.Int32
 	var wg sync.WaitGroup
@@ -126,6 +129,7 @@ func TestCodexStatePostgresConcurrentCASAndGenerationFence(t *testing.T) {
 	missing, err := repo.Get(ctx, key)
 	require.NoError(t, err)
 	require.Nil(t, missing)
+	loaded.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
 	saved, err := repo.SaveCAS(ctx, *loaded, loaded.Version)
 	require.NoError(t, err)
 	require.False(t, saved)
@@ -153,6 +157,7 @@ func TestCodexStatePostgresDisableSerializesWithPublication(t *testing.T) {
 	now := time.Now().UTC()
 	record, err := repo.BeginBusiness(ctx, key, "attempt", now, now.Add(time.Minute))
 	require.NoError(t, err)
+	record.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
 	tx, err := integrationDB.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
@@ -214,11 +219,13 @@ func TestCodexStatePostgresScanSelectsOnlyDueCollectors(t *testing.T) {
 		'{codex_turn_state,collector_proxy_id}', '42'::jsonb) WHERE id=$1`, key.OwnerAccountID)
 	require.NoError(t, err)
 	now := time.Now().UTC().Truncate(time.Microsecond)
+	policyRevision := installCodexStateModelPolicyFixture(t, []string{"fresh", "due", "missing", "paused", "cooldown", "natural-inflight"})
 	for _, model := range []string{"fresh", "due", "missing", "paused", "cooldown", "natural-inflight"} {
 		modelKey := key
 		modelKey.Model = model
 		record, err := repo.BeginBusiness(ctx, modelKey, model, now, now.Add(time.Minute))
 		require.NoError(t, err)
+		record.ModelPolicyRevision = policyRevision
 		if model != "natural-inflight" {
 			require.NoError(t, repo.EndBusiness(ctx, modelKey, model))
 		}

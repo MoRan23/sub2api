@@ -143,6 +143,7 @@ func newCodexStatePassthroughHarness(t *testing.T, enabled bool) (*OpenAIGateway
 	repo := &codexStatePassthroughRepository{records: make(map[CodexTurnStateKey]CodexTurnStateRecord)}
 	svc.accountRepo = accounts
 	svc.codexTurnStateService = NewCodexTurnStateService(repo, accounts, codexStatePassthroughEncryptor{}, nil)
+	svc.codexTurnStateService.modelPolicy = newCodexStateTestModelPolicy("gpt-5.5", "gpt-5.4")
 	dialer := &codexStatePassthroughDialer{conn: upstream, request: make(chan http.Header, 1), headers: make(http.Header)}
 	svc.openaiWSPassthroughDialer = dialer
 	return svc, account, accounts, repo, dialer

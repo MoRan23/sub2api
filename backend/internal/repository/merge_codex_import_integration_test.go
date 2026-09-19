@@ -21,6 +21,7 @@ import (
 
 func TestMergeCodexImportRealPostgresRemapsCollectorAndDropsRuntime(t *testing.T) {
 	ctx := context.Background()
+	policyRevision := installCodexStateModelPolicyFixture(t, []string{"gpt-5.4"})
 	client := testEntClient(t)
 	accounts := newAccountRepositoryWithSQL(client, integrationDB, nil)
 	proxies := NewProxyRepository(client, integrationDB)
@@ -60,6 +61,7 @@ func TestMergeCodexImportRealPostgresRemapsCollectorAndDropsRuntime(t *testing.T
 	require.NoError(t, err)
 	state.EncryptedToken, state.Source, state.Shape = "source-encrypted-token-must-not-copy", "business", "accepted"
 	state.IssuedAt, state.ExpiresAt, state.TokenLength, state.CipherBlocks = now, now.Add(time.Hour), 332, 12
+	state.ModelPolicyRevision = policyRevision
 	saved, err := runtime.SaveCAS(ctx, *state, state.Version)
 	require.NoError(t, err)
 	require.True(t, saved)

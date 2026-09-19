@@ -70,9 +70,12 @@ func (s *OpenAIGatewayService) prepareOpenAICodexWSStateFrame(ctx context.Contex
 	}
 	if attempt.Enabled && !s.codexTurnStateService.ValidateCredentialHeaders(ctx, attempt, credentialHeaders) {
 		s.finishOpenAICodexWSState(ctx, attempt, false)
-		final, patchErr := applyOpenAICodexWSStateSnapshot(payload, "", firstGuardedHeaderToken)
-		noteOpenAICodexStatePatch(c, nil, payload, final)
-		return final, nil, patchErr
+		attempt = passiveCodexStateAfterValidationFailure(attempt)
+		if attempt == nil {
+			final, patchErr := applyOpenAICodexWSStateSnapshot(payload, "", firstGuardedHeaderToken)
+			noteOpenAICodexStatePatch(c, nil, payload, final)
+			return final, nil, patchErr
+		}
 	}
 	final, err := applyOpenAICodexWSStateSnapshot(payload, attempt.Snapshot.Token, firstGuardedHeaderToken)
 	if err != nil {

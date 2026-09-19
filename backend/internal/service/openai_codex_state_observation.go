@@ -16,19 +16,24 @@ const codexStateWireObservationKey = "openai_codex_state_wire_observation"
 // CodexTurnStateObservation deliberately contains neither tokens nor fingerprints
 // of tokens. Its outbound length is populated from the actual physical send.
 type CodexTurnStateObservation struct {
-	Enabled              bool       `json:"enabled"`
-	Action               string     `json:"action"`
-	Source               string     `json:"source,omitempty"`
-	Model                string     `json:"model"`
-	OutboundLength       int        `json:"outbound_length"`
-	OutboundHeaderLength int        `json:"outbound_header_length,omitempty"`
-	OutboundBodyLength   int        `json:"outbound_body_length,omitempty"`
-	OutboundCarrier      string     `json:"outbound_carrier,omitempty"`
-	ResponseLength       int        `json:"response_length,omitempty"`
-	ResponseShape        string     `json:"response_shape,omitempty"`
-	ResponseSource       string     `json:"response_source,omitempty"`
-	ExpiresAt            *time.Time `json:"expires_at,omitempty"`
-	RenewalReason        string     `json:"renewal_reason,omitempty"`
+	Enabled                  bool       `json:"enabled"`
+	AccountEnabled           bool       `json:"account_enabled"`
+	MaintenanceReason        string     `json:"maintenance_reason,omitempty"`
+	Action                   string     `json:"action"`
+	Source                   string     `json:"source,omitempty"`
+	Model                    string     `json:"model"`
+	OutboundLength           int        `json:"outbound_length"`
+	OutboundHeaderLength     int        `json:"outbound_header_length,omitempty"`
+	OutboundBodyLength       int        `json:"outbound_body_length,omitempty"`
+	OutboundCarrier          string     `json:"outbound_carrier,omitempty"`
+	ResponseLength           int        `json:"response_length,omitempty"`
+	ResponseShape            string     `json:"response_shape,omitempty"`
+	ResponseSource           string     `json:"response_source,omitempty"`
+	ResponseObservedShape    string     `json:"response_observed_shape,omitempty"`
+	ResponseCipherBlocks     int        `json:"response_cipher_blocks,omitempty"`
+	ResponseValidationReason string     `json:"response_validation_reason,omitempty"`
+	ExpiresAt                *time.Time `json:"expires_at,omitempty"`
+	RenewalReason            string     `json:"renewal_reason,omitempty"`
 }
 
 type codexTurnStateWireObservation struct {
@@ -98,7 +103,7 @@ func noteOpenAICodexStatePatch(c *gin.Context, attempt *CodexTurnStateAttempt, b
 	if attempt == nil {
 		return
 	}
-	observation := &codexTurnStateWireObservation{value: CodexTurnStateObservation{Enabled: attempt.Enabled, Action: "passthrough", Model: attempt.Model}}
+	observation := &codexTurnStateWireObservation{value: CodexTurnStateObservation{Enabled: attempt.Enabled, AccountEnabled: attempt.AccountEnabled, MaintenanceReason: attempt.MaintenanceReason, Action: "passthrough", Model: attempt.Model}}
 	if attempt.Snapshot.Token != "" {
 		observation.value.Action = "injected"
 		observation.value.Source = attempt.Snapshot.Source
@@ -216,6 +221,9 @@ func finishOpenAICodexStateObservation(attempt *CodexTurnStateAttempt) {
 	defer observation.mu.Unlock()
 	observation.value.ResponseLength = safe.TokenLength
 	observation.value.ResponseSource = safe.ResponseSource
+	observation.value.ResponseObservedShape = safe.ObservedShape
+	observation.value.ResponseCipherBlocks = safe.CipherBlocks
+	observation.value.ResponseValidationReason = safe.ValidationReason
 	switch safe.Shape {
 	case CodexTurnStateShapeTarget:
 		observation.value.ResponseShape = "target"

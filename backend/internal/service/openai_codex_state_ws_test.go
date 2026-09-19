@@ -140,6 +140,7 @@ func newCodexWSStateTestGateway(t *testing.T, accountType string) (*OpenAIGatewa
 	accounts := &codexWSStateTestAccounts{account: &copy}
 	repo := &codexWSStateTestRepo{records: make(map[CodexTurnStateKey]CodexTurnStateRecord), active: make(map[string]bool)}
 	service := NewCodexTurnStateService(repo, accounts, codexWSStateTestEncryptor{}, nil)
+	service.modelPolicy = newCodexStateTestModelPolicy("gpt-final", "gpt-other", "gpt-5.1", "gpt-5.5", "gpt-5.4")
 	svc := &OpenAIGatewayService{codexTurnStateService: service, accountRepo: accounts, toolCorrector: NewCodexToolCorrector(), cache: &stubGatewayCache{}}
 	return svc, account, repo, accounts
 }

@@ -183,6 +183,8 @@ export interface FingerprintObservationEntry {
   request_integrity?: RequestIntegrityObservation
   codex_turn_state?: {
     enabled: boolean
+    account_enabled?: boolean
+    maintenance_reason?: string
     action: string
     source?: string
     model: string
@@ -192,6 +194,9 @@ export interface FingerprintObservationEntry {
     outbound_carrier?: 'header' | 'body' | 'header_and_body' | 'ws_handshake' | 'ws_frame' | 'ws_handshake_and_frame'
     response_length?: number
     response_shape?: string
+    response_observed_shape?: 'personal_target' | 'personal_extended' | 'team_business_target' | 'team_business_extended' | 'invalid'
+    response_cipher_blocks?: number
+    response_validation_reason?: string
     response_source?: 'header' | 'metadata'
     expires_at?: string
     renewal_reason?: string

@@ -1378,6 +1378,90 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
+  it("displays default turn-state models without overwriting an omitted server setting", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, enable_openai_codex_fingerprint_normalization: false });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const input = wrapper.get<HTMLTextAreaElement>('[data-testid="codex-turn-state-models-input"]');
+    expect(input.element.value).toBe("gpt-6-astra\ngpt-5.6-sol\ngpt-5.6-terra");
+    expect(input.element.disabled).toBe(false);
+    expect(wrapper.find('[data-testid="codex-turn-state-models-paused"]').exists()).toBe(false);
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    expect(updateSettings.mock.calls[0][0]).not.toHaveProperty("codex_turn_state_models");
+  });
+
+  it("preserves an explicit empty turn-state list through saving and a partial response", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, codex_turn_state_models: [] });
+    updateSettings.mockResolvedValueOnce({ ...baseSettingsResponse });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const input = wrapper.get<HTMLTextAreaElement>('[data-testid="codex-turn-state-models-input"]');
+    expect(input.element.value).toBe("");
+    expect(wrapper.find('[data-testid="codex-turn-state-models-paused"]').exists()).toBe(true);
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ codex_turn_state_models: [] }));
+    expect(input.element.value).toBe("");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ codex_turn_state_models: [] }));
+  });
+
+  it("saves exact turn-state model IDs without prefixes, case folding, or duplicate empty lines", async () => {
+    const models = ["gpt-6-astra", "gpt-5.6-sol"];
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, codex_turn_state_models: models });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const input = wrapper.get<HTMLTextAreaElement>('[data-testid="codex-turn-state-models-input"]');
+    expect(input.element.value).toBe(models.join("\n"));
+    await input.setValue(" gpt-6-astra-v2 \n\nGPT-6-ASTRA\ngpt-6-astra-v2\nprovider/custom:model ");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ codex_turn_state_models: ["gpt-6-astra-v2", "GPT-6-ASTRA", "provider/custom:model"] }));
+    expect(models).toEqual(["gpt-6-astra", "gpt-5.6-sol"]);
+    expect(input.element.value).toBe("gpt-6-astra-v2\nGPT-6-ASTRA\nprovider/custom:model");
+  });
+
+  it("allows explicitly clearing the displayed default turn-state model list", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    await wrapper.get('[data-testid="codex-turn-state-models-input"]').setValue(" \n ");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ codex_turn_state_models: [] }));
+    expect(wrapper.find('[data-testid="codex-turn-state-models-paused"]').exists()).toBe(true);
+  });
+
+  it.each([{ models: null }, { models: "gpt-6-astra" }, { models: ["gpt-6-astra", 42] }])("does not overwrite malformed turn-state model settings $models", async ({ models }) => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, codex_turn_state_models: models });
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings.mock.calls[0][0]).not.toHaveProperty("codex_turn_state_models");
+  });
+
+  it.each([
+    "gpt-*", "gpt-6 astra", "x".repeat(257), Array.from({ length: 65 }, (_, i) => `model-${i}`).join("\n"),
+  ])("rejects invalid turn-state model lists before updating settings", async (models) => {
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    await wrapper.get('[data-testid="codex-turn-state-models-input"]').setValue(models);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenCalledWith("admin.settings.codexTurnStateModels.invalidModels");
+  });
+
   it("defaults integrity observation on independently and preserves an explicit disable after a partial save response", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,

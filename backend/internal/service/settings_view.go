@@ -235,38 +235,39 @@ type SystemSettings struct {
 	BackendModeEnabled bool
 
 	// Gateway forwarding behavior
-	OpenAITTFTMode                               string // Responses first_token_ms 统计口径（默认 semantic）
-	EnableFingerprintUnification                 bool   // 是否统一 OAuth 账号的指纹头（默认 true）
-	EnableMetadataPassthrough                    bool   // 是否透传客户端原始 metadata（默认 false）
-	EnableCCHSigning                             bool   // 已废弃 no-op：新版 CLI 取消 cch 签名后网关不再注入/签名 cch，开关无效果
-	EnableClaudeOAuthSystemPromptInjection       bool   // 是否对 Claude OAuth mimic 路径注入 Claude Code system blocks（默认 true）
-	ClaudeOAuthSystemPrompt                      string // Claude OAuth mimic 路径注入的通用扩展 system prompt；空值使用内置默认
-	ClaudeOAuthSystemPromptBlocks                string // Claude OAuth mimic 路径注入的 system blocks JSON 配置；空值使用内置默认
-	EnableAnthropicCacheTTL1hInjection           bool   // 是否对 Anthropic OAuth/SetupToken 请求体注入 1h cache_control ttl（默认 false）
-	EnableClientDatelineNormalization            bool   // 是否对 Anthropic OAuth/SetupToken 请求体做客户端 dateline 归一化（默认 true）
-	RewriteMessageCacheControl                   bool   // 是否改写 messages[*].content[*].cache_control（默认 false）
-	AntigravityUserAgentVersion                  string // Antigravity 上游 User-Agent 版本号；空值使用配置/默认值
-	OpenAICodexUserAgent                         string // OpenAI Codex 上游完整 User-Agent；空值由 Codex 客户端版本号拼出标准 TUI UA
-	OpenAICodexClientVersion                     string // 出站声明的 Codex 客户端版本号（管理员覆写）；空值跟随自动同步值
-	OpenAICodexClientVersionSynced               string // 自动同步到的官方最新稳定版版本号（只读展示）
-	OpenAICodexVersionAutoSyncEnabled            bool   // 是否启用 Codex 客户端版本号自动同步（默认 true）
-	EnableOpenAICodexFingerprintNormalization    bool   // Codex 指纹归一总开关（默认 true）
-	EnableOpenAICodexInstallationIDNormalization bool   // OAuth installation_id 归一分项（默认 true）
-	EnableOpenAIUUIDv7SessionIdentity            bool   // 是否启用稳定复用的 OpenAI UUIDv7 session/thread 标识对（默认 true）
-	EnableOpenAIOAuthDailySessionRotation        bool   // OAuth 会话根是否按 UTC+8 每日轮换（默认 false）
-	CodexTelemetryEnabled                        bool   // 独立的 Codex 客户端遥测（默认 true，包含模拟行为）
-	OpenAIRequestIntegrityObserveEnabled         bool   // 独立的 OpenAI 请求完整性观察（默认 true，不改变请求）
-	EnableOpenAICodexClientIdentityNormalization bool   // UA/originator/version 归一分项（默认 true）
-	EnableOpenAICodexPATContextManagement        bool   // PAT Codex History/Notes 适配（默认 false）
-	EnableOpenAIRequestTimezoneConversion        bool   // 请求时区及本轮日期转换（默认 true）
-	EnableOpenAIPassthroughTimezoneConversion    bool   // 透传正文时区转换，受请求转换总开关控制（默认 true）
-	EnableOpenAICodexResidencyUS                 bool   // 强制 OpenAI 上游美国地域请求头（默认 true）
-	MinCodexVersion                              string // codex_cli_only 最低 Codex 引擎版本；空=不检查
-	MaxCodexVersion                              string // codex_cli_only 最高 Codex 引擎版本；空=不检查
-	CodexCLIOnlyBlacklist                        string // codex_cli_only 全局黑名单 JSON（[]AllowedClientEntry，OR deny）
-	CodexCLIOnlyWhitelist                        string // codex_cli_only 全局白名单 JSON（[]AllowedClientEntry，AND allow）
-	CodexCLIOnlyAllowAppServerClients            bool   // codex_cli_only App Server 开关：对未列名客户端开闸（默认 false）
-	CodexCLIOnlyEngineFingerprintSignals         string // codex_cli_only 引擎指纹门信号列表 JSON（[]EngineFingerprintSignal）
+	OpenAITTFTMode                               string   // Responses first_token_ms 统计口径（默认 semantic）
+	EnableFingerprintUnification                 bool     // 是否统一 OAuth 账号的指纹头（默认 true）
+	EnableMetadataPassthrough                    bool     // 是否透传客户端原始 metadata（默认 false）
+	EnableCCHSigning                             bool     // 已废弃 no-op：新版 CLI 取消 cch 签名后网关不再注入/签名 cch，开关无效果
+	EnableClaudeOAuthSystemPromptInjection       bool     // 是否对 Claude OAuth mimic 路径注入 Claude Code system blocks（默认 true）
+	ClaudeOAuthSystemPrompt                      string   // Claude OAuth mimic 路径注入的通用扩展 system prompt；空值使用内置默认
+	ClaudeOAuthSystemPromptBlocks                string   // Claude OAuth mimic 路径注入的 system blocks JSON 配置；空值使用内置默认
+	EnableAnthropicCacheTTL1hInjection           bool     // 是否对 Anthropic OAuth/SetupToken 请求体注入 1h cache_control ttl（默认 false）
+	EnableClientDatelineNormalization            bool     // 是否对 Anthropic OAuth/SetupToken 请求体做客户端 dateline 归一化（默认 true）
+	RewriteMessageCacheControl                   bool     // 是否改写 messages[*].content[*].cache_control（默认 false）
+	AntigravityUserAgentVersion                  string   // Antigravity 上游 User-Agent 版本号；空值使用配置/默认值
+	OpenAICodexUserAgent                         string   // OpenAI Codex 上游完整 User-Agent；空值由 Codex 客户端版本号拼出标准 TUI UA
+	OpenAICodexClientVersion                     string   // 出站声明的 Codex 客户端版本号（管理员覆写）；空值跟随自动同步值
+	OpenAICodexClientVersionSynced               string   // 自动同步到的官方最新稳定版版本号（只读展示）
+	OpenAICodexVersionAutoSyncEnabled            bool     // 是否启用 Codex 客户端版本号自动同步（默认 true）
+	EnableOpenAICodexFingerprintNormalization    bool     // Codex 指纹归一总开关（默认 true）
+	EnableOpenAICodexInstallationIDNormalization bool     // OAuth installation_id 归一分项（默认 true）
+	EnableOpenAIUUIDv7SessionIdentity            bool     // 是否启用稳定复用的 OpenAI UUIDv7 session/thread 标识对（默认 true）
+	EnableOpenAIOAuthDailySessionRotation        bool     // OAuth 会话根是否按 UTC+8 每日轮换（默认 false）
+	CodexTelemetryEnabled                        bool     // 独立的 Codex 客户端遥测（默认 true，包含模拟行为）
+	CodexTurnStateModels                         []string // 精确的最终上游模型名单；空数组暂停维护
+	OpenAIRequestIntegrityObserveEnabled         bool     // 独立的 OpenAI 请求完整性观察（默认 true，不改变请求）
+	EnableOpenAICodexClientIdentityNormalization bool     // UA/originator/version 归一分项（默认 true）
+	EnableOpenAICodexPATContextManagement        bool     // PAT Codex History/Notes 适配（默认 false）
+	EnableOpenAIRequestTimezoneConversion        bool     // 请求时区及本轮日期转换（默认 true）
+	EnableOpenAIPassthroughTimezoneConversion    bool     // 透传正文时区转换，受请求转换总开关控制（默认 true）
+	EnableOpenAICodexResidencyUS                 bool     // 强制 OpenAI 上游美国地域请求头（默认 true）
+	MinCodexVersion                              string   // codex_cli_only 最低 Codex 引擎版本；空=不检查
+	MaxCodexVersion                              string   // codex_cli_only 最高 Codex 引擎版本；空=不检查
+	CodexCLIOnlyBlacklist                        string   // codex_cli_only 全局黑名单 JSON（[]AllowedClientEntry，OR deny）
+	CodexCLIOnlyWhitelist                        string   // codex_cli_only 全局白名单 JSON（[]AllowedClientEntry，AND allow）
+	CodexCLIOnlyAllowAppServerClients            bool     // codex_cli_only App Server 开关：对未列名客户端开闸（默认 false）
+	CodexCLIOnlyEngineFingerprintSignals         string   // codex_cli_only 引擎指纹门信号列表 JSON（[]EngineFingerprintSignal）
 
 	// OpenAI 指纹观测（兼容字段）：开启后记录每个 OAuth 请求的出站指纹到进程内环形缓冲；
 	// 默认 false，关闭即停止记录并清空。

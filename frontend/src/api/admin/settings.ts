@@ -420,6 +420,7 @@ export interface SystemSettings {
   enable_openai_uuidv7_session_identity: boolean; // OpenAI UUIDv7 session/thread 标识对
   enable_openai_oauth_daily_session_rotation: boolean;
   codex_telemetry_enabled?: boolean;
+  codex_turn_state_models?: string[];
   openai_request_integrity_observe_enabled?: boolean;
   codex_telemetry_effective_enabled?: boolean;
   codex_telemetry_forced_off_reason?: string;
@@ -784,6 +785,7 @@ export interface UpdateSettingsRequest {
   enable_openai_uuidv7_session_identity?: boolean; // OpenAI UUIDv7 session/thread 标识对
   enable_openai_oauth_daily_session_rotation?: boolean;
   codex_telemetry_enabled?: boolean;
+  codex_turn_state_models?: string[];
   openai_request_integrity_observe_enabled?: boolean;
   enable_openai_codex_pat_context_management?: boolean;
   enable_openai_codex_client_identity_normalization?: boolean;

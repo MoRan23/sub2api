@@ -221,6 +221,7 @@ func newCodexStateTestService(t *testing.T) (*CodexTurnStateService, *codexState
 	a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "test-token", "plan_type": "plus"}, Extra: map[string]any{"codex_turn_state": map[string]any{"enabled": true, "account_type": "personal", "collector_proxy_id": float64(2)}, "codex_turn_state_generation": "gen1"}}
 	repo := newCodexStateMemoryRepo()
 	s := NewCodexTurnStateService(repo, &codexStateTestAccounts{account: a}, codexStateTestEncryptor{}, nil)
+	s.modelPolicy = newCodexStateTestModelPolicy("gpt-5", "gpt-5-mini", "gpt-5.4", "final-model", "other-model")
 	s.now = func() time.Time { return time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC) }
 	return s, repo, a
 }
@@ -414,6 +415,7 @@ func TestCodexTurnStateAccountWideSingleFlightAndPause(t *testing.T) {
 		return CodexTurnStateCollectResult{StatusCode: 401}, nil
 	})
 	other := NewCodexTurnStateService(repo, s.accounts, s.encryptor, s.collector)
+	other.modelPolicy = s.modelPolicy
 	other.now = s.now
 	go func() { defer close(done); s.collect(ctx, first.key) }()
 	<-started

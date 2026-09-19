@@ -25,23 +25,26 @@ type CodexTurnStateKey struct {
 
 // CodexTurnStateRecord contains encrypted state only. Empty timestamps mean unset.
 type CodexTurnStateRecord struct {
-	OwnerAccountID  int64
-	Model           string
-	Generation      string
-	Version         int64
-	EncryptedToken  string
-	IssuedAt        time.Time
-	ExpiresAt       time.Time
-	TokenLength     int
-	CipherBlocks    int
-	Source          string
-	Shape           string
-	RefreshReason   string
-	LastBusinessAt  time.Time
-	LastCollectedAt time.Time
-	NextCollectAt   time.Time
-	CollectorPaused bool
-	LastError       string
+	// A transient publication fence, checked transactionally against settings.
+	// It is never persisted as part of a token record or exposed by JSON APIs.
+	ModelPolicyRevision string `json:"-"`
+	OwnerAccountID      int64
+	Model               string
+	Generation          string
+	Version             int64
+	EncryptedToken      string
+	IssuedAt            time.Time
+	ExpiresAt           time.Time
+	TokenLength         int
+	CipherBlocks        int
+	Source              string
+	Shape               string
+	RefreshReason       string
+	LastBusinessAt      time.Time
+	LastCollectedAt     time.Time
+	NextCollectAt       time.Time
+	CollectorPaused     bool
+	LastError           string
 }
 
 func (r CodexTurnStateRecord) Key() CodexTurnStateKey {
@@ -82,25 +85,31 @@ type CodexTurnStateAttempt struct {
 	Generation     string
 	// Enabled=false is a passive fingerprint observation: no runtime lease,
 	// cached snapshot, retained response candidates, publication or collection.
-	Enabled         bool
-	Snapshot        CodexTurnStateSnapshot
-	key             CodexTurnStateKey
-	id              string
-	accountType     string
-	baseVersion     int64
-	mu              sync.Mutex
-	candidates      []string
-	finished        bool
-	wireObservation *codexTurnStateWireObservation
-	safeObservation CodexTurnStateSafeObservation
+	Enabled           bool
+	AccountEnabled    bool
+	MaintenanceReason string
+	policyRevision    string
+	validationReason  string
+	Snapshot          CodexTurnStateSnapshot
+	key               CodexTurnStateKey
+	id                string
+	accountType       string
+	baseVersion       int64
+	mu                sync.Mutex
+	candidates        []string
+	finished          bool
+	wireObservation   *codexTurnStateWireObservation
+	safeObservation   CodexTurnStateSafeObservation
 }
 
 type CodexTurnStateSafeObservation struct {
-	TokenLength    int
-	CipherBlocks   int
-	Shape          string
-	ResponseSource string
-	RefreshReason  string
+	TokenLength      int
+	CipherBlocks     int
+	Shape            string
+	ResponseSource   string
+	ObservedShape    string
+	ValidationReason string
+	RefreshReason    string
 }
 
 func (a *CodexTurnStateAttempt) SafeObservation() CodexTurnStateSafeObservation {
@@ -116,6 +125,9 @@ type CodexTurnStateCollectRequest struct {
 	Account *Account
 	Model   string
 	ProxyID int64
+	// Created only by the maintenance service; callers cannot grant trust with
+	// a wire header. The native adapter invokes it at the final send boundary.
+	validateModelPolicy func(context.Context) bool
 }
 
 type CodexTurnStateCollectResult struct {
@@ -135,6 +147,7 @@ type CodexTurnStateCollectorHTTPDo func(context.Context, CodexTurnStateCollectRe
 
 type CodexTurnStateModelStatus struct {
 	Model            string     `json:"model"`
+	ModelAllowed     bool       `json:"model_allowed"`
 	State            string     `json:"state"`
 	Shape            string     `json:"shape"`
 	Source           string     `json:"source"`

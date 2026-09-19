@@ -236,3 +236,129 @@ func TestCodexStatePassiveObservationSendErrorDoesNotInventResponse(t *testing.T
 	require.Empty(t, observation.ResponseShape)
 	require.Empty(t, observation.ResponseSource)
 }
+
+func TestCodexStatePassiveBusinessEnvelopeObservationWithoutAccountInference(t *testing.T) {
+	for _, tc := range []struct {
+		blocks   int
+		observed string
+	}{
+		{12, "team_business_target"},
+		{13, "team_business_extended"},
+	} {
+		t.Run(tc.observed, func(t *testing.T) {
+			enableCodexStatePassiveObservation(t)
+			state, repo, account := newCodexStateTestService(t)
+			account.Extra[CodexTurnStateExtraKey] = map[string]any{"enabled": false, "account_type": "auto"}
+			account.Credentials["plan_type"] = "unrecognized-subscription"
+			gateway := &OpenAIGatewayService{codexTurnStateService: state}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			request := gateway.prepareOpenAICodexStateHTTPRequest(c, account, codexStateHTTPRequest(t, `{"model":"gpt-5"}`))
+			token := codexStateTestToken(tc.blocks, state.now())
+			response := &http.Response{StatusCode: 200, Header: http.Header{"X-Codex-Turn-State": {token}}, Body: io.NopCloser(strings.NewReader(""))}
+			observeCodexTurnStateHTTPResponse(request, response, nil)
+			beginCodexTurnStateHTTPParsing(response)
+			markCodexTurnStateHTTPDelivered(response)
+			completeCodexTurnStateHTTPResponse(response, nil)
+			require.NoError(t, response.Body.Close())
+			observation := codexStateWireObservation(c).value
+			require.Equal(t, tc.observed, observation.ResponseObservedShape)
+			require.Equal(t, tc.blocks, observation.ResponseCipherBlocks)
+			require.Equal(t, len(token), observation.ResponseLength)
+			require.Equal(t, "account_type_unknown", observation.ResponseValidationReason)
+			require.Equal(t, "unknown", observation.ResponseShape, "observed envelope shape does not infer the account's cache admission")
+			require.Empty(t, observation.RenewalReason)
+			require.Empty(t, CodexTurnStateAccountTypeForAccount(account))
+			require.Empty(t, repo.records)
+			require.Empty(t, state.queue)
+			encoded, err := json.Marshal(observation)
+			require.NoError(t, err)
+			require.NotContains(t, string(encoded), token)
+		})
+	}
+}
+
+type codexStatePolicyChangeOnDecrypt struct {
+	SecretEncryptor
+	change func()
+}
+
+func (e codexStatePolicyChangeOnDecrypt) Decrypt(token string) (string, error) {
+	value, err := e.SecretEncryptor.Decrypt(token)
+	e.change()
+	return value, err
+}
+
+func TestCodexStatePolicyChangeBeforeFreezeFallsBackToPassiveGuardedCarriers(t *testing.T) {
+	for _, transport := range []string{"http", "ws"} {
+		for _, change := range []string{"remove", "replace_revision"} {
+			t.Run(transport+"/"+change, func(t *testing.T) {
+				enableCodexStatePassiveObservation(t)
+				state, repo, account := newCodexStateTestService(t)
+				policy := newCodexStateTestModelPolicy("gpt-5")
+				state.modelPolicy = policy
+				seed, err := state.Prepare(context.Background(), account, "gpt-5")
+				require.NoError(t, err)
+				token := codexStateTestToken(10, state.now())
+				state.Observe(seed, token)
+				require.NoError(t, state.Finish(context.Background(), seed, true))
+				before, err := repo.Get(context.Background(), seed.key)
+				require.NoError(t, err)
+				state.encryptor = codexStatePolicyChangeOnDecrypt{SecretEncryptor: state.encryptor, change: func() {
+					if change == "remove" {
+						policy.set()
+					} else {
+						policy.set("gpt-5")
+					}
+				}}
+				gateway := &OpenAIGatewayService{codexTurnStateService: state}
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				body := []byte(`{"type":"response.create","model":"gpt-5","client_metadata":{"x-codex-turn-state":"guarded-client"}}`)
+				var actual []byte
+				var headers http.Header
+				if transport == "http" {
+					request := codexStateHTTPRequest(t, string(body))
+					request.Header.Set(openAICodexTurnStateHeader, "guarded-header")
+					request = gateway.prepareOpenAICodexStateHTTPRequest(c, account, request)
+					actual, err = io.ReadAll(request.Body)
+					require.NoError(t, err)
+					headers = request.Header
+					require.Equal(t, "guarded-header", headers.Get(openAICodexTurnStateHeader))
+					response := &http.Response{StatusCode: 200, Header: http.Header{"X-Codex-Turn-State": {token}}, Body: io.NopCloser(strings.NewReader(""))}
+					observeCodexTurnStateHTTPResponse(request, response, nil)
+					beginCodexTurnStateHTTPParsing(response)
+					markCodexTurnStateHTTPDelivered(response)
+					completeCodexTurnStateHTTPResponse(response, nil)
+					require.NoError(t, response.Body.Close())
+				} else {
+					var attempt *CodexTurnStateAttempt
+					actual, attempt, err = gateway.prepareOpenAICodexWSStateFrame(context.Background(), c, account, body, "guarded-handshake", codexWSStateTestHeaders(account))
+					require.NoError(t, err)
+					require.NotNil(t, attempt)
+					require.False(t, attempt.Enabled)
+					gateway.observeOpenAICodexWSStateHeaders(attempt, http.Header{"X-Codex-Turn-State": {token}})
+					gateway.finishOpenAICodexWSState(context.Background(), attempt, true)
+				}
+				require.Equal(t, body, actual, "only source-guarded original carriers may survive the policy change")
+				entry := FingerprintObservationEntry{}
+				populateCodexTurnStateObservation(c, &entry, headers, actual, transport == "ws")
+				require.NotNil(t, entry.CodexTurnState)
+				require.False(t, entry.CodexTurnState.Enabled)
+				require.True(t, entry.CodexTurnState.AccountEnabled)
+				require.Equal(t, "client", entry.CodexTurnState.Source)
+				require.Equal(t, "passthrough", entry.CodexTurnState.Action)
+				wantReason := "model_excluded"
+				if change == "replace_revision" {
+					wantReason = "model_policy_changed"
+				}
+				require.Equal(t, wantReason, entry.CodexTurnState.MaintenanceReason)
+				require.Equal(t, 292, entry.CodexTurnState.ResponseLength)
+				after, err := repo.Get(context.Background(), seed.key)
+				require.NoError(t, err)
+				require.Equal(t, before.Version, after.Version)
+				require.Equal(t, before.EncryptedToken, after.EncryptedToken)
+				require.Empty(t, state.business)
+				require.Empty(t, state.queue)
+			})
+		}
+	}
+}

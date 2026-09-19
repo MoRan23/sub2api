@@ -272,7 +272,7 @@ func TestPluginTurnStateMergeCollectorStaysOnBuiltinExplicitProxy(t *testing.T) 
 	gateway := &OpenAIGatewayService{pluginManager: manager, httpUpstream: upstream, accountRepo: accounts}
 	do := ProvideCodexTurnStateCollectorHTTPDo(gateway.accountRepo, codexCollectorTransportProxies{proxy: proxy}, gateway.httpUpstream)
 	collector := NewCodexTurnStateHTTPCollector(do)
-	result, err := collector.Collect(context.Background(), CodexTurnStateCollectRequest{Account: account, Model: "gpt-5.4", ProxyID: proxy.ID})
+	result, err := collector.Collect(context.Background(), CodexTurnStateCollectRequest{Account: account, Model: "gpt-5.4", ProxyID: proxy.ID, validateModelPolicy: allowCodexCollectorTestModelPolicy})
 	require.NoError(t, err)
 	require.Contains(t, result.Tokens, token)
 	require.Zero(t, client.calls.Load(), "collector bypasses all business plugins even for an actively bound account")

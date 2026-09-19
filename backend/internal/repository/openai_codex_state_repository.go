@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -58,6 +59,45 @@ func lockCodexStateGeneration(ctx context.Context, tx *sql.Tx, key service.Codex
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// The revision row is the policy's publication barrier. Settings saves update
+// the model list and revision in one statement, which cannot commit while this
+// shared lock is held. Acquire it before the account lock everywhere: settings
+// writes never need account locks, and absent default settings need a real row
+// so their first explicit update is fenced too.
+func lockCodexStateModelPolicy(ctx context.Context, tx *sql.Tx, record service.CodexTurnStateRecord) (bool, error) {
+	if record.ModelPolicyRevision == "" {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO settings (key, value, updated_at)
+		VALUES ($1, '', NOW()) ON CONFLICT (key) DO NOTHING`, service.SettingKeyCodexTurnStateModelsRevision); err != nil {
+		return false, err
+	}
+	var lockedRevision string
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1 FOR SHARE`,
+		service.SettingKeyCodexTurnStateModelsRevision).Scan(&lockedRevision); err != nil {
+		return false, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT key, value FROM settings WHERE key IN ($1,$2)`,
+		service.SettingKeyCodexTurnStateModels, service.SettingKeyCodexTurnStateModelsRevision)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	values := make(map[string]string, 2)
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return false, err
+		}
+		values[key] = value
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	models, revision, err := service.ParseCodexTurnStateModelPolicyValues(values)
+	return err == nil && revision == record.ModelPolicyRevision && slices.Contains(models, record.Model), err
 }
 
 func (r *openAICodexStateRepository) BeginBusiness(ctx context.Context, key service.CodexTurnStateKey, attemptID string, now, leaseUntil time.Time) (*service.CodexTurnStateRecord, error) {
@@ -169,11 +209,17 @@ func (r *openAICodexStateRepository) SaveCAS(ctx context.Context, record service
 	if expectedVersion < 1 {
 		return false, errors.New("invalid Codex turn-state version")
 	}
-	tx, err := r.db.BeginTx(ctx, nil)
+	// A snapshot taken after waiting for the policy lock must see the previous
+	// writer's committed pair, regardless of the database's default isolation.
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	policyLive, err := lockCodexStateModelPolicy(ctx, tx, record)
+	if err != nil || !policyLive {
+		return false, err
+	}
 	live, err := lockCodexStateGeneration(ctx, tx, record.Key())
 	if err != nil || !live {
 		return false, err
