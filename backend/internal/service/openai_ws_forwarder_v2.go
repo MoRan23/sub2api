@@ -412,7 +412,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	defer func() { s.finishOpenAICodexWSState(ctx, codexStateAttempt, codexStateDelivered) }()
 	// Consume the physical handshake even on a storage miss: a later model on
 	// this socket must never inherit an unclaimed first-frame candidate.
-	s.observeOpenAICodexWSStateHeaders(codexStateAttempt, lease.ClaimCodexStateHandshakeHeaders())
+	stateHandshakeHeaders, stateHandshakeLength := lease.ClaimCodexStateHandshakeObservation()
+	s.observeOpenAICodexWSStateHeaders(codexStateAttempt, stateHandshakeHeaders)
+	observeCodexTurnStateWSHandshakeLength(codexStateAttempt, stateHandshakeLength)
 	recordFrameObservation := s.freezeFingerprintObservationWSFrame(c, account, timezoneState, observationBody, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &outboundIdentityPlan))
 	recordOpenAICodexGuardianSourceThread(outboundIdentityPlan, nil, observationBody)
 	telemetry := s.beginCodexTelemetryWS(ctx, account, lease.FingerprintObservationHeaders(), wsHeaders, observationBody)

@@ -47,6 +47,7 @@ export default {
         status: { success: '地域已确认', failed: '地域查询失败', unknown: '地域未检测' },
         details: '检测详情', ip: '出口 IP', source: '地域查询方式', sourceValue: '按出口 IP 查询',
         notCollected: '未采集', checkedAt: '地域检测时间', reason: '原因', reasonUnknown: '地域查询未完成',
+        persistenceHint: '新增代理或已有代理缺少地域时，后台自动补齐。成功结果持久保存，手动测试时重新获取；代理连接配置或已知出口变化时重新检测。',
         failedHint: '连接状态与地域查询分别判断。仍显示的地域是后端保留的历史结果，请结合检测时间判断；新的出口 IP 不沿用旧地域。',
         reasons: {
           probe_failed: '出口探测失败', not_checked: '尚无有效地域检测结果', last_good_expired: '之前的有效地域已过期', invalid_checked_at: '地域检测时间无效',

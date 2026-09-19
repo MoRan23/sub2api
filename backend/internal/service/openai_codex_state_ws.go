@@ -68,7 +68,7 @@ func (s *OpenAIGatewayService) prepareOpenAICodexWSStateFrame(ctx context.Contex
 		noteOpenAICodexStatePatch(c, nil, payload, final)
 		return final, nil, patchErr
 	}
-	if !s.codexTurnStateService.ValidateCredentialHeaders(ctx, attempt, credentialHeaders) {
+	if attempt.Enabled && !s.codexTurnStateService.ValidateCredentialHeaders(ctx, attempt, credentialHeaders) {
 		s.finishOpenAICodexWSState(ctx, attempt, false)
 		final, patchErr := applyOpenAICodexWSStateSnapshot(payload, "", firstGuardedHeaderToken)
 		noteOpenAICodexStatePatch(c, nil, payload, final)
@@ -102,6 +102,13 @@ func openAIWSCodexStateCredentialHeaders(conn openAIWSClientConn, fallback http.
 		return source.CodexStateCredentialHeaders()
 	}
 	return cloneOpenAICodexWSCredentialHeaders(fallback)
+}
+
+func openAIWSCodexStateOutboundHeaderLength(conn openAIWSClientConn, fallback http.Header) int {
+	if source, ok := conn.(interface{ CodexStateOutboundHeaderLength() int }); ok {
+		return source.CodexStateOutboundHeaderLength()
+	}
+	return codexTurnStateHeaderLength(fallback)
 }
 
 func applyOpenAICodexWSStateSnapshot(payload []byte, cachedToken, firstGuardedHeaderToken string) ([]byte, error) {

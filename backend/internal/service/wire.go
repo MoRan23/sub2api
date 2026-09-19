@@ -312,6 +312,12 @@ func ProvideOpenAIGatewayService(
 	return svc
 }
 
+func ProvideOpenAIEgressLocationService(prober ProxyExitInfoProber, cache ProxyLatencyCache) *OpenAIEgressLocationService {
+	svc := NewOpenAIEgressLocationService(prober)
+	svc.SetProxyLatencyCache(cache)
+	return svc
+}
+
 // ProvideAdminService shares the gateway's egress cache with explicit proxy tests.
 // Keep the base constructor unchanged for integrations that do not run workers.
 func ProvideAdminService(
@@ -333,7 +339,9 @@ func ProvideAdminService(
 		proxyProber, proxyLatencyCache, authCacheInvalidator, entClient, settingService,
 		defaultSubAssigner, userSubRepo, privacyClientFactory, runtimeBlocker,
 		affiliateService, compositeRouteRepo, compositeResolver, channelCacheInvalidators...)
-	svc.(*adminServiceImpl).egressLocationService = egressLocation
+	impl := svc.(*adminServiceImpl)
+	impl.egressLocationService = egressLocation
+	impl.proxyGeoStop = impl.startProxyGeoBackfill()
 	return svc
 }
 
@@ -970,7 +978,7 @@ var ProviderSet = wire.NewSet(
 	ProvideBillingCacheService,
 	NewAnnouncementService,
 	ProvideAdminService,
-	NewOpenAIEgressLocationService,
+	ProvideOpenAIEgressLocationService,
 	NewGatewayService,
 	ProvideOpenAIGatewayService,
 	ProvideCodexTurnStateCollectorHTTPDo,

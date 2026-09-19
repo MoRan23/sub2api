@@ -25,6 +25,7 @@
           <dd class="break-words text-amber-700 dark:text-amber-400">{{ reason }}</dd>
         </div>
       </dl>
+      <p v-if="open" class="mt-2 break-words text-gray-500 dark:text-gray-400">{{ t(`${prefix}.persistenceHint`) }}</p>
       <p v-if="open && geo.geo_status === 'failed'" class="mt-2 break-words text-gray-500 dark:text-gray-400">{{ t(`${prefix}.failedHint`) }}</p>
     </details>
   </div>

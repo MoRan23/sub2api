@@ -1129,6 +1129,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if firstCodexStateFrame {
 					if gjson.GetBytes(projected, "generate").Type != gjson.False {
 						s.observeOpenAICodexWSStateHeaders(stateAttempt, handshakeHeaders)
+						observeCodexTurnStateWSHandshakeLength(stateAttempt, openAIWSCodexStateOutboundHeaderLength(upstreamConn, headers))
 					}
 					firstCodexStateFrame = false
 				}

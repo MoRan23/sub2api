@@ -77,9 +77,11 @@ type CodexTurnStateSnapshot struct {
 // Public identity and Snapshot fields are frozen by Prepare. Callers must not
 // modify them. Response candidates are private and synchronized for WS readers.
 type CodexTurnStateAttempt struct {
-	OwnerAccountID  int64
-	Model           string
-	Generation      string
+	OwnerAccountID int64
+	Model          string
+	Generation     string
+	// Enabled=false is a passive fingerprint observation: no runtime lease,
+	// cached snapshot, retained response candidates, publication or collection.
 	Enabled         bool
 	Snapshot        CodexTurnStateSnapshot
 	key             CodexTurnStateKey
@@ -94,10 +96,11 @@ type CodexTurnStateAttempt struct {
 }
 
 type CodexTurnStateSafeObservation struct {
-	TokenLength   int
-	CipherBlocks  int
-	Shape         string
-	RefreshReason string
+	TokenLength    int
+	CipherBlocks   int
+	Shape          string
+	ResponseSource string
+	RefreshReason  string
 }
 
 func (a *CodexTurnStateAttempt) SafeObservation() CodexTurnStateSafeObservation {

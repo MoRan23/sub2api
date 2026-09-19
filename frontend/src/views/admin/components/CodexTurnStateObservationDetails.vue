@@ -23,10 +23,17 @@ function label(group: string, value?: string) {
 }
 const items = computed(() => [
   { label: t(`${prefix}.model`), value: props.state.model },
+  { label: t(`${prefix}.cacheMode`), value: t(`${prefix}.${props.state.enabled ? 'cacheEnabled' : 'observationOnly'}`) },
   { label: t(`${prefix}.action`), value: label('actions', props.state.action) },
   { label: t(`${prefix}.source`), value: label('sources', props.state.source) },
   { label: t(`${prefix}.length`), value: props.state.outbound_length },
+  ...(props.state.outbound_carrier ? [
+    { label: t(`${prefix}.carrier`), value: label('carriers', props.state.outbound_carrier) },
+    { label: t(`${prefix}.headerLength`), value: props.state.outbound_header_length ?? 0 },
+    { label: t(`${prefix}.bodyLength`), value: props.state.outbound_body_length ?? 0 }
+  ] : []),
   { label: t(`${prefix}.shape`), value: `${label('shapes', props.state.response_shape)}${props.state.response_length ? ` (${props.state.response_length})` : ''}` },
+  { label: t(`${prefix}.responseSource`), value: label('sources', props.state.response_source ? `response_${props.state.response_source}` : undefined) },
   { label: t(`${prefix}.expiresAt`), value: props.state.expires_at ? new Date(props.state.expires_at).toLocaleString() : '—' },
   { label: t(`${prefix}.refreshReason`), value: label('reasons', props.state.renewal_reason) }
 ])

@@ -32,7 +32,7 @@ describe('applyProxyProbeResult', () => {
     expect(target).toMatchObject({ city: 'Tokyo', timezone: 'Asia/Tokyo', geo_status: 'failed', geo_checked_at: '2026-09-18T00:00:00Z' })
   })
 
-  it('clears an expired snapshot even when the exit IP has not changed', () => {
+  it('applies an authoritative manual result that clears previous location fields', () => {
     const target = proxy()
     applyProxyProbeResult(target, { success: true, ip_address: target.ip_address, geo_status: 'failed', geo_reason: 'timeout' })
     expect(target.city).toBeUndefined()

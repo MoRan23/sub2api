@@ -1154,7 +1154,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		payload, codexStateAttempt = preparedStatePayload, stateAttempt
 		payloadBytes = len(payload)
-		s.observeOpenAICodexWSStateHeaders(codexStateAttempt, lease.ClaimCodexStateHandshakeHeaders())
+		stateHandshakeHeaders, stateHandshakeLength := lease.ClaimCodexStateHandshakeObservation()
+		s.observeOpenAICodexWSStateHeaders(codexStateAttempt, stateHandshakeHeaders)
+		observeCodexTurnStateWSHandshakeLength(codexStateAttempt, stateHandshakeLength)
 		timezoneState, _ := RequestTimezoneStateFromContext(c)
 		recordFrameObservation := s.freezeFingerprintObservationWSFrame(c, account, timezoneState, payload, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &pinnedIdentityPlan))
 		recordOpenAICodexGuardianSourceThread(pinnedIdentityPlan, nil, payload)

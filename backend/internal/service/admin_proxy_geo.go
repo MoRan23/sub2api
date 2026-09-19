@@ -7,6 +7,12 @@ func proxyEgressRoute(proxy *Proxy) OpenAIEgressRoute {
 }
 
 func proxyGeoRouteKey(proxy *Proxy) string {
+	return ProxyGeoRouteKey(proxy)
+}
+
+// ProxyGeoRouteKey binds a saved observation to the complete configured route.
+// It contains no recoverable proxy credentials.
+func ProxyGeoRouteKey(proxy *Proxy) string {
 	return openAIEgressRouteKey(proxyEgressRoute(proxy), "")
 }
 
@@ -21,7 +27,7 @@ func (s *adminServiceImpl) observeProxyExit(proxy *Proxy, info *ProxyExitInfo, e
 			copy.GeoCheckedAt = startedAt
 			info = &copy
 		}
-		s.egressLocationService.ObserveResult(proxyEgressRoute(proxy), info, err)
+		s.egressLocationService.ObserveResultAt(proxyEgressRoute(proxy), info, err, startedAt)
 	}
 }
 
@@ -57,10 +63,10 @@ func copyProxyExitGeo(info *ProxyLatencyInfo, exit *ProxyExitInfo) {
 func usableProxyGeo(info *ProxyLatencyInfo, now time.Time) bool {
 	return info != nil && info.IPAddress != "" && info.Country != "" && info.CountryCode != "" && info.Region != "" &&
 		info.City != "" && info.Timezone != "" && info.GeoCheckedAt != nil &&
-		!info.GeoCheckedAt.After(now) && now.Sub(*info.GeoCheckedAt) < openAIEgressLocationMaxAge
+		!info.GeoCheckedAt.After(now)
 }
 
-// Preserve a recent success only for the same configured route and same known
+// Preserve a successful lookup only for the same configured route and same known
 // exit. In particular, a new IP with failed geolocation cannot inherit old geo.
 func mergeProxyGeo(info, existing *ProxyLatencyInfo, now time.Time) {
 	if existing == nil || info.RouteKey == "" || info.RouteKey != existing.RouteKey {
@@ -91,10 +97,6 @@ func expireProxyGeo(info *ProxyLatencyInfo, now time.Time) {
 		return
 	}
 	info.Country, info.CountryCode, info.Region, info.City, info.Timezone = "", "", "", "", ""
-	if info.GeoCheckedAt != nil && !info.GeoCheckedAt.After(now) && now.Sub(*info.GeoCheckedAt) >= openAIEgressLocationMaxAge {
-		info.GeoStatus, info.GeoReason = "failed", "last_good_expired"
-		return
-	}
 	// A failed fresh lookup has a useful reason even though it has no complete
 	// location. Expiry must not turn rate limits/network failures into expiry.
 	if info.GeoStatus == "failed" && info.GeoReason != "" {
@@ -106,9 +108,34 @@ func expireProxyGeo(info *ProxyLatencyInfo, now time.Time) {
 		info.GeoReason = "not_checked"
 	case info.GeoCheckedAt.After(now):
 		info.GeoReason = "invalid_checked_at"
-	case now.Sub(*info.GeoCheckedAt) >= openAIEgressLocationMaxAge:
-		info.GeoReason = "last_good_expired"
 	}
+}
+
+// MergeProxyLatencySnapshot returns a copy of the newest observation, retaining
+// a complete last good location on a failed lookup only for the same route/IP.
+// Repositories call this under their atomic write lock as well as services.
+func MergeProxyLatencySnapshot(incoming, existing *ProxyLatencyInfo, now time.Time) *ProxyLatencyInfo {
+	if incoming == nil {
+		return nil
+	}
+	merged := *incoming
+	if existing != nil {
+		if existing.RouteKey == merged.RouteKey && existing.GeoResultUnixMs > merged.GeoResultUnixMs {
+			latest := *existing
+			expireProxyGeo(&latest, now)
+			return &latest
+		}
+		mergeProxyGeo(&merged, existing, now)
+		if merged.RouteKey == existing.RouteKey && merged.QualityCheckedAt == nil &&
+			merged.QualityScore == nil && merged.QualityGrade == "" && merged.QualityStatus == "" &&
+			merged.QualitySummary == "" && merged.QualityCFRay == "" {
+			merged.QualityStatus, merged.QualityScore = existing.QualityStatus, existing.QualityScore
+			merged.QualityGrade, merged.QualitySummary = existing.QualityGrade, existing.QualitySummary
+			merged.QualityCheckedAt, merged.QualityCFRay = existing.QualityCheckedAt, existing.QualityCFRay
+		}
+	}
+	expireProxyGeo(&merged, now)
+	return &merged
 }
 
 func proxyTestResultFromLatency(info *ProxyLatencyInfo) *ProxyTestResult {

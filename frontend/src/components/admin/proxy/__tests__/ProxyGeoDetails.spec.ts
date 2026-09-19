@@ -52,4 +52,16 @@ describe('ProxyGeoDetails', () => {
     await fireEvent.click(screen.getByText('检测详情'))
     expect(await screen.findByText('查询结果与出口 IP 不匹配')).toBeTruthy()
   })
+
+  it('keeps a saved historical location visible without expiring its timestamp', async () => {
+    show({ country: 'Japan', region: 'Tokyo', city: 'Tokyo', timezone: 'Asia/Tokyo', geo_status: 'success', geo_checked_at: '2020-01-01T00:00:00Z' }, 'zh')
+    expect(screen.getByText('Japan · Tokyo')).toBeTruthy()
+    expect(screen.getByText('Asia/Tokyo')).toBeTruthy()
+    expect(screen.getByText('地域已确认')).toBeTruthy()
+    expect(screen.queryByText(/成功结果持久保存/)).toBeNull()
+    await fireEvent.click(screen.getByText('检测详情'))
+    expect(await screen.findByText(/成功结果持久保存/)).toBeTruthy()
+    expect(screen.getByText(/2020/)).toBeTruthy()
+    expect(screen.queryByText('之前的有效地域已过期')).toBeNull()
+  })
 })

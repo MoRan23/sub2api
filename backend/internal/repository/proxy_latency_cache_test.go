@@ -3,11 +3,13 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -114,4 +116,63 @@ func TestProxyLatencyCacheMalformedRecordAndNil(t *testing.T) {
 	values, err = cache.GetProxyLatencies(ctx, []int64{3})
 	require.NoError(t, err)
 	require.Equal(t, "Berlin", values[3].City)
+}
+
+func TestProxyLatencyCacheDatabaseFailureDoesNotReturnRedisSnapshot(t *testing.T) {
+	cache, server := newProxyLatencyCacheTest(t)
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	cache.db = db
+	legacy, err := json.Marshal(proxyLatencyTestInfo(t, "old-route", 100, "Berlin"))
+	require.NoError(t, err)
+	require.NoError(t, server.Set(proxyLatencyKey(3), string(legacy)))
+	mock.ExpectQuery("SELECT p.id").WillReturnError(errors.New("database unavailable"))
+	values, err := cache.GetProxyLatencies(context.Background(), []int64{3})
+	require.EqualError(t, err, "database unavailable")
+	require.Empty(t, values)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestProxyProbeLeaseExpiryAndOwnerFencing(t *testing.T) {
+	first, server := newProxyLatencyCacheTest(t)
+	second := &proxyLatencyCache{rdb: first.rdb}
+	ctx := context.Background()
+	releaseFirst, acquired, err := first.AcquireProxyProbe(ctx, 7, "route-a", time.Minute)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	_, acquired, err = second.AcquireProxyProbe(ctx, 7, "route-b", time.Minute)
+	require.NoError(t, err)
+	require.False(t, acquired, "a changed route still shares the proxy's probe slot")
+	server.FastForward(time.Minute)
+	releaseSecond, acquired, err := second.AcquireProxyProbe(ctx, 7, "route-b", time.Minute)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	releaseFirst()
+	_, acquired, err = first.AcquireProxyProbe(ctx, 7, "route-b", time.Minute)
+	require.NoError(t, err)
+	require.False(t, acquired, "expired owner cannot release its successor's lock")
+	releaseSecond()
+	releaseLast, acquired, err := first.AcquireProxyProbe(ctx, 7, "route-b", time.Minute)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	releaseLast()
+}
+
+func TestProxyProbeLeaseReleaseAfterCancellationAndUnavailableStore(t *testing.T) {
+	cache, _ := newProxyLatencyCacheTest(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	release, acquired, err := cache.AcquireProxyProbe(ctx, 8, "route", time.Minute)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	cancel()
+	release()
+	lastRelease, acquired, err := cache.AcquireProxyProbe(context.Background(), 8, "route", time.Minute)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	lastRelease()
+	missing := &proxyLatencyCache{}
+	_, acquired, err = missing.AcquireProxyProbe(context.Background(), 8, "route", time.Minute)
+	require.Error(t, err)
+	require.False(t, acquired)
 }

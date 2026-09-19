@@ -191,10 +191,17 @@ func (l *openAIWSConnLease) HandshakeHeaders() http.Header {
 // ClaimCodexStateHandshakeHeaders binds a handshake response candidate to just
 // the first business frame on this physical socket, even after pool reuse.
 func (l *openAIWSConnLease) ClaimCodexStateHandshakeHeaders() http.Header {
+	headers, _ := l.ClaimCodexStateHandshakeObservation()
+	return headers
+}
+
+// Claim both halves together so a pooled connection's outbound handshake length
+// and response candidate can only be attributed to its first business frame.
+func (l *openAIWSConnLease) ClaimCodexStateHandshakeObservation() (http.Header, int) {
 	if l == nil || l.conn == nil || !l.conn.codexStateHandshakeClaimed.CompareAndSwap(false, true) {
-		return nil
+		return nil, 0
 	}
-	return l.HandshakeHeaders()
+	return l.HandshakeHeaders(), l.conn.codexStateOutboundHeaderLength
 }
 
 func (l *openAIWSConnLease) CodexStateCredentialHeaders() http.Header {
@@ -327,15 +334,16 @@ type openAIWSConn struct {
 	id string
 	ws openAIWSClientConn
 
-	handshakeHeaders            http.Header
-	observationHeaders          http.Header
-	codexStateCredentialHeaders http.Header
-	handshakeObserverInstalled  bool
-	codexStateHandshakeClaimed  atomic.Bool
-	handshakeCompatibility      openAIWSHandshakeCompatibilityKey
-	routingAffinity             string
-	turnStateMu                 sync.Mutex
-	turnStateIdentity           string
+	handshakeHeaders               http.Header
+	observationHeaders             http.Header
+	codexStateOutboundHeaderLength int
+	codexStateCredentialHeaders    http.Header
+	handshakeObserverInstalled     bool
+	codexStateHandshakeClaimed     atomic.Bool
+	handshakeCompatibility         openAIWSHandshakeCompatibilityKey
+	routingAffinity                string
+	turnStateMu                    sync.Mutex
+	turnStateIdentity              string
 	// Retained as mirrors for narrow in-package tests and compatibility helpers.
 	// Production matching uses handshakeCompatibility.
 	betaFeatures   string
@@ -2293,6 +2301,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	id := p.nextConnID(req.Account.ID)
 	pooledConn := newOpenAIWSConn(id, req.Account.ID, conn, handshakeHeaders)
 	pooledConn.observationHeaders = openAIWSPhysicalObservationHeaders(conn, headers)
+	pooledConn.codexStateOutboundHeaderLength = openAIWSCodexStateOutboundHeaderLength(conn, headers)
 	pooledConn.codexStateCredentialHeaders = openAIWSCodexStateCredentialHeaders(conn, headers)
 	pooledConn.handshakeObserverInstalled = req.HandshakeObserver != nil
 	if req.HandshakeObserver != nil {

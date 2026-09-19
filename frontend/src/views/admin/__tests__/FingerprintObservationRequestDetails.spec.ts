@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { createI18n } from 'vue-i18n'
 import type { FingerprintObservationEntry, RequestTimezoneScan } from '@/api/admin/fingerprintObservations'
 import en from '@/i18n/locales/en/admin/fingerprintObservation'
+import enAccounts from '@/i18n/locales/en/admin/accounts'
 import FingerprintObservationRequestDetails from '../components/FingerprintObservationRequestDetails.vue'
 
 const legacyEntry: FingerprintObservationEntry = {
@@ -25,7 +26,7 @@ function runtimeMessages(messages: Record<string, unknown>): RuntimeMessages {
 function renderDetails(overrides: Partial<FingerprintObservationEntry> = {}) {
   return render(FingerprintObservationRequestDetails, {
     props: { observation: { ...legacyEntry, ...overrides } },
-    global: { plugins: [createI18n({ legacy: false, locale: 'en-US', messages: { 'en-US': runtimeMessages({ admin: en }) } })] },
+    global: { plugins: [createI18n({ legacy: false, locale: 'en-US', messages: { 'en-US': runtimeMessages({ admin: { ...en, ...enAccounts } }) } })] },
   })
 }
 
@@ -37,6 +38,34 @@ async function openDetails() {
 afterEach(cleanup)
 
 describe('FingerprintObservationRequestDetails', () => {
+  it('shows the received response length as unclassified when the account subscription is unknown', async () => {
+    renderDetails({ codex_turn_state: {
+      enabled: false, action: 'passthrough', model: 'gpt-observed', outbound_length: 0,
+      response_length: 332, response_shape: 'unknown', response_source: 'header',
+    } })
+    await openDetails()
+    const observation = within(screen.getByTestId('codex-turn-state-observation'))
+    expect(observation.getByText('Unclassified shape (332)')).toBeTruthy()
+    expect(observation.getByText('Response header')).toBeTruthy()
+    expect(observation.queryByText('Not observed')).toBeNull()
+    expect(observation.queryByText('Matches target shape (332)')).toBeNull()
+  })
+
+  it('shows passive turn-state request and response observations when the account cache is disabled', async () => {
+    renderDetails({ codex_turn_state: {
+      enabled: false, action: 'passthrough', source: 'client', model: 'gpt-observed',
+      outbound_length: 292, response_length: 332, response_shape: 'target',
+    } })
+    expect(screen.queryByTestId('codex-turn-state-observation')).toBeNull()
+    await openDetails()
+    const observation = within(screen.getByTestId('codex-turn-state-observation'))
+    expect(observation.getByText('Disabled (observation only)')).toBeTruthy()
+    expect(observation.getByText('gpt-observed')).toBeTruthy()
+    expect(observation.getByText('292')).toBeTruthy()
+    expect(observation.getByText('Matches target shape (332)')).toBeTruthy()
+    expect(observation.getByText('Passed through')).toBeTruthy()
+  })
+
   it.each([
     ['Asia/Tokyo', '09/10/2026, 14:30:00 GMT+9'],
     ['America/New_York', '09/10/2026, 01:30:00 EDT'],

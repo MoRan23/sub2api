@@ -47,6 +47,7 @@ export default {
         status: { success: 'Location confirmed', failed: 'Location lookup failed', unknown: 'Location not checked' },
         details: 'Lookup details', ip: 'Exit IP', source: 'Lookup method', sourceValue: 'Lookup by exit IP',
         notCollected: 'Not collected', checkedAt: 'Location checked at', reason: 'Reason', reasonUnknown: 'Location lookup incomplete',
+        persistenceHint: 'New proxies and proxies with missing location data are completed in the background. Successful results are saved until a manual test refreshes them; connection settings or known exit changes require a new lookup.',
         failedHint: 'Connectivity and location lookups have separate results. Any location still shown is a previous result retained by the server; check its timestamp. A new exit IP never inherits an old location.',
         reasons: {
           probe_failed: 'Exit probe failed', not_checked: 'No valid location check yet', last_good_expired: 'Previous valid location expired', invalid_checked_at: 'Invalid location check time',

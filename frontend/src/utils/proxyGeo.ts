@@ -15,7 +15,7 @@ export function applyProxyProbeResult(target: Proxy, result: ProbeResult): void 
   if (result.geo_status !== undefined || result.ip_address) target.ip_address = result.ip_address
 
   // Explicit status makes omitted fields authoritative too: a changed IP or
-  // expired geography must not retain location details from the previous result.
+  // replaced geography must not retain location details from the previous result.
   for (const field of geoFields) {
     if (result.geo_status !== undefined || result[field] !== undefined) {
       Object.assign(target, { [field]: result[field] })

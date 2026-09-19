@@ -88,7 +88,7 @@ func TestAdminProxyGeoMergePreservesOnlyUsableSameExit(t *testing.T) {
 		{name: "legacy no route", ip: "203.0.113.1", alter: func(v *ProxyLatencyInfo) { v.RouteKey = "" }},
 		{name: "legacy no timezone", ip: "203.0.113.1", alter: func(v *ProxyLatencyInfo) { v.Timezone = "" }},
 		{name: "missing country", ip: "203.0.113.1", alter: func(v *ProxyLatencyInfo) { v.Country = "" }},
-		{name: "expired", ip: "203.0.113.1", alter: func(v *ProxyLatencyInfo) { old := now.Add(-24 * time.Hour); v.GeoCheckedAt = &old }},
+		{name: "old success remains usable", ip: "203.0.113.1", alter: func(v *ProxyLatencyInfo) { old := now.AddDate(-2, 0, 0); v.GeoCheckedAt = &old }, preserve: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			old := proxyLatencyFromExit(proxy, adminProxyGeoExit("203.0.113.1", now.Add(-time.Hour)), 10, nil, now.Add(-time.Hour))
@@ -145,7 +145,7 @@ func TestAdminProxyGeoOldResultCannotReplaceWholeSnapshot(t *testing.T) {
 	require.Equal(t, latest, svc.saveProxyLatency(context.Background(), proxy.ID, old))
 }
 
-func TestAdminProxyGeoListDropsLegacyAndExpiredLocation(t *testing.T) {
+func TestAdminProxyGeoListDropsLegacyAndInvalidLocation(t *testing.T) {
 	now := time.Now()
 	for _, tc := range []struct {
 		name   string
@@ -155,7 +155,7 @@ func TestAdminProxyGeoListDropsLegacyAndExpiredLocation(t *testing.T) {
 		{"missing route", func(v *ProxyLatencyInfo) { v.RouteKey = "" }, "not_checked"},
 		{"missing timezone", func(v *ProxyLatencyInfo) { v.Timezone = "" }, "incomplete_location"},
 		{"missing time", func(v *ProxyLatencyInfo) { v.GeoCheckedAt = nil }, "not_checked"},
-		{"expired", func(v *ProxyLatencyInfo) { old := now.Add(-24 * time.Hour); v.GeoCheckedAt = &old }, "last_good_expired"},
+		{"future time", func(v *ProxyLatencyInfo) { future := now.Add(time.Hour); v.GeoCheckedAt = &future }, "invalid_checked_at"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			proxy := adminProxyGeoFixture()
@@ -292,4 +292,48 @@ func TestAdminProxyGeoOldFailureDoesNotSupersedeResolverObservation(t *testing.T
 	require.Equal(t, checked, entry.checkedAt)
 	require.Empty(t, entry.reason)
 	resolver.mu.Unlock()
+}
+
+type adminProxyGeoWinningCache struct {
+	adminProxyGeoCache
+	winner *ProxyLatencyInfo
+}
+
+func (c *adminProxyGeoWinningCache) SetProxyLatency(ctx context.Context, id int64, _ *ProxyLatencyInfo) error {
+	// Simulate another instance committing a newer test between our read/write.
+	// The persistent repository silently rejects this caller's older candidate.
+	return c.adminProxyGeoCache.SetProxyLatency(ctx, id, c.winner)
+}
+
+func TestAdminProxyGeoManualPublishesCommittedWinner(t *testing.T) {
+	proxy := adminProxyGeoFixture()
+	cache := &adminProxyGeoWinningCache{}
+	resolver := NewOpenAIEgressLocationService(nil)
+	defer resolver.Stop()
+	svc := &adminServiceImpl{proxyRepo: &adminProxyGeoRepo{value: proxy}, proxyLatencyCache: cache, egressLocationService: resolver}
+	svc.proxyProber = adminProxyGeoProber(func(context.Context, string) (*ProxyExitInfo, int64, error) {
+		time.Sleep(2 * time.Millisecond)
+		winnerStarted := time.Now()
+		cache.winner = proxyLatencyFromExit(proxy, adminProxyGeoExit("203.0.113.2", winnerStarted), 10, nil, winnerStarted)
+		time.Sleep(2 * time.Millisecond)
+		// The old attempt's geolocation completes later than the newer attempt.
+		return adminProxyGeoExit("203.0.113.1", time.Now()), 100, nil
+	})
+	result, err := svc.TestProxy(context.Background(), proxy.ID)
+	require.NoError(t, err)
+	require.Equal(t, "203.0.113.2", result.IPAddress)
+	location := resolver.Resolve(proxyEgressRoute(proxy))
+	require.Equal(t, "203.0.113.2", location.IPAddress)
+	require.Equal(t, *cache.winner.GeoCheckedAt, location.CheckedAt)
+}
+
+func TestMergeProxyLatencySnapshotNewRouteDoesNotReuseOldClock(t *testing.T) {
+	now := time.Now()
+	proxy := adminProxyGeoFixture()
+	old := proxyLatencyFromExit(proxy, adminProxyGeoExit("203.0.113.1", now), 10, nil, now)
+	changed := *proxy
+	changed.Host = "replacement.proxy.example"
+	current := proxyLatencyFromExit(&changed, adminProxyGeoExit("203.0.113.2", now.Add(-time.Second)), 20, nil, now.Add(-time.Second))
+	merged := MergeProxyLatencySnapshot(current, old, now)
+	require.Equal(t, current, merged)
 }

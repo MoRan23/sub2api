@@ -209,7 +209,7 @@ func TestProxyExportDataSortByAccountCountUsesAccountCountListing(t *testing.T) 
 	require.Equal(t, 0, adminSvc.lastListProxies.calls)
 }
 
-func TestProxyImportDataReusesAndTriggersLatencyProbe(t *testing.T) {
+func TestProxyImportDataReusesWithoutManualRetest(t *testing.T) {
 	router, adminSvc := setupProxyDataRouter()
 
 	adminSvc.proxies = []service.Proxy{
@@ -274,9 +274,9 @@ func TestProxyImportDataReusesAndTriggersLatencyProbe(t *testing.T) {
 	adminSvc.mu.Unlock()
 	require.Contains(t, updatedIDs, int64(1))
 
-	require.Eventually(t, func() bool {
+	require.Never(t, func() bool {
 		adminSvc.mu.Lock()
 		defer adminSvc.mu.Unlock()
-		return len(adminSvc.testedProxyIDs) == 1
-	}, time.Second, 10*time.Millisecond)
+		return len(adminSvc.testedProxyIDs) != 0
+	}, 100*time.Millisecond, 10*time.Millisecond, "imports must preserve saved metadata instead of scheduling manual retests")
 }

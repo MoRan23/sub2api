@@ -39,7 +39,7 @@ func (s *OpenAIGatewayService) prepareOpenAICodexStateHTTPRequest(c *gin.Context
 	if err != nil || attempt == nil {
 		return request
 	}
-	if !s.codexTurnStateService.ValidateCredentialHeaders(request.Context(), attempt, request.Header) {
+	if attempt.Enabled && !s.codexTurnStateService.ValidateCredentialHeaders(request.Context(), attempt, request.Header) {
 		finishCodexTurnStateHTTPAttempt(s.codexTurnStateService, attempt, false)
 		return request
 	}
@@ -104,11 +104,15 @@ func observeCodexTurnStateHTTPResponse(request *http.Request, response *http.Res
 	if collector == nil {
 		return
 	}
+	if sendErr == nil && response != nil {
+		// Error response headers are still real upstream observations, but the
+		// failed status below must never reach cache publication.
+		collector.service.ObserveHeaders(collector.attempt, response.Header)
+	}
 	if sendErr != nil || response == nil || response.StatusCode < 200 || response.StatusCode >= 300 || response.Body == nil {
 		collector.finish(false)
 		return
 	}
-	collector.service.ObserveHeaders(collector.attempt, response.Header)
 	responseRequest := response.Request
 	if responseRequest == nil {
 		responseRequest = request

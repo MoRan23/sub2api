@@ -88,8 +88,9 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 	if err := s.proxyRepo.Create(ctx, proxy); err != nil {
 		return nil, err
 	}
-	// Probe latency asynchronously so creation isn't blocked by network timeout.
-	go s.probeProxyLatency(context.Background(), proxy)
+	// The shared bounded resolver handles new records and startup backfill alike.
+	// It reuses durable successes and never delays creation on network I/O.
+	s.scheduleProxyGeo(proxy)
 	return proxy, nil
 }
 
@@ -155,6 +156,7 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	if err := s.proxyRepo.Update(ctx, proxy); err != nil {
 		return nil, err
 	}
+	s.scheduleProxyGeo(proxy)
 	return proxy, nil
 }
 
@@ -221,8 +223,7 @@ func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (*ProxyTestR
 	proxyURL := proxy.URL()
 	probeStartedAt := time.Now()
 	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxyURL)
-	s.observeProxyExit(proxy, exitInfo, err, probeStartedAt)
-	info := s.saveProxyLatency(ctx, id, proxyLatencyFromExit(proxy, exitInfo, latencyMs, err, probeStartedAt))
+	info := s.saveAndObserveProxyLatency(ctx, proxy, proxyLatencyFromExit(proxy, exitInfo, latencyMs, err, probeStartedAt))
 	return proxyTestResultFromLatency(info), nil
 }
 
@@ -255,7 +256,6 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 	}
 
 	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxyURL)
-	s.observeProxyExit(proxy, exitInfo, err, probeStartedAt)
 	if err != nil {
 		result.Items = append(result.Items, ProxyQualityCheckItem{
 			Target:    "base_connectivity",
@@ -489,7 +489,7 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxy *
 	if exitInfo == nil {
 		info.GeoStatus, info.GeoReason = "failed", "probe_failed"
 	}
-	applyProxyQualityGeo(result, s.saveProxyLatency(ctx, proxy.ID, info))
+	applyProxyQualityGeo(result, s.saveAndObserveProxyLatency(ctx, proxy, info))
 }
 
 func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) {
@@ -498,8 +498,7 @@ func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) 
 	}
 	probeStartedAt := time.Now()
 	exitInfo, latencyMs, err := s.proxyProber.ProbeProxy(ctx, proxy.URL())
-	s.observeProxyExit(proxy, exitInfo, err, probeStartedAt)
-	s.saveProxyLatency(ctx, proxy.ID, proxyLatencyFromExit(proxy, exitInfo, latencyMs, err, probeStartedAt))
+	s.saveAndObserveProxyLatency(ctx, proxy, proxyLatencyFromExit(proxy, exitInfo, latencyMs, err, probeStartedAt))
 }
 
 func (s *adminServiceImpl) attachProxyLatency(ctx context.Context, proxies []ProxyWithAccountCount) {
@@ -558,8 +557,21 @@ func (s *adminServiceImpl) attachProxyLatency(ctx context.Context, proxies []Pro
 }
 
 func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, info *ProxyLatencyInfo) *ProxyLatencyInfo {
+	result, _ := s.persistProxyLatency(ctx, proxyID, info)
+	return result
+}
+
+func (s *adminServiceImpl) saveAndObserveProxyLatency(ctx context.Context, proxy *Proxy, info *ProxyLatencyInfo) *ProxyLatencyInfo {
+	result, committed := s.persistProxyLatency(ctx, proxy.ID, info)
+	if committed && result != nil && result.RouteKey == proxyGeoRouteKey(proxy) && s.egressLocationService != nil {
+		s.egressLocationService.ObserveProxySnapshot(proxyEgressRoute(proxy), result)
+	}
+	return result
+}
+
+func (s *adminServiceImpl) persistProxyLatency(ctx context.Context, proxyID int64, info *ProxyLatencyInfo) (*ProxyLatencyInfo, bool) {
 	if s.proxyLatencyCache == nil || info == nil {
-		return info
+		return info, s.proxyLatencyCache == nil
 	}
 	s.proxySnapshotLockOnce.Do(func() {
 		for i := range s.proxySnapshotLocks {
@@ -571,37 +583,29 @@ func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, 
 	case lock <- struct{}{}:
 		defer func() { <-lock }()
 	case <-ctx.Done():
-		return info
+		return info, false
 	}
 
-	merged := *info
+	var existing *ProxyLatencyInfo
 	if latencies, err := s.proxyLatencyCache.GetProxyLatencies(ctx, []int64{proxyID}); err == nil {
-		if existing := latencies[proxyID]; existing != nil {
-			if existing.GeoResultUnixMs > merged.GeoResultUnixMs {
-				latest := *existing
-				expireProxyGeo(&latest, time.Now())
-				return &latest
-			}
-			mergeProxyGeo(&merged, existing, time.Now())
-			if merged.RouteKey == existing.RouteKey && merged.QualityCheckedAt == nil &&
-				merged.QualityScore == nil &&
-				merged.QualityGrade == "" &&
-				merged.QualityStatus == "" &&
-				merged.QualitySummary == "" &&
-				merged.QualityCFRay == "" {
-				merged.QualityStatus = existing.QualityStatus
-				merged.QualityScore = existing.QualityScore
-				merged.QualityGrade = existing.QualityGrade
-				merged.QualitySummary = existing.QualitySummary
-				merged.QualityCheckedAt = existing.QualityCheckedAt
-				merged.QualityCFRay = existing.QualityCFRay
-			}
-		}
+		existing = latencies[proxyID]
 	}
-	expireProxyGeo(&merged, time.Now())
+	if existing != nil && existing.GeoResultUnixMs > info.GeoResultUnixMs {
+		latest := *existing
+		expireProxyGeo(&latest, time.Now())
+		return &latest, true
+	}
+	merged := MergeProxyLatencySnapshot(info, existing, time.Now())
 
-	if err := s.proxyLatencyCache.SetProxyLatency(ctx, proxyID, &merged); err != nil {
+	if err := s.proxyLatencyCache.SetProxyLatency(ctx, proxyID, merged); err != nil {
 		logger.LegacyPrintf("service.admin", "Warning: store proxy latency cache failed: %v", err)
+		return merged, false
 	}
-	return &merged
+	// A different instance may have committed a newer manual result while this
+	// probe ran. Publish and return the database winner, never a rejected candidate.
+	latencies, err := s.proxyLatencyCache.GetProxyLatencies(ctx, []int64{proxyID})
+	if err != nil || latencies[proxyID] == nil {
+		return merged, false
+	}
+	return latencies[proxyID], true
 }

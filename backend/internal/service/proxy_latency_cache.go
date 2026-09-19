@@ -33,3 +33,9 @@ type ProxyLatencyCache interface {
 	GetProxyLatencies(ctx context.Context, proxyIDs []int64) (map[int64]*ProxyLatencyInfo, error)
 	SetProxyLatency(ctx context.Context, proxyID int64, info *ProxyLatencyInfo) error
 }
+
+// ProxyProbeLeaseCache optionally coordinates automatic probes across replicas.
+// Release must only clear the lease owned by this caller.
+type ProxyProbeLeaseCache interface {
+	AcquireProxyProbe(ctx context.Context, proxyID int64, routeKey string, ttl time.Duration) (release func(), acquired bool, err error)
+}

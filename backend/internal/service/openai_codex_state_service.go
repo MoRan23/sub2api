@@ -111,14 +111,26 @@ func (s *CodexTurnStateService) Enabled(ctx context.Context, account *Account) (
 }
 
 func (s *CodexTurnStateService) Prepare(ctx context.Context, account *Account, finalModel string) (*CodexTurnStateAttempt, error) {
-	if s == nil || account == nil || s.repo == nil || s.encryptor == nil || strings.TrimSpace(finalModel) == "" {
+	if s == nil || account == nil || strings.TrimSpace(finalModel) == "" {
 		return nil, nil
 	}
 	owner, err := s.currentOwner(ctx, account.ID)
 	if err != nil {
 		return nil, err
 	}
-	if !codexTurnStateEligible(owner) || !CodexTurnStateConfigForAccount(owner).Enabled {
+	if !codexTurnStateEligible(owner) {
+		return nil, nil
+	}
+	if !CodexTurnStateConfigForAccount(owner).Enabled {
+		// Observation is independent of cache maintenance. This request-local
+		// attempt has no lease, generation, cached token or collection identity.
+		// It must never enter the runtime store, even when a response is delivered.
+		if IsFingerprintObservationEnabled() {
+			return &CodexTurnStateAttempt{OwnerAccountID: owner.ID, Model: strings.TrimSpace(finalModel), accountType: CodexTurnStateAccountTypeForAccount(owner)}, nil
+		}
+		return nil, nil
+	}
+	if s.repo == nil || s.encryptor == nil {
 		return nil, nil
 	}
 	if !account.IsShadow() {
@@ -210,6 +222,10 @@ func (s *CodexTurnStateService) ValidateCredentialHeaders(ctx context.Context, a
 }
 
 func (s *CodexTurnStateService) Observe(a *CodexTurnStateAttempt, token string) {
+	s.observe(a, token, "")
+}
+
+func (s *CodexTurnStateService) observe(a *CodexTurnStateAttempt, token, source string) {
 	if a == nil || token == "" || len(token) > 4096 {
 		return
 	}
@@ -219,7 +235,7 @@ func (s *CodexTurnStateService) Observe(a *CodexTurnStateAttempt, token string) 
 		return
 	}
 	shape, err := ParseCodexTurnState(token, a.accountType, s.now())
-	a.safeObservation = CodexTurnStateSafeObservation{TokenLength: len(token), CipherBlocks: shape.CipherBlocks, Shape: shape.Shape}
+	a.safeObservation = CodexTurnStateSafeObservation{TokenLength: len(token), CipherBlocks: shape.CipherBlocks, Shape: shape.Shape, ResponseSource: source}
 	if err != nil {
 		a.safeObservation.RefreshReason = "invalid_state"
 		if err.Error() == "expired" {
@@ -228,6 +244,11 @@ func (s *CodexTurnStateService) Observe(a *CodexTurnStateAttempt, token string) 
 		}
 	} else if shape.Shape == CodexTurnStateShapeExtended {
 		a.safeObservation.RefreshReason = "extended_shape"
+	}
+	if !a.Enabled {
+		// Passive observations retain only the safe summary, never token values.
+		a.safeObservation.RefreshReason = ""
+		return
 	}
 	for _, existing := range a.candidates {
 		if existing == token {
@@ -245,7 +266,7 @@ func (s *CodexTurnStateService) ObserveHeaders(a *CodexTurnStateAttempt, headers
 	for key, values := range headers {
 		if strings.EqualFold(key, "x-codex-turn-state") {
 			for _, token := range values {
-				s.Observe(a, token)
+				s.observe(a, token, "header")
 			}
 		}
 	}
@@ -253,7 +274,7 @@ func (s *CodexTurnStateService) ObserveHeaders(a *CodexTurnStateAttempt, headers
 
 func (s *CodexTurnStateService) ObserveEvent(a *CodexTurnStateAttempt, event []byte) {
 	for _, token := range CodexTurnStateTokensFromEvent(event) {
-		s.Observe(a, token)
+		s.observe(a, token, "metadata")
 	}
 }
 
@@ -270,6 +291,9 @@ func (s *CodexTurnStateService) Finish(ctx context.Context, a *CodexTurnStateAtt
 	tokens := append([]string(nil), a.candidates...)
 	a.candidates = nil
 	a.mu.Unlock()
+	if !a.Enabled {
+		return nil
+	}
 	s.mu.Lock()
 	delete(s.business, a.id)
 	s.mu.Unlock()

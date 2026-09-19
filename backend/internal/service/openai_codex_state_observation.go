@@ -3,6 +3,7 @@ package service
 import (
 	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,15 +16,19 @@ const codexStateWireObservationKey = "openai_codex_state_wire_observation"
 // CodexTurnStateObservation deliberately contains neither tokens nor fingerprints
 // of tokens. Its outbound length is populated from the actual physical send.
 type CodexTurnStateObservation struct {
-	Enabled        bool       `json:"enabled"`
-	Action         string     `json:"action"`
-	Source         string     `json:"source,omitempty"`
-	Model          string     `json:"model"`
-	OutboundLength int        `json:"outbound_length"`
-	ResponseLength int        `json:"response_length,omitempty"`
-	ResponseShape  string     `json:"response_shape,omitempty"`
-	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
-	RenewalReason  string     `json:"renewal_reason,omitempty"`
+	Enabled              bool       `json:"enabled"`
+	Action               string     `json:"action"`
+	Source               string     `json:"source,omitempty"`
+	Model                string     `json:"model"`
+	OutboundLength       int        `json:"outbound_length"`
+	OutboundHeaderLength int        `json:"outbound_header_length,omitempty"`
+	OutboundBodyLength   int        `json:"outbound_body_length,omitempty"`
+	OutboundCarrier      string     `json:"outbound_carrier,omitempty"`
+	ResponseLength       int        `json:"response_length,omitempty"`
+	ResponseShape        string     `json:"response_shape,omitempty"`
+	ResponseSource       string     `json:"response_source,omitempty"`
+	ExpiresAt            *time.Time `json:"expires_at,omitempty"`
+	RenewalReason        string     `json:"renewal_reason,omitempty"`
 }
 
 type codexTurnStateWireObservation struct {
@@ -120,21 +125,70 @@ func populateCodexTurnStateObservation(c *gin.Context, entry *FingerprintObserva
 	if observation == nil {
 		return nil
 	}
-	state := ""
-	if frame {
-		state = gjson.GetBytes(body, "client_metadata.x-codex-turn-state").String()
-	} else {
-		state = headers.Get(openAICodexTurnStateHeader)
+	bodyLength := 0
+	if state := gjson.GetBytes(body, "client_metadata.x-codex-turn-state"); state.Type == gjson.String {
+		bodyLength = len(state.String())
 	}
 	observation.mu.Lock()
-	observation.value.OutboundLength = len(state)
-	if observation.value.Action != "injected" && state != "" {
+	headerLength := observation.value.OutboundHeaderLength
+	if !frame {
+		headerLength = codexTurnStateHeaderLength(headers)
+	}
+	observation.value.OutboundHeaderLength = headerLength
+	observation.value.OutboundBodyLength = bodyLength
+	observation.value.OutboundLength = headerLength
+	switch {
+	case headerLength > 0 && bodyLength > 0:
+		observation.value.OutboundCarrier = "header_and_body"
+		if frame {
+			observation.value.OutboundCarrier = "ws_handshake_and_frame"
+		}
+	case headerLength > 0:
+		observation.value.OutboundCarrier = "header"
+		if frame {
+			observation.value.OutboundCarrier = "ws_handshake"
+		}
+	case bodyLength > 0:
+		observation.value.OutboundCarrier = "body"
+		if frame {
+			observation.value.OutboundCarrier = "ws_frame"
+		}
+	}
+	if headerLength == 0 || (frame && bodyLength > 0) {
+		observation.value.OutboundLength = bodyLength
+	}
+	if observation.value.Action != "injected" && observation.value.OutboundLength > 0 {
 		observation.value.Source = "client"
 	}
 	copy := observation.value
 	observation.mu.Unlock()
 	entry.CodexTurnState = &copy
 	return observation
+}
+
+// Compute this directly from physical request headers, before the safe header
+// snapshot discards token values. The retained integer cannot recover a token.
+func codexTurnStateHeaderLength(headers http.Header) int {
+	for name, values := range headers {
+		if strings.EqualFold(name, openAICodexTurnStateHeader) && len(values) > 0 {
+			return len(values[0])
+		}
+	}
+	return 0
+}
+
+func observeCodexTurnStateWSHandshakeLength(attempt *CodexTurnStateAttempt, length int) {
+	if attempt == nil {
+		return
+	}
+	attempt.mu.Lock()
+	observation := attempt.wireObservation
+	attempt.mu.Unlock()
+	if observation != nil {
+		observation.mu.Lock()
+		observation.value.OutboundHeaderLength = length
+		observation.mu.Unlock()
+	}
 }
 
 func bindCodexTurnStateObservationSequence(observation *codexTurnStateWireObservation, seq uint64) {
@@ -161,6 +215,7 @@ func finishOpenAICodexStateObservation(attempt *CodexTurnStateAttempt) {
 	observation.mu.Lock()
 	defer observation.mu.Unlock()
 	observation.value.ResponseLength = safe.TokenLength
+	observation.value.ResponseSource = safe.ResponseSource
 	switch safe.Shape {
 	case CodexTurnStateShapeTarget:
 		observation.value.ResponseShape = "target"

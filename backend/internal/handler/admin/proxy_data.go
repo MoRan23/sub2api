@@ -129,7 +129,6 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 		}
 	}
 
-	latencyProbeIDs := make([]int64, 0, len(req.Data.Proxies))
 	for i := range req.Data.Proxies {
 		item := req.Data.Proxies[i]
 		key := item.ProxyKey
@@ -194,7 +193,6 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 					})
 				}
 			}
-			latencyProbeIDs = append(latencyProbeIDs, existing.ID)
 			continue
 		}
 
@@ -280,14 +278,8 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 		// CreateProxy already triggers a latency probe, avoid double probing here.
 	}
 
-	if len(latencyProbeIDs) > 0 {
-		ids := append([]int64(nil), latencyProbeIDs...)
-		go func() {
-			for _, id := range ids {
-				_, _ = h.adminService.TestProxy(context.Background(), id)
-			}
-		}()
-	}
+	// Existing records retain their saved location. Missing metadata is filled
+	// by the shared bounded maintenance queue; import is not a manual retest.
 
 	response.Success(c, result)
 }

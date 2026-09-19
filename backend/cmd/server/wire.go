@@ -120,6 +120,7 @@ func provideCleanup(
 	codexTelemetry *service.CodexTelemetryService,
 	codexTurnState *service.CodexTurnStateService,
 	egressLocation *service.OpenAIEgressLocationService,
+	adminService service.AdminService,
 	openAIOutboundSessionV1Cleanup *service.OpenAIOutboundSessionV1CleanupWorker,
 	scheduledTestRunner *service.ScheduledTestRunnerService,
 	backupSvc *service.BackupService,
@@ -139,6 +140,9 @@ func provideCleanup(
 		// Redis subscriptions, or the durable runtime database.
 		if codexTurnState != nil {
 			codexTurnState.Stop()
+		}
+		if maintenance, ok := adminService.(interface{ StopProxyGeoBackfill() }); ok {
+			maintenance.StopProxyGeoBackfill()
 		}
 		if egressLocation != nil {
 			egressLocation.Stop()

@@ -727,6 +727,7 @@ type adminServiceImpl struct {
 	proxySnapshotLockOnce sync.Once
 	proxySnapshotLocks    [32]chan struct{}
 	egressLocationService *OpenAIEgressLocationService
+	proxyGeoStop          func()
 	authCacheInvalidator  APIKeyAuthCacheInvalidator
 	entClient             *dbent.Client // 用于开启数据库事务
 	settingService        *SettingService

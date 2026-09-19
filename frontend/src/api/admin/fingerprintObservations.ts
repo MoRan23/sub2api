@@ -187,8 +187,12 @@ export interface FingerprintObservationEntry {
     source?: string
     model: string
     outbound_length: number
+    outbound_header_length?: number
+    outbound_body_length?: number
+    outbound_carrier?: 'header' | 'body' | 'header_and_body' | 'ws_handshake' | 'ws_frame' | 'ws_handshake_and_frame'
     response_length?: number
     response_shape?: string
+    response_source?: 'header' | 'metadata'
     expires_at?: string
     renewal_reason?: string
   }
