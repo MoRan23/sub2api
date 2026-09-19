@@ -4,7 +4,7 @@ export default {
       codexTurnStateModels: {
         title: 'Codex turn-state 生效模型',
         description: '仅对已开启账号缓存且最终上游模型在名单内的请求进行缓存注入、学习与独立采集。名单外的模型仍可在指纹观测页查看 turn-state。',
-        formatHint: '每行填写一个完整模型 ID，区分大小写且精确匹配，不支持前缀或通配符。默认：gpt-6-astra、gpt-5.6-sol、gpt-5.6-terra。留空将暂停所有模型的缓存维护。',
+        formatHint: '每行填写一个完整模型 ID，区分大小写且精确匹配，不支持前缀或通配符。默认：gpt-6-astra、gpt-5.6-sol。留空将暂停所有模型的缓存维护。',
         emptyHint: '当前名单为空，保存后所有模型仅保留观测，不进行缓存维护。',
         invalidModels: '最多填写 64 个模型，每个模型 ID 最多 256 字节，不能包含空白、控制字符或通配符。',
       },

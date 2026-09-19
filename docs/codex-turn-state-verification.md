@@ -1,0 +1,38 @@
+# Codex turn-state 采集与状态展示验证记录
+
+基线：`dev@26d980d46`。本次验证使用仓库声明的 Go 1.27.0、`GOEXPERIMENT=jsonv2`、WSL Ubuntu 24.04，以及隔离的 PostgreSQL 18.1 和 Redis 8.4 测试容器。没有连接收费模型上游或部署应用。
+
+## 验证范围
+
+- 编译全部后端包；运行 service、repository、admin handler、DTO、migrations 中相关 turn-state 回归与竞态测试。
+- 验证 292/312、332/356 封装和时间、自然响应优先、无状态不采集、异常历史凭据隔离及成功交付边界。
+- 验证 10 秒退避、账号级 429/401/403 约束、提前 5 分钟续采、同值不延寿、旧有效缓存保留、真实业务活动窗口。
+- 验证慢采集 CAS、业务抢占、取消通知丢失、状态行锁等待后新租约可见，以及快速 WS 响应在成功写回调前完成的两种交错。
+- 验证缓存开启但指纹关闭，以及维护初始化失败时的 HTTP/Chat/Messages/WS 观测；独立采集观测标明来源且不延长业务活跃时间。
+- PostgreSQL/Redis 集成验证配置行锁、凭据代次、历史消费水位、单飞、代理删除和导入映射；真实 Redis 验证通知载荷、断线重连和订阅取消清理。集成测试设置 `CI=true`，不将跳过算作通过。
+- 前端相关 132 项测试、类型检查、lint、生产构建；浏览器模拟验收 8 项，包括最多五行、无占位、额外观测动态补入、红绿灰、宽屏左右列和窄屏堆叠、五秒刷新保持内容、无重叠请求及关闭取消。
+
+## 可复现命令
+
+后端在 `backend` 目录执行：
+
+```bash
+env -u OPENAI_API_KEY GOEXPERIMENT=jsonv2 go test ./... -run '^$'
+env -u OPENAI_API_KEY GOEXPERIMENT=jsonv2 go test -race \
+  ./internal/service ./internal/repository ./internal/handler/admin ./internal/handler/dto ./migrations \
+  -run 'Codex(State|TurnState)|AccountConfigurationCommit' -count=1
+env -u OPENAI_API_KEY GOEXPERIMENT=jsonv2 go test -tags unit \
+  ./internal/service ./internal/repository ./internal/handler/admin ./internal/handler/dto ./migrations \
+  -run 'Codex(State|TurnState)|AccountConfigurationCommit' -count=1
+```
+
+真实存储测试使用 `go test -tags integration ./internal/repository` 的相关测试；TestMain 创建隔离容器并应用迁移 245/246。完整命令、输出及浏览器截图保存在本地 `.git/task-artifacts/codex-turn-state-demand/` 和 `.git/task-artifacts/codex-turn-state-status-refresh/`。
+
+## 额外发现与基线对照
+
+第一次集成选择式意外扩大到整个账号仓储套件，额外出现两项失败，未将其计为本次相关测试通过：
+
+- `TestAccountRepoSuite/TestEnsureOpenAIInstallationIDSupportsSetupTokenOwnerOnly`：当前树和固定基线均因同一 `chk_accounts_parent_dimension` 约束失败，已确认是原有 fixture 问题。
+- `TestAccountRepoSuite/TestUpdateExtra_SchedulerNeutralSkipsOutboxAndSyncsFreshSnapshot`：组合运行出现 outbox 计数失败；当前树和基线分别单独运行均通过。组合运行问题未归因，未删除或放宽断言。
+
+本记录不宣称后端所有无关测试或全量后端 lint 已通过。模型长度分类只说明可观察封装形态，不验证解密内容或模型质量。

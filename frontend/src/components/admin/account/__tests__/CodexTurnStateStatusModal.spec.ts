@@ -1,6 +1,6 @@
 import { defineComponent } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CodexTurnStateStatus } from '@/api/admin/accounts'
 
 const { getCodexTurnState } = vi.hoisted(() => ({ getCodexTurnState: vi.fn() }))
@@ -13,19 +13,25 @@ const status: CodexTurnStateStatus = {
   account_type: 'auto', resolved_account_type: 'team_business', collector_proxy_id: null,
   expected_length: 332, reason: '',
   models: [{ model: 'gpt-test', state: 'ready', shape: 'target', source: 'business', token_length: 332,
-    cipher_blocks: 12, expires_at: '2026-09-19T12:00:00Z', remaining_seconds: 1000, collector_paused: false }]
+    cipher_blocks: 12, expires_at: '2026-09-19T12:00:00Z', remaining_seconds: 1000, collector_paused: false,
+    cache_available: true, collection_status: 'idle', collection_reason: 'idle' }]
 }
 function render() {
   return mount(CodexTurnStateStatusModal, {
     props: { show: true, account: { id: 2, name: 'Spark' } },
     global: {
-      stubs: { BaseDialog: defineComponent({ template: '<div><slot/><slot name="footer"/></div>' }) }
+      stubs: { BaseDialog: defineComponent({ props: ['width'], template: '<div :data-width="width"><slot/><slot name="footer"/></div>' }) }
     }
   })
 }
 
 describe('Codex turn-state status modal', () => {
-  beforeEach(() => getCodexTurnState.mockReset())
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-19T11:30:00Z'))
+    getCodexTurnState.mockReset()
+  })
+  afterEach(() => vi.useRealTimers())
 
   it('loads sanitized per-model state and displays parent inheritance', async () => {
     getCodexTurnState.mockResolvedValue(status)
@@ -38,6 +44,12 @@ describe('Codex turn-state status modal', () => {
     expect(wrapper.text()).toContain('admin.accounts.codexTurnState.sources.business')
     expect(wrapper.text()).toContain('admin.accounts.codexTurnState.noCollectorProxy')
     expect(getCodexTurnState).toHaveBeenCalledWith(2, expect.any(AbortSignal))
+    expect(wrapper.get('[data-width]').attributes('data-width')).toBe('extra-wide')
+    const columns = wrapper.get('[data-testid="codex-turn-state-status-columns"]')
+    expect(columns.classes()).toContain('grid-cols-1')
+    expect(columns.classes()).toContain('lg:grid-cols-2')
+    expect(columns.element.children[0]?.getAttribute('data-testid')).toBe('codex-turn-state-cache-section')
+    expect(columns.element.children[1]?.getAttribute('data-testid')).toBe('codex-turn-state-observations-section')
     wrapper.unmount()
   })
 
@@ -67,7 +79,7 @@ describe('Codex turn-state status modal', () => {
     getCodexTurnState.mockResolvedValue({ ...status, enabled: false, observation_enabled: false, observation_scope: 'instance', observations: [
       { model: 'gpt-outside-list', observed_at: '2026-09-20T12:00:00Z', outbound_length: 292, response_length: 356,
         response_shape: 'unknown', response_observed_shape: 'team_business_extended', response_cipher_blocks: 13,
-        response_validation_reason: 'account_type_unknown', response_source: 'metadata' },
+        response_validation_reason: 'account_type_unknown', response_source: 'metadata', request_source: 'collector' },
       { model: 'gpt-no-response', observed_at: '2026-09-20T11:30:00Z', outbound_length: 0, response_length: 0, response_shape: 'missing' },
     ] })
     const wrapper = render()
@@ -79,10 +91,14 @@ describe('Codex turn-state status modal', () => {
     expect(outside.text()).toContain('observedShapes.team_business_extended')
     expect(outside.text()).toContain('validationReasons.account_type_unknown')
     expect(outside.text()).toContain('sources.response_metadata')
+    expect(outside.text()).toContain('requestSource')
+    expect(outside.text()).toContain('sources.collector')
+    expect(outside.text()).toContain('responseCarrier')
     expect(outside.text()).toContain(new Date('2026-09-20T12:00:00Z').toLocaleString())
     expect(outside.text()).toContain('13')
     expect(observations.text()).toContain('responseStateMissing')
-    expect(wrapper.find('[data-testid="codex-turn-state-cache-section"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="codex-turn-state-cache-section"]').text()).toContain('disabled')
+    expect(wrapper.find('[data-testid="codex-turn-state-cache-gpt-test"]').exists()).toBe(false)
     expect(observations.text()).not.toContain('states.ready')
     expect(observations.text()).not.toContain('remaining')
     wrapper.unmount()
@@ -108,6 +124,76 @@ describe('Codex turn-state status modal', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('admin.accounts.codexTurnState.unresolved')
     expect(wrapper.text()).not.toContain('gpt-test')
+    wrapper.unmount()
+  })
+
+  it('refreshes every five seconds without clearing content or overlapping a slow request', async () => {
+    let resolveRefresh!: (value: CodexTurnStateStatus) => void
+    getCodexTurnState.mockResolvedValueOnce(status)
+      .mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve }))
+    const wrapper = render()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(getCodexTurnState).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('gpt-test')
+    expect(wrapper.find('[role="status"]').exists()).toBe(false)
+    const refresh = wrapper.get('[data-testid="codex-turn-state-refresh"]')
+    expect(refresh.attributes('disabled')).toBeDefined()
+    await refresh.trigger('click')
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(getCodexTurnState).toHaveBeenCalledTimes(2)
+    resolveRefresh({ ...status, models: [{ ...status.models[0]!, collection_status: 'backoff', collection_reason: 'collector_rate_limited', cache_available: false }] })
+    await flushPromises()
+    expect(wrapper.text()).toContain('collectionStatuses.backoff')
+    expect(wrapper.text()).toContain('reasons.collector_rate_limited')
+    expect(wrapper.get('[data-testid="codex-turn-state-cache-availability-gpt-test"]').text()).toContain('cacheUnavailable')
+    expect(refresh.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('keeps existing content after a refresh fails and clears the error after recovery', async () => {
+    getCodexTurnState.mockResolvedValueOnce(status).mockRejectedValueOnce(new Error('secret-token')).mockResolvedValueOnce(status)
+    const wrapper = render()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(wrapper.text()).toContain('gpt-test')
+    expect(wrapper.get('[role="alert"]').text()).toContain('refreshFailed')
+    expect(wrapper.text()).not.toContain('secret-token')
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('aborts an in-flight refresh and stops polling immediately when closed', async () => {
+    let resolveRefresh!: (value: CodexTurnStateStatus) => void
+    getCodexTurnState.mockResolvedValueOnce(status).mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve }))
+    const wrapper = render()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(5000)
+    const signal = getCodexTurnState.mock.calls[1]![1] as AbortSignal
+    await wrapper.findAll('button').find(button => button.text() === 'common.close')!.trigger('click')
+    expect(signal.aborted).toBe(true)
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    await wrapper.setProps({ show: false })
+    resolveRefresh({ ...status, models: [{ ...status.models[0]!, model: 'stale-response' }] })
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(getCodexTurnState).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).not.toContain('stale-response')
+    wrapper.unmount()
+  })
+
+  it('shows valid cache independently of paused collection and updates remaining lifetime on the shared refresh clock', async () => {
+    const paused = { ...status, models: [{ ...status.models[0]!, expires_at: '2026-09-19T11:30:04Z', state: 'paused', collector_paused: true, collection_status: 'paused', collection_reason: 'collector_auth_rejected' }] }
+    getCodexTurnState.mockResolvedValueOnce(paused).mockImplementation(() => new Promise(() => {}))
+    const wrapper = render()
+    await flushPromises()
+    const available = wrapper.get('[data-testid="codex-turn-state-cache-availability-gpt-test"]')
+    expect(available.text()).toContain('cacheAvailable')
+    expect(wrapper.get('[data-testid="codex-turn-state-collection-gpt-test"]').text()).toContain('collectionStatuses.paused')
+    expect(wrapper.text()).toContain('nextCollect')
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(available.text()).toContain('cacheUnavailable')
     wrapper.unmount()
   })
 })

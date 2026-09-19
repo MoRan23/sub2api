@@ -168,6 +168,17 @@ func projectCodexTurnStateStatus(accountID int64, owner *Account, records []Code
 	for _, model := range allowedModels {
 		allowed[model] = true
 	}
+	ownerPaused := false
+	var ownerRetry time.Time
+	for _, record := range records {
+		if record.Generation != CodexTurnStateGenerationForAccount(owner) {
+			continue
+		}
+		ownerPaused = ownerPaused || record.CollectorPaused
+		if !record.LastCollectedAt.IsZero() && record.NextCollectAt.After(ownerRetry) {
+			ownerRetry = record.NextCollectAt
+		}
+	}
 	for _, record := range records {
 		if record.Generation != CodexTurnStateGenerationForAccount(owner) {
 			continue
@@ -194,7 +205,67 @@ func projectCodexTurnStateStatus(accountID int64, owner *Account, records []Code
 		item.LastBusinessAt = codexStateTimePtr(record.LastBusinessAt)
 		item.LastCollectedAt = codexStateTimePtr(record.LastCollectedAt)
 		item.NextCollectAt = codexStateTimePtr(record.NextCollectAt)
+		item.CacheAvailable = result.Enabled && item.ModelAllowed && result.ExpectedLength > 0 &&
+			record.EncryptedToken != "" && record.Shape == CodexTurnStateShapeTarget &&
+			record.TokenLength == result.ExpectedLength && record.CipherBlocks == map[int]int{292: 10, 332: 12}[result.ExpectedLength] &&
+			!record.IssuedAt.IsZero() && !record.IssuedAt.After(now.Add(30*time.Second)) && record.ExpiresAt.After(now)
+		item.CollectionStatus, item.CollectionReason = projectCodexStateCollection(result, owner, record, now, ownerPaused, ownerRetry)
+		if !item.ModelAllowed {
+			item.CollectionStatus, item.CollectionReason = "blocked", item.State
+		}
+		if ownerRetry.After(record.NextCollectAt) && item.CollectionStatus == "backoff" {
+			item.NextCollectAt = codexStateTimePtr(ownerRetry)
+		}
 		result.Models = append(result.Models, item)
 	}
 	return result
+}
+
+func projectCodexStateCollection(status *CodexTurnStateStatus, owner *Account, record CodexTurnStateRecord, now time.Time, ownerPaused bool, ownerRetry time.Time) (string, string) {
+	if !status.Enabled {
+		return "blocked", "disabled"
+	}
+	if status.ExpectedLength == 0 {
+		return "blocked", "account_type_unknown"
+	}
+	if status.CollectorProxyID == nil || *status.CollectorProxyID <= 0 {
+		return "blocked", "collector_proxy_not_configured"
+	}
+	if owner.Status != StatusActive || !owner.Schedulable || (owner.ExpiresAt != nil && !owner.ExpiresAt.After(now)) {
+		return "blocked", "account_unavailable"
+	}
+	if ownerPaused {
+		return "paused", "collector_auth_rejected"
+	}
+	if record.LastBusinessAt.Before(now.Add(-CodexTurnStateActiveWindow)) {
+		return "idle", "idle"
+	}
+	if record.DemandReason != "" && record.BusinessInFlight {
+		return "pending", "waiting_business"
+	}
+	if record.CollectionStatus == "collecting" && record.LastCollectedAt.Add(CodexTurnStateCollectTimeout).After(now) {
+		return "collecting", "collecting"
+	}
+	if record.DemandReason == "" {
+		if record.EncryptedToken == "" {
+			return "idle", "waiting_business_response"
+		}
+		if record.ExpiresAt.After(now.Add(CodexTurnStateRefreshAhead)) {
+			return "idle", ""
+		}
+	}
+	if record.NextCollectAt.After(now) || ownerRetry.After(now) {
+		reason := record.LastError
+		if reason == "" {
+			reason = "account_cooldown"
+		}
+		return "backoff", reason
+	}
+	if record.CollectionReason == "collector_proxy_unavailable" {
+		return "blocked", record.CollectionReason
+	}
+	if record.CollectionReason == "waiting_business" {
+		return "pending", "waiting_business"
+	}
+	return "pending", "queued"
 }

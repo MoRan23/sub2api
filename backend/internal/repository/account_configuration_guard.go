@@ -92,19 +92,66 @@ func accountConfigurationExtraPatch(ctx context.Context, ids []int64, updates ma
 	return filtered
 }
 
-const codexTurnStateOwnerSQL = "platform = 'openai' AND type = 'oauth' AND parent_account_id IS NULL AND LOWER(COALESCE(credentials ->> 'auth_mode', '')) NOT IN ('personalaccesstoken', 'personal_access_token', 'agentidentity') AND LOWER(COALESCE(credentials ->> 'openai_auth_mode', '')) NOT IN ('personalaccesstoken', 'personal_access_token', 'agentidentity')"
+func codexTurnStateOwnerExpression(credentialsExpression string) string {
+	return "platform = 'openai' AND type = 'oauth' AND parent_account_id IS NULL AND LOWER(BTRIM(COALESCE((" + credentialsExpression + ") ->> 'auth_mode', ''))) NOT IN ('personalaccesstoken', 'personal_access_token', 'agentidentity') AND LOWER(BTRIM(COALESCE((" + credentialsExpression + ") ->> 'openai_auth_mode', ''))) NOT IN ('personalaccesstoken', 'personal_access_token', 'agentidentity')"
+}
 
 // Both expressions are evaluated against the latest row under UPDATE's lock.
 // The generation is changed in the same statement as its auth/config identity.
 func guardedCodexTurnStateGenerationExpression(extraExpression, credentialsExpression string) string {
 	changes := []string{"extra -> 'codex_turn_state' IS DISTINCT FROM (" + extraExpression + ") -> 'codex_turn_state'"}
+	authChanges := make([]string, 0, len(service.CodexTurnStateCredentialKeys))
 	if credentialsExpression != "" {
 		for _, key := range service.CodexTurnStateCredentialKeys {
-			changes = append(changes, "credentials -> '"+key+"' IS DISTINCT FROM ("+credentialsExpression+") -> '"+key+"'")
+			authChanges = append(authChanges, "credentials -> '"+key+"' IS DISTINCT FROM ("+credentialsExpression+") -> '"+key+"'")
 		}
+		changes = append(changes, authChanges...)
 		changes = append(changes, "(COALESCE(extra #>> '{codex_turn_state,account_type}', 'auto') = 'auto' AND credentials -> 'plan_type' IS DISTINCT FROM ("+credentialsExpression+") -> 'plan_type')")
+	} else {
+		credentialsExpression = "credentials"
 	}
-	return "CASE WHEN " + codexTurnStateOwnerSQL + " AND ((" + extraExpression + ") ? 'codex_turn_state') AND (" + strings.Join(changes, " OR ") + ") THEN COALESCE((" + extraExpression + "), '{}'::jsonb) || jsonb_build_object('codex_turn_state_generation', gen_random_uuid()::text) ELSE (" + extraExpression + ") END"
+	eligible := codexTurnStateOwnerExpression(credentialsExpression)
+	previousEligible := codexTurnStateOwnerExpression("credentials")
+	changes = append(changes, "NOT ("+previousEligible+")", "COALESCE(BTRIM(extra ->> 'codex_turn_state_generation'), '') = ''")
+	generation := "CASE WHEN " + eligible + " AND ((" + extraExpression + ") ? 'codex_turn_state') AND (" + strings.Join(changes, " OR ") + ") THEN COALESCE((" + extraExpression + "), '{}'::jsonb) || jsonb_build_object('codex_turn_state_generation', gen_random_uuid()::text) ELSE (" + extraExpression + ") END"
+	epochChanges := append([]string{"NOT (" + previousEligible + ")", "jsonb_typeof(extra -> 'codex_turn_state_credential_epoch') IS DISTINCT FROM 'string'", "COALESCE(BTRIM(extra ->> 'codex_turn_state_credential_epoch'), '') = ''"}, authChanges...)
+	// Preserve from the locked row, never a caller-supplied extra snapshot. The
+	// credential-only fence exists even when cache configuration is absent.
+	epoch := "CASE WHEN " + strings.Join(epochChanges, " OR ") + " THEN gen_random_uuid()::text ELSE extra ->> 'codex_turn_state_credential_epoch' END"
+	return "CASE WHEN " + eligible + " THEN COALESCE((" + generation + "), '{}'::jsonb) || jsonb_build_object('codex_turn_state_credential_epoch', " + epoch + ") ELSE (" + extraExpression + ") - 'codex_turn_state_credential_epoch' - 'codex_turn_state_generation' - 'codex_turn_state' END"
+}
+
+// Register after successful writes and before an owned transaction commits.
+// A caller transaction must not notify observers until its actual commit.
+func notifyCodexTurnStateAccountAfterCommit(ctx context.Context, ids ...int64) {
+	unique := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if id > 0 {
+			unique[id] = struct{}{}
+		}
+	}
+	notify := func() {
+		for id := range unique {
+			service.NotifyCodexTurnStateAccountConfigurationChanged(id)
+		}
+	}
+	afterAccountConfigurationCommit(ctx, notify)
+}
+
+func afterAccountConfigurationCommit(ctx context.Context, notify func()) {
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		tx.OnCommit(func(next dbent.Committer) dbent.Committer {
+			return dbent.CommitFunc(func(ctx context.Context, tx *dbent.Tx) error {
+				if err := next.Commit(ctx, tx); err != nil {
+					return err
+				}
+				notify()
+				return nil
+			})
+		})
+		return
+	}
+	notify()
 }
 
 // Collector references use JSONB, so take the same lock used by proxy deletion.

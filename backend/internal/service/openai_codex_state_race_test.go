@@ -30,10 +30,8 @@ func TestCodexTurnStateCollectorColdStartBusinessRegistrationRace(t *testing.T) 
 	s, repo, account := newCodexStateTestService(t)
 	account.Status, account.Schedulable = StatusActive, true
 	ctx := context.Background()
-	seed, err := s.Prepare(ctx, account, "gpt-5")
-	require.NoError(t, err)
-	require.NotNil(t, seed)
-	require.NoError(t, s.Finish(ctx, seed, false))
+	seed := seedCodexStateTestDemand(t, s, account, "gpt-5")
+	var err error
 	var calls atomic.Int64
 	s.collector = codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
 		calls.Add(1)
@@ -69,10 +67,7 @@ func TestCodexTurnStateCollectorSkipsInactiveOwner(t *testing.T) {
 			s, _, account := newCodexStateTestService(t)
 			account.Status, account.Schedulable = StatusActive, true
 			ctx := context.Background()
-			attempt, err := s.Prepare(ctx, account, "gpt-5")
-			require.NoError(t, err)
-			require.NotNil(t, attempt)
-			require.NoError(t, s.Finish(ctx, attempt, false))
+			attempt := seedCodexStateTestDemand(t, s, account, "gpt-5")
 			switch name {
 			case "disabled":
 				account.Status = StatusDisabled

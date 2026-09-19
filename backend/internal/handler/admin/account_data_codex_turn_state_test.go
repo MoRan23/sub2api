@@ -24,8 +24,9 @@ func TestAccountDataCodexTurnStatePortableRoundTrip(t *testing.T) {
 			Credentials: map[string]any{"access_token": "oauth-credential"}, ProxyID: &businessID,
 			Extra: map[string]any{
 				"note": "keep", "codex_turn_state_generation": "must-not-leak-generation",
-				"codex_turn_state_runtime": map[string]any{"token": "must-not-leak-token"},
-				"codex_turn_state":         map[string]any{"enabled": true, "account_type": "team_business", "collector_proxy_id": collectorID, "token": "must-not-leak-nested"},
+				"codex_turn_state_credential_epoch": "must-not-leak-credential-epoch",
+				"codex_turn_state_runtime":          map[string]any{"token": "must-not-leak-token"},
+				"codex_turn_state":                  map[string]any{"enabled": true, "account_type": "team_business", "collector_proxy_id": collectorID, "token": "must-not-leak-nested"},
 			}},
 		{ID: 8, Name: "shadow", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, ParentAccountID: &parentID},
 	}

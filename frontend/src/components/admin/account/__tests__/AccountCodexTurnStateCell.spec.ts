@@ -8,7 +8,7 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({
   t: (key: string, args?: unknown) => key + (args ? JSON.stringify(args) : ''), te: () => true
 }) }))
 const now = Date.parse('2026-09-20T12:00:00Z')
-const models = ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra']
+const models = ['gpt-6-astra', 'gpt-5.6-sol']
 const account = { id: 1, platform: 'openai', type: 'oauth', credentials: {}, name: 'OAuth' } as AccountListItem
 const status: CodexTurnStateStatus = {
   account_id: 1, owner_account_id: 1, inherited: false, enabled: true, account_type: 'auto',
@@ -31,11 +31,11 @@ describe('AccountCodexTurnStateCell', () => {
   it('renders only fixed-height model rows and opens details for the entire cell', async () => {
     const wrapper = show()
     expect(wrapper.text()).toBe(models.join(''))
-    expect(wrapper.get('button').classes()).toContain('h-16')
+    expect(wrapper.get('button').attributes('style')).toContain('height: 44px')
     const rows = wrapper.findAll('[data-testid^="codex-turn-state-model-"]')
-    expect(rows).toHaveLength(3)
+    expect(rows).toHaveLength(2)
     expect(rows.every(row => row.classes().includes('h-5'))).toBe(true)
-    expect(colors(wrapper)).toEqual(['green', 'gray', 'gray'])
+    expect(colors(wrapper)).toEqual(['green', 'gray'])
     expect(rows[0]!.attributes('title')).toContain('dotCachedTarget')
     expect(rows[0]!.attributes('aria-label')).toContain(models[0])
     await rows[0]!.trigger('click')
@@ -46,7 +46,7 @@ describe('AccountCodexTurnStateCell', () => {
     { response_length: 292, response_observed_shape: 'personal_target' },
     { response_length: 332, response_observed_shape: 'team_business_target' },
   ])('shows a green latest target response with cache disabled (%s)', (shape) => {
-    const wrapper = show({ status: { ...status, enabled: false, observations: [observation(shape)] } })
+    const wrapper = show({ status: { ...status, enabled: false, expected_length: shape.response_length, observations: [observation(shape)] } })
     expect(colors(wrapper)[0]).toBe('green')
     const row = wrapper.get(`[data-testid="codex-turn-state-model-${models[0]}"]`)
     expect(row.attributes('title')).toContain('dotObservedTarget')
@@ -59,17 +59,17 @@ describe('AccountCodexTurnStateCell', () => {
   it.each([
     { response_length: 312, response_shape: 'suspect', response_observed_shape: 'personal_extended' },
     { response_length: 356, response_shape: 'suspect', response_observed_shape: 'team_business_extended' },
-    { response_shape: 'invalid', response_observed_shape: 'invalid', response_validation_reason: 'invalid_envelope' },
-    { response_validation_reason: 'invalid_encoding' },
-    { response_validation_reason: 'future_issued_at' },
-  ])('shows explicit latest extended or invalid states in red, ahead of a ready cache (%s)', (shape) => {
-    const wrapper = show({ status: { ...status, observations: [observation(shape)] } })
+  ])('shows valid matching latest extended states in red, ahead of a ready cache (%s)', (shape) => {
+    const wrapper = show({ status: { ...status, expected_length: shape.response_length === 312 ? 292 : 332, observations: [observation(shape)] } })
     expect(colors(wrapper)[0]).toBe('red')
     expect(wrapper.text()).toBe(models.join(''))
   })
 
   it.each([
     { response_shape: 'unknown', response_validation_reason: 'account_type_unknown' },
+    { response_shape: 'invalid', response_observed_shape: 'invalid', response_validation_reason: 'invalid_envelope' },
+    { response_validation_reason: 'invalid_encoding' },
+    { response_validation_reason: 'future_issued_at' },
     { response_shape: 'invalid', response_validation_reason: 'unexpected_shape' },
     { response_shape: 'expired', response_validation_reason: 'expired' },
     { response_shape: 'unknown' },
@@ -85,6 +85,38 @@ describe('AccountCodexTurnStateCell', () => {
     expect(colors(wrapper)[0]).toBe('green')
   })
 
+  it.each(['business', 'collector'] as const)('uses the latest %s result and identifies its request origin', (request_source) => {
+    const wrapper = show({ status: { ...status, observations: [observation({ request_source, response_length: 356, response_shape: 'extended', response_observed_shape: 'team_business_extended', response_cipher_blocks: 13 })] } })
+    expect(colors(wrapper)[0]).toBe('red')
+    expect(wrapper.get(`[data-testid="codex-turn-state-model-${models[0]}"]`).attributes('title')).toContain(`sources.${request_source}`)
+  })
+
+  it.each(['pending', 'collecting', 'backoff', 'paused', 'blocked'] as const)('does not let collection status %s replace a known shape or invent an abnormal missing result', (collection_status) => {
+    const wrapper = show({ status: { ...status, models: [
+      { ...status.models[0]!, cache_available: false, collection_status },
+      { ...status.models[0]!, model: models[1]!, state: 'missing', cache_available: false, collection_status },
+    ], observations: [observation({ response_length: 356, response_shape: 'extended', response_observed_shape: 'team_business_extended' })] } })
+    expect(colors(wrapper)).toEqual(['red', 'gray'])
+  })
+
+  it.each([
+    { expected_length: 0, response_length: 356, response_observed_shape: 'team_business_extended', response_cipher_blocks: 13 },
+    { expected_length: 292, response_length: 356, response_observed_shape: 'team_business_extended', response_cipher_blocks: 13 },
+    { expected_length: 332, response_length: 356, response_observed_shape: 'team_business_extended', response_cipher_blocks: 12 },
+  ])('does not classify unknown, mismatching or invalid block counts as red (%s)', (sample) => {
+    const wrapper = show({ status: { ...status, expected_length: sample.expected_length, observations: [observation({ ...sample, response_shape: 'extended' })] } })
+    expect(colors(wrapper)[0]).toBe('gray')
+  })
+
+  it('honors explicit cache availability, including valid cache while collection is paused', async () => {
+    const wrapper = show({ status: { ...status, models: [{ ...status.models[0]!, state: 'paused', collector_paused: true, cache_available: true }] } })
+    expect(colors(wrapper)[0]).toBe('green')
+    await wrapper.setProps({ status: { ...status, models: [{ ...status.models[0]!, cache_available: false }] } })
+    expect(colors(wrapper)[0]).toBe('gray')
+    await wrapper.setProps({ status: { ...status, models: [{ ...status.models[0]!, cache_available: true, model_allowed: false }] } })
+    expect(colors(wrapper)[0]).toBe('gray')
+  })
+
   it('uses gray when a cache expires or is disabled, and green only for a valid fallback cache', async () => {
     const wrapper = show()
     expect(colors(wrapper)[0]).toBe('green')
@@ -96,25 +128,29 @@ describe('AccountCodexTurnStateCell', () => {
     expect(colors(wrapper)[0]).toBe('gray')
   })
 
-  it('keeps the first load, refresh and failure in the same three-row frame without loading text', async () => {
+  it('keeps the first load, refresh and failure in the same two-row frame without loading text', async () => {
     const wrapper = show({ status: undefined, models: [], loading: true })
-    expect(colors(wrapper)).toEqual(['gray', 'gray', 'gray'])
+    expect(colors(wrapper)).toEqual(['gray', 'gray'])
     expect(wrapper.text()).toBe(models.join(''))
     expect(wrapper.text()).not.toContain('loading')
     await wrapper.setProps({ status, models, loading: true })
     expect(colors(wrapper)[0]).toBe('green')
-    expect(wrapper.get('button').classes()).toContain('h-16')
+    expect(wrapper.get('button').attributes('style')).toContain('height: 44px')
     await wrapper.setProps({ failed: true, loading: false })
-    expect(colors(wrapper)).toEqual(['gray', 'gray', 'gray'])
+    expect(colors(wrapper)).toEqual(['gray', 'gray'])
     expect(wrapper.get(`[data-testid="codex-turn-state-model-${models[0]}"]`).attributes('title')).toContain('columnUnavailable')
     expect(wrapper.text()).toBe(models.join(''))
   })
 
-  it('keeps all exact model IDs accessible while limiting the cell to three rows with an inline count', () => {
-    const wrapper = show({ models: [...models, 'custom-4', 'custom-5'] })
-    expect(wrapper.text()).toBe(`${models.join('')}+2`)
-    expect(wrapper.get('[data-testid="codex-turn-state-more"]').attributes('title')).toContain('columnMore{"count":2}')
-    expect(wrapper.findAll('[data-testid="codex-turn-state-dot"]')).toHaveLength(3)
+  it('keeps configured order and limits the cell to five real models with an inline count on the last row', () => {
+    const configured = [...models, 'gpt-5.6-terra', 'custom-4', 'custom-5', 'custom-6']
+    const wrapper = show({ models: configured })
+    expect(wrapper.text()).toBe(`${configured.slice(0, 5).join('')}+1`)
+    expect(wrapper.get('[data-testid="codex-turn-state-more"]').attributes('title')).toContain('columnMore{"count":1}')
+    expect(wrapper.findAll('[data-testid="codex-turn-state-dot"]')).toHaveLength(5)
+    expect(wrapper.get('[data-testid="codex-turn-state-model-custom-5"]').text()).toContain('+1')
+    expect(wrapper.get('button').attributes('style')).toContain('height: 104px')
+    expect(wrapper.text()).not.toContain('custom-6')
   })
 
   it('includes off-list actual observations and inheritance in accessible descriptions', () => {
@@ -126,19 +162,44 @@ describe('AccountCodexTurnStateCell', () => {
   })
 
   it('keeps configured model order unchanged when later observations arrive with caching disabled', async () => {
-    const wrapper = show({ status: { ...status, enabled: false, observations: [observation({ model: models[2]! })] } })
+    const wrapper = show({ status: { ...status, enabled: false, observations: [observation({ model: models[1]! })] } })
     expect(wrapper.text()).toBe(models.join(''))
-    expect(colors(wrapper)).toEqual(['gray', 'gray', 'green'])
-    await wrapper.setProps({ status: { ...status, enabled: false, observations: [observation({ model: models[0]! }), observation({ model: models[2]! })] } })
+    expect(colors(wrapper)).toEqual(['gray', 'green'])
+    await wrapper.setProps({ status: { ...status, enabled: false, observations: [observation({ model: models[0]! }), observation({ model: models[1]! })] } })
     expect(wrapper.text()).toBe(models.join(''))
-    expect(colors(wrapper)).toEqual(['green', 'gray', 'green'])
+    expect(colors(wrapper)).toEqual(['green', 'green'])
   })
 
-  it('keeps three gray placeholder rows for an explicitly empty policy without inventing model IDs', () => {
+  it('does not create model rows or gray dots for an explicitly empty policy with no observations', () => {
     const wrapper = show({ models: [], status: { ...status, models: [] } })
-    expect(wrapper.text()).toBe('———')
-    expect(colors(wrapper)).toEqual(['gray', 'gray', 'gray'])
-    expect(wrapper.findAll('[data-testid="codex-turn-state-placeholder"]')).toHaveLength(3)
+    expect(wrapper.text()).toBe('—')
+    expect(colors(wrapper)).toEqual([])
+    expect(wrapper.findAll('[data-testid^="codex-turn-state-model-"]')).toHaveLength(0)
+    expect(wrapper.findAll('[data-testid="codex-turn-state-placeholder"]')).toHaveLength(0)
+  })
+
+  it('fills unused rows with actual observations, excludes off-list cache-only records and retains the order of existing observations', async () => {
+    const cached = [{ ...status.models[0]!, model: 'cache-only' }]
+    const wrapper = show({ status: { ...status, models: cached, observations: [observation({ model: 'z-observed' })] } })
+    expect(wrapper.text()).toBe(`${models.join('')}z-observed`)
+    expect(wrapper.get('button').attributes('style')).toContain('height: 64px')
+    await wrapper.setProps({ status: { ...status, models: cached, observations: [
+      observation({ model: 'a-new' }), observation({ model: 'b-new' }), observation({ model: 'c-new' }), observation({ model: 'z-observed' })
+    ] } })
+    expect(wrapper.text()).toBe(`${models.join('')}z-observeda-newb-new+1`)
+    expect(wrapper.findAll('[data-testid="codex-turn-state-dot"]')).toHaveLength(5)
+    expect(wrapper.text()).not.toContain('cache-only')
+    await wrapper.setProps({ loading: true })
+    expect(wrapper.text()).toBe(`${models.join('')}z-observeda-newb-new+1`)
+    expect(wrapper.get('button').attributes('style')).toContain('height: 104px')
+  })
+
+  it('shows a configured third model without adding any unused placeholder rows', () => {
+    const wrapper = show({ models: [...models, 'gpt-5.6-terra'] })
+    expect(wrapper.text()).toBe(`${models.join('')}gpt-5.6-terra`)
+    expect(colors(wrapper)).toEqual(['green', 'gray', 'gray'])
+    expect(wrapper.get('button').attributes('style')).toContain('height: 64px')
+    expect(wrapper.find('[data-testid="codex-turn-state-more"]').exists()).toBe(false)
   })
 
   it.each([

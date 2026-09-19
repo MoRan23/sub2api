@@ -11180,7 +11180,7 @@ const codexSyncedVersionLabel = computed(() => {
 const codexTelemetryEffectiveEnabled = ref<boolean | null>(null);
 const codexTelemetryForcedOffReason = ref("");
 
-const codexTurnStateModelsInput = ref("gpt-6-astra\ngpt-5.6-sol\ngpt-5.6-terra");
+const codexTurnStateModelsInput = ref("gpt-6-astra\ngpt-5.6-sol");
 const codexTurnStateModelsLoaded = ref(false);
 const codexTurnStateModelsEdited = ref(false);
 const codexTurnStateModels = computed(() => [...new Set(

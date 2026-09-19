@@ -60,10 +60,38 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 	defer response.Body.Close()
 	result.StatusCode = response.StatusCode
 	result.RetryAfter = codexTurnStateRetryAfter(response.Header.Get("Retry-After"), time.Now())
+	observe := func(token, source string) {
+		if token == "" || len(token) > 4096 {
+			return
+		}
+		now := time.Now()
+		envelope, envelopeErr := InspectCodexTurnStateEnvelope(token, now)
+		shape, shapeErr := ParseCodexTurnState(token, CodexTurnStateAccountTypeForAccount(input.Account), now)
+		safe := &CodexTurnStateSafeObservation{ObservedAt: now, TokenLength: len(token), CipherBlocks: envelope.CipherBlocks,
+			Shape: shape.Shape, ResponseSource: source, ObservedShape: envelope.ObservedShape, ValidationReason: envelope.ValidationReason,
+			IssuedAt: envelope.IssuedAt, ExpiresAt: envelope.ExpiresAt, EnvelopeValid: envelopeErr == nil}
+		if shapeErr != nil && safe.ValidationReason == "" {
+			safe.ValidationReason = shapeErr.Error()
+		}
+		if safe.ValidationReason == "expired" {
+			safe.Shape = "expired"
+		}
+		result.Observation = safe
+	}
+	for key, values := range response.Header {
+		if strings.EqualFold(key, "x-codex-turn-state") {
+			for _, token := range values {
+				observe(token, "header")
+				if len(result.Tokens) < 16 && len(token) <= 4096 {
+					result.Tokens = append(result.Tokens, token)
+				}
+			}
+		}
+	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		result.Tokens = nil
 		return result, nil
 	}
-	result.Tokens = append(result.Tokens, response.Header.Values("x-codex-turn-state")...)
 	// A header alone is not enough: collect only from a completed Responses
 	// stream. Cap total input so malformed endpoints cannot allocate unboundedly.
 	scanner := bufio.NewScanner(io.LimitReader(response.Body, 2<<20))
@@ -92,6 +120,7 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 			completed = true
 		}
 		for _, token := range CodexTurnStateTokensFromEvent(data) {
+			observe(token, "metadata")
 			if len(result.Tokens) < 16 && len(token) <= 4096 {
 				result.Tokens = append(result.Tokens, token)
 			}
@@ -102,7 +131,8 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			if err := consume(); err != nil {
-				return CodexTurnStateCollectResult{StatusCode: result.StatusCode}, err
+				result.Tokens = nil
+				return result, err
 			}
 			if completed {
 				break
@@ -120,13 +150,16 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return CodexTurnStateCollectResult{StatusCode: result.StatusCode}, errors.New("collector_stream_failed")
+		result.Tokens = nil
+		return result, errors.New("collector_stream_failed")
 	}
 	if err := consume(); err != nil {
-		return CodexTurnStateCollectResult{StatusCode: result.StatusCode}, err
+		result.Tokens = nil
+		return result, err
 	}
 	if !completed {
-		return CodexTurnStateCollectResult{StatusCode: result.StatusCode}, errors.New("collector_response_incomplete")
+		result.Tokens = nil
+		return result, errors.New("collector_response_incomplete")
 	}
 	return result, nil
 }

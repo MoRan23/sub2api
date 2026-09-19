@@ -11,6 +11,12 @@ import (
 )
 
 const codexStateCancelChannel = "openai:codex:state:cancel:v1"
+const codexStateActivationChannel = "openai:codex:state:activate:v1"
+
+type codexStateActivation struct {
+	OwnerAccountID int64  `json:"owner_account_id"`
+	Generation     string `json:"generation"`
+}
 
 func (r *openAICodexStateRepository) redisAvailable() error {
 	if r == nil || r.rdb == nil {
@@ -95,6 +101,55 @@ func (r *openAICodexStateRepository) SubscribeCancels(ctx context.Context, handl
 			var key service.CodexTurnStateKey
 			if json.Unmarshal([]byte(message.Payload), &key) == nil && validateCodexStateKey(key) == nil {
 				handle(key)
+			}
+		}
+	}
+}
+
+// Activation messages carry only the current configuration scope. Every
+// subscriber revalidates PostgreSQL and its own safe observation before demand
+// can be created. Neither observations nor credentials are broadcast.
+func (r *openAICodexStateRepository) PublishActivation(ctx context.Context, ownerID int64, generation string) error {
+	if err := r.redisAvailable(); err != nil {
+		return err
+	}
+	if ownerID <= 0 || strings.TrimSpace(generation) == "" {
+		return errors.New("invalid Codex turn-state activation scope")
+	}
+	payload, err := json.Marshal(codexStateActivation{OwnerAccountID: ownerID, Generation: generation})
+	if err != nil {
+		return err
+	}
+	return r.rdb.Publish(ctx, codexStateActivationChannel, payload).Err()
+}
+
+func (r *openAICodexStateRepository) SubscribeActivations(ctx context.Context, handle func(int64, string)) error {
+	if err := r.redisAvailable(); err != nil {
+		return err
+	}
+	if handle == nil {
+		return errors.New("nil Codex turn-state activation handler")
+	}
+	subscription := r.rdb.Subscribe(ctx, codexStateActivationChannel)
+	defer func() { _ = subscription.Close() }()
+	if _, err := subscription.Receive(ctx); err != nil {
+		return err
+	}
+	messages := subscription.Channel()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case message, ok := <-messages:
+			if !ok {
+				return errors.New("Codex turn-state activation subscription closed")
+			}
+			if len(message.Payload) > 4096 {
+				continue
+			}
+			var activation codexStateActivation
+			if json.Unmarshal([]byte(message.Payload), &activation) == nil && activation.OwnerAccountID > 0 && strings.TrimSpace(activation.Generation) != "" {
+				handle(activation.OwnerAccountID, activation.Generation)
 			}
 		}
 	}

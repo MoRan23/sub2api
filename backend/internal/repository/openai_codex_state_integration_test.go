@@ -38,17 +38,28 @@ func TestCodexStatePostgresNaturalLeasesDurabilityAndCAS(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, record)
 	require.EqualValues(t, 1, record.Version)
+	require.True(t, record.BusinessInFlight)
+	require.Equal(t, time.Unix(0, 0).UTC(), record.LastBusinessAt, "preparation is not physical business activity")
+	require.NoError(t, first.MarkBusinessSent(ctx, key, now))
 	// A second physical request preserves token version and both leases remain visible.
 	another, err := second.BeginBusiness(ctx, key, "attempt-b", now.Add(time.Second), now.Add(time.Minute))
 	require.NoError(t, err)
 	require.Equal(t, record.Version, another.Version)
+	require.NoError(t, second.MarkBusinessSent(ctx, key, now.Add(time.Second)))
 	require.NoError(t, first.EndBusiness(ctx, key, "attempt-a"))
 	active, err := first.HasBusiness(ctx, key, now)
 	require.NoError(t, err)
 	require.True(t, active)
+	withLease, err := second.Get(ctx, key)
+	require.NoError(t, err)
+	require.True(t, withLease.BusinessInFlight, "another instance must observe a remaining live business lease")
 	active, err = first.HasBusiness(ctx, key, now.Add(2*time.Minute))
 	require.NoError(t, err)
 	require.False(t, active, "abandoned leases must expire after process loss")
+	require.NoError(t, second.EndBusiness(ctx, key, "attempt-b"))
+	withoutLease, err := first.Get(ctx, key)
+	require.NoError(t, err)
+	require.False(t, withoutLease.BusinessInFlight)
 
 	record.EncryptedToken = "ciphertext-from-secret-encryptor"
 	record.IssuedAt, record.ExpiresAt = now, now.Add(time.Hour)
@@ -219,12 +230,13 @@ func TestCodexStatePostgresScanSelectsOnlyDueCollectors(t *testing.T) {
 		'{codex_turn_state,collector_proxy_id}', '42'::jsonb) WHERE id=$1`, key.OwnerAccountID)
 	require.NoError(t, err)
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	policyRevision := installCodexStateModelPolicyFixture(t, []string{"fresh", "due", "missing", "paused", "cooldown", "natural-inflight"})
-	for _, model := range []string{"fresh", "due", "missing", "paused", "cooldown", "natural-inflight"} {
+	policyRevision := installCodexStateModelPolicyFixture(t, []string{"fresh", "due", "missing", "demand", "paused", "cooldown", "natural-inflight"})
+	for _, model := range []string{"fresh", "due", "missing", "demand", "paused", "cooldown", "natural-inflight"} {
 		modelKey := key
 		modelKey.Model = model
 		record, err := repo.BeginBusiness(ctx, modelKey, model, now, now.Add(time.Minute))
 		require.NoError(t, err)
+		require.NoError(t, repo.MarkBusinessSent(ctx, modelKey, now))
 		record.ModelPolicyRevision = policyRevision
 		if model != "natural-inflight" {
 			require.NoError(t, repo.EndBusiness(ctx, modelKey, model))
@@ -234,10 +246,14 @@ func TestCodexStatePostgresScanSelectsOnlyDueCollectors(t *testing.T) {
 			record.EncryptedToken, record.ExpiresAt = "encrypted", now.Add(time.Hour)
 		case "due":
 			record.EncryptedToken, record.ExpiresAt = "encrypted", now.Add(4*time.Minute)
+		case "demand", "natural-inflight":
+			record.DemandReason, record.DemandAt = "extended_shape", now
 		case "paused":
 			record.CollectorPaused = true
+			record.DemandReason, record.DemandAt = "extended_shape", now
 		case "cooldown":
 			record.NextCollectAt = now.Add(3 * time.Minute)
+			record.DemandReason, record.DemandAt = "extended_shape", now
 		}
 		saved, err := repo.SaveCAS(ctx, *record, record.Version)
 		require.NoError(t, err)
@@ -251,7 +267,7 @@ func TestCodexStatePostgresScanSelectsOnlyDueCollectors(t *testing.T) {
 			models = append(models, record.Model)
 		}
 	}
-	require.ElementsMatch(t, []string{"due", "missing"}, models)
+	require.ElementsMatch(t, []string{"due", "demand"}, models)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,
 		'{codex_turn_state,collector_proxy_id}', 'null'::jsonb) WHERE id=$1`, key.OwnerAccountID)
 	require.NoError(t, err)

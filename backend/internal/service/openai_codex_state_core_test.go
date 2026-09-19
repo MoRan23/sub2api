@@ -76,6 +76,7 @@ type codexStateMemoryRepo struct {
 	leases  map[CodexTurnStateKey]map[string]time.Time
 	locks   map[int64]string
 	getErr  error
+	now     func() time.Time
 }
 
 func newCodexStateMemoryRepo() *codexStateMemoryRepo {
@@ -86,15 +87,51 @@ func (r *codexStateMemoryRepo) BeginBusiness(_ context.Context, k CodexTurnState
 	defer r.mu.Unlock()
 	v, ok := r.records[k]
 	if !ok {
-		v = CodexTurnStateRecord{OwnerAccountID: k.OwnerAccountID, Model: k.Model, Generation: k.Generation, Version: 1}
+		v = CodexTurnStateRecord{OwnerAccountID: k.OwnerAccountID, Model: k.Model, Generation: k.Generation, Version: 1, LastBusinessAt: time.Unix(0, 0)}
 	}
-	v.LastBusinessAt = now
+	if v.LastBusinessAt.After(time.Unix(0, 0)) && v.LastBusinessAt.Before(now.Add(-CodexTurnStateActiveWindow)) {
+		if v.DemandReason != "" {
+			v.Version++
+		}
+		clearIdleCodexTurnStateDemand(&v)
+	}
 	r.records[k] = v
 	if r.leases[k] == nil {
 		r.leases[k] = map[string]time.Time{}
 	}
 	r.leases[k][id] = until
 	return &v, nil
+}
+func (r *codexStateMemoryRepo) MarkBusinessSent(_ context.Context, key CodexTurnStateKey, sentAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if record, ok := r.records[key]; ok && sentAt.After(record.LastBusinessAt) {
+		record.LastBusinessAt = sentAt
+		r.records[key] = record
+	}
+	return nil
+}
+
+func markCodexStateTestBusinessSent(t *testing.T, state *CodexTurnStateService, attempt *CodexTurnStateAttempt) {
+	t.Helper()
+	attempt.mu.Lock()
+	attempt.businessSentAt = state.now()
+	attempt.historyPhysicalBound = true
+	attempt.mu.Unlock()
+	if attempt.Enabled {
+		require.NoError(t, state.repo.MarkBusinessSent(context.Background(), attempt.key, state.now()))
+	}
+}
+
+func seedCodexStateTestDemand(t *testing.T, state *CodexTurnStateService, account *Account, model string) *CodexTurnStateAttempt {
+	t.Helper()
+	attempt, err := state.Prepare(context.Background(), account, model)
+	require.NoError(t, err)
+	require.NotNil(t, attempt)
+	markCodexStateTestBusinessSent(t, state, attempt)
+	state.Observe(attempt, codexStateTestToken(11, state.now()))
+	require.NoError(t, state.Finish(context.Background(), attempt, true))
+	return attempt
 }
 func (r *codexStateMemoryRepo) EndBusiness(_ context.Context, k CodexTurnStateKey, id string) error {
 	r.mu.Lock()
@@ -112,8 +149,23 @@ func (r *codexStateMemoryRepo) Get(_ context.Context, k CodexTurnStateKey) (*Cod
 	if !ok {
 		return nil, nil
 	}
+	v.BusinessInFlight = r.businessInFlightLocked(k)
 	return &v, nil
 }
+
+func (r *codexStateMemoryRepo) businessInFlightLocked(key CodexTurnStateKey) bool {
+	now := time.Now()
+	if r.now != nil {
+		now = r.now()
+	}
+	for _, until := range r.leases[key] {
+		if until.After(now) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *codexStateMemoryRepo) SaveCAS(_ context.Context, v CodexTurnStateRecord, expected int64) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -121,9 +173,17 @@ func (r *codexStateMemoryRepo) SaveCAS(_ context.Context, v CodexTurnStateRecord
 	if !ok || old.Version != expected {
 		return false, nil
 	}
+	if v.CollectorPublication && r.businessInFlightLocked(v.Key()) {
+		return false, nil
+	}
+	v.CollectorPublication = false
+	v.BusinessInFlight = false
 	v.Version = expected + 1
 	if old.LastBusinessAt.After(v.LastBusinessAt) {
 		v.LastBusinessAt = old.LastBusinessAt
+	}
+	if old.HistoryProofObservedAt.After(v.HistoryProofObservedAt) {
+		v.HistoryProofObservedAt = old.HistoryProofObservedAt
 	}
 	r.records[v.Key()] = v
 	return true, nil
@@ -133,7 +193,8 @@ func (r *codexStateMemoryRepo) ListActive(_ context.Context, since time.Time, li
 	defer r.mu.Unlock()
 	var out []CodexTurnStateRecord
 	for _, v := range r.records {
-		if !v.LastBusinessAt.Before(since) && len(out) < limit {
+		if !v.LastBusinessAt.Before(since) && len(out) < limit && (v.DemandReason != "" || v.EncryptedToken != "") {
+			v.BusinessInFlight = r.businessInFlightLocked(v.Key())
 			out = append(out, v)
 		}
 	}
@@ -145,6 +206,7 @@ func (r *codexStateMemoryRepo) ListByAccount(_ context.Context, id int64) ([]Cod
 	var out []CodexTurnStateRecord
 	for _, v := range r.records {
 		if v.OwnerAccountID == id {
+			v.BusinessInFlight = r.businessInFlightLocked(v.Key())
 			out = append(out, v)
 		}
 	}
@@ -160,6 +222,7 @@ func (r *codexStateMemoryRepo) ListByAccounts(_ context.Context, ids []int64) ([
 	var records []CodexTurnStateRecord
 	for _, record := range r.records {
 		if owners[record.OwnerAccountID] {
+			record.BusinessInFlight = r.businessInFlightLocked(record.Key())
 			records = append(records, record)
 		}
 	}
@@ -238,6 +301,7 @@ func newCodexStateTestService(t *testing.T) (*CodexTurnStateService, *codexState
 	s := NewCodexTurnStateService(repo, &codexStateTestAccounts{account: a}, codexStateTestEncryptor{}, nil)
 	s.modelPolicy = newCodexStateTestModelPolicy("gpt-5", "gpt-5-mini", "gpt-5.4", "final-model", "other-model")
 	s.now = func() time.Time { return time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC) }
+	repo.now = func() time.Time { return s.now() }
 	return s, repo, a
 }
 
@@ -252,6 +316,7 @@ func TestCodexTurnStateNaturalLearningAvoidsCollector(t *testing.T) {
 	attempt, err := s.Prepare(ctx, a, "gpt-5")
 	require.NoError(t, err)
 	require.NotNil(t, attempt)
+	markCodexStateTestBusinessSent(t, s, attempt)
 	s.collect(ctx, attempt.key)
 	require.Zero(t, calls.Load(), "business attempt holds lease")
 	token := codexStateTestToken(10, s.now())
@@ -261,6 +326,7 @@ func TestCodexTurnStateNaturalLearningAvoidsCollector(t *testing.T) {
 	require.Zero(t, calls.Load(), "natural target is sufficient")
 	next, err := s.Prepare(ctx, a, "gpt-5")
 	require.NoError(t, err)
+	markCodexStateTestBusinessSent(t, s, next)
 	require.Equal(t, token, next.Snapshot.Token)
 	require.True(t, s.ValidateAttempt(ctx, next))
 	record, _ := repo.Get(ctx, next.key)
@@ -285,7 +351,9 @@ func TestCodexTurnStateDiscardAndStaleExtended(t *testing.T) {
 	record, _ := repo.Get(ctx, discard.key)
 	require.Empty(t, record.EncryptedToken)
 	old, _ := s.Prepare(ctx, a, "gpt-5")
+	markCodexStateTestBusinessSent(t, s, old)
 	fresh, _ := s.Prepare(ctx, a, "gpt-5")
+	markCodexStateTestBusinessSent(t, s, fresh)
 	s.Observe(fresh, codexStateTestToken(10, s.now()))
 	require.NoError(t, s.Finish(ctx, fresh, true))
 	s.Observe(old, codexStateTestToken(11, s.now()))
@@ -293,6 +361,7 @@ func TestCodexTurnStateDiscardAndStaleExtended(t *testing.T) {
 	record, _ = repo.Get(ctx, old.key)
 	require.NotEmpty(t, record.EncryptedToken, "late extended shape cannot clear a newer version")
 	extended, _ := s.Prepare(ctx, a, "gpt-5")
+	markCodexStateTestBusinessSent(t, s, extended)
 	s.Observe(extended, codexStateTestToken(11, s.now()))
 	require.NoError(t, s.Finish(ctx, extended, true))
 	record, _ = repo.Get(ctx, extended.key)
@@ -323,8 +392,11 @@ func TestCodexTurnStatePhysicalCredentialsAreBoundToGeneration(t *testing.T) {
 	stale := *account
 	stale.Credentials = map[string]any{"access_token": "old-token", "plan_type": "plus"}
 	attempt, err := s.Prepare(context.Background(), &stale, "gpt-5")
-	require.Error(t, err)
-	require.Nil(t, attempt)
+	require.NoError(t, err)
+	require.NotNil(t, attempt)
+	require.False(t, attempt.Enabled)
+	require.Empty(t, attempt.Snapshot.Token)
+	require.Equal(t, "physical_credentials_stale", attempt.MaintenanceReason)
 	attempt, err = s.Prepare(context.Background(), account, "gpt-5")
 	require.NoError(t, err)
 	require.True(t, s.ValidateCredentialHeaders(context.Background(), attempt, http.Header{"authorization": {"Bearer test-token"}}))
@@ -360,8 +432,7 @@ func TestCodexTurnStateTeamAndUnknownType(t *testing.T) {
 func TestCodexTurnStateCollectorPacingAndActivity(t *testing.T) {
 	s, repo, account := newCodexStateTestService(t)
 	ctx := context.Background()
-	attempt, _ := s.Prepare(ctx, account, "gpt-5")
-	require.NoError(t, s.Finish(ctx, attempt, false))
+	attempt := seedCodexStateTestDemand(t, s, account, "gpt-5")
 	var calls atomic.Int64
 	s.collector = codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
 		calls.Add(1)
@@ -385,8 +456,7 @@ func TestCodexTurnStateCollectorPacingAndActivity(t *testing.T) {
 func TestCodexTurnStateSlowCollectorLosesToNaturalResponse(t *testing.T) {
 	s, repo, a := newCodexStateTestService(t)
 	ctx := context.Background()
-	initial, _ := s.Prepare(ctx, a, "gpt-5")
-	require.NoError(t, s.Finish(ctx, initial, false))
+	initial := seedCodexStateTestDemand(t, s, a, "gpt-5")
 	started := make(chan struct{})
 	release := make(chan struct{})
 	done := make(chan struct{})
@@ -415,10 +485,8 @@ func TestCodexTurnStateSlowCollectorLosesToNaturalResponse(t *testing.T) {
 func TestCodexTurnStateAccountWideSingleFlightAndPause(t *testing.T) {
 	s, repo, a := newCodexStateTestService(t)
 	ctx := context.Background()
-	first, _ := s.Prepare(ctx, a, "gpt-5")
-	second, _ := s.Prepare(ctx, a, "gpt-5-mini")
-	require.NoError(t, s.Finish(ctx, first, false))
-	require.NoError(t, s.Finish(ctx, second, false))
+	first := seedCodexStateTestDemand(t, s, a, "gpt-5")
+	second := seedCodexStateTestDemand(t, s, a, "gpt-5-mini")
 	started := make(chan struct{})
 	release := make(chan struct{})
 	done := make(chan struct{})

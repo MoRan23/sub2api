@@ -108,3 +108,78 @@ func TestCodexTurnStateConfigurationRejectsShadowAndInvalidFields(t *testing.T) 
 	clean := StripCodexTurnStateManagedExtra(map[string]any{CodexTurnStateExtraKey: "bad", CodexTurnStateGenerationExtraKey: "bad", "codex_turn_state_token": "secret", "usage": 1})
 	require.Equal(t, map[string]any{"usage": 1}, clean)
 }
+
+func TestCodexTurnStateCredentialEpochExistsWithoutCacheConfiguration(t *testing.T) {
+	a := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "initial"},
+		Extra: map[string]any{CodexTurnStateCredentialEpochExtraKey: "untrusted"}}
+	require.NoError(t, PrepareCodexTurnStateForCreate(a, nil))
+	epoch := CodexTurnStateCredentialEpochForAccount(a)
+	require.NotEmpty(t, epoch)
+	require.NotEqual(t, "untrusted", epoch)
+	require.NotContains(t, a.Extra, CodexTurnStateExtraKey)
+	require.Empty(t, CodexTurnStateGenerationForAccount(a))
+
+	legacy := *a
+	legacy.Extra = nil
+	target := legacy
+	require.NoError(t, PreserveAccountConfiguration(&legacy, &target, AccountConfigurationIntent{}))
+	require.NotEmpty(t, CodexTurnStateCredentialEpochForAccount(&target))
+	require.NotContains(t, target.Extra, CodexTurnStateExtraKey)
+}
+
+func TestCodexTurnStateCredentialEpochPreservesConfigurationAndUsageChanges(t *testing.T) {
+	current := codexConfigAccount(t)
+	epoch := CodexTurnStateCredentialEpochForAccount(current)
+	proxyID := int64(9)
+	for _, config := range []CodexTurnStateConfig{
+		{AccountType: "auto"},
+		{Enabled: true, AccountType: "team_business"},
+		{Enabled: true, AccountType: "auto", CollectorProxyID: &proxyID},
+	} {
+		target := *current
+		target.Extra = map[string]any{CodexTurnStateCredentialEpochExtraKey: "spoofed"}
+		require.NoError(t, PreserveAccountConfiguration(current, &target, AccountConfigurationIntent{CodexTurnState: &config}))
+		require.Equal(t, epoch, CodexTurnStateCredentialEpochForAccount(&target))
+	}
+	for _, key := range []string{"plan_type", "usage", "model_mapping", "user_agent", "_token_version"} {
+		target := *current
+		target.Credentials = maps.Clone(current.Credentials)
+		target.Credentials[key] = "updated"
+		require.NoError(t, PreserveAccountConfiguration(current, &target, AccountConfigurationIntent{}))
+		require.Equal(t, epoch, CodexTurnStateCredentialEpochForAccount(&target), key)
+	}
+	require.NotContains(t, StripCodexTurnStateManagedExtra(current.Extra), CodexTurnStateCredentialEpochExtraKey)
+}
+
+func TestCodexTurnStateCredentialEpochRotatesOnlyForAuthOrQualification(t *testing.T) {
+	current := codexConfigAccount(t)
+	epoch := CodexTurnStateCredentialEpochForAccount(current)
+	for _, key := range CodexTurnStateCredentialKeys {
+		target := *current
+		target.Credentials = maps.Clone(current.Credentials)
+		target.Credentials[key] = "different"
+		require.NoError(t, PreserveAccountConfiguration(current, &target, AccountConfigurationIntent{}))
+		require.NotEmpty(t, CodexTurnStateCredentialEpochForAccount(&target), key)
+		require.NotEqual(t, epoch, CodexTurnStateCredentialEpochForAccount(&target), key)
+	}
+	for _, authModeKey := range []string{"auth_mode", "openai_auth_mode"} {
+		for _, mode := range []string{OpenAIAuthModePersonalAccessToken, "  AgentIdentity  "} {
+			ineligible := *current
+			ineligible.Credentials = maps.Clone(current.Credentials)
+			ineligible.Credentials[authModeKey] = mode
+			require.NoError(t, PreserveAccountConfiguration(current, &ineligible, AccountConfigurationIntent{}))
+			require.Empty(t, CodexTurnStateCredentialEpochForAccount(&ineligible))
+			require.NotContains(t, ineligible.Extra, CodexTurnStateCredentialEpochExtraKey)
+			restored := ineligible
+			restored.Credentials = maps.Clone(current.Credentials)
+			require.NoError(t, PreserveAccountConfiguration(&ineligible, &restored, AccountConfigurationIntent{}))
+			require.NotEmpty(t, CodexTurnStateCredentialEpochForAccount(&restored))
+			require.NotEqual(t, epoch, CodexTurnStateCredentialEpochForAccount(&restored))
+		}
+	}
+	parent := int64(8)
+	shadow := *current
+	shadow.ParentAccountID = &parent
+	require.NoError(t, PreserveAccountConfiguration(current, &shadow, AccountConfigurationIntent{}))
+	require.NotContains(t, shadow.Extra, CodexTurnStateCredentialEpochExtraKey)
+}

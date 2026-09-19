@@ -46,6 +46,7 @@ func (s *OpenAIGatewayService) prepareOpenAICodexStateHTTPRequest(c *gin.Context
 			return request
 		}
 	}
+	s.codexTurnStateService.bindHistoryCredentials(request.Context(), attempt, request.Header)
 	finalBody := body
 	if token := attempt.Snapshot.Token; token != "" {
 		// Only an existing HTTP body carrier is synchronized; WS creates its own

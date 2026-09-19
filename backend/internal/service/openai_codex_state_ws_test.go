@@ -235,7 +235,12 @@ func TestCodexWSStateDisabledAndUnavailablePreserveInput(t *testing.T) {
 	repo.mu.Unlock()
 	final, attempt, err = svc.prepareOpenAICodexWSStateFrame(context.Background(), nil, account, payload, "", codexWSStateTestHeaders(account))
 	require.NoError(t, err)
-	require.Nil(t, attempt)
+	require.NotNil(t, attempt)
+	require.False(t, attempt.Enabled)
+	require.Empty(t, attempt.Snapshot.Token)
+	require.Equal(t, "maintenance_unavailable", attempt.MaintenanceReason)
+	svc.finishOpenAICodexWSState(context.Background(), attempt, true)
+	require.Zero(t, repo.activeCount())
 	require.Equal(t, payload, final)
 }
 

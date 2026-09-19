@@ -99,6 +99,7 @@ func (index *codexTurnStateObservationIndex) record(sequence uint64, ownerAccoun
 		ResponseCipherBlocks:     value.ResponseCipherBlocks,
 		ResponseValidationReason: value.ResponseValidationReason,
 		ResponseSource:           value.ResponseSource,
+		RequestSource:            value.RequestSource,
 		OutboundLength:           value.OutboundLength,
 	}
 	index.lru.MoveToFront(element)

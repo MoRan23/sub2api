@@ -200,6 +200,9 @@ export interface CodexTurnStateModelStatus {
   model: string
   state: 'ready' | 'expired' | 'missing' | 'paused' | 'model_excluded' | 'model_policy_unavailable'
   model_allowed?: boolean
+  cache_available?: boolean
+  collection_status?: 'idle' | 'pending' | 'collecting' | 'backoff' | 'paused' | 'blocked'
+  collection_reason?: string
   shape: string
   source: string
   token_length: number
@@ -217,6 +220,7 @@ export interface CodexTurnStateModelStatus {
 export interface CodexTurnStateObservation {
   model: string
   observed_at: string
+  request_source?: 'business' | 'collector'
   outbound_length: number
   response_length: number
   response_shape: string

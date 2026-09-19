@@ -1384,7 +1384,7 @@ describe("admin SettingsView payment visible method controls", () => {
     await flushPromises();
     await openGatewayTab(wrapper);
     const input = wrapper.get<HTMLTextAreaElement>('[data-testid="codex-turn-state-models-input"]');
-    expect(input.element.value).toBe("gpt-6-astra\ngpt-5.6-sol\ngpt-5.6-terra");
+    expect(input.element.value).toBe("gpt-6-astra\ngpt-5.6-sol");
     expect(input.element.disabled).toBe(false);
     expect(wrapper.find('[data-testid="codex-turn-state-models-paused"]').exists()).toBe(false);
 
@@ -1411,6 +1411,21 @@ describe("admin SettingsView payment visible method controls", () => {
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
     expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ codex_turn_state_models: [] }));
+  });
+
+  it("preserves a previously saved Terra model despite the smaller default list", async () => {
+    const models = ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"];
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, codex_turn_state_models: models });
+    updateSettings.mockResolvedValueOnce({ ...baseSettingsResponse });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const input = wrapper.get<HTMLTextAreaElement>('[data-testid="codex-turn-state-models-input"]');
+    expect(input.element.value).toBe(models.join("\n"));
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ codex_turn_state_models: models }));
+    expect(input.element.value).toBe(models.join("\n"));
   });
 
   it("saves exact turn-state model IDs without prefixes, case folding, or duplicate empty lines", async () => {

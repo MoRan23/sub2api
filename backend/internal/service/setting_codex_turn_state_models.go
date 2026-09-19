@@ -25,7 +25,7 @@ const (
 var ErrCodexTurnStateModelsUnavailable = errors.New("Codex turn-state model policy unavailable")
 
 func DefaultCodexTurnStateModels() []string {
-	return []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"}
+	return []string{"gpt-6-astra", "gpt-5.6-sol"}
 }
 
 // NormalizeCodexTurnStateModels preserves exact case and order. An empty slice

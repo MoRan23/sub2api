@@ -68,6 +68,7 @@ func (s *CodexTurnStateService) Start(ctx context.Context) {
 			}
 		}
 	}()
+	s.startHistoryActivation(runCtx)
 }
 
 func (s *CodexTurnStateService) Stop() {
@@ -124,6 +125,10 @@ func (s *CodexTurnStateService) Prepare(ctx context.Context, account *Account, f
 		return nil, nil
 	}
 	accountEnabled := CodexTurnStateConfigForAccount(owner).Enabled
+	passive := func(reason string) *CodexTurnStateAttempt {
+		return &CodexTurnStateAttempt{OwnerAccountID: owner.ID, Model: strings.TrimSpace(finalModel), AccountEnabled: accountEnabled,
+			MaintenanceReason: reason, accountType: CodexTurnStateAccountTypeForAccount(owner), credentialEpoch: CodexTurnStateCredentialEpochForAccount(owner), historyService: s, preparedAt: s.now()}
+	}
 	// Preparing a physical request must not grant maintenance from a stale
 	// cross-instance settings cache after an administrator removes a model.
 	allowed, policyRevision, policyErr := false, "", error(nil)
@@ -141,31 +146,32 @@ func (s *CodexTurnStateService) Prepare(ctx context.Context, account *Account, f
 				reason = "model_policy_unavailable"
 			}
 		}
-		return &CodexTurnStateAttempt{OwnerAccountID: owner.ID, Model: strings.TrimSpace(finalModel), AccountEnabled: accountEnabled, MaintenanceReason: reason, accountType: CodexTurnStateAccountTypeForAccount(owner)}, nil
+		return passive(reason), nil
 	}
 	if s.repo == nil || s.encryptor == nil {
-		return nil, nil
+		return passive("maintenance_unavailable"), nil
 	}
 	if !account.IsShadow() {
 		for _, key := range CodexTurnStateCredentialKeys {
 			if !reflect.DeepEqual(account.Credentials[key], owner.Credentials[key]) {
-				return nil, errors.New("turn_state_physical_credentials_stale")
+				return passive("physical_credentials_stale"), nil
 			}
 		}
 	}
 	generation := CodexTurnStateGenerationForAccount(owner)
 	if generation == "" {
-		return nil, errors.New("turn_state_generation_unavailable")
+		return passive("generation_unavailable"), nil
 	}
 	key := CodexTurnStateKey{OwnerAccountID: owner.ID, Model: strings.TrimSpace(finalModel), Generation: generation}
 	now := s.now()
-	a := &CodexTurnStateAttempt{OwnerAccountID: owner.ID, Model: key.Model, Generation: generation, Enabled: true, AccountEnabled: true, key: key, id: uuid.NewString(), accountType: CodexTurnStateAccountTypeForAccount(owner), policyRevision: policyRevision}
+	a := passive("")
+	a.Generation, a.Enabled, a.key, a.id, a.policyRevision = generation, true, key, uuid.NewString(), policyRevision
 	record, err := s.repo.BeginBusiness(ctx, key, a.id, now, now.Add(2*time.Minute))
 	if err != nil {
-		return nil, err
+		return passive("maintenance_unavailable"), nil
 	}
 	if record == nil {
-		return nil, errors.New("turn_state_generation_changed")
+		return passive("generation_changed"), nil
 	}
 	a.baseVersion = record.Version
 	a.Snapshot.Version = record.Version
@@ -181,10 +187,9 @@ func (s *CodexTurnStateService) Prepare(ctx context.Context, account *Account, f
 	s.mu.Lock()
 	s.business[a.id] = a
 	s.mu.Unlock()
-	if a.Snapshot.Token == "" {
-		// A newly arrived normal request takes priority over a cold collection.
-		s.cancelAndNotify(ctx, key)
-	}
+	// Every natural request takes precedence over a background request, including
+	// a renewal while a still-valid cached token is in use.
+	s.cancelAndNotify(ctx, key)
 	return a, nil
 }
 
@@ -277,6 +282,7 @@ func (s *CodexTurnStateService) observe(a *CodexTurnStateAttempt, token, source 
 	} else if shape.Shape == CodexTurnStateShapeExtended {
 		a.safeObservation.RefreshReason = "extended_shape"
 	}
+	s.observeHistoryEnvelopeLocked(a, token, now)
 	if !a.Enabled {
 		// Passive observations retain only the safe summary, never token values.
 		a.safeObservation.RefreshReason = ""
@@ -320,9 +326,13 @@ func (s *CodexTurnStateService) Finish(ctx context.Context, a *CodexTurnStateAtt
 		return nil
 	}
 	a.finished = true
+	a.historyDelivered = delivered
 	tokens := append([]string(nil), a.candidates...)
+	businessSentAt := a.businessSentAt
+	observedAt := a.safeObservation.ObservedAt
 	a.candidates = nil
 	a.mu.Unlock()
+	s.recordDeliveredHistory(a, delivered)
 	if !a.Enabled {
 		return nil
 	}
@@ -332,28 +342,31 @@ func (s *CodexTurnStateService) Finish(ctx context.Context, a *CodexTurnStateAtt
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	var publishErr error
-	if delivered {
-		_, publishErr = s.publish(cleanupCtx, a.key, tokens, "business", a.baseVersion, false, a.policyRevision)
+	if !businessSentAt.IsZero() {
+		publishErr = s.repo.MarkBusinessSent(cleanupCtx, a.key, businessSentAt)
+	}
+	if delivered && publishErr == nil {
+		demandAt := time.Time{}
+		if !businessSentAt.IsZero() {
+			demandAt = observedAt
+		}
+		_, publishErr = s.publish(cleanupCtx, a.key, tokens, "business", a.baseVersion, false, a.policyRevision, demandAt)
 	}
 	endErr := s.repo.EndBusiness(cleanupCtx, a.key, a.id)
+	if delivered && businessSentAt.IsZero() && endErr == nil {
+		s.completeBusinessSent(a)
+	}
 	if delivered && publishErr == nil && endErr == nil && s.modelPolicyMatches(cleanupCtx, a.Model, a.policyRevision) {
 		if record, readErr := s.repo.Get(cleanupCtx, a.key); readErr == nil && record != nil {
 			reason := ""
-			if record.EncryptedToken == "" {
-				reason = record.RefreshReason
-				if reason == "" {
-					reason = "missing"
-				}
-			} else if !record.ExpiresAt.After(s.now()) {
-				reason = "expired"
-			} else if !record.ExpiresAt.After(s.now().Add(CodexTurnStateRefreshAhead)) {
-				reason = "expiring"
-			}
+			reason = record.DemandReason
 			a.mu.Lock()
 			a.safeObservation.RefreshReason = reason
 			a.mu.Unlock()
+			if reason != "" {
+				s.enqueue(cleanupCtx, a.key)
+			}
 		}
-		s.enqueue(cleanupCtx, a.key)
 	}
 	return errors.Join(publishErr, endErr)
 }
@@ -361,7 +374,7 @@ func (s *CodexTurnStateService) Finish(ctx context.Context, a *CodexTurnStateAtt
 // publish returns true only when a target was committed or already present.
 // Natural responses may replace a concurrent record only with a newer signed
 // timestamp; collector results require the exact version they started with.
-func (s *CodexTurnStateService) publish(ctx context.Context, key CodexTurnStateKey, tokens []string, source string, expected int64, strict bool, policyRevision string) (bool, error) {
+func (s *CodexTurnStateService) publish(ctx context.Context, key CodexTurnStateKey, tokens []string, source string, expected int64, strict bool, policyRevision string, demandAt time.Time) (bool, error) {
 	if !s.modelPolicyMatches(ctx, key.Model, policyRevision) {
 		return false, nil
 	}
@@ -430,9 +443,29 @@ func (s *CodexTurnStateService) publish(ctx context.Context, key CodexTurnStateK
 			record.CipherBlocks = bestShape.CipherBlocks
 			record.Source = source
 			record.Shape = bestShape.Shape
-			record.RefreshReason = ""
-			record.LastError = ""
-			record.NextCollectAt = time.Time{}
+			now := s.now()
+			if bestShape.ExpiresAt.After(now.Add(CodexTurnStateRefreshAhead)) {
+				record.RefreshReason = ""
+				completeCodexTurnStateDemand(record, now)
+			} else {
+				// A newer natural token can still be due for renewal. Preserve
+				// the existing retry fence when business preempts a collector.
+				record.DemandReason, record.RefreshReason = "expiring", "expiring"
+				if record.DemandAt.IsZero() {
+					record.DemandAt = now
+				}
+				switch {
+				case record.CollectorPaused:
+					record.CollectionStatus, record.CollectionReason = "paused", record.LastError
+				case record.NextCollectAt.After(now):
+					record.CollectionStatus, record.CollectionReason = "backoff", record.LastError
+					if record.CollectionReason == "" {
+						record.CollectionReason = "target_still_expiring"
+					}
+				default:
+					record.CollectionStatus, record.CollectionReason = "pending", "queued"
+				}
+			}
 			if source == "collector" {
 				record.LastCollectedAt = s.now()
 			}
@@ -450,7 +483,7 @@ func (s *CodexTurnStateService) publish(ctx context.Context, key CodexTurnStateK
 			}
 			continue
 		}
-		if extended && record.Version == expected {
+		if extended && record.Version == expected && !demandAt.IsZero() {
 			record.EncryptedToken = ""
 			record.ExpiresAt = time.Time{}
 			record.Shape = CodexTurnStateShapeExtended
@@ -460,6 +493,8 @@ func (s *CodexTurnStateService) publish(ctx context.Context, key CodexTurnStateK
 				record.IssuedAt = extendedShape.IssuedAt
 			}
 			record.RefreshReason = "extended_shape"
+			record.DemandReason, record.DemandAt = "extended_shape", demandAt
+			record.CollectionStatus, record.CollectionReason = "pending", "queued"
 			if source == "collector" {
 				record.LastCollectedAt = s.now()
 			}
@@ -511,13 +546,18 @@ func (s *CodexTurnStateService) enqueue(ctx context.Context, key CodexTurnStateK
 func (s *CodexTurnStateService) maintenance(ctx context.Context) {
 	ticker := time.NewTicker(CodexTurnStateScanInterval)
 	defer ticker.Stop()
+	due := time.NewTicker(CodexTurnStateDueInterval)
+	defer due.Stop()
+	s.scan(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			s.scan(ctx)
+		case <-due.C:
+			s.pumpDue(ctx)
 		}
-		s.scan(ctx)
 	}
 }
 
@@ -535,6 +575,9 @@ func (s *CodexTurnStateService) scan(ctx context.Context) {
 			owner, err := s.currentOwner(ctx, a.OwnerAccountID)
 			if err == nil && owner != nil && CodexTurnStateConfigForAccount(owner).Enabled && CodexTurnStateGenerationForAccount(owner) == a.Generation && s.modelPolicyMatches(ctx, a.Model, a.policyRevision) {
 				now := s.now()
+				if !a.businessSentAt.IsZero() {
+					_ = s.repo.MarkBusinessSent(ctx, a.key, a.businessSentAt)
+				}
 				_, _ = s.repo.BeginBusiness(ctx, a.key, a.id, now, now.Add(2*time.Minute))
 			} else {
 				s.cancelCollection(a.key)
@@ -554,13 +597,51 @@ func (s *CodexTurnStateService) scan(ctx context.Context) {
 			s.cancelCollection(key)
 		}
 	}
+	s.scanHistory(ctx)
+	s.pumpDue(ctx)
+}
+
+func (s *CodexTurnStateService) pumpDue(ctx context.Context) {
+	if s == nil || s.repo == nil {
+		return
+	}
 	records, err := s.repo.ListActive(ctx, s.now().Add(-CodexTurnStateActiveWindow), 512)
 	if err != nil {
 		return
 	}
 	for _, record := range records {
-		s.enqueue(ctx, record.Key())
+		if s.ensureCodexTurnStateDemand(ctx, &record) {
+			s.enqueue(ctx, record.Key())
+		}
 	}
+}
+
+// An empty cache never creates demand. The only time-based demand starts from
+// a previously accepted token reaching its renewal window.
+func (s *CodexTurnStateService) ensureCodexTurnStateDemand(ctx context.Context, record *CodexTurnStateRecord) bool {
+	if record == nil || record.LastBusinessAt.Before(s.now().Add(-CodexTurnStateActiveWindow)) {
+		return false
+	}
+	if record.DemandReason != "" {
+		return true
+	}
+	if record.EncryptedToken == "" || record.ExpiresAt.After(s.now().Add(CodexTurnStateRefreshAhead)) {
+		return false
+	}
+	allowed, revision, err := s.checkModelPolicy(ctx, record.Model, true)
+	if err != nil || !allowed {
+		return false
+	}
+	record.DemandReason, record.RefreshReason, record.DemandAt = "expiring", "expiring", s.now()
+	record.CollectionStatus, record.CollectionReason = "pending", "queued"
+	record.ModelPolicyRevision = revision
+	record.CollectorPublication = true
+	ok, err := s.repo.SaveCAS(ctx, *record, record.Version)
+	record.CollectorPublication = false
+	if ok {
+		record.Version++
+	}
+	return err == nil && ok
 }
 
 func (s *CodexTurnStateService) worker(ctx context.Context) {
@@ -615,19 +696,34 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 		return
 	}
 	now := s.now()
-	if record.LastBusinessAt.Before(now.Add(-CodexTurnStateActiveWindow)) || record.CollectorPaused || record.NextCollectAt.After(now) || (record.EncryptedToken != "" && record.ExpiresAt.After(now.Add(CodexTurnStateRefreshAhead))) {
+	if record.LastBusinessAt.Before(now.Add(-CodexTurnStateActiveWindow)) {
+		if record.DemandReason != "" && s.authoritativeModelPolicyMatches(ctx, key.Model, policyRevision) {
+			clearIdleCodexTurnStateDemand(record)
+			record.ModelPolicyRevision = policyRevision
+			record.CollectorPublication = true
+			_, _ = s.repo.SaveCAS(ctx, *record, record.Version)
+		}
 		return
 	}
+	if record.CollectorPaused || record.NextCollectAt.After(now) || !s.ensureCodexTurnStateDemand(ctx, record) {
+		return
+	}
+	var cooldownUntil time.Time
 	for _, until := range []*time.Time{owner.RateLimitResetAt, owner.OverloadUntil, owner.TempUnschedulableUntil} {
-		if until != nil && until.After(now) {
-			record.NextCollectAt = *until
-			record.LastError = "account_cooldown"
-			if s.authoritativeModelPolicyMatches(ctx, key.Model, policyRevision) {
-				record.ModelPolicyRevision = policyRevision
-				_, _ = s.repo.SaveCAS(ctx, *record, record.Version)
-			}
-			return
+		if until != nil && until.After(now) && until.After(cooldownUntil) {
+			cooldownUntil = *until
 		}
+	}
+	if !cooldownUntil.IsZero() {
+		record.NextCollectAt = cooldownUntil
+		record.LastError = "account_cooldown"
+		record.CollectionStatus, record.CollectionReason = "backoff", "account_cooldown"
+		if s.authoritativeModelPolicyMatches(ctx, key.Model, policyRevision) {
+			record.ModelPolicyRevision = policyRevision
+			record.CollectorPublication = true
+			_, _ = s.repo.SaveCAS(ctx, *record, record.Version)
+		}
+		return
 	}
 	// Authentication failures pause the credential owner, not only one model.
 	all, err := s.repo.ListByAccount(ctx, key.OwnerAccountID)
@@ -674,7 +770,9 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 				return
 			case <-ticker.C:
 				current, checkErr := s.currentOwner(probeCtx, key.OwnerAccountID)
+				businessActive, businessErr := s.repo.HasBusiness(probeCtx, key, s.now())
 				if checkErr != nil || current == nil || current.Status != StatusActive || !current.Schedulable ||
+					businessErr != nil || businessActive ||
 					(current.ExpiresAt != nil && !current.ExpiresAt.After(s.now())) ||
 					!CodexTurnStateConfigForAccount(current).Enabled || CodexTurnStateGenerationForAccount(current) != key.Generation || !s.modelPolicyMatches(probeCtx, key.Model, policyRevision) {
 					cancel()
@@ -685,19 +783,15 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 	}()
 	defer func() { cancel(); <-watchDone }()
 	// Persist pacing before network I/O: process death must not immediately retry.
-	record.NextCollectAt = now.Add(CodexTurnStateRetryInterval)
+	record.NextCollectAt = now.Add(CodexTurnStateCollectTimeout + CodexTurnStateRetryInterval)
 	record.LastCollectedAt = now
-	if record.RefreshReason == "" {
-		if record.EncryptedToken == "" {
-			record.RefreshReason = "missing"
-		} else {
-			record.RefreshReason = "expiring"
-		}
-	}
+	record.RefreshReason = record.DemandReason
+	record.CollectionStatus, record.CollectionReason = "collecting", "collecting"
 	if !s.authoritativeModelPolicyMatches(probeCtx, key.Model, policyRevision) {
 		return
 	}
 	record.ModelPolicyRevision = policyRevision
+	record.CollectorPublication = true
 	if ok, saveErr := s.repo.SaveCAS(probeCtx, *record, record.Version); saveErr != nil || !ok {
 		return
 	}
@@ -709,58 +803,14 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 		validateModelPolicy: func(sendCtx context.Context) bool {
 			return s.authoritativeModelPolicyMatches(sendCtx, key.Model, policyRevision)
 		}})
+	s.recordCollectorObservation(owner, key.Model, result)
 	if probeCtx.Err() != nil && !errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
 		return
 	}
 	if errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
 		collectErr = context.DeadlineExceeded
 	}
-	publishCtx, publishCancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-	defer publishCancel()
-	if collectErr == nil && result.StatusCode >= 200 && result.StatusCode < 300 {
-		accepted, publishErr := s.publish(publishCtx, key, result.Tokens, "collector", expected, true, policyRevision)
-		if accepted || publishErr != nil {
-			return
-		}
-	}
-	if !s.modelPolicyMatches(publishCtx, key.Model, policyRevision) {
-		return
-	}
-	latest, getErr := s.repo.Get(publishCtx, key)
-	if getErr != nil || latest == nil || latest.Version != expected {
-		return
-	}
-	latest.LastError = "no_target_state"
-	if collectErr != nil {
-		latest.LastError = "collection_failed"
-	}
-	if errors.Is(collectErr, ErrCodexTurnStateCollectorProxyUnavailable) {
-		latest.LastError = "collector_proxy_unavailable"
-	}
-	if errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
-		latest.LastError = "collection_timeout"
-	}
-	switch result.StatusCode {
-	case 401, 403:
-		latest.CollectorPaused = true
-		latest.LastError = "collector_auth_rejected"
-	case 429:
-		latest.LastError = "collector_rate_limited"
-	}
-	retry := CodexTurnStateRetryInterval
-	if result.RetryAfter > retry {
-		retry = result.RetryAfter
-	}
-	latest.NextCollectAt = s.now().Add(retry)
-	for _, until := range []*time.Time{owner.RateLimitResetAt, owner.OverloadUntil, owner.TempUnschedulableUntil} {
-		if until != nil && until.After(latest.NextCollectAt) {
-			latest.NextCollectAt = *until
-		}
-	}
-	if s.authoritativeModelPolicyMatches(publishCtx, key.Model, policyRevision) {
-		latest.ModelPolicyRevision = policyRevision
-		_, _ = s.repo.SaveCAS(publishCtx, *latest, expected)
-	}
+	s.finishCollectorOutcome(ctx, owner, key, expected, policyRevision, result, collectErr)
 }
 
 func (s *CodexTurnStateService) GetStatus(ctx context.Context, accountID int64) (*CodexTurnStateStatus, error) {

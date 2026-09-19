@@ -31,7 +31,7 @@ func TestSettingsCodexTurnStateModelsDefaultAndStoredEmpty(t *testing.T) {
 		stored map[string]string
 		want   []string
 	}{
-		{name: "missing uses defaults", stored: map[string]string{}, want: []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"}},
+		{name: "missing uses defaults", stored: map[string]string{}, want: []string{"gpt-6-astra", "gpt-5.6-sol"}},
 		{name: "explicit empty denies all", stored: map[string]string{service.SettingKeyCodexTurnStateModels: `[]`, service.SettingKeyCodexTurnStateModelsRevision: "hidden-revision"}, want: []string{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -74,6 +74,7 @@ func (r *accountRepository) PatchOpenAIOAuthCredentialsIfUnchanged(
 	if err != nil || affected == 0 {
 		return false, err
 	}
+	notifyCodexTurnStateAccountAfterCommit(ctx, id)
 	if contextTx == nil {
 		r.syncSchedulerAccountSnapshotDetached(ctx, id)
 	}

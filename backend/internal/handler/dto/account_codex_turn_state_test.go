@@ -13,6 +13,7 @@ func TestAccountCodexTurnStateDTOHidesManagedRuntime(t *testing.T) {
 		Extra: map[string]any{
 			service.CodexTurnStateExtraKey:           map[string]any{"enabled": true, "account_type": "personal", "collector_proxy_id": float64(8)},
 			service.CodexTurnStateGenerationExtraKey: "server-generation", "codex_turn_state_token": "secret-token", "usage": 3,
+			service.CodexTurnStateCredentialEpochExtraKey: "private-credential-epoch",
 		}}
 	dto := AccountFromServiceShallow(account)
 	require.True(t, dto.CodexTurnState.Enabled)
@@ -22,6 +23,7 @@ func TestAccountCodexTurnStateDTOHidesManagedRuntime(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "server-generation")
 	require.NotContains(t, string(encoded), "secret-token")
+	require.NotContains(t, string(encoded), "private-credential-epoch")
 	compact := AccountListItemFromAccount(dto)
 	require.Equal(t, dto.CodexTurnState, compact.CodexTurnState)
 }

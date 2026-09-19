@@ -28,8 +28,9 @@ func (s *adminServiceImpl) validateCodexTurnStateConfig(ctx context.Context, acc
 }
 
 const (
-	CodexTurnStateExtraKey           = "codex_turn_state"
-	CodexTurnStateGenerationExtraKey = "codex_turn_state_generation"
+	CodexTurnStateExtraKey                = "codex_turn_state"
+	CodexTurnStateGenerationExtraKey      = "codex_turn_state_generation"
+	CodexTurnStateCredentialEpochExtraKey = "codex_turn_state_credential_epoch"
 )
 
 // CodexTurnStateConfig is explicit administrator configuration. State and tokens
@@ -41,7 +42,8 @@ type CodexTurnStateConfig struct {
 }
 
 func IsCodexTurnStateAccount(account *Account) bool {
-	return account != nil && account.IsOpenAIOAuth() && !account.IsShadow() && !account.IsOpenAIPersonalAccessToken() && !account.IsOpenAIAgentIdentity()
+	return account != nil && account.IsOpenAIOAuth() && !account.IsShadow() && !account.IsOpenAIPersonalAccessToken() && !account.IsOpenAIAgentIdentity() &&
+		!strings.EqualFold(strings.TrimSpace(account.GetCredential("openai_auth_mode")), OpenAIAuthModeAgentIdentity)
 }
 
 func CodexTurnStateConfigForAccount(account *Account) CodexTurnStateConfig {
@@ -68,6 +70,19 @@ func CodexTurnStateGenerationForAccount(account *Account) string {
 		return ""
 	}
 	value, _ := account.Extra[CodexTurnStateGenerationExtraKey].(string)
+	return value
+}
+
+// CodexTurnStateCredentialEpochForAccount is a server-owned, opaque identity
+// fence. It does not disclose or fingerprint credentials and is never exported.
+func CodexTurnStateCredentialEpochForAccount(account *Account) string {
+	if !IsCodexTurnStateAccount(account) {
+		return ""
+	}
+	value, _ := account.Extra[CodexTurnStateCredentialEpochExtraKey].(string)
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
 	return value
 }
 
@@ -141,6 +156,9 @@ func PrepareCodexTurnStateForCreate(account *Account, config *CodexTurnStateConf
 	if account.Extra == nil {
 		account.Extra = make(map[string]any)
 	}
+	if IsCodexTurnStateAccount(account) {
+		account.Extra[CodexTurnStateCredentialEpochExtraKey] = uuid.NewString()
+	}
 	if IsCodexTurnStateAccount(account) && config != nil {
 		value := CodexTurnStateConfig{AccountType: "auto"}
 		if config != nil {
@@ -156,14 +174,19 @@ func PrepareCodexTurnStateForCreate(account *Account, config *CodexTurnStateConf
 // environment, and ordinary account metadata do not invalidate cached states.
 var CodexTurnStateCredentialKeys = []string{"access_token", "refresh_token", "id_token", "chatgpt_account_id", "chatgpt_user_id", "organization_id", "client_id", "account_id", "auth_mode", "openai_auth_mode"}
 
-func codexTurnStateCredentialsChanged(current, target *Account) bool {
+func codexTurnStateAuthCredentialsChanged(current, target *Account) bool {
 	for _, key := range CodexTurnStateCredentialKeys {
 		if !reflect.DeepEqual(current.Credentials[key], target.Credentials[key]) {
 			return true
 		}
 	}
-	// Auto classification is part of the configuration's meaning.
-	return CodexTurnStateAccountTypeForAccount(current) != CodexTurnStateAccountTypeForAccount(target)
+	return false
+}
+
+func codexTurnStateCredentialsChanged(current, target *Account) bool {
+	// Auto classification affects cache admission, not the credential epoch.
+	return codexTurnStateAuthCredentialsChanged(current, target) ||
+		CodexTurnStateAccountTypeForAccount(current) != CodexTurnStateAccountTypeForAccount(target)
 }
 
 func preserveCodexTurnStateConfiguration(current, target *Account, requested *CodexTurnStateConfig) error {
@@ -174,11 +197,16 @@ func preserveCodexTurnStateConfiguration(current, target *Account, requested *Co
 	if !IsCodexTurnStateAccount(target) {
 		return nil
 	}
-	if _, configured := current.Extra[CodexTurnStateExtraKey]; !configured && requested == nil {
-		return nil
-	}
 	if target.Extra == nil {
 		target.Extra = make(map[string]any)
+	}
+	epoch := CodexTurnStateCredentialEpochForAccount(current)
+	if epoch == "" || !IsCodexTurnStateAccount(current) || codexTurnStateAuthCredentialsChanged(current, target) {
+		epoch = uuid.NewString()
+	}
+	target.Extra[CodexTurnStateCredentialEpochExtraKey] = epoch
+	if _, configured := current.Extra[CodexTurnStateExtraKey]; !configured && requested == nil {
+		return nil
 	}
 	oldConfig := CodexTurnStateConfigForAccount(current)
 	config := oldConfig

@@ -144,7 +144,7 @@ func TestCodexTurnStateModelPolicySingleflight(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			models, _, err := svc.CodexTurnStateModelPolicy(context.Background())
-			if err != nil || len(models) != 3 {
+			if err != nil || len(models) != 2 {
 				t.Errorf("unexpected policy: %v, %v", models, err)
 			}
 		}()

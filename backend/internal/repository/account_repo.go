@@ -616,7 +616,13 @@ func (r *accountRepository) updateLockedAccount(
 	builder.SetQuotaDimension(dbaccount.QuotaDimension(account.QuotaDimensionOrDefault()))
 	builder.SetNillableParentAccountID(account.ParentAccountID)
 
-	return builder.Save(ctx)
+	updated, err := builder.Save(ctx)
+	if err == nil && dbent.TxFromContext(ctx) != nil &&
+		(service.CodexTurnStateGenerationForAccount(current) != service.CodexTurnStateGenerationForAccount(account) ||
+			service.CodexTurnStateCredentialEpochForAccount(current) != service.CodexTurnStateCredentialEpochForAccount(account)) {
+		notifyCodexTurnStateAccountAfterCommit(ctx, account.ID)
+	}
+	return updated, err
 }
 
 func lockAndMergeAccountProbeExtra(
@@ -866,6 +872,9 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 	}
 	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		return err
+	}
+	if dbent.TxFromContext(ctx) != nil {
+		notifyCodexTurnStateAccountAfterCommit(ctx, id)
 	}
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
@@ -3317,6 +3326,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		payload := map[string]any{"account_ids": ids}
 		if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, payload); err != nil {
 			return 0, err
+		}
+		if (updates.CodexTurnState != nil || credentialPlaceholder != "") && (dbent.TxFromContext(ctx) != nil || r.client == nil) {
+			notifyCodexTurnStateAccountAfterCommit(ctx, ids...)
 		}
 	}
 	if tx != nil {

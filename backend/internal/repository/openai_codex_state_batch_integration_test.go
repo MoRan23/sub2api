@@ -40,6 +40,7 @@ func TestCodexStateBatchPostgresOwnerFilterOrderingAndReadOnly(t *testing.T) {
 			record, err := repo.BeginBusiness(ctx, key, fmt.Sprintf("batch-%d-%s", i, model), now, now.Add(time.Minute))
 			require.NoError(t, err)
 			require.NotNil(t, record)
+			require.NoError(t, repo.MarkBusinessSent(ctx, key, now))
 		}
 	}
 	beforeStates, beforeLeases := codexBatchSnapshot(t, ctx, ids)

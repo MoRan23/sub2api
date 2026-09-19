@@ -77,6 +77,7 @@ func (s *OpenAIGatewayService) prepareOpenAICodexWSStateFrame(ctx context.Contex
 			return final, nil, patchErr
 		}
 	}
+	s.codexTurnStateService.bindHistoryCredentials(ctx, attempt, credentialHeaders)
 	final, err := applyOpenAICodexWSStateSnapshot(payload, attempt.Snapshot.Token, firstGuardedHeaderToken)
 	if err != nil {
 		s.finishOpenAICodexWSState(ctx, attempt, false)

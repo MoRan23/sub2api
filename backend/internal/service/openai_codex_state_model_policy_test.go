@@ -327,9 +327,7 @@ func TestCodexTurnStateExcludedSlowCollectorCannotPublishAfterReaddition(t *test
 	policy := newCodexStateTestModelPolicy("gpt-5")
 	s.modelPolicy = policy
 	ctx := context.Background()
-	attempt, err := s.Prepare(ctx, account, "gpt-5")
-	require.NoError(t, err)
-	require.NoError(t, s.Finish(ctx, attempt, false))
+	attempt := seedCodexStateTestDemand(t, s, account, "gpt-5")
 	started, cancelled, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
 	var releaseOnce sync.Once
 	t.Cleanup(func() {

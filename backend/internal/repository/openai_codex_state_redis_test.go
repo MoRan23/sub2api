@@ -90,3 +90,40 @@ func TestCodexStateRepositoryUnavailableAndInvalidInputs(t *testing.T) {
 	var nilRepository *openAICodexStateRepository
 	require.Error(t, nilRepository.PublishCancel(ctx, service.CodexTurnStateKey{}))
 }
+
+func TestCodexStateActivationCrossInstanceScopeOnly(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	first := &openAICodexStateRepository{rdb: rdb}
+	second := &openAICodexStateRepository{rdb: rdb}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	received := make(chan codexStateActivation, 1)
+	finished := make(chan error, 1)
+	go func() {
+		finished <- second.SubscribeActivations(ctx, func(ownerID int64, generation string) {
+			received <- codexStateActivation{OwnerAccountID: ownerID, Generation: generation}
+		})
+	}()
+	require.Eventually(t, func() bool {
+		result, err := rdb.PubSubNumSub(context.Background(), codexStateActivationChannel).Result()
+		return err == nil && result[codexStateActivationChannel] == 1
+	}, time.Second, time.Millisecond)
+	require.NoError(t, rdb.Publish(ctx, codexStateActivationChannel, `{"owner_account_id":17}`).Err())
+	require.Error(t, first.PublishActivation(ctx, 0, "generation"))
+	require.NoError(t, first.PublishActivation(ctx, 17, "generation-2"))
+	select {
+	case actual := <-received:
+		require.Equal(t, codexStateActivation{OwnerAccountID: 17, Generation: "generation-2"}, actual)
+	case <-time.After(time.Second):
+		t.Fatal("activation was not delivered")
+	}
+	cancel()
+	select {
+	case err := <-finished:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("activation subscription did not stop")
+	}
+}

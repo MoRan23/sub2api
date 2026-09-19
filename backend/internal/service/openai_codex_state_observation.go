@@ -29,6 +29,7 @@ type CodexTurnStateObservation struct {
 	ResponseLength           int        `json:"response_length,omitempty"`
 	ResponseShape            string     `json:"response_shape,omitempty"`
 	ResponseSource           string     `json:"response_source,omitempty"`
+	RequestSource            string     `json:"request_source,omitempty"`
 	ResponseObservedShape    string     `json:"response_observed_shape,omitempty"`
 	ResponseCipherBlocks     int        `json:"response_cipher_blocks,omitempty"`
 	ResponseValidationReason string     `json:"response_validation_reason,omitempty"`
@@ -44,6 +45,8 @@ type codexTurnStateWireObservation struct {
 	summarySequence uint64
 	finished        bool
 	observedAt      time.Time
+	attempt         *CodexTurnStateAttempt
+	sendStartedAt   time.Time
 }
 
 // codexStateBodyPatch is private request-local evidence, never input from a
@@ -107,7 +110,7 @@ func noteOpenAICodexStatePatch(c *gin.Context, attempt *CodexTurnStateAttempt, b
 	if attempt == nil {
 		return
 	}
-	observation := &codexTurnStateWireObservation{ownerAccountID: attempt.OwnerAccountID, value: CodexTurnStateObservation{Enabled: attempt.Enabled, AccountEnabled: attempt.AccountEnabled, MaintenanceReason: attempt.MaintenanceReason, Action: "passthrough", Model: attempt.Model}}
+	observation := &codexTurnStateWireObservation{ownerAccountID: attempt.OwnerAccountID, attempt: attempt, value: CodexTurnStateObservation{Enabled: attempt.Enabled, AccountEnabled: attempt.AccountEnabled, MaintenanceReason: attempt.MaintenanceReason, Action: "passthrough", Model: attempt.Model, RequestSource: "business"}}
 	if attempt.Snapshot.Token != "" {
 		observation.value.Action = "injected"
 		observation.value.Source = attempt.Snapshot.Source
@@ -139,6 +142,9 @@ func populateCodexTurnStateObservation(c *gin.Context, entry *FingerprintObserva
 		bodyLength = len(state.String())
 	}
 	observation.mu.Lock()
+	if observation.sendStartedAt.IsZero() {
+		observation.sendStartedAt = time.Now()
+	}
 	headerLength := observation.value.OutboundHeaderLength
 	if !frame {
 		headerLength = codexTurnStateHeaderLength(headers)
@@ -217,11 +223,30 @@ func bindCodexTurnStateSummarySequence(observation *codexTurnStateWireObservatio
 		return
 	}
 	observation.mu.Lock()
-	defer observation.mu.Unlock()
 	if observation.summarySequence == 0 {
 		observation.summarySequence = globalCodexTurnStateSummaryStore.nextSequence()
 	}
 	globalCodexTurnStateSummaryStore.update(observation.summarySequence, observation.ownerAccountID, observation.value, observation.finished, observation.observedAt)
+	attempt := observation.attempt
+	sentAt := observation.sendStartedAt
+	observation.mu.Unlock()
+	if attempt != nil {
+		attempt.mu.Lock()
+		if !attempt.historyPhysicalBound {
+			attempt.historyPhysicalBound = true
+			if sentAt.IsZero() {
+				sentAt = attempt.preparedAt
+			}
+			attempt.businessSentAt = sentAt
+		}
+		finished, service := attempt.finished, attempt.historyService
+		attempt.mu.Unlock()
+		// WS response delivery can race the successful-write callback.
+		recordCodexDeliveredHistory(attempt)
+		if finished && service != nil {
+			service.completeBusinessSent(attempt)
+		}
+	}
 }
 
 func finishOpenAICodexStateObservation(attempt *CodexTurnStateAttempt) {

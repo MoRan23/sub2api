@@ -12,8 +12,9 @@ const (
 	CodexTurnStateRefreshAhead   = 5 * time.Minute
 	CodexTurnStateActiveWindow   = 30 * time.Minute
 	CodexTurnStateScanInterval   = 30 * time.Second
+	CodexTurnStateDueInterval    = time.Second
 	CodexTurnStateCollectTimeout = 20 * time.Second
-	CodexTurnStateRetryInterval  = 3 * time.Minute
+	CodexTurnStateRetryInterval  = 10 * time.Second
 )
 
 // CodexTurnStateKey always refers to the actual credential owner and final wire model.
@@ -28,23 +29,32 @@ type CodexTurnStateRecord struct {
 	// A transient publication fence, checked transactionally against settings.
 	// It is never persisted as part of a token record or exposed by JSON APIs.
 	ModelPolicyRevision string `json:"-"`
-	OwnerAccountID      int64
-	Model               string
-	Generation          string
-	Version             int64
-	EncryptedToken      string
-	IssuedAt            time.Time
-	ExpiresAt           time.Time
-	TokenLength         int
-	CipherBlocks        int
-	Source              string
-	Shape               string
-	RefreshReason       string
-	LastBusinessAt      time.Time
-	LastCollectedAt     time.Time
-	NextCollectAt       time.Time
-	CollectorPaused     bool
-	LastError           string
+	// Background scheduling and publication cannot advance a record while a
+	// same-model business lease is active. This marker is never persisted.
+	CollectorPublication   bool `json:"-"`
+	BusinessInFlight       bool `json:"-"`
+	OwnerAccountID         int64
+	Model                  string
+	Generation             string
+	Version                int64
+	EncryptedToken         string
+	IssuedAt               time.Time
+	ExpiresAt              time.Time
+	TokenLength            int
+	CipherBlocks           int
+	Source                 string
+	Shape                  string
+	RefreshReason          string
+	DemandReason           string
+	DemandAt               time.Time
+	HistoryProofObservedAt time.Time
+	CollectionStatus       string
+	CollectionReason       string
+	LastBusinessAt         time.Time
+	LastCollectedAt        time.Time
+	NextCollectAt          time.Time
+	CollectorPaused        bool
+	LastError              string
 }
 
 func (r CodexTurnStateRecord) Key() CodexTurnStateKey {
@@ -56,6 +66,7 @@ func (r CodexTurnStateRecord) Key() CodexTurnStateKey {
 // SaveCAS increments Version on success; stale generations/versions return false.
 type CodexTurnStateRepository interface {
 	BeginBusiness(context.Context, CodexTurnStateKey, string, time.Time, time.Time) (*CodexTurnStateRecord, error)
+	MarkBusinessSent(context.Context, CodexTurnStateKey, time.Time) error
 	EndBusiness(context.Context, CodexTurnStateKey, string) error
 	Get(context.Context, CodexTurnStateKey) (*CodexTurnStateRecord, error)
 	SaveCAS(context.Context, CodexTurnStateRecord, int64) (bool, error)
@@ -86,24 +97,34 @@ type CodexTurnStateAttempt struct {
 	Generation     string
 	// Enabled=false is a passive fingerprint observation: no runtime lease,
 	// cached snapshot, retained response candidates, publication or collection.
-	Enabled           bool
-	AccountEnabled    bool
-	MaintenanceReason string
-	policyRevision    string
-	validationReason  string
-	Snapshot          CodexTurnStateSnapshot
-	key               CodexTurnStateKey
-	id                string
-	accountType       string
-	baseVersion       int64
-	mu                sync.Mutex
-	candidates        []string
-	finished          bool
-	wireObservation   *codexTurnStateWireObservation
-	safeObservation   CodexTurnStateSafeObservation
+	Enabled              bool
+	AccountEnabled       bool
+	MaintenanceReason    string
+	policyRevision       string
+	validationReason     string
+	Snapshot             CodexTurnStateSnapshot
+	key                  CodexTurnStateKey
+	id                   string
+	accountType          string
+	baseVersion          int64
+	credentialEpoch      string
+	businessSentAt       time.Time
+	historyProof         *CodexTurnStateHistoryProof
+	historyDelivered     bool
+	historyPhysicalBound bool
+	historyService       *CodexTurnStateService
+	preparedAt           time.Time
+	mu                   sync.Mutex
+	candidates           []string
+	finished             bool
+	wireObservation      *codexTurnStateWireObservation
+	safeObservation      CodexTurnStateSafeObservation
 }
 
 type CodexTurnStateSafeObservation struct {
+	IssuedAt         time.Time `json:"-"`
+	ExpiresAt        time.Time `json:"-"`
+	EnvelopeValid    bool      `json:"-"`
 	ObservedAt       time.Time
 	TokenLength      int
 	CipherBlocks     int
@@ -133,9 +154,10 @@ type CodexTurnStateCollectRequest struct {
 }
 
 type CodexTurnStateCollectResult struct {
-	Tokens     []string
-	StatusCode int
-	RetryAfter time.Duration
+	Tokens      []string
+	StatusCode  int
+	RetryAfter  time.Duration
+	Observation *CodexTurnStateSafeObservation `json:"-"`
 }
 
 type CodexTurnStateCollector interface {
@@ -150,6 +172,9 @@ type CodexTurnStateCollectorHTTPDo func(context.Context, CodexTurnStateCollectRe
 type CodexTurnStateModelStatus struct {
 	Model            string     `json:"model"`
 	ModelAllowed     bool       `json:"model_allowed"`
+	CacheAvailable   bool       `json:"cache_available"`
+	CollectionStatus string     `json:"collection_status"`
+	CollectionReason string     `json:"collection_reason,omitempty"`
 	State            string     `json:"state"`
 	Shape            string     `json:"shape"`
 	Source           string     `json:"source"`
@@ -185,6 +210,7 @@ type CodexTurnStateStatus struct {
 // contains no token, ciphertext, hash, or credential/configuration identifier.
 type CodexTurnStateModelObservation struct {
 	Model                    string    `json:"model"`
+	RequestSource            string    `json:"request_source"`
 	ObservedAt               time.Time `json:"observed_at"`
 	ResponseLength           int       `json:"response_length"`
 	ResponseShape            string    `json:"response_shape"`
