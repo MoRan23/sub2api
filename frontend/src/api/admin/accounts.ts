@@ -224,6 +224,14 @@ export interface CodexTurnStateObservation {
   model: string
   observed_at: string
   request_source?: 'business' | 'collector'
+  observation_id?: string
+  request_sent_at?: string
+  outbound_action?: 'injected' | 'passthrough' | 'collector_omitted'
+  outbound_source?: 'business' | 'collector' | 'client'
+  maintenance_reason?: string
+  business_delivered?: boolean
+  snapshot_version?: number
+  snapshot_expires_at?: string
   outbound_length: number
   response_length: number
   response_shape: string

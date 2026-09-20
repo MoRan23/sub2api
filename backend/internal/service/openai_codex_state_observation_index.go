@@ -101,7 +101,18 @@ func (index *codexTurnStateObservationIndex) record(sequence uint64, ownerAccoun
 		ResponseSource:           value.ResponseSource,
 		RequestSource:            value.RequestSource,
 		OutboundLength:           value.OutboundLength,
+		ObservationID:            value.ObservationID,
+		RequestSentAt:            value.RequestSentAt,
+		OutboundAction:           value.Action,
+		OutboundSource:           value.Source,
+		MaintenanceReason:        value.MaintenanceReason,
+		BusinessDelivered:        value.BusinessDelivered,
 	}
+	if value.Action == "injected" {
+		entry.summary.SnapshotVersion = value.SnapshotVersion
+		entry.summary.SnapshotExpiresAt = value.ExpiresAt
+	}
+	entry.summary = cloneCodexTurnStateModelObservation(entry.summary)
 	index.lru.MoveToFront(element)
 }
 
@@ -123,11 +134,27 @@ func (store *codexTurnStateSummaryStore) snapshot(ownerAccountIDs []int64) (bool
 			continue
 		}
 		entry := element.Value.(*codexTurnStateObservationIndexEntry)
-		result[key.ownerAccountID] = append(result[key.ownerAccountID], entry.summary)
+		result[key.ownerAccountID] = append(result[key.ownerAccountID], cloneCodexTurnStateModelObservation(entry.summary))
 		store.index.lru.MoveToFront(element)
 	}
 	for _, observations := range result {
 		sort.Slice(observations, func(i, j int) bool { return observations[i].Model < observations[j].Model })
 	}
 	return true, result
+}
+
+func cloneCodexTurnStateModelObservation(value CodexTurnStateModelObservation) CodexTurnStateModelObservation {
+	if value.RequestSentAt != nil {
+		copied := *value.RequestSentAt
+		value.RequestSentAt = &copied
+	}
+	if value.SnapshotExpiresAt != nil {
+		copied := *value.SnapshotExpiresAt
+		value.SnapshotExpiresAt = &copied
+	}
+	if value.BusinessDelivered != nil {
+		copied := *value.BusinessDelivered
+		value.BusinessDelivered = &copied
+	}
+	return value
 }

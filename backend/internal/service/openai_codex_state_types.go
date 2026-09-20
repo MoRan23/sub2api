@@ -140,9 +140,12 @@ type CodexTurnStateAttempt struct {
 	preparedAt           time.Time
 	mu                   sync.Mutex
 	candidates           []string
-	finished             bool
-	wireObservation      *codexTurnStateWireObservation
-	safeObservation      CodexTurnStateSafeObservation
+	// A delivered WS anomaly may precede its successful-write callback. Retain
+	// only validated envelope metadata until that callback proves the send.
+	pendingAnomaly  *CodexTurnStateShape
+	finished        bool
+	wireObservation *codexTurnStateWireObservation
+	safeObservation CodexTurnStateSafeObservation
 }
 
 type CodexTurnStateSafeObservation struct {
@@ -172,16 +175,19 @@ type CodexTurnStateCollectRequest struct {
 	Account *Account
 	Model   string
 	ProxyID int64
+	onSend  func(time.Time)
 	// Created only by the maintenance service; callers cannot grant trust with
 	// a wire header. The native adapter invokes it at the final send boundary.
 	validateModelPolicy func(context.Context) bool
 }
 
 type CodexTurnStateCollectResult struct {
-	Tokens      []string
-	StatusCode  int
-	RetryAfter  time.Duration
-	Observation *CodexTurnStateSafeObservation `json:"-"`
+	Tokens        []string
+	StatusCode    int
+	RetryAfter    time.Duration
+	Observation   *CodexTurnStateSafeObservation `json:"-"`
+	observationID string
+	requestSentAt time.Time
 }
 
 type CodexTurnStateCollector interface {
@@ -237,16 +243,24 @@ type CodexTurnStateStatus struct {
 // CodexTurnStateModelObservation is a process-local diagnostic summary. It
 // contains no token, ciphertext, hash, or credential/configuration identifier.
 type CodexTurnStateModelObservation struct {
-	Model                    string    `json:"model"`
-	RequestSource            string    `json:"request_source"`
-	ObservedAt               time.Time `json:"observed_at"`
-	ResponseLength           int       `json:"response_length"`
-	ResponseShape            string    `json:"response_shape"`
-	ResponseObservedShape    string    `json:"response_observed_shape,omitempty"`
-	ResponseCipherBlocks     int       `json:"response_cipher_blocks,omitempty"`
-	ResponseValidationReason string    `json:"response_validation_reason,omitempty"`
-	ResponseSource           string    `json:"response_source,omitempty"`
-	OutboundLength           int       `json:"outbound_length"`
+	Model                    string     `json:"model"`
+	RequestSource            string     `json:"request_source"`
+	ObservedAt               time.Time  `json:"observed_at"`
+	ResponseLength           int        `json:"response_length"`
+	ResponseShape            string     `json:"response_shape"`
+	ResponseObservedShape    string     `json:"response_observed_shape,omitempty"`
+	ResponseCipherBlocks     int        `json:"response_cipher_blocks,omitempty"`
+	ResponseValidationReason string     `json:"response_validation_reason,omitempty"`
+	ResponseSource           string     `json:"response_source,omitempty"`
+	OutboundLength           int        `json:"outbound_length"`
+	ObservationID            string     `json:"observation_id,omitempty"`
+	RequestSentAt            *time.Time `json:"request_sent_at,omitempty"`
+	OutboundAction           string     `json:"outbound_action,omitempty"`
+	OutboundSource           string     `json:"outbound_source,omitempty"`
+	MaintenanceReason        string     `json:"maintenance_reason,omitempty"`
+	BusinessDelivered        *bool      `json:"business_delivered,omitempty"`
+	SnapshotVersion          int64      `json:"snapshot_version,omitempty"`
+	SnapshotExpiresAt        *time.Time `json:"snapshot_expires_at,omitempty"`
 }
 
 type CodexTurnStateBatchStatus struct {

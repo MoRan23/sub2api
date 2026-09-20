@@ -329,6 +329,12 @@ func (s *CodexTurnStateService) Finish(ctx context.Context, a *CodexTurnStateAtt
 	tokens := append([]string(nil), a.candidates...)
 	businessSentAt := a.businessSentAt
 	observedAt := a.safeObservation.ObservedAt
+	if a.Enabled && delivered && businessSentAt.IsZero() {
+		best, _, extended := selectCodexTurnStateCandidates(tokens, a.accountType, s.now())
+		if best == "" && extended.Shape == CodexTurnStateShapeExtended {
+			a.pendingAnomaly = &extended
+		}
+	}
 	a.candidates = nil
 	a.mu.Unlock()
 	s.recordDeliveredHistory(a, delivered)
@@ -388,26 +394,10 @@ func (s *CodexTurnStateService) publish(ctx context.Context, key CodexTurnStateK
 	if accountType == "" {
 		return false, nil
 	}
-	var best string
-	var bestShape CodexTurnStateShape
-	extended := false
-	var extendedShape CodexTurnStateShape
-	for _, token := range tokens {
-		shape, parseErr := ParseCodexTurnState(token, accountType, s.now())
-		if parseErr != nil {
-			continue
-		}
-		if shape.Shape == CodexTurnStateShapeExtended {
-			extended = true
-			if extendedShape.IssuedAt.IsZero() || shape.IssuedAt.After(extendedShape.IssuedAt) {
-				extendedShape = shape
-			}
-			continue
-		}
-		if best == "" || shape.IssuedAt.After(bestShape.IssuedAt) {
-			best = token
-			bestShape = shape
-		}
+	best, bestShape, extendedShape := selectCodexTurnStateCandidates(tokens, accountType, s.now())
+	if best == "" {
+		_, err := s.publishCodexTurnStateAnomaly(ctx, key, extendedShape, expected, strict, policyRevision, demandAt, baseCacheIdentity)
+		return false, err
 	}
 	for range 3 {
 		if !s.authoritativeModelPolicyMatches(ctx, key.Model, policyRevision) {
@@ -502,35 +492,6 @@ func (s *CodexTurnStateService) publish(ctx context.Context, key CodexTurnStateK
 				}
 				return true, nil
 			}
-			continue
-		}
-		if extended && cacheUnchanged && !demandAt.IsZero() {
-			record.EncryptedToken = ""
-			record.ExpiresAt = time.Time{}
-			record.Shape = CodexTurnStateShapeExtended
-			record.TokenLength = extendedShape.TokenLength
-			record.CipherBlocks = extendedShape.CipherBlocks
-			if extendedShape.IssuedAt.After(record.IssuedAt) {
-				record.IssuedAt = extendedShape.IssuedAt
-			}
-			record.RefreshReason = "extended_shape"
-			record.DemandReason, record.DemandAt = "extended_shape", demandAt
-			if record.CollectionStatus != "collecting" || !record.LastCollectedAt.Add(CodexTurnStateCollectTimeout).After(s.now()) {
-				record.CollectionStatus, record.CollectionReason = "pending", "queued"
-			}
-			if source == "collector" {
-				record.LastCollectedAt = s.now()
-			}
-			if !s.authoritativeModelPolicyMatches(ctx, key.Model, policyRevision) {
-				return false, nil
-			}
-			record.ModelPolicyRevision = policyRevision
-			ok, saveErr := s.repo.SaveCAS(ctx, *record, record.Version)
-			if saveErr != nil || ok {
-				return false, saveErr
-			}
-			// A concurrent scheduling write may have advanced only the CAS
-			// version. Reload and recheck cache identity before invalidating.
 			continue
 		}
 		return false, nil
@@ -856,7 +817,7 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 		return
 	}
 	if errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
-		collectErr = context.DeadlineExceeded
+		collectErr = codexTurnStateCollectorDeadlineError(collectErr)
 	}
 	s.finishCollectorOutcome(ctx, owner, key, *record, policyRevision, result, collectErr)
 }

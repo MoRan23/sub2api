@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -40,6 +42,13 @@ func TestCodexTurnStateCollectorSafeFailureCategoriesReachStatus(t *testing.T) {
 		{name: "transport", reason: "collector_transport_failed", transportErr: errors.New(privateDetail)},
 		{name: "transport_timeout", reason: "collection_timeout", transportErr: &url.Error{Op: "POST", URL: "https://" + privateDetail, Err: codexStateDiagnosticTimeout{}}},
 		{name: "transport_deadline", reason: "collection_timeout", transportErr: fmt.Errorf("%s: %w", privateDetail, context.DeadlineExceeded)},
+		{name: "transport_dns", reason: "collector_dns_failed", transportErr: &net.DNSError{Name: privateDetail, Err: privateDetail}},
+		{name: "transport_refused", reason: "collector_connection_refused", transportErr: &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}},
+		{name: "transport_closed", reason: "collector_connection_closed", transportErr: &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}},
+		{name: "transport_connect_timeout", reason: "collector_connect_timeout", transportErr: &net.OpError{Op: "dial", Err: codexStateDiagnosticTimeout{}}},
+		{name: "transport_socks_auth", reason: "collector_proxy_auth_required", transportErr: &net.OpError{Op: "socks connect", Err: errors.New("username/password authentication failed")}},
+		{name: "transport_socks_tunnel", reason: "collector_proxy_tunnel_failed", transportErr: &net.OpError{Op: "socks connect", Err: errors.New(privateDetail)}},
+		{name: "transport_connect_auth", reason: "collector_proxy_auth_required", transportErr: &url.Error{Op: "POST", URL: "https://" + privateDetail, Err: errors.New("Proxy Authentication Required")}},
 		{name: "proxy_unavailable", reason: "collector_proxy_unavailable", transportErr: fmt.Errorf("%s: %w", privateDetail, ErrCodexTurnStateCollectorProxyUnavailable)},
 		{name: "nil_response", reason: "collector_empty_response", nilResponse: true},
 		{name: "nil_body", reason: "collector_empty_response", status: 200, nilBody: true},

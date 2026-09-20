@@ -63,8 +63,11 @@ func TestCodexTurnStateCollectorTransportIsolatedExplicitProxy(t *testing.T) {
 	request, err := http.NewRequest(http.MethodPost, chatgptCodexURL, strings.NewReader("{}"))
 	require.NoError(t, err)
 	request.Header["x-Codex-Turn-state"] = []string{"must-not-be-sent"}
-	response, err := do(context.Background(), CodexTurnStateCollectRequest{Account: account, Model: "gpt-5.4", ProxyID: 2, validateModelPolicy: allowCodexCollectorTestModelPolicy}, request)
+	var sentAt time.Time
+	response, err := do(context.Background(), CodexTurnStateCollectRequest{Account: account, Model: "gpt-5.4", ProxyID: 2, validateModelPolicy: allowCodexCollectorTestModelPolicy,
+		onSend: func(at time.Time) { sentAt = at }}, request)
 	require.NoError(t, err)
+	require.False(t, sentAt.IsZero())
 	require.NoError(t, response.Body.Close())
 	require.Equal(t, 1, upstream.calls)
 	require.Equal(t, proxy.URL(), upstream.proxyURL)
@@ -104,7 +107,8 @@ func TestCodexTurnStateCollectorTransportRejectsUnavailableProxyWithoutFallback(
 			do := ProvideCodexTurnStateCollectorHTTPDo(codexCollectorTransportAccounts{account: account}, codexCollectorTransportProxies{proxy: proxy}, upstream)
 			request, err := http.NewRequest(http.MethodPost, chatgptCodexURL, nil)
 			require.NoError(t, err)
-			_, err = do(context.Background(), CodexTurnStateCollectRequest{Account: account, ProxyID: 2, validateModelPolicy: allowCodexCollectorTestModelPolicy}, request)
+			_, err = do(context.Background(), CodexTurnStateCollectRequest{Account: account, ProxyID: 2, validateModelPolicy: allowCodexCollectorTestModelPolicy,
+				onSend: func(time.Time) { t.Fatal("unavailable proxy must not record a send") }}, request)
 			require.ErrorIs(t, err, ErrCodexTurnStateCollectorProxyUnavailable)
 			require.Zero(t, upstream.calls)
 		})

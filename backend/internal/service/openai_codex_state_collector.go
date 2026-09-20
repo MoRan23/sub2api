@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"strconv"
 	"strings"
 	"time"
@@ -20,7 +22,7 @@ type CodexTurnStateHTTPCollector struct{ Do CodexTurnStateCollectorHTTPDo }
 
 var ErrCodexTurnStateCollectorProxyUnavailable = errors.New("collector_proxy_unavailable")
 
-// These fixed errors may be exposed as diagnostic categories. Never retain an
+// These fixed errors may be exposed as diagnostic categories. Never expose an
 // upstream error body or transport error text in a collection outcome.
 var (
 	errCodexTurnStateCollectorRateLimited        = errors.New("collector_rate_limited")
@@ -54,6 +56,15 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 		"parallel_tool_calls": true,
 		"include":             []string{"reasoning.encrypted_content"},
 	})
+	trace := &codexTurnStateCollectorTrace{stage: "unknown"}
+	ctx = httptrace.WithClientTrace(ctx, trace.hooks())
+	onSend := input.onSend
+	input.onSend = func(at time.Time) {
+		trace.markSent(at)
+		if onSend != nil {
+			onSend(at)
+		}
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, chatgptCodexURL, bytes.NewReader(body))
 	if err != nil {
 		return result, err
@@ -65,9 +76,18 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 		request.Header.Set("ChatGPT-Account-Id", accountID)
 	}
 	request.Header.Set("session_id", uuid.NewString())
-	request.Header.Set("x-client-request-id", uuid.NewString())
+	result.observationID = uuid.NewString()
+	request.Header.Set("x-client-request-id", result.observationID)
+	started := time.Now()
 	response, err := c.Do(ctx, input, request)
+	stage, sentAt := trace.snapshot()
+	result.requestSentAt = sentAt
 	if response != nil {
+		if result.requestSentAt.IsZero() {
+			// Test/custom adapters may omit the send hook. A real response is
+			// evidence of sending, while a preflight error alone is not.
+			result.requestSentAt = started
+		}
 		result.StatusCode = response.StatusCode
 		result.RetryAfter = codexTurnStateRetryAfter(response.Header.Get("Retry-After"), time.Now())
 	}
@@ -75,13 +95,13 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 		if response != nil && response.Body != nil {
 			_ = response.Body.Close()
 		}
-		if errors.Is(err, ErrCodexTurnStateCollectorProxyUnavailable) {
-			return result, ErrCodexTurnStateCollectorProxyUnavailable
+		failure := newCodexTurnStateCollectorTransportError(err, stage)
+		if !sentAt.IsZero() && !codexTurnStateCollectorCanceled(err) {
+			slog.Warn("openai.codex_turn_state_collector_transport_failed", "account_id", input.Account.ID,
+				"model", input.Model, "proxy_id", input.ProxyID, "observation_id", result.observationID, "elapsed_ms", time.Since(started).Milliseconds(),
+				"stage", stage, "reason", failure.Error())
 		}
-		if codexTurnStateCollectorTimedOut(err) {
-			return result, context.DeadlineExceeded
-		}
-		return result, errCodexTurnStateCollectorTransportFailed
+		return result, failure
 	}
 	if response == nil || response.Body == nil {
 		return result, errCodexTurnStateCollectorEmptyResponse

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // CodexTurnStateHistoryProof is private maintenance evidence, never an API DTO.
@@ -190,6 +192,25 @@ func (s *CodexTurnStateService) completeBusinessSent(a *CodexTurnStateAttempt) {
 	if err := s.repo.MarkBusinessSent(ctx, key, sentAt); err != nil || !delivered {
 		return
 	}
+	// Finish may have observed delivery before this successful-write callback.
+	// Unlike historical recovery, that physical attempt still has the exact
+	// cache identity needed to revoke its own cached token safely.
+	a.mu.Lock()
+	pending, observedAt := a.pendingAnomaly, a.safeObservation.ObservedAt
+	a.pendingAnomaly = nil
+	a.mu.Unlock()
+	if pending != nil {
+		published, publishErr := s.publishCodexTurnStateAnomaly(ctx, key, *pending, a.baseVersion, false, a.policyRevision, observedAt, a.baseCacheIdentity)
+		if publishErr != nil {
+			return
+		}
+		if published {
+			a.mu.Lock()
+			a.safeObservation.RefreshReason = "extended_shape"
+			a.mu.Unlock()
+			s.enqueue(ctx, key)
+		}
+	}
 	owner, err := s.currentOwner(ctx, a.OwnerAccountID)
 	if err == nil && owner != nil {
 		s.activateHistoryForOwner(ctx, owner, key.Generation)
@@ -325,7 +346,15 @@ func (s *CodexTurnStateService) recordCollectorObservation(owner *Account, model
 	}
 	value := CodexTurnStateObservation{Model: model, RequestSource: "collector", ResponseLength: safe.TokenLength,
 		ResponseShape: safe.Shape, ResponseSource: safe.ResponseSource, ResponseObservedShape: safe.ObservedShape,
-		ResponseCipherBlocks: safe.CipherBlocks, ResponseValidationReason: safe.ValidationReason}
+		ResponseCipherBlocks: safe.CipherBlocks, ResponseValidationReason: safe.ValidationReason,
+		Action: "collector_omitted", ObservationID: result.observationID}
+	if value.ObservationID == "" {
+		value.ObservationID = uuid.NewString()
+	}
+	if !result.requestSentAt.IsZero() {
+		sentAt := result.requestSentAt
+		value.RequestSentAt = &sentAt
+	}
 	if value.ResponseShape == CodexTurnStateShapeExtended {
 		value.ResponseShape = "suspect"
 	}
@@ -333,4 +362,5 @@ func (s *CodexTurnStateService) recordCollectorObservation(owner *Account, model
 		value.ResponseShape = "unknown"
 	}
 	globalCodexTurnStateSummaryStore.update(globalCodexTurnStateSummaryStore.nextSequence(), owner.ID, value, true, safe.ObservedAt)
+	logCodexTurnStateObservation(owner.ID, value, safe.ObservedAt)
 }

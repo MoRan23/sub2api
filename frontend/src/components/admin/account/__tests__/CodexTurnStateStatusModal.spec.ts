@@ -165,6 +165,43 @@ describe('Codex turn-state status modal', () => {
     wrapper.unmount()
   })
 
+  it.each([292, 332])('shows the actual injected %i-character state and historical cache source', async (length) => {
+    getCodexTurnState.mockResolvedValue({ ...status, observations: [
+      { model: 'gpt-test', request_source: 'business', observed_at: '2026-09-19T11:20:05Z', request_sent_at: '2026-09-19T11:20:00Z',
+        outbound_length: length, outbound_action: 'injected', outbound_source: 'collector', business_delivered: true,
+        response_length: length === 292 ? 312 : 356, response_shape: 'extended', observation_id: '8742d982-c755-4357-b173-9ca9478e3024',
+        snapshot_expires_at: '2026-09-19T12:15:00Z', snapshot_version: 42 },
+    ] })
+    const wrapper = render()
+    await flushPromises()
+    const card = wrapper.get('[data-testid="codex-turn-state-observation-gpt-test"]')
+    expect(card.get('[data-testid="codex-turn-state-outbound-gpt-test"]').text()).toBe(`admin.accounts.codexTurnState.characters{"count":${length}}`)
+    expect(card.get('[data-testid="codex-turn-state-outbound-action-gpt-test"]').text()).toContain('outboundActions.injected')
+    expect(card.text()).toContain('outboundCacheSource')
+    expect(card.text()).toContain('sources.collector')
+    expect(card.text()).toContain('businessDelivered')
+    expect(card.get('details').text()).toContain('8742d982-c755-4357-b173-9ca9478e3024')
+    expect(card.get('details').text()).toContain('outboundCacheVersion42')
+    expect(card.get('details').text()).toContain(new Date('2026-09-19T12:15:00Z').toLocaleString())
+    expect(card.find('[data-testid="codex-turn-state-delivery-hint-gpt-test"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('preserves legacy observation compatibility without inferring an injection or successful delivery', async () => {
+    getCodexTurnState.mockResolvedValue({ ...status, observations: [
+      { model: 'gpt-test', request_source: 'business', observed_at: '2026-09-19T11:20:05Z', outbound_length: 292, response_length: 312, response_shape: 'extended' },
+    ] })
+    const wrapper = render()
+    await flushPromises()
+    const card = wrapper.get('[data-testid="codex-turn-state-observation-gpt-test"]')
+    expect(card.get('[data-testid="codex-turn-state-sent-at-gpt-test"]').text()).toBe('—')
+    expect(card.get('[data-testid="codex-turn-state-delivery-gpt-test"]').text()).toContain('businessDeliveryUnknown')
+    expect(card.find('[data-testid="codex-turn-state-outbound-action-gpt-test"]').exists()).toBe(false)
+    expect(card.text()).not.toContain('businessDelivered')
+    expect(card.find('details').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('ignores a previous account response after selection changes', async () => {
     let resolveFirst!: (value: CodexTurnStateStatus) => void
     getCodexTurnState.mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve }))

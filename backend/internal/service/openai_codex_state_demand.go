@@ -50,7 +50,12 @@ func codexTurnStateCollectorFailureReason(result CodexTurnStateCollectResult, er
 		return "collector_upstream_unavailable"
 	case result.StatusCode != 0 && (result.StatusCode < 200 || result.StatusCode >= 300):
 		return "collector_http_rejected"
-	case codexTurnStateCollectorTimedOut(err):
+	}
+	var transport *codexTurnStateCollectorTransportError
+	if errors.As(err, &transport) {
+		return transport.code
+	}
+	if codexTurnStateCollectorTimedOut(err) {
 		return "collection_timeout"
 	}
 	for _, category := range []struct {

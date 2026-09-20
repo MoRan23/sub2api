@@ -47,20 +47,36 @@
       <section class="min-w-0 space-y-3" data-testid="codex-turn-state-observations-section">
         <h3 class="font-semibold text-gray-900 dark:text-gray-100">{{ t(`${prefix}.observationsTitle`) }}</h3>
           <p class="text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.observationScopeHint`) }}</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.observationRequestHint`) }}</p>
           <p v-if="!status.observations?.length" class="text-gray-500 dark:text-gray-400" data-testid="codex-turn-state-observation-empty">{{ t(`${prefix}.observationEmpty`) }}</p>
           <section v-for="observation in status.observations" :key="observation.model" class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600" :data-testid="`codex-turn-state-observation-${observation.model}`">
             <h4 class="break-all font-mono font-semibold text-gray-900 dark:text-gray-100">{{ observation.model }}</h4>
             <dl class="grid gap-3 sm:grid-cols-2">
               <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.observedAt`) }}</dt><dd>{{ date(observation.observed_at) }}</dd></div>
               <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.requestSource`) }}</dt><dd>{{ label('sources', observation.request_source) }}</dd></div>
+              <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.requestSentAt`) }}</dt><dd :data-testid="`codex-turn-state-sent-at-${observation.model}`">{{ date(observation.request_sent_at) }}</dd></div>
+              <div v-if="observation.request_source === 'business'"><dt class="text-xs text-gray-500">{{ t(`${prefix}.businessDelivery`) }}</dt><dd :data-testid="`codex-turn-state-delivery-${observation.model}`">{{ t(`${prefix}.${typeof observation.business_delivered === 'boolean' ? (observation.business_delivered ? 'businessDelivered' : 'businessNotDelivered') : 'businessDeliveryUnknown'}`) }}</dd></div>
               <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.responseLength`) }}</dt><dd>{{ observation.response_length > 0 ? t(`${prefix}.characters`, { count: observation.response_length }) : t(`${prefix}.responseStateMissing`) }}</dd></div>
               <div v-if="observation.response_observed_shape"><dt class="text-xs text-gray-500">{{ t(`${prefix}.observedShape`) }}</dt><dd>{{ label('observedShapes', observation.response_observed_shape) }}</dd></div>
               <div v-if="typeof observation.response_cipher_blocks === 'number'"><dt class="text-xs text-gray-500">{{ t(`${prefix}.cipherBlocks`) }}</dt><dd>{{ observation.response_cipher_blocks }}</dd></div>
               <div v-if="observation.response_length > 0"><dt class="text-xs text-gray-500">{{ t(`${prefix}.responseEligibility`) }}</dt><dd>{{ label('shapes', observation.response_shape) }}</dd></div>
               <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.responseCarrier`) }}</dt><dd>{{ label('sources', observation.response_source ? `response_${observation.response_source}` : undefined) }}</dd></div>
-              <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.outboundObservedLength`) }}</dt><dd>{{ observation.outbound_length }}</dd></div>
+              <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.outboundObservedLength`) }}</dt><dd :data-testid="`codex-turn-state-outbound-${observation.model}`">{{ outboundLength(observation) }}</dd></div>
+              <div v-if="observation.outbound_action"><dt class="text-xs text-gray-500">{{ t(`${prefix}.observationOutboundAction`) }}</dt><dd :data-testid="`codex-turn-state-outbound-action-${observation.model}`">{{ outboundAction(observation) }}</dd></div>
+              <div v-if="observation.outbound_action === 'injected'"><dt class="text-xs text-gray-500">{{ t(`${prefix}.outboundCacheSource`) }}</dt><dd>{{ ['business', 'collector'].includes(observation.outbound_source || '') ? label('sources', observation.outbound_source) : '—' }}</dd></div>
+              <div v-if="observation.maintenance_reason"><dt class="text-xs text-gray-500">{{ t(`${prefix}.observationMaintenanceReason`) }}</dt><dd :data-testid="`codex-turn-state-maintenance-${observation.model}`">{{ label('reasons', observation.maintenance_reason) }}</dd></div>
               <div v-if="observation.response_validation_reason"><dt class="text-xs text-gray-500">{{ t(`${prefix}.validationReason`) }}</dt><dd>{{ label('validationReasons', observation.response_validation_reason) }}</dd></div>
             </dl>
+            <p v-if="observation.request_source === 'collector' && observation.outbound_length === 0" class="text-xs text-gray-500 dark:text-gray-400" :data-testid="`codex-turn-state-collector-outbound-hint-${observation.model}`">{{ t(`${prefix}.collectorOutboundHint`) }}</p>
+            <p v-if="observation.request_source === 'business' && observation.business_delivered === false" class="text-xs text-gray-500 dark:text-gray-400" :data-testid="`codex-turn-state-delivery-hint-${observation.model}`">{{ t(`${prefix}.businessNotDeliveredHint`) }}</p>
+            <details v-if="observationID(observation)" class="text-xs text-gray-500 dark:text-gray-400">
+              <summary class="cursor-pointer">{{ t(`${prefix}.observationReference`) }}</summary>
+              <dl class="mt-2 space-y-2">
+                <div><dt>{{ t(`${prefix}.observationID`) }}</dt><dd class="break-all font-mono">{{ observationID(observation) }}</dd></div>
+                <div v-if="observation.outbound_action === 'injected' && Number.isSafeInteger(observation.snapshot_version) && (observation.snapshot_version ?? 0) > 0"><dt>{{ t(`${prefix}.outboundCacheVersion`) }}</dt><dd>{{ observation.snapshot_version }}</dd></div>
+                <div v-if="observation.outbound_action === 'injected' && observation.snapshot_expires_at"><dt>{{ t(`${prefix}.outboundCacheExpiresAt`) }}</dt><dd>{{ date(observation.snapshot_expires_at) }}</dd></div>
+              </dl>
+            </details>
           </section>
           <p v-if="status.observations?.length" class="text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.observedShapeHint`) }}</p>
       </section>
@@ -76,7 +92,7 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getCodexTurnState, type CodexTurnStateModelStatus, type CodexTurnStateStatus } from '@/api/admin/accounts'
+import { getCodexTurnState, type CodexTurnStateModelStatus, type CodexTurnStateObservation, type CodexTurnStateStatus } from '@/api/admin/accounts'
 import { getAll as getProxies } from '@/api/admin/proxies'
 import { collectorProxyIDs } from '@/components/account/codexTurnState'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -96,11 +112,14 @@ let proxyController: AbortController | null = null
 let timer: ReturnType<typeof setInterval> | null = null
 const reasonCodes = new Set([
   'model_excluded', 'model_policy_unavailable', 'model_policy_changed', 'snapshot_unavailable',
+  'cache_disabled', 'cache_unavailable', 'maintenance_unavailable', 'physical_credentials_stale', 'generation_unavailable', 'generation_changed',
   'disabled', 'account_type_unknown', 'business_learning_only', 'invalid_state', 'extended_shape', 'missing', 'expiring',
   'account_cooldown', 'no_target_state', 'collection_failed', 'collection_timeout', 'collector_proxy_unavailable',
   'collector_auth_rejected', 'collector_rate_limited', 'collector_transport_failed', 'collector_empty_response',
   'collector_stream_failed', 'collector_response_failed', 'collector_response_incomplete', 'collector_event_too_large',
   'collector_upstream_unavailable', 'collector_http_rejected', 'collector_proxy_auth_required',
+  'collector_dns_failed', 'collector_connection_refused', 'collector_connection_closed', 'collector_tls_failed', 'collector_proxy_tunnel_failed',
+  'collector_connect_timeout', 'collector_tls_timeout', 'collector_response_header_timeout',
   'waiting_business_response', 'queued', 'waiting_business', 'collecting', 'collector_proxy_not_configured', 'collector_proxy_changed',
   'account_unavailable', 'account_inactive', 'account_scheduling_disabled', 'account_expired', 'idle',
   'target_still_expiring', 'business_preempted',
@@ -124,6 +143,22 @@ function reasonHint(value?: string) {
 function date(value?: string) {
   const parsed = value ? new Date(value) : null
   return parsed && Number.isFinite(parsed.getTime()) ? parsed.toLocaleString() : '—'
+}
+function outboundLength(observation: CodexTurnStateObservation) {
+  if (observation.outbound_length > 0) return t(`${prefix}.characters`, { count: observation.outbound_length })
+  return t(`${prefix}.${observation.request_source === 'collector' ? 'outboundCollectorOmitted' : 'outboundNotCarried'}`)
+}
+function outboundAction(observation: CodexTurnStateObservation) {
+  if (observation.outbound_action === 'injected') return t(`${prefix}.outboundActions.injected`)
+  if (observation.outbound_action === 'collector_omitted') return t(`${prefix}.outboundActions.collector_omitted`)
+  if (observation.outbound_action === 'passthrough') {
+    return t(`${prefix}.outboundActions.${observation.outbound_length > 0 ? 'passthrough' : 'missing'}`)
+  }
+  return '—'
+}
+function observationID(observation: CodexTurnStateObservation) {
+  const value = observation.observation_id
+  return value && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ? value : ''
 }
 function proxyName(id?: number | null) {
   return id ? proxyNames.value[id] || t(`${prefix}.proxyFallback`, { id }) : '—'

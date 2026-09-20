@@ -119,3 +119,21 @@ env -u OPENAI_API_KEY CI=true GOEXPERIMENT=jsonv2 go test -tags integration ./in
 `TestAccountConfigurationPreservesLatestAfterStaleSnapshot` 的整个 Extra 对象相等断言没有计入服务端初始化的私有 `codex_turn_state_credential_epoch`，在当前代码与 `git archive eab22c5c3 backend` 提取的固定基线中，均以相同 Go 工具链和竞态参数复现同一失败。原断言未删除或放宽；基线输出为 `go-baseline-stale-snapshot.jsonl`。首次集成编译发现新增测试将仓储具体方法误当作接口方法调用，修正测试接收者后完整集成重跑通过。
 
 前端九个相关测试文件共 202 项通过，变更文件 ESLint、类型检查和生产构建通过。浏览器使用本地模拟接口通过八组验收：旧单值回显、列表增删与排序、重复过滤、显式空数组及新数组提交、Spark 只读、代理名称与计数轮换、五秒刷新及关闭取消、390px 下新增配置与状态组件布局。没有外部请求、浏览器错误或真实模型调用；预览服务已关闭。另观察到未改动的 WS mode 表单区域在窄屏下横向溢出，未在固定基线复跑，也未计入本轮新增组件的通过范围。
+
+## WS 异常补偿与请求诊断修复（基线 `c1912aaa6`）
+
+确认并复现了已有正常缓存时的 WS 时序缺陷：异常响应已成功交付，而成功发送绑定尚未完成，原代码在补记发送后只回填历史；历史保护有效缓存，因而没有废除旧缓存或建立采集需求。新增回归先在旧实现中让个人／Team、Finish 内／后绑定四种组合失败，再修复为按原请求缓存身份补执行异常 CAS 发布。补偿只保存安全形态摘要，覆盖并发新缓存保护、重复绑定、未发送／未交付、配置／模型策略变化、时间校验、目标优先及现有退避。
+
+另修复采集错误原因被压成通用错误，以及总截止时间抹掉已知传输阶段／SSE 限流原因；新增类型化网络错误、依赖固定模板、隐私保护、真实发送边界及最终持久化错误分类测试。观测新增同次请求的发送时间、注入快照、交付结果和独立关联 ID，补测 WS 未绑定／失败发送不覆盖旧摘要、指针隔离及日志不含 token 或私有尝试标识。
+
+本轮使用 Windows Go 1.27.0 和 `GOEXPERIMENT=jsonv2`，以下统一回归与竞态命令通过 **815 项测试结果（含子测试），0 失败、0 跳过**。新增完整 HTTP 流程覆盖个人／Team、Responses／透传／Chat／Messages、响应头／metadata：正常缓存实际出站，异常成功交付后撤销旧缓存、排队、独立采集并在下一次业务注入新缓存；无状态响应保留旧观测及其原始时间。
+
+```bash
+env -u OPENAI_API_KEY GOEXPERIMENT=jsonv2 go test -race -tags unit \
+  ./internal/service ./internal/handler/admin ./internal/handler/dto \
+  -run 'Codex(State|TurnState|MultiProxy)' -count=1 -json
+```
+
+输出在 `.git/task-artifacts/codex-state-diagnostics/go-race.jsonl`。WSL 启动多次返回 `Wsl/Service/0x8007274c`，Windows 环境也没有 Docker CLI；本轮未能重跑隔离 PostgreSQL／Redis 集成，不能将此前的 85 项通过算作本次验证。本次没有修改数据库迁移或仓储 SQL，没有为恢复测试环境停止 WSL 或更改服务器。
+
+前端相关 **78 项测试**、类型检查、变更文件 ESLint 和生产构建通过。模拟接口浏览器六组验收通过：采集不携带旧状态的说明、业务正常出站／异常响应及失败交付说明、维护降级和细分错误、折叠关联信息、390px 布局、五秒刷新／不重叠／关闭取消。报告及截图在 `.git/task-artifacts/codex-state-bugfix/`；无浏览器错误或外部请求，预览服务已关闭。20 秒采集上限、30 秒重试、代理轮换和列表红绿灰规则不变；未发送真实收费采集请求，未部署。

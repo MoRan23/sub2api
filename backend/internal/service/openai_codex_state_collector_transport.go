@@ -61,6 +61,9 @@ func ProvideCodexTurnStateCollectorHTTPDo(accounts AccountRepository, proxies Pr
 		if input.validateModelPolicy == nil || !input.validateModelPolicy(ctx) {
 			return nil, errors.New("collector_model_policy_changed")
 		}
+		if input.onSend != nil {
+			input.onSend(time.Now())
+		}
 		return upstream.Do(request, proxy.URL(), owner.ID, 1)
 	}
 }

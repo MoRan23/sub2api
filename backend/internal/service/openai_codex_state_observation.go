@@ -1,6 +1,7 @@
 package service
 
 import (
+	"log/slog"
 	"net/http"
 	"reflect"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
 
@@ -35,6 +37,10 @@ type CodexTurnStateObservation struct {
 	ResponseValidationReason string     `json:"response_validation_reason,omitempty"`
 	ExpiresAt                *time.Time `json:"expires_at,omitempty"`
 	RenewalReason            string     `json:"renewal_reason,omitempty"`
+	ObservationID            string     `json:"observation_id,omitempty"`
+	RequestSentAt            *time.Time `json:"request_sent_at,omitempty"`
+	BusinessDelivered        *bool      `json:"business_delivered,omitempty"`
+	SnapshotVersion          int64      `json:"snapshot_version,omitempty"`
 }
 
 type codexTurnStateWireObservation struct {
@@ -47,6 +53,7 @@ type codexTurnStateWireObservation struct {
 	observedAt      time.Time
 	attempt         *CodexTurnStateAttempt
 	sendStartedAt   time.Time
+	logged          bool
 }
 
 // codexStateBodyPatch is private request-local evidence, never input from a
@@ -110,10 +117,25 @@ func noteOpenAICodexStatePatch(c *gin.Context, attempt *CodexTurnStateAttempt, b
 	if attempt == nil {
 		return
 	}
-	observation := &codexTurnStateWireObservation{ownerAccountID: attempt.OwnerAccountID, attempt: attempt, value: CodexTurnStateObservation{Enabled: attempt.Enabled, AccountEnabled: attempt.AccountEnabled, MaintenanceReason: attempt.MaintenanceReason, Action: "passthrough", Model: attempt.Model, RequestSource: "business"}}
+	// This public diagnostic ID must remain independent of private runtime lease
+	// or collector lock identities.
+	observationID := uuid.NewString()
+	reason := attempt.MaintenanceReason
+	if reason == "" && attempt.Snapshot.Token == "" {
+		switch {
+		case !attempt.AccountEnabled:
+			reason = "cache_disabled"
+		case attempt.accountType == "":
+			reason = "account_type_unknown"
+		default:
+			reason = "cache_unavailable"
+		}
+	}
+	observation := &codexTurnStateWireObservation{ownerAccountID: attempt.OwnerAccountID, attempt: attempt, value: CodexTurnStateObservation{Enabled: attempt.Enabled, AccountEnabled: attempt.AccountEnabled, MaintenanceReason: reason, Action: "passthrough", Model: attempt.Model, RequestSource: "business", ObservationID: observationID}}
 	if attempt.Snapshot.Token != "" {
 		observation.value.Action = "injected"
 		observation.value.Source = attempt.Snapshot.Source
+		observation.value.SnapshotVersion = attempt.Snapshot.Version
 		expires := attempt.Snapshot.ExpiresAt
 		observation.value.ExpiresAt = &expires
 	}
@@ -226,7 +248,13 @@ func bindCodexTurnStateSummarySequence(observation *codexTurnStateWireObservatio
 	if observation.summarySequence == 0 {
 		observation.summarySequence = globalCodexTurnStateSummaryStore.nextSequence()
 	}
+	if !observation.sendStartedAt.IsZero() {
+		sentAt := observation.sendStartedAt
+		observation.value.RequestSentAt = &sentAt
+	}
+	globalFingerprintObserver.updateCodexTurnStateObservation(observation.sequence, observation.value)
 	globalCodexTurnStateSummaryStore.update(observation.summarySequence, observation.ownerAccountID, observation.value, observation.finished, observation.observedAt)
+	observation.logCompletionLocked()
 	attempt := observation.attempt
 	sentAt := observation.sendStartedAt
 	observation.mu.Unlock()
@@ -255,6 +283,7 @@ func finishOpenAICodexStateObservation(attempt *CodexTurnStateAttempt) {
 	}
 	attempt.mu.Lock()
 	observation := attempt.wireObservation
+	finished, delivered := attempt.finished, attempt.historyDelivered
 	attempt.mu.Unlock()
 	if observation == nil {
 		return
@@ -266,6 +295,9 @@ func finishOpenAICodexStateObservation(attempt *CodexTurnStateAttempt) {
 		return
 	}
 	observation.finished = true
+	if finished {
+		observation.value.BusinessDelivered = &delivered
+	}
 	observation.observedAt = safe.ObservedAt
 	// A send error or response without a state must not replace an earlier
 	// actual observation. Only Observe can provide its response timestamp.
@@ -288,6 +320,43 @@ func finishOpenAICodexStateObservation(attempt *CodexTurnStateAttempt) {
 	observation.value.RenewalReason = safe.RefreshReason
 	globalFingerprintObserver.updateCodexTurnStateObservation(observation.sequence, observation.value)
 	globalCodexTurnStateSummaryStore.update(observation.summarySequence, observation.ownerAccountID, observation.value, true, observation.observedAt)
+	observation.logCompletionLocked()
+}
+
+// Only a bound physical send may emit a completion record. In particular, a WS
+// response can finish before the successful-write callback; failed writes never
+// acquire a summary sequence and must not invent a completed physical request.
+func (observation *codexTurnStateWireObservation) logCompletionLocked() {
+	if observation.logged || !observation.finished || observation.summarySequence == 0 {
+		return
+	}
+	observation.logged = true
+	logCodexTurnStateObservation(observation.ownerAccountID, observation.value, observation.observedAt)
+}
+
+// All logged values are server identifiers or reduced diagnostics. Never add
+// request headers, response bodies, token bytes/digests or configuration epochs.
+func logCodexTurnStateObservation(ownerAccountID int64, value CodexTurnStateObservation, observedAt time.Time) {
+	fields := []any{
+		"account_id", ownerAccountID, "model", value.Model, "observation_id", value.ObservationID,
+		"request_source", value.RequestSource, "outbound_action", value.Action, "outbound_source", value.Source,
+		"outbound_length", value.OutboundLength, "maintenance_reason", value.MaintenanceReason,
+		"response_length", value.ResponseLength, "response_shape", value.ResponseShape,
+		"response_source", value.ResponseSource,
+	}
+	if value.RequestSentAt != nil {
+		fields = append(fields, "request_sent_at", *value.RequestSentAt)
+	}
+	if !observedAt.IsZero() {
+		fields = append(fields, "response_observed_at", observedAt)
+	}
+	if value.BusinessDelivered != nil {
+		fields = append(fields, "business_delivered", *value.BusinessDelivered)
+	}
+	if value.Action == "injected" {
+		fields = append(fields, "snapshot_version", value.SnapshotVersion, "snapshot_expires_at", value.ExpiresAt)
+	}
+	slog.Info("openai_codex_turn_state_observation_completed", fields...)
 }
 
 // A fast response can finish between the actual write and binding its observation

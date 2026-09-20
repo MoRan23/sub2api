@@ -2,7 +2,7 @@ import { defineComponent } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CodexTurnStateModelStatus, CodexTurnStateStatus } from '@/api/admin/accounts'
+import type { CodexTurnStateModelStatus, CodexTurnStateObservation, CodexTurnStateStatus } from '@/api/admin/accounts'
 import en from '@/i18n/locales/en/admin/accounts'
 import zh from '@/i18n/locales/zh/admin/accounts'
 
@@ -62,6 +62,9 @@ describe('Codex turn-state collection diagnostics', () => {
       'collector_upstream_unavailable', 'collector_http_rejected', 'collector_proxy_auth_required',
       'collection_timeout', 'collector_proxy_unavailable', 'collector_auth_rejected', 'collector_rate_limited',
       'account_inactive', 'account_scheduling_disabled', 'account_expired',
+      'collector_dns_failed', 'collector_connection_refused', 'collector_connection_closed',
+      'collector_tls_failed', 'collector_proxy_tunnel_failed', 'collector_connect_timeout',
+      'collector_tls_timeout', 'collector_response_header_timeout',
     ] as const
     getCodexTurnState.mockResolvedValue(state(codes.map(code => model(code))))
     const wrapper = render(locale)
@@ -162,6 +165,66 @@ describe('Codex turn-state collection diagnostics', () => {
     expect(wrapper.get('[data-testid="codex-turn-state-guidance-gpt-test"]').text()).toBe(messages.reasonHints.collector_proxy_changed)
     expect(wrapper.find('[data-testid="codex-turn-state-previous-error-gpt-test"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain(messages.retryHint)
+    wrapper.unmount()
+  })
+
+  it.each(['zh', 'en'] as const)('explains independent collection outbound zero without suggesting a failed injection in %s', async (locale) => {
+    getCodexTurnState.mockResolvedValue({ ...state([]), observations: [
+      { model: 'gpt-sol', request_source: 'collector', observed_at: '2026-09-20T11:59:55Z', request_sent_at: '2026-09-20T11:59:50Z',
+        outbound_action: 'collector_omitted', outbound_length: 0, response_length: 292, response_shape: 'target' },
+    ] })
+    const wrapper = render(locale)
+    await flushPromises()
+    const messages = (locale === 'zh' ? zh : en).accounts.codexTurnState
+    const card = wrapper.get('[data-testid="codex-turn-state-observation-gpt-sol"]')
+    expect(card.get('[data-testid="codex-turn-state-outbound-gpt-sol"]').text()).toBe(messages.outboundCollectorOmitted)
+    expect(card.get('[data-testid="codex-turn-state-outbound-action-gpt-sol"]').text()).toBe(messages.outboundActions.collector_omitted)
+    expect(card.get('[data-testid="codex-turn-state-collector-outbound-hint-gpt-sol"]').text()).toBe(messages.collectorOutboundHint)
+    expect(card.find('[data-testid="codex-turn-state-delivery-gpt-sol"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain(messages.observationRequestHint)
+    wrapper.unmount()
+  })
+
+  it.each(['zh', 'en'] as const)('shows successful and failed historical business delivery independently of current cache in %s', async (locale) => {
+    const observation: CodexTurnStateObservation = {
+      model: 'gpt-sol', request_source: 'business', observed_at: '2026-09-20T11:20:05Z', request_sent_at: '2026-09-20T11:20:00Z',
+      outbound_action: 'passthrough', outbound_length: 0, response_length: 312, response_shape: 'extended',
+      maintenance_reason: 'cache_unavailable', business_delivered: false,
+    }
+    getCodexTurnState.mockResolvedValue({ ...state([model('gpt-sol', {
+      state: 'ready', shape: 'target', token_length: 292, cipher_blocks: 10, expires_at: '2026-09-20T12:30:00Z',
+      remaining_seconds: 1800, cache_available: true, last_business_at: '2026-09-20T11:59:55Z',
+    })]), observations: [observation, { ...observation, model: 'gpt-astra', business_delivered: true }] })
+    const wrapper = render(locale)
+    await flushPromises()
+    const messages = (locale === 'zh' ? zh : en).accounts.codexTurnState
+    const card = wrapper.get('[data-testid="codex-turn-state-observation-gpt-sol"]')
+    expect(card.get('[data-testid="codex-turn-state-outbound-gpt-sol"]').text()).toBe(messages.outboundNotCarried)
+    expect(card.get('[data-testid="codex-turn-state-delivery-gpt-sol"]').text()).toBe(messages.businessNotDelivered)
+    expect(card.get('[data-testid="codex-turn-state-delivery-hint-gpt-sol"]').text()).toBe(messages.businessNotDeliveredHint)
+    expect(card.get('[data-testid="codex-turn-state-maintenance-gpt-sol"]').text()).toBe(messages.reasons.cache_unavailable)
+    expect(card.get('[data-testid="codex-turn-state-sent-at-gpt-sol"]').text()).toBe(new Date(observation.request_sent_at!).toLocaleString())
+    expect(card.text()).not.toContain(new Date('2026-09-20T11:59:55Z').toLocaleString())
+    expect(wrapper.get('[data-testid="codex-turn-state-delivery-gpt-astra"]').text()).toBe(messages.businessDelivered)
+    expect(wrapper.find('[data-testid="codex-turn-state-delivery-hint-gpt-astra"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('does not echo unrecognized maintenance errors, outbound actions, cache sources or observation references', async () => {
+    const unsafe = 'Authorization: Bearer private-token https://user:pass@proxy/'
+    getCodexTurnState.mockResolvedValue({ ...state([]), observations: [
+      { model: 'gpt-sol', request_source: 'business', observed_at: '2026-09-20T11:59:55Z', outbound_action: 'injected',
+        outbound_length: 292, response_length: 312, response_shape: 'extended', maintenance_reason: unsafe, outbound_source: unsafe, observation_id: unsafe },
+      { model: 'gpt-astra', request_source: 'business', observed_at: '2026-09-20T11:59:55Z', outbound_action: unsafe,
+        outbound_length: 0, response_length: 312, response_shape: 'extended' },
+    ] })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('private-token')
+    expect(wrapper.text()).not.toContain('user:pass')
+    expect(wrapper.get('[data-testid="codex-turn-state-maintenance-gpt-sol"]').text()).toBe(zh.accounts.codexTurnState.unknownReason)
+    expect(wrapper.get('[data-testid="codex-turn-state-outbound-action-gpt-astra"]').text()).toBe('—')
+    expect(wrapper.find('details').exists()).toBe(false)
     wrapper.unmount()
   })
 })
