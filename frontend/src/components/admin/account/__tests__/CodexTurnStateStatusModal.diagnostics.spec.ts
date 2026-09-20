@@ -133,7 +133,7 @@ describe('Codex turn-state collection diagnostics', () => {
     wrapper.unmount()
   })
 
-  it('clears old diagnostics when automatic refresh reports recovery', async () => {
+  it('clears old diagnostics and explains inactivity when automatic refresh reports idle collection', async () => {
     const initial = state([model('gpt-test', { collection_reason: 'collector_transport_failed', last_error: 'collector_transport_failed' })])
     const recovered = state([model('gpt-test', { collection_status: 'idle', collection_reason: 'idle', last_error: '', next_collect_at: undefined })])
     getCodexTurnState.mockResolvedValueOnce(initial).mockResolvedValueOnce(recovered)
@@ -142,7 +142,7 @@ describe('Codex turn-state collection diagnostics', () => {
     expect(wrapper.text()).toContain('采集连接或发送失败')
     await vi.advanceTimersByTimeAsync(5000)
     expect(getCodexTurnState).toHaveBeenCalledTimes(2)
-    expect(wrapper.get('[data-testid="codex-turn-state-reason-gpt-test"]').text()).toBe('当前无需采集')
+    expect(wrapper.get('[data-testid="codex-turn-state-reason-gpt-test"]').text()).toBe('该模型近 30 分钟无业务，已停止采集')
     expect(wrapper.find('[data-testid="codex-turn-state-guidance-gpt-test"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="codex-turn-state-previous-error-gpt-test"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('采集连接或发送失败')

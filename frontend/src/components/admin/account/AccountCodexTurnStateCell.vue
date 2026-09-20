@@ -53,6 +53,7 @@ const supported = computed(() => supportsCodexTurnState(props.account))
 const defaultModels = ['gpt-6-astra', 'gpt-5.6-sol']
 const dotClasses = {
   green: 'bg-emerald-500 dark:bg-emerald-400',
+  yellow: 'bg-amber-500 dark:bg-amber-400',
   red: 'bg-red-500 dark:bg-red-400',
   gray: 'bg-gray-400 dark:bg-gray-500'
 }
@@ -108,6 +109,19 @@ function indicator(model: ModelSummary): Indicator {
   const result = (color: DotColor, key: string): Indicator => ({ color, label: t(`${prefix}.${key}`) })
   if (props.failed) return result('gray', 'columnUnavailable')
   if (!props.status) return result('gray', props.loading ? 'dotPending' : 'columnUnavailable')
+  const cache = model.cache
+  const available = cache?.cache_available ?? (cache?.state === 'ready' || cache?.state === 'paused')
+  const targetCache = props.status.enabled && cache && cache.model_allowed !== false && cache.shape === 'target' &&
+    [292, 332].includes(cache.token_length) && cache.token_length === props.status.expected_length &&
+    cache.cipher_blocks === (cache.token_length === 292 ? 10 : 12)
+  // Cache lifecycle warnings take precedence over historical response shapes.
+  // A collector's failed renewal does not make the still-valid old cache expire.
+  if (targetCache && cache.source === 'collector') {
+    const seconds = remaining(cache)
+    if (available && seconds > 0 && seconds <= 300) return result('yellow', 'dotCollectorExpiring')
+    if (seconds === 0 && cache.collection_status === 'idle' && cache.collection_reason === 'idle' &&
+      (cache.state === 'expired' || Number.isFinite(Date.parse(cache.expires_at || '')))) return result('gray', 'dotExpiredIdle')
+  }
   const observation = model.observation
   if (observation) {
     const reason = observation.response_validation_reason
@@ -127,11 +141,7 @@ function indicator(model: ModelSummary): Indicator {
     if (observation.response_shape === 'target' && targetShape) return result('green', 'dotObservedTarget')
     return result('gray', observation.response_length ? 'dotUnknown' : 'modelNotObserved')
   }
-  const cache = model.cache
-  const available = cache?.cache_available ?? (cache?.state === 'ready' || cache?.state === 'paused')
-  if (props.status.enabled && available && cache && cache.model_allowed !== false && cache.shape === 'target' && remaining(cache) > 0 &&
-    [292, 332].includes(cache.token_length) && cache.token_length === props.status.expected_length &&
-    cache.cipher_blocks === (cache.token_length === 292 ? 10 : 12)) return result('green', 'dotCachedTarget')
+  if (targetCache && available && remaining(cache) > 0) return result('green', 'dotCachedTarget')
   if (cache?.state === 'expired' || (cache?.state === 'ready' && remaining(cache) === 0)) return result('gray', 'dotExpired')
   return result('gray', model.model ? 'modelNotObserved' : 'columnEmptyList')
 }

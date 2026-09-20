@@ -85,6 +85,57 @@ describe('AccountCodexTurnStateCell', () => {
     expect(colors(wrapper)[0]).toBe('green')
   })
 
+  it.each([292, 332])('warns in yellow during a collected cache renewal window despite an abnormal renewal (%s)', async (length) => {
+    const cached = { ...status.models[0]!, source: 'collector', token_length: length, cipher_blocks: length === 292 ? 10 : 12, cache_available: true }
+    const wrapper = show({ status: { ...status, expected_length: length, models: [cached], observations: [observation({
+      request_source: 'collector', response_length: length === 292 ? 312 : 356, response_cipher_blocks: cached.cipher_blocks + 1,
+      response_shape: 'extended', response_observed_shape: length === 292 ? 'personal_extended' : 'team_business_extended'
+    })] } })
+    expect(colors(wrapper)[0]).toBe('red')
+    await wrapper.setProps({ now: now + 25 * 60_000 })
+    expect(colors(wrapper)[0]).toBe('yellow')
+    expect(wrapper.get(`[data-testid="codex-turn-state-model-${models[0]}"]`).attributes('title')).toContain('dotCollectorExpiring')
+    await wrapper.setProps({ now: now + 30 * 60_000 - 1, loading: true })
+    expect(colors(wrapper)[0]).toBe('yellow')
+    expect(wrapper.get('button').attributes('style')).toContain('height: 44px')
+    await wrapper.setProps({ now: now + 30 * 60_000 })
+    expect(colors(wrapper)[0]).toBe('red')
+  })
+
+  it.each(['target', 'extended'])('shows an expired, idle collected cache in gray ahead of its old %s observation', (shape) => {
+    const wrapper = show({ status: { ...status, models: [{ ...status.models[0]!, source: 'collector', state: 'expired',
+      cache_available: false, expires_at: new Date(now - 1000).toISOString(), remaining_seconds: 0,
+      collection_status: 'idle', collection_reason: 'idle' }], observations: [observation({ response_shape: shape,
+      response_length: shape === 'target' ? 332 : 356, response_observed_shape: shape === 'target' ? 'team_business_target' : 'team_business_extended' })] } })
+    expect(colors(wrapper)[0]).toBe('gray')
+    expect(wrapper.get(`[data-testid="codex-turn-state-model-${models[0]}"]`).attributes('title')).toContain('dotExpiredIdle')
+  })
+
+  it('preserves passive observation and does not mistake a revoked or excluded cache for a lifecycle warning', () => {
+    for (const cache of [
+      { ...status.models[0]!, source: 'business' },
+      { ...status.models[0]!, source: 'collector', cache_available: false },
+      { ...status.models[0]!, source: 'collector', model_allowed: false },
+      { ...status.models[0]!, source: 'collector', shape: 'extended', expires_at: undefined },
+    ]) {
+      const wrapper = show({ now: now + 26 * 60_000, status: { ...status, models: [cache], observations: [observation()] } })
+      expect(colors(wrapper)[0]).toBe('green')
+    }
+    const wrapper = show({ now: now + 26 * 60_000, status: { ...status, enabled: false,
+      models: [{ ...status.models[0]!, source: 'collector' }], observations: [observation()] } })
+    expect(colors(wrapper)[0]).toBe('green')
+  })
+
+  it('keeps a paused but usable collected cache yellow, while an active expired cache follows observations', () => {
+    const wrapper = show({ now: now + 26 * 60_000, status: { ...status, models: [{ ...status.models[0]!, source: 'collector',
+      cache_available: true, state: 'paused', collector_paused: true, collection_status: 'paused' }] } })
+    expect(colors(wrapper)[0]).toBe('yellow')
+    const expired = show({ status: { ...status, models: [{ ...status.models[0]!, source: 'collector', state: 'expired',
+      cache_available: false, expires_at: new Date(now - 1000).toISOString(), remaining_seconds: 0,
+      collection_status: 'pending', collection_reason: 'queued' }], observations: [observation()] } })
+    expect(colors(expired)[0]).toBe('green')
+  })
+
   it.each(['business', 'collector'] as const)('uses the latest %s result and identifies its request origin', (request_source) => {
     const wrapper = show({ status: { ...status, observations: [observation({ request_source, response_length: 356, response_shape: 'extended', response_observed_shape: 'team_business_extended', response_cipher_blocks: 13 })] } })
     expect(colors(wrapper)[0]).toBe('red')

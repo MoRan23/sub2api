@@ -35,6 +35,8 @@ export default {
         dotPending: 'Status not loaded yet',
         dotObservedTarget: 'Latest response matches the target shape',
         dotCachedTarget: 'Current cache matches the target shape',
+        dotCollectorExpiring: 'Independently collected cache expires within 5 minutes',
+        dotExpiredIdle: 'Cache expired; collection stopped after 30 minutes without business requests for this model',
         dotExtended: 'Latest response has an extended shape',
         dotInvalid: 'Latest response state is invalid',
         dotUnknown: 'Target shape cannot be determined',
@@ -139,7 +141,7 @@ export default {
           collector_upstream_unavailable: 'Upstream service error (5xx)', collector_http_rejected: 'Upstream returned an unsuccessful HTTP response',
           collector_proxy_auth_required: 'Collector proxy authentication failed or required',
           waiting_business_response: 'Waiting for the first business response', queued: 'Queued for collection', waiting_business: 'Waiting for the business request to finish', collecting: 'Collection in progress',
-          collector_proxy_not_configured: 'No collector proxy configured; learning from business responses only', collector_proxy_changed: 'Collector proxy changed; waiting for cache expiry', account_unavailable: 'Account is unavailable for collection', idle: 'No collection needed',
+          collector_proxy_not_configured: 'No collector proxy configured; learning from business responses only', collector_proxy_changed: 'Collector proxy changed; waiting for cache expiry', account_unavailable: 'Account is unavailable for collection', idle: 'Collection stopped after 30 minutes without business requests for this model',
           account_inactive: 'Account is not active', account_scheduling_disabled: 'Account scheduling is disabled', account_expired: 'Account has expired',
           target_still_expiring: 'The new state still expires soon; collection will retry', business_preempted: 'Collection stopped to prioritize the business response'
         },

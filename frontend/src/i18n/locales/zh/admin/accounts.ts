@@ -35,6 +35,8 @@ export default {
         dotPending: '尚未加载状态',
         dotObservedTarget: '最近响应符合目标形态',
         dotCachedTarget: '当前缓存符合目标形态',
+        dotCollectorExpiring: '独立采集缓存将在 5 分钟内过期',
+        dotExpiredIdle: '缓存已过期；该模型近 30 分钟无业务，已停止采集',
         dotExtended: '最近响应为扩展形态',
         dotInvalid: '最近响应状态无效',
         dotUnknown: '尚无法确定目标形态',
@@ -139,7 +141,7 @@ export default {
           collector_upstream_unavailable: '上游服务异常（5xx）', collector_http_rejected: '上游返回非成功 HTTP 响应',
           collector_proxy_auth_required: '采集代理认证失败或要求认证',
           waiting_business_response: '等待首次业务响应', queued: '已排队等待采集', waiting_business: '等待业务请求完成', collecting: '采集中',
-          collector_proxy_not_configured: '未配置采集代理，仅从业务响应学习', collector_proxy_changed: '采集代理已更换，等待缓存到期', account_unavailable: '账号暂不满足采集条件', idle: '当前无需采集',
+          collector_proxy_not_configured: '未配置采集代理，仅从业务响应学习', collector_proxy_changed: '采集代理已更换，等待缓存到期', account_unavailable: '账号暂不满足采集条件', idle: '该模型近 30 分钟无业务，已停止采集',
           account_inactive: '账号状态不是正常', account_scheduling_disabled: '账号已关闭参与调度', account_expired: '账号有效期已结束',
           target_still_expiring: '新状态仍即将过期，将继续重试采集', business_preempted: '优先等待业务响应，已停止本次采集'
         },
