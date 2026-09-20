@@ -506,7 +506,7 @@ func (r *proxyRepository) ExistsByHostPortAuth(ctx context.Context, host string,
 
 // Match JSON numbers without a text-to-bigint cast: malformed historical extra
 // values must not break proxy listing or bypass the deletion usage check.
-const proxyAccountReferenceSQL = "(proxy_id = $1 OR extra #> '{codex_turn_state,collector_proxy_id}' = to_jsonb($1::bigint))"
+const proxyAccountReferenceSQL = "(proxy_id = $1 OR (jsonb_typeof(extra #> '{codex_turn_state,collector_proxy_ids}') = 'array' AND extra #> '{codex_turn_state,collector_proxy_ids}' @> jsonb_build_array($1::bigint)) OR (NOT (COALESCE(extra -> 'codex_turn_state', '{}'::jsonb) ? 'collector_proxy_ids') AND extra #> '{codex_turn_state,collector_proxy_id}' = to_jsonb($1::bigint)))"
 const proxyAccountCountSQL = "SELECT COUNT(*) FROM accounts WHERE " + proxyAccountReferenceSQL + " AND deleted_at IS NULL"
 
 // CountAccountsByProxyID counts each account once, including collector-only use.
@@ -569,7 +569,8 @@ func (r *proxyRepository) GetAccountCountsForProxies(ctx context.Context) (count
 			UNION
 			SELECT a.id AS account_id, p.id AS proxy_id
 			FROM accounts a JOIN proxies p
-				ON a.extra #> '{codex_turn_state,collector_proxy_id}' = to_jsonb(p.id)
+				ON (jsonb_typeof(a.extra #> '{codex_turn_state,collector_proxy_ids}') = 'array' AND a.extra #> '{codex_turn_state,collector_proxy_ids}' @> jsonb_build_array(p.id))
+				OR (NOT (COALESCE(a.extra -> 'codex_turn_state', '{}'::jsonb) ? 'collector_proxy_ids') AND a.extra #> '{codex_turn_state,collector_proxy_id}' = to_jsonb(p.id))
 			WHERE a.deleted_at IS NULL AND p.deleted_at IS NULL
 		) references_by_account GROUP BY proxy_id`)
 	if err != nil {

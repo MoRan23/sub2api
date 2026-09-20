@@ -492,9 +492,25 @@ describe('EditAccountModal', () => {
     const wrapper = mountModal(account)
     await flushPromises()
     const fields = wrapper.getComponent({ name: 'CodexTurnStateFields' })
-    fields.vm.$emit('update:modelValue', { enabled: false, account_type: 'team_business', collector_proxy_id: null })
+    fields.vm.$emit('update:modelValue', { enabled: false, account_type: 'team_business', collector_proxy_ids: [] })
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-    expect(updateAccountMock.mock.calls[0]?.[1]?.codex_turn_state).toEqual({ enabled: false, account_type: 'team_business', collector_proxy_id: null })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.codex_turn_state).toEqual({ enabled: false, account_type: 'team_business', collector_proxy_ids: [] })
+  })
+
+  it('persists a deliberate proxy reorder without mutating the original account snapshot or sharing the request array', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.codex_turn_state = { enabled: true, account_type: 'personal', collector_proxy_ids: [9, 7] }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const config = { enabled: true, account_type: 'personal', collector_proxy_ids: [7, 9] }
+    wrapper.getComponent({ name: 'CodexTurnStateFields' }).vm.$emit('update:modelValue', config)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    const sent = updateAccountMock.mock.calls[0]?.[1]?.codex_turn_state
+    expect(sent).toEqual(config)
+    expect(sent.collector_proxy_ids).not.toBe(config.collector_proxy_ids)
+    expect(sent).not.toHaveProperty('collector_proxy_id')
+    expect(account.codex_turn_state.collector_proxy_ids).toEqual([9, 7])
   })
 
   it('does not submit reverted turn-state edits or shadow configuration', async () => {
@@ -505,7 +521,7 @@ describe('EditAccountModal', () => {
       const fields = wrapper.getComponent({ name: 'CodexTurnStateFields' })
       fields.vm.$emit('update:modelValue', { enabled: true, account_type: 'personal', collector_proxy_id: 7 })
       if (!account.parent_account_id) {
-        fields.vm.$emit('update:modelValue', { enabled: false, account_type: 'auto', collector_proxy_id: null })
+        fields.vm.$emit('update:modelValue', { enabled: false, account_type: 'auto', collector_proxy_ids: [] })
       } else {
         expect(fields.props('inheritedFrom')).toBe(account.parent_account_id)
       }

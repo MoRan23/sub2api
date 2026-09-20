@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 const installationOwnerSQL = "platform = 'openai' AND type IN ('oauth', 'setup-token') AND parent_account_id IS NULL"
@@ -86,7 +88,7 @@ func accountConfigurationExtraPatch(ctx context.Context, ids []int64, updates ma
 			if filtered == nil {
 				filtered = make(map[string]any)
 			}
-			filtered[service.CodexTurnStateExtraKey] = *config
+			filtered[service.CodexTurnStateExtraKey] = service.CodexTurnStateConfigJSON(*config)
 		}
 	}
 	return filtered
@@ -99,7 +101,7 @@ func codexTurnStateOwnerExpression(credentialsExpression string) string {
 // Both expressions are evaluated against the latest row under UPDATE's lock.
 // The generation is changed in the same statement as its auth/config identity.
 func guardedCodexTurnStateGenerationExpression(extraExpression, credentialsExpression string) string {
-	changes := []string{"extra -> 'codex_turn_state' IS DISTINCT FROM (" + extraExpression + ") -> 'codex_turn_state'"}
+	changes := []string{canonicalCodexTurnStateConfigExpression("extra -> 'codex_turn_state'") + " IS DISTINCT FROM " + canonicalCodexTurnStateConfigExpression("("+extraExpression+") -> 'codex_turn_state'")}
 	authChanges := make([]string, 0, len(service.CodexTurnStateCredentialKeys))
 	if credentialsExpression != "" {
 		for _, key := range service.CodexTurnStateCredentialKeys {
@@ -119,6 +121,13 @@ func guardedCodexTurnStateGenerationExpression(extraExpression, credentialsExpre
 	// credential-only fence exists even when cache configuration is absent.
 	epoch := "CASE WHEN " + strings.Join(epochChanges, " OR ") + " THEN gen_random_uuid()::text ELSE extra ->> 'codex_turn_state_credential_epoch' END"
 	return "CASE WHEN " + eligible + " THEN COALESCE((" + generation + "), '{}'::jsonb) || jsonb_build_object('codex_turn_state_credential_epoch', " + epoch + ") ELSE (" + extraExpression + ") - 'codex_turn_state_credential_epoch' - 'codex_turn_state_generation' - 'codex_turn_state' END"
+}
+
+// Compare legacy singleton and ordered-list settings by meaning, so a normal
+// background write or format-only migration cannot revoke a usable cache.
+func canonicalCodexTurnStateConfigExpression(config string) string {
+	value := "(" + config + ")"
+	return "CASE WHEN " + value + " IS NULL THEN NULL ELSE (" + value + " - 'collector_proxy_id' - 'collector_proxy_ids') || jsonb_build_object('collector_proxy_ids', CASE WHEN " + value + " ? 'collector_proxy_ids' THEN " + value + " -> 'collector_proxy_ids' WHEN " + value + " -> 'collector_proxy_id' IS NOT NULL AND " + value + " -> 'collector_proxy_id' <> 'null'::jsonb THEN jsonb_build_array(" + value + " -> 'collector_proxy_id') ELSE '[]'::jsonb END) END"
 }
 
 // Register after successful writes and before an owned transaction commits.
@@ -157,21 +166,28 @@ func afterAccountConfigurationCommit(ctx context.Context, notify func()) {
 // Collector references use JSONB, so take the same lock used by proxy deletion.
 func lockCodexTurnStateCollectorProxy(ctx context.Context, client *dbent.Client, account *service.Account) error {
 	config := service.CodexTurnStateConfigForAccount(account)
-	if config.CollectorProxyID == nil {
+	ids := service.CodexTurnStateCollectorProxyIDs(config)
+	if len(ids) == 0 {
 		return nil
 	}
-	rows, err := client.QueryContext(ctx, `SELECT id FROM proxies WHERE id = $1 AND deleted_at IS NULL FOR KEY SHARE`, *config.CollectorProxyID)
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	rows, err := client.QueryContext(ctx, `SELECT id FROM proxies WHERE id = ANY($1) AND deleted_at IS NULL ORDER BY id FOR KEY SHARE`, pq.Array(ids))
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rows.Close() }()
-	if !rows.Next() {
-		if err := rows.Err(); err != nil {
-			return err
-		}
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if count != len(ids) {
 		return service.ErrProxyNotFound
 	}
-	return rows.Err()
+	return nil
 }
 
 func guardedAccountExtraExpression(expression string) string {

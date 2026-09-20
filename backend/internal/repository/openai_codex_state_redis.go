@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/google/uuid"
 )
 
 const codexStateCancelChannel = "openai:codex:state:cancel:v1"
@@ -56,14 +57,16 @@ func (r *openAICodexStateRepository) ReleaseCollector(ctx context.Context, owner
 	return leaderLockReleaseScript.Run(ctx, r.rdb, []string{key}, lockID).Err()
 }
 
-// Notifications only carry the scope. They can cancel work eagerly, but losing a
+// Notifications carry the scope and optionally one exact collection attempt.
+// An empty attempt remains the configuration-level cancellation contract.
+// They can cancel work eagerly, but losing a
 // notification cannot permit stale publication: PostgreSQL generation/version
 // CAS remains the publication authority.
 func (r *openAICodexStateRepository) PublishCancel(ctx context.Context, key service.CodexTurnStateKey) error {
 	if err := r.redisAvailable(); err != nil {
 		return err
 	}
-	if err := validateCodexStateKey(key); err != nil {
+	if err := validateCodexStateCancelKey(key); err != nil {
 		return err
 	}
 	payload, err := json.Marshal(key)
@@ -99,11 +102,23 @@ func (r *openAICodexStateRepository) SubscribeCancels(ctx context.Context, handl
 				continue
 			}
 			var key service.CodexTurnStateKey
-			if json.Unmarshal([]byte(message.Payload), &key) == nil && validateCodexStateKey(key) == nil {
+			if json.Unmarshal([]byte(message.Payload), &key) == nil && validateCodexStateCancelKey(key) == nil {
 				handle(key)
 			}
 		}
 	}
+}
+
+func validateCodexStateCancelKey(key service.CodexTurnStateKey) error {
+	if err := validateCodexStateKey(key); err != nil {
+		return err
+	}
+	if key.CollectorAttemptID != "" {
+		if _, err := uuid.Parse(key.CollectorAttemptID); err != nil {
+			return errors.New("invalid Codex turn-state collector attempt")
+		}
+	}
+	return nil
 }
 
 // Activation messages carry only the current configuration scope. Every

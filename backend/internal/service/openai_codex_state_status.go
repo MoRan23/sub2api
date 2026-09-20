@@ -151,7 +151,8 @@ func attachCodexTurnStateObservations(status *CodexTurnStateStatus, enabled bool
 
 func projectCodexTurnStateStatus(accountID int64, owner *Account, records []CodexTurnStateRecord, allowedModels []string, policyErr error, now time.Time) *CodexTurnStateStatus {
 	cfg := CodexTurnStateConfigForAccount(owner)
-	result := &CodexTurnStateStatus{AccountID: accountID, OwnerAccountID: owner.ID, Inherited: owner.ID != accountID, Enabled: cfg.Enabled && codexTurnStateEligible(owner), AccountType: cfg.AccountType, ResolvedAccountType: CodexTurnStateAccountTypeForAccount(owner), CollectorProxyID: cfg.CollectorProxyID, Models: []CodexTurnStateModelStatus{}}
+	proxyIDs := CodexTurnStateCollectorProxyIDs(cfg)
+	result := &CodexTurnStateStatus{AccountID: accountID, OwnerAccountID: owner.ID, Inherited: owner.ID != accountID, Enabled: cfg.Enabled && codexTurnStateEligible(owner), AccountType: cfg.AccountType, ResolvedAccountType: CodexTurnStateAccountTypeForAccount(owner), CollectorProxyID: codexStateProxyIDPtr(codexTurnStateSelectedProxy(proxyIDs, 0)), CollectorProxyIDs: append([]int64{}, proxyIDs...), Models: []CodexTurnStateModelStatus{}}
 	if result.ResolvedAccountType == "personal" {
 		result.ExpectedLength = 292
 	} else if result.ResolvedAccountType == "team_business" {
@@ -161,7 +162,7 @@ func projectCodexTurnStateStatus(accountID int64, owner *Account, records []Code
 		result.Reason = "disabled"
 	} else if result.ExpectedLength == 0 {
 		result.Reason = "account_type_unknown"
-	} else if cfg.CollectorProxyID == nil {
+	} else if len(proxyIDs) == 0 {
 		result.Reason = "business_learning_only"
 	}
 	allowed := make(map[string]bool, len(allowedModels))
@@ -184,6 +185,9 @@ func projectCodexTurnStateStatus(accountID int64, owner *Account, records []Code
 			continue
 		}
 		item := CodexTurnStateModelStatus{Model: record.Model, State: "missing", Shape: record.Shape, Source: record.Source, TokenLength: record.TokenLength, CipherBlocks: record.CipherBlocks, CollectorPaused: record.CollectorPaused, LastError: record.LastError, RefreshReason: record.RefreshReason}
+		item.CollectorProxyID = codexStateProxyIDPtr(codexTurnStateSelectedProxy(proxyIDs, record.CollectorProxyID))
+		item.LastCollectorProxyID = codexStateProxyIDPtr(record.LastCollectorProxyID)
+		item.CollectorExtendedCount = record.CollectorExtendedCount
 		if record.EncryptedToken != "" {
 			item.State = "expired"
 			if record.ExpiresAt.After(now) {

@@ -213,6 +213,9 @@ export interface CodexTurnStateModelStatus {
   last_collected_at?: string
   next_collect_at?: string
   collector_paused: boolean
+  collector_proxy_id?: number | null
+  last_collector_proxy_id?: number | null
+  collector_extended_count?: number
   last_error?: string
   refresh_reason?: string
 }
@@ -237,7 +240,9 @@ export interface CodexTurnStateStatus {
   enabled: boolean
   account_type: 'auto' | 'personal' | 'team_business'
   resolved_account_type: string
-  collector_proxy_id: number | null
+  collector_proxy_ids?: number[]
+  /** Legacy status response compatibility. */
+  collector_proxy_id?: number | null
   expected_length: number
   reason: string
   models: CodexTurnStateModelStatus[]

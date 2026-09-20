@@ -7,6 +7,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/alicebob/miniredis/v2"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
@@ -69,6 +70,18 @@ func TestCodexStateCancellationCrossInstanceAndContext(t *testing.T) {
 		require.Equal(t, key, actual)
 	case <-time.After(time.Second):
 		t.Fatal("cross-instance cancellation was not delivered")
+	}
+	key.CollectorAttemptID = "not-a-uuid"
+	require.ErrorContains(t, first.PublishCancel(ctx, key), "collector attempt")
+	require.NoError(t, rdb.Publish(ctx, codexStateCancelChannel,
+		`{"OwnerAccountID":17,"Model":"gpt-5.4","Generation":"generation-2","CollectorAttemptID":"invalid"}`).Err())
+	key.CollectorAttemptID = uuid.NewString()
+	require.NoError(t, first.PublishCancel(ctx, key))
+	select {
+	case actual := <-received:
+		require.Equal(t, key, actual, "late cancellation must identify only its exact attempt")
+	case <-time.After(time.Second):
+		t.Fatal("attempt-specific cancellation was not delivered")
 	}
 	cancel()
 	select {

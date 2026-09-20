@@ -90,7 +90,7 @@ func (r *codexStateMemoryRepo) BeginBusiness(_ context.Context, k CodexTurnState
 		v = CodexTurnStateRecord{OwnerAccountID: k.OwnerAccountID, Model: k.Model, Generation: k.Generation, Version: 1, LastBusinessAt: time.Unix(0, 0)}
 	}
 	if v.LastBusinessAt.After(time.Unix(0, 0)) && v.LastBusinessAt.Before(now.Add(-CodexTurnStateActiveWindow)) {
-		if v.DemandReason != "" {
+		if v.DemandReason != "" || v.CollectorAttemptID != "" {
 			v.Version++
 		}
 		clearIdleCodexTurnStateDemand(&v)

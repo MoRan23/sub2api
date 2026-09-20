@@ -5194,7 +5194,7 @@ const handleSubmit = async () => {
   const updatePayload: Record<string, unknown> = { ...form }
   if (supportsCodexTurnState(props.account) && !isSparkShadow.value &&
     codexTurnStateConfigChanged(codexTurnStateConfig.value, codexTurnStateInitial.value)) {
-    updatePayload.codex_turn_state = { ...codexTurnStateConfig.value }
+    updatePayload.codex_turn_state = readCodexTurnStateConfig(codexTurnStateConfig.value)
   }
   try {
     if (props.account.platform === 'openai' &&

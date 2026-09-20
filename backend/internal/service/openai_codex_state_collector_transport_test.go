@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -143,6 +144,29 @@ func TestCodexTurnStateCollectorTransportRequiresFinalModelPolicyCheck(t *testin
 			require.Error(t, err)
 			require.Equal(t, mode == "excluded", checked)
 			require.Zero(t, upstream.calls, "final policy rejection prevents actual upstream transport")
+		})
+	}
+}
+
+func TestCodexTurnStateCollectorTransportUsesSelectedListMember(t *testing.T) {
+	for _, id := range []int64{3, 4} {
+		t.Run(strconv.FormatInt(id, 10), func(t *testing.T) {
+			account, proxy := codexCollectorTransportFixture()
+			account.Extra[CodexTurnStateExtraKey].(map[string]any)["collector_proxy_ids"] = []any{float64(2), float64(3)}
+			proxy.ID = id
+			upstream := &codexCollectorTransportUpstream{}
+			do := ProvideCodexTurnStateCollectorHTTPDo(codexCollectorTransportAccounts{account: account}, codexCollectorTransportProxies{proxy: proxy}, upstream)
+			request, err := http.NewRequest(http.MethodPost, chatgptCodexURL, nil)
+			require.NoError(t, err)
+			response, err := do(context.Background(), CodexTurnStateCollectRequest{Account: account, ProxyID: id, validateModelPolicy: allowCodexCollectorTestModelPolicy}, request)
+			if id == 3 {
+				require.NoError(t, err)
+				require.NoError(t, response.Body.Close())
+				require.Equal(t, 1, upstream.calls)
+			} else {
+				require.ErrorContains(t, err, "configuration_changed")
+				require.Zero(t, upstream.calls)
+			}
 		})
 	}
 }

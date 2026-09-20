@@ -21,10 +21,11 @@ func TestCodexStateListByAccountsUsesOneQueryWithLiveGenerationFilter(t *testing
 		"issued_at", "expires_at", "token_length", "cipher_blocks", "source", "shape",
 		"refresh_reason", "last_business_at", "last_collected_at", "next_collect_at", "collector_paused", "last_error",
 		"demand_reason", "demand_at", "history_proof_observed_at", "collection_status", "collection_reason",
+		"collector_proxy_id", "collector_extended_count", "last_collector_proxy_id", "collector_attempt_id",
 		"business_in_flight",
-	}).AddRow(3, "gpt-5.3", "generation-3", 2, "encrypted-one", now, now.Add(time.Hour), 292, 10, "business", "target", "", now, nil, nil, false, "", "", nil, nil, "", "", true).
-		AddRow(3, "gpt-5.4", "generation-3", 4, "encrypted-two", now, now.Add(time.Hour), 332, 12, "collector", "target", "", now, now, now.Add(time.Minute), false, "", "", nil, nil, "", "", false).
-		AddRow(9, "gpt-5.4", "generation-9", 1, "", nil, nil, 0, 0, "", "", "missing", now, nil, nil, true, "authorization_failed", "extended_shape", now, now, "paused", "authorization_failed", true)
+	}).AddRow(3, "gpt-5.3", "generation-3", 2, "encrypted-one", now, now.Add(time.Hour), 292, 10, "business", "target", "", now, nil, nil, false, "", "", nil, nil, "", "", nil, 0, nil, nil, true).
+		AddRow(3, "gpt-5.4", "generation-3", 4, "encrypted-two", now, now.Add(time.Hour), 332, 12, "collector", "target", "", now, now, now.Add(time.Minute), false, "", "", nil, nil, "", "", 202, 2, 101, "06aee3d4-720c-4e11-aeb4-0f0be2dcc027", false).
+		AddRow(9, "gpt-5.4", "generation-9", 1, "", nil, nil, 0, 0, "", "", "missing", now, nil, nil, true, "authorization_failed", "extended_shape", now, now, "paused", "authorization_failed", 101, 1, 101, nil, true)
 	// Match the security predicates explicitly so an accidentally broader batch
 	// query cannot expose a disabled/deleted account or an obsolete generation.
 	mock.ExpectQuery(`(?s)SELECT .* FROM openai_codex_state s\s+JOIN accounts a ON a.id=s.owner_account_id WHERE s.owner_account_id = ANY\(\$1\) AND a.deleted_at IS NULL AND a.platform = 'openai' AND a.type = 'oauth'\s+AND a.extra->'codex_turn_state'->>'enabled' = 'true'\s+AND a.extra->>'codex_turn_state_generation' = s.generation\s+ORDER BY s.owner_account_id, s.model`).
@@ -42,6 +43,10 @@ func TestCodexStateListByAccountsUsesOneQueryWithLiveGenerationFilter(t *testing
 	require.Equal(t, now, records[1].LastCollectedAt)
 	require.Equal(t, now.Add(time.Minute), records[1].NextCollectAt)
 	require.False(t, records[1].BusinessInFlight)
+	require.EqualValues(t, 202, records[1].CollectorProxyID)
+	require.Equal(t, 2, records[1].CollectorExtendedCount)
+	require.EqualValues(t, 101, records[1].LastCollectorProxyID)
+	require.Equal(t, "06aee3d4-720c-4e11-aeb4-0f0be2dcc027", records[1].CollectorAttemptID)
 	require.EqualValues(t, 9, records[2].OwnerAccountID)
 	require.True(t, records[2].CollectorPaused)
 	require.Equal(t, "authorization_failed", records[2].LastError)

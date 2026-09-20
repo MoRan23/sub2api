@@ -3,8 +3,9 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CodexTurnStateStatus } from '@/api/admin/accounts'
 
-const { getCodexTurnState } = vi.hoisted(() => ({ getCodexTurnState: vi.fn() }))
+const { getCodexTurnState, getProxies } = vi.hoisted(() => ({ getCodexTurnState: vi.fn(), getProxies: vi.fn() }))
 vi.mock('@/api/admin/accounts', () => ({ getCodexTurnState }))
+vi.mock('@/api/admin/proxies', () => ({ getAll: getProxies }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, args?: unknown) => key + (args ? JSON.stringify(args) : ''), te: () => true }) }))
 import CodexTurnStateStatusModal from '../CodexTurnStateStatusModal.vue'
 
@@ -30,6 +31,7 @@ describe('Codex turn-state status modal', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-19T11:30:00Z'))
     getCodexTurnState.mockReset()
+    getProxies.mockReset().mockResolvedValue([])
   })
   afterEach(() => vi.useRealTimers())
 
@@ -62,6 +64,56 @@ describe('Codex turn-state status modal', () => {
     await wrapper.findAll('button').find(button => button.text() === 'common.refresh')!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('admin.accounts.codexTurnState.cacheEmpty')
+    wrapper.unmount()
+  })
+
+  it('shows each model route and count using directory names without proxy addresses or credentials', async () => {
+    getProxies.mockResolvedValue([{ id: 7, name: 'Collector A', host: 'private-proxy-host', password: 'private-password' }, { id: 9, name: 'Collector B' }])
+    getCodexTurnState.mockResolvedValue({ ...status, inherited: false, collector_proxy_ids: [7, 9], models: [
+      { ...status.models[0], collector_proxy_id: 9, last_collector_proxy_id: 7, collector_extended_count: 2 },
+      { ...status.models[0], model: 'gpt-second', collector_proxy_id: 7, last_collector_proxy_id: 9, collector_extended_count: 0 },
+    ] })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="codex-turn-state-current-proxy-gpt-test"]').text()).toBe('Collector B')
+    expect(wrapper.get('[data-testid="codex-turn-state-last-proxy-gpt-test"]').text()).toBe('Collector A')
+    expect(wrapper.get('[data-testid="codex-turn-state-proxy-count-gpt-test"]').text()).toBe('2 / 3')
+    expect(wrapper.get('[data-testid="codex-turn-state-current-proxy-gpt-second"]').text()).toBe('Collector A')
+    expect(wrapper.get('[data-testid="codex-turn-state-proxy-count-gpt-second"]').text()).toBe('0 / 3')
+    expect(wrapper.text()).not.toContain('noCollectorProxy')
+    expect(wrapper.text()).not.toContain('private-proxy-host')
+    expect(wrapper.text()).not.toContain('private-password')
+    wrapper.unmount()
+  })
+
+  it('honors an explicit empty list over a legacy proxy and safely falls back when names cannot load', async () => {
+    getProxies.mockRejectedValue(new Error('private-directory-error'))
+    getCodexTurnState.mockResolvedValue({ ...status, collector_proxy_ids: [], collector_proxy_id: 7, models: [
+      { ...status.models[0], last_collector_proxy_id: 9 },
+    ] })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.text()).toContain('noCollectorProxy')
+    expect(wrapper.get('[data-testid="codex-turn-state-current-proxy-gpt-test"]').text()).toBe('—')
+    expect(wrapper.get('[data-testid="codex-turn-state-last-proxy-gpt-test"]').text()).toBe('admin.accounts.codexTurnState.proxyFallback{"id":9}')
+    expect(wrapper.text()).not.toContain('private-directory-error')
+    wrapper.unmount()
+  })
+
+  it('aborts the directory request and ignores its late result on account changes', async () => {
+    let resolveDirectory!: (value: { id: number; name: string }[]) => void
+    getProxies.mockImplementationOnce(() => new Promise(resolve => { resolveDirectory = resolve })).mockResolvedValueOnce([{ id: 7, name: 'Current name' }])
+    getCodexTurnState.mockResolvedValue({ ...status, collector_proxy_ids: [7] })
+    const wrapper = render()
+    await flushPromises()
+    const signal = getProxies.mock.calls[0]![0] as AbortSignal
+    await wrapper.setProps({ account: { id: 3, name: 'New account' } })
+    await flushPromises()
+    expect(signal.aborted).toBe(true)
+    resolveDirectory([{ id: 7, name: 'Stale name' }])
+    await flushPromises()
+    expect(wrapper.get('[data-testid="codex-turn-state-current-proxy-gpt-test"]').text()).toBe('Current name')
+    expect(wrapper.text()).not.toContain('Stale name')
     wrapper.unmount()
   })
 

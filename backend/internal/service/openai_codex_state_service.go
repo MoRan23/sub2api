@@ -16,26 +16,27 @@ import (
 // callers retain their ordinary request if Prepare or ValidateAttempt fails.
 // Only PostgreSQL records are authoritative; there is no fallback token cache.
 type CodexTurnStateService struct {
-	repo          CodexTurnStateRepository
-	accounts      AccountRepository
-	encryptor     SecretEncryptor
-	collector     CodexTurnStateCollector
-	modelPolicy   CodexTurnStateModelPolicy
-	now           func() time.Time
-	mu            sync.Mutex
-	ctx           context.Context
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	queue         chan CodexTurnStateKey
-	queued        map[CodexTurnStateKey]bool
-	running       map[CodexTurnStateKey]context.CancelFunc
-	runningPolicy map[CodexTurnStateKey]string
-	business      map[string]*CodexTurnStateAttempt
+	repo           CodexTurnStateRepository
+	accounts       AccountRepository
+	encryptor      SecretEncryptor
+	collector      CodexTurnStateCollector
+	modelPolicy    CodexTurnStateModelPolicy
+	now            func() time.Time
+	mu             sync.Mutex
+	ctx            context.Context
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	queue          chan CodexTurnStateKey
+	queued         map[CodexTurnStateKey]bool
+	running        map[CodexTurnStateKey]context.CancelFunc
+	runningPolicy  map[CodexTurnStateKey]string
+	runningAttempt map[CodexTurnStateKey]string
+	business       map[string]*CodexTurnStateAttempt
 }
 
 func NewCodexTurnStateService(repo CodexTurnStateRepository, accounts AccountRepository, encryptor SecretEncryptor, collector CodexTurnStateCollector) *CodexTurnStateService {
 	return &CodexTurnStateService{repo: repo, accounts: accounts, encryptor: encryptor, collector: collector, now: time.Now,
-		queue: make(chan CodexTurnStateKey, 128), queued: make(map[CodexTurnStateKey]bool), running: make(map[CodexTurnStateKey]context.CancelFunc), runningPolicy: make(map[CodexTurnStateKey]string), business: make(map[string]*CodexTurnStateAttempt)}
+		queue: make(chan CodexTurnStateKey, 128), queued: make(map[CodexTurnStateKey]bool), running: make(map[CodexTurnStateKey]context.CancelFunc), runningPolicy: make(map[CodexTurnStateKey]string), runningAttempt: make(map[CodexTurnStateKey]string), business: make(map[string]*CodexTurnStateAttempt)}
 }
 
 func (s *CodexTurnStateService) Start(ctx context.Context) {
@@ -423,6 +424,7 @@ func (s *CodexTurnStateService) publish(ctx context.Context, key CodexTurnStateK
 		// Those writes must not revoke a business response's cache identity; a
 		// genuinely changed token still protects against late invalidation.
 		cacheUnchanged := record.Version == expected || baseCacheIdentity.matches(record)
+		collectorAttemptID := record.CollectorAttemptID
 		if best != "" {
 			if bestShape.IssuedAt.Before(record.IssuedAt) || (bestShape.IssuedAt.Equal(record.IssuedAt) && record.EncryptedToken == "" && !cacheUnchanged) {
 				return false, nil
@@ -431,8 +433,19 @@ func (s *CodexTurnStateService) publish(ctx context.Context, key CodexTurnStateK
 				if record.ExpiresAt.After(s.now()) {
 					// Reobserving a still-expiring token cannot satisfy renewal or
 					// cancel the independent request already trying to replace it.
-					if record.ExpiresAt.After(s.now().Add(CodexTurnStateRefreshAhead)) {
-						s.cancelAndNotify(ctx, key)
+					if record.ExpiresAt.After(s.now().Add(CodexTurnStateRefreshAhead)) &&
+						(record.DemandReason != "" || record.CollectorExtendedCount != 0 || record.CollectorAttemptID != "") {
+						completeCodexTurnStateDemand(record, s.now())
+						record.RefreshReason = ""
+						record.ModelPolicyRevision = policyRevision
+						ok, saveErr := s.repo.SaveCAS(ctx, *record, record.Version)
+						if saveErr != nil {
+							return false, saveErr
+						}
+						if !ok {
+							continue
+						}
+						s.cancelCollectorAttempt(ctx, key, collectorAttemptID)
 					}
 					return true, nil
 				}
@@ -485,7 +498,7 @@ func (s *CodexTurnStateService) publish(ctx context.Context, key CodexTurnStateK
 			}
 			if ok {
 				if bestShape.ExpiresAt.After(s.now().Add(CodexTurnStateRefreshAhead)) {
-					s.cancelAndNotify(ctx, key)
+					s.cancelCollectorAttempt(ctx, key, collectorAttemptID)
 				}
 				return true, nil
 			}
@@ -526,9 +539,15 @@ func (s *CodexTurnStateService) publish(ctx context.Context, key CodexTurnStateK
 }
 
 func (s *CodexTurnStateService) cancelCollection(key CodexTurnStateKey) {
+	attemptID := key.CollectorAttemptID
+	key.CollectorAttemptID = ""
 	s.mu.Lock()
 	cancel := s.running[key]
-	delete(s.queued, key)
+	if attemptID == "" {
+		delete(s.queued, key)
+	} else if s.runningAttempt[key] != attemptID {
+		cancel = nil
+	}
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -538,6 +557,14 @@ func (s *CodexTurnStateService) cancelCollection(key CodexTurnStateKey) {
 func (s *CodexTurnStateService) cancelAndNotify(ctx context.Context, key CodexTurnStateKey) {
 	s.cancelCollection(key)
 	_ = s.repo.PublishCancel(ctx, key)
+}
+
+func (s *CodexTurnStateService) cancelCollectorAttempt(ctx context.Context, key CodexTurnStateKey, attemptID string) {
+	if attemptID == "" {
+		return
+	}
+	key.CollectorAttemptID = attemptID
+	s.cancelAndNotify(ctx, key)
 }
 
 func (s *CodexTurnStateService) enqueue(ctx context.Context, key CodexTurnStateKey) {
@@ -704,7 +731,8 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 		return
 	}
 	cfg := CodexTurnStateConfigForAccount(owner)
-	if cfg.CollectorProxyID == nil || *cfg.CollectorProxyID <= 0 {
+	proxyIDs := CodexTurnStateCollectorProxyIDs(cfg)
+	if len(proxyIDs) == 0 {
 		return
 	}
 	record, err := s.repo.Get(ctx, key)
@@ -758,8 +786,16 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 	s.mu.Lock()
 	s.running[key] = cancel
 	s.runningPolicy[key] = policyRevision
+	s.runningAttempt[key] = lockID
 	s.mu.Unlock()
-	defer func() { cancel(); s.mu.Lock(); delete(s.running, key); delete(s.runningPolicy, key); s.mu.Unlock() }()
+	defer func() {
+		cancel()
+		s.mu.Lock()
+		delete(s.running, key)
+		delete(s.runningPolicy, key)
+		delete(s.runningAttempt, key)
+		s.mu.Unlock()
+	}()
 	if probeCtx.Err() != nil || !s.modelPolicyMatches(probeCtx, key.Model, policyRevision) {
 		return
 	}
@@ -794,6 +830,9 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 	record.LastCollectedAt = now
 	record.RefreshReason = record.DemandReason
 	record.CollectionStatus, record.CollectionReason = "collecting", "collecting"
+	record.CollectorProxyID = codexTurnStateSelectedProxy(proxyIDs, record.CollectorProxyID)
+	record.LastCollectorProxyID = record.CollectorProxyID
+	record.CollectorAttemptID = lockID
 	if !s.authoritativeModelPolicyMatches(probeCtx, key.Model, policyRevision) {
 		return
 	}
@@ -804,9 +843,13 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 	if probeCtx.Err() != nil || !s.authoritativeModelPolicyMatches(probeCtx, key.Model, policyRevision) {
 		return
 	}
-	result, collectErr := s.collector.Collect(probeCtx, CodexTurnStateCollectRequest{Account: owner, Model: key.Model, ProxyID: *cfg.CollectorProxyID,
+	result, collectErr := s.collector.Collect(probeCtx, CodexTurnStateCollectRequest{Account: owner, Model: key.Model, ProxyID: record.CollectorProxyID,
 		validateModelPolicy: func(sendCtx context.Context) bool {
-			return s.authoritativeModelPolicyMatches(sendCtx, key.Model, policyRevision)
+			if !s.authoritativeModelPolicyMatches(sendCtx, key.Model, policyRevision) {
+				return false
+			}
+			live, readErr := s.repo.Get(sendCtx, key)
+			return readErr == nil && live != nil && live.CollectorAttemptID == lockID && live.CollectorProxyID == record.CollectorProxyID
 		}})
 	s.recordCollectorObservation(owner, key.Model, result)
 	if probeCtx.Err() != nil && !errors.Is(probeCtx.Err(), context.DeadlineExceeded) {

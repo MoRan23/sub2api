@@ -1178,7 +1178,9 @@ export interface OllamaCloudUsageSettings {
 export interface CodexTurnStateConfig {
   enabled: boolean
   account_type: 'auto' | 'personal' | 'team_business'
-  collector_proxy_id: number | null
+  collector_proxy_ids?: number[]
+  /** Read compatibility for servers and accounts using the former single proxy setting. */
+  collector_proxy_id?: number | null
 }
 
 export interface Account {
@@ -1631,6 +1633,9 @@ export interface AdminDataAccount {
   credentials: Record<string, unknown>
   extra?: Record<string, unknown>
   proxy_key?: string | null
+  codex_turn_state?: CodexTurnStateConfig
+  codex_turn_state_proxy_keys?: string[]
+  codex_turn_state_proxy_key?: string | null
   concurrency: number
   priority: number
   rate_multiplier?: number | null

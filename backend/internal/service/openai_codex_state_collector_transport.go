@@ -28,7 +28,7 @@ func ProvideCodexTurnStateCollectorHTTPDo(accounts AccountRepository, proxies Pr
 			return nil, errors.New("collector_account_unavailable")
 		}
 		cfg := CodexTurnStateConfigForAccount(owner)
-		if !cfg.Enabled || CodexTurnStateAccountTypeForAccount(owner) == "" || cfg.CollectorProxyID == nil || *cfg.CollectorProxyID != input.ProxyID ||
+		if !cfg.Enabled || CodexTurnStateAccountTypeForAccount(owner) == "" || !codexTurnStateProxyAllowed(CodexTurnStateCollectorProxyIDs(cfg), input.ProxyID) ||
 			CodexTurnStateGenerationForAccount(owner) != CodexTurnStateGenerationForAccount(input.Account) {
 			return nil, errors.New("collector_configuration_changed")
 		}

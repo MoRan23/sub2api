@@ -27,10 +27,27 @@
       <p class="input-hint">{{ t(`${prefix}.typeHint`) }}</p>
       <div>
         <label class="input-label">{{ t(`${prefix}.collectorProxy`) }}</label>
-        <ProxySelector :model-value="modelValue.collector_proxy_id" :proxies="proxies"
-          :disabled="inheritedFrom != null" :no-proxy-label="t(`${prefix}.noCollectorProxy`)"
-          @update:model-value="update({ collector_proxy_id: $event })" />
+        <div class="space-y-2">
+          <div v-for="(proxyId, index) in proxyIDs" :key="proxyId" class="flex items-center gap-2" data-testid="codex-turn-state-proxy-row">
+            <span class="w-4 shrink-0 text-xs text-gray-500">{{ index + 1 }}</span>
+            <div class="min-w-0 flex-1">
+              <ProxySelector :model-value="proxyId" :proxies="availableProxies(proxyId)"
+                :disabled="inheritedFrom != null" :no-proxy-label="t(`${prefix}.removeCollectorProxy`)"
+                @update:model-value="replaceProxy(index, $event)" />
+            </div>
+            <button type="button" class="btn btn-secondary px-2" :disabled="inheritedFrom != null || index === 0"
+              :aria-label="t(`${prefix}.moveProxyUp`)" data-testid="codex-turn-state-proxy-up" @click="moveProxy(index, -1)">↑</button>
+            <button type="button" class="btn btn-secondary px-2" :disabled="inheritedFrom != null || index === proxyIDs.length - 1"
+              :aria-label="t(`${prefix}.moveProxyDown`)" data-testid="codex-turn-state-proxy-down" @click="moveProxy(index, 1)">↓</button>
+            <button type="button" class="btn btn-secondary px-2" :disabled="inheritedFrom != null"
+              :aria-label="t(`${prefix}.removeCollectorProxy`)" data-testid="codex-turn-state-proxy-remove" @click="replaceProxy(index, null)">×</button>
+          </div>
+          <p v-if="!proxyIDs.length" class="text-xs text-gray-500 dark:text-gray-400" data-testid="codex-turn-state-proxy-empty">{{ t(`${prefix}.noCollectorProxy`) }}</p>
+          <button type="button" class="btn btn-secondary" :disabled="inheritedFrom != null || !availableProxies().length"
+            data-testid="codex-turn-state-proxy-add" @click="addProxy">{{ t(`${prefix}.addCollectorProxy`) }}</button>
+        </div>
         <p class="input-hint">{{ t(`${prefix}.proxyHint`) }}</p>
+        <p class="input-hint">{{ t(`${prefix}.proxyRotationHint`) }}</p>
       </div>
     </template>
     <p class="text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.experimental`) }}</p>
@@ -38,16 +55,40 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { CodexTurnStateConfig, Proxy } from '@/types'
 import ProxySelector from '@/components/common/ProxySelector.vue'
+import { collectorProxyIDs, readCodexTurnStateConfig, type EditableCodexTurnStateConfig } from './codexTurnState'
 
 const props = defineProps<{ modelValue: CodexTurnStateConfig; proxies: Proxy[]; inheritedFrom?: number | null }>()
-const emit = defineEmits<{ 'update:modelValue': [value: CodexTurnStateConfig] }>()
+const emit = defineEmits<{ 'update:modelValue': [value: EditableCodexTurnStateConfig] }>()
 const { t } = useI18n()
 const prefix = 'admin.accounts.codexTurnState'
+const proxyIDs = computed(() => collectorProxyIDs(props.modelValue))
 function update(patch: Partial<CodexTurnStateConfig>) {
   if (props.inheritedFrom != null) return
-  emit('update:modelValue', { ...props.modelValue, ...patch })
+  emit('update:modelValue', readCodexTurnStateConfig({ ...props.modelValue, ...patch }))
+}
+function availableProxies(currentId?: number) {
+  return props.proxies.filter(proxy => proxy.id === currentId || !proxyIDs.value.includes(proxy.id))
+}
+function addProxy() {
+  const proxy = availableProxies()[0]
+  if (proxy) update({ collector_proxy_ids: [...proxyIDs.value, proxy.id] })
+}
+function replaceProxy(index: number, id: number | null) {
+  if (id != null && (!props.proxies.some(proxy => proxy.id === id) || proxyIDs.value.some((existing, position) => position !== index && existing === id))) return
+  const ids = [...proxyIDs.value]
+  if (id == null) ids.splice(index, 1)
+  else ids[index] = id
+  update({ collector_proxy_ids: ids })
+}
+function moveProxy(index: number, direction: number) {
+  const target = index + direction
+  if (target < 0 || target >= proxyIDs.value.length) return
+  const ids = [...proxyIDs.value]
+  ;[ids[index], ids[target]] = [ids[target]!, ids[index]!]
+  update({ collector_proxy_ids: ids })
 }
 </script>

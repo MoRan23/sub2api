@@ -13,6 +13,7 @@ func codexTurnStateRetainsAccountCooldown(record *CodexTurnStateRecord) bool {
 
 func clearIdleCodexTurnStateDemand(record *CodexTurnStateRecord) {
 	record.DemandReason, record.DemandAt = "", time.Time{}
+	record.CollectorAttemptID = ""
 	if !codexTurnStateRetainsAccountCooldown(record) {
 		record.NextCollectAt = time.Time{}
 		record.CollectionStatus, record.CollectionReason = "idle", "waiting_business_response"
@@ -21,6 +22,7 @@ func clearIdleCodexTurnStateDemand(record *CodexTurnStateRecord) {
 
 func completeCodexTurnStateDemand(record *CodexTurnStateRecord, now time.Time) {
 	record.DemandReason, record.DemandAt = "", time.Time{}
+	record.CollectorExtendedCount, record.CollectorAttemptID = 0, ""
 	if record.CollectorPaused {
 		record.CollectionStatus, record.CollectionReason = "paused", record.LastError
 		return
@@ -78,6 +80,9 @@ func codexTurnStateCollectorFailureReason(result CodexTurnStateCollectResult, er
 func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owner *Account, key CodexTurnStateKey, base CodexTurnStateRecord, policyRevision string, result CodexTurnStateCollectResult, collectErr error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
+	if base.CollectorAttemptID == "" || base.CollectorProxyID <= 0 {
+		return
+	}
 	identity := base.cacheIdentity()
 	for range 3 {
 		if !s.authoritativeModelPolicyMatches(ctx, key.Model, policyRevision) {
@@ -85,6 +90,9 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 		}
 		record, err := s.repo.Get(ctx, key)
 		if err != nil || record == nil || record.DemandReason == "" || record.CollectorPaused {
+			return
+		}
+		if record.CollectorAttemptID != base.CollectorAttemptID || record.CollectorProxyID != base.CollectorProxyID {
 			return
 		}
 		// Scheduling writes and another abnormal business response may advance the
@@ -97,6 +105,10 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 		now := s.now()
 		if err != nil || !codexTurnStateEligible(current) || !CodexTurnStateConfigForAccount(current).Enabled || CodexTurnStateGenerationForAccount(current) != key.Generation ||
 			current.Status != StatusActive || !current.Schedulable || (current.ExpiresAt != nil && !current.ExpiresAt.After(now)) {
+			return
+		}
+		proxyIDs := CodexTurnStateCollectorProxyIDs(CodexTurnStateConfigForAccount(current))
+		if !codexTurnStateProxyAllowed(proxyIDs, base.CollectorProxyID) {
 			return
 		}
 		outcomeErr := collectErr
@@ -136,13 +148,24 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 			} else {
 				outcomeErr = encryptErr
 			}
+		} else if best != "" && target.IssuedAt.Equal(record.IssuedAt) && record.EncryptedToken != "" && record.ExpiresAt.After(now) {
+			if record.ExpiresAt.After(now.Add(CodexTurnStateRefreshAhead)) {
+				record.RefreshReason = ""
+				completeCodexTurnStateDemand(record, now)
+				accepted = true
+			} else {
+				targetStillExpiring = true
+			}
 		}
 		if !accepted {
 			concurrentCooldownReason := ""
 			if !record.NextCollectAt.Equal(base.NextCollectAt) && record.NextCollectAt.After(now) && codexTurnStateRetainsAccountCooldown(record) {
 				concurrentCooldownReason = record.LastError
 			}
-			if !extended.IssuedAt.IsZero() && !extended.IssuedAt.Before(record.IssuedAt) && !(record.EncryptedToken != "" && record.ExpiresAt.After(now)) {
+			if best == "" && !extended.IssuedAt.IsZero() {
+				rotateCodexTurnStateProxy(record, proxyIDs)
+			}
+			if best == "" && !extended.IssuedAt.IsZero() && !extended.IssuedAt.Before(record.IssuedAt) && !(record.EncryptedToken != "" && record.ExpiresAt.After(now)) {
 				record.EncryptedToken, record.ExpiresAt = "", time.Time{}
 				record.Shape, record.TokenLength, record.CipherBlocks = extended.Shape, extended.TokenLength, extended.CipherBlocks
 				record.IssuedAt = extended.IssuedAt
@@ -186,13 +209,14 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 			return
 		}
 		record.ModelPolicyRevision = policyRevision
+		record.CollectorAttemptID = ""
 		ok, saveErr := s.repo.SaveCAS(ctx, *record, record.Version)
 		if saveErr != nil {
 			return
 		}
 		if ok {
 			if accepted {
-				s.cancelAndNotify(ctx, key)
+				s.cancelCollectorAttempt(ctx, key, base.CollectorAttemptID)
 			}
 			return
 		}

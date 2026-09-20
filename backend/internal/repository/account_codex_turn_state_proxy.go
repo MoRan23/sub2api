@@ -19,6 +19,10 @@ func preserveCodexTurnStateOnCollectorProxyChange(ctx context.Context, client *d
 	if service.CodexTurnStateAccountTypeForAccount(target) == "team_business" {
 		length, blocks = 332, 12
 	}
+	var firstProxyID any
+	if ids := service.CodexTurnStateCollectorProxyIDs(service.CodexTurnStateConfigForAccount(target)); len(ids) > 0 {
+		firstProxyID = ids[0]
+	}
 	_, err := client.ExecContext(ctx, `WITH eligible AS (
 		SELECT owner_account_id, model,
 			COALESCE(encrypted_token <> '' AND shape = 'target' AND token_length = $4 AND cipher_blocks = $5
@@ -32,6 +36,7 @@ func preserveCodexTurnStateOnCollectorProxyChange(ctx context.Context, client *d
 		demand_at = CASE WHEN eligible.valid_target THEN NULL ELSE s.demand_at END,
 		refresh_reason = CASE WHEN eligible.valid_target THEN '' ELSE s.refresh_reason END,
 		collector_paused = FALSE,
+		collector_proxy_id = $7, collector_extended_count = 0, collector_attempt_id = NULL,
 		next_collect_at = CASE
 			WHEN s.collector_paused THEN NULL
 			WHEN NOT eligible.valid_target OR (s.last_error IN ('account_cooldown','collector_rate_limited') AND s.next_collect_at > NOW()) THEN s.next_collect_at
@@ -46,6 +51,6 @@ func preserveCodexTurnStateOnCollectorProxyChange(ctx context.Context, client *d
 	FROM eligible WHERE s.owner_account_id = eligible.owner_account_id AND s.model = eligible.model
 		AND s.generation = $2 AND (eligible.valid_target OR s.demand_reason <> '')`,
 		current.ID, service.CodexTurnStateGenerationForAccount(current), service.CodexTurnStateGenerationForAccount(target),
-		length, blocks, int64(service.CodexTurnStateLifetime/time.Second))
+		length, blocks, int64(service.CodexTurnStateLifetime/time.Second), firstProxyID)
 	return err
 }

@@ -93,7 +93,7 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
 	client := clientFromContext(ctx, r.client)
 	var tx *dbent.Tx
-	if service.CodexTurnStateConfigForAccount(account).CollectorProxyID != nil && dbent.TxFromContext(ctx) == nil {
+	if len(service.CodexTurnStateCollectorProxyIDs(service.CodexTurnStateConfigForAccount(account))) > 0 && dbent.TxFromContext(ctx) == nil {
 		var err error
 		tx, err = r.client.Tx(ctx)
 		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
@@ -3295,7 +3295,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			for key, value := range updates.Credentials {
 				current.Credentials[key] = value
 			}
-			if err := service.ValidateCodexTurnStateConfig(current, updates.CodexTurnState); err != nil {
+			if err := service.ValidateCodexTurnStateConfigUpdate(&previous, current, updates.CodexTurnState); err != nil {
 				return 0, err
 			}
 			if service.AccountConfigurationIntentFromContext(ctx, id).CodexTurnState == nil {

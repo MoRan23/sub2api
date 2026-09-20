@@ -59,8 +59,8 @@ export async function list(
  * Get all active proxies (without pagination)
  * @returns List of all active proxies
  */
-export async function getAll(): Promise<Proxy[]> {
-  const { data } = await apiClient.get<Proxy[]>('/admin/proxies/all')
+export async function getAll(signal?: AbortSignal): Promise<Proxy[]> {
+  const { data } = await apiClient.get<Proxy[]>('/admin/proxies/all', signal ? { signal } : undefined)
   assertProxyArray(data)
   return data
 }

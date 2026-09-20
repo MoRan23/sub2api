@@ -22,6 +22,8 @@ type CodexTurnStateKey struct {
 	OwnerAccountID int64
 	Model          string
 	Generation     string
+	// Set only on cancellation notifications, never on repository lookup keys.
+	CollectorAttemptID string `json:",omitempty"`
 }
 
 // CodexTurnStateRecord contains encrypted state only. Empty timestamps mean unset.
@@ -52,6 +54,10 @@ type CodexTurnStateRecord struct {
 	NextCollectAt          time.Time
 	CollectorPaused        bool
 	LastError              string
+	CollectorProxyID       int64
+	CollectorExtendedCount int
+	LastCollectorProxyID   int64
+	CollectorAttemptID     string `json:"-"`
 }
 
 func (r CodexTurnStateRecord) Key() CodexTurnStateKey {
@@ -188,24 +194,27 @@ type CodexTurnStateCollector interface {
 type CodexTurnStateCollectorHTTPDo func(context.Context, CodexTurnStateCollectRequest, *http.Request) (*http.Response, error)
 
 type CodexTurnStateModelStatus struct {
-	Model            string     `json:"model"`
-	ModelAllowed     bool       `json:"model_allowed"`
-	CacheAvailable   bool       `json:"cache_available"`
-	CollectionStatus string     `json:"collection_status"`
-	CollectionReason string     `json:"collection_reason,omitempty"`
-	State            string     `json:"state"`
-	Shape            string     `json:"shape"`
-	Source           string     `json:"source"`
-	TokenLength      int        `json:"token_length"`
-	CipherBlocks     int        `json:"cipher_blocks"`
-	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
-	RemainingSeconds int64      `json:"remaining_seconds"`
-	LastBusinessAt   *time.Time `json:"last_business_at,omitempty"`
-	LastCollectedAt  *time.Time `json:"last_collected_at,omitempty"`
-	NextCollectAt    *time.Time `json:"next_collect_at,omitempty"`
-	CollectorPaused  bool       `json:"collector_paused"`
-	LastError        string     `json:"last_error,omitempty"`
-	RefreshReason    string     `json:"refresh_reason,omitempty"`
+	Model                  string     `json:"model"`
+	ModelAllowed           bool       `json:"model_allowed"`
+	CacheAvailable         bool       `json:"cache_available"`
+	CollectionStatus       string     `json:"collection_status"`
+	CollectionReason       string     `json:"collection_reason,omitempty"`
+	State                  string     `json:"state"`
+	Shape                  string     `json:"shape"`
+	Source                 string     `json:"source"`
+	TokenLength            int        `json:"token_length"`
+	CipherBlocks           int        `json:"cipher_blocks"`
+	ExpiresAt              *time.Time `json:"expires_at,omitempty"`
+	RemainingSeconds       int64      `json:"remaining_seconds"`
+	LastBusinessAt         *time.Time `json:"last_business_at,omitempty"`
+	LastCollectedAt        *time.Time `json:"last_collected_at,omitempty"`
+	NextCollectAt          *time.Time `json:"next_collect_at,omitempty"`
+	CollectorPaused        bool       `json:"collector_paused"`
+	LastError              string     `json:"last_error,omitempty"`
+	RefreshReason          string     `json:"refresh_reason,omitempty"`
+	CollectorProxyID       *int64     `json:"collector_proxy_id,omitempty"`
+	LastCollectorProxyID   *int64     `json:"last_collector_proxy_id,omitempty"`
+	CollectorExtendedCount int        `json:"collector_extended_count"`
 }
 
 type CodexTurnStateStatus struct {
@@ -218,6 +227,7 @@ type CodexTurnStateStatus struct {
 	ExpectedLength      int                              `json:"expected_length"`
 	Reason              string                           `json:"reason,omitempty"`
 	CollectorProxyID    *int64                           `json:"collector_proxy_id"`
+	CollectorProxyIDs   []int64                          `json:"collector_proxy_ids"`
 	Models              []CodexTurnStateModelStatus      `json:"models"`
 	ObservationEnabled  bool                             `json:"observation_enabled"`
 	ObservationScope    string                           `json:"observation_scope"`

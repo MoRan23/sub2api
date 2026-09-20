@@ -35,7 +35,8 @@ const codexStateColumns = `s.owner_account_id, s.model, s.generation, s.version,
 	 s.source, s.shape, s.refresh_reason, s.last_business_at, s.last_collected_at,
 	 s.next_collect_at, s.collector_paused, s.last_error,
 	 s.demand_reason, s.demand_at, s.history_proof_observed_at,
-	 s.collection_status, s.collection_reason,
+		 s.collection_status, s.collection_reason,
+		 s.collector_proxy_id, s.collector_extended_count, s.last_collector_proxy_id, s.collector_attempt_id,
 	 EXISTS (SELECT 1 FROM openai_codex_state_business_leases state_lease
 	 WHERE state_lease.owner_account_id=s.owner_account_id AND state_lease.model=s.model
 	 AND state_lease.generation=s.generation AND state_lease.lease_until>NOW())`
@@ -150,6 +151,12 @@ func (r *openAICodexStateRepository) BeginBusiness(ctx context.Context, key serv
 			OR openai_codex_state.last_error IN ('account_cooldown','collector_rate_limited'))
 			THEN openai_codex_state.next_collect_at ELSE NULL END,
 		collector_paused = CASE WHEN openai_codex_state.generation = EXCLUDED.generation THEN openai_codex_state.collector_paused ELSE FALSE END,
+		collector_proxy_id = CASE WHEN openai_codex_state.generation = EXCLUDED.generation THEN openai_codex_state.collector_proxy_id ELSE NULL END,
+		collector_extended_count = CASE WHEN openai_codex_state.generation = EXCLUDED.generation THEN openai_codex_state.collector_extended_count ELSE 0 END,
+		last_collector_proxy_id = CASE WHEN openai_codex_state.generation = EXCLUDED.generation THEN openai_codex_state.last_collector_proxy_id ELSE NULL END,
+		collector_attempt_id = CASE WHEN openai_codex_state.generation = EXCLUDED.generation
+			AND (openai_codex_state.last_business_at <= $4 OR openai_codex_state.last_business_at >= $5)
+			THEN openai_codex_state.collector_attempt_id ELSE NULL END,
 		last_error = CASE WHEN openai_codex_state.generation = EXCLUDED.generation THEN openai_codex_state.last_error ELSE '' END,
 		demand_reason = CASE WHEN openai_codex_state.generation = EXCLUDED.generation AND (openai_codex_state.last_business_at <= $4 OR openai_codex_state.last_business_at >= $5) THEN openai_codex_state.demand_reason ELSE '' END,
 		demand_at = CASE WHEN openai_codex_state.generation = EXCLUDED.generation AND (openai_codex_state.last_business_at <= $4 OR openai_codex_state.last_business_at >= $5) THEN openai_codex_state.demand_at ELSE NULL END,
@@ -313,13 +320,16 @@ func (r *openAICodexStateRepository) CreateHistoryDemand(ctx context.Context, pr
 		source=$9, shape=$10, refresh_reason=$11, last_business_at=$12,
 		last_collected_at=$13, next_collect_at=$14, collector_paused=$15, last_error=$16,
 		demand_reason=$17, demand_at=$18, history_proof_observed_at=$19,
-		collection_status=$20, collection_reason=$21, updated_at=NOW()
+		collection_status=$20, collection_reason=$21,
+		collector_proxy_id=$22, collector_extended_count=$23, last_collector_proxy_id=$24,
+		collector_attempt_id=$25, updated_at=NOW()
 		WHERE owner_account_id=$1 AND model=$2`, key.OwnerAccountID, key.Model, key.Generation,
 		record.EncryptedToken, codexStateNullableTime(record.IssuedAt), codexStateNullableTime(record.ExpiresAt),
 		record.TokenLength, record.CipherBlocks, record.Source, record.Shape, record.RefreshReason,
 		record.LastBusinessAt.UTC(), codexStateNullableTime(record.LastCollectedAt), codexStateNullableTime(record.NextCollectAt),
 		record.CollectorPaused, record.LastError, record.DemandReason, codexStateNullableTime(record.DemandAt), proof.ObservedAt,
-		record.CollectionStatus, record.CollectionReason)
+		record.CollectionStatus, record.CollectionReason, codexStateNullableID(record.CollectorProxyID),
+		record.CollectorExtendedCount, codexStateNullableID(record.LastCollectorProxyID), codexStateNullableString(record.CollectorAttemptID))
 	if err != nil {
 		return false, err
 	}
@@ -406,7 +416,9 @@ func (r *openAICodexStateRepository) SaveCAS(ctx context.Context, record service
 		next_collect_at=$15, collector_paused=$16, last_error=$17,
 		demand_reason=$18, demand_at=$19,
 		history_proof_observed_at=GREATEST(history_proof_observed_at,$20),
-		collection_status=$21, collection_reason=$22, updated_at=NOW()
+		collection_status=$21, collection_reason=$22,
+		collector_proxy_id=$23, collector_extended_count=$24, last_collector_proxy_id=$25,
+		collector_attempt_id=$26, updated_at=NOW()
 		WHERE owner_account_id=$1 AND model=$2 AND generation=$3 AND version=$4`,
 		record.OwnerAccountID, record.Model, record.Generation, expectedVersion,
 		record.EncryptedToken, codexStateNullableTime(record.IssuedAt), codexStateNullableTime(record.ExpiresAt),
@@ -414,7 +426,8 @@ func (r *openAICodexStateRepository) SaveCAS(ctx context.Context, record service
 		codexStateNullableTime(record.LastBusinessAt), codexStateNullableTime(record.LastCollectedAt),
 		codexStateNullableTime(record.NextCollectAt), record.CollectorPaused, record.LastError,
 		record.DemandReason, codexStateNullableTime(record.DemandAt), codexStateNullableTime(record.HistoryProofObservedAt),
-		record.CollectionStatus, record.CollectionReason)
+		record.CollectionStatus, record.CollectionReason, codexStateNullableID(record.CollectorProxyID),
+		record.CollectorExtendedCount, codexStateNullableID(record.LastCollectorProxyID), codexStateNullableString(record.CollectorAttemptID))
 	if err != nil {
 		return false, err
 	}
@@ -444,7 +457,12 @@ func (r *openAICodexStateRepository) ListActive(ctx context.Context, since time.
 		AND NOT COALESCE((s.collection_reason = 'collector_proxy_changed' AND s.encrypted_token <> '' AND s.shape = 'target'
 		 AND ((s.token_length = 292 AND s.cipher_blocks = 10) OR (s.token_length = 332 AND s.cipher_blocks = 12))
 		 AND s.issued_at <= NOW() + INTERVAL '30 seconds' AND s.expires_at = s.issued_at + INTERVAL '1 hour' AND s.expires_at > NOW()), FALSE)
-		AND a.extra->'codex_turn_state'->>'collector_proxy_id' ~ '^[1-9][0-9]*$'
+		AND CASE WHEN a.extra->'codex_turn_state' ? 'collector_proxy_ids' THEN
+		 CASE WHEN jsonb_typeof(a.extra->'codex_turn_state'->'collector_proxy_ids') = 'array' THEN
+		  EXISTS (SELECT 1 FROM jsonb_array_elements(a.extra->'codex_turn_state'->'collector_proxy_ids') AS collector_proxy(value)
+		   WHERE jsonb_typeof(collector_proxy.value) = 'number' AND collector_proxy.value #>> '{}' ~ '^[1-9][0-9]*$')
+		 ELSE FALSE END
+		 ELSE a.extra->'codex_turn_state'->>'collector_proxy_id' ~ '^[1-9][0-9]*$' END
 		ORDER BY s.next_collect_at ASC NULLS FIRST, s.expires_at ASC NULLS FIRST,
 		s.last_business_at DESC, s.owner_account_id, s.model LIMIT $2`, since.UTC(), limit, int64(service.CodexTurnStateRefreshAhead/time.Second))
 }
@@ -508,17 +526,22 @@ type codexStateScanner interface{ Scan(...any) error }
 func scanCodexState(scanner codexStateScanner) (*service.CodexTurnStateRecord, error) {
 	var record service.CodexTurnStateRecord
 	var issued, expires, collected, next, demand, historyProof sql.NullTime
+	var collectorProxyID, lastCollectorProxyID sql.NullInt64
+	var collectorAttemptID sql.NullString
 	err := scanner.Scan(&record.OwnerAccountID, &record.Model, &record.Generation, &record.Version,
 		&record.EncryptedToken, &issued, &expires, &record.TokenLength, &record.CipherBlocks,
 		&record.Source, &record.Shape, &record.RefreshReason, &record.LastBusinessAt,
 		&collected, &next, &record.CollectorPaused, &record.LastError,
-		&record.DemandReason, &demand, &historyProof, &record.CollectionStatus, &record.CollectionReason, &record.BusinessInFlight)
+		&record.DemandReason, &demand, &historyProof, &record.CollectionStatus, &record.CollectionReason,
+		&collectorProxyID, &record.CollectorExtendedCount, &lastCollectorProxyID, &collectorAttemptID, &record.BusinessInFlight)
 	if err != nil {
 		return nil, err
 	}
 	record.IssuedAt, record.ExpiresAt = issued.Time, expires.Time
 	record.LastCollectedAt, record.NextCollectAt = collected.Time, next.Time
 	record.DemandAt, record.HistoryProofObservedAt = demand.Time, historyProof.Time
+	record.CollectorProxyID, record.LastCollectorProxyID = collectorProxyID.Int64, lastCollectorProxyID.Int64
+	record.CollectorAttemptID = collectorAttemptID.String
 	return &record, nil
 }
 
@@ -527,6 +550,20 @@ func codexStateNullableTime(value time.Time) any {
 		return nil
 	}
 	return value.UTC()
+}
+
+func codexStateNullableID(value int64) any {
+	if value == 0 {
+		return nil
+	}
+	return value
+}
+
+func codexStateNullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func codexStateCollectorKey(ownerID int64) (string, error) {

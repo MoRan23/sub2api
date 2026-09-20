@@ -8,6 +8,7 @@ import zh from '@/i18n/locales/zh/admin/accounts'
 
 const { getCodexTurnState } = vi.hoisted(() => ({ getCodexTurnState: vi.fn() }))
 vi.mock('@/api/admin/accounts', () => ({ getCodexTurnState }))
+vi.mock('@/api/admin/proxies', () => ({ getAll: vi.fn().mockResolvedValue([]) }))
 import CodexTurnStateStatusModal from '../CodexTurnStateStatusModal.vue'
 
 function runtimeMessages(messages: Record<string, unknown>): Record<string, unknown> {

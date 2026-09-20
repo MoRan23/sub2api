@@ -97,3 +97,25 @@ env -u OPENAI_API_KEY CI=true GOEXPERIMENT=jsonv2 go test -tags integration ./in
 ```
 
 前端六个相关测试文件共 70 项通过，包括账号列表、状态弹窗、管理 API 及中英文翻译；变更文件 ESLint、`vue-tsc` 类型检查与生产构建通过。浏览器使用模拟管理接口验收错误提示、重复提示合并、历史错误、未知类别安全回退、五秒刷新恢复、窄屏布局，以及代理切换后正常缓存继续可用；该状态保留真实本地过期时间，最早可重试时间不会被伪造为缓存到期时间。未运行无关的全量后端测试或部署应用。
+
+## 多采集代理与按模型轮换（基线 `eab22c5c3`）
+
+新增有序代理配置、兼容单值读取及迁移 247；运行态持久化代理选择、异常计数和精确采集尝试标识。覆盖第三次有效 312／356 后循环轮换、普通错误保留计数、跨模型隔离、成功后保留代理并清零、空闲恢复、配置变更保留正常缓存、迟到结果及迟到取消通知的隔离。配置测试还覆盖显式空数组和畸形新字段不能恢复旧单代理、旧快照保护、全部代理引用与删除锁、按映射键保序导入导出。
+
+本轮使用 Go 1.27.0、`GOEXPERIMENT=jsonv2`，相关 service / admin / DTO 普通回归通过 719 项；扩大的 unit 竞态选择式通过 734 项，另有一项下述基线失败，无跳过。隔离 PostgreSQL / Redis 相关集成通过 85 项，无失败或跳过。命令在 `backend` 执行，输出在 `.git/task-artifacts/codex-multi-proxy/`：
+
+```bash
+env -u OPENAI_API_KEY GOEXPERIMENT=jsonv2 go test \
+  ./internal/service ./internal/handler/dto ./internal/handler/admin \
+  -run 'CodexTurnState|CodexState|CodexMultiProxy' -count=1 -json
+env -u OPENAI_API_KEY GOEXPERIMENT=jsonv2 go test -race -tags unit \
+  ./internal/service ./internal/repository ./internal/handler/admin ./internal/handler/dto ./migrations \
+  -run 'Codex(State|TurnState|MultiProxy)|AccountConfiguration' -count=1 -json
+env -u OPENAI_API_KEY CI=true GOEXPERIMENT=jsonv2 go test -tags integration ./internal/repository \
+  -run '^TestCodex(State|TurnState|MultiProxy|CollectorProxyChangePostgres|HistoryDemandPostgres|CollectorPublicationPostgres)|^TestMergeCodexImportRealPostgres' \
+  -count=1 -json
+```
+
+`TestAccountConfigurationPreservesLatestAfterStaleSnapshot` 的整个 Extra 对象相等断言没有计入服务端初始化的私有 `codex_turn_state_credential_epoch`，在当前代码与 `git archive eab22c5c3 backend` 提取的固定基线中，均以相同 Go 工具链和竞态参数复现同一失败。原断言未删除或放宽；基线输出为 `go-baseline-stale-snapshot.jsonl`。首次集成编译发现新增测试将仓储具体方法误当作接口方法调用，修正测试接收者后完整集成重跑通过。
+
+前端九个相关测试文件共 202 项通过，变更文件 ESLint、类型检查和生产构建通过。浏览器使用本地模拟接口通过八组验收：旧单值回显、列表增删与排序、重复过滤、显式空数组及新数组提交、Spark 只读、代理名称与计数轮换、五秒刷新及关闭取消、390px 下新增配置与状态组件布局。没有外部请求、浏览器错误或真实模型调用；预览服务已关闭。另观察到未改动的 WS mode 表单区域在窄屏下横向溢出，未在固定基线复跑，也未计入本轮新增组件的通过范围。

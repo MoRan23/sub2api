@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"maps"
+	"slices"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/google/uuid"
@@ -26,6 +27,7 @@ func withAccountConfigurationIntent(ctx context.Context, ids []int64, extra map[
 	intent := AccountConfigurationIntent{Extra: make(map[string]any)}
 	if len(codex) > 0 && codex[0] != nil {
 		value := *codex[0]
+		value.CollectorProxyIDs = slices.Clone(value.CollectorProxyIDs)
 		if value.CollectorProxyID != nil {
 			proxyID := *value.CollectorProxyID
 			value.CollectorProxyID = &proxyID
@@ -62,6 +64,7 @@ func AccountConfigurationIntentFromContext(ctx context.Context, id int64) Accoun
 	}
 	if intent.CodexTurnState != nil {
 		value := *intent.CodexTurnState
+		value.CollectorProxyIDs = slices.Clone(value.CollectorProxyIDs)
 		if value.CollectorProxyID != nil {
 			proxyID := *value.CollectorProxyID
 			value.CollectorProxyID = &proxyID

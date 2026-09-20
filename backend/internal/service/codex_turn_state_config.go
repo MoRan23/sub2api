@@ -1,10 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -16,12 +19,14 @@ func (s *adminServiceImpl) validateCodexTurnStateConfig(ctx context.Context, acc
 	if err := ValidateCodexTurnStateConfig(account, config); err != nil {
 		return err
 	}
-	if config != nil && config.CollectorProxyID != nil {
+	if config != nil && len(CodexTurnStateCollectorProxyIDs(*config)) > 0 {
 		if s.proxyRepo == nil {
 			return infraerrors.BadRequest("CODEX_TURN_STATE_PROXY_UNAVAILABLE", "collector proxy repository is unavailable")
 		}
-		if _, err := s.proxyRepo.GetByID(ctx, *config.CollectorProxyID); err != nil {
-			return err
+		for _, id := range CodexTurnStateCollectorProxyIDs(*config) {
+			if _, err := s.proxyRepo.GetByID(ctx, id); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -36,9 +41,44 @@ const (
 // CodexTurnStateConfig is explicit administrator configuration. State and tokens
 // are stored separately and never accepted through this object.
 type CodexTurnStateConfig struct {
-	Enabled          bool   `json:"enabled"`
-	AccountType      string `json:"account_type"`
-	CollectorProxyID *int64 `json:"collector_proxy_id"`
+	Enabled           bool    `json:"enabled"`
+	AccountType       string  `json:"account_type"`
+	CollectorProxyIDs []int64 `json:"collector_proxy_ids,omitzero"`
+	CollectorProxyID  *int64  `json:"collector_proxy_id,omitempty"`
+}
+
+// Presence matters: a malformed new list cannot resurrect a legacy destination.
+// Keep omitted lists nil for legacy requests; an explicit [] stays non-nil.
+func (config *CodexTurnStateConfig) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if raw, exists := fields["collector_proxy_ids"]; exists {
+		raw = bytes.TrimSpace(raw)
+		if len(raw) == 0 || raw[0] != '[' {
+			return errors.New("collector_proxy_ids must be an array")
+		}
+	}
+	type plainConfig CodexTurnStateConfig
+	var decoded plainConfig
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*config = CodexTurnStateConfig(decoded)
+	return nil
+}
+
+// CodexTurnStateCollectorProxyIDs returns an independent ordered copy. A present
+// empty array explicitly clears collectors and must never fall back to legacy ID.
+func CodexTurnStateCollectorProxyIDs(config CodexTurnStateConfig) []int64 {
+	if config.CollectorProxyIDs != nil {
+		return append([]int64{}, config.CollectorProxyIDs...)
+	}
+	if config.CollectorProxyID != nil {
+		return []int64{*config.CollectorProxyID}
+	}
+	return []int64{}
 }
 
 func IsCodexTurnStateAccount(account *Account) bool {
@@ -47,17 +87,26 @@ func IsCodexTurnStateAccount(account *Account) bool {
 }
 
 func CodexTurnStateConfigForAccount(account *Account) CodexTurnStateConfig {
-	config := CodexTurnStateConfig{AccountType: "auto"}
+	config := CodexTurnStateConfig{AccountType: "auto", CollectorProxyIDs: []int64{}}
 	if account == nil {
 		return config
 	}
 	if raw, exists := account.Extra[CodexTurnStateExtraKey]; exists {
 		if encoded, err := json.Marshal(raw); err == nil {
-			_ = json.Unmarshal(encoded, &config)
+			var decoded CodexTurnStateConfig
+			if err := json.Unmarshal(encoded, &decoded); err == nil {
+				config = decoded
+			}
 		}
 	}
 	if config.AccountType == "" {
 		config.AccountType = "auto"
+	}
+	config.CollectorProxyIDs = CodexTurnStateCollectorProxyIDs(config)
+	config.CollectorProxyID = nil
+	if len(config.CollectorProxyIDs) > 0 {
+		firstID := config.CollectorProxyIDs[0]
+		config.CollectorProxyID = &firstID
 	}
 	if !IsCodexTurnStateAccount(account) {
 		config.Enabled = false
@@ -122,18 +171,43 @@ func ValidateCodexTurnStateConfig(account *Account, config *CodexTurnStateConfig
 	default:
 		return infraerrors.BadRequest("CODEX_TURN_STATE_INVALID", "account_type must be auto, personal, or team_business")
 	}
-	if config.CollectorProxyID != nil && *config.CollectorProxyID <= 0 {
-		return infraerrors.BadRequest("CODEX_TURN_STATE_INVALID", "collector_proxy_id must be positive or null")
+	seen := make(map[int64]struct{})
+	for _, id := range CodexTurnStateCollectorProxyIDs(*config) {
+		if id <= 0 {
+			return infraerrors.BadRequest("CODEX_TURN_STATE_INVALID", "collector_proxy_ids must contain positive integer IDs")
+		}
+		if _, exists := seen[id]; exists {
+			return infraerrors.BadRequest("CODEX_TURN_STATE_INVALID", "collector_proxy_ids must not contain duplicate IDs")
+		}
+		seen[id] = struct{}{}
 	}
 	return nil
 }
 
 func codexTurnStateConfigMap(config CodexTurnStateConfig) map[string]any {
-	var proxy any
-	if config.CollectorProxyID != nil {
-		proxy = *config.CollectorProxyID
+	return CodexTurnStateConfigJSON(config)
+}
+
+// CodexTurnStateConfigJSON is the canonical stored representation. Legacy input
+// remains supported, but new writes never persist a second conflicting carrier.
+func CodexTurnStateConfigJSON(config CodexTurnStateConfig) map[string]any {
+	return map[string]any{"enabled": config.Enabled, "account_type": config.AccountType, "collector_proxy_ids": CodexTurnStateCollectorProxyIDs(config)}
+}
+
+// ValidateCodexTurnStateConfigUpdate must run against the current locked row.
+// An older client cannot silently collapse an existing multi-proxy list.
+func ValidateCodexTurnStateConfigUpdate(current, target *Account, requested *CodexTurnStateConfig) error {
+	if err := ValidateCodexTurnStateConfig(target, requested); err != nil {
+		return err
 	}
-	return map[string]any{"enabled": config.Enabled, "account_type": config.AccountType, "collector_proxy_id": proxy}
+	if requested != nil && requested.CollectorProxyIDs == nil && len(CodexTurnStateCollectorProxyIDs(CodexTurnStateConfigForAccount(current))) > 1 {
+		return infraerrors.BadRequest("CODEX_TURN_STATE_LEGACY_PROXY_UPDATE", "use collector_proxy_ids to update an account with multiple collector proxies")
+	}
+	return nil
+}
+
+func codexTurnStateConfigsEqual(a, b CodexTurnStateConfig) bool {
+	return a.Enabled == b.Enabled && a.AccountType == b.AccountType && slices.Equal(CodexTurnStateCollectorProxyIDs(a), CodexTurnStateCollectorProxyIDs(b))
 }
 
 // StripCodexTurnStateManagedExtra removes server-owned configuration/runtime
@@ -197,7 +271,7 @@ func CodexTurnStateCollectorProxyOnlyChanged(current, target *Account) bool {
 		return false
 	}
 	previous, next := CodexTurnStateConfigForAccount(current), CodexTurnStateConfigForAccount(target)
-	if !previous.Enabled || !next.Enabled || previous.AccountType != next.AccountType || reflect.DeepEqual(previous.CollectorProxyID, next.CollectorProxyID) {
+	if !previous.Enabled || !next.Enabled || previous.AccountType != next.AccountType || slices.Equal(CodexTurnStateCollectorProxyIDs(previous), CodexTurnStateCollectorProxyIDs(next)) {
 		return false
 	}
 	accountType := CodexTurnStateAccountTypeForAccount(current)
@@ -211,7 +285,7 @@ func CodexTurnStateCollectorProxyOnlyChanged(current, target *Account) bool {
 }
 
 func preserveCodexTurnStateConfiguration(current, target *Account, requested *CodexTurnStateConfig) error {
-	if err := ValidateCodexTurnStateConfig(target, requested); err != nil {
+	if err := ValidateCodexTurnStateConfigUpdate(current, target, requested); err != nil {
 		return err
 	}
 	target.Extra = StripCodexTurnStateManagedExtra(target.Extra)
@@ -239,7 +313,7 @@ func preserveCodexTurnStateConfiguration(current, target *Account, requested *Co
 	}
 	target.Extra[CodexTurnStateExtraKey] = codexTurnStateConfigMap(config)
 	generation := CodexTurnStateGenerationForAccount(current)
-	if generation == "" || !reflect.DeepEqual(oldConfig, config) || !IsCodexTurnStateAccount(current) || codexTurnStateCredentialsChanged(current, target) {
+	if generation == "" || !codexTurnStateConfigsEqual(oldConfig, config) || !IsCodexTurnStateAccount(current) || codexTurnStateCredentialsChanged(current, target) {
 		generation = uuid.NewString()
 	}
 	target.Extra[CodexTurnStateGenerationExtraKey] = generation
