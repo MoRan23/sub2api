@@ -42,7 +42,7 @@ func TestCodexTurnStateCollectorRetryReplacesReservationAtPostgresTimestampPreci
 	require.Equal(t, 1, calls)
 	after, err := repo.Get(context.Background(), seed.key)
 	require.NoError(t, err)
-	require.Equal(t, now.Add(30*time.Second).UTC().Truncate(time.Microsecond), after.NextCollectAt,
+	require.Equal(t, now.UTC().Truncate(time.Microsecond), after.NextCollectAt,
 		"PostgreSQL microsecond precision must not make this attempt's 50-second crash reservation look like a concurrent cooldown")
 	require.Equal(t, "backoff", after.CollectionStatus)
 	require.Equal(t, "collection_failed", after.LastError)

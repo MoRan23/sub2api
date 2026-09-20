@@ -183,13 +183,19 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 			if record.LastError == "collector_auth_rejected" {
 				record.CollectorPaused = true
 			}
+			// Only a completed response without a usable target gets the fixed
+			// shape-retry delay. Transport/upstream errors return to the normal
+			// one-second scheduler, while explicit cooldowns below still apply.
+			retry := time.Duration(0)
+			if record.LastError == "no_target_state" || record.LastError == "target_still_expiring" {
+				retry = CodexTurnStateRetryInterval
+			}
 			// Keep the reason together with a concurrently established account
 			// cooldown, so a later natural success cannot clear its retry fence.
 			// Authentication rejection still takes precedence and pauses collection.
 			if concurrentCooldownReason != "" && !record.CollectorPaused {
 				record.LastError = concurrentCooldownReason
 			}
-			retry := CodexTurnStateRetryInterval
 			if result.RetryAfter > retry {
 				retry = result.RetryAfter
 			}

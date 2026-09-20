@@ -117,13 +117,22 @@ func TestCodexTurnStateCollectorSafeFailureCategoriesReachStatus(t *testing.T) {
 			require.Equal(t, tc.reason, after.CollectionReason)
 			require.Equal(t, before.DemandReason, after.DemandReason)
 			require.Equal(t, before.LastBusinessAt, after.LastBusinessAt)
-			require.Equal(t, now.Add(30*time.Second), after.NextCollectAt)
+			require.Equal(t, now, after.NextCollectAt)
 			require.Equal(t, tc.reason == "collector_auth_rejected", after.CollectorPaused)
 			status, err := s.GetStatus(context.Background(), account.ID)
 			require.NoError(t, err)
 			require.Len(t, status.Models, 1)
 			require.Equal(t, tc.reason, status.Models[0].LastError)
-			require.Equal(t, tc.reason, status.Models[0].CollectionReason)
+			if tc.reason == "collector_auth_rejected" {
+				require.Equal(t, "paused", status.Models[0].CollectionStatus)
+				require.Equal(t, tc.reason, status.Models[0].CollectionReason)
+			} else if tc.reason == "collector_proxy_unavailable" {
+				require.Equal(t, "blocked", status.Models[0].CollectionStatus)
+				require.Equal(t, tc.reason, status.Models[0].CollectionReason)
+			} else {
+				require.Equal(t, "pending", status.Models[0].CollectionStatus)
+				require.Equal(t, "queued", status.Models[0].CollectionReason, "without a future retry fence the task is ready, while LastError preserves the diagnostic")
+			}
 			payload, err := json.Marshal(status)
 			require.NoError(t, err)
 			for _, private := range []string{privateDetail, "private-network-timeout", target, account.GetCredential("access_token")} {

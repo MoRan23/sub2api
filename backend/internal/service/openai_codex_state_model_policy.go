@@ -66,7 +66,8 @@ func passiveCodexStateAfterValidationFailure(attempt *CodexTurnStateAttempt) *Co
 		reason = "snapshot_unavailable"
 	}
 	return &CodexTurnStateAttempt{OwnerAccountID: attempt.OwnerAccountID, Model: attempt.Model,
-		AccountEnabled: attempt.AccountEnabled, MaintenanceReason: reason, accountType: attempt.accountType}
+		AccountEnabled: attempt.AccountEnabled, MaintenanceReason: reason, accountType: attempt.accountType,
+		credentialEpoch: attempt.credentialEpoch, preparedAt: attempt.preparedAt, historyService: attempt.historyService}
 }
 
 // CancelExcludedModels only retires background work. Already sent business

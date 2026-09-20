@@ -142,10 +142,11 @@ type CodexTurnStateAttempt struct {
 	candidates           []string
 	// A delivered WS anomaly may precede its successful-write callback. Retain
 	// only validated envelope metadata until that callback proves the send.
-	pendingAnomaly  *CodexTurnStateShape
-	finished        bool
-	wireObservation *codexTurnStateWireObservation
-	safeObservation CodexTurnStateSafeObservation
+	pendingAnomaly     *CodexTurnStateShape
+	anomalyPublication bool
+	finished           bool
+	wireObservation    *codexTurnStateWireObservation
+	safeObservation    CodexTurnStateSafeObservation
 }
 
 type CodexTurnStateSafeObservation struct {

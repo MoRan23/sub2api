@@ -2,8 +2,11 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+var errCodexTurnStatePublicationConflict = errors.New("turn_state_publication_conflict")
 
 // All carriers from one response share target-first admission, including a WS
 // response that finishes before the physical-write callback.
@@ -47,7 +50,11 @@ func (s *CodexTurnStateService) publishCodexTurnStateAnomaly(ctx context.Context
 		return false, nil
 	}
 	for range 3 {
-		if !s.authoritativeModelPolicyMatches(ctx, key.Model, policyRevision) {
+		allowed, revision, policyErr := s.checkModelPolicy(ctx, key.Model, true)
+		if policyErr != nil {
+			return false, policyErr
+		}
+		if !allowed || revision != policyRevision {
 			return false, nil
 		}
 		record, err := s.repo.Get(ctx, key)
@@ -67,7 +74,11 @@ func (s *CodexTurnStateService) publishCodexTurnStateAnomaly(ctx context.Context
 		if record.CollectionStatus != "collecting" || !record.LastCollectedAt.Add(CodexTurnStateCollectTimeout).After(s.now()) {
 			record.CollectionStatus, record.CollectionReason = "pending", "queued"
 		}
-		if !s.authoritativeModelPolicyMatches(ctx, key.Model, policyRevision) {
+		allowed, revision, policyErr = s.checkModelPolicy(ctx, key.Model, true)
+		if policyErr != nil {
+			return false, policyErr
+		}
+		if !allowed || revision != policyRevision {
 			return false, nil
 		}
 		record.ModelPolicyRevision = policyRevision
@@ -78,5 +89,5 @@ func (s *CodexTurnStateService) publishCodexTurnStateAnomaly(ctx context.Context
 		// Scheduling writes may advance the version without changing the cache.
 		// Recheck its identity after CAS conflicts so a new target remains intact.
 	}
-	return false, nil
+	return false, errCodexTurnStatePublicationConflict
 }

@@ -41,6 +41,15 @@ type CodexTurnStateObservation struct {
 	RequestSentAt            *time.Time `json:"request_sent_at,omitempty"`
 	BusinessDelivered        *bool      `json:"business_delivered,omitempty"`
 	SnapshotVersion          int64      `json:"snapshot_version,omitempty"`
+	credentialEpoch          string
+	envelopeEvidence         codexTurnStateObservationEnvelope
+}
+
+// Private admission evidence supports display-only account-type projection.
+// It is never serialized or reconstructed from an observed token length.
+type codexTurnStateObservationEnvelope struct {
+	checked, valid      bool
+	issuedAt, expiresAt time.Time
 }
 
 type codexTurnStateWireObservation struct {
@@ -131,7 +140,10 @@ func noteOpenAICodexStatePatch(c *gin.Context, attempt *CodexTurnStateAttempt, b
 			reason = "cache_unavailable"
 		}
 	}
-	observation := &codexTurnStateWireObservation{ownerAccountID: attempt.OwnerAccountID, attempt: attempt, value: CodexTurnStateObservation{Enabled: attempt.Enabled, AccountEnabled: attempt.AccountEnabled, MaintenanceReason: reason, Action: "passthrough", Model: attempt.Model, RequestSource: "business", ObservationID: observationID}}
+	attempt.mu.Lock()
+	credentialEpoch := attempt.credentialEpoch
+	attempt.mu.Unlock()
+	observation := &codexTurnStateWireObservation{ownerAccountID: attempt.OwnerAccountID, attempt: attempt, value: CodexTurnStateObservation{Enabled: attempt.Enabled, AccountEnabled: attempt.AccountEnabled, MaintenanceReason: reason, Action: "passthrough", Model: attempt.Model, RequestSource: "business", ObservationID: observationID, credentialEpoch: credentialEpoch}}
 	if attempt.Snapshot.Token != "" {
 		observation.value.Action = "injected"
 		observation.value.Source = attempt.Snapshot.Source
@@ -306,6 +318,7 @@ func finishOpenAICodexStateObservation(attempt *CodexTurnStateAttempt) {
 	observation.value.ResponseObservedShape = safe.ObservedShape
 	observation.value.ResponseCipherBlocks = safe.CipherBlocks
 	observation.value.ResponseValidationReason = safe.ValidationReason
+	observation.value.envelopeEvidence = codexTurnStateObservationEnvelope{checked: true, valid: safe.EnvelopeValid, issuedAt: safe.IssuedAt, expiresAt: safe.ExpiresAt}
 	switch safe.Shape {
 	case CodexTurnStateShapeTarget:
 		observation.value.ResponseShape = "target"

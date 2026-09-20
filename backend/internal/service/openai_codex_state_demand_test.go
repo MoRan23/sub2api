@@ -101,8 +101,10 @@ func TestCodexTurnStateDemandCollectorOutcomeAtomicallyKeepsShapeAndRetry(t *tes
 				require.Equal(t, "idle", record.CollectionStatus)
 			} else {
 				require.Equal(t, "extended_shape", record.DemandReason)
-				retry := 30 * time.Second
-				if name == "rate_limited" {
+				retry := time.Duration(0)
+				if name == "extended" || name == "missing" {
+					retry = 30 * time.Second
+				} else if name == "rate_limited" {
 					retry = time.Minute
 				}
 				require.Equal(t, s.now().Add(retry), record.NextCollectAt)
@@ -118,7 +120,11 @@ func TestCodexTurnStateDemandCollectorOutcomeAtomicallyKeepsShapeAndRetry(t *tes
 				}
 			}
 			s.collect(context.Background(), attempt.key)
-			require.EqualValues(t, 1, calls.Load(), "neither a fresh target nor retry backoff permits immediate recollection")
+			if name == "network" || name == "proxy" || name == "timeout" {
+				require.EqualValues(t, 2, calls.Load(), "ordinary errors do not impose fixed shape-retry backoff")
+			} else {
+				require.EqualValues(t, 1, calls.Load(), "fresh target, explicit cooldown, or missing usable state still blocks recollection")
+			}
 		})
 	}
 }

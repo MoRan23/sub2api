@@ -11,14 +11,16 @@ import (
 const codexTurnStateObservationCapacity = 4096
 
 type codexTurnStateObservationKey struct {
-	ownerAccountID int64
-	model          string
+	ownerAccountID  int64
+	model           string
+	credentialEpoch string
 }
 
 type codexTurnStateObservationIndexEntry struct {
 	key      codexTurnStateObservationKey
 	sequence uint64
 	summary  CodexTurnStateModelObservation
+	envelope codexTurnStateObservationEnvelope
 }
 
 // All fields are protected by the containing summary store. Its lifetime is
@@ -63,7 +65,7 @@ func (index *codexTurnStateObservationIndex) record(sequence uint64, ownerAccoun
 	if ownerAccountID <= 0 || strings.TrimSpace(value.Model) == "" || observedAt.IsZero() {
 		return
 	}
-	key := codexTurnStateObservationKey{ownerAccountID: ownerAccountID, model: value.Model}
+	key := codexTurnStateObservationKey{ownerAccountID: ownerAccountID, model: value.Model, credentialEpoch: value.credentialEpoch}
 	if index.entries == nil {
 		index.entries = make(map[codexTurnStateObservationKey]*list.Element)
 	}
@@ -90,6 +92,7 @@ func (index *codexTurnStateObservationIndex) record(sequence uint64, ownerAccoun
 	}
 	entry := element.Value.(*codexTurnStateObservationIndexEntry)
 	entry.sequence = sequence
+	entry.envelope = value.envelopeEvidence
 	entry.summary = CodexTurnStateModelObservation{
 		Model:                    value.Model,
 		ObservedAt:               observedAt,
@@ -114,6 +117,61 @@ func (index *codexTurnStateObservationIndex) record(sequence uint64, ownerAccoun
 	}
 	entry.summary = cloneCodexTurnStateModelObservation(entry.summary)
 	index.lru.MoveToFront(element)
+}
+
+// Management reads select only the currently bound credential identity. A late
+// response can update its old epoch's entry but cannot overwrite or impersonate
+// a new credential's state. Empty epochs match only other empty epochs.
+func (store *codexTurnStateSummaryStore) snapshotForOwners(owners []*Account) (bool, map[int64][]CodexTurnStateModelObservation) {
+	result := make(map[int64][]CodexTurnStateModelObservation)
+	if store == nil {
+		return false, result
+	}
+	byID := make(map[int64]*Account, len(owners))
+	for _, owner := range owners {
+		if codexTurnStateEligible(owner) {
+			byID[owner.ID] = owner
+		}
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for key, element := range store.index.entries {
+		owner := byID[key.ownerAccountID]
+		if owner == nil || key.credentialEpoch != CodexTurnStateCredentialEpochForAccount(owner) {
+			continue
+		}
+		entry := element.Value.(*codexTurnStateObservationIndexEntry)
+		value := projectCodexTurnStateObservation(entry.summary, entry.envelope, CodexTurnStateAccountTypeForAccount(owner))
+		result[key.ownerAccountID] = append(result[key.ownerAccountID], value)
+		store.index.lru.MoveToFront(element)
+	}
+	for _, observations := range result {
+		sort.Slice(observations, func(i, j int) bool { return observations[i].Model < observations[j].Model })
+	}
+	return true, result
+}
+
+func projectCodexTurnStateObservation(summary CodexTurnStateModelObservation, evidence codexTurnStateObservationEnvelope, accountType string) CodexTurnStateModelObservation {
+	value := cloneCodexTurnStateModelObservation(summary)
+	// Keep the envelope validation at observation time. An old observation is not
+	// a usable cache, and its original validity does not change as the UI is read.
+	if !evidence.checked || !evidence.valid || evidence.issuedAt.IsZero() || !evidence.expiresAt.Equal(evidence.issuedAt.Add(CodexTurnStateLifetime)) {
+		return value
+	}
+	value.ResponseShape, value.ResponseValidationReason = "unknown", "unexpected_shape"
+	if accountType != "personal" && accountType != "team_business" {
+		value.ResponseValidationReason = "account_type_unknown"
+		return value
+	}
+	switch {
+	case accountType == "personal" && value.ResponseObservedShape == CodexTurnStateObservedPersonalTarget,
+		accountType == "team_business" && value.ResponseObservedShape == CodexTurnStateObservedTeamBusinessTarget:
+		value.ResponseShape, value.ResponseValidationReason = "target", ""
+	case accountType == "personal" && value.ResponseObservedShape == CodexTurnStateObservedPersonalExtended,
+		accountType == "team_business" && value.ResponseObservedShape == CodexTurnStateObservedTeamBusinessExtended:
+		value.ResponseShape, value.ResponseValidationReason = "suspect", ""
+	}
+	return value
 }
 
 // snapshot takes one read-only, coherent snapshot for all owners

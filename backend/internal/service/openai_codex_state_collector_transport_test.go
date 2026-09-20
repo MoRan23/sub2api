@@ -47,7 +47,7 @@ func (u *codexCollectorTransportUpstream) Do(request *http.Request, proxyURL str
 
 func codexCollectorTransportFixture() (*Account, *Proxy) {
 	businessProxyID := int64(99)
-	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ProxyID: &businessProxyID,
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, ProxyID: &businessProxyID,
 		Credentials: map[string]any{"access_token": "test-only-access", "chatgpt_account_id": "test-owner", "plan_type": "plus"},
 		Extra:       map[string]any{CodexTurnStateExtraKey: map[string]any{"enabled": true, "account_type": "personal", "collector_proxy_id": float64(2)}, CodexTurnStateGenerationExtraKey: "generation-1"}}
 	proxy := &Proxy{ID: 2, Protocol: "http", Host: "collector.invalid", Port: 8080, Status: StatusActive}
@@ -148,6 +148,35 @@ func TestCodexTurnStateCollectorTransportRequiresFinalModelPolicyCheck(t *testin
 			require.Error(t, err)
 			require.Equal(t, mode == "excluded", checked)
 			require.Zero(t, upstream.calls, "final policy rejection prevents actual upstream transport")
+		})
+	}
+}
+
+func TestCodexTurnStateCollectorTransportRechecksLiveAccountEligibility(t *testing.T) {
+	for _, mode := range []string{"inactive", "scheduling_disabled", "expired"} {
+		t.Run(mode, func(t *testing.T) {
+			account, proxy := codexCollectorTransportFixture()
+			prepared := *account
+			// The account was eligible when this task was selected. A later admin
+			// update or expiry must be honored before starting the physical request.
+			switch mode {
+			case "inactive":
+				account.Status = "disabled"
+			case "scheduling_disabled":
+				account.Schedulable = false
+			case "expired":
+				expired := time.Now().Add(-time.Minute)
+				account.ExpiresAt = &expired
+			}
+			upstream := &codexCollectorTransportUpstream{}
+			do := ProvideCodexTurnStateCollectorHTTPDo(codexCollectorTransportAccounts{account: account}, codexCollectorTransportProxies{proxy: proxy}, upstream)
+			request, err := http.NewRequest(http.MethodPost, chatgptCodexURL, nil)
+			require.NoError(t, err)
+			_, err = do(context.Background(), CodexTurnStateCollectRequest{Account: &prepared, Model: "gpt-5.4", ProxyID: proxy.ID,
+				validateModelPolicy: allowCodexCollectorTestModelPolicy,
+				onSend: func(time.Time) { t.Error("an ineligible account must not record a send") }}, request)
+			require.ErrorContains(t, err, "collector_account_unavailable")
+			require.Zero(t, upstream.calls, "a stale eligible account cannot authorize collection")
 		})
 	}
 }

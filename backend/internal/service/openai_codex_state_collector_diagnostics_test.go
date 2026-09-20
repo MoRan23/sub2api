@@ -156,7 +156,7 @@ func TestCodexTurnStateCollectorDeadlinePreservesPersistedPhase(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tc.reason, record.LastError)
 			require.Equal(t, tc.reason, record.CollectionReason)
-			require.Equal(t, now.Add(30*time.Second), record.NextCollectAt)
+			require.Equal(t, now, record.NextCollectAt)
 			require.False(t, record.CollectorPaused)
 		})
 	}

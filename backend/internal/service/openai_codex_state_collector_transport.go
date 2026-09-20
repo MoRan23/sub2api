@@ -24,7 +24,8 @@ func ProvideCodexTurnStateCollectorHTTPDo(accounts AccountRepository, proxies Pr
 			return nil, errors.New("collector_invalid_request")
 		}
 		owner, err := accounts.GetByID(ctx, input.Account.ID)
-		if err != nil || !codexTurnStateEligible(owner) || owner.IsShadow() || strings.TrimSpace(owner.GetCredential("access_token")) == "" {
+		if err != nil || !codexTurnStateEligible(owner) || owner.IsShadow() || strings.TrimSpace(owner.GetCredential("access_token")) == "" ||
+			owner.Status != StatusActive || !owner.Schedulable || (owner.ExpiresAt != nil && !owner.ExpiresAt.After(time.Now())) {
 			return nil, errors.New("collector_account_unavailable")
 		}
 		cfg := CodexTurnStateConfigForAccount(owner)

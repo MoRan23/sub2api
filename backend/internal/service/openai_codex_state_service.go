@@ -16,22 +16,24 @@ import (
 // callers retain their ordinary request if Prepare or ValidateAttempt fails.
 // Only PostgreSQL records are authoritative; there is no fallback token cache.
 type CodexTurnStateService struct {
-	repo           CodexTurnStateRepository
-	accounts       AccountRepository
-	encryptor      SecretEncryptor
-	collector      CodexTurnStateCollector
-	modelPolicy    CodexTurnStateModelPolicy
-	now            func() time.Time
-	mu             sync.Mutex
-	ctx            context.Context
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
-	queue          chan CodexTurnStateKey
-	queued         map[CodexTurnStateKey]bool
-	running        map[CodexTurnStateKey]context.CancelFunc
-	runningPolicy  map[CodexTurnStateKey]string
-	runningAttempt map[CodexTurnStateKey]string
-	business       map[string]*CodexTurnStateAttempt
+	repo                CodexTurnStateRepository
+	accounts            AccountRepository
+	encryptor           SecretEncryptor
+	collector           CodexTurnStateCollector
+	modelPolicy         CodexTurnStateModelPolicy
+	now                 func() time.Time
+	mu                  sync.Mutex
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	wg                  sync.WaitGroup
+	queue               chan CodexTurnStateKey
+	queued              map[CodexTurnStateKey]bool
+	running             map[CodexTurnStateKey]context.CancelFunc
+	runningPolicy       map[CodexTurnStateKey]string
+	runningAttempt      map[CodexTurnStateKey]string
+	business            map[string]*CodexTurnStateAttempt
+	pendingPublications map[CodexTurnStateKey]*codexTurnStatePendingPublication
+	stopped             bool
 }
 
 func NewCodexTurnStateService(repo CodexTurnStateRepository, accounts AccountRepository, encryptor SecretEncryptor, collector CodexTurnStateCollector) *CodexTurnStateService {
@@ -44,7 +46,7 @@ func (s *CodexTurnStateService) Start(ctx context.Context) {
 		return
 	}
 	s.mu.Lock()
-	if s.ctx != nil {
+	if s.ctx != nil || s.stopped {
 		s.mu.Unlock()
 		return
 	}
@@ -78,11 +80,15 @@ func (s *CodexTurnStateService) Stop() {
 	}
 	s.mu.Lock()
 	cancel := s.cancel
+	s.stopped = true
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
 		s.wg.Wait()
 	}
+	s.mu.Lock()
+	s.pendingPublications = nil
+	s.mu.Unlock()
 }
 
 func (s *CodexTurnStateService) currentOwner(ctx context.Context, accountID int64) (*Account, error) {
@@ -329,10 +335,11 @@ func (s *CodexTurnStateService) Finish(ctx context.Context, a *CodexTurnStateAtt
 	tokens := append([]string(nil), a.candidates...)
 	businessSentAt := a.businessSentAt
 	observedAt := a.safeObservation.ObservedAt
-	if a.Enabled && delivered && businessSentAt.IsZero() {
+	if a.Enabled && delivered {
 		best, _, extended := selectCodexTurnStateCandidates(tokens, a.accountType, s.now())
 		if best == "" && extended.Shape == CodexTurnStateShapeExtended {
 			a.pendingAnomaly = &extended
+			a.anomalyPublication = true
 		}
 	}
 	a.candidates = nil
@@ -347,10 +354,13 @@ func (s *CodexTurnStateService) Finish(ctx context.Context, a *CodexTurnStateAtt
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	var publishErr error
-	if !businessSentAt.IsZero() {
+	pending := s.retainCodexTurnStateAnomaly(a)
+	if pending != nil {
+		publishErr = s.processCodexTurnStateAnomaly(cleanupCtx, pending, true)
+	} else if !businessSentAt.IsZero() {
 		publishErr = s.repo.MarkBusinessSent(cleanupCtx, a.key, businessSentAt)
 	}
-	if delivered && publishErr == nil {
+	if pending == nil && delivered && publishErr == nil {
 		demandAt := time.Time{}
 		if !businessSentAt.IsZero() {
 			demandAt = observedAt
@@ -608,6 +618,7 @@ func (s *CodexTurnStateService) pumpDue(ctx context.Context) {
 	if s == nil || s.repo == nil {
 		return
 	}
+	s.retryCodexTurnStateAnomalies(ctx)
 	records, err := s.repo.ListActive(ctx, s.now().Add(-CodexTurnStateActiveWindow), 512)
 	if err != nil {
 		return
@@ -784,7 +795,8 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 		}
 	}()
 	defer func() { cancel(); <-watchDone }()
-	// Persist pacing before network I/O: process death must not immediately retry.
+	// Reserve crash recovery before network I/O; completed results replace this
+	// reservation with their own policy, including immediate eligibility on error.
 	// PostgreSQL timestamps retain microseconds. Keep the local reservation at
 	// the same precision so completion can distinguish it from a new cooldown.
 	record.NextCollectAt = now.Add(CodexTurnStateCollectTimeout + CodexTurnStateRetryInterval).UTC().Truncate(time.Microsecond)
@@ -839,7 +851,7 @@ func (s *CodexTurnStateService) GetStatus(ctx context.Context, accountID int64) 
 	}
 	models, policyErr := s.statusModelPolicy(ctx)
 	result := projectCodexTurnStateStatus(accountID, owner, records, models, policyErr, s.statusNow())
-	observationEnabled, observations := globalCodexTurnStateSummaryStore.snapshot([]int64{owner.ID})
+	observationEnabled, observations := globalCodexTurnStateSummaryStore.snapshotForOwners([]*Account{owner})
 	attachCodexTurnStateObservations(result, observationEnabled, observations[owner.ID])
 	return result, nil
 }

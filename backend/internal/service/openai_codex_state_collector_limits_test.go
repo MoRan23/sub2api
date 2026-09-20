@@ -164,7 +164,7 @@ func TestCodexTurnStateCollectorRetryAfterParsing(t *testing.T) {
 
 func TestCodexTurnStateCollectorSSEAndHTTPRateLimitOutcomes(t *testing.T) {
 	for _, wire := range []string{"http_429", "sse_rate_limit_exceeded", "sse_insufficient_quota"} {
-		for _, pacing := range []string{"minimum", "retry_after", "longer_account_cooldown"} {
+		for _, pacing := range []string{"no_header", "retry_after", "longer_account_cooldown"} {
 			t.Run(wire+"/"+pacing, func(t *testing.T) {
 				isolateCodexTurnStateSummaryStore(t)
 				s, repo, account := newCodexStateTestService(t)
@@ -182,7 +182,7 @@ func TestCodexTurnStateCollectorSSEAndHTTPRateLimitOutcomes(t *testing.T) {
 				require.NoError(t, err)
 				newToken := codexStateTestToken(10, clock)
 				var calls atomic.Int64
-				wait := 30 * time.Second
+				wait := time.Duration(0)
 				if pacing == "retry_after" {
 					wait = 2 * time.Minute
 				} else if pacing == "longer_account_cooldown" {
@@ -192,7 +192,7 @@ func TestCodexTurnStateCollectorSSEAndHTTPRateLimitOutcomes(t *testing.T) {
 					calls.Add(1)
 					require.EqualValues(t, 2, input.ProxyID)
 					header := http.Header{"X-Codex-Turn-State": {newToken}}
-					if pacing != "minimum" {
+					if pacing != "no_header" {
 						header.Set("Retry-After", "120")
 					}
 					if pacing == "longer_account_cooldown" {
@@ -229,6 +229,10 @@ func TestCodexTurnStateCollectorSSEAndHTTPRateLimitOutcomes(t *testing.T) {
 				restarted := NewCodexTurnStateService(repo, s.accounts, s.encryptor, s.collector)
 				restarted.now, restarted.modelPolicy = s.now, s.modelPolicy
 				restarted.collect(ctx, other.key)
+				if wait == 0 {
+					require.EqualValues(t, 2, calls.Load(), "429 without Retry-After or account cooldown does not invent a fixed wait")
+					return
+				}
 				require.EqualValues(t, 1, calls.Load())
 				natural, err := s.Prepare(ctx, account, seed.Model)
 				require.NoError(t, err)

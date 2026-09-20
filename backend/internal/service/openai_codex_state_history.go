@@ -189,27 +189,15 @@ func (s *CodexTurnStateService) completeBusinessSent(a *CodexTurnStateAttempt) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err := s.repo.MarkBusinessSent(ctx, key, sentAt); err != nil || !delivered {
-		return
-	}
 	// Finish may have observed delivery before this successful-write callback.
 	// Unlike historical recovery, that physical attempt still has the exact
 	// cache identity needed to revoke its own cached token safely.
-	a.mu.Lock()
-	pending, observedAt := a.pendingAnomaly, a.safeObservation.ObservedAt
-	a.pendingAnomaly = nil
-	a.mu.Unlock()
-	if pending != nil {
-		published, publishErr := s.publishCodexTurnStateAnomaly(ctx, key, *pending, a.baseVersion, false, a.policyRevision, observedAt, a.baseCacheIdentity)
-		if publishErr != nil {
+	if pending := s.retainCodexTurnStateAnomaly(a); pending != nil {
+		if err := s.processCodexTurnStateAnomaly(ctx, pending, true); err != nil {
 			return
 		}
-		if published {
-			a.mu.Lock()
-			a.safeObservation.RefreshReason = "extended_shape"
-			a.mu.Unlock()
-			s.enqueue(ctx, key)
-		}
+	} else if err := s.repo.MarkBusinessSent(ctx, key, sentAt); err != nil || !delivered {
+		return
 	}
 	owner, err := s.currentOwner(ctx, a.OwnerAccountID)
 	if err == nil && owner != nil {
@@ -347,7 +335,8 @@ func (s *CodexTurnStateService) recordCollectorObservation(owner *Account, model
 	value := CodexTurnStateObservation{Model: model, RequestSource: "collector", ResponseLength: safe.TokenLength,
 		ResponseShape: safe.Shape, ResponseSource: safe.ResponseSource, ResponseObservedShape: safe.ObservedShape,
 		ResponseCipherBlocks: safe.CipherBlocks, ResponseValidationReason: safe.ValidationReason,
-		Action: "collector_omitted", ObservationID: result.observationID}
+		Action: "collector_omitted", ObservationID: result.observationID, credentialEpoch: CodexTurnStateCredentialEpochForAccount(owner),
+		envelopeEvidence: codexTurnStateObservationEnvelope{checked: true, valid: safe.EnvelopeValid, issuedAt: safe.IssuedAt, expiresAt: safe.ExpiresAt}}
 	if value.ObservationID == "" {
 		value.ObservationID = uuid.NewString()
 	}

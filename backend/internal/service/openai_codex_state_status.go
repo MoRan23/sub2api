@@ -132,7 +132,11 @@ func (s *CodexTurnStateService) GetStatuses(ctx context.Context, accountIDs []in
 		}
 	}
 	now := s.statusNow()
-	observationEnabled, observations := globalCodexTurnStateSummaryStore.snapshot(ownerIDs)
+	observationOwners := make([]*Account, 0, len(owners))
+	for _, owner := range owners {
+		observationOwners = append(observationOwners, owner)
+	}
+	observationEnabled, observations := globalCodexTurnStateSummaryStore.snapshotForOwners(observationOwners)
 	for _, id := range ids {
 		if owner := owners[id]; owner != nil {
 			item := projectCodexTurnStateStatus(id, owner, recordsByOwner[owner.ID], models, nil, now)
