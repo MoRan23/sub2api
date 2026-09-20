@@ -27,13 +27,17 @@
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.source`) }}</dt><dd>{{ label('sources', model.source) }}</dd></div>
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.expiresAt`) }}</dt><dd>{{ date(model.expires_at) }}</dd><dd v-if="remaining(model) > 0" class="text-xs text-gray-500">{{ t(`${prefix}.remaining`, { seconds: remaining(model) }) }}</dd></div>
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.collectionStatus`) }}</dt><dd :data-testid="`codex-turn-state-collection-${model.model}`">{{ label('collectionStatuses', model.collection_status || (model.collector_paused ? 'paused' : undefined)) }}</dd></div>
-          <div v-if="model.collection_reason"><dt class="text-xs text-gray-500">{{ t(`${prefix}.collectionReason`) }}</dt><dd class="break-words">{{ label('reasons', model.collection_reason) }}</dd></div>
+          <div v-if="model.collection_reason"><dt class="text-xs text-gray-500">{{ t(`${prefix}.collectionReason`) }}</dt><dd class="break-words" :data-testid="`codex-turn-state-reason-${model.model}`">{{ label('reasons', model.collection_reason) }}</dd></div>
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.lastBusiness`) }}</dt><dd>{{ date(model.last_business_at) }}</dd></div>
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.lastCollected`) }}</dt><dd>{{ date(model.last_collected_at) }}</dd></div>
-          <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.nextCollect`) }}</dt><dd>{{ date(model.next_collect_at) }}</dd></div>
+          <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.nextCollect`) }}</dt><dd>{{ date(model.next_collect_at) }}</dd><dd v-if="model.collection_status === 'backoff' && model.next_collect_at" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.retryHint`) }}</dd></div>
         </dl>
+        <p v-if="reasonHint(model.collection_reason)" class="break-words text-xs text-gray-600 dark:text-gray-400" :data-testid="`codex-turn-state-guidance-${model.model}`">{{ reasonHint(model.collection_reason) }}</p>
         <p v-if="model.refresh_reason" class="break-words text-xs text-gray-500">{{ t(`${prefix}.refreshReason`) }}: {{ label('reasons', model.refresh_reason) }}</p>
-        <p v-if="model.last_error" class="break-words text-xs text-red-600 dark:text-red-400">{{ t(`${prefix}.lastError`) }}: {{ label('reasons', model.last_error) }}</p>
+        <div v-if="model.last_error && model.last_error !== model.collection_reason" class="space-y-1 border-t border-gray-100 pt-2 dark:border-dark-600" :data-testid="`codex-turn-state-previous-error-${model.model}`">
+          <p class="break-words text-xs text-amber-700 dark:text-amber-400">{{ t(`${prefix}.lastError`) }}: {{ label('reasons', model.last_error) }}</p>
+          <p v-if="reasonHint(model.last_error)" class="break-words text-xs text-gray-500 dark:text-gray-400">{{ reasonHint(model.last_error) }}</p>
+        </div>
       </section>
       </template>
       </section>
@@ -83,11 +87,32 @@ const now = ref(Date.now())
 let observedAt = now.value
 let controller: AbortController | null = null
 let timer: ReturnType<typeof setInterval> | null = null
+const reasonCodes = new Set([
+  'model_excluded', 'model_policy_unavailable', 'model_policy_changed', 'snapshot_unavailable',
+  'disabled', 'account_type_unknown', 'business_learning_only', 'invalid_state', 'extended_shape', 'missing', 'expiring',
+  'account_cooldown', 'no_target_state', 'collection_failed', 'collection_timeout', 'collector_proxy_unavailable',
+  'collector_auth_rejected', 'collector_rate_limited', 'collector_transport_failed', 'collector_empty_response',
+  'collector_stream_failed', 'collector_response_failed', 'collector_response_incomplete', 'collector_event_too_large',
+  'collector_upstream_unavailable', 'collector_http_rejected', 'collector_proxy_auth_required',
+  'waiting_business_response', 'queued', 'waiting_business', 'collecting', 'collector_proxy_not_configured', 'collector_proxy_changed',
+  'account_unavailable', 'account_inactive', 'account_scheduling_disabled', 'account_expired', 'idle',
+  'target_still_expiring', 'business_preempted',
+])
 
 function label(group: string, value?: string) {
   if (!value) return '—'
+  if (group === 'reasons' && !knownReason(value)) return t(`${prefix}.unknownReason`)
   const key = `${prefix}.${group}.${value}`
   return te(key) ? t(key) : value
+}
+function knownReason(value: string) {
+  return reasonCodes.has(value) && te(`${prefix}.reasons.${value}`)
+}
+function reasonHint(value?: string) {
+  if (!value) return ''
+  if (!knownReason(value)) return t(`${prefix}.reasonHints.collection_failed`)
+  const key = `${prefix}.reasonHints.${value}`
+  return te(key) ? t(key) : ''
 }
 function date(value?: string) {
   const parsed = value ? new Date(value) : null

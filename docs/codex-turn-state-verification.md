@@ -75,3 +75,25 @@ env -u OPENAI_API_KEY CI=true GOEXPERIMENT=jsonv2 go test -tags integration ./in
 普通回归和带 `unit` 标签的竞态测试各通过 513 项测试结果（含子测试）；真实存储集成通过 14 项。三轮均无失败、无跳过。额外覆盖 PostgreSQL 微秒精度不会误保留本轮防崩溃预留，以及并发更长账号冷却在采集普通失败、自然业务成功后仍有效。
 
 本轮没有前端代码或数据库结构变更，未重复运行前端套件；没有发送真实收费模型请求或部署应用。
+
+## 采集错误展示与代理切换保留缓存（基线 `342f1f68a`）
+
+后端保留固定脱敏的采集失败类别，前端显示原因与对应提示，合并重复错误并安全处理未知类别。账号不可采集的原因拆分为状态非正常、调度关闭和过期。沿用现有状态字段，不新增迁移，不改变采集并发、缓存发布与重试策略。
+
+追加的代理切换修复在账号配置事务中保留正常有效缓存及其原到期时间，仍更新代次拒绝旧结果；异常既有需求继续处理。覆盖个人／Team、单条／批量、取消代理、分类／凭据同时变化、到期后采集、异常提前失效、同 token 不延寿、跨模型、空闲恢复、历史水位及事务回滚。
+
+验证覆盖模拟传输与 SSE 错误、HTTP 错误、超时、限流、未知错误不泄漏、失败响应不发布 token，以及前端中英文文案、错误去重、历史错误标识、自动刷新恢复和未知错误安全回退。本轮输出和浏览器模拟验收截图保存在 `.git/task-artifacts/codex-collector-errors/`；所有采集响应与管理 API 均使用本地模拟，没有访问真实收费模型接口。
+
+相关 service 普通回归通过 576 项；最终代码的 service / repository 带 `unit` 标签竞态测试通过 589 项（均含子测试）。隔离 PostgreSQL / Redis 的相关集成选择式通过 64 项。上述检查均无剩余失败或跳过。首次集成运行发现三个新增 fixture 的测试账号名超过数据库 100 字符限制，缩短子测试名称后重跑通过，未修改产品约束或测试断言。
+
+```bash
+env -u OPENAI_API_KEY GOEXPERIMENT=jsonv2 go test ./internal/service \
+  -run 'Codex(State|TurnState)' -count=1 -json
+env -u OPENAI_API_KEY GOEXPERIMENT=jsonv2 go test -race -tags unit ./internal/service ./internal/repository \
+  -run 'Codex(State|TurnState)' -count=1 -json
+env -u OPENAI_API_KEY CI=true GOEXPERIMENT=jsonv2 go test -tags integration ./internal/repository \
+  -run '^TestCodex(State|TurnState|CollectorProxyChangePostgres|HistoryDemandPostgres|CollectorPublicationPostgres)' \
+  -count=1 -json
+```
+
+前端六个相关测试文件共 70 项通过，包括账号列表、状态弹窗、管理 API 及中英文翻译；变更文件 ESLint、`vue-tsc` 类型检查与生产构建通过。浏览器使用模拟管理接口验收错误提示、重复提示合并、历史错误、未知类别安全回退、五秒刷新恢复、窄屏布局，以及代理切换后正常缓存继续可用；该状态保留真实本地过期时间，最早可重试时间不会被伪造为缓存到期时间。未运行无关的全量后端测试或部署应用。

@@ -189,6 +189,27 @@ func codexTurnStateCredentialsChanged(current, target *Account) bool {
 		CodexTurnStateAccountTypeForAccount(current) != CodexTurnStateAccountTypeForAccount(target)
 }
 
+// CodexTurnStateCollectorProxyOnlyChanged permits carrying runtime state across
+// a collector destination change, while keeping the new publication generation.
+// Credential, qualification, admission-policy, and enablement changes never qualify.
+func CodexTurnStateCollectorProxyOnlyChanged(current, target *Account) bool {
+	if !IsCodexTurnStateAccount(current) || !IsCodexTurnStateAccount(target) || current.ID != target.ID {
+		return false
+	}
+	previous, next := CodexTurnStateConfigForAccount(current), CodexTurnStateConfigForAccount(target)
+	if !previous.Enabled || !next.Enabled || previous.AccountType != next.AccountType || reflect.DeepEqual(previous.CollectorProxyID, next.CollectorProxyID) {
+		return false
+	}
+	accountType := CodexTurnStateAccountTypeForAccount(current)
+	if accountType == "" || accountType != CodexTurnStateAccountTypeForAccount(target) || codexTurnStateAuthCredentialsChanged(current, target) {
+		return false
+	}
+	epoch := CodexTurnStateCredentialEpochForAccount(current)
+	previousGeneration, nextGeneration := CodexTurnStateGenerationForAccount(current), CodexTurnStateGenerationForAccount(target)
+	return epoch != "" && epoch == CodexTurnStateCredentialEpochForAccount(target) &&
+		strings.TrimSpace(previousGeneration) != "" && strings.TrimSpace(nextGeneration) != "" && previousGeneration != nextGeneration
+}
+
 func preserveCodexTurnStateConfiguration(current, target *Account, requested *CodexTurnStateConfig) error {
 	if err := ValidateCodexTurnStateConfig(target, requested); err != nil {
 		return err

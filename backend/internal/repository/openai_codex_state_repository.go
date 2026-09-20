@@ -159,6 +159,7 @@ func (r *openAICodexStateRepository) BeginBusiness(ctx context.Context, key serv
 			OR openai_codex_state.last_error IN ('account_cooldown','collector_rate_limited')
 			THEN openai_codex_state.collection_status ELSE 'idle' END,
 		collection_reason = CASE WHEN openai_codex_state.generation <> EXCLUDED.generation THEN ''
+			WHEN openai_codex_state.collection_reason = 'collector_proxy_changed' THEN openai_codex_state.collection_reason
 			WHEN openai_codex_state.last_business_at <= $4 OR openai_codex_state.last_business_at >= $5 OR openai_codex_state.collector_paused
 			OR openai_codex_state.last_error IN ('account_cooldown','collector_rate_limited')
 			THEN openai_codex_state.collection_reason ELSE 'waiting_business_response' END,
@@ -440,6 +441,9 @@ func (r *openAICodexStateRepository) ListActive(ctx context.Context, since time.
 		JOIN accounts a ON a.id=s.owner_account_id WHERE s.last_business_at >= $1 AND `+codexStateLiveAccount+`
 		AND NOT s.collector_paused AND (s.next_collect_at IS NULL OR s.next_collect_at <= NOW())
 		AND (s.demand_reason <> '' OR (s.encrypted_token <> '' AND s.expires_at <= NOW() + ($3 * INTERVAL '1 second')))
+		AND NOT COALESCE((s.collection_reason = 'collector_proxy_changed' AND s.encrypted_token <> '' AND s.shape = 'target'
+		 AND ((s.token_length = 292 AND s.cipher_blocks = 10) OR (s.token_length = 332 AND s.cipher_blocks = 12))
+		 AND s.issued_at <= NOW() + INTERVAL '30 seconds' AND s.expires_at = s.issued_at + INTERVAL '1 hour' AND s.expires_at > NOW()), FALSE)
 		AND a.extra->'codex_turn_state'->>'collector_proxy_id' ~ '^[1-9][0-9]*$'
 		ORDER BY s.next_collect_at ASC NULLS FIRST, s.expires_at ASC NULLS FIRST,
 		s.last_business_at DESC, s.owner_account_id, s.model LIMIT $2`, since.UTC(), limit, int64(service.CodexTurnStateRefreshAhead/time.Second))

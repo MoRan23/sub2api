@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,8 +20,22 @@ type CodexTurnStateHTTPCollector struct{ Do CodexTurnStateCollectorHTTPDo }
 
 var ErrCodexTurnStateCollectorProxyUnavailable = errors.New("collector_proxy_unavailable")
 
-// Stream-level rate limits do not change the actual HTTP response status.
-var errCodexTurnStateCollectorRateLimited = errors.New("collector_rate_limited")
+// These fixed errors may be exposed as diagnostic categories. Never retain an
+// upstream error body or transport error text in a collection outcome.
+var (
+	errCodexTurnStateCollectorRateLimited        = errors.New("collector_rate_limited")
+	errCodexTurnStateCollectorTransportFailed    = errors.New("collector_transport_failed")
+	errCodexTurnStateCollectorEmptyResponse      = errors.New("collector_empty_response")
+	errCodexTurnStateCollectorStreamFailed       = errors.New("collector_stream_failed")
+	errCodexTurnStateCollectorResponseFailed     = errors.New("collector_response_failed")
+	errCodexTurnStateCollectorResponseIncomplete = errors.New("collector_response_incomplete")
+	errCodexTurnStateCollectorEventTooLarge      = errors.New("collector_event_too_large")
+)
+
+func codexTurnStateCollectorTimedOut(err error) bool {
+	var networkError net.Error
+	return errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &networkError) && networkError.Timeout())
+}
 
 func NewCodexTurnStateHTTPCollector(do CodexTurnStateCollectorHTTPDo) *CodexTurnStateHTTPCollector {
 	return &CodexTurnStateHTTPCollector{Do: do}
@@ -52,18 +67,26 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 	request.Header.Set("session_id", uuid.NewString())
 	request.Header.Set("x-client-request-id", uuid.NewString())
 	response, err := c.Do(ctx, input, request)
+	if response != nil {
+		result.StatusCode = response.StatusCode
+		result.RetryAfter = codexTurnStateRetryAfter(response.Header.Get("Retry-After"), time.Now())
+	}
 	if err != nil {
+		if response != nil && response.Body != nil {
+			_ = response.Body.Close()
+		}
 		if errors.Is(err, ErrCodexTurnStateCollectorProxyUnavailable) {
 			return result, ErrCodexTurnStateCollectorProxyUnavailable
 		}
-		return result, errors.New("collector_transport_failed")
+		if codexTurnStateCollectorTimedOut(err) {
+			return result, context.DeadlineExceeded
+		}
+		return result, errCodexTurnStateCollectorTransportFailed
 	}
 	if response == nil || response.Body == nil {
-		return result, errors.New("collector_empty_response")
+		return result, errCodexTurnStateCollectorEmptyResponse
 	}
 	defer response.Body.Close()
-	result.StatusCode = response.StatusCode
-	result.RetryAfter = codexTurnStateRetryAfter(response.Header.Get("Retry-After"), time.Now())
 	observe := func(token, source string) {
 		if token == "" || len(token) > 4096 {
 			return
@@ -122,6 +145,10 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 			eventType = event.Type
 		}
 		if eventType == "error" || eventType == "response.failed" || eventType == "response.incomplete" {
+			failureErr := errCodexTurnStateCollectorResponseFailed
+			if eventType == "response.incomplete" {
+				failureErr = errCodexTurnStateCollectorResponseIncomplete
+			}
 			var failure struct {
 				Code  string `json:"code"`
 				Error struct {
@@ -136,7 +163,7 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 			// Malformed error details cannot turn a recognized failure into a
 			// successful response or provide a reliable rate-limit code.
 			if json.Unmarshal(data, &failure) != nil {
-				return errors.New("collector_response_failed")
+				return failureErr
 			}
 			code := failure.Response.Error.Code
 			if code == "" {
@@ -150,7 +177,7 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 			if code == "rate_limit_exceeded" || code == "insufficient_quota" {
 				return errCodexTurnStateCollectorRateLimited
 			}
-			return errors.New("collector_response_failed")
+			return failureErr
 		}
 		if eventType == "response.completed" {
 			completed = true
@@ -186,13 +213,19 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 			eventData = append(eventData, bytes.TrimSpace(line[5:])...)
 			if len(eventData) > 256<<10 {
 				result.Tokens = nil
-				return result, errors.New("collector_event_too_large")
+				return result, errCodexTurnStateCollectorEventTooLarge
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		result.Tokens = nil
-		return result, errors.New("collector_stream_failed")
+		if errors.Is(err, bufio.ErrTooLong) {
+			return result, errCodexTurnStateCollectorEventTooLarge
+		}
+		if codexTurnStateCollectorTimedOut(err) {
+			return result, context.DeadlineExceeded
+		}
+		return result, errCodexTurnStateCollectorStreamFailed
 	}
 	if err := consume(); err != nil {
 		result.Tokens = nil
@@ -200,7 +233,7 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 	}
 	if !completed {
 		result.Tokens = nil
-		return result, errors.New("collector_response_incomplete")
+		return result, errCodexTurnStateCollectorResponseIncomplete
 	}
 	return result, nil
 }

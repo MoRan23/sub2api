@@ -617,6 +617,9 @@ func (r *accountRepository) updateLockedAccount(
 	builder.SetNillableParentAccountID(account.ParentAccountID)
 
 	updated, err := builder.Save(ctx)
+	if err == nil {
+		err = preserveCodexTurnStateOnCollectorProxyChange(ctx, client, current, account)
+	}
 	if err == nil && dbent.TxFromContext(ctx) != nil &&
 		(service.CodexTurnStateGenerationForAccount(current) != service.CodexTurnStateGenerationForAccount(account) ||
 			service.CodexTurnStateCredentialEpochForAccount(current) != service.CodexTurnStateCredentialEpochForAccount(account)) {
@@ -3273,6 +3276,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 
+	previousCodexAccounts := make(map[int64]*service.Account)
 	if updates.CodexTurnState != nil {
 		lockedIDs := append([]int64(nil), ids...)
 		sort.Slice(lockedIDs, func(i, j int) bool { return lockedIDs[i] < lockedIDs[j] })
@@ -3282,6 +3286,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			if err != nil {
 				return 0, err
 			}
+			previous := *current
+			previous.Credentials = copyJSONMap(current.Credentials)
+			previousCodexAccounts[id] = &previous
 			if current.Credentials == nil {
 				current.Credentials = make(map[string]any)
 			}
@@ -3307,6 +3314,16 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	rows, err := result.RowsAffected()
 	if err != nil {
 		return 0, err
+	}
+	for id, previous := range previousCodexAccounts {
+		lockClient := clientFromContext(ctx, r.client)
+		current, err := lockAccountConfiguration(ctx, lockClient, id)
+		if err != nil {
+			return 0, err
+		}
+		if err := preserveCodexTurnStateOnCollectorProxyChange(ctx, lockClient, previous, current); err != nil {
+			return 0, err
+		}
 	}
 	if updates.ProbeEnabled != nil {
 		expectedRows := int64(0)

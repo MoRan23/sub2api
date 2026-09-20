@@ -637,6 +637,9 @@ func (s *CodexTurnStateService) ensureCodexTurnStateDemand(ctx context.Context, 
 	if record == nil || record.LastBusinessAt.Before(s.now().Add(-CodexTurnStateActiveWindow)) {
 		return false
 	}
+	if codexTurnStateWaitsForProxyCacheExpiry(record, s.now()) {
+		return false
+	}
 	if record.DemandReason != "" {
 		return true
 	}

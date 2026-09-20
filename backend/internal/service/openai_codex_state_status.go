@@ -231,8 +231,14 @@ func projectCodexStateCollection(status *CodexTurnStateStatus, owner *Account, r
 	if status.CollectorProxyID == nil || *status.CollectorProxyID <= 0 {
 		return "blocked", "collector_proxy_not_configured"
 	}
-	if owner.Status != StatusActive || !owner.Schedulable || (owner.ExpiresAt != nil && !owner.ExpiresAt.After(now)) {
-		return "blocked", "account_unavailable"
+	if owner.Status != StatusActive {
+		return "blocked", "account_inactive"
+	}
+	if !owner.Schedulable {
+		return "blocked", "account_scheduling_disabled"
+	}
+	if owner.ExpiresAt != nil && !owner.ExpiresAt.After(now) {
+		return "blocked", "account_expired"
 	}
 	if ownerPaused {
 		return "paused", "collector_auth_rejected"
@@ -242,6 +248,16 @@ func projectCodexStateCollection(status *CodexTurnStateStatus, owner *Account, r
 	}
 	if record.CollectionStatus == "collecting" && record.LastCollectedAt.Add(CodexTurnStateCollectTimeout).After(now) {
 		return "collecting", "collecting"
+	}
+	if codexTurnStateWaitsForProxyCacheExpiry(&record, now) {
+		if record.NextCollectAt.After(now) || ownerRetry.After(now) {
+			reason := record.LastError
+			if reason == "" {
+				reason = "account_cooldown"
+			}
+			return "backoff", reason
+		}
+		return "idle", "collector_proxy_changed"
 	}
 	if record.DemandReason == "" {
 		if record.EncryptedToken == "" {

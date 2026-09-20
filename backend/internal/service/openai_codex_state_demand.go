@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"time"
 )
 
@@ -30,6 +31,46 @@ func completeCodexTurnStateDemand(record *CodexTurnStateRecord, now time.Time) {
 	}
 	record.LastError, record.CollectionStatus, record.CollectionReason = "", "idle", ""
 	record.NextCollectAt = time.Time{}
+}
+
+// Only trusted categories cross the diagnostic boundary. Error text may contain
+// proxy credentials, request URLs, or upstream payloads, even when it resembles
+// one of these codes, so it must never be used as a persisted reason.
+func codexTurnStateCollectorFailureReason(result CodexTurnStateCollectResult, err error) string {
+	switch {
+	case result.StatusCode == http.StatusUnauthorized || result.StatusCode == http.StatusForbidden:
+		return "collector_auth_rejected"
+	case result.StatusCode == http.StatusTooManyRequests || errors.Is(err, errCodexTurnStateCollectorRateLimited):
+		return "collector_rate_limited"
+	case result.StatusCode == http.StatusProxyAuthRequired:
+		return "collector_proxy_auth_required"
+	case result.StatusCode >= 500 && result.StatusCode <= 599:
+		return "collector_upstream_unavailable"
+	case result.StatusCode != 0 && (result.StatusCode < 200 || result.StatusCode >= 300):
+		return "collector_http_rejected"
+	case codexTurnStateCollectorTimedOut(err):
+		return "collection_timeout"
+	}
+	for _, category := range []struct {
+		err  error
+		code string
+	}{
+		{ErrCodexTurnStateCollectorProxyUnavailable, "collector_proxy_unavailable"},
+		{errCodexTurnStateCollectorTransportFailed, "collector_transport_failed"},
+		{errCodexTurnStateCollectorEmptyResponse, "collector_empty_response"},
+		{errCodexTurnStateCollectorStreamFailed, "collector_stream_failed"},
+		{errCodexTurnStateCollectorResponseFailed, "collector_response_failed"},
+		{errCodexTurnStateCollectorResponseIncomplete, "collector_response_incomplete"},
+		{errCodexTurnStateCollectorEventTooLarge, "collector_event_too_large"},
+	} {
+		if errors.Is(err, category.err) {
+			return category.code
+		}
+	}
+	if err != nil {
+		return "collection_failed"
+	}
+	return "no_target_state"
 }
 
 // The entire collector outcome is one versioned write. In particular, an
@@ -107,24 +148,12 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 				record.IssuedAt = extended.IssuedAt
 				record.RefreshReason = "extended_shape"
 			}
-			record.LastError = "no_target_state"
-			if targetStillExpiring {
+			record.LastError = codexTurnStateCollectorFailureReason(result, outcomeErr)
+			if record.LastError == "no_target_state" && targetStillExpiring {
 				record.LastError = "target_still_expiring"
 			}
-			if outcomeErr != nil {
-				record.LastError = "collection_failed"
-			}
-			if errors.Is(outcomeErr, ErrCodexTurnStateCollectorProxyUnavailable) {
-				record.LastError = "collector_proxy_unavailable"
-			}
-			if errors.Is(outcomeErr, context.DeadlineExceeded) {
-				record.LastError = "collection_timeout"
-			}
-			switch {
-			case result.StatusCode == 401 || result.StatusCode == 403:
-				record.CollectorPaused, record.LastError = true, "collector_auth_rejected"
-			case result.StatusCode == 429 || errors.Is(outcomeErr, errCodexTurnStateCollectorRateLimited):
-				record.LastError = "collector_rate_limited"
+			if record.LastError == "collector_auth_rejected" {
+				record.CollectorPaused = true
 			}
 			// Keep the reason together with a concurrently established account
 			// cooldown, so a later natural success cannot clear its retry fence.
