@@ -818,6 +818,62 @@ const addLine = (text: string, className: string = 'text-gray-300') => {
   scrollToBottom()
 }
 
+const addResponseInfo = (data: unknown) => {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return
+  const info = data as Record<string, unknown>
+  if (streamingContent.value) {
+    addLine(streamingContent.value, 'text-green-300')
+    streamingContent.value = ''
+  }
+  const model = typeof info.upstream_model === 'string' ? info.upstream_model.trim() : ''
+  addLine(
+    t('admin.accounts.testResponseInfo.model', {
+      model: model || t('admin.accounts.testResponseInfo.notReturned')
+    }),
+    model ? 'text-cyan-400' : 'text-gray-400'
+  )
+
+  const rawState = info.codex_turn_state
+  if (!rawState || typeof rawState !== 'object' || Array.isArray(rawState)) return
+  const state = rawState as Record<string, unknown>
+  const length = typeof state.length === 'number' && Number.isSafeInteger(state.length) && state.length >= 0
+    ? state.length
+    : null
+  const expected = typeof state.expected_length === 'number' && Number.isSafeInteger(state.expected_length) && state.expected_length > 0
+    ? state.expected_length
+    : null
+  const target = expected
+    ? t('admin.accounts.testResponseInfo.target', { length: expected })
+    : t('admin.accounts.testResponseInfo.targetUnknown')
+  if (state.shape === 'missing' && length === 0) {
+    addLine(t('admin.accounts.testResponseInfo.turnStateMissing', { target }), 'text-gray-400')
+    return
+  }
+
+  let result = t('admin.accounts.testResponseInfo.unknown')
+  let color = 'text-gray-400'
+  if (length !== null && expected && !state.validation_reason) {
+    if (state.shape === 'target' && length === expected) {
+      result = t('admin.accounts.testResponseInfo.matches')
+      color = 'text-green-400'
+    } else if (state.shape === 'extended') {
+      result = t('admin.accounts.testResponseInfo.extended')
+      color = 'text-red-400'
+    }
+  }
+  const knownReasons = ['account_type_unknown', 'unexpected_shape', 'invalid_envelope', 'invalid_encoding', 'future_issued_at', 'expired']
+  if (typeof state.validation_reason === 'string' && knownReasons.includes(state.validation_reason)) {
+    result += ` (${t(`admin.accounts.codexTurnState.validationReasons.${state.validation_reason}`)})`
+  }
+  addLine(t('admin.accounts.testResponseInfo.turnState', {
+    actual: length !== null
+      ? t('admin.accounts.testResponseInfo.length', { length })
+      : t('admin.accounts.testResponseInfo.unknown'),
+    target,
+    result
+  }), color)
+}
+
 const scrollToBottom = async () => {
   await nextTick()
   if (terminalRef.value) {
@@ -948,6 +1004,7 @@ const handleEvent = (event: {
   audio_url?: string
   video_url?: string
   mime_type?: string
+  data?: unknown
 }) => {
   switch (event.type) {
     case 'test_start':
@@ -1020,6 +1077,10 @@ const handleEvent = (event: {
       if (event.text) {
         addLine(event.text, 'text-cyan-300')
       }
+      break
+
+    case 'response_info':
+      addResponseInfo(event.data)
       break
 
     case 'test_complete':

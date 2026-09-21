@@ -1765,6 +1765,18 @@ export default {
       testCompleted: '测试完成！',
       connectedToApi: '已连接到 API',
       usingModel: '使用模型：{model}',
+      testResponseInfo: {
+        model: '上游返回模型：{model}',
+        notReturned: '未返回',
+        turnState: 'Codex turn-state：{actual}；{target}；{result}',
+        turnStateMissing: 'Codex turn-state：未返回；{target}',
+        length: '{length} 字符',
+        target: '目标 {length} 字符',
+        targetUnknown: '目标未知',
+        matches: '符合目标形态',
+        extended: '不符合目标（有效异常形态）',
+        unknown: '无法判断'
+      },
       sendingTestMessage: '发送测试消息："hi"',
       sendingImageRequest: '发送生图测试请求...',
       response: '响应：',

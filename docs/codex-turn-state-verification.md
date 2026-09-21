@@ -172,3 +172,19 @@ env -u OPENAI_API_KEY GOEXPERIMENT=jsonv2 go test -race -tags unit \
 账号列表增加黄色状态点：独立采集的可用目标缓存剩余 5 分钟以内时优先显示黄色，即使最新续采结果为异常形态。缓存到期后，仅在后台明确返回 `idle/idle`（该模型超过 30 分钟无真实业务）时优先显示灰色；其他情况保留原有观测规则。按原 `expires_at` 判断边界，不把观测时间当作签发时间；不足一秒但尚未到期的缓存仍为黄色。中英文悬停说明及空闲原因文案同步更新，模型行数和行高不变。
 
 账号状态点、状态弹窗、诊断及批量刷新共 **93 项前端测试通过**；修改文件 ESLint 和 `pnpm run build` 通过，构建包含翻译完整性及 `vue-tsc` 类型检查。覆盖个人／Team、5 分钟与过期边界、续采异常、空闲过期、暂停但缓存仍有效、禁用和被撤销缓存、刷新稳定性。构建仍提示部分产物超出建议块大小。结果位于 `.git/task-artifacts/codex-state-colors/`。本轮仅改前端展示及说明，未改后台调度、未部署、未发送真实采集请求。
+
+## 账号连接测试响应摘要（基线 `2d71ba10f`）
+
+OpenAI 文本连接测试和原生压缩测试增加 `response_info` SSE 事件，在测试完成或错误事件之前输出一次。展示真实返回模型，以及常规 OAuth 的 turn-state 实际长度、目标长度和匹配结果。没有模型字段不回填请求模型；套餐及时间校验复用缓存解析规则，Spark 按凭据母账号分类。API Key Chat Completions 只报告实际返回模型。此诊断不维护缓存、不建立采集需求，不改变原测试成功／失败判定。
+
+Windows Go 1.27.0、`GOEXPERIMENT=jsonv2` 下运行：
+
+```bash
+go test -race -tags unit ./internal/service \
+  -run 'TestAccountTestService_.*(OpenAI|OAuth)|TestAccountTestResponseInfo|TestParseTestSSEOutput' \
+  -count=1 -json
+```
+
+共 **49 项测试结果（含子测试）通过，0 失败、0 跳过**，其中新增响应摘要回归 23 项。覆盖个人 292／312、Team 332／356、未知套餐、套餐不匹配、非法封装、未来及过期时间、缺失状态、实际模型不同、响应头与 metadata 目标优先、Spark 母账号、失败流不转成功、API Key Chat、压缩模式及无 token 泄露。日志在 `.git/task-artifacts/account-test-response-info/go-race.jsonl`。
+
+前端账号测试弹窗 **12 项测试**及 **3 项 i18n 测试**通过；相关 ESLint、`pnpm run build`（包含翻译完整性和 `vue-tsc`）通过。构建保留既有工具提示和产物体积警告。所有上游响应均为本地模拟；未调用真实收费接口，未改数据库、后台采集策略或部署。

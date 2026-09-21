@@ -1710,6 +1710,18 @@ export default {
       testFailed: 'Test failed',
       connectedToApi: 'Connected to API',
       usingModel: 'Using model: {model}',
+      testResponseInfo: {
+        model: 'Upstream returned model: {model}',
+        notReturned: 'Not returned',
+        turnState: 'Codex turn-state: {actual}; {target}; {result}',
+        turnStateMissing: 'Codex turn-state: Not returned; {target}',
+        length: '{length} characters',
+        target: 'Target: {length} characters',
+        targetUnknown: 'Target unknown',
+        matches: 'Matches target shape',
+        extended: 'Does not match target (valid extended shape)',
+        unknown: 'Cannot determine'
+      },
       sendingTestMessage: 'Sending test message: "hi"',
       sendingImageRequest: 'Sending image generation test request...',
       response: 'Response:',

@@ -24,7 +24,20 @@ vi.mock('@/composables/useClipboard', () => ({
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   const messages: Record<string, string> = {
-    'admin.accounts.imagePromptDefault': 'Generate a cute orange cat astronaut sticker on a clean pastel background.'
+    'admin.accounts.imagePromptDefault': 'Generate a cute orange cat astronaut sticker on a clean pastel background.',
+    'admin.accounts.testResponseInfo.model': '上游返回模型：{model}',
+    'admin.accounts.testResponseInfo.notReturned': '未返回',
+    'admin.accounts.testResponseInfo.turnState': 'Codex turn-state：{actual}；{target}；{result}',
+    'admin.accounts.testResponseInfo.turnStateMissing': 'Codex turn-state：未返回；{target}',
+    'admin.accounts.testResponseInfo.length': '{length} 字符',
+    'admin.accounts.testResponseInfo.target': '目标 {length} 字符',
+    'admin.accounts.testResponseInfo.targetUnknown': '目标未知',
+    'admin.accounts.testResponseInfo.matches': '符合目标形态',
+    'admin.accounts.testResponseInfo.extended': '不符合目标（有效异常形态）',
+    'admin.accounts.testResponseInfo.unknown': '无法判断',
+    'admin.accounts.codexTurnState.validationReasons.account_type_unknown': '账号套餐未识别',
+    'admin.accounts.codexTurnState.validationReasons.invalid_envelope': 'Fernet 封装无效',
+    'admin.accounts.codexTurnState.validationReasons.expired': '已超过本地有效期'
   }
   return {
     ...actual,
@@ -36,7 +49,7 @@ vi.mock('vue-i18n', async () => {
         if (key === 'admin.accounts.imagePreviewAlt' && params?.index) {
           return `test-image-${params.index}`
         }
-        return messages[key] || key
+        return (messages[key] || key).replace(/\{(\w+)\}/g, (_, name: string) => String(params?.[name] ?? `{${name}}`))
       }
     })
   }
@@ -219,5 +232,73 @@ describe('AccountTestModal', () => {
       prompt: '',
       mode: 'compact'
     })
+  })
+
+  async function runOpenAITest(data: Record<string, unknown>, type = 'oauth') {
+    getAvailableModels.mockResolvedValue([{ id: 'requested-model', display_name: 'Requested model' }])
+    global.fetch = vi.fn().mockResolvedValue(createStreamResponse([
+      'data: {"type":"test_start","model":"requested-model"}\n',
+      'data: {"type":"content","text":"Hello from upstream"}\n',
+      `data: ${JSON.stringify({ type: 'response_info', data })}\n`,
+      'data: {"type":"test_complete","success":true}\n'
+    ])) as any
+    const wrapper = mountModal({ id: 42, name: 'OpenAI test', platform: 'openai', type, status: 'active' })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+    return wrapper
+  }
+
+  it.each([
+    { length: 292, expected: 292, shape: 'target', color: 'text-green-400', result: '符合目标形态' },
+    { length: 332, expected: 332, shape: 'target', color: 'text-green-400', result: '符合目标形态' },
+    { length: 312, expected: 292, shape: 'extended', color: 'text-red-400', result: '不符合目标（有效异常形态）' },
+    { length: 356, expected: 332, shape: 'extended', color: 'text-red-400', result: '不符合目标（有效异常形态）' }
+  ])('显示实际返回模型与 $length / $expected 形态结果', async ({ length, expected, shape, color, result }) => {
+    const wrapper = await runOpenAITest({
+      upstream_model: 'gpt-6-astra-returned',
+      codex_turn_state: { length, expected_length: expected, shape, source: 'header' }
+    })
+    const text = wrapper.text()
+    expect(text).toContain('上游返回模型：gpt-6-astra-returned')
+    const summary = `Codex turn-state：${length} 字符；目标 ${expected} 字符；${result}`
+    expect(wrapper.findAll(`.${color}`).some((line) => line.text() === summary)).toBe(true)
+    expect(text.indexOf('Hello from upstream')).toBeLessThan(text.indexOf('上游返回模型'))
+    expect(text.match(/Hello from upstream/g)).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it.each([
+    { length: 332, expected: 0, reason: 'account_type_unknown', target: '目标未知', detail: '账号套餐未识别' },
+    { length: 292, expected: 292, reason: 'invalid_envelope', target: '目标 292 字符', detail: 'Fernet 封装无效' },
+    { length: 332, expected: 332, reason: 'expired', target: '目标 332 字符', detail: '已超过本地有效期' }
+  ])('不能判断时以灰色说明 $reason，不因长度相同显示绿色', async ({ length, expected, reason, target, detail }) => {
+    const wrapper = await runOpenAITest({
+      upstream_model: 'gpt-5.6-sol',
+      codex_turn_state: { length, expected_length: expected, shape: 'unknown', validation_reason: reason }
+    })
+    const summary = `Codex turn-state：${length} 字符；${target}；无法判断 (${detail})`
+    expect(wrapper.findAll('.text-gray-400').some((line) => line.text() === summary)).toBe(true)
+    expect(wrapper.text()).not.toContain('符合目标形态')
+    wrapper.unmount()
+  })
+
+  it('上游没有模型和状态时明确未返回，不用请求模型代替', async () => {
+    const wrapper = await runOpenAITest({
+      codex_turn_state: { length: 0, expected_length: 292, shape: 'missing' }
+    })
+    expect(wrapper.text()).toContain('上游返回模型：未返回')
+    expect(wrapper.text()).not.toContain('上游返回模型：requested-model')
+    expect(wrapper.findAll('.text-gray-400').some((line) => line.text() === 'Codex turn-state：未返回；目标 292 字符')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('非 Codex 响应只显示返回模型，额外原始字段不展示', async () => {
+    const wrapper = await runOpenAITest({ upstream_model: 'upstream-model', token: 'private-token-must-not-render' }, 'apikey')
+    expect(wrapper.text()).toContain('上游返回模型：upstream-model')
+    expect(wrapper.text()).not.toContain('Codex turn-state：')
+    expect(wrapper.text()).not.toContain('private-token-must-not-render')
+    wrapper.unmount()
   })
 })

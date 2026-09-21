@@ -1117,6 +1117,8 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			c.Request = c.Request.WithContext(markAgentIdentityTaskRecoveryTried(ctx))
 			return s.testOpenAIAccountConnection(c, account, modelID, prompt, mode)
 		}
+		beginAccountTestResponseInfo(c, credentialAccount, resp.Header)
+		observeAccountTestResponseInfo(c, body)
 		if resp.StatusCode == http.StatusTooManyRequests {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
@@ -1128,6 +1130,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
+	beginAccountTestResponseInfo(c, credentialAccount, resp.Header)
 	// Process SSE stream
 	return s.processOpenAIStream(c, resp.Body)
 }
@@ -2306,9 +2309,11 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) request failed: %s", err.Error()))
 	}
 	defer func() { _ = resp.Body.Close() }()
+	beginAccountTestResponseInfo(c, account, resp.Header)
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		observeAccountTestResponseInfo(c, body)
 		if resp.StatusCode == http.StatusTooManyRequests {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
@@ -2485,6 +2490,11 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		c.Request = c.Request.WithContext(markAgentIdentityTaskRecoveryTried(ctx))
 		return s.testOpenAICompactConnection(c, account, testModelID)
 	}
+	beginAccountTestResponseInfo(c, credentialAccount, resp.Header)
+	observeAccountTestResponseInfo(c, body)
+	forEachOpenAISSEDataPayload(string(body), func(payload []byte) {
+		observeAccountTestResponseInfo(c, payload)
+	})
 
 	compactionFound := openAICompactProbeFoundCompactionItem(body)
 	if s.accountRepo != nil {
@@ -3085,6 +3095,7 @@ func (s *AccountTestService) processOpenAIChatCompletionsStream(c *gin.Context, 
 			return s.sendErrorAndEnd(c, "Invalid Chat Completions response from /v1/chat/completions: expected JSON data")
 		}
 		seenJSON = true
+		observeAccountTestResponseInfo(c, []byte(jsonStr))
 
 		if errData, ok := data["error"].(map[string]any); ok {
 			errorMsg := "Chat Completions API (/v1/chat/completions) returned an error"
@@ -3156,6 +3167,7 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 		if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
 			continue
 		}
+		observeAccountTestResponseInfo(c, []byte(jsonStr))
 
 		eventType, _ := data["type"].(string)
 
@@ -3480,6 +3492,9 @@ func (s *AccountTestService) sendEvent(c *gin.Context, event TestEvent) {
 				return
 			}
 		}
+	}
+	if event.Type == "test_complete" || event.Type == "error" {
+		s.sendAccountTestResponseInfo(c)
 	}
 	eventJSON, _ := json.Marshal(event)
 	if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", eventJSON); err != nil {
