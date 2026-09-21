@@ -1596,6 +1596,27 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(wrapper.find('[data-testid="codex-telemetry-forced-off"]').exists()).toBe(false);
   });
 
+  it("saves telemetry modes separately and retains choices across partial responses", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, codex_telemetry_enabled: true, codex_telemetry_simulation_enabled: false, codex_telemetry_observation_enabled: true });
+    updateSettings.mockResolvedValueOnce({ ...baseSettingsResponse });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const simulation = wrapper.get('[data-testid="codex-telemetry-simulation-toggle"]');
+    const observation = wrapper.get('[data-testid="codex-telemetry-observation-toggle"]');
+    expect((simulation.element as HTMLInputElement).checked).toBe(false);
+    expect((observation.element as HTMLInputElement).checked).toBe(true);
+    await simulation.setValue(true);
+    await observation.setValue(false);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ codex_telemetry_simulation_enabled: true, codex_telemetry_observation_enabled: false }));
+    expect((observation.element as HTMLInputElement).checked).toBe(false);
+    await wrapper.get('[data-testid="codex-telemetry-toggle"]').setValue(false);
+    expect((simulation.element as HTMLInputElement).disabled).toBe(true);
+    expect((observation.element as HTMLInputElement).disabled).toBe(true);
+  });
+
   it("builds the Codex UA placeholder from the manual version and falls back live to the synced version", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,

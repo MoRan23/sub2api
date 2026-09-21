@@ -46,7 +46,7 @@ func TestCodexTelemetryWSFinalFrameIdentityIsIndependentOfObservation(t *testing
 	before := append([]byte(nil), frame...)
 	turn := gateway.beginCodexTelemetryWS(context.Background(), account, physical, auth, frame)
 	require.NotNil(t, turn)
-	input := turn.attempt.turn.profile.input
+	input := turn.attempt.profile.input
 	require.Equal(t, telemetryWSRoot, input.SessionID)
 	require.Equal(t, telemetryWSChildA, input.ThreadID, "per-frame identity must win over reused socket and unrelated auth headers")
 	require.Equal(t, telemetryWSTurnID, input.TurnID)
@@ -58,8 +58,8 @@ func TestCodexTelemetryWSFinalFrameIdentityIsIndependentOfObservation(t *testing
 	physical.Set("Thread-Id", "changed")
 	auth.Set("Authorization", "Bearer changed")
 	frame[0] = ' '
-	require.Equal(t, telemetryWSChildA, turn.attempt.turn.profile.input.ThreadID)
-	require.Equal(t, "synthetic-token", turn.attempt.turn.profile.input.AccessToken)
+	require.Equal(t, telemetryWSChildA, turn.attempt.profile.input.ThreadID)
+	require.Equal(t, "synthetic-token", turn.attempt.profile.input.AccessToken)
 	turn.observe([]byte(`{"type":"response.completed","response":{"id":"real-response","status":"completed","usage":{"input_tokens":19,"output_tokens":5}}}`), "response.completed")
 	turn.finish(false)
 	require.Equal(t, "completed", turn.result.Status)
@@ -74,7 +74,8 @@ func TestCodexTelemetryWSSharedRootChildrenDoNotMerge(t *testing.T) {
 	right := gateway.beginCodexTelemetryWS(context.Background(), account, physical, auth, body(telemetryWSChildB))
 	require.NotNil(t, left)
 	require.NotNil(t, right)
-	require.NotSame(t, left.attempt.turn, right.attempt.turn)
+	require.NotEqual(t, left.attempt.profile.threadID, right.attempt.profile.threadID)
+	require.NotEqual(t, left.attempt.attemptID, right.attempt.attemptID)
 	left.observe([]byte(`{"type":"response.failed","response":{"status":"failed"}}`), "response.failed")
 	right.observe([]byte(`{"type":"response.completed","response":{"status":"completed"}}`), "response.completed")
 	left.finish(false)
@@ -90,13 +91,14 @@ func TestCodexTelemetryWSRetryDoesNotCommitEarlyFailure(t *testing.T) {
 	first := gateway.beginCodexTelemetryWS(ctx, account, physical, auth, body(telemetryWSChildA))
 	first.observe([]byte(`{"type":"error","error":{"code":"server_error","type":"server_error","message":"private error text"}}`), "error")
 	first.finish(true)
-	require.False(t, first.attempt.turn.finished)
+	require.True(t, first.done)
 	second := gateway.beginCodexTelemetryWS(ctx, account, physical, auth, body(telemetryWSChildA))
-	require.Same(t, first.attempt.turn, second.attempt.turn)
+	require.Equal(t, first.attempt.profile.turnID, second.attempt.profile.turnID)
+	require.NotEqual(t, first.attempt.attemptID, second.attempt.attemptID)
 	second.observe([]byte(`{"type":"response.output_text.delta","delta":"private output"}`), "response.output_text.delta")
 	second.observe([]byte(`{"type":"response.completed","response":{"id":"retry-response","status":"completed","usage":{"input_tokens":7,"output_tokens":2}}}`), "response.completed")
 	second.finish(false)
-	require.True(t, second.attempt.turn.finished)
+	require.True(t, second.done)
 	require.Equal(t, "completed", second.result.Status)
 	require.False(t, second.result.FirstTokenAt.IsZero())
 	require.Equal(t, "retry-response", second.result.ResponseID)
@@ -121,9 +123,9 @@ func TestCodexTelemetryWSExcludedRequestsAndNoIdentityFabrication(t *testing.T) 
 	physical.Del("Thread-Id")
 	turn := gateway.beginCodexTelemetryWS(context.Background(), account, physical, auth, []byte(`{"type":"response.create","model":"gpt-6-astra"}`))
 	require.NotNil(t, turn)
-	require.Empty(t, turn.attempt.turn.profile.input.SessionID)
-	require.Empty(t, turn.attempt.turn.profile.input.ThreadID)
-	require.Empty(t, turn.attempt.turn.profile.input.TurnID)
+	require.Empty(t, turn.attempt.profile.input.SessionID)
+	require.Empty(t, turn.attempt.profile.input.ThreadID)
+	require.Empty(t, turn.attempt.profile.input.TurnID)
 	turn.finish(false)
 	telemetryWaitDrained(t, gateway.codexTelemetry)
 	got := gateway.codexTelemetry.Observations(CodexTelemetryObservationQuery{})
@@ -361,7 +363,7 @@ func TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity(t *testing.T) {
 					}
 				}
 			}
-			wantEvents := 1
+			wantEvents := 0 // One Responses completion alone does not seal a client turn.
 			if actualSession == "" || actualThread == "" {
 				// This fixture intentionally has no physical session/thread headers;
 				// the service records the attempt but must skip turn attribution.
@@ -520,8 +522,8 @@ func TestCodexTelemetryWSDailyRootConcurrentChildrenUseActualWire(t *testing.T) 
 		}
 		require.NoError(t, json.Unmarshal(sent.body, &payload))
 		for _, event := range payload.Events {
-			if event.EventType == "codex_turn_event" && event.EventParams["thread_id"] == sent.input.ThreadID {
-				require.False(t, observedThreads[sent.input.ThreadID], "one terminal event per actual child")
+			if event.EventType == "codex_thread_initialized" && event.EventParams["thread_id"] == sent.input.ThreadID {
+				require.False(t, observedThreads[sent.input.ThreadID], "one initialization event per actual child")
 				observedThreads[sent.input.ThreadID] = true
 			}
 		}

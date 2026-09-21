@@ -118,8 +118,19 @@ func (s *SettingService) persistSettingsAndRefreshOpenAIPolicies(
 	// Publish only a value included in the committed write, under the same lock.
 	// Unrelated partial saves cannot replay an older telemetry state; disabling
 	// still takes effect if the subsequent full settings read fails.
-	if value, present := updates[SettingKeyCodexTelemetryEnabled]; present && s.codexTelemetry != nil {
-		s.codexTelemetry.SetEnabled(parseCodexTelemetryEnabled(value))
+	if s.codexTelemetry != nil {
+		_, enabledChanged := updates[SettingKeyCodexTelemetryEnabled]
+		_, simulationChanged := updates[SettingKeyCodexTelemetrySimulationEnabled]
+		_, observationChanged := updates[SettingKeyCodexTelemetryObservationEnabled]
+		if enabledChanged || simulationChanged || observationChanged {
+			preference := func(key string) bool {
+				if value, present := updates[key]; present {
+					return parseCodexTelemetryEnabled(value)
+				}
+				return s.codexTelemetryPreference(ctx, key)
+			}
+			s.codexTelemetry.SetPolicy(preference(SettingKeyCodexTelemetryEnabled), preference(SettingKeyCodexTelemetrySimulationEnabled), preference(SettingKeyCodexTelemetryObservationEnabled))
+		}
 	}
 	if value, present := updates[SettingKeyOpenAIRequestIntegrityObserveEnabled]; present {
 		s.publishOpenAIRequestIntegrityObserveEnabled(value)
@@ -571,6 +582,8 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyEnableOpenAIUUIDv7SessionIdentity] = strconv.FormatBool(settings.EnableOpenAIUUIDv7SessionIdentity)
 	updates[SettingKeyEnableOpenAIOAuthDailySessionRotation] = strconv.FormatBool(settings.EnableOpenAIOAuthDailySessionRotation)
 	updates[SettingKeyCodexTelemetryEnabled] = strconv.FormatBool(settings.CodexTelemetryEnabled)
+	updates[SettingKeyCodexTelemetrySimulationEnabled] = strconv.FormatBool(settings.CodexTelemetrySimulationEnabled)
+	updates[SettingKeyCodexTelemetryObservationEnabled] = strconv.FormatBool(settings.CodexTelemetryObservationEnabled)
 	if settings.CodexTurnStateModels != nil {
 		raw, _ := json.Marshal(settings.CodexTurnStateModels)
 		updates[SettingKeyCodexTurnStateModels] = string(raw)

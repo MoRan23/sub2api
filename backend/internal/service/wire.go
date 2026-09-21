@@ -351,8 +351,10 @@ func ProvideAdminService(
 	return svc
 }
 
-func ProvideCodexTelemetryService(httpUpstream HTTPUpstream, settings *SettingService) *CodexTelemetryService {
+func ProvideCodexTelemetryService(httpUpstream HTTPUpstream, settings *SettingService, store CodexTelemetryStore, notifier CodexTelemetryNotifier, accounts AccountRepository, proxies ProxyRepository) *CodexTelemetryService {
 	svc := NewCodexTelemetryService(httpUpstream)
+	svc.SetPersistence(store, accounts, proxies)
+	svc.SetNotifier(notifier)
 	settings.SetCodexTelemetryService(svc)
 	return svc
 }

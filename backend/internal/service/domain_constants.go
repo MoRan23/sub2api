@@ -720,6 +720,8 @@ const (
 	SettingKeyEnableOpenAIUUIDv7SessionIdentity     = "enable_openai_uuidv7_session_identity"
 	SettingKeyEnableOpenAIOAuthDailySessionRotation = "enable_openai_oauth_daily_session_rotation"
 	SettingKeyCodexTelemetryEnabled                 = "codex_telemetry_enabled"
+	SettingKeyCodexTelemetrySimulationEnabled       = "codex_telemetry_simulation_enabled"
+	SettingKeyCodexTelemetryObservationEnabled      = "codex_telemetry_observation_enabled"
 	SettingKeyCodexTurnStateModels                  = "codex_turn_state_models"
 	SettingKeyCodexTurnStateModelsRevision          = "codex_turn_state_models_revision"
 	SettingKeyOpenAIRequestIntegrityObserveEnabled  = "openai_request_integrity_observe_enabled"

@@ -19,7 +19,8 @@ func TestCodexTelemetryThreadInitializationWorktreeIsExplicitlyUnknown(t *testin
 			profile := codexTelemetryEventTestProfile()
 			profile.client.userAgent = userAgent
 			seen := make(map[string]bool)
-			for _, event := range codexInitializationEvents(profile) {
+			events := append(codexInitializationEvents(profile), codexTerminalEvents(profile, codexTelemetryTerminal{status: "completed", finished: profile.started.Add(time.Second)})...)
+			for _, event := range events {
 				encoded, err := json.Marshal(event)
 				require.NoError(t, err)
 				var wire struct {
@@ -44,7 +45,7 @@ func TestCodexTelemetryWorktreeObservationMatchesAnalyticsOnly(t *testing.T) {
 	attempt := s.Begin(context.Background(), telemetryTestInput())
 	require.NotNil(t, attempt)
 	attempt.Finish(CodexTelemetryResult{Status: "completed", HTTPStatus: 200})
-	s.flushMetrics(time.Now())
+	s.flushMetrics(time.Now().Add(2 * time.Minute))
 	telemetryWaitDrained(t, s)
 	initializations := 0
 	for _, call := range sent() {
@@ -65,9 +66,9 @@ func TestCodexTelemetryWorktreeObservationMatchesAnalyticsOnly(t *testing.T) {
 			}
 		}
 	}
-	require.Equal(t, 3, initializations)
+	require.Equal(t, 1, initializations, "only the observed thread's simulated initialization precedes next-turn sealing")
 
-	withWorktree, withoutWorktree := 0, 0
+	withWorktree := 0
 	snapshot := s.Observations(CodexTelemetryObservationQuery{PageSize: 100})
 	for _, item := range snapshot.Items {
 		encoded, err := json.Marshal(item)
@@ -81,12 +82,13 @@ func TestCodexTelemetryWorktreeObservationMatchesAnalyticsOnly(t *testing.T) {
 			require.Equal(t, "null", string(wire["is_worktree"]))
 			copy(item.IsWorktree, "true") // Returned snapshots must not mutate the history.
 		} else {
-			withoutWorktree++
 			require.NotContains(t, wire, "is_worktree")
 		}
 	}
 	require.Equal(t, 1, withWorktree)
-	require.Positive(t, withoutWorktree)
+	metric, err := json.Marshal(CodexTelemetryObservation{Type: "metrics"})
+	require.NoError(t, err)
+	require.NotContains(t, string(metric), "is_worktree", "pending metric windows must not infer analytics worktree facts")
 	for _, item := range s.Observations(CodexTelemetryObservationQuery{PageSize: 100}).Items {
 		if len(item.IsWorktree) > 0 {
 			require.Equal(t, "null", string(item.IsWorktree))
@@ -104,7 +106,7 @@ func TestCodexTelemetryThreadStartedWorktreeUnknownAggregates(t *testing.T) {
 	store.record(profile, codexTelemetryTerminal{status: "completed", finished: profile.started.Add(time.Second)})
 	profile.threadID, profile.turnID = "another-thread", "another-turn"
 	store.record(profile, codexTelemetryTerminal{status: "completed", finished: profile.started.Add(2 * time.Second)})
-	batches := store.flush(profile.started.Add(time.Minute))
+	batches := store.flush(profile.started.Add(2 * time.Minute))
 	require.Len(t, batches, 1)
 	points := codexMetricsTestMetric(batches[0].body, "codex.thread.started").Get("sum.dataPoints").Array()
 	require.Len(t, points, 1)
@@ -113,5 +115,5 @@ func TestCodexTelemetryThreadStartedWorktreeUnknownAggregates(t *testing.T) {
 	require.Equal(t, 2, batches[0].turns)
 	require.Empty(t, batches[0].profile.threadID)
 	require.Empty(t, batches[0].profile.turnID)
-	require.Len(t, codexMetricDescriptors, 66)
+	require.True(t, codexStatsigMetricAllowed("codex.thread.started"))
 }

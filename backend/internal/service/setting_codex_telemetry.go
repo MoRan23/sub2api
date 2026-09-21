@@ -21,13 +21,25 @@ func parseCodexTelemetryEnabled(raw string) bool {
 // IsCodexTelemetryEnabled returns the persisted preference. Environment forcing
 // is applied by CodexTelemetryService so the configured value remains visible.
 func (s *SettingService) IsCodexTelemetryEnabled(ctx context.Context) bool {
+	return s.codexTelemetryPreference(ctx, SettingKeyCodexTelemetryEnabled)
+}
+
+func (s *SettingService) IsCodexTelemetrySimulationEnabled(ctx context.Context) bool {
+	return s.codexTelemetryPreference(ctx, SettingKeyCodexTelemetrySimulationEnabled)
+}
+
+func (s *SettingService) IsCodexTelemetryObservationEnabled(ctx context.Context) bool {
+	return s.codexTelemetryPreference(ctx, SettingKeyCodexTelemetryObservationEnabled)
+}
+
+func (s *SettingService) codexTelemetryPreference(ctx context.Context, key string) bool {
 	if s == nil || s.settingRepo == nil {
 		return true
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	raw, err := s.settingRepo.GetValue(ctx, SettingKeyCodexTelemetryEnabled)
+	raw, err := s.settingRepo.GetValue(ctx, key)
 	if errors.Is(err, ErrSettingNotFound) {
 		return true
 	}
@@ -47,6 +59,6 @@ func (s *SettingService) SetCodexTelemetryService(telemetry *CodexTelemetryServi
 	defer s.settingsUpdateMu.Unlock()
 	s.codexTelemetry = telemetry
 	if telemetry != nil {
-		telemetry.SetEnabled(s.IsCodexTelemetryEnabled(context.Background()))
+		telemetry.SetPolicy(s.IsCodexTelemetryEnabled(context.Background()), s.IsCodexTelemetrySimulationEnabled(context.Background()), s.IsCodexTelemetryObservationEnabled(context.Background()))
 	}
 }

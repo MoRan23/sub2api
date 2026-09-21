@@ -9,6 +9,8 @@ type CodexTelemetryObservationQuery struct {
 	AccountID int64
 	Status    string
 	Type      string
+	OSFamily  string
+	Source    string
 	Page      int
 	PageSize  int
 }
@@ -21,47 +23,56 @@ type CodexTelemetryCounters struct {
 	Dropped   uint64 `json:"dropped"`
 	Cancelled uint64 `json:"cancelled"`
 	Skipped   uint64 `json:"skipped"`
+	Unknown   uint64 `json:"unknown"`
 }
 
 type CodexTelemetryObservationSnapshot struct {
-	ConfiguredEnabled bool                        `json:"configured_enabled"`
-	EffectiveEnabled  bool                        `json:"effective_enabled"`
-	ForcedOffReason   string                      `json:"forced_off_reason"`
-	QueueDepth        int                         `json:"queue_depth"`
-	Counters          CodexTelemetryCounters      `json:"counters"`
-	Items             []CodexTelemetryObservation `json:"items"`
-	Total             int                         `json:"total"`
-	Page              int                         `json:"page"`
-	PageSize          int                         `json:"page_size"`
+	ConfiguredEnabled  bool                        `json:"configured_enabled"`
+	SimulationEnabled  bool                        `json:"simulation_enabled"`
+	ObservationEnabled bool                        `json:"observation_enabled"`
+	EffectiveEnabled   bool                        `json:"effective_enabled"`
+	ForcedOffReason    string                      `json:"forced_off_reason"`
+	QueueDepth         int                         `json:"queue_depth"`
+	Counters           CodexTelemetryCounters      `json:"counters"`
+	Items              []CodexTelemetryObservation `json:"items"`
+	Total              int                         `json:"total"`
+	Page               int                         `json:"page"`
+	PageSize           int                         `json:"page_size"`
 }
 
 // CodexTelemetryObservation contains only allowlisted diagnostics. Never add
 // serialized input, transport errors or headers here: they may carry secrets.
 type CodexTelemetryObservation struct {
-	ID                uint64    `json:"id"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
-	AccountID         int64     `json:"account_id"`
-	AccountName       string    `json:"account_name"`
-	Type              string    `json:"type"`
-	Status            string    `json:"status"`
-	EventNames        []string  `json:"event_names"`
-	ContainsSimulated bool      `json:"contains_simulated"`
-	AttemptID         uint64    `json:"attempt_id"`
-	AttemptCount      int       `json:"attempt_count"`
-	TurnCount         int       `json:"turn_count"`
-	SessionID         string    `json:"session_id"`
-	ThreadID          string    `json:"thread_id"`
-	TurnID            string    `json:"turn_id"`
-	ParentThreadID    string    `json:"parent_thread_id"`
-	ParentTurnID      string    `json:"parent_turn_id"`
-	RootTurnID        string    `json:"root_turn_id"`
-	Model             string    `json:"model"`
-	UserAgent         string    `json:"user_agent"`
-	Originator        string    `json:"originator"`
-	Version           string    `json:"version"`
-	HTTPStatus        int       `json:"http_status"`
-	Error             string    `json:"error"`
+	ID                uint64            `json:"id"`
+	CreatedAt         time.Time         `json:"created_at"`
+	UpdatedAt         time.Time         `json:"updated_at"`
+	AccountID         int64             `json:"account_id"`
+	AccountName       string            `json:"account_name"`
+	Type              string            `json:"type"`
+	Status            string            `json:"status"`
+	EventNames        []string          `json:"event_names"`
+	ContainsSimulated bool              `json:"contains_simulated"`
+	OSFamily          string            `json:"os_family"`
+	PoolID            string            `json:"pool_id"`
+	BatchID           string            `json:"batch_id"`
+	Source            string            `json:"source"`
+	Reasons           []string          `json:"reasons"`
+	FieldSources      map[string]string `json:"field_sources"`
+	AttemptID         uint64            `json:"attempt_id"`
+	AttemptCount      int               `json:"attempt_count"`
+	TurnCount         int               `json:"turn_count"`
+	SessionID         string            `json:"session_id"`
+	ThreadID          string            `json:"thread_id"`
+	TurnID            string            `json:"turn_id"`
+	ParentThreadID    string            `json:"parent_thread_id"`
+	ParentTurnID      string            `json:"parent_turn_id"`
+	RootTurnID        string            `json:"root_turn_id"`
+	Model             string            `json:"model"`
+	UserAgent         string            `json:"user_agent"`
+	Originator        string            `json:"originator"`
+	Version           string            `json:"version"`
+	HTTPStatus        int               `json:"http_status"`
+	Error             string            `json:"error"`
 	// A missing field means no thread-initialization state was collected. An
 	// explicit JSON null records unknown client worktree state, never host state.
 	IsWorktree json.RawMessage `json:"is_worktree,omitempty"`
@@ -84,8 +95,9 @@ func (s *CodexTelemetryService) Observations(query CodexTelemetryObservationQuer
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result.ConfiguredEnabled = s.configured
+	result.SimulationEnabled, result.ObservationEnabled = s.simulationEnabled, s.observationEnabled
 	result.EffectiveEnabled, result.ForcedOffReason = CodexTelemetryEffectiveState(s.configured)
-	result.EffectiveEnabled = result.EffectiveEnabled && !s.stopped
+	result.EffectiveEnabled = result.EffectiveEnabled && !s.stopped && (s.simulationEnabled || s.observationEnabled)
 	result.QueueDepth, result.Counters = s.queueDepth, s.counters
 	offset := (query.Page - 1) * query.PageSize
 	for i := len(s.observations) - 1; i >= 0; i-- {
@@ -99,10 +111,18 @@ func (s *CodexTelemetryService) Observations(query CodexTelemetryObservationQuer
 		if query.Type != "" && entry.Type != query.Type {
 			continue
 		}
+		if query.OSFamily != "" && entry.OSFamily != query.OSFamily {
+			continue
+		}
+		if query.Source != "" && entry.Source != query.Source {
+			continue
+		}
 		if result.Total >= offset && len(result.Items) < query.PageSize {
 			copyEntry := *entry
 			copyEntry.EventNames = append([]string{}, entry.EventNames...)
 			copyEntry.IsWorktree = append(json.RawMessage(nil), entry.IsWorktree...)
+			copyEntry.Reasons = append([]string{}, entry.Reasons...)
+			copyEntry.FieldSources = cloneCodexTelemetryFieldSources(entry.FieldSources)
 			result.Items = append(result.Items, copyEntry)
 		}
 		result.Total++
@@ -115,10 +135,23 @@ func (s *CodexTelemetryService) newObservationLocked(profile codexTelemetryProfi
 	now := time.Now()
 	entry := &CodexTelemetryObservation{
 		ID: s.nextID, CreatedAt: now, UpdatedAt: now, AccountID: profile.client.localID, AccountName: profile.client.name,
-		Type: kind, Status: "queued", EventNames: append([]string{}, names...), ContainsSimulated: codexSimulatesClientBehavior(profile),
+		Type: kind, Status: "queued", EventNames: append([]string{}, names...),
+		OSFamily: string(profile.input.OSFamily), PoolID: profile.poolID, Source: profile.source,
+		Reasons: append([]string{}, profile.reasons...), FieldSources: cloneCodexTelemetryFieldSources(profile.fieldSources),
 		AttemptID: attemptID, TurnCount: turns, Model: profile.model,
 		UserAgent: profile.client.userAgent, Originator: profile.client.originator, Version: profile.client.version,
 	}
+	if entry.Source == "" {
+		switch {
+		case s.simulationEnabled && s.observationEnabled:
+			entry.Source = "mixed"
+		case s.simulationEnabled:
+			entry.Source = "simulated"
+		case s.observationEnabled:
+			entry.Source = "observed"
+		}
+	}
+	entry.ContainsSimulated = entry.Source == "simulated" || entry.Source == "mixed"
 	if kind == "analytics" {
 		entry.AttemptCount = profile.attemptCount
 		entry.SessionID, entry.ThreadID, entry.TurnID = profile.sessionID, profile.threadID, profile.turnID
@@ -149,7 +182,17 @@ func (s *CodexTelemetryService) finishObservationLocked(entry *CodexTelemetryObs
 		s.counters.Cancelled++
 	case "skipped":
 		s.counters.Skipped++
+	case "unknown":
+		s.counters.Unknown++
 	}
+}
+
+func cloneCodexTelemetryFieldSources(fields map[string]string) map[string]string {
+	result := make(map[string]string, len(fields))
+	for name, source := range fields {
+		result[name] = source
+	}
+	return result
 }
 
 func (s *CodexTelemetryService) skipLocked(profile codexTelemetryProfile, attemptID uint64, reason string) {

@@ -417,13 +417,19 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	observeCodexTurnStateWSHandshakeLength(codexStateAttempt, stateHandshakeLength)
 	recordFrameObservation := s.freezeFingerprintObservationWSFrame(c, account, timezoneState, observationBody, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &outboundIdentityPlan))
 	recordOpenAICodexGuardianSourceThread(outboundIdentityPlan, nil, observationBody)
-	telemetry := s.beginCodexTelemetryWS(ctx, account, lease.FingerprintObservationHeaders(), wsHeaders, observationBody)
+	telemetry := s.beginCodexTelemetryWS(withCodexTelemetryGatewayContext(ctx, c, account, "http", &outboundIdentityPlan), account, lease.FingerprintObservationHeaders(), wsHeaders, observationBody)
 	defer func() {
 		var fallback *openAIWSFallbackError
 		var failover *UpstreamFailoverError
+		if returnErr != nil {
+			telemetry.markDelivery(false)
+		}
 		telemetry.finish(errors.As(returnErr, &fallback) || errors.As(returnErr, &failover))
 	}()
-	if err := lease.WriteJSONWithContextTimeout(ctx, wirePayload, s.openAIWSWriteTimeout()); err != nil {
+	telemetryWriteStarted := time.Now()
+	telemetryWriteErr := lease.WriteJSONWithContextTimeout(ctx, wirePayload, s.openAIWSWriteTimeout())
+	telemetry.sent(telemetryWriteStarted, time.Now(), telemetryWriteErr)
+	if err := telemetryWriteErr; err != nil {
 		telemetry.writeFailed()
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(
@@ -515,6 +521,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			return
 		}
 		clientDisconnected = true
+		telemetry.markDelivery(false)
 		clientDisconnectDrainStartedAt = time.Now()
 		if !upstreamReadDetached {
 			upstreamReadCtx = context.WithoutCancel(ctx)
@@ -606,6 +613,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		n, wErr := c.Writer.Write(frame)
 		if wErr == nil && n == len(frame) {
 			wroteDownstream = true
+			if openAIWSPassthroughIsTerminalOutput(message) {
+				telemetry.markDelivery(true)
+			}
 			if openAIWSPassthroughOutputCommitsTurnState(message) {
 				codexStateDelivered = true
 			}
@@ -657,7 +667,9 @@ readLoop:
 		markClientRequestCanceled()
 		var message []byte
 		var readErr error
+		var telemetryReadStarted, telemetryReadFinished time.Time
 		readUsedDetachedContext := upstreamReadDetached
+		telemetryBuffered := len(pendingJSONDocuments) > 0
 		if len(pendingJSONDocuments) > 0 {
 			message = pendingJSONDocuments[0]
 			pendingJSONDocuments = pendingJSONDocuments[1:]
@@ -673,7 +685,9 @@ readLoop:
 					currentReadTimeout = remaining
 				}
 			}
+			telemetryReadStarted = time.Now()
 			message, readErr = lease.ReadMessageWithContextTimeout(upstreamReadCtx, currentReadTimeout)
+			telemetryReadFinished = time.Now()
 			if readErr == nil {
 				if documents, repaired := splitOpenAIConcatenatedJSONDocuments(message); repaired {
 					logOpenAIWSModeInfo(
@@ -687,6 +701,14 @@ readLoop:
 					pendingJSONDocuments = append(pendingJSONDocuments, documents[1:]...)
 				}
 			}
+		}
+		if telemetryReadFinished.IsZero() {
+			telemetryReadFinished = time.Now()
+		}
+		if telemetryBuffered {
+			telemetry.observeBuffered(message)
+		} else {
+			telemetry.observeRead(message, "", telemetryReadStarted, telemetryReadFinished, readErr)
 		}
 		markClientRequestCanceled()
 		if readErr == nil && !json.Valid(message) {
@@ -749,7 +771,6 @@ readLoop:
 		}
 		// Capture the unmodified upstream result before client model/tool rewrites.
 		s.observeOpenAICodexWSStateEvent(codexStateAttempt, message)
-		telemetry.observe(message, eventType)
 		responseModelObserver.ObserveOpenAI(message, eventType)
 		eventCount++
 		if firstEventType == "" {
@@ -973,7 +994,9 @@ readLoop:
 		}
 
 		stageTurnStateHeader()
-		if writeOpenAIResponseDataWithDelivery(c, http.StatusOK, "application/json", finalResponse) {
+		telemetryDelivered := writeOpenAIResponseDataWithDelivery(c, http.StatusOK, "application/json", finalResponse)
+		telemetry.markDelivery(telemetryDelivered)
+		if telemetryDelivered {
 			codexStateDelivered = openAIWSPassthroughOutputCommitsTurnState(finalTerminalMessage)
 			for _, doneEvent := range pendingNonStreamingRemoteV2DoneEvents {
 				observeOpenAICodexWSCompactionDelivery(compactionDelivery, doneEvent)

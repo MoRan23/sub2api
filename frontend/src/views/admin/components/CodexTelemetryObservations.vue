@@ -1,5 +1,5 @@
 <template>
-  <section class="flex h-full min-h-[320px] flex-col" :aria-label="t('admin.fingerprintObservation.telemetry.title')">
+  <section class="flex h-full min-h-[320px] flex-col overflow-auto" :aria-label="t('admin.fingerprintObservation.telemetry.title')">
     <div class="shrink-0 space-y-3 border-b border-gray-200 p-4 dark:border-dark-700">
       <div class="flex flex-wrap items-center gap-2 text-xs">
         <template v-if="response">
@@ -8,11 +8,11 @@
           </span>
           <span class="text-gray-500 dark:text-gray-400">{{ t(response.configured_enabled ? 'admin.fingerprintObservation.telemetry.configuredOn' : 'admin.fingerprintObservation.telemetry.configuredOff') }}</span>
         </template>
-        <span class="rounded-full bg-amber-100 px-2.5 py-1 font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">{{ t('admin.fingerprintObservation.telemetry.simulated') }}</span>
+        <span v-if="mode" class="rounded-full bg-blue-100 px-2.5 py-1 font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">{{ t(`admin.fingerprintObservation.telemetry.modes.${mode}`) }}</span>
       </div>
       <p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{{ t('admin.fingerprintObservation.telemetry.hint') }}</p>
       <p v-if="response?.forced_off_reason" class="break-words text-xs text-amber-700 dark:text-amber-300" role="status">{{ t('admin.fingerprintObservation.telemetry.forcedOff', { reason: response.forced_off_reason }) }}</p>
-      <dl v-if="response" class="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
+      <dl v-if="response" class="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-9">
         <div v-for="metric in metrics" :key="metric.key" class="min-w-0 rounded-lg bg-gray-50 px-3 py-2 dark:bg-dark-900/60">
           <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t(`admin.fingerprintObservation.telemetry.counters.${metric.key}`) }}</dt>
           <dd class="mt-1 text-lg font-semibold tabular-nums text-gray-900 dark:text-white">{{ metric.value }}</dd>
@@ -38,6 +38,20 @@
             <option value="metrics">{{ t('admin.fingerprintObservation.telemetry.types.metrics') }}</option>
           </select>
         </label>
+        <label class="min-w-0 flex-1 text-xs text-gray-500 sm:max-w-36 dark:text-gray-400">
+          {{ t('admin.fingerprintObservation.telemetry.os') }}
+          <select v-model="osFilter" :aria-label="t('admin.fingerprintObservation.telemetry.os')" class="input mt-1 w-full">
+            <option value="">{{ t('admin.fingerprintObservation.telemetry.allSystems') }}</option>
+            <option v-for="os in systems" :key="os" :value="os">{{ t(`admin.fingerprintObservation.telemetry.systems.${os}`) }}</option>
+          </select>
+        </label>
+        <label class="min-w-0 flex-1 text-xs text-gray-500 sm:max-w-36 dark:text-gray-400">
+          {{ t('admin.fingerprintObservation.telemetry.source') }}
+          <select v-model="sourceFilter" :aria-label="t('admin.fingerprintObservation.telemetry.source')" class="input mt-1 w-full">
+            <option value="">{{ t('admin.fingerprintObservation.telemetry.allSources') }}</option>
+            <option v-for="source in sources" :key="source" :value="source">{{ t(`admin.fingerprintObservation.telemetry.sources.${source}`) }}</option>
+          </select>
+        </label>
         <button type="submit" class="btn btn-secondary col-span-2" :disabled="loading">{{ t('common.filter') }}</button>
       </form>
     </div>
@@ -47,7 +61,7 @@
       <button type="button" class="font-medium underline" :disabled="loading" @click="refresh">{{ t('common.retry') }}</button>
     </div>
 
-    <div class="min-h-0 flex-1 overflow-auto" :aria-busy="loading">
+    <div class="min-h-48 flex-1 overflow-auto" :aria-busy="loading">
       <div v-if="loading && !items.length" class="flex min-h-48 items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-400">
         <Icon name="refresh" size="sm" class="animate-spin" />{{ t('common.loading') }}
       </div>
@@ -58,7 +72,9 @@
               <span class="rounded-full bg-indigo-100 px-2 py-0.5 font-semibold text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">{{ t(`admin.fingerprintObservation.telemetry.types.${entry.type}`) }}</span>
               <span class="font-semibold" :class="statusClass(entry.status)">{{ t(`admin.fingerprintObservation.telemetry.status.${entry.status}`) }}</span>
               <span v-if="entry.http_status" class="font-mono text-gray-500 dark:text-gray-400">HTTP {{ entry.http_status }}</span>
-              <span v-if="entry.contains_simulated" class="text-amber-700 dark:text-amber-300">{{ t('admin.fingerprintObservation.telemetry.simulated') }}</span>
+              <span v-if="entry.os_family" class="text-gray-600 dark:text-gray-300">{{ t(`admin.fingerprintObservation.telemetry.systems.${entry.os_family}`) }}</span>
+              <span v-if="entry.source" :class="entry.source === 'observed' ? 'text-blue-700 dark:text-blue-300' : 'text-amber-700 dark:text-amber-300'">{{ t(`admin.fingerprintObservation.telemetry.sources.${entry.source}`) }}</span>
+              <span v-else-if="entry.contains_simulated" class="text-amber-700 dark:text-amber-300">{{ t('admin.fingerprintObservation.telemetry.simulated') }}</span>
             </div>
             <time class="text-xs text-gray-400" :datetime="entry.created_at">{{ formatTime(entry.created_at) }}</time>
           </div>
@@ -68,7 +84,7 @@
             <span v-if="entry.type === 'metrics'">{{ t(entry.turn_count > 1 ? 'admin.fingerprintObservation.telemetry.multipleTurns' : 'admin.fingerprintObservation.telemetry.metricBatch', { count: entry.turn_count }) }}</span>
             <span>{{ t('admin.fingerprintObservation.telemetry.eventCount', { count: entry.event_names.length }) }}</span>
           </div>
-          <p v-if="entry.error" class="mt-2 break-words text-xs text-red-600 dark:text-red-400">{{ entry.error }}</p>
+          <p v-if="entry.error" class="mt-2 break-words text-xs text-amber-700 dark:text-amber-300">{{ reasonLabel(entry.error) }}</p>
           <details class="mt-3 rounded-lg border border-gray-200 dark:border-dark-700" @toggle="toggleDetails(entry.id, $event)">
             <summary class="cursor-pointer px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300">{{ t('admin.fingerprintObservation.telemetry.details') }}</summary>
             <div v-if="openedDetails.has(entry.id)" class="space-y-3 border-t border-gray-200 p-3 dark:border-dark-700">
@@ -79,6 +95,19 @@
                   <dd class="mt-1 break-all font-mono text-gray-700 dark:text-gray-300">{{ field.value || '—' }}</dd>
                 </div>
               </dl>
+              <div v-if="entry.reasons?.length">
+                <p class="text-xs font-medium text-gray-400">{{ t('admin.fingerprintObservation.telemetry.reasons') }}</p>
+                <ul class="mt-1 space-y-1 text-xs text-gray-700 dark:text-gray-300"><li v-for="reason in entry.reasons" :key="reason">{{ reasonLabel(reason) }}</li></ul>
+              </div>
+              <div v-if="entry.field_sources && Object.keys(entry.field_sources).length">
+                <p class="text-xs font-medium text-gray-400">{{ t('admin.fingerprintObservation.telemetry.fieldSources') }}</p>
+                <dl class="mt-1 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
+                  <div v-for="(source, name) in entry.field_sources" :key="name" class="flex min-w-0 justify-between gap-3">
+                    <dt class="break-all font-mono text-gray-600 dark:text-gray-300">{{ name }}</dt>
+                    <dd class="shrink-0 text-gray-500 dark:text-gray-400">{{ t(`admin.fingerprintObservation.telemetry.sources.${source}`) }}</dd>
+                  </div>
+                </dl>
+              </div>
               <div>
                 <p class="text-xs font-medium text-gray-400">{{ t('admin.fingerprintObservation.telemetry.eventNames') }}</p>
                 <ul class="mt-1 space-y-1 break-all font-mono text-xs text-gray-700 dark:text-gray-300"><li v-for="name in entry.event_names" :key="name">{{ name }}</li></ul>
@@ -100,13 +129,13 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
-import type { CodexTelemetryEntry, CodexTelemetryListParams, CodexTelemetryObservationsResponse, CodexTelemetryStatus, CodexTelemetryType } from '@/api/admin/codexTelemetry'
+import type { CodexTelemetryEntry, CodexTelemetryListParams, CodexTelemetryObservationsResponse, CodexTelemetryStatus, CodexTelemetryType, CodexTelemetryOS, CodexTelemetrySource } from '@/api/admin/codexTelemetry'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import Pagination from '@/components/common/Pagination.vue'
 import Icon from '@/components/icons/Icon.vue'
 
 const emit = defineEmits<{ stateChanged: [state: { loading: boolean; paused: boolean }] }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
 const response = ref<CodexTelemetryObservationsResponse | null>(null)
 const loading = ref(false)
 const error = ref('')
@@ -115,9 +144,19 @@ const pageSize = ref(20)
 const accountFilter = ref<string | number>('')
 const statusFilter = ref<CodexTelemetryStatus | ''>('')
 const typeFilter = ref<CodexTelemetryType | ''>('')
+const osFilter = ref<CodexTelemetryOS | ''>('')
+const sourceFilter = ref<CodexTelemetrySource | ''>('')
+const systems: CodexTelemetryOS[] = ['windows', 'macos', 'linux']
+const sources: CodexTelemetrySource[] = ['observed', 'simulated', 'mixed']
 const appliedFilters = ref<CodexTelemetryListParams>({})
 const openedDetails = ref(new Set<number>())
-const statuses: CodexTelemetryStatus[] = ['queued', 'sent', 'failed', 'dropped', 'cancelled', 'skipped']
+const statuses: CodexTelemetryStatus[] = ['queued', 'sent', 'failed', 'dropped', 'cancelled', 'skipped', 'unknown']
+const mode = computed(() => {
+  const data = response.value
+  if (typeof data?.simulation_enabled !== 'boolean' || typeof data.observation_enabled !== 'boolean') return ''
+  if (data.simulation_enabled && data.observation_enabled) return 'mixed'
+  return data.simulation_enabled ? 'simulated' : data.observation_enabled ? 'observed' : 'off'
+})
 const items = computed(() => Array.isArray(response.value?.items) ? response.value.items : [])
 const metrics = computed(() => [
   { key: 'queueDepth', value: response.value?.queue_depth ?? 0 },
@@ -172,6 +211,8 @@ function applyFilters(): void {
     ...(accountFilter.value !== '' ? { account_id: accountID } : {}),
     ...(statusFilter.value ? { status: statusFilter.value } : {}),
     ...(typeFilter.value ? { type: typeFilter.value } : {}),
+    ...(osFilter.value ? { os_family: osFilter.value } : {}),
+    ...(sourceFilter.value ? { source: sourceFilter.value } : {}),
   }
   void load(1)
 }
@@ -193,6 +234,7 @@ function toggleDetails(id: number, event: Event): void {
 function statusClass(status: CodexTelemetryStatus): string {
   if (status === 'sent') return 'text-green-700 dark:text-green-300'
   if (status === 'failed' || status === 'dropped') return 'text-red-700 dark:text-red-300'
+  if (status === 'unknown') return 'text-amber-700 dark:text-amber-300'
   return 'text-gray-600 dark:text-gray-300'
 }
 function detailFields(entry: CodexTelemetryEntry): Array<{ key: string; value: string | number }> {
@@ -200,6 +242,8 @@ function detailFields(entry: CodexTelemetryEntry): Array<{ key: string; value: s
     ? ['attempt_count', 'user_agent', 'originator', 'version', 'updated_at'] as const
     : ['session_id', 'thread_id', 'turn_id', 'parent_thread_id', 'parent_turn_id', 'root_turn_id', 'attempt_id', 'attempt_count', 'user_agent', 'originator', 'version', 'updated_at'] as const
   const fields: Array<{ key: string; value: string | number }> = keys.map((key) => ({ key, value: key === 'updated_at' ? formatTime(entry[key]) : entry[key] }))
+  if (entry.pool_id) fields.unshift({ key: 'pool_id', value: entry.pool_id })
+  if (entry.batch_id) fields.unshift({ key: 'batch_id', value: entry.batch_id })
   if (entry.type === 'analytics' && entry.event_names.includes('codex_thread_initialized')) {
     fields.push({
       key: 'is_worktree',
@@ -211,6 +255,10 @@ function detailFields(entry: CodexTelemetryEntry): Array<{ key: string; value: s
     })
   }
   return fields
+}
+function reasonLabel(reason: string): string {
+  const key = `admin.fingerprintObservation.telemetry.reasonLabels.${reason}`
+  return te(key) ? t(key) : reason
 }
 function formatTime(value: string): string {
   const date = new Date(value)

@@ -89,9 +89,11 @@ func (c *openAIWSPolicyEnforcingFrameConn) Close() error {
 // boundary. Its finalizer runs after every policy/model/retry mutation and
 // immediately before the physical frame write.
 type openAIWSFinalizingUpstreamFrameConn struct {
-	inner      openaiwsv2.FrameConn
-	finalize   func(msgType coderws.MessageType, payload []byte) ([]byte, error)
-	afterWrite func(msgType coderws.MessageType, payload []byte, err error)
+	inner           openaiwsv2.FrameConn
+	finalize        func(msgType coderws.MessageType, payload []byte) ([]byte, error)
+	afterWrite      func(msgType coderws.MessageType, payload []byte, err error)
+	afterWriteTimed func(msgType coderws.MessageType, payload []byte, started, finished time.Time, err error)
+	afterRead       func(msgType coderws.MessageType, payload []byte, started, finished time.Time, err error)
 }
 
 var _ openaiwsv2.FrameConn = (*openAIWSFinalizingUpstreamFrameConn)(nil)
@@ -100,7 +102,12 @@ func (c *openAIWSFinalizingUpstreamFrameConn) ReadFrame(ctx context.Context) (co
 	if c == nil || c.inner == nil {
 		return coderws.MessageText, nil, errOpenAIWSConnClosed
 	}
-	return c.inner.ReadFrame(ctx)
+	started := time.Now()
+	msgType, payload, err := c.inner.ReadFrame(ctx)
+	if c.afterRead != nil {
+		c.afterRead(msgType, payload, started, time.Now(), err)
+	}
+	return msgType, payload, err
 }
 
 func (c *openAIWSFinalizingUpstreamFrameConn) WriteFrame(ctx context.Context, msgType coderws.MessageType, payload []byte) error {
@@ -114,7 +121,11 @@ func (c *openAIWSFinalizingUpstreamFrameConn) WriteFrame(ctx context.Context, ms
 		}
 		payload = finalized
 	}
+	started := time.Now()
 	err := c.inner.WriteFrame(ctx, msgType, payload)
+	if c.afterWriteTimed != nil {
+		c.afterWriteTimed(msgType, payload, started, time.Now(), err)
+	}
 	if c.afterWrite != nil {
 		c.afterWrite(msgType, payload, err)
 	}
@@ -1075,6 +1086,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	telemetryMayRetry := true // The initial physical write can be retried by the caller.
 	defer func() { currentTelemetry().finish(telemetryMayRetry) }()
 	var pendingFrameObservation func()
+	telemetryFrameNumber := 0
 	physicalUpstreamFrameConn := &openAIWSFinalizingUpstreamFrameConn{
 		inner: relayUpstreamFrameConn,
 		finalize: func(msgType coderws.MessageType, payload []byte) ([]byte, error) {
@@ -1133,11 +1145,22 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			pendingFrameObservation = s.freezeFingerprintObservationWSFrame(c, account, currentTimezoneState, payload, physicalObservationHeaders, openAIWSObservationFramePlan(account, &framePlan))
 			recordOpenAICodexGuardianSourceThread(framePlan, nil, payload)
 			currentTelemetry().finish(false)
-			nextTelemetry := s.beginCodexTelemetryWS(ctx, account, physicalObservationHeaders, headers, payload)
+			telemetryFrameNumber++
+			nextTelemetry := s.beginCodexTelemetryWS(withCodexTelemetryGatewayContext(ctx, c, account, fmt.Sprintf("ws:%d", telemetryFrameNumber), &framePlan), account, physicalObservationHeaders, headers, payload)
 			telemetryMu.Lock()
 			telemetry = nextTelemetry
 			telemetryMu.Unlock()
 			return payload, nil
+		},
+		afterRead: func(msgType coderws.MessageType, payload []byte, started, finished time.Time, err error) {
+			if err != nil || msgType == coderws.MessageText || msgType == coderws.MessageBinary {
+				currentTelemetry().observeRead(payload, "", started, finished, err)
+			}
+		},
+		afterWriteTimed: func(_ coderws.MessageType, payload []byte, started, finished time.Time, err error) {
+			if gjson.GetBytes(payload, "type").String() == "response.create" {
+				currentTelemetry().sent(started, finished, err)
+			}
 		},
 		afterWrite: func(_ coderws.MessageType, payload []byte, err error) {
 			if err == nil && pendingFrameObservation != nil {
@@ -1459,7 +1482,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				)
 			},
 			OnTurnComplete: func(turn openaiwsv2.RelayTurnResult) {
-				currentTelemetry().finish(false)
 				turnNo := int(completedTurns.Add(1))
 				if hooks != nil && hooks.TurnStarted != nil && !turn.StartedAt.IsZero() {
 					hooks.TurnStarted(turnNo, turn.StartedAt)
@@ -1515,6 +1537,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			AfterClientWrite: func(msgType coderws.MessageType, payload []byte, writeErr error) {
 				isDataFrame := msgType == coderws.MessageText || msgType == coderws.MessageBinary
 				isTerminal := isDataFrame && openAIWSPassthroughIsTerminalOutput(payload)
+				if writeErr != nil || isTerminal {
+					currentTelemetry().markDelivery(writeErr == nil)
+				}
+				if isTerminal {
+					currentTelemetry().finish(false)
+				}
 				if writeErr == nil && isDataFrame {
 					outboundIdentityMu.Lock()
 					observeOpenAICodexWSCompactionDelivery(activeCompactionDelivery, payload)
@@ -1574,8 +1602,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			BeforeWriteClient: func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error {
 				if msgType == coderws.MessageText || msgType == coderws.MessageBinary {
 					s.observeOpenAICodexWSStateEvent(currentCodexStateAttempt(), payload)
-					eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
-					currentTelemetry().observe(payload, eventType)
 				}
 				if msgType != coderws.MessageText {
 					return nil

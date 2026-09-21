@@ -45,7 +45,7 @@ func parseCodexTelemetryObservationQuery(c *gin.Context) (service.CodexTelemetry
 	}
 	query.Status = c.Query("status")
 	switch query.Status {
-	case "", "queued", "sent", "failed", "dropped", "cancelled", "skipped":
+	case "", "queued", "sent", "failed", "dropped", "cancelled", "skipped", "unknown":
 	default:
 		response.Error(c, http.StatusBadRequest, "Invalid telemetry status")
 		return query, false
@@ -55,6 +55,20 @@ func parseCodexTelemetryObservationQuery(c *gin.Context) (service.CodexTelemetry
 	case "", "analytics", "metrics":
 	default:
 		response.Error(c, http.StatusBadRequest, "Invalid telemetry type")
+		return query, false
+	}
+	query.OSFamily = c.Query("os_family")
+	switch query.OSFamily {
+	case "", "windows", "macos", "linux":
+	default:
+		response.Error(c, http.StatusBadRequest, "Invalid telemetry OS family")
+		return query, false
+	}
+	query.Source = c.Query("source")
+	switch query.Source {
+	case "", "observed", "simulated", "mixed":
+	default:
+		response.Error(c, http.StatusBadRequest, "Invalid telemetry source")
 		return query, false
 	}
 	return query, true

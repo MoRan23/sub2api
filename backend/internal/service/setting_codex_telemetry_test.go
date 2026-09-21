@@ -26,10 +26,16 @@ func TestCodexTelemetrySettingsDefaultAndExplicitPreference(t *testing.T) {
 			values := map[string]string{}
 			if tc.value != "" {
 				values[SettingKeyCodexTelemetryEnabled] = tc.value
+				values[SettingKeyCodexTelemetrySimulationEnabled] = tc.value
+				values[SettingKeyCodexTelemetryObservationEnabled] = tc.value
 			}
 			svc := NewSettingService(&forwardedIPMigrationRepoStub{values: values}, &config.Config{})
 			require.Equal(t, tc.want, svc.parseSettings(values).CodexTelemetryEnabled)
 			require.Equal(t, tc.want, svc.IsCodexTelemetryEnabled(context.Background()))
+			require.Equal(t, tc.want, svc.parseSettings(values).CodexTelemetrySimulationEnabled)
+			require.Equal(t, tc.want, svc.parseSettings(values).CodexTelemetryObservationEnabled)
+			require.Equal(t, tc.want, svc.IsCodexTelemetrySimulationEnabled(context.Background()))
+			require.Equal(t, tc.want, svc.IsCodexTelemetryObservationEnabled(context.Background()))
 		})
 	}
 }

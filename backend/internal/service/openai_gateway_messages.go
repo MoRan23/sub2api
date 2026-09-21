@@ -499,7 +499,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 			}
 		}
 		upstreamReq = markOpenAIGuardianSourceHTTPRequest(upstreamReq, c, account)
-		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, c.Request.Context())
+		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, withCodexTelemetryGatewayContext(c.Request.Context(), c, account, "http"))
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		if err != nil {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)

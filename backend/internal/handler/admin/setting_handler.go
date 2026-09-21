@@ -132,6 +132,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 	}
 	passkeyConfigured, passkeyRPID, passkeyRPOrigins := h.settingService.PasskeyConfiguration()
 	telemetryEffectiveEnabled, telemetryForcedOffReason := service.CodexTelemetryEffectiveState(settings.CodexTelemetryEnabled)
+	telemetryEffectiveEnabled = telemetryEffectiveEnabled && (settings.CodexTelemetrySimulationEnabled || settings.CodexTelemetryObservationEnabled)
 
 	payload := dto.SystemSettings{
 		RegistrationEnabled:                                    settings.RegistrationEnabled,
@@ -153,6 +154,8 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		EnableOpenAIUUIDv7SessionIdentity:                      settings.EnableOpenAIUUIDv7SessionIdentity,
 		EnableOpenAIOAuthDailySessionRotation:                  settings.EnableOpenAIOAuthDailySessionRotation,
 		CodexTelemetryEnabled:                                  settings.CodexTelemetryEnabled,
+		CodexTelemetrySimulationEnabled:                        settings.CodexTelemetrySimulationEnabled,
+		CodexTelemetryObservationEnabled:                       settings.CodexTelemetryObservationEnabled,
 		CodexTurnStateModels:                                   settings.CodexTurnStateModels,
 		OpenAIRequestIntegrityObserveEnabled:                   settings.OpenAIRequestIntegrityObserveEnabled,
 		CodexTelemetryEffectiveEnabled:                         telemetryEffectiveEnabled,

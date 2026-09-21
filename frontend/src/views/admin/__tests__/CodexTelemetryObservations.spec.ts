@@ -203,4 +203,37 @@ describe('CodexTelemetryObservations', () => {
     expect(wrapper.text()).toContain('Parent thread')
     expect(wrapper.text()).not.toContain('admin.fingerprintObservation')
   })
+
+  it('shows OS, actual provenance, unknown delivery and field sources without implying simulation for observed batches', async () => {
+    list.mockResolvedValue(response({ simulation_enabled: false, observation_enabled: true, items: [{
+      ...entry, contains_simulated: false, source: 'observed', os_family: 'macos', status: 'unknown',
+      pool_id: 'pool-uuid', batch_id: 'batch-uuid', reasons: ['unknown_os'], error: 'delivery_unknown',
+      field_sources: { response_model: 'observed', sandbox_policy: 'simulated' },
+    }] }))
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.text()).toContain('仅真实观测')
+    expect(wrapper.text()).toContain('macOS')
+    expect(wrapper.text()).toContain('发送结果未知')
+    expect(wrapper.text()).toContain('不会盲目重发')
+    expect(wrapper.text()).not.toContain('包含模拟事件')
+    await expand(wrapper)
+    expect(wrapper.text()).toContain('pool-uuid')
+    expect(wrapper.text()).toContain('batch-uuid')
+    expect(wrapper.text()).toContain('response_model')
+    expect(wrapper.text()).toContain('字段来源')
+    expect(wrapper.text()).toContain('无法可靠识别系统')
+  })
+
+  it('applies system and source filters and retains them during refresh', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('select[aria-label="系统"]').setValue('linux')
+    await wrapper.get('select[aria-label="数据来源"]').setValue('mixed')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(list.mock.lastCall?.[0]).toMatchObject({ os_family: 'linux', source: 'mixed', page: 1 })
+    await (wrapper.vm as unknown as { refresh: () => Promise<void> }).refresh()
+    expect(list.mock.lastCall?.[0]).toMatchObject({ os_family: 'linux', source: 'mixed' })
+  })
 })

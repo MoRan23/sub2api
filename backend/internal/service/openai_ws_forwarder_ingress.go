@@ -1150,8 +1150,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		timezoneState, _ := RequestTimezoneStateFromContext(c)
 		recordFrameObservation := s.freezeFingerprintObservationWSFrame(c, account, timezoneState, payload, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &pinnedIdentityPlan))
 		recordOpenAICodexGuardianSourceThread(pinnedIdentityPlan, nil, payload)
-		telemetry = s.beginCodexTelemetryWS(ctx, account, lease.FingerprintObservationHeaders(), baseAcquireReq.Headers, payload)
-		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
+		telemetry = s.beginCodexTelemetryWS(withCodexTelemetryGatewayContext(ctx, c, account, fmt.Sprintf("ws:%d", turn), &pinnedIdentityPlan), account, lease.FingerprintObservationHeaders(), baseAcquireReq.Headers, payload)
+		telemetryWriteStarted := time.Now()
+		telemetryWriteErr := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout())
+		telemetry.sent(telemetryWriteStarted, time.Now(), telemetryWriteErr)
+		if err := telemetryWriteErr; err != nil {
 			telemetry.writeFailed()
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
@@ -1201,7 +1204,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 		}
 		for {
+			telemetryReadStarted := time.Now()
 			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
+			telemetry.observeRead(upstreamMessage, "", telemetryReadStarted, time.Now(), readErr)
 			if readErr != nil {
 				lease.MarkBroken()
 				return nil, wrapOpenAIWSIngressTurnError(
@@ -1215,7 +1220,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 
 			eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
-			telemetry.observe(upstreamMessage, eventType)
 			s.observeOpenAICodexWSStateEvent(codexStateAttempt, upstreamMessage)
 			responseModelObserver.ObserveOpenAI(upstreamMessage, eventType)
 			if responseID == "" && eventResponseID != "" {
@@ -1378,6 +1382,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					}
 				}
 				if err := writeClientMessage(clientMessage); err != nil {
+					telemetry.markDelivery(false)
 					if isOpenAIWSClientDisconnectError(err) {
 						clientDisconnected = true
 						closeStatus, closeReason := summarizeOpenAIWSReadCloseError(err)
@@ -1398,6 +1403,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					}
 				} else {
 					wroteDownstream = true
+					if isTerminalEvent {
+						telemetry.markDelivery(true)
+					}
 					if openAIWSPassthroughOutputCommitsTurnState(upstreamMessage) {
 						codexStateDelivered = true
 					}

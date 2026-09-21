@@ -14,7 +14,11 @@ export default {
       },
       codexTelemetry: {
         title: 'Codex client telemetry',
-        description: 'Enabled by default. Sends client telemetry upstream, including simulated behavior, independently of daily fixed roots and fingerprint capture.',
+        description: 'Enabled by default. Separate Windows, macOS, and Linux pools are driven only by business requests from that system, independently of daily roots and fingerprint capture. Accepted delivery does not indicate a model-routing or account-state change.',
+        simulation: 'Simulated client activity',
+        simulationHint: 'Enabled by default. Fills gaps according to system capabilities. Pools are shared across instances; restarting does not simulate startup again.',
+        observation: 'Observed requests',
+        observationHint: 'Enabled by default. Observed facts take precedence over simulation without duplicate counting. With simulation off, client events lacking evidence are skipped.',
         configured: 'Configured', effective: 'Effective', enabled: 'Enabled', disabled: 'Disabled', unknown: 'Not reported',
         forcedOff: 'Forced off by environment: {reason}',
       },

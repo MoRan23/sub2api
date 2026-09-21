@@ -6,7 +6,6 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +19,7 @@ const (
 	codexStatsigAPIKeyDefault     = "client-MkRuleRQBd6qakfnDYqJVR9JuXcY57Ljly3vi5JVUIO"
 	codexTelemetryQueueSize       = 256
 	codexTelemetryTimeout         = 10 * time.Second
-	codexTelemetryStateTTL        = 5 * time.Minute
+	codexTelemetryStateTTL        = 30 * time.Minute
 	codexTelemetryMaxStates       = 4096
 	codexTelemetryHistorySize     = 500
 )
@@ -30,38 +29,46 @@ const (
 // Credentials only live in pending work; they are never returned by Observations.
 type CodexTelemetryInput struct {
 	// Transport-only hints, never emitted as telemetry data or observations.
-	nativeHTTPScope    codexnative.Scope
-	AccountID          int64
-	AccountName        string
-	AccessToken        string `json:"-"`
-	ChatGPTAccountID   string
-	ProxyURL           string `json:"-"`
-	UserAgent          string
-	Originator         string
-	Version            string
-	SessionID          string
-	ThreadID           string
-	TurnID             string
-	ParentThreadID     string
-	ParentTurnID       string
-	RootTurnID         string
-	ForkedFromThreadID string
-	ThreadSource       string
-	TurnTrigger        string
-	AgentName          string
-	SubagentKind       string
-	OpenAISubagent     string
-	Sandbox            string
-	SandboxMode        string
-	ApprovalPolicy     string
-	ApprovalsReviewer  string
-	AutoReviewEnabled  *bool
-	GuardianV2Enabled  *bool
-	Model              string
-	Effort             string
-	ServiceTier        string
-	WebSocket          bool
-	StartedAt          time.Time
+	nativeHTTPScope     codexnative.Scope
+	AccountID           int64
+	OwnerAccountID      int64
+	OSFamily            string
+	InstallationID      string
+	ManagedInstallation bool
+	SamplingID          string
+	ProxyID             *int64
+	ReturnedToolCallIDs []string
+	Shell               string
+	AccountName         string
+	AccessToken         string `json:"-"`
+	ChatGPTAccountID    string
+	ProxyURL            string `json:"-"`
+	UserAgent           string
+	Originator          string
+	Version             string
+	SessionID           string
+	ThreadID            string
+	TurnID              string
+	ParentThreadID      string
+	ParentTurnID        string
+	RootTurnID          string
+	ForkedFromThreadID  string
+	ThreadSource        string
+	TurnTrigger         string
+	AgentName           string
+	SubagentKind        string
+	OpenAISubagent      string
+	Sandbox             string
+	SandboxMode         string
+	ApprovalPolicy      string
+	ApprovalsReviewer   string
+	AutoReviewEnabled   *bool
+	GuardianV2Enabled   *bool
+	Model               string
+	Effort              string
+	ServiceTier         string
+	WebSocket           bool
+	StartedAt           time.Time
 }
 
 // CodexTelemetryResult contains measurements, not the upstream response body.
@@ -78,6 +85,18 @@ type CodexTelemetryResult struct {
 	FirstTokenAt            time.Time
 	FinishedAt              time.Time
 	ExplicitClientInterrupt bool
+	FirstAgentMessageAt     time.Time
+	RequestSentAt           time.Time
+	DeliveryStatus          string
+	EndTurn                 *bool
+	PendingToolCallIDs      []string
+	EventCount              int64
+	FailedEventCount        int64
+	EventWaitDurationsMS    []float64
+	SendDurationMS          float64
+	SendSucceeded           *bool
+	EventWaitFailed         []bool
+	ServerTiming            map[string]float64
 }
 
 type codexTelemetryClient struct {
@@ -93,6 +112,12 @@ type codexTelemetryProfile struct {
 	firstThread, websocket, dynamicTool, command, fileChange            bool
 	input                                                               CodexTelemetryInput
 	attemptCount                                                        int
+	simulationEnabled, observationEnabled                               bool
+	poolID, scenarioSeed, source                                        string
+	samplingCount, clientRetryCount                                     int
+	ended                                                               time.Time
+	reasons                                                             []string
+	fieldSources                                                        map[string]string
 }
 
 type codexTelemetryTerminal struct {
@@ -102,6 +127,7 @@ type codexTelemetryTerminal struct {
 	explicitClientInterrupt          bool
 	httpStatus                       int
 	responseID                       string
+	result                           CodexTelemetryResult
 }
 
 type codexTelemetryTurn struct {
@@ -113,11 +139,12 @@ type codexTelemetryTurn struct {
 }
 
 type codexTelemetryJob struct {
-	profile codexTelemetryProfile
-	body    []byte
-	metrics bool
-	epoch   uint64
-	entry   *CodexTelemetryObservation
+	profile   codexTelemetryProfile
+	body      []byte
+	metrics   bool
+	epoch     uint64
+	entry     *CodexTelemetryObservation
+	persisted *CodexTelemetryBatch
 }
 
 // CodexTelemetrySender allows routing through the application's auxiliary
@@ -127,39 +154,59 @@ type CodexTelemetrySender func(context.Context, *http.Request, CodexTelemetryInp
 // CodexTelemetryService owns bounded queues and process-local diagnostic state.
 // Account hashing selects a serial worker so an account's batches stay ordered.
 type CodexTelemetryService struct {
-	mu           sync.Mutex
-	upstream     HTTPUpstream
-	sender       CodexTelemetrySender
-	configured   bool
-	stopped      bool
-	epoch        uint64
-	epochCtx     context.Context
-	epochCancel  context.CancelFunc
-	stop         chan struct{}
-	wg           sync.WaitGroup
-	queues       [4][]codexTelemetryJob
-	wake         [4]chan struct{}
-	queueDepth   int
-	threads      map[string]time.Time
-	turns        map[string]*codexTelemetryTurn
-	metrics      *codexTelemetryMetricStore
-	observations []*CodexTelemetryObservation
-	counters     CodexTelemetryCounters
-	nextID       uint64
-	nextAttempt  uint64
-	randIntN     func(int) int
-	analyticsURL string
-	metricsURL   string
+	mu                   sync.Mutex
+	upstream             HTTPUpstream
+	sender               CodexTelemetrySender
+	configured           bool
+	simulationEnabled    bool
+	observationEnabled   bool
+	stopped              bool
+	epoch                uint64
+	epochCtx             context.Context
+	epochCancel          context.CancelFunc
+	stop                 chan struct{}
+	wg                   sync.WaitGroup
+	queues               [4][]codexTelemetryJob
+	wake                 [4]chan struct{}
+	queueDepth           int
+	threads              map[string]time.Time
+	turns                map[string]*codexTelemetryTurn
+	metrics              *codexTelemetryMetricStore
+	observations         []*CodexTelemetryObservation
+	counters             CodexTelemetryCounters
+	nextID               uint64
+	nextAttempt          uint64
+	randIntN             func(int) int
+	analyticsURL         string
+	metricsURL           string
+	store                CodexTelemetryStore
+	accountRepo          AccountRepository
+	proxyRepo            ProxyRepository
+	transportInputs      map[CodexTelemetryPoolKey]CodexTelemetryInput
+	sharedEpoch          int64
+	mutations            chan codexTelemetryMutation
+	mutationReservations int
+	runtimeAttempts      map[uint64]*CodexTelemetryAttempt
+	notifier             CodexTelemetryNotifier
+	notifierCancel       context.CancelFunc
+	pollMu               sync.Mutex
+	lastPolicyRefresh    time.Time
+	runtimeWake          chan struct{}
 }
 
 func NewCodexTelemetryService(upstream HTTPUpstream) *CodexTelemetryService {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &CodexTelemetryService{
-		upstream: upstream, configured: true, epoch: 1, epochCtx: ctx, epochCancel: cancel,
+		upstream: upstream, configured: true, simulationEnabled: true, observationEnabled: true, epoch: 1, sharedEpoch: 1, epochCtx: ctx, epochCancel: cancel,
 		stop: make(chan struct{}), threads: make(map[string]time.Time), turns: make(map[string]*codexTelemetryTurn),
 		metrics: newCodexTelemetryMetricStore(), randIntN: rand.IntN,
 		analyticsURL: codexAnalyticsEndpointDefault, metricsURL: codexMetricsEndpointDefault,
+		store: NewMemoryCodexTelemetryStore(), transportInputs: make(map[CodexTelemetryPoolKey]CodexTelemetryInput),
+		mutations: make(chan codexTelemetryMutation, codexTelemetryQueueSize), runtimeAttempts: make(map[uint64]*CodexTelemetryAttempt),
+		runtimeWake: make(chan struct{}, 1),
 	}
+	s.wg.Add(1)
+	go s.mutationLoop()
 	for i := range s.wake {
 		s.wake[i] = make(chan struct{}, 1)
 		s.wg.Add(1)
@@ -190,7 +237,7 @@ func CodexTelemetryEffectiveState(configured bool) (bool, string) {
 
 func (s *CodexTelemetryService) enabledLocked() bool {
 	enabled, _ := CodexTelemetryEffectiveState(s.configured)
-	return enabled && !s.stopped
+	return enabled && (s.simulationEnabled || s.observationEnabled) && !s.stopped
 }
 
 // Enabled avoids copying/parsing response bodies when collection is disabled.
@@ -208,14 +255,9 @@ func (s *CodexTelemetryService) SetEnabled(enabled bool) {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.stopped {
-		return
-	}
-	s.configured = enabled
-	if !s.enabledLocked() {
-		s.resetLocked()
-	}
+	simulation, observation := s.simulationEnabled, s.observationEnabled
+	s.mu.Unlock()
+	s.SetPolicy(enabled, simulation, observation)
 }
 
 // resetLocked invalidates callbacks from all prior requests and actively cancels
@@ -234,6 +276,19 @@ func (s *CodexTelemetryService) resetLocked() {
 	s.threads = make(map[string]time.Time)
 	s.turns = make(map[string]*codexTelemetryTurn)
 	s.metrics.clear()
+	for _, attempt := range s.runtimeAttempts {
+		attempt.invalid = true
+		attempt.reservations = 0
+	}
+	s.runtimeAttempts = make(map[uint64]*CodexTelemetryAttempt)
+	s.mutationReservations = 0
+	for {
+		select {
+		case <-s.mutations:
+		default:
+			return
+		}
+	}
 }
 
 func (s *CodexTelemetryService) Stop() {
@@ -247,6 +302,7 @@ func (s *CodexTelemetryService) Stop() {
 		return
 	}
 	s.stopped = true
+	s.stopNotifierLocked()
 	s.resetLocked()
 	s.epochCancel()
 	close(s.stop)
@@ -255,16 +311,22 @@ func (s *CodexTelemetryService) Stop() {
 }
 
 type CodexTelemetryAttempt struct {
-	service     *CodexTelemetryService
-	turn        *codexTelemetryTurn
-	epoch       uint64
-	id          uint64
-	profile     codexTelemetryProfile
-	recorded    bool // protected by the service mutex
-	once        sync.Once
-	contextMu   sync.Mutex
-	contextDone <-chan struct{}
-	stopContext func() bool
+	service            *CodexTelemetryService
+	turn               *codexTelemetryTurn
+	epoch              uint64
+	id                 uint64
+	profile            codexTelemetryProfile
+	recorded           bool // protected by the service mutex
+	once               sync.Once
+	contextMu          sync.Mutex
+	contextDone        <-chan struct{}
+	contextCancelledAt time.Time
+	stopContext        func() bool
+	attemptID          string
+	poolKey            CodexTelemetryPoolKey
+	policyEpoch        int64
+	invalid            bool // protected by service.mu
+	reservations       int  // protected by service.mu
 }
 
 func (s *CodexTelemetryService) Begin(ctx context.Context, input CodexTelemetryInput) *CodexTelemetryAttempt {
@@ -279,6 +341,11 @@ func (s *CodexTelemetryService) Begin(ctx context.Context, input CodexTelemetryI
 		v := *input.GuardianV2Enabled
 		input.GuardianV2Enabled = &v
 	}
+	if input.ProxyID != nil {
+		v := *input.ProxyID
+		input.ProxyID = &v
+	}
+	input.ReturnedToolCallIDs = append([]string(nil), input.ReturnedToolCallIDs...)
 	if input.StartedAt.IsZero() {
 		input.StartedAt = time.Now()
 	}
@@ -311,54 +378,7 @@ func (s *CodexTelemetryService) Begin(ctx context.Context, input CodexTelemetryI
 		s.mu.Unlock()
 		return nil
 	}
-	s.expireLocked(time.Now())
-	key := strconv.FormatInt(input.AccountID, 10) + ":" + input.ThreadID + ":" + input.TurnID
-	if input.ThreadID == "" || input.TurnID == "" {
-		key += ":attempt:" + strconv.FormatUint(id, 10)
-	}
-	turn := s.turns[key]
-	if turn == nil {
-		if codexSimulatesClientBehavior(profile) {
-			profile.dynamicTool = s.randIntN(5) < 2
-			profile.command = profile.dynamicTool && s.randIntN(2) == 0
-			profile.fileChange = s.randIntN(5) == 0
-		}
-		if input.SessionID != "" && input.ThreadID != "" {
-			threadKey := strconv.FormatInt(input.AccountID, 10) + ":" + input.ThreadID
-			_, seen := s.threads[threadKey]
-			profile.firstThread = !seen
-			s.threads[threadKey] = input.StartedAt
-		}
-		turn = &codexTelemetryTurn{profile: profile}
-		s.turns[key] = turn
-		if input.SessionID != "" && input.ThreadID != "" {
-			s.enqueueAnalyticsLocked(profile, id, codexInitializationEvents(profile))
-		} else {
-			s.skipLocked(profile, id, "missing_outbound_session_or_thread")
-		}
-	} else {
-		// Preserve logical timing and choices, but report the final request's model.
-		prior := turn.profile
-		turn.profile = profile
-		turn.profile.started, turn.profile.firstThread = prior.started, prior.firstThread
-		turn.profile.dynamicTool, turn.profile.command, turn.profile.fileChange = prior.dynamicTool, prior.command, prior.fileChange
-		turn.profile.attemptCount = prior.attemptCount + 1
-	}
-	for _, batch := range s.metrics.touch(profile) {
-		s.enqueueMetricBatchLocked(batch)
-	}
-	turn.latest, turn.lastSeen, turn.pending = id, time.Now(), nil
-	attempt := &CodexTelemetryAttempt{service: s, turn: turn, epoch: s.epoch, id: id, profile: profile}
-	if ctx != nil {
-		attempt.contextDone = ctx.Done()
-	}
-	s.mu.Unlock()
-	if ctx != nil && ctx.Done() != nil {
-		attempt.contextMu.Lock()
-		attempt.stopContext = context.AfterFunc(ctx, func() { attempt.finishOnContextEnd() })
-		attempt.contextMu.Unlock()
-	}
-	return attempt
+	return s.beginPersistentLocked(ctx, profile, id)
 }
 
 func (a *CodexTelemetryAttempt) Finish(result CodexTelemetryResult) {
@@ -376,81 +396,22 @@ func (a *CodexTelemetryAttempt) Finish(result CodexTelemetryResult) {
 	})
 }
 
-// Retry records a physical attempt without committing a final logical turn.
-// The original request context provides a final-failure fallback if no attempt follows.
+// Retry records one physical transport attempt. It neither commits a logical
+// client turn nor invents a client retry from the gateway's routing decision.
 func (a *CodexTelemetryAttempt) Retry(result CodexTelemetryResult) {
 	if a == nil {
 		return
 	}
-	s := a.service
-	s.mu.Lock()
-	if a.epoch != s.epoch || !s.enabledLocked() {
-		s.mu.Unlock()
-		return
-	}
-	s.recordAttemptLocked(a, result)
-	if a.turn.finished || a.turn.latest != a.id {
-		s.mu.Unlock()
-		return
-	}
-	copyResult := result
-	a.turn.pending = &copyResult
-	a.turn.lastSeen = time.Now()
-	s.mu.Unlock()
-	// AfterFunc may already have run while this attempt was still active. Retry
-	// must close its own pending result when the original context is already done.
-	select {
-	case <-a.contextDone:
-		a.finishOnContextEnd()
-	default:
-	}
+	a.once.Do(func() { a.service.submitPersistentResult(a, result, true) })
 }
 
 func (a *CodexTelemetryAttempt) finishOnContextEnd() {
-	s := a.service
-	s.mu.Lock()
-	if a.epoch != s.epoch || a.turn.latest != a.id || a.turn.finished {
-		s.mu.Unlock()
-		return
-	}
-	// A cancelled request is finalized by its adapter after it has observed the
-	// upstream terminal frame. Context fallback only closes attempts that already
-	// handed control to a retry path; otherwise it would race a WS drain and turn
-	// a real terminal response into a fabricated interruption.
-	if a.turn.pending == nil {
-		s.mu.Unlock()
-		return
-	}
-	result := CodexTelemetryResult{Status: "interrupted", FinishedAt: time.Now()}
-	if a.turn.pending != nil {
-		result = *a.turn.pending
-	}
-	s.mu.Unlock()
-	a.Finish(result)
+	// Adapters own terminal classification. Context cancellation alone cannot
+	// distinguish disconnects, retries, and a client interrupt.
 }
 
 func (s *CodexTelemetryService) finishAttempt(a *CodexTelemetryAttempt, result CodexTelemetryResult) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if a.epoch != s.epoch || !s.enabledLocked() {
-		return
-	}
-	s.recordAttemptLocked(a, result)
-	if a.turn.finished || a.turn.latest != a.id {
-		return
-	}
-	a.turn.finished, a.turn.lastSeen = true, time.Now()
-	terminal := codexTelemetryTerminalFromResult(result)
-	profile := a.turn.profile
-	if result.ServiceTier != "" {
-		profile.serviceTier, profile.input.ServiceTier = result.ServiceTier, result.ServiceTier
-	}
-	if profile.sessionID != "" && profile.threadID != "" && profile.turnID != "" {
-		s.enqueueAnalyticsLocked(profile, a.id, codexTerminalEvents(profile, terminal))
-	} else {
-		s.skipLocked(profile, a.id, "missing_outbound_turn_identity")
-	}
-	s.metrics.record(profile, terminal)
+	s.submitPersistentResult(a, result, false)
 }
 
 func (s *CodexTelemetryService) recordAttemptLocked(a *CodexTelemetryAttempt, result CodexTelemetryResult) {
@@ -469,6 +430,7 @@ func codexTelemetryTerminalFromResult(result CodexTelemetryResult) codexTelemetr
 	if result.FinishedAt.IsZero() {
 		result.FinishedAt = time.Now()
 	}
+	measurement := result
 	switch result.Status {
 	case "completed", "failed", "interrupted", "cancelled":
 	default:
@@ -481,7 +443,7 @@ func codexTelemetryTerminalFromResult(result CodexTelemetryResult) codexTelemetr
 	}})
 	return codexTelemetryTerminal{status: result.Status, body: usage, firstEvent: result.FirstEventAt,
 		firstToken: result.FirstTokenAt, finished: result.FinishedAt, explicitClientInterrupt: result.ExplicitClientInterrupt,
-		httpStatus: result.HTTPStatus, responseID: result.ResponseID}
+		httpStatus: result.HTTPStatus, responseID: result.ResponseID, result: measurement}
 }
 
 func (s *CodexTelemetryService) expireLocked(now time.Time) {
@@ -512,12 +474,14 @@ func (s *CodexTelemetryService) expireLocked(now time.Time) {
 
 func (s *CodexTelemetryService) flushLoop() {
 	defer s.wg.Done()
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case now := <-ticker.C:
-			s.flushMetrics(now)
+			s.pollPersistentRuntime(now)
+		case <-s.runtimeWake:
+			s.pollPersistentRuntime(time.Now())
 		case <-s.stop:
 			return
 		}
@@ -525,13 +489,5 @@ func (s *CodexTelemetryService) flushLoop() {
 }
 
 func (s *CodexTelemetryService) flushMetrics(now time.Time) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.enabledLocked() {
-		return
-	}
-	s.expireLocked(now)
-	for _, batch := range s.metrics.flush(now) {
-		s.enqueueMetricBatchLocked(batch)
-	}
+	s.pollPersistentRuntime(now)
 }

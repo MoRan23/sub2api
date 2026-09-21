@@ -1,7 +1,9 @@
 import { apiClient } from '../client'
 
 export type CodexTelemetryType = 'analytics' | 'metrics'
-export type CodexTelemetryStatus = 'queued' | 'sent' | 'failed' | 'dropped' | 'cancelled' | 'skipped'
+export type CodexTelemetryStatus = 'queued' | 'sent' | 'failed' | 'dropped' | 'cancelled' | 'skipped' | 'unknown'
+export type CodexTelemetryOS = 'windows' | 'macos' | 'linux'
+export type CodexTelemetrySource = 'observed' | 'simulated' | 'mixed'
 
 export interface CodexTelemetryEntry {
   id: number
@@ -14,6 +16,12 @@ export interface CodexTelemetryEntry {
   event_names: string[]
   is_worktree?: boolean | null
   contains_simulated: boolean
+  os_family?: CodexTelemetryOS | ''
+  pool_id?: string
+  batch_id?: string
+  source?: CodexTelemetrySource | ''
+  reasons?: string[]
+  field_sources?: Record<string, CodexTelemetrySource>
   attempt_id: number
   attempt_count: number
   turn_count: number
@@ -33,10 +41,12 @@ export interface CodexTelemetryEntry {
 
 export interface CodexTelemetryObservationsResponse {
   configured_enabled: boolean
+  simulation_enabled?: boolean
+  observation_enabled?: boolean
   effective_enabled: boolean
   forced_off_reason: string
   queue_depth: number
-  counters: Record<'attempts' | CodexTelemetryStatus, number>
+  counters: Record<'attempts' | Exclude<CodexTelemetryStatus, 'unknown'>, number> & { unknown?: number }
   items: CodexTelemetryEntry[]
   total: number
   page: number
@@ -47,6 +57,8 @@ export interface CodexTelemetryListParams {
   account_id?: number
   status?: CodexTelemetryStatus
   type?: CodexTelemetryType
+  os_family?: CodexTelemetryOS
+  source?: CodexTelemetrySource
   page?: number
   page_size?: number
 }
@@ -67,6 +79,10 @@ async function list(
         event_names: Array.isArray(entry.event_names)
           ? entry.event_names.filter((name): name is string => typeof name === 'string')
           : [],
+        reasons: Array.isArray(entry.reasons) ? entry.reasons.filter((reason): reason is string => typeof reason === 'string') : [],
+        field_sources: entry.field_sources && typeof entry.field_sources === 'object' && !Array.isArray(entry.field_sources)
+          ? Object.fromEntries(Object.entries(entry.field_sources).filter(([, source]) => ['observed', 'simulated', 'mixed'].includes(source)))
+          : {},
       }))
       : [],
   }

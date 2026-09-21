@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/tidwall/gjson"
 )
 
 type codexTelemetryHTTPContextKey struct{}
@@ -59,11 +57,11 @@ func observeCodexTelemetryHTTPResponse(attempt codexTelemetryHTTPAttempt, respon
 		status = response.StatusCode
 	}
 	if sendErr != nil || response == nil || status < 200 || status >= 300 {
-		attempt.Retry(CodexTelemetryResult{Status: "failed", HTTPStatus: status, FinishedAt: time.Now()})
+		attempt.Retry(CodexTelemetryResult{Status: "failed", DeliveryStatus: "incomplete", HTTPStatus: status, FinishedAt: time.Now()})
 		return
 	}
 	if response.Body == nil {
-		attempt.Retry(CodexTelemetryResult{Status: "interrupted", HTTPStatus: status, FinishedAt: time.Now()})
+		attempt.Retry(CodexTelemetryResult{Status: "incomplete", DeliveryStatus: "incomplete", HTTPStatus: status, FinishedAt: time.Now()})
 		return
 	}
 	collector := &codexTelemetryHTTPCollector{attempt: attempt, status: status}
@@ -139,71 +137,24 @@ func observeCodexTelemetryHTTPBody(response *http.Response, body []byte) {
 }
 
 type codexTelemetryHTTPCollector struct {
-	mu                     sync.Mutex
-	attempt                codexTelemetryHTTPAttempt
-	status                 int
-	done                   bool
-	parsing                bool
-	firstEvent, firstToken time.Time
-	latest                 CodexTelemetryResult
-	usage                  OpenAIUsage
-	reasoningTokens        int64
+	mu      sync.Mutex
+	attempt codexTelemetryHTTPAttempt
+	status  int
+	done    bool
+	parsing bool
+	stream  codexTelemetryStream
 }
 
 func (c *codexTelemetryHTTPCollector) observe(payload []byte, eventType string) {
-	if !gjson.ValidBytes(payload) {
-		return
-	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.done {
 		return
 	}
-	now := time.Now()
-	if c.firstEvent.IsZero() {
-		c.firstEvent = now
-	}
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "" {
-		eventType = strings.TrimSpace(gjson.GetBytes(payload, "type").String())
-	}
-	if c.firstToken.IsZero() && openAIStreamDataStartsVisibleOutput(string(payload), eventType) {
-		c.firstToken = now
-	}
-	status := ""
-	switch eventType {
-	case "response.completed":
-		status = "completed"
-	case "response.failed", "response.incomplete", "error":
-		status = "failed"
-	case "response.cancelled", "response.canceled":
-		status = "cancelled"
-	case "response.done", "":
-		status = firstNonEmpty(gjson.GetBytes(payload, "response.status").String(), gjson.GetBytes(payload, "status").String())
-	}
-	result := codexTelemetryResultFromResponse(payload, status, c.status, c.firstEvent, c.firstToken)
-	parseOpenAIResponseUsageInto(payload, eventType, &c.usage)
-	if result.ReasoningOutputTokens > 0 {
-		c.reasoningTokens = result.ReasoningOutputTokens
-	}
-	result.InputTokens, result.CachedInputTokens, result.OutputTokens = int64(c.usage.InputTokens), int64(c.usage.CacheReadInputTokens), int64(c.usage.OutputTokens)
-	result.ReasoningOutputTokens = c.reasoningTokens
-	if result.ResponseID == "" {
-		result.ResponseID = c.latest.ResponseID
-	}
-	// Progress frames may report a response ID, but never establish a terminal
-	// status. A bare error may be followed by a successful authoritative terminal.
-	if status == "" {
-		c.latest.ResponseID = result.ResponseID
-		c.latest.InputTokens, c.latest.CachedInputTokens, c.latest.OutputTokens = result.InputTokens, result.CachedInputTokens, result.OutputTokens
-		c.latest.ReasoningOutputTokens = result.ReasoningOutputTokens
-		return
-	}
-	result.FinishedAt = now
-	c.latest = result
-	if eventType == "error" {
-		return
-	}
+	// These callbacks run after the existing parser. They cannot measure the
+	// precise wait for an SSE event without including buffering/downstream work;
+	// leave that optional metric absent instead of reporting a false duration.
+	c.stream.observe(payload, eventType, time.Now(), -1)
 }
 
 func (c *codexTelemetryHTTPCollector) complete(parseErr error) {
@@ -213,20 +164,24 @@ func (c *codexTelemetryHTTPCollector) complete(parseErr error) {
 		return
 	}
 	c.done = true
-	result := c.latest
-	result.HTTPStatus, result.FirstEventAt, result.FirstTokenAt = c.status, c.firstEvent, c.firstToken
+	result := c.stream.result
+	result.HTTPStatus = c.status
 	if result.FinishedAt.IsZero() {
 		result.FinishedAt = time.Now()
+	}
+	result.DeliveryStatus = "incomplete"
+	if parseErr == nil && result.Status != "" {
+		result.DeliveryStatus = "delivered"
+	}
+	if parseErr != nil {
+		result.DeliveryStatus = "rejected"
 	}
 	if parseErr == nil && result.Status == "completed" {
 		c.attempt.Finish(result)
 		return
 	}
-	if parseErr != nil && result.Status == "completed" {
-		result.Status = "failed"
-	}
 	if result.Status == "" {
-		result.Status = "interrupted"
+		result.Status = "incomplete"
 	}
 	c.attempt.Retry(result)
 }
@@ -237,15 +192,15 @@ func (c *codexTelemetryHTTPCollector) close() {
 	if c.done {
 		return
 	}
-	if c.parsing || c.latest.Status != "" {
+	if c.parsing || c.stream.result.Status != "" {
 		// A parser can close the body before returning its acceptance decision.
 		return
 	}
 	c.done = true
-	result := c.latest
+	result := c.stream.result
 	if result.Status == "" {
-		result.Status = "interrupted"
+		result.Status = "incomplete"
 	}
-	result.HTTPStatus, result.FirstEventAt, result.FirstTokenAt, result.FinishedAt = c.status, c.firstEvent, c.firstToken, time.Now()
+	result.HTTPStatus, result.DeliveryStatus, result.FinishedAt = c.status, "incomplete", time.Now()
 	c.attempt.Retry(result)
 }

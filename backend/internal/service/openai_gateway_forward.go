@@ -1051,7 +1051,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// Send request
 		upstreamStart := time.Now()
 		upstreamReq = markOpenAIGuardianSourceHTTPRequest(upstreamReq, c, account)
-		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, c.Request.Context())
+		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, withCodexTelemetryGatewayContext(c.Request.Context(), c, account, "http"))
 		resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		// A plugin may report an uncertain physical send at the same instant the

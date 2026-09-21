@@ -148,33 +148,43 @@ func TestCodexTelemetryNativeHTTPPreservesExporterUAAndFrozenSource(t *testing.T
 	svc := &CodexTelemetryService{analyticsURL: "https://chatgpt.com/analytics", metricsURL: "https://ab.chatgpt.com/metrics"}
 	sourceUA := "codex-tui/0.154.0 (Mac OS 26.4.1; arm64)"
 	scope := codexnative.Scope{AccountID: 42, SourceUserAgent: sourceUA, AccountUserAgent: "account (Windows)", CanonicalUserAgent: "canonical (Linux)", Purpose: "telemetry"}
-	profile := codexTelemetryProfile{client: codexTelemetryClient{localID: 42, userAgent: sourceUA, nativeHTTPScope: scope, accessToken: "test-token"}}
-	for _, metrics := range []bool{false, true} {
-		code, reason, cancelled := svc.send(context.Background(), func(ctx context.Context, req *http.Request, _ CodexTelemetryInput, isMetrics bool) (*http.Response, error) {
-			gotScope, ok := codexnative.ScopeFromContext(req.Context())
-			require.True(t, ok)
-			require.Equal(t, scope, gotScope)
-			require.Equal(t, codexnative.MacOS, codexnative.Resolve(req.UserAgent(), gotScope).Platform)
-			require.True(t, HTTPUpstreamRedirectsDisabled(ctx))
-			if isMetrics {
-				require.Equal(t, "OTel-OTLP-Exporter-Rust/0.31.0", req.UserAgent())
-				require.Empty(t, req.Header.Get("Authorization"))
-			} else {
-				require.Equal(t, sourceUA, req.UserAgent())
-				require.Equal(t, "Bearer test-token", req.Header.Get("Authorization"))
-			}
-			body, err := io.ReadAll(req.Body)
-			require.NoError(t, err)
-			require.Equal(t, `{"events":[]}`, string(body))
-			return &http.Response{StatusCode: 204, Body: http.NoBody}, nil
-		}, codexTelemetryJob{profile: profile, body: []byte(`{"events":[]}`), metrics: metrics})
-		require.Equal(t, 204, code)
-		require.Empty(t, reason)
-		require.False(t, cancelled)
+	firstProxyID, secondProxyID := int64(7), int64(8)
+	profile := codexTelemetryProfile{
+		client: codexTelemetryClient{localID: 42, userAgent: sourceUA, nativeHTTPScope: scope, accessToken: "test-token", proxyURL: "http://first-proxy.test:8080"},
+		input:  CodexTelemetryInput{OwnerAccountID: 42, OSFamily: "macos", InstallationID: "local-installation", ProxyID: &firstProxyID, ProxyURL: "http://first-proxy.test:8080"},
 	}
 	other := profile
 	other.client.nativeHTTPScope.AccountUserAgent = "other (Linux)"
-	require.NotEqual(t, codexMetricClientKey(profile), codexMetricClientKey(other))
+	other.client.proxyURL, other.input.ProxyURL, other.input.ProxyID = "http://second-proxy.test:8080", "http://second-proxy.test:8080", &secondProxyID
+	require.Equal(t, codexMetricClientKey(profile), codexMetricClientKey(other), "a routing or account UA change must not restart the installation pool")
+	require.NotEqual(t, codexMetricStateKey(profile), codexMetricStateKey(other), "pending samples retain their original route partition")
+	for _, frozen := range []codexTelemetryProfile{profile, other} {
+		for _, metrics := range []bool{false, true} {
+			code, reason, cancelled := svc.send(context.Background(), func(ctx context.Context, req *http.Request, input CodexTelemetryInput, isMetrics bool) (*http.Response, error) {
+				gotScope, ok := codexnative.ScopeFromContext(req.Context())
+				require.True(t, ok)
+				require.Equal(t, frozen.client.nativeHTTPScope, gotScope)
+				require.Equal(t, frozen.input.ProxyID, input.ProxyID)
+				require.Equal(t, frozen.client.proxyURL, input.ProxyURL)
+				require.Equal(t, codexnative.MacOS, codexnative.Resolve(req.UserAgent(), gotScope).Platform)
+				require.True(t, HTTPUpstreamRedirectsDisabled(ctx))
+				if isMetrics {
+					require.Equal(t, "OTel-OTLP-Exporter-Rust/0.31.0", req.UserAgent())
+					require.Empty(t, req.Header.Get("Authorization"))
+				} else {
+					require.Equal(t, sourceUA, req.UserAgent())
+					require.Equal(t, "Bearer test-token", req.Header.Get("Authorization"))
+				}
+				body, err := io.ReadAll(req.Body)
+				require.NoError(t, err)
+				require.Equal(t, `{"events":[]}`, string(body))
+				return &http.Response{StatusCode: 204, Body: http.NoBody}, nil
+			}, codexTelemetryJob{profile: frozen, body: []byte(`{"events":[]}`), metrics: metrics})
+			require.Equal(t, 204, code)
+			require.Empty(t, reason)
+			require.False(t, cancelled)
+		}
+	}
 }
 
 func TestCodexTelemetryNativeHTTPFreezesAccountAtInference(t *testing.T) {

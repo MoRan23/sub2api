@@ -6003,6 +6003,22 @@
                 data-testid="codex-telemetry-toggle"
               />
             </div>
+            <div class="grid gap-4 border-t border-gray-100 pt-4 dark:border-dark-700 md:grid-cols-2">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <h3 id="codex-telemetry-simulation-label" class="text-sm font-medium text-gray-900 dark:text-white">{{ t("admin.settings.codexTelemetry.simulation") }}</h3>
+                  <p id="codex-telemetry-simulation-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t("admin.settings.codexTelemetry.simulationHint") }}</p>
+                </div>
+                <Toggle v-model="form.codex_telemetry_simulation_enabled" :disabled="!form.codex_telemetry_enabled" aria-labelledby="codex-telemetry-simulation-label" aria-describedby="codex-telemetry-simulation-hint" data-testid="codex-telemetry-simulation-toggle" />
+              </div>
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <h3 id="codex-telemetry-observation-label" class="text-sm font-medium text-gray-900 dark:text-white">{{ t("admin.settings.codexTelemetry.observation") }}</h3>
+                  <p id="codex-telemetry-observation-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t("admin.settings.codexTelemetry.observationHint") }}</p>
+                </div>
+                <Toggle v-model="form.codex_telemetry_observation_enabled" :disabled="!form.codex_telemetry_enabled" aria-labelledby="codex-telemetry-observation-label" aria-describedby="codex-telemetry-observation-hint" data-testid="codex-telemetry-observation-toggle" />
+              </div>
+            </div>
             <dl class="flex flex-wrap gap-x-6 gap-y-2 text-xs">
               <div class="flex items-center gap-2" data-testid="codex-telemetry-configured">
                 <dt class="text-gray-500 dark:text-gray-400">{{ t("admin.settings.codexTelemetry.configured") }}</dt>
@@ -9868,6 +9884,8 @@ type SettingsForm = Omit<
   channel_monitor_show_quota: boolean;
   channel_monitor_hide_user_ranking: boolean;
   codex_telemetry_enabled: boolean;
+  codex_telemetry_simulation_enabled: boolean;
+  codex_telemetry_observation_enabled: boolean;
   openai_request_integrity_observe_enabled: boolean;
   smtp_password: string;
   turnstile_secret_key: string;
@@ -10176,6 +10194,8 @@ const form = reactive<SettingsForm>({
   enable_openai_uuidv7_session_identity: true,
   enable_openai_oauth_daily_session_rotation: false,
   codex_telemetry_enabled: true,
+  codex_telemetry_simulation_enabled: true,
+  codex_telemetry_observation_enabled: true,
   openai_request_integrity_observe_enabled: true,
   enable_openai_codex_pat_context_management: false,
   // codex_cli_only 加固
@@ -11215,6 +11235,12 @@ function syncCodexTelemetrySettings(settings: Partial<SystemSettings>) {
   if (typeof settings.codex_telemetry_enabled === "boolean") {
     form.codex_telemetry_enabled = settings.codex_telemetry_enabled;
   }
+  if (typeof settings.codex_telemetry_simulation_enabled === "boolean") {
+    form.codex_telemetry_simulation_enabled = settings.codex_telemetry_simulation_enabled;
+  }
+  if (typeof settings.codex_telemetry_observation_enabled === "boolean") {
+    form.codex_telemetry_observation_enabled = settings.codex_telemetry_observation_enabled;
+  }
   if (typeof settings.codex_telemetry_effective_enabled === "boolean") {
     codexTelemetryEffectiveEnabled.value = settings.codex_telemetry_effective_enabled;
   }
@@ -11225,6 +11251,8 @@ function syncCodexTelemetrySettings(settings: Partial<SystemSettings>) {
 
 function isCodexTelemetrySetting(key: string): boolean {
   return key === "codex_telemetry_enabled" ||
+    key === "codex_telemetry_simulation_enabled" ||
+    key === "codex_telemetry_observation_enabled" ||
     key === "codex_telemetry_effective_enabled" ||
     key === "codex_telemetry_forced_off_reason";
 }
@@ -11675,6 +11703,8 @@ async function saveSettings() {
       enable_openai_oauth_daily_session_rotation:
         form.enable_openai_oauth_daily_session_rotation,
       codex_telemetry_enabled: form.codex_telemetry_enabled,
+      codex_telemetry_simulation_enabled: form.codex_telemetry_simulation_enabled,
+      codex_telemetry_observation_enabled: form.codex_telemetry_observation_enabled,
       openai_request_integrity_observe_enabled: form.openai_request_integrity_observe_enabled,
       enable_openai_codex_client_identity_normalization:
         form.enable_openai_codex_client_identity_normalization,

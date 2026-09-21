@@ -350,7 +350,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 
 		upstreamStart := time.Now()
 		upstreamReq = markOpenAIGuardianSourceHTTPRequest(upstreamReq, c, account)
-		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, c.Request.Context())
+		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, withCodexTelemetryGatewayContext(c.Request.Context(), c, account, "http"))
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {

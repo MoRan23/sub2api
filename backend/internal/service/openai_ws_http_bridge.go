@@ -641,7 +641,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			return nil, buildErr
 		}
 		upstreamReq = markOpenAIGuardianSourceHTTPRequest(upstreamReq, c, account)
-		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, telemetryTurnCtx)
+		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, withCodexTelemetryGatewayContext(telemetryTurnCtx, c, account, fmt.Sprintf("ws:%d", turn), identityPlan))
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		if err != nil {
 			if turn == 1 {

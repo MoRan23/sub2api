@@ -72,3 +72,26 @@ func TestDiffSettingsIncludesCodexTelemetrySwitch(t *testing.T) {
 	changed := diffSettings(&service.SystemSettings{CodexTelemetryEnabled: true}, &service.SystemSettings{}, nil, nil, UpdateSettingsRequest{})
 	require.Contains(t, changed, service.SettingKeyCodexTelemetryEnabled)
 }
+
+func TestSettingsCodexTelemetryModesAreIndependentAndPreserveOmission(t *testing.T) {
+	t.Setenv("CODEX_TELEMETRY_ENABLED", "")
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{})
+	telemetry := service.NewCodexTelemetryService(nil)
+	t.Cleanup(telemetry.Stop)
+	h.settingService.SetCodexTelemetryService(telemetry)
+	for _, modes := range [][2]bool{{true, true}, {false, true}, {true, false}, {false, false}} {
+		rec := doUpdateSettings(t, h, map[string]any{"codex_telemetry_simulation_enabled": modes[0], "codex_telemetry_observation_enabled": modes[1]}, nil)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		state := telemetry.Observations(service.CodexTelemetryObservationQuery{})
+		require.True(t, state.ConfiguredEnabled)
+		require.Equal(t, modes[0], state.SimulationEnabled)
+		require.Equal(t, modes[1], state.ObservationEnabled)
+		require.Equal(t, modes[0] || modes[1], state.EffectiveEnabled)
+	}
+	rec := doUpdateSettings(t, h, map[string]any{"codex_telemetry_simulation_enabled": nil, "site_name": "keep-modes"}, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotContains(t, repo.lastUpdates, service.SettingKeyCodexTelemetrySimulationEnabled)
+	require.NotContains(t, repo.lastUpdates, service.SettingKeyCodexTelemetryObservationEnabled)
+	require.False(t, telemetry.Observations(service.CodexTelemetryObservationQuery{}).SimulationEnabled)
+	require.False(t, telemetry.Observations(service.CodexTelemetryObservationQuery{}).ObservationEnabled)
+}

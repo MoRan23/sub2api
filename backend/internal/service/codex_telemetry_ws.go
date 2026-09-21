@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -11,11 +10,14 @@ import (
 // codexTelemetryWSTurn retains only bounded response metadata, never a request
 // or response frame. The passthrough reader and writer may call it concurrently.
 type codexTelemetryWSTurn struct {
-	mu       sync.Mutex
-	attempt  *CodexTelemetryAttempt
-	result   CodexTelemetryResult
-	terminal bool
-	done     bool
+	mu               sync.Mutex
+	attempt          *CodexTelemetryAttempt
+	result           CodexTelemetryResult
+	terminal         bool
+	done             bool
+	stream           codexTelemetryStream
+	cancelRequested  bool
+	lastReadFinished time.Time
 }
 
 func (s *OpenAIGatewayService) beginCodexTelemetryWS(ctx context.Context, account *Account, physicalHeaders, authHeaders http.Header, body []byte) *codexTelemetryWSTurn {
@@ -42,7 +44,14 @@ func (s *OpenAIGatewayService) beginCodexTelemetryWS(ctx context.Context, accoun
 }
 
 func (t *codexTelemetryWSTurn) observe(message []byte, eventType string) {
-	if t == nil || eventType == "" {
+	t.observeRead(message, eventType, time.Time{}, time.Now(), nil)
+}
+
+// observeRead receives the physical read boundaries, excluding time spent
+// rewriting or delivering a previous frame. Protocol Ping/Pong is consumed by
+// the WS implementation and never passed here as a model event.
+func (t *codexTelemetryWSTurn) observeRead(message []byte, eventType string, started, finished time.Time, readErr error) {
+	if t == nil {
 		return
 	}
 	t.mu.Lock()
@@ -50,39 +59,78 @@ func (t *codexTelemetryWSTurn) observe(message []byte, eventType string) {
 	if t.done {
 		return
 	}
-	now := time.Now()
-	if t.result.FirstEventAt.IsZero() {
-		t.result.FirstEventAt = now
+	wait := time.Duration(-1)
+	if !started.IsZero() && !finished.Before(started) {
+		wait = finished.Sub(started)
+		t.lastReadFinished = finished
 	}
-	if t.result.FirstTokenAt.IsZero() && isOpenAIWSTokenEvent(eventType) {
-		t.result.FirstTokenAt = now
+	if readErr != nil {
+		t.stream.readFailed(finished, wait)
+	} else {
+		t.stream.observe(message, eventType, finished, wait)
 	}
-	_, responseID, _ := parseOpenAIWSEventEnvelope(message)
-	if responseID != "" {
-		t.result.ResponseID = responseID
+	t.stream.result.HTTPStatus = http.StatusSwitchingProtocols
+	if t.cancelRequested && t.stream.result.Status == "cancelled" {
+		t.stream.result.ExplicitClientInterrupt = true
 	}
-	if !isOpenAIWSTerminalEvent(eventType) && eventType != "error" {
+	t.result = t.stream.result
+	t.terminal = t.result.Status != ""
+}
+
+// A gateway compatibility repair can extract multiple JSON documents from a
+// single WS frame. They still count as only one physical event/read wait.
+func (t *codexTelemetryWSTurn) observeBuffered(message []byte) {
+	if t == nil {
 		return
 	}
-	status := "failed"
-	switch eventType {
-	case "response.completed", "response.done":
-		status = "completed"
-	case "response.cancelled", "response.canceled":
-		status = "cancelled"
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.done {
+		return
 	}
-	statusCode := http.StatusOK
-	if eventType == "error" {
-		code, typ, _ := parseOpenAIWSErrorEventFields(message)
-		statusCode = openAIWSErrorHTTPStatusFromRaw(code, typ)
+	count := t.stream.result.EventCount
+	failed := t.stream.result.FailedEventCount
+	at := t.lastReadFinished
+	if at.IsZero() {
+		at = time.Now()
 	}
-	result := codexTelemetryResultFromResponse(message, status, statusCode, t.result.FirstEventAt, t.result.FirstTokenAt)
-	result.ExplicitClientInterrupt = t.result.ExplicitClientInterrupt
-	if result.ResponseID == "" {
-		result.ResponseID = t.result.ResponseID
+	t.stream.observe(message, "", at, -1)
+	t.stream.result.EventCount = count
+	if t.stream.result.FailedEventCount > count {
+		t.stream.result.FailedEventCount = count
 	}
-	t.result = result
-	t.terminal = true
+	if t.stream.result.FailedEventCount > failed && len(t.stream.result.EventWaitFailed) > 0 {
+		t.stream.result.EventWaitFailed[len(t.stream.result.EventWaitFailed)-1] = true
+	}
+	if t.cancelRequested && t.stream.result.Status == "cancelled" {
+		t.stream.result.ExplicitClientInterrupt = true
+	}
+	t.result = t.stream.result
+	t.terminal = t.result.Status != ""
+}
+
+func (t *codexTelemetryWSTurn) sent(started, finished time.Time, sendErr error) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.done {
+		return
+	}
+	t.stream.result.RequestSentAt = started
+	succeeded := sendErr == nil
+	t.stream.result.SendSucceeded = &succeeded
+	if !started.IsZero() && !finished.Before(started) {
+		t.stream.result.SendDurationMS = float64(finished.Sub(started)) / float64(time.Millisecond)
+	}
+	if sendErr != nil {
+		if t.stream.result.Status == "" {
+			t.stream.result.Status, t.stream.result.FinishedAt = "failed", finished
+		}
+		t.stream.result.DeliveryStatus = "incomplete"
+	}
+	t.result = t.stream.result
 }
 
 func (t *codexTelemetryWSTurn) requestCancel() {
@@ -92,7 +140,7 @@ func (t *codexTelemetryWSTurn) requestCancel() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if !t.done {
-		t.result.ExplicitClientInterrupt = true
+		t.cancelRequested = true
 	}
 }
 
@@ -103,8 +151,25 @@ func (t *codexTelemetryWSTurn) writeFailed() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if !t.done && !t.terminal {
-		t.result.Status = "failed"
+		t.stream.result.Status, t.stream.result.DeliveryStatus = "failed", "incomplete"
+		t.result = t.stream.result
 	}
+}
+
+func (t *codexTelemetryWSTurn) markDelivery(delivered bool) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.done || t.result.DeliveryStatus == "rejected" {
+		return
+	}
+	status := "rejected"
+	if delivered {
+		status = "delivered"
+	}
+	t.stream.result.DeliveryStatus, t.result.DeliveryStatus = status, status
 }
 
 // finish is invoked at the retry decision, not upon seeing an error frame:
@@ -120,14 +185,21 @@ func (t *codexTelemetryWSTurn) finish(retry bool) {
 	}
 	t.done = true
 	result := t.result
-	if strings.TrimSpace(result.Status) == "" {
+	if result.Status == "" {
 		// A broken socket or a cancelled server context is not evidence of an
 		// explicit user interruption, even when no first token was received.
-		result.Status = "interrupted"
+		result.Status = "incomplete"
+	}
+	if result.DeliveryStatus == "" {
+		result.DeliveryStatus = "incomplete"
+		if retry {
+			result.DeliveryStatus = "rejected"
+		}
 	}
 	if result.FinishedAt.IsZero() {
 		result.FinishedAt = time.Now()
 	}
+	t.result = result
 	t.mu.Unlock()
 	if retry {
 		t.attempt.Retry(result)

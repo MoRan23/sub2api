@@ -99,9 +99,9 @@ func TestCodexTelemetryHTTPResponseNonCompletionOutcomes(t *testing.T) {
 	}{
 		{"failure", `data: {"type":"response.failed","response":{"id":"resp_fail","status":"failed"}}` + "\n\n", "failed", false},
 		{"server cancellation", `data: {"type":"response.done","response":{"status":"cancelled"}}` + "\n\n", "cancelled", false},
-		{"incomplete", `data: {"type":"response.incomplete","response":{"status":"incomplete"}}` + "\n\n", "failed", false},
-		{"missing terminal", `data: {"type":"response.created","response":{"id":"resp_partial"}}` + "\n\n", "interrupted", false},
-		{"done alone", "data: [DONE]\n\n", "interrupted", false},
+		{"incomplete", `data: {"type":"response.incomplete","response":{"status":"incomplete"}}` + "\n\n", "incomplete", false},
+		{"missing terminal", `data: {"type":"response.created","response":{"id":"resp_partial"}}` + "\n\n", "incomplete", false},
+		{"done alone", "data: [DONE]\n\n", "incomplete", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			recorder := &codexTelemetryHTTPRecorder{}
@@ -156,11 +156,11 @@ func TestCodexTelemetryHTTPResponseEarlyCloseIsNotUserCancellation(t *testing.T)
 	require.NoError(t, response.Body.Close())
 	require.NoError(t, response.Body.Close())
 	require.Len(t, recorder.retried, 1)
-	require.Equal(t, "interrupted", recorder.retried[0].Status)
+	require.Equal(t, "incomplete", recorder.retried[0].Status)
 	require.False(t, recorder.retried[0].ExplicitClientInterrupt)
 }
 
-func TestCodexTelemetryHTTPUsesProgressiveUsageAndIgnoresBareErrorBeforeSuccess(t *testing.T) {
+func TestCodexTelemetryHTTPUsesProgressiveUsageAndLatchesBareErrorBeforeSuccess(t *testing.T) {
 	recorder := &codexTelemetryHTTPRecorder{}
 	response := &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(""))}
 	observeCodexTelemetryHTTPResponse(recorder, response, nil)
@@ -171,9 +171,10 @@ func TestCodexTelemetryHTTPUsesProgressiveUsageAndIgnoresBareErrorBeforeSuccess(
 	observeCodexTelemetryHTTPPayload(response, []byte(`{"type":"response.completed","response":{"status":"completed","service_tier":"flex","usage":{"input_tokens":0,"output_tokens":0}}}`), "response.completed")
 	require.NoError(t, response.Body.Close())
 	completeCodexTelemetryHTTPResponse(response, nil)
-	require.Len(t, recorder.finished, 1)
-	require.Empty(t, recorder.retried)
-	result := recorder.finished[0]
+	require.Empty(t, recorder.finished)
+	require.Len(t, recorder.retried, 1)
+	result := recorder.retried[0]
+	require.Equal(t, "failed", result.Status)
 	require.Equal(t, "resp_progress", result.ResponseID)
 	require.EqualValues(t, 30, result.InputTokens)
 	require.EqualValues(t, 5, result.OutputTokens)
@@ -199,7 +200,8 @@ func TestCodexTelemetryHTTPCompletedWaitsForGatewayAcceptance(t *testing.T) {
 		if rejected {
 			require.Empty(t, recorder.finished)
 			require.Len(t, recorder.retried, 1)
-			require.Equal(t, "failed", recorder.retried[0].Status)
+			require.Equal(t, "completed", recorder.retried[0].Status)
+			require.Equal(t, "rejected", recorder.retried[0].DeliveryStatus)
 		} else {
 			require.Len(t, recorder.finished, 1)
 			require.Empty(t, recorder.retried)
@@ -323,7 +325,7 @@ func TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff(t *
 					collector, ok := upstream.resp.Request.Context().Value(codexTelemetryHTTPResponseKey{}).(*codexTelemetryHTTPCollector)
 					require.True(t, ok)
 					collector.mu.Lock()
-					result := collector.latest
+					result := collector.stream.result
 					collector.mu.Unlock()
 					require.Equal(t, "completed", result.Status)
 					require.Equal(t, "resp_wire_telemetry", result.ResponseID)

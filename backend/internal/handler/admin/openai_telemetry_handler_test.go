@@ -17,7 +17,7 @@ func TestListTelemetryObservationsValidatesFilters(t *testing.T) {
 	for _, query := range []string{
 		"page=0", "page=-1", "page=1000001", "page=abc", "page_size=0", "page_size=101",
 		"account_id=-1", "account_id=0", "account_id=9223372036854775808",
-		"status=success", "type=secret",
+		"status=success", "type=secret", "os_family=android", "source=guessed",
 	} {
 		t.Run(query, func(t *testing.T) {
 			rec := httptest.NewRecorder()
@@ -27,6 +27,17 @@ func TestListTelemetryObservationsValidatesFilters(t *testing.T) {
 			require.Equal(t, http.StatusBadRequest, rec.Code)
 		})
 	}
+}
+
+func TestTelemetryObservationQueryAcceptsSystemSourceAndUnknownDelivery(t *testing.T) {
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/?os_family=macos&source=mixed&status=unknown", nil)
+	query, ok := parseCodexTelemetryObservationQuery(c)
+	require.True(t, ok)
+	require.Equal(t, "macos", query.OSFamily)
+	require.Equal(t, "mixed", query.Source)
+	require.Equal(t, "unknown", query.Status)
 }
 
 func TestListTelemetryObservationsRemainsIndependentOfFingerprintCollection(t *testing.T) {
