@@ -219,16 +219,57 @@ func (s *AccountTestService) applyOAuthAccountTestRootSession(ctx context.Contex
 	if s == nil || account == nil || plan == nil || !account.IsOpenAIOAuth() {
 		return nil
 	}
+	owner := account
+	if account.IsShadow() && s.accountRepo != nil {
+		var err error
+		owner, err = resolveCredentialAccount(ctx, s.accountRepo, account)
+		if err != nil {
+			return err
+		}
+	}
+	// Narrow test repositories keep their legacy root fallback. Production
+	// provisions profiles durably, while a loaded profile can be read directly.
+	_, profilesAvailable := s.accountRepo.(OpenAIOAuthOSProfilesEnsurer)
+	profilesAvailable = (profilesAvailable || OpenAIOAuthOSProfilesComplete(owner.OpenAIOAuthOSProfiles)) && IsOpenAIOAuthOSProfileOwner(owner)
+	var defaultProfile, selectedProfile OpenAIOAuthOSProfile
+	if profilesAvailable {
+		var err error
+		defaultProfile, err = ResolveOpenAIOAuthOSProfile(ctx, s.accountRepo, owner, "")
+		if err != nil {
+			return fmt.Errorf("resolve OAuth synchronous test profile: %w", err)
+		}
+		selectedProfile = defaultProfile
+		if plan.OSFamily != "" && plan.OSFamily != defaultProfile.OSFamily {
+			selectedProfile, err = ResolveOpenAIOAuthOSProfile(ctx, s.accountRepo, owner, plan.OSFamily)
+			if err != nil {
+				return fmt.Errorf("resolve OAuth synchronous test profile: %w", err)
+			}
+		}
+	}
+	receivedAt := plan.ReceivedAt
+	if receivedAt.IsZero() {
+		receivedAt = time.Now()
+	}
 	var root string
 	var err error
 	if s.oauthDailySessionRepo != nil && s.settingService != nil && s.settingService.IsOpenAIOAuthDailySessionRotationEnabled(ctx) {
-		pool, e := s.oauthDailySessionRepo.GetOrCreateOAuthDailySessionPool(ctx, account.ID, time.Now())
-		if e != nil {
-			return fmt.Errorf("resolve OAuth daily synchronous test session for account %d: %w", account.ID, e)
+		if osRepo, ok := s.oauthDailySessionRepo.(OAuthDailySessionOSRepository); ok && profilesAvailable {
+			pool, e := osRepo.GetOrCreateOAuthDailySessionPoolForOS(ctx, owner.ID, defaultProfile.OSFamily, receivedAt)
+			if e != nil {
+				return fmt.Errorf("resolve OAuth daily synchronous test session for account %d: %w", owner.ID, e)
+			}
+			root = pool.OSRoots[selectedProfile.OSFamily].SyncSessionID
+		} else {
+			pool, e := s.oauthDailySessionRepo.GetOrCreateOAuthDailySessionPool(ctx, owner.ID, receivedAt)
+			if e != nil {
+				return fmt.Errorf("resolve OAuth daily synchronous test session for account %d: %w", owner.ID, e)
+			}
+			root = pool.SyncSessionID
 		}
-		root = pool.SyncSessionID
+	} else if profilesAvailable {
+		root = selectedProfile.SyncSessionID
 	} else if s.oauthSyncSessionRepo != nil {
-		root, err = s.oauthSyncSessionRepo.GetOrCreateOAuthSyncSession(ctx, account.ID)
+		root, err = s.oauthSyncSessionRepo.GetOrCreateOAuthSyncSession(ctx, owner.ID)
 	} else {
 		return nil
 	}

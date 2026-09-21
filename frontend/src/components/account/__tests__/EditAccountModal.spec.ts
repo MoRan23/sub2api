@@ -197,6 +197,7 @@ function buildOpenAISparkShadowAccount() {
       }
     },
     openai_environment_fingerprint: '(Shadow OS; x86_64) shadow-terminal',
+    openai_oauth_os_profiles: buildOSProfiles(),
     extra: {
       openai_installation_pin_enabled: false,
       openai_pinned_installation_id: '0191d95a-3b41-7bb2-8ae7-733dd9845c20',
@@ -205,11 +206,22 @@ function buildOpenAISparkShadowAccount() {
   } as any
 }
 
+function buildOSProfiles() {
+  return {
+    default_os: 'linux',
+    profiles: Object.fromEntries(['windows', 'macos', 'linux'].map((os, index) => [os, {
+      os, installation_id: `00000000-0000-4000-8000-00000000000${index}`,
+      user_agent: `codex_cli_rs/1.0 (${os}; x86_64) Terminal`, sync_session_id: `sync-${os}`,
+    }])),
+  }
+}
+
 function buildOpenAIOAuthAccount() {
   return {
     ...buildAccount(),
     name: 'OpenAI OAuth',
     type: 'oauth',
+    openai_oauth_os_profiles: buildOSProfiles(),
     credentials: {
       access_token: 'access-token',
       refresh_token: 'refresh-token',
@@ -368,7 +380,7 @@ describe('EditAccountModal', () => {
     })
   })
 
-  it('keeps OAuth fingerprint values editable while global normalization is paused', async () => {
+  it('keeps the pin switch editable but system identities readonly while normalization is paused', async () => {
     const account = buildOpenAIOAuthAccount()
     getSettingsMock.mockResolvedValueOnce({
       enable_openai_codex_fingerprint_normalization: false,
@@ -386,23 +398,18 @@ describe('EditAccountModal', () => {
     )
     expect(pinToggle.attributes('disabled')).toBeUndefined()
     await pinToggle.trigger('click')
-    await wrapper.get(
-      'input[aria-label="admin.accounts.openai.environmentFingerprint"]'
-    ).setValue(
-      '(Mac OS X 15.1.0; arm64) iTerm.app'
-    )
+    expect(wrapper.find('[data-testid="openai-environment-fingerprint"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="openai-os-profile-linux"]').text()).toContain('codex_cli_rs/1.0 (linux; x86_64) Terminal')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_installation_pin_enabled).toBe(false)
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty(
       'openai_pinned_installation_id'
     )
-    expect(updateAccountMock.mock.calls[0]?.[1]?.openai_environment_fingerprint).toBe(
-      '(Mac OS X 15.1.0; arm64) iTerm.app'
-    )
+    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty('openai_environment_fingerprint')
   })
 
-  it('keeps the environment fingerprint editable while only client identity normalization is paused', async () => {
+  it('keeps the three managed identities readonly when only client identity normalization is paused', async () => {
     const account = buildOpenAIOAuthAccount()
     getSettingsMock.mockResolvedValueOnce({
       enable_openai_codex_fingerprint_normalization: true,
@@ -417,17 +424,14 @@ describe('EditAccountModal', () => {
 
     expect(wrapper.get('[data-testid="openai-client-identity-normalization-paused"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="openai-codex-fingerprint-paused"]').exists()).toBe(false)
-    const input = wrapper.get<HTMLInputElement>('[data-testid="openai-environment-fingerprint"]')
-    expect(input.element.disabled).toBe(false)
-    await input.setValue('(Mac OS X 15.1.0; arm64) iTerm.app')
+    expect(wrapper.find('[data-testid="openai-environment-fingerprint"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-testid^="openai-os-profile-"]')).toHaveLength(3)
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
-    expect(updateAccountMock.mock.calls[0]?.[1]?.openai_environment_fingerprint).toBe(
-      '(Mac OS X 15.1.0; arm64) iTerm.app'
-    )
+    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty('openai_environment_fingerprint')
   })
 
-  it('shows only an inheritance notice for a Spark shadow Codex fingerprint', async () => {
+  it('shows inherited readonly identities without regeneration for a Spark shadow', async () => {
     const wrapper = mountModal(buildOpenAISparkShadowAccount())
     await flushPromises()
 
@@ -438,6 +442,8 @@ describe('EditAccountModal', () => {
     expect(wrapper.find('[role="switch"][aria-label="admin.accounts.openai.installationPin"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="openai-pinned-installation-id"]').exists()).toBe(false)
     expect(wrapper.find('input[aria-label="admin.accounts.openai.environmentFingerprint"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-testid^="openai-os-profile-"]')).toHaveLength(3)
+    expect(wrapper.find('[data-testid^="openai-installation-regenerate-"]').exists()).toBe(false)
   })
 
   it('loads and submits the OpenAI environment fingerprint', async () => {
@@ -459,6 +465,29 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.openai_environment_fingerprint).toBe(
       '(Mac OS X 15.1.0; arm64) iTerm.app'
     )
+  })
+
+  it.each(['personalAccessToken', 'agentIdentity'])('keeps the legacy single identity editor for %s', async (authMode) => {
+    const account = buildOpenAIOAuthAccount()
+    account.credentials.auth_mode = authMode
+    delete account.openai_oauth_os_profiles
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="openai-os-profiles"]').exists()).toBe(false)
+    const field = wrapper.get<HTMLInputElement>('[data-testid="openai-environment-fingerprint"]')
+    expect(field.element.readOnly).toBe(false)
+    await field.setValue('(Mac OS X; arm64) Terminal')
+    await wrapper.get('[data-testid="openai-installation-regenerate"]').trigger('click')
+    await flushPromises()
+    expect(regenerateInstallationIDMock).toHaveBeenCalledWith(account.id)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="openai-pinned-installation-id"]').element.value).toBe('0191d95a-3b41-7bb2-8ae7-733dd9845c22')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.openai_environment_fingerprint).toBe('(Mac OS X; arm64) Terminal')
+    wrapper.unmount()
+    confirm.mockRestore()
   })
 
   it('omits untouched protected fields and raw UA from an old account snapshot', async () => {
@@ -538,19 +567,38 @@ describe('EditAccountModal', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const wrapper = mountModal(account)
     await flushPromises()
-    await wrapper.get('[data-testid="openai-installation-regenerate"]').trigger('click')
+    await wrapper.get('[data-testid="openai-installation-regenerate-macos"]').trigger('click')
     await flushPromises()
-    expect((wrapper.get('[data-testid="openai-pinned-installation-id"]').element as HTMLInputElement).value).toBe('0191d95a-3b41-7bb2-8ae7-733dd9845c22')
+    expect(regenerateInstallationIDMock).toHaveBeenCalledWith(account.id, 'macos')
+    expect(wrapper.get('[data-testid="openai-os-profile-macos"]').text()).toContain('0191d95a-3b41-7bb2-8ae7-733dd9845c22')
+    expect(wrapper.get('[data-testid="openai-os-profile-windows"]').text()).toContain('00000000-0000-4000-8000-000000000000')
+    expect(account.openai_oauth_os_profiles.profiles.macos.installation_id).toBe('00000000-0000-4000-8000-000000000001')
     await wrapper.get('[data-testid="openai-installation-pin-toggle"]').trigger('click')
     await wrapper.get('[data-testid="openai-installation-pin-toggle"]').trigger('click')
-    const ua = wrapper.get('[data-testid="openai-environment-fingerprint"]')
-    await ua.setValue('(Mac OS X; arm64) Terminal')
-    await ua.setValue(account.openai_environment_fingerprint)
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     const payload = updateAccountMock.mock.calls[0]?.[1]
     expect(payload).not.toHaveProperty('openai_environment_fingerprint')
     expect(payload.extra).not.toHaveProperty('openai_installation_pin_enabled')
     expect(payload.extra).not.toHaveProperty('openai_pinned_installation_id')
+    expect(payload).not.toHaveProperty('openai_oauth_os_profiles')
+    confirm.mockRestore()
+  })
+
+  it('ignores a completed regeneration after switching to another account', async () => {
+    let resolveRegeneration!: (value: { installation_id: string }) => void
+    regenerateInstallationIDMock.mockImplementationOnce(() => new Promise(resolve => { resolveRegeneration = resolve }))
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const first = buildOpenAIOAuthAccount()
+    const second = { ...buildOpenAIOAuthAccount(), id: 99 }
+    const wrapper = mountModal(first)
+    await flushPromises()
+    await wrapper.get('[data-testid="openai-installation-regenerate-windows"]').trigger('click')
+    await wrapper.setProps({ account: second })
+    resolveRegeneration({ installation_id: 'late-first-account-id' })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="openai-os-profile-windows"]').text()).not.toContain('late-first-account-id')
+    expect(wrapper.get('[data-testid="openai-os-profile-windows"]').text()).toContain(second.openai_oauth_os_profiles.profiles.windows.installation_id)
+    wrapper.unmount()
     confirm.mockRestore()
   })
 
@@ -585,7 +633,7 @@ describe('EditAccountModal', () => {
     updateAccountMock.mockReset().mockResolvedValue(next)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(original)
-    await wrapper.get('[data-testid="openai-environment-fingerprint"]').setValue('(Unused OS; x86_64) Terminal')
+    await wrapper.get('[data-testid="openai-installation-pin-toggle"]').trigger('click')
     await wrapper.setProps({ show: false })
     await wrapper.setProps({ account: next, show: true })
     await flushPromises()

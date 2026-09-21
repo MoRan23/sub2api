@@ -19,15 +19,25 @@ func OAuthDailyBusinessDate(now time.Time) string {
 	return now.In(OAuthDailyLocation).Format("2006-01-02")
 }
 
+// OAuthDailyOSRoots pairs the independent stream and synchronous roots for one
+// operating system. Both roots remain stable for the pool's UTC+8 business day.
+type OAuthDailyOSRoots struct {
+	StreamSessionID string `json:"stream_session_id"`
+	SyncSessionID   string `json:"sync_session_id"`
+}
+
 // OAuthDailySessionPool is one account's generation for a UTC+8 calendar day.
-// StreamSessionIDs are stable roots; SyncSessionID is an independent root for
-// non-streaming requests and account connection tests.
+// OSRoots contains the Windows, macOS, and Linux pairs after OS provisioning.
+// The legacy fields remain compatibility mirrors: streaming slots are ordered
+// Windows, macOS, Linux, and SyncSessionID belongs to DefaultOS.
 type OAuthDailySessionPool struct {
 	AccountID        int64                                `json:"account_id"`
 	BusinessDate     string                               `json:"business_date"`
 	Generation       string                               `json:"generation"`
 	StreamSessionIDs [OAuthDailyStreamSessionCount]string `json:"stream_session_ids"`
 	SyncSessionID    string                               `json:"sync_session_id"`
+	OSRoots          map[string]OAuthDailyOSRoots         `json:"os_roots,omitempty"`
+	DefaultOS        string                               `json:"default_os,omitempty"`
 }
 
 type OAuthDailySessionAffinity struct {
@@ -47,6 +57,14 @@ type OAuthDailySessionRepository interface {
 	GetOrCreateOAuthDailySessionAffinity(ctx context.Context, accountID, apiKeyID int64, logicalSessionKey string, now time.Time) (OAuthDailySessionAffinity, error)
 	ReleaseOAuthDailySessionGeneration(ctx context.Context, accountID int64, generation string) error
 	CleanupOAuthDailySessionGenerations(ctx context.Context, before time.Time) (int, error)
+}
+
+// OAuthDailySessionOSRepository is the opt-in extension for ordinary OAuth
+// accounts. defaultOS is the credential owner's persisted default, not the
+// current request's selected OS; it decides which OS inherits a legacy sync
+// root on first provisioning. Callers supply their frozen server receive time.
+type OAuthDailySessionOSRepository interface {
+	GetOrCreateOAuthDailySessionPoolForOS(ctx context.Context, accountID int64, defaultOS string, now time.Time) (OAuthDailySessionPool, error)
 }
 
 // OAuthDailySessionPoolReader exposes a strictly read-only lookup used by

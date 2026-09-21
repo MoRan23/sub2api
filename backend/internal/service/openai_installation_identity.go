@@ -50,6 +50,7 @@ type installationIDResolution struct {
 
 type installationIDRequestCache struct {
 	SourceAccountID int64
+	OSFamily        string
 	Resolution      installationIDResolution
 }
 
@@ -117,9 +118,10 @@ func resolveInstallationIDForRequestWithRepo(
 	account *Account,
 	clientReportedID string,
 ) (installationIDResolution, error) {
+	selection, osSelected := openAIOAuthOSSelectionFromContext(ctx)
 	if c != nil && account != nil {
 		if cached, ok := c.Get(installationPinContextKey); ok {
-			if requestCache, ok := cached.(installationIDRequestCache); ok && requestCache.SourceAccountID == account.ID {
+			if requestCache, ok := cached.(installationIDRequestCache); ok && requestCache.SourceAccountID == account.ID && requestCache.OSFamily == selection.Profile.OSFamily {
 				return requestCache.Resolution, nil
 			}
 		}
@@ -130,6 +132,9 @@ func resolveInstallationIDForRequestWithRepo(
 		return installationIDResolution{}, err
 	}
 	res := resolveOutboundInstallationID(identityAccount, clientReportedID)
+	if osSelected && identityAccount != nil && identityAccount.ID == selection.OwnerID {
+		res = openAIOAuthOSInstallationResolution(identityAccount, selection, clientReportedID)
+	}
 	if res.Enabled && res.OutboundID == "" {
 		generated, ensureErr := ensureOpenAIInstallationID(ctx, repo, identityAccount)
 		if ensureErr != nil {
@@ -144,6 +149,7 @@ func resolveInstallationIDForRequestWithRepo(
 		}
 		c.Set(installationPinContextKey, installationIDRequestCache{
 			SourceAccountID: sourceAccountID,
+			OSFamily:        selection.Profile.OSFamily,
 			Resolution:      res,
 		})
 	}

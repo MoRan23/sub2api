@@ -150,6 +150,7 @@ const (
 // pure operation and never needs to look up an account or settings again.
 type CodexClientIdentityPlan struct {
 	Mode       CodexClientIdentityMode
+	Frozen     bool
 	UserAgent  string
 	Originator string
 	Version    string
@@ -372,7 +373,7 @@ func applyCodexClientIdentityPlan(h http.Header, plan CodexClientIdentityPlan) {
 		originator: plan.Originator,
 		version:    plan.Version,
 	}
-	if plan.Mode == CodexClientIdentitySafePair {
+	if plan.Mode == CodexClientIdentitySafePair && !plan.Frozen {
 		pairCodexIdentityHeadersWithFallback(h, identity)
 		return
 	}

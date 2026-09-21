@@ -3260,7 +3260,7 @@
             {{ t('admin.accounts.openai.codexFingerprintNormalization') }}
           </h3>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.openai.codexFingerprintCreateDesc') }}
+            {{ t(oauthFlowRef?.inputMethod === 'codex_pat' || oauthFlowRef?.inputMethod === 'agent_identity' ? 'admin.accounts.openai.codexFingerprintLegacyCreateDesc' : 'admin.accounts.openai.codexFingerprintCreateDesc') }}
           </p>
           <p
             v-if="!codexFingerprintNormalizationEnabled"
@@ -3302,6 +3302,7 @@
             />
           </button>
         </div>
+        <OpenAIOAuthOSProfiles v-if="oauthFlowRef?.inputMethod !== 'codex_pat' && oauthFlowRef?.inputMethod !== 'agent_identity'" creating />
         <div class="mt-4 border-t border-gray-100 pt-4 dark:border-dark-700">
           <p class="input-label mb-0">{{ t('admin.accounts.openai.environmentFingerprint') }}</p>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -3990,6 +3991,7 @@ import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import CodexTurnStateFields from './CodexTurnStateFields.vue'
+import OpenAIOAuthOSProfiles from './OpenAIOAuthOSProfiles.vue'
 import { defaultCodexTurnStateConfig, readCodexTurnStateConfig } from './codexTurnState'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'

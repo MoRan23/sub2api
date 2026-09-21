@@ -8,7 +8,7 @@ import (
 )
 
 func TestApplyOAuthAccountTestRootSessionUsesDailySyncRoot(t *testing.T) {
-	settingsRepo := &openAIUUIDv7RuntimeRepo{values: map[string]string{
+	settingsRepo := &dailyRotationSettingRepo{values: map[string]string{
 		SettingKeyEnableOpenAIOAuthDailySessionRotation: "true",
 	}}
 	daily := &fakeOAuthDailySessionRepository{pool: OAuthDailySessionPool{

@@ -57,7 +57,18 @@ func ProvideCodexTurnStateCollectorHTTPDo(accounts AccountRepository, proxies Pr
 				delete(request.Header, key)
 			}
 		}
-		identity := resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, owner.GetOpenAIUserAgent())
+		// Background collection has no inbound OS evidence. Use the owner's
+		// persisted default profile without adopting its installation or roots.
+		userAgent := owner.GetOpenAIUserAgent()
+		_, profilesAvailable := accounts.(OpenAIOAuthOSProfilesEnsurer)
+		if IsOpenAIOAuthOSProfileOwner(owner) && (profilesAvailable || OpenAIOAuthOSProfilesComplete(owner.OpenAIOAuthOSProfiles)) {
+			profile, err := ResolveOpenAIOAuthOSProfile(ctx, accounts, owner, "")
+			if err != nil {
+				return nil, err
+			}
+			userAgent = profile.UserAgent
+		}
+		identity := resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, userAgent)
 		ensureCodexIdentityHeadersFromPlan(request.Header, identity)
 		if input.validateModelPolicy == nil || !input.validateModelPolicy(ctx) {
 			return nil, errors.New("collector_model_policy_changed")

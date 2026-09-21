@@ -143,6 +143,9 @@ docs/*
 !docs/PLUGIN_DEVELOPMENT.md
 !docs/channel-monitor-v2-safe-defaults.md
 !docs/OPENAI_PROMPTS_AND_TOOL_NAMES.md
+!docs/OPENAI_OAUTH_OS_IDENTITIES.md
+!docs/OPENAI_CODEX_AUTH_EXPORT.md
+!docs/OPENAI_OAUTH_OS_VERIFICATION.md
 !docs/legal/
 !docs/legal/*.md
 !docs/screenshots/

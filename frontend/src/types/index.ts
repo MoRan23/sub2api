@@ -1183,6 +1183,20 @@ export interface CodexTurnStateConfig {
   collector_proxy_id?: number | null
 }
 
+export type OpenAIOAuthOS = 'windows' | 'macos' | 'linux'
+
+export interface OpenAIOAuthOSProfile {
+  os: OpenAIOAuthOS
+  installation_id: string
+  user_agent: string
+  sync_session_id: string
+}
+
+export interface OpenAIOAuthOSProfiles {
+  default_os: OpenAIOAuthOS
+  profiles: Record<OpenAIOAuthOS, OpenAIOAuthOSProfile>
+}
+
 export interface Account {
   id: number
   name: string
@@ -1196,6 +1210,7 @@ export interface Account {
   credentials?: Record<string, unknown>
   credentials_status?: Record<string, boolean>
   openai_environment_fingerprint?: string
+  openai_oauth_os_profiles?: OpenAIOAuthOSProfiles
   codex_turn_state?: CodexTurnStateConfig
   codex_turn_state_inherited_from_account_id?: number
   ollama_cloud_usage?: OllamaCloudUsageState

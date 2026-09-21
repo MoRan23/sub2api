@@ -437,6 +437,12 @@ func captureOpenAIWSFrameIdentity(payload []byte, currentPlan *OpenAIOAuthIdenti
 	if currentPlan == nil {
 		return capture
 	}
+	// The physical connection owns one OS/profile/date. Frames may carry new
+	// logical turns, but cannot change the handshake's machine identity.
+	capture.UserAgent = currentPlan.Capture.UserAgent
+	capture.UserAgentVersion = currentPlan.Capture.UserAgentVersion
+	capture.OSFamily, capture.OSSource = currentPlan.Capture.OSFamily, currentPlan.Capture.OSSource
+	capture.ReceivedAt = currentPlan.Capture.ReceivedAt
 	// Environment attributes are connection-stable defaults. A frame may
 	// override them explicitly, but omission must not erase the frozen Codex
 	// environment while resolving a new request turn.

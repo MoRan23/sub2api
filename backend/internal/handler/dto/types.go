@@ -223,6 +223,7 @@ type Account struct {
 	Credentials                  map[string]any                 `json:"credentials"`
 	CredentialsStatus            map[string]bool                `json:"credentials_status,omitempty"`
 	OpenAIEnvironmentFingerprint string                         `json:"openai_environment_fingerprint,omitempty"`
+	OpenAIOAuthOSProfiles        *service.OpenAIOAuthOSProfiles `json:"openai_oauth_os_profiles,omitempty"`
 	Extra                        map[string]any                 `json:"extra"`
 	OllamaCloudUsage             *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
 	ProxyID                      *int64                         `json:"proxy_id"`

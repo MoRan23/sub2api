@@ -15,7 +15,7 @@ func (s *AccountRepoSuite) TestConfigurationGuardPreservesRegeneratedIdentityAcr
 	client := testEntClient(s.T())
 	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
 	account := mustCreateAccount(s.T(), client, &service.Account{Name: "configuration-guard", Platform: service.PlatformOpenAI,
-		Type: service.AccountTypeOAuth, Credentials: map[string]any{"user_agent": "codex-tui/0.154.0 (stable)"},
+		Type: service.AccountTypeOAuth, Credentials: map[string]any{"user_agent": legacyProfileUA},
 		Extra: map[string]any{"openai_pinned_installation_id": uuid.NewString(), "enable_tls_fingerprint": true, "tls_fingerprint_profile_id": 12}})
 	s.T().Cleanup(func() {
 		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM scheduler_outbox WHERE account_id = $1", account.ID)
@@ -38,7 +38,7 @@ func (s *AccountRepoSuite) TestConfigurationGuardPreservesRegeneratedIdentityAcr
 	stored, err := repo.GetByID(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().Equal(latest, stored.GetPinnedOpenAIInstallationID())
-	s.Require().Equal("codex-tui/0.154.0 (stable)", stored.GetOpenAIUserAgent())
+	s.Require().Equal(legacyProfileUA, stored.GetOpenAIUserAgent())
 	s.Require().Equal(true, stored.Extra["enable_tls_fingerprint"])
 	s.Require().Equal(float64(12), stored.Extra["tls_fingerprint_profile_id"])
 	s.Require().Equal("new token", stored.Credentials["access_token"])
@@ -76,7 +76,7 @@ func (s *AccountRepoSuite) TestRegenerateRechecksPinAfterConcurrentCommit() {
 
 func (s *AccountRepoSuite) TestAdminConfigurationExplicitEditsAndStaleForm() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "admin-config-intent", Platform: service.PlatformOpenAI,
-		Type: service.AccountTypeOAuth, Credentials: map[string]any{"user_agent": "codex-tui/0.154.0 (old)"},
+		Type: service.AccountTypeOAuth, Credentials: map[string]any{"user_agent": legacyProfileUA},
 		Extra: map[string]any{"openai_pinned_installation_id": uuid.NewString(), "enable_tls_fingerprint": true, "tls_fingerprint_profile_id": 12}})
 	admin := service.NewAdminService(nil, nil, nil, s.repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, s.client, nil, nil, nil, nil, nil, nil, nil, nil)
 	environment := "(Ubuntu 24.04.4; x86_64) screen-256color"
@@ -89,7 +89,7 @@ func (s *AccountRepoSuite) TestAdminConfigurationExplicitEditsAndStaleForm() {
 	s.Require().Equal(false, updated.Extra["enable_tls_fingerprint"])
 	s.Require().Contains(updated.Extra, "tls_fingerprint_profile_id")
 	s.Require().Nil(updated.Extra["tls_fingerprint_profile_id"])
-	s.Require().Equal(environment, updated.GetOpenAIEnvironmentFingerprint())
+	s.Require().Equal(legacyProfileUA, updated.GetOpenAIUserAgent(), "regular OAuth environment is owned by its default OS profile")
 	_, err = admin.UpdateAccount(s.ctx, account.ID, &service.UpdateAccountInput{
 		Name: "stale ordinary form", Credentials: account.Credentials, Extra: map[string]any{},
 	})

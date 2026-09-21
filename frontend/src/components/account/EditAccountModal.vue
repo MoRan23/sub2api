@@ -2221,7 +2221,7 @@
             {{ t('admin.accounts.openai.codexFingerprintShadowHint') }}
           </p>
           <p v-else class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.openai.codexFingerprintEditDesc') }}
+            {{ t(supportsCodexTurnState(account) ? 'admin.accounts.openai.codexFingerprintEditDesc' : 'admin.accounts.openai.codexFingerprintLegacyEditDesc') }}
           </p>
           <p
             v-if="!isSparkShadow && !codexFingerprintNormalizationEnabled"
@@ -2266,60 +2266,41 @@
               />
             </button>
           </div>
-          <div class="mt-3 flex items-center gap-2">
-            <label for="openai-pinned-installation-id" class="sr-only">
-              {{ t('admin.accounts.openai.installationID') }}
-            </label>
-            <input
-              id="openai-pinned-installation-id"
-              v-model="openAIPinnedInstallationID"
-              type="text"
-              readonly
-              class="input min-w-0 flex-1 font-mono text-xs"
-              data-testid="openai-pinned-installation-id"
-            />
-            <button
-              type="button"
-              class="btn btn-secondary shrink-0"
-              :disabled="installationRegenerating || !openAIInstallationPinEnabled || !installationPinSavedEnabled"
-              data-testid="openai-installation-regenerate"
-              :title="t('admin.accounts.openai.installationRegenerate')"
-              @click="regenerateOpenAIInstallationID"
-            >
-              <Icon name="refresh" size="sm" :class="installationRegenerating ? 'animate-spin' : ''" />
-              <span class="sr-only">{{ t('admin.accounts.openai.installationRegenerate') }}</span>
-            </button>
-          </div>
           <p v-if="!installationPinSavedEnabled && openAIInstallationPinEnabled" class="mt-1 text-xs text-amber-600 dark:text-amber-400">
             {{ t('admin.accounts.openai.installationRegenerateSaveHint') }}
           </p>
 
-          <div class="mt-4 border-t border-gray-100 pt-4 dark:border-dark-700">
-            <label for="openai-environment-fingerprint" class="input-label">
-              {{ t('admin.accounts.openai.environmentFingerprint') }}
-            </label>
-            <input
-              id="openai-environment-fingerprint"
-              v-model="openAIEnvironmentFingerprint"
-              type="text"
-              maxlength="256"
-              class="input font-mono text-sm"
-              :aria-label="t('admin.accounts.openai.environmentFingerprint')"
-              :placeholder="t('admin.accounts.openai.environmentFingerprintPlaceholder')"
-              data-testid="openai-environment-fingerprint"
-            />
-            <p class="input-hint">
-              {{ t('admin.accounts.openai.environmentFingerprintDesc') }}
-            </p>
-            <p
-              v-if="!codexFingerprintNormalizationEnabled || !codexClientIdentityNormalizationEnabled"
-              class="mt-1 text-xs text-amber-600 dark:text-amber-400"
-              data-testid="openai-client-identity-normalization-paused"
-            >
-              {{ t('admin.accounts.openai.clientIdentityNormalizationPaused') }}
-            </p>
-          </div>
+          <template v-if="!supportsCodexTurnState(account)">
+            <div class="mt-3 flex items-center gap-2">
+              <input v-model="legacyPinnedInstallationID" type="text" readonly class="input min-w-0 flex-1 font-mono text-xs" :aria-label="t('admin.accounts.openai.installationID')" data-testid="openai-pinned-installation-id" />
+              <button type="button" class="btn btn-secondary shrink-0" :disabled="legacyInstallationRegenerating || !openAIInstallationPinEnabled || !installationPinSavedEnabled" data-testid="openai-installation-regenerate" :title="t('admin.accounts.openai.installationRegenerate')" @click="regenerateLegacyOpenAIInstallationID">
+                <Icon name="refresh" size="sm" :class="legacyInstallationRegenerating ? 'animate-spin' : ''" />
+                <span class="sr-only">{{ t('admin.accounts.openai.installationRegenerate') }}</span>
+              </button>
+            </div>
+            <div class="mt-4 border-t border-gray-100 pt-4 dark:border-dark-700">
+              <label for="openai-environment-fingerprint" class="input-label">{{ t('admin.accounts.openai.environmentFingerprint') }}</label>
+              <input id="openai-environment-fingerprint" v-model="openAIEnvironmentFingerprint" type="text" maxlength="256" class="input font-mono text-sm" :aria-label="t('admin.accounts.openai.environmentFingerprint')" :placeholder="t('admin.accounts.openai.environmentFingerprintPlaceholder')" data-testid="openai-environment-fingerprint" />
+              <p class="input-hint">{{ t('admin.accounts.openai.environmentFingerprintDesc') }}</p>
+            </div>
+          </template>
+
+          <p
+            v-if="!codexFingerprintNormalizationEnabled || !codexClientIdentityNormalizationEnabled"
+            class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+            data-testid="openai-client-identity-normalization-paused"
+          >
+            {{ t('admin.accounts.openai.clientIdentityNormalizationPaused') }}
+          </p>
         </template>
+        <OpenAIOAuthOSProfiles
+          v-if="supportsCodexTurnState(account)"
+          :profiles="openAIOSProfiles"
+          :inherited="isSparkShadow"
+          :disabled="!openAIInstallationPinEnabled || !installationPinSavedEnabled"
+          :regenerating="installationRegenerating"
+          @regenerate="regenerateOpenAIInstallationID"
+        />
       </section>
 
       <!-- API-key environment UA remains outside OAuth Codex normalization. -->
@@ -3179,6 +3160,8 @@ import { adminAPI } from '@/api/admin'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
 import type {
   Account,
+  OpenAIOAuthOS,
+  OpenAIOAuthOSProfiles as OpenAIOAuthOSProfilesData,
   Proxy,
   AdminGroup,
   Group,
@@ -3199,6 +3182,7 @@ import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import CodexTurnStateFields from './CodexTurnStateFields.vue'
+import OpenAIOAuthOSProfiles from './OpenAIOAuthOSProfiles.vue'
 import { codexTurnStateConfigChanged, defaultCodexTurnStateConfig, readCodexTurnStateConfig, supportsCodexTurnState } from './codexTurnState'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
@@ -3671,9 +3655,11 @@ const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
 // installation_id 固定（仅 OpenAI OAuth）。UUID 由服务端生成。
 const openAIInstallationPinEnabled = ref(true)
-const openAIPinnedInstallationID = ref('')
+const openAIOSProfiles = ref<OpenAIOAuthOSProfilesData>()
+const legacyPinnedInstallationID = ref('')
+const legacyInstallationRegenerating = ref(false)
 const installationPinSavedEnabled = ref(true)
-const installationRegenerating = ref(false)
+const installationRegenerating = ref<OpenAIOAuthOS | null>(null)
 const openAIEnvironmentFingerprint = ref('')
 // Snapshot editable protected values when the dialog opens. Absent fields in an
 // update mean "keep the latest server value", never "restore this old form".
@@ -4194,7 +4180,10 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openAILongContextBillingEnabled.value = false
   // 固定默认 ON；随后按 extra 覆盖。
   openAIInstallationPinEnabled.value = true
-  openAIPinnedInstallationID.value = ''
+  openAIOSProfiles.value = newAccount.openai_oauth_os_profiles
+    ? JSON.parse(JSON.stringify(newAccount.openai_oauth_os_profiles))
+    : undefined
+  legacyPinnedInstallationID.value = typeof extra?.openai_pinned_installation_id === 'string' ? extra.openai_pinned_installation_id : ''
   installationPinSavedEnabled.value = true
   openAIEnvironmentFingerprint.value = ''
   editPlanType.value = ''
@@ -4218,9 +4207,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     openAILongContextBillingEnabled.value = longContextBillingValue === true
     // installation_id 固定默认 ON：仅显式 false 关闭。
     openAIInstallationPinEnabled.value = extra?.openai_installation_pin_enabled !== false
-    openAIPinnedInstallationID.value = typeof extra?.openai_pinned_installation_id === 'string'
-      ? extra.openai_pinned_installation_id
-      : ''
     installationPinSavedEnabled.value = openAIInstallationPinEnabled.value
     openAIEnvironmentFingerprint.value = typeof newAccount.openai_environment_fingerprint === 'string'
       ? newAccount.openai_environment_fingerprint
@@ -5094,22 +5080,49 @@ const handleClose = () => {
   emit('close')
 }
 
-const regenerateOpenAIInstallationID = async () => {
-  if (!props.account || props.account.platform !== 'openai' || props.account.type !== 'oauth' || isSparkShadow.value) return
+const regenerateOpenAIInstallationID = async (os: OpenAIOAuthOS) => {
+  if (!props.account || !supportsCodexTurnState(props.account) || isSparkShadow.value || installationRegenerating.value) return
   if (!openAIInstallationPinEnabled.value || !installationPinSavedEnabled.value) {
     appStore.showError(t('admin.accounts.openai.installationRegenerateSaveHint'))
     return
   }
-  if (!confirm(t('admin.accounts.openai.installationRegenerateConfirm'))) return
-  installationRegenerating.value = true
+  if (!confirm(t('admin.accounts.openai.installationRegenerateConfirm', { os: { windows: 'Windows', macos: 'macOS', linux: 'Linux' }[os] }))) return
+  const accountID = props.account.id
+  installationRegenerating.value = os
   try {
-    const result = await adminAPI.accounts.regenerateInstallationID(props.account.id)
-    openAIPinnedInstallationID.value = result.installation_id
+    const result = await adminAPI.accounts.regenerateInstallationID(accountID, os)
+    if (props.account?.id !== accountID) return
+    if (result.openai_oauth_os_profiles) {
+      openAIOSProfiles.value = JSON.parse(JSON.stringify(result.openai_oauth_os_profiles))
+    } else if (openAIOSProfiles.value?.profiles[os]) {
+      openAIOSProfiles.value.profiles[os].installation_id = result.installation_id
+    }
     appStore.showSuccess(t('admin.accounts.openai.installationRegenerateSuccess'))
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.accounts.openai.installationRegenerateFailed'))
   } finally {
-    installationRegenerating.value = false
+    installationRegenerating.value = null
+  }
+}
+
+const regenerateLegacyOpenAIInstallationID = async () => {
+  if (!props.account || props.account.platform !== 'openai' || props.account.type !== 'oauth' || supportsCodexTurnState(props.account) || isSparkShadow.value || legacyInstallationRegenerating.value) return
+  if (!openAIInstallationPinEnabled.value || !installationPinSavedEnabled.value) {
+    appStore.showError(t('admin.accounts.openai.installationRegenerateSaveHint'))
+    return
+  }
+  if (!confirm(t('admin.accounts.openai.installationRegenerateLegacyConfirm'))) return
+  const accountID = props.account.id
+  legacyInstallationRegenerating.value = true
+  try {
+    const result = await adminAPI.accounts.regenerateInstallationID(accountID)
+    if (props.account?.id !== accountID) return
+    legacyPinnedInstallationID.value = result.installation_id
+    appStore.showSuccess(t('admin.accounts.openai.installationRegenerateSuccess'))
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.accounts.openai.installationRegenerateFailed'))
+  } finally {
+    legacyInstallationRegenerating.value = false
   }
 }
 
@@ -5198,7 +5211,7 @@ const handleSubmit = async () => {
   }
   try {
     if (props.account.platform === 'openai' &&
-      (props.account.type === 'oauth' || props.account.type === 'apikey') &&
+      (props.account.type === 'apikey' || (props.account.type === 'oauth' && !supportsCodexTurnState(props.account))) &&
       !isSparkShadow.value &&
       openAIEnvironmentFingerprint.value.trim() !== protectedConfigInitial.value.environment) {
       const fingerprint = openAIEnvironmentFingerprint.value.trim()

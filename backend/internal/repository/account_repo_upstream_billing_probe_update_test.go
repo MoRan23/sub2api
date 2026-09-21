@@ -346,9 +346,9 @@ func TestUpdateCredentialsAtomicallyClearsProbeForOpenAIAPIKeyIdentityChange(t *
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`(?s)UPDATE accounts.*credentials IS DISTINCT FROM \(CASE.*\$1::jsonb.*- 'upstream_billing_probe'`).
+	mock.ExpectQuery(`(?s)WITH previous_profile.*UPDATE accounts.*credentials IS DISTINCT FROM \(CASE.*\$1::jsonb.*- 'upstream_billing_probe'`).
 		WithArgs(`{"api_key":"sk-new"}`, int64(27)).
-		WillReturnResult(sqlmock.NewResult(0, 1))
+		WillReturnRows(sqlmock.NewRows([]string{"profile_eligibility_changed"}).AddRow(false))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
 		WithArgs(service.SchedulerOutboxEventAccountChanged, int64(27), nil, nil, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -440,9 +440,9 @@ func TestUpdateCredentialsRollsBackWhenOutboxFails(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`(?s)UPDATE accounts.*credentials IS DISTINCT FROM \(CASE.*\$1::jsonb.*- 'upstream_billing_probe'`).
+	mock.ExpectQuery(`(?s)WITH previous_profile.*UPDATE accounts.*credentials IS DISTINCT FROM \(CASE.*\$1::jsonb.*- 'upstream_billing_probe'`).
 		WithArgs(`{"api_key":"sk-new"}`, int64(27)).
-		WillReturnResult(sqlmock.NewResult(0, 1))
+		WillReturnRows(sqlmock.NewRows([]string{"profile_eligibility_changed"}).AddRow(false))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).WillReturnError(errors.New("outbox failed"))
 	mock.ExpectRollback()
 

@@ -17,6 +17,12 @@ import (
 	"go.uber.org/zap"
 )
 
+func ProvideOpenAIOAuthOSProfileBackfill(accountRepo AccountRepository) *OpenAIOAuthOSProfileBackfill {
+	worker := NewOpenAIOAuthOSProfileBackfill(accountRepo)
+	worker.Start()
+	return worker
+}
+
 func ProvideGrokOAuthService(proxyRepo ProxyRepository, oauthClient GrokOAuthClient, cfg *config.Config, redisClient *redis.Client) *GrokOAuthService {
 	svc := NewGrokOAuthService(proxyRepo, oauthClient, cfg)
 	// wire.go is depguard-exempt for redis; construct the Redis session store here.
@@ -1054,6 +1060,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(GrokOAuthReconciler), new(*TokenRefreshService)),
 	ProvideAccountExpiryService,
 	ProvideOpenAICodexVersionSyncService,
+	ProvideOpenAIOAuthOSProfileBackfill,
 	ProvideProxyExpiryService,
 	ProvideSubscriptionExpiryService,
 	ProvideTimingWheelService,

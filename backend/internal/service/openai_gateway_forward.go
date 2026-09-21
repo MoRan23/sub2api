@@ -1508,6 +1508,18 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 		}
 	}
 	if usesOpenAICodexIdentityProtocol(account) {
+		capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
+		if !captured {
+			capture = CaptureOpenAIOAuthIdentity(c, body, promptCacheKey)
+			SetOpenAIOAuthIdentityCapture(c, capture)
+		}
+		osSelection, osSelected, osErr := s.resolveOpenAIOAuthOSSelection(ctx, c, account, capture)
+		if osErr != nil {
+			return nil, osErr
+		}
+		if osSelected {
+			ctx = context.WithValue(ctx, openAIOAuthOSSelectionContextKey{}, osSelection)
+		}
 		identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
 		// OAuth stream=false requests use one durable account root and a fresh
 		// context-free child thread per request. Resolve the root before the
@@ -1518,7 +1530,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 		var syncRequest bool
 		var syncErr error
 		if clientSyncRequest {
-			if existing, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && existing.TurnIdentity.Relation == OpenAICodexTurnRelationDescendant && account.IsOpenAIOAuth() {
+			if existing, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && existing.Synchronous && existing.TurnIdentity.Relation == OpenAICodexTurnRelationDescendant && account.IsOpenAIOAuth() && (!osSelected || (existing.OSOwnerID == osSelection.OwnerID && existing.OSFamily == osSelection.Profile.OSFamily)) {
 				syncIdentity, syncRequest = existing.TurnIdentity, true
 			} else {
 				syncIdentity, syncRequest, syncErr = s.resolveOAuthSynchronousTurnIdentity(ctx, account, false, originalOpenAISyncSession(c, body)+"\x00"+originalOpenAISyncThread(c, body))
@@ -1529,18 +1541,15 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 		}
 		if syncRequest {
 			identityModeEnabled = false
-			if account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil && s.oauthDailySessionRotationEnabled(ctx) {
+			if osSelected && osSelection.DailyEnabled {
+				setOpenAIDailyRootObservation(c, OpenAIDailyRootObservation{Enabled: true, Kind: "sync", OSFamily: osSelection.Profile.OSFamily, BusinessDate: osSelection.DailyBusinessDate, SlotIndex: -1, SessionID: syncIdentity.SessionID})
+			} else if !osSelected && account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil && s.oauthDailySessionRotationEnabled(ctx) {
 				setOpenAIDailyRootObservation(c, OpenAIDailyRootObservation{Enabled: true, Kind: "sync", BusinessDate: OAuthDailyBusinessDate(time.Now().UTC()), SlotIndex: -1, SessionID: syncIdentity.SessionID})
 			}
 		}
 		projectionMode := OpenAIOAuthIdentityProjectionRegular
 		if isOpenAIResponsesCompactPath(c) {
 			projectionMode = OpenAIOAuthIdentityProjectionCompact
-		}
-		capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
-		if !captured {
-			capture = CaptureOpenAIOAuthIdentity(c, body, promptCacheKey)
-			SetOpenAIOAuthIdentityCapture(c, capture)
 		}
 		planOptions := OpenAIOAuthIdentityPlanOptions{
 			TurnIdentityEnabled: identityModeEnabled,
@@ -1554,6 +1563,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 		identityPlan = plan
 		identityPlanned = true
 		if syncRequest {
+			identityPlan.Synchronous = true
 			identityPlan.TurnIdentityRequested = true
 			identityPlan.TurnIdentityEnabled = true
 			identityPlan.TurnIdentity = syncIdentity

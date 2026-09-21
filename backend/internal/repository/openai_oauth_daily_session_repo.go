@@ -12,9 +12,12 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/openaioauthdailysessionpool"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type openAIOAuthDailySessionRepository struct{ client *ent.Client }
+
+var _ service.OAuthDailySessionOSRepository = (*openAIOAuthDailySessionRepository)(nil)
 
 func NewOpenAIOAuthDailySessionRepository(client *ent.Client) service.OAuthDailySessionRepository {
 	return &openAIOAuthDailySessionRepository{client: client}
@@ -86,6 +89,128 @@ func (r *openAIOAuthDailySessionRepository) GetOrCreateOAuthDailySessionPool(ctx
 	return result, nil
 }
 
+// GetOrCreateOAuthDailySessionPoolForOS upgrades the legacy four-root pool in
+// place. The parent's upsert and row lock serialize child provisioning across
+// gateways, and the transaction keeps a partially provisioned pool invisible.
+func (r *openAIOAuthDailySessionRepository) GetOrCreateOAuthDailySessionPoolForOS(ctx context.Context, accountID int64, defaultOS string, now time.Time) (service.OAuthDailySessionPool, error) {
+	if r == nil || r.client == nil {
+		return service.OAuthDailySessionPool{}, fmt.Errorf("nil OpenAI OAuth daily-session repository")
+	}
+	defaultOS = service.NormalizeOpenAIOSFamily(defaultOS)
+	if defaultOS == "" {
+		return service.OAuthDailySessionPool{}, fmt.Errorf("invalid OAuth daily-session default OS")
+	}
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return service.OAuthDailySessionPool{}, fmt.Errorf("begin OAuth daily OS roots: %w", err)
+	}
+	defer tx.Rollback()
+	txRepo := &openAIOAuthDailySessionRepository{client: tx.Client()}
+	pool, err := txRepo.GetOrCreateOAuthDailySessionPool(ctx, accountID, now)
+	if err != nil {
+		return service.OAuthDailySessionPool{}, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM openai_oauth_daily_session_pools
+		WHERE account_id=$1 AND business_date=$2 FOR UPDATE`, pool.AccountID, pool.BusinessDate)
+	if err != nil {
+		return service.OAuthDailySessionPool{}, fmt.Errorf("lock OAuth daily session pool: %w", err)
+	}
+	var poolID int64
+	if !rows.Next() {
+		err = rows.Err()
+		rows.Close()
+		if err == nil {
+			err = fmt.Errorf("pool disappeared during provisioning")
+		}
+		return service.OAuthDailySessionPool{}, fmt.Errorf("lock OAuth daily session pool: %w", err)
+	}
+	err = rows.Scan(&poolID)
+	rows.Close()
+	if err != nil {
+		return service.OAuthDailySessionPool{}, fmt.Errorf("scan OAuth daily session pool id: %w", err)
+	}
+	stored, err := loadOAuthDailyOSRoots(ctx, tx, []int64{poolID})
+	if err != nil {
+		return service.OAuthDailySessionPool{}, err
+	}
+	attachOAuthDailyOSRoots(&pool, stored[poolID])
+	if pool.DefaultOS != "" {
+		// The existing legacy-sync association wins even if a later caller
+		// supplies a different default. Published roots are never reassigned.
+		defaultOS = pool.DefaultOS
+	}
+	if pool.OSRoots == nil {
+		pool.OSRoots = make(map[string]service.OAuthDailyOSRoots, service.OAuthDailyStreamSessionCount)
+	}
+	for slot, osFamily := range service.OpenAIOAuthOSFamilies() {
+		if _, exists := pool.OSRoots[osFamily]; exists {
+			continue
+		}
+		root := service.OAuthDailyOSRoots{StreamSessionID: pool.StreamSessionIDs[slot], SyncSessionID: pool.SyncSessionID}
+		if osFamily != defaultOS {
+			root.SyncSessionID, err = newUUIDv7()
+			if err != nil {
+				return service.OAuthDailySessionPool{}, fmt.Errorf("generate OAuth daily OS sync root: %w", err)
+			}
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO openai_oauth_daily_os_roots
+			(pool_id,os_family,stream_session_id,sync_session_id) VALUES ($1,$2,$3,$4)`,
+			poolID, osFamily, root.StreamSessionID, root.SyncSessionID)
+		if err != nil {
+			return service.OAuthDailySessionPool{}, fmt.Errorf("create OAuth daily %s roots: %w", osFamily, err)
+		}
+		pool.OSRoots[osFamily] = root
+	}
+	attachOAuthDailyOSRoots(&pool, pool.OSRoots)
+	if pool.DefaultOS == "" {
+		return service.OAuthDailySessionPool{}, fmt.Errorf("OAuth daily OS roots have no legacy synchronous root association")
+	}
+	if err := tx.Commit(); err != nil {
+		return service.OAuthDailySessionPool{}, fmt.Errorf("commit OAuth daily OS roots: %w", err)
+	}
+	return pool, nil
+}
+
+func loadOAuthDailyOSRoots(ctx context.Context, db sqlExecutor, poolIDs []int64) (map[int64]map[string]service.OAuthDailyOSRoots, error) {
+	result := make(map[int64]map[string]service.OAuthDailyOSRoots, len(poolIDs))
+	if len(poolIDs) == 0 {
+		return result, nil
+	}
+	rows, err := db.QueryContext(ctx, `SELECT pool_id,os_family,stream_session_id,sync_session_id
+		FROM openai_oauth_daily_os_roots WHERE pool_id=ANY($1)`, pq.Array(poolIDs))
+	if err != nil {
+		return nil, fmt.Errorf("read OAuth daily OS roots: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var poolID int64
+		var osFamily string
+		var root service.OAuthDailyOSRoots
+		if err := rows.Scan(&poolID, &osFamily, &root.StreamSessionID, &root.SyncSessionID); err != nil {
+			return nil, fmt.Errorf("scan OAuth daily OS roots: %w", err)
+		}
+		if result[poolID] == nil {
+			result[poolID] = make(map[string]service.OAuthDailyOSRoots, service.OAuthDailyStreamSessionCount)
+		}
+		result[poolID][osFamily] = root
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate OAuth daily OS roots: %w", err)
+	}
+	return result, nil
+}
+
+func attachOAuthDailyOSRoots(pool *service.OAuthDailySessionPool, roots map[string]service.OAuthDailyOSRoots) {
+	pool.OSRoots = roots
+	pool.DefaultOS = ""
+	for osFamily, root := range roots {
+		if root.SyncSessionID == pool.SyncSessionID {
+			pool.DefaultOS = osFamily
+			break
+		}
+	}
+}
+
 func (r *openAIOAuthDailySessionRepository) GetOrCreateOAuthDailySessionAffinity(ctx context.Context, accountID, apiKeyID int64, logicalKey string, now time.Time) (service.OAuthDailySessionAffinity, error) {
 	if r == nil || r.client == nil {
 		return service.OAuthDailySessionAffinity{}, fmt.Errorf("nil OpenAI OAuth daily-session repository")
@@ -143,8 +268,18 @@ func (r *openAIOAuthDailySessionRepository) ListOAuthDailySessionPools(ctx conte
 	if err != nil {
 		return nil, fmt.Errorf("list OAuth daily session pools: %w", err)
 	}
+	poolIDs := make([]int64, 0, len(rows))
 	for _, row := range rows {
-		result[row.AccountID] = service.OAuthDailySessionPool{AccountID: row.AccountID, BusinessDate: row.BusinessDate, Generation: row.Generation, StreamSessionIDs: [3]string{row.StreamSession0, row.StreamSession1, row.StreamSession2}, SyncSessionID: row.SyncSession}
+		poolIDs = append(poolIDs, row.ID)
+	}
+	osRoots, err := loadOAuthDailyOSRoots(ctx, r.client, poolIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		pool := service.OAuthDailySessionPool{AccountID: row.AccountID, BusinessDate: row.BusinessDate, Generation: row.Generation, StreamSessionIDs: [3]string{row.StreamSession0, row.StreamSession1, row.StreamSession2}, SyncSessionID: row.SyncSession}
+		attachOAuthDailyOSRoots(&pool, osRoots[row.ID])
+		result[row.AccountID] = pool
 	}
 	return result, nil
 }

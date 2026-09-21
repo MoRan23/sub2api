@@ -162,6 +162,9 @@ export interface FingerprintObservationEntry {
   tool_namespaces_info?: CodexToolNamespaceMetadata[]
   metadata_status?: Record<'request_kind' | 'history_ingest_requested' | 'compaction' | 'tool_namespaces_info', CodexMetadataStatus>
   daily_fixed_root_enabled: boolean
+  routing_os_family?: 'windows' | 'macos' | 'linux'
+  routing_os_source?: 'user_agent' | 'environment_context' | 'account_default'
+  daily_fixed_root_os_family?: 'windows' | 'macos' | 'linux'
   daily_fixed_root_kind?: 'stream' | 'sync'
   daily_fixed_root_business_date?: string
   daily_fixed_root_slot_index?: number

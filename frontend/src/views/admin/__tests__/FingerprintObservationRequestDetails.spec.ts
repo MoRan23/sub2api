@@ -38,6 +38,18 @@ async function openDetails() {
 afterEach(cleanup)
 
 describe('FingerprintObservationRequestDetails', () => {
+  it('shows the frozen operating system, selection source and corresponding daily root', async () => {
+    renderDetails({
+      routing_os_family: 'macos', routing_os_source: 'environment_context',
+      daily_fixed_root_enabled: true, daily_fixed_root_os_family: 'macos',
+      daily_fixed_root_kind: 'stream', daily_fixed_root_business_date: '2026-09-21',
+    })
+    await openDetails()
+    expect(screen.getByText('macOS')).toBeTruthy()
+    expect(screen.getByText('Current environment context')).toBeTruthy()
+    expect(screen.getByText('macos / stream / 2026-09-21')).toBeTruthy()
+  })
+
   it.each([
     [332, 12, 'team_business_target', 'Team / Business target shape (332 characters)'],
     [356, 13, 'team_business_extended', 'Team / Business extended shape (356 characters)'],

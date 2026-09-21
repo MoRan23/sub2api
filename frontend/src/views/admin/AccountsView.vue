@@ -258,7 +258,7 @@
           <template #cell-daily_fixed_roots="{ row }">
             <div v-if="Array.isArray(dailyFixedRootPools[row.id]?.stream_session_ids)" class="w-40 max-w-full space-y-1 whitespace-normal text-xs text-gray-600 dark:text-gray-300">
               <div>{{ dailyFixedRootPools[row.id].business_date }}</div>
-              <div class="text-[11px] text-gray-500 dark:text-gray-400">{{ t('admin.accounts.dailyFixedRoots.summary', { stream: dailyFixedRootPools[row.id].stream_session_ids.length, sync: dailyFixedRootPools[row.id].sync_session_id ? 1 : 0 }) }}</div>
+              <div class="text-[11px] text-gray-500 dark:text-gray-400">{{ t('admin.accounts.dailyFixedRoots.summary', dailyFixedRootCounts(dailyFixedRootPools[row.id])) }}</div>
               <button
                 type="button"
                 aria-haspopup="dialog"
@@ -497,7 +497,7 @@
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
     <CodexTurnStateStatusModal :show="codexTurnStateAccount !== null" :account="codexTurnStateAccount" @close="codexTurnStateAccount = null" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @codex-turn-state="codexTurnStateAccount = $event" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :codex-auth-exporting="codexAuthExporting || exportingData" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @codex-turn-state="codexTurnStateAccount = $event" @export-codex-auth="handleExportCodexAuth" @open-auth-parent="handleOpenAuthParent" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -551,6 +551,7 @@ import AccountTableActions from '@/components/admin/account/AccountTableActions.
 import AccountDailyFixedRootsModal from '@/components/admin/account/AccountDailyFixedRootsModal.vue'
 import CodexTurnStateStatusModal from '@/components/admin/account/CodexTurnStateStatusModal.vue'
 import AccountCodexTurnStateCell from '@/components/admin/account/AccountCodexTurnStateCell.vue'
+import { supportsCodexTurnState } from '@/components/account/codexTurnState'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
@@ -574,7 +575,7 @@ import { fetchAllAccountIds } from '@/utils/accountSelection'
 import { buildGrokUsageRefreshKey, buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
-import { extractApiErrorMessage } from '@/utils/apiError'
+import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
@@ -1159,6 +1160,13 @@ const selectedDailyFixedRootPool = computed(() => {
   const pool = dailyFixedRootAccount.value ? dailyFixedRootPools[dailyFixedRootAccount.value.id] : undefined
   return Array.isArray(pool?.stream_session_ids) ? pool : undefined
 })
+function dailyFixedRootCounts(pool: OAuthDailySessionPool) {
+  if (pool.os_roots) {
+    const roots = Object.values(pool.os_roots)
+    return { stream: roots.filter(root => root?.stream_session_id).length, sync: roots.filter(root => root?.sync_session_id).length }
+  }
+  return { stream: pool.stream_session_ids.filter(Boolean).length, sync: pool.sync_session_id ? 1 : 0 }
+}
 watch(accounts, async (rows) => {
   if (!isColumnVisible('daily_fixed_roots')) return
   const ids = rows.filter((row) => row.platform === 'openai' && row.type === 'oauth').map((row) => row.id)
@@ -2425,7 +2433,7 @@ const openExportDataDialog = () => {
   showExportDataDialog.value = true
 }
 const handleExportData = async () => {
-  if (exportingData.value) return
+  if (exportingData.value || codexAuthExporting.value) return
   exportingData.value = true
   try {
     const dataPayload = await accountExportStepUp.run(() => adminAPI.accounts.exportData(
@@ -2470,6 +2478,52 @@ const handleExportData = async () => {
   }
 }
 const accountExportStepUp = useStepUp()
+const codexAuthExporting = ref(false)
+const handleExportCodexAuth = async (account: Account) => {
+  if (codexAuthExporting.value || exportingData.value || account.parent_account_id != null || !supportsCodexTurnState(account)) return
+  codexAuthExporting.value = true
+  try {
+    const result = await accountExportStepUp.run(() => adminAPI.accounts.exportCodexAuth(account.id))
+    const url = URL.createObjectURL(new Blob([JSON.stringify(result.auth, null, 2)], { type: 'application/json' }))
+    try {
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'auth.json'
+      link.click()
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+    const warnings = result.warnings.map(code => t(`admin.accounts.codexAuth.warnings.${code === 'missing_refresh_token' || code === 'access_token_expired' ? code : 'other'}`))
+    if (warnings.length) appStore.showWarning(warnings.join(' '))
+    else appStore.showSuccess(t('admin.accounts.codexAuth.success'))
+  } catch (error: any) {
+    if (isStepUpCancelled(error)) return
+    if (isStepUpBlocked(error)) {
+      appStore.showError(stepUpBlockReason(error) === 'STEP_UP_ADMIN_API_KEY_FORBIDDEN' ? t('stepUp.adminApiKeyForbidden') : t('stepUp.notEnabled'))
+    } else if (extractApiErrorCode(error) === 'OPENAI_CODEX_AUTH_EXPORT_INCOMPLETE') {
+      const field = extractApiErrorMessage(error, '')
+      const safeField = ['id_token', 'access_token'].includes(field) ? field : ''
+      appStore.showError(t('admin.accounts.codexAuth.incomplete', { field: safeField }))
+    } else if (extractApiErrorCode(error) === 'OPENAI_CODEX_AUTH_EXPORT_UNSUPPORTED') {
+      appStore.showError(t('admin.accounts.codexAuth.unsupported'))
+    } else {
+      appStore.showError(extractApiErrorMessage(error, t('admin.accounts.codexAuth.failed')))
+    }
+  } finally {
+    codexAuthExporting.value = false
+  }
+}
+const handleOpenAuthParent = async (account: Account) => {
+  if (account.parent_account_id == null) return
+  try {
+    const parent = await adminAPI.accounts.getById(account.parent_account_id)
+    edAcc.value = parent
+    showEdit.value = true
+    appStore.showInfo(t('admin.accounts.codexAuth.parentHint', { id: account.parent_account_id }))
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('common.error')))
+  }
+}
 const closeTestModal = () => { showTest.value = false; testingAcc.value = null }
 const closeStatsModal = () => { showStats.value = false; statsAcc.value = null }
 const closeReAuthModal = () => { showReAuth.value = false; reAuthAcc.value = null }

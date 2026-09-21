@@ -231,10 +231,22 @@ func (r *accountRepository) RegenerateOpenAIInstallationID(ctx context.Context, 
 	if !current.IsOpenAIInstallationPinEnabled() {
 		return "", infraerrors.BadRequest("OPENAI_INSTALLATION_REGENERATE_PIN_DISABLED", "enable fixed installation_id and save the account before regenerating")
 	}
-	_, err = client.ExecContext(ctx, `UPDATE accounts SET extra = jsonb_set(
-		COALESCE(extra, '{}'::jsonb) - 'openai_installation_rotate_enabled',
-		'{openai_pinned_installation_id}', to_jsonb($2::text), true), updated_at = NOW()
-		WHERE id = $1 AND deleted_at IS NULL`, id, generatedID)
+	if service.IsOpenAIOAuthOSProfileOwner(current) {
+		profiles, _, ensureErr := ensureOpenAIOAuthOSProfilesLocked(ctx, client, current)
+		if ensureErr != nil {
+			return "", ensureErr
+		}
+		previous := service.CloneOpenAIOAuthOSProfiles(profiles)
+		profile := profiles.Profiles[profiles.DefaultOS]
+		profile.InstallationID = generatedID
+		profiles.Profiles[profiles.DefaultOS] = profile
+		_, err = saveOpenAIOAuthOSProfilesLocked(ctx, client, current, previous, profiles)
+	} else {
+		_, err = client.ExecContext(ctx, `UPDATE accounts SET extra = jsonb_set(
+			COALESCE(extra, '{}'::jsonb) - 'openai_installation_rotate_enabled',
+			'{openai_pinned_installation_id}', to_jsonb($2::text), true), updated_at = NOW()
+			WHERE id = $1 AND deleted_at IS NULL`, id, generatedID)
+	}
 	if err != nil {
 		return "", err
 	}

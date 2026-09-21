@@ -117,6 +117,24 @@ afterEach(() => {
 })
 
 describe('AccountsView daily fixed root HTTP contract', () => {
+  it('shows all six roots grouped by operating system', async () => {
+    const osRoots = {
+      windows: { stream_session_id: 'windows-stream', sync_session_id: 'windows-sync' },
+      macos: { stream_session_id: 'macos-stream', sync_session_id: 'macos-sync' },
+      linux: { stream_session_id: 'linux-stream', sync_session_id: 'linux-sync' },
+    }
+    poolResponse = { ...fixture, items: { '42': { ...pool, os_roots: osRoots } } }
+    const { renderErrors } = renderAccounts()
+    await fireEvent.click(await screen.findByRole('button', { name: 'admin.accounts.dailyFixedRoots.viewDetails' }))
+    const dialog = await screen.findByRole('dialog', { name: 'admin.accounts.dailyFixedRoots.title' })
+    for (const [os, roots] of Object.entries(osRoots)) {
+      const section = within(dialog).getByTestId(`daily-root-${os}`)
+      expect(within(section).getByText(roots.stream_session_id)).toBeTruthy()
+      expect(within(section).getByText(roots.sync_session_id)).toBeTruthy()
+    }
+    expect(renderErrors).not.toHaveBeenCalled()
+  })
+
   it('shows the turn-state column by default, batches supported rows, and opens existing status details', async () => {
     turnStateResponse = { models: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'], items: { '42': {
       account_id: 42, owner_account_id: 42, inherited: false, enabled: true,

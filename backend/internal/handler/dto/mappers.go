@@ -258,6 +258,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		Credentials:                  redactedCreds,
 		CredentialsStatus:            credsStatus,
 		OpenAIEnvironmentFingerprint: a.GetOpenAIEnvironmentFingerprint(),
+		OpenAIOAuthOSProfiles:        service.CloneOpenAIOAuthOSProfiles(a.OpenAIOAuthOSProfiles),
 		Extra:                        extra,
 		OllamaCloudUsage:             ollamaCloudUsage,
 		ProxyID:                      a.ProxyID,

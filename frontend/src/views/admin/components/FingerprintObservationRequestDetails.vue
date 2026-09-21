@@ -205,7 +205,9 @@ function conversionReasonLabel(reason: string): string {
   return te(key) ? t(key) : reason
 }
 const metadataItems = computed(() => [
-  ['dailyRoot', props.observation.daily_fixed_root_enabled ? `${props.observation.daily_fixed_root_kind || '—'} / ${props.observation.daily_fixed_root_business_date || '—'} / ${props.observation.daily_fixed_root_slot_index ?? '—'}` : t(`${prefix}.disabled`)],
+  ['routingOS', props.observation.routing_os_family ? { windows: 'Windows', macos: 'macOS', linux: 'Linux' }[props.observation.routing_os_family] : undefined],
+  ['routingOSSource', props.observation.routing_os_source ? t(`${prefix}.routingOSSources.${props.observation.routing_os_source}`) : undefined],
+  ['dailyRoot', props.observation.daily_fixed_root_enabled ? `${props.observation.daily_fixed_root_os_family ?? props.observation.daily_fixed_root_slot_index ?? '—'} / ${props.observation.daily_fixed_root_kind || '—'} / ${props.observation.daily_fixed_root_business_date || '—'}` : t(`${prefix}.disabled`)],
   ['dailyRootSession', props.observation.daily_fixed_root_session_id], ['window', props.observation.window_id],
   ['windowNumber', props.observation.window_number?.toString()], ['contextWindow', props.observation.context_window_id],
   ['turn', props.observation.turn_id], ['parentTurn', props.observation.parent_turn_id], ['rootTurn', props.observation.root_turn_id],

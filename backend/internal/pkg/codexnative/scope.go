@@ -4,7 +4,8 @@ package codexnative
 
 import (
 	"context"
-	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 type Platform string
@@ -70,15 +71,5 @@ func Resolve(finalUA string, scope Scope) Selection {
 }
 
 func platformFromUA(ua string) Platform {
-	ua = strings.ToLower(ua)
-	switch {
-	case strings.Contains(ua, "windows"):
-		return Windows
-	case strings.Contains(ua, "mac os"), strings.Contains(ua, "macos"), strings.Contains(ua, "macintosh"), strings.Contains(ua, "darwin"):
-		return MacOS
-	case strings.Contains(ua, "linux"), strings.Contains(ua, "ubuntu"):
-		return Linux
-	default:
-		return ""
-	}
+	return Platform(openai.DetectOSFamilyFromUserAgent(ua))
 }

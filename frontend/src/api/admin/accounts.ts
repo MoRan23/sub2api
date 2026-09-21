@@ -6,6 +6,8 @@
 import { apiClient } from '../client'
 import type {
   Account,
+  OpenAIOAuthOS,
+  OpenAIOAuthOSProfiles,
   AccountListItem,
   CreateAccountRequest,
   UpdateAccountRequest,
@@ -74,6 +76,8 @@ export interface OAuthDailySessionPool {
   generation: string
   stream_session_ids: string[]
   sync_session_id: string
+  os_roots?: Partial<Record<OpenAIOAuthOS, { stream_session_id: string; sync_session_id: string }>>
+  default_os?: OpenAIOAuthOS
 }
 
 export interface OAuthDailySessionPoolsResponse {
@@ -342,10 +346,24 @@ export async function update(id: number, updates: UpdateAccountRequest): Promise
   return data
 }
 
-export async function regenerateInstallationID(id: number): Promise<{ installation_id: string }> {
-  const { data } = await apiClient.post<{ installation_id: string }>(
-    `/admin/accounts/${id}/installation-id/regenerate`
+export async function regenerateInstallationID(id: number, os?: OpenAIOAuthOS): Promise<{ installation_id: string; os?: OpenAIOAuthOS; openai_oauth_os_profiles?: OpenAIOAuthOSProfiles }> {
+  const { data } = await apiClient.post<{ installation_id: string; os?: OpenAIOAuthOS; openai_oauth_os_profiles?: OpenAIOAuthOSProfiles }>(
+    `/admin/accounts/${id}/installation-id/regenerate`, os ? { os } : undefined
   )
+  return data
+}
+
+export interface CodexAuthExport {
+  auth: {
+    auth_mode: 'chatgpt'
+    OPENAI_API_KEY: null
+    tokens: { id_token: string; access_token: string; refresh_token: string; account_id: string | null }
+  }
+  warnings: string[]
+}
+
+export async function exportCodexAuth(id: number): Promise<CodexAuthExport> {
+  const { data } = await apiClient.get<CodexAuthExport>(`/admin/accounts/${id}/codex-auth`)
   return data
 }
 
@@ -1192,6 +1210,7 @@ export const accountsAPI = {
   duplicate,
   update,
   regenerateInstallationID,
+  exportCodexAuth,
   getGrokMediaEligibility,
   updateGrokMediaEligibility,
   checkMixedChannelRisk,

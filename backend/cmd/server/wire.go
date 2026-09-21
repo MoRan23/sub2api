@@ -100,6 +100,7 @@ func provideCleanup(
 	accountExpiry *service.AccountExpiryService,
 	cnProviderBalanceCheck *service.CNProviderBalanceCheckService,
 	codexVersionSync *service.OpenAICodexVersionSyncService,
+	openAIOAuthOSProfiles *service.OpenAIOAuthOSProfileBackfill,
 	proxyExpiry *service.ProxyExpiryService,
 	subscriptionExpiry *service.SubscriptionExpiryService,
 	usageCleanup *service.UsageCleanupService,
@@ -136,6 +137,9 @@ func provideCleanup(
 	pluginManager *service.PluginManager,
 ) func() {
 	return func() {
+		if openAIOAuthOSProfiles != nil {
+			openAIOAuthOSProfiles.Stop()
+		}
 		// Cancel collectors and wait for their workers before closing transports,
 		// Redis subscriptions, or the durable runtime database.
 		if codexTurnState != nil {

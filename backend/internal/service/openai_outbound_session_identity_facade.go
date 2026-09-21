@@ -118,6 +118,11 @@ const (
 // OpenAIOAuthIdentityCapture is immutable request input captured before any
 // compatibility or compact body transformation.
 type OpenAIOAuthIdentityCapture struct {
+	UserAgent                string
+	UserAgentVersion         string
+	OSFamily                 string
+	OSSource                 string
+	ReceivedAt               time.Time
 	Logical                  OpenAICodexLogicalTurnIdentity
 	Aliases                  []OpenAICodexLogicalTurnAlias
 	RequestTurn              OpenAICodexRequestTurnSnapshot
@@ -151,7 +156,15 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthProfileIdentityPlan(
 	account *Account,
 	installationPolicy OpenAIOAuthInstallationPolicy,
 ) (OpenAIOAuthIdentityPlan, error) {
-	return s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, OpenAIOAuthIdentityCapture{}, OpenAIOAuthIdentityPlanOptions{
+	capture := OpenAIOAuthIdentityCapture{}
+	if current, ok := OpenAIOAuthIdentityCaptureFromContext(c); ok {
+		capture.UserAgent, capture.UserAgentVersion = current.UserAgent, current.UserAgentVersion
+		capture.OSFamily, capture.OSSource = current.OSFamily, current.OSSource
+	} else if c != nil {
+		capture.UserAgent, capture.OSFamily, capture.OSSource = captureOpenAIRequestOS(c, nil)
+		capture.UserAgentVersion = c.GetHeader("version")
+	}
+	return s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, OpenAIOAuthIdentityPlanOptions{
 		TurnIdentityEnabled: false,
 		ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
 		InstallationPolicy:  installationPolicy,
@@ -161,6 +174,17 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthProfileIdentityPlan(
 // OpenAIOAuthIdentityPlan contains every generated identity needed by the
 // final projector. Apply never consults a store and never resolves again.
 type OpenAIOAuthIdentityPlan struct {
+	OSFamily                 string
+	OSSource                 string
+	ReceivedAt               time.Time
+	OSProfile                OpenAIOAuthOSProfile
+	OSDefault                string
+	OSOwnerID                int64
+	DailyRootsEnabled        bool
+	DailyBusinessDate        string
+	DailyStreamRoot          string
+	DailySyncRoot            string
+	Synchronous              bool
 	Capture                  OpenAIOAuthIdentityCapture
 	RequestTurn              OpenAICodexRequestTurnSnapshot
 	PromptCacheKey           OpenAICodexPromptCacheKeyPlan
@@ -249,6 +273,16 @@ func CaptureOpenAIOAuthIdentityForAlphaSearch(c *gin.Context, body []byte, endpo
 
 func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explicitTurnMetadata string, appendEndpointAlias, preferEndpointAlias, promptCacheKeyApplicable bool, forcedRequestKind CodexWireRequestKind) OpenAIOAuthIdentityCapture {
 	capture := captureOpenAICodexLogicalTurnIdentity(c, body, callerSeed, explicitTurnMetadata, appendEndpointAlias, preferEndpointAlias)
+	capture.UserAgent, capture.OSFamily, capture.OSSource = captureOpenAIRequestOS(c, body)
+	if c != nil && c.Request != nil {
+		capture.UserAgentVersion = c.GetHeader("version")
+	}
+	capture.ReceivedAt = time.Now().UTC()
+	if existing, ok := OpenAIOAuthIdentityCaptureFromContext(c); ok && !existing.ReceivedAt.IsZero() {
+		// Compatibility recapture and credential failover still belong to the
+		// original ingress request, even when they cross the business midnight.
+		capture.ReceivedAt = existing.ReceivedAt
+	}
 	capture.WireProfile = captureCodexWireProfile(c, body, explicitTurnMetadata)
 	capture.Logical.GuardianClassifierSourceThreadKey = capture.WireProfile.guardianClassifierSourceThread(capture.Logical.ThreadKey)
 	capture.Logical.GuardianClassifierParentTurnKey = capture.WireProfile.TurnLineage.ParentTurnID.Value
@@ -700,7 +734,8 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 		s.oauthDailySessionRotationEnabled(ctx) &&
 		(openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c)) {
 		if seed := s.oauthDailyLogicalSessionFallbackSeedForRequest(ctx, c, nil); seed != "" {
-			capture = CaptureOpenAIOAuthIdentity(c, nil, seed)
+			fallback := CaptureOpenAIOAuthIdentity(c, nil, seed)
+			capture.Logical, capture.Aliases = fallback.Logical, fallback.Aliases
 			plan.Capture = cloneOpenAIOAuthIdentityCapture(capture)
 			plan.RequestTurn = capture.RequestTurn
 		}
@@ -722,6 +757,14 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 		}
 	}
 	canonicalClientIdentity := openAICodexClientIdentityForRequest(c)
+	osSelection, osSelected, osErr := s.resolveOpenAIOAuthOSSelection(ctx, c, account, capture)
+	if osErr != nil {
+		return plan, fmt.Errorf("resolve OpenAI OAuth OS profile: %w", osErr)
+	}
+	if osSelected {
+		bindOpenAIOAuthOSSelection(&plan, osSelection)
+		ctx = context.WithValue(ctx, openAIOAuthOSSelectionContextKey{}, osSelection)
+	}
 	plan.ClientIdentity = resolveCodexClientIdentityPlanFromSnapshot(
 		CodexClientIdentitySafePair, "", canonicalClientIdentity,
 	)
@@ -729,7 +772,9 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 	if policy.ClientIdentityNormalizationEnabled() || forceCodexCLI {
 		overrideUA := ""
 		var err error
-		if !forceCodexCLI {
+		if osSelected {
+			overrideUA = osSelection.Profile.UserAgent
+		} else if !forceCodexCLI {
 			var accountRepo AccountRepository
 			if s != nil {
 				accountRepo = s.accountRepo
@@ -742,6 +787,23 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 		plan.ClientIdentity = resolveCodexClientIdentityPlanFromSnapshot(
 			CodexClientIdentityNormalize, overrideUA, canonicalClientIdentity,
 		)
+	} else if osSelected {
+		// SafePair keeps a recognized ingress identity. Its fallback belongs to
+		// the selected OS so a malformed UA cannot select a different machine.
+		fallback := resolveCodexClientIdentityPlanFromSnapshot(CodexClientIdentityNormalize, osSelection.Profile.UserAgent, canonicalClientIdentity)
+		userAgent, version := "", fallback.Version
+		if capture.OSSource == "user_agent" {
+			userAgent = capture.UserAgent
+			if strings.TrimSpace(capture.UserAgentVersion) != "" {
+				version = capture.UserAgentVersion
+			}
+		}
+		headers := http.Header{"User-Agent": []string{userAgent}, "Version": []string{version}}
+		pairCodexIdentityHeadersWithFallback(headers, codexOutboundIdentity{userAgent: fallback.UserAgent, originator: fallback.Originator, version: fallback.Version})
+		plan.ClientIdentity = CodexClientIdentityPlan{Mode: CodexClientIdentitySafePair, UserAgent: headers.Get("User-Agent"), Originator: headers.Get("originator"), Version: headers.Get("version"), Frozen: true}
+	}
+	if osSelected {
+		plan.ClientIdentity.Frozen = true
 	}
 	if namespace, err := s.resolveOpenAIOutboundSessionIdentityNamespace(ctx, account); err == nil {
 		plan.CredentialOwnerNamespace = namespace
@@ -974,7 +1036,8 @@ func (s *OpenAIGatewayService) GetOrResolveOpenAIOAuthOutboundIdentity(
 }
 
 func openAIOAuthIdentityCapturesEqual(left, right OpenAIOAuthIdentityCapture) bool {
-	if left.Logical != right.Logical ||
+	if left.UserAgent != right.UserAgent || left.UserAgentVersion != right.UserAgentVersion || left.OSFamily != right.OSFamily || left.OSSource != right.OSSource || !left.ReceivedAt.Equal(right.ReceivedAt) ||
+		left.Logical != right.Logical ||
 		left.RequestTurn != right.RequestTurn ||
 		left.ContextWindowIDCandidate != right.ContextWindowIDCandidate ||
 		left.ClientWindow != right.ClientWindow ||
@@ -1028,14 +1091,14 @@ func (s *OpenAIGatewayService) OpenAIOAuthIdentityPlanMatches(
 	// A cached plan may have been materialized before the daily switch was
 	// enabled. Always rematerialize daily OAuth stream plans so the affinity
 	// repository is consulted and the current generation/slot is applied.
-	if dailyOAuthStream {
+	if dailyOAuthStream && plan.OSFamily == "" {
 		return false
 	}
 	if plan.APIKeyID != getAPIKeyIDFromContext(c) ||
 		plan.ProjectionMode != options.ProjectionMode ||
 		plan.InstallationPolicy != options.InstallationPolicy ||
-		plan.TurnIdentityRequested != (options.TurnIdentityEnabled &&
-			(plan.PolicySnapshot.TurnIdentityNormalizationEnabled() || dailyOAuthStream)) {
+		plan.TurnIdentityRequested != (plan.Synchronous || (options.TurnIdentityEnabled &&
+			(plan.PolicySnapshot.TurnIdentityNormalizationEnabled() || dailyOAuthStream))) {
 		return false
 	}
 	currentPolicy := s.openAICodexFingerprintPolicyForRequest(ctx, c)

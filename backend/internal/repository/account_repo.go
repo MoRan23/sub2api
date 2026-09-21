@@ -93,7 +93,7 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
 	client := clientFromContext(ctx, r.client)
 	var tx *dbent.Tx
-	if len(service.CodexTurnStateCollectorProxyIDs(service.CodexTurnStateConfigForAccount(account))) > 0 && dbent.TxFromContext(ctx) == nil {
+	if (service.IsOpenAIOAuthOSProfileOwner(account) || len(service.CodexTurnStateCollectorProxyIDs(service.CodexTurnStateConfigForAccount(account))) > 0) && dbent.TxFromContext(ctx) == nil {
 		var err error
 		tx, err = r.client.Tx(ctx)
 		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
@@ -120,6 +120,11 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 func createAccountRecord(ctx context.Context, client *dbent.Client, account *service.Account) error {
 	if account == nil {
 		return service.ErrAccountNilInput
+	}
+	if service.IsOpenAIOAuthOSProfileOwner(account) && !service.OpenAIOAuthOSProfilesComplete(account.OpenAIOAuthOSProfiles) {
+		if err := service.PrepareOpenAIOAuthOSProfilesForCreate(account); err != nil {
+			return err
+		}
 	}
 	config := service.CodexTurnStateConfigForAccount(account)
 	if service.IsCodexTurnStateAccount(account) {
@@ -199,6 +204,11 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	account.ID = created.ID
 	account.CreatedAt = created.CreatedAt
 	account.UpdatedAt = created.UpdatedAt
+	if service.IsOpenAIOAuthOSProfileOwner(account) {
+		if _, err := saveOpenAIOAuthOSProfilesLocked(ctx, client, account, nil, account.OpenAIOAuthOSProfiles); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -321,12 +331,19 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 	if err != nil {
 		return nil, err
 	}
+	profilesByAccount, err := loadOpenAIOAuthOSProfiles(ctx, clientFromContext(ctx, r.client), accountIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	outByID := make(map[int64]*service.Account, len(entAccounts))
 	for _, entAcc := range entAccounts {
 		out := accountEntityToService(entAcc)
 		if out == nil {
 			continue
+		}
+		if service.IsOpenAIOAuthOSProfileOwner(out) {
+			out.OpenAIOAuthOSProfiles = profilesByAccount[out.ID]
 		}
 
 		// Prefer the preloaded proxy edge when available.
@@ -526,6 +543,18 @@ func (r *accountRepository) updateLockedAccount(
 	}
 	if err := service.PreserveAccountConfiguration(current, account, service.AccountConfigurationIntentFromContext(ctx, account.ID)); err != nil {
 		return nil, err
+	}
+	if service.IsOpenAIOAuthOSProfileOwner(account) {
+		if _, _, err := ensureOpenAIOAuthOSProfilesLocked(ctx, client, account); err != nil {
+			return nil, err
+		}
+	} else {
+		account.OpenAIOAuthOSProfiles = nil
+		if service.IsOpenAIOAuthOSProfileOwner(current) {
+			if _, err := client.ExecContext(ctx, `DELETE FROM account_openai_oauth_os_profiles WHERE account_id=$1`, account.ID); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if err := lockCodexTurnStateCollectorProxy(ctx, client, account); err != nil {
 		return nil, err
@@ -831,7 +860,11 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 			client = tx.Client()
 		}
 	}
-	result, err := client.ExecContext(ctx, `
+	rows, err := client.QueryContext(ctx, `
+		WITH previous_profile AS (
+			SELECT id AS profile_account_id, (`+codexTurnStateOwnerExpression("credentials")+`) AS was_profile_owner
+			FROM accounts WHERE id=$2 AND deleted_at IS NULL FOR NO KEY UPDATE
+		)
 		UPDATE accounts
 		SET
 			credentials = `+guardedAccountCredentialsExpression("$1::jsonb")+`,
@@ -861,17 +894,34 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 				ELSE extra
 			END`, guardedAccountCredentialsExpression("$1::jsonb"))+`,
 			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL
+		FROM previous_profile
+		WHERE id = previous_profile.profile_account_id AND deleted_at IS NULL
+		RETURNING previous_profile.was_profile_owner IS DISTINCT FROM (`+codexTurnStateOwnerExpression("accounts.credentials")+`)
 	`, string(payload), id)
 	if err != nil {
 		return err
 	}
-	affected, err := result.RowsAffected()
+	if !rows.Next() {
+		err := rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return err
+		}
+		return service.ErrAccountNotFound
+	}
+	var profileEligibilityChanged bool
+	err = rows.Scan(&profileEligibilityChanged)
+	if err == nil {
+		err = rows.Err()
+	}
+	_ = rows.Close()
 	if err != nil {
 		return err
 	}
-	if affected == 0 {
-		return service.ErrAccountNotFound
+	if profileEligibilityChanged {
+		if err := reconcileOpenAIOAuthOSProfileEligibilityLocked(ctx, client, id); err != nil {
+			return err
+		}
 	}
 	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		return err
@@ -2814,8 +2864,8 @@ func (r *accountRepository) CompareAndUpdateOpenAIAutoResetPreflight(
 }
 
 // EnsureOpenAIInstallationID repairs a missing or invalid account-owned UUID
-// with compare-and-swap semantics. Concurrent callers either perform the write
-// or read back the UUID committed by the winner.
+// with compare-and-swap semantics for legacy owners. Regular OAuth accounts
+// repair the legacy mirror from their locked default OS profile instead.
 func (r *accountRepository) EnsureOpenAIInstallationID(ctx context.Context, accountID int64, expectedID, generatedID string) (string, error) {
 	expectedID = strings.TrimSpace(expectedID)
 	generatedID = strings.TrimSpace(generatedID)
@@ -2838,6 +2888,31 @@ func (r *accountRepository) EnsureOpenAIInstallationID(ctx context.Context, acco
 			ctx = dbent.NewTxContext(ctx, tx)
 			client = tx.Client()
 		}
+	}
+
+	current, err := lockAccountConfiguration(ctx, client, accountID)
+	if err != nil {
+		return "", err
+	}
+	if service.IsOpenAIOAuthOSProfileOwner(current) {
+		profiles, changed, err := ensureOpenAIOAuthOSProfilesLocked(ctx, client, current)
+		if err != nil {
+			return "", err
+		}
+		if changed {
+			if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
+				return "", err
+			}
+		}
+		if tx != nil {
+			if err := tx.Commit(); err != nil {
+				return "", err
+			}
+			if changed {
+				r.syncSchedulerAccountSnapshot(baseCtx, accountID)
+			}
+		}
+		return profiles.Profiles[profiles.DefaultOS].InstallationID, nil
 	}
 
 	result, err := client.ExecContext(ctx, `
@@ -3277,6 +3352,23 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	}
 
 	previousCodexAccounts := make(map[int64]*service.Account)
+	previousOSProfileOwners := make(map[int64]bool)
+	_, authModeExplicit := updates.Credentials["auth_mode"]
+	_, legacyAuthModeExplicit := updates.Credentials["openai_auth_mode"]
+	if (authModeExplicit || legacyAuthModeExplicit) && r.client != nil {
+		lockedIDs := uniquePositiveInt64s(ids)
+		sort.Slice(lockedIDs, func(i, j int) bool { return lockedIDs[i] < lockedIDs[j] })
+		for _, id := range lockedIDs {
+			current, err := lockAccountConfiguration(ctx, clientFromContext(ctx, r.client), id)
+			if errors.Is(err, service.ErrAccountNotFound) {
+				continue
+			}
+			if err != nil {
+				return 0, err
+			}
+			previousOSProfileOwners[id] = service.IsOpenAIOAuthOSProfileOwner(current)
+		}
+	}
 	if updates.CodexTurnState != nil {
 		lockedIDs := append([]int64(nil), ids...)
 		sort.Slice(lockedIDs, func(i, j int) bool { return lockedIDs[i] < lockedIDs[j] })
@@ -3314,6 +3406,18 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	rows, err := result.RowsAffected()
 	if err != nil {
 		return 0, err
+	}
+	for id, wasOwner := range previousOSProfileOwners {
+		client := clientFromContext(ctx, r.client)
+		current, err := lockAccountConfiguration(ctx, client, id)
+		if err != nil {
+			return 0, err
+		}
+		if wasOwner != service.IsOpenAIOAuthOSProfileOwner(current) {
+			if err := reconcileOpenAIOAuthOSProfileEligibilityLocked(ctx, client, id); err != nil {
+				return 0, err
+			}
+		}
 	}
 	for id, previous := range previousCodexAccounts {
 		lockClient := clientFromContext(ctx, r.client)
@@ -3464,12 +3568,19 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 	if err != nil {
 		return nil, err
 	}
+	profilesByAccount, err := loadOpenAIOAuthOSProfiles(ctx, clientFromContext(ctx, r.client), accountIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	outAccounts := make([]service.Account, 0, len(accounts))
 	for _, acc := range accounts {
 		out := accountEntityToService(acc)
 		if out == nil {
 			continue
+		}
+		if service.IsOpenAIOAuthOSProfileOwner(out) {
+			out.OpenAIOAuthOSProfiles = profilesByAccount[out.ID]
 		}
 		if acc.ProxyID != nil {
 			if proxy, ok := proxyMap[*acc.ProxyID]; ok {

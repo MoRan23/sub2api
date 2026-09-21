@@ -47,6 +47,8 @@ type FingerprintObservationEntry struct {
 	Pinned                       bool                           `json:"pinned"`
 	ClientReportedInstallationID string                         `json:"client_reported_installation_id"`
 	OutboundInstallationID       string                         `json:"outbound_installation_id"`
+	RoutingOSFamily              string                         `json:"routing_os_family,omitempty"`
+	RoutingOSSource              string                         `json:"routing_os_source,omitempty"`
 	SessionID                    string                         `json:"session_id"`
 	ThreadID                     string                         `json:"thread_id"`
 	ParentThreadID               string                         `json:"parent_thread_id"`
@@ -80,6 +82,7 @@ type FingerprintObservationEntry struct {
 	DailyFixedRootBusinessDate   string                         `json:"daily_fixed_root_business_date,omitempty"`
 	DailyFixedRootSlotIndex      int                            `json:"daily_fixed_root_slot_index,omitempty"`
 	DailyFixedRootSessionID      string                         `json:"daily_fixed_root_session_id,omitempty"`
+	DailyFixedRootOSFamily       string                         `json:"daily_fixed_root_os_family,omitempty"`
 	UserAgent                    string                         `json:"user_agent"`
 	Originator                   string                         `json:"originator"`
 	OpenAIBeta                   string                         `json:"openai_beta"`
@@ -103,6 +106,7 @@ type FingerprintObservationEntry struct {
 // daily root was successfully resolved and projected onto the outbound turn.
 type OpenAIDailyRootObservation struct {
 	Enabled      bool
+	OSFamily     string
 	Kind         string
 	BusinessDate string
 	SlotIndex    int
@@ -128,6 +132,31 @@ func openAIDailyRootObservationFromContext(c *gin.Context) (OpenAIDailyRootObser
 	}
 	result, ok := value.(OpenAIDailyRootObservation)
 	return result, ok && result.Enabled
+}
+
+// Routing diagnostics describe a frozen identity selection only when its UA
+// actually reached the wire. They never infer an installation from a UA alone.
+func populateFingerprintObservationOS(entry *FingerprintObservationEntry, plan *OpenAIOAuthIdentityPlan) {
+	entry.RoutingOSFamily, entry.RoutingOSSource = "", ""
+	if plan == nil || plan.OSFamily == "" || entry.UserAgent == "" ||
+		entry.UserAgent != strings.TrimSpace(plan.ClientIdentity.UserAgent) {
+		return
+	}
+	entry.RoutingOSFamily, entry.RoutingOSSource = plan.OSFamily, plan.OSSource
+}
+
+func populateFingerprintObservationDailyRoot(entry *FingerprintObservationEntry, daily OpenAIDailyRootObservation) {
+	entry.DailyFixedRootEnabled = false
+	entry.DailyFixedRootKind, entry.DailyFixedRootBusinessDate = "", ""
+	entry.DailyFixedRootSlotIndex = 0
+	entry.DailyFixedRootSessionID, entry.DailyFixedRootOSFamily = "", ""
+	if !daily.Enabled || entry.SessionID == "" || entry.SessionID != daily.SessionID {
+		return
+	}
+	entry.DailyFixedRootEnabled = true
+	entry.DailyFixedRootKind, entry.DailyFixedRootBusinessDate = daily.Kind, daily.BusinessDate
+	entry.DailyFixedRootSlotIndex, entry.DailyFixedRootSessionID = daily.SlotIndex, entry.SessionID
+	entry.DailyFixedRootOSFamily = daily.OSFamily
 }
 
 // FingerprintObservationThreadNode groups final wire observations for one
@@ -704,15 +733,6 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 			entry.TurnStartedAtUnixMS, entry.WindowID, entry.ContextWindowID = 0, "", ""
 			entry.WindowNumber, entry.ForkedFromOrdinalExclusive = nil, nil
 		}
-		if daily, ok := openAIDailyRootObservationFromContext(c); ok {
-			entry.DailyFixedRootEnabled = true
-			entry.DailyFixedRootKind = daily.Kind
-			entry.DailyFixedRootBusinessDate = daily.BusinessDate
-			entry.DailyFixedRootSlotIndex = daily.SlotIndex
-			if entry.SessionID == "" || entry.SessionID == daily.SessionID {
-				entry.DailyFixedRootSessionID = entry.SessionID
-			}
-		}
 		if hasTrustedIdentity && identityHeaders {
 			entry.SessionID, sessionHeaderPresent = fingerprintObservationHeaderUUID(outbound, trustedIdentity.SessionID,
 				"session-id", "session_id")
@@ -762,14 +782,6 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 		if entry.SessionID == "" && !sessionHeaderPresent {
 			entry.SessionID, _ = bodyIdentity.uuid(trustedIdentity.SessionID, "session_id", "session_id")
 		}
-		if daily, ok := openAIDailyRootObservationFromContext(c); ok {
-			if entry.SessionID == daily.SessionID {
-				entry.DailyFixedRootSessionID = entry.SessionID
-			} else {
-				entry.DailyFixedRootEnabled = false
-				entry.DailyFixedRootSessionID = ""
-			}
-		}
 		if entry.ThreadID == "" && !threadHeaderPresent {
 			entry.ThreadID, _ = bodyIdentity.uuid(trustedIdentity.ThreadID, "thread_id", "thread_id")
 		}
@@ -781,6 +793,12 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 			entry.ForkedFromThreadID, _ = bodyIdentity.uuid(trustedIdentity.ForkedFromThreadID, "forked_from_thread_id",
 				"forked_from_thread_id")
 		}
+	}
+	if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok {
+		populateFingerprintObservationOS(&entry, &plan)
+	}
+	if daily, ok := openAIDailyRootObservationFromContext(c); ok {
+		populateFingerprintObservationDailyRoot(&entry, daily)
 	}
 	if c != nil && c.Request != nil {
 		path := strings.TrimSpace(c.FullPath())
@@ -976,6 +994,13 @@ func freezeFingerprintObservationWSHandshake(c *gin.Context, account *Account) f
 		pin = installationIDResolution{}
 	}
 	base := buildFingerprintObservationEntry(c, account, pin, nil, nil, identity, trusted, true)
+	daily, _ := openAIDailyRootObservationFromContext(c)
+	// Capture only scalar provenance, not the full plan's request metadata.
+	var routingPlan OpenAIOAuthIdentityPlan
+	if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok {
+		routingPlan.OSFamily, routingPlan.OSSource = plan.OSFamily, plan.OSSource
+		routingPlan.ClientIdentity.UserAgent = plan.ClientIdentity.UserAgent
+	}
 	// Keep only immutable attribution and protocol classification. Without the
 	// latter the background recorder mistakes a Codex account for a different
 	// protocol and clears the already validated outbound identity.
@@ -991,6 +1016,8 @@ func freezeFingerprintObservationWSHandshake(c *gin.Context, account *Account) f
 		entry.EventKind = FingerprintObservationEventWSHandshake
 		entry.TimezoneComparisonStatus = "not_applicable"
 		entry.OutboundCodexResidencySource = "ws_handshake"
+		populateFingerprintObservationOS(&entry, &routingPlan)
+		populateFingerprintObservationDailyRoot(&entry, daily)
 		globalFingerprintObserver.record(entry)
 	}
 }
@@ -1044,6 +1071,7 @@ func (s *OpenAIGatewayService) freezeFingerprintObservationWSFrame(c *gin.Contex
 		pin = installationIDResolution{Enabled: plan.InstallationEnabled, ClientID: plan.Capture.ClientInstallationID, OutboundID: plan.InstallationID}
 	}
 	entry := buildFingerprintObservationEntry(c, account, pin, handshakeHeaders, body, identity, trusted, false)
+	populateFingerprintObservationOS(&entry, plan)
 	entry.EventKind = FingerprintObservationEventWSFrame
 	entry.RequestIntegrity = integrity
 	entry.ConversionCheck = GetOpenAIChatConversionCheck(c)

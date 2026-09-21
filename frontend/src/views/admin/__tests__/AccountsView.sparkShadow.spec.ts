@@ -6,6 +6,7 @@ import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
+import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 
 // 外审 F2:AccountActionMenu emit 'create-spark-shadow',但 AccountsView 此前未监听,
 // 导致按钮点击无效。本测试通过真实组件引用 emit 该事件,断言父页面接线调用 API。
@@ -17,6 +18,8 @@ const {
   getAllGroups,
   duplicateAccount,
   createSparkShadow,
+  exportCodexAuth,
+  showWarning,
   showSuccess,
   showError
 } = vi.hoisted(() => ({
@@ -27,6 +30,8 @@ const {
   getAllGroups: vi.fn(),
   duplicateAccount: vi.fn(),
   createSparkShadow: vi.fn(),
+  exportCodexAuth: vi.fn(),
+  showWarning: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn()
 }))
@@ -40,6 +45,7 @@ vi.mock('@/api/admin', () => ({
       duplicate: duplicateAccount,
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       createSparkShadow,
+      exportCodexAuth,
       delete: vi.fn(),
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
@@ -51,7 +57,7 @@ vi.mock('@/api/admin', () => ({
 }))
 
 vi.mock('@/stores/app', () => ({
-  useAppStore: () => ({ showError, showSuccess, showInfo: vi.fn() })
+  useAppStore: () => ({ showError, showSuccess, showWarning, showInfo: vi.fn() })
 }))
 
 vi.mock('@/stores/auth', () => ({
@@ -107,7 +113,7 @@ const mountView = () =>
 describe('admin AccountsView — 外审 F2:spark 影子创建接线', () => {
   beforeEach(() => {
     localStorage.clear()
-    for (const fn of [listAccounts, listWithEtag, getBatchTodayStats, getAllProxies, getAllGroups, duplicateAccount, createSparkShadow, showSuccess, showError]) {
+    for (const fn of [listAccounts, listWithEtag, getBatchTodayStats, getAllProxies, getAllGroups, duplicateAccount, createSparkShadow, exportCodexAuth, showSuccess, showError, showWarning]) {
       fn.mockReset()
     }
     listAccounts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
@@ -121,6 +127,62 @@ describe('admin AccountsView — 外审 F2:spark 影子创建接线', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  it('exports only auth.json after step-up and ignores duplicate clicks while verification is pending', async () => {
+    const auth = { auth_mode: 'chatgpt', OPENAI_API_KEY: null, tokens: { id_token: 'synthetic-id', access_token: 'synthetic-access', refresh_token: '', account_id: null } }
+    exportCodexAuth.mockRejectedValueOnce({ reason: 'STEP_UP_REQUIRED' }).mockResolvedValueOnce({ auth, warnings: ['missing_refresh_token'] })
+    const files: BlobPart[][] = []
+    const OriginalBlob = Blob
+    vi.stubGlobal('Blob', class extends OriginalBlob {
+      constructor(parts: BlobPart[], options?: BlobPropertyBag) { super(parts, options); files.push(parts) }
+    })
+    const revoke = vi.fn()
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => 'blob:synthetic-auth-download')
+      static revokeObjectURL = revoke
+    })
+    let filename = ''
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () { filename = this.download })
+    const wrapper = mountView()
+    await flushPromises()
+    const account = { id: 42, platform: 'openai', type: 'oauth', credentials: {} }
+    const menu = wrapper.findComponent(AccountActionMenu)
+    menu.vm.$emit('export-codex-auth', account)
+    await flushPromises()
+    const controller = wrapper.findComponent(TotpStepUpDialog).props('controller')
+    expect(controller.visible.value).toBe(true)
+    menu.vm.$emit('export-codex-auth', account)
+    expect(exportCodexAuth).toHaveBeenCalledTimes(1)
+    expect(files).toHaveLength(0)
+    controller.onVerified()
+    await flushPromises()
+    expect(exportCodexAuth).toHaveBeenCalledTimes(2)
+    expect(exportCodexAuth).toHaveBeenLastCalledWith(42)
+    expect(filename).toBe('auth.json')
+    expect(JSON.parse(String(files[0]?.[0]))).toEqual(auth)
+    expect(revoke).toHaveBeenCalledWith('blob:synthetic-auth-download')
+    expect(showWarning).toHaveBeenCalledWith('admin.accounts.codexAuth.warnings.missing_refresh_token')
+    wrapper.unmount()
+    click.mockRestore()
+  })
+
+  it('prevents direct Spark and non-OAuth auth exports and localizes incomplete credential errors', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const menu = wrapper.findComponent(AccountActionMenu)
+    for (const account of [
+      { id: 42, platform: 'openai', type: 'oauth', parent_account_id: 1 },
+      { id: 42, platform: 'openai', type: 'apikey' },
+      { id: 42, platform: 'openai', type: 'oauth', credentials: { auth_mode: 'personalAccessToken' } },
+    ]) menu.vm.$emit('export-codex-auth', account)
+    await flushPromises()
+    expect(exportCodexAuth).not.toHaveBeenCalled()
+    exportCodexAuth.mockRejectedValueOnce({ reason: 'OPENAI_CODEX_AUTH_EXPORT_INCOMPLETE', message: 'id_token' })
+    menu.vm.$emit('export-codex-auth', { id: 42, platform: 'openai', type: 'oauth', credentials: {} })
+    await flushPromises()
+    expect(showError).toHaveBeenCalledWith('admin.accounts.codexAuth.incomplete')
+    wrapper.unmount()
   })
 
   it('AccountActionMenu 的 duplicate 事件一键复制账号并刷新列表', async () => {

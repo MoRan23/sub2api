@@ -267,6 +267,9 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 		delete(account.Extra, openAIInstallationPinEnabledKey)
 	}
 	PrepareOpenAIAccountUserAgentForCreate(account)
+	if err := PrepareOpenAIOAuthOSProfilesForCreate(account); err != nil {
+		return nil, err
+	}
 	if err := PrepareCodexTurnStateForCreate(account, req.CodexTurnState); err != nil {
 		return nil, err
 	}

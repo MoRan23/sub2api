@@ -757,6 +757,9 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
     expect(wrapper.get('[data-testid="openai-codex-fingerprint-section"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="openai-installation-pin-toggle"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.findAll('[data-testid^="openai-os-profile-"]')).toHaveLength(3)
+    expect(wrapper.get('[data-testid="openai-os-profiles"]').text()).toContain('admin.accounts.openai.osProfilePending')
+    expect(wrapper.find('[data-testid^="openai-installation-regenerate-"]').exists()).toBe(false)
 
     await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex import')
     await wrapper.get('form#create-account-form').trigger('submit.prevent')

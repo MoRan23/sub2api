@@ -1619,7 +1619,14 @@ func (s *OpenAIGatewayService) resolveOpenAICodexTurnIdentityWithAliasesDetailed
 	apiKeyID := getAPIKeyIDFromContext(c)
 	credentialNamespace := namespace
 	var dailyRoot *OpenAIDailyRootObservation
-	if account != nil && account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil &&
+	osSelection, osSelected := openAIOAuthOSSelectionFromContext(ctx)
+	if osSelected {
+		namespace += "/os/" + osSelection.Profile.OSFamily
+		if osSelection.DailyEnabled && (openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c)) {
+			dailyRoot = &OpenAIDailyRootObservation{Enabled: true, Kind: "stream", OSFamily: osSelection.Profile.OSFamily, BusinessDate: osSelection.DailyBusinessDate, SlotIndex: -1, SessionID: osSelection.DailyStreamRoot}
+			namespace += "/oauth-daily-stream/" + osSelection.DailyStreamRoot
+		}
+	} else if account != nil && account.IsOpenAIOAuth() && s.oauthDailySessionRepo != nil &&
 		s.oauthDailySessionRotationEnabled(ctx) && (openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c)) {
 		affinity, affinityErr := s.oauthDailySessionRepo.GetOrCreateOAuthDailySessionAffinity(
 			ctx, account.ID, apiKeyID, logical.SessionKey, time.Now().UTC(),

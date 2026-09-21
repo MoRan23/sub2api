@@ -72,8 +72,17 @@ func (s *OpenAIGatewayService) ResolvePluginOutboundIdentity(ctx context.Context
 		return nil, err
 	}
 	// A directory lookup has no model or logical turn. Resolve only the account's
-	// client identity, without allocating roots or touching turn-state runtime.
-	identity := resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, account.GetOpenAIUserAgent())
+	// client identity, without selecting request roots or touching turn-state runtime.
+	userAgent := account.GetOpenAIUserAgent()
+	_, profilesAvailable := s.accountRepo.(OpenAIOAuthOSProfilesEnsurer)
+	if IsOpenAIOAuthOSProfileOwner(account) && (profilesAvailable || OpenAIOAuthOSProfilesComplete(account.OpenAIOAuthOSProfiles)) {
+		profile, err := ResolveOpenAIOAuthOSProfile(ctx, s.accountRepo, account, "")
+		if err != nil {
+			return nil, err
+		}
+		userAgent = profile.UserAgent
+	}
+	identity := resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, userAgent)
 	ensureCodexIdentityHeadersFromPlan(headers, identity)
 	return &PluginOutboundIdentity{
 		AccountID:   account.ID,

@@ -551,6 +551,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		account.LoadFactor = input.LoadFactor
 	}
 	PrepareOpenAIAccountUserAgentForCreate(account)
+	if err := PrepareOpenAIOAuthOSProfilesForCreate(account); err != nil {
+		return nil, err
+	}
 	return account, nil
 }
 
@@ -662,6 +665,18 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		return nil, err
 	}
 	input.Extra = StripCodexTurnStateManagedExtra(input.Extra)
+	// Regular OAuth environments are fixed per OS. Legacy clients may still send
+	// the old single-UA editor value; it is no longer configuration intent.
+	profileTarget := *account
+	if input.Type != "" {
+		profileTarget.Type = input.Type
+	}
+	if len(input.Credentials) > 0 {
+		profileTarget.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
+	}
+	if IsOpenAIOAuthOSProfileOwner(&profileTarget) {
+		input.OpenAIEnvironmentFingerprint = nil
+	}
 	if input.OpenAIEnvironmentFingerprint != nil {
 		targetType := account.Type
 		if input.Type != "" {
@@ -1095,6 +1110,20 @@ func (s *adminServiceImpl) RegenerateOpenAIInstallationID(ctx context.Context, i
 		return regenerator.RegenerateOpenAIInstallationID(ctx, id, installationID)
 	}
 	return "", errors.New("account repository does not support atomic installation_id regeneration")
+}
+
+// RegenerateOpenAIInstallationIDForOS changes only the selected installation;
+// environment and long-lived sync roots remain stable.
+func (s *adminServiceImpl) RegenerateOpenAIInstallationIDForOS(ctx context.Context, id int64, osFamily string) (*OpenAIOAuthOSProfiles, error) {
+	osFamily = NormalizeOpenAIOSFamily(osFamily)
+	if osFamily == "" {
+		return nil, infraerrors.BadRequest("OPENAI_INSTALLATION_OS_INVALID", "os must be windows, macos, or linux")
+	}
+	repository, ok := s.accountRepo.(OpenAIOAuthOSProfileInstallationRegenerator)
+	if !ok {
+		return nil, errors.New("account repository does not support atomic OS installation regeneration")
+	}
+	return repository.RegenerateOpenAIOAuthOSProfileInstallationID(ctx, id, osFamily)
 }
 
 // BulkUpdateAccounts updates multiple accounts in one request.

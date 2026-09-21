@@ -690,6 +690,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 			return nil, fmt.Errorf("resolve openai OAuth passthrough identity plan: %w", planErr)
 		}
 		identityPlanned = true
+		if identityPlan.OSFamily != "" {
+			ctx = context.WithValue(ctx, openAIOAuthOSSelectionContextKey{}, openAIOAuthOSSelectionFromPlan(identityPlan))
+		}
 		// Non-streaming OAuth passthrough requests get a fresh empty child under
 		// the durable account sync root. Retries reuse the frozen plan carried by
 		// explicitPlan; only the first materialization creates the child.
@@ -699,7 +702,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 			var syncRequest bool
 			var syncErr error
 			if clientSyncRequest {
-				if existing, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && existing.TurnIdentity.Relation == OpenAICodexTurnRelationDescendant && account.IsOpenAIOAuth() {
+				if existing, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && existing.Synchronous && existing.TurnIdentity.Relation == OpenAICodexTurnRelationDescendant && account.IsOpenAIOAuth() && existing.OSOwnerID == identityPlan.OSOwnerID && existing.OSFamily == identityPlan.OSFamily {
 					syncIdentity, syncRequest = existing.TurnIdentity, true
 				} else {
 					syncIdentity, syncRequest, syncErr = s.resolveOAuthSynchronousTurnIdentity(ctx, account, false, originalOpenAISyncSession(c, body)+"\x00"+originalOpenAISyncThread(c, body))
@@ -708,6 +711,10 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 			if syncErr != nil {
 				return nil, syncErr
 			} else if syncRequest {
+				identityPlan.Synchronous = true
+				if identityPlan.DailyRootsEnabled {
+					setOpenAIDailyRootObservation(c, OpenAIDailyRootObservation{Enabled: true, Kind: "sync", OSFamily: identityPlan.OSFamily, BusinessDate: identityPlan.DailyBusinessDate, SlotIndex: -1, SessionID: syncIdentity.SessionID})
+				}
 				identityPlan.TurnIdentityRequested = true
 				identityPlan.TurnIdentityEnabled = true
 				identityPlan.TurnIdentity = syncIdentity

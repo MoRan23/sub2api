@@ -46,6 +46,14 @@
               <Icon name="sparkles" size="sm" />
               {{ t('admin.accounts.createSparkShadow') }}
             </button>
+            <button v-if="supportsCodexTurnState(account) && !isShadow" :disabled="codexAuthExporting" @click="$emit('export-codex-auth', account); $emit('close')" data-testid="export-codex-auth" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 disabled:opacity-50 dark:hover:bg-dark-700">
+              <Icon name="download" size="sm" />
+              {{ t('admin.accounts.codexAuth.export') }}
+            </button>
+            <button v-else-if="supportsCodexTurnState(account) && isShadow" @click="$emit('open-auth-parent', account); $emit('close')" data-testid="open-auth-parent" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">
+              <Icon name="link" size="sm" />
+              {{ t('admin.accounts.codexAuth.openParent') }}
+            </button>
             <button v-if="supportsPrivacy" @click="$emit('set-privacy', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-emerald-600 hover:bg-gray-100 dark:hover:bg-dark-700">
               <Icon name="shield" size="sm" />
               {{ t('admin.accounts.setPrivacy') }}
@@ -74,8 +82,8 @@ import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
 import { supportsCodexTurnState } from '@/components/account/codexTurnState'
 
-const props = defineProps<{ show: boolean; account: Account | null; anchorRect: DOMRect | null }>()
-const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'codex-turn-state'])
+const props = defineProps<{ show: boolean; account: Account | null; anchorRect: DOMRect | null; codexAuthExporting?: boolean }>()
+const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'codex-turn-state', 'export-codex-auth', 'open-auth-parent'])
 const { t } = useI18n()
 const menuRef = ref<HTMLElement | null>(null)
 const { width: viewportWidth, height: viewportHeight } = useWindowSize()

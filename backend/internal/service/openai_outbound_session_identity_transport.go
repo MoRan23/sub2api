@@ -78,6 +78,30 @@ func (s *OpenAIGatewayService) resolveOAuthSynchronousTurnIdentity(ctx context.C
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if selection, selected := openAIOAuthOSSelectionFromContext(ctx); selected {
+		root := selection.Profile.SyncSessionID
+		if selection.DailyEnabled {
+			root = selection.DailySyncRoot
+		}
+		root, err := canonicalUUIDv7(root)
+		if err != nil {
+			return OpenAICodexTurnIdentity{}, false, fmt.Errorf("invalid OAuth OS sync root: %w", err)
+		}
+		parts := strings.SplitN(existingThread, "\x00", 2)
+		existingSession := ""
+		if len(parts) == 2 {
+			existingSession, existingThread = parts[0], parts[1]
+		}
+		child, err := canonicalUUIDv7(existingThread)
+		if err != nil || (existingSession != "" && existingSession != root) {
+			generated, generateErr := uuid.NewV7()
+			if generateErr != nil {
+				return OpenAICodexTurnIdentity{}, false, generateErr
+			}
+			child = generated.String()
+		}
+		return OpenAICodexTurnIdentity{SessionID: root, ThreadID: child, ParentThreadID: root, Relation: OpenAICodexTurnRelationDescendant}, true, nil
+	}
 	// When daily rotation is enabled, synchronous requests use the independent
 	// daily root. The legacy repository remains the compatibility path.
 	if s.oauthDailySessionRepo != nil && s.oauthDailySessionRotationEnabled(ctx) {

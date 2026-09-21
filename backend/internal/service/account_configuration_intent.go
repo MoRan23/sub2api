@@ -77,6 +77,10 @@ func AccountConfigurationIntentFromContext(ctx context.Context, id int64) Accoun
 // PreserveAccountConfiguration must run with current loaded under the account
 // row lock. It preserves only managed identity/transport fields, not all extra.
 func PreserveAccountConfiguration(current, target *Account, intent AccountConfigurationIntent) error {
+	target.OpenAIOAuthOSProfiles = CloneOpenAIOAuthOSProfiles(current.OpenAIOAuthOSProfiles)
+	if !IsOpenAIOAuthOSProfileOwner(target) {
+		target.OpenAIOAuthOSProfiles = nil
+	}
 	target.Extra = maps.Clone(target.Extra)
 	if target.Extra == nil {
 		target.Extra = make(map[string]any)
@@ -120,7 +124,7 @@ func PreserveAccountConfiguration(current, target *Account, intent AccountConfig
 				target.Credentials["user_agent"] = value
 			}
 		}
-		if intent.Environment != nil {
+		if intent.Environment != nil && !IsOpenAIOAuthOSProfileOwner(target) {
 			if !isOpenAIEnvironmentFingerprintAccount(target) {
 				return infraerrors.BadRequest("OPENAI_ENVIRONMENT_FINGERPRINT_UNSUPPORTED", "environment fingerprints are supported only by non-shadow OpenAI OAuth/API-key accounts")
 			}
@@ -133,6 +137,9 @@ func PreserveAccountConfiguration(current, target *Account, intent AccountConfig
 		if current.Platform != target.Platform || current.Type != target.Type {
 			EnsureOpenAIAccountUserAgent(target)
 		}
+	}
+	if IsOpenAIOAuthOSProfileOwner(target) && target.OpenAIOAuthOSProfiles != nil {
+		ApplyOpenAIOAuthOSProfiles(target, target.OpenAIOAuthOSProfiles)
 	}
 	return preserveCodexTurnStateConfiguration(current, target, intent.CodexTurnState)
 }

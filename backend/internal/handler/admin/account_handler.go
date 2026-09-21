@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"net/http"
@@ -1217,6 +1218,32 @@ func (h *AccountHandler) RegenerateInstallationID(c *gin.Context) {
 		response.BadRequest(c, "Invalid account ID")
 		return
 	}
+	var request struct {
+		OS *string `json:"os"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil && !errors.Is(err, io.EOF) {
+		response.BadRequest(c, "Invalid request body")
+		return
+	}
+	if request.OS != nil {
+		osFamily := service.NormalizeOpenAIOSFamily(*request.OS)
+		if osFamily == "" {
+			response.ErrorFrom(c, infraerrors.BadRequest("OPENAI_INSTALLATION_OS_INVALID", "os must be windows, macos, or linux"))
+			return
+		}
+		regenerator, ok := h.adminService.(service.OpenAIOAuthOSProfileAdminRegenerator)
+		if !ok {
+			response.InternalError(c, "OS installation regeneration is unavailable")
+			return
+		}
+		profiles, err := regenerator.RegenerateOpenAIInstallationIDForOS(c.Request.Context(), accountID, osFamily)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		response.Success(c, gin.H{"installation_id": profiles.Profiles[osFamily].InstallationID, "os": osFamily, "openai_oauth_os_profiles": profiles})
+		return
+	}
 	installationID, err := h.adminService.RegenerateOpenAIInstallationID(c.Request.Context(), accountID)
 	if err != nil {
 		if errors.Is(err, service.ErrAccountNotFound) {
@@ -1226,7 +1253,12 @@ func (h *AccountHandler) RegenerateInstallationID(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, gin.H{"installation_id": installationID})
+	result := gin.H{"installation_id": installationID}
+	if account, err := h.adminService.GetAccount(c.Request.Context(), accountID); err == nil && account != nil && account.OpenAIOAuthOSProfiles != nil {
+		result["os"] = account.OpenAIOAuthOSProfiles.DefaultOS
+		result["openai_oauth_os_profiles"] = service.CloneOpenAIOAuthOSProfiles(account.OpenAIOAuthOSProfiles)
+	}
+	response.Success(c, result)
 }
 
 // scheduleOpenAIResponsesProbe 异步触发 OpenAI APIKey 账号的 Responses API 能力探测。

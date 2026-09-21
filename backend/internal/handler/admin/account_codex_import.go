@@ -562,6 +562,7 @@ func normalizeCodexImportEntry(entry codexImportEntry) (*codexImportAccount, err
 		)
 		item.Email = firstCodexString(raw, []string{"email"}, []string{"user", "email"})
 		item.AccountID = firstCodexString(raw,
+			[]string{"tokens", "account_id"},
 			[]string{"chatgpt_account_id"},
 			[]string{"chatgptAccountId"},
 			[]string{"account_id"},
