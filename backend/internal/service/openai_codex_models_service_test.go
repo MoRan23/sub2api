@@ -2164,7 +2164,7 @@ func TestCompleteAPIKeyCodexModelsManifestForClientPreservesProviderMetadata(t *
 
 	svc := &OpenAIGatewayService{}
 	manifest := &OpenAIModelsResponse{
-		Body: []byte(`{"models":[{"slug":"grok-4.6","description":"Provider supplied","service_tiers":[{"id":"provider-priority","name":"Provider Fast","description":"Provider supplied tier."}],"model_messages":{"auto_review":{"enabled":true}},"truncation_policy":{"mode":"tokens"},"unknown":{"kept":true}}],"metadata":{"source":"upstream"}}`),
+		Body: []byte(`{"models":[{"slug":"grok-4.6","description":"Provider supplied","service_tiers":[{"id":"provider-priority","name":"Provider Fast","description":"Provider supplied tier."}],"model_messages":{"instructions_template":"Provider-authored instructions.","auto_review":{"enabled":true}},"truncation_policy":{"mode":"tokens"},"unknown":{"kept":true}}],"metadata":{"source":"upstream"}}`),
 	}
 	account := newCodexModelsAPIKeyTestAccount("https://upstream.example/v1")
 
@@ -2185,7 +2185,7 @@ func TestCompleteAPIKeyCodexModelsManifestForClientPreservesProviderMetadata(t *
 	require.Equal(t, []string{"low", "medium", "high", "xhigh"}, effortsFromManifestModel(t, models[0]))
 	modelMessages, ok := models[0]["model_messages"].(map[string]any)
 	require.True(t, ok)
-	require.NotEmpty(t, modelMessages["instructions_template"])
+	require.Equal(t, "Provider-authored instructions.", modelMessages["instructions_template"])
 	require.Equal(t, map[string]any{"enabled": true}, modelMessages["auto_review"])
 	require.Equal(t, map[string]any{"mode": "tokens", "limit": float64(10_000)}, models[0]["truncation_policy"])
 	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)

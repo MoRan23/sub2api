@@ -52,15 +52,14 @@ const DefaultTestModel = "gpt-5.4"
 // CodexUsageProbeModel is the model used for OAuth Codex usage probes.
 const CodexUsageProbeModel = "codex-auto-review"
 
-// DefaultInstructions default instructions for non-Codex CLI requests.
-// 内容为真实 Codex CLI 的 GPT-5-Codex base prompt（codex 系模型默认）。
+// DefaultInstructions is the retained GPT-5-Codex template for legacy Codex
+// model catalog entries and account probes. It is not a forwarding default.
 //
 //go:embed instructions.txt
 var DefaultInstructions string
 
-// instructionsGPT51 / instructionsGPT52 / instructionsGPT55 / instructionsGPT6Astra
-// 为对应非 codex 模型的真实 Codex 编码 agent base prompt，用于模型感知的 instructions 选择。
-// GPT-5.5 同时作为 GPT-5 系列的 fallback（覆盖 5.3 / 5.4 等未单独维护 prompt 的版本）。
+// instructionsGPT51 / instructionsGPT52 are retained compatibility templates:
+// these older models are absent from the current official models manifest.
 //
 //go:embed instructions_gpt5_1.txt
 var instructionsGPT51 string
@@ -68,16 +67,33 @@ var instructionsGPT51 string
 //go:embed instructions_gpt5_2.txt
 var instructionsGPT52 string
 
+// Current templates below are copied from model_messages.instructions_template
+// in openai/codex codex-rs/models-manager/models.json at
+// 6149914a0e59363b6777080b3e953b05d592dbac. The three GPT-5.6 variants share
+// one template; codex-auto-review shares the Daybreak Blue template.
+// These are used only for synthetic model catalogs and explicit account probes,
+// never as defaults added to a forwarded user's request.
+//
+//go:embed instructions_gpt5_4.txt
+var instructionsGPT54 string
+
 //go:embed instructions_gpt5_5.txt
 var instructionsGPT55 string
 
-// Source: openai/codex codex-rs/models-manager/models.json at 121f91fd5d9d.
-//
+//go:embed instructions_gpt5_6.txt
+var instructionsGPT56 string
+
 //go:embed instructions_gpt6_astra.txt
 var instructionsGPT6Astra string
 
-// latestCodexInstructions 返回当前已知最新版本的 Codex base instructions，
-// 当前为 GPT-5.5；若 5.5 prompt 意外为空则回退到 DefaultInstructions 保证非空。
+//go:embed instructions_daybreak_blue.txt
+var instructionsDaybreakBlue string
+
+//go:embed instructions_daybreak_red.txt
+var instructionsDaybreakRed string
+
+// latestCodexInstructions retains the existing GPT-5.5 fallback for models
+// without a known template; it is not evidence of an upstream model mapping.
 func latestCodexInstructions() string {
 	if v := strings.TrimSpace(instructionsGPT55); v != "" {
 		return instructionsGPT55
@@ -126,15 +142,9 @@ func CanonicalizeOpenAIModelAliasSpelling(model string) string {
 	return normalized
 }
 
-// CodexBaseInstructionsForModel 按模型返回最匹配的真实 Codex base instructions：
-//   - gpt-6 / gpt-6-astra（含供应商前缀与日期变体）→ GPT-6 Astra prompt
-//   - 含 "codex" 的模型（gpt-5-codex / gpt-5.x-codex / codex-max / spark 等）→ GPT-5-Codex prompt
-//   - gpt-5.5 系非 codex 模型 → GPT-5.5 prompt
-//   - gpt-5.2 系非 codex 模型 → GPT-5.2 prompt
-//   - gpt-5.1 系非 codex 模型 → GPT-5.1 prompt
-//   - 其它（含 gpt-5.3 / gpt-5.4 / 裸 gpt-5 / 未知模型）→ 回退到最新版本（当前 GPT-5.5）
-//
-// 任一专用 prompt 意外为空时回退链最终落到 DefaultInstructions，保证返回非空。
+// CodexBaseInstructionsForModel selects the official template for known models
+// and established aliases. Older models and unknown names keep their existing
+// compatibility fallback; no template is inferred from another new model.
 func CodexBaseInstructionsForModel(model string) string {
 	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
 	switch {
@@ -142,6 +152,14 @@ func CodexBaseInstructionsForModel(model string) string {
 		if v := strings.TrimSpace(instructionsGPT6Astra); v != "" {
 			return instructionsGPT6Astra
 		}
+	case canonical == "gpt-5.6" || canonical == "gpt-5.6-sol" || canonical == "gpt-5.6-terra" || canonical == "gpt-5.6-luna":
+		return instructionsGPT56
+	case canonical == "gpt-daybreak-blue-latest" || canonical == "codex-auto-review":
+		return instructionsDaybreakBlue
+	case canonical == "gpt-daybreak-red-latest":
+		return instructionsDaybreakRed
+	case canonical == "gpt-5.4":
+		return instructionsGPT54
 	case strings.Contains(canonical, "codex"):
 		return DefaultInstructions
 	case strings.HasPrefix(canonical, "gpt-5.5"):

@@ -88,9 +88,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	firstAcceptedAt := time.Now()
 	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	SetOpenAIClientTransport(c, OpenAIClientTransportWS)
-	// A handler may reuse the same gin context across account failover attempts.
-	// Never let an OAuth attempt's response aliases leak into the next account.
-	setCodexToolNameReverse(c, nil)
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
 	}
@@ -301,16 +298,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		} else if compatibilityChanged {
 			normalized = compatibilityBody
 		}
-		if account.IsOpenAIOAuthLike() {
-			aliasedBody, reverse, aliased, aliasErr := aliasOpenAIOAuthReservedToolNamesBody(normalized)
-			if aliasErr != nil {
-				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, aliasErr.Error(), aliasErr)
-			}
-			updateCodexToolNameReverseForWSFrame(c, normalized, reverse)
-			if aliased {
-				normalized = aliasedBody
-			}
-		}
 
 		originalModel := strings.TrimSpace(values[1].String())
 		modelMissing := originalModel == ""
@@ -515,7 +502,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	writeClientMessage := func(message []byte) error {
 		writeCtx, cancel := newOpenAIWSDownstreamWriteContext(ctx, hooks, s.openAIWSWriteTimeout())
 		defer cancel()
-		message = restoreCodexToolNamesFromContext(c, message)
 		return clientConn.Write(writeCtx, coderws.MessageText, message)
 	}
 

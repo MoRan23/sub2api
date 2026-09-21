@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 var codexModelMap = map[string]string{
@@ -77,14 +75,10 @@ type codexTransformResult struct {
 	Modified        bool
 	NormalizedModel string
 	PromptCacheKey  string
-	ToolNameReverse map[string]string
-	Error           error
 }
 
 type codexOAuthTransformOptions struct {
-	IsCodexCLI                          bool
 	IsCompact                           bool
-	SkipDefaultInstructions             bool
 	PreserveToolCallIDs                 bool
 	OmitPromotedSystemMessagesFromInput bool
 }
@@ -161,10 +155,9 @@ var openAICodexOAuthUnsupportedFields = append([]string{
 	"presence_penalty",
 }, openAIChatGPTInternalUnsupportedFields...)
 
-func applyCodexOAuthTransform(reqBody map[string]any, isCodexCLI bool, isCompact bool) codexTransformResult {
+func applyCodexOAuthTransform(reqBody map[string]any, _ bool, isCompact bool) codexTransformResult {
 	return applyCodexOAuthTransformWithOptions(reqBody, codexOAuthTransformOptions{
-		IsCodexCLI: isCodexCLI,
-		IsCompact:  isCompact,
+		IsCompact: isCompact,
 	})
 }
 
@@ -261,18 +254,6 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 	if normalizeCodexTools(reqBody) {
 		result.Modified = true
 	}
-	// Collect aliases only after prompt/functions/function_call compatibility
-	// has produced the final Responses protocol nodes. Otherwise references
-	// introduced by those migrations can retain the reserved name.
-	toolNameReverse, toolNamesChanged, err := aliasOpenAIOAuthReservedToolNames(reqBody)
-	if err != nil {
-		result.Error = err
-		return result
-	}
-	result.ToolNameReverse = toolNameReverse
-	if toolNamesChanged {
-		result.Modified = true
-	}
 	if normalizeCodexToolChoice(reqBody) {
 		result.Modified = true
 	}
@@ -294,10 +275,6 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 		result.Modified = true
 	}
 
-	// instructions 处理逻辑：根据是否是 Codex CLI 分别调用不同方法
-	if !opts.SkipDefaultInstructions && applyInstructions(reqBody, opts.IsCodexCLI) {
-		result.Modified = true
-	}
 	if isCodexSparkModel(normalizedModel) && applyCodexSparkImageUnsupportedInstructions(reqBody) {
 		result.Modified = true
 	}
@@ -1438,17 +1415,6 @@ func extractPromptLikeInstructionsFromInput(reqBody map[string]any) string {
 	return strings.Join(texts, "\n\n")
 }
 
-// defaultCodexSynthInstructions 返回合成路径在 instructions 为空时应填入的默认提示词。
-//
-// 按 model 选择真实 Codex CLI 的 base instructions，使合成请求在提示词层面贴近真实 Codex 行为；
-// 若内嵌 prompt 意外为空，回退到最小占位符以保证字段非空。
-func defaultCodexSynthInstructions(model string) string {
-	if instructions := strings.TrimSpace(openai.CodexBaseInstructionsForModel(model)); instructions != "" {
-		return instructions
-	}
-	return "You are a helpful coding assistant."
-}
-
 // ensureCodexReasoningInclude 在请求带 reasoning 时补齐 include:["reasoning.encrypted_content"]。
 //
 // 真实 Codex 在 reasoning 存在时总会请求加密推理内容（ChatGPT/store=false 场景下用于上下文回放）。
@@ -1516,33 +1482,6 @@ func applyCodexClientMetadata(reqBody map[string]any, account *Account) bool {
 	default:
 		return false
 	}
-}
-
-// applyInstructions 处理 instructions 字段：仅在 instructions 为空时填充默认值。
-func applyInstructions(reqBody map[string]any, isCodexCLI bool) bool {
-	if !isInstructionsEmpty(reqBody) {
-		return false
-	}
-	model, _ := reqBody["model"].(string)
-	reqBody["instructions"] = defaultCodexSynthInstructions(model)
-	return true
-}
-
-// isInstructionsEmpty 检查 instructions 字段是否为空
-// 处理以下情况：字段不存在、nil、空字符串、纯空白字符串
-func isInstructionsEmpty(reqBody map[string]any) bool {
-	val, exists := reqBody["instructions"]
-	if !exists {
-		return true
-	}
-	if val == nil {
-		return true
-	}
-	str, ok := val.(string)
-	if !ok {
-		return true
-	}
-	return strings.TrimSpace(str) == ""
 }
 
 type codexInputFilterOptions struct {

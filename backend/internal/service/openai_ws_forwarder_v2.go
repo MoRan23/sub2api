@@ -796,7 +796,6 @@ readLoop:
 					message = corrected
 				}
 			}
-			message = restoreCodexToolNamesFromContext(c, message)
 		}
 		if openAIWSMessageShouldParseUsage(eventType, message) {
 			parseOpenAIWSResponseUsageFromCompletedEvent(message, usage)

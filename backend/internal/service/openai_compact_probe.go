@@ -31,7 +31,7 @@ func normalizeAccountTestMode(mode string) string {
 func createOpenAICompactProbePayload(model string, isOAuth bool) map[string]any {
 	payload := map[string]any{
 		"model":        strings.TrimSpace(model),
-		"instructions": openAITestInstructions(),
+		"instructions": openAITestInstructions(model),
 		"input": []any{
 			map[string]any{
 				"type":    "message",

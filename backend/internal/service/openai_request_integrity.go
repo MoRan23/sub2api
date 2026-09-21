@@ -175,24 +175,6 @@ func (s *OpenAIRequestIntegrityState) Check(account *Account, wire []byte, opts 
 				}
 			}
 		}
-		// Only the exact embedded default for the independently resolved model
-		// may be added to empty instructions or a promoted system prefix.
-		rawInstructions, instructionsExist := s.parsed["instructions"]
-		instructionText, instructionIsText := rawInstructions.(string)
-		if !instructionsExist || rawInstructions == nil || (instructionIsText && strings.TrimSpace(instructionText) == "") {
-			model, _ := before["model"].(string)
-			if model != "" {
-				expected := defaultCodexSynthInstructions(model)
-				prefix, _ := before["instructions"].(string)
-				if prefix != "" {
-					expected = prefix + "\n\n" + expected
-				}
-				if actual, ok := after["instructions"].(string); ok && actual == expected {
-					before["instructions"] = expected
-					rules["codex_default_instructions"] = true
-				}
-			}
-		}
 	}
 	collector := requestIntegrityDifferenceCollector{}
 	if opts.CodexStatePatch != nil {

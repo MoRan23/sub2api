@@ -2977,7 +2977,7 @@ func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
 	}
 
 	// All accounts require instructions for Responses API
-	payload["instructions"] = openAITestInstructions()
+	payload["instructions"] = openAITestInstructions(modelID)
 
 	return payload
 }

@@ -78,11 +78,6 @@ func canonicalizeRequestIntegrityCodex(body map[string]any, rules map[string]boo
 			rules["function_choice_shape"] = true
 		}
 	}
-	// This helper only applies a bijective name mapping, with collision checks.
-	// It never removes declarations, calls or their parameter schema.
-	if _, changed, err := aliasOpenAIOAuthReservedToolNames(body); err == nil && changed {
-		rules["reserved_tool_alias"] = true
-	}
 	input, ok := body["input"].([]any)
 	if !ok {
 		return

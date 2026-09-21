@@ -23,6 +23,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 func f64p(v float64) *float64 { return &v }
@@ -1824,7 +1825,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_UpstreamRequestIgnoresClientCance
 	require.NoError(t, upstream.lastReq.Context().Err())
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsGetsDefault(t *testing.T) {
+func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsStayAbsent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	for _, stream := range []bool{false, true} {
@@ -1868,12 +1869,12 @@ func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsGetsDefau
 			} else {
 				require.False(t, gjson.GetBytes(upstream.lastBody, "stream").Exists())
 			}
-			require.Equal(t, strings.TrimSpace(defaultCodexSynthInstructions("gpt-5.1-codex-max")), strings.TrimSpace(gjson.GetBytes(upstream.lastBody, "instructions").String()))
+			require.False(t, gjson.GetBytes(upstream.lastBody, "instructions").Exists())
 		})
 	}
 }
 
-func TestOpenAIGatewayService_Forward_MissingInstructionsUsesMappedModelTemplate(t *testing.T) {
+func TestOpenAIGatewayService_Forward_MissingInstructionsStayAbsentAfterModelMapping(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -1906,9 +1907,104 @@ func TestOpenAIGatewayService_Forward_MissingInstructionsUsesMappedModelTemplate
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "gpt-6-astra", gjson.GetBytes(upstream.lastBody, "model").String())
-	instructions := gjson.GetBytes(upstream.lastBody, "instructions").String()
-	require.True(t, strings.HasPrefix(strings.TrimSpace(instructions), "You are Codex, an agent based on GPT-6."))
-	require.NotContains(t, instructions, "You are Codex, a coding agent based on GPT-5.")
+	require.Empty(t, gjson.GetBytes(upstream.lastBody, "instructions").String())
+}
+
+func TestOpenAIGatewayService_Forward_PreservesPythonToolsWithoutSyntheticInstructions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, accountType := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
+		for _, passthrough := range []bool{false, true} {
+			for _, explicitInstructions := range []bool{false, true} {
+				t.Run(fmt.Sprintf("type=%s/passthrough=%t/instructions=%t", accountType, passthrough, explicitInstructions), func(t *testing.T) {
+					rec := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(rec)
+					body := []byte(`{"model":"gpt-5.5","stream":true,"tools":[{"type":"function","name":"python","parameters":{"type":"object","properties":{}}},{"type":"function","name":"python_exec","parameters":{"type":"object","properties":{}}}],"tool_choice":{"type":"function","name":"python"},"input":[{"type":"function_call","call_id":"call_python","name":"python","arguments":"{}"},{"type":"function_call_output","call_id":"call_python","output":"done"},{"role":"user","content":"hello"}]}`)
+					if explicitInstructions {
+						body, _ = sjson.SetBytes(body, "instructions", "Keep the caller's python tool name.")
+					}
+					c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+					c.Request.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
+					upstream := &httpUpstreamRecorder{resp: &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+						Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+							`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_new","call_id":"call_new","name":"python","arguments":""}}`,
+							"",
+							`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_new","call_id":"call_new","name":"python","arguments":"{}"}}`,
+							"",
+							`data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"function_call","id":"fc_new","call_id":"call_new","name":"python","arguments":"{}"}],"usage":{"input_tokens":1,"output_tokens":1}}}`,
+							"", "data: [DONE]", "",
+						}, "\n"))),
+					}}
+					svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+					account := &Account{
+						ID: 123, Name: "mock", Platform: PlatformOpenAI, Type: accountType, Concurrency: 1,
+						Credentials: map[string]any{"access_token": "oauth-token", "api_key": "api-key", "chatgpt_account_id": "chatgpt-acc"},
+						Extra: map[string]any{
+							"openai_passthrough": passthrough, "openai_responses_supported": true,
+							"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeOff,
+						},
+						Status: StatusActive, Schedulable: true, RateMultiplier: f64p(1),
+					}
+					result, err := svc.Forward(context.Background(), c, account, body)
+					require.NoError(t, err)
+					require.NotNil(t, result)
+					require.NotNil(t, upstream.lastReq)
+					require.Equal(t, "python", gjson.GetBytes(upstream.lastBody, "tools.0.name").String())
+					require.Equal(t, "python_exec", gjson.GetBytes(upstream.lastBody, "tools.1.name").String())
+					require.Equal(t, "python", gjson.GetBytes(upstream.lastBody, "tool_choice.name").String())
+					require.Equal(t, "python", gjson.GetBytes(upstream.lastBody, "input.0.name").String())
+					if explicitInstructions {
+						require.Equal(t, "Keep the caller's python tool name.", gjson.GetBytes(upstream.lastBody, "instructions").String())
+					} else {
+						require.Empty(t, gjson.GetBytes(upstream.lastBody, "instructions").String())
+					}
+					require.Contains(t, rec.Body.String(), `"name":"python"`)
+					require.NotContains(t, rec.Body.String(), `"name":"python_exec"`)
+				})
+			}
+		}
+	}
+}
+
+func TestOpenAIGatewayService_CompatBridgesPreservePythonToolNames(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, accountType := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
+		for _, bridge := range []string{"chat", "messages"} {
+			t.Run(accountType+"/"+bridge, func(t *testing.T) {
+				body := []byte(`{"model":"gpt-5.4","stream":false,"messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"python","parameters":{"type":"object","properties":{}}}},{"type":"function","function":{"name":"python_exec","parameters":{"type":"object","properties":{}}}}]}`)
+				path := "/v1/chat/completions"
+				if bridge == "messages" {
+					body = []byte(`{"model":"gpt-5.4","stream":false,"max_tokens":32,"messages":[{"role":"user","content":"hello"}],"tools":[{"name":"python","input_schema":{"type":"object","properties":{}}},{"name":"python_exec","input_schema":{"type":"object","properties":{}}}]}`)
+					path = "/v1/messages"
+				}
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+				upstream := &httpUpstreamRecorder{resp: &http.Response{
+					StatusCode: http.StatusBadRequest,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"mock upstream stop"}}`)),
+				}}
+				svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+				account := &Account{
+					ID: 123, Platform: PlatformOpenAI, Type: accountType, Concurrency: 1,
+					Credentials: map[string]any{"access_token": "oauth-token", "api_key": "api-key"},
+					Extra:       map[string]any{"openai_responses_supported": true},
+				}
+				var err error
+				if bridge == "messages" {
+					_, err = svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.4")
+				} else {
+					_, err = svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.4")
+				}
+				require.Error(t, err)
+				require.NotNil(t, upstream.lastReq, "request must reach the mocked upstream without a name-collision rejection")
+				require.Equal(t, "python", gjson.GetBytes(upstream.lastBody, "tools.0.name").String())
+				require.Equal(t, "python_exec", gjson.GetBytes(upstream.lastBody, "tools.1.name").String())
+				require.Empty(t, gjson.GetBytes(upstream.lastBody, "instructions").String())
+			})
+		}
+	}
 }
 
 func TestOpenAIGatewayService_OAuthPassthrough_DisabledUsesLegacyTransform(t *testing.T) {

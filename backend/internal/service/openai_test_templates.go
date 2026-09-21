@@ -68,6 +68,6 @@ func randomOpenAIImageTestPrompt() string {
 	return randomOpenAITestTemplate(openAIImageTestTemplates)
 }
 
-func openAITestInstructions() string {
-	return openai.DefaultInstructions
+func openAITestInstructions(model string) string {
+	return openai.CodexBaseInstructionsForModel(model)
 }

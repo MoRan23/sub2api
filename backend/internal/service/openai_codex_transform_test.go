@@ -100,8 +100,7 @@ func TestApplyCodexOAuthTransform_MessagesBridgePromptCacheKeyIsHeaderOnly(t *te
 	}
 
 	result := applyCodexOAuthTransformWithOptions(reqBody, codexOAuthTransformOptions{
-		SkipDefaultInstructions: true,
-		PreserveToolCallIDs:     true,
+		PreserveToolCallIDs: true,
 	})
 
 	require.Equal(t, "anthropic-metadata-session-1", result.PromptCacheKey)
@@ -535,8 +534,7 @@ func TestApplyCodexOAuthTransform_PreservesAllowedTools(t *testing.T) {
 				before, err := json.Marshal(reqBody)
 				require.NoError(t, err)
 				reqBody["model"] = "gpt-6-astra"
-				result := applyCodexOAuthTransform(reqBody, true, false)
-				require.NoError(t, result.Error)
+				applyCodexOAuthTransform(reqBody, true, false)
 				after, err := json.Marshal(map[string]any{
 					"tools": reqBody["tools"], "input": reqBody["input"], "tool_choice": reqBody["tool_choice"],
 				})
@@ -569,12 +567,10 @@ func TestApplyCodexOAuthTransform_AllowedToolsKeepsReservedNameReferences(t *tes
 	reqBody := map[string]any{
 		"model": "gpt-6-astra", "tools": []any{declaration}, "tool_choice": choice,
 	}
-	result := applyCodexOAuthTransform(reqBody, true, false)
-	require.NoError(t, result.Error)
+	applyCodexOAuthTransform(reqBody, true, false)
 	require.Equal(t, choice, reqBody["tool_choice"])
-	require.Equal(t, codexPythonToolAlias, declaration["name"])
-	require.Equal(t, codexPythonToolAlias, reference["name"])
-	require.Equal(t, "python", result.ToolNameReverse[codexPythonToolAlias])
+	require.Equal(t, "python", declaration["name"])
+	require.Equal(t, "python", reference["name"])
 }
 
 func TestApplyCodexOAuthTransform_DowngradesUnknownToolChoice(t *testing.T) {
@@ -1566,49 +1562,31 @@ func TestApplyCodexOAuthTransform_CodexCLI_PreservesExistingInstructions(t *test
 	_ = result
 }
 
-func TestApplyCodexOAuthTransform_CodexCLI_SuppliesDefaultWhenEmpty(t *testing.T) {
-	// Codex CLI 场景：无 instructions 时补充默认值
-
-	reqBody := map[string]any{
-		"model": "gpt-5.1",
-		// 没有 instructions 字段
+func TestApplyCodexOAuthTransform_PreservesClientInstructionState(t *testing.T) {
+	for _, model := range []string{"gpt-5.1", "gpt-5.5", "gpt-6-astra"} {
+		for _, tc := range []struct {
+			name    string
+			present bool
+			value   any
+		}{
+			{name: "missing"},
+			{name: "null", present: true},
+			{name: "empty", present: true, value: ""},
+			{name: "whitespace", present: true, value: "   "},
+			{name: "provided", present: true, value: "Use only the tools I declared."},
+		} {
+			t.Run(model+"/"+tc.name, func(t *testing.T) {
+				body := map[string]any{"model": model}
+				if tc.present {
+					body["instructions"] = tc.value
+				}
+				applyCodexOAuthTransform(body, true, false)
+				value, present := body["instructions"]
+				require.Equal(t, tc.present, present)
+				require.Equal(t, tc.value, value)
+			})
+		}
 	}
-
-	result := applyCodexOAuthTransform(reqBody, true, false) // isCodexCLI=true
-
-	instructions, ok := reqBody["instructions"].(string)
-	require.True(t, ok)
-	require.NotEmpty(t, instructions)
-	require.True(t, result.Modified)
-}
-
-func TestApplyCodexOAuthTransform_GPT55SuppliesModelSpecificInstructions(t *testing.T) {
-	reqBody := map[string]any{
-		"model":        "gpt-5.5",
-		"instructions": "   ",
-	}
-
-	result := applyCodexOAuthTransform(reqBody, true, false)
-
-	instructions, ok := reqBody["instructions"].(string)
-	require.True(t, ok)
-	require.Contains(t, instructions, "You are Codex, a coding agent based on GPT-5")
-	require.NotContains(t, instructions, "You are GPT-5.1 running in the Codex CLI")
-	require.True(t, result.Modified)
-}
-
-func TestApplyCodexOAuthTransform_GPT6AstraSuppliesModelSpecificInstructions(t *testing.T) {
-	reqBody := map[string]any{
-		"model": "gpt-6-astra",
-	}
-
-	result := applyCodexOAuthTransform(reqBody, true, false)
-
-	instructions, ok := reqBody["instructions"].(string)
-	require.True(t, ok)
-	require.True(t, strings.HasPrefix(strings.TrimSpace(instructions), "You are Codex, an agent based on GPT-6."))
-	require.NotContains(t, instructions, "You are Codex, a coding agent based on GPT-5.")
-	require.True(t, result.Modified)
 }
 
 func TestApplyCodexOAuthTransform_NonCodexCLI_PreservesExistingInstructions(t *testing.T) {
@@ -2006,28 +1984,6 @@ func TestApplyCodexOAuthTransform_JsonObjectKeepsJsonInstructionInInput(t *testi
 	user, ok := input[1].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, "user", user["role"])
-}
-
-func TestIsInstructionsEmpty(t *testing.T) {
-	tests := []struct {
-		name     string
-		reqBody  map[string]any
-		expected bool
-	}{
-		{"missing field", map[string]any{}, true},
-		{"nil value", map[string]any{"instructions": nil}, true},
-		{"empty string", map[string]any{"instructions": ""}, true},
-		{"whitespace only", map[string]any{"instructions": "   "}, true},
-		{"non-string", map[string]any{"instructions": 123}, true},
-		{"valid string", map[string]any{"instructions": "hello"}, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := isInstructionsEmpty(tt.reqBody)
-			require.Equal(t, tt.expected, result)
-		})
-	}
 }
 
 // TestFilterCodexInput_PreservesReasoningStripsID covers the core OAuth-path

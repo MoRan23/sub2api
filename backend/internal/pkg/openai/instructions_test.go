@@ -33,8 +33,8 @@ func TestCodexBaseInstructionsForModel(t *testing.T) {
 		{" GPT-5.5 ", "You are Codex, a coding agent based on GPT-5"},
 		{"gpt-5.2", "You are GPT-5.2 running in the Codex CLI"},
 		{"gpt-5.1", "You are GPT-5.1 running in the Codex CLI"},
-		{"gpt-5", "You are Codex, a coding agent based on GPT-5"},   // 回退到最新（GPT-5.5）
-		{"gpt-5.4", "You are Codex, a coding agent based on GPT-5"}, // 未单独维护 → 最新
+		{"gpt-5", "You are Codex, a coding agent based on GPT-5"}, // 回退到最新（GPT-5.5）
+		{"gpt-5.4", "You are Codex, a coding agent based on GPT-5"},
 		{"gpt-5.3", "You are Codex, a coding agent based on GPT-5"}, // 未单独维护 → 最新
 		{"some-unknown-model", "You are Codex, a coding agent based on GPT-5"},
 		{"", "You are Codex, a coding agent based on GPT-5"}, // 回退到最新
@@ -48,5 +48,33 @@ func TestCodexBaseInstructionsForModel(t *testing.T) {
 		if !strings.HasPrefix(got, c.wantHead) {
 			t.Errorf("model %q: got prefix %q, want %q", c.model, firstLine(got), c.wantHead)
 		}
+	}
+}
+
+func TestCodexBaseInstructionsForModelCurrentManifestTemplates(t *testing.T) {
+	for _, tt := range []struct {
+		model string
+		want  string
+	}{
+		{"gpt-6-astra", instructionsGPT6Astra},
+		{"gpt-6", instructionsGPT6Astra},
+		{"gpt-5.6-sol", instructionsGPT56},
+		{"gpt-5.6-terra", instructionsGPT56},
+		{"gpt-5.6-luna", instructionsGPT56},
+		{"openai/GPT-5.6", instructionsGPT56},
+		{"gpt-5.5", instructionsGPT55},
+		{"gpt-5.4", instructionsGPT54},
+		{"gpt-daybreak-blue-latest", instructionsDaybreakBlue},
+		{"gpt-daybreak-red-latest", instructionsDaybreakRed},
+		{"codex-auto-review", instructionsDaybreakBlue},
+	} {
+		t.Run(tt.model, func(t *testing.T) {
+			if strings.TrimSpace(tt.want) == "" {
+				t.Fatal("official model template must not be empty")
+			}
+			if got := CodexBaseInstructionsForModel(tt.model); got != tt.want {
+				t.Fatal("model did not select its official manifest template")
+			}
+		})
 	}
 }

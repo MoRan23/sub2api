@@ -294,6 +294,15 @@ func TestOpenAIWSDownstreamWriteContext_CancellationOwnership(t *testing.T) {
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossTurns(t *testing.T) {
+	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
+		t.Run(accountType, func(t *testing.T) {
+			testOpenAIWSKeepLeaseAcrossTurns(t, accountType)
+		})
+	}
+}
+
+func testOpenAIWSKeepLeaseAcrossTurns(t *testing.T, accountType string) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
@@ -335,12 +344,12 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 		ID:          114,
 		Name:        "openai-ingress-session-lease",
 		Platform:    PlatformOpenAI,
-		Type:        AccountTypeAPIKey,
+		Type:        accountType,
 		Status:      StatusActive,
 		Schedulable: true,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"api_key": "sk-test",
+			"api_key": "sk-test", "access_token": "oauth-token",
 		},
 		Extra: map[string]any{
 			"responses_websockets_v2_enabled": true,
@@ -413,7 +422,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 		return message
 	}
 
-	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false}`)
+	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"tools":[{"type":"function","name":"python"},{"type":"function","name":"python_exec"}]}`)
 	firstTurnImageEvent := readMessage()
 	require.Equal(t, "response.output_item.done", gjson.GetBytes(firstTurnImageEvent, "type").String())
 	require.Equal(t, "completed", gjson.GetBytes(firstTurnImageEvent, "item.status").String())
@@ -422,7 +431,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 	require.Equal(t, "response.completed", gjson.GetBytes(firstTurnEvent, "type").String())
 	require.Equal(t, "resp_ingress_turn_1", gjson.GetBytes(firstTurnEvent, "response.id").String())
 
-	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"previous_response_id":"resp_ingress_turn_1"}`)
+	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"previous_response_id":"resp_ingress_turn_1","instructions":"Use exactly the caller's tools.","tools":[{"type":"function","name":"python"},{"type":"function","name":"python_exec"}]}`)
 	secondTurnEvent := readMessage()
 	require.Equal(t, "response.completed", gjson.GetBytes(secondTurnEvent, "type").String())
 	require.Equal(t, "resp_ingress_turn_2", gjson.GetBytes(secondTurnEvent, "response.id").String())
@@ -442,6 +451,13 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 	require.Equal(t, int64(1), metrics.AcquireTotal, "同一 ingress 会话多 turn 应只获取一次上游 lease")
 	require.Equal(t, 1, captureDialer.DialCount(), "同一 ingress 会话应保持同一上游连接")
 	require.Len(t, captureConn.writes, 2, "应向同一上游连接发送两轮 response.create")
+	for _, frame := range captureConn.writes {
+		payload := requestToJSONString(frame)
+		require.Equal(t, "python", gjson.Get(payload, "tools.0.name").String())
+		require.Equal(t, "python_exec", gjson.Get(payload, "tools.1.name").String())
+	}
+	require.Empty(t, gjson.Get(requestToJSONString(captureConn.writes[0]), "instructions").String())
+	require.Equal(t, "Use exactly the caller's tools.", gjson.Get(requestToJSONString(captureConn.writes[1]), "instructions").String())
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePromptCacheInheritsUntilExplicitSessionChange(t *testing.T) {
@@ -1513,7 +1529,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughModeR
 	}()
 
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
-	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"service_tier":"fast","reasoning":{"effort":"HIGH"}}`))
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"service_tier":"fast","reasoning":{"effort":"HIGH"},"instructions":"Use exactly the caller's tools.","tools":[{"type":"function","name":"python"},{"type":"function","name":"python_exec"}]}`))
 	cancelWrite()
 	require.NoError(t, err)
 
@@ -1554,6 +1570,10 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughModeR
 
 	require.Equal(t, 1, captureDialer.DialCount(), "passthrough 模式应直接建立上游 websocket")
 	require.Len(t, upstreamConn.writes, 1, "passthrough 模式应透传首条 response.create")
+	forwarded := requestToJSONString(upstreamConn.writes[0])
+	require.Equal(t, "python", gjson.Get(forwarded, "tools.0.name").String())
+	require.Equal(t, "python_exec", gjson.Get(forwarded, "tools.1.name").String())
+	require.Equal(t, "Use exactly the caller's tools.", gjson.Get(forwarded, "instructions").String())
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughBridgeBoundaries(t *testing.T) {
@@ -1794,7 +1814,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 		"reasoning":{"effort":"medium","context":"current_turn"},
 		"parallel_tool_calls":true,
 		"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true","x-codex-installation-id":"passthrough-frame-installation","x-codex-turn-metadata":"{\"installation_id\":\"passthrough-frame-nested\",\"session_id\":\"frame-session\"}"},
-		"tools":[{"type":"namespace","name":"collaboration","tools":[{"type":"function","name":"spawn_agent"}]}],
+		"tools":[{"type":"namespace","name":"collaboration","tools":[{"type":"function","name":"spawn_agent"},{"type":"function","name":"python"},{"type":"function","name":"python_exec"}]}],
 		"input":[{"type":"message","role":"user","content":"hello"}],
 		"tool_choice":{"type":"namespace","name":"collaboration"}
 	}`))
@@ -1843,6 +1863,9 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 	require.Equal(t, handshakeIdentity.ThreadID, gjson.Get(forwardedTurnMetadata, "thread_id").String())
 	require.False(t, gjson.Get(forwarded, `tools.#(type=="namespace")`).Exists())
 	require.Equal(t, "collaboration", gjson.Get(forwarded, `input.#(type=="additional_tools").tools.0.name`).String())
+	require.Equal(t, "python", gjson.Get(forwarded, `input.#(type=="additional_tools").tools.0.tools.1.name`).String())
+	require.Equal(t, "python_exec", gjson.Get(forwarded, `input.#(type=="additional_tools").tools.0.tools.2.name`).String())
+	require.Empty(t, gjson.Get(forwarded, "instructions").String())
 	require.Equal(t, "namespace", gjson.Get(forwarded, "tool_choice.type").String())
 	require.Equal(t, "collaboration", gjson.Get(forwarded, "tool_choice.name").String())
 	require.Equal(t, "medium", gjson.Get(forwarded, "reasoning.effort").String())

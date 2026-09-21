@@ -48,15 +48,15 @@ func TestRandomOpenAITestTemplatesStayWithinConfiguredSets(t *testing.T) {
 		if _, ok := imageTemplates[randomOpenAIImageTestPrompt()]; !ok {
 			t.Fatal("random image prompt was not selected from configured templates")
 		}
-		if got := openAITestInstructions(); got != openai.DefaultInstructions {
-			t.Fatalf("test instructions = %q, want openai.DefaultInstructions", got)
+		if got := openAITestInstructions("gpt-6-astra"); got != openai.CodexBaseInstructionsForModel("gpt-6-astra") {
+			t.Fatal("test instructions did not select the tested model's template")
 		}
 	}
 }
 
 func TestCreateOpenAITestPayloadUsesRandomDefaultsAndPreservesAccountShape(t *testing.T) {
 	for _, isOAuth := range []bool{false, true} {
-		payload := createOpenAITestPayload("gpt-test", isOAuth)
+		payload := createOpenAITestPayload("gpt-6-astra", isOAuth)
 		input, ok := payload["input"].([]map[string]any)
 		if !ok || len(input) != 1 {
 			t.Fatalf("input = %#v, want one message", payload["input"])
@@ -74,8 +74,8 @@ func TestCreateOpenAITestPayloadUsesRandomDefaultsAndPreservesAccountShape(t *te
 		}[content[0]["text"].(string)]; !ok {
 			t.Fatalf("unexpected Responses test input: %#v", content[0]["text"])
 		}
-		if got := payload["instructions"].(string); got != openai.DefaultInstructions {
-			t.Fatalf("Responses test instructions = %q, want openai.DefaultInstructions", got)
+		if got := payload["instructions"].(string); got != openai.CodexBaseInstructionsForModel("gpt-6-astra") {
+			t.Fatal("Responses test instructions did not select the tested model's template")
 		}
 		if payload["store"] == nil && isOAuth {
 			t.Fatal("OAuth Responses test must keep store=false")
@@ -102,9 +102,9 @@ func TestOpenAIChatCompletionsTestPayloadPreservesExplicitPrompt(t *testing.T) {
 }
 
 func TestOpenAICompactProbePayloadUsesRandomDefaults(t *testing.T) {
-	payload := createOpenAICompactProbePayload("gpt-test", true)
-	if got := payload["instructions"].(string); got != openai.DefaultInstructions {
-		t.Fatalf("compact instructions = %q, want openai.DefaultInstructions", got)
+	payload := createOpenAICompactProbePayload("gpt-5.6-sol", true)
+	if got := payload["instructions"].(string); got != openai.CodexBaseInstructionsForModel("gpt-5.6-sol") {
+		t.Fatal("compact instructions did not select the tested model's template")
 	}
 	if stream, _ := payload["stream"].(bool); !stream {
 		t.Fatal("native compact probe must use the streaming Responses wire")
