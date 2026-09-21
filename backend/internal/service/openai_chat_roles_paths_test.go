@@ -65,10 +65,8 @@ func TestOpenAIChatRolePathsPreserveAccountBoundaries(t *testing.T) {
 						require.Equal(t, "allowed_tools", gjson.GetBytes(out, "tool_choice.type").String())
 						require.Equal(t, "required", gjson.GetBytes(out, "tool_choice.mode").String())
 						require.False(t, gjson.GetBytes(out, "tool_choice.allowed_tools").Exists())
-						alias := gjson.GetBytes(out, "tools.0.name").String()
-						require.NotEmpty(t, alias)
-						require.NotEqual(t, "python", alias)
-						require.Equal(t, alias, gjson.GetBytes(out, "tool_choice.tools.0.name").String())
+						require.Equal(t, "python", gjson.GetBytes(out, "tools.0.name").String())
+						require.Equal(t, "python", gjson.GetBytes(out, "tool_choice.tools.0.name").String())
 						return
 					}
 					require.Equal(t, "/v1/chat/completions", upstream.lastReq.URL.Path)

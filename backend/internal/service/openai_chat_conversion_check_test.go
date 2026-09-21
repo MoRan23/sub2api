@@ -102,7 +102,7 @@ func TestOpenAIChatOAuthKeepsLaterSystemAtOriginalPosition(t *testing.T) {
 	require.Equal(t, "developer policy", gjson.GetBytes(out, "input.3.content").String())
 }
 
-func TestOpenAIChatOAuthAllowedToolsPreservesDefinitionsAndAliases(t *testing.T) {
+func TestOpenAIChatOAuthAllowedToolsPreservesDefinitionsAndNames(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"use python"}],"tools":[{"type":"function","function":{"name":"python","parameters":{"type":"object"}}},{"type":"function","function":{"name":"other","strict":true,"parameters":{"type":"object"}}}],"tool_choice":{"type":"allowed_tools","allowed_tools":{"mode":"required","tools":[{"type":"function","function":{"name":"python"}}]}}}`)
 	out := forwardOAuthChatCompletionsForUpstreamBody(t, body)
 	require.Equal(t, int64(2), gjson.GetBytes(out, "tools.#").Int())
@@ -111,8 +111,8 @@ func TestOpenAIChatOAuthAllowedToolsPreservesDefinitionsAndAliases(t *testing.T)
 	require.Equal(t, "allowed_tools", gjson.GetBytes(out, "tool_choice.type").String())
 	require.Equal(t, "required", gjson.GetBytes(out, "tool_choice.mode").String())
 	require.False(t, gjson.GetBytes(out, "tool_choice.allowed_tools").Exists())
-	require.Equal(t, gjson.GetBytes(out, "tools.0.name").String(), gjson.GetBytes(out, "tool_choice.tools.0.name").String())
-	require.NotEqual(t, "python", gjson.GetBytes(out, "tools.0.name").String())
+	require.Equal(t, "python", gjson.GetBytes(out, "tools.0.name").String())
+	require.Equal(t, "python", gjson.GetBytes(out, "tool_choice.tools.0.name").String())
 }
 
 func TestLegacyResponsesIngressMapsNestedAllowedTools(t *testing.T) {
