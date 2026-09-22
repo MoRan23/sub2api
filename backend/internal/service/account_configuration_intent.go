@@ -28,6 +28,9 @@ func withAccountConfigurationIntent(ctx context.Context, ids []int64, extra map[
 	if len(codex) > 0 && codex[0] != nil {
 		value := *codex[0]
 		value.CollectorProxyIDs = slices.Clone(value.CollectorProxyIDs)
+		if value.UseTicketProxy != nil {
+			value.UseTicketProxy = new(*value.UseTicketProxy)
+		}
 		if value.CollectorProxyID != nil {
 			proxyID := *value.CollectorProxyID
 			value.CollectorProxyID = &proxyID
@@ -65,6 +68,9 @@ func AccountConfigurationIntentFromContext(ctx context.Context, id int64) Accoun
 	if intent.CodexTurnState != nil {
 		value := *intent.CodexTurnState
 		value.CollectorProxyIDs = slices.Clone(value.CollectorProxyIDs)
+		if value.UseTicketProxy != nil {
+			value.UseTicketProxy = new(*value.UseTicketProxy)
+		}
 		if value.CollectorProxyID != nil {
 			proxyID := *value.CollectorProxyID
 			value.CollectorProxyID = &proxyID

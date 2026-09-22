@@ -201,9 +201,11 @@ func populateCodexTurnStateObservation(c *gin.Context, entry *FingerprintObserva
 		bodyLength = len(state.String())
 	}
 	var binding CodexTurnStateBundleBinding
+	keepAccountProxy := false
 	if observation.attempt != nil {
 		observation.attempt.mu.Lock()
 		binding = observation.attempt.OutboundBinding
+		keepAccountProxy = observation.attempt.keepAccountProxy
 		observation.attempt.mu.Unlock()
 	}
 	observation.mu.Lock()
@@ -211,7 +213,7 @@ func populateCodexTurnStateObservation(c *gin.Context, entry *FingerprintObserva
 		id := binding.ProxyID
 		observation.value.ActualProxyID = &id
 		observation.value.RouteSource = "account"
-		if observation.value.Action == "injected" {
+		if observation.value.Action == "injected" && !keepAccountProxy {
 			observation.value.RouteSource = "bundle"
 		}
 	}

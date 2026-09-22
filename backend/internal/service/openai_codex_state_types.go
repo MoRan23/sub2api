@@ -169,9 +169,12 @@ type CodexTurnStateSnapshot struct {
 // Public identity and Snapshot fields are frozen by Prepare. Callers must not
 // modify them. Response candidates are private and synchronized for WS readers.
 type CodexTurnStateAttempt struct {
-	WireMode                string
-	CollectionEligible      bool
-	OutboundBinding         CodexTurnStateBundleBinding
+	WireMode           string
+	CollectionEligible bool
+	OutboundBinding    CodexTurnStateBundleBinding
+	// The account preference is frozen with the request, independently of the
+	// package's issuing route. Retries retain both the preference and actual route.
+	keepAccountProxy        bool
 	OwnerAccountID          int64
 	AuthorizationGeneration string
 	OSFamily                string

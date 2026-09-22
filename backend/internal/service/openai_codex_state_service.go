@@ -158,10 +158,12 @@ func (s *CodexTurnStateService) PrepareForHTTP(ctx context.Context, account *Acc
 	if !codexTurnStateEligible(owner) {
 		return nil, nil
 	}
-	accountEnabled := CodexTurnStateConfigForAccount(owner).Enabled
+	cfg := CodexTurnStateConfigForAccount(owner)
+	accountEnabled := cfg.Enabled
 	passive := func(reason string) *CodexTurnStateAttempt {
 		return &CodexTurnStateAttempt{OwnerAccountID: owner.ID, AuthorizationGeneration: owner.OpenAIOAuthAuthorizationGeneration, OSFamily: codexTurnStateOS(owner), Model: strings.TrimSpace(finalModel), AccountEnabled: accountEnabled,
 			WireMode: binding.WireMode, CollectionEligible: binding.Valid() && binding.WireMode == "lite", OutboundBinding: binding,
+			keepAccountProxy:  !CodexTurnStateUseTicketProxy(cfg),
 			MaintenanceReason: reason, accountType: CodexTurnStateAccountTypeForAccount(owner), credentialEpoch: CodexTurnStateCredentialEpochForAccount(owner), historyService: s, preparedAt: s.now()}
 	}
 	// Preparing a physical request must not grant maintenance from a stale
@@ -233,7 +235,9 @@ func (s *CodexTurnStateService) PrepareForHTTP(ctx context.Context, account *Acc
 				a.Snapshot = CodexTurnStateSnapshot{Token: token, Version: record.Version, Source: record.Source, TokenLength: shape.TokenLength, CipherBlocks: shape.CipherBlocks, ExpiresAt: expiresAt,
 					BundleInvalidationVersion: record.BundleInvalidationVersion,
 					EncryptedCookieBundle:     record.EncryptedCookieBundle, AuthorizationGeneration: record.AuthorizationGeneration, CookieBundleExpiresAt: record.CookieBundleExpiresAt, BundleBinding: record.BundleBinding}
-				a.OutboundBinding = record.BundleBinding
+				if !a.keepAccountProxy {
+					a.OutboundBinding = record.BundleBinding
+				}
 				if _, err := s.codexCookieBundleForSnapshot(a); err != nil {
 					a.DiscardBundle("bundle_binding_invalid", binding)
 				}
@@ -272,7 +276,8 @@ func (s *CodexTurnStateService) RetryForHTTP(ctx context.Context, previous *Code
 		OwnerAccountID: previous.OwnerAccountID, AuthorizationGeneration: previous.AuthorizationGeneration,
 		OSFamily: previous.OSFamily, Model: previous.Model, Generation: previous.Generation,
 		WireMode: previous.WireMode, CollectionEligible: previous.CollectionEligible, OutboundBinding: previous.OutboundBinding,
-		Enabled: previous.Enabled, AccountEnabled: previous.AccountEnabled, MaintenanceReason: previous.MaintenanceReason,
+		keepAccountProxy: previous.keepAccountProxy,
+		Enabled:          previous.Enabled, AccountEnabled: previous.AccountEnabled, MaintenanceReason: previous.MaintenanceReason,
 		policyRevision: previous.policyRevision, Snapshot: previous.Snapshot, key: previous.key,
 		accountType: previous.accountType, baseVersion: previous.baseVersion, baseCacheIdentity: previous.baseCacheIdentity,
 		credentialEpoch: previous.credentialEpoch, historyService: s, preparedAt: s.now(),
@@ -316,7 +321,7 @@ func (s *CodexTurnStateService) ValidateAttempt(ctx context.Context, a *CodexTur
 	if err != nil || !codexTurnStateEligible(owner) || !CodexTurnStateConfigForAccount(owner).Enabled || CodexTurnStateGenerationForAccount(owner) != a.Generation {
 		return false
 	}
-	if a.Snapshot.Token != "" && (!a.Snapshot.BundleBinding.Valid() || a.Snapshot.BundleBinding.WireMode != a.WireMode || a.Snapshot.BundleBinding != a.OutboundBinding || CodexTurnStateAccountTypeForAccount(owner) != a.accountType || !a.Snapshot.ExpiresAt.After(s.now()) ||
+	if a.Snapshot.Token != "" && (!a.bundleMatchesOutbound() || CodexTurnStateAccountTypeForAccount(owner) != a.accountType || !a.Snapshot.ExpiresAt.After(s.now()) ||
 		(a.Snapshot.CookieBundleExpiresAt != nil && !a.Snapshot.CookieBundleExpiresAt.After(s.now())) ||
 		(a.Snapshot.AuthorizationGeneration != "" && a.Snapshot.AuthorizationGeneration != owner.OpenAIOAuthAuthorizationGeneration)) {
 		return false

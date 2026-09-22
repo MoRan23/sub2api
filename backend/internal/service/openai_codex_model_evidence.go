@@ -255,7 +255,7 @@ func observeCodexCookies(a *CodexTurnStateAttempt, diagnostic openaicookies.Diag
 			id := binding.ProxyID
 			observation.value.ActualProxyID = &id
 			observation.value.RouteSource = "account"
-			if observation.value.Action == "injected" {
+			if observation.value.Action == "injected" && !a.keepAccountProxy {
 				observation.value.RouteSource = "bundle"
 			}
 		}

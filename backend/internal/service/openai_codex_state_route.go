@@ -120,12 +120,14 @@ func (s *OpenAIGatewayService) selectOpenAIHTTPBundleRoute(ctx context.Context, 
 	if attempt.Snapshot.Token == "" {
 		return selected
 	}
-	if mode != "lite" && attempt.Snapshot.BundleBinding != binding {
+	if !attempt.keepAccountProxy && mode != "lite" && attempt.Snapshot.BundleBinding != binding {
 		attempt.DiscardBundle("bundle_route_unprepared", binding)
 		return selected
 	}
 	if resolved, ok := s.resolveOpenAIHTTPBundleProxy(ctx, account, attempt); ok {
-		selected.route = resolved
+		if !attempt.keepAccountProxy {
+			selected.route = resolved
+		}
 	} else {
 		attempt.DiscardBundle("bundle_proxy_unavailable", binding)
 	}
@@ -142,7 +144,7 @@ func (s *OpenAIGatewayService) resolveOpenAIHTTPBundleProxy(ctx context.Context,
 		return OpenAIEgressRoute{}, false
 	}
 	if binding.EgressKind == "direct" {
-		return OpenAIEgressRoute{}, owner.ProxyID == nil
+		return OpenAIEgressRoute{}, attempt.keepAccountProxy || owner.ProxyID == nil
 	}
 	if s.codexTurnStateProxyRepo == nil {
 		return OpenAIEgressRoute{}, false
@@ -164,11 +166,28 @@ func (s *OpenAIGatewayService) resolveOpenAIHTTPBundleProxy(ctx context.Context,
 
 func (s *OpenAIGatewayService) validateOpenAIHTTPBundleRoute(ctx context.Context, c *gin.Context, account *Account, attempt *CodexTurnStateAttempt) bool {
 	selected := codexHTTPRouteSelectionFromContext(c, account)
-	if selected == nil || attempt == nil || attempt.Snapshot.Token == "" {
+	if attempt == nil || attempt.Snapshot.Token == "" {
+		return true
+	}
+	if selected == nil && (!attempt.keepAccountProxy || attempt.Snapshot.BundleBinding == attempt.OutboundBinding) {
 		return true
 	}
 	route, ok := s.resolveOpenAIHTTPBundleProxy(ctx, account, attempt)
+	if selected == nil {
+		return ok
+	}
+	if attempt.keepAccountProxy {
+		return ok && selected.route == selected.baseline && attempt.OutboundBinding == selected.baselineBinding
+	}
 	return ok && route == selected.route
+}
+
+func (a *CodexTurnStateAttempt) bundleMatchesOutbound() bool {
+	if a == nil || !a.Snapshot.BundleBinding.Valid() || !a.OutboundBinding.Valid() ||
+		a.Snapshot.BundleBinding.WireMode != a.WireMode || a.OutboundBinding.WireMode != a.WireMode {
+		return false
+	}
+	return a.keepAccountProxy || a.Snapshot.BundleBinding == a.OutboundBinding
 }
 
 // Rebuild only after a strictly local, pre-send rejection. The original business

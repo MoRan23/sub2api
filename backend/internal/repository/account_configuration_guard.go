@@ -88,7 +88,11 @@ func accountConfigurationExtraPatch(ctx context.Context, ids []int64, updates ma
 			if filtered == nil {
 				filtered = make(map[string]any)
 			}
-			filtered[service.CodexTurnStateExtraKey] = service.CodexTurnStateConfigJSON(*config)
+			configPatch := service.CodexTurnStateConfigJSON(*config)
+			if config.UseTicketProxy == nil {
+				delete(configPatch, "use_ticket_proxy")
+			}
+			filtered[service.CodexTurnStateExtraKey] = configPatch
 		}
 	}
 	return filtered
@@ -124,10 +128,24 @@ func guardedCodexTurnStateGenerationExpression(extraExpression, credentialsExpre
 }
 
 // Compare legacy singleton and ordered-list settings by meaning, so a normal
-// background write or format-only migration cannot revoke a usable cache.
+// background write or format-only migration cannot revoke a usable cache. The
+// routing switch is intentionally excluded: it must not discard collected bundles.
 func canonicalCodexTurnStateConfigExpression(config string) string {
 	value := "(" + config + ")"
-	return "CASE WHEN " + value + " IS NULL THEN NULL ELSE (" + value + " - 'collector_proxy_id' - 'collector_proxy_ids') || jsonb_build_object('collector_proxy_ids', CASE WHEN " + value + " ? 'collector_proxy_ids' THEN " + value + " -> 'collector_proxy_ids' WHEN " + value + " -> 'collector_proxy_id' IS NOT NULL AND " + value + " -> 'collector_proxy_id' <> 'null'::jsonb THEN jsonb_build_array(" + value + " -> 'collector_proxy_id') ELSE '[]'::jsonb END) END"
+	return "CASE WHEN " + value + " IS NULL THEN NULL ELSE (" + value + " - 'collector_proxy_id' - 'collector_proxy_ids' - 'use_ticket_proxy') || jsonb_build_object('collector_proxy_ids', CASE WHEN " + value + " ? 'collector_proxy_ids' THEN " + value + " -> 'collector_proxy_ids' WHEN " + value + " -> 'collector_proxy_id' IS NOT NULL AND " + value + " -> 'collector_proxy_id' <> 'null'::jsonb THEN jsonb_build_array(" + value + " -> 'collector_proxy_id') ELSE '[]'::jsonb END) END"
+}
+
+// Bulk requests can cover accounts with different routing preferences. Resolve an
+// omitted switch separately from each locked row rather than defaulting all rows.
+func preserveOmittedCodexTurnStateRoutingPolicyExpression(expression string, patch map[string]any) string {
+	config, configured := patch[service.CodexTurnStateExtraKey].(map[string]any)
+	if !configured {
+		return expression
+	}
+	if _, explicit := config["use_ticket_proxy"]; explicit {
+		return expression
+	}
+	return "jsonb_set((" + expression + "), '{codex_turn_state,use_ticket_proxy}', CASE WHEN jsonb_typeof(extra #> '{codex_turn_state,use_ticket_proxy}') = 'boolean' THEN extra #> '{codex_turn_state,use_ticket_proxy}' ELSE 'true'::jsonb END)"
 }
 
 // Register after successful writes and before an owned transaction commits.

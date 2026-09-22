@@ -60,7 +60,7 @@ func (s *OpenAIGatewayService) prepareOpenAICodexStateHTTPRequest(c *gin.Context
 		}
 		_, binding := s.codexHTTPRouteBinding(request.Context(), account, mode)
 		attempt, err = s.codexTurnStateService.PrepareForHTTP(request.Context(), account, model, binding)
-		if attempt != nil && attempt.Snapshot.Token != "" && attempt.Snapshot.BundleBinding != binding {
+		if attempt != nil && attempt.Snapshot.Token != "" && !attempt.keepAccountProxy && attempt.Snapshot.BundleBinding != binding {
 			attempt.DiscardBundle("bundle_route_unprepared", binding)
 		}
 	}

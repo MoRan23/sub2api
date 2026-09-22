@@ -45,6 +45,8 @@ type CodexTurnStateConfig struct {
 	AccountType       string  `json:"account_type"`
 	CollectorProxyIDs []int64 `json:"collector_proxy_ids,omitzero"`
 	CollectorProxyID  *int64  `json:"collector_proxy_id,omitempty"`
+	// Nil preserves the existing value on update and defaults to true on create.
+	UseTicketProxy *bool `json:"use_ticket_proxy,omitempty"`
 }
 
 // Presence matters: a malformed new list cannot resurrect a legacy destination.
@@ -60,6 +62,12 @@ func (config *CodexTurnStateConfig) UnmarshalJSON(data []byte) error {
 			return errors.New("collector_proxy_ids must be an array")
 		}
 	}
+	if raw, exists := fields["use_ticket_proxy"]; exists {
+		raw = bytes.TrimSpace(raw)
+		if !bytes.Equal(raw, []byte("true")) && !bytes.Equal(raw, []byte("false")) {
+			return errors.New("use_ticket_proxy must be a boolean")
+		}
+	}
 	type plainConfig CodexTurnStateConfig
 	var decoded plainConfig
 	if err := json.Unmarshal(data, &decoded); err != nil {
@@ -67,6 +75,12 @@ func (config *CodexTurnStateConfig) UnmarshalJSON(data []byte) error {
 	}
 	*config = CodexTurnStateConfig(decoded)
 	return nil
+}
+
+// CodexTurnStateUseTicketProxy preserves the pre-switch behavior for old accounts
+// and clients. The flag controls business routing, not ticket or Cookie admission.
+func CodexTurnStateUseTicketProxy(config CodexTurnStateConfig) bool {
+	return config.UseTicketProxy == nil || *config.UseTicketProxy
 }
 
 // CodexTurnStateCollectorProxyIDs returns an independent ordered copy. A present
@@ -87,7 +101,7 @@ func IsCodexTurnStateAccount(account *Account) bool {
 }
 
 func CodexTurnStateConfigForAccount(account *Account) CodexTurnStateConfig {
-	config := CodexTurnStateConfig{AccountType: "auto", CollectorProxyIDs: []int64{}}
+	config := CodexTurnStateConfig{AccountType: "auto", CollectorProxyIDs: []int64{}, UseTicketProxy: new(true)}
 	if account == nil {
 		return config
 	}
@@ -102,6 +116,7 @@ func CodexTurnStateConfigForAccount(account *Account) CodexTurnStateConfig {
 	if config.AccountType == "" {
 		config.AccountType = "auto"
 	}
+	config.UseTicketProxy = new(CodexTurnStateUseTicketProxy(config))
 	config.CollectorProxyIDs = CodexTurnStateCollectorProxyIDs(config)
 	config.CollectorProxyID = nil
 	if len(config.CollectorProxyIDs) > 0 {
@@ -191,7 +206,7 @@ func codexTurnStateConfigMap(config CodexTurnStateConfig) map[string]any {
 // CodexTurnStateConfigJSON is the canonical stored representation. Legacy input
 // remains supported, but new writes never persist a second conflicting carrier.
 func CodexTurnStateConfigJSON(config CodexTurnStateConfig) map[string]any {
-	return map[string]any{"enabled": config.Enabled, "account_type": config.AccountType, "collector_proxy_ids": CodexTurnStateCollectorProxyIDs(config)}
+	return map[string]any{"enabled": config.Enabled, "account_type": config.AccountType, "collector_proxy_ids": CodexTurnStateCollectorProxyIDs(config), "use_ticket_proxy": CodexTurnStateUseTicketProxy(config)}
 }
 
 // ValidateCodexTurnStateConfigUpdate must run against the current locked row.
@@ -207,6 +222,8 @@ func ValidateCodexTurnStateConfigUpdate(current, target *Account, requested *Cod
 }
 
 func codexTurnStateConfigsEqual(a, b CodexTurnStateConfig) bool {
+	// Routing preference does not change the contents or validity of a bundle.
+	// Switching it must leave already collected tickets available immediately.
 	return a.Enabled == b.Enabled && a.AccountType == b.AccountType && slices.Equal(CodexTurnStateCollectorProxyIDs(a), CodexTurnStateCollectorProxyIDs(b))
 }
 
@@ -310,6 +327,9 @@ func preserveCodexTurnStateConfiguration(current, target *Account, requested *Co
 	}
 	if requested != nil {
 		config = *requested
+		if config.UseTicketProxy == nil {
+			config.UseTicketProxy = new(CodexTurnStateUseTicketProxy(oldConfig))
+		}
 	}
 	target.Extra[CodexTurnStateExtraKey] = codexTurnStateConfigMap(config)
 	generation := CodexTurnStateGenerationForAccount(current)

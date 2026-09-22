@@ -23,21 +23,43 @@ describe('Codex turn-state configuration', () => {
     expect(wrapper.find('select').exists()).toBe(false)
     await wrapper.get('input').setValue(true)
     const updated = wrapper.emitted('update:modelValue')?.[0]?.[0]
-    expect(updated).toEqual({ enabled: true, account_type: 'auto', collector_proxy_ids: [] })
+    expect(updated).toEqual({ enabled: true, account_type: 'auto', use_ticket_proxy: true, collector_proxy_ids: [] })
     await wrapper.setProps({ modelValue: updated as ReturnType<typeof defaultCodexTurnStateConfig> })
     expect(wrapper.get('select').text()).toContain('admin.accounts.codexTurnState.types.team_business')
     expect(wrapper.get('[data-testid="codex-turn-state-bundle-routing-hint"]').text()).toBe('admin.accounts.codexTurnState.bundleRoutingHint')
     expect(wrapper.get('[data-testid="codex-turn-state-proxy-empty"]').text()).toBe('admin.accounts.codexTurnState.noCollectorProxy')
     expect(wrapper.findComponent({ name: 'ProxySelector' }).exists()).toBe(false)
     await wrapper.get('[data-testid="codex-turn-state-proxy-add"]').trigger('click')
-    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toEqual({ enabled: true, account_type: 'auto', collector_proxy_ids: [1] })
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toEqual({ enabled: true, account_type: 'auto', use_ticket_proxy: true, collector_proxy_ids: [1] })
+  })
+
+  it('defaults to the issuing proxy and can retain tickets and cookies while using the account proxy', async () => {
+    const wrapper = render(undefined, { enabled: true, account_type: 'personal', collector_proxy_ids: [2] })
+    const toggle = wrapper.get<HTMLInputElement>('[data-testid="codex-turn-state-use-ticket-proxy"]')
+    expect(toggle.element.checked).toBe(true)
+    await toggle.setValue(false)
+    const updated = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as CodexTurnStateConfig
+    expect(updated).toEqual({ enabled: true, account_type: 'personal', collector_proxy_ids: [2], use_ticket_proxy: false })
+    await wrapper.setProps({ modelValue: updated })
+    await wrapper.get('input').setValue(false)
+    const disabled = wrapper.emitted('update:modelValue')?.at(-1)?.[0] as CodexTurnStateConfig
+    expect(disabled.enabled).toBe(false)
+    expect(disabled.use_ticket_proxy).toBe(false)
+    await wrapper.setProps({ modelValue: disabled })
+    expect(wrapper.find('[data-testid="codex-turn-state-use-ticket-proxy"]').exists()).toBe(false)
+    await wrapper.get('input').setValue(true)
+    expect((wrapper.emitted('update:modelValue')?.at(-1)?.[0] as CodexTurnStateConfig).use_ticket_proxy).toBe(false)
   })
 
   it('explains inheritance and prevents edits to shadow settings', async () => {
-    const wrapper = render(17, { enabled: true, account_type: 'auto', collector_proxy_ids: [1, 2] })
+    const wrapper = render(17, { enabled: true, account_type: 'auto', use_ticket_proxy: false, collector_proxy_ids: [1, 2] })
     expect(wrapper.text()).toContain('admin.accounts.codexTurnState.inherited{"id":17}')
     expect(wrapper.get('input').attributes('disabled')).toBeDefined()
     await wrapper.get('input').trigger('change')
+    const routeToggle = wrapper.get<HTMLInputElement>('[data-testid="codex-turn-state-use-ticket-proxy"]')
+    expect(routeToggle.element.checked).toBe(false)
+    expect(routeToggle.attributes('disabled')).toBeDefined()
+    await routeToggle.trigger('change')
     expect(wrapper.get('select').attributes('disabled')).toBeDefined()
     expect(wrapper.findAll('button').every(button => button.attributes('disabled') !== undefined)).toBe(true)
     for (const selector of wrapper.findAllComponents({ name: 'ProxySelector' })) {
@@ -84,7 +106,7 @@ describe('Codex turn-state configuration', () => {
 
   it('reads legacy values, honors explicit clearing, and clones arrays for form snapshots and requests', () => {
     const legacy = { enabled: true, account_type: 'auto' as const, collector_proxy_id: 9 }
-    expect(readCodexTurnStateConfig(legacy)).toEqual({ enabled: true, account_type: 'auto', collector_proxy_ids: [9] })
+    expect(readCodexTurnStateConfig(legacy)).toEqual({ enabled: true, account_type: 'auto', use_ticket_proxy: true, collector_proxy_ids: [9] })
     expect(readCodexTurnStateConfig({ ...legacy, collector_proxy_ids: [] }).collector_proxy_ids).toEqual([])
     const source = { ...legacy, collector_proxy_ids: [9, 7] }
     const editable = readCodexTurnStateConfig(source)
@@ -95,6 +117,9 @@ describe('Codex turn-state configuration', () => {
     expect(codexTurnStateConfigChanged(editable, initial)).toBe(true)
     expect(codexTurnStateConfigChanged(legacy, readCodexTurnStateConfig(legacy))).toBe(false)
     expect(codexTurnStateConfigChanged({ ...legacy, collector_proxy_ids: [] }, legacy)).toBe(true)
+    expect(readCodexTurnStateConfig({ ...legacy, use_ticket_proxy: false }).use_ticket_proxy).toBe(false)
+    expect(codexTurnStateConfigChanged({ ...legacy, use_ticket_proxy: false }, legacy)).toBe(true)
+    expect(codexTurnStateConfigChanged({ ...legacy, use_ticket_proxy: true }, legacy)).toBe(false)
   })
 
   it.each(['personalAccessToken', 'personal_access_token', 'agentIdentity', 'agent_identity'])('excludes unsupported auth mode %s', (mode) => {

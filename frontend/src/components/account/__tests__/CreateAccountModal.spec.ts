@@ -719,7 +719,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
     expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
     expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBeUndefined()
-    expect(importCodexSessionMock.mock.calls[0]?.[0]?.codex_turn_state).toEqual({ enabled: false, account_type: 'auto', collector_proxy_ids: [] })
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.codex_turn_state).toEqual({ enabled: false, account_type: 'auto', use_ticket_proxy: true, collector_proxy_ids: [] })
   })
 
   it('applies configured turn-state classification to standard OAuth session imports', async () => {
@@ -728,17 +728,18 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     const fields = wrapper.get('[data-testid="codex-turn-state-fields"]')
     await fields.get('input[type="checkbox"]').setValue(true)
     await fields.get('select').setValue('team_business')
+    await fields.get('[data-testid="codex-turn-state-use-ticket-proxy"]').setValue(false)
     await wrapper.get('form#create-account-form input[type="text"]').setValue('Team account')
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
     await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
     await flushPromises()
-    expect(importCodexSessionMock.mock.calls[0]?.[0]?.codex_turn_state).toEqual({ enabled: true, account_type: 'team_business', collector_proxy_ids: [] })
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.codex_turn_state).toEqual({ enabled: true, account_type: 'team_business', use_ticket_proxy: false, collector_proxy_ids: [] })
   })
 
   it('sends an independent ordered collector proxy list for OAuth imports', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')
-    const config = { enabled: true, account_type: 'team_business', collector_proxy_ids: [9, 7] }
+    const config = { enabled: true, account_type: 'team_business', use_ticket_proxy: true, collector_proxy_ids: [9, 7] }
     wrapper.getComponent({ name: 'CodexTurnStateFields' }).vm.$emit('update:modelValue', config)
     await wrapper.get('form#create-account-form input[type="text"]').setValue('Multiple collector proxies')
     await wrapper.get('form#create-account-form').trigger('submit.prevent')

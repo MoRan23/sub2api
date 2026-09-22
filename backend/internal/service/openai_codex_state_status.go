@@ -185,6 +185,7 @@ func (s *CodexTurnStateService) validateCodexTurnStateStatusBundles(ctx context.
 		results = make(map[int64]codexTurnStateStatusProxy)
 	}
 	byModel := make(map[string]CodexTurnStateRecord, len(records))
+	useTicketProxy := CodexTurnStateUseTicketProxy(CodexTurnStateConfigForAccount(owner))
 	for _, record := range records {
 		if record.Generation == CodexTurnStateGenerationForAccount(owner) {
 			byModel[record.Model] = record
@@ -201,13 +202,13 @@ func (s *CodexTurnStateService) validateCodexTurnStateStatusBundles(ctx context.
 		if !binding.Valid() {
 			reason = "bundle_binding_invalid"
 		} else if binding.EgressKind == "direct" {
-			if owner.ProxyID != nil {
+			if useTicketProxy && owner.ProxyID != nil {
 				reason = "bundle_proxy_unavailable"
 			}
 		} else {
 			allowed := codexTurnStateProxyAllowed(CodexTurnStateCollectorProxyIDs(CodexTurnStateConfigForAccount(owner)), binding.ProxyID)
 			isAccountRoute := owner.ProxyID != nil && *owner.ProxyID == binding.ProxyID
-			if (!allowed && !isAccountRoute) || (binding.WireMode == "responses" && !isAccountRoute) || s.proxies == nil {
+			if (!allowed && !isAccountRoute) || (useTicketProxy && binding.WireMode == "responses" && !isAccountRoute) || s.proxies == nil {
 				reason = "bundle_proxy_unavailable"
 			} else {
 				result, exists := results[binding.ProxyID]

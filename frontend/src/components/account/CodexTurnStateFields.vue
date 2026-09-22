@@ -47,6 +47,15 @@
             data-testid="codex-turn-state-proxy-add" @click="addProxy">{{ t(`${prefix}.addCollectorProxy`) }}</button>
         </div>
         <p class="input-hint">{{ t(`${prefix}.proxyHint`) }}</p>
+        <label class="mt-3 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+          <input
+            type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600"
+            data-testid="codex-turn-state-use-ticket-proxy"
+            :checked="modelValue.use_ticket_proxy !== false" :disabled="inheritedFrom != null"
+            @change="update({ use_ticket_proxy: ($event.target as HTMLInputElement).checked })"
+          />
+          {{ t(`${prefix}.useTicketProxy`) }}
+        </label>
         <p class="input-hint" data-testid="codex-turn-state-bundle-routing-hint">{{ t(`${prefix}.bundleRoutingHint`) }}</p>
         <p class="input-hint">{{ t(`${prefix}.proxyRotationHint`) }}</p>
       </div>

@@ -555,7 +555,34 @@ describe('EditAccountModal', () => {
     const fields = wrapper.getComponent({ name: 'CodexTurnStateFields' })
     fields.vm.$emit('update:modelValue', { enabled: false, account_type: 'team_business', collector_proxy_ids: [] })
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
-    expect(updateAccountMock.mock.calls[0]?.[1]?.codex_turn_state).toEqual({ enabled: false, account_type: 'team_business', collector_proxy_ids: [] })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.codex_turn_state).toEqual({ enabled: false, account_type: 'team_business', use_ticket_proxy: true, collector_proxy_ids: [] })
+  })
+
+  it('saves a deliberate issuing-proxy change without disabling the cache or changing collector proxies', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.codex_turn_state = { enabled: true, account_type: 'personal', collector_proxy_ids: [9, 7] }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('[data-testid="codex-turn-state-use-ticket-proxy"]').setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.codex_turn_state).toEqual({
+      enabled: true, account_type: 'personal', use_ticket_proxy: false, collector_proxy_ids: [9, 7],
+    })
+    expect(account.codex_turn_state).not.toHaveProperty('use_ticket_proxy')
+    wrapper.unmount()
+  })
+
+  it('preserves a disabled issuing-proxy setting on unrelated edits', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.codex_turn_state = { enabled: true, account_type: 'personal', use_ticket_proxy: false, collector_proxy_ids: [9] }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('[data-testid="codex-turn-state-use-ticket-proxy"]').element.checked).toBe(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty('codex_turn_state')
+    wrapper.unmount()
   })
 
   it('persists a deliberate proxy reorder without mutating the original account snapshot or sharing the request array', async () => {
@@ -564,7 +591,7 @@ describe('EditAccountModal', () => {
     updateAccountMock.mockReset().mockResolvedValue(account)
     const wrapper = mountModal(account)
     await flushPromises()
-    const config = { enabled: true, account_type: 'personal', collector_proxy_ids: [7, 9] }
+    const config = { enabled: true, account_type: 'personal', use_ticket_proxy: true, collector_proxy_ids: [7, 9] }
     wrapper.getComponent({ name: 'CodexTurnStateFields' }).vm.$emit('update:modelValue', config)
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     const sent = updateAccountMock.mock.calls[0]?.[1]?.codex_turn_state

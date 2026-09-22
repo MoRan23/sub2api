@@ -1178,6 +1178,8 @@ export interface OllamaCloudUsageSettings {
 export interface CodexTurnStateConfig {
   enabled: boolean
   account_type: 'auto' | 'personal' | 'team_business'
+  /** Defaults to true for accounts created before the setting was introduced. */
+  use_ticket_proxy?: boolean
   collector_proxy_ids?: number[]
   /** Read compatibility for servers and accounts using the former single proxy setting. */
   collector_proxy_id?: number | null

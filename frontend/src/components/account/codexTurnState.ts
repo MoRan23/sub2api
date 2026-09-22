@@ -1,6 +1,6 @@
 import type { Account, CodexTurnStateConfig } from '@/types'
 
-export type EditableCodexTurnStateConfig = CodexTurnStateConfig & { collector_proxy_ids: number[] }
+export type EditableCodexTurnStateConfig = CodexTurnStateConfig & { collector_proxy_ids: number[]; use_ticket_proxy: boolean }
 
 export function collectorProxyIDs(config?: Pick<CodexTurnStateConfig, 'collector_proxy_ids' | 'collector_proxy_id'>): number[] {
   if (Array.isArray(config?.collector_proxy_ids)) return [...config.collector_proxy_ids]
@@ -8,15 +8,21 @@ export function collectorProxyIDs(config?: Pick<CodexTurnStateConfig, 'collector
 }
 
 export function defaultCodexTurnStateConfig(): EditableCodexTurnStateConfig {
-  return { enabled: false, account_type: 'auto', collector_proxy_ids: [] }
+  return { enabled: false, account_type: 'auto', use_ticket_proxy: true, collector_proxy_ids: [] }
 }
 
 export function readCodexTurnStateConfig(config?: CodexTurnStateConfig): EditableCodexTurnStateConfig {
-  return config ? { enabled: config.enabled, account_type: config.account_type, collector_proxy_ids: collectorProxyIDs(config) } : defaultCodexTurnStateConfig()
+  return config ? {
+    enabled: config.enabled,
+    account_type: config.account_type,
+    use_ticket_proxy: config.use_ticket_proxy !== false,
+    collector_proxy_ids: collectorProxyIDs(config),
+  } : defaultCodexTurnStateConfig()
 }
 
 export function codexTurnStateConfigChanged(current: CodexTurnStateConfig, initial: CodexTurnStateConfig): boolean {
   return current.enabled !== initial.enabled || current.account_type !== initial.account_type ||
+    (current.use_ticket_proxy !== false) !== (initial.use_ticket_proxy !== false) ||
     JSON.stringify(collectorProxyIDs(current)) !== JSON.stringify(collectorProxyIDs(initial))
 }
 

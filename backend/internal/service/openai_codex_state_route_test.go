@@ -207,6 +207,65 @@ func TestCodexHTTPBundleOrdinaryResponsesNeverSwitchConfiguredRoute(t *testing.T
 	finishCodexTurnStateHTTPAttempt(state, selected.attempt, false)
 }
 
+func TestCodexHTTPBundleProxySwitchOffKeepsIssuerValidation(t *testing.T) {
+	state, _, account := newCodexStateTestService(t)
+	seedCodexHTTPRouteBundle(t, state, account, "gpt-5", "lite")
+	codexProxySwitchSet(account, false)
+	proxies := &codexHTTPRouteProxyRepo{proxy: Proxy{ID: 2, Protocol: "http", Host: "collector.invalid", Port: 8080, Status: StatusActive, RouteGeneration: 1}}
+	s := &OpenAIGatewayService{codexTurnStateService: state, codexTurnStateProxyRepo: proxies}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set(responsesLiteHeader, "true")
+	selected := s.selectOpenAIHTTPBundleRoute(context.Background(), c, account, "gpt-5", []byte(`{"model":"gpt-5","input":"hello"}`))
+	require.NotEmpty(t, selected.attempt.Snapshot.Token)
+	require.Empty(t, selected.route.ProxyURL)
+	require.True(t, s.validateOpenAIHTTPBundleRoute(context.Background(), c, account, selected.attempt))
+	proxies.proxy.RouteGeneration++
+	require.False(t, s.validateOpenAIHTTPBundleRoute(context.Background(), c, account, selected.attempt), "the switch does not bypass issuer generation checks")
+	finishCodexTurnStateHTTPAttempt(state, selected.attempt, false)
+
+	c.Set(codexHTTPRouteSelectionKey, nil)
+	c.Request.Header.Del(responsesLiteHeader)
+	ordinary := s.selectOpenAIHTTPBundleRoute(context.Background(), c, account, "gpt-5", []byte(`{"model":"gpt-5","input":"hello"}`))
+	require.Empty(t, ordinary.attempt.Snapshot.Token, "the switch does not permit a Lite bundle on ordinary Responses")
+	require.Equal(t, "bundle_protocol_mismatch", ordinary.attempt.MaintenanceReason)
+	finishCodexTurnStateHTTPAttempt(state, ordinary.attempt, false)
+	SetOpenAIClientTransport(c, OpenAIClientTransportWS)
+	require.Nil(t, s.selectOpenAIHTTPBundleRoute(context.Background(), c, account, "gpt-5", []byte(`{"model":"gpt-5","input":"hello"}`)))
+}
+
+func TestCodexHTTPBundleProxySwitchOffOrdinaryStatusAndAuxiliaryPreparation(t *testing.T) {
+	state, repo, account := newCodexStateTestService(t)
+	token := seedCodexHTTPRouteBundle(t, state, account, "gpt-5", "responses")
+	codexProxySwitchSet(account, false)
+	proxies := &codexHTTPRouteProxyRepo{proxy: Proxy{ID: 2, Protocol: "http", Host: "collector.invalid", Port: 8080, Status: StatusActive, RouteGeneration: 1}}
+	state.SetProxyRepository(proxies)
+	s := &OpenAIGatewayService{codexTurnStateService: state, codexTurnStateProxyRepo: proxies}
+	status, err := state.GetStatus(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.Len(t, status.Models, 1)
+	require.True(t, status.Models[0].CacheAvailable)
+	require.Empty(t, status.Models[0].BundleUnavailableReason)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	request, err := http.NewRequest(http.MethodPost, "https://chatgpt.com/backend-api/codex/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	require.NoError(t, err)
+	request.Header.Set("Authorization", "Bearer "+account.GetCredential("access_token"))
+	request.Header.Set("ChatGPT-Account-Id", account.GetCredential("chatgpt_account_id"))
+	prepared := s.prepareOpenAICodexStateHTTPRequest(c, account, request)
+	require.Equal(t, token, prepared.Header.Get(openAICodexTurnStateHeader))
+	collector, ok := prepared.Context().Value(codexTurnStateHTTPRequestKey{}).(*codexTurnStateHTTPCollector)
+	require.True(t, ok)
+	require.Equal(t, "direct", collector.attempt.OutboundBinding.EgressKind)
+	require.Equal(t, int64(2), collector.attempt.Snapshot.BundleBinding.ProxyID)
+	before, err := repo.Get(context.Background(), collector.attempt.key)
+	require.NoError(t, err)
+	finishCodexTurnStateHTTPAttempt(state, collector.attempt, false)
+	after, err := repo.Get(context.Background(), collector.attempt.key)
+	require.NoError(t, err)
+	require.Equal(t, before.EncryptedCookieBundle, after.EncryptedCookieBundle)
+}
+
 func TestCodexHTTPBundleDirectSnapshotCannotBypassNewAccountProxy(t *testing.T) {
 	state, _, account := newCodexStateTestService(t)
 	a, err := state.PrepareForHTTP(context.Background(), account, "gpt-5", codexStateTestBinding())

@@ -125,7 +125,7 @@ func (s *CodexTurnStateService) codexCookieBundleForSnapshot(a *CodexTurnStateAt
 		return openaicookies.Bundle{}, openaicookies.ErrBundleInvalid
 	}
 	var envelope codexTurnStateCookieEnvelope
-	if json.Unmarshal([]byte(plain), &envelope) != nil || envelope.Version != 2 || !envelope.Binding.Valid() || envelope.Binding != a.Snapshot.BundleBinding || envelope.Binding != a.OutboundBinding || envelope.Binding.WireMode != a.WireMode || envelope.OwnerAccountID != a.OwnerAccountID || envelope.Model != a.Model || envelope.AuthorizationGeneration != a.AuthorizationGeneration {
+	if json.Unmarshal([]byte(plain), &envelope) != nil || envelope.Version != 2 || envelope.Binding != a.Snapshot.BundleBinding || !a.bundleMatchesOutbound() || envelope.OwnerAccountID != a.OwnerAccountID || envelope.Model != a.Model || envelope.AuthorizationGeneration != a.AuthorizationGeneration {
 		return openaicookies.Bundle{}, openaicookies.ErrBundleInvalid
 	}
 	if !envelope.Bundle.ValidAt(s.now()) || envelope.Bundle.ExpiresAt.After(a.Snapshot.ExpiresAt) {

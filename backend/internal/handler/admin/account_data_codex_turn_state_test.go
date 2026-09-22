@@ -27,7 +27,7 @@ func TestAccountDataCodexTurnStatePortableRoundTrip(t *testing.T) {
 				"note": "keep", "codex_turn_state_generation": "must-not-leak-generation",
 				"codex_turn_state_credential_epoch": "must-not-leak-credential-epoch",
 				"codex_turn_state_runtime":          map[string]any{"token": "must-not-leak-token"},
-				"codex_turn_state":                  map[string]any{"enabled": true, "account_type": "team_business", "collector_proxy_ids": []int64{alternateID, collectorID, businessID}, "token": "must-not-leak-nested", "collector_attempt_id": "must-not-leak-attempt", "collector_extended_count": 2},
+				"codex_turn_state":                  map[string]any{"enabled": true, "account_type": "team_business", "collector_proxy_ids": []int64{alternateID, collectorID, businessID}, "use_ticket_proxy": false, "token": "must-not-leak-nested", "collector_attempt_id": "must-not-leak-attempt", "collector_extended_count": 2},
 			}},
 		{ID: 8, Name: "shadow", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, ParentAccountID: &parentID},
 	}
@@ -46,6 +46,8 @@ func TestAccountDataCodexTurnStatePortableRoundTrip(t *testing.T) {
 	require.Equal(t, map[string]any{"note": "keep"}, account.Extra)
 	require.NotNil(t, account.CodexTurnState)
 	require.True(t, account.CodexTurnState.Enabled)
+	require.NotNil(t, account.CodexTurnState.UseTicketProxy)
+	require.False(t, *account.CodexTurnState.UseTicketProxy)
 	require.Nil(t, account.CodexTurnState.CollectorProxyID)
 	require.Empty(t, account.CodexTurnState.CollectorProxyIDs)
 	require.Nil(t, account.CodexTurnStateProxyKey)
@@ -76,6 +78,8 @@ func TestAccountDataCodexTurnStatePortableRoundTrip(t *testing.T) {
 	require.Nil(t, created.CodexTurnState.CollectorProxyID)
 	require.Equal(t, "team_business", created.CodexTurnState.AccountType)
 	require.True(t, created.CodexTurnState.Enabled)
+	require.NotNil(t, created.CodexTurnState.UseTicketProxy)
+	require.False(t, *created.CodexTurnState.UseTicketProxy)
 	require.Equal(t, map[string]any{"note": "keep"}, created.Extra)
 }
 
@@ -102,6 +106,7 @@ func TestImportCodexTurnStateRejectsUnmappedLocalIDs(t *testing.T) {
 	config, err := importCodexTurnStateConfig(DataAccount{Extra: map[string]any{"codex_turn_state": map[string]any{"enabled": true}}}, nil)
 	require.NoError(t, err)
 	require.True(t, config.Enabled)
+	require.True(t, service.CodexTurnStateUseTicketProxy(*config), "old backups retain the previous routing behavior")
 	require.Equal(t, "auto", config.AccountType)
 	require.Nil(t, config.CollectorProxyID, "null collector stays passive")
 	config, err = importCodexTurnStateConfig(DataAccount{}, nil)

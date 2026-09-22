@@ -3300,6 +3300,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 				return 0, err
 			}
 			extraExpression += " || $" + itoa(idx) + "::jsonb"
+			extraExpression = preserveOmittedCodexTurnStateRoutingPolicyExpression(extraExpression, updates.Extra)
 			args = append(args, payload)
 			idx++
 			if upstreamBillingProbeExplicitlyDisabled(updates.Extra) || upstreamBillingProbeSnapshotClearRequested(updates.Extra) {
