@@ -12,8 +12,8 @@ import (
 
 func codexHistoryProofFixture(now time.Time) service.CodexTurnStateHistoryProof {
 	return service.CodexTurnStateHistoryProof{
-		OwnerAccountID: 17, Model: "gpt-5.4", Generation: "generation-1",
-		CredentialEpoch: "credential-1", ModelPolicyRevision: "policy-1", AccountType: "personal",
+		OwnerAccountID: 17, OSFamily: "windows", Model: "gpt-5.4", Generation: "generation-1",
+		CredentialEpoch: "00000000-0000-4000-8000-000000000011", ModelPolicyRevision: "policy-1", AccountType: "personal",
 		BusinessAt: now.Add(-10 * time.Minute), ObservedAt: now.Add(-9 * time.Minute),
 		IssuedAt: now.Add(-10 * time.Minute), ExpiresAt: now.Add(50 * time.Minute),
 		TokenLength: 312, CipherBlocks: 11, EnvelopeValid: true, Delivered: true,

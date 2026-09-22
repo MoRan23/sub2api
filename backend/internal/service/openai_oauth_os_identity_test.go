@@ -24,6 +24,7 @@ func osIdentityTestAccount(t *testing.T, id int64) *Account {
 	profiles, err := BuildOpenAIOAuthOSProfiles(account, nil)
 	require.NoError(t, err)
 	account.OpenAIOAuthOSProfiles = profiles
+	authorizeOpenAIOAuthTestAccount(account, OpenAIOAuthOSFamilies()...)
 	return account
 }
 
@@ -43,7 +44,7 @@ func TestOAuthOSIdentityFinalWireUsesMatchingUAAndInstallation(t *testing.T) {
 				profile := account.OpenAIOAuthOSProfiles.Profiles[osFamily]
 				c := osIdentityTestContext(t, profile.UserAgent)
 				body := []byte(`{"model":"gpt-5.4","stream":true,"input":"hello"}`)
-				svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: force}}}
+				svc := &OpenAIGatewayService{accountRepo: newAuthorizedOpenAIOAuthTestRepo(account), cfg: &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: force}}}
 				capture := CaptureOpenAIOAuthIdentity(c, body, "logical")
 				plan, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), c, account, capture, OpenAIOAuthIdentityPlanOptions{InstallationPolicy: OpenAIOAuthInstallationAccountPin}, nil)
 				require.NoError(t, err)
@@ -91,6 +92,7 @@ func osIdentityDailyService() (*OpenAIGatewayService, *osIdentityDailyRepository
 func TestOAuthOSIdentityDailyRootsFreezeDateAndSeparateOwners(t *testing.T) {
 	svc, repo := osIdentityDailyService()
 	account := osIdentityTestAccount(t, 703)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	c := osIdentityTestContext(t, account.OpenAIOAuthOSProfiles.Profiles[OpenAIOSLinux].UserAgent)
 	setOpenAIClientRequestedStream(c, true)
 	capture := CaptureOpenAIOAuthIdentity(c, []byte(`{"stream":true,"input":"hello"}`), "shared-logical")
@@ -112,6 +114,7 @@ func TestOAuthOSIdentityDailyRootsFreezeDateAndSeparateOwners(t *testing.T) {
 	require.Equal(t, firstRoot, continued.TurnIdentity.SessionID)
 	require.Equal(t, 1, repo.calls)
 	replacement := osIdentityTestAccount(t, 704)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account, replacement)
 	other, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), c, replacement, capture, options, &plan)
 	require.NoError(t, err)
 	require.Equal(t, OpenAIOSLinux, other.OSFamily)
@@ -133,7 +136,7 @@ func TestOAuthOSIdentityDailyRootsFreezeDateAndSeparateOwners(t *testing.T) {
 
 func TestOAuthOSIdentityDisabledDailyKeepsSeparateStreamMappingsAndSyncRoots(t *testing.T) {
 	account := osIdentityTestAccount(t, 705)
-	svc := &OpenAIGatewayService{}
+	svc := &OpenAIGatewayService{accountRepo: newAuthorizedOpenAIOAuthTestRepo(account)}
 	identities := map[string]OpenAICodexTurnIdentity{}
 	for _, osFamily := range []string{OpenAIOSWindows, OpenAIOSMacOS} {
 		c := osIdentityTestContext(t, account.OpenAIOAuthOSProfiles.Profiles[osFamily].UserAgent)
@@ -159,7 +162,7 @@ func TestOAuthOSIdentitySafePairAndInstallationSwitches(t *testing.T) {
 		c.Set(openAICodexFingerprintPolicyContextKey, CodexFingerprintPolicySnapshot{MasterEnabled: true, InstallationIDEnabled: pin, TurnIdentityEnabled: true, ClientIdentityEnabled: false})
 		body := []byte(`{"stream":true,"input":"hello","client_metadata":{"x-codex-installation-id":"client-installation"}}`)
 		capture := CaptureOpenAIOAuthIdentity(c, body, "logical")
-		svc := &OpenAIGatewayService{}
+		svc := &OpenAIGatewayService{accountRepo: newAuthorizedOpenAIOAuthTestRepo(account)}
 		plan, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), c, account, capture, OpenAIOAuthIdentityPlanOptions{}, nil)
 		require.NoError(t, err)
 		plan, err = FinalizeOpenAICodexWirePlan(plan, "turn", CodexModelCapabilities{})
@@ -187,6 +190,7 @@ func TestOAuthOSIdentityHTTPUsesSelectedSyncRoot(t *testing.T) {
 			c := osIdentityTestContext(t, account.OpenAIOAuthOSProfiles.Profiles[OpenAIOSLinux].UserAgent)
 			body := []byte(`{"model":"gpt-5.4","stream":false,"instructions":"test","input":"hello"}`)
 			svc, repo := osIdentityDailyService()
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			upstream := &httpUpstreamRecorder{resp: successfulInstallationTestResponse()}
 			if passthrough {
 				upstream.resp = &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"))}
@@ -206,6 +210,7 @@ func TestOAuthOSIdentityHTTPUsesSelectedSyncRoot(t *testing.T) {
 func TestOAuthOSIdentityProfileOnlyCapturesEnvironmentWithoutAllocatingRoots(t *testing.T) {
 	account := osIdentityTestAccount(t, 708)
 	svc, daily := osIdentityDailyService()
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	c := osIdentityTestContext(t, "generic-client")
 	captureOpenAIOAuthProfileRequest(c, []byte(`{"input":[{"role":"user","content":[{"type":"input_text","text":"<environment_context><cwd>/home/test/project</cwd></environment_context>"}]}]}`))
 	plan, err := svc.ResolveOpenAIOAuthProfileIdentityPlan(context.Background(), c, account, OpenAIOAuthInstallationPreserve)

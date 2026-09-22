@@ -678,7 +678,20 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 		} else {
 			extra[openAIPinnedInstallationIDKey] = uuid.NewString()
 		}
-		if existing != nil {
+		authorizedDefaultOS := false
+		if IsOpenAIOAuthOSProfileOwner(existing) {
+			existing, authorizedDefaultOS, err = s.authorizeCRSOpenAIOAuthCredentials(ctx, existing, credentials)
+			if err != nil {
+				item.Action = "failed"
+				item.Error = "default OS authorization failed: " + err.Error()
+				result.Failed++
+				result.Items = append(result.Items, item)
+				continue
+			}
+			// Provider credentials belong to the private authorization transaction.
+			// Ordinary configuration writes only carry its durable default mirror.
+			credentials = PreserveOpenAIOAuthProviderCredentials(existing.Credentials, mergeMap(existing.Credentials, credentials))
+		} else if existing != nil {
 			credentials = mergeMap(existing.Credentials, credentials)
 		}
 		reconcileCRSUpstreamBillingProbeExtra(existing, PlatformOpenAI, AccountTypeOAuth, credentials, extra)
@@ -739,7 +752,17 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 			continue
 		}
 
-		proxySource := s.refreshOpenAIOAuthAfterSync(ctx, existing)
+		var proxySource *Account
+		if authorizedDefaultOS {
+			// The import already exchanged and durably bound fresh credentials.
+			// Reload after configuration update for current proxy propagation.
+			proxySource, err = s.accountRepo.GetByID(ctx, existing.ID)
+			if err != nil {
+				slog.Warn("crs_sync_openai_authorization_durable_read_failed", "account_id", existing.ID, "error", err)
+			}
+		} else {
+			proxySource = s.refreshOpenAIOAuthAfterSync(ctx, existing)
+		}
 
 		// 母账号 proxy 经 CRS 改动后同步到其 spark 影子,避免影子保留旧 proxy 出现出站漂移(外审第8轮)。
 		// 影子 proxy 恒继承母账号(创建即继承、AdminService 编辑也传播)。best-effort:母账号本身已成功
@@ -1430,11 +1453,72 @@ func crsExportAccounts(ctx context.Context, client *http.Client, baseURL, adminT
 	return &parsed, nil
 }
 
+// CRS exports predate OS-specific authorization. Existing owners can therefore
+// import credentials only into their persisted default slot, after a server-side
+// exchange verifies the upstream subject. Omitted provider fields are preserved.
+func (s *CRSSyncService) authorizeCRSOpenAIOAuthCredentials(ctx context.Context, existing *Account, imported map[string]any) (*Account, bool, error) {
+	if !crsOpenAIProviderCredentialsChanged(existing.Credentials, imported) {
+		return existing, false, nil
+	}
+	refreshToken := strings.TrimSpace(credentialString(imported, "refresh_token"))
+	if refreshToken == "" {
+		return nil, false, errors.New("changed OAuth credentials require an imported refresh token for server verification")
+	}
+	if s.openaiOAuthService == nil {
+		return nil, false, errors.New("OpenAI OAuth authorization service is unavailable")
+	}
+	durable, err := s.accountRepo.GetByID(ctx, existing.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !IsOpenAIOAuthOSProfileOwner(durable) {
+		return nil, false, errors.New("account no longer supports independent OS authorization")
+	}
+	profile, err := ResolveOpenAIOAuthOSProfile(ctx, s.accountRepo, durable, "")
+	if err != nil {
+		return nil, false, err
+	}
+	info, err := s.openaiOAuthService.AuthorizeAccountWithRefreshToken(ctx, durable.ID, profile.OSFamily, refreshToken, strings.TrimSpace(credentialString(imported, "client_id")))
+	if err != nil {
+		return nil, false, err
+	}
+	if info == nil || info.Account == nil {
+		return nil, false, errors.New("OpenAI OAuth authorization did not return a durable account")
+	}
+	return info.Account, true, nil
+}
+
+func crsOpenAIProviderCredentialsChanged(current, imported map[string]any) bool {
+	for key, value := range OpenAIOAuthProviderCredentials(imported) {
+		existing := current[key]
+		if key == "token_type" && strings.TrimSpace(credentialString(current, key)) == "" {
+			existing = "Bearer"
+		}
+		// CRS JSON numbers and database JSON numbers may use different Go types.
+		before, beforeErr := json.Marshal(existing)
+		after, afterErr := json.Marshal(value)
+		if beforeErr != nil || afterErr != nil || !bytes.Equal(before, after) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *CRSSyncService) refreshOpenAIOAuthAfterSync(ctx context.Context, account *Account) *Account {
 	if s.openaiOAuthService == nil {
 		return account
 	}
-	expected := snapshotOAuthRefreshAccount(account)
+	durable, err := s.accountRepo.GetByID(ctx, account.ID)
+	if err != nil || durable == nil {
+		slog.Warn("crs_sync_openai_refresh_durable_read_failed", "account_id", account.ID, "error", err)
+		return nil
+	}
+	scoped, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, durable, "")
+	if err != nil {
+		slog.Warn("crs_sync_openai_refresh_authorization_unavailable", "account_id", account.ID, "error", err)
+		return nil
+	}
+	expected := snapshotOAuthRefreshAccount(scoped)
 	if credentials := s.refreshOAuthToken(ctx, expected); credentials != nil {
 		credentials["_token_version"] = time.Now().UnixMilli()
 		durable, _, err := persistOpenAIOAuthRefreshCredentials(ctx, s.accountRepo, expected, credentials)
@@ -1445,7 +1529,7 @@ func (s *CRSSyncService) refreshOpenAIOAuthAfterSync(ctx context.Context, accoun
 		return durable
 	}
 	// Even an unsuccessful network refresh may overlap an administrator proxy edit.
-	durable, err := s.accountRepo.GetByID(ctx, account.ID)
+	durable, err = s.accountRepo.GetByID(ctx, account.ID)
 	if err != nil || durable == nil {
 		slog.Warn("crs_sync_openai_refresh_durable_read_failed", "account_id", account.ID, "error", err)
 		return nil

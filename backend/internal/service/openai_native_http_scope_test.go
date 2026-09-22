@@ -100,17 +100,18 @@ func TestOpenAINativeHTTPGatewayKeepsFinalUAAndAccountLimits(t *testing.T) {
 }
 
 func TestOpenAINativeHTTPScopeUsesCredentialOwner(t *testing.T) {
-	owner := &Account{ID: 20, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"user_agent": "owner (Windows)"}}
+	const ownerUA = "codex-tui/0.152.0 (Windows 10.0.26200; x86_64) WindowsTerminal"
+	owner := &Account{ID: 20, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"user_agent": ownerUA}}
 	shadow := &Account{ID: 21, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &owner.ID, Credentials: map[string]any{"user_agent": "wrong shadow (Linux)"}}
 	req, err := http.NewRequest(http.MethodGet, "https://chatgpt.com/backend-api/codex/models", nil)
 	require.NoError(t, err)
-	out := withOpenAINativeHTTPRequestScope(req, shadow, &openAIEnvironmentAdminRepoStub{account: owner}, "models")
+	out := withOpenAINativeHTTPRequestScope(req, shadow, newAuthorizedOpenAIOAuthTestRepo(owner, shadow), "models")
 	scope, ok := codexnative.ScopeFromContext(out.Context())
 	require.True(t, ok)
 	require.Equal(t, owner.ID, scope.AccountID)
-	require.Equal(t, "owner (Windows)", scope.AccountUserAgent)
+	require.Equal(t, ownerUA, scope.AccountUserAgent)
 	owner.Credentials["user_agent"] = "new (Mac OS)"
-	require.Equal(t, "owner (Windows)", scope.AccountUserAgent)
+	require.Equal(t, ownerUA, scope.AccountUserAgent)
 }
 
 func TestOpenAINativeHTTPConcurrentAccountScopesRemainSeparate(t *testing.T) {

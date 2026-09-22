@@ -19,6 +19,16 @@ type codexAuthExportAdminStub struct {
 	account *service.Account
 	err     error
 	readIDs []int64
+	slots   map[string]*service.OpenAIOAuthOSCredential
+	readOS  []string
+}
+
+func (s *codexAuthExportAdminStub) GetOpenAIOAuthOSCredential(_ context.Context, id int64, os string) (*service.OpenAIOAuthOSCredential, error) {
+	s.readOS = append(s.readOS, os)
+	if s.slots != nil {
+		return s.slots[os], nil
+	}
+	return &service.OpenAIOAuthOSCredential{OwnerAccountID: id, OSFamily: os, Credentials: s.account.Credentials}, nil
 }
 
 func (s *codexAuthExportAdminStub) GetAccount(_ context.Context, id int64) (*service.Account, error) {
@@ -32,6 +42,7 @@ func TestExportCodexAuthFreshSnapshotAndImportRoundTrip(t *testing.T) {
 	stub := &codexAuthExportAdminStub{account: &service.Account{ID: 42, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{
 		"access_token": "first-token", "id_token": idToken, "refresh_token": "refresh-token", "chatgpt_account_id": "selected-workspace",
 	}}}
+	stub.account.OpenAIOAuthOSProfiles = &service.OpenAIOAuthOSProfiles{DefaultOS: "windows"}
 	h := &AccountHandler{adminService: stub}
 	router := gin.New()
 	router.GET("/accounts/:id/codex-auth", h.ExportCodexAuth)
@@ -54,11 +65,12 @@ func TestExportCodexAuthFreshSnapshotAndImportRoundTrip(t *testing.T) {
 		require.Equal(t, idToken, imported.IDToken)
 	}
 	require.Equal(t, []int64{42, 42}, stub.readIDs)
+	require.Equal(t, []string{"windows", "windows"}, stub.readOS)
 }
 
 func TestExportCodexAuthErrorsAreNonCacheableAndDoNotExposeTokens(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	stub := &codexAuthExportAdminStub{account: &service.Account{Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{"access_token": "secret-access", "id_token": "secret-invalid-id"}}}
+	stub := &codexAuthExportAdminStub{account: &service.Account{ID: 42, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: map[string]any{"access_token": "secret-access", "id_token": "secret-invalid-id"}, OpenAIOAuthOSProfiles: &service.OpenAIOAuthOSProfiles{DefaultOS: "windows"}}}
 	h := &AccountHandler{adminService: stub}
 	router := gin.New()
 	router.GET("/accounts/:id/codex-auth", h.ExportCodexAuth)
@@ -77,4 +89,22 @@ func TestExportCodexAuthErrorsAreNonCacheableAndDoNotExposeTokens(t *testing.T) 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/accounts/43/codex-auth", nil))
 	require.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestExportCodexAuthUsesOnlyExplicitPrivateSlot(t *testing.T) {
+	idToken := "header." + base64.RawURLEncoding.EncodeToString([]byte(`{}`)) + ".signature"
+	stub := &codexAuthExportAdminStub{account: &service.Account{ID: 42, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "default-secret"}, OpenAIOAuthOSProfiles: &service.OpenAIOAuthOSProfiles{DefaultOS: "windows"}},
+		slots: map[string]*service.OpenAIOAuthOSCredential{"macos": {OwnerAccountID: 42, OSFamily: "macos", Credentials: map[string]any{"access_token": "mac-token", "id_token": idToken}}}}
+	router := gin.New()
+	router.GET("/accounts/:id/codex-auth", (&AccountHandler{adminService: stub}).ExportCodexAuth)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/accounts/42/codex-auth?os=macos", nil))
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, "mac-token", gjson.GetBytes(response.Body.Bytes(), "data.auth.tokens.access_token").String())
+	require.NotContains(t, response.Body.String(), "default-secret")
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/accounts/42/codex-auth?os=linux", nil))
+	require.Equal(t, http.StatusBadRequest, response.Code)
+	require.NotContains(t, response.Body.String(), "default-secret")
 }

@@ -56,6 +56,9 @@ func codexClientWindowPathBody(t *testing.T, ws bool, session string, number uin
 // actually forwards its HTTP request through the in-process upstream recorder.
 func codexClientWindowPathBuild(t *testing.T, transport string, svc *OpenAIGatewayService, upstream *httpUpstreamRecorder, account *Account, c *gin.Context, body []byte) ([]byte, OpenAIOAuthIdentityPlan) {
 	t.Helper()
+	if svc.accountRepo == nil {
+		svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
+	}
 	// HTTP and WS ingress capture once before routing; retain the same immutable
 	// capture when rebuilding an already-started physical attempt.
 	if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
@@ -131,6 +134,7 @@ func TestOpenAICodexClientWindowPathsTokenBudgetRollover(t *testing.T) {
 			// newly added PAT History/Notes feature remains disabled.
 			require.False(t, svc.settingService.IsOpenAICodexPATContextManagementEnabled(context.Background()))
 			account := newOpenAIIdentityPathOAuthAccount(927300)
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			session := codexClientWindowPathUUID(t)
 			clientIDs := []string{codexClientWindowPathUUID(t), codexClientWindowPathUUID(t), codexClientWindowPathUUID(t)}
 			isWS := transport == "websocket" || transport == "websocket_http_bridge"
@@ -187,6 +191,7 @@ func TestOpenAICodexClientWindowPathsSameWSConnectionFrames(t *testing.T) {
 			upstream := &httpUpstreamRecorder{}
 			svc, _ := newOpenAIIdentityPathService(t, true, upstream)
 			account := newOpenAIIdentityPathOAuthAccount(927306)
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			session := codexClientWindowPathUUID(t)
 			clientIDs := []string{codexClientWindowPathUUID(t), codexClientWindowPathUUID(t), codexClientWindowPathUUID(t)}
 			frames := []struct {
@@ -278,6 +283,7 @@ func TestOpenAICodexClientWindowPathsGapRollbackAndBranch(t *testing.T) {
 			svc, _ := newOpenAIIdentityPathService(t, true, upstream)
 			require.False(t, svc.settingService.IsOpenAICodexPATContextManagementEnabled(context.Background()))
 			account := newOpenAIIdentityPathOAuthAccount(927304)
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			session := codexClientWindowPathUUID(t)
 			first, skipped := codexClientWindowPathUUID(t), codexClientWindowPathUUID(t)
 			gap, branch := codexClientWindowPathUUID(t), codexClientWindowPathUUID(t)
@@ -336,6 +342,7 @@ func TestOpenAICodexClientWindowPathsUnmarkedTurnCannotAdvance(t *testing.T) {
 			upstream := &httpUpstreamRecorder{}
 			svc, _ := newOpenAIIdentityPathService(t, true, upstream)
 			account := newOpenAIIdentityPathOAuthAccount(927302)
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			session := codexClientWindowPathUUID(t)
 			first, next := codexClientWindowPathUUID(t), codexClientWindowPathUUID(t)
 			isWS := transport == "websocket" || transport == "websocket_http_bridge"

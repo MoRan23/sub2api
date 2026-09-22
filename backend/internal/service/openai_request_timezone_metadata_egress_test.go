@@ -46,6 +46,7 @@ func TestOpenAIRequestTimezoneUnlabelledMetadataUsesActualEgress(t *testing.T) {
 				}
 				upstream := &httpUpstreamRecorder{resp: response}
 				svc, _ := newOpenAIIdentityPathService(t, false, upstream)
+				svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 				svc.egressLocationService = resolver
 				svc.CaptureOpenAIRequestTimezone(c, body)
 				capture, _ := c.Get(openAIRequestTimezoneCaptureKey)

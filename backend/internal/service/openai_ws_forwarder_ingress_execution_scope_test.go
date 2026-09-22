@@ -263,6 +263,7 @@ func runOpenAIWSCodexThreadPair(t *testing.T, threadA, threadB string) (serverEr
 		Credentials: map[string]any{"access_token": "test-token"},
 		Extra:       map[string]any{"openai_oauth_responses_websockets_v2_enabled": true},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	serverErrCh := make(chan error, 2)
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

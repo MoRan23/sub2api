@@ -26,6 +26,61 @@ type codexTurnStateHandlerTestService struct {
 	err        error
 }
 
+type codexTurnStateOSHandlerTestService struct {
+	codexTurnStateHandlerTestService
+	os string
+}
+
+func (s *codexTurnStateOSHandlerTestService) GetStatusForOS(ctx context.Context, id int64, os string) (*service.CodexTurnStateStatus, error) {
+	s.os = os
+	result, err := s.GetStatus(ctx, id)
+	result.OSFamily = os
+	return result, err
+}
+
+func (s *codexTurnStateOSHandlerTestService) GetStatusesForOS(ctx context.Context, ids []int64, os string) (*service.CodexTurnStateBatchStatus, error) {
+	s.os = os
+	return s.GetStatuses(ctx, ids)
+}
+
+func TestAccountCodexTurnStateOSQuery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, batch := range []bool{false, true} {
+		for _, query := range []string{"", "?os=windows", "?os=linux", "?os=macos", "?os=", "?os=Linux", "?os=unknown", "?os=linux&os=windows"} {
+			t.Run(fmt.Sprintf("batch_%t/%s", batch, query), func(t *testing.T) {
+				state := &codexTurnStateOSHandlerTestService{codexTurnStateHandlerTestService: codexTurnStateHandlerTestService{result: &service.CodexTurnStateBatchStatus{Items: map[string]*service.CodexTurnStateStatus{}}}}
+				h := &AccountHandler{}
+				h.SetCodexTurnStateService(state)
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				url := "/admin/accounts/1/codex-turn-state" + query
+				if batch {
+					url += "&account_ids=1"
+					if query == "" {
+						url = "/admin/accounts/codex-turn-state?account_ids=1"
+					}
+				}
+				c.Request = httptest.NewRequest(http.MethodGet, url, nil)
+				c.Params = gin.Params{{Key: "id", Value: "1"}}
+				if batch {
+					h.GetCodexTurnStates(c)
+				} else {
+					h.GetCodexTurnState(c)
+				}
+				valid := query == "" || query == "?os=windows" || query == "?os=linux" || query == "?os=macos"
+				if valid {
+					require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+					require.Equal(t, strings.TrimPrefix(query, "?os="), state.os)
+				} else {
+					require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+					require.Zero(t, state.batchCalls)
+					require.Zero(t, state.singleID)
+				}
+			})
+		}
+	}
+}
+
 func (s *codexTurnStateHandlerTestService) GetStatus(_ context.Context, id int64) (*service.CodexTurnStateStatus, error) {
 	s.singleID = id
 	return &service.CodexTurnStateStatus{AccountID: id}, s.err

@@ -50,7 +50,7 @@ func TestAccountTestService_OpenAIImageOAuthHandlesOutputItemDoneFallback(t *tes
 		},
 	}
 
-	err := svc.testOpenAIImageOAuth(c, context.Background(), account, "gpt-image-1", "draw a cat")
+	err := svc.testOpenAIImageOAuth(c, context.Background(), prepareAccountTestCredential(t, svc, account), "gpt-image-1", "draw a cat")
 	require.NoError(t, err)
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(upstream.lastReq.Context()))
@@ -140,7 +140,7 @@ func TestAccountTestService_OpenAIImageOAuthSurfacesSSEError(t *testing.T) {
 		Body: io.NopCloser(strings.NewReader("data: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The selected image model is unavailable\"}}\n\n")),
 	}}}
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "test"}}
-	err := svc.testOpenAIImageOAuth(c, context.Background(), account, "gpt-image-1", "draw a cup")
+	err := svc.testOpenAIImageOAuth(c, context.Background(), prepareAccountTestCredential(t, svc, account), "gpt-image-1", "draw a cup")
 	require.ErrorContains(t, err, "The selected image model is unavailable")
 	require.NotContains(t, rec.Body.String(), "No images returned")
 }

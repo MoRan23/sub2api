@@ -23,7 +23,8 @@ func codexStateIndexTestSequence(t *testing.T, o *codexTurnStateSummaryStore) ui
 
 func codexStateIndexTestValue(model string, length int) CodexTurnStateObservation {
 	return CodexTurnStateObservation{
-		Model: model, Action: "passthrough", OutboundLength: 292,
+		OSFamily: "windows",
+		Model:    model, Action: "passthrough", OutboundLength: 292,
 		ResponseLength: length, ResponseShape: "unknown", ResponseObservedShape: "team_target",
 		ResponseCipherBlocks: 12, ResponseValidationReason: "account_type_unknown", ResponseSource: "metadata",
 	}

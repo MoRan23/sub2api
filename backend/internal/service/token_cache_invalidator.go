@@ -48,6 +48,9 @@ func (c *CompositeTokenCacheInvalidator) InvalidateToken(ctx context.Context, ac
 		keysToDelete = append(keysToDelete, AntigravityTokenCacheKey(account))
 	case PlatformOpenAI:
 		keysToDelete = append(keysToDelete, OpenAITokenCacheKey(account))
+		// Old unscoped entries are never read by scoped requests, but clear them
+		// during the rollout for legacy callers and excluded OAuth auth modes.
+		keysToDelete = append(keysToDelete, "openai:"+accountIDKey)
 	case PlatformGrok:
 		keysToDelete = append(keysToDelete, GrokTokenCacheKey(account))
 		keysToDelete = append(keysToDelete, "grok:"+accountIDKey)
@@ -82,6 +85,15 @@ func (c *CompositeTokenCacheInvalidator) InvalidateToken(ctx context.Context, ac
 func CheckTokenVersion(ctx context.Context, account *Account, repo AccountRepository) (latestAccount *Account, isStale bool) {
 	if account == nil || repo == nil {
 		return nil, false
+	}
+	if account.OpenAIOAuthCredentialOS != "" {
+		latest, err := ReloadOpenAIOAuthCredentialAccount(ctx, repo, account)
+		if err != nil || latest == nil {
+			// A revoked slot or unavailable private state cannot safely supply the
+			// default mirror, nor permit an old token to be used on this request.
+			return nil, true
+		}
+		return latest, OpenAITokenCacheKey(latest) != OpenAITokenCacheKey(account)
 	}
 
 	currentVersion := account.GetCredentialAsInt64("_token_version")

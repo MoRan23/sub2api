@@ -42,7 +42,7 @@ func (r *codexStatePassthroughAccounts) GetByID(context.Context, int64) (*Accoun
 	account := *r.account
 	account.Extra = maps.Clone(r.account.Extra)
 	account.Credentials = maps.Clone(r.account.Credentials)
-	return &account, nil
+	return codexStateTestScopeAccount(&account), nil
 }
 
 func (r *codexStatePassthroughAccounts) disable() {
@@ -66,6 +66,7 @@ func (r *codexStatePassthroughRepository) BeginBusiness(_ context.Context, key C
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	record := r.records[key]
+	record.OSFamily = key.OSFamily
 	record.OwnerAccountID, record.Model, record.Generation = key.OwnerAccountID, key.Model, key.Generation
 	record.LastBusinessAt = now
 	r.records[key] = record
@@ -139,6 +140,7 @@ func newCodexStatePassthroughHarness(t *testing.T, enabled bool) (*OpenAIGateway
 		CodexTurnStateExtraKey:                      CodexTurnStateConfig{Enabled: enabled, AccountType: "personal"},
 		CodexTurnStateGenerationExtraKey:            "initial-generation",
 	}
+	account = codexStateTestScopeAccount(account)
 	accounts := &codexStatePassthroughAccounts{account: account}
 	repo := &codexStatePassthroughRepository{records: make(map[CodexTurnStateKey]CodexTurnStateRecord)}
 	svc.accountRepo = accounts
@@ -155,8 +157,8 @@ func seedCodexStatePassthroughModel(t *testing.T, repo *codexStatePassthroughRep
 	require.NoError(t, err)
 	encrypted, err := (codexStatePassthroughEncryptor{}).Encrypt(token)
 	require.NoError(t, err)
-	key := CodexTurnStateKey{OwnerAccountID: account.ID, Model: model, Generation: CodexTurnStateGenerationForAccount(account)}
-	repo.records[key] = CodexTurnStateRecord{OwnerAccountID: key.OwnerAccountID, Model: key.Model, Generation: key.Generation, Version: 1,
+	key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: model, Generation: CodexTurnStateGenerationForAccount(account)}
+	repo.records[key] = CodexTurnStateRecord{OSFamily: "windows", OwnerAccountID: key.OwnerAccountID, Model: key.Model, Generation: key.Generation, Version: 1,
 		EncryptedToken: encrypted, IssuedAt: shape.IssuedAt, ExpiresAt: shape.ExpiresAt, TokenLength: shape.TokenLength, CipherBlocks: shape.CipherBlocks, Source: "collector", Shape: shape.Shape}
 	return key
 }
@@ -260,7 +262,7 @@ func TestCodexStatePassthroughAbandonedMetadataDoesNotLearn(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("passthrough did not finish")
 	}
-	key := CodexTurnStateKey{OwnerAccountID: account.ID, Model: "gpt-5.5", Generation: CodexTurnStateGenerationForAccount(account)}
+	key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5.5", Generation: CodexTurnStateGenerationForAccount(account)}
 	record, err := repo.Get(ctx, key)
 	require.NoError(t, err)
 	require.NotNil(t, record)
@@ -292,7 +294,7 @@ func TestCodexStatePassthroughPrewarmDiscardsHandshakeState(t *testing.T) {
 	dialer.conn.Send(`{"type":"response.completed","response":{"id":"resp_after_prewarm","model":"gpt-5.4","usage":{"input_tokens":1,"output_tokens":1}}}`)
 	readCodexStatePassthroughFrame(t, ctx, client)
 	require.Eventually(t, func() bool { repo.mu.Lock(); defer repo.mu.Unlock(); return repo.ended == 1 }, time.Second, time.Millisecond)
-	key := CodexTurnStateKey{OwnerAccountID: account.ID, Model: "gpt-5.4", Generation: CodexTurnStateGenerationForAccount(account)}
+	key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5.4", Generation: CodexTurnStateGenerationForAccount(account)}
 	record, err := repo.Get(ctx, key)
 	require.NoError(t, err)
 	require.NotNil(t, record)

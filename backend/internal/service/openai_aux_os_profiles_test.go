@@ -14,6 +14,34 @@ import (
 
 type auxOAuthUnavailableProfileRepository struct {
 	AccountRepository
+	incompleteProfile bool
+}
+
+func (r auxOAuthUnavailableProfileRepository) GetByID(ctx context.Context, id int64) (*Account, error) {
+	account, err := r.AccountRepository.GetByID(ctx, id)
+	if err != nil || account == nil || !r.incompleteProfile {
+		return account, err
+	}
+	copy := *account
+	copy.OpenAIOAuthOSProfiles = CloneOpenAIOAuthOSProfiles(account.OpenAIOAuthOSProfiles)
+	if copy.OpenAIOAuthOSProfiles != nil {
+		delete(copy.OpenAIOAuthOSProfiles.Profiles, OpenAIOSLinux)
+	}
+	return &copy, nil
+}
+
+func (r auxOAuthUnavailableProfileRepository) GetOpenAIOAuthOSCredential(ctx context.Context, id int64, os string) (*OpenAIOAuthOSCredential, error) {
+	if reader, ok := r.AccountRepository.(OpenAIOAuthOSCredentialsReader); ok {
+		return reader.GetOpenAIOAuthOSCredential(ctx, id, os)
+	}
+	return nil, ErrOpenAIOAuthOSUnauthorized
+}
+
+func (r auxOAuthUnavailableProfileRepository) ListOpenAIOAuthOSCredentials(ctx context.Context, id int64) ([]*OpenAIOAuthOSCredential, error) {
+	if reader, ok := r.AccountRepository.(OpenAIOAuthOSCredentialsReader); ok {
+		return reader.ListOpenAIOAuthOSCredentials(ctx, id)
+	}
+	return nil, ErrOpenAIOAuthOSUnauthorized
 }
 
 func (auxOAuthUnavailableProfileRepository) EnsureOpenAIOAuthOSProfiles(context.Context, int64) (*OpenAIOAuthOSProfiles, error) {
@@ -71,7 +99,7 @@ func TestPluginDirectoryUsesDefaultOSProfileWithoutTurnIdentity(t *testing.T) {
 func TestCodexTurnStateCollectorStopsWhenProfileStorageFails(t *testing.T) {
 	account, proxy := codexCollectorTransportFixture()
 	upstream := &codexCollectorTransportUpstream{}
-	repo := auxOAuthUnavailableProfileRepository{AccountRepository: codexCollectorTransportAccounts{account: account}}
+	repo := auxOAuthUnavailableProfileRepository{AccountRepository: codexCollectorTransportAccounts{account: account}, incompleteProfile: true}
 	do := ProvideCodexTurnStateCollectorHTTPDo(repo, codexCollectorTransportProxies{proxy: proxy}, upstream)
 	request, err := http.NewRequest(http.MethodPost, chatgptCodexURL, strings.NewReader(`{}`))
 	require.NoError(t, err)
@@ -110,7 +138,7 @@ func TestAccountTestRootUsesSelectedOSAndFrozenReceiveTime(t *testing.T) {
 	owner := Account{ID: 17, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{}}
 	profiles := auxOAuthProfileFixture(t, &owner, OpenAIOSMacOS)
 	shadow := &Account{ID: 18, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &owner.ID}
-	repo := &pluginAccountDirectoryRepository{accounts: []Account{owner}}
+	repo := newAuthorizedOpenAIOAuthTestRepo(&owner)
 	selectedRoot := "018f5c3c-6e3a-7abf-8def-1234567890ae"
 	daily := &auxOAuthDailyOSRepository{pool: OAuthDailySessionPool{OSRoots: map[string]OAuthDailyOSRoots{
 		OpenAIOSLinux: {SyncSessionID: selectedRoot},
@@ -122,7 +150,8 @@ func TestAccountTestRootUsesSelectedOSAndFrozenReceiveTime(t *testing.T) {
 			SettingKeyEnableOpenAIOAuthDailySessionRotation: "true",
 		}}, nil)}
 	plan := &OpenAIOAuthIdentityPlan{OSFamily: OpenAIOSLinux, ReceivedAt: received}
-	require.NoError(t, svc.applyOAuthAccountTestRootSession(context.Background(), shadow, plan))
+	ctx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: OpenAIOSLinux})
+	require.NoError(t, svc.applyOAuthAccountTestRootSession(ctx, shadow, plan))
 	require.Equal(t, owner.ID, daily.ownerID)
 	require.Equal(t, profiles.DefaultOS, daily.defaultOS)
 	require.Equal(t, received, daily.received)

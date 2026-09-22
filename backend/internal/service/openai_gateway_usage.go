@@ -150,6 +150,37 @@ func groupBillsOpenAIFastAtStandard(apiKey *APIKey, account *Account, serviceTie
 	}
 }
 
+// Usage settlement reads billing configuration, not permission to send another
+// request. A completed attempt must remain billable after its slot is revoked,
+// enters cooldown, or advances to another authorization generation.
+func resolveOpenAIUsageBillingAccount(ctx context.Context, repo AccountRepository, account *Account) (*Account, error) {
+	if account == nil || !account.IsShadow() {
+		return account, nil
+	}
+	if repo == nil {
+		return nil, errors.New("spark shadow billing parent repository is unavailable")
+	}
+	parent, err := repo.GetByID(ctx, *account.ParentAccountID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve spark shadow billing parent %d: %w", *account.ParentAccountID, err)
+	}
+	parent, err = credentialAccountFromParent(account, parent)
+	if err != nil {
+		return nil, err
+	}
+	if account.OpenAIOAuthCredentialOS == "" {
+		return parent, nil
+	}
+	// Spark inherits current parent billing settings while the provider plan and
+	// credential contract come from the physical request's frozen slot snapshot.
+	// No other slot (including a newly selected default) participates in billing.
+	billing := *parent
+	billing.Credentials = PreserveOpenAIOAuthProviderCredentials(account.Credentials, parent.Credentials)
+	billing.OpenAIOAuthCredentialStateGeneration = account.OpenAIOAuthCredentialStateGeneration
+	billing.OpenAIOAuthCredentialEpoch = account.OpenAIOAuthCredentialEpoch
+	return &billing, nil
+}
+
 // RecordUsage records usage and deducts balance
 func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRecordUsageInput) error {
 	if input == nil {
@@ -167,7 +198,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	user := input.User
 	account := input.Account
 	subscription := input.Subscription
-	billingAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
+	billingAccount, err := resolveOpenAIUsageBillingAccount(ctx, s.accountRepo, account)
 	if err != nil {
 		return err
 	}

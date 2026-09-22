@@ -130,7 +130,7 @@ func TestAdvancedCostSchedulerUsesTopKOverflowWhenPreferredAccountIsKnownFull(t 
 	cfg.Gateway.OpenAIWS.LBTopK = 1
 	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.UpstreamCost = 1
 	svc := &OpenAIGatewayService{
-		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*cheap, *expensive}},
+		accountRepo:        newSchedulerTestOpenAIAccountRepo([]Account{*cheap, *expensive}),
 		cfg:                cfg,
 		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
 		concurrencyService: NewConcurrencyService(cache),
@@ -277,7 +277,7 @@ func TestAdvancedCostSchedulerKeepsCompactSupportedOverflowAheadOfUnknown(t *tes
 	cfg.Gateway.OpenAIWS.LBTopK = 1
 	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.UpstreamCost = 1
 	svc := &OpenAIGatewayService{
-		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*preferred, *overflow, *unknown}},
+		accountRepo:        newSchedulerTestOpenAIAccountRepo([]Account{*preferred, *overflow, *unknown}),
 		cfg:                cfg,
 		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
 		concurrencyService: NewConcurrencyService(cache),
@@ -569,7 +569,7 @@ func TestOpenAIGatewayServiceLegacyLowRatePriorityUsesConfiguredOAuthReference(t
 	}}
 	cfg := &config.Config{}
 	svc := &OpenAIGatewayService{
-		accountRepo:      schedulerTestOpenAIAccountRepo{accounts: []Account{*cheap, *oauth, *expensive}},
+		accountRepo:      newSchedulerTestOpenAIAccountRepo([]Account{*cheap, *oauth, *expensive}),
 		cache:            &schedulerTestGatewayCache{},
 		cfg:              cfg,
 		rateLimitService: &RateLimitService{settingService: NewSettingService(settings, cfg)},
@@ -604,7 +604,7 @@ func TestOpenAIModelsSelectionIgnoresTokenCostSignal(t *testing.T) {
 	}}
 	cfg := &config.Config{}
 	svc := &OpenAIGatewayService{
-		accountRepo:      schedulerTestOpenAIAccountRepo{accounts: []Account{*cheap, *expensive}},
+		accountRepo:      newSchedulerTestOpenAIAccountRepo([]Account{*cheap, *expensive}),
 		cfg:              cfg,
 		rateLimitService: &RateLimitService{settingService: NewSettingService(settings, cfg)},
 	}
@@ -646,7 +646,7 @@ func TestOpenAIGatewayServiceLegacyLowRatePriorityIsIndependentFromAdvancedSched
 			cfg := &config.Config{}
 			cfg.Gateway.Scheduling.LoadBatchEnabled = tt.loadBatch
 			svc := &OpenAIGatewayService{
-				accountRepo:      schedulerTestOpenAIAccountRepo{accounts: accounts},
+				accountRepo:      newSchedulerTestOpenAIAccountRepo(accounts),
 				cache:            &schedulerTestGatewayCache{},
 				cfg:              cfg,
 				rateLimitService: &RateLimitService{settingService: NewSettingService(settings, cfg)},
@@ -685,7 +685,7 @@ func TestOpenAIGatewayServiceAdvancedSchedulerIgnoresLegacyLowRateSwitch(t *test
 	cfg.Gateway.OpenAIWS.LBTopK = 1
 	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 1
 	svc := &OpenAIGatewayService{
-		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*cheap, *expensive}},
+		accountRepo:        newSchedulerTestOpenAIAccountRepo([]Account{*cheap, *expensive}),
 		cache:              &schedulerTestGatewayCache{},
 		cfg:                cfg,
 		rateLimitService:   &RateLimitService{settingService: NewSettingService(settings, cfg)},
@@ -719,7 +719,7 @@ func TestOpenAIGatewayServiceLegacyLowRatePrioritySkipsCooledDownAccount(t *test
 	cfg := &config.Config{}
 	cfg.Gateway.Scheduling.LoadBatchEnabled = true
 	svc := &OpenAIGatewayService{
-		accountRepo:      schedulerTestOpenAIAccountRepo{accounts: []Account{*cheap, *expensive}},
+		accountRepo:      newSchedulerTestOpenAIAccountRepo([]Account{*cheap, *expensive}),
 		cache:            &schedulerTestGatewayCache{},
 		cfg:              cfg,
 		rateLimitService: &RateLimitService{settingService: NewSettingService(settings, cfg)},

@@ -382,8 +382,9 @@ func TestOpenAIGatewayService_OAuthRetriesExactRejectedStatus(t *testing.T) {
 	}}
 	upstream.responses[1].Header.Set("Content-Type", "text/event-stream")
 
-	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
-		context.Background(), newOpenAIRejectedFieldTestContext(body), newOpenAIOAuthNamespaceTestAccount(), body,
+	account := newOpenAIOAuthNamespaceTestAccount()
+	result, err := newOpenAIRejectedFieldTestService(upstream, account).Forward(
+		context.Background(), newOpenAIRejectedFieldTestContext(body), account, body,
 	)
 
 	require.NoError(t, err)
@@ -584,7 +585,7 @@ func TestOpenAIGatewayService_OpenAIHTTPStripsInputNamespacesBeforeFirstForward(
 				c := newOpenAIRejectedFieldTestContext(body)
 				c.Request.URL.Path = path
 
-				result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
+				result, err := newOpenAIRejectedFieldTestService(upstream, tt.account).Forward(
 					context.Background(),
 					c,
 					tt.account,
@@ -648,12 +649,13 @@ func TestOpenAIGatewayService_ComposesProactiveNamespaceStripWithRejectedFieldRe
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "max_output_tokens").Exists())
 }
 
-func newOpenAIRejectedFieldTestService(upstream *httpUpstreamRecorder) *OpenAIGatewayService {
+func newOpenAIRejectedFieldTestService(upstream *httpUpstreamRecorder, accounts ...*Account) *OpenAIGatewayService {
 	return &OpenAIGatewayService{
 		cfg: &config.Config{Security: config.SecurityConfig{
 			URLAllowlist: config.URLAllowlistConfig{Enabled: false},
 		}},
 		httpUpstream: upstream,
+		accountRepo:  newAuthorizedOpenAIOAuthTestRepo(accounts...),
 	}
 }
 

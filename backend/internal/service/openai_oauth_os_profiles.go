@@ -24,10 +24,11 @@ var ErrOpenAIOAuthOSProfileUnavailable = errors.New("OpenAI OAuth OS identity is
 // OpenAIOAuthOSProfile is an account-owned installation and its matching client
 // environment. SyncSessionID is independent of the rotating daily roots.
 type OpenAIOAuthOSProfile struct {
-	OSFamily       string `json:"os"`
-	InstallationID string `json:"installation_id"`
-	UserAgent      string `json:"user_agent"`
-	SyncSessionID  string `json:"sync_session_id"`
+	OSFamily       string                            `json:"os"`
+	InstallationID string                            `json:"installation_id"`
+	UserAgent      string                            `json:"user_agent"`
+	SyncSessionID  string                            `json:"sync_session_id"`
+	Authorization  OpenAIOAuthOSAuthorizationSummary `json:"authorization"`
 }
 
 type OpenAIOAuthOSProfiles struct {
@@ -87,7 +88,12 @@ func CloneOpenAIOAuthOSProfiles(value *OpenAIOAuthOSProfiles) *OpenAIOAuthOSProf
 	if value == nil {
 		return nil
 	}
-	return &OpenAIOAuthOSProfiles{DefaultOS: value.DefaultOS, Profiles: maps.Clone(value.Profiles)}
+	out := &OpenAIOAuthOSProfiles{DefaultOS: value.DefaultOS, Profiles: maps.Clone(value.Profiles)}
+	for os, profile := range out.Profiles {
+		profile.Authorization = CloneOpenAIOAuthOSAuthorizationSummary(profile.Authorization)
+		out.Profiles[os] = profile
+	}
+	return out
 }
 
 func defaultOpenAIOAuthEnvironment(osFamily string) string {
@@ -152,6 +158,9 @@ func BuildOpenAIOAuthOSProfiles(account *Account, existing *OpenAIOAuthOSProfile
 	for _, osFamily := range OpenAIOAuthOSFamilies() {
 		profile := out.Profiles[osFamily]
 		profile.OSFamily = osFamily
+		if profile.Authorization.Status == "" {
+			profile.Authorization.Status = OpenAIOAuthAuthorizationUnauthorized
+		}
 		profile.InstallationID = validOpenAIOAuthProfileInstallationID(profile.InstallationID)
 		if profile.InstallationID == "" && osFamily == out.DefaultOS {
 			profile.InstallationID = legacyInstallation
@@ -238,7 +247,8 @@ func ApplyOpenAIOAuthOSProfiles(account *Account, profiles *OpenAIOAuthOSProfile
 }
 
 // PrepareOpenAIOAuthOSProfilesForCreate ignores any caller-supplied identity.
-// New accounts start with Windows as their default; imports share this path.
+// New accounts use their explicit initial authorization OS, with Windows kept
+// as the compatibility default when older creation callers omit it.
 func PrepareOpenAIOAuthOSProfilesForCreate(account *Account) error {
 	if !IsOpenAIOAuthOSProfileOwner(account) {
 		return nil
@@ -248,7 +258,14 @@ func PrepareOpenAIOAuthOSProfilesForCreate(account *Account) error {
 	delete(seed.Extra, openAIPinnedInstallationIDKey)
 	seed.Credentials = maps.Clone(account.Credentials)
 	delete(seed.Credentials, "user_agent")
-	profiles, err := BuildOpenAIOAuthOSProfiles(&seed, &OpenAIOAuthOSProfiles{DefaultOS: OpenAIOSWindows})
+	initialOS := NormalizeOpenAIOSFamily(account.OpenAIOAuthInitialOS)
+	if strings.TrimSpace(account.OpenAIOAuthInitialOS) != "" && initialOS == "" {
+		return ErrOpenAIOAuthOSUnauthorized
+	}
+	if initialOS == "" {
+		initialOS = OpenAIOSWindows
+	}
+	profiles, err := BuildOpenAIOAuthOSProfiles(&seed, &OpenAIOAuthOSProfiles{DefaultOS: initialOS})
 	if err != nil {
 		return err
 	}
@@ -259,6 +276,12 @@ func PrepareOpenAIOAuthOSProfilesForCreate(account *Account) error {
 // ResolveOpenAIOAuthOSProfile returns one immutable request profile. Spark uses
 // its credential owner, and unknown OS evidence falls back to the stored default.
 func ResolveOpenAIOAuthOSProfile(ctx context.Context, repo AccountRepository, account *Account, osFamily string) (OpenAIOAuthOSProfile, error) {
+	if account != nil && account.OpenAIOAuthCredentialOS != "" {
+		if explicit := NormalizeOpenAIOSFamily(osFamily); explicit != "" && explicit != account.OpenAIOAuthCredentialOS {
+			return OpenAIOAuthOSProfile{}, ErrOpenAIOAuthOSAuthorizationChanged
+		}
+		osFamily = account.OpenAIOAuthCredentialOS
+	}
 	if account != nil && account.IsShadow() && repo == nil {
 		return OpenAIOAuthOSProfile{}, ErrOpenAIOAuthOSProfileUnavailable
 	}

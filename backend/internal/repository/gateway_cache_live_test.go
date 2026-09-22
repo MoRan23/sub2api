@@ -19,18 +19,21 @@ func TestGatewayCacheLiveCallIdentityAndController(t *testing.T) {
 	otherInstance, ok := NewGatewayCache(client).(service.LiveCallStore)
 	require.True(t, ok)
 	record := &service.LiveCallRecord{
-		CallID:                "call_secret",
-		CallHash:              HashLiveCallID("call_secret"),
-		AccountID:             11,
-		APIKeyID:              22,
-		UserID:                33,
-		GroupID:               44,
-		LeaseID:               "lease",
-		Model:                 "gpt-live-test",
-		AttestationCiphertext: "encrypted-attestation",
-		CreatedAt:             time.Now(),
-		ExpiresAt:             time.Now().Add(time.Hour),
-		Controller:            service.LiveControllerPending,
+		CallID:                  "call_secret",
+		CallHash:                HashLiveCallID("call_secret"),
+		AccountID:               11,
+		APIKeyID:                22,
+		UserID:                  33,
+		GroupID:                 44,
+		LeaseID:                 "lease",
+		Model:                   "gpt-live-test",
+		AttestationCiphertext:   "encrypted-attestation",
+		CredentialOS:            "linux",
+		CredentialOwnerID:       11,
+		AuthorizationGeneration: "linux-generation",
+		CreatedAt:               time.Now(),
+		ExpiresAt:               time.Now().Add(time.Hour),
+		Controller:              service.LiveControllerPending,
 	}
 	require.NoError(t, cache.SaveLiveCall(context.Background(), record, time.Hour))
 
@@ -39,6 +42,9 @@ func TestGatewayCacheLiveCallIdentityAndController(t *testing.T) {
 	require.Equal(t, record.CallID, loaded.CallID)
 	require.Equal(t, record.AccountID, loaded.AccountID)
 	require.Equal(t, record.AttestationCiphertext, loaded.AttestationCiphertext)
+	require.Equal(t, record.CredentialOS, loaded.CredentialOS)
+	require.Equal(t, record.CredentialOwnerID, loaded.CredentialOwnerID)
+	require.Equal(t, record.AuthorizationGeneration, loaded.AuthorizationGeneration)
 
 	claimed, err := cache.ClaimLiveController(context.Background(), record.CallHash, service.LiveControllerObserver, "observer-1")
 	require.NoError(t, err)

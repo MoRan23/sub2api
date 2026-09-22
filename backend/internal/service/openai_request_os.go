@@ -26,6 +26,14 @@ const (
 // A recognizable UA wins. Otherwise, only the last standalone environment in
 // the final consecutive user messages may supply operating-system evidence.
 func captureOpenAIRequestOS(c *gin.Context, body []byte) (userAgent, osFamily, source string) {
+	value := CaptureOpenAIRequestOS(c, body)
+	if c != nil && c.Request != nil {
+		userAgent = c.Request.UserAgent()
+	}
+	return userAgent, value.Family, value.Source
+}
+
+func detectOpenAIRequestOS(c *gin.Context, body []byte) (userAgent, osFamily, source string) {
 	if c != nil && c.Request != nil {
 		userAgent = c.Request.UserAgent()
 	}

@@ -454,6 +454,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 
+	service.CaptureOpenAIRequestOS(c, body)
 	setOpsRequestContext(c, "", false)
 	if gjson.ValidBytes(body) {
 		h.gatewayService.CaptureOpenAIRequestTimezone(c, body)
@@ -2771,6 +2772,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			)
 			if lastFailoverErr != nil {
 				closeOpenAIWSFailoverExhausted(c, wsConn, lastFailoverErr)
+			} else if errors.Is(err, service.ErrNoAvailableOpenAIOAuthOSAccounts) {
+				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available accounts authorized for the requested operating system")
 			} else {
 				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account")
 			}

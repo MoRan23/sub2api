@@ -139,17 +139,18 @@ func (s *AccountRepoSuite) TestOAuthOSProfilesRejectOtherCredentialKinds() {
 func (s *AccountRepoSuite) TestOAuthOSProfilesFollowCredentialModeTransitions() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "os-profile-mode-transition", Platform: service.PlatformOpenAI,
 		Type: service.AccountTypeOAuth, Credentials: map[string]any{"auth_mode": "personalAccessToken", "user_agent": legacyProfileUA}})
+	modeCtx := service.WithOpenAIOAuthCredentialModeChangeIntent(s.ctx, account.ID)
 	// UpdateCredentials replaces the map. Omitting an old mode is a real
 	// eligibility transition and must initialize profiles in the same transaction.
-	s.Require().NoError(s.repo.UpdateCredentials(s.ctx, account.ID, map[string]any{"access_token": "synthetic-regular-token"}))
+	s.Require().NoError(s.repo.UpdateCredentials(modeCtx, account.ID, map[string]any{"access_token": "synthetic-regular-token"}))
 	profiles, err := s.repo.GetOpenAIOAuthOSProfiles(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().True(service.OpenAIOAuthOSProfilesComplete(profiles))
-	s.Require().NoError(s.repo.UpdateCredentials(s.ctx, account.ID, map[string]any{"auth_mode": "personalAccessToken", "access_token": "synthetic-pat"}))
+	s.Require().NoError(s.repo.UpdateCredentials(modeCtx, account.ID, map[string]any{"auth_mode": "personalAccessToken", "access_token": "synthetic-pat"}))
 	profiles, err = s.repo.GetOpenAIOAuthOSProfiles(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().Nil(profiles)
-	rows, err := s.repo.BulkUpdate(s.ctx, []int64{account.ID}, service.AccountBulkUpdate{
+	rows, err := s.repo.BulkUpdate(modeCtx, []int64{account.ID}, service.AccountBulkUpdate{
 		Credentials: map[string]any{"auth_mode": nil},
 	})
 	s.Require().NoError(err)
@@ -157,7 +158,7 @@ func (s *AccountRepoSuite) TestOAuthOSProfilesFollowCredentialModeTransitions() 
 	profiles, err = s.repo.GetOpenAIOAuthOSProfiles(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().True(service.OpenAIOAuthOSProfilesComplete(profiles))
-	_, err = s.repo.BulkUpdate(s.ctx, []int64{account.ID}, service.AccountBulkUpdate{
+	_, err = s.repo.BulkUpdate(modeCtx, []int64{account.ID}, service.AccountBulkUpdate{
 		Credentials: map[string]any{"openai_auth_mode": "agentIdentity"},
 	})
 	s.Require().NoError(err)

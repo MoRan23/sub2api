@@ -32,6 +32,9 @@ func newCRSLongContextAccountRepo(existing ...*Account) *crsLongContextAccountRe
 		if account == nil {
 			continue
 		}
+		if account.IsOpenAIOAuth() && account.Credentials == nil {
+			account.Credentials = map[string]any{"access_token": "oauth-token"}
+		}
 		crsID, _ := account.Extra["crs_account_id"].(string)
 		repo.accounts[crsID] = account
 		if account.ID > repo.nextID {

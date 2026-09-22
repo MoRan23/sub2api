@@ -121,6 +121,7 @@ func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
 		"custom":{"keep":true}
 	}`)
 
+	registerAuxiliaryOSFixture(t, service, account)
 	created, err := service.createUpstreamLiveCall(context.Background(), account, &LiveCallRequest{
 		SDP:     "v=offer\r\n",
 		Session: session,

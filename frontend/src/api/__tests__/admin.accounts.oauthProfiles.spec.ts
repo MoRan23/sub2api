@@ -18,7 +18,7 @@ describe('OAuth identity management API', () => {
     const exported = { auth: { auth_mode: 'chatgpt', OPENAI_API_KEY: null, tokens: { id_token: 'synthetic-id', access_token: 'synthetic-access', refresh_token: '', account_id: null } }, warnings: ['missing_refresh_token'] }
     get.mockResolvedValueOnce({ data: exported })
     await expect(exportCodexAuth(42)).resolves.toEqual(exported)
-    expect(get).toHaveBeenCalledWith('/admin/accounts/42/codex-auth')
+    expect(get).toHaveBeenCalledWith('/admin/accounts/42/codex-auth', undefined)
     expect(post).not.toHaveBeenCalled()
   })
 })

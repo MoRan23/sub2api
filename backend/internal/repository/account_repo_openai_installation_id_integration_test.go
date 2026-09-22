@@ -43,6 +43,7 @@ func (s *AccountRepoSuite) TestEnsureOpenAIInstallationIDSupportsSetupTokenOwner
 		Platform:        service.PlatformOpenAI,
 		Type:            service.AccountTypeSetupToken,
 		ParentAccountID: &parentID,
+		QuotaDimension:  service.QuotaDimensionSpark,
 		Extra:           map[string]any{},
 	})
 	_, err = s.repo.EnsureOpenAIInstallationID(s.ctx, shadow.ID, "", loser)

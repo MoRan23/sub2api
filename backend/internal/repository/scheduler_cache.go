@@ -863,35 +863,52 @@ func (c *schedulerCache) mgetChunked(ctx context.Context, keys []string) ([]any,
 }
 
 func buildSchedulerMetadataAccount(account service.Account) service.Account {
+	requiresOSAuthorization := service.RequiresOpenAIOAuthOSAuthorization(&account)
 	return service.Account{
-		ID:                      account.ID,
-		Name:                    account.Name,
-		Platform:                account.Platform,
-		Type:                    account.Type,
-		Concurrency:             account.Concurrency,
-		LoadFactor:              account.LoadFactor,
-		Priority:                account.Priority,
-		RateMultiplier:          account.RateMultiplier,
-		Status:                  account.Status,
-		LastUsedAt:              account.LastUsedAt,
-		ExpiresAt:               account.ExpiresAt,
-		AutoPauseOnExpired:      account.AutoPauseOnExpired,
-		Schedulable:             account.Schedulable,
-		RateLimitedAt:           account.RateLimitedAt,
-		RateLimitResetAt:        account.RateLimitResetAt,
-		OverloadUntil:           account.OverloadUntil,
-		TempUnschedulableUntil:  account.TempUnschedulableUntil,
-		TempUnschedulableReason: account.TempUnschedulableReason,
-		SessionWindowStart:      account.SessionWindowStart,
-		SessionWindowEnd:        account.SessionWindowEnd,
-		SessionWindowStatus:     account.SessionWindowStatus,
-		ParentAccountID:         account.ParentAccountID,
-		QuotaDimension:          account.QuotaDimension,
-		AccountGroups:           filterSchedulerAccountGroups(account.AccountGroups),
-		GroupIDs:                filterSchedulerGroupIDs(account.GroupIDs, account.AccountGroups),
-		Credentials:             filterSchedulerCredentials(account.Credentials),
-		Extra:                   filterSchedulerExtra(account.Extra),
+		ID:                                 account.ID,
+		Name:                               account.Name,
+		Platform:                           account.Platform,
+		Type:                               account.Type,
+		Concurrency:                        account.Concurrency,
+		LoadFactor:                         account.LoadFactor,
+		Priority:                           account.Priority,
+		RateMultiplier:                     account.RateMultiplier,
+		Status:                             account.Status,
+		LastUsedAt:                         account.LastUsedAt,
+		ExpiresAt:                          account.ExpiresAt,
+		AutoPauseOnExpired:                 account.AutoPauseOnExpired,
+		Schedulable:                        account.Schedulable,
+		RateLimitedAt:                      account.RateLimitedAt,
+		RateLimitResetAt:                   account.RateLimitResetAt,
+		OverloadUntil:                      account.OverloadUntil,
+		TempUnschedulableUntil:             account.TempUnschedulableUntil,
+		TempUnschedulableReason:            account.TempUnschedulableReason,
+		SessionWindowStart:                 account.SessionWindowStart,
+		SessionWindowEnd:                   account.SessionWindowEnd,
+		SessionWindowStatus:                account.SessionWindowStatus,
+		ParentAccountID:                    account.ParentAccountID,
+		QuotaDimension:                     account.QuotaDimension,
+		AccountGroups:                      filterSchedulerAccountGroups(account.AccountGroups),
+		GroupIDs:                           filterSchedulerGroupIDs(account.GroupIDs, account.AccountGroups),
+		Credentials:                        filterSchedulerCredentials(account.Credentials),
+		Extra:                              filterSchedulerExtra(account.Extra),
+		OpenAIOAuthRequiresOSAuthorization: &requiresOSAuthorization,
+		OpenAIOAuthOSProfiles:              schedulerOpenAIOAuthOSAuthorizationSummary(account.OpenAIOAuthOSProfiles),
 	}
+}
+
+func schedulerOpenAIOAuthOSAuthorizationSummary(profiles *service.OpenAIOAuthOSProfiles) *service.OpenAIOAuthOSProfiles {
+	if profiles == nil {
+		return nil
+	}
+	out := &service.OpenAIOAuthOSProfiles{DefaultOS: profiles.DefaultOS, Profiles: make(map[string]service.OpenAIOAuthOSProfile, len(profiles.Profiles))}
+	for os, profile := range profiles.Profiles {
+		summary := service.CloneOpenAIOAuthOSAuthorizationSummary(profile.Authorization)
+		// Scheduling needs authorization status and refresh cooldown only.
+		summary.LastError, summary.AuthorizedAt, summary.ExpiresAt = "", nil, nil
+		out.Profiles[os] = service.OpenAIOAuthOSProfile{OSFamily: os, Authorization: summary}
+	}
+	return out
 }
 
 func filterSchedulerAccountGroups(accountGroups []service.AccountGroup) []service.AccountGroup {
@@ -956,7 +973,7 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	}
 	// Candidate-list admission evaluates the account override before hydrating
 	// the full account. Dropping it silently falls back to the platform threshold.
-	keys := []string{"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type", "account_scheduling_threshold"}
+	keys := []string{"model_mapping", "compact_model_mapping", "project_id", "oauth_type", "plan_type", "auth_mode", "openai_auth_mode", "account_scheduling_threshold"}
 	filtered := make(map[string]any)
 	for _, key := range keys {
 		if value, ok := credentials[key]; ok && value != nil {

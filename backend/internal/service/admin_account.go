@@ -474,6 +474,9 @@ func normalizeOpenAIInstallationPinUpdateExtra(account *Account, input *UpdateAc
 }
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
+	if input.OpenAIOAuthInitialOS != "" && NormalizeOpenAIOSFamily(input.OpenAIOAuthInitialOS) == "" {
+		return nil, infraerrors.BadRequest("OPENAI_OAUTH_OS_INVALID", "os must be windows, macos, or linux")
+	}
 	// Probe/session state is system-managed. New accounts always start with automatic refresh disabled.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingRateSyncEnabledExtraKey)
@@ -500,17 +503,19 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		delete(accountExtra, openAIInstallationPinEnabledKey)
 	}
 	account := &Account{
-		Name:        input.Name,
-		Notes:       normalizeAccountNotes(input.Notes),
-		Platform:    input.Platform,
-		Type:        input.Type,
-		Credentials: input.Credentials,
-		Extra:       accountExtra,
-		ProxyID:     input.ProxyID,
-		Concurrency: normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
-		Priority:    input.Priority,
-		Status:      StatusActive,
-		Schedulable: true,
+		OpenAIOAuthInitialOS:          input.OpenAIOAuthInitialOS,
+		OpenAIOAuthInitialCredentials: input.OpenAIOAuthInitialCredentials,
+		Name:                          input.Name,
+		Notes:                         normalizeAccountNotes(input.Notes),
+		Platform:                      input.Platform,
+		Type:                          input.Type,
+		Credentials:                   input.Credentials,
+		Extra:                         accountExtra,
+		ProxyID:                       input.ProxyID,
+		Concurrency:                   normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
+		Priority:                      input.Priority,
+		Status:                        StatusActive,
+		Schedulable:                   true,
 	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
@@ -663,6 +668,16 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	modeChanged, credentials, err := explicitOpenAIAuthModeChange(account, input.OpenAIAuthModeChange, input.Credentials)
+	if err != nil {
+		return nil, err
+	}
+	input.Credentials = credentials
+	if modeChanged {
+		ctx = WithOpenAIOAuthCredentialModeChangeIntent(ctx, id)
+	} else if IsOpenAIOAuthOSProfileOwner(account) && input.Credentials != nil {
+		input.Credentials = PreserveOpenAIOAuthProviderCredentials(account.Credentials, input.Credentials)
 	}
 	input.Extra = StripCodexTurnStateManagedExtra(input.Extra)
 	// Regular OAuth environments are fixed per OS. Legacy clients may still send
@@ -1176,7 +1191,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.CodexTurnState != nil {
+	if len(input.Credentials) > 0 || input.OpenAIAuthModeChange || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.CodexTurnState != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1187,6 +1202,24 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	for _, account := range cachedTargets {
 		if account != nil {
 			targetsByID[account.ID] = account
+		}
+	}
+	if input.OpenAIAuthModeChange {
+		var changedIDs []int64
+		var normalizedCredentials map[string]any
+		for _, id := range input.AccountIDs {
+			changed, credentials, err := explicitOpenAIAuthModeChange(targetsByID[id], true, input.Credentials)
+			if err != nil {
+				return nil, err
+			}
+			if changed {
+				changedIDs = append(changedIDs, id)
+				normalizedCredentials = credentials
+			}
+		}
+		if len(changedIDs) > 0 {
+			ctx = WithOpenAIOAuthCredentialModeChangeIntent(ctx, changedIDs...)
+			input.Credentials = normalizedCredentials
 		}
 	}
 	if input.CodexTurnState != nil {

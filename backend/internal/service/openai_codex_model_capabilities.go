@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +12,32 @@ const (
 	codexModelCapabilityCacheMaxEntries = 512
 	codexModelCapabilityCacheTTL        = 5 * time.Minute
 )
+
+// Model visibility belongs to an authorization, while conversation roots remain
+// stable across reauthorization. Never use the root namespace as this cache key
+// for an account that has selected an OS credential slot.
+func openAICodexModelCapabilitiesNamespace(account *Account) string {
+	if account == nil || account.OpenAIOAuthCredentialOS == "" {
+		return openAIOutboundSessionIdentityNamespace(account)
+	}
+	base := "account:" + strconv.FormatInt(account.OpenAIOAuthCredentialOwnerID, 10)
+	return codexModelAuthorizationNamespace(base, account.OpenAIOAuthCredentialOS, account.OpenAIOAuthAuthorizationGeneration)
+}
+
+func openAICodexModelCapabilitiesPlanNamespace(plan OpenAIOAuthIdentityPlan) string {
+	if plan.CredentialOS == "" && plan.AuthorizationGeneration == "" {
+		return plan.CredentialOwnerNamespace
+	}
+	base := "account:" + strconv.FormatInt(plan.OSOwnerID, 10)
+	return codexModelAuthorizationNamespace(base, plan.CredentialOS, plan.AuthorizationGeneration)
+}
+
+func codexModelAuthorizationNamespace(base, os, generation string) string {
+	if os == "" || generation == "" {
+		return ""
+	}
+	return base + "/os/" + os + "/authorization/" + generation
+}
 
 // CodexModelCapabilities is the stable subset of the models manifest that
 // changes Codex request metadata. Missing manifest fields use the same false

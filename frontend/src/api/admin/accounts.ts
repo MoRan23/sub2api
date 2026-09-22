@@ -11,6 +11,7 @@ import type {
   AccountListItem,
   CreateAccountRequest,
   UpdateAccountRequest,
+  BulkUpdateAccountRequest,
   PaginatedResponse,
   AccountUsageInfo,
   WindowStats,
@@ -201,6 +202,7 @@ export async function getById(id: number): Promise<Account> {
 }
 
 export interface CodexTurnStateModelStatus {
+  os_family?: OpenAIOAuthOS
   model: string
   state: 'ready' | 'expired' | 'missing' | 'paused' | 'model_excluded' | 'model_policy_unavailable'
   model_allowed?: boolean
@@ -225,6 +227,7 @@ export interface CodexTurnStateModelStatus {
 }
 
 export interface CodexTurnStateObservation {
+  os_family?: OpenAIOAuthOS
   model: string
   observed_at: string
   request_source?: 'business' | 'collector'
@@ -246,6 +249,7 @@ export interface CodexTurnStateObservation {
 }
 
 export interface CodexTurnStateStatus {
+  os_family?: OpenAIOAuthOS
   account_id: number
   owner_account_id: number
   inherited: boolean
@@ -264,8 +268,8 @@ export interface CodexTurnStateStatus {
   observations?: CodexTurnStateObservation[]
 }
 
-export async function getCodexTurnState(id: number, signal?: AbortSignal): Promise<CodexTurnStateStatus> {
-  const { data } = await apiClient.get<CodexTurnStateStatus>(`/admin/accounts/${id}/codex-turn-state`, { signal })
+export async function getCodexTurnState(id: number, signal?: AbortSignal, os?: OpenAIOAuthOS): Promise<CodexTurnStateStatus> {
+  const { data } = await apiClient.get<CodexTurnStateStatus>(`/admin/accounts/${id}/codex-turn-state`, { signal, ...(os ? { params: { os } } : {}) })
   return data
 }
 
@@ -354,6 +358,7 @@ export async function regenerateInstallationID(id: number, os?: OpenAIOAuthOS): 
 }
 
 export interface CodexAuthExport {
+  os?: OpenAIOAuthOS
   auth: {
     auth_mode: 'chatgpt'
     OPENAI_API_KEY: null
@@ -362,8 +367,18 @@ export interface CodexAuthExport {
   warnings: string[]
 }
 
-export async function exportCodexAuth(id: number): Promise<CodexAuthExport> {
-  const { data } = await apiClient.get<CodexAuthExport>(`/admin/accounts/${id}/codex-auth`)
+export async function exportCodexAuth(id: number, os?: OpenAIOAuthOS): Promise<CodexAuthExport> {
+  const { data } = await apiClient.get<CodexAuthExport>(`/admin/accounts/${id}/codex-auth`, os ? { params: { os } } : undefined)
+  return data
+}
+
+export async function revokeOpenAIOAuthOS(id: number, os: OpenAIOAuthOS): Promise<Account> {
+  const { data } = await apiClient.delete<Account>(`/admin/accounts/${id}/openai/os-auth/${os}`)
+  return data
+}
+
+export async function setDefaultOpenAIOAuthOS(id: number, os: OpenAIOAuthOS): Promise<Account> {
+  const { data } = await apiClient.put<Account>(`/admin/accounts/${id}/openai/os-auth/${os}/default`)
   return data
 }
 
@@ -460,6 +475,7 @@ export async function applyOAuthCredentials(
   id: number,
   payload: {
     type: 'oauth' | 'setup-token'
+    os?: OpenAIOAuthOS
     credentials: Record<string, unknown>
     extra?: Record<string, unknown>
   }
@@ -588,7 +604,7 @@ export async function resetTempUnschedulable(id: number): Promise<{ message: str
  */
 export async function generateAuthUrl(
   endpoint: string,
-  config: { proxy_id?: number }
+  config: { proxy_id?: number; redirect_uri?: string; account_id?: number; os?: OpenAIOAuthOS; purpose?: 'create' | 'authorize' }
 ): Promise<{ auth_url: string; session_id: string }> {
   const { data } = await apiClient.post<{ auth_url: string; session_id: string }>(endpoint, config)
   return data
@@ -655,8 +671,8 @@ export async function batchUpdateCredentials(request: {
  * @returns Success confirmation
  */
 export async function bulkUpdate(
-  accountIdsOrPayload: number[] | Record<string, unknown>,
-  updates?: Record<string, unknown>
+  accountIdsOrPayload: number[] | BulkUpdateAccountRequest,
+  updates?: BulkUpdateAccountRequest
 ): Promise<{
   success: number
   failed: number
@@ -726,8 +742,8 @@ export async function setSchedulable(id: number, schedulable: boolean): Promise<
  * @param id - Account ID
  * @returns List of available models for this account
  */
-export async function getAvailableModels(id: number): Promise<ClaudeModel[]> {
-  const { data } = await apiClient.get<ClaudeModel[]>(`/admin/accounts/${id}/models`)
+export async function getAvailableModels(id: number, os?: OpenAIOAuthOS): Promise<ClaudeModel[]> {
+  const { data } = await apiClient.get<ClaudeModel[]>(`/admin/accounts/${id}/models`, os ? { params: { os } } : undefined)
   return data
 }
 
@@ -921,10 +937,14 @@ export async function refreshOpenAIToken(
   refreshToken: string,
   proxyId?: number | null,
   endpoint: string = '/admin/openai/refresh-token',
-  clientId?: string
+  clientId?: string,
+  os?: OpenAIOAuthOS,
+  accountId?: number
 ): Promise<Record<string, unknown>> {
-  const payload: { refresh_token: string; proxy_id?: number; client_id?: string } = {
-    refresh_token: refreshToken
+  const payload: { refresh_token: string; proxy_id?: number; client_id?: string; os?: OpenAIOAuthOS; account_id?: number } = {
+    refresh_token: refreshToken,
+    ...(os ? { os } : {}),
+    ...(accountId ? { account_id: accountId } : {})
   }
   if (proxyId) {
     payload.proxy_id = proxyId
@@ -1211,6 +1231,8 @@ export const accountsAPI = {
   update,
   regenerateInstallationID,
   exportCodexAuth,
+  revokeOpenAIOAuthOS,
+  setDefaultOpenAIOAuthOS,
   getGrokMediaEligibility,
   updateGrokMediaEligibility,
   checkMixedChannelRisk,

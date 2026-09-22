@@ -2,6 +2,8 @@ package admin
 
 import (
 	"context"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -160,6 +162,9 @@ func (h *OpenAIOAuthHandler) ListOAuthDailySessionPools(c *gin.Context) {
 
 // OpenAIGenerateAuthURLRequest represents the request for generating OpenAI auth URL
 type OpenAIGenerateAuthURLRequest struct {
+	AccountID   int64  `json:"account_id"`
+	OS          string `json:"os"`
+	Purpose     string `json:"purpose"`
 	ProxyID     *int64 `json:"proxy_id"`
 	RedirectURI string `json:"redirect_uri"`
 }
@@ -169,15 +174,21 @@ type OpenAIGenerateAuthURLRequest struct {
 func (h *OpenAIOAuthHandler) GenerateAuthURL(c *gin.Context) {
 	var req OpenAIGenerateAuthURLRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		// Allow empty body
-		req = OpenAIGenerateAuthURLRequest{}
+		if !errors.Is(err, io.EOF) {
+			response.BadRequest(c, "Invalid request: "+err.Error())
+			return
+		}
 	}
 
-	result, err := h.openaiOAuthService.GenerateAuthURL(
+	if req.OS == "" && req.AccountID == 0 {
+		req.OS = service.OpenAIOSWindows
+	}
+	result, err := h.openaiOAuthService.GenerateAuthURLForOS(
 		c.Request.Context(),
 		req.ProxyID,
 		req.RedirectURI,
 		oauthPlatformFromPath(c),
+		service.OpenAIOAuthAuthorizationTarget{AccountID: req.AccountID, OS: req.OS, Purpose: req.Purpose},
 	)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -189,6 +200,8 @@ func (h *OpenAIOAuthHandler) GenerateAuthURL(c *gin.Context) {
 
 // OpenAIExchangeCodeRequest represents the request for exchanging OpenAI auth code
 type OpenAIExchangeCodeRequest struct {
+	AccountID   int64  `json:"account_id"`
+	OS          string `json:"os"`
 	SessionID   string `json:"session_id" binding:"required"`
 	Code        string `json:"code" binding:"required"`
 	State       string `json:"state" binding:"required"`
@@ -206,6 +219,8 @@ func (h *OpenAIOAuthHandler) ExchangeCode(c *gin.Context) {
 	}
 
 	tokenInfo, err := h.openaiOAuthService.ExchangeCode(c.Request.Context(), &service.OpenAIExchangeCodeInput{
+		AccountID:   req.AccountID,
+		OS:          req.OS,
 		SessionID:   req.SessionID,
 		Code:        req.Code,
 		State:       req.State,
@@ -217,11 +232,13 @@ func (h *OpenAIOAuthHandler) ExchangeCode(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, tokenInfo)
+	respondOpenAIOAuthAuthorization(c, tokenInfo)
 }
 
 // OpenAIRefreshTokenRequest represents the request for refreshing OpenAI token
 type OpenAIRefreshTokenRequest struct {
+	AccountID    int64  `json:"account_id"`
+	OS           string `json:"os"`
 	RefreshToken string `json:"refresh_token"`
 	RT           string `json:"rt"`
 	ClientID     string `json:"client_id"`
@@ -258,6 +275,15 @@ func (h *OpenAIOAuthHandler) RefreshToken(c *gin.Context) {
 	if refreshToken == "" {
 		refreshToken = strings.TrimSpace(req.RT)
 	}
+	if req.AccountID > 0 {
+		info, err := h.openaiOAuthService.AuthorizeAccountWithRefreshToken(c.Request.Context(), req.AccountID, req.OS, refreshToken, req.ClientID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		respondOpenAIOAuthAuthorization(c, info)
+		return
+	}
 	if refreshToken == "" {
 		response.BadRequest(c, "refresh_token is required")
 		return
@@ -278,7 +304,10 @@ func (h *OpenAIOAuthHandler) RefreshToken(c *gin.Context) {
 		clientID, _ = openai.OAuthClientConfigByPlatform(platform)
 	}
 
-	tokenInfo, err := h.openaiOAuthService.RefreshTokenWithClientID(c.Request.Context(), refreshToken, proxyURL, clientID)
+	if req.OS == "" {
+		req.OS = service.OpenAIOSWindows
+	}
+	tokenInfo, err := h.openaiOAuthService.RefreshTokenForOS(c.Request.Context(), refreshToken, proxyURL, clientID, req.OS)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -320,6 +349,13 @@ func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
 	if account.IsCredentialShadow() {
 		response.BadRequest(c, "Cannot refresh spark shadow account; its credentials are managed by the parent account")
 		return
+	}
+	if service.IsOpenAIOAuthOSProfileOwner(account) {
+		account, err = resolveAdminOpenAIOAuthCredentialAccount(c.Request.Context(), h.adminService, account, c.Query("os"))
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
 	}
 
 	// Use OpenAI OAuth service to refresh token
@@ -378,6 +414,7 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 
 	// Exchange code for tokens
 	tokenInfo, err := h.openaiOAuthService.ExchangeCode(c.Request.Context(), &service.OpenAIExchangeCodeInput{
+		Purpose:     "create",
 		SessionID:   req.SessionID,
 		Code:        req.Code,
 		State:       req.State,
@@ -390,6 +427,10 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 	}
 
 	// Build credentials from token info
+	if tokenInfo.Account != nil {
+		response.BadRequest(c, "this OAuth session is bound to an existing account")
+		return
+	}
 	credentials := h.openaiOAuthService.BuildAccountCredentials(tokenInfo)
 
 	platform := oauthPlatformFromPath(c)
@@ -405,15 +446,16 @@ func (h *OpenAIOAuthHandler) CreateAccountFromOAuth(c *gin.Context) {
 
 	// Create account
 	account, err := h.adminService.CreateAccount(c.Request.Context(), &service.CreateAccountInput{
-		Name:        name,
-		Platform:    platform,
-		Type:        "oauth",
-		Credentials: credentials,
-		Extra:       nil,
-		ProxyID:     req.ProxyID,
-		Concurrency: req.Concurrency,
-		Priority:    req.Priority,
-		GroupIDs:    req.GroupIDs,
+		OpenAIOAuthInitialOS: tokenInfo.OS,
+		Name:                 name,
+		Platform:             platform,
+		Type:                 "oauth",
+		Credentials:          credentials,
+		Extra:                nil,
+		ProxyID:              req.ProxyID,
+		Concurrency:          req.Concurrency,
+		Priority:             req.Priority,
+		GroupIDs:             req.GroupIDs,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

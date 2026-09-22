@@ -221,7 +221,9 @@ func TestOpenAIImagesJSONKeepalive_HeartbeatBeforeForwardStillFailsOver(t *testi
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+	stop()
 
 	require.Nil(t, result)
 	var failoverErr *UpstreamFailoverError

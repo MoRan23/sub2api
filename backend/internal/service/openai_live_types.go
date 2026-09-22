@@ -68,6 +68,10 @@ type LiveCallRecord struct {
 	InboundEndpoint string
 	// AttestationCiphertext 仅用于让同一会话的 Sideband 复用创建时的证明。
 	AttestationCiphertext string
+	// The authorization used to create a call also owns every sideband reconnect.
+	CredentialOS            string
+	CredentialOwnerID       int64
+	AuthorizationGeneration string
 }
 
 type LiveCallCreated struct {

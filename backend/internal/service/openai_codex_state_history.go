@@ -14,6 +14,7 @@ import (
 // It contains no token, ciphertext or credential-derived digest.
 type CodexTurnStateHistoryProof struct {
 	OwnerAccountID                                                       int64
+	OSFamily                                                             string
 	Model, Generation, CredentialEpoch, ModelPolicyRevision, AccountType string
 	ObservedAt, BusinessAt, IssuedAt, ExpiresAt                          time.Time
 	TokenLength, CipherBlocks                                            int
@@ -25,13 +26,14 @@ type CodexTurnStateHistoryRepository interface {
 	CreateHistoryDemand(context.Context, CodexTurnStateHistoryProof, time.Time) (bool, error)
 }
 
-type CodexTurnStateActivationRepository interface {
-	PublishActivation(context.Context, int64, string) error
-	SubscribeActivations(context.Context, func(int64, string)) error
+type CodexTurnStateOSActivationRepository interface {
+	PublishOSActivation(context.Context, int64, string, string) error
+	SubscribeOSActivations(context.Context, func(int64, string, string)) error
 }
 
 type codexStateHistoryKey struct {
 	ownerAccountID         int64
+	osFamily               string
 	model, credentialEpoch string
 }
 
@@ -80,27 +82,20 @@ func (s *CodexTurnStateService) startHistoryActivation(ctx context.Context) {
 				return
 			case ownerID := <-ch:
 				workCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-				owner, err := s.currentOwner(workCtx, ownerID)
-				if err == nil && owner != nil {
-					generation := CodexTurnStateGenerationForAccount(owner)
-					s.activateHistoryForOwner(workCtx, owner, generation)
-					if bus, ok := s.repo.(CodexTurnStateActivationRepository); ok {
-						_ = bus.PublishActivation(workCtx, owner.ID, generation)
-					}
-				}
+				s.activateHistoryForAccount(workCtx, ownerID)
 				cancel()
 			}
 		}
 	}()
-	if bus, ok := s.repo.(CodexTurnStateActivationRepository); ok {
+	if bus, ok := s.repo.(CodexTurnStateOSActivationRepository); ok {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
 			for ctx.Err() == nil {
-				_ = bus.SubscribeActivations(ctx, func(id int64, generation string) {
+				_ = bus.SubscribeOSActivations(ctx, func(id int64, osFamily, generation string) {
 					workCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 					defer cancel()
-					owner, err := s.currentOwner(workCtx, id)
+					owner, err := s.currentOwner(workCtx, id, osFamily)
 					if err == nil && owner != nil {
 						s.activateHistoryForOwner(workCtx, owner, generation)
 					}
@@ -142,7 +137,7 @@ func (s *CodexTurnStateService) observeHistoryEnvelopeLocked(a *CodexTurnStateAt
 			shapes[index] = CodexTurnStateShape{TokenLength: envelope.TokenLength, CipherBlocks: envelope.CipherBlocks, IssuedAt: envelope.IssuedAt, ExpiresAt: envelope.ExpiresAt}
 		}
 	}
-	a.historyProof = &CodexTurnStateHistoryProof{OwnerAccountID: a.OwnerAccountID, Model: a.Model, Shapes: shapes,
+	a.historyProof = &CodexTurnStateHistoryProof{OwnerAccountID: a.OwnerAccountID, OSFamily: a.OSFamily, Model: a.Model, Shapes: shapes,
 		CredentialEpoch: a.credentialEpoch, ObservedAt: a.safeObservation.ObservedAt,
 		IssuedAt: envelope.IssuedAt, ExpiresAt: envelope.ExpiresAt, TokenLength: envelope.TokenLength,
 		CipherBlocks: envelope.CipherBlocks, EnvelopeValid: err == nil}
@@ -152,7 +147,7 @@ func (s *CodexTurnStateService) bindHistoryCredentials(ctx context.Context, a *C
 	if a == nil {
 		return
 	}
-	owner, err := s.currentOwner(ctx, a.OwnerAccountID)
+	owner, err := s.currentOwner(ctx, a.OwnerAccountID, a.OSFamily)
 	header := func(name string) string {
 		for key, values := range headers {
 			if strings.EqualFold(key, name) && len(values) > 0 {
@@ -199,7 +194,7 @@ func (s *CodexTurnStateService) completeBusinessSent(a *CodexTurnStateAttempt) {
 	} else if err := s.repo.MarkBusinessSent(ctx, key, sentAt); err != nil || !delivered {
 		return
 	}
-	owner, err := s.currentOwner(ctx, a.OwnerAccountID)
+	owner, err := s.currentOwner(ctx, a.OwnerAccountID, a.OSFamily)
 	if err == nil && owner != nil {
 		s.activateHistoryForOwner(ctx, owner, key.Generation)
 	}
@@ -214,7 +209,7 @@ func recordCodexDeliveredHistory(a *CodexTurnStateAttempt) {
 	proof := *a.historyProof
 	proof.CredentialEpoch, proof.BusinessAt, proof.Delivered = a.credentialEpoch, a.businessSentAt, true
 	a.mu.Unlock()
-	key := codexStateHistoryKey{ownerAccountID: proof.OwnerAccountID, model: proof.Model, credentialEpoch: proof.CredentialEpoch}
+	key := codexStateHistoryKey{ownerAccountID: proof.OwnerAccountID, osFamily: proof.OSFamily, model: proof.Model, credentialEpoch: proof.CredentialEpoch}
 	codexStateHistory.Lock()
 	defer codexStateHistory.Unlock()
 	previous, exists := codexStateHistory.proofs[key]
@@ -269,7 +264,12 @@ func (s *CodexTurnStateService) scanHistory(ctx context.Context) {
 	}
 	for _, owner := range owners {
 		if owner != nil {
-			s.activateHistoryForOwner(ctx, owner, CodexTurnStateGenerationForAccount(owner))
+			for _, os := range []string{"windows", "macos", "linux"} {
+				projected, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accounts, owner, os)
+				if err == nil {
+					s.activateHistoryForOwner(ctx, projected, CodexTurnStateGenerationForAccount(projected))
+				}
+			}
 		}
 	}
 }
@@ -281,7 +281,7 @@ func (s *CodexTurnStateService) activateHistoryForOwner(ctx context.Context, own
 	s.mu.Lock()
 	var canceled []CodexTurnStateKey
 	for key := range s.running {
-		if key.OwnerAccountID == owner.ID && (key.Generation != generation || !CodexTurnStateConfigForAccount(owner).Enabled) {
+		if key.OwnerAccountID == owner.ID && key.OSFamily == codexTurnStateOS(owner) && (key.Generation != generation || !CodexTurnStateConfigForAccount(owner).Enabled) {
 			canceled = append(canceled, key)
 		}
 	}
@@ -296,6 +296,9 @@ func (s *CodexTurnStateService) activateHistoryForOwner(ctx context.Context, own
 	}
 	now := s.now()
 	for _, proof := range codexStateHistorySnapshot(owner.ID, now.Add(-CodexTurnStateActiveWindow)) {
+		if proof.OSFamily != codexTurnStateOS(owner) {
+			continue
+		}
 		targetIndex := 0
 		if accountType == "team_business" {
 			targetIndex = 2
@@ -322,7 +325,7 @@ func (s *CodexTurnStateService) activateHistoryForOwner(ctx context.Context, own
 		}
 		proof.Generation, proof.ModelPolicyRevision, proof.AccountType = generation, revision, accountType
 		if created, err := repo.CreateHistoryDemand(ctx, proof, now); err == nil && created {
-			s.enqueue(ctx, CodexTurnStateKey{OwnerAccountID: owner.ID, Model: proof.Model, Generation: generation})
+			s.enqueue(ctx, CodexTurnStateKey{OwnerAccountID: owner.ID, OSFamily: codexTurnStateOS(owner), Model: proof.Model, Generation: generation})
 		}
 	}
 }
@@ -332,7 +335,7 @@ func (s *CodexTurnStateService) recordCollectorObservation(owner *Account, model
 	if safe == nil || safe.ObservedAt.IsZero() || owner == nil {
 		return
 	}
-	value := CodexTurnStateObservation{Model: model, RequestSource: "collector", ResponseLength: safe.TokenLength,
+	value := CodexTurnStateObservation{OSFamily: codexTurnStateOS(owner), Model: model, RequestSource: "collector", ResponseLength: safe.TokenLength,
 		ResponseShape: safe.Shape, ResponseSource: safe.ResponseSource, ResponseObservedShape: safe.ObservedShape,
 		ResponseCipherBlocks: safe.CipherBlocks, ResponseValidationReason: safe.ValidationReason,
 		Action: "collector_omitted", ObservationID: result.observationID, credentialEpoch: CodexTurnStateCredentialEpochForAccount(owner),

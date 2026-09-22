@@ -60,8 +60,8 @@ func newOpenAICodexWSCompactWindowTestPlan(t *testing.T, secret string, apiKeyID
 		ContextWindowID: contextWindowID.String(),
 	}, mappingKey)
 	require.NoError(t, err)
-	return &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: secret}}},
-		&Account{ID: 4242, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, plan
+	account := &Account{ID: 4242, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "oauth-token"}}
+	return &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: secret}}, accountRepo: newAuthorizedOpenAIOAuthTestRepo(account)}, account, plan
 }
 
 func TestObserveOpenAICodexWSCompactionDeliveryRequiresDeliveredSuccessfulTerminal(t *testing.T) {
@@ -631,6 +631,7 @@ func TestOpenAIHTTPToUpstreamWSLocalCompactionDownstreamWriteFailureDoesNotCommi
 			openAIPinnedInstallationIDKey:     transportTestPinnedInstallationID,
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -743,6 +744,7 @@ func TestOpenAIHTTPToUpstreamWSRemoteV2NonStreamingDoneCardinalityControlsCommit
 					openAIPinnedInstallationIDKey:     transportTestPinnedInstallationID,
 				},
 			}
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 			recorder := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(recorder)

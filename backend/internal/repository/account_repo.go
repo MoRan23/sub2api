@@ -208,6 +208,12 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		if _, err := saveOpenAIOAuthOSProfilesLocked(ctx, client, account, nil, account.OpenAIOAuthOSProfiles); err != nil {
 			return err
 		}
+		if _, _, err := ensureOpenAIOAuthOSProfilesLocked(ctx, client, account); err != nil {
+			return err
+		}
+		if err := initializeOpenAIOAuthOSCredentialsLocked(ctx, client, account); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -541,6 +547,9 @@ func (r *accountRepository) updateLockedAccount(
 	if err != nil {
 		return nil, err
 	}
+	if service.IsOpenAIOAuthOSProfileOwner(current) && (service.IsOpenAIOAuthOSProfileOwner(account) || !service.OpenAIOAuthCredentialModeChangeAllowed(ctx, account.ID)) {
+		account.Credentials = service.PreserveOpenAIOAuthProviderCredentials(current.Credentials, account.Credentials)
+	}
 	if err := service.PreserveAccountConfiguration(current, account, service.AccountConfigurationIntentFromContext(ctx, account.ID)); err != nil {
 		return nil, err
 	}
@@ -552,6 +561,9 @@ func (r *accountRepository) updateLockedAccount(
 		account.OpenAIOAuthOSProfiles = nil
 		if service.IsOpenAIOAuthOSProfileOwner(current) {
 			if _, err := client.ExecContext(ctx, `DELETE FROM account_openai_oauth_os_profiles WHERE account_id=$1`, account.ID); err != nil {
+				return nil, err
+			}
+			if _, err := client.ExecContext(ctx, `UPDATE account_openai_oauth_os_credentials SET credentials='{}'::jsonb,status='unauthorized',authorization_generation=gen_random_uuid(),state_generation=gen_random_uuid(),credential_epoch=gen_random_uuid(),revision=revision+1,updated_at=NOW() WHERE account_id=$1`, account.ID); err != nil {
 				return nil, err
 			}
 		}
@@ -838,6 +850,9 @@ func decodeAccountExtraJSON(raw []byte) (any, bool, error) {
 }
 
 func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, credentials map[string]any) error {
+	guardedCredentials := func(expression string) string {
+		return guardedAccountCredentialsExpression(expression, service.OpenAIOAuthCredentialModeChangeAllowed(ctx, id))
+	}
 	payload, err := json.Marshal(normalizeJSONMap(credentials))
 	if err != nil {
 		return err
@@ -867,13 +882,13 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 		)
 		UPDATE accounts
 		SET
-			credentials = `+guardedAccountCredentialsExpression("$1::jsonb")+`,
+			credentials = `+guardedCredentials("$1::jsonb")+`,
 			extra = `+guardedCodexTurnStateGenerationExpression(`CASE
 				-- 凭证整体未变化 ⇒ Ollama 组身份必然未变化；顶层 DISTINCT 守卫防止
 				-- 非 Ollama 账号的无变化持久化误清探测快照或重写 NULL extra。
 				WHEN platform IN (`+ollamaCloudUsagePlatformsSQL+`)
 					AND type = 'apikey'
-					AND credentials IS DISTINCT FROM (`+guardedAccountCredentialsExpression("$1::jsonb")+`)
+				AND credentials IS DISTINCT FROM (`+guardedCredentials("$1::jsonb")+`)
 					AND (
 						credentials -> 'api_key' IS DISTINCT FROM $1::jsonb -> 'api_key'
 						OR NOT (
@@ -889,10 +904,10 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 				-- 上游倍率探测已放宽到全部 API-key 平台：凭证变化即视为探测
 				-- 身份变化，丢弃 stale 快照。
 				WHEN type = 'apikey'
-					AND credentials IS DISTINCT FROM (`+guardedAccountCredentialsExpression("$1::jsonb")+`)
+				AND credentials IS DISTINCT FROM (`+guardedCredentials("$1::jsonb")+`)
 				THEN COALESCE(extra, '{}'::jsonb) - 'upstream_billing_probe'
 				ELSE extra
-			END`, guardedAccountCredentialsExpression("$1::jsonb"))+`,
+		END`, guardedCredentials("$1::jsonb"))+`,
 			updated_at = NOW()
 		FROM previous_profile
 		WHERE id = previous_profile.profile_account_id AND deleted_at IS NULL
@@ -1312,15 +1327,18 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 	}
 	if options.RequireRefreshToken {
 		query += `
-			AND credentials ? 'refresh_token'
-			AND btrim(credentials->>'refresh_token') <> ''`
+			AND CASE WHEN (` + codexTurnStateOwnerExpression("credentials") + `) THEN EXISTS (
+				SELECT 1 FROM account_openai_oauth_os_credentials c WHERE c.account_id=accounts.id
+				AND c.status='authorized' AND BTRIM(COALESCE(c.credentials->>'refresh_token',''))<>''
+				AND (c.refresh_retry_after IS NULL OR c.refresh_retry_after<=NOW()))
+			ELSE credentials ? 'refresh_token' AND btrim(credentials->>'refresh_token') <> '' END`
 	}
 	if options.ExcludeRetryCooldown {
 		query += `
-			AND (
+			AND ((` + codexTurnStateOwnerExpression("credentials") + `) OR (
 				temp_unschedulable_until > NOW()
 				AND temp_unschedulable_reason LIKE 'token refresh retry exhausted:%'
-			) IS NOT TRUE`
+			) IS NOT TRUE)`
 	}
 	query += `
 		ORDER BY id ASC
@@ -3179,6 +3197,9 @@ func ollamaCloudUsageSnapshotClearRequested(extra map[string]any) bool {
 }
 
 func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates service.AccountBulkUpdate) (int64, error) {
+	guardedCredentials := func(expression string) string {
+		return guardedAccountCredentialsExpression(expression, service.OpenAIOAuthCredentialModeChangeAllowed(ctx, ids...))
+	}
 	if len(ids) == 0 {
 		return 0, nil
 	}
@@ -3255,7 +3276,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			return 0, err
 		}
 		credentialPlaceholder = "$" + itoa(idx)
-		setClauses = append(setClauses, "credentials = "+guardedAccountCredentialsExpression("COALESCE(credentials, '{}'::jsonb) || "+credentialPlaceholder+"::jsonb"))
+		setClauses = append(setClauses, "credentials = "+guardedCredentials("COALESCE(credentials, '{}'::jsonb) || "+credentialPlaceholder+"::jsonb"))
 		args = append(args, payload)
 		idx++
 	}
@@ -3311,7 +3332,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 		credentialsExpression := ""
 		if credentialPlaceholder != "" {
-			credentialsExpression = guardedAccountCredentialsExpression("COALESCE(credentials, '{}'::jsonb) || " + credentialPlaceholder + "::jsonb")
+			credentialsExpression = guardedCredentials("COALESCE(credentials, '{}'::jsonb) || " + credentialPlaceholder + "::jsonb")
 		}
 		extraExpression = guardedCodexTurnStateGenerationExpression(extraExpression, credentialsExpression)
 		setClauses = append(setClauses, "extra = "+guardedAccountExtraExpression(extraExpression))
@@ -3386,6 +3407,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			}
 			for key, value := range updates.Credentials {
 				current.Credentials[key] = value
+			}
+			if service.IsOpenAIOAuthOSProfileOwner(&previous) && (service.IsOpenAIOAuthOSProfileOwner(current) || !service.OpenAIOAuthCredentialModeChangeAllowed(ctx, id)) {
+				current.Credentials = service.PreserveOpenAIOAuthProviderCredentials(previous.Credentials, current.Credentials)
 			}
 			if err := service.ValidateCodexTurnStateConfigUpdate(&previous, current, updates.CodexTurnState); err != nil {
 				return 0, err

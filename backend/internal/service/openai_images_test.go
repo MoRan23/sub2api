@@ -865,6 +865,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthPassesNAndReturnsAllImages(t *te
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -1019,6 +1020,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthUpstreamHTTPErrorSurfacesRealErr
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 	require.Nil(t, result)
 
@@ -1077,6 +1079,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthNonStreamModerationBlockedReturn
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 	require.Nil(t, result)
 	var upstreamErr *OpenAIImagesUpstreamError
@@ -1127,6 +1130,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthNonStreamServerErrorReturnsFailo
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 
 	require.Nil(t, result)
@@ -1165,6 +1169,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuth429CarriesSameAccountRetryWindow
 	account := &Account{ID: 22, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "token-123"}}
 	startedAt := time.Now()
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 
 	require.Nil(t, result)
@@ -1317,6 +1322,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthStreamServerErrorAfterFlushDoesN
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 
 	require.Nil(t, result)
@@ -1409,6 +1415,7 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyGenerationUsesConfiguredV1BaseU
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -1456,6 +1463,7 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyAccessStateUsesTypedFailover(t 
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 
 	require.Nil(t, result)
@@ -1510,6 +1518,7 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyStreamJSONResponseBillsImage(t 
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -1559,6 +1568,7 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyStreamRawJSONEventStreamFallbac
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -1611,6 +1621,7 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyStreamMultilineSSEDataBillsImag
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -1673,6 +1684,7 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyEditUsesConfiguredV1BaseURL(t *
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body.Bytes(), parsed, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -1731,6 +1743,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthStreamingTransformsEvents(t *tes
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -1811,6 +1824,7 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyStreamingDrainsAfterClientDisco
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -1885,6 +1899,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthEditsMultipartUsesResponsesAPI(t
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body.Bytes(), parsed, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -1947,6 +1962,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthEditsStreamingTransformsEvents(t
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -2137,6 +2153,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthStreamingHandlesOutputItemDoneFa
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -2193,6 +2210,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthStreamingHandlesMultilineSSE(t *
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -2257,6 +2275,7 @@ func TestOpenAIGatewayServiceForwardImages_OAuthStreamingDrainsAfterClientDiscon
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)

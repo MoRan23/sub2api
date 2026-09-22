@@ -92,6 +92,7 @@ func TestOpenAIGatewayService_Forward_FailoverReparsesCachedBodyForNextAccount(t
 
 			firstAccount := openAIFailoverCachedBodyTestAccount(1, "account-a", tt.firstMapping)
 			secondAccount := openAIFailoverCachedBodyTestAccount(2, "account-b", tt.secondMapping)
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(firstAccount, secondAccount)
 
 			_, err := svc.Forward(context.Background(), c, firstAccount, body)
 			require.Error(t, err)

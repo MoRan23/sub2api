@@ -12,8 +12,28 @@ import (
 
 // OpenAICodexAuthExport separates the downloadable auth.json from UI warnings.
 type OpenAICodexAuthExport struct {
+	OS       string              `json:"os,omitempty"`
 	Auth     OpenAICodexAuthFile `json:"auth"`
 	Warnings []string            `json:"warnings"`
+}
+
+// BuildOpenAICodexAuthExportForOS uses only a privately read selected slot. It
+// never falls back to the compatibility mirror or provisions installation data.
+func BuildOpenAICodexAuthExportForOS(account *Account, slot *OpenAIOAuthOSCredential, now time.Time) (*OpenAICodexAuthExport, error) {
+	if !IsOpenAIOAuthOSProfileOwner(account) {
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_CODEX_AUTH_EXPORT_UNSUPPORTED", "platform, type, parent_account_id, auth_mode")
+	}
+	if slot == nil || slot.OwnerAccountID != account.ID || NormalizeOpenAIOSFamily(slot.OSFamily) == "" || len(slot.Credentials) == 0 {
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_CODEX_AUTH_EXPORT_UNAUTHORIZED", "selected OS has no saved OAuth authorization")
+	}
+	selected := *account
+	selected.Credentials = slot.Credentials
+	result, err := BuildOpenAICodexAuthExport(&selected, now)
+	if err != nil {
+		return nil, err
+	}
+	result.OS = slot.OSFamily
+	return result, nil
 }
 
 type OpenAICodexAuthFile struct {

@@ -31,8 +31,10 @@ func TestOpenAIModelsCachePreservesOAuthCapabilityNamespaces(t *testing.T) {
 	other := newCodexModelsTestAccount()
 	other.ID = 2
 	other.Credentials["chatgpt_account_id"] = "acc-other"
-	firstNamespace := openAIOutboundSessionIdentityNamespace(first)
-	otherNamespace := openAIOutboundSessionIdentityNamespace(other)
+	first = scopedAuxiliaryOSFixture(t, s, first)
+	other = scopedAuxiliaryOSFixture(t, s, other)
+	firstNamespace := openAICodexModelCapabilitiesNamespace(first)
+	otherNamespace := openAICodexModelCapabilitiesNamespace(other)
 	require.NotEqual(t, firstNamespace, otherNamespace)
 
 	list, err := s.FetchOpenAIModelsList(context.Background(), first)
@@ -58,7 +60,6 @@ func TestOpenAIModelsNotModifiedOnlyRefreshesExistingOAuthManifestCapabilities(t
 	}))
 	defer server.Close()
 	account := newCodexModelsTestAccount()
-	namespace := openAIOutboundSessionIdentityNamespace(account)
 	for _, tc := range []struct {
 		name     string
 		manifest bool
@@ -70,12 +71,14 @@ func TestOpenAIModelsNotModifiedOnlyRefreshesExistingOAuthManifestCapabilities(t
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &OpenAIGatewayService{}
+			scoped := scopedAuxiliaryOSFixture(t, s, account)
+			namespace := openAICodexModelCapabilitiesNamespace(scoped)
 			expiredAt := time.Now().Add(-codexModelCapabilityCacheTTL - time.Second)
 			s.codexModelCapabilities.observeManifest("unrelated-account", []byte(`{"models":[{"slug":"gpt-5.6-sol"}]}`), expiredAt)
 			if tc.known {
 				s.codexModelCapabilities.observeManifest(namespace, []byte(`{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":true}]}`), expiredAt)
 			}
-			request := openAIModelsRequest{url: server.URL, headers: make(http.Header), credentialAccount: account}
+			request := openAIModelsRequest{url: server.URL, headers: make(http.Header), credentialAccount: scoped}
 			fetch := s.fetchOpenAIModelsUpstream
 			if tc.manifest {
 				fetch = s.fetchCodexModelsManifestUpstream

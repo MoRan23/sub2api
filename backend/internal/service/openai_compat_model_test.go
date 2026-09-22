@@ -1092,7 +1092,7 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
-	svc.accountRepo = &installationIdentityRepoStub{accounts: map[int64]*Account{account.ID: account}}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	const turnMetadata = `{"turn_id":"01916d9b-bb60-7c4a-8e04-32e9c8bf1234"}`
 
 	firstBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"}],"stream":false}`)
@@ -1106,7 +1106,8 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, firstResult)
 	require.Empty(t, upstream.requests[0].Header.Get("x-codex-turn-state"))
-	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], codexCLIUserAgent, openai.CodexDefaultOriginator)
+	profileUA := resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, account.OpenAIOAuthOSProfiles.Profiles[account.OpenAIOAuthOSProfiles.DefaultOS].UserAgent).UserAgent
+	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], profileUA, openai.CodexDefaultOriginator)
 
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
 	secondRec := httptest.NewRecorder()
@@ -1123,7 +1124,7 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 	secondIdentity := requireOpenAIIdentityPathPair(t, upstream.requests[1].Header, upstream.bodies[1])
 	require.Equal(t, firstIdentity, secondIdentity)
 	require.Empty(t, upstream.requests[1].Header.Get("conversation_id"))
-	requireOpenAIMessagesCodexIdentity(t, upstream.requests[1], codexCLIUserAgent, openai.CodexDefaultOriginator)
+	requireOpenAIMessagesCodexIdentity(t, upstream.requests[1], profileUA, openai.CodexDefaultOriginator)
 	require.Equal(t, secondIdentity.SessionID, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").String())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
 
@@ -1159,7 +1160,7 @@ func TestForwardAsAnthropic_GuardsCompositeTurnStateAfterFinalProjection(t *test
 		Type: AccountTypeOAuth, Concurrency: 1,
 		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
 	}
-	svc.accountRepo = &installationIdentityRepoStub{accounts: map[int64]*Account{account.ID: account}}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
 	rec := httptest.NewRecorder()
@@ -1263,7 +1264,7 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
-	svc.accountRepo = &installationIdentityRepoStub{accounts: map[int64]*Account{account.ID: account}}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	const turnMetadata = `{"turn_id":"01916d9b-bb60-7c4a-8e04-32e9c8bf1235"}`
 
 	firstBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"}],"stream":false}`)
@@ -1278,7 +1279,8 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	require.NotNil(t, firstResult)
 	firstIdentity := requireOpenAIIdentityPathPair(t, upstream.requests[0].Header, upstream.bodies[0])
 	require.Empty(t, upstream.requests[0].Header.Get("x-codex-turn-state"))
-	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], codexCLIUserAgent, openai.CodexDefaultOriginator)
+	profileUA := resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, account.OpenAIOAuthOSProfiles.Profiles[account.OpenAIOAuthOSProfiles.DefaultOS].UserAgent).UserAgent
+	requireOpenAIMessagesCodexIdentity(t, upstream.requests[0], profileUA, openai.CodexDefaultOriginator)
 	require.Equal(t, firstIdentity.SessionID, gjson.GetBytes(upstream.bodies[0], "prompt_cache_key").String())
 
 	secondBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":"ok"},{"role":"user","content":"second"}],"stream":false}`)
@@ -1295,7 +1297,7 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 	require.Equal(t, firstIdentity, secondIdentity)
 	require.Equal(t, "turn_state_digest_first", upstream.requests[1].Header.Get("x-codex-turn-state"))
 	require.Empty(t, upstream.requests[1].Header.Get("conversation_id"))
-	requireOpenAIMessagesCodexIdentity(t, upstream.requests[1], codexCLIUserAgent, openai.CodexDefaultOriginator)
+	requireOpenAIMessagesCodexIdentity(t, upstream.requests[1], profileUA, openai.CodexDefaultOriginator)
 	require.Equal(t, secondIdentity.SessionID, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").String())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "previous_response_id").Exists())
 }
@@ -1325,7 +1327,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
-	svc.accountRepo = &installationIdentityRepoStub{accounts: map[int64]*Account{account.ID: account}}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	const turnMetadata = `{"turn_id":"01916d9b-bb60-7c4a-8e04-32e9c8bf1236"}`
 	metadata := `{"user_id":"{\"device_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"account_uuid\":\"\",\"session_id\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\"}"}`
 
@@ -1386,7 +1388,7 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
-	svc.accountRepo = &installationIdentityRepoStub{accounts: map[int64]*Account{account.ID: account}}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	const turnMetadata = `{"turn_id":"01916d9b-bb60-7c4a-8e04-32e9c8bf1237"}`
 	metadata := `{"user_id":"{\"device_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"account_uuid\":\"\",\"session_id\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"}`
 

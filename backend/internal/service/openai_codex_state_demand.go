@@ -88,6 +88,18 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 	if base.CollectorAttemptID == "" || base.CollectorProxyID <= 0 {
 		return
 	}
+	// A real account-wide Retry-After remains authoritative even if the request's
+	// credential slot was rebound, revoked, or satisfied by a business response.
+	if cooldowns, ok := s.repo.(CodexTurnStateCooldownRepository); ok &&
+		codexTurnStateCollectorFailureReason(result, collectErr) == "collector_rate_limited" {
+		retry := result.RetryAfter
+		if retry < time.Second {
+			retry = time.Second
+		}
+		if err := cooldowns.ExtendCollectorCooldown(ctx, key.OwnerAccountID, s.now().Add(retry)); err != nil {
+			return
+		}
+	}
 	identity := base.cacheIdentity()
 	for range 3 {
 		if !s.authoritativeModelPolicyMatches(ctx, key.Model, policyRevision) {
@@ -106,7 +118,7 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 		if record.EncryptedToken != "" && !identity.matches(record) {
 			return
 		}
-		current, err := s.currentOwner(ctx, key.OwnerAccountID)
+		current, err := s.currentOwner(ctx, key.OwnerAccountID, key.OSFamily)
 		now := s.now()
 		if err != nil || !codexTurnStateEligible(current) || !CodexTurnStateConfigForAccount(current).Enabled || CodexTurnStateGenerationForAccount(current) != key.Generation ||
 			current.Status != StatusActive || !current.Schedulable || (current.ExpiresAt != nil && !current.ExpiresAt.After(now)) {

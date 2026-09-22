@@ -43,6 +43,7 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
+	service.CaptureOpenAIRequestOS(c, request.Session)
 	model := strings.TrimSpace(gjson.GetBytes(request.Session, "model").String())
 	if !compositeTargetPlatformAllowed(c, apiKey, model, service.PlatformOpenAI) {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Live only supports OpenAI models for Composite groups")
@@ -179,6 +180,8 @@ func liveCallIdentity(
 
 func (h *OpenAIGatewayHandler) writeLiveCreateError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, service.ErrOpenAIOAuthOSUnauthorized), errors.Is(err, service.ErrOpenAIOAuthOSAuthorizationChanged):
+		h.errorResponse(c, http.StatusServiceUnavailable, "openai_os_authorization_unavailable", "No available OpenAI OAuth authorization for the requested operating system")
 	case errors.Is(err, service.ErrLiveConcurrencyFull):
 		h.errorResponse(c, http.StatusTooManyRequests, "rate_limit_error", "Live concurrency limit reached")
 	case errors.Is(err, service.ErrLiveUnavailable):
@@ -222,6 +225,10 @@ func (h *OpenAIGatewayHandler) LiveSideband(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, service.ErrLiveIdentityMismatch) {
 			h.errorResponse(c, http.StatusForbidden, "permission_error", "Live call belongs to another identity")
+			return
+		}
+		if errors.Is(err, service.ErrOpenAIOAuthOSUnauthorized) || errors.Is(err, service.ErrOpenAIOAuthOSAuthorizationChanged) {
+			h.writeLiveCreateError(c, err)
 			return
 		}
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Live call not found")

@@ -20,6 +20,7 @@ const (
 // CodexTurnStateKey always refers to the actual credential owner and final wire model.
 type CodexTurnStateKey struct {
 	OwnerAccountID int64
+	OSFamily       string
 	Model          string
 	Generation     string
 	// Set only on cancellation notifications, never on repository lookup keys.
@@ -33,6 +34,7 @@ type CodexTurnStateRecord struct {
 	ModelPolicyRevision    string `json:"-"`
 	BusinessInFlight       bool   `json:"-"`
 	OwnerAccountID         int64
+	OSFamily               string
 	Model                  string
 	Generation             string
 	Version                int64
@@ -61,7 +63,7 @@ type CodexTurnStateRecord struct {
 }
 
 func (r CodexTurnStateRecord) Key() CodexTurnStateKey {
-	return CodexTurnStateKey{OwnerAccountID: r.OwnerAccountID, Model: r.Model, Generation: r.Generation}
+	return CodexTurnStateKey{OwnerAccountID: r.OwnerAccountID, OSFamily: r.OSFamily, Model: r.Model, Generation: r.Generation}
 }
 
 // Cache identity is private request-local state, independent of scheduling CAS
@@ -103,6 +105,13 @@ type CodexTurnStateRepository interface {
 	SubscribeCancels(context.Context, func(CodexTurnStateKey)) error
 }
 
+// Cooldown is account-wide and must outlive every OS credential generation.
+// Extending it is monotonic; successful business traffic never clears it.
+type CodexTurnStateCooldownRepository interface {
+	GetCollectorCooldowns(context.Context, []int64) (map[int64]time.Time, error)
+	ExtendCollectorCooldown(context.Context, int64, time.Time) error
+}
+
 type CodexTurnStateSnapshot struct {
 	Token        string
 	Version      int64
@@ -116,6 +125,7 @@ type CodexTurnStateSnapshot struct {
 // modify them. Response candidates are private and synchronized for WS readers.
 type CodexTurnStateAttempt struct {
 	OwnerAccountID int64
+	OSFamily       string
 	Model          string
 	Generation     string
 	// Enabled=false is a passive fingerprint observation: no runtime lease,
@@ -201,6 +211,7 @@ type CodexTurnStateCollector interface {
 type CodexTurnStateCollectorHTTPDo func(context.Context, CodexTurnStateCollectRequest, *http.Request) (*http.Response, error)
 
 type CodexTurnStateModelStatus struct {
+	OSFamily               string     `json:"os_family"`
 	Model                  string     `json:"model"`
 	ModelAllowed           bool       `json:"model_allowed"`
 	CacheAvailable         bool       `json:"cache_available"`
@@ -225,6 +236,7 @@ type CodexTurnStateModelStatus struct {
 }
 
 type CodexTurnStateStatus struct {
+	OSFamily            string                           `json:"os_family"`
 	AccountID           int64                            `json:"account_id"`
 	OwnerAccountID      int64                            `json:"owner_account_id"`
 	Inherited           bool                             `json:"inherited"`
@@ -244,6 +256,7 @@ type CodexTurnStateStatus struct {
 // CodexTurnStateModelObservation is a process-local diagnostic summary. It
 // contains no token, ciphertext, hash, or credential/configuration identifier.
 type CodexTurnStateModelObservation struct {
+	OSFamily                 string     `json:"os_family"`
 	Model                    string     `json:"model"`
 	RequestSource            string     `json:"request_source"`
 	ObservedAt               time.Time  `json:"observed_at"`

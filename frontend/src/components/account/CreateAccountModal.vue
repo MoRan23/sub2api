@@ -3302,7 +3302,7 @@
             />
           </button>
         </div>
-        <OpenAIOAuthOSProfiles v-if="oauthFlowRef?.inputMethod !== 'codex_pat' && oauthFlowRef?.inputMethod !== 'agent_identity'" creating />
+        <OpenAIOAuthOSProfiles v-if="oauthFlowRef?.inputMethod !== 'codex_pat' && oauthFlowRef?.inputMethod !== 'agent_identity'" :initial-o-s="selectedOpenAIOS" creating />
         <div class="mt-4 border-t border-gray-100 pt-4 dark:border-dark-700">
           <p class="input-label mb-0">{{ t('admin.accounts.openai.environmentFingerprint') }}</p>
           <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -3593,6 +3593,9 @@
 
     <!-- Step 2: OAuth Authorization -->
     <div v-else class="space-y-5">
+      <OpenAIOAuthOSSelect v-if="form.platform === 'openai' && oauthFlowRef?.inputMethod !== 'codex_pat' && oauthFlowRef?.inputMethod !== 'agent_identity'" v-model="selectedOpenAIOS" :disabled="currentOAuthLoading || !!openaiOAuth.sessionId.value" />
+      <p v-if="form.platform === 'openai' && openaiOAuth.sessionId.value" class="text-xs text-gray-500">{{ t('admin.accounts.openai.authorizationSessionLocked') }}</p>
+      <p v-if="form.platform === 'openai' && ['refresh_token', 'codex_session'].includes(oauthFlowRef?.inputMethod || '')" class="text-xs text-gray-500">{{ t('admin.accounts.openai.importedAuthorizationHint') }}</p>
       <OAuthAuthorizationFlow
         ref="oauthFlowRef"
         :add-method="form.platform === 'anthropic' ? addMethod : 'oauth'"
@@ -3980,7 +3983,8 @@ import type {
   CodexSessionImportMessage,
   OpenAICompactMode,
   OpenAIResponsesMode,
-  OpenAIEndpointCapability
+  OpenAIEndpointCapability,
+  OpenAIOAuthOS
 } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -3992,6 +3996,7 @@ import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import CodexTurnStateFields from './CodexTurnStateFields.vue'
 import OpenAIOAuthOSProfiles from './OpenAIOAuthOSProfiles.vue'
+import OpenAIOAuthOSSelect from './OpenAIOAuthOSSelect.vue'
 import { defaultCodexTurnStateConfig, readCodexTurnStateConfig } from './codexTurnState'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
@@ -4154,6 +4159,7 @@ const hideAccountLongContextBilling = computed(() => {
 // OAuth composables
 const oauth = useAccountOAuth() // For Anthropic OAuth
 const openaiOAuth = useOpenAIOAuth() // For OpenAI OAuth
+const selectedOpenAIOS = ref<OpenAIOAuthOS>('windows')
 const geminiOAuth = useGeminiOAuth() // For Gemini OAuth
 const antigravityOAuth = useAntigravityOAuth() // For Antigravity OAuth
 const grokOAuth = useGrokOAuth() // For Grok OAuth
@@ -5316,6 +5322,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
   submitting.value = true
   try {
     if (payload.platform === 'openai' && payload.type === 'oauth') {
+      payload.os = selectedOpenAIOS.value
       payload.codex_turn_state = readCodexTurnStateConfig(codexTurnStateConfig.value)
     }
     const account = await adminAPI.accounts.create(withAntigravityConfirmFlag(payload))
@@ -5371,6 +5378,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 
 // Methods
 const resetForm = () => {
+  selectedOpenAIOS.value = 'windows'
   codexTurnStateConfig.value = defaultCodexTurnStateConfig()
   step.value = 1
   form.name = ''
@@ -5969,7 +5977,7 @@ const goBackToBasicInfo = () => {
 
 const handleGenerateUrl = async () => {
   if (form.platform === 'openai') {
-    await openaiOAuth.generateAuthUrl(form.proxy_id)
+    await openaiOAuth.generateAuthUrl(form.proxy_id, undefined, selectedOpenAIOS.value)
   } else if (form.platform === 'gemini') {
     await geminiOAuth.generateAuthUrl(
       form.proxy_id,
@@ -6415,6 +6423,7 @@ const handleOpenAIExchange = async (authCode: string) => {
         notes: form.notes,
         platform: 'openai',
         type: 'oauth',
+        os: tokenInfo.os || oauthClient.boundOS.value || selectedOpenAIOS.value,
         codex_turn_state: readCodexTurnStateConfig(codexTurnStateConfig.value),
         credentials,
         extra: withUpstreamRequestIdHeader(extra),
@@ -6520,6 +6529,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
   try {
     const extra = buildOpenAICodexImportExtra()
     const result = await adminAPI.accounts.importCodexSession({
+      os: isAgentIdentityImportContent(trimmed) ? undefined : selectedOpenAIOS.value,
       codex_turn_state: isAgentIdentityImportContent(trimmed) ? undefined : readCodexTurnStateConfig(codexTurnStateConfig.value),
       content: trimmed,
       name: form.name,
@@ -6658,7 +6668,8 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
         const tokenInfo = await oauthClient.validateRefreshToken(
           refreshTokens[i],
           form.proxy_id,
-          clientId
+          clientId,
+          selectedOpenAIOS.value
         )
         if (!tokenInfo) {
           failedCount++
@@ -6698,6 +6709,7 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             notes: form.notes,
             platform: 'openai',
             type: 'oauth',
+            os: selectedOpenAIOS.value,
             codex_turn_state: readCodexTurnStateConfig(codexTurnStateConfig.value),
             credentials,
             extra: withUpstreamRequestIdHeader(extra),

@@ -196,6 +196,7 @@ func codexMetricStateKey(profile codexTelemetryProfile) string {
 	// model, UA, transport, account or proxy with its own profile.
 	key, _ := json.Marshal([]any{
 		codexMetricClientKey(profile), profile.client.localID,
+		profile.input.CredentialOS, profile.input.AuthorizationGeneration,
 		profile.client.userAgent, profile.client.originator, profile.client.version,
 		profile.input.ProxyID, profile.model, profile.effort, profile.serviceTier,
 		profile.websocket, profile.simulationEnabled, profile.observationEnabled, codexResourceAttributes(profile),

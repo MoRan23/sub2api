@@ -8,63 +8,66 @@ import (
 // An explicit allowlist is intentionally used instead of marshalling Input or
 // Client. Those live snapshots also contain OAuth tokens and proxy credentials.
 type codexTelemetryProfileSnapshot struct {
-	AccountID           int64             `json:"account_id"`
-	AccountName         string            `json:"account_name"`
-	ChatGPTAccountID    string            `json:"chatgpt_account_id"`
-	OwnerAccountID      int64             `json:"owner_account_id"`
-	OSFamily            string            `json:"os_family"`
-	InstallationID      string            `json:"installation_id"`
-	ManagedInstallation bool              `json:"managed_installation"`
-	ProxyID             *int64            `json:"proxy_id,omitempty"`
-	SamplingID          string            `json:"sampling_id,omitempty"`
-	UserAgent           string            `json:"user_agent"`
-	Originator          string            `json:"originator"`
-	Version             string            `json:"version"`
-	SessionID           string            `json:"session_id"`
-	ThreadID            string            `json:"thread_id"`
-	TurnID              string            `json:"turn_id"`
-	RootTurnID          string            `json:"root_turn_id"`
-	ParentThreadID      string            `json:"parent_thread_id"`
-	ParentTurnID        string            `json:"parent_turn_id"`
-	ForkedFromThreadID  string            `json:"forked_from_thread_id"`
-	ThreadSource        string            `json:"thread_source"`
-	TurnTrigger         string            `json:"turn_trigger"`
-	AgentName           string            `json:"agent_name"`
-	SubagentKind        string            `json:"subagent_kind"`
-	OpenAISubagent      string            `json:"openai_subagent"`
-	Shell               string            `json:"shell"`
-	Sandbox             string            `json:"sandbox"`
-	SandboxMode         string            `json:"sandbox_mode"`
-	ApprovalPolicy      string            `json:"approval_policy"`
-	ApprovalsReviewer   string            `json:"approvals_reviewer"`
-	AutoReviewEnabled   *bool             `json:"auto_review_enabled,omitempty"`
-	GuardianV2Enabled   *bool             `json:"guardian_v2_enabled,omitempty"`
-	Model               string            `json:"model"`
-	Effort              string            `json:"effort"`
-	ServiceTier         string            `json:"service_tier"`
-	Started             time.Time         `json:"started"`
-	Ended               time.Time         `json:"ended"`
-	FirstThread         bool              `json:"first_thread"`
-	Websocket           bool              `json:"websocket"`
-	DynamicTool         bool              `json:"dynamic_tool"`
-	Command             bool              `json:"command"`
-	FileChange          bool              `json:"file_change"`
-	AttemptCount        int               `json:"attempt_count"`
-	SamplingCount       int               `json:"sampling_count"`
-	ClientRetryCount    int               `json:"client_retry_count"`
-	SimulationEnabled   bool              `json:"simulation_enabled"`
-	ObservationEnabled  bool              `json:"observation_enabled"`
-	PoolID              string            `json:"pool_id"`
-	ScenarioSeed        string            `json:"scenario_seed"`
-	Source              string            `json:"source"`
-	Reasons             []string          `json:"reasons,omitempty"`
-	FieldSources        map[string]string `json:"field_sources,omitempty"`
+	AccountID               int64             `json:"account_id"`
+	AccountName             string            `json:"account_name"`
+	ChatGPTAccountID        string            `json:"chatgpt_account_id"`
+	OwnerAccountID          int64             `json:"owner_account_id"`
+	OSFamily                string            `json:"os_family"`
+	CredentialOS            string            `json:"credential_os,omitempty"`
+	AuthorizationGeneration string            `json:"authorization_generation,omitempty"`
+	InstallationID          string            `json:"installation_id"`
+	ManagedInstallation     bool              `json:"managed_installation"`
+	ProxyID                 *int64            `json:"proxy_id,omitempty"`
+	SamplingID              string            `json:"sampling_id,omitempty"`
+	UserAgent               string            `json:"user_agent"`
+	Originator              string            `json:"originator"`
+	Version                 string            `json:"version"`
+	SessionID               string            `json:"session_id"`
+	ThreadID                string            `json:"thread_id"`
+	TurnID                  string            `json:"turn_id"`
+	RootTurnID              string            `json:"root_turn_id"`
+	ParentThreadID          string            `json:"parent_thread_id"`
+	ParentTurnID            string            `json:"parent_turn_id"`
+	ForkedFromThreadID      string            `json:"forked_from_thread_id"`
+	ThreadSource            string            `json:"thread_source"`
+	TurnTrigger             string            `json:"turn_trigger"`
+	AgentName               string            `json:"agent_name"`
+	SubagentKind            string            `json:"subagent_kind"`
+	OpenAISubagent          string            `json:"openai_subagent"`
+	Shell                   string            `json:"shell"`
+	Sandbox                 string            `json:"sandbox"`
+	SandboxMode             string            `json:"sandbox_mode"`
+	ApprovalPolicy          string            `json:"approval_policy"`
+	ApprovalsReviewer       string            `json:"approvals_reviewer"`
+	AutoReviewEnabled       *bool             `json:"auto_review_enabled,omitempty"`
+	GuardianV2Enabled       *bool             `json:"guardian_v2_enabled,omitempty"`
+	Model                   string            `json:"model"`
+	Effort                  string            `json:"effort"`
+	ServiceTier             string            `json:"service_tier"`
+	Started                 time.Time         `json:"started"`
+	Ended                   time.Time         `json:"ended"`
+	FirstThread             bool              `json:"first_thread"`
+	Websocket               bool              `json:"websocket"`
+	DynamicTool             bool              `json:"dynamic_tool"`
+	Command                 bool              `json:"command"`
+	FileChange              bool              `json:"file_change"`
+	AttemptCount            int               `json:"attempt_count"`
+	SamplingCount           int               `json:"sampling_count"`
+	ClientRetryCount        int               `json:"client_retry_count"`
+	SimulationEnabled       bool              `json:"simulation_enabled"`
+	ObservationEnabled      bool              `json:"observation_enabled"`
+	PoolID                  string            `json:"pool_id"`
+	ScenarioSeed            string            `json:"scenario_seed"`
+	Source                  string            `json:"source"`
+	Reasons                 []string          `json:"reasons,omitempty"`
+	FieldSources            map[string]string `json:"field_sources,omitempty"`
 }
 
 func marshalCodexTelemetryProfile(p codexTelemetryProfile) ([]byte, error) {
 	i := p.input
 	return json.Marshal(codexTelemetryProfileSnapshot{
 		AccountID: i.AccountID, AccountName: i.AccountName, ChatGPTAccountID: i.ChatGPTAccountID, OwnerAccountID: i.OwnerAccountID, OSFamily: i.OSFamily,
+		CredentialOS: i.CredentialOS, AuthorizationGeneration: i.AuthorizationGeneration,
 		InstallationID: i.InstallationID, ManagedInstallation: i.ManagedInstallation, ProxyID: i.ProxyID,
 		SamplingID: i.SamplingID, UserAgent: p.client.userAgent, Originator: p.client.originator, Version: p.client.version,
 		SessionID: p.sessionID, ThreadID: p.threadID, TurnID: p.turnID, RootTurnID: p.rootTurnID,
@@ -88,6 +91,7 @@ func unmarshalCodexTelemetryProfile(data []byte) (codexTelemetryProfile, error) 
 	}
 	i := CodexTelemetryInput{
 		AccountID: snap.AccountID, AccountName: snap.AccountName, ChatGPTAccountID: snap.ChatGPTAccountID, OwnerAccountID: snap.OwnerAccountID, OSFamily: snap.OSFamily,
+		CredentialOS: snap.CredentialOS, AuthorizationGeneration: snap.AuthorizationGeneration,
 		InstallationID: snap.InstallationID, ManagedInstallation: snap.ManagedInstallation, ProxyID: snap.ProxyID,
 		SamplingID: snap.SamplingID, UserAgent: snap.UserAgent, Originator: snap.Originator, Version: snap.Version,
 		SessionID: snap.SessionID, ThreadID: snap.ThreadID, TurnID: snap.TurnID, RootTurnID: snap.RootTurnID,

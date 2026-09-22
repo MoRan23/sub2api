@@ -541,6 +541,7 @@ func TestOpenAIWSHTTPBridgeFullCustomToolHistoryWithoutPreviousResponseIDDoesNot
 		Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
 		Concurrency: 1, Status: StatusActive, Schedulable: true,
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	errCh := make(chan error, 1)
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -640,6 +641,7 @@ func TestOpenAIWSHTTPBridgeObjectToolOutputWithoutPreviousResponseIDReplaysMatch
 		Credentials: map[string]any{"access_token": "test-token"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
 		Concurrency: 1, Status: StatusActive, Schedulable: true,
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	errCh := make(chan error, 1)
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1062,7 +1064,8 @@ func TestProxyOpenAIWSHTTPBridgeTurnRewritesCapacityShedCodeForClient(t *testing
 				Body:       io.NopCloser(strings.NewReader(tt.body)),
 			}}
 			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
-			account := &Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1}
+			account := &Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "sk-test"}}
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			recorder := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(recorder)
 			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
@@ -1238,7 +1241,8 @@ func TestProxyOpenAIWSHTTPBridgeTurnBareErrorFollowedByCompletedUsesCompleted(t 
 	}, "\n")
 	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}}
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
-	account := &Account{ID: 113, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1}
+	account := &Account{ID: 113, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "sk-test"}}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
@@ -1276,7 +1280,8 @@ func TestProxyOpenAIWSHTTPBridgeTurnStagesMetadataBeforeCapacityFailover(t *test
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}}
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
-	account := &Account{ID: 12, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1}
+	account := &Account{ID: 12, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "sk-test"}}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
@@ -1318,7 +1323,8 @@ func TestProxyOpenAIWSHTTPBridgeTurnDoesNotReplayCapacityAfterSemanticOutput(t *
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}}
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
-	account := &Account{ID: 13, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1}
+	account := &Account{ID: 13, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "sk-test"}}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
@@ -1549,6 +1555,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnUsesConnectionIdentityPlan(t *testing.T) {
 		ID: 20, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
 		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
@@ -1628,8 +1635,12 @@ func TestProxyOpenAIWSHTTPBridgeTurnUsesFinalizedResponsesLiteCapability(t *test
 				ID: 4242, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
 				Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
 			}
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
+			scoped, scopeErr := ResolveOpenAIOAuthCredentialAccount(context.Background(), svc.accountRepo, account, "")
+			require.NoError(t, scopeErr)
+			account = scoped
 			if tt.manifest != "" {
-				svc.codexModelCapabilities.observeManifest(openAIOutboundSessionIdentityNamespace(account), []byte(tt.manifest), time.Now())
+				svc.codexModelCapabilities.observeManifest(openAICodexModelCapabilitiesNamespace(account), []byte(tt.manifest), time.Now())
 			}
 
 			payload := `{"type":"response.create","model":"` + model + `","stream":true,"reasoning":{"context":"current_turn"},"parallel_tool_calls":true,"tools":[{"type":"namespace","name":"collaboration"}],"input":"hi"}`
@@ -1643,6 +1654,9 @@ func TestProxyOpenAIWSHTTPBridgeTurnUsesFinalizedResponsesLiteCapability(t *test
 			plan.PolicySnapshot = defaultOpenAICodexFingerprintPolicy(0)
 			plan.ProjectionMode = OpenAIOAuthIdentityProjectionPassthrough
 			plan.CredentialOwnerNamespace = openAIOutboundSessionIdentityNamespace(account)
+			plan.CredentialOS = account.OpenAIOAuthCredentialOS
+			plan.OSOwnerID = account.OpenAIOAuthCredentialOwnerID
+			plan.AuthorizationGeneration = account.OpenAIOAuthAuthorizationGeneration
 
 			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
 				context.Background(), c, account, "oauth-token", []byte(payload), len(payload),
@@ -1689,6 +1703,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnPinsAndObservesFinalOAuthWireOnce(t *testing
 	}}
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, toolCorrector: NewCodexToolCorrector()}
 	account := installationTestOAuthAccount(nil)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
@@ -2066,7 +2081,7 @@ func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
 				IngressModeDefault:       OpenAIWSIngressModeCtxPool,
 				ClientReadLimitBytes:     64 * 1024 * 1024,
 				HTTPBridgeEnabled:        true,
-				HTTPBridgeThresholdBytes: 17*1024*1024 + 512,
+				HTTPBridgeThresholdBytes: 17*1024*1024 + 4096,
 			},
 		},
 	}
@@ -2093,7 +2108,9 @@ func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
 		Status:      StatusActive,
 	}
 
-	payload := []byte(strings.Repeat(" ", 1024) + `{"type":"response.create","generate":true,"model":"gpt-5","stream":true,"input":"` + strings.Repeat("x", 17*1024*1024) + `"}`)
+	// Keep the normalized body below the bridge threshold after adding outbound
+	// identity metadata; only the original frame's padding crosses it.
+	payload := []byte(strings.Repeat(" ", 8192) + `{"type":"response.create","generate":true,"model":"gpt-5","stream":true,"input":"` + strings.Repeat("x", 17*1024*1024) + `"}`)
 	require.Greater(t, len(payload), 16*1024*1024)
 	require.GreaterOrEqual(t, int64(len(payload)), cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes)
 	require.Less(t, int64(len(payload)), ResolveOpenAIWSClientReadLimitBytes(cfg))

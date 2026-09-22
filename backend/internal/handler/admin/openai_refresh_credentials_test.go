@@ -45,6 +45,18 @@ func (s *adminOpenAIRefreshPersistence) GetAccount(context.Context, int64) (*ser
 	return s.initial, nil
 }
 
+func (s *adminOpenAIRefreshPersistence) ResolveOpenAIOAuthCredentialAccount(_ context.Context, _ int64, os string) (*service.Account, error) {
+	copy := *s.initial
+	if os == "" {
+		os = service.OpenAIOSWindows
+	}
+	copy.OpenAIOAuthCredentialOS = os
+	copy.OpenAIOAuthCredentialOwnerID = copy.ID
+	copy.OpenAIOAuthAuthorizationGeneration = "test-generation"
+	copy.OpenAIOAuthCredentialRevision = 1
+	return &copy, nil
+}
+
 func (s *adminOpenAIRefreshPersistence) PersistOpenAIOAuthRefreshCredentials(_ context.Context, expected *service.Account, credentials map[string]any) (*service.Account, bool, error) {
 	s.persistCalls++
 	s.expected, s.credentials = expected, credentials

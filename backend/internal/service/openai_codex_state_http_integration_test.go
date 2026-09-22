@@ -49,6 +49,9 @@ func codexStateHTTPIntegrationBody(path string, stream bool) []byte {
 
 func codexStateHTTPIntegrationForward(t *testing.T, svc *OpenAIGatewayService, account *Account, path string, body []byte) (*OpenAIForwardResult, *httptest.ResponseRecorder, error) {
 	t.Helper()
+	if svc.accountRepo == nil && svc.codexTurnStateService != nil {
+		svc.accountRepo = svc.codexTurnStateService.accounts
+	}
 	url := "/v1/responses"
 	if path == "chat" {
 		url = "/v1/chat/completions"
@@ -98,7 +101,7 @@ func TestCodexTurnStateHTTPGatewayNaturalResponseAllPaths(t *testing.T) {
 					require.Len(t, upstream.requests, 1)
 					finalModel := gjson.GetBytes(upstream.lastBody, "model").String()
 					require.Equal(t, "gpt-5.4", finalModel)
-					key := CodexTurnStateKey{OwnerAccountID: account.ID, Model: finalModel, Generation: CodexTurnStateGenerationForAccount(account)}
+					key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: finalModel, Generation: CodexTurnStateGenerationForAccount(account)}
 					record, err := repo.Get(context.Background(), key)
 					require.NoError(t, err)
 					require.NotNil(t, record, "forward must bind final model")
@@ -124,7 +127,7 @@ func TestCodexTurnStateHTTPGatewayAbandonedResponsesDoNotLearn(t *testing.T) {
 				gateway := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, codexTurnStateService: state}
 				_, _, err := codexStateHTTPIntegrationForward(t, gateway, account, path, codexStateHTTPIntegrationBody(path, stream))
 				require.Error(t, err)
-				key := CodexTurnStateKey{OwnerAccountID: account.ID, Model: gjson.GetBytes(upstream.lastBody, "model").String(), Generation: CodexTurnStateGenerationForAccount(account)}
+				key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: gjson.GetBytes(upstream.lastBody, "model").String(), Generation: CodexTurnStateGenerationForAccount(account)}
 				record, getErr := repo.Get(context.Background(), key)
 				require.NoError(t, getErr)
 				require.NotNil(t, record)

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
@@ -37,8 +38,8 @@ func TestCaptureOpenAIRequestOSPreservesOriginalUAAndBody(t *testing.T) {
 	c.Request.Header.Set("User-Agent", "unknown-client/1.0")
 	gotUA, family, source = captureOpenAIRequestOS(c, body)
 	require.Equal(t, "unknown-client/1.0", gotUA)
-	require.Equal(t, "windows", family)
-	require.Equal(t, "environment_context", source)
+	require.Equal(t, "linux", family)
+	require.Equal(t, "user_agent", source)
 	gotUA, family, source = captureOpenAIRequestOS(nil, nil)
 	require.Empty(t, gotUA)
 	require.Empty(t, family)
@@ -100,9 +101,40 @@ func TestCaptureOpenAIRequestOSMobileUserAgentUsesEnvironmentFallback(t *testing
 		require.Empty(t, source)
 		body := requestOSTestBody(t, "input", requestOSTestMessage("user", "<environment_context><os>Windows</os></environment_context>"))
 		_, family, source = captureOpenAIRequestOS(c, body)
+		require.Empty(t, family, "a captured unknown OS cannot be replaced by a later body")
+		require.Empty(t, source)
+		fresh := osIdentityTestContext(t, ua)
+		_, family, source = captureOpenAIRequestOS(fresh, body)
 		require.Equal(t, "windows", family)
 		require.Equal(t, "environment_context", source)
 	}
+}
+
+func TestOpenAIRequestOSContextPreservesUnknownAcrossIdentityRecapture(t *testing.T) {
+	c := osIdentityTestContext(t, "unknown-client/1.0")
+	first := CaptureOpenAIRequestOS(c, []byte(`{"input":"hello"}`))
+	require.True(t, first.Captured)
+	require.Empty(t, first.Family)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/1.0 (Windows 11; x86_64)")
+	SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, []byte(`{"input":"later"}`), ""))
+	require.Equal(t, first, OpenAIRequestOSFromContext(c.Request.Context()))
+	ctx := ContextWithOpenAIRequestOS(c.Request.Context(), OpenAIRequestOS{Family: OpenAIOSLinux, Source: "later"})
+	require.Equal(t, first, OpenAIRequestOSFromContext(ctx))
+	require.False(t, OpenAIRequestOSFromContext(context.Background()).Captured)
+}
+
+func TestOpenAIRequestOSContextBridgePreservesUnknownBeforeWSCapture(t *testing.T) {
+	ctx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Source: "original_unknown"})
+	c := osIdentityTestContext(t, "codex_cli_rs/1.0 (Linux 6.8; x86_64)")
+	body := []byte(`{"type":"response.create","input":"later frame"}`)
+	ctx = captureOpenAIRequestOSContext(ctx, c, body)
+	SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, body, ""))
+	require.Equal(t, OpenAIRequestOSFromContext(ctx), OpenAIRequestOSFromContext(c.Request.Context()))
+	require.Empty(t, OpenAIRequestOSFromContext(ctx).Family)
+	capture, ok := OpenAIOAuthIdentityCaptureFromContext(c)
+	require.True(t, ok)
+	require.Empty(t, capture.OSFamily)
+	require.Equal(t, "original_unknown", capture.OSSource)
 }
 
 func TestOpenAIRequestOSUsesOnlyLatestCurrentStandaloneEnvironment(t *testing.T) {

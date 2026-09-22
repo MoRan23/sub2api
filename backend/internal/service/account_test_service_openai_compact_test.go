@@ -48,7 +48,7 @@ func TestAccountTestService_TestAccountConnection_OpenAICompactOAuthSuccessPersi
 		Body:       io.NopCloser(strings.NewReader(compactProbeSSESuccessBody)),
 	}}
 	svc := &AccountTestService{
-		accountRepo:  repo,
+		accountRepo:  accountTestDefaultOSRepository(t, repo, &account),
 		httpUpstream: upstream,
 	}
 
@@ -119,7 +119,7 @@ func TestAccountTestService_TestAccountConnection_OpenAICompactOAuth404Preserves
 		Body:       io.NopCloser(strings.NewReader(`404 page not found`)),
 	}}
 	svc := &AccountTestService{
-		accountRepo:  repo,
+		accountRepo:  accountTestDefaultOSRepository(t, repo, &account),
 		httpUpstream: upstream,
 	}
 
@@ -260,7 +260,7 @@ func TestAccountTestService_TestAccountConnection_OpenAICompact2xxWithoutItemMar
 		Body:       io.NopCloser(strings.NewReader(noItemBody)),
 	}}
 	svc := &AccountTestService{
-		accountRepo:  repo,
+		accountRepo:  accountTestDefaultOSRepository(t, repo, &account),
 		httpUpstream: upstream,
 	}
 

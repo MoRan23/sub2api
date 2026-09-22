@@ -221,6 +221,7 @@ func TestAccountUsageService_ProfileIdentityFallbackUsesConfiguredFingerprintPol
 		Type:     AccountTypeOAuth,
 		Extra:    map[string]any{"openai_passthrough": true},
 	}
+	svc.accountRepo = auxiliaryOSFixtureRepository(t, nil, account)
 
 	plan, err := svc.openAIGatewayForProfileIdentity().ResolveOpenAIOAuthProfileIdentityPlan(
 		context.Background(), nil, account, OpenAIOAuthInstallationAccountPin,
@@ -253,6 +254,7 @@ func TestAccountUsageService_UsageProbeIdentityUsesStableLogicalSeedAndFreshRequ
 			openAIPinnedInstallationIDKey: "33333333-4444-4555-8666-777777777777",
 		},
 	}
+	registerAuxiliaryOSFixture(t, gateway, account)
 	payload := []byte(`{"model":"gpt-5.4","stream":true}`)
 
 	first, err := svc.resolveOpenAICodexUsageProbeIdentityPlan(context.Background(), account, payload)
@@ -296,6 +298,7 @@ func TestAccountUsageService_UsageProbeIdentityFlagOffDoesNotProjectTurnStoreIde
 		openAIGatewayService: &OpenAIGatewayService{settingService: settings},
 	}
 	account := &Account{ID: 9043, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	registerAuxiliaryOSFixture(t, svc.openAIGatewayService, account)
 	body := []byte(`{"model":"gpt-5.4","stream":true}`)
 
 	plan, err := svc.resolveOpenAICodexUsageProbeIdentityPlan(context.Background(), account, body)

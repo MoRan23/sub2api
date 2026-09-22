@@ -427,6 +427,8 @@ type openAIQuotaUpstreamCall struct {
 	fedRAMP          bool
 }
 
+type openAIQuotaCredentialContextKey struct{}
+
 // prepareUpstreamCall loads the account, validates it, obtains a fresh access
 // token via the shared TokenProvider, and resolves the chatgpt-account-id and
 // proxy URL. Centralized so QueryUsage / ResetCredit share validation.
@@ -452,14 +454,10 @@ func (s *OpenAIQuotaService) prepareUpstreamCall(ctx context.Context, accountID 
 	// Spark shadow accounts do not hold their own credentials; resolve to the
 	// parent account so that chatgpt_account_id / access_token / proxy all come
 	// from the parent. This must happen BEFORE the chatgpt_account_id check.
-	if account.IsShadow() {
-		resolved, rerr := resolveCredentialAccount(ctx, s.accountRepo, account)
-		if rerr != nil {
-			return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_QUOTA_SHADOW_RESOLVE_FAILED", "failed to resolve shadow account: %v", rerr)
-		}
-		account = resolved
+	account, err = resolveCredentialAccount(ctx, s.accountRepo, account)
+	if err != nil {
+		return nil, fmt.Errorf("resolve quota authorization: %w", err)
 	}
-	ctx = WithOpenAINativeHTTPScope(ctx, account, "")
 	var accessToken, chatGPTAccountID, proxyURL string
 
 	chatGPTAccountID = strings.TrimSpace(account.GetCredential("chatgpt_account_id"))
@@ -475,7 +473,7 @@ func (s *OpenAIQuotaService) prepareUpstreamCall(ctx context.Context, accountID 
 		if s.tokenProvider == nil {
 			return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_QUOTA_NOT_CONFIGURED", "openai quota token provider is not configured")
 		}
-		accessToken, err = s.tokenProvider.GetAccessToken(ctx, account)
+		accessToken, account, err = s.tokenProvider.GetAccessTokenWithAccount(ctx, account)
 		if err != nil {
 			return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_QUOTA_TOKEN_UNAVAILABLE", "failed to acquire access token: %v", err)
 		}
@@ -483,6 +481,8 @@ func (s *OpenAIQuotaService) prepareUpstreamCall(ctx context.Context, accountID 
 			return nil, infraerrors.New(http.StatusBadGateway, "OPENAI_QUOTA_TOKEN_UNAVAILABLE", "access token is empty")
 		}
 	}
+	ctx = context.WithValue(ctx, openAIQuotaCredentialContextKey{}, account)
+	ctx = WithOpenAINativeHTTPScope(ctx, account, "")
 
 	// account.Proxy is eager-loaded by accountRepo.GetByID (see
 	// repository.accountsToService), so we can read the proxy URL directly
@@ -546,23 +546,36 @@ func (s *OpenAIQuotaService) isAgentIdentityAccount(ctx context.Context, account
 func (s *OpenAIQuotaService) buildCodexQuotaHeaders(ctx context.Context, accountID int64, accessToken, chatGPTAccountID string, fedRAMP bool) (map[string]string, string, error) {
 	headers := buildCodexCommonHeaders(accessToken, chatGPTAccountID, fedRAMP)
 	if s == nil || s.accountRepo == nil {
-		return headers, "", nil
+		return nil, "", fmt.Errorf("quota account credentials are unavailable")
 	}
-	account, err := s.accountRepo.GetByID(ctx, accountID)
-	if err != nil || account == nil {
-		if strings.TrimSpace(accessToken) == "" {
-			return nil, "", fmt.Errorf("agent identity account credentials are unavailable")
+	var account *Account
+	var err error
+	if scoped, ok := ctx.Value(openAIQuotaCredentialContextKey{}).(*Account); ok && scoped != nil {
+		_, err = ReloadOpenAIOAuthCredentialAccount(ctx, s.accountRepo, scoped)
+		if err != nil {
+			return nil, "", err
 		}
-		return headers, "", nil
+		// The token and revision must remain from the same refresh snapshot.
+		account = scoped
+	} else {
+		account, err = s.accountRepo.GetByID(ctx, accountID)
 	}
-	if account.IsShadow() {
-		if resolved, resolveErr := resolveCredentialAccount(ctx, s.accountRepo, account); resolveErr == nil && resolved != nil {
-			account = resolved
-		} else if strings.TrimSpace(accessToken) == "" {
-			return nil, "", fmt.Errorf("agent identity shadow credentials are unavailable")
+	if err != nil || account == nil {
+		return nil, "", fmt.Errorf("quota account credentials are unavailable")
+	}
+	if account.OpenAIOAuthCredentialOS == "" {
+		account, err = resolveCredentialAccount(ctx, s.accountRepo, account)
+		if err != nil {
+			return nil, "", err
 		}
 	}
 	if !account.IsOpenAIAgentIdentity() {
+		if account.OpenAIOAuthCredentialOS != "" {
+			identity := resolveCodexOutboundIdentity(account.GetOpenAIUserAgent())
+			headers["user-agent"] = identity.userAgent
+			headers["originator"] = identity.originator
+			headers["version"] = identity.version
+		}
 		return headers, "", nil
 	}
 	if err := ensureAgentIdentityTaskForAccount(ctx, s.accountRepo, s.agentIdentityWS, &s.agentIdentityTaskMu, account, ""); err != nil {

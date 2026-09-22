@@ -144,10 +144,10 @@ func TestOpenAITokenProvider_CacheHit(t *testing.T) {
 			"access_token": "db-token",
 		},
 	}
-	cacheKey := OpenAITokenCacheKey(account)
+	cacheKey := prepareOpenAIProviderTestAccount(account)
 	cache.tokens[cacheKey] = "cached-token"
 
-	provider := NewOpenAITokenProvider(nil, cache, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.NoError(t, err)
@@ -170,14 +170,14 @@ func TestOpenAITokenProvider_CacheMiss_FromCredentials(t *testing.T) {
 		},
 	}
 
-	provider := NewOpenAITokenProvider(nil, cache, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.NoError(t, err)
 	require.Equal(t, "credential-token", token)
 
 	// Should have stored in cache
-	cacheKey := OpenAITokenCacheKey(account)
+	cacheKey := prepareOpenAIProviderTestAccount(account)
 	require.Equal(t, "credential-token", cache.tokens[cacheKey])
 }
 
@@ -234,7 +234,7 @@ func (p *testOpenAITokenProvider) GetAccessToken(ctx context.Context, account *A
 		return "", errors.New("not an openai oauth account")
 	}
 
-	cacheKey := OpenAITokenCacheKey(account)
+	cacheKey := prepareOpenAIProviderTestAccount(account)
 
 	// 1. Check cache
 	if p.tokenCache != nil {
@@ -337,7 +337,7 @@ func TestOpenAITokenProvider_LockRaceCondition(t *testing.T) {
 	accountRepo.account = account
 
 	// Simulate another worker already refreshed and cached
-	cacheKey := OpenAITokenCacheKey(account)
+	cacheKey := prepareOpenAIProviderTestAccount(account)
 	go func() {
 		time.Sleep(5 * time.Millisecond)
 		cache.mu.Lock()
@@ -406,7 +406,7 @@ func TestOpenAITokenProvider_NilCache(t *testing.T) {
 		},
 	}
 
-	provider := NewOpenAITokenProvider(nil, nil, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), nil, nil)
 
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.NoError(t, err)
@@ -430,7 +430,7 @@ func TestOpenAITokenProvider_CacheGetError(t *testing.T) {
 		},
 	}
 
-	provider := NewOpenAITokenProvider(nil, cache, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 
 	// Should gracefully degrade and return from credentials
 	token, err := provider.GetAccessToken(context.Background(), account)
@@ -453,7 +453,7 @@ func TestOpenAITokenProvider_CacheSetError(t *testing.T) {
 		},
 	}
 
-	provider := NewOpenAITokenProvider(nil, cache, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 
 	// Should still work even if cache set fails
 	token, err := provider.GetAccessToken(context.Background(), account)
@@ -474,7 +474,7 @@ func TestOpenAITokenProvider_MissingAccessToken(t *testing.T) {
 		},
 	}
 
-	provider := NewOpenAITokenProvider(nil, cache, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.Error(t, err)
@@ -577,13 +577,13 @@ func TestOpenAITokenProvider_TTLCalculation(t *testing.T) {
 				},
 			}
 
-			provider := NewOpenAITokenProvider(nil, cache, nil)
+			provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 
 			_, err := provider.GetAccessToken(context.Background(), account)
 			require.NoError(t, err)
 
 			// Verify token was cached
-			cacheKey := OpenAITokenCacheKey(account)
+			cacheKey := prepareOpenAIProviderTestAccount(account)
 			require.Equal(t, "test-token", cache.tokens[cacheKey])
 		})
 	}
@@ -612,7 +612,7 @@ func TestOpenAITokenProvider_DoubleCheckAfterLock(t *testing.T) {
 		},
 	}
 	accountRepo.account = account
-	cacheKey := OpenAITokenCacheKey(account)
+	cacheKey := prepareOpenAIProviderTestAccount(account)
 
 	// Simulate: first GetAccessToken returns empty, but after lock acquired, cache has token
 	originalGet := int32(0)
@@ -658,7 +658,7 @@ func TestOpenAITokenProvider_Real_LockFailedWait(t *testing.T) {
 	}
 
 	// Set token in cache after lock wait period (simulate other worker refreshing)
-	cacheKey := OpenAITokenCacheKey(account)
+	cacheKey := prepareOpenAIProviderTestAccount(account)
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		cache.mu.Lock()
@@ -666,7 +666,7 @@ func TestOpenAITokenProvider_Real_LockFailedWait(t *testing.T) {
 		cache.mu.Unlock()
 	}()
 
-	provider := NewOpenAITokenProvider(nil, cache, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.NoError(t, err)
 	// Should get either the fallback token or the refreshed one
@@ -689,7 +689,7 @@ func TestOpenAITokenProvider_Real_CacheHitAfterWait(t *testing.T) {
 		},
 	}
 
-	cacheKey := OpenAITokenCacheKey(account)
+	cacheKey := prepareOpenAIProviderTestAccount(account)
 	// Set token in cache immediately after wait starts
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -698,7 +698,7 @@ func TestOpenAITokenProvider_Real_CacheHitAfterWait(t *testing.T) {
 		cache.mu.Unlock()
 	}()
 
-	provider := NewOpenAITokenProvider(nil, cache, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.NoError(t, err)
 	require.NotEmpty(t, token)
@@ -718,7 +718,7 @@ func TestOpenAITokenProvider_Real_ExpiredWithoutRefreshToken(t *testing.T) {
 		},
 	}
 
-	provider := NewOpenAITokenProvider(nil, cache, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 	token, err := provider.GetAccessToken(context.Background(), account)
 	// Without OAuth service, refresh will fail but token should be returned from credentials
 	require.NoError(t, err)
@@ -741,7 +741,7 @@ func TestOpenAITokenProvider_Real_WhitespaceToken(t *testing.T) {
 		},
 	}
 
-	provider := NewOpenAITokenProvider(nil, cache, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.NoError(t, err)
 	require.Equal(t, "real-token", token) // Should fall back to credentials
@@ -763,7 +763,7 @@ func TestOpenAITokenProvider_Real_LockError(t *testing.T) {
 		},
 	}
 
-	provider := NewOpenAITokenProvider(nil, cache, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.NoError(t, err)
 	require.Equal(t, "fallback-on-lock-error", token)
@@ -783,7 +783,7 @@ func TestOpenAITokenProvider_Real_WhitespaceCredentialToken(t *testing.T) {
 		},
 	}
 
-	provider := NewOpenAITokenProvider(nil, cache, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "access_token not found")
@@ -804,7 +804,7 @@ func TestOpenAITokenProvider_Real_NilCredentials(t *testing.T) {
 		},
 	}
 
-	provider := NewOpenAITokenProvider(nil, cache, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "access_token not found")
@@ -827,7 +827,7 @@ func TestOpenAITokenProvider_Real_LockRace_PollingHitsCache(t *testing.T) {
 		},
 	}
 
-	cacheKey := OpenAITokenCacheKey(account)
+	cacheKey := prepareOpenAIProviderTestAccount(account)
 	go func() {
 		time.Sleep(5 * time.Millisecond)
 		cache.mu.Lock()
@@ -835,7 +835,7 @@ func TestOpenAITokenProvider_Real_LockRace_PollingHitsCache(t *testing.T) {
 		cache.mu.Unlock()
 	}()
 
-	provider := NewOpenAITokenProvider(nil, cache, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.NoError(t, err)
 	require.Equal(t, "winner-token", token)
@@ -860,7 +860,7 @@ func TestOpenAITokenProvider_Real_LockRace_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	provider := NewOpenAITokenProvider(nil, cache, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 	start := time.Now()
 	token, err := provider.GetAccessToken(ctx, account)
 	require.Error(t, err)
@@ -884,7 +884,7 @@ func TestOpenAITokenProvider_RuntimeMetrics_LockWaitHitAndSnapshot(t *testing.T)
 			"expires_at":    expiresAt,
 		},
 	}
-	cacheKey := OpenAITokenCacheKey(account)
+	cacheKey := prepareOpenAIProviderTestAccount(account)
 	go func() {
 		time.Sleep(10 * time.Millisecond)
 		cache.mu.Lock()
@@ -892,7 +892,7 @@ func TestOpenAITokenProvider_RuntimeMetrics_LockWaitHitAndSnapshot(t *testing.T)
 		cache.mu.Unlock()
 	}()
 
-	provider := NewOpenAITokenProvider(nil, cache, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.NoError(t, err)
 	require.Equal(t, "winner-token", token)
@@ -922,7 +922,7 @@ func TestOpenAITokenProvider_RuntimeMetrics_LockAcquireFailure(t *testing.T) {
 		},
 	}
 
-	provider := NewOpenAITokenProvider(nil, cache, nil)
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 	_, err := provider.GetAccessToken(context.Background(), account)
 	require.NoError(t, err)
 
@@ -946,12 +946,13 @@ func TestOpenAITokenProvider_NoRefreshTokenExpired_DisablesAccount(t *testing.T)
 		},
 	}
 
-	cacheKey := OpenAITokenCacheKey(account)
+	cacheKey := prepareOpenAIProviderTestAccount(account)
 	cache.tokens[cacheKey] = "stale-cached-token"
 	// Force the provider past the cache hit branch.
 	cache.getErr = errors.New("simulated cache miss")
 
-	provider := NewOpenAITokenProvider(repo, cache, nil)
+	slotRepo := newOpenAIProviderTestRepo(account)
+	provider := NewOpenAITokenProvider(slotRepo, cache, nil)
 	blocker := &runtimeBlockRecorder{}
 	provider.SetAccountRuntimeBlocker(blocker)
 
@@ -960,9 +961,8 @@ func TestOpenAITokenProvider_NoRefreshTokenExpired_DisablesAccount(t *testing.T)
 	require.Empty(t, token)
 	require.Contains(t, err.Error(), "refresh_token is missing")
 
-	require.Equal(t, 1, repo.setErrorCalls, "account should be disabled via SetError exactly once")
-	require.Contains(t, repo.lastErrorMsg, "refresh_token is missing")
-	require.Len(t, blocker.accounts, 1)
-	require.Equal(t, account.ID, blocker.accounts[0].ID)
-	require.Equal(t, "missing_refresh_token", blocker.reasons[0])
+	require.Zero(t, repo.setErrorCalls, "missing refresh token must not disable the entire account")
+	require.Equal(t, OpenAIOAuthAuthorizationReauthRequired, slotRepo.slots[OpenAIOSWindows].Status)
+	require.Contains(t, slotRepo.slots[OpenAIOSWindows].LastError, "refresh_token is missing")
+	require.Empty(t, blocker.accounts)
 }

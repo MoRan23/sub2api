@@ -75,6 +75,7 @@ func TestOpenAIWSIntegrityCapturesEachClientTurnBeforeAdaptation(t *testing.T) {
 						Extra: map[string]any{"responses_websockets_v2_enabled": true, "openai_oauth_responses_websockets_v2_mode": mode,
 							openAIPinnedInstallationIDKey: transportTestPinnedInstallationID},
 					}
+					svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 					contexts := make(chan *gin.Context, 1)
 					server, done := startPassthroughLifecycleServerWithHooks(t, ctx, svc, account, func(c *gin.Context) *OpenAIWSIngressHooks {
 						c.Set("api_key", &APIKey{ID: 98})
@@ -168,6 +169,7 @@ func TestOpenAIWSHTTPBridgeIntegrityKeepsClientBaselineAcrossReplay(t *testing.T
 			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge,
 			openAIPinnedInstallationIDKey:               transportTestPinnedInstallationID},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	contexts := make(chan *gin.Context, 1)
 	server, done := startPassthroughLifecycleServerWithHooks(t, ctx, svc, account, func(c *gin.Context) *OpenAIWSIngressHooks {
 		contexts <- c

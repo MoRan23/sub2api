@@ -145,9 +145,8 @@ func TestOpenAIAgentIdentityPassthroughKeepsSessionAndPromptCacheHeaders(t *test
 	require.Len(t, agentPromptCacheKey, 46)
 	require.True(t, strings.HasPrefix(agentPromptCacheKey, "pc_"))
 
-	// Authentication mode must not affect session isolation or prompt-cache
-	// behavior. Compare the same request with the existing OAuth path instead
-	// of pinning this test to an implementation-specific hash.
+		// Both authentication modes preserve valid isolated identities. Regular
+		// OAuth additionally partitions the identity by its authorized OS slot.
 	oauthAccount := &Account{
 		ID:       account.ID,
 		Platform: PlatformOpenAI,
@@ -157,6 +156,7 @@ func TestOpenAIAgentIdentityPassthroughKeepsSessionAndPromptCacheHeaders(t *test
 		},
 	}
 	oauthRecorder := httptest.NewRecorder()
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(oauthAccount)
 	oauthContext, _ := gin.CreateTestContext(oauthRecorder)
 	oauthContext.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	oauthContext.Request.Header.Set("session_id", "client-session")
@@ -168,10 +168,12 @@ func TestOpenAIAgentIdentityPassthroughKeepsSessionAndPromptCacheHeaders(t *test
 		ThreadID:  oauthReq.Header.Get("thread-id"),
 	}
 	require.NoError(t, ValidateOpenAIOutboundSessionIdentity(oauthIdentity))
-	require.Equal(t, agentIdentity, oauthIdentity)
+	require.NotEqual(t, agentIdentity, oauthIdentity, "OAuth OS slots have a separate identity namespace")
 	oauthBody, err := io.ReadAll(oauthReq.Body)
 	require.NoError(t, err)
-	require.Equal(t, agentPromptCacheKey, gjson.GetBytes(oauthBody, "prompt_cache_key").String())
+	oauthPromptCacheKey := gjson.GetBytes(oauthBody, "prompt_cache_key").String()
+	require.Len(t, oauthPromptCacheKey, 46)
+	require.True(t, strings.HasPrefix(oauthPromptCacheKey, "pc_"))
 }
 
 func TestOpenAIAgentIdentityErrorRedactionDoesNotLeakCredentialValues(t *testing.T) {

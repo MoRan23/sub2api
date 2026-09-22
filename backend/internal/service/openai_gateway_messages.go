@@ -45,6 +45,11 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
 	if account != nil && account.IsOpenAIOAuth() {
+		var scopeErr error
+		ctx, account, scopeErr = s.prepareOpenAIOAuthRequestScope(ctx, c, account, body)
+		if scopeErr != nil {
+			return nil, scopeErr
+		}
 		s.freezeOpenAIRequestIntegrity(ctx, c)
 	}
 	resetOpenAIRequestIntegrityAttemptRules(c)

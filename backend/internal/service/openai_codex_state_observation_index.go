@@ -12,6 +12,7 @@ const codexTurnStateObservationCapacity = 4096
 
 type codexTurnStateObservationKey struct {
 	ownerAccountID  int64
+	osFamily        string
 	model           string
 	credentialEpoch string
 }
@@ -65,7 +66,7 @@ func (index *codexTurnStateObservationIndex) record(sequence uint64, ownerAccoun
 	if ownerAccountID <= 0 || strings.TrimSpace(value.Model) == "" || observedAt.IsZero() {
 		return
 	}
-	key := codexTurnStateObservationKey{ownerAccountID: ownerAccountID, model: value.Model, credentialEpoch: value.credentialEpoch}
+	key := codexTurnStateObservationKey{ownerAccountID: ownerAccountID, osFamily: value.OSFamily, model: value.Model, credentialEpoch: value.credentialEpoch}
 	if index.entries == nil {
 		index.entries = make(map[codexTurnStateObservationKey]*list.Element)
 	}
@@ -94,6 +95,7 @@ func (index *codexTurnStateObservationIndex) record(sequence uint64, ownerAccoun
 	entry.sequence = sequence
 	entry.envelope = value.envelopeEvidence
 	entry.summary = CodexTurnStateModelObservation{
+		OSFamily:                 value.OSFamily,
 		Model:                    value.Model,
 		ObservedAt:               observedAt,
 		ResponseLength:           value.ResponseLength,
@@ -137,7 +139,7 @@ func (store *codexTurnStateSummaryStore) snapshotForOwners(owners []*Account) (b
 	defer store.mu.Unlock()
 	for key, element := range store.index.entries {
 		owner := byID[key.ownerAccountID]
-		if owner == nil || key.credentialEpoch != CodexTurnStateCredentialEpochForAccount(owner) {
+		if owner == nil || key.osFamily != codexTurnStateOS(owner) || key.credentialEpoch != CodexTurnStateCredentialEpochForAccount(owner) {
 			continue
 		}
 		entry := element.Value.(*codexTurnStateObservationIndexEntry)

@@ -442,6 +442,7 @@ func TestOpenAIGatewayServiceForward_NormalizesResponsesLiteToolsForOAuth(t *tes
 				"tool_choice":{"type":"namespace","name":"collaboration"}
 			}`)
 
+			registerAuxiliaryOSFixture(t, svc, account)
 			result, err := svc.Forward(context.Background(), c, account, body)
 
 			require.NoError(t, err)
@@ -543,7 +544,8 @@ func TestOpenAIGatewayServiceForward_UsesManifestResponsesLiteCapability(t *test
 				Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
 			}
 			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
-			svc.codexModelCapabilities.observeManifest(openAIOutboundSessionIdentityNamespace(account), []byte(tt.manifest), time.Now())
+			account = scopedAuxiliaryOSFixture(t, svc, account)
+			svc.codexModelCapabilities.observeManifest(openAICodexModelCapabilitiesNamespace(account), []byte(tt.manifest), time.Now())
 			body := []byte(`{
 				"model":"gpt-5.6-terra","stream":true,
 				"reasoning":{"context":"current_turn"},
@@ -551,6 +553,7 @@ func TestOpenAIGatewayServiceForward_UsesManifestResponsesLiteCapability(t *test
 				"input":"hello"
 			}`)
 
+			registerAuxiliaryOSFixture(t, svc, account)
 			result, err := svc.Forward(context.Background(), c, account, body)
 			require.NoError(t, err)
 			require.NotNil(t, result)
@@ -623,6 +626,7 @@ func TestOpenAIGatewayServiceForward_PinsParallelToolCallsForToollessResponsesLi
 						"input":[{"type":"message","role":"user","content":"hello"}]` + parallelCase.field + `
 					}`)
 
+					registerAuxiliaryOSFixture(t, svc, account)
 					result, err := svc.Forward(context.Background(), c, account, body)
 
 					require.NoError(t, err)
@@ -671,6 +675,7 @@ func TestOpenAIGatewayServiceForward_DisablesParallelToolCallsForResponsesLiteAP
 				"input":[{"type":"message","role":"user","content":"hello"}]
 			}`)
 
+			registerAuxiliaryOSFixture(t, svc, account)
 			result, err := svc.Forward(context.Background(), c, account, body)
 
 			require.NoError(t, err)

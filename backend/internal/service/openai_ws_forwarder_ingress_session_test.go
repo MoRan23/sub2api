@@ -157,6 +157,7 @@ func TestOpenAIWSCurrentTurnFailoverRematerializesForReplacementOwner(t *testing
 	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "ws-owner-failover-secret"}}}
 	accountA := &Account{ID: 88041, Type: AccountTypeOAuth, Platform: PlatformOpenAI}
 	accountB := &Account{ID: 88042, Type: AccountTypeOAuth, Platform: PlatformOpenAI}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(accountA, accountB)
 	options := OpenAIOAuthIdentityPlanOptions{
 		TurnIdentityEnabled: true,
 		ProjectionMode:      OpenAIOAuthIdentityProjectionPassthrough,
@@ -226,6 +227,7 @@ func TestOpenAIWSCurrentTurnFailoverCapturesFrameWithoutOldOwnerPlan(t *testing.
 
 	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "ws-api-key-oauth-failover-secret"}}}
 	replacement := &Account{ID: 88043, Type: AccountTypeOAuth, Platform: PlatformOpenAI}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(replacement)
 	plan, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), c, replacement, retryCapture, OpenAIOAuthIdentityPlanOptions{
 		TurnIdentityEnabled: true,
 		ProjectionMode:      OpenAIOAuthIdentityProjectionPassthrough,
@@ -355,6 +357,11 @@ func testOpenAIWSKeepLeaseAcrossTurns(t *testing.T, accountType string) {
 			"responses_websockets_v2_enabled": true,
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
+	token := "sk-test"
+	if account.IsOpenAIOAuth() {
+		token = account.GetOpenAIAccessToken()
+	}
 
 	serverErrCh := make(chan error, 1)
 	turnTerminalCh := make(chan string, 2)
@@ -396,7 +403,7 @@ func testOpenAIWSKeepLeaseAcrossTurns(t *testing.T, accountType string) {
 			return
 		}
 
-		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "sk-test", firstMessage, hooks)
+		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, token, firstMessage, hooks)
 	}))
 	defer wsServer.Close()
 
@@ -521,6 +528,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePrompt
 			openAIPinnedInstallationIDKey:     transportTestPinnedInstallationID,
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	serverErrCh := make(chan error, 1)
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1139,6 +1147,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 			"codex_image_generation_bridge":                true,
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	serverErrCh := make(chan error, 1)
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1757,6 +1766,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 			openAIPinnedInstallationIDKey:               transportTestPinnedInstallationID,
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	serverErrCh := make(chan error, 1)
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1947,6 +1957,7 @@ func runOpenAIWSPassthroughRemoteV2DoneCardinalityTest(t *testing.T, doneCount i
 			openAIPinnedInstallationIDKey:               transportTestPinnedInstallationID,
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	serverErrCh := make(chan error, 1)
 	turnDoneCh := make(chan *OpenAIForwardResult, 1)
@@ -2125,6 +2136,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_LocalCompactionC
 					openAIPinnedInstallationIDKey:               transportTestPinnedInstallationID,
 				},
 			}
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 			serverErrCh := make(chan error, 1)
 			turnDoneCh := make(chan *OpenAIForwardResult, 1)

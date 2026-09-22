@@ -116,6 +116,7 @@ func NewAccountHandler(
 
 // CreateAccountRequest represents create account request
 type CreateAccountRequest struct {
+	OS             string                        `json:"os"`
 	CodexTurnState *service.CodexTurnStateConfig `json:"codex_turn_state"`
 
 	Name                    string         `json:"name" binding:"required"`
@@ -139,7 +140,8 @@ type CreateAccountRequest struct {
 // UpdateAccountRequest represents update account request
 // 使用指针类型来区分"未提供"和"设置为0"
 type UpdateAccountRequest struct {
-	CodexTurnState *service.CodexTurnStateConfig `json:"codex_turn_state"`
+	OpenAIAuthModeChange bool                          `json:"openai_auth_mode_change"`
+	CodexTurnState       *service.CodexTurnStateConfig `json:"codex_turn_state"`
 
 	Name                         string         `json:"name"`
 	Notes                        *string        `json:"notes"`
@@ -163,7 +165,8 @@ type UpdateAccountRequest struct {
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
 type BulkUpdateAccountsRequest struct {
-	CodexTurnState *service.CodexTurnStateConfig `json:"codex_turn_state"`
+	OpenAIAuthModeChange bool                          `json:"openai_auth_mode_change"`
+	CodexTurnState       *service.CodexTurnStateConfig `json:"codex_turn_state"`
 
 	AccountIDs              []int64                   `json:"account_ids"`
 	Filters                 *BulkUpdateAccountFilters `json:"filters"`
@@ -1031,6 +1034,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 
 	result, err := executeAdminIdempotent(c, "admin.accounts.create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		account, execErr := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
+			OpenAIOAuthInitialOS:  req.OS,
 			CodexTurnState:        req.CodexTurnState,
 			Name:                  req.Name,
 			Notes:                 req.Notes,
@@ -1164,6 +1168,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
 	account, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
+		OpenAIAuthModeChange:         req.OpenAIAuthModeChange,
 		CodexTurnState:               req.CodexTurnState,
 		Name:                         req.Name,
 		Notes:                        req.Notes,
@@ -1306,6 +1311,7 @@ func (h *AccountHandler) Delete(c *gin.Context) {
 
 // TestAccountRequest represents the request body for testing an account
 type TestAccountRequest struct {
+	OS      string `json:"os"`
 	ModelID string `json:"model_id"`
 	Prompt  string `json:"prompt"`
 	Mode    string `json:"mode"`
@@ -1343,6 +1349,7 @@ func (h *AccountHandler) Test(c *gin.Context) {
 	_ = c.ShouldBindJSON(&req)
 
 	opts := service.AccountTestOptions{
+		OSFamily:     req.OS,
 		ImageDataURL: req.ImageDataURL,
 		AudioDataURL: req.AudioDataURL,
 	}
@@ -1350,6 +1357,14 @@ func (h *AccountHandler) Test(c *gin.Context) {
 	// Use AccountTestService to test the account with SSE streaming
 	if err := h.accountTestService.TestAccountConnection(c, accountID, req.ModelID, req.Prompt, req.Mode, opts); err != nil {
 		// Error already sent via SSE, just log
+		return
+	}
+	if scoped := service.OpenAIOAuthAccountTestCredential(c); scoped != nil {
+		if h.rateLimitService != nil {
+			if _, err := h.rateLimitService.RecoverOpenAIOAuthOSAfterSuccessfulTest(c.Request.Context(), scoped); err != nil {
+				_ = c.Error(err)
+			}
+		}
 		return
 	}
 
@@ -1454,6 +1469,13 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 	if account.IsCredentialShadow() {
 		return nil, "", infraerrors.BadRequest("SPARK_SHADOW_NO_REFRESH",
 			"cannot refresh spark shadow account; its credentials are managed by the parent account")
+	}
+	if service.IsOpenAIOAuthOSProfileOwner(account) && account.OpenAIOAuthCredentialOS == "" {
+		var err error
+		account, err = resolveAdminOpenAIOAuthCredentialAccount(ctx, h.adminService, account, "")
+		if err != nil {
+			return nil, "", err
+		}
 	}
 
 	var newCredentials map[string]any
@@ -1619,6 +1641,11 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 		return
 	}
 
+	account, err = resolveAdminOpenAIOAuthCredentialAccount(c.Request.Context(), h.adminService, account, c.Query("os"))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	updatedAccount, warning, err := h.refreshSingleAccount(c.Request.Context(), account)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -1639,6 +1666,7 @@ func (h *AccountHandler) Refresh(c *gin.Context) {
 
 // ApplyOAuthCredentialsRequest is the payload for persisting re-authorized OAuth credentials.
 type ApplyOAuthCredentialsRequest struct {
+	OS          string         `json:"os"`
 	Type        string         `json:"type" binding:"required,oneof=oauth setup-token"`
 	Credentials map[string]any `json:"credentials" binding:"required"`
 	Extra       map[string]any `json:"extra"`
@@ -1688,6 +1716,23 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 	}
 	if err := service.ValidateUpstreamRequestIDHeaderExtra(req.Extra); err != nil {
 		response.ErrorFrom(c, err)
+		return
+	}
+	if service.IsOpenAIOAuthOSProfileOwner(existing) {
+		os := req.OS
+		// The old endpoint is compatible only with its current default slot.
+		// Explicit slots are always validated by a server-side refresh exchange.
+		if os == "" && existing.OpenAIOAuthOSProfiles != nil {
+			os = existing.OpenAIOAuthOSProfiles.DefaultOS
+		}
+		refreshToken, _ := req.Credentials["refresh_token"].(string)
+		clientID, _ := req.Credentials["client_id"].(string)
+		info, bindErr := h.openaiOAuthService.AuthorizeAccountWithRefreshToken(ctx, accountID, os, refreshToken, clientID)
+		if bindErr != nil {
+			response.ErrorFrom(c, bindErr)
+			return
+		}
+		response.Success(c, h.buildAccountResponseWithRuntime(ctx, info.Account))
 		return
 	}
 
@@ -2184,6 +2229,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 			skipCheck := item.ConfirmMixedChannelRisk != nil && *item.ConfirmMixedChannelRisk
 
 			account, err := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
+				OpenAIOAuthInitialOS:  item.OS,
 				Name:                  item.Name,
 				Notes:                 item.Notes,
 				Platform:              item.Platform,
@@ -2401,6 +2447,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 	}
 
 	result, err := h.adminService.BulkUpdateAccounts(c.Request.Context(), &service.BulkUpdateAccountsInput{
+		OpenAIAuthModeChange:  req.OpenAIAuthModeChange,
 		CodexTurnState:        req.CodexTurnState,
 		AccountIDs:            req.AccountIDs,
 		Filters:               toServiceBulkUpdateAccountFilters(req.Filters),
@@ -2867,7 +2914,7 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		// Prefer the shared, account-keyed upstream catalog. If discovery fails,
 		// retain the legacy local catalog below so the test dialog remains usable.
 		if h.accountTestService != nil {
-			if models, fetchErr := h.accountTestService.FetchOpenAIAccountModels(c.Request.Context(), account); fetchErr == nil {
+			if models, fetchErr := h.accountTestService.FetchOpenAIAccountModels(c.Request.Context(), account, c.Query("os")); fetchErr == nil {
 				response.Success(c, models)
 				return
 			}

@@ -1,6 +1,7 @@
 <template>
   <BaseDialog :show="show" :title="t(`${prefix}.statusTitle`)" width="extra-wide" @close="close">
     <p class="mb-3 break-all font-medium text-gray-800 dark:text-gray-200">{{ account?.name }}</p>
+    <OpenAIOAuthOSSelect :model-value="selectedOS" :profiles="account?.openai_oauth_os_profiles" class="mb-3" @update:model-value="selectOS" />
     <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.experimental`) }}</p>
     <p class="mb-4 text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.autoRefreshHint`) }}</p>
     <p v-if="loading && !status" role="status">{{ t(`${prefix}.loading`) }}</p>
@@ -96,14 +97,18 @@ import { getCodexTurnState, type CodexTurnStateModelStatus, type CodexTurnStateO
 import { getAll as getProxies } from '@/api/admin/proxies'
 import { collectorProxyIDs } from '@/components/account/codexTurnState'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import OpenAIOAuthOSSelect from '@/components/account/OpenAIOAuthOSSelect.vue'
+import { defaultOpenAIOS } from '@/components/account/openaiOAuthOS'
+import type { Account, OpenAIOAuthOS } from '@/types'
 
-const props = defineProps<{ show: boolean; account: { id: number; name: string } | null }>()
+const props = defineProps<{ show: boolean; account: Pick<Account, 'id' | 'name' | 'openai_oauth_os_profiles'> | null }>()
 const emit = defineEmits<{ close: [] }>()
 const { t, te } = useI18n()
 const prefix = 'admin.accounts.codexTurnState'
 const loading = ref(false)
 const failed = ref(false)
 const status = ref<CodexTurnStateStatus | null>(null)
+const selectedOS = ref<OpenAIOAuthOS>('windows')
 const proxyNames = ref<Record<number, string>>({})
 const now = ref(Date.now())
 let observedAt = now.value
@@ -208,7 +213,7 @@ async function refresh() {
   controller = current
   loading.value = true
   try {
-    const result = await getCodexTurnState(accountId, current.signal)
+    const result = await getCodexTurnState(accountId, current.signal, selectedOS.value)
     if (controller === current && !current.signal.aborted && props.show && props.account?.id === accountId) {
       status.value = result
       now.value = observedAt = Date.now()
@@ -229,6 +234,7 @@ watch(() => [props.show, props.account?.id], () => {
   proxyNames.value = {}
   failed.value = false
   if (!props.show || !props.account) return
+  selectedOS.value = defaultOpenAIOS(props.account)
   void loadProxyNames()
   void refresh()
   timer = setInterval(() => {
@@ -236,5 +242,13 @@ watch(() => [props.show, props.account?.id], () => {
     void refresh()
   }, 5000)
 }, { immediate: true })
+function selectOS(os: OpenAIOAuthOS) {
+  selectedOS.value = os
+  controller?.abort()
+  controller = null
+  status.value = null
+  failed.value = false
+  void refresh()
+}
 onUnmounted(stop)
 </script>

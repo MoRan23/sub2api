@@ -78,7 +78,7 @@ func TestAccountTestResponseInfo_OAuthShapeAndActualModel(t *testing.T) {
 			service := &AccountTestService{httpUpstream: upstream}
 			account := accountTestResponseInfoOAuth(tc.plan)
 			require.False(t, CodexTurnStateConfigForAccount(account).Enabled, "diagnostics also work with caching disabled")
-			require.NoError(t, service.testOpenAIAccountConnection(ctx, account, "gpt-6-astra", "", ""))
+			require.NoError(t, service.testOpenAIAccountConnection(ctx, prepareAccountTestCredential(t, service, account), "gpt-6-astra", "", ""))
 			require.Len(t, upstream.requests, 1)
 			requestBody, err := io.ReadAll(upstream.requests[0].Body)
 			require.NoError(t, err)
@@ -122,7 +122,7 @@ func TestAccountTestResponseInfo_MetadataAndHeaderCandidatePriority(t *testing.T
 			upstream := &queuedHTTPUpstream{responses: []*http.Response{response}}
 			service := &AccountTestService{httpUpstream: upstream}
 			ctx, recorder := newTestContext()
-			require.NoError(t, service.testOpenAIAccountConnection(ctx, accountTestResponseInfoOAuth("plus"), "gpt-6-astra", "", ""))
+			require.NoError(t, service.testOpenAIAccountConnection(ctx, prepareAccountTestCredential(t, service, accountTestResponseInfoOAuth("plus")), "gpt-6-astra", "", ""))
 			info := requireAccountTestResponseInfo(t, recorder.Body.String(), "test_complete")
 			require.Equal(t, "gpt-6-astra-upstream", info.Get("upstream_model").String())
 			require.Equal(t, tc.shape, info.Get("codex_turn_state.shape").String())
@@ -141,7 +141,7 @@ func TestAccountTestResponseInfo_DoesNotInferMissingModelOrSearchOutputForState(
 		"data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"model\":\"fake-model\",\"headers\":{\"x-codex-turn-state\":%q}}]}}\n\n", token))
 	service := &AccountTestService{httpUpstream: &queuedHTTPUpstream{responses: []*http.Response{response}}}
 	ctx, recorder := newTestContext()
-	require.NoError(t, service.testOpenAIAccountConnection(ctx, accountTestResponseInfoOAuth("plus"), "gpt-6-astra", "", ""))
+	require.NoError(t, service.testOpenAIAccountConnection(ctx, prepareAccountTestCredential(t, service, accountTestResponseInfoOAuth("plus")), "gpt-6-astra", "", ""))
 	info := requireAccountTestResponseInfo(t, recorder.Body.String(), "test_complete")
 	require.Empty(t, info.Get("upstream_model").String(), "selected request model must not be substituted for an absent returned model")
 	require.Equal(t, "missing", info.Get("codex_turn_state.shape").String())
@@ -162,7 +162,9 @@ func TestAccountTestResponseInfo_ShadowUsesCredentialParentPlan(t *testing.T) {
 		accountsByID: map[int64]*Account{parent.ID: parent, shadow.ID: shadow},
 	}}
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{response}}
-	service := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+	scopedRepo := accountTestDefaultOSRepository(t, repo, parent)
+	scopedRepo.accounts[shadow.ID] = shadow
+	service := &AccountTestService{accountRepo: scopedRepo, httpUpstream: upstream}
 	ctx, recorder := newTestContext()
 	require.NoError(t, service.TestAccountConnection(ctx, shadow.ID, "gpt-5.3-codex-spark", "", ""))
 	info := requireAccountTestResponseInfo(t, recorder.Body.String(), "test_complete")
@@ -183,7 +185,7 @@ func TestAccountTestResponseInfo_FailedStreamRetainsFailureSemantics(t *testing.
 			response.Header.Set("x-codex-turn-state", token)
 			service := &AccountTestService{httpUpstream: &queuedHTTPUpstream{responses: []*http.Response{response}}}
 			ctx, recorder := newTestContext()
-			require.Error(t, service.testOpenAIAccountConnection(ctx, accountTestResponseInfoOAuth("plus"), "gpt-6-astra", "", ""))
+			require.Error(t, service.testOpenAIAccountConnection(ctx, prepareAccountTestCredential(t, service, accountTestResponseInfoOAuth("plus")), "gpt-6-astra", "", ""))
 			info := requireAccountTestResponseInfo(t, recorder.Body.String(), "error")
 			require.Equal(t, "gpt-6-astra-error", info.Get("upstream_model").String())
 			require.Equal(t, "target", info.Get("codex_turn_state.shape").String())
@@ -209,7 +211,7 @@ func TestAccountTestResponseInfo_APIKeyChatReportsActualModelOnly(t *testing.T) 
 		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
 	}
 	ctx, recorder := newTestContext()
-	require.NoError(t, service.testOpenAIAccountConnection(ctx, account, "gpt-6-astra", "", ""))
+	require.NoError(t, service.testOpenAIAccountConnection(ctx, prepareAccountTestCredential(t, service, account), "gpt-6-astra", "", ""))
 	require.Equal(t, "/v1/chat/completions", upstream.requests[0].URL.Path)
 	info := requireAccountTestResponseInfo(t, recorder.Body.String(), "test_complete")
 	require.Equal(t, "returned-chat-model", info.Get("upstream_model").String())
@@ -223,7 +225,7 @@ func TestAccountTestResponseInfo_CompactOAuthReportsResponse(t *testing.T) {
 	response.Header.Set("x-codex-turn-state", codexStateTestToken(10, time.Now().UTC()))
 	service := &AccountTestService{httpUpstream: &queuedHTTPUpstream{responses: []*http.Response{response}}}
 	ctx, recorder := newTestContext()
-	require.NoError(t, service.testOpenAIAccountConnection(ctx, accountTestResponseInfoOAuth("plus"), "gpt-6-astra", "", AccountTestModeCompact))
+	require.NoError(t, service.testOpenAIAccountConnection(ctx, prepareAccountTestCredential(t, service, accountTestResponseInfoOAuth("plus")), "gpt-6-astra", "", AccountTestModeCompact))
 	info := requireAccountTestResponseInfo(t, recorder.Body.String(), "test_complete")
 	require.Equal(t, "gpt-6-astra-compact", info.Get("upstream_model").String())
 	require.Equal(t, "target", info.Get("codex_turn_state.shape").String())

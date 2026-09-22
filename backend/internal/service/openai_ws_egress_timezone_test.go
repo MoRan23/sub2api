@@ -108,6 +108,7 @@ func TestOpenAIWSHTTPAdaptedMapUsesFrozenSourceAndRoute(t *testing.T) {
 	t.Cleanup(pool.Close)
 	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: &httpUpstreamRecorder{}, cache: &stubGatewayCache{},
 		toolCorrector: NewCodexToolCorrector(), openaiWSPool: pool, egressLocationService: resolver}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	original := timezoneTestBody(t, map[string]any{"model": "gpt-5.1", "input": []any{

@@ -409,12 +409,12 @@ func TestApplyOpenAIInstallationIDForOutboundCompactStripsBodyMetadata(t *testin
 	}
 }
 
-func TestApplyOpenAIInstallationIDForOutboundShadowUsesParentAndRepairsCAS(t *testing.T) {
+func TestApplyOpenAIInstallationIDForOutboundShadowUsesAuthorizedParentProfile(t *testing.T) {
 	parentID := int64(503)
 	parent := newOpenAIOAuthPinAccount(parentID, map[string]any{openAIPinnedInstallationIDKey: "invalid"})
 	shadow := newOpenAIOAuthPinAccount(504, nil)
 	shadow.ParentAccountID = &parentID
-	repo := &installationIdentityRepoStub{accounts: map[int64]*Account{parentID: parent}}
+	repo := newAuthorizedOpenAIOAuthTestRepo(parent)
 	body := map[string]any{}
 	headers := make(http.Header)
 
@@ -424,8 +424,9 @@ func TestApplyOpenAIInstallationIDForOutboundShadowUsesParentAndRepairsCAS(t *te
 	if err != nil {
 		t.Fatalf("apply shadow installation identity: %v", err)
 	}
-	if !resolution.Enabled || resolution.OutboundID == "" || resolution.OutboundID == "invalid" || repo.ensureCalls != 1 {
-		t.Fatalf("shadow CAS resolution mismatch: resolution=%+v ensure_calls=%d", resolution, repo.ensureCalls)
+	profile := parent.OpenAIOAuthOSProfiles.Profiles[parent.OpenAIOAuthOSProfiles.DefaultOS]
+	if !resolution.Enabled || resolution.OutboundID != profile.InstallationID || repo.ensureCalls != 0 {
+		t.Fatalf("shadow profile resolution mismatch: resolution=%+v ensure_calls=%d", resolution, repo.ensureCalls)
 	}
 	if got := body["client_metadata"].(map[string]any)[codexInstallationIDKey]; got != resolution.OutboundID {
 		t.Fatalf("shadow body used wrong installation ID: %v", got)
@@ -438,7 +439,7 @@ func TestApplyOpenAIInstallationIDForOutboundShadowUsesParentAndRepairsCAS(t *te
 	secondHeaders := make(http.Header)
 	second, err := applyOpenAIInstallationIDForOutbound(context.Background(), nil, repo, shadow, secondBody, secondHeaders, false, false)
 	if err != nil || second.OutboundID != resolution.OutboundID {
-		t.Fatalf("shadow CAS value was not stable: first=%+v second=%+v err=%v", resolution, second, err)
+		t.Fatalf("shadow profile value was not stable: first=%+v second=%+v err=%v", resolution, second, err)
 	}
 }
 

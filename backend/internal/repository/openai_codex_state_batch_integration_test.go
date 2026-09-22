@@ -93,20 +93,21 @@ func TestCodexStateBatchPostgresLiveAccountAndGenerationFilter(t *testing.T) {
 	_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,
 		'{codex_turn_state,enabled}', 'false'::jsonb) WHERE id=$1`, ids[1])
 	require.NoError(t, err)
-	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,
-		'{codex_turn_state_generation}', '"replacement-generation"'::jsonb) WHERE id=$1`, ids[2])
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_os_credentials SET state_generation=gen_random_uuid() WHERE account_id=$1`, ids[2])
 	require.NoError(t, err)
 	assertOwners(ids[0])
 	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET type='apikey',
 		extra=jsonb_set(extra, '{codex_turn_state,enabled}', 'true'::jsonb) WHERE id=$1`, ids[1])
 	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET platform='anthropic',
-		extra=jsonb_set(extra, '{codex_turn_state_generation}', '"generation-1"'::jsonb) WHERE id=$1`, ids[2])
+		extra=jsonb_set(extra, '{codex_turn_state_generation}', '"00000000-0000-4000-8000-000000000001"'::jsonb) WHERE id=$1`, ids[2])
 	require.NoError(t, err)
 	assertOwners(ids[0])
 	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET type='oauth', deleted_at=NOW() WHERE id=$1`, ids[1])
 	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET platform='openai' WHERE id=$1`, ids[2])
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_os_credentials SET state_generation='00000000-0000-4000-8000-000000000001' WHERE account_id=$1`, ids[2])
 	require.NoError(t, err)
 	assertOwners(ids[0], ids[2])
 	afterStates, afterLeases := codexBatchSnapshot(t, ctx, ids)

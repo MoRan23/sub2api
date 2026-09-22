@@ -72,6 +72,11 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	compatPromptCacheTenantIsolated bool,
 ) (*OpenAIForwardResult, error) {
 	if account != nil && account.IsOpenAIOAuth() {
+		var scopeErr error
+		ctx, account, scopeErr = s.prepareOpenAIOAuthRequestScope(ctx, c, account, body)
+		if scopeErr != nil {
+			return nil, scopeErr
+		}
 		PrepareOpenAIChatConversionCheck(c, body)
 	}
 	if err := ValidateOpenAIChatConversionForAccount(c, account); err != nil {

@@ -186,7 +186,7 @@ func TestParentHealthSchedulerFallsBackToRepoWhenSnapshotMissesParent(t *testing
 		Concurrency:     1,
 	}
 
-	repo := schedulerTestOpenAIAccountRepo{accounts: []Account{parent}}
+	repo := newSchedulerTestOpenAIAccountRepo([]Account{parent})
 	scheduler := &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{
 		accountRepo: repo,
 		schedulerSnapshot: &SchedulerSnapshotService{

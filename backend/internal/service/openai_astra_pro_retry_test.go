@@ -39,8 +39,10 @@ func TestOpenAIGatewayService_OAuthAstraProModeRejectionPassesThrough(t *testing
 	)}
 	svc := newOpenAIRejectedFieldTestService(upstream)
 	c, recorder := newOpenAIAstraProRetryContext(body)
+	account := newOpenAIOAuthNamespaceTestAccount()
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
-	_, err := svc.Forward(context.Background(), c, newOpenAIOAuthNamespaceTestAccount(), body)
+	_, err := svc.Forward(context.Background(), c, account, body)
 	require.Error(t, err)
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.Len(t, upstream.bodies, 1, "deterministic 400 must not trigger a retry")
@@ -74,8 +76,10 @@ func TestOpenAIGatewayService_OAuthAstraProModeKeptAcrossRejectedFieldRetry(t *t
 	upstream.responses[1].Header.Set("Content-Type", "text/event-stream")
 	svc := newOpenAIRejectedFieldTestService(upstream)
 	c, _ := newOpenAIAstraProRetryContext(body)
+	account := newOpenAIOAuthNamespaceTestAccount()
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
-	result, err := svc.Forward(context.Background(), c, newOpenAIOAuthNamespaceTestAccount(), body)
+	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Len(t, upstream.bodies, 2)

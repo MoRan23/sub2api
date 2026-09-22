@@ -197,8 +197,19 @@ func guardedAccountExtraExpression(expression string) string {
 
 // SQL UPDATE evaluates these expressions against the locked, latest row, so an
 // asynchronous token/credential snapshot cannot restore a stale environment UA.
-func guardedAccountCredentialsExpression(expression string) string {
-	return "CASE WHEN platform = 'openai' THEN ((" + expression + ") - 'user_agent') || " +
+func guardedAccountCredentialsExpression(expression string, allowModeChange ...bool) string {
+	protectedKeys := service.OpenAIOAuthProviderCredentialKeys()
+	quoted := make([]string, 0, len(protectedKeys))
+	for _, key := range protectedKeys {
+		quoted = append(quoted, "'"+key+"'")
+	}
+	keys := "ARRAY[" + strings.Join(quoted, ",") + "]::text[]"
+	predicate := codexTurnStateOwnerExpression("credentials")
+	if len(allowModeChange) > 0 && allowModeChange[0] {
+		predicate += " AND " + codexTurnStateOwnerExpression(expression)
+	}
+	protected := "CASE WHEN " + predicate + " THEN ((" + expression + ") - " + keys + ") || (SELECT COALESCE(jsonb_object_agg(key,value),'{}'::jsonb) FROM jsonb_each(COALESCE(credentials,'{}'::jsonb)) WHERE key=ANY(" + keys + ")) ELSE (" + expression + ") END"
+	return "CASE WHEN platform = 'openai' THEN ((" + protected + ") - 'user_agent') || " +
 		"CASE WHEN parent_account_id IS NULL AND credentials ? 'user_agent' THEN jsonb_build_object('user_agent', credentials -> 'user_agent') ELSE '{}'::jsonb END" +
 		" ELSE (" + expression + ") END"
 }

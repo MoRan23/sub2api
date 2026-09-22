@@ -67,7 +67,7 @@ func (r *codexStatePublicationRetryRepository) EndBusiness(ctx context.Context, 
 }
 
 func (r *codexStatePublicationRetryRepository) CreateHistoryDemand(ctx context.Context, proof CodexTurnStateHistoryProof, now time.Time) (bool, error) {
-	key := CodexTurnStateKey{OwnerAccountID: proof.OwnerAccountID, Model: proof.Model, Generation: proof.Generation}
+	key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: proof.OwnerAccountID, Model: proof.Model, Generation: proof.Generation}
 	record, err := r.codexStateMemoryRepo.Get(ctx, key)
 	if err != nil || record == nil || !proof.ObservedAt.After(record.HistoryProofObservedAt) {
 		return false, err
@@ -225,14 +225,14 @@ func TestCodexTurnStatePendingPublicationStopRejectsLateCompletion(t *testing.T)
 func TestCodexTurnStatePendingPublicationIsBoundedAndPrivate(t *testing.T) {
 	s, _, account := newCodexStateTestService(t)
 	for index := range codexTurnStatePendingPublicationLimit + 1 {
-		attempt := &CodexTurnStateAttempt{Enabled: true, finished: true, historyDelivered: true, historyPhysicalBound: true, anomalyPublication: true,
-			key:            CodexTurnStateKey{OwnerAccountID: account.ID, Model: fmt.Sprintf("model-%04d", index), Generation: "gen1"},
+		attempt := &CodexTurnStateAttempt{OSFamily: "windows", Enabled: true, finished: true, historyDelivered: true, historyPhysicalBound: true, anomalyPublication: true,
+			key:            CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: fmt.Sprintf("model-%04d", index), Generation: "gen1"},
 			businessSentAt: s.now(), pendingAnomaly: &CodexTurnStateShape{Shape: "extended", ExpiresAt: s.now().Add(time.Hour)},
 			safeObservation: CodexTurnStateSafeObservation{ObservedAt: s.now().Add(time.Duration(index) * time.Nanosecond)}}
 		s.retainCodexTurnStateAnomaly(attempt)
 	}
 	require.Len(t, s.pendingPublications, codexTurnStatePendingPublicationLimit)
-	require.NotContains(t, s.pendingPublications, CodexTurnStateKey{OwnerAccountID: account.ID, Model: "model-0000", Generation: "gen1"})
+	require.NotContains(t, s.pendingPublications, CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: "model-0000", Generation: "gen1"})
 	for _, pending := range s.pendingPublications {
 		encoded, err := json.Marshal(pending)
 		require.NoError(t, err)
@@ -247,7 +247,7 @@ func TestCodexTurnStatePendingPublicationRetriesOneBoundedBatch(t *testing.T) {
 	s, _, _ := newCodexStateTestService(t)
 	s.pendingPublications = make(map[CodexTurnStateKey]*codexTurnStatePendingPublication)
 	for index := range codexTurnStatePendingPublicationBatch + 3 {
-		key := CodexTurnStateKey{OwnerAccountID: 1, Model: fmt.Sprintf("model-%04d", index), Generation: "gen1"}
+		key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: 1, Model: fmt.Sprintf("model-%04d", index), Generation: "gen1"}
 		s.pendingPublications[key] = &codexTurnStatePendingPublication{key: key, sentAt: s.now(),
 			shape: CodexTurnStateShape{Shape: "extended", TokenLength: 312, CipherBlocks: 11,
 				IssuedAt: s.now(), ExpiresAt: s.now().Add(time.Hour)}, observedAt: s.now()}

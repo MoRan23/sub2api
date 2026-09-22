@@ -83,7 +83,7 @@ func TestOpenAIOAuthHTTPBuildersSendRoutingHintFromFinalBody(t *testing.T) {
 			"chatgpt_account_id": "test-account",
 		},
 	}
-	svc := &OpenAIGatewayService{}
+	svc := &OpenAIGatewayService{accountRepo: newAuthorizedOpenAIOAuthTestRepo(oauthAccount)}
 
 	tests := []struct {
 		name string
@@ -169,6 +169,7 @@ func TestOpenAIHTTPPassthroughStripsOnlyOAuthLegacyResponsesBeta(t *testing.T) {
 			"api_key": "test-api-key",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(oauth)
 
 	t.Run("oauth legacy only is removed including raw lowercase key", func(t *testing.T) {
 		headers := build(t, oauth, []string{"responses=experimental"}, true)
@@ -226,6 +227,7 @@ func TestBuildOpenAIWSHeadersSendsOAuthRoutingHintOnly(t *testing.T) {
 			openAIPinnedInstallationIDKey: transportTestPinnedInstallationID,
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(oauthAccount)
 	require.Equal(t, "model=gpt-5.6-codex;tier=priority", build(t, oauthAccount, "fast").Get(openAICodexRoutingHintHeader))
 	require.Equal(t, "model=gpt-5.6-codex;tier=ultrafast", build(t, oauthAccount, "ultrafast").Get(openAICodexRoutingHintHeader))
 	require.Equal(t, "model=gpt-5.6-codex", build(t, oauthAccount, "default").Get(openAICodexRoutingHintHeader))
@@ -246,7 +248,7 @@ func TestOpenAIRoutingDiagnosticsUseFinalDerivedValuesOnly(t *testing.T) {
 		},
 	}
 	body := []byte(`{"model":"gpt-5.6-codex","service_tier":"fast"}`)
-	svc := &OpenAIGatewayService{}
+	svc := &OpenAIGatewayService{accountRepo: newAuthorizedOpenAIOAuthTestRepo(account)}
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)

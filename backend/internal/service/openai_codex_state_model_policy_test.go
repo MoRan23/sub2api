@@ -137,7 +137,7 @@ func TestCodexTurnStateExcludedModelStillObservesWithoutMaintenance(t *testing.T
 	require.Equal(t, "target", attempt.SafeObservation().Shape)
 	require.Empty(t, attempt.candidates)
 	require.NoError(t, s.Finish(context.Background(), attempt, true))
-	s.collect(context.Background(), CodexTurnStateKey{OwnerAccountID: account.ID, Model: "gpt-5", Generation: "gen1"})
+	s.collect(context.Background(), CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5", Generation: "gen1"})
 	require.Zero(t, calls.Load())
 	require.Empty(t, repo.records)
 	require.Empty(t, repo.leases)

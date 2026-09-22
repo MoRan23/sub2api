@@ -60,6 +60,7 @@ func TestOpenAIChatConversionRejectedBeforeAnyUpstreamAttempt(t *testing.T) {
 		upstream := &httpUpstreamRecorder{}
 		svc := &OpenAIGatewayService{httpUpstream: upstream}
 		account := &Account{ID: 23, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+		svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 		result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
 		var conversionErr *apicompat.ChatConversionError
 		require.ErrorAs(t, err, &conversionErr)

@@ -78,8 +78,9 @@ func TestOpenAIInstallationNormalHTTPRewritesBodyAndHeaders(t *testing.T) {
 	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"installation_id":"client-nested-header","session_id":"header-session"}`)
 
 	upstream := &httpUpstreamRecorder{resp: successfulInstallationTestResponse()}
-	svc := &OpenAIGatewayService{httpUpstream: upstream}
-	result, err := svc.Forward(context.Background(), c, installationTestOAuthAccount(nil), body)
+	account := installationTestOAuthAccount(nil)
+	svc := &OpenAIGatewayService{httpUpstream: upstream, accountRepo: newAuthorizedOpenAIOAuthTestRepo(account)}
+	result, err := svc.Forward(context.Background(), c, account, body)
 	if err != nil {
 		t.Fatalf("forward request: %v", err)
 	}
@@ -109,7 +110,9 @@ func TestOpenAIInstallationNormalHTTPRewritesBodyAndHeaders(t *testing.T) {
 	}
 	require.Equal(t, turnSessionID, requireInstallationTestRootIdentity(t, headerTurn))
 	require.Equal(t, turnSessionID, upstream.lastReq.Header.Get("session-id"))
-	require.Equal(t, turnSessionID, upstream.lastReq.Header.Get("thread-id"))
+	require.Equal(t, bodyTurn["thread_id"], upstream.lastReq.Header.Get("thread-id"))
+	require.NotEqual(t, turnSessionID, upstream.lastReq.Header.Get("thread-id"))
+	require.Equal(t, turnSessionID, upstream.lastReq.Header.Get("x-codex-parent-thread-id"))
 }
 
 func TestOpenAIInstallationCompactUsesHeadersOnly(t *testing.T) {
@@ -124,8 +127,9 @@ func TestOpenAIInstallationCompactUsesHeadersOnly(t *testing.T) {
 	c.Request.Header.Set("x-codex-window-id", "window-1")
 
 	upstream := &httpUpstreamRecorder{resp: successfulInstallationTestResponse()}
-	svc := &OpenAIGatewayService{httpUpstream: upstream}
-	if _, err := svc.Forward(context.Background(), c, installationTestOAuthAccount(nil), body); err != nil {
+	account := installationTestOAuthAccount(nil)
+	svc := &OpenAIGatewayService{httpUpstream: upstream, accountRepo: newAuthorizedOpenAIOAuthTestRepo(account)}
+	if _, err := svc.Forward(context.Background(), c, account, body); err != nil {
 		t.Fatalf("forward compact request: %v", err)
 	}
 	var outboundBody map[string]any
@@ -143,9 +147,12 @@ func TestOpenAIInstallationCompactUsesHeadersOnly(t *testing.T) {
 		t.Fatalf("unexpected compact turn metadata: %#v", headerTurn)
 	}
 	turnSessionID := requireInstallationTestRootIdentity(t, headerTurn)
-	if upstream.lastReq.Header.Get("x-codex-window-id") != "" ||
+	turnThreadID := headerTurn["thread_id"].(string)
+	require.NotEqual(t, turnSessionID, turnThreadID)
+	if upstream.lastReq.Header.Get("x-codex-window-id") != turnThreadID+":0" ||
 		upstream.lastReq.Header.Get("session-id") != turnSessionID ||
-		upstream.lastReq.Header.Get("thread-id") != turnSessionID ||
+		upstream.lastReq.Header.Get("thread-id") != turnThreadID ||
+		upstream.lastReq.Header.Get("x-codex-parent-thread-id") != turnSessionID ||
 		upstream.lastReq.Header.Get("session_id") != "" ||
 		upstream.lastReq.Header.Get("x-client-request-id") != "" {
 		t.Fatalf("compact compatibility headers were not preserved: %#v", upstream.lastReq.Header)
@@ -177,6 +184,7 @@ func TestOpenAIInstallationHTTPPassthroughPinsAllCarriers(t *testing.T) {
 		openAIPinnedInstallationIDKey: transportTestPinnedInstallationID,
 		"openai_passthrough":          true,
 	})
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	if _, err := svc.Forward(context.Background(), c, account, body); err != nil {
 		t.Fatalf("forward passthrough request: %v", err)
 	}
@@ -275,7 +283,7 @@ func TestBuildOpenAIWSHeadersPinsInstallationForPassthrough(t *testing.T) {
 	c.Request.Header.Set(codexInstallationIDKey, "client-header")
 	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"installation_id":"client-nested","session_id":"session-1"}`)
 	account := installationTestOAuthAccount(map[string]any{"openai_passthrough": true})
-	svc := &OpenAIGatewayService{}
+	svc := &OpenAIGatewayService{accountRepo: newAuthorizedOpenAIOAuthTestRepo(account)}
 	decision := OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}
 
 	passthroughHeaders, _, err := svc.buildOpenAIWSHeaders(
@@ -327,6 +335,7 @@ func TestBuildOpenAIWSHeadersIdentityPlanReuseRequiresCredentialOwnerMatch(t *te
 	firstAccount := installationTestOAuthAccount(nil)
 	secondAccount := installationTestOAuthAccount(nil)
 	secondAccount.ID = firstAccount.ID + 1
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(firstAccount, secondAccount)
 
 	firstPlan := OpenAIOAuthIdentityPlan{
 		Capture:                  capture,
@@ -391,6 +400,7 @@ func TestOpenAIInstallationIngressWSRewritesEveryResponseCreate(t *testing.T) {
 		openAIPinnedInstallationIDKey:     transportTestPinnedInstallationID,
 		"responses_websockets_v2_enabled": true,
 	})
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	serverErrCh := make(chan error, 1)
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -33,14 +33,14 @@ func TestOpenAIChatConversionPathsDailyRootsMatchObservedWire(t *testing.T) {
 					SettingKeyEnableOpenAIOAuthDailySessionRotation:     strconv.FormatBool(daily),
 				}}, nil)
 				businessDate := OAuthDailyBusinessDate(time.Now())
-				svc.oauthDailySessionRepo = &fakeOAuthDailyAffinityRepository{
-					pool: OAuthDailySessionPool{AccountID: 9801, BusinessDate: businessDate, Generation: streamRoot, SyncSessionID: syncRoot},
-					affinity: OAuthDailySessionAffinity{AccountID: 9801, APIKeyID: 98, LogicalSessionKey: "chat-check-path",
-						BusinessDate: businessDate, Generation: streamRoot, SlotIndex: 1, StreamSessionID: streamRoot},
+				svc.oauthDailySessionRepo = &osIdentityDailyRepository{
+					pool: OAuthDailySessionPool{AccountID: 9801, BusinessDate: businessDate,
+						OSRoots: map[string]OAuthDailyOSRoots{OpenAIOSWindows: {StreamSessionID: streamRoot, SyncSessionID: syncRoot}}},
 				}
 				c, recorder := newOpenAIIdentityPathContext(t, "/v1/chat/completions", body, 98)
 				account := newOpenAIIdentityPathOAuthAccount(9801)
 				account.Extra = map[string]any{openAIPinnedInstallationIDKey: transportTestPinnedInstallationID}
+				svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 				result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "chat-check-path", "gpt-5.4")
 
@@ -116,7 +116,9 @@ func TestOpenAIChatConversionPathsResponsesShapePreservesInput(t *testing.T) {
 	c, recorder := newOpenAIIdentityPathContext(t, "/v1/chat/completions", body, 98)
 	PrepareOpenAIChatConversionCheck(c, body)
 
-	result, err := svc.ForwardAsChatCompletions(context.Background(), c, newOpenAIIdentityPathOAuthAccount(9803), body, "native-chat-path", "gpt-5.4")
+	account := newOpenAIIdentityPathOAuthAccount(9803)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "native-chat-path", "gpt-5.4")
 
 	require.NoError(t, err, recorder.Body.String())
 	require.NotNil(t, result)

@@ -16,11 +16,32 @@ type codexTurnStateStatusService interface {
 	GetStatuses(context.Context, []int64) (*service.CodexTurnStateBatchStatus, error)
 }
 
+type codexTurnStateOSStatusService interface {
+	GetStatusForOS(context.Context, int64, string) (*service.CodexTurnStateStatus, error)
+	GetStatusesForOS(context.Context, []int64, string) (*service.CodexTurnStateBatchStatus, error)
+}
+
+func codexTurnStateQueryOS(c *gin.Context) (string, bool) {
+	values, exists := c.GetQueryArray("os")
+	if !exists {
+		return "", true
+	}
+	if len(values) != 1 || values[0] == "" || service.NormalizeOpenAIOSFamily(values[0]) != values[0] {
+		response.BadRequest(c, "os must be windows, macos, or linux")
+		return "", false
+	}
+	return values[0], true
+}
+
 func (h *AccountHandler) SetCodexTurnStateService(state codexTurnStateStatusService) {
 	h.codexTurnState = state
 }
 
 func (h *AccountHandler) GetCodexTurnStates(c *gin.Context) {
+	os, valid := codexTurnStateQueryOS(c)
+	if !valid {
+		return
+	}
 	const maxAccountIDs = 200
 	const maxAccountIDsQueryBytes = 8192
 	queries, present := c.GetQueryArray("account_ids")
@@ -50,7 +71,16 @@ func (h *AccountHandler) GetCodexTurnStates(c *gin.Context) {
 		response.ErrorFrom(c, infraerrors.New(503, "CODEX_TURN_STATE_UNAVAILABLE", "turn-state storage is unavailable"))
 		return
 	}
-	status, err := h.codexTurnState.GetStatuses(c.Request.Context(), ids)
+	var status *service.CodexTurnStateBatchStatus
+	var err error
+	if scoped, ok := h.codexTurnState.(codexTurnStateOSStatusService); ok {
+		status, err = scoped.GetStatusesForOS(c.Request.Context(), ids, os)
+	} else if os == "" {
+		status, err = h.codexTurnState.GetStatuses(c.Request.Context(), ids)
+	} else {
+		response.BadRequest(c, "OS-scoped turn-state status is unavailable")
+		return
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -59,6 +89,10 @@ func (h *AccountHandler) GetCodexTurnStates(c *gin.Context) {
 }
 
 func (h *AccountHandler) GetCodexTurnState(c *gin.Context) {
+	os, valid := codexTurnStateQueryOS(c)
+	if !valid {
+		return
+	}
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
 		response.BadRequest(c, "Invalid account ID")
@@ -68,7 +102,15 @@ func (h *AccountHandler) GetCodexTurnState(c *gin.Context) {
 		response.ErrorFrom(c, infraerrors.New(503, "CODEX_TURN_STATE_UNAVAILABLE", "turn-state storage is unavailable"))
 		return
 	}
-	status, err := h.codexTurnState.GetStatus(c.Request.Context(), id)
+	var status *service.CodexTurnStateStatus
+	if scoped, ok := h.codexTurnState.(codexTurnStateOSStatusService); ok {
+		status, err = scoped.GetStatusForOS(c.Request.Context(), id, os)
+	} else if os == "" {
+		status, err = h.codexTurnState.GetStatus(c.Request.Context(), id)
+	} else {
+		response.BadRequest(c, "OS-scoped turn-state status is unavailable")
+		return
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

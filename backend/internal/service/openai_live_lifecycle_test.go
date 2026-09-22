@@ -312,17 +312,22 @@ func TestFinalizeLiveCallIsIdempotentAndWritesZeroUsage(t *testing.T) {
 
 func TestGetLiveCallForIdentityRejectsMismatchedCaller(t *testing.T) {
 	groupID := int64(44)
+	account, repo := oauthOSCredentialFixture(t)
 	record := &LiveCallRecord{
-		CallID:     "call_identity",
-		CallHash:   hashLiveCallID("call_identity"),
-		APIKeyID:   22,
-		UserID:     33,
-		GroupID:    groupID,
-		Controller: LiveControllerPending,
+		AccountID:               account.ID,
+		CredentialOS:            OpenAIOSWindows,
+		CredentialOwnerID:       account.ID,
+		AuthorizationGeneration: "windows-generation",
+		CallID:                  "call_identity",
+		CallHash:                hashLiveCallID("call_identity"),
+		APIKeyID:                22,
+		UserID:                  33,
+		GroupID:                 groupID,
+		Controller:              LiveControllerPending,
 	}
 	store := &liveTestStore{}
 	require.NoError(t, store.SaveLiveCall(context.Background(), record, time.Hour))
-	service := &OpenAIGatewayService{cache: store}
+	service := &OpenAIGatewayService{cache: store, accountRepo: repo}
 
 	_, err := service.GetLiveCallForIdentity(context.Background(), record.CallID, LiveCallIdentity{
 		APIKeyID: 99,
@@ -378,6 +383,11 @@ func TestProxyLiveSidebandForwardsTextAndBinary(t *testing.T) {
 		openaiWSPassthroughDialer: dialer,
 		liveAttestationCipher:     attestationCipher,
 	}
+	registerAuxiliaryOSFixture(t, service, account)
+	record.CredentialOS = account.OpenAIOAuthOSProfiles.DefaultOS
+	record.CredentialOwnerID = account.ID
+	record.AuthorizationGeneration = "fixture-authorization"
+	require.NoError(t, store.SaveLiveCall(context.Background(), record, time.Hour))
 	proxyResult := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		downstream, err := coderws.Accept(writer, request, nil)

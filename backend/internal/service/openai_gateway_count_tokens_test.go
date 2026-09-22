@@ -75,6 +75,7 @@ func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_APIKeyUsesResponsesI
 		Schedulable: true,
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	err := svc.ForwardCountTokensAsAnthropic(context.Background(), c, account, body, "gpt-5.3-codex")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -157,6 +158,7 @@ func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_OAuthFallsBackWhenPl
 				rateLimitService: &RateLimitService{accountRepo: repo, cfg: &config.Config{}},
 			}
 
+			registerAuxiliaryOSFixture(t, svc, account)
 			err := svc.ForwardCountTokensAsAnthropic(context.Background(), c, account, body, "gpt-5.4")
 			require.NoError(t, err)
 			require.Equal(t, http.StatusOK, rec.Code)

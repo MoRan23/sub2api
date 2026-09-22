@@ -299,6 +299,7 @@ func TestCaptureOpenAIWSFrameIdentityUsesCurrentFramePromptCacheSnapshot(t *test
 	c.Set("api_key", &APIKey{ID: int64(994)})
 	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "ws-prompt-cache-secret"}}}
 	account := &Account{ID: 9194, Type: AccountTypeOAuth, Platform: PlatformOpenAI}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	options := OpenAIOAuthIdentityPlanOptions{
 		TurnIdentityEnabled: true,
 		ProjectionMode:      OpenAIOAuthIdentityProjectionPassthrough,
@@ -418,6 +419,7 @@ func TestOpenAIWSContinuationResolveFinalizeApplyKeepsCurrentTurn(t *testing.T) 
 	c.Set("api_key", &APIKey{ID: 991})
 	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "ws-wire-continuation-secret"}}}
 	account := &Account{ID: 9191, Type: AccountTypeOAuth, Platform: PlatformOpenAI}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	options := OpenAIOAuthIdentityPlanOptions{
 		TurnIdentityEnabled: true,
 		ProjectionMode:      OpenAIOAuthIdentityProjectionPassthrough,

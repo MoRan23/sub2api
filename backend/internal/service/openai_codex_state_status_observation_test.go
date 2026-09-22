@@ -41,7 +41,7 @@ func TestCodexTurnStateStatusObservationsRemainIndependentOfDisabledCache(t *tes
 		1: ownerOne, 2: ownerTwo, 3: codexStateBatchOwner(3, false), 11: codexStateBatchShadow(11, 1),
 	}}
 	records := &codexStateBatchRecords{records: []CodexTurnStateRecord{
-		{OwnerAccountID: 1, Generation: CodexTurnStateGenerationForAccount(ownerOne), Model: "cached-model", EncryptedToken: "private-encrypted-token", ExpiresAt: now.Add(20 * time.Minute), TokenLength: 292, CipherBlocks: 10, Shape: "target", Source: "business"},
+		{OSFamily: "windows", OwnerAccountID: 1, Generation: CodexTurnStateGenerationForAccount(ownerOne), Model: "cached-model", EncryptedToken: "private-encrypted-token", ExpiresAt: now.Add(20 * time.Minute), TokenLength: 292, CipherBlocks: 10, Shape: "target", Source: "business"},
 	}}
 	beforeRecords := slices.Clone(records.records)
 	state := NewCodexTurnStateService(records, accounts, nil, codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
@@ -56,16 +56,19 @@ func TestCodexTurnStateStatusObservationsRemainIndependentOfDisabledCache(t *tes
 	require.Empty(t, before.Observations)
 	require.Len(t, before.Models, 1)
 	recordCodexStatusObservation(t, 11, 1, CodexTurnStateObservation{
-		Model: "z-observed", Action: "passthrough", Source: "client", OutboundLength: 312,
+		OSFamily: "windows",
+		Model:    "z-observed", Action: "passthrough", Source: "client", OutboundLength: 312,
 		ResponseLength: 312, ResponseShape: "suspect", ResponseObservedShape: CodexTurnStateObservedPersonalExtended,
 		ResponseCipherBlocks: 11, ResponseSource: "metadata",
 	}, now.Add(-3*time.Second))
 	recordCodexStatusObservation(t, 1, 1, CodexTurnStateObservation{
-		Model: "a-observed", Action: "passthrough", ResponseLength: 292, ResponseShape: "target",
+		OSFamily: "windows",
+		Model:    "a-observed", Action: "passthrough", ResponseLength: 292, ResponseShape: "target",
 		ResponseObservedShape: CodexTurnStateObservedPersonalTarget, ResponseCipherBlocks: 10, ResponseSource: "header",
 	}, now.Add(-2*time.Second))
 	recordCodexStatusObservation(t, 2, 2, CodexTurnStateObservation{
-		Model: "other-owner-model", Action: "passthrough", ResponseLength: 356, ResponseShape: "unknown",
+		OSFamily: "windows",
+		Model:    "other-owner-model", Action: "passthrough", ResponseLength: 356, ResponseShape: "unknown",
 		ResponseObservedShape: CodexTurnStateObservedTeamBusinessExtended, ResponseCipherBlocks: 13,
 		ResponseValidationReason: "unexpected_shape", ResponseSource: "metadata",
 	}, now.Add(-time.Second))
@@ -234,7 +237,8 @@ func TestCodexTurnStateStatusObservationFingerprintSwitchDoesNotDiscardSummary(t
 	require.Empty(t, SnapshotFingerprintObservations(0), "summary publication must not repopulate the disabled full fingerprint ring")
 	SetFingerprintObservationEnabled(true)
 	recordCodexStatusObservation(t, owner.ID, owner.ID, CodexTurnStateObservation{
-		Model: "new-window-model", Action: "passthrough", ResponseLength: 292, ResponseShape: "target", ResponseSource: "header",
+		OSFamily: "windows",
+		Model:    "new-window-model", Action: "passthrough", ResponseLength: 292, ResponseShape: "target", ResponseSource: "header",
 	}, time.Now())
 	status, err = state.GetStatus(ctx, owner.ID)
 	require.NoError(t, err)
@@ -259,7 +263,8 @@ func TestCodexTurnStateStatusObservationNoStateDoesNotReplacePriorResponse(t *te
 				state.modelPolicy = &codexStateBatchPolicy{models: []string{"final-model"}}
 				if withPrior {
 					recordCodexStatusObservation(t, owner.ID, owner.ID, CodexTurnStateObservation{
-						Model: "final-model", Action: "passthrough", ResponseLength: 356, ResponseShape: "unknown",
+						OSFamily: "windows",
+						Model:    "final-model", Action: "passthrough", ResponseLength: 356, ResponseShape: "unknown",
 						ResponseObservedShape: CodexTurnStateObservedTeamBusinessExtended,
 						ResponseCipherBlocks:  13, ResponseValidationReason: "unexpected_shape", ResponseSource: "metadata",
 					}, time.Now().Add(-time.Minute))

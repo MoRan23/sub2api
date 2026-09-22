@@ -190,7 +190,7 @@ func TestCodexTurnStateStatusExplainsUnavailableAccount(t *testing.T) {
 			s, _, account := newCodexStateTestService(t)
 			now := s.now()
 			tc.mutate(account, now)
-			record := CodexTurnStateRecord{OwnerAccountID: account.ID, Model: "gpt-5", Generation: "gen1", LastBusinessAt: now, DemandReason: "extended_shape"}
+			record := CodexTurnStateRecord{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5", Generation: "gen1", LastBusinessAt: now, DemandReason: "extended_shape"}
 			status := projectCodexTurnStateStatus(account.ID, account, []CodexTurnStateRecord{record}, []string{"gpt-5"}, nil, now)
 			require.Equal(t, "blocked", status.Models[0].CollectionStatus)
 			require.Equal(t, tc.reason, status.Models[0].CollectionReason)

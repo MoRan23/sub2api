@@ -181,7 +181,19 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 		return nil, errors.New("oauth refresh executor is nil")
 	}
 	requestPath := isOAuthRefreshRequestPath(ctx)
+	if account.OpenAIOAuthCredentialOS == "" && IsOpenAIOAuthOSProfileOwner(account) {
+		if _, scoped := api.accountRepo.(OpenAIOAuthOSCredentialsReader); scoped {
+			var err error
+			account, err = ResolveOpenAIOAuthCredentialAccount(ctx, api.accountRepo, account, OpenAIRequestOSFromContext(ctx).Family)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	cacheKey := executor.CacheKey(account)
+	if account.OpenAIOAuthCredentialOS != "" {
+		cacheKey = OpenAITokenRefreshLockKey(account)
+	}
 
 	// 0. 获取进程内互斥锁（防止同一进程内的并发刷新竞争）
 	localMu := api.getLocalLock(cacheKey)
@@ -209,7 +221,13 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 	}
 
 	// 2. 从 DB 重读最新 account（锁保护下，确保使用最新的 refresh_token）
-	freshAccount, err := api.accountRepo.GetByID(ctx, account.ID)
+	var freshAccount *Account
+	var err error
+	if account.OpenAIOAuthCredentialOS != "" {
+		freshAccount, err = ReloadOpenAIOAuthCredentialAccount(ctx, api.accountRepo, account)
+	} else {
+		freshAccount, err = api.accountRepo.GetByID(ctx, account.ID)
+	}
 	if err != nil {
 		if requestPath {
 			return nil, fmt.Errorf("%w: %v", errOAuthRefreshAccountRereadFailed, err)
@@ -354,7 +372,7 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 			durableAccount, applied, updateErr := persistOpenAIOAuthRefreshCredentials(ctx, api.accountRepo, attemptedAccount, newCredentials)
 			if applied {
 				cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), defaultRefreshPostPersistCleanupTimeout)
-				api.invalidateAccessTokenAfterPersist(cleanupCtx, cacheKey, freshAccount.ID)
+				api.invalidateAccessTokenAfterPersist(cleanupCtx, OpenAITokenCacheKey(attemptedAccount), freshAccount.ID)
 				cleanupCancel()
 			}
 			if updateErr != nil {
@@ -436,7 +454,13 @@ func (api *OAuthRefreshAPI) tryRecoverFromRefreshRace(ctx context.Context, usedA
 	if api.accountRepo == nil {
 		return nil, false
 	}
-	reReadAccount, err := api.accountRepo.GetByID(ctx, usedAccount.ID)
+	var reReadAccount *Account
+	var err error
+	if usedAccount.OpenAIOAuthCredentialOS != "" {
+		reReadAccount, err = ReloadOpenAIOAuthCredentialAccount(ctx, api.accountRepo, usedAccount)
+	} else {
+		reReadAccount, err = api.accountRepo.GetByID(ctx, usedAccount.ID)
+	}
 	if err != nil || reReadAccount == nil {
 		return nil, false
 	}

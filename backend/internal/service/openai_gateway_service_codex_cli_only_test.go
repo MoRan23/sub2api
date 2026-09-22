@@ -84,7 +84,10 @@ func TestOpenAIGatewayService_Forward_VersionGateMessage(t *testing.T) {
 			MinCodexVersion: "0.42.0",
 		}}}
 
-		_, err := svc.Forward(context.Background(), c, account(), body)
+		authorizedAccount := account()
+		authorizedAccount.ID = 1
+		authorizeOpenAIForwardFixture(svc, authorizedAccount)
+		_, err := svc.Forward(context.Background(), c, authorizedAccount, body)
 		require.Error(t, err)
 		require.Equal(t, http.StatusForbidden, rec.Code)
 		require.Contains(t, rec.Body.String(), "Your Codex version (0.39.0) is below the minimum required version (0.42.0)")
@@ -99,7 +102,10 @@ func TestOpenAIGatewayService_Forward_VersionGateMessage(t *testing.T) {
 			Reason:  CodexClientRestrictionReasonNotMatchedUA,
 		}}}
 
-		_, err := svc.Forward(context.Background(), c, account(), body)
+		authorizedAccount := account()
+		authorizedAccount.ID = 1
+		authorizeOpenAIForwardFixture(svc, authorizedAccount)
+		_, err := svc.Forward(context.Background(), c, authorizedAccount, body)
 		require.Error(t, err)
 		require.Equal(t, http.StatusForbidden, rec.Code)
 		require.Contains(t, rec.Body.String(), "This account only allows Codex official clients")
@@ -406,6 +412,7 @@ func TestOpenAIGatewayService_Forward_LogsInstructionsRequiredDetails(t *testing
 	}
 	body := []byte(`{"model":"gpt-5.1-codex","stream":false,"input":[{"type":"text","text":"hello"}],"prompt_cache_key":"pc-forward","access_token":"secret-token"}`)
 
+	authorizeOpenAIForwardFixture(svc, account)
 	_, err := svc.Forward(context.Background(), c, account, body)
 	require.Error(t, err)
 	// missing_required_parameter 是确定性的请求错误：换账号、重试都不会变。按真实的
@@ -462,6 +469,7 @@ func TestOpenAIGatewayService_Forward_TransientProcessingErrorTriggersFailover(t
 	}
 	body := []byte(`{"model":"gpt-5.1-codex","stream":false,"input":[{"type":"text","text":"hello"}]}`)
 
+	authorizeOpenAIForwardFixture(svc, account)
 	_, err := svc.Forward(context.Background(), c, account, body)
 	require.Error(t, err)
 
@@ -513,6 +521,7 @@ func TestOpenAIGatewayService_Forward_ModelCapacityErrorTriggersFailoverAndSameA
 	}
 	body := []byte(`{"model":"gpt-5.4","stream":false,"input":[{"type":"text","text":"hello"}]}`)
 
+	authorizeOpenAIForwardFixture(svc, account)
 	_, err := svc.Forward(context.Background(), c, account, body)
 	require.Error(t, err)
 

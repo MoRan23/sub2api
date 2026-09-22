@@ -46,6 +46,7 @@ vi.mock('@/api/admin', () => ({
       getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
       createSparkShadow,
       exportCodexAuth,
+      getById: vi.fn().mockImplementation(async (id: number) => ({ id, name: 'OpenAI', platform: 'openai', type: 'oauth', credentials: {}, openai_oauth_os_profiles: { default_os: 'windows', profiles: { windows: { authorization: { status: 'authorized' } }, macos: { authorization: { status: 'authorized' } }, linux: { authorization: { status: 'unauthorized' } } } } })),
       delete: vi.fn(),
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
@@ -77,6 +78,7 @@ const mountView = () =>
     global: {
       stubs: {
         AppLayout: { template: '<div><slot /></div>' },
+        BaseDialog: { props: ['show'], template: '<div v-if="show"><slot/><slot name="footer"/></div>' },
         TablePageLayout: {
           template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
         },
@@ -150,6 +152,11 @@ describe('admin AccountsView — 外审 F2:spark 影子创建接线', () => {
     const menu = wrapper.findComponent(AccountActionMenu)
     menu.vm.$emit('export-codex-auth', account)
     await flushPromises()
+    expect(exportCodexAuth).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="openai-oauth-os-select"]').setValue('macos')
+    expect(wrapper.get('option[value="linux"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="confirm-codex-auth-export"]').trigger('click')
+    await flushPromises()
     const controller = wrapper.findComponent(TotpStepUpDialog).props('controller')
     expect(controller.visible.value).toBe(true)
     menu.vm.$emit('export-codex-auth', account)
@@ -158,7 +165,7 @@ describe('admin AccountsView — 外审 F2:spark 影子创建接线', () => {
     controller.onVerified()
     await flushPromises()
     expect(exportCodexAuth).toHaveBeenCalledTimes(2)
-    expect(exportCodexAuth).toHaveBeenLastCalledWith(42)
+    expect(exportCodexAuth).toHaveBeenLastCalledWith(42, 'macos')
     expect(filename).toBe('auth.json')
     expect(JSON.parse(String(files[0]?.[0]))).toEqual(auth)
     expect(revoke).toHaveBeenCalledWith('blob:synthetic-auth-download')
@@ -180,6 +187,8 @@ describe('admin AccountsView — 外审 F2:spark 影子创建接线', () => {
     expect(exportCodexAuth).not.toHaveBeenCalled()
     exportCodexAuth.mockRejectedValueOnce({ reason: 'OPENAI_CODEX_AUTH_EXPORT_INCOMPLETE', message: 'id_token' })
     menu.vm.$emit('export-codex-auth', { id: 42, platform: 'openai', type: 'oauth', credentials: {} })
+    await flushPromises()
+    await wrapper.get('[data-testid="confirm-codex-auth-export"]').trigger('click')
     await flushPromises()
     expect(showError).toHaveBeenCalledWith('admin.accounts.codexAuth.incomplete')
     wrapper.unmount()

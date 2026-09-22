@@ -18,6 +18,7 @@ const codexStateWireObservationKey = "openai_codex_state_wire_observation"
 // CodexTurnStateObservation deliberately contains neither tokens nor fingerprints
 // of tokens. Its outbound length is populated from the actual physical send.
 type CodexTurnStateObservation struct {
+	OSFamily                 string     `json:"os_family"`
 	Enabled                  bool       `json:"enabled"`
 	AccountEnabled           bool       `json:"account_enabled"`
 	MaintenanceReason        string     `json:"maintenance_reason,omitempty"`
@@ -143,7 +144,7 @@ func noteOpenAICodexStatePatch(c *gin.Context, attempt *CodexTurnStateAttempt, b
 	attempt.mu.Lock()
 	credentialEpoch := attempt.credentialEpoch
 	attempt.mu.Unlock()
-	observation := &codexTurnStateWireObservation{ownerAccountID: attempt.OwnerAccountID, attempt: attempt, value: CodexTurnStateObservation{Enabled: attempt.Enabled, AccountEnabled: attempt.AccountEnabled, MaintenanceReason: reason, Action: "passthrough", Model: attempt.Model, RequestSource: "business", ObservationID: observationID, credentialEpoch: credentialEpoch}}
+	observation := &codexTurnStateWireObservation{ownerAccountID: attempt.OwnerAccountID, attempt: attempt, value: CodexTurnStateObservation{OSFamily: attempt.OSFamily, Enabled: attempt.Enabled, AccountEnabled: attempt.AccountEnabled, MaintenanceReason: reason, Action: "passthrough", Model: attempt.Model, RequestSource: "business", ObservationID: observationID, credentialEpoch: credentialEpoch}}
 	if attempt.Snapshot.Token != "" {
 		observation.value.Action = "injected"
 		observation.value.Source = attempt.Snapshot.Source

@@ -194,9 +194,9 @@ func TestOpenAITokenRefresher_Refresh_PATRemovesStaleOAuthFields(t *testing.T) {
 }
 
 func TestOpenAITokenProvider_NoRefreshTokenExpiredAccessTokenReturnsError(t *testing.T) {
-	provider := NewOpenAITokenProvider(nil, nil, nil)
 	expiresAt := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
 	account := &Account{
+		ID:       41,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Credentials: map[string]any{
@@ -204,6 +204,7 @@ func TestOpenAITokenProvider_NoRefreshTokenExpiredAccessTokenReturnsError(t *tes
 			"expires_at":   expiresAt,
 		},
 	}
+	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), nil, nil)
 
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.Error(t, err)

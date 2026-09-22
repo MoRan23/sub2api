@@ -61,11 +61,50 @@ func openAIRefreshCredentialPatch(previous, next map[string]any) (map[string]any
 }
 
 func persistOpenAIOAuthRefreshCredentials(ctx context.Context, repo AccountRepository, expected *Account, credentials map[string]any) (*Account, bool, error) {
-	if expected == nil || expected.IsCredentialShadow() {
+	if expected == nil || (expected.IsCredentialShadow() && expected.OpenAIOAuthCredentialOS == "") {
 		return expected, false, nil
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
+	}
+	if expected.OpenAIOAuthCredentialOS == "" && IsOpenAIOAuthOSProfileOwner(expected) {
+		if _, supported := repo.(OpenAIOAuthOSCredentialsReader); supported {
+			scoped, err := ResolveOpenAIOAuthCredentialAccount(ctx, repo, expected, OpenAIRequestOSFromContext(ctx).Family)
+			if err != nil {
+				return nil, false, err
+			}
+			if !reflect.DeepEqual(openAIRefreshAuthIdentity(expected.Credentials), openAIRefreshAuthIdentity(scoped.Credentials)) {
+				return nil, false, errOAuthRefreshAccountStateChanged
+			}
+			expected = scoped
+		}
+	}
+	if expected.OpenAIOAuthCredentialOS != "" {
+		updater, ok := repo.(OpenAIOAuthOSCredentialsRepository)
+		if !ok {
+			return nil, false, &providerConfigurationRefreshError{err: fmt.Errorf("OpenAI OAuth OS credential repository is not configured")}
+		}
+		patch, removed := openAIRefreshCredentialPatch(expected.Credentials, credentials)
+		applied, err := updater.PatchOpenAIOAuthOSCredentialsIfUnchanged(ctx,
+			expected.OpenAIOAuthCredentialOwnerID, expected.OpenAIOAuthCredentialOS,
+			expected.OpenAIOAuthAuthorizationGeneration, expected.OpenAIOAuthCredentialRevision,
+			expected.ProxyID, patch, removed)
+		if err != nil {
+			return nil, false, &providerCycleContainmentRefreshError{err: fmt.Errorf("%w: %v", errOAuthRefreshCredentialPersist, err)}
+		}
+		readCtx := ctx
+		if applied {
+			var cancel context.CancelFunc
+			readCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), defaultRefreshPostPersistCleanupTimeout)
+			defer cancel()
+		}
+		// Reload restores this OS and rejects a revoked/replaced authorization.
+		// A fresh default mirror must never escape as the result of a slot refresh.
+		account, err := ReloadOpenAIOAuthCredentialAccount(readCtx, repo, expected)
+		if err != nil {
+			return nil, applied, &providerCycleContainmentRefreshError{err: fmt.Errorf("OpenAI OAuth OS refresh durable state is unavailable: %w", err)}
+		}
+		return account, applied, nil
 	}
 	updater, ok := repo.(OpenAIOAuthRefreshCredentialsRepository)
 	if !ok {
@@ -101,6 +140,22 @@ func persistOpenAIOAuthRefreshCredentials(ctx context.Context, repo AccountRepos
 		}
 	}
 	return account, applied, nil
+}
+
+// A failure belongs to the authorization snapshot that actually reached the
+// provider. The CAS makes late errors harmless after refresh or reauthorization.
+func persistOpenAIOAuthCredentialError(ctx context.Context, repo AccountRepository, account *Account, reason string) (handled, applied bool, err error) {
+	if account == nil || account.OpenAIOAuthCredentialOS == "" {
+		return false, false, nil
+	}
+	updater, ok := repo.(OpenAIOAuthOSCredentialsRepository)
+	if !ok {
+		return true, false, fmt.Errorf("OpenAI OAuth OS credential repository is not configured")
+	}
+	applied, err = updater.SetOpenAIOAuthOSCredentialErrorIfUnchanged(ctx,
+		account.OpenAIOAuthCredentialOwnerID, account.OpenAIOAuthCredentialOS,
+		account.OpenAIOAuthAuthorizationGeneration, account.OpenAIOAuthCredentialRevision, reason)
+	return true, applied, err
 }
 
 func (s *adminServiceImpl) PersistOpenAIOAuthRefreshCredentials(ctx context.Context, expected *Account, credentials map[string]any) (*Account, bool, error) {

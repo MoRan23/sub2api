@@ -89,6 +89,7 @@ func TestOpenAIGatewayServiceForwardImages_ImageRateLimitReturnsFailoverAndCools
 	c.Request = req
 
 	svc := &OpenAIGatewayService{
+		accountRepo:      repo,
 		rateLimitService: &RateLimitService{accountRepo: repo},
 		httpUpstream: &httpUpstreamRecorder{
 			resp: &http.Response{
@@ -110,6 +111,7 @@ func TestOpenAIGatewayServiceForwardImages_ImageRateLimitReturnsFailoverAndCools
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 
 	require.Nil(t, result)
@@ -159,6 +161,7 @@ func TestOpenAIGatewayServiceForwardImages_TextFallbackDoesNotCoolImageCapabilit
 		},
 	}
 
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 
 	require.Nil(t, result)
@@ -212,6 +215,7 @@ func TestOpenAIGatewayServiceForwardImages_StructuredUnavailableCoolsImageCapabi
 	}
 
 	before := time.Now()
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 
 	require.Nil(t, result)
@@ -253,6 +257,7 @@ func TestOpenAIGatewayServiceForwardImages_CapabilityLossCoolsImageScope(t *test
 	c.Request = req
 
 	svc := &OpenAIGatewayService{
+		accountRepo:      repo,
 		rateLimitService: &RateLimitService{accountRepo: repo},
 		httpUpstream: &httpUpstreamRecorder{
 			resp: &http.Response{
@@ -275,6 +280,7 @@ func TestOpenAIGatewayServiceForwardImages_CapabilityLossCoolsImageScope(t *test
 	}
 
 	before := time.Now()
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 
 	require.Nil(t, result)

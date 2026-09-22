@@ -1190,6 +1190,15 @@ export interface OpenAIOAuthOSProfile {
   installation_id: string
   user_agent: string
   sync_session_id: string
+  authorization?: OpenAIOAuthAuthorizationSummary
+}
+
+export interface OpenAIOAuthAuthorizationSummary {
+  status: 'unauthorized' | 'authorized' | 'reauth_required'
+  authorized_at?: string
+  expires_at?: string
+  last_error?: string
+  refresh_retry_after?: string
 }
 
 export interface OpenAIOAuthOSProfiles {
@@ -1521,6 +1530,7 @@ export interface OpenAIResponsesState {
 }
 
 export interface CreateAccountRequest {
+  os?: OpenAIOAuthOS
   codex_turn_state?: CodexTurnStateConfig
   name: string
   notes?: string | null
@@ -1546,6 +1556,8 @@ export interface UpdateAccountRequest {
   notes?: string | null
   type?: AccountType
   openai_environment_fingerprint?: string
+  // Explicit authorization-mode conversion intent; never infer from a credential snapshot.
+  openai_auth_mode_change?: boolean
   credentials?: Record<string, unknown>
   extra?: Record<string, unknown>
   proxy_id?: number | null
@@ -1561,6 +1573,11 @@ export interface UpdateAccountRequest {
   upstream_billing_probe_enabled?: boolean
   upstream_billing_rate_sync_enabled?: boolean
   confirm_mixed_channel_risk?: boolean
+}
+
+export interface BulkUpdateAccountRequest extends Record<string, unknown> {
+  // Send only for a user-selected authorization-mode conversion.
+  openai_auth_mode_change?: boolean
 }
 
 export type GrokMediaEligibilityMode = 'auto' | 'enabled' | 'disabled'
@@ -1641,6 +1658,9 @@ export interface AdminDataProxy {
 }
 
 export interface AdminDataAccount {
+  openai_oauth_default_os?: OpenAIOAuthOS
+  // Explicit administrator backup format; never part of the public account summary.
+  openai_oauth_authorizations?: Partial<Record<OpenAIOAuthOS, { credentials: Record<string, unknown> }>>
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -1675,6 +1695,7 @@ export interface AdminDataImportResult {
 }
 
 export interface CodexSessionImportRequest {
+  os?: OpenAIOAuthOS
   codex_turn_state?: CodexTurnStateConfig
   content?: string
   contents?: string[]

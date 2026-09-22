@@ -20,12 +20,17 @@ func createCodexStateFixture(t *testing.T) service.CodexTurnStateKey {
 	var ownerID int64
 	require.NoError(t, integrationDB.QueryRowContext(context.Background(), `INSERT INTO accounts
 		(name, platform, type, credentials, extra) VALUES ($1,'openai','oauth','{}',
-		'{"codex_turn_state":{"enabled":true,"account_type":"personal"},"codex_turn_state_generation":"generation-1"}'::jsonb)
+		'{"codex_turn_state":{"enabled":true,"account_type":"personal"},"codex_turn_state_generation":"00000000-0000-4000-8000-000000000001"}'::jsonb)
 		RETURNING id`, t.Name()).Scan(&ownerID))
+	_, err := integrationDB.ExecContext(context.Background(), `INSERT INTO account_openai_oauth_os_credentials
+		(account_id,os_family,credentials,status,state_generation,credential_epoch) VALUES
+		($1,'windows','{"access_token":"fixture-token","plan_type":"plus"}','authorized',
+		'00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000011')`, ownerID)
+	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = integrationDB.ExecContext(context.Background(), `DELETE FROM accounts WHERE id=$1`, ownerID)
 	})
-	return service.CodexTurnStateKey{OwnerAccountID: ownerID, Model: "gpt-5.4", Generation: "generation-1"}
+	return service.CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: ownerID, Model: "gpt-5.4", Generation: "00000000-0000-4000-8000-000000000001"}
 }
 
 func TestCodexStatePostgresNaturalLeasesDurabilityAndCAS(t *testing.T) {
@@ -134,8 +139,8 @@ func TestCodexStatePostgresConcurrentCASAndGenerationFence(t *testing.T) {
 	loaded, err := repo.Get(ctx, key)
 	require.NoError(t, err)
 	require.NotEmpty(t, loaded.EncryptedToken)
-	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,
-		'{codex_turn_state_generation}', '"generation-2"'::jsonb) WHERE id=$1`, key.OwnerAccountID)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_os_credentials SET state_generation='00000000-0000-4000-8000-000000000002'
+		WHERE account_id=$1 AND os_family='windows'`, key.OwnerAccountID)
 	require.NoError(t, err)
 	missing, err := repo.Get(ctx, key)
 	require.NoError(t, err)
@@ -147,7 +152,7 @@ func TestCodexStatePostgresConcurrentCASAndGenerationFence(t *testing.T) {
 	oldBegin, err := repo.BeginBusiness(ctx, key, "late-attempt", now, now.Add(time.Minute))
 	require.NoError(t, err)
 	require.Nil(t, oldBegin)
-	key.Generation = "generation-2"
+	key.Generation = "00000000-0000-4000-8000-000000000002"
 	reset, err := repo.BeginBusiness(ctx, key, "new-attempt", now.Add(time.Second), now.Add(time.Minute))
 	require.NoError(t, err)
 	require.Empty(t, reset.EncryptedToken)
@@ -229,6 +234,7 @@ func TestCodexStatePostgresScanSelectsOnlyDueCollectors(t *testing.T) {
 	_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,
 		'{codex_turn_state,collector_proxy_id}', '42'::jsonb) WHERE id=$1`, key.OwnerAccountID)
 	require.NoError(t, err)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT state_generation::text FROM account_openai_oauth_os_credentials WHERE account_id=$1 AND os_family=$2`, key.OwnerAccountID, key.OSFamily).Scan(&key.Generation))
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	policyRevision := installCodexStateModelPolicyFixture(t, []string{"fresh", "due", "missing", "demand", "paused", "cooldown", "natural-inflight"})
 	for _, model := range []string{"fresh", "due", "missing", "demand", "paused", "cooldown", "natural-inflight"} {

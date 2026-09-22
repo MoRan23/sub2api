@@ -48,6 +48,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_StripsInvalidInputItemIDs(t *tes
 		]
 	}`)
 
+	authorizeOpenAIForwardFixture(svc, account)
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -104,6 +105,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_SanitizesNativeToolItemIDs(t *tes
 		]
 	}`)
 
+			authorizeOpenAIForwardFixture(svc, account)
 			result, err := svc.Forward(context.Background(), c, account, body)
 			require.NoError(t, err)
 			require.NotNil(t, result)
@@ -146,6 +148,7 @@ func TestOpenAIGatewayService_SetupTokenLegacy_SanitizesAndTransforms(t *testing
 		]
 	}`)
 
+	authorizeOpenAIForwardFixture(svc, account)
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -188,6 +191,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_StripsInvalidReasoningItemIDs(t 
 		]
 	}`)
 
+	authorizeOpenAIForwardFixture(svc, account)
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)

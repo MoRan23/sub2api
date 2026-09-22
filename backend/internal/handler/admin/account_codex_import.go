@@ -22,6 +22,7 @@ import (
 const codexImportClockSkewSeconds int64 = 120
 
 type CodexSessionImportRequest struct {
+	OS             string                        `json:"os"`
 	CodexTurnState *service.CodexTurnStateConfig `json:"codex_turn_state"`
 
 	Content                 string         `json:"content"`
@@ -123,6 +124,10 @@ func (h *AccountHandler) ImportCodexSession(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if req.OS != "" && service.NormalizeOpenAIOSFamily(req.OS) == "" {
+		response.BadRequest(c, "os must be windows, macos, or linux")
+		return
+	}
 	if err := service.ValidateOpenAILongContextBillingExtra(service.PlatformOpenAI, req.Extra); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -163,6 +168,9 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 	result := CodexSessionImportResult{
 		Total: len(entries),
 		Items: make([]CodexSessionImportItem, 0, len(entries)),
+	}
+	if req.OS != "" && service.NormalizeOpenAIOSFamily(req.OS) == "" {
+		return result, errors.New("os must be windows, macos, or linux")
 	}
 
 	existingAccounts, err := h.listAccountsFiltered(ctx, service.PlatformOpenAI, service.AccountTypeOAuth, "", "", 0, "", "created_at", "desc")
@@ -257,6 +265,19 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 
 		existing, matchedKey := index.Find(item.IdentityKeys, item.UserID)
 		if existing != nil && updateExisting {
+			if service.IsOpenAIOAuthOSProfileOwner(existing) {
+				fresh, authorizationErr := h.authorizeCodexImportedOS(ctx, existing, req.OS, item, credentials)
+				if authorizationErr != nil {
+					result.Failed++
+					result.Items = append(result.Items, CodexSessionImportItem{Index: entry.Index, Name: accountName, Action: "failed", Message: authorizationErr.Error()})
+					result.Errors = append(result.Errors, CodexSessionImportMessage{Index: entry.Index, Name: accountName, Message: authorizationErr.Error()})
+					continue
+				}
+				existing = fresh
+				// Provider fields were atomically bound by the verified authorization
+				// flow. The ordinary account edit below carries only configuration.
+				credentials = service.PreserveOpenAIOAuthProviderCredentials(existing.Credentials, credentials)
+			}
 			if strings.HasPrefix(matchedKey, "account:") && item.UserID != "" &&
 				codexCredentialString(existing.Credentials, "chatgpt_user_id") == "" {
 				result.Warnings = append(result.Warnings, CodexSessionImportMessage{
@@ -277,6 +298,9 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 				autoPauseOnExpired = nil
 			}
 			mergedCredentials := mergeCodexImportCredentials(existing.Credentials, credentials, item)
+			if service.IsOpenAIOAuthOSProfileOwner(existing) {
+				mergedCredentials = service.PreserveOpenAIOAuthProviderCredentials(existing.Credentials, mergedCredentials)
+			}
 			mergedExtra := mergeCodexImportMap(existing.Extra, extra)
 			updateInput := &service.UpdateAccountInput{
 				CodexTurnState:     req.CodexTurnState,
@@ -332,6 +356,7 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 		}
 
 		account, createErr := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
+			OpenAIOAuthInitialOS:  req.OS,
 			CodexTurnState:        req.CodexTurnState,
 			Name:                  accountName,
 			Notes:                 req.Notes,

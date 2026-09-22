@@ -6,6 +6,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -336,22 +337,29 @@ func NormalizeOpenAICompatiblePlatform(platform string) string {
 // never forward this error text to OpenAI-platform clients (they respond with
 // the generic classification message). Callers that must preserve the legacy
 // message pass "".
+var ErrNoAvailableOpenAIOAuthOSAccounts = errors.New("no available OpenAI accounts authorized for the requested operating system")
+
 func noAvailableOpenAISelectionError(requestedModel string, compactBlocked bool, details string) error {
 	if compactBlocked {
 		return ErrNoAvailableCompactAccounts
 	}
 	message := "no available OpenAI accounts"
+	missingOSAuthorization := strings.Contains(details, "all_candidates_missing_os_authorization")
 	if requestedModel != "" {
 		message = fmt.Sprintf("no available OpenAI accounts supporting model: %s", requestedModel)
+	}
+	if missingOSAuthorization {
+		message = ErrNoAvailableOpenAIOAuthOSAccounts.Error()
 	}
 	if details != "" {
 		message += " (" + details + ")"
 	}
-	return openAINoAvailableSelectionError{message: message}
+	return openAINoAvailableSelectionError{message: message, missingOSAuthorization: missingOSAuthorization}
 }
 
 type openAINoAvailableSelectionError struct {
-	message string
+	message                string
+	missingOSAuthorization bool
 }
 
 func (e openAINoAvailableSelectionError) Error() string {
@@ -360,6 +368,10 @@ func (e openAINoAvailableSelectionError) Error() string {
 
 func (e openAINoAvailableSelectionError) Unwrap() error {
 	return ErrNoAvailableAccounts
+}
+
+func (e openAINoAvailableSelectionError) Is(target error) bool {
+	return target == ErrNoAvailableOpenAIOAuthOSAccounts && e.missingOSAuthorization
 }
 
 // openAICompactSupportTier classifies an OpenAI-compatible account by compact capability.
@@ -387,7 +399,7 @@ func openAICompactSupportTier(account *Account) int {
 // isOpenAICompatibleAccountEligibleForRequest 判断 OpenAI 兼容账号是否满足本次请求的调度条件。
 // 检查内容包括：平台匹配、账号可用性、quota 自动暂停、spark 路由限制、模型支持及端点能力。
 //
-// 注意：对 spark 影子账号，调用方还须额外调用 parentHealthyForShadow(account, lookup)
+// 注意：对 spark 影子账号，调用方还须额外调用 openAIParentHealthyForShadow(ctx, account, lookup)
 // 检查母账号凭据可用性；该检查未内置于本函数，以避免注入 DB 依赖。
 func isOpenAICompatibleAccountEligibleForRequest(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) bool {
 	return openAICompatibleAccountEligibilityFailureReason(ctx, account, platform, requestedModel, requireCompact, requiredCapability) == ""
@@ -472,6 +484,9 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 	}
 	if requireCompact && openAICompactSupportTier(account) == 0 {
 		return "compact_unsupported"
+	}
+	if !account.IsShadow() && !openAIAccountOSAuthorizationEligible(ctx, account, nil) {
+		return "os_authorization_unavailable"
 	}
 	return ""
 }
@@ -996,7 +1011,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	if !isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability) {
 		return nil
 	}
-	if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
+	if !openAIParentHealthyForShadow(ctx, account, s.parentAccountLookup(ctx)) {
 		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 		return nil
 	}
@@ -1046,6 +1061,16 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 		if _, excluded := excludedIDs[acc.ID]; excluded {
 			filterStats.exclude("excluded")
 			continue
+		}
+		if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, acc, platform, requestedModel, false, requiredCapability); reason == "os_authorization_unavailable" {
+			filterStats.exclude(reason)
+			continue
+		} else if reason == "" && acc.IsShadow() {
+			lookup := s.parentAccountLookup(ctx)
+			if parentHealthyForShadow(acc, lookup) && !openAIAccountOSAuthorizationEligible(ctx, acc, lookup) {
+				filterStats.exclude("os_authorization_unavailable")
+				continue
+			}
 		}
 
 		fresh := s.resolveFreshSchedulableOpenAIAccountBeforeProfit(ctx, acc, platform, requestedModel, false, requiredCapability)
@@ -1230,7 +1255,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 					} else if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
-					} else if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
+					} else if !openAIParentHealthyForShadow(ctx, account, s.parentAccountLookup(ctx)) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 					} else {
 						result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
@@ -1292,6 +1317,10 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		}
 		if !parentHealthyForShadow(acc, parentLookupL2) {
 			filterStats.exclude("shadow_parent_unhealthy")
+			continue
+		}
+		if !openAIAccountOSAuthorizationEligible(ctx, acc, parentLookupL2) {
+			filterStats.exclude("os_authorization_unavailable")
 			continue
 		}
 		if s.isOpenAIAccountRequestRuntimeBlocked(acc, requestedModel) {
@@ -1575,7 +1604,7 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccountBeforeProfit(
 	if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, fresh, platform, requestedModel, requireCompact, requiredCapability) {
 		return nil
 	}
-	if !parentHealthyForShadow(fresh, s.parentAccountLookup(ctx)) {
+	if !openAIParentHealthyForShadow(ctx, fresh, s.parentAccountLookup(ctx)) {
 		return nil
 	}
 	if s.isOpenAIAccountRequestRuntimeBlocked(fresh, requestedModel) {
@@ -1630,13 +1659,13 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 		if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, account) {
 			return nil
 		}
-		if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
+		if !openAIParentHealthyForShadow(ctx, account, s.parentAccountLookup(ctx)) {
 			return nil
 		}
 		if s.isOpenAIProxyStreamQuarantined(ctx, account) {
 			return nil
 		}
-		return account
+		return s.resolveSelectedOpenAIOAuthCredentials(ctx, account)
 	}
 
 	latest, err := s.accountRepo.GetByID(ctx, account.ID)
@@ -1652,7 +1681,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, latest, platform, requestedModel, requireCompact, requiredCapability) {
 		return nil
 	}
-	if !parentHealthyForShadow(latest, s.parentAccountLookup(ctx)) {
+	if !openAIParentHealthyForShadow(ctx, latest, s.parentAccountLookup(ctx)) {
 		return nil
 	}
 	if s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel) {
@@ -1664,7 +1693,18 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	if s.isOpenAIProxyStreamQuarantined(ctx, latest) {
 		return nil
 	}
-	return latest
+	return s.resolveSelectedOpenAIOAuthCredentials(ctx, latest)
+}
+
+func (s *OpenAIGatewayService) resolveSelectedOpenAIOAuthCredentials(ctx context.Context, account *Account) *Account {
+	if !RequiresOpenAIOAuthOSAuthorization(account) {
+		return account
+	}
+	resolved, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, OpenAIRequestOSFromContext(ctx).Family)
+	if err != nil {
+		return nil
+	}
+	return resolved
 }
 
 func (s *OpenAIGatewayService) openAIAccountMatchesSchedulingGroup(account *Account, groupID *int64) bool {
@@ -1731,7 +1771,15 @@ func (s *OpenAIGatewayService) isOpenAIAccountBlockedBySchedulingThreshold(ctx c
 }
 
 func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
+	// The final DB check already projected the selected private slot. Replacing
+	// it with the cache's default mirror would lose the frozen credential scope.
+	if account != nil && account.OpenAIOAuthCredentialOS != "" {
+		return account, nil
+	}
 	if account == nil || s.schedulerSnapshot == nil {
+		if RequiresOpenAIOAuthOSAuthorization(account) {
+			return ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, OpenAIRequestOSFromContext(ctx).Family)
+		}
 		return account, nil
 	}
 	hydrated, err := s.schedulerSnapshot.GetAccount(ctx, account.ID)
@@ -1740,6 +1788,9 @@ func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, accou
 	}
 	if hydrated == nil {
 		return nil, fmt.Errorf("selected openai account %d not found during hydration", account.ID)
+	}
+	if RequiresOpenAIOAuthOSAuthorization(hydrated) {
+		return ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, hydrated, OpenAIRequestOSFromContext(ctx).Family)
 	}
 	return hydrated, nil
 }

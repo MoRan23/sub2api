@@ -19,10 +19,12 @@ func TestOpenAIGatewayService_APIKeyPassthrough_ImageIntentPreservesGateAndBilli
 	t.Run("disabled group rejects before upstream", func(t *testing.T) {
 		upstream := &httpUpstreamRecorder{}
 		svc := newOpenAIImageGenerationControlTestService(upstream)
+		disableOpenAIForwardFixtureNormalization(svc)
 		c, recorder := newOpenAIImageGenerationControlTestContext(false, "curl/8.0")
 		account := newOpenAIImageGenerationControlTestAccount()
 		account.Extra = map[string]any{"openai_passthrough": true}
 
+		authorizeOpenAIForwardFixture(svc, account)
 		result, err := svc.Forward(context.Background(), c, account, body)
 
 		require.Error(t, err)
@@ -41,10 +43,12 @@ func TestOpenAIGatewayService_APIKeyPassthrough_ImageIntentPreservesGateAndBilli
 			)),
 		}}
 		svc := newOpenAIImageGenerationControlTestService(upstream)
+		disableOpenAIForwardFixtureNormalization(svc)
 		c, _ := newOpenAIImageGenerationControlTestContext(true, "curl/8.0")
 		account := newOpenAIImageGenerationControlTestAccount()
 		account.Extra = map[string]any{"openai_passthrough": true}
 
+		authorizeOpenAIForwardFixture(svc, account)
 		result, err := svc.Forward(context.Background(), c, account, body)
 
 		require.NoError(t, err)

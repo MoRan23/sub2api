@@ -675,6 +675,7 @@ func TestBuildOpenAIWSHeaders_CarriesSessionBetaFeatures(t *testing.T) {
 		return headers
 	}
 	oauthAccount := installationTestOAuthAccount(nil)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(oauthAccount)
 	require.Equal(t, "remote_compaction_v2", build(t, oauthAccount, "").Get("x-codex-beta-features"))
 	require.Equal(t, []string{"some_other_feature,remote_compaction_v2"}, build(t, oauthAccount, "some_other_feature").Values("x-codex-beta-features"))
 	require.Empty(t, build(t, &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, "").Get("x-codex-beta-features"))

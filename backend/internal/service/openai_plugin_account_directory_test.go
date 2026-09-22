@@ -32,6 +32,16 @@ func (r *pluginAccountDirectoryRepository) GetByID(_ context.Context, id int64) 
 	return nil, nil
 }
 
+func (r *pluginAccountDirectoryRepository) GetOpenAIOAuthOSCredential(ctx context.Context, id int64, family string) (*OpenAIOAuthOSCredential, error) {
+	account, err := r.GetByID(ctx, id)
+	return openAIOAuthTestCredential(account, family), err
+}
+
+func (r *pluginAccountDirectoryRepository) ListOpenAIOAuthOSCredentials(ctx context.Context, id int64) ([]*OpenAIOAuthOSCredential, error) {
+	account, err := r.GetByID(ctx, id)
+	return openAIOAuthTestCredentials(account), err
+}
+
 func TestOpenAIPluginAccountDirectoryUsesSameScopeForListAndResolve(t *testing.T) {
 	parentID := int64(1)
 	repo := &pluginAccountDirectoryRepository{accounts: []Account{
@@ -42,6 +52,7 @@ func TestOpenAIPluginAccountDirectoryUsesSameScopeForListAndResolve(t *testing.T
 		{ID: 5, Platform: PlatformOpenAI, Type: AccountTypeSetupToken, Status: StatusActive},
 		{ID: 6, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Status: StatusActive},
 	}}
+	authorizeOpenAIOAuthTestAccount(&repo.accounts[0], OpenAIOSWindows)
 	gateway := &OpenAIGatewayService{accountRepo: repo}
 	ctx := context.Background()
 	for _, filters := range [][2]string{{"", ""}, {" openai ", " oauth "}} {
@@ -92,6 +103,7 @@ func TestOpenAIPluginAccountDirectoryPreservesAccountIdentityWithoutTurnState(t 
 	gateway := &OpenAIGatewayService{accountRepo: repo}
 	for i := range repo.accounts {
 		account := &repo.accounts[i]
+		authorizeOpenAIOAuthTestAccount(account, OpenAIOAuthOSFamilies()...)
 		identity, err := gateway.ResolvePluginOutboundIdentity(context.Background(), account.ID)
 		require.NoError(t, err)
 		want := resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, account.GetOpenAIUserAgent())
@@ -121,4 +133,37 @@ func TestOpenAIPluginAccountDirectoryPropagatesRepositoryFailure(t *testing.T) {
 	require.ErrorIs(t, err, want)
 	_, err = gateway.ResolvePluginOutboundIdentity(context.Background(), 1)
 	require.ErrorIs(t, err, want)
+}
+
+func TestOpenAIPluginAccountDirectorySelectsOnlyAuthorizedRequestOS(t *testing.T) {
+	account := Account{ID: 71, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
+		Credentials: map[string]any{"access_token": "windows-access", "chatgpt_account_id": "plugin-owner"}}
+	authorizeOpenAIOAuthTestAccount(&account, OpenAIOSWindows, OpenAIOSLinux)
+	repo := &pluginAccountDirectoryRepository{accounts: []Account{account}}
+	gateway := &OpenAIGatewayService{accountRepo: repo}
+	for _, tt := range []struct{ family, token, ua string }{
+		{"", "windows-access", "Windows"},
+		{OpenAIOSLinux, "windows-access-linux", "Linux"},
+	} {
+		ctx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: tt.family, Captured: true})
+		ids, err := gateway.ListPluginAccounts(ctx, "", "")
+		require.NoError(t, err)
+		require.Equal(t, []int64{account.ID}, ids)
+		identity, err := gateway.ResolvePluginOutboundIdentity(ctx, account.ID)
+		require.NoError(t, err)
+		require.Equal(t, tt.token, identity.Token)
+		profile := account.OpenAIOAuthOSProfiles.Profiles[tt.family]
+		if tt.family == "" {
+			profile = account.OpenAIOAuthOSProfiles.Profiles[OpenAIOSWindows]
+		}
+		require.Equal(t, resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, profile.UserAgent).UserAgent, identity.Headers.Get("User-Agent"))
+	}
+	ctx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: OpenAIOSMacOS, Captured: true})
+	ids, err := gateway.ListPluginAccounts(ctx, "", "")
+	require.NoError(t, err)
+	require.Empty(t, ids)
+	_, err = gateway.ResolvePluginOutboundIdentity(ctx, account.ID)
+	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized)
+	require.Empty(t, repo.accounts[0].OpenAIOAuthCredentialOS, "lookup must not scope the shared account")
+	require.Equal(t, "windows-access", repo.accounts[0].GetOpenAIAccessToken())
 }

@@ -169,6 +169,7 @@ func (s *OpenAIGatewayService) fetchPinnedOpenAIModels(ctx context.Context, grou
 
 	// 按配置顺序筛选可用账号；已解绑/已删除的 ID 直接跳过。
 	usable := make([]Account, 0, len(cfg.AccountIDs))
+	var authorizationErr error
 	for _, id := range cfg.AccountIDs {
 		member, ok := memberByID[id]
 		if !ok || member.Platform != PlatformOpenAI {
@@ -177,9 +178,17 @@ func (s *OpenAIGatewayService) fetchPinnedOpenAIModels(ctx context.Context, grou
 		if !isPinnedCodexModelsAccountUsable(&member) {
 			continue
 		}
-		usable = append(usable, member)
+		projected, resolveErr := ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, &member, OpenAIRequestOSFromContext(ctx).Family)
+		if resolveErr != nil {
+			authorizationErr = openAIModelsCredentialError(resolveErr)
+			continue
+		}
+		usable = append(usable, *projected)
 	}
 	if len(usable) == 0 {
+		if authorizationErr != nil {
+			return nil, authorizationErr
+		}
 		return nil, ErrNoPinnedCodexModelsAccounts
 	}
 

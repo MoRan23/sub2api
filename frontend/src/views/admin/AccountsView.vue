@@ -273,7 +273,7 @@
               :account="row" :status="codexTurnStateStatuses[String(row.id)]" :models="codexTurnStateModels"
               :loading="codexTurnStateLoading" :failed="codexTurnStateErrors.has(row.id)"
               :now="Math.max(upstreamBillingNow, codexTurnStateObservedAt)" :observed-at="codexTurnStateObservedAt"
-              @open="codexTurnStateAccount = { id: row.id, name: row.name }"
+              @open="codexTurnStateAccount = row"
             />
           </template>
           <template #cell-platform_type="{ row }">
@@ -522,6 +522,15 @@
     </ConfirmDialog>
     <ErrorPassthroughRulesModal :show="showErrorPassthrough" @close="showErrorPassthrough = false" />
     <TLSFingerprintProfilesModal :show="showTLSFingerprintProfiles" @close="showTLSFingerprintProfiles = false" />
+    <BaseDialog :show="codexAuthExportAccount !== null" :title="t('admin.accounts.codexAuth.export')" width="normal" @close="codexAuthExportAccount = null">
+      <p class="mb-3 text-sm">{{ codexAuthExportAccount?.name }}</p>
+      <p class="mb-3 text-xs text-gray-500">{{ t('admin.accounts.openai.exportOSDescription') }}</p>
+      <OpenAIOAuthOSSelect v-model="codexAuthExportOS" :profiles="codexAuthExportAccount?.openai_oauth_os_profiles" :disabled="codexAuthExporting" authorized-only />
+      <template #footer>
+        <button type="button" class="btn btn-secondary" :disabled="codexAuthExporting" @click="codexAuthExportAccount = null">{{ t('common.cancel') }}</button>
+        <button type="button" class="btn btn-primary" :disabled="codexAuthExporting || !isOpenAIOSAuthorized(codexAuthExportAccount?.openai_oauth_os_profiles, codexAuthExportOS)" data-testid="confirm-codex-auth-export" @click="confirmExportCodexAuth">{{ t('admin.accounts.codexAuth.export') }}</button>
+      </template>
+    </BaseDialog>
     <TotpStepUpDialog :controller="accountExportStepUp" />
   </AppLayout>
 </template>
@@ -540,6 +549,10 @@ import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/us
 import { useTableSelection } from '@/composables/useTableSelection'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
+import BaseDialog from '@/components/common/BaseDialog.vue'
+import OpenAIOAuthOSSelect from '@/components/account/OpenAIOAuthOSSelect.vue'
+import { defaultOpenAIOS, isOpenAIOSAuthorized } from '@/components/account/openaiOAuthOS'
+import type { OpenAIOAuthOS } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -1150,7 +1163,7 @@ const {
 
 const dailyFixedRootPools = reactive<Record<number, OAuthDailySessionPool>>({})
 const dailyFixedRootAccount = ref<Pick<AccountListItem, 'id' | 'name'> | null>(null)
-const codexTurnStateAccount = ref<Pick<AccountListItem, 'id' | 'name'> | null>(null)
+const codexTurnStateAccount = ref<Pick<AccountListItem, 'id' | 'name' | 'openai_oauth_os_profiles'> | null>(null)
 const {
   statuses: codexTurnStateStatuses, errors: codexTurnStateErrors, models: codexTurnStateModels,
   loading: codexTurnStateLoading, observedAt: codexTurnStateObservedAt, refresh: refreshCodexTurnStateBatch
@@ -2479,11 +2492,25 @@ const handleExportData = async () => {
 }
 const accountExportStepUp = useStepUp()
 const codexAuthExporting = ref(false)
+const codexAuthExportAccount = ref<Account | null>(null)
+const codexAuthExportOS = ref<OpenAIOAuthOS>('windows')
 const handleExportCodexAuth = async (account: Account) => {
   if (codexAuthExporting.value || exportingData.value || account.parent_account_id != null || !supportsCodexTurnState(account)) return
+  try {
+    const current = await adminAPI.accounts.getById(account.id)
+    codexAuthExportOS.value = defaultOpenAIOS(current)
+    codexAuthExportAccount.value = current
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('admin.accounts.codexAuth.failed')))
+  }
+}
+const confirmExportCodexAuth = async () => {
+  const account = codexAuthExportAccount.value
+  const os = codexAuthExportOS.value
+  if (!account || codexAuthExporting.value || !isOpenAIOSAuthorized(account.openai_oauth_os_profiles, os)) return
   codexAuthExporting.value = true
   try {
-    const result = await accountExportStepUp.run(() => adminAPI.accounts.exportCodexAuth(account.id))
+    const result = await accountExportStepUp.run(() => adminAPI.accounts.exportCodexAuth(account.id, os))
     const url = URL.createObjectURL(new Blob([JSON.stringify(result.auth, null, 2)], { type: 'application/json' }))
     try {
       const link = document.createElement('a')
@@ -2496,6 +2523,7 @@ const handleExportCodexAuth = async (account: Account) => {
     const warnings = result.warnings.map(code => t(`admin.accounts.codexAuth.warnings.${code === 'missing_refresh_token' || code === 'access_token_expired' ? code : 'other'}`))
     if (warnings.length) appStore.showWarning(warnings.join(' '))
     else appStore.showSuccess(t('admin.accounts.codexAuth.success'))
+    codexAuthExportAccount.value = null
   } catch (error: any) {
     if (isStepUpCancelled(error)) return
     if (isStepUpBlocked(error)) {

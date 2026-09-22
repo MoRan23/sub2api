@@ -235,6 +235,7 @@ func TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity(t *testing.T) {
 				Credentials: map[string]any{"access_token": "synthetic-token", "chatgpt_account_id": "synthetic-account"},
 				Extra:       map[string]any{"responses_websockets_v2_enabled": true, "openai_oauth_responses_websockets_v2_mode": mode, openAIPinnedInstallationIDKey: transportTestPinnedInstallationID},
 			}
+			gateway.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			body := []byte(`{"model":"gpt-5.1","stream":false,"input":[{"type":"input_text","text":"synthetic request"}]}`)
 			if tc.stream {
 				body = []byte(strings.Replace(string(body), `"stream":false`, `"stream":true`, 1))
@@ -388,12 +389,26 @@ func configureCodexTelemetryWSDailyFixture(gateway *OpenAIGatewayService) {
 		SettingKeyEnableOpenAIUUIDv7SessionIdentity:         "true",
 		SettingKeyEnableOpenAIOAuthDailySessionRotation:     "true",
 	}}, nil)
-	gateway.oauthDailySessionRepo = &fakeOAuthDailyAffinityRepository{
+	gateway.oauthDailySessionRepo = &telemetryDailyOSRepository{&fakeOAuthDailyAffinityRepository{
 		pool: OAuthDailySessionPool{AccountID: 531, BusinessDate: OAuthDailyBusinessDate(time.Now()), Generation: telemetryWSTurnID,
 			StreamSessionIDs: [OAuthDailyStreamSessionCount]string{telemetryWSRoot, telemetryWSChildA, telemetryWSChildB}, SyncSessionID: telemetryWSSyncRoot},
 		affinity: OAuthDailySessionAffinity{AccountID: 531, APIKeyID: 98, LogicalSessionKey: "logical", BusinessDate: OAuthDailyBusinessDate(time.Now()),
 			Generation: telemetryWSTurnID, SlotIndex: 0, StreamSessionID: telemetryWSRoot},
+	}}
+}
+
+type telemetryDailyOSRepository struct {
+	*fakeOAuthDailyAffinityRepository
+}
+
+func (r *telemetryDailyOSRepository) GetOrCreateOAuthDailySessionPoolForOS(_ context.Context, _ int64, defaultOS string, _ time.Time) (OAuthDailySessionPool, error) {
+	pool := r.pool
+	pool.DefaultOS = defaultOS
+	pool.OSRoots = make(map[string]OAuthDailyOSRoots)
+	for _, os := range OpenAIOAuthOSFamilies() {
+		pool.OSRoots[os] = OAuthDailyOSRoots{StreamSessionID: r.affinity.StreamSessionID, SyncSessionID: pool.SyncSessionID}
 	}
+	return pool, nil
 }
 
 type telemetryWSConcurrentCaptureConn struct {
@@ -471,6 +486,7 @@ func TestCodexTelemetryWSDailyRootConcurrentChildrenUseActualWire(t *testing.T) 
 	account := &Account{ID: 531, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 2,
 		Credentials: map[string]any{"access_token": "synthetic-token", "chatgpt_account_id": "synthetic-account"},
 		Extra:       map[string]any{"responses_websockets_v2_enabled": true, openAIPinnedInstallationIDKey: transportTestPinnedInstallationID}}
+	gateway.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	var wg sync.WaitGroup
 	errorsCh := make(chan error, 2)
 	for _, child := range []string{"child-a", "child-b"} {

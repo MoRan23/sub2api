@@ -30,16 +30,22 @@ func newCodexProxyChangeFixture(t *testing.T) codexProxyChangeFixture {
 	oldProxy := mustCreateProxy(t, integrationEntClient, &service.Proxy{Name: "codex-old-collector"})
 	newProxy := mustCreateProxy(t, integrationEntClient, &service.Proxy{Name: "codex-new-collector"})
 	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM scheduler_outbox WHERE account_id=$1`, key.OwnerAccountID)
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM accounts WHERE id=$1`, key.OwnerAccountID)
 		_, _ = integrationDB.ExecContext(ctx, `DELETE FROM proxies WHERE id IN ($1,$2)`, oldProxy.ID, newProxy.ID)
 	})
-	_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET credentials='{"access_token":"synthetic","plan_type":"plus"}'::jsonb,
+	_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET credentials='{"access_token":"synthetic","refresh_token":"windows-refresh","chatgpt_account_id":"workspace-1","chatgpt_user_id":"user-1","plan_type":"plus"}'::jsonb,
 		extra=extra || jsonb_build_object('codex_turn_state_credential_epoch','credential-epoch',
 		'codex_turn_state',jsonb_build_object('enabled',true,'account_type','personal','collector_proxy_id',$2::bigint)) WHERE id=$1`, key.OwnerAccountID, oldProxy.ID)
 	require.NoError(t, err)
 	accounts := newAccountRepositoryWithSQL(integrationEntClient, integrationDB, nil)
+	_, err = accounts.EnsureOpenAIOAuthOSProfiles(ctx, key.OwnerAccountID)
+	require.NoError(t, err)
 	account, err := accounts.GetByID(ctx, key.OwnerAccountID)
 	require.NoError(t, err)
+	account, err = service.ResolveOpenAIOAuthCredentialAccount(ctx, accounts, account, service.OpenAIOSWindows)
+	require.NoError(t, err)
+	key.Generation = account.OpenAIOAuthCredentialStateGeneration
 	states := NewOpenAICodexStateRepository(integrationDB, integrationRedis)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	state, err := states.BeginBusiness(ctx, key, "seed", now, now.Add(time.Minute))
@@ -66,6 +72,13 @@ func newCodexProxyChangeFixture(t *testing.T) codexProxyChangeFixture {
 
 func (f codexProxyChangeFixture) change(t *testing.T, ctx context.Context, bulk bool, config service.CodexTurnStateConfig, credentials map[string]any) *service.Account {
 	t.Helper()
+	if credentials != nil {
+		slot, err := f.accounts.GetOpenAIOAuthOSCredential(ctx, f.key.OwnerAccountID, f.key.OSFamily)
+		require.NoError(t, err)
+		applied, err := f.accounts.PatchOpenAIOAuthOSCredentialsIfUnchanged(ctx, f.key.OwnerAccountID, f.key.OSFamily, slot.AuthorizationGeneration, slot.Revision, nil, credentials, nil)
+		require.NoError(t, err)
+		require.True(t, applied)
+	}
 	if bulk {
 		_, err := f.admin.BulkUpdateAccounts(ctx, &service.BulkUpdateAccountsInput{AccountIDs: []int64{f.key.OwnerAccountID}, CodexTurnState: &config, Credentials: credentials})
 		require.NoError(t, err)
@@ -74,6 +87,8 @@ func (f codexProxyChangeFixture) change(t *testing.T, ctx context.Context, bulk 
 		require.NoError(t, err)
 	}
 	stored, err := f.accounts.GetByID(ctx, f.key.OwnerAccountID)
+	require.NoError(t, err)
+	stored, err = service.ResolveOpenAIOAuthCredentialAccount(ctx, f.accounts, stored, f.key.OSFamily)
 	require.NoError(t, err)
 	return stored
 }
@@ -116,6 +131,58 @@ func TestCodexCollectorProxyChangePostgresPreservesValidCache(t *testing.T) {
 				require.False(t, ok, "the old proxy cannot publish into the migrated cache")
 			})
 		}
+	}
+}
+
+func TestCodexCollectorProxyChangePostgresPreservesEachOSCache(t *testing.T) {
+	for _, bulk := range []bool{false, true} {
+		name := "single"
+		if bulk {
+			name = "bulk"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newCodexProxyChangeFixture(t)
+			linux, err := f.accounts.BindOpenAIOAuthOSCredentials(ctx, f.key.OwnerAccountID, service.OpenAIOSLinux, oauthOSTestGrant("linux-independent"), "test")
+			require.NoError(t, err)
+			linuxKey := f.key
+			linuxKey.OSFamily = service.OpenAIOSLinux
+			linuxKey.Generation = linux.StateGeneration
+			now := time.Now().UTC()
+			initial, err := f.states.BeginBusiness(ctx, linuxKey, "linux-seed", now, now.Add(time.Minute))
+			require.NoError(t, err)
+			require.NoError(t, f.states.EndBusiness(ctx, linuxKey, "linux-seed"))
+			linuxState := f.state
+			linuxState.OSFamily = service.OpenAIOSLinux
+			linuxState.Generation = linux.StateGeneration
+			linuxState.Version = initial.Version
+			linuxState.EncryptedToken = "linux-private-state"
+			ok, err := f.states.SaveCAS(ctx, linuxState, initial.Version)
+			require.NoError(t, err)
+			require.True(t, ok)
+			storedLinux, err := f.states.Get(ctx, linuxKey)
+			require.NoError(t, err)
+			storedLinux.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
+			before := []service.CodexTurnStateRecord{f.state, *storedLinux}
+			f.change(t, ctx, bulk, service.CodexTurnStateConfig{Enabled: true, AccountType: "personal", CollectorProxyID: &f.proxyID}, nil)
+			for _, old := range before {
+				slot, err := f.accounts.GetOpenAIOAuthOSCredential(ctx, f.key.OwnerAccountID, old.OSFamily)
+				require.NoError(t, err)
+				require.NotEqual(t, old.Generation, slot.StateGeneration)
+				key := old.Key()
+				key.Generation = slot.StateGeneration
+				carried, err := f.states.Get(ctx, key)
+				require.NoError(t, err)
+				require.NotNil(t, carried)
+				require.Equal(t, old.EncryptedToken, carried.EncryptedToken)
+				require.Equal(t, old.IssuedAt, carried.IssuedAt)
+				require.Equal(t, old.ExpiresAt, carried.ExpiresAt)
+				require.Equal(t, old.Version+1, carried.Version)
+				ok, err = f.states.SaveCAS(ctx, old, old.Version)
+				require.NoError(t, err)
+				require.False(t, ok)
+			}
+		})
 	}
 }
 
@@ -257,6 +324,8 @@ func TestCodexCollectorProxyChangePostgresRollsBackWithConfiguration(t *testing.
 	require.NoError(t, err)
 	require.NoError(t, tx.Rollback())
 	account, err := f.accounts.GetByID(ctx, f.key.OwnerAccountID)
+	require.NoError(t, err)
+	account, err = service.ResolveOpenAIOAuthCredentialAccount(ctx, f.accounts, account, f.key.OSFamily)
 	require.NoError(t, err)
 	require.Equal(t, f.key.Generation, service.CodexTurnStateGenerationForAccount(account))
 	state, err := f.states.Get(ctx, f.key)

@@ -37,6 +37,25 @@ func (r openAIImagesFailoverAccountRepo) GetByID(_ context.Context, id int64) (*
 	return nil, service.ErrNoAvailableAccounts
 }
 
+func (r openAIImagesFailoverAccountRepo) GetOpenAIOAuthOSCredential(ctx context.Context, id int64, os string) (*service.OpenAIOAuthOSCredential, error) {
+	account, err := r.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return openAIHandlerTestCredential(account, os), nil
+}
+
+func (r openAIImagesFailoverAccountRepo) ListOpenAIOAuthOSCredentials(ctx context.Context, id int64) ([]*service.OpenAIOAuthOSCredential, error) {
+	account, err := r.GetByID(ctx, id)
+	if err != nil || account.OpenAIOAuthOSProfiles == nil {
+		return nil, err
+	}
+	if slot := openAIHandlerTestCredential(account, account.OpenAIOAuthOSProfiles.DefaultOS); slot != nil {
+		return []*service.OpenAIOAuthOSCredential{slot}, nil
+	}
+	return nil, nil
+}
+
 func (r openAIImagesFailoverAccountRepo) ListSchedulableByGroupIDAndPlatform(_ context.Context, _ int64, platform string) ([]service.Account, error) {
 	return r.accountsForPlatform(platform), nil
 }
@@ -113,6 +132,9 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 			Priority:    1,
 			Credentials: map[string]any{"access_token": "token-2"},
 		},
+	}
+	for i := range accounts {
+		authorizeOpenAIHandlerTestAccount(t, &accounts[i])
 	}
 	accountRepo := openAIImagesFailoverAccountRepo{accounts: accounts}
 	upstream := &openAIImagesFailoverHTTPUpstream{}

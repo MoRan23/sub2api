@@ -225,7 +225,7 @@ func TestCodexStateEnabledObservationWSToHTTPBridgeFingerprintOff(t *testing.T) 
 	cached := seedCodexEnabledObservation(t, state, account, "gpt-5.4")
 	token := codexStateTestToken(10, state.now())
 	upstream := &httpUpstreamRecorder{resp: codexStateHTTPIntegrationResponse(token, "metadata", false)}
-	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}, httpUpstream: upstream, codexTurnStateService: state}
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}, httpUpstream: upstream, codexTurnStateService: state, accountRepo: state.accounts}
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	payload := []byte(`{"type":"response.create","model":"gpt-5.4","input":"hi"}`)
@@ -303,8 +303,8 @@ func TestCodexStateEnabledObservationCollectorOriginFromActualResponse(t *testin
 			isolateCodexTurnStateSummaryStore(t)
 			state, repo, account := newCodexStateTestService(t)
 			state.now = time.Now
-			key := CodexTurnStateKey{OwnerAccountID: account.ID, Model: "gpt-5.4", Generation: CodexTurnStateGenerationForAccount(account)}
-			repo.records[key] = CodexTurnStateRecord{OwnerAccountID: key.OwnerAccountID, Model: key.Model, Generation: key.Generation,
+			key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5.4", Generation: CodexTurnStateGenerationForAccount(account)}
+			repo.records[key] = CodexTurnStateRecord{OSFamily: "windows", OwnerAccountID: key.OwnerAccountID, Model: key.Model, Generation: key.Generation,
 				Version: 1, LastBusinessAt: state.now(), DemandReason: "extended_shape", DemandAt: state.now(), CollectionStatus: "pending"}
 			token := codexStateTestToken(tc.blocks, state.now().Add(-time.Minute))
 			var calls atomic.Int64

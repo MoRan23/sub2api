@@ -23,7 +23,7 @@ func ProvideCodexTurnStateCollectorHTTPDo(accounts AccountRepository, proxies Pr
 		if request.Method != http.MethodPost || request.URL.String() != chatgptCodexURL {
 			return nil, errors.New("collector_invalid_request")
 		}
-		owner, err := accounts.GetByID(ctx, input.Account.ID)
+		owner, err := ReloadOpenAIOAuthCredentialAccount(ctx, accounts, input.Account)
 		if err != nil || !codexTurnStateEligible(owner) || owner.IsShadow() || strings.TrimSpace(owner.GetCredential("access_token")) == "" ||
 			owner.Status != StatusActive || !owner.Schedulable || (owner.ExpiresAt != nil && !owner.ExpiresAt.After(time.Now())) {
 			return nil, errors.New("collector_account_unavailable")
@@ -57,12 +57,12 @@ func ProvideCodexTurnStateCollectorHTTPDo(accounts AccountRepository, proxies Pr
 				delete(request.Header, key)
 			}
 		}
-		// Background collection has no inbound OS evidence. Use the owner's
-		// persisted default profile without adopting its installation or roots.
+		// Demand fixes the credential OS; keep that profile across owner reloads
+		// without adopting business installation or continuation identifiers.
 		userAgent := owner.GetOpenAIUserAgent()
 		_, profilesAvailable := accounts.(OpenAIOAuthOSProfilesEnsurer)
 		if IsOpenAIOAuthOSProfileOwner(owner) && (profilesAvailable || OpenAIOAuthOSProfilesComplete(owner.OpenAIOAuthOSProfiles)) {
-			profile, err := ResolveOpenAIOAuthOSProfile(ctx, accounts, owner, "")
+			profile, err := ResolveOpenAIOAuthOSProfile(ctx, accounts, owner, codexTurnStateOS(owner))
 			if err != nil {
 				return nil, err
 			}

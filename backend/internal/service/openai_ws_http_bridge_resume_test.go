@@ -41,7 +41,8 @@ func TestProxyOpenAIWSHTTPBridgeTurnLaterTurn429FailsOverBeforeClientWrite(t *te
 		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}`)),
 	}}
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
-	account := &Account{ID: 129, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1}
+	account := &Account{ID: 129, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "access-token"}}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
@@ -152,12 +153,13 @@ func TestOpenAIWSHTTPBridgeLaterTurn429RetriesCurrentTurnOnReplacementAccount(t 
 		ID: 129, Name: "limited", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
 		Status: StatusActive, Schedulable: true, Concurrency: 1,
 		Extra:       map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge},
-		Credentials: map[string]any{"chatgpt_account_id": "account-a", "chatgpt_user_id": "user-a"},
+		Credentials: map[string]any{"access_token": "access-token-a", "chatgpt_account_id": "account-a", "chatgpt_user_id": "user-a"},
 	}
 	nextAccount := *account
 	nextAccount.ID = 130
 	nextAccount.Name = "replacement"
-	nextAccount.Credentials = map[string]any{"chatgpt_account_id": "account-b", "chatgpt_user_id": "user-b"}
+	nextAccount.Credentials = map[string]any{"access_token": "access-token-b", "chatgpt_account_id": "account-b", "chatgpt_user_id": "user-b"}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account, &nextAccount)
 
 	serverErrCh := make(chan error, 1)
 	failoverCh := make(chan []byte, 1)

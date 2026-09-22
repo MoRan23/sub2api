@@ -118,8 +118,10 @@ func ProvideOpenAIOAuthService(
 	oauthClient OpenAIOAuthClient,
 	privacyClientFactory PrivacyClientFactory,
 	settingService *SettingService,
+	accountRepo AccountRepository,
 ) *OpenAIOAuthService {
 	svc := NewOpenAIOAuthService(proxyRepo, oauthClient)
+	svc.SetAccountRepository(accountRepo)
 	svc.SetPrivacyClientFactory(privacyClientFactory)
 	svc.SetRequestPolicySettingService(settingService)
 	return svc

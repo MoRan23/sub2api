@@ -46,6 +46,7 @@ func TestOpenAIGatewayService_Forward_CompactOnlyModelMappingOverridesOAuthUpstr
 		Status:      StatusActive,
 		Schedulable: true,
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
@@ -117,6 +118,7 @@ func TestOpenAIGatewayService_Forward_NormalizesCompactionTriggerAfterHistoryCle
 		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
 		Status:      StatusActive, Schedulable: true,
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
@@ -159,6 +161,7 @@ func TestOpenAIGatewayService_Forward_NonCompactRequestIgnoresCompactOnlyModelMa
 		Status:      StatusActive,
 		Schedulable: true,
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
@@ -200,6 +203,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_CompactOnlyModelMappingOverridesU
 		Status:      StatusActive,
 		Schedulable: true,
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.Forward(context.Background(), c, account, originalBody)
 	require.NoError(t, err)

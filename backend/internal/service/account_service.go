@@ -174,6 +174,7 @@ type AccountBulkUpdate struct {
 
 // CreateAccountRequest 创建账号请求
 type CreateAccountRequest struct {
+	OS             string                `json:"os"`
 	CodexTurnState *CodexTurnStateConfig `json:"codex_turn_state"`
 
 	Name               string         `json:"name"`
@@ -236,17 +237,18 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 
 	// 创建账号
 	account := &Account{
-		Name:        req.Name,
-		Notes:       normalizeAccountNotes(req.Notes),
-		Platform:    req.Platform,
-		Type:        req.Type,
-		Credentials: SanitizeStoredCredentials(req.Platform, req.Credentials),
-		Extra:       req.Extra,
-		ProxyID:     req.ProxyID,
-		Concurrency: req.Concurrency,
-		Priority:    req.Priority,
-		Status:      StatusActive,
-		ExpiresAt:   req.ExpiresAt,
+		OpenAIOAuthInitialOS: req.OS,
+		Name:                 req.Name,
+		Notes:                normalizeAccountNotes(req.Notes),
+		Platform:             req.Platform,
+		Type:                 req.Type,
+		Credentials:          SanitizeStoredCredentials(req.Platform, req.Credentials),
+		Extra:                req.Extra,
+		ProxyID:              req.ProxyID,
+		Concurrency:          req.Concurrency,
+		Priority:             req.Priority,
+		Status:               StatusActive,
+		ExpiresAt:            req.ExpiresAt,
 	}
 	if isOpenAICodexInstallationOwner(account) {
 		if err := ValidateOpenAIInstallationPinExtra(req.Platform, account.Extra); err != nil {

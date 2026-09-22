@@ -161,6 +161,7 @@ func TestOpenAIRequestTimezoneHTTPWire(t *testing.T) {
 			if route == "raw_chat" {
 				account.Extra = map[string]any{"openai_responses_supported": false}
 			}
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			svc.CaptureOpenAIRequestTimezone(c, body)
 			capture, _ := c.Get(openAIRequestTimezoneCaptureKey)
 			capture.(*openAIRequestTimezoneCapture).acceptedAt = timezoneTestAcceptedAt()
@@ -221,7 +222,9 @@ func TestOpenAIRequestTimezoneChatObservationRejectsUnsupportedTool(t *testing.T
 	c, _ := newOpenAIIdentityPathContext(t, "/v1/chat/completions", body, 31)
 	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_timezone_tools", "gpt-5.4")}
 	svc, _ := newOpenAIIdentityPathService(t, true, upstream)
-	_, err := svc.ForwardAsChatCompletions(context.Background(), c, newOpenAIIdentityPathOAuthAccount(73), body, "timezone-tools", "")
+	account := newOpenAIIdentityPathOAuthAccount(73)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
+	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "timezone-tools", "")
 	require.ErrorContains(t, err, "unsupported_tool_type")
 	require.Nil(t, upstream.lastReq, "location normalization must not bypass the compatibility validator")
 }
@@ -232,7 +235,9 @@ func TestOpenAIRequestTimezoneChatObservationKeepsLocationAfterAdapter(t *testin
 	c, _ := newOpenAIIdentityPathContext(t, "/v1/chat/completions", body, 31)
 	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_timezone_tools", "gpt-5.4")}
 	svc, _ := newOpenAIIdentityPathService(t, true, upstream)
-	_, err := svc.ForwardAsChatCompletions(context.Background(), c, newOpenAIIdentityPathOAuthAccount(73), body, "timezone-tools", "")
+	account := newOpenAIIdentityPathOAuthAccount(73)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
+	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "timezone-tools", "")
 	require.NoError(t, err)
 	require.Equal(t, "Seattle", gjson.GetBytes(upstream.lastBody, "tools.0.user_location.city").String())
 	entries := SnapshotFingerprintObservations(0)

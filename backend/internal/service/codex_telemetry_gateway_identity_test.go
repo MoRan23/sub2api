@@ -81,9 +81,13 @@ func TestCodexTelemetryGatewaySparkOwnerAndAccountBoundary(t *testing.T) {
 	t.Cleanup(telemetry.Stop)
 	owner := osIdentityTestAccount(t, 91)
 	shadow := &Account{ID: 92, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &owner.ID}
-	svc := &OpenAIGatewayService{codexTelemetry: telemetry, accountRepo: &outboundIdentityAccountRepoStub{accounts: map[int64]*Account{owner.ID: owner}}}
+	repo := newAuthorizedOpenAIOAuthTestRepo(owner)
+	var err error
+	shadow, err = ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, shadow, OpenAIOSMacOS)
+	require.NoError(t, err)
+	svc := &OpenAIGatewayService{codexTelemetry: telemetry, accountRepo: repo}
 	profile := owner.OpenAIOAuthOSProfiles.Profiles[OpenAIOSMacOS]
-	ctx := withCodexTelemetryGatewayContext(context.Background(), osIdentityTestContext(t, ""), shadow, "http", &OpenAIOAuthIdentityPlan{OSOwnerID: owner.ID, OSFamily: profile.OSFamily, OSProfile: profile})
+	ctx := withCodexTelemetryGatewayContext(context.Background(), osIdentityTestContext(t, ""), shadow, "http", &OpenAIOAuthIdentityPlan{OSOwnerID: owner.ID, OSFamily: profile.OSFamily, OSProfile: profile, CredentialOS: OpenAIOSMacOS, AuthorizationGeneration: shadow.OpenAIOAuthAuthorizationGeneration})
 	attempt := svc.beginCodexTelemetryFromWire(ctx, shadow, http.Header{"User-Agent": {profile.UserAgent}, "Authorization": {"Bearer test-token"}, "Chatgpt-Account-Id": {"test-account"}}, []byte(`{"model":"gpt-6-astra"}`), "", false)
 	require.NotNil(t, attempt)
 	require.Equal(t, owner.ID, attempt.profile.input.OwnerAccountID)

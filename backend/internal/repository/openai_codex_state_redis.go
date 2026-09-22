@@ -11,11 +11,12 @@ import (
 	"github.com/google/uuid"
 )
 
-const codexStateCancelChannel = "openai:codex:state:cancel:v1"
-const codexStateActivationChannel = "openai:codex:state:activate:v1"
+const codexStateCancelChannel = "openai:codex:state:cancel:v2"
+const codexStateActivationChannel = "openai:codex:state:activate:v2"
 
 type codexStateActivation struct {
 	OwnerAccountID int64  `json:"owner_account_id"`
+	OSFamily       string `json:"os_family"`
 	Generation     string `json:"generation"`
 }
 
@@ -124,21 +125,21 @@ func validateCodexStateCancelKey(key service.CodexTurnStateKey) error {
 // Activation messages carry only the current configuration scope. Every
 // subscriber revalidates PostgreSQL and its own safe observation before demand
 // can be created. Neither observations nor credentials are broadcast.
-func (r *openAICodexStateRepository) PublishActivation(ctx context.Context, ownerID int64, generation string) error {
+func (r *openAICodexStateRepository) PublishOSActivation(ctx context.Context, ownerID int64, osFamily, generation string) error {
 	if err := r.redisAvailable(); err != nil {
 		return err
 	}
-	if ownerID <= 0 || strings.TrimSpace(generation) == "" {
+	if ownerID <= 0 || osFamily == "" || service.NormalizeOpenAIOSFamily(osFamily) != osFamily || strings.TrimSpace(generation) == "" {
 		return errors.New("invalid Codex turn-state activation scope")
 	}
-	payload, err := json.Marshal(codexStateActivation{OwnerAccountID: ownerID, Generation: generation})
+	payload, err := json.Marshal(codexStateActivation{OwnerAccountID: ownerID, OSFamily: osFamily, Generation: generation})
 	if err != nil {
 		return err
 	}
 	return r.rdb.Publish(ctx, codexStateActivationChannel, payload).Err()
 }
 
-func (r *openAICodexStateRepository) SubscribeActivations(ctx context.Context, handle func(int64, string)) error {
+func (r *openAICodexStateRepository) SubscribeOSActivations(ctx context.Context, handle func(int64, string, string)) error {
 	if err := r.redisAvailable(); err != nil {
 		return err
 	}
@@ -163,8 +164,8 @@ func (r *openAICodexStateRepository) SubscribeActivations(ctx context.Context, h
 				continue
 			}
 			var activation codexStateActivation
-			if json.Unmarshal([]byte(message.Payload), &activation) == nil && activation.OwnerAccountID > 0 && strings.TrimSpace(activation.Generation) != "" {
-				handle(activation.OwnerAccountID, activation.Generation)
+			if json.Unmarshal([]byte(message.Payload), &activation) == nil && activation.OwnerAccountID > 0 && activation.OSFamily != "" && service.NormalizeOpenAIOSFamily(activation.OSFamily) == activation.OSFamily && strings.TrimSpace(activation.Generation) != "" {
+				handle(activation.OwnerAccountID, activation.OSFamily, activation.Generation)
 			}
 		}
 	}

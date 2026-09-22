@@ -17,6 +17,8 @@ func (s *AccountRepoSuite) TestPatchOpenAIOAuthCredentialsIfUnchanged_PreservesC
 		Type: service.AccountTypeOAuth, Status: service.StatusActive,
 		Schedulable: true, Credentials: credentials,
 	})
+	_, err := s.repo.EnsureOpenAIOAuthOSProfiles(s.ctx, account.ID)
+	s.Require().NoError(err)
 	expected := openAIRefreshExpectedAuthForRepoTest()
 	expected["id_token"] = "old-id"
 	// The administrator disables gpt-5 while the provider refresh is in flight.
@@ -25,7 +27,7 @@ func (s *AccountRepoSuite) TestPatchOpenAIOAuthCredentialsIfUnchanged_PreservesC
 	s.Require().NoError(s.repo.UpdateCredentials(s.ctx, account.ID, credentials))
 	cache := &schedulerCacheRecorder{}
 	s.repo.schedulerCache = cache
-	_, err := s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
+	_, err = s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
 	s.Require().NoError(err)
 
 	applied, err := s.repo.PatchOpenAIOAuthCredentialsIfUnchanged(s.ctx, account.ID, expected, nil,
@@ -40,8 +42,7 @@ func (s *AccountRepoSuite) TestPatchOpenAIOAuthCredentialsIfUnchanged_PreservesC
 	s.Require().NotContains(got.Credentials, "id_token")
 	s.Require().Equal("https://admin-configured.example", got.Credentials["base_url"])
 	s.Require().Equal(map[string]any{"gpt-6-astra": "gpt-6-astra"}, got.Credentials["model_mapping"])
-	s.Require().Len(cache.setAccounts, 1)
-	s.Require().Equal(got.Credentials, cache.setAccounts[0].Credentials)
+	s.Require().Empty(cache.setAccounts, "a caller-owned transaction must not publish an uncommitted credential snapshot")
 	var outboxCount int
 	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql,
 		"SELECT COUNT(*) FROM scheduler_outbox WHERE account_id = $1", []any{account.ID}, &outboxCount))
@@ -51,7 +52,7 @@ func (s *AccountRepoSuite) TestPatchOpenAIOAuthCredentialsIfUnchanged_PreservesC
 		map[string]any{"access_token": "duplicate-access", "_token_version": 14}, nil)
 	s.Require().NoError(err)
 	s.Require().False(applied, "a repeated refresh based on old auth must not overwrite the winner")
-	s.Require().Len(cache.setAccounts, 1)
+	s.Require().Empty(cache.setAccounts)
 	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql,
 		"SELECT COUNT(*) FROM scheduler_outbox WHERE account_id = $1", []any{account.ID}, &outboxCount))
 	s.Require().Equal(1, outboxCount)
@@ -66,11 +67,15 @@ func (s *AccountRepoSuite) TestPatchOpenAIOAuthCredentialsIfUnchanged_RejectsCha
 				Type: service.AccountTypeOAuth, Status: service.StatusActive,
 				Schedulable: true, Credentials: credentials,
 			})
+			_, err := s.repo.EnsureOpenAIOAuthOSProfiles(s.ctx, account.ID)
+			s.Require().NoError(err)
 			expected := openAIRefreshExpectedAuthForRepoTest()
 			credentials[key] = "reauthorized"
 			updatedJSON, err := json.Marshal(credentials)
 			s.Require().NoError(err)
 			_, err = s.repo.sql.ExecContext(s.ctx, "UPDATE accounts SET credentials = $1::jsonb WHERE id = $2", string(updatedJSON), account.ID)
+			s.Require().NoError(err)
+			_, err = s.repo.sql.ExecContext(s.ctx, "UPDATE account_openai_oauth_os_credentials SET credentials=$1::jsonb,revision=revision+1 WHERE account_id=$2", string(updatedJSON), account.ID)
 			s.Require().NoError(err)
 			_, err = s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
 			s.Require().NoError(err)
@@ -95,6 +100,8 @@ func (s *AccountRepoSuite) TestPatchOpenAIOAuthCredentialsIfUnchanged_RejectsCha
 		Type: service.AccountTypeOAuth, Status: service.StatusActive,
 		Schedulable: true, Credentials: openAIRefreshExpectedAuthForRepoTest(),
 	})
+	_, err := s.repo.EnsureOpenAIOAuthOSProfiles(s.ctx, account.ID)
+	s.Require().NoError(err)
 	wrongProxyID := int64(99)
 	applied, err := s.repo.PatchOpenAIOAuthCredentialsIfUnchanged(s.ctx, account.ID,
 		openAIRefreshExpectedAuthForRepoTest(), &wrongProxyID, map[string]any{"access_token": "wrong-proxy"}, nil)

@@ -187,10 +187,11 @@ func TestOpenAIGatewayService_OAuthDropsOrphanAfterDroppingPreviousResponse(t *t
 		newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"id":"resp_ok","output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
 	}}
 
-	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
+	account := newOpenAIOAuthNamespaceTestAccount()
+	result, err := newOpenAIRejectedFieldTestService(upstream, account).Forward(
 		context.Background(),
 		newOpenAIRejectedFieldTestContext(body),
-		newOpenAIOAuthNamespaceTestAccount(),
+		account,
 		body,
 	)
 

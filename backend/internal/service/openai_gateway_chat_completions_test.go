@@ -190,13 +190,19 @@ func TestForwardAsChatCompletions_UnknownModelWithoutMessagesDispatchKeepsReques
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
 	require.Error(t, err)
 	require.Nil(t, result)
 	require.Equal(t, "gpt6", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.NotEqual(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String())
-	require.Equal(t, http.StatusBadRequest, rec.Code)
+	// The authorized account repository also makes this a managed gateway:
+	// account-specific missing models return the upstream status for failover.
+	var failover *UpstreamFailoverError
+	require.ErrorAs(t, err, &failover)
+	require.Equal(t, http.StatusBadRequest, failover.StatusCode)
+	require.False(t, c.Writer.Written())
 }
 
 func TestForwardAsChatCompletions_APIKeyPropagatesPromptCacheKeyInResponsesBody(t *testing.T) {
@@ -218,6 +224,9 @@ func TestForwardAsChatCompletions_APIKeyPropagatesPromptCacheKeyInResponsesBody(
 	svc := &OpenAIGatewayService{
 		cfg:          &config.Config{},
 		httpUpstream: upstream,
+		settingService: NewSettingService(&dailyRotationSettingRepo{values: map[string]string{
+			SettingKeyEnableOpenAICodexFingerprintNormalization: "false",
+		}}, nil),
 	}
 	account := &Account{
 		ID:          2,
@@ -240,7 +249,7 @@ func TestForwardAsChatCompletions_APIKeyPropagatesPromptCacheKeyInResponsesBody(
 	require.Equal(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.Equal(t, "https://api.openai.com/v1/responses", upstream.lastReq.URL.String())
 	require.Equal(t, "Bearer sk-compatible", upstream.lastReq.Header.Get("Authorization"))
-	require.Equal(t, generateSessionUUID(isolateOpenAISessionID(99, "cache-key-123")), upstream.lastReq.Header.Get("session_id"))
+	require.Equal(t, isolateOpenAISessionID(99, "cache-key-123"), upstream.lastReq.Header.Get("session_id"))
 }
 
 func TestForwardAsChatCompletions_APIKeyAutoDerivesStableIsolatedPromptCacheKey(t *testing.T) {
@@ -255,6 +264,9 @@ func TestForwardAsChatCompletions_APIKeyAutoDerivesStableIsolatedPromptCacheKey(
 	}
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{response(), response(), response()}}
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	svc.settingService = NewSettingService(&dailyRotationSettingRepo{values: map[string]string{
+		SettingKeyEnableOpenAICodexFingerprintNormalization: "false",
+	}}, nil)
 	account := &Account{
 		ID: 2, Name: "openai-compatible", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
 		Credentials: map[string]any{"api_key": "sk-compatible"},
@@ -284,9 +296,9 @@ func TestForwardAsChatCompletions_APIKeyAutoDerivesStableIsolatedPromptCacheKey(
 	require.NotEmpty(t, firstKey)
 	require.Equal(t, firstKey, appendedKey)
 	require.NotEqual(t, firstKey, otherTenantKey)
-	require.Equal(t, generateSessionUUID(firstKey), upstream.requests[0].Header.Get("session_id"))
+	require.Equal(t, isolateOpenAISessionID(99, firstKey), upstream.requests[0].Header.Get("session_id"))
 	require.Equal(t, upstream.requests[0].Header.Get("session_id"), upstream.requests[1].Header.Get("session_id"))
-	require.Equal(t, generateSessionUUID(otherTenantKey), upstream.requests[2].Header.Get("session_id"))
+	require.Equal(t, isolateOpenAISessionID(100, otherTenantKey), upstream.requests[2].Header.Get("session_id"))
 	require.NotEqual(t, upstream.requests[1].Header.Get("session_id"), upstream.requests[2].Header.Get("session_id"))
 }
 
@@ -302,6 +314,9 @@ func TestForwardAsChatCompletions_ResponsesShapeDoesNotAutoDerivePromptCacheKey(
 	}
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{response(), response(), response()}}
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	svc.settingService = NewSettingService(&dailyRotationSettingRepo{values: map[string]string{
+		SettingKeyEnableOpenAICodexFingerprintNormalization: "false",
+	}}, nil)
 	account := &Account{
 		ID: 2, Name: "openai-compatible", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
 		Credentials: map[string]any{"api_key": "sk-compatible"},
@@ -329,7 +344,7 @@ func TestForwardAsChatCompletions_ResponsesShapeDoesNotAutoDerivePromptCacheKey(
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").Exists())
 	require.Empty(t, upstream.requests[1].Header.Get("session_id"))
 	require.Equal(t, "explicit-responses-key", gjson.GetBytes(upstream.bodies[2], "prompt_cache_key").String())
-	require.Equal(t, generateSessionUUID(isolateOpenAISessionID(99, "explicit-responses-key")), upstream.requests[2].Header.Get("session_id"))
+	require.Equal(t, isolateOpenAISessionID(99, "explicit-responses-key"), upstream.requests[2].Header.Get("session_id"))
 }
 
 func TestForwardAsChatCompletions_OAuthDoesNotInjectDefaultInstructions(t *testing.T) {
@@ -362,6 +377,7 @@ func TestForwardAsChatCompletions_OAuthDoesNotInjectDefaultInstructions(t *testi
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.4")
 	require.Error(t, err)
@@ -399,6 +415,7 @@ func forwardOAuthChatCompletionsForUpstreamBody(t *testing.T, body []byte) []byt
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.4")
 	require.Error(t, err)
@@ -484,6 +501,7 @@ func TestForwardAsChatCompletions_ClientDisconnectDrainsUpstreamUsage(t *testing
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.1")
 	require.NoError(t, err)
@@ -525,6 +543,7 @@ func TestForwardAsChatCompletions_BufferedContextWindowResponseFailedReturnsErro
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.5")
 	require.Error(t, err)
@@ -570,6 +589,7 @@ func TestForwardAsChatCompletions_StreamContextWindowResponseFailedReturnsErrorW
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.5")
 	require.Error(t, err)
@@ -611,6 +631,7 @@ func TestForwardAsChatCompletions_StreamBareErrorAfterOutputDoesNotFailOver(t *t
 		ID: 1, Name: "openai-oauth", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
 		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.5")
 
@@ -703,6 +724,7 @@ func TestForwardAsChatCompletions_StreamCyberPolicyNoFailover(t *testing.T) {
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.5")
 	var failoverErr *UpstreamFailoverError
@@ -751,6 +773,7 @@ func TestForwardAsChatCompletions_StreamsUsageWithoutClientStreamOptions(t *test
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.1")
 	require.NoError(t, err)
@@ -803,6 +826,7 @@ func TestForwardAsChatCompletions_StreamsTopLevelTerminalUsage(t *testing.T) {
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.1")
 	require.NoError(t, err)
@@ -851,6 +875,7 @@ func TestForwardAsChatCompletions_BufferedTopLevelTerminalUsage(t *testing.T) {
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.1")
 	require.NoError(t, err)
@@ -899,6 +924,7 @@ func TestForwardAsChatCompletions_TerminalUsageWithoutUpstreamCloseReturns(t *te
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	type forwardResult struct {
 		result *OpenAIForwardResult
@@ -965,6 +991,7 @@ func TestForwardAsChatCompletions_EventNamedTerminalWithoutUpstreamCloseReturns(
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	type forwardResult struct {
 		result *OpenAIForwardResult
@@ -1028,6 +1055,7 @@ func TestForwardAsChatCompletions_EventTypeDoesNotLeakAcrossFrames(t *testing.T)
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.1")
 	require.NoError(t, err)
@@ -1068,6 +1096,7 @@ func TestForwardAsChatCompletions_BufferedTerminalWithoutUpstreamCloseReturns(t 
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	type forwardResult struct {
 		result *OpenAIForwardResult
@@ -1120,6 +1149,7 @@ func TestForwardAsChatCompletions_DoneSentinelWithoutTerminalReturnsError(t *tes
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.1")
 	require.Error(t, err)
@@ -1164,6 +1194,7 @@ func TestForwardAsChatCompletions_UpstreamRequestIgnoresClientCancel(t *testing.
 			"chatgpt_account_id": "chatgpt-acc",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.ForwardAsChatCompletions(reqCtx, c, account, body, "", "gpt-5.1")
 	require.NoError(t, err)

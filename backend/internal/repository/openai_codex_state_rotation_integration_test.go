@@ -92,10 +92,10 @@ func TestCodexStatePostgresRotationIdleAndGeneration(t *testing.T) {
 	require.Empty(t, resumed.CollectorAttemptID, "idle resumes cannot keep a stale attempt reservation")
 	require.Empty(t, resumed.DemandReason)
 
-	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,
-		'{codex_turn_state_generation}', '"generation-2"'::jsonb) WHERE id=$1`, key.OwnerAccountID)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_os_credentials SET state_generation='00000000-0000-4000-8000-000000000002'
+		WHERE account_id=$1 AND os_family='windows'`, key.OwnerAccountID)
 	require.NoError(t, err)
-	key.Generation = "generation-2"
+	key.Generation = "00000000-0000-4000-8000-000000000002"
 	reset, err := repo.BeginBusiness(ctx, key, "new", now, now.Add(time.Minute))
 	require.NoError(t, err)
 	require.Zero(t, reset.CollectorProxyID)
@@ -134,6 +134,10 @@ func TestCodexStatePostgresRotationScanConfigPrecedence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,
 				'{codex_turn_state}', $2::jsonb) WHERE id=$1`, key.OwnerAccountID, tc.config)
+			require.NoError(t, err)
+			// This test exercises scan policy, retaining its prepared runtime row
+			// under the newly committed configuration's slot fence.
+			_, err = integrationDB.ExecContext(ctx, `UPDATE openai_codex_state s SET generation=c.state_generation::text FROM account_openai_oauth_os_credentials c WHERE s.owner_account_id=$1 AND c.account_id=s.owner_account_id AND c.os_family=s.os_family`, key.OwnerAccountID)
 			require.NoError(t, err)
 			rows, err := repo.ListActive(ctx, now.Add(-time.Minute), 1000)
 			require.NoError(t, err)

@@ -65,7 +65,7 @@ func passiveCodexStateAfterValidationFailure(attempt *CodexTurnStateAttempt) *Co
 	if reason == "" {
 		reason = "snapshot_unavailable"
 	}
-	return &CodexTurnStateAttempt{OwnerAccountID: attempt.OwnerAccountID, Model: attempt.Model,
+	return &CodexTurnStateAttempt{OwnerAccountID: attempt.OwnerAccountID, OSFamily: attempt.OSFamily, Model: attempt.Model,
 		AccountEnabled: attempt.AccountEnabled, MaintenanceReason: reason, accountType: attempt.accountType,
 		credentialEpoch: attempt.credentialEpoch, preparedAt: attempt.preparedAt, historyService: attempt.historyService}
 }

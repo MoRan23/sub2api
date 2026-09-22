@@ -3,8 +3,11 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiError'
+import type { Account, OpenAIOAuthOS } from '@/types'
 
 export interface OpenAITokenInfo {
+  account?: Account
+  os?: OpenAIOAuthOS
   access_token?: string
   refresh_token?: string
   client_id?: string
@@ -38,29 +41,42 @@ export function useOpenAIOAuth() {
   const oauthState = ref('')
   const loading = ref(false)
   const error = ref('')
+  const boundOS = ref<OpenAIOAuthOS | null>(null)
+  const boundAccountId = ref<number | null>(null)
+  let generationVersion = 0
 
   // Reset state
   const resetState = () => {
+    generationVersion++
     authUrl.value = ''
     sessionId.value = ''
     oauthState.value = ''
     loading.value = false
     error.value = ''
+    boundOS.value = null
+    boundAccountId.value = null
   }
 
   // Generate auth URL for OpenAI OAuth
   const generateAuthUrl = async (
     proxyId?: number | null,
-    redirectUri?: string
+    redirectUri?: string,
+    os: OpenAIOAuthOS = 'windows',
+    accountId?: number
   ): Promise<boolean> => {
+    const requestVersion = ++generationVersion
     loading.value = true
     authUrl.value = ''
     sessionId.value = ''
+    boundOS.value = null
+    boundAccountId.value = null
     oauthState.value = ''
     error.value = ''
 
     try {
-      const payload: Record<string, unknown> = {}
+      const payload: { proxy_id?: number; redirect_uri?: string; os: OpenAIOAuthOS; account_id?: number; purpose: 'create' | 'authorize' } = {
+        os, ...(accountId ? { account_id: accountId } : {}), purpose: accountId ? 'authorize' : 'create'
+      }
       if (proxyId) {
         payload.proxy_id = proxyId
       }
@@ -72,8 +88,11 @@ export function useOpenAIOAuth() {
         `${endpointPrefix}/generate-auth-url`,
         payload
       )
+      if (requestVersion !== generationVersion) return false
       authUrl.value = response.auth_url
       sessionId.value = response.session_id
+      boundOS.value = os
+      boundAccountId.value = accountId ?? null
       try {
         const parsed = new URL(response.auth_url)
         oauthState.value = parsed.searchParams.get('state') || ''
@@ -82,11 +101,12 @@ export function useOpenAIOAuth() {
       }
       return true
     } catch (err: any) {
+      if (requestVersion !== generationVersion) return false
       error.value = extractApiErrorMessage(err, t('admin.accounts.oauth.openai.failedToGenerateUrl'))
       appStore.showError(error.value)
       return false
     } finally {
-      loading.value = false
+      if (requestVersion === generationVersion) loading.value = false
     }
   }
 
@@ -136,7 +156,9 @@ export function useOpenAIOAuth() {
   const validateRefreshToken = async (
     refreshToken: string,
     proxyId?: number | null,
-    clientId?: string
+    clientId?: string,
+    os: OpenAIOAuthOS = 'windows',
+    accountId?: number
   ): Promise<OpenAITokenInfo | null> => {
     if (!refreshToken.trim()) {
       error.value = 'Missing refresh token'
@@ -152,7 +174,9 @@ export function useOpenAIOAuth() {
         refreshToken.trim(),
         proxyId,
         `${endpointPrefix}/refresh-token`,
-        clientId
+        clientId,
+        os,
+        accountId
       )
       return tokenInfo as OpenAITokenInfo
     } catch (err: any) {
@@ -230,6 +254,8 @@ export function useOpenAIOAuth() {
     oauthState,
     loading,
     error,
+    boundOS,
+    boundAccountId,
     // Methods
     resetState,
     generateAuthUrl,

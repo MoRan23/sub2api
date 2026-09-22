@@ -61,6 +61,7 @@ func TestFetchOpenAIModelsListOAuthSharesManifestCache(t *testing.T) {
 	_, calls := newCodexModelsOAuthCacheServer(t, `{"models":[{"slug":"special-oauth-model","display_name":"Special OAuth Model","description":"manifest only"},{"slug":"gpt-image-1"}]}`)
 	s := &OpenAIGatewayService{}
 	account := newCodexModelsTestAccount()
+	registerAuxiliaryOSFixture(t, s, account)
 	response, err := s.FetchOpenAIModelsList(context.Background(), account)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"object":"list","data":[{"id":"special-oauth-model","object":"model","owned_by":"openai","created":0,"display_name":"Special OAuth Model"},{"id":"gpt-image-1","object":"model","owned_by":"openai","created":0}]}`, string(response.Body))
@@ -245,6 +246,13 @@ func TestPinnedOpenAIModelsListMixedAccountsShareColdCacheAcrossGroups(t *testin
 	}
 	accounts := []Account{*apiAccount, *oauthAccount}
 	s.accountRepo = splitCodexModelsAccountRepo{all: map[int64][]Account{10: accounts, 11: accounts}}
+	registerAuxiliaryOSFixture(t, s, oauthAccount)
+	// ListByGroup returns value snapshots; give them the persisted profile too.
+	for i := range accounts {
+		if accounts[i].ID == oauthAccount.ID {
+			accounts[i] = *oauthAccount
+		}
+	}
 	groups := []*Group{
 		{ID: 10, Platform: PlatformOpenAI, CodexModelsManifestConfig: GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{2, 1}},
 			ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"oauth-special", "shared-model"}}},
@@ -297,6 +305,7 @@ func TestFetchOpenAIModelsListResolvesShadowOAuthCredentials(t *testing.T) {
 	parent := newCodexModelsTestAccount()
 	shadow := &Account{ID: 9, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &parent.ID}
 	s := &OpenAIGatewayService{accountRepo: newStubCredRepo(parent)}
+	registerAuxiliaryOSFixture(t, s, parent)
 	response, err := s.FetchOpenAIModelsList(context.Background(), shadow)
 	require.NoError(t, err)
 	require.Contains(t, string(response.Body), `"id":"parent-model"`)

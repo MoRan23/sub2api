@@ -63,8 +63,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	}
 
 	if isMultipartImagesContentType(c.GetHeader("Content-Type")) {
+		// Uploaded media and multipart form text are not environment evidence.
+		service.CaptureOpenAIRequestOS(c, nil)
 		setOpsRequestContext(c, "", false)
 	} else {
+		service.CaptureOpenAIRequestOS(c, body)
 		setOpsRequestContext(c, "", false)
 	}
 

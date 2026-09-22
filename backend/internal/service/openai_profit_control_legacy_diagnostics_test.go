@@ -12,7 +12,7 @@ import (
 
 func legacyProfitDiagnosticService(accounts []Account) *OpenAIGatewayService {
 	return &OpenAIGatewayService{
-		accountRepo:        stubOpenAIAccountRepo{accounts: accounts},
+		accountRepo:        newSchedulerTestOpenAIAccountRepo(accounts),
 		cfg:                &config.Config{},
 		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("false"),
 		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),

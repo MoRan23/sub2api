@@ -172,6 +172,7 @@ func TestOpenAIGatewayService_Forward_WSv2_ExecutionScopeUsesOriginalIdentity(t 
 			openAIPinnedInstallationIDKey:     "11111111-1111-4111-8111-aaaaaaaaaaaa",
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	forward := func(sessionID, body string) (*gin.Context, []byte) {
 		rec := httptest.NewRecorder()

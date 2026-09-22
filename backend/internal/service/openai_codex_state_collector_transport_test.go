@@ -19,7 +19,7 @@ type codexCollectorTransportAccounts struct {
 }
 
 func (r codexCollectorTransportAccounts) GetByID(context.Context, int64) (*Account, error) {
-	return r.account, nil
+	return codexStateTestScopeAccount(r.account), nil
 }
 
 type codexCollectorTransportProxies struct {
@@ -174,7 +174,7 @@ func TestCodexTurnStateCollectorTransportRechecksLiveAccountEligibility(t *testi
 			require.NoError(t, err)
 			_, err = do(context.Background(), CodexTurnStateCollectRequest{Account: &prepared, Model: "gpt-5.4", ProxyID: proxy.ID,
 				validateModelPolicy: allowCodexCollectorTestModelPolicy,
-				onSend: func(time.Time) { t.Error("an ineligible account must not record a send") }}, request)
+				onSend:              func(time.Time) { t.Error("an ineligible account must not record a send") }}, request)
 			require.ErrorContains(t, err, "collector_account_unavailable")
 			require.Zero(t, upstream.calls, "a stale eligible account cannot authorize collection")
 		})

@@ -183,6 +183,7 @@ func TestOpenAIWSHTTPBridgeSessionIsolationAcrossSameSessionHash(t *testing.T) {
 		Credentials: map[string]any{"access_token": "test-token"},
 		Extra:       map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge},
 		Concurrency: 2, Status: StatusActive, Schedulable: true}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	groupID := int64(7)
 	newContext := func(r *http.Request) *gin.Context {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())

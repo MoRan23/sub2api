@@ -29,14 +29,14 @@ func (r *codexStateBatchAccounts) GetByIDs(_ context.Context, ids []int64) ([]*A
 	var accounts []*Account
 	for _, id := range ids {
 		if account := r.accounts[id]; account != nil {
-			accounts = append(accounts, account)
+			accounts = append(accounts, codexStateTestScopeAccount(account))
 		}
 	}
 	return accounts, nil
 }
 
 func (r *codexStateBatchAccounts) GetByID(_ context.Context, id int64) (*Account, error) {
-	return r.accounts[id], nil
+	return codexStateTestScopeAccount(r.accounts[id]), nil
 }
 
 // All unimplemented runtime/collection methods panic through the embedded nil
@@ -103,11 +103,11 @@ func TestCodexTurnStateBatchStatusDeduplicatesOwnersAndSharesSingleProjection(t 
 	}}
 	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
 	records := &codexStateBatchRecords{records: []CodexTurnStateRecord{
-		{OwnerAccountID: 1, Generation: CodexTurnStateGenerationForAccount(ownerOne), Model: "gpt-5.6-sol", EncryptedToken: "private-encrypted-token", ExpiresAt: now.Add(20 * time.Minute), TokenLength: 292, CipherBlocks: 10, Shape: "target", Source: "business"},
-		{OwnerAccountID: 1, Generation: CodexTurnStateGenerationForAccount(ownerOne), Model: "gpt-6-astra", EncryptedToken: "private-encrypted-expired", ExpiresAt: now.Add(-time.Minute)},
-		{OwnerAccountID: 1, Generation: "obsolete-generation", Model: "obsolete-model", EncryptedToken: "old-private-token"},
-		{OwnerAccountID: 2, Generation: CodexTurnStateGenerationForAccount(ownerTwo), Model: "gpt-5.6-terra", CollectorPaused: true, LastError: "collector_auth_rejected"},
-		{OwnerAccountID: 2, Generation: CodexTurnStateGenerationForAccount(ownerTwo), Model: "gpt-unlisted", EncryptedToken: "private-unlisted-token", ExpiresAt: now.Add(time.Hour)},
+		{OSFamily: "windows", OwnerAccountID: 1, Generation: CodexTurnStateGenerationForAccount(ownerOne), Model: "gpt-5.6-sol", EncryptedToken: "private-encrypted-token", ExpiresAt: now.Add(20 * time.Minute), TokenLength: 292, CipherBlocks: 10, Shape: "target", Source: "business"},
+		{OSFamily: "windows", OwnerAccountID: 1, Generation: CodexTurnStateGenerationForAccount(ownerOne), Model: "gpt-6-astra", EncryptedToken: "private-encrypted-expired", ExpiresAt: now.Add(-time.Minute)},
+		{OSFamily: "windows", OwnerAccountID: 1, Generation: "obsolete-generation", Model: "obsolete-model", EncryptedToken: "old-private-token"},
+		{OSFamily: "windows", OwnerAccountID: 2, Generation: CodexTurnStateGenerationForAccount(ownerTwo), Model: "gpt-5.6-terra", CollectorPaused: true, LastError: "collector_auth_rejected"},
+		{OSFamily: "windows", OwnerAccountID: 2, Generation: CodexTurnStateGenerationForAccount(ownerTwo), Model: "gpt-unlisted", EncryptedToken: "private-unlisted-token", ExpiresAt: now.Add(time.Hour)},
 	}}
 	policy := &codexStateBatchPolicy{models: []string{"gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"}}
 	service := NewCodexTurnStateService(records, accounts, nil, codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {

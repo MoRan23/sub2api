@@ -21,6 +21,7 @@ import (
 // otherwise ChatGPT manifests are proxied verbatim and custom API key manifests
 // receive provider-compatibility normalization plus short-lived caching.
 func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
+	service.CaptureOpenAIRequestOS(c, nil)
 	if c.Request.Context().Err() != nil {
 		return
 	}

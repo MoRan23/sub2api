@@ -272,6 +272,7 @@ func TestCaptureOpenAIOAuthIdentityForCompatTurnOverridesSpoofedMemoryBeforeUUID
 func TestOpenAIGatewayForwardRejectsMemoryCompactionBeforeUpstreamWork(t *testing.T) {
 	body := codexWireTestBody(t, `{"request_kind":"memory","sandbox":"workspace-write"}`, nil)
 	account := &Account{ID: 99101, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	repo := newAuthorizedOpenAIOAuthTestRepo(account)
 	tests := []struct {
 		name       string
 		path       string
@@ -286,7 +287,7 @@ func TestOpenAIGatewayForwardRejectsMemoryCompactionBeforeUpstreamWork(t *testin
 			if test.markNative {
 				MarkOpenAINativeCompactionV2(c)
 			}
-			result, err := (&OpenAIGatewayService{}).Forward(context.Background(), c, account, body)
+			result, err := (&OpenAIGatewayService{accountRepo: repo}).Forward(context.Background(), c, account, body)
 			require.Nil(t, result)
 			require.ErrorIs(t, err, ErrOpenAICodexRequestKindConflict)
 			require.Equal(t, http.StatusBadRequest, recorder.Code)

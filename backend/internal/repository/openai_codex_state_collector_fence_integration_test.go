@@ -84,8 +84,8 @@ func TestCodexCollectorPublicationPostgresAllowsLeaseCommittedBehindStateLock(t 
 		return err == nil && blocked
 	}, 3*time.Second, 10*time.Millisecond, "collector must serialize behind the pending natural request's state lock")
 	_, err = tx.ExecContext(ctx, `INSERT INTO openai_codex_state_business_leases
-		(owner_account_id,model,generation,attempt_id,lease_until) VALUES ($1,$2,$3,'late-natural',$4)`,
-		key.OwnerAccountID, key.Model, key.Generation, time.Now().Add(time.Minute))
+		(owner_account_id,model,generation,attempt_id,lease_until,os_family) VALUES ($1,$2,$3,'late-natural',$4,$5)`,
+		key.OwnerAccountID, key.Model, key.Generation, time.Now().Add(time.Minute), key.OSFamily)
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
 	outcome := <-finished

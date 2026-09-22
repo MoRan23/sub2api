@@ -98,8 +98,16 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	// Direct callers do not pass through the handler's pre-selection capture.
 	// Give each accepted client connection a stable, non-shared fallback seed;
 	// explicit Codex session/thread signals still win inside Capture.
+	ctx = captureOpenAIRequestOSContext(ctx, c, firstClientMessage)
 	if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
 		SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, firstClientMessage, "openai_ws_connection:"+uuid.NewString()))
+	}
+	if RequiresOpenAIOAuthOSAuthorization(account) {
+		var err error
+		account, err = s.freezeOpenAIWSAuthorization(ctx, account, token)
+		if err != nil {
+			return err
+		}
 	}
 
 	// 预取一次 OpenAI Fast Policy settings，绑定到 ctx，让该 WS session
@@ -633,6 +641,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		bridgeAccountFailoverInputExists := false
 		bridgeTimezoneReplay := newOpenAIWSTimezoneReplayLedger()
 		for turn := 1; ; turn++ {
+			if err := s.validateOpenAIWSAuthorization(ctx, account); err != nil {
+				return err
+			}
 			bridgeFrameCapture := cloneOpenAIOAuthIdentityCapture(bridgeCaptureState.Capture)
 			if turn > 1 {
 				bridgeFrameCapture = captureOpenAIWSFrameIdentity(currentBridgePayload.rawForHash, &bridgeCaptureState)
@@ -1693,6 +1704,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return true
 	}
 	for {
+		if err := s.validateOpenAIWSAuthorization(ctx, account); err != nil {
+			return err
+		}
 		if turn > 1 && !skipBeforeTurn && hooks != nil && hooks.BeforeRequest != nil {
 			if err := hooks.BeforeRequest(turn, currentPayload, currentOriginalModel); err != nil {
 				return err

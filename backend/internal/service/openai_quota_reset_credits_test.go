@@ -155,9 +155,7 @@ func TestQueryUsageResetCreditCountPrecedence(t *testing.T) {
 				},
 			}
 			repo := &stubQuotaAccountRepo{accounts: map[int64]*Account{100: account}}
-			tokenCache := &stubQuotaTokenCache{tokens: map[string]string{
-				OpenAITokenCacheKey(account): "fake-token",
-			}}
+			tokenCache := quotaAuthorizedTokenFixture(t, repo, account, "fake-token")
 			tokenProvider := NewOpenAITokenProvider(repo, tokenCache, nil)
 
 			var detailCalls int

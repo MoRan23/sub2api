@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -51,9 +52,17 @@ func setupAccountDataRouter() (*gin.Engine, *stubAdminService) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	adminSvc := newStubAdminService()
+	router.Use(func(c *gin.Context) {
+		for i := range adminSvc.accounts {
+			if service.IsOpenAIOAuthOSProfileOwner(&adminSvc.accounts[i]) && adminSvc.accounts[i].OpenAIOAuthOSProfiles == nil {
+				adminSvc.accounts[i].OpenAIOAuthOSProfiles = &service.OpenAIOAuthOSProfiles{DefaultOS: service.OpenAIOSWindows}
+			}
+		}
+		c.Next()
+	})
 
 	h := NewAccountHandler(
-		adminSvc,
+		&dataOSCredentialAdminStub{stubAdminService: adminSvc},
 		nil,
 		nil,
 		nil,
@@ -72,6 +81,23 @@ func setupAccountDataRouter() (*gin.Engine, *stubAdminService) {
 	router.GET("/api/v1/admin/accounts/data", h.ExportData)
 	router.POST("/api/v1/admin/accounts/data", h.ImportData)
 	return router, adminSvc
+}
+
+type dataOSCredentialAdminStub struct {
+	*stubAdminService
+	slots []*service.OpenAIOAuthOSCredential
+}
+
+func (s *dataOSCredentialAdminStub) ListOpenAIOAuthOSCredentials(_ context.Context, id int64) ([]*service.OpenAIOAuthOSCredential, error) {
+	if s.slots != nil {
+		return s.slots, nil
+	}
+	for _, account := range s.accounts {
+		if account.ID == id {
+			return []*service.OpenAIOAuthOSCredential{{OwnerAccountID: id, OSFamily: service.OpenAIOSWindows, Credentials: account.Credentials}}, nil
+		}
+	}
+	return nil, nil
 }
 
 func TestExportDataIncludesSecrets(t *testing.T) {
@@ -124,7 +150,7 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, 0, resp.Code)
 	require.Empty(t, resp.Data.Type)
-	require.Equal(t, 0, resp.Data.Version)
+	require.Equal(t, dataOSAuthorizationVersion, resp.Data.Version)
 	require.Len(t, resp.Data.Proxies, 1)
 	require.Equal(t, "pass", resp.Data.Proxies[0].Password)
 	require.Len(t, resp.Data.Accounts, 1)

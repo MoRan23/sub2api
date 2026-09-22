@@ -38,7 +38,7 @@ func (s *OpenAIGatewayService) ListPluginAccounts(ctx context.Context, platform,
 	ids := make([]int64, 0, len(accounts))
 	for i := range accounts {
 		account := &accounts[i]
-		if pluginAccountDirectoryEligible(account) {
+		if pluginAccountDirectoryEligible(account) && OpenAIOAuthOSAuthorizationAvailable(account, OpenAIRequestOSFromContext(ctx).Family) {
 			ids = append(ids, account.ID)
 		}
 	}
@@ -59,6 +59,12 @@ func (s *OpenAIGatewayService) ResolvePluginOutboundIdentity(ctx context.Context
 	}
 	if !pluginAccountDirectoryEligible(account) {
 		return nil, nil
+	}
+	// Freeze the selected authorization before resolving its token. The token
+	// provider may refresh this request-owned snapshot, never the directory entry.
+	account, err = ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, OpenAIRequestOSFromContext(ctx).Family)
+	if err != nil {
+		return nil, err
 	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {

@@ -196,6 +196,7 @@ func TestBuildUpstreamModelsRequestSupportsOpenAIOAuth(t *testing.T) {
 			"chatgpt_account_id": "chatgpt-account",
 		},
 	}
+	svc.accountRepo = auxiliaryOSFixtureRepository(t, nil, account)
 
 	req, err := svc.buildUpstreamModelsRequest(context.Background(), account)
 	require.NoError(t, err)
@@ -219,14 +220,16 @@ func TestFetchUpstreamSupportedModelsParsesOpenAIOAuthManifest(t *testing.T) {
 		cfg:          upstreamModelSyncTestConfig(),
 	}
 
-	models, err := svc.FetchUpstreamSupportedModels(context.Background(), &Account{
+	account := &Account{
 		ID:       12,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Credentials: map[string]any{
 			"access_token": "openai-oauth-token",
 		},
-	})
+	}
+	svc.accountRepo = auxiliaryOSFixtureRepository(t, nil, account)
+	models, err := svc.FetchUpstreamSupportedModels(context.Background(), account)
 	require.NoError(t, err)
 	require.Equal(t, []string{"gpt-5.5-codex", "gpt-5.6-sol"}, models)
 	require.Equal(t, "Bearer openai-oauth-token", upstream.lastReq.Header.Get("Authorization"))

@@ -54,6 +54,7 @@ func newChatConversionHandler(t *testing.T, accountType string, cache *chatConve
 		},
 		Extra: map[string]any{"openai_pinned_installation_id": openAIIdentityContinuityInstallationID},
 	}
+	authorizeOpenAIHandlerTestAccount(t, &account)
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cfg.Gateway.Scheduling.FallbackWaitTimeout = time.Second
 	concurrency := service.NewConcurrencyService(cache)

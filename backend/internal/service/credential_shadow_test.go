@@ -19,7 +19,7 @@ func (s *stubCredRepo) GetByID(_ context.Context, _ int64) (*Account, error) {
 }
 
 func newStubCredRepo(parent *Account) AccountRepository {
-	return &stubCredRepo{parent: parent}
+	return newAuthorizedOpenAIOAuthTestRepo(parent)
 }
 
 func TestResolveCredentialAccount(t *testing.T) {

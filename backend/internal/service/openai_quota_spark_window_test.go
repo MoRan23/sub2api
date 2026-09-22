@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 // stubQuotaAccountRepo 是多账号 AccountRepository stub，仅实现 GetByID。
 type stubQuotaAccountRepo struct {
 	AccountRepository
+	mu               sync.Mutex
 	accounts         map[int64]*Account
 	extraUpdates     map[int64]map[string]any
 	extraUpdateCalls int
@@ -35,11 +37,43 @@ type stubQuotaAccountRepo struct {
 }
 
 func (r *stubQuotaAccountRepo) GetByID(_ context.Context, id int64) (*Account, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	acc, ok := r.accounts[id]
 	if !ok {
 		return nil, fmt.Errorf("account %d not found", id)
 	}
+	if IsOpenAIOAuthOSProfileOwner(acc) && acc.OpenAIOAuthOSProfiles == nil {
+		profiles, err := BuildOpenAIOAuthOSProfiles(acc, nil)
+		if err != nil {
+			return nil, err
+		}
+		ApplyOpenAIOAuthOSProfiles(acc, profiles)
+	}
 	return acc, nil
+}
+
+func (r *stubQuotaAccountRepo) GetOpenAIOAuthOSCredential(ctx context.Context, id int64, os string) (*OpenAIOAuthOSCredential, error) {
+	account, err := r.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !IsOpenAIOAuthOSProfileOwner(account) || os != account.OpenAIOAuthOSProfiles.DefaultOS {
+		return nil, nil
+	}
+	return &OpenAIOAuthOSCredential{OwnerAccountID: id, OSFamily: os, Credentials: account.Credentials, AuthorizationGeneration: "quota-test-generation", Revision: 1, Status: OpenAIOAuthAuthorizationAuthorized}, nil
+}
+
+func (r *stubQuotaAccountRepo) ListOpenAIOAuthOSCredentials(ctx context.Context, id int64) ([]*OpenAIOAuthOSCredential, error) {
+	account, err := r.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !IsOpenAIOAuthOSProfileOwner(account) {
+		return nil, nil
+	}
+	slot, err := r.GetOpenAIOAuthOSCredential(ctx, id, account.OpenAIOAuthOSProfiles.DefaultOS)
+	return []*OpenAIOAuthOSCredential{slot}, err
 }
 
 func (r *stubQuotaAccountRepo) UpdateCredentials(_ context.Context, id int64, credentials map[string]any) error {
@@ -66,6 +100,20 @@ func (r *stubQuotaAccountRepo) UpdateExtra(_ context.Context, id int64, updates 
 // stubQuotaTokenCache 实现 OpenAITokenCache，返回预设静态 token。
 type stubQuotaTokenCache struct {
 	tokens map[string]string
+}
+
+func quotaAuthorizedTokenFixture(t *testing.T, repo AccountRepository, account *Account, token string) *stubQuotaTokenCache {
+	t.Helper()
+	account.Credentials = shallowCopyMap(account.Credentials)
+	if account.Credentials == nil {
+		account.Credentials = make(map[string]any)
+	}
+	account.Credentials["access_token"] = token
+	account, err := repo.GetByID(context.Background(), account.ID)
+	require.NoError(t, err)
+	scoped, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, account, "")
+	require.NoError(t, err)
+	return &stubQuotaTokenCache{tokens: map[string]string{OpenAITokenCacheKey(scoped): token}}
 }
 
 func (c *stubQuotaTokenCache) GetAccessToken(_ context.Context, key string) (string, error) {
@@ -198,7 +246,7 @@ func TestResetCreditTargetedSendsStableCreditAndRedeemIDs(t *testing.T) {
 		Credentials: map[string]any{"chatgpt_account_id": "account-targeted"},
 	}
 	repo := &stubQuotaAccountRepo{accounts: map[int64]*Account{account.ID: account}}
-	tokenCache := &stubQuotaTokenCache{tokens: map[string]string{OpenAITokenCacheKey(account): "fake-token"}}
+	tokenCache := quotaAuthorizedTokenFixture(t, repo, account, "fake-token")
 	tokenProvider := NewOpenAITokenProvider(repo, tokenCache, nil)
 	var body map[string]string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -370,9 +418,7 @@ func TestPrepareUpstreamCallShadowResolve(t *testing.T) {
 	repo := &stubQuotaAccountRepo{accounts: map[int64]*Account{200: shadow, 100: parent}}
 
 	// stubTokenCache 为母账号 cache key 提供 fake token（走缓存命中路径，无需真实刷新）
-	tokenCache := &stubQuotaTokenCache{tokens: map[string]string{
-		OpenAITokenCacheKey(parent): "fake-access-token",
-	}}
+	tokenCache := quotaAuthorizedTokenFixture(t, repo, parent, "fake-access-token")
 	tokenProvider := NewOpenAITokenProvider(repo, tokenCache, nil)
 
 	// privacyClientFactory 可以是任意合法工厂；prepareUpstreamCall 在返回前不调用它
@@ -548,9 +594,7 @@ func TestQueryUsageIncludesResetCreditExpirations_EndToEnd(t *testing.T) {
 		},
 	}
 	repo := &stubQuotaAccountRepo{accounts: map[int64]*Account{100: account}}
-	tokenCache := &stubQuotaTokenCache{tokens: map[string]string{
-		OpenAITokenCacheKey(account): "fake-token",
-	}}
+	tokenCache := quotaAuthorizedTokenFixture(t, repo, account, "fake-token")
 	tokenProvider := NewOpenAITokenProvider(repo, tokenCache, nil)
 
 	var capturedBeta string
@@ -611,9 +655,7 @@ func TestQueryUsageResetCreditDetails401NonFatal(t *testing.T) {
 		},
 	}
 	repo := &stubQuotaAccountRepo{accounts: map[int64]*Account{100: account}}
-	tokenCache := &stubQuotaTokenCache{tokens: map[string]string{
-		OpenAITokenCacheKey(account): "fake-token",
-	}}
+	tokenCache := quotaAuthorizedTokenFixture(t, repo, account, "fake-token")
 	tokenProvider := NewOpenAITokenProvider(repo, tokenCache, nil)
 
 	var detailCalls int
@@ -765,9 +807,7 @@ func TestQueryUsageShadowResolve_EndToEnd(t *testing.T) {
 	}
 	repo := &stubQuotaAccountRepo{accounts: map[int64]*Account{200: shadow, 100: parent}}
 
-	tokenCache := &stubQuotaTokenCache{tokens: map[string]string{
-		OpenAITokenCacheKey(parent): "fake-token-e2e",
-	}}
+	tokenCache := quotaAuthorizedTokenFixture(t, repo, parent, "fake-token-e2e")
 	tokenProvider := NewOpenAITokenProvider(repo, tokenCache, nil)
 
 	// httptest server 记录收到的 chatgpt-account-id header，返回空 usage JSON

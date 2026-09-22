@@ -274,10 +274,11 @@ func TestResolveOpenAIOAuthIdentityPlanMemorySkipsWindowResolution(t *testing.T)
 	require.Equal(t, CodexWireRequestMemory, capture.WireProfile.RequestKind)
 	require.Empty(t, capture.ContextWindowIDCandidate)
 
-	plan, err := (&OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "memory-window-secret"}}}).ResolveOpenAIOAuthIdentityPlan(
+	account := &Account{ID: 3901500, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	plan, err := (&OpenAIGatewayService{accountRepo: newAuthorizedOpenAIOAuthTestRepo(account), cfg: &config.Config{JWT: config.JWTConfig{Secret: "memory-window-secret"}}}).ResolveOpenAIOAuthIdentityPlan(
 		context.Background(),
 		c,
-		&Account{ID: 3901500, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+		account,
 		capture,
 		OpenAIOAuthIdentityPlanOptions{
 			TurnIdentityEnabled: true,
@@ -331,6 +332,7 @@ func TestResolveOpenAIOAuthIdentityPlanReusesCapturedContextWindowCandidate(t *t
 	}
 	firstAccount := &Account{ID: 3901501, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	secondAccount := &Account{ID: 3901502, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(firstAccount, secondAccount)
 
 	first, err := svc.ResolveOpenAIOAuthIdentityPlan(context.Background(), c, firstAccount, capture, options)
 	require.NoError(t, err)
@@ -951,7 +953,7 @@ func TestApplyOpenAIOAuthIdentityPlanSafePairPreservesRecognizedClient(t *testin
 func TestResolveOpenAIOAuthIdentityPlanForceCodexCLINormalizesWhenPolicyDisabled(t *testing.T) {
 	const (
 		resolvedUA = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
-		wantUA     = "codex-tui/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.200.1)"
+		wantUA     = "codex-tui/0.200.1 (Windows 11; x86_64) WindowsTerminal (codex-tui; 0.200.1)"
 		clientUA   = "codex_vscode/0.145.2 (Mac OS X 14.0; arm64) vscode (codex_vscode; 0.145.2)"
 	)
 	SetCodexCanonicalUserAgentResolver(func() string { return resolvedUA })
@@ -973,7 +975,7 @@ func TestResolveOpenAIOAuthIdentityPlanForceCodexCLINormalizesWhenPolicyDisabled
 				ID: 902, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
 				Credentials: map[string]any{"user_agent": "codex-tui/0.100.0 (Windows 11; x86_64) WindowsTerminal"},
 			}
-			svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: true}}}
+			svc := &OpenAIGatewayService{accountRepo: newAuthorizedOpenAIOAuthTestRepo(account), cfg: &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: true}}}
 			plan, err := svc.ResolveOpenAIOAuthIdentityPlan(
 				context.Background(), c, account, OpenAIOAuthIdentityCapture{}, OpenAIOAuthIdentityPlanOptions{
 					ProjectionMode:     OpenAIOAuthIdentityProjectionRegular,
@@ -1006,7 +1008,7 @@ func TestResolveOpenAIOAuthIdentityPlanForceCodexCLINormalizesWhenPolicyDisabled
 func TestResolveOpenAIOAuthIdentityPlanFreezesHTTPClientIdentity(t *testing.T) {
 	const (
 		resolvedUA     = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
-		wantResolvedUA = "codex-tui/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.200.1)"
+		wantResolvedUA = "codex-tui/0.200.1 (Windows 10.0.26200; x86_64) WindowsTerminal (codex-tui; 0.200.1)"
 		updatedUA      = "codex_cli_rs/0.201.2 (Mac OS X 15.1.0; arm64) iTerm.app"
 	)
 	SetCodexCanonicalUserAgentResolver(func() string { return resolvedUA })
@@ -1016,7 +1018,7 @@ func TestResolveOpenAIOAuthIdentityPlanFreezesHTTPClientIdentity(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	account := &Account{ID: 901, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	plan, err := (&OpenAIGatewayService{}).ResolveOpenAIOAuthIdentityPlan(
+	plan, err := (&OpenAIGatewayService{accountRepo: newAuthorizedOpenAIOAuthTestRepo(account)}).ResolveOpenAIOAuthIdentityPlan(
 		context.Background(), c, account, OpenAIOAuthIdentityCapture{}, OpenAIOAuthIdentityPlanOptions{
 			ProjectionMode:     OpenAIOAuthIdentityProjectionRegular,
 			InstallationPolicy: OpenAIOAuthInstallationPreserve,
@@ -1046,7 +1048,7 @@ func TestResolveOpenAIOAuthIdentityPlanFreezesHTTPClientIdentity(t *testing.T) {
 func TestResolveOpenAIOAuthIdentityPlanReusesWSConnectionClientIdentitySnapshot(t *testing.T) {
 	const (
 		resolvedUA     = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
-		wantResolvedUA = "codex-tui/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.200.1)"
+		wantResolvedUA = "codex-tui/0.200.1 (Windows 10.0.26200; x86_64) WindowsTerminal (codex-tui; 0.200.1)"
 		updatedUA      = "codex_cli_rs/0.201.2 (Mac OS X 15.1.0; arm64) iTerm.app"
 	)
 	SetCodexCanonicalUserAgentResolver(func() string { return resolvedUA })
@@ -1056,7 +1058,7 @@ func TestResolveOpenAIOAuthIdentityPlanReusesWSConnectionClientIdentitySnapshot(
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	account := &Account{ID: 903, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	svc := &OpenAIGatewayService{}
+	svc := &OpenAIGatewayService{accountRepo: newAuthorizedOpenAIOAuthTestRepo(account)}
 	options := OpenAIOAuthIdentityPlanOptions{
 		ProjectionMode:     OpenAIOAuthIdentityProjectionRegular,
 		InstallationPolicy: OpenAIOAuthInstallationPreserve,
@@ -1087,7 +1089,7 @@ func TestResolveOpenAIOAuthIdentityPlanReusesWSConnectionClientIdentitySnapshot(
 func TestResolveOpenAIOAuthIdentityPlanInvalidStoredUAUsesFrozenConnectionFallback(t *testing.T) {
 	const (
 		resolvedUA     = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
-		wantResolvedUA = "codex-tui/0.200.1 (Ubuntu 24.04.4; x86_64) xterm-256color (codex-tui; 0.200.1)"
+		wantResolvedUA = "codex-tui/0.200.1 (Windows 10.0.26200; x86_64) WindowsTerminal (codex-tui; 0.200.1)"
 		updatedUA      = "codex_vscode/0.201.2 (Mac OS X 15.1.0; arm64) vscode"
 	)
 	SetCodexCanonicalUserAgentResolver(func() string { return resolvedUA })
@@ -1100,7 +1102,7 @@ func TestResolveOpenAIOAuthIdentityPlanInvalidStoredUAUsesFrozenConnectionFallba
 		ID: 904, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
 		Credentials: map[string]any{"user_agent": "luna/1.0"},
 	}
-	svc := &OpenAIGatewayService{}
+	svc := &OpenAIGatewayService{accountRepo: newAuthorizedOpenAIOAuthTestRepo(account)}
 	options := OpenAIOAuthIdentityPlanOptions{
 		ProjectionMode:     OpenAIOAuthIdentityProjectionRegular,
 		InstallationPolicy: OpenAIOAuthInstallationPreserve,
@@ -1154,7 +1156,7 @@ func TestResolveOpenAIOAuthIdentityPlanFailoverUsesTargetAccountWithFrozenCanoni
 		ProjectionMode:     OpenAIOAuthIdentityProjectionRegular,
 		InstallationPolicy: OpenAIOAuthInstallationPreserve,
 	}
-	svc := &OpenAIGatewayService{}
+	svc := &OpenAIGatewayService{accountRepo: newAuthorizedOpenAIOAuthTestRepo(firstAccount, secondAccount)}
 
 	first, err := svc.ResolveOpenAIOAuthIdentityPlan(
 		context.Background(), c, firstAccount, OpenAIOAuthIdentityCapture{}, options,
@@ -1181,7 +1183,7 @@ func TestOpenAIOAuthIdentityPlanMatchesCredentialOwner(t *testing.T) {
 
 	firstAccount := &Account{ID: 907, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	secondAccount := &Account{ID: 908, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
-	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "plan-owner-match-secret"}}}
+	svc := &OpenAIGatewayService{accountRepo: newAuthorizedOpenAIOAuthTestRepo(firstAccount, secondAccount), cfg: &config.Config{JWT: config.JWTConfig{Secret: "plan-owner-match-secret"}}}
 	options := OpenAIOAuthIdentityPlanOptions{
 		TurnIdentityEnabled: true,
 		ProjectionMode:      OpenAIOAuthIdentityProjectionRegular,
@@ -1208,6 +1210,7 @@ func TestGetOrResolveOpenAIOAuthOutboundIdentityUsesExactCaptureAndCredentialSco
 	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "get-or-resolve-secret"}}}
 	firstAccount := &Account{ID: 920, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	secondAccount := &Account{ID: 921, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(firstAccount, secondAccount)
 	firstCapture := CaptureOpenAIOAuthIdentity(nil, []byte(`{"client_metadata":{"session_id":"first"}}`), "")
 	secondCapture := CaptureOpenAIOAuthIdentity(nil, []byte(`{"client_metadata":{"session_id":"second"}}`), "")
 	regular := OpenAIOAuthIdentityPlanOptions{
@@ -1331,7 +1334,7 @@ func TestApplyOpenAIOAuthIdentityPlanSafePairFreezesFallback(t *testing.T) {
 func TestBuildOpenAIWSHeadersReusesFrozenClientIdentityPlan(t *testing.T) {
 	const (
 		resolvedUA     = "codex_cli_rs/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color"
-		wantResolvedUA = "codex-tui/0.200.1 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.200.1)"
+		wantResolvedUA = "codex-tui/0.200.1 (Mac OS 26.6.2; arm64) iTerm.app/3.7.0 (codex-tui; 0.200.1)"
 		updatedUA      = "codex_cli_rs/0.201.2 (Mac OS X 15.1.0; arm64) iTerm.app"
 	)
 	SetCodexCanonicalUserAgentResolver(func() string { return resolvedUA })
@@ -1345,7 +1348,7 @@ func TestBuildOpenAIWSHeadersReusesFrozenClientIdentityPlan(t *testing.T) {
 		ID: 902, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
 		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
 	}
-	svc := &OpenAIGatewayService{}
+	svc := &OpenAIGatewayService{accountRepo: newAuthorizedOpenAIOAuthTestRepo(account)}
 	capture := CaptureOpenAIOAuthIdentity(c, nil, "")
 	SetOpenAIOAuthIdentityCapture(c, capture)
 	plan, err := svc.ResolveOpenAIOAuthIdentityPlan(

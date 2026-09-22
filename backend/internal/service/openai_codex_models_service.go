@@ -1421,11 +1421,12 @@ func codexModelWithVisibility(rawModel json.RawMessage, visibility string) (json
 }
 
 type codexModelsManifestUpstreamError struct {
-	err        error
-	retryable  bool
-	statusCode int
-	headers    http.Header
-	body       []byte
+	err               error
+	retryable         bool
+	statusCode        int
+	headers           http.Header
+	body              []byte
+	credentialAccount *Account
 }
 
 func (e *codexModelsManifestUpstreamError) Error() string { return e.err.Error() }
@@ -1632,7 +1633,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	credAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {
-		return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_CREDENTIALS_FAILED", "resolve credential account: %v", err)
+		return nil, openAIModelsCredentialError(err)
 	}
 
 	clientVersion = strings.TrimSpace(clientVersion)
@@ -1644,7 +1645,10 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	var clientIdentity CodexClientIdentityPlan
 	switch {
 	case credAccount.IsOpenAIOAuth():
-		authToken = strings.TrimSpace(credAccount.GetOpenAIAccessToken())
+		authToken, _, err = s.GetAccessToken(ctx, credAccount)
+		if err != nil {
+			return nil, openAIModelsCredentialError(err)
+		}
 		if authToken == "" && !credAccount.IsOpenAIAgentIdentity() {
 			return nil, infraerrors.New(http.StatusBadGateway, "OPENAI_CODEX_MODELS_TOKEN_MISSING", "account has no Codex backend access token")
 		}
@@ -1804,11 +1808,24 @@ func (s *OpenAIGatewayService) handleCodexModelsManifestAccountAuthError(ctx con
 	if !errors.As(err, &upstreamErr) || upstreamErr.statusCode != http.StatusUnauthorized {
 		return
 	}
+	if upstreamErr.credentialAccount != nil {
+		credAccount = upstreamErr.credentialAccount
+	}
 	headers := upstreamErr.headers
 	if headers == nil {
 		headers = http.Header{}
 	}
+	if credAccount.OpenAIOAuthCredentialOS != "" {
+		account = credAccount
+	}
 	s.handleOpenAIAccountUpstreamError(ctx, account, upstreamErr.statusCode, headers, upstreamErr.body)
+}
+
+func openAIModelsCredentialError(err error) error {
+	if errors.Is(err, ErrOpenAIOAuthOSUnauthorized) || errors.Is(err, ErrOpenAIOAuthOSAuthorizationChanged) {
+		return infraerrors.New(http.StatusServiceUnavailable, "OPENAI_OS_AUTHORIZATION_UNAVAILABLE", "No available OpenAI OAuth authorization for the requested operating system")
+	}
+	return infraerrors.New(http.StatusBadGateway, "OPENAI_CODEX_MODELS_CREDENTIALS_FAILED", "OpenAI model discovery credentials are unavailable")
 }
 
 func (s *OpenAIGatewayService) fetchCachedOpenAIModels(ctx context.Context, request openAIModelsRequest, fetch func(ctx context.Context, ifNoneMatch string) (*OpenAIModelsResponse, error), ifNoneMatch string) (*OpenAIModelsResponse, error) {
@@ -1870,6 +1887,23 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstreamForRequest(reques
 }
 
 func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, request openAIModelsRequest, ifNoneMatch string) (*OpenAIModelsResponse, error) {
+	if RequiresOpenAIOAuthOSAuthorization(request.credentialAccount) {
+		// Shared cache refreshes run after the original request. Revalidate its
+		// frozen slot and generation instead of selecting today's default slot.
+		credential, authErr := ReloadOpenAIOAuthCredentialAccount(ctx, s.accountRepo, request.credentialAccount)
+		if authErr != nil {
+			return nil, openAIModelsCredentialError(authErr)
+		}
+		request.credentialAccount = credential
+		ctx = ContextWithOpenAIRequestOS(ctx, OpenAIRequestOS{Family: credential.OpenAIOAuthCredentialOS, Source: "frozen_authorization", Captured: true})
+		token, _, authErr := s.GetAccessToken(ctx, credential)
+		if authErr != nil {
+			return nil, openAIModelsCredentialError(authErr)
+		}
+		request.headers = request.headers.Clone()
+		request.headers.Set("Authorization", "Bearer "+token)
+		setOpenAIChatGPTAccountHeaders(request.headers, credential)
+	}
 	if request.requestPolicy != nil {
 		ctx = openai.WithRequestPolicy(ctx, *request.requestPolicy)
 	}
@@ -1938,11 +1972,12 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 			message = resp.Status
 		}
 		return nil, &codexModelsManifestUpstreamError{
-			err:        infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "codex models manifest upstream error %d: %s", resp.StatusCode, message),
-			statusCode: resp.StatusCode,
-			headers:    resp.Header.Clone(),
-			body:       body,
-			retryable:  isRetryableCodexModelsManifestStatus(resp.StatusCode, request.useAPIKeyUpstream),
+			err:               infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "codex models manifest upstream error %d: %s", resp.StatusCode, message),
+			credentialAccount: request.credentialAccount,
+			statusCode:        resp.StatusCode,
+			headers:           resp.Header.Clone(),
+			body:              body,
+			retryable:         isRetryableCodexModelsManifestStatus(resp.StatusCode, request.useAPIKeyUpstream),
 		}
 	}
 
@@ -1971,7 +2006,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 	}
 	if response.NotModified {
 		if !request.useAPIKeyUpstream {
-			namespace := openAIOutboundSessionIdentityNamespace(request.credentialAccount)
+			namespace := openAICodexModelCapabilitiesNamespace(request.credentialAccount)
 			s.codexModelCapabilities.refreshNamespace(namespace, time.Now())
 		}
 		return response, nil
@@ -2026,7 +2061,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 			}
 		}
 	} else {
-		namespace := openAIOutboundSessionIdentityNamespace(request.credentialAccount)
+		namespace := openAICodexModelCapabilitiesNamespace(request.credentialAccount)
 		s.codexModelCapabilities.observeManifest(namespace, body, time.Now())
 	}
 	etag := response.upstreamETag
@@ -2528,6 +2563,9 @@ func validateCodexModelsManifestEnvelope(body []byte) error {
 func buildOpenAIModelsCacheKey(request openAIModelsRequest) string {
 	hasher := sha256.New()
 	_, _ = fmt.Fprintf(hasher, "%d\n%d\n%t\n%s\n%s\n", request.accountID, request.credentialAccountID, request.standardModelsList, request.proxyURL, request.url)
+	if account := request.credentialAccount; account != nil {
+		_, _ = fmt.Fprintf(hasher, "credential_os=%s\nauthorization_generation=%s\n", account.OpenAIOAuthCredentialOS, account.OpenAIOAuthAuthorizationGeneration)
+	}
 	if request.requestPolicy != nil {
 		_, _ = fmt.Fprintf(hasher, "residency_us=%t\n", request.requestPolicy.CodexResidencyUS)
 	}

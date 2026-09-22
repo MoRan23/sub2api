@@ -69,6 +69,7 @@ type TestEvent struct {
 // AccountTestOptions carries optional media for admin connectivity tests.
 // ImageDataURL / AudioDataURL are full data URLs (data:<mime>;base64,...).
 type AccountTestOptions struct {
+	OSFamily     string
 	ImageDataURL string
 	AudioDataURL string
 }
@@ -173,8 +174,45 @@ func captureOpenAIOAuthSyntheticRequest(c *gin.Context, body []byte, callerSeed 
 		return current
 	}
 	capture := CaptureOpenAIOAuthIdentity(nil, body, callerSeed)
+	if scoped := OpenAIOAuthAccountTestCredential(c); scoped != nil {
+		capture.OSFamily = scoped.OpenAIOAuthCredentialOS
+		capture.OSSource = "account_test"
+	}
 	SetOpenAIOAuthIdentityCapture(c, capture)
 	return capture
+}
+
+const openAIOAuthAccountTestCredentialKey = "openai_oauth_account_test_credential"
+
+// OpenAIOAuthAccountTestCredential is request-local and never serialized.
+func OpenAIOAuthAccountTestCredential(c *gin.Context) *Account {
+	if c == nil {
+		return nil
+	}
+	value, _ := c.Get(openAIOAuthAccountTestCredentialKey)
+	account, _ := value.(*Account)
+	return account
+}
+
+func openAIAccountTestResponseCredential(account *Account) *Account {
+	if account == nil || account.OpenAIOAuthCredentialOS == "" || !account.IsCredentialShadow() {
+		return account
+	}
+	copy := *account
+	copy.ID = account.OpenAIOAuthCredentialOwnerID
+	copy.ParentAccountID = nil
+	return &copy
+}
+
+func (s *AccountTestService) recordOpenAIAccountTestUnauthorized(ctx context.Context, account *Account, message string) {
+	if account.OpenAIOAuthCredentialOS != "" {
+		if repo, ok := s.accountRepo.(OpenAIOAuthOSCredentialsRepository); ok {
+			_, _ = repo.SetOpenAIOAuthOSCredentialErrorIfUnchanged(ctx, account.OpenAIOAuthCredentialOwnerID,
+				account.OpenAIOAuthCredentialOS, account.OpenAIOAuthAuthorizationGeneration, account.OpenAIOAuthCredentialRevision, "account_test_unauthorized")
+		}
+		return
+	}
+	_ = s.accountRepo.SetError(ctx, account.ID, message)
 }
 
 func (s *AccountTestService) SetSettingService(settingService *SettingService) {
@@ -233,17 +271,25 @@ func (s *AccountTestService) applyOAuthAccountTestRootSession(ctx context.Contex
 	profilesAvailable = (profilesAvailable || OpenAIOAuthOSProfilesComplete(owner.OpenAIOAuthOSProfiles)) && IsOpenAIOAuthOSProfileOwner(owner)
 	var defaultProfile, selectedProfile OpenAIOAuthOSProfile
 	if profilesAvailable {
-		var err error
-		defaultProfile, err = ResolveOpenAIOAuthOSProfile(ctx, s.accountRepo, owner, "")
-		if err != nil {
-			return fmt.Errorf("resolve OAuth synchronous test profile: %w", err)
-		}
-		selectedProfile = defaultProfile
-		if plan.OSFamily != "" && plan.OSFamily != defaultProfile.OSFamily {
-			selectedProfile, err = ResolveOpenAIOAuthOSProfile(ctx, s.accountRepo, owner, plan.OSFamily)
+		profiles := owner.OpenAIOAuthOSProfiles
+		if !OpenAIOAuthOSProfilesComplete(profiles) {
+			ensurer := s.accountRepo.(OpenAIOAuthOSProfilesEnsurer)
+			var err error
+			profiles, err = ensurer.EnsureOpenAIOAuthOSProfiles(ctx, owner.ID)
 			if err != nil {
 				return fmt.Errorf("resolve OAuth synchronous test profile: %w", err)
 			}
+		}
+		if !OpenAIOAuthOSProfilesComplete(profiles) {
+			return ErrOpenAIOAuthOSProfileUnavailable
+		}
+		// Daily legacy-root migration uses the owner's stored default even when
+		// this test is already frozen to another OS authorization.
+		defaultProfile = profiles.Profiles[profiles.DefaultOS]
+		var err error
+		selectedProfile, err = ResolveOpenAIOAuthOSProfile(ctx, s.accountRepo, owner, plan.OSFamily)
+		if err != nil {
+			return fmt.Errorf("resolve OAuth synchronous test profile: %w", err)
 		}
 	}
 	receivedAt := plan.ReceivedAt
@@ -315,7 +361,21 @@ func (s *AccountTestService) freezeOpenAIAccountTestPolicy(ctx context.Context, 
 // FetchOpenAIAccountModels uses the shared cached discovery path for the test picker.
 // It only fills picker-only gaps (local display-name fallbacks, OAuth image choices)
 // on its own copy; the shared catalog and its cache stay untouched.
-func (s *AccountTestService) FetchOpenAIAccountModels(ctx context.Context, account *Account) ([]openai.Model, error) {
+func (s *AccountTestService) FetchOpenAIAccountModels(ctx context.Context, account *Account, osFamily ...string) ([]openai.Model, error) {
+	if s == nil {
+		return nil, errors.New("OpenAI model discovery service is unavailable")
+	}
+	if RequiresOpenAIOAuthOSAuthorization(account) {
+		os := ""
+		if len(osFamily) > 0 {
+			os = osFamily[0]
+		}
+		var err error
+		account, err = ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, os)
+		if err != nil {
+			return nil, ErrOpenAIOAuthOSUnauthorized
+		}
+	}
 	if s == nil || s.openAIGatewayService == nil {
 		return nil, errors.New("OpenAI model discovery service is unavailable")
 	}
@@ -545,6 +605,16 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		s.sendEvent(c, TestEvent{Type: "content", Text: "Synthetic Anthropic OAuth account is healthy and interactive."})
 		s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 		return nil
+	}
+	if RequiresOpenAIOAuthOSAuthorization(account) {
+		if testOpts.OSFamily != "" && NormalizeOpenAIOSFamily(testOpts.OSFamily) == "" {
+			return s.sendErrorAndEnd(c, "os must be windows, macos, or linux")
+		}
+		account, err = ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, testOpts.OSFamily)
+		if err != nil {
+			return s.sendErrorAndEnd(c, ErrOpenAIOAuthOSUnauthorized.Error())
+		}
+		c.Set(openAIOAuthAccountTestCredentialKey, account)
 	}
 
 	// Route to platform-specific test method
@@ -977,7 +1047,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 
 	credentialAccount := account
-	if account.IsCredentialShadow() {
+	if account.IsCredentialShadow() && account.OpenAIOAuthCredentialOS == "" {
 		resolved, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 		if err != nil {
 			return s.sendErrorAndEnd(c, err.Error())
@@ -1158,7 +1228,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			c.Request = c.Request.WithContext(markAgentIdentityTaskRecoveryTried(ctx))
 			return s.testOpenAIAccountConnection(c, account, modelID, prompt, mode)
 		}
-		beginAccountTestResponseInfo(c, credentialAccount, resp.Header)
+		beginAccountTestResponseInfo(c, openAIAccountTestResponseCredential(credentialAccount), resp.Header)
 		observeAccountTestResponseInfo(c, body)
 		if resp.StatusCode == http.StatusTooManyRequests {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
@@ -1166,12 +1236,12 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		// 401 Unauthorized: 标记账号为永久错误
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
 			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+			s.recordOpenAIAccountTestUnauthorized(ctx, credentialAccount, errMsg)
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
-	beginAccountTestResponseInfo(c, credentialAccount, resp.Header)
+	beginAccountTestResponseInfo(c, openAIAccountTestResponseCredential(credentialAccount), resp.Header)
 	// Process SSE stream
 	return s.processOpenAIStream(c, resp.Body)
 }
@@ -2375,7 +2445,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account *Account, testModelID string) error {
 	ctx := s.freezeOpenAIAccountTestPolicy(c.Request.Context(), c, account)
 	credentialAccount := account
-	if account.IsShadow() {
+	if account.IsShadow() && account.OpenAIOAuthCredentialOS == "" {
 		resolved, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 		if err != nil {
 			return s.sendErrorAndEnd(c, "Failed to resolve account credentials")
@@ -2531,7 +2601,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		c.Request = c.Request.WithContext(markAgentIdentityTaskRecoveryTried(ctx))
 		return s.testOpenAICompactConnection(c, account, testModelID)
 	}
-	beginAccountTestResponseInfo(c, credentialAccount, resp.Header)
+	beginAccountTestResponseInfo(c, openAIAccountTestResponseCredential(credentialAccount), resp.Header)
 	observeAccountTestResponseInfo(c, body)
 	forEachOpenAISSEDataPayload(string(body), func(payload []byte) {
 		observeAccountTestResponseInfo(c, payload)
@@ -2556,7 +2626,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
 			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+			s.recordOpenAIAccountTestUnauthorized(ctx, credentialAccount, errMsg)
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
@@ -2596,7 +2666,7 @@ func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, accoun
 	account.RateLimitedAt = &now
 	account.RateLimitResetAt = resetAt
 
-	if account.Status == StatusError {
+	if account.Status == StatusError && account.OpenAIOAuthCredentialOS == "" {
 		if err := s.accountRepo.ClearError(ctx, account.ID); err != nil {
 			return
 		}
@@ -3348,7 +3418,7 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Context, account *Account, modelID, prompt string) error {
 	ctx = s.freezeOpenAIAccountTestPolicy(ctx, c, account)
 	credentialAccount := account
-	if account.IsShadow() {
+	if account.IsShadow() && account.OpenAIOAuthCredentialOS == "" {
 		resolved, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 		if err != nil {
 			return s.sendErrorAndEnd(c, "Failed to resolve account credentials")

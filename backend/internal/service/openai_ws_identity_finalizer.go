@@ -44,7 +44,7 @@ func (s *OpenAIGatewayService) finalizeOpenAIOAuthWSWirePlan(
 		}
 	}
 
-	observedCapabilities := s.openAICodexModelCapabilities(plan.CredentialOwnerNamespace, model)
+	observedCapabilities := s.openAICodexModelCapabilities(openAICodexModelCapabilitiesPlanNamespace(plan), model)
 	modelCapabilities := effectiveCodexModelCapabilities(
 		observedCapabilities,
 		explicitOpenAIResponsesLiteWS(c, payload),

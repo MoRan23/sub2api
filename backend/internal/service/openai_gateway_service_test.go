@@ -167,6 +167,7 @@ func TestOpenAIGatewayService_ForwardAsAnthropic_CapacityShedReturnsRequestScope
 		},
 	}
 
+	authorizeOpenAIForwardFixture(svc, account)
 	_, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
 
 	var failoverErr *UpstreamFailoverError
@@ -1741,6 +1742,7 @@ func TestOpenAIStreamingTerminalAndClientCancellationDoNotQuarantineProxy(t *tes
 	proxyID := int64(4699)
 	account := &Account{ID: 469901, Name: "oauth", Platform: PlatformOpenAI, Type: AccountTypeOAuth, ProxyID: &proxyID}
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
+	authorizeOpenAIForwardFixture(svc, account)
 
 	terminalRecorder := httptest.NewRecorder()
 	terminalCtx, _ := gin.CreateTestContext(terminalRecorder)
@@ -3022,6 +3024,7 @@ func TestOpenAIInvalidBaseURLWhenAllowlistDisabled(t *testing.T) {
 		Credentials: map[string]any{"base_url": "://invalid-url"},
 	}
 
+	authorizeOpenAIForwardFixture(svc, account)
 	_, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, []byte("{}"), "token", false, "", false)
 	if err == nil {
 		t.Fatalf("expected error for invalid base_url when allowlist disabled")
@@ -3184,6 +3187,7 @@ func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesCompactPath(t *test
 	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "compact-path-test-secret"}}}
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 
+	authorizeOpenAIForwardFixture(svc, account)
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), "token")
 	require.NoError(t, err)
 	require.Equal(t, chatgptCodexURL+"/compact", req.URL.String())
@@ -3208,6 +3212,7 @@ func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesExplicitAPIKeyBetaH
 	}}
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 
+	authorizeOpenAIForwardFixture(svc, account)
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), "token")
 	require.NoError(t, err)
 	require.Equal(t, "api-key-specific-beta", req.Header.Get("OpenAI-Beta"), "OAuth-only backport must not alter API-key passthrough headers")
@@ -3226,6 +3231,7 @@ func TestOpenAIBuildUpstreamRequestCompactForcesJSONAcceptForOAuth(t *testing.T)
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
 	}
 
+	authorizeOpenAIForwardFixture(svc, account)
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", false, "", true)
 	require.NoError(t, err)
 	require.Equal(t, chatgptCodexURL+"/compact", req.URL.String())
@@ -3251,6 +3257,7 @@ func TestOpenAIBuildUpstreamRequestOAuthMessagesBridgeUsesSessionOnly(t *testing
 		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-acc"},
 	}
 
+	authorizeOpenAIForwardFixture(svc, account)
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", true, "anthropic-metadata-session-1", false)
 	require.NoError(t, err)
 	require.NotEmpty(t, req.Header.Get("Session-Id"))
@@ -3276,6 +3283,7 @@ func TestOpenAIBuildUpstreamRequestPreservesCompactPathForAPIKeyBaseURL(t *testi
 		Credentials: map[string]any{"base_url": "https://example.com/v1"},
 	}
 
+	authorizeOpenAIForwardFixture(svc, account)
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), "token", false, "", false)
 	require.NoError(t, err)
 	require.Equal(t, "https://example.com/v1/responses/compact", req.URL.String())
@@ -3299,6 +3307,7 @@ func TestOpenAIBuildUpstreamRequestPreservesCodexIdentityHeaders(t *testing.T) {
 	}}
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 
+	authorizeOpenAIForwardFixture(svc, account)
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "token", false, "", true)
 	require.NoError(t, err)
 	// API-key OpenAI requests now use the unified identity projector; a
@@ -3312,26 +3321,29 @@ func TestOpenAIBuildUpstreamRequestPreservesCodexIdentityHeaders(t *testing.T) {
 func TestOpenAIBuildUpstreamRequestOAuthOfficialClientOriginatorCompatibility(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// 强制统一出口：客户端自报的 originator / User-Agent 都不参与上游身份构造，
-	// 一律改写为网关规范身份，天然满足 originator 与 UA 首段配套的上游校验（issue #3901）。
+	// The inbound OS selects the authorized profile; client product/version and
+	// originator are replaced by that profile's paired gateway identity.
 	tests := []struct {
 		name       string
 		userAgent  string
 		originator string
+		wantOS     string
 	}{
-		{name: "official desktop ua", userAgent: "Codex Desktop/1.2.3"},
+		{name: "official desktop ua", userAgent: "Codex Desktop/1.2.3", wantOS: "windows"},
 		{
 			name:       "mismatched originator",
 			userAgent:  "codex_vscode/0.140.2 (Mac OS X 14.0; arm64) vscode (codex_vscode; 0.140.2)",
 			originator: "codex_cli_rs",
+			wantOS:     "macos",
 		},
 		{
 			name:       "tui identity",
 			userAgent:  "codex-tui/0.140.2 (Mac OS X 14.0; arm64) iTerm (codex-tui; 0.140.2)",
 			originator: "codex-tui",
+			wantOS:     "macos",
 		},
-		{name: "official originator without ua", originator: "codex_vscode"},
-		{name: "third-party ua", userAgent: "luna/1.2.0"},
+		{name: "official originator without ua", originator: "codex_vscode", wantOS: "windows"},
+		{name: "third-party ua", userAgent: "luna/1.2.0", wantOS: "windows"},
 	}
 
 	for _, tt := range tests {
@@ -3358,10 +3370,11 @@ func TestOpenAIBuildUpstreamRequestOAuthOfficialClientOriginatorCompatibility(t 
 			}
 
 			isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
+			authorizeOpenAIForwardFixture(svc, account)
 			req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), "token", false, "", isCodexCLI)
 			require.NoError(t, err)
 			require.Equal(t, openai.CodexDefaultOriginator, req.Header.Get("originator"))
-			require.Equal(t, codexCLIUserAgent, req.Header.Get("User-Agent"))
+			require.Equal(t, openAIForwardFixtureUserAgent(t, account, tt.wantOS), req.Header.Get("User-Agent"))
 			require.Equal(t, codexCLIVersion, req.Header.Get("version"))
 		})
 	}

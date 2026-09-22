@@ -97,6 +97,7 @@ func TestOpenAIOAuthOSWSPlanMaterializationKeepsOwnerProfileAndDailyRoots(t *tes
 	}
 	account := &Account{ID: 941177, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	require.NoError(t, PrepareOpenAIOAuthOSProfilesForCreate(account))
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	c := newOutboundIdentityTestContext(t, map[string]string{"User-Agent": "codex-tui/0.152.0 (Windows 10.0.26200; x86_64) WindowsTerminal"})
 	setOpenAIClientRequestedStream(c, true)
 	firstCapture := CaptureOpenAIOAuthIdentity(c, oauthOSWSTestFrame(t, "Windows", "ws-os-plan"), "")
@@ -143,7 +144,7 @@ func TestOpenAIOAuthOSWSPlanMaterializationKeepsOwnerProfileAndDailyRoots(t *tes
 	require.Equal(t, OpenAIOSLinux, reconnectedCapture.OSFamily)
 	require.Equal(t, "environment_context", reconnectedCapture.OSSource)
 	reconnectedCapture.ReceivedAt = firstCapture.ReceivedAt.Add(2 * time.Second)
-	reconnected, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), reconnectedContext, account, reconnectedCapture, options, &first)
+	reconnected, err := svc.GetOrResolveOpenAIOAuthOutboundIdentity(context.Background(), reconnectedContext, account, reconnectedCapture, options, nil)
 	require.NoError(t, err)
 	require.Equal(t, OpenAIOSLinux, reconnected.OSFamily)
 	require.Equal(t, "2026-09-22", reconnected.DailyBusinessDate)

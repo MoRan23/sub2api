@@ -28,6 +28,9 @@ func (r *integrityGatewaySettingsRepo) GetValue(_ context.Context, key string) (
 
 func forwardOpenAIIntegrityTestRequest(t *testing.T, svc *OpenAIGatewayService, c *gin.Context, account *Account, route string, body []byte) *OpenAIForwardResult {
 	t.Helper()
+	if IsOpenAIOAuthOSProfileOwner(account) {
+		svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
+	}
 	var result *OpenAIForwardResult
 	var err error
 	switch route {
@@ -179,21 +182,36 @@ func TestOpenAIIntegrityGatewayExcludesAPIKey(t *testing.T) {
 
 func TestOpenAIIntegrityGatewayToggleDoesNotChangeSentBodyOrResponse(t *testing.T) {
 	var sent, received [2][]byte
+	body := []byte(`{"model":"gpt-5.4","stream":false,"instructions":"Answer briefly.","prompt_cache_key":"stable-integrity-prompt","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Hello integrity."}]}]}`)
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		openAICompatSSECompletedResponse("resp_integrity_toggle", "gpt-5.4"),
+		openAICompatSSECompletedResponse("resp_integrity_toggle", "gpt-5.4"),
+	}}
+	svc, _ := newOpenAIIdentityPathService(t, false, upstream)
+	settingRepo := &integrityGatewaySettingsRepo{svc.settingService.settingRepo.(*openAIUUIDv7RuntimeRepo)}
+	svc.settingService = NewSettingService(settingRepo, nil)
+	account := newOpenAIIdentityPathOAuthAccount(9705)
+	account.Extra = map[string]any{openAIPinnedInstallationIDKey: transportTestPinnedInstallationID}
+	seedContext, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 9705)
+	// Replay the same captured request so random turn IDs and receive time do
+	// not confound the observer switch's effect on the complete wire bytes.
+	capture := CaptureOpenAIOAuthIdentity(seedContext, body, "")
+	var frozenPlan OpenAIOAuthIdentityPlan
 	for index, enabled := range []bool{false, true} {
 		enableOpenAIIdentityPathFingerprintObservation(t)
-		body := []byte(`{"model":"gpt-5.4","stream":false,"instructions":"Answer briefly.","prompt_cache_key":"stable-integrity-prompt","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Hello integrity."}]}]}`)
-		upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_integrity_toggle", "gpt-5.4")}
-		svc, _ := newOpenAIIdentityPathService(t, false, upstream)
-		settingRepo := &integrityGatewaySettingsRepo{svc.settingService.settingRepo.(*openAIUUIDv7RuntimeRepo)}
-		svc.settingService = NewSettingService(settingRepo, nil)
-		settingRepo.values[SettingKeyOpenAIRequestIntegrityObserveEnabled] = "false"
+		svc.settingService.publishOpenAIRequestIntegrityObserveEnabled("false")
 		if enabled {
-			settingRepo.values[SettingKeyOpenAIRequestIntegrityObserveEnabled] = "true"
+			svc.settingService.publishOpenAIRequestIntegrityObserveEnabled("true")
 		}
 		c, recorder := newOpenAIIdentityPathContext(t, "/v1/responses", body, 9705)
-		account := newOpenAIIdentityPathOAuthAccount(9705)
-		account.Extra = map[string]any{openAIPinnedInstallationIDKey: transportTestPinnedInstallationID}
+		SetOpenAIOAuthIdentityCapture(c, capture)
+		if index > 0 {
+			SetOpenAIOAuthIdentityPlan(c, frozenPlan)
+		}
 		forwardOpenAIIntegrityTestRequest(t, svc, c, account, "responses", body)
+		var hasPlan bool
+		frozenPlan, hasPlan = OpenAIOAuthIdentityPlanFromContext(c)
+		require.True(t, hasPlan)
 		sent[index], received[index] = upstream.lastBody, recorder.Body.Bytes()
 		entries := SnapshotFingerprintObservations(0)
 		require.Len(t, entries, 1)
@@ -224,9 +242,9 @@ func TestOpenAIIntegrityGatewayDailyRootsDoNotChangeContentVerdict(t *testing.T)
 				SettingKeyEnableOpenAIUUIDv7SessionIdentity:         "true",
 				SettingKeyEnableOpenAIOAuthDailySessionRotation:     "true",
 			}}, nil)
-			svc.oauthDailySessionRepo = &fakeOAuthDailyAffinityRepository{
-				pool:     OAuthDailySessionPool{AccountID: 9706, BusinessDate: "2026-09-17", Generation: streamRoot, SyncSessionID: syncRoot},
-				affinity: OAuthDailySessionAffinity{AccountID: 9706, APIKeyID: 9706, LogicalSessionKey: "integrity-daily", BusinessDate: "2026-09-17", Generation: streamRoot, SlotIndex: 1, StreamSessionID: streamRoot},
+			svc.oauthDailySessionRepo = &osIdentityDailyRepository{
+				pool: OAuthDailySessionPool{AccountID: 9706, BusinessDate: "2026-09-17",
+					OSRoots: map[string]OAuthDailyOSRoots{OpenAIOSWindows: {StreamSessionID: streamRoot, SyncSessionID: syncRoot}}},
 			}
 			body, err := json.Marshal(map[string]any{"model": "gpt-5.4", "stream": stream, "instructions": "Answer briefly.", "input": "Hello integrity."})
 			require.NoError(t, err)
@@ -257,7 +275,9 @@ func TestOpenAIIntegrityGatewayFailoverRetainsBaselineAndFrozenSwitch(t *testing
 	settings.values[SettingKeyOpenAIRequestIntegrityObserveEnabled] = "true"
 	svc.settingService = NewSettingService(settings, nil)
 	c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 9707)
-	_, err := svc.Forward(context.Background(), c, newOpenAIIdentityPathOAuthAccount(9707), body)
+	firstAccount := newOpenAIIdentityPathOAuthAccount(9707)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(firstAccount)
+	_, err := svc.Forward(context.Background(), c, firstAccount, body)
 	var failover *UpstreamFailoverError
 	require.ErrorAs(t, err, &failover)
 	firstCapture := openAIIntegrityCaptureFromContext(c)

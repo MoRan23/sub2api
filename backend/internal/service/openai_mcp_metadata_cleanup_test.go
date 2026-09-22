@@ -135,6 +135,7 @@ func TestOpenAIMCPMetadataCleanupHTTPWire(t *testing.T) {
 			if passthrough {
 				account.Extra = map[string]any{"openai_passthrough": true}
 			}
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			_, err = svc.Forward(context.Background(), c, account, body)
 			require.NoError(t, err)
 			select {
@@ -168,12 +169,14 @@ func TestOpenAIMCPMetadataCleanupWSWire(t *testing.T) {
 			svc.openaiWSPool.setClientDialerForTest(dialer)
 			defer svc.openaiWSPool.Close()
 			account := newOpenAIIdentityPathOAuthAccount(1542)
+			account.Credentials["access_token"] = "sk-test"
 			account.Status, account.Schedulable = StatusActive, true
 			account.Extra = map[string]any{
 				"responses_websockets_v2_enabled":           true,
 				"openai_oauth_responses_websockets_v2_mode": mode,
 				openAIPinnedInstallationIDKey:               transportTestPinnedInstallationID,
 			}
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			server, done := startPassthroughLifecycleServer(t, ctx, svc, account)
 			defer server.Close()
 			client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", nil)

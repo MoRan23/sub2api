@@ -31,6 +31,8 @@ export default {
         send_result_unknown: 'Sending started but acceptance could not be confirmed. The batch will not be blindly resent.',
         proxy_unavailable: 'The batch business proxy is unavailable. Direct connection was not used.',
         stale_identity: 'The installation identity changed. Old pool data was not sent with the new identity.',
+        missing_oauth_authorization_scope: 'A trusted system authorization snapshot is missing. Telemetry was skipped.',
+        stale_authorization: 'Authorization for this system changed or became invalid. The old batch was skipped.',
         telemetry_disabled: 'Telemetry or the corresponding mode is disabled.',
         timeout: 'Telemetry delivery timed out.', transport_error: 'Telemetry connection or send failed.',
         transport_unavailable: 'The telemetry transport is unavailable.', upstream_http_error: 'The telemetry endpoint returned an unsuccessful status.',

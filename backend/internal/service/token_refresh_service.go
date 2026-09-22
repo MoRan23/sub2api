@@ -617,11 +617,19 @@ func (s *TokenRefreshService) processCandidatePage(
 			continue
 		}
 		stats.oauth++
-		if !state.registration.refresher.NeedsRefresh(account, refreshWindow) {
+		candidates, err := s.backgroundRefreshAccounts(ctx, account)
+		if err != nil {
+			stats.failed++
+			slog.Warn("token_refresh.list_authorizations_failed", "account_id", account.ID, "error", logredact.RedactText(err.Error()))
 			continue
 		}
-		stats.needsRefresh++
-		groups[account.Platform] = append(groups[account.Platform], account)
+		for _, candidate := range candidates {
+			if !state.registration.refresher.NeedsRefresh(candidate, refreshWindow) {
+				continue
+			}
+			stats.needsRefresh++
+			groups[account.Platform] = append(groups[account.Platform], candidate)
+		}
 	}
 
 	type providerResult struct {
@@ -650,6 +658,45 @@ func (s *TokenRefreshService) processCandidatePage(
 	return stats
 }
 
+// Pagination remains account-based. Only after a unique owner has been read do
+// we expand its authorized slots into independent refresh jobs.
+func (s *TokenRefreshService) backgroundRefreshAccounts(ctx context.Context, account *Account) ([]*Account, error) {
+	reader, ok := s.accountRepo.(OpenAIOAuthOSCredentialsReader)
+	if !ok || !IsOpenAIOAuthOSProfileOwner(account) {
+		return []*Account{account}, nil
+	}
+	slots, err := reader.ListOpenAIOAuthOSCredentials(ctx, account.ID)
+	if err != nil {
+		return nil, err
+	}
+	accounts := make([]*Account, 0, len(slots))
+	seen := make(map[string]bool, len(slots))
+	now := time.Now()
+	for _, slot := range slots {
+		if slot == nil || slot.Status != OpenAIOAuthAuthorizationAuthorized ||
+			(slot.RefreshRetryAfter != nil && now.Before(*slot.RefreshRetryAfter)) {
+			continue
+		}
+		osFamily := NormalizeOpenAIOSFamily(slot.OSFamily)
+		refreshToken, _ := slot.Credentials["refresh_token"].(string)
+		if osFamily == "" || seen[osFamily] || strings.TrimSpace(refreshToken) == "" {
+			continue
+		}
+		seen[osFamily] = true
+		candidate, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, osFamily)
+		if err != nil {
+			if errors.Is(err, ErrOpenAIOAuthOSUnauthorized) || errors.Is(err, ErrOpenAIOAuthOSAuthorizationChanged) {
+				// Revocation, reauthorization, or a concurrent refresh cooldown can
+				// remove a slot between enumeration and resolution.
+				continue
+			}
+			return nil, err
+		}
+		accounts = append(accounts, candidate)
+	}
+	return accounts, nil
+}
+
 func (s *TokenRefreshService) processProviderAccounts(
 	ctx context.Context,
 	state *tokenRefreshProviderState,
@@ -661,6 +708,7 @@ func (s *TokenRefreshService) processProviderAccounts(
 	}
 	type refreshResult struct {
 		accountID int64
+		osFamily  string
 		err       error
 	}
 	jobs := make(chan *Account, len(accounts))
@@ -676,16 +724,16 @@ func (s *TokenRefreshService) processProviderAccounts(
 			defer wg.Done()
 			for account := range jobs {
 				if ctx.Err() != nil || state.isTripped() {
-					results <- refreshResult{accountID: account.ID, err: errRefreshSkipped}
+					results <- refreshResult{accountID: account.ID, osFamily: account.OpenAIOAuthCredentialOS, err: errRefreshSkipped}
 					continue
 				}
 				if state.isTripped() {
-					results <- refreshResult{accountID: account.ID, err: errRefreshSkipped}
+					results <- refreshResult{accountID: account.ID, osFamily: account.OpenAIOAuthCredentialOS, err: errRefreshSkipped}
 					continue
 				}
 				err := s.refreshWithRetryWithRateGate(ctx, account, state.registration.refresher, state.registration.executor, refreshWindow, state)
 				state.recordResult(err)
-				results <- refreshResult{accountID: account.ID, err: err}
+				results <- refreshResult{accountID: account.ID, osFamily: account.OpenAIOAuthCredentialOS, err: err}
 			}
 		}()
 	}
@@ -700,12 +748,12 @@ func (s *TokenRefreshService) processProviderAccounts(
 		switch {
 		case result.err == nil:
 			refreshed++
-			slog.Info("token_refresh.account_refreshed", "account_id", result.accountID, "platform", state.registration.platform)
+			slog.Info("token_refresh.account_refreshed", "account_id", result.accountID, "platform", state.registration.platform, "os", result.osFamily)
 		case errors.Is(result.err, errRefreshSkipped):
 			skipped++
 		default:
 			failed++
-			slog.Warn("token_refresh.account_refresh_failed", "account_id", result.accountID, "platform", state.registration.platform, "error", logredact.RedactText(result.err.Error()))
+			slog.Warn("token_refresh.account_refresh_failed", "account_id", result.accountID, "platform", state.registration.platform, "os", result.osFamily, "error", logredact.RedactText(result.err.Error()))
 		}
 	}
 	return refreshed, skipped, failed
@@ -1006,6 +1054,23 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 		// 不可重试错误（invalid_grant/invalid_client 等）直接标记 error 状态并返回
 		if isNonRetryableRefreshError(err) {
 			errorMsg := "Token refresh failed (non-retryable): " + logredact.RedactText(err.Error())
+			if handled, applied, setErr := persistOpenAIOAuthCredentialError(ctx, s.accountRepo, account, errorMsg); handled {
+				if setErr != nil {
+					return &providerCycleContainmentRefreshError{err: fmt.Errorf("failed to persist OpenAI OAuth slot refresh failure: %w", setErr)}
+				}
+				if !applied {
+					return errRefreshSkipped
+				}
+				cacheInvalidationFailed := s.cacheInvalidator == nil
+				if s.cacheInvalidator != nil {
+					if invalidateErr := s.cacheInvalidator.InvalidateToken(ctx, account); invalidateErr != nil {
+						cacheInvalidationFailed = true
+						slog.Warn("token_refresh.invalidate_failed_token_cache_failed", "account_id", account.ID, "os", account.OpenAIOAuthCredentialOS, "error", logredact.RedactText(invalidateErr.Error()))
+					}
+				}
+				s.syncSchedulerAccount(ctx, account)
+				return &accountPermanentRefreshError{err: err, persistentlyBlocked: true, cacheInvalidationFailed: cacheInvalidationFailed}
+			}
 			isGrokOAuth := account.IsGrokOAuth()
 			if !isGrokOAuth {
 				s.notifyAccountSchedulingBlocked(account, time.Time{}, "token_refresh_non_retryable")
@@ -1108,6 +1173,28 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 	if lastErr != nil {
 		reason += ": " + logredact.RedactText(lastErr.Error())
 	}
+	if account.OpenAIOAuthCredentialOS != "" {
+		conditionalRepo, ok := s.accountRepo.(interface {
+			SetOpenAIOAuthOSCredentialCooldownIfUnchanged(context.Context, int64, string, string, int64, time.Time, string) (bool, error)
+		})
+		if !ok {
+			return &providerConfigurationRefreshError{err: errors.New("OpenAI OAuth slot refresh cooldown repository is not configured")}
+		}
+		ownerID := account.OpenAIOAuthCredentialOwnerID
+		if ownerID <= 0 {
+			ownerID = account.ID
+		}
+		applied, setErr := conditionalRepo.SetOpenAIOAuthOSCredentialCooldownIfUnchanged(ctx, ownerID, account.OpenAIOAuthCredentialOS,
+			account.OpenAIOAuthAuthorizationGeneration, account.OpenAIOAuthCredentialRevision, until, reason)
+		if setErr != nil {
+			return &providerCycleContainmentRefreshError{err: fmt.Errorf("failed to persist OpenAI OAuth slot refresh cooldown: %w", setErr)}
+		}
+		if !applied {
+			return errRefreshSkipped
+		}
+		s.syncSchedulerAccount(ctx, account)
+		return lastErr
+	}
 	if account.IsGrokOAuth() {
 		conditionalRepo, ok := s.accountRepo.(GrokOAuthRefreshMutationRepository)
 		if !ok {
@@ -1196,7 +1283,7 @@ func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *A
 		}
 	}
 	// 刷新成功后清除临时不可调度状态（处理 OAuth 401 恢复场景）
-	if account.TempUnschedulableUntil != nil && time.Now().Before(*account.TempUnschedulableUntil) {
+	if account.OpenAIOAuthCredentialOS == "" && account.TempUnschedulableUntil != nil && time.Now().Before(*account.TempUnschedulableUntil) {
 		if clearErr := s.accountRepo.ClearTempUnschedulable(ctx, account.ID); clearErr != nil {
 			slog.Warn("token_refresh.clear_temp_unschedulable_failed",
 				"account_id", account.ID,
@@ -1238,6 +1325,9 @@ func (s *TokenRefreshService) postRefreshStateSyncWithCleanup(parent context.Con
 }
 
 func (s *TokenRefreshService) postRefreshStateSync(ctx context.Context, account *Account) {
+	if account == nil {
+		return
+	}
 	// 对所有 OAuth 账号调用缓存失效（InvalidateToken 内部根据平台判断是否需要处理）
 	if s.cacheInvalidator != nil && account.Type == AccountTypeOAuth {
 		if err := s.cacheInvalidator.InvalidateToken(ctx, account); err != nil {
@@ -1249,8 +1339,21 @@ func (s *TokenRefreshService) postRefreshStateSync(ctx context.Context, account 
 			slog.Debug("token_refresh.token_cache_invalidated", "account_id", account.ID)
 		}
 	}
-	// 同步更新调度器缓存，确保调度获取的 Account 对象包含最新的 credentials
+	s.syncSchedulerAccount(ctx, account)
+}
+
+func (s *TokenRefreshService) syncSchedulerAccount(ctx context.Context, account *Account) {
+	// A scoped refresh snapshot carries one OS's private credentials. Publish the
+	// canonical account so a non-default slot never replaces the default mirror.
 	if s.schedulerCache != nil {
+		if account.OpenAIOAuthCredentialOS != "" {
+			canonical, err := s.accountRepo.GetByID(ctx, account.ID)
+			if err != nil || canonical == nil {
+				slog.Warn("token_refresh.reload_scheduler_account_failed", "account_id", account.ID, "error", err)
+				return
+			}
+			account = canonical
+		}
 		if err := s.schedulerCache.SetAccount(ctx, account); err != nil {
 			slog.Warn("token_refresh.sync_scheduler_cache_failed",
 				"account_id", account.ID,

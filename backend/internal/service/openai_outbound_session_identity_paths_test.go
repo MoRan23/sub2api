@@ -222,6 +222,7 @@ func TestOpenAIOutboundIdentityPathsResponsesBuilder(t *testing.T) {
 			c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 31)
 			svc, cache := newOpenAIIdentityPathService(t, enabled, nil)
 			account := newOpenAIIdentityPathOAuthAccount(910001)
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 			req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "oauth-token", true, "responses-path-key", false)
 			require.NoError(t, err)
@@ -286,6 +287,7 @@ func TestOpenAIOutboundIdentityPathsResponsesBuilderUsesExplicitTupleWithoutProm
 			}
 			svc, cache := newOpenAIIdentityPathService(t, true, nil)
 			account := newOpenAIIdentityPathOAuthAccount(910032)
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 			req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, tt.body, "oauth-token", true, "", false)
 			require.NoError(t, err)
@@ -297,13 +299,14 @@ func TestOpenAIOutboundIdentityPathsResponsesBuilderUsesExplicitTupleWithoutProm
 
 func TestOpenAIOutboundIdentityEnabledOAuthRejectsUnsafeSeedWithoutLegacyFallback(t *testing.T) {
 	unsafeSeed := strings.Repeat("x", maxPersistedSessionIDLength+1)
-	body := []byte(`{"model":"gpt-5.4","prompt_cache_key":"` + unsafeSeed + `","input":"hello"}`)
+	body := []byte(`{"model":"gpt-5.4","stream":true,"prompt_cache_key":"` + unsafeSeed + `","input":"hello"}`)
 
 	for _, passthrough := range []bool{false, true} {
 		t.Run(map[bool]string{false: "responses", true: "passthrough"}[passthrough], func(t *testing.T) {
 			c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 310)
 			svc, cache := newOpenAIIdentityPathService(t, true, nil)
 			account := newOpenAIIdentityPathOAuthAccount(910031)
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 			var req *http.Request
 			var err error
@@ -327,38 +330,30 @@ func TestOpenAIOutboundIdentityPathsCompactUsesCanonicalPair(t *testing.T) {
 			c, _ := newOpenAIIdentityPathContext(t, "/v1/responses/compact", body, 32)
 			svc, cache := newOpenAIIdentityPathService(t, enabled, nil)
 			account := newOpenAIIdentityPathOAuthAccount(910002)
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 			req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, "oauth-token", false, "compact-path-key", false)
 			require.NoError(t, err)
 			outboundBody := readOpenAIIdentityPathRequestBody(t, req)
 			require.Empty(t, req.Header.Get("thread_id"))
-			if enabled {
-				sessionID := req.Header.Get("session-id")
-				threadID := req.Header.Get("thread-id")
-				require.Equal(t, sessionID, threadID)
-				require.True(t, ValidateFingerprintObservationUUIDv7(sessionID))
-				require.Empty(t, req.Header.Get("session_id"))
-				require.Empty(t, req.Header.Get("conversation_id"))
-				requireOpenAIIdentityPathContextWindowID(t, req.Header, outboundBody)
-			} else {
-				require.Empty(t, req.Header.Get("session-id"))
-				require.Empty(t, req.Header.Get("thread-id"))
-				require.Equal(t, isolateOpenAISessionID(32, "compact-path-key"), req.Header.Get("conversation_id"))
-			}
+			sessionID := req.Header.Get("session-id")
+			threadID := req.Header.Get("thread-id")
+			require.Equal(t, account.OpenAIOAuthOSProfiles.Profiles[account.OpenAIOAuthOSProfiles.DefaultOS].SyncSessionID, sessionID)
+			require.NotEqual(t, sessionID, threadID)
+			require.True(t, ValidateFingerprintObservationUUIDv7(threadID))
+			require.Equal(t, sessionID, req.Header.Get("x-codex-parent-thread-id"))
+			require.Empty(t, req.Header.Get("session_id"))
+			require.Empty(t, req.Header.Get("conversation_id"))
+			requireOpenAIIdentityPathContextWindowID(t, req.Header, outboundBody)
 			require.Empty(t, req.Header.Get("conversation-id"))
 			require.Empty(t, req.Header.Get("x-client-request-id"))
 			requireOpenAIIdentityPathNoBodyPair(t, outboundBody)
-			if enabled {
-				require.Equal(t, 1, identityPathCacheCalls(cache))
-			} else {
-				require.Equal(t, isolateOpenAISessionID(32, "compact-path-key"), req.Header.Get("session_id"))
-				require.Equal(t, 0, identityPathCacheCalls(cache))
-			}
+			require.Equal(t, 0, identityPathCacheCalls(cache), "synchronous roots do not use the logical stream mapping store")
 		})
 	}
 }
 
-func TestOpenAIOutboundIdentityPathsResponsesThenCompactReuseCanonicalIdentity(t *testing.T) {
+func TestOpenAIOutboundIdentityPathsSynchronousResponsesAndCompactShareRootWithFreshThreads(t *testing.T) {
 	tests := []struct {
 		name          string
 		responsesBody []byte
@@ -397,6 +392,7 @@ func TestOpenAIOutboundIdentityPathsResponsesThenCompactReuseCanonicalIdentity(t
 			svc, _ := newOpenAIIdentityPathService(t, true, upstream)
 			account := newOpenAIIdentityPathOAuthAccount(910073)
 			account.Extra = map[string]any{openAIPinnedInstallationIDKey: transportTestPinnedInstallationID}
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 			responsesContext, _ := newOpenAIIdentityPathContext(t, "/v1/responses", tt.responsesBody, 73)
 			if tt.setupHeaders != nil {
@@ -428,9 +424,9 @@ func TestOpenAIOutboundIdentityPathsResponsesThenCompactReuseCanonicalIdentity(t
 			}
 			require.NoError(t, ValidateOpenAIOutboundSessionIdentity(compactIdentity))
 			require.Equal(t, responsesIdentity.SessionID, compactIdentity.SessionID)
-			require.Equal(t, responsesIdentity.ThreadID, compactIdentity.ThreadID)
+			require.NotEqual(t, responsesIdentity.ThreadID, compactIdentity.ThreadID)
 			compactContextWindowID := requireOpenAIIdentityPathContextWindowID(t, upstream.requests[1].Header, upstream.bodies[1])
-			require.Equal(t, responsesContextWindowID, compactContextWindowID, "compact must use the current context window")
+			require.NotEqual(t, responsesContextWindowID, compactContextWindowID, "independent synchronous requests must use fresh context windows")
 			requireOpenAIIdentityPathNoBodyPair(t, upstream.bodies[1])
 			require.False(t, gjson.GetBytes(upstream.bodies[1], "client_metadata").Exists())
 
@@ -439,7 +435,8 @@ func TestOpenAIOutboundIdentityPathsResponsesThenCompactReuseCanonicalIdentity(t
 			for _, req := range upstream.requests {
 				require.Equal(t, openai.CodexDefaultOriginator, req.Header.Get("originator"))
 				require.Equal(t, codexCLIVersion, req.Header.Get("version"))
-				require.Equal(t, buildCodexCLIUserAgent(codexCLIVersion), req.Header.Get("user-agent"))
+				require.Equal(t, account.OpenAIOAuthOSProfiles.DefaultOS, openai.DetectOSFamilyFromUserAgent(req.Header.Get("user-agent")))
+				require.Equal(t, responsesIdentity.SessionID, req.Header.Get("x-codex-parent-thread-id"))
 			}
 		})
 	}
@@ -478,6 +475,7 @@ func TestOpenAIOutboundIdentityPathsResponsesAndCompactObserveFinalTransport(t *
 			upstream := &httpUpstreamRecorder{resp: successfulInstallationTestResponse()}
 			svc, cache := newOpenAIIdentityPathService(t, true, upstream)
 			account := newOpenAIIdentityPathOAuthAccount(tt.accountID)
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 			result, err := svc.Forward(context.Background(), c, account, tt.body)
 			require.NoError(t, err)
@@ -488,15 +486,16 @@ func TestOpenAIOutboundIdentityPathsResponsesAndCompactObserveFinalTransport(t *
 			if tt.compactOnly {
 				identity.SessionID = upstream.lastReq.Header.Get("session-id")
 				identity.ThreadID = upstream.lastReq.Header.Get("thread-id")
-				identity.Relation = OpenAICodexTurnRelationRoot
+				identity.Relation = OpenAICodexTurnRelationDescendant
 				require.True(t, ValidateFingerprintObservationUUIDv7(identity.SessionID))
-				require.Equal(t, identity.SessionID, identity.ThreadID)
+				require.True(t, ValidateFingerprintObservationUUIDv7(identity.ThreadID))
+				require.NotEqual(t, identity.SessionID, identity.ThreadID)
 				requireOpenAIIdentityPathNoBodyPair(t, upstream.lastBody)
 			} else {
 				identity = requireOpenAIIdentityPathPair(t, upstream.lastReq.Header, upstream.lastBody)
 			}
 			requireOpenAIIdentityPathSingleFingerprintObservation(t, identity, http.MethodPost+" "+tt.path)
-			require.Equal(t, 1, identityPathCacheCalls(cache))
+			require.Equal(t, 0, identityPathCacheCalls(cache), "synchronous requests use the selected OS sync root")
 		})
 	}
 }
@@ -508,6 +507,7 @@ func TestOpenAIOutboundIdentityPathsOAuthWSObservesFinalHandshakePair(t *testing
 	c.Request.Header.Set("session_id", "ws-observation-key")
 	svc, cache := newOpenAIIdentityPathService(t, true, nil)
 	account := newOpenAIIdentityPathOAuthAccount(910042)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	headers, resolution, err := svc.buildOpenAIWSHeadersWithBody(
 		context.Background(),
@@ -671,6 +671,7 @@ func TestOpenAIOutboundIdentityPlanReusedAcrossSameAccountTransportRetry(t *test
 			upstream := &httpUpstreamRecorder{responses: []*http.Response{tt.response(), tt.response()}}
 			svc, cache := newOpenAIIdentityPathService(t, true, upstream)
 			account := newOpenAIIdentityPathOAuthAccount(910050)
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			if tt.configure != nil {
 				tt.configure(account)
 			}
@@ -683,7 +684,11 @@ func TestOpenAIOutboundIdentityPlanReusedAcrossSameAccountTransportRetry(t *test
 				firstContextWindowID = requireOpenAIIdentityPathContextWindowID(t, upstream.requests[0].Header, upstream.bodies[0])
 			}
 			firstStoreCalls := identityPathCacheCalls(cache)
-			require.Positive(t, firstStoreCalls)
+			if tt.name == "responses" {
+				require.Zero(t, firstStoreCalls, "synchronous requests use the selected OS sync root")
+			} else {
+				require.Positive(t, firstStoreCalls)
+			}
 
 			require.NoError(t, tt.invoke(svc, c, account, tt.body))
 			require.Len(t, upstream.requests, 2)
@@ -703,10 +708,11 @@ func TestOpenAIOutboundIdentityPlanReusedAcrossSameAccountTransportRetry(t *test
 func TestOpenAIOutboundIdentityPathsOAuthPassthrough(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "disabled", true: "enabled"}[enabled], func(t *testing.T) {
-			body := []byte(`{"model":"gpt-5.4","prompt_cache_key":"passthrough-path-key","input":"hello"}`)
+			body := []byte(`{"model":"gpt-5.4","stream":true,"prompt_cache_key":"passthrough-path-key","input":"hello"}`)
 			c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 33)
 			svc, cache := newOpenAIIdentityPathService(t, enabled, nil)
 			account := newOpenAIIdentityPathOAuthAccount(910003)
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			account.Extra = map[string]any{"openai_passthrough": true}
 
 			req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, "oauth-token")
@@ -736,6 +742,7 @@ func TestOpenAIOutboundIdentityPathsOAuthPassthroughObservesEachPhysicalSend(t *
 	}}
 	svc, _ := newOpenAIIdentityPathService(t, true, upstream)
 	account := newOpenAIIdentityPathOAuthAccount(910034)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	account.Extra = map[string]any{"openai_passthrough": true}
 
 	result, err := svc.Forward(context.Background(), c, account, body)
@@ -755,6 +762,7 @@ func TestOpenAIOutboundIdentityPathsOAuthPassthroughUsesMetadataWithoutLegacySee
 	c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 331)
 	svc, cache := newOpenAIIdentityPathService(t, true, nil)
 	account := newOpenAIIdentityPathOAuthAccount(910033)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	account.Extra = map[string]any{"openai_passthrough": true}
 
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, "oauth-token")
@@ -775,6 +783,7 @@ func TestOpenAIHTTPIdentityBuildersGuardCompositeTurnStateAfterProjection(t *tes
 			resetTurnStateLocalStore(t, 32)
 			svc, _ := newOpenAIIdentityPathService(t, true, nil)
 			account := newOpenAIIdentityPathOAuthAccount(920100)
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			if tc.passthrough {
 				account.Extra = map[string]any{"openai_passthrough": true}
 			}
@@ -841,6 +850,7 @@ func TestOpenAIOutboundIdentityPassthroughPinsInstallationAcrossCarriers(t *test
 		"openai_passthrough":          true,
 		openAIPinnedInstallationIDKey: "11111111-2222-4333-8444-555555555555",
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, "oauth-token")
 	require.NoError(t, err)
@@ -871,13 +881,15 @@ func TestOpenAIOutboundIdentityPassthroughCompactPinsHeaderAndStripsClientMetada
 		"openai_passthrough":          true,
 		openAIPinnedInstallationIDKey: pinnedInstallationID,
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, "oauth-token")
 	require.NoError(t, err)
 	outboundBody := readOpenAIIdentityPathRequestBody(t, req)
 	require.Equal(t, pinnedInstallationID, req.Header.Get(codexInstallationIDKey))
 	require.True(t, ValidateFingerprintObservationUUIDv7(req.Header.Get("session-id")))
-	require.Equal(t, req.Header.Get("session-id"), req.Header.Get("thread-id"))
+	require.NotEqual(t, req.Header.Get("session-id"), req.Header.Get("thread-id"))
+	require.Equal(t, req.Header.Get("session-id"), req.Header.Get("x-codex-parent-thread-id"))
 	require.Empty(t, req.Header.Get("x-client-request-id"))
 	require.False(t, gjson.GetBytes(outboundBody, "client_metadata").Exists())
 	plan, ok := OpenAIOAuthIdentityPlanFromContext(c)
@@ -892,6 +904,7 @@ func TestOpenAIOutboundIdentityPassthroughConversationHeaderKeepsPairSeed(t *tes
 	c.Request.Header.Set("conversation_id", "passthrough-conversation")
 	svc, cache := newOpenAIIdentityPathService(t, true, nil)
 	account := newOpenAIIdentityPathOAuthAccount(910006)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, "oauth-token")
 	require.NoError(t, err)
@@ -903,7 +916,7 @@ func TestOpenAIOutboundIdentityPassthroughConversationHeaderKeepsPairSeed(t *tes
 	cache.mu.Unlock()
 	expected, err := OpenAIOutboundSessionIdentityKey(
 		"transport-identity-test-secret",
-		"account:910006",
+		"account:910006/os/"+account.OpenAIOAuthOSProfiles.DefaultOS,
 		40,
 		"passthrough-conversation",
 	)
@@ -918,6 +931,7 @@ func TestOpenAIOutboundIdentityPassthroughInvalidPrimarySeedUsesValidConversatio
 	c.Request.Header.Set("conversation_id", "valid-conversation")
 	svc, cache := newOpenAIIdentityPathService(t, true, nil)
 	account := newOpenAIIdentityPathOAuthAccount(910007)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, "oauth-token")
 	require.NoError(t, err)
@@ -977,6 +991,7 @@ func TestOpenAIOutboundIdentityPathsChatAndMessagesUseOneFinalPair(t *testing.T)
 				upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_identity_path_"+route, "gpt-5.4")}
 				svc, cache := newOpenAIIdentityPathService(t, enabled, upstream)
 				account := newOpenAIIdentityPathOAuthAccount(910010 + int64(len(route)))
+				svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 				var err error
 				if route == "chat" {
 					_, err = svc.ForwardAsChatCompletions(context.Background(), c, account, body, "compat-path-key", "gpt-5.4")
@@ -1026,6 +1041,7 @@ func TestOpenAIOutboundIdentityCompatUsesPreConversionTuple(t *testing.T) {
 			upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_pre_conversion_"+route, "gpt-5.4")}
 			svc, cache := newOpenAIIdentityPathService(t, true, upstream)
 			account := newOpenAIIdentityPathOAuthAccount(910050 + int64(len(route)))
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 			var err error
 			if route == "chat" {
@@ -1039,7 +1055,7 @@ func TestOpenAIOutboundIdentityCompatUsesPreConversionTuple(t *testing.T) {
 
 			expected, keyErr := OpenAICodexSessionMappingKey(
 				"transport-identity-test-secret",
-				openAIOutboundSessionIdentityNamespace(account),
+				openAIOutboundSessionIdentityNamespace(account)+"/os/"+account.OpenAIOAuthOSProfiles.DefaultOS,
 				apiKeyID,
 				logicalSession,
 			)
@@ -1070,6 +1086,7 @@ func TestOpenAIOutboundIdentityCompatUsesExplicitTupleWithoutPromptKey(t *testin
 			upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_no_prompt_"+route, "gpt-4o")}
 			svc, cache := newOpenAIIdentityPathService(t, true, upstream)
 			account := newOpenAIIdentityPathOAuthAccount(910051 + int64(len(route)))
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 			var err error
 			if route == "chat" {
@@ -1142,6 +1159,7 @@ func TestOpenAIOutboundIdentityPathsDisabledCompatDoesNotObserveClientUUIDv7(t *
 	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_identity_client_uuid", "gpt-4o")}
 	svc, cache := newOpenAIIdentityPathService(t, false, upstream)
 	account := newOpenAIIdentityPathOAuthAccount(910044)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "client-observation-key", "gpt-4o")
 	require.NoError(t, err)
@@ -1171,6 +1189,7 @@ func TestOpenAIOutboundIdentityPathsCompatWithoutPromptKeyIsUntouched(t *testing
 			upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_identity_no_key_"+route, "gpt-4o")}
 			svc, cache := newOpenAIIdentityPathService(t, true, upstream)
 			account := newOpenAIIdentityPathOAuthAccount(910020 + int64(len(route)))
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			var err error
 			if route == "chat" {
 				_, err = svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-4o")
@@ -1193,6 +1212,7 @@ func TestOpenAIOutboundIdentityPathsAlphaResponsesFallback(t *testing.T) {
 			c, _ := newOpenAIIdentityPathContext(t, "/v1/alpha/search", alphaBody, 40)
 			svc, cache := newOpenAIIdentityPathService(t, enabled, nil)
 			account := newOpenAIIdentityPathOAuthAccount(910030)
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			responsesBody, err := buildOpenAIAlphaSearchResponsesWebSearchBody(alphaBody, "gpt-5.4")
 			require.NoError(t, err)
 
@@ -1217,6 +1237,7 @@ func TestOpenAIOutboundIdentityPathsAlphaWithoutIDIsUntouched(t *testing.T) {
 	c, _ := newOpenAIIdentityPathContext(t, "/v1/alpha/search", alphaBody, 41)
 	svc, cache := newOpenAIIdentityPathService(t, true, nil)
 	account := newOpenAIIdentityPathOAuthAccount(910031)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	responsesBody, err := buildOpenAIAlphaSearchResponsesWebSearchBody(alphaBody, "gpt-5.4")
 	require.NoError(t, err)
 
@@ -1234,6 +1255,7 @@ func TestOpenAIOutboundIdentityPathsAlphaWithoutIDUsesExplicitTurnMetadata(t *te
 	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"session_id":"alpha-metadata-session","thread_id":"alpha-metadata-thread"}`)
 	svc, cache := newOpenAIIdentityPathService(t, true, nil)
 	account := newOpenAIIdentityPathOAuthAccount(910034)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	responsesBody, err := buildOpenAIAlphaSearchResponsesWebSearchBody(alphaBody, "gpt-5.4")
 	require.NoError(t, err)
 
@@ -1254,6 +1276,7 @@ func TestOpenAIOutboundIdentityDirectAlphaProjectsCanonicalMetadata(t *testing.T
 	svc, _ := newOpenAIIdentityPathService(t, true, nil)
 	account := newOpenAIIdentityPathOAuthAccount(910036)
 	account.Extra = map[string]any{openAIPinnedInstallationIDKey: "11111111-2222-4333-8444-555555555555"}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	req, err := svc.buildOpenAIAlphaSearchRequest(c.Request.Context(), c, account, body, "oauth-token")
 	require.NoError(t, err)

@@ -124,7 +124,7 @@ func TestCodexStateModelPolicyPostgresPublicationBlocksPolicyCommit(t *testing.T
 	installCodexStateModelPolicyFixture(t, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	record := service.CodexTurnStateRecord{OwnerAccountID: key.OwnerAccountID, Model: key.Model,
+	record := service.CodexTurnStateRecord{OSFamily: "windows", OwnerAccountID: key.OwnerAccountID, Model: key.Model,
 		Generation: key.Generation, ModelPolicyRevision: codexStateModelPolicyRevisionForTest(t)}
 	tx, err := integrationDB.BeginTx(ctx, nil)
 	require.NoError(t, err)

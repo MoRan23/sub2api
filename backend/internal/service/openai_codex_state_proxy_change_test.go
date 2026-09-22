@@ -14,13 +14,14 @@ func newCodexProxyChangedTestService(t *testing.T) (*CodexTurnStateService, *cod
 	s, repo, account := newCodexStateTestService(t)
 	account.Extra[CodexTurnStateExtraKey].(map[string]any)["collector_proxy_id"] = float64(99)
 	account.Extra[CodexTurnStateGenerationExtraKey] = "after-proxy-change"
-	key := CodexTurnStateKey{OwnerAccountID: account.ID, Model: "gpt-5", Generation: "after-proxy-change"}
+	key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5", Generation: "after-proxy-change"}
 	token := codexStateTestToken(10, s.now().Add(-58*time.Minute))
 	shape, err := ParseCodexTurnState(token, "personal", s.now())
 	require.NoError(t, err)
 	encrypted, err := s.encryptor.Encrypt(token)
 	require.NoError(t, err)
 	repo.records[key] = CodexTurnStateRecord{
+		OSFamily:       "windows",
 		OwnerAccountID: key.OwnerAccountID, Model: key.Model, Generation: key.Generation, Version: 7,
 		EncryptedToken: encrypted, IssuedAt: shape.IssuedAt, ExpiresAt: shape.ExpiresAt,
 		Shape: shape.Shape, TokenLength: shape.TokenLength, CipherBlocks: shape.CipherBlocks, Source: "business",

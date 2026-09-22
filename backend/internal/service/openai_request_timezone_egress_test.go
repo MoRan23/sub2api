@@ -69,6 +69,7 @@ func TestOpenAIRequestTimezoneEgressPhysicalHTTPPaths(t *testing.T) {
 				c.Request = c.Request.WithContext(openai.WithRequestPolicy(c.Request.Context(), timezoneTestPolicy()))
 				upstream := &httpUpstreamRecorder{resp: response}
 				svc, _ := newOpenAIIdentityPathService(t, false, upstream)
+				svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 				svc.egressLocationService = resolver
 				svc.CaptureOpenAIRequestTimezone(c, body)
 				capture, _ := c.Get(openAIRequestTimezoneCaptureKey)
@@ -149,6 +150,7 @@ func TestOpenAIRequestTimezoneEgressFailoverUsesOriginalSource(t *testing.T) {
 			c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 92)
 			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusUnauthorized, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"unauthorized"}}`))}}
 			svc, _ := newOpenAIIdentityPathService(t, false, upstream)
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(first, second)
 			svc.egressLocationService = resolver
 			svc.CaptureOpenAIRequestTimezone(c, body)
 			capture, _ := c.Get(openAIRequestTimezoneCaptureKey)
@@ -230,6 +232,7 @@ func TestOpenAIRequestTimezoneEgressCompatibilityRetainsNegativeMetadata(t *test
 					c, _ := newOpenAIIdentityPathContext(t, "/v1/chat/completions", body, 96)
 					upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_negative", "gpt-5.4")}
 					svc, _ := newOpenAIIdentityPathService(t, false, upstream)
+					svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 					svc.egressLocationService = resolver
 					if strings.HasPrefix(route, "chat") {
 						_, err = svc.ForwardAsChatCompletions(context.Background(), c, account, body, "egress", "")
@@ -262,6 +265,7 @@ func TestOpenAIRequestTimezoneEgressDisabledStillObservesActualWire(t *testing.T
 	c.Request = c.Request.WithContext(openai.WithRequestPolicy(c.Request.Context(), policy))
 	upstream := &httpUpstreamRecorder{resp: successfulInstallationTestResponse()}
 	svc, _ := newOpenAIIdentityPathService(t, false, upstream)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	svc.egressLocationService = resolver
 	_, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)

@@ -40,6 +40,10 @@ func codexTurnStateStatusUnavailable(cause error) error {
 // GetStatuses performs bounded read-only lookups for an account-list page. It
 // neither starts business leases nor decrypts state nor schedules collection.
 func (s *CodexTurnStateService) GetStatuses(ctx context.Context, accountIDs []int64) (*CodexTurnStateBatchStatus, error) {
+	return s.GetStatusesForOS(ctx, accountIDs, "")
+}
+
+func (s *CodexTurnStateService) GetStatusesForOS(ctx context.Context, accountIDs []int64, osFamily string) (*CodexTurnStateBatchStatus, error) {
 	ids := make([]int64, 0, len(accountIDs))
 	seen := make(map[int64]bool, len(accountIDs))
 	for _, id := range accountIDs {
@@ -102,6 +106,7 @@ func (s *CodexTurnStateService) GetStatuses(ctx context.Context, accountIDs []in
 	owners := make(map[int64]*Account, len(ids))
 	ownerIDs := make([]int64, 0, len(ids))
 	ownerSeen := make(map[int64]bool, len(ids))
+	projections := make(map[int64]*Account, len(ids))
 	for _, id := range ids {
 		account := loaded[id]
 		if account == nil {
@@ -114,6 +119,15 @@ func (s *CodexTurnStateService) GetStatuses(ctx context.Context, accountIDs []in
 				// An unresolved owner is unavailable, never a disabled account.
 				continue
 			}
+		}
+		if projected, exists := projections[owner.ID]; exists {
+			owner = projected
+		} else {
+			owner, err = s.codexTurnStateStatusOwner(ctx, owner, osFamily)
+			if err != nil {
+				return nil, codexTurnStateStatusUnavailable(err)
+			}
+			projections[owner.ID] = owner
 		}
 		owners[id] = owner
 		if !ownerSeen[owner.ID] {
@@ -132,6 +146,13 @@ func (s *CodexTurnStateService) GetStatuses(ctx context.Context, accountIDs []in
 		}
 	}
 	now := s.statusNow()
+	var cooldowns map[int64]time.Time
+	if repository, ok := s.repo.(CodexTurnStateCooldownRepository); ok {
+		cooldowns, err = repository.GetCollectorCooldowns(ctx, ownerIDs)
+		if err != nil {
+			return nil, codexTurnStateStatusUnavailable(err)
+		}
+	}
 	observationOwners := make([]*Account, 0, len(owners))
 	for _, owner := range owners {
 		observationOwners = append(observationOwners, owner)
@@ -139,7 +160,7 @@ func (s *CodexTurnStateService) GetStatuses(ctx context.Context, accountIDs []in
 	observationEnabled, observations := globalCodexTurnStateSummaryStore.snapshotForOwners(observationOwners)
 	for _, id := range ids {
 		if owner := owners[id]; owner != nil {
-			item := projectCodexTurnStateStatus(id, owner, recordsByOwner[owner.ID], models, nil, now)
+			item := projectCodexTurnStateStatus(id, owner, recordsByOwner[owner.ID], models, nil, now, cooldowns[owner.ID])
 			attachCodexTurnStateObservations(item, observationEnabled, observations[owner.ID])
 			result.Items[strconv.FormatInt(id, 10)] = item
 		}
@@ -150,13 +171,20 @@ func (s *CodexTurnStateService) GetStatuses(ctx context.Context, accountIDs []in
 func attachCodexTurnStateObservations(status *CodexTurnStateStatus, enabled bool, observations []CodexTurnStateModelObservation) {
 	status.ObservationEnabled = enabled
 	status.ObservationScope = "instance"
+	if status.Reason == "authorization_unavailable" {
+		observations = nil
+	}
 	status.Observations = append([]CodexTurnStateModelObservation{}, observations...)
 }
 
-func projectCodexTurnStateStatus(accountID int64, owner *Account, records []CodexTurnStateRecord, allowedModels []string, policyErr error, now time.Time) *CodexTurnStateStatus {
+func projectCodexTurnStateStatus(accountID int64, owner *Account, records []CodexTurnStateRecord, allowedModels []string, policyErr error, now time.Time, sharedCooldown ...time.Time) *CodexTurnStateStatus {
 	cfg := CodexTurnStateConfigForAccount(owner)
 	proxyIDs := CodexTurnStateCollectorProxyIDs(cfg)
-	result := &CodexTurnStateStatus{AccountID: accountID, OwnerAccountID: owner.ID, Inherited: owner.ID != accountID, Enabled: cfg.Enabled && codexTurnStateEligible(owner), AccountType: cfg.AccountType, ResolvedAccountType: CodexTurnStateAccountTypeForAccount(owner), CollectorProxyID: codexStateProxyIDPtr(codexTurnStateSelectedProxy(proxyIDs, 0)), CollectorProxyIDs: append([]int64{}, proxyIDs...), Models: []CodexTurnStateModelStatus{}}
+	result := &CodexTurnStateStatus{OSFamily: codexTurnStateOS(owner), AccountID: accountID, OwnerAccountID: owner.ID, Inherited: owner.ID != accountID, Enabled: cfg.Enabled && codexTurnStateEligible(owner), AccountType: cfg.AccountType, ResolvedAccountType: CodexTurnStateAccountTypeForAccount(owner), CollectorProxyID: codexStateProxyIDPtr(codexTurnStateSelectedProxy(proxyIDs, 0)), CollectorProxyIDs: append([]int64{}, proxyIDs...), Models: []CodexTurnStateModelStatus{}}
+	if result.OSFamily != "" && owner.OpenAIOAuthAuthorizationGeneration == "" {
+		result.Enabled, result.Reason = false, "authorization_unavailable"
+		return result
+	}
 	if result.ResolvedAccountType == "personal" {
 		result.ExpectedLength = 292
 	} else if result.ResolvedAccountType == "team_business" {
@@ -175,8 +203,14 @@ func projectCodexTurnStateStatus(accountID int64, owner *Account, records []Code
 	}
 	ownerPaused := false
 	var ownerRetry time.Time
+	if len(sharedCooldown) > 0 {
+		ownerRetry = sharedCooldown[0]
+	}
 	for _, record := range records {
-		if record.Generation != CodexTurnStateGenerationForAccount(owner) {
+		if record.OSFamily != result.OSFamily || record.Generation != CodexTurnStateGenerationForAccount(owner) {
+			if (record.LastError == "collector_rate_limited" || record.LastError == "account_cooldown") && !record.LastCollectedAt.IsZero() && record.NextCollectAt.After(ownerRetry) {
+				ownerRetry = record.NextCollectAt
+			}
 			continue
 		}
 		ownerPaused = ownerPaused || record.CollectorPaused
@@ -185,10 +219,10 @@ func projectCodexTurnStateStatus(accountID int64, owner *Account, records []Code
 		}
 	}
 	for _, record := range records {
-		if record.Generation != CodexTurnStateGenerationForAccount(owner) {
+		if record.OSFamily != result.OSFamily || record.Generation != CodexTurnStateGenerationForAccount(owner) {
 			continue
 		}
-		item := CodexTurnStateModelStatus{Model: record.Model, State: "missing", Shape: record.Shape, Source: record.Source, TokenLength: record.TokenLength, CipherBlocks: record.CipherBlocks, CollectorPaused: record.CollectorPaused, LastError: record.LastError, RefreshReason: record.RefreshReason}
+		item := CodexTurnStateModelStatus{OSFamily: record.OSFamily, Model: record.Model, State: "missing", Shape: record.Shape, Source: record.Source, TokenLength: record.TokenLength, CipherBlocks: record.CipherBlocks, CollectorPaused: record.CollectorPaused, LastError: record.LastError, RefreshReason: record.RefreshReason}
 		item.CollectorProxyID = codexStateProxyIDPtr(codexTurnStateSelectedProxy(proxyIDs, record.CollectorProxyID))
 		item.LastCollectorProxyID = codexStateProxyIDPtr(record.LastCollectorProxyID)
 		item.CollectorExtendedCount = record.CollectorExtendedCount

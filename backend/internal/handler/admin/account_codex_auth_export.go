@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"strconv"
 	"time"
 
@@ -26,7 +27,32 @@ func (h *AccountHandler) ExportCodexAuth(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	exported, err := service.BuildOpenAICodexAuthExport(account, time.Now())
+	if !service.IsOpenAIOAuthOSProfileOwner(account) {
+		_, err := service.BuildOpenAICodexAuthExport(account, time.Now())
+		response.ErrorFrom(c, err)
+		return
+	}
+	os := service.NormalizeOpenAIOSFamily(c.Query("os"))
+	if c.Query("os") != "" && os == "" {
+		response.BadRequest(c, "os must be windows, macos, or linux")
+		return
+	}
+	if os == "" && account.OpenAIOAuthOSProfiles != nil {
+		os = account.OpenAIOAuthOSProfiles.DefaultOS
+	}
+	reader, ok := h.adminService.(interface {
+		GetOpenAIOAuthOSCredential(context.Context, int64, string) (*service.OpenAIOAuthOSCredential, error)
+	})
+	if !ok || os == "" {
+		response.BadRequest(c, "selected OS has no saved OAuth authorization")
+		return
+	}
+	slot, err := reader.GetOpenAIOAuthOSCredential(c.Request.Context(), id, os)
+	if err != nil {
+		response.BadRequest(c, "selected OS has no saved OAuth authorization")
+		return
+	}
+	exported, err := service.BuildOpenAICodexAuthExportForOS(account, slot, time.Now())
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

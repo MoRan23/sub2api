@@ -66,6 +66,7 @@ func TestOpenAICodexContextWindowBodyPathsFrozenRetryAndRotation(t *testing.T) {
 			c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 921)
 			svc, _ := newOpenAIIdentityPathService(t, true, nil)
 			account := newOpenAIIdentityPathOAuthAccount(919021)
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			var outbound []byte
 			var plan OpenAIOAuthIdentityPlan
 			var err error
@@ -154,6 +155,7 @@ func TestOpenAICodexContextWindowBodyPathsWSHTTPBridge(t *testing.T) {
 	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_context_window_bridge", "gpt-5.4")}
 	svc, _ := newOpenAIIdentityPathService(t, true, upstream)
 	account := newOpenAIIdentityPathOAuthAccount(919022)
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	c, _ := newOpenAIIdentityPathContext(t, "/v1/responses", body, 922)
 	c.Request.Method = http.MethodGet
 	frames := 0

@@ -17,7 +17,7 @@ import (
 func codexStateIdentityFixture(t *testing.T) (*CodexTurnStateService, *Account) {
 	t.Helper()
 	isolateCodexTurnStateSummaryStore(t)
-	owner := codexStateBatchOwner(7, false)
+	owner := codexStateTestScopeAccount(codexStateBatchOwner(7, false))
 	owner.Extra[CodexTurnStateCredentialEpochExtraKey] = "private-epoch-first"
 	accounts := &codexStateBatchAccounts{accounts: map[int64]*Account{7: owner, 17: codexStateBatchShadow(17, 7)}}
 	state := NewCodexTurnStateService(&codexStateBatchRecords{}, accounts, nil, nil)
@@ -153,8 +153,8 @@ func TestCodexTurnStateObservationIdentityValidationFallbackRetainsOnlyVerifiedI
 	for _, matching := range []bool{false, true} {
 		t.Run(testBoolName(matching), func(t *testing.T) {
 			state, owner := codexStateIdentityFixture(t)
-			original := &CodexTurnStateAttempt{OwnerAccountID: owner.ID, Model: "gpt-6-astra", AccountEnabled: true,
-				Generation: "private-config-generation", key: CodexTurnStateKey{OwnerAccountID: owner.ID, Model: "gpt-6-astra", Generation: "private-config-generation"},
+			original := &CodexTurnStateAttempt{OSFamily: "windows", OwnerAccountID: owner.ID, Model: "gpt-6-astra", AccountEnabled: true,
+				Generation: "private-config-generation", key: CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: owner.ID, Model: "gpt-6-astra", Generation: "private-config-generation"},
 				credentialEpoch: CodexTurnStateCredentialEpochForAccount(owner), historyService: state, preparedAt: time.Now(),
 				id: "private-lease", accountType: "personal", Snapshot: CodexTurnStateSnapshot{Token: "not-to-inherit", Version: 2}}
 			attempt := passiveCodexStateAfterValidationFailure(original)

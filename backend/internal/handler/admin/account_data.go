@@ -19,10 +19,11 @@ import (
 )
 
 const (
-	dataType       = "sub2api-data"
-	legacyDataType = "sub2api-bundle"
-	dataVersion    = 1
-	dataPageCap    = 1000
+	dataType                   = "sub2api-data"
+	legacyDataType             = "sub2api-bundle"
+	dataVersion                = 1
+	dataOSAuthorizationVersion = 2
+	dataPageCap                = 1000
 )
 
 type DataPayload struct {
@@ -59,21 +60,29 @@ type DataProxy struct {
 // 影子的独立调度配置(priority/并发/分组/status 管理员可单独调)亦不在本备份范围,属已知局限
 // (外审第6轮裁决:保持排除 + 前端警告,而非升级格式做完整往返)。
 type DataAccount struct {
-	Name                    string                        `json:"name"`
-	Notes                   *string                       `json:"notes,omitempty"`
-	Platform                string                        `json:"platform"`
-	Type                    string                        `json:"type"`
-	Credentials             map[string]any                `json:"credentials"`
-	Extra                   map[string]any                `json:"extra,omitempty"`
-	ProxyKey                *string                       `json:"proxy_key,omitempty"`
-	CodexTurnState          *service.CodexTurnStateConfig `json:"codex_turn_state,omitempty"`
-	CodexTurnStateProxyKey  *string                       `json:"codex_turn_state_proxy_key,omitempty"`
-	CodexTurnStateProxyKeys *[]string                     `json:"codex_turn_state_proxy_keys,omitempty"`
-	Concurrency             int                           `json:"concurrency"`
-	Priority                int                           `json:"priority"`
-	RateMultiplier          *float64                      `json:"rate_multiplier,omitempty"`
-	ExpiresAt               *int64                        `json:"expires_at,omitempty"`
-	AutoPauseOnExpired      *bool                         `json:"auto_pause_on_expired,omitempty"`
+	OpenAIOAuthDefaultOS      string                                  `json:"openai_oauth_default_os,omitempty"`
+	OpenAIOAuthAuthorizations map[string]DataOpenAIOAuthAuthorization `json:"openai_oauth_authorizations,omitempty"`
+	Name                      string                                  `json:"name"`
+	Notes                     *string                                 `json:"notes,omitempty"`
+	Platform                  string                                  `json:"platform"`
+	Type                      string                                  `json:"type"`
+	Credentials               map[string]any                          `json:"credentials"`
+	Extra                     map[string]any                          `json:"extra,omitempty"`
+	ProxyKey                  *string                                 `json:"proxy_key,omitempty"`
+	CodexTurnState            *service.CodexTurnStateConfig           `json:"codex_turn_state,omitempty"`
+	CodexTurnStateProxyKey    *string                                 `json:"codex_turn_state_proxy_key,omitempty"`
+	CodexTurnStateProxyKeys   *[]string                               `json:"codex_turn_state_proxy_keys,omitempty"`
+	Concurrency               int                                     `json:"concurrency"`
+	Priority                  int                                     `json:"priority"`
+	RateMultiplier            *float64                                `json:"rate_multiplier,omitempty"`
+	ExpiresAt                 *int64                                  `json:"expires_at,omitempty"`
+	AutoPauseOnExpired        *bool                                   `json:"auto_pause_on_expired,omitempty"`
+}
+
+// Backup authorization entries contain provider credentials only. Installation
+// identities, authorization generations, and runtime state are regenerated locally.
+type DataOpenAIOAuthAuthorization struct {
+	Credentials map[string]any `json:"credentials"`
 }
 
 type DataImportRequest struct {
@@ -102,6 +111,8 @@ func buildProxyKey(protocol, host string, port int, username, password string) s
 }
 
 func (h *AccountHandler) ExportData(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
 	ctx := c.Request.Context()
 
 	selectedIDs, err := parseAccountIDs(c)
@@ -192,6 +203,11 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 	dataAccounts := make([]DataAccount, 0, len(accounts))
 	for i := range accounts {
 		acc := accounts[i]
+		defaultOS, authorizations, err := h.exportOpenAIOAuthAuthorizations(ctx, &acc)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
 		var proxyKey *string
 		if includeProxies && acc.ProxyID != nil {
 			if key, ok := proxyKeyByID[*acc.ProxyID]; ok {
@@ -209,28 +225,37 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			expiresAt = &v
 		}
 		dataAccounts = append(dataAccounts, DataAccount{
-			Name:                    acc.Name,
-			Notes:                   acc.Notes,
-			Platform:                acc.Platform,
-			Type:                    acc.Type,
-			Credentials:             acc.Credentials,
-			Extra:                   service.StripCodexTurnStateManagedExtra(acc.Extra),
-			ProxyKey:                proxyKey,
-			CodexTurnState:          turnState,
-			CodexTurnStateProxyKeys: turnStateProxyKeys,
-			Concurrency:             acc.Concurrency,
-			Priority:                acc.Priority,
-			RateMultiplier:          acc.RateMultiplier,
-			ExpiresAt:               expiresAt,
-			AutoPauseOnExpired:      &acc.AutoPauseOnExpired,
+			OpenAIOAuthDefaultOS:      defaultOS,
+			OpenAIOAuthAuthorizations: authorizations,
+			Name:                      acc.Name,
+			Notes:                     acc.Notes,
+			Platform:                  acc.Platform,
+			Type:                      acc.Type,
+			Credentials:               portableOpenAIOAuthCredentials(&acc, acc.Credentials),
+			Extra:                     portableOpenAIOAuthExtra(&acc),
+			ProxyKey:                  proxyKey,
+			CodexTurnState:            turnState,
+			CodexTurnStateProxyKeys:   turnStateProxyKeys,
+			Concurrency:               acc.Concurrency,
+			Priority:                  acc.Priority,
+			RateMultiplier:            acc.RateMultiplier,
+			ExpiresAt:                 expiresAt,
+			AutoPauseOnExpired:        &acc.AutoPauseOnExpired,
 		})
 	}
 
 	payload := DataPayload{
+		Version:        dataVersion,
 		ExportedAt:     time.Now().UTC().Format(time.RFC3339),
 		Proxies:        dataProxies,
 		Accounts:       dataAccounts,
 		SkippedShadows: skippedShadows,
+	}
+	for _, account := range dataAccounts {
+		if account.OpenAIOAuthDefaultOS != "" || len(account.OpenAIOAuthAuthorizations) > 0 {
+			payload.Version = dataOSAuthorizationVersion
+			break
+		}
 	}
 
 	response.Success(c, payload)
@@ -451,23 +476,31 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			continue
 		}
 		enrichCredentialsFromIDToken(&item)
+		initialOS, initialCredentials, err := h.prepareOpenAIOAuthBackupImport(ctx, &item, proxyID)
+		if err != nil {
+			result.AccountFailed++
+			result.Errors = append(result.Errors, DataImportError{Kind: "account", Name: item.Name, Message: err.Error()})
+			continue
+		}
 
 		accountInput := &service.CreateAccountInput{
-			Name:                 item.Name,
-			Notes:                item.Notes,
-			Platform:             item.Platform,
-			Type:                 item.Type,
-			Credentials:          item.Credentials,
-			Extra:                service.StripCodexTurnStateManagedExtra(item.Extra),
-			CodexTurnState:       turnState,
-			ProxyID:              proxyID,
-			Concurrency:          item.Concurrency,
-			Priority:             item.Priority,
-			RateMultiplier:       item.RateMultiplier,
-			GroupIDs:             nil,
-			ExpiresAt:            item.ExpiresAt,
-			AutoPauseOnExpired:   item.AutoPauseOnExpired,
-			SkipDefaultGroupBind: skipDefaultGroupBind,
+			OpenAIOAuthInitialOS:          initialOS,
+			OpenAIOAuthInitialCredentials: initialCredentials,
+			Name:                          item.Name,
+			Notes:                         item.Notes,
+			Platform:                      item.Platform,
+			Type:                          item.Type,
+			Credentials:                   item.Credentials,
+			Extra:                         service.StripCodexTurnStateManagedExtra(item.Extra),
+			CodexTurnState:                turnState,
+			ProxyID:                       proxyID,
+			Concurrency:                   item.Concurrency,
+			Priority:                      item.Priority,
+			RateMultiplier:                item.RateMultiplier,
+			GroupIDs:                      nil,
+			ExpiresAt:                     item.ExpiresAt,
+			AutoPauseOnExpired:            item.AutoPauseOnExpired,
+			SkipDefaultGroupBind:          skipDefaultGroupBind,
 		}
 
 		created, err := h.adminService.CreateAccount(ctx, accountInput)
@@ -739,8 +772,15 @@ func validateDataHeader(payload DataPayload) error {
 	if payload.Type != "" && payload.Type != dataType && payload.Type != legacyDataType {
 		return fmt.Errorf("unsupported data type: %s", payload.Type)
 	}
-	if payload.Version != 0 && payload.Version != dataVersion {
+	if payload.Version != 0 && payload.Version != dataVersion && payload.Version != dataOSAuthorizationVersion {
 		return fmt.Errorf("unsupported data version: %d", payload.Version)
+	}
+	if payload.Version != dataOSAuthorizationVersion {
+		for _, account := range payload.Accounts {
+			if account.OpenAIOAuthDefaultOS != "" || len(account.OpenAIOAuthAuthorizations) > 0 {
+				return errors.New("OpenAI OS authorization mappings require data version 2")
+			}
+		}
 	}
 	if payload.Proxies == nil {
 		return errors.New("proxies is required")
@@ -785,7 +825,8 @@ func validateDataAccount(item DataAccount) error {
 	if strings.TrimSpace(item.Type) == "" {
 		return errors.New("account type is required")
 	}
-	if len(item.Credentials) == 0 {
+	unauthorizedOSAccount := item.Platform == service.PlatformOpenAI && item.Type == service.AccountTypeOAuth && service.NormalizeOpenAIOSFamily(item.OpenAIOAuthDefaultOS) != ""
+	if len(item.Credentials) == 0 && len(item.OpenAIOAuthAuthorizations) == 0 && !unauthorizedOSAccount {
 		return errors.New("account credentials is required")
 	}
 	switch item.Type {

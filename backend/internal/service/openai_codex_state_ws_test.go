@@ -37,6 +37,7 @@ func (r *codexWSStateTestRepo) BeginBusiness(_ context.Context, key CodexTurnSta
 	}
 	row := r.records[key]
 	row.OwnerAccountID, row.Model, row.Generation = key.OwnerAccountID, key.Model, key.Generation
+	row.OSFamily = key.OSFamily
 	row.LastBusinessAt = now
 	r.records[key] = row
 	r.active[id] = true
@@ -121,7 +122,7 @@ func (r *codexWSStateTestAccounts) GetByID(_ context.Context, id int64) (*Accoun
 	copy := *r.account
 	copy.Extra = maps.Clone(r.account.Extra)
 	copy.Credentials = maps.Clone(r.account.Credentials)
-	return &copy, nil
+	return codexStateTestScopeAccount(&copy), nil
 }
 
 func (r *codexWSStateTestAccounts) update(fn func(*Account)) {
@@ -135,6 +136,7 @@ func newCodexWSStateTestGateway(t *testing.T, accountType string) (*OpenAIGatewa
 	account := &Account{ID: 8911, Name: "turn-state-ws", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 2,
 		Credentials: map[string]any{"access_token": "test-access", "chatgpt_account_id": "test-chatgpt-account", "plan_type": "plus"},
 		Extra:       map[string]any{CodexTurnStateExtraKey: map[string]any{"enabled": true, "account_type": accountType}, CodexTurnStateGenerationExtraKey: "generation-one"}}
+	account = codexStateTestScopeAccount(account)
 	copy := *account
 	copy.Extra, copy.Credentials = maps.Clone(account.Extra), maps.Clone(account.Credentials)
 	accounts := &codexWSStateTestAccounts{account: &copy}

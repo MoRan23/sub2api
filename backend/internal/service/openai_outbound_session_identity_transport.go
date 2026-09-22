@@ -28,6 +28,13 @@ import (
 // client labels are treated as a new turn so they cannot attach to another
 // account's server-side thread.
 func originalOpenAISyncThread(c *gin.Context, body []byte) string {
+	if capture, ok := OpenAIOAuthIdentityCaptureFromContext(c); ok {
+		return capture.syncThreadID
+	}
+	return captureOpenAISyncThread(c, body)
+}
+
+func captureOpenAISyncThread(c *gin.Context, body []byte) string {
 	candidates := []string{
 		gjson.GetBytes(body, "client_metadata.thread_id").String(),
 		gjson.GetBytes(body, "thread_id").String(),
@@ -47,6 +54,13 @@ func originalOpenAISyncThread(c *gin.Context, body []byte) string {
 }
 
 func originalOpenAISyncSession(c *gin.Context, body []byte) string {
+	if capture, ok := OpenAIOAuthIdentityCaptureFromContext(c); ok {
+		return capture.syncSessionID
+	}
+	return captureOpenAISyncSession(c, body)
+}
+
+func captureOpenAISyncSession(c *gin.Context, body []byte) string {
 	candidates := []string{
 		gjson.GetBytes(body, "client_metadata.session_id").String(),
 		gjson.GetBytes(body, "session_id").String(),
@@ -504,6 +518,8 @@ func openAIWSOutboundIdentityPlanDigest(headers http.Header, plan OpenAIOAuthIde
 	}
 	parts := []string{
 		openAIWSOutboundIdentityPlanDigestDomain,
+		plan.CredentialOS,
+		plan.AuthorizationGeneration,
 		string(plan.InstallationPolicy),
 		fmt.Sprintf("%t", plan.InstallationEnabled),
 		fmt.Sprintf("%t", plan.TurnIdentityRequested),

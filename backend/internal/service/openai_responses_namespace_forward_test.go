@@ -41,8 +41,9 @@ func TestOpenAIGatewayService_OAuthPreservesCodexNamespaceTools(t *testing.T) {
 	}}
 	c := newOpenAIRejectedFieldTestContext(body)
 
-	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
-		context.Background(), c, newOpenAIOAuthNamespaceTestAccount(), body,
+	account := newOpenAIOAuthNamespaceTestAccount()
+	result, err := newOpenAIRejectedFieldTestService(upstream, account).Forward(
+		context.Background(), c, account, body,
 	)
 
 	require.NoError(t, err)
@@ -140,8 +141,9 @@ func TestOpenAIGatewayService_OAuthCompactKeepsFlattening(t *testing.T) {
 	c := newOpenAIRejectedFieldTestContext(body)
 	c.Request.URL.Path = "/v1/responses/compact"
 
-	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
-		context.Background(), c, newOpenAIOAuthNamespaceTestAccount(), body,
+	account := newOpenAIOAuthNamespaceTestAccount()
+	result, err := newOpenAIRejectedFieldTestService(upstream, account).Forward(
+		context.Background(), c, account, body,
 	)
 
 	require.NoError(t, err)
@@ -165,7 +167,7 @@ func TestOpenAIGatewayService_OAuthFlattenFlagRestoresLegacyBehavior(t *testing.
 	account := newOpenAIOAuthNamespaceTestAccount()
 	account.Extra = map[string]any{"openai_responses_flatten_namespaces": true}
 
-	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
+	result, err := newOpenAIRejectedFieldTestService(upstream, account).Forward(
 		context.Background(), c, account, body,
 	)
 
@@ -201,8 +203,9 @@ func TestOpenAIGatewayService_ForwardClearsStaleNamespaceNames(t *testing.T) {
 		"stale__tool": {Namespace: "stale", Name: "tool"},
 	})
 
-	_, err := newOpenAIRejectedFieldTestService(upstream).Forward(
-		context.Background(), c, newOpenAIOAuthNamespaceTestAccount(), body,
+	account := newOpenAIOAuthNamespaceTestAccount()
+	_, err := newOpenAIRejectedFieldTestService(upstream, account).Forward(
+		context.Background(), c, account, body,
 	)
 
 	require.NoError(t, err)

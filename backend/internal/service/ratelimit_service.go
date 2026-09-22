@@ -301,6 +301,11 @@ const (
 // 自定义错误码开启时覆盖后续所有逻辑（包括临时不可调度）。
 func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) ErrorPolicyResult {
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
+	if (statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden) && RequiresOpenAIOAuthOSAuthorization(account) {
+		if _, scoped := s.accountRepo.(OpenAIOAuthOSCredentialsReader); scoped {
+			return ErrorPolicyNone
+		}
+	}
 	if account.IsCustomErrorCodesEnabled() {
 		if account.ShouldHandleErrorCode(statusCode) {
 			return ErrorPolicyMatched
@@ -331,6 +336,9 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 // 返回是否应该停止该账号的调度
 func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
+	if handled, disable := s.handleOpenAIOAuthOSAuthFailure(ctx, account, statusCode, responseBody); handled {
+		return disable
+	}
 	// Team 联动熔断必须先于池模式/自定义错误码/临时不可调度的各类早退；
 	// 同请求内与 fastpath 调用点的重复触发由方法内去重吸收。
 	s.maybeHandleOpenAITeamLinkedError(ctx, account, statusCode, responseBody)
@@ -1979,6 +1987,23 @@ func persistOpenAI429PlanType(ctx context.Context, repo AccountRepository, accou
 	if strings.EqualFold(current, planType) {
 		return
 	}
+	if account.OpenAIOAuthCredentialOS != "" {
+		updater, ok := repo.(OpenAIOAuthOSCredentialsRepository)
+		if !ok {
+			return
+		}
+		applied, err := updater.PatchOpenAIOAuthOSCredentialsIfUnchanged(ctx, account.OpenAIOAuthCredentialOwnerID,
+			account.OpenAIOAuthCredentialOS, account.OpenAIOAuthAuthorizationGeneration, account.OpenAIOAuthCredentialRevision,
+			account.ProxyID, map[string]any{"plan_type": planType}, nil)
+		if err != nil {
+			slog.Warn("openai_429_slot_plan_type_sync_failed", "account_id", account.ID, "os", account.OpenAIOAuthCredentialOS, "error", err)
+		}
+		if applied {
+			account.Credentials = shallowCopyMap(account.Credentials)
+			account.Credentials["plan_type"] = planType
+		}
+		return
+	}
 
 	if _, err := repo.BulkUpdate(ctx, []int64{account.ID}, AccountBulkUpdate{
 		Credentials: map[string]any{"plan_type": planType},
@@ -2231,6 +2256,17 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 // RecoverAccountAfterSuccessfulTest 将一次成功测试视为正常请求，
 // 按需恢复 error / rate-limit / overload / temp-unsched / model-rate-limit 等运行时状态。
 func (s *RateLimitService) RecoverAccountAfterSuccessfulTest(ctx context.Context, accountID int64) (*SuccessfulTestRecoveryResult, error) {
+	if _, scoped := s.accountRepo.(OpenAIOAuthOSCredentialsReader); scoped {
+		account, err := s.accountRepo.GetByID(ctx, accountID)
+		if err != nil {
+			return nil, err
+		}
+		if RequiresOpenAIOAuthOSAuthorization(account) {
+			// ID-only callers have no attempted authorization snapshot. They cannot
+			// clear another slot's error or shared account limits after a test.
+			return &SuccessfulTestRecoveryResult{}, nil
+		}
+	}
 	return s.RecoverAccountState(ctx, accountID, AccountRecoveryOptions{})
 }
 

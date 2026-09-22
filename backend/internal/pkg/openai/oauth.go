@@ -3,6 +3,7 @@ package openai
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -41,12 +42,17 @@ const (
 
 // OAuthSession stores OAuth flow state for OpenAI
 type OAuthSession struct {
-	State        string    `json:"state"`
-	CodeVerifier string    `json:"code_verifier"`
-	ClientID     string    `json:"client_id,omitempty"`
-	ProxyURL     string    `json:"proxy_url,omitempty"`
-	RedirectURI  string    `json:"redirect_uri"`
-	CreatedAt    time.Time `json:"created_at"`
+	AccountID               int64     `json:"-"`
+	OS                      string    `json:"-"`
+	Purpose                 string    `json:"-"`
+	AuthorizationGeneration string    `json:"-"`
+	UserAgent               string    `json:"-"`
+	State                   string    `json:"state"`
+	CodeVerifier            string    `json:"code_verifier"`
+	ClientID                string    `json:"client_id,omitempty"`
+	ProxyURL                string    `json:"proxy_url,omitempty"`
+	RedirectURI             string    `json:"redirect_uri"`
+	CreatedAt               time.Time `json:"created_at"`
 }
 
 // SessionStore manages OAuth sessions in memory
@@ -95,6 +101,20 @@ func (s *SessionStore) Delete(sessionID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, sessionID)
+}
+
+// Consume accepts the matching state exactly once, before token exchange starts.
+// Invalid states do not consume someone else's pending login session.
+func (s *SessionStore) Consume(sessionID, state string) (*OAuthSession, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[sessionID]
+	if !ok || time.Since(session.CreatedAt) > SessionTTL || state == "" || subtle.ConstantTimeCompare([]byte(state), []byte(session.State)) != 1 {
+		return nil, false
+	}
+	delete(s.sessions, sessionID)
+	copy := *session
+	return &copy, true
 }
 
 // Stop stops the cleanup goroutine

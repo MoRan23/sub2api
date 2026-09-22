@@ -49,12 +49,14 @@ func TestCodexStateRedisIntegrationNotificationsPayloadReconnectAndCleanup(t *te
 			t.Cleanup(func() { _ = publisherClient.Close(); _ = subscriberClient.Close() })
 			publisher := &openAICodexStateRepository{rdb: publisherClient}
 			subscriber := &openAICodexStateRepository{rdb: subscriberClient}
-			key := service.CodexTurnStateKey{OwnerAccountID: 8675309, Model: "gpt-5.4", Generation: "synthetic-generation"}
+			key := service.CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: 8675309, Model: "gpt-5.4", Generation: "synthetic-generation"}
 			channel := codexStateActivationChannel
-			expected := map[string]any{"owner_account_id": float64(key.OwnerAccountID), "generation": key.Generation}
-			publish := func() error { return publisher.PublishActivation(ctx, key.OwnerAccountID, key.Generation) }
+			expected := map[string]any{"owner_account_id": float64(key.OwnerAccountID), "os_family": key.OSFamily, "generation": key.Generation}
+			publish := func() error {
+				return publisher.PublishOSActivation(ctx, key.OwnerAccountID, key.OSFamily, key.Generation)
+			}
 			subscribe := func(handle func(string)) error {
-				return subscriber.SubscribeActivations(ctx, func(id int64, generation string) {
+				return subscriber.SubscribeOSActivations(ctx, func(id int64, osFamily, generation string) {
 					handle(fmt.Sprintf("%d|%s", id, generation))
 				})
 			}
@@ -62,7 +64,7 @@ func TestCodexStateRedisIntegrationNotificationsPayloadReconnectAndCleanup(t *te
 			invalid := []string{`not-json`, `{}`, `{"owner_account_id":0,"generation":"generation"}`, `{"owner_account_id":17,"generation":" "}`}
 			if kind == "cancellation" {
 				channel = codexStateCancelChannel
-				expected = map[string]any{"OwnerAccountID": float64(key.OwnerAccountID), "Model": key.Model, "Generation": key.Generation}
+				expected = map[string]any{"OwnerAccountID": float64(key.OwnerAccountID), "OSFamily": key.OSFamily, "Model": key.Model, "Generation": key.Generation}
 				publish = func() error { return publisher.PublishCancel(ctx, key) }
 				subscribe = func(handle func(string)) error {
 					return subscriber.SubscribeCancels(ctx, func(actual service.CodexTurnStateKey) {

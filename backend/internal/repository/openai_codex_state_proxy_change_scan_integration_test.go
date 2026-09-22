@@ -18,6 +18,7 @@ func TestCodexStatePostgresProxyChangeDefersOnlyValidTargets(t *testing.T) {
 	_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,
 		'{codex_turn_state,collector_proxy_id}', '42'::jsonb) WHERE id=$1`, key.OwnerAccountID)
 	require.NoError(t, err)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT state_generation::text FROM account_openai_oauth_os_credentials WHERE account_id=$1 AND os_family=$2`, key.OwnerAccountID, key.OSFamily).Scan(&key.Generation))
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	models := []string{"retained", "expired", "anomaly", "missing-time", "renewal"}
 	revision := installCodexStateModelPolicyFixture(t, models)

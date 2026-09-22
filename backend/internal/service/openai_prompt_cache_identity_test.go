@@ -23,6 +23,7 @@ func resolvePromptCacheIdentityPlan(
 	apiKeyID int64,
 ) (OpenAIOAuthIdentityCapture, OpenAIOAuthIdentityPlan) {
 	t.Helper()
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -176,6 +177,7 @@ func TestOpenAICodexPromptCacheProjectionDefaultAndCompactContinuity(t *testing.
 func TestOpenAICodexLegacyCompactEndpointAliasPreservesExplicitOverride(t *testing.T) {
 	svc := &OpenAIGatewayService{cfg: &config.Config{JWT: config.JWTConfig{Secret: "prompt-cache-legacy-compact-secret"}}}
 	account := &Account{ID: 73008, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	body := []byte(`{"model":"gpt-5.6","client_metadata":{"session_id":"logical-root"},"prompt_cache_key":"review-scope"}`)
 	capture := CaptureOpenAIOAuthIdentityWithEndpointAlias(nil, body, "legacy-compact-id")
 	require.True(t, capture.PromptCacheKey.Applicable)
@@ -261,7 +263,8 @@ func TestOpenAICodexPromptCacheFallbackWithoutJWTSecretAndDisabledBoundaries(t *
 		MasterEnabled: true, InstallationIDEnabled: true, ClientIdentityEnabled: true,
 	})
 	capture := CaptureOpenAIOAuthIdentity(c, body, "")
-	disabled, err := (&OpenAIGatewayService{}).ResolveOpenAIOAuthIdentityPlan(context.Background(), c, account, capture, OpenAIOAuthIdentityPlanOptions{
+	disabledService := &OpenAIGatewayService{accountRepo: newAuthorizedOpenAIOAuthTestRepo(account)}
+	disabled, err := disabledService.ResolveOpenAIOAuthIdentityPlan(context.Background(), c, account, capture, OpenAIOAuthIdentityPlanOptions{
 		TurnIdentityEnabled: true, ProjectionMode: OpenAIOAuthIdentityProjectionRegular,
 		InstallationPolicy: OpenAIOAuthInstallationPreserve,
 	})

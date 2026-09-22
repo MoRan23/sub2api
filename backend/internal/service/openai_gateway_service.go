@@ -1228,6 +1228,7 @@ func hashSensitiveValueForLog(raw string) string {
 
 // GetAccessToken gets the access token for an OpenAI account
 func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Account) (string, string, error) {
+	businessAccount := account
 	if account.IsShadow() {
 		credAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 		if err != nil {
@@ -1256,13 +1257,40 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 		}
 		// 使用 TokenProvider 获取缓存的 token
 		if s.openAITokenProvider != nil {
-			accessToken, err := s.openAITokenProvider.GetAccessToken(ctx, account)
+			accessToken, credentialSnapshot, err := s.openAITokenProvider.GetAccessTokenWithAccount(ctx, account)
 			if err != nil {
 				return "", "", err
+			}
+			// A scoped selection is request-owned. Keep the exact token revision so
+			// an upstream auth failure cannot suspend a different refresh revision.
+			if businessAccount.OpenAIOAuthCredentialOS != "" {
+				projected, err := OpenAIOAuthTokenAccountSnapshot(businessAccount, credentialSnapshot)
+				if err != nil {
+					return "", "", err
+				}
+				*businessAccount = *projected
 			}
 			return accessToken, "oauth", nil
 		}
 		// 降级：TokenProvider 未配置时直接从账号读取
+		if RequiresOpenAIOAuthOSAuthorization(account) {
+			var err error
+			os := account.OpenAIOAuthCredentialOS
+			if os == "" {
+				os = OpenAIRequestOSFromContext(ctx).Family
+			}
+			account, err = ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, os)
+			if err != nil {
+				return "", "", err
+			}
+			if businessAccount.OpenAIOAuthCredentialOS != "" {
+				projected, err := OpenAIOAuthTokenAccountSnapshot(businessAccount, account)
+				if err != nil {
+					return "", "", err
+				}
+				*businessAccount = *projected
+			}
+		}
 		accessToken := account.GetOpenAIAccessToken()
 		if accessToken == "" {
 			return "", "", errors.New("access_token not found in credentials")

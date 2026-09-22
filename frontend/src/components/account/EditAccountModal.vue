@@ -2299,7 +2299,11 @@
           :inherited="isSparkShadow"
           :disabled="!openAIInstallationPinEnabled || !installationPinSavedEnabled"
           :regenerating="installationRegenerating"
+          :authorization-busy="osAuthorizationBusy"
           @regenerate="regenerateOpenAIInstallationID"
+          @authorize="authorizationOS = $event"
+          @revoke="revokeOSAuthorization"
+          @set-default="setDefaultAuthorizationOS"
         />
       </section>
 
@@ -3137,6 +3141,7 @@
       </div>
     </template>
   </BaseDialog>
+  <ReAuthAccountModal :show="authorizationOS !== null" :account="account" :initial-o-s="authorizationOS ?? undefined" @close="authorizationOS = null" @reauthorized="handleOSAuthorizationUpdated" />
 
   <!-- Mixed Channel Warning Dialog -->
   <ConfirmDialog
@@ -3183,6 +3188,8 @@ import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import CodexTurnStateFields from './CodexTurnStateFields.vue'
 import OpenAIOAuthOSProfiles from './OpenAIOAuthOSProfiles.vue'
+import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
+import { openAIOSLabels } from './openaiOAuthOS'
 import { codexTurnStateConfigChanged, defaultCodexTurnStateConfig, readCodexTurnStateConfig, supportsCodexTurnState } from './codexTurnState'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
@@ -3656,6 +3663,8 @@ const openAILongContextBillingEnabled = ref(false)
 // installation_id 固定（仅 OpenAI OAuth）。UUID 由服务端生成。
 const openAIInstallationPinEnabled = ref(true)
 const openAIOSProfiles = ref<OpenAIOAuthOSProfilesData>()
+const authorizationOS = ref<OpenAIOAuthOS | null>(null)
+const osAuthorizationBusy = ref(false)
 const legacyPinnedInstallationID = ref('')
 const legacyInstallationRegenerating = ref(false)
 const installationPinSavedEnabled = ref(true)
@@ -5075,9 +5084,39 @@ const parseDateTimeLocal = parseDateTimeLocalInput
 
 // Methods
 const handleClose = () => {
+  authorizationOS.value = null
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
   emit('close')
+}
+
+const handleOSAuthorizationUpdated = (account: Account) => {
+  if (props.account?.id !== account.id) return
+  openAIOSProfiles.value = account.openai_oauth_os_profiles
+  emit('updated', account)
+}
+
+const revokeOSAuthorization = async (os: OpenAIOAuthOS) => {
+  if (!props.account || osAuthorizationBusy.value || isSparkShadow.value) return
+  if (!confirm(t('admin.accounts.openai.revokeOSConfirm', { os: openAIOSLabels[os] }))) return
+  osAuthorizationBusy.value = true
+  try {
+    handleOSAuthorizationUpdated(await adminAPI.accounts.revokeOpenAIOAuthOS(props.account.id, os))
+    appStore.showSuccess(t('admin.accounts.openai.authorizationSaved'))
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.accounts.failedToUpdate'))
+  } finally { osAuthorizationBusy.value = false }
+}
+
+const setDefaultAuthorizationOS = async (os: OpenAIOAuthOS) => {
+  if (!props.account || osAuthorizationBusy.value || isSparkShadow.value) return
+  osAuthorizationBusy.value = true
+  try {
+    handleOSAuthorizationUpdated(await adminAPI.accounts.setDefaultOpenAIOAuthOS(props.account.id, os))
+    appStore.showSuccess(t('admin.accounts.openai.authorizationSaved'))
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.accounts.failedToUpdate'))
+  } finally { osAuthorizationBusy.value = false }
 }
 
 const regenerateOpenAIInstallationID = async (os: OpenAIOAuthOS) => {

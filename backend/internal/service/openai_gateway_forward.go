@@ -22,6 +22,10 @@ func ptrUint64(v uint64) *uint64 { return &v }
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	ctx, account, scopeErr := s.prepareOpenAIOAuthRequestScope(ctx, c, account, body)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	if account != nil && account.IsOpenAIOAuth() {
 		s.captureOpenAIRequestIntegrity(ctx, c, "responses", body)
 	}

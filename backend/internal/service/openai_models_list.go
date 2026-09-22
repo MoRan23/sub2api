@@ -23,14 +23,19 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, accoun
 	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	credentialAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {
-		return nil, fmt.Errorf("resolve model list credentials: %w", err)
+		return nil, openAIModelsCredentialError(err)
 	}
 	if credentialAccount.IsOpenAIOAuth() {
 		clientVersion := CodexCanonicalClientVersion()
 		if s.settingService != nil {
 			clientVersion = s.settingService.GetOpenAICodexClientVersion(ctx)
 		}
-		response, err := s.FetchCodexModelsManifest(ctx, account, clientVersion, "")
+		// Keep business-account routing while freezing the slot selected above.
+		scoped := *account
+		scoped.OpenAIOAuthCredentialOS = credentialAccount.OpenAIOAuthCredentialOS
+		scoped.OpenAIOAuthCredentialOwnerID = credentialAccount.OpenAIOAuthCredentialOwnerID
+		scoped.OpenAIOAuthAuthorizationGeneration = credentialAccount.OpenAIOAuthAuthorizationGeneration
+		response, err := s.FetchCodexModelsManifest(ctx, &scoped, clientVersion, "")
 		if err != nil {
 			return nil, err
 		}

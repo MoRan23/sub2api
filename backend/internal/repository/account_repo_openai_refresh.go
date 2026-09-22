@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,6 +24,40 @@ func (r *accountRepository) PatchOpenAIOAuthCredentialsIfUnchanged(
 	if r == nil {
 		return false, errors.New("account repository SQL executor is not configured")
 	}
+	if len(expectedAuth) == 0 {
+		return false, errors.New("OpenAI OAuth refresh requires an expected auth snapshot")
+	}
+	// Compatibility callers may still supply the former single credential
+	// snapshot. Bind that operation to the default slot and compare its exact
+	// authentication document before entering the private slot CAS.
+	if r.client != nil {
+		account, err := r.GetByID(ctx, id)
+		if err != nil {
+			return false, err
+		}
+		if service.IsOpenAIOAuthOSProfileOwner(account) {
+			scoped, err := service.ResolveOpenAIOAuthCredentialAccount(ctx, r, account, "")
+			if err != nil {
+				return false, err
+			}
+			for key, value := range expectedAuth {
+				expectedValue, err := json.Marshal(value)
+				if err != nil {
+					return false, err
+				}
+				currentValue, err := json.Marshal(scoped.Credentials[key])
+				if err != nil {
+					return false, err
+				}
+				if !bytes.Equal(currentValue, expectedValue) {
+					return false, nil
+				}
+			}
+			return r.PatchOpenAIOAuthOSCredentialsIfUnchanged(ctx, id, scoped.OpenAIOAuthCredentialOS,
+				scoped.OpenAIOAuthAuthorizationGeneration, scoped.OpenAIOAuthCredentialRevision,
+				expectedProxyID, patch, removedKeys)
+		}
+	}
 	contextTx := dbent.TxFromContext(ctx)
 	exec := r.sql
 	if contextTx != nil {
@@ -30,9 +65,6 @@ func (r *accountRepository) PatchOpenAIOAuthCredentialsIfUnchanged(
 	}
 	if exec == nil {
 		return false, errors.New("account repository SQL executor is not configured")
-	}
-	if len(expectedAuth) == 0 {
-		return false, errors.New("OpenAI OAuth refresh requires an expected auth snapshot")
 	}
 	expectedJSON, err := json.Marshal(expectedAuth)
 	if err != nil {

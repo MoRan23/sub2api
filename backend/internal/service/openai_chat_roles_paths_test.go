@@ -42,6 +42,7 @@ func TestOpenAIChatRolePathsPreserveAccountBoundaries(t *testing.T) {
 					switch path {
 					case "oauth":
 						account = newOpenAIIdentityPathOAuthAccount(9912)
+						svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 						upstream.resp = openAICompatSSECompletedResponse("resp_chat_roles", "gpt-5.4")
 					case "compatible":
 						account.Credentials["base_url"] = "https://compatible.example.test/v1"

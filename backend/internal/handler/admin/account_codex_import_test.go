@@ -738,6 +738,7 @@ func TestImportCodexSessionsUpgradesAccessTokenOnlyAccountWithRefreshToken(t *te
 		},
 	}})
 	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	enableCodexImportVerification(t, handler, svc, newToken, "refresh-new")
 	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
 	entries := []codexImportEntry{
 		{Index: 1, Value: map[string]any{
@@ -820,6 +821,7 @@ func TestImportCodexSessionsBatchOldAccessTokenDoesNotRollbackRefreshToken(t *te
 		},
 	}})
 	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	enableCodexImportVerification(t, handler, svc, newToken, "refresh-new")
 	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
 	entries := []codexImportEntry{
 		{Index: 1, Value: map[string]any{
@@ -866,6 +868,7 @@ func TestImportCodexSessionsWithRefreshTokenKeepsExistingDedup(t *testing.T) {
 		},
 	}})
 	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	enableCodexImportVerification(t, handler, svc, existingToken, "refresh-new")
 	req := CodexSessionImportRequest{SkipDefaultGroupBind: boolPtr(true)}
 	entries := []codexImportEntry{
 		{Index: 1, Value: buildCodexRefreshImportValue(t, "workspace-1", "user-1", "refresh-new")},
@@ -895,6 +898,15 @@ type codexImportMemoryAdminService struct {
 func newCodexImportMemoryAdminService(accounts []service.Account) *codexImportMemoryAdminService {
 	stub := newStubAdminService()
 	stub.accounts = append([]service.Account(nil), accounts...)
+	for i := range stub.accounts {
+		if service.IsOpenAIOAuthOSProfileOwner(&stub.accounts[i]) {
+			profiles, err := service.BuildOpenAIOAuthOSProfiles(&stub.accounts[i], nil)
+			if err != nil {
+				panic(err)
+			}
+			service.ApplyOpenAIOAuthOSProfiles(&stub.accounts[i], profiles)
+		}
+	}
 	return &codexImportMemoryAdminService{
 		stubAdminService: stub,
 		nextID:           100,
@@ -946,6 +958,14 @@ func (s *codexImportMemoryAdminService) GetAccount(ctx context.Context, id int64
 		}
 	}
 	return s.stubAdminService.GetAccount(ctx, id)
+}
+
+func (s *codexImportMemoryAdminService) GetOpenAIOAuthOSCredential(ctx context.Context, id int64, os string) (*service.OpenAIOAuthOSCredential, error) {
+	account, err := s.GetAccount(ctx, id)
+	if err != nil || account.OpenAIOAuthOSProfiles == nil || account.OpenAIOAuthOSProfiles.DefaultOS != os {
+		return nil, err
+	}
+	return &service.OpenAIOAuthOSCredential{OwnerAccountID: id, OSFamily: os, Credentials: account.Credentials, Status: service.OpenAIOAuthAuthorizationAuthorized, AuthorizationGeneration: "fixture-generation", Revision: 1}, nil
 }
 
 func buildCodexAccessOnlyImportValue(t *testing.T, accountID, userID string) map[string]any {

@@ -33,6 +33,23 @@ func (r *openAIIdentityContinuityAccountRepo) GetByID(_ context.Context, id int6
 	return &account, nil
 }
 
+func (r *openAIIdentityContinuityAccountRepo) GetOpenAIOAuthOSCredential(_ context.Context, id int64, os string) (*service.OpenAIOAuthOSCredential, error) {
+	if id != r.account.ID {
+		return nil, nil
+	}
+	return openAIHandlerTestCredential(&r.account, os), nil
+}
+
+func (r *openAIIdentityContinuityAccountRepo) ListOpenAIOAuthOSCredentials(_ context.Context, id int64) ([]*service.OpenAIOAuthOSCredential, error) {
+	if id != r.account.ID || r.account.OpenAIOAuthOSProfiles == nil {
+		return nil, nil
+	}
+	if slot := openAIHandlerTestCredential(&r.account, r.account.OpenAIOAuthOSProfiles.DefaultOS); slot != nil {
+		return []*service.OpenAIOAuthOSCredential{slot}, nil
+	}
+	return nil, nil
+}
+
 func (r *openAIIdentityContinuityAccountRepo) ListSchedulableByGroupIDAndPlatform(_ context.Context, _ int64, platform string) ([]service.Account, error) {
 	return r.accountsForPlatform(platform), nil
 }
@@ -93,7 +110,7 @@ func (u *openAIIdentityContinuityUpstream) snapshot() []openAIIdentityContinuity
 	return out
 }
 
-func newOpenAIIdentityContinuityHandler(t *testing.T) (*OpenAIGatewayHandler, *openAIIdentityContinuityUpstream) {
+func newOpenAIIdentityContinuityHandler(t *testing.T) (*OpenAIGatewayHandler, *openAIIdentityContinuityUpstream, string) {
 	t.Helper()
 	repo := &openAIIdentityContinuityAccountRepo{account: service.Account{
 		ID:          910074,
@@ -112,6 +129,7 @@ func newOpenAIIdentityContinuityHandler(t *testing.T) (*OpenAIGatewayHandler, *o
 			"openai_pinned_installation_id": openAIIdentityContinuityInstallationID,
 		},
 	}}
+	authorizeOpenAIHandlerTestAccount(t, &repo.account)
 	upstream := &openAIIdentityContinuityUpstream{}
 	cfg := &config.Config{
 		RunMode: config.RunModeSimple,
@@ -130,7 +148,8 @@ func newOpenAIIdentityContinuityHandler(t *testing.T) (*OpenAIGatewayHandler, *o
 		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg),
 		nil, nil, nil, nil, cfg,
 	)
-	return handler, upstream
+	profiles := repo.account.OpenAIOAuthOSProfiles
+	return handler, upstream, profiles.Profiles[profiles.DefaultOS].SyncSessionID
 }
 
 func newOpenAIIdentityContinuityContext(t *testing.T, path string, body []byte, setup func(http.Header)) (*gin.Context, *httptest.ResponseRecorder) {
@@ -164,11 +183,13 @@ func TestOpenAIResponsesHandlerPreservesIdentityAcrossResponsesAndCompact(t *tes
 		responsesBody []byte
 		compactBody   []byte
 		setupHeaders  func(http.Header)
+		reusesChild   bool
 	}{
 		{
 			name:          "canonical tuple",
-			responsesBody: []byte(`{"model":"gpt-5.4","stream":false,"input":"hello","client_metadata":{"session_id":"handler-canonical","thread_id":"handler-canonical"}}`),
-			compactBody:   []byte(`{"model":"gpt-5.4","stream":false,"input":"hello","client_metadata":{"session_id":"handler-canonical","thread_id":"handler-canonical"}}`),
+			responsesBody: []byte(`{"model":"gpt-5.4","stream":false,"input":"hello","client_metadata":{"session_id":"SYNC_ROOT","thread_id":"01989f44-7c00-7000-8000-000000000111"}}`),
+			compactBody:   []byte(`{"model":"gpt-5.4","stream":false,"input":"hello","client_metadata":{"session_id":"SYNC_ROOT","thread_id":"01989f44-7c00-7000-8000-000000000111"}}`),
+			reusesChild:   true,
 		},
 		{
 			name:          "prompt cache fallback",
@@ -187,12 +208,14 @@ func TestOpenAIResponsesHandlerPreservesIdentityAcrossResponsesAndCompact(t *tes
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler, upstream := newOpenAIIdentityContinuityHandler(t)
-			responsesContext, responsesRecorder := newOpenAIIdentityContinuityContext(t, "/v1/responses", tt.responsesBody, tt.setupHeaders)
+			handler, upstream, syncRoot := newOpenAIIdentityContinuityHandler(t)
+			responsesBody := bytes.ReplaceAll(tt.responsesBody, []byte("SYNC_ROOT"), []byte(syncRoot))
+			compactBody := bytes.ReplaceAll(tt.compactBody, []byte("SYNC_ROOT"), []byte(syncRoot))
+			responsesContext, responsesRecorder := newOpenAIIdentityContinuityContext(t, "/v1/responses", responsesBody, tt.setupHeaders)
 			handler.Responses(responsesContext)
 			require.Equal(t, http.StatusOK, responsesRecorder.Code, responsesRecorder.Body.String())
 
-			compactContext, compactRecorder := newOpenAIIdentityContinuityContext(t, "/v1/responses/compact", tt.compactBody, tt.setupHeaders)
+			compactContext, compactRecorder := newOpenAIIdentityContinuityContext(t, "/v1/responses/compact", compactBody, tt.setupHeaders)
 			handler.Responses(compactContext)
 			require.Equal(t, http.StatusOK, compactRecorder.Code, compactRecorder.Body.String())
 
@@ -204,11 +227,17 @@ func TestOpenAIResponsesHandlerPreservesIdentityAcrossResponsesAndCompact(t *tes
 			require.NotEmpty(t, responsesThread)
 			require.True(t, service.ValidateFingerprintObservationUUIDv7(responsesSession))
 			require.True(t, service.ValidateFingerprintObservationUUIDv7(responsesThread))
-			require.Equal(t, responsesSession, responsesThread)
+			require.Equal(t, syncRoot, responsesSession, "non-stream requests use the selected OS's persisted sync root")
+			require.NotEqual(t, responsesSession, responsesThread, "the logical turn remains a child of the sync root")
 			require.Equal(t, responsesSession, gjson.GetBytes(requests[0].Body, "client_metadata.session_id").String())
 			require.Equal(t, responsesThread, gjson.GetBytes(requests[0].Body, "client_metadata.thread_id").String())
 			require.Equal(t, responsesSession, requests[1].Header.Get("session-id"))
-			require.Equal(t, responsesThread, requests[1].Header.Get("thread-id"))
+			if tt.reusesChild {
+				require.Equal(t, responsesThread, requests[1].Header.Get("thread-id"))
+			} else {
+				require.True(t, service.ValidateFingerprintObservationUUIDv7(requests[1].Header.Get("thread-id")))
+				require.NotEqual(t, responsesThread, requests[1].Header.Get("thread-id"), "non-native aliases do not reuse a synchronous child")
+			}
 			require.Equal(t, responsesThread, requests[0].Header.Get("x-client-request-id"))
 			require.Empty(t, requests[1].Header.Get("x-client-request-id"))
 			require.False(t, gjson.GetBytes(requests[1].Body, "client_metadata").Exists())

@@ -29,46 +29,48 @@ const (
 // Credentials only live in pending work; they are never returned by Observations.
 type CodexTelemetryInput struct {
 	// Transport-only hints, never emitted as telemetry data or observations.
-	nativeHTTPScope     codexnative.Scope
-	AccountID           int64
-	OwnerAccountID      int64
-	OSFamily            string
-	InstallationID      string
-	ManagedInstallation bool
-	SamplingID          string
-	ProxyID             *int64
-	ReturnedToolCallIDs []string
-	Shell               string
-	AccountName         string
-	AccessToken         string `json:"-"`
-	ChatGPTAccountID    string
-	ProxyURL            string `json:"-"`
-	UserAgent           string
-	Originator          string
-	Version             string
-	SessionID           string
-	ThreadID            string
-	TurnID              string
-	ParentThreadID      string
-	ParentTurnID        string
-	RootTurnID          string
-	ForkedFromThreadID  string
-	ThreadSource        string
-	TurnTrigger         string
-	AgentName           string
-	SubagentKind        string
-	OpenAISubagent      string
-	Sandbox             string
-	SandboxMode         string
-	ApprovalPolicy      string
-	ApprovalsReviewer   string
-	AutoReviewEnabled   *bool
-	GuardianV2Enabled   *bool
-	Model               string
-	Effort              string
-	ServiceTier         string
-	WebSocket           bool
-	StartedAt           time.Time
+	nativeHTTPScope         codexnative.Scope
+	AccountID               int64
+	OwnerAccountID          int64
+	OSFamily                string
+	CredentialOS            string `json:"-"`
+	AuthorizationGeneration string `json:"-"`
+	InstallationID          string
+	ManagedInstallation     bool
+	SamplingID              string
+	ProxyID                 *int64
+	ReturnedToolCallIDs     []string
+	Shell                   string
+	AccountName             string
+	AccessToken             string `json:"-"`
+	ChatGPTAccountID        string
+	ProxyURL                string `json:"-"`
+	UserAgent               string
+	Originator              string
+	Version                 string
+	SessionID               string
+	ThreadID                string
+	TurnID                  string
+	ParentThreadID          string
+	ParentTurnID            string
+	RootTurnID              string
+	ForkedFromThreadID      string
+	ThreadSource            string
+	TurnTrigger             string
+	AgentName               string
+	SubagentKind            string
+	OpenAISubagent          string
+	Sandbox                 string
+	SandboxMode             string
+	ApprovalPolicy          string
+	ApprovalsReviewer       string
+	AutoReviewEnabled       *bool
+	GuardianV2Enabled       *bool
+	Model                   string
+	Effort                  string
+	ServiceTier             string
+	WebSocket               bool
+	StartedAt               time.Time
 }
 
 // CodexTelemetryResult contains measurements, not the upstream response body.

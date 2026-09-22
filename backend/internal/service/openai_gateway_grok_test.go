@@ -3573,6 +3573,10 @@ func TestOpenAIWSHTTPBridgeSSEErrorSideEffectsRunOncePerPlatform(t *testing.T) {
 				svc.rateLimitService = NewRateLimitService(repo, nil, cfg, nil, nil)
 			}
 			account := &Account{ID: 70, Platform: platform, Type: AccountTypeOAuth, Concurrency: 1}
+			if platform == PlatformOpenAI {
+				account.Credentials = map[string]any{"access_token": "sk-test"}
+				account = scopedAuxiliaryOSFixture(t, svc, account)
+			}
 			recorder := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(recorder)
 			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)

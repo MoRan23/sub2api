@@ -132,6 +132,7 @@ func TestOpenAILiveResidencyRequestAndHandshake(t *testing.T) {
 		ctx := openai.WithRequestPolicy(context.Background(), policy)
 		upstream := &liveHTTPUpstreamStub{}
 		svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, liveAttestationCipher: cipher}
+		registerAuxiliaryOSFixture(t, svc, account)
 		_, err := svc.createUpstreamLiveCall(ctx, account, &LiveCallRequest{SDP: "v=0\r\n", Session: []byte(`{"model":"gpt-live"}`)}, "test-attestation")
 		require.NoError(t, err)
 		headers, err := svc.liveSidebandHeaders(ctx, account, &LiveCallRecord{AttestationCiphertext: ciphertext})

@@ -751,6 +751,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return err
 	}
 	rawFirstClientMessage := append([]byte(nil), firstClientMessage...)
+	ctx = captureOpenAIRequestOSContext(ctx, c, rawFirstClientMessage)
 	if account.IsOpenAIOAuth() {
 		s.beginOpenAIWSRequestIntegrityTurn(ctx, c, rawFirstClientMessage, false)
 		resetOpenAIRequestIntegrityAttemptRules(c)
@@ -758,6 +759,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if account.UsesOpenAICodexProtocol() {
 		if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
 			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, rawFirstClientMessage, ""))
+		}
+	}
+	if RequiresOpenAIOAuthOSAuthorization(account) {
+		var err error
+		account, err = s.freezeOpenAIWSAuthorization(ctx, account, token)
+		if err != nil {
+			return err
 		}
 	}
 	firstClientMessage, currentTimezoneState := s.prepareOpenAIWSFrameTimezone(ctx, c, account, firstClientMessage, true, true, firstAcceptedAt)
@@ -1292,6 +1300,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			requestModelForThisFrame := ""
 			if isResponseCreate {
+				if err := s.validateOpenAIWSAuthorization(ctx, account); err != nil {
+					return payload, nil, err
+				}
 				requestModelForThisFrame = usageMeta.requestModelForFrame(payload)
 				if requestModelForThisFrame == "" {
 					requestModelForThisFrame = capturedSessionModel

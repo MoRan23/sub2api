@@ -140,7 +140,7 @@ func TestProfitControl_FailoverDoesNotReadmitExcluded(t *testing.T) {
 		expensive.ID: {AccountID: expensive.ID},
 	}}
 	svc := &OpenAIGatewayService{
-		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*cheap, *expensive}},
+		accountRepo:        newSchedulerTestOpenAIAccountRepo([]Account{*cheap, *expensive}),
 		cfg:                &config.Config{},
 		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
 		concurrencyService: NewConcurrencyService(cache),
@@ -200,7 +200,7 @@ func TestProfitControl_RateRecoveryReadmitsAccount(t *testing.T) {
 		expensive.ID: {AccountID: expensive.ID},
 	}}
 	svc := &OpenAIGatewayService{
-		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*expensive}},
+		accountRepo:        newSchedulerTestOpenAIAccountRepo([]Account{*expensive}),
 		cfg:                &config.Config{},
 		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
 		concurrencyService: NewConcurrencyService(cache),
@@ -218,7 +218,7 @@ func TestProfitControl_RateRecoveryReadmitsAccount(t *testing.T) {
 	recovered.Status = StatusActive
 	recovered.Schedulable = true
 	recovered.Concurrency = 2
-	svc.accountRepo = schedulerTestOpenAIAccountRepo{accounts: []Account{*recovered}}
+	svc.accountRepo = newSchedulerTestOpenAIAccountRepo([]Account{*recovered})
 
 	selection, _, err = svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "gpt-test", nil, OpenAIUpstreamTransportAny, false)
 	require.NoError(t, err)

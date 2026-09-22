@@ -53,12 +53,17 @@ func (s *OpenAIGatewayService) beginCodexTelemetryFromWire(
 	}
 	input := codexTelemetryInputFromWire(account, headers, body, proxyURL, websocket, profile)
 	input.OwnerAccountID = owner.ID
+	input.CredentialOS = account.OpenAIOAuthCredentialOS
+	input.AuthorizationGeneration = account.OpenAIOAuthAuthorizationGeneration
 	if frozen {
 		if snapshot.ownerID != 0 && snapshot.ownerID != owner.ID {
 			s.skipCodexTelemetryIdentity(account, headers, "stale_identity")
 			return nil
 		}
 		input.SamplingID = snapshot.samplingID
+		if snapshot.credentialOS != "" {
+			input.CredentialOS, input.AuthorizationGeneration = snapshot.credentialOS, snapshot.authorizationGeneration
+		}
 		if snapshot.route.ProxyURL != proxyURL {
 			s.skipCodexTelemetryIdentity(account, headers, "proxy_unavailable")
 			return nil // An unidentified route must never become a direct send.
@@ -86,6 +91,13 @@ func (s *OpenAIGatewayService) beginCodexTelemetryFromWire(
 	if input.SamplingID == "" {
 		input.SamplingID = uuid.NewString()
 	}
+	if _, managed := s.accountRepo.(OpenAIOAuthOSCredentialsReader); managed &&
+		(NormalizeOpenAIOSFamily(input.CredentialOS) == "" || input.AuthorizationGeneration == "") {
+		// The response cannot establish which authorization sent this request.
+		// Never infer it from a newer database read after the physical send.
+		s.skipCodexTelemetryIdentity(account, headers, "missing_oauth_authorization_scope")
+		return nil
+	}
 	transportCtx := withOpenAINativeHTTPAccountScope(ctx, account, s.accountRepo, "telemetry")
 	input.nativeHTTPScope, _ = codexnative.ScopeFromContext(transportCtx)
 	input.nativeHTTPScope.SourceUserAgent = input.UserAgent
@@ -100,7 +112,7 @@ func (s *OpenAIGatewayService) skipCodexTelemetryIdentity(account *Account, head
 		return
 	}
 	switch reason {
-	case "identity_unavailable", "stale_identity", "proxy_unavailable":
+	case "identity_unavailable", "stale_identity", "proxy_unavailable", "missing_oauth_authorization_scope":
 	default:
 		return
 	}
@@ -193,11 +205,13 @@ func codexTelemetryInputFromWire(account *Account, headers http.Header, body []b
 type codexTelemetryGatewayContextKey struct{}
 
 type codexTelemetryGatewaySnapshot struct {
-	ownerID        int64
-	os             string
-	installationID string
-	samplingID     string
-	route          OpenAIEgressRoute
+	ownerID                 int64
+	os                      string
+	installationID          string
+	samplingID              string
+	route                   OpenAIEgressRoute
+	credentialOS            string
+	authorizationGeneration string
 }
 
 type codexTelemetrySamplingCursor struct {
@@ -229,14 +243,19 @@ func withCodexTelemetryGatewayContext(ctx context.Context, c *gin.Context, accou
 	samplingID := cursor.id
 	cursor.mu.Unlock()
 	snapshot := codexTelemetryGatewaySnapshot{samplingID: samplingID, route: OpenAIOutboundRouteForAccount(c, account)}
+	snapshot.credentialOS, snapshot.authorizationGeneration = account.OpenAIOAuthCredentialOS, account.OpenAIOAuthAuthorizationGeneration
 	plan, hasPlan := OpenAIOAuthIdentityPlanFromContext(c)
 	if len(plans) > 0 && plans[0] != nil {
 		plan, hasPlan = *plans[0], true
 	}
 	if hasPlan {
 		snapshot.ownerID, snapshot.os, snapshot.installationID = plan.OSOwnerID, plan.OSFamily, plan.OSProfile.InstallationID
+		if plan.CredentialOS != "" {
+			snapshot.credentialOS, snapshot.authorizationGeneration = plan.CredentialOS, plan.AuthorizationGeneration
+		}
 	} else if selection, ok := openAIOAuthOSSelectionFromContext(ctx); ok {
 		snapshot.ownerID, snapshot.os, snapshot.installationID = selection.OwnerID, selection.Profile.OSFamily, selection.Profile.InstallationID
+		snapshot.credentialOS, snapshot.authorizationGeneration = selection.CredentialOS, selection.AuthorizationGeneration
 	}
 	return context.WithValue(ctx, codexTelemetryGatewayContextKey{}, snapshot)
 }

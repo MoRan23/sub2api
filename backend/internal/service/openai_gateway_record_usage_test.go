@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,94 @@ type openAIRecordUsageAccountRepoStub struct {
 func (s *openAIRecordUsageAccountRepoStub) GetByID(_ context.Context, _ int64) (*Account, error) {
 	s.calls++
 	return s.account, nil
+}
+
+type openAIRecordUsageSlotRepoStub struct {
+	openAIRecordUsageAccountRepoStub
+	slot      *OpenAIOAuthOSCredential
+	slotErr   error
+	slotReads int
+}
+
+func (s *openAIRecordUsageSlotRepoStub) GetOpenAIOAuthOSCredential(context.Context, int64, string) (*OpenAIOAuthOSCredential, error) {
+	s.slotReads++
+	return s.slot, s.slotErr
+}
+
+func (s *openAIRecordUsageSlotRepoStub) ListOpenAIOAuthOSCredentials(context.Context, int64) ([]*OpenAIOAuthOSCredential, error) {
+	s.slotReads++
+	return []*OpenAIOAuthOSCredential{s.slot}, s.slotErr
+}
+
+func TestOpenAIGatewayServiceRecordUsage_CompletedOAuthAttemptSurvivesSlotChanges(t *testing.T) {
+	for _, shadow := range []bool{false, true} {
+		for _, change := range []string{"revoked", "cooldown", "authorization_changed"} {
+			t.Run(change+"/shadow="+strconv.FormatBool(shadow), func(t *testing.T) {
+				usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+				userRepo := &openAIRecordUsageUserRepoStub{}
+				svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+				swapInOpenAILadderCatalog(t, svc)
+				parent := &Account{ID: 4001, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+					Credentials: map[string]any{"plan_type": "team", "access_token": "different-default-token"},
+					Extra:       map[string]any{openAILongContextBillingEnabledKey: true}}
+				account := &Account{ID: parent.ID, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+					Credentials:             map[string]any{"plan_type": "plus", "access_token": "physical-linux-token"},
+					OpenAIOAuthCredentialOS: "linux", OpenAIOAuthCredentialOwnerID: parent.ID,
+					OpenAIOAuthAuthorizationGeneration: "completed-authorization", OpenAIOAuthCredentialRevision: 8}
+				if shadow {
+					account.ID, account.ParentAccountID, account.QuotaDimension = 3001, &parent.ID, QuotaDimensionSpark
+				}
+				repo := &openAIRecordUsageSlotRepoStub{openAIRecordUsageAccountRepoStub: openAIRecordUsageAccountRepoStub{account: parent},
+					slot: &OpenAIOAuthOSCredential{Status: OpenAIOAuthAuthorizationAuthorized}}
+				switch change {
+				case "revoked":
+					repo.slot.Status = OpenAIOAuthAuthorizationUnauthorized
+				case "cooldown":
+					until := time.Now().Add(time.Hour)
+					repo.slot.RefreshRetryAfter = &until
+				case "authorization_changed":
+					repo.slotErr = ErrOpenAIOAuthOSAuthorizationChanged
+				}
+				svc.accountRepo = repo
+				err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+					Result: &OpenAIForwardResult{RequestID: "completed-os-billing", Model: "gpt-5.4", Usage: OpenAIUsage{InputTokens: 300000, OutputTokens: 100}, Duration: time.Second},
+					APIKey: openAIRecordUsageAPIKeyWithGroup(svc, 1001, false), User: &User{ID: 2001}, Account: account,
+				})
+				require.NoError(t, err)
+				require.Equal(t, 1, usageRepo.calls)
+				require.Equal(t, 1, userRepo.deductCalls)
+				require.Equal(t, account.ID, usageRepo.lastLog.AccountID)
+				require.Equal(t, shadow, usageRepo.lastLog.LongContextBillingApplied, "shadow uses current parent configuration; ordinary accounts keep their request snapshot")
+				require.Zero(t, repo.slotReads, "settlement must not reauthorize or select another OS slot")
+				if shadow {
+					require.Equal(t, 1, repo.calls)
+				} else {
+					require.Zero(t, repo.calls)
+				}
+			})
+		}
+	}
+}
+
+func TestOpenAIGatewayServiceRecordUsage_ShadowBillingKeepsPhysicalProviderPlan(t *testing.T) {
+	parent := &Account{ID: 4001, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"plan_type": "team", "access_token": "current-default-token", "billing_setting": "current-parent"},
+		Extra:       map[string]any{openAILongContextBillingEnabledKey: true}}
+	snapshot := &Account{ID: 3001, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &parent.ID,
+		Credentials:             map[string]any{"plan_type": "plus", "access_token": "attempt-token"},
+		OpenAIOAuthCredentialOS: "linux", OpenAIOAuthCredentialOwnerID: parent.ID, OpenAIOAuthAuthorizationGeneration: "old-grant", OpenAIOAuthCredentialRevision: 8}
+	repo := &openAIRecordUsageAccountRepoStub{account: parent}
+	billing, err := resolveOpenAIUsageBillingAccount(context.Background(), repo, snapshot)
+	require.NoError(t, err)
+	require.Equal(t, "plus", billing.GetCredential("plan_type"))
+	require.Equal(t, "attempt-token", billing.GetCredential("access_token"))
+	require.Equal(t, "current-parent", billing.GetCredential("billing_setting"))
+	require.True(t, billing.IsOpenAILongContextBillingEnabled())
+	require.Equal(t, "linux", billing.OpenAIOAuthCredentialOS)
+	require.Equal(t, "old-grant", billing.OpenAIOAuthAuthorizationGeneration)
+	require.EqualValues(t, 8, billing.OpenAIOAuthCredentialRevision)
+	require.Equal(t, "team", parent.GetCredential("plan_type"), "billing projection must not overwrite parent defaults")
+	require.Equal(t, "plus", snapshot.GetCredential("plan_type"))
 }
 
 func (s *openAIRecordUsageBillingRepoStub) Apply(ctx context.Context, cmd *UsageBillingCommand) (*UsageBillingApplyResult, error) {

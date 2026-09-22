@@ -18,7 +18,7 @@ type codexHistoryTestRepository struct {
 
 func (r *codexHistoryTestRepository) CreateHistoryDemand(_ context.Context, p CodexTurnStateHistoryProof, _ time.Time) (bool, error) {
 	for _, existing := range r.proofs {
-		if existing.OwnerAccountID == p.OwnerAccountID && existing.Model == p.Model && existing.Generation == p.Generation && !p.ObservedAt.After(existing.ObservedAt) {
+		if existing.OwnerAccountID == p.OwnerAccountID && existing.OSFamily == p.OSFamily && existing.Model == p.Model && existing.Generation == p.Generation && !p.ObservedAt.After(existing.ObservedAt) {
 			return false, nil
 		}
 	}
@@ -94,7 +94,7 @@ func TestCodexTurnStateHistoryActivationOnlyValidRecentMatchingAbnormal(t *testi
 			repo := &codexHistoryTestRepository{codexStateMemoryRepo: memory}
 			s.repo = repo
 			now := s.now()
-			p := CodexTurnStateHistoryProof{OwnerAccountID: account.ID, Model: "gpt-5", CredentialEpoch: "epoch", BusinessAt: now,
+			p := CodexTurnStateHistoryProof{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5", CredentialEpoch: "epoch", BusinessAt: now,
 				ObservedAt: now, IssuedAt: now, ExpiresAt: now.Add(time.Hour), TokenLength: 312, CipherBlocks: 11, EnvelopeValid: true, Delivered: true}
 			gen := CodexTurnStateGenerationForAccount(account)
 			switch name {

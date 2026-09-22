@@ -178,6 +178,13 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 		}
 
 		account := selection.Account
+		account, err = ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, OpenAIRequestOSFromContext(ctx).Family)
+		if err != nil {
+			selection.ReleaseFunc()
+			excluded[selection.Account.ID] = struct{}{}
+			lastErr = err
+			continue
+		}
 		leaseID := generateRequestID()
 		acquired, acquireErr := liveCache.AcquireLiveLease(
 			ctx,
@@ -215,22 +222,25 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			model = "gpt-live"
 		}
 		record := &LiveCallRecord{
-			CallID:                created.CallID,
-			CallHash:              hashLiveCallID(created.CallID),
-			AccountID:             account.ID,
-			APIKeyID:              identity.APIKeyID,
-			UserID:                identity.UserID,
-			GroupID:               liveGroupID(identity.GroupID),
-			SubscriptionID:        liveGroupID(identity.SubscriptionID),
-			LeaseID:               leaseID,
-			Model:                 model,
-			CreatedAt:             now,
-			ExpiresAt:             now.Add(s.liveMaxSessionDuration()),
-			Controller:            LiveControllerPending,
-			UserAgent:             identity.UserAgent,
-			IPAddress:             identity.IPAddress,
-			InboundEndpoint:       identity.InboundEndpoint,
-			AttestationCiphertext: attestationCiphertext,
+			CallID:                  created.CallID,
+			CallHash:                hashLiveCallID(created.CallID),
+			AccountID:               account.ID,
+			APIKeyID:                identity.APIKeyID,
+			UserID:                  identity.UserID,
+			GroupID:                 liveGroupID(identity.GroupID),
+			SubscriptionID:          liveGroupID(identity.SubscriptionID),
+			LeaseID:                 leaseID,
+			Model:                   model,
+			CreatedAt:               now,
+			ExpiresAt:               now.Add(s.liveMaxSessionDuration()),
+			Controller:              LiveControllerPending,
+			UserAgent:               identity.UserAgent,
+			IPAddress:               identity.IPAddress,
+			InboundEndpoint:         identity.InboundEndpoint,
+			AttestationCiphertext:   attestationCiphertext,
+			CredentialOS:            account.OpenAIOAuthCredentialOS,
+			CredentialOwnerID:       account.OpenAIOAuthCredentialOwnerID,
+			AuthorizationGeneration: account.OpenAIOAuthAuthorizationGeneration,
 		}
 		mappingTTL := s.liveMaxSessionDuration() + 5*time.Minute
 		if saveErr := store.SaveLiveCall(ctx, record, mappingTTL); saveErr != nil {
@@ -267,6 +277,10 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	attestation string,
 ) (*LiveCallCreated, error) {
 	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
+	account, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, OpenAIRequestOSFromContext(ctx).Family)
+	if err != nil {
+		return nil, err
+	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		logLiveCreateStageFailure(ctx, account.ID, "access_token", err)
@@ -336,6 +350,7 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 		return nil, err
 	}
 	return &LiveCallCreated{
+		Account:  account,
 		SDP:      responseBody,
 		CallID:   callID,
 		Location: resp.Header.Get("Location"),
@@ -415,6 +430,8 @@ func (s *OpenAIGatewayService) applyLiveUpstreamIdentityHeaders(ctx context.Cont
 	// that marker from the same immutable plan instead of consulting the runtime
 	// canonical identity a second time through ensureCodexIdentityHeaders.
 	headers.Set("originator", plan.ClientIdentity.Originator)
+	headers.Set("User-Agent", plan.ClientIdentity.UserAgent)
+	headers.Set("Version", plan.ClientIdentity.Version)
 	if _, err = ApplyOpenAIOAuthIdentityPlan(headers, nil, plan); err != nil {
 		return fmt.Errorf("apply live OAuth profile identity: %w", err)
 	}
@@ -457,7 +474,7 @@ func (s *OpenAIGatewayService) dialLiveSideband(ctx context.Context, record *Liv
 	// A physical reconnect picks up the latest policy; established calls continue
 	// using the headers captured in their existing handshake.
 	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
-	account, err := s.accountRepo.GetByID(ctx, record.AccountID)
+	account, err := s.resolveLiveCallAccount(ctx, record)
 	if err != nil {
 		return nil, err
 	}
@@ -481,6 +498,29 @@ func (s *OpenAIGatewayService) dialLiveSideband(ctx context.Context, record *Liv
 	return raw, nil
 }
 
+func (s *OpenAIGatewayService) resolveLiveCallAccount(ctx context.Context, record *LiveCallRecord) (*Account, error) {
+	if record == nil || s.accountRepo == nil {
+		return nil, ErrLiveCallNotFound
+	}
+	account, err := s.accountRepo.GetByID(ctx, record.AccountID)
+	if err != nil || account == nil {
+		return nil, ErrLiveUnavailable
+	}
+	if !RequiresOpenAIOAuthOSAuthorization(account) {
+		return account, nil
+	}
+	// Legacy call records have no trustworthy slot binding and cannot reconnect
+	// using whichever authorization happens to be the current default.
+	if record.CredentialOS == "" || record.CredentialOwnerID == 0 || record.AuthorizationGeneration == "" {
+		return nil, ErrOpenAIOAuthOSAuthorizationChanged
+	}
+	scoped := *account
+	scoped.OpenAIOAuthCredentialOS = record.CredentialOS
+	scoped.OpenAIOAuthCredentialOwnerID = record.CredentialOwnerID
+	scoped.OpenAIOAuthAuthorizationGeneration = record.AuthorizationGeneration
+	return ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, &scoped, record.CredentialOS)
+}
+
 func (s *OpenAIGatewayService) GetLiveCallForIdentity(
 	ctx context.Context,
 	callID string,
@@ -502,6 +542,9 @@ func (s *OpenAIGatewayService) GetLiveCallForIdentity(
 	}
 	if record.Controller == LiveControllerClosed {
 		return nil, ErrLiveCallNotFound
+	}
+	if _, err := s.resolveLiveCallAccount(ctx, record); err != nil {
+		return nil, err
 	}
 	return record, nil
 }
@@ -547,6 +590,10 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 			messageType, payload, readErr := downstream.Read(proxyCtx)
 			if readErr != nil {
 				errCh <- readErr
+				return
+			}
+			if _, authErr := s.resolveLiveCallAccount(proxyCtx, record); authErr != nil {
+				errCh <- authErr
 				return
 			}
 			if writeErr := upstream.WriteFrame(proxyCtx, messageType, payload); writeErr != nil {
@@ -596,6 +643,8 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 func liveSessionEnded(err error) bool {
 	return errors.Is(err, ErrLiveCallNotFound) ||
 		errors.Is(err, ErrLiveUnavailable) ||
+		errors.Is(err, ErrOpenAIOAuthOSUnauthorized) ||
+		errors.Is(err, ErrOpenAIOAuthOSAuthorizationChanged) ||
 		errors.Is(err, context.DeadlineExceeded)
 }
 
@@ -621,6 +670,9 @@ func (s *OpenAIGatewayService) runLiveController(
 			cancel()
 			return context.DeadlineExceeded
 		case <-refreshTicker.C:
+			if _, err := s.resolveLiveCallAccount(ctx, record); err != nil {
+				return err
+			}
 			if !s.refreshLiveLease(record) {
 				return ErrLiveUnavailable
 			}
@@ -677,6 +729,10 @@ func (s *OpenAIGatewayService) observeLiveCall(record *LiveCallRecord) {
 		}
 		upstream, dialErr := s.dialLiveSideband(context.Background(), record)
 		if dialErr != nil {
+			if liveSessionEnded(dialErr) {
+				s.finalizeLiveCall(record)
+				return
+			}
 			if !s.waitForLiveObserverRetry(record) {
 				return
 			}
@@ -748,6 +804,9 @@ func (s *OpenAIGatewayService) runLiveObserverConnection(record *LiveCallRecord,
 		case <-refreshTicker.C:
 			if !s.refreshLiveLease(record) {
 				return ErrLiveUnavailable
+			}
+			if _, err := s.resolveLiveCallAccount(ctx, record); err != nil {
+				return err
 			}
 		case <-maxTimer.C:
 			closeCtx, closeCancel := context.WithTimeout(context.Background(), 2*time.Second)

@@ -94,6 +94,8 @@ func TestOpenAIGatewayForwardUsesGlobalCompactModelOnInitialLegacyRequest(t *tes
 		Status:      StatusActive, Schedulable: true,
 	}
 
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
+
 	result, err := svc.Forward(context.Background(), c, account, body)
 
 	require.NoError(t, err)
@@ -207,6 +209,8 @@ func TestOpenAIGatewayForwardRetriesExplicitNativeCompactHTTPFailureOnce(t *test
 		Status:      StatusActive, Schedulable: true,
 	}
 
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
+
 	result, err := svc.Forward(context.Background(), c, account, body)
 
 	require.NoError(t, err)
@@ -278,6 +282,8 @@ func TestOpenAIGatewayForwardNonStreamCompactRetryRecordsAttemptWithManagedProxy
 	}
 	account, proxy := compactFallbackManagedProxyAccount()
 
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
+
 	result, err := svc.Forward(context.Background(), c, account, body)
 
 	require.NoError(t, err)
@@ -322,6 +328,8 @@ func TestOpenAIGatewayForwardCompactFailoverEventCarriesManagedProxy(t *testing.
 		httpUpstream: upstream,
 	}
 	account, proxy := compactFallbackManagedProxyAccount()
+
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.Forward(context.Background(), c, account, body)
 
@@ -372,6 +380,8 @@ func TestOpenAIGatewayForwardRetriesExplicitNativeCompactSSEFailureBeforeOutput(
 		Status:      StatusActive, Schedulable: true,
 	}
 
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
+
 	result, err := svc.Forward(context.Background(), c, account, body)
 
 	require.NoError(t, err)
@@ -410,6 +420,8 @@ func TestOpenAIGatewayForwardRetriesStreamingCompactFailureBeforeOutput(t *testi
 		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
 		Status:      StatusActive, Schedulable: true,
 	}
+
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.Forward(context.Background(), c, account, body)
 
@@ -450,6 +462,8 @@ func TestOpenAIGatewayForwardDoesNotRecurseWhenCompactFallbackAlsoFails(t *testi
 		Status:      StatusActive, Schedulable: true,
 	}
 
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
+
 	result, err := svc.Forward(context.Background(), c, account, body)
 
 	require.Error(t, err)
@@ -459,8 +473,15 @@ func TestOpenAIGatewayForwardDoesNotRecurseWhenCompactFallbackAlsoFails(t *testi
 	require.Equal(t, "gpt-5.4", gjson.GetBytes(upstream.bodies[1], "model").String())
 	var compactSignal *openAICompactFallbackSignal
 	require.False(t, errors.As(err, &compactSignal))
-	require.Equal(t, http.StatusBadRequest, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "model not found")
+	// The required authorization repository makes this a managed gateway. After
+	// the one compact fallback, its caller may select another account for a
+	// model-not-found failure, without consuming another in-service attempt.
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadRequest, failoverErr.StatusCode)
+	require.Contains(t, string(failoverErr.ResponseBody), "model not found")
+	require.False(t, c.Writer.Written())
+	require.Empty(t, recorder.Body.String())
 	rawEvents, ok := c.Get(OpsUpstreamErrorsKey)
 	require.True(t, ok)
 	events, ok := rawEvents.([]*OpsUpstreamErrorEvent)
@@ -468,7 +489,7 @@ func TestOpenAIGatewayForwardDoesNotRecurseWhenCompactFallbackAlsoFails(t *testi
 	require.Len(t, events, 2)
 	require.Equal(t, "retry", events[0].Kind)
 	require.Equal(t, "compact_model_fallback", events[0].Reason)
-	require.Equal(t, "http_error", events[1].Kind)
+	require.Equal(t, "failover", events[1].Kind)
 	for _, ev := range events {
 		require.Nil(t, ev.ProxyID)
 		require.Equal(t, opsProxyNameDirect, ev.ProxyName)
@@ -495,6 +516,8 @@ func TestOpenAIPassthroughCompactFallbackSecondStreamFailureUsesStandardErrorPat
 		httpUpstream: upstream,
 	}
 	account, proxy := compactFallbackManagedProxyAccount()
+
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	result, err := svc.forwardOpenAIPassthrough(
 		context.Background(), c, account, body, body, "gpt-5.5", false, nil, true, time.Now(),

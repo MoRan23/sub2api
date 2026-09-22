@@ -63,7 +63,7 @@ func TestOpenAIAuxRequestsRespectFrozenResidencyPolicy(t *testing.T) {
 				Credentials: map[string]any{"chatgpt_account_id": "org-test"},
 			}
 			repo := &stubQuotaAccountRepo{accounts: map[int64]*Account{account.ID: account}}
-			tokens := &stubQuotaTokenCache{tokens: map[string]string{OpenAITokenCacheKey(account): "test-token"}}
+			tokens := quotaAuthorizedTokenFixture(t, repo, account, "test-token")
 			svc := NewOpenAIQuotaService(repo, nil, NewOpenAITokenProvider(repo, tokens, nil), factory)
 			_, err = svc.QueryUsage(ctx, account.ID)
 			require.NoError(t, err)

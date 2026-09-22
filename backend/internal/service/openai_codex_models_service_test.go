@@ -1734,7 +1734,7 @@ func TestFetchCodexModelsManifestPassthrough(t *testing.T) {
 	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
 
 	s := &OpenAIGatewayService{}
-	manifest, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsTestAccount(), "0.137.0", "")
+	manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), newCodexModelsTestAccount(), "0.137.0", "")
 	if err != nil {
 		t.Fatalf("FetchCodexModelsManifest returned error: %v", err)
 	}
@@ -1793,7 +1793,7 @@ func TestFetchCodexModelsManifestAgentIdentityUsesAssertionWithoutOAuthToken(t *
 	defer func() { chatgptCodexModelsURL = original }()
 
 	s := &OpenAIGatewayService{}
-	manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+	manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 	if err != nil {
 		t.Fatalf("FetchCodexModelsManifest returned error: %v", err)
 	}
@@ -1852,7 +1852,7 @@ func TestFetchCodexModelsManifestAgentIdentityRecoversInvalidTaskOnce(t *testing
 	t.Cleanup(func() { openAIAgentIdentityAuthAPIBaseURL = originalAuthBase })
 
 	s := &OpenAIGatewayService{accountRepo: repo}
-	manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+	manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 	require.NoError(t, err)
 	require.Equal(t, `{"models":[]}`, string(manifest.Body))
 	require.Equal(t, 2, modelsCalls)
@@ -1886,7 +1886,7 @@ func TestFetchCodexModelsManifestAgentIdentityRedactsUpstreamErrors(t *testing.T
 	t.Cleanup(func() { chatgptCodexModelsURL = original })
 
 	s := &OpenAIGatewayService{}
-	_, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+	_, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), key.runtimeID)
 	require.NotContains(t, err.Error(), key.taskID)
@@ -1908,7 +1908,7 @@ func TestFetchCodexModelsManifestDefaultClientVersion(t *testing.T) {
 	defer func() { chatgptCodexModelsURL = original }()
 
 	s := &OpenAIGatewayService{}
-	if _, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsTestAccount(), "", ""); err != nil {
+	if _, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), newCodexModelsTestAccount(), "", ""); err != nil {
 		t.Fatalf("FetchCodexModelsManifest returned error: %v", err)
 	}
 	if gotClientVersion != CodexCanonicalClientVersion() {
@@ -1932,7 +1932,7 @@ func TestFetchCodexModelsManifestNotModified(t *testing.T) {
 
 	s := &OpenAIGatewayService{}
 	account := newCodexModelsTestAccount()
-	first, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+	first, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 	if err != nil {
 		t.Fatalf("FetchCodexModelsManifest returned error: %v", err)
 	}
@@ -1945,7 +1945,7 @@ func TestFetchCodexModelsManifestNotModified(t *testing.T) {
 
 	// OAuth 路径接入缓存后，客户端 If-None-Match 与缓存内容 ETag 比较，不再透传上游：
 	// 新鲜期内命中缓存且匹配直接 304，零上游请求。
-	second, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", `W/"abc123"`)
+	second, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", `W/"abc123"`)
 	if err != nil {
 		t.Fatalf("cached fetch returned error: %v", err)
 	}
@@ -1972,13 +1972,14 @@ func TestFetchCodexModelsManifestNotModifiedRefreshesKnownModelCapabilities(t *t
 	defer func() { chatgptCodexModelsURL = original }()
 
 	account := newCodexModelsTestAccount()
-	namespace := openAIOutboundSessionIdentityNamespace(account)
 	s := &OpenAIGatewayService{}
+	account = scopedAuxiliaryOSFixture(t, s, account)
+	namespace := openAICodexModelCapabilitiesNamespace(account)
 	expiredAt := time.Now().Add(-codexModelCapabilityCacheTTL - time.Second)
 	s.codexModelCapabilities.observeManifest(namespace, []byte(`{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":true}]}`), expiredAt)
 	require.False(t, s.openAICodexModelCapabilities(namespace, "gpt-5.6-sol").Known)
 
-	manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.147.0", `W/"responses-lite"`)
+	manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.147.0", `W/"responses-lite"`)
 	require.NoError(t, err)
 	require.True(t, manifest.NotModified)
 	capabilities := s.openAICodexModelCapabilities(namespace, "gpt-5.6-sol")
@@ -1997,7 +1998,7 @@ func TestFetchCodexModelsManifestUpstreamError(t *testing.T) {
 	defer func() { chatgptCodexModelsURL = original }()
 
 	s := &OpenAIGatewayService{}
-	if _, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsTestAccount(), "0.137.0", ""); err == nil {
+	if _, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), newCodexModelsTestAccount(), "0.137.0", ""); err == nil {
 		t.Fatal("expected error for upstream 500, got nil")
 	}
 }
@@ -2007,7 +2008,7 @@ func TestFetchCodexModelsManifestMissingToken(t *testing.T) {
 	delete(account.Credentials, "access_token")
 
 	s := &OpenAIGatewayService{}
-	if _, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", ""); err == nil {
+	if _, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", ""); err == nil {
 		t.Fatal("expected error for missing access token, got nil")
 	}
 }
@@ -2033,7 +2034,7 @@ func TestFetchCodexModelsManifestAPIKeyCustomUpstream(t *testing.T) {
 	}}
 
 	s := newCodexModelsAPIKeyTestService(upstream)
-	manifest, err := s.FetchCodexModelsManifest(
+	manifest, err := fetchAuthorizedCodexModelsFixture(t, s,
 		context.Background(),
 		newCodexModelsAPIKeyTestAccount("https://upstream.example/v1"),
 		"0.144.0",
@@ -2098,14 +2099,14 @@ func TestFetchCodexModelsManifestAPIKeyCompleteBodyWithoutUpstreamETagUsesFinalB
 	account := newCodexModelsAPIKeyTestAccount("https://upstream.example/v1")
 	group := &Group{ID: 82, Platform: PlatformOpenAI}
 
-	first, err := svc.FetchCodexModelsManifest(context.Background(), account, "0.150.0", "")
+	first, err := fetchAuthorizedCodexModelsFixture(t, svc, context.Background(), account, "0.150.0", "")
 	require.NoError(t, err)
 	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(first, account))
 	require.NoError(t, svc.MergeGroupConfiguredCodexModels(context.Background(), group, first, ""))
 	require.Equal(t, codexModelsManifestBodyETag(first.Body), first.ETag)
 	require.NotEmpty(t, first.ETag)
 
-	second, err := svc.FetchCodexModelsManifest(context.Background(), account, "0.150.0", "")
+	second, err := fetchAuthorizedCodexModelsFixture(t, svc, context.Background(), account, "0.150.0", "")
 	require.NoError(t, err)
 	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(second, account))
 	require.NoError(t, svc.MergeGroupConfiguredCodexModels(context.Background(), group, second, first.ETag))
@@ -2127,7 +2128,7 @@ func TestFetchCodexModelsManifestAPIKeyConvertsStandardOpenAIModelList(t *testin
 	}}
 
 	s := newCodexModelsAPIKeyTestService(upstream)
-	manifest, err := s.FetchCodexModelsManifest(
+	manifest, err := fetchAuthorizedCodexModelsFixture(t, s,
 		context.Background(),
 		newCodexModelsAPIKeyTestAccount("https://upstream.example/v1"),
 		"0.144.0",
@@ -2245,7 +2246,7 @@ func TestCompleteAPIKeyCodexModelsManifestForClientUsesSyncedMetadataForConverte
 	}}
 	svc := newCodexModelsAPIKeyTestService(upstream)
 
-	manifest, err := svc.FetchCodexModelsManifest(context.Background(), account, "0.150.0", "")
+	manifest, err := fetchAuthorizedCodexModelsFixture(t, svc, context.Background(), account, "0.150.0", "")
 	require.NoError(t, err)
 	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(manifest, account))
 
@@ -2327,7 +2328,7 @@ func TestCompleteAPIKeyCodexModelsManifestForClientUsesCurrentSnapshotForCachedN
 	}}
 	svc := newCodexModelsAPIKeyTestService(upstream)
 
-	first, err := svc.FetchCodexModelsManifest(context.Background(), account, "0.150.0", "")
+	first, err := fetchAuthorizedCodexModelsFixture(t, svc, context.Background(), account, "0.150.0", "")
 	require.NoError(t, err)
 	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(first, account))
 	firstModel := decodeCodexManifestModels(t, first.Body)[0]
@@ -2339,7 +2340,7 @@ func TestCompleteAPIKeyCodexModelsManifestForClientUsesCurrentSnapshotForCachedN
 	require.EqualValues(t, 256_000, firstModel["context_window"])
 
 	setSnapshot("Refreshed DeepSeek", 512_000)
-	second, err := svc.FetchCodexModelsManifest(context.Background(), account, "0.150.0", "")
+	second, err := fetchAuthorizedCodexModelsFixture(t, svc, context.Background(), account, "0.150.0", "")
 	require.NoError(t, err)
 	require.NoError(t, svc.CompleteAPIKeyCodexModelsManifestForClient(second, account))
 	secondModel := decodeCodexManifestModels(t, second.Body)[0]
@@ -2432,13 +2433,13 @@ func TestFetchCodexModelsManifestAPIKeyDisablesResponsesLiteForAffectedModels(t 
 	}}
 
 	s := newCodexModelsAPIKeyTestService(upstream)
-	manifest, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsAPIKeyTestAccount("https://upstream.example"), "0.145.0", "")
+	manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), newCodexModelsAPIKeyTestAccount("https://upstream.example"), "0.145.0", "")
 	require.NoError(t, err)
 	require.JSONEq(t, `{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":false},{"slug":"gpt-5.6-codex","use_responses_lite":true}],"metadata":{"version":1}}`, string(manifest.Body))
 	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
 	require.Equal(t, `"upstream-strong"`, manifest.upstreamETag)
 
-	notModified, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsAPIKeyTestAccount("https://upstream.example"), "0.145.0", manifest.ETag)
+	notModified, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), newCodexModelsAPIKeyTestAccount("https://upstream.example"), "0.145.0", manifest.ETag)
 	require.NoError(t, err)
 	require.True(t, notModified.NotModified)
 	require.Equal(t, manifest.ETag, notModified.ETag)
@@ -2455,7 +2456,7 @@ func TestFetchCodexModelsManifestOAuthPreservesResponsesLite(t *testing.T) {
 	defer func() { chatgptCodexModelsURL = original }()
 
 	s := &OpenAIGatewayService{}
-	manifest, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsTestAccount(), "0.145.0", "")
+	manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), newCodexModelsTestAccount(), "0.145.0", "")
 	require.NoError(t, err)
 	require.Equal(t, manifestBody, string(manifest.Body))
 }
@@ -2533,7 +2534,7 @@ func TestFetchCodexModelsManifestUsesConfiguredBodyLimit(t *testing.T) {
 
 	s := newCodexModelsAPIKeyTestService(upstream)
 	s.cfg.Gateway.ModelsListReadMaxBytes = 8
-	_, err := s.FetchCodexModelsManifest(
+	_, err := fetchAuthorizedCodexModelsFixture(t, s,
 		context.Background(),
 		newCodexModelsAPIKeyTestAccount("https://upstream.example"),
 		"0.144.0",
@@ -2562,7 +2563,7 @@ func TestFetchCodexModelsManifestAcceptsConfiguredLimitAboveLegacyBoundary(t *te
 
 	s := &OpenAIGatewayService{cfg: &config.Config{}}
 	s.cfg.Gateway.ModelsListReadMaxBytes = 16 << 20
-	manifest, err := s.FetchCodexModelsManifest(context.Background(), newCodexModelsTestAccount(), "0.144.0", "")
+	manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), newCodexModelsTestAccount(), "0.144.0", "")
 	require.NoError(t, err)
 	require.True(t, bytes.Equal([]byte(manifestBody), manifest.Body), "manifest body must be returned intact")
 }
@@ -2594,7 +2595,7 @@ func TestFetchCodexModelsManifestRejectsInvalidEnvelope(t *testing.T) {
 			}}
 
 			s := newCodexModelsAPIKeyTestService(upstream)
-			_, err := s.FetchCodexModelsManifest(
+			_, err := fetchAuthorizedCodexModelsFixture(t, s,
 				context.Background(),
 				newCodexModelsAPIKeyTestAccount("https://upstream.example"),
 				"0.144.0",
@@ -2634,10 +2635,10 @@ func TestFetchCodexModelsManifestAPIKeyDoesNotCacheInvalidEnvelope(t *testing.T)
 
 	s := newCodexModelsAPIKeyTestService(upstream)
 	account := newCodexModelsAPIKeyTestAccount("https://upstream.example")
-	if _, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", ""); err == nil {
+	if _, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", ""); err == nil {
 		t.Fatal("expected invalid manifest error on first fetch")
 	}
-	manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+	manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", "")
 	if err != nil {
 		t.Fatalf("second fetch returned error: %v", err)
 	}
@@ -2682,7 +2683,7 @@ func TestFetchCodexModelsManifestAPIKeySharedRefreshSurvivesCallerCancellation(t
 	firstCtx, cancelFirst := context.WithCancel(context.Background())
 	firstErr := make(chan error, 1)
 	go func() {
-		_, err := s.FetchCodexModelsManifest(firstCtx, account, "0.144.0", "")
+		_, err := fetchAuthorizedCodexModelsFixture(t, s, firstCtx, account, "0.144.0", "")
 		firstErr <- err
 	}()
 
@@ -2710,7 +2711,7 @@ func TestFetchCodexModelsManifestAPIKeySharedRefreshSurvivesCallerCancellation(t
 		err      error
 	}, 1)
 	go func() {
-		manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+		manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", "")
 		secondResult <- struct {
 			manifest *OpenAIModelsResponse
 			err      error
@@ -2762,7 +2763,7 @@ func TestFetchCodexModelsManifestAPIKeyConcurrentRequestsShareRefresh(t *testing
 	for i := 0; i < callers; i++ {
 		go func() {
 			<-begin
-			_, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+			_, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", "")
 			errs <- err
 		}()
 	}
@@ -2800,10 +2801,10 @@ func TestFetchCodexModelsManifestAPIKeyFreshCacheHandlesETagLocally(t *testing.T
 
 	s := newCodexModelsAPIKeyTestService(upstream)
 	account := newCodexModelsAPIKeyTestAccount("https://upstream.example")
-	if _, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", ""); err != nil {
+	if _, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", ""); err != nil {
 		t.Fatalf("initial fetch returned error: %v", err)
 	}
-	manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", `W/"cached"`)
+	manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", `W/"cached"`)
 	if err != nil {
 		t.Fatalf("cached fetch returned error: %v", err)
 	}
@@ -2829,7 +2830,7 @@ func TestFetchCodexModelsManifestAPIKeyCacheSurvivesClientMutation(t *testing.T)
 	s.accountRepo = codexModelsVisibilityAccountRepo{}
 	account := newCodexModelsAPIKeyTestAccount("https://upstream.example")
 
-	first, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+	first, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", "")
 	require.NoError(t, err)
 	require.Contains(t, string(first.Body), "model-a")
 	require.Contains(t, string(first.Body), "model-b")
@@ -2850,7 +2851,7 @@ func TestFetchCodexModelsManifestAPIKeyCacheSurvivesClientMutation(t *testing.T)
 	))
 	require.Equal(t, []string{"model-a"}, codexManifestModelSlugs(t, first.Body))
 
-	second, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+	second, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", "")
 	require.NoError(t, err)
 	require.Equal(t, []string{"model-a", "model-b"}, codexManifestModelSlugs(t, second.Body))
 	require.Equal(t, int32(1), calls.Load())
@@ -2860,7 +2861,7 @@ func TestFetchCodexModelsManifestAPIKeyCacheSurvivesClientMutation(t *testing.T)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			manifest, fetchErr := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+			manifest, fetchErr := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", "")
 			require.NoError(t, fetchErr)
 			require.NoError(t, s.MergeGroupConfiguredCodexModels(
 				context.Background(),
@@ -2880,7 +2881,7 @@ func TestFetchCodexModelsManifestAPIKeyCacheSurvivesClientMutation(t *testing.T)
 	}
 	wg.Wait()
 
-	third, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+	third, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", "")
 	require.NoError(t, err)
 	require.Equal(t, []string{"model-a", "model-b"}, codexManifestModelSlugs(t, third.Body))
 	require.Equal(t, int32(1), calls.Load())
@@ -2901,7 +2902,7 @@ func TestFetchCodexModelsManifestAPIKeyCacheKeyIsolatesRequestIdentity(t *testin
 	base := newCodexModelsAPIKeyTestAccount("https://upstream.example")
 	fetch := func(account *Account, version string) {
 		t.Helper()
-		if _, err := s.FetchCodexModelsManifest(context.Background(), account, version, ""); err != nil {
+		if _, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, version, ""); err != nil {
 			t.Fatalf("fetch returned error: %v", err)
 		}
 	}
@@ -2957,7 +2958,7 @@ func TestFetchCodexModelsManifestAPIKeyCacheBoundsEntriesAndBodySize(t *testing.
 	s := newCodexModelsAPIKeyTestService(upstream)
 	fetch := func(account *Account) {
 		t.Helper()
-		if _, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", ""); err != nil {
+		if _, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", ""); err != nil {
 			t.Fatalf("fetch returned error: %v", err)
 		}
 	}
@@ -3018,7 +3019,7 @@ func TestFetchCodexModelsManifestAPIKeyServesStaleWhileRefreshing(t *testing.T) 
 	}}
 	s := newCodexModelsAPIKeyTestService(upstream)
 	account := newCodexModelsAPIKeyTestAccount("https://upstream.example")
-	if _, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", ""); err != nil {
+	if _, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", ""); err != nil {
 		t.Fatalf("initial fetch returned error: %v", err)
 	}
 
@@ -3034,7 +3035,7 @@ func TestFetchCodexModelsManifestAPIKeyServesStaleWhileRefreshing(t *testing.T) 
 		err      error
 	}, 1)
 	go func() {
-		manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+		manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", "")
 		resultCh <- struct {
 			manifest *OpenAIModelsResponse
 			err      error
@@ -3074,7 +3075,7 @@ func TestFetchCodexModelsManifestAPIKeyServesStaleWhileRefreshing(t *testing.T) 
 	}
 	deadline := time.Now().Add(time.Second)
 	for {
-		manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+		manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", "")
 		if err == nil && string(manifest.Body) == `{"models":[{"slug":"new"}]}` {
 			break
 		}
@@ -3112,7 +3113,7 @@ func TestFetchCodexModelsManifestAPIKeyRevalidatesStaleETag(t *testing.T) {
 	}}
 	s := newCodexModelsAPIKeyTestService(upstream)
 	account := newCodexModelsAPIKeyTestAccount("https://upstream.example")
-	if _, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", ""); err != nil {
+	if _, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", ""); err != nil {
 		t.Fatalf("initial fetch returned error: %v", err)
 	}
 	s.openAIModelsCache.mu.Lock()
@@ -3122,7 +3123,7 @@ func TestFetchCodexModelsManifestAPIKeyRevalidatesStaleETag(t *testing.T) {
 	}
 	s.openAIModelsCache.mu.Unlock()
 
-	manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+	manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", "")
 	if err != nil {
 		t.Fatalf("stale fetch returned error: %v", err)
 	}
@@ -3151,7 +3152,7 @@ func TestFetchCodexModelsManifestAPIKeyRevalidatesStaleETag(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	manifest, err = s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+	manifest, err = fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", "")
 	if err != nil || string(manifest.Body) != `{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":false}]}` {
 		t.Fatalf("renewed cached manifest: body=%q err=%v", manifest.Body, err)
 	}
@@ -3174,7 +3175,7 @@ func TestFetchCodexModelsManifestAPIKeyColdCacheHandlesNotModifiedLocally(t *tes
 	}}
 
 	s := newCodexModelsAPIKeyTestService(upstream)
-	manifest, err := s.FetchCodexModelsManifest(
+	manifest, err := fetchAuthorizedCodexModelsFixture(t, s,
 		context.Background(),
 		newCodexModelsAPIKeyTestAccount("https://upstream.example"),
 		"0.144.0",
@@ -3208,7 +3209,7 @@ func TestFetchCodexModelsManifestAPIKeyDoesNotCacheUnexpectedColdNotModified(t *
 	s := newCodexModelsAPIKeyTestService(upstream)
 	account := newCodexModelsAPIKeyTestAccount("https://upstream.example")
 	for i := 0; i < 2; i++ {
-		manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+		manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.144.0", "")
 		if err != nil {
 			t.Fatalf("fetch %d returned error: %v", i, err)
 		}
@@ -3233,7 +3234,7 @@ func TestFetchCodexModelsManifestAPIKeyPreservesBaseURLQuery(t *testing.T) {
 	}}
 
 	s := newCodexModelsAPIKeyTestService(upstream)
-	_, err := s.FetchCodexModelsManifest(
+	_, err := fetchAuthorizedCodexModelsFixture(t, s,
 		context.Background(),
 		newCodexModelsAPIKeyTestAccount("https://upstream.example/v1?tenant=acme"),
 		"0.144.0",
@@ -3259,7 +3260,7 @@ func TestFetchCodexModelsManifestAPIKeyRejectsBaseURLFragment(t *testing.T) {
 	}}
 
 	s := newCodexModelsAPIKeyTestService(upstream)
-	_, err := s.FetchCodexModelsManifest(
+	_, err := fetchAuthorizedCodexModelsFixture(t, s,
 		context.Background(),
 		newCodexModelsAPIKeyTestAccount("https://upstream.example/v1#models"),
 		"0.144.0",
@@ -3305,12 +3306,12 @@ func (r *codexModelsAccountStateRepo) SetTempUnschedulable(_ context.Context, _ 
 
 func newCodexModels401TestService(repo AccountRepository) *OpenAIGatewayService {
 	rateLimitService := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
-	s := &OpenAIGatewayService{rateLimitService: rateLimitService}
+	s := &OpenAIGatewayService{rateLimitService: rateLimitService, accountRepo: repo}
 	rateLimitService.SetAccountRuntimeBlocker(s)
 	return s
 }
 
-func TestFetchCodexModelsManifestOAuth401MarksAccountUnschedulable(t *testing.T) {
+func TestFetchCodexModelsManifestOAuth401OnlyCoolsSelectedAuthorization(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"detail":{"message":"invalid token"}}`))
@@ -3326,15 +3327,16 @@ func TestFetchCodexModelsManifestOAuth401MarksAccountUnschedulable(t *testing.T)
 	account := newCodexModelsTestAccount()
 	account.Credentials["refresh_token"] = "test-refresh-token"
 
-	_, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+	_, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 	require.Error(t, err)
 	require.True(t, IsRetryableCodexModelsManifestError(err), "manifest 401 should allow account failover")
-	require.Equal(t, 1, repo.setTempUnschedCalls, "OAuth 401 should temp-unschedule the account")
+	require.Equal(t, 0, repo.setTempUnschedCalls, "OAuth 401 must not temp-unschedule every OS")
 	require.Equal(t, 0, repo.setErrorCalls)
-	require.True(t, s.isOpenAIAccountRuntimeBlocked(account), "account should be runtime-blocked after manifest 401")
+	slotRepo := s.accountRepo.(*auxiliaryOSLegacyTestRepository)
+	require.True(t, slotRepo.cooldowns[account.ID].After(time.Now()), "the failing slot should cool down")
 }
 
-func TestFetchCodexModelsManifestOAuth401TokenRevokedDisablesAccount(t *testing.T) {
+func TestFetchCodexModelsManifestOAuth401TokenRevokedOnlyDisablesSelectedAuthorization(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":{"code":"token_revoked","message":"token has been revoked"}}`))
@@ -3350,11 +3352,12 @@ func TestFetchCodexModelsManifestOAuth401TokenRevokedDisablesAccount(t *testing.
 	account := newCodexModelsTestAccount()
 	account.Credentials["refresh_token"] = "test-refresh-token"
 
-	_, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+	_, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 	require.Error(t, err)
 	require.True(t, IsRetryableCodexModelsManifestError(err))
-	require.Equal(t, 1, repo.setErrorCalls, "revoked token should permanently disable the account")
-	require.Contains(t, repo.lastErrorMsg, "Token revoked")
+	require.Equal(t, 0, repo.setErrorCalls, "revoking one OS must not disable the whole account")
+	slotRepo := s.accountRepo.(*auxiliaryOSLegacyTestRepository)
+	require.NotEmpty(t, slotRepo.errors[account.ID], "the failing authorization requires reauthorization")
 	require.Equal(t, 0, repo.setTempUnschedCalls)
 }
 
@@ -3385,7 +3388,7 @@ func TestFetchCodexModelsManifestAgentIdentity401DoesNotDisableAccount(t *testin
 	repo := &codexModelsAccountStateRepo{}
 	s := newCodexModels401TestService(repo)
 
-	_, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+	_, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 	require.Error(t, err)
 	require.Equal(t, 0, repo.setErrorCalls, "agent identity 401s must not disable the account")
 	require.Equal(t, 0, repo.setTempUnschedCalls)
@@ -3405,7 +3408,7 @@ func TestFetchCodexModelsManifestAPIKey401KeepsNoFailoverAndNoDisable(t *testing
 	s := newCodexModelsAPIKeyTestService(upstream)
 	s.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 
-	_, err := s.FetchCodexModelsManifest(
+	_, err := fetchAuthorizedCodexModelsFixture(t, s,
 		context.Background(),
 		newCodexModelsAPIKeyTestAccount("https://upstream.example"),
 		"0.144.0",
@@ -3428,7 +3431,7 @@ func TestFetchCodexModelsManifestAPIKeyUpstreamError(t *testing.T) {
 	}}
 
 	s := newCodexModelsAPIKeyTestService(upstream)
-	_, err := s.FetchCodexModelsManifest(
+	_, err := fetchAuthorizedCodexModelsFixture(t, s,
 		context.Background(),
 		newCodexModelsAPIKeyTestAccount("https://upstream.example"),
 		"0.144.0",
@@ -3467,7 +3470,7 @@ func TestFetchCodexModelsManifestAPIKeyUsesOfficialOpenAIModelsEndpoint(t *testi
 				}, nil
 			}})
 
-			manifest, err := s.FetchCodexModelsManifest(
+			manifest, err := fetchAuthorizedCodexModelsFixture(t, s,
 				context.Background(),
 				newCodexModelsAPIKeyTestAccount(tt.baseURL),
 				"0.144.0",
@@ -3522,7 +3525,7 @@ func TestFetchCodexModelsManifestOAuthFreshWindowZeroUpstreamRequests(t *testing
 	account := newCodexModelsTestAccount()
 
 	for i := 0; i < 10; i++ {
-		manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+		manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 		require.NoError(t, err)
 		require.False(t, manifest.NotModified)
 		require.JSONEq(t, `{"models":[{"slug":"gpt-5.5"}]}`, string(manifest.Body))
@@ -3550,7 +3553,7 @@ func TestFetchCodexModelsManifestOAuthStaleServesOldValueAndRefreshesInBackgroun
 
 	s := &OpenAIGatewayService{}
 	account := newCodexModelsTestAccount()
-	first, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+	first, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 	require.NoError(t, err)
 	require.Contains(t, string(first.Body), `"new"`)
 
@@ -3559,7 +3562,7 @@ func TestFetchCodexModelsManifestOAuthStaleServesOldValueAndRefreshesInBackgroun
 	resultCh := make(chan *OpenAIModelsResponse, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		manifest, fetchErr := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+		manifest, fetchErr := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 		resultCh <- manifest
 		errCh <- fetchErr
 	}()
@@ -3582,7 +3585,7 @@ func TestFetchCodexModelsManifestOAuthStaleServesOldValueAndRefreshesInBackgroun
 	close(release)
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		manifest, fetchErr := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+		manifest, fetchErr := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 		if fetchErr == nil && manifest != nil && !manifest.NotModified {
 			require.Contains(t, string(manifest.Body), `"new"`)
 		}
@@ -3616,19 +3619,19 @@ func TestFetchCodexModelsManifestOAuthOverdueSynchronousRefreshAndFailure(t *tes
 
 		s := &OpenAIGatewayService{}
 		account := newCodexModelsTestAccount()
-		_, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+		_, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 		require.NoError(t, err)
 
 		// 超过 5 分钟：缓存条目被丢弃，同步等待上游刷新。
 		expireCodexModelsManifestCache(s, 6*time.Minute)
 
-		manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+		manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 		require.NoError(t, err)
 		require.Contains(t, string(manifest.Body), `"refreshed"`)
 		require.EqualValues(t, 2, calls.Load())
 
 		// 新内容写回缓存并重新开始新鲜期。
-		again, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+		again, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 		require.NoError(t, err)
 		require.Contains(t, string(again.Body), `"refreshed"`)
 		require.EqualValues(t, 2, calls.Load())
@@ -3652,13 +3655,13 @@ func TestFetchCodexModelsManifestOAuthOverdueSynchronousRefreshAndFailure(t *tes
 
 		s := &OpenAIGatewayService{}
 		account := newCodexModelsTestAccount()
-		_, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+		_, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 		require.NoError(t, err)
 
 		fail.Store(true)
 		expireCodexModelsManifestCache(s, 6*time.Minute)
 
-		_, err = s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+		_, err = fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 		require.Error(t, err, "超期后上游失败必须返回错误而非旧缓存")
 		require.Equal(t, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", infraerrors.Reason(err))
 	})
@@ -3669,13 +3672,13 @@ func TestFetchCodexModelsManifestOAuthTokenChangeCacheMiss(t *testing.T) {
 	s := &OpenAIGatewayService{}
 	account := newCodexModelsTestAccount()
 
-	_, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+	_, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, calls.Load())
 
 	// 令牌刷新后缓存键变化，下一次拉取视为未命中并同步请求上游。
 	account.Credentials["access_token"] = "rotated-access-token"
-	manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+	manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 	require.NoError(t, err)
 	require.Contains(t, string(manifest.Body), `"models"`)
 	require.EqualValues(t, 2, calls.Load())
@@ -3708,6 +3711,7 @@ func TestFetchCodexModelsManifestOAuthSharedAcrossGroupsWithIndependentFiltering
 	}
 	account := newCodexModelsTestAccount()
 	groupA := &Group{ID: 91, Platform: PlatformOpenAI, ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"model-a"}}}
+	registerAuxiliaryOSFixture(t, s, account)
 	groupB := &Group{ID: 92, Platform: PlatformOpenAI, ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"model-b"}}}
 
 	begin := make(chan struct{})
@@ -3719,7 +3723,7 @@ func TestFetchCodexModelsManifestOAuthSharedAcrossGroupsWithIndependentFiltering
 	for _, group := range []*Group{groupA, groupB} {
 		go func(g *Group) {
 			<-begin
-			manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.137.0", "")
+			manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), account, "0.137.0", "")
 			if err == nil {
 				err = s.MergeGroupConfiguredCodexModels(context.Background(), g, manifest, "")
 			}

@@ -28,9 +28,11 @@ func NewOpenAICodexStateRepository(db *sql.DB, rdb *redis.Client) service.CodexT
 
 const codexStateLiveAccount = `a.deleted_at IS NULL AND a.platform = 'openai' AND a.type = 'oauth'
  AND a.extra->'codex_turn_state'->>'enabled' = 'true'
- AND a.extra->>'codex_turn_state_generation' = s.generation`
+ AND EXISTS (SELECT 1 FROM account_openai_oauth_os_credentials credential
+ WHERE credential.account_id = a.id AND credential.os_family = s.os_family
+ AND credential.status = 'authorized' AND credential.state_generation::text = s.generation)`
 
-const codexStateColumns = `s.owner_account_id, s.model, s.generation, s.version,
+const codexStateColumns = `s.owner_account_id, s.os_family, s.model, s.generation, s.version,
  s.encrypted_token, s.issued_at, s.expires_at, s.token_length, s.cipher_blocks,
 	 s.source, s.shape, s.refresh_reason, s.last_business_at, s.last_collected_at,
 	 s.next_collect_at, s.collector_paused, s.last_error,
@@ -38,11 +40,11 @@ const codexStateColumns = `s.owner_account_id, s.model, s.generation, s.version,
 		 s.collection_status, s.collection_reason,
 		 s.collector_proxy_id, s.collector_extended_count, s.last_collector_proxy_id, s.collector_attempt_id,
 	 EXISTS (SELECT 1 FROM openai_codex_state_business_leases state_lease
-	 WHERE state_lease.owner_account_id=s.owner_account_id AND state_lease.model=s.model
+	 WHERE state_lease.owner_account_id=s.owner_account_id AND state_lease.os_family=s.os_family AND state_lease.model=s.model
 	 AND state_lease.generation=s.generation AND state_lease.lease_until>NOW())`
 
 func validateCodexStateKey(key service.CodexTurnStateKey) error {
-	if key.OwnerAccountID <= 0 || strings.TrimSpace(key.Model) == "" || strings.TrimSpace(key.Generation) == "" {
+	if key.OwnerAccountID <= 0 || service.NormalizeOpenAIOSFamily(key.OSFamily) != key.OSFamily || key.OSFamily == "" || strings.TrimSpace(key.Model) == "" || strings.TrimSpace(key.Generation) == "" {
 		return errors.New("invalid Codex turn-state key")
 	}
 	return nil
@@ -61,12 +63,24 @@ func lockCodexStateGeneration(ctx context.Context, tx *sql.Tx, key service.Codex
 	var found int64
 	err := tx.QueryRowContext(ctx, `SELECT a.id FROM accounts a
 		WHERE a.id = $1 AND a.deleted_at IS NULL AND a.platform = 'openai' AND a.type = 'oauth'
-		AND a.extra->'codex_turn_state'->>'enabled' = 'true'
-		AND a.extra->>'codex_turn_state_generation' = $2 FOR SHARE`, key.OwnerAccountID, key.Generation).Scan(&found)
+		AND a.extra->'codex_turn_state'->>'enabled' = 'true' FOR SHARE`, key.OwnerAccountID).Scan(&found)
+	if err != nil {
+		return false, ignoreCodexStateNoRows(err)
+	}
+	err = tx.QueryRowContext(ctx, `SELECT account_id FROM account_openai_oauth_os_credentials
+		WHERE account_id=$1 AND os_family=$2 AND state_generation::text=$3 AND status='authorized'
+		FOR SHARE`, key.OwnerAccountID, key.OSFamily, key.Generation).Scan(&found)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	return err == nil, err
+}
+
+func ignoreCodexStateNoRows(err error) error {
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	return err
 }
 
 // The revision row is the policy's publication barrier. Settings saves update
@@ -130,9 +144,9 @@ func (r *openAICodexStateRepository) BeginBusiness(ctx context.Context, key serv
 	// A lease is not evidence that a physical business request was sent. Only
 	// MarkBusinessSent records activity. A new generation clears old runtime state.
 	_, err = tx.ExecContext(ctx, `INSERT INTO openai_codex_state
-		(owner_account_id, model, generation, last_business_at)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (owner_account_id, model) DO UPDATE SET
+		(owner_account_id, model, generation, last_business_at, os_family)
+		VALUES ($1, $2, $3, $4, $6)
+		ON CONFLICT (owner_account_id, os_family, model) DO UPDATE SET
 		generation = EXCLUDED.generation,
 		version = CASE WHEN openai_codex_state.generation = EXCLUDED.generation
 			AND NOT (openai_codex_state.last_business_at > $4 AND openai_codex_state.last_business_at < $5 AND openai_codex_state.demand_reason <> '')
@@ -171,26 +185,26 @@ func (r *openAICodexStateRepository) BeginBusiness(ctx context.Context, key serv
 			OR openai_codex_state.last_error IN ('account_cooldown','collector_rate_limited')
 			THEN openai_codex_state.collection_reason ELSE 'waiting_business_response' END,
 		last_business_at = CASE WHEN openai_codex_state.generation = EXCLUDED.generation THEN openai_codex_state.last_business_at ELSE EXCLUDED.last_business_at END,
-		updated_at = NOW()`, key.OwnerAccountID, key.Model, key.Generation, time.Unix(0, 0).UTC(), now.Add(-service.CodexTurnStateActiveWindow).UTC())
+		updated_at = NOW()`, key.OwnerAccountID, key.Model, key.Generation, time.Unix(0, 0).UTC(), now.Add(-service.CodexTurnStateActiveWindow).UTC(), key.OSFamily)
 	if err != nil {
 		return nil, err
 	}
 	_, err = tx.ExecContext(ctx, `DELETE FROM openai_codex_state_business_leases
-		WHERE owner_account_id = $1 AND model = $2 AND (lease_until <= $3 OR generation <> $4)`,
-		key.OwnerAccountID, key.Model, now.UTC(), key.Generation)
+		WHERE owner_account_id = $1 AND model = $2 AND (lease_until <= $3 OR generation <> $4) AND os_family=$5`,
+		key.OwnerAccountID, key.Model, now.UTC(), key.Generation, key.OSFamily)
 	if err != nil {
 		return nil, err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO openai_codex_state_business_leases
-		(owner_account_id, model, generation, attempt_id, lease_until) VALUES ($1,$2,$3,$4,$5)
-		ON CONFLICT (owner_account_id, model, generation, attempt_id)
+		(owner_account_id, model, generation, attempt_id, lease_until, os_family) VALUES ($1,$2,$3,$4,$5,$6)
+		ON CONFLICT (owner_account_id, os_family, model, generation, attempt_id)
 		DO UPDATE SET lease_until = GREATEST(openai_codex_state_business_leases.lease_until, EXCLUDED.lease_until)`,
-		key.OwnerAccountID, key.Model, key.Generation, attemptID, leaseUntil.UTC())
+		key.OwnerAccountID, key.Model, key.Generation, attemptID, leaseUntil.UTC(), key.OSFamily)
 	if err != nil {
 		return nil, err
 	}
 	record, err := scanCodexState(tx.QueryRowContext(ctx, `SELECT `+codexStateColumns+` FROM openai_codex_state s
-		WHERE s.owner_account_id=$1 AND s.model=$2 AND s.generation=$3`, key.OwnerAccountID, key.Model, key.Generation))
+		WHERE s.owner_account_id=$1 AND s.model=$2 AND s.generation=$3 AND s.os_family=$4`, key.OwnerAccountID, key.Model, key.Generation, key.OSFamily))
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +235,7 @@ func (r *openAICodexStateRepository) MarkBusinessSent(ctx context.Context, key s
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE openai_codex_state
 		SET last_business_at=GREATEST(last_business_at,$4), updated_at=NOW()
-		WHERE owner_account_id=$1 AND model=$2 AND generation=$3`, key.OwnerAccountID, key.Model, key.Generation, sentAt.UTC())
+		WHERE owner_account_id=$1 AND model=$2 AND generation=$3 AND os_family=$5`, key.OwnerAccountID, key.Model, key.Generation, sentAt.UTC(), key.OSFamily)
 	if err != nil {
 		return err
 	}
@@ -235,7 +249,7 @@ func (r *openAICodexStateRepository) CreateHistoryDemand(ctx context.Context, pr
 	if err := r.databaseAvailable(); err != nil {
 		return false, err
 	}
-	key := service.CodexTurnStateKey{OwnerAccountID: proof.OwnerAccountID, Model: proof.Model, Generation: proof.Generation}
+	key := service.CodexTurnStateKey{OwnerAccountID: proof.OwnerAccountID, OSFamily: proof.OSFamily, Model: proof.Model, Generation: proof.Generation}
 	if err := validateCodexStateKey(key); err != nil {
 		return false, err
 	}
@@ -255,15 +269,19 @@ func (r *openAICodexStateRepository) CreateHistoryDemand(ctx context.Context, pr
 	if err != nil || !policyLive {
 		return false, err
 	}
+	live, err := lockCodexStateGeneration(ctx, tx, key)
+	if err != nil || !live {
+		return false, err
+	}
 	var extraJSON, credentialsJSON []byte
 	var parentID sql.NullInt64
 	err = tx.QueryRowContext(ctx, `SELECT a.extra,
-		jsonb_build_object('plan_type', a.credentials->'plan_type', 'auth_mode', a.credentials->'auth_mode', 'openai_auth_mode', a.credentials->'openai_auth_mode'),
-		a.parent_account_id FROM accounts a
+		jsonb_build_object('plan_type', credential.credentials->'plan_type', 'auth_mode', credential.credentials->'auth_mode', 'openai_auth_mode', credential.credentials->'openai_auth_mode'),
+		a.parent_account_id FROM accounts a JOIN account_openai_oauth_os_credentials credential ON credential.account_id=a.id
 		WHERE a.id=$1 AND a.deleted_at IS NULL AND a.platform='openai' AND a.type='oauth'
 		AND a.extra->'codex_turn_state'->>'enabled'='true'
-		AND a.extra->>'codex_turn_state_generation'=$2
-		AND a.extra->>'codex_turn_state_credential_epoch'=$3 FOR SHARE`, key.OwnerAccountID, key.Generation, proof.CredentialEpoch).
+		AND credential.state_generation::text=$2 AND credential.status='authorized'
+		AND credential.credential_epoch::text=$3 AND credential.os_family=$4`, key.OwnerAccountID, key.Generation, proof.CredentialEpoch, key.OSFamily).
 		Scan(&extraJSON, &credentialsJSON, &parentID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -282,13 +300,13 @@ func (r *openAICodexStateRepository) CreateHistoryDemand(ctx context.Context, pr
 		return false, nil
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO openai_codex_state
-		(owner_account_id, model, generation, last_business_at) VALUES ($1,$2,$3,$4)
-		ON CONFLICT (owner_account_id,model) DO NOTHING`, key.OwnerAccountID, key.Model, key.Generation, proof.BusinessAt.UTC())
+		(owner_account_id, model, generation, last_business_at, os_family) VALUES ($1,$2,$3,$4,$5)
+		ON CONFLICT (owner_account_id,os_family,model) DO NOTHING`, key.OwnerAccountID, key.Model, key.Generation, proof.BusinessAt.UTC(), key.OSFamily)
 	if err != nil {
 		return false, err
 	}
 	record, err := scanCodexState(tx.QueryRowContext(ctx, `SELECT `+codexStateColumns+` FROM openai_codex_state s
-		WHERE s.owner_account_id=$1 AND s.model=$2 FOR UPDATE`, key.OwnerAccountID, key.Model))
+		WHERE s.owner_account_id=$1 AND s.model=$2 AND s.os_family=$3 FOR UPDATE`, key.OwnerAccountID, key.Model, key.OSFamily))
 	if err != nil {
 		return false, err
 	}
@@ -296,7 +314,7 @@ func (r *openAICodexStateRepository) CreateHistoryDemand(ctx context.Context, pr
 		return false, nil
 	}
 	if record.Generation != key.Generation {
-		*record = service.CodexTurnStateRecord{OwnerAccountID: key.OwnerAccountID, Model: key.Model, Generation: key.Generation, Version: record.Version}
+		*record = service.CodexTurnStateRecord{OwnerAccountID: key.OwnerAccountID, OSFamily: key.OSFamily, Model: key.Model, Generation: key.Generation, Version: record.Version}
 	}
 	// A historical diagnostic cannot establish the CAS version that produced it.
 	// Consume it without clearing or superseding a currently valid target token.
@@ -323,13 +341,13 @@ func (r *openAICodexStateRepository) CreateHistoryDemand(ctx context.Context, pr
 		collection_status=$20, collection_reason=$21,
 		collector_proxy_id=$22, collector_extended_count=$23, last_collector_proxy_id=$24,
 		collector_attempt_id=$25, updated_at=NOW()
-		WHERE owner_account_id=$1 AND model=$2`, key.OwnerAccountID, key.Model, key.Generation,
+		WHERE owner_account_id=$1 AND model=$2 AND os_family=$26`, key.OwnerAccountID, key.Model, key.Generation,
 		record.EncryptedToken, codexStateNullableTime(record.IssuedAt), codexStateNullableTime(record.ExpiresAt),
 		record.TokenLength, record.CipherBlocks, record.Source, record.Shape, record.RefreshReason,
 		record.LastBusinessAt.UTC(), codexStateNullableTime(record.LastCollectedAt), codexStateNullableTime(record.NextCollectAt),
 		record.CollectorPaused, record.LastError, record.DemandReason, codexStateNullableTime(record.DemandAt), proof.ObservedAt,
 		record.CollectionStatus, record.CollectionReason, codexStateNullableID(record.CollectorProxyID),
-		record.CollectorExtendedCount, codexStateNullableID(record.LastCollectorProxyID), codexStateNullableString(record.CollectorAttemptID))
+		record.CollectorExtendedCount, codexStateNullableID(record.LastCollectorProxyID), codexStateNullableString(record.CollectorAttemptID), key.OSFamily)
 	if err != nil {
 		return false, err
 	}
@@ -359,8 +377,8 @@ func (r *openAICodexStateRepository) EndBusiness(ctx context.Context, key servic
 		return err
 	}
 	_, err := r.db.ExecContext(ctx, `DELETE FROM openai_codex_state_business_leases
-		WHERE owner_account_id=$1 AND model=$2 AND generation=$3 AND attempt_id=$4`,
-		key.OwnerAccountID, key.Model, key.Generation, attemptID)
+		WHERE owner_account_id=$1 AND model=$2 AND generation=$3 AND attempt_id=$4 AND os_family=$5`,
+		key.OwnerAccountID, key.Model, key.Generation, attemptID, key.OSFamily)
 	return err
 }
 
@@ -373,8 +391,8 @@ func (r *openAICodexStateRepository) Get(ctx context.Context, key service.CodexT
 	}
 	record, err := scanCodexState(r.db.QueryRowContext(ctx, `SELECT `+codexStateColumns+`
 		FROM openai_codex_state s JOIN accounts a ON a.id=s.owner_account_id
-		WHERE s.owner_account_id=$1 AND s.model=$2 AND s.generation=$3 AND `+codexStateLiveAccount,
-		key.OwnerAccountID, key.Model, key.Generation))
+		WHERE s.owner_account_id=$1 AND s.model=$2 AND s.generation=$3 AND s.os_family=$4 AND `+codexStateLiveAccount,
+		key.OwnerAccountID, key.Model, key.Generation, key.OSFamily))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -390,6 +408,11 @@ func (r *openAICodexStateRepository) SaveCAS(ctx context.Context, record service
 	}
 	if expectedVersion < 1 {
 		return false, errors.New("invalid Codex turn-state version")
+	}
+	if (record.LastError == "collector_rate_limited" || record.LastError == "account_cooldown") && !record.NextCollectAt.IsZero() {
+		if err := r.ExtendCollectorCooldown(ctx, record.OwnerAccountID, record.NextCollectAt); err != nil {
+			return false, err
+		}
 	}
 	// A snapshot taken after waiting for the policy lock must see the previous
 	// writer's committed pair, regardless of the database's default isolation.
@@ -419,7 +442,7 @@ func (r *openAICodexStateRepository) SaveCAS(ctx context.Context, record service
 		collection_status=$21, collection_reason=$22,
 		collector_proxy_id=$23, collector_extended_count=$24, last_collector_proxy_id=$25,
 		collector_attempt_id=$26, updated_at=NOW()
-		WHERE owner_account_id=$1 AND model=$2 AND generation=$3 AND version=$4`,
+		WHERE owner_account_id=$1 AND model=$2 AND generation=$3 AND version=$4 AND os_family=$27`,
 		record.OwnerAccountID, record.Model, record.Generation, expectedVersion,
 		record.EncryptedToken, codexStateNullableTime(record.IssuedAt), codexStateNullableTime(record.ExpiresAt),
 		record.TokenLength, record.CipherBlocks, record.Source, record.Shape, record.RefreshReason,
@@ -427,7 +450,7 @@ func (r *openAICodexStateRepository) SaveCAS(ctx context.Context, record service
 		codexStateNullableTime(record.NextCollectAt), record.CollectorPaused, record.LastError,
 		record.DemandReason, codexStateNullableTime(record.DemandAt), codexStateNullableTime(record.HistoryProofObservedAt),
 		record.CollectionStatus, record.CollectionReason, codexStateNullableID(record.CollectorProxyID),
-		record.CollectorExtendedCount, codexStateNullableID(record.LastCollectorProxyID), codexStateNullableString(record.CollectorAttemptID))
+		record.CollectorExtendedCount, codexStateNullableID(record.LastCollectorProxyID), codexStateNullableString(record.CollectorAttemptID), record.OSFamily)
 	if err != nil {
 		return false, err
 	}
@@ -452,6 +475,7 @@ func (r *openAICodexStateRepository) ListActive(ctx context.Context, since time.
 	// cannot starve due work. Refresh lead tracks the service policy constant.
 	return r.list(ctx, `SELECT `+codexStateColumns+` FROM openai_codex_state s
 		JOIN accounts a ON a.id=s.owner_account_id WHERE s.last_business_at >= $1 AND `+codexStateLiveAccount+`
+		AND (a.codex_turn_state_retry_after IS NULL OR a.codex_turn_state_retry_after <= NOW())
 		AND NOT s.collector_paused AND (s.next_collect_at IS NULL OR s.next_collect_at <= NOW())
 		AND (s.demand_reason <> '' OR (s.encrypted_token <> '' AND s.expires_at <= NOW() + ($3 * INTERVAL '1 second')))
 		AND NOT COALESCE((s.collection_reason = 'collector_proxy_changed' AND s.encrypted_token <> '' AND s.shape = 'target'
@@ -514,10 +538,10 @@ func (r *openAICodexStateRepository) HasBusiness(ctx context.Context, key servic
 	}
 	var found bool
 	err := r.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM openai_codex_state_business_leases l
-		JOIN openai_codex_state s ON s.owner_account_id=l.owner_account_id AND s.model=l.model AND s.generation=l.generation
+		JOIN openai_codex_state s ON s.owner_account_id=l.owner_account_id AND s.os_family=l.os_family AND s.model=l.model AND s.generation=l.generation
 		JOIN accounts a ON a.id=s.owner_account_id
-		WHERE l.owner_account_id=$1 AND l.model=$2 AND l.generation=$3 AND l.lease_until>$4 AND `+codexStateLiveAccount+`)`,
-		key.OwnerAccountID, key.Model, key.Generation, now.UTC()).Scan(&found)
+		WHERE l.owner_account_id=$1 AND l.model=$2 AND l.generation=$3 AND l.lease_until>$4 AND l.os_family=$5 AND `+codexStateLiveAccount+`)`,
+		key.OwnerAccountID, key.Model, key.Generation, now.UTC(), key.OSFamily).Scan(&found)
 	return found, err
 }
 
@@ -528,7 +552,7 @@ func scanCodexState(scanner codexStateScanner) (*service.CodexTurnStateRecord, e
 	var issued, expires, collected, next, demand, historyProof sql.NullTime
 	var collectorProxyID, lastCollectorProxyID sql.NullInt64
 	var collectorAttemptID sql.NullString
-	err := scanner.Scan(&record.OwnerAccountID, &record.Model, &record.Generation, &record.Version,
+	err := scanner.Scan(&record.OwnerAccountID, &record.OSFamily, &record.Model, &record.Generation, &record.Version,
 		&record.EncryptedToken, &issued, &expires, &record.TokenLength, &record.CipherBlocks,
 		&record.Source, &record.Shape, &record.RefreshReason, &record.LastBusinessAt,
 		&collected, &next, &record.CollectorPaused, &record.LastError,
@@ -575,4 +599,4 @@ func codexStateCollectorKey(ownerID int64) (string, error) {
 
 var _ service.CodexTurnStateRepository = (*openAICodexStateRepository)(nil)
 var _ service.CodexTurnStateHistoryRepository = (*openAICodexStateRepository)(nil)
-var _ service.CodexTurnStateActivationRepository = (*openAICodexStateRepository)(nil)
+var _ service.CodexTurnStateOSActivationRepository = (*openAICodexStateRepository)(nil)

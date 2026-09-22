@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -741,6 +742,8 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 							usage.UpdatedAt = &now
 						}
 						applyExtraToUsage(usage, account.Extra, now)
+					} else {
+						setOpenAIUsageAuthorizationError(usage, err)
 					}
 				}
 			}
@@ -751,6 +754,8 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 					usage.UpdatedAt = &now
 				}
 				applyExtraToUsage(usage, account.Extra, now)
+			} else {
+				setOpenAIUsageAuthorizationError(usage, err)
 			}
 		}
 	}
@@ -774,6 +779,13 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 	}
 
 	return usage, nil
+}
+
+func setOpenAIUsageAuthorizationError(usage *UsageInfo, err error) {
+	if usage != nil && (errors.Is(err, ErrOpenAIOAuthOSUnauthorized) || errors.Is(err, ErrOpenAIOAuthOSAuthorizationChanged)) {
+		usage.ErrorCode = "openai_os_authorization_unavailable"
+		usage.Error = "The selected operating system has no available OpenAI OAuth authorization"
+	}
 }
 
 func shouldRefreshOpenAICodexSnapshot(account *Account, usage *UsageInfo, now time.Time) bool {
@@ -838,6 +850,11 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 		return nil, nil
 	}
 	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
+	accountID := account.ID
+	account, err := resolveCredentialAccount(ctx, s.accountRepo, account)
+	if err != nil {
+		return nil, fmt.Errorf("resolve usage probe authorization: %w", err)
+	}
 	accessToken := ""
 	if !account.IsOpenAIAgentIdentity() {
 		accessToken = account.GetOpenAIAccessToken()
@@ -889,7 +906,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	if planErr != nil {
 		return nil, fmt.Errorf("resolve OpenAI OAuth identity: %w", planErr)
 	}
-	if gateway.cfg != nil && gateway.cfg.Gateway.ForceCodexCLI {
+	if account.OpenAIOAuthCredentialOS != "" || gateway.cfg != nil && gateway.cfg.Gateway.ForceCodexCLI {
 		req.Header.Set("User-Agent", plan.ClientIdentity.UserAgent)
 		req.Header.Set("Originator", plan.ClientIdentity.Originator)
 		req.Header.Set("Version", plan.ClientIdentity.Version)
@@ -933,7 +950,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 		return nil, err
 	}
 	if len(updates) > 0 {
-		s.persistOpenAICodexProbeSnapshot(account.ID, updates)
+		s.persistOpenAICodexProbeSnapshot(accountID, updates)
 		return updates, nil
 	}
 	return nil, nil

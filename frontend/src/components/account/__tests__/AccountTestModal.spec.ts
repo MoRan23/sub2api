@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 import AccountTestModal from '../AccountTestModal.vue'
+import AdminAccountTestModal from '@/components/admin/account/AccountTestModal.vue'
 
 const { getAvailableModelsMock } = vi.hoisted(() => ({
   getAvailableModelsMock: vi.fn()
@@ -86,6 +87,7 @@ function buildAccount() {
     type: 'oauth',
     status: 'active',
     credentials: {},
+    openai_oauth_os_profiles: { default_os: 'windows', profiles: { windows: { authorization: { status: 'authorized' } } } },
     extra: {},
     concurrency: 1,
     priority: 1,
@@ -135,9 +137,9 @@ describe('AccountTestModal', () => {
     })
 
     await flushPromises()
-    ;(wrapper.vm as any).selectedModelId = 'gpt-5.4'
-    ;(wrapper.vm as any).testMode = 'compact'
-    await (wrapper.vm as any).startTest()
+    ;(wrapper.findComponent(AdminAccountTestModal).vm as any).selectedModelId = 'gpt-5.4'
+    ;(wrapper.findComponent(AdminAccountTestModal).vm as any).testMode = 'compact'
+    await (wrapper.findComponent(AdminAccountTestModal).vm as any).startTest()
     await flushPromises()
 
     expect(global.fetch).toHaveBeenCalledTimes(1)
@@ -183,8 +185,8 @@ describe('AccountTestModal', () => {
     })
 
     await flushPromises()
-    ;(wrapper.vm as any).selectedModelId = 'gpt-5.4'
-    await (wrapper.vm as any).startTest()
+    ;(wrapper.findComponent(AdminAccountTestModal).vm as any).selectedModelId = 'gpt-5.4'
+    await (wrapper.findComponent(AdminAccountTestModal).vm as any).startTest()
     await flushPromises()
 
     expect(wrapper.text()).toContain('已通过 /v1/chat/completions 验证')

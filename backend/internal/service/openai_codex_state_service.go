@@ -91,7 +91,7 @@ func (s *CodexTurnStateService) Stop() {
 	s.mu.Unlock()
 }
 
-func (s *CodexTurnStateService) currentOwner(ctx context.Context, accountID int64) (*Account, error) {
+func (s *CodexTurnStateService) currentOwner(ctx context.Context, accountID int64, osFamily ...string) (*Account, error) {
 	if s == nil || s.accounts == nil {
 		return nil, errors.New("turn_state_unavailable")
 	}
@@ -99,7 +99,15 @@ func (s *CodexTurnStateService) currentOwner(ctx context.Context, accountID int6
 	if err != nil || account == nil {
 		return nil, err
 	}
-	return resolveCredentialAccount(ctx, s.accounts, account)
+	account, err = s.codexTurnStateCredentialOwner(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+	os := ""
+	if len(osFamily) > 0 {
+		os = osFamily[0]
+	}
+	return ResolveOpenAIOAuthCredentialAccount(ctx, s.accounts, account, os)
 }
 
 func codexTurnStateEligible(account *Account) bool {
@@ -110,7 +118,7 @@ func (s *CodexTurnStateService) Enabled(ctx context.Context, account *Account) (
 	if s == nil || account == nil {
 		return false, "", nil
 	}
-	owner, err := s.currentOwner(ctx, account.ID)
+	owner, err := s.currentOwnerForAttempt(ctx, account)
 	if err != nil {
 		return false, "", err
 	}
@@ -124,7 +132,7 @@ func (s *CodexTurnStateService) Prepare(ctx context.Context, account *Account, f
 	if s == nil || account == nil || strings.TrimSpace(finalModel) == "" {
 		return nil, nil
 	}
-	owner, err := s.currentOwner(ctx, account.ID)
+	owner, err := s.currentOwnerForAttempt(ctx, account)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +141,7 @@ func (s *CodexTurnStateService) Prepare(ctx context.Context, account *Account, f
 	}
 	accountEnabled := CodexTurnStateConfigForAccount(owner).Enabled
 	passive := func(reason string) *CodexTurnStateAttempt {
-		return &CodexTurnStateAttempt{OwnerAccountID: owner.ID, Model: strings.TrimSpace(finalModel), AccountEnabled: accountEnabled,
+		return &CodexTurnStateAttempt{OwnerAccountID: owner.ID, OSFamily: codexTurnStateOS(owner), Model: strings.TrimSpace(finalModel), AccountEnabled: accountEnabled,
 			MaintenanceReason: reason, accountType: CodexTurnStateAccountTypeForAccount(owner), credentialEpoch: CodexTurnStateCredentialEpochForAccount(owner), historyService: s, preparedAt: s.now()}
 	}
 	// Preparing a physical request must not grant maintenance from a stale
@@ -169,7 +177,7 @@ func (s *CodexTurnStateService) Prepare(ctx context.Context, account *Account, f
 	if generation == "" {
 		return passive("generation_unavailable"), nil
 	}
-	key := CodexTurnStateKey{OwnerAccountID: owner.ID, Model: strings.TrimSpace(finalModel), Generation: generation}
+	key := CodexTurnStateKey{OwnerAccountID: owner.ID, OSFamily: codexTurnStateOS(owner), Model: strings.TrimSpace(finalModel), Generation: generation}
 	now := s.now()
 	a := passive("")
 	a.Generation, a.Enabled, a.key, a.id, a.policyRevision = generation, true, key, uuid.NewString(), policyRevision
@@ -215,7 +223,7 @@ func (s *CodexTurnStateService) ValidateAttempt(ctx context.Context, a *CodexTur
 		a.mu.Unlock()
 		return false
 	}
-	owner, err := s.currentOwner(ctx, a.OwnerAccountID)
+	owner, err := s.currentOwner(ctx, a.OwnerAccountID, a.OSFamily)
 	if err != nil || !codexTurnStateEligible(owner) || !CodexTurnStateConfigForAccount(owner).Enabled || CodexTurnStateGenerationForAccount(owner) != a.Generation {
 		return false
 	}
@@ -235,7 +243,7 @@ func (s *CodexTurnStateService) ValidateCredentialHeaders(ctx context.Context, a
 	if s == nil || a == nil {
 		return false
 	}
-	owner, err := s.currentOwner(ctx, a.OwnerAccountID)
+	owner, err := s.currentOwner(ctx, a.OwnerAccountID, a.OSFamily)
 	if err != nil || owner == nil || CodexTurnStateGenerationForAccount(owner) != a.Generation {
 		return false
 	}
@@ -393,7 +401,7 @@ func (s *CodexTurnStateService) publish(ctx context.Context, key CodexTurnStateK
 	if !s.modelPolicyMatches(ctx, key.Model, policyRevision) {
 		return false, nil
 	}
-	owner, err := s.currentOwner(ctx, key.OwnerAccountID)
+	owner, err := s.currentOwner(ctx, key.OwnerAccountID, key.OSFamily)
 	if err != nil {
 		return false, err
 	}
@@ -585,7 +593,7 @@ func (s *CodexTurnStateService) scan(ctx context.Context) {
 	for _, a := range active {
 		a.mu.Lock()
 		if !a.finished {
-			owner, err := s.currentOwner(ctx, a.OwnerAccountID)
+			owner, err := s.currentOwner(ctx, a.OwnerAccountID, a.OSFamily)
 			if err == nil && owner != nil && CodexTurnStateConfigForAccount(owner).Enabled && CodexTurnStateGenerationForAccount(owner) == a.Generation && s.modelPolicyMatches(ctx, a.Model, a.policyRevision) {
 				now := s.now()
 				if !a.businessSentAt.IsZero() {
@@ -605,7 +613,7 @@ func (s *CodexTurnStateService) scan(ctx context.Context) {
 	}
 	s.mu.Unlock()
 	for _, key := range running {
-		owner, err := s.currentOwner(ctx, key.OwnerAccountID)
+		owner, err := s.currentOwner(ctx, key.OwnerAccountID, key.OSFamily)
 		if err != nil || owner == nil || !CodexTurnStateConfigForAccount(owner).Enabled || CodexTurnStateGenerationForAccount(owner) != key.Generation {
 			s.cancelCollection(key)
 		}
@@ -695,7 +703,13 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 		defer cancel()
 		_ = s.repo.ReleaseCollector(releaseCtx, key.OwnerAccountID, lockID)
 	}()
-	owner, err := s.currentOwner(ctx, key.OwnerAccountID)
+	if cooldowns, ok := s.repo.(CodexTurnStateCooldownRepository); ok {
+		until, err := cooldowns.GetCollectorCooldowns(ctx, []int64{key.OwnerAccountID})
+		if err != nil || until[key.OwnerAccountID].After(s.now()) {
+			return
+		}
+	}
+	owner, err := s.currentOwner(ctx, key.OwnerAccountID, key.OSFamily)
 	if err != nil || !codexTurnStateEligible(owner) || !CodexTurnStateConfigForAccount(owner).Enabled || CodexTurnStateGenerationForAccount(owner) != key.Generation || CodexTurnStateAccountTypeForAccount(owner) == "" {
 		return
 	}
@@ -739,16 +753,16 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 		}
 		return
 	}
-	// Authentication failures pause the credential owner, not only one model.
+	// Authentication failures pause this OS slot across all of its models.
 	all, err := s.repo.ListByAccount(ctx, key.OwnerAccountID)
 	if err != nil {
 		return
 	}
 	for _, other := range all {
-		if other.Generation == key.Generation && other.CollectorPaused {
+		if other.OSFamily == key.OSFamily && other.Generation == key.Generation && other.CollectorPaused {
 			return
 		}
-		if other.Generation == key.Generation && !other.LastCollectedAt.IsZero() && other.NextCollectAt.After(now) {
+		if ((other.OSFamily == key.OSFamily && other.Generation == key.Generation) || other.LastError == "collector_rate_limited" || other.LastError == "account_cooldown") && !other.LastCollectedAt.IsZero() && other.NextCollectAt.After(now) {
 			// Failure pacing (including upstream Retry-After) belongs to the
 			// credential owner even when another model is next in the queue.
 			return
@@ -784,7 +798,7 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 			case <-probeCtx.Done():
 				return
 			case <-ticker.C:
-				current, checkErr := s.currentOwner(probeCtx, key.OwnerAccountID)
+				current, checkErr := s.currentOwner(probeCtx, key.OwnerAccountID, key.OSFamily)
 				if checkErr != nil || current == nil || current.Status != StatusActive || !current.Schedulable ||
 					(current.ExpiresAt != nil && !current.ExpiresAt.After(s.now())) ||
 					!CodexTurnStateConfigForAccount(current).Enabled || CodexTurnStateGenerationForAccount(current) != key.Generation || !s.modelPolicyMatches(probeCtx, key.Model, policyRevision) {
@@ -835,7 +849,20 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 }
 
 func (s *CodexTurnStateService) GetStatus(ctx context.Context, accountID int64) (*CodexTurnStateStatus, error) {
-	owner, err := s.currentOwner(ctx, accountID)
+	return s.GetStatusForOS(ctx, accountID, "")
+}
+
+func (s *CodexTurnStateService) GetStatusForOS(ctx context.Context, accountID int64, osFamily string) (*CodexTurnStateStatus, error) {
+	if s == nil || s.accounts == nil {
+		return nil, codexTurnStateStatusUnavailable(nil)
+	}
+	owner, err := s.accounts.GetByID(ctx, accountID)
+	if err == nil && owner != nil {
+		owner, err = s.codexTurnStateCredentialOwner(ctx, owner)
+	}
+	if err == nil && owner != nil {
+		owner, err = s.codexTurnStateStatusOwner(ctx, owner, osFamily)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -850,7 +877,15 @@ func (s *CodexTurnStateService) GetStatus(ctx context.Context, accountID int64) 
 		}
 	}
 	models, policyErr := s.statusModelPolicy(ctx)
-	result := projectCodexTurnStateStatus(accountID, owner, records, models, policyErr, s.statusNow())
+	var retryAfter time.Time
+	if repository, ok := s.repo.(CodexTurnStateCooldownRepository); ok {
+		cooldowns, err := repository.GetCollectorCooldowns(ctx, []int64{owner.ID})
+		if err != nil {
+			return nil, codexTurnStateStatusUnavailable(err)
+		}
+		retryAfter = cooldowns[owner.ID]
+	}
+	result := projectCodexTurnStateStatus(accountID, owner, records, models, policyErr, s.statusNow(), retryAfter)
 	observationEnabled, observations := globalCodexTurnStateSummaryStore.snapshotForOwners([]*Account{owner})
 	attachCodexTurnStateObservations(result, observationEnabled, observations[owner.ID])
 	return result, nil

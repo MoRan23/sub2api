@@ -41,7 +41,7 @@ func (s *AccountRepoSuite) TestConfigurationGuardPreservesRegeneratedIdentityAcr
 	s.Require().Equal(legacyProfileUA, stored.GetOpenAIUserAgent())
 	s.Require().Equal(true, stored.Extra["enable_tls_fingerprint"])
 	s.Require().Equal(float64(12), stored.Extra["tls_fingerprint_profile_id"])
-	s.Require().Equal("new token", stored.Credentials["access_token"])
+	s.Require().NotContains(stored.Credentials, "access_token", "ordinary snapshots cannot establish or overwrite an OAuth grant")
 	s.Require().Equal("accepted", stored.Extra["custom"])
 }
 

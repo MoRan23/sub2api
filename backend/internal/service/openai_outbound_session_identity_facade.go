@@ -118,6 +118,10 @@ const (
 // OpenAIOAuthIdentityCapture is immutable request input captured before any
 // compatibility or compact body transformation.
 type OpenAIOAuthIdentityCapture struct {
+	// Native synchronous continuation candidates are frozen before compact and
+	// compatibility rewrites remove or replace the ingress metadata.
+	syncSessionID            string
+	syncThreadID             string
 	UserAgent                string
 	UserAgentVersion         string
 	OSFamily                 string
@@ -174,6 +178,8 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthProfileIdentityPlan(
 // OpenAIOAuthIdentityPlan contains every generated identity needed by the
 // final projector. Apply never consults a store and never resolves again.
 type OpenAIOAuthIdentityPlan struct {
+	CredentialOS             string
+	AuthorizationGeneration  string
 	OSFamily                 string
 	OSSource                 string
 	ReceivedAt               time.Time
@@ -273,6 +279,8 @@ func CaptureOpenAIOAuthIdentityForAlphaSearch(c *gin.Context, body []byte, endpo
 
 func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explicitTurnMetadata string, appendEndpointAlias, preferEndpointAlias, promptCacheKeyApplicable bool, forcedRequestKind CodexWireRequestKind) OpenAIOAuthIdentityCapture {
 	capture := captureOpenAICodexLogicalTurnIdentity(c, body, callerSeed, explicitTurnMetadata, appendEndpointAlias, preferEndpointAlias)
+	capture.syncSessionID = captureOpenAISyncSession(c, body)
+	capture.syncThreadID = captureOpenAISyncThread(c, body)
 	capture.UserAgent, capture.OSFamily, capture.OSSource = captureOpenAIRequestOS(c, body)
 	if c != nil && c.Request != nil {
 		capture.UserAgentVersion = c.GetHeader("version")
@@ -1014,6 +1022,34 @@ func (s *OpenAIGatewayService) GetOrResolveOpenAIOAuthOutboundIdentity(
 	pinnedPlan *OpenAIOAuthOutboundIdentityPlan,
 ) (OpenAIOAuthOutboundIdentityPlan, error) {
 	options = normalizeOpenAIOAuthIdentityPlanOptions(options)
+	if RequiresOpenAIOAuthOSAuthorization(account) {
+		requestedOS := capture.OSFamily
+		if frozen := OpenAIRequestOSFromContext(ctx); frozen.Captured {
+			requestedOS = frozen.Family
+		}
+		resolved, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, requestedOS)
+		if err != nil {
+			return OpenAIOAuthOutboundIdentityPlan{}, err
+		}
+		account = resolved
+		validateFrozen := func(plan OpenAIOAuthIdentityPlan) error {
+			if plan.OSOwnerID == account.OpenAIOAuthCredentialOwnerID && plan.AuthorizationGeneration != "" &&
+				(plan.CredentialOS != account.OpenAIOAuthCredentialOS || plan.AuthorizationGeneration != account.OpenAIOAuthAuthorizationGeneration) {
+				return ErrOpenAIOAuthOSAuthorizationChanged
+			}
+			return nil
+		}
+		if pinnedPlan != nil {
+			if err := validateFrozen(*pinnedPlan); err != nil {
+				return OpenAIOAuthOutboundIdentityPlan{}, err
+			}
+		}
+		if cached, ok := OpenAIOAuthIdentityPlanFromContext(c); ok {
+			if err := validateFrozen(cached); err != nil {
+				return OpenAIOAuthOutboundIdentityPlan{}, err
+			}
+		}
+	}
 	if pinnedPlan != nil &&
 		openAIOAuthIdentityCapturesEqual(pinnedPlan.Capture, capture) &&
 		s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, *pinnedPlan, options) {
@@ -1342,6 +1378,12 @@ func cloneOpenAIOAuthIdentityPlan(plan OpenAIOAuthIdentityPlan) OpenAIOAuthIdent
 
 func SetOpenAIOAuthIdentityCapture(c *gin.Context, capture OpenAIOAuthIdentityCapture) {
 	if c != nil {
+		if c.Request != nil {
+			ctx := ContextWithOpenAIRequestOS(c.Request.Context(), OpenAIRequestOS{Family: capture.OSFamily, Source: capture.OSSource, Captured: true})
+			frozen := OpenAIRequestOSFromContext(ctx)
+			capture.OSFamily, capture.OSSource = frozen.Family, frozen.Source
+			c.Request = c.Request.WithContext(ctx)
+		}
 		// A capture defines one logical inbound turn. Replacing it is the only
 		// unconditional invalidation boundary for a materialized plan; transport
 		// retries on the same Gin request keep the capture and let PlanMatches

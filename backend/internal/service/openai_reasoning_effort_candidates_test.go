@@ -106,6 +106,7 @@ func TestOpenAIGatewayServiceForwardOAuthDerivesEffortFromSuffixModel(t *testing
 		Status:      StatusActive,
 		Schedulable: true,
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)

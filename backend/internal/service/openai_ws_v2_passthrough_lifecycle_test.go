@@ -240,9 +240,23 @@ func startPassthroughLifecycleServerWithHooks(
 		if hooksFactory != nil {
 			hooks = hooksFactory(ginCtx)
 		}
-		serverErr <- svc.ProxyResponsesWebSocketFromClient(controlCtx, ginCtx, conn, account, "sk-test", firstMessage, hooks)
+		selectedAccount, accessToken, requestCtx := account, "sk-test", controlCtx
+		if RequiresOpenAIOAuthOSAuthorization(account) {
+			requestCtx, selectedAccount, err = svc.prepareOpenAIOAuthRequestScope(controlCtx, ginCtx, account, firstMessage)
+			if err != nil {
+				serverErr <- err
+				return
+			}
+			accessToken = selectedAccount.GetOpenAIAccessToken()
+		}
+		serverErr <- svc.ProxyResponsesWebSocketFromClient(requestCtx, ginCtx, conn, selectedAccount, accessToken, firstMessage, hooks)
 	}))
 	return server, serverErr
+}
+
+type passthroughLifecycleOAuthSemantic429Repo struct {
+	*openAIWSSemantic429Repo
+	OpenAIOAuthOSCredentialsReader
 }
 
 func TestPassthroughLifecycle_FirstTurnSemanticRateLimitKeepsBodyClassification(t *testing.T) {
@@ -257,7 +271,11 @@ func TestPassthroughLifecycle_FirstTurnSemanticRateLimitKeepsBodyClassification(
 	account.Type = AccountTypeOAuth
 	account.Credentials = map[string]any{"access_token": "oauth-token"}
 	account.Extra = map[string]any{"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough}
-	repo := &openAIWSSemantic429Repo{}
+	credentials := newAuthorizedOpenAIOAuthTestRepo(account)
+	repo := &passthroughLifecycleOAuthSemantic429Repo{
+		openAIWSSemantic429Repo:        &openAIWSSemantic429Repo{AccountRepository: credentials},
+		OpenAIOAuthOSCredentialsReader: credentials,
+	}
 	svc.accountRepo = repo
 	svc.rateLimitService = NewRateLimitService(repo, nil, nil, nil, nil)
 	svc.rateLimitService.SetAccountRuntimeBlocker(svc)
@@ -671,6 +689,7 @@ func TestPassthroughLifecycle_TurnStateCommitsOnlyAfterFirstDeliveredOutput(t *t
 				openAIPinnedInstallationIDKey:               transportTestPinnedInstallationID,
 			},
 		}
+		svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 		server, serverErr := startPassthroughLifecycleServer(t, context.Background(), svc, account)
 		sessionHash, _ := deriveOpenAISessionHashes(sessionID)
 		svc.getOpenAIWSStateStore().BindSessionTurnState(0, sessionHash, oldState, time.Minute)
@@ -839,6 +858,7 @@ func TestPassthroughLifecycle_UUIDv7PromptCacheChangeKeepsPinnedTuple(t *testing
 			openAIPinnedInstallationIDKey:               transportTestPinnedInstallationID,
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, svc, account)
 	defer server.Close()
 
@@ -945,6 +965,7 @@ func TestPassthroughLifecycle_FirstFramePinsInstallationWhenTurnIdentityDisabled
 			openAIPinnedInstallationIDKey:               transportTestPinnedInstallationID,
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, svc, account)
 	defer server.Close()
 
@@ -1012,6 +1033,7 @@ func TestPassthroughLifecycle_UUIDv7LatePromptCacheInheritsUntilExplicitSessionC
 			openAIPinnedInstallationIDKey:               transportTestPinnedInstallationID,
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, svc, account)
 	defer server.Close()
 

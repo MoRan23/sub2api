@@ -12,6 +12,7 @@ import (
 )
 
 func (h *GatewayHandler) pinnedOpenAIModels(c *gin.Context, group *service.Group) {
+	service.CaptureOpenAIRequestOS(c, nil)
 	if c.Request.Context().Err() != nil {
 		return
 	}

@@ -274,13 +274,14 @@ func TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff(t *
 						SettingKeyEnableOpenAIUUIDv7SessionIdentity:     "true",
 						SettingKeyEnableOpenAIOAuthDailySessionRotation: strconv.FormatBool(daily),
 					}}, nil)
-					svc.oauthDailySessionRepo = &fakeOAuthDailyAffinityRepository{
+					svc.oauthDailySessionRepo = &telemetryDailyOSRepository{&fakeOAuthDailyAffinityRepository{
 						pool:     OAuthDailySessionPool{AccountID: 44, BusinessDate: OAuthDailyBusinessDate(time.Now()), Generation: root, SyncSessionID: syncRoot},
 						affinity: OAuthDailySessionAffinity{AccountID: 44, APIKeyID: 12, LogicalSessionKey: "logical-test", BusinessDate: OAuthDailyBusinessDate(time.Now()), Generation: root, SlotIndex: 1, StreamSessionID: root},
-					}
+					}}
 					telemetry, sent := telemetryCaptureService(t)
 					svc.SetCodexTelemetryService(telemetry)
 					account := newOpenAIIdentityPathOAuthAccount(44)
+					svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 					var err error
 					switch route {
 					case "responses":

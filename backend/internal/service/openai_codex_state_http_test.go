@@ -101,7 +101,7 @@ func TestCodexStateHTTPNaturalResponsePublicationBoundary(t *testing.T) {
 			if tc.parse {
 				completeCodexTelemetryHTTPResponse(resp, nil)
 			}
-			key := CodexTurnStateKey{OwnerAccountID: account.ID, Model: "gpt-5", Generation: "gen1"}
+			key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5", Generation: "gen1"}
 			record, err := repo.Get(context.Background(), key)
 			require.NoError(t, err)
 			if tc.delivered {

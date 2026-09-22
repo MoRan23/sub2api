@@ -85,7 +85,9 @@ function mountModal(account: Record<string, unknown> = {
   return mount(AccountTestModal, {
     props: {
       show: false,
-      account
+      account: account.platform === 'openai' && !('openai_oauth_os_profiles' in account)
+        ? { ...account, openai_oauth_os_profiles: { default_os: 'windows', profiles: { windows: { authorization: { status: 'authorized' } }, macos: { authorization: { status: 'unauthorized' } }, linux: { authorization: { status: 'authorized' } } } } }
+        : account
     } as any,
     global: {
       stubs: {
@@ -104,6 +106,7 @@ function mountModal(account: Record<string, unknown> = {
 
 describe('AccountTestModal', () => {
   beforeEach(() => {
+    getAvailableModels.mockClear()
     getAvailableModels.mockResolvedValue([
       { id: 'gemini-2.0-flash', display_name: 'Gemini 2.0 Flash' },
       { id: 'gemini-2.5-flash-image', display_name: 'Gemini 2.5 Flash Image' },
@@ -130,6 +133,32 @@ describe('AccountTestModal', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it('blocks an unauthorized system before loading models or sending a test', async () => {
+    const wrapper = mountModal({ id: 42, name: 'Not authorized', platform: 'openai', type: 'oauth', status: 'active', openai_oauth_os_profiles: { default_os: 'windows', profiles: { windows: { installation_id: 'installed-only', authorization: { status: 'unauthorized' } } } } })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(getAvailableModels).not.toHaveBeenCalled()
+    const start = wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!
+    expect(start.attributes('disabled')).toBeDefined()
+    await start.trigger('click')
+    expect(global.fetch).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('uses the selected authorized system for model lookup and the SSE test', async () => {
+    const wrapper = mountModal({ id: 42, name: 'OpenAI', platform: 'openai', type: 'oauth', status: 'active' })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    await wrapper.get('[data-testid="openai-oauth-os-select"]').setValue('linux')
+    await flushPromises()
+    expect(getAvailableModels).toHaveBeenLastCalledWith(42, 'linux')
+    await wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!.trigger('click')
+    await flushPromises()
+    expect(JSON.parse(vi.mocked(global.fetch).mock.calls[0]![1]!.body as string).os).toBe('linux')
+    expect(wrapper.get('option[value="macos"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
   })
 
   it('gemini 图片模型测试会携带提示词并渲染图片预览', async () => {

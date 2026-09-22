@@ -76,7 +76,7 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 		}
 	}
 	observedCapabilities := s.openAICodexModelCapabilities(
-		options.Plan.CredentialOwnerNamespace,
+		openAICodexModelCapabilitiesPlanNamespace(options.Plan),
 		strings.TrimSpace(options.FinalModel),
 	)
 	modelCapabilities := effectiveCodexModelCapabilities(

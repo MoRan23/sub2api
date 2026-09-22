@@ -768,6 +768,7 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 		},
 	}
 
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	body := []byte(`{"model":"gpt-5.1","stream":false,"store":true,"input":[{"type":"input_text","text":"hello","namespace":"native-wsv2"}]}`)
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
@@ -843,6 +844,7 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthSanitizesInvalidNativeToolItemID
 		},
 	}
 
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	body := []byte(`{"model":"gpt-5.6-sol","stream":false,"instructions":"Continue the task.","input":[{"type":"custom_tool_call","id":"fc_hotfix_probe","call_id":"fc_hotfix","name":"exec","input":"pwd","status":"completed"},{"type":"custom_tool_call_output","call_id":"fc_hotfix","output":"done"}]}`)
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
@@ -862,25 +864,28 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthSanitizesInvalidNativeToolItemID
 func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// WS 握手头与 HTTP 出站共用身份收口：同样强制统一为网关规范身份，
-	// 客户端自报的 originator / user-agent 不参与构造（issue #3901 的配对不变式自然满足）。
+	// WS 与 HTTP 使用相同规范身份。客户端只决定系统族；originator 和版本
+	// 始终来自所选系统的网关配置，保持 issue #3901 的配对不变式。
 	tests := []struct {
 		name       string
 		userAgent  string
 		originator string
+		wantOS     string
 	}{
-		{name: "official desktop ua", userAgent: "Codex Desktop/1.2.3"},
+		{name: "official desktop ua", userAgent: "Codex Desktop/1.2.3", wantOS: OpenAIOSWindows},
 		{
 			name:       "mismatched originator",
 			userAgent:  "codex_vscode/0.140.2 (Mac OS X 14.0; arm64) vscode (codex_vscode; 0.140.2)",
 			originator: "codex_cli_rs",
+			wantOS:     OpenAIOSMacOS,
 		},
 		{
 			name:       "tui identity",
 			userAgent:  "codex-tui/0.140.2 (Mac OS X 14.0; arm64) iTerm (codex-tui; 0.140.2)",
 			originator: "codex-tui",
+			wantOS:     OpenAIOSMacOS,
 		},
-		{name: "official originator without ua", originator: "codex_vscode"},
+		{name: "official originator without ua", originator: "codex_vscode", wantOS: OpenAIOSWindows},
 	}
 
 	for _, tt := range tests {
@@ -939,13 +944,14 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testi
 					"responses_websockets_v2_enabled": true,
 				},
 			}
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 			body := []byte(`{"model":"gpt-5.1","stream":false,"input":[{"type":"input_text","text":"hello"}]}`)
 			result, err := svc.Forward(context.Background(), c, account, body)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			require.Equal(t, openai.CodexDefaultOriginator, captureDialer.lastHeaders.Get("originator"))
-			require.Equal(t, codexCLIUserAgent, captureDialer.lastHeaders.Get("user-agent"))
+			require.Equal(t, tt.wantOS, openai.DetectOSFamilyFromUserAgent(captureDialer.lastHeaders.Get("user-agent")))
 			require.Equal(t, codexCLIVersion, captureDialer.lastHeaders.Get("version"))
 		})
 	}
@@ -1007,6 +1013,7 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthHonorsAccountUserAgent(t *testin
 			"responses_websockets_v2_enabled": true,
 		},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	body := []byte(`{"model":"gpt-5.1","stream":false,"input":[{"type":"input_text","text":"hello"}]}`)
 	result, err := svc.Forward(context.Background(), c, account, body)
@@ -1072,6 +1079,7 @@ func TestOpenAIGatewayService_Forward_WSv2_HeaderSessionFallbackFromPromptCacheK
 		},
 	}
 
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 	body := []byte(`{"model":"gpt-5.1","stream":true,"prompt_cache_key":"pcache_123","input":[{"type":"input_text","text":"hi"}]}`)
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)

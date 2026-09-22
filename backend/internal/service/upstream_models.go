@@ -740,6 +740,13 @@ func (s *AccountTestService) fetchUpstreamModelList(ctx context.Context, account
 	if s.httpUpstream == nil {
 		return nil, nil, newUpstreamModelSyncConfigError("Upstream HTTP client is not configured", nil)
 	}
+	if RequiresOpenAIOAuthOSAuthorization(account) {
+		var err error
+		account, err = ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, OpenAIRequestOSFromContext(ctx).Family)
+		if err != nil {
+			return nil, nil, newUpstreamModelSyncConfigError("OpenAI model sync authorization is unavailable", err)
+		}
+	}
 
 	req, err := s.buildUpstreamModelsRequest(ctx, account)
 	if err != nil {
@@ -1060,11 +1067,23 @@ func (s *AccountTestService) buildOpenAIOAuthUpstreamModelsRequest(ctx context.C
 			fmt.Sprintf("Unsupported OpenAI account type for upstream model sync: %s", credentialAccount.Type), nil,
 		)
 	}
+	identity := resolveCodexOutboundIdentity(credentialAccount.GetOpenAIUserAgent())
+	if credentialAccount.OpenAIOAuthCredentialOS != "" {
+		gateway := s.openAIGatewayService
+		if gateway == nil {
+			gateway = &OpenAIGatewayService{accountRepo: s.accountRepo, settingService: s.settingService}
+		}
+		plan, planErr := gateway.ResolveOpenAIOAuthProfileIdentityPlan(ctx, nil, credentialAccount, OpenAIOAuthInstallationPreserve)
+		if planErr != nil {
+			return nil, newUpstreamModelSyncConfigError("OpenAI model sync identity is unavailable", planErr)
+		}
+		identity.userAgent, identity.originator, identity.version = plan.ClientIdentity.UserAgent, plan.ClientIdentity.Originator, plan.ClientIdentity.Version
+	}
 
 	modelsURL, err := buildCodexModelsManifestURL(
 		chatgptCodexModelsURL,
 		false,
-		CodexCanonicalClientVersion(),
+		identity.version,
 	)
 	if err != nil {
 		return nil, newUpstreamModelSyncConfigError("Invalid OpenAI Codex model list URL", err)
@@ -1098,14 +1117,15 @@ func (s *AccountTestService) buildOpenAIOAuthUpstreamModelsRequest(ctx context.C
 		req.Header.Set("Authorization", "Bearer "+accessToken)
 	}
 
-	identity := resolveCodexOutboundIdentity(credentialAccount.GetOpenAIUserAgent())
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Originator", identity.originator)
 	req.Header.Set("User-Agent", identity.userAgent)
 	req.Header.Set("Version", identity.version)
 	setOpenAIChatGPTAccountHeaders(req.Header, credentialAccount)
 	credentialAccount.ApplyHeaderOverrides(req.Header)
-	enforceCodexIdentityHeadersWithUA(req.Header, credentialAccount.GetOpenAIUserAgent())
+	req.Header.Set("Originator", identity.originator)
+	req.Header.Set("User-Agent", identity.userAgent)
+	req.Header.Set("Version", identity.version)
 	return ApplyOpenAIRequestPolicy(req, s.settingService), nil
 }
 
@@ -1196,6 +1216,14 @@ func (s *AccountTestService) fetchAntigravityOAuthUpstreamModels(ctx context.Con
 }
 
 func (s *AccountTestService) doUpstreamModelsRequest(req *http.Request, proxyURL string, account *Account) (*http.Response, error) {
+	if account != nil && account.OpenAIOAuthCredentialOS != "" {
+		// Revalidate the binding without replacing the exact credential revision
+		// that supplied the already-built request's bearer token.
+		_, err := ReloadOpenAIOAuthCredentialAccount(req.Context(), s.accountRepo, account)
+		if err != nil {
+			return nil, err
+		}
+	}
 	req = withOpenAINativeHTTPRequestScope(req, account, s.accountRepo, "models")
 	if s.tlsFPProfileService == nil {
 		return s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, nil)

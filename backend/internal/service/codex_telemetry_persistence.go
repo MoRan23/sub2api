@@ -39,7 +39,7 @@ func (s *CodexTelemetryService) rememberTransport(input CodexTelemetryInput) {
 	if owner == 0 {
 		owner = input.AccountID
 	}
-	key := CodexTelemetryPoolKey{OwnerAccountID: owner, OSFamily: input.OSFamily, InstallationID: input.InstallationID}
+	key := CodexTelemetryPoolKey{OwnerAccountID: owner, OSFamily: codexTelemetryPoolOS(input), InstallationID: input.InstallationID}
 	if _, exists := s.transportInputs[key]; !exists && len(s.transportInputs) >= codexTelemetryMaxStates {
 		return
 	}
@@ -163,7 +163,19 @@ func (s *CodexTelemetryService) hydrateTelemetryTransport(ctx context.Context, j
 		if err != nil || owner == nil {
 			return "identity_unavailable"
 		}
-		if !IsOpenAIOAuthOSProfileOwner(owner) || owner.Status != StatusActive || owner.GetChatGPTAccountID() != input.ChatGPTAccountID {
+		if !IsOpenAIOAuthOSProfileOwner(owner) || owner.Status != StatusActive {
+			return "stale_identity"
+		}
+		if _, managed := accounts.(OpenAIOAuthOSCredentialsReader); managed {
+			if NormalizeOpenAIOSFamily(input.CredentialOS) == "" || input.AuthorizationGeneration == "" {
+				return "stale_authorization"
+			}
+			owner, err = ResolveOpenAIOAuthCredentialAccount(ctx, accounts, owner, input.CredentialOS)
+			if err != nil || owner == nil || owner.OpenAIOAuthAuthorizationGeneration != input.AuthorizationGeneration {
+				return "stale_authorization"
+			}
+		}
+		if owner.GetChatGPTAccountID() != input.ChatGPTAccountID {
 			return "stale_identity"
 		}
 		if input.ManagedInstallation {

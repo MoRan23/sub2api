@@ -76,6 +76,36 @@ describe('useOpenAIOAuth.buildCredentials', () => {
 })
 
 describe('useOpenAIOAuth.exchangeAuthCode', () => {
+  it('ignores a previous account authorization URL that resolves after reset', async () => {
+    let resolve!: (value: { auth_url: string; session_id: string }) => void
+    vi.mocked(adminAPI.accounts.generateAuthUrl).mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    const oauth = useOpenAIOAuth()
+    const pending = oauth.generateAuthUrl(undefined, undefined, 'linux', 42)
+    oauth.resetState()
+    resolve({ auth_url: 'https://example.test/old', session_id: 'old-session' })
+    expect(await pending).toBe(false)
+    expect(oauth.sessionId.value).toBe('')
+    expect(oauth.boundAccountId.value).toBeNull()
+  })
+  it('binds an existing account and system when generating authorization', async () => {
+    vi.mocked(adminAPI.accounts.generateAuthUrl).mockResolvedValueOnce({ auth_url: 'https://example.test/auth?state=nonce', session_id: 'session' })
+    const oauth = useOpenAIOAuth()
+    await oauth.generateAuthUrl(5, undefined, 'linux', 42)
+    expect(adminAPI.accounts.generateAuthUrl).toHaveBeenLastCalledWith('/admin/openai/generate-auth-url', { proxy_id: 5, os: 'linux', account_id: 42, purpose: 'authorize' })
+    expect(oauth.boundOS.value).toBe('linux')
+    expect(oauth.boundAccountId.value).toBe(42)
+    oauth.resetState()
+    expect(oauth.boundOS.value).toBeNull()
+    expect(oauth.boundAccountId.value).toBeNull()
+  })
+
+  it('sends manual refresh-token imports to the selected existing slot', async () => {
+    vi.mocked(adminAPI.accounts.refreshOpenAIToken).mockResolvedValueOnce({ account: { id: 42 }, os: 'macos' })
+    const oauth = useOpenAIOAuth()
+    const result = await oauth.validateRefreshToken('synthetic-rt', 5, undefined, 'macos', 42)
+    expect(adminAPI.accounts.refreshOpenAIToken).toHaveBeenLastCalledWith('synthetic-rt', 5, '/admin/openai/refresh-token', undefined, 'macos', 42)
+    expect(result?.account?.id).toBe(42)
+  })
   it('shows a clear proxy hint when code exchange fails without a proxy', async () => {
     vi.mocked(adminAPI.accounts.exchangeCode).mockRejectedValueOnce({
       status: 502,

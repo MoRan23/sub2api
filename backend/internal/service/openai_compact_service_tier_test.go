@@ -53,7 +53,7 @@ func TestOpenAIOAuthCompactHTTPBuildersUsePreservedServiceTierInRoutingHint(t *t
 			"chatgpt_account_id": "test-account",
 		},
 	}
-	svc := &OpenAIGatewayService{}
+	svc := &OpenAIGatewayService{accountRepo: newAuthorizedOpenAIOAuthTestRepo(account)}
 
 	tests := []struct {
 		name  string

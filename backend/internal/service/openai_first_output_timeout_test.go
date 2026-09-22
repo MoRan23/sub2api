@@ -70,6 +70,7 @@ func TestOpenAIForwardFirstOutputTimeoutIncludesResponseHeaderWait(t *testing.T)
 		Status: StatusActive, Schedulable: true, Concurrency: 1,
 		Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"},
 	}
+	svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 
 	started := time.Now()
 	_, err := svc.Forward(context.Background(), c, account, body)

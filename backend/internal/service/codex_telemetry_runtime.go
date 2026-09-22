@@ -177,7 +177,7 @@ func (s *CodexTelemetryService) beginPersistentLocked(ctx context.Context, profi
 	}
 	attempt := &CodexTelemetryAttempt{service: s, epoch: s.epoch, id: id, profile: profile,
 		attemptID: uuid.NewString(), policyEpoch: s.sharedEpoch, reservations: 2,
-		poolKey: CodexTelemetryPoolKey{OwnerAccountID: profile.input.OwnerAccountID, OSFamily: profile.input.OSFamily, InstallationID: profile.input.InstallationID}}
+		poolKey: CodexTelemetryPoolKey{OwnerAccountID: profile.input.OwnerAccountID, OSFamily: codexTelemetryPoolOS(profile.input), InstallationID: profile.input.InstallationID}}
 	if ctx != nil {
 		attempt.contextDone = ctx.Done()
 	}
@@ -197,6 +197,15 @@ func codexTelemetryRuntimeSource(profile codexTelemetryProfile) string {
 		return "simulated"
 	}
 	return "observed"
+}
+
+// A final wire UA may be unknown even though authorization selection is frozen.
+// Do not merge two authorizations into the same missing-installation partition.
+func codexTelemetryPoolOS(input CodexTelemetryInput) string {
+	if os := NormalizeOpenAIOSFamily(input.CredentialOS); os != "" {
+		return os
+	}
+	return input.OSFamily
 }
 
 func (s *CodexTelemetryService) submitPersistentResult(a *CodexTelemetryAttempt, result CodexTelemetryResult, retry bool) {
@@ -342,7 +351,13 @@ func codexRuntimeTurnKey(profile codexTelemetryProfile, attemptID string) string
 	if profile.threadID == "" || profile.turnID == "" {
 		return "request:" + attemptID
 	}
-	return profile.threadID + ":" + profile.turnID
+	key := profile.threadID + ":" + profile.turnID
+	// Reauthorization does not recreate the installation pool or its startup
+	// markers, but old and new authorizations must never share turn aggregates.
+	if profile.input.AuthorizationGeneration != "" {
+		key += ":auth:" + profile.input.AuthorizationGeneration
+	}
+	return key
 }
 
 func beginCodexTelemetryRuntime(tx *CodexTelemetryPoolTransaction, a *CodexTelemetryAttempt) error {

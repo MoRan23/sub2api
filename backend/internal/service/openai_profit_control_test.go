@@ -202,7 +202,7 @@ func TestProfitControlSchedulerFiltersCandidates(t *testing.T) {
 	}}
 	cfg := &config.Config{}
 	svc := &OpenAIGatewayService{
-		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*cheap, *expensive, *oauth}},
+		accountRepo:        newSchedulerTestOpenAIAccountRepo([]Account{*cheap, *expensive, *oauth}),
 		cfg:                cfg,
 		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
 		concurrencyService: NewConcurrencyService(cache),
@@ -237,7 +237,7 @@ func TestProfitControlSchedulerFiltersCandidates(t *testing.T) {
 	t.Run("manually rated oauth account is admitted", func(t *testing.T) {
 		// 阈值 0.2 排除两个 API Key；OAuth 手工倍率 0.1 可参与调度。
 		profitControlTestAccountWithRate(oauth, 0.1)
-		svc.accountRepo = schedulerTestOpenAIAccountRepo{accounts: []Account{*cheap, *expensive, *oauth}}
+		svc.accountRepo = newSchedulerTestOpenAIAccountRepo([]Account{*cheap, *expensive, *oauth})
 		ctx := profitControlTestCtx(profitControlTestGroup(groupID, 0.7, 0.1))
 		selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "gpt-test", nil, OpenAIUpstreamTransportAny, false)
 		require.NoError(t, err)

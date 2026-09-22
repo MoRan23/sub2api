@@ -63,7 +63,7 @@ func TestCodexStateCancellationCrossInstanceAndContext(t *testing.T) {
 	}, time.Second, time.Millisecond)
 	// Invalid payloads are ignored and never invoke the handler.
 	require.NoError(t, rdb.Publish(ctx, codexStateCancelChannel, `{"OwnerAccountID":17}`).Err())
-	key := service.CodexTurnStateKey{OwnerAccountID: 17, Model: "gpt-5.4", Generation: "generation-2"}
+	key := service.CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: 17, Model: "gpt-5.4", Generation: "generation-2"}
 	require.NoError(t, first.PublishCancel(ctx, key))
 	select {
 	case actual := <-received:
@@ -99,7 +99,7 @@ func TestCodexStateRepositoryUnavailableAndInvalidInputs(t *testing.T) {
 	require.Error(t, err)
 	_, err = r.AcquireCollector(ctx, 1, "owner", time.Second)
 	require.Error(t, err)
-	require.Error(t, validateCodexStateKey(service.CodexTurnStateKey{OwnerAccountID: 1, Model: "gpt-5.4"}))
+	require.Error(t, validateCodexStateKey(service.CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: 1, Model: "gpt-5.4"}))
 	var nilRepository *openAICodexStateRepository
 	require.Error(t, nilRepository.PublishCancel(ctx, service.CodexTurnStateKey{}))
 }
@@ -115,8 +115,8 @@ func TestCodexStateActivationCrossInstanceScopeOnly(t *testing.T) {
 	received := make(chan codexStateActivation, 1)
 	finished := make(chan error, 1)
 	go func() {
-		finished <- second.SubscribeActivations(ctx, func(ownerID int64, generation string) {
-			received <- codexStateActivation{OwnerAccountID: ownerID, Generation: generation}
+		finished <- second.SubscribeOSActivations(ctx, func(ownerID int64, osFamily, generation string) {
+			received <- codexStateActivation{OwnerAccountID: ownerID, OSFamily: osFamily, Generation: generation}
 		})
 	}()
 	require.Eventually(t, func() bool {
@@ -124,11 +124,11 @@ func TestCodexStateActivationCrossInstanceScopeOnly(t *testing.T) {
 		return err == nil && result[codexStateActivationChannel] == 1
 	}, time.Second, time.Millisecond)
 	require.NoError(t, rdb.Publish(ctx, codexStateActivationChannel, `{"owner_account_id":17}`).Err())
-	require.Error(t, first.PublishActivation(ctx, 0, "generation"))
-	require.NoError(t, first.PublishActivation(ctx, 17, "generation-2"))
+	require.Error(t, first.PublishOSActivation(ctx, 0, "windows", "generation"))
+	require.NoError(t, first.PublishOSActivation(ctx, 17, "windows", "generation-2"))
 	select {
 	case actual := <-received:
-		require.Equal(t, codexStateActivation{OwnerAccountID: 17, Generation: "generation-2"}, actual)
+		require.Equal(t, codexStateActivation{OwnerAccountID: 17, OSFamily: "windows", Generation: "generation-2"}, actual)
 	case <-time.After(time.Second):
 		t.Fatal("activation was not delivered")
 	}

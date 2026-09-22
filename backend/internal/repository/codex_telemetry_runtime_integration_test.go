@@ -19,6 +19,19 @@ import (
 type telemetryRuntimeAccounts struct {
 	service.AccountRepository
 	account *service.Account
+	slots   map[string]*service.OpenAIOAuthOSCredential
+}
+
+func (r telemetryRuntimeAccounts) GetOpenAIOAuthOSCredential(_ context.Context, _ int64, os string) (*service.OpenAIOAuthOSCredential, error) {
+	return r.slots[os], nil
+}
+
+func (r telemetryRuntimeAccounts) ListOpenAIOAuthOSCredentials(context.Context, int64) ([]*service.OpenAIOAuthOSCredential, error) {
+	var result []*service.OpenAIOAuthOSCredential
+	for _, slot := range r.slots {
+		result = append(result, slot)
+	}
+	return result, nil
 }
 
 func (r telemetryRuntimeAccounts) GetByID(context.Context, int64) (*service.Account, error) {
@@ -41,6 +54,7 @@ func TestCodexTelemetryPostgresRuntimeThreeSystemsAcrossRestart(t *testing.T) {
 		installation := uuid.NewString()
 		profiles[os] = service.OpenAIOAuthOSProfile{OSFamily: os, InstallationID: installation, UserAgent: ua}
 		inputs[os] = service.CodexTelemetryInput{AccountID: owner, OwnerAccountID: owner, OSFamily: os,
+			CredentialOS: os, AuthorizationGeneration: "authorization-" + os,
 			InstallationID: installation, ManagedInstallation: true, AccessToken: "stale-request-token",
 			ChatGPTAccountID: "integration-workspace", UserAgent: ua, Originator: "codex_cli_rs", Version: "0.155.1",
 			SessionID: uuid.NewString(), ThreadID: uuid.NewString(), TurnID: uuid.NewString(), SamplingID: uuid.NewString(),
@@ -60,7 +74,13 @@ func TestCodexTelemetryPostgresRuntimeThreeSystemsAcrossRestart(t *testing.T) {
 		account := &service.Account{ID: owner, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive,
 			Credentials:           map[string]any{"access_token": token, "chatgpt_account_id": "integration-workspace"},
 			OpenAIOAuthOSProfiles: &service.OpenAIOAuthOSProfiles{DefaultOS: "windows", Profiles: profiles}}
-		runtime.SetPersistence(store, telemetryRuntimeAccounts{account: account}, nil)
+		slots := map[string]*service.OpenAIOAuthOSCredential{}
+		for os := range profiles {
+			slots[os] = &service.OpenAIOAuthOSCredential{OwnerAccountID: owner, OSFamily: os,
+				AuthorizationGeneration: "authorization-" + os, Revision: 2, Status: service.OpenAIOAuthAuthorizationAuthorized,
+				Credentials: map[string]any{"access_token": token + "-" + os, "chatgpt_account_id": "integration-workspace"}}
+		}
+		runtime.SetPersistence(store, telemetryRuntimeAccounts{account: account, slots: slots}, nil)
 		t.Cleanup(runtime.Stop)
 		return runtime
 	}
@@ -121,7 +141,8 @@ func TestCodexTelemetryPostgresRuntimeThreeSystemsAcrossRestart(t *testing.T) {
 	for _, request := range sent {
 		require.Equal(t, "integration-workspace", request.workspace)
 		require.NotEqual(t, "Bearer stale-request-token", request.authorization)
-		if request.authorization == "Bearer latest-refreshed-token" {
+		require.True(t, strings.HasSuffix(request.authorization, "-"+request.os), "each system must use its own authorization")
+		if request.authorization == "Bearer latest-refreshed-token-"+request.os {
 			seenRefreshed[request.os] = true
 		}
 	}

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"reflect"
@@ -22,11 +23,14 @@ func loadOpenAIOAuthOSProfiles(ctx context.Context, client *dbent.Client, ids []
 	}
 	eligible := ""
 	if len(eligibleOnly) > 0 && eligibleOnly[0] {
-		eligible = " AND EXISTS (SELECT 1 FROM accounts WHERE accounts.id=account_id AND deleted_at IS NULL AND " + codexTurnStateOwnerExpression("credentials") + ")"
+		eligible = " AND EXISTS (SELECT 1 FROM accounts WHERE accounts.id=p.account_id AND deleted_at IS NULL AND " + codexTurnStateOwnerExpression("credentials") + ")"
 	}
-	rows, err := client.QueryContext(ctx, `SELECT account_id, os_family, installation_id::text,
-		user_agent, sync_session_id::text, is_default FROM account_openai_oauth_os_profiles
-		WHERE account_id = ANY($1)`+eligible+` ORDER BY account_id, os_family`, pq.Array(ids))
+	rows, err := client.QueryContext(ctx, `SELECT p.account_id, p.os_family, p.installation_id::text,
+		p.user_agent, p.sync_session_id::text, p.is_default, COALESCE(c.status,'unauthorized'),
+		c.authorized_at,c.expires_at,COALESCE(c.last_error,''),c.refresh_retry_after,c.credentials->>'expires_at'
+		FROM account_openai_oauth_os_profiles p LEFT JOIN account_openai_oauth_os_credentials c
+		ON c.account_id=p.account_id AND c.os_family=p.os_family
+		WHERE p.account_id = ANY($1)`+eligible+` ORDER BY p.account_id, p.os_family`, pq.Array(ids))
 	if err != nil {
 		return nil, err
 	}
@@ -35,8 +39,22 @@ func loadOpenAIOAuthOSProfiles(ctx context.Context, client *dbent.Client, ids []
 		var accountID int64
 		var profile service.OpenAIOAuthOSProfile
 		var isDefault bool
-		if err := rows.Scan(&accountID, &profile.OSFamily, &profile.InstallationID, &profile.UserAgent, &profile.SyncSessionID, &isDefault); err != nil {
+		var authorized, expires, retry sql.NullTime
+		var legacyExpiry sql.NullString
+		if err := rows.Scan(&accountID, &profile.OSFamily, &profile.InstallationID, &profile.UserAgent, &profile.SyncSessionID, &isDefault,
+			&profile.Authorization.Status, &authorized, &expires, &profile.Authorization.LastError, &retry, &legacyExpiry); err != nil {
 			return nil, err
+		}
+		if authorized.Valid {
+			profile.Authorization.AuthorizedAt = &authorized.Time
+		}
+		if expires.Valid {
+			profile.Authorization.ExpiresAt = &expires.Time
+		} else if legacyExpiry.Valid {
+			profile.Authorization.ExpiresAt = openAIOAuthCredentialExpiry(map[string]any{"expires_at": legacyExpiry.String})
+		}
+		if retry.Valid {
+			profile.Authorization.RefreshRetryAfter = &retry.Time
 		}
 		profiles := out[accountID]
 		if profiles == nil {
@@ -89,7 +107,7 @@ func saveOpenAIOAuthOSProfilesLocked(ctx context.Context, client *dbent.Client, 
 		}
 		for _, os := range []string{"windows", "macos", "linux"} {
 			profile := profiles.Profiles[os]
-			if previous != nil && previous.Profiles[os] == profile && (previous.DefaultOS == os) == (profiles.DefaultOS == os) {
+			if previous != nil && reflect.DeepEqual(previous.Profiles[os], profile) && (previous.DefaultOS == os) == (profiles.DefaultOS == os) {
 				continue
 			}
 			_, err := client.ExecContext(ctx, `INSERT INTO account_openai_oauth_os_profiles
@@ -155,7 +173,22 @@ func ensureOpenAIOAuthOSProfilesLocked(ctx context.Context, client *dbent.Client
 		return nil, false, err
 	}
 	changed, err := saveOpenAIOAuthOSProfilesLocked(ctx, client, account, stored[account.ID], profiles)
-	return profiles, changed, err
+	if err != nil {
+		return nil, false, err
+	}
+	migrated, err := migrateOpenAIOAuthOSCredentialsLocked(ctx, client, account, profiles)
+	if err != nil {
+		return nil, false, err
+	}
+	if migrated {
+		loaded, loadErr := loadOpenAIOAuthOSProfiles(ctx, client, []int64{account.ID})
+		if loadErr != nil {
+			return nil, false, loadErr
+		}
+		profiles = loaded[account.ID]
+		service.ApplyOpenAIOAuthOSProfiles(account, profiles)
+	}
+	return profiles, changed || migrated, nil
 }
 
 func (r *accountRepository) mutateOpenAIOAuthOSProfiles(ctx context.Context, accountID int64, mutate func(*service.Account, *service.OpenAIOAuthOSProfiles) error) (*service.OpenAIOAuthOSProfiles, error) {
@@ -225,6 +258,10 @@ func reconcileOpenAIOAuthOSProfileEligibilityLocked(ctx context.Context, client 
 	}
 	if service.IsOpenAIOAuthOSProfileOwner(account) {
 		_, _, err := ensureOpenAIOAuthOSProfilesLocked(ctx, client, account)
+		return err
+	}
+	_, err = client.ExecContext(ctx, `UPDATE account_openai_oauth_os_credentials SET credentials='{}'::jsonb,status='unauthorized',authorization_generation=gen_random_uuid(),state_generation=gen_random_uuid(),credential_epoch=gen_random_uuid(),revision=revision+1,updated_at=NOW() WHERE account_id=$1`, accountID)
+	if err != nil {
 		return err
 	}
 	_, err = client.ExecContext(ctx, `DELETE FROM account_openai_oauth_os_profiles WHERE account_id=$1`, accountID)

@@ -1,0 +1,194 @@
+package service
+
+import (
+	"context"
+	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+)
+
+// OpenAIOAuthAuthorizationTarget is selected before PKCE authorization starts.
+type OpenAIOAuthAuthorizationTarget struct {
+	AccountID int64
+	OS        string
+	Purpose   string
+}
+
+type openAIOAuthAuthUAKey struct{}
+
+func (s *OpenAIOAuthService) SetAccountRepository(repo AccountRepository) { s.accountRepo = repo }
+
+func withOpenAIOAuthAuthUserAgent(ctx context.Context, ua string) context.Context {
+	if strings.TrimSpace(ua) == "" {
+		return ctx
+	}
+	ctx = context.WithValue(ctx, openAIOAuthAuthUAKey{}, ua)
+	ctx = WithOpenAINativeHTTPScope(ctx, nil, ua)
+	// A caller may already carry the account's default native scope. Both the
+	// application header and transport hint must use this explicitly bound OS.
+	scope, _ := codexnative.ScopeFromContext(ctx)
+	scope.AccountUserAgent = ua
+	return codexnative.WithScope(ctx, scope)
+}
+
+// OpenAIOAuthAuthIdentity uses only the server-bound installation identity.
+func OpenAIOAuthAuthIdentity(ctx context.Context) (string, string) {
+	ua, originator := CodexCanonicalAuthIdentity()
+	if ctx != nil {
+		if bound, _ := ctx.Value(openAIOAuthAuthUAKey{}).(string); bound != "" {
+			return bound, originator
+		}
+		if scope, ok := codexnative.ScopeFromContext(ctx); ok && scope.AccountUserAgent != "" {
+			return scope.AccountUserAgent, originator
+		}
+	}
+	return ua, originator
+}
+
+func (s *OpenAIOAuthService) prepareAuthorizationTarget(ctx context.Context, target OpenAIOAuthAuthorizationTarget) (*openai.OAuthSession, error) {
+	os := NormalizeOpenAIOSFamily(target.OS)
+	if os == "" {
+		return nil, infraerrors.BadRequest("OPENAI_OAUTH_OS_REQUIRED", "a valid authorization OS is required")
+	}
+	if target.AccountID < 0 {
+		return nil, infraerrors.BadRequest("OPENAI_OAUTH_INVALID_ACCOUNT", "invalid account ID")
+	}
+	purpose := strings.TrimSpace(target.Purpose)
+	if purpose == "" {
+		if target.AccountID > 0 {
+			purpose = "authorize"
+		} else {
+			purpose = "create"
+		}
+	}
+	if (target.AccountID == 0 && purpose != "create") || (target.AccountID > 0 && purpose != "authorize") {
+		return nil, infraerrors.BadRequest("OPENAI_OAUTH_INVALID_PURPOSE", "authorization purpose does not match its target")
+	}
+	binding := &openai.OAuthSession{AccountID: target.AccountID, OS: os, Purpose: purpose}
+	if target.AccountID == 0 {
+		ua, err := BuildOpenAIUserAgentWithEnvironment(CodexCanonicalUserAgent(), defaultOpenAIOAuthEnvironment(os))
+		binding.UserAgent = ua
+		return binding, err
+	}
+	if s.accountRepo == nil {
+		return nil, infraerrors.ServiceUnavailable("OPENAI_OAUTH_STORAGE_UNAVAILABLE", "authorization storage is unavailable")
+	}
+	account, err := s.accountRepo.GetByID(ctx, target.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	if !IsOpenAIOAuthOSProfileOwner(account) {
+		return nil, infraerrors.BadRequest("OPENAI_OAUTH_INVALID_ACCOUNT", "account does not support independent OS authorization")
+	}
+	profile, err := ResolveOpenAIOAuthOSProfile(ctx, s.accountRepo, account, os)
+	if err != nil {
+		return nil, err
+	}
+	binding.UserAgent = profile.UserAgent
+	store, ok := s.accountRepo.(OpenAIOAuthOSCredentialsRepository)
+	if !ok {
+		return nil, infraerrors.ServiceUnavailable("OPENAI_OAUTH_STORAGE_UNAVAILABLE", "authorization storage is unavailable")
+	}
+	slot, err := store.GetOpenAIOAuthOSCredential(ctx, target.AccountID, os)
+	if err != nil {
+		return nil, err
+	}
+	if slot != nil {
+		binding.AuthorizationGeneration = slot.AuthorizationGeneration
+	}
+	return binding, nil
+}
+
+func (s *OpenAIOAuthService) completeBoundAuthorization(ctx context.Context, session *openai.OAuthSession, info *OpenAITokenInfo, source string) (*OpenAITokenInfo, error) {
+	// These values come from the HTTPS token exchange response, never callback
+	// parameters or a caller-provided JWT. Missing identity cannot establish a slot.
+	if strings.TrimSpace(info.ChatGPTAccountID) == "" || strings.TrimSpace(info.ChatGPTUserID) == "" {
+		return nil, infraerrors.BadRequest("OPENAI_OAUTH_IDENTITY_REQUIRED", "the token response did not identify the ChatGPT account and user")
+	}
+	store, ok := s.accountRepo.(OpenAIOAuthOSCredentialsRepository)
+	if !ok {
+		return nil, infraerrors.ServiceUnavailable("OPENAI_OAUTH_STORAGE_UNAVAILABLE", "authorization storage is unavailable")
+	}
+	if _, err := store.BindOpenAIOAuthOSCredentialsIfGeneration(ctx, session.AccountID, session.OS, session.AuthorizationGeneration, s.BuildAccountCredentials(info), source); err != nil {
+		return nil, err
+	}
+	account, err := s.accountRepo.GetByID(ctx, session.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	return &OpenAITokenInfo{OS: session.OS, Account: account}, nil
+}
+
+// RefreshTokenForOS validates an imported refresh token with the chosen OS identity.
+func (s *OpenAIOAuthService) RefreshTokenForOS(ctx context.Context, refreshToken, proxyURL, clientID, os string) (*OpenAITokenInfo, error) {
+	binding, err := s.prepareAuthorizationTarget(ctx, OpenAIOAuthAuthorizationTarget{OS: os, Purpose: "create"})
+	if err != nil {
+		return nil, err
+	}
+	// This is a validation primitive for imports: the caller must finish subject
+	// checks for all grants before performing account enrichment or mutations.
+	info, err := s.refreshTokenWithClientID(withOpenAIOAuthAuthUserAgent(ctx, binding.UserAgent), refreshToken, proxyURL, clientID, false)
+	if err != nil {
+		return nil, err
+	}
+	info.OS = binding.OS
+	if info.RefreshToken == "" {
+		info.RefreshToken = strings.TrimSpace(refreshToken)
+	}
+	return info, nil
+}
+
+// AuthorizeAccountWithRefreshToken exchanges on the server, then CAS-binds only
+// the selected slot. Browser supplied account/user claims are never consulted.
+func (s *OpenAIOAuthService) AuthorizeAccountWithRefreshToken(ctx context.Context, accountID int64, os, refreshToken, clientID string) (*OpenAITokenInfo, error) {
+	if strings.TrimSpace(refreshToken) == "" {
+		return nil, infraerrors.BadRequest("OPENAI_OAUTH_REFRESH_TOKEN_REQUIRED", "refresh token is required to validate imported credentials")
+	}
+	binding, err := s.prepareAuthorizationTarget(ctx, OpenAIOAuthAuthorizationTarget{AccountID: accountID, OS: os, Purpose: "authorize"})
+	if err != nil {
+		return nil, err
+	}
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	var proxyURL string
+	if account.ProxyID != nil && s.proxyRepo != nil {
+		proxy, proxyErr := s.proxyRepo.GetByID(ctx, *account.ProxyID)
+		if proxyErr != nil {
+			return nil, proxyErr
+		}
+		if proxy != nil {
+			proxyURL = proxy.URL()
+		}
+	}
+	// Detect a copied refresh token before exchanging it: rotating a token from
+	// another OS would invalidate that slot even if persistence later rejects it.
+	store := s.accountRepo.(OpenAIOAuthOSCredentialsRepository)
+	slots, err := store.ListOpenAIOAuthOSCredentials(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	for _, slot := range slots {
+		if slot != nil && slot.OSFamily != binding.OS && strings.TrimSpace(credentialString(slot.Credentials, "refresh_token")) == strings.TrimSpace(refreshToken) {
+			return nil, infraerrors.BadRequest("OPENAI_OAUTH_DUPLICATE_REFRESH_TOKEN", "another OS already owns this refresh token; start a new OAuth login")
+		}
+	}
+	// Subject verification precedes privacy/account enrichment, so importing an
+	// unrelated login cannot mutate that unrelated account's preferences.
+	info, err := s.refreshTokenWithClientID(withOpenAIOAuthAuthUserAgent(ctx, binding.UserAgent), refreshToken, proxyURL, clientID, false)
+	if err != nil {
+		return nil, err
+	}
+	if info.RefreshToken == "" {
+		info.RefreshToken = strings.TrimSpace(refreshToken)
+	}
+	return s.completeBoundAuthorization(ctx, binding, info, "refresh_token_import")
+}
+
+func credentialString(credentials map[string]any, key string) string {
+	value, _ := credentials[key].(string)
+	return value
+}

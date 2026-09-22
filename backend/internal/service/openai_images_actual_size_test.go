@@ -111,6 +111,7 @@ func runOpenAIOAuthImageActualSizeTest(t *testing.T, stream bool) openAIOAuthIma
 			"chatgpt_account_id": "acct-123",
 		},
 	}
+	registerAuxiliaryOSFixture(t, svc, account)
 	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)

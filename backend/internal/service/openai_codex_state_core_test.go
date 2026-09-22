@@ -87,7 +87,7 @@ func (r *codexStateMemoryRepo) BeginBusiness(_ context.Context, k CodexTurnState
 	defer r.mu.Unlock()
 	v, ok := r.records[k]
 	if !ok {
-		v = CodexTurnStateRecord{OwnerAccountID: k.OwnerAccountID, Model: k.Model, Generation: k.Generation, Version: 1, LastBusinessAt: time.Unix(0, 0)}
+		v = CodexTurnStateRecord{OwnerAccountID: k.OwnerAccountID, OSFamily: k.OSFamily, Model: k.Model, Generation: k.Generation, Version: 1, LastBusinessAt: time.Unix(0, 0)}
 	}
 	if v.LastBusinessAt.After(time.Unix(0, 0)) && v.LastBusinessAt.Before(now.Add(-CodexTurnStateActiveWindow)) {
 		if v.DemandReason != "" || v.CollectorAttemptID != "" {
@@ -269,7 +269,7 @@ func (r *codexStateTestAccounts) GetByID(_ context.Context, id int64) (*Account,
 	if r.account.ID != id {
 		return nil, nil
 	}
-	return r.account, nil
+	return codexStateTestScopeAccount(r.account), nil
 }
 
 type codexStateTestEncryptor struct{}
@@ -293,6 +293,7 @@ func (f codexStateTestCollector) Collect(ctx context.Context, in CodexTurnStateC
 func newCodexStateTestService(t *testing.T) (*CodexTurnStateService, *codexStateMemoryRepo, *Account) {
 	t.Helper()
 	a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "test-token", "plan_type": "plus"}, Extra: map[string]any{"codex_turn_state": map[string]any{"enabled": true, "account_type": "personal", "collector_proxy_id": float64(2)}, "codex_turn_state_generation": "gen1"}}
+	a = codexStateTestScopeAccount(a)
 	repo := newCodexStateMemoryRepo()
 	s := NewCodexTurnStateService(repo, &codexStateTestAccounts{account: a}, codexStateTestEncryptor{}, nil)
 	s.modelPolicy = newCodexStateTestModelPolicy("gpt-5", "gpt-5-mini", "gpt-5.4", "final-model", "other-model")

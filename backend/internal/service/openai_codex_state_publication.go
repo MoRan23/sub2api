@@ -37,7 +37,7 @@ func (s *CodexTurnStateService) publishCodexTurnStateAnomaly(ctx context.Context
 		shape.IssuedAt.After(now.Add(30*time.Second)) || !shape.ExpiresAt.Equal(shape.IssuedAt.Add(CodexTurnStateLifetime)) || !shape.ExpiresAt.After(now) {
 		return false, nil
 	}
-	owner, err := s.currentOwner(ctx, key.OwnerAccountID)
+	owner, err := s.currentOwner(ctx, key.OwnerAccountID, key.OSFamily)
 	if err != nil {
 		return false, err
 	}
