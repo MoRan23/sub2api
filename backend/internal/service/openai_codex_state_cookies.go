@@ -21,6 +21,7 @@ type codexTurnStateCookieAttempt interface {
 }
 
 type codexTurnStateCookiePublication struct {
+	BundleBinding           CodexTurnStateBundleBinding
 	SourceOS                string
 	EncryptedCookieBundle   string
 	CookieBundleExpiresAt   *time.Time
@@ -28,27 +29,29 @@ type codexTurnStateCookiePublication struct {
 }
 
 type codexTurnStateCookieEnvelope struct {
-	Version                 int                  `json:"version"`
-	OwnerAccountID          int64                `json:"owner_account_id"`
-	Model                   string               `json:"model"`
-	AuthorizationGeneration string               `json:"authorization_generation"`
-	Bundle                  openaicookies.Bundle `json:"bundle"`
-	ResponseEvidence        CodexModelEvidence   `json:"response_evidence"`
+	Binding                 CodexTurnStateBundleBinding `json:"binding"`
+	Version                 int                         `json:"version"`
+	OwnerAccountID          int64                       `json:"owner_account_id"`
+	Model                   string                      `json:"model"`
+	AuthorizationGeneration string                      `json:"authorization_generation"`
+	Bundle                  openaicookies.Bundle        `json:"bundle"`
+	ResponseEvidence        CodexModelEvidence          `json:"response_evidence"`
 }
 
 func applyCodexTurnStateCookiePublication(record *CodexTurnStateRecord, publication codexTurnStateCookiePublication) {
 	record.EncryptedCookieBundle = publication.EncryptedCookieBundle
 	record.CookieBundleExpiresAt = publication.CookieBundleExpiresAt
 	record.AuthorizationGeneration = publication.AuthorizationGeneration
+	record.BundleBinding = publication.BundleBinding
 }
 
 var errCodexCookieAdmission = errors.New("cookie_target_rejected")
 
-func (s *CodexTurnStateService) encryptCodexCookiePublication(key CodexTurnStateKey, authorization string, bundle openaicookies.Bundle, evidence ...CodexModelEvidence) (codexTurnStateCookiePublication, error) {
-	if s == nil || s.encryptor == nil || !bundle.ValidAt(s.now()) {
+func (s *CodexTurnStateService) encryptCodexCookiePublication(key CodexTurnStateKey, authorization string, bundle openaicookies.Bundle, binding CodexTurnStateBundleBinding, evidence ...CodexModelEvidence) (codexTurnStateCookiePublication, error) {
+	if s == nil || s.encryptor == nil || !binding.Valid() || !bundle.ValidAt(s.now()) {
 		return codexTurnStateCookiePublication{}, errCodexCookieAdmission
 	}
-	envelope := codexTurnStateCookieEnvelope{Version: 1, OwnerAccountID: key.OwnerAccountID, Model: key.Model, AuthorizationGeneration: authorization, Bundle: bundle}
+	envelope := codexTurnStateCookieEnvelope{Version: 2, OwnerAccountID: key.OwnerAccountID, Model: key.Model, AuthorizationGeneration: authorization, Bundle: bundle, Binding: binding}
 	if len(evidence) > 0 {
 		envelope.ResponseEvidence = evidence[0]
 	}
@@ -61,11 +64,11 @@ func (s *CodexTurnStateService) encryptCodexCookiePublication(key CodexTurnState
 		return codexTurnStateCookiePublication{}, openaicookies.ErrStoreUnavailable
 	}
 	expiresAt := bundle.ExpiresAt
-	return codexTurnStateCookiePublication{EncryptedCookieBundle: encrypted, CookieBundleExpiresAt: &expiresAt, AuthorizationGeneration: authorization}, nil
+	return codexTurnStateCookiePublication{EncryptedCookieBundle: encrypted, CookieBundleExpiresAt: &expiresAt, AuthorizationGeneration: authorization, BundleBinding: binding}, nil
 }
 
-func (s *CodexTurnStateService) emptyCodexCookiePublication(key CodexTurnStateKey, authorization string, expiresAt time.Time) (codexTurnStateCookiePublication, error) {
-	return s.encryptCodexCookiePublication(key, authorization, openaicookies.Bundle{Entries: []openaicookies.Entry{}, ExpiresAt: expiresAt})
+func (s *CodexTurnStateService) emptyCodexCookiePublication(key CodexTurnStateKey, authorization string, expiresAt time.Time, binding CodexTurnStateBundleBinding) (codexTurnStateCookiePublication, error) {
+	return s.encryptCodexCookiePublication(key, authorization, openaicookies.Bundle{Entries: []openaicookies.Entry{}, ExpiresAt: expiresAt}, binding)
 }
 
 func (s *CodexTurnStateService) prepareBusinessCookiePublication(a *CodexTurnStateAttempt, expiresAt time.Time) (codexTurnStateCookiePublication, error) {
@@ -80,7 +83,7 @@ func (s *CodexTurnStateService) prepareBusinessCookiePublication(a *CodexTurnSta
 	// A source without Cookie candidates can only contribute an empty bundle.
 	// Native WS is bypassed at its entry point and never reaches publication.
 	if staged == nil {
-		publication, err := s.encryptCodexCookiePublication(a.key, a.AuthorizationGeneration, openaicookies.Bundle{ExpiresAt: expiresAt}, evidence)
+		publication, err := s.encryptCodexCookiePublication(a.key, a.AuthorizationGeneration, openaicookies.Bundle{ExpiresAt: expiresAt}, a.OutboundBinding, evidence)
 		publication.SourceOS = a.OSFamily
 		return publication, err
 	}
@@ -91,7 +94,7 @@ func (s *CodexTurnStateService) prepareBusinessCookiePublication(a *CodexTurnSta
 	if err != nil {
 		return codexTurnStateCookiePublication{}, err
 	}
-	publication, err := s.encryptCodexCookiePublication(a.key, a.AuthorizationGeneration, bundle, evidence)
+	publication, err := s.encryptCodexCookiePublication(a.key, a.AuthorizationGeneration, bundle, a.OutboundBinding, evidence)
 	publication.SourceOS = a.OSFamily
 	return publication, err
 }
@@ -101,13 +104,13 @@ func (s *CodexTurnStateService) prepareCollectorCookiePublication(key CodexTurnS
 		return codexTurnStateCookiePublication{}, errCodexCookieAdmission
 	}
 	if result.cookieAttempt == nil {
-		return s.encryptCodexCookiePublication(key, authorization, openaicookies.Bundle{ExpiresAt: expiresAt}, result.ModelEvidence)
+		return s.encryptCodexCookiePublication(key, authorization, openaicookies.Bundle{ExpiresAt: expiresAt}, result.BundleBinding, result.ModelEvidence)
 	}
 	bundle, err := result.cookieAttempt.Snapshot(expiresAt)
 	if err != nil {
 		return codexTurnStateCookiePublication{}, err
 	}
-	return s.encryptCodexCookiePublication(key, authorization, bundle, result.ModelEvidence)
+	return s.encryptCodexCookiePublication(key, authorization, bundle, result.BundleBinding, result.ModelEvidence)
 }
 
 func (s *CodexTurnStateService) codexCookieBundleForSnapshot(a *CodexTurnStateAttempt) (openaicookies.Bundle, error) {
@@ -122,7 +125,7 @@ func (s *CodexTurnStateService) codexCookieBundleForSnapshot(a *CodexTurnStateAt
 		return openaicookies.Bundle{}, openaicookies.ErrBundleInvalid
 	}
 	var envelope codexTurnStateCookieEnvelope
-	if json.Unmarshal([]byte(plain), &envelope) != nil || envelope.Version != 1 || envelope.OwnerAccountID != a.OwnerAccountID || envelope.Model != a.Model || envelope.AuthorizationGeneration != a.AuthorizationGeneration {
+	if json.Unmarshal([]byte(plain), &envelope) != nil || envelope.Version != 2 || !envelope.Binding.Valid() || envelope.Binding != a.Snapshot.BundleBinding || envelope.Binding != a.OutboundBinding || envelope.Binding.WireMode != a.WireMode || envelope.OwnerAccountID != a.OwnerAccountID || envelope.Model != a.Model || envelope.AuthorizationGeneration != a.AuthorizationGeneration {
 		return openaicookies.Bundle{}, openaicookies.ErrBundleInvalid
 	}
 	if !envelope.Bundle.ValidAt(s.now()) || envelope.Bundle.ExpiresAt.After(a.Snapshot.ExpiresAt) {

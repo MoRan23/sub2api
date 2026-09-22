@@ -29,7 +29,7 @@ func (r codexStateDiagnosticReadError) Read([]byte) (int, error) { return 0, r.e
 
 func TestCodexTurnStateCollectorSafeFailureCategoriesReachStatus(t *testing.T) {
 	const privateDetail = "private-proxy-password-and-response-body"
-	completed := "data: {\"type\":\"response.completed\"}\n\n"
+	completed := "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
 	for _, tc := range []struct {
 		name, reason string
 		status       int

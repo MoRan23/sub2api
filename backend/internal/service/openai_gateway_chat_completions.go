@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -71,6 +72,12 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
 ) (*OpenAIForwardResult, error) {
+	return s.withOpenAIHTTPBundleBaseline(c, account, func() (*OpenAIForwardResult, error) {
+		return s.forwardAsChatCompletionsWithHTTPBundle(ctx, c, account, body, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated)
+	})
+}
+
+func (s *OpenAIGatewayService) forwardAsChatCompletionsWithHTTPBundle(ctx context.Context, c *gin.Context, account *Account, body []byte, promptCacheKey, defaultMappedModel string, compatPromptCacheTenantIsolated bool) (*OpenAIForwardResult, error) {
 	if account != nil && account.IsOpenAIOAuth() {
 		var scopeErr error
 		ctx, account, scopeErr = s.prepareOpenAIOAuthRequestScope(ctx, c, account, body)
@@ -113,6 +120,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 
 	if account.Platform == PlatformOpenAI {
+		s.prepareOpenAIHTTPBundleModel(ctx, c, account, body, "chat", defaultMappedModel)
 		ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 		if account.IsOpenAIOAuth() && gjson.GetBytes(body, "messages").Exists() {
 			s.prepareOpenAIRequestTimezoneDeferred(ctx, c, account, body, account.IsOpenAIPassthroughEnabled())
@@ -431,6 +439,10 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	upstreamReq = markOpenAIGuardianSourceHTTPRequest(upstreamReq, c, account)
 	upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, withCodexTelemetryGatewayContext(c.Request.Context(), c, account, "http"))
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+	if errors.Is(err, openaicookies.ErrBundleSendRejected) {
+		cancelUpstream()
+		return nil, err
+	}
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}

@@ -158,14 +158,78 @@ func (s *CodexTurnStateService) GetStatusesForOS(ctx context.Context, accountIDs
 		observationOwners = append(observationOwners, owner)
 	}
 	observationEnabled, observations := globalCodexTurnStateSummaryStore.snapshotForOwners(observationOwners)
+	proxyResults := make(map[int64]codexTurnStateStatusProxy)
 	for _, id := range ids {
 		if owner := owners[id]; owner != nil {
 			item := projectCodexTurnStateStatus(id, owner, recordsByOwner[owner.ID], models, nil, now, cooldowns[owner.ID])
+			s.validateCodexTurnStateStatusBundles(ctx, item, owner, recordsByOwner[owner.ID], proxyResults)
 			attachCodexTurnStateObservations(item, observationEnabled, observations[owner.ID])
 			result.Items[strconv.FormatInt(id, 10)] = item
 		}
 	}
 	return result, nil
+}
+
+type codexTurnStateStatusProxy struct {
+	proxy *Proxy
+	err   error
+}
+
+// Status queries never repair or delete packages. A live route check only marks
+// a stored package unusable, and is shared across aliases on an account page.
+func (s *CodexTurnStateService) validateCodexTurnStateStatusBundles(ctx context.Context, status *CodexTurnStateStatus, owner *Account, records []CodexTurnStateRecord, results map[int64]codexTurnStateStatusProxy) {
+	if s == nil || status == nil || owner == nil {
+		return
+	}
+	if results == nil {
+		results = make(map[int64]codexTurnStateStatusProxy)
+	}
+	byModel := make(map[string]CodexTurnStateRecord, len(records))
+	for _, record := range records {
+		if record.Generation == CodexTurnStateGenerationForAccount(owner) {
+			byModel[record.Model] = record
+		}
+	}
+	for i := range status.Models {
+		item := &status.Models[i]
+		if !item.CacheAvailable {
+			continue
+		}
+		record := byModel[item.Model]
+		binding := record.BundleBinding
+		reason := ""
+		if !binding.Valid() {
+			reason = "bundle_binding_invalid"
+		} else if binding.EgressKind == "direct" {
+			if owner.ProxyID != nil {
+				reason = "bundle_proxy_unavailable"
+			}
+		} else {
+			allowed := codexTurnStateProxyAllowed(CodexTurnStateCollectorProxyIDs(CodexTurnStateConfigForAccount(owner)), binding.ProxyID)
+			isAccountRoute := owner.ProxyID != nil && *owner.ProxyID == binding.ProxyID
+			if (!allowed && !isAccountRoute) || (binding.WireMode == "responses" && !isAccountRoute) || s.proxies == nil {
+				reason = "bundle_proxy_unavailable"
+			} else {
+				result, exists := results[binding.ProxyID]
+				if !exists {
+					result.proxy, result.err = s.proxies.GetByID(ctx, binding.ProxyID)
+					results[binding.ProxyID] = result
+				}
+				if result.err != nil || result.proxy == nil || !result.proxy.IsActive() || result.proxy.IsExpired(s.statusNow()) || result.proxy.Host == "" || result.proxy.Port <= 0 {
+					reason = "bundle_proxy_unavailable"
+				} else if result.proxy.RouteGeneration != binding.ProxyRouteGeneration {
+					reason = "bundle_proxy_changed"
+				}
+			}
+		}
+		if reason != "" {
+			item.CacheAvailable = false
+			item.BundleUnavailableReason = reason
+			if item.State == "ready" {
+				item.State = "missing"
+			}
+		}
+	}
 }
 
 func attachCodexTurnStateObservations(status *CodexTurnStateStatus, enabled bool, observations []CodexTurnStateModelObservation) {
@@ -235,12 +299,15 @@ func projectCodexTurnStateStatus(accountID int64, owner *Account, records []Code
 		}
 		item := CodexTurnStateModelStatus{OSFamily: record.OSFamily, Model: record.Model, State: "missing", Shape: record.Shape, Source: record.Source, TokenLength: record.TokenLength, CipherBlocks: record.CipherBlocks, CollectorPaused: record.CollectorPaused, LastError: record.LastError, RefreshReason: record.RefreshReason}
 		item.CacheScope, item.CookieBundleExpiresAt = "shared", record.CookieBundleExpiresAt
+		item.BundleWireMode, item.BundleEgressKind = record.BundleBinding.WireMode, record.BundleBinding.EgressKind
+		item.BundleProxyID = codexStateProxyIDPtr(record.BundleBinding.ProxyID)
+		item.LastEligibleCollectionAt = codexStateTimePtr(record.LastEligibleCollectionAt)
 		item.CollectorProxyID = codexStateProxyIDPtr(codexTurnStateSelectedProxy(proxyIDs, record.CollectorProxyID))
 		item.LastCollectorProxyID = codexStateProxyIDPtr(record.LastCollectorProxyID)
 		item.CollectorExtendedCount = record.CollectorExtendedCount
 		if record.EncryptedToken != "" {
 			item.State = "expired"
-			if record.EncryptedCookieBundle != "" && record.ExpiresAt.After(now) && (record.CookieBundleExpiresAt == nil || record.CookieBundleExpiresAt.After(now)) {
+			if record.BundleBinding.Valid() && record.EncryptedCookieBundle != "" && record.ExpiresAt.After(now) && (record.CookieBundleExpiresAt == nil || record.CookieBundleExpiresAt.After(now)) {
 				item.State = "ready"
 				item.RemainingSeconds = int64(record.ExpiresAt.Sub(now) / time.Second)
 			}
@@ -260,6 +327,7 @@ func projectCodexTurnStateStatus(accountID int64, owner *Account, records []Code
 		item.LastCollectedAt = codexStateTimePtr(record.LastCollectedAt)
 		item.NextCollectAt = codexStateTimePtr(record.NextCollectAt)
 		item.CacheAvailable = result.Enabled && item.ModelAllowed && result.ExpectedLength > 0 &&
+			record.BundleBinding.Valid() &&
 			record.EncryptedToken != "" && record.EncryptedCookieBundle != "" && record.AuthorizationGeneration == owner.OpenAIOAuthAuthorizationGeneration && record.Shape == CodexTurnStateShapeTarget &&
 			record.TokenLength == result.ExpectedLength && record.CipherBlocks == map[int]int{292: 10, 332: 12}[result.ExpectedLength] &&
 			!record.IssuedAt.IsZero() && !record.IssuedAt.After(now.Add(30*time.Second)) && record.ExpiresAt.After(now) &&
@@ -298,7 +366,10 @@ func projectCodexStateCollection(status *CodexTurnStateStatus, owner *Account, r
 	if ownerPaused {
 		return "paused", "collector_auth_rejected"
 	}
-	if record.LastBusinessAt.Before(now.Add(-CodexTurnStateActiveWindow)) {
+	if record.LastEligibleCollectionAt.IsZero() && record.LastBusinessAt.After(now.Add(-CodexTurnStateActiveWindow)) {
+		return "idle", "waiting_eligible_business"
+	}
+	if record.LastEligibleCollectionAt.IsZero() || record.LastEligibleCollectionAt.Before(now.Add(-CodexTurnStateActiveWindow)) {
 		return "idle", "idle"
 	}
 	if record.CollectionStatus == "collecting" && record.LastCollectedAt.Add(CodexTurnStateCollectTimeout).After(now) {

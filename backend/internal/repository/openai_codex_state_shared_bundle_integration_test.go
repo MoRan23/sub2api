@@ -22,6 +22,7 @@ func TestCodexStateSharedBundlePublishesAtomicallyAndFencesReenable(t *testing.T
 	require.NotNil(t, record)
 	record.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
 	record.EncryptedToken, record.EncryptedCookieBundle = "ticket-a", "cookies-a"
+	record.BundleBinding = service.CodexTurnStateBundleBinding{WireMode: "responses", EgressKind: "direct"}
 	record.IssuedAt, record.ExpiresAt = now, now.Add(service.CodexTurnStateLifetime)
 	cookieExpiry := now.Add(time.Minute)
 	record.CookieBundleExpiresAt = &cookieExpiry
@@ -96,6 +97,7 @@ func TestCodexStateAuthorizationFenceCannotRelabelPreviousBundle(t *testing.T) {
 	record, err := repo.BeginBusiness(ctx, key, "original", now, now.Add(time.Minute))
 	require.NoError(t, err)
 	record.EncryptedToken, record.EncryptedCookieBundle = "original-ticket", "original-cookies"
+	record.BundleBinding = service.CodexTurnStateBundleBinding{WireMode: "responses", EgressKind: "direct"}
 	record.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
 	saved, err := repo.SaveCAS(ctx, *record, record.Version)
 	require.NoError(t, err)

@@ -147,7 +147,7 @@ func TestCodexTurnStateStatusObservationUsesFrozenOwnerAcrossBindOrdering(t *tes
 			records := &codexStateBatchRecords{}
 			state := NewCodexTurnStateService(records, accounts, nil, nil)
 			state.modelPolicy = &codexStateBatchPolicy{models: []string{"observed-final-model"}}
-			attempt, err := state.Prepare(ctx, shadow, "observed-final-model")
+			attempt, err := prepareCodexStateTest(state, ctx, shadow, "observed-final-model")
 			require.NoError(t, err)
 			require.NotNil(t, attempt)
 			require.False(t, attempt.Enabled)
@@ -212,7 +212,7 @@ func TestCodexTurnStateStatusObservationFingerprintSwitchDoesNotDiscardSummary(t
 	records := &codexStateBatchRecords{}
 	state := NewCodexTurnStateService(records, accounts, nil, nil)
 	state.modelPolicy = &codexStateBatchPolicy{models: []string{"old-window-model", "new-window-model"}}
-	attempt, err := state.Prepare(ctx, owner, "old-window-model")
+	attempt, err := prepareCodexStateTest(state, ctx, owner, "old-window-model")
 	require.NoError(t, err)
 	require.NotNil(t, attempt)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -271,7 +271,7 @@ func TestCodexTurnStateStatusObservationNoStateDoesNotReplacePriorResponse(t *te
 				}
 				before, err := state.GetStatus(ctx, owner.ID)
 				require.NoError(t, err)
-				attempt, err := state.Prepare(ctx, owner, "final-model")
+				attempt, err := prepareCodexStateTest(state, ctx, owner, "final-model")
 				require.NoError(t, err)
 				require.NotNil(t, attempt)
 				c, _ := gin.CreateTestContext(httptest.NewRecorder())

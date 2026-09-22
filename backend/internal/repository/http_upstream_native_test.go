@@ -95,3 +95,31 @@ func TestNativeUpstreamPreservesRequestAndSelectsEachRedirect(t *testing.T) {
 		entry.client.CloseIdleConnections()
 	}
 }
+
+func TestNativeCollectorUsesFreshConnectionsWithoutCachingClients(t *testing.T) {
+	for _, ua := range []string{"codex-tui/0.155.1 (Windows NT 10.0; x86_64)", "codex-tui/0.155.1 (Mac OS 26.0; arm64)", "codex-tui/0.155.1 (Linux; x86_64)"} {
+		t.Run(ua, func(t *testing.T) {
+			peers := make(chan string, 2)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				peers <- r.RemoteAddr
+				_, _ = io.WriteString(w, "ok")
+			}))
+			defer server.Close()
+			s := NewHTTPUpstream(nil).(*httpUpstreamService)
+			ctx := codexnative.WithScope(context.Background(), codexnative.Scope{AccountID: 9, Purpose: "turn_state_collector"})
+			ctx = service.WithHTTPUpstreamProfile(ctx, service.HTTPUpstreamProfileCodexAuxiliary)
+			for range 2 {
+				request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+				require.NoError(t, err)
+				request.Header.Set("User-Agent", ua)
+				response, err := s.Do(request, "", 9, 2)
+				require.NoError(t, err)
+				_, err = io.Copy(io.Discard, response.Body)
+				require.NoError(t, err)
+				require.NoError(t, response.Body.Close())
+			}
+			require.NotEqual(t, <-peers, <-peers, "collection attempts must not share a connection")
+			require.Empty(t, s.clients, "one-shot collection transports must not grow the shared cache")
+		})
+	}
+}

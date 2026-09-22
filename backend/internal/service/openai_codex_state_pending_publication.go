@@ -15,13 +15,14 @@ const (
 // The original encrypted cache identity is used only to compare a fresh database
 // record before invalidation. No response token, body, or attempt is retained.
 type codexTurnStatePendingPublication struct {
-	key            CodexTurnStateKey
-	shape          CodexTurnStateShape
-	identity       codexTurnStateCacheIdentity
-	version        int64
-	policyRevision string
-	sentAt         time.Time
-	observedAt     time.Time
+	key                CodexTurnStateKey
+	shape              CodexTurnStateShape
+	identity           codexTurnStateCacheIdentity
+	version            int64
+	policyRevision     string
+	sentAt             time.Time
+	observedAt         time.Time
+	collectionEligible bool
 	// Scheduling fields are protected by the service mutex.
 	nextAttemptAt time.Time
 	inFlight      bool
@@ -42,7 +43,7 @@ func (s *CodexTurnStateService) retainCodexTurnStateAnomaly(a *CodexTurnStateAtt
 	var candidate *codexTurnStatePendingPublication
 	if a.pendingAnomaly != nil {
 		candidate = &codexTurnStatePendingPublication{key: a.key, shape: *a.pendingAnomaly, identity: a.baseCacheIdentity,
-			version: a.baseVersion, policyRevision: a.policyRevision, sentAt: a.businessSentAt, observedAt: a.safeObservation.ObservedAt}
+			version: a.baseVersion, policyRevision: a.policyRevision, sentAt: a.businessSentAt, observedAt: a.safeObservation.ObservedAt, collectionEligible: a.CollectionEligible}
 		a.pendingAnomaly = nil
 	}
 	key := a.key
@@ -97,6 +98,9 @@ func (s *CodexTurnStateService) processCodexTurnStateAnomaly(ctx context.Context
 	pending.inFlight = true
 	s.mu.Unlock()
 	err := s.repo.MarkBusinessSent(ctx, pending.key, pending.sentAt)
+	if err == nil && pending.collectionEligible {
+		err = s.repo.MarkEligibleCollectionSent(ctx, pending.key, pending.sentAt)
+	}
 	published := false
 	if err == nil {
 		published, err = s.publishCodexTurnStateAnomaly(ctx, pending.key, pending.shape, pending.version, false, pending.policyRevision, pending.observedAt, pending.identity)

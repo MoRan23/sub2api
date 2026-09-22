@@ -308,6 +308,7 @@ func ProvideOpenAIGatewayService(
 	codexTelemetry *CodexTelemetryService,
 	codexTurnState *CodexTurnStateService,
 	egressLocation *OpenAIEgressLocationService,
+	proxyRepo ProxyRepository,
 ) *OpenAIGatewayService {
 	svc := NewOpenAIGatewayService(
 		accountRepo, usageLogRepo, usageBillingRepo, userRepo, userSubRepo, userGroupRateRepo,
@@ -319,6 +320,7 @@ func ProvideOpenAIGatewayService(
 	svc.SetOAuthDailySessionRepository(dailySessionRepo)
 	svc.SetCodexTelemetryService(codexTelemetry)
 	svc.SetCodexTurnStateService(codexTurnState)
+	svc.SetCodexTurnStateProxyRepository(proxyRepo)
 	svc.egressLocationService = egressLocation
 	return svc
 }

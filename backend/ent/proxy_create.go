@@ -131,6 +131,20 @@ func (_c *ProxyCreate) SetNillableStatus(v *string) *ProxyCreate {
 	return _c
 }
 
+// SetRouteGeneration sets the "route_generation" field.
+func (_c *ProxyCreate) SetRouteGeneration(v int64) *ProxyCreate {
+	_c.mutation.SetRouteGeneration(v)
+	return _c
+}
+
+// SetNillableRouteGeneration sets the "route_generation" field if the given value is not nil.
+func (_c *ProxyCreate) SetNillableRouteGeneration(v *int64) *ProxyCreate {
+	if v != nil {
+		_c.SetRouteGeneration(*v)
+	}
+	return _c
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_c *ProxyCreate) SetExpiresAt(v time.Time) *ProxyCreate {
 	_c.mutation.SetExpiresAt(v)
@@ -262,6 +276,10 @@ func (_c *ProxyCreate) defaults() error {
 		v := proxy.DefaultStatus
 		_c.mutation.SetStatus(v)
 	}
+	if _, ok := _c.mutation.RouteGeneration(); !ok {
+		v := proxy.DefaultRouteGeneration
+		_c.mutation.SetRouteGeneration(v)
+	}
 	if _, ok := _c.mutation.FallbackMode(); !ok {
 		v := proxy.DefaultFallbackMode
 		_c.mutation.SetFallbackMode(v)
@@ -325,6 +343,9 @@ func (_c *ProxyCreate) check() error {
 		if err := proxy.StatusValidator(v); err != nil {
 			return &ValidationError{Name: "status", err: fmt.Errorf(`ent: validator failed for field "Proxy.status": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.RouteGeneration(); !ok {
+		return &ValidationError{Name: "route_generation", err: errors.New(`ent: missing required field "Proxy.route_generation"`)}
 	}
 	if _, ok := _c.mutation.FallbackMode(); !ok {
 		return &ValidationError{Name: "fallback_mode", err: errors.New(`ent: missing required field "Proxy.fallback_mode"`)}
@@ -403,6 +424,10 @@ func (_c *ProxyCreate) createSpec() (*Proxy, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(proxy.FieldStatus, field.TypeString, value)
 		_node.Status = value
+	}
+	if value, ok := _c.mutation.RouteGeneration(); ok {
+		_spec.SetField(proxy.FieldRouteGeneration, field.TypeInt64, value)
+		_node.RouteGeneration = value
 	}
 	if value, ok := _c.mutation.ExpiresAt(); ok {
 		_spec.SetField(proxy.FieldExpiresAt, field.TypeTime, value)
@@ -630,6 +655,24 @@ func (u *ProxyUpsert) SetStatus(v string) *ProxyUpsert {
 // UpdateStatus sets the "status" field to the value that was provided on create.
 func (u *ProxyUpsert) UpdateStatus() *ProxyUpsert {
 	u.SetExcluded(proxy.FieldStatus)
+	return u
+}
+
+// SetRouteGeneration sets the "route_generation" field.
+func (u *ProxyUpsert) SetRouteGeneration(v int64) *ProxyUpsert {
+	u.Set(proxy.FieldRouteGeneration, v)
+	return u
+}
+
+// UpdateRouteGeneration sets the "route_generation" field to the value that was provided on create.
+func (u *ProxyUpsert) UpdateRouteGeneration() *ProxyUpsert {
+	u.SetExcluded(proxy.FieldRouteGeneration)
+	return u
+}
+
+// AddRouteGeneration adds v to the "route_generation" field.
+func (u *ProxyUpsert) AddRouteGeneration(v int64) *ProxyUpsert {
+	u.Add(proxy.FieldRouteGeneration, v)
 	return u
 }
 
@@ -895,6 +938,27 @@ func (u *ProxyUpsertOne) SetStatus(v string) *ProxyUpsertOne {
 func (u *ProxyUpsertOne) UpdateStatus() *ProxyUpsertOne {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetRouteGeneration sets the "route_generation" field.
+func (u *ProxyUpsertOne) SetRouteGeneration(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetRouteGeneration(v)
+	})
+}
+
+// AddRouteGeneration adds v to the "route_generation" field.
+func (u *ProxyUpsertOne) AddRouteGeneration(v int64) *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddRouteGeneration(v)
+	})
+}
+
+// UpdateRouteGeneration sets the "route_generation" field to the value that was provided on create.
+func (u *ProxyUpsertOne) UpdateRouteGeneration() *ProxyUpsertOne {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateRouteGeneration()
 	})
 }
 
@@ -1337,6 +1401,27 @@ func (u *ProxyUpsertBulk) SetStatus(v string) *ProxyUpsertBulk {
 func (u *ProxyUpsertBulk) UpdateStatus() *ProxyUpsertBulk {
 	return u.Update(func(s *ProxyUpsert) {
 		s.UpdateStatus()
+	})
+}
+
+// SetRouteGeneration sets the "route_generation" field.
+func (u *ProxyUpsertBulk) SetRouteGeneration(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.SetRouteGeneration(v)
+	})
+}
+
+// AddRouteGeneration adds v to the "route_generation" field.
+func (u *ProxyUpsertBulk) AddRouteGeneration(v int64) *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.AddRouteGeneration(v)
+	})
+}
+
+// UpdateRouteGeneration sets the "route_generation" field to the value that was provided on create.
+func (u *ProxyUpsertBulk) UpdateRouteGeneration() *ProxyUpsertBulk {
+	return u.Update(func(s *ProxyUpsert) {
+		s.UpdateRouteGeneration()
 	})
 }
 

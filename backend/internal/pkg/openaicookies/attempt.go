@@ -12,6 +12,8 @@ type attemptKey struct{}
 type bundleKey struct{}
 type guardKey struct{}
 type fallbackKey struct{}
+type rejectedSendKey struct{}
+type rejectedSendPolicy struct{ cause error }
 type bundlePolicy struct {
 	bundle Bundle
 	bypass bool
@@ -28,6 +30,7 @@ func WithBundle(ctx context.Context, bundle Bundle) context.Context {
 	// Selecting a new bundle (especially an independent collector's empty base)
 	// must not inherit another operation's authorization guard or restoration.
 	ctx = context.WithValue(ctx, guardKey{}, struct{}{})
+	ctx = context.WithValue(ctx, rejectedSendKey{}, struct{}{})
 	return context.WithValue(ctx, fallbackKey{}, struct{}{})
 }
 
@@ -56,13 +59,41 @@ func EnabledForRequest(request *http.Request) bool {
 
 // WithSendGuard runs on a request clone just before an enabled physical send,
 // before cookie replacement. The service checks authoritative account state;
-// false invokes WithFallback, bypasses cookie handling, and leaves no response
-// candidate for publication.
+// false leaves no response candidate for publication. WithRejectedSendError
+// aborts the send; otherwise WithFallback restores the legacy request.
 func WithSendGuard(ctx context.Context, guard func(*http.Request) bool) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	return context.WithValue(ctx, guardKey{}, guard)
+}
+
+// WithRejectedSendError requires an enabled bundle to pass every send-time check
+// before calling the underlying transport. Apply it after WithBundle. A rejected
+// send never invokes WithFallback: callers must rebuild the complete baseline
+// request themselves. Passing nil clears the strict policy.
+//
+// Rejections match ErrBundleSendRejected and the supplied error with errors.Is;
+// their public error text is fixed and never includes request or cookie values.
+func WithRejectedSendError(ctx context.Context, cause error) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, rejectedSendKey{}, rejectedSendPolicy{cause: cause})
+}
+
+type bundleSendRejectedError struct{ cause error }
+
+func (e bundleSendRejectedError) Error() string        { return ErrBundleSendRejected.Error() }
+func (e bundleSendRejectedError) Is(target error) bool { return target == ErrBundleSendRejected }
+func (e bundleSendRejectedError) Unwrap() error        { return e.cause }
+
+func rejectedBundleSend(ctx context.Context) error {
+	policy, ok := ctx.Value(rejectedSendKey{}).(rejectedSendPolicy)
+	if !ok || policy.cause == nil {
+		return nil
+	}
+	return bundleSendRejectedError{cause: policy.cause}
 }
 
 // WithFallback restores only the feature-owned ticket changes when the guarded

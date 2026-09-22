@@ -60,7 +60,7 @@ func TestCodexTurnStateHistoryNeedsActualDeliveryAndCurrentCredentials(t *testin
 			s, _, account := newCodexStateTestService(t)
 			account.Extra[CodexTurnStateExtraKey].(map[string]any)["enabled"] = false
 			account.Extra[CodexTurnStateCredentialEpochExtraKey] = "private-epoch"
-			a, err := s.Prepare(context.Background(), account, "gpt-5")
+			a, err := prepareCodexStateTest(s, context.Background(), account, "gpt-5")
 			require.NoError(t, err)
 			h := http.Header{"Authorization": {"Bearer test-token"}}
 			if !tc.matching {
@@ -149,11 +149,11 @@ func TestCodexTurnStateHistoryOldEpochCannotEraseCurrentProof(t *testing.T) {
 	s.repo = repo
 	account.Extra[CodexTurnStateExtraKey].(map[string]any)["enabled"] = false
 	account.Extra[CodexTurnStateCredentialEpochExtraKey] = "old"
-	old, err := s.Prepare(context.Background(), account, "gpt-5")
+	old, err := prepareCodexStateTest(s, context.Background(), account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, old)
 	account.Extra[CodexTurnStateCredentialEpochExtraKey] = "current"
-	current, err := s.Prepare(context.Background(), account, "gpt-5")
+	current, err := prepareCodexStateTest(s, context.Background(), account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, current)
 	s.Observe(current, codexStateTestToken(11, s.now()))
@@ -175,7 +175,7 @@ func TestCodexTurnStateHistoryMixedCarriersPreferAnyTarget(t *testing.T) {
 			s.repo = repo
 			account.Extra[CodexTurnStateExtraKey].(map[string]any)["enabled"] = false
 			account.Extra[CodexTurnStateCredentialEpochExtraKey] = "epoch"
-			a, err := s.Prepare(context.Background(), account, "gpt-5")
+			a, err := prepareCodexStateTest(s, context.Background(), account, "gpt-5")
 			require.NoError(t, err)
 			markCodexStateTestBusinessSent(t, s, a)
 			first, second := 10, 11
@@ -200,7 +200,7 @@ func TestCodexTurnStateLateWSWriteBindingCompletesBusinessActivity(t *testing.T)
 	repo := &codexHistoryTestRepository{codexStateMemoryRepo: memory}
 	s.repo = repo
 	account.Extra[CodexTurnStateCredentialEpochExtraKey] = "epoch"
-	a, err := s.Prepare(context.Background(), account, "gpt-5")
+	a, err := prepareCodexStateTest(s, context.Background(), account, "gpt-5")
 	require.NoError(t, err)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	noteOpenAICodexStatePatch(c, a, nil, nil)
@@ -226,7 +226,7 @@ func TestCodexTurnStateWSWriteBindingDuringFinishActivatesWithBusinessLease(t *t
 	repo := &codexHistoryEndCallbackRepository{codexHistoryTestRepository: &codexHistoryTestRepository{codexStateMemoryRepo: memory}}
 	s.repo = repo
 	account.Extra[CodexTurnStateCredentialEpochExtraKey] = "epoch"
-	a, err := s.Prepare(context.Background(), account, "gpt-5")
+	a, err := prepareCodexStateTest(s, context.Background(), account, "gpt-5")
 	require.NoError(t, err)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	noteOpenAICodexStatePatch(c, a, nil, nil)

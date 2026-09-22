@@ -180,12 +180,13 @@ func TestCodexTurnStateCookieBundleBindingSeparatesModelOwnerAndAuthorization(t 
 	state, _, _ := newCodexStateTestService(t)
 	key := CodexTurnStateKey{OwnerAccountID: 1, Model: "gpt-5", Generation: "state-generation"}
 	bundle := codexCookieAtomicTestBundle(state.now(), "synthetic-route")
-	publication, err := state.encryptCodexCookiePublication(key, "authorization-one", bundle)
+	publication, err := state.encryptCodexCookiePublication(key, "authorization-one", bundle, codexStateTestBinding())
 	require.NoError(t, err)
 	for _, name := range []string{"windows", "macos", "linux", "other_owner", "other_model", "other_os_authorization", "corrupt_ciphertext", "expired_bundle", "bundle_outlives_ticket"} {
 		t.Run(name, func(t *testing.T) {
 			attempt := &CodexTurnStateAttempt{OwnerAccountID: key.OwnerAccountID, Model: key.Model, AuthorizationGeneration: "authorization-one", OSFamily: "windows",
-				Snapshot: CodexTurnStateSnapshot{Token: "synthetic-ticket", EncryptedCookieBundle: publication.EncryptedCookieBundle, ExpiresAt: bundle.ExpiresAt}}
+				WireMode: "lite", OutboundBinding: codexStateTestBinding(),
+				Snapshot: CodexTurnStateSnapshot{Token: "synthetic-ticket", EncryptedCookieBundle: publication.EncryptedCookieBundle, ExpiresAt: bundle.ExpiresAt, BundleBinding: codexStateTestBinding()}}
 			switch name {
 			case "windows", "macos", "linux":
 				attempt.OSFamily = name

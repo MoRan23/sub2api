@@ -37,11 +37,19 @@ func ProvideCodexTurnStateCollectorHTTPDo(accounts AccountRepository, proxies Pr
 		if err != nil || proxy == nil || !proxy.IsActive() || proxy.IsExpired(time.Now()) || strings.TrimSpace(proxy.Host) == "" || proxy.Port <= 0 {
 			return nil, ErrCodexTurnStateCollectorProxyUnavailable
 		}
+		// Freeze the exact route returned by the repository before any later
+		// validation or callbacks can observe a proxy edit or another selection.
+		proxyURL := proxy.URL()
+		binding := CodexTurnStateBundleBinding{WireMode: "lite", EgressKind: "proxy", ProxyID: proxy.ID, ProxyRouteGeneration: proxy.RouteGeneration}
+		if proxy.ID != input.ProxyID || !binding.Valid() {
+			return nil, ErrCodexTurnStateCollectorProxyUnavailable
+		}
 		ctx = WithHTTPUpstreamRedirectsDisabled(WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileCodexAuxiliary))
 		ctx = WithOpenAINativeHTTPScope(ctx, owner, "")
 		scope, _ := codexnative.ScopeFromContext(ctx)
 		scope.Purpose = "turn_state_collector"
 		request = request.Clone(codexnative.WithScope(ctx, scope))
+		request.Close = true
 		if request.Header == nil {
 			request.Header = make(http.Header)
 		}
@@ -53,7 +61,7 @@ func ProvideCodexTurnStateCollectorHTTPDo(accounts AccountRepository, proxies Pr
 			request.Header.Set("ChatGPT-Account-Id", accountID)
 		}
 		for key := range request.Header {
-			if strings.EqualFold(key, "x-codex-turn-state") {
+			if strings.EqualFold(key, "x-codex-turn-state") || strings.EqualFold(key, "Cookie") {
 				delete(request.Header, key)
 			}
 		}
@@ -70,18 +78,23 @@ func ProvideCodexTurnStateCollectorHTTPDo(accounts AccountRepository, proxies Pr
 		}
 		identity := resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, userAgent)
 		ensureCodexIdentityHeadersFromPlan(request.Header, identity)
+		request.Header.Set(responsesLiteHeaderKey, "true")
 		if input.validateModelPolicy == nil || !input.validateModelPolicy(ctx) {
 			return nil, errors.New("collector_model_policy_changed")
 		}
 		if input.onSend != nil {
 			input.onSend(time.Now())
 		}
-		return upstream.Do(request, proxy.URL(), owner.ID, 1)
+		if input.CaptureBundleBinding != nil {
+			input.CaptureBundleBinding(binding)
+		}
+		return upstream.Do(request, proxyURL, owner.ID, 1)
 	}
 }
 
-func ProvideCodexTurnStateService(repo CodexTurnStateRepository, accounts AccountRepository, encryptor SecretEncryptor, do CodexTurnStateCollectorHTTPDo, settings *SettingService) *CodexTurnStateService {
+func ProvideCodexTurnStateService(repo CodexTurnStateRepository, accounts AccountRepository, encryptor SecretEncryptor, do CodexTurnStateCollectorHTTPDo, settings *SettingService, proxies ProxyRepository) *CodexTurnStateService {
 	svc := NewCodexTurnStateService(repo, accounts, encryptor, NewCodexTurnStateHTTPCollector(do))
+	svc.SetProxyRepository(proxies)
 	if settings != nil {
 		svc.modelPolicy = settings
 		settings.AddCodexTurnStateModelsListener(func() {

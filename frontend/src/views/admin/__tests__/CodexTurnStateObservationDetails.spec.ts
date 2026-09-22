@@ -79,4 +79,14 @@ describe('Codex turn-state wire observation details', () => {
     expect(values['admin.accounts.codexTurnState.headerLength']).toBe(String(headerLength))
     expect(values['admin.accounts.codexTurnState.bodyLength']).toBe(String(bodyLength))
   })
+
+  it.each([0, 292, 332])('does not derive Cookie presence or a route from a %s character ticket', (length) => {
+    const wrapper = mount(CodexTurnStateObservationDetails, {
+      props: { state: { enabled: true, action: 'injected', model: 'gpt-final', outbound_length: length,
+        response_length: 292, response_shape: 'target' } },
+    })
+    expect(wrapper.get('[data-testid="codex-cookie-send-state"]').text()).toContain('cookieSendStates.unknown')
+    expect(wrapper.get('[data-testid="codex-route-actual-proxy"]').text()).toContain('diagnosticUnknown')
+    expect(wrapper.get('[data-testid="codex-route-bundle-proxy"]').text()).toContain('diagnosticUnknown')
+  })
 })

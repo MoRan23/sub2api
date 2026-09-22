@@ -172,6 +172,27 @@ func (_u *ProxyUpdate) SetNillableStatus(v *string) *ProxyUpdate {
 	return _u
 }
 
+// SetRouteGeneration sets the "route_generation" field.
+func (_u *ProxyUpdate) SetRouteGeneration(v int64) *ProxyUpdate {
+	_u.mutation.ResetRouteGeneration()
+	_u.mutation.SetRouteGeneration(v)
+	return _u
+}
+
+// SetNillableRouteGeneration sets the "route_generation" field if the given value is not nil.
+func (_u *ProxyUpdate) SetNillableRouteGeneration(v *int64) *ProxyUpdate {
+	if v != nil {
+		_u.SetRouteGeneration(*v)
+	}
+	return _u
+}
+
+// AddRouteGeneration adds value to the "route_generation" field.
+func (_u *ProxyUpdate) AddRouteGeneration(v int64) *ProxyUpdate {
+	_u.mutation.AddRouteGeneration(v)
+	return _u
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (_u *ProxyUpdate) SetExpiresAt(v time.Time) *ProxyUpdate {
 	_u.mutation.SetExpiresAt(v)
@@ -432,6 +453,12 @@ func (_u *ProxyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(proxy.FieldStatus, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.RouteGeneration(); ok {
+		_spec.SetField(proxy.FieldRouteGeneration, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedRouteGeneration(); ok {
+		_spec.AddField(proxy.FieldRouteGeneration, field.TypeInt64, value)
+	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(proxy.FieldExpiresAt, field.TypeTime, value)
 	}
@@ -681,6 +708,27 @@ func (_u *ProxyUpdateOne) SetNillableStatus(v *string) *ProxyUpdateOne {
 	if v != nil {
 		_u.SetStatus(*v)
 	}
+	return _u
+}
+
+// SetRouteGeneration sets the "route_generation" field.
+func (_u *ProxyUpdateOne) SetRouteGeneration(v int64) *ProxyUpdateOne {
+	_u.mutation.ResetRouteGeneration()
+	_u.mutation.SetRouteGeneration(v)
+	return _u
+}
+
+// SetNillableRouteGeneration sets the "route_generation" field if the given value is not nil.
+func (_u *ProxyUpdateOne) SetNillableRouteGeneration(v *int64) *ProxyUpdateOne {
+	if v != nil {
+		_u.SetRouteGeneration(*v)
+	}
+	return _u
+}
+
+// AddRouteGeneration adds value to the "route_generation" field.
+func (_u *ProxyUpdateOne) AddRouteGeneration(v int64) *ProxyUpdateOne {
+	_u.mutation.AddRouteGeneration(v)
 	return _u
 }
 
@@ -973,6 +1021,12 @@ func (_u *ProxyUpdateOne) sqlSave(ctx context.Context) (_node *Proxy, err error)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(proxy.FieldStatus, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.RouteGeneration(); ok {
+		_spec.SetField(proxy.FieldRouteGeneration, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedRouteGeneration(); ok {
+		_spec.AddField(proxy.FieldRouteGeneration, field.TypeInt64, value)
 	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(proxy.FieldExpiresAt, field.TypeTime, value)

@@ -57,6 +57,9 @@ func (t *nativeUpstreamRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 	release := func() {
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
+		if scope.Purpose == "turn_state_collector" {
+			entry.client.CloseIdleConnections()
+		}
 	}
 	response, err := entry.client.Transport.RoundTrip(req)
 	if err != nil || response == nil {
@@ -80,6 +83,27 @@ func (s *httpUpstreamService) acquireNativeClient(proxyURL string, accountID int
 	}
 	settings := s.applyProfilePoolSettings(s.resolvePoolSettings(s.getIsolationMode(), concurrency), profile)
 	poolKey := buildPoolKey(settings, upstreamProtocolModeNativeHTTP)
+	// A collection attempt must start with a fresh connection while retaining
+	// the selected platform TLS profile. Do not add per-attempt cache keys: they
+	// would retain unused clients after every background collection.
+	if scope.Purpose == "turn_state_collector" {
+		base, err := buildUpstreamTransport(settings, nil, upstreamProtocolModeOpenAIH1)
+		if err != nil {
+			return nil, err
+		}
+		base.DisableKeepAlives = true
+		if parsed != nil {
+			base.Proxy = http.ProxyURL(parsed)
+		}
+		transport, err := codexnative.NewTransport(selection.Platform, base)
+		if err != nil {
+			return nil, err
+		}
+		entry := &upstreamClientEntry{client: &http.Client{Transport: transport}, proxyKey: proxyKey, poolKey: poolKey, protocolMode: upstreamProtocolModeNativeHTTP}
+		atomic.StoreInt64(&entry.inFlight, 1)
+		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
+		return entry, nil
+	}
 	// Always include the account and proxy, even where ordinary HTTP is configured
 	// to share a proxy pool. No session/thread/turn identifiers enter this key.
 	cacheKey := fmt.Sprintf("native:%d:%d:%x:%s:%s:%s", accountID, scope.AccountID, sha256.Sum256([]byte(proxyKey)), scope.Purpose, selection.Digest, profile)

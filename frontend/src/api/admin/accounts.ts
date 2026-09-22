@@ -202,7 +202,9 @@ export async function getById(id: number): Promise<Account> {
 }
 
 export interface CodexCookieDiagnostic {
-  sent: boolean
+  sent?: boolean
+  /** Whether the HTTP attempt reached the send boundary, independent of Cookie presence. */
+  send_state?: 'sent' | 'not_sent'
   source?: 'none' | 'bundle' | 'persistent' | 'memory' | 'mixed'
   names?: string[]
   cookies?: { name: string; expires_at?: string }[]
@@ -221,6 +223,15 @@ export interface CodexResponseEvidence {
   cookie_diagnostic?: CodexCookieDiagnostic
 }
 
+/** Safe physical-route diagnostics only; route generations and proxy URLs are private. */
+export interface CodexTurnStateRouteEvidence {
+  wire_mode?: 'responses' | 'lite'
+  /** Zero explicitly means direct; an absent value means no route evidence. */
+  actual_proxy_id?: number | null
+  route_source?: 'account' | 'bundle' | 'collector'
+  bundle_proxy_id?: number | null
+}
+
 export interface CodexTurnStateModelStatus {
   os_family?: OpenAIOAuthOS
   model: string
@@ -236,8 +247,13 @@ export interface CodexTurnStateModelStatus {
   expires_at?: string
   /** Complete HTTP package expiry, bounded by the token and every cookie. */
   cookie_bundle_expires_at?: string
+  bundle_wire_mode?: 'responses' | 'lite'
+  bundle_egress_kind?: 'direct' | 'proxy'
+  bundle_proxy_id?: number | null
+  bundle_unavailable_reason?: string
   remaining_seconds: number
   last_business_at?: string
+  last_eligible_collection_at?: string
   last_collected_at?: string
   next_collect_at?: string
   collector_paused: boolean
@@ -249,7 +265,7 @@ export interface CodexTurnStateModelStatus {
   latest_response_evidence?: CodexResponseEvidence
 }
 
-export interface CodexTurnStateObservation extends CodexResponseEvidence {
+export interface CodexTurnStateObservation extends CodexResponseEvidence, CodexTurnStateRouteEvidence {
   os_family?: OpenAIOAuthOS
   model: string
   observed_at: string

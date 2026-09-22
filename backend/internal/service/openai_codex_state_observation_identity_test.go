@@ -27,7 +27,7 @@ func codexStateIdentityFixture(t *testing.T) (*CodexTurnStateService, *Account) 
 
 func prepareCodexIdentityObservation(t *testing.T, state *CodexTurnStateService, owner *Account, physicalToken string) *CodexTurnStateAttempt {
 	t.Helper()
-	attempt, err := state.Prepare(context.Background(), owner, "gpt-6-astra")
+	attempt, err := prepareCodexStateTest(state, context.Background(), owner, "gpt-6-astra")
 	require.NoError(t, err)
 	require.NotNil(t, attempt)
 	headers := http.Header{"Authorization": {"Bearer " + physicalToken}}

@@ -13,15 +13,16 @@ import (
 )
 
 var (
-	ErrInvalidScope     = errors.New("cookie_invalid_scope")
-	ErrStaleScope       = errors.New("cookie_stale_scope")
-	ErrStoreUnavailable = errors.New("cookie_store_unavailable")
-	ErrStoreCorrupt     = errors.New("cookie_store_corrupt")
-	ErrConflict         = errors.New("cookie_commit_conflict")
-	ErrAttemptClosed    = errors.New("cookie_attempt_closed")
-	ErrNoSnapshot       = errors.New("cookie_snapshot_unavailable")
-	ErrBundleExpired    = errors.New("cookie_bundle_expired")
-	ErrBundleInvalid    = errors.New("cookie_bundle_invalid")
+	ErrInvalidScope       = errors.New("cookie_invalid_scope")
+	ErrStaleScope         = errors.New("cookie_stale_scope")
+	ErrStoreUnavailable   = errors.New("cookie_store_unavailable")
+	ErrStoreCorrupt       = errors.New("cookie_store_corrupt")
+	ErrConflict           = errors.New("cookie_commit_conflict")
+	ErrAttemptClosed      = errors.New("cookie_attempt_closed")
+	ErrNoSnapshot         = errors.New("cookie_snapshot_unavailable")
+	ErrBundleExpired      = errors.New("cookie_bundle_expired")
+	ErrBundleInvalid      = errors.New("cookie_bundle_invalid")
+	ErrBundleSendRejected = errors.New("cookie_bundle_send_rejected")
 )
 
 // Scope follows the credential authorization, independently of model, proxy or purpose.
@@ -56,6 +57,7 @@ func WithScope(ctx context.Context, scope Scope) context.Context {
 		ctx = context.WithValue(ctx, bundleKey{}, struct{}{})
 		ctx = context.WithValue(ctx, guardKey{}, struct{}{})
 		ctx = context.WithValue(ctx, fallbackKey{}, struct{}{})
+		ctx = context.WithValue(ctx, rejectedSendKey{}, struct{}{})
 	}
 	return ctx
 }
@@ -162,7 +164,10 @@ type DiagnosticCookie struct {
 	ExpiresAt *time.Time
 }
 type Diagnostic struct {
-	Reason       string
+	Reason string
+	// SendState describes reaching the HTTP RoundTrip boundary, not network success.
+	// Empty means unknown; rejected preflight sends report "not_sent".
+	SendState    string
 	Sent         bool
 	Source       string
 	Names        []string
@@ -173,6 +178,7 @@ type Diagnostic struct {
 }
 
 type observerKey struct{}
+type sendObserverKey struct{}
 
 // WithObserver adds a safe request-local callback. Diagnostics never contain values.
 func WithObserver(ctx context.Context, observer func(Diagnostic)) context.Context {
@@ -180,6 +186,27 @@ func WithObserver(ctx context.Context, observer func(Diagnostic)) context.Contex
 		ctx = context.Background()
 	}
 	return context.WithValue(ctx, observerKey{}, observer)
+}
+
+// WithSendObserver observes the final request after bundle validation and cookie
+// application, immediately before RoundTrip. It is never called for a rejected
+// send or a websocket upgrade. The callback must not retain or mutate the request.
+func WithSendObserver(ctx context.Context, observer func(*http.Request)) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, sendObserverKey{}, observer)
+}
+
+// NeedsTransportObserver keeps disabled cookie flows observable without enabling
+// cookie replacement or response capture.
+func NeedsTransportObserver(request *http.Request) bool {
+	if request == nil || websocketUpgrade(request) {
+		return false
+	}
+	observer, _ := request.Context().Value(observerKey{}).(func(Diagnostic))
+	sendObserver, _ := request.Context().Value(sendObserverKey{}).(func(*http.Request))
+	return observer != nil || sendObserver != nil
 }
 
 func report(ctx context.Context, diagnostic Diagnostic) {

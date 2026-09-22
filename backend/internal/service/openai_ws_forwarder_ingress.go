@@ -85,6 +85,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if account == nil {
 		return errors.New("account is nil")
 	}
+	c.Set(codexHTTPBridgeRouteKey, false)
+	defer func() {
+		if selected := codexHTTPRouteSelectionFromContext(c, account); selected != nil && selected.attempt != nil && !selected.physical {
+			finishCodexTurnStateHTTPAttempt(s.codexTurnStateService, selected.attempt, false)
+		}
+	}()
 	firstAcceptedAt := time.Now()
 	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	SetOpenAIClientTransport(c, OpenAIClientTransportWS)
@@ -608,6 +614,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	refreshIngressRouteState(firstPayload)
 
 	if useHTTPBridge {
+		firstPayload.payloadRaw, firstPayload.timezoneState = s.prepareOpenAIHTTPBridgeBundleRoute(ctx, c, account, firstPayload.payloadRaw, true)
+		firstPayload.payloadBytes = len(firstPayload.payloadRaw)
 		var bridgeIdentityPlan *OpenAIOAuthIdentityPlan
 		bridgeConnectionCapture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
 		if !captured {
@@ -657,6 +665,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		bridgeAccountFailoverInputExists := false
 		bridgeTimezoneReplay := newOpenAIWSTimezoneReplayLedger()
 		for turn := 1; ; turn++ {
+			if turn > 1 {
+				currentBridgePayload.payloadRaw, currentBridgePayload.timezoneState = s.prepareOpenAIHTTPBridgeBundleRoute(ctx, c, account, currentBridgePayload.payloadRaw, true)
+				currentBridgePayload.payloadBytes = len(currentBridgePayload.payloadRaw)
+			}
 			bridgeFrameCapture := cloneOpenAIOAuthIdentityCapture(bridgeCaptureState.Capture)
 			if turn > 1 {
 				bridgeFrameCapture = captureOpenAIWSFrameIdentity(currentBridgePayload.rawForHash, &bridgeCaptureState)

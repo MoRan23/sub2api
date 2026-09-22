@@ -28,10 +28,12 @@ func TestCodexStatePostgresProxyChangeHonorsCollectionSchedule(t *testing.T) {
 		record, err := repo.BeginBusiness(ctx, modelKey, "seed", now, now.Add(time.Minute))
 		require.NoError(t, err)
 		require.NoError(t, repo.MarkBusinessSent(ctx, modelKey, now))
+		require.NoError(t, repo.MarkEligibleCollectionSent(ctx, modelKey, now))
 		require.NoError(t, repo.EndBusiness(ctx, modelKey, "seed"))
 		record.ModelPolicyRevision = revision
 		record.EncryptedToken, record.Shape = "synthetic-encrypted-target", service.CodexTurnStateShapeTarget
 		record.EncryptedCookieBundle = "synthetic-encrypted-cookie-bundle"
+		record.BundleBinding = service.CodexTurnStateBundleBinding{WireMode: "responses", EgressKind: "direct"}
 		record.IssuedAt, record.ExpiresAt = now.Add(-service.CodexTurnStateLifetime+20*time.Second), now.Add(20*time.Second)
 		record.TokenLength, record.CipherBlocks = 292, 10
 		record.CollectionStatus, record.CollectionReason = "idle", "collector_proxy_changed"
@@ -83,9 +85,11 @@ func TestCodexStatePostgresProxyChangeSurvivesIdleBusinessResume(t *testing.T) {
 	require.NoError(t, repo.EndBusiness(ctx, key, "seed"))
 	record.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
 	record.EncryptedToken, record.Shape = "synthetic-encrypted-target", service.CodexTurnStateShapeTarget
+	record.BundleBinding = service.CodexTurnStateBundleBinding{WireMode: "responses", EgressKind: "direct"}
 	record.IssuedAt, record.ExpiresAt = now.Add(-service.CodexTurnStateLifetime+20*time.Second), now.Add(20*time.Second)
 	record.TokenLength, record.CipherBlocks = 292, 10
 	record.LastBusinessAt = now.Add(-40 * time.Minute)
+	record.LastEligibleCollectionAt = record.LastBusinessAt
 	record.CollectionStatus, record.CollectionReason = "idle", "collector_proxy_changed"
 	ok, err := repo.SaveCAS(ctx, *record, record.Version)
 	require.NoError(t, err)

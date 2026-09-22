@@ -143,6 +143,14 @@ func proxyProbeIdentityFromService(proxyIn *service.Proxy) proxyProbeIdentity {
 	}
 }
 
+func (identity proxyProbeIdentity) sameRoute(other proxyProbeIdentity) bool {
+	return identity.protocol == other.protocol &&
+		identity.host == other.host &&
+		identity.port == other.port &&
+		identity.username == other.username &&
+		identity.password == other.password
+}
+
 func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.Client, proxyIn *service.Proxy) (*dbent.Proxy, error) {
 	currentIdentity, err := lockProxyProbeIdentity(ctx, client, proxyIn.ID)
 	if err != nil {
@@ -156,6 +164,12 @@ func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.C
 		SetStatus(proxyIn.Status).
 		SetFallbackMode(proxyIn.FallbackMode).
 		SetExpiryWarnDays(proxyIn.ExpiryWarnDays)
+	newIdentity := proxyProbeIdentityFromService(proxyIn)
+	if !currentIdentity.sameRoute(newIdentity) {
+		// The proxy row is locked before any bound API-key accounts. Increment
+		// from the stored value so a stale caller cannot reset the generation.
+		builder.AddRouteGeneration(1)
+	}
 	if proxyIn.Username != "" {
 		builder.SetUsername(proxyIn.Username)
 	} else {
@@ -184,7 +198,7 @@ func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.C
 	if err != nil {
 		return nil, err
 	}
-	if currentIdentity == proxyProbeIdentityFromService(proxyIn) {
+	if currentIdentity == newIdentity {
 		return updated, nil
 	}
 	accountIDs, err := invalidateProxyProbeSnapshots(ctx, client, proxyIn.ID)
@@ -634,18 +648,19 @@ func proxyEntityToService(m *dbent.Proxy) *service.Proxy {
 		return nil
 	}
 	out := &service.Proxy{
-		ID:             m.ID,
-		Name:           m.Name,
-		Protocol:       m.Protocol,
-		Host:           m.Host,
-		Port:           m.Port,
-		Status:         m.Status,
-		CreatedAt:      m.CreatedAt,
-		UpdatedAt:      m.UpdatedAt,
-		ExpiresAt:      m.ExpiresAt,
-		FallbackMode:   m.FallbackMode,
-		BackupProxyID:  m.BackupProxyID,
-		ExpiryWarnDays: m.ExpiryWarnDays,
+		ID:              m.ID,
+		Name:            m.Name,
+		Protocol:        m.Protocol,
+		Host:            m.Host,
+		Port:            m.Port,
+		Status:          m.Status,
+		RouteGeneration: m.RouteGeneration,
+		CreatedAt:       m.CreatedAt,
+		UpdatedAt:       m.UpdatedAt,
+		ExpiresAt:       m.ExpiresAt,
+		FallbackMode:    m.FallbackMode,
+		BackupProxyID:   m.BackupProxyID,
+		ExpiryWarnDays:  m.ExpiryWarnDays,
 	}
 	if m.Username != nil {
 		out.Username = *m.Username
@@ -661,6 +676,7 @@ func applyProxyEntityToService(dst *service.Proxy, src *dbent.Proxy) {
 		return
 	}
 	dst.ID = src.ID
+	dst.RouteGeneration = src.RouteGeneration
 	dst.CreatedAt = src.CreatedAt
 	dst.UpdatedAt = src.UpdatedAt
 }

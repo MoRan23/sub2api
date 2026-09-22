@@ -31,9 +31,16 @@ func TestCodexTurnStateCollectorAlignedRequestContract(t *testing.T) {
 		require.Equal(t, "application/json", request.Header.Get("Content-Type"))
 		require.Equal(t, "text/event-stream", request.Header.Get("Accept"))
 		require.Empty(t, request.Header.Get("x-codex-turn-state"))
+		require.Empty(t, request.Header.Get("Cookie"))
+		require.Equal(t, "true", request.Header.Get(responsesLiteHeaderKey))
+		require.Equal(t, "responses=experimental", request.Header.Get("OpenAI-Beta"))
+		require.True(t, request.Close)
+		deadline, ok := request.Context().Deadline()
+		require.True(t, ok)
+		require.LessOrEqual(t, time.Until(deadline), CodexTurnStateCollectTimeout)
 		body, err := io.ReadAll(request.Body)
 		require.NoError(t, err)
-		require.JSONEq(t, `{"model":"final-model","instructions":"Reply with OK.","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Reply with OK."}]}],"stream":true,"store":false,"parallel_tool_calls":true,"include":["reasoning.encrypted_content"]}`, string(body))
+		require.JSONEq(t, `{"model":"final-model","instructions":"Reply with exactly: pong. Do not call tools.","input":[{"type":"additional_tools","role":"developer","tools":[{"type":"namespace","name":"codex","description":"local tools","tools":[{"type":"function","name":"noop","description":"Do nothing.","strict":false,"parameters":{"type":"object","properties":{},"additionalProperties":false}}]}]},{"role":"user","content":[{"type":"input_text","text":"ping"}]}],"stream":true,"store":false,"parallel_tool_calls":false,"include":["reasoning.encrypted_content"],"reasoning":{"context":"all_turns"}}`, string(body))
 		require.EqualValues(t, len(body), request.ContentLength)
 		for _, header := range []string{"session_id", "x-client-request-id"} {
 			_, err = uuid.Parse(request.Header.Get(header))
@@ -41,7 +48,7 @@ func TestCodexTurnStateCollectorAlignedRequestContract(t *testing.T) {
 		}
 		sessions = append(sessions, request.Header.Get("session_id"))
 		requestIDs = append(requestIDs, request.Header.Get("x-client-request-id"))
-		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\"}\n\n"))}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"))}, nil
 	})
 	for range 2 {
 		_, err := collector.Collect(context.Background(), CodexTurnStateCollectRequest{Account: account, Model: "final-model", ProxyID: 99})
@@ -102,11 +109,11 @@ func TestCodexTurnStateCollectorSSELimitClassification(t *testing.T) {
 		{"absent_json_type_uses_sse_event", "event: response.failed\ndata: {\"error\":{\"code\":\"insufficient_quota\"}}", true, true},
 		{"empty_json_type_uses_sse_event", "event: response.incomplete\ndata: {\"type\":\"\",\"code\":\"rate_limit_exceeded\"}", true, true},
 		{"multiline_sse_data", "event: error\ndata: {\ndata: \"error\": {\"code\":\"insufficient_quota\"}\ndata: }", true, true},
-		{"event_name_does_not_leak_to_next_event", "event: error\ndata: {}\n\ndata: {\"type\":\"response.completed\"}", false, true},
+		{"event_name_does_not_leak_to_next_event", "event: error\ndata: {}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}", false, true},
 		{"event_only_frame_does_not_leak_to_next_frame", "event: error\n\ndata: {\"code\":\"rate_limit_exceeded\"}", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err, body := codexStateCollectSSETest(t, tc.frame+"\n\ndata: {\"type\":\"response.completed\"}\n\n", "")
+			result, err, body := codexStateCollectSSETest(t, tc.frame+"\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n", "")
 			if tc.limited {
 				require.ErrorIs(t, err, errCodexTurnStateCollectorRateLimited)
 			} else {
@@ -128,7 +135,7 @@ func TestCodexTurnStateCollectorSSELimitStopsBeforeLaterCompletion(t *testing.T)
 	token := codexStateTestToken(10, time.Now().Add(-time.Minute))
 	metadata := fmt.Sprintf("data: {\"type\":\"response.metadata\",\"headers\":{\"x-codex-turn-state\":%q}}\n\n", token)
 	failure := "event: response.failed\ndata: {\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"secret-body\"}}\n\n"
-	stream := metadata + failure + "data: {\"type\":\"response.completed\"}\n\n"
+	stream := metadata + failure + "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"
 	result, err, body := codexStateCollectSSETest(t, stream, token)
 	require.ErrorIs(t, err, errCodexTurnStateCollectorRateLimited)
 	require.NotContains(t, err.Error(), "secret-body")
@@ -171,7 +178,7 @@ func TestCodexTurnStateCollectorSSEAndHTTPRateLimitOutcomes(t *testing.T) {
 				clock := time.Now().UTC().Truncate(time.Second)
 				s.now = func() time.Time { return clock }
 				ctx := context.Background()
-				seed, err := s.Prepare(ctx, account, "gpt-5")
+				seed, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 				require.NoError(t, err)
 				markCodexStateTestBusinessSent(t, s, seed)
 				oldToken := codexStateTestToken(10, clock.Add(-CodexTurnStateLifetime+10*time.Second))
@@ -208,7 +215,7 @@ func TestCodexTurnStateCollectorSSEAndHTTPRateLimitOutcomes(t *testing.T) {
 					status, body := http.StatusTooManyRequests, "{\"error\":\"secret-body\"}"
 					if wire != "http_429" {
 						status = http.StatusOK
-						body = fmt.Sprintf("data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":%q,\"message\":\"secret-body\"}}}\n\ndata: {\"type\":\"response.completed\"}\n\n", strings.TrimPrefix(wire, "sse_"))
+						body = fmt.Sprintf("data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":%q,\"message\":\"secret-body\"}}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n", strings.TrimPrefix(wire, "sse_"))
 					}
 					return &http.Response{StatusCode: status, Header: header, Body: io.NopCloser(strings.NewReader(body))}, nil
 				})
@@ -238,7 +245,7 @@ func TestCodexTurnStateCollectorSSEAndHTTPRateLimitOutcomes(t *testing.T) {
 					return
 				}
 				require.EqualValues(t, 1, calls.Load())
-				natural, err := s.Prepare(ctx, account, seed.Model)
+				natural, err := prepareCodexStateTest(s, ctx, account, seed.Model)
 				require.NoError(t, err)
 				markCodexStateTestBusinessSent(t, s, natural)
 				s.Observe(natural, newToken)

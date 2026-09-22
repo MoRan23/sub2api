@@ -72,7 +72,7 @@ func TestCodexTurnStateModelPolicyExactFinalModelAdmission(t *testing.T) {
 			SetFingerprintObservationEnabled(false)
 			s, repo, account := newCodexStateTestService(t)
 			s.modelPolicy = newCodexStateTestModelPolicy("gpt-5")
-			attempt, err := s.Prepare(context.Background(), account, model)
+			attempt, err := prepareCodexStateTest(s, context.Background(), account, model)
 			require.NoError(t, err)
 			if model == "gpt-5" {
 				require.NotNil(t, attempt)
@@ -103,7 +103,7 @@ func TestCodexTurnStateModelPolicyUnavailableAndEmptyFailClosed(t *testing.T) {
 			} else if mode == "error" {
 				policy.fail(errors.New("settings unavailable"))
 			}
-			attempt, _ := s.Prepare(context.Background(), account, "gpt-5")
+			attempt, _ := prepareCodexStateTest(s, context.Background(), account, "gpt-5")
 			require.NotNil(t, attempt)
 			require.False(t, attempt.Enabled)
 			require.Empty(t, attempt.Snapshot.Token)
@@ -125,7 +125,7 @@ func TestCodexTurnStateExcludedModelStillObservesWithoutMaintenance(t *testing.T
 		calls.Add(1)
 		return CodexTurnStateCollectResult{}, nil
 	})
-	attempt, err := s.Prepare(context.Background(), account, "gpt-5")
+	attempt, err := prepareCodexStateTest(s, context.Background(), account, "gpt-5")
 	require.NoError(t, err)
 	require.NotNil(t, attempt)
 	require.False(t, attempt.Enabled)
@@ -150,7 +150,7 @@ func TestCodexTurnStateModelRemovalPreservesCacheWithoutExtendingLifetime(t *tes
 	policy := newCodexStateTestModelPolicy("gpt-5")
 	s.modelPolicy = policy
 	ctx := context.Background()
-	seed, err := s.Prepare(ctx, account, "gpt-5")
+	seed, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	token := codexStateTestToken(10, s.now())
 	s.Observe(seed, token)
@@ -158,7 +158,7 @@ func TestCodexTurnStateModelRemovalPreservesCacheWithoutExtendingLifetime(t *tes
 	before, err := repo.Get(ctx, seed.key)
 	require.NoError(t, err)
 	require.NotEmpty(t, before.EncryptedToken)
-	oldAttempt, err := s.Prepare(ctx, account, "gpt-5")
+	oldAttempt, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	policy.set()
 	s.CancelExcludedModels(ctx)
@@ -178,13 +178,13 @@ func TestCodexTurnStateModelRemovalPreservesCacheWithoutExtendingLifetime(t *tes
 	require.NoError(t, s.Finish(ctx, oldAttempt, false))
 	initialTime := s.now()
 	s.now = func() time.Time { return initialTime.Add(time.Minute) }
-	resumed, err := s.Prepare(ctx, account, "gpt-5")
+	resumed, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	require.Equal(t, token, resumed.Snapshot.Token)
 	require.Equal(t, before.ExpiresAt, resumed.Snapshot.ExpiresAt)
 	require.NoError(t, s.Finish(ctx, resumed, false))
 	s.now = func() time.Time { return initialTime.Add(CodexTurnStateLifetime) }
-	expired, err := s.Prepare(ctx, account, "gpt-5")
+	expired, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	require.Empty(t, expired.Snapshot.Token, "re-adding a model never renews the original signed timestamp")
 	require.NoError(t, s.Finish(ctx, expired, false))
@@ -195,7 +195,7 @@ func TestCodexTurnStateModelPolicyErrorDisablesExistingSnapshotAndStatus(t *test
 	policy := newCodexStateTestModelPolicy("gpt-5")
 	s.modelPolicy = policy
 	ctx := context.Background()
-	attempt, err := s.Prepare(ctx, account, "gpt-5")
+	attempt, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	policy.fail(errors.New("settings secret detail"))
 	require.False(t, s.ValidateAttempt(ctx, attempt))
@@ -215,7 +215,7 @@ func TestCodexTurnStateModelRemovalRejectsBusinessPublication(t *testing.T) {
 			policy := newCodexStateTestModelPolicy("gpt-5")
 			s.modelPolicy = policy
 			ctx := context.Background()
-			attempt, err := s.Prepare(ctx, account, "gpt-5")
+			attempt, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 			require.NoError(t, err)
 			s.Observe(attempt, codexStateTestToken(10, s.now()))
 			policy.set()
@@ -249,7 +249,7 @@ func TestCodexTurnStateModelPolicyRecheckedBeforeFinalSave(t *testing.T) {
 	s.modelPolicy = policy
 	s.encryptor = codexStatePolicyChangingEncryptor{policy: policy}
 	ctx := context.Background()
-	attempt, err := s.Prepare(ctx, account, "gpt-5")
+	attempt, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	s.Observe(attempt, codexStateTestToken(10, s.now()))
 	require.NoError(t, s.Finish(ctx, attempt, true))
@@ -266,7 +266,7 @@ func TestCodexTurnStateAuthoritativePolicyOverridesStaleLocalAdmission(t *testin
 			policy := newCodexStateTestModelPolicy("gpt-5")
 			s.modelPolicy = policy
 			ctx := context.Background()
-			attempt, err := s.Prepare(ctx, account, "gpt-5")
+			attempt, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 			require.NoError(t, err)
 			require.NotNil(t, attempt)
 			if mode == "excluded" {
@@ -298,7 +298,7 @@ func TestCodexTurnStateExcludedModelCancelsQueuedAndRejectsCollection(t *testing
 	policy := newCodexStateTestModelPolicy("gpt-5")
 	s.modelPolicy = policy
 	ctx := context.Background()
-	attempt, err := s.Prepare(ctx, account, "gpt-5")
+	attempt, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	require.NoError(t, s.Finish(ctx, attempt, false))
 	var calls atomic.Int64

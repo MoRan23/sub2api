@@ -168,6 +168,7 @@ func mustCreateProxy(t *testing.T, client *dbent.Client, p *service.Proxy) *serv
 	require.NoError(t, err, "create proxy")
 
 	p.ID = created.ID
+	p.RouteGeneration = created.RouteGeneration
 	p.CreatedAt = created.CreatedAt
 	p.UpdatedAt = created.UpdatedAt
 	return p

@@ -19,6 +19,10 @@ const codexStateWireObservationKey = "openai_codex_state_wire_observation"
 // of tokens. Its outbound length is populated from the actual physical send.
 type CodexTurnStateObservation struct {
 	CodexModelEvidence
+	WireMode                 string     `json:"wire_mode,omitempty"`
+	ActualProxyID            *int64     `json:"actual_proxy_id,omitempty"`
+	RouteSource              string     `json:"route_source,omitempty"`
+	BundleProxyID            *int64     `json:"bundle_proxy_id,omitempty"`
 	OSFamily                 string     `json:"os_family"`
 	Enabled                  bool       `json:"enabled"`
 	AccountEnabled           bool       `json:"account_enabled"`
@@ -55,16 +59,30 @@ type codexTurnStateObservationEnvelope struct {
 }
 
 type codexTurnStateWireObservation struct {
-	mu              sync.Mutex
-	value           CodexTurnStateObservation
-	ownerAccountID  int64
-	sequence        uint64
-	summarySequence uint64
-	finished        bool
-	observedAt      time.Time
-	attempt         *CodexTurnStateAttempt
-	sendStartedAt   time.Time
-	logged          bool
+	mu                sync.Mutex
+	value             CodexTurnStateObservation
+	ownerAccountID    int64
+	sequence          uint64
+	summarySequence   uint64
+	finished          bool
+	observedAt        time.Time
+	attempt           *CodexTurnStateAttempt
+	sendStartedAt     time.Time
+	deferHTTPActivity bool
+	httpSendReached   bool
+	logged            bool
+}
+
+// HTTP preparation is not evidence of an upstream send. Production HTTP
+// attempts wait for the cookie transport's physical boundary before binding
+// activity; manual observations and WS write callbacks retain their contract.
+func deferCodexTurnStateHTTPActivity(attempt *CodexTurnStateAttempt) {
+	if attempt == nil {
+		return
+	}
+	attempt.mu.Lock()
+	attempt.deferHTTPActivity = true
+	attempt.mu.Unlock()
 }
 
 // codexStateBodyPatch is private request-local evidence, never input from a
@@ -144,9 +162,14 @@ func noteOpenAICodexStatePatch(c *gin.Context, attempt *CodexTurnStateAttempt, b
 	}
 	attempt.mu.Lock()
 	credentialEpoch := attempt.credentialEpoch
+	wireMode := attempt.WireMode
+	deferHTTPActivity := attempt.deferHTTPActivity
 	attempt.mu.Unlock()
-	observation := &codexTurnStateWireObservation{ownerAccountID: attempt.OwnerAccountID, attempt: attempt, value: CodexTurnStateObservation{OSFamily: attempt.OSFamily, Enabled: attempt.Enabled, AccountEnabled: attempt.AccountEnabled, MaintenanceReason: reason, Action: "passthrough", Model: attempt.Model, RequestSource: "business", ObservationID: observationID, credentialEpoch: credentialEpoch}}
+	observation := &codexTurnStateWireObservation{ownerAccountID: attempt.OwnerAccountID, attempt: attempt, deferHTTPActivity: deferHTTPActivity, value: CodexTurnStateObservation{OSFamily: attempt.OSFamily, Enabled: attempt.Enabled, AccountEnabled: attempt.AccountEnabled, MaintenanceReason: reason, Action: "passthrough", Model: attempt.Model, RequestSource: "business", ObservationID: observationID, credentialEpoch: credentialEpoch}}
+	observation.value.WireMode = wireMode
 	if attempt.Snapshot.Token != "" {
+		id := attempt.Snapshot.BundleBinding.ProxyID
+		observation.value.BundleProxyID = &id
 		observation.value.Action = "injected"
 		observation.value.Source = attempt.Snapshot.Source
 		observation.value.SnapshotVersion = attempt.Snapshot.Version
@@ -177,8 +200,22 @@ func populateCodexTurnStateObservation(c *gin.Context, entry *FingerprintObserva
 	if state := gjson.GetBytes(body, "client_metadata.x-codex-turn-state"); state.Type == gjson.String {
 		bodyLength = len(state.String())
 	}
+	var binding CodexTurnStateBundleBinding
+	if observation.attempt != nil {
+		observation.attempt.mu.Lock()
+		binding = observation.attempt.OutboundBinding
+		observation.attempt.mu.Unlock()
+	}
 	observation.mu.Lock()
-	if observation.sendStartedAt.IsZero() {
+	if !frame && (!observation.deferHTTPActivity || observation.httpSendReached) && (binding.EgressKind == "proxy" || binding.EgressKind == "direct") {
+		id := binding.ProxyID
+		observation.value.ActualProxyID = &id
+		observation.value.RouteSource = "account"
+		if observation.value.Action == "injected" {
+			observation.value.RouteSource = "bundle"
+		}
+	}
+	if observation.sendStartedAt.IsZero() && (!observation.deferHTTPActivity || observation.httpSendReached) {
 		observation.sendStartedAt = time.Now()
 	}
 	headerLength := observation.value.OutboundHeaderLength
@@ -259,6 +296,10 @@ func bindCodexTurnStateSummarySequence(observation *codexTurnStateWireObservatio
 		return
 	}
 	observation.mu.Lock()
+	if observation.deferHTTPActivity && !observation.httpSendReached {
+		observation.mu.Unlock()
+		return
+	}
 	if observation.summarySequence == 0 {
 		observation.summarySequence = globalCodexTurnStateSummaryStore.nextSequence()
 	}
@@ -359,6 +400,17 @@ func logCodexTurnStateObservation(ownerAccountID int64, value CodexTurnStateObse
 		"outbound_length", value.OutboundLength, "maintenance_reason", value.MaintenanceReason,
 		"response_length", value.ResponseLength, "response_shape", value.ResponseShape,
 		"response_source", value.ResponseSource,
+		"wire_mode", value.WireMode, "route_source", value.RouteSource,
+	}
+	if value.ActualProxyID != nil {
+		fields = append(fields, "actual_proxy_id", *value.ActualProxyID)
+	}
+	if value.BundleProxyID != nil {
+		fields = append(fields, "bundle_proxy_id", *value.BundleProxyID)
+	}
+	if cookie := value.CookieDiagnostic; cookie != nil {
+		fields = append(fields, "cookie_send_state", cookie.SendState, "cookie_sent", cookie.Sent,
+			"cookie_source", cookie.Source, "cookie_names", cookie.Names, "cookie_count", cookie.SentCount)
 	}
 	if value.RequestSentAt != nil {
 		fields = append(fields, "request_sent_at", *value.RequestSentAt)

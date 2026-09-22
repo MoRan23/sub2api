@@ -260,11 +260,13 @@ func TestCodexTurnStateCollectorCookieRequiresAcceptedTargetCAS(t *testing.T) {
 					record.IssuedAt = issued
 					record.EncryptedToken, _ = state.encryptor.Encrypt(token)
 					record.ExpiresAt = issued.Add(CodexTurnStateLifetime)
+					bindCodexStateTestBundle(t, state, account, &record, CodexTurnStateBundleBinding{WireMode: "lite", EgressKind: "proxy", ProxyID: 11, ProxyRouteGeneration: 1})
 				}
 				repo.records[key] = record
 			}
-			state.collector = codexCookieCompletionTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
+			state.collector = codexCookieCompletionTestCollector(func(_ context.Context, input CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
 				result := CodexTurnStateCollectResult{StatusCode: 200, completed: true, Tokens: []string{token}, cookieAttempt: cookies,
+					BundleBinding: CodexTurnStateBundleBinding{WireMode: "lite", EgressKind: "proxy", ProxyID: input.ProxyID, ProxyRouteGeneration: 1},
 					ModelEvidence: CodexModelEvidence{UpstreamResponseModel: "gpt-5", ModelRelation: "exact", ModelEvidenceSource: "response.model", HeaderEvidenceScope: "response", SafetyBufferingFasterModel: "gpt-5-mini"}}
 				switch name {
 				case "extended":

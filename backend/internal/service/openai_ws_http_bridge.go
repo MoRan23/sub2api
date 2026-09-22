@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
@@ -423,6 +424,12 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	writeClientMessage func([]byte) error,
 	identityPlans ...*OpenAIOAuthIdentityPlan,
 ) (_ *OpenAIForwardResult, returnErr error) {
+	return s.withOpenAIHTTPBundleBaseline(c, account, func() (*OpenAIForwardResult, error) {
+		return s.proxyOpenAIWSHTTPBridgeTurnWithBundle(ctx, c, account, token, payload, payloadBytes, originalModel, imageBillingModel, imageSizeTier, imageInputSize, grokCacheIdentity, turn, writeClientMessage, identityPlans...)
+	})
+}
+
+func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurnWithBundle(ctx context.Context, c *gin.Context, account *Account, token string, payload []byte, payloadBytes int, originalModel, imageBillingModel, imageSizeTier, imageInputSize, grokCacheIdentity string, turn int, writeClientMessage func([]byte) error, identityPlans ...*OpenAIOAuthIdentityPlan) (_ *OpenAIForwardResult, returnErr error) {
 	if s == nil {
 		return nil, errors.New("service is nil")
 	}
@@ -443,6 +450,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		identityPlan = identityPlans[0]
 	}
 
+	payload, _ = s.prepareOpenAIHTTPBridgeBundleRoute(ctx, c, account, payload, false)
 	body, err := prepareOpenAIWSHTTPBridgeBody(account, payload)
 	if err != nil {
 		return nil, fmt.Errorf("prepare http bridge body: %w", err)
@@ -643,6 +651,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		upstreamReq = markOpenAIGuardianSourceHTTPRequest(upstreamReq, c, account)
 		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, withCodexTelemetryGatewayContext(telemetryTurnCtx, c, account, fmt.Sprintf("ws:%d", turn), identityPlan))
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+		if errors.Is(err, openaicookies.ErrBundleSendRejected) {
+			return nil, err
+		}
 		if err != nil {
 			if turn == 1 {
 				return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)

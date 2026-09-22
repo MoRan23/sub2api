@@ -53,10 +53,12 @@ func newCodexProxyChangeFixture(t *testing.T) codexProxyChangeFixture {
 	require.NoError(t, states.EndBusiness(ctx, key, "seed"))
 	state.EncryptedToken, state.Shape, state.Source = "synthetic-encrypted-state", "target", "collector"
 	state.EncryptedCookieBundle = "synthetic-encrypted-cookie-bundle"
+	state.BundleBinding = service.CodexTurnStateBundleBinding{WireMode: "responses", EgressKind: "direct"}
 	state.TokenLength, state.CipherBlocks = 292, 10
 	state.IssuedAt, state.ExpiresAt = now.Add(-2*time.Minute), now.Add(service.CodexTurnStateLifetime-2*time.Minute)
 	state.CookieBundleExpiresAt = &state.ExpiresAt
 	state.LastBusinessAt, state.LastCollectedAt = now.Add(-time.Minute), now.Add(-2*time.Minute)
+	state.LastEligibleCollectionAt = state.LastBusinessAt
 	state.HistoryProofObservedAt = now.Add(-3 * time.Minute)
 	state.DemandReason, state.RefreshReason, state.DemandAt = "expiring", "expiring", now.Add(-time.Minute)
 	state.NextCollectAt, state.LastError = now.Add(30*time.Second), "collection_failed"

@@ -40042,6 +40042,8 @@ type ProxyMutation struct {
 	username            *string
 	password            *string
 	status              *string
+	route_generation    *int64
+	addroute_generation *int64
 	expires_at          *time.Time
 	fallback_mode       *string
 	expiry_warn_days    *int
@@ -40574,6 +40576,62 @@ func (m *ProxyMutation) ResetStatus() {
 	m.status = nil
 }
 
+// SetRouteGeneration sets the "route_generation" field.
+func (m *ProxyMutation) SetRouteGeneration(i int64) {
+	m.route_generation = &i
+	m.addroute_generation = nil
+}
+
+// RouteGeneration returns the value of the "route_generation" field in the mutation.
+func (m *ProxyMutation) RouteGeneration() (r int64, exists bool) {
+	v := m.route_generation
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRouteGeneration returns the old "route_generation" field's value of the Proxy entity.
+// If the Proxy object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ProxyMutation) OldRouteGeneration(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRouteGeneration is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRouteGeneration requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRouteGeneration: %w", err)
+	}
+	return oldValue.RouteGeneration, nil
+}
+
+// AddRouteGeneration adds i to the "route_generation" field.
+func (m *ProxyMutation) AddRouteGeneration(i int64) {
+	if m.addroute_generation != nil {
+		*m.addroute_generation += i
+	} else {
+		m.addroute_generation = &i
+	}
+}
+
+// AddedRouteGeneration returns the value that was added to the "route_generation" field in this mutation.
+func (m *ProxyMutation) AddedRouteGeneration() (r int64, exists bool) {
+	v := m.addroute_generation
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetRouteGeneration resets all changes to the "route_generation" field.
+func (m *ProxyMutation) ResetRouteGeneration() {
+	m.route_generation = nil
+	m.addroute_generation = nil
+}
+
 // SetExpiresAt sets the "expires_at" field.
 func (m *ProxyMutation) SetExpiresAt(t time.Time) {
 	m.expires_at = &t
@@ -40879,7 +40937,7 @@ func (m *ProxyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ProxyMutation) Fields() []string {
-	fields := make([]string, 0, 14)
+	fields := make([]string, 0, 15)
 	if m.created_at != nil {
 		fields = append(fields, proxy.FieldCreatedAt)
 	}
@@ -40909,6 +40967,9 @@ func (m *ProxyMutation) Fields() []string {
 	}
 	if m.status != nil {
 		fields = append(fields, proxy.FieldStatus)
+	}
+	if m.route_generation != nil {
+		fields = append(fields, proxy.FieldRouteGeneration)
 	}
 	if m.expires_at != nil {
 		fields = append(fields, proxy.FieldExpiresAt)
@@ -40950,6 +41011,8 @@ func (m *ProxyMutation) Field(name string) (ent.Value, bool) {
 		return m.Password()
 	case proxy.FieldStatus:
 		return m.Status()
+	case proxy.FieldRouteGeneration:
+		return m.RouteGeneration()
 	case proxy.FieldExpiresAt:
 		return m.ExpiresAt()
 	case proxy.FieldFallbackMode:
@@ -40987,6 +41050,8 @@ func (m *ProxyMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldPassword(ctx)
 	case proxy.FieldStatus:
 		return m.OldStatus(ctx)
+	case proxy.FieldRouteGeneration:
+		return m.OldRouteGeneration(ctx)
 	case proxy.FieldExpiresAt:
 		return m.OldExpiresAt(ctx)
 	case proxy.FieldFallbackMode:
@@ -41074,6 +41139,13 @@ func (m *ProxyMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetStatus(v)
 		return nil
+	case proxy.FieldRouteGeneration:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRouteGeneration(v)
+		return nil
 	case proxy.FieldExpiresAt:
 		v, ok := value.(time.Time)
 		if !ok {
@@ -41113,6 +41185,9 @@ func (m *ProxyMutation) AddedFields() []string {
 	if m.addport != nil {
 		fields = append(fields, proxy.FieldPort)
 	}
+	if m.addroute_generation != nil {
+		fields = append(fields, proxy.FieldRouteGeneration)
+	}
 	if m.addexpiry_warn_days != nil {
 		fields = append(fields, proxy.FieldExpiryWarnDays)
 	}
@@ -41126,6 +41201,8 @@ func (m *ProxyMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
 	case proxy.FieldPort:
 		return m.AddedPort()
+	case proxy.FieldRouteGeneration:
+		return m.AddedRouteGeneration()
 	case proxy.FieldExpiryWarnDays:
 		return m.AddedExpiryWarnDays()
 	}
@@ -41143,6 +41220,13 @@ func (m *ProxyMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddPort(v)
+		return nil
+	case proxy.FieldRouteGeneration:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddRouteGeneration(v)
 		return nil
 	case proxy.FieldExpiryWarnDays:
 		v, ok := value.(int)
@@ -41240,6 +41324,9 @@ func (m *ProxyMutation) ResetField(name string) error {
 		return nil
 	case proxy.FieldStatus:
 		m.ResetStatus()
+		return nil
+	case proxy.FieldRouteGeneration:
+		m.ResetRouteGeneration()
 		return nil
 	case proxy.FieldExpiresAt:
 		m.ResetExpiresAt()

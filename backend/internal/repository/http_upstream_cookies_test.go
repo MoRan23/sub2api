@@ -94,3 +94,33 @@ func TestHTTPUpstreamCookieBypassPreservesOriginalClientPolicy(t *testing.T) {
 	require.Same(t, client, service.OpenAICookieClient(client, request))
 	require.Same(t, jar, client.Jar)
 }
+
+func TestHTTPUpstreamCookieBypassObservesSendWithoutChangingPolicy(t *testing.T) {
+	for _, manager := range []*openaicookies.Manager{nil, openaicookies.NewManager()} {
+		service := NewHTTPUpstreamWithCookies(nil, manager).(*httpUpstreamService)
+		jar, err := cookiejar.New(nil)
+		require.NoError(t, err)
+		var diagnostic openaicookies.Diagnostic
+		var observed *http.Request
+		ctx := openaicookies.Bypass(context.Background())
+		ctx = openaicookies.WithObserver(ctx, func(value openaicookies.Diagnostic) { diagnostic = value })
+		ctx = openaicookies.WithSendObserver(ctx, func(value *http.Request) { observed = value })
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://chatgpt.com/", nil)
+		require.NoError(t, err)
+		request.Header.Set("Cookie", "__oailb=client; private=unobserved")
+		original := request.Header.Clone()
+		client := &http.Client{Jar: jar, Transport: upstreamCookieRoundTripFunc(func(outbound *http.Request) (*http.Response, error) {
+			require.Same(t, outbound, observed)
+			require.Equal(t, original, outbound.Header)
+			require.Equal(t, "sent", diagnostic.SendState)
+			require.Equal(t, []string{"__oailb"}, diagnostic.Names)
+			return &http.Response{StatusCode: http.StatusOK}, nil
+		})}
+		wrapped := service.OpenAICookieClient(client, request)
+		require.NotSame(t, client, wrapped)
+		require.Same(t, jar, wrapped.Jar)
+		_, err = wrapped.Transport.RoundTrip(request)
+		require.NoError(t, err)
+		require.Equal(t, original, request.Header)
+	}
+}

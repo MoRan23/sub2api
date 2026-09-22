@@ -20,6 +20,7 @@ const codexTurnStateCollectorWorkers = 16
 type CodexTurnStateService struct {
 	repo                CodexTurnStateRepository
 	accounts            AccountRepository
+	proxies             ProxyRepository
 	encryptor           SecretEncryptor
 	collector           CodexTurnStateCollector
 	modelPolicy         CodexTurnStateModelPolicy
@@ -41,6 +42,12 @@ type CodexTurnStateService struct {
 func NewCodexTurnStateService(repo CodexTurnStateRepository, accounts AccountRepository, encryptor SecretEncryptor, collector CodexTurnStateCollector) *CodexTurnStateService {
 	return &CodexTurnStateService{repo: repo, accounts: accounts, encryptor: encryptor, collector: collector, now: time.Now,
 		queue: make(chan CodexTurnStateKey, 128), queued: make(map[CodexTurnStateKey]bool), running: make(map[CodexTurnStateKey]context.CancelFunc), runningPolicy: make(map[CodexTurnStateKey]string), runningAttempt: make(map[CodexTurnStateKey]string), business: make(map[string]*CodexTurnStateAttempt)}
+}
+
+func (s *CodexTurnStateService) SetProxyRepository(repo ProxyRepository) {
+	if s != nil {
+		s.proxies = repo
+	}
 }
 
 func (s *CodexTurnStateService) Start(ctx context.Context) {
@@ -131,6 +138,16 @@ func (s *CodexTurnStateService) Enabled(ctx context.Context, account *Account) (
 }
 
 func (s *CodexTurnStateService) Prepare(ctx context.Context, account *Account, finalModel string) (*CodexTurnStateAttempt, error) {
+	// Legacy callers do not prove Lite capability. They may observe ordinary
+	// Responses traffic, but cannot activate the Lite collector.
+	binding := CodexTurnStateBundleBinding{WireMode: "responses", EgressKind: "direct"}
+	if account != nil && account.ProxyID != nil && *account.ProxyID > 0 {
+		binding.EgressKind, binding.ProxyID = "proxy", *account.ProxyID
+	}
+	return s.PrepareForHTTP(ctx, account, finalModel, binding)
+}
+
+func (s *CodexTurnStateService) PrepareForHTTP(ctx context.Context, account *Account, finalModel string, binding CodexTurnStateBundleBinding) (*CodexTurnStateAttempt, error) {
 	if s == nil || account == nil || strings.TrimSpace(finalModel) == "" {
 		return nil, nil
 	}
@@ -144,6 +161,7 @@ func (s *CodexTurnStateService) Prepare(ctx context.Context, account *Account, f
 	accountEnabled := CodexTurnStateConfigForAccount(owner).Enabled
 	passive := func(reason string) *CodexTurnStateAttempt {
 		return &CodexTurnStateAttempt{OwnerAccountID: owner.ID, AuthorizationGeneration: owner.OpenAIOAuthAuthorizationGeneration, OSFamily: codexTurnStateOS(owner), Model: strings.TrimSpace(finalModel), AccountEnabled: accountEnabled,
+			WireMode: binding.WireMode, CollectionEligible: binding.Valid() && binding.WireMode == "lite", OutboundBinding: binding,
 			MaintenanceReason: reason, accountType: CodexTurnStateAccountTypeForAccount(owner), credentialEpoch: CodexTurnStateCredentialEpochForAccount(owner), historyService: s, preparedAt: s.now()}
 	}
 	// Preparing a physical request must not grant maintenance from a stale
@@ -193,7 +211,15 @@ func (s *CodexTurnStateService) Prepare(ctx context.Context, account *Account, f
 	a.baseVersion = record.Version
 	a.baseCacheIdentity = record.cacheIdentity()
 	a.Snapshot.Version = record.Version
-	if a.accountType != "" && record.EncryptedToken != "" && record.EncryptedCookieBundle != "" && record.ExpiresAt.After(now) &&
+	if record.EncryptedToken != "" && (!record.BundleBinding.Valid() || record.BundleBinding.WireMode != binding.WireMode) {
+		a.MaintenanceReason = "bundle_protocol_mismatch"
+		if !record.BundleBinding.Valid() {
+			a.MaintenanceReason = "bundle_binding_invalid"
+		}
+		// A bypassed cache must not be revoked by an unrelated protocol's reply.
+		a.baseVersion, a.baseCacheIdentity = -1, codexTurnStateCacheIdentity{}
+	}
+	if a.accountType != "" && binding.Valid() && record.BundleBinding.Valid() && record.BundleBinding.WireMode == binding.WireMode && record.EncryptedToken != "" && record.EncryptedCookieBundle != "" && record.ExpiresAt.After(now) &&
 		(record.CookieBundleExpiresAt == nil || record.CookieBundleExpiresAt.After(now)) &&
 		record.AuthorizationGeneration == a.AuthorizationGeneration {
 		token, decryptErr := s.encryptor.Decrypt(record.EncryptedToken)
@@ -205,9 +231,63 @@ func (s *CodexTurnStateService) Prepare(ctx context.Context, account *Account, f
 					expiresAt = record.ExpiresAt
 				}
 				a.Snapshot = CodexTurnStateSnapshot{Token: token, Version: record.Version, Source: record.Source, TokenLength: shape.TokenLength, CipherBlocks: shape.CipherBlocks, ExpiresAt: expiresAt,
-					EncryptedCookieBundle: record.EncryptedCookieBundle, AuthorizationGeneration: record.AuthorizationGeneration, CookieBundleExpiresAt: record.CookieBundleExpiresAt}
+					BundleInvalidationVersion: record.BundleInvalidationVersion,
+					EncryptedCookieBundle:     record.EncryptedCookieBundle, AuthorizationGeneration: record.AuthorizationGeneration, CookieBundleExpiresAt: record.CookieBundleExpiresAt, BundleBinding: record.BundleBinding}
+				a.OutboundBinding = record.BundleBinding
+				if _, err := s.codexCookieBundleForSnapshot(a); err != nil {
+					a.DiscardBundle("bundle_binding_invalid", binding)
+				}
 			}
 		}
+	}
+	s.mu.Lock()
+	s.business[a.id] = a
+	s.mu.Unlock()
+	return a, nil
+}
+
+// DiscardBundle abandons an unusable snapshot before any physical send. The
+// gateway must rebuild all route-dependent request projections from its input.
+func (a *CodexTurnStateAttempt) DiscardBundle(reason string, baseline CodexTurnStateBundleBinding) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Snapshot = CodexTurnStateSnapshot{}
+	a.OutboundBinding = baseline
+	a.CollectionEligible = baseline.Valid() && baseline.WireMode == "lite"
+	a.MaintenanceReason = reason
+	a.baseVersion, a.baseCacheIdentity = -1, codexTurnStateCacheIdentity{}
+}
+
+// RetryForHTTP starts a new physical lifecycle without selecting a newer bundle.
+// The caller separately retains the frozen proxy URL and request identity plan.
+func (s *CodexTurnStateService) RetryForHTTP(ctx context.Context, previous *CodexTurnStateAttempt) (*CodexTurnStateAttempt, error) {
+	if s == nil || previous == nil {
+		return nil, nil
+	}
+	previous.mu.Lock()
+	a := &CodexTurnStateAttempt{
+		OwnerAccountID: previous.OwnerAccountID, AuthorizationGeneration: previous.AuthorizationGeneration,
+		OSFamily: previous.OSFamily, Model: previous.Model, Generation: previous.Generation,
+		WireMode: previous.WireMode, CollectionEligible: previous.CollectionEligible, OutboundBinding: previous.OutboundBinding,
+		Enabled: previous.Enabled, AccountEnabled: previous.AccountEnabled, MaintenanceReason: previous.MaintenanceReason,
+		policyRevision: previous.policyRevision, Snapshot: previous.Snapshot, key: previous.key,
+		accountType: previous.accountType, baseVersion: previous.baseVersion, baseCacheIdentity: previous.baseCacheIdentity,
+		credentialEpoch: previous.credentialEpoch, historyService: s, preparedAt: s.now(),
+	}
+	previous.mu.Unlock()
+	if !a.Enabled {
+		return a, nil
+	}
+	a.id = uuid.NewString()
+	record, err := s.repo.BeginBusiness(ctx, a.key, a.id, s.now(), s.now().Add(2*time.Minute))
+	if err != nil {
+		return nil, err
+	}
+	if record == nil {
+		return nil, errors.New("turn_state_generation_changed")
 	}
 	s.mu.Lock()
 	s.business[a.id] = a
@@ -236,7 +316,7 @@ func (s *CodexTurnStateService) ValidateAttempt(ctx context.Context, a *CodexTur
 	if err != nil || !codexTurnStateEligible(owner) || !CodexTurnStateConfigForAccount(owner).Enabled || CodexTurnStateGenerationForAccount(owner) != a.Generation {
 		return false
 	}
-	if a.Snapshot.Token != "" && (CodexTurnStateAccountTypeForAccount(owner) != a.accountType || !a.Snapshot.ExpiresAt.After(s.now()) ||
+	if a.Snapshot.Token != "" && (!a.Snapshot.BundleBinding.Valid() || a.Snapshot.BundleBinding.WireMode != a.WireMode || a.Snapshot.BundleBinding != a.OutboundBinding || CodexTurnStateAccountTypeForAccount(owner) != a.accountType || !a.Snapshot.ExpiresAt.After(s.now()) ||
 		(a.Snapshot.CookieBundleExpiresAt != nil && !a.Snapshot.CookieBundleExpiresAt.After(s.now())) ||
 		(a.Snapshot.AuthorizationGeneration != "" && a.Snapshot.AuthorizationGeneration != owner.OpenAIOAuthAuthorizationGeneration)) {
 		return false
@@ -244,7 +324,7 @@ func (s *CodexTurnStateService) ValidateAttempt(ctx context.Context, a *CodexTur
 	// Also check runtime availability immediately before injection. This prevents
 	// sending an earlier snapshot after storage becomes unavailable.
 	record, err := s.repo.Get(ctx, a.key)
-	return err == nil && record != nil && (a.Snapshot.Token == "" || record.Version == a.Snapshot.Version || a.baseCacheIdentity.matches(record))
+	return err == nil && record != nil && (a.Snapshot.Token == "" || record.BundleInvalidationVersion == a.Snapshot.BundleInvalidationVersion)
 }
 
 // ValidateCredentialHeaders binds learning and injection to the credentials
@@ -386,6 +466,9 @@ func (s *CodexTurnStateService) Finish(ctx context.Context, a *CodexTurnStateAtt
 		publishErr = s.processCodexTurnStateAnomaly(cleanupCtx, pending, true)
 	} else if !businessSentAt.IsZero() {
 		publishErr = s.repo.MarkBusinessSent(cleanupCtx, a.key, businessSentAt)
+		if publishErr == nil && a.CollectionEligible {
+			publishErr = s.repo.MarkEligibleCollectionSent(cleanupCtx, a.key, businessSentAt)
+		}
 	}
 	if pending == nil && delivered && publishErr == nil {
 		demandAt := time.Time{}
@@ -450,10 +533,10 @@ func (s *CodexTurnStateService) publish(ctx context.Context, key CodexTurnStateK
 	if len(publications) > 0 {
 		bundle = publications[0]
 	} else {
-		bundle, err = s.emptyCodexCookiePublication(key, owner.OpenAIOAuthAuthorizationGeneration, bestShape.ExpiresAt)
-		if err != nil {
-			return false, err
-		}
+		return false, errCodexCookieAdmission
+	}
+	if !bundle.BundleBinding.Valid() || bundle.EncryptedCookieBundle == "" {
+		return false, errCodexCookieAdmission
 	}
 	for range 3 {
 		if !s.authoritativeModelPolicyMatches(ctx, key.Model, policyRevision) {
@@ -480,7 +563,7 @@ func (s *CodexTurnStateService) publish(ctx context.Context, key CodexTurnStateK
 				if decryptErr != nil {
 					return false, decryptErr
 				}
-				if cachedToken != best {
+				if cachedToken != best || record.BundleBinding != bundle.BundleBinding {
 					return false, nil
 				}
 				if record.ExpiresAt.After(s.now()) && cacheUnchanged {
@@ -662,6 +745,9 @@ func (s *CodexTurnStateService) scan(ctx context.Context) {
 				now := s.now()
 				if !a.businessSentAt.IsZero() {
 					_ = s.repo.MarkBusinessSent(ctx, a.key, a.businessSentAt)
+					if a.CollectionEligible {
+						_ = s.repo.MarkEligibleCollectionSent(ctx, a.key, a.businessSentAt)
+					}
 				}
 				_, _ = s.repo.BeginBusiness(ctx, a.key, a.id, now, now.Add(2*time.Minute))
 			} else {
@@ -706,7 +792,7 @@ func (s *CodexTurnStateService) pumpDue(ctx context.Context) {
 // traffic never extend this lease. Successful results schedule a fresh attempt
 // thirty seconds after completion while business remains active.
 func (s *CodexTurnStateService) ensureCodexTurnStateDemand(ctx context.Context, record *CodexTurnStateRecord) bool {
-	if record == nil || record.LastBusinessAt.Before(s.now().Add(-CodexTurnStateActiveWindow)) {
+	if record == nil || record.LastEligibleCollectionAt.IsZero() || record.LastEligibleCollectionAt.Before(s.now().Add(-CodexTurnStateActiveWindow)) {
 		return false
 	}
 	refreshExpired := record.DemandReason == "refresh" && (codexTurnStateCookieExpired(record, s.now()) || !record.ExpiresAt.After(s.now().Add(CodexTurnStateRefreshAhead)))
@@ -800,7 +886,7 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 		return
 	}
 	now := s.now()
-	if record.LastBusinessAt.Before(now.Add(-CodexTurnStateActiveWindow)) {
+	if record.LastEligibleCollectionAt.IsZero() || record.LastEligibleCollectionAt.Before(now.Add(-CodexTurnStateActiveWindow)) {
 		if record.DemandReason != "" && s.authoritativeModelPolicyMatches(ctx, key.Model, policyRevision) {
 			clearIdleCodexTurnStateDemand(record)
 			record.ModelPolicyRevision = policyRevision
@@ -965,6 +1051,7 @@ func (s *CodexTurnStateService) GetStatusForOS(ctx context.Context, accountID in
 		retryAfter = cooldowns[owner.ID]
 	}
 	result := projectCodexTurnStateStatus(accountID, owner, records, models, policyErr, s.statusNow(), retryAfter)
+	s.validateCodexTurnStateStatusBundles(ctx, result, owner, records, nil)
 	observationEnabled, observations := globalCodexTurnStateSummaryStore.snapshotForOwners([]*Account{owner})
 	attachCodexTurnStateObservations(result, observationEnabled, observations[owner.ID])
 	return result, nil

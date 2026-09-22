@@ -63,7 +63,7 @@ describe('FingerprintObservationRequestDetails', () => {
     const observation = within(screen.getByTestId('codex-turn-state-observation'))
     expect(observation.getByText(description)).toBeTruthy()
     expect(observation.getByText(String(blocks))).toBeTruthy()
-    expect(observation.getByText('Account target shape match')).toBeTruthy()
+    expect(observation.getByText(enAccounts.accounts.codexTurnState.responseEligibility)).toBeTruthy()
     expect(observation.getByText(`Unclassified shape (${length})`)).toBeTruthy()
     expect(observation.getByText('Subscription is unknown; cache target eligibility cannot be determined')).toBeTruthy()
     expect(observation.getByText('Envelope shape describes the actual response; it does not identify the account subscription or model quality.')).toBeTruthy()

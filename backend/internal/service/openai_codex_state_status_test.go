@@ -103,7 +103,7 @@ func TestCodexTurnStateBatchStatusDeduplicatesOwnersAndSharesSingleProjection(t 
 	}}
 	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
 	records := &codexStateBatchRecords{records: []CodexTurnStateRecord{
-		{OSFamily: "windows", OwnerAccountID: 1, Generation: CodexTurnStateGenerationForAccount(ownerOne), Model: "gpt-5.6-sol", EncryptedToken: "private-encrypted-token", EncryptedCookieBundle: "private-encrypted-cookie-bundle", AuthorizationGeneration: "test-authorization", IssuedAt: now, ExpiresAt: now.Add(CodexTurnStateLifetime), TokenLength: 292, CipherBlocks: 10, Shape: "target", Source: "business"},
+		{OSFamily: "windows", OwnerAccountID: 1, Generation: CodexTurnStateGenerationForAccount(ownerOne), Model: "gpt-5.6-sol", EncryptedToken: "private-encrypted-token", EncryptedCookieBundle: "private-encrypted-cookie-bundle", BundleBinding: codexStateTestBinding(), AuthorizationGeneration: "test-authorization", IssuedAt: now, ExpiresAt: now.Add(CodexTurnStateLifetime), TokenLength: 292, CipherBlocks: 10, Shape: "target", Source: "business"},
 		{OSFamily: "linux", OwnerAccountID: 1, Generation: CodexTurnStateGenerationForAccount(ownerOne), Model: "gpt-6-astra", EncryptedToken: "private-encrypted-expired", ExpiresAt: now.Add(-time.Minute)},
 		{OSFamily: "windows", OwnerAccountID: 1, Generation: "obsolete-generation", Model: "obsolete-model", EncryptedToken: "old-private-token"},
 		{OSFamily: "windows", OwnerAccountID: 2, Generation: CodexTurnStateGenerationForAccount(ownerTwo), Model: "gpt-5.6-terra", CollectorPaused: true, LastError: "collector_auth_rejected"},

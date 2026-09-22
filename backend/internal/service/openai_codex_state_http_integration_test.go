@@ -56,6 +56,7 @@ func codexStateHTTPIntegrationResponse(token, carrier string, failed bool) *http
 		stream.WriteString("data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_turn_state_test\",\"model\":\"gpt-5.4\",\"status\":\"in_progress\"}}\n\n")
 		stream.WriteString("data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"ok\"}\n\n")
 		stream.Write(completed)
+		stream.WriteByte('\n') // Terminate the final SSE frame for strict collectors.
 	}
 	response.Body = io.NopCloser(strings.NewReader(stream.String()))
 	return response

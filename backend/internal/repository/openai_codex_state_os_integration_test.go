@@ -31,6 +31,7 @@ func TestCodexStateOSPostgresCASAndLeasesShareOwnerAndModel(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, active)
 	w.EncryptedToken, w.ModelPolicyRevision = "windows-ciphertext", codexStateModelPolicyRevisionForTest(t)
+	w.BundleBinding = service.CodexTurnStateBundleBinding{WireMode: "responses", EgressKind: "direct"}
 	w.EncryptedCookieBundle = "windows-cookie-ciphertext"
 	updated, err := repo.SaveCAS(ctx, *w, w.Version)
 	require.NoError(t, err)

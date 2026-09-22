@@ -124,6 +124,48 @@ describe('Codex turn-state status modal', () => {
     wrapper.unmount()
   })
 
+  it('keeps the package issuing route, next collector route and actual business route separate', async () => {
+    getProxies.mockResolvedValue([{ id: 7, name: 'Original issuer' }, { id: 9, name: 'Next collector' }, { id: 11, name: 'Business fallback' }])
+    getCodexTurnState.mockResolvedValue({ ...status, collector_proxy_ids: [9], models: [
+      { ...status.models[0], bundle_wire_mode: 'lite', bundle_egress_kind: 'proxy', bundle_proxy_id: 7,
+        collector_proxy_id: 9, last_eligible_collection_at: '2026-09-19T11:25:00Z' },
+    ], observations: [
+      { model: 'gpt-test', observed_at: '2026-09-19T11:29:00Z', request_source: 'business', wire_mode: 'responses',
+        actual_proxy_id: 11, route_source: 'account', maintenance_reason: 'bundle_protocol_mismatch', outbound_length: 0,
+        response_length: 292, response_shape: 'target', cookie_diagnostic: { send_state: 'sent', sent: false, source: 'none' } },
+    ] })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="codex-turn-state-bundle-wire-gpt-test"]').text()).toContain('wireModes.lite')
+    expect(wrapper.get('[data-testid="codex-turn-state-bundle-proxy-gpt-test"]').text()).toBe('Original issuer')
+    expect(wrapper.get('[data-testid="codex-turn-state-current-proxy-gpt-test"]').text()).toBe('Next collector')
+    expect(wrapper.get('[data-testid="codex-turn-state-last-eligible-gpt-test"]').text()).toBe(new Date('2026-09-19T11:25:00Z').toLocaleString())
+    const observation = wrapper.get('[data-testid="codex-turn-state-observation-gpt-test"]')
+    expect(observation.get('[data-testid="codex-route-wire-mode"]').text()).toContain('wireModes.responses')
+    expect(observation.get('[data-testid="codex-route-actual-proxy"]').text()).toBe('Business fallback')
+    expect(observation.get('[data-testid="codex-route-bundle-proxy"]').text()).toContain('diagnosticUnknown')
+    expect(observation.get('[data-testid="codex-turn-state-maintenance-gpt-test"]').text()).toContain('reasons.bundle_protocol_mismatch')
+    expect(observation.get('[data-testid="codex-cookie-send-state"]').text()).toContain('cookieSendStates.not_carried')
+    wrapper.unmount()
+  })
+
+  it('requires explicit evidence before calling an absent package route direct', async () => {
+    getCodexTurnState.mockResolvedValue({ ...status, models: [
+      { ...status.models[0], model: 'gpt-direct', bundle_wire_mode: 'responses', bundle_egress_kind: 'direct' },
+      { ...status.models[0], model: 'gpt-unknown' },
+      { ...status.models[0], model: 'gpt-invalid', bundle_wire_mode: 'private-route-generation', bundle_egress_kind: 'proxy', bundle_proxy_id: -1 },
+    ] })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="codex-turn-state-bundle-proxy-gpt-direct"]').text()).toContain('proxyDirect')
+    for (const model of ['gpt-unknown', 'gpt-invalid']) {
+      expect(wrapper.get(`[data-testid="codex-turn-state-bundle-proxy-${model}"]`).text()).toContain('diagnosticUnknown')
+      expect(wrapper.get(`[data-testid="codex-turn-state-bundle-wire-${model}"]`).text()).toContain('wireModes.unknown')
+    }
+    expect(wrapper.text()).not.toContain('private-route-generation')
+    wrapper.unmount()
+  })
+
   it('honors an explicit empty list over a legacy proxy and safely falls back when names cannot load', async () => {
     getProxies.mockRejectedValue(new Error('private-directory-error'))
     getCodexTurnState.mockResolvedValue({ ...status, collector_proxy_ids: [], collector_proxy_id: 7, models: [

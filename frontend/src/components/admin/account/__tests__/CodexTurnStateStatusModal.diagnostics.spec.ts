@@ -66,6 +66,8 @@ describe('Codex turn-state collection diagnostics', () => {
       'collector_tls_failed', 'collector_proxy_tunnel_failed', 'collector_connect_timeout',
       'collector_tls_timeout', 'collector_response_header_timeout',
       'collector_model_mismatch', 'authorization_unavailable', 'cookie_expired',
+      'bundle_protocol_mismatch', 'bundle_binding_invalid', 'bundle_proxy_unavailable', 'bundle_proxy_changed',
+      'bundle_route_changed', 'bundle_rebuild_baseline', 'waiting_eligible_business',
     ] as const
     getCodexTurnState.mockResolvedValue(state(codes.map(code => model(code))))
     const wrapper = render(locale)
@@ -91,6 +93,19 @@ describe('Codex turn-state collection diagnostics', () => {
     expect(wrapper.get('[data-testid="codex-turn-state-reason-gpt-test"]').text()).toBe(messages.reasons.collector_model_mismatch)
     expect(wrapper.get('[data-testid="codex-turn-state-guidance-gpt-test"]').text()).toBe(messages.reasonHints.collector_model_mismatch)
     expect(wrapper.text()).not.toContain(messages.unknownReason)
+    wrapper.unmount()
+  })
+
+  it.each(['bundle_proxy_unavailable', 'bundle_proxy_changed', 'bundle_binding_invalid'])('shows %s as a package blocker without relabeling collection', async (reason) => {
+    getCodexTurnState.mockResolvedValue(state([model('gpt-test', { state: 'missing', bundle_unavailable_reason: reason,
+      collection_status: 'scheduled', collection_reason: 'refresh', last_error: undefined })]))
+    const wrapper = render()
+    await flushPromises()
+    const messages = zh.accounts.codexTurnState
+    expect(wrapper.get('[data-testid="codex-turn-state-bundle-unavailable-gpt-test"]').text()).toBe(messages.reasons[reason as keyof typeof messages.reasons])
+    expect(wrapper.get('[data-testid="codex-turn-state-bundle-guidance-gpt-test"]').text()).toBe(messages.reasonHints[reason as keyof typeof messages.reasonHints])
+    expect(wrapper.get('[data-testid="codex-turn-state-collection-gpt-test"]').text()).toBe(messages.collectionStatuses.scheduled)
+    expect(wrapper.get('[data-testid="codex-turn-state-reason-gpt-test"]').text()).toBe(messages.reasons.refresh)
     wrapper.unmount()
   })
 
@@ -182,7 +197,7 @@ describe('Codex turn-state collection diagnostics', () => {
     expect(wrapper.text()).toContain('采集连接或发送失败')
     await vi.advanceTimersByTimeAsync(5000)
     expect(getCodexTurnState).toHaveBeenCalledTimes(2)
-    expect(wrapper.get('[data-testid="codex-turn-state-reason-gpt-test"]').text()).toBe('该模型近 30 分钟无业务，已停止采集')
+    expect(wrapper.get('[data-testid="codex-turn-state-reason-gpt-test"]').text()).toBe('该模型近 30 分钟无符合续采条件的业务，已停止采集')
     expect(wrapper.find('[data-testid="codex-turn-state-guidance-gpt-test"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="codex-turn-state-previous-error-gpt-test"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('采集连接或发送失败')

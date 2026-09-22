@@ -146,7 +146,7 @@ func TestOpenAIPluginCookieBundleUnhandledFallsBackWithoutDoubleCapture(t *testi
 	require.NoError(t, err)
 	require.NoError(t, response.Body.Close())
 	require.Equal(t, 1, upstream.calls)
-	require.Equal(t, 2, guards, "the real fallback send checks authority again")
+	require.Equal(t, 1, guards, "only the actual fallback send checks authority")
 	require.Equal(t, 1, staged, "a plugin that did not send cannot contribute a candidate")
 	bundle, err := attempt.Snapshot(time.Now().Add(openaicookies.BundleLifetime))
 	require.NoError(t, err)

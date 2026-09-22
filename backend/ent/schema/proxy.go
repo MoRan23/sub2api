@@ -52,6 +52,9 @@ func (Proxy) Fields() []ent.Field {
 		field.String("status").
 			MaxLen(20).
 			Default("active"),
+		field.Int64("route_generation").
+			Default(1).
+			Comment("Monotonic generation of the proxy endpoint and credentials."),
 		field.Time("expires_at").
 			Optional().Nillable().
 			Comment("Proxy expiration time (NULL means never expires)."),

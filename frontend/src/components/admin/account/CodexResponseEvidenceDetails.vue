@@ -10,15 +10,16 @@
       <div v-if="evidence.header_evidence_scope === 'response' || evidence.header_evidence_scope === 'connection'"><dt class="text-xs text-gray-500">{{ t(`${prefix}.headerEvidenceScope`) }}</dt><dd data-testid="codex-header-evidence-scope">{{ t(`${prefix}.headerEvidenceScopes.${evidence.header_evidence_scope}`) }}</dd></div>
     </dl>
     <p class="text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.modelEvidenceHint`) }}</p>
-    <section v-if="evidence.cookie_diagnostic" class="space-y-2" data-testid="codex-cookie-diagnostic">
+    <section class="space-y-2" data-testid="codex-cookie-diagnostic">
       <h5 class="text-xs font-semibold">{{ t(`${prefix}.cookieDiagnostic`) }}</h5>
       <dl class="grid gap-3 sm:grid-cols-2">
-        <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.cookieSent`) }}</dt><dd>{{ flag(evidence.cookie_diagnostic.sent) }}</dd></div>
+        <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.cookieSent`) }}</dt><dd data-testid="codex-cookie-send-state">{{ cookieSendState }}</dd></div>
         <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.cookieSource`) }}</dt><dd>{{ cookieSource }}</dd></div>
         <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.cookieNames`) }}</dt><dd class="break-all font-mono">{{ cookieNames.join(', ') || '—' }}</dd></div>
         <div v-if="cookieExpiries.length"><dt class="text-xs text-gray-500">{{ t(`${prefix}.cookieExpiresAt`) }}</dt><dd v-for="(cookie, index) in cookieExpiries" :key="`${cookie.name}:${index}`" class="break-words"><span class="font-mono">{{ cookie.name }}</span>: {{ cookie.expiry }}</dd></div>
       </dl>
-      <p v-if="evidence.cookie_diagnostic.reason" class="text-xs text-gray-500 dark:text-gray-400">{{ cookieReason }}</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.cookieSendEvidenceHint`) }}</p>
+      <p v-if="evidence.cookie_diagnostic?.reason" class="text-xs text-gray-500 dark:text-gray-400">{{ cookieReason }}</p>
     </section>
   </section>
 </template>
@@ -37,6 +38,13 @@ const cookieReasons = new Set(['cookie_scope_missing', 'cookie_invalid_scope', '
 const relation = computed(() => t(`${prefix}.modelRelations.${props.evidence.model_conflict ? 'conflicting' : relations.has(props.evidence.model_relation || '') ? props.evidence.model_relation : 'not_reported'}`))
 const cookieSource = computed(() => t(`${prefix}.cookieSources.${cookieSources.has(props.evidence.cookie_diagnostic?.source || '') ? props.evidence.cookie_diagnostic?.source : 'unknown'}`))
 const cookieReason = computed(() => t(`${prefix}.cookieReasons.${cookieReasons.has(props.evidence.cookie_diagnostic?.reason || '') ? props.evidence.cookie_diagnostic?.reason : 'unknown'}`))
+const cookieSendState = computed(() => {
+  const diagnostic = props.evidence.cookie_diagnostic
+  let state = 'unknown'
+  if (diagnostic?.send_state === 'not_sent') state = 'not_sent'
+  else if (diagnostic?.send_state === 'sent' && typeof diagnostic.sent === 'boolean') state = diagnostic.sent ? 'carried' : 'not_carried'
+  return t(`${prefix}.cookieSendStates.${state}`)
+})
 const cookieNames = computed(() => [...new Set(props.evidence.cookie_diagnostic?.names || [])])
 const cookieExpiries = computed(() => (props.evidence.cookie_diagnostic?.cookies || []).map(cookie => {
   const time = cookie.expires_at ? Date.parse(cookie.expires_at) : Number.NaN

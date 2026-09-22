@@ -26,6 +26,7 @@ describe('Codex turn-state configuration', () => {
     expect(updated).toEqual({ enabled: true, account_type: 'auto', collector_proxy_ids: [] })
     await wrapper.setProps({ modelValue: updated as ReturnType<typeof defaultCodexTurnStateConfig> })
     expect(wrapper.get('select').text()).toContain('admin.accounts.codexTurnState.types.team_business')
+    expect(wrapper.get('[data-testid="codex-turn-state-bundle-routing-hint"]').text()).toBe('admin.accounts.codexTurnState.bundleRoutingHint')
     expect(wrapper.get('[data-testid="codex-turn-state-proxy-empty"]').text()).toBe('admin.accounts.codexTurnState.noCollectorProxy')
     expect(wrapper.findComponent({ name: 'ProxySelector' }).exists()).toBe(false)
     await wrapper.get('[data-testid="codex-turn-state-proxy-add"]').trigger('click')

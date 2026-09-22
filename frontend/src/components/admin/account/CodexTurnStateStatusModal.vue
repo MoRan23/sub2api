@@ -12,6 +12,7 @@
       <section class="min-w-0 space-y-3" data-testid="codex-turn-state-cache-section">
       <h3 class="font-semibold text-gray-900 dark:text-gray-100">{{ t(`${prefix}.cacheSection`) }}</h3>
       <p class="text-xs text-gray-500 dark:text-gray-400" data-testid="codex-turn-state-shared-hint">{{ t(`${prefix}.sharedCacheHint`) }}</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400" data-testid="codex-turn-state-bundle-routing-hint">{{ t(`${prefix}.bundleRoutingHint`) }}</p>
       <p v-if="!status.enabled">{{ t(`${prefix}.disabled`) }}</p>
       <p v-else-if="!status.expected_length" class="text-amber-700 dark:text-amber-400">{{ t(`${prefix}.unresolved`) }}</p>
       <p v-else>{{ t(`${prefix}.expectedLength`) }}: {{ t(`${prefix}.characters`, { count: status.expected_length }) }}</p>
@@ -27,6 +28,9 @@
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.cacheShape`) }}</dt><dd>{{ label('shapes', model.shape || 'unknown') }}</dd></div>
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.length`) }}</dt><dd>{{ model.token_length || '—' }}</dd></div>
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.source`) }}</dt><dd>{{ label('sources', model.source) }}</dd></div>
+          <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.bundleWireMode`) }}</dt><dd :data-testid="`codex-turn-state-bundle-wire-${model.model}`">{{ wireMode(model.bundle_wire_mode) }}</dd></div>
+          <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.bundleProxy`) }}</dt><dd class="break-words" :data-testid="`codex-turn-state-bundle-proxy-${model.model}`">{{ bundleProxy(model) }}</dd></div>
+          <div v-if="model.bundle_unavailable_reason"><dt class="text-xs text-gray-500">{{ t(`${prefix}.bundleUnavailableReason`) }}</dt><dd class="break-words" :data-testid="`codex-turn-state-bundle-unavailable-${model.model}`">{{ label('reasons', model.bundle_unavailable_reason) }}</dd></div>
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.expiresAt`) }}</dt><dd>{{ date(model.expires_at) }}</dd></div>
           <div v-if="model.cookie_bundle_expires_at"><dt class="text-xs text-gray-500">{{ t(`${prefix}.bundleExpiresAt`) }}</dt><dd :data-testid="`codex-turn-state-bundle-expiry-${model.model}`">{{ date(model.cookie_bundle_expires_at) }}</dd></div>
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.bundleRemaining`) }}</dt><dd :data-testid="`codex-turn-state-remaining-${model.model}`">{{ t(`${prefix}.remaining`, { seconds: remaining(model) }) }}</dd></div>
@@ -36,9 +40,11 @@
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.lastCollectorProxy`) }}</dt><dd class="break-words" :data-testid="`codex-turn-state-last-proxy-${model.model}`">{{ proxyName(model.last_collector_proxy_id) }}</dd></div>
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.collectorExtendedCount`) }}</dt><dd :data-testid="`codex-turn-state-proxy-count-${model.model}`">{{ model.collector_extended_count ?? 0 }} / 3</dd></div>
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.lastBusiness`) }}</dt><dd>{{ date(model.last_business_at) }}</dd></div>
+          <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.lastEligibleCollection`) }}</dt><dd :data-testid="`codex-turn-state-last-eligible-${model.model}`">{{ date(model.last_eligible_collection_at) }}</dd></div>
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.lastCollected`) }}</dt><dd>{{ date(model.last_collected_at) }}</dd></div>
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.nextCollect`) }}</dt><dd>{{ date(model.next_collect_at) }}</dd><dd v-if="model.collection_status === 'backoff' && model.next_collect_at" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.retryHint`) }}</dd></div>
         </dl>
+        <p v-if="model.bundle_unavailable_reason && reasonHint(model.bundle_unavailable_reason)" class="break-words text-xs text-amber-700 dark:text-amber-400" :data-testid="`codex-turn-state-bundle-guidance-${model.model}`">{{ reasonHint(model.bundle_unavailable_reason) }}</p>
         <p v-if="reasonHint(model.collection_reason)" class="break-words text-xs text-gray-600 dark:text-gray-400" :data-testid="`codex-turn-state-guidance-${model.model}`">{{ reasonHint(model.collection_reason) }}</p>
         <p v-if="model.refresh_reason" class="break-words text-xs text-gray-500">{{ t(`${prefix}.refreshReason`) }}: {{ label('reasons', model.refresh_reason) }}</p>
         <div v-if="model.last_error && model.last_error !== model.collection_reason" class="space-y-1 border-t border-gray-100 pt-2 dark:border-dark-600" :data-testid="`codex-turn-state-previous-error-${model.model}`">
@@ -79,6 +85,7 @@
               <div v-if="observation.maintenance_reason"><dt class="text-xs text-gray-500">{{ t(`${prefix}.observationMaintenanceReason`) }}</dt><dd :data-testid="`codex-turn-state-maintenance-${observation.model}`">{{ label('reasons', observation.maintenance_reason) }}</dd></div>
               <div v-if="observation.response_validation_reason"><dt class="text-xs text-gray-500">{{ t(`${prefix}.validationReason`) }}</dt><dd>{{ label('validationReasons', observation.response_validation_reason) }}</dd></div>
             </dl>
+            <CodexTurnStateRouteDetails :evidence="observation" :proxy-names="proxyNames" />
             <CodexResponseEvidenceDetails :evidence="observation" />
             <p v-if="observation.request_source === 'collector' && observation.outbound_length === 0" class="text-xs text-gray-500 dark:text-gray-400" :data-testid="`codex-turn-state-collector-outbound-hint-${observation.model}`">{{ t(`${prefix}.collectorOutboundHint`) }}</p>
             <p v-if="observation.request_source === 'business' && observation.business_delivered === false" class="text-xs text-gray-500 dark:text-gray-400" :data-testid="`codex-turn-state-delivery-hint-${observation.model}`">{{ t(`${prefix}.businessNotDeliveredHint`) }}</p>
@@ -111,6 +118,7 @@ import { codexTurnStatePackageExpiry, collectorProxyIDs } from '@/components/acc
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import OpenAIOAuthOSSelect from '@/components/account/OpenAIOAuthOSSelect.vue'
 import CodexResponseEvidenceDetails from './CodexResponseEvidenceDetails.vue'
+import CodexTurnStateRouteDetails from './CodexTurnStateRouteDetails.vue'
 import { defaultOpenAIOS } from '@/components/account/openaiOAuthOS'
 import type { Account, OpenAIOAuthOS } from '@/types'
 
@@ -142,6 +150,7 @@ const reasonCodes = new Set([
   'waiting_business_response', 'queued', 'waiting_business', 'collecting', 'collector_proxy_not_configured', 'collector_proxy_changed',
   'account_unavailable', 'account_inactive', 'account_scheduling_disabled', 'account_expired', 'idle',
   'target_still_expiring', 'business_preempted', 'collector_model_mismatch', 'authorization_unavailable', 'cookie_expired', 'business_active', 'refresh',
+  'bundle_protocol_mismatch', 'bundle_binding_invalid', 'bundle_proxy_unavailable', 'bundle_proxy_changed', 'bundle_route_changed', 'bundle_rebuild_baseline', 'waiting_eligible_business',
 ])
 
 function canonicalReason(value: string) {
@@ -188,7 +197,15 @@ function observationID(observation: CodexTurnStateObservation) {
   return value && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ? value : ''
 }
 function proxyName(id?: number | null) {
-  return id ? proxyNames.value[id] || t(`${prefix}.proxyFallback`, { id }) : '—'
+  return Number.isSafeInteger(id) && (id ?? 0) > 0 ? proxyNames.value[id!] || t(`${prefix}.proxyFallback`, { id }) : '—'
+}
+function wireMode(value?: string) {
+  return t(`${prefix}.wireModes.${value === 'lite' || value === 'responses' ? value : 'unknown'}`)
+}
+function bundleProxy(model: CodexTurnStateModelStatus) {
+  if (model.bundle_egress_kind === 'direct') return t(`${prefix}.proxyDirect`)
+  if (model.bundle_egress_kind === 'proxy' && Number.isSafeInteger(model.bundle_proxy_id) && (model.bundle_proxy_id ?? 0) > 0) return proxyName(model.bundle_proxy_id)
+  return t(`${prefix}.diagnosticUnknown`)
 }
 async function loadProxyNames() {
   const current = new AbortController()

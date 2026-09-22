@@ -16,7 +16,7 @@ func TestCodexTurnStateSharedActivityStartsOnSendAndRefreshesAfterCompletion(t *
 	ctx := context.Background()
 	now := s.now()
 	s.now = func() time.Time { return now }
-	prepared, err := s.Prepare(ctx, account, "gpt-5")
+	prepared, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	calls := 0
 	s.collector = codexStateTestCollector(func(_ context.Context, request CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
@@ -87,7 +87,7 @@ func TestCodexTurnStateSharedActivitySameTokenDoesNotExtendLifetime(t *testing.T
 	ctx := context.Background()
 	now := s.now()
 	s.now = func() time.Time { return now }
-	a, err := s.Prepare(ctx, account, "gpt-5")
+	a, err := s.PrepareForHTTP(ctx, account, "gpt-5", CodexTurnStateBundleBinding{WireMode: "lite", EgressKind: "proxy", ProxyID: 2, ProxyRouteGeneration: 1})
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, a)
 	token := codexStateTestToken(10, now)
@@ -118,7 +118,7 @@ func TestCodexTurnStateSharedActivityUsesOneBundleAcrossOperatingSystems(t *test
 	s, repo, account := newCodexStateTestService(t)
 	isolateCodexHistory(t)
 	ctx := context.Background()
-	windows, err := s.Prepare(ctx, account, "gpt-5")
+	windows, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, windows)
 	token := codexStateTestToken(10, s.now())
@@ -127,7 +127,7 @@ func TestCodexTurnStateSharedActivityUsesOneBundleAcrossOperatingSystems(t *test
 	for _, os := range []string{"windows", "macos", "linux"} {
 		requestAccount := *account
 		requestAccount.OpenAIOAuthCredentialOS = os
-		attempt, err := s.Prepare(ctx, &requestAccount, "gpt-5")
+		attempt, err := prepareCodexStateTest(s, ctx, &requestAccount, "gpt-5")
 		require.NoError(t, err)
 		require.Equal(t, os, attempt.OSFamily)
 		require.Equal(t, windows.key, attempt.key)
@@ -150,7 +150,7 @@ func TestCodexTurnStateSharedActivitySameIssuedDifferentTokenCannotMixBundle(t *
 			ctx := context.Background()
 			now := s.now()
 			s.now = func() time.Time { return now }
-			a, err := s.Prepare(ctx, account, "gpt-5")
+			a, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 			require.NoError(t, err)
 			markCodexStateTestBusinessSent(t, s, a)
 			token := codexStateTestToken(10, now)
@@ -164,7 +164,7 @@ func TestCodexTurnStateSharedActivitySameIssuedDifferentTokenCannotMixBundle(t *
 			other := base64.URLEncoding.EncodeToString(bytes)
 			require.NotEqual(t, token, other)
 			if source == "business" {
-				attempt, err := s.Prepare(ctx, account, "gpt-5")
+				attempt, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 				require.NoError(t, err)
 				markCodexStateTestBusinessSent(t, s, attempt)
 				s.Observe(attempt, other)
@@ -191,7 +191,7 @@ func TestCodexTurnStateSharedActivityDuplicateBusinessDoesNotPostponeRefresh(t *
 	ctx := context.Background()
 	now := s.now()
 	s.now = func() time.Time { return now }
-	seed, err := s.Prepare(ctx, account, "gpt-5")
+	seed, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, seed)
 	token := codexStateTestToken(10, now)
@@ -200,7 +200,7 @@ func TestCodexTurnStateSharedActivityDuplicateBusinessDoesNotPostponeRefresh(t *
 	before, err := repo.Get(ctx, seed.key)
 	require.NoError(t, err)
 	now = now.Add(20 * time.Second)
-	next, err := s.Prepare(ctx, account, "gpt-5")
+	next, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, next)
 	s.Observe(next, token)

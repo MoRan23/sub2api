@@ -20,14 +20,14 @@ func newCodexProxyChangedTestService(t *testing.T) (*CodexTurnStateService, *cod
 	require.NoError(t, err)
 	encrypted, err := s.encryptor.Encrypt(token)
 	require.NoError(t, err)
-	bundle, err := s.emptyCodexCookiePublication(key, account.OpenAIOAuthAuthorizationGeneration, shape.ExpiresAt)
+	bundle, err := s.emptyCodexCookiePublication(key, account.OpenAIOAuthAuthorizationGeneration, shape.ExpiresAt, codexStateTestBinding())
 	require.NoError(t, err)
 	repo.records[key] = CodexTurnStateRecord{
 		OSFamily:       "windows",
 		OwnerAccountID: key.OwnerAccountID, Model: key.Model, Generation: key.Generation, Version: 7,
 		EncryptedToken: encrypted, IssuedAt: shape.IssuedAt, ExpiresAt: shape.ExpiresAt,
 		Shape: shape.Shape, TokenLength: shape.TokenLength, CipherBlocks: shape.CipherBlocks, Source: "business",
-		LastBusinessAt: s.now(), LastCollectedAt: s.now().Add(-time.Minute),
+		LastBusinessAt: s.now(), LastEligibleCollectionAt: s.now(), LastCollectedAt: s.now().Add(-time.Minute),
 		DemandReason: "refresh", NextCollectAt: s.now().Add(CodexTurnStateCollectInterval),
 		CollectionStatus: "scheduled", CollectionReason: "refresh",
 	}
@@ -127,7 +127,7 @@ func TestCodexTurnStateProxyChangeBusinessDuplicateAndNewTarget(t *testing.T) {
 	s, repo, account, key, previousToken := newCodexProxyChangedTestService(t)
 	ctx := context.Background()
 	before := repo.records[key]
-	duplicate, err := s.Prepare(ctx, account, key.Model)
+	duplicate, err := prepareCodexStateTest(s, ctx, account, key.Model)
 	require.NoError(t, err)
 	require.Equal(t, previousToken, duplicate.Snapshot.Token)
 	markCodexStateTestBusinessSent(t, s, duplicate)
@@ -142,7 +142,7 @@ func TestCodexTurnStateProxyChangeBusinessDuplicateAndNewTarget(t *testing.T) {
 	require.False(t, s.ensureCodexTurnStateDemand(ctx, repeated))
 
 	newTarget := codexStateTestToken(10, s.now())
-	natural, err := s.Prepare(ctx, account, key.Model)
+	natural, err := prepareCodexStateTest(s, ctx, account, key.Model)
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, natural)
 	s.Observe(natural, newTarget)
@@ -246,8 +246,10 @@ func TestCodexTurnStateProxyChangeKeepsActivityAndProxyRequirements(t *testing.T
 			switch mode {
 			case "never_active":
 				record.LastBusinessAt = time.Unix(0, 0)
+				record.LastEligibleCollectionAt = record.LastBusinessAt
 			case "idle":
 				record.LastBusinessAt = s.now().Add(-CodexTurnStateActiveWindow - time.Second)
+				record.LastEligibleCollectionAt = record.LastBusinessAt
 			case "no_proxy":
 				account.Extra[CodexTurnStateExtraKey].(map[string]any)["collector_proxy_id"] = nil
 			}
@@ -265,7 +267,7 @@ func TestCodexTurnStateProxyChangeKeepsActivityAndProxyRequirements(t *testing.T
 			}
 			status := projectCodexTurnStateStatus(account.ID, account, []CodexTurnStateRecord{record}, []string{key.Model}, nil, s.now())
 			require.Equal(t, "collector_proxy_not_configured", status.Models[0].CollectionReason)
-			natural, err := s.Prepare(ctx, account, key.Model)
+			natural, err := prepareCodexStateTest(s, ctx, account, key.Model)
 			require.NoError(t, err)
 			markCodexStateTestBusinessSent(t, s, natural)
 			fresh := codexStateTestToken(10, s.now())

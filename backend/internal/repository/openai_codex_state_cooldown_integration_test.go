@@ -18,6 +18,7 @@ func codexStateCooldownDemandFixture(t *testing.T, repo service.CodexTurnStateRe
 	require.NoError(t, err)
 	require.NotNil(t, record, "the fixture must use the current OS state generation")
 	require.NoError(t, repo.MarkBusinessSent(ctx, key, now))
+	require.NoError(t, repo.MarkEligibleCollectionSent(ctx, key, now))
 	record.DemandReason, record.DemandAt = "extended_shape", now
 	record.CollectionStatus, record.CollectionReason = "pending", "queued"
 	record.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)

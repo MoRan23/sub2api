@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -44,6 +45,12 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	return s.withOpenAIHTTPBundleBaseline(c, account, func() (*OpenAIForwardResult, error) {
+		return s.forwardAsAnthropicWithHTTPBundle(ctx, c, account, body, promptCacheKey, defaultMappedModel)
+	})
+}
+
+func (s *OpenAIGatewayService) forwardAsAnthropicWithHTTPBundle(ctx context.Context, c *gin.Context, account *Account, body []byte, promptCacheKey, defaultMappedModel string) (*OpenAIForwardResult, error) {
 	if account != nil && account.IsOpenAIOAuth() {
 		var scopeErr error
 		ctx, account, scopeErr = s.prepareOpenAIOAuthRequestScope(ctx, c, account, body)
@@ -63,6 +70,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
 	}
 	if account.Platform == PlatformOpenAI {
+		s.prepareOpenAIHTTPBundleModel(ctx, c, account, body, "messages", defaultMappedModel)
 		ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 		if account.IsOpenAIOAuth() {
 			s.prepareOpenAIRequestTimezoneDeferred(ctx, c, account, body, account.IsOpenAIPassthroughEnabled())
@@ -509,6 +517,9 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 		upstreamReq = markOpenAIGuardianSourceHTTPRequest(upstreamReq, c, account)
 		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, withCodexTelemetryGatewayContext(c.Request.Context(), c, account, "http"))
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+		if errors.Is(err, openaicookies.ErrBundleSendRejected) {
+			return nil, err
+		}
 		if err != nil {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 		}
@@ -848,8 +859,8 @@ func (s *OpenAIGatewayService) recordOpenAIMessagesStreamUpstreamError(c *gin.Co
 	message = sanitizeUpstreamErrorMessage(message)
 	setOpsUpstreamError(c, http.StatusBadGateway, message, "")
 	event := OpsUpstreamErrorEvent{
-		ProxyID:            opsUpstreamProxyID(account),
-		ProxyName:          opsUpstreamProxyName(account),
+		ProxyID:            opsOpenAIOutboundProxyID(c, account),
+		ProxyName:          opsOpenAIOutboundProxyName(c, account),
 		Platform:           PlatformOpenAI,
 		UpstreamStatusCode: http.StatusBadGateway,
 		UpstreamRequestID:  strings.TrimSpace(upstreamRequestID),

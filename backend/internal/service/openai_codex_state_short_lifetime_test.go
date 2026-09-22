@@ -28,7 +28,7 @@ func TestCodexTurnStateSnapshotNeverExtendsEarlierStoredExpiry(t *testing.T) {
 	ctx := context.Background()
 	clock := s.now()
 	s.now = func() time.Time { return clock }
-	seed, err := s.Prepare(ctx, account, "gpt-5")
+	seed, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, seed)
 	s.Observe(seed, codexStateTestToken(10, clock))
@@ -36,10 +36,11 @@ func TestCodexTurnStateSnapshotNeverExtendsEarlierStoredExpiry(t *testing.T) {
 	row, err := repo.Get(ctx, seed.key)
 	require.NoError(t, err)
 	row.ExpiresAt = clock.Add(10 * time.Second)
+	bindCodexStateTestBundle(t, s, account, row, row.BundleBinding)
 	ok, err := repo.SaveCAS(ctx, *row, row.Version)
 	require.NoError(t, err)
 	require.True(t, ok)
-	attempt, err := s.Prepare(ctx, account, "gpt-5")
+	attempt, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	require.Equal(t, row.ExpiresAt, attempt.Snapshot.ExpiresAt)
 	clock = row.ExpiresAt

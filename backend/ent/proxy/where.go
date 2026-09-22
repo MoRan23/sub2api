@@ -105,6 +105,11 @@ func Status(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldStatus, v))
 }
 
+// RouteGeneration applies equality check predicate on the "route_generation" field. It's identical to RouteGenerationEQ.
+func RouteGeneration(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldRouteGeneration, v))
+}
+
 // ExpiresAt applies equality check predicate on the "expires_at" field. It's identical to ExpiresAtEQ.
 func ExpiresAt(v time.Time) predicate.Proxy {
 	return predicate.Proxy(sql.FieldEQ(FieldExpiresAt, v))
@@ -703,6 +708,46 @@ func StatusEqualFold(v string) predicate.Proxy {
 // StatusContainsFold applies the ContainsFold predicate on the "status" field.
 func StatusContainsFold(v string) predicate.Proxy {
 	return predicate.Proxy(sql.FieldContainsFold(FieldStatus, v))
+}
+
+// RouteGenerationEQ applies the EQ predicate on the "route_generation" field.
+func RouteGenerationEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldEQ(FieldRouteGeneration, v))
+}
+
+// RouteGenerationNEQ applies the NEQ predicate on the "route_generation" field.
+func RouteGenerationNEQ(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNEQ(FieldRouteGeneration, v))
+}
+
+// RouteGenerationIn applies the In predicate on the "route_generation" field.
+func RouteGenerationIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldIn(FieldRouteGeneration, vs...))
+}
+
+// RouteGenerationNotIn applies the NotIn predicate on the "route_generation" field.
+func RouteGenerationNotIn(vs ...int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldNotIn(FieldRouteGeneration, vs...))
+}
+
+// RouteGenerationGT applies the GT predicate on the "route_generation" field.
+func RouteGenerationGT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGT(FieldRouteGeneration, v))
+}
+
+// RouteGenerationGTE applies the GTE predicate on the "route_generation" field.
+func RouteGenerationGTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldGTE(FieldRouteGeneration, v))
+}
+
+// RouteGenerationLT applies the LT predicate on the "route_generation" field.
+func RouteGenerationLT(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLT(FieldRouteGeneration, v))
+}
+
+// RouteGenerationLTE applies the LTE predicate on the "route_generation" field.
+func RouteGenerationLTE(v int64) predicate.Proxy {
+	return predicate.Proxy(sql.FieldLTE(FieldRouteGeneration, v))
 }
 
 // ExpiresAtEQ applies the EQ predicate on the "expires_at" field.

@@ -35,6 +35,12 @@ func completeCodexTurnStateDemand(record *CodexTurnStateRecord, now time.Time) {
 		record.CollectionStatus, record.CollectionReason = "backoff", record.LastError
 		return
 	}
+	if record.LastEligibleCollectionAt.IsZero() || record.LastEligibleCollectionAt.Before(now.Add(-CodexTurnStateActiveWindow)) {
+		record.LastError = ""
+		clearIdleCodexTurnStateDemand(record)
+		record.CollectionReason = "waiting_eligible_business"
+		return
+	}
 	record.LastError, record.CollectionStatus, record.CollectionReason = "", "scheduled", "refresh"
 	record.NextCollectAt = now.Add(CodexTurnStateCollectInterval)
 	if record.CookieBundleExpiresAt != nil && record.CookieBundleExpiresAt.Before(record.NextCollectAt) {
@@ -166,6 +172,12 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 		hasTargetCandidate := best != ""
 		var bundle codexTurnStateCookiePublication
 		if !modelMismatch && best != "" {
+			if result.BundleBinding.WireMode != "lite" || result.BundleBinding.EgressKind != "proxy" || result.BundleBinding.ProxyID != base.CollectorProxyID {
+				outcomeErr = errCodexCookieAdmission
+				best = ""
+			}
+		}
+		if !modelMismatch && best != "" {
 			bundle, outcomeErr = s.prepareCollectorCookiePublication(key, current.OpenAIOAuthAuthorizationGeneration, &result, target.ExpiresAt)
 			if outcomeErr != nil {
 				best = ""
@@ -192,7 +204,7 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 			}
 		} else if !modelMismatch && best != "" && target.IssuedAt.Equal(record.IssuedAt) && record.EncryptedToken != "" && record.ExpiresAt.After(now) {
 			cachedToken, decryptErr := s.encryptor.Decrypt(record.EncryptedToken)
-			if decryptErr != nil || cachedToken != best {
+			if decryptErr != nil || cachedToken != best || record.BundleBinding != bundle.BundleBinding {
 				// Equal issuance seconds do not prove that a ticket and Cookie set
 				// belong to the same response. Preserve the existing pair intact.
 				best = ""
@@ -220,6 +232,7 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 			if !hasTargetCandidate && !extended.IssuedAt.IsZero() && !extended.IssuedAt.Before(record.IssuedAt) && !(record.EncryptedToken != "" && record.ExpiresAt.After(now)) {
 				record.EncryptedToken, record.ExpiresAt = "", time.Time{}
 				record.EncryptedCookieBundle, record.CookieBundleExpiresAt = "", nil
+				record.BundleBinding = CodexTurnStateBundleBinding{}
 				record.Shape, record.TokenLength, record.CipherBlocks = extended.Shape, extended.TokenLength, extended.CipherBlocks
 				record.IssuedAt = extended.IssuedAt
 				record.RefreshReason = "extended_shape"

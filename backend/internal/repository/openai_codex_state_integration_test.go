@@ -71,6 +71,7 @@ func TestCodexStatePostgresNaturalLeasesDurabilityAndCAS(t *testing.T) {
 	require.False(t, withoutLease.BusinessInFlight)
 
 	record.EncryptedToken = "ciphertext-from-secret-encryptor"
+	record.BundleBinding = service.CodexTurnStateBundleBinding{WireMode: "responses", EgressKind: "direct"}
 	record.IssuedAt, record.ExpiresAt = now, now.Add(service.CodexTurnStateLifetime)
 	record.TokenLength, record.CipherBlocks = 292, 10
 	record.Source, record.Shape = "business", "accepted"
@@ -114,6 +115,7 @@ func TestCodexStatePostgresConcurrentCASAndGenerationFence(t *testing.T) {
 	require.NoError(t, err)
 	record.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
 	const writers = 12
+	record.BundleBinding = service.CodexTurnStateBundleBinding{WireMode: "responses", EgressKind: "direct"}
 	var wins atomic.Int32
 	var wg sync.WaitGroup
 	errCh := make(chan error, writers)
@@ -247,7 +249,9 @@ func TestCodexStatePostgresScanSelectsOnlyDueCollectors(t *testing.T) {
 		record, err := repo.BeginBusiness(ctx, modelKey, model, now, now.Add(time.Minute))
 		require.NoError(t, err)
 		require.NoError(t, repo.MarkBusinessSent(ctx, modelKey, now))
+		require.NoError(t, repo.MarkEligibleCollectionSent(ctx, modelKey, now))
 		record.ModelPolicyRevision = policyRevision
+		record.BundleBinding = service.CodexTurnStateBundleBinding{WireMode: "responses", EgressKind: "direct"}
 		if model != "natural-inflight" {
 			require.NoError(t, repo.EndBusiness(ctx, modelKey, model))
 		}

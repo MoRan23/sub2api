@@ -45,12 +45,12 @@ func prepareCodexStateLateSendTest(t *testing.T, accountType string) (*CodexTurn
 	if accountType == "team_business" {
 		blocks = 12
 	}
-	seed, err := s.Prepare(context.Background(), account, "gpt-5")
+	seed, err := prepareCodexStateTest(s, context.Background(), account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, seed)
 	s.Observe(seed, codexStateTestToken(blocks, now.Add(-2*time.Minute)))
 	require.NoError(t, s.Finish(context.Background(), seed, true))
-	a, err := s.Prepare(context.Background(), account, "gpt-5")
+	a, err := prepareCodexStateTest(s, context.Background(), account, "gpt-5")
 	require.NoError(t, err)
 	require.NotEmpty(t, a.Snapshot.Token)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -115,7 +115,7 @@ func TestCodexTurnStateLateWSSendPreservesConcurrentTarget(t *testing.T) {
 	ctx := context.Background()
 	s.Observe(a, codexStateTestToken(11, s.now()))
 	require.NoError(t, s.Finish(ctx, a, true))
-	newer, err := s.Prepare(ctx, account, a.Model)
+	newer, err := prepareCodexStateTest(s, ctx, account, a.Model)
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, newer)
 	token := codexStateTestToken(10, s.now().Add(-time.Minute))

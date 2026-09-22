@@ -6,6 +6,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 // The caller holds the account configuration row lock and uses its transaction.
@@ -23,6 +24,11 @@ func preserveCodexTurnStateOnCollectorProxyChange(ctx context.Context, client *d
 	if ids := service.CodexTurnStateCollectorProxyIDs(service.CodexTurnStateConfigForAccount(target)); len(ids) > 0 {
 		firstProxyID = ids[0]
 	}
+	allowedProxyIDs := service.CodexTurnStateCollectorProxyIDs(service.CodexTurnStateConfigForAccount(target))
+	directAllowed := target.ProxyID == nil || *target.ProxyID == 0
+	if !directAllowed {
+		allowedProxyIDs = append(allowedProxyIDs, *target.ProxyID)
+	}
 	_, err := client.ExecContext(ctx, `WITH eligible AS (
 		SELECT s.owner_account_id, s.model, s.generation AS previous_generation,
 			c.state_generation::text AS next_generation,
@@ -30,7 +36,12 @@ func preserveCodexTurnStateOnCollectorProxyChange(ctx context.Context, client *d
 			AND s.issued_at IS NOT NULL AND s.issued_at <= NOW() + INTERVAL '30 seconds'
 			AND s.expires_at > NOW() AND s.expires_at > s.issued_at
 			AND s.expires_at <= s.issued_at + ($4 * INTERVAL '1 second')
-			AND s.encrypted_cookie_bundle <> '' AND (s.cookie_bundle_expires_at IS NULL OR s.cookie_bundle_expires_at > NOW()), FALSE) AS valid_target
+			AND s.encrypted_cookie_bundle <> '' AND (s.cookie_bundle_expires_at IS NULL OR s.cookie_bundle_expires_at > NOW())
+			AND s.bundle_wire_mode IN ('responses','lite')
+			AND ((s.bundle_egress_kind='direct' AND $7 AND s.bundle_proxy_id=0 AND s.bundle_proxy_route_generation=0)
+			 OR (s.bundle_egress_kind='proxy' AND s.bundle_proxy_id=ANY($6) AND EXISTS (
+			  SELECT 1 FROM proxies p WHERE p.id=s.bundle_proxy_id AND p.route_generation=s.bundle_proxy_route_generation
+			  AND p.deleted_at IS NULL AND p.status='active' AND (p.expires_at IS NULL OR p.expires_at>NOW())))), FALSE) AS valid_target
 		FROM openai_codex_state s JOIN account_openai_oauth_credentials c
 		ON c.account_id=s.owner_account_id
 		WHERE s.owner_account_id = $1 AND c.status='authorized'
@@ -41,6 +52,14 @@ func preserveCodexTurnStateOnCollectorProxyChange(ctx context.Context, client *d
 		encrypted_token = CASE WHEN eligible.valid_target THEN s.encrypted_token ELSE '' END,
 		encrypted_cookie_bundle = CASE WHEN eligible.valid_target THEN s.encrypted_cookie_bundle ELSE '' END,
 		cookie_bundle_expires_at = CASE WHEN eligible.valid_target THEN s.cookie_bundle_expires_at ELSE NULL END,
+		bundle_wire_mode = CASE WHEN eligible.valid_target THEN s.bundle_wire_mode ELSE '' END,
+		bundle_egress_kind = CASE WHEN eligible.valid_target THEN s.bundle_egress_kind ELSE '' END,
+		bundle_proxy_id = CASE WHEN eligible.valid_target THEN s.bundle_proxy_id ELSE 0 END,
+		bundle_proxy_route_generation = CASE WHEN eligible.valid_target THEN s.bundle_proxy_route_generation ELSE 0 END,
+		issued_at = CASE WHEN eligible.valid_target THEN s.issued_at ELSE NULL END,
+		expires_at = CASE WHEN eligible.valid_target THEN s.expires_at ELSE NULL END,
+		token_length = CASE WHEN eligible.valid_target THEN s.token_length ELSE 0 END,
+		cipher_blocks = CASE WHEN eligible.valid_target THEN s.cipher_blocks ELSE 0 END,
 		collector_paused = FALSE,
 		collector_proxy_id = $5, collector_extended_count = 0, collector_attempt_id = NULL,
 		next_collect_at = CASE
@@ -56,6 +75,6 @@ func preserveCodexTurnStateOnCollectorProxyChange(ctx context.Context, client *d
 		updated_at = NOW()
 	FROM eligible WHERE s.owner_account_id = eligible.owner_account_id AND s.model = eligible.model
 		AND s.generation = eligible.previous_generation AND (eligible.valid_target OR s.demand_reason <> '')`,
-		current.ID, length, blocks, int64(service.CodexTurnStateLifetime/time.Second), firstProxyID)
+		current.ID, length, blocks, int64(service.CodexTurnStateLifetime/time.Second), firstProxyID, pq.Array(allowedProxyIDs), directAllowed)
 	return err
 }

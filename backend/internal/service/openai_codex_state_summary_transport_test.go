@@ -82,7 +82,7 @@ func TestCodexTurnStateSummaryHTTPAllPathsWithBothSwitchesOff(t *testing.T) {
 				}
 				token := codexStateTestToken(10, state.now())
 				upstream := &httpUpstreamRecorder{resp: codexStateHTTPIntegrationResponse(token, "metadata", false)}
-				gateway := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, codexTurnStateService: state}
+				gateway := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: &codexTelemetryBoundaryUpstream{httpUpstreamRecorder: upstream}, codexTurnStateService: state}
 				result, recorder, err := codexStateHTTPIntegrationForward(t, gateway, account, path, codexStateHTTPIntegrationBody(path, stream))
 				require.NoError(t, err, recorder.Body.String())
 				require.NotNil(t, result)

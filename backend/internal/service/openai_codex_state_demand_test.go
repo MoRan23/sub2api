@@ -19,7 +19,7 @@ func TestCodexTurnStateDemandStartsFromSentBusinessAndPreservesAnomalyEvidence(t
 				account.Extra[CodexTurnStateExtraKey].(map[string]any)["account_type"] = "auto"
 				account.Credentials["plan_type"] = "unknown"
 			}
-			attempt, err := s.Prepare(context.Background(), account, "gpt-5")
+			attempt, err := prepareCodexStateTest(s, context.Background(), account, "gpt-5")
 			require.NoError(t, err)
 			if name != "unsent" {
 				markCodexStateTestBusinessSent(t, s, attempt)
@@ -138,7 +138,7 @@ func TestCodexTurnStateDemandRenewalAndLeaseHeartbeatUseActualBusinessTime(t *te
 	ctx := context.Background()
 	clock := s.now()
 	s.now = func() time.Time { return clock }
-	attempt, err := s.Prepare(ctx, account, "gpt-5")
+	attempt, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, attempt)
 	token := codexStateTestToken(10, clock.Add(-CodexTurnStateLifetime+CodexTurnStateRefreshAhead+time.Minute))
@@ -151,7 +151,7 @@ func TestCodexTurnStateDemandRenewalAndLeaseHeartbeatUseActualBusinessTime(t *te
 	require.True(t, s.ensureCodexTurnStateDemand(ctx, record))
 	require.Equal(t, "expiring", record.DemandReason)
 	previousExpiry := record.ExpiresAt
-	second, err := s.Prepare(ctx, account, "gpt-5")
+	second, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, second)
 	s.Observe(second, token)
@@ -159,7 +159,7 @@ func TestCodexTurnStateDemandRenewalAndLeaseHeartbeatUseActualBusinessTime(t *te
 	record, _ = repo.Get(ctx, second.key)
 	require.Equal(t, previousExpiry, record.ExpiresAt)
 	require.Equal(t, "expiring", record.DemandReason, "returning the same token cannot satisfy renewal demand")
-	long, err := s.Prepare(ctx, account, "gpt-5")
+	long, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, long)
 	actualSentAt := clock
@@ -176,7 +176,7 @@ func TestCodexTurnStateDemandRenewalRetainsValidCacheAndRetriesNearExpiry(t *tes
 		t.Run(name, func(t *testing.T) {
 			s, repo, account := newCodexStateTestService(t)
 			ctx := context.Background()
-			seed, err := s.Prepare(ctx, account, "gpt-5")
+			seed, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 			require.NoError(t, err)
 			markCodexStateTestBusinessSent(t, s, seed)
 			oldToken := codexStateTestToken(10, s.now().Add(-CodexTurnStateLifetime+10*time.Second))
@@ -225,7 +225,7 @@ func TestCodexTurnStateDemandIdleResumeCreatesFreshBusinessDemand(t *testing.T) 
 	seed := seedCodexStateTestDemand(t, s, account, "gpt-5")
 	clock := s.now().Add(CodexTurnStateActiveWindow + time.Second)
 	s.now = func() time.Time { return clock }
-	resumed, err := s.Prepare(context.Background(), account, "gpt-5")
+	resumed, err := prepareCodexStateTest(s, context.Background(), account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, resumed)
 	require.NoError(t, s.Finish(context.Background(), resumed, true))
@@ -245,7 +245,7 @@ func TestCodexTurnStateDemandIdleResumeCreatesFreshBusinessDemand(t *testing.T) 
 func TestCodexTurnStateDemandNaturalNearExpiryPreservesRetry(t *testing.T) {
 	s, repo, account := newCodexStateTestService(t)
 	ctx := context.Background()
-	seed, err := s.Prepare(ctx, account, "gpt-5")
+	seed, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, seed)
 	s.Observe(seed, codexStateTestToken(10, s.now().Add(-CodexTurnStateLifetime+10*time.Second)))
@@ -259,7 +259,7 @@ func TestCodexTurnStateDemandNaturalNearExpiryPreservesRetry(t *testing.T) {
 	before, err := repo.Get(ctx, seed.key)
 	require.NoError(t, err)
 	require.Equal(t, s.now().Add(CodexTurnStateRetryInterval), before.NextCollectAt)
-	natural, err := s.Prepare(ctx, account, "gpt-5")
+	natural, err := prepareCodexStateTest(s, ctx, account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, natural)
 	token := codexStateTestToken(10, s.now().Add(-CodexTurnStateLifetime+20*time.Second))
@@ -307,7 +307,7 @@ func TestCodexTurnStateDemandNaturalTargetPreservesOwnerRetryAfter(t *testing.T)
 		return CodexTurnStateCollectResult{StatusCode: http.StatusTooManyRequests, RetryAfter: 5 * time.Minute}, nil
 	})
 	s.collect(context.Background(), first.key)
-	natural, err := s.Prepare(context.Background(), account, "gpt-5")
+	natural, err := prepareCodexStateTest(s, context.Background(), account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, natural)
 	s.Observe(natural, codexStateTestToken(10, s.now()))

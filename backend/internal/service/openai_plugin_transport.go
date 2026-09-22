@@ -2,6 +2,7 @@ package service
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 )
@@ -12,22 +13,10 @@ func (f openAIPluginRoundTripFunc) RoundTrip(request *http.Request) (*http.Respo
 	return f(request)
 }
 
-// Plugins are another physical HTTP boundary. Apply the same explicit frozen
-// bundle and send guard before serializing the request into plugin RPC frames.
-// The manager has no persistent jar; unhandled dispatch leaves the original
-// request untouched for the builtin transport's own guarded physical send.
+// The manager applies cookie handling only after selecting a live plugin. An
+// unhandled dispatch must not claim a physical send or open a cookie attempt.
 func roundTripOpenAIPluginWithCookieBundle(manager *PluginManager, request *http.Request, proxyURL string, account *Account) (*http.Response, bool, error) {
-	if !openaicookies.EnabledForRequest(request) {
-		return manager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
-	}
-	var handled bool
-	boundary := openaicookies.NewManager().Wrap(openAIPluginRoundTripFunc(func(outbound *http.Request) (*http.Response, error) {
-		response, selected, err := manager.RoundTripOpenAIOAuth(outbound.Context(), outbound, proxyURL, account)
-		handled = selected
-		return response, err
-	}))
-	response, err := boundary.RoundTrip(request)
-	return response, handled, err
+	return manager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 }
 
 func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
@@ -38,13 +27,23 @@ func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 // 插件返回标准 http.Response，响应解析、错误映射、SSE 和计费仍由现有核心链处理。
 func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL string, account *Account) (response *http.Response, err error) {
 	defer func() { observeCodexTurnStateHTTPResponse(request, response, err) }()
+	if rejected, _ := request.Context().Value(codexHTTPBundleRejectedKey{}).(bool); rejected {
+		return nil, openaicookies.ErrBundleSendRejected
+	}
 	if account != nil && account.Platform == PlatformOpenAI {
 		request = ApplyOpenAIRequestPolicy(request, s.settingService)
 	}
 	recordOpenAIGuardianSourceHTTPRequest(request, account)
-	if attempt := s.beginCodexTelemetryHTTPRequest(request, proxyURL, account); attempt != nil {
-		defer func() { observeCodexTelemetryHTTPResponse(attempt, response, err) }()
-	}
+	var telemetryAttempt *CodexTelemetryAttempt
+	var telemetryStart sync.Once
+	request = request.WithContext(openaicookies.WithSendObserver(request.Context(), func(outbound *http.Request) {
+		telemetryStart.Do(func() { telemetryAttempt = s.beginCodexTelemetryHTTPRequest(outbound, proxyURL, account) })
+	}))
+	defer func() {
+		if telemetryAttempt != nil {
+			observeCodexTelemetryHTTPResponse(telemetryAttempt, response, err)
+		}
+	}()
 	request = withOpenAINativeHTTPRequestScope(request, account, s.accountRepo, "gateway")
 	if s.pluginManager != nil {
 		var handled bool

@@ -13,7 +13,7 @@ func TestCodexTurnStateStatusSeparatesUsableCacheFromPausedCollector(t *testing.
 	record := CodexTurnStateRecord{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5", Generation: "gen1", EncryptedToken: "ciphertext",
 		EncryptedCookieBundle: "encrypted:fixture-cookie-bundle", AuthorizationGeneration: account.OpenAIOAuthAuthorizationGeneration,
 		Shape: "target", TokenLength: 292, CipherBlocks: 10, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(CodexTurnStateLifetime - time.Minute),
-		LastBusinessAt: now, CollectorPaused: true, LastError: "collector_auth_rejected"}
+		LastBusinessAt: now, LastEligibleCollectionAt: now, BundleBinding: codexStateTestBinding(), CollectorPaused: true, LastError: "collector_auth_rejected"}
 	status := projectCodexTurnStateStatus(account.ID, account, []CodexTurnStateRecord{record}, []string{"gpt-5"}, nil, now)
 	require.True(t, status.Models[0].CacheAvailable)
 	require.Equal(t, "paused", status.Models[0].CollectionStatus)
@@ -26,9 +26,9 @@ func TestCodexTurnStateStatusSeparatesUsableCacheFromPausedCollector(t *testing.
 func TestCodexTurnStateStatusShowsParallelCollectionAndOwnerCooldown(t *testing.T) {
 	s, _, account := newCodexStateTestService(t)
 	now := s.now()
-	busy := CodexTurnStateRecord{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5", Generation: "gen1", LastBusinessAt: now,
+	busy := CodexTurnStateRecord{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5", Generation: "gen1", LastBusinessAt: now, LastEligibleCollectionAt: now, BundleBinding: codexStateTestBinding(),
 		DemandReason: "extended_shape", CollectionStatus: "collecting", LastCollectedAt: now, BusinessInFlight: true}
-	cooldown := CodexTurnStateRecord{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5-mini", Generation: "gen1", LastBusinessAt: now,
+	cooldown := CodexTurnStateRecord{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5-mini", Generation: "gen1", LastBusinessAt: now, LastEligibleCollectionAt: now, BundleBinding: codexStateTestBinding(),
 		LastCollectedAt: now, NextCollectAt: now.Add(time.Minute), LastError: "collector_rate_limited"}
 	status := projectCodexTurnStateStatus(account.ID, account, []CodexTurnStateRecord{busy, cooldown}, []string{"gpt-5", "gpt-5-mini"}, nil, now)
 	require.Equal(t, "collecting", status.Models[0].CollectionStatus)
@@ -45,7 +45,7 @@ func TestCodexTurnStateStatusDoesNotBorrowAnotherModelsShapeRetryOrReservation(t
 		t.Run(reason, func(t *testing.T) {
 			s, _, account := newCodexStateTestService(t)
 			now := s.now()
-			failed := CodexTurnStateRecord{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5", Generation: "gen1", LastBusinessAt: now,
+			failed := CodexTurnStateRecord{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5", Generation: "gen1", LastBusinessAt: now, LastEligibleCollectionAt: now, BundleBinding: codexStateTestBinding(),
 				DemandReason: "extended_shape", LastCollectedAt: now, NextCollectAt: now, LastError: "collector_connect_timeout", CollectionStatus: "pending"}
 			other := failed
 			other.Model, other.LastError, other.CollectionStatus = "gpt-5-mini", reason, "backoff"
@@ -73,7 +73,7 @@ func TestCodexTurnStateStatusExpiresSharedCacheWithCookieBundle(t *testing.T) {
 		EncryptedToken: "private-token", EncryptedCookieBundle: "private-cookie-bundle",
 		AuthorizationGeneration: account.OpenAIOAuthAuthorizationGeneration, CookieBundleExpiresAt: &cookieExpiresAt,
 		Shape: "target", TokenLength: 292, CipherBlocks: 10, IssuedAt: now, ExpiresAt: now.Add(CodexTurnStateLifetime),
-		LastBusinessAt: now, DemandReason: "refresh", CollectionStatus: "scheduled", NextCollectAt: now.Add(CodexTurnStateCollectInterval),
+		LastBusinessAt: now, LastEligibleCollectionAt: now, BundleBinding: codexStateTestBinding(), DemandReason: "refresh", CollectionStatus: "scheduled", NextCollectAt: now.Add(CodexTurnStateCollectInterval),
 	}
 	require.Empty(t, record.Key().OSFamily, "source identity must not partition the shared record")
 	status := projectCodexTurnStateStatus(account.ID, account, []CodexTurnStateRecord{record}, []string{"gpt-5"}, nil, now)

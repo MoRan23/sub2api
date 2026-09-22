@@ -20,6 +20,7 @@ func TestCodexStatePostgresRotationDurabilityAndFencing(t *testing.T) {
 	record, err := repo.BeginBusiness(ctx, key, "business", now, now.Add(time.Minute))
 	require.NoError(t, err)
 	require.NoError(t, repo.MarkBusinessSent(ctx, key, now))
+	require.NoError(t, repo.MarkEligibleCollectionSent(ctx, key, now))
 	record.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
 	record.DemandReason, record.DemandAt = "extended_shape", now
 	record.CollectorProxyID, record.LastCollectorProxyID = 202, 202
@@ -77,6 +78,7 @@ func TestCodexStatePostgresRotationIdleAndGeneration(t *testing.T) {
 	record, err := repo.BeginBusiness(ctx, key, "old", old, old.Add(time.Minute))
 	require.NoError(t, err)
 	require.NoError(t, repo.MarkBusinessSent(ctx, key, old))
+	require.NoError(t, repo.MarkEligibleCollectionSent(ctx, key, old))
 	record.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
 	record.DemandReason, record.DemandAt = "extended_shape", old
 	record.CollectorProxyID, record.LastCollectorProxyID, record.CollectorExtendedCount = 202, 101, 2
@@ -112,6 +114,7 @@ func TestCodexStatePostgresRotationScanConfigPrecedence(t *testing.T) {
 	record, err := repo.BeginBusiness(ctx, key, "business", now, now.Add(time.Minute))
 	require.NoError(t, err)
 	require.NoError(t, repo.MarkBusinessSent(ctx, key, now))
+	require.NoError(t, repo.MarkEligibleCollectionSent(ctx, key, now))
 	record.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
 	record.DemandReason, record.DemandAt = "extended_shape", now
 	record.CollectorProxyID, record.CollectorExtendedCount = 202, 2

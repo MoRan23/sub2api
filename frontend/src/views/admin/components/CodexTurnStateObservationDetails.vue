@@ -8,6 +8,7 @@
       </div>
     </dl>
     <p v-if="state.response_observed_shape" class="mt-3 text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.observedShapeHint`) }}</p>
+    <CodexTurnStateRouteDetails :evidence="state" class="mt-3" />
     <CodexResponseEvidenceDetails :evidence="state" class="mt-3" />
   </section>
 </template>
@@ -17,6 +18,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { FingerprintObservationEntry } from '@/api/admin/fingerprintObservations'
 import CodexResponseEvidenceDetails from '@/components/admin/account/CodexResponseEvidenceDetails.vue'
+import CodexTurnStateRouteDetails from '@/components/admin/account/CodexTurnStateRouteDetails.vue'
 const props = defineProps<{ state: NonNullable<FingerprintObservationEntry['codex_turn_state']> }>()
 const { t, te } = useI18n()
 const prefix = 'admin.accounts.codexTurnState'

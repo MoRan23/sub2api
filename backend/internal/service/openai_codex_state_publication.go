@@ -71,6 +71,7 @@ func (s *CodexTurnStateService) publishCodexTurnStateAnomaly(ctx context.Context
 		}
 		record.EncryptedToken, record.ExpiresAt = "", time.Time{}
 		record.EncryptedCookieBundle, record.CookieBundleExpiresAt = "", nil
+		record.BundleBinding = CodexTurnStateBundleBinding{}
 		record.Shape, record.TokenLength, record.CipherBlocks = shape.Shape, shape.TokenLength, shape.CipherBlocks
 		if shape.IssuedAt.After(record.IssuedAt) {
 			record.IssuedAt = shape.IssuedAt
@@ -79,6 +80,9 @@ func (s *CodexTurnStateService) publishCodexTurnStateAnomaly(ctx context.Context
 		record.DemandReason, record.DemandAt = "extended_shape", demandAt
 		if record.CollectionStatus != "collecting" || !record.LastCollectedAt.Add(CodexTurnStateCollectTimeout).After(s.now()) {
 			record.CollectionStatus, record.CollectionReason = "pending", "queued"
+		}
+		if record.LastEligibleCollectionAt.IsZero() || record.LastEligibleCollectionAt.Before(now.Add(-CodexTurnStateActiveWindow)) {
+			clearIdleCodexTurnStateDemand(record)
 		}
 		allowed, revision, policyErr = s.checkModelPolicy(ctx, key.Model, true)
 		if policyErr != nil {

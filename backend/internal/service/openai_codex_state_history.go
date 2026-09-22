@@ -177,7 +177,7 @@ func (s *CodexTurnStateService) recordDeliveredHistory(a *CodexTurnStateAttempt,
 // Complete a WS activity marker if delivery raced the successful-write callback.
 func (s *CodexTurnStateService) completeBusinessSent(a *CodexTurnStateAttempt) {
 	a.mu.Lock()
-	enabled, key, sentAt, delivered := a.Enabled, a.key, a.businessSentAt, a.historyDelivered
+	enabled, key, sentAt, delivered, eligible := a.Enabled, a.key, a.businessSentAt, a.historyDelivered, a.CollectionEligible
 	a.mu.Unlock()
 	if !enabled || s.repo == nil || sentAt.IsZero() {
 		return
@@ -193,6 +193,11 @@ func (s *CodexTurnStateService) completeBusinessSent(a *CodexTurnStateAttempt) {
 		}
 	} else if err := s.repo.MarkBusinessSent(ctx, key, sentAt); err != nil {
 		return
+	}
+	if eligible {
+		if err := s.repo.MarkEligibleCollectionSent(ctx, key, sentAt); err != nil {
+			return
+		}
 	}
 	if record, err := s.repo.Get(ctx, key); err == nil && record != nil && s.ensureCodexTurnStateDemand(ctx, record) {
 		s.enqueue(ctx, key)
@@ -354,6 +359,10 @@ func (s *CodexTurnStateService) recordCollectorObservation(owner *Account, model
 	if !result.requestSentAt.IsZero() {
 		sentAt := result.requestSentAt
 		value.RequestSentAt = &sentAt
+		if result.BundleBinding.Valid() {
+			value.WireMode, value.RouteSource = result.BundleBinding.WireMode, "collector"
+			value.ActualProxyID = codexStateProxyIDPtr(result.BundleBinding.ProxyID)
+		}
 	}
 	if value.ResponseShape == CodexTurnStateShapeExtended {
 		value.ResponseShape = "suspect"

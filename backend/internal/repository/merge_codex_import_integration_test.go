@@ -55,12 +55,17 @@ func TestMergeCodexImportRealPostgresRemapsCollectorAndDropsRuntime(t *testing.T
 			"codex_turn_state_runtime":               map[string]any{"token": "source-runtime-must-not-copy"},
 		},
 	})
+	_, err := accounts.EnsureOpenAIOAuthOSProfiles(ctx, source.ID)
+	require.NoError(t, err)
 	runtime := NewOpenAICodexStateRepository(integrationDB, integrationRedis)
-	key := service.CodexTurnStateKey{OwnerAccountID: source.ID, Model: "gpt-5.4", Generation: "source-generation-must-not-copy"}
+	key := service.CodexTurnStateKey{OwnerAccountID: source.ID, Model: "gpt-5.4"}
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT state_generation::text FROM account_openai_oauth_credentials WHERE account_id=$1`, source.ID).Scan(&key.Generation))
 	now := time.Now().UTC()
 	state, err := runtime.BeginBusiness(ctx, key, "synthetic-export", now, now.Add(time.Minute))
 	require.NoError(t, err)
+	require.NotNil(t, state)
 	state.EncryptedToken, state.Source, state.Shape = "source-encrypted-token-must-not-copy", "business", "accepted"
+	state.BundleBinding = service.CodexTurnStateBundleBinding{WireMode: "responses", EgressKind: "proxy", ProxyID: business.ID, ProxyRouteGeneration: business.RouteGeneration}
 	state.IssuedAt, state.ExpiresAt, state.TokenLength, state.CipherBlocks = now, now.Add(time.Hour), 332, 12
 	state.ModelPolicyRevision = policyRevision
 	saved, err := runtime.SaveCAS(ctx, *state, state.Version)

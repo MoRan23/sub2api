@@ -36,17 +36,48 @@ func (s *OpenAIGatewayService) prepareOpenAICodexStateHTTPRequest(c *gin.Context
 		return request
 	}
 	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
-	attempt, err := s.codexTurnStateService.Prepare(request.Context(), account, model)
+	selected := codexHTTPRouteSelectionFromContext(c, account)
+	var attempt *CodexTurnStateAttempt
+	if selected != nil {
+		if selected.model != model {
+			return rejectedOpenAIHTTPBundleRequest(request)
+		}
+		attempt = selected.attempt
+		if attempt != nil && selected.physical {
+			hadBundle := attempt.Snapshot.Token != ""
+			attempt, err = s.codexTurnStateService.RetryForHTTP(request.Context(), attempt)
+			selected.attempt = attempt
+			if hadBundle && (err != nil || attempt == nil) {
+				return rejectedOpenAIHTTPBundleRequest(request)
+			}
+		}
+	} else {
+		// Auxiliary callers without an early selection may learn on their original
+		// route, but may not retarget an already projected request.
+		mode := "responses"
+		if hasOpenAIResponsesLiteHeader(request.Header) {
+			mode = "lite"
+		}
+		_, binding := s.codexHTTPRouteBinding(request.Context(), account, mode)
+		attempt, err = s.codexTurnStateService.PrepareForHTTP(request.Context(), account, model, binding)
+		if attempt != nil && attempt.Snapshot.Token != "" && attempt.Snapshot.BundleBinding != binding {
+			attempt.DiscardBundle("bundle_route_unprepared", binding)
+		}
+	}
 	if err != nil || attempt == nil {
 		return request
 	}
-	if attempt.Enabled && !s.codexTurnStateService.ValidateCredentialHeaders(request.Context(), attempt, request.Header) {
+	if attempt.Enabled && (!s.codexTurnStateService.ValidateCredentialHeaders(request.Context(), attempt, request.Header) || !s.validateOpenAIHTTPBundleRoute(request.Context(), c, account, attempt) || !codexHTTPBundleWireModeMatches(attempt, request.Header)) {
 		finishCodexTurnStateHTTPAttempt(s.codexTurnStateService, attempt, false)
+		if selected != nil && attempt.Snapshot.Token != "" {
+			return rejectedOpenAIHTTPBundleRequest(request)
+		}
 		attempt = passiveCodexStateAfterValidationFailure(attempt)
 		if attempt == nil {
 			return request
 		}
 	}
+	deferCodexTurnStateHTTPActivity(attempt)
 	s.codexTurnStateService.bindHistoryCredentials(request.Context(), attempt, request.Header)
 	originalStateHeaders := make(http.Header)
 	for key, values := range request.Header {
@@ -59,7 +90,11 @@ func (s *OpenAIGatewayService) prepareOpenAICodexStateHTTPRequest(c *gin.Context
 		bundle, err = s.codexTurnStateService.codexCookieBundleForSnapshot(attempt)
 		if err != nil {
 			// A ticket must not escape with a missing or expired Cookie snapshot.
-			attempt.Snapshot.Token = ""
+			if selected != nil && attempt.Snapshot.Token != "" {
+				finishCodexTurnStateHTTPAttempt(s.codexTurnStateService, attempt, false)
+				return rejectedOpenAIHTTPBundleRequest(request)
+			}
+			attempt.DiscardBundle("bundle_cookie_unavailable", attempt.OutboundBinding)
 			bundle = openaicookies.Bundle{}
 		}
 	}
@@ -99,6 +134,9 @@ func (s *OpenAIGatewayService) prepareOpenAICodexStateHTTPRequest(c *gin.Context
 	}
 	noteOpenAICodexStatePatch(c, attempt, body, finalBody)
 	collector := &codexTurnStateHTTPCollector{service: s.codexTurnStateService, attempt: attempt}
+	if selected != nil {
+		selected.physical = true
+	}
 	ctx := openaicookies.WithObserver(request.Context(), func(diagnostic openaicookies.Diagnostic) { observeCodexCookies(attempt, diagnostic) })
 	if attempt.Enabled {
 		ctx = openaicookies.WithBundle(ctx, bundle)
@@ -109,11 +147,14 @@ func (s *OpenAIGatewayService) prepareOpenAICodexStateHTTPRequest(c *gin.Context
 			failCodexCookieResponse(attempt)
 		})
 		ctx = openaicookies.WithSendGuard(ctx, func(outbound *http.Request) bool {
-			if (bundle.Fresh() || bundle.ValidAt(s.codexTurnStateService.now())) && s.codexTurnStateService.ValidateCredentialHeaders(outbound.Context(), attempt, outbound.Header) {
+			if (bundle.Fresh() || bundle.ValidAt(s.codexTurnStateService.now())) && s.codexTurnStateService.ValidateCredentialHeaders(outbound.Context(), attempt, outbound.Header) && s.validateOpenAIHTTPBundleRoute(outbound.Context(), c, account, attempt) && codexHTTPBundleWireModeMatches(attempt, outbound.Header) {
 				return true
 			}
 			return false
 		})
+		if selected != nil && attempt.Snapshot.Token != "" {
+			ctx = openaicookies.WithRejectedSendError(ctx, openaicookies.ErrBundleSendRejected)
+		}
 		var cookieAttempt *openaicookies.Attempt
 		ctx, cookieAttempt = openaicookies.WithAttempt(ctx)
 		attempt.cookieAttempt = cookieAttempt

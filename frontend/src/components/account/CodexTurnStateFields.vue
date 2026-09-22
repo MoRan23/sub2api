@@ -47,6 +47,7 @@
             data-testid="codex-turn-state-proxy-add" @click="addProxy">{{ t(`${prefix}.addCollectorProxy`) }}</button>
         </div>
         <p class="input-hint">{{ t(`${prefix}.proxyHint`) }}</p>
+        <p class="input-hint" data-testid="codex-turn-state-bundle-routing-hint">{{ t(`${prefix}.bundleRoutingHint`) }}</p>
         <p class="input-hint">{{ t(`${prefix}.proxyRotationHint`) }}</p>
       </div>
     </template>

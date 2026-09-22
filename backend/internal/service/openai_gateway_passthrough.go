@@ -18,6 +18,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -352,6 +353,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		upstreamReq = markOpenAIGuardianSourceHTTPRequest(upstreamReq, c, account)
 		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, withCodexTelemetryGatewayContext(c.Request.Context(), c, account, "http"))
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+		if errors.Is(err, openaicookies.ErrBundleSendRejected) {
+			return nil, err
+		}
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {
 			// Transport-level failure (proxy/DNS/TCP/TLS — no HTTP response). Convert to
@@ -1268,8 +1272,8 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 	canonicalModel := canonicalOpenAIAccountSchedulingModel(account, reqModel)
 	shouldDisable := s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, canonicalModel)
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-		ProxyID:              opsUpstreamProxyID(account),
-		ProxyName:            opsUpstreamProxyName(account),
+		ProxyID:              opsOpenAIOutboundProxyID(c, account),
+		ProxyName:            opsOpenAIOutboundProxyName(c, account),
 		Platform:             account.Platform,
 		AccountID:            account.ID,
 		AccountName:          account.Name,
@@ -1336,8 +1340,8 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 		_ = s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, canonicalModel)
 	}
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-		ProxyID:              opsUpstreamProxyID(account),
-		ProxyName:            opsUpstreamProxyName(account),
+		ProxyID:              opsOpenAIOutboundProxyID(c, account),
+		ProxyName:            opsOpenAIOutboundProxyName(c, account),
 		Platform:             account.Platform,
 		AccountID:            account.ID,
 		AccountName:          account.Name,
@@ -2057,8 +2061,8 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 	if c != nil {
 		setOpsUpstreamError(c, statusCode, message, detail)
 		event := OpsUpstreamErrorEvent{
-			ProxyID:            opsUpstreamProxyID(account),
-			ProxyName:          opsUpstreamProxyName(account),
+			ProxyID:            opsOpenAIOutboundProxyID(c, account),
+			ProxyName:          opsOpenAIOutboundProxyName(c, account),
 			Platform:           PlatformOpenAI,
 			UpstreamStatusCode: statusCode,
 			UpstreamRequestID:  strings.TrimSpace(upstreamRequestID),

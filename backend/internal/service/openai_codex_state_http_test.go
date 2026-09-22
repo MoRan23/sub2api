@@ -203,6 +203,10 @@ func TestCodexStateHTTPFailsOpenAndIgnoresNonResponses(t *testing.T) {
 				service.recordFingerprintObservationWithBody(c, account, installationIDResolution{}, out.Header, got)
 				responseToken := codexStateTestToken(10, state.now().Add(-time.Minute))
 				response := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"X-Codex-Turn-State": {responseToken}}, Body: io.NopCloser(strings.NewReader(""))}
+				response, err = openaicookies.NewManager().Wrap(openAIPluginRoundTripFunc(func(*http.Request) (*http.Response, error) {
+					return response, nil
+				})).RoundTrip(out)
+				require.NoError(t, err)
 				observeCodexTurnStateHTTPResponse(out, response, nil)
 				require.Empty(t, collector.attempt.candidates, "passive diagnostics must not retain response tokens")
 				markCodexTurnStateHTTPDelivered(response)

@@ -25,9 +25,10 @@ func TestCodexStateListByAccountsUsesOneQueryWithLiveGenerationFilter(t *testing
 		"demand_reason", "demand_at", "history_proof_observed_at", "collection_status", "collection_reason",
 		"collector_proxy_id", "collector_extended_count", "last_collector_proxy_id", "collector_attempt_id",
 		"business_in_flight", "authorization_generation", "encrypted_cookie_bundle", "cookie_bundle_expires_at",
-	}).AddRow(3, "windows", "gpt-5.3", "generation-3", 2, "encrypted-one", now, now.Add(service.CodexTurnStateLifetime), 292, 10, "business", "target", "", now, nil, nil, false, "", "", nil, nil, "", "", nil, 0, nil, nil, true, "auth-3", "encrypted-cookie-one", now.Add(time.Minute)).
-		AddRow(3, "linux", "gpt-5.4", "generation-3", 4, "encrypted-two", now, now.Add(service.CodexTurnStateLifetime), 332, 12, "collector", "target", "", now, now, now.Add(time.Minute), false, "", "", nil, nil, "", "", 202, 2, 101, "06aee3d4-720c-4e11-aeb4-0f0be2dcc027", false, "auth-3", "encrypted-cookie-two", nil).
-		AddRow(9, "macos", "gpt-5.4", "generation-9", 1, "", nil, nil, 0, 0, "", "", "missing", now, nil, nil, true, "authorization_failed", "extended_shape", now, now, "paused", "authorization_failed", 101, 1, 101, nil, true, "auth-9", "", nil)
+		"bundle_wire_mode", "bundle_egress_kind", "bundle_proxy_id", "bundle_proxy_route_generation", "last_eligible_collection_at", "bundle_invalidation_version",
+	}).AddRow(3, "windows", "gpt-5.3", "generation-3", 2, "encrypted-one", now, now.Add(service.CodexTurnStateLifetime), 292, 10, "business", "target", "", now, nil, nil, false, "", "", nil, nil, "", "", nil, 0, nil, nil, true, "auth-3", "encrypted-cookie-one", now.Add(time.Minute), "responses", "direct", 0, 0, now, 1).
+		AddRow(3, "linux", "gpt-5.4", "generation-3", 4, "encrypted-two", now, now.Add(service.CodexTurnStateLifetime), 332, 12, "collector", "target", "", now, now, now.Add(time.Minute), false, "", "", nil, nil, "", "", 202, 2, 101, "06aee3d4-720c-4e11-aeb4-0f0be2dcc027", false, "auth-3", "encrypted-cookie-two", nil, "responses", "proxy", 202, 7, now, 1).
+		AddRow(9, "macos", "gpt-5.4", "generation-9", 1, "", nil, nil, 0, 0, "", "", "missing", now, nil, nil, true, "authorization_failed", "extended_shape", now, now, "paused", "authorization_failed", 101, 1, 101, nil, true, "auth-9", "", nil, "", "", 0, 0, nil, 1)
 	// Match the security predicates explicitly so an accidentally broader batch
 	// query cannot expose a disabled/deleted account or an obsolete generation.
 	mock.ExpectQuery(`(?s)SELECT .* FROM openai_codex_state s\s+JOIN accounts a ON a.id=s.owner_account_id WHERE s.owner_account_id = ANY\(\$1\) AND ` + regexp.QuoteMeta(codexStateLiveAccount) + `\s+ORDER BY s.owner_account_id, s.model`).
@@ -43,6 +44,11 @@ func TestCodexStateListByAccountsUsesOneQueryWithLiveGenerationFilter(t *testing
 	require.Equal(t, "encrypted-one", records[0].EncryptedToken, "repository keeps ciphertext opaque for the status projection")
 	require.Equal(t, "encrypted-cookie-one", records[0].EncryptedCookieBundle)
 	require.Equal(t, "auth-3", records[0].AuthorizationGeneration)
+	require.Equal(t, service.CodexTurnStateBundleBinding{WireMode: "responses", EgressKind: "direct"}, records[0].BundleBinding)
+	require.Equal(t, service.CodexTurnStateBundleBinding{WireMode: "responses", EgressKind: "proxy", ProxyID: 202, ProxyRouteGeneration: 7}, records[1].BundleBinding)
+	require.Equal(t, now, records[0].LastEligibleCollectionAt)
+	require.EqualValues(t, 1, records[0].BundleInvalidationVersion)
+	require.True(t, records[2].LastEligibleCollectionAt.IsZero())
 	require.Equal(t, now.Add(time.Minute), *records[0].CookieBundleExpiresAt)
 	require.Nil(t, records[1].CookieBundleExpiresAt)
 	require.Equal(t, now.Add(service.CodexTurnStateLifetime), records[0].ExpiresAt)

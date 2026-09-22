@@ -13,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
@@ -22,6 +23,12 @@ func ptrUint64(v uint64) *uint64 { return &v }
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	return s.withOpenAIHTTPBundleBaseline(c, account, func() (*OpenAIForwardResult, error) {
+		return s.forwardWithOpenAIHTTPBundle(ctx, c, account, body)
+	})
+}
+
+func (s *OpenAIGatewayService) forwardWithOpenAIHTTPBundle(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	ctx, account, scopeErr := s.prepareOpenAIOAuthRequestScope(ctx, c, account, body)
 	if scopeErr != nil {
 		return nil, scopeErr
@@ -90,6 +97,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
 	}
 
+	s.prepareOpenAIHTTPBundleModel(ctx, c, account, body, "responses", "")
 	body = s.prepareOpenAIRequestTimezone(ctx, c, account, body, account.IsOpenAIPassthroughEnabled())
 	normalizedBody, normalized, err := normalizeOpenAICodexCompactReasoningEffortForAccount(c, account, body)
 	if err != nil {
@@ -1062,6 +1070,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		upstreamReq = markOpenAIGuardianSourceHTTPRequest(upstreamReq, c, account)
 		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, withCodexTelemetryGatewayContext(c.Request.Context(), c, account, "http"))
 		resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
+		if errors.Is(err, openaicookies.ErrBundleSendRejected) {
+			if headerGuard != nil {
+				headerGuard.close()
+			}
+			return nil, err
+		}
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		// A plugin may report an uncertain physical send at the same instant the
 		// response-header deadline fires. Preserve that stronger no-replay signal
@@ -1084,7 +1098,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			headerGuard.close()
 			return nil, s.newOpenAIFirstOutputTimeoutError(
-				ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
+				ctx, c, account, opsOpenAIOutboundProxyID(c, account), opsOpenAIOutboundProxyName(c, account),
 				startTime, originalModel, reasoningEffortValue,
 				firstOutputTimeout, "response_headers", nil,
 			)
@@ -1187,8 +1201,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					upstreamDetail = truncateString(string(respBody), maxBytes)
 				}
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-					ProxyID:            opsUpstreamProxyID(account),
-					ProxyName:          opsUpstreamProxyName(account),
+					ProxyID:            opsOpenAIOutboundProxyID(c, account),
+					ProxyName:          opsOpenAIOutboundProxyName(c, account),
 					Platform:           account.Platform,
 					AccountID:          account.ID,
 					AccountName:        account.Name,
@@ -1256,8 +1270,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					compactResp, compactBody := openAICompactFallbackErrorResponse(resp, signal)
 					if s.shouldFailoverOpenAIUpstreamResponse(account, compactResp.StatusCode, signal.message, compactBody) {
 						appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-							ProxyID:            opsUpstreamProxyID(account),
-							ProxyName:          opsUpstreamProxyName(account),
+							ProxyID:            opsOpenAIOutboundProxyID(c, account),
+							ProxyName:          opsOpenAIOutboundProxyName(c, account),
 							Platform:           account.Platform,
 							AccountID:          account.ID,
 							AccountName:        account.Name,

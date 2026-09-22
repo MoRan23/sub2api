@@ -29,6 +29,7 @@ type CodexCookieDiagnosticCookie struct {
 
 // Names and absolute expiry only: neither cookie values nor recoverable hashes.
 type CodexCookieDiagnostic struct {
+	SendState    string                        `json:"send_state,omitempty"`
 	Sent         bool                          `json:"sent"`
 	Source       string                        `json:"source,omitempty"`
 	Names        []string                      `json:"names,omitempty"`
@@ -40,7 +41,7 @@ type CodexCookieDiagnostic struct {
 }
 
 func codexCookieDiagnostic(value openaicookies.Diagnostic) *CodexCookieDiagnostic {
-	d := &CodexCookieDiagnostic{Sent: value.Sent, Source: value.Source, Names: append([]string(nil), value.Names...), Reason: value.Reason, SentCount: value.SentCount, SavedCount: value.SavedCount, DeletedCount: value.DeletedCount}
+	d := &CodexCookieDiagnostic{SendState: value.SendState, Sent: value.Sent, Source: value.Source, Names: append([]string(nil), value.Names...), Reason: value.Reason, SentCount: value.SentCount, SavedCount: value.SavedCount, DeletedCount: value.DeletedCount}
 	for _, cookie := range value.Cookies {
 		item := CodexCookieDiagnosticCookie{Name: cookie.Name}
 		if cookie.ExpiresAt != nil {
@@ -218,9 +219,55 @@ func observeCodexCookies(a *CodexTurnStateAttempt, diagnostic openaicookies.Diag
 		return
 	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if !a.finished {
 		a.modelEvidence.headers.CookieDiagnostic = codexCookieDiagnostic(diagnostic)
+	}
+	deferred, observation, binding := a.deferHTTPActivity, a.wireObservation, a.OutboundBinding
+	a.mu.Unlock()
+	if !deferred {
+		return
+	}
+	if observation == nil {
+		// Account tests and auxiliary HTTP callers may have no Gin observation.
+		// Their activity is still bound only to the actual transport boundary.
+		if diagnostic.SendState == "sent" {
+			a.mu.Lock()
+			first := !a.historyPhysicalBound
+			if first {
+				a.historyPhysicalBound, a.businessSentAt = true, time.Now()
+			}
+			service := a.historyService
+			a.mu.Unlock()
+			if first && service != nil {
+				recordCodexDeliveredHistory(a)
+				service.completeBusinessSent(a)
+			}
+		}
+		return
+	}
+	observation.mu.Lock()
+	observation.value.CookieDiagnostic = codexCookieDiagnostic(diagnostic)
+	firstSend := diagnostic.SendState == "sent" && !observation.httpSendReached
+	if firstSend {
+		observation.httpSendReached = true
+		observation.sendStartedAt = time.Now()
+		if binding.EgressKind == "proxy" || binding.EgressKind == "direct" {
+			id := binding.ProxyID
+			observation.value.ActualProxyID = &id
+			observation.value.RouteSource = "account"
+			if observation.value.Action == "injected" {
+				observation.value.RouteSource = "bundle"
+			}
+		}
+	} else if diagnostic.SendState == "not_sent" && !observation.httpSendReached {
+		observation.value.ActualProxyID = nil
+		observation.value.RouteSource = ""
+		observation.value.RequestSentAt = nil
+	}
+	globalFingerprintObserver.updateCodexTurnStateObservation(observation.sequence, observation.value)
+	observation.mu.Unlock()
+	if firstSend {
+		bindCodexTurnStateSummarySequence(observation)
 	}
 }
 

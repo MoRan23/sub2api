@@ -37,6 +37,8 @@ type Proxy struct {
 	Password *string `json:"password,omitempty"`
 	// Status holds the value of the "status" field.
 	Status string `json:"status,omitempty"`
+	// Monotonic generation of the proxy endpoint and credentials.
+	RouteGeneration int64 `json:"route_generation,omitempty"`
 	// Proxy expiration time (NULL means never expires).
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	// Fallback target on expiry: none | proxy | direct.
@@ -87,7 +89,7 @@ func (*Proxy) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case proxy.FieldID, proxy.FieldPort, proxy.FieldBackupProxyID, proxy.FieldExpiryWarnDays:
+		case proxy.FieldID, proxy.FieldPort, proxy.FieldRouteGeneration, proxy.FieldBackupProxyID, proxy.FieldExpiryWarnDays:
 			values[i] = new(sql.NullInt64)
 		case proxy.FieldName, proxy.FieldProtocol, proxy.FieldHost, proxy.FieldUsername, proxy.FieldPassword, proxy.FieldStatus, proxy.FieldFallbackMode:
 			values[i] = new(sql.NullString)
@@ -176,6 +178,12 @@ func (_m *Proxy) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field status", values[i])
 			} else if value.Valid {
 				_m.Status = value.String
+			}
+		case proxy.FieldRouteGeneration:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field route_generation", values[i])
+			} else if value.Valid {
+				_m.RouteGeneration = value.Int64
 			}
 		case proxy.FieldExpiresAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -284,6 +292,9 @@ func (_m *Proxy) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("status=")
 	builder.WriteString(_m.Status)
+	builder.WriteString(", ")
+	builder.WriteString("route_generation=")
+	builder.WriteString(fmt.Sprintf("%v", _m.RouteGeneration))
 	builder.WriteString(", ")
 	if v := _m.ExpiresAt; v != nil {
 		builder.WriteString("expires_at=")

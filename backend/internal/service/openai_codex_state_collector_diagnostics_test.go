@@ -127,7 +127,7 @@ func TestCodexTurnStateCollectorSendBoundaryEvidence(t *testing.T) {
 		require.Equal(t, sent, !result.requestSentAt.IsZero())
 	}
 	collector := NewCodexTurnStateHTTPCollector(func(context.Context, CodexTurnStateCollectRequest, *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\"}\n\n"))}, nil
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n"))}, nil
 	})
 	result, err := collector.Collect(context.Background(), CodexTurnStateCollectRequest{Account: account, ProxyID: 2, Model: "gpt-5.6-sol"})
 	require.NoError(t, err)

@@ -50,7 +50,7 @@ func codexCollectorTransportFixture() (*Account, *Proxy) {
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, ProxyID: &businessProxyID,
 		Credentials: map[string]any{"access_token": "test-only-access", "chatgpt_account_id": "test-owner", "plan_type": "plus"},
 		Extra:       map[string]any{CodexTurnStateExtraKey: map[string]any{"enabled": true, "account_type": "personal", "collector_proxy_id": float64(2)}, CodexTurnStateGenerationExtraKey: "generation-1"}}
-	proxy := &Proxy{ID: 2, Protocol: "http", Host: "collector.invalid", Port: 8080, Status: StatusActive}
+	proxy := &Proxy{ID: 2, Protocol: "http", Host: "collector.invalid", Port: 8080, Status: StatusActive, RouteGeneration: 1}
 	return account, proxy
 }
 
@@ -63,15 +63,20 @@ func TestCodexTurnStateCollectorTransportIsolatedExplicitProxy(t *testing.T) {
 	request, err := http.NewRequest(http.MethodPost, chatgptCodexURL, strings.NewReader("{}"))
 	require.NoError(t, err)
 	request.Header["x-Codex-Turn-state"] = []string{"must-not-be-sent"}
+	request.Header["coOKie"] = []string{"must-not-be-sent"}
 	var sentAt time.Time
+	var binding CodexTurnStateBundleBinding
 	response, err := do(context.Background(), CodexTurnStateCollectRequest{Account: account, Model: "gpt-5.4", ProxyID: 2, validateModelPolicy: allowCodexCollectorTestModelPolicy,
-		onSend: func(at time.Time) { sentAt = at }}, request)
+		CaptureBundleBinding: func(value CodexTurnStateBundleBinding) { binding = value }, onSend: func(at time.Time) { sentAt = at }}, request)
 	require.NoError(t, err)
 	require.False(t, sentAt.IsZero())
 	require.NoError(t, response.Body.Close())
 	require.Equal(t, 1, upstream.calls)
 	require.Equal(t, proxy.URL(), upstream.proxyURL)
 	require.Equal(t, account.ID, upstream.accountID)
+	require.Equal(t, CodexTurnStateBundleBinding{WireMode: "lite", EgressKind: "proxy", ProxyID: proxy.ID, ProxyRouteGeneration: proxy.RouteGeneration}, binding)
+	require.True(t, upstream.request.Close)
+	require.Equal(t, "true", upstream.request.Header.Get(responsesLiteHeaderKey))
 	require.True(t, HTTPUpstreamRedirectsDisabled(upstream.request.Context()))
 	require.Equal(t, HTTPUpstreamProfileCodexAuxiliary, HTTPUpstreamProfileFromContext(upstream.request.Context()))
 	scope, ok := codexnative.ScopeFromContext(upstream.request.Context())
@@ -84,13 +89,14 @@ func TestCodexTurnStateCollectorTransportIsolatedExplicitProxy(t *testing.T) {
 	require.NotEmpty(t, upstream.request.Header.Get("Version"))
 	for key := range upstream.request.Header {
 		require.False(t, strings.EqualFold(key, "x-codex-turn-state"))
+		require.False(t, strings.EqualFold(key, "Cookie"))
 	}
 	// Cloning must not mutate a caller-owned request or its original headers.
 	require.Equal(t, []string{"must-not-be-sent"}, request.Header["x-Codex-Turn-state"])
 }
 
 func TestCodexTurnStateCollectorTransportRejectsUnavailableProxyWithoutFallback(t *testing.T) {
-	for _, mode := range []string{"missing", "inactive", "expired"} {
+	for _, mode := range []string{"missing", "inactive", "expired", "unversioned", "wrong_proxy"} {
 		t.Run(mode, func(t *testing.T) {
 			account, proxy := codexCollectorTransportFixture()
 			proxy.FallbackMode = FallbackModeDirect
@@ -102,6 +108,10 @@ func TestCodexTurnStateCollectorTransportRejectsUnavailableProxyWithoutFallback(
 			case "expired":
 				expired := time.Now().Add(-time.Minute)
 				proxy.ExpiresAt = &expired
+			case "unversioned":
+				proxy.RouteGeneration = 0
+			case "wrong_proxy":
+				proxy.ID = 3
 			}
 			upstream := &codexCollectorTransportUpstream{}
 			do := ProvideCodexTurnStateCollectorHTTPDo(codexCollectorTransportAccounts{account: account}, codexCollectorTransportProxies{proxy: proxy}, upstream)

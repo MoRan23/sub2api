@@ -48,6 +48,8 @@ func NewCodexTurnStateHTTPCollector(do CodexTurnStateCollectorHTTPDo) *CodexTurn
 // Collect creates its own identity and short, constant body. It never receives
 // user messages, continuation state, a business proxy, or a daily root identity.
 func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTurnStateCollectRequest) (result CodexTurnStateCollectResult, collectErr error) {
+	ctx, cancel := context.WithTimeout(ctx, CodexTurnStateCollectTimeout)
+	defer cancel()
 	var evidence codexModelEvidenceObserver
 	var cookieMu sync.Mutex
 	var cookieDiagnostic *CodexCookieDiagnostic
@@ -69,10 +71,20 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 		return result, errors.New("collector_not_configured")
 	}
 	body, _ := json.Marshal(map[string]any{
-		"model": input.Model, "stream": true, "store": false, "instructions": "Reply with OK.",
-		"input":               []any{map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "Reply with OK."}}}},
-		"parallel_tool_calls": true,
+		"model": input.Model, "stream": true, "store": false,
+		"instructions": "Reply with exactly: pong. Do not call tools.",
+		"input": []any{
+			map[string]any{"type": "additional_tools", "role": "developer", "tools": []any{
+				map[string]any{"type": "namespace", "name": "codex", "description": "local tools", "tools": []any{
+					map[string]any{"type": "function", "name": "noop", "description": "Do nothing.", "strict": false,
+						"parameters": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}},
+				}},
+			}},
+			map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "ping"}}},
+		},
+		"parallel_tool_calls": false,
 		"include":             []string{"reasoning.encrypted_content"},
+		"reasoning":           map[string]any{"context": "all_turns"},
 	})
 	trace := &codexTurnStateCollectorTrace{stage: "unknown"}
 	ctx = httptrace.WithClientTrace(ctx, trace.hooks())
@@ -83,12 +95,22 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 			onSend(at)
 		}
 	}
+	captureBinding := input.CaptureBundleBinding
+	input.CaptureBundleBinding = func(binding CodexTurnStateBundleBinding) {
+		result.BundleBinding = binding
+		if captureBinding != nil {
+			captureBinding(binding)
+		}
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, chatgptCodexURL, bytes.NewReader(body))
 	if err != nil {
 		return result, err
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "text/event-stream")
+	request.Header.Set("OpenAI-Beta", "responses=experimental")
+	request.Header.Set(responsesLiteHeaderKey, "true")
+	request.Close = true
 	request.Header.Set("Authorization", "Bearer "+input.Account.GetCredential("access_token"))
 	if accountID := input.Account.GetCredential("chatgpt_account_id"); accountID != "" {
 		request.Header.Set("ChatGPT-Account-Id", accountID)
@@ -154,13 +176,15 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 			}
 		}
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
+	if response.StatusCode != http.StatusOK {
 		result.Tokens = nil
 		return result, nil
 	}
 	// A header alone is not enough: collect only from a completed Responses
 	// stream. Cap total input so malformed endpoints cannot allocate unboundedly.
-	scanner := bufio.NewScanner(io.LimitReader(response.Body, 2<<20))
+	const maxResponseBytes = 1 << 20
+	limited := &io.LimitedReader{R: response.Body, N: maxResponseBytes + 1}
+	scanner := bufio.NewScanner(limited)
 	scanner.Buffer(make([]byte, 4096), 256<<10)
 	var eventData []byte
 	var eventName string
@@ -175,10 +199,16 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 			return nil
 		}
 		var event struct {
-			Type string `json:"type"`
+			Type     string          `json:"type"`
+			Status   string          `json:"status"`
+			Error    json.RawMessage `json:"error"`
+			Response *struct {
+				Status string          `json:"status"`
+				Error  json.RawMessage `json:"error"`
+			} `json:"response"`
 		}
 		if json.Unmarshal(data, &event) != nil {
-			return nil
+			return errCodexTurnStateCollectorResponseIncomplete
 		}
 		if event.Type != "" {
 			eventType = event.Type
@@ -186,9 +216,17 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 		// Preserve the actual upstream declaration, before any conversion. A
 		// header routing hint is not evidence of the model in this response.
 		evidence.observePayload([]byte(openAICompatPayloadWithEventType(string(data), eventType)))
-		if eventType == "error" || eventType == "response.failed" || eventType == "response.incomplete" {
+		nestedFailed, nestedIncomplete, nestedError := false, false, false
+		if event.Response != nil {
+			nestedFailed = event.Response.Status == "failed"
+			nestedIncomplete = event.Response.Status == "incomplete"
+			nestedError = len(event.Response.Error) > 0 && !bytes.Equal(bytes.TrimSpace(event.Response.Error), []byte("null"))
+		}
+		rootError := len(event.Error) > 0 && !bytes.Equal(bytes.TrimSpace(event.Error), []byte("null"))
+		if eventType == "error" || eventType == "response.failed" || eventType == "response.incomplete" ||
+			event.Status == "failed" || event.Status == "incomplete" || nestedFailed || nestedIncomplete || rootError || nestedError {
 			failureErr := errCodexTurnStateCollectorResponseFailed
-			if eventType == "response.incomplete" {
+			if eventType == "response.incomplete" || event.Status == "incomplete" || nestedIncomplete {
 				failureErr = errCodexTurnStateCollectorResponseIncomplete
 			}
 			var failure struct {
@@ -222,6 +260,9 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 			return failureErr
 		}
 		if eventType == "response.completed" {
+			if event.Response == nil || event.Response.Status != "completed" {
+				return errCodexTurnStateCollectorResponseIncomplete
+			}
 			completed = true
 		}
 		for _, token := range CodexTurnStateTokensFromEvent(data) {
@@ -238,9 +279,6 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 			if err := consume(); err != nil {
 				result.Tokens = nil
 				return result, err
-			}
-			if completed {
-				break
 			}
 			continue
 		}
@@ -270,9 +308,14 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 		}
 		return result, errCodexTurnStateCollectorStreamFailed
 	}
-	if err := consume(); err != nil {
+	if limited.N == 0 {
 		result.Tokens = nil
-		return result, err
+		return result, errCodexTurnStateCollectorEventTooLarge
+	}
+	// A valid JSON event without its final SSE separator can still be truncated.
+	if len(eventData) != 0 {
+		result.Tokens = nil
+		return result, errCodexTurnStateCollectorResponseIncomplete
 	}
 	if !completed {
 		result.Tokens = nil

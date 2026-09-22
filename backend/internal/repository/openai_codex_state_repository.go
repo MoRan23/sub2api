@@ -49,7 +49,9 @@ const codexStateColumns = `s.owner_account_id, s.source_os, s.model, s.generatio
 	 EXISTS (SELECT 1 FROM openai_codex_state_business_leases state_lease
 	 WHERE state_lease.owner_account_id=s.owner_account_id AND state_lease.model=s.model
 	 AND state_lease.generation=s.generation AND state_lease.lease_until>NOW()),
-	 s.authorization_generation::text, s.encrypted_cookie_bundle, s.cookie_bundle_expires_at`
+		 s.authorization_generation::text, s.encrypted_cookie_bundle, s.cookie_bundle_expires_at,
+		 s.bundle_wire_mode, s.bundle_egress_kind, s.bundle_proxy_id, s.bundle_proxy_route_generation,
+		 s.last_eligible_collection_at, s.bundle_invalidation_version`
 
 func validateCodexStateKey(key service.CodexTurnStateKey) error {
 	if key.OwnerAccountID <= 0 || strings.TrimSpace(key.Model) == "" || strings.TrimSpace(key.Generation) == "" {
@@ -165,11 +167,17 @@ func (r *openAICodexStateRepository) BeginBusiness(ctx context.Context, key serv
 		authorization_generation = EXCLUDED.authorization_generation,
 		source_os = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.source_os ELSE EXCLUDED.source_os END,
 		version = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation)
-			AND NOT (openai_codex_state.last_business_at > $4 AND openai_codex_state.last_business_at < $5 AND openai_codex_state.demand_reason <> '')
+			AND NOT (COALESCE(openai_codex_state.last_eligible_collection_at, $4) > $4 AND COALESCE(openai_codex_state.last_eligible_collection_at, $4) < $5 AND openai_codex_state.demand_reason <> '')
 			THEN openai_codex_state.version ELSE openai_codex_state.version + 1 END,
 		encrypted_token = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.encrypted_token ELSE '' END,
 		encrypted_cookie_bundle = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.encrypted_cookie_bundle ELSE '' END,
 		cookie_bundle_expires_at = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.cookie_bundle_expires_at ELSE NULL END,
+		bundle_wire_mode = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.bundle_wire_mode ELSE '' END,
+		bundle_egress_kind = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.bundle_egress_kind ELSE '' END,
+		bundle_proxy_id = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.bundle_proxy_id ELSE 0 END,
+		bundle_proxy_route_generation = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.bundle_proxy_route_generation ELSE 0 END,
+		bundle_invalidation_version = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.bundle_invalidation_version ELSE openai_codex_state.bundle_invalidation_version + 1 END,
+		last_eligible_collection_at = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.last_eligible_collection_at ELSE NULL END,
 		issued_at = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.issued_at ELSE NULL END,
 		expires_at = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.expires_at ELSE NULL END,
 		token_length = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.token_length ELSE 0 END,
@@ -179,7 +187,7 @@ func (r *openAICodexStateRepository) BeginBusiness(ctx context.Context, key serv
 		refresh_reason = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.refresh_reason ELSE '' END,
 		last_collected_at = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.last_collected_at ELSE NULL END,
 		next_collect_at = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation)
-			AND (openai_codex_state.last_business_at <= $4 OR openai_codex_state.last_business_at >= $5 OR openai_codex_state.collector_paused
+			AND (COALESCE(openai_codex_state.last_eligible_collection_at, $4) <= $4 OR COALESCE(openai_codex_state.last_eligible_collection_at, $4) >= $5 OR openai_codex_state.collector_paused
 			OR openai_codex_state.last_error IN ('account_cooldown','collector_rate_limited'))
 			THEN openai_codex_state.next_collect_at ELSE NULL END,
 		collector_paused = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.collector_paused ELSE FALSE END,
@@ -187,19 +195,19 @@ func (r *openAICodexStateRepository) BeginBusiness(ctx context.Context, key serv
 		collector_extended_count = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.collector_extended_count ELSE 0 END,
 		last_collector_proxy_id = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.last_collector_proxy_id ELSE NULL END,
 		collector_attempt_id = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation)
-			AND (openai_codex_state.last_business_at <= $4 OR openai_codex_state.last_business_at >= $5)
+			AND (COALESCE(openai_codex_state.last_eligible_collection_at, $4) <= $4 OR COALESCE(openai_codex_state.last_eligible_collection_at, $4) >= $5)
 			THEN openai_codex_state.collector_attempt_id ELSE NULL END,
 		last_error = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.last_error ELSE '' END,
-		demand_reason = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) AND (openai_codex_state.last_business_at <= $4 OR openai_codex_state.last_business_at >= $5) THEN openai_codex_state.demand_reason ELSE '' END,
-		demand_at = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) AND (openai_codex_state.last_business_at <= $4 OR openai_codex_state.last_business_at >= $5) THEN openai_codex_state.demand_at ELSE NULL END,
+		demand_reason = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) AND (COALESCE(openai_codex_state.last_eligible_collection_at, $4) <= $4 OR COALESCE(openai_codex_state.last_eligible_collection_at, $4) >= $5) THEN openai_codex_state.demand_reason ELSE '' END,
+		demand_at = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) AND (COALESCE(openai_codex_state.last_eligible_collection_at, $4) <= $4 OR COALESCE(openai_codex_state.last_eligible_collection_at, $4) >= $5) THEN openai_codex_state.demand_at ELSE NULL END,
 		history_proof_observed_at = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.history_proof_observed_at ELSE NULL END,
 		collection_status = CASE WHEN (openai_codex_state.generation <> EXCLUDED.generation OR openai_codex_state.authorization_generation <> EXCLUDED.authorization_generation) THEN ''
-			WHEN openai_codex_state.last_business_at <= $4 OR openai_codex_state.last_business_at >= $5 OR openai_codex_state.collector_paused
+			WHEN COALESCE(openai_codex_state.last_eligible_collection_at, $4) <= $4 OR COALESCE(openai_codex_state.last_eligible_collection_at, $4) >= $5 OR openai_codex_state.collector_paused
 			OR openai_codex_state.last_error IN ('account_cooldown','collector_rate_limited')
 			THEN openai_codex_state.collection_status ELSE 'idle' END,
 		collection_reason = CASE WHEN (openai_codex_state.generation <> EXCLUDED.generation OR openai_codex_state.authorization_generation <> EXCLUDED.authorization_generation) THEN ''
 			WHEN openai_codex_state.collection_reason = 'collector_proxy_changed' THEN openai_codex_state.collection_reason
-			WHEN openai_codex_state.last_business_at <= $4 OR openai_codex_state.last_business_at >= $5 OR openai_codex_state.collector_paused
+			WHEN COALESCE(openai_codex_state.last_eligible_collection_at, $4) <= $4 OR COALESCE(openai_codex_state.last_eligible_collection_at, $4) >= $5 OR openai_codex_state.collector_paused
 			OR openai_codex_state.last_error IN ('account_cooldown','collector_rate_limited')
 			THEN openai_codex_state.collection_reason ELSE 'waiting_business_response' END,
 		last_business_at = CASE WHEN (openai_codex_state.generation = EXCLUDED.generation AND openai_codex_state.authorization_generation = EXCLUDED.authorization_generation) THEN openai_codex_state.last_business_at ELSE EXCLUDED.last_business_at END,
@@ -233,6 +241,14 @@ func (r *openAICodexStateRepository) BeginBusiness(ctx context.Context, key serv
 }
 
 func (r *openAICodexStateRepository) MarkBusinessSent(ctx context.Context, key service.CodexTurnStateKey, sentAt time.Time) error {
+	return r.markSent(ctx, key, sentAt, "last_business_at")
+}
+
+func (r *openAICodexStateRepository) MarkEligibleCollectionSent(ctx context.Context, key service.CodexTurnStateKey, sentAt time.Time) error {
+	return r.markSent(ctx, key, sentAt, "last_eligible_collection_at")
+}
+
+func (r *openAICodexStateRepository) markSent(ctx context.Context, key service.CodexTurnStateKey, sentAt time.Time, column string) error {
 	if err := r.databaseAvailable(); err != nil {
 		return err
 	}
@@ -252,7 +268,7 @@ func (r *openAICodexStateRepository) MarkBusinessSent(ctx context.Context, key s
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE openai_codex_state
-		SET last_business_at=GREATEST(last_business_at,$4), updated_at=NOW()
+		SET `+column+`=GREATEST(`+column+`,$4), updated_at=NOW()
 		WHERE owner_account_id=$1 AND model=$2 AND generation=$3`, key.OwnerAccountID, key.Model, key.Generation, sentAt.UTC())
 	if err != nil {
 		return err
@@ -361,6 +377,8 @@ func (r *openAICodexStateRepository) CreateHistoryDemand(ctx context.Context, pr
 		collection_status=$20, collection_reason=$21,
 		collector_proxy_id=$22, collector_extended_count=$23, last_collector_proxy_id=$24,
 		collector_attempt_id=$25, source_os=$26, encrypted_cookie_bundle=$27, cookie_bundle_expires_at=$28,
+		bundle_wire_mode=$29, bundle_egress_kind=$30, bundle_proxy_id=$31, bundle_proxy_route_generation=$32,
+		last_eligible_collection_at=$33,
 		authorization_generation=(SELECT authorization_generation FROM account_openai_oauth_credentials WHERE account_id=$1), updated_at=NOW()
 		WHERE owner_account_id=$1 AND model=$2`, key.OwnerAccountID, key.Model, key.Generation,
 		record.EncryptedToken, codexStateNullableTime(record.IssuedAt), codexStateNullableTime(record.ExpiresAt),
@@ -369,7 +387,9 @@ func (r *openAICodexStateRepository) CreateHistoryDemand(ctx context.Context, pr
 		record.CollectorPaused, record.LastError, record.DemandReason, codexStateNullableTime(record.DemandAt), proof.ObservedAt,
 		record.CollectionStatus, record.CollectionReason, codexStateNullableID(record.CollectorProxyID),
 		record.CollectorExtendedCount, codexStateNullableID(record.LastCollectorProxyID), codexStateNullableString(record.CollectorAttemptID), service.NormalizeOpenAIOSFamily(record.OSFamily),
-		record.EncryptedCookieBundle, record.CookieBundleExpiresAt)
+		record.EncryptedCookieBundle, record.CookieBundleExpiresAt,
+		record.BundleBinding.WireMode, record.BundleBinding.EgressKind, record.BundleBinding.ProxyID, record.BundleBinding.ProxyRouteGeneration,
+		codexStateNullableTime(record.LastEligibleCollectionAt))
 	if err != nil {
 		return false, err
 	}
@@ -431,6 +451,9 @@ func (r *openAICodexStateRepository) SaveCAS(ctx context.Context, record service
 	if expectedVersion < 1 {
 		return false, errors.New("invalid Codex turn-state version")
 	}
+	if record.EncryptedToken == "" && record.EncryptedCookieBundle == "" {
+		record.BundleBinding = service.CodexTurnStateBundleBinding{}
+	}
 	// A new attempt may still carry an old rate-limit diagnostic. Its crash
 	// reservation is not a real account cooldown and must remain model-local.
 	extendCooldown := (record.LastError == "collector_rate_limited" || record.LastError == "account_cooldown") &&
@@ -446,10 +469,26 @@ func (r *openAICodexStateRepository) SaveCAS(ctx context.Context, record service
 	if err != nil || !policyLive {
 		return false, err
 	}
+	// Proxy writers lock the proxy before invalidating account snapshots. Take
+	// the same order so publication cannot race a changed connection identity.
+	bindingLive, err := lockCodexStateBundleProxy(ctx, tx, record)
+	if err != nil {
+		return false, err
+	}
 	live, err := lockCodexStateGeneration(ctx, tx, record.Key(), extendCooldown)
 	if err != nil || !live {
 		return false, err
 	}
+	if bindingLive {
+		bindingLive, err = codexStateBundleEgressAllowed(ctx, tx, record)
+		if err != nil {
+			return false, err
+		}
+	}
+	// A route change must reject new packages, but it must not freeze scheduling
+	// forever behind the unusable old package. The UPDATE below admits that case
+	// only when the complete stored package is unchanged. Keep this comparison in
+	// the CAS statement so concurrent publications cannot turn it into a bypass.
 	// Business activity may overlap collection. The UPDATE locks the state row
 	// and rechecks its version after any concurrent writer commits, preventing
 	// a late result from replacing a newer publication without waiting for leases.
@@ -463,10 +502,24 @@ func (r *openAICodexStateRepository) SaveCAS(ctx context.Context, record service
 		history_proof_observed_at=GREATEST(history_proof_observed_at,$20),
 		collection_status=$21, collection_reason=$22,
 		collector_proxy_id=$23, collector_extended_count=$24, last_collector_proxy_id=$25,
-		collector_attempt_id=$26, source_os=$27, encrypted_cookie_bundle=$29, cookie_bundle_expires_at=$30, updated_at=NOW()
+		collector_attempt_id=$26, source_os=$27, encrypted_cookie_bundle=$29, cookie_bundle_expires_at=$30,
+		bundle_wire_mode=$32, bundle_egress_kind=$33, bundle_proxy_id=$34, bundle_proxy_route_generation=$35,
+		last_eligible_collection_at=GREATEST(last_eligible_collection_at,$36),
+		bundle_invalidation_version=bundle_invalidation_version + CASE
+			WHEN encrypted_token<>'' AND encrypted_cookie_bundle<>'' AND ($5='' OR $29='') THEN 1 ELSE 0 END,
+		updated_at=NOW()
 		WHERE owner_account_id=$1 AND model=$2 AND generation=$3 AND version=$4
 		AND authorization_generation::text=$31
 		AND authorization_generation=(SELECT authorization_generation FROM account_openai_oauth_credentials WHERE account_id=$1)
+		AND (($37 AND ($33 <> 'proxy' OR EXISTS (SELECT 1 FROM proxies bundle_proxy
+			WHERE bundle_proxy.id=$34 AND bundle_proxy.route_generation=$35 AND bundle_proxy.deleted_at IS NULL
+			AND bundle_proxy.status='active' AND (bundle_proxy.expires_at IS NULL OR bundle_proxy.expires_at>clock_timestamp()))))
+			OR (encrypted_token=$5 AND encrypted_cookie_bundle=$29
+				AND issued_at IS NOT DISTINCT FROM $6 AND expires_at IS NOT DISTINCT FROM $7
+				AND cookie_bundle_expires_at IS NOT DISTINCT FROM $30
+				AND token_length=$8 AND cipher_blocks=$9 AND shape=$11
+				AND bundle_wire_mode=$32 AND bundle_egress_kind=$33
+				AND bundle_proxy_id=$34 AND bundle_proxy_route_generation=$35))
 		RETURNING owner_account_id,next_collect_at), updated_cooldown AS (
 		UPDATE accounts a SET codex_turn_state_retry_after=GREATEST(a.codex_turn_state_retry_after,s.next_collect_at)
 		FROM updated_state s WHERE a.id=s.owner_account_id AND a.deleted_at IS NULL AND $28
@@ -480,7 +533,9 @@ func (r *openAICodexStateRepository) SaveCAS(ctx context.Context, record service
 		record.DemandReason, codexStateNullableTime(record.DemandAt), codexStateNullableTime(record.HistoryProofObservedAt),
 		record.CollectionStatus, record.CollectionReason, codexStateNullableID(record.CollectorProxyID),
 		record.CollectorExtendedCount, codexStateNullableID(record.LastCollectorProxyID), codexStateNullableString(record.CollectorAttemptID), service.NormalizeOpenAIOSFamily(record.OSFamily), extendCooldown,
-		record.EncryptedCookieBundle, record.CookieBundleExpiresAt, record.AuthorizationGeneration).Scan(&changed)
+		record.EncryptedCookieBundle, record.CookieBundleExpiresAt, record.AuthorizationGeneration,
+		record.BundleBinding.WireMode, record.BundleBinding.EgressKind, record.BundleBinding.ProxyID, record.BundleBinding.ProxyRouteGeneration,
+		codexStateNullableTime(record.LastEligibleCollectionAt), bindingLive).Scan(&changed)
 	if err != nil {
 		return false, err
 	}
@@ -488,6 +543,48 @@ func (r *openAICodexStateRepository) SaveCAS(ctx context.Context, record service
 		return false, err
 	}
 	return changed, nil
+}
+
+func lockCodexStateBundleProxy(ctx context.Context, tx *sql.Tx, record service.CodexTurnStateRecord) (bool, error) {
+	if record.EncryptedToken == "" && record.EncryptedCookieBundle == "" {
+		return true, nil
+	}
+	binding := record.BundleBinding
+	if !binding.Valid() {
+		return false, nil
+	}
+	if binding.EgressKind == "direct" {
+		return true, nil
+	}
+	var id int64
+	err := tx.QueryRowContext(ctx, `SELECT id FROM proxies WHERE id=$1 AND route_generation=$2
+		AND deleted_at IS NULL AND status='active' AND (expires_at IS NULL OR expires_at>NOW()) FOR SHARE`,
+		binding.ProxyID, binding.ProxyRouteGeneration).Scan(&id)
+	return err == nil, ignoreCodexStateNoRows(err)
+}
+
+// The account row is already locked, so its original business route and collector
+// allowlist cannot change between this check and the publication.
+func codexStateBundleEgressAllowed(ctx context.Context, tx *sql.Tx, record service.CodexTurnStateRecord) (bool, error) {
+	if record.EncryptedToken == "" && record.EncryptedCookieBundle == "" {
+		return true, nil
+	}
+	var proxyID sql.NullInt64
+	var extra []byte
+	if err := tx.QueryRowContext(ctx, `SELECT proxy_id, extra FROM accounts WHERE id=$1`, record.OwnerAccountID).Scan(&proxyID, &extra); err != nil {
+		return false, err
+	}
+	if record.BundleBinding.EgressKind == "direct" {
+		return !proxyID.Valid || proxyID.Int64 == 0, nil
+	}
+	if proxyID.Valid && proxyID.Int64 == record.BundleBinding.ProxyID {
+		return true, nil
+	}
+	var account service.Account
+	if len(extra) != 0 && json.Unmarshal(extra, &account.Extra) != nil {
+		return false, errors.New("invalid Codex turn-state account metadata")
+	}
+	return slices.Contains(service.CodexTurnStateCollectorProxyIDs(service.CodexTurnStateConfigForAccount(&account)), record.BundleBinding.ProxyID), nil
 }
 
 func (r *openAICodexStateRepository) ListActive(ctx context.Context, since time.Time, limit int) ([]service.CodexTurnStateRecord, error) {
@@ -500,7 +597,7 @@ func (r *openAICodexStateRepository) ListActive(ctx context.Context, since time.
 	// Filter before LIMIT so fresh tokens, cooldowns, and learning-only accounts
 	// cannot starve due work. Refresh lead tracks the service policy constant.
 	return r.list(ctx, `SELECT `+codexStateColumns+` FROM openai_codex_state s
-		JOIN accounts a ON a.id=s.owner_account_id WHERE s.last_business_at >= $1 AND `+codexStateLiveAccount+`
+		JOIN accounts a ON a.id=s.owner_account_id WHERE s.last_eligible_collection_at >= $1 AND `+codexStateLiveAccount+`
 		AND (a.codex_turn_state_retry_after IS NULL OR a.codex_turn_state_retry_after <= NOW())
 		AND NOT s.collector_paused AND (s.next_collect_at IS NULL OR s.next_collect_at <= NOW())
 		AND (s.demand_reason <> '' OR s.encrypted_token = '' OR s.encrypted_cookie_bundle = ''
@@ -512,7 +609,7 @@ func (r *openAICodexStateRepository) ListActive(ctx context.Context, since time.
 		 ELSE FALSE END
 		 ELSE a.extra->'codex_turn_state'->>'collector_proxy_id' ~ '^[1-9][0-9]*$' END
 		ORDER BY s.next_collect_at ASC NULLS FIRST, s.expires_at ASC NULLS FIRST,
-		s.last_business_at DESC, s.owner_account_id, s.model LIMIT $2`, since.UTC(), limit, int64(service.CodexTurnStateRefreshAhead/time.Second))
+		s.last_eligible_collection_at DESC, s.owner_account_id, s.model LIMIT $2`, since.UTC(), limit, int64(service.CodexTurnStateRefreshAhead/time.Second))
 }
 
 func (r *openAICodexStateRepository) ListByAccount(ctx context.Context, ownerID int64) ([]service.CodexTurnStateRecord, error) {
@@ -573,7 +670,7 @@ type codexStateScanner interface{ Scan(...any) error }
 
 func scanCodexState(scanner codexStateScanner) (*service.CodexTurnStateRecord, error) {
 	var record service.CodexTurnStateRecord
-	var issued, expires, collected, next, demand, historyProof, cookieExpires sql.NullTime
+	var issued, expires, collected, next, demand, historyProof, cookieExpires, eligible sql.NullTime
 	var collectorProxyID, lastCollectorProxyID sql.NullInt64
 	var collectorAttemptID sql.NullString
 	err := scanner.Scan(&record.OwnerAccountID, &record.OSFamily, &record.Model, &record.Generation, &record.Version,
@@ -582,7 +679,9 @@ func scanCodexState(scanner codexStateScanner) (*service.CodexTurnStateRecord, e
 		&collected, &next, &record.CollectorPaused, &record.LastError,
 		&record.DemandReason, &demand, &historyProof, &record.CollectionStatus, &record.CollectionReason,
 		&collectorProxyID, &record.CollectorExtendedCount, &lastCollectorProxyID, &collectorAttemptID, &record.BusinessInFlight,
-		&record.AuthorizationGeneration, &record.EncryptedCookieBundle, &cookieExpires)
+		&record.AuthorizationGeneration, &record.EncryptedCookieBundle, &cookieExpires,
+		&record.BundleBinding.WireMode, &record.BundleBinding.EgressKind, &record.BundleBinding.ProxyID, &record.BundleBinding.ProxyRouteGeneration,
+		&eligible, &record.BundleInvalidationVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -591,6 +690,7 @@ func scanCodexState(scanner codexStateScanner) (*service.CodexTurnStateRecord, e
 	record.DemandAt, record.HistoryProofObservedAt = demand.Time, historyProof.Time
 	record.CollectorProxyID, record.LastCollectorProxyID = collectorProxyID.Int64, lastCollectorProxyID.Int64
 	record.CollectorAttemptID = collectorAttemptID.String
+	record.LastEligibleCollectionAt = eligible.Time
 	if cookieExpires.Valid {
 		record.CookieBundleExpiresAt = &cookieExpires.Time
 	}

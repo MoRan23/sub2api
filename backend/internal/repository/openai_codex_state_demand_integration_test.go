@@ -71,6 +71,7 @@ func TestCodexHistoryDemandPostgresHealthyCacheConsumesProofAndFencesSlowWriter(
 	require.NoError(t, err)
 	require.NoError(t, r.EndBusiness(ctx, key, "natural"))
 	record.EncryptedToken, record.TokenLength, record.CipherBlocks = "opaque-encrypted-target", 292, 10
+	record.BundleBinding = service.CodexTurnStateBundleBinding{WireMode: "responses", EgressKind: "direct"}
 	record.IssuedAt, record.ExpiresAt = now.Add(-time.Minute), now.Add(service.CodexTurnStateLifetime-time.Minute)
 	record.ModelPolicyRevision = proof.ModelPolicyRevision
 	saved, err := r.SaveCAS(ctx, *record, record.Version)
@@ -180,6 +181,7 @@ func TestCodexDemandPostgresIdleResumeDropsDemandPreservesWatermarkAndCooldown(t
 			record, err := r.BeginBusiness(ctx, key, "old-business", old, old.Add(time.Minute))
 			require.NoError(t, err)
 			require.NoError(t, r.MarkBusinessSent(ctx, key, old))
+			require.NoError(t, r.MarkEligibleCollectionSent(ctx, key, old))
 			record.DemandReason, record.DemandAt, record.HistoryProofObservedAt = "extended_shape", old, old
 			record.NextCollectAt = now.Add(time.Hour)
 			record.LastError, record.CollectionReason, record.CollectionStatus = outcome, outcome, "backoff"

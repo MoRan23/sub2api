@@ -157,7 +157,7 @@ func TestCodexTurnStatePendingPublicationRejectsStaleEvidence(t *testing.T) {
 			retryAt := s.now().Add(2 * time.Second)
 			switch changed {
 			case "new_target":
-				business, err := s.Prepare(ctx, account, attempt.Model)
+				business, err := prepareCodexStateTest(s, ctx, account, attempt.Model)
 				require.NoError(t, err)
 				markCodexStateTestBusinessSent(t, s, business)
 				s.Observe(business, codexStateTestToken(10, s.now()))

@@ -71,4 +71,19 @@ describe('Codex response evidence', () => {
     expect(wrapper.text()).not.toContain('private-value')
     expect(wrapper.text()).not.toContain('private-bundle-id')
   })
+
+  it.each([
+    [undefined, 'unknown'],
+    [{ sent: false, source: 'none' }, 'unknown'],
+    [{ sent: true, source: 'bundle' }, 'unknown'],
+    [{ send_state: 'not_sent', sent: false }, 'not_sent'],
+    [{ send_state: 'sent', sent: false }, 'not_carried'],
+    [{ send_state: 'sent', sent: true }, 'carried'],
+    [{ send_state: 'sent' }, 'unknown'],
+    [{ send_state: 'private-send-state', sent: false }, 'unknown'],
+  ] as const)('uses explicit send-boundary evidence to distinguish Cookie state (%j)', (diagnostic, expected) => {
+    const wrapper = render({ cookie_diagnostic: diagnostic } as CodexResponseEvidence)
+    expect(wrapper.get('[data-testid="codex-cookie-send-state"]').text()).toBe(`admin.accounts.codexTurnState.cookieSendStates.${expected}`)
+    expect(wrapper.text()).not.toContain('private-send-state')
+  })
 })

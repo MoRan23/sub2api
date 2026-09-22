@@ -27,7 +27,7 @@ func newCodexRotationTestService(t *testing.T, accountType string, proxyIDs ...i
 
 func seedCodexRotationTestDemand(t *testing.T, s *CodexTurnStateService, account *Account, model string, blocks int) CodexTurnStateKey {
 	t.Helper()
-	attempt, err := s.Prepare(context.Background(), account, model)
+	attempt, err := prepareCodexStateTest(s, context.Background(), account, model)
 	require.NoError(t, err)
 	require.NotNil(t, attempt)
 	markCodexStateTestBusinessSent(t, s, attempt)
@@ -227,9 +227,10 @@ func TestCodexTurnStateRotationBusinessTargetClearsPendingAttemptEvenForSameToke
 				require.NoError(t, err)
 				before.IssuedAt, before.ExpiresAt = shape.IssuedAt, shape.ExpiresAt
 				before.Shape, before.TokenLength, before.CipherBlocks = shape.Shape, shape.TokenLength, shape.CipherBlocks
+				bindCodexStateTestBundle(t, s, account, before, codexStateTestBinding())
 			}
 			repo.records[key] = *before
-			business, err := s.Prepare(context.Background(), account, key.Model)
+			business, err := prepareCodexStateTest(s, context.Background(), account, key.Model)
 			require.NoError(t, err)
 			markCodexStateTestBusinessSent(t, s, business)
 			s.Observe(business, token)
@@ -267,7 +268,7 @@ func TestCodexTurnStateRotationSameExpiringTokenDoesNotResetCount(t *testing.T) 
 				})
 				s.collect(context.Background(), key)
 			} else {
-				business, prepareErr := s.Prepare(context.Background(), account, key.Model)
+				business, prepareErr := prepareCodexStateTest(s, context.Background(), account, key.Model)
 				require.NoError(t, prepareErr)
 				markCodexStateTestBusinessSent(t, s, business)
 				s.Observe(business, token)
@@ -343,7 +344,7 @@ func TestCodexTurnStateRotationRejectsOldCompletionAfterNewBusinessDemand(t *tes
 			s.collector = codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
 				other := NewCodexTurnStateService(repo, s.accounts, s.encryptor, nil)
 				other.now, other.modelPolicy = s.now, s.modelPolicy
-				business, err := other.Prepare(context.Background(), account, key.Model)
+				business, err := prepareCodexStateTest(other, context.Background(), account, key.Model)
 				require.NoError(t, err)
 				markCodexStateTestBusinessSent(t, other, business)
 				other.Observe(business, codexStateTestToken(10, *now))
@@ -379,7 +380,7 @@ func TestCodexTurnStateRotationEmptyListOnlyLearnsBusinessTargets(t *testing.T) 
 	require.Zero(t, before.CollectorProxyID)
 	require.Zero(t, before.CollectorExtendedCount)
 	require.Empty(t, before.CollectorAttemptID)
-	business, err := s.Prepare(context.Background(), account, key.Model)
+	business, err := prepareCodexStateTest(s, context.Background(), account, key.Model)
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, business)
 	token := codexStateTestToken(10, *now)
@@ -437,6 +438,7 @@ func TestCodexTurnStateRotationSameValidCollectorTargetCompletesDemand(t *testin
 	before.IssuedAt, before.ExpiresAt = shape.IssuedAt, shape.ExpiresAt
 	before.Shape, before.TokenLength, before.CipherBlocks = shape.Shape, shape.TokenLength, shape.CipherBlocks
 	before.CollectorProxyID, before.CollectorExtendedCount = 22, 2
+	bindCodexStateTestBundle(t, s, account, before, CodexTurnStateBundleBinding{WireMode: "lite", EgressKind: "proxy", ProxyID: 22, ProxyRouteGeneration: 1})
 	repo.records[key] = *before
 	s.collector = codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
 		return CodexTurnStateCollectResult{StatusCode: http.StatusOK, Tokens: []string{token}}, nil

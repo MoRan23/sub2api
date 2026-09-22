@@ -282,6 +282,7 @@ func TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff(t *
 					svc.SetCodexTelemetryService(telemetry)
 					account := newOpenAIIdentityPathOAuthAccount(44)
 					svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
+					svc.httpUpstream = &codexTelemetryBoundaryUpstream{httpUpstreamRecorder: upstream}
 					var err error
 					switch route {
 					case "responses":

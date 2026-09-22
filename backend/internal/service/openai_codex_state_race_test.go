@@ -18,7 +18,7 @@ func TestCodexTurnStateCollectorRunsWithBusinessBeforeAndAfterStart(t *testing.T
 			var natural *CodexTurnStateAttempt
 			startBusiness := func() {
 				var err error
-				natural, err = s.Prepare(ctx, account, "gpt-5")
+				natural, err = prepareCodexStateTest(s, ctx, account, "gpt-5")
 				require.NoError(t, err)
 				markCodexStateTestBusinessSent(t, s, natural)
 			}

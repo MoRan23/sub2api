@@ -83,6 +83,36 @@ func restoreBundleRequest(request *http.Request, stripWithoutFallback bool) {
 	}
 }
 
+func (t *transport) roundTripBypass(request *http.Request, rejectionReason ...string) (*http.Response, error) {
+	diagnostic := Diagnostic{Reason: "cookie_empty", SendState: "sent", Source: "none"}
+	names := make(map[string]bool)
+	for _, cookie := range request.Cookies() {
+		if AllowedName(cookie.Name) {
+			diagnostic.SentCount++
+			names[cookie.Name] = true
+		}
+	}
+	for name := range names {
+		diagnostic.Names = append(diagnostic.Names, name)
+	}
+	sort.Strings(diagnostic.Names)
+	if diagnostic.SentCount > 0 {
+		diagnostic.Sent, diagnostic.Reason, diagnostic.Source = true, "cookie_sent", "client"
+	}
+	if len(rejectionReason) > 0 && rejectionReason[0] != "" {
+		diagnostic.Reason = rejectionReason[0]
+	}
+	report(request.Context(), diagnostic)
+	return t.roundTripSend(request)
+}
+
+func (t *transport) roundTripSend(request *http.Request) (*http.Response, error) {
+	if observer, ok := request.Context().Value(sendObserverKey{}).(func(*http.Request)); ok && observer != nil {
+		observer(request)
+	}
+	return t.next.RoundTrip(request)
+}
+
 func (t *transport) RoundTrip(request *http.Request) (*http.Response, error) {
 	if request == nil {
 		return nil, errors.New("cookie_request_missing")
@@ -93,9 +123,15 @@ func (t *transport) RoundTrip(request *http.Request) (*http.Response, error) {
 	policy, enabled := request.Context().Value(bundleKey{}).(bundlePolicy)
 	scope, _ := ScopeFromContext(request.Context())
 	attempt := attemptFromContext(request.Context())
+	rejected := rejectedBundleSend(request.Context())
+	if rejected != nil && (policy.bypass || !enabled) {
+		attempt.invalidate()
+		report(request.Context(), Diagnostic{Reason: ErrBundleSendRejected.Error(), SendState: "not_sent", Source: "none"})
+		return nil, rejected
+	}
 	if policy.bypass || !enabled && scope.EphemeralID == "" {
 		attempt.invalidate()
-		return t.next.RoundTrip(request)
+		return t.roundTripBypass(request)
 	}
 	clone := request.Clone(request.Context())
 	if clone.Header == nil {
@@ -104,21 +140,31 @@ func (t *transport) RoundTrip(request *http.Request) (*http.Response, error) {
 	if enabled {
 		if guard, ok := clone.Context().Value(guardKey{}).(func(*http.Request) bool); ok && guard != nil && !guard(clone) {
 			attempt.invalidate()
+			if rejected != nil {
+				report(clone.Context(), Diagnostic{Reason: ErrBundleSendRejected.Error(), SendState: "not_sent", Source: "none"})
+				return nil, rejected
+			}
 			restoreBundleRequest(clone, false)
-			return t.next.RoundTrip(clone)
+			return t.roundTripBypass(clone)
 		}
 	}
 	if t.manager == nil || !scope.Valid() || enabled && !scope.Persistent() {
 		attempt.invalidate()
+		if rejected != nil {
+			report(clone.Context(), Diagnostic{Reason: ErrInvalidScope.Error(), SendState: "not_sent", Source: "none"})
+			return nil, rejected
+		}
 		restoreBundleRequest(clone, true)
-		report(clone.Context(), Diagnostic{Reason: ErrInvalidScope.Error(), Source: "none"})
-		return t.next.RoundTrip(clone)
+		return t.roundTripBypass(clone, ErrInvalidScope.Error())
 	}
 	if !AllowedURL(clone.URL) {
 		attempt.invalidate()
+		if rejected != nil {
+			report(clone.Context(), Diagnostic{Reason: "cookie_host_not_allowed", SendState: "not_sent", Source: "none"})
+			return nil, rejected
+		}
 		restoreBundleRequest(clone, true)
-		report(clone.Context(), Diagnostic{Reason: "cookie_host_not_allowed", Source: "none"})
-		return t.next.RoundTrip(clone)
+		return t.roundTripBypass(clone, "cookie_host_not_allowed")
 	}
 	if !enabled {
 		removeHeader(clone.Header, "Cookie")
@@ -127,11 +173,19 @@ func (t *transport) RoundTrip(request *http.Request) (*http.Response, error) {
 	now := t.manager.now()
 	if !policy.bundle.Fresh() && !policy.bundle.ValidAt(now) {
 		attempt.invalidate()
+		if rejected != nil {
+			report(clone.Context(), Diagnostic{Reason: ErrBundleExpired.Error(), SendState: "not_sent", Source: "none"})
+			return nil, rejected
+		}
 		restoreBundleRequest(clone, true)
-		report(clone.Context(), Diagnostic{Reason: ErrBundleExpired.Error(), Source: "none"})
-		return t.next.RoundTrip(clone)
+		return t.roundTripBypass(clone, ErrBundleExpired.Error())
 	}
 	sequence := attempt.begin(scope, t.manager.now)
+	if rejected != nil && attempt != nil && sequence == 0 {
+		attempt.invalidate()
+		report(clone.Context(), Diagnostic{Reason: ErrBundleSendRejected.Error(), SendState: "not_sent", Source: "none"})
+		return nil, rejected
+	}
 	removeHeader(clone.Header, "Cookie")
 	// Only cookies eligible for this physical URL belong to its candidate. The
 	// caller's raw Cookie header is never read or copied into an accepted bundle.
@@ -142,11 +196,12 @@ func (t *transport) RoundTrip(request *http.Request) (*http.Response, error) {
 		}
 	}
 	diagnostic := apply(clone, entries, now)
+	diagnostic.SendState = "sent"
 	if diagnostic.Sent {
 		diagnostic.Source = "bundle"
 	}
 	report(clone.Context(), diagnostic)
-	response, err := t.next.RoundTrip(clone)
+	response, err := t.roundTripSend(clone)
 	if response != nil && err == nil && response.StatusCode >= 200 && response.StatusCode < 300 {
 		receivedAt := t.manager.now()
 		entries = mergeEntries(entries, normalizeResponse(clone.URL, response.Cookies(), receivedAt))
@@ -173,11 +228,12 @@ func (t *transport) roundTripEphemeral(request *http.Request, scope Scope) (*htt
 	}
 	m.mu.Unlock()
 	diagnostic := apply(request, entries, now)
+	diagnostic.SendState = "sent"
 	if diagnostic.Sent {
 		diagnostic.Source = "memory"
 	}
 	report(request.Context(), diagnostic)
-	response, err := t.next.RoundTrip(request)
+	response, err := t.roundTripSend(request)
 	if response != nil && err == nil && response.StatusCode >= 200 && response.StatusCode < 400 {
 		changes := normalizeResponse(request.URL, response.Cookies(), m.now())
 		m.mu.Lock()
