@@ -21,15 +21,18 @@ import (
 )
 
 type Account struct {
-	ID                                   int64
-	Name                                 string
-	Notes                                *string
-	Platform                             string
-	Type                                 string
-	Credentials                          map[string]any
-	Extra                                map[string]any
-	OpenAIOAuthOSProfiles                *OpenAIOAuthOSProfiles
-	OpenAIOAuthRequiresOSAuthorization   *bool                     `json:"requires_os_authorization,omitempty"`
+	ID                                 int64
+	Name                               string
+	Notes                              *string
+	Platform                           string
+	Type                               string
+	Credentials                        map[string]any
+	Extra                              map[string]any
+	OpenAIOAuthOSProfiles              *OpenAIOAuthOSProfiles
+	OpenAIOAuthRequiresOSAuthorization *bool `json:"requires_os_authorization,omitempty"`
+	// Only scheduler metadata carries this token-presence summary. Full account
+	// reads and physical sends continue to validate accounts.credentials.
+	OpenAIOAuthCredentialsAvailable      *bool                     `json:"oauth_credentials_available,omitempty"`
 	OpenAIOAuthCredentialOS              string                    `json:"-"`
 	OpenAIOAuthCredentialOwnerID         int64                     `json:"-"`
 	OpenAIOAuthAuthorizationGeneration   string                    `json:"-"`

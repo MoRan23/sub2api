@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -299,6 +300,12 @@ func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.Schedul
 		account, err := decodeCachedAccount(val)
 		if err != nil {
 			return nil, false, err
+		}
+		// Older metadata has no credential-presence summary. Its token fields
+		// are deliberately absent, so let the controlled DB fallback rebuild it
+		// instead of treating that omission as an unauthorized account.
+		if service.RequiresOpenAIOAuthOSAuthorization(account) && account.OpenAIOAuthCredentialsAvailable == nil {
+			return nil, false, nil
 		}
 		if err := applySchedulerLastUsed(account, lastUsedValues[i]); err != nil {
 			return nil, false, err
@@ -864,6 +871,7 @@ func (c *schedulerCache) mgetChunked(ctx context.Context, keys []string) ([]any,
 
 func buildSchedulerMetadataAccount(account service.Account) service.Account {
 	requiresOSAuthorization := service.RequiresOpenAIOAuthOSAuthorization(&account)
+	oauthCredentialsAvailable := strings.TrimSpace(account.GetOpenAIAccessToken()) != "" || strings.TrimSpace(account.GetOpenAIRefreshToken()) != ""
 	return service.Account{
 		ID:                                 account.ID,
 		Name:                               account.Name,
@@ -893,6 +901,7 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 		Credentials:                        filterSchedulerCredentials(account.Credentials),
 		Extra:                              filterSchedulerExtra(account.Extra),
 		OpenAIOAuthRequiresOSAuthorization: &requiresOSAuthorization,
+		OpenAIOAuthCredentialsAvailable:    &oauthCredentialsAvailable,
 		OpenAIOAuthOSProfiles:              schedulerOpenAIOAuthOSAuthorizationSummary(account.OpenAIOAuthOSProfiles),
 	}
 }

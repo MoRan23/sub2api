@@ -156,10 +156,15 @@ func RequiresOpenAIOAuthOSAuthorization(account *Account) bool {
 
 // OpenAIOAuthOSAuthorizationAvailable retains the legacy API name. Authorization
 // lives on the account; OS profile summaries are compatibility data, never an
-// admission gate. Account status and scheduling limits are checked by the caller.
+// admission gate. The scheduler's secret-free projection carries only whether
+// account credentials were present. Full accounts still use their actual tokens.
+// Account status and scheduling limits are checked by the caller.
 func OpenAIOAuthOSAuthorizationAvailable(account *Account, _ string) bool {
 	if !RequiresOpenAIOAuthOSAuthorization(account) {
 		return true
+	}
+	if account.OpenAIOAuthCredentialsAvailable != nil {
+		return *account.OpenAIOAuthCredentialsAvailable
 	}
 	return strings.TrimSpace(account.GetOpenAIAccessToken()) != "" || strings.TrimSpace(account.GetOpenAIRefreshToken()) != ""
 }

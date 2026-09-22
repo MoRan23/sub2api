@@ -1,5 +1,22 @@
 # Codex 共享票据包与账号授权恢复验证
 
+## OAuth 调度摘要回归修复（2026-09-22）
+
+`f7683086e` 恢复账号级凭据后，候选准入直接检查了 token，但 Redis 调度候选使用刻意去除 token 的 `sched:meta` 摘要，导致正常 OAuth 账号在加载完整凭据前被误判为不可用。账号页面的正常状态不受影响，因此可能出现全部候选被排除并返回 `No available accounts have usable OpenAI OAuth authorization`。之前的定向回归没有包含仓储调度摘要测试，漏掉了该路径。
+
+修复在摘要生成前计算账号凭据是否存在，只向摘要增加布尔值；完整账号与实际发送仍校验账号最新凭据。旧摘要缺少该字段时返回缓存未命中，使用现有受控数据库回退和快照重建，不将旧系统授权标记当作凭据，也不向摘要写入 token。不需要新增数据库迁移或重新授权；服务端必须更新到包含此修复的版本。
+
+以下本地 WSL 检查 **139 项测试及子测试通过**，无失败、跳过或竞态报告；服务包 1.181 秒、仓储包 1.428 秒。覆盖普通与高级调度器、三系统共用授权、Spark 使用母账号、完整凭据加载、撤销后旧摘要不能放行，以及 miniredis 真实缓存读写、敏感字段剔除、旧摘要重建和 API Key／PAT／Agent Identity 豁免。
+
+```sh
+cd backend
+go test -race -tags unit ./internal/service ./internal/repository \
+  -run '^(TestOpenAIOAuthSchedulerMetadata|TestOpenAISharedAuthorization|TestOpenAIOSAuthorization|TestOpenAIOAuthAccountCredentials|TestSchedulerSnapshot|TestSchedulerCache|TestSchedulerMetadata|TestBuildSchedulerMetadataAccount|TestMarshalSchedulerCacheAccount|TestFilterSchedulerCredentials)' \
+  -count=1 -json
+```
+
+本次是后端候选缓存修复，没有修改前端或数据库结构，未重复前端检查及 PostgreSQL 集成测试；未部署、未调用真实业务或授权端点。该验证证明代码回归及修复，不代表已检查线上账号的实际凭据状态。
+
 ## 后端与隔离存储验证（2026-09-22）
 
 Go 检查在本机 WSL Ubuntu 24.04 中运行。HTTP、原生 WebSocket 和插件发送使用合成请求、内存服务或本地模拟传输；测试没有请求真实业务、采集、授权或遥测端点。
