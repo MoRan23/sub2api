@@ -1,5 +1,50 @@
 # 三系统遥测验证记录
 
+## 四项兼容修正（2026-09-22）
+
+本轮从 `dev@a5411ee97` 修改，仍以本地 Codex 0.155.1 源码快照为依据。
+仅修正权限字段、多环境 shell、指标桶与标签、子代理 hook；其余客户端活动
+继续使用原模拟规则，不新增公共 API、页面配置或数据库迁移。
+
+在 `backend` 执行并通过：
+
+```sh
+go test ./internal/service -run '^TestCodexTelemetry' -count=1
+go test -race ./internal/service -run 'Test.*CodexTelemetry' -count=1
+go test -race ./internal/handler/admin ./internal/repository -run 'Test.*CodexTelemetry' -count=1
+go test ./cmd/server -run '^$' -count=1
+```
+
+另在 WSL 隔离 Docker 环境执行 PostgreSQL 18.1／Redis 8.4 集成测试，普通
+回归和最终竞态检查均通过，最终 15 项无失败、无竞态：
+
+```sh
+CI=true go test -race -tags integration ./internal/repository -run 'CodexTelemetry' -count=1
+```
+
+新增存储用例贯穿真实数据库 v1 加载、两实例并发追加、重启和封口，确认计数
+及周期保留、旧封口批次不变，内部兼容原因不进入 OTLP。发送使用模拟 sender。
+
+新增及调整的用例覆盖：
+
+- 主回合完全访问网络为 true，未知／受限仍为模拟 false；标题独立保持受限。
+- 旧版和多环境 XML、三系统远程 shell、唯一主环境、主次冲突、不可用状态、
+  重复 ID、引用／技能／历史排除，以及正文、节点、深度和环境数量上限。
+- 主线程 Stop／显式 Interrupt，spawned 子代理 SubagentStop，以及其他、未知、
+  矛盾和 Guardian 来源的 hook 抑制；事件数量与指标样本一致。
+- 三项字节指标原生桶边界、两个目录标签、600 个以上流事件完整聚合、逐事件
+  kind／success、HTTP 不虚构计时、WS 缓冲补解析不重复计数及深拷贝。
+- 固定事件名名单、任意 UUID／JWT 样式 type 归 unknown、不写入报文或快照；
+  每次尝试及跨请求窗口的类别上限，overflow 样本仍累加。
+- v1／v2 快照、旧类别归 unknown 后碰撞合并、三个不可重桶的旧聚合清除及
+  内部兼容原因、其他样本和启动标记保留、已封口批次不可变。
+
+本轮没有前端改动，未重复前端测试、构建和浏览器验收；未运行无关全仓库
+套件。上述相关检查没有未解决失败。所有发送均由测试模拟，不发送真实业务
+或官方遥测，不部署、不发布标签、不等待 CI。
+
+## 原三系统实现记录
+
 验证日期：2026-09-22。实现基线：`dev@b051d90ca`。行为依据为本地 Codex
 0.155.1 源码快照；该源码目录没有 Git 元数据，不宣称对应某个上游提交。
 

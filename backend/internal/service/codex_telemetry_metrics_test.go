@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"testing"
 	"time"
@@ -38,6 +39,21 @@ func codexMetricsTestAttribute(point gjson.Result, name string) string {
 		}
 	}
 	return ""
+}
+
+func codexMetricsTestEventMetric(kind string, success bool, waits ...float64) CodexTelemetryEventMetric {
+	event := CodexTelemetryEventMetric{Kind: kind, Success: success, Count: uint64(len(waits)), WaitCount: uint64(len(waits)), WaitBuckets: make([]uint64, len(codexHistogramBounds)+1)}
+	for index, wait := range waits {
+		if index == 0 || wait < event.WaitMinMS {
+			event.WaitMinMS = wait
+		}
+		if wait > event.WaitMaxMS {
+			event.WaitMaxMS = wait
+		}
+		event.WaitSumMS += wait
+		event.WaitBuckets[sort.SearchFloat64s(codexHistogramBounds, wait)]++
+	}
+	return event
 }
 
 func TestCodexTelemetryMetricsDescriptorContract(t *testing.T) {
@@ -148,7 +164,11 @@ func TestCodexTelemetryMetricsObservedTransportHasNoInventedClientTurn(t *testin
 		profile.simulationEnabled, profile.websocket = false, websocket
 		store.touch(profile)
 		result := codexTelemetryTerminal{status: "failed", finished: profile.started.Add(20 * time.Second), result: CodexTelemetryResult{
-			EventCount: 3, FailedEventCount: 1, EventWaitDurationsMS: []float64{2, 5, 9}, EventWaitFailed: []bool{false, false, true},
+			EventCount: 3, FailedEventCount: 1,
+			EventMetrics: []CodexTelemetryEventMetric{
+				codexMetricsTestEventMetric("response.output_text.delta", true, 2, 5),
+				codexMetricsTestEventMetric("response.failed", false, 9),
+			},
 			SendDurationMS: 4, SendSucceeded: boolPointer(true), FirstTokenAt: profile.started.Add(time.Second),
 			ServerTiming: map[string]float64{"engine_service_total_ms": 123, "engine_service_ttft_total_ms": 9},
 		}}
@@ -166,10 +186,9 @@ func TestCodexTelemetryMetricsObservedTransportHasNoInventedClientTurn(t *testin
 		points := codexMetricsTestMetric(batch.body, eventName).Get("sum.dataPoints").Array()
 		counts := map[string]uint64{}
 		for _, point := range points {
-			counts[codexMetricsTestAttribute(point, "success")] = point.Get("asInt").Uint()
-			require.Empty(t, codexMetricsTestAttribute(point, "kind"))
+			counts[codexMetricsTestAttribute(point, "kind")+":"+codexMetricsTestAttribute(point, "success")] = point.Get("asInt").Uint()
 		}
-		require.Equal(t, map[string]uint64{"true": 2, "false": 1}, counts)
+		require.Equal(t, map[string]uint64{"response.output_text.delta:true": 2, "response.failed:false": 1}, counts)
 		var waits float64
 		for _, point := range codexMetricsTestMetric(batch.body, eventName+".duration_ms").Get("histogram.dataPoints").Array() {
 			waits += point.Get("sum").Float()

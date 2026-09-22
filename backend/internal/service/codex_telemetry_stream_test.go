@@ -60,7 +60,10 @@ func TestCodexTelemetryStreamDeduplicatesIDsWithoutRetainingPayload(t *testing.T
 		stream.observe([]byte(raw), "", at.Add(time.Second), time.Millisecond)
 	}
 	require.EqualValues(t, 3, stream.result.EventCount)
-	require.Len(t, stream.result.EventWaitDurationsMS, 3)
+	require.Len(t, stream.result.EventMetrics, 3)
+	for _, metric := range stream.result.EventMetrics {
+		require.EqualValues(t, 1, metric.WaitCount)
+	}
 	require.Equal(t, []string{"call1"}, stream.result.PendingToolCallIDs)
 	require.NotNil(t, stream.result.EndTurn)
 	require.False(t, *stream.result.EndTurn)
@@ -76,7 +79,16 @@ func TestCodexTelemetryStreamBoundedTimingAndAllowedServerFields(t *testing.T) {
 		stream.observe([]byte(`{"type":"response.output_text.delta","delta":"x"}`), "", time.Now(), time.Millisecond)
 	}
 	require.EqualValues(t, 600, stream.result.EventCount)
-	require.Len(t, stream.result.EventWaitDurationsMS, codexTelemetryMaxEventSamples)
+	require.Len(t, stream.result.EventMetrics, 1)
+	metric := stream.result.EventMetrics[0]
+	require.Equal(t, "response.output_text.delta", metric.Kind)
+	require.True(t, metric.Success)
+	require.EqualValues(t, 600, metric.Count)
+	require.EqualValues(t, 600, metric.WaitCount)
+	require.Equal(t, float64(600), metric.WaitSumMS)
+	require.Equal(t, float64(1), metric.WaitMinMS)
+	require.Equal(t, float64(1), metric.WaitMaxMS)
+	require.EqualValues(t, 600, metric.WaitBuckets[1])
 	stream.observe([]byte(`{"type":"responsesapi.websocket_timing","timing_metrics":{"engine_service_total_ms":12.5,"engine_iapi_ttft_total_ms":-3,"engine_service_ttft_total_ms":"12","responses_duration_excl_engine_and_client_tool_time_ms":1e999,"private":"secret","other":7}}`), "", time.Now(), 0)
 	require.Equal(t, map[string]float64{"engine_service_total_ms": 12.5}, stream.result.ServerTiming)
 }
@@ -91,7 +103,9 @@ func TestCodexTelemetryWSReadTimingAndControlFrames(t *testing.T) {
 	turn.observeRead([]byte(`{"type":"response.created","response":{"id":"r"}}`), "", at.Add(time.Second), at.Add(time.Second+5*time.Millisecond), nil)
 	turn.observeRead([]byte(`{"type":"response.output_text.delta","delta":"answer"}`), "", at.Add(5*time.Second), at.Add(5*time.Second+7*time.Millisecond), nil)
 	require.EqualValues(t, 2, turn.result.EventCount)
-	require.Equal(t, []float64{5, 7}, turn.result.EventWaitDurationsMS, "downstream processing gaps must not be counted as read waits")
+	require.Len(t, turn.result.EventMetrics, 2)
+	require.Equal(t, float64(5), turn.result.EventMetrics[0].WaitSumMS)
+	require.Equal(t, float64(7), turn.result.EventMetrics[1].WaitSumMS, "downstream processing gaps must not be counted as read waits")
 	require.Equal(t, float64(4), turn.result.SendDurationMS)
 	turn.observeRead(nil, "", at.Add(6*time.Second), at.Add(7*time.Second), errors.New("private socket address"))
 	require.Empty(t, turn.result.Status, "a receive failure alone does not fabricate an upstream terminal")
@@ -116,9 +130,13 @@ func TestCodexTelemetryWSRepairedDocumentsRemainOnePhysicalFrame(t *testing.T) {
 	turn.observeBuffered([]byte(`{"type":"response.output_text.delta","delta":"answer"}`))
 	turn.observeBuffered([]byte(`{"type":"response.failed","response":{"status":"failed"}}`))
 	require.EqualValues(t, 1, turn.result.EventCount)
-	require.EqualValues(t, 1, turn.result.FailedEventCount)
-	require.Equal(t, []float64{1}, turn.result.EventWaitDurationsMS)
-	require.Equal(t, []bool{true}, turn.result.EventWaitFailed)
+	require.Zero(t, turn.result.FailedEventCount, "buffered document parsing updates metadata, not physical frame statistics")
+	require.Len(t, turn.result.EventMetrics, 1)
+	require.Equal(t, "response.created", turn.result.EventMetrics[0].Kind)
+	require.EqualValues(t, 1, turn.result.EventMetrics[0].Count)
+	require.Equal(t, float64(1), turn.result.EventMetrics[0].WaitSumMS)
+	require.True(t, turn.result.EventMetrics[0].Success)
+	require.Equal(t, "failed", turn.result.Status)
 	require.Equal(t, at.Add(time.Millisecond), turn.result.FirstTokenAt)
 }
 
@@ -145,4 +163,133 @@ func TestCodexTelemetryWSSendOutcomeIsIndependentOfResponse(t *testing.T) {
 	require.Equal(t, "completed", turn.result.Status)
 	require.NotNil(t, turn.result.SendSucceeded)
 	require.False(t, *turn.result.SendSucceeded)
+}
+
+func TestCodexTelemetryStreamMetricsSeparateSuccessAndPreserveAllWaits(t *testing.T) {
+	var stream codexTelemetryStream
+	at := time.Now()
+	for i := 0; i < 600; i++ {
+		status := "completed"
+		if i%2 != 0 {
+			status = "failed"
+		}
+		stream.observe([]byte(fmt.Sprintf(`{"type":"response.done","response":{"id":"response-%d","status":%q}}`, i, status)), "", at, time.Duration(i+1)*time.Millisecond)
+	}
+	require.EqualValues(t, 600, stream.result.EventCount)
+	require.EqualValues(t, 300, stream.result.FailedEventCount)
+	require.Len(t, stream.result.EventMetrics, 2)
+	var sum float64
+	for _, metric := range stream.result.EventMetrics {
+		require.Equal(t, "response.done", metric.Kind)
+		require.EqualValues(t, 300, metric.Count)
+		require.EqualValues(t, 300, metric.WaitCount)
+		var buckets uint64
+		for _, count := range metric.WaitBuckets {
+			buckets += count
+		}
+		require.Equal(t, metric.WaitCount, buckets)
+		sum += metric.WaitSumMS
+	}
+	require.Equal(t, float64(600*601/2), sum)
+}
+
+func TestCodexTelemetryStreamMetricsOverflowKeepsBothOutcomes(t *testing.T) {
+	var stream codexTelemetryStream
+	for i := 0; i < 600; i++ {
+		stream.recordKnownEventMetric(fmt.Sprintf("future_reviewed_kind_%d", i), true, time.Millisecond)
+	}
+	for i := 0; i < 20; i++ {
+		stream.recordKnownEventMetric("parse_error", false, 2*time.Millisecond)
+	}
+	require.EqualValues(t, 620, stream.result.EventCount)
+	require.EqualValues(t, 20, stream.result.FailedEventCount)
+	require.Len(t, stream.result.EventMetrics, codexTelemetryMaxEventKinds)
+	require.Len(t, stream.eventMetrics, codexTelemetryMaxEventKinds)
+	var count, waits uint64
+	var sum float64
+	unknownOutcomes := map[bool]uint64{}
+	for _, metric := range stream.result.EventMetrics {
+		count += metric.Count
+		waits += metric.WaitCount
+		sum += metric.WaitSumMS
+		if metric.Kind == "unknown" {
+			unknownOutcomes[metric.Success] = metric.Count
+		}
+	}
+	require.EqualValues(t, 620, count)
+	require.EqualValues(t, 620, waits)
+	require.Equal(t, float64(640), sum)
+	require.Equal(t, map[bool]uint64{true: 474, false: 20}, unknownOutcomes)
+}
+
+func TestCodexTelemetryStreamUnknownKindsAndHTTPDurationAbsence(t *testing.T) {
+	var stream codexTelemetryStream
+	at := time.Now()
+	for _, raw := range []string{`{}`, `{"type":"private text\nmessage"}`, `{"type":"response.output_text.delta","delta":"text"}`} {
+		stream.observe([]byte(raw), "", at, -1)
+	}
+	stream.observe([]byte("[DONE]"), "", at, 5*time.Millisecond)
+	require.EqualValues(t, 3, stream.result.EventCount)
+	require.Len(t, stream.result.EventMetrics, 2)
+	require.Equal(t, "unknown", stream.result.EventMetrics[0].Kind)
+	require.EqualValues(t, 2, stream.result.EventMetrics[0].Count)
+	for _, metric := range stream.result.EventMetrics {
+		require.Zero(t, metric.WaitCount)
+		require.Empty(t, metric.WaitBuckets)
+		require.Zero(t, metric.WaitSumMS)
+	}
+}
+
+func TestCodexTelemetryRuntimeCopiesEventMetricBuckets(t *testing.T) {
+	result := CodexTelemetryResult{EventCount: 2, FailedEventCount: 1, EventMetrics: []CodexTelemetryEventMetric{
+		{Kind: "response.completed", Success: true, Count: 1, WaitCount: 1, WaitSumMS: 5, WaitMinMS: 5, WaitMaxMS: 5, WaitBuckets: []uint64{0, 1}},
+		{Kind: "error", Success: false, Count: 1, WaitCount: 1, WaitSumMS: 7, WaitMinMS: 7, WaitMaxMS: 7, WaitBuckets: []uint64{0, 0, 1}},
+	}}
+	copy := copyCodexTelemetryRuntimeResult(result)
+	result.EventMetrics[0].Count = 9
+	result.EventMetrics[0].WaitBuckets[1] = 9
+	result.EventMetrics[1].WaitBuckets[2] = 8
+	require.EqualValues(t, 1, copy.EventMetrics[0].Count)
+	require.Equal(t, []uint64{0, 1}, copy.EventMetrics[0].WaitBuckets)
+	require.Equal(t, []uint64{0, 0, 1}, copy.EventMetrics[1].WaitBuckets)
+	var turn CodexTelemetryResult
+	mergeRuntimeResult(&turn, copy)
+	require.Empty(t, turn.EventMetrics, "attempt histograms must not be persisted in logical turn summaries")
+	require.Zero(t, turn.EventCount)
+	require.Zero(t, turn.FailedEventCount)
+	require.NotEmpty(t, copy.EventMetrics)
+}
+
+func TestCodexTelemetryStreamEventKindsUseFixedProtocolVocabulary(t *testing.T) {
+	known := []string{
+		"response.created", "response.metadata", "codex.response.metadata", "response.output_item.done",
+		"response.content_part.done", "response.reasoning_summary_part.added", "response.reasoning_summary_text.done",
+		"response.reasoning_text.delta", "response.custom_tool_call_input.delta", "response.function_call_arguments.done",
+		"response.output_text.delta", "response.refusal.delta", "response.mcp_call_arguments.delta",
+		"response.image_generation_call.partial_image", "response.audio_transcript.done", "response.output_audio.delta",
+		"response.completed", "response.done", "response.cancelled", "responsesapi.websocket_timing", "parse_error", "error",
+	}
+	for _, kind := range known {
+		require.Equal(t, kind, codexTelemetryEventKind(kind))
+	}
+	unknown := []string{
+		"", "4b857f6e-c8b4-4e81-923f-03419f65bcef", "sk-private-credential-value",
+		"eyJhbGciOiJIUzI1NiJ9.eyJzZWNyZXQiOiJwcml2YXRlIn0.signature",
+		"response.new_tool_event", "response.output_text.delta.secret", "private text",
+	}
+	var stream codexTelemetryStream
+	for _, kind := range unknown {
+		require.Equal(t, "unknown", codexTelemetryEventKind(kind))
+		raw, err := json.Marshal(map[string]string{"type": kind})
+		require.NoError(t, err)
+		stream.observe(raw, "", time.Now(), time.Millisecond)
+	}
+	require.Len(t, stream.result.EventMetrics, 1)
+	require.Equal(t, "unknown", stream.result.EventMetrics[0].Kind)
+	require.EqualValues(t, len(unknown), stream.result.EventMetrics[0].Count)
+	encoded, err := json.Marshal(stream.result)
+	require.NoError(t, err)
+	for _, raw := range unknown[1:] {
+		require.NotContains(t, string(encoded), raw)
+	}
 }

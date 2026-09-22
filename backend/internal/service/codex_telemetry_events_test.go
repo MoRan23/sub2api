@@ -69,7 +69,7 @@ func TestCodexTelemetryAnalyticsEventContract(t *testing.T) {
 		body: []byte(`{"response":{"id":"resp_actual","service_tier":"priority","usage":{"input_tokens":70,"output_tokens":30,"input_tokens_details":{"cached_tokens":20},"output_tokens_details":{"reasoning_tokens":5}}}}`),
 	}
 	terminal := codexTerminalEvents(profile, result)
-	require.Len(t, terminal, 9+codexSimulatedHookCount(profile))
+	require.Len(t, terminal, 9)
 	counts := map[string]int{"codex_hook_run": 0}
 	for _, event := range append(initial, terminal...) {
 		counts[event.EventType]++
@@ -79,7 +79,7 @@ func TestCodexTelemetryAnalyticsEventContract(t *testing.T) {
 	}
 	require.Equal(t, map[string]int{
 		"codex_thread_initialized": 3, "codex_turn_event": 2, "codex_command_execution_event": 1,
-		"codex_dynamic_tool_call_event": 1, "codex_file_change_event": 1, "codex_accepted_line_fingerprints": 1, "codex_hook_run": codexSimulatedHookCount(profile),
+		"codex_dynamic_tool_call_event": 1, "codex_file_change_event": 1, "codex_accepted_line_fingerprints": 1, "codex_hook_run": 0,
 		"codex_guardian_review": 1,
 	}, counts)
 	turn := terminal[len(terminal)-1].EventParams
@@ -104,8 +104,6 @@ func TestCodexTelemetryAnalyticsEventContract(t *testing.T) {
 		case "codex_accepted_line_fingerprints":
 			require.Nil(t, event.EventParams["repo_hash"])
 			require.Empty(t, event.EventParams["line_fingerprints"])
-		case "codex_hook_run":
-			require.Equal(t, "Stop", event.EventParams["hook_name"])
 		}
 	}
 }
@@ -153,6 +151,7 @@ func TestCodexTelemetryAnalyticsAttemptCountsDoNotLeakIntoSyntheticTitle(t *test
 
 func TestCodexTelemetryAnalyticsFailureIsNotAnExplicitInterrupt(t *testing.T) {
 	profile := codexTelemetryEventTestProfile()
+	profile.input.ThreadSource, profile.input.SubagentKind = "user", ""
 	profile.dynamicTool, profile.command, profile.fileChange = false, false, false
 	profile.firstThread = false
 	for _, status := range []string{"failed", "interrupted", "incomplete", "completed"} {

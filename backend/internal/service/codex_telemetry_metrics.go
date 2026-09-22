@@ -58,8 +58,8 @@ var codexMetricDescriptors = []codexMetricDescriptor{
 	{"codex.rollout_compression.materialize", "sum", "", "outcome"},
 	{"codex.websocket.event", "sum", "", "app.version,auth_mode,kind,model,originator,service_name,session_source,success"},
 	{"codex.websocket.event.duration_ms", "histogram", "ms", "app.version,auth_mode,kind,model,originator,service_name,session_source,success"},
-	{"codex.sse_event", "sum", "", "app.version,auth_mode,model,originator,service_name,session_source,success"},
-	{"codex.sse_event.duration_ms", "histogram", "ms", "app.version,auth_mode,model,originator,service_name,session_source,success"},
+	{"codex.sse_event", "sum", "", "app.version,auth_mode,kind,model,originator,service_name,session_source,success"},
+	{"codex.sse_event.duration_ms", "histogram", "ms", "app.version,auth_mode,kind,model,originator,service_name,session_source,success"},
 	{"codex.startup_prewarm.duration_ms", "histogram", "ms", "app.version,auth_mode,model,originator,service_name,session_source,status"},
 	{"codex.startup_prewarm.age_at_first_turn_ms", "histogram", "ms", "app.version,auth_mode,model,originator,service_name,session_source,status"},
 	{"codex.thread.skills.enabled_total", "histogram", "", "app.version,auth_mode,catalog_surface,model,originator,service_name,session_source"},
@@ -94,8 +94,16 @@ var codexMetricDescriptors = []codexMetricDescriptor{
 
 var codexHistogramBounds = []float64{0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 7500, 8000, 9000, 10000, 12000, 15000, 20000, 30000, 60000, 120000}
 var codexValueHistogramBounds = []float64{0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000}
+var codexHomeSizeHistogramBounds = []float64{1048576, 10485760, 104857600, 1073741824, 10737418240, 107374182400, 1099511627776}
+var codexSQLiteBytesHistogramBounds = []float64{128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216}
 
 func codexMetricBounds(descriptor codexMetricDescriptor) []float64 {
+	switch descriptor.name {
+	case "codex.app_server.codex_home.size_bytes":
+		return codexHomeSizeHistogramBounds
+	case "codex.sqlite.logs.write.bytes", "codex.sqlite.logs.write.max_entry_bytes":
+		return codexSQLiteBytesHistogramBounds
+	}
 	if descriptor.unit == "ms" {
 		return codexHistogramBounds
 	}
@@ -166,13 +174,15 @@ type codexMetricState struct {
 	externalAgentSent bool
 	collectedAt       time.Time
 	source            string
+	eventMetricKinds  map[string]struct{}
 }
 
 // The service mutex protects this store. Samples are summarized into bounded
 // buckets rather than retaining a growing list of individual observations.
 type codexTelemetryMetricStore struct {
-	states  map[string]*codexMetricState
-	clients map[string]time.Time
+	states              map[string]*codexMetricState
+	clients             map[string]time.Time
+	compatibilityReason string
 }
 
 func newCodexTelemetryMetricStore() *codexTelemetryMetricStore {
@@ -258,6 +268,13 @@ func (s *codexTelemetryMetricStore) touch(profile codexTelemetryProfile) []codex
 			// A Windows UA does not prove whether the MXC capability probe passed.
 			continue
 		}
+		if descriptor.name == "codex.app_server.codex_home.size_bytes" {
+			for _, directory := range []string{"sessions", "archived_sessions"} {
+				value := float64(simulatedInt(profile.scenarioSeed+":"+descriptor.name+":"+directory, 262144))
+				state.addWithSource(descriptor, value, profile, "completed", profile.started, map[string]string{"directory": directory}, "simulated")
+			}
+			continue
+		}
 		state.addWithSource(descriptor, codexStartupMetricValue(profile, descriptor), profile, "completed", profile.started, nil, "simulated")
 	}
 	return nil
@@ -312,11 +329,8 @@ func (s *codexTelemetryMetricStore) record(profile codexTelemetryProfile, result
 			}
 			value = codexStartupMetricValue(profile, descriptor)
 		case "codex.hooks.run", "codex.hooks.run.duration_ms":
-			hookName := "Stop"
-			if result.explicitClientInterrupt {
-				hookName = "Interrupt"
-			}
-			for index := range codexSimulatedHookCount(profile) {
+			hookName, hookCount := codexSimulatedLifecycleHook(profile, result.explicitClientInterrupt)
+			for index := range hookCount {
 				hookValue := float64(1)
 				if descriptor.unit == "ms" {
 					hookValue = float64(codexSimulatedHookDuration(profile, index))
@@ -393,18 +407,13 @@ func (s *codexTelemetryMetricStore) recordAttempt(profile codexTelemetryProfile,
 			state.addWithSource(descriptor, 1, profile, "", now, map[string]string{"success": strconv.FormatBool(*measurement.SendSucceeded)}, "observed")
 			continue
 		case "codex.websocket.event", "codex.sse_event":
-			if strings.HasPrefix(descriptor.name, "codex.websocket") != profile.websocket || measurement.EventCount <= 0 {
+			if strings.HasPrefix(descriptor.name, "codex.websocket") != profile.websocket {
 				continue
 			}
-			failed := min(measurement.FailedEventCount, measurement.EventCount)
-			if failed < 0 {
-				failed = 0
-			}
-			if succeeded := measurement.EventCount - failed; succeeded > 0 {
-				state.addWithSource(descriptor, float64(succeeded), profile, "completed", now, map[string]string{"kind": ""}, "observed")
-			}
-			if failed > 0 {
-				state.addWithSource(descriptor, float64(failed), profile, "failed", now, map[string]string{"kind": ""}, "observed")
+			for _, event := range codexTelemetryMetricEvents(measurement) {
+				if event.Count > 0 {
+					state.addWithSource(descriptor, float64(event.Count), profile, "", now, state.eventMetricAttributes(event), "observed")
+				}
 			}
 			continue
 		case "codex.websocket.request.duration_ms":
@@ -417,12 +426,8 @@ func (s *codexTelemetryMetricStore) recordAttempt(profile codexTelemetryProfile,
 			if strings.HasPrefix(descriptor.name, "codex.websocket") != profile.websocket {
 				continue
 			}
-			for index, wait := range measurement.EventWaitDurationsMS {
-				success := ""
-				if index < len(measurement.EventWaitFailed) {
-					success = strconv.FormatBool(!measurement.EventWaitFailed[index])
-				}
-				state.addWithSource(descriptor, wait, profile, "", now, map[string]string{"kind": "", "success": success}, "observed")
+			for _, event := range measurement.EventMetrics {
+				state.addEventWaitAggregate(descriptor, event, profile, now)
 			}
 			continue
 		case "codex.responses_api_overhead.duration_ms", "codex.responses_api_inference_time.duration_ms", "codex.responses_api_engine_iapi_tbt.duration_ms":
@@ -443,6 +448,90 @@ func (s *codexTelemetryMetricStore) recordAttempt(profile codexTelemetryProfile,
 	}
 }
 
+func codexTelemetryMetricEvents(result CodexTelemetryResult) []CodexTelemetryEventMetric {
+	if len(result.EventMetrics) > 0 {
+		return result.EventMetrics
+	}
+	// Older result producers know the counts but cannot recover event kinds.
+	failed := min(result.FailedEventCount, result.EventCount)
+	if failed < 0 {
+		failed = 0
+	}
+	events := make([]CodexTelemetryEventMetric, 0, 2)
+	if succeeded := result.EventCount - failed; succeeded > 0 {
+		events = append(events, CodexTelemetryEventMetric{Kind: "unknown", Success: true, Count: uint64(succeeded)})
+	}
+	if failed > 0 {
+		events = append(events, CodexTelemetryEventMetric{Kind: "unknown", Success: false, Count: uint64(failed)})
+	}
+	return events
+}
+
+func (s *codexMetricState) eventMetricAttributes(event CodexTelemetryEventMetric) map[string]string {
+	success := strconv.FormatBool(event.Success)
+	return map[string]string{"kind": s.eventMetricKind(event.Kind, success), "success": success}
+}
+
+// Counts and durations share one assignment for the entire delta window.
+// Reserve two unknown series so overflow preserves every success/failure sample.
+func (s *codexMetricState) eventMetricKind(kind, success string) string {
+	kind = codexTelemetryEventKind(kind)
+	if kind == "unknown" {
+		return kind
+	}
+	key := kind + ":" + success
+	if _, exists := s.eventMetricKinds[key]; exists {
+		return kind
+	}
+	if len(s.eventMetricKinds) >= codexTelemetryMaxEventKinds-2 {
+		return "unknown"
+	}
+	if s.eventMetricKinds == nil {
+		s.eventMetricKinds = make(map[string]struct{})
+	}
+	s.eventMetricKinds[key] = struct{}{}
+	return kind
+}
+
+func (s *codexMetricState) addEventWaitAggregate(descriptor codexMetricDescriptor, event CodexTelemetryEventMetric, profile codexTelemetryProfile, finished time.Time) {
+	if event.WaitCount == 0 || len(event.WaitBuckets) != len(codexMetricBounds(descriptor))+1 {
+		return
+	}
+	for _, value := range []float64{event.WaitSumMS, event.WaitMinMS, event.WaitMaxMS} {
+		if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+			return
+		}
+	}
+	if event.WaitMinMS > event.WaitMaxMS {
+		return
+	}
+	var bucketCount uint64
+	for _, count := range event.WaitBuckets {
+		bucketCount += count
+	}
+	if bucketCount != event.WaitCount {
+		return
+	}
+	aggregate := s.aggregateWithSource(descriptor, profile, "", s.eventMetricAttributes(event), "observed")
+	if aggregate.count == 0 {
+		aggregate.started, aggregate.minimum, aggregate.maximum = profile.started, event.WaitMinMS, event.WaitMaxMS
+		aggregate.buckets = make([]uint64, len(event.WaitBuckets))
+	} else {
+		aggregate.minimum, aggregate.maximum = math.Min(aggregate.minimum, event.WaitMinMS), math.Max(aggregate.maximum, event.WaitMaxMS)
+		if profile.started.Before(aggregate.started) {
+			aggregate.started = profile.started
+		}
+	}
+	if finished.After(aggregate.finished) {
+		aggregate.finished = finished
+	}
+	aggregate.count += event.WaitCount
+	aggregate.sum += event.WaitSumMS
+	for index, count := range event.WaitBuckets {
+		aggregate.buckets[index] += count
+	}
+}
+
 func (s *codexMetricState) add(descriptor codexMetricDescriptor, value float64, profile codexTelemetryProfile, status string, finished time.Time) {
 	s.addWithAttributes(descriptor, value, profile, status, finished, nil)
 }
@@ -455,6 +544,10 @@ func (s *codexMetricState) addWithSource(descriptor codexMetricDescriptor, value
 	if !codexStatsigMetricAllowed(descriptor.name) || value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
 		return
 	}
+	s.aggregateWithSource(descriptor, profile, status, overrides, source).observe(value, profile.started, finished)
+}
+
+func (s *codexMetricState) aggregateWithSource(descriptor codexMetricDescriptor, profile codexTelemetryProfile, status string, overrides map[string]string, source string) *codexMetricAggregate {
 	if s.source == "" {
 		s.source = source
 	} else if s.source != source {
@@ -468,7 +561,7 @@ func (s *codexMetricState) addWithSource(descriptor codexMetricDescriptor, value
 		aggregate = &codexMetricAggregate{descriptor: descriptor, attributes: attributes}
 		s.pending[key] = aggregate
 	}
-	aggregate.observe(value, profile.started, finished)
+	return aggregate
 }
 
 func (s *codexTelemetryMetricStore) flush(now time.Time) []codexTelemetryMetricBatch {
@@ -489,6 +582,7 @@ func (s *codexTelemetryMetricStore) flush(now time.Time) []codexTelemetryMetricB
 			}
 			batches = append(batches, state.batch())
 			state.pending = make(map[string]*codexMetricAggregate)
+			state.eventMetricKinds = nil
 		}
 		state.collectedAt, state.source = now, ""
 		state.turns, state.attempts = 0, 0
@@ -502,6 +596,7 @@ func (s *codexTelemetryMetricStore) flush(now time.Time) []codexTelemetryMetricB
 func (s *codexTelemetryMetricStore) clear() {
 	s.states = make(map[string]*codexMetricState)
 	s.clients = make(map[string]time.Time)
+	s.compatibilityReason = ""
 }
 
 func (s *codexMetricState) batch() codexTelemetryMetricBatch {
@@ -723,10 +818,13 @@ func codexStartupMetricValue(profile codexTelemetryProfile, descriptor codexMetr
 // The durable store contains aggregates and a whitelisted profile snapshot,
 // never bearer tokens, proxy URLs, response contents, or full business inputs.
 type codexMetricStoreSnapshot struct {
-	Version int                        `json:"version"`
-	States  []codexMetricStateSnapshot `json:"states"`
-	Clients map[string]time.Time       `json:"clients"`
+	CompatibilityReason string                     `json:"compatibility_reason,omitempty"`
+	Version             int                        `json:"version"`
+	States              []codexMetricStateSnapshot `json:"states"`
+	Clients             map[string]time.Time       `json:"clients"`
 }
+
+const codexMetricLegacyBytesDiscarded = "legacy_byte_histogram_discarded"
 
 type codexMetricStateSnapshot struct {
 	Profile           json.RawMessage                `json:"profile"`
@@ -754,10 +852,11 @@ type codexMetricAggregateSnapshot struct {
 }
 
 func marshalCodexTelemetryMetricStore(store *codexTelemetryMetricStore) ([]byte, error) {
-	snapshot := codexMetricStoreSnapshot{Version: 1, Clients: make(map[string]time.Time)}
+	snapshot := codexMetricStoreSnapshot{Version: 2, Clients: make(map[string]time.Time)}
 	if store == nil {
 		return json.Marshal(snapshot)
 	}
+	snapshot.CompatibilityReason = store.compatibilityReason
 	for key, value := range store.clients {
 		snapshot.Clients[key] = value
 	}
@@ -804,8 +903,13 @@ func unmarshalCodexTelemetryMetricStore(encoded []byte) (*codexTelemetryMetricSt
 	if err := json.Unmarshal(encoded, &snapshot); err != nil {
 		return nil, err
 	}
-	if snapshot.Version != 1 || len(snapshot.States) > codexTelemetryMetricStateLimit || len(snapshot.Clients) > codexTelemetryMetricStateLimit {
+	if (snapshot.Version != 1 && snapshot.Version != 2) || len(snapshot.States) > codexTelemetryMetricStateLimit || len(snapshot.Clients) > codexTelemetryMetricStateLimit {
 		return nil, errors.New("unsupported telemetry metric snapshot")
+	}
+	// Keep only a fixed local compatibility marker. It is persisted with the
+	// aggregate transaction and is never part of an exported metric batch.
+	if snapshot.CompatibilityReason == codexMetricLegacyBytesDiscarded {
+		store.compatibilityReason = codexMetricLegacyBytesDiscarded
 	}
 	for key, value := range snapshot.Clients {
 		store.clients[key] = value
@@ -822,21 +926,112 @@ func unmarshalCodexTelemetryMetricStore(encoded []byte) (*codexTelemetryMetricSt
 		}
 		for _, item := range item.Pending {
 			descriptor := codexMetricDescriptor{name: item.Name, kind: item.Kind, unit: item.Unit}
+			if snapshot.Version == 1 && codexMetricHasMigratedByteBounds(item.Name) {
+				if item.Kind != "histogram" || item.Unit != "" || len(item.Buckets) != len(codexValueHistogramBounds)+1 {
+					return nil, errors.New("invalid legacy telemetry byte histogram")
+				}
+				// Version 1 retained no original samples or bounds. These three
+				// pending distributions cannot be rebucketed without inventing data.
+				// Preserve the rest of the state; already sealed batches are untouched.
+				store.compatibilityReason = codexMetricLegacyBytesDiscarded
+				continue
+			}
 			if !codexStatsigMetricAllowed(item.Name) || (item.Kind != "sum" && item.Kind != "histogram") || len(item.Buckets) != len(codexMetricBounds(descriptor))+1 {
 				return nil, errors.New("invalid telemetry metric aggregate")
+			}
+			if codexMetricIsEventMetric(item.Name) {
+				var err error
+				item.Attributes, err = state.eventSnapshotAttributes(item.Attributes)
+				if err != nil {
+					return nil, err
+				}
 			}
 			attributes, err := json.Marshal(item.Attributes)
 			if err != nil {
 				return nil, err
 			}
-			state.pending[item.Name+":"+string(attributes)] = &codexMetricAggregate{
+			key := item.Name + ":" + string(attributes)
+			incoming := &codexMetricAggregate{
 				descriptor: descriptor, attributes: item.Attributes, started: item.Started, finished: item.Finished,
 				count: item.Count, sum: item.Sum, minimum: item.Minimum, maximum: item.Maximum, buckets: append([]uint64(nil), item.Buckets...),
+			}
+			if existing := state.pending[key]; existing != nil && codexMetricIsEventMetric(item.Name) {
+				if existing.descriptor != incoming.descriptor {
+					return nil, errors.New("conflicting event metric aggregates")
+				}
+				mergeCodexMetricAggregate(existing, incoming)
+			} else {
+				state.pending[key] = incoming
 			}
 		}
 		store.states[codexMetricStateKey(profile)] = state
 	}
 	return store, nil
+}
+
+func codexMetricIsEventMetric(name string) bool {
+	switch name {
+	case "codex.websocket.event", "codex.websocket.event.duration_ms", "codex.sse_event", "codex.sse_event.duration_ms":
+		return true
+	default:
+		return false
+	}
+}
+
+// v1 aggregates can lack the kind label. Normalize both snapshot versions so
+// only known protocol kinds survive in pending data, and canonicalize the
+// attributes before merging any series that now share the unknown label.
+func (s *codexMetricState) eventSnapshotAttributes(attributes []any) ([]any, error) {
+	values := make(map[string]string, len(attributes)+1)
+	for _, raw := range attributes {
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			return nil, err
+		}
+		var attribute struct {
+			Key   string `json:"key"`
+			Value struct {
+				StringValue *string `json:"stringValue"`
+			} `json:"value"`
+		}
+		if err := json.Unmarshal(encoded, &attribute); err != nil || attribute.Key == "" || attribute.Value.StringValue == nil {
+			return nil, errors.New("invalid event metric attributes")
+		}
+		values[attribute.Key] = *attribute.Value.StringValue
+	}
+	values["kind"] = s.eventMetricKind(values["kind"], values["success"])
+	return codexOTLPAttributes(values), nil
+}
+
+func mergeCodexMetricAggregate(dst, src *codexMetricAggregate) {
+	if src.count == 0 {
+		return
+	}
+	if dst.count == 0 {
+		dst.started, dst.finished = src.started, src.finished
+		dst.minimum, dst.maximum = src.minimum, src.maximum
+	} else {
+		if src.started.Before(dst.started) {
+			dst.started = src.started
+		}
+		if src.finished.After(dst.finished) {
+			dst.finished = src.finished
+		}
+		dst.minimum, dst.maximum = math.Min(dst.minimum, src.minimum), math.Max(dst.maximum, src.maximum)
+	}
+	dst.count += src.count
+	dst.sum += src.sum
+	for index, count := range src.buckets {
+		dst.buckets[index] += count
+	}
+}
+
+func codexMetricHasMigratedByteBounds(name string) bool {
+	switch name {
+	case "codex.app_server.codex_home.size_bytes", "codex.sqlite.logs.write.bytes", "codex.sqlite.logs.write.max_entry_bytes":
+		return true
+	}
+	return false
 }
 
 func (s *codexTelemetryMetricStore) nextFlushAt() time.Time {

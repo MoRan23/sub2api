@@ -386,9 +386,18 @@ func codexTelemetryShellFromEnvironment(text string) string {
 			return ""
 		}
 	}
+	// Environment identity is execution context only. It must not select a
+	// credential, change the final wire OS, or migrate an installation pool.
+	type environment struct {
+		id, primary, shell, status string
+		shellFields, statusFields  int
+	}
 	decoder := xml.NewDecoder(strings.NewReader(text))
-	depth, nodes, roots := 0, 0, 0
-	shell, field, fields := "", "", 0
+	var path []string
+	var environments []environment
+	ids := make(map[string]bool)
+	nodes, roots, containers := 0, 0, 0
+	shell, field, fields, fieldDepth, current := "", "", 0, 0, -1
 	for {
 		token, err := decoder.Token()
 		if err == io.EOF {
@@ -400,7 +409,11 @@ func codexTelemetryShellFromEnvironment(text string) string {
 		}
 		switch token := token.(type) {
 		case xml.StartElement:
-			depth++
+			if field != "" {
+				return "" // Shell and status are scalar fields, not XML subtrees.
+			}
+			path = append(path, token.Name.Local)
+			depth := len(path)
 			if depth > openAIRequestOSXMLDepthLimit || token.Name.Space != "" {
 				return ""
 			}
@@ -410,29 +423,119 @@ func codexTelemetryShellFromEnvironment(text string) string {
 					return ""
 				}
 			}
-			if depth == 2 && token.Name.Local == "shell" {
+			switch {
+			case depth == 2 && token.Name.Local == "shell":
+				if len(token.Attr) != 0 {
+					return ""
+				}
 				field = "shell"
+				fieldDepth = depth
 				fields++
-			} else if depth > 2 && field == "shell" {
-				return ""
+			case depth == 2 && token.Name.Local == "environments":
+				containers++
+				if containers != 1 {
+					return ""
+				}
+			case depth == 3 && path[1] == "environments" && token.Name.Local == "environment":
+				if len(environments) >= openAIRequestOSEnvironmentLimit {
+					return ""
+				}
+				env := environment{}
+				seen := make(map[string]bool)
+				for _, attr := range token.Attr {
+					if attr.Name.Space != "" || seen[attr.Name.Local] {
+						return ""
+					}
+					seen[attr.Name.Local] = true
+					switch attr.Name.Local {
+					case "id":
+						env.id = attr.Value
+					case "primary":
+						if attr.Value != "true" && attr.Value != "false" {
+							return ""
+						}
+						env.primary = attr.Value
+					case "status":
+						env.status, env.statusFields = attr.Value, 1
+					}
+				}
+				if env.id == "" || ids[env.id] {
+					return ""
+				}
+				ids[env.id] = true
+				environments = append(environments, env)
+				current = len(environments) - 1
+			case depth == 4 && path[1] == "environments" && path[2] == "environment" && current >= 0:
+				switch token.Name.Local {
+				case "shell":
+					if len(token.Attr) != 0 {
+						return ""
+					}
+					environments[current].shellFields++
+					field, fieldDepth = "environment_shell", depth
+				case "status":
+					if len(token.Attr) != 0 {
+						return ""
+					}
+					environments[current].statusFields++
+					field, fieldDepth = "environment_status", depth
+				}
 			}
 		case xml.EndElement:
-			if depth == 2 {
+			depth := len(path)
+			if depth == fieldDepth {
 				field = ""
+				fieldDepth = 0
 			}
-			depth--
+			if depth == 3 && path[1] == "environments" && path[2] == "environment" {
+				current = -1
+			}
+			path = path[:depth-1]
 		case xml.CharData:
-			if depth == 0 && strings.TrimSpace(string(token)) != "" {
+			if len(path) == 0 && strings.TrimSpace(string(token)) != "" {
 				return ""
 			}
-			if field == "shell" {
+			switch field {
+			case "shell":
 				shell += string(token)
+			case "environment_shell":
+				environments[current].shell += string(token)
+			case "environment_status":
+				environments[current].status += string(token)
 			}
 		case xml.Comment, xml.Directive, xml.ProcInst:
 			return ""
 		}
 	}
-	if depth != 0 || roots != 1 || fields != 1 {
+	if len(path) != 0 || roots != 1 || fields > 1 || (fields != 0 && containers != 0) {
+		return ""
+	}
+	if containers != 0 {
+		selected := -1
+		for i, env := range environments {
+			if env.shellFields > 1 || env.statusFields > 1 {
+				return ""
+			}
+			if env.primary == "true" {
+				if selected != -1 {
+					return ""
+				}
+				selected = i
+			}
+		}
+		if selected == -1 && len(environments) == 1 && environments[0].primary == "" {
+			selected = 0
+		}
+		if selected == -1 {
+			return ""
+		}
+		env := environments[selected]
+		status := strings.TrimSpace(env.status)
+		if env.shellFields != 1 || (env.statusFields != 0 && status != "available") {
+			return ""
+		}
+		shell = env.shell
+	} else if fields != 1 {
 		return ""
 	}
 	shell = strings.TrimSpace(strings.ToLower(shell))

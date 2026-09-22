@@ -239,8 +239,10 @@ func copyCodexTelemetryRuntimeResult(result CodexTelemetryResult) CodexTelemetry
 		result.SendSucceeded = &v
 	}
 	result.PendingToolCallIDs = append([]string(nil), result.PendingToolCallIDs...)
-	result.EventWaitDurationsMS = append([]float64(nil), result.EventWaitDurationsMS...)
-	result.EventWaitFailed = append([]bool(nil), result.EventWaitFailed...)
+	result.EventMetrics = append([]CodexTelemetryEventMetric(nil), result.EventMetrics...)
+	for index := range result.EventMetrics {
+		result.EventMetrics[index].WaitBuckets = append([]uint64(nil), result.EventMetrics[index].WaitBuckets...)
+	}
 	if result.ServerTiming != nil {
 		copy := make(map[string]float64, len(result.ServerTiming))
 		for k, v := range result.ServerTiming {
@@ -569,7 +571,8 @@ func mergeRuntimeResult(total *CodexTelemetryResult, next CodexTelemetryResult) 
 	total.FirstEventAt, total.FirstTokenAt, total.FirstAgentMessageAt = firstEvent, firstToken, firstMessage
 	// Per-event measurements belong to the physical-attempt metrics, never a
 	// logical-turn summary or an accumulating persisted transcript.
-	total.EventWaitDurationsMS, total.EventWaitFailed, total.ServerTiming = nil, nil, nil
+	total.EventMetrics, total.ServerTiming = nil, nil
+	total.EventCount, total.FailedEventCount = 0, 0
 	total.PendingToolCallIDs = nil
 }
 

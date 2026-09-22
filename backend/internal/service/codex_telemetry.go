@@ -94,11 +94,24 @@ type CodexTelemetryResult struct {
 	PendingToolCallIDs      []string
 	EventCount              int64
 	FailedEventCount        int64
-	EventWaitDurationsMS    []float64
+	EventMetrics            []CodexTelemetryEventMetric
 	SendDurationMS          float64
 	SendSucceeded           *bool
-	EventWaitFailed         []bool
 	ServerTiming            map[string]float64
+}
+
+// CodexTelemetryEventMetric is a bounded aggregate of physical stream events.
+// Histogram buckets use codexHistogramBounds and include the final +Inf bucket.
+// A missing exact read boundary increments Count without inventing a duration.
+type CodexTelemetryEventMetric struct {
+	Kind        string
+	Success     bool
+	Count       uint64
+	WaitCount   uint64
+	WaitSumMS   float64
+	WaitMinMS   float64
+	WaitMaxMS   float64
+	WaitBuckets []uint64
 }
 
 type codexTelemetryClient struct {

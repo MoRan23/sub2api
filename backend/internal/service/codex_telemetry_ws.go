@@ -88,20 +88,11 @@ func (t *codexTelemetryWSTurn) observeBuffered(message []byte) {
 	if t.done {
 		return
 	}
-	count := t.stream.result.EventCount
-	failed := t.stream.result.FailedEventCount
 	at := t.lastReadFinished
 	if at.IsZero() {
 		at = time.Now()
 	}
-	t.stream.observe(message, "", at, -1)
-	t.stream.result.EventCount = count
-	if t.stream.result.FailedEventCount > count {
-		t.stream.result.FailedEventCount = count
-	}
-	if t.stream.result.FailedEventCount > failed && len(t.stream.result.EventWaitFailed) > 0 {
-		t.stream.result.EventWaitFailed[len(t.stream.result.EventWaitFailed)-1] = true
-	}
+	t.stream.observeMetadata(message, at)
 	if t.cancelRequested && t.stream.result.Status == "cancelled" {
 		t.stream.result.ExplicitClientInterrupt = true
 	}

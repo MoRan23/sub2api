@@ -105,6 +105,7 @@ func codexTitleTurnEvent(profile codexTelemetryProfile, threadID string) codexAn
 	params["started_at"], params["completed_at"], params["duration_ms"] = completed.Add(-time.Duration(duration)*time.Millisecond).Unix(), completed.Unix(), duration
 	params["ephemeral"], params["is_first_turn"] = true, true
 	params["sandbox_policy"], params["status"] = "read_only", "completed"
+	params["sandbox_network_access"] = false
 	params["reasoning_summary"], params["workspace_kind"] = nil, nil
 	return newCodexAnalyticsEvent(profile, "codex_turn_event", params)
 }
@@ -136,8 +137,9 @@ func codexTerminalEvents(profile codexTelemetryProfile, result codexTelemetryTer
 	if codexSimulatesFileChange(profile) {
 		events = append(events, codexFileChangeEvent(profile, result.body), codexAcceptedLinesEvent(profile))
 	}
-	for range codexSimulatedHookCount(profile) {
-		events = append(events, codexHookEvent(profile, result.explicitClientInterrupt))
+	hookName, hookCount := codexSimulatedLifecycleHook(profile, result.explicitClientInterrupt)
+	for range hookCount {
+		events = append(events, codexHookEvent(profile, hookName))
 	}
 	return append(events, codexMainTurnEvent(profile, result))
 }
@@ -202,7 +204,7 @@ func codexTurnEventBase(profile codexTelemetryProfile, spec codexTurnSpec) map[s
 		"parent_turn_id": codexOptionalString(profile.input.ParentTurnID), "forked_from_thread_id": codexOptionalString(profile.input.ForkedFromThreadID),
 		"reasoning_effort": spec.effort, "reasoning_output_tokens": 0, "reasoning_summary": "detailed",
 		"root_turn_id": codexOptionalString(profile.rootTurnID), "runtime": codexRuntime(profile), "sampling_request_count": requestCount,
-		"sampling_retry_count": max(profile.clientRetryCount, 0), "sandbox_network_access": false, "service_tier": profile.serviceTier,
+		"sampling_retry_count": max(profile.clientRetryCount, 0), "sandbox_network_access": codexTelemetrySandboxNetworkAccess(profile), "service_tier": profile.serviceTier,
 		"session_id": profile.sessionID, "shell_command_count": commandCount, "started_at": profile.started.Unix(),
 		"steer_count": 0, "subagent_source": codexOptionalString(profile.input.SubagentKind), "subagent_tool_call_count": 0, "submission_type": nil,
 		"agent_name": codexOptionalString(profile.input.AgentName),
@@ -232,11 +234,7 @@ func setCodexTurnUsage(params map[string]any, response gjson.Result) {
 	params["reasoning_output_tokens"] = usage.Get("output_tokens_details.reasoning_tokens").Int()
 }
 
-func codexHookEvent(profile codexTelemetryProfile, explicitInterrupt bool) codexAnalyticsEvent {
-	hookName := "Stop"
-	if explicitInterrupt {
-		hookName = "Interrupt"
-	}
+func codexHookEvent(profile codexTelemetryProfile, hookName string) codexAnalyticsEvent {
 	return newCodexAnalyticsEvent(profile, "codex_hook_run", map[string]any{
 		"execution_mode": "sync", "handler_type": "mcp_tool", "hook_name": hookName,
 		"hook_source": "plugin", "model_slug": profile.model, "product_client_id": codexClientName(profile),
@@ -466,6 +464,12 @@ func codexTelemetrySandboxPolicy(profile codexTelemetryProfile) string {
 	return "read_only"
 }
 
+func codexTelemetrySandboxNetworkAccess(profile codexTelemetryProfile) bool {
+	// Full access proves networking is enabled. Other modes do not expose their
+	// network configuration here, so retain the simulated restricted default.
+	return codexTelemetrySandboxPolicy(profile) == "full_access"
+}
+
 func codexSimulatesFileChange(profile codexTelemetryProfile) bool {
 	policy := codexTelemetrySandboxPolicy(profile)
 	return codexSimulatesClientBehavior(profile) && profile.fileChange && (policy == "workspace_write" || policy == "full_access")
@@ -491,6 +495,37 @@ func codexSimulatedHookCount(profile codexTelemetryProfile) int {
 	// A pool has a stable simulated hook configuration. Counts must agree in
 	// analytics, the feature flag, and OTLP instead of hard-coding four hooks.
 	return simulatedInt(profile.scenarioSeed+":registered-hooks", 3)
+}
+
+func codexSimulatedLifecycleHook(profile codexTelemetryProfile, explicitInterrupt bool) (name string, count int) {
+	if !codexSimulatesClientBehavior(profile) {
+		return "", 0
+	}
+	source := strings.ToLower(strings.TrimSpace(profile.input.ThreadSource))
+	kind := strings.ToLower(strings.TrimSpace(profile.input.SubagentKind))
+	header := strings.ToLower(strings.TrimSpace(profile.input.OpenAISubagent))
+	if source == "memory_consolidation" {
+		// Internal memory sessions only select managed/executor Stop hooks, not
+		// the plugin hooks simulated here. The wire can also hide their subtype.
+		return "", 0
+	}
+	spawned := func(value string) bool { return value == "thread_spawn" || value == "collab_spawn" }
+	if kind != "" && header != "" && kind != header && !(spawned(kind) && spawned(header)) {
+		return "", 0
+	}
+	if kind == "" {
+		kind = header
+	}
+	if kind != "" || source == "subagent" {
+		if !spawned(kind) || explicitInterrupt || (source != "" && source != "subagent") {
+			return "", 0
+		}
+		return "SubagentStop", codexSimulatedHookCount(profile)
+	}
+	if explicitInterrupt {
+		return "Interrupt", codexSimulatedHookCount(profile)
+	}
+	return "Stop", codexSimulatedHookCount(profile)
 }
 
 func codexSimulatedHookDuration(profile codexTelemetryProfile, index int) int64 {
