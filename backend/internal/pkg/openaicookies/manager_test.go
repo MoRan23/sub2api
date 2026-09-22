@@ -51,6 +51,11 @@ func (s *memoryStore) Merge(_ context.Context, scope Scope, changes []Mutation) 
 	if s.mergeErr != nil {
 		return nil, s.mergeErr
 	}
+	for _, change := range changes {
+		if change.ExpectedVersion != nil && s.versions[scope][change.Key] != *change.ExpectedVersion {
+			return nil, ErrConflict
+		}
+	}
 	if s.entries == nil {
 		s.entries = make(map[Scope]map[string]Entry)
 	}
@@ -97,6 +102,11 @@ func cookieRequest(t *testing.T, client *http.Client, scope Scope, path string, 
 	if diagnostics != nil {
 		ctx = WithObserver(ctx, func(d Diagnostic) { *diagnostics = append(*diagnostics, d) })
 	}
+	var attempt *Attempt
+	if scope.Persistent() {
+		ctx, attempt = WithAttempt(ctx)
+		defer attempt.Discard()
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://chatgpt.com"+path, nil)
 	require.NoError(t, err)
 	request.Header = headers.Clone()
@@ -105,22 +115,23 @@ func cookieRequest(t *testing.T, client *http.Client, scope Scope, path string, 
 	_, err = io.Copy(io.Discard, response.Body)
 	require.NoError(t, err)
 	require.NoError(t, response.Body.Close())
+	require.NoError(t, attempt.Commit(ctx))
 }
 
-func TestManagerHTTPAuxiliaryResponsesPersistenceAndSession(t *testing.T) {
+func TestManagerAcceptedResponsePersistenceAndSession(t *testing.T) {
 	store := &memoryStore{}
 	manager := NewManager(store)
 	var sent []string
 	client := localCookieClient(t, manager, func(w http.ResponseWriter, r *http.Request) {
 		sent = append(sent, r.Header.Get("Cookie"))
-		if r.URL.Path == "/backend-api/codex/plugins/list" {
+		if r.URL.Path == "/backend-api/codex/responses/accepted" {
 			w.Header().Add("Set-Cookie", "__oailb=route; Path=/; Max-Age=3600; Secure; HttpOnly")
 			w.Header().Add("Set-Cookie", "__cflb=session; Path=/; Secure")
 			w.Header().Add("Set-Cookie", "login_session=private; Path=/; Max-Age=3600")
 		}
 		w.WriteHeader(http.StatusOK)
 	})
-	cookieRequest(t, client, testScope, "/backend-api/codex/plugins/list", http.Header{"Cookie": []string{"caller=must-not-forward"}}, nil)
+	cookieRequest(t, client, testScope, "/backend-api/codex/responses/accepted", http.Header{"Cookie": []string{"caller=must-not-forward"}}, nil)
 	require.Empty(t, sent[0])
 	var diagnostics []Diagnostic
 	cookieRequest(t, client, testScope, "/backend-api/codex/responses?model=other", nil, &diagnostics)
@@ -286,7 +297,7 @@ func TestManagerRedirectUsesTargetPathAndRejectsForeignHost(t *testing.T) {
 			w.Header().Add("Set-Cookie", "__oailb=route; Path=/allowed; Max-Age=3600")
 			http.Redirect(w, r, "/allowed/step", http.StatusFound)
 		case "/allowed/step":
-			require.True(t, strings.Contains(r.Header.Get("Cookie"), "__oailb="))
+			require.Empty(t, r.Header.Get("Cookie"), "a redirect has no accepted target ticket")
 			http.Redirect(w, r, "https://untrusted.example/finish", http.StatusFound)
 		default:
 			destinationCookie = r.Header.Get("Cookie")

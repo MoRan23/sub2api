@@ -8,7 +8,11 @@ import (
 )
 
 func codexTurnStateRetainsAccountCooldown(record *CodexTurnStateRecord) bool {
-	return record.CollectorPaused || record.LastError == "account_cooldown" || record.LastError == "collector_rate_limited"
+	return record.CollectorPaused || codexTurnStateHasAccountCooldown(record)
+}
+
+func codexTurnStateHasAccountCooldown(record *CodexTurnStateRecord) bool {
+	return record.LastError == "account_cooldown" || record.LastError == "collector_rate_limited"
 }
 
 func clearIdleCodexTurnStateDemand(record *CodexTurnStateRecord) {
@@ -83,6 +87,7 @@ func codexTurnStateCollectorFailureReason(result CodexTurnStateCollectResult, er
 // The entire collector outcome is one versioned write. In particular, an
 // extended response cannot consume the CAS before its retry/error is saved.
 func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owner *Account, key CodexTurnStateKey, base CodexTurnStateRecord, policyRevision string, result CodexTurnStateCollectResult, collectErr error) {
+	defer result.discardCookies()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	if base.CollectorAttemptID == "" || base.CollectorProxyID <= 0 {
@@ -246,6 +251,9 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 			return
 		}
 		if ok {
+			if accepted || targetStillExpiring {
+				result.commitCookies(ctx)
+			}
 			if accepted {
 				s.cancelCollectorAttempt(ctx, key, base.CollectorAttemptID)
 			}

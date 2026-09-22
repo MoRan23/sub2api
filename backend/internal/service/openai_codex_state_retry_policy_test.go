@@ -121,3 +121,94 @@ func TestCodexTurnStateRetryPolicyOwnerCooldownStillAppliesToHTTP429(t *testing.
 	require.Equal(t, until, after.NextCollectAt)
 	require.Equal(t, "collector_rate_limited", after.LastError)
 }
+
+func TestCodexTurnStateRetryPolicyOtherModelShapeDelayDoesNotDelayTransportRetry(t *testing.T) {
+	s, repo, account := newCodexStateTestService(t)
+	clock := s.now()
+	s.now = func() time.Time { return clock }
+	ctx := context.Background()
+	shape := seedCodexStateTestDemand(t, s, account, "gpt-5")
+	transport := seedCodexStateTestDemand(t, s, account, "gpt-5-mini")
+	calls := map[string]int{}
+	s.collector = codexStateTestCollector(func(_ context.Context, input CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
+		calls[input.Model]++
+		if input.Model == "gpt-5" {
+			return CodexTurnStateCollectResult{StatusCode: http.StatusOK, completed: true}, nil
+		}
+		return CodexTurnStateCollectResult{}, context.DeadlineExceeded
+	})
+	s.collect(ctx, shape.key)
+	s.collect(ctx, transport.key)
+	require.Equal(t, 1, calls[transport.key.Model], "another model's no-target result is not an account cooldown")
+	after, err := repo.Get(ctx, transport.key)
+	require.NoError(t, err)
+	require.Equal(t, clock, after.NextCollectAt)
+	require.Empty(t, after.CollectorAttemptID)
+	clock = clock.Add(CodexTurnStateDueInterval)
+	s.collect(ctx, transport.key)
+	require.Equal(t, 2, calls[transport.key.Model], "the timeout may retry at the next one-second scheduler tick")
+	s.collect(ctx, shape.key)
+	require.Equal(t, 1, calls[shape.key.Model], "the five-second shape delay still applies to its own model")
+}
+
+func TestCodexTurnStateRetryPolicyNewReservationClearsExpiredRateLimitReason(t *testing.T) {
+	for _, reason := range []string{"collector_rate_limited", "account_cooldown"} {
+		t.Run(reason, func(t *testing.T) {
+			s, repo, account := newCodexStateTestService(t)
+			ctx := context.Background()
+			attempt := seedCodexStateTestDemand(t, s, account, "gpt-5")
+			before, err := repo.Get(ctx, attempt.key)
+			require.NoError(t, err)
+			before.LastError, before.CollectionStatus = reason, "backoff"
+			before.NextCollectAt, before.LastCollectedAt = s.now().Add(-time.Second), s.now().Add(-time.Minute)
+			ok, err := repo.SaveCAS(ctx, *before, before.Version)
+			require.NoError(t, err)
+			require.True(t, ok)
+			s.collector = codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
+				reserved, err := repo.Get(ctx, attempt.key)
+				require.NoError(t, err)
+				require.Empty(t, reserved.LastError, "a crash reservation cannot inherit an old account-cooldown marker")
+				require.Equal(t, "collecting", reserved.CollectionStatus)
+				return CodexTurnStateCollectResult{}, context.DeadlineExceeded
+			})
+			s.collect(ctx, attempt.key)
+			after, err := repo.Get(ctx, attempt.key)
+			require.NoError(t, err)
+			require.Equal(t, s.now(), after.NextCollectAt)
+			require.Equal(t, "collection_timeout", after.LastError)
+			require.Equal(t, "pending", after.CollectionStatus)
+			require.Empty(t, after.CollectorAttemptID)
+		})
+	}
+}
+
+type codexTurnStateReservationDeadlineRepo struct{ *codexStateMemoryRepo }
+
+func (r *codexTurnStateReservationDeadlineRepo) SaveCAS(ctx context.Context, record CodexTurnStateRecord, version int64) (bool, error) {
+	accepted, err := r.codexStateMemoryRepo.SaveCAS(ctx, record, version)
+	if accepted && record.CollectionStatus == "collecting" {
+		<-ctx.Done()
+	}
+	return accepted, err
+}
+
+func TestCodexTurnStateRetryPolicyDeadlineAfterReservationClearsItWithoutSending(t *testing.T) {
+	s, repo, account := newCodexStateTestService(t)
+	attempt := seedCodexStateTestDemand(t, s, account, "gpt-5")
+	s.repo = &codexTurnStateReservationDeadlineRepo{repo}
+	calls := 0
+	s.collector = codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
+		calls++
+		return CodexTurnStateCollectResult{}, nil
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	s.collect(ctx, attempt.key)
+	after, err := repo.Get(context.Background(), attempt.key)
+	require.NoError(t, err)
+	require.Zero(t, calls)
+	require.Empty(t, after.CollectorAttemptID)
+	require.Equal(t, s.now(), after.NextCollectAt)
+	require.Equal(t, "collection_timeout", after.LastError)
+	require.Equal(t, "pending", after.CollectionStatus)
+}

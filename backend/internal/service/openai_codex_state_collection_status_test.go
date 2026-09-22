@@ -35,6 +35,30 @@ func TestCodexTurnStateStatusShowsParallelCollectionAndOwnerCooldown(t *testing.
 	busy.CollectionStatus = "pending"
 	status = projectCodexTurnStateStatus(account.ID, account, []CodexTurnStateRecord{busy, cooldown}, []string{"gpt-5", "gpt-5-mini"}, nil, now)
 	require.Equal(t, "backoff", status.Models[0].CollectionStatus)
-	require.Equal(t, "account_cooldown", status.Models[0].CollectionReason)
+	require.Equal(t, "collector_rate_limited", status.Models[0].CollectionReason)
 	require.Equal(t, cooldown.NextCollectAt, *status.Models[0].NextCollectAt)
+}
+
+func TestCodexTurnStateStatusDoesNotBorrowAnotherModelsShapeRetryOrReservation(t *testing.T) {
+	for _, reason := range []string{"no_target_state", "model_mismatch", "collecting"} {
+		t.Run(reason, func(t *testing.T) {
+			s, _, account := newCodexStateTestService(t)
+			now := s.now()
+			failed := CodexTurnStateRecord{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5", Generation: "gen1", LastBusinessAt: now,
+				DemandReason: "extended_shape", LastCollectedAt: now, NextCollectAt: now, LastError: "collector_connect_timeout", CollectionStatus: "pending"}
+			other := failed
+			other.Model, other.LastError, other.CollectionStatus = "gpt-5-mini", reason, "backoff"
+			other.NextCollectAt = now.Add(5 * time.Second)
+			if reason == "collecting" {
+				other.LastError, other.CollectionStatus = "", "collecting"
+				other.CollectorAttemptID = "other-attempt"
+				other.NextCollectAt = now.Add(CodexTurnStateCollectTimeout + CodexTurnStateRetryInterval)
+			}
+			status := projectCodexTurnStateStatus(account.ID, account, []CodexTurnStateRecord{failed, other}, []string{"gpt-5", "gpt-5-mini"}, nil, now)
+			require.Equal(t, "pending", status.Models[0].CollectionStatus)
+			require.Equal(t, "queued", status.Models[0].CollectionReason)
+			require.Equal(t, now, *status.Models[0].NextCollectAt)
+			require.Equal(t, "collector_connect_timeout", status.Models[0].LastError)
+		})
+	}
 }

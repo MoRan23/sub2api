@@ -65,7 +65,7 @@ describe('Codex turn-state collection diagnostics', () => {
       'collector_dns_failed', 'collector_connection_refused', 'collector_connection_closed',
       'collector_tls_failed', 'collector_proxy_tunnel_failed', 'collector_connect_timeout',
       'collector_tls_timeout', 'collector_response_header_timeout',
-      'collector_model_mismatch',
+      'collector_model_mismatch', 'authorization_unavailable',
     ] as const
     getCodexTurnState.mockResolvedValue(state(codes.map(code => model(code))))
     const wrapper = render(locale)
@@ -80,6 +80,29 @@ describe('Codex turn-state collection diagnostics', () => {
     }
     expect(wrapper.text()).toContain('401/403')
     expect(wrapper.text()).toContain(locale === 'zh' ? '不能证明是代理并发限制' : 'does not prove a proxy concurrency limit')
+    wrapper.unmount()
+  })
+
+  it.each(['zh', 'en'] as const)('recognizes the persisted model_mismatch code in %s', async (locale) => {
+    getCodexTurnState.mockResolvedValue(state([model('gpt-test', { collection_reason: 'model_mismatch', last_error: 'model_mismatch' })]))
+    const wrapper = render(locale)
+    await flushPromises()
+    const messages = (locale === 'zh' ? zh : en).accounts.codexTurnState
+    expect(wrapper.get('[data-testid="codex-turn-state-reason-gpt-test"]').text()).toBe(messages.reasons.collector_model_mismatch)
+    expect(wrapper.get('[data-testid="codex-turn-state-guidance-gpt-test"]').text()).toBe(messages.reasonHints.collector_model_mismatch)
+    expect(wrapper.text()).not.toContain(messages.unknownReason)
+    wrapper.unmount()
+  })
+
+  it('keeps a previous transport failure separate when the next collection is already running', async () => {
+    getCodexTurnState.mockResolvedValue(state([model('gpt-test', {
+      collection_status: 'collecting', collection_reason: 'collecting', last_error: 'collector_connection_closed',
+    })]))
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="codex-turn-state-reason-gpt-test"]').text()).toBe('采集中')
+    expect(wrapper.get('[data-testid="codex-turn-state-previous-error-gpt-test"]').text()).toContain('上次采集错误: 采集连接被重置或提前关闭')
+    expect(wrapper.text()).not.toContain(zh.accounts.codexTurnState.retryHint)
     wrapper.unmount()
   })
 

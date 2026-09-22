@@ -86,7 +86,7 @@ func TestCodexTurnStateRotationCountsOnceAndCyclesAfterThree(t *testing.T) {
 					require.Empty(t, record.EncryptedToken)
 					*now = record.NextCollectAt.Add(-time.Nanosecond)
 					s.collect(context.Background(), key)
-					require.Len(t, used, attempt+1, "rotation cannot bypass the 30-second retry fence")
+					require.Len(t, used, attempt+1, "rotation cannot bypass the model's retry fence")
 					*now = record.NextCollectAt
 				}
 			})
@@ -115,8 +115,7 @@ func TestCodexTurnStateRotationIsPerModelAndSurvivesServiceRestart(t *testing.T)
 	restarted.collect(context.Background(), first)
 	require.Equal(t, int64(22), codexRotationTestRecord(t, repo, first).CollectorProxyID)
 	restarted.collect(context.Background(), second)
-	require.Len(t, models, 3, "an owner's other model still obeys the prior attempt's retry fence")
-	*now = codexRotationTestRecord(t, repo, first).NextCollectAt
+	require.Len(t, models, 4, "another model has its own shape-retry fence")
 	restarted.collect(context.Background(), second)
 	require.Equal(t, []string{"gpt-5", "gpt-5", "gpt-5", "gpt-5-mini"}, models)
 	require.Equal(t, []int64{11, 11, 11, 11}, proxies)

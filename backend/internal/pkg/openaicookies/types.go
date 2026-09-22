@@ -16,6 +16,8 @@ var (
 	ErrStaleScope       = errors.New("cookie_stale_scope")
 	ErrStoreUnavailable = errors.New("cookie_store_unavailable")
 	ErrStoreCorrupt     = errors.New("cookie_store_corrupt")
+	ErrConflict         = errors.New("cookie_commit_conflict")
+	ErrAttemptClosed    = errors.New("cookie_attempt_closed")
 )
 
 // Scope follows the credential authorization, independently of model, proxy or purpose.
@@ -103,8 +105,9 @@ func (e Entry) cookie() *http.Cookie {
 
 // Mutation changes one cookie identity. A nil Entry deletes that identity.
 type Mutation struct {
-	Key   string
-	Entry *Entry
+	Key             string
+	Entry           *Entry
+	ExpectedVersion *int64
 }
 
 // Snapshot includes value-free mutation versions, so another node's deletion or

@@ -301,6 +301,9 @@ func (s *CodexTurnStateService) observe(a *CodexTurnStateAttempt, token, source 
 	} else if shape.Shape == CodexTurnStateShapeExtended {
 		a.safeObservation.RefreshReason = "extended_shape"
 	}
+	if err == nil && shape.Shape == CodexTurnStateShapeTarget && shape.IssuedAt.After(a.cookieTarget.IssuedAt) {
+		a.cookieTarget = shape
+	}
 	s.observeHistoryEnvelopeLocked(a, token, now)
 	if !a.Enabled {
 		// Passive observations retain only the safe summary, never token values.
@@ -332,6 +335,7 @@ func (s *CodexTurnStateService) ObserveHeaders(a *CodexTurnStateAttempt, headers
 
 func (s *CodexTurnStateService) ObserveEvent(a *CodexTurnStateAttempt, event []byte) {
 	observeCodexModelEvent(a, event)
+	observeCodexCookieResponseEvent(a, event)
 	for _, token := range CodexTurnStateTokensFromEvent(event) {
 		s.observe(a, token, "metadata")
 	}
@@ -361,14 +365,16 @@ func (s *CodexTurnStateService) Finish(ctx context.Context, a *CodexTurnStateAtt
 	a.candidates = nil
 	a.mu.Unlock()
 	s.recordDeliveredHistory(a, delivered)
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	cacheAccepted := false
+	defer func() { a.finishCookies(cleanupCtx, delivered, cacheAccepted, s.now()) }()
 	if !a.Enabled {
 		return nil
 	}
 	s.mu.Lock()
 	delete(s.business, a.id)
 	s.mu.Unlock()
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-	defer cancel()
 	var publishErr error
 	pending := s.retainCodexTurnStateAnomaly(a)
 	if pending != nil {
@@ -381,7 +387,7 @@ func (s *CodexTurnStateService) Finish(ctx context.Context, a *CodexTurnStateAtt
 		if !businessSentAt.IsZero() {
 			demandAt = observedAt
 		}
-		_, publishErr = s.publish(cleanupCtx, a.key, tokens, "business", a.baseVersion, false, a.policyRevision, demandAt, a.baseCacheIdentity)
+		cacheAccepted, publishErr = s.publish(cleanupCtx, a.key, tokens, "business", a.baseVersion, false, a.policyRevision, demandAt, a.baseCacheIdentity)
 	}
 	endErr := s.repo.EndBusiness(cleanupCtx, a.key, a.id)
 	if delivered && businessSentAt.IsZero() && endErr == nil {
@@ -770,9 +776,9 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 		if other.OSFamily == key.OSFamily && other.Generation == key.Generation && other.CollectorPaused {
 			return
 		}
-		if ((other.OSFamily == key.OSFamily && other.Generation == key.Generation) || other.LastError == "collector_rate_limited" || other.LastError == "account_cooldown") && !other.LastCollectedAt.IsZero() && other.NextCollectAt.After(now) {
-			// Failure pacing (including upstream Retry-After) belongs to the
-			// credential owner even when another model is next in the queue.
+		if codexTurnStateHasAccountCooldown(&other) && other.NextCollectAt.After(now) {
+			// Only a real account limit is shared across models. A model's shape
+			// retry and crash reservation must not delay another model.
 			return
 		}
 	}
@@ -823,6 +829,7 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 	// the same precision so completion can distinguish it from a new cooldown.
 	record.NextCollectAt = now.Add(CodexTurnStateCollectTimeout + CodexTurnStateRetryInterval).UTC().Truncate(time.Microsecond)
 	record.LastCollectedAt = now
+	record.LastError = ""
 	record.RefreshReason = record.DemandReason
 	record.CollectionStatus, record.CollectionReason = "collecting", "collecting"
 	record.CollectorProxyID = codexTurnStateSelectedProxy(proxyIDs, record.CollectorProxyID)
@@ -836,6 +843,9 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 		return
 	}
 	if probeCtx.Err() != nil || !s.authoritativeModelPolicyMatches(probeCtx, key.Model, policyRevision) {
+		if errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
+			s.finishCollectorOutcome(ctx, owner, key, *record, policyRevision, CodexTurnStateCollectResult{}, context.DeadlineExceeded)
+		}
 		return
 	}
 	result, collectErr := s.collector.Collect(probeCtx, CodexTurnStateCollectRequest{Account: owner, Model: key.Model, ProxyID: record.CollectorProxyID,
@@ -846,7 +856,8 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 			live, readErr := s.repo.Get(sendCtx, key)
 			return readErr == nil && live != nil && live.CollectorAttemptID == lockID && live.CollectorProxyID == record.CollectorProxyID
 		}})
-	s.recordCollectorObservation(owner, key.Model, result)
+	defer func() { s.recordCollectorObservation(owner, key.Model, result) }()
+	defer result.discardCookies()
 	if probeCtx.Err() != nil && !errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
 		return
 	}

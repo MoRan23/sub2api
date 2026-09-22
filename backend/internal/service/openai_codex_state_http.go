@@ -85,6 +85,8 @@ func (s *OpenAIGatewayService) prepareOpenAICodexStateHTTPRequest(c *gin.Context
 	noteOpenAICodexStatePatch(c, attempt, body, finalBody)
 	collector := &codexTurnStateHTTPCollector{service: s.codexTurnStateService, attempt: attempt}
 	ctx := openaicookies.WithObserver(request.Context(), func(diagnostic openaicookies.Diagnostic) { observeCodexCookies(attempt, diagnostic) })
+	ctx, cookieAttempt := openaicookies.WithAttempt(ctx)
+	attempt.cookieAttempt = cookieAttempt
 	return request.WithContext(context.WithValue(ctx, codexTurnStateHTTPRequestKey{}, collector))
 }
 
@@ -164,6 +166,9 @@ func markCodexTurnStateHTTPDelivered(response *http.Response) {
 
 func completeCodexTurnStateHTTPResponse(response *http.Response, parseErr error) {
 	if collector := codexTurnStateHTTPCollectorFromResponse(response); collector != nil {
+		if parseErr != nil {
+			failCodexCookieResponse(collector.attempt)
+		}
 		collector.mu.Lock()
 		delivered := collector.delivered
 		collector.mu.Unlock()

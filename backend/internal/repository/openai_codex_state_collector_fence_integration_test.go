@@ -80,7 +80,7 @@ func TestCodexCollectorPublicationPostgresAllowsLeaseCommittedBehindStateLock(t 
 		var blocked bool
 		err := integrationDB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
 			WHERE wait_event_type='Lock' AND $1 = ANY(pg_blocking_pids(pid))
-			AND query LIKE 'UPDATE openai_codex_state SET%')`, blockerPID).Scan(&blocked)
+			AND query LIKE '%UPDATE openai_codex_state SET%')`, blockerPID).Scan(&blocked)
 		return err == nil && blocked
 	}, 3*time.Second, 10*time.Millisecond, "collector must serialize behind the pending natural request's state lock")
 	_, err = tx.ExecContext(ctx, `INSERT INTO openai_codex_state_business_leases
@@ -125,7 +125,7 @@ func TestCodexCollectorPublicationPostgresRejectsNewVersionCommittedBehindStateL
 		var blocked bool
 		err := integrationDB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
 			WHERE wait_event_type='Lock' AND $1 = ANY(pg_blocking_pids(pid))
-			AND query LIKE 'UPDATE openai_codex_state SET%')`, blockerPID).Scan(&blocked)
+			AND query LIKE '%UPDATE openai_codex_state SET%')`, blockerPID).Scan(&blocked)
 		return err == nil && blocked
 	}, 3*time.Second, 10*time.Millisecond, "collector must serialize behind the newer natural publication")
 	require.NoError(t, tx.Commit())

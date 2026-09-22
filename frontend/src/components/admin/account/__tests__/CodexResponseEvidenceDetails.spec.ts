@@ -57,4 +57,10 @@ describe('Codex response evidence', () => {
     expect(wrapper.text()).not.toContain('private-token')
     expect(wrapper.text()).not.toContain('private-reason')
   })
+
+  it.each(['cookie_staged', 'cookie_target_required', 'cookie_target_rejected', 'cookie_commit_conflict', 'cookie_attempt_closed'])('renders the safe Cookie commit outcome %s', (reason) => {
+    const wrapper = render({ cookie_diagnostic: { sent: false, source: 'none', reason } })
+    expect(wrapper.get('[data-testid="codex-cookie-diagnostic"]').text()).toContain(`cookieReasons.${reason}`)
+    expect(wrapper.text()).not.toContain('cookieReasons.unknown')
+  })
 })

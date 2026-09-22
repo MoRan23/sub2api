@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -180,6 +181,116 @@ func TestOpenAIHTTPCookieStoreConcurrentIdentityRevisionsFollowCommittedValue(t 
 	require.Equal(t, latest.revision, loaded.Versions[loaded.Entries[0].Key])
 }
 
+func TestOpenAIHTTPCookieStoreCASRejectsLateCommit(t *testing.T) {
+	ctx := context.Background()
+	scope, encryptor := createOpenAIHTTPCookieFixture(t)
+	first := NewOpenAIHTTPCookieStore(integrationDB, encryptor)
+	second := NewOpenAIHTTPCookieStore(integrationDB, encryptor)
+	entry := openAIHTTPCookieEntry("__oailb", "/")
+	original, err := first.Merge(ctx, scope, []openaicookies.Mutation{{Key: entry.Key, Entry: &entry}})
+	require.NoError(t, err)
+	expected := original[entry.Key]
+	deleted, err := second.Merge(ctx, scope, []openaicookies.Mutation{{Key: entry.Key, ExpectedVersion: &expected}})
+	require.NoError(t, err)
+	entry.Value = "late-response-value"
+	versions, err := first.Merge(ctx, scope, []openaicookies.Mutation{{Key: entry.Key, Entry: &entry, ExpectedVersion: &expected}})
+	require.ErrorIs(t, err, openaicookies.ErrConflict)
+	require.Equal(t, "cookie_commit_conflict", err.Error())
+	require.Nil(t, versions)
+	loaded, err := second.Load(ctx, scope)
+	require.NoError(t, err)
+	require.Empty(t, loaded.Entries, "an old response cannot resurrect a cookie deleted by a newer commit")
+	require.Equal(t, deleted, loaded.Versions)
+
+	expected = deleted[entry.Key]
+	committed, err := first.Merge(ctx, scope, []openaicookies.Mutation{{Key: entry.Key, Entry: &entry, ExpectedVersion: &expected}})
+	require.NoError(t, err)
+	require.Greater(t, committed[entry.Key], expected)
+	loaded, err = second.Load(ctx, scope)
+	require.NoError(t, err)
+	require.Equal(t, []openaicookies.Entry{entry}, loaded.Entries)
+}
+
+func TestOpenAIHTTPCookieStoreCASConflictRollsBackEntireBatch(t *testing.T) {
+	ctx := context.Background()
+	scope, encryptor := createOpenAIHTTPCookieFixture(t)
+	store := NewOpenAIHTTPCookieStore(integrationDB, encryptor)
+	entries := make([]openaicookies.Entry, 4)
+	for i := range entries {
+		entries[i] = openAIHTTPCookieEntry("__oailb", fmt.Sprintf("/batch/%d", i))
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Key < entries[j].Key })
+	// Leave the first identity absent, so the failing transaction must roll back
+	// an inserted placeholder as well as any prospective value/tombstone updates.
+	initial := make([]openaicookies.Mutation, 0, 3)
+	for i := 1; i < len(entries); i++ {
+		initial = append(initial, openaicookies.Mutation{Key: entries[i].Key, Entry: &entries[i]})
+	}
+	require.NoError(t, mergeOpenAIHTTPCookies(ctx, store, scope, initial))
+	before, err := store.Load(ctx, scope)
+	require.NoError(t, err)
+	zero := int64(0)
+	sessionExpected := before.Versions[entries[1].Key]
+	updateExpected := before.Versions[entries[2].Key]
+	changed := entries[2]
+	changed.Value = "batch-change-must-rollback"
+	versions, err := store.Merge(ctx, scope, []openaicookies.Mutation{
+		{Key: entries[0].Key, Entry: &entries[0], ExpectedVersion: &zero},
+		{Key: entries[1].Key, ExpectedVersion: &sessionExpected}, // Session replacement tombstone.
+		{Key: changed.Key, Entry: &changed, ExpectedVersion: &updateExpected},
+		{Key: entries[3].Key, Entry: &entries[3], ExpectedVersion: &zero}, // Existing identity cannot be absent.
+	})
+	require.ErrorIs(t, err, openaicookies.ErrConflict)
+	require.Nil(t, versions)
+	after, err := store.Load(ctx, scope)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "conflict must not commit a value, session tombstone, revision, or placeholder")
+	_, exists := after.Versions[entries[0].Key]
+	require.False(t, exists)
+}
+
+func TestOpenAIHTTPCookieStoreCASConcurrentAbsentIdentityHasOneWinner(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	scope, encryptor := createOpenAIHTTPCookieFixture(t)
+	stores := []openaicookies.Store{NewOpenAIHTTPCookieStore(integrationDB, encryptor), NewOpenAIHTTPCookieStore(integrationDB, encryptor)}
+	type result struct {
+		entry    openaicookies.Entry
+		versions map[string]int64
+		err      error
+	}
+	start := make(chan struct{})
+	results := make(chan result, len(stores))
+	for i, store := range stores {
+		go func(i int, store openaicookies.Store) {
+			entry := openAIHTTPCookieEntry("__oailb", "/")
+			entry.Value = fmt.Sprintf("absent-candidate-%d", i)
+			expected := int64(0)
+			<-start
+			versions, err := store.Merge(ctx, scope, []openaicookies.Mutation{{Key: entry.Key, Entry: &entry, ExpectedVersion: &expected}})
+			results <- result{entry: entry, versions: versions, err: err}
+		}(i, store)
+	}
+	close(start)
+	wins := 0
+	var winner result
+	for range stores {
+		outcome := <-results
+		if outcome.err == nil {
+			wins++
+			winner = outcome
+			continue
+		}
+		require.ErrorIs(t, outcome.err, openaicookies.ErrConflict)
+		require.Nil(t, outcome.versions)
+	}
+	require.Equal(t, 1, wins, "the absent row must be locked against concurrent compare-and-set")
+	loaded, err := stores[0].Load(ctx, scope)
+	require.NoError(t, err)
+	require.Equal(t, []openaicookies.Entry{winner.entry}, loaded.Entries)
+	require.Equal(t, winner.versions, loaded.Versions)
+}
+
 type openAIHTTPCookieRoundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f openAIHTTPCookieRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -201,12 +312,17 @@ func newOpenAIHTTPCookieTestClient(store openaicookies.Store) *http.Client {
 func requestOpenAIHTTPCookieTestClient(t *testing.T, client *http.Client, scope openaicookies.Scope, setCookie string) string {
 	t.Helper()
 	ctx := openaicookies.WithScope(context.Background(), scope)
+	ctx, attempt := openaicookies.WithAttempt(ctx)
+	defer attempt.Discard()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://chatgpt.com/backend-api/responses", nil)
 	require.NoError(t, err)
 	request.Header.Set("X-Test-Set-Cookie", setCookie)
 	response, err := client.Do(request)
 	require.NoError(t, err)
 	require.NoError(t, response.Body.Close())
+	// This store-level fixture represents a response whose target ticket has
+	// already been accepted; service tests exercise that admission decision.
+	require.NoError(t, attempt.Commit(ctx))
 	return response.Header.Get("X-Test-Observed-Cookie")
 }
 

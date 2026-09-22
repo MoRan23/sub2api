@@ -15,11 +15,12 @@ import (
 // Manager shares persistent cookies through Store while keeping session cookies
 // in this process. It never uses a transport pool key as a credential identity.
 type Manager struct {
-	store  Store
-	now    func() time.Time
-	mu     sync.Mutex
-	memory map[Scope]map[string]memoryEntry
-	scopes [64]chan struct{}
+	store   Store
+	now     func() time.Time
+	mu      sync.Mutex
+	memory  map[Scope]map[string]memoryEntry
+	version int64
+	scopes  [64]chan struct{}
 }
 
 type memoryEntry struct {
@@ -123,7 +124,9 @@ func (t *transport) RoundTrip(request *http.Request) (*http.Response, error) {
 		report(clone.Context(), diagnostic)
 		return t.next.RoundTrip(clone)
 	}
-	entries, err := t.manager.load(clone.Context(), scope)
+	attempt := attemptFromContext(clone.Context())
+	sequence := attempt.begin(t.manager, scope)
+	entries, versions, err := t.manager.loadState(clone.Context(), scope)
 	if err != nil {
 		diagnostic.Reason = safeReason(err)
 		report(clone.Context(), diagnostic)
@@ -136,10 +139,14 @@ func (t *transport) RoundTrip(request *http.Request) (*http.Response, error) {
 	}
 	report(clone.Context(), diagnostic)
 	response, transportErr := t.next.RoundTrip(clone)
-	if response != nil {
+	if response != nil && transportErr == nil && response.StatusCode >= 200 && response.StatusCode < 400 && (!scope.Persistent() || response.StatusCode < 300) {
 		changes := normalizeResponse(clone.URL, response.Cookies(), t.manager.now())
 		if len(changes) != 0 {
 			for index := range changes {
+				if attempt != nil {
+					version := versions[changes[index].Key]
+					changes[index].ExpectedVersion = &version
+				}
 				if changes[index].Entry == nil {
 					continue
 				}
@@ -150,12 +157,21 @@ func (t *transport) RoundTrip(request *http.Request) (*http.Response, error) {
 					}
 				}
 			}
-			saved, deleted, mergeErr := t.manager.merge(clone.Context(), scope, changes)
-			diagnostic.SavedCount, diagnostic.DeletedCount = saved, deleted
-			if mergeErr != nil {
-				diagnostic.Reason = safeReason(mergeErr)
+			if attempt != nil {
+				attempt.stage(sequence, candidate{changes: changes, diagnostic: diagnostic, observer: clone.Context()})
+				diagnostic.Reason = "cookie_staged"
+			} else if scope.Persistent() {
+				diagnostic.Reason = "cookie_target_required"
 			} else {
-				diagnostic.Reason = "cookie_updated"
+				// An unbound OAuth flow may keep temporary cookies; it has no
+				// account scope and never writes PostgreSQL or a bound pool.
+				saved, deleted, mergeErr := t.manager.merge(clone.Context(), scope, changes)
+				diagnostic.SavedCount, diagnostic.DeletedCount = saved, deleted
+				if mergeErr != nil {
+					diagnostic.Reason = safeReason(mergeErr)
+				} else {
+					diagnostic.Reason = "cookie_updated"
+				}
 			}
 			report(clone.Context(), diagnostic)
 		}
@@ -171,14 +187,23 @@ func safeReason(err error) string {
 		return ErrStaleScope.Error()
 	case errors.Is(err, ErrStoreCorrupt):
 		return ErrStoreCorrupt.Error()
+	case errors.Is(err, ErrConflict):
+		return ErrConflict.Error()
+	case errors.Is(err, ErrAttemptClosed):
+		return ErrAttemptClosed.Error()
 	default:
 		return ErrStoreUnavailable.Error()
 	}
 }
 
 func (m *Manager) load(ctx context.Context, scope Scope) ([]Entry, error) {
+	entries, _, err := m.loadState(ctx, scope)
+	return entries, err
+}
+
+func (m *Manager) loadState(ctx context.Context, scope Scope) ([]Entry, map[string]int64, error) {
 	if m == nil {
-		return nil, ErrStoreUnavailable
+		return nil, nil, ErrStoreUnavailable
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
@@ -186,13 +211,14 @@ func (m *Manager) load(ctx context.Context, scope Scope) ([]Entry, error) {
 	select {
 	case lock <- struct{}{}:
 	case <-ctx.Done():
-		return nil, ErrStoreUnavailable
+		return nil, nil, ErrStoreUnavailable
 	}
 	defer func() { <-lock }()
 	var snapshot Snapshot
+	snapshot.Versions = make(map[string]int64)
 	if scope.Persistent() {
 		if m.store == nil {
-			return nil, ErrStoreUnavailable
+			return nil, nil, ErrStoreUnavailable
 		}
 		var err error
 		snapshot, err = m.store.Load(ctx, scope)
@@ -200,14 +226,14 @@ func (m *Manager) load(ctx context.Context, scope Scope) ([]Entry, error) {
 			m.mu.Lock()
 			delete(m.memory, scope)
 			m.mu.Unlock()
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	now := m.now()
 	merged := make(map[string]Entry, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
 		if !entry.Valid() || entry.ExpiresAt.IsZero() || snapshot.Versions[entry.Key] <= 0 {
-			return nil, ErrStoreCorrupt
+			return nil, nil, ErrStoreCorrupt
 		}
 		if entry.ExpiresAt.After(now) {
 			merged[entry.Key] = entry
@@ -216,12 +242,22 @@ func (m *Manager) load(ctx context.Context, scope Scope) ([]Entry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for key, entry := range m.memory[scope] {
+		if !scope.Persistent() {
+			snapshot.Versions[key] = entry.version
+			if entry.Key == "" {
+				continue
+			}
+		}
 		if scope.Persistent() && snapshot.Versions[key] != entry.version {
 			delete(m.memory[scope], key)
 			continue
 		}
 		if !entry.ExpiresAt.IsZero() && !entry.ExpiresAt.After(now) {
-			delete(m.memory[scope], key)
+			if scope.Persistent() {
+				delete(m.memory[scope], key)
+			} else {
+				m.memory[scope][key] = memoryEntry{version: entry.version}
+			}
 			continue
 		}
 		merged[key] = entry.Entry
@@ -230,7 +266,7 @@ func (m *Manager) load(ctx context.Context, scope Scope) ([]Entry, error) {
 	for _, entry := range merged {
 		result = append(result, entry)
 	}
-	return result, nil
+	return result, snapshot.Versions, nil
 }
 
 func apply(request *http.Request, entries []Entry, now time.Time) Diagnostic {
@@ -342,7 +378,7 @@ func (m *Manager) merge(ctx context.Context, scope Scope, changes []Mutation) (i
 	persistent := make([]Mutation, 0, len(changes))
 	for _, change := range changes {
 		if change.Entry == nil || change.Entry.ExpiresAt.IsZero() {
-			persistent = append(persistent, Mutation{Key: change.Key})
+			persistent = append(persistent, Mutation{Key: change.Key, ExpectedVersion: change.ExpectedVersion})
 		} else {
 			persistent = append(persistent, change)
 		}
@@ -367,13 +403,29 @@ func (m *Manager) merge(ctx context.Context, scope Scope, changes []Mutation) (i
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if !scope.Persistent() {
+		for _, change := range changes {
+			if change.ExpectedVersion != nil && m.memory[scope][change.Key].version != *change.ExpectedVersion {
+				return 0, 0, ErrConflict
+			}
+		}
+		versions = make(map[string]int64, len(changes))
+		for _, change := range changes {
+			m.version++
+			versions[change.Key] = m.version
+		}
+	}
 	if m.memory[scope] == nil {
 		m.memory[scope] = make(map[string]memoryEntry)
 	}
 	saved, deleted := 0, 0
 	for _, change := range changes {
 		if change.Entry == nil {
-			delete(m.memory[scope], change.Key)
+			if scope.Persistent() {
+				delete(m.memory[scope], change.Key)
+			} else {
+				m.memory[scope][change.Key] = memoryEntry{version: versions[change.Key]}
+			}
 			deleted++
 			continue
 		}

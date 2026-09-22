@@ -213,19 +213,19 @@ func projectCodexTurnStateStatus(accountID int64, owner *Account, records []Code
 	}
 	ownerPaused := false
 	var ownerRetry time.Time
+	ownerRetryReason := "account_cooldown"
 	if len(sharedCooldown) > 0 {
 		ownerRetry = sharedCooldown[0]
 	}
+	if owner.RateLimitResetAt != nil && owner.RateLimitResetAt.After(ownerRetry) {
+		ownerRetry = *owner.RateLimitResetAt
+	}
 	for _, record := range records {
-		if record.OSFamily != result.OSFamily || record.Generation != CodexTurnStateGenerationForAccount(owner) {
-			if (record.LastError == "collector_rate_limited" || record.LastError == "account_cooldown") && !record.LastCollectedAt.IsZero() && record.NextCollectAt.After(ownerRetry) {
-				ownerRetry = record.NextCollectAt
-			}
-			continue
+		if codexTurnStateHasAccountCooldown(&record) && !record.NextCollectAt.Before(ownerRetry) {
+			ownerRetry, ownerRetryReason = record.NextCollectAt, record.LastError
 		}
-		ownerPaused = ownerPaused || record.CollectorPaused
-		if !record.LastCollectedAt.IsZero() && record.NextCollectAt.After(ownerRetry) {
-			ownerRetry = record.NextCollectAt
+		if record.OSFamily == result.OSFamily && record.Generation == CodexTurnStateGenerationForAccount(owner) {
+			ownerPaused = ownerPaused || record.CollectorPaused
 		}
 	}
 	for _, record := range records {
@@ -261,7 +261,7 @@ func projectCodexTurnStateStatus(accountID int64, owner *Account, records []Code
 			record.EncryptedToken != "" && record.Shape == CodexTurnStateShapeTarget &&
 			record.TokenLength == result.ExpectedLength && record.CipherBlocks == map[int]int{292: 10, 332: 12}[result.ExpectedLength] &&
 			!record.IssuedAt.IsZero() && !record.IssuedAt.After(now.Add(30*time.Second)) && record.ExpiresAt.After(now)
-		item.CollectionStatus, item.CollectionReason = projectCodexStateCollection(result, owner, record, now, ownerPaused, ownerRetry)
+		item.CollectionStatus, item.CollectionReason = projectCodexStateCollection(result, owner, record, now, ownerPaused, ownerRetry, ownerRetryReason)
 		if !item.ModelAllowed {
 			item.CollectionStatus, item.CollectionReason = "blocked", item.State
 		}
@@ -273,7 +273,7 @@ func projectCodexTurnStateStatus(accountID int64, owner *Account, records []Code
 	return result
 }
 
-func projectCodexStateCollection(status *CodexTurnStateStatus, owner *Account, record CodexTurnStateRecord, now time.Time, ownerPaused bool, ownerRetry time.Time) (string, string) {
+func projectCodexStateCollection(status *CodexTurnStateStatus, owner *Account, record CodexTurnStateRecord, now time.Time, ownerPaused bool, ownerRetry time.Time, ownerRetryReason string) (string, string) {
 	if !status.Enabled {
 		return "blocked", "disabled"
 	}
@@ -304,6 +304,9 @@ func projectCodexStateCollection(status *CodexTurnStateStatus, owner *Account, r
 	if codexTurnStateWaitsForProxyCacheExpiry(&record, now) {
 		if record.NextCollectAt.After(now) || ownerRetry.After(now) {
 			reason := record.LastError
+			if ownerRetry.After(record.NextCollectAt) {
+				reason = ownerRetryReason
+			}
 			if reason == "" {
 				reason = "account_cooldown"
 			}
@@ -321,6 +324,9 @@ func projectCodexStateCollection(status *CodexTurnStateStatus, owner *Account, r
 	}
 	if record.NextCollectAt.After(now) || ownerRetry.After(now) {
 		reason := record.LastError
+		if ownerRetry.After(record.NextCollectAt) {
+			reason = ownerRetryReason
+		}
 		if reason == "" {
 			reason = "account_cooldown"
 		}

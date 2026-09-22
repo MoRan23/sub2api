@@ -137,6 +137,7 @@ func TestCodexModelEvidenceStatusLatestIsIndependentOfCache(t *testing.T) {
 }
 
 func TestCodexModelEvidenceNoTicketDoesNotRewritePreviousObservation(t *testing.T) {
+	isolateCodexHistory(t)
 	state, owner := codexStateIdentityFixture(t)
 	first := prepareCodexIdentityObservation(t, state, owner, owner.GetCredential("access_token"))
 	state.ObserveEvent(first, []byte(`{"type":"response.completed","response":{"model":"gpt-6-astra"}}`))

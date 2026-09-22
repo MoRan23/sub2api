@@ -62,6 +62,8 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 		cookieDiagnostic = codexCookieDiagnostic(diagnostic)
 		cookieMu.Unlock()
 	})
+	ctx, cookieAttempt := openaicookies.WithAttempt(ctx)
+	result.cookieAttempt = cookieAttempt
 	if c == nil || c.Do == nil || input.ProxyID <= 0 || !codexTurnStateEligible(input.Account) || strings.TrimSpace(input.Model) == "" {
 		return result, errors.New("collector_not_configured")
 	}
@@ -261,8 +263,9 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 		if errors.Is(err, bufio.ErrTooLong) {
 			return result, errCodexTurnStateCollectorEventTooLarge
 		}
-		if codexTurnStateCollectorTimedOut(err) {
-			return result, context.DeadlineExceeded
+		failure := newCodexTurnStateCollectorTransportError(err, "response_body")
+		if transport, ok := failure.(*codexTurnStateCollectorTransportError); ok && transport.code != "collector_transport_failed" {
+			return result, failure
 		}
 		return result, errCodexTurnStateCollectorStreamFailed
 	}

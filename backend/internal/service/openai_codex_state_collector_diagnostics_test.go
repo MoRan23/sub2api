@@ -165,3 +165,48 @@ func TestCodexTurnStateCollectorDeadlinePreservesPersistedPhase(t *testing.T) {
 	require.Equal(t, "collector_rate_limited", codexTurnStateCollectorFailureReason(CodexTurnStateCollectResult{StatusCode: 200}, limited))
 	require.ErrorIs(t, codexTurnStateCollectorDeadlineError(errors.New("private-error")), context.DeadlineExceeded)
 }
+
+type codexTurnStateErrorReader struct{ err error }
+
+func (r codexTurnStateErrorReader) Read([]byte) (int, error) { return 0, r.err }
+
+func TestCodexTurnStateCollectorBodyFailureRetriesOnNextTick(t *testing.T) {
+	for _, tc := range []struct {
+		name, reason string
+		readErr      error
+		status       int
+	}{
+		{name: "reset", readErr: syscall.ECONNRESET, reason: "collector_connection_closed", status: 200},
+		{name: "early_close", readErr: io.ErrUnexpectedEOF, reason: "collector_connection_closed", status: 200},
+		{name: "timeout", readErr: context.DeadlineExceeded, reason: "collection_timeout", status: 200},
+		{name: "unfinished_eof", reason: "collector_response_incomplete", status: 200},
+		{name: "upstream_503", reason: "collector_upstream_unavailable", status: 503},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, repo, account := newCodexStateTestService(t)
+			clock := s.now()
+			s.now = func() time.Time { return clock }
+			ctx := context.Background()
+			attempt := seedCodexStateTestDemand(t, s, account, "gpt-5")
+			calls := 0
+			s.collector = NewCodexTurnStateHTTPCollector(func(context.Context, CodexTurnStateCollectRequest, *http.Request) (*http.Response, error) {
+				calls++
+				var body io.Reader = strings.NewReader("data: {\"type\":\"response.created\"}\n\n")
+				if tc.readErr != nil {
+					body = codexTurnStateErrorReader{tc.readErr}
+				}
+				return &http.Response{StatusCode: tc.status, Header: http.Header{"Retry-After": {"5"}}, Body: io.NopCloser(body)}, nil
+			})
+			s.collect(ctx, attempt.key)
+			record, err := repo.Get(ctx, attempt.key)
+			require.NoError(t, err)
+			require.Equal(t, tc.reason, record.LastError)
+			require.Equal(t, "pending", record.CollectionStatus)
+			require.Equal(t, clock, record.NextCollectAt)
+			require.Empty(t, record.CollectorAttemptID)
+			clock = clock.Add(CodexTurnStateDueInterval)
+			s.collect(ctx, attempt.key)
+			require.Equal(t, 2, calls)
+		})
+	}
+}

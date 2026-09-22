@@ -39,6 +39,11 @@ func (s *upstreamCookieMemoryStore) Load(_ context.Context, scope openaicookies.
 func (s *upstreamCookieMemoryStore) Merge(_ context.Context, scope openaicookies.Scope, mutations []openaicookies.Mutation) (map[string]int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, mutation := range mutations {
+		if mutation.ExpectedVersion != nil && s.versions[scope][mutation.Key] != *mutation.ExpectedVersion {
+			return nil, openaicookies.ErrConflict
+		}
+	}
 	if s.entries == nil {
 		s.entries = make(map[openaicookies.Scope]map[string]openaicookies.Entry)
 	}
@@ -79,6 +84,11 @@ func TestHTTPUpstreamCookiesAtActualSendBoundary(t *testing.T) {
 			scope := openaicookies.Scope{OwnerAccountID: 31, OSFamily: "windows", AuthorizationGeneration: "grant-a"}
 			send := func(proxy, path string, cookieScope openaicookies.Scope, expected string, learn bool) {
 				ctx := openaicookies.WithScope(context.Background(), cookieScope)
+				var attempt *openaicookies.Attempt
+				if strings.HasPrefix(path, "/backend-api/codex/responses") {
+					ctx, attempt = openaicookies.WithAttempt(ctx)
+					defer attempt.Discard()
+				}
 				nativeScope := codexnative.Scope{AccountID: 31, Purpose: "oauth", AccountUserAgent: "Windows"}
 				if native {
 					ctx = codexnative.WithScope(ctx, nativeScope)
@@ -107,10 +117,12 @@ func TestHTTPUpstreamCookiesAtActualSendBoundary(t *testing.T) {
 				response, err := s.Do(request, proxy, 31, 2)
 				require.NoError(t, err)
 				require.NoError(t, response.Body.Close())
+				require.NoError(t, attempt.Commit(ctx))
 				require.Zero(t, atomic.LoadInt64(&entry.inFlight))
 				require.Equal(t, "__oailb=untrusted-client-value", request.Header.Get("Cookie"), "transport must clone rather than mutate caller headers")
 			}
 			send("", "/backend-api/plugins/list", scope, "", true)
+			send("", "/backend-api/codex/responses", scope, "", true)
 			send("http://proxy.invalid:8080", "/backend-api/codex/responses", scope, "__oailb=synthetic-routing-value", false)
 			other := scope
 			other.OSFamily = "linux"

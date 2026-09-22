@@ -158,6 +158,13 @@ type CodexTurnStateAttempt struct {
 	wireObservation    *codexTurnStateWireObservation
 	safeObservation    CodexTurnStateSafeObservation
 	modelEvidence      codexModelEvidenceObserver
+	// Cookie admission is independent of cache maintenance. Passive attempts keep
+	// only validated target metadata, never a token, until successful delivery.
+	cookieAttempt          codexTurnStateCookieAttempt
+	cookieTarget           CodexTurnStateShape
+	cookieCredentialsBound bool
+	cookieResponseComplete bool
+	cookieResponseFailed   bool
 }
 
 type CodexTurnStateSafeObservation struct {
@@ -208,6 +215,7 @@ type CodexTurnStateCollectResult struct {
 	Observation   *CodexTurnStateSafeObservation `json:"-"`
 	observationID string
 	requestSentAt time.Time
+	cookieAttempt codexTurnStateCookieAttempt
 }
 
 type CodexTurnStateCollector interface {

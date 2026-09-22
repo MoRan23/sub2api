@@ -135,20 +135,28 @@ const reasonCodes = new Set([
   'collector_connect_timeout', 'collector_tls_timeout', 'collector_response_header_timeout',
   'waiting_business_response', 'queued', 'waiting_business', 'collecting', 'collector_proxy_not_configured', 'collector_proxy_changed',
   'account_unavailable', 'account_inactive', 'account_scheduling_disabled', 'account_expired', 'idle',
-  'target_still_expiring', 'business_preempted', 'collector_model_mismatch',
+  'target_still_expiring', 'business_preempted', 'collector_model_mismatch', 'authorization_unavailable',
 ])
 
+function canonicalReason(value: string) {
+  // Persisted collector results use model_mismatch; older UI/API snapshots may
+  // contain collector_model_mismatch. Both describe the same admission failure.
+  return value === 'model_mismatch' ? 'collector_model_mismatch' : value
+}
 function label(group: string, value?: string) {
   if (!value) return '—'
+  if (group === 'reasons') value = canonicalReason(value)
   if (group === 'reasons' && !knownReason(value)) return t(`${prefix}.unknownReason`)
   const key = `${prefix}.${group}.${value}`
   return te(key) ? t(key) : value
 }
 function knownReason(value: string) {
+  value = canonicalReason(value)
   return reasonCodes.has(value) && te(`${prefix}.reasons.${value}`)
 }
 function reasonHint(value?: string) {
   if (!value) return ''
+  value = canonicalReason(value)
   if (!knownReason(value)) return t(`${prefix}.reasonHints.collection_failed`)
   const key = `${prefix}.reasonHints.${value}`
   return te(key) ? t(key) : ''

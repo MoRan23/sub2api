@@ -154,6 +154,35 @@ func validOpenAIHTTPCookieKey(key string) bool {
 	return err == nil && hex.EncodeToString(decoded) == key
 }
 
+// lockOpenAIHTTPCookieIdentity also locks an absent identity using a transaction-
+// local tombstone. The unique key serializes competing inserts; only this
+// transaction's newly inserted placeholder has logical revision zero. A failed
+// comparison rolls the placeholder back together with the rest of the batch.
+func lockOpenAIHTTPCookieIdentity(ctx context.Context, tx *sql.Tx, scope openaicookies.Scope, key string) (int64, error) {
+	var revision int64
+	err := tx.QueryRowContext(ctx, `INSERT INTO openai_http_cookies
+		(owner_account_id, os_family, authorization_generation, entry_key)
+		VALUES ($1,$2,$3::uuid,$4)
+		ON CONFLICT (owner_account_id, os_family, authorization_generation, entry_key) DO NOTHING
+		RETURNING revision`, scope.OwnerAccountID, scope.OSFamily, scope.AuthorizationGeneration, key).Scan(&revision)
+	if err == nil {
+		return 0, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, openaicookies.ErrStoreUnavailable
+	}
+	err = tx.QueryRowContext(ctx, `SELECT revision FROM openai_http_cookies
+		WHERE owner_account_id=$1 AND os_family=$2 AND authorization_generation::text=$3 AND entry_key=$4
+		FOR UPDATE`, scope.OwnerAccountID, scope.OSFamily, scope.AuthorizationGeneration, key).Scan(&revision)
+	if err != nil {
+		return 0, openaicookies.ErrStoreUnavailable
+	}
+	if revision <= 0 {
+		return 0, openaicookies.ErrStoreCorrupt
+	}
+	return revision, nil
+}
+
 func (s *openAIHTTPCookieStore) Merge(ctx context.Context, scope openaicookies.Scope, mutations []openaicookies.Mutation) (map[string]int64, error) {
 	if !scope.Persistent() {
 		return nil, openaicookies.ErrInvalidScope
@@ -163,18 +192,27 @@ func (s *openAIHTTPCookieStore) Merge(ctx context.Context, scope openaicookies.S
 	}
 	// Coalesce repeated identities using their last mutation, then lock entries in
 	// a stable order to avoid deadlocks between overlapping response cookie sets.
-	latest := make(map[string]*openaicookies.Entry, len(mutations))
+	latest := make(map[string]openaicookies.Mutation, len(mutations))
 	for _, mutation := range mutations {
 		if !validOpenAIHTTPCookieKey(mutation.Key) || mutation.Entry != nil &&
 			(mutation.Entry.Key != mutation.Key || !validPersistentOpenAIHTTPCookie(*mutation.Entry)) {
 			return nil, openaicookies.ErrStoreCorrupt
 		}
-		latest[mutation.Key] = mutation.Entry
+		if previous, exists := latest[mutation.Key]; exists && previous.ExpectedVersion != nil {
+			if mutation.ExpectedVersion != nil && *mutation.ExpectedVersion != *previous.ExpectedVersion {
+				return nil, openaicookies.ErrConflict
+			}
+			// Last value wins for duplicate identities, but no earlier CAS
+			// precondition may be discarded by a later unconditional mutation.
+			mutation.ExpectedVersion = previous.ExpectedVersion
+		}
+		latest[mutation.Key] = mutation
 	}
 	keys := make([]string, 0, len(latest))
 	ciphertexts := make(map[string]string, len(latest))
-	for key, entry := range latest {
+	for key, mutation := range latest {
 		keys = append(keys, key)
+		entry := mutation.Entry
 		if entry == nil {
 			continue
 		}
@@ -194,13 +232,24 @@ func (s *openAIHTTPCookieStore) Merge(ctx context.Context, scope openaicookies.S
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	now := time.Now().UTC()
 	if err := pruneOpenAIHTTPCookies(ctx, tx, scope); err != nil {
 		return nil, err
 	}
+	// Lock and compare the entire batch before changing any committed cookie.
+	// Unconditional merges follow the same sorted locking order as CAS merges.
+	for _, key := range keys {
+		revision, err := lockOpenAIHTTPCookieIdentity(ctx, tx, scope, key)
+		if err != nil {
+			return nil, err
+		}
+		if expected := latest[key].ExpectedVersion; expected != nil && revision != *expected {
+			return nil, openaicookies.ErrConflict
+		}
+	}
+	now := time.Now().UTC()
 	versions := make(map[string]int64, len(keys))
 	for _, key := range keys {
-		entry := latest[key]
+		entry := latest[key].Entry
 		var ciphertext, expiresAt any
 		if entry != nil && entry.ExpiresAt.After(now) {
 			ciphertext, expiresAt = ciphertexts[key], entry.ExpiresAt.UTC().Truncate(time.Microsecond)

@@ -33,7 +33,7 @@ const { t } = useI18n()
 const prefix = 'admin.accounts.codexTurnState'
 const relations = new Set(['not_reported', 'exact', 'known_alias', 'different', 'conflicting'])
 const cookieSources = new Set(['none', 'persistent', 'memory', 'mixed'])
-const cookieReasons = new Set(['cookie_scope_missing', 'cookie_invalid_scope', 'cookie_host_not_allowed', 'cookie_store_unavailable', 'cookie_store_corrupt', 'cookie_stale_scope', 'cookie_empty', 'cookie_sent', 'cookie_updated'])
+const cookieReasons = new Set(['cookie_scope_missing', 'cookie_invalid_scope', 'cookie_host_not_allowed', 'cookie_store_unavailable', 'cookie_store_corrupt', 'cookie_stale_scope', 'cookie_empty', 'cookie_sent', 'cookie_updated', 'cookie_staged', 'cookie_target_required', 'cookie_target_rejected', 'cookie_commit_conflict', 'cookie_attempt_closed'])
 const relation = computed(() => t(`${prefix}.modelRelations.${props.evidence.model_conflict ? 'conflicting' : relations.has(props.evidence.model_relation || '') ? props.evidence.model_relation : 'not_reported'}`))
 const cookieSource = computed(() => t(`${prefix}.cookieSources.${cookieSources.has(props.evidence.cookie_diagnostic?.source || '') ? props.evidence.cookie_diagnostic?.source : 'unknown'}`))
 const cookieReason = computed(() => t(`${prefix}.cookieReasons.${cookieReasons.has(props.evidence.cookie_diagnostic?.reason || '') ? props.evidence.cookie_diagnostic?.reason : 'unknown'}`))

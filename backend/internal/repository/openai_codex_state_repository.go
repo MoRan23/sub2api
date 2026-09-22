@@ -61,11 +61,17 @@ func (r *openAICodexStateRepository) databaseAvailable() error {
 
 // The shared row lock conflicts with account configuration's FOR NO KEY UPDATE
 // lock, so a disabled/replaced generation cannot race a successful publication.
-func lockCodexStateGeneration(ctx context.Context, tx *sql.Tx, key service.CodexTurnStateKey) (bool, error) {
+func lockCodexStateGeneration(ctx context.Context, tx *sql.Tx, key service.CodexTurnStateKey, writeAccount bool) (bool, error) {
+	accountLock := " FOR SHARE"
+	if writeAccount {
+		// Cooldown publication also updates this row. Take the write lock first
+		// so simultaneous model outcomes cannot deadlock upgrading shared locks.
+		accountLock = " FOR NO KEY UPDATE"
+	}
 	var found int64
 	err := tx.QueryRowContext(ctx, `SELECT a.id FROM accounts a
 		WHERE a.id = $1 AND a.deleted_at IS NULL AND a.platform = 'openai' AND a.type = 'oauth'
-		AND a.extra->'codex_turn_state'->>'enabled' = 'true' FOR SHARE`, key.OwnerAccountID).Scan(&found)
+		AND a.extra->'codex_turn_state'->>'enabled' = 'true'`+accountLock, key.OwnerAccountID).Scan(&found)
 	if err != nil {
 		return false, ignoreCodexStateNoRows(err)
 	}
@@ -145,7 +151,7 @@ func (r *openAICodexStateRepository) BeginBusiness(ctx context.Context, key serv
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	live, err := lockCodexStateGeneration(ctx, tx, key)
+	live, err := lockCodexStateGeneration(ctx, tx, key, false)
 	if err != nil || !live {
 		return nil, err
 	}
@@ -237,7 +243,7 @@ func (r *openAICodexStateRepository) MarkBusinessSent(ctx context.Context, key s
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	live, err := lockCodexStateGeneration(ctx, tx, key)
+	live, err := lockCodexStateGeneration(ctx, tx, key, false)
 	if err != nil || !live {
 		return err
 	}
@@ -277,7 +283,7 @@ func (r *openAICodexStateRepository) CreateHistoryDemand(ctx context.Context, pr
 	if err != nil || !policyLive {
 		return false, err
 	}
-	live, err := lockCodexStateGeneration(ctx, tx, key)
+	live, err := lockCodexStateGeneration(ctx, tx, key, false)
 	if err != nil || !live {
 		return false, err
 	}
@@ -419,11 +425,10 @@ func (r *openAICodexStateRepository) SaveCAS(ctx context.Context, record service
 	if expectedVersion < 1 {
 		return false, errors.New("invalid Codex turn-state version")
 	}
-	if (record.LastError == "collector_rate_limited" || record.LastError == "account_cooldown") && !record.NextCollectAt.IsZero() {
-		if err := r.ExtendCollectorCooldown(ctx, record.OwnerAccountID, record.NextCollectAt); err != nil {
-			return false, err
-		}
-	}
+	// A new attempt may still carry an old rate-limit diagnostic. Its crash
+	// reservation is not a real account cooldown and must remain model-local.
+	extendCooldown := (record.LastError == "collector_rate_limited" || record.LastError == "account_cooldown") &&
+		!record.NextCollectAt.IsZero() && record.CollectionStatus != "collecting" && record.CollectorAttemptID == ""
 	// A snapshot taken after waiting for the policy lock must see the previous
 	// writer's committed pair, regardless of the database's default isolation.
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
@@ -435,14 +440,15 @@ func (r *openAICodexStateRepository) SaveCAS(ctx context.Context, record service
 	if err != nil || !policyLive {
 		return false, err
 	}
-	live, err := lockCodexStateGeneration(ctx, tx, record.Key())
+	live, err := lockCodexStateGeneration(ctx, tx, record.Key(), extendCooldown)
 	if err != nil || !live {
 		return false, err
 	}
 	// Business activity may overlap collection. The UPDATE locks the state row
 	// and rechecks its version after any concurrent writer commits, preventing
 	// a late result from replacing a newer publication without waiting for leases.
-	result, err := tx.ExecContext(ctx, `UPDATE openai_codex_state SET
+	var changed bool
+	err = tx.QueryRowContext(ctx, `WITH updated_state AS (UPDATE openai_codex_state SET
 		version=version+1, encrypted_token=$5, issued_at=$6, expires_at=$7,
 		token_length=$8, cipher_blocks=$9, source=$10, shape=$11, refresh_reason=$12,
 		last_business_at=GREATEST(last_business_at,$13), last_collected_at=$14,
@@ -452,7 +458,12 @@ func (r *openAICodexStateRepository) SaveCAS(ctx context.Context, record service
 		collection_status=$21, collection_reason=$22,
 		collector_proxy_id=$23, collector_extended_count=$24, last_collector_proxy_id=$25,
 		collector_attempt_id=$26, updated_at=NOW()
-		WHERE owner_account_id=$1 AND model=$2 AND generation=$3 AND version=$4 AND os_family=$27`,
+		WHERE owner_account_id=$1 AND model=$2 AND generation=$3 AND version=$4 AND os_family=$27
+		RETURNING owner_account_id,next_collect_at), updated_cooldown AS (
+		UPDATE accounts a SET codex_turn_state_retry_after=GREATEST(a.codex_turn_state_retry_after,s.next_collect_at)
+		FROM updated_state s WHERE a.id=s.owner_account_id AND a.deleted_at IS NULL AND $28
+		RETURNING a.id)
+		SELECT EXISTS (SELECT 1 FROM updated_state)`,
 		record.OwnerAccountID, record.Model, record.Generation, expectedVersion,
 		record.EncryptedToken, codexStateNullableTime(record.IssuedAt), codexStateNullableTime(record.ExpiresAt),
 		record.TokenLength, record.CipherBlocks, record.Source, record.Shape, record.RefreshReason,
@@ -460,18 +471,14 @@ func (r *openAICodexStateRepository) SaveCAS(ctx context.Context, record service
 		codexStateNullableTime(record.NextCollectAt), record.CollectorPaused, record.LastError,
 		record.DemandReason, codexStateNullableTime(record.DemandAt), codexStateNullableTime(record.HistoryProofObservedAt),
 		record.CollectionStatus, record.CollectionReason, codexStateNullableID(record.CollectorProxyID),
-		record.CollectorExtendedCount, codexStateNullableID(record.LastCollectorProxyID), codexStateNullableString(record.CollectorAttemptID), record.OSFamily)
-	if err != nil {
-		return false, err
-	}
-	changed, err := result.RowsAffected()
+		record.CollectorExtendedCount, codexStateNullableID(record.LastCollectorProxyID), codexStateNullableString(record.CollectorAttemptID), record.OSFamily, extendCooldown).Scan(&changed)
 	if err != nil {
 		return false, err
 	}
 	if err = tx.Commit(); err != nil {
 		return false, err
 	}
-	return changed == 1, nil
+	return changed, nil
 }
 
 func (r *openAICodexStateRepository) ListActive(ctx context.Context, since time.Time, limit int) ([]service.CodexTurnStateRecord, error) {

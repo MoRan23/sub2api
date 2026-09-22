@@ -158,11 +158,11 @@ func (s *CodexTurnStateService) bindHistoryCredentials(ctx context.Context, a *C
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if err != nil || !codexTurnStateEligible(owner) || a.credentialEpoch == "" ||
-		CodexTurnStateCredentialEpochForAccount(owner) != a.credentialEpoch ||
-		strings.TrimSpace(owner.GetCredential("access_token")) == "" ||
-		header("Authorization") != "Bearer "+strings.TrimSpace(owner.GetCredential("access_token")) ||
-		header("ChatGPT-Account-Id") != strings.TrimSpace(owner.GetCredential("chatgpt_account_id")) {
+	a.cookieCredentialsBound = err == nil && codexTurnStateEligible(owner) &&
+		strings.TrimSpace(owner.GetCredential("access_token")) != "" &&
+		header("Authorization") == "Bearer "+strings.TrimSpace(owner.GetCredential("access_token")) &&
+		header("ChatGPT-Account-Id") == strings.TrimSpace(owner.GetCredential("chatgpt_account_id"))
+	if !a.cookieCredentialsBound || a.credentialEpoch == "" || CodexTurnStateCredentialEpochForAccount(owner) != a.credentialEpoch {
 		a.credentialEpoch = ""
 	}
 }
@@ -331,6 +331,11 @@ func (s *CodexTurnStateService) activateHistoryForOwner(ctx context.Context, own
 }
 
 func (s *CodexTurnStateService) recordCollectorObservation(owner *Account, model string, result CodexTurnStateCollectResult) {
+	if result.cookieAttempt != nil {
+		if diagnostic := result.cookieAttempt.Diagnostic(); diagnostic.Reason != "" {
+			result.ModelEvidence.CookieDiagnostic = codexCookieDiagnostic(diagnostic)
+		}
+	}
 	safe := result.Observation
 	if safe == nil || safe.ObservedAt.IsZero() || owner == nil {
 		return
