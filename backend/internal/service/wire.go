@@ -11,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
@@ -119,11 +120,13 @@ func ProvideOpenAIOAuthService(
 	privacyClientFactory PrivacyClientFactory,
 	settingService *SettingService,
 	accountRepo AccountRepository,
+	cookies *openaicookies.Manager,
 ) *OpenAIOAuthService {
 	svc := NewOpenAIOAuthService(proxyRepo, oauthClient)
 	svc.SetAccountRepository(accountRepo)
 	svc.SetPrivacyClientFactory(privacyClientFactory)
 	svc.SetRequestPolicySettingService(settingService)
+	svc.SetCookieManager(cookies)
 	return svc
 }
 

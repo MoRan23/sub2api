@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCodexTurnStateRetryPolicyOnlyNoTargetWaitsThirtySeconds(t *testing.T) {
+func TestCodexTurnStateRetryPolicyOnlyNoTargetWaitsFiveSeconds(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		status     int
@@ -21,13 +21,14 @@ func TestCodexTurnStateRetryPolicyOnlyNoTargetWaitsThirtySeconds(t *testing.T) {
 		wait       time.Duration
 		paused     bool
 	}{
-		{name: "extended", status: 200, blocks: 11, wait: 30 * time.Second},
-		{name: "missing", status: 200, wait: 30 * time.Second},
-		{name: "invalid", status: 200, invalid: true, wait: 30 * time.Second},
+		{name: "extended", status: 200, blocks: 11, wait: 5 * time.Second},
+		{name: "missing", status: 200, wait: 5 * time.Second},
+		{name: "invalid", status: 200, invalid: true, wait: 5 * time.Second},
 		{name: "transport", collectErr: errCodexTurnStateCollectorTransportFailed},
 		{name: "timeout", collectErr: context.DeadlineExceeded},
 		{name: "proxy_unavailable", collectErr: ErrCodexTurnStateCollectorProxyUnavailable},
 		{name: "upstream_5xx", status: 503},
+		{name: "upstream_5xx_retry_after", status: 503, retryAfter: time.Minute},
 		{name: "stream", status: 200, collectErr: errCodexTurnStateCollectorStreamFailed},
 		{name: "response_failed", status: 200, collectErr: errCodexTurnStateCollectorResponseFailed},
 		{name: "response_incomplete", status: 200, collectErr: errCodexTurnStateCollectorResponseIncomplete},
@@ -49,7 +50,7 @@ func TestCodexTurnStateRetryPolicyOnlyNoTargetWaitsThirtySeconds(t *testing.T) {
 				calls++
 				reserved, err := repo.Get(ctx, attempt.key)
 				require.NoError(t, err)
-				require.True(t, reserved.NextCollectAt.After(clock.Add(30*time.Second)), "in-flight crash reservation remains separate from the completed-result policy")
+				require.Equal(t, clock.Add(CodexTurnStateCollectTimeout+CodexTurnStateRetryInterval), reserved.NextCollectAt, "in-flight crash reservation remains separate from the completed-result policy")
 				result := CodexTurnStateCollectResult{StatusCode: tc.status, RetryAfter: tc.retryAfter}
 				if tc.blocks != 0 {
 					result.Tokens = []string{codexStateTestToken(tc.blocks, clock)}
@@ -107,7 +108,7 @@ func TestCodexTurnStateRetryPolicyOwnerCooldownStillAppliesToHTTP429(t *testing.
 	until := s.now().Add(3 * time.Minute)
 	s.collector = codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
 		updated := *account
-		updated.OverloadUntil = &until
+		updated.RateLimitResetAt = &until
 		accounts := s.accounts.(*codexStateTestAccounts)
 		accounts.mu.Lock()
 		accounts.account = &updated

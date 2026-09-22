@@ -173,8 +173,8 @@ func readCodexStatePassthroughFrame(t *testing.T, ctx context.Context, client *c
 func TestCodexStatePassthroughUsesFinalModelAndLearnsLateMetadata(t *testing.T) {
 	svc, account, _, repo, dialer := newCodexStatePassthroughHarness(t, true)
 	now := time.Now()
-	firstToken := codexStatePassthroughToken(1, now.Add(-10*time.Minute))
-	secondToken := codexStatePassthroughToken(2, now.Add(-9*time.Minute))
+	firstToken := codexStatePassthroughToken(1, now.Add(-3*time.Minute))
+	secondToken := codexStatePassthroughToken(2, now.Add(-150*time.Second))
 	newToken := codexStatePassthroughToken(3, now.Add(-time.Minute))
 	keyFirst := seedCodexStatePassthroughModel(t, repo, account, "gpt-5.5", firstToken)
 	keySecond := seedCodexStatePassthroughModel(t, repo, account, "gpt-5.4", secondToken)

@@ -149,7 +149,7 @@ func TestCodexTurnStatePendingPublicationRejectsStaleEvidence(t *testing.T) {
 			s.repo = repo
 			issuedAt := s.now()
 			if changed == "expired" {
-				issuedAt = issuedAt.Add(-59 * time.Minute)
+				issuedAt = issuedAt.Add(-CodexTurnStateLifetime + 10*time.Second)
 			}
 			s.Observe(attempt, codexStateTestToken(11, issuedAt))
 			require.Error(t, s.Finish(ctx, attempt, true))
@@ -183,7 +183,7 @@ func TestCodexTurnStatePendingPublicationRejectsStaleEvidence(t *testing.T) {
 			case "policy":
 				s.modelPolicy.(*codexStateTestModelPolicy).set("other-model")
 			case "expired":
-				retryAt = s.now().Add(2 * time.Minute)
+				retryAt = s.now().Add(20 * time.Second)
 			case "idle":
 				retryAt = s.now().Add(31 * time.Minute)
 			}
@@ -227,7 +227,7 @@ func TestCodexTurnStatePendingPublicationIsBoundedAndPrivate(t *testing.T) {
 	for index := range codexTurnStatePendingPublicationLimit + 1 {
 		attempt := &CodexTurnStateAttempt{OSFamily: "windows", Enabled: true, finished: true, historyDelivered: true, historyPhysicalBound: true, anomalyPublication: true,
 			key:            CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: fmt.Sprintf("model-%04d", index), Generation: "gen1"},
-			businessSentAt: s.now(), pendingAnomaly: &CodexTurnStateShape{Shape: "extended", ExpiresAt: s.now().Add(time.Hour)},
+			businessSentAt: s.now(), pendingAnomaly: &CodexTurnStateShape{Shape: "extended", ExpiresAt: s.now().Add(CodexTurnStateLifetime)},
 			safeObservation: CodexTurnStateSafeObservation{ObservedAt: s.now().Add(time.Duration(index) * time.Nanosecond)}}
 		s.retainCodexTurnStateAnomaly(attempt)
 	}
@@ -250,7 +250,7 @@ func TestCodexTurnStatePendingPublicationRetriesOneBoundedBatch(t *testing.T) {
 		key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: 1, Model: fmt.Sprintf("model-%04d", index), Generation: "gen1"}
 		s.pendingPublications[key] = &codexTurnStatePendingPublication{key: key, sentAt: s.now(),
 			shape: CodexTurnStateShape{Shape: "extended", TokenLength: 312, CipherBlocks: 11,
-				IssuedAt: s.now(), ExpiresAt: s.now().Add(time.Hour)}, observedAt: s.now()}
+				IssuedAt: s.now(), ExpiresAt: s.now().Add(CodexTurnStateLifetime)}, observedAt: s.now()}
 	}
 	// Every item is terminal because its model is excluded; a single tick still
 	// handles at most the bounded batch, allowing other maintenance to progress.

@@ -22,7 +22,7 @@ func collectorPublicationFixture(t *testing.T, ctx context.Context) (service.Cod
 	require.NoError(t, repo.EndBusiness(ctx, key, "seed"))
 	record.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
 	record.EncryptedToken, record.Source = "collector-target", "collector"
-	record.IssuedAt, record.ExpiresAt = now, now.Add(time.Hour)
+	record.IssuedAt, record.ExpiresAt = now, now.Add(service.CodexTurnStateLifetime)
 	record.TokenLength, record.CipherBlocks = 292, 10
 	return key, *record
 }

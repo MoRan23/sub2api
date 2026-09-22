@@ -13,8 +13,10 @@ import (
 	"net/http/httptrace"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/google/uuid"
 )
 
@@ -45,8 +47,21 @@ func NewCodexTurnStateHTTPCollector(do CodexTurnStateCollectorHTTPDo) *CodexTurn
 
 // Collect creates its own identity and short, constant body. It never receives
 // user messages, continuation state, a business proxy, or a daily root identity.
-func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
-	var result CodexTurnStateCollectResult
+func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTurnStateCollectRequest) (result CodexTurnStateCollectResult, collectErr error) {
+	var evidence codexModelEvidenceObserver
+	var cookieMu sync.Mutex
+	var cookieDiagnostic *CodexCookieDiagnostic
+	defer func() {
+		cookieMu.Lock()
+		evidence.headers.CookieDiagnostic = cookieDiagnostic
+		result.ModelEvidence = evidence.snapshot(input.Model)
+		cookieMu.Unlock()
+	}()
+	ctx = openaicookies.WithObserver(ctx, func(diagnostic openaicookies.Diagnostic) {
+		cookieMu.Lock()
+		cookieDiagnostic = codexCookieDiagnostic(diagnostic)
+		cookieMu.Unlock()
+	})
 	if c == nil || c.Do == nil || input.ProxyID <= 0 || !codexTurnStateEligible(input.Account) || strings.TrimSpace(input.Model) == "" {
 		return result, errors.New("collector_not_configured")
 	}
@@ -89,6 +104,7 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 			result.requestSentAt = started
 		}
 		result.StatusCode = response.StatusCode
+		evidence.observeHeaders(response.Header, "response")
 		result.RetryAfter = codexTurnStateRetryAfter(response.Header.Get("Retry-After"), time.Now())
 	}
 	if err != nil {
@@ -164,6 +180,9 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 		if event.Type != "" {
 			eventType = event.Type
 		}
+		// Preserve the actual upstream declaration, before any conversion. A
+		// header routing hint is not evidence of the model in this response.
+		evidence.observePayload([]byte(openAICompatPayloadWithEventType(string(data), eventType)))
 		if eventType == "error" || eventType == "response.failed" || eventType == "response.incomplete" {
 			failureErr := errCodexTurnStateCollectorResponseFailed
 			if eventType == "response.incomplete" {
@@ -255,6 +274,7 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 		result.Tokens = nil
 		return result, errCodexTurnStateCollectorResponseIncomplete
 	}
+	result.completed = true
 	return result, nil
 }
 

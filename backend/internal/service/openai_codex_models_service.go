@@ -21,6 +21,7 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"golang.org/x/net/http2"
 	"golang.org/x/sync/singleflight"
@@ -1924,7 +1925,7 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 
 	var resp *http.Response
 	if request.useAPIKeyUpstream {
-		req = req.WithContext(codexnative.WithoutScope(req.Context()))
+		req = req.WithContext(openaicookies.WithoutScope(codexnative.WithoutScope(req.Context())))
 		if s.httpUpstream == nil {
 			return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_UPSTREAM_NOT_CONFIGURED", "Codex models upstream HTTP client is not configured")
 		}
@@ -1938,6 +1939,7 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 		if !handled {
 			if request.nativeScope != nil {
 				req = req.WithContext(codexnative.WithScope(req.Context(), *request.nativeScope))
+				req = req.WithContext(withOpenAIHTTPCookieAccountScope(req.Context(), request.credentialAccount))
 			} else {
 				req = withOpenAINativeHTTPRequestScope(req, request.credentialAccount, s.accountRepo, "models")
 			}
@@ -1950,6 +1952,7 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 			if clientErr != nil {
 				return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_PROXY_INVALID", "invalid proxy configuration: %v", clientErr)
 			}
+			client = openAIHTTPCookieClient(s.httpUpstream, client, req)
 			resp, err = openai.HTTPClientWithCodexResidencyRedirectGuard(client).Do(req)
 		}
 	}

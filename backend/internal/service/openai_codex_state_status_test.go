@@ -103,11 +103,11 @@ func TestCodexTurnStateBatchStatusDeduplicatesOwnersAndSharesSingleProjection(t 
 	}}
 	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
 	records := &codexStateBatchRecords{records: []CodexTurnStateRecord{
-		{OSFamily: "windows", OwnerAccountID: 1, Generation: CodexTurnStateGenerationForAccount(ownerOne), Model: "gpt-5.6-sol", EncryptedToken: "private-encrypted-token", ExpiresAt: now.Add(20 * time.Minute), TokenLength: 292, CipherBlocks: 10, Shape: "target", Source: "business"},
+		{OSFamily: "windows", OwnerAccountID: 1, Generation: CodexTurnStateGenerationForAccount(ownerOne), Model: "gpt-5.6-sol", EncryptedToken: "private-encrypted-token", IssuedAt: now, ExpiresAt: now.Add(CodexTurnStateLifetime), TokenLength: 292, CipherBlocks: 10, Shape: "target", Source: "business"},
 		{OSFamily: "windows", OwnerAccountID: 1, Generation: CodexTurnStateGenerationForAccount(ownerOne), Model: "gpt-6-astra", EncryptedToken: "private-encrypted-expired", ExpiresAt: now.Add(-time.Minute)},
 		{OSFamily: "windows", OwnerAccountID: 1, Generation: "obsolete-generation", Model: "obsolete-model", EncryptedToken: "old-private-token"},
 		{OSFamily: "windows", OwnerAccountID: 2, Generation: CodexTurnStateGenerationForAccount(ownerTwo), Model: "gpt-5.6-terra", CollectorPaused: true, LastError: "collector_auth_rejected"},
-		{OSFamily: "windows", OwnerAccountID: 2, Generation: CodexTurnStateGenerationForAccount(ownerTwo), Model: "gpt-unlisted", EncryptedToken: "private-unlisted-token", ExpiresAt: now.Add(time.Hour)},
+		{OSFamily: "windows", OwnerAccountID: 2, Generation: CodexTurnStateGenerationForAccount(ownerTwo), Model: "gpt-unlisted", EncryptedToken: "private-unlisted-token", IssuedAt: now, ExpiresAt: now.Add(CodexTurnStateLifetime)},
 	}}
 	policy := &codexStateBatchPolicy{models: []string{"gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"}}
 	service := NewCodexTurnStateService(records, accounts, nil, codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
@@ -128,7 +128,7 @@ func TestCodexTurnStateBatchStatusDeduplicatesOwnersAndSharesSingleProjection(t 
 	require.True(t, result.Items["11"].Inherited)
 	require.EqualValues(t, 1, result.Items["11"].OwnerAccountID)
 	require.Equal(t, "ready", result.Items["11"].Models[0].State)
-	require.EqualValues(t, 1200, result.Items["11"].Models[0].RemainingSeconds)
+	require.EqualValues(t, CodexTurnStateLifetime/time.Second, result.Items["11"].Models[0].RemainingSeconds)
 	require.Equal(t, "expired", result.Items["11"].Models[1].State)
 	require.Equal(t, "team_business", result.Items["21"].ResolvedAccountType)
 	require.Equal(t, "paused", result.Items["21"].Models[0].State)

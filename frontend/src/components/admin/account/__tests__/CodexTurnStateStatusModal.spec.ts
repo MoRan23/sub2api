@@ -179,6 +179,25 @@ describe('Codex turn-state status modal', () => {
     wrapper.unmount()
   })
 
+  it('keeps response model evidence separate from a usable cache and from target token shape', async () => {
+    getCodexTurnState.mockResolvedValue({ ...status, models: [{ ...status.models[0], latest_response_evidence: {
+      upstream_response_model: 'gpt-5.6-luna', model_relation: 'different', model_conflict: false,
+    } }], observations: [{ model: 'gpt-test', observed_at: '2026-09-19T11:20:05Z', request_source: 'collector',
+      outbound_length: 0, response_length: 332, response_shape: 'target', upstream_response_model: 'gpt-5.6-luna',
+      model_relation: 'different', model_evidence_source: 'response.model', safety_buffering_enabled: true,
+      safety_buffering_faster_model: 'gpt-5.6-luna' }] })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="codex-turn-state-cache-availability-gpt-test"]').text()).toContain('cacheAvailable')
+    const latest = wrapper.get('[data-testid="codex-turn-state-latest-evidence-gpt-test"]')
+    expect(latest.text()).toContain('latestResponseEvidenceHint')
+    const observation = wrapper.get('[data-testid="codex-turn-state-observation-gpt-test"]')
+    expect(observation.text()).toContain('shapes.target')
+    expect(observation.get('[data-testid="codex-response-model-relation"]').text()).toContain('modelRelations.different')
+    expect(observation.text()).toContain('gpt-5.6-luna')
+    wrapper.unmount()
+  })
+
   it.each([292, 332])('shows the actual injected %i-character state and historical cache source', async (length) => {
     getCodexTurnState.mockResolvedValue({ ...status, observations: [
       { model: 'gpt-test', request_source: 'business', observed_at: '2026-09-19T11:20:05Z', request_sent_at: '2026-09-19T11:20:00Z',

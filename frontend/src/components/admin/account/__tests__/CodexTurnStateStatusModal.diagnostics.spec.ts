@@ -65,6 +65,7 @@ describe('Codex turn-state collection diagnostics', () => {
       'collector_dns_failed', 'collector_connection_refused', 'collector_connection_closed',
       'collector_tls_failed', 'collector_proxy_tunnel_failed', 'collector_connect_timeout',
       'collector_tls_timeout', 'collector_response_header_timeout',
+      'collector_model_mismatch',
     ] as const
     getCodexTurnState.mockResolvedValue(state(codes.map(code => model(code))))
     const wrapper = render(locale)

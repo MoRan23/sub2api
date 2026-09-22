@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"testing"
 
@@ -169,7 +170,7 @@ func TestReqClientRequestPolicyStripsCrossOrigin(t *testing.T) {
 	}
 }
 
-func TestReqClientRequestPolicyPreservesCookieState(t *testing.T) {
+func TestReqClientRequestPolicyDoesNotUseSharedCookieJar(t *testing.T) {
 	seen := make(chan string, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen <- r.Header.Get("Cookie")
@@ -177,10 +178,15 @@ func TestReqClientRequestPolicyPreservesCookieState(t *testing.T) {
 	}))
 	defer server.Close()
 	client := req.C()
+	origin, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.GetClient().Jar.SetCookies(origin, []*http.Cookie{{Name: "old-session", Value: "other-account", Path: "/"}})
 	for range 2 {
 		derived := ReqClientWithRequestPolicy(client, context.Background())
-		if derived.GetClient().Jar != client.GetClient().Jar {
-			t.Fatal("derived client must retain existing cookie jar")
+		if derived.GetClient().Jar != nil || derived.Clone().GetClient().Jar != nil {
+			t.Fatal("OpenAI policy clones must not restore a default cookie jar")
 		}
 		if _, err := derived.R().Get(server.URL); err != nil {
 			t.Fatal(err)
@@ -189,7 +195,10 @@ func TestReqClientRequestPolicyPreservesCookieState(t *testing.T) {
 	if first := <-seen; first != "" {
 		t.Fatalf("initial request unexpectedly has cookies: %q", first)
 	}
-	if second := <-seen; second != "existing-session=cookie-value" {
-		t.Fatalf("second request lost server cookie: %q", second)
+	if second := <-seen; second != "" {
+		t.Fatalf("second request reused shared cookies: %q", second)
+	}
+	if cookies := client.GetClient().Jar.Cookies(origin); len(cookies) != 1 || cookies[0].Name != "old-session" {
+		t.Fatal("OpenAI requests changed the source client's cookie state")
 	}
 }

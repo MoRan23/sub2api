@@ -28,6 +28,12 @@ func TestOAuthOSIdentityFacadeRealRedisIsolation(t *testing.T) {
 			accountRepo := NewAccountRepository(client, integrationDB, nil)
 			_, err := accountRepo.(service.OpenAIOAuthOSProfilesEnsurer).EnsureOpenAIOAuthOSProfiles(ctx, accountID)
 			require.NoError(t, err)
+			// Creating installation profiles does not authorize an OS. Each
+			// exercised slot needs its own synthetic grant, as in production.
+			for _, osFamily := range service.OpenAIOAuthOSFamilies() {
+				_, err = accountRepo.(service.OpenAIOAuthOSCredentialsRepository).BindOpenAIOAuthOSCredentials(ctx, accountID, osFamily, oauthOSTestGrant("identity-"+osFamily), "test")
+				require.NoError(t, err)
+			}
 			account, err := accountRepo.GetByID(ctx, accountID)
 			require.NoError(t, err)
 			require.True(t, service.OpenAIOAuthOSProfilesComplete(account.OpenAIOAuthOSProfiles))

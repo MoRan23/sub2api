@@ -34,7 +34,7 @@ func TestCodexTurnStateRecoveryWireTargetThenExtendedThenRecollect(t *testing.T)
 					if accountType == "team_business" {
 						blocks = 12
 					}
-					old := codexStateTestToken(blocks, now.Add(-10*time.Minute))
+					old := codexStateTestToken(blocks, now.Add(-3*time.Minute))
 					extended := codexStateTestToken(blocks+1, now.Add(-time.Second))
 					fresh := codexStateTestToken(blocks, now)
 					seed, err := state.Prepare(context.Background(), account, "gpt-5.4")

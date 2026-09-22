@@ -76,7 +76,7 @@ func requireCodexEnabledSummary(t *testing.T, state *CodexTurnStateService, acco
 
 func seedCodexEnabledObservation(t *testing.T, state *CodexTurnStateService, account *Account, model string) string {
 	t.Helper()
-	token := codexStateTestToken(10, state.now().Add(-10*time.Minute))
+	token := codexStateTestToken(10, state.now().Add(-3*time.Minute))
 	attempt, err := state.Prepare(context.Background(), account, model)
 	require.NoError(t, err)
 	require.NotNil(t, attempt)
@@ -255,7 +255,7 @@ func TestCodexStateEnabledObservationNativeWSFingerprintOff(t *testing.T) {
 				var dialer *codexStatePassthroughDialer
 				svc, account, _, repo, dialer = newCodexStatePassthroughHarness(t, true)
 				upstream, request, response = dialer.conn, dialer.request, dialer.headers
-				cached = makeCodexWSStateTestToken(10, time.Now().Add(-10*time.Minute))
+				cached = makeCodexWSStateTestToken(10, time.Now().Add(-3*time.Minute))
 				seedCodexStatePassthroughModel(t, repo, account, "gpt-5.5", cached)
 			} else {
 				var dialer *codexWSStatePooledDialer

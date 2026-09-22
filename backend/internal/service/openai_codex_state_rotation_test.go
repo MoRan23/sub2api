@@ -81,7 +81,7 @@ func TestCodexTurnStateRotationCountsOnceAndCyclesAfterThree(t *testing.T) {
 					require.Equal(t, ids[((attempt+1)/3)%len(ids)], record.CollectorProxyID)
 					require.Equal(t, used[attempt], record.LastCollectorProxyID)
 					require.Empty(t, record.CollectorAttemptID)
-					require.Equal(t, now.Add(30*time.Second), record.NextCollectAt)
+					require.Equal(t, now.Add(CodexTurnStateRetryInterval), record.NextCollectAt)
 					require.Equal(t, "extended_shape", record.DemandReason)
 					require.Empty(t, record.EncryptedToken)
 					*now = record.NextCollectAt.Add(-time.Nanosecond)
@@ -139,7 +139,7 @@ func TestCodexTurnStateRotationOtherOutcomesRetainPositionAndCount(t *testing.T)
 		{name: "no_state", status: 200},
 		{name: "invalid_envelope", status: 200, invalid: true},
 		{name: "wrong_account_type", status: 200, blocks: 13},
-		{name: "expired", status: 200, blocks: 11, offset: -time.Hour},
+		{name: "expired", status: 200, blocks: 11, offset: -CodexTurnStateLifetime},
 		{name: "future", status: 200, blocks: 11, offset: time.Minute},
 		{name: "http_rate_limit", status: 429, blocks: 11},
 		{name: "sse_rate_limit", status: 200, err: errCodexTurnStateCollectorRateLimited, blocks: 11},
@@ -249,7 +249,7 @@ func TestCodexTurnStateRotationSameExpiringTokenDoesNotResetCount(t *testing.T) 
 		t.Run(source, func(t *testing.T) {
 			s, repo, account, now := newCodexRotationTestService(t, "personal", 11, 22)
 			key := seedCodexRotationTestDemand(t, s, account, "gpt-5", 11)
-			token := codexStateTestToken(10, now.Add(-56*time.Minute))
+			token := codexStateTestToken(10, now.Add(-CodexTurnStateLifetime+20*time.Second))
 			shape, err := ParseCodexTurnState(token, "personal", *now)
 			require.NoError(t, err)
 			before := codexRotationTestRecord(t, repo, key)

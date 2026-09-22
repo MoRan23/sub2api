@@ -12,6 +12,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const codexTurnStateCollectorWorkers = 16
+
 // CodexTurnStateService deliberately fails open at the forwarding boundary:
 // callers retain their ordinary request if Prepare or ValidateAttempt fails.
 // Only PostgreSQL records are authoritative; there is no fallback token cache.
@@ -52,9 +54,9 @@ func (s *CodexTurnStateService) Start(ctx context.Context) {
 	}
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	runCtx := s.ctx
-	s.wg.Add(6)
+	s.wg.Add(codexTurnStateCollectorWorkers + 2)
 	s.mu.Unlock()
-	for range 4 {
+	for range codexTurnStateCollectorWorkers {
 		go func() { defer s.wg.Done(); s.worker(runCtx) }()
 	}
 	go func() { defer s.wg.Done(); s.maintenance(runCtx) }()
@@ -196,7 +198,11 @@ func (s *CodexTurnStateService) Prepare(ctx context.Context, account *Account, f
 		if decryptErr == nil {
 			shape, shapeErr := ParseCodexTurnState(token, a.accountType, now)
 			if shapeErr == nil && shape.Shape == CodexTurnStateShapeTarget {
-				a.Snapshot = CodexTurnStateSnapshot{Token: token, Version: record.Version, Source: record.Source, TokenLength: shape.TokenLength, CipherBlocks: shape.CipherBlocks, ExpiresAt: shape.ExpiresAt}
+				expiresAt := shape.ExpiresAt
+				if record.ExpiresAt.Before(expiresAt) {
+					expiresAt = record.ExpiresAt
+				}
+				a.Snapshot = CodexTurnStateSnapshot{Token: token, Version: record.Version, Source: record.Source, TokenLength: shape.TokenLength, CipherBlocks: shape.CipherBlocks, ExpiresAt: expiresAt}
 			}
 		}
 	}
@@ -314,6 +320,7 @@ func (s *CodexTurnStateService) observe(a *CodexTurnStateAttempt, token, source 
 }
 
 func (s *CodexTurnStateService) ObserveHeaders(a *CodexTurnStateAttempt, headers http.Header) {
+	observeCodexModelHeaders(a, headers, "response")
 	for key, values := range headers {
 		if strings.EqualFold(key, "x-codex-turn-state") {
 			for _, token := range values {
@@ -324,6 +331,7 @@ func (s *CodexTurnStateService) ObserveHeaders(a *CodexTurnStateAttempt, headers
 }
 
 func (s *CodexTurnStateService) ObserveEvent(a *CodexTurnStateAttempt, event []byte) {
+	observeCodexModelEvent(a, event)
 	for _, token := range CodexTurnStateTokensFromEvent(event) {
 		s.observe(a, token, "metadata")
 	}
@@ -738,10 +746,10 @@ func (s *CodexTurnStateService) collect(ctx context.Context, key CodexTurnStateK
 		return
 	}
 	var cooldownUntil time.Time
-	for _, until := range []*time.Time{owner.RateLimitResetAt, owner.OverloadUntil, owner.TempUnschedulableUntil} {
-		if until != nil && until.After(now) && until.After(cooldownUntil) {
-			cooldownUntil = *until
-		}
+	// Business transport failures must not delay an independent collection.
+	// Only an actual account rate limit is inherited by the collector.
+	if owner.RateLimitResetAt != nil && owner.RateLimitResetAt.After(now) {
+		cooldownUntil = *owner.RateLimitResetAt
 	}
 	if !cooldownUntil.IsZero() {
 		record.NextCollectAt = cooldownUntil

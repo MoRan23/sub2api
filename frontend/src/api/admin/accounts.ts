@@ -201,6 +201,26 @@ export async function getById(id: number): Promise<Account> {
   return data
 }
 
+export interface CodexCookieDiagnostic {
+  sent: boolean
+  source?: 'none' | 'persistent' | 'memory' | 'mixed'
+  names?: string[]
+  cookies?: { name: string; expires_at?: string }[]
+  reason?: string
+}
+
+/** Evidence belongs to one observed response, not necessarily the current cache. */
+export interface CodexResponseEvidence {
+  upstream_response_model?: string
+  model_relation?: 'not_reported' | 'exact' | 'known_alias' | 'different' | 'conflicting'
+  model_conflict?: boolean
+  model_evidence_source?: 'response.model' | 'model'
+  safety_buffering_enabled?: boolean
+  safety_buffering_faster_model?: string
+  header_evidence_scope?: 'response' | 'connection'
+  cookie_diagnostic?: CodexCookieDiagnostic
+}
+
 export interface CodexTurnStateModelStatus {
   os_family?: OpenAIOAuthOS
   model: string
@@ -224,9 +244,10 @@ export interface CodexTurnStateModelStatus {
   collector_extended_count?: number
   last_error?: string
   refresh_reason?: string
+  latest_response_evidence?: CodexResponseEvidence
 }
 
-export interface CodexTurnStateObservation {
+export interface CodexTurnStateObservation extends CodexResponseEvidence {
   os_family?: OpenAIOAuthOS
   model: string
   observed_at: string

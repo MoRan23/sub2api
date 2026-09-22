@@ -53,7 +53,7 @@ func newCodexProxyChangeFixture(t *testing.T) codexProxyChangeFixture {
 	require.NoError(t, states.EndBusiness(ctx, key, "seed"))
 	state.EncryptedToken, state.Shape, state.Source = "synthetic-encrypted-state", "target", "collector"
 	state.TokenLength, state.CipherBlocks = 292, 10
-	state.IssuedAt, state.ExpiresAt = now.Add(-10*time.Minute), now.Add(50*time.Minute)
+	state.IssuedAt, state.ExpiresAt = now.Add(-2*time.Minute), now.Add(service.CodexTurnStateLifetime-2*time.Minute)
 	state.LastBusinessAt, state.LastCollectedAt = now.Add(-time.Minute), now.Add(-2*time.Minute)
 	state.HistoryProofObservedAt = now.Add(-3 * time.Minute)
 	state.DemandReason, state.RefreshReason, state.DemandAt = "expiring", "expiring", now.Add(-time.Minute)
@@ -186,6 +186,42 @@ func TestCodexCollectorProxyChangePostgresPreservesEachOSCache(t *testing.T) {
 	}
 }
 
+func TestCodexCollectorProxyChangePostgresPreservesEarlierExpiry(t *testing.T) {
+	for _, bulk := range []bool{false, true} {
+		name := "single"
+		if bulk {
+			name = "bulk"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newCodexProxyChangeFixture(t)
+			candidate := f.state
+			candidate.ExpiresAt = candidate.ExpiresAt.Add(-time.Minute)
+			ok, err := f.states.SaveCAS(ctx, candidate, candidate.Version)
+			require.NoError(t, err)
+			require.True(t, ok)
+			before, err := f.states.Get(ctx, f.key)
+			require.NoError(t, err)
+			require.NotNil(t, before)
+			account := f.change(t, ctx, bulk, service.CodexTurnStateConfig{Enabled: true, AccountType: "personal", CollectorProxyID: &f.proxyID}, nil)
+			key := f.key
+			key.Generation = service.CodexTurnStateGenerationForAccount(account)
+			require.NotEqual(t, f.key.Generation, key.Generation)
+			after, err := f.states.Get(ctx, key)
+			require.NoError(t, err)
+			require.NotNil(t, after)
+			require.Equal(t, before.EncryptedToken, after.EncryptedToken)
+			require.Equal(t, before.IssuedAt, after.IssuedAt)
+			require.Equal(t, before.ExpiresAt, after.ExpiresAt, "proxy changes must neither discard nor extend an earlier local deadline")
+			require.Equal(t, before.Version+1, after.Version)
+			require.Empty(t, after.DemandReason)
+			require.True(t, after.NextCollectAt.IsZero())
+			require.Equal(t, "idle", after.CollectionStatus)
+			require.Equal(t, "collector_proxy_changed", after.CollectionReason)
+		})
+	}
+}
+
 func TestCodexCollectorProxyChangePostgresKeepsDemandAndAccountCooldown(t *testing.T) {
 	for _, test := range []struct {
 		name   string
@@ -282,8 +318,8 @@ func TestCodexCollectorProxyChangePostgresRejectsInvalidCacheWithoutDemand(t *te
 			state.DemandReason = ""
 			switch variant {
 			case "expired":
-				state.IssuedAt = state.IssuedAt.Add(-time.Hour)
-				state.ExpiresAt = state.ExpiresAt.Add(-time.Hour)
+				state.IssuedAt = state.IssuedAt.Add(-service.CodexTurnStateLifetime)
+				state.ExpiresAt = state.ExpiresAt.Add(-service.CodexTurnStateLifetime)
 			case "abnormal":
 				state.EncryptedToken = ""
 				state.Shape = "extended"
@@ -291,9 +327,9 @@ func TestCodexCollectorProxyChangePostgresRejectsInvalidCacheWithoutDemand(t *te
 				state.CipherBlocks = 11
 			case "future":
 				state.IssuedAt = time.Now().Add(time.Minute)
-				state.ExpiresAt = state.IssuedAt.Add(time.Hour)
+				state.ExpiresAt = state.IssuedAt.Add(service.CodexTurnStateLifetime)
 			case "lifetime":
-				state.ExpiresAt = state.ExpiresAt.Add(time.Hour)
+				state.ExpiresAt = state.ExpiresAt.Add(time.Second)
 			case "shape":
 				state.Shape = "unknown"
 			case "wrong account shape":

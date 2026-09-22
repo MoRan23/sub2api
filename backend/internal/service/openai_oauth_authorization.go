@@ -7,6 +7,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
+	"github.com/google/uuid"
 )
 
 // OpenAIOAuthAuthorizationTarget is selected before PKCE authorization starts.
@@ -17,6 +19,23 @@ type OpenAIOAuthAuthorizationTarget struct {
 }
 
 type openAIOAuthAuthUAKey struct{}
+
+// New and renewed authorizations never inherit cookies from the old grant or
+// caller. One ephemeral scope spans this flow's token and enrichment requests.
+func (s *OpenAIOAuthService) beginCookieFlow(ctx context.Context, forceNew bool) (context.Context, func()) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, exists := openaicookies.ScopeFromContext(ctx); exists && !forceNew {
+		return ctx, func() {}
+	}
+	id := uuid.NewString()
+	return openaicookies.WithScope(ctx, openaicookies.Scope{EphemeralID: id}), func() {
+		if s.cookieManager != nil {
+			s.cookieManager.ClearEphemeral(id)
+		}
+	}
+}
 
 func (s *OpenAIOAuthService) SetAccountRepository(repo AccountRepository) { s.accountRepo = repo }
 
@@ -123,6 +142,8 @@ func (s *OpenAIOAuthService) completeBoundAuthorization(ctx context.Context, ses
 
 // RefreshTokenForOS validates an imported refresh token with the chosen OS identity.
 func (s *OpenAIOAuthService) RefreshTokenForOS(ctx context.Context, refreshToken, proxyURL, clientID, os string) (*OpenAITokenInfo, error) {
+	ctx, releaseCookies := s.beginCookieFlow(ctx, true)
+	defer releaseCookies()
 	binding, err := s.prepareAuthorizationTarget(ctx, OpenAIOAuthAuthorizationTarget{OS: os, Purpose: "create"})
 	if err != nil {
 		return nil, err
@@ -143,6 +164,8 @@ func (s *OpenAIOAuthService) RefreshTokenForOS(ctx context.Context, refreshToken
 // AuthorizeAccountWithRefreshToken exchanges on the server, then CAS-binds only
 // the selected slot. Browser supplied account/user claims are never consulted.
 func (s *OpenAIOAuthService) AuthorizeAccountWithRefreshToken(ctx context.Context, accountID int64, os, refreshToken, clientID string) (*OpenAITokenInfo, error) {
+	ctx, releaseCookies := s.beginCookieFlow(ctx, true)
+	defer releaseCookies()
 	if strings.TrimSpace(refreshToken) == "" {
 		return nil, infraerrors.BadRequest("OPENAI_OAUTH_REFRESH_TOKEN_REQUIRED", "refresh token is required to validate imported credentials")
 	}

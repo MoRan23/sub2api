@@ -30,6 +30,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
@@ -162,7 +163,8 @@ type openAIHTTP2FallbackState struct {
 // 7. 代理变更时清空旧连接池，避免复用错误代理
 // 8. 账号并发数与连接池上限对应（账号隔离策略下）
 type httpUpstreamService struct {
-	cfg     *config.Config                  // 全局配置
+	cfg     *config.Config // 全局配置
+	cookies *openaicookies.Manager
 	mu      sync.RWMutex                    // 保护 clients map 的读写锁
 	clients map[string]*upstreamClientEntry // 客户端缓存池，key 由隔离策略决定
 	// OpenAI 走 HTTP/HTTPS 代理时的 H2->H1 回退状态（key=标准化 proxyKey）
@@ -182,6 +184,25 @@ func NewHTTPUpstream(cfg *config.Config) service.HTTPUpstream {
 		cfg:     cfg,
 		clients: make(map[string]*upstreamClientEntry),
 	}
+}
+
+func NewHTTPUpstreamWithCookies(cfg *config.Config, cookies *openaicookies.Manager) service.HTTPUpstream {
+	s := NewHTTPUpstream(cfg).(*httpUpstreamService)
+	s.cookies = cookies
+	return s
+}
+
+// OpenAICookieClient derives only the HTTP policy. The wrapper runs on every
+// physical send, including native dispatch and redirects; cached transports do
+// not retain a particular account's cookie jar.
+func (s *httpUpstreamService) OpenAICookieClient(client *http.Client, request *http.Request) *http.Client {
+	if client == nil || request == nil || s.cookies == nil {
+		return client
+	}
+	clone := *client
+	clone.Jar = nil
+	clone.Transport = s.cookies.Wrap(client.Transport)
+	return &clone
 }
 
 // Do 执行 HTTP 请求
@@ -315,16 +336,16 @@ func (s *httpUpstreamService) httpClientForUpstreamRequest(client *http.Client, 
 		return client
 	}
 	ctx := req.Context()
-	selected := client
+	selected := s.OpenAICookieClient(client, req)
 	switch {
 	case service.HTTPUpstreamRedirectsDisabled(ctx):
-		clone := *client
+		clone := *selected
 		clone.CheckRedirect = func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		}
 		selected = &clone
-	case service.HTTPUpstreamPublicHostsOnly(ctx) && client.CheckRedirect == nil:
-		clone := *client
+	case service.HTTPUpstreamPublicHostsOnly(ctx) && selected.CheckRedirect == nil:
+		clone := *selected
 		clone.CheckRedirect = s.redirectChecker
 		selected = &clone
 	}

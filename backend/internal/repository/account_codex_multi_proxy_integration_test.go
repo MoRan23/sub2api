@@ -54,6 +54,8 @@ func TestCodexMultiProxyPostgresConfiguration(t *testing.T) {
 			require.ErrorContains(t, err, "collector_proxy_ids")
 			unchanged, err := f.accounts.GetByID(ctx, f.key.OwnerAccountID)
 			require.NoError(t, err)
+			unchanged, err = service.ResolveOpenAIOAuthCredentialAccount(ctx, f.accounts, unchanged, f.key.OSFamily)
+			require.NoError(t, err)
 			require.Equal(t, key.Generation, service.CodexTurnStateGenerationForAccount(unchanged))
 			config.CollectorProxyIDs = []int64{oldIDs[0], f.proxyID}
 			reordered := f.change(t, ctx, bulk, config, nil)
@@ -131,6 +133,8 @@ func TestCodexMultiProxyPostgresMissingProxyAndDeletionLock(t *testing.T) {
 	_, err := f.admin.UpdateAccount(ctx, f.key.OwnerAccountID, &service.UpdateAccountInput{CodexTurnState: &invalid})
 	require.ErrorIs(t, err, service.ErrProxyNotFound)
 	stored, err := f.accounts.GetByID(ctx, f.key.OwnerAccountID)
+	require.NoError(t, err)
+	stored, err = service.ResolveOpenAIOAuthCredentialAccount(ctx, f.accounts, stored, f.key.OSFamily)
 	require.NoError(t, err)
 	require.Equal(t, f.key.Generation, service.CodexTurnStateGenerationForAccount(stored))
 	tx, err := integrationEntClient.Tx(ctx)

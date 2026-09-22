@@ -67,7 +67,7 @@ func TestCodexStatePostgresNaturalLeasesDurabilityAndCAS(t *testing.T) {
 	require.False(t, withoutLease.BusinessInFlight)
 
 	record.EncryptedToken = "ciphertext-from-secret-encryptor"
-	record.IssuedAt, record.ExpiresAt = now, now.Add(time.Hour)
+	record.IssuedAt, record.ExpiresAt = now, now.Add(service.CodexTurnStateLifetime)
 	record.TokenLength, record.CipherBlocks = 292, 10
 	record.Source, record.Shape = "business", "accepted"
 	record.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
@@ -80,7 +80,7 @@ func TestCodexStatePostgresNaturalLeasesDurabilityAndCAS(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, record.EncryptedToken, loaded.EncryptedToken)
 	require.Equal(t, now, loaded.IssuedAt)
-	require.Equal(t, now.Add(time.Hour), loaded.ExpiresAt)
+	require.Equal(t, now.Add(service.CodexTurnStateLifetime), loaded.ExpiresAt)
 	require.Equal(t, now.Add(time.Second), loaded.LastBusinessAt, "a slow write must not regress recent activity")
 	require.Equal(t, record.Version+1, loaded.Version)
 	// A probe/abnormal response holding the old version cannot erase the new token.
@@ -119,7 +119,7 @@ func TestCodexStatePostgresConcurrentCASAndGenerationFence(t *testing.T) {
 			defer wg.Done()
 			candidate := *record
 			candidate.EncryptedToken = fmt.Sprintf("encrypted-candidate-%d", i)
-			candidate.IssuedAt, candidate.ExpiresAt = now, now.Add(time.Hour)
+			candidate.IssuedAt, candidate.ExpiresAt = now, now.Add(service.CodexTurnStateLifetime)
 			ok, err := repo.SaveCAS(ctx, candidate, record.Version)
 			if err != nil {
 				errCh <- err
@@ -249,9 +249,9 @@ func TestCodexStatePostgresScanSelectsOnlyDueCollectors(t *testing.T) {
 		}
 		switch model {
 		case "fresh":
-			record.EncryptedToken, record.ExpiresAt = "encrypted", now.Add(time.Hour)
+			record.EncryptedToken, record.IssuedAt, record.ExpiresAt = "encrypted", now, now.Add(service.CodexTurnStateLifetime)
 		case "due":
-			record.EncryptedToken, record.ExpiresAt = "encrypted", now.Add(4*time.Minute)
+			record.EncryptedToken, record.IssuedAt, record.ExpiresAt = "encrypted", now.Add(-service.CodexTurnStateLifetime+20*time.Second), now.Add(20*time.Second)
 		case "demand", "natural-inflight":
 			record.DemandReason, record.DemandAt = "extended_shape", now
 		case "paused":

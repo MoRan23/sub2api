@@ -92,7 +92,9 @@ describe('AccountCodexTurnStateCell', () => {
       response_shape: 'extended', response_observed_shape: length === 292 ? 'personal_extended' : 'team_business_extended'
     })] } })
     expect(colors(wrapper)[0]).toBe('red')
-    await wrapper.setProps({ now: now + 25 * 60_000 })
+    await wrapper.setProps({ now: now + 30 * 60_000 - 30_001 })
+    expect(colors(wrapper)[0]).toBe('red')
+    await wrapper.setProps({ now: now + 30 * 60_000 - 30_000 })
     expect(colors(wrapper)[0]).toBe('yellow')
     expect(wrapper.get(`[data-testid="codex-turn-state-model-${models[0]}"]`).attributes('title')).toContain('dotCollectorExpiring')
     await wrapper.setProps({ now: now + 30 * 60_000 - 1, loading: true })
@@ -118,16 +120,16 @@ describe('AccountCodexTurnStateCell', () => {
       { ...status.models[0]!, source: 'collector', model_allowed: false },
       { ...status.models[0]!, source: 'collector', shape: 'extended', expires_at: undefined },
     ]) {
-      const wrapper = show({ now: now + 26 * 60_000, status: { ...status, models: [cache], observations: [observation()] } })
+      const wrapper = show({ now: now + 30 * 60_000 - 20_000, status: { ...status, models: [cache], observations: [observation()] } })
       expect(colors(wrapper)[0]).toBe('green')
     }
-    const wrapper = show({ now: now + 26 * 60_000, status: { ...status, enabled: false,
+    const wrapper = show({ now: now + 30 * 60_000 - 20_000, status: { ...status, enabled: false,
       models: [{ ...status.models[0]!, source: 'collector' }], observations: [observation()] } })
     expect(colors(wrapper)[0]).toBe('green')
   })
 
   it('keeps a paused but usable collected cache yellow, while an active expired cache follows observations', () => {
-    const wrapper = show({ now: now + 26 * 60_000, status: { ...status, models: [{ ...status.models[0]!, source: 'collector',
+    const wrapper = show({ now: now + 30 * 60_000 - 20_000, status: { ...status, models: [{ ...status.models[0]!, source: 'collector',
       cache_available: true, state: 'paused', collector_paused: true, collection_status: 'paused' }] } })
     expect(colors(wrapper)[0]).toBe('yellow')
     const expired = show({ status: { ...status, models: [{ ...status.models[0]!, source: 'collector', state: 'expired',

@@ -148,7 +148,10 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 		}
 		accepted := false
 		targetStillExpiring := false
-		if best != "" && (target.IssuedAt.After(record.IssuedAt) || (record.EncryptedToken == "" && target.IssuedAt.Equal(record.IssuedAt))) {
+		// Keep candidate shape selection separate from model admission: a rejected
+		// target must not turn a response into an extended-only rotation signal.
+		modelMismatch := collectErr == nil && result.StatusCode >= 200 && result.StatusCode < 300 && result.ModelMismatch()
+		if !modelMismatch && best != "" && (target.IssuedAt.After(record.IssuedAt) || (record.EncryptedToken == "" && target.IssuedAt.Equal(record.IssuedAt))) {
 			encrypted, encryptErr := s.encryptor.Encrypt(best)
 			if encryptErr == nil {
 				record.EncryptedToken, record.Source, record.Shape = encrypted, "collector", target.Shape
@@ -165,7 +168,7 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 			} else {
 				outcomeErr = encryptErr
 			}
-		} else if best != "" && target.IssuedAt.Equal(record.IssuedAt) && record.EncryptedToken != "" && record.ExpiresAt.After(now) {
+		} else if !modelMismatch && best != "" && target.IssuedAt.Equal(record.IssuedAt) && record.EncryptedToken != "" && record.ExpiresAt.After(now) {
 			if record.ExpiresAt.After(now.Add(CodexTurnStateRefreshAhead)) {
 				record.RefreshReason = ""
 				completeCodexTurnStateDemand(record, now)
@@ -189,7 +192,9 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 				record.RefreshReason = "extended_shape"
 			}
 			record.LastError = codexTurnStateCollectorFailureReason(result, outcomeErr)
-			if record.LastError == "no_target_state" && targetStillExpiring {
+			if modelMismatch {
+				record.LastError = "model_mismatch"
+			} else if record.LastError == "no_target_state" && targetStillExpiring {
 				record.LastError = "target_still_expiring"
 			}
 			if record.LastError == "collector_auth_rejected" {
@@ -199,7 +204,7 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 			// shape-retry delay. Transport/upstream errors return to the normal
 			// one-second scheduler, while explicit cooldowns below still apply.
 			retry := time.Duration(0)
-			if record.LastError == "no_target_state" || record.LastError == "target_still_expiring" {
+			if record.LastError == "no_target_state" || record.LastError == "target_still_expiring" || record.LastError == "model_mismatch" {
 				retry = CodexTurnStateRetryInterval
 			}
 			// Keep the reason together with a concurrently established account
@@ -208,7 +213,7 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 			if concurrentCooldownReason != "" && !record.CollectorPaused {
 				record.LastError = concurrentCooldownReason
 			}
-			if result.RetryAfter > retry {
+			if codexTurnStateCollectorFailureReason(result, outcomeErr) == "collector_rate_limited" && result.RetryAfter > retry {
 				retry = result.RetryAfter
 			}
 			next := now.Add(retry)
@@ -218,12 +223,15 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 				next = record.NextCollectAt
 			}
 			record.NextCollectAt = next
-			for _, until := range []*time.Time{current.RateLimitResetAt, current.OverloadUntil, current.TempUnschedulableUntil, owner.RateLimitResetAt, owner.OverloadUntil, owner.TempUnschedulableUntil} {
+			for _, until := range []*time.Time{current.RateLimitResetAt, owner.RateLimitResetAt} {
 				if until != nil && until.After(record.NextCollectAt) {
 					record.NextCollectAt = *until
 				}
 			}
-			record.CollectionStatus, record.CollectionReason = "backoff", record.LastError
+			record.CollectionStatus, record.CollectionReason = "pending", record.LastError
+			if record.NextCollectAt.After(now) {
+				record.CollectionStatus = "backoff"
+			}
 			if record.CollectorPaused {
 				record.CollectionStatus = "paused"
 			}

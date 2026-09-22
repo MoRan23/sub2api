@@ -939,6 +939,9 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	}
 	req = ApplyOpenAIRequestPolicy(req, s.settingService)
 	req = withOpenAINativeHTTPRequestScope(req, account, s.accountRepo, "usage-probe")
+	if s.openAIGatewayService != nil {
+		client = openAIHTTPCookieClient(s.openAIGatewayService.httpUpstream, client, req)
+	}
 	resp, err := openaipkg.HTTPClientWithCodexResidencyRedirectGuard(client).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("openai codex probe request failed: %w", err)

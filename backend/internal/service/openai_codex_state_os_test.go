@@ -241,7 +241,7 @@ func TestCodexTurnStateOSHistoryAndObservationIsolation(t *testing.T) {
 		}
 		s.recordCollectorObservation(owner, "gpt-5", CodexTurnStateCollectResult{Observation: &CodexTurnStateSafeObservation{
 			ObservedAt: s.now(), TokenLength: length, Shape: "target", EnvelopeValid: true,
-			IssuedAt: s.now(), ExpiresAt: s.now().Add(time.Hour),
+			IssuedAt: s.now(), ExpiresAt: s.now().Add(CodexTurnStateLifetime),
 		}})
 	}
 	proofs := codexStateHistorySnapshot(accounts.owner.ID, s.now().Add(-time.Minute))

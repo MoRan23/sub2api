@@ -103,7 +103,7 @@ func TestCodexTurnStateDemandCollectorOutcomeAtomicallyKeepsShapeAndRetry(t *tes
 				require.Equal(t, "extended_shape", record.DemandReason)
 				retry := time.Duration(0)
 				if name == "extended" || name == "missing" {
-					retry = 30 * time.Second
+					retry = CodexTurnStateRetryInterval
 				} else if name == "rate_limited" {
 					retry = time.Minute
 				}
@@ -111,6 +111,8 @@ func TestCodexTurnStateDemandCollectorOutcomeAtomicallyKeepsShapeAndRetry(t *tes
 				if name == "auth" {
 					require.True(t, record.CollectorPaused)
 					require.Equal(t, "paused", record.CollectionStatus)
+				} else if retry == 0 {
+					require.Equal(t, "pending", record.CollectionStatus)
 				} else {
 					require.Equal(t, "backoff", record.CollectionStatus)
 				}
@@ -137,7 +139,7 @@ func TestCodexTurnStateDemandRenewalAndLeaseHeartbeatUseActualBusinessTime(t *te
 	attempt, err := s.Prepare(ctx, account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, attempt)
-	token := codexStateTestToken(10, clock.Add(-54*time.Minute))
+	token := codexStateTestToken(10, clock.Add(-CodexTurnStateLifetime+CodexTurnStateRefreshAhead+time.Minute))
 	s.Observe(attempt, token)
 	require.NoError(t, s.Finish(ctx, attempt, true))
 	record, _ := repo.Get(ctx, attempt.key)
@@ -175,14 +177,14 @@ func TestCodexTurnStateDemandRenewalRetainsValidCacheAndRetriesNearExpiry(t *tes
 			seed, err := s.Prepare(ctx, account, "gpt-5")
 			require.NoError(t, err)
 			markCodexStateTestBusinessSent(t, s, seed)
-			oldToken := codexStateTestToken(10, s.now().Add(-58*time.Minute))
+			oldToken := codexStateTestToken(10, s.now().Add(-CodexTurnStateLifetime+10*time.Second))
 			s.Observe(seed, oldToken)
 			require.NoError(t, s.Finish(ctx, seed, true))
 			before, _ := repo.Get(ctx, seed.key)
 			responseToken := codexStateTestToken(11, s.now())
 			switch name {
 			case "near_target":
-				responseToken = codexStateTestToken(10, s.now().Add(-56*time.Minute))
+				responseToken = codexStateTestToken(10, s.now().Add(-CodexTurnStateLifetime+20*time.Second))
 			case "same_target":
 				responseToken = oldToken
 			case "fresh_target":
@@ -210,7 +212,7 @@ func TestCodexTurnStateDemandRenewalRetainsValidCacheAndRetriesNearExpiry(t *tes
 			} else {
 				require.Equal(t, "expiring", after.DemandReason)
 				require.Equal(t, "backoff", after.CollectionStatus)
-				require.Equal(t, s.now().Add(30*time.Second), after.NextCollectAt)
+				require.Equal(t, s.now().Add(CodexTurnStateRetryInterval), after.NextCollectAt)
 			}
 		})
 	}
@@ -243,7 +245,7 @@ func TestCodexTurnStateDemandNaturalNearExpiryPreservesRetry(t *testing.T) {
 	seed, err := s.Prepare(ctx, account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, seed)
-	s.Observe(seed, codexStateTestToken(10, s.now().Add(-58*time.Minute)))
+	s.Observe(seed, codexStateTestToken(10, s.now().Add(-CodexTurnStateLifetime+10*time.Second)))
 	require.NoError(t, s.Finish(ctx, seed, true))
 	var calls atomic.Int64
 	s.collector = codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
@@ -253,11 +255,11 @@ func TestCodexTurnStateDemandNaturalNearExpiryPreservesRetry(t *testing.T) {
 	s.collect(ctx, seed.key)
 	before, err := repo.Get(ctx, seed.key)
 	require.NoError(t, err)
-	require.Equal(t, s.now().Add(30*time.Second), before.NextCollectAt)
+	require.Equal(t, s.now().Add(CodexTurnStateRetryInterval), before.NextCollectAt)
 	natural, err := s.Prepare(ctx, account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, natural)
-	token := codexStateTestToken(10, s.now().Add(-56*time.Minute))
+	token := codexStateTestToken(10, s.now().Add(-CodexTurnStateLifetime+20*time.Second))
 	s.Observe(natural, token)
 	require.NoError(t, s.Finish(ctx, natural, true))
 	after, err := repo.Get(ctx, natural.key)
@@ -273,11 +275,11 @@ func TestCodexTurnStateDemandNaturalNearExpiryPreservesRetry(t *testing.T) {
 	require.EqualValues(t, 1, calls.Load(), "a natural near-expiry target must not bypass retry pacing")
 }
 
-func TestCodexTurnStateDemandRespectsLongestAccountCooldown(t *testing.T) {
+func TestCodexTurnStateDemandRespectsRateLimitButIgnoresBusinessOverload(t *testing.T) {
 	s, repo, account := newCodexStateTestService(t)
 	attempt := seedCodexStateTestDemand(t, s, account, "gpt-5")
 	short, long := s.now().Add(time.Minute), s.now().Add(5*time.Minute)
-	account.RateLimitResetAt, account.OverloadUntil = &short, &long
+	account.RateLimitResetAt, account.OverloadUntil, account.TempUnschedulableUntil = &short, &long, &long
 	var calls atomic.Int64
 	s.collector = codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
 		calls.Add(1)
@@ -287,7 +289,7 @@ func TestCodexTurnStateDemandRespectsLongestAccountCooldown(t *testing.T) {
 	record, err := repo.Get(context.Background(), attempt.key)
 	require.NoError(t, err)
 	require.Zero(t, calls.Load())
-	require.Equal(t, long, record.NextCollectAt)
+	require.Equal(t, short, record.NextCollectAt)
 	require.Equal(t, "account_cooldown", record.CollectionReason)
 	require.Equal(t, "backoff", record.CollectionStatus)
 }

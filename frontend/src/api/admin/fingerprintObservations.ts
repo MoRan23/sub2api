@@ -6,6 +6,7 @@
  */
 
 import { apiClient } from '../client'
+import type { CodexResponseEvidence } from './accounts'
 
 export type FingerprintObservationRelation = 'root' | 'descendant' | 'unthreaded'
 
@@ -184,7 +185,7 @@ export interface FingerprintObservationEntry {
   outbound_codex_residency?: string
   outbound_codex_residency_source?: 'request_headers' | 'ws_handshake'
   request_integrity?: RequestIntegrityObservation
-  codex_turn_state?: {
+  codex_turn_state?: CodexResponseEvidence & {
     enabled: boolean
     account_enabled?: boolean
     maintenance_reason?: string

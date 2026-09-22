@@ -8,6 +8,7 @@ import (
 	entsql "entgo.io/ent/dialect/sql"
 	"github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
@@ -74,6 +75,8 @@ var ProviderSet = wire.NewSet(
 	NewOpenAIOAuthSyncSessionRepository,
 	NewOpenAIOAuthDailySessionRepository,
 	NewOpenAICodexStateRepository,
+	NewOpenAIHTTPCookieStore,
+	openaicookies.NewManager,
 	NewCodexTelemetryStore,
 	NewCodexTelemetryNotifier,
 	NewAdminAccountRepository,
@@ -166,8 +169,8 @@ var ProviderSet = wire.NewSet(
 	NewProxyExitInfoProber,
 	NewClaudeUsageFetcher,
 	NewClaudeOAuthClient,
-	NewHTTPUpstream,
-	NewOpenAIOAuthClient,
+	NewHTTPUpstreamWithCookies,
+	NewOpenAIOAuthClientWithCookies,
 	NewGrokOAuthClient,
 	NewGeminiOAuthClient,
 	NewGeminiCliCodeAssistClient,

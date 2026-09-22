@@ -133,6 +133,9 @@ func applyOpenAICodexWSStateSnapshot(payload []byte, cachedToken, firstGuardedHe
 func (s *OpenAIGatewayService) observeOpenAICodexWSStateHeaders(attempt *CodexTurnStateAttempt, headers http.Header) {
 	if s != nil && s.codexTurnStateService != nil && attempt != nil {
 		s.codexTurnStateService.ObserveHeaders(attempt, headers)
+		// The same headers may be reused with the physical connection; they are
+		// not a fresh per-turn response declaration.
+		observeCodexModelHeaders(attempt, headers, "connection")
 	}
 }
 

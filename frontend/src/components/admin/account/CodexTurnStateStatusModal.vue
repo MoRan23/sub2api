@@ -4,6 +4,7 @@
     <OpenAIOAuthOSSelect :model-value="selectedOS" :profiles="account?.openai_oauth_os_profiles" class="mb-3" @update:model-value="selectOS" />
     <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.experimental`) }}</p>
     <p class="mb-4 text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.autoRefreshHint`) }}</p>
+    <p class="mb-4 text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.lifetimePolicyHint`) }}</p>
     <p v-if="loading && !status" role="status">{{ t(`${prefix}.loading`) }}</p>
     <p v-if="failed" role="alert" class="mb-3 text-sm text-red-600 dark:text-red-400">{{ t(`${prefix}.${status ? 'refreshFailed' : 'loadFailed'}`) }}</p>
     <div v-if="status" class="space-y-4 text-sm" data-testid="codex-turn-state-status">
@@ -42,6 +43,11 @@
           <p class="break-words text-xs text-amber-700 dark:text-amber-400">{{ t(`${prefix}.lastError`) }}: {{ label('reasons', model.last_error) }}</p>
           <p v-if="reasonHint(model.last_error)" class="break-words text-xs text-gray-500 dark:text-gray-400">{{ reasonHint(model.last_error) }}</p>
         </div>
+        <details v-if="model.latest_response_evidence" class="text-xs" :data-testid="`codex-turn-state-latest-evidence-${model.model}`">
+          <summary class="cursor-pointer text-gray-600 dark:text-gray-400">{{ t(`${prefix}.latestResponseEvidence`) }}</summary>
+          <p class="mt-2 text-gray-500 dark:text-gray-400">{{ t(`${prefix}.latestResponseEvidenceHint`) }}</p>
+          <CodexResponseEvidenceDetails :evidence="model.latest_response_evidence" class="mt-2" />
+        </details>
       </section>
       </template>
       </section>
@@ -68,6 +74,7 @@
               <div v-if="observation.maintenance_reason"><dt class="text-xs text-gray-500">{{ t(`${prefix}.observationMaintenanceReason`) }}</dt><dd :data-testid="`codex-turn-state-maintenance-${observation.model}`">{{ label('reasons', observation.maintenance_reason) }}</dd></div>
               <div v-if="observation.response_validation_reason"><dt class="text-xs text-gray-500">{{ t(`${prefix}.validationReason`) }}</dt><dd>{{ label('validationReasons', observation.response_validation_reason) }}</dd></div>
             </dl>
+            <CodexResponseEvidenceDetails :evidence="observation" />
             <p v-if="observation.request_source === 'collector' && observation.outbound_length === 0" class="text-xs text-gray-500 dark:text-gray-400" :data-testid="`codex-turn-state-collector-outbound-hint-${observation.model}`">{{ t(`${prefix}.collectorOutboundHint`) }}</p>
             <p v-if="observation.request_source === 'business' && observation.business_delivered === false" class="text-xs text-gray-500 dark:text-gray-400" :data-testid="`codex-turn-state-delivery-hint-${observation.model}`">{{ t(`${prefix}.businessNotDeliveredHint`) }}</p>
             <details v-if="observationID(observation)" class="text-xs text-gray-500 dark:text-gray-400">
@@ -98,6 +105,7 @@ import { getAll as getProxies } from '@/api/admin/proxies'
 import { collectorProxyIDs } from '@/components/account/codexTurnState'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import OpenAIOAuthOSSelect from '@/components/account/OpenAIOAuthOSSelect.vue'
+import CodexResponseEvidenceDetails from './CodexResponseEvidenceDetails.vue'
 import { defaultOpenAIOS } from '@/components/account/openaiOAuthOS'
 import type { Account, OpenAIOAuthOS } from '@/types'
 
@@ -127,7 +135,7 @@ const reasonCodes = new Set([
   'collector_connect_timeout', 'collector_tls_timeout', 'collector_response_header_timeout',
   'waiting_business_response', 'queued', 'waiting_business', 'collecting', 'collector_proxy_not_configured', 'collector_proxy_changed',
   'account_unavailable', 'account_inactive', 'account_scheduling_disabled', 'account_expired', 'idle',
-  'target_still_expiring', 'business_preempted',
+  'target_still_expiring', 'business_preempted', 'collector_model_mismatch',
 ])
 
 function label(group: string, value?: string) {

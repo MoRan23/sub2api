@@ -335,7 +335,7 @@ func (s *CodexTurnStateService) recordCollectorObservation(owner *Account, model
 	if safe == nil || safe.ObservedAt.IsZero() || owner == nil {
 		return
 	}
-	value := CodexTurnStateObservation{OSFamily: codexTurnStateOS(owner), Model: model, RequestSource: "collector", ResponseLength: safe.TokenLength,
+	value := CodexTurnStateObservation{CodexModelEvidence: result.ModelEvidence.clone(), OSFamily: codexTurnStateOS(owner), Model: model, RequestSource: "collector", ResponseLength: safe.TokenLength,
 		ResponseShape: safe.Shape, ResponseSource: safe.ResponseSource, ResponseObservedShape: safe.ObservedShape,
 		ResponseCipherBlocks: safe.CipherBlocks, ResponseValidationReason: safe.ValidationReason,
 		Action: "collector_omitted", ObservationID: result.observationID, credentialEpoch: CodexTurnStateCredentialEpochForAccount(owner),

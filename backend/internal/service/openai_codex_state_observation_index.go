@@ -95,6 +95,7 @@ func (index *codexTurnStateObservationIndex) record(sequence uint64, ownerAccoun
 	entry.sequence = sequence
 	entry.envelope = value.envelopeEvidence
 	entry.summary = CodexTurnStateModelObservation{
+		CodexModelEvidence:       value.CodexModelEvidence.clone(),
 		OSFamily:                 value.OSFamily,
 		Model:                    value.Model,
 		ObservedAt:               observedAt,
@@ -204,6 +205,7 @@ func (store *codexTurnStateSummaryStore) snapshot(ownerAccountIDs []int64) (bool
 }
 
 func cloneCodexTurnStateModelObservation(value CodexTurnStateModelObservation) CodexTurnStateModelObservation {
+	value.CodexModelEvidence = value.CodexModelEvidence.clone()
 	if value.RequestSentAt != nil {
 		copied := *value.RequestSentAt
 		value.RequestSentAt = &copied

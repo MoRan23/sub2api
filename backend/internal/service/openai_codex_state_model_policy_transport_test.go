@@ -88,8 +88,8 @@ func TestCodexTurnStateModelPolicyWSFinalModelAndLiveRemoval(t *testing.T) {
 			state.modelPolicy = policy
 			initialMode := h.svc.openAICodexWSStateMode(context.Background(), h.account)
 			require.True(t, initialMode.Enabled)
-			firstCache := makeCodexWSStateTestToken(10, time.Now().Add(-10*time.Minute))
-			secondCache := makeCodexWSStateTestToken(10, time.Now().Add(-9*time.Minute))
+			firstCache := makeCodexWSStateTestToken(10, time.Now().Add(-3*time.Minute))
+			secondCache := makeCodexWSStateTestToken(10, time.Now().Add(-150*time.Second))
 			seedCodexWSState(t, h.svc, h.account, firstFinalModel, firstCache)
 			seedCodexWSState(t, h.svc, h.account, "gpt-5.4", secondCache)
 			beforeFirst, beforeSecond := h.record(firstFinalModel), h.record("gpt-5.4")
@@ -188,7 +188,7 @@ func TestCodexTurnStateModelPolicyHTTPExcludedCacheAllPaths(t *testing.T) {
 				if path == "passthrough" {
 					account.Extra["openai_passthrough"] = true
 				}
-				cached := codexStateTestToken(10, state.now().Add(-10*time.Minute))
+				cached := codexStateTestToken(10, state.now().Add(-3*time.Minute))
 				seed, err := state.Prepare(context.Background(), account, "gpt-5.4")
 				require.NoError(t, err)
 				state.Observe(seed, cached)
@@ -233,7 +233,7 @@ func TestCodexTurnStateModelPolicyWSRejectedFieldRetryRestoresClientState(t *tes
 			state := h.svc.codexTurnStateService
 			policy := newCodexStateTestModelPolicy("gpt-5.4")
 			state.modelPolicy = policy
-			cached := makeCodexWSStateTestToken(10, time.Now().Add(-10*time.Minute))
+			cached := makeCodexWSStateTestToken(10, time.Now().Add(-3*time.Minute))
 			seedCodexWSState(t, h.svc, h.account, "gpt-5.4", cached)
 			before := h.record("gpt-5.4")
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

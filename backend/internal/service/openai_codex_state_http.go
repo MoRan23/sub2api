@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -83,7 +84,8 @@ func (s *OpenAIGatewayService) prepareOpenAICodexStateHTTPRequest(c *gin.Context
 	}
 	noteOpenAICodexStatePatch(c, attempt, body, finalBody)
 	collector := &codexTurnStateHTTPCollector{service: s.codexTurnStateService, attempt: attempt}
-	return request.WithContext(context.WithValue(request.Context(), codexTurnStateHTTPRequestKey{}, collector))
+	ctx := openaicookies.WithObserver(request.Context(), func(diagnostic openaicookies.Diagnostic) { observeCodexCookies(attempt, diagnostic) })
+	return request.WithContext(context.WithValue(ctx, codexTurnStateHTTPRequestKey{}, collector))
 }
 
 func finishCodexTurnStateHTTPAttempt(service *CodexTurnStateService, attempt *CodexTurnStateAttempt, delivered bool) {
@@ -133,8 +135,11 @@ func codexTurnStateHTTPCollectorFromResponse(response *http.Response) *codexTurn
 	return collector
 }
 
-func observeCodexTurnStateHTTPPayload(response *http.Response, payload []byte) {
+func observeCodexTurnStateHTTPPayload(response *http.Response, payload []byte, eventType ...string) {
 	if collector := codexTurnStateHTTPCollectorFromResponse(response); collector != nil {
+		if len(eventType) > 0 && eventType[0] != "" {
+			payload = []byte(openAICompatPayloadWithEventType(string(payload), eventType[0]))
+		}
 		collector.service.ObserveEvent(collector.attempt, payload)
 	}
 }

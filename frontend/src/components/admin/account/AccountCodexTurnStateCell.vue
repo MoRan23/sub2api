@@ -118,7 +118,7 @@ function indicator(model: ModelSummary): Indicator {
   // A collector's failed renewal does not make the still-valid old cache expire.
   if (targetCache && cache.source === 'collector') {
     const seconds = remaining(cache)
-    if (available && seconds > 0 && seconds <= 300) return result('yellow', 'dotCollectorExpiring')
+    if (available && seconds > 0 && seconds <= 30) return result('yellow', 'dotCollectorExpiring')
     if (seconds === 0 && cache.collection_status === 'idle' && cache.collection_reason === 'idle' &&
       (cache.state === 'expired' || Number.isFinite(Date.parse(cache.expires_at || '')))) return result('gray', 'dotExpiredIdle')
   }

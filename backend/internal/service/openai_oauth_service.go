@@ -10,6 +10,7 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 )
 
 // OpenAIOAuthService handles OpenAI OAuth authentication flows
@@ -20,6 +21,7 @@ type OpenAIOAuthService struct {
 	oauthClient          OpenAIOAuthClient
 	accountRepo          AccountRepository
 	privacyClientFactory PrivacyClientFactory // ChatGPT backend application headers and native OAuth transport
+	cookieManager        *openaicookies.Manager
 }
 
 func (s *OpenAIOAuthService) SetRequestPolicySettingService(settings *SettingService) {
@@ -39,6 +41,10 @@ func NewOpenAIOAuthService(proxyRepo ProxyRepository, oauthClient OpenAIOAuthCli
 // 用于调用 chatgpt.com/backend-api 获取账号信息（plan_type 等）。
 func (s *OpenAIOAuthService) SetPrivacyClientFactory(factory PrivacyClientFactory) {
 	s.privacyClientFactory = factory
+}
+
+func (s *OpenAIOAuthService) SetCookieManager(manager *openaicookies.Manager) {
+	s.cookieManager = manager
 }
 
 // OpenAIAuthURLResult contains the authorization URL and session info
@@ -190,6 +196,8 @@ func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExch
 	if session, ok = s.sessionStore.Consume(input.SessionID, input.State); !ok {
 		return nil, infraerrors.BadRequest("OPENAI_OAUTH_SESSION_NOT_FOUND", "session not found or already consumed")
 	}
+	ctx, releaseCookies := s.beginCookieFlow(ctx, true)
+	defer releaseCookies()
 	ctx = withOpenAIOAuthAuthUserAgent(ctx, session.UserAgent)
 
 	// Bound flows retain the proxy chosen at authorization start. The optional
@@ -274,6 +282,8 @@ func (s *OpenAIOAuthService) RefreshTokenWithClientID(ctx context.Context, refre
 }
 
 func (s *OpenAIOAuthService) refreshTokenWithClientID(ctx context.Context, refreshToken string, proxyURL string, clientID string, enrich bool) (*OpenAITokenInfo, error) {
+	ctx, releaseCookies := s.beginCookieFlow(ctx, false)
+	defer releaseCookies()
 	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	ctx = WithOpenAINativeHTTPScope(ctx, nil, "")
 	tokenResp, err := s.oauthClient.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)
@@ -327,6 +337,8 @@ func (s *OpenAIOAuthService) refreshTokenWithClientID(ctx context.Context, refre
 // 从 accounts/check 获取最新 plan_type、subscription_expires_at、email，
 // 然后尝试关闭训练数据共享。适用于所有获取/刷新 token 的路径。
 func (s *OpenAIOAuthService) enrichTokenInfo(ctx context.Context, tokenInfo *OpenAITokenInfo, proxyURL string) {
+	ctx, releaseCookies := s.beginCookieFlow(ctx, false)
+	defer releaseCookies()
 	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	ctx = WithOpenAINativeHTTPScope(ctx, nil, "")
 	if tokenInfo.AccessToken == "" || s.privacyClientFactory == nil {

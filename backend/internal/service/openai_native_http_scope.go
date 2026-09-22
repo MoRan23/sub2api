@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 )
 
 // WithOpenAINativeHTTPScope freezes platform hints for a known Codex OAuth HTTP
@@ -14,8 +15,9 @@ import (
 // reserved for explicit authentication operations before an account exists.
 func WithOpenAINativeHTTPScope(ctx context.Context, account *Account, sourceUA string) context.Context {
 	if account != nil && !account.UsesOpenAICodexProtocol() {
-		return codexnative.WithoutScope(ctx)
+		return openaicookies.WithoutScope(codexnative.WithoutScope(ctx))
 	}
+	ctx = withOpenAIHTTPCookieAccountScope(ctx, account)
 	scope, _ := codexnative.ScopeFromContext(ctx)
 	if sourceUA = strings.TrimSpace(sourceUA); sourceUA != "" {
 		scope.SourceUserAgent = sourceUA
@@ -47,9 +49,27 @@ func withOpenAINativeHTTPRequestScope(request *http.Request, account *Account, r
 		return request
 	}
 	if account == nil || !account.UsesOpenAICodexProtocol() {
-		return request.WithContext(codexnative.WithoutScope(request.Context()))
+		return request.WithContext(openaicookies.WithoutScope(codexnative.WithoutScope(request.Context())))
 	}
 	return request.WithContext(withOpenAINativeHTTPAccountScope(request.Context(), account, repo, purpose))
+}
+
+// Cookie identity follows the credential snapshot that supplied the bearer, not
+// a UA guess or the default slot of a later account reload. A nil account keeps
+// an explicitly isolated authorization flow supplied by its caller.
+func withOpenAIHTTPCookieAccountScope(ctx context.Context, account *Account) context.Context {
+	if account == nil {
+		return ctx
+	}
+	if !RequiresOpenAIOAuthOSAuthorization(account) || account.OpenAIOAuthCredentialOwnerID <= 0 ||
+		NormalizeOpenAIOSFamily(account.OpenAIOAuthCredentialOS) == "" || account.OpenAIOAuthAuthorizationGeneration == "" {
+		return openaicookies.WithoutScope(ctx)
+	}
+	return openaicookies.WithScope(ctx, openaicookies.Scope{
+		OwnerAccountID:          account.OpenAIOAuthCredentialOwnerID,
+		OSFamily:                account.OpenAIOAuthCredentialOS,
+		AuthorizationGeneration: account.OpenAIOAuthAuthorizationGeneration,
+	})
 }
 
 func withOpenAINativeHTTPAccountScope(ctx context.Context, account *Account, repo AccountRepository, purpose string) context.Context {

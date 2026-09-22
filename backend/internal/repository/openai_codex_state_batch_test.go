@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,8 +24,8 @@ func TestCodexStateListByAccountsUsesOneQueryWithLiveGenerationFilter(t *testing
 		"demand_reason", "demand_at", "history_proof_observed_at", "collection_status", "collection_reason",
 		"collector_proxy_id", "collector_extended_count", "last_collector_proxy_id", "collector_attempt_id",
 		"business_in_flight",
-	}).AddRow(3, "windows", "gpt-5.3", "generation-3", 2, "encrypted-one", now, now.Add(time.Hour), 292, 10, "business", "target", "", now, nil, nil, false, "", "", nil, nil, "", "", nil, 0, nil, nil, true).
-		AddRow(3, "linux", "gpt-5.4", "generation-3", 4, "encrypted-two", now, now.Add(time.Hour), 332, 12, "collector", "target", "", now, now, now.Add(time.Minute), false, "", "", nil, nil, "", "", 202, 2, 101, "06aee3d4-720c-4e11-aeb4-0f0be2dcc027", false).
+	}).AddRow(3, "windows", "gpt-5.3", "generation-3", 2, "encrypted-one", now, now.Add(service.CodexTurnStateLifetime), 292, 10, "business", "target", "", now, nil, nil, false, "", "", nil, nil, "", "", nil, 0, nil, nil, true).
+		AddRow(3, "linux", "gpt-5.4", "generation-3", 4, "encrypted-two", now, now.Add(service.CodexTurnStateLifetime), 332, 12, "collector", "target", "", now, now, now.Add(time.Minute), false, "", "", nil, nil, "", "", 202, 2, 101, "06aee3d4-720c-4e11-aeb4-0f0be2dcc027", false).
 		AddRow(9, "macos", "gpt-5.4", "generation-9", 1, "", nil, nil, 0, 0, "", "", "missing", now, nil, nil, true, "authorization_failed", "extended_shape", now, now, "paused", "authorization_failed", 101, 1, 101, nil, true)
 	// Match the security predicates explicitly so an accidentally broader batch
 	// query cannot expose a disabled/deleted account or an obsolete generation.
@@ -39,7 +40,7 @@ func TestCodexStateListByAccountsUsesOneQueryWithLiveGenerationFilter(t *testing
 	require.Equal(t, "gpt-5.3", records[0].Model)
 	require.Equal(t, "generation-3", records[0].Generation)
 	require.Equal(t, "encrypted-one", records[0].EncryptedToken, "repository keeps ciphertext opaque for the status projection")
-	require.Equal(t, now.Add(time.Hour), records[0].ExpiresAt)
+	require.Equal(t, now.Add(service.CodexTurnStateLifetime), records[0].ExpiresAt)
 	require.True(t, records[0].BusinessInFlight)
 	require.Equal(t, "gpt-5.4", records[1].Model)
 	require.Equal(t, now, records[1].LastCollectedAt)

@@ -11,7 +11,7 @@ func TestCodexTurnStateStatusSeparatesUsableCacheFromPausedCollector(t *testing.
 	s, _, account := newCodexStateTestService(t)
 	now := s.now()
 	record := CodexTurnStateRecord{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5", Generation: "gen1", EncryptedToken: "ciphertext",
-		Shape: "target", TokenLength: 292, CipherBlocks: 10, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(59 * time.Minute),
+		Shape: "target", TokenLength: 292, CipherBlocks: 10, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(CodexTurnStateLifetime - time.Minute),
 		LastBusinessAt: now, CollectorPaused: true, LastError: "collector_auth_rejected"}
 	status := projectCodexTurnStateStatus(account.ID, account, []CodexTurnStateRecord{record}, []string{"gpt-5"}, nil, now)
 	require.True(t, status.Models[0].CacheAvailable)

@@ -177,7 +177,7 @@ func TestCodexTurnStateModelRemovalPreservesCacheWithoutExtendingLifetime(t *tes
 	require.False(t, s.ValidateAttempt(ctx, oldAttempt), "removal and re-addition cannot revive a frozen old attempt")
 	require.NoError(t, s.Finish(ctx, oldAttempt, false))
 	initialTime := s.now()
-	s.now = func() time.Time { return initialTime.Add(10 * time.Minute) }
+	s.now = func() time.Time { return initialTime.Add(time.Minute) }
 	resumed, err := s.Prepare(ctx, account, "gpt-5")
 	require.NoError(t, err)
 	require.Equal(t, token, resumed.Snapshot.Token)

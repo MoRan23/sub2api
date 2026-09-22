@@ -10,7 +10,8 @@ import (
 
 // Attach to the standard http.Client, after req has merged its common headers.
 // net/http invokes this dispatcher for every redirect, so the actual UA always
-// wins over frozen account hints. Request-policy clones share it and the jar.
+// wins over frozen account hints. Request-policy clones share this dispatcher;
+// their cookies belong to the outer authorization-scoped transport.
 func newOpenAINativeReqDispatcher(client *req.Client) *codexnative.Dispatcher {
 	base := openAINativeReqTransportOptions(client.GetTransport())
 	options := codexnative.Options{AutoDecompression: client.GetTransport().AutoDecompression}

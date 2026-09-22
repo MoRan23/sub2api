@@ -34,6 +34,23 @@ func TestInspectCodexTurnStateEnvelopeClassifiesWithoutAccountType(t *testing.T)
 	}
 }
 
+func TestInspectCodexTurnStateEnvelopeExpiresFourMinutesAfterIssue(t *testing.T) {
+	issuedAt := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	expiresAt := issuedAt.Add(240 * time.Second)
+	for _, blocks := range []int{10, 11, 12, 13} {
+		token := codexStateTestToken(blocks, issuedAt)
+		for _, observedAt := range []time.Time{issuedAt, issuedAt.Add(2 * time.Minute), expiresAt.Add(-time.Nanosecond)} {
+			observed, err := InspectCodexTurnStateEnvelope(token, observedAt)
+			require.NoError(t, err, "blocks=%d observedAt=%s", blocks, observedAt)
+			require.Equal(t, issuedAt, observed.IssuedAt)
+			require.Equal(t, expiresAt, observed.ExpiresAt, "repeated observation must not extend the issue-based lifetime")
+		}
+		observed, err := InspectCodexTurnStateEnvelope(token, expiresAt)
+		require.EqualError(t, err, "expired", "blocks=%d", blocks)
+		require.Equal(t, expiresAt, observed.ExpiresAt)
+	}
+}
+
 func TestCodexTurnState356ObservationDoesNotRelaxAccountAdmission(t *testing.T) {
 	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
 	token := codexStateTestToken(13, now)

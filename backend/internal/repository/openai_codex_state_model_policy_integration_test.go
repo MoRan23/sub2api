@@ -59,7 +59,7 @@ func newCodexStatePolicyCandidate(t *testing.T, ctx context.Context, repo servic
 	require.NotNil(t, record)
 	record.ModelPolicyRevision = revision
 	record.EncryptedToken, record.Source = "synthetic-policy-ciphertext", "business"
-	record.IssuedAt, record.ExpiresAt = now, now.Add(time.Hour)
+	record.IssuedAt, record.ExpiresAt = now, now.Add(service.CodexTurnStateLifetime)
 	return record
 }
 

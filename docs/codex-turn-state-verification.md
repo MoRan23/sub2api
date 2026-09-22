@@ -1,5 +1,7 @@
 # Codex turn-state 采集与状态展示验证记录
 
+240 秒策略、HTTP Cookie 池、模型准入和 16 worker 的最新验证见 [Cookie 与 240 秒验证记录](testing/codex-cookie-240s-verification.md)。以下保留各历史版本的验证结果，旧的有效期和重试参数不代表当前配置。
+
 基线：`dev@26d980d46`。本次验证使用仓库声明的 Go 1.27.0、`GOEXPERIMENT=jsonv2`、WSL Ubuntu 24.04，以及隔离的 PostgreSQL 18.1 和 Redis 8.4 测试容器。没有连接收费模型上游或部署应用。
 
 ## 验证范围

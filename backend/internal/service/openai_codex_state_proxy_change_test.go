@@ -15,7 +15,7 @@ func newCodexProxyChangedTestService(t *testing.T) (*CodexTurnStateService, *cod
 	account.Extra[CodexTurnStateExtraKey].(map[string]any)["collector_proxy_id"] = float64(99)
 	account.Extra[CodexTurnStateGenerationExtraKey] = "after-proxy-change"
 	key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5", Generation: "after-proxy-change"}
-	token := codexStateTestToken(10, s.now().Add(-58*time.Minute))
+	token := codexStateTestToken(10, s.now().Add(-CodexTurnStateLifetime+10*time.Second))
 	shape, err := ParseCodexTurnState(token, "personal", s.now())
 	require.NoError(t, err)
 	encrypted, err := s.encryptor.Encrypt(token)
@@ -32,15 +32,25 @@ func newCodexProxyChangedTestService(t *testing.T) (*CodexTurnStateService, *cod
 }
 
 func TestCodexTurnStateProxyChangeDefersValidCacheUntilExpiration(t *testing.T) {
-	for _, legacyDemand := range []string{"", "extended_shape"} {
-		t.Run("previous_demand_"+legacyDemand, func(t *testing.T) {
+	for _, tc := range []struct {
+		name, legacyDemand string
+		earlierExpiry      bool
+	}{
+		{name: "previous_demand_"},
+		{name: "previous_demand_extended_shape", legacyDemand: "extended_shape"},
+		{name: "earlier_expiry", earlierExpiry: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			s, repo, account, key, _ := newCodexProxyChangedTestService(t)
 			ctx := context.Background()
 			s.ctx = ctx
 			clock := s.now()
 			s.now = func() time.Time { return clock }
 			before := repo.records[key]
-			before.DemandReason = legacyDemand
+			before.DemandReason = tc.legacyDemand
+			if tc.earlierExpiry {
+				before.ExpiresAt = clock.Add(5 * time.Second)
+			}
 			repo.records[key] = before
 			calls := 0
 			s.collector = codexStateTestCollector(func(_ context.Context, input CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
@@ -58,7 +68,7 @@ func TestCodexTurnStateProxyChangeDefersValidCacheUntilExpiration(t *testing.T) 
 			after, err := repo.Get(ctx, key)
 			require.NoError(t, err)
 			require.Equal(t, before.EncryptedToken, after.EncryptedToken)
-			require.Equal(t, before.ExpiresAt, after.ExpiresAt)
+			require.Equal(t, before.ExpiresAt, after.ExpiresAt, "deferring collection must preserve an earlier local deadline")
 			require.True(t, after.NextCollectAt.IsZero(), "cache expiry must not become an owner-wide collection cooldown")
 			status := projectCodexTurnStateStatus(account.ID, account, []CodexTurnStateRecord{*after}, []string{key.Model}, nil, clock)
 			require.Equal(t, "idle", status.Models[0].CollectionStatus)
@@ -122,7 +132,7 @@ func TestCodexTurnStateProxyChangeBusinessDuplicateAndNewTarget(t *testing.T) {
 	require.Equal(t, "collector_proxy_changed", repeated.CollectionReason)
 	require.False(t, s.ensureCodexTurnStateDemand(ctx, repeated))
 
-	newTarget := codexStateTestToken(10, s.now().Add(-56*time.Minute))
+	newTarget := codexStateTestToken(10, s.now().Add(-CodexTurnStateLifetime+20*time.Second))
 	natural, err := s.Prepare(ctx, account, key.Model)
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, natural)
@@ -133,7 +143,7 @@ func TestCodexTurnStateProxyChangeBusinessDuplicateAndNewTarget(t *testing.T) {
 	plain, err := s.encryptor.Decrypt(updated.EncryptedToken)
 	require.NoError(t, err)
 	require.Equal(t, newTarget, plain)
-	require.Equal(t, "expiring", updated.DemandReason, "a new target resumes the normal five-minute renewal policy")
+	require.Equal(t, "expiring", updated.DemandReason, "a new target resumes the normal renewal policy")
 	require.NotEqual(t, "collector_proxy_changed", updated.CollectionReason)
 	require.True(t, s.ensureCodexTurnStateDemand(ctx, updated))
 }

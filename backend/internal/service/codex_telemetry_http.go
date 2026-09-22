@@ -87,7 +87,7 @@ func (b *codexTelemetryHTTPBody) Close() error {
 // The existing gateway SSE/JSON parsers call this before any model/tool rewrite.
 // No second parser, reader goroutine, body buffering, or response limit is added.
 func observeCodexTelemetryHTTPPayload(response *http.Response, payload []byte, eventType string) {
-	observeCodexTurnStateHTTPPayload(response, payload)
+	observeCodexTurnStateHTTPPayload(response, payload, eventType)
 	if response == nil || response.Request == nil {
 		return
 	}

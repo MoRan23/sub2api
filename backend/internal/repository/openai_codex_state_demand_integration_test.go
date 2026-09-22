@@ -71,7 +71,7 @@ func TestCodexHistoryDemandPostgresHealthyCacheConsumesProofAndFencesSlowWriter(
 	require.NoError(t, err)
 	require.NoError(t, r.EndBusiness(ctx, key, "natural"))
 	record.EncryptedToken, record.TokenLength, record.CipherBlocks = "opaque-encrypted-target", 292, 10
-	record.IssuedAt, record.ExpiresAt = now.Add(-time.Minute), now.Add(59*time.Minute)
+	record.IssuedAt, record.ExpiresAt = now.Add(-time.Minute), now.Add(service.CodexTurnStateLifetime-time.Minute)
 	record.ModelPolicyRevision = proof.ModelPolicyRevision
 	saved, err := r.SaveCAS(ctx, *record, record.Version)
 	require.NoError(t, err)

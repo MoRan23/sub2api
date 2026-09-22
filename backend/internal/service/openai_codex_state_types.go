@@ -8,13 +8,13 @@ import (
 )
 
 const (
-	CodexTurnStateLifetime       = time.Hour
-	CodexTurnStateRefreshAhead   = 5 * time.Minute
+	CodexTurnStateLifetime       = 240 * time.Second
+	CodexTurnStateRefreshAhead   = 30 * time.Second
 	CodexTurnStateActiveWindow   = 30 * time.Minute
 	CodexTurnStateScanInterval   = 30 * time.Second
 	CodexTurnStateDueInterval    = time.Second
 	CodexTurnStateCollectTimeout = 20 * time.Second
-	CodexTurnStateRetryInterval  = 30 * time.Second
+	CodexTurnStateRetryInterval  = 5 * time.Second
 )
 
 // CodexTurnStateKey always refers to the actual credential owner and final wire model.
@@ -157,9 +157,11 @@ type CodexTurnStateAttempt struct {
 	finished           bool
 	wireObservation    *codexTurnStateWireObservation
 	safeObservation    CodexTurnStateSafeObservation
+	modelEvidence      codexModelEvidenceObserver
 }
 
 type CodexTurnStateSafeObservation struct {
+	CodexModelEvidence
 	IssuedAt         time.Time `json:"-"`
 	ExpiresAt        time.Time `json:"-"`
 	EnvelopeValid    bool      `json:"-"`
@@ -179,7 +181,12 @@ func (a *CodexTurnStateAttempt) SafeObservation() CodexTurnStateSafeObservation 
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.safeObservation
+	value := a.safeObservation
+	// Request diagnostics can retain response metadata without a ticket. The
+	// summary index still requires ObservedAt, so this cannot replace an older
+	// ticket's model/cookie evidence when the new response contains no state.
+	value.CodexModelEvidence = a.modelEvidence.snapshot(a.Model)
+	return value
 }
 
 type CodexTurnStateCollectRequest struct {
@@ -193,6 +200,8 @@ type CodexTurnStateCollectRequest struct {
 }
 
 type CodexTurnStateCollectResult struct {
+	ModelEvidence CodexModelEvidence
+	completed     bool
 	Tokens        []string
 	StatusCode    int
 	RetryAfter    time.Duration
@@ -211,28 +220,29 @@ type CodexTurnStateCollector interface {
 type CodexTurnStateCollectorHTTPDo func(context.Context, CodexTurnStateCollectRequest, *http.Request) (*http.Response, error)
 
 type CodexTurnStateModelStatus struct {
-	OSFamily               string     `json:"os_family"`
-	Model                  string     `json:"model"`
-	ModelAllowed           bool       `json:"model_allowed"`
-	CacheAvailable         bool       `json:"cache_available"`
-	CollectionStatus       string     `json:"collection_status"`
-	CollectionReason       string     `json:"collection_reason,omitempty"`
-	State                  string     `json:"state"`
-	Shape                  string     `json:"shape"`
-	Source                 string     `json:"source"`
-	TokenLength            int        `json:"token_length"`
-	CipherBlocks           int        `json:"cipher_blocks"`
-	ExpiresAt              *time.Time `json:"expires_at,omitempty"`
-	RemainingSeconds       int64      `json:"remaining_seconds"`
-	LastBusinessAt         *time.Time `json:"last_business_at,omitempty"`
-	LastCollectedAt        *time.Time `json:"last_collected_at,omitempty"`
-	NextCollectAt          *time.Time `json:"next_collect_at,omitempty"`
-	CollectorPaused        bool       `json:"collector_paused"`
-	LastError              string     `json:"last_error,omitempty"`
-	RefreshReason          string     `json:"refresh_reason,omitempty"`
-	CollectorProxyID       *int64     `json:"collector_proxy_id,omitempty"`
-	LastCollectorProxyID   *int64     `json:"last_collector_proxy_id,omitempty"`
-	CollectorExtendedCount int        `json:"collector_extended_count"`
+	LatestResponseEvidence *CodexModelEvidence `json:"latest_response_evidence,omitempty"`
+	OSFamily               string              `json:"os_family"`
+	Model                  string              `json:"model"`
+	ModelAllowed           bool                `json:"model_allowed"`
+	CacheAvailable         bool                `json:"cache_available"`
+	CollectionStatus       string              `json:"collection_status"`
+	CollectionReason       string              `json:"collection_reason,omitempty"`
+	State                  string              `json:"state"`
+	Shape                  string              `json:"shape"`
+	Source                 string              `json:"source"`
+	TokenLength            int                 `json:"token_length"`
+	CipherBlocks           int                 `json:"cipher_blocks"`
+	ExpiresAt              *time.Time          `json:"expires_at,omitempty"`
+	RemainingSeconds       int64               `json:"remaining_seconds"`
+	LastBusinessAt         *time.Time          `json:"last_business_at,omitempty"`
+	LastCollectedAt        *time.Time          `json:"last_collected_at,omitempty"`
+	NextCollectAt          *time.Time          `json:"next_collect_at,omitempty"`
+	CollectorPaused        bool                `json:"collector_paused"`
+	LastError              string              `json:"last_error,omitempty"`
+	RefreshReason          string              `json:"refresh_reason,omitempty"`
+	CollectorProxyID       *int64              `json:"collector_proxy_id,omitempty"`
+	LastCollectorProxyID   *int64              `json:"last_collector_proxy_id,omitempty"`
+	CollectorExtendedCount int                 `json:"collector_extended_count"`
 }
 
 type CodexTurnStateStatus struct {
@@ -256,6 +266,7 @@ type CodexTurnStateStatus struct {
 // CodexTurnStateModelObservation is a process-local diagnostic summary. It
 // contains no token, ciphertext, hash, or credential/configuration identifier.
 type CodexTurnStateModelObservation struct {
+	CodexModelEvidence
 	OSFamily                 string     `json:"os_family"`
 	Model                    string     `json:"model"`
 	RequestSource            string     `json:"request_source"`

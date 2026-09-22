@@ -28,7 +28,8 @@ func preserveCodexTurnStateOnCollectorProxyChange(ctx context.Context, client *d
 			c.state_generation::text AS next_generation,
 			COALESCE(s.encrypted_token <> '' AND s.shape = 'target' AND s.token_length = $2 AND s.cipher_blocks = $3
 			AND s.issued_at IS NOT NULL AND s.issued_at <= NOW() + INTERVAL '30 seconds'
-			AND s.expires_at > NOW() AND s.expires_at = s.issued_at + ($4 * INTERVAL '1 second'), FALSE) AS valid_target
+			AND s.expires_at > NOW() AND s.expires_at > s.issued_at
+			AND s.expires_at <= s.issued_at + ($4 * INTERVAL '1 second'), FALSE) AS valid_target
 		FROM openai_codex_state s JOIN account_openai_oauth_os_credentials c
 		ON c.account_id=s.owner_account_id AND c.os_family=s.os_family
 		WHERE s.owner_account_id = $1 AND c.status='authorized'

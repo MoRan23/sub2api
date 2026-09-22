@@ -174,7 +174,7 @@ func TestCodexTurnStateCollectorSSEAndHTTPRateLimitOutcomes(t *testing.T) {
 				seed, err := s.Prepare(ctx, account, "gpt-5")
 				require.NoError(t, err)
 				markCodexStateTestBusinessSent(t, s, seed)
-				oldToken := codexStateTestToken(10, clock.Add(-58*time.Minute))
+				oldToken := codexStateTestToken(10, clock.Add(-CodexTurnStateLifetime+10*time.Second))
 				s.Observe(seed, oldToken)
 				require.NoError(t, s.Finish(ctx, seed, true))
 				other := seedCodexStateTestDemand(t, s, account, "gpt-5-mini")
@@ -199,7 +199,7 @@ func TestCodexTurnStateCollectorSSEAndHTTPRateLimitOutcomes(t *testing.T) {
 						// An account cooldown may be updated while the network request is in flight.
 						until := clock.Add(wait)
 						updated := *account
-						updated.OverloadUntil = &until
+						updated.RateLimitResetAt = &until
 						accounts := s.accounts.(*codexStateTestAccounts)
 						accounts.mu.Lock()
 						accounts.account = &updated
@@ -217,7 +217,11 @@ func TestCodexTurnStateCollectorSSEAndHTTPRateLimitOutcomes(t *testing.T) {
 				require.NoError(t, err)
 				require.EqualValues(t, 1, calls.Load())
 				require.Equal(t, "collector_rate_limited", after.LastError)
-				require.Equal(t, "backoff", after.CollectionStatus)
+				if wait > 0 {
+					require.Equal(t, "backoff", after.CollectionStatus)
+				} else {
+					require.Equal(t, "pending", after.CollectionStatus)
+				}
 				require.Equal(t, "collector_rate_limited", after.CollectionReason)
 				require.Equal(t, "expiring", after.DemandReason)
 				require.Equal(t, clock.Add(wait), after.NextCollectAt)

@@ -441,8 +441,8 @@ func newCodexWSStateIngressHarness(t *testing.T) (*OpenAIGatewayService, *Accoun
 func TestCodexWSStateIngressSeparatesTurnsModelsAndLateMetadata(t *testing.T) {
 	svc, account, repo, _, dialer := newCodexWSStateIngressHarness(t)
 	now := time.Now()
-	firstToken := makeCodexWSStateTestToken(10, now.Add(-10*time.Minute))
-	secondToken := makeCodexWSStateTestToken(10, now.Add(-9*time.Minute))
+	firstToken := makeCodexWSStateTestToken(10, now.Add(-3*time.Minute))
+	secondToken := makeCodexWSStateTestToken(10, now.Add(-150*time.Second))
 	newToken := makeCodexWSStateTestToken(10, now.Add(-time.Minute))
 	seedCodexWSState(t, svc, account, "gpt-5.5", firstToken)
 	seedCodexWSState(t, svc, account, "gpt-5.4", secondToken)

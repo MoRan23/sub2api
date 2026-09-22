@@ -131,7 +131,10 @@ func ReqClientWithRequestPolicy(client *req.Client, ctx context.Context) *req.Cl
 	policy, _ := RequestPolicyFromContext(ctx)
 	clone := client.Clone()
 	clone.GetClient().Transport = client.GetClient().Transport
-	clone.GetClient().Jar = client.GetClient().Jar
+	// OpenAI cookies belong to the scoped transport. req.Clone recreates its
+	// default jar; disable its factory too so later clones cannot restore it.
+	clone.SetCookieJarFactory(nil)
+	clone.GetClient().Jar = nil
 	guarded := HTTPClientWithCodexResidencyRedirectGuard(clone.GetClient())
 	clone.GetClient().CheckRedirect = guarded.CheckRedirect
 	clone.WrapRoundTripFunc(func(next req.RoundTripper) req.RoundTripFunc {

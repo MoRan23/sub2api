@@ -42,12 +42,12 @@ func TestCodexTurnStateParserShapeAndTime(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tc.length, len(token))
 			require.Equal(t, tc.shape, parsed.Shape)
-			require.Equal(t, now.Add(time.Hour), parsed.ExpiresAt)
+			require.Equal(t, now.Add(CodexTurnStateLifetime), parsed.ExpiresAt)
 		})
 	}
 	for _, tc := range []struct{ name, token, kind string }{
 		{"wrong_type", codexStateTestToken(12, now), "personal"}, {"unknown", codexStateTestToken(10, now), ""},
-		{"expired", codexStateTestToken(10, now.Add(-time.Hour)), "personal"}, {"future", codexStateTestToken(10, now.Add(time.Minute)), "personal"},
+		{"expired", codexStateTestToken(10, now.Add(-CodexTurnStateLifetime)), "personal"}, {"future", codexStateTestToken(10, now.Add(time.Minute)), "personal"},
 		{"trimmed", codexStateTestToken(10, now) + " ", "personal"}, {"padding", strings.TrimRight(codexStateTestToken(10, now), "="), "personal"},
 		{"version", "A" + codexStateTestToken(10, now)[1:], "personal"},
 	} {
@@ -65,7 +65,7 @@ func TestCodexTurnStateSafeExpiredObservation(t *testing.T) {
 	s, _, account := newCodexStateTestService(t)
 	attempt, err := s.Prepare(context.Background(), account, "gpt-5")
 	require.NoError(t, err)
-	s.Observe(attempt, codexStateTestToken(10, s.now().Add(-time.Hour)))
+	s.Observe(attempt, codexStateTestToken(10, s.now().Add(-CodexTurnStateLifetime)))
 	require.Equal(t, "expired", attempt.SafeObservation().Shape)
 	require.NoError(t, s.Finish(context.Background(), attempt, false))
 }

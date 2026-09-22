@@ -10,22 +10,31 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/google/uuid"
 	"github.com/imroc/req/v3"
 )
 
 // NewOpenAIOAuthClient creates a new OpenAI OAuth client
 func NewOpenAIOAuthClient() service.OpenAIOAuthClient {
-	return &openaiOAuthService{tokenURL: openai.TokenURL}
+	return NewOpenAIOAuthClientWithCookies(nil)
+}
+
+func NewOpenAIOAuthClientWithCookies(manager *openaicookies.Manager) service.OpenAIOAuthClient {
+	return &openaiOAuthService{tokenURL: openai.TokenURL, cookies: manager}
 }
 
 type openaiOAuthService struct {
 	tokenURL string
+	cookies  *openaicookies.Manager
 }
 
 func (s *openaiOAuthService) ExchangeCode(ctx context.Context, code, codeVerifier, redirectURI, proxyURL, clientID string) (*openai.TokenResponse, error) {
+	ctx, releaseCookies := s.ensureCookieScope(ctx, true)
+	defer releaseCookies()
 	ctx = service.WithOpenAINativeHTTPScope(ctx, nil, "")
-	client, err := createOpenAIReqClient(proxyURL)
+	client, err := createOpenAIReqClientWithCookies(proxyURL, s.cookies)
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_OAUTH_CLIENT_INIT_FAILED", "create HTTP client: %v", err)
 	}
@@ -84,8 +93,10 @@ func (s *openaiOAuthService) RefreshTokenWithClientID(ctx context.Context, refre
 }
 
 func (s *openaiOAuthService) refreshTokenWithClientID(ctx context.Context, refreshToken, proxyURL, clientID string) (*openai.TokenResponse, error) {
+	ctx, releaseCookies := s.ensureCookieScope(ctx, false)
+	defer releaseCookies()
 	ctx = service.WithOpenAINativeHTTPScope(ctx, nil, "")
-	client, err := createOpenAIReqClient(proxyURL)
+	client, err := createOpenAIReqClientWithCookies(proxyURL, s.cookies)
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_OAUTH_CLIENT_INIT_FAILED", "create HTTP client: %v", err)
 	}
@@ -122,11 +133,33 @@ func (s *openaiOAuthService) refreshTokenWithClientID(ctx context.Context, refre
 }
 
 func createOpenAIReqClient(proxyURL string) (*req.Client, error) {
+	return createOpenAIReqClientWithCookies(proxyURL, nil)
+}
+
+func createOpenAIReqClientWithCookies(proxyURL string, manager *openaicookies.Manager) (*req.Client, error) {
 	return getSharedReqClient(reqClientOptions{
 		ProxyURL:         proxyURL,
 		Timeout:          120 * time.Second,
 		OpenAINativeHTTP: true,
+		OpenAICookies:    manager,
 	})
+}
+
+// Direct repository consumers still get a private, bounded flow when they have
+// no owning service scope. Nested token/enrichment calls retain the outer scope.
+func (s *openaiOAuthService) ensureCookieScope(ctx context.Context, newAuthorization bool) (context.Context, func()) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if scope, exists := openaicookies.ScopeFromContext(ctx); exists && (!newAuthorization || (scope.Valid() && scope.EphemeralID != "")) {
+		return ctx, func() {}
+	}
+	id := uuid.NewString()
+	return openaicookies.WithScope(ctx, openaicookies.Scope{EphemeralID: id}), func() {
+		if s.cookies != nil {
+			s.cookies.ClearEphemeral(id)
+		}
+	}
 }
 
 func shouldReturnOpenAINoProxyHint(ctx context.Context, proxyURL string, err error) bool {

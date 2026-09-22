@@ -44,7 +44,7 @@ func TestCodexTurnStateCollectorRetryReplacesReservationAtPostgresTimestampPreci
 	require.NoError(t, err)
 	require.Equal(t, now.UTC().Truncate(time.Microsecond), after.NextCollectAt,
 		"PostgreSQL microsecond precision must not make this attempt's 50-second crash reservation look like a concurrent cooldown")
-	require.Equal(t, "backoff", after.CollectionStatus)
+	require.Equal(t, "pending", after.CollectionStatus)
 	require.Equal(t, "collection_failed", after.LastError)
 	require.Equal(t, "extended_shape", after.DemandReason)
 }
@@ -304,7 +304,7 @@ func TestCodexTurnStateParallelCollectorMetadataDoesNotInvalidateBusinessSnapsho
 	seed, err := s.Prepare(ctx, account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, seed)
-	oldToken := codexStateTestToken(10, s.now().Add(-58*time.Minute))
+	oldToken := codexStateTestToken(10, s.now().Add(-CodexTurnStateLifetime+10*time.Second))
 	s.Observe(seed, oldToken)
 	require.NoError(t, s.Finish(ctx, seed, true))
 	business, err := s.Prepare(ctx, account, "gpt-5")
@@ -354,7 +354,7 @@ func TestCodexTurnStateParallelDuplicateNearExpiryBusinessTargetDoesNotCancelRen
 	seed, err := s.Prepare(ctx, account, "gpt-5")
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, seed)
-	oldToken := codexStateTestToken(10, s.now().Add(-58*time.Minute))
+	oldToken := codexStateTestToken(10, s.now().Add(-CodexTurnStateLifetime+10*time.Second))
 	s.Observe(seed, oldToken)
 	require.NoError(t, s.Finish(ctx, seed, true))
 	before, err := repo.Get(ctx, seed.key)

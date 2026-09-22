@@ -21,7 +21,7 @@ func TestCodexTurnStateObservationDiagnosticsBindDeliveryAndSnapshot(t *testing.
 			t.Run(testBoolName(finishBeforeBind)+"/"+testBoolName(delivered), func(t *testing.T) {
 				isolateCodexTurnStateSummaryStore(t)
 				now := time.Now()
-				expiresAt := now.Add(time.Hour)
+				expiresAt := now.Add(CodexTurnStateLifetime - time.Minute)
 				token := codexStateTestToken(10, now.Add(-time.Minute))
 				attempt := &CodexTurnStateAttempt{OSFamily: "windows", OwnerAccountID: 41, Model: "gpt-6-astra", AccountEnabled: true, accountType: "personal",
 					Snapshot: CodexTurnStateSnapshot{Token: token, Source: "collector", Version: 17, ExpiresAt: expiresAt}}
@@ -167,7 +167,7 @@ func TestCodexTurnStateObservationDiagnosticsLogsOnlyBoundAttemptOnce(t *testing
 	token := codexStateTestToken(10, now.Add(-time.Minute))
 	attempt := &CodexTurnStateAttempt{OSFamily: "windows", OwnerAccountID: 7, Model: "gpt-6-astra", AccountEnabled: true, accountType: "personal",
 		Generation: "never-log-generation", credentialEpoch: "never-log-epoch", id: "private-lease-id",
-		Snapshot: CodexTurnStateSnapshot{Token: token, Source: "business", Version: 8, ExpiresAt: now.Add(time.Hour)}}
+		Snapshot: CodexTurnStateSnapshot{Token: token, Source: "business", Version: 8, ExpiresAt: now.Add(CodexTurnStateLifetime - time.Minute)}}
 	noteOpenAICodexStatePatch(c, attempt, nil, nil)
 	wire := populateCodexTurnStateObservation(c, nil, http.Header{"X-Codex-Turn-State": {token}}, nil, false)
 	state.ObserveHeaders(attempt, http.Header{"X-Codex-Turn-State": {codexStateTestToken(11, now)}})

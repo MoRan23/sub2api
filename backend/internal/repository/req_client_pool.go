@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
 
@@ -15,11 +16,12 @@ import (
 
 // reqClientOptions 定义 req 客户端的构建参数
 type reqClientOptions struct {
-	ProxyURL         string        // 代理 URL（支持 http/https/socks5）
-	Timeout          time.Duration // 请求超时时间
-	Impersonate      bool          // 是否模拟浏览器指纹（当前为 Firefox，Chrome 伪装会被 chatgpt.com 的 Cloudflare 质询）
-	ForceHTTP2       bool          // 是否强制使用 HTTP/2
-	OpenAINativeHTTP bool          // OpenAI OAuth final-UA transport; only explicitly scoped requests use it
+	ProxyURL         string                 // 代理 URL（支持 http/https/socks5）
+	Timeout          time.Duration          // 请求超时时间
+	Impersonate      bool                   // 是否模拟浏览器指纹（当前为 Firefox，Chrome 伪装会被 chatgpt.com 的 Cloudflare 质询）
+	ForceHTTP2       bool                   // 是否强制使用 HTTP/2
+	OpenAINativeHTTP bool                   // OpenAI OAuth final-UA transport; only explicitly scoped requests use it
+	OpenAICookies    *openaicookies.Manager // private authorization-scoped jars; never req's shared default jar
 }
 
 // sharedReqClients 存储按配置参数缓存的 req 客户端实例
@@ -67,7 +69,12 @@ func getSharedReqClient(opts reqClientOptions) (*req.Client, error) {
 	}
 	client = instrumentReqClient(client)
 	if opts.OpenAINativeHTTP {
+		client.SetCookieJarFactory(nil)
+		client.GetClient().Jar = nil
 		client.GetClient().Transport = newOpenAINativeReqDispatcher(client)
+		if opts.OpenAICookies != nil {
+			client.GetClient().Transport = opts.OpenAICookies.Wrap(client.GetClient().Transport)
+		}
 	}
 
 	actual, _ := sharedReqClients.LoadOrStore(key, client)
@@ -97,6 +104,7 @@ func buildReqClientKey(opts reqClientOptions) string {
 	)
 	if opts.OpenAINativeHTTP {
 		key += "|openai-native-http"
+		key += fmt.Sprintf("|cookies:%p", opts.OpenAICookies)
 	}
 	return key
 }
@@ -106,10 +114,15 @@ func buildReqClientKey(opts reqClientOptions) string {
 // Keeps the existing Firefox application headers. Explicitly scoped OAuth
 // requests select the native transport from their final User-Agent instead.
 func CreatePrivacyReqClient(proxyURL string) (*req.Client, error) {
+	return CreatePrivacyReqClientWithCookies(proxyURL, nil)
+}
+
+func CreatePrivacyReqClientWithCookies(proxyURL string, manager *openaicookies.Manager) (*req.Client, error) {
 	return getSharedReqClient(reqClientOptions{
 		ProxyURL:         proxyURL,
 		Timeout:          30 * time.Second,
 		Impersonate:      true, // Enable browser TLS fingerprint impersonation (Firefox, see getSharedReqClient)
 		OpenAINativeHTTP: true,
+		OpenAICookies:    manager,
 	})
 }

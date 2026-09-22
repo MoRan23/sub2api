@@ -175,6 +175,16 @@ func attachCodexTurnStateObservations(status *CodexTurnStateStatus, enabled bool
 		observations = nil
 	}
 	status.Observations = append([]CodexTurnStateModelObservation{}, observations...)
+	for i := range status.Models {
+		status.Models[i].LatestResponseEvidence = nil
+		for _, observation := range observations {
+			if observation.Model == status.Models[i].Model && observation.OSFamily == status.Models[i].OSFamily {
+				evidence := observation.CodexModelEvidence.clone()
+				status.Models[i].LatestResponseEvidence = &evidence
+				break
+			}
+		}
+	}
 }
 
 func projectCodexTurnStateStatus(accountID int64, owner *Account, records []CodexTurnStateRecord, allowedModels []string, policyErr error, now time.Time, sharedCooldown ...time.Time) *CodexTurnStateStatus {

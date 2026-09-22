@@ -18,6 +18,7 @@ const codexStateWireObservationKey = "openai_codex_state_wire_observation"
 // CodexTurnStateObservation deliberately contains neither tokens nor fingerprints
 // of tokens. Its outbound length is populated from the actual physical send.
 type CodexTurnStateObservation struct {
+	CodexModelEvidence
 	OSFamily                 string     `json:"os_family"`
 	Enabled                  bool       `json:"enabled"`
 	AccountEnabled           bool       `json:"account_enabled"`
@@ -315,6 +316,7 @@ func finishOpenAICodexStateObservation(attempt *CodexTurnStateAttempt) {
 	// A send error or response without a state must not replace an earlier
 	// actual observation. Only Observe can provide its response timestamp.
 	observation.value.ResponseLength = safe.TokenLength
+	observation.value.CodexModelEvidence = safe.CodexModelEvidence.clone()
 	observation.value.ResponseSource = safe.ResponseSource
 	observation.value.ResponseObservedShape = safe.ObservedShape
 	observation.value.ResponseCipherBlocks = safe.CipherBlocks

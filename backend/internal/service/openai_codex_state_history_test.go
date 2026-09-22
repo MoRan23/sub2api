@@ -95,7 +95,7 @@ func TestCodexTurnStateHistoryActivationOnlyValidRecentMatchingAbnormal(t *testi
 			s.repo = repo
 			now := s.now()
 			p := CodexTurnStateHistoryProof{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5", CredentialEpoch: "epoch", BusinessAt: now,
-				ObservedAt: now, IssuedAt: now, ExpiresAt: now.Add(time.Hour), TokenLength: 312, CipherBlocks: 11, EnvelopeValid: true, Delivered: true}
+				ObservedAt: now, IssuedAt: now, ExpiresAt: now.Add(CodexTurnStateLifetime), TokenLength: 312, CipherBlocks: 11, EnvelopeValid: true, Delivered: true}
 			gen := CodexTurnStateGenerationForAccount(account)
 			switch name {
 			case "normal":

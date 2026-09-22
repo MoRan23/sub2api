@@ -682,7 +682,8 @@ const upstreamBillingNow = ref(Date.now())
 const upstreamBillingRateETag = ref<string | null>(null)
 const upstreamBillingRateRefreshing = ref(false)
 let upstreamBillingRateAbortController: AbortController | null = null
-useIntervalFn(() => { upstreamBillingNow.value = Date.now() }, 60_000)
+// Refresh local expiry indicators without adding any account or status requests.
+useIntervalFn(() => { upstreamBillingNow.value = Date.now() }, 5_000)
 
 // Account tools dropdown
 const showAccountToolsDropdown = ref(false)

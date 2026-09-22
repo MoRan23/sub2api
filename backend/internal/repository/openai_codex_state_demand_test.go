@@ -14,8 +14,8 @@ func codexHistoryProofFixture(now time.Time) service.CodexTurnStateHistoryProof 
 	return service.CodexTurnStateHistoryProof{
 		OwnerAccountID: 17, OSFamily: "windows", Model: "gpt-5.4", Generation: "generation-1",
 		CredentialEpoch: "00000000-0000-4000-8000-000000000011", ModelPolicyRevision: "policy-1", AccountType: "personal",
-		BusinessAt: now.Add(-10 * time.Minute), ObservedAt: now.Add(-9 * time.Minute),
-		IssuedAt: now.Add(-10 * time.Minute), ExpiresAt: now.Add(50 * time.Minute),
+		BusinessAt: now.Add(-2 * time.Minute), ObservedAt: now.Add(-time.Minute),
+		IssuedAt: now.Add(-2 * time.Minute), ExpiresAt: now.Add(service.CodexTurnStateLifetime - 2*time.Minute),
 		TokenLength: 312, CipherBlocks: 11, EnvelopeValid: true, Delivered: true,
 	}
 }
@@ -31,11 +31,16 @@ func TestCodexHistoryDemandRejectsUnsafeOrInactiveProofBeforeDatabaseWrite(t *te
 		"idle":                       func(p *service.CodexTurnStateHistoryProof) { p.BusinessAt = now.Add(-31 * time.Minute) },
 		"future observation":         func(p *service.CodexTurnStateHistoryProof) { p.ObservedAt = now.Add(time.Second) },
 		"business after observation": func(p *service.CodexTurnStateHistoryProof) { p.BusinessAt = now },
-		"expired":                    func(p *service.CodexTurnStateHistoryProof) { p.IssuedAt = now.Add(-time.Hour); p.ExpiresAt = now },
-		"fabricated lifetime":        func(p *service.CodexTurnStateHistoryProof) { p.ExpiresAt = now.Add(2 * time.Hour) },
-		"target shape":               func(p *service.CodexTurnStateHistoryProof) { p.TokenLength = 292; p.CipherBlocks = 10 },
-		"wrong account shape":        func(p *service.CodexTurnStateHistoryProof) { p.TokenLength = 356; p.CipherBlocks = 13 },
-		"wrong blocks":               func(p *service.CodexTurnStateHistoryProof) { p.CipherBlocks = 12 },
+		"expired": func(p *service.CodexTurnStateHistoryProof) {
+			p.IssuedAt = now.Add(-service.CodexTurnStateLifetime)
+			p.ExpiresAt = now
+		},
+		"fabricated lifetime": func(p *service.CodexTurnStateHistoryProof) {
+			p.ExpiresAt = p.IssuedAt.Add(service.CodexTurnStateLifetime + time.Second)
+		},
+		"target shape":        func(p *service.CodexTurnStateHistoryProof) { p.TokenLength = 292; p.CipherBlocks = 10 },
+		"wrong account shape": func(p *service.CodexTurnStateHistoryProof) { p.TokenLength = 356; p.CipherBlocks = 13 },
+		"wrong blocks":        func(p *service.CodexTurnStateHistoryProof) { p.CipherBlocks = 12 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			db, mock, err := sqlmock.New()

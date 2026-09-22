@@ -20,7 +20,7 @@ func TestCodexStatePostgresProxyChangeDefersOnlyValidTargets(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT state_generation::text FROM account_openai_oauth_os_credentials WHERE account_id=$1 AND os_family=$2`, key.OwnerAccountID, key.OSFamily).Scan(&key.Generation))
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	models := []string{"retained", "expired", "anomaly", "missing-time", "renewal"}
+	models := []string{"retained", "earlier-expiry", "expired", "anomaly", "missing-time", "renewal"}
 	revision := installCodexStateModelPolicyFixture(t, models)
 	for _, model := range models {
 		modelKey := key
@@ -31,12 +31,14 @@ func TestCodexStatePostgresProxyChangeDefersOnlyValidTargets(t *testing.T) {
 		require.NoError(t, repo.EndBusiness(ctx, modelKey, "seed"))
 		record.ModelPolicyRevision = revision
 		record.EncryptedToken, record.Shape = "synthetic-encrypted-target", service.CodexTurnStateShapeTarget
-		record.IssuedAt, record.ExpiresAt = now.Add(-58*time.Minute), now.Add(2*time.Minute)
+		record.IssuedAt, record.ExpiresAt = now.Add(-service.CodexTurnStateLifetime+20*time.Second), now.Add(20*time.Second)
 		record.TokenLength, record.CipherBlocks = 292, 10
 		record.CollectionStatus, record.CollectionReason = "idle", "collector_proxy_changed"
 		switch model {
+		case "earlier-expiry":
+			record.ExpiresAt = now.Add(10 * time.Second)
 		case "expired":
-			record.IssuedAt, record.ExpiresAt = now.Add(-61*time.Minute), now.Add(-time.Minute)
+			record.IssuedAt, record.ExpiresAt = now.Add(-service.CodexTurnStateLifetime-time.Minute), now.Add(-time.Minute)
 		case "anomaly":
 			record.EncryptedToken, record.Shape, record.DemandReason = "", service.CodexTurnStateShapeExtended, "extended_shape"
 			record.TokenLength, record.CipherBlocks = 312, 11
@@ -59,6 +61,13 @@ func TestCodexStatePostgresProxyChangeDefersOnlyValidTargets(t *testing.T) {
 		}
 	}
 	require.ElementsMatch(t, []string{"expired", "anomaly", "missing-time", "renewal"}, due)
+	earlierKey := key
+	earlierKey.Model = "earlier-expiry"
+	earlier, err := repo.Get(ctx, earlierKey)
+	require.NoError(t, err)
+	require.NotNil(t, earlier)
+	require.Equal(t, now.Add(10*time.Second), earlier.ExpiresAt, "the due scan must preserve an earlier local deadline")
+	require.Equal(t, "collector_proxy_changed", earlier.CollectionReason)
 }
 
 func TestCodexStatePostgresProxyChangeSurvivesIdleBusinessResume(t *testing.T) {
@@ -71,7 +80,7 @@ func TestCodexStatePostgresProxyChangeSurvivesIdleBusinessResume(t *testing.T) {
 	require.NoError(t, repo.EndBusiness(ctx, key, "seed"))
 	record.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
 	record.EncryptedToken, record.Shape = "synthetic-encrypted-target", service.CodexTurnStateShapeTarget
-	record.IssuedAt, record.ExpiresAt = now.Add(-58*time.Minute), now.Add(2*time.Minute)
+	record.IssuedAt, record.ExpiresAt = now.Add(-service.CodexTurnStateLifetime+20*time.Second), now.Add(20*time.Second)
 	record.TokenLength, record.CipherBlocks = 292, 10
 	record.LastBusinessAt = now.Add(-40 * time.Minute)
 	record.CollectionStatus, record.CollectionReason = "idle", "collector_proxy_changed"
