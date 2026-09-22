@@ -328,6 +328,13 @@ func (r *installationIdentityRepoStub) GetByID(_ context.Context, id int64) (*Ac
 	return nil, nil
 }
 
+// Forwarding tests reuse this identity repository. Their asynchronous usage
+// snapshot writes are outside this fixture's scope and must not call the nil
+// embedded AccountRepository after the response assertions have completed.
+func (r *installationIdentityRepoStub) UpdateExtra(context.Context, int64, map[string]any) error {
+	return nil
+}
+
 func (r *installationIdentityRepoStub) EnsureOpenAIInstallationID(_ context.Context, accountID int64, _ string, generatedID string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

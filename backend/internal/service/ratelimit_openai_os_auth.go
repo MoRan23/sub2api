@@ -11,8 +11,8 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// RecoverOpenAIOAuthOSAfterSuccessfulTest clears only the exact authorization
-// that was tested. A late result after replacement or refresh loses its CAS.
+// RecoverOpenAIOAuthOSAfterSuccessfulTest clears the shared grant that was
+// tested. A late result after replacement or refresh loses its CAS.
 func (s *RateLimitService) RecoverOpenAIOAuthOSAfterSuccessfulTest(ctx context.Context, account *Account) (*SuccessfulTestRecoveryResult, error) {
 	if s == nil || account == nil || account.OpenAIOAuthCredentialOS == "" {
 		return nil, fmt.Errorf("OpenAI OAuth test recovery requires a scoped credential snapshot")
@@ -30,8 +30,8 @@ func (s *RateLimitService) RecoverOpenAIOAuthOSAfterSuccessfulTest(ctx context.C
 	return &SuccessfulTestRecoveryResult{ClearedError: applied}, nil
 }
 
-// Authentication failures belong to the slot that made the request. Quota,
-// overload, account concurrency and other account limits retain shared handling.
+// Authentication failures belong to the shared grant used by the request.
+// The selected OS remains an outbound identity, not an authorization boundary.
 func (s *RateLimitService) handleOpenAIOAuthOSAuthFailure(ctx context.Context, account *Account, status int, body []byte) (bool, bool) {
 	if s == nil || !RequiresOpenAIOAuthOSAuthorization(account) || (status != http.StatusUnauthorized && status != http.StatusForbidden) {
 		return false, false
@@ -66,8 +66,7 @@ func (s *RateLimitService) handleOpenAIOAuthOSAuthFailure(ctx context.Context, a
 		return true, true
 	}
 	if status == http.StatusUnauthorized {
-		// Force a real refresh once the retry delay expires without ever replacing
-		// the whole credential document or touching another slot's token.
+		// Force a refresh of the shared grant once the retry delay expires.
 		applied, err := repo.PatchOpenAIOAuthOSCredentialsIfUnchanged(ctx, account.OpenAIOAuthCredentialOwnerID,
 			account.OpenAIOAuthCredentialOS, account.OpenAIOAuthAuthorizationGeneration, account.OpenAIOAuthCredentialRevision,
 			account.ProxyID, map[string]any{"expires_at": time.Now().Add(-time.Minute).Format(time.RFC3339)}, nil)

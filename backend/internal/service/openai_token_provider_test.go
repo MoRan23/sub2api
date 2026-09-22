@@ -478,7 +478,7 @@ func TestOpenAITokenProvider_MissingAccessToken(t *testing.T) {
 
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "access_token not found")
+	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized)
 	require.Empty(t, token)
 }
 
@@ -786,7 +786,7 @@ func TestOpenAITokenProvider_Real_WhitespaceCredentialToken(t *testing.T) {
 	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "access_token not found")
+	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized)
 	require.Empty(t, token)
 }
 
@@ -807,7 +807,7 @@ func TestOpenAITokenProvider_Real_NilCredentials(t *testing.T) {
 	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "access_token not found")
+	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized)
 	require.Empty(t, token)
 }
 

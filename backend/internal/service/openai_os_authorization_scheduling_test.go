@@ -20,11 +20,12 @@ func newSchedulerOSAuthorizationTestRepo(accounts ...Account) *schedulerOSAuthor
 		if account.OpenAIOAuthOSProfiles == nil || account.IsShadow() {
 			continue
 		}
-		for os, profile := range account.OpenAIOAuthOSProfiles.Profiles {
-			if profile.Authorization.Status == OpenAIOAuthAuthorizationAuthorized {
-				key := fmt.Sprintf("%d/%s", account.ID, os)
-				r.slots[key] = &OpenAIOAuthOSCredential{OwnerAccountID: account.ID, OSFamily: os, Status: OpenAIOAuthAuthorizationAuthorized,
-					Credentials: map[string]any{"access_token": "access-" + key, "refresh_token": "refresh-" + key}, AuthorizationGeneration: "generation-" + key, Revision: 1}
+		if OpenAIOAuthOSAuthorizationAvailable(&account, "") {
+			key := fmt.Sprintf("%d", account.ID)
+			grant := &OpenAIOAuthOSCredential{OwnerAccountID: account.ID, OSFamily: account.OpenAIOAuthOSProfiles.DefaultOS, Status: OpenAIOAuthAuthorizationAuthorized,
+				Credentials: map[string]any{"access_token": "access-" + key, "refresh_token": "refresh-" + key}, AuthorizationGeneration: "generation-" + key, Revision: 1}
+			for _, os := range OpenAIOAuthOSFamilies() {
+				r.slots[fmt.Sprintf("%d/%s", account.ID, os)] = grant
 			}
 		}
 	}
@@ -32,7 +33,14 @@ func newSchedulerOSAuthorizationTestRepo(accounts ...Account) *schedulerOSAuthor
 }
 
 func (r *schedulerOSAuthorizationTestRepo) GetOpenAIOAuthOSCredential(_ context.Context, id int64, os string) (*OpenAIOAuthOSCredential, error) {
-	return r.slots[fmt.Sprintf("%d/%s", id, os)], nil
+	grant := r.slots[fmt.Sprintf("%d/%s", id, os)]
+	if grant == nil {
+		return nil, nil
+	}
+	projection := *grant
+	projection.OSFamily = os
+	projection.StateGeneration = fmt.Sprintf("state-%d/%s", id, os)
+	return &projection, nil
 }
 
 func (r *schedulerOSAuthorizationTestRepo) ListOpenAIOAuthOSCredentials(_ context.Context, id int64) ([]*OpenAIOAuthOSCredential, error) {
@@ -40,6 +48,7 @@ func (r *schedulerOSAuthorizationTestRepo) ListOpenAIOAuthOSCredentials(_ contex
 	for _, slot := range r.slots {
 		if slot.OwnerAccountID == id {
 			slots = append(slots, slot)
+			break
 		}
 	}
 	return slots, nil
@@ -55,11 +64,13 @@ func schedulerOSAuthorizedAccount(id int64, defaultOS string, authorized ...stri
 		profile.Authorization.Status = OpenAIOAuthAuthorizationAuthorized
 		profiles.Profiles[os] = profile
 	}
+	summary := profiles.Profiles[defaultOS].Authorization
+	profiles.Authorization = &summary
 	return Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1,
 		Credentials: map[string]any{}, OpenAIOAuthOSProfiles: profiles, Extra: map[string]any{"openai_oauth_responses_websockets_v2_enabled": true}}
 }
 
-func TestOpenAIOSAuthorizationKnownOSFiltersBeforeTopKAndSticky(t *testing.T) {
+func TestOpenAISharedAuthorizationKnownOSDoesNotFilterBeforeTopKOrSticky(t *testing.T) {
 	for _, advanced := range []string{"false", "true"} {
 		for _, sticky := range []bool{false, true} {
 			t.Run(fmt.Sprintf("advanced=%s/sticky=%t", advanced, sticky), func(t *testing.T) {
@@ -80,11 +91,13 @@ func TestOpenAIOSAuthorizationKnownOSFiltersBeforeTopKAndSticky(t *testing.T) {
 				ctx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: OpenAIOSLinux})
 				selection, decision, err := svc.SelectAccountWithScheduler(ctx, nil, "", session, "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
 				require.NoError(t, err)
-				require.Equal(t, linux.ID, selection.Account.ID)
+				require.Equal(t, windows.ID, selection.Account.ID, "the preferred account's legacy Linux slot need not be authorized")
 				require.Equal(t, OpenAIOSLinux, selection.Account.OpenAIOAuthCredentialOS)
-				require.Equal(t, "access-902/linux", selection.Account.GetCredential("access_token"))
+				require.Equal(t, "access-901", selection.Account.GetCredential("access_token"))
 				if advanced == "true" {
-					require.Equal(t, 1, decision.CandidateCount)
+					if !sticky {
+						require.Equal(t, 2, decision.CandidateCount)
+					}
 				}
 				if selection.ReleaseFunc != nil {
 					selection.ReleaseFunc()
@@ -105,7 +118,7 @@ func TestOpenAIOSAuthorizationUnknownUsesEachCandidateDefault(t *testing.T) {
 	second, err := svc.SelectAccountForModelWithExclusions(ctx, nil, "", "gpt-5.1", map[int64]struct{}{windows.ID: {}})
 	require.NoError(t, err)
 	require.Equal(t, OpenAIOSMacOS, second.OpenAIOAuthCredentialOS)
-	require.Equal(t, "access-912/macos", second.GetCredential("access_token"))
+	require.Equal(t, "access-912", second.GetCredential("access_token"))
 	require.Empty(t, OpenAIRequestOSFromContext(ctx).Family)
 }
 
@@ -153,7 +166,11 @@ func TestOpenAIOSAuthorizationSparkUsesParentSlotAndKeepsBusinessID(t *testing.T
 	require.Equal(t, shadow.ID, scoped.ID)
 	require.Equal(t, parent.ID, scoped.OpenAIOAuthCredentialOwnerID)
 	require.Equal(t, OpenAIOSMacOS, scoped.OpenAIOAuthCredentialOS)
-	require.False(t, openAIParentHealthyForShadow(ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: OpenAIOSLinux}), &shadow, svc.parentAccountLookup(ctx)))
+	linuxCtx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: OpenAIOSLinux})
+	require.True(t, openAIParentHealthyForShadow(linuxCtx, &shadow, svc.parentAccountLookup(linuxCtx)))
+	linux := svc.resolveSelectedOpenAIOAuthCredentials(linuxCtx, &shadow)
+	require.Equal(t, OpenAIOSLinux, linux.OpenAIOAuthCredentialOS)
+	require.Equal(t, scoped.GetCredential("access_token"), linux.GetCredential("access_token"))
 }
 
 func TestOpenAIOSAuthorizationExemptsNonOAuthSchemes(t *testing.T) {
@@ -179,18 +196,18 @@ func TestOpenAIOSAuthorizationPostWaitAdmissionKeepsSlotAndRejectsReauthorizatio
 	latest, vetoed, _ := svc.ProfitControlVetoLatest(ctx, selected)
 	require.False(t, vetoed)
 	require.Equal(t, OpenAIOSLinux, latest.OpenAIOAuthCredentialOS)
-	require.Equal(t, "access-941/linux", latest.GetCredential("access_token"))
+	require.Equal(t, "access-941", latest.GetCredential("access_token"))
 	repo.slots["941/linux"].AuthorizationGeneration = "replacement-generation"
 	_, vetoed, reason := svc.ProfitControlVetoLatest(ctx, selected)
 	require.True(t, vetoed)
-	require.Equal(t, "os_authorization_unavailable", reason)
+	require.Equal(t, "oauth_authorization_unavailable", reason)
 }
 
 func TestOpenAIOSAuthorizationNoAvailableErrorDoesNotOverrideOtherConstraints(t *testing.T) {
 	for _, advanced := range []string{"false", "true"} {
 		t.Run(advanced, func(t *testing.T) {
 			resetOpenAIAdvancedSchedulerSettingCacheForTest()
-			unauthorized := schedulerOSAuthorizedAccount(951, OpenAIOSWindows, OpenAIOSWindows)
+			unauthorized := schedulerOSAuthorizedAccount(951, OpenAIOSWindows)
 			svc := &OpenAIGatewayService{accountRepo: newSchedulerOSAuthorizationTestRepo(unauthorized), cfg: newSchedulerTestOpenAIWSV2Config(),
 				cache: &schedulerTestGatewayCache{}, rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(advanced), concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{})}
 			ctx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: OpenAIOSLinux})
@@ -227,14 +244,14 @@ func TestOpenAIOSAuthorizationPhysicalWSNeverChangesSlotAfterDefaultOrGeneration
 	require.Equal(t, OpenAIOSWindows, scoped.OpenAIOAuthCredentialOS)
 	repo.accounts[0].OpenAIOAuthOSProfiles.DefaultOS = OpenAIOSLinux
 	require.NoError(t, svc.validateOpenAIWSAuthorization(ctx, scoped))
-	require.Equal(t, "access-961/windows", scoped.GetCredential("access_token"))
+	require.Equal(t, "access-961", scoped.GetCredential("access_token"))
 	repo.slots["961/windows"].AuthorizationGeneration = "replacement"
-	require.Error(t, svc.validateOpenAIWSAuthorization(ctx, scoped), "normalization settings and a valid other slot cannot permit a generation switch")
+	require.Error(t, svc.validateOpenAIWSAuthorization(ctx, scoped), "a different identity cannot permit a shared authorization generation switch")
 	repo.slots["961/windows"].Status = OpenAIOAuthAuthorizationUnauthorized
 	require.Error(t, svc.validateOpenAIWSAuthorization(ctx, scoped))
 }
 
-func TestOpenAIOSAuthorizationWSFreezeRetainsTokenRevisionAndRejectsWrongDefaultToken(t *testing.T) {
+func TestOpenAISharedAuthorizationWSFreezeRetainsTokenRevisionAndRejectsWrongToken(t *testing.T) {
 	account := schedulerOSAuthorizedAccount(962, OpenAIOSWindows, OpenAIOSWindows, OpenAIOSLinux)
 	repo := newSchedulerOSAuthorizationTestRepo(account)
 	svc := &OpenAIGatewayService{accountRepo: repo}
@@ -249,8 +266,8 @@ func TestOpenAIOSAuthorizationWSFreezeRetainsTokenRevisionAndRejectsWrongDefault
 	require.Same(t, scoped, frozen)
 	require.Equal(t, int64(1), frozen.OpenAIOAuthCredentialRevision)
 	require.Equal(t, token, frozen.GetOpenAIAccessToken())
-	_, err = svc.freezeOpenAIWSAuthorization(ctx, scoped, "access-962/windows")
+	_, err = svc.freezeOpenAIWSAuthorization(ctx, scoped, "unrelated-token")
 	require.ErrorIs(t, err, ErrOpenAIOAuthOSAuthorizationChanged)
-	_, err = svc.freezeOpenAIWSAuthorization(ctx, &account, "access-962/windows")
+	_, err = svc.freezeOpenAIWSAuthorization(ctx, &account, "unrelated-token")
 	require.ErrorIs(t, err, ErrOpenAIOAuthOSAuthorizationChanged)
 }

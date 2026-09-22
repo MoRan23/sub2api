@@ -32,7 +32,9 @@ func preserveCodexTurnStateOnCollectorProxyChange(ctx context.Context, client *d
 			AND s.expires_at <= s.issued_at + ($4 * INTERVAL '1 second'), FALSE) AS valid_target
 		FROM openai_codex_state s JOIN account_openai_oauth_os_credentials c
 		ON c.account_id=s.owner_account_id AND c.os_family=s.os_family
-		WHERE s.owner_account_id = $1 AND c.status='authorized'
+		JOIN account_openai_oauth_credentials shared_grant ON shared_grant.account_id=c.account_id
+		WHERE s.owner_account_id = $1 AND shared_grant.status='authorized'
+		AND c.authorization_generation=shared_grant.authorization_generation
 		AND s.generation=c.previous_state_generation::text FOR UPDATE OF s
 	)
 	UPDATE openai_codex_state s SET generation = eligible.next_generation, version = s.version + 1,

@@ -76,7 +76,8 @@ func (s *OpenAIGatewayService) prepareOpenAIOAuthRequestScope(ctx context.Contex
 }
 
 // openAIAccountOSAuthorizationEligible evaluates credential-owner eligibility.
-// Shadow business accounts use their parent's slot and default OS.
+// Shadow business accounts use their parent's shared grant. Request OS does not
+// participate in authorization eligibility.
 func openAIAccountOSAuthorizationEligible(ctx context.Context, account *Account, lookup func(int64) *Account) bool {
 	if !RequiresOpenAIOAuthOSAuthorization(account) {
 		return true
@@ -91,7 +92,7 @@ func openAIAccountOSAuthorizationEligible(ctx context.Context, account *Account,
 			return false
 		}
 	}
-	return OpenAIOAuthOSAuthorizationAvailable(owner, OpenAIRequestOSFromContext(ctx).Family)
+	return OpenAIOAuthOSAuthorizationAvailable(owner, "")
 }
 
 func openAIParentHealthyForShadow(ctx context.Context, account *Account, lookup func(int64) *Account) bool {

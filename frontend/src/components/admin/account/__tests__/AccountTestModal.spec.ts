@@ -135,19 +135,20 @@ describe('AccountTestModal', () => {
     vi.restoreAllMocks()
   })
 
-  it('blocks an unauthorized system before loading models or sending a test', async () => {
-    const wrapper = mountModal({ id: 42, name: 'Not authorized', platform: 'openai', type: 'oauth', status: 'active', openai_oauth_os_profiles: { default_os: 'windows', profiles: { windows: { installation_id: 'installed-only', authorization: { status: 'unauthorized' } } } } })
+  it('does not gate tests on obsolete per-system authorization summaries', async () => {
+    const wrapper = mountModal({ id: 42, name: 'Shared authorization', platform: 'openai', type: 'oauth', status: 'active', openai_oauth_os_profiles: { default_os: 'windows', authorization: { status: 'authorized' }, profiles: { windows: { installation_id: 'installed-only', authorization: { status: 'unauthorized' } } } } })
     await wrapper.setProps({ show: true })
     await flushPromises()
-    expect(getAvailableModels).not.toHaveBeenCalled()
+    expect(getAvailableModels).toHaveBeenCalledWith(42, 'windows')
     const start = wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!
-    expect(start.attributes('disabled')).toBeDefined()
+    expect(start.attributes('disabled')).toBeUndefined()
     await start.trigger('click')
-    expect(global.fetch).not.toHaveBeenCalled()
+    await flushPromises()
+    expect(global.fetch).toHaveBeenCalled()
     wrapper.unmount()
   })
 
-  it('uses the selected authorized system for model lookup and the SSE test', async () => {
+  it('uses any selected identity system for model lookup and the SSE test', async () => {
     const wrapper = mountModal({ id: 42, name: 'OpenAI', platform: 'openai', type: 'oauth', status: 'active' })
     await wrapper.setProps({ show: true })
     await flushPromises()
@@ -157,7 +158,7 @@ describe('AccountTestModal', () => {
     await wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!.trigger('click')
     await flushPromises()
     expect(JSON.parse(vi.mocked(global.fetch).mock.calls[0]![1]!.body as string).os).toBe('linux')
-    expect(wrapper.get('option[value="macos"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('option[value="macos"]').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 

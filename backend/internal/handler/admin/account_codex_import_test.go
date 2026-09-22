@@ -962,7 +962,7 @@ func (s *codexImportMemoryAdminService) GetAccount(ctx context.Context, id int64
 
 func (s *codexImportMemoryAdminService) GetOpenAIOAuthOSCredential(ctx context.Context, id int64, os string) (*service.OpenAIOAuthOSCredential, error) {
 	account, err := s.GetAccount(ctx, id)
-	if err != nil || account.OpenAIOAuthOSProfiles == nil || account.OpenAIOAuthOSProfiles.DefaultOS != os {
+	if err != nil || account.OpenAIOAuthOSProfiles == nil || service.NormalizeOpenAIOSFamily(os) == "" {
 		return nil, err
 	}
 	return &service.OpenAIOAuthOSCredential{OwnerAccountID: id, OSFamily: os, Credentials: account.Credentials, Status: service.OpenAIOAuthAuthorizationAuthorized, AuthorizationGeneration: "fixture-generation", Revision: 1}, nil

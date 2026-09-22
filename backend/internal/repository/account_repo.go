@@ -563,7 +563,7 @@ func (r *accountRepository) updateLockedAccount(
 			if _, err := client.ExecContext(ctx, `DELETE FROM account_openai_oauth_os_profiles WHERE account_id=$1`, account.ID); err != nil {
 				return nil, err
 			}
-			if _, err := client.ExecContext(ctx, `UPDATE account_openai_oauth_os_credentials SET credentials='{}'::jsonb,status='unauthorized',authorization_generation=gen_random_uuid(),state_generation=gen_random_uuid(),credential_epoch=gen_random_uuid(),revision=revision+1,updated_at=NOW() WHERE account_id=$1`, account.ID); err != nil {
+			if err := revokeSharedOpenAIOAuthCredentialsLocked(ctx, client, account.ID); err != nil {
 				return nil, err
 			}
 		}
@@ -1328,7 +1328,7 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 	if options.RequireRefreshToken {
 		query += `
 			AND CASE WHEN (` + codexTurnStateOwnerExpression("credentials") + `) THEN EXISTS (
-				SELECT 1 FROM account_openai_oauth_os_credentials c WHERE c.account_id=accounts.id
+				SELECT 1 FROM account_openai_oauth_credentials c WHERE c.account_id=accounts.id
 				AND c.status='authorized' AND BTRIM(COALESCE(c.credentials->>'refresh_token',''))<>''
 				AND (c.refresh_retry_after IS NULL OR c.refresh_retry_after<=NOW()))
 			ELSE credentials ? 'refresh_token' AND btrim(credentials->>'refresh_token') <> '' END`

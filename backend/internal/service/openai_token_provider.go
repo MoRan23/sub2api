@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"strings"
@@ -167,6 +168,9 @@ func (p *OpenAITokenProvider) GetAccessTokenWithAccount(ctx context.Context, acc
 
 	cacheKey := OpenAITokenCacheKey(account)
 	cacheTokenUsable := true
+	if account.OpenAIOAuthCredentialOS != "" && strings.TrimSpace(account.GetOpenAIAccessToken()) == "" {
+		cacheTokenUsable = false
+	}
 	if expires := account.GetCredentialAsTime("expires_at"); account.OpenAIOAuthCredentialOS != "" && expires != nil && !time.Now().Before(*expires) {
 		cacheTokenUsable = false
 	}
@@ -185,13 +189,16 @@ func (p *OpenAITokenProvider) GetAccessTokenWithAccount(ctx context.Context, acc
 
 	// 2) Refresh if needed (pre-expiry skew).
 	expiresAt := account.GetCredentialAsTime("expires_at")
-	needsRefresh := !account.IsOpenAIPersonalAccessToken() && (expiresAt == nil || time.Until(*expiresAt) <= openAITokenRefreshSkew)
+	needsRefresh := !account.IsOpenAIPersonalAccessToken() && (strings.TrimSpace(account.GetOpenAIAccessToken()) == "" || expiresAt == nil || time.Until(*expiresAt) <= openAITokenRefreshSkew)
 	if needsRefresh && strings.TrimSpace(account.GetOpenAIRefreshToken()) == "" {
 		if expiresAt != nil && !time.Now().Before(*expiresAt) {
 			const reason = "openai access_token expired and refresh_token is missing"
 			// 永久故障：缺失 refresh_token 时账号无法自愈，必须立即从调度池剔除，
 			// 否则会被反复选中、每次都在 token 阶段直接返回错误，对用户呈现持续 502。
 			p.disableAccountMissingRefreshToken(account, reason)
+			if account.OpenAIOAuthCredentialOS != "" {
+				return "", nil, fmt.Errorf("%w: %s", ErrOpenAIOAuthOSUnauthorized, reason)
+			}
 			return "", nil, errors.New(reason)
 		}
 		needsRefresh = false
@@ -204,6 +211,30 @@ func (p *OpenAITokenProvider) GetAccessTokenWithAccount(ctx context.Context, acc
 
 		result, err := p.refreshAPI.RefreshIfNeeded(ctx, account, p.executor, openAITokenRefreshSkew)
 		if err != nil {
+			// RefreshIfNeeded returns the exact failed attempt. A permanent grant
+			// failure must revoke scheduling eligibility immediately, with the same
+			// revision guard used by background refresh and upstream auth failures.
+			if result != nil && result.Account != nil && isNonRetryableRefreshError(err) && !isSharedProviderRefreshError(err) {
+				attempted := result.Account
+				if attempted.OpenAIOAuthCredentialOS != "" {
+					cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), defaultRefreshPostPersistCleanupTimeout)
+					_, applied, persistErr := persistOpenAIOAuthCredentialError(cleanupCtx, p.accountRepo, attempted, "OpenAI OAuth authorization requires sign-in")
+					if applied && p.tokenCache != nil {
+						_ = p.tokenCache.DeleteAccessToken(cleanupCtx, OpenAITokenCacheKey(attempted))
+					}
+					cancel()
+					if persistErr != nil {
+						return "", nil, fmt.Errorf("persist OpenAI OAuth refresh failure: %w", persistErr)
+					}
+					if applied {
+						p.metrics.refreshFailure.Add(1)
+						return "", nil, fmt.Errorf("%w: OpenAI OAuth refresh requires sign-in", ErrOpenAIOAuthOSUnauthorized)
+					}
+					// A newer refresh or authorization won the CAS. Reload below;
+					// never apply this old failure to the replacement grant.
+					account = attempted
+				}
+			}
 			if p.refreshPolicy.OnRefreshError == ProviderRefreshErrorReturn {
 				return "", nil, err
 			}
@@ -265,7 +296,7 @@ func (p *OpenAITokenProvider) GetAccessTokenWithAccount(ctx context.Context, acc
 		cacheKey = OpenAITokenCacheKey(account)
 		expiresAt = account.GetCredentialAsTime("expires_at")
 		if expiresAt != nil && !time.Now().Before(*expiresAt) {
-			return "", nil, errors.New("OpenAI OAuth access token is expired for the selected operating system")
+			return "", nil, errors.New("OpenAI OAuth access token is expired")
 		}
 	}
 
@@ -278,7 +309,7 @@ func (p *OpenAITokenProvider) GetAccessTokenWithAccount(ctx context.Context, acc
 	if p.tokenCache != nil {
 		latestAccount, isStale := CheckTokenVersion(ctx, account, p.accountRepo)
 		if isStale && latestAccount == nil && account.OpenAIOAuthCredentialOS != "" {
-			return "", nil, errors.New("OpenAI OAuth OS authorization is no longer available")
+			return "", nil, ErrOpenAIOAuthOSUnauthorized
 		}
 		if isStale && latestAccount != nil {
 			slog.Debug("openai_token_version_stale_use_latest", "account_id", account.ID)
@@ -397,6 +428,7 @@ func (p *OpenAITokenProvider) waitForTokenAfterLockRaceWithAccount(ctx context.C
 		p.metrics.lockWaitTotalMs.Add(waitMs)
 		p.metrics.touchNow()
 
+		cacheTokenUsable := true
 		if account != nil && account.OpenAIOAuthCredentialOS != "" {
 			latest, err := ReloadOpenAIOAuthCredentialAccount(ctx, p.accountRepo, account)
 			if err != nil {
@@ -411,8 +443,14 @@ func (p *OpenAITokenProvider) waitForTokenAfterLockRaceWithAccount(ctx context.C
 			}
 			cacheKey = latestKey
 			account = latest
+			expiresAt := latest.GetCredentialAsTime("expires_at")
+			cacheTokenUsable = strings.TrimSpace(latest.GetOpenAIAccessToken()) != "" && (expiresAt == nil || time.Now().Before(*expiresAt))
 		}
-		token, err := p.tokenCache.GetAccessToken(ctx, cacheKey)
+		var token string
+		var err error
+		if cacheTokenUsable {
+			token, err = p.tokenCache.GetAccessToken(ctx, cacheKey)
+		}
 		if err == nil && strings.TrimSpace(token) != "" {
 			p.metrics.lockWaitHit.Add(1)
 			if totalWaitMs >= openAILockWarnThresholdMs {

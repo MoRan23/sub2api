@@ -1824,7 +1824,7 @@ func (s *OpenAIGatewayService) handleCodexModelsManifestAccountAuthError(ctx con
 
 func openAIModelsCredentialError(err error) error {
 	if errors.Is(err, ErrOpenAIOAuthOSUnauthorized) || errors.Is(err, ErrOpenAIOAuthOSAuthorizationChanged) {
-		return infraerrors.New(http.StatusServiceUnavailable, "OPENAI_OS_AUTHORIZATION_UNAVAILABLE", "No available OpenAI OAuth authorization for the requested operating system")
+		return infraerrors.New(http.StatusServiceUnavailable, "OPENAI_OS_AUTHORIZATION_UNAVAILABLE", "OpenAI OAuth account authorization is unavailable")
 	}
 	return infraerrors.New(http.StatusBadGateway, "OPENAI_CODEX_MODELS_CREDENTIALS_FAILED", "OpenAI model discovery credentials are unavailable")
 }

@@ -181,7 +181,7 @@ func liveCallIdentity(
 func (h *OpenAIGatewayHandler) writeLiveCreateError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrOpenAIOAuthOSUnauthorized), errors.Is(err, service.ErrOpenAIOAuthOSAuthorizationChanged):
-		h.errorResponse(c, http.StatusServiceUnavailable, "openai_os_authorization_unavailable", "No available OpenAI OAuth authorization for the requested operating system")
+		h.errorResponse(c, http.StatusServiceUnavailable, "openai_os_authorization_unavailable", "OpenAI OAuth account authorization is unavailable")
 	case errors.Is(err, service.ErrLiveConcurrencyFull):
 		h.errorResponse(c, http.StatusTooManyRequests, "rate_limit_error", "Live concurrency limit reached")
 	case errors.Is(err, service.ErrLiveUnavailable):

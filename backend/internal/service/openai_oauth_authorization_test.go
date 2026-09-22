@@ -62,7 +62,13 @@ func (r *authorizationTestRepository) GetByID(_ context.Context, id int64) (*Acc
 func (r *authorizationTestRepository) GetOpenAIOAuthOSCredential(_ context.Context, id int64, os string) (*OpenAIOAuthOSCredential, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.slots[os], nil
+	grant := r.slots[r.account.OpenAIOAuthOSProfiles.DefaultOS]
+	if grant == nil {
+		return nil, nil
+	}
+	copy := *grant
+	copy.OSFamily = os
+	return &copy, nil
 }
 func (r *authorizationTestRepository) ListOpenAIOAuthOSCredentials(_ context.Context, _ int64) ([]*OpenAIOAuthOSCredential, error) {
 	r.mu.Lock()
@@ -76,7 +82,7 @@ func (r *authorizationTestRepository) ListOpenAIOAuthOSCredentials(_ context.Con
 func (r *authorizationTestRepository) BindOpenAIOAuthOSCredentialsIfGeneration(_ context.Context, id int64, os, generation string, credentials map[string]any, _ string) (*OpenAIOAuthOSCredential, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	current := r.slots[os]
+	current := r.slots[r.account.OpenAIOAuthOSProfiles.DefaultOS]
 	if (current == nil && generation != "") || (current != nil && current.AuthorizationGeneration != generation) {
 		return nil, ErrOpenAIOAuthOSAuthorizationChanged
 	}
@@ -84,7 +90,8 @@ func (r *authorizationTestRepository) BindOpenAIOAuthOSCredentialsIfGeneration(_
 		return nil, ErrOpenAIOAuthOSSubjectMismatch
 	}
 	bound := &OpenAIOAuthOSCredential{OwnerAccountID: id, OSFamily: os, Credentials: maps.Clone(credentials), AuthorizationGeneration: "new-generation", Status: OpenAIOAuthAuthorizationAuthorized}
-	r.slots[os] = bound
+	r.slots[r.account.OpenAIOAuthOSProfiles.DefaultOS] = bound
+	r.account.Credentials = PreserveOpenAIOAuthProviderCredentials(credentials, r.account.Credentials)
 	return bound, nil
 }
 
@@ -133,8 +140,8 @@ func TestOpenAIOAuthAuthorizationRejectsCallbackRetargeting(t *testing.T) {
 	require.Equal(t, OpenAIOSLinux, info.OS)
 	require.Empty(t, info.AccessToken)
 	require.Empty(t, info.RefreshToken)
-	require.Equal(t, "windows-rt", repo.slots[OpenAIOSWindows].Credentials["refresh_token"])
-	require.Equal(t, "linux-rt", repo.slots[OpenAIOSLinux].Credentials["refresh_token"])
+	require.Equal(t, "linux-rt", repo.slots[OpenAIOSWindows].Credentials["refresh_token"])
+	require.Len(t, repo.slots, 1)
 	require.Equal(t, repo.account.OpenAIOAuthOSProfiles.Profiles[OpenAIOSLinux].UserAgent, client.userAgent)
 }
 
@@ -186,22 +193,24 @@ func TestOpenAIOAuthAuthorizationDifferentUpstreamAccountRejected(t *testing.T) 
 func TestOpenAIOAuthAuthorizationStaleSessionCannotUndoRevoke(t *testing.T) {
 	svc, _, repo := authorizationTestSetup(t)
 	input := authorizationTestInput(t, svc, 42, OpenAIOSLinux)
-	repo.slots[OpenAIOSLinux] = &OpenAIOAuthOSCredential{OSFamily: OpenAIOSLinux, AuthorizationGeneration: "revoked-generation", Status: OpenAIOAuthAuthorizationUnauthorized}
+	repo.slots[OpenAIOSWindows] = &OpenAIOAuthOSCredential{OSFamily: OpenAIOSWindows, AuthorizationGeneration: "revoked-generation", Status: OpenAIOAuthAuthorizationUnauthorized}
 	_, err := svc.ExchangeCode(context.Background(), input)
 	require.ErrorIs(t, err, ErrOpenAIOAuthOSAuthorizationChanged)
-	require.Equal(t, OpenAIOAuthAuthorizationUnauthorized, repo.slots[OpenAIOSLinux].Status)
+	require.Equal(t, OpenAIOAuthAuthorizationUnauthorized, repo.slots[OpenAIOSWindows].Status)
 }
 
-func TestOpenAIOAuthAuthorizationCopiedRefreshTokenRejectedBeforeExchange(t *testing.T) {
+func TestOpenAIOAuthAuthorizationSameRefreshTokenCanUseAnotherIdentity(t *testing.T) {
 	svc, client, repo := authorizationTestSetup(t)
 	_, err := svc.AuthorizeAccountWithRefreshToken(context.Background(), 42, OpenAIOSLinux, "windows-rt", "")
-	require.Error(t, err)
-	require.Zero(t, client.calls.Load())
-	require.NotContains(t, repo.slots, OpenAIOSLinux)
+	require.NoError(t, err)
+	require.Equal(t, int32(1), client.calls.Load())
+	require.Len(t, repo.slots, 1)
+	require.Equal(t, "linux-rt", repo.slots[OpenAIOSWindows].Credentials["refresh_token"])
 }
 
-func TestOpenAIOAuthAuthorizationMissingSlotCannotRefresh(t *testing.T) {
+func TestOpenAIOAuthAuthorizationMissingSharedGrantCannotRefresh(t *testing.T) {
 	svc, client, repo := authorizationTestSetup(t)
+	delete(repo.slots, OpenAIOSWindows)
 	account := *repo.account
 	account.OpenAIOAuthCredentialOS = OpenAIOSLinux
 	_, err := svc.RefreshAccountToken(context.Background(), &account)
@@ -215,22 +224,35 @@ func TestOpenAIOAuthAuthorizationManualImportUsesServerIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, info.Account)
 	require.Empty(t, info.AccessToken)
-	require.Equal(t, "workspace", repo.slots[OpenAIOSMacOS].Credentials["chatgpt_account_id"])
+	require.Equal(t, "workspace", repo.slots[OpenAIOSWindows].Credentials["chatgpt_account_id"])
 	require.Equal(t, OpenAIOSMacOS, openai.DetectOSFamilyFromUserAgent(client.userAgent))
 }
 
-func TestOpenAIOAuthAuthorizationReauthorizationChangesOnlyTargetSlot(t *testing.T) {
+func TestOpenAIOAuthAuthorizationReauthorizationChangesSharedGrantPreservesIdentities(t *testing.T) {
 	svc, client, repo := authorizationTestSetup(t)
-	linux := &OpenAIOAuthOSCredential{OwnerAccountID: 42, OSFamily: OpenAIOSLinux, Credentials: map[string]any{"access_token": "linux-existing-at", "refresh_token": "linux-existing-rt"}, AuthorizationGeneration: "linux-existing-generation", Status: OpenAIOAuthAuthorizationAuthorized}
-	repo.slots[OpenAIOSLinux] = linux
 	client.response.RefreshToken = "windows-new-rt"
-	installation := repo.account.OpenAIOAuthOSProfiles.Profiles[OpenAIOSWindows].InstallationID
+	profiles := CloneOpenAIOAuthOSProfiles(repo.account.OpenAIOAuthOSProfiles)
 	input := authorizationTestInput(t, svc, 42, OpenAIOSWindows)
 	_, err := svc.ExchangeCode(context.Background(), input)
 	require.NoError(t, err)
-	require.Same(t, linux, repo.slots[OpenAIOSLinux])
 	require.Equal(t, "windows-new-rt", repo.slots[OpenAIOSWindows].Credentials["refresh_token"])
-	require.Equal(t, installation, repo.account.OpenAIOAuthOSProfiles.Profiles[OpenAIOSWindows].InstallationID)
+	require.Equal(t, profiles, repo.account.OpenAIOAuthOSProfiles)
+	for _, os := range OpenAIOAuthOSFamilies() {
+		grant, err := repo.GetOpenAIOAuthOSCredential(context.Background(), 42, os)
+		require.NoError(t, err)
+		require.Equal(t, os, grant.OSFamily)
+		require.Equal(t, "windows-new-rt", grant.Credentials["refresh_token"])
+	}
+}
+
+func TestOpenAIOAuthAuthorizationOmittedOSUsesAccountDefaultIdentity(t *testing.T) {
+	svc, client, repo := authorizationTestSetup(t)
+	input := authorizationTestInput(t, svc, 42, "")
+	info, err := svc.ExchangeCode(context.Background(), input)
+	require.NoError(t, err)
+	require.Equal(t, repo.account.OpenAIOAuthOSProfiles.DefaultOS, info.OS)
+	require.Equal(t, OpenAIOSWindows, openai.DetectOSFamilyFromUserAgent(client.userAgent))
+	require.Len(t, repo.slots, 1)
 }
 
 func TestOpenAIOAuthAuthorizationMissingProviderIdentityCannotBind(t *testing.T) {

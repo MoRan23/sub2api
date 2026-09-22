@@ -15,7 +15,8 @@ const (
 )
 
 var (
-	ErrOpenAIOAuthOSUnauthorized         = infraerrors.BadRequest("OPENAI_OAUTH_OS_UNAUTHORIZED", "OpenAI OAuth authorization is unavailable for this operating system")
+	// OS names/codes are retained for compatibility; authorization is account-wide.
+	ErrOpenAIOAuthOSUnauthorized         = infraerrors.BadRequest("OPENAI_OAUTH_OS_UNAUTHORIZED", "OpenAI OAuth account authorization is unavailable")
 	ErrOpenAIOAuthOSAuthorizationChanged = infraerrors.Conflict("OPENAI_OAUTH_OS_AUTHORIZATION_CHANGED", "OpenAI OAuth authorization changed; start a new request")
 	ErrOpenAIOAuthOSSubjectMismatch      = infraerrors.BadRequest("OPENAI_OAUTH_OS_SUBJECT_MISMATCH", "OpenAI OAuth authorization must belong to the same ChatGPT account and user")
 	ErrOpenAIOAuthOSRefreshTokenReused   = infraerrors.BadRequest("OPENAI_OAUTH_OS_REFRESH_TOKEN_REUSED", "OpenAI OAuth refresh token is already bound to another operating system")
@@ -153,23 +154,32 @@ func RequiresOpenAIOAuthOSAuthorization(account *Account) bool {
 	return IsOpenAIOAuthOSProfileOwner(account) || account != nil && account.IsOpenAIOAuth() && account.IsShadow()
 }
 
-func OpenAIOAuthOSAuthorizationAvailable(account *Account, os string) bool {
+// OpenAIOAuthOSAuthorizationAvailable retains the legacy API name. The OS only
+// selects an installation identity and does not select a different grant.
+func OpenAIOAuthOSAuthorizationAvailable(account *Account, _ string) bool {
 	if !RequiresOpenAIOAuthOSAuthorization(account) {
 		return true
 	}
 	if account.OpenAIOAuthOSProfiles == nil {
 		return false
 	}
-	if os = NormalizeOpenAIOSFamily(os); os == "" {
-		os = account.OpenAIOAuthOSProfiles.DefaultOS
+	profiles := account.OpenAIOAuthOSProfiles
+	summary := profiles.Authorization
+	if summary == nil {
+		// Legacy scheduler snapshots carry only per-profile summaries. Migration
+		// retains the default grant; an old non-default slot must not select it.
+		profile, ok := profiles.Profiles[NormalizeOpenAIOSFamily(profiles.DefaultOS)]
+		if !ok {
+			return false
+		}
+		summary = &profile.Authorization
 	}
-	summary := account.OpenAIOAuthOSProfiles.Profiles[os].Authorization
 	return summary.Status == OpenAIOAuthAuthorizationAuthorized && (summary.RefreshRetryAfter == nil || !summary.RefreshRetryAfter.After(time.Now()))
 }
 
-// Resolve selects a private slot without modifying the shared business account.
-// Unknown OS uses this owner's default. A scoped request can never switch slots
-// or cross an authorization generation, including after a revoke and rebind.
+// Resolve projects the shared grant onto a private OS identity without modifying
+// the business account. Unknown OS uses the owner's default. A scoped request
+// cannot switch identity or cross the shared authorization generation.
 func ResolveOpenAIOAuthCredentialAccount(ctx context.Context, repo AccountRepository, account *Account, os string) (*Account, error) {
 	if account == nil {
 		return nil, ErrAccountNotFound
@@ -199,7 +209,7 @@ func ResolveOpenAIOAuthCredentialAccount(ctx context.Context, repo AccountReposi
 		os = account.OpenAIOAuthCredentialOS
 	}
 	if os == "" && owner.OpenAIOAuthOSProfiles != nil {
-		os = owner.OpenAIOAuthOSProfiles.DefaultOS
+		os = NormalizeOpenAIOSFamily(owner.OpenAIOAuthOSProfiles.DefaultOS)
 	}
 	if os == "" {
 		return nil, ErrOpenAIOAuthOSUnauthorized
@@ -212,7 +222,7 @@ func ResolveOpenAIOAuthCredentialAccount(ctx context.Context, repo AccountReposi
 	if err != nil {
 		return nil, ErrOpenAIOAuthOSUnauthorized
 	}
-	if slot == nil || slot.Status != OpenAIOAuthAuthorizationAuthorized || (slot.RefreshRetryAfter != nil && slot.RefreshRetryAfter.After(time.Now())) {
+	if slot == nil || slot.OwnerAccountID != owner.ID || slot.Status != OpenAIOAuthAuthorizationAuthorized || (slot.RefreshRetryAfter != nil && slot.RefreshRetryAfter.After(time.Now())) {
 		return nil, ErrOpenAIOAuthOSUnauthorized
 	}
 	if account.OpenAIOAuthAuthorizationGeneration != "" && (account.OpenAIOAuthAuthorizationGeneration != slot.AuthorizationGeneration || account.OpenAIOAuthCredentialOwnerID != slot.OwnerAccountID) {
@@ -223,7 +233,10 @@ func ResolveOpenAIOAuthCredentialAccount(ctx context.Context, repo AccountReposi
 		out.Credentials = cloneOpenAIOAuthJSON(account.Credentials).(map[string]any)
 	}
 	out.Credentials = PreserveOpenAIOAuthProviderCredentials(slot.Credentials, out.Credentials)
-	if len(out.Credentials) == 0 {
+	// A refresh-only imported grant must reach the token provider so it can
+	// acquire its first access token. Sending still requires that provider's
+	// final access-token validation.
+	if strings.TrimSpace(out.GetCredential("access_token")) == "" && strings.TrimSpace(out.GetCredential("refresh_token")) == "" {
 		return nil, ErrOpenAIOAuthOSUnauthorized
 	}
 	out.Extra = maps.Clone(account.Extra)
@@ -234,10 +247,17 @@ func ResolveOpenAIOAuthCredentialAccount(ctx context.Context, repo AccountReposi
 	if owner.OpenAIOAuthOSProfiles == nil {
 		return nil, ErrOpenAIOAuthOSProfileUnavailable
 	}
-	if profile, exists := owner.OpenAIOAuthOSProfiles.Profiles[os]; exists {
-		out.Credentials["user_agent"] = profile.UserAgent
-		out.Extra[openAIPinnedInstallationIDKey] = profile.InstallationID
+	profile, exists := owner.OpenAIOAuthOSProfiles.Profiles[os]
+	if !exists {
+		return nil, ErrOpenAIOAuthOSProfileUnavailable
 	}
+	out.Credentials["user_agent"] = profile.UserAgent
+	out.Extra[openAIPinnedInstallationIDKey] = profile.InstallationID
+	summary := CloneOpenAIOAuthOSAuthorizationSummary(OpenAIOAuthOSAuthorizationSummary{
+		Status: slot.Status, AuthorizedAt: slot.AuthorizedAt, ExpiresAt: slot.ExpiresAt,
+		LastError: slot.LastError, RefreshRetryAfter: slot.RefreshRetryAfter,
+	})
+	out.OpenAIOAuthOSProfiles.Authorization = &summary
 	out.Extra["codex_turn_state_generation"] = slot.StateGeneration
 	out.Extra["codex_turn_state_credential_epoch"] = slot.CredentialEpoch
 	out.OpenAIOAuthCredentialOS, out.OpenAIOAuthCredentialOwnerID = os, owner.ID

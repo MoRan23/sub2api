@@ -1,5 +1,8 @@
 # OpenAI OAuth 三系统独立授权
 
+> 历史实现文档：迁移 255 起已改为账号共享一份授权。当前行为与升级要求见
+> [共享授权与三系统身份](OPENAI_SHARED_OAUTH_AUTHORIZATION.md)。以下仅保留旧版本设计记录。
+
 常规 OpenAI OAuth 账号分别保存 Windows、macOS、Linux 授权。三套 UA、安装 ID 和
 会话根仍是安装身份配置；生成了安装身份不代表已经授权。三个授权槽必须属于同一个
 ChatGPT 用户及工作区，不能把同一 refresh token 复制到另一系统槽。

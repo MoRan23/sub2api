@@ -39,6 +39,11 @@ func resolveAdminOpenAIOAuthCredentialAccount(ctx context.Context, admin service
 func (h *AccountHandler) RevokeOpenAIOAuthOSAuthorization(c *gin.Context) {
 	h.mutateOpenAIOAuthOSAuthorization(c, false)
 }
+
+// RevokeOpenAIOAuthAuthorization revokes the one grant used by all OS identities.
+func (h *AccountHandler) RevokeOpenAIOAuthAuthorization(c *gin.Context) {
+	h.mutateOpenAIOAuthOSAuthorization(c, false)
+}
 func (h *AccountHandler) SetDefaultOpenAIOAuthOS(c *gin.Context) {
 	h.mutateOpenAIOAuthOSAuthorization(c, true)
 }
@@ -50,8 +55,8 @@ func (h *AccountHandler) mutateOpenAIOAuthOSAuthorization(c *gin.Context, setDef
 		return
 	}
 	os := service.NormalizeOpenAIOSFamily(c.Param("os"))
-	if os == "" {
-		response.BadRequest(c, "a valid authorization OS is required")
+	if (setDefault || c.Param("os") != "") && os == "" {
+		response.BadRequest(c, "a valid client identity OS is required")
 		return
 	}
 	admin, ok := h.adminService.(service.OpenAIOAuthOSAuthorizationAdmin)

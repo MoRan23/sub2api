@@ -2301,8 +2301,8 @@
           :regenerating="installationRegenerating"
           :authorization-busy="osAuthorizationBusy"
           @regenerate="regenerateOpenAIInstallationID"
-          @authorize="authorizationOS = $event"
-          @revoke="revokeOSAuthorization"
+          @authorize="showAuthorization = true"
+          @revoke="revokeAuthorization"
           @set-default="setDefaultAuthorizationOS"
         />
       </section>
@@ -3141,7 +3141,7 @@
       </div>
     </template>
   </BaseDialog>
-  <ReAuthAccountModal :show="authorizationOS !== null" :account="account" :initial-o-s="authorizationOS ?? undefined" @close="authorizationOS = null" @reauthorized="handleOSAuthorizationUpdated" />
+  <ReAuthAccountModal :show="showAuthorization" :account="account" @close="showAuthorization = false" @reauthorized="handleOSAuthorizationUpdated" />
 
   <!-- Mixed Channel Warning Dialog -->
   <ConfirmDialog
@@ -3189,7 +3189,6 @@ import ProxySelector from '@/components/common/ProxySelector.vue'
 import CodexTurnStateFields from './CodexTurnStateFields.vue'
 import OpenAIOAuthOSProfiles from './OpenAIOAuthOSProfiles.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
-import { openAIOSLabels } from './openaiOAuthOS'
 import { codexTurnStateConfigChanged, defaultCodexTurnStateConfig, readCodexTurnStateConfig, supportsCodexTurnState } from './codexTurnState'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
@@ -3663,7 +3662,7 @@ const openAILongContextBillingEnabled = ref(false)
 // installation_id 固定（仅 OpenAI OAuth）。UUID 由服务端生成。
 const openAIInstallationPinEnabled = ref(true)
 const openAIOSProfiles = ref<OpenAIOAuthOSProfilesData>()
-const authorizationOS = ref<OpenAIOAuthOS | null>(null)
+const showAuthorization = ref(false)
 const osAuthorizationBusy = ref(false)
 const legacyPinnedInstallationID = ref('')
 const legacyInstallationRegenerating = ref(false)
@@ -5084,7 +5083,7 @@ const parseDateTimeLocal = parseDateTimeLocalInput
 
 // Methods
 const handleClose = () => {
-  authorizationOS.value = null
+  showAuthorization.value = false
   antigravityMixedChannelConfirmed.value = false
   clearMixedChannelDialog()
   emit('close')
@@ -5096,12 +5095,12 @@ const handleOSAuthorizationUpdated = (account: Account) => {
   emit('updated', account)
 }
 
-const revokeOSAuthorization = async (os: OpenAIOAuthOS) => {
+const revokeAuthorization = async () => {
   if (!props.account || osAuthorizationBusy.value || isSparkShadow.value) return
-  if (!confirm(t('admin.accounts.openai.revokeOSConfirm', { os: openAIOSLabels[os] }))) return
+  if (!confirm(t('admin.accounts.openai.revokeAuthorizationConfirm'))) return
   osAuthorizationBusy.value = true
   try {
-    handleOSAuthorizationUpdated(await adminAPI.accounts.revokeOpenAIOAuthOS(props.account.id, os))
+    handleOSAuthorizationUpdated(await adminAPI.accounts.revokeOpenAIOAuth(props.account.id))
     appStore.showSuccess(t('admin.accounts.openai.authorizationSaved'))
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.accounts.failedToUpdate'))

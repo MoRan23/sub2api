@@ -18,7 +18,9 @@ func TestCodexStateOSPostgresCASAndLeasesStayInSlot(t *testing.T) {
 	linux := windows
 	linux.OSFamily, linux.Generation = "linux", "00000000-0000-4000-8000-000000000003"
 	_, err := integrationDB.ExecContext(ctx, `INSERT INTO account_openai_oauth_os_credentials
-		(account_id,os_family,credentials,status,state_generation) VALUES ($1,'linux','{}','authorized',$2)`, windows.OwnerAccountID, linux.Generation)
+		(account_id,os_family,credentials,status,state_generation,authorization_generation,credential_epoch)
+		SELECT account_id,'linux','{}','authorized',$2,authorization_generation,credential_epoch
+		FROM account_openai_oauth_credentials WHERE account_id=$1`, windows.OwnerAccountID, linux.Generation)
 	require.NoError(t, err)
 	repo := NewOpenAICodexStateRepository(integrationDB, integrationRedis)
 	now := time.Now().UTC()
@@ -100,6 +102,8 @@ func TestCodexStateOSCooldownSurvivesSlotLifecycleAndSuccess(t *testing.T) {
 	ok, err := repo.SaveCAS(ctx, *w, w.Version)
 	require.NoError(t, err)
 	require.True(t, ok)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_credentials SET status='unauthorized' WHERE account_id=$1`, key.OwnerAccountID)
+	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_os_credentials SET state_generation=gen_random_uuid(),status='unauthorized' WHERE account_id=$1`, key.OwnerAccountID)
 	require.NoError(t, err)
 	require.NoError(t, cooldowns.ExtendCollectorCooldown(ctx, key.OwnerAccountID, now.Add(time.Hour)))
@@ -107,6 +111,8 @@ func TestCodexStateOSCooldownSurvivesSlotLifecycleAndSuccess(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, w.NextCollectAt, until[key.OwnerAccountID])
 	// Reauthorization and successful/unknown-error state writes may not clear it.
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_credentials SET status='authorized' WHERE account_id=$1`, key.OwnerAccountID)
+	require.NoError(t, err)
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `UPDATE account_openai_oauth_os_credentials SET state_generation=gen_random_uuid(),status='authorized' WHERE account_id=$1 AND os_family=$2 RETURNING state_generation::text`, key.OwnerAccountID, key.OSFamily).Scan(&key.Generation))
 	fresh, err := repo.BeginBusiness(ctx, key, "reauthorized", now, now.Add(time.Minute))
 	require.NoError(t, err)

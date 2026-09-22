@@ -11,7 +11,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// OpenAIOAuthAuthorizationTarget is selected before PKCE authorization starts.
+// OpenAIOAuthAuthorizationTarget binds the account before PKCE authorization
+// starts. OS selects the flow's client identity, never a separate authorization.
 type OpenAIOAuthAuthorizationTarget struct {
 	AccountID int64
 	OS        string
@@ -68,8 +69,8 @@ func OpenAIOAuthAuthIdentity(ctx context.Context) (string, string) {
 
 func (s *OpenAIOAuthService) prepareAuthorizationTarget(ctx context.Context, target OpenAIOAuthAuthorizationTarget) (*openai.OAuthSession, error) {
 	os := NormalizeOpenAIOSFamily(target.OS)
-	if os == "" {
-		return nil, infraerrors.BadRequest("OPENAI_OAUTH_OS_REQUIRED", "a valid authorization OS is required")
+	if strings.TrimSpace(target.OS) != "" && os == "" {
+		return nil, infraerrors.BadRequest("OPENAI_OAUTH_OS_REQUIRED", "a valid client identity OS is required")
 	}
 	if target.AccountID < 0 {
 		return nil, infraerrors.BadRequest("OPENAI_OAUTH_INVALID_ACCOUNT", "invalid account ID")
@@ -87,6 +88,10 @@ func (s *OpenAIOAuthService) prepareAuthorizationTarget(ctx context.Context, tar
 	}
 	binding := &openai.OAuthSession{AccountID: target.AccountID, OS: os, Purpose: purpose}
 	if target.AccountID == 0 {
+		if os == "" {
+			os = OpenAIOSWindows
+			binding.OS = os
+		}
 		ua, err := BuildOpenAIUserAgentWithEnvironment(CodexCanonicalUserAgent(), defaultOpenAIOAuthEnvironment(os))
 		binding.UserAgent = ua
 		return binding, err
@@ -99,8 +104,15 @@ func (s *OpenAIOAuthService) prepareAuthorizationTarget(ctx context.Context, tar
 		return nil, err
 	}
 	if !IsOpenAIOAuthOSProfileOwner(account) {
-		return nil, infraerrors.BadRequest("OPENAI_OAUTH_INVALID_ACCOUNT", "account does not support independent OS authorization")
+		return nil, infraerrors.BadRequest("OPENAI_OAUTH_INVALID_ACCOUNT", "account does not support shared OpenAI OAuth authorization")
 	}
+	if os == "" && account.OpenAIOAuthOSProfiles != nil {
+		os = account.OpenAIOAuthOSProfiles.DefaultOS
+	}
+	if os == "" {
+		os = OpenAIOSWindows
+	}
+	binding.OS = os
 	profile, err := ResolveOpenAIOAuthOSProfile(ctx, s.accountRepo, account, os)
 	if err != nil {
 		return nil, err
@@ -161,8 +173,8 @@ func (s *OpenAIOAuthService) RefreshTokenForOS(ctx context.Context, refreshToken
 	return info, nil
 }
 
-// AuthorizeAccountWithRefreshToken exchanges on the server, then CAS-binds only
-// the selected slot. Browser supplied account/user claims are never consulted.
+// AuthorizeAccountWithRefreshToken exchanges on the server, then CAS-binds the
+// account's shared authorization. Browser supplied subject claims are ignored.
 func (s *OpenAIOAuthService) AuthorizeAccountWithRefreshToken(ctx context.Context, accountID int64, os, refreshToken, clientID string) (*OpenAITokenInfo, error) {
 	ctx, releaseCookies := s.beginCookieFlow(ctx, true)
 	defer releaseCookies()
@@ -185,18 +197,6 @@ func (s *OpenAIOAuthService) AuthorizeAccountWithRefreshToken(ctx context.Contex
 		}
 		if proxy != nil {
 			proxyURL = proxy.URL()
-		}
-	}
-	// Detect a copied refresh token before exchanging it: rotating a token from
-	// another OS would invalidate that slot even if persistence later rejects it.
-	store := s.accountRepo.(OpenAIOAuthOSCredentialsRepository)
-	slots, err := store.ListOpenAIOAuthOSCredentials(ctx, accountID)
-	if err != nil {
-		return nil, err
-	}
-	for _, slot := range slots {
-		if slot != nil && slot.OSFamily != binding.OS && strings.TrimSpace(credentialString(slot.Credentials, "refresh_token")) == strings.TrimSpace(refreshToken) {
-			return nil, infraerrors.BadRequest("OPENAI_OAUTH_DUPLICATE_REFRESH_TOKEN", "another OS already owns this refresh token; start a new OAuth login")
 		}
 	}
 	// Subject verification precedes privacy/account enrichment, so importing an

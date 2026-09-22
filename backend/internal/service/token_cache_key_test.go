@@ -184,6 +184,55 @@ func TestOpenAITokenCacheKey(t *testing.T) {
 	}
 }
 
+func TestOpenAITokenKeysShareOwnerGrantAcrossOS(t *testing.T) {
+	owner := &Account{
+		ID:                                   300,
+		OpenAIOAuthCredentialOwnerID:         300,
+		OpenAIOAuthAuthorizationGeneration:   "shared-grant",
+		OpenAIOAuthCredentialRevision:        7,
+		OpenAIOAuthCredentialOS:              OpenAIOSWindows,
+		OpenAIOAuthCredentialStateGeneration: "windows-state",
+	}
+	for _, os := range []string{OpenAIOSWindows, OpenAIOSMacOS, OpenAIOSLinux, ""} {
+		t.Run(os, func(t *testing.T) {
+			shadow := *owner
+			shadow.ID = 301
+			shadow.OpenAIOAuthCredentialOS = os
+			shadow.OpenAIOAuthCredentialStateGeneration = os + "-state"
+			require.Equal(t, OpenAITokenCacheKey(owner), OpenAITokenCacheKey(&shadow))
+			require.Equal(t, OpenAITokenRefreshLockKey(owner), OpenAITokenRefreshLockKey(&shadow))
+		})
+	}
+	require.Equal(t, "openai:account:300:auth:shared-grant:revision:7", OpenAITokenCacheKey(owner))
+	require.Equal(t, "openai:account:300:auth:shared-grant", OpenAITokenRefreshLockKey(owner))
+}
+
+func TestOpenAITokenKeysFenceCredentialChanges(t *testing.T) {
+	initial := &Account{
+		ID:                                 300,
+		OpenAIOAuthCredentialOwnerID:       300,
+		OpenAIOAuthAuthorizationGeneration: "initial-grant",
+		OpenAIOAuthCredentialRevision:      7,
+		OpenAIOAuthCredentialOS:            OpenAIOSWindows,
+	}
+	rotated := *initial
+	rotated.OpenAIOAuthCredentialRevision++
+	rotated.OpenAIOAuthCredentialOS = OpenAIOSLinux
+	require.NotEqual(t, OpenAITokenCacheKey(initial), OpenAITokenCacheKey(&rotated), "old fills must not replace a rotated token")
+	require.Equal(t, OpenAITokenRefreshLockKey(initial), OpenAITokenRefreshLockKey(&rotated), "rotation on another OS must use the same refresh lock")
+
+	reauthorized := *initial
+	reauthorized.OpenAIOAuthAuthorizationGeneration = "replacement-grant"
+	reauthorized.OpenAIOAuthCredentialRevision = 1
+	require.NotEqual(t, OpenAITokenCacheKey(initial), OpenAITokenCacheKey(&reauthorized))
+	require.NotEqual(t, OpenAITokenRefreshLockKey(initial), OpenAITokenRefreshLockKey(&reauthorized), "old refresh completion must not release the replacement grant's lock")
+
+	otherOwner := *initial
+	otherOwner.OpenAIOAuthCredentialOwnerID = 302
+	require.NotEqual(t, OpenAITokenCacheKey(initial), OpenAITokenCacheKey(&otherOwner))
+	require.NotEqual(t, OpenAITokenRefreshLockKey(initial), OpenAITokenRefreshLockKey(&otherOwner))
+}
+
 func TestGrokTokenCacheKey(t *testing.T) {
 	tests := []struct {
 		name     string

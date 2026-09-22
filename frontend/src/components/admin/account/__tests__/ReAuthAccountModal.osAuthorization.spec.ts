@@ -41,15 +41,12 @@ describe('OpenAI authorization target', () => {
     refreshOpenAIToken.mockResolvedValue({ account, os: 'linux' })
   })
 
-  it('defaults to account OS, binds a selected slot, freezes it, and accepts the server account result', async () => {
+  it('binds the shared account without an OS selector and accepts the server account result', async () => {
     const wrapper = render()
-    const selector = wrapper.get('[data-testid="openai-oauth-os-select"]')
-    expect((selector.element as HTMLSelectElement).value).toBe('macos')
-    await selector.setValue('linux')
+    expect(wrapper.find('[data-testid="openai-oauth-os-select"]').exists()).toBe(false)
     await wrapper.get('[data-testid="generate"]').trigger('click')
     await flushPromises()
-    expect(generateAuthUrl).toHaveBeenCalledWith('/admin/openai/generate-auth-url', { proxy_id: 5, account_id: 42, os: 'linux', purpose: 'authorize' })
-    expect(selector.attributes('disabled')).toBeDefined()
+    expect(generateAuthUrl).toHaveBeenCalledWith('/admin/openai/generate-auth-url', { proxy_id: 5, account_id: 42, purpose: 'authorize' })
     await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.oauth.completeAuth')!.trigger('click')
     await flushPromises()
     expect(exchangeCode).toHaveBeenCalledWith('/admin/openai/exchange-code', { session_id: 'bound-session', code: 'synthetic-code', state: 'nonce', proxy_id: 5 })
@@ -58,12 +55,11 @@ describe('OpenAI authorization target', () => {
     wrapper.unmount()
   })
 
-  it('imports a refresh token directly into the selected bound account slot', async () => {
+  it('imports a refresh token directly into the shared bound account', async () => {
     const wrapper = render()
-    await wrapper.get('[data-testid="openai-oauth-os-select"]').setValue('linux')
     await wrapper.get('[data-testid="import"]').trigger('click')
     await flushPromises()
-    expect(refreshOpenAIToken).toHaveBeenCalledWith('synthetic-rt', 5, '/admin/openai/refresh-token', undefined, 'linux', 42)
+    expect(refreshOpenAIToken).toHaveBeenCalledWith('synthetic-rt', 5, '/admin/openai/refresh-token', undefined, 42)
     expect(applyOAuthCredentials).not.toHaveBeenCalled()
     expect(wrapper.emitted('reauthorized')?.[0]).toEqual([account])
     wrapper.unmount()

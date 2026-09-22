@@ -1441,8 +1441,8 @@ func (s openAISelectionFilterStats) summary(extra string) string {
 		_, _ = b.WriteString(", ")
 		_, _ = b.WriteString(extra)
 	}
-	if s.pool > 0 && s.reasons["os_authorization_unavailable"] == s.pool {
-		_, _ = b.WriteString(", all_candidates_missing_os_authorization")
+	if s.pool > 0 && s.reasons["oauth_authorization_unavailable"] == s.pool {
+		_, _ = b.WriteString(", all_candidates_missing_oauth_authorization")
 	}
 	return b.String()
 }
@@ -1871,7 +1871,7 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if !openAIAccountOSAuthorizationEligible(ctx, account, func(id int64) *Account {
 		return s.lookupShadowParentAccount(ctx, id)
 	}) {
-		return false, "os_authorization_unavailable"
+		return false, "oauth_authorization_unavailable"
 	}
 	// 分组利润控制：不合格账号在候选过滤与抢槽后终检阶段即被排除，
 	// 排序/评分/粘性/熔断只在合格账号之间工作；named reason 进入 filter stats。

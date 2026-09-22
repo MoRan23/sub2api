@@ -1720,8 +1720,8 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 	}
 	if service.IsOpenAIOAuthOSProfileOwner(existing) {
 		os := req.OS
-		// The old endpoint is compatible only with its current default slot.
-		// Explicit slots are always validated by a server-side refresh exchange.
+		// Legacy OS selects the exchange identity; the verified credentials replace
+		// the one account-wide grant used by all three systems.
 		if os == "" && existing.OpenAIOAuthOSProfiles != nil {
 			os = existing.OpenAIOAuthOSProfiles.DefaultOS
 		}

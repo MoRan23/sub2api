@@ -30,9 +30,14 @@ func createOpenAIHTTPCookieFixture(t *testing.T) (openaicookies.Scope, service.S
 	t.Cleanup(func() {
 		_, _ = integrationDB.ExecContext(context.Background(), `DELETE FROM accounts WHERE id=$1`, scope.OwnerAccountID)
 	})
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO account_openai_oauth_os_credentials
-		(account_id, os_family, credentials, status) VALUES ($1,$2,'{}','authorized')
-		RETURNING authorization_generation::text`, scope.OwnerAccountID, scope.OSFamily).Scan(&scope.AuthorizationGeneration))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO account_openai_oauth_credentials
+		(account_id, credentials, status) VALUES ($1,'{"access_token":"fixture-token"}','authorized')
+		RETURNING authorization_generation::text`, scope.OwnerAccountID).Scan(&scope.AuthorizationGeneration))
+	_, err := integrationDB.ExecContext(ctx, `INSERT INTO account_openai_oauth_os_credentials
+		(account_id, os_family, credentials, status, authorization_generation,credential_epoch)
+		SELECT account_id,$2,'{}','authorized',authorization_generation,credential_epoch
+		FROM account_openai_oauth_credentials WHERE account_id=$1`, scope.OwnerAccountID, scope.OSFamily)
+	require.NoError(t, err)
 	return scope, &AESEncryptor{key: []byte("0123456789abcdef0123456789abcdef")}
 }
 
@@ -266,6 +271,8 @@ func TestOpenAIHTTPCookieStoreAuthorizationGenerationFence(t *testing.T) {
 
 	next := scope
 	next.AuthorizationGeneration = uuid.NewString()
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_credentials SET authorization_generation=$2::uuid WHERE account_id=$1`, scope.OwnerAccountID, next.AuthorizationGeneration)
+	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_os_credentials
 		SET authorization_generation=$3::uuid WHERE account_id=$1 AND os_family=$2`, scope.OwnerAccountID, scope.OSFamily, next.AuthorizationGeneration)
 	require.NoError(t, err)
@@ -281,8 +288,9 @@ func TestOpenAIHTTPCookieStoreAuthorizationGenerationFence(t *testing.T) {
 		WHERE owner_account_id=$1 AND authorization_generation::text=$2`, scope.OwnerAccountID, scope.AuthorizationGeneration).Scan(&oldRows))
 	require.Zero(t, oldRows, "loading the new authorization cleans up the previous generation")
 	require.NoError(t, mergeOpenAIHTTPCookies(ctx, store, next, mutation))
-	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_os_credentials
-		SET status='unauthorized' WHERE account_id=$1 AND os_family=$2`, next.OwnerAccountID, next.OSFamily)
+	// A stale metadata mirror cannot keep the account's revoked grant usable.
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_credentials
+		SET status='unauthorized' WHERE account_id=$1`, next.OwnerAccountID)
 	require.NoError(t, err)
 	_, err = store.Load(ctx, next)
 	require.ErrorIs(t, err, openaicookies.ErrStaleScope)
@@ -300,8 +308,8 @@ func TestOpenAIHTTPCookieStoreWaitsForRevocation(t *testing.T) {
 	defer func() { _ = tx.Rollback() }()
 	var ownerID int64
 	require.NoError(t, tx.QueryRowContext(ctx, `SELECT id FROM accounts WHERE id=$1 FOR NO KEY UPDATE`, scope.OwnerAccountID).Scan(&ownerID))
-	_, err = tx.ExecContext(ctx, `UPDATE account_openai_oauth_os_credentials SET status='unauthorized',
-		authorization_generation=gen_random_uuid() WHERE account_id=$1 AND os_family=$2`, scope.OwnerAccountID, scope.OSFamily)
+	_, err = tx.ExecContext(ctx, `UPDATE account_openai_oauth_credentials SET status='unauthorized',
+		authorization_generation=gen_random_uuid() WHERE account_id=$1`, scope.OwnerAccountID)
 	require.NoError(t, err)
 	loadResult := make(chan error, 1)
 	mergeResult := make(chan error, 1)

@@ -50,9 +50,14 @@ func (s *openAIHTTPCookieStore) begin(ctx context.Context, scope openaicookies.S
 		WHERE id=$1 AND deleted_at IS NULL AND `+codexTurnStateOwnerExpression("credentials")+`
 		FOR SHARE`, scope.OwnerAccountID).Scan(&ownerID)
 	if err == nil {
+		err = tx.QueryRowContext(ctx, `SELECT account_id FROM account_openai_oauth_credentials
+			WHERE account_id=$1 AND authorization_generation::text=$2 AND status='authorized'
+			FOR SHARE`, scope.OwnerAccountID, scope.AuthorizationGeneration).Scan(&ownerID)
+	}
+	if err == nil {
 		err = tx.QueryRowContext(ctx, `SELECT account_id FROM account_openai_oauth_os_credentials
 			WHERE account_id=$1 AND os_family=$2 AND authorization_generation::text=$3
-			AND status='authorized' FOR SHARE`, scope.OwnerAccountID, scope.OSFamily, scope.AuthorizationGeneration).Scan(&ownerID)
+			FOR SHARE`, scope.OwnerAccountID, scope.OSFamily, scope.AuthorizationGeneration).Scan(&ownerID)
 	}
 	if err != nil {
 		_ = tx.Rollback()

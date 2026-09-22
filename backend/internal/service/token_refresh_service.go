@@ -617,19 +617,17 @@ func (s *TokenRefreshService) processCandidatePage(
 			continue
 		}
 		stats.oauth++
-		candidates, err := s.backgroundRefreshAccounts(ctx, account)
+		account, err := s.backgroundRefreshAccount(ctx, account)
 		if err != nil {
 			stats.failed++
-			slog.Warn("token_refresh.list_authorizations_failed", "account_id", account.ID, "error", logredact.RedactText(err.Error()))
+			slog.Warn("token_refresh.resolve_authorization_failed", "account_id", accounts[i].ID, "error", logredact.RedactText(err.Error()))
 			continue
 		}
-		for _, candidate := range candidates {
-			if !state.registration.refresher.NeedsRefresh(candidate, refreshWindow) {
-				continue
-			}
-			stats.needsRefresh++
-			groups[account.Platform] = append(groups[account.Platform], candidate)
+		if account == nil || !state.registration.refresher.NeedsRefresh(account, refreshWindow) {
+			continue
 		}
+		stats.needsRefresh++
+		groups[account.Platform] = append(groups[account.Platform], account)
 	}
 
 	type providerResult struct {
@@ -658,43 +656,24 @@ func (s *TokenRefreshService) processCandidatePage(
 	return stats
 }
 
-// Pagination remains account-based. Only after a unique owner has been read do
-// we expand its authorized slots into independent refresh jobs.
-func (s *TokenRefreshService) backgroundRefreshAccounts(ctx context.Context, account *Account) ([]*Account, error) {
-	reader, ok := s.accountRepo.(OpenAIOAuthOSCredentialsReader)
+// A grant belongs to the owner account. Resolve its default outbound identity
+// once; Windows, macOS and Linux must not rotate the same refresh token as jobs.
+func (s *TokenRefreshService) backgroundRefreshAccount(ctx context.Context, account *Account) (*Account, error) {
+	_, ok := s.accountRepo.(OpenAIOAuthOSCredentialsReader)
 	if !ok || !IsOpenAIOAuthOSProfileOwner(account) {
-		return []*Account{account}, nil
+		return account, nil
 	}
-	slots, err := reader.ListOpenAIOAuthOSCredentials(ctx, account.ID)
+	candidate, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, "")
 	if err != nil {
+		if errors.Is(err, ErrOpenAIOAuthOSUnauthorized) || errors.Is(err, ErrOpenAIOAuthOSAuthorizationChanged) {
+			return nil, nil
+		}
 		return nil, err
 	}
-	accounts := make([]*Account, 0, len(slots))
-	seen := make(map[string]bool, len(slots))
-	now := time.Now()
-	for _, slot := range slots {
-		if slot == nil || slot.Status != OpenAIOAuthAuthorizationAuthorized ||
-			(slot.RefreshRetryAfter != nil && now.Before(*slot.RefreshRetryAfter)) {
-			continue
-		}
-		osFamily := NormalizeOpenAIOSFamily(slot.OSFamily)
-		refreshToken, _ := slot.Credentials["refresh_token"].(string)
-		if osFamily == "" || seen[osFamily] || strings.TrimSpace(refreshToken) == "" {
-			continue
-		}
-		seen[osFamily] = true
-		candidate, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, osFamily)
-		if err != nil {
-			if errors.Is(err, ErrOpenAIOAuthOSUnauthorized) || errors.Is(err, ErrOpenAIOAuthOSAuthorizationChanged) {
-				// Revocation, reauthorization, or a concurrent refresh cooldown can
-				// remove a slot between enumeration and resolution.
-				continue
-			}
-			return nil, err
-		}
-		accounts = append(accounts, candidate)
+	if strings.TrimSpace(candidate.GetOpenAIRefreshToken()) == "" {
+		return nil, nil
 	}
-	return accounts, nil
+	return candidate, nil
 }
 
 func (s *TokenRefreshService) processProviderAccounts(
@@ -1343,8 +1322,8 @@ func (s *TokenRefreshService) postRefreshStateSync(ctx context.Context, account 
 }
 
 func (s *TokenRefreshService) syncSchedulerAccount(ctx context.Context, account *Account) {
-	// A scoped refresh snapshot carries one OS's private credentials. Publish the
-	// canonical account so a non-default slot never replaces the default mirror.
+	// Publish the canonical account, rather than copying a request's outbound
+	// identity or stale account state into the shared scheduler cache.
 	if s.schedulerCache != nil {
 		if account.OpenAIOAuthCredentialOS != "" {
 			canonical, err := s.accountRepo.GetByID(ctx, account.ID)

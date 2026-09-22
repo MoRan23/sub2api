@@ -34,6 +34,9 @@ type OpenAIOAuthOSProfile struct {
 type OpenAIOAuthOSProfiles struct {
 	DefaultOS string                          `json:"default_os"`
 	Profiles  map[string]OpenAIOAuthOSProfile `json:"profiles"`
+	// One grant is shared by all installation identities. Per-profile summaries
+	// remain compatibility projections, not separate authorizations.
+	Authorization *OpenAIOAuthOSAuthorizationSummary `json:"authorization,omitempty"`
 }
 
 type OpenAIOAuthOSProfilesEnsurer interface {
@@ -89,6 +92,10 @@ func CloneOpenAIOAuthOSProfiles(value *OpenAIOAuthOSProfiles) *OpenAIOAuthOSProf
 		return nil
 	}
 	out := &OpenAIOAuthOSProfiles{DefaultOS: value.DefaultOS, Profiles: maps.Clone(value.Profiles)}
+	if value.Authorization != nil {
+		summary := CloneOpenAIOAuthOSAuthorizationSummary(*value.Authorization)
+		out.Authorization = &summary
+	}
 	for os, profile := range out.Profiles {
 		profile.Authorization = CloneOpenAIOAuthOSAuthorizationSummary(profile.Authorization)
 		out.Profiles[os] = profile

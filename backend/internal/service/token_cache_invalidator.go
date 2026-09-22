@@ -47,9 +47,12 @@ func (c *CompositeTokenCacheInvalidator) InvalidateToken(ctx context.Context, ac
 		}
 		keysToDelete = append(keysToDelete, AntigravityTokenCacheKey(account))
 	case PlatformOpenAI:
+		// Delete only the attempted shared grant snapshot. A newer revision or
+		// authorization may already have populated its own cache entry.
 		keysToDelete = append(keysToDelete, OpenAITokenCacheKey(account))
 		// Old unscoped entries are never read by scoped requests, but clear them
 		// during the rollout for legacy callers and excluded OAuth auth modes.
+		keysToDelete = append(keysToDelete, openAITokenOwnerKey(account))
 		keysToDelete = append(keysToDelete, "openai:"+accountIDKey)
 	case PlatformGrok:
 		keysToDelete = append(keysToDelete, GrokTokenCacheKey(account))
@@ -89,7 +92,7 @@ func CheckTokenVersion(ctx context.Context, account *Account, repo AccountReposi
 	if account.OpenAIOAuthCredentialOS != "" {
 		latest, err := ReloadOpenAIOAuthCredentialAccount(ctx, repo, account)
 		if err != nil || latest == nil {
-			// A revoked slot or unavailable private state cannot safely supply the
+			// A revoked grant or unavailable private state cannot safely supply the
 			// default mirror, nor permit an old token to be used on this request.
 			return nil, true
 		}

@@ -22,10 +22,14 @@ func createCodexStateFixture(t *testing.T) service.CodexTurnStateKey {
 		(name, platform, type, credentials, extra) VALUES ($1,'openai','oauth','{}',
 		'{"codex_turn_state":{"enabled":true,"account_type":"personal"},"codex_turn_state_generation":"00000000-0000-4000-8000-000000000001"}'::jsonb)
 		RETURNING id`, t.Name()).Scan(&ownerID))
-	_, err := integrationDB.ExecContext(context.Background(), `INSERT INTO account_openai_oauth_os_credentials
-		(account_id,os_family,credentials,status,state_generation,credential_epoch) VALUES
-		($1,'windows','{"access_token":"fixture-token","plan_type":"plus"}','authorized',
-		'00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000011')`, ownerID)
+	_, err := integrationDB.ExecContext(context.Background(), `INSERT INTO account_openai_oauth_credentials
+		(account_id,credentials,status,credential_epoch) VALUES
+		($1,'{"access_token":"fixture-token","plan_type":"plus"}','authorized','00000000-0000-4000-8000-000000000011')`, ownerID)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(context.Background(), `INSERT INTO account_openai_oauth_os_credentials
+		(account_id,os_family,credentials,status,state_generation,credential_epoch,authorization_generation)
+		SELECT account_id,'windows','{}','authorized','00000000-0000-4000-8000-000000000001',credential_epoch,authorization_generation
+		FROM account_openai_oauth_credentials WHERE account_id=$1`, ownerID)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = integrationDB.ExecContext(context.Background(), `DELETE FROM accounts WHERE id=$1`, ownerID)

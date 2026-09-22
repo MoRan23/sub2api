@@ -1,23 +1,28 @@
 package service
 
-import (
-	"strconv"
-	"strings"
-)
+import "strconv"
 
-// OpenAITokenCacheKey 生成 OpenAI OAuth 账号的缓存键
-// 格式: "openai:account:{account_id}"
+// OpenAITokenCacheKey shares a grant across OS identities, while fencing cache
+// fills from earlier authorizations and credential revisions.
 func OpenAITokenCacheKey(account *Account) string {
 	key := OpenAITokenRefreshLockKey(account)
-	if account != nil && account.OpenAIOAuthCredentialOS != "" {
-		key += ":auth:" + account.OpenAIOAuthAuthorizationGeneration + ":revision:" + strconv.FormatInt(account.OpenAIOAuthCredentialRevision, 10)
+	if account != nil && (account.OpenAIOAuthAuthorizationGeneration != "" || account.OpenAIOAuthCredentialOS != "") {
+		key += ":revision:" + strconv.FormatInt(account.OpenAIOAuthCredentialRevision, 10)
 	}
 	return key
 }
 
-// Refresh locks survive normal token rotation. Cache entries also include the
-// authorization and revision, so an in-flight old fill cannot revive a token.
+// OpenAITokenRefreshLockKey serializes every OS identity and revision of the
+// same grant. Reauthorization creates a separate lock from an old in-flight grant.
 func OpenAITokenRefreshLockKey(account *Account) string {
+	key := openAITokenOwnerKey(account)
+	if account != nil && (account.OpenAIOAuthAuthorizationGeneration != "" || account.OpenAIOAuthCredentialOS != "") {
+		key += ":auth:" + account.OpenAIOAuthAuthorizationGeneration
+	}
+	return key
+}
+
+func openAITokenOwnerKey(account *Account) string {
 	if account == nil {
 		return "openai:account:0"
 	}
@@ -25,11 +30,7 @@ func OpenAITokenRefreshLockKey(account *Account) string {
 	if account.OpenAIOAuthCredentialOwnerID > 0 {
 		id = account.OpenAIOAuthCredentialOwnerID
 	}
-	key := "openai:account:" + strconv.FormatInt(id, 10)
-	if os := strings.TrimSpace(account.OpenAIOAuthCredentialOS); os != "" {
-		key += ":os:" + os
-	}
-	return key
+	return "openai:account:" + strconv.FormatInt(id, 10)
 }
 
 // ClaudeTokenCacheKey 生成 Claude (Anthropic) OAuth 账号的缓存键

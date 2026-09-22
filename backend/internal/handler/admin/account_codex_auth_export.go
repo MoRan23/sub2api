@@ -37,19 +37,22 @@ func (h *AccountHandler) ExportCodexAuth(c *gin.Context) {
 		response.BadRequest(c, "os must be windows, macos, or linux")
 		return
 	}
-	if os == "" && account.OpenAIOAuthOSProfiles != nil {
+	// A legacy os query remains valid, but auth.json is account-wide. Always read
+	// the same private grant using the default identity projection.
+	os = ""
+	if account.OpenAIOAuthOSProfiles != nil {
 		os = account.OpenAIOAuthOSProfiles.DefaultOS
 	}
 	reader, ok := h.adminService.(interface {
 		GetOpenAIOAuthOSCredential(context.Context, int64, string) (*service.OpenAIOAuthOSCredential, error)
 	})
-	if !ok || os == "" {
-		response.BadRequest(c, "selected OS has no saved OAuth authorization")
+	if !ok {
+		response.BadRequest(c, "OAuth authorization storage is unavailable")
 		return
 	}
 	slot, err := reader.GetOpenAIOAuthOSCredential(c.Request.Context(), id, os)
 	if err != nil {
-		response.BadRequest(c, "selected OS has no saved OAuth authorization")
+		response.BadRequest(c, "account has no saved OAuth authorization")
 		return
 	}
 	exported, err := service.BuildOpenAICodexAuthExportForOS(account, slot, time.Now())

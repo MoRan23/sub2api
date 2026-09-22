@@ -25,7 +25,7 @@ func TestSchedulerMetadataOSAuthorizationContainsNoCredentialsOrInstallation(t *
 	require.NotNil(t, metadata.OpenAIOAuthRequiresOSAuthorization)
 	require.True(t, *metadata.OpenAIOAuthRequiresOSAuthorization)
 	require.True(t, service.OpenAIOAuthOSAuthorizationAvailable(&metadata, ""))
-	require.False(t, service.OpenAIOAuthOSAuthorizationAvailable(&metadata, service.OpenAIOSLinux))
+	require.True(t, service.OpenAIOAuthOSAuthorizationAvailable(&metadata, service.OpenAIOSLinux), "legacy default summary represents the shared account authorization")
 	require.Equal(t, retryAt, *metadata.OpenAIOAuthOSProfiles.Profiles[service.OpenAIOSLinux].Authorization.RefreshRetryAfter)
 	payload, err := json.Marshal(metadata)
 	require.NoError(t, err)

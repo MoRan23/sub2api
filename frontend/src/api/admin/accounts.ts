@@ -379,7 +379,6 @@ export async function regenerateInstallationID(id: number, os?: OpenAIOAuthOS): 
 }
 
 export interface CodexAuthExport {
-  os?: OpenAIOAuthOS
   auth: {
     auth_mode: 'chatgpt'
     OPENAI_API_KEY: null
@@ -388,13 +387,13 @@ export interface CodexAuthExport {
   warnings: string[]
 }
 
-export async function exportCodexAuth(id: number, os?: OpenAIOAuthOS): Promise<CodexAuthExport> {
-  const { data } = await apiClient.get<CodexAuthExport>(`/admin/accounts/${id}/codex-auth`, os ? { params: { os } } : undefined)
+export async function exportCodexAuth(id: number): Promise<CodexAuthExport> {
+  const { data } = await apiClient.get<CodexAuthExport>(`/admin/accounts/${id}/codex-auth`, undefined)
   return data
 }
 
-export async function revokeOpenAIOAuthOS(id: number, os: OpenAIOAuthOS): Promise<Account> {
-  const { data } = await apiClient.delete<Account>(`/admin/accounts/${id}/openai/os-auth/${os}`)
+export async function revokeOpenAIOAuth(id: number): Promise<Account> {
+  const { data } = await apiClient.delete<Account>(`/admin/accounts/${id}/openai-oauth-authorization`)
   return data
 }
 
@@ -959,12 +958,10 @@ export async function refreshOpenAIToken(
   proxyId?: number | null,
   endpoint: string = '/admin/openai/refresh-token',
   clientId?: string,
-  os?: OpenAIOAuthOS,
   accountId?: number
 ): Promise<Record<string, unknown>> {
-  const payload: { refresh_token: string; proxy_id?: number; client_id?: string; os?: OpenAIOAuthOS; account_id?: number } = {
+  const payload: { refresh_token: string; proxy_id?: number; client_id?: string; account_id?: number } = {
     refresh_token: refreshToken,
-    ...(os ? { os } : {}),
     ...(accountId ? { account_id: accountId } : {})
   }
   if (proxyId) {
@@ -1252,7 +1249,7 @@ export const accountsAPI = {
   update,
   regenerateInstallationID,
   exportCodexAuth,
-  revokeOpenAIOAuthOS,
+  revokeOpenAIOAuth,
   setDefaultOpenAIOAuthOS,
   getGrokMediaEligibility,
   updateGrokMediaEligibility,

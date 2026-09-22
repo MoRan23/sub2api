@@ -14,18 +14,26 @@ import (
 type geminiTokenCacheStub struct {
 	deletedKeys []string
 	deleteErr   error
+	tokens      map[string]string
 }
 
 func (s *geminiTokenCacheStub) GetAccessToken(ctx context.Context, cacheKey string) (string, error) {
-	return "", nil
+	return s.tokens[cacheKey], nil
 }
 
 func (s *geminiTokenCacheStub) SetAccessToken(ctx context.Context, cacheKey string, token string, ttl time.Duration) error {
+	if s.tokens == nil {
+		s.tokens = make(map[string]string)
+	}
+	s.tokens[cacheKey] = token
 	return nil
 }
 
 func (s *geminiTokenCacheStub) DeleteAccessToken(ctx context.Context, cacheKey string) error {
 	s.deletedKeys = append(s.deletedKeys, cacheKey)
+	if s.deleteErr == nil {
+		delete(s.tokens, cacheKey)
+	}
 	return s.deleteErr
 }
 
@@ -125,6 +133,41 @@ func TestCompositeTokenCacheInvalidator_OpenAI(t *testing.T) {
 	err := invalidator.InvalidateToken(context.Background(), account)
 	require.NoError(t, err)
 	require.Equal(t, []string{"openai:account:500"}, cache.deletedKeys)
+}
+
+func TestCompositeTokenCacheInvalidator_OpenAISharedGrantPreservesNewerSnapshots(t *testing.T) {
+	for _, os := range []string{OpenAIOSWindows, OpenAIOSMacOS, OpenAIOSLinux} {
+		t.Run(os, func(t *testing.T) {
+			cache := &geminiTokenCacheStub{tokens: map[string]string{
+				"openai:account:500:auth:grant-1:revision:7": "old-access",
+				"openai:account:500:auth:grant-1:revision:8": "rotated-access",
+				"openai:account:500:auth:grant-2:revision:1": "reauthorized-access",
+				"openai:account:502:auth:grant-1:revision:7": "other-owner-access",
+				"openai:account:500":                         "legacy-owner-access",
+				"openai:account:501":                         "legacy-shadow-access",
+			}}
+			account := &Account{
+				ID:                                 501,
+				Platform:                           PlatformOpenAI,
+				Type:                               AccountTypeOAuth,
+				OpenAIOAuthCredentialOwnerID:       500,
+				OpenAIOAuthAuthorizationGeneration: "grant-1",
+				OpenAIOAuthCredentialRevision:      7,
+				OpenAIOAuthCredentialOS:            os,
+			}
+			require.NoError(t, NewCompositeTokenCacheInvalidator(cache).InvalidateToken(context.Background(), account))
+			require.Equal(t, []string{
+				"openai:account:500:auth:grant-1:revision:7",
+				"openai:account:500",
+				"openai:account:501",
+			}, cache.deletedKeys)
+			require.Equal(t, map[string]string{
+				"openai:account:500:auth:grant-1:revision:8": "rotated-access",
+				"openai:account:500:auth:grant-2:revision:1": "reauthorized-access",
+				"openai:account:502:auth:grant-1:revision:7": "other-owner-access",
+			}, cache.tokens)
+		})
+	}
 }
 
 func TestCompositeTokenCacheInvalidator_Claude(t *testing.T) {

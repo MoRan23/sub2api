@@ -28,8 +28,8 @@ func loadOpenAIOAuthOSProfiles(ctx context.Context, client *dbent.Client, ids []
 	rows, err := client.QueryContext(ctx, `SELECT p.account_id, p.os_family, p.installation_id::text,
 		p.user_agent, p.sync_session_id::text, p.is_default, COALESCE(c.status,'unauthorized'),
 		c.authorized_at,c.expires_at,COALESCE(c.last_error,''),c.refresh_retry_after,c.credentials->>'expires_at'
-		FROM account_openai_oauth_os_profiles p LEFT JOIN account_openai_oauth_os_credentials c
-		ON c.account_id=p.account_id AND c.os_family=p.os_family
+		FROM account_openai_oauth_os_profiles p LEFT JOIN account_openai_oauth_credentials c
+		ON c.account_id=p.account_id
 		WHERE p.account_id = ANY($1)`+eligible+` ORDER BY p.account_id, p.os_family`, pq.Array(ids))
 	if err != nil {
 		return nil, err
@@ -62,6 +62,8 @@ func loadOpenAIOAuthOSProfiles(ctx context.Context, client *dbent.Client, ids []
 			out[accountID] = profiles
 		}
 		profiles.Profiles[profile.OSFamily] = profile
+		summary := service.CloneOpenAIOAuthOSAuthorizationSummary(profile.Authorization)
+		profiles.Authorization = &summary
 		if isDefault {
 			profiles.DefaultOS = profile.OSFamily
 		}
@@ -260,7 +262,7 @@ func reconcileOpenAIOAuthOSProfileEligibilityLocked(ctx context.Context, client 
 		_, _, err := ensureOpenAIOAuthOSProfilesLocked(ctx, client, account)
 		return err
 	}
-	_, err = client.ExecContext(ctx, `UPDATE account_openai_oauth_os_credentials SET credentials='{}'::jsonb,status='unauthorized',authorization_generation=gen_random_uuid(),state_generation=gen_random_uuid(),credential_epoch=gen_random_uuid(),revision=revision+1,updated_at=NOW() WHERE account_id=$1`, accountID)
+	err = revokeSharedOpenAIOAuthCredentialsLocked(ctx, client, accountID)
 	if err != nil {
 		return err
 	}

@@ -1,17 +1,17 @@
 # Codex auth.json 导出
 
-账号管理页的常规 OpenAI OAuth 账号可通过操作菜单选择系统后导出 `auth.json`。每份文件只包含该系统的一套 ChatGPT 登录凭据；它不包含本项目的账号配置、UA、installation ID、每日会话根或 turn-state 运行态。
+账号管理页的常规 OpenAI OAuth 账号可通过操作菜单直接导出 `auth.json`，无需选择系统。每份文件包含账号共享的一套 ChatGPT 登录凭据；它不包含本项目的账号配置、UA、installation ID、每日会话根或 turn-state 运行态。
 
 ## 适用账号与读取行为
 
 - 仅支持 OpenAI 平台的常规 OAuth 账号。
 - API Key、setup-token、Personal Access Token、agent identity 和影子账号不可导出。影子账号应前往凭据母账号操作。
-- 每次导出直接读取数据库中所选系统最新的完整授权槽快照，保持该次读取中的凭据一致。导出不刷新 token、不修改账号、不调用上游接口，也不进行真实模型请求。
+- 每次导出直接读取数据库中账号共享授权的最新完整快照，保持该次读取中的凭据一致。导出不刷新 token、不修改账号、不调用上游接口，也不进行真实模型请求。
 - 导出要求非空 `access_token`，以及可被 Codex ID-token 解析结构读取的 `id_token`。这里只验证 JWT 包装与相关字段类型，不验证签名或授权资格；ID token 的旧签发时间、过期时间不会单独阻止导出。
 
 ## 管理接口与文件格式
 
-接口为 `GET /api/v1/admin/accounts/:id/codex-auth?os=windows|macos|linux`，省略 `os` 使用账号默认系统。沿用管理员认证和现有敏感操作 step-up 策略。需要 step-up 时，前端完成验证后重试；取消验证不会生成下载。
+接口为 `GET /api/v1/admin/accounts/:id/codex-auth`。旧 `os=windows|macos|linux` 参数保留兼容，但不改变导出的授权。沿用管理员认证和现有敏感操作 step-up 策略。需要 step-up 时，前端完成验证后重试；取消验证不会生成下载。
 
 成功响应使用标准 API envelope，`data` 下包含 `auth` 与 `warnings`。前端仅将 `auth` 序列化为 `auth.json`，不会把 envelope 或警告写入文件。
 
@@ -56,4 +56,4 @@
 
 Codex session 导入支持该文件结构。选择工作区时，先读取显式 `tokens.account_id`，再读取既有顶层兼容字段；仅在显式账号 ID 缺失时从 token claims 推导，避免把导出时选择的工作区替换成 JWT 中另一工作区。
 
-导出允许携带已过期 access token 并给出警告。向另一系统槽导入需通过服务端验证，不能将同一 refresh token 复制为多个系统授权；旧默认槽的原样重导入保留兼容行为。文件不会复制服务端私有凭据代次或运行态。详见 [三系统独立授权](OPENAI_OS_OAUTH_AUTHORIZATION.md)。
+导出允许携带已过期 access token 并给出警告。导入按现有规则验证并更新账号共享授权；不再创建另一个系统授权槽。文件不会复制服务端私有凭据代次或运行态。详见 [共享授权](OPENAI_SHARED_OAUTH_AUTHORIZATION.md)。

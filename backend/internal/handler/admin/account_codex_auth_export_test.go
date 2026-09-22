@@ -91,20 +91,20 @@ func TestExportCodexAuthErrorsAreNonCacheableAndDoNotExposeTokens(t *testing.T) 
 	require.Equal(t, http.StatusNotFound, rec.Code)
 }
 
-func TestExportCodexAuthUsesOnlyExplicitPrivateSlot(t *testing.T) {
+func TestExportCodexAuthUsesSamePrivateGrantForEveryLegacyOS(t *testing.T) {
 	idToken := "header." + base64.RawURLEncoding.EncodeToString([]byte(`{}`)) + ".signature"
 	stub := &codexAuthExportAdminStub{account: &service.Account{ID: 42, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
 		Credentials: map[string]any{"access_token": "default-secret"}, OpenAIOAuthOSProfiles: &service.OpenAIOAuthOSProfiles{DefaultOS: "windows"}},
-		slots: map[string]*service.OpenAIOAuthOSCredential{"macos": {OwnerAccountID: 42, OSFamily: "macos", Credentials: map[string]any{"access_token": "mac-token", "id_token": idToken}}}}
+		slots: map[string]*service.OpenAIOAuthOSCredential{"windows": {OwnerAccountID: 42, OSFamily: "windows", Credentials: map[string]any{"access_token": "shared-token", "id_token": idToken}}}}
 	router := gin.New()
 	router.GET("/accounts/:id/codex-auth", (&AccountHandler{adminService: stub}).ExportCodexAuth)
-	response := httptest.NewRecorder()
-	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/accounts/42/codex-auth?os=macos", nil))
-	require.Equal(t, http.StatusOK, response.Code)
-	require.Equal(t, "mac-token", gjson.GetBytes(response.Body.Bytes(), "data.auth.tokens.access_token").String())
-	require.NotContains(t, response.Body.String(), "default-secret")
-	response = httptest.NewRecorder()
-	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/accounts/42/codex-auth?os=linux", nil))
-	require.Equal(t, http.StatusBadRequest, response.Code)
-	require.NotContains(t, response.Body.String(), "default-secret")
+	for _, query := range []string{"", "?os=macos", "?os=linux", "?os=windows"} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/accounts/42/codex-auth"+query, nil))
+		require.Equal(t, http.StatusOK, response.Code)
+		require.Equal(t, "shared-token", gjson.GetBytes(response.Body.Bytes(), "data.auth.tokens.access_token").String())
+		require.False(t, gjson.GetBytes(response.Body.Bytes(), "data.os").Exists())
+		require.NotContains(t, response.Body.String(), "default-secret")
+	}
+	require.Equal(t, []string{"windows", "windows", "windows", "windows"}, stub.readOS)
 }

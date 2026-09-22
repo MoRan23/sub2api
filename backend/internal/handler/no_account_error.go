@@ -62,7 +62,7 @@ func classifySelectionFailureError(err error, fallback noAccountErrorClassificat
 	}
 	if errors.Is(err, service.ErrNoAvailableOpenAIOAuthOSAccounts) {
 		return noAccountErrorClassification{Status: http.StatusServiceUnavailable, ErrType: "api_error",
-			Message: "No available accounts are authorized for the requested operating system."}
+			Message: "No available accounts have usable OpenAI OAuth authorization."}
 	}
 	match := selectionModelRateLimitedPattern.FindStringSubmatch(strings.ToLower(err.Error()))
 	if len(match) != 2 {

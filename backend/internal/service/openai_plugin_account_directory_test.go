@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"maps"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -34,12 +36,29 @@ func (r *pluginAccountDirectoryRepository) GetByID(_ context.Context, id int64) 
 
 func (r *pluginAccountDirectoryRepository) GetOpenAIOAuthOSCredential(ctx context.Context, id int64, family string) (*OpenAIOAuthOSCredential, error) {
 	account, err := r.GetByID(ctx, id)
-	return openAIOAuthTestCredential(account, family), err
+	if err != nil || account == nil || account.OpenAIOAuthOSProfiles == nil || !OpenAIOAuthOSAuthorizationAvailable(account, "") {
+		return nil, err
+	}
+	if _, exists := account.OpenAIOAuthOSProfiles.Profiles[family]; !exists {
+		return nil, nil
+	}
+	return &OpenAIOAuthOSCredential{
+		OwnerAccountID: account.ID, OSFamily: family, Credentials: maps.Clone(account.Credentials),
+		Status: OpenAIOAuthAuthorizationAuthorized, AuthorizationGeneration: fmt.Sprintf("test-shared-generation-%d", account.ID),
+		Revision: 1, StateGeneration: fmt.Sprintf("test-state-%d/%s", account.ID, family),
+	}, nil
 }
 
 func (r *pluginAccountDirectoryRepository) ListOpenAIOAuthOSCredentials(ctx context.Context, id int64) ([]*OpenAIOAuthOSCredential, error) {
 	account, err := r.GetByID(ctx, id)
-	return openAIOAuthTestCredentials(account), err
+	if err != nil || account == nil || account.OpenAIOAuthOSProfiles == nil {
+		return nil, err
+	}
+	grant, err := r.GetOpenAIOAuthOSCredential(ctx, id, account.OpenAIOAuthOSProfiles.DefaultOS)
+	if err != nil || grant == nil {
+		return nil, err
+	}
+	return []*OpenAIOAuthOSCredential{grant}, nil
 }
 
 func TestOpenAIPluginAccountDirectoryUsesSameScopeForListAndResolve(t *testing.T) {
@@ -135,35 +154,35 @@ func TestOpenAIPluginAccountDirectoryPropagatesRepositoryFailure(t *testing.T) {
 	require.ErrorIs(t, err, want)
 }
 
-func TestOpenAIPluginAccountDirectorySelectsOnlyAuthorizedRequestOS(t *testing.T) {
+func TestOpenAIPluginAccountDirectoryUsesSharedAuthorizationForEveryOSIdentity(t *testing.T) {
 	account := Account{ID: 71, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
 		Credentials: map[string]any{"access_token": "windows-access", "chatgpt_account_id": "plugin-owner"}}
 	authorizeOpenAIOAuthTestAccount(&account, OpenAIOSWindows, OpenAIOSLinux)
 	repo := &pluginAccountDirectoryRepository{accounts: []Account{account}}
 	gateway := &OpenAIGatewayService{accountRepo: repo}
-	for _, tt := range []struct{ family, token, ua string }{
-		{"", "windows-access", "Windows"},
-		{OpenAIOSLinux, "windows-access-linux", "Linux"},
-	} {
-		ctx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: tt.family, Captured: true})
+	for _, family := range []string{"", OpenAIOSWindows, OpenAIOSLinux, OpenAIOSMacOS} {
+		ctx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: family, Captured: true})
 		ids, err := gateway.ListPluginAccounts(ctx, "", "")
 		require.NoError(t, err)
 		require.Equal(t, []int64{account.ID}, ids)
 		identity, err := gateway.ResolvePluginOutboundIdentity(ctx, account.ID)
 		require.NoError(t, err)
-		require.Equal(t, tt.token, identity.Token)
-		profile := account.OpenAIOAuthOSProfiles.Profiles[tt.family]
-		if tt.family == "" {
+		require.Equal(t, "windows-access", identity.Token)
+		profile := account.OpenAIOAuthOSProfiles.Profiles[family]
+		if family == "" {
 			profile = account.OpenAIOAuthOSProfiles.Profiles[OpenAIOSWindows]
 		}
 		require.Equal(t, resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, profile.UserAgent).UserAgent, identity.Headers.Get("User-Agent"))
 	}
-	ctx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: OpenAIOSMacOS, Captured: true})
-	ids, err := gateway.ListPluginAccounts(ctx, "", "")
-	require.NoError(t, err)
-	require.Empty(t, ids)
-	_, err = gateway.ResolvePluginOutboundIdentity(ctx, account.ID)
-	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized)
 	require.Empty(t, repo.accounts[0].OpenAIOAuthCredentialOS, "lookup must not scope the shared account")
 	require.Equal(t, "windows-access", repo.accounts[0].GetOpenAIAccessToken())
+	repo.accounts[0].OpenAIOAuthOSProfiles.Authorization = &OpenAIOAuthOSAuthorizationSummary{Status: OpenAIOAuthAuthorizationUnauthorized}
+	for _, family := range OpenAIOAuthOSFamilies() {
+		ctx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: family, Captured: true})
+		ids, err := gateway.ListPluginAccounts(ctx, "", "")
+		require.NoError(t, err)
+		require.Empty(t, ids)
+		_, err = gateway.ResolvePluginOutboundIdentity(ctx, account.ID)
+		require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized)
+	}
 }

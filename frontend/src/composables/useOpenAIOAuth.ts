@@ -3,11 +3,10 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiError'
-import type { Account, OpenAIOAuthOS } from '@/types'
+import type { Account } from '@/types'
 
 export interface OpenAITokenInfo {
   account?: Account
-  os?: OpenAIOAuthOS
   access_token?: string
   refresh_token?: string
   client_id?: string
@@ -41,7 +40,6 @@ export function useOpenAIOAuth() {
   const oauthState = ref('')
   const loading = ref(false)
   const error = ref('')
-  const boundOS = ref<OpenAIOAuthOS | null>(null)
   const boundAccountId = ref<number | null>(null)
   let generationVersion = 0
 
@@ -53,7 +51,6 @@ export function useOpenAIOAuth() {
     oauthState.value = ''
     loading.value = false
     error.value = ''
-    boundOS.value = null
     boundAccountId.value = null
   }
 
@@ -61,21 +58,19 @@ export function useOpenAIOAuth() {
   const generateAuthUrl = async (
     proxyId?: number | null,
     redirectUri?: string,
-    os: OpenAIOAuthOS = 'windows',
     accountId?: number
   ): Promise<boolean> => {
     const requestVersion = ++generationVersion
     loading.value = true
     authUrl.value = ''
     sessionId.value = ''
-    boundOS.value = null
     boundAccountId.value = null
     oauthState.value = ''
     error.value = ''
 
     try {
-      const payload: { proxy_id?: number; redirect_uri?: string; os: OpenAIOAuthOS; account_id?: number; purpose: 'create' | 'authorize' } = {
-        os, ...(accountId ? { account_id: accountId } : {}), purpose: accountId ? 'authorize' : 'create'
+      const payload: { proxy_id?: number; redirect_uri?: string; account_id?: number; purpose: 'create' | 'authorize' } = {
+        ...(accountId ? { account_id: accountId } : {}), purpose: accountId ? 'authorize' : 'create'
       }
       if (proxyId) {
         payload.proxy_id = proxyId
@@ -91,7 +86,6 @@ export function useOpenAIOAuth() {
       if (requestVersion !== generationVersion) return false
       authUrl.value = response.auth_url
       sessionId.value = response.session_id
-      boundOS.value = os
       boundAccountId.value = accountId ?? null
       try {
         const parsed = new URL(response.auth_url)
@@ -157,7 +151,6 @@ export function useOpenAIOAuth() {
     refreshToken: string,
     proxyId?: number | null,
     clientId?: string,
-    os: OpenAIOAuthOS = 'windows',
     accountId?: number
   ): Promise<OpenAITokenInfo | null> => {
     if (!refreshToken.trim()) {
@@ -175,7 +168,6 @@ export function useOpenAIOAuth() {
         proxyId,
         `${endpointPrefix}/refresh-token`,
         clientId,
-        os,
         accountId
       )
       return tokenInfo as OpenAITokenInfo
@@ -254,7 +246,6 @@ export function useOpenAIOAuth() {
     oauthState,
     loading,
     error,
-    boundOS,
     boundAccountId,
     // Methods
     resetState,

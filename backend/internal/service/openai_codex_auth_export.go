@@ -17,14 +17,14 @@ type OpenAICodexAuthExport struct {
 	Warnings []string            `json:"warnings"`
 }
 
-// BuildOpenAICodexAuthExportForOS uses only a privately read selected slot. It
-// never falls back to the compatibility mirror or provisions installation data.
+// BuildOpenAICodexAuthExportForOS is retained for callers using the legacy name.
+// The private record is the account's shared grant; its OS is an identity view.
 func BuildOpenAICodexAuthExportForOS(account *Account, slot *OpenAIOAuthOSCredential, now time.Time) (*OpenAICodexAuthExport, error) {
 	if !IsOpenAIOAuthOSProfileOwner(account) {
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_CODEX_AUTH_EXPORT_UNSUPPORTED", "platform, type, parent_account_id, auth_mode")
 	}
 	if slot == nil || slot.OwnerAccountID != account.ID || NormalizeOpenAIOSFamily(slot.OSFamily) == "" || len(slot.Credentials) == 0 {
-		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_CODEX_AUTH_EXPORT_UNAUTHORIZED", "selected OS has no saved OAuth authorization")
+		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_CODEX_AUTH_EXPORT_UNAUTHORIZED", "account has no saved OAuth authorization")
 	}
 	selected := *account
 	selected.Credentials = slot.Credentials
@@ -32,7 +32,6 @@ func BuildOpenAICodexAuthExportForOS(account *Account, slot *OpenAIOAuthOSCreden
 	if err != nil {
 		return nil, err
 	}
-	result.OS = slot.OSFamily
 	return result, nil
 }
 

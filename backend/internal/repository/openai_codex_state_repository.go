@@ -29,8 +29,10 @@ func NewOpenAICodexStateRepository(db *sql.DB, rdb *redis.Client) service.CodexT
 const codexStateLiveAccount = `a.deleted_at IS NULL AND a.platform = 'openai' AND a.type = 'oauth'
  AND a.extra->'codex_turn_state'->>'enabled' = 'true'
  AND EXISTS (SELECT 1 FROM account_openai_oauth_os_credentials credential
- WHERE credential.account_id = a.id AND credential.os_family = s.os_family
- AND credential.status = 'authorized' AND credential.state_generation::text = s.generation)`
+ JOIN account_openai_oauth_credentials shared_grant ON shared_grant.account_id=credential.account_id
+	WHERE credential.account_id = a.id AND credential.os_family = s.os_family
+	AND shared_grant.status = 'authorized' AND credential.authorization_generation=shared_grant.authorization_generation
+	AND credential.state_generation::text = s.generation)`
 
 const codexStateColumns = `s.owner_account_id, s.os_family, s.model, s.generation, s.version,
  s.encrypted_token, s.issued_at, s.expires_at, s.token_length, s.cipher_blocks,
@@ -67,9 +69,15 @@ func lockCodexStateGeneration(ctx context.Context, tx *sql.Tx, key service.Codex
 	if err != nil {
 		return false, ignoreCodexStateNoRows(err)
 	}
+	var authorizationGeneration string
+	err = tx.QueryRowContext(ctx, `SELECT authorization_generation::text FROM account_openai_oauth_credentials
+		WHERE account_id=$1 AND status='authorized' FOR SHARE`, key.OwnerAccountID).Scan(&authorizationGeneration)
+	if err != nil {
+		return false, ignoreCodexStateNoRows(err)
+	}
 	err = tx.QueryRowContext(ctx, `SELECT account_id FROM account_openai_oauth_os_credentials
-		WHERE account_id=$1 AND os_family=$2 AND state_generation::text=$3 AND status='authorized'
-		FOR SHARE`, key.OwnerAccountID, key.OSFamily, key.Generation).Scan(&found)
+		WHERE account_id=$1 AND os_family=$2 AND state_generation::text=$3 AND authorization_generation::text=$4
+		FOR SHARE`, key.OwnerAccountID, key.OSFamily, key.Generation, authorizationGeneration).Scan(&found)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -276,12 +284,14 @@ func (r *openAICodexStateRepository) CreateHistoryDemand(ctx context.Context, pr
 	var extraJSON, credentialsJSON []byte
 	var parentID sql.NullInt64
 	err = tx.QueryRowContext(ctx, `SELECT a.extra,
-		jsonb_build_object('plan_type', credential.credentials->'plan_type', 'auth_mode', credential.credentials->'auth_mode', 'openai_auth_mode', credential.credentials->'openai_auth_mode'),
+		jsonb_build_object('plan_type', shared_grant.credentials->'plan_type', 'auth_mode', shared_grant.credentials->'auth_mode', 'openai_auth_mode', shared_grant.credentials->'openai_auth_mode'),
 		a.parent_account_id FROM accounts a JOIN account_openai_oauth_os_credentials credential ON credential.account_id=a.id
+		JOIN account_openai_oauth_credentials shared_grant ON shared_grant.account_id=a.id
 		WHERE a.id=$1 AND a.deleted_at IS NULL AND a.platform='openai' AND a.type='oauth'
 		AND a.extra->'codex_turn_state'->>'enabled'='true'
-		AND credential.state_generation::text=$2 AND credential.status='authorized'
-		AND credential.credential_epoch::text=$3 AND credential.os_family=$4`, key.OwnerAccountID, key.Generation, proof.CredentialEpoch, key.OSFamily).
+		AND credential.state_generation::text=$2 AND shared_grant.status='authorized'
+		AND credential.authorization_generation=shared_grant.authorization_generation
+		AND shared_grant.credential_epoch::text=$3 AND credential.os_family=$4`, key.OwnerAccountID, key.Generation, proof.CredentialEpoch, key.OSFamily).
 		Scan(&extraJSON, &credentialsJSON, &parentID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil

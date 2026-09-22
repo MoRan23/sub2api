@@ -337,14 +337,14 @@ func NormalizeOpenAICompatiblePlatform(platform string) string {
 // never forward this error text to OpenAI-platform clients (they respond with
 // the generic classification message). Callers that must preserve the legacy
 // message pass "".
-var ErrNoAvailableOpenAIOAuthOSAccounts = errors.New("no available OpenAI accounts authorized for the requested operating system")
+var ErrNoAvailableOpenAIOAuthOSAccounts = errors.New("no available OpenAI accounts with available OAuth account authorization")
 
 func noAvailableOpenAISelectionError(requestedModel string, compactBlocked bool, details string) error {
 	if compactBlocked {
 		return ErrNoAvailableCompactAccounts
 	}
 	message := "no available OpenAI accounts"
-	missingOSAuthorization := strings.Contains(details, "all_candidates_missing_os_authorization")
+	missingOSAuthorization := strings.Contains(details, "all_candidates_missing_oauth_authorization")
 	if requestedModel != "" {
 		message = fmt.Sprintf("no available OpenAI accounts supporting model: %s", requestedModel)
 	}
@@ -486,7 +486,7 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 		return "compact_unsupported"
 	}
 	if !account.IsShadow() && !openAIAccountOSAuthorizationEligible(ctx, account, nil) {
-		return "os_authorization_unavailable"
+		return "oauth_authorization_unavailable"
 	}
 	return ""
 }
@@ -1062,13 +1062,13 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 			filterStats.exclude("excluded")
 			continue
 		}
-		if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, acc, platform, requestedModel, false, requiredCapability); reason == "os_authorization_unavailable" {
+		if reason := openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx, acc, platform, requestedModel, false, requiredCapability); reason == "oauth_authorization_unavailable" {
 			filterStats.exclude(reason)
 			continue
 		} else if reason == "" && acc.IsShadow() {
 			lookup := s.parentAccountLookup(ctx)
 			if parentHealthyForShadow(acc, lookup) && !openAIAccountOSAuthorizationEligible(ctx, acc, lookup) {
-				filterStats.exclude("os_authorization_unavailable")
+				filterStats.exclude("oauth_authorization_unavailable")
 				continue
 			}
 		}
@@ -1320,7 +1320,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			continue
 		}
 		if !openAIAccountOSAuthorizationEligible(ctx, acc, parentLookupL2) {
-			filterStats.exclude("os_authorization_unavailable")
+			filterStats.exclude("oauth_authorization_unavailable")
 			continue
 		}
 		if s.isOpenAIAccountRequestRuntimeBlocked(acc, requestedModel) {

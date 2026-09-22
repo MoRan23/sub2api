@@ -359,7 +359,7 @@ func (s *OpenAIGatewayService) ProfitControlVetoLatest(ctx context.Context, sele
 		// private slot while retaining its OS and authorization generation; a
 		// scheduler snapshot contains only the default compatibility mirror.
 		if s.accountRepo == nil {
-			return selected, true, "os_authorization_unavailable"
+			return selected, true, "oauth_authorization_unavailable"
 		}
 		var latest *Account
 		var err error
@@ -369,7 +369,7 @@ func (s *OpenAIGatewayService) ProfitControlVetoLatest(ctx context.Context, sele
 			latest, err = ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, selected, OpenAIRequestOSFromContext(ctx).Family)
 		}
 		if err != nil {
-			return selected, true, "os_authorization_unavailable"
+			return selected, true, "oauth_authorization_unavailable"
 		}
 		vetoed, reason := openAIProfitControlVetoReason(ctx, latest)
 		return latest, vetoed, reason

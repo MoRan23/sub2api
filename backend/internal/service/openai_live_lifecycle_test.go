@@ -317,7 +317,7 @@ func TestGetLiveCallForIdentityRejectsMismatchedCaller(t *testing.T) {
 		AccountID:               account.ID,
 		CredentialOS:            OpenAIOSWindows,
 		CredentialOwnerID:       account.ID,
-		AuthorizationGeneration: "windows-generation",
+		AuthorizationGeneration: "shared-generation",
 		CallID:                  "call_identity",
 		CallHash:                hashLiveCallID("call_identity"),
 		APIKeyID:                22,

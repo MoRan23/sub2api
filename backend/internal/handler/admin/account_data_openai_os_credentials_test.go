@@ -45,16 +45,14 @@ func TestOpenAIOAuthBackupExportUsesPrivateSlotsAndOmitsRuntimeIdentity(t *testi
 	os, slots, err := h.exportOpenAIOAuthAuthorizations(context.Background(), account)
 	require.NoError(t, err)
 	require.Equal(t, service.OpenAIOSWindows, os)
-	require.Len(t, slots, 2)
+	require.Nil(t, slots, "new backups export one shared credential tuple, not OS authorizations")
 	require.Equal(t, "windows-token", account.Credentials["access_token"])
-	require.Equal(t, "mac-token", slots[service.OpenAIOSMacOS].Credentials["access_token"])
-	require.NotContains(t, slots[service.OpenAIOSMacOS].Credentials, "sync_session_id")
-	require.NotContains(t, slots[service.OpenAIOSWindows].Credentials, "_token_version")
+	require.NotContains(t, account.Credentials, "_token_version")
 	require.NotContains(t, portableOpenAIOAuthCredentials(account, account.Credentials), "user_agent")
 	require.Equal(t, map[string]any{"note": "keep"}, portableOpenAIOAuthExtra(account))
 }
 
-func TestOpenAIOAuthBackupImportLegacyMissingRefreshStaysDefaultOnly(t *testing.T) {
+func TestOpenAIOAuthBackupImportLegacyMissingRefreshBecomesShared(t *testing.T) {
 	h := &AccountHandler{}
 	item := &DataAccount{Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, OpenAIOAuthDefaultOS: service.OpenAIOSMacOS,
 		Credentials:               map[string]any{"user_agent": "ignored-device", "installation_id": "ignored-id"},
@@ -78,7 +76,7 @@ func TestOpenAIOAuthBackupVersionGatePreservesLegacyImports(t *testing.T) {
 	require.NoError(t, validateDataHeader(payload))
 }
 
-func TestOpenAIOAuthBackupImportValidatesAllSlotsBeforeAtomicCreate(t *testing.T) {
+func TestOpenAIOAuthBackupImportSelectsDefaultWholeTupleWithoutExchanges(t *testing.T) {
 	client := &codexImportOAuthClientStub{responses: map[string]*openai.TokenResponse{
 		"windows-rt": backupOAuthResponse(t, "workspace", "user", "verified-windows", "rotated-windows"),
 		"mac-rt":     backupOAuthResponse(t, "workspace", "user", "verified-mac", "rotated-mac"),
@@ -95,13 +93,14 @@ func TestOpenAIOAuthBackupImportValidatesAllSlotsBeforeAtomicCreate(t *testing.T
 	os, slots, err := h.prepareOpenAIOAuthBackupImport(context.Background(), item, nil)
 	require.NoError(t, err)
 	require.Equal(t, service.OpenAIOSWindows, os)
-	require.Equal(t, "verified-windows", item.Credentials["access_token"])
-	require.Equal(t, "verified-mac", slots[service.OpenAIOSMacOS]["access_token"])
-	require.Equal(t, "workspace", slots[service.OpenAIOSMacOS]["chatgpt_account_id"])
-	require.Equal(t, []string{"windows-rt", "mac-rt"}, client.calls)
+	require.Nil(t, slots)
+	require.Equal(t, "windows-rt", item.Credentials["refresh_token"])
+	require.Equal(t, "forged", item.Credentials["chatgpt_account_id"], "backup restore follows the single-credential import contract")
+	require.NotContains(t, item.Credentials, "access_token", "must not combine the selected grant with the compatibility mirror")
+	require.Empty(t, client.calls)
 }
 
-func TestOpenAIOAuthBackupImportRejectsDuplicateAndMissingRefreshBeforeExchange(t *testing.T) {
+func TestOpenAIOAuthBackupImportIgnoresUnusedDuplicateAndMissingRefresh(t *testing.T) {
 	for _, rt := range []string{"same-rt", ""} {
 		t.Run(rt, func(t *testing.T) {
 			client := &codexImportOAuthClientStub{}
@@ -113,14 +112,16 @@ func TestOpenAIOAuthBackupImportRejectsDuplicateAndMissingRefreshBeforeExchange(
 					service.OpenAIOSWindows: {Credentials: map[string]any{"refresh_token": "same-rt"}},
 					service.OpenAIOSMacOS:   {Credentials: map[string]any{"refresh_token": rt}},
 				}}
-			_, _, err := h.prepareOpenAIOAuthBackupImport(context.Background(), item, nil)
-			require.Error(t, err)
+			_, slots, err := h.prepareOpenAIOAuthBackupImport(context.Background(), item, nil)
+			require.NoError(t, err)
+			require.Nil(t, slots)
+			require.Equal(t, "same-rt", item.Credentials["refresh_token"])
 			require.Empty(t, client.calls)
 		})
 	}
 }
 
-func TestOpenAIOAuthBackupImportRejectsDifferentVerifiedSubjects(t *testing.T) {
+func TestOpenAIOAuthBackupImportFallsBackWithoutCombiningGrantSubjects(t *testing.T) {
 	client := &codexImportOAuthClientStub{responses: map[string]*openai.TokenResponse{
 		"windows-rt": backupOAuthResponse(t, "workspace-a", "user", "windows-access", "rotated-windows"),
 		"mac-rt":     backupOAuthResponse(t, "workspace-b", "user", "mac-access", "rotated-mac"),
@@ -128,14 +129,18 @@ func TestOpenAIOAuthBackupImportRejectsDifferentVerifiedSubjects(t *testing.T) {
 	oauth := service.NewOpenAIOAuthService(nil, client)
 	t.Cleanup(oauth.Stop)
 	h := &AccountHandler{openaiOAuthService: oauth}
-	item := &DataAccount{Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, OpenAIOAuthDefaultOS: service.OpenAIOSWindows,
+	item := &DataAccount{Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, OpenAIOAuthDefaultOS: service.OpenAIOSLinux,
 		OpenAIOAuthAuthorizations: map[string]DataOpenAIOAuthAuthorization{
-			service.OpenAIOSWindows: {Credentials: map[string]any{"refresh_token": "windows-rt", "chatgpt_account_id": "forged-same"}},
-			service.OpenAIOSMacOS:   {Credentials: map[string]any{"refresh_token": "mac-rt", "chatgpt_account_id": "forged-same"}},
+			service.OpenAIOSWindows: {Credentials: map[string]any{"refresh_token": "windows-rt", "chatgpt_account_id": "workspace-a"}},
+			service.OpenAIOSMacOS:   {Credentials: map[string]any{"refresh_token": "mac-rt", "access_token": "mac-only", "chatgpt_account_id": "workspace-b"}},
 		}}
 	_, slots, err := h.prepareOpenAIOAuthBackupImport(context.Background(), item, nil)
-	require.ErrorContains(t, err, "same ChatGPT account and user")
+	require.NoError(t, err)
 	require.Nil(t, slots)
+	require.Equal(t, "windows-rt", item.Credentials["refresh_token"])
+	require.Equal(t, "workspace-a", item.Credentials["chatgpt_account_id"])
+	require.NotContains(t, item.Credentials, "access_token")
+	require.Empty(t, client.calls)
 }
 
 type codexImportAuthorizationRepository struct {

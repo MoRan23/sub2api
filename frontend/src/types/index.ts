@@ -1203,6 +1203,7 @@ export interface OpenAIOAuthAuthorizationSummary {
 
 export interface OpenAIOAuthOSProfiles {
   default_os: OpenAIOAuthOS
+  authorization?: OpenAIOAuthAuthorizationSummary
   profiles: Record<OpenAIOAuthOS, OpenAIOAuthOSProfile>
 }
 

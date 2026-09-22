@@ -26,6 +26,16 @@ func (s *adminServiceImpl) RevokeOpenAIOAuthOSCredentials(ctx context.Context, i
 	if !ok {
 		return infraerrors.ServiceUnavailable("OPENAI_OAUTH_STORAGE_UNAVAILABLE", "authorization storage is unavailable")
 	}
+	if os == "" {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		os = OpenAIOSWindows
+		if account != nil && account.OpenAIOAuthOSProfiles != nil {
+			os = account.OpenAIOAuthOSProfiles.DefaultOS
+		}
+	}
 	return repo.RevokeOpenAIOAuthOSCredentials(ctx, id, os)
 }
 

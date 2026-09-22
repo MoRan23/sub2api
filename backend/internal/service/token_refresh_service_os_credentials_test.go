@@ -37,7 +37,12 @@ func (r *tokenRefreshOSCredentialsRepo) ListOpenAIOAuthOSCredentials(_ context.C
 
 func (r *tokenRefreshOSCredentialsRepo) GetOpenAIOAuthOSCredential(_ context.Context, _ int64, os string) (*OpenAIOAuthOSCredential, error) {
 	r.readOS = append(r.readOS, os)
-	return r.slots[os], nil
+	if r.slots[os] == nil {
+		return nil, nil
+	}
+	grant := *r.slots[os]
+	grant.OSFamily = os
+	return &grant, nil
 }
 
 func (r *tokenRefreshOSCredentialsRepo) SetOpenAIOAuthOSCredentialErrorIfUnchanged(_ context.Context, id int64, os, generation string, revision int64, _ string) (bool, error) {
@@ -79,12 +84,13 @@ func newTokenRefreshOSFixture(t *testing.T) (*Account, *tokenRefreshOSCredential
 		tokenRefreshAccountRepo: &tokenRefreshAccountRepo{mockAccountRepoForGemini: mockAccountRepoForGemini{accountsByID: map[int64]*Account{account.ID: account}}},
 		slots:                   map[string]*OpenAIOAuthOSCredential{},
 	}
-	for _, os := range []string{OpenAIOSWindows, OpenAIOSLinux} {
-		repo.slots[os] = &OpenAIOAuthOSCredential{
-			OwnerAccountID: account.ID, OSFamily: os, AuthorizationGeneration: "generation-" + os, Revision: 3,
-			Status:      OpenAIOAuthAuthorizationAuthorized,
-			Credentials: map[string]any{"access_token": "access-" + os, "refresh_token": "refresh-" + os, "expires_at": time.Now().Add(-time.Minute).Unix()},
-		}
+	grant := &OpenAIOAuthOSCredential{
+		OwnerAccountID: account.ID, AuthorizationGeneration: "shared-generation", Revision: 3,
+		Status:      OpenAIOAuthAuthorizationAuthorized,
+		Credentials: map[string]any{"access_token": "shared-access", "refresh_token": "shared-refresh", "expires_at": time.Now().Add(-time.Minute).Unix()},
+	}
+	for _, os := range OpenAIOAuthOSFamilies() {
+		repo.slots[os] = grant
 	}
 	return account, repo
 }
@@ -102,7 +108,7 @@ func (r *tokenRefreshOSRecorder) Refresh(_ context.Context, account *Account) (m
 	return nil, nil
 }
 
-func TestTokenRefreshService_OpenAISlotsExpandAfterAccountPagination(t *testing.T) {
+func TestTokenRefreshService_OpenAISharedGrantRefreshesOnceAfterAccountPagination(t *testing.T) {
 	account, repo := newTokenRefreshOSFixture(t)
 	refresher := &tokenRefreshOSRecorder{}
 	svc := &TokenRefreshService{accountRepo: repo, cfg: &config.TokenRefreshConfig{MaxRetries: 1}}
@@ -111,22 +117,22 @@ func TestTokenRefreshService_OpenAISlotsExpandAfterAccountPagination(t *testing.
 
 	require.Equal(t, 1, stats.total, "the account cursor sees each owner only once")
 	require.Equal(t, 1, stats.oauth)
-	require.Equal(t, 2, stats.needsRefresh, "the fresh default mirror must not hide expired private slots")
-	require.Equal(t, 2, stats.refreshed)
-	require.Equal(t, []int64{account.ID}, repo.listedIDs)
-	require.ElementsMatch(t, []string{OpenAIOSWindows, OpenAIOSLinux}, refresher.refreshed)
-	require.ElementsMatch(t, []string{OpenAIOSWindows, OpenAIOSLinux}, repo.readOS)
+	require.Equal(t, 1, stats.needsRefresh, "the shared grant is resolved once instead of using a stale account mirror")
+	require.Equal(t, 1, stats.refreshed)
+	require.Empty(t, repo.listedIDs)
+	require.Equal(t, []string{OpenAIOSWindows}, refresher.refreshed)
+	require.Equal(t, []string{OpenAIOSWindows}, repo.readOS)
 	require.Equal(t, "default-mirror", account.GetOpenAIAccessToken())
 }
 
-func TestTokenRefreshService_OpenAISlotsSkipIneligibleAuthorizations(t *testing.T) {
+func TestTokenRefreshService_OpenAISharedGrantSkipsIneligibleAuthorization(t *testing.T) {
 	for _, reason := range []string{"missing", "reauth", "cooldown", "no refresh token"} {
 		t.Run(reason, func(t *testing.T) {
 			account, repo := newTokenRefreshOSFixture(t)
 			slot := repo.slots[OpenAIOSLinux]
 			switch reason {
 			case "missing":
-				delete(repo.slots, OpenAIOSLinux)
+				repo.slots = nil
 			case "reauth":
 				slot.Status = OpenAIOAuthAuthorizationReauthRequired
 			case "cooldown":
@@ -136,16 +142,15 @@ func TestTokenRefreshService_OpenAISlotsSkipIneligibleAuthorizations(t *testing.
 				delete(slot.Credentials, "refresh_token")
 			}
 			svc := &TokenRefreshService{accountRepo: repo}
-			candidates, err := svc.backgroundRefreshAccounts(context.Background(), account)
+			candidate, err := svc.backgroundRefreshAccount(context.Background(), account)
 			require.NoError(t, err)
-			require.Len(t, candidates, 1)
-			require.Equal(t, OpenAIOSWindows, candidates[0].OpenAIOAuthCredentialOS)
-			require.Equal(t, []string{OpenAIOSWindows}, repo.readOS, "ineligible slots must not start refresh work")
+			require.Nil(t, candidate)
+			require.Equal(t, []string{OpenAIOSWindows}, repo.readOS, "the grant is checked once using the default identity")
 		})
 	}
 }
 
-func TestTokenRefreshService_OpenAISlotFailureIsolation(t *testing.T) {
+func TestTokenRefreshService_OpenAISharedGrantFailurePreservesRevisionGuard(t *testing.T) {
 	for _, permanent := range []bool{false, true} {
 		for _, stale := range []bool{false, true} {
 			name := "transient"
@@ -180,8 +185,8 @@ func TestTokenRefreshService_OpenAISlotFailureIsolation(t *testing.T) {
 					require.Equal(t, 1, repo.slotCooldowns)
 					require.NotNil(t, repo.slots[OpenAIOSLinux].RefreshRetryAfter)
 				}
-				require.Equal(t, OpenAIOAuthAuthorizationAuthorized, repo.slots[OpenAIOSWindows].Status)
-				require.Nil(t, repo.slots[OpenAIOSWindows].RefreshRetryAfter)
+				require.Equal(t, repo.slots[OpenAIOSLinux].Status, repo.slots[OpenAIOSWindows].Status)
+				require.Equal(t, repo.slots[OpenAIOSLinux].RefreshRetryAfter, repo.slots[OpenAIOSWindows].RefreshRetryAfter)
 				require.Zero(t, repo.setErrorCalls)
 				require.Zero(t, repo.setTempUnschedCalls)
 				require.Zero(t, blocker.blockCalls)
@@ -192,8 +197,6 @@ func TestTokenRefreshService_OpenAISlotFailureIsolation(t *testing.T) {
 
 func TestTokenRefreshService_OpenAISlotSuccessPreservesSharedCooldownAndPublishesCanonicalAccount(t *testing.T) {
 	account, repo := newTokenRefreshOSFixture(t)
-	repo.slots[OpenAIOSWindows].Status = OpenAIOAuthAuthorizationReauthRequired
-	repo.slots[OpenAIOSWindows].LastError = "OAuth authorization requires sign-in"
 	until := time.Now().Add(time.Hour)
 	account.TempUnschedulableUntil = &until
 	account.TempUnschedulableReason = "shared upstream rate limit"
@@ -208,12 +211,11 @@ func TestTokenRefreshService_OpenAISlotSuccessPreservesSharedCooldownAndPublishe
 	require.Zero(t, cache.deleteCalls)
 	require.Zero(t, blocker.clearCalls)
 	require.Equal(t, OpenAIOSLinux, invalidator.lastAccount.OpenAIOAuthCredentialOS)
-	require.Equal(t, "access-linux", invalidator.lastAccount.GetOpenAIAccessToken())
+	require.Equal(t, "shared-access", invalidator.lastAccount.GetOpenAIAccessToken())
 	require.Equal(t, "default-mirror", scheduler.lastAccount.GetOpenAIAccessToken())
 	require.Empty(t, scheduler.lastAccount.OpenAIOAuthCredentialOS)
 	require.Equal(t, &until, scheduler.lastAccount.TempUnschedulableUntil)
-	require.Equal(t, OpenAIOAuthAuthorizationReauthRequired, repo.slots[OpenAIOSWindows].Status)
-	require.Equal(t, "OAuth authorization requires sign-in", repo.slots[OpenAIOSWindows].LastError)
+	require.Equal(t, OpenAIOAuthAuthorizationAuthorized, repo.slots[OpenAIOSWindows].Status)
 }
 
 func TestTokenRefreshService_OpenAISlotFailurePersistenceErrorNeverFallsBackToGlobalState(t *testing.T) {
@@ -233,7 +235,7 @@ func TestTokenRefreshService_OpenAISlotFailurePersistenceErrorNeverFallsBackToGl
 	require.Zero(t, blocker.blockCalls)
 }
 
-func TestOpenAITokenRefresher_LockScopeStableAcrossGeneration(t *testing.T) {
+func TestOpenAITokenRefresher_LockScopeSharedAcrossOSAndFencedByGeneration(t *testing.T) {
 	account, repo := newTokenRefreshOSFixture(t)
 	windows, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, account, OpenAIOSWindows)
 	require.NoError(t, err)
@@ -241,7 +243,7 @@ func TestOpenAITokenRefresher_LockScopeStableAcrossGeneration(t *testing.T) {
 	require.NoError(t, err)
 	refresher := &OpenAITokenRefresher{}
 	key := refresher.CacheKey(windows)
+	require.Equal(t, key, refresher.CacheKey(linux))
 	windows.OpenAIOAuthAuthorizationGeneration = "replacement-authorization"
-	require.Equal(t, key, refresher.CacheKey(windows))
-	require.NotEqual(t, key, refresher.CacheKey(linux))
+	require.NotEqual(t, key, refresher.CacheKey(windows))
 }

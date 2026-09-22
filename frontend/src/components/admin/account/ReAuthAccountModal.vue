@@ -120,7 +120,6 @@
         </div>
       </div>
 
-      <OpenAIOAuthOSSelect v-if="isOpenAI" v-model="selectedOS" :profiles="account.openai_oauth_os_profiles" :disabled="currentLoading || !!currentSessionId" />
       <p v-if="isOpenAI && currentSessionId" class="text-xs text-gray-500">{{ t('admin.accounts.openai.authorizationSessionLocked') }}</p>
       <p v-if="isOpenAI && oauthFlowRef?.inputMethod === 'refresh_token'" class="text-xs text-gray-500">{{ t('admin.accounts.openai.importedAuthorizationHint') }}</p>
       <OAuthAuthorizationFlow
@@ -206,9 +205,7 @@ import { useOpenAIOAuth } from '@/composables/useOpenAIOAuth'
 import { useGeminiOAuth } from '@/composables/useGeminiOAuth'
 import { useAntigravityOAuth } from '@/composables/useAntigravityOAuth'
 import { useGrokOAuth } from '@/composables/useGrokOAuth'
-import type { Account, OpenAIOAuthOS } from '@/types'
-import OpenAIOAuthOSSelect from '@/components/account/OpenAIOAuthOSSelect.vue'
-import { defaultOpenAIOS } from '@/components/account/openaiOAuthOS'
+import type { Account } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import OAuthAuthorizationFlow from '@/components/account/OAuthAuthorizationFlow.vue'
@@ -227,7 +224,6 @@ interface OAuthFlowExposed {
 interface Props {
   show: boolean
   account: Account | null
-  initialOS?: OpenAIOAuthOS
 }
 
 const props = defineProps<Props>()
@@ -251,7 +247,6 @@ const oauthFlowRef = ref<OAuthFlowExposed | null>(null)
 
 // State
 const addMethod = ref<AddMethod>('oauth')
-const selectedOS = ref<OpenAIOAuthOS>(props.initialOS || defaultOpenAIOS(props.account))
 const geminiOAuthType = ref<'code_assist' | 'google_one' | 'ai_studio'>('code_assist')
 
 // Computed - check platform
@@ -332,11 +327,10 @@ const canExchangeCode = computed(() => {
 
 // Watchers
 watch(
-  () => [props.show, props.account?.id, props.initialOS] as const,
+  () => [props.show, props.account?.id] as const,
   ([newVal]) => {
     resetState()
     if (newVal && props.account) {
-      selectedOS.value = props.initialOS || defaultOpenAIOS(props.account)
       // Initialize addMethod based on current account type (Claude only)
       if (
         isAnthropic.value &&
@@ -379,7 +373,7 @@ const handleGenerateUrl = async () => {
   if (!props.account) return
 
   if (isOpenAILike.value) {
-    await openaiOAuth.generateAuthUrl(props.account.proxy_id, undefined, selectedOS.value, props.account.id)
+    await openaiOAuth.generateAuthUrl(props.account.proxy_id, undefined, props.account.id)
   } else if (isGemini.value) {
     const creds = (props.account.credentials || {}) as Record<string, unknown>
     const tierId = typeof creds.tier_id === 'string' ? creds.tier_id : undefined
@@ -643,7 +637,7 @@ const handleValidateRefreshToken = async (refreshTokenInput: string) => {
     openaiOAuth.loading.value = true
     openaiOAuth.error.value = ''
     try {
-      const tokenInfo = await openaiOAuth.validateRefreshToken(refreshToken, props.account.proxy_id, undefined, selectedOS.value, props.account.id)
+      const tokenInfo = await openaiOAuth.validateRefreshToken(refreshToken, props.account.proxy_id, undefined, props.account.id)
       if (!tokenInfo) return
       if (!tokenInfo.account || tokenInfo.account.id !== props.account.id) throw new Error(t('admin.accounts.oauth.authFailed'))
       const updatedAccount = tokenInfo.account

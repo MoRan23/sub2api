@@ -533,7 +533,7 @@ func (s *OpenAIGatewayService) freezeOpenAIWSAuthorization(ctx context.Context, 
 		var err error
 		scoped, err = ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, OpenAIRequestOSFromContext(ctx).Family)
 		if err != nil {
-			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "authorization for this operating system is unavailable", err)
+			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "OAuth account authorization is unavailable", err)
 		}
 	}
 	if strings.TrimSpace(token) != scoped.GetOpenAIAccessToken() {
@@ -552,11 +552,11 @@ func (s *OpenAIGatewayService) validateOpenAIWSAuthorization(ctx context.Context
 		return nil
 	}
 	if account.OpenAIOAuthCredentialOS == "" || account.OpenAIOAuthAuthorizationGeneration == "" {
-		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "authorization for this operating system is unavailable", ErrOpenAIOAuthOSUnauthorized)
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "OAuth account authorization is unavailable", ErrOpenAIOAuthOSUnauthorized)
 	}
 	_, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, account.OpenAIOAuthCredentialOS)
 	if err != nil {
-		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "authorization for this operating system is no longer available", err)
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "OAuth account authorization is no longer available", err)
 	}
 	return nil
 }

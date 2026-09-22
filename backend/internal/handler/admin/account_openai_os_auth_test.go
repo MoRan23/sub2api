@@ -75,3 +75,43 @@ func TestOpenAIOAuthBoundResponseDoesNotExposeProviderCredentials(t *testing.T) 
 	require.Contains(t, w.Body.String(), `"account":`)
 	require.NotContains(t, w.Body.String(), "secret-")
 }
+
+type sharedAuthorizationMutationAdmin struct {
+	*codexAuthExportAdminStub
+	revokedOS []string
+	defaultOS string
+}
+
+func (a *sharedAuthorizationMutationAdmin) ResolveOpenAIOAuthCredentialAccount(context.Context, int64, string) (*service.Account, error) {
+	return a.account, nil
+}
+func (a *sharedAuthorizationMutationAdmin) RevokeOpenAIOAuthOSCredentials(_ context.Context, _ int64, os string) error {
+	a.revokedOS = append(a.revokedOS, os)
+	return nil
+}
+func (a *sharedAuthorizationMutationAdmin) SetDefaultOpenAIOAuthOS(_ context.Context, _ int64, os string) (*service.OpenAIOAuthOSProfiles, error) {
+	a.defaultOS = os
+	return a.account.OpenAIOAuthOSProfiles, nil
+}
+
+func TestOpenAIOAuthSharedRevokeAndLegacyRouteUseSameAccountMutation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	admin := &sharedAuthorizationMutationAdmin{codexAuthExportAdminStub: &codexAuthExportAdminStub{account: &service.Account{
+		ID: 42, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		OpenAIOAuthOSProfiles: &service.OpenAIOAuthOSProfiles{DefaultOS: service.OpenAIOSWindows},
+	}}}
+	h := &AccountHandler{adminService: admin}
+	router := gin.New()
+	router.DELETE("/accounts/:id/openai-oauth-authorization", h.RevokeOpenAIOAuthAuthorization)
+	router.DELETE("/accounts/:id/openai/os-auth/:os", h.RevokeOpenAIOAuthOSAuthorization)
+	for _, path := range []string{"/accounts/42/openai-oauth-authorization", "/accounts/42/openai/os-auth/linux"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, path, nil))
+		require.Equal(t, http.StatusOK, rec.Code)
+	}
+	require.Equal(t, []string{"", service.OpenAIOSLinux}, admin.revokedOS)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/accounts/42/openai/os-auth/unknown", nil))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Len(t, admin.revokedOS, 2)
+}

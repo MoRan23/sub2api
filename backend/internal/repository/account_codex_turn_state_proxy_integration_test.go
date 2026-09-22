@@ -143,27 +143,38 @@ func TestCodexCollectorProxyChangePostgresPreservesEachOSCache(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			f := newCodexProxyChangeFixture(t)
-			linux, err := f.accounts.BindOpenAIOAuthOSCredentials(ctx, f.key.OwnerAccountID, service.OpenAIOSLinux, oauthOSTestGrant("linux-independent"), "test")
-			require.NoError(t, err)
-			linuxKey := f.key
-			linuxKey.OSFamily = service.OpenAIOSLinux
-			linuxKey.Generation = linux.StateGeneration
-			now := time.Now().UTC()
-			initial, err := f.states.BeginBusiness(ctx, linuxKey, "linux-seed", now, now.Add(time.Minute))
-			require.NoError(t, err)
-			require.NoError(t, f.states.EndBusiness(ctx, linuxKey, "linux-seed"))
-			linuxState := f.state
-			linuxState.OSFamily = service.OpenAIOSLinux
-			linuxState.Generation = linux.StateGeneration
-			linuxState.Version = initial.Version
-			linuxState.EncryptedToken = "linux-private-state"
-			ok, err := f.states.SaveCAS(ctx, linuxState, initial.Version)
-			require.NoError(t, err)
-			require.True(t, ok)
-			storedLinux, err := f.states.Get(ctx, linuxKey)
-			require.NoError(t, err)
-			storedLinux.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
-			before := []service.CodexTurnStateRecord{f.state, *storedLinux}
+			before := []service.CodexTurnStateRecord{f.state}
+			for _, family := range []string{service.OpenAIOSLinux, service.OpenAIOSMacOS} {
+				// The low-level state fixture initially creates only Windows metadata.
+				_, err := integrationDB.ExecContext(ctx, `INSERT INTO account_openai_oauth_os_credentials
+					(account_id,os_family,credentials,status,authorization_generation,credential_epoch)
+					SELECT account_id,$2,'{}',status,authorization_generation,credential_epoch
+					FROM account_openai_oauth_credentials WHERE account_id=$1`, f.key.OwnerAccountID, family)
+				require.NoError(t, err)
+				// Authorization is shared; read each existing identity projection
+				// without rebinding and invalidating the already seeded OS states.
+				slot, err := f.accounts.GetOpenAIOAuthOSCredential(ctx, f.key.OwnerAccountID, family)
+				require.NoError(t, err)
+				require.NotNil(t, slot)
+				key := f.key
+				key.OSFamily, key.Generation = family, slot.StateGeneration
+				now := time.Now().UTC()
+				initial, err := f.states.BeginBusiness(ctx, key, family+"-seed", now, now.Add(time.Minute))
+				require.NoError(t, err)
+				require.NotNil(t, initial)
+				require.NoError(t, f.states.EndBusiness(ctx, key, family+"-seed"))
+				state := f.state
+				state.OSFamily, state.Generation, state.Version = family, slot.StateGeneration, initial.Version
+				state.EncryptedToken = family + "-private-state"
+				ok, err := f.states.SaveCAS(ctx, state, initial.Version)
+				require.NoError(t, err)
+				require.True(t, ok)
+				stored, err := f.states.Get(ctx, key)
+				require.NoError(t, err)
+				require.NotNil(t, stored)
+				stored.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
+				before = append(before, *stored)
+			}
 			f.change(t, ctx, bulk, service.CodexTurnStateConfig{Enabled: true, AccountType: "personal", CollectorProxyID: &f.proxyID}, nil)
 			for _, old := range before {
 				slot, err := f.accounts.GetOpenAIOAuthOSCredential(ctx, f.key.OwnerAccountID, old.OSFamily)
@@ -178,7 +189,7 @@ func TestCodexCollectorProxyChangePostgresPreservesEachOSCache(t *testing.T) {
 				require.Equal(t, old.IssuedAt, carried.IssuedAt)
 				require.Equal(t, old.ExpiresAt, carried.ExpiresAt)
 				require.Equal(t, old.Version+1, carried.Version)
-				ok, err = f.states.SaveCAS(ctx, old, old.Version)
+				ok, err := f.states.SaveCAS(ctx, old, old.Version)
 				require.NoError(t, err)
 				require.False(t, ok)
 			}

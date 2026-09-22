@@ -41,7 +41,7 @@
         </span>
       </div>
 
-      <OpenAIOAuthOSSelect v-if="usesOSAuthorization" :model-value="selectedOS" :profiles="account?.openai_oauth_os_profiles" :disabled="status === 'connecting'" authorized-only @update:model-value="selectTestOS" />
+      <OpenAIOAuthOSSelect v-if="usesOSIdentity" :model-value="selectedOS" :profiles="account?.openai_oauth_os_profiles" :disabled="status === 'connecting'" @update:model-value="selectTestOS" />
       <!-- Grok: mode first, then optional model / mode params -->
       <div v-if="isGrokAccount" class="space-y-1.5">
         <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -378,7 +378,7 @@ import { ADMIN_UI_REQUEST_HEADER } from '@/api/adminUIRequest'
 import { adminAPI } from '@/api/admin'
 import type { Account, ClaudeModel, OpenAIOAuthOS } from '@/types'
 import OpenAIOAuthOSSelect from '@/components/account/OpenAIOAuthOSSelect.vue'
-import { defaultOpenAIOS, isOpenAIOSAuthorized } from '@/components/account/openaiOAuthOS'
+import { defaultOpenAIOS } from '@/components/account/openaiOAuthOS'
 import { supportsCodexTurnState } from '@/components/account/codexTurnState'
 
 const { t } = useI18n()
@@ -411,7 +411,7 @@ const errorMessage = ref('')
 const availableModels = ref<ClaudeModel[]>([])
 const selectedModelId = ref('')
 const selectedOS = ref<OpenAIOAuthOS>('windows')
-const usesOSAuthorization = computed(() => !!props.account && supportsCodexTurnState(props.account))
+const usesOSIdentity = computed(() => !!props.account && supportsCodexTurnState(props.account))
 const testPrompt = ref('')
 const loadingModels = ref(false)
 let abortController: AbortController | null = null
@@ -681,7 +681,6 @@ const testModeSummary = computed(() => {
 
 const canStartTest = computed(() => {
   if (status.value === 'connecting') return false
-  if (usesOSAuthorization.value && !isOpenAIOSAuthorized(props.account?.openai_oauth_os_profiles, selectedOS.value)) return false
   if (isGrokAccount.value) {
     if (
       grokTestMode.value === 'search' ||
@@ -769,7 +768,7 @@ watch(grokTestMode, () => {
 })
 
 const selectTestOS = (os: OpenAIOAuthOS) => {
-  if (!props.show || !usesOSAuthorization.value) return
+  if (!props.show || !usesOSIdentity.value) return
   selectedOS.value = os
   abortStream()
   resetState()
@@ -781,16 +780,11 @@ let modelsLoadVersion = 0
 const loadAvailableModels = async () => {
   const version = ++modelsLoadVersion
   if (!props.account) return
-  if (usesOSAuthorization.value && !isOpenAIOSAuthorized(props.account.openai_oauth_os_profiles, selectedOS.value)) {
-    availableModels.value = []
-    selectedModelId.value = ''
-    return
-  }
 
   loadingModels.value = true
   selectedModelId.value = '' // Reset selection before loading
   try {
-    const models = await adminAPI.accounts.getAvailableModels(props.account.id, usesOSAuthorization.value ? selectedOS.value : undefined)
+    const models = await adminAPI.accounts.getAvailableModels(props.account.id, usesOSIdentity.value ? selectedOS.value : undefined)
     if (version !== modelsLoadVersion) return
     availableModels.value = props.account.platform === 'gemini' || props.account.platform === 'antigravity'
       ? sortTestModels(models)
@@ -940,7 +934,7 @@ const startTest = async () => {
     if (isOpenAIAccount.value) {
       requestBody.mode = testMode.value
     }
-    if (usesOSAuthorization.value) requestBody.os = selectedOS.value
+    if (usesOSIdentity.value) requestBody.os = selectedOS.value
     if (isGrokAccount.value) {
       // Always send explicit Grok mode. search/tts/stt/realtime are standalone
       // endpoints (no free-form model select). text/image/video use optional model.

@@ -12,31 +12,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLiveCreateUsesRequestedOSAuthorization(t *testing.T) {
+func TestLiveCreateUsesSharedAuthorizationAndRequestedOSIdentity(t *testing.T) {
 	account, repo := oauthOSCredentialFixture(t)
 	upstream := &liveHTTPUpstreamStub{}
 	gateway := &OpenAIGatewayService{accountRepo: repo, httpUpstream: upstream}
 	ctx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: OpenAIOSLinux, Source: "user_agent", Captured: true})
 	created, err := gateway.createUpstreamLiveCall(ctx, account, &LiveCallRequest{SDP: "v=0", Session: json.RawMessage(`{"model":"gpt-live"}`)}, "test-attestation")
 	require.NoError(t, err)
-	require.Equal(t, "Bearer linux-token", upstream.request.Header.Get("Authorization"))
+	require.Equal(t, "Bearer shared-token", upstream.request.Header.Get("Authorization"))
 	require.Equal(t, OpenAIOSLinux, created.Account.OpenAIOAuthCredentialOS)
 	require.Equal(t, OpenAIOSLinux, openai.DetectOSFamilyFromUserAgent(upstream.request.Header.Get("User-Agent")))
 	upstream.request = nil
 	repo.slots[OpenAIOSLinux].Status = OpenAIOAuthAuthorizationUnauthorized
 	_, err = gateway.createUpstreamLiveCall(ctx, account, &LiveCallRequest{SDP: "v=0", Session: json.RawMessage(`{"model":"gpt-live"}`)}, "test-attestation")
 	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized)
-	require.Nil(t, upstream.request, "an unauthorized OS must not send using the default token")
+	require.Nil(t, upstream.request, "an unavailable shared grant must not send")
 }
 
 func TestLiveSidebandPreservesAuthorizationAcrossDefaultChanges(t *testing.T) {
 	account, repo := oauthOSCredentialFixture(t)
 	gateway := &OpenAIGatewayService{accountRepo: repo}
-	record := &LiveCallRecord{AccountID: account.ID, CredentialOS: OpenAIOSLinux, CredentialOwnerID: account.ID, AuthorizationGeneration: "linux-generation"}
+	record := &LiveCallRecord{AccountID: account.ID, CredentialOS: OpenAIOSLinux, CredentialOwnerID: account.ID, AuthorizationGeneration: "shared-generation"}
 	account.OpenAIOAuthOSProfiles.DefaultOS = OpenAIOSWindows
 	resolved, err := gateway.resolveLiveCallAccount(context.Background(), record)
 	require.NoError(t, err)
-	require.Equal(t, "linux-token", resolved.GetOpenAIAccessToken())
+	require.Equal(t, "shared-token", resolved.GetOpenAIAccessToken())
 	repo.slots[OpenAIOSLinux].AuthorizationGeneration = "rebound"
 	_, err = gateway.resolveLiveCallAccount(context.Background(), record)
 	require.ErrorIs(t, err, ErrOpenAIOAuthOSAuthorizationChanged)
@@ -57,7 +57,7 @@ func (r auxiliaryOSModelsRepository) ListByGroup(context.Context, int64) ([]Acco
 	return accounts, nil
 }
 
-func TestPinnedModelsEnforcesRequestedOSAuthorization(t *testing.T) {
+func TestPinnedModelsUsesSharedAuthorizationAndRequestedOSIdentity(t *testing.T) {
 	account, repo := oauthOSCredentialFixture(t)
 	account.Status, account.Schedulable = StatusActive, true
 	gateway := &OpenAIGatewayService{accountRepo: auxiliaryOSModelsRepository{repo}}
@@ -65,20 +65,22 @@ func TestPinnedModelsEnforcesRequestedOSAuthorization(t *testing.T) {
 	group.CodexModelsManifestConfig.Enabled = true
 	group.CodexModelsManifestConfig.AccountIDs = []int64{account.ID}
 	fetched := 0
+	expectedOS := OpenAIOSMacOS
 	fetch := func(_ context.Context, selected *Account) (*OpenAIModelsResponse, error) {
 		fetched++
-		require.Equal(t, OpenAIOSLinux, selected.OpenAIOAuthCredentialOS)
-		require.Equal(t, "linux-token", selected.GetOpenAIAccessToken())
+		require.Equal(t, expectedOS, selected.OpenAIOAuthCredentialOS)
+		require.Equal(t, "shared-token", selected.GetOpenAIAccessToken())
 		return &OpenAIModelsResponse{Body: []byte(`{"models":[]}`)}, nil
 	}
 	ctx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: OpenAIOSMacOS, Captured: true})
 	_, err := gateway.fetchPinnedOpenAIModels(ctx, group, fetch)
-	require.Equal(t, http.StatusServiceUnavailable, infraerrors.Code(err))
-	require.Zero(t, fetched)
+	require.NoError(t, err)
+	require.Equal(t, 1, fetched)
+	expectedOS = OpenAIOSLinux
 	ctx = ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: OpenAIOSLinux, Captured: true})
 	_, err = gateway.fetchPinnedOpenAIModels(ctx, group, fetch)
 	require.NoError(t, err)
-	require.Equal(t, 1, fetched)
+	require.Equal(t, 2, fetched)
 }
 
 func TestModelsBackgroundRefreshRejectsReboundAuthorization(t *testing.T) {
@@ -122,16 +124,16 @@ func TestQuotaHeadersFreezeCredentialOSAndRejectRebind(t *testing.T) {
 	require.NoError(t, err)
 	ctx := context.WithValue(context.Background(), openAIQuotaCredentialContextKey{}, scoped)
 	service := &OpenAIQuotaService{accountRepo: repo}
-	headers, _, err := service.buildCodexQuotaHeaders(ctx, account.ID, "linux-token", "test-account", false)
+	headers, _, err := service.buildCodexQuotaHeaders(ctx, account.ID, "shared-token", "test-account", false)
 	require.NoError(t, err)
-	require.Equal(t, "Bearer linux-token", headers["authorization"])
+	require.Equal(t, "Bearer shared-token", headers["authorization"])
 	require.Equal(t, OpenAIOSLinux, openai.DetectOSFamilyFromUserAgent(headers["user-agent"]))
 	repo.slots[OpenAIOSLinux].AuthorizationGeneration = "replacement"
-	_, _, err = service.buildCodexQuotaHeaders(ctx, account.ID, "linux-token", "test-account", false)
+	_, _, err = service.buildCodexQuotaHeaders(ctx, account.ID, "shared-token", "test-account", false)
 	require.ErrorIs(t, err, ErrOpenAIOAuthOSAuthorizationChanged)
 }
 
-func TestUsageProbeSkipsUnauthorizedDefaultWithoutCrossOSFallback(t *testing.T) {
+func TestUsageProbeSkipsUnavailableSharedGrant(t *testing.T) {
 	account, repo := oauthOSCredentialFixture(t)
 	repo.slots[OpenAIOSWindows].Status = OpenAIOAuthAuthorizationUnauthorized
 	service := &AccountUsageService{accountRepo: repo}

@@ -40,15 +40,15 @@ func (h *AccountHandler) exportOpenAIOAuthAuthorizations(ctx context.Context, ac
 		ListOpenAIOAuthOSCredentials(context.Context, int64) ([]*service.OpenAIOAuthOSCredential, error)
 	})
 	if !ok || account.OpenAIOAuthOSProfiles == nil {
-		return "", nil, errors.New("OpenAI OS authorization storage is unavailable")
+		return "", nil, errors.New("OpenAI OAuth authorization storage is unavailable")
 	}
 	defaultOS := account.OpenAIOAuthOSProfiles.DefaultOS
 	slots, err := reader.ListOpenAIOAuthOSCredentials(ctx, account.ID)
 	if err != nil {
-		return "", nil, errors.New("unable to read OpenAI OS authorizations")
+		return "", nil, errors.New("unable to read OpenAI OAuth authorization")
 	}
-	out := make(map[string]DataOpenAIOAuthAuthorization)
-	// Clear the compatibility mirror before projecting the actual default slot.
+	// New exports contain one shared credential tuple. The legacy OS map remains
+	// an import-only format and must not duplicate the same refresh token.
 	account.Credentials = service.PreserveOpenAIOAuthProviderCredentials(nil, account.Credentials)
 	for _, slot := range slots {
 		if slot == nil || slot.OwnerAccountID != account.ID || service.NormalizeOpenAIOSFamily(slot.OSFamily) == "" {
@@ -59,19 +59,16 @@ func (h *AccountHandler) exportOpenAIOAuthAuthorizations(ctx context.Context, ac
 		if strings.TrimSpace(codexCredentialString(credentials, "access_token")) == "" && strings.TrimSpace(codexCredentialString(credentials, "refresh_token")) == "" {
 			continue
 		}
-		out[slot.OSFamily] = DataOpenAIOAuthAuthorization{Credentials: credentials}
-		if slot.OSFamily == defaultOS {
-			account.Credentials = service.PreserveOpenAIOAuthProviderCredentials(credentials, account.Credentials)
-		}
+		account.Credentials = service.PreserveOpenAIOAuthProviderCredentials(credentials, account.Credentials)
+		break
 	}
-	return defaultOS, out, nil
+	return defaultOS, nil, nil
 }
 
-// Explicit multi-OS backup imports verify each refresh token before creating the
-// account. The repository then inserts every verified slot in one transaction.
-// Legacy single-credential backups still establish only the default OS, including
-// older access-token-only accounts that cannot renew their credentials.
-func (h *AccountHandler) prepareOpenAIOAuthBackupImport(ctx context.Context, item *DataAccount, proxyID *int64) (string, map[string]map[string]any, error) {
+// Old multi-OS backups collapse to one complete provider credential tuple. Prefer
+// the saved default identity; otherwise use the first populated known OS. Never
+// exchange unused refresh tokens or combine credentials from different grants.
+func (h *AccountHandler) prepareOpenAIOAuthBackupImport(_ context.Context, item *DataAccount, _ *int64) (string, map[string]map[string]any, error) {
 	account := &service.Account{Platform: item.Platform, Type: item.Type, Credentials: item.Credentials, Extra: item.Extra}
 	if item.OpenAIOAuthDefaultOS == "" && len(item.OpenAIOAuthAuthorizations) == 0 {
 		if service.IsOpenAIOAuthOSProfileOwner(account) {
@@ -81,15 +78,12 @@ func (h *AccountHandler) prepareOpenAIOAuthBackupImport(ctx context.Context, ite
 		return "", nil, nil
 	}
 	if !service.IsOpenAIOAuthOSProfileOwner(account) {
-		return "", nil, errors.New("OS authorizations require a regular OpenAI OAuth account")
+		return "", nil, errors.New("OAuth authorizations require a regular OpenAI OAuth account")
 	}
 	defaultOS := service.NormalizeOpenAIOSFamily(item.OpenAIOAuthDefaultOS)
 	if defaultOS == "" {
 		return "", nil, errors.New("openai_oauth_default_os must be windows, macos, or linux")
 	}
-	seenRefresh := make(map[string]struct{})
-	_, containsDefault := item.OpenAIOAuthAuthorizations[defaultOS]
-	requiresVerification := len(item.OpenAIOAuthAuthorizations) > 1 || len(item.OpenAIOAuthAuthorizations) == 1 && !containsDefault
 	for os, slot := range item.OpenAIOAuthAuthorizations {
 		if os == "" || service.NormalizeOpenAIOSFamily(os) != os || len(slot.Credentials) == 0 {
 			return "", nil, errors.New("invalid OpenAI OS authorization mapping")
@@ -97,62 +91,26 @@ func (h *AccountHandler) prepareOpenAIOAuthBackupImport(ctx context.Context, ite
 		if !service.IsOpenAIOAuthOSProfileOwner(&service.Account{Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: slot.Credentials}) {
 			return "", nil, errors.New("OS authorization mappings do not support PAT or Agent Identity credentials")
 		}
-		refresh := strings.TrimSpace(codexCredentialString(slot.Credentials, "refresh_token"))
-		if requiresVerification && refresh == "" {
-			return "", nil, errors.New("importing additional OS authorizations requires refresh_token for every saved OS; reauthorize missing systems")
-		}
-		if refresh != "" {
-			if _, exists := seenRefresh[refresh]; exists {
-				return "", nil, errors.New("each OS requires an independent refresh token; start a new OAuth login")
-			}
-			seenRefresh[refresh] = struct{}{}
-		}
 	}
 	item.Credentials = portableOpenAIOAuthCredentials(account, item.Credentials)
 	item.Extra = portableOpenAIOAuthExtra(account)
 	if len(item.OpenAIOAuthAuthorizations) == 0 {
 		return defaultOS, nil, nil
 	}
-	if len(item.OpenAIOAuthAuthorizations) == 1 {
-		if slot, exists := item.OpenAIOAuthAuthorizations[defaultOS]; exists {
-			item.Credentials = service.PreserveOpenAIOAuthProviderCredentials(slot.Credentials, item.Credentials)
-			delete(item.Credentials, "_token_version")
-			return defaultOS, nil, nil
-		}
-	}
-	if h.openaiOAuthService == nil {
-		return "", nil, errors.New("importing additional OS authorizations requires refresh_token verification or OAuth reauthorization")
-	}
-	var proxyURL string
-	if proxyID != nil {
-		proxy, err := h.adminService.GetProxy(ctx, *proxyID)
-		if err != nil || proxy == nil {
-			return "", nil, errors.New("unable to resolve authorization proxy")
-		}
-		proxyURL = proxy.URL()
-	}
-	verified := make(map[string]map[string]any, len(item.OpenAIOAuthAuthorizations))
-	var accountID, userID string
-	for _, os := range service.OpenAIOAuthOSFamilies() {
+	order := append([]string{defaultOS}, service.OpenAIOAuthOSFamilies()...)
+	for _, os := range order {
 		slot, exists := item.OpenAIOAuthAuthorizations[os]
 		if !exists {
 			continue
 		}
-		refresh := strings.TrimSpace(codexCredentialString(slot.Credentials, "refresh_token"))
-		if refresh == "" {
-			return "", nil, errors.New("importing additional OS authorizations requires refresh_token for every saved OS; reauthorize missing systems")
+		credentials := service.OpenAIOAuthProviderCredentials(slot.Credentials)
+		if strings.TrimSpace(codexCredentialString(credentials, "access_token")) == "" && strings.TrimSpace(codexCredentialString(credentials, "refresh_token")) == "" {
+			continue
 		}
-		info, err := h.openaiOAuthService.RefreshTokenForOS(ctx, refresh, proxyURL, codexCredentialString(slot.Credentials, "client_id"), os)
-		if err != nil || info == nil || info.ChatGPTAccountID == "" || info.ChatGPTUserID == "" {
-			return "", nil, errors.New("unable to verify an imported OS authorization; reauthorize that OS")
-		}
-		if accountID != "" && (accountID != info.ChatGPTAccountID || userID != info.ChatGPTUserID) {
-			return "", nil, errors.New("all OS authorizations must belong to the same ChatGPT account and user")
-		}
-		accountID, userID = info.ChatGPTAccountID, info.ChatGPTUserID
-		verified[os] = h.openaiOAuthService.BuildAccountCredentials(info)
+		delete(credentials, "_token_version")
+		item.Credentials = service.PreserveOpenAIOAuthProviderCredentials(credentials, item.Credentials)
+		return defaultOS, nil, nil
 	}
-	// Never seed an unverified compatibility copy while importing verified slots.
-	item.Credentials = service.PreserveOpenAIOAuthProviderCredentials(verified[defaultOS], item.Credentials)
-	return defaultOS, verified, nil
+	item.Credentials = service.PreserveOpenAIOAuthProviderCredentials(nil, item.Credentials)
+	return defaultOS, nil, nil
 }

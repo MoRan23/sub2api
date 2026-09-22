@@ -421,6 +421,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/:id/refresh", h.Admin.Account.Refresh)
 		accounts.POST("/:id/apply-oauth-credentials", h.Admin.Account.ApplyOAuthCredentials)
 		accounts.DELETE("/:id/openai/os-auth/:os", h.Admin.Account.RevokeOpenAIOAuthOSAuthorization)
+		accounts.DELETE("/:id/openai-oauth-authorization", h.Admin.Account.RevokeOpenAIOAuthAuthorization)
 		accounts.PUT("/:id/openai/os-auth/:os/default", h.Admin.Account.SetDefaultOpenAIOAuthOS)
 		accounts.POST("/:id/set-privacy", h.Admin.Account.SetPrivacy)
 		accounts.POST("/:id/refresh-tier", h.Admin.Account.RefreshTier)
