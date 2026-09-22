@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"context"
 	"strconv"
 	"time"
 
@@ -37,25 +36,9 @@ func (h *AccountHandler) ExportCodexAuth(c *gin.Context) {
 		response.BadRequest(c, "os must be windows, macos, or linux")
 		return
 	}
-	// A legacy os query remains valid, but auth.json is account-wide. Always read
-	// the same private grant using the default identity projection.
-	os = ""
-	if account.OpenAIOAuthOSProfiles != nil {
-		os = account.OpenAIOAuthOSProfiles.DefaultOS
-	}
-	reader, ok := h.adminService.(interface {
-		GetOpenAIOAuthOSCredential(context.Context, int64, string) (*service.OpenAIOAuthOSCredential, error)
-	})
-	if !ok {
-		response.BadRequest(c, "OAuth authorization storage is unavailable")
-		return
-	}
-	slot, err := reader.GetOpenAIOAuthOSCredential(c.Request.Context(), id, os)
-	if err != nil {
-		response.BadRequest(c, "account has no saved OAuth authorization")
-		return
-	}
-	exported, err := service.BuildOpenAICodexAuthExportForOS(account, slot, time.Now())
+	// Legacy OS parameters are identity hints. Export the account's current
+	// complete credential snapshot without reading a second authorization store.
+	exported, err := service.BuildOpenAICodexAuthExport(account, time.Now())
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

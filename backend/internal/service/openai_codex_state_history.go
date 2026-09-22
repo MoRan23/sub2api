@@ -191,7 +191,13 @@ func (s *CodexTurnStateService) completeBusinessSent(a *CodexTurnStateAttempt) {
 		if err := s.processCodexTurnStateAnomaly(ctx, pending, true); err != nil {
 			return
 		}
-	} else if err := s.repo.MarkBusinessSent(ctx, key, sentAt); err != nil || !delivered {
+	} else if err := s.repo.MarkBusinessSent(ctx, key, sentAt); err != nil {
+		return
+	}
+	if record, err := s.repo.Get(ctx, key); err == nil && record != nil && s.ensureCodexTurnStateDemand(ctx, record) {
+		s.enqueue(ctx, key)
+	}
+	if !delivered {
 		return
 	}
 	owner, err := s.currentOwner(ctx, a.OwnerAccountID, a.OSFamily)
@@ -264,8 +270,8 @@ func (s *CodexTurnStateService) scanHistory(ctx context.Context) {
 	}
 	for _, owner := range owners {
 		if owner != nil {
-			for _, os := range []string{"windows", "macos", "linux"} {
-				projected, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accounts, owner, os)
+			{
+				projected, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accounts, owner, "")
 				if err == nil {
 					s.activateHistoryForOwner(ctx, projected, CodexTurnStateGenerationForAccount(projected))
 				}
@@ -281,7 +287,7 @@ func (s *CodexTurnStateService) activateHistoryForOwner(ctx context.Context, own
 	s.mu.Lock()
 	var canceled []CodexTurnStateKey
 	for key := range s.running {
-		if key.OwnerAccountID == owner.ID && key.OSFamily == codexTurnStateOS(owner) && (key.Generation != generation || !CodexTurnStateConfigForAccount(owner).Enabled) {
+		if key.OwnerAccountID == owner.ID && (key.Generation != generation || !CodexTurnStateConfigForAccount(owner).Enabled) {
 			canceled = append(canceled, key)
 		}
 	}
@@ -296,9 +302,6 @@ func (s *CodexTurnStateService) activateHistoryForOwner(ctx context.Context, own
 	}
 	now := s.now()
 	for _, proof := range codexStateHistorySnapshot(owner.ID, now.Add(-CodexTurnStateActiveWindow)) {
-		if proof.OSFamily != codexTurnStateOS(owner) {
-			continue
-		}
 		targetIndex := 0
 		if accountType == "team_business" {
 			targetIndex = 2
@@ -325,7 +328,7 @@ func (s *CodexTurnStateService) activateHistoryForOwner(ctx context.Context, own
 		}
 		proof.Generation, proof.ModelPolicyRevision, proof.AccountType = generation, revision, accountType
 		if created, err := repo.CreateHistoryDemand(ctx, proof, now); err == nil && created {
-			s.enqueue(ctx, CodexTurnStateKey{OwnerAccountID: owner.ID, OSFamily: codexTurnStateOS(owner), Model: proof.Model, Generation: generation})
+			s.enqueue(ctx, CodexTurnStateKey{OwnerAccountID: owner.ID, Model: proof.Model, Generation: generation})
 		}
 	}
 }

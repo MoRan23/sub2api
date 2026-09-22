@@ -39,7 +39,13 @@ func (r *schedulerOSAuthorizationTestRepo) GetOpenAIOAuthOSCredential(_ context.
 	}
 	projection := *grant
 	projection.OSFamily = os
-	projection.StateGeneration = fmt.Sprintf("state-%d/%s", id, os)
+	projection.StateGeneration = fmt.Sprintf("state-%d", id)
+	for _, account := range r.accounts {
+		if account.ID == id {
+			projection.Credentials = OpenAIOAuthProviderCredentials(account.Credentials)
+			break
+		}
+	}
 	return &projection, nil
 }
 
@@ -66,8 +72,13 @@ func schedulerOSAuthorizedAccount(id int64, defaultOS string, authorized ...stri
 	}
 	summary := profiles.Profiles[defaultOS].Authorization
 	profiles.Authorization = &summary
+	credentials := make(map[string]any)
+	if len(authorized) > 0 {
+		credentials["access_token"] = fmt.Sprintf("access-%d", id)
+		credentials["refresh_token"] = fmt.Sprintf("refresh-%d", id)
+	}
 	return Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1,
-		Credentials: map[string]any{}, OpenAIOAuthOSProfiles: profiles, Extra: map[string]any{"openai_oauth_responses_websockets_v2_enabled": true}}
+		Credentials: credentials, OpenAIOAuthOSProfiles: profiles, Extra: map[string]any{"openai_oauth_responses_websockets_v2_enabled": true}}
 }
 
 func TestOpenAISharedAuthorizationKnownOSDoesNotFilterBeforeTopKOrSticky(t *testing.T) {
@@ -259,7 +270,7 @@ func TestOpenAISharedAuthorizationWSFreezeRetainsTokenRevisionAndRejectsWrongTok
 	scoped := svc.resolveSelectedOpenAIOAuthCredentials(ctx, &account)
 	require.NotNil(t, scoped)
 	token := scoped.GetOpenAIAccessToken()
-	repo.slots["962/linux"].Credentials["access_token"] = "newer-refreshed-token"
+	repo.accounts[0].Credentials["access_token"] = "newer-refreshed-token"
 	repo.slots["962/linux"].Revision++
 	frozen, err := svc.freezeOpenAIWSAuthorization(ctx, scoped, token)
 	require.NoError(t, err)

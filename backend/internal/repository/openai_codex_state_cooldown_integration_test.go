@@ -34,7 +34,7 @@ func TestCodexStatePostgresCollectorReservationDoesNotExtendExpiredCooldown(t *t
 			require.NoError(t, err)
 			// Collector configuration changes rotate the runtime generation.
 			require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT state_generation::text
-				FROM account_openai_oauth_os_credentials WHERE account_id=$1 AND os_family=$2`, key.OwnerAccountID, key.OSFamily).Scan(&key.Generation))
+				FROM account_openai_oauth_credentials WHERE account_id=$1`, key.OwnerAccountID).Scan(&key.Generation))
 			repo := NewOpenAICodexStateRepository(integrationDB, integrationRedis)
 			cooldowns := repo.(service.CodexTurnStateCooldownRepository)
 			now := time.Now().UTC().Truncate(time.Microsecond)
@@ -69,6 +69,7 @@ func TestCodexStatePostgresCollectorReservationDoesNotExtendExpiredCooldown(t *t
 			active, err := repo.ListActive(ctx, now.Add(-time.Minute), 1000)
 			require.NoError(t, err)
 			var otherDue bool
+			otherKey.OSFamily = ""
 			for _, row := range active {
 				otherDue = otherDue || row.Key() == otherKey
 			}

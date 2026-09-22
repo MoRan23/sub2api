@@ -55,6 +55,8 @@ func (r *tokenRefreshOSCredentialsRepo) SetOpenAIOAuthOSCredentialErrorIfUnchang
 	}
 	r.slotErrors++
 	slot.Status = OpenAIOAuthAuthorizationReauthRequired
+	account := r.accountsByID[id]
+	account.Status, account.Schedulable, account.ErrorMessage = StatusError, false, "OAuth authorization must be renewed"
 	return true, nil
 }
 
@@ -89,6 +91,7 @@ func newTokenRefreshOSFixture(t *testing.T) (*Account, *tokenRefreshOSCredential
 		Status:      OpenAIOAuthAuthorizationAuthorized,
 		Credentials: map[string]any{"access_token": "shared-access", "refresh_token": "shared-refresh", "expires_at": time.Now().Add(-time.Minute).Unix()},
 	}
+	account.Credentials = grant.Credentials
 	for _, os := range OpenAIOAuthOSFamilies() {
 		repo.slots[os] = grant
 	}
@@ -122,7 +125,7 @@ func TestTokenRefreshService_OpenAISharedGrantRefreshesOnceAfterAccountPaginatio
 	require.Empty(t, repo.listedIDs)
 	require.Equal(t, []string{OpenAIOSWindows}, refresher.refreshed)
 	require.Equal(t, []string{OpenAIOSWindows}, repo.readOS)
-	require.Equal(t, "default-mirror", account.GetOpenAIAccessToken())
+	require.Equal(t, "shared-access", account.GetOpenAIAccessToken())
 }
 
 func TestTokenRefreshService_OpenAISharedGrantSkipsIneligibleAuthorization(t *testing.T) {
@@ -178,9 +181,13 @@ func TestTokenRefreshService_OpenAISharedGrantFailurePreservesRevisionGuard(t *t
 				if stale {
 					require.ErrorIs(t, err, errRefreshSkipped)
 					require.Zero(t, repo.slotErrors+repo.slotCooldowns)
+					require.Equal(t, StatusActive, account.Status)
+					require.True(t, account.Schedulable)
 				} else if permanent {
 					require.Equal(t, 1, repo.slotErrors)
 					require.Equal(t, OpenAIOAuthAuthorizationReauthRequired, repo.slots[OpenAIOSLinux].Status)
+					require.Equal(t, StatusError, account.Status)
+					require.False(t, account.Schedulable)
 				} else {
 					require.Equal(t, 1, repo.slotCooldowns)
 					require.NotNil(t, repo.slots[OpenAIOSLinux].RefreshRetryAfter)
@@ -212,7 +219,7 @@ func TestTokenRefreshService_OpenAISlotSuccessPreservesSharedCooldownAndPublishe
 	require.Zero(t, blocker.clearCalls)
 	require.Equal(t, OpenAIOSLinux, invalidator.lastAccount.OpenAIOAuthCredentialOS)
 	require.Equal(t, "shared-access", invalidator.lastAccount.GetOpenAIAccessToken())
-	require.Equal(t, "default-mirror", scheduler.lastAccount.GetOpenAIAccessToken())
+	require.Equal(t, "shared-access", scheduler.lastAccount.GetOpenAIAccessToken())
 	require.Empty(t, scheduler.lastAccount.OpenAIOAuthCredentialOS)
 	require.Equal(t, &until, scheduler.lastAccount.TempUnschedulableUntil)
 	require.Equal(t, OpenAIOAuthAuthorizationAuthorized, repo.slots[OpenAIOSWindows].Status)

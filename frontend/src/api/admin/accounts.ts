@@ -203,7 +203,7 @@ export async function getById(id: number): Promise<Account> {
 
 export interface CodexCookieDiagnostic {
   sent: boolean
-  source?: 'none' | 'persistent' | 'memory' | 'mixed'
+  source?: 'none' | 'bundle' | 'persistent' | 'memory' | 'mixed'
   names?: string[]
   cookies?: { name: string; expires_at?: string }[]
   reason?: string
@@ -227,13 +227,15 @@ export interface CodexTurnStateModelStatus {
   state: 'ready' | 'expired' | 'missing' | 'paused' | 'model_excluded' | 'model_policy_unavailable'
   model_allowed?: boolean
   cache_available?: boolean
-  collection_status?: 'idle' | 'pending' | 'collecting' | 'backoff' | 'paused' | 'blocked'
+  collection_status?: 'idle' | 'scheduled' | 'pending' | 'collecting' | 'backoff' | 'paused' | 'blocked'
   collection_reason?: string
   shape: string
   source: string
   token_length: number
   cipher_blocks: number
   expires_at?: string
+  /** Complete HTTP package expiry, bounded by the token and every cookie. */
+  cookie_bundle_expires_at?: string
   remaining_seconds: number
   last_business_at?: string
   last_collected_at?: string
@@ -270,6 +272,7 @@ export interface CodexTurnStateObservation extends CodexResponseEvidence {
 }
 
 export interface CodexTurnStateStatus {
+  cache_scope?: 'shared'
   os_family?: OpenAIOAuthOS
   account_id: number
   owner_account_id: number
@@ -290,6 +293,7 @@ export interface CodexTurnStateStatus {
 }
 
 export async function getCodexTurnState(id: number, signal?: AbortSignal, os?: OpenAIOAuthOS): Promise<CodexTurnStateStatus> {
+  // The OS filter selects observations only; model caches are shared across OSes.
   const { data } = await apiClient.get<CodexTurnStateStatus>(`/admin/accounts/${id}/codex-turn-state`, { signal, ...(os ? { params: { os } } : {}) })
   return data
 }

@@ -26,8 +26,16 @@ func (r *openAIStream403AccountRepo) SetError(context.Context, int64, string) er
 
 type openAIAuthPolicyAccountRepo struct {
 	AccountRepository
+	account       *Account
 	tempCalls     int
 	setErrorCalls int
+}
+
+func (r *openAIAuthPolicyAccountRepo) GetByID(_ context.Context, id int64) (*Account, error) {
+	if r.account == nil || r.account.ID != id {
+		return nil, ErrAccountNotFound
+	}
+	return snapshotOAuthRefreshAccount(r.account), nil
 }
 
 func (r *openAIAuthPolicyAccountRepo) SetTempUnschedulable(context.Context, int64, time.Time, string) error {
@@ -161,6 +169,7 @@ func TestOpenAIHTTPAuthMessagesUseExistingStatusPolicies(t *testing.T) {
 		svc := &OpenAIGatewayService{rateLimitService: rateLimits}
 		account := &Account{ID: 931, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
 			Credentials: map[string]any{"refresh_token": "refreshable"}}
+		repo.account = account
 		body := []byte(`{"error":{"message":"account is disabled"}}`)
 
 		require.False(t, isOpenAIHTTPUpstreamAccessStateError(http.StatusUnauthorized, "", body))
@@ -177,6 +186,7 @@ func TestOpenAIHTTPAuthMessagesUseExistingStatusPolicies(t *testing.T) {
 		svc := &OpenAIGatewayService{rateLimitService: rateLimits}
 		rateLimits.SetAccountRuntimeBlocker(svc)
 		account := &Account{ID: 932, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true}
+		repo.account = account
 		body := []byte(`{"error":{"message":"workspace has been suspended"}}`)
 
 		require.False(t, isOpenAIHTTPUpstreamAccessStateError(http.StatusForbidden, "", body))

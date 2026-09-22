@@ -21,19 +21,31 @@ type codexCookieCandidateTest struct {
 	commits, discards int
 	closed            bool
 	diagnostic        openaicookies.Diagnostic
+	snapshotErr       error
+	snapshotExpiresAt time.Time
 }
 
 func newCodexCookieCandidateTest() *codexCookieCandidateTest {
 	return &codexCookieCandidateTest{diagnostic: openaicookies.Diagnostic{Reason: "cookie_staged", Names: []string{"session"}}}
 }
 
-func (c *codexCookieCandidateTest) Commit(context.Context) error {
+func (c *codexCookieCandidateTest) Snapshot(expiresAt time.Time) (openaicookies.Bundle, error) {
+	if c.closed {
+		return openaicookies.Bundle{}, openaicookies.ErrAttemptClosed
+	}
+	c.snapshotExpiresAt = expiresAt
+	if c.snapshotErr != nil {
+		return openaicookies.Bundle{}, c.snapshotErr
+	}
+	return openaicookies.Bundle{Entries: []openaicookies.Entry{}, ExpiresAt: expiresAt}, nil
+}
+
+func (c *codexCookieCandidateTest) MarkPublished() {
 	if !c.closed {
 		c.commits++
 		c.closed = true
-		c.diagnostic.Reason, c.diagnostic.SavedCount = "cookie_updated", 1
+		c.diagnostic.Reason, c.diagnostic.SavedCount = "cookie_bundle_saved", 1
 	}
-	return nil
 }
 func (c *codexCookieCandidateTest) Discard() {
 	if !c.closed {
@@ -43,6 +55,12 @@ func (c *codexCookieCandidateTest) Discard() {
 	}
 }
 func (c *codexCookieCandidateTest) Diagnostic() openaicookies.Diagnostic { return c.diagnostic }
+
+type codexCookieCompletionTestCollector func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error)
+
+func (f codexCookieCompletionTestCollector) Collect(ctx context.Context, request CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
+	return f(ctx, request)
+}
 
 func TestCodexTurnStateCookieHTTPRequiresDeliveredCompletedTarget(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
@@ -70,9 +88,14 @@ func TestCodexTurnStateCookieHTTPRequiresDeliveredCompletedTarget(t *testing.T) 
 				request = gateway.prepareOpenAICodexStateHTTPRequest(nil, account, request)
 				collector, _ := request.Context().Value(codexTurnStateHTTPRequestKey{}).(*codexTurnStateHTTPCollector)
 				require.NotNil(t, collector)
-				require.NotNil(t, collector.attempt.cookieAttempt, "physical request has its own staged-cookie boundary")
 				cookies := newCodexCookieCandidateTest()
-				collector.attempt.cookieAttempt = cookies
+				wantCandidate := enabled && name != "model_excluded" && name != "maintenance_unavailable" && name != "stale_credentials"
+				if wantCandidate {
+					require.NotNil(t, collector.attempt.cookieAttempt, "enabled physical request has its own staged-cookie boundary")
+					collector.attempt.cookieAttempt = cookies
+				} else {
+					require.Nil(t, collector.attempt.cookieAttempt, "passive requests cannot retain cookie candidates")
+				}
 				token := codexStateTestToken(10, state.now())
 				switch name {
 				case "extended":
@@ -129,7 +152,7 @@ func TestCodexTurnStateCookieHTTPRequiresDeliveredCompletedTarget(t *testing.T) 
 				}
 				completeCodexTelemetryHTTPResponse(response, parseErr)
 				require.NoError(t, response.Body.Close())
-				wantCommit := name == "header_target" || name == "metadata_target" || name == "nonstream_target" || name == "business_model_mismatch" || name == "model_excluded" || name == "maintenance_unavailable"
+				wantCommit := wantCandidate && (name == "header_target" || name == "metadata_target" || name == "nonstream_target" || name == "business_model_mismatch")
 				if wantCommit {
 					require.Equal(t, 1, cookies.commits)
 				} else {
@@ -138,20 +161,33 @@ func TestCodexTurnStateCookieHTTPRequiresDeliveredCompletedTarget(t *testing.T) 
 				if !enabled {
 					require.Empty(t, collector.attempt.candidates, "passive cookie qualification must not retain token values")
 				}
-				wantReason := "cookie_target_rejected"
-				if wantCommit {
-					wantReason = "cookie_updated"
+				wantReason := ""
+				if wantCandidate {
+					wantReason = "cookie_target_rejected"
 				}
-				require.Equal(t, wantReason, collector.attempt.SafeObservation().CookieDiagnostic.Reason)
+				if wantCommit {
+					wantReason = "cookie_bundle_saved"
+				}
+				diagnostic := collector.attempt.SafeObservation().CookieDiagnostic
+				if wantCandidate {
+					require.NotNil(t, diagnostic)
+					require.Equal(t, wantReason, diagnostic.Reason)
+				} else {
+					require.Nil(t, diagnostic, "passive requests have no cookie publication diagnostics")
+				}
 				completeCodexTelemetryHTTPResponse(response, nil)
-				require.Equal(t, 1, cookies.commits+cookies.discards, "late completion cannot re-admit rejected cookies")
+				if wantCandidate {
+					require.Equal(t, 1, cookies.commits+cookies.discards, "late completion cannot re-admit rejected cookies")
+				} else {
+					require.Zero(t, cookies.commits+cookies.discards, "passive requests never create or publish a cookie candidate")
+				}
 			})
 		}
 	}
 }
 
 func TestCodexTurnStateCookieBusinessRequiresCacheAdmissionButAcceptsSameExpiringTarget(t *testing.T) {
-	for _, name := range []string{"same_expiring", "later_cache_wins", "store_failure"} {
+	for _, name := range []string{"same_expiring", "later_cache_wins", "store_failure", "snapshot_failure"} {
 		t.Run(name, func(t *testing.T) {
 			isolateCodexHistory(t)
 			isolateCodexTurnStateSummaryStore(t)
@@ -166,6 +202,9 @@ func TestCodexTurnStateCookieBusinessRequiresCacheAdmissionButAcceptsSameExpirin
 			request := gateway.prepareOpenAICodexStateHTTPRequest(nil, account, codexStateHTTPRequest(t, `{"model":"gpt-5","input":"hello"}`))
 			collector := request.Context().Value(codexTurnStateHTTPRequestKey{}).(*codexTurnStateHTTPCollector)
 			cookies := newCodexCookieCandidateTest()
+			if name == "snapshot_failure" {
+				cookies.snapshotErr = openaicookies.ErrNoSnapshot
+			}
 			collector.attempt.cookieAttempt = cookies
 			response := &http.Response{StatusCode: 200, Header: http.Header{"X-Codex-Turn-State": {token}}, Body: io.NopCloser(strings.NewReader(""))}
 			observeCodexTurnStateHTTPResponse(request, response, nil)
@@ -181,12 +220,21 @@ func TestCodexTurnStateCookieBusinessRequiresCacheAdmissionButAcceptsSameExpirin
 			if name == "store_failure" {
 				repo.getErr = errors.New("local store unavailable")
 			}
+			before := repo.records[collector.attempt.key]
 			completeCodexTelemetryHTTPResponse(response, nil)
 			require.NoError(t, response.Body.Close())
+			after := repo.records[collector.attempt.key]
 			if name == "same_expiring" {
 				require.Equal(t, 1, cookies.commits)
+				require.NotEmpty(t, after.EncryptedCookieBundle)
+				require.Equal(t, before.EncryptedToken, after.EncryptedToken)
+				require.Equal(t, before.IssuedAt, after.IssuedAt)
+				require.Equal(t, before.ExpiresAt, after.ExpiresAt, "same target never renews ticket lifetime")
+				require.Equal(t, before.ExpiresAt, cookies.snapshotExpiresAt)
+				require.Equal(t, before.ExpiresAt, *after.CookieBundleExpiresAt)
 			} else {
 				require.Zero(t, cookies.commits)
+				require.Equal(t, before.cacheIdentity(), after.cacheIdentity(), "rejected candidate cannot replace either half of the cached pair")
 			}
 		})
 	}
@@ -215,8 +263,9 @@ func TestCodexTurnStateCollectorCookieRequiresAcceptedTargetCAS(t *testing.T) {
 				}
 				repo.records[key] = record
 			}
-			state.collector = codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
-				result := CodexTurnStateCollectResult{StatusCode: 200, completed: true, Tokens: []string{token}, cookieAttempt: cookies}
+			state.collector = codexCookieCompletionTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
+				result := CodexTurnStateCollectResult{StatusCode: 200, completed: true, Tokens: []string{token}, cookieAttempt: cookies,
+					ModelEvidence: CodexModelEvidence{UpstreamResponseModel: "gpt-5", ModelRelation: "exact", ModelEvidenceSource: "response.model", HeaderEvidenceScope: "response", SafetyBufferingFasterModel: "gpt-5-mini"}}
 				switch name {
 				case "extended":
 					result.Tokens = []string{codexStateTestToken(11, *now)}
@@ -238,6 +287,12 @@ func TestCodexTurnStateCollectorCookieRequiresAcceptedTargetCAS(t *testing.T) {
 			state.collect(context.Background(), key)
 			if name == "target" || name == "expiring_target" || name == "same_expiring_target" {
 				require.Equal(t, 1, cookies.commits)
+				evidence := decryptCodexCookieAtomicTestEnvelope(t, state, repo.records[key]).ResponseEvidence
+				require.Equal(t, "gpt-5", evidence.UpstreamResponseModel)
+				require.Equal(t, "exact", evidence.ModelRelation)
+				require.Equal(t, "response.model", evidence.ModelEvidenceSource)
+				require.Equal(t, "response", evidence.HeaderEvidenceScope)
+				require.Equal(t, "gpt-5-mini", evidence.SafetyBufferingFasterModel)
 			} else {
 				require.Zero(t, cookies.commits)
 			}
@@ -250,13 +305,18 @@ type codexCookieGatewayUpstream struct {
 	*httpUpstreamRecorder
 	t       *testing.T
 	cookies *codexCookieCandidateTest
+	enabled bool
 }
 
 func (u *codexCookieGatewayUpstream) Do(req *http.Request, proxy string, id int64, concurrency int) (*http.Response, error) {
 	collector, _ := req.Context().Value(codexTurnStateHTTPRequestKey{}).(*codexTurnStateHTTPCollector)
 	require.NotNil(u.t, collector, "all Responses transport paths must prepare a physical attempt")
-	require.NotNil(u.t, collector.attempt.cookieAttempt)
-	collector.attempt.cookieAttempt = u.cookies
+	if u.enabled {
+		require.NotNil(u.t, collector.attempt.cookieAttempt)
+		collector.attempt.cookieAttempt = u.cookies
+	} else {
+		require.Nil(u.t, collector.attempt.cookieAttempt)
+	}
 	return u.httpUpstreamRecorder.Do(req, proxy, id, concurrency)
 }
 
@@ -280,18 +340,20 @@ func TestCodexTurnStateCookieGatewayAllHTTPEntryPaths(t *testing.T) {
 							account.Extra["openai_passthrough"] = true
 						}
 						cookies := newCodexCookieCandidateTest()
-						upstream := &codexCookieGatewayUpstream{t: t, cookies: cookies, httpUpstreamRecorder: &httpUpstreamRecorder{
+						upstream := &codexCookieGatewayUpstream{t: t, cookies: cookies, enabled: enabled, httpUpstreamRecorder: &httpUpstreamRecorder{
 							resp: codexStateHTTPIntegrationResponse(codexStateTestToken(10, state.now()), "header", failed),
 						}}
 						gateway := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, codexTurnStateService: state}
 						_, recorder, err := codexStateHTTPIntegrationForward(t, gateway, account, path, codexStateHTTPIntegrationBody(path, stream))
 						if !failed {
 							require.NoError(t, err, recorder.Body.String())
+						}
+						if enabled && !failed {
 							require.Equal(t, 1, cookies.commits)
 						} else {
 							require.Zero(t, cookies.commits)
 						}
-						require.True(t, cookies.closed)
+						require.Equal(t, enabled, cookies.closed)
 					})
 				}
 			}

@@ -35,7 +35,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AccountListItem } from '@/types'
 import type { CodexTurnStateModelStatus, CodexTurnStateObservation, CodexTurnStateStatus } from '@/api/admin/accounts'
-import { supportsCodexTurnState } from '@/components/account/codexTurnState'
+import { codexTurnStatePackageExpiry, supportsCodexTurnState } from '@/components/account/codexTurnState'
 
 const props = defineProps<{
   account: AccountListItem
@@ -101,7 +101,7 @@ const visibleRows = computed(() => allModels.value.slice(0, 5).map(model => {
 }))
 
 function remaining(model: CodexTurnStateModelStatus): number {
-  const expires = model.expires_at ? Date.parse(model.expires_at) : Number.NaN
+  const expires = codexTurnStatePackageExpiry(model)
   if (Number.isFinite(expires)) return Math.max(0, Math.ceil((expires - Math.max(props.now, props.observedAt)) / 1000))
   return Math.max(0, model.remaining_seconds - Math.max(0, Math.floor((props.now - props.observedAt) / 1000)))
 }
@@ -123,6 +123,10 @@ function indicator(model: ModelSummary): Indicator {
       (cache.state === 'expired' || Number.isFinite(Date.parse(cache.expires_at || '')))) return result('gray', 'dotExpiredIdle')
   }
   const observation = model.observation
+  if (targetCache && cache.cookie_bundle_expires_at && remaining(cache) === 0 &&
+    Date.parse(cache.cookie_bundle_expires_at) < Date.parse(cache.expires_at || '')) {
+    return result('gray', 'dotCookieExpired')
+  }
   if (observation) {
     const reason = observation.response_validation_reason
     if (reason === 'expired' || observation.response_shape === 'expired') return result('gray', 'dotExpired')

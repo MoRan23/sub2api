@@ -1,6 +1,34 @@
 package service
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
+)
+
+type openAIPluginRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f openAIPluginRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+// Plugins are another physical HTTP boundary. Apply the same explicit frozen
+// bundle and send guard before serializing the request into plugin RPC frames.
+// The manager has no persistent jar; unhandled dispatch leaves the original
+// request untouched for the builtin transport's own guarded physical send.
+func roundTripOpenAIPluginWithCookieBundle(manager *PluginManager, request *http.Request, proxyURL string, account *Account) (*http.Response, bool, error) {
+	if !openaicookies.EnabledForRequest(request) {
+		return manager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
+	}
+	var handled bool
+	boundary := openaicookies.NewManager().Wrap(openAIPluginRoundTripFunc(func(outbound *http.Request) (*http.Response, error) {
+		response, selected, err := manager.RoundTripOpenAIOAuth(outbound.Context(), outbound, proxyURL, account)
+		handled = selected
+		return response, err
+	}))
+	response, err := boundary.RoundTrip(request)
+	return response, handled, err
+}
 
 func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 	s.pluginManager = manager
@@ -17,14 +45,14 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 	if attempt := s.beginCodexTelemetryHTTPRequest(request, proxyURL, account); attempt != nil {
 		defer func() { observeCodexTelemetryHTTPResponse(attempt, response, err) }()
 	}
+	request = withOpenAINativeHTTPRequestScope(request, account, s.accountRepo, "gateway")
 	if s.pluginManager != nil {
 		var handled bool
-		response, handled, err = s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
+		response, handled, err = roundTripOpenAIPluginWithCookieBundle(s.pluginManager, request, proxyURL, account)
 		if handled {
 			return response, err
 		}
 	}
-	request = withOpenAINativeHTTPRequestScope(request, account, s.accountRepo, "gateway")
 	return s.httpUpstream.Do(request, proxyURL, account.ID, account.Concurrency)
 }
 

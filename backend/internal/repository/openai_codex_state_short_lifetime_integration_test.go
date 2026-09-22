@@ -18,7 +18,8 @@ func TestCodexStateShortLifetimeMigrationPreservesHistoryAndLimits(t *testing.T)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = tx.Rollback() })
 	_, err = tx.ExecContext(ctx, `CREATE TEMP TABLE openai_codex_state
-		(LIKE public.openai_codex_state INCLUDING DEFAULTS)`)
+		(LIKE public.openai_codex_state INCLUDING DEFAULTS);
+		ALTER TABLE openai_codex_state DROP COLUMN authorization_generation, ADD COLUMN os_family TEXT`)
 	require.NoError(t, err)
 	var now time.Time
 	require.NoError(t, tx.QueryRowContext(ctx, `SELECT NOW()`).Scan(&now))

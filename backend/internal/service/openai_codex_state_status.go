@@ -178,7 +178,7 @@ func attachCodexTurnStateObservations(status *CodexTurnStateStatus, enabled bool
 	for i := range status.Models {
 		status.Models[i].LatestResponseEvidence = nil
 		for _, observation := range observations {
-			if observation.Model == status.Models[i].Model && observation.OSFamily == status.Models[i].OSFamily {
+			if observation.Model == status.Models[i].Model {
 				evidence := observation.CodexModelEvidence.clone()
 				status.Models[i].LatestResponseEvidence = &evidence
 				break
@@ -191,6 +191,7 @@ func projectCodexTurnStateStatus(accountID int64, owner *Account, records []Code
 	cfg := CodexTurnStateConfigForAccount(owner)
 	proxyIDs := CodexTurnStateCollectorProxyIDs(cfg)
 	result := &CodexTurnStateStatus{OSFamily: codexTurnStateOS(owner), AccountID: accountID, OwnerAccountID: owner.ID, Inherited: owner.ID != accountID, Enabled: cfg.Enabled && codexTurnStateEligible(owner), AccountType: cfg.AccountType, ResolvedAccountType: CodexTurnStateAccountTypeForAccount(owner), CollectorProxyID: codexStateProxyIDPtr(codexTurnStateSelectedProxy(proxyIDs, 0)), CollectorProxyIDs: append([]int64{}, proxyIDs...), Models: []CodexTurnStateModelStatus{}}
+	result.CacheScope = "shared"
 	if result.OSFamily != "" && owner.OpenAIOAuthAuthorizationGeneration == "" {
 		result.Enabled, result.Reason = false, "authorization_unavailable"
 		return result
@@ -224,21 +225,22 @@ func projectCodexTurnStateStatus(accountID int64, owner *Account, records []Code
 		if codexTurnStateHasAccountCooldown(&record) && !record.NextCollectAt.Before(ownerRetry) {
 			ownerRetry, ownerRetryReason = record.NextCollectAt, record.LastError
 		}
-		if record.OSFamily == result.OSFamily && record.Generation == CodexTurnStateGenerationForAccount(owner) {
+		if record.Generation == CodexTurnStateGenerationForAccount(owner) {
 			ownerPaused = ownerPaused || record.CollectorPaused
 		}
 	}
 	for _, record := range records {
-		if record.OSFamily != result.OSFamily || record.Generation != CodexTurnStateGenerationForAccount(owner) {
+		if record.Generation != CodexTurnStateGenerationForAccount(owner) {
 			continue
 		}
 		item := CodexTurnStateModelStatus{OSFamily: record.OSFamily, Model: record.Model, State: "missing", Shape: record.Shape, Source: record.Source, TokenLength: record.TokenLength, CipherBlocks: record.CipherBlocks, CollectorPaused: record.CollectorPaused, LastError: record.LastError, RefreshReason: record.RefreshReason}
+		item.CacheScope, item.CookieBundleExpiresAt = "shared", record.CookieBundleExpiresAt
 		item.CollectorProxyID = codexStateProxyIDPtr(codexTurnStateSelectedProxy(proxyIDs, record.CollectorProxyID))
 		item.LastCollectorProxyID = codexStateProxyIDPtr(record.LastCollectorProxyID)
 		item.CollectorExtendedCount = record.CollectorExtendedCount
 		if record.EncryptedToken != "" {
 			item.State = "expired"
-			if record.ExpiresAt.After(now) {
+			if record.EncryptedCookieBundle != "" && record.ExpiresAt.After(now) && (record.CookieBundleExpiresAt == nil || record.CookieBundleExpiresAt.After(now)) {
 				item.State = "ready"
 				item.RemainingSeconds = int64(record.ExpiresAt.Sub(now) / time.Second)
 			}
@@ -258,9 +260,10 @@ func projectCodexTurnStateStatus(accountID int64, owner *Account, records []Code
 		item.LastCollectedAt = codexStateTimePtr(record.LastCollectedAt)
 		item.NextCollectAt = codexStateTimePtr(record.NextCollectAt)
 		item.CacheAvailable = result.Enabled && item.ModelAllowed && result.ExpectedLength > 0 &&
-			record.EncryptedToken != "" && record.Shape == CodexTurnStateShapeTarget &&
+			record.EncryptedToken != "" && record.EncryptedCookieBundle != "" && record.AuthorizationGeneration == owner.OpenAIOAuthAuthorizationGeneration && record.Shape == CodexTurnStateShapeTarget &&
 			record.TokenLength == result.ExpectedLength && record.CipherBlocks == map[int]int{292: 10, 332: 12}[result.ExpectedLength] &&
-			!record.IssuedAt.IsZero() && !record.IssuedAt.After(now.Add(30*time.Second)) && record.ExpiresAt.After(now)
+			!record.IssuedAt.IsZero() && !record.IssuedAt.After(now.Add(30*time.Second)) && record.ExpiresAt.After(now) &&
+			(record.CookieBundleExpiresAt == nil || record.CookieBundleExpiresAt.After(now))
 		item.CollectionStatus, item.CollectionReason = projectCodexStateCollection(result, owner, record, now, ownerPaused, ownerRetry, ownerRetryReason)
 		if !item.ModelAllowed {
 			item.CollectionStatus, item.CollectionReason = "blocked", item.State
@@ -301,26 +304,8 @@ func projectCodexStateCollection(status *CodexTurnStateStatus, owner *Account, r
 	if record.CollectionStatus == "collecting" && record.LastCollectedAt.Add(CodexTurnStateCollectTimeout).After(now) {
 		return "collecting", "collecting"
 	}
-	if codexTurnStateWaitsForProxyCacheExpiry(&record, now) {
-		if record.NextCollectAt.After(now) || ownerRetry.After(now) {
-			reason := record.LastError
-			if ownerRetry.After(record.NextCollectAt) {
-				reason = ownerRetryReason
-			}
-			if reason == "" {
-				reason = "account_cooldown"
-			}
-			return "backoff", reason
-		}
-		return "idle", "collector_proxy_changed"
-	}
-	if record.DemandReason == "" {
-		if record.EncryptedToken == "" {
-			return "idle", "waiting_business_response"
-		}
-		if record.ExpiresAt.After(now.Add(CodexTurnStateRefreshAhead)) {
-			return "idle", ""
-		}
+	if record.DemandReason == "refresh" && record.NextCollectAt.After(now) && !ownerRetry.After(now) && record.LastError == "" && !codexTurnStateCookieExpired(&record, now) {
+		return "scheduled", "refresh"
 	}
 	if record.NextCollectAt.After(now) || ownerRetry.After(now) {
 		reason := record.LastError
@@ -334,6 +319,9 @@ func projectCodexStateCollection(status *CodexTurnStateStatus, owner *Account, r
 	}
 	if record.CollectionReason == "collector_proxy_unavailable" {
 		return "blocked", record.CollectionReason
+	}
+	if record.CookieBundleExpiresAt != nil && !record.CookieBundleExpiresAt.After(now) && record.EncryptedToken != "" && record.ExpiresAt.After(now) {
+		return "pending", "cookie_expired"
 	}
 	return "pending", "queued"
 }

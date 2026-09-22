@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -43,6 +44,7 @@ func TestCodexTurnStateRecoveryWireTargetThenExtendedThenRecollect(t *testing.T)
 					require.NoError(t, state.Finish(context.Background(), seed, true))
 
 					calls := 0
+					manager := openaicookies.NewManager()
 					state.collector = NewCodexTurnStateHTTPCollector(func(_ context.Context, input CodexTurnStateCollectRequest, request *http.Request) (*http.Response, error) {
 						calls++
 						require.Equal(t, account.ID, input.Account.ID)
@@ -55,12 +57,15 @@ func TestCodexTurnStateRecoveryWireTargetThenExtendedThenRecollect(t *testing.T)
 						require.False(t, gjson.GetBytes(body, "client_metadata.x-codex-turn-state").Exists())
 						require.False(t, gjson.GetBytes(body, "previous_response_id").Exists())
 						require.NotContains(t, string(body), "hello")
-						return codexStateHTTPIntegrationResponse(fresh, "metadata", false), nil
+						ctx := openaicookies.WithScope(request.Context(), openaicookies.Scope{OwnerAccountID: input.Account.ID, OSFamily: input.Account.OpenAIOAuthCredentialOS, AuthorizationGeneration: input.Account.OpenAIOAuthAuthorizationGeneration})
+						return manager.Wrap(codexCookieAtomicRoundTripper(func(*http.Request) (*http.Response, error) {
+							return codexStateHTTPIntegrationResponse(fresh, "metadata", false), nil
+						})).RoundTrip(request.WithContext(ctx))
 					})
 					// Enable enqueue without starting workers so the invalidated state can
 					// be inspected before executing the already-enqueued collector task.
 					state.ctx = context.Background()
-					upstream := &httpUpstreamRecorder{resp: codexStateHTTPIntegrationResponse(extended, carrier, false)}
+					upstream := &codexStateCookieIntegrationUpstream{httpUpstreamRecorder: &httpUpstreamRecorder{resp: codexStateHTTPIntegrationResponse(extended, carrier, false)}, manager: manager, account: account}
 					gateway := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, codexTurnStateService: state}
 					result, recorder, err := codexStateHTTPIntegrationForward(t, gateway, account, path, codexStateHTTPIntegrationBody(path, true))
 					require.NoError(t, err, recorder.Body.String())
@@ -73,6 +78,7 @@ func TestCodexTurnStateRecoveryWireTargetThenExtendedThenRecollect(t *testing.T)
 					require.Empty(t, record.EncryptedToken)
 					require.True(t, record.ExpiresAt.IsZero())
 					require.Equal(t, "extended_shape", record.DemandReason)
+					require.False(t, record.NextCollectAt.After(now), "an invalidated package must not wait for its prior successful refresh interval")
 					require.Zero(t, record.CollectorExtendedCount, "business anomalies never count toward proxy rotation")
 					summary := requireCodexEnabledSummary(t, state, account.ID, "gpt-5.4", extended, carrier, "business", len(old))
 					require.Equal(t, "suspect", summary.ResponseShape)
@@ -89,7 +95,9 @@ func TestCodexTurnStateRecoveryWireTargetThenExtendedThenRecollect(t *testing.T)
 					plain, err := state.encryptor.Decrypt(recovered.EncryptedToken)
 					require.NoError(t, err)
 					require.Equal(t, fresh, plain)
-					require.Empty(t, recovered.DemandReason)
+					require.Equal(t, "refresh", recovered.DemandReason)
+					require.Equal(t, now.Add(CodexTurnStateCollectInterval), recovered.NextCollectAt)
+					require.NotEmpty(t, recovered.EncryptedCookieBundle)
 					collected := requireCodexEnabledSummary(t, state, account.ID, "gpt-5.4", fresh, "metadata", "collector", 0)
 
 					upstream.resp = codexStateHTTPIntegrationResponse("", "header", false)

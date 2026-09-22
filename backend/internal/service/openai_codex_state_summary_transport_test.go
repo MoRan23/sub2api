@@ -54,6 +54,20 @@ func requireCodexSummaryWithBothSwitchesOff(t *testing.T, state *CodexTurnStateS
 	requirePassiveWSNoMaintenance(t, state)
 }
 
+func requireNoCodexSummaryForWSTransport(t *testing.T, state *CodexTurnStateService, accountID int64, model string) {
+	t.Helper()
+	require.False(t, IsFingerprintObservationEnabled())
+	reader := NewCodexTurnStateService(&codexStateBatchRecords{}, state.accounts, nil, nil)
+	reader.modelPolicy = &codexStateBatchPolicy{models: []string{model}}
+	status, err := reader.GetStatus(context.Background(), accountID)
+	require.NoError(t, err)
+	require.False(t, status.Enabled)
+	require.Empty(t, status.Models)
+	require.Empty(t, status.Observations, "actual upstream WS responses cannot produce turn-state summaries")
+	require.Empty(t, SnapshotFingerprintObservations(0))
+	requirePassiveWSNoMaintenance(t, state)
+}
+
 func TestCodexTurnStateSummaryHTTPAllPathsWithBothSwitchesOff(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, path := range []string{"responses", "passthrough", "chat", "messages"} {
@@ -93,6 +107,8 @@ func TestCodexTurnStateSummaryWSBridgeWithBothSwitchesOff(t *testing.T) {
 			svc, account, repo, accounts := newCodexWSStateTestGateway(t, "personal")
 			account.Extra[CodexTurnStateExtraKey] = CodexTurnStateConfig{AccountType: "personal"}
 			accounts.update(func(a *Account) { a.Extra[CodexTurnStateExtraKey] = account.Extra[CodexTurnStateExtraKey] })
+			readSpy := &codexNativeWSStateReadSpy{CodexTurnStateRepository: repo}
+			svc.codexTurnStateService.repo = readSpy
 			cfg := newOpenAIWSV2TestConfig()
 			cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
 			cfg.Gateway.OpenAIWS.OAuthEnabled = true
@@ -118,7 +134,8 @@ func TestCodexTurnStateSummaryWSBridgeWithBothSwitchesOff(t *testing.T) {
 			conn.mu.Unlock()
 			require.NoError(t, err)
 			require.Equal(t, "private-client-frame", gjson.GetBytes(frame, "client_metadata.x-codex-turn-state").String())
-			requireCodexSummaryWithBothSwitchesOff(t, svc.codexTurnStateService, account.ID, "gpt-5.1", token, "metadata", len("private-client-frame"))
+			requireNoCodexSummaryForWSTransport(t, svc.codexTurnStateService, account.ID, "gpt-5.1")
+			require.Zero(t, readSpy.reads.Load(), "HTTP ingress does not enable the ticket cache on a WS upstream")
 			repo.mu.Lock()
 			defer repo.mu.Unlock()
 			require.Empty(t, repo.records)
@@ -143,10 +160,7 @@ func TestCodexTurnStateSummaryNativeWSWithBothSwitchesOff(t *testing.T) {
 				svc, account, _, repo, dialer = newCodexStatePassthroughHarness(t, false)
 				upstream, request, response = dialer.conn, dialer.request, dialer.headers
 				assertNoWrites = func() {
-					repo.mu.Lock()
-					defer repo.mu.Unlock()
-					require.Empty(t, repo.records)
-					require.Zero(t, repo.ended)
+					requireCodexStatePassthroughUntouched(t, repo, nil)
 				}
 			} else {
 				var repo *codexWSStateTestRepo
@@ -163,6 +177,8 @@ func TestCodexTurnStateSummaryNativeWSWithBothSwitchesOff(t *testing.T) {
 					require.Empty(t, repo.active)
 				}
 			}
+			readSpy := &codexNativeWSStateReadSpy{CodexTurnStateRepository: svc.codexTurnStateService.repo}
+			svc.codexTurnStateService.repo = readSpy
 			token := makeCodexWSStateTestToken(10, time.Now().Add(-time.Minute))
 			response.Set(openAIWSTurnStateHeader, token)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -178,7 +194,6 @@ func TestCodexTurnStateSummaryNativeWSWithBothSwitchesOff(t *testing.T) {
 			require.Equal(t, "private-client-frame", (<-request).Get(openAIWSTurnStateHeader))
 			upstream.Send(`{"type":"response.completed","response":{"id":"resp_summary_native","model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`)
 			readCodexStatePassthroughFrame(t, ctx, client)
-			requireCodexSummaryWithBothSwitchesOff(t, svc.codexTurnStateService, account.ID, "gpt-5.5", token, "header", len("private-client-frame"))
 			_ = client.CloseNow()
 			select {
 			case <-serverErr:
@@ -186,6 +201,8 @@ func TestCodexTurnStateSummaryNativeWSWithBothSwitchesOff(t *testing.T) {
 				t.Fatal("local summary connection did not finish")
 			}
 			assertNoWrites()
+			requireNoCodexSummaryForWSTransport(t, svc.codexTurnStateService, account.ID, "gpt-5.5")
+			require.Zero(t, readSpy.reads.Load())
 			require.Empty(t, request)
 			requirePassiveWSNoMaintenance(t, svc.codexTurnStateService)
 		})

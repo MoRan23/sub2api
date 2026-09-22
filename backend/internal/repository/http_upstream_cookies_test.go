@@ -4,10 +4,11 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
@@ -15,78 +16,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type upstreamCookieMemoryStore struct {
-	mu       sync.Mutex
-	entries  map[openaicookies.Scope]map[string]openaicookies.Entry
-	versions map[openaicookies.Scope]map[string]int64
-	sequence int64
-}
-
-func (s *upstreamCookieMemoryStore) Load(_ context.Context, scope openaicookies.Scope) (openaicookies.Snapshot, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var entries []openaicookies.Entry
-	for _, entry := range s.entries[scope] {
-		entries = append(entries, entry)
-	}
-	versions := make(map[string]int64)
-	for key, version := range s.versions[scope] {
-		versions[key] = version
-	}
-	return openaicookies.Snapshot{Entries: entries, Versions: versions}, nil
-}
-
-func (s *upstreamCookieMemoryStore) Merge(_ context.Context, scope openaicookies.Scope, mutations []openaicookies.Mutation) (map[string]int64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, mutation := range mutations {
-		if mutation.ExpectedVersion != nil && s.versions[scope][mutation.Key] != *mutation.ExpectedVersion {
-			return nil, openaicookies.ErrConflict
-		}
-	}
-	if s.entries == nil {
-		s.entries = make(map[openaicookies.Scope]map[string]openaicookies.Entry)
-	}
-	if s.entries[scope] == nil {
-		s.entries[scope] = make(map[string]openaicookies.Entry)
-	}
-	if s.versions == nil {
-		s.versions = make(map[openaicookies.Scope]map[string]int64)
-	}
-	if s.versions[scope] == nil {
-		s.versions[scope] = make(map[string]int64)
-	}
-	result := make(map[string]int64)
-	for _, mutation := range mutations {
-		s.sequence++
-		s.versions[scope][mutation.Key] = s.sequence
-		result[mutation.Key] = s.sequence
-		if mutation.Entry == nil {
-			delete(s.entries[scope], mutation.Key)
-		} else {
-			s.entries[scope][mutation.Key] = *mutation.Entry
-		}
-	}
-	return result, nil
-}
-
 type upstreamCookieRoundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f upstreamCookieRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// Exercise the actual outer Client.Do paths. Native dispatch uses inner
-// Transport.RoundTrip, so a jar installed on that inner client would fail here.
-func TestHTTPUpstreamCookiesAtActualSendBoundary(t *testing.T) {
+func TestHTTPUpstreamFrozenCookieBundlesAtActualSendBoundary(t *testing.T) {
 	for _, native := range []bool{false, true} {
 		t.Run(map[bool]string{false: "ordinary", true: "native"}[native], func(t *testing.T) {
-			manager := openaicookies.NewManager(&upstreamCookieMemoryStore{})
+			manager := openaicookies.NewManager()
 			s := NewHTTPUpstreamWithCookies(nil, manager).(*httpUpstreamService)
 			scope := openaicookies.Scope{OwnerAccountID: 31, OSFamily: "windows", AuthorizationGeneration: "grant-a"}
-			send := func(proxy, path string, cookieScope openaicookies.Scope, expected string, learn bool) {
+			send := func(proxy, path string, cookieScope openaicookies.Scope, base *openaicookies.Bundle, expected string, learn bool) openaicookies.Bundle {
 				ctx := openaicookies.WithScope(context.Background(), cookieScope)
 				var attempt *openaicookies.Attempt
-				if strings.HasPrefix(path, "/backend-api/codex/responses") {
-					ctx, attempt = openaicookies.WithAttempt(ctx)
+				if base != nil {
+					ctx, attempt = openaicookies.WithAttempt(openaicookies.WithBundle(ctx, *base))
 					defer attempt.Discard()
 				}
 				nativeScope := codexnative.Scope{AccountID: 31, Purpose: "oauth", AccountUserAgent: "Windows"}
@@ -96,7 +40,7 @@ func TestHTTPUpstreamCookiesAtActualSendBoundary(t *testing.T) {
 				request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://chatgpt.com"+path, nil)
 				require.NoError(t, err)
 				request.Header.Set("User-Agent", "codex-tui/0.155.1 (Windows 10.0; x86_64)")
-				request.Header.Set("Cookie", "__oailb=untrusted-client-value")
+				request.Header.Set("Cookie", "original=preserved-in-bypass")
 				var entry *upstreamClientEntry
 				if native {
 					entry, err = s.acquireNativeClient(proxy, 31, 2, service.HTTPUpstreamProfileDefault, nativeScope, codexnative.Resolve(request.UserAgent(), nativeScope))
@@ -110,26 +54,43 @@ func TestHTTPUpstreamCookiesAtActualSendBoundary(t *testing.T) {
 					require.Equal(t, expected, r.Header.Get("Cookie"))
 					header := make(http.Header)
 					if learn {
-						header.Add("Set-Cookie", "__oailb=synthetic-routing-value; Path=/; Secure; Max-Age=600")
+						header.Add("Set-Cookie", "__oailb=synthetic-route; Path=/; Secure; Max-Age=600")
 					}
 					return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader("{}")), Request: r}, nil
 				})
 				response, err := s.Do(request, proxy, 31, 2)
 				require.NoError(t, err)
 				require.NoError(t, response.Body.Close())
-				require.NoError(t, attempt.Commit(ctx))
 				require.Zero(t, atomic.LoadInt64(&entry.inFlight))
-				require.Equal(t, "__oailb=untrusted-client-value", request.Header.Get("Cookie"), "transport must clone rather than mutate caller headers")
+				require.Equal(t, "original=preserved-in-bypass", request.Header.Get("Cookie"), "physical transport must not mutate the original request")
+				if attempt == nil {
+					return openaicookies.Bundle{}
+				}
+				bundle, err := attempt.Snapshot(time.Now().Add(openaicookies.BundleLifetime))
+				require.NoError(t, err)
+				return bundle
 			}
-			send("", "/backend-api/plugins/list", scope, "", true)
-			send("", "/backend-api/codex/responses", scope, "", true)
-			send("http://proxy.invalid:8080", "/backend-api/codex/responses", scope, "__oailb=synthetic-routing-value", false)
+			// Auxiliary responses cannot feed a later model's cookie snapshot.
+			send("", "/backend-api/plugins/list", scope, nil, "original=preserved-in-bypass", true)
+			fresh := openaicookies.Bundle{}
+			bundle := send("", "/backend-api/codex/responses", scope, &fresh, "", true)
+			send("http://proxy.invalid:8080", "/backend-api/codex/responses", scope, &bundle, "__oailb=synthetic-route", false)
 			other := scope
 			other.OSFamily = "linux"
-			send("", "/backend-api/codex/responses", other, "", false)
-			other = scope
-			other.AuthorizationGeneration = "grant-b"
-			send("", "/backend-api/codex/responses", other, "", false)
+			send("", "/backend-api/codex/responses", other, &bundle, "__oailb=synthetic-route", false)
+			send("", "/backend-api/codex/responses", other, &fresh, "", false)
 		})
 	}
+}
+
+func TestHTTPUpstreamCookieBypassPreservesOriginalClientPolicy(t *testing.T) {
+	service := NewHTTPUpstreamWithCookies(nil, openaicookies.NewManager()).(*httpUpstreamService)
+	jar, err := cookiejar.New(nil)
+	require.NoError(t, err)
+	client := &http.Client{Jar: jar}
+	ctx := openaicookies.Bypass(openaicookies.WithBundle(context.Background(), openaicookies.Bundle{}))
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://chatgpt.com/", nil)
+	require.NoError(t, err)
+	require.Same(t, client, service.OpenAICookieClient(client, request))
+	require.Same(t, jar, client.Jar)
 }

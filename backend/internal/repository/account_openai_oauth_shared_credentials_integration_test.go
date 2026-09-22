@@ -123,12 +123,12 @@ func (s *AccountRepoSuite) TestOAuthSharedCredentialsAllOSReadOneGrantAndRefresh
 		s.Require().Equal(windows.AuthorizationGeneration, slot.AuthorizationGeneration)
 		s.Require().Equal(windows.Revision+1, slot.Revision)
 		s.Require().Equal("rotated", slot.Credentials["access_token"])
-		s.Require().NotEqual(initial[os].StateGeneration, slot.StateGeneration)
+		s.Require().Equal(initial[os].StateGeneration, slot.StateGeneration, "normal token refresh preserves the owner runtime generation")
 	}
 	slots, err := s.repo.ListOpenAIOAuthOSCredentials(s.ctx, account.ID)
 	s.Require().NoError(err)
 	s.Require().Len(slots, 1)
-	var legacyTokens int
-	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, `SELECT count(*) FROM account_openai_oauth_os_credentials WHERE account_id=$1 AND credentials<>'{}'::jsonb`, []any{account.ID}, &legacyTokens))
-	s.Require().Zero(legacyTokens)
+	var tokenColumns int
+	s.Require().NoError(scanSingleRow(s.ctx, s.repo.sql, `SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name IN ('account_openai_oauth_os_credentials','account_openai_oauth_credentials') AND column_name='credentials'`, nil, &tokenColumns))
+	s.Require().Zero(tokenColumns)
 }

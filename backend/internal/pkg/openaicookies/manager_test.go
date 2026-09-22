@@ -3,86 +3,19 @@ package openaicookies
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-type memoryStore struct {
-	mu       sync.Mutex
-	entries  map[Scope]map[string]Entry
-	versions map[Scope]map[string]int64
-	version  int64
-	loadErr  error
-	mergeErr error
-	loads    int
-}
-
-func (s *memoryStore) Load(_ context.Context, scope Scope) (Snapshot, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.loads++
-	if s.loadErr != nil {
-		return Snapshot{}, s.loadErr
-	}
-	var result []Entry
-	for _, entry := range s.entries[scope] {
-		result = append(result, entry)
-	}
-	versions := make(map[string]int64)
-	for key, version := range s.versions[scope] {
-		versions[key] = version
-	}
-	return Snapshot{Entries: result, Versions: versions}, nil
-}
-
-func (s *memoryStore) Merge(_ context.Context, scope Scope, changes []Mutation) (map[string]int64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.mergeErr != nil {
-		return nil, s.mergeErr
-	}
-	for _, change := range changes {
-		if change.ExpectedVersion != nil && s.versions[scope][change.Key] != *change.ExpectedVersion {
-			return nil, ErrConflict
-		}
-	}
-	if s.entries == nil {
-		s.entries = make(map[Scope]map[string]Entry)
-	}
-	if s.entries[scope] == nil {
-		s.entries[scope] = make(map[string]Entry)
-	}
-	if s.versions == nil {
-		s.versions = make(map[Scope]map[string]int64)
-	}
-	if s.versions[scope] == nil {
-		s.versions[scope] = make(map[string]int64)
-	}
-	versions := make(map[string]int64)
-	for _, change := range changes {
-		s.version++
-		s.versions[scope][change.Key] = s.version
-		versions[change.Key] = s.version
-		if change.Entry == nil {
-			delete(s.entries[scope], change.Key)
-		} else {
-			s.entries[scope][change.Key] = *change.Entry
-		}
-	}
-	return versions, nil
-}
-
-var testScope = Scope{OwnerAccountID: 1, OSFamily: "windows", AuthorizationGeneration: "00000000-0000-4000-8000-000000000001"}
+var testScope = Scope{OwnerAccountID: 1, OSFamily: "windows", AuthorizationGeneration: "grant-one"}
 
 func localCookieClient(t *testing.T, manager *Manager, handler http.HandlerFunc) *http.Client {
 	t.Helper()
@@ -96,18 +29,9 @@ func localCookieClient(t *testing.T, manager *Manager, handler http.HandlerFunc)
 	return &http.Client{Transport: manager.Wrap(transport)}
 }
 
-func cookieRequest(t *testing.T, client *http.Client, scope Scope, path string, headers http.Header, diagnostics *[]Diagnostic) {
+func doCookieRequest(t *testing.T, client *http.Client, ctx context.Context, target string, headers http.Header) {
 	t.Helper()
-	ctx := WithScope(context.Background(), scope)
-	if diagnostics != nil {
-		ctx = WithObserver(ctx, func(d Diagnostic) { *diagnostics = append(*diagnostics, d) })
-	}
-	var attempt *Attempt
-	if scope.Persistent() {
-		ctx, attempt = WithAttempt(ctx)
-		defer attempt.Discard()
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://chatgpt.com"+path, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	require.NoError(t, err)
 	request.Header = headers.Clone()
 	response, err := client.Do(request)
@@ -115,85 +39,150 @@ func cookieRequest(t *testing.T, client *http.Client, scope Scope, path string, 
 	_, err = io.Copy(io.Discard, response.Body)
 	require.NoError(t, err)
 	require.NoError(t, response.Body.Close())
-	require.NoError(t, attempt.Commit(ctx))
 }
 
-func TestManagerAcceptedResponsePersistenceAndSession(t *testing.T) {
-	store := &memoryStore{}
-	manager := NewManager(store)
+func capturedRequest(t *testing.T, client *http.Client, scope Scope, bundle Bundle, path string) *Attempt {
+	t.Helper()
+	ctx, attempt := WithAttempt(WithBundle(WithScope(context.Background(), scope), bundle))
+	doCookieRequest(t, client, ctx, "https://chatgpt.com"+path, http.Header{"Cookie": {"caller=excluded"}})
+	return attempt
+}
+
+func testBundle(t *testing.T, now time.Time, cookies ...*http.Cookie) Bundle {
+	t.Helper()
+	result := Bundle{ExpiresAt: now.Add(BundleLifetime)}
+	target, _ := url.Parse("https://chatgpt.com/backend-api/codex/responses")
+	for _, cookie := range cookies {
+		entry, deleted, ok := normalize(target, cookie, now)
+		require.True(t, ok)
+		require.False(t, deleted)
+		if entry.ExpiresAt.IsZero() || entry.ExpiresAt.After(result.ExpiresAt) {
+			entry.ExpiresAt = result.ExpiresAt
+		}
+		if entry.ExpiresAt.Before(result.ExpiresAt) {
+			result.ExpiresAt = entry.ExpiresAt
+		}
+		result.Entries = append(result.Entries, entry)
+	}
+	require.True(t, result.ValidAt(now))
+	return result
+}
+
+func TestManagerFrozenBundleCanReplayAcrossOSAndNewProcesses(t *testing.T) {
+	manager := NewManager()
+	now := time.Now().UTC()
+	manager.now = func() time.Time { return now }
 	var sent []string
 	client := localCookieClient(t, manager, func(w http.ResponseWriter, r *http.Request) {
 		sent = append(sent, r.Header.Get("Cookie"))
-		if r.URL.Path == "/backend-api/codex/responses/accepted" {
-			w.Header().Add("Set-Cookie", "__oailb=route; Path=/; Max-Age=3600; Secure; HttpOnly")
+		if r.URL.Path == "/collect" {
+			w.Header().Add("Set-Cookie", "__oailb=route; Path=/; Max-Age=3600; Secure")
 			w.Header().Add("Set-Cookie", "__cflb=session; Path=/; Secure")
-			w.Header().Add("Set-Cookie", "login_session=private; Path=/; Max-Age=3600")
+			w.Header().Add("Set-Cookie", "login_session=excluded; Path=/")
 		}
-		w.WriteHeader(http.StatusOK)
 	})
-	cookieRequest(t, client, testScope, "/backend-api/codex/responses/accepted", http.Header{"Cookie": []string{"caller=must-not-forward"}}, nil)
+	attempt := capturedRequest(t, client, testScope, Bundle{}, "/collect")
 	require.Empty(t, sent[0])
-	var diagnostics []Diagnostic
-	cookieRequest(t, client, testScope, "/backend-api/codex/responses?model=other", nil, &diagnostics)
-	require.True(t, strings.Contains(sent[1], "__oailb=") && strings.Contains(sent[1], "__cflb="))
-	require.False(t, strings.Contains(sent[1], "login_session="))
-	require.Equal(t, "mixed", diagnostics[0].Source)
-	require.Equal(t, []string{"__cflb", "__oailb"}, diagnostics[0].Names)
-	loaded, err := store.Load(context.Background(), testScope)
+	bundle, err := attempt.Snapshot(now.Add(BundleLifetime))
 	require.NoError(t, err)
-	require.Len(t, loaded.Entries, 1)
-	newManager := NewManager(store)
-	entries, err := newManager.load(context.Background(), testScope)
-	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	require.Equal(t, "__oailb", entries[0].Name)
-	for _, scope := range []Scope{{OwnerAccountID: 2, OSFamily: "windows", AuthorizationGeneration: testScope.AuthorizationGeneration}, {OwnerAccountID: 1, OSFamily: "linux", AuthorizationGeneration: testScope.AuthorizationGeneration}, {OwnerAccountID: 1, OSFamily: "windows", AuthorizationGeneration: "new-generation"}} {
-		entries, err = manager.load(context.Background(), scope)
+	require.Len(t, bundle.Entries, 2)
+	for _, entry := range bundle.Entries {
+		require.Equal(t, now.Add(BundleLifetime), entry.ExpiresAt)
+	}
+	for _, os := range []string{"windows", "macos", "linux"} {
+		scope := testScope
+		scope.OSFamily = os
+		next := NewManager()
+		next.now = manager.now
+		replay := localCookieClient(t, next, func(w http.ResponseWriter, r *http.Request) {
+			require.True(t, strings.Contains(r.Header.Get("Cookie"), "__oailb=") && strings.Contains(r.Header.Get("Cookie"), "__cflb="))
+			require.False(t, strings.Contains(r.Header.Get("Cookie"), "caller="))
+		})
+		captured := capturedRequest(t, replay, scope, bundle, "/business")
+		copy, err := captured.Snapshot(now.Add(BundleLifetime))
 		require.NoError(t, err)
-		require.Empty(t, entries)
+		require.ElementsMatch(t, bundle.Entries, copy.Entries)
+	}
+	// The same manager cannot supply cookies to an unrelated model/attempt. Only
+	// the explicitly selected bundle can supply a base, including an empty base.
+	empty := capturedRequest(t, client, testScope, Bundle{}, "/fresh-other-model")
+	blank, err := empty.Snapshot(now.Add(BundleLifetime))
+	require.NoError(t, err)
+	require.Empty(t, blank.Entries)
+	require.True(t, blank.ValidAt(now))
+	require.Empty(t, sent[1])
+}
+
+func TestManagerDisabledAndBoundAuxiliaryCompletelyBypass(t *testing.T) {
+	now := time.Now()
+	bundle := testBundle(t, now, &http.Cookie{Name: "__oailb", Value: "saved", Path: "/"})
+	contexts := []context.Context{context.Background(), WithScope(context.Background(), testScope), Bypass(WithBundle(WithScope(context.Background(), testScope), bundle))}
+	for _, ctx := range contexts {
+		ctx, attempt := WithAttempt(ctx)
+		original := http.Header{"Cookie": {"already-filtered=original"}, "X-Codex-Turn-State": {"original-ticket"}}
+		client := localCookieClient(t, NewManager(), func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, original.Get("Cookie"), r.Header.Get("Cookie"))
+			require.Equal(t, original.Get("X-Codex-Turn-State"), r.Header.Get("X-Codex-Turn-State"))
+			w.Header().Add("Set-Cookie", "__oailb=ignored; Path=/; Max-Age=3600")
+		})
+		doCookieRequest(t, client, ctx, "https://chatgpt.com/auxiliary", original)
+		_, err := attempt.Snapshot(now.Add(BundleLifetime))
+		require.ErrorIs(t, err, ErrNoSnapshot)
 	}
 }
 
-func TestManagerAbsoluteExpiryDeletionAndSessionReplacement(t *testing.T) {
-	store := &memoryStore{}
-	manager := NewManager(store)
-	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
-	manager.now = func() time.Time { return now }
-	target, _ := url.Parse("https://chatgpt.com/backend-api/codex/responses")
-	entry, deleted, accepted := normalize(target, &http.Cookie{Name: "__oailb", Value: "route", MaxAge: 240, Expires: now.Add(time.Hour), Path: "/"}, now)
-	require.True(t, accepted)
-	require.False(t, deleted)
-	require.Equal(t, now.Add(240*time.Second), entry.ExpiresAt)
-	_, _, err := manager.merge(context.Background(), testScope, []Mutation{{Key: entry.Key, Entry: &entry}})
-	require.NoError(t, err)
-	now = now.Add(239 * time.Second)
-	entries, err := manager.load(context.Background(), testScope)
-	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	require.Equal(t, entry.ExpiresAt, entries[0].ExpiresAt)
-	now = now.Add(time.Second)
-	entries, err = manager.load(context.Background(), testScope)
-	require.NoError(t, err)
-	require.Empty(t, entries)
-	entry.ExpiresAt = now.Add(time.Hour)
-	_, _, err = manager.merge(context.Background(), testScope, []Mutation{{Key: entry.Key, Entry: &entry}})
-	require.NoError(t, err)
-	entry.ExpiresAt = time.Time{}
-	_, _, err = manager.merge(context.Background(), testScope, []Mutation{{Key: entry.Key, Entry: &entry}})
-	require.NoError(t, err)
-	loaded, err := store.Load(context.Background(), testScope)
-	require.NoError(t, err)
-	require.Empty(t, loaded.Entries, "a session replacement must delete the persistent version")
-	for _, cookie := range []*http.Cookie{{Name: "__oailb", Path: "/", MaxAge: -1}, {Name: "__oailb", Path: "/", Expires: now.Add(-time.Second)}} {
-		changes := normalizeResponse(target, []*http.Cookie{cookie}, now)
-		require.Len(t, changes, 1)
-		require.Nil(t, changes[0].Entry)
-		_, _, err = manager.merge(context.Background(), testScope, changes)
-		require.NoError(t, err)
-	}
-	entries, err = manager.load(context.Background(), testScope)
-	require.NoError(t, err)
-	require.Empty(t, entries)
+func TestManagerSendGuardRestoresOriginalRequestBeforeBypass(t *testing.T) {
+	ctx := WithBundle(WithScope(context.Background(), testScope), Bundle{})
+	ctx = WithSendGuard(ctx, func(request *http.Request) bool {
+		request.Header.Set("X-Codex-Turn-State", "original-ticket")
+		return false
+	})
+	ctx, attempt := WithAttempt(ctx)
+	client := localCookieClient(t, NewManager(), func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "original-ticket", r.Header.Get("X-Codex-Turn-State"))
+		require.Equal(t, "original=value", r.Header.Get("Cookie"))
+		require.Equal(t, "Bearer synthetic", r.Header.Get("Authorization"))
+		w.Header().Add("Set-Cookie", "__oailb=ignored; Path=/")
+	})
+	doCookieRequest(t, client, ctx, "https://chatgpt.com/", http.Header{"Cookie": {"original=value"}, "X-Codex-Turn-State": {"injected-ticket"}, "Authorization": {"Bearer synthetic"}})
+	_, err := attempt.Snapshot(time.Now().Add(BundleLifetime))
+	require.ErrorIs(t, err, ErrNoSnapshot)
+}
+
+func TestManagerExpiredBundleRejectsEveryCookieAndCachedTicket(t *testing.T) {
+	now := time.Now()
+	bundle := testBundle(t, now, &http.Cookie{Name: "__oailb", Value: "expires-first", Path: "/", MaxAge: 1}, &http.Cookie{Name: "__cflb", Value: "still-live", Path: "/", MaxAge: 60})
+	manager := NewManager()
+	manager.now = func() time.Time { return now.Add(2 * time.Second) }
+	client := localCookieClient(t, manager, func(w http.ResponseWriter, r *http.Request) {
+		require.Empty(t, r.Header.Get("Cookie"))
+		require.Empty(t, r.Header.Get("X-Codex-Turn-State"))
+		w.Header().Add("Set-Cookie", "__oailb=ignored; Path=/")
+	})
+	ctx, attempt := WithAttempt(WithBundle(WithScope(context.Background(), testScope), bundle))
+	doCookieRequest(t, client, ctx, "https://chatgpt.com/", http.Header{"Cookie": {"caller=blocked"}, "X-Codex-Turn-State": {"cached-ticket"}})
+	_, err := attempt.Snapshot(now.Add(BundleLifetime))
+	require.ErrorIs(t, err, ErrNoSnapshot)
+}
+
+func TestManagerEphemeralAuthorizationRedirectsStayIsolated(t *testing.T) {
+	manager := NewManager()
+	var cookies []string
+	client := localCookieClient(t, manager, func(w http.ResponseWriter, r *http.Request) {
+		cookies = append(cookies, r.Header.Get("Cookie"))
+		if r.URL.Path == "/start" {
+			w.Header().Add("Set-Cookie", "__cflb=flow; Path=/; Secure")
+			http.Redirect(w, r, "/finish", http.StatusFound)
+		}
+	})
+	ctx := WithScope(Bypass(context.Background()), Scope{EphemeralID: "first-flow"})
+	doCookieRequest(t, client, ctx, "https://chatgpt.com/start", nil)
+	require.Equal(t, []string{"", "__cflb=flow"}, cookies)
+	doCookieRequest(t, client, WithScope(context.Background(), Scope{EphemeralID: "second-flow"}), "https://chatgpt.com/finish", nil)
+	require.Empty(t, cookies[2])
+	manager.ClearEphemeral("first-flow")
+	doCookieRequest(t, client, ctx, "https://chatgpt.com/finish", nil)
+	require.Empty(t, cookies[3])
 }
 
 func TestCookieDomainPathAndHostPolicy(t *testing.T) {
@@ -210,8 +199,7 @@ func TestCookieDomainPathAndHostPolicy(t *testing.T) {
 		count int
 	}{{"https://chatgpt.com/backend-api/codex/responses", 2}, {"https://chatgpt.com/backend-api/codex/plugins/item", 3}, {"https://sub.chatgpt.com/backend-api/codex/responses", 1}, {"https://chatgpt.com/backend-api-other", 1}} {
 		r, _ := http.NewRequest(http.MethodGet, check.url, nil)
-		d := apply(r, entries, now)
-		require.Equal(t, check.count, d.SentCount)
+		require.Equal(t, check.count, apply(r, entries, now).SentCount)
 	}
 	for _, target := range []string{"http://chatgpt.com/", "https://api.openai.com/", "https://chatgpt.com.evil.example/", "https://sub.chat.openai.com/"} {
 		u, _ := url.Parse(target)
@@ -221,88 +209,4 @@ func TestCookieDomainPathAndHostPolicy(t *testing.T) {
 		_, _, accepted := normalize(origin, cookie, now)
 		require.False(t, accepted)
 	}
-}
-
-func TestManagerStoreFailureAndEphemeralFlow(t *testing.T) {
-	store := &memoryStore{loadErr: errors.New("private transport details")}
-	manager := NewManager(store)
-	var sent string
-	client := localCookieClient(t, manager, func(w http.ResponseWriter, r *http.Request) {
-		sent = r.Header.Get("Cookie")
-		w.Header().Add("Set-Cookie", "__oailb=route; Path=/; Max-Age=3600")
-	})
-	var diagnostics []Diagnostic
-	cookieRequest(t, client, testScope, "/", http.Header{"cookie": []string{"caller=blocked"}}, &diagnostics)
-	require.Empty(t, sent)
-	require.Equal(t, ErrStoreUnavailable.Error(), diagnostics[0].Reason)
-	require.False(t, diagnostics[0].Sent)
-	temporary := Scope{EphemeralID: "one-authorization-flow"}
-	cookieRequest(t, client, temporary, "/", nil, nil)
-	cookieRequest(t, client, temporary, "/", nil, &diagnostics)
-	require.True(t, strings.Contains(sent, "__oailb="))
-	require.Equal(t, "memory", diagnostics[len(diagnostics)-1].Source)
-	manager.ClearEphemeral(temporary.EphemeralID)
-	cookieRequest(t, client, temporary, "/", nil, nil)
-	require.Empty(t, sent)
-	require.Equal(t, 1, store.loads, "temporary flows never access persistent storage")
-}
-
-func TestManagerPerEntryMergeLatestStorageAndFailedPublication(t *testing.T) {
-	store := &memoryStore{}
-	first, second := NewManager(store), NewManager(store)
-	target, _ := url.Parse("https://chatgpt.com/")
-	now := time.Now()
-	left, _, ok := normalize(target, &http.Cookie{Name: "__oailb", Value: "one", Path: "/", MaxAge: 3600}, now)
-	require.True(t, ok)
-	right, _, ok := normalize(target, &http.Cookie{Name: "__cflb", Value: "two", Path: "/", MaxAge: 3600}, now)
-	require.True(t, ok)
-	var wait sync.WaitGroup
-	for index, manager := range []*Manager{first, second} {
-		entry := []Entry{left, right}[index]
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
-			_, _, err := manager.merge(context.Background(), testScope, []Mutation{{Key: entry.Key, Entry: &entry}})
-			if err != nil {
-				t.Errorf("merge failed: %s", safeReason(err))
-			}
-		}()
-	}
-	wait.Wait()
-	for _, manager := range []*Manager{first, second} {
-		entries, err := manager.load(context.Background(), testScope)
-		require.NoError(t, err)
-		require.Len(t, entries, 2)
-	}
-	_, _, err := first.merge(context.Background(), testScope, []Mutation{{Key: left.Key}})
-	require.NoError(t, err)
-	entries, err := second.load(context.Background(), testScope)
-	require.NoError(t, err)
-	require.Len(t, entries, 1, "each request observes deletion from another process")
-	store.mergeErr = ErrStaleScope
-	left.ExpiresAt = time.Time{}
-	_, _, err = first.merge(context.Background(), testScope, []Mutation{{Key: left.Key, Entry: &left}})
-	require.ErrorIs(t, err, ErrStaleScope)
-	entries, err = first.load(context.Background(), testScope)
-	require.NoError(t, err)
-	require.Len(t, entries, 1, "failed session publication cannot change process memory")
-}
-
-func TestManagerRedirectUsesTargetPathAndRejectsForeignHost(t *testing.T) {
-	manager := NewManager(&memoryStore{})
-	var destinationCookie string
-	client := localCookieClient(t, manager, func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/start":
-			w.Header().Add("Set-Cookie", "__oailb=route; Path=/allowed; Max-Age=3600")
-			http.Redirect(w, r, "/allowed/step", http.StatusFound)
-		case "/allowed/step":
-			require.Empty(t, r.Header.Get("Cookie"), "a redirect has no accepted target ticket")
-			http.Redirect(w, r, "https://untrusted.example/finish", http.StatusFound)
-		default:
-			destinationCookie = r.Header.Get("Cookie")
-		}
-	})
-	cookieRequest(t, client, testScope, "/start", nil, nil)
-	require.Empty(t, destinationCookie)
 }

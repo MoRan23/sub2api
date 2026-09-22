@@ -200,7 +200,8 @@ func TestCodexTurnStateRotationTargetWinsAndResetsWithoutChangingProxy(t *testin
 	require.EqualValues(t, 22, after.CollectorProxyID)
 	require.Zero(t, after.CollectorExtendedCount)
 	require.Empty(t, after.CollectorAttemptID)
-	require.Empty(t, after.DemandReason)
+	require.Equal(t, "refresh", after.DemandReason)
+	require.Equal(t, now.Add(CodexTurnStateCollectInterval), after.NextCollectAt)
 	plain, err := s.encryptor.Decrypt(after.EncryptedToken)
 	require.NoError(t, err)
 	require.Equal(t, target, plain)
@@ -237,7 +238,8 @@ func TestCodexTurnStateRotationBusinessTargetClearsPendingAttemptEvenForSameToke
 			require.EqualValues(t, 22, after.CollectorProxyID)
 			require.Zero(t, after.CollectorExtendedCount)
 			require.Empty(t, after.CollectorAttemptID)
-			require.Empty(t, after.DemandReason)
+			require.Equal(t, "refresh", after.DemandReason)
+			require.Equal(t, now.Add(CodexTurnStateCollectInterval), after.NextCollectAt)
 			require.Greater(t, after.Version, before.Version, "even a duplicate token must persist clearing the old attempt and anomaly count")
 		})
 	}
@@ -387,7 +389,8 @@ func TestCodexTurnStateRotationEmptyListOnlyLearnsBusinessTargets(t *testing.T) 
 	plain, err := s.encryptor.Decrypt(after.EncryptedToken)
 	require.NoError(t, err)
 	require.Equal(t, token, plain)
-	require.Empty(t, after.DemandReason)
+	require.Equal(t, "refresh", after.DemandReason)
+	require.Equal(t, now.Add(CodexTurnStateCollectInterval), after.NextCollectAt)
 }
 
 func TestCodexTurnStateRotationCompletionRequiresAttemptProxyAndGeneration(t *testing.T) {
@@ -445,7 +448,8 @@ func TestCodexTurnStateRotationSameValidCollectorTargetCompletesDemand(t *testin
 	require.EqualValues(t, 22, after.CollectorProxyID)
 	require.Zero(t, after.CollectorExtendedCount)
 	require.Empty(t, after.CollectorAttemptID)
-	require.Empty(t, after.DemandReason)
+	require.Equal(t, "refresh", after.DemandReason)
+	require.Equal(t, now.Add(CodexTurnStateCollectInterval), after.NextCollectAt)
 }
 
 func TestCodexTurnStateRotationDelayedCancellationPreservesSuccessor(t *testing.T) {
@@ -485,7 +489,8 @@ func TestCodexTurnStateRotationDelayedCancellationPreservesSuccessor(t *testing.
 			plain, err := s.encryptor.Decrypt(after.EncryptedToken)
 			require.NoError(t, err)
 			require.Equal(t, target, plain)
-			require.Empty(t, after.DemandReason)
+			require.Equal(t, "refresh", after.DemandReason)
+			require.Equal(t, now.Add(CodexTurnStateCollectInterval), after.NextCollectAt)
 			require.Empty(t, after.CollectorAttemptID)
 		})
 	}

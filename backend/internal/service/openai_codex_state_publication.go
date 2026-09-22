@@ -64,7 +64,13 @@ func (s *CodexTurnStateService) publishCodexTurnStateAnomaly(ctx context.Context
 		if (strict && record.Version != expected) || (record.Version != expected && !identity.matches(record)) {
 			return false, nil
 		}
+		// A newly invalidated package no longer qualifies for the successful
+		// refresh interval. Preserve error backoff and real account cooldowns.
+		if record.DemandReason == "refresh" && record.CollectionStatus == "scheduled" && record.LastError == "" && !codexTurnStateRetainsAccountCooldown(record) {
+			record.NextCollectAt = time.Time{}
+		}
 		record.EncryptedToken, record.ExpiresAt = "", time.Time{}
+		record.EncryptedCookieBundle, record.CookieBundleExpiresAt = "", nil
 		record.Shape, record.TokenLength, record.CipherBlocks = shape.Shape, shape.TokenLength, shape.CipherBlocks
 		if shape.IssuedAt.After(record.IssuedAt) {
 			record.IssuedAt = shape.IssuedAt

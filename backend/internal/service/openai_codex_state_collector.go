@@ -62,6 +62,7 @@ func (c *CodexTurnStateHTTPCollector) Collect(ctx context.Context, input CodexTu
 		cookieDiagnostic = codexCookieDiagnostic(diagnostic)
 		cookieMu.Unlock()
 	})
+	ctx = openaicookies.WithBundle(ctx, openaicookies.Bundle{})
 	ctx, cookieAttempt := openaicookies.WithAttempt(ctx)
 	result.cookieAttempt = cookieAttempt
 	if c == nil || c.Do == nil || input.ProxyID <= 0 || !codexTurnStateEligible(input.Account) || strings.TrimSpace(input.Model) == "" {

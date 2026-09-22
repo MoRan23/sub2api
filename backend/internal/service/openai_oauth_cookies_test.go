@@ -29,7 +29,7 @@ func (f cookieFlowOAuthClient) RefreshTokenWithClientID(ctx context.Context, _, 
 }
 
 func TestOpenAIOAuthCookiesOneEphemeralScopeSpansEnrichmentAndEnds(t *testing.T) {
-	manager := openaicookies.NewManager(nil)
+	manager := openaicookies.NewManager()
 	var tokenScopes []openaicookies.Scope
 	svc := NewOpenAIOAuthService(nil, cookieFlowOAuthClient(func(ctx context.Context) (*openai.TokenResponse, error) {
 		scope, ok := openaicookies.ScopeFromContext(ctx)
@@ -85,7 +85,7 @@ func TestOpenAIOAuthCookiesNewAuthorizationReplacesOldGrantAndCleansUpOnError(t 
 	for _, flow := range []string{"exchange", "reauthorize", "import", "unbound-refresh"} {
 		t.Run(flow, func(t *testing.T) {
 			svc, _, _ := authorizationTestSetup(t)
-			manager := openaicookies.NewManager(nil)
+			manager := openaicookies.NewManager()
 			svc.SetCookieManager(manager)
 			var usedScope openaicookies.Scope
 			var cookies []string
@@ -140,7 +140,7 @@ func TestOpenAIOAuthCookiesBoundRefreshRetainsCredentialScope(t *testing.T) {
 }
 
 func TestOpenAIOAuthCookiesConcurrentFlowsShareTransportWithoutSharingCookies(t *testing.T) {
-	manager := openaicookies.NewManager(nil)
+	manager := openaicookies.NewManager()
 	svc := NewOpenAIOAuthService(nil, cookieFlowOAuthClient(func(context.Context) (*openai.TokenResponse, error) {
 		return &openai.TokenResponse{AccessToken: "test-at", ExpiresIn: 3600, IDToken: authorizationTestIDToken("workspace", "user")}, nil
 	}))

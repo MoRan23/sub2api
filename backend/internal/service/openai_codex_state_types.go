@@ -8,19 +8,20 @@ import (
 )
 
 const (
-	CodexTurnStateLifetime       = 240 * time.Second
-	CodexTurnStateRefreshAhead   = 30 * time.Second
-	CodexTurnStateActiveWindow   = 30 * time.Minute
-	CodexTurnStateScanInterval   = 30 * time.Second
-	CodexTurnStateDueInterval    = time.Second
-	CodexTurnStateCollectTimeout = 20 * time.Second
-	CodexTurnStateRetryInterval  = 5 * time.Second
+	CodexTurnStateLifetime        = 240 * time.Second
+	CodexTurnStateRefreshAhead    = 30 * time.Second
+	CodexTurnStateActiveWindow    = 30 * time.Minute
+	CodexTurnStateScanInterval    = 30 * time.Second
+	CodexTurnStateDueInterval     = time.Second
+	CodexTurnStateCollectTimeout  = 12 * time.Second
+	CodexTurnStateRetryInterval   = 5 * time.Second
+	CodexTurnStateCollectInterval = 30 * time.Second
 )
 
 // CodexTurnStateKey always refers to the actual credential owner and final wire model.
 type CodexTurnStateKey struct {
 	OwnerAccountID int64
-	OSFamily       string
+	OSFamily       string // Compatibility field; runtime keys always leave this empty.
 	Model          string
 	Generation     string
 	// Set only on cancellation notifications, never on repository lookup keys.
@@ -31,59 +32,75 @@ type CodexTurnStateKey struct {
 type CodexTurnStateRecord struct {
 	// A transient publication fence, checked transactionally against settings.
 	// It is never persisted as part of a token record or exposed by JSON APIs.
-	ModelPolicyRevision    string `json:"-"`
-	BusinessInFlight       bool   `json:"-"`
-	OwnerAccountID         int64
-	OSFamily               string
-	Model                  string
-	Generation             string
-	Version                int64
-	EncryptedToken         string
-	IssuedAt               time.Time
-	ExpiresAt              time.Time
-	TokenLength            int
-	CipherBlocks           int
-	Source                 string
-	Shape                  string
-	RefreshReason          string
-	DemandReason           string
-	DemandAt               time.Time
-	HistoryProofObservedAt time.Time
-	CollectionStatus       string
-	CollectionReason       string
-	LastBusinessAt         time.Time
-	LastCollectedAt        time.Time
-	NextCollectAt          time.Time
-	CollectorPaused        bool
-	LastError              string
-	CollectorProxyID       int64
-	CollectorExtendedCount int
-	LastCollectorProxyID   int64
-	CollectorAttemptID     string `json:"-"`
+	ModelPolicyRevision     string `json:"-"`
+	BusinessInFlight        bool   `json:"-"`
+	OwnerAccountID          int64
+	OSFamily                string
+	Model                   string
+	Generation              string
+	Version                 int64
+	EncryptedToken          string
+	EncryptedCookieBundle   string `json:"-"`
+	AuthorizationGeneration string `json:"-"`
+	CookieBundleExpiresAt   *time.Time
+	IssuedAt                time.Time
+	ExpiresAt               time.Time
+	TokenLength             int
+	CipherBlocks            int
+	Source                  string
+	Shape                   string
+	RefreshReason           string
+	DemandReason            string
+	DemandAt                time.Time
+	HistoryProofObservedAt  time.Time
+	CollectionStatus        string
+	CollectionReason        string
+	LastBusinessAt          time.Time
+	LastCollectedAt         time.Time
+	NextCollectAt           time.Time
+	CollectorPaused         bool
+	LastError               string
+	CollectorProxyID        int64
+	CollectorExtendedCount  int
+	LastCollectorProxyID    int64
+	CollectorAttemptID      string `json:"-"`
 }
 
 func (r CodexTurnStateRecord) Key() CodexTurnStateKey {
-	return CodexTurnStateKey{OwnerAccountID: r.OwnerAccountID, OSFamily: r.OSFamily, Model: r.Model, Generation: r.Generation}
+	return CodexTurnStateKey{OwnerAccountID: r.OwnerAccountID, Model: r.Model, Generation: r.Generation}
 }
 
 // Cache identity is private request-local state, independent of scheduling CAS
 // versions. It is never persisted, exported, or used as historical evidence.
 type codexTurnStateCacheIdentity struct {
-	encryptedToken string
-	issuedAt       time.Time
-	expiresAt      time.Time
-	shape          string
-	tokenLength    int
-	cipherBlocks   int
+	encryptedToken          string
+	issuedAt                time.Time
+	expiresAt               time.Time
+	shape                   string
+	tokenLength             int
+	cipherBlocks            int
+	encryptedCookieBundle   string
+	cookieBundleExpiresAt   time.Time
+	authorizationGeneration string
 }
 
 func (r CodexTurnStateRecord) cacheIdentity() codexTurnStateCacheIdentity {
-	return codexTurnStateCacheIdentity{r.EncryptedToken, r.IssuedAt, r.ExpiresAt, r.Shape, r.TokenLength, r.CipherBlocks}
+	var cookieExpiry time.Time
+	if r.CookieBundleExpiresAt != nil {
+		cookieExpiry = *r.CookieBundleExpiresAt
+	}
+	return codexTurnStateCacheIdentity{r.EncryptedToken, r.IssuedAt, r.ExpiresAt, r.Shape, r.TokenLength, r.CipherBlocks, r.EncryptedCookieBundle, cookieExpiry, r.AuthorizationGeneration}
 }
 
 func (i codexTurnStateCacheIdentity) matches(r *CodexTurnStateRecord) bool {
-	return r != nil && i.encryptedToken == r.EncryptedToken && i.issuedAt.Equal(r.IssuedAt) &&
-		i.expiresAt.Equal(r.ExpiresAt) && i.shape == r.Shape && i.tokenLength == r.TokenLength && i.cipherBlocks == r.CipherBlocks
+	if r == nil {
+		return false
+	}
+	other := r.cacheIdentity()
+	return i.encryptedToken == other.encryptedToken && i.issuedAt.Equal(other.issuedAt) &&
+		i.expiresAt.Equal(other.expiresAt) && i.shape == other.shape && i.tokenLength == other.tokenLength && i.cipherBlocks == other.cipherBlocks &&
+		i.encryptedCookieBundle == other.encryptedCookieBundle && i.cookieBundleExpiresAt.Equal(other.cookieBundleExpiresAt) &&
+		i.authorizationGeneration == other.authorizationGeneration
 }
 
 // Implementations must guard writes against the live account generation and
@@ -113,21 +130,25 @@ type CodexTurnStateCooldownRepository interface {
 }
 
 type CodexTurnStateSnapshot struct {
-	Token        string
-	Version      int64
-	Source       string
-	TokenLength  int
-	CipherBlocks int
-	ExpiresAt    time.Time
+	Token                   string
+	EncryptedCookieBundle   string `json:"-"`
+	AuthorizationGeneration string `json:"-"`
+	CookieBundleExpiresAt   *time.Time
+	Version                 int64
+	Source                  string
+	TokenLength             int
+	CipherBlocks            int
+	ExpiresAt               time.Time
 }
 
 // Public identity and Snapshot fields are frozen by Prepare. Callers must not
 // modify them. Response candidates are private and synchronized for WS readers.
 type CodexTurnStateAttempt struct {
-	OwnerAccountID int64
-	OSFamily       string
-	Model          string
-	Generation     string
+	OwnerAccountID          int64
+	AuthorizationGeneration string
+	OSFamily                string
+	Model                   string
+	Generation              string
 	// Enabled=false is a passive fingerprint observation: no runtime lease,
 	// cached snapshot, retained response candidates, publication or collection.
 	Enabled              bool
@@ -228,6 +249,8 @@ type CodexTurnStateCollector interface {
 type CodexTurnStateCollectorHTTPDo func(context.Context, CodexTurnStateCollectRequest, *http.Request) (*http.Response, error)
 
 type CodexTurnStateModelStatus struct {
+	CacheScope             string              `json:"cache_scope"`
+	CookieBundleExpiresAt  *time.Time          `json:"cookie_bundle_expires_at,omitempty"`
 	LatestResponseEvidence *CodexModelEvidence `json:"latest_response_evidence,omitempty"`
 	OSFamily               string              `json:"os_family"`
 	Model                  string              `json:"model"`
@@ -254,6 +277,7 @@ type CodexTurnStateModelStatus struct {
 }
 
 type CodexTurnStateStatus struct {
+	CacheScope          string                           `json:"cache_scope"`
 	OSFamily            string                           `json:"os_family"`
 	AccountID           int64                            `json:"account_id"`
 	OwnerAccountID      int64                            `json:"owner_account_id"`

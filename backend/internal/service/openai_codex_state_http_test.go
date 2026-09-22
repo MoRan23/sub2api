@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -68,24 +69,37 @@ func TestCodexStateHTTPFrozenCarriersAndFinalModel(t *testing.T) {
 
 func TestCodexStateHTTPNaturalResponsePublicationBoundary(t *testing.T) {
 	for _, tc := range []struct {
-		name             string
-		parse, delivered bool
-		status           int
-		event            bool
+		name                        string
+		parse, delivered, completed bool
+		status                      int
+		event                       bool
 	}{
-		{"headers_delivered", true, true, 200, false}, {"metadata_delivered", true, true, 200, true},
-		{"headers_abandoned", false, false, 200, false}, {"parsed_but_undelivered", true, false, 200, false},
-		{"failed_status", false, false, 429, false},
+		{"headers_delivered", true, true, true, 200, false}, {"metadata_delivered", true, true, true, 200, true},
+		{"headers_abandoned", false, false, false, 200, false}, {"parsed_but_undelivered", true, false, true, 200, false},
+		{"delivered_without_terminal", true, true, false, 200, false}, {"failed_status", false, false, false, 429, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			state, repo, account := newCodexStateTestService(t)
+			now := time.Now().UTC().Truncate(time.Second)
+			state.now = func() time.Time { return now }
 			service := &OpenAIGatewayService{codexTurnStateService: state}
 			token := codexStateTestToken(10, state.now())
 			req := service.prepareOpenAICodexStateHTTPRequest(nil, account, codexStateHTTPRequest(t, `{"model":"gpt-5","input":"hello"}`))
-			resp := &http.Response{StatusCode: tc.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}
-			if !tc.event {
-				resp.Header.Set(openAICodexTurnStateHeader, token)
-			}
+			req = withOpenAINativeHTTPRequestScope(req, account, nil, "business")
+			scope, ok := openaicookies.ScopeFromContext(req.Context())
+			require.True(t, ok && scope.Persistent())
+			collector := req.Context().Value(codexTurnStateHTTPRequestKey{}).(*codexTurnStateHTTPCollector)
+			transport := openaicookies.NewManager().Wrap(openAIPluginRoundTripFunc(func(outbound *http.Request) (*http.Response, error) {
+				require.Empty(t, outbound.Header.Get("Cookie"))
+				response := &http.Response{StatusCode: tc.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(""))}
+				response.Header.Add("Set-Cookie", "__oailb=synthetic-route; Path=/; Secure; Max-Age=60")
+				if !tc.event {
+					response.Header.Set(openAICodexTurnStateHeader, token)
+				}
+				return response, nil
+			}))
+			resp, err := transport.RoundTrip(req)
+			require.NoError(t, err)
 			observeCodexTurnStateHTTPResponse(req, resp, nil)
 			if tc.parse {
 				beginCodexTelemetryHTTPParsing(resp)
@@ -94,6 +108,9 @@ func TestCodexStateHTTPNaturalResponsePublicationBoundary(t *testing.T) {
 				payload, _ := json.Marshal(map[string]any{"type": "response.metadata", "headers": map[string]string{openAICodexTurnStateHeader: token}})
 				observeCodexTelemetryHTTPPayload(resp, payload, "response.metadata")
 			}
+			if tc.completed {
+				observeCodexTelemetryHTTPPayload(resp, []byte(`{"type":"response.completed","response":{"model":"gpt-5","status":"completed"}}`), "response.completed")
+			}
 			if tc.delivered {
 				markCodexTurnStateHTTPDelivered(resp)
 			}
@@ -101,13 +118,29 @@ func TestCodexStateHTTPNaturalResponsePublicationBoundary(t *testing.T) {
 			if tc.parse {
 				completeCodexTelemetryHTTPResponse(resp, nil)
 			}
-			key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5", Generation: "gen1"}
+			key := collector.attempt.key
 			record, err := repo.Get(context.Background(), key)
 			require.NoError(t, err)
-			if tc.delivered {
+			if tc.delivered && tc.completed {
 				require.NotEmpty(t, record.EncryptedToken)
+				require.NotEmpty(t, record.EncryptedCookieBundle)
+				require.Equal(t, account.OpenAIOAuthAuthorizationGeneration, record.AuthorizationGeneration)
+				require.NotNil(t, record.CookieBundleExpiresAt)
+				require.False(t, record.CookieBundleExpiresAt.After(record.ExpiresAt))
+				plain, decryptErr := state.encryptor.Decrypt(record.EncryptedCookieBundle)
+				require.NoError(t, decryptErr)
+				var envelope codexTurnStateCookieEnvelope
+				require.NoError(t, json.Unmarshal([]byte(plain), &envelope))
+				require.Equal(t, key.OwnerAccountID, envelope.OwnerAccountID)
+				require.Equal(t, key.Model, envelope.Model)
+				require.Equal(t, record.AuthorizationGeneration, envelope.AuthorizationGeneration)
+				require.True(t, envelope.Bundle.ValidAt(state.now()))
+				require.Len(t, envelope.Bundle.Entries, 1)
+				require.Equal(t, "__oailb", envelope.Bundle.Entries[0].Name)
+				require.Equal(t, "synthetic-route", envelope.Bundle.Entries[0].Value)
 			} else {
 				require.Empty(t, record.EncryptedToken)
+				require.Empty(t, record.EncryptedCookieBundle)
 			}
 			active, _ := repo.HasBusiness(context.Background(), key, state.now())
 			require.False(t, active)
@@ -198,22 +231,33 @@ func TestCodexStateHTTPFailsOpenAndIgnoresNonResponses(t *testing.T) {
 }
 
 func TestCodexStateIntegrityTrustsOnlyExactPatch(t *testing.T) {
-	before := []byte(`{"model":"gpt-5","input":"keep","client_metadata":{"x-codex-turn-state":"old"}}`)
-	after, _ := sjson.SetBytes(before, "client_metadata.x-codex-turn-state", "server-snapshot")
-	patch := newCodexStateBodyPatch(before, after)
-	require.NotNil(t, patch)
-	state := NewOpenAIRequestIntegrityState(true, "responses", before)
-	good := state.Check(integrityTestAccount(), after, RequestIntegrityCheckOptions{CodexStatePatch: patch})
-	require.Equal(t, "expected_transform", good.Status)
-	tampered, _ := sjson.SetBytes(after, "client_metadata.x-codex-turn-state", "injected-after-freeze")
-	bad := state.Check(integrityTestAccount(), tampered, RequestIntegrityCheckOptions{CodexStatePatch: patch})
-	require.Equal(t, "difference", bad.Status)
-	require.Contains(t, bad.ChangedFields, "client_metadata.x-codex-turn-state")
-	changed, _ := sjson.SetBytes(after, "input", "corrupted")
-	require.Nil(t, newCodexStateBodyPatch(before, changed))
-	bad = state.Check(integrityTestAccount(), changed, RequestIntegrityCheckOptions{CodexStatePatch: patch})
-	require.Equal(t, "difference", bad.Status)
-	require.Contains(t, bad.ChangedFields, "input[0].content[0].text")
+	for _, tc := range []struct{ name, input, mutationPath, changedField string }{
+		{"scalar", `"keep"`, "input", "input"},
+		{"message_array", `[{"type":"message","role":"user","content":[{"type":"input_text","text":"keep"}]}]`, "input.0.content.0.text", "input[0].content[0].text"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := []byte(`{"model":"gpt-5","input":` + tc.input + `,"client_metadata":{"x-codex-turn-state":"old"}}`)
+			after, err := sjson.SetBytes(before, "client_metadata.x-codex-turn-state", "server-snapshot")
+			require.NoError(t, err)
+			patch := newCodexStateBodyPatch(before, after)
+			require.NotNil(t, patch)
+			state := NewOpenAIRequestIntegrityState(true, "responses", before)
+			opts := RequestIntegrityCheckOptions{Transport: "http", ExpectedModel: "gpt-5", CodexStatePatch: patch}
+			good := state.Check(integrityTestAccount(), after, opts)
+			require.Equal(t, "expected_transform", good.Status)
+			tampered, err := sjson.SetBytes(after, "client_metadata.x-codex-turn-state", "injected-after-freeze")
+			require.NoError(t, err)
+			bad := state.Check(integrityTestAccount(), tampered, opts)
+			require.Equal(t, "difference", bad.Status)
+			require.Contains(t, bad.ChangedFields, "client_metadata.x-codex-turn-state")
+			changed, err := sjson.SetBytes(after, tc.mutationPath, "corrupted")
+			require.NoError(t, err)
+			require.Nil(t, newCodexStateBodyPatch(before, changed))
+			bad = state.Check(integrityTestAccount(), changed, opts)
+			require.Equal(t, "difference", bad.Status)
+			require.Contains(t, bad.ChangedFields, tc.changedField)
+		})
+	}
 }
 
 func TestCodexStateHTTPObservationResponseBeforeRowBinding(t *testing.T) {

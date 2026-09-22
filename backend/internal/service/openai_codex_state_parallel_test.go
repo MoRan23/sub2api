@@ -92,7 +92,7 @@ func TestCodexTurnStateParallelCollectorFailureRetainsConcurrentCooldownThroughB
 			require.NoError(t, err)
 			require.Equal(t, token, plain)
 			require.Equal(t, "business", afterBusiness.Source)
-			require.Empty(t, afterBusiness.DemandReason)
+			require.Equal(t, "refresh", afterBusiness.DemandReason)
 			require.Equal(t, retryAt, afterBusiness.NextCollectAt)
 			require.Equal(t, marker, afterBusiness.LastError, "natural target success must not erase the concurrent account cooldown")
 			require.Equal(t, "backoff", afterBusiness.CollectionStatus)
@@ -157,7 +157,7 @@ func TestCodexTurnStateParallelCollectorPublicationRetriesSchedulingCASConflict(
 	require.NoError(t, err)
 	require.Equal(t, newToken, plain)
 	require.Equal(t, "collector", after.Source)
-	require.Empty(t, after.DemandReason)
+	require.Equal(t, "refresh", after.DemandReason)
 	require.Equal(t, retryAt, after.NextCollectAt, "recomputing the outcome must retain the concurrent account cooldown")
 	require.Equal(t, "collector_rate_limited", after.LastError)
 	require.Equal(t, "backoff", after.CollectionStatus)
@@ -193,11 +193,16 @@ func TestCodexTurnStateParallelCollectorPublicationPreservesBusinessTargetAfterC
 	require.NoError(t, err)
 	require.Equal(t, accepted.Version, after.Version)
 	require.Equal(t, accepted.EncryptedToken, after.EncryptedToken)
+	require.Equal(t, accepted.cacheIdentity(), after.cacheIdentity(), "a losing collector cannot replace the winning ticket, cookie bundle, or authorization binding")
 	plain, err := s.encryptor.Decrypt(after.EncryptedToken)
 	require.NoError(t, err)
 	require.Equal(t, businessToken, plain)
 	require.Equal(t, "business", after.Source)
-	require.Empty(t, after.DemandReason)
+	require.Equal(t, "refresh", after.DemandReason)
+	require.Equal(t, "scheduled", after.CollectionStatus)
+	require.Equal(t, "refresh", after.CollectionReason)
+	require.Equal(t, s.now().Add(CodexTurnStateCollectInterval), after.NextCollectAt)
+	require.Equal(t, accepted.NextCollectAt, after.NextCollectAt, "the losing collector cannot move the winning target's schedule")
 }
 
 func (r *codexStateInvalidationConflictRepository) SaveCAS(ctx context.Context, record CodexTurnStateRecord, expected int64) (bool, error) {
@@ -244,6 +249,8 @@ func TestCodexTurnStateParallelInvalidationRetriesSchedulingCASConflict(t *testi
 	after, err := repo.Get(ctx, business.key)
 	require.NoError(t, err)
 	require.Empty(t, after.EncryptedToken)
+	require.Empty(t, after.EncryptedCookieBundle, "accepted invalidation clears the complete cached pair")
+	require.Nil(t, after.CookieBundleExpiresAt)
 	require.Equal(t, CodexTurnStateShapeExtended, after.Shape)
 	require.Equal(t, "extended_shape", after.DemandReason)
 	require.Equal(t, business.SafeObservation().ObservedAt, after.DemandAt)
@@ -290,12 +297,17 @@ func TestCodexTurnStateParallelInvalidationPreservesNewTargetAfterCASConflict(t 
 	require.NoError(t, err)
 	require.Equal(t, accepted.Version, after.Version)
 	require.Equal(t, accepted.EncryptedToken, after.EncryptedToken)
+	require.Equal(t, accepted.cacheIdentity(), after.cacheIdentity(), "a late anomaly cannot remove the replacement target's encrypted cookie bundle")
 	plain, err := s.encryptor.Decrypt(after.EncryptedToken)
 	require.NoError(t, err)
 	require.Equal(t, newToken, plain)
 	require.Equal(t, CodexTurnStateShapeTarget, after.Shape)
 	require.Equal(t, "business", after.Source)
-	require.Empty(t, after.DemandReason, "a late anomaly must not create demand for the newly accepted target")
+	require.Equal(t, "refresh", after.DemandReason, "a late anomaly must preserve the newly accepted target's refresh demand")
+	require.Equal(t, "scheduled", after.CollectionStatus)
+	require.Equal(t, "refresh", after.CollectionReason)
+	require.Equal(t, s.now().Add(CodexTurnStateCollectInterval), after.NextCollectAt)
+	require.Equal(t, accepted.NextCollectAt, after.NextCollectAt, "a late anomaly must not reschedule the replacement target")
 }
 
 func TestCodexTurnStateParallelCollectorMetadataDoesNotInvalidateBusinessSnapshot(t *testing.T) {
@@ -336,6 +348,7 @@ func TestCodexTurnStateParallelCollectorMetadataDoesNotInvalidateBusinessSnapsho
 	require.Greater(t, afterCollection.Version, reserved.Version)
 	require.Equal(t, before.EncryptedToken, afterCollection.EncryptedToken)
 	require.Equal(t, before.ExpiresAt, afterCollection.ExpiresAt)
+	require.Equal(t, before.cacheIdentity(), afterCollection.cacheIdentity(), "a scheduling-only collection result preserves the complete frozen pair")
 	require.Equal(t, "backoff", afterCollection.CollectionStatus)
 	require.True(t, s.ValidateAttempt(ctx, business), "a non-target renewal result must not disable the still-valid frozen cache")
 	s.Observe(business, codexStateTestToken(11, s.now()))
@@ -343,6 +356,8 @@ func TestCodexTurnStateParallelCollectorMetadataDoesNotInvalidateBusinessSnapsho
 	afterBusiness, err := repo.Get(ctx, business.key)
 	require.NoError(t, err)
 	require.Empty(t, afterBusiness.EncryptedToken, "a delivered anomaly must revoke its unchanged old cache across scheduling-only version changes")
+	require.Empty(t, afterBusiness.EncryptedCookieBundle)
+	require.Nil(t, afterBusiness.CookieBundleExpiresAt)
 	require.Equal(t, "extended_shape", afterBusiness.DemandReason)
 	require.Equal(t, afterCollection.NextCollectAt, afterBusiness.NextCollectAt, "an anomaly must preserve the collector's retry fence")
 	require.False(t, s.ValidateAttempt(ctx, business), "a frozen token cannot be injected after its cache was revoked")
@@ -390,7 +405,10 @@ func TestCodexTurnStateParallelDuplicateNearExpiryBusinessTargetDoesNotCancelRen
 	require.NoError(t, err)
 	require.Equal(t, newToken, plain)
 	require.Equal(t, "collector", after.Source)
-	require.Empty(t, after.DemandReason)
+	require.Equal(t, "refresh", after.DemandReason)
+	require.Equal(t, "scheduled", after.CollectionStatus)
+	require.Equal(t, "refresh", after.CollectionReason)
+	require.Equal(t, s.now().Add(CodexTurnStateCollectInterval), after.NextCollectAt)
 }
 
 func TestCodexTurnStateParallelLateCollectorCannotOverwriteRemoteBusinessSuccess(t *testing.T) {
@@ -420,11 +438,16 @@ func TestCodexTurnStateParallelLateCollectorCannotOverwriteRemoteBusinessSuccess
 	after, err := repo.Get(ctx, seed.key)
 	require.NoError(t, err)
 	require.Equal(t, accepted.Version, after.Version, "CAS still protects business success when remote cancellation notifications are lost")
+	require.Equal(t, accepted.cacheIdentity(), after.cacheIdentity(), "lost cancellation cannot let a late collector mix cookie and ticket snapshots")
 	plain, err := s.encryptor.Decrypt(after.EncryptedToken)
 	require.NoError(t, err)
 	require.Equal(t, newToken, plain)
 	require.Equal(t, "business", after.Source)
-	require.Empty(t, after.DemandReason)
+	require.Equal(t, "refresh", after.DemandReason)
+	require.Equal(t, "scheduled", after.CollectionStatus)
+	require.Equal(t, "refresh", after.CollectionReason)
+	require.Equal(t, s.now().Add(CodexTurnStateCollectInterval), after.NextCollectAt)
+	require.Equal(t, accepted.NextCollectAt, after.NextCollectAt)
 }
 
 func TestCodexTurnStateParallelCollectorTargetSurvivesRepeatedBusinessAnomaly(t *testing.T) {
@@ -472,8 +495,10 @@ func TestCodexTurnStateParallelCollectorTargetSurvivesRepeatedBusinessAnomaly(t 
 			require.Equal(t, newToken, plain, "a concurrent repeated anomaly cannot discard a newer target collected for the still-pending demand")
 			require.Greater(t, after.Version, afterBusiness.Version)
 			require.Equal(t, "collector", after.Source)
-			require.Empty(t, after.DemandReason)
-			require.Equal(t, "idle", after.CollectionStatus)
+			require.Equal(t, "refresh", after.DemandReason)
+			require.Equal(t, "scheduled", after.CollectionStatus)
+			require.Equal(t, "refresh", after.CollectionReason)
+			require.Equal(t, s.now().Add(CodexTurnStateCollectInterval), after.NextCollectAt)
 		})
 	}
 }

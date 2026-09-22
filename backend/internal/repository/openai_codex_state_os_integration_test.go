@@ -12,41 +12,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCodexStateOSPostgresCASAndLeasesStayInSlot(t *testing.T) {
+func TestCodexStateOSPostgresCASAndLeasesShareOwnerAndModel(t *testing.T) {
 	ctx := context.Background()
 	windows := createCodexStateFixture(t)
 	linux := windows
-	linux.OSFamily, linux.Generation = "linux", "00000000-0000-4000-8000-000000000003"
-	_, err := integrationDB.ExecContext(ctx, `INSERT INTO account_openai_oauth_os_credentials
-		(account_id,os_family,credentials,status,state_generation,authorization_generation,credential_epoch)
-		SELECT account_id,'linux','{}','authorized',$2,authorization_generation,credential_epoch
-		FROM account_openai_oauth_credentials WHERE account_id=$1`, windows.OwnerAccountID, linux.Generation)
-	require.NoError(t, err)
+	linux.OSFamily = "linux"
 	repo := NewOpenAICodexStateRepository(integrationDB, integrationRedis)
 	now := time.Now().UTC()
-	w, err := repo.BeginBusiness(ctx, windows, "same-attempt", now, now.Add(time.Minute))
+	w, err := repo.BeginBusiness(ctx, windows, "windows-attempt", now, now.Add(time.Minute))
 	require.NoError(t, err)
 	require.NotNil(t, w)
-	l, err := repo.BeginBusiness(ctx, linux, "same-attempt", now, now.Add(time.Minute))
+	l, err := repo.BeginBusiness(ctx, linux, "linux-attempt", now, now.Add(time.Minute))
 	require.NoError(t, err)
 	require.NotNil(t, l)
-	require.NoError(t, repo.EndBusiness(ctx, windows, "same-attempt"))
+	require.Equal(t, w.Version, l.Version)
+	require.NoError(t, repo.EndBusiness(ctx, linux, "windows-attempt"))
 	active, err := repo.HasBusiness(ctx, linux, now)
 	require.NoError(t, err)
 	require.True(t, active)
 	w.EncryptedToken, w.ModelPolicyRevision = "windows-ciphertext", codexStateModelPolicyRevisionForTest(t)
+	w.EncryptedCookieBundle = "windows-cookie-ciphertext"
 	updated, err := repo.SaveCAS(ctx, *w, w.Version)
 	require.NoError(t, err)
 	require.True(t, updated)
 	l, err = repo.Get(ctx, linux)
 	require.NoError(t, err)
-	require.Empty(t, l.EncryptedToken)
-	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_os_credentials SET state_generation=gen_random_uuid() WHERE account_id=$1 AND os_family='linux'`, windows.OwnerAccountID)
+	require.Equal(t, w.EncryptedToken, l.EncryptedToken)
+	require.Equal(t, w.EncryptedCookieBundle, l.EncryptedCookieBundle)
+	require.Equal(t, "windows", l.OSFamily, "OS describes the publication source, not the lookup scope")
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_credentials SET state_generation=gen_random_uuid() WHERE account_id=$1`, windows.OwnerAccountID)
 	require.NoError(t, err)
 	w, err = repo.Get(ctx, windows)
 	require.NoError(t, err)
-	require.Equal(t, "windows-ciphertext", w.EncryptedToken)
-	l.ModelPolicyRevision = w.ModelPolicyRevision
+	require.Nil(t, w)
+	l.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
 	updated, err = repo.SaveCAS(ctx, *l, l.Version)
 	require.NoError(t, err)
 	require.False(t, updated)
@@ -104,7 +103,7 @@ func TestCodexStateOSCooldownSurvivesSlotLifecycleAndSuccess(t *testing.T) {
 	require.True(t, ok)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_credentials SET status='unauthorized' WHERE account_id=$1`, key.OwnerAccountID)
 	require.NoError(t, err)
-	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_os_credentials SET state_generation=gen_random_uuid(),status='unauthorized' WHERE account_id=$1`, key.OwnerAccountID)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_credentials SET state_generation=gen_random_uuid(),status='unauthorized' WHERE account_id=$1`, key.OwnerAccountID)
 	require.NoError(t, err)
 	require.NoError(t, cooldowns.ExtendCollectorCooldown(ctx, key.OwnerAccountID, now.Add(time.Hour)))
 	until, err := cooldowns.GetCollectorCooldowns(ctx, []int64{key.OwnerAccountID})
@@ -113,7 +112,7 @@ func TestCodexStateOSCooldownSurvivesSlotLifecycleAndSuccess(t *testing.T) {
 	// Reauthorization and successful/unknown-error state writes may not clear it.
 	_, err = integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_credentials SET status='authorized' WHERE account_id=$1`, key.OwnerAccountID)
 	require.NoError(t, err)
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `UPDATE account_openai_oauth_os_credentials SET state_generation=gen_random_uuid(),status='authorized' WHERE account_id=$1 AND os_family=$2 RETURNING state_generation::text`, key.OwnerAccountID, key.OSFamily).Scan(&key.Generation))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `UPDATE account_openai_oauth_credentials SET state_generation=gen_random_uuid(),status='authorized' WHERE account_id=$1 RETURNING state_generation::text`, key.OwnerAccountID).Scan(&key.Generation))
 	fresh, err := repo.BeginBusiness(ctx, key, "reauthorized", now, now.Add(time.Minute))
 	require.NoError(t, err)
 	for _, reason := range []string{"", "collection_failed"} {

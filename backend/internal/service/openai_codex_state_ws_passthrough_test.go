@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	coderws "github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -57,14 +59,16 @@ func (r *codexStatePassthroughAccounts) disable() {
 
 type codexStatePassthroughRepository struct {
 	CodexTurnStateRepository
-	mu      sync.Mutex
-	records map[CodexTurnStateKey]CodexTurnStateRecord
-	ended   int
+	mu                      sync.Mutex
+	records                 map[CodexTurnStateKey]CodexTurnStateRecord
+	ended                   int
+	begun, saved, collected int
 }
 
 func (r *codexStatePassthroughRepository) BeginBusiness(_ context.Context, key CodexTurnStateKey, _ string, now, _ time.Time) (*CodexTurnStateRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.begun++
 	record := r.records[key]
 	record.OSFamily = key.OSFamily
 	record.OwnerAccountID, record.Model, record.Generation = key.OwnerAccountID, key.Model, key.Generation
@@ -93,6 +97,7 @@ func (r *codexStatePassthroughRepository) Get(_ context.Context, key CodexTurnSt
 func (r *codexStatePassthroughRepository) SaveCAS(_ context.Context, record CodexTurnStateRecord, expected int64) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.saved++
 	if r.records[record.Key()].Version != expected {
 		return false, nil
 	}
@@ -146,6 +151,12 @@ func newCodexStatePassthroughHarness(t *testing.T, enabled bool) (*OpenAIGateway
 	svc.accountRepo = accounts
 	svc.codexTurnStateService = NewCodexTurnStateService(repo, accounts, codexStatePassthroughEncryptor{}, nil)
 	svc.codexTurnStateService.modelPolicy = newCodexStateTestModelPolicy("gpt-5.5", "gpt-5.4")
+	svc.codexTurnStateService.collector = codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
+		repo.mu.Lock()
+		repo.collected++
+		repo.mu.Unlock()
+		return CodexTurnStateCollectResult{}, nil
+	})
 	dialer := &codexStatePassthroughDialer{conn: upstream, request: make(chan http.Header, 1), headers: make(http.Header)}
 	svc.openaiWSPassthroughDialer = dialer
 	return svc, account, accounts, repo, dialer
@@ -157,9 +168,21 @@ func seedCodexStatePassthroughModel(t *testing.T, repo *codexStatePassthroughRep
 	require.NoError(t, err)
 	encrypted, err := (codexStatePassthroughEncryptor{}).Encrypt(token)
 	require.NoError(t, err)
-	key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: model, Generation: CodexTurnStateGenerationForAccount(account)}
+	key := CodexTurnStateKey{OwnerAccountID: account.ID, Model: model, Generation: CodexTurnStateGenerationForAccount(account)}
+	bundle := openaicookies.Bundle{ExpiresAt: shape.ExpiresAt, Entries: []openaicookies.Entry{{
+		Key: openaicookies.CookieKey("__oailb", "chatgpt.com", "/"), Name: "__oailb", Value: "http-route-" + model,
+		Domain: "chatgpt.com", Path: "/", HostOnly: true, Secure: true, ExpiresAt: shape.ExpiresAt,
+	}}}
+	require.True(t, bundle.ValidAt(time.Now()))
+	value, err := json.Marshal(codexTurnStateCookieEnvelope{Version: 1, OwnerAccountID: account.ID, Model: model, AuthorizationGeneration: account.OpenAIOAuthAuthorizationGeneration,
+		Bundle: bundle, ResponseEvidence: CodexModelEvidence{UpstreamResponseModel: model, ModelRelation: "exact", ModelEvidenceSource: "response.model"}})
+	require.NoError(t, err)
+	encryptedBundle, err := (codexStatePassthroughEncryptor{}).Encrypt(string(value))
+	require.NoError(t, err)
 	repo.records[key] = CodexTurnStateRecord{OSFamily: "windows", OwnerAccountID: key.OwnerAccountID, Model: key.Model, Generation: key.Generation, Version: 1,
-		EncryptedToken: encrypted, IssuedAt: shape.IssuedAt, ExpiresAt: shape.ExpiresAt, TokenLength: shape.TokenLength, CipherBlocks: shape.CipherBlocks, Source: "collector", Shape: shape.Shape}
+		EncryptedToken: encrypted, EncryptedCookieBundle: encryptedBundle, CookieBundleExpiresAt: &shape.ExpiresAt, AuthorizationGeneration: account.OpenAIOAuthAuthorizationGeneration,
+		IssuedAt: shape.IssuedAt, ExpiresAt: shape.ExpiresAt, TokenLength: shape.TokenLength, CipherBlocks: shape.CipherBlocks, Source: "collector", Shape: shape.Shape,
+		DemandReason: "refresh", CollectionStatus: "scheduled", CollectionReason: "refresh", NextCollectAt: time.Now().Add(CodexTurnStateCollectInterval)}
 	return key
 }
 
@@ -170,16 +193,42 @@ func readCodexStatePassthroughFrame(t *testing.T, ctx context.Context, client *c
 	return payload
 }
 
-func TestCodexStatePassthroughUsesFinalModelAndLearnsLateMetadata(t *testing.T) {
+func requireCodexStatePassthroughUntouched(t *testing.T, repo *codexStatePassthroughRepository, records map[CodexTurnStateKey]CodexTurnStateRecord) {
+	t.Helper()
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if len(records) == 0 {
+		require.Empty(t, repo.records, "native WS cannot create cache records or collection demand")
+	} else {
+		require.Equal(t, records, repo.records, "native WS cannot alter existing HTTP tickets, cookie bundles, evidence, or schedules")
+	}
+	require.Zero(t, repo.begun, "native WS cannot reserve business leases")
+	require.Zero(t, repo.ended)
+	require.Zero(t, repo.saved, "native WS cannot attempt state publication")
+	require.Zero(t, repo.collected, "native WS cannot invoke the turn-state collector")
+}
+
+func finishCodexStatePassthrough(t *testing.T, ctx context.Context, client *coderws.Conn, serverErr <-chan error) {
+	t.Helper()
+	_ = client.CloseNow()
+	select {
+	case <-serverErr:
+	case <-ctx.Done():
+		t.Fatal("passthrough did not finish after the client closed")
+	}
+}
+
+func TestCodexStatePassthroughPreservesClientStateAndIgnoresHTTPBundlesAndMetadata(t *testing.T) {
 	svc, account, _, repo, dialer := newCodexStatePassthroughHarness(t, true)
 	now := time.Now()
 	firstToken := codexStatePassthroughToken(1, now.Add(-3*time.Minute))
 	secondToken := codexStatePassthroughToken(2, now.Add(-150*time.Second))
 	newToken := codexStatePassthroughToken(3, now.Add(-time.Minute))
-	keyFirst := seedCodexStatePassthroughModel(t, repo, account, "gpt-5.5", firstToken)
-	keySecond := seedCodexStatePassthroughModel(t, repo, account, "gpt-5.4", secondToken)
+	seedCodexStatePassthroughModel(t, repo, account, "gpt-5.5", firstToken)
+	seedCodexStatePassthroughModel(t, repo, account, "gpt-5.4", secondToken)
+	before := maps.Clone(repo.records)
 	dialer.headers.Set(openAIWSTurnStateHeader, codexStatePassthroughToken(4, now.Add(-2*time.Minute)))
-	server, _ := startPassthroughLifecycleServer(t, context.Background(), svc, account)
+	server, serverErr := startPassthroughLifecycleServer(t, context.Background(), svc, account)
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -188,34 +237,30 @@ func TestCodexStatePassthroughUsesFinalModelAndLearnsLateMetadata(t *testing.T) 
 	defer client.CloseNow()
 	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.5","input":[],"client_metadata":{"x-codex-turn-state":"old-client-frame"}}`)))
 	first := requirePassthroughUpstreamWrite(t, dialer.conn, 3*time.Second)
-	require.Equal(t, firstToken, gjson.GetBytes(first, "client_metadata.x-codex-turn-state").String())
-	require.Empty(t, (<-dialer.request).Get(openAIWSTurnStateHeader))
+	require.Equal(t, "old-client-frame", gjson.GetBytes(first, "client_metadata.x-codex-turn-state").String())
+	require.Equal(t, "old-client-header", (<-dialer.request).Get(openAIWSTurnStateHeader))
 	dialer.conn.Send(`{"type":"response.output_text.delta","delta":"ready"}`)
 	readCodexStatePassthroughFrame(t, ctx, client)
 	dialer.conn.Send(fmt.Sprintf(`{"type":"response.metadata","headers":{"X-Codex-Turn-State":%q}}`, newToken))
 	readCodexStatePassthroughFrame(t, ctx, client)
 	dialer.conn.Send(`{"type":"response.completed","response":{"id":"resp_first","model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`)
 	readCodexStatePassthroughFrame(t, ctx, client)
-	require.Eventually(t, func() bool {
-		record, _ := repo.Get(ctx, keyFirst)
-		return record != nil && record.Source == "business" && record.IssuedAt.Equal(time.Unix(now.Add(-time.Minute).Unix(), 0))
-	}, time.Second, time.Millisecond)
 	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.4","input":[]}`)))
 	second := requirePassthroughUpstreamWrite(t, dialer.conn, 3*time.Second)
-	require.Equal(t, secondToken, gjson.GetBytes(second, "client_metadata.x-codex-turn-state").String())
+	require.False(t, gjson.GetBytes(second, "client_metadata.x-codex-turn-state").Exists())
+	dialer.conn.Send(fmt.Sprintf(`{"type":"response.metadata","headers":{"x-codex-turn-state":%q}}`, codexStateTestToken(11, now)))
+	readCodexStatePassthroughFrame(t, ctx, client)
 	dialer.conn.Send(`{"type":"response.completed","response":{"id":"resp_second","model":"gpt-5.4","usage":{"input_tokens":1,"output_tokens":1}}}`)
 	readCodexStatePassthroughFrame(t, ctx, client)
-	require.Eventually(t, func() bool { repo.mu.Lock(); defer repo.mu.Unlock(); return repo.ended == 2 }, time.Second, time.Millisecond)
-	record, err := repo.Get(ctx, keySecond)
-	require.NoError(t, err)
-	require.Equal(t, int64(1), record.Version, "a reused socket must not relearn its original handshake state under the next model")
+	finishCodexStatePassthrough(t, ctx, client, serverErr)
+	requireCodexStatePassthroughUntouched(t, repo, before)
 }
 
-func TestCodexStatePassthroughMigratesOnlyFirstGuardedHeader(t *testing.T) {
+func TestCodexStatePassthroughKeepsGuardedHeaderWithoutFrameMigration(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
 		t.Run(fmt.Sprintf("enabled_%t", enabled), func(t *testing.T) {
-			svc, account, _, _, dialer := newCodexStatePassthroughHarness(t, enabled)
-			server, _ := startPassthroughLifecycleServer(t, context.Background(), svc, account)
+			svc, account, _, repo, dialer := newCodexStatePassthroughHarness(t, enabled)
+			server, serverErr := startPassthroughLifecycleServer(t, context.Background(), svc, account)
 			defer server.Close()
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer cancel()
@@ -225,18 +270,17 @@ func TestCodexStatePassthroughMigratesOnlyFirstGuardedHeader(t *testing.T) {
 			require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.5","input":[]}`)))
 			first := requirePassthroughUpstreamWrite(t, dialer.conn, 3*time.Second)
 			headers := <-dialer.request
-			if enabled {
-				require.Empty(t, headers.Get(openAIWSTurnStateHeader))
-				require.Equal(t, "client-header", gjson.GetBytes(first, "client_metadata.x-codex-turn-state").String())
-			} else {
-				require.Equal(t, "client-header", headers.Get(openAIWSTurnStateHeader))
-				require.False(t, gjson.GetBytes(first, "client_metadata.x-codex-turn-state").Exists())
-			}
+			require.Equal(t, "client-header", headers.Get(openAIWSTurnStateHeader))
+			require.False(t, gjson.GetBytes(first, "client_metadata.x-codex-turn-state").Exists())
+			dialer.conn.Send(fmt.Sprintf(`{"type":"response.metadata","headers":{"x-codex-turn-state":%q}}`, codexStatePassthroughToken(8, time.Now())))
+			readCodexStatePassthroughFrame(t, ctx, client)
 			dialer.conn.Send(`{"type":"response.completed","response":{"id":"resp_migration","model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`)
 			readCodexStatePassthroughFrame(t, ctx, client)
 			require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.5","input":[]}`)))
 			second := requirePassthroughUpstreamWrite(t, dialer.conn, 3*time.Second)
 			require.False(t, gjson.GetBytes(second, "client_metadata.x-codex-turn-state").Exists())
+			finishCodexStatePassthrough(t, ctx, client, serverErr)
+			requireCodexStatePassthroughUntouched(t, repo, nil)
 		})
 	}
 }
@@ -262,20 +306,13 @@ func TestCodexStatePassthroughAbandonedMetadataDoesNotLearn(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("passthrough did not finish")
 	}
-	key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5.5", Generation: CodexTurnStateGenerationForAccount(account)}
-	record, err := repo.Get(ctx, key)
-	require.NoError(t, err)
-	require.NotNil(t, record)
-	require.Empty(t, record.EncryptedToken)
-	repo.mu.Lock()
-	defer repo.mu.Unlock()
-	require.Equal(t, 1, repo.ended)
+	requireCodexStatePassthroughUntouched(t, repo, nil)
 }
 
 func TestCodexStatePassthroughPrewarmDiscardsHandshakeState(t *testing.T) {
 	svc, account, _, repo, dialer := newCodexStatePassthroughHarness(t, true)
 	dialer.headers.Set(openAIWSTurnStateHeader, codexStatePassthroughToken(7, time.Now().Add(-time.Minute)))
-	server, _ := startPassthroughLifecycleServer(t, context.Background(), svc, account)
+	server, serverErr := startPassthroughLifecycleServer(t, context.Background(), svc, account)
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -285,25 +322,21 @@ func TestCodexStatePassthroughPrewarmDiscardsHandshakeState(t *testing.T) {
 	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.5","generate":false,"input":[]}`)))
 	first := requirePassthroughUpstreamWrite(t, dialer.conn, 3*time.Second)
 	require.False(t, gjson.GetBytes(first, "client_metadata.x-codex-turn-state").Exists())
-	require.Empty(t, (<-dialer.request).Get(openAIWSTurnStateHeader))
+	require.Equal(t, "prewarm-header", (<-dialer.request).Get(openAIWSTurnStateHeader))
 	dialer.conn.Send(`{"type":"response.completed","response":{"id":"resp_prewarm","model":"gpt-5.5"}}`)
 	readCodexStatePassthroughFrame(t, ctx, client)
 	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.4","input":[]}`)))
 	second := requirePassthroughUpstreamWrite(t, dialer.conn, 3*time.Second)
-	require.False(t, gjson.GetBytes(second, "client_metadata.x-codex-turn-state").Exists(), "prewarm must consume the first-header migration privilege")
+	require.False(t, gjson.GetBytes(second, "client_metadata.x-codex-turn-state").Exists(), "a later model cannot inherit prewarm handshake state")
 	dialer.conn.Send(`{"type":"response.completed","response":{"id":"resp_after_prewarm","model":"gpt-5.4","usage":{"input_tokens":1,"output_tokens":1}}}`)
 	readCodexStatePassthroughFrame(t, ctx, client)
-	require.Eventually(t, func() bool { repo.mu.Lock(); defer repo.mu.Unlock(); return repo.ended == 1 }, time.Second, time.Millisecond)
-	key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5.4", Generation: CodexTurnStateGenerationForAccount(account)}
-	record, err := repo.Get(ctx, key)
-	require.NoError(t, err)
-	require.NotNil(t, record)
-	require.Empty(t, record.EncryptedToken, "a later model cannot claim the prewarm handshake response")
+	finishCodexStatePassthrough(t, ctx, client, serverErr)
+	requireCodexStatePassthroughUntouched(t, repo, nil)
 }
 
-func TestCodexStatePassthroughModeChangeClosesAfterTerminal(t *testing.T) {
-	svc, account, accounts, _, dialer := newCodexStatePassthroughHarness(t, true)
-	server, _ := startPassthroughLifecycleServer(t, context.Background(), svc, account)
+func TestCodexStatePassthroughCacheModeChangeKeepsSocketOpen(t *testing.T) {
+	svc, account, accounts, repo, dialer := newCodexStatePassthroughHarness(t, true)
+	server, serverErr := startPassthroughLifecycleServer(t, context.Background(), svc, account)
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -317,6 +350,12 @@ func TestCodexStatePassthroughModeChangeClosesAfterTerminal(t *testing.T) {
 	require.Equal(t, "response.output_text.delta", gjson.GetBytes(readCodexStatePassthroughFrame(t, ctx, client), "type").String())
 	dialer.conn.Send(`{"type":"response.completed","response":{"id":"resp_changed","model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`)
 	require.Equal(t, "response.completed", gjson.GetBytes(readCodexStatePassthroughFrame(t, ctx, client), "type").String())
-	_, _, err = client.Read(ctx)
-	require.Equal(t, coderws.StatusNormalClosure, coderws.CloseStatus(err))
+	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.4","input":[]}`)))
+	second := requirePassthroughUpstreamWrite(t, dialer.conn, 3*time.Second)
+	require.Equal(t, "gpt-5.4", gjson.GetBytes(second, "model").String())
+	require.False(t, gjson.GetBytes(second, "client_metadata.x-codex-turn-state").Exists())
+	dialer.conn.Send(`{"type":"response.completed","response":{"id":"resp_after_changed","model":"gpt-5.4","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	require.Equal(t, "response.completed", gjson.GetBytes(readCodexStatePassthroughFrame(t, ctx, client), "type").String())
+	finishCodexStatePassthrough(t, ctx, client, serverErr)
+	requireCodexStatePassthroughUntouched(t, repo, nil)
 }

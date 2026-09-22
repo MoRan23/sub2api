@@ -248,7 +248,7 @@ func TestCodexTurnStateCollectorSSEAndHTTPRateLimitOutcomes(t *testing.T) {
 				plain, err := s.encryptor.Decrypt(accepted.EncryptedToken)
 				require.NoError(t, err)
 				require.Equal(t, newToken, plain)
-				require.Empty(t, accepted.DemandReason)
+				require.Equal(t, "refresh", accepted.DemandReason)
 				require.Equal(t, after.NextCollectAt, accepted.NextCollectAt)
 				require.Equal(t, "collector_rate_limited", accepted.LastError)
 				restarted.collect(ctx, other.key)

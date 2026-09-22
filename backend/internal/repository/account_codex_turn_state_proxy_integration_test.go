@@ -52,8 +52,10 @@ func newCodexProxyChangeFixture(t *testing.T) codexProxyChangeFixture {
 	require.NoError(t, err)
 	require.NoError(t, states.EndBusiness(ctx, key, "seed"))
 	state.EncryptedToken, state.Shape, state.Source = "synthetic-encrypted-state", "target", "collector"
+	state.EncryptedCookieBundle = "synthetic-encrypted-cookie-bundle"
 	state.TokenLength, state.CipherBlocks = 292, 10
 	state.IssuedAt, state.ExpiresAt = now.Add(-2*time.Minute), now.Add(service.CodexTurnStateLifetime-2*time.Minute)
+	state.CookieBundleExpiresAt = &state.ExpiresAt
 	state.LastBusinessAt, state.LastCollectedAt = now.Add(-time.Minute), now.Add(-2*time.Minute)
 	state.HistoryProofObservedAt = now.Add(-3 * time.Minute)
 	state.DemandReason, state.RefreshReason, state.DemandAt = "expiring", "expiring", now.Add(-time.Minute)
@@ -73,11 +75,8 @@ func newCodexProxyChangeFixture(t *testing.T) codexProxyChangeFixture {
 func (f codexProxyChangeFixture) change(t *testing.T, ctx context.Context, bulk bool, config service.CodexTurnStateConfig, credentials map[string]any) *service.Account {
 	t.Helper()
 	if credentials != nil {
-		slot, err := f.accounts.GetOpenAIOAuthOSCredential(ctx, f.key.OwnerAccountID, f.key.OSFamily)
+		_, err := f.accounts.BindOpenAIOAuthOSCredentials(ctx, f.key.OwnerAccountID, f.key.OSFamily, credentials, "test_reauthorization")
 		require.NoError(t, err)
-		applied, err := f.accounts.PatchOpenAIOAuthOSCredentialsIfUnchanged(ctx, f.key.OwnerAccountID, f.key.OSFamily, slot.AuthorizationGeneration, slot.Revision, nil, credentials, nil)
-		require.NoError(t, err)
-		require.True(t, applied)
 	}
 	if bulk {
 		_, err := f.admin.BulkUpdateAccounts(ctx, &service.BulkUpdateAccountsInput{AccountIDs: []int64{f.key.OwnerAccountID}, CodexTurnState: &config, Credentials: credentials})
@@ -120,12 +119,12 @@ func TestCodexCollectorProxyChangePostgresPreservesValidCache(t *testing.T) {
 				require.Equal(t, f.state.LastBusinessAt, state.LastBusinessAt)
 				require.Equal(t, f.state.LastCollectedAt, state.LastCollectedAt)
 				require.Equal(t, f.state.HistoryProofObservedAt, state.HistoryProofObservedAt)
-				require.Empty(t, state.DemandReason)
-				require.Empty(t, state.RefreshReason)
+				require.Equal(t, f.state.DemandReason, state.DemandReason)
+				require.Equal(t, f.state.RefreshReason, state.RefreshReason)
 				require.Empty(t, state.LastError)
-				require.True(t, state.NextCollectAt.IsZero())
-				require.Equal(t, "idle", state.CollectionStatus)
-				require.Equal(t, "collector_proxy_changed", state.CollectionReason)
+				require.Equal(t, f.state.NextCollectAt, state.NextCollectAt)
+				require.Equal(t, "backoff", state.CollectionStatus)
+				require.Equal(t, "queued", state.CollectionReason)
 				ok, err := f.states.SaveCAS(ctx, f.state, f.state.Version)
 				require.NoError(t, err)
 				require.False(t, ok, "the old proxy cannot publish into the migrated cache")
@@ -134,7 +133,7 @@ func TestCodexCollectorProxyChangePostgresPreservesValidCache(t *testing.T) {
 	}
 }
 
-func TestCodexCollectorProxyChangePostgresPreservesEachOSCache(t *testing.T) {
+func TestCodexCollectorProxyChangePostgresPreservesSharedOSBundle(t *testing.T) {
 	for _, bulk := range []bool{false, true} {
 		name := "single"
 		if bulk {
@@ -143,16 +142,8 @@ func TestCodexCollectorProxyChangePostgresPreservesEachOSCache(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			f := newCodexProxyChangeFixture(t)
-			before := []service.CodexTurnStateRecord{f.state}
+			before := f.state
 			for _, family := range []string{service.OpenAIOSLinux, service.OpenAIOSMacOS} {
-				// The low-level state fixture initially creates only Windows metadata.
-				_, err := integrationDB.ExecContext(ctx, `INSERT INTO account_openai_oauth_os_credentials
-					(account_id,os_family,credentials,status,authorization_generation,credential_epoch)
-					SELECT account_id,$2,'{}',status,authorization_generation,credential_epoch
-					FROM account_openai_oauth_credentials WHERE account_id=$1`, f.key.OwnerAccountID, family)
-				require.NoError(t, err)
-				// Authorization is shared; read each existing identity projection
-				// without rebinding and invalidating the already seeded OS states.
 				slot, err := f.accounts.GetOpenAIOAuthOSCredential(ctx, f.key.OwnerAccountID, family)
 				require.NoError(t, err)
 				require.NotNil(t, slot)
@@ -163,9 +154,10 @@ func TestCodexCollectorProxyChangePostgresPreservesEachOSCache(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, initial)
 				require.NoError(t, f.states.EndBusiness(ctx, key, family+"-seed"))
-				state := f.state
+				state := before
 				state.OSFamily, state.Generation, state.Version = family, slot.StateGeneration, initial.Version
-				state.EncryptedToken = family + "-private-state"
+				state.EncryptedToken = family + "-shared-state"
+				state.EncryptedCookieBundle = family + "-shared-cookie-bundle"
 				ok, err := f.states.SaveCAS(ctx, state, initial.Version)
 				require.NoError(t, err)
 				require.True(t, ok)
@@ -173,23 +165,25 @@ func TestCodexCollectorProxyChangePostgresPreservesEachOSCache(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, stored)
 				stored.ModelPolicyRevision = codexStateModelPolicyRevisionForTest(t)
-				before = append(before, *stored)
+				before = *stored
 			}
 			f.change(t, ctx, bulk, service.CodexTurnStateConfig{Enabled: true, AccountType: "personal", CollectorProxyID: &f.proxyID}, nil)
-			for _, old := range before {
-				slot, err := f.accounts.GetOpenAIOAuthOSCredential(ctx, f.key.OwnerAccountID, old.OSFamily)
+			for _, family := range []string{service.OpenAIOSWindows, service.OpenAIOSLinux, service.OpenAIOSMacOS} {
+				slot, err := f.accounts.GetOpenAIOAuthOSCredential(ctx, f.key.OwnerAccountID, family)
 				require.NoError(t, err)
-				require.NotEqual(t, old.Generation, slot.StateGeneration)
-				key := old.Key()
+				require.NotEqual(t, before.Generation, slot.StateGeneration)
+				key := before.Key()
+				key.OSFamily = family
 				key.Generation = slot.StateGeneration
 				carried, err := f.states.Get(ctx, key)
 				require.NoError(t, err)
 				require.NotNil(t, carried)
-				require.Equal(t, old.EncryptedToken, carried.EncryptedToken)
-				require.Equal(t, old.IssuedAt, carried.IssuedAt)
-				require.Equal(t, old.ExpiresAt, carried.ExpiresAt)
-				require.Equal(t, old.Version+1, carried.Version)
-				ok, err := f.states.SaveCAS(ctx, old, old.Version)
+				require.Equal(t, before.EncryptedToken, carried.EncryptedToken)
+				require.Equal(t, before.EncryptedCookieBundle, carried.EncryptedCookieBundle)
+				require.Equal(t, before.IssuedAt, carried.IssuedAt)
+				require.Equal(t, before.ExpiresAt, carried.ExpiresAt)
+				require.Equal(t, before.Version+1, carried.Version)
+				ok, err := f.states.SaveCAS(ctx, before, before.Version)
 				require.NoError(t, err)
 				require.False(t, ok)
 			}
@@ -225,10 +219,10 @@ func TestCodexCollectorProxyChangePostgresPreservesEarlierExpiry(t *testing.T) {
 			require.Equal(t, before.IssuedAt, after.IssuedAt)
 			require.Equal(t, before.ExpiresAt, after.ExpiresAt, "proxy changes must neither discard nor extend an earlier local deadline")
 			require.Equal(t, before.Version+1, after.Version)
-			require.Empty(t, after.DemandReason)
-			require.True(t, after.NextCollectAt.IsZero())
-			require.Equal(t, "idle", after.CollectionStatus)
-			require.Equal(t, "collector_proxy_changed", after.CollectionReason)
+			require.Equal(t, before.DemandReason, after.DemandReason)
+			require.Equal(t, before.NextCollectAt, after.NextCollectAt)
+			require.Equal(t, "backoff", after.CollectionStatus)
+			require.Equal(t, "queued", after.CollectionReason)
 		})
 	}
 }
@@ -250,6 +244,7 @@ func TestCodexCollectorProxyChangePostgresKeepsDemandAndAccountCooldown(t *testi
 			before.LastError = "collector_rate_limited"
 			if !test.target {
 				before.EncryptedToken = ""
+				before.EncryptedCookieBundle = ""
 				before.Shape = "extended"
 				before.TokenLength = 312
 				before.CipherBlocks = 11
@@ -279,8 +274,8 @@ func TestCodexCollectorProxyChangePostgresKeepsDemandAndAccountCooldown(t *testi
 				require.Equal(t, before.NextCollectAt, state.NextCollectAt)
 			}
 			if test.target {
-				require.Empty(t, state.DemandReason)
-				require.Equal(t, "collector_proxy_changed", state.CollectionReason)
+				require.Equal(t, before.DemandReason, state.DemandReason)
+				require.Equal(t, "queued", state.CollectionReason)
 			} else {
 				require.Empty(t, state.EncryptedToken)
 				require.Equal(t, "extended_shape", state.DemandReason)

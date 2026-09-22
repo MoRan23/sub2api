@@ -32,41 +32,21 @@ func portableOpenAIOAuthExtra(account *service.Account) map[string]any {
 	return out
 }
 
-func (h *AccountHandler) exportOpenAIOAuthAuthorizations(ctx context.Context, account *service.Account) (string, map[string]DataOpenAIOAuthAuthorization, error) {
+func (h *AccountHandler) exportOpenAIOAuthAuthorizations(_ context.Context, account *service.Account) (string, map[string]DataOpenAIOAuthAuthorization, error) {
 	if !service.IsOpenAIOAuthOSProfileOwner(account) {
 		return "", nil, nil
 	}
-	reader, ok := h.adminService.(interface {
-		ListOpenAIOAuthOSCredentials(context.Context, int64) ([]*service.OpenAIOAuthOSCredential, error)
-	})
-	if !ok || account.OpenAIOAuthOSProfiles == nil {
-		return "", nil, errors.New("OpenAI OAuth authorization storage is unavailable")
+	// The account row is the only credential source. OS metadata is an optional
+	// identity hint; an empty or unavailable legacy slot cannot erase this tuple.
+	defaultOS := ""
+	if account.OpenAIOAuthOSProfiles != nil {
+		defaultOS = account.OpenAIOAuthOSProfiles.DefaultOS
 	}
-	defaultOS := account.OpenAIOAuthOSProfiles.DefaultOS
-	slots, err := reader.ListOpenAIOAuthOSCredentials(ctx, account.ID)
-	if err != nil {
-		return "", nil, errors.New("unable to read OpenAI OAuth authorization")
-	}
-	// New exports contain one shared credential tuple. The legacy OS map remains
-	// an import-only format and must not duplicate the same refresh token.
-	account.Credentials = service.PreserveOpenAIOAuthProviderCredentials(nil, account.Credentials)
-	for _, slot := range slots {
-		if slot == nil || slot.OwnerAccountID != account.ID || service.NormalizeOpenAIOSFamily(slot.OSFamily) == "" {
-			continue
-		}
-		credentials := service.OpenAIOAuthProviderCredentials(slot.Credentials)
-		delete(credentials, "_token_version")
-		if strings.TrimSpace(codexCredentialString(credentials, "access_token")) == "" && strings.TrimSpace(codexCredentialString(credentials, "refresh_token")) == "" {
-			continue
-		}
-		account.Credentials = service.PreserveOpenAIOAuthProviderCredentials(credentials, account.Credentials)
-		break
-	}
+	account.Credentials = portableOpenAIOAuthCredentials(account, account.Credentials)
 	return defaultOS, nil, nil
 }
 
-// Old multi-OS backups collapse to one complete provider credential tuple. Prefer
-// the saved default identity; otherwise use the first populated known OS. Never
+// Old multi-OS backups retain only the saved default identity's complete tuple. Never
 // exchange unused refresh tokens or combine credentials from different grants.
 func (h *AccountHandler) prepareOpenAIOAuthBackupImport(_ context.Context, item *DataAccount, _ *int64) (string, map[string]map[string]any, error) {
 	account := &service.Account{Platform: item.Platform, Type: item.Type, Credentials: item.Credentials, Extra: item.Extra}
@@ -97,19 +77,13 @@ func (h *AccountHandler) prepareOpenAIOAuthBackupImport(_ context.Context, item 
 	if len(item.OpenAIOAuthAuthorizations) == 0 {
 		return defaultOS, nil, nil
 	}
-	order := append([]string{defaultOS}, service.OpenAIOAuthOSFamilies()...)
-	for _, os := range order {
-		slot, exists := item.OpenAIOAuthAuthorizations[os]
-		if !exists {
-			continue
-		}
+	if slot, exists := item.OpenAIOAuthAuthorizations[defaultOS]; exists {
 		credentials := service.OpenAIOAuthProviderCredentials(slot.Credentials)
-		if strings.TrimSpace(codexCredentialString(credentials, "access_token")) == "" && strings.TrimSpace(codexCredentialString(credentials, "refresh_token")) == "" {
-			continue
+		if strings.TrimSpace(codexCredentialString(credentials, "access_token")) != "" || strings.TrimSpace(codexCredentialString(credentials, "refresh_token")) != "" {
+			delete(credentials, "_token_version")
+			item.Credentials = service.PreserveOpenAIOAuthProviderCredentials(credentials, item.Credentials)
+			return defaultOS, nil, nil
 		}
-		delete(credentials, "_token_version")
-		item.Credentials = service.PreserveOpenAIOAuthProviderCredentials(credentials, item.Credentials)
-		return defaultOS, nil, nil
 	}
 	item.Credentials = service.PreserveOpenAIOAuthProviderCredentials(nil, item.Credentials)
 	return defaultOS, nil, nil

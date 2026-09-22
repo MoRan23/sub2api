@@ -29,14 +29,14 @@ func (r *codexStateBatchAccounts) GetByIDs(_ context.Context, ids []int64) ([]*A
 	var accounts []*Account
 	for _, id := range ids {
 		if account := r.accounts[id]; account != nil {
-			accounts = append(accounts, codexStateTestScopeAccount(account))
+			accounts = append(accounts, codexStateTestOwnerAccount(account))
 		}
 	}
 	return accounts, nil
 }
 
 func (r *codexStateBatchAccounts) GetByID(_ context.Context, id int64) (*Account, error) {
-	return codexStateTestScopeAccount(r.accounts[id]), nil
+	return codexStateTestOwnerAccount(r.accounts[id]), nil
 }
 
 // All unimplemented runtime/collection methods panic through the embedded nil
@@ -103,8 +103,8 @@ func TestCodexTurnStateBatchStatusDeduplicatesOwnersAndSharesSingleProjection(t 
 	}}
 	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
 	records := &codexStateBatchRecords{records: []CodexTurnStateRecord{
-		{OSFamily: "windows", OwnerAccountID: 1, Generation: CodexTurnStateGenerationForAccount(ownerOne), Model: "gpt-5.6-sol", EncryptedToken: "private-encrypted-token", IssuedAt: now, ExpiresAt: now.Add(CodexTurnStateLifetime), TokenLength: 292, CipherBlocks: 10, Shape: "target", Source: "business"},
-		{OSFamily: "windows", OwnerAccountID: 1, Generation: CodexTurnStateGenerationForAccount(ownerOne), Model: "gpt-6-astra", EncryptedToken: "private-encrypted-expired", ExpiresAt: now.Add(-time.Minute)},
+		{OSFamily: "windows", OwnerAccountID: 1, Generation: CodexTurnStateGenerationForAccount(ownerOne), Model: "gpt-5.6-sol", EncryptedToken: "private-encrypted-token", EncryptedCookieBundle: "private-encrypted-cookie-bundle", AuthorizationGeneration: "test-authorization", IssuedAt: now, ExpiresAt: now.Add(CodexTurnStateLifetime), TokenLength: 292, CipherBlocks: 10, Shape: "target", Source: "business"},
+		{OSFamily: "linux", OwnerAccountID: 1, Generation: CodexTurnStateGenerationForAccount(ownerOne), Model: "gpt-6-astra", EncryptedToken: "private-encrypted-expired", ExpiresAt: now.Add(-time.Minute)},
 		{OSFamily: "windows", OwnerAccountID: 1, Generation: "obsolete-generation", Model: "obsolete-model", EncryptedToken: "old-private-token"},
 		{OSFamily: "windows", OwnerAccountID: 2, Generation: CodexTurnStateGenerationForAccount(ownerTwo), Model: "gpt-5.6-terra", CollectorPaused: true, LastError: "collector_auth_rejected"},
 		{OSFamily: "windows", OwnerAccountID: 2, Generation: CodexTurnStateGenerationForAccount(ownerTwo), Model: "gpt-unlisted", EncryptedToken: "private-unlisted-token", IssuedAt: now, ExpiresAt: now.Add(CodexTurnStateLifetime)},
@@ -126,6 +126,7 @@ func TestCodexTurnStateBatchStatusDeduplicatesOwnersAndSharesSingleProjection(t 
 		require.NotContains(t, result.Items, missing, "missing/broken owners must not look disabled; parent-only loads are not requested rows")
 	}
 	require.True(t, result.Items["11"].Inherited)
+	require.Equal(t, "shared", result.Items["11"].CacheScope)
 	require.EqualValues(t, 1, result.Items["11"].OwnerAccountID)
 	require.Equal(t, "ready", result.Items["11"].Models[0].State)
 	require.EqualValues(t, CodexTurnStateLifetime/time.Second, result.Items["11"].Models[0].RemainingSeconds)
@@ -141,6 +142,11 @@ func TestCodexTurnStateBatchStatusDeduplicatesOwnersAndSharesSingleProjection(t 
 		require.Equal(t, single, result.Items[fmt.Sprint(id)], "single-account details and the table must use the same projection")
 	}
 	require.NotSame(t, result.Items["11"], result.Items["12"])
+	for _, os := range []string{"windows", "linux", "macos"} {
+		selected, readErr := service.GetStatusForOS(context.Background(), 11, os)
+		require.NoError(t, readErr)
+		require.Equal(t, result.Items["11"].Models, selected.Models, "model cache projection is shared across OS selectors")
+	}
 	encoded, err := json.Marshal(result)
 	require.NoError(t, err)
 	for _, secret := range []string{"private-", "obsolete-model", "encrypted_token", "generation", "access_token"} {

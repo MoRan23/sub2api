@@ -1167,7 +1167,11 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	// 确定是否跳过混合渠道检查
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
-	account, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
+	ctx := c.Request.Context()
+	if req.Status != "" {
+		ctx = service.WithOpenAIOAuthAccountStateIntent(ctx, accountID)
+	}
+	account, err := h.adminService.UpdateAccount(ctx, accountID, &service.UpdateAccountInput{
 		OpenAIAuthModeChange:         req.OpenAIAuthModeChange,
 		CodexTurnState:               req.CodexTurnState,
 		Name:                         req.Name,
@@ -1680,7 +1684,7 @@ type ApplyOAuthCredentialsRequest struct {
 //   - Extra 走 UpdateAccountExtra(JSONB key 级合并)，**绝不**全量覆盖；
 //     避免 base_rpm / window_cost_limit / max_sessions / quota_* / privacy_mode
 //     等持久化配置在重新授权后丢失
-//   - 内置 ClearError + InvalidateToken，避免前端额外两次调用，
+//   - 授权绑定负责恢复其持有的错误暂停，并失效旧 token 缓存，
 //     并修复旧路径未失效 token 缓存导致重新授权后立即 401 的隐性 bug
 //
 // 与 /refresh 的区别：/refresh 用现有 refresh_token 换 access_token（无用户交互），
@@ -1718,31 +1722,25 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if service.IsOpenAIOAuthOSProfileOwner(existing) {
-		os := req.OS
-		// Legacy OS selects the exchange identity; the verified credentials replace
-		// the one account-wide grant used by all three systems.
-		if os == "" && existing.OpenAIOAuthOSProfiles != nil {
-			os = existing.OpenAIOAuthOSProfiles.DefaultOS
-		}
-		refreshToken, _ := req.Credentials["refresh_token"].(string)
-		clientID, _ := req.Credentials["client_id"].(string)
-		info, bindErr := h.openaiOAuthService.AuthorizeAccountWithRefreshToken(ctx, accountID, os, refreshToken, clientID)
-		if bindErr != nil {
-			response.ErrorFrom(c, bindErr)
-			return
-		}
-		response.Success(c, h.buildAccountResponseWithRuntime(ctx, info.Account))
-		return
-	}
-
 	// Drop SSO/password residue; re-auth must leave only OAuth tokens on disk.
 	req.Credentials = service.SanitizeStoredCredentials(existing.Platform, req.Credentials)
-
-	updatedAccount, err := h.adminService.UpdateAccount(ctx, accountID, &service.UpdateAccountInput{
-		Type:        req.Type,
-		Credentials: req.Credentials,
-	})
+	accountAuthorization := service.IsOpenAIOAuthOSProfileOwner(existing)
+	var updatedAccount *service.Account
+	if accountAuthorization {
+		binder, ok := h.adminService.(service.OpenAIOAuthCredentialsAdmin)
+		if !ok {
+			response.ErrorFrom(c, infraerrors.ServiceUnavailable("OPENAI_OAUTH_STORAGE_UNAVAILABLE", "authorization storage is unavailable"))
+			return
+		}
+		// The browser has already completed OAuth. Persist that whole tuple without
+		// rotating its refresh token a second time or requiring an OS authorization.
+		updatedAccount, err = binder.BindOpenAIOAuthCredentials(ctx, accountID, req.OS, req.Credentials)
+	} else {
+		updatedAccount, err = h.adminService.UpdateAccount(ctx, accountID, &service.UpdateAccountInput{
+			Type:        req.Type,
+			Credentials: req.Credentials,
+		})
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -1750,7 +1748,7 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 
 	// 增量合并 Extra（JSONB key 级 merge，绝不覆盖 base_rpm / window_cost_limit /
 	// max_sessions / quota_* / privacy_mode 等持久化键）。
-	// best-effort：失败仅记日志；下方 ClearAccountError 会从 DB 重新读取最新 account，
+	// best-effort：失败仅记日志；下方会从 DB 重新读取最新 account，
 	// 因此响应里的 extra 始终以 DB 为准——这里不需要手动维护内存快照。
 	if len(req.Extra) > 0 {
 		if extraErr := h.adminService.UpdateAccountExtra(ctx, accountID, req.Extra); extraErr != nil {
@@ -1780,17 +1778,27 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 		}
 	}
 
-	if cleared, clearErr := h.adminService.ClearAccountError(ctx, accountID); clearErr != nil {
-		slog.Warn("apply_oauth_credentials.clear_error_failed",
-			"account_id", accountID,
-			"err", clearErr,
-		)
-	} else if cleared != nil {
-		updatedAccount = cleared
+	if !accountAuthorization {
+		if cleared, clearErr := h.adminService.ClearAccountError(ctx, accountID); clearErr != nil {
+			slog.Warn("apply_oauth_credentials.clear_error_failed",
+				"account_id", accountID,
+				"err", clearErr,
+			)
+		} else if cleared != nil {
+			updatedAccount = cleared
+		}
+	} else if len(req.Extra) > 0 {
+		if current, readErr := h.adminService.GetAccount(ctx, accountID); readErr == nil && current != nil {
+			updatedAccount = current
+		}
 	}
 
 	if h.tokenCacheInvalidator != nil && updatedAccount.IsOAuth() {
-		if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(ctx, updatedAccount); invalidateErr != nil {
+		invalidateAccount := updatedAccount
+		if accountAuthorization {
+			invalidateAccount = existing
+		}
+		if invalidateErr := h.tokenCacheInvalidator.InvalidateToken(ctx, invalidateAccount); invalidateErr != nil {
 			slog.Warn("apply_oauth_credentials.invalidate_token_failed",
 				"account_id", accountID,
 				"err", invalidateErr,
@@ -2446,7 +2454,11 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		return
 	}
 
-	result, err := h.adminService.BulkUpdateAccounts(c.Request.Context(), &service.BulkUpdateAccountsInput{
+	ctx := c.Request.Context()
+	if req.Status != "" || req.Schedulable != nil {
+		ctx = service.WithOpenAIOAuthAccountStateIntent(ctx, req.AccountIDs...)
+	}
+	result, err := h.adminService.BulkUpdateAccounts(ctx, &service.BulkUpdateAccountsInput{
 		OpenAIAuthModeChange:  req.OpenAIAuthModeChange,
 		CodexTurnState:        req.CodexTurnState,
 		AccountIDs:            req.AccountIDs,

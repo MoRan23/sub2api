@@ -547,6 +547,10 @@ func (r *accountRepository) updateLockedAccount(
 	if err != nil {
 		return nil, err
 	}
+	preserveAuthPause, err := preserveOpenAIOAuthOwnedPauseLocked(ctx, client, account)
+	if err != nil {
+		return nil, err
+	}
 	if service.IsOpenAIOAuthOSProfileOwner(current) && (service.IsOpenAIOAuthOSProfileOwner(account) || !service.OpenAIOAuthCredentialModeChangeAllowed(ctx, account.ID)) {
 		account.Credentials = service.PreserveOpenAIOAuthProviderCredentials(current.Credentials, account.Credentials)
 	}
@@ -591,10 +595,10 @@ func (r *accountRepository) updateLockedAccount(
 		SetExtra(extra).
 		SetConcurrency(account.Concurrency).
 		SetPriority(account.Priority).
-		SetStatus(account.Status).
-		SetErrorMessage(account.ErrorMessage).
-		SetSchedulable(schedulable).
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
+	if !preserveAuthPause {
+		builder.SetStatus(account.Status).SetErrorMessage(account.ErrorMessage).SetSchedulable(schedulable)
+	}
 
 	if explicitRateMultiplier != nil {
 		builder.SetRateMultiplier(*explicitRateMultiplier)
@@ -1329,7 +1333,7 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 		query += `
 			AND CASE WHEN (` + codexTurnStateOwnerExpression("credentials") + `) THEN EXISTS (
 				SELECT 1 FROM account_openai_oauth_credentials c WHERE c.account_id=accounts.id
-				AND c.status='authorized' AND BTRIM(COALESCE(c.credentials->>'refresh_token',''))<>''
+				AND c.status='authorized' AND BTRIM(COALESCE(accounts.credentials->>'refresh_token',''))<>''
 				AND (c.refresh_retry_after IS NULL OR c.refresh_retry_after<=NOW()))
 			ELSE credentials ? 'refresh_token' AND btrim(credentials->>'refresh_token') <> '' END`
 	}

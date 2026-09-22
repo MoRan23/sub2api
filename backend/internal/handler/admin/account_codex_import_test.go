@@ -960,6 +960,15 @@ func (s *codexImportMemoryAdminService) GetAccount(ctx context.Context, id int64
 	return s.stubAdminService.GetAccount(ctx, id)
 }
 
+func (s *codexImportMemoryAdminService) BindOpenAIOAuthCredentials(ctx context.Context, id int64, _ string, credentials map[string]any) (*service.Account, error) {
+	account, err := s.GetAccount(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	account.Credentials = service.PreserveOpenAIOAuthProviderCredentials(credentials, account.Credentials)
+	return account, nil
+}
+
 func (s *codexImportMemoryAdminService) GetOpenAIOAuthOSCredential(ctx context.Context, id int64, os string) (*service.OpenAIOAuthOSCredential, error) {
 	account, err := s.GetAccount(ctx, id)
 	if err != nil || account.OpenAIOAuthOSProfiles == nil || service.NormalizeOpenAIOSFamily(os) == "" {

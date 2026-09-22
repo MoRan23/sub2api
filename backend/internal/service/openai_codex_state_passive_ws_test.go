@@ -33,37 +33,9 @@ func passiveWSStateRows(accountID int64) []FingerprintObservationEntry {
 	return rows
 }
 
-func requirePassiveWSStateRow(t *testing.T, accountID int64, model string, outboundLength, responseLength int, source, shape string) *CodexTurnStateObservation {
+func requireNativeWSNoStateObservation(t *testing.T, accountID int64) {
 	t.Helper()
-	require.Eventually(t, func() bool {
-		for _, row := range passiveWSStateRows(accountID) {
-			state := row.CodexTurnState
-			if state.Model == model && state.ResponseLength == responseLength && state.ResponseSource == source {
-				return true
-			}
-		}
-		return false
-	}, time.Second, time.Millisecond, "final response summary must attach to the matching physical frame")
-	var matched *CodexTurnStateObservation
-	for _, row := range passiveWSStateRows(accountID) {
-		if row.CodexTurnState.Model == model {
-			require.Nil(t, matched, "a single actual send must produce a single model row")
-			matched = row.CodexTurnState
-		}
-	}
-	require.NotNil(t, matched)
-	require.False(t, matched.Enabled)
-	require.Equal(t, "passthrough", matched.Action)
-	require.Equal(t, outboundLength, matched.OutboundLength)
-	if outboundLength > 0 {
-		require.Equal(t, "client", matched.Source)
-	}
-	require.Equal(t, responseLength, matched.ResponseLength)
-	require.Equal(t, source, matched.ResponseSource)
-	require.Equal(t, shape, matched.ResponseShape)
-	require.Empty(t, matched.RenewalReason, "diagnostics alone must not schedule maintenance")
-	require.Nil(t, matched.ExpiresAt, "passive response observation is not a cached snapshot")
-	return matched
+	require.Empty(t, passiveWSStateRows(accountID), "native WS must not create ticket-specific fingerprint observations")
 }
 
 func requirePassiveWSNoMaintenance(t *testing.T, service *CodexTurnStateService) {
@@ -94,7 +66,7 @@ func TestCodexStatePassiveWSHandshakeObservationUsesActualSendOnce(t *testing.T)
 	require.Zero(t, length, "a prewarm consuming the response candidate must also consume the outbound handshake summary")
 }
 
-func TestCodexStatePassiveWSBridgeObservesActualStateWithoutCaching(t *testing.T) {
+func TestCodexStatePassiveHTTPToWSBridgeBypassesTurnState(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, source := range []string{"header", "metadata"} {
 		for _, stream := range []bool{false, true} {
@@ -136,14 +108,7 @@ func TestCodexStatePassiveWSBridgeObservesActualStateWithoutCaching(t *testing.T
 				handshakeState := dialer.lastHeaders.Get(openAIWSTurnStateHeader)
 				dialer.mu.Unlock()
 				require.Equal(t, "guarded-client-header", handshakeState, "disabled caching must preserve the existing handshake carrier")
-				observation := requirePassiveWSStateRow(t, account.ID, "gpt-5.1", len("guarded-client-frame"), 292, source, "target")
-				require.Equal(t, "ws_handshake_and_frame", observation.OutboundCarrier)
-				require.Equal(t, len("guarded-client-header"), observation.OutboundHeaderLength)
-				require.Equal(t, len("guarded-client-frame"), observation.OutboundBodyLength)
-				encoded, err := json.Marshal(passiveWSStateRows(account.ID))
-				require.NoError(t, err)
-				require.NotContains(t, string(encoded), token)
-				require.NotContains(t, string(encoded), "guarded-client-frame")
+				requireNativeWSNoStateObservation(t, account.ID)
 				repo.mu.Lock()
 				recordCount, activeCount := len(repo.records), len(repo.active)
 				repo.mu.Unlock()
@@ -155,7 +120,7 @@ func TestCodexStatePassiveWSBridgeObservesActualStateWithoutCaching(t *testing.T
 	}
 }
 
-func TestCodexStatePassiveWSIngressKeepsModelsAndResponseSourcesSeparate(t *testing.T) {
+func TestCodexStatePassiveWSIngressPreservesModelsAndBypassesResponseState(t *testing.T) {
 	for _, passthrough := range []bool{false, true} {
 		t.Run(fmt.Sprintf("passthrough_%t", passthrough), func(t *testing.T) {
 			enablePassiveWSFingerprintObservation(t)
@@ -171,10 +136,7 @@ func TestCodexStatePassiveWSIngressKeepsModelsAndResponseSourcesSeparate(t *test
 				svc, account, _, repo, dialer = newCodexStatePassthroughHarness(t, false)
 				upstream, request, response = dialer.conn, dialer.request, dialer.headers
 				assertNoWrites = func() {
-					repo.mu.Lock()
-					defer repo.mu.Unlock()
-					require.Empty(t, repo.records)
-					require.Zero(t, repo.ended)
+					requireCodexStatePassthroughUntouched(t, repo, nil)
 				}
 			} else {
 				var repo *codexWSStateTestRepo
@@ -207,10 +169,6 @@ func TestCodexStatePassiveWSIngressKeepsModelsAndResponseSourcesSeparate(t *test
 			require.Equal(t, "client-header", (<-request).Get(openAIWSTurnStateHeader))
 			upstream.Send(`{"type":"response.completed","response":{"id":"resp_passive_first","model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`)
 			readCodexStatePassthroughFrame(t, ctx, client)
-			firstObservation := requirePassiveWSStateRow(t, account.ID, "gpt-5.5", len("client-header"), 292, "header", "target")
-			require.Equal(t, "ws_handshake", firstObservation.OutboundCarrier)
-			require.Equal(t, len("client-header"), firstObservation.OutboundHeaderLength)
-			require.Zero(t, firstObservation.OutboundBodyLength)
 			require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.4","input":[],"client_metadata":{"x-codex-turn-state":"second-frame"}}`)))
 			second := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
 			require.Equal(t, "second-frame", gjson.GetBytes(second, "client_metadata.x-codex-turn-state").String())
@@ -218,11 +176,6 @@ func TestCodexStatePassiveWSIngressKeepsModelsAndResponseSourcesSeparate(t *test
 			readCodexStatePassthroughFrame(t, ctx, client)
 			upstream.Send(`{"type":"response.completed","response":{"id":"resp_passive_second","model":"gpt-5.4","usage":{"input_tokens":1,"output_tokens":1}}}`)
 			readCodexStatePassthroughFrame(t, ctx, client)
-			secondObservation := requirePassiveWSStateRow(t, account.ID, "gpt-5.4", len("second-frame"), 312, "metadata", "suspect")
-			require.Equal(t, "ws_frame", secondObservation.OutboundCarrier)
-			require.Zero(t, secondObservation.OutboundHeaderLength, "a prior physical handshake is not sent again for this frame")
-			require.Equal(t, len("second-frame"), secondObservation.OutboundBodyLength)
-			requirePassiveWSStateRow(t, account.ID, "gpt-5.5", len("client-header"), 292, "header", "target")
 			require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.3","input":[]}`)))
 			third := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
 			require.False(t, gjson.GetBytes(third, "client_metadata.x-codex-turn-state").Exists())
@@ -239,16 +192,8 @@ func TestCodexStatePassiveWSIngressKeepsModelsAndResponseSourcesSeparate(t *test
 			case <-ctx.Done():
 				t.Fatal("gateway did not finish the local observed connection")
 			}
-			thirdObservation := requirePassiveWSStateRow(t, account.ID, thirdFinalModel, 0, 0, "", "")
-			require.Empty(t, thirdObservation.OutboundCarrier)
-			require.Zero(t, thirdObservation.OutboundHeaderLength)
-			require.Zero(t, thirdObservation.OutboundBodyLength)
+			requireNativeWSNoStateObservation(t, account.ID)
 			require.Empty(t, request, "all observed models must share the original physical socket")
-			encoded, err := json.Marshal(passiveWSStateRows(account.ID))
-			require.NoError(t, err)
-			for _, secret := range []string{firstToken, secondToken, "second-frame", "client-header"} {
-				require.NotContains(t, string(encoded), secret)
-			}
 			assertNoWrites()
 			requirePassiveWSNoMaintenance(t, svc.codexTurnStateService)
 		})

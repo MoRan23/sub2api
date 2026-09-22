@@ -1,7 +1,6 @@
 <template>
   <BaseDialog :show="show" :title="t(`${prefix}.statusTitle`)" width="extra-wide" @close="close">
     <p class="mb-3 break-all font-medium text-gray-800 dark:text-gray-200">{{ account?.name }}</p>
-    <OpenAIOAuthOSSelect :model-value="selectedOS" :profiles="account?.openai_oauth_os_profiles" class="mb-3" @update:model-value="selectOS" />
     <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.experimental`) }}</p>
     <p class="mb-4 text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.autoRefreshHint`) }}</p>
     <p class="mb-4 text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.lifetimePolicyHint`) }}</p>
@@ -12,6 +11,7 @@
       <div class="grid grid-cols-1 items-start gap-6 lg:grid-cols-2" data-testid="codex-turn-state-status-columns">
       <section class="min-w-0 space-y-3" data-testid="codex-turn-state-cache-section">
       <h3 class="font-semibold text-gray-900 dark:text-gray-100">{{ t(`${prefix}.cacheSection`) }}</h3>
+      <p class="text-xs text-gray-500 dark:text-gray-400" data-testid="codex-turn-state-shared-hint">{{ t(`${prefix}.sharedCacheHint`) }}</p>
       <p v-if="!status.enabled">{{ t(`${prefix}.disabled`) }}</p>
       <p v-else-if="!status.expected_length" class="text-amber-700 dark:text-amber-400">{{ t(`${prefix}.unresolved`) }}</p>
       <p v-else>{{ t(`${prefix}.expectedLength`) }}: {{ t(`${prefix}.characters`, { count: status.expected_length }) }}</p>
@@ -27,7 +27,9 @@
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.cacheShape`) }}</dt><dd>{{ label('shapes', model.shape || 'unknown') }}</dd></div>
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.length`) }}</dt><dd>{{ model.token_length || '—' }}</dd></div>
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.source`) }}</dt><dd>{{ label('sources', model.source) }}</dd></div>
-          <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.expiresAt`) }}</dt><dd>{{ date(model.expires_at) }}</dd><dd v-if="remaining(model) > 0" class="text-xs text-gray-500">{{ t(`${prefix}.remaining`, { seconds: remaining(model) }) }}</dd></div>
+          <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.expiresAt`) }}</dt><dd>{{ date(model.expires_at) }}</dd></div>
+          <div v-if="model.cookie_bundle_expires_at"><dt class="text-xs text-gray-500">{{ t(`${prefix}.bundleExpiresAt`) }}</dt><dd :data-testid="`codex-turn-state-bundle-expiry-${model.model}`">{{ date(model.cookie_bundle_expires_at) }}</dd></div>
+          <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.bundleRemaining`) }}</dt><dd :data-testid="`codex-turn-state-remaining-${model.model}`">{{ t(`${prefix}.remaining`, { seconds: remaining(model) }) }}</dd></div>
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.collectionStatus`) }}</dt><dd :data-testid="`codex-turn-state-collection-${model.model}`">{{ label('collectionStatuses', model.collection_status || (model.collector_paused ? 'paused' : undefined)) }}</dd></div>
           <div v-if="model.collection_reason"><dt class="text-xs text-gray-500">{{ t(`${prefix}.collectionReason`) }}</dt><dd class="break-words" :data-testid="`codex-turn-state-reason-${model.model}`">{{ label('reasons', model.collection_reason) }}</dd></div>
           <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.currentCollectorProxy`) }}</dt><dd class="break-words" :data-testid="`codex-turn-state-current-proxy-${model.model}`">{{ proxyName(model.collector_proxy_id ?? collectorProxyIDs(status)[0]) }}</dd></div>
@@ -53,6 +55,8 @@
       </section>
       <section class="min-w-0 space-y-3" data-testid="codex-turn-state-observations-section">
         <h3 class="font-semibold text-gray-900 dark:text-gray-100">{{ t(`${prefix}.observationsTitle`) }}</h3>
+          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.observationSystemHint`) }}</p>
+          <OpenAIOAuthOSSelect :model-value="selectedOS" :profiles="account?.openai_oauth_os_profiles" :label="t(`${prefix}.observationSystem`)" @update:model-value="selectOS" />
           <p class="text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.observationScopeHint`) }}</p>
           <p class="text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.observationRequestHint`) }}</p>
           <p v-if="!status.observations?.length" class="text-gray-500 dark:text-gray-400" data-testid="codex-turn-state-observation-empty">{{ t(`${prefix}.observationEmpty`) }}</p>
@@ -61,6 +65,7 @@
             <dl class="grid gap-3 sm:grid-cols-2">
               <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.observedAt`) }}</dt><dd>{{ date(observation.observed_at) }}</dd></div>
               <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.requestSource`) }}</dt><dd>{{ label('sources', observation.request_source) }}</dd></div>
+              <div v-if="observation.os_family"><dt class="text-xs text-gray-500">{{ t('admin.accounts.openai.identityOS') }}</dt><dd>{{ osLabels[observation.os_family] }}</dd></div>
               <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.requestSentAt`) }}</dt><dd :data-testid="`codex-turn-state-sent-at-${observation.model}`">{{ date(observation.request_sent_at) }}</dd></div>
               <div v-if="observation.request_source === 'business'"><dt class="text-xs text-gray-500">{{ t(`${prefix}.businessDelivery`) }}</dt><dd :data-testid="`codex-turn-state-delivery-${observation.model}`">{{ t(`${prefix}.${typeof observation.business_delivered === 'boolean' ? (observation.business_delivered ? 'businessDelivered' : 'businessNotDelivered') : 'businessDeliveryUnknown'}`) }}</dd></div>
               <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.responseLength`) }}</dt><dd>{{ observation.response_length > 0 ? t(`${prefix}.characters`, { count: observation.response_length }) : t(`${prefix}.responseStateMissing`) }}</dd></div>
@@ -102,7 +107,7 @@ import { onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getCodexTurnState, type CodexTurnStateModelStatus, type CodexTurnStateObservation, type CodexTurnStateStatus } from '@/api/admin/accounts'
 import { getAll as getProxies } from '@/api/admin/proxies'
-import { collectorProxyIDs } from '@/components/account/codexTurnState'
+import { codexTurnStatePackageExpiry, collectorProxyIDs } from '@/components/account/codexTurnState'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import OpenAIOAuthOSSelect from '@/components/account/OpenAIOAuthOSSelect.vue'
 import CodexResponseEvidenceDetails from './CodexResponseEvidenceDetails.vue'
@@ -117,6 +122,7 @@ const loading = ref(false)
 const failed = ref(false)
 const status = ref<CodexTurnStateStatus | null>(null)
 const selectedOS = ref<OpenAIOAuthOS>('windows')
+const osLabels = { windows: 'Windows', macos: 'macOS', linux: 'Linux' }
 const proxyNames = ref<Record<number, string>>({})
 const now = ref(Date.now())
 let observedAt = now.value
@@ -135,7 +141,7 @@ const reasonCodes = new Set([
   'collector_connect_timeout', 'collector_tls_timeout', 'collector_response_header_timeout',
   'waiting_business_response', 'queued', 'waiting_business', 'collecting', 'collector_proxy_not_configured', 'collector_proxy_changed',
   'account_unavailable', 'account_inactive', 'account_scheduling_disabled', 'account_expired', 'idle',
-  'target_still_expiring', 'business_preempted', 'collector_model_mismatch', 'authorization_unavailable',
+  'target_still_expiring', 'business_preempted', 'collector_model_mismatch', 'authorization_unavailable', 'cookie_expired', 'business_active', 'refresh',
 ])
 
 function canonicalReason(value: string) {
@@ -199,7 +205,7 @@ async function loadProxyNames() {
   }
 }
 function remaining(model: CodexTurnStateModelStatus) {
-  const expires = model.expires_at ? Date.parse(model.expires_at) : Number.NaN
+  const expires = codexTurnStatePackageExpiry(model)
   if (Number.isFinite(expires)) return Math.max(0, Math.ceil((expires - now.value) / 1000))
   return Math.max(0, model.remaining_seconds - Math.max(0, Math.floor((now.value - observedAt) / 1000)))
 }
@@ -262,7 +268,8 @@ function selectOS(os: OpenAIOAuthOS) {
   selectedOS.value = os
   controller?.abort()
   controller = null
-  status.value = null
+  // Changing the observation filter must not hide the shared model cache.
+  if (status.value) status.value = { ...status.value, observations: [] }
   failed.value = false
   void refresh()
 }

@@ -123,6 +123,10 @@ func TestPluginTurnStateMergeDeliveredHTTPResponsePublishes(t *testing.T) {
 				}
 				t.Run(name, func(t *testing.T) {
 					state, repo, account := newCodexStateTestService(t)
+					// This exercises the real physical cookie boundary, whose clock
+					// validates the target deadline before producing a frozen bundle.
+					now := time.Now().UTC().Truncate(time.Second)
+					state.now = func() time.Time { return now }
 					account.Concurrency = 1
 					if path == "passthrough" {
 						account.Extra["openai_passthrough"] = true

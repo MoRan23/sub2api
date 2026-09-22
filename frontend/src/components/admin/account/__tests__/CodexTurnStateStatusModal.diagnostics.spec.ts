@@ -65,7 +65,7 @@ describe('Codex turn-state collection diagnostics', () => {
       'collector_dns_failed', 'collector_connection_refused', 'collector_connection_closed',
       'collector_tls_failed', 'collector_proxy_tunnel_failed', 'collector_connect_timeout',
       'collector_tls_timeout', 'collector_response_header_timeout',
-      'collector_model_mismatch', 'authorization_unavailable',
+      'collector_model_mismatch', 'authorization_unavailable', 'cookie_expired',
     ] as const
     getCodexTurnState.mockResolvedValue(state(codes.map(code => model(code))))
     const wrapper = render(locale)
@@ -90,6 +90,22 @@ describe('Codex turn-state collection diagnostics', () => {
     const messages = (locale === 'zh' ? zh : en).accounts.codexTurnState
     expect(wrapper.get('[data-testid="codex-turn-state-reason-gpt-test"]').text()).toBe(messages.reasons.collector_model_mismatch)
     expect(wrapper.get('[data-testid="codex-turn-state-guidance-gpt-test"]').text()).toBe(messages.reasonHints.collector_model_mismatch)
+    expect(wrapper.text()).not.toContain(messages.unknownReason)
+    wrapper.unmount()
+  })
+
+  it.each(['zh', 'en'] as const)('explains normal scheduled collection separately from error backoff in %s', async (locale) => {
+    getCodexTurnState.mockResolvedValue(state([model('gpt-test', { collection_status: 'scheduled', collection_reason: 'refresh', last_error: undefined, refresh_reason: 'business_active' })]))
+    const wrapper = render(locale)
+    await flushPromises()
+    const messages = (locale === 'zh' ? zh : en).accounts.codexTurnState
+    expect(wrapper.text()).toContain(messages.collectionStatuses.scheduled)
+    expect(wrapper.text()).toContain(messages.reasons.business_active)
+    expect(wrapper.text()).toContain(messages.reasonHints.refresh)
+    expect(wrapper.get('[data-testid="codex-turn-state-shared-hint"]').text()).toContain(locale === 'zh'
+      ? '仅 HTTP 出站使用；原生 WebSocket 不使用缓存票据或触发采集。'
+      : 'Used only for HTTP outbound requests; native WebSocket requests neither use cached tokens nor trigger collection.')
+    expect(wrapper.text()).not.toContain(messages.retryHint)
     expect(wrapper.text()).not.toContain(messages.unknownReason)
     wrapper.unmount()
   })

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -18,6 +19,9 @@ var (
 	ErrStoreCorrupt     = errors.New("cookie_store_corrupt")
 	ErrConflict         = errors.New("cookie_commit_conflict")
 	ErrAttemptClosed    = errors.New("cookie_attempt_closed")
+	ErrNoSnapshot       = errors.New("cookie_snapshot_unavailable")
+	ErrBundleExpired    = errors.New("cookie_bundle_expired")
+	ErrBundleInvalid    = errors.New("cookie_bundle_invalid")
 )
 
 // Scope follows the credential authorization, independently of model, proxy or purpose.
@@ -45,7 +49,15 @@ func WithScope(ctx context.Context, scope Scope) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, scopeKey{}, scope)
+	ctx = context.WithValue(ctx, scopeKey{}, scope)
+	if scope.EphemeralID != "" {
+		// A new unbound authorization flow cannot inherit a prior account's
+		// bundle, feature-disable marker, or request-specific restoration.
+		ctx = context.WithValue(ctx, bundleKey{}, struct{}{})
+		ctx = context.WithValue(ctx, guardKey{}, struct{}{})
+		ctx = context.WithValue(ctx, fallbackKey{}, struct{}{})
+	}
+	return ctx
 }
 
 // WithoutScope clears a previous account projection without inheriting its cookies.
@@ -82,6 +94,41 @@ type Entry struct {
 	UpdatedAt time.Time
 }
 
+// Bundle is a frozen cookie snapshot attached to one accepted turn-state ticket.
+// It is persisted only inside that ticket's encrypted, atomic state record. Its
+// lifetime never exceeds the ticket's local lifetime, including session cookies.
+type Bundle struct {
+	Entries   []Entry   `json:"entries"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+const BundleLifetime = 240 * time.Second
+
+func (b Bundle) Clone() Bundle {
+	b.Entries = append([]Entry(nil), b.Entries...)
+	return b
+}
+
+// Fresh identifies an explicit empty starting snapshot, not a saved ticket bundle.
+func (b Bundle) Fresh() bool { return len(b.Entries) == 0 && b.ExpiresAt.IsZero() }
+
+// ValidAt rejects the entire bundle if any cookie is expired or malformed. A
+// valid accepted ticket may carry an empty cookie set, with a nonzero deadline.
+func (b Bundle) ValidAt(now time.Time) bool {
+	if b.ExpiresAt.IsZero() || !b.ExpiresAt.After(now) {
+		return false
+	}
+	seen := make(map[string]bool, len(b.Entries))
+	for _, entry := range b.Entries {
+		if !entry.Valid() || (!AllowedURL(&url.URL{Scheme: "https", Host: entry.Domain}) && entry.Domain != "openai.com") ||
+			entry.ExpiresAt.IsZero() || entry.ExpiresAt.Before(b.ExpiresAt) || !entry.ExpiresAt.After(now) || seen[entry.Key] {
+			return false
+		}
+		seen[entry.Key] = true
+	}
+	return true
+}
+
 // CookieKey is the RFC cookie identity; HostOnly is deliberately not part of it.
 func CookieKey(name, domain, path string) string {
 	digest := sha256.Sum256([]byte(name + "\x00" + domain + "\x00" + path))
@@ -103,25 +150,11 @@ func (e Entry) cookie() *http.Cookie {
 	return &http.Cookie{Name: e.Name, Value: e.Value, Domain: domain, Path: e.Path, Secure: e.Secure, HttpOnly: e.HTTPOnly, Quoted: e.Quoted, SameSite: e.SameSite, Expires: e.ExpiresAt}
 }
 
-// Mutation changes one cookie identity. A nil Entry deletes that identity.
-type Mutation struct {
-	Key             string
-	Entry           *Entry
-	ExpectedVersion *int64
-}
-
-// Snapshot includes value-free mutation versions, so another node's deletion or
-// session replacement invalidates a process-local session without sharing its value.
-type Snapshot struct {
-	Entries  []Entry
-	Versions map[string]int64
-}
-
-// Store is authoritative for persistent cookies and must fence every operation
-// against the current authorization generation. It must return sanitized errors.
-type Store interface {
-	Load(context.Context, Scope) (Snapshot, error)
-	Merge(context.Context, Scope, []Mutation) (map[string]int64, error)
+// mutation applies one response cookie to a request-local candidate. There is no
+// independent cookie-store API: persistence belongs to the atomic ticket bundle.
+type mutation struct {
+	Key   string
+	Entry *Entry
 }
 
 type DiagnosticCookie struct {

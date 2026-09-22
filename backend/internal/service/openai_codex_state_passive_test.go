@@ -313,12 +313,17 @@ func TestCodexStatePolicyChangeBeforeFreezeFallsBackToPassiveGuardedCarriers(t *
 				require.NoError(t, state.Finish(context.Background(), seed, true))
 				before, err := repo.Get(context.Background(), seed.key)
 				require.NoError(t, err)
-				state.encryptor = codexStatePolicyChangeOnDecrypt{SecretEncryptor: state.encryptor, change: func() {
+				applyPolicyChange := func() {
 					if change == "remove" {
 						policy.set()
 					} else {
 						policy.set("gpt-5")
 					}
+				}
+				cacheDecrypted := false
+				state.encryptor = codexStatePolicyChangeOnDecrypt{SecretEncryptor: state.encryptor, change: func() {
+					cacheDecrypted = true
+					applyPolicyChange()
 				}}
 				gateway := &OpenAIGatewayService{codexTurnStateService: state}
 				c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -340,32 +345,40 @@ func TestCodexStatePolicyChangeBeforeFreezeFallsBackToPassiveGuardedCarriers(t *
 					completeCodexTurnStateHTTPResponse(response, nil)
 					require.NoError(t, response.Body.Close())
 				} else {
+					applyPolicyChange()
 					var attempt *CodexTurnStateAttempt
 					actual, attempt, err = gateway.prepareOpenAICodexWSStateFrame(context.Background(), c, account, body, "guarded-handshake", codexWSStateTestHeaders(account))
 					require.NoError(t, err)
-					require.NotNil(t, attempt)
-					require.False(t, attempt.Enabled)
+					require.Nil(t, attempt, "native WS never creates a ticket attempt")
+					require.False(t, cacheDecrypted, "native WS does not read the HTTP cache bundle")
 					gateway.observeOpenAICodexWSStateHeaders(attempt, http.Header{"X-Codex-Turn-State": {token}})
 					gateway.finishOpenAICodexWSState(context.Background(), attempt, true)
 				}
 				require.Equal(t, body, actual, "only source-guarded original carriers may survive the policy change")
 				entry := FingerprintObservationEntry{}
 				populateCodexTurnStateObservation(c, &entry, headers, actual, transport == "ws")
-				require.NotNil(t, entry.CodexTurnState)
-				require.False(t, entry.CodexTurnState.Enabled)
-				require.True(t, entry.CodexTurnState.AccountEnabled)
-				require.Equal(t, "client", entry.CodexTurnState.Source)
-				require.Equal(t, "passthrough", entry.CodexTurnState.Action)
-				wantReason := "model_excluded"
-				if change == "replace_revision" {
-					wantReason = "model_policy_changed"
+				if transport == "ws" {
+					require.Nil(t, entry.CodexTurnState)
+				} else {
+					require.NotNil(t, entry.CodexTurnState)
+					require.False(t, entry.CodexTurnState.Enabled)
+					require.True(t, entry.CodexTurnState.AccountEnabled)
+					require.Equal(t, "client", entry.CodexTurnState.Source)
+					require.Equal(t, "passthrough", entry.CodexTurnState.Action)
+					wantReason := "model_excluded"
+					if change == "replace_revision" {
+						wantReason = "model_policy_changed"
+					}
+					require.Equal(t, wantReason, entry.CodexTurnState.MaintenanceReason)
+					require.Equal(t, 292, entry.CodexTurnState.ResponseLength)
 				}
-				require.Equal(t, wantReason, entry.CodexTurnState.MaintenanceReason)
-				require.Equal(t, 292, entry.CodexTurnState.ResponseLength)
 				after, err := repo.Get(context.Background(), seed.key)
 				require.NoError(t, err)
 				require.Equal(t, before.Version, after.Version)
 				require.Equal(t, before.EncryptedToken, after.EncryptedToken)
+				if transport == "ws" {
+					require.Equal(t, before, after, "native WS cannot update the cache bundle, activity, or collection demand")
+				}
 				require.Empty(t, state.business)
 				require.Empty(t, state.queue)
 			})

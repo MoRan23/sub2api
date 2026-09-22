@@ -281,11 +281,11 @@ func bindCodexTurnStateSummarySequence(observation *codexTurnStateWireObservatio
 			}
 			attempt.businessSentAt = sentAt
 		}
-		finished, service := attempt.finished, attempt.historyService
+		service := attempt.historyService
 		attempt.mu.Unlock()
 		// WS response delivery can race the successful-write callback.
 		recordCodexDeliveredHistory(attempt)
-		if finished && service != nil {
+		if service != nil {
 			service.completeBusinessSent(attempt)
 		}
 	}

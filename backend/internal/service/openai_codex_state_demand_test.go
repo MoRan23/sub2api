@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCodexTurnStateDemandOnlyFromDeliveredMatchingExtended(t *testing.T) {
+func TestCodexTurnStateDemandStartsFromSentBusinessAndPreservesAnomalyEvidence(t *testing.T) {
 	for _, name := range []string{"missing", "invalid", "future", "expired", "wrong_type", "failed", "unsent", "unknown_type", "extended"} {
 		t.Run(name, func(t *testing.T) {
 			s, repo, account := newCodexStateTestService(t)
@@ -44,8 +44,10 @@ func TestCodexTurnStateDemandOnlyFromDeliveredMatchingExtended(t *testing.T) {
 			if name == "extended" {
 				require.Equal(t, "extended_shape", record.DemandReason)
 				require.False(t, record.DemandAt.IsZero())
-			} else {
+			} else if name == "unsent" {
 				require.Empty(t, record.DemandReason)
+			} else {
+				require.Equal(t, "business_active", record.DemandReason)
 			}
 			var calls atomic.Int64
 			s.collector = codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
@@ -53,7 +55,7 @@ func TestCodexTurnStateDemandOnlyFromDeliveredMatchingExtended(t *testing.T) {
 				return CodexTurnStateCollectResult{}, errors.New("synthetic failure")
 			})
 			s.collect(context.Background(), attempt.key)
-			require.Equal(t, name == "extended", calls.Load() == 1)
+			require.Equal(t, name != "unsent" && name != "unknown_type", calls.Load() == 1)
 		})
 	}
 }
@@ -96,9 +98,9 @@ func TestCodexTurnStateDemandCollectorOutcomeAtomicallyKeepsShapeAndRetry(t *tes
 			require.Equal(t, wantError, record.LastError)
 			if name == "target" {
 				require.NotEmpty(t, record.EncryptedToken)
-				require.Empty(t, record.DemandReason)
-				require.True(t, record.NextCollectAt.IsZero())
-				require.Equal(t, "idle", record.CollectionStatus)
+				require.Equal(t, "refresh", record.DemandReason)
+				require.Equal(t, s.now().Add(CodexTurnStateCollectInterval), record.NextCollectAt)
+				require.Equal(t, "scheduled", record.CollectionStatus)
 			} else {
 				require.Equal(t, "extended_shape", record.DemandReason)
 				retry := time.Duration(0)
@@ -207,8 +209,8 @@ func TestCodexTurnStateDemandRenewalRetainsValidCacheAndRetriesNearExpiry(t *tes
 				require.Equal(t, responseToken, plain)
 			}
 			if name == "fresh_target" {
-				require.Empty(t, after.DemandReason)
-				require.Equal(t, "idle", after.CollectionStatus)
+				require.Equal(t, "refresh", after.DemandReason)
+				require.Equal(t, "scheduled", after.CollectionStatus)
 			} else {
 				require.Equal(t, "expiring", after.DemandReason)
 				require.Equal(t, "backoff", after.CollectionStatus)
@@ -218,7 +220,7 @@ func TestCodexTurnStateDemandRenewalRetainsValidCacheAndRetriesNearExpiry(t *tes
 	}
 }
 
-func TestCodexTurnStateDemandIdleResumeWithoutStateCannotRecreateOldDemand(t *testing.T) {
+func TestCodexTurnStateDemandIdleResumeCreatesFreshBusinessDemand(t *testing.T) {
 	s, repo, account := newCodexStateTestService(t)
 	seed := seedCodexStateTestDemand(t, s, account, "gpt-5")
 	clock := s.now().Add(CodexTurnStateActiveWindow + time.Second)
@@ -229,14 +231,15 @@ func TestCodexTurnStateDemandIdleResumeWithoutStateCannotRecreateOldDemand(t *te
 	require.NoError(t, s.Finish(context.Background(), resumed, true))
 	record, err := repo.Get(context.Background(), seed.key)
 	require.NoError(t, err)
-	require.Empty(t, record.DemandReason)
+	require.Equal(t, "business_active", record.DemandReason)
+	require.Equal(t, clock, record.DemandAt)
 	var calls atomic.Int64
 	s.collector = codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
 		calls.Add(1)
 		return CodexTurnStateCollectResult{}, nil
 	})
 	s.collect(context.Background(), seed.key)
-	require.Zero(t, calls.Load())
+	require.EqualValues(t, 1, calls.Load())
 }
 
 func TestCodexTurnStateDemandNaturalNearExpiryPreservesRetry(t *testing.T) {
@@ -312,7 +315,7 @@ func TestCodexTurnStateDemandNaturalTargetPreservesOwnerRetryAfter(t *testing.T)
 	row, err := repo.Get(context.Background(), first.key)
 	require.NoError(t, err)
 	require.NotEmpty(t, row.EncryptedToken)
-	require.Empty(t, row.DemandReason)
+	require.Equal(t, "refresh", row.DemandReason)
 	require.Equal(t, "collector_rate_limited", row.LastError)
 	require.Equal(t, s.now().Add(5*time.Minute), row.NextCollectAt)
 	s.collect(context.Background(), second.key)
@@ -401,5 +404,5 @@ func TestCodexTurnStateDemandReservationAndOutcomeAdvanceAlongsideBusinessLease(
 	require.NoError(t, err)
 	require.NotEmpty(t, accepted.EncryptedToken, "reservation and failed collection must not prevent a same-issued natural target from replacing the unchanged anomaly")
 	require.Equal(t, "business", accepted.Source)
-	require.Empty(t, accepted.DemandReason)
+	require.Equal(t, "refresh", accepted.DemandReason)
 }

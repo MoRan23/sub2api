@@ -48,6 +48,21 @@ func (s *OpenAIGatewayService) prepareOpenAICodexStateHTTPRequest(c *gin.Context
 		}
 	}
 	s.codexTurnStateService.bindHistoryCredentials(request.Context(), attempt, request.Header)
+	originalStateHeaders := make(http.Header)
+	for key, values := range request.Header {
+		if strings.EqualFold(key, openAICodexTurnStateHeader) {
+			originalStateHeaders[key] = append([]string(nil), values...)
+		}
+	}
+	bundle := openaicookies.Bundle{}
+	if attempt.Enabled {
+		bundle, err = s.codexTurnStateService.codexCookieBundleForSnapshot(attempt)
+		if err != nil {
+			// A ticket must not escape with a missing or expired Cookie snapshot.
+			attempt.Snapshot.Token = ""
+			bundle = openaicookies.Bundle{}
+		}
+	}
 	finalBody := body
 	if token := attempt.Snapshot.Token; token != "" {
 		// Only an existing HTTP body carrier is synchronized; WS creates its own
@@ -85,9 +100,65 @@ func (s *OpenAIGatewayService) prepareOpenAICodexStateHTTPRequest(c *gin.Context
 	noteOpenAICodexStatePatch(c, attempt, body, finalBody)
 	collector := &codexTurnStateHTTPCollector{service: s.codexTurnStateService, attempt: attempt}
 	ctx := openaicookies.WithObserver(request.Context(), func(diagnostic openaicookies.Diagnostic) { observeCodexCookies(attempt, diagnostic) })
-	ctx, cookieAttempt := openaicookies.WithAttempt(ctx)
-	attempt.cookieAttempt = cookieAttempt
+	if attempt.Enabled {
+		ctx = openaicookies.WithBundle(ctx, bundle)
+		ctx = openaicookies.WithFallback(ctx, func(outbound *http.Request) {
+			if attempt.Snapshot.Token != "" {
+				restoreCodexStateCookieRequest(outbound, originalStateHeaders, body)
+			}
+			failCodexCookieResponse(attempt)
+		})
+		ctx = openaicookies.WithSendGuard(ctx, func(outbound *http.Request) bool {
+			if (bundle.Fresh() || bundle.ValidAt(s.codexTurnStateService.now())) && s.codexTurnStateService.ValidateCredentialHeaders(outbound.Context(), attempt, outbound.Header) {
+				return true
+			}
+			return false
+		})
+		var cookieAttempt *openaicookies.Attempt
+		ctx, cookieAttempt = openaicookies.WithAttempt(ctx)
+		attempt.cookieAttempt = cookieAttempt
+	} else {
+		ctx = openaicookies.Bypass(ctx)
+	}
 	return request.WithContext(context.WithValue(ctx, codexTurnStateHTTPRequestKey{}, collector))
+}
+
+// Restore only this feature's turn-state changes; authorization and all other
+// request normalization remain frozen on the physical request.
+func restoreCodexStateCookieRequest(request *http.Request, headers http.Header, baseline []byte) {
+	for key := range request.Header {
+		if strings.EqualFold(key, openAICodexTurnStateHeader) {
+			delete(request.Header, key)
+		}
+	}
+	for key, values := range headers {
+		request.Header[key] = append([]string(nil), values...)
+	}
+	original := gjson.GetBytes(baseline, "client_metadata.x-codex-turn-state")
+	if !original.Exists() || request.GetBody == nil {
+		return
+	}
+	reader, err := request.GetBody()
+	if err != nil {
+		return
+	}
+	current, err := io.ReadAll(reader)
+	_ = reader.Close()
+	if err != nil {
+		return
+	}
+	restored, err := sjson.SetRawBytes(current, "client_metadata.x-codex-turn-state", []byte(original.Raw))
+	if err != nil {
+		return
+	}
+	request.Body = io.NopCloser(bytes.NewReader(restored))
+	request.ContentLength = int64(len(restored))
+	for key := range request.Header {
+		if strings.EqualFold(key, "Content-Length") {
+			delete(request.Header, key)
+		}
+	}
+	request.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(restored)), nil }
 }
 
 func finishCodexTurnStateHTTPAttempt(service *CodexTurnStateService, attempt *CodexTurnStateAttempt, delivered bool) {

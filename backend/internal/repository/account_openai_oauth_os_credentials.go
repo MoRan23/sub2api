@@ -15,12 +15,12 @@ import (
 	"github.com/lib/pq"
 )
 
-const openAIOAuthSlotColumns = `c.account_id,p.os_family,c.credentials,c.authorization_generation::text,c.revision,s.state_generation::text,c.credential_epoch::text,c.status,c.authorized_at,c.expires_at,c.last_error,c.refresh_retry_after`
+const openAIOAuthSlotColumns = `c.account_id,p.os_family,a.credentials,c.authorization_generation::text,c.revision,c.state_generation::text,c.credential_epoch::text,c.status,c.authorized_at,c.expires_at,c.last_error,c.refresh_retry_after`
 
 func readOpenAIOAuthOSCredentials(ctx context.Context, client *dbent.Client, id int64, os string) ([]*service.OpenAIOAuthOSCredential, error) {
 	// The OS selects only installation/runtime identity. There is exactly one
 	// authoritative credential tuple and CAS revision for the owning account.
-	query := `SELECT ` + openAIOAuthSlotColumns + ` FROM account_openai_oauth_credentials c JOIN account_openai_oauth_os_profiles p ON p.account_id=c.account_id JOIN account_openai_oauth_os_credentials s ON s.account_id=c.account_id AND s.os_family=p.os_family WHERE c.account_id=$1 AND EXISTS (SELECT 1 FROM accounts a WHERE a.id=$1 AND a.deleted_at IS NULL AND ` + codexTurnStateOwnerExpression("a.credentials") + `)`
+	query := `SELECT ` + openAIOAuthSlotColumns + ` FROM account_openai_oauth_credentials c JOIN accounts a ON a.id=c.account_id JOIN account_openai_oauth_os_profiles p ON p.account_id=c.account_id WHERE c.account_id=$1 AND a.deleted_at IS NULL AND ` + codexTurnStateOwnerExpression("a.credentials")
 	args := []any{id}
 	if os != "" {
 		query += ` AND p.os_family=$2`
@@ -44,6 +44,7 @@ func readOpenAIOAuthOSCredentials(ctx context.Context, client *dbent.Client, id 
 		if err := json.Unmarshal(credentials, &slot.Credentials); err != nil {
 			return nil, err
 		}
+		slot.Credentials = service.OpenAIOAuthProviderCredentials(slot.Credentials)
 		if authorized.Valid {
 			slot.AuthorizedAt = &authorized.Time
 		}
@@ -101,9 +102,6 @@ func initializeOpenAIOAuthOSCredentialsLocked(ctx context.Context, client *dbent
 		if service.OpenAIOAuthCredentialSubject(credentials, "access_token") == "" && service.OpenAIOAuthCredentialSubject(credentials, "refresh_token") == "" {
 			return service.ErrOpenAIOAuthOSUnauthorized
 		}
-		if err := validateOpenAIOAuthOSSubjectLocked(ctx, client, account.ID, os, credentials); err != nil {
-			return err
-		}
 		now := time.Now().UTC()
 		slot := &service.OpenAIOAuthOSCredential{OwnerAccountID: account.ID, OSFamily: os, Credentials: service.OpenAIOAuthProviderCredentials(credentials), AuthorizationGeneration: uuid.NewString(), Revision: 1, StateGeneration: uuid.NewString(), CredentialEpoch: uuid.NewString(), Status: service.OpenAIOAuthAuthorizationAuthorized, AuthorizedAt: &now, ExpiresAt: openAIOAuthCredentialExpiry(credentials)}
 		if err := saveOpenAIOAuthOSCredentialLocked(ctx, client, slot, "initial"); err != nil {
@@ -113,9 +111,6 @@ func initializeOpenAIOAuthOSCredentialsLocked(ctx context.Context, client *dbent
 		break
 	}
 	if _, err := client.ExecContext(ctx, `UPDATE account_openai_oauth_credentials SET source='initial' WHERE account_id=$1 AND source='legacy_migration'`, account.ID); err != nil {
-		return err
-	}
-	if err := mirrorOpenAIOAuthOSCredentialLocked(ctx, client, account.ID, account.OpenAIOAuthOSProfiles.DefaultOS); err != nil {
 		return err
 	}
 	profiles, err := loadOpenAIOAuthOSProfiles(ctx, client, []int64{account.ID})
@@ -163,9 +158,6 @@ func migrateOpenAIOAuthOSCredentialsLocked(ctx context.Context, client *dbent.Cl
 	if err = saveOpenAIOAuthOSCredentialLocked(ctx, client, slot, "legacy_migration"); err != nil {
 		return false, err
 	}
-	if err = mirrorOpenAIOAuthOSCredentialLocked(ctx, client, account.ID, profiles.DefaultOS); err != nil {
-		return false, err
-	}
 	return true, nil
 }
 
@@ -175,51 +167,44 @@ func saveOpenAIOAuthOSCredentialLocked(ctx context.Context, client *dbent.Client
 		return err
 	}
 	_, err = client.ExecContext(ctx, `INSERT INTO account_openai_oauth_credentials
-	(account_id,credentials,authorization_generation,revision,credential_epoch,status,source,authorized_at,expires_at,last_error,refresh_retry_after)
-	VALUES($1,$2::jsonb,$3::uuid,$4,$5::uuid,$6,$7,$8,$9,$10,$11)
-	ON CONFLICT(account_id) DO UPDATE SET credentials=EXCLUDED.credentials,authorization_generation=EXCLUDED.authorization_generation,revision=EXCLUDED.revision,credential_epoch=EXCLUDED.credential_epoch,status=EXCLUDED.status,source=CASE WHEN EXCLUDED.source='' THEN account_openai_oauth_credentials.source ELSE EXCLUDED.source END,authorized_at=EXCLUDED.authorized_at,expires_at=EXCLUDED.expires_at,last_error=EXCLUDED.last_error,refresh_retry_after=EXCLUDED.refresh_retry_after,updated_at=NOW()`, slot.OwnerAccountID, string(payload), slot.AuthorizationGeneration, slot.Revision, slot.CredentialEpoch, slot.Status, source, slot.AuthorizedAt, slot.ExpiresAt, slot.LastError, slot.RefreshRetryAfter)
+	(account_id,authorization_generation,revision,state_generation,credential_epoch,status,source,authorized_at,expires_at,last_error,refresh_retry_after)
+	VALUES($1,$2::uuid,$3,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11)
+	ON CONFLICT(account_id) DO UPDATE SET authorization_generation=EXCLUDED.authorization_generation,revision=EXCLUDED.revision,
+	previous_state_generation=CASE WHEN account_openai_oauth_credentials.state_generation<>EXCLUDED.state_generation THEN account_openai_oauth_credentials.state_generation ELSE account_openai_oauth_credentials.previous_state_generation END,
+	state_generation=EXCLUDED.state_generation,credential_epoch=EXCLUDED.credential_epoch,status=EXCLUDED.status,source=CASE WHEN EXCLUDED.source='' THEN account_openai_oauth_credentials.source ELSE EXCLUDED.source END,authorized_at=EXCLUDED.authorized_at,expires_at=EXCLUDED.expires_at,last_error=EXCLUDED.last_error,refresh_retry_after=EXCLUDED.refresh_retry_after,updated_at=NOW()`, slot.OwnerAccountID, slot.AuthorizationGeneration, slot.Revision, slot.StateGeneration, slot.CredentialEpoch, slot.Status, source, slot.AuthorizedAt, slot.ExpiresAt, slot.LastError, slot.RefreshRetryAfter)
+	if err != nil {
+		return err
+	}
+	_, err = client.ExecContext(ctx, `UPDATE accounts SET credentials=(COALESCE(credentials,'{}'::jsonb)-$2::text[]) || $3::jsonb,updated_at=NOW() WHERE id=$1`, slot.OwnerAccountID, pq.Array(service.OpenAIOAuthProviderCredentialKeys()), string(payload))
 	if err != nil {
 		return err
 	}
 	if err = syncOpenAIOAuthRuntimeCredentialMetadataLocked(ctx, client, slot.OwnerAccountID); err != nil {
 		return err
 	}
-	rows, err := client.QueryContext(ctx, `SELECT state_generation::text FROM account_openai_oauth_os_credentials WHERE account_id=$1 AND os_family=$2`, slot.OwnerAccountID, slot.OSFamily)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	if rows.Next() {
-		return rows.Scan(&slot.StateGeneration)
-	}
-	return rows.Err()
+	return nil
 }
 
 // Retained OS rows contain runtime fences only. Mirroring metadata maintains
 // existing state/cookie joins without storing three refreshable token copies.
 func syncOpenAIOAuthRuntimeCredentialMetadataLocked(ctx context.Context, client *dbent.Client, id int64) error {
 	_, err := client.ExecContext(ctx, `INSERT INTO account_openai_oauth_os_credentials AS s
-	(account_id,os_family,credentials,authorization_generation,revision,state_generation,credential_epoch,status,source,authorized_at,expires_at,last_error,refresh_retry_after)
-	SELECT c.account_id,os,'{}'::jsonb,c.authorization_generation,c.revision,gen_random_uuid(),c.credential_epoch,c.status,'shared_runtime',c.authorized_at,c.expires_at,c.last_error,c.refresh_retry_after
+	(account_id,os_family,authorization_generation,revision,state_generation,credential_epoch,status,source,authorized_at,expires_at,last_error,refresh_retry_after)
+	SELECT c.account_id,os,c.authorization_generation,c.revision,c.state_generation,c.credential_epoch,c.status,'shared_runtime',c.authorized_at,c.expires_at,c.last_error,c.refresh_retry_after
 	FROM account_openai_oauth_credentials c CROSS JOIN unnest(ARRAY['windows','macos','linux']) os WHERE c.account_id=$1
-	ON CONFLICT(account_id,os_family) DO UPDATE SET credentials='{}'::jsonb,
-	previous_state_generation=CASE WHEN s.authorization_generation<>EXCLUDED.authorization_generation OR s.credential_epoch<>EXCLUDED.credential_epoch THEN s.state_generation ELSE s.previous_state_generation END,
-	state_generation=CASE WHEN s.authorization_generation<>EXCLUDED.authorization_generation OR s.credential_epoch<>EXCLUDED.credential_epoch THEN gen_random_uuid() ELSE s.state_generation END,
+	ON CONFLICT(account_id,os_family) DO UPDATE SET
+	previous_state_generation=CASE WHEN s.state_generation<>EXCLUDED.state_generation THEN s.state_generation ELSE s.previous_state_generation END,
+	state_generation=EXCLUDED.state_generation,
 	authorization_generation=EXCLUDED.authorization_generation,revision=EXCLUDED.revision,credential_epoch=EXCLUDED.credential_epoch,status=EXCLUDED.status,source='shared_runtime',authorized_at=EXCLUDED.authorized_at,expires_at=EXCLUDED.expires_at,last_error=EXCLUDED.last_error,refresh_retry_after=EXCLUDED.refresh_retry_after,updated_at=NOW()`, id)
 	return err
 }
 
 func revokeSharedOpenAIOAuthCredentialsLocked(ctx context.Context, client *dbent.Client, id int64) error {
-	_, err := client.ExecContext(ctx, `UPDATE account_openai_oauth_credentials SET credentials='{}'::jsonb,status='unauthorized',authorization_generation=gen_random_uuid(),credential_epoch=gen_random_uuid(),revision=revision+1,last_error='',refresh_retry_after=NULL,updated_at=NOW() WHERE account_id=$1`, id)
+	_, err := client.ExecContext(ctx, `UPDATE account_openai_oauth_credentials SET status='unauthorized',authorization_generation=gen_random_uuid(),previous_state_generation=state_generation,state_generation=gen_random_uuid(),credential_epoch=gen_random_uuid(),revision=revision+1,last_error='',refresh_retry_after=NULL,auth_pause_owned=false,updated_at=NOW() WHERE account_id=$1`, id)
 	if err != nil {
 		return err
 	}
 	return syncOpenAIOAuthRuntimeCredentialMetadataLocked(ctx, client, id)
-}
-
-func mirrorOpenAIOAuthOSCredentialLocked(ctx context.Context, client *dbent.Client, id int64, os string) error {
-	_, err := client.ExecContext(ctx, `UPDATE accounts a SET credentials=(COALESCE(a.credentials,'{}'::jsonb)-$2::text[]) || COALESCE((SELECT c.credentials FROM account_openai_oauth_credentials c WHERE c.account_id=a.id AND c.status<>'unauthorized'),'{}'::jsonb),updated_at=NOW() WHERE a.id=$1`, id, pq.Array(service.OpenAIOAuthProviderCredentialKeys()))
-	return err
 }
 
 func (r *accountRepository) mutateOpenAIOAuthOSCredential(ctx context.Context, id int64, os string, mutate func(context.Context, *dbent.Client, *service.Account, *service.OpenAIOAuthOSProfiles) (bool, error)) error {
@@ -257,9 +242,6 @@ func (r *accountRepository) mutateOpenAIOAuthOSCredential(ctx context.Context, i
 		return err
 	}
 	if changed {
-		if err = mirrorOpenAIOAuthOSCredentialLocked(ctx, client, id, os); err != nil {
-			return err
-		}
 		if err = enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 			return err
 		}
@@ -274,48 +256,6 @@ func (r *accountRepository) mutateOpenAIOAuthOSCredential(ctx context.Context, i
 		}
 	}
 	return nil
-}
-
-func validateOpenAIOAuthOSSubjectLocked(ctx context.Context, client *dbent.Client, id int64, os string, credentials map[string]any) error {
-	accountID, userID := service.OpenAIOAuthCredentialSubject(credentials, "chatgpt_account_id"), service.OpenAIOAuthCredentialSubject(credentials, "chatgpt_user_id")
-	if accountID == "" || userID == "" {
-		return service.ErrOpenAIOAuthOSSubjectMismatch
-	}
-	rows, err := client.QueryContext(ctx, `SELECT chatgpt_account_id,chatgpt_user_id FROM account_openai_oauth_authorization_migrations WHERE account_id=$1`, id)
-	if err != nil {
-		return err
-	}
-	var anchorAccount, anchorUser string
-	if rows.Next() {
-		err = rows.Scan(&anchorAccount, &anchorUser)
-	}
-	closeErr := rows.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if (anchorAccount != "" && anchorAccount != accountID) || (anchorUser != "" && anchorUser != userID) {
-		return service.ErrOpenAIOAuthOSSubjectMismatch
-	}
-	slots, err := readOpenAIOAuthOSCredentials(ctx, client, id, "")
-	if err != nil {
-		return err
-	}
-	for _, slot := range slots {
-		if slot.Status == service.OpenAIOAuthAuthorizationUnauthorized {
-			continue
-		}
-		for _, key := range []string{"chatgpt_account_id", "chatgpt_user_id"} {
-			existing := service.OpenAIOAuthCredentialSubject(slot.Credentials, key)
-			if existing != "" && existing != service.OpenAIOAuthCredentialSubject(credentials, key) {
-				return service.ErrOpenAIOAuthOSSubjectMismatch
-			}
-		}
-	}
-	_, err = client.ExecContext(ctx, `UPDATE account_openai_oauth_authorization_migrations SET chatgpt_account_id=$2,chatgpt_user_id=$3 WHERE account_id=$1`, id, accountID, userID)
-	return err
 }
 
 func (r *accountRepository) BindOpenAIOAuthOSCredentials(ctx context.Context, id int64, os string, credentials map[string]any, source string) (*service.OpenAIOAuthOSCredential, error) {
@@ -343,12 +283,12 @@ func (r *accountRepository) bindOpenAIOAuthOSCredentials(ctx context.Context, id
 		if service.OpenAIOAuthCredentialSubject(credentials, "access_token") == "" && service.OpenAIOAuthCredentialSubject(credentials, "refresh_token") == "" {
 			return false, service.ErrOpenAIOAuthOSUnauthorized
 		}
-		if err := validateOpenAIOAuthOSSubjectLocked(ctx, client, id, os, credentials); err != nil {
-			return false, err
-		}
 		now := time.Now().UTC()
 		result = &service.OpenAIOAuthOSCredential{OwnerAccountID: id, OSFamily: os, Credentials: service.OpenAIOAuthProviderCredentials(credentials), AuthorizationGeneration: uuid.NewString(), Revision: revision + 1, StateGeneration: uuid.NewString(), CredentialEpoch: uuid.NewString(), Status: service.OpenAIOAuthAuthorizationAuthorized, AuthorizedAt: &now, ExpiresAt: openAIOAuthCredentialExpiry(credentials)}
-		return true, saveOpenAIOAuthOSCredentialLocked(ctx, client, result, source)
+		if err = saveOpenAIOAuthOSCredentialLocked(ctx, client, result, source); err != nil {
+			return false, err
+		}
+		return true, restoreOpenAIOAuthOwnedPauseLocked(ctx, client, id, true)
 	})
 	return result, err
 }
@@ -380,7 +320,7 @@ func (r *accountRepository) PatchOpenAIOAuthOSCredentialsIfUnchanged(ctx context
 			return false, nil
 		}
 		slot := slots[0]
-		if slot.Status == service.OpenAIOAuthAuthorizationUnauthorized || slot.AuthorizationGeneration != generation || slot.Revision != revision {
+		if slot.Status != service.OpenAIOAuthAuthorizationAuthorized || slot.AuthorizationGeneration != generation || slot.Revision != revision {
 			return false, nil
 		}
 		next := service.OpenAIOAuthProviderCredentials(slot.Credentials)
@@ -410,7 +350,6 @@ func (r *accountRepository) PatchOpenAIOAuthOSCredentialsIfUnchanged(ctx context
 			}
 		}
 		if !reflect.DeepEqual(next, slot.Credentials) {
-			slot.StateGeneration = uuid.NewString()
 			slot.CredentialEpoch = uuid.NewString()
 		}
 		slot.Credentials = next
@@ -420,6 +359,9 @@ func (r *accountRepository) PatchOpenAIOAuthOSCredentialsIfUnchanged(ctx context
 		slot.RefreshRetryAfter = nil
 		slot.ExpiresAt = openAIOAuthCredentialExpiry(next)
 		if err = saveOpenAIOAuthOSCredentialLocked(ctx, client, slot, ""); err != nil {
+			return false, err
+		}
+		if err = restoreOpenAIOAuthOwnedPauseLocked(ctx, client, id, false); err != nil {
 			return false, err
 		}
 		applied = true
@@ -439,7 +381,7 @@ func (r *accountRepository) mutateOpenAIOAuthOSCredentialStateCAS(ctx context.Co
 			return false, nil
 		}
 		slot := slots[0]
-		if slot.Status == service.OpenAIOAuthAuthorizationUnauthorized || slot.AuthorizationGeneration != generation || slot.Revision != revision {
+		if slot.Status != service.OpenAIOAuthAuthorizationAuthorized || slot.AuthorizationGeneration != generation || slot.Revision != revision {
 			return false, nil
 		}
 		slot.Status = status
@@ -451,6 +393,14 @@ func (r *accountRepository) mutateOpenAIOAuthOSCredentialStateCAS(ctx context.Co
 			slot.CredentialEpoch = uuid.NewString()
 		}
 		if err = saveOpenAIOAuthOSCredentialLocked(ctx, client, slot, ""); err != nil {
+			return false, err
+		}
+		if status == service.OpenAIOAuthAuthorizationReauthRequired {
+			err = pauseOpenAIOAuthAccountLocked(ctx, client, id)
+		} else if until != nil {
+			err = cooldownOpenAIOAuthAccountLocked(ctx, client, id, *until)
+		}
+		if err != nil {
 			return false, err
 		}
 		applied = true
@@ -477,7 +427,10 @@ func (r *accountRepository) RevokeOpenAIOAuthOSCredentials(ctx context.Context, 
 			revision = slots[0].Revision + 1
 		}
 		slot := &service.OpenAIOAuthOSCredential{OwnerAccountID: id, OSFamily: os, Credentials: map[string]any{}, AuthorizationGeneration: uuid.NewString(), Revision: revision, StateGeneration: uuid.NewString(), CredentialEpoch: uuid.NewString(), Status: service.OpenAIOAuthAuthorizationUnauthorized}
-		return true, saveOpenAIOAuthOSCredentialLocked(ctx, client, slot, "revoked")
+		if err = saveOpenAIOAuthOSCredentialLocked(ctx, client, slot, "revoked"); err != nil {
+			return false, err
+		}
+		return true, pauseOpenAIOAuthAccountLocked(ctx, client, id)
 	})
 }
 

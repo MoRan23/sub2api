@@ -27,9 +27,10 @@ func loadOpenAIOAuthOSProfiles(ctx context.Context, client *dbent.Client, ids []
 	}
 	rows, err := client.QueryContext(ctx, `SELECT p.account_id, p.os_family, p.installation_id::text,
 		p.user_agent, p.sync_session_id::text, p.is_default, COALESCE(c.status,'unauthorized'),
-		c.authorized_at,c.expires_at,COALESCE(c.last_error,''),c.refresh_retry_after,c.credentials->>'expires_at'
+		c.authorized_at,c.expires_at,COALESCE(c.last_error,''),c.refresh_retry_after,a.credentials->>'expires_at'
 		FROM account_openai_oauth_os_profiles p LEFT JOIN account_openai_oauth_credentials c
 		ON c.account_id=p.account_id
+		JOIN accounts a ON a.id=p.account_id
 		WHERE p.account_id = ANY($1)`+eligible+` ORDER BY p.account_id, p.os_family`, pq.Array(ids))
 	if err != nil {
 		return nil, err

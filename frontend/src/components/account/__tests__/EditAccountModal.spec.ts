@@ -380,6 +380,38 @@ describe('EditAccountModal', () => {
     })
   })
 
+  it.each(['active', 'error'] as const)('omits unchanged %s status when saving a name edit from an open account snapshot', async (status) => {
+    const account = { ...buildOpenAIOAuthAccount(), status }
+    // The server can independently pause this account while the form retains
+    // its original snapshot. An ordinary edit must leave that state untouched.
+    updateAccountMock.mockReset().mockResolvedValue({ ...account, status: 'error', schedulable: false })
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('[data-tour="edit-account-form-name"]').setValue('Only the name changed')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.name).toBe('Only the name changed')
+    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty('status')
+    wrapper.unmount()
+  })
+
+  it('sends an explicitly changed status and omits a reverted state choice', async () => {
+    const account = buildOpenAIOAuthAccount()
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('[data-testid="edit-account-status"]').setValue('inactive')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.status).toBe('inactive')
+    updateAccountMock.mockClear()
+    await wrapper.get('[data-testid="edit-account-status"]').setValue('active')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty('status')
+    wrapper.unmount()
+  })
+
   it('keeps the pin switch editable but system identities readonly while normalization is paused', async () => {
     const account = buildOpenAIOAuthAccount()
     getSettingsMock.mockResolvedValueOnce({

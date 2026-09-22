@@ -66,7 +66,8 @@ func TestCodexTurnStateCollectorRunsWithBusinessBeforeAndAfterStart(t *testing.T
 			require.NoError(t, err)
 			require.Equal(t, token, plain)
 			require.Equal(t, "collector", record.Source)
-			require.Empty(t, record.DemandReason)
+			require.Equal(t, "refresh", record.DemandReason)
+			require.Equal(t, s.now().Add(CodexTurnStateCollectInterval), record.NextCollectAt)
 			require.NoError(t, s.Finish(ctx, natural, true))
 		})
 	}

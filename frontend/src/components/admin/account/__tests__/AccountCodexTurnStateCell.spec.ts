@@ -113,6 +113,19 @@ describe('AccountCodexTurnStateCell', () => {
     expect(wrapper.get(`[data-testid="codex-turn-state-model-${models[0]}"]`).attributes('title')).toContain('dotExpiredIdle')
   })
 
+  it('expires the HTTP package at the earlier cookie deadline and keeps the model row layout', async () => {
+    const cookieExpiry = new Date(now + 20_000).toISOString()
+    const wrapper = show({ status: { ...status, models: [{ ...status.models[0]!, source: 'collector',
+      cache_available: true, cookie_bundle_expires_at: cookieExpiry, collection_status: 'scheduled', collection_reason: 'refresh' }],
+    observations: [observation()] } })
+    expect(colors(wrapper)[0]).toBe('yellow')
+    await wrapper.setProps({ now: now + 20_000 })
+    expect(colors(wrapper)[0]).toBe('gray')
+    expect(wrapper.get(`[data-testid="codex-turn-state-model-${models[0]}"]`).attributes('title')).toContain('dotCookieExpired')
+    expect(wrapper.get('button').attributes('style')).toContain('height: 44px')
+    expect(wrapper.text()).toBe(models.join(''))
+  })
+
   it('preserves passive observation and does not mistake a revoked or excluded cache for a lifecycle warning', () => {
     for (const cache of [
       { ...status.models[0]!, source: 'business' },

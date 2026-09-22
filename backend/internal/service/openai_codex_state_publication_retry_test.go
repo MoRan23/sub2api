@@ -194,7 +194,8 @@ func TestCodexTurnStatePendingPublicationRejectsStaleEvidence(t *testing.T) {
 			after, err := memory.Get(ctx, attempt.key)
 			require.NoError(t, err)
 			require.Equal(t, before.EncryptedToken, after.EncryptedToken)
-			require.Empty(t, after.DemandReason)
+			require.Equal(t, before.DemandReason, after.DemandReason, "stale anomaly evidence must not replace the scheduled refresh")
+			require.Equal(t, before.NextCollectAt, after.NextCollectAt)
 			require.Empty(t, s.pendingPublications)
 		})
 	}

@@ -154,32 +154,19 @@ func RequiresOpenAIOAuthOSAuthorization(account *Account) bool {
 	return IsOpenAIOAuthOSProfileOwner(account) || account != nil && account.IsOpenAIOAuth() && account.IsShadow()
 }
 
-// OpenAIOAuthOSAuthorizationAvailable retains the legacy API name. The OS only
-// selects an installation identity and does not select a different grant.
+// OpenAIOAuthOSAuthorizationAvailable retains the legacy API name. Authorization
+// lives on the account; OS profile summaries are compatibility data, never an
+// admission gate. Account status and scheduling limits are checked by the caller.
 func OpenAIOAuthOSAuthorizationAvailable(account *Account, _ string) bool {
 	if !RequiresOpenAIOAuthOSAuthorization(account) {
 		return true
 	}
-	if account.OpenAIOAuthOSProfiles == nil {
-		return false
-	}
-	profiles := account.OpenAIOAuthOSProfiles
-	summary := profiles.Authorization
-	if summary == nil {
-		// Legacy scheduler snapshots carry only per-profile summaries. Migration
-		// retains the default grant; an old non-default slot must not select it.
-		profile, ok := profiles.Profiles[NormalizeOpenAIOSFamily(profiles.DefaultOS)]
-		if !ok {
-			return false
-		}
-		summary = &profile.Authorization
-	}
-	return summary.Status == OpenAIOAuthAuthorizationAuthorized && (summary.RefreshRetryAfter == nil || !summary.RefreshRetryAfter.After(time.Now()))
+	return strings.TrimSpace(account.GetOpenAIAccessToken()) != "" || strings.TrimSpace(account.GetOpenAIRefreshToken()) != ""
 }
 
-// Resolve projects the shared grant onto a private OS identity without modifying
-// the business account. Unknown OS uses the owner's default. A scoped request
-// cannot switch identity or cross the shared authorization generation.
+// Resolve reads the account's current credentials and private CAS metadata, then
+// projects its selected installation identity without modifying the stored row.
+// A scoped request cannot switch identity or cross an authorization generation.
 func ResolveOpenAIOAuthCredentialAccount(ctx context.Context, repo AccountRepository, account *Account, os string) (*Account, error) {
 	if account == nil {
 		return nil, ErrAccountNotFound
@@ -190,16 +177,16 @@ func ResolveOpenAIOAuthCredentialAccount(ctx context.Context, repo AccountReposi
 		}
 		return account, nil
 	}
-	owner := account
+	if repo == nil {
+		return nil, ErrOpenAIOAuthOSUnauthorized
+	}
+	ownerID := account.ID
 	if account.IsShadow() {
-		if repo == nil {
-			return nil, ErrOpenAIOAuthOSUnauthorized
-		}
-		var err error
-		owner, err = repo.GetByID(ctx, *account.ParentAccountID)
-		if err != nil || !IsOpenAIOAuthOSProfileOwner(owner) {
-			return nil, ErrOpenAIOAuthOSUnauthorized
-		}
+		ownerID = *account.ParentAccountID
+	}
+	owner, err := repo.GetByID(ctx, ownerID)
+	if err != nil || !IsOpenAIOAuthOSProfileOwner(owner) {
+		return nil, ErrOpenAIOAuthOSUnauthorized
 	}
 	os = NormalizeOpenAIOSFamily(os)
 	if account.OpenAIOAuthCredentialOS != "" {
@@ -228,10 +215,16 @@ func ResolveOpenAIOAuthCredentialAccount(ctx context.Context, repo AccountReposi
 	if account.OpenAIOAuthAuthorizationGeneration != "" && (account.OpenAIOAuthAuthorizationGeneration != slot.AuthorizationGeneration || account.OpenAIOAuthCredentialOwnerID != slot.OwnerAccountID) {
 		return nil, ErrOpenAIOAuthOSAuthorizationChanged
 	}
-	out := *account
-	if account.Credentials != nil {
-		out.Credentials = cloneOpenAIOAuthJSON(account.Credentials).(map[string]any)
+	business := account
+	if !account.IsShadow() {
+		business = owner
 	}
+	out := *business
+	if business.Credentials != nil {
+		out.Credentials = cloneOpenAIOAuthJSON(business.Credentials).(map[string]any)
+	}
+	// The compatibility reader returns an atomic projection of accounts.credentials
+	// and its private metadata. It no longer reads a separate token store.
 	out.Credentials = PreserveOpenAIOAuthProviderCredentials(slot.Credentials, out.Credentials)
 	// A refresh-only imported grant must reach the token provider so it can
 	// acquire its first access token. Sending still requires that provider's
@@ -239,7 +232,7 @@ func ResolveOpenAIOAuthCredentialAccount(ctx context.Context, repo AccountReposi
 	if strings.TrimSpace(out.GetCredential("access_token")) == "" && strings.TrimSpace(out.GetCredential("refresh_token")) == "" {
 		return nil, ErrOpenAIOAuthOSUnauthorized
 	}
-	out.Extra = maps.Clone(account.Extra)
+	out.Extra = maps.Clone(business.Extra)
 	if out.Extra == nil {
 		out.Extra = make(map[string]any)
 	}

@@ -72,7 +72,7 @@ func (s *AccountRepoSuite) TestCodexTurnStateGenerationTracksCredentialWrites() 
 	s.Require().True(applied)
 	stored, err = service.ReloadOpenAIOAuthCredentialAccount(s.ctx, s.repo, account)
 	s.Require().NoError(err)
-	s.Require().NotEqual(generation, service.CodexTurnStateGenerationForAccount(stored))
+	s.Require().Equal(generation, service.CodexTurnStateGenerationForAccount(stored), "normal OAuth refresh preserves the shared runtime fence")
 }
 
 func (s *AccountRepoSuite) TestCodexTurnStateCredentialEpochBeforeConfiguration() {

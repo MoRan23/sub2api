@@ -10,7 +10,7 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, args?: unknown) 
 import CodexTurnStateStatusModal from '../CodexTurnStateStatusModal.vue'
 
 const status: CodexTurnStateStatus = {
-  account_id: 2, owner_account_id: 1, inherited: true, enabled: true,
+  account_id: 2, owner_account_id: 1, inherited: true, enabled: true, cache_scope: 'shared',
   account_type: 'auto', resolved_account_type: 'team_business', collector_proxy_id: null,
   expected_length: 332, reason: '',
   models: [{ model: 'gpt-test', state: 'ready', shape: 'target', source: 'business', token_length: 332,
@@ -45,6 +45,7 @@ describe('Codex turn-state status modal', () => {
     expect(wrapper.text()).toContain('admin.accounts.codexTurnState.shapes.target')
     expect(wrapper.text()).toContain('admin.accounts.codexTurnState.sources.business')
     expect(wrapper.text()).toContain('admin.accounts.codexTurnState.noCollectorProxy')
+    expect(wrapper.get('[data-testid="codex-turn-state-shared-hint"]').text()).toContain('sharedCacheHint')
     expect(getCodexTurnState).toHaveBeenCalledWith(2, expect.any(AbortSignal), 'windows')
     expect(wrapper.get('[data-width]').attributes('data-width')).toBe('extra-wide')
     const columns = wrapper.get('[data-testid="codex-turn-state-status-columns"]')
@@ -55,17 +56,40 @@ describe('Codex turn-state status modal', () => {
     wrapper.unmount()
   })
 
-  it('selects the account default system and preserves the selection on auto refresh', async () => {
+  it('filters observations by the selected system while retaining the shared cache', async () => {
     getCodexTurnState.mockResolvedValue(status)
     const wrapper = render()
     await wrapper.setProps({ account: { id: 3, name: 'Linux default', openai_oauth_os_profiles: { default_os: 'linux', profiles: {} } } as any })
     await flushPromises()
     expect(getCodexTurnState).toHaveBeenLastCalledWith(3, expect.any(AbortSignal), 'linux')
+    expect(wrapper.get('[data-testid="codex-turn-state-cache-section"]').find('[data-testid="openai-oauth-os-select"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="codex-turn-state-observations-section"]').find('[data-testid="openai-oauth-os-select"]').exists()).toBe(true)
+    let complete!: (value: CodexTurnStateStatus) => void
+    getCodexTurnState.mockImplementationOnce(() => new Promise(resolve => { complete = resolve }))
     await wrapper.get('[data-testid="openai-oauth-os-select"]').setValue('macos')
     await flushPromises()
     expect(getCodexTurnState).toHaveBeenLastCalledWith(3, expect.any(AbortSignal), 'macos')
+    expect(wrapper.find('[data-testid="codex-turn-state-cache-gpt-test"]').exists()).toBe(true)
+    complete(status)
+    await flushPromises()
     await vi.advanceTimersByTimeAsync(5000)
     expect(getCodexTurnState).toHaveBeenLastCalledWith(3, expect.any(AbortSignal), 'macos')
+    wrapper.unmount()
+  })
+
+  it('uses the earlier cookie package expiry without changing the token expiry or shape', async () => {
+    getCodexTurnState.mockResolvedValue({ ...status, models: [{ ...status.models[0],
+      cookie_bundle_expires_at: '2026-09-19T11:30:04Z', collection_status: 'scheduled', collection_reason: 'refresh' }] })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="codex-turn-state-remaining-gpt-test"]').text()).toContain('remaining{"seconds":4}')
+    expect(wrapper.get('[data-testid="codex-turn-state-cache-availability-gpt-test"]').text()).toContain('cacheAvailable')
+    expect(wrapper.get('[data-testid="codex-turn-state-collection-gpt-test"]').text()).toContain('collectionStatuses.scheduled')
+    expect(wrapper.get('[data-testid="codex-turn-state-cache-gpt-test"]').text()).toContain(new Date(status.models[0]!.expires_at!).toLocaleString())
+    await vi.advanceTimersByTimeAsync(5000)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="codex-turn-state-cache-availability-gpt-test"]').text()).toContain('cacheUnavailable')
+    expect(wrapper.get('[data-testid="codex-turn-state-cache-gpt-test"]').text()).toContain('shapes.target')
     wrapper.unmount()
   })
 

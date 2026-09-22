@@ -14,11 +14,13 @@ func newCodexProxyChangedTestService(t *testing.T) (*CodexTurnStateService, *cod
 	s, repo, account := newCodexStateTestService(t)
 	account.Extra[CodexTurnStateExtraKey].(map[string]any)["collector_proxy_id"] = float64(99)
 	account.Extra[CodexTurnStateGenerationExtraKey] = "after-proxy-change"
-	key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5", Generation: "after-proxy-change"}
-	token := codexStateTestToken(10, s.now().Add(-CodexTurnStateLifetime+10*time.Second))
+	key := CodexTurnStateKey{OwnerAccountID: account.ID, Model: "gpt-5", Generation: "after-proxy-change"}
+	token := codexStateTestToken(10, s.now().Add(-time.Minute))
 	shape, err := ParseCodexTurnState(token, "personal", s.now())
 	require.NoError(t, err)
 	encrypted, err := s.encryptor.Encrypt(token)
+	require.NoError(t, err)
+	bundle, err := s.emptyCodexCookiePublication(key, account.OpenAIOAuthAuthorizationGeneration, shape.ExpiresAt)
 	require.NoError(t, err)
 	repo.records[key] = CodexTurnStateRecord{
 		OSFamily:       "windows",
@@ -26,18 +28,21 @@ func newCodexProxyChangedTestService(t *testing.T) (*CodexTurnStateService, *cod
 		EncryptedToken: encrypted, IssuedAt: shape.IssuedAt, ExpiresAt: shape.ExpiresAt,
 		Shape: shape.Shape, TokenLength: shape.TokenLength, CipherBlocks: shape.CipherBlocks, Source: "business",
 		LastBusinessAt: s.now(), LastCollectedAt: s.now().Add(-time.Minute),
-		CollectionStatus: "idle", CollectionReason: "collector_proxy_changed",
+		DemandReason: "refresh", NextCollectAt: s.now().Add(CodexTurnStateCollectInterval),
+		CollectionStatus: "scheduled", CollectionReason: "refresh",
 	}
+	record := repo.records[key]
+	applyCodexTurnStateCookiePublication(&record, bundle)
+	repo.records[key] = record
 	return s, repo, account, key, token
 }
 
-func TestCodexTurnStateProxyChangeDefersValidCacheUntilExpiration(t *testing.T) {
+func TestCodexTurnStateProxyChangePreservesBundleAndRefreshCadence(t *testing.T) {
 	for _, tc := range []struct {
-		name, legacyDemand string
-		earlierExpiry      bool
+		name          string
+		earlierExpiry bool
 	}{
-		{name: "previous_demand_"},
-		{name: "previous_demand_extended_shape", legacyDemand: "extended_shape"},
+		{name: "scheduled_refresh"},
 		{name: "earlier_expiry", earlierExpiry: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -47,9 +52,8 @@ func TestCodexTurnStateProxyChangeDefersValidCacheUntilExpiration(t *testing.T) 
 			clock := s.now()
 			s.now = func() time.Time { return clock }
 			before := repo.records[key]
-			before.DemandReason = tc.legacyDemand
 			if tc.earlierExpiry {
-				before.ExpiresAt = clock.Add(5 * time.Second)
+				before.ExpiresAt = clock.Add(45 * time.Second)
 			}
 			repo.records[key] = before
 			calls := 0
@@ -60,7 +64,7 @@ func TestCodexTurnStateProxyChangeDefersValidCacheUntilExpiration(t *testing.T) 
 			})
 			record, err := repo.Get(ctx, key)
 			require.NoError(t, err)
-			require.False(t, s.ensureCodexTurnStateDemand(ctx, record), "proxy change defers even a prior demand while the retained cache is valid")
+			require.False(t, s.ensureCodexTurnStateDemand(ctx, record), "proxy change preserves the existing refresh schedule")
 			s.pumpDue(ctx)
 			require.Empty(t, s.queue)
 			s.collect(ctx, key)
@@ -68,14 +72,17 @@ func TestCodexTurnStateProxyChangeDefersValidCacheUntilExpiration(t *testing.T) 
 			after, err := repo.Get(ctx, key)
 			require.NoError(t, err)
 			require.Equal(t, before.EncryptedToken, after.EncryptedToken)
+			require.Equal(t, before.EncryptedCookieBundle, after.EncryptedCookieBundle)
+			require.Equal(t, before.AuthorizationGeneration, after.AuthorizationGeneration)
 			require.Equal(t, before.ExpiresAt, after.ExpiresAt, "deferring collection must preserve an earlier local deadline")
-			require.True(t, after.NextCollectAt.IsZero(), "cache expiry must not become an owner-wide collection cooldown")
+			require.Equal(t, before.NextCollectAt, after.NextCollectAt, "proxy changes must not postpone renewal until token expiration")
 			status := projectCodexTurnStateStatus(account.ID, account, []CodexTurnStateRecord{*after}, []string{key.Model}, nil, clock)
-			require.Equal(t, "idle", status.Models[0].CollectionStatus)
-			require.Equal(t, "collector_proxy_changed", status.Models[0].CollectionReason)
+			require.Equal(t, "scheduled", status.Models[0].CollectionStatus)
+			require.Equal(t, "refresh", status.Models[0].CollectionReason)
 			require.True(t, status.Models[0].CacheAvailable)
 
-			clock = before.ExpiresAt
+			clock = before.NextCollectAt
+			require.True(t, before.ExpiresAt.After(clock))
 			s.pumpDue(ctx)
 			require.Len(t, s.queue, 1)
 			require.Equal(t, key, <-s.queue)
@@ -85,8 +92,9 @@ func TestCodexTurnStateProxyChangeDefersValidCacheUntilExpiration(t *testing.T) 
 			require.NoError(t, err)
 			require.Equal(t, "collector", after.Source)
 			require.Equal(t, clock.Add(CodexTurnStateLifetime), after.ExpiresAt)
-			require.Empty(t, after.DemandReason)
-			require.NotEqual(t, "collector_proxy_changed", after.CollectionReason)
+			require.Equal(t, "refresh", after.DemandReason)
+			require.Equal(t, "scheduled", after.CollectionStatus)
+			require.Equal(t, clock.Add(CodexTurnStateCollectInterval), after.NextCollectAt)
 		})
 	}
 }
@@ -107,12 +115,12 @@ func TestCodexTurnStateProxyChangeDoesNotDelayAnotherModel(t *testing.T) {
 	require.Equal(t, 1, calls)
 	retained, err := repo.Get(ctx, key)
 	require.NoError(t, err)
-	require.Equal(t, "collector_proxy_changed", retained.CollectionReason)
-	require.True(t, retained.NextCollectAt.IsZero())
+	require.Equal(t, "refresh", retained.CollectionReason)
+	require.Equal(t, s.now().Add(CodexTurnStateCollectInterval), retained.NextCollectAt)
 	collected, err := repo.Get(ctx, other.key)
 	require.NoError(t, err)
 	require.NotEmpty(t, collected.EncryptedToken)
-	require.Empty(t, collected.DemandReason)
+	require.Equal(t, "refresh", collected.DemandReason)
 }
 
 func TestCodexTurnStateProxyChangeBusinessDuplicateAndNewTarget(t *testing.T) {
@@ -129,10 +137,11 @@ func TestCodexTurnStateProxyChangeBusinessDuplicateAndNewTarget(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, before.EncryptedToken, repeated.EncryptedToken)
 	require.Equal(t, before.ExpiresAt, repeated.ExpiresAt)
-	require.Equal(t, "collector_proxy_changed", repeated.CollectionReason)
+	require.Equal(t, "refresh", repeated.CollectionReason)
+	require.Equal(t, before.NextCollectAt, repeated.NextCollectAt)
 	require.False(t, s.ensureCodexTurnStateDemand(ctx, repeated))
 
-	newTarget := codexStateTestToken(10, s.now().Add(-CodexTurnStateLifetime+20*time.Second))
+	newTarget := codexStateTestToken(10, s.now())
 	natural, err := s.Prepare(ctx, account, key.Model)
 	require.NoError(t, err)
 	markCodexStateTestBusinessSent(t, s, natural)
@@ -143,9 +152,9 @@ func TestCodexTurnStateProxyChangeBusinessDuplicateAndNewTarget(t *testing.T) {
 	plain, err := s.encryptor.Decrypt(updated.EncryptedToken)
 	require.NoError(t, err)
 	require.Equal(t, newTarget, plain)
-	require.Equal(t, "expiring", updated.DemandReason, "a new target resumes the normal renewal policy")
-	require.NotEqual(t, "collector_proxy_changed", updated.CollectionReason)
-	require.True(t, s.ensureCodexTurnStateDemand(ctx, updated))
+	require.Equal(t, "refresh", updated.DemandReason, "a new target resumes the regular refresh schedule")
+	require.Equal(t, s.now().Add(CodexTurnStateCollectInterval), updated.NextCollectAt)
+	require.False(t, s.ensureCodexTurnStateDemand(ctx, updated))
 }
 
 func TestCodexTurnStateProxyChangeBusinessAnomalyInvalidatesImmediately(t *testing.T) {
@@ -168,7 +177,7 @@ func TestCodexTurnStateProxyChangeBusinessAnomalyInvalidatesImmediately(t *testi
 	require.Equal(t, 1, calls)
 }
 
-func TestCodexTurnStateProxyChangeOnlyDefersMatchingValidCache(t *testing.T) {
+func TestCodexTurnStateProxyChangeDoesNotSuppressDueDemandForInvalidCache(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		mutate func(*CodexTurnStateRecord, time.Time)
@@ -188,6 +197,7 @@ func TestCodexTurnStateProxyChangeOnlyDefersMatchingValidCache(t *testing.T) {
 			s, repo, _, key, _ := newCodexProxyChangedTestService(t)
 			record := repo.records[key]
 			record.DemandReason = "extended_shape"
+			record.NextCollectAt = s.now()
 			tc.mutate(&record, s.now())
 			repo.records[key] = record
 			require.True(t, s.ensureCodexTurnStateDemand(context.Background(), &record), "an invalid retained cache must not suppress existing demand")
@@ -202,7 +212,7 @@ func TestCodexTurnStateProxyChangeOnlyDefersMatchingValidCache(t *testing.T) {
 	}
 }
 
-func TestCodexTurnStateProxyChangeDefersValidTeamCache(t *testing.T) {
+func TestCodexTurnStateProxyChangeRetainsScheduledTeamCache(t *testing.T) {
 	s, repo, account, key, _ := newCodexProxyChangedTestService(t)
 	account.Extra[CodexTurnStateExtraKey].(map[string]any)["account_type"] = "team_business"
 	record := repo.records[key]
@@ -221,8 +231,8 @@ func TestCodexTurnStateProxyChangeDefersValidTeamCache(t *testing.T) {
 	require.Zero(t, calls)
 	status := projectCodexTurnStateStatus(account.ID, account, []CodexTurnStateRecord{record}, []string{key.Model}, nil, s.now())
 	require.True(t, status.Models[0].CacheAvailable)
-	require.Equal(t, "idle", status.Models[0].CollectionStatus)
-	require.Equal(t, "collector_proxy_changed", status.Models[0].CollectionReason)
+	require.Equal(t, "scheduled", status.Models[0].CollectionStatus)
+	require.Equal(t, "refresh", status.Models[0].CollectionReason)
 }
 
 func TestCodexTurnStateProxyChangeKeepsActivityAndProxyRequirements(t *testing.T) {

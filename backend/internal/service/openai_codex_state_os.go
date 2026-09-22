@@ -63,18 +63,17 @@ func (s *CodexTurnStateService) codexTurnStateStatusOwner(ctx context.Context, o
 	return &copy, nil
 }
 
-// Reload each authorized OS independently when an account-wide configuration
-// notification arrives. No empty slot may inherit another OS's credentials.
+// Shared authorization and state require one activation per credential owner.
 func (s *CodexTurnStateService) activateHistoryForAccount(ctx context.Context, accountID int64) {
-	for _, os := range []string{"windows", "macos", "linux"} {
-		owner, err := s.currentOwner(ctx, accountID, os)
+	{
+		owner, err := s.currentOwner(ctx, accountID)
 		if err != nil || owner == nil {
-			continue
+			return
 		}
 		generation := CodexTurnStateGenerationForAccount(owner)
 		s.activateHistoryForOwner(ctx, owner, generation)
 		if bus, ok := s.repo.(CodexTurnStateOSActivationRepository); ok {
-			_ = bus.PublishOSActivation(ctx, owner.ID, os, generation)
+			_ = bus.PublishOSActivation(ctx, owner.ID, "", generation)
 		}
 	}
 }

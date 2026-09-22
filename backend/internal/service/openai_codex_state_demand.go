@@ -25,7 +25,7 @@ func clearIdleCodexTurnStateDemand(record *CodexTurnStateRecord) {
 }
 
 func completeCodexTurnStateDemand(record *CodexTurnStateRecord, now time.Time) {
-	record.DemandReason, record.DemandAt = "", time.Time{}
+	record.DemandReason, record.DemandAt = "refresh", now
 	record.CollectorExtendedCount, record.CollectorAttemptID = 0, ""
 	if record.CollectorPaused {
 		record.CollectionStatus, record.CollectionReason = "paused", record.LastError
@@ -35,8 +35,15 @@ func completeCodexTurnStateDemand(record *CodexTurnStateRecord, now time.Time) {
 		record.CollectionStatus, record.CollectionReason = "backoff", record.LastError
 		return
 	}
-	record.LastError, record.CollectionStatus, record.CollectionReason = "", "idle", ""
-	record.NextCollectAt = time.Time{}
+	record.LastError, record.CollectionStatus, record.CollectionReason = "", "scheduled", "refresh"
+	record.NextCollectAt = now.Add(CodexTurnStateCollectInterval)
+	if record.CookieBundleExpiresAt != nil && record.CookieBundleExpiresAt.Before(record.NextCollectAt) {
+		record.NextCollectAt = *record.CookieBundleExpiresAt
+	}
+}
+
+func codexTurnStateCookieExpired(record *CodexTurnStateRecord, now time.Time) bool {
+	return record != nil && record.EncryptedToken != "" && record.CookieBundleExpiresAt != nil && !record.CookieBundleExpiresAt.After(now)
 }
 
 // Only trusted categories cross the diagnostic boundary. Error text may contain
@@ -156,10 +163,20 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 		// Keep candidate shape selection separate from model admission: a rejected
 		// target must not turn a response into an extended-only rotation signal.
 		modelMismatch := collectErr == nil && result.StatusCode >= 200 && result.StatusCode < 300 && result.ModelMismatch()
+		hasTargetCandidate := best != ""
+		var bundle codexTurnStateCookiePublication
+		if !modelMismatch && best != "" {
+			bundle, outcomeErr = s.prepareCollectorCookiePublication(key, current.OpenAIOAuthAuthorizationGeneration, &result, target.ExpiresAt)
+			if outcomeErr != nil {
+				best = ""
+			}
+		}
 		if !modelMismatch && best != "" && (target.IssuedAt.After(record.IssuedAt) || (record.EncryptedToken == "" && target.IssuedAt.Equal(record.IssuedAt))) {
 			encrypted, encryptErr := s.encryptor.Encrypt(best)
 			if encryptErr == nil {
 				record.EncryptedToken, record.Source, record.Shape = encrypted, "collector", target.Shape
+				applyCodexTurnStateCookiePublication(record, bundle)
+				record.OSFamily = codexTurnStateOS(owner)
 				record.IssuedAt, record.ExpiresAt = target.IssuedAt, target.ExpiresAt
 				record.TokenLength, record.CipherBlocks = target.TokenLength, target.CipherBlocks
 				if target.ExpiresAt.After(now.Add(CodexTurnStateRefreshAhead)) {
@@ -174,12 +191,22 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 				outcomeErr = encryptErr
 			}
 		} else if !modelMismatch && best != "" && target.IssuedAt.Equal(record.IssuedAt) && record.EncryptedToken != "" && record.ExpiresAt.After(now) {
-			if record.ExpiresAt.After(now.Add(CodexTurnStateRefreshAhead)) {
-				record.RefreshReason = ""
-				completeCodexTurnStateDemand(record, now)
-				accepted = true
+			cachedToken, decryptErr := s.encryptor.Decrypt(record.EncryptedToken)
+			if decryptErr != nil || cachedToken != best {
+				// Equal issuance seconds do not prove that a ticket and Cookie set
+				// belong to the same response. Preserve the existing pair intact.
+				best = ""
+				outcomeErr = decryptErr
 			} else {
-				targetStillExpiring = true
+				applyCodexTurnStateCookiePublication(record, bundle)
+				record.OSFamily = codexTurnStateOS(owner)
+				if record.ExpiresAt.After(now.Add(CodexTurnStateRefreshAhead)) {
+					record.RefreshReason = ""
+					completeCodexTurnStateDemand(record, now)
+					accepted = true
+				} else {
+					targetStillExpiring = true
+				}
 			}
 		}
 		if !accepted {
@@ -187,11 +214,12 @@ func (s *CodexTurnStateService) finishCollectorOutcome(ctx context.Context, owne
 			if !record.NextCollectAt.Equal(base.NextCollectAt) && record.NextCollectAt.After(now) && codexTurnStateRetainsAccountCooldown(record) {
 				concurrentCooldownReason = record.LastError
 			}
-			if best == "" && !extended.IssuedAt.IsZero() {
+			if !hasTargetCandidate && !extended.IssuedAt.IsZero() {
 				rotateCodexTurnStateProxy(record, proxyIDs)
 			}
-			if best == "" && !extended.IssuedAt.IsZero() && !extended.IssuedAt.Before(record.IssuedAt) && !(record.EncryptedToken != "" && record.ExpiresAt.After(now)) {
+			if !hasTargetCandidate && !extended.IssuedAt.IsZero() && !extended.IssuedAt.Before(record.IssuedAt) && !(record.EncryptedToken != "" && record.ExpiresAt.After(now)) {
 				record.EncryptedToken, record.ExpiresAt = "", time.Time{}
+				record.EncryptedCookieBundle, record.CookieBundleExpiresAt = "", nil
 				record.Shape, record.TokenLength, record.CipherBlocks = extended.Shape, extended.TokenLength, extended.CipherBlocks
 				record.IssuedAt = extended.IssuedAt
 				record.RefreshReason = "extended_shape"

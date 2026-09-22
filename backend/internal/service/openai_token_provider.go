@@ -216,7 +216,7 @@ func (p *OpenAITokenProvider) GetAccessTokenWithAccount(ctx context.Context, acc
 			// revision guard used by background refresh and upstream auth failures.
 			if result != nil && result.Account != nil && isNonRetryableRefreshError(err) && !isSharedProviderRefreshError(err) {
 				attempted := result.Account
-				if attempted.OpenAIOAuthCredentialOS != "" {
+				if RequiresOpenAIOAuthOSAuthorization(attempted) || attempted.OpenAIOAuthCredentialOS != "" {
 					cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), defaultRefreshPostPersistCleanupTimeout)
 					_, applied, persistErr := persistOpenAIOAuthCredentialError(cleanupCtx, p.accountRepo, attempted, "OpenAI OAuth authorization requires sign-in")
 					if applied && p.tokenCache != nil {
@@ -357,12 +357,14 @@ func (p *OpenAITokenProvider) disableAccountMissingRefreshToken(account *Account
 	if p == nil || p.accountRepo == nil || account == nil {
 		return
 	}
-	if handled, _, err := persistOpenAIOAuthCredentialError(context.Background(), p.accountRepo, account, reason); handled {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), defaultRefreshPostPersistCleanupTimeout)
+	defer cancel()
+	if handled, applied, err := persistOpenAIOAuthCredentialError(cleanupCtx, p.accountRepo, account, reason); handled {
 		if err != nil {
-			slog.Warn("openai_token_provider.slot_set_error_failed", "account_id", account.ID, "os", account.OpenAIOAuthCredentialOS, "error", err)
+			slog.Warn("openai_token_provider.account_auth_error_failed", "account_id", account.ID, "error", err)
 		}
-		if p.tokenCache != nil {
-			_ = p.tokenCache.DeleteAccessToken(context.Background(), OpenAITokenCacheKey(account))
+		if applied && p.tokenCache != nil {
+			_ = p.tokenCache.DeleteAccessToken(cleanupCtx, OpenAITokenCacheKey(account))
 		}
 		return
 	}

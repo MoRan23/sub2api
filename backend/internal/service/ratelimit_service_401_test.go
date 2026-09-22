@@ -69,6 +69,29 @@ type tokenCacheInvalidatorRecorder struct {
 	err      error
 }
 
+// This compatibility-policy fixture reads the parent's real account tuple while
+// leaving the legacy SetTempUnschedulable/SetError policy under test unchanged.
+type rateLimitOAuthOwnerReader struct {
+	*rateLimitAccountRepoStub
+}
+
+func (r *rateLimitOAuthOwnerReader) GetOpenAIOAuthOSCredential(_ context.Context, id int64, os string) (*OpenAIOAuthOSCredential, error) {
+	account := r.accountsByID[id]
+	if account == nil {
+		return nil, ErrAccountNotFound
+	}
+	return &OpenAIOAuthOSCredential{OwnerAccountID: id, OSFamily: os, Credentials: OpenAIOAuthProviderCredentials(account.Credentials),
+		AuthorizationGeneration: "parent-authorization", Revision: 1, Status: OpenAIOAuthAuthorizationAuthorized}, nil
+}
+
+func (r *rateLimitOAuthOwnerReader) ListOpenAIOAuthOSCredentials(ctx context.Context, id int64) ([]*OpenAIOAuthOSCredential, error) {
+	credential, err := r.GetOpenAIOAuthOSCredential(ctx, id, OpenAIOSWindows)
+	if err != nil {
+		return nil, err
+	}
+	return []*OpenAIOAuthOSCredential{credential}, nil
+}
+
 type openAI403CounterCacheStub struct {
 	counts     []int64
 	resetCalls []int64
@@ -165,7 +188,7 @@ func TestRateLimitService_HandleUpstreamError_OAuth401SetsTempUnschedulable(t *t
 // 401(母账号 token 问题)必须重定向到凭据 owner(母账号)——母账号 temp-unschedulable + token cache 失效,
 // 影子不得被永久禁用(否则母账号可恢复的 token 问题会把影子永久打死)。
 func TestRateLimitService_HandleUpstreamError_SparkShadow401RedirectsToParent(t *testing.T) {
-	repo := &rateLimitAccountRepoStub{}
+	repo := &rateLimitOAuthOwnerReader{rateLimitAccountRepoStub: &rateLimitAccountRepoStub{}}
 	repo.accountsByID = map[int64]*Account{}
 	invalidator := &tokenCacheInvalidatorRecorder{}
 	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
@@ -178,6 +201,7 @@ func TestRateLimitService_HandleUpstreamError_SparkShadow401RedirectsToParent(t 
 		Type:        AccountTypeOAuth,
 		Credentials: map[string]any{"refresh_token": "rt-mother"},
 	}
+	require.NoError(t, PrepareOpenAIOAuthOSProfilesForCreate(mother))
 	repo.accountsByID[parentID] = mother
 
 	shadowParent := parentID

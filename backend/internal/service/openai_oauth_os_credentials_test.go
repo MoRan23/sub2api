@@ -24,8 +24,9 @@ func (r *oauthOSCredentialTestRepository) GetOpenAIOAuthOSCredential(_ context.C
 	if slot != nil && slot.OwnerAccountID == id {
 		projection := *slot
 		projection.OSFamily = os
-		projection.StateGeneration = os + "-state"
-		projection.CredentialEpoch = os + "-epoch"
+		projection.Credentials = OpenAIOAuthProviderCredentials(r.accounts[id].Credentials)
+		projection.StateGeneration = "account-state"
+		projection.CredentialEpoch = "account-epoch"
 		return &projection, nil
 	}
 	return nil, nil
@@ -43,7 +44,7 @@ func (r *oauthOSCredentialTestRepository) ListOpenAIOAuthOSCredentials(_ context
 
 func oauthOSCredentialFixture(t *testing.T) (*Account, *oauthOSCredentialTestRepository) {
 	t.Helper()
-	account := &Account{ID: 10, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "default-only", "model_mapping": map[string]any{"gpt": "model"}}}
+	account := &Account{ID: 10, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "shared-token", "model_mapping": map[string]any{"gpt": "model"}}}
 	require.NoError(t, PrepareOpenAIOAuthOSProfilesForCreate(account))
 	grant := &OpenAIOAuthOSCredential{OwnerAccountID: account.ID, OSFamily: OpenAIOSWindows,
 		Credentials: map[string]any{"access_token": "shared-token"}, AuthorizationGeneration: "shared-generation", Revision: 3, Status: OpenAIOAuthAuthorizationAuthorized}
@@ -75,11 +76,11 @@ func TestOpenAIOAuthSharedCredentialsSelectOnlyRequestedOrDefaultIdentity(t *tes
 	require.Equal(t, OpenAIOSMacOS, mac.OpenAIOAuthCredentialOS)
 	require.Equal(t, linux.OpenAIOAuthAuthorizationGeneration, mac.OpenAIOAuthAuthorizationGeneration)
 	require.Equal(t, linux.OpenAIOAuthCredentialRevision, mac.OpenAIOAuthCredentialRevision)
-	require.NotEqual(t, linux.OpenAIOAuthCredentialStateGeneration, mac.OpenAIOAuthCredentialStateGeneration)
+	require.Equal(t, linux.OpenAIOAuthCredentialStateGeneration, mac.OpenAIOAuthCredentialStateGeneration)
 	require.NotEqual(t, linux.GetCredential("user_agent"), mac.GetCredential("user_agent"))
 	linux.Credentials["model_mapping"].(map[string]any)["gpt"] = "changed"
 	require.Equal(t, "model", account.Credentials["model_mapping"].(map[string]any)["gpt"])
-	require.Equal(t, "default-only", account.GetCredential("access_token"))
+	require.Equal(t, "shared-token", account.GetCredential("access_token"))
 }
 
 func TestOpenAIOAuthOSCredentialsReloadFencesReauthorization(t *testing.T) {
@@ -95,6 +96,25 @@ func TestOpenAIOAuthOSCredentialsReloadFencesReauthorization(t *testing.T) {
 	require.ErrorIs(t, err, ErrOpenAIOAuthOSAuthorizationChanged)
 	_, err = ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, scoped, OpenAIOSWindows)
 	require.ErrorIs(t, err, ErrOpenAIOAuthOSAuthorizationChanged)
+}
+
+func TestOpenAIOAuthAccountCredentialsResolveLatestAccountWithoutAuthorizationSummary(t *testing.T) {
+	account, repo := oauthOSCredentialFixture(t)
+	stale := *account
+	stale.Credentials = map[string]any{"access_token": "stale-token", "model_mapping": map[string]any{"gpt": "old-model"}}
+	account.Credentials["access_token"] = "current-account-token"
+	account.Credentials["model_mapping"] = map[string]any{"gpt": "current-model"}
+	account.OpenAIOAuthOSProfiles.Authorization = nil
+	for _, os := range OpenAIOAuthOSFamilies() {
+		require.True(t, OpenAIOAuthOSAuthorizationAvailable(account, os))
+		resolved, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, &stale, os)
+		require.NoError(t, err)
+		require.Equal(t, "current-account-token", resolved.GetOpenAIAccessToken())
+		require.Equal(t, "current-model", resolved.Credentials["model_mapping"].(map[string]any)["gpt"])
+		require.Equal(t, os, resolved.OpenAIOAuthCredentialOS)
+	}
+	account.Credentials = map[string]any{"model_mapping": map[string]any{"gpt": "current-model"}}
+	require.False(t, OpenAIOAuthOSAuthorizationAvailable(account, OpenAIOSWindows), "configuration alone is not an OAuth credential")
 }
 
 func TestOpenAIOAuthOSCredentialsSparkPreservesBusinessIdentity(t *testing.T) {
@@ -157,7 +177,7 @@ func TestOpenAIOAuthOSCredentialsConcurrentProjectionIsolation(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	require.Equal(t, "default-only", account.GetCredential("access_token"))
+	require.Equal(t, "shared-token", account.GetCredential("access_token"))
 	require.Equal(t, "shared-token", repo.slots[OpenAIOSLinux].Credentials["access_token"])
 	require.Equal(t, "model", account.Credentials["model_mapping"].(map[string]any)["gpt"])
 }
@@ -183,13 +203,13 @@ func TestOpenAIOAuthSharedAuthorizationSummaryIgnoresRequestedOS(t *testing.T) {
 		available     bool
 	}{
 		{"shared authorized supersedes old slots", &OpenAIOAuthOSAuthorizationSummary{Status: OpenAIOAuthAuthorizationAuthorized}, OpenAIOAuthAuthorizationUnauthorized, OpenAIOAuthAuthorizationUnauthorized, true},
-		{"shared unavailable supersedes old slots", &OpenAIOAuthOSAuthorizationSummary{Status: OpenAIOAuthAuthorizationReauthRequired}, OpenAIOAuthAuthorizationAuthorized, OpenAIOAuthAuthorizationAuthorized, false},
-		{"shared cooldown applies to all identities", &OpenAIOAuthOSAuthorizationSummary{Status: OpenAIOAuthAuthorizationAuthorized, RefreshRetryAfter: &until}, OpenAIOAuthAuthorizationAuthorized, OpenAIOAuthAuthorizationAuthorized, false},
+		{"old shared error does not override account credentials", &OpenAIOAuthOSAuthorizationSummary{Status: OpenAIOAuthAuthorizationReauthRequired}, OpenAIOAuthAuthorizationAuthorized, OpenAIOAuthAuthorizationAuthorized, true},
+		{"old shared cooldown does not override account credentials", &OpenAIOAuthOSAuthorizationSummary{Status: OpenAIOAuthAuthorizationAuthorized, RefreshRetryAfter: &until}, OpenAIOAuthAuthorizationAuthorized, OpenAIOAuthAuthorizationAuthorized, true},
 		{"legacy default grant remains usable", nil, OpenAIOAuthAuthorizationAuthorized, OpenAIOAuthAuthorizationUnauthorized, true},
-		{"legacy nondefault grant cannot replace default", nil, OpenAIOAuthAuthorizationUnauthorized, OpenAIOAuthAuthorizationAuthorized, false},
+		{"legacy unauthorized default does not gate account credentials", nil, OpenAIOAuthAuthorizationUnauthorized, OpenAIOAuthAuthorizationAuthorized, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, OpenAIOAuthOSProfiles: &OpenAIOAuthOSProfiles{
+			account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "account-token"}, OpenAIOAuthOSProfiles: &OpenAIOAuthOSProfiles{
 				DefaultOS: OpenAIOSWindows, Authorization: test.shared, Profiles: map[string]OpenAIOAuthOSProfile{
 					OpenAIOSWindows: {Authorization: OpenAIOAuthOSAuthorizationSummary{Status: test.defaultStatus}},
 					OpenAIOSLinux:   {Authorization: OpenAIOAuthOSAuthorizationSummary{Status: test.otherStatus}},
@@ -224,10 +244,10 @@ func TestOpenAIOAuthSharedAuthorizationFencesEveryFrozenIdentity(t *testing.T) {
 
 func TestOpenAIOAuthSharedAuthorizationRejectsMissingGrantAndIdentity(t *testing.T) {
 	account, repo := oauthOSCredentialFixture(t)
-	repo.slots[OpenAIOSWindows].Credentials["access_token"] = "  "
+	account.Credentials["access_token"] = "  "
 	_, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, account, OpenAIOSLinux)
 	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized, "provider-independent fields are not credentials")
-	repo.slots[OpenAIOSWindows].Credentials["access_token"] = "shared-token"
+	account.Credentials["access_token"] = "shared-token"
 	delete(account.OpenAIOAuthOSProfiles.Profiles, OpenAIOSLinux)
 	_, err = ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, account, OpenAIOSLinux)
 	require.ErrorIs(t, err, ErrOpenAIOAuthOSProfileUnavailable, "shared auth must not invent an unpersisted OS identity")
@@ -235,8 +255,7 @@ func TestOpenAIOAuthSharedAuthorizationRejectsMissingGrantAndIdentity(t *testing
 
 func TestOpenAIOAuthSharedAuthorizationAllowsRefreshOnlyGrant(t *testing.T) {
 	account, repo := oauthOSCredentialFixture(t)
-	grant := repo.slots[OpenAIOSWindows]
-	grant.Credentials = map[string]any{"refresh_token": "refresh-only"}
+	account.Credentials = map[string]any{"refresh_token": "refresh-only"}
 	for _, os := range OpenAIOAuthOSFamilies() {
 		resolved, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, account, os)
 		require.NoError(t, err, os)

@@ -1164,6 +1164,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		}
 		input.AccountIDs = accountIDs
 	}
+	if input.Status != "" || input.Schedulable != nil {
+		ctx = WithOpenAIOAuthAccountStateIntent(ctx, input.AccountIDs...)
+	}
 
 	result := &BulkUpdateAccountsResult{
 		SuccessIDs: make([]int64, 0, len(input.AccountIDs)),

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -180,12 +181,31 @@ func TestCodexStateEnabledObservationRealBeginFallback(t *testing.T) {
 	}
 }
 
-func TestCodexStateEnabledObservationHTTPToWSBridgeFingerprintOff(t *testing.T) {
+type codexNativeWSStateReadSpy struct {
+	CodexTurnStateRepository
+	reads atomic.Int64
+}
+
+func (r *codexNativeWSStateReadSpy) Get(ctx context.Context, key CodexTurnStateKey) (*CodexTurnStateRecord, error) {
+	r.reads.Add(1)
+	return r.CodexTurnStateRepository.Get(ctx, key)
+}
+
+func (r *codexNativeWSStateReadSpy) BeginBusiness(ctx context.Context, key CodexTurnStateKey, id string, now, until time.Time) (*CodexTurnStateRecord, error) {
+	r.reads.Add(1)
+	return r.CodexTurnStateRepository.BeginBusiness(ctx, key, id, now, until)
+}
+
+func TestCodexStateEnabledObservationHTTPToWSBridgeBypassesState(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(strconv.FormatBool(stream), func(t *testing.T) {
 			isolateCodexTurnStateSummaryStore(t)
-			svc, account, _, _ := newCodexWSStateTestGateway(t, "personal")
-			cached := seedCodexEnabledObservation(t, svc.codexTurnStateService, account, "gpt-5.1")
+			svc, account, repo, _ := newCodexWSStateTestGateway(t, "personal")
+			seedCodexEnabledObservation(t, svc.codexTurnStateService, account, "gpt-5.1")
+			before := repo.snapshotRecords()
+			_, beforeSummaries := globalCodexTurnStateSummaryStore.snapshot([]int64{account.ID})
+			readSpy := &codexNativeWSStateReadSpy{CodexTurnStateRepository: repo}
+			svc.codexTurnStateService.repo = readSpy
 			cfg := newOpenAIWSV2TestConfig()
 			cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
 			cfg.Gateway.OpenAIWS.OAuthEnabled = true
@@ -201,9 +221,10 @@ func TestCodexStateEnabledObservationHTTPToWSBridgeFingerprintOff(t *testing.T) 
 			defer svc.openaiWSPool.Close()
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader("{}"))
+			c.Request.Header.Set(openAIWSTurnStateHeader, "guarded-client-header")
 			var recovered bool
 			result, err := svc.forwardOpenAIWSV2(context.Background(), c, account,
-				map[string]any{"model": "gpt-5.1", "stream": stream, "input": "hi"}, "", "", "test-access",
+				map[string]any{"model": "gpt-5.1", "stream": stream, "input": "hi", "client_metadata": map[string]any{openAICodexTurnStateHeader: "guarded-client-frame"}}, "", "", "test-access",
 				OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, false, stream,
 				"gpt-5.1", "gpt-5.1", time.Now(), 0, "", &recovered)
 			require.NoError(t, err)
@@ -212,8 +233,13 @@ func TestCodexStateEnabledObservationHTTPToWSBridgeFingerprintOff(t *testing.T) 
 			frame, marshalErr := json.Marshal(conn.lastWrite)
 			conn.mu.Unlock()
 			require.NoError(t, marshalErr)
-			require.Equal(t, cached, gjson.GetBytes(frame, "client_metadata.x-codex-turn-state").String())
-			requireCodexEnabledSummary(t, svc.codexTurnStateService, account.ID, "gpt-5.1", token, "metadata", "business", len(cached))
+			require.Equal(t, "guarded-client-frame", gjson.GetBytes(frame, "client_metadata.x-codex-turn-state").String())
+			require.Equal(t, before, repo.snapshotRecords(), "actual WS transport cannot update the HTTP cache, activity, or schedule")
+			require.Zero(t, repo.activeCount())
+			require.Zero(t, readSpy.reads.Load(), "actual WS transport never reads the ticket cache")
+			_, afterSummaries := globalCodexTurnStateSummaryStore.snapshot([]int64{account.ID})
+			require.Equal(t, beforeSummaries, afterSummaries, "WS responses cannot produce ticket-specific summaries")
+			requirePassiveWSNoMaintenance(t, svc.codexTurnStateService)
 		})
 	}
 }
@@ -240,52 +266,75 @@ func TestCodexStateEnabledObservationWSToHTTPBridgeFingerprintOff(t *testing.T) 
 	requireCodexEnabledSummary(t, state, account.ID, "gpt-5.4", token, "metadata", "business", len(cached))
 }
 
-func TestCodexStateEnabledObservationNativeWSFingerprintOff(t *testing.T) {
+func TestCodexStateEnabledObservationNativeWSBypassesState(t *testing.T) {
 	for _, passthrough := range []bool{false, true} {
-		t.Run(fmt.Sprintf("passthrough_%t", passthrough), func(t *testing.T) {
-			isolateCodexTurnStateSummaryStore(t)
-			var svc *OpenAIGatewayService
-			var account *Account
-			var upstream *stagedPassthroughConn
-			var request chan http.Header
-			var response http.Header
-			var cached string
-			if passthrough {
-				var repo *codexStatePassthroughRepository
-				var dialer *codexStatePassthroughDialer
-				svc, account, _, repo, dialer = newCodexStatePassthroughHarness(t, true)
-				upstream, request, response = dialer.conn, dialer.request, dialer.headers
-				cached = makeCodexWSStateTestToken(10, time.Now().Add(-3*time.Minute))
-				seedCodexStatePassthroughModel(t, repo, account, "gpt-5.5", cached)
-			} else {
-				var dialer *codexWSStatePooledDialer
-				svc, account, _, _, dialer = newCodexWSStateIngressHarness(t)
-				upstream, request, response = dialer.conn.stagedPassthroughConn, dialer.request, dialer.response
-				cached = seedCodexEnabledObservation(t, svc.codexTurnStateService, account, "gpt-5.5")
-			}
-			token := makeCodexWSStateTestToken(10, time.Now().Add(-time.Minute))
-			response.Set(openAIWSTurnStateHeader, token)
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			server, serverErr := startPassthroughLifecycleServer(t, ctx, svc, account)
-			defer server.Close()
-			client, _, err := coderws.Dial(ctx, "ws"+server.URL[4:], nil)
-			require.NoError(t, err)
-			defer client.CloseNow()
-			require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.5","input":[]}`)))
-			frame := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
-			require.Equal(t, cached, gjson.GetBytes(frame, "client_metadata.x-codex-turn-state").String())
-			require.Empty(t, (<-request).Get(openAIWSTurnStateHeader))
-			upstream.Send(`{"type":"response.completed","response":{"id":"resp_enabled_native","model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`)
-			readCodexStatePassthroughFrame(t, ctx, client)
-			requireCodexEnabledSummary(t, svc.codexTurnStateService, account.ID, "gpt-5.5", token, "header", "business", len(cached))
-			_ = client.CloseNow()
-			select {
-			case <-serverErr:
-			case <-ctx.Done():
-				t.Fatal("local enabled summary connection did not finish")
-			}
-		})
+		for _, failed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("passthrough_%t/failed_%t", passthrough, failed), func(t *testing.T) {
+				isolateCodexTurnStateSummaryStore(t)
+				var svc *OpenAIGatewayService
+				var account *Account
+				var upstream *stagedPassthroughConn
+				var request chan http.Header
+				var response http.Header
+				var assertUnchanged func()
+				if passthrough {
+					var repo *codexStatePassthroughRepository
+					var dialer *codexStatePassthroughDialer
+					svc, account, _, repo, dialer = newCodexStatePassthroughHarness(t, true)
+					upstream, request, response = dialer.conn, dialer.request, dialer.headers
+					cached := makeCodexWSStateTestToken(10, time.Now().Add(-3*time.Minute))
+					seedCodexStatePassthroughModel(t, repo, account, "gpt-5.5", cached)
+					before := maps.Clone(repo.records)
+					assertUnchanged = func() { requireCodexStatePassthroughUntouched(t, repo, before) }
+				} else {
+					var dialer *codexWSStatePooledDialer
+					var repo *codexWSStateTestRepo
+					svc, account, repo, _, dialer = newCodexWSStateIngressHarness(t)
+					upstream, request, response = dialer.conn.stagedPassthroughConn, dialer.request, dialer.response
+					seedCodexEnabledObservation(t, svc.codexTurnStateService, account, "gpt-5.5")
+					before := repo.snapshotRecords()
+					assertUnchanged = func() {
+						require.Equal(t, before, repo.snapshotRecords())
+						require.Zero(t, repo.activeCount())
+					}
+				}
+				readSpy := &codexNativeWSStateReadSpy{CodexTurnStateRepository: svc.codexTurnStateService.repo}
+				svc.codexTurnStateService.repo = readSpy
+				_, beforeSummaries := globalCodexTurnStateSummaryStore.snapshot([]int64{account.ID})
+				token := makeCodexWSStateTestToken(10, time.Now().Add(-time.Minute))
+				response.Set(openAIWSTurnStateHeader, token)
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				server, serverErr := startPassthroughLifecycleServer(t, ctx, svc, account)
+				defer server.Close()
+				client, _, err := coderws.Dial(ctx, "ws"+server.URL[4:], &coderws.DialOptions{HTTPHeader: http.Header{"X-Codex-Turn-State": {"guarded-client-header"}}})
+				require.NoError(t, err)
+				defer client.CloseNow()
+				require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.5","input":[],"client_metadata":{"x-codex-turn-state":"guarded-client-frame"}}`)))
+				frame := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+				require.Equal(t, "guarded-client-frame", gjson.GetBytes(frame, "client_metadata.x-codex-turn-state").String())
+				require.Equal(t, "guarded-client-header", (<-request).Get(openAIWSTurnStateHeader))
+				upstream.Send(fmt.Sprintf(`{"type":"response.metadata","headers":{"x-codex-turn-state":%q}}`, makeCodexWSStateTestToken(11, time.Now())))
+				readCodexStatePassthroughFrame(t, ctx, client)
+				if failed {
+					upstream.Send(`{"type":"response.failed","response":{"id":"resp_enabled_native","model":"gpt-5.5","status":"failed","error":{"type":"invalid_request_error","message":"synthetic failure"}}}`)
+				} else {
+					upstream.Send(`{"type":"response.completed","response":{"id":"resp_enabled_native","model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`)
+				}
+				readCodexStatePassthroughFrame(t, ctx, client)
+				_ = client.CloseNow()
+				select {
+				case <-serverErr:
+				case <-ctx.Done():
+					t.Fatal("local enabled summary connection did not finish")
+				}
+				assertUnchanged()
+				require.Zero(t, readSpy.reads.Load(), "native WS never reads or reserves the HTTP ticket cache")
+				_, afterSummaries := globalCodexTurnStateSummaryStore.snapshot([]int64{account.ID})
+				require.Equal(t, beforeSummaries, afterSummaries)
+				requirePassiveWSNoMaintenance(t, svc.codexTurnStateService)
+			})
+		}
 	}
 }
 
@@ -303,7 +352,7 @@ func TestCodexStateEnabledObservationCollectorOriginFromActualResponse(t *testin
 			isolateCodexTurnStateSummaryStore(t)
 			state, repo, account := newCodexStateTestService(t)
 			state.now = time.Now
-			key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: "gpt-5.4", Generation: CodexTurnStateGenerationForAccount(account)}
+			key := CodexTurnStateKey{OwnerAccountID: account.ID, Model: "gpt-5.4", Generation: CodexTurnStateGenerationForAccount(account)}
 			repo.records[key] = CodexTurnStateRecord{OSFamily: "windows", OwnerAccountID: key.OwnerAccountID, Model: key.Model, Generation: key.Generation,
 				Version: 1, LastBusinessAt: state.now(), DemandReason: "extended_shape", DemandAt: state.now(), CollectionStatus: "pending"}
 			token := codexStateTestToken(tc.blocks, state.now().Add(-time.Minute))

@@ -1,8 +1,6 @@
 package openaicookies
 
 import (
-	"context"
-	"crypto/sha256"
 	"errors"
 	"net/http"
 	"net/url"
@@ -12,48 +10,26 @@ import (
 	"time"
 )
 
-// Manager shares persistent cookies through Store while keeping session cookies
-// in this process. It never uses a transport pool key as a credential identity.
+// Manager applies explicitly supplied ticket bundles. Its only mutable jar is
+// isolated, process-local memory for unbound OAuth flows. Bound cookie values
+// are persisted with the ticket only; this manager has no storage dependency.
 type Manager struct {
-	store   Store
-	now     func() time.Time
-	mu      sync.Mutex
-	memory  map[Scope]map[string]memoryEntry
-	version int64
-	scopes  [64]chan struct{}
+	now    func() time.Time
+	mu     sync.Mutex
+	memory map[Scope]map[string]Entry
 }
 
-type memoryEntry struct {
-	Entry
-	version int64
+func NewManager() *Manager {
+	return &Manager{now: time.Now, memory: make(map[Scope]map[string]Entry)}
 }
 
-func NewManager(store Store) *Manager {
-	manager := &Manager{store: store, now: time.Now, memory: make(map[Scope]map[string]memoryEntry)}
-	for index := range manager.scopes {
-		manager.scopes[index] = make(chan struct{}, 1)
-	}
-	return manager
-}
-
-// ClearEphemeral ends an unbound authorization flow, including its session cookies.
 func (m *Manager) ClearEphemeral(id string) {
 	if m == nil {
 		return
 	}
-	scope := Scope{EphemeralID: id}
-	lock := m.scopeLock(scope)
-	lock <- struct{}{}
-	defer func() { <-lock }()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.memory, scope)
-}
-
-func (m *Manager) scopeLock(scope Scope) chan struct{} {
-	key := CookieKey(scope.OSFamily, scope.AuthorizationGeneration, scope.EphemeralID)
-	digest := sha256.Sum256([]byte(key))
-	return m.scopes[(uint64(scope.OwnerAccountID)+uint64(digest[0]))%uint64(len(m.scopes))]
+	delete(m.memory, Scope{EphemeralID: id})
 }
 
 type transport struct {
@@ -67,8 +43,7 @@ func (t *transport) CloseIdleConnections() {
 	}
 }
 
-// Wrap belongs immediately around the actual HTTP RoundTripper. It intentionally
-// does not modify websocket dialers or install an http.Client.Jar.
+// Wrap does not install an http.Client.Jar and never handles websocket upgrades.
 func (m *Manager) Wrap(next http.RoundTripper) http.RoundTripper {
 	if next == nil {
 		next = http.DefaultTransport
@@ -76,202 +51,176 @@ func (m *Manager) Wrap(next http.RoundTripper) http.RoundTripper {
 	return &transport{manager: m, next: next}
 }
 
+func websocketUpgrade(request *http.Request) bool {
+	for name, values := range request.Header {
+		if strings.EqualFold(name, "Upgrade") {
+			for _, value := range values {
+				for _, token := range strings.Split(value, ",") {
+					if strings.EqualFold(strings.TrimSpace(token), "websocket") {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+func removeHeader(header http.Header, target string) {
+	for name := range header {
+		if strings.EqualFold(name, target) {
+			delete(header, name)
+		}
+	}
+}
+
+func restoreBundleRequest(request *http.Request, stripWithoutFallback bool) {
+	if restore, ok := request.Context().Value(fallbackKey{}).(func(*http.Request)); ok && restore != nil {
+		restore(request)
+	} else if stripWithoutFallback {
+		removeHeader(request.Header, "Cookie")
+		removeHeader(request.Header, "x-codex-turn-state")
+	}
+}
+
 func (t *transport) RoundTrip(request *http.Request) (*http.Response, error) {
 	if request == nil {
 		return nil, errors.New("cookie_request_missing")
 	}
-	// Websocket upgrades never read or update the HTTP jar, even if a future
-	// caller reuses a scoped HTTP client for its handshake.
-	for name, values := range request.Header {
-		if !strings.EqualFold(name, "Upgrade") {
-			continue
-		}
-		for _, value := range values {
-			for _, token := range strings.Split(value, ",") {
-				if strings.EqualFold(strings.TrimSpace(token), "websocket") {
-					return t.next.RoundTrip(request)
-				}
-			}
-		}
+	if websocketUpgrade(request) {
+		return t.next.RoundTrip(request)
 	}
-	scope, scoped := ScopeFromContext(request.Context())
-	if !scoped && !AllowedURL(request.URL) {
+	policy, enabled := request.Context().Value(bundleKey{}).(bundlePolicy)
+	scope, _ := ScopeFromContext(request.Context())
+	attempt := attemptFromContext(request.Context())
+	if policy.bypass || !enabled && scope.EphemeralID == "" {
+		attempt.invalidate()
 		return t.next.RoundTrip(request)
 	}
 	clone := request.Clone(request.Context())
-	// Remove every spelling, including redirect headers from a previous hop.
-	for name := range clone.Header {
-		if strings.EqualFold(name, "Cookie") {
-			delete(clone.Header, name)
-		}
-	}
 	if clone.Header == nil {
 		clone.Header = make(http.Header)
 	}
-	diagnostic := Diagnostic{Source: "none"}
-	if !scoped {
-		diagnostic.Reason = "cookie_scope_missing"
-		report(clone.Context(), diagnostic)
-		return t.next.RoundTrip(clone)
+	if enabled {
+		if guard, ok := clone.Context().Value(guardKey{}).(func(*http.Request) bool); ok && guard != nil && !guard(clone) {
+			attempt.invalidate()
+			restoreBundleRequest(clone, false)
+			return t.next.RoundTrip(clone)
+		}
 	}
-	if !scope.Valid() {
-		diagnostic.Reason = ErrInvalidScope.Error()
-		report(clone.Context(), diagnostic)
+	if t.manager == nil || !scope.Valid() || enabled && !scope.Persistent() {
+		attempt.invalidate()
+		restoreBundleRequest(clone, true)
+		report(clone.Context(), Diagnostic{Reason: ErrInvalidScope.Error(), Source: "none"})
 		return t.next.RoundTrip(clone)
 	}
 	if !AllowedURL(clone.URL) {
-		diagnostic.Reason = "cookie_host_not_allowed"
-		report(clone.Context(), diagnostic)
+		attempt.invalidate()
+		restoreBundleRequest(clone, true)
+		report(clone.Context(), Diagnostic{Reason: "cookie_host_not_allowed", Source: "none"})
 		return t.next.RoundTrip(clone)
 	}
-	attempt := attemptFromContext(clone.Context())
-	sequence := attempt.begin(t.manager, scope)
-	entries, versions, err := t.manager.loadState(clone.Context(), scope)
-	if err != nil {
-		diagnostic.Reason = safeReason(err)
-		report(clone.Context(), diagnostic)
-		return t.next.RoundTrip(clone)
+	if !enabled {
+		removeHeader(clone.Header, "Cookie")
+		return t.roundTripEphemeral(clone, scope)
 	}
 	now := t.manager.now()
-	diagnostic = apply(clone, entries, now)
-	if !scope.Persistent() && diagnostic.Sent {
-		diagnostic.Source = "memory"
+	if !policy.bundle.Fresh() && !policy.bundle.ValidAt(now) {
+		attempt.invalidate()
+		restoreBundleRequest(clone, true)
+		report(clone.Context(), Diagnostic{Reason: ErrBundleExpired.Error(), Source: "none"})
+		return t.next.RoundTrip(clone)
+	}
+	sequence := attempt.begin(scope, t.manager.now)
+	removeHeader(clone.Header, "Cookie")
+	// Only cookies eligible for this physical URL belong to its candidate. The
+	// caller's raw Cookie header is never read or copied into an accepted bundle.
+	entries := make([]Entry, 0, len(policy.bundle.Entries))
+	for _, entry := range policy.bundle.Entries {
+		if entryMatches(entry, clone.URL, now) {
+			entries = append(entries, entry)
+		}
+	}
+	diagnostic := apply(clone, entries, now)
+	if diagnostic.Sent {
+		diagnostic.Source = "bundle"
 	}
 	report(clone.Context(), diagnostic)
-	response, transportErr := t.next.RoundTrip(clone)
-	if response != nil && transportErr == nil && response.StatusCode >= 200 && response.StatusCode < 400 && (!scope.Persistent() || response.StatusCode < 300) {
-		changes := normalizeResponse(clone.URL, response.Cookies(), t.manager.now())
-		if len(changes) != 0 {
-			for index := range changes {
-				if attempt != nil {
-					version := versions[changes[index].Key]
-					changes[index].ExpectedVersion = &version
-				}
-				if changes[index].Entry == nil {
-					continue
-				}
-				for _, existing := range entries {
-					if existing.Key == changes[index].Key {
-						changes[index].Entry.CreatedAt = existing.CreatedAt
-						break
-					}
-				}
-			}
-			if attempt != nil {
-				attempt.stage(sequence, candidate{changes: changes, diagnostic: diagnostic, observer: clone.Context()})
-				diagnostic.Reason = "cookie_staged"
-			} else if scope.Persistent() {
-				diagnostic.Reason = "cookie_target_required"
-			} else {
-				// An unbound OAuth flow may keep temporary cookies; it has no
-				// account scope and never writes PostgreSQL or a bound pool.
-				saved, deleted, mergeErr := t.manager.merge(clone.Context(), scope, changes)
-				diagnostic.SavedCount, diagnostic.DeletedCount = saved, deleted
-				if mergeErr != nil {
-					diagnostic.Reason = safeReason(mergeErr)
-				} else {
-					diagnostic.Reason = "cookie_updated"
-				}
-			}
+	response, err := t.next.RoundTrip(clone)
+	if response != nil && err == nil && response.StatusCode >= 200 && response.StatusCode < 300 {
+		receivedAt := t.manager.now()
+		entries = mergeEntries(entries, normalizeResponse(clone.URL, response.Cookies(), receivedAt))
+		attempt.capture(sequence, entries, receivedAt, diagnostic)
+		if attempt != nil && sequence != 0 {
+			diagnostic.Reason = "cookie_staged"
 			report(clone.Context(), diagnostic)
 		}
 	}
-	return response, transportErr
+	return response, err
 }
 
-func safeReason(err error) string {
-	switch {
-	case errors.Is(err, ErrInvalidScope):
-		return ErrInvalidScope.Error()
-	case errors.Is(err, ErrStaleScope):
-		return ErrStaleScope.Error()
-	case errors.Is(err, ErrStoreCorrupt):
-		return ErrStoreCorrupt.Error()
-	case errors.Is(err, ErrConflict):
-		return ErrConflict.Error()
-	case errors.Is(err, ErrAttemptClosed):
-		return ErrAttemptClosed.Error()
-	default:
-		return ErrStoreUnavailable.Error()
-	}
-}
-
-func (m *Manager) load(ctx context.Context, scope Scope) ([]Entry, error) {
-	entries, _, err := m.loadState(ctx, scope)
-	return entries, err
-}
-
-func (m *Manager) loadState(ctx context.Context, scope Scope) ([]Entry, map[string]int64, error) {
-	if m == nil {
-		return nil, nil, ErrStoreUnavailable
-	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	lock := m.scopeLock(scope)
-	select {
-	case lock <- struct{}{}:
-	case <-ctx.Done():
-		return nil, nil, ErrStoreUnavailable
-	}
-	defer func() { <-lock }()
-	var snapshot Snapshot
-	snapshot.Versions = make(map[string]int64)
-	if scope.Persistent() {
-		if m.store == nil {
-			return nil, nil, ErrStoreUnavailable
-		}
-		var err error
-		snapshot, err = m.store.Load(ctx, scope)
-		if err != nil {
-			m.mu.Lock()
-			delete(m.memory, scope)
-			m.mu.Unlock()
-			return nil, nil, err
-		}
-	}
+func (t *transport) roundTripEphemeral(request *http.Request, scope Scope) (*http.Response, error) {
+	m := t.manager
 	now := m.now()
-	merged := make(map[string]Entry, len(snapshot.Entries))
-	for _, entry := range snapshot.Entries {
-		if !entry.Valid() || entry.ExpiresAt.IsZero() || snapshot.Versions[entry.Key] <= 0 {
-			return nil, nil, ErrStoreCorrupt
-		}
-		if entry.ExpiresAt.After(now) {
-			merged[entry.Key] = entry
-		}
-	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	entries := make([]Entry, 0, len(m.memory[scope]))
 	for key, entry := range m.memory[scope] {
-		if !scope.Persistent() {
-			snapshot.Versions[key] = entry.version
-			if entry.Key == "" {
-				continue
-			}
-		}
-		if scope.Persistent() && snapshot.Versions[key] != entry.version {
+		if !entry.ExpiresAt.IsZero() && !entry.ExpiresAt.After(now) {
 			delete(m.memory[scope], key)
 			continue
 		}
-		if !entry.ExpiresAt.IsZero() && !entry.ExpiresAt.After(now) {
-			if scope.Persistent() {
-				delete(m.memory[scope], key)
+		entries = append(entries, entry)
+	}
+	m.mu.Unlock()
+	diagnostic := apply(request, entries, now)
+	if diagnostic.Sent {
+		diagnostic.Source = "memory"
+	}
+	report(request.Context(), diagnostic)
+	response, err := t.next.RoundTrip(request)
+	if response != nil && err == nil && response.StatusCode >= 200 && response.StatusCode < 400 {
+		changes := normalizeResponse(request.URL, response.Cookies(), m.now())
+		m.mu.Lock()
+		if m.memory[scope] == nil {
+			m.memory[scope] = make(map[string]Entry)
+		}
+		for _, change := range changes {
+			if change.Entry == nil {
+				delete(m.memory[scope], change.Key)
 			} else {
-				m.memory[scope][key] = memoryEntry{version: entry.version}
+				m.memory[scope][change.Key] = *change.Entry
 			}
+		}
+		m.mu.Unlock()
+	}
+	return response, err
+}
+
+func mergeEntries(base []Entry, changes []mutation) []Entry {
+	entries := make(map[string]Entry, len(base)+len(changes))
+	for _, entry := range base {
+		entries[entry.Key] = entry
+	}
+	for _, change := range changes {
+		if change.Entry == nil {
+			delete(entries, change.Key)
 			continue
 		}
-		merged[key] = entry.Entry
+		entry := *change.Entry
+		if previous, ok := entries[change.Key]; ok {
+			entry.CreatedAt = previous.CreatedAt
+		}
+		entries[change.Key] = entry
 	}
-	result := make([]Entry, 0, len(merged))
-	for _, entry := range merged {
+	result := make([]Entry, 0, len(entries))
+	for _, entry := range entries {
 		result = append(result, entry)
 	}
-	return result, snapshot.Versions, nil
+	return result
 }
 
 func apply(request *http.Request, entries []Entry, now time.Time) Diagnostic {
 	jar := newJar()
-	// Reconstruct in creation order to preserve the RFC same-path ordering.
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].CreatedAt.Equal(entries[j].CreatedAt) {
 			return entries[i].Key < entries[j].Key
@@ -282,14 +231,12 @@ func apply(request *http.Request, entries []Entry, now time.Time) Diagnostic {
 		if !entry.ExpiresAt.IsZero() && !entry.ExpiresAt.After(now) {
 			continue
 		}
-		origin := &url.URL{Scheme: "https", Host: entry.Domain, Path: entry.Path}
 		cookie := entry.cookie()
-		cookie.Expires = time.Time{} // Expiry was checked using the manager clock.
-		jar.SetCookies(origin, []*http.Cookie{cookie})
+		cookie.Expires = time.Time{}
+		jar.SetCookies(&url.URL{Scheme: "https", Host: entry.Domain, Path: entry.Path}, []*http.Cookie{cookie})
 	}
 	diagnostic := Diagnostic{Reason: "cookie_empty", Source: "none"}
 	names := make(map[string]bool)
-	persistent, session := false, false
 	for _, cookie := range jar.Cookies(request.URL) {
 		request.AddCookie(cookie)
 		diagnostic.SentCount++
@@ -303,9 +250,6 @@ func apply(request *http.Request, entries []Entry, now time.Time) Diagnostic {
 		if !entry.ExpiresAt.IsZero() {
 			expires := entry.ExpiresAt
 			metadata.ExpiresAt = &expires
-			persistent = true
-		} else {
-			session = true
 		}
 		diagnostic.Cookies = append(diagnostic.Cookies, metadata)
 	}
@@ -314,16 +258,7 @@ func apply(request *http.Request, entries []Entry, now time.Time) Diagnostic {
 	}
 	sort.Strings(diagnostic.Names)
 	if diagnostic.SentCount > 0 {
-		diagnostic.Sent = true
-		diagnostic.Reason = "cookie_sent"
-	}
-	switch {
-	case persistent && session:
-		diagnostic.Source = "mixed"
-	case persistent:
-		diagnostic.Source = "persistent"
-	case session:
-		diagnostic.Source = "memory"
+		diagnostic.Sent, diagnostic.Reason = true, "cookie_sent"
 	}
 	return diagnostic
 }
@@ -339,105 +274,24 @@ func entryMatches(entry Entry, target *url.URL, now time.Time) bool {
 	return len(jar.Cookies(target)) != 0
 }
 
-func normalizeResponse(target *url.URL, cookies []*http.Cookie, now time.Time) []Mutation {
-	// Duplicate identities follow their order in the response: the last wins.
-	changes := make(map[string]Mutation)
+func normalizeResponse(target *url.URL, cookies []*http.Cookie, now time.Time) []mutation {
+	changes := make(map[string]mutation)
 	for index, cookie := range cookies {
 		entry, remove, accepted := normalize(target, cookie, now)
 		if !accepted {
 			continue
 		}
-		mutation := Mutation{Key: entry.Key}
+		mutation := mutation{Key: entry.Key}
 		if !remove {
 			entry.CreatedAt = now.Add(time.Duration(index) * time.Nanosecond)
 			mutation.Entry = &entry
 		}
 		changes[entry.Key] = mutation
 	}
-	result := make([]Mutation, 0, len(changes))
+	result := make([]mutation, 0, len(changes))
 	for _, change := range changes {
 		result = append(result, change)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Key < result[j].Key })
 	return result
-}
-
-func (m *Manager) merge(ctx context.Context, scope Scope, changes []Mutation) (int, int, error) {
-	if m == nil {
-		return 0, 0, ErrStoreUnavailable
-	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	lock := m.scopeLock(scope)
-	select {
-	case lock <- struct{}{}:
-	case <-ctx.Done():
-		return 0, 0, ErrStoreUnavailable
-	}
-	defer func() { <-lock }()
-	persistent := make([]Mutation, 0, len(changes))
-	for _, change := range changes {
-		if change.Entry == nil || change.Entry.ExpiresAt.IsZero() {
-			persistent = append(persistent, Mutation{Key: change.Key, ExpectedVersion: change.ExpectedVersion})
-		} else {
-			persistent = append(persistent, change)
-		}
-	}
-	// Every bound update, even replacing a persistent cookie with a session cookie,
-	// passes the authorization fence. Local state changes only after commit.
-	var versions map[string]int64
-	if scope.Persistent() {
-		if m.store == nil {
-			return 0, 0, ErrStoreUnavailable
-		}
-		var err error
-		versions, err = m.store.Merge(ctx, scope, persistent)
-		if err != nil {
-			return 0, 0, err
-		}
-		for _, change := range changes {
-			if versions[change.Key] <= 0 {
-				return 0, 0, ErrStoreCorrupt
-			}
-		}
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if !scope.Persistent() {
-		for _, change := range changes {
-			if change.ExpectedVersion != nil && m.memory[scope][change.Key].version != *change.ExpectedVersion {
-				return 0, 0, ErrConflict
-			}
-		}
-		versions = make(map[string]int64, len(changes))
-		for _, change := range changes {
-			m.version++
-			versions[change.Key] = m.version
-		}
-	}
-	if m.memory[scope] == nil {
-		m.memory[scope] = make(map[string]memoryEntry)
-	}
-	saved, deleted := 0, 0
-	for _, change := range changes {
-		if change.Entry == nil {
-			if scope.Persistent() {
-				delete(m.memory[scope], change.Key)
-			} else {
-				m.memory[scope][change.Key] = memoryEntry{version: versions[change.Key]}
-			}
-			deleted++
-			continue
-		}
-		saved++
-		if !scope.Persistent() || change.Entry.ExpiresAt.IsZero() {
-			m.memory[scope][change.Key] = memoryEntry{Entry: *change.Entry, version: versions[change.Key]}
-		} else {
-			delete(m.memory[scope], change.Key)
-		}
-	}
-	if len(m.memory[scope]) == 0 {
-		delete(m.memory, scope)
-	}
-	return saved, deleted, nil
 }

@@ -6,13 +6,10 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
-// The mode is internal connection state, never a client-controlled wire header.
-// Its generation makes otherwise identical pooled sockets incompatible after
-// the account's configuration or effective OAuth credentials change.
+// Retained in the connection contract for compatibility. Shared ticket/Cookie
+// bundles apply only to physical HTTP requests, never native WS connections.
 type openAICodexWSStateMode struct {
 	Enabled    bool
 	Generation string
@@ -26,65 +23,19 @@ func (m openAICodexWSStateMode) poolKey() string {
 }
 
 func (s *OpenAIGatewayService) openAICodexWSStateMode(ctx context.Context, account *Account) openAICodexWSStateMode {
-	if s == nil || s.codexTurnStateService == nil {
-		return openAICodexWSStateMode{}
-	}
-	enabled, generation, err := s.codexTurnStateService.Enabled(ctx, account)
-	if err != nil {
-		return openAICodexWSStateMode{}
-	}
-	return openAICodexWSStateMode{Enabled: enabled, Generation: generation}
+	return openAICodexWSStateMode{}
 }
 
 func (s *OpenAIGatewayService) openAICodexWSStateModeChanged(ctx context.Context, account *Account, initial openAICodexWSStateMode) bool {
-	if s == nil || s.codexTurnStateService == nil {
-		return false
-	}
-	enabled, generation, err := s.codexTurnStateService.Enabled(ctx, account)
-	if err != nil {
-		// A storage outage prevents injection but is not evidence of a settings
-		// change. Keep forwarding the ordinary client frames on this socket.
-		return false
-	}
-	return (openAICodexWSStateMode{Enabled: enabled, Generation: generation}).poolKey() != initial.poolKey()
+	return false
 }
 
-// prepareOpenAICodexWSStateFrame runs only after the ordinary client provenance
-// guard. The attempt's private server snapshot is the sole source of a cache
-// override, and never changes the provenance associated with a client token.
+// Native WS keeps the ordinary client provenance/forwarding rules. It must not
+// read or inject an HTTP bundle, learn a ticket, or activate background collection.
+// WS-to-HTTP bridges use the separate HTTP request path and remain supported.
 func (s *OpenAIGatewayService) prepareOpenAICodexWSStateFrame(ctx context.Context, c *gin.Context, account *Account, payload []byte, firstGuardedHeaderToken string, credentialHeaders http.Header) ([]byte, *CodexTurnStateAttempt, error) {
 	noteOpenAICodexStatePatch(c, nil, nil, nil)
-	if s == nil || s.codexTurnStateService == nil ||
-		strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "response.create" ||
-		gjson.GetBytes(payload, "generate").Type == gjson.False {
-		return payload, nil, nil
-	}
-	model := strings.TrimSpace(gjson.GetBytes(payload, "model").String())
-	attempt, err := s.codexTurnStateService.Prepare(ctx, account, model)
-	if err != nil || attempt == nil {
-		// The handshake may already have been suppressed. Preserve its guarded
-		// first-frame value even when no classification/cache can be loaded.
-		final, patchErr := applyOpenAICodexWSStateSnapshot(payload, "", firstGuardedHeaderToken)
-		noteOpenAICodexStatePatch(c, nil, payload, final)
-		return final, nil, patchErr
-	}
-	if attempt.Enabled && !s.codexTurnStateService.ValidateCredentialHeaders(ctx, attempt, credentialHeaders) {
-		s.finishOpenAICodexWSState(ctx, attempt, false)
-		attempt = passiveCodexStateAfterValidationFailure(attempt)
-		if attempt == nil {
-			final, patchErr := applyOpenAICodexWSStateSnapshot(payload, "", firstGuardedHeaderToken)
-			noteOpenAICodexStatePatch(c, nil, payload, final)
-			return final, nil, patchErr
-		}
-	}
-	s.codexTurnStateService.bindHistoryCredentials(ctx, attempt, credentialHeaders)
-	final, err := applyOpenAICodexWSStateSnapshot(payload, attempt.Snapshot.Token, firstGuardedHeaderToken)
-	if err != nil {
-		s.finishOpenAICodexWSState(ctx, attempt, false)
-		return payload, nil, err
-	}
-	noteOpenAICodexStatePatch(c, attempt, payload, final)
-	return final, attempt, nil
+	return payload, nil, nil
 }
 
 // Only these private fields are retained for checking a physical socket's
@@ -113,21 +64,6 @@ func openAIWSCodexStateOutboundHeaderLength(conn openAIWSClientConn, fallback ht
 		return source.CodexStateOutboundHeaderLength()
 	}
 	return codexTurnStateHeaderLength(fallback)
-}
-
-func applyOpenAICodexWSStateSnapshot(payload []byte, cachedToken, firstGuardedHeaderToken string) ([]byte, error) {
-	token := strings.TrimSpace(cachedToken)
-	if token == "" {
-		// Existing per-frame input takes precedence over a first-frame migration.
-		if gjson.GetBytes(payload, "client_metadata.x-codex-turn-state").Exists() {
-			return payload, nil
-		}
-		token = strings.TrimSpace(firstGuardedHeaderToken)
-	}
-	if token == "" {
-		return payload, nil
-	}
-	return sjson.SetBytes(payload, "client_metadata.x-codex-turn-state", token)
 }
 
 func (s *OpenAIGatewayService) observeOpenAICodexWSStateHeaders(attempt *CodexTurnStateAttempt, headers http.Header) {

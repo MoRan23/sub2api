@@ -196,7 +196,7 @@ func NewHTTPUpstreamWithCookies(cfg *config.Config, cookies *openaicookies.Manag
 // physical send, including native dispatch and redirects; cached transports do
 // not retain a particular account's cookie jar.
 func (s *httpUpstreamService) OpenAICookieClient(client *http.Client, request *http.Request) *http.Client {
-	if client == nil || request == nil || s.cookies == nil {
+	if client == nil || request == nil || s.cookies == nil || !openaicookies.EnabledForRequest(request) {
 		return client
 	}
 	clone := *client

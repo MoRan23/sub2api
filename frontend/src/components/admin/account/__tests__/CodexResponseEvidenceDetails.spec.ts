@@ -58,9 +58,17 @@ describe('Codex response evidence', () => {
     expect(wrapper.text()).not.toContain('private-reason')
   })
 
-  it.each(['cookie_staged', 'cookie_target_required', 'cookie_target_rejected', 'cookie_commit_conflict', 'cookie_attempt_closed'])('renders the safe Cookie commit outcome %s', (reason) => {
+  it.each(['cookie_staged', 'cookie_target_required', 'cookie_target_rejected', 'cookie_commit_conflict', 'cookie_attempt_closed', 'cookie_bundle_expired', 'cookie_bundle_invalid', 'cookie_snapshot_unavailable', 'cookie_bundle_saved'])('renders the safe Cookie commit outcome %s', (reason) => {
     const wrapper = render({ cookie_diagnostic: { sent: false, source: 'none', reason } })
     expect(wrapper.get('[data-testid="codex-cookie-diagnostic"]').text()).toContain(`cookieReasons.${reason}`)
     expect(wrapper.text()).not.toContain('cookieReasons.unknown')
+  })
+
+  it('identifies the frozen package source without displaying private package content', () => {
+    const wrapper = render({ cookie_diagnostic: { sent: true, source: 'bundle', reason: 'cookie_sent', names: ['__oailb'],
+      cookies: [{ name: '__oailb', expires_at: '2026-09-22T12:00:00Z', value: 'private-value' }], package_id: 'private-bundle-id' } } as CodexResponseEvidence)
+    expect(wrapper.text()).toContain('cookieSources.bundle')
+    expect(wrapper.text()).not.toContain('private-value')
+    expect(wrapper.text()).not.toContain('private-bundle-id')
   })
 })

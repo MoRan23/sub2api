@@ -12,12 +12,33 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+// Exercise the real Cookie send/capture boundary without opening a socket.
+type codexStateCookieIntegrationUpstream struct {
+	*httpUpstreamRecorder
+	manager *openaicookies.Manager
+	account *Account
+}
+
+func (u *codexStateCookieIntegrationUpstream) Do(request *http.Request, proxy string, id int64, concurrency int) (*http.Response, error) {
+	ctx := openaicookies.WithScope(request.Context(), openaicookies.Scope{OwnerAccountID: u.account.ID, OSFamily: u.account.OpenAIOAuthCredentialOS, AuthorizationGeneration: u.account.OpenAIOAuthAuthorizationGeneration})
+	return u.manager.Wrap(codexCookieAtomicRoundTripper(func(wire *http.Request) (*http.Response, error) {
+		return u.httpUpstreamRecorder.Do(wire, proxy, id, concurrency)
+	})).RoundTrip(request.WithContext(ctx))
+}
+
+func (u *codexStateCookieIntegrationUpstream) DoWithTLS(request *http.Request, proxy string, id int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(request, proxy, id, concurrency)
+}
 
 func codexStateHTTPIntegrationResponse(token, carrier string, failed bool) *http.Response {
 	response := openAICompatSSECompletedResponse("resp_turn_state_test", "gpt-5.4")
@@ -83,12 +104,13 @@ func TestCodexTurnStateHTTPGatewayNaturalResponseAllPaths(t *testing.T) {
 			for _, carrier := range []string{"header", "metadata"} {
 				t.Run(path+"/stream="+strconv.FormatBool(stream)+"/"+carrier, func(t *testing.T) {
 					state, repo, account := newCodexStateTestService(t)
+					state.now = time.Now
 					account.Concurrency = 1
 					if path == "passthrough" {
 						account.Extra["openai_passthrough"] = true
 					}
 					token := codexStateTestToken(10, state.now())
-					upstream := &httpUpstreamRecorder{resp: codexStateHTTPIntegrationResponse(token, carrier, false)}
+					upstream := &codexStateCookieIntegrationUpstream{httpUpstreamRecorder: &httpUpstreamRecorder{resp: codexStateHTTPIntegrationResponse(token, carrier, false)}, manager: openaicookies.NewManager(), account: account}
 					gateway := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, codexTurnStateService: state}
 					var collected atomic.Int64
 					state.collector = codexStateTestCollector(func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
@@ -101,13 +123,14 @@ func TestCodexTurnStateHTTPGatewayNaturalResponseAllPaths(t *testing.T) {
 					require.Len(t, upstream.requests, 1)
 					finalModel := gjson.GetBytes(upstream.lastBody, "model").String()
 					require.Equal(t, "gpt-5.4", finalModel)
-					key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: finalModel, Generation: CodexTurnStateGenerationForAccount(account)}
+					key := CodexTurnStateKey{OwnerAccountID: account.ID, Model: finalModel, Generation: CodexTurnStateGenerationForAccount(account)}
 					record, err := repo.Get(context.Background(), key)
 					require.NoError(t, err)
 					require.NotNil(t, record, "forward must bind final model")
 					plain, err := state.encryptor.Decrypt(record.EncryptedToken)
 					require.NoError(t, err, "delivered normal response must be learned")
 					require.Equal(t, token, plain)
+					require.NotEmpty(t, record.EncryptedCookieBundle, "ticket and frozen Cookie snapshot must be published together")
 					state.collect(context.Background(), key)
 					require.Zero(t, collected.Load(), "natural target state avoids separate collection")
 				})
@@ -122,16 +145,18 @@ func TestCodexTurnStateHTTPGatewayAbandonedResponsesDoNotLearn(t *testing.T) {
 		for _, stream := range []bool{false, true} {
 			t.Run(path+"/stream="+strconv.FormatBool(stream), func(t *testing.T) {
 				state, repo, account := newCodexStateTestService(t)
+				state.now = time.Now
 				account.Concurrency = 1
-				upstream := &httpUpstreamRecorder{resp: codexStateHTTPIntegrationResponse(codexStateTestToken(10, state.now()), "metadata", true)}
+				upstream := &codexStateCookieIntegrationUpstream{httpUpstreamRecorder: &httpUpstreamRecorder{resp: codexStateHTTPIntegrationResponse(codexStateTestToken(10, state.now()), "metadata", true)}, manager: openaicookies.NewManager(), account: account}
 				gateway := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, codexTurnStateService: state}
 				_, _, err := codexStateHTTPIntegrationForward(t, gateway, account, path, codexStateHTTPIntegrationBody(path, stream))
 				require.Error(t, err)
-				key := CodexTurnStateKey{OSFamily: "windows", OwnerAccountID: account.ID, Model: gjson.GetBytes(upstream.lastBody, "model").String(), Generation: CodexTurnStateGenerationForAccount(account)}
+				key := CodexTurnStateKey{OwnerAccountID: account.ID, Model: gjson.GetBytes(upstream.lastBody, "model").String(), Generation: CodexTurnStateGenerationForAccount(account)}
 				record, getErr := repo.Get(context.Background(), key)
 				require.NoError(t, getErr)
 				require.NotNil(t, record)
 				require.Empty(t, record.EncryptedToken, "metadata before a failed response must not enter reusable cache")
+				require.Empty(t, record.EncryptedCookieBundle)
 			})
 		}
 	}

@@ -71,7 +71,7 @@ func TestOpenAIOSAuthorizationDirectForwardingKeepsTokenAndIdentityTogether(t *t
 					_, _ = svc.Forward(ctx, c, &account, body)
 				}
 				require.NotNil(t, upstream.lastReq)
-				require.Equal(t, "Bearer access-981", upstream.lastReq.Header.Get("Authorization"))
+				require.Equal(t, "Bearer canonical-default-token", upstream.lastReq.Header.Get("Authorization"))
 				require.Equal(t, expectedOS, openai.DetectOSFamilyFromUserAgent(upstream.lastReq.UserAgent()))
 				plan, ok := OpenAIOAuthIdentityPlanFromContext(c)
 				require.True(t, ok)

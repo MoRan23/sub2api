@@ -55,7 +55,7 @@ func TestCodexTurnStateWorkersBoundConcurrencyAndStopCancelsCollectors(t *testin
 				CodexTurnStateGenerationExtraKey: "gen1",
 			},
 		})
-		key := CodexTurnStateKey{OwnerAccountID: id, OSFamily: "windows", Model: "gpt-5", Generation: "gen1"}
+		key := CodexTurnStateKey{OwnerAccountID: id, Model: "gpt-5", Generation: "gen1"}
 		repo.records[key] = CodexTurnStateRecord{
 			OwnerAccountID: id, OSFamily: key.OSFamily, Model: key.Model, Generation: key.Generation, Version: 1,
 			LastBusinessAt: now, DemandAt: now, DemandReason: "extended_shape", CollectionStatus: "pending",

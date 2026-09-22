@@ -74,7 +74,7 @@ func requireCodexModelPolicyExcludedObservation(t *testing.T, row FingerprintObs
 	require.Nil(t, state.ExpiresAt)
 }
 
-func TestCodexTurnStateModelPolicyWSFinalModelAndLiveRemoval(t *testing.T) {
+func TestCodexTurnStateModelPolicyWSBypassesHTTPCacheAcrossLiveRemoval(t *testing.T) {
 	for _, passthrough := range []bool{false, true} {
 		t.Run(fmt.Sprintf("passthrough_%t", passthrough), func(t *testing.T) {
 			enablePassiveWSFingerprintObservation(t)
@@ -87,7 +87,7 @@ func TestCodexTurnStateModelPolicyWSFinalModelAndLiveRemoval(t *testing.T) {
 			policy := newCodexStateTestModelPolicy(firstFinalModel, "gpt-5.4")
 			state.modelPolicy = policy
 			initialMode := h.svc.openAICodexWSStateMode(context.Background(), h.account)
-			require.True(t, initialMode.Enabled)
+			require.False(t, initialMode.Enabled)
 			firstCache := makeCodexWSStateTestToken(10, time.Now().Add(-3*time.Minute))
 			secondCache := makeCodexWSStateTestToken(10, time.Now().Add(-150*time.Second))
 			seedCodexWSState(t, h.svc, h.account, firstFinalModel, firstCache)
@@ -111,20 +111,15 @@ func TestCodexTurnStateModelPolicyWSFinalModelAndLiveRemoval(t *testing.T) {
 			require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.3","input":[]}`)))
 			first := requirePassthroughUpstreamWrite(t, h.upstream, 3*time.Second)
 			require.Equal(t, firstFinalModel, gjson.GetBytes(first, "model").String())
-			require.Equal(t, "guarded-first-header", gjson.GetBytes(first, "client_metadata.x-codex-turn-state").String(), "excluded models retain the guarded client migration, never a stored cache")
-			require.Empty(t, (<-h.request).Get(openAIWSTurnStateHeader), "account-level frame mode must remain enabled even for an excluded model")
+			require.False(t, gjson.GetBytes(first, "client_metadata.x-codex-turn-state").Exists(), "native WS must never migrate HTTP ticket state into its frames")
+			require.Equal(t, "guarded-first-header", (<-h.request).Get(openAIWSTurnStateHeader))
 			h.upstream.Send(fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp_policy_first","model":%q,"usage":{"input_tokens":1,"output_tokens":1}}}`, firstFinalModel))
 			readCodexStatePassthroughFrame(t, ctx, client)
-			firstRow := waitCodexModelPolicyTransportRow(t, h.account.ID, firstFinalModel, 0, 292)
-			requireCodexModelPolicyExcludedObservation(t, firstRow, "client", len("guarded-first-header"))
-			require.Equal(t, "header", firstRow.CodexTurnState.ResponseSource)
-			require.Equal(t, "ws_frame", firstRow.CodexTurnState.OutboundCarrier)
 			require.Equal(t, beforeFirst, h.record(firstFinalModel), "excluded traffic must not touch an existing cache or its last-business timestamp")
 			require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.4","input":[]}`)))
 			second := requirePassthroughUpstreamWrite(t, h.upstream, 3*time.Second)
-			require.Equal(t, secondCache, gjson.GetBytes(second, "client_metadata.x-codex-turn-state").String())
-			// Change the policy only after capturing the physical send. The current
-			// turn must finish normally, but its frozen old revision cannot publish.
+			require.False(t, gjson.GetBytes(second, "client_metadata.x-codex-turn-state").Exists(), "allowed models also bypass the HTTP-only cache on native WS")
+			// HTTP maintenance policy changes cannot interrupt an active WS turn.
 			policy.set()
 			require.False(t, h.svc.openAICodexWSStateModeChanged(ctx, h.account, initialMode), "model policy changes must not change account-level handshake mode")
 			h.upstream.Send(`{"type":"response.output_text.delta","delta":"already sent turn completes"}`)
@@ -133,14 +128,8 @@ func TestCodexTurnStateModelPolicyWSFinalModelAndLiveRemoval(t *testing.T) {
 			readCodexStatePassthroughFrame(t, ctx, client)
 			h.upstream.Send(`{"type":"response.completed","response":{"id":"resp_policy_second","model":"gpt-5.4","usage":{"input_tokens":1,"output_tokens":1}}}`)
 			require.Equal(t, "response.completed", gjson.GetBytes(readCodexStatePassthroughFrame(t, ctx, client), "type").String())
-			secondRow := waitCodexModelPolicyTransportRow(t, h.account.ID, "gpt-5.4", firstRow.SequenceID, 292)
-			require.True(t, secondRow.CodexTurnState.Enabled, "already-sent observations must reflect the actual injected snapshot")
-			require.Equal(t, "injected", secondRow.CodexTurnState.Action)
-			require.Equal(t, "metadata", secondRow.CodexTurnState.ResponseSource)
 			afterSecond := h.record("gpt-5.4")
-			require.Equal(t, beforeSecond.Version, afterSecond.Version)
-			require.Equal(t, beforeSecond.EncryptedToken, afterSecond.EncryptedToken)
-			require.Equal(t, beforeSecond.ExpiresAt, afterSecond.ExpiresAt)
+			require.Equal(t, beforeSecond, afterSecond)
 			require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.4","input":[]}`)))
 			third := requirePassthroughUpstreamWrite(t, h.upstream, 3*time.Second)
 			require.False(t, gjson.GetBytes(third, "client_metadata.x-codex-turn-state").Exists(), "the next excluded turn must neither inject the old cache nor inherit the first handshake")
@@ -149,10 +138,6 @@ func TestCodexTurnStateModelPolicyWSFinalModelAndLiveRemoval(t *testing.T) {
 			readCodexStatePassthroughFrame(t, ctx, client)
 			h.upstream.Send(`{"type":"response.completed","response":{"id":"resp_policy_third","model":"gpt-5.4","usage":{"input_tokens":1,"output_tokens":1}}}`)
 			readCodexStatePassthroughFrame(t, ctx, client)
-			thirdRow := waitCodexModelPolicyTransportRow(t, h.account.ID, "gpt-5.4", secondRow.SequenceID, 312)
-			requireCodexModelPolicyExcludedObservation(t, thirdRow, "", 0)
-			require.Equal(t, "metadata", thirdRow.CodexTurnState.ResponseSource)
-			require.Equal(t, "suspect", thirdRow.CodexTurnState.ResponseShape)
 			require.Equal(t, afterSecond, h.record("gpt-5.4"))
 			_ = client.CloseNow()
 			select {
@@ -166,7 +151,11 @@ func TestCodexTurnStateModelPolicyWSFinalModelAndLiveRemoval(t *testing.T) {
 			state.collect(ctx, beforeSecond.Key())
 			require.Zero(t, collected.Load())
 			requirePassiveWSNoMaintenance(t, state)
-			serialized, err := json.Marshal([]FingerprintObservationEntry{firstRow, secondRow, thirdRow})
+			observations := SnapshotFingerprintObservations(0)
+			for _, row := range observations {
+				require.Nil(t, row.CodexTurnState, "native WS does not create ticket observations")
+			}
+			serialized, err := json.Marshal(observations)
 			require.NoError(t, err)
 			for _, token := range []string{firstCache, secondCache, responseToken, extended, "guarded-first-header"} {
 				require.NotContains(t, string(serialized), token)
@@ -225,7 +214,7 @@ func TestCodexTurnStateModelPolicyHTTPExcludedCacheAllPaths(t *testing.T) {
 	}
 }
 
-func TestCodexTurnStateModelPolicyWSRejectedFieldRetryRestoresClientState(t *testing.T) {
+func TestCodexTurnStateModelPolicyWSRejectedFieldRetryPreservesClientState(t *testing.T) {
 	for _, clientState := range []string{"", "guarded-client-frame"} {
 		t.Run(fmt.Sprintf("client_state_%t", clientState != ""), func(t *testing.T) {
 			enablePassiveWSFingerprintObservation(t)
@@ -257,17 +246,14 @@ func TestCodexTurnStateModelPolicyWSRejectedFieldRetryRestoresClientState(t *tes
 			require.NoError(t, err)
 			require.NoError(t, client.Write(ctx, coderws.MessageText, payload))
 			first := requirePassthroughUpstreamWrite(t, h.upstream, 3*time.Second)
-			require.Equal(t, cached, gjson.GetBytes(first, "client_metadata.x-codex-turn-state").String())
+			require.Equal(t, clientState, gjson.GetBytes(first, "client_metadata.x-codex-turn-state").String())
 			require.Equal(t, "retry_test", gjson.GetBytes(first, "input.0.namespace").String())
-			firstRow := waitCodexModelPolicyTransportRow(t, h.account.ID, "gpt-5.4", 0, 0)
-			require.True(t, firstRow.CodexTurnState.Enabled)
-			require.Equal(t, "injected", firstRow.CodexTurnState.Action)
 			require.Empty(t, (<-h.request).Get(openAIWSTurnStateHeader))
 			policy.set()
 			h.upstream.Send(`{"type":"error","status":400,"error":{"type":"invalid_request_error","code":"unknown_parameter","message":"Unknown parameter: 'input[0].namespace'.","param":"input[0].namespace"}}`)
 			retry := requirePassthroughUpstreamWrite(t, h.upstream, 3*time.Second)
 			require.False(t, gjson.GetBytes(retry, "input.0.namespace").Exists(), "the rejected-field retry must actually execute")
-			require.Equal(t, clientState, gjson.GetBytes(retry, "client_metadata.x-codex-turn-state").String(), "a retry prepared after model removal must rebuild from guarded client state, never the previous server injection")
+			require.Equal(t, clientState, gjson.GetBytes(retry, "client_metadata.x-codex-turn-state").String(), "the rejected-field retry retains only the client's guarded state")
 			if clientState == "" {
 				require.False(t, gjson.GetBytes(retry, "client_metadata.x-codex-turn-state").Exists())
 			}
@@ -276,17 +262,8 @@ func TestCodexTurnStateModelPolicyWSRejectedFieldRetryRestoresClientState(t *tes
 			require.Equal(t, "response.metadata", gjson.GetBytes(readCodexStatePassthroughFrame(t, ctx, client), "type").String(), "the rejected error remains internal to the pre-output retry")
 			h.upstream.Send(`{"type":"response.completed","response":{"id":"resp_policy_retry","model":"gpt-5.4","usage":{"input_tokens":1,"output_tokens":1}}}`)
 			require.Equal(t, "response.completed", gjson.GetBytes(readCodexStatePassthroughFrame(t, ctx, client), "type").String())
-			retryRow := waitCodexModelPolicyTransportRow(t, h.account.ID, "gpt-5.4", firstRow.SequenceID, 292)
-			source := ""
-			if clientState != "" {
-				source = "client"
-			}
-			requireCodexModelPolicyExcludedObservation(t, retryRow, source, len(clientState))
-			require.Equal(t, "metadata", retryRow.CodexTurnState.ResponseSource)
 			after := h.record("gpt-5.4")
-			require.Equal(t, before.Version, after.Version)
-			require.Equal(t, before.EncryptedToken, after.EncryptedToken)
-			require.Equal(t, before.ExpiresAt, after.ExpiresAt)
+			require.Equal(t, before, after)
 			_ = client.CloseNow()
 			select {
 			case <-serverErr:
@@ -296,6 +273,9 @@ func TestCodexTurnStateModelPolicyWSRejectedFieldRetryRestoresClientState(t *tes
 			require.Empty(t, h.request, "field retry keeps the original physical socket")
 			require.Empty(t, h.upstream.writes, "only the rejected attempt and normalized retry should be sent")
 			requirePassiveWSNoMaintenance(t, state)
+			for _, row := range SnapshotFingerprintObservations(0) {
+				require.Nil(t, row.CodexTurnState)
+			}
 		})
 	}
 }

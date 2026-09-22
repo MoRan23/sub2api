@@ -39,8 +39,7 @@ func (s *AccountRepoSuite) TestOAuthOSCredentialsSharedGrantAndNoResurrection() 
 	s.Require().NoError(err)
 	s.Require().Equal(first, slot.AuthorizationGeneration)
 	s.Require().NoError(s.repo.RevokeOpenAIOAuthOSCredentials(s.ctx, account.ID, service.OpenAIOSLinux))
-	_, err = s.client.ExecContext(s.ctx, `UPDATE accounts SET credentials=credentials || '{"access_token":"stale-snapshot"}'::jsonb WHERE id=$1`, account.ID)
-	s.Require().NoError(err)
+	s.Require().NoError(s.repo.UpdateCredentials(s.ctx, account.ID, map[string]any{"access_token": "stale-snapshot"}))
 	_, err = s.repo.EnsureOpenAIOAuthOSProfiles(s.ctx, account.ID)
 	s.Require().NoError(err)
 	slot, err = s.repo.GetOpenAIOAuthOSCredential(s.ctx, account.ID, service.OpenAIOSLinux)
@@ -60,8 +59,9 @@ func (s *AccountRepoSuite) TestOAuthOSCredentialsBindDefaultAndStaleSnapshots() 
 	s.Require().NoError(err, "another OS identity uses the same account authorization")
 	other := oauthOSTestGrant("other")
 	other["chatgpt_user_id"] = "different-user"
-	_, err = s.repo.BindOpenAIOAuthOSCredentials(s.ctx, account.ID, service.OpenAIOSMacOS, other, "test")
-	s.Require().ErrorIs(err, service.ErrOpenAIOAuthOSSubjectMismatch)
+	other["access_token"] = "linux"
+	linux, err = s.repo.BindOpenAIOAuthOSCredentials(s.ctx, account.ID, service.OpenAIOSMacOS, other, "test")
+	s.Require().NoError(err, "explicit reauthorization may replace the account subject")
 	_, err = s.repo.SetDefaultOpenAIOAuthOS(s.ctx, account.ID, service.OpenAIOSLinux)
 	s.Require().NoError(err)
 	stale.Credentials["auth_mode"] = "personalAccessToken"
@@ -141,9 +141,9 @@ func (s *AccountRepoSuite) TestOAuthOSCredentialsInitialImportIsAtomic() {
 	s.client = testEntClient(s.T())
 	s.repo = newAccountRepositoryWithSQL(s.client, integrationDB, nil)
 	account := &service.Account{Name: "atomic-slot-import", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, OpenAIOAuthInitialOS: service.OpenAIOSMacOS, Credentials: oauthOSTestGrant("macos"), OpenAIOAuthInitialCredentials: map[string]map[string]any{service.OpenAIOSMacOS: oauthOSTestGrant("macos"), service.OpenAIOSLinux: oauthOSTestGrant("macos")}}
-	account.OpenAIOAuthInitialCredentials[service.OpenAIOSMacOS]["chatgpt_user_id"] = "different-user"
+	account.OpenAIOAuthInitialCredentials[service.OpenAIOSMacOS] = map[string]any{}
 	err := s.repo.Create(s.ctx, account)
-	s.Require().ErrorIs(err, service.ErrOpenAIOAuthOSSubjectMismatch)
+	s.Require().ErrorIs(err, service.ErrOpenAIOAuthOSUnauthorized)
 	_, err = s.repo.GetByID(s.ctx, account.ID)
 	s.Require().ErrorIs(err, service.ErrAccountNotFound)
 	account.ID = 0
@@ -226,7 +226,7 @@ func (s *AccountRepoSuite) TestOAuthOSCredentialsErrorsAndRevokeApplyToSharedAut
 	s.Require().NoError(err)
 	applied, err = s.repo.PatchOpenAIOAuthOSCredentialsIfUnchanged(s.ctx, account.ID, service.OpenAIOSWindows, windows.AuthorizationGeneration, windows.Revision, nil, nil, nil)
 	s.Require().NoError(err)
-	s.Require().True(applied)
+	s.Require().False(applied, "permanent failure requires explicit reauthorization")
 	s.Require().NoError(s.repo.RevokeOpenAIOAuthOSCredentials(s.ctx, account.ID, service.OpenAIOSLinux))
 	fresh, err = s.repo.GetByID(s.ctx, account.ID)
 	s.Require().NoError(err)

@@ -25,7 +25,7 @@ func resolveAdminOpenAIOAuthCredentialAccount(ctx context.Context, admin service
 		return account, nil
 	}
 	if strings.TrimSpace(os) != "" && service.NormalizeOpenAIOSFamily(os) == "" {
-		return nil, infraerrors.BadRequest("OPENAI_OAUTH_OS_REQUIRED", "invalid authorization OS")
+		return nil, infraerrors.BadRequest("OPENAI_OAUTH_OS_INVALID", "invalid client identity OS")
 	}
 	resolver, ok := admin.(interface {
 		ResolveOpenAIOAuthCredentialAccount(context.Context, int64, string) (*service.Account, error)

@@ -98,8 +98,8 @@ func persistOpenAIOAuthRefreshCredentials(ctx context.Context, repo AccountRepos
 			readCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), defaultRefreshPostPersistCleanupTimeout)
 			defer cancel()
 		}
-		// Reload restores this OS and rejects a revoked/replaced authorization.
-		// A fresh default mirror must never escape as the result of a slot refresh.
+		// Reload keeps the request's installation identity and rejects a revoked or
+		// replaced account authorization. OS never selects a different token source.
 		account, err := ReloadOpenAIOAuthCredentialAccount(readCtx, repo, expected)
 		if err != nil {
 			return nil, applied, &providerCycleContainmentRefreshError{err: fmt.Errorf("OpenAI OAuth OS refresh durable state is unavailable: %w", err)}
@@ -145,13 +145,32 @@ func persistOpenAIOAuthRefreshCredentials(ctx context.Context, repo AccountRepos
 // A failure belongs to the authorization snapshot that actually reached the
 // provider. The CAS makes late errors harmless after refresh or reauthorization.
 func persistOpenAIOAuthCredentialError(ctx context.Context, repo AccountRepository, account *Account, reason string) (handled, applied bool, err error) {
-	if account == nil || account.OpenAIOAuthCredentialOS == "" {
+	if account == nil {
 		return false, false, nil
+	}
+	if account.OpenAIOAuthCredentialOS == "" {
+		if !IsOpenAIOAuthOSProfileOwner(account) {
+			return false, false, nil
+		}
+		if _, ok := repo.(OpenAIOAuthOSCredentialsReader); !ok {
+			return false, false, nil
+		}
+		current, resolveErr := ResolveOpenAIOAuthCredentialAccount(ctx, repo, account, "")
+		if resolveErr != nil {
+			return true, false, resolveErr
+		}
+		if !reflect.DeepEqual(openAIRefreshAuthIdentity(account.Credentials), openAIRefreshAuthIdentity(current.Credentials)) {
+			return true, false, nil
+		}
+		account = current
 	}
 	updater, ok := repo.(OpenAIOAuthOSCredentialsRepository)
 	if !ok {
-		return true, false, fmt.Errorf("OpenAI OAuth OS credential repository is not configured")
+		return true, false, fmt.Errorf("OpenAI OAuth account credential repository is not configured")
 	}
+	// The repository atomically marks the same account revision as an auth error,
+	// pauses scheduling, and publishes the canonical scheduler snapshot. Do not
+	// follow this with an unconditional SetError or an unversioned runtime block.
 	applied, err = updater.SetOpenAIOAuthOSCredentialErrorIfUnchanged(ctx,
 		account.OpenAIOAuthCredentialOwnerID, account.OpenAIOAuthCredentialOS,
 		account.OpenAIOAuthAuthorizationGeneration, account.OpenAIOAuthCredentialRevision, reason)

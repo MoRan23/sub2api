@@ -83,6 +83,7 @@ func newCodexStateMemoryRepo() *codexStateMemoryRepo {
 	return &codexStateMemoryRepo{records: map[CodexTurnStateKey]CodexTurnStateRecord{}, leases: map[CodexTurnStateKey]map[string]time.Time{}, locks: map[int64]string{}}
 }
 func (r *codexStateMemoryRepo) BeginBusiness(_ context.Context, k CodexTurnStateKey, id string, now, until time.Time) (*CodexTurnStateRecord, error) {
+	k.OSFamily = ""
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	v, ok := r.records[k]
@@ -103,6 +104,7 @@ func (r *codexStateMemoryRepo) BeginBusiness(_ context.Context, k CodexTurnState
 	return &v, nil
 }
 func (r *codexStateMemoryRepo) MarkBusinessSent(_ context.Context, key CodexTurnStateKey, sentAt time.Time) error {
+	key.OSFamily = ""
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if record, ok := r.records[key]; ok && sentAt.After(record.LastBusinessAt) {
@@ -118,9 +120,7 @@ func markCodexStateTestBusinessSent(t *testing.T, state *CodexTurnStateService, 
 	attempt.businessSentAt = state.now()
 	attempt.historyPhysicalBound = true
 	attempt.mu.Unlock()
-	if attempt.Enabled {
-		require.NoError(t, state.repo.MarkBusinessSent(context.Background(), attempt.key, state.now()))
-	}
+	state.completeBusinessSent(attempt)
 }
 
 func seedCodexStateTestDemand(t *testing.T, state *CodexTurnStateService, account *Account, model string) *CodexTurnStateAttempt {
@@ -134,12 +134,14 @@ func seedCodexStateTestDemand(t *testing.T, state *CodexTurnStateService, accoun
 	return attempt
 }
 func (r *codexStateMemoryRepo) EndBusiness(_ context.Context, k CodexTurnStateKey, id string) error {
+	k.OSFamily = ""
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.leases[k], id)
 	return nil
 }
 func (r *codexStateMemoryRepo) Get(_ context.Context, k CodexTurnStateKey) (*CodexTurnStateRecord, error) {
+	k.OSFamily = ""
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.getErr != nil {
@@ -154,6 +156,7 @@ func (r *codexStateMemoryRepo) Get(_ context.Context, k CodexTurnStateKey) (*Cod
 }
 
 func (r *codexStateMemoryRepo) businessInFlightLocked(key CodexTurnStateKey) bool {
+	key.OSFamily = ""
 	now := time.Now()
 	if r.now != nil {
 		now = r.now()
@@ -225,6 +228,7 @@ func (r *codexStateMemoryRepo) ListByAccounts(_ context.Context, ids []int64) ([
 	return records, nil
 }
 func (r *codexStateMemoryRepo) HasBusiness(_ context.Context, k CodexTurnStateKey, now time.Time) (bool, error) {
+	k.OSFamily = ""
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, until := range r.leases[k] {
@@ -269,7 +273,7 @@ func (r *codexStateTestAccounts) GetByID(_ context.Context, id int64) (*Account,
 	if r.account.ID != id {
 		return nil, nil
 	}
-	return codexStateTestScopeAccount(r.account), nil
+	return codexStateTestOwnerAccount(r.account), nil
 }
 
 type codexStateTestEncryptor struct{}
@@ -287,7 +291,13 @@ func (codexStateTestEncryptor) Decrypt(value string) (string, error) {
 type codexStateTestCollector func(context.Context, CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error)
 
 func (f codexStateTestCollector) Collect(ctx context.Context, in CodexTurnStateCollectRequest) (CodexTurnStateCollectResult, error) {
-	return f(ctx, in)
+	result, err := f(ctx, in)
+	// This fake returns completed collection results. Wire completion failures are
+	// exercised through the real HTTP collector and its explicit terminal events.
+	if err == nil && result.StatusCode >= 200 && result.StatusCode < 300 {
+		result.completed = true
+	}
+	return result, err
 }
 
 func newCodexStateTestService(t *testing.T) (*CodexTurnStateService, *codexStateMemoryRepo, *Account) {
@@ -313,9 +323,9 @@ func TestCodexTurnStateNaturalLearningAvoidsCollector(t *testing.T) {
 	attempt, err := s.Prepare(ctx, a, "gpt-5")
 	require.NoError(t, err)
 	require.NotNil(t, attempt)
-	markCodexStateTestBusinessSent(t, s, attempt)
 	s.collect(ctx, attempt.key)
-	require.Zero(t, calls.Load(), "a cold cache alone does not create collection demand")
+	require.Zero(t, calls.Load(), "preparing an unsent request does not create collection demand")
+	markCodexStateTestBusinessSent(t, s, attempt)
 	token := codexStateTestToken(10, s.now())
 	s.ObserveHeaders(attempt, http.Header{"x-codex-turn-state": {token}})
 	require.NoError(t, s.Finish(ctx, attempt, true))
@@ -331,8 +341,12 @@ func TestCodexTurnStateNaturalLearningAvoidsCollector(t *testing.T) {
 	s.Observe(next, token)
 	require.NoError(t, s.Finish(ctx, next, true))
 	after, _ := repo.Get(ctx, next.key)
+	require.Equal(t, record.EncryptedToken, after.EncryptedToken)
+	require.Equal(t, record.IssuedAt, after.IssuedAt)
 	require.Equal(t, record.ExpiresAt, after.ExpiresAt)
-	require.Equal(t, record.Version, after.Version, "duplicate does not refresh record")
+	require.Equal(t, s.now().Add(CodexTurnStateCollectInterval), after.NextCollectAt)
+	require.Equal(t, "refresh", after.DemandReason)
+	require.Equal(t, "scheduled", after.CollectionStatus)
 	status, err := s.GetStatus(ctx, a.ID)
 	require.NoError(t, err)
 	encoded, _ := json.Marshal(status)

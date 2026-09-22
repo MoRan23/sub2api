@@ -15,7 +15,7 @@ import (
 )
 
 func TestOpenAIReqCookiesFactoriesIsolateManagersAndDisableSharedJar(t *testing.T) {
-	first, second := openaicookies.NewManager(nil), openaicookies.NewManager(nil)
+	first, second := openaicookies.NewManager(), openaicookies.NewManager()
 	for _, factory := range []func(string, *openaicookies.Manager) (*req.Client, error){createOpenAIReqClientWithCookies, CreatePrivacyReqClientWithCookies} {
 		a, err := factory("", first)
 		require.NoError(t, err)
@@ -36,7 +36,7 @@ func TestOpenAIReqCookiesFactoriesIsolateManagersAndDisableSharedJar(t *testing.
 }
 
 func TestOpenAIReqCookiesWrapEveryNativeRedirectAfterPolicyClone(t *testing.T) {
-	manager := openaicookies.NewManager(nil)
+	manager := openaicookies.NewManager()
 	client := req.C().ImpersonateFirefox()
 	sharedJar := client.GetClient().Jar
 	var observed []*http.Request
@@ -78,7 +78,7 @@ func TestOpenAIReqCookiesWrapEveryNativeRedirectAfterPolicyClone(t *testing.T) {
 }
 
 func TestOpenAIReqCookiesDirectTokenScopeLifetime(t *testing.T) {
-	service := &openaiOAuthService{cookies: openaicookies.NewManager(nil)}
+	service := &openaiOAuthService{cookies: openaicookies.NewManager()}
 	bound := openaicookies.Scope{OwnerAccountID: 7, OSFamily: "linux", AuthorizationGeneration: "generation"}
 	ctx := openaicookies.WithScope(context.Background(), bound)
 	refreshed, release := service.ensureCookieScope(ctx, false)

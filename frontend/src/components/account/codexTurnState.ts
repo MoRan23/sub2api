@@ -26,3 +26,10 @@ export function supportsCodexTurnState(account: Pick<Account, 'platform' | 'type
     .map(value => String(value || '').trim().toLowerCase())
   return !modes.some(mode => ['personalaccesstoken', 'personal_access_token', 'agentidentity', 'agent_identity'].includes(mode))
 }
+
+export function codexTurnStatePackageExpiry(model: { expires_at?: string; cookie_bundle_expires_at?: string }): number {
+  const expiries = [model.expires_at, model.cookie_bundle_expires_at]
+    .map(value => value ? Date.parse(value) : Number.NaN)
+    .filter(Number.isFinite)
+  return expiries.length ? Math.min(...expiries) : Number.NaN
+}

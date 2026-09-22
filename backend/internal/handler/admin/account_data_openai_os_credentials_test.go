@@ -31,9 +31,9 @@ func backupOAuthResponse(t *testing.T, accountID, userID, access, refresh string
 		IDToken: buildCodexImportTestJWT(t, time.Now().Add(time.Hour), map[string]any{"sub": userID, "https://api.openai.com/auth": map[string]any{"chatgpt_account_id": accountID, "chatgpt_user_id": userID}})}
 }
 
-func TestOpenAIOAuthBackupExportUsesPrivateSlotsAndOmitsRuntimeIdentity(t *testing.T) {
+func TestOpenAIOAuthBackupExportUsesAccountCredentialsAndOmitsRuntimeIdentity(t *testing.T) {
 	account := &service.Account{ID: 4, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
-		Credentials:           map[string]any{"access_token": "stale-mirror", "user_agent": "private-device", "_token_version": "private-version", "model_mapping": map[string]any{"a": "b"}},
+		Credentials:           map[string]any{"access_token": "current-account-token", "refresh_token": "current-refresh", "user_agent": "private-device", "_token_version": "private-version", "model_mapping": map[string]any{"a": "b"}},
 		Extra:                 map[string]any{"openai_pinned_installation_id": "private-installation", "codex_turn_state_generation": "private-generation", "note": "keep"},
 		OpenAIOAuthOSProfiles: &service.OpenAIOAuthOSProfiles{DefaultOS: service.OpenAIOSWindows}}
 	stub := &dataOSCredentialAdminStub{stubAdminService: newStubAdminService(), slots: []*service.OpenAIOAuthOSCredential{
@@ -46,7 +46,9 @@ func TestOpenAIOAuthBackupExportUsesPrivateSlotsAndOmitsRuntimeIdentity(t *testi
 	require.NoError(t, err)
 	require.Equal(t, service.OpenAIOSWindows, os)
 	require.Nil(t, slots, "new backups export one shared credential tuple, not OS authorizations")
-	require.Equal(t, "windows-token", account.Credentials["access_token"])
+	require.Equal(t, "current-account-token", account.Credentials["access_token"])
+	require.Equal(t, "current-refresh", account.Credentials["refresh_token"])
+	require.Equal(t, map[string]any{"a": "b"}, account.Credentials["model_mapping"])
 	require.NotContains(t, account.Credentials, "_token_version")
 	require.NotContains(t, portableOpenAIOAuthCredentials(account, account.Credentials), "user_agent")
 	require.Equal(t, map[string]any{"note": "keep"}, portableOpenAIOAuthExtra(account))
@@ -121,7 +123,7 @@ func TestOpenAIOAuthBackupImportIgnoresUnusedDuplicateAndMissingRefresh(t *testi
 	}
 }
 
-func TestOpenAIOAuthBackupImportFallsBackWithoutCombiningGrantSubjects(t *testing.T) {
+func TestOpenAIOAuthBackupImportDoesNotFallBackFromMissingDefault(t *testing.T) {
 	client := &codexImportOAuthClientStub{responses: map[string]*openai.TokenResponse{
 		"windows-rt": backupOAuthResponse(t, "workspace-a", "user", "windows-access", "rotated-windows"),
 		"mac-rt":     backupOAuthResponse(t, "workspace-b", "user", "mac-access", "rotated-mac"),
@@ -137,8 +139,8 @@ func TestOpenAIOAuthBackupImportFallsBackWithoutCombiningGrantSubjects(t *testin
 	_, slots, err := h.prepareOpenAIOAuthBackupImport(context.Background(), item, nil)
 	require.NoError(t, err)
 	require.Nil(t, slots)
-	require.Equal(t, "windows-rt", item.Credentials["refresh_token"])
-	require.Equal(t, "workspace-a", item.Credentials["chatgpt_account_id"])
+	require.NotContains(t, item.Credentials, "refresh_token")
+	require.NotContains(t, item.Credentials, "chatgpt_account_id")
 	require.NotContains(t, item.Credentials, "access_token")
 	require.Empty(t, client.calls)
 }

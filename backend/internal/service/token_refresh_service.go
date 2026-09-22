@@ -1035,7 +1035,7 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 			errorMsg := "Token refresh failed (non-retryable): " + logredact.RedactText(err.Error())
 			if handled, applied, setErr := persistOpenAIOAuthCredentialError(ctx, s.accountRepo, account, errorMsg); handled {
 				if setErr != nil {
-					return &providerCycleContainmentRefreshError{err: fmt.Errorf("failed to persist OpenAI OAuth slot refresh failure: %w", setErr)}
+					return &providerCycleContainmentRefreshError{err: fmt.Errorf("failed to persist OpenAI OAuth account refresh failure: %w", setErr)}
 				}
 				if !applied {
 					return errRefreshSkipped
@@ -1157,7 +1157,7 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 			SetOpenAIOAuthOSCredentialCooldownIfUnchanged(context.Context, int64, string, string, int64, time.Time, string) (bool, error)
 		})
 		if !ok {
-			return &providerConfigurationRefreshError{err: errors.New("OpenAI OAuth slot refresh cooldown repository is not configured")}
+			return &providerConfigurationRefreshError{err: errors.New("OpenAI OAuth account refresh cooldown repository is not configured")}
 		}
 		ownerID := account.OpenAIOAuthCredentialOwnerID
 		if ownerID <= 0 {
@@ -1166,7 +1166,7 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 		applied, setErr := conditionalRepo.SetOpenAIOAuthOSCredentialCooldownIfUnchanged(ctx, ownerID, account.OpenAIOAuthCredentialOS,
 			account.OpenAIOAuthAuthorizationGeneration, account.OpenAIOAuthCredentialRevision, until, reason)
 		if setErr != nil {
-			return &providerCycleContainmentRefreshError{err: fmt.Errorf("failed to persist OpenAI OAuth slot refresh cooldown: %w", setErr)}
+			return &providerCycleContainmentRefreshError{err: fmt.Errorf("failed to persist OpenAI OAuth account refresh cooldown: %w", setErr)}
 		}
 		if !applied {
 			return errRefreshSkipped

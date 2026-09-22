@@ -75,7 +75,7 @@ func (s *AccountRepoSuite) TestPatchOpenAIOAuthCredentialsIfUnchanged_RejectsCha
 			s.Require().NoError(err)
 			_, err = s.repo.sql.ExecContext(s.ctx, "UPDATE accounts SET credentials = $1::jsonb WHERE id = $2", string(updatedJSON), account.ID)
 			s.Require().NoError(err)
-			_, err = s.repo.sql.ExecContext(s.ctx, "UPDATE account_openai_oauth_credentials SET credentials=$1::jsonb,revision=revision+1 WHERE account_id=$2", string(updatedJSON), account.ID)
+			_, err = s.repo.sql.ExecContext(s.ctx, "UPDATE account_openai_oauth_credentials SET revision=revision+1 WHERE account_id=$1", account.ID)
 			s.Require().NoError(err)
 			_, err = s.repo.sql.ExecContext(s.ctx, "TRUNCATE scheduler_outbox")
 			s.Require().NoError(err)

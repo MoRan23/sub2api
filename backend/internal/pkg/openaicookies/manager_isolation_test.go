@@ -3,122 +3,76 @@ package openaicookies
 import (
 	"context"
 	"net/http"
-	"net/url"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestManagerCrossNodeMutationInvalidatesLocalSession(t *testing.T) {
-	for _, persistentReplacement := range []bool{false, true} {
-		store := &memoryStore{}
-		manager, other := NewManager(store), NewManager(store)
-		target, _ := url.Parse("https://chatgpt.com/")
-		now := time.Now()
-		entry, _, ok := normalize(target, &http.Cookie{Name: "__oailb", Value: "session", Path: "/"}, now)
-		require.True(t, ok)
-		_, _, err := manager.merge(context.Background(), testScope, []Mutation{{Key: entry.Key, Entry: &entry}})
-		require.NoError(t, err)
-		entry.Value = "new-value"
-		entry.UpdatedAt = now.Add(-time.Hour) // Cross-node clock skew cannot select the old session.
-		if persistentReplacement {
-			entry.ExpiresAt = now.Add(time.Hour)
-		}
-		_, _, err = other.merge(context.Background(), testScope, []Mutation{{Key: entry.Key, Entry: &entry}})
-		require.NoError(t, err)
-		// The first node never reads the intermediate replacement before deletion.
-		_, _, err = other.merge(context.Background(), testScope, []Mutation{{Key: entry.Key}})
-		require.NoError(t, err)
-		entries, err := manager.load(context.Background(), testScope)
-		require.NoError(t, err)
-		require.Empty(t, entries)
-		snapshot, err := store.Load(context.Background(), testScope)
-		require.NoError(t, err)
-		require.Empty(t, snapshot.Entries)
-		require.Len(t, snapshot.Versions, 1)
-	}
+func TestManagerWebsocketNeverReceivesBundleCookieHandling(t *testing.T) {
+	ctx, attempt := WithAttempt(WithBundle(WithScope(context.Background(), testScope), Bundle{}))
+	client := localCookieClient(t, NewManager(), func(w http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "preexisting=unchanged", request.Header.Get("Cookie"))
+		w.Header().Add("Set-Cookie", "__oailb=not-captured; Path=/")
+	})
+	doCookieRequest(t, client, ctx, "https://chatgpt.com/", http.Header{"Upgrade": {"h2c, WebSocket"}, "Cookie": {"preexisting=unchanged"}})
+	_, err := attempt.Snapshot(time.Now().Add(BundleLifetime))
+	require.ErrorIs(t, err, ErrNoSnapshot)
 }
 
-func TestManagerWebsocketBypassAndMissingScopeCookieRemoval(t *testing.T) {
-	store := &memoryStore{}
-	manager := NewManager(store)
-	var sent bool
-	client := localCookieClient(t, manager, func(w http.ResponseWriter, r *http.Request) {
-		sent = r.Header.Get("Cookie") != ""
-		w.Header().Add("Set-Cookie", "__oailb=route; Path=/; Max-Age=3600")
+func TestManagerForeignRedirectDoesNotReceiveFrozenCookies(t *testing.T) {
+	now := time.Now()
+	bundle := testBundle(t, now, &http.Cookie{Name: "__oailb", Value: "route", Path: "/"})
+	client := localCookieClient(t, NewManager(), func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/start" {
+			require.Equal(t, "__oailb=route", r.Header.Get("Cookie"))
+			http.Redirect(w, r, "https://unrelated.example/final", http.StatusFound)
+			return
+		}
+		require.Empty(t, r.Header.Get("Cookie"))
+		require.Empty(t, r.Header.Get("X-Codex-Turn-State"))
 	})
+	ctx, attempt := WithAttempt(WithBundle(WithScope(context.Background(), testScope), bundle))
+	doCookieRequest(t, client, ctx, "https://chatgpt.com/start", http.Header{"X-Codex-Turn-State": {"cached"}})
+	_, err := attempt.Snapshot(now.Add(BundleLifetime))
+	require.ErrorIs(t, err, ErrNoSnapshot)
+}
+
+func TestManagerCreationOrderSurvivesResponseReplacement(t *testing.T) {
+	now := time.Now()
+	base := testBundle(t, now, &http.Cookie{Name: "__oailb", Value: "first", Path: "/"})
+	base.Entries[0].CreatedAt = now.Add(-time.Minute)
+	manager := NewManager()
+	manager.now = func() time.Time { return now }
+	client := localCookieClient(t, manager, func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Add("Set-Cookie", "__cflb=second; Path=/")
+		w.Header().Add("Set-Cookie", "__oailb=replacement; Path=/")
+	})
+	attempt := capturedRequest(t, client, testScope, base, "/")
+	bundle, err := attempt.Snapshot(now.Add(BundleLifetime))
+	require.NoError(t, err)
 	request, err := http.NewRequest(http.MethodGet, "https://chatgpt.com/", nil)
 	require.NoError(t, err)
-	request.Header.Set("Cookie", "caller=blocked")
-	response, err := client.Do(request)
-	require.NoError(t, err)
-	require.NoError(t, response.Body.Close())
-	require.False(t, sent)
-	cookieRequest(t, client, testScope, "/", http.Header{"Upgrade": []string{"h2c, WebSocket"}}, nil)
-	require.Zero(t, store.loads, "websocket upgrades never access the HTTP jar")
-	snapshot, err := store.Load(context.Background(), testScope)
-	require.NoError(t, err)
-	require.Empty(t, snapshot.Entries)
-	require.Empty(t, snapshot.Versions)
+	apply(request, bundle.Entries, now)
+	require.Equal(t, "__oailb=replacement; __cflb=second", request.Header.Get("Cookie"))
 }
 
-func TestManagerPreservesCreationOrderWhenUpdatingCookie(t *testing.T) {
-	manager := NewManager(&memoryStore{})
-	now := time.Now()
-	manager.now = func() time.Time { return now }
-	var order []string
-	client := localCookieClient(t, manager, func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/first":
-			w.Header().Add("Set-Cookie", "__oailb=first; Path=/; Max-Age=3600")
-		case "/second":
-			w.Header().Add("Set-Cookie", "__cflb=second; Path=/; Max-Age=3600")
-		case "/update":
-			w.Header().Add("Set-Cookie", "__oailb=updated; Path=/; Max-Age=3600")
-		default:
-			for _, cookie := range r.Cookies() {
-				order = append(order, cookie.Name)
-			}
-		}
+func TestManagerFreshCollectorBundleClearsInheritedGuardAndFallback(t *testing.T) {
+	ctx := WithSendGuard(WithScope(context.Background(), testScope), func(*http.Request) bool {
+		t.Fatal("independent collector inherited business guard")
+		return false
 	})
-	for _, path := range []string{"/first", "/second", "/update", "/observe"} {
-		now = now.Add(time.Second)
-		cookieRequest(t, client, testScope, path, nil, nil)
-	}
-	require.Equal(t, []string{"__oailb", "__cflb"}, order)
-}
-
-func TestCookieContextHelpersAcceptNil(t *testing.T) {
-	scope, ok := ScopeFromContext(WithScope(nil, testScope))
-	require.True(t, ok)
-	require.Equal(t, testScope, scope)
-	_, ok = ScopeFromContext(WithoutScope(nil))
-	require.False(t, ok)
-	called := false
-	report(WithObserver(nil, func(Diagnostic) { called = true }), Diagnostic{})
-	require.True(t, called)
-}
-
-type unavailableStore struct{}
-
-func (unavailableStore) Load(ctx context.Context, _ Scope) (Snapshot, error) {
-	<-ctx.Done()
-	return Snapshot{}, ctx.Err()
-}
-func (unavailableStore) Merge(context.Context, Scope, []Mutation) (map[string]int64, error) {
-	return nil, ErrStoreUnavailable
-}
-
-func TestManagerStoreTimeoutDoesNotCancelBusinessRequest(t *testing.T) {
-	manager := NewManager(unavailableStore{})
-	client := localCookieClient(t, manager, func(w http.ResponseWriter, r *http.Request) {
-		require.Empty(t, r.Header.Get("Cookie"))
-		w.WriteHeader(http.StatusOK)
+	ctx = WithFallback(ctx, func(*http.Request) {
+		t.Fatal("independent collector inherited business fallback")
 	})
-	var diagnostics []Diagnostic
-	started := time.Now()
-	cookieRequest(t, client, testScope, "/", nil, &diagnostics)
-	require.Less(t, time.Since(started), 4*time.Second)
-	require.Equal(t, ErrStoreUnavailable.Error(), diagnostics[0].Reason)
+	ctx, attempt := WithAttempt(WithBundle(ctx, Bundle{}))
+	client := localCookieClient(t, NewManager(), func(w http.ResponseWriter, request *http.Request) {
+		require.Empty(t, request.Header.Get("Cookie"))
+	})
+	doCookieRequest(t, client, ctx, "https://chatgpt.com/", http.Header{"Cookie": {"previous=excluded"}})
+	bundle, err := attempt.Snapshot(time.Now().Add(BundleLifetime))
+	require.NoError(t, err)
+	require.True(t, bundle.ValidAt(time.Now()))
+	// Force a rejection as well; a successful send would never call a fallback.
+	doCookieRequest(t, client, ctx, "https://unrelated.example/", nil)
 }

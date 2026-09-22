@@ -91,7 +91,7 @@ func TestCodexTurnStateLateWSSendInvalidatesPreparedCache(t *testing.T) {
 					unsent, err := repo.Get(ctx, a.key)
 					require.NoError(t, err)
 					require.NotEmpty(t, unsent.EncryptedToken, "delivery alone is not proof of a successful physical send")
-					require.Empty(t, unsent.DemandReason)
+					require.Equal(t, "refresh", unsent.DemandReason)
 					bindCodexTurnStateSummarySequence(wire)
 				}
 				after, err := repo.Get(ctx, a.key)
@@ -99,7 +99,7 @@ func TestCodexTurnStateLateWSSendInvalidatesPreparedCache(t *testing.T) {
 				require.Empty(t, after.EncryptedToken, "late successful-send binding must revoke the cache used by the delivered anomaly")
 				require.True(t, after.ExpiresAt.IsZero())
 				require.Equal(t, "extended_shape", after.DemandReason)
-				require.Equal(t, before.NextCollectAt, after.NextCollectAt, "late publication must preserve the existing 30-second retry fence")
+				require.Equal(t, before.NextCollectAt, after.NextCollectAt, "late publication must preserve the existing failed-attempt retry fence")
 				require.True(t, s.queued[a.key])
 				bindCodexTurnStateSummarySequence(wire)
 				repeated, err := repo.Get(ctx, a.key)
@@ -128,7 +128,7 @@ func TestCodexTurnStateLateWSSendPreservesConcurrentTarget(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, beforeBinding.Version, after.Version)
 	require.Equal(t, beforeBinding.EncryptedToken, after.EncryptedToken)
-	require.Empty(t, after.DemandReason)
+	require.Equal(t, "refresh", after.DemandReason)
 	require.False(t, s.queued[a.key])
 }
 
@@ -177,10 +177,19 @@ func TestCodexTurnStateLateWSSendRechecksPublicationAdmission(t *testing.T) {
 			}
 			after, err := repo.Get(ctx, a.key)
 			require.NoError(t, err)
-			require.Equal(t, before.Version, after.Version)
+			if name == "expired" || name == "target_priority" {
+				require.Equal(t, before.Version+1, after.Version, "expiry scheduling or same-ticket bundle publication is one CAS")
+			} else {
+				require.Equal(t, before.Version, after.Version)
+			}
 			require.Equal(t, before.EncryptedToken, after.EncryptedToken)
-			require.Empty(t, after.DemandReason)
-			require.False(t, s.queued[a.key])
+			if name == "expired" {
+				require.Equal(t, "cookie_expired", after.DemandReason)
+				require.True(t, s.queued[a.key], "a fresh physical send reactivates an expired bundle")
+			} else {
+				require.Equal(t, "refresh", after.DemandReason)
+				require.False(t, s.queued[a.key])
+			}
 		})
 	}
 }
@@ -196,7 +205,7 @@ func TestCodexTurnStateLateWSSendRequiresPersistedSend(t *testing.T) {
 	afterFailure, err := repo.Get(ctx, a.key)
 	require.NoError(t, err)
 	require.NotEmpty(t, afterFailure.EncryptedToken)
-	require.Empty(t, afterFailure.DemandReason)
+	require.Equal(t, "refresh", afterFailure.DemandReason)
 	require.False(t, s.queued[a.key])
 	wrapped.markErr = nil
 	bindCodexTurnStateSummarySequence(wire)

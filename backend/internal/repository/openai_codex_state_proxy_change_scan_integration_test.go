@@ -11,14 +11,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCodexStatePostgresProxyChangeDefersOnlyValidTargets(t *testing.T) {
+func TestCodexStatePostgresProxyChangeHonorsCollectionSchedule(t *testing.T) {
 	ctx := context.Background()
 	key := createCodexStateFixture(t)
 	repo := NewOpenAICodexStateRepository(integrationDB, integrationRedis)
 	_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,
 		'{codex_turn_state,collector_proxy_id}', '42'::jsonb) WHERE id=$1`, key.OwnerAccountID)
 	require.NoError(t, err)
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT state_generation::text FROM account_openai_oauth_os_credentials WHERE account_id=$1 AND os_family=$2`, key.OwnerAccountID, key.OSFamily).Scan(&key.Generation))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT state_generation::text FROM account_openai_oauth_credentials WHERE account_id=$1`, key.OwnerAccountID).Scan(&key.Generation))
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	models := []string{"retained", "earlier-expiry", "expired", "anomaly", "missing-time", "renewal"}
 	revision := installCodexStateModelPolicyFixture(t, models)
@@ -31,10 +31,13 @@ func TestCodexStatePostgresProxyChangeDefersOnlyValidTargets(t *testing.T) {
 		require.NoError(t, repo.EndBusiness(ctx, modelKey, "seed"))
 		record.ModelPolicyRevision = revision
 		record.EncryptedToken, record.Shape = "synthetic-encrypted-target", service.CodexTurnStateShapeTarget
+		record.EncryptedCookieBundle = "synthetic-encrypted-cookie-bundle"
 		record.IssuedAt, record.ExpiresAt = now.Add(-service.CodexTurnStateLifetime+20*time.Second), now.Add(20*time.Second)
 		record.TokenLength, record.CipherBlocks = 292, 10
 		record.CollectionStatus, record.CollectionReason = "idle", "collector_proxy_changed"
 		switch model {
+		case "retained":
+			record.NextCollectAt = now.Add(30 * time.Second)
 		case "earlier-expiry":
 			record.ExpiresAt = now.Add(10 * time.Second)
 		case "expired":
@@ -60,7 +63,7 @@ func TestCodexStatePostgresProxyChangeDefersOnlyValidTargets(t *testing.T) {
 			due = append(due, record.Model)
 		}
 	}
-	require.ElementsMatch(t, []string{"expired", "anomaly", "missing-time", "renewal"}, due)
+	require.ElementsMatch(t, []string{"earlier-expiry", "expired", "anomaly", "missing-time", "renewal"}, due)
 	earlierKey := key
 	earlierKey.Model = "earlier-expiry"
 	earlier, err := repo.Get(ctx, earlierKey)
