@@ -73,6 +73,32 @@ func (r *tokenRefreshOSCredentialsRepo) SetOpenAIOAuthOSCredentialCooldownIfUnch
 	return true, nil
 }
 
+func (r *tokenRefreshOSCredentialsRepo) MutateOpenAIOAuthAccountStateIfUnchanged(_ context.Context, id int64, snapshot OpenAIOAuthAccountStateSnapshot, change OpenAIOAuthAccountStateChange) (*OpenAIOAuthAccountStateResult, error) {
+	if r.slotWriteErr != nil {
+		return nil, r.slotWriteErr
+	}
+	slot := r.slots[OpenAIOSWindows]
+	if slot == nil || id != snapshot.OwnerAccountID || slot.OwnerAccountID != id || slot.AuthorizationGeneration != snapshot.AuthorizationGeneration || slot.Revision != snapshot.CredentialRevision {
+		return &OpenAIOAuthAccountStateResult{}, nil
+	}
+	switch change.Kind {
+	case OpenAIOAuthAccountStateClearTemp:
+		r.clearTempCalls++
+		r.accountsByID[id].TempUnschedulableUntil = nil
+		r.accountsByID[id].TempUnschedulableReason = ""
+	case OpenAIOAuthAccountStateError:
+		r.slotErrors++
+		r.accountsByID[id].Status = StatusError
+		r.accountsByID[id].Schedulable = false
+		r.accountsByID[id].ErrorMessage = change.ErrorMessage
+	case OpenAIOAuthAccountStateCooldown:
+		r.slotCooldowns++
+		r.accountsByID[id].TempUnschedulableUntil = &change.Until
+		r.accountsByID[id].TempUnschedulableReason = change.Reason
+	}
+	return &OpenAIOAuthAccountStateResult{Applied: true}, nil
+}
+
 func newTokenRefreshOSFixture(t *testing.T) (*Account, *tokenRefreshOSCredentialsRepo) {
 	t.Helper()
 	account := &Account{
@@ -128,7 +154,7 @@ func TestTokenRefreshService_OpenAISharedGrantRefreshesOnceAfterAccountPaginatio
 	require.Equal(t, "shared-access", account.GetOpenAIAccessToken())
 }
 
-func TestTokenRefreshService_OpenAISharedGrantSkipsIneligibleAuthorization(t *testing.T) {
+func TestTokenRefreshService_OpenAIRefreshEligibilityUsesAccountCredentials(t *testing.T) {
 	for _, reason := range []string{"missing", "reauth", "cooldown", "no refresh token"} {
 		t.Run(reason, func(t *testing.T) {
 			account, repo := newTokenRefreshOSFixture(t)
@@ -147,8 +173,9 @@ func TestTokenRefreshService_OpenAISharedGrantSkipsIneligibleAuthorization(t *te
 			svc := &TokenRefreshService{accountRepo: repo}
 			candidate, err := svc.backgroundRefreshAccount(context.Background(), account)
 			require.NoError(t, err)
-			require.Nil(t, candidate)
-			require.Equal(t, []string{OpenAIOSWindows}, repo.readOS, "the grant is checked once using the default identity")
+			require.NotNil(t, candidate, "private authorization metadata does not filter account candidates")
+			require.Equal(t, reason != "no refresh token", (&OpenAITokenRefresher{}).NeedsRefresh(candidate, time.Hour))
+			require.Equal(t, []string{OpenAIOSWindows}, repo.readOS, "the revision is captured once using the default identity")
 		})
 	}
 }
@@ -185,24 +212,29 @@ func TestTokenRefreshService_OpenAISharedGrantFailurePreservesRevisionGuard(t *t
 					require.True(t, account.Schedulable)
 				} else if permanent {
 					require.Equal(t, 1, repo.slotErrors)
-					require.Equal(t, OpenAIOAuthAuthorizationReauthRequired, repo.slots[OpenAIOSLinux].Status)
+					require.Equal(t, OpenAIOAuthAuthorizationAuthorized, repo.slots[OpenAIOSLinux].Status)
 					require.Equal(t, StatusError, account.Status)
 					require.False(t, account.Schedulable)
 				} else {
 					require.Equal(t, 1, repo.slotCooldowns)
-					require.NotNil(t, repo.slots[OpenAIOSLinux].RefreshRetryAfter)
+					require.NotNil(t, account.TempUnschedulableUntil)
+					require.Contains(t, account.TempUnschedulableReason, "token refresh retry exhausted")
 				}
 				require.Equal(t, repo.slots[OpenAIOSLinux].Status, repo.slots[OpenAIOSWindows].Status)
 				require.Equal(t, repo.slots[OpenAIOSLinux].RefreshRetryAfter, repo.slots[OpenAIOSWindows].RefreshRetryAfter)
 				require.Zero(t, repo.setErrorCalls)
 				require.Zero(t, repo.setTempUnschedCalls)
-				require.Zero(t, blocker.blockCalls)
+				if stale {
+					require.Zero(t, blocker.blockCalls)
+				} else {
+					require.Equal(t, 1, blocker.blockCalls)
+				}
 			})
 		}
 	}
 }
 
-func TestTokenRefreshService_OpenAISlotSuccessPreservesSharedCooldownAndPublishesCanonicalAccount(t *testing.T) {
+func TestTokenRefreshService_OpenAIRefreshSuccessClearsAccountCooldownAndPublishesCanonicalAccount(t *testing.T) {
 	account, repo := newTokenRefreshOSFixture(t)
 	until := time.Now().Add(time.Hour)
 	account.TempUnschedulableUntil = &until
@@ -214,15 +246,32 @@ func TestTokenRefreshService_OpenAISlotSuccessPreservesSharedCooldownAndPublishe
 	svc := &TokenRefreshService{accountRepo: repo, tempUnschedCache: cache, runtimeBlocker: blocker, schedulerCache: scheduler, cacheInvalidator: invalidator}
 	svc.postRefreshActions(context.Background(), scoped)
 
-	require.Zero(t, repo.clearTempCalls)
-	require.Zero(t, cache.deleteCalls)
-	require.Zero(t, blocker.clearCalls)
+	require.Equal(t, 1, repo.clearTempCalls)
+	require.Equal(t, 1, cache.deleteCalls)
+	require.Equal(t, 1, blocker.clearCalls)
 	require.Equal(t, OpenAIOSLinux, invalidator.lastAccount.OpenAIOAuthCredentialOS)
 	require.Equal(t, "shared-access", invalidator.lastAccount.GetOpenAIAccessToken())
 	require.Equal(t, "shared-access", scheduler.lastAccount.GetOpenAIAccessToken())
 	require.Empty(t, scheduler.lastAccount.OpenAIOAuthCredentialOS)
-	require.Equal(t, &until, scheduler.lastAccount.TempUnschedulableUntil)
+	require.Nil(t, scheduler.lastAccount.TempUnschedulableUntil)
 	require.Equal(t, OpenAIOAuthAuthorizationAuthorized, repo.slots[OpenAIOSWindows].Status)
+}
+
+func TestTokenRefreshService_OpenAILateRefreshSuccessCannotClearNewGrantCooldown(t *testing.T) {
+	account, repo := newTokenRefreshOSFixture(t)
+	until := time.Now().Add(time.Hour)
+	account.TempUnschedulableUntil = &until
+	account.TempUnschedulableReason = "new authorization cooldown"
+	scoped, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, account, OpenAIOSLinux)
+	require.NoError(t, err)
+	repo.slots[OpenAIOSWindows].AuthorizationGeneration = "replacement-grant"
+	cache, blocker := &tempUnschedCacheStub{}, &tokenRefreshRuntimeBlocker{}
+	svc := &TokenRefreshService{accountRepo: repo, tempUnschedCache: cache, runtimeBlocker: blocker}
+	svc.postRefreshActions(context.Background(), scoped)
+	require.Zero(t, repo.clearTempCalls)
+	require.Zero(t, cache.deleteCalls)
+	require.Zero(t, blocker.clearCalls)
+	require.Equal(t, &until, account.TempUnschedulableUntil)
 }
 
 func TestTokenRefreshService_OpenAISlotFailurePersistenceErrorNeverFallsBackToGlobalState(t *testing.T) {

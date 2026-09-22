@@ -6,7 +6,7 @@ import "strconv"
 // fills from earlier authorizations and credential revisions.
 func OpenAITokenCacheKey(account *Account) string {
 	key := OpenAITokenRefreshLockKey(account)
-	if account != nil && (account.OpenAIOAuthAuthorizationGeneration != "" || account.OpenAIOAuthCredentialOS != "") {
+	if account != nil && account.OpenAIOAuthAuthorizationGeneration != "" {
 		key += ":revision:" + strconv.FormatInt(account.OpenAIOAuthCredentialRevision, 10)
 	}
 	return key
@@ -16,7 +16,7 @@ func OpenAITokenCacheKey(account *Account) string {
 // same grant. Reauthorization creates a separate lock from an old in-flight grant.
 func OpenAITokenRefreshLockKey(account *Account) string {
 	key := openAITokenOwnerKey(account)
-	if account != nil && (account.OpenAIOAuthAuthorizationGeneration != "" || account.OpenAIOAuthCredentialOS != "") {
+	if account != nil && account.OpenAIOAuthAuthorizationGeneration != "" {
 		key += ":auth:" + account.OpenAIOAuthAuthorizationGeneration
 	}
 	return key

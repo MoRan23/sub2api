@@ -28,14 +28,7 @@ func resolveCredentialAccount(ctx context.Context, repo AccountRepository, accou
 			return nil, err
 		}
 	}
-	if !IsOpenAIOAuthOSProfileOwner(owner) {
-		return owner, nil
-	}
-	os := account.OpenAIOAuthCredentialOS
-	if os == "" {
-		os = OpenAIRequestOSFromContext(ctx).Family
-	}
-	return ResolveOpenAIOAuthCredentialAccount(ctx, repo, owner, os)
+	return owner, nil
 }
 
 // credentialAccountFromParent shares the same one-level parent validation with
@@ -61,6 +54,9 @@ func credentialAccountFromParent(account, parent *Account) (*Account, error) {
 		copy.OpenAIOAuthCredentialOwnerID = account.OpenAIOAuthCredentialOwnerID
 		copy.OpenAIOAuthAuthorizationGeneration = account.OpenAIOAuthAuthorizationGeneration
 		copy.OpenAIOAuthCredentialRevision = account.OpenAIOAuthCredentialRevision
+		if OpenAIOAuthOSProfilesComplete(account.OpenAIOAuthOSProfiles) {
+			copy.OpenAIOAuthOSProfiles = CloneOpenAIOAuthOSProfiles(account.OpenAIOAuthOSProfiles)
+		}
 		parent = &copy
 	}
 	return parent, nil

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"maps"
 
 	"github.com/gin-gonic/gin"
 )
@@ -63,38 +64,32 @@ func captureOpenAIRequestOSContext(ctx context.Context, c *gin.Context, body []b
 	return ContextWithOpenAIRequestOS(ctx, CaptureOpenAIRequestOS(c, body))
 }
 
-// Direct service callers can enter without a handler-selected credential scope.
-// Capture before transformations, propagate it to the local context too, and
-// project a private request-owned account before obtaining any bearer token.
+// Capture before transformations and select the identity only after scheduling.
+// The identity projection leaves the selected account's OAuth credentials intact.
 func (s *OpenAIGatewayService) prepareOpenAIOAuthRequestScope(ctx context.Context, c *gin.Context, account *Account, body []byte) (context.Context, *Account, error) {
 	ctx = captureOpenAIRequestOSContext(ctx, c, body)
-	if !RequiresOpenAIOAuthOSAuthorization(account) || account.OpenAIOAuthCredentialOS != "" {
+	if !RequiresOpenAIOAuthOSAuthorization(account) {
 		return ctx, account, nil
 	}
-	scoped, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, OpenAIRequestOSFromContext(ctx).Family)
+	if selection, exists := openAIOAuthOSSelectionForAccount(c, account); exists {
+		out := *account
+		out.Credentials = maps.Clone(account.Credentials)
+		if out.Credentials == nil {
+			out.Credentials = make(map[string]any)
+		}
+		out.Extra = maps.Clone(account.Extra)
+		if out.Extra == nil {
+			out.Extra = make(map[string]any)
+		}
+		out.Credentials["user_agent"] = selection.Profile.UserAgent
+		out.Extra[openAIPinnedInstallationIDKey] = selection.Profile.InstallationID
+		out.OpenAIOAuthOSProfiles = CloneOpenAIOAuthOSProfiles(selection.Profiles)
+		out.OpenAIOAuthCredentialOS, out.OpenAIOAuthCredentialOwnerID = selection.Profile.OSFamily, selection.OwnerID
+		return ctx, &out, nil
+	}
+	if account.OpenAIOAuthCredentialOS != "" {
+		return ctx, account, nil
+	}
+	scoped, err := ResolveOpenAIOAuthIdentityAccount(ctx, s.accountRepo, account, OpenAIRequestOSFromContext(ctx).Family)
 	return ctx, scoped, err
-}
-
-// openAIAccountOSAuthorizationEligible evaluates credential-owner eligibility.
-// Shadow business accounts use their parent's shared grant. Request OS does not
-// participate in authorization eligibility.
-func openAIAccountOSAuthorizationEligible(ctx context.Context, account *Account, lookup func(int64) *Account) bool {
-	if !RequiresOpenAIOAuthOSAuthorization(account) {
-		return true
-	}
-	owner := account
-	if account.IsShadow() {
-		if lookup == nil || account.ParentAccountID == nil {
-			return false
-		}
-		owner = lookup(*account.ParentAccountID)
-		if owner == nil {
-			return false
-		}
-	}
-	return OpenAIOAuthOSAuthorizationAvailable(owner, "")
-}
-
-func openAIParentHealthyForShadow(ctx context.Context, account *Account, lookup func(int64) *Account) bool {
-	return parentHealthyForShadow(account, lookup) && openAIAccountOSAuthorizationEligible(ctx, account, lookup)
 }

@@ -31,7 +31,7 @@ func TestOpenAISchedulerSelectReturnsRealLatency(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			scheduler := &defaultOpenAIAccountScheduler{
-				service: &OpenAIGatewayService{accountRepo: schedulerLatencyAccountRepo{newSchedulerTestOpenAIAccountRepo(accounts)}},
+				service: &OpenAIGatewayService{accountRepo: schedulerLatencyAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}}},
 				stats:   newOpenAIAccountRuntimeStats(),
 			}
 			selection, decision, err := scheduler.Select(context.Background(), OpenAIAccountScheduleRequest{Platform: PlatformOpenAI})

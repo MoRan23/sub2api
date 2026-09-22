@@ -301,8 +301,10 @@ const (
 // 自定义错误码开启时覆盖后续所有逻辑（包括临时不可调度）。
 func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) ErrorPolicyResult {
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
-	if (statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden) && RequiresOpenAIOAuthOSAuthorization(account) {
-		if _, scoped := s.accountRepo.(OpenAIOAuthOSCredentialsReader); scoped {
+	if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+		var current bool
+		account, current = s.openAIOAuthErrorAccount(ctx, account)
+		if !current {
 			return ErrorPolicyNone
 		}
 	}
@@ -336,8 +338,12 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 // 返回是否应该停止该账号的调度
 func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
-	if handled, disable := s.handleOpenAIOAuthOSAuthFailure(ctx, account, statusCode, responseBody); handled {
-		return disable
+	if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
+		var current bool
+		account, current = s.openAIOAuthErrorAccount(ctx, account)
+		if !current {
+			return true
+		}
 	}
 	// Team 联动熔断必须先于池模式/自定义错误码/临时不可调度的各类早退；
 	// 同请求内与 fastpath 调用点的重复触发由方法内去重吸收。
@@ -433,7 +439,13 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		// 问题变成影子永久死亡。母账号被标记 temp-unschedulable 后由 parentHealthyForShadow 级联排除影子。
 		// 非影子时 resolveCredentialAccount 返回自身;母账号缺失/损坏(orphan 影子,罕见)时回退到原 account。
 		authAccount := account
-		if resolved, rerr := resolveCredentialAccount(ctx, s.accountRepo, account); rerr == nil && resolved != nil {
+		if _, scoped := openAIOAuthAccountStateSnapshot(account); scoped {
+			// The provider's attempted token revision must survive owner selection.
+			owner := *account
+			owner.ID = account.OpenAIOAuthCredentialOwnerID
+			owner.ParentAccountID = nil
+			authAccount = &owner
+		} else if resolved, rerr := resolveCredentialAccount(ctx, s.accountRepo, account); rerr == nil && resolved != nil {
 			authAccount = resolved
 		}
 		// OpenAI: token_invalidated / token_revoked 表示 token 被永久作废（非过期），直接标记 error
@@ -443,7 +455,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			if upstreamMsg != "" {
 				msg = "Token revoked (401): " + upstreamMsg
 			}
-			s.handleAuthError(ctx, authAccount, msg)
+			s.handleAuthError(ctx, authAccount, msg, true)
 			shouldDisable = true
 			break
 		}
@@ -453,7 +465,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			if upstreamMsg != "" {
 				msg = "Unauthorized (401): " + upstreamMsg
 			}
-			s.handleAuthError(ctx, authAccount, msg)
+			s.handleAuthError(ctx, authAccount, msg, true)
 			shouldDisable = true
 			break
 		}
@@ -472,7 +484,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 				if upstreamMsg != "" {
 					msg = "OAuth 401 (no refresh_token): " + upstreamMsg
 				}
-				s.handleAuthError(ctx, authAccount, msg)
+				s.handleAuthError(ctx, authAccount, msg, true)
 				shouldDisable = true
 				break
 			}
@@ -503,13 +515,15 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 					slog.Info("antigravity_401_force_refresh_marked", "account_id", authAccount.ID)
 				}
 			}
-			cooldownMinutes := s.cfg.RateLimit.OAuth401CooldownMinutes
+			cooldownMinutes := 0
+			if s.cfg != nil {
+				cooldownMinutes = s.cfg.RateLimit.OAuth401CooldownMinutes
+			}
 			if cooldownMinutes <= 0 {
 				cooldownMinutes = 10
 			}
 			until := time.Now().Add(time.Duration(cooldownMinutes) * time.Minute)
-			s.notifyAccountSchedulingBlocked(authAccount, until, "oauth_401")
-			if err := s.accountRepo.SetTempUnschedulable(ctx, authAccount.ID, until, msg); err != nil {
+			if _, err := s.setAccountCooldownForAttempt(ctx, authAccount, until, msg, "oauth_401"); err != nil {
 				slog.Warn("oauth_401_set_temp_unschedulable_failed", "account_id", authAccount.ID, "error", err)
 			}
 			shouldDisable = true
@@ -519,7 +533,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			if upstreamMsg != "" {
 				msg = "Authentication failed (401): " + upstreamMsg
 			}
-			s.handleAuthError(ctx, authAccount, msg)
+			s.handleAuthError(ctx, authAccount, msg, true)
 			shouldDisable = true
 		}
 	case 402:
@@ -953,13 +967,15 @@ func (s *RateLimitService) GeminiCooldown(ctx context.Context, account *Account)
 }
 
 // handleAuthError 处理认证类错误(401/403)，停止账号调度
-func (s *RateLimitService) handleAuthError(ctx context.Context, account *Account, errorMsg string) {
-	s.notifyAccountSchedulingBlocked(account, time.Time{}, "auth_error")
-	if err := s.accountRepo.SetError(ctx, account.ID, errorMsg); err != nil {
+func (s *RateLimitService) handleAuthError(ctx context.Context, account *Account, errorMsg string, authFailure ...bool) {
+	applied, err := s.setAccountErrorForAttempt(ctx, account, errorMsg, "auth_error", len(authFailure) > 0 && authFailure[0])
+	if err != nil {
 		slog.Warn("account_set_error_failed", "account_id", account.ID, "error", err)
 		return
 	}
-	slog.Warn("account_disabled_auth_error", "account_id", account.ID, "error", errorMsg)
+	if applied {
+		slog.Warn("account_disabled_auth_error", "account_id", account.ID, "error", errorMsg)
+	}
 }
 
 func buildForbiddenErrorMessage(prefix string, upstreamMsg string, responseBody []byte, fallback string) string {
@@ -1056,29 +1072,28 @@ func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account
 	)
 
 	if s.openAI403CounterCache == nil {
-		s.handleAuthError(ctx, account, msg)
+		s.handleAuthError(ctx, account, msg, true)
 		return true
 	}
 
 	count, err := s.openAI403CounterCache.IncrementOpenAI403Count(ctx, account.ID, openAI403CounterWindowMinutes)
 	if err != nil {
 		slog.Warn("openai_403_increment_failed", "account_id", account.ID, "error", err)
-		s.handleAuthError(ctx, account, msg)
+		s.handleAuthError(ctx, account, msg, true)
 		return true
 	}
 
 	if count >= openAI403DisableThreshold {
 		msg = fmt.Sprintf("%s | consecutive_403=%d/%d", msg, count, openAI403DisableThreshold)
-		s.handleAuthError(ctx, account, msg)
+		s.handleAuthError(ctx, account, msg, true)
 		return true
 	}
 
 	until := time.Now().Add(time.Duration(openAI403CooldownMinutesDefault) * time.Minute)
 	reason := fmt.Sprintf("OpenAI 403 temporary cooldown (%d/%d): %s", count, openAI403DisableThreshold, msg)
-	s.notifyAccountSchedulingBlocked(account, until, "openai_403_temp")
-	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
+	if _, err := s.setAccountCooldownForAttempt(ctx, account, until, reason, "openai_403_temp"); err != nil {
 		slog.Warn("openai_403_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
-		s.handleAuthError(ctx, account, msg)
+		s.handleAuthError(ctx, account, msg, true)
 		return true
 	}
 
@@ -1141,8 +1156,7 @@ func (s *RateLimitService) handleAntigravity403(ctx context.Context, account *Ac
 // handleCustomErrorCode 处理自定义错误码，停止账号调度
 func (s *RateLimitService) handleCustomErrorCode(ctx context.Context, account *Account, statusCode int, errorMsg string) {
 	msg := "Custom error code " + strconv.Itoa(statusCode) + ": " + errorMsg
-	s.notifyAccountSchedulingBlocked(account, time.Time{}, "custom_error_code")
-	if err := s.accountRepo.SetError(ctx, account.ID, msg); err != nil {
+	if _, err := s.setAccountErrorForAttempt(ctx, account, msg, "custom_error_code", false); err != nil {
 		slog.Warn("account_set_error_failed", "account_id", account.ID, "status_code", statusCode, "error", err)
 		return
 	}
@@ -2256,17 +2270,6 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 // RecoverAccountAfterSuccessfulTest 将一次成功测试视为正常请求，
 // 按需恢复 error / rate-limit / overload / temp-unsched / model-rate-limit 等运行时状态。
 func (s *RateLimitService) RecoverAccountAfterSuccessfulTest(ctx context.Context, accountID int64) (*SuccessfulTestRecoveryResult, error) {
-	if _, scoped := s.accountRepo.(OpenAIOAuthOSCredentialsReader); scoped {
-		account, err := s.accountRepo.GetByID(ctx, accountID)
-		if err != nil {
-			return nil, err
-		}
-		if RequiresOpenAIOAuthOSAuthorization(account) {
-			// ID-only callers have no attempted authorization snapshot. They cannot
-			// clear another slot's error or shared account limits after a test.
-			return &SuccessfulTestRecoveryResult{}, nil
-		}
-	}
 	return s.RecoverAccountState(ctx, accountID, AccountRecoveryOptions{})
 }
 
@@ -2808,7 +2811,11 @@ func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account
 	// retain the legacy account-wide temporary-unschedulable behavior below.
 	modelKey := firstRequestedModel(requestedModel)
 	if modelKey != "" && statusCode != http.StatusUnauthorized {
-		if err := s.accountRepo.SetModelRateLimit(ctx, account.ID, modelKey, until, reason); err != nil {
+		_, scoped, err := mutateOpenAIOAuthAccountState(ctx, s.accountRepo, account, OpenAIOAuthAccountStateChange{Kind: OpenAIOAuthAccountStateModelCooldown, ModelKey: modelKey, Until: until, Reason: reason})
+		if !scoped {
+			err = s.accountRepo.SetModelRateLimit(ctx, account.ID, modelKey, until, reason)
+		}
+		if err != nil {
 			slog.Warn("temp_unsched_model_rate_limit_set_failed", "account_id", account.ID, "model", modelKey, "error", err)
 			// The rule matched, so fail over the current request even if persistence
 			// failed; never widen a model-scoped failure into an account-wide block.
@@ -2818,13 +2825,13 @@ func (s *RateLimitService) triggerTempUnschedulable(ctx context.Context, account
 		return true
 	}
 
-	s.notifyAccountSchedulingBlocked(account, until, "temp_unschedulable")
-	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
+	applied, err := s.setAccountCooldownForAttempt(ctx, account, until, reason, "temp_unschedulable")
+	if err != nil {
 		slog.Warn("temp_unsched_set_failed", "account_id", account.ID, "error", err)
 		return false
 	}
 
-	if s.tempUnschedCache != nil {
+	if applied && s.tempUnschedCache != nil {
 		if err := s.tempUnschedCache.SetTempUnsched(ctx, account.ID, state); err != nil {
 			slog.Warn("temp_unsched_cache_set_failed", "account_id", account.ID, "error", err)
 		}

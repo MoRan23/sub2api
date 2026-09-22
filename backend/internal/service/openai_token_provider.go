@@ -167,16 +167,9 @@ func (p *OpenAITokenProvider) GetAccessTokenWithAccount(ctx context.Context, acc
 	}
 
 	cacheKey := OpenAITokenCacheKey(account)
-	cacheTokenUsable := true
-	if account.OpenAIOAuthCredentialOS != "" && strings.TrimSpace(account.GetOpenAIAccessToken()) == "" {
-		cacheTokenUsable = false
-	}
-	if expires := account.GetCredentialAsTime("expires_at"); account.OpenAIOAuthCredentialOS != "" && expires != nil && !time.Now().Before(*expires) {
-		cacheTokenUsable = false
-	}
 
 	// 1) Try cache first.
-	if p.tokenCache != nil && cacheTokenUsable {
+	if p.tokenCache != nil {
 		if token, err := p.tokenCache.GetAccessToken(ctx, cacheKey); err == nil && strings.TrimSpace(token) != "" {
 			slog.Debug("openai_token_cache_hit", "account_id", account.ID)
 			return token, snapshotOAuthRefreshAccount(account), nil
@@ -189,14 +182,14 @@ func (p *OpenAITokenProvider) GetAccessTokenWithAccount(ctx context.Context, acc
 
 	// 2) Refresh if needed (pre-expiry skew).
 	expiresAt := account.GetCredentialAsTime("expires_at")
-	needsRefresh := !account.IsOpenAIPersonalAccessToken() && (strings.TrimSpace(account.GetOpenAIAccessToken()) == "" || expiresAt == nil || time.Until(*expiresAt) <= openAITokenRefreshSkew)
+	needsRefresh := !account.IsOpenAIPersonalAccessToken() && (expiresAt == nil || time.Until(*expiresAt) <= openAITokenRefreshSkew)
 	if needsRefresh && strings.TrimSpace(account.GetOpenAIRefreshToken()) == "" {
 		if expiresAt != nil && !time.Now().Before(*expiresAt) {
 			const reason = "openai access_token expired and refresh_token is missing"
 			// 永久故障：缺失 refresh_token 时账号无法自愈，必须立即从调度池剔除，
 			// 否则会被反复选中、每次都在 token 阶段直接返回错误，对用户呈现持续 502。
 			p.disableAccountMissingRefreshToken(account, reason)
-			if account.OpenAIOAuthCredentialOS != "" {
+			if account.OpenAIOAuthAuthorizationGeneration != "" {
 				return "", nil, fmt.Errorf("%w: %s", ErrOpenAIOAuthOSUnauthorized, reason)
 			}
 			return "", nil, errors.New(reason)
@@ -211,30 +204,6 @@ func (p *OpenAITokenProvider) GetAccessTokenWithAccount(ctx context.Context, acc
 
 		result, err := p.refreshAPI.RefreshIfNeeded(ctx, account, p.executor, openAITokenRefreshSkew)
 		if err != nil {
-			// RefreshIfNeeded returns the exact failed attempt. A permanent grant
-			// failure must revoke scheduling eligibility immediately, with the same
-			// revision guard used by background refresh and upstream auth failures.
-			if result != nil && result.Account != nil && isNonRetryableRefreshError(err) && !isSharedProviderRefreshError(err) {
-				attempted := result.Account
-				if RequiresOpenAIOAuthOSAuthorization(attempted) || attempted.OpenAIOAuthCredentialOS != "" {
-					cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), defaultRefreshPostPersistCleanupTimeout)
-					_, applied, persistErr := persistOpenAIOAuthCredentialError(cleanupCtx, p.accountRepo, attempted, "OpenAI OAuth authorization requires sign-in")
-					if applied && p.tokenCache != nil {
-						_ = p.tokenCache.DeleteAccessToken(cleanupCtx, OpenAITokenCacheKey(attempted))
-					}
-					cancel()
-					if persistErr != nil {
-						return "", nil, fmt.Errorf("persist OpenAI OAuth refresh failure: %w", persistErr)
-					}
-					if applied {
-						p.metrics.refreshFailure.Add(1)
-						return "", nil, fmt.Errorf("%w: OpenAI OAuth refresh requires sign-in", ErrOpenAIOAuthOSUnauthorized)
-					}
-					// A newer refresh or authorization won the CAS. Reload below;
-					// never apply this old failure to the replacement grant.
-					account = attempted
-				}
-			}
 			if p.refreshPolicy.OnRefreshError == ProviderRefreshErrorReturn {
 				return "", nil, err
 			}
@@ -287,7 +256,7 @@ func (p *OpenAITokenProvider) GetAccessTokenWithAccount(ctx context.Context, acc
 			}
 		}
 	}
-	if account.OpenAIOAuthCredentialOS != "" {
+	if account.OpenAIOAuthAuthorizationGeneration != "" {
 		var err error
 		account, err = ReloadOpenAIOAuthCredentialAccount(ctx, p.accountRepo, account)
 		if err != nil {
@@ -295,9 +264,6 @@ func (p *OpenAITokenProvider) GetAccessTokenWithAccount(ctx context.Context, acc
 		}
 		cacheKey = OpenAITokenCacheKey(account)
 		expiresAt = account.GetCredentialAsTime("expires_at")
-		if expiresAt != nil && !time.Now().Before(*expiresAt) {
-			return "", nil, errors.New("OpenAI OAuth access token is expired")
-		}
 	}
 
 	accessToken := account.GetCredential("access_token")
@@ -308,7 +274,7 @@ func (p *OpenAITokenProvider) GetAccessTokenWithAccount(ctx context.Context, acc
 	// 3) Populate cache with TTL.
 	if p.tokenCache != nil {
 		latestAccount, isStale := CheckTokenVersion(ctx, account, p.accountRepo)
-		if isStale && latestAccount == nil && account.OpenAIOAuthCredentialOS != "" {
+		if isStale && latestAccount == nil && account.OpenAIOAuthAuthorizationGeneration != "" {
 			return "", nil, ErrOpenAIOAuthOSUnauthorized
 		}
 		if isStale && latestAccount != nil {
@@ -362,6 +328,9 @@ func (p *OpenAITokenProvider) disableAccountMissingRefreshToken(account *Account
 	if handled, applied, err := persistOpenAIOAuthCredentialError(cleanupCtx, p.accountRepo, account, reason); handled {
 		if err != nil {
 			slog.Warn("openai_token_provider.account_auth_error_failed", "account_id", account.ID, "error", err)
+		}
+		if applied && p.runtimeBlocker != nil {
+			p.runtimeBlocker.BlockAccountScheduling(account, time.Time{}, "missing_refresh_token")
 		}
 		if applied && p.tokenCache != nil {
 			_ = p.tokenCache.DeleteAccessToken(cleanupCtx, OpenAITokenCacheKey(account))
@@ -430,29 +399,21 @@ func (p *OpenAITokenProvider) waitForTokenAfterLockRaceWithAccount(ctx context.C
 		p.metrics.lockWaitTotalMs.Add(waitMs)
 		p.metrics.touchNow()
 
-		cacheTokenUsable := true
-		if account != nil && account.OpenAIOAuthCredentialOS != "" {
+		if account != nil && account.OpenAIOAuthAuthorizationGeneration != "" {
 			latest, err := ReloadOpenAIOAuthCredentialAccount(ctx, p.accountRepo, account)
 			if err != nil {
 				return "", nil, err
 			}
 			latestKey := OpenAITokenCacheKey(latest)
 			if latestKey != cacheKey {
-				expiresAt := latest.GetCredentialAsTime("expires_at")
-				if token := strings.TrimSpace(latest.GetOpenAIAccessToken()); token != "" && (expiresAt == nil || time.Now().Before(*expiresAt)) {
+				if token := strings.TrimSpace(latest.GetOpenAIAccessToken()); token != "" {
 					return token, latest, nil
 				}
 			}
 			cacheKey = latestKey
 			account = latest
-			expiresAt := latest.GetCredentialAsTime("expires_at")
-			cacheTokenUsable = strings.TrimSpace(latest.GetOpenAIAccessToken()) != "" && (expiresAt == nil || time.Now().Before(*expiresAt))
 		}
-		var token string
-		var err error
-		if cacheTokenUsable {
-			token, err = p.tokenCache.GetAccessToken(ctx, cacheKey)
-		}
+		token, err := p.tokenCache.GetAccessToken(ctx, cacheKey)
 		if err == nil && strings.TrimSpace(token) != "" {
 			p.metrics.lockWaitHit.Add(1)
 			if totalWaitMs >= openAILockWarnThresholdMs {

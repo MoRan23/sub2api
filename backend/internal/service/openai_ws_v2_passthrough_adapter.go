@@ -763,7 +763,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	if RequiresOpenAIOAuthOSAuthorization(account) {
 		var err error
-		account, err = s.freezeOpenAIWSAuthorization(ctx, account, token)
+		ctx, account, err = s.prepareOpenAIOAuthRequestScope(ctx, c, account, rawFirstClientMessage)
 		if err != nil {
 			return err
 		}
@@ -1306,9 +1306,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			requestModelForThisFrame := ""
 			if isResponseCreate {
-				if err := s.validateOpenAIWSAuthorization(ctx, account); err != nil {
-					return payload, nil, err
-				}
 				requestModelForThisFrame = usageMeta.requestModelForFrame(payload)
 				if requestModelForThisFrame == "" {
 					requestModelForThisFrame = capturedSessionModel

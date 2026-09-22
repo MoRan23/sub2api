@@ -478,7 +478,7 @@ func TestOpenAITokenProvider_MissingAccessToken(t *testing.T) {
 
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.Error(t, err)
-	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized)
+	require.ErrorContains(t, err, "access_token not found in credentials")
 	require.Empty(t, token)
 }
 
@@ -786,7 +786,7 @@ func TestOpenAITokenProvider_Real_WhitespaceCredentialToken(t *testing.T) {
 	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.Error(t, err)
-	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized)
+	require.ErrorContains(t, err, "access_token not found in credentials")
 	require.Empty(t, token)
 }
 
@@ -807,7 +807,7 @@ func TestOpenAITokenProvider_Real_NilCredentials(t *testing.T) {
 	provider := NewOpenAITokenProvider(newOpenAIProviderTestRepo(account), cache, nil)
 	token, err := provider.GetAccessToken(context.Background(), account)
 	require.Error(t, err)
-	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized)
+	require.ErrorContains(t, err, "access_token not found in credentials")
 	require.Empty(t, token)
 }
 
@@ -961,8 +961,9 @@ func TestOpenAITokenProvider_NoRefreshTokenExpired_DisablesAccount(t *testing.T)
 	require.Empty(t, token)
 	require.Contains(t, err.Error(), "refresh_token is missing")
 
-	require.Zero(t, repo.setErrorCalls, "missing refresh token must not disable the entire account")
-	require.Equal(t, OpenAIOAuthAuthorizationReauthRequired, slotRepo.slots[OpenAIOSWindows].Status)
-	require.Contains(t, slotRepo.slots[OpenAIOSWindows].LastError, "refresh_token is missing")
-	require.Empty(t, blocker.accounts)
+	require.Zero(t, repo.setErrorCalls, "the account error must use the attempted revision guard")
+	require.Equal(t, OpenAIOAuthAuthorizationAuthorized, slotRepo.slots[OpenAIOSWindows].Status)
+	require.Equal(t, StatusError, account.Status)
+	require.Contains(t, account.ErrorMessage, "refresh_token is missing")
+	require.Len(t, blocker.accounts, 1)
 }

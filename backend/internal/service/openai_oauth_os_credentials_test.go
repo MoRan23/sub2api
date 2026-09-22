@@ -129,10 +129,12 @@ func TestOpenAIOAuthOSCredentialsSparkPreservesBusinessIdentity(t *testing.T) {
 	require.Equal(t, "shared-token", scoped.GetCredential("access_token"))
 }
 
-func TestOpenAIOAuthOSCredentialsNoReaderNoSecretJSONAndCooldown(t *testing.T) {
+func TestOpenAIOAuthCredentialsIgnoreLegacyAuthorizationGates(t *testing.T) {
 	account, repo := oauthOSCredentialFixture(t)
-	_, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), nil, account, OpenAIOSWindows)
-	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized)
+	identity, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), nil, account, OpenAIOSWindows)
+	require.NoError(t, err)
+	require.Equal(t, account.GetOpenAIAccessToken(), identity.GetOpenAIAccessToken())
+	require.Empty(t, identity.OpenAIOAuthAuthorizationGeneration)
 	encoded, err := json.Marshal(repo.slots[OpenAIOSWindows])
 	require.NoError(t, err)
 	require.JSONEq(t, "{}", string(encoded))
@@ -144,10 +146,32 @@ func TestOpenAIOAuthOSCredentialsNoReaderNoSecretJSONAndCooldown(t *testing.T) {
 	require.NotContains(t, string(encoded), "OpenAIOAuthCredential")
 	until := time.Now().Add(time.Minute)
 	repo.slots[OpenAIOSWindows].RefreshRetryAfter = &until
-	_, err = ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, account, OpenAIOSWindows)
-	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized)
-	_, err = ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, account, OpenAIOSLinux)
-	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized, "refresh cooldown belongs to the shared grant")
+	for _, status := range []string{OpenAIOAuthAuthorizationUnauthorized, OpenAIOAuthAuthorizationReauthRequired, OpenAIOAuthAuthorizationAuthorized} {
+		repo.slots[OpenAIOSWindows].Status = status
+		for _, os := range OpenAIOAuthOSFamilies() {
+			resolved, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, account, os)
+			require.NoError(t, err, "account scheduling and token provider own eligibility")
+			require.Equal(t, "shared-token", resolved.GetOpenAIAccessToken())
+			require.Equal(t, os, resolved.OpenAIOAuthCredentialOS)
+		}
+	}
+}
+
+func TestOpenAIOAuthIdentitySelectionDoesNotReadAuthorization(t *testing.T) {
+	account, repo := oauthOSCredentialFixture(t)
+	repo.slots = nil
+	account.Credentials = nil
+	for _, os := range OpenAIOAuthOSFamilies() {
+		identity, err := ResolveOpenAIOAuthIdentityAccount(context.Background(), repo, account, os)
+		require.NoError(t, err)
+		require.Equal(t, os, identity.OpenAIOAuthCredentialOS)
+		require.Equal(t, account.OpenAIOAuthOSProfiles.Profiles[os].UserAgent, identity.GetOpenAIUserAgent())
+		require.Equal(t, account.OpenAIOAuthOSProfiles.Profiles[os].InstallationID, identity.GetPinnedOpenAIInstallationID())
+		require.Empty(t, identity.OpenAIOAuthAuthorizationGeneration)
+		require.Empty(t, identity.GetOpenAIAccessToken())
+		require.Equal(t, "openai:account:10", OpenAITokenCacheKey(identity))
+	}
+	require.Nil(t, account.Credentials)
 }
 
 func TestOpenAIOAuthOSCredentialsProviderFieldsProtected(t *testing.T) {
@@ -237,16 +261,18 @@ func TestOpenAIOAuthSharedAuthorizationFencesEveryFrozenIdentity(t *testing.T) {
 	}
 	repo.slots[OpenAIOSWindows].Status = OpenAIOAuthAuthorizationUnauthorized
 	for _, os := range OpenAIOAuthOSFamilies() {
-		_, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, account, os)
-		require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized, os)
+		resolved, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, account, os)
+		require.NoError(t, err, "legacy private status is not an account admission condition")
+		require.Equal(t, "shared-replacement", resolved.OpenAIOAuthAuthorizationGeneration)
 	}
 }
 
-func TestOpenAIOAuthSharedAuthorizationRejectsMissingGrantAndIdentity(t *testing.T) {
+func TestOpenAIOAuthIdentityDoesNotValidateTokensOrInventMissingProfiles(t *testing.T) {
 	account, repo := oauthOSCredentialFixture(t)
 	account.Credentials["access_token"] = "  "
-	_, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, account, OpenAIOSLinux)
-	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized, "provider-independent fields are not credentials")
+	resolved, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, account, OpenAIOSLinux)
+	require.NoError(t, err, "token provider owns final token validation")
+	require.Equal(t, "  ", resolved.GetOpenAIAccessToken())
 	account.Credentials["access_token"] = "shared-token"
 	delete(account.OpenAIOAuthOSProfiles.Profiles, OpenAIOSLinux)
 	_, err = ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, account, OpenAIOSLinux)

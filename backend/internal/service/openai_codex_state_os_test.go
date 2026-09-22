@@ -239,9 +239,16 @@ func TestCodexTurnStateOSCacheSharedAndAuthorizationFencesEveryIdentity(t *testi
 		require.Empty(t, next.Snapshot.Token, "a new shared authorization never reuses the old generation")
 	}
 	accounts.authorization = nil
+	accounts.owner.Credentials = map[string]any{}
+	accounts.owner.Status = StatusError
+	accounts.owner.Schedulable = false
 	for _, account := range []*Account{windows, linux} {
-		_, err = s.Prepare(ctx, account, "gpt-5")
-		require.Error(t, err, "revoking the account authorization applies to every identity")
+		attempt, prepareErr := s.Prepare(ctx, account, "gpt-5")
+		require.NoError(t, prepareErr, "cache preparation does not replace account scheduling or token validation")
+		require.NotNil(t, attempt)
+		require.False(t, attempt.Enabled)
+		require.Empty(t, attempt.Snapshot.Token, "a revoked account cannot reuse a ticket on any identity")
+		require.False(t, s.ValidateAttempt(ctx, attempt))
 	}
 }
 

@@ -181,7 +181,7 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 		return nil, errors.New("oauth refresh executor is nil")
 	}
 	requestPath := isOAuthRefreshRequestPath(ctx)
-	if account.OpenAIOAuthCredentialOS == "" && IsOpenAIOAuthOSProfileOwner(account) {
+	if account.OpenAIOAuthAuthorizationGeneration == "" && IsOpenAIOAuthOSProfileOwner(account) {
 		if _, scoped := api.accountRepo.(OpenAIOAuthOSCredentialsReader); scoped {
 			var err error
 			account, err = ResolveOpenAIOAuthCredentialAccount(ctx, api.accountRepo, account, OpenAIRequestOSFromContext(ctx).Family)
@@ -191,7 +191,7 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 		}
 	}
 	cacheKey := executor.CacheKey(account)
-	if account.OpenAIOAuthCredentialOS != "" {
+	if account.OpenAIOAuthAuthorizationGeneration != "" {
 		cacheKey = OpenAITokenRefreshLockKey(account)
 	}
 
@@ -223,7 +223,7 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 	// 2. 从 DB 重读最新 account（锁保护下，确保使用最新的 refresh_token）
 	var freshAccount *Account
 	var err error
-	if account.OpenAIOAuthCredentialOS != "" {
+	if account.OpenAIOAuthAuthorizationGeneration != "" {
 		freshAccount, err = ReloadOpenAIOAuthCredentialAccount(ctx, api.accountRepo, account)
 	} else {
 		freshAccount, err = api.accountRepo.GetByID(ctx, account.ID)
@@ -456,7 +456,7 @@ func (api *OAuthRefreshAPI) tryRecoverFromRefreshRace(ctx context.Context, usedA
 	}
 	var reReadAccount *Account
 	var err error
-	if usedAccount.OpenAIOAuthCredentialOS != "" {
+	if usedAccount.OpenAIOAuthAuthorizationGeneration != "" {
 		reReadAccount, err = ReloadOpenAIOAuthCredentialAccount(ctx, api.accountRepo, usedAccount)
 	} else {
 		reReadAccount, err = api.accountRepo.GetByID(ctx, usedAccount.ID)

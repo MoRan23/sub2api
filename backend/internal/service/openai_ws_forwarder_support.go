@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -522,45 +521,6 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
 	return s.selectAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, "", requireCompact)
 }
 
-// Physical WS connections retain one private authorization generation. A new
-// frame checks that same slot without changing the token on the existing socket.
-func (s *OpenAIGatewayService) freezeOpenAIWSAuthorization(ctx context.Context, account *Account, token string) (*Account, error) {
-	if !RequiresOpenAIOAuthOSAuthorization(account) {
-		return account, nil
-	}
-	scoped := account
-	if scoped.OpenAIOAuthCredentialOS == "" {
-		var err error
-		scoped, err = ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, OpenAIRequestOSFromContext(ctx).Family)
-		if err != nil {
-			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "OAuth account authorization is unavailable", err)
-		}
-	}
-	if strings.TrimSpace(token) != scoped.GetOpenAIAccessToken() {
-		return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "websocket token does not match the selected authorization", ErrOpenAIOAuthOSAuthorizationChanged)
-	}
-	if err := s.validateOpenAIWSAuthorization(ctx, scoped); err != nil {
-		return nil, err
-	}
-	// Retain the exact snapshot that produced token. A concurrent refresh may
-	// advance the private revision, but cannot change attribution of this socket.
-	return scoped, nil
-}
-
-func (s *OpenAIGatewayService) validateOpenAIWSAuthorization(ctx context.Context, account *Account) error {
-	if !RequiresOpenAIOAuthOSAuthorization(account) {
-		return nil
-	}
-	if account.OpenAIOAuthCredentialOS == "" || account.OpenAIOAuthAuthorizationGeneration == "" {
-		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "OAuth account authorization is unavailable", ErrOpenAIOAuthOSUnauthorized)
-	}
-	_, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, account.OpenAIOAuthCredentialOS)
-	if err != nil {
-		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "OAuth account authorization is no longer available", err)
-	}
-	return nil
-}
-
 func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 	ctx context.Context,
 	groupID *int64,
@@ -657,9 +617,6 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return 0, nil, "", nil
 	}
-	if !openAIAccountOSAuthorizationEligible(ctx, account, s.parentAccountLookup(ctx)) {
-		return 0, nil, "", nil
-	}
 	// OAuth/SetupToken continuation state lives on the WSv2 session and cannot
 	// survive an HTTP fallback. Official API-key Responses HTTP requests are
 	// different: previous_response_id is supported by the provider and scoped to
@@ -671,7 +628,7 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return 0, nil, "", nil
 	}
-	if !openAIParentHealthyForShadow(ctx, account, s.parentAccountLookup(ctx)) {
+	if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return 0, nil, "", nil
 	}
@@ -700,9 +657,6 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 			return 0, nil, "", nil
 		}
-		if !openAIAccountOSAuthorizationEligible(ctx, latest, s.parentAccountLookup(ctx)) {
-			return 0, nil, "", nil
-		}
 		if shouldClearStickySession(latest, requestedModel) || !latest.IsOpenAI() || !latest.IsSchedulable() {
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 			return 0, nil, "", nil
@@ -713,7 +667,7 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		if s.openAIGroupRequiresPrivacySet(ctx, groupID) && !latest.IsPrivacySet() {
 			return 0, nil, "", nil
 		}
-		if !openAIParentHealthyForShadow(ctx, latest, s.parentAccountLookup(ctx)) {
+		if !parentHealthyForShadow(latest, s.parentAccountLookup(ctx)) {
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 			return 0, nil, "", nil
 		}
@@ -738,10 +692,6 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 	}
 	if requireCompact && openAICompactSupportTier(account) == 0 {
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
-		return 0, nil, "", nil
-	}
-	account = s.resolveSelectedOpenAIOAuthCredentials(ctx, account)
-	if account == nil {
 		return 0, nil, "", nil
 	}
 	return accountID, account, responseID, store

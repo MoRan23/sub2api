@@ -121,6 +121,33 @@ func TestOpenAIRefreshCredentialsSkipsConcurrentReauthorization(t *testing.T) {
 	}
 }
 
+func TestOpenAIRefreshCredentialsIdentityWithoutMetadataUsesAccountCAS(t *testing.T) {
+	for _, replaced := range []bool{false, true} {
+		t.Run(map[bool]string{false: "current credentials", true: "new authorization"}[replaced], func(t *testing.T) {
+			stored := openAIRefreshMappingAccount()
+			expected := snapshotOAuthRefreshAccount(stored)
+			expected.OpenAIOAuthCredentialOS = OpenAIOSLinux
+			expected.OpenAIOAuthCredentialOwnerID = expected.ID
+			repo := &refreshAPIAccountRepo{account: stored}
+			next := shallowCopyMap(expected.Credentials)
+			next["access_token"] = "refreshed-access"
+			if replaced {
+				stored.Credentials["access_token"] = "replacement-access"
+			}
+			durable, applied, err := persistOpenAIOAuthRefreshCredentials(context.Background(), repo, expected, next)
+			require.NoError(t, err)
+			require.Equal(t, !replaced, applied)
+			if replaced {
+				require.Equal(t, "replacement-access", durable.GetOpenAIAccessToken())
+				require.Zero(t, repo.updateCredentialsCalls)
+			} else {
+				require.Equal(t, "refreshed-access", durable.GetOpenAIAccessToken())
+				require.Equal(t, 1, repo.updateCredentialsCalls)
+			}
+		})
+	}
+}
+
 func TestOpenAIRefreshCredentialPatchOnlyChangesProviderFields(t *testing.T) {
 	previous := map[string]any{"access_token": "old", "plan_type": "pro", "model_mapping": "old-mapping", "refresh_token": "old-refresh"}
 	next := map[string]any{"access_token": "new", "plan_type": "pro", "model_mapping": "bad-mapping", "quota_limit": 999}

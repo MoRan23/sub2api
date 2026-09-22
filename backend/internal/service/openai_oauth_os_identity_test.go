@@ -221,3 +221,129 @@ func TestOAuthOSIdentityProfileOnlyCapturesEnvironmentWithoutAllocatingRoots(t *
 	require.False(t, plan.TurnIdentityEnabled)
 	require.False(t, plan.InstallationEnabled)
 }
+
+func TestOAuthOSIdentityRetryKeepsOwnerProfileAfterDefaultOrInstallationChanges(t *testing.T) {
+	for _, shadow := range []bool{false, true} {
+		for _, changeDefault := range []bool{false, true} {
+			name := map[bool]string{false: "owner", true: "shadow"}[shadow] + map[bool]string{false: "/regenerate", true: "/new-default"}[changeDefault]
+			t.Run(name, func(t *testing.T) {
+				owner := osIdentityTestAccount(t, 710)
+				owner.Credentials = nil
+				owner.OpenAIOAuthOSProfiles.DefaultOS = OpenAIOSWindows
+				owner.OpenAIOAuthOSProfiles.Authorization = &OpenAIOAuthOSAuthorizationSummary{Status: OpenAIOAuthAuthorizationUnauthorized}
+				repo := newSchedulerOSAuthorizationTestRepo(*owner)
+				account := &repo.accounts[0]
+				if shadow {
+					account = &Account{ID: 711, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &owner.ID}
+				}
+				svc := &OpenAIGatewayService{accountRepo: repo}
+				c := osIdentityTestContext(t, "generic-client")
+				firstBody := []byte(`{"input":"first"}`)
+				ctx, first, err := svc.prepareOpenAIOAuthRequestScope(context.Background(), c, account, firstBody)
+				require.NoError(t, err)
+				require.Empty(t, OpenAIRequestOSFromContext(ctx).Family)
+				firstCapture := CaptureOpenAIOAuthIdentity(c, firstBody, "first-attempt")
+				selection, enabled, err := svc.resolveOpenAIOAuthOSSelection(ctx, c, first, firstCapture)
+				require.NoError(t, err)
+				require.True(t, enabled)
+				require.Equal(t, OpenAIOSWindows, selection.Profile.OSFamily)
+
+				updated := CloneOpenAIOAuthOSProfiles(repo.accounts[0].OpenAIOAuthOSProfiles)
+				regenerated := updated.Profiles[OpenAIOSWindows]
+				regenerated.InstallationID = uuid.NewString()
+				regenerated.UserAgent = "codex_cli_rs/0.999.1 (Windows 11.0.26100; x86_64) WindowsTerminal"
+				regenerated.SyncSessionID = uuid.Must(uuid.NewV7()).String()
+				updated.Profiles[OpenAIOSWindows] = regenerated
+				if changeDefault {
+					updated.DefaultOS = OpenAIOSLinux
+				}
+				repo.accounts[0].OpenAIOAuthOSProfiles = updated
+
+				// WS retries receive the handler's original, unscoped business account.
+				ClearOpenAIOAuthIdentityPlan(c)
+				retryInput := *account
+				retryInput.OpenAIOAuthAuthorizationGeneration = "current-generation"
+				retryInput.OpenAIOAuthCredentialRevision = 9
+				retryInput.OpenAIOAuthCredentialStateGeneration = "current-state"
+				retryInput.OpenAIOAuthCredentialEpoch = "current-epoch"
+				retryBody := []byte(`{"input":"next turn"}`)
+				ctx, retry, err := svc.prepareOpenAIOAuthRequestScope(ctx, c, &retryInput, retryBody)
+				require.NoError(t, err)
+				require.Equal(t, account.ID, retry.ID)
+				require.Equal(t, selection.Profile.UserAgent, retry.GetOpenAIUserAgent())
+				require.Equal(t, selection.Profile.InstallationID, retry.Extra[openAIPinnedInstallationIDKey])
+				require.Equal(t, selection.Profile, retry.OpenAIOAuthOSProfiles.Profiles[OpenAIOSWindows])
+				require.Equal(t, "current-generation", retry.OpenAIOAuthAuthorizationGeneration)
+				require.Equal(t, int64(9), retry.OpenAIOAuthCredentialRevision)
+				require.Equal(t, "current-state", retry.OpenAIOAuthCredentialStateGeneration)
+				require.Equal(t, "current-epoch", retry.OpenAIOAuthCredentialEpoch)
+				nextCapture := CaptureOpenAIOAuthIdentity(c, retryBody, "second-attempt")
+				continued, enabled, err := svc.resolveOpenAIOAuthOSSelection(ctx, c, retry, nextCapture)
+				require.NoError(t, err)
+				require.True(t, enabled)
+				require.Equal(t, selection.Profile, continued.Profile)
+
+				freshContext := osIdentityTestContext(t, "generic-client")
+				_, fresh, err := svc.prepareOpenAIOAuthRequestScope(context.Background(), freshContext, account, firstBody)
+				require.NoError(t, err)
+				want := updated.Profiles[updated.DefaultOS]
+				require.Equal(t, want.OSFamily, fresh.OpenAIOAuthCredentialOS)
+				require.Equal(t, want.UserAgent, fresh.GetOpenAIUserAgent())
+				require.Equal(t, want.InstallationID, fresh.Extra[openAIPinnedInstallationIDKey])
+				require.Zero(t, repo.credentialReads.Load(), "identity retries must not read authorization metadata")
+				require.Nil(t, account.Credentials, "identity projection must not mutate the selected account")
+				require.Empty(t, account.OpenAIOAuthCredentialOS)
+			})
+		}
+	}
+}
+
+func TestOAuthOSIdentityCredentialReloadKeepsFrozenProfileAndFreshTokens(t *testing.T) {
+	for _, shadow := range []bool{false, true} {
+		t.Run(map[bool]string{false: "owner", true: "shadow"}[shadow], func(t *testing.T) {
+			owner, repo := oauthOSCredentialFixture(t)
+			account := owner
+			if shadow {
+				account = &Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &owner.ID}
+				repo.accounts[account.ID] = account
+			}
+			scoped, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, account, OpenAIOSWindows)
+			require.NoError(t, err)
+			frozen := scoped.OpenAIOAuthOSProfiles.Profiles[OpenAIOSWindows]
+			updated := CloneOpenAIOAuthOSProfiles(owner.OpenAIOAuthOSProfiles)
+			changed := updated.Profiles[OpenAIOSWindows]
+			changed.InstallationID = uuid.NewString()
+			changed.UserAgent = "codex_cli_rs/0.999.1 (Windows 11.0.26100; x86_64) WindowsTerminal"
+			updated.Profiles[OpenAIOSWindows] = changed
+			updated.DefaultOS = OpenAIOSLinux
+			owner.OpenAIOAuthOSProfiles = updated
+			// Parent lookup during the first materialization must retain the
+			// identity already frozen before the persisted profile changed.
+			svc := &OpenAIGatewayService{accountRepo: repo}
+			c := osIdentityTestContext(t, "generic-client")
+			ctx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{})
+			capture := CaptureOpenAIOAuthIdentity(c, []byte(`{"input":"first turn"}`), "first-after-regeneration")
+			selection, enabled, err := svc.resolveOpenAIOAuthOSSelection(ctx, c, scoped, capture)
+			require.NoError(t, err)
+			require.True(t, enabled)
+			require.Equal(t, owner.ID, selection.OwnerID)
+			require.Equal(t, frozen, selection.Profile)
+			owner.Credentials["access_token"] = "refreshed-shared-token"
+			grant := repo.slots[OpenAIOSWindows]
+			grant.Revision++
+			grant.Status = OpenAIOAuthAuthorizationUnauthorized
+			cooldown := time.Now().Add(time.Minute)
+			grant.RefreshRetryAfter = &cooldown
+			reloaded, err := ReloadOpenAIOAuthCredentialAccount(context.Background(), repo, scoped)
+			require.NoError(t, err)
+			require.Equal(t, account.ID, reloaded.ID)
+			require.Equal(t, frozen.UserAgent, reloaded.GetOpenAIUserAgent())
+			require.Equal(t, frozen.InstallationID, reloaded.Extra[openAIPinnedInstallationIDKey])
+			require.Equal(t, frozen, reloaded.OpenAIOAuthOSProfiles.Profiles[OpenAIOSWindows])
+			require.Equal(t, OpenAIOSWindows, reloaded.OpenAIOAuthCredentialOS)
+			require.Equal(t, "refreshed-shared-token", reloaded.GetOpenAIAccessToken())
+			require.Equal(t, grant.Revision, reloaded.OpenAIOAuthCredentialRevision)
+			require.Equal(t, "shared-token", scoped.GetOpenAIAccessToken())
+		})
+	}
+}

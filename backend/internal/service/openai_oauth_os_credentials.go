@@ -154,24 +154,18 @@ func RequiresOpenAIOAuthOSAuthorization(account *Account) bool {
 	return IsOpenAIOAuthOSProfileOwner(account) || account != nil && account.IsOpenAIOAuth() && account.IsShadow()
 }
 
-// OpenAIOAuthOSAuthorizationAvailable retains the legacy API name. Authorization
-// lives on the account; OS profile summaries are compatibility data, never an
-// admission gate. The scheduler's secret-free projection carries only whether
-// account credentials were present. Full accounts still use their actual tokens.
-// Account status and scheduling limits are checked by the caller.
+// OpenAIOAuthOSAuthorizationAvailable is retained for compatibility diagnostics.
+// Scheduling never inspects tokens or OS authorization summaries.
 func OpenAIOAuthOSAuthorizationAvailable(account *Account, _ string) bool {
 	if !RequiresOpenAIOAuthOSAuthorization(account) {
 		return true
 	}
-	if account.OpenAIOAuthCredentialsAvailable != nil {
-		return *account.OpenAIOAuthCredentialsAvailable
-	}
 	return strings.TrimSpace(account.GetOpenAIAccessToken()) != "" || strings.TrimSpace(account.GetOpenAIRefreshToken()) != ""
 }
 
-// Resolve reads the account's current credentials and private CAS metadata, then
-// projects its selected installation identity without modifying the stored row.
-// A scoped request cannot switch identity or cross an authorization generation.
+// Resolve reads the single account credential snapshot and its private CAS
+// attribution after account selection. Legacy authorization status and refresh
+// cooldown fields are not another admission policy.
 func ResolveOpenAIOAuthCredentialAccount(ctx context.Context, repo AccountRepository, account *Account, os string) (*Account, error) {
 	if account == nil {
 		return nil, ErrAccountNotFound
@@ -182,16 +176,22 @@ func ResolveOpenAIOAuthCredentialAccount(ctx context.Context, repo AccountReposi
 		}
 		return account, nil
 	}
-	if repo == nil {
-		return nil, ErrOpenAIOAuthOSUnauthorized
-	}
 	ownerID := account.ID
 	if account.IsShadow() {
 		ownerID = *account.ParentAccountID
 	}
-	owner, err := repo.GetByID(ctx, ownerID)
-	if err != nil || !IsOpenAIOAuthOSProfileOwner(owner) {
-		return nil, ErrOpenAIOAuthOSUnauthorized
+	owner := account
+	if repo != nil {
+		var err error
+		owner, err = repo.GetByID(ctx, ownerID)
+		if err != nil {
+			return nil, err
+		}
+	} else if account.IsShadow() {
+		return nil, ErrAccountNotFound
+	}
+	if !IsOpenAIOAuthOSProfileOwner(owner) {
+		return nil, ErrAccountNotFound
 	}
 	os = NormalizeOpenAIOSFamily(os)
 	if account.OpenAIOAuthCredentialOS != "" {
@@ -204,18 +204,24 @@ func ResolveOpenAIOAuthCredentialAccount(ctx context.Context, repo AccountReposi
 		os = NormalizeOpenAIOSFamily(owner.OpenAIOAuthOSProfiles.DefaultOS)
 	}
 	if os == "" {
-		return nil, ErrOpenAIOAuthOSUnauthorized
+		os = OpenAIOSWindows
 	}
 	reader, ok := repo.(OpenAIOAuthOSCredentialsReader)
 	if !ok {
-		return nil, ErrOpenAIOAuthOSUnauthorized
+		return ResolveOpenAIOAuthIdentityAccount(ctx, repo, account, os)
 	}
 	slot, err := reader.GetOpenAIOAuthOSCredential(ctx, owner.ID, os)
 	if err != nil {
-		return nil, ErrOpenAIOAuthOSUnauthorized
+		return nil, err
 	}
-	if slot == nil || slot.OwnerAccountID != owner.ID || slot.Status != OpenAIOAuthAuthorizationAuthorized || (slot.RefreshRetryAfter != nil && slot.RefreshRetryAfter.After(time.Now())) {
-		return nil, ErrOpenAIOAuthOSUnauthorized
+	if slot == nil {
+		if account.OpenAIOAuthAuthorizationGeneration != "" {
+			return nil, ErrOpenAIOAuthOSAuthorizationChanged
+		}
+		return ResolveOpenAIOAuthIdentityAccount(ctx, repo, account, os)
+	}
+	if slot.OwnerAccountID != owner.ID {
+		return nil, ErrOpenAIOAuthOSAuthorizationChanged
 	}
 	if account.OpenAIOAuthAuthorizationGeneration != "" && (account.OpenAIOAuthAuthorizationGeneration != slot.AuthorizationGeneration || account.OpenAIOAuthCredentialOwnerID != slot.OwnerAccountID) {
 		return nil, ErrOpenAIOAuthOSAuthorizationChanged
@@ -231,36 +237,88 @@ func ResolveOpenAIOAuthCredentialAccount(ctx context.Context, repo AccountReposi
 	// The compatibility reader returns an atomic projection of accounts.credentials
 	// and its private metadata. It no longer reads a separate token store.
 	out.Credentials = PreserveOpenAIOAuthProviderCredentials(slot.Credentials, out.Credentials)
-	// A refresh-only imported grant must reach the token provider so it can
-	// acquire its first access token. Sending still requires that provider's
-	// final access-token validation.
-	if strings.TrimSpace(out.GetCredential("access_token")) == "" && strings.TrimSpace(out.GetCredential("refresh_token")) == "" {
-		return nil, ErrOpenAIOAuthOSUnauthorized
-	}
 	out.Extra = maps.Clone(business.Extra)
 	if out.Extra == nil {
 		out.Extra = make(map[string]any)
 	}
 	out.OpenAIOAuthOSProfiles = CloneOpenAIOAuthOSProfiles(owner.OpenAIOAuthOSProfiles)
-	if owner.OpenAIOAuthOSProfiles == nil {
-		return nil, ErrOpenAIOAuthOSProfileUnavailable
+	if account.OpenAIOAuthCredentialOS != "" && OpenAIOAuthOSProfilesComplete(account.OpenAIOAuthOSProfiles) {
+		out.OpenAIOAuthOSProfiles = CloneOpenAIOAuthOSProfiles(account.OpenAIOAuthOSProfiles)
 	}
-	profile, exists := owner.OpenAIOAuthOSProfiles.Profiles[os]
-	if !exists {
-		return nil, ErrOpenAIOAuthOSProfileUnavailable
-	}
-	out.Credentials["user_agent"] = profile.UserAgent
-	out.Extra[openAIPinnedInstallationIDKey] = profile.InstallationID
-	summary := CloneOpenAIOAuthOSAuthorizationSummary(OpenAIOAuthOSAuthorizationSummary{
-		Status: slot.Status, AuthorizedAt: slot.AuthorizedAt, ExpiresAt: slot.ExpiresAt,
-		LastError: slot.LastError, RefreshRetryAfter: slot.RefreshRetryAfter,
-	})
-	out.OpenAIOAuthOSProfiles.Authorization = &summary
 	out.Extra["codex_turn_state_generation"] = slot.StateGeneration
 	out.Extra["codex_turn_state_credential_epoch"] = slot.CredentialEpoch
 	out.OpenAIOAuthCredentialOS, out.OpenAIOAuthCredentialOwnerID = os, owner.ID
 	out.OpenAIOAuthAuthorizationGeneration, out.OpenAIOAuthCredentialRevision = slot.AuthorizationGeneration, slot.Revision
 	out.OpenAIOAuthCredentialStateGeneration, out.OpenAIOAuthCredentialEpoch = slot.StateGeneration, slot.CredentialEpoch
+	return ResolveOpenAIOAuthIdentityAccount(ctx, repo, &out, os)
+}
+
+// ResolveOpenAIOAuthIdentityAccount only selects an installation profile. It
+// does not select credentials, inspect authorization state, or affect scheduling.
+func ResolveOpenAIOAuthIdentityAccount(ctx context.Context, repo AccountRepository, account *Account, os string) (*Account, error) {
+	if account == nil {
+		return nil, ErrAccountNotFound
+	}
+	if !RequiresOpenAIOAuthOSAuthorization(account) {
+		return account, nil
+	}
+	owner := account
+	if account.IsShadow() {
+		if repo == nil {
+			return nil, ErrAccountNotFound
+		}
+		parent, err := repo.GetByID(ctx, *account.ParentAccountID)
+		if err != nil {
+			return nil, err
+		}
+		owner, err = credentialAccountFromParent(account, parent)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if account.OpenAIOAuthCredentialOS != "" {
+		if requested := NormalizeOpenAIOSFamily(os); requested != "" && requested != account.OpenAIOAuthCredentialOS {
+			return nil, ErrOpenAIOAuthOSAuthorizationChanged
+		}
+		os = account.OpenAIOAuthCredentialOS
+	}
+	profiles := CloneOpenAIOAuthOSProfiles(owner.OpenAIOAuthOSProfiles)
+	if account.OpenAIOAuthCredentialOS != "" && OpenAIOAuthOSProfilesComplete(account.OpenAIOAuthOSProfiles) {
+		profiles = CloneOpenAIOAuthOSProfiles(account.OpenAIOAuthOSProfiles)
+	}
+	if !OpenAIOAuthOSProfilesComplete(profiles) {
+		if ensurer, supported := repo.(OpenAIOAuthOSProfilesEnsurer); supported {
+			var err error
+			profiles, err = ensurer.EnsureOpenAIOAuthOSProfiles(ctx, owner.ID)
+			if err != nil || !OpenAIOAuthOSProfilesComplete(profiles) {
+				return nil, ErrOpenAIOAuthOSProfileUnavailable
+			}
+		} else {
+			// Older adapters keep their persisted single identity, as before OS
+			// profiles were supported; never generate an ephemeral installation.
+			if profiles != nil {
+				return nil, ErrOpenAIOAuthOSProfileUnavailable
+			}
+			return account, nil
+		}
+	}
+	if os = NormalizeOpenAIOSFamily(os); os == "" {
+		os = profiles.DefaultOS
+	}
+	out := *account
+	out.Credentials = maps.Clone(account.Credentials)
+	if out.Credentials == nil {
+		out.Credentials = make(map[string]any)
+	}
+	out.Extra = maps.Clone(account.Extra)
+	if out.Extra == nil {
+		out.Extra = make(map[string]any)
+	}
+	profile := profiles.Profiles[os]
+	out.OpenAIOAuthOSProfiles = profiles
+	out.Credentials["user_agent"] = profile.UserAgent
+	out.Extra[openAIPinnedInstallationIDKey] = profile.InstallationID
+	out.OpenAIOAuthCredentialOS, out.OpenAIOAuthCredentialOwnerID = os, owner.ID
 	return &out, nil
 }
 
@@ -280,6 +338,7 @@ func ReloadOpenAIOAuthCredentialAccount(ctx context.Context, repo AccountReposit
 		copy.OpenAIOAuthCredentialOS = scoped.OpenAIOAuthCredentialOS
 		copy.OpenAIOAuthCredentialOwnerID = scoped.OpenAIOAuthCredentialOwnerID
 		copy.OpenAIOAuthAuthorizationGeneration = scoped.OpenAIOAuthAuthorizationGeneration
+		copy.OpenAIOAuthOSProfiles = CloneOpenAIOAuthOSProfiles(scoped.OpenAIOAuthOSProfiles)
 		fresh = &copy
 	}
 	return ResolveOpenAIOAuthCredentialAccount(ctx, repo, fresh, scoped.OpenAIOAuthCredentialOS)

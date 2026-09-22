@@ -26,10 +26,12 @@ type openAIOSRuntimeRepo struct {
 func newOpenAIOSRuntimeRepo() *openAIOSRuntimeRepo {
 	r := &openAIOSRuntimeRepo{slots: make(map[string]*OpenAIOAuthOSCredential)}
 	r.account = &Account{ID: 41, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
-		Credentials: map[string]any{"access_token": "shared-access", "refresh_token": "shared-refresh"},
-		OpenAIOAuthOSProfiles: &OpenAIOAuthOSProfiles{DefaultOS: OpenAIOSWindows, Profiles: map[string]OpenAIOAuthOSProfile{
-			OpenAIOSWindows: {OSFamily: OpenAIOSWindows}, OpenAIOSMacOS: {OSFamily: OpenAIOSMacOS}, OpenAIOSLinux: {OSFamily: OpenAIOSLinux},
-		}}}
+		Credentials: map[string]any{"access_token": "shared-access", "refresh_token": "shared-refresh"}}
+	profiles, err := BuildOpenAIOAuthOSProfiles(r.account, nil)
+	if err != nil {
+		panic(err)
+	}
+	r.account.OpenAIOAuthOSProfiles = profiles
 	grant := &OpenAIOAuthOSCredential{OwnerAccountID: 41, Status: OpenAIOAuthAuthorizationAuthorized,
 		AuthorizationGeneration: "shared-generation", Revision: 1, Credentials: map[string]any{
 			"access_token": "shared-access", "refresh_token": "shared-refresh", "expires_at": time.Now().Add(time.Hour).Format(time.RFC3339),
@@ -133,7 +135,7 @@ func TestOpenAIOSProviderRejectsReauthorizationEvenWithOldCache(t *testing.T) {
 	require.ErrorIs(t, err, ErrOpenAIOAuthOSAuthorizationChanged)
 }
 
-func TestOpenAIOSProviderDoesNotReturnExpiredSelectedToken(t *testing.T) {
+func TestOpenAIOSProviderPreservesCacheFirstDespiteStoredExpiry(t *testing.T) {
 	r := newOpenAIOSRuntimeRepo()
 	r.slots[OpenAIOSLinux].Credentials["expires_at"] = time.Now().Add(-time.Minute).Format(time.RFC3339)
 	ctx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: OpenAIOSLinux, Captured: true})
@@ -142,12 +144,13 @@ func TestOpenAIOSProviderDoesNotReturnExpiredSelectedToken(t *testing.T) {
 	cache := newOpenAITokenCacheStub()
 	cache.tokens[OpenAITokenCacheKey(scoped)] = "expired-cache-token"
 	token, err := NewOpenAITokenProvider(r, cache, nil).GetAccessToken(ctx, r.account)
-	require.ErrorContains(t, err, "access token is expired")
-	require.Empty(t, token)
+	require.NoError(t, err)
+	require.Equal(t, "expired-cache-token", token)
+	require.Zero(t, cache.lockCalled, "a cache hit keeps the original refresh policy")
 	require.Equal(t, "shared-access", r.slots[OpenAIOSWindows].Credentials["access_token"])
 }
 
-func TestOpenAIOSProviderRefreshLockWaitCannotReturnExpiredCachedToken(t *testing.T) {
+func TestOpenAIOSProviderRefreshLockWaitUsesCachedTokenDespiteStoredExpiry(t *testing.T) {
 	r := newOpenAIOSRuntimeRepo()
 	r.slots[OpenAIOSWindows].Credentials["expires_at"] = time.Now().Add(-time.Minute).Format(time.RFC3339)
 	scoped, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), r, r.account, OpenAIOSLinux)
@@ -158,9 +161,10 @@ func TestOpenAIOSProviderRefreshLockWaitCannotReturnExpiredCachedToken(t *testin
 	executor := &refreshAPIExecutorStub{needsRefresh: true}
 	provider := NewOpenAITokenProvider(r, cache, nil)
 	provider.SetRefreshAPI(NewOAuthRefreshAPI(r, cache), executor)
-	token, err := provider.GetAccessToken(context.Background(), scoped)
-	require.ErrorContains(t, err, "access token is expired")
-	require.Empty(t, token)
+	token, used, err := provider.waitForTokenAfterLockRaceWithAccount(context.Background(), OpenAITokenCacheKey(scoped), scoped)
+	require.NoError(t, err)
+	require.Equal(t, "expired-cached-token", token)
+	require.Equal(t, scoped.OpenAIOAuthCredentialRevision, used.OpenAIOAuthCredentialRevision)
 	require.Zero(t, executor.refreshCalls)
 }
 
@@ -172,13 +176,13 @@ func (e *openAIOSProductionRefreshPredicate) NeedsRefresh(account *Account, wind
 	return (&OpenAITokenRefresher{}).NeedsRefresh(account, window)
 }
 
-func TestOpenAIOSProviderRefreshesRTOnlyGrantDespiteFutureExpiry(t *testing.T) {
+func TestOpenAIOSProviderPreservesCacheFirstForRefreshOnlyAccount(t *testing.T) {
 	r := newOpenAIOSRuntimeRepo()
 	delete(r.slots[OpenAIOSWindows].Credentials, "access_token")
 	scoped, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), r, r.account, OpenAIOSLinux)
 	require.NoError(t, err)
 	cache := newOpenAITokenCacheStub()
-	cache.tokens[OpenAITokenCacheKey(scoped)] = "invalid-old-cache"
+	cache.tokens[OpenAITokenCacheKey(scoped)] = "cached-access"
 	executor := &openAIOSProductionRefreshPredicate{&refreshAPIExecutorStub{credentials: map[string]any{
 		"access_token": "new-access", "refresh_token": "next-refresh", "expires_at": time.Now().Add(time.Hour).Format(time.RFC3339),
 	}}}
@@ -186,14 +190,14 @@ func TestOpenAIOSProviderRefreshesRTOnlyGrantDespiteFutureExpiry(t *testing.T) {
 	provider.SetRefreshAPI(NewOAuthRefreshAPI(r, cache), executor)
 	token, used, err := provider.GetAccessTokenWithAccount(context.Background(), scoped)
 	require.NoError(t, err)
-	require.Equal(t, "new-access", token)
-	require.Equal(t, 1, executor.refreshCalls)
+	require.Equal(t, "cached-access", token)
+	require.Zero(t, executor.refreshCalls)
 	require.Equal(t, OpenAIOSLinux, used.OpenAIOAuthCredentialOS)
-	require.Equal(t, "new-access", r.slots[OpenAIOSWindows].Credentials["access_token"])
+	require.Empty(t, r.account.GetOpenAIAccessToken())
 	require.False(t, executor.NeedsRefresh(used, time.Minute))
 }
 
-func TestOpenAIOSProviderPermanentRefreshFailureMarksSharedReauthorization(t *testing.T) {
+func TestOpenAIOSProviderPermanentRefreshFailureUsesOriginalFallbackPolicy(t *testing.T) {
 	for _, failure := range []string{"invalid_grant", "refresh_token_reused", "refresh_token_invalidated"} {
 		t.Run(failure, func(t *testing.T) {
 			r := newOpenAIOSRuntimeRepo()
@@ -201,23 +205,20 @@ func TestOpenAIOSProviderPermanentRefreshFailureMarksSharedReauthorization(t *te
 			scoped, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), r, r.account, OpenAIOSLinux)
 			require.NoError(t, err)
 			cache := newOpenAITokenCacheStub()
-			cache.tokens[OpenAITokenCacheKey(scoped)] = "expired-access"
 			provider := NewOpenAITokenProvider(r, cache, nil)
 			provider.SetRefreshAPI(NewOAuthRefreshAPI(r, cache), &refreshAPIExecutorStub{needsRefresh: true, err: errors.New(failure)})
 
 			token, err := provider.GetAccessToken(context.Background(), scoped)
-			require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized)
-			require.Empty(t, token)
-			require.NotContains(t, cache.tokens, OpenAITokenCacheKey(scoped))
-			require.Equal(t, StatusError, r.account.Status)
-			require.False(t, r.account.Schedulable)
-			require.NotEmpty(t, r.account.ErrorMessage)
+			require.NoError(t, err)
+			require.Equal(t, "shared-access", token)
+			require.Equal(t, token, cache.tokens[OpenAITokenCacheKey(scoped)])
+			require.Equal(t, StatusActive, r.account.Status)
+			require.True(t, r.account.Schedulable)
+			require.Empty(t, r.account.ErrorMessage)
 			for _, os := range OpenAIOAuthOSFamilies() {
-				require.Equal(t, OpenAIOAuthAuthorizationReauthRequired, r.slots[os].Status)
-				_, resolveErr := ResolveOpenAIOAuthCredentialAccount(context.Background(), r, r.account, os)
-				require.ErrorIs(t, resolveErr, ErrOpenAIOAuthOSUnauthorized)
+				require.Equal(t, OpenAIOAuthAuthorizationAuthorized, r.slots[os].Status)
 			}
-			require.Zero(t, r.globalErrors, "the snapshot CAS must be the only authorization write")
+			require.Zero(t, r.globalErrors, "request refresh follows the configured fallback policy")
 		})
 	}
 }
@@ -305,8 +306,8 @@ func TestOpenAIOSProviderTransientOrClientRefreshFailureDoesNotRequireReauthoriz
 			provider := NewOpenAITokenProvider(r, newOpenAITokenCacheStub(), nil)
 			provider.SetRefreshAPI(NewOAuthRefreshAPI(r, nil), &refreshAPIExecutorStub{needsRefresh: true, err: errors.New(failure)})
 			token, err := provider.GetAccessToken(context.Background(), r.account)
-			require.Error(t, err)
-			require.Empty(t, token)
+			require.NoError(t, err)
+			require.Equal(t, "shared-access", token)
 			require.Equal(t, OpenAIOAuthAuthorizationAuthorized, r.slots[OpenAIOSWindows].Status)
 			require.Zero(t, r.globalErrors)
 		})
@@ -323,19 +324,41 @@ func (c *openAIOSRefreshFailureTTLCache) SetAccessToken(ctx context.Context, key
 	return c.OpenAITokenCache.SetAccessToken(ctx, key, token, ttl)
 }
 
-func TestOpenAIOSProviderPreservesUnexpiredFallbackAndShortCacheAfterTransientRefreshFailure(t *testing.T) {
+func TestOpenAIOSProviderPreservesFallbackAndShortCacheAfterTransientRefreshFailure(t *testing.T) {
+	for _, expiresIn := range []time.Duration{-time.Minute, 2 * time.Minute} {
+		t.Run(expiresIn.String(), func(t *testing.T) {
+			r := newOpenAIOSRuntimeRepo()
+			r.account.Credentials["expires_at"] = time.Now().Add(expiresIn).Format(time.RFC3339)
+			cache := &openAIOSRefreshFailureTTLCache{OpenAITokenCache: newOpenAITokenCacheStub()}
+			provider := NewOpenAITokenProvider(r, cache, nil)
+			provider.SetRefreshAPI(NewOAuthRefreshAPI(r, nil), &refreshAPIExecutorStub{needsRefresh: true, err: errors.New("upstream timeout")})
+			ctx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: OpenAIOSLinux})
+			token, used, err := provider.GetAccessTokenWithAccount(ctx, r.account)
+			require.NoError(t, err)
+			require.Equal(t, "shared-access", token)
+			require.Equal(t, OpenAIOSLinux, used.OpenAIOAuthCredentialOS)
+			require.Equal(t, OpenAIProviderRefreshPolicy().FailureTTL, cache.ttl)
+			require.Equal(t, OpenAIOAuthAuthorizationAuthorized, r.slots[OpenAIOSWindows].Status)
+		})
+	}
+}
+
+func TestOpenAIOSProviderHonorsRefreshErrorReturnPolicy(t *testing.T) {
 	r := newOpenAIOSRuntimeRepo()
-	r.slots[OpenAIOSWindows].Credentials["expires_at"] = time.Now().Add(2 * time.Minute).Format(time.RFC3339)
-	cache := &openAIOSRefreshFailureTTLCache{OpenAITokenCache: newOpenAITokenCacheStub()}
+	r.account.Credentials["expires_at"] = time.Now().Add(-time.Minute).Format(time.RFC3339)
+	refreshErr := errors.New("invalid_grant")
+	cache := newOpenAITokenCacheStub()
 	provider := NewOpenAITokenProvider(r, cache, nil)
-	provider.SetRefreshAPI(NewOAuthRefreshAPI(r, nil), &refreshAPIExecutorStub{needsRefresh: true, err: errors.New("upstream timeout")})
-	ctx := ContextWithOpenAIRequestOS(context.Background(), OpenAIRequestOS{Family: OpenAIOSLinux})
-	token, used, err := provider.GetAccessTokenWithAccount(ctx, r.account)
-	require.NoError(t, err)
-	require.Equal(t, "shared-access", token)
-	require.Equal(t, OpenAIOSLinux, used.OpenAIOAuthCredentialOS)
-	require.Equal(t, OpenAIProviderRefreshPolicy().FailureTTL, cache.ttl)
-	require.Equal(t, OpenAIOAuthAuthorizationAuthorized, r.slots[OpenAIOSWindows].Status)
+	provider.SetRefreshAPI(NewOAuthRefreshAPI(r, nil), &refreshAPIExecutorStub{needsRefresh: true, err: refreshErr})
+	policy := OpenAIProviderRefreshPolicy()
+	policy.OnRefreshError = ProviderRefreshErrorReturn
+	provider.SetRefreshPolicy(policy)
+	token, err := provider.GetAccessToken(context.Background(), r.account)
+	require.ErrorIs(t, err, refreshErr)
+	require.Empty(t, token)
+	require.Zero(t, cache.setCalled)
+	require.Equal(t, StatusActive, r.account.Status)
+	require.True(t, r.account.Schedulable)
 }
 
 func TestOpenAIOSRefreshSharesCredentialsAndRetainsAttemptedIdentity(t *testing.T) {
@@ -383,14 +406,15 @@ func TestOpenAIOSInvalidGrantRecoveryRequiresNewSharedCredentials(t *testing.T) 
 	require.EqualError(t, err, "invalid_grant")
 }
 
-func TestOpenAIOSUpstreamRevocationPausesSharedAuthorization(t *testing.T) {
+func TestOpenAIOSUpstreamRevocationPausesAccountWithFrozenCredentials(t *testing.T) {
 	r := newOpenAIOSRuntimeRepo()
 	scoped, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), r, r.account, OpenAIOSLinux)
 	require.NoError(t, err)
 	svc := NewRateLimitService(r, nil, nil, nil, nil)
 	require.True(t, svc.HandleUpstreamError(context.Background(), scoped, 401, nil, []byte(`{"error":{"code":"token_revoked"}}`)))
-	require.Equal(t, OpenAIOAuthAuthorizationReauthRequired, r.slots[OpenAIOSLinux].Status)
-	require.Equal(t, OpenAIOAuthAuthorizationReauthRequired, r.slots[OpenAIOSWindows].Status)
+	require.Equal(t, StatusError, r.account.Status)
+	require.False(t, r.account.Schedulable)
+	require.Equal(t, OpenAIOAuthAuthorizationAuthorized, r.slots[OpenAIOSWindows].Status)
 	require.Zero(t, r.globalErrors)
 	require.Zero(t, r.globalCooldowns)
 }
@@ -464,8 +488,9 @@ func TestOpenAIOSProviderReturnsRefreshedAttemptRevisionForAuthFailure(t *testin
 	require.NoError(t, err)
 	require.Equal(t, token, attempt.GetOpenAIAccessToken())
 	require.True(t, NewRateLimitService(r, nil, nil, nil, nil).HandleUpstreamError(context.Background(), attempt, 401, nil, []byte(`{"error":{"code":"token_revoked"}}`)))
-	require.Equal(t, OpenAIOAuthAuthorizationReauthRequired, r.slots[OpenAIOSLinux].Status)
-	require.Equal(t, OpenAIOAuthAuthorizationReauthRequired, r.slots[OpenAIOSWindows].Status)
+	require.Equal(t, StatusError, r.account.Status)
+	require.False(t, r.account.Schedulable)
+	require.Equal(t, OpenAIOAuthAuthorizationAuthorized, r.slots[OpenAIOSWindows].Status)
 }
 
 type openAIOSCacheReadHook struct {
@@ -585,17 +610,23 @@ func TestOpenAIOSGatewayRefreshUpdatesSparkAttemptWithoutChangingBusinessID(t *t
 	require.Equal(t, int64(2), attempt.OpenAIOAuthCredentialRevision)
 	require.Equal(t, token, attempt.GetOpenAIAccessToken())
 	require.True(t, NewRateLimitService(r, nil, nil, nil, nil).HandleUpstreamError(context.Background(), attempt, 401, nil, []byte(`{"error":{"code":"token_revoked"}}`)))
-	require.Equal(t, OpenAIOAuthAuthorizationReauthRequired, r.slots[OpenAIOSLinux].Status)
-	require.Equal(t, OpenAIOAuthAuthorizationReauthRequired, r.slots[OpenAIOSWindows].Status)
+	require.Equal(t, StatusError, r.account.Status)
+	require.False(t, r.account.Schedulable)
+	require.Equal(t, OpenAIOAuthAuthorizationAuthorized, r.slots[OpenAIOSWindows].Status)
 	require.Zero(t, r.globalErrors)
 }
 
-func TestOpenAIOSProviderAndShadowFailClosedWithoutSlotReader(t *testing.T) {
+func TestOpenAIOSProviderPreservesLegacyAccountWithoutMetadataReader(t *testing.T) {
 	account := &Account{ID: 71, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "legacy-secret"}}
-	_, err := NewOpenAITokenProvider(nil, nil, nil).GetAccessToken(context.Background(), account)
-	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized)
-	_, err = resolveCredentialAccount(context.Background(), nil, account)
-	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized)
+	token, err := NewOpenAITokenProvider(nil, nil, nil).GetAccessToken(context.Background(), account)
+	require.NoError(t, err)
+	require.Equal(t, "legacy-secret", token)
+	resolved, err := resolveCredentialAccount(context.Background(), nil, account)
+	require.NoError(t, err)
+	require.Equal(t, token, resolved.GetOpenAIAccessToken())
+	shadow := &Account{ID: 72, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &account.ID, QuotaDimension: QuotaDimensionSpark}
+	_, err = resolveCredentialAccount(context.Background(), nil, shadow)
+	require.Error(t, err, "a shadow still needs its actual parent credential source")
 }
 
 func TestOpenAIOS429PlanMetadataPatchUpdatesSharedGrant(t *testing.T) {

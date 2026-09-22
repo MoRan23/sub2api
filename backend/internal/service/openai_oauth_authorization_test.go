@@ -208,14 +208,14 @@ func TestOpenAIOAuthAuthorizationSameRefreshTokenCanUseAnotherIdentity(t *testin
 	require.Equal(t, "linux-rt", repo.slots[OpenAIOSWindows].Credentials["refresh_token"])
 }
 
-func TestOpenAIOAuthAuthorizationMissingSharedGrantCannotRefresh(t *testing.T) {
+func TestOpenAIOAuthAuthorizationMetadataAbsenceDoesNotGateAccountRefresh(t *testing.T) {
 	svc, client, repo := authorizationTestSetup(t)
 	delete(repo.slots, OpenAIOSWindows)
 	account := *repo.account
 	account.OpenAIOAuthCredentialOS = OpenAIOSLinux
 	_, err := svc.RefreshAccountToken(context.Background(), &account)
-	require.ErrorIs(t, err, ErrOpenAIOAuthOSUnauthorized)
-	require.Zero(t, client.calls.Load())
+	require.NoError(t, err)
+	require.Equal(t, int32(1), client.calls.Load())
 }
 
 func TestOpenAIOAuthAuthorizationManualImportUsesServerIdentity(t *testing.T) {

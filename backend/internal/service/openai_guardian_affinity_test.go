@@ -223,7 +223,7 @@ func TestOpenAIGatewayService_GuardianParentAffinitySelectsParentAccountAcrossSc
 			cfg.Gateway.OpenAIWS.LBTopK = 2
 			cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:" + parentHash: 39001}}
 			svc := &OpenAIGatewayService{
-				accountRepo:        schedulerGroupAwareOpenAIAccountRepo{newSchedulerTestOpenAIAccountRepo(accounts)},
+				accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
 				cache:              cache,
 				cfg:                cfg,
 				rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService(mode.advanced, mode.stickyWeighted),
@@ -274,7 +274,7 @@ func TestOpenAIGatewayService_GuardianParentAffinityFallsBackWithoutCrossGroupOr
 			}
 			cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:" + parentHash: 39011}}
 			svc := &OpenAIGatewayService{
-				accountRepo:        schedulerGroupAwareOpenAIAccountRepo{newSchedulerTestOpenAIAccountRepo(accounts)},
+				accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
 				cache:              cache,
 				cfg:                &config.Config{},
 				rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
@@ -311,7 +311,7 @@ func TestOpenAIGatewayService_GuardianParentHashCollisionPreservesParentBinding(
 			}
 			cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:" + parentHash: 39021}}
 			svc := &OpenAIGatewayService{
-				accountRepo:        schedulerGroupAwareOpenAIAccountRepo{newSchedulerTestOpenAIAccountRepo(accounts)},
+				accountRepo:        schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}},
 				cache:              cache,
 				cfg:                &config.Config{},
 				rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService(advanced),
@@ -347,7 +347,7 @@ func TestOpenAIGatewayService_GuardianParentAffinityHonorsRequiredPrivacy(t *tes
 				{ID: 39031, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}, Credentials: map[string]any{"plan_type": "team"}},
 				{ID: 39032, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5, GroupIDs: []int64{groupID}, Credentials: map[string]any{"plan_type": "team"}, Extra: map[string]any{"privacy_mode": PrivacyModeTrainingOff}},
 			}
-			repo := &guardianAffinityAccountRepo{schedulerGroupAwareOpenAIAccountRepo: schedulerGroupAwareOpenAIAccountRepo{newSchedulerTestOpenAIAccountRepo(accounts)}}
+			repo := &guardianAffinityAccountRepo{schedulerGroupAwareOpenAIAccountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}}}
 			cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:" + parentHash: 39031}}
 			svc := &OpenAIGatewayService{
 				accountRepo:        repo,
@@ -431,7 +431,7 @@ func TestOpenAIGatewayService_PreviousResponseHonorsGroupAndRequiredPrivacy(t *t
 				},
 			}
 			accounts := []Account{tc.boundAccount, fallback}
-			repo := &guardianAffinityAccountRepo{schedulerGroupAwareOpenAIAccountRepo: schedulerGroupAwareOpenAIAccountRepo{newSchedulerTestOpenAIAccountRepo(accounts)}}
+			repo := &guardianAffinityAccountRepo{schedulerGroupAwareOpenAIAccountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}}}
 			cache := &schedulerTestGatewayCache{}
 			store := NewOpenAIWSStateStore(cache)
 			groupRepo := guardianAffinityGroupRepo{
@@ -498,7 +498,7 @@ func TestOpenAIGatewayService_PreviousResponseSimpleModeIgnoresGroupMembership(t
 		Extra:    map[string]any{"openai_apikey_responses_websockets_v2_enabled": true},
 	}
 	accounts := []Account{bound, fallback}
-	repo := &guardianAffinityAccountRepo{schedulerGroupAwareOpenAIAccountRepo: schedulerGroupAwareOpenAIAccountRepo{newSchedulerTestOpenAIAccountRepo(accounts)}}
+	repo := &guardianAffinityAccountRepo{schedulerGroupAwareOpenAIAccountRepo: schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: accounts}}}
 	cache := &schedulerTestGatewayCache{}
 	store := NewOpenAIWSStateStore(cache)
 	cfg := &config.Config{RunMode: config.RunModeSimple}

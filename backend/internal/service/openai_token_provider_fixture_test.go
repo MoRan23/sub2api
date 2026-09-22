@@ -37,16 +37,29 @@ func (r *openAIProviderTestRepo) SetOpenAIOAuthOSCredentialErrorIfUnchanged(_ co
 	return true, nil
 }
 
+func (r *openAIProviderTestRepo) MutateOpenAIOAuthAccountStateIfUnchanged(_ context.Context, id int64, snapshot OpenAIOAuthAccountStateSnapshot, change OpenAIOAuthAccountStateChange) (*OpenAIOAuthAccountStateResult, error) {
+	slot := r.slots[r.account.OpenAIOAuthCredentialOS]
+	if id != r.account.ID || slot == nil || slot.OwnerAccountID != snapshot.OwnerAccountID || slot.AuthorizationGeneration != snapshot.AuthorizationGeneration || slot.Revision != snapshot.CredentialRevision {
+		return &OpenAIOAuthAccountStateResult{}, nil
+	}
+	r.account.Status = StatusError
+	r.account.Schedulable = false
+	r.account.ErrorMessage = change.ErrorMessage
+	return &OpenAIOAuthAccountStateResult{Applied: true}, nil
+}
+
 // Provider tests retain their original credential contents (including deliberate
 // missing tokens) while explicitly authorizing one private test slot.
 func prepareOpenAIProviderTestAccount(account *Account) string {
 	if !IsOpenAIOAuthOSProfileOwner(account) {
 		return OpenAITokenCacheKey(account)
 	}
-	if account.OpenAIOAuthOSProfiles == nil {
-		account.OpenAIOAuthOSProfiles = &OpenAIOAuthOSProfiles{DefaultOS: OpenAIOSWindows, Profiles: map[string]OpenAIOAuthOSProfile{
-			OpenAIOSWindows: {OSFamily: OpenAIOSWindows, Authorization: OpenAIOAuthOSAuthorizationSummary{Status: OpenAIOAuthAuthorizationAuthorized}},
-		}}
+	if !OpenAIOAuthOSProfilesComplete(account.OpenAIOAuthOSProfiles) {
+		profiles, err := BuildOpenAIOAuthOSProfiles(account, account.OpenAIOAuthOSProfiles)
+		if err != nil {
+			panic(err)
+		}
+		account.OpenAIOAuthOSProfiles = profiles
 	}
 	account.OpenAIOAuthCredentialOS = account.OpenAIOAuthOSProfiles.DefaultOS
 	account.OpenAIOAuthCredentialOwnerID = account.ID

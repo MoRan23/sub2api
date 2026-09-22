@@ -20,6 +20,7 @@ type openAIOAuthOSSelection struct {
 	OwnerID                 int64
 	DefaultOS               string
 	Profile                 OpenAIOAuthOSProfile
+	Profiles                *OpenAIOAuthOSProfiles
 	Source                  string
 	ReceivedAt              time.Time
 	DailyEnabled            bool
@@ -55,13 +56,18 @@ func (s *OpenAIGatewayService) resolveOpenAIOAuthOSSelection(ctx context.Context
 	if s != nil {
 		repo = s.accountRepo
 	}
+	// The first identity for an owner is frozen for this request/connection.
+	// A later account reload or default-OS change does not reselect its machine.
+	if selection, exists := openAIOAuthOSSelectionForAccount(c, account); exists {
+		return selection, true, nil
+	}
 	requestedOS := capture.OSFamily
 	if frozen := OpenAIRequestOSFromContext(ctx); frozen.Captured {
 		requestedOS = frozen.Family
 	}
 	credentialOS, authorizationGeneration := "", ""
 	if RequiresOpenAIOAuthOSAuthorization(account) {
-		resolved, err := ResolveOpenAIOAuthCredentialAccount(ctx, repo, account, requestedOS)
+		resolved, err := ResolveOpenAIOAuthIdentityAccount(ctx, repo, account, requestedOS)
 		if err != nil {
 			return openAIOAuthOSSelection{}, false, err
 		}
@@ -81,18 +87,6 @@ func (s *OpenAIGatewayService) resolveOpenAIOAuthOSSelection(ctx context.Context
 			// Legacy adapters without durable profile storage keep their existing
 			// identity instead of minting a different machine on every request.
 			return openAIOAuthOSSelection{}, false, nil
-		}
-	}
-	if c != nil {
-		if value, found := c.Get(openAIOAuthOSSelectionsContextKey); found {
-			if selections, valid := value.(map[int64]openAIOAuthOSSelection); valid {
-				if selection, exists := selections[owner.ID]; exists {
-					if selection.CredentialOS != credentialOS || selection.AuthorizationGeneration != authorizationGeneration {
-						return openAIOAuthOSSelection{}, false, ErrOpenAIOAuthOSAuthorizationChanged
-					}
-					return selection, true, nil
-				}
-			}
 		}
 	}
 	profile, err := ResolveOpenAIOAuthOSProfile(ctx, repo, owner, requestedOS)
@@ -118,7 +112,7 @@ func (s *OpenAIGatewayService) resolveOpenAIOAuthOSSelection(ctx context.Context
 		source = "account_default"
 	}
 	selection := openAIOAuthOSSelection{OwnerID: owner.ID, DefaultOS: defaultOS, Profile: profile, Source: source, ReceivedAt: receivedAt,
-		CredentialOS: credentialOS, AuthorizationGeneration: authorizationGeneration}
+		CredentialOS: credentialOS, AuthorizationGeneration: authorizationGeneration, Profiles: CloneOpenAIOAuthOSProfiles(owner.OpenAIOAuthOSProfiles)}
 	if !capture.ReceivedAt.IsZero() && capture.RequestTurn.ID != "" && s != nil && s.oauthDailySessionRepo != nil && s.oauthDailySessionRotationEnabled(ctx) {
 		if daily, ok := s.oauthDailySessionRepo.(OAuthDailySessionOSRepository); ok {
 			pool, poolErr := daily.GetOrCreateOAuthDailySessionPoolForOS(ctx, owner.ID, selection.DefaultOS, receivedAt)
@@ -152,6 +146,26 @@ func (s *OpenAIGatewayService) resolveOpenAIOAuthOSSelection(ctx context.Context
 		c.Set(openAIOAuthOSSelectionsContextKey, selections)
 	}
 	return selection, true, nil
+}
+
+func openAIOAuthOSSelectionForAccount(c *gin.Context, account *Account) (openAIOAuthOSSelection, bool) {
+	if c == nil || account == nil {
+		return openAIOAuthOSSelection{}, false
+	}
+	ownerID := account.ID
+	if account.IsShadow() {
+		ownerID = *account.ParentAccountID
+	}
+	value, found := c.Get(openAIOAuthOSSelectionsContextKey)
+	if !found {
+		return openAIOAuthOSSelection{}, false
+	}
+	selections, valid := value.(map[int64]openAIOAuthOSSelection)
+	if !valid {
+		return openAIOAuthOSSelection{}, false
+	}
+	selection, exists := selections[ownerID]
+	return selection, exists
 }
 
 func bindOpenAIOAuthOSSelection(plan *OpenAIOAuthIdentityPlan, selection openAIOAuthOSSelection) {

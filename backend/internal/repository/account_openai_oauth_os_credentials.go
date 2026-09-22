@@ -320,7 +320,7 @@ func (r *accountRepository) PatchOpenAIOAuthOSCredentialsIfUnchanged(ctx context
 			return false, nil
 		}
 		slot := slots[0]
-		if slot.Status != service.OpenAIOAuthAuthorizationAuthorized || slot.AuthorizationGeneration != generation || slot.Revision != revision {
+		if slot.AuthorizationGeneration != generation || slot.Revision != revision {
 			return false, nil
 		}
 		next := service.OpenAIOAuthProviderCredentials(slot.Credentials)
@@ -381,7 +381,7 @@ func (r *accountRepository) mutateOpenAIOAuthOSCredentialStateCAS(ctx context.Co
 			return false, nil
 		}
 		slot := slots[0]
-		if slot.Status != service.OpenAIOAuthAuthorizationAuthorized || slot.AuthorizationGeneration != generation || slot.Revision != revision {
+		if slot.AuthorizationGeneration != generation || slot.Revision != revision {
 			return false, nil
 		}
 		slot.Status = status

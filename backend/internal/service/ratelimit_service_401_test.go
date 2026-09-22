@@ -214,7 +214,13 @@ func TestRateLimitService_HandleUpstreamError_SparkShadow401RedirectsToParent(t 
 		// 影子不持凭据:GetCredential("refresh_token") == ""
 	}
 
-	shouldDisable := service.HandleUpstreamError(context.Background(), shadow, 401, http.Header{}, []byte("unauthorized"))
+	// Freeze the owner's credentials when constructing the upstream request, as
+	// the gateway does, so a late 401 cannot borrow a replacement revision.
+	credential, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, mother, OpenAIOSWindows)
+	require.NoError(t, err)
+	attempt, err := OpenAIOAuthTokenAccountSnapshot(shadow, credential)
+	require.NoError(t, err)
+	shouldDisable := service.HandleUpstreamError(context.Background(), attempt, 401, http.Header{}, []byte("unauthorized"))
 
 	require.True(t, shouldDisable)
 	require.Equal(t, 0, repo.setErrorCalls, "spark shadow must not be permanently disabled on a parent-token 401")

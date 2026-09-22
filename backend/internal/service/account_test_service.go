@@ -205,11 +205,7 @@ func openAIAccountTestResponseCredential(account *Account) *Account {
 }
 
 func (s *AccountTestService) recordOpenAIAccountTestUnauthorized(ctx context.Context, account *Account, message string) {
-	if account.OpenAIOAuthCredentialOS != "" {
-		if repo, ok := s.accountRepo.(OpenAIOAuthOSCredentialsRepository); ok {
-			_, _ = repo.SetOpenAIOAuthOSCredentialErrorIfUnchanged(ctx, account.OpenAIOAuthCredentialOwnerID,
-				account.OpenAIOAuthCredentialOS, account.OpenAIOAuthAuthorizationGeneration, account.OpenAIOAuthCredentialRevision, "account_test_unauthorized")
-		}
+	if _, scoped, _ := mutateOpenAIOAuthAccountState(ctx, s.accountRepo, account, OpenAIOAuthAccountStateChange{Kind: OpenAIOAuthAccountStateError, ErrorMessage: message, AuthFailure: true}); scoped {
 		return
 	}
 	_ = s.accountRepo.SetError(ctx, account.ID, message)
@@ -2666,8 +2662,12 @@ func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, accoun
 	account.RateLimitedAt = &now
 	account.RateLimitResetAt = resetAt
 
-	if account.Status == StatusError && account.OpenAIOAuthCredentialOS == "" {
-		if err := s.accountRepo.ClearError(ctx, account.ID); err != nil {
+	if account.Status == StatusError {
+		result, scoped, err := mutateOpenAIOAuthAccountState(ctx, s.accountRepo, account, OpenAIOAuthAccountStateChange{Kind: OpenAIOAuthAccountStateClearError})
+		if scoped && (err != nil || result == nil || !result.Applied) {
+			return
+		}
+		if !scoped && s.accountRepo.ClearError(ctx, account.ID) != nil {
 			return
 		}
 		account.Status = StatusActive

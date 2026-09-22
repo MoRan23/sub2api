@@ -61,13 +61,13 @@ func openAIRefreshCredentialPatch(previous, next map[string]any) (map[string]any
 }
 
 func persistOpenAIOAuthRefreshCredentials(ctx context.Context, repo AccountRepository, expected *Account, credentials map[string]any) (*Account, bool, error) {
-	if expected == nil || (expected.IsCredentialShadow() && expected.OpenAIOAuthCredentialOS == "") {
+	if expected == nil || (expected.IsCredentialShadow() && expected.OpenAIOAuthAuthorizationGeneration == "") {
 		return expected, false, nil
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
-	if expected.OpenAIOAuthCredentialOS == "" && IsOpenAIOAuthOSProfileOwner(expected) {
+	if expected.OpenAIOAuthAuthorizationGeneration == "" && IsOpenAIOAuthOSProfileOwner(expected) {
 		if _, supported := repo.(OpenAIOAuthOSCredentialsReader); supported {
 			scoped, err := ResolveOpenAIOAuthCredentialAccount(ctx, repo, expected, OpenAIRequestOSFromContext(ctx).Family)
 			if err != nil {
@@ -79,7 +79,7 @@ func persistOpenAIOAuthRefreshCredentials(ctx context.Context, repo AccountRepos
 			expected = scoped
 		}
 	}
-	if expected.OpenAIOAuthCredentialOS != "" {
+	if expected.OpenAIOAuthAuthorizationGeneration != "" {
 		updater, ok := repo.(OpenAIOAuthOSCredentialsRepository)
 		if !ok {
 			return nil, false, &providerConfigurationRefreshError{err: fmt.Errorf("OpenAI OAuth OS credential repository is not configured")}
@@ -148,7 +148,7 @@ func persistOpenAIOAuthCredentialError(ctx context.Context, repo AccountReposito
 	if account == nil {
 		return false, false, nil
 	}
-	if account.OpenAIOAuthCredentialOS == "" {
+	if account.OpenAIOAuthAuthorizationGeneration == "" {
 		if !IsOpenAIOAuthOSProfileOwner(account) {
 			return false, false, nil
 		}
@@ -164,17 +164,18 @@ func persistOpenAIOAuthCredentialError(ctx context.Context, repo AccountReposito
 		}
 		account = current
 	}
-	updater, ok := repo.(OpenAIOAuthOSCredentialsRepository)
-	if !ok {
-		return true, false, fmt.Errorf("OpenAI OAuth account credential repository is not configured")
+	if account.OpenAIOAuthAuthorizationGeneration == "" {
+		return false, false, nil
 	}
-	// The repository atomically marks the same account revision as an auth error,
-	// pauses scheduling, and publishes the canonical scheduler snapshot. Do not
-	// follow this with an unconditional SetError or an unversioned runtime block.
-	applied, err = updater.SetOpenAIOAuthOSCredentialErrorIfUnchanged(ctx,
-		account.OpenAIOAuthCredentialOwnerID, account.OpenAIOAuthCredentialOS,
-		account.OpenAIOAuthAuthorizationGeneration, account.OpenAIOAuthCredentialRevision, reason)
-	return true, applied, err
+	// Preserve the original account-error behavior, with the attempted credential
+	// revision guarding the write. Runtime failure does not change authorization
+	// metadata or create another authorization policy.
+	owner := *account
+	owner.ID = account.OpenAIOAuthCredentialOwnerID
+	result, handled, err := mutateOpenAIOAuthAccountState(ctx, repo, &owner, OpenAIOAuthAccountStateChange{
+		Kind: OpenAIOAuthAccountStateError, ErrorMessage: reason, AuthFailure: true,
+	})
+	return handled, result != nil && result.Applied, err
 }
 
 func (s *adminServiceImpl) PersistOpenAIOAuthRefreshCredentials(ctx context.Context, expected *Account, credentials map[string]any) (*Account, bool, error) {

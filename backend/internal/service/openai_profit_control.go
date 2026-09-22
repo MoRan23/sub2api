@@ -354,26 +354,6 @@ func (s *OpenAIGatewayService) ProfitControlVetoLatest(ctx context.Context, sele
 	if s == nil {
 		return selected, false, ""
 	}
-	if RequiresOpenAIOAuthOSAuthorization(selected) {
-		// A wait may outlive a revoke or reauthorization. Re-read the selected
-		// private slot while retaining its OS and authorization generation; a
-		// scheduler snapshot contains only the default compatibility mirror.
-		if s.accountRepo == nil {
-			return selected, true, "oauth_authorization_unavailable"
-		}
-		var latest *Account
-		var err error
-		if selected.OpenAIOAuthCredentialOS != "" {
-			latest, err = ReloadOpenAIOAuthCredentialAccount(ctx, s.accountRepo, selected)
-		} else {
-			latest, err = ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, selected, OpenAIRequestOSFromContext(ctx).Family)
-		}
-		if err != nil {
-			return selected, true, "oauth_authorization_unavailable"
-		}
-		vetoed, reason := openAIProfitControlVetoReason(ctx, latest)
-		return latest, vetoed, reason
-	}
 	return profitControlVetoLatest(ctx, selected, s.schedulerSnapshot)
 }
 

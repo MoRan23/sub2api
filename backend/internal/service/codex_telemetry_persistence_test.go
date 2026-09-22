@@ -24,6 +24,7 @@ func (r *telemetryLatestAccounts) GetOpenAIOAuthOSCredential(_ context.Context, 
 	}
 	projected := *r.grant
 	projected.OSFamily, projected.StateGeneration = os, metadata.StateGeneration
+	projected.Credentials = OpenAIOAuthProviderCredentials(r.account.Credentials)
 	return &projected, nil
 }
 
@@ -62,20 +63,23 @@ func telemetryPersistedTransportFixture(t *testing.T) (*CodexTelemetryService, *
 	t.Cleanup(s.Stop)
 	account := &Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
 		Credentials: map[string]any{"access_token": "new-current-token", "chatgpt_account_id": "workspace"},
-		OpenAIOAuthOSProfiles: &OpenAIOAuthOSProfiles{DefaultOS: "windows", Profiles: map[string]OpenAIOAuthOSProfile{
-			"windows": {OSFamily: "windows", InstallationID: "installation-current"},
-		}},
 	}
-	accounts := &telemetryLatestAccounts{account: account, slots: map[string]*OpenAIOAuthOSCredential{
-		"windows": {OwnerAccountID: 11, OSFamily: "windows", StateGeneration: "windows-state"},
-	}, grant: &OpenAIOAuthOSCredential{OwnerAccountID: 11, Credentials: account.Credentials, Status: OpenAIOAuthAuthorizationAuthorized, AuthorizationGeneration: "shared-auth", Revision: 1}}
+	profiles, err := BuildOpenAIOAuthOSProfiles(account, nil)
+	require.NoError(t, err)
+	ApplyOpenAIOAuthOSProfiles(account, profiles)
+	accounts := &telemetryLatestAccounts{account: account, slots: map[string]*OpenAIOAuthOSCredential{},
+		grant: &OpenAIOAuthOSCredential{OwnerAccountID: 11, Status: OpenAIOAuthAuthorizationAuthorized, AuthorizationGeneration: "shared-auth", Revision: 1}}
+	for _, family := range OpenAIOAuthOSFamilies() {
+		accounts.slots[family] = &OpenAIOAuthOSCredential{OwnerAccountID: 11, OSFamily: family, StateGeneration: family + "-state"}
+	}
 	proxies := &telemetryRouteDirectory{proxy: &Proxy{ID: 71, Protocol: "http", Host: "127.0.0.1", Port: 7897, Username: "route", Password: "secret", Status: StatusActive}}
 	s.SetPersistence(NewMemoryCodexTelemetryStore(), accounts, proxies)
 	proxyID := int64(71)
-	key := CodexTelemetryPoolKey{OwnerAccountID: 11, OSFamily: "windows", InstallationID: "installation-current"}
+	profile := profiles.Profiles[OpenAIOSWindows]
+	key := CodexTelemetryPoolKey{OwnerAccountID: 11, OSFamily: "windows", InstallationID: profile.InstallationID}
 	input := CodexTelemetryInput{AccountID: 11, OwnerAccountID: 11, OSFamily: "windows", InstallationID: key.InstallationID, ManagedInstallation: true,
 		CredentialOS: "windows", AuthorizationGeneration: "shared-auth",
-		ChatGPTAccountID: "workspace", UserAgent: "codex-tui/0.155.1 (Windows 10.0.26200; x86_64)", ProxyID: &proxyID}
+		ChatGPTAccountID: "workspace", UserAgent: profile.UserAgent, ProxyID: &proxyID}
 	return s, accounts, proxies, codexTelemetryJob{profile: codexTelemetryProfile{input: input}, persisted: &CodexTelemetryBatch{Pool: CodexTelemetryPool{Key: key}, ProxyID: &proxyID}}
 }
 
@@ -106,7 +110,9 @@ func TestCodexTelemetryPersistentSenderRejectsChangedIdentity(t *testing.T) {
 			case "workspace":
 				accounts.account.Credentials["chatgpt_account_id"] = "other-workspace"
 			case "installation":
-				accounts.account.OpenAIOAuthOSProfiles.Profiles["windows"] = OpenAIOAuthOSProfile{InstallationID: "new-installation"}
+				profile := accounts.account.OpenAIOAuthOSProfiles.Profiles[OpenAIOSWindows]
+				profile.InstallationID = "44f7b0b2-4b1a-4672-a93a-f2e6d9c07f54"
+				accounts.account.OpenAIOAuthOSProfiles.Profiles[OpenAIOSWindows] = profile
 			case "qualification":
 				accounts.account.Type = AccountTypeAPIKey
 			}
@@ -145,39 +151,52 @@ func TestCodexTelemetryProfilePersistenceExcludesTransportSecrets(t *testing.T) 
 
 func TestCodexTelemetryOSAuthorizationUsesFrozenSlotAndLatestRefresh(t *testing.T) {
 	s, accounts, _, job := telemetryPersistedTransportFixture(t)
-	accounts.account.OpenAIOAuthOSProfiles.Profiles["linux"] = OpenAIOAuthOSProfile{OSFamily: "linux", InstallationID: "linux-installation"}
-	accounts.slots["linux"] = &OpenAIOAuthOSCredential{OwnerAccountID: 11, OSFamily: "linux", StateGeneration: "linux-state"}
-	accounts.grant.Credentials = map[string]any{"access_token": "shared-latest-token", "chatgpt_account_id": "workspace"}
+	installationID := accounts.account.OpenAIOAuthOSProfiles.Profiles[OpenAIOSLinux].InstallationID
+	accounts.account.Credentials = map[string]any{"access_token": "shared-latest-token", "chatgpt_account_id": "workspace"}
+	accounts.grant.Revision++
 	job.profile.input.CredentialOS, job.profile.input.AuthorizationGeneration = "linux", "shared-auth"
 	job.profile.input.OSFamily = "unknown"
-	job.profile.input.InstallationID, job.persisted.Pool.Key.InstallationID = "linux-installation", "linux-installation"
+	job.profile.input.InstallationID, job.persisted.Pool.Key.InstallationID = installationID, installationID
 	job.persisted.Pool.Key.OSFamily = "linux"
-	// The legacy account mirror is not the authoritative shared grant.
-	accounts.account.Credentials = map[string]any{}
 	require.Empty(t, s.hydrateTelemetryTransport(context.Background(), &job))
 	require.Equal(t, "shared-latest-token", job.profile.client.accessToken)
 	require.Equal(t, "linux", codexTelemetryPoolOS(job.profile.input))
 }
 
 func TestCodexTelemetryOSAuthorizationRejectsOldOrMissingScope(t *testing.T) {
-	for _, change := range []string{"reauthorized", "revoked", "missing_generation", "missing_os", "cooldown"} {
+	for _, change := range []string{"reauthorized", "revoked", "missing_generation", "missing_os"} {
 		t.Run(change, func(t *testing.T) {
 			s, accounts, _, job := telemetryPersistedTransportFixture(t)
+			expected := "stale_authorization"
 			switch change {
 			case "reauthorized":
 				accounts.grant.AuthorizationGeneration = "new-authorization"
 			case "revoked":
 				accounts.grant.Status = OpenAIOAuthAuthorizationUnauthorized
+				accounts.grant.AuthorizationGeneration = "revoked-authorization"
+				accounts.account.Credentials = map[string]any{}
+				accounts.account.Status = StatusError
+				expected = "stale_identity"
 			case "missing_generation":
 				job.profile.input.AuthorizationGeneration = ""
 			case "missing_os":
 				job.profile.input.CredentialOS = ""
-			case "cooldown":
-				until := time.Now().Add(time.Minute)
-				accounts.grant.RefreshRetryAfter = &until
 			}
-			require.Equal(t, "stale_authorization", s.hydrateTelemetryTransport(context.Background(), &job))
+			require.Equal(t, expected, s.hydrateTelemetryTransport(context.Background(), &job))
 			require.Empty(t, job.profile.client.accessToken)
+		})
+	}
+}
+
+func TestCodexTelemetryOSAuthorizationIgnoresPrivateAdmissionState(t *testing.T) {
+	for _, status := range []string{OpenAIOAuthAuthorizationUnauthorized, OpenAIOAuthAuthorizationReauthRequired, OpenAIOAuthAuthorizationAuthorized} {
+		t.Run(status, func(t *testing.T) {
+			s, accounts, _, job := telemetryPersistedTransportFixture(t)
+			accounts.grant.Status = status
+			until := time.Now().Add(time.Minute)
+			accounts.grant.RefreshRetryAfter = &until
+			require.Empty(t, s.hydrateTelemetryTransport(context.Background(), &job))
+			require.Equal(t, "new-current-token", job.profile.client.accessToken)
 		})
 	}
 }

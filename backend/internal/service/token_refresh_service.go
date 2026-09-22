@@ -656,24 +656,15 @@ func (s *TokenRefreshService) processCandidatePage(
 	return stats
 }
 
-// A grant belongs to the owner account. Resolve its default outbound identity
-// once; Windows, macOS and Linux must not rotate the same refresh token as jobs.
+// Capture the account revision and default outbound identity once. Refresh
+// eligibility comes from the account and its refresh predicate, never metadata
+// status or a separate retry deadline.
 func (s *TokenRefreshService) backgroundRefreshAccount(ctx context.Context, account *Account) (*Account, error) {
 	_, ok := s.accountRepo.(OpenAIOAuthOSCredentialsReader)
 	if !ok || !IsOpenAIOAuthOSProfileOwner(account) {
 		return account, nil
 	}
-	candidate, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, "")
-	if err != nil {
-		if errors.Is(err, ErrOpenAIOAuthOSUnauthorized) || errors.Is(err, ErrOpenAIOAuthOSAuthorizationChanged) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	if strings.TrimSpace(candidate.GetOpenAIRefreshToken()) == "" {
-		return nil, nil
-	}
-	return candidate, nil
+	return ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, "")
 }
 
 func (s *TokenRefreshService) processProviderAccounts(
@@ -1040,6 +1031,7 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 				if !applied {
 					return errRefreshSkipped
 				}
+				s.notifyAccountSchedulingBlocked(account, time.Time{}, "token_refresh_non_retryable")
 				cacheInvalidationFailed := s.cacheInvalidator == nil
 				if s.cacheInvalidator != nil {
 					if invalidateErr := s.cacheInvalidator.InvalidateToken(ctx, account); invalidateErr != nil {
@@ -1152,25 +1144,17 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 	if lastErr != nil {
 		reason += ": " + logredact.RedactText(lastErr.Error())
 	}
-	if account.OpenAIOAuthCredentialOS != "" {
-		conditionalRepo, ok := s.accountRepo.(interface {
-			SetOpenAIOAuthOSCredentialCooldownIfUnchanged(context.Context, int64, string, string, int64, time.Time, string) (bool, error)
+	if account.OpenAIOAuthAuthorizationGeneration != "" {
+		result, _, setErr := mutateOpenAIOAuthAccountState(ctx, s.accountRepo, account, OpenAIOAuthAccountStateChange{
+			Kind: OpenAIOAuthAccountStateCooldown, Until: until, Reason: reason,
 		})
-		if !ok {
-			return &providerConfigurationRefreshError{err: errors.New("OpenAI OAuth account refresh cooldown repository is not configured")}
-		}
-		ownerID := account.OpenAIOAuthCredentialOwnerID
-		if ownerID <= 0 {
-			ownerID = account.ID
-		}
-		applied, setErr := conditionalRepo.SetOpenAIOAuthOSCredentialCooldownIfUnchanged(ctx, ownerID, account.OpenAIOAuthCredentialOS,
-			account.OpenAIOAuthAuthorizationGeneration, account.OpenAIOAuthCredentialRevision, until, reason)
 		if setErr != nil {
 			return &providerCycleContainmentRefreshError{err: fmt.Errorf("failed to persist OpenAI OAuth account refresh cooldown: %w", setErr)}
 		}
-		if !applied {
+		if result == nil || !result.Applied {
 			return errRefreshSkipped
 		}
+		s.notifyAccountSchedulingBlocked(account, until, "token_refresh_retry_exhausted")
 		s.syncSchedulerAccount(ctx, account)
 		return lastErr
 	}
@@ -1262,18 +1246,23 @@ func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *A
 		}
 	}
 	// 刷新成功后清除临时不可调度状态（处理 OAuth 401 恢复场景）
-	if account.OpenAIOAuthCredentialOS == "" && account.TempUnschedulableUntil != nil && time.Now().Before(*account.TempUnschedulableUntil) {
-		if clearErr := s.accountRepo.ClearTempUnschedulable(ctx, account.ID); clearErr != nil {
+	if account.TempUnschedulableUntil != nil && time.Now().Before(*account.TempUnschedulableUntil) {
+		handled, cleared, clearErr := clearOpenAIOAuthTempUnschedulableIfUnchanged(ctx, s.accountRepo, account)
+		if !handled {
+			clearErr = s.accountRepo.ClearTempUnschedulable(ctx, account.ID)
+			cleared = clearErr == nil
+		}
+		if clearErr != nil {
 			slog.Warn("token_refresh.clear_temp_unschedulable_failed",
 				"account_id", account.ID,
 				"error", clearErr,
 			)
-		} else {
+		} else if cleared {
 			slog.Info("token_refresh.cleared_temp_unschedulable", "account_id", account.ID)
 			s.notifyAccountSchedulingBlockCleared(account.ID)
 		}
 		// 同步清除 Redis 缓存，避免调度器读到过期的临时不可调度状态
-		if s.tempUnschedCache != nil {
+		if (!handled || cleared) && s.tempUnschedCache != nil {
 			if clearErr := s.tempUnschedCache.DeleteTempUnsched(ctx, account.ID); clearErr != nil {
 				slog.Warn("token_refresh.clear_temp_unsched_cache_failed",
 					"account_id", account.ID,

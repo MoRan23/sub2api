@@ -1,6 +1,64 @@
 # Codex 共享票据包与账号授权恢复验证
 
+## 原账号调度恢复（2026-09-22）
+
+根据用户进一步确认，`d62c56269` 的摘要布尔修复并未完全恢复原调度；它仍保留了多系统凭据引入的第二道授权准入。本次直接对照 `a5411ee97` 的前一个版本 `41501a3de`。以下四个生产文件恢复后与该历史版本没有差异：`openai_account_scheduler.go`、`openai_gateway_scheduling.go`、`openai_ws_forwarder_support.go`、`openai_profit_control.go`。同时移除插件目录的凭据过滤、Redis 授权摘要和相应专用 503 分支。
+
+OS 只在选中账号后分配身份；账号 token 缓存、刷新条件、401／403 与测试恢复使用原账号策略。实际凭据仍由 `accounts.credentials` 提供，保留的 generation/revision CAS 只防迟到写入，不以旧系统授权状态决定资格。旧 metadata 中的布尔字段被忽略，正常快照无需强制失效或重建。没有新增数据库迁移；此前 256、257 仍是共享凭据与 HTTP 票据包的基础。
+
+隔离 PostgreSQL／Redis 集成回归在 WSL Ubuntu 24.04 执行，**155 项测试及子测试通过，无跳过**，包含当前凭据刷新、旧授权状态不干扰 CAS、撤销无 token 复活、完整账号错误与冷却、测试恢复、授权错误持有的暂停与重新授权恢复、人工暂停保留，以及迟到版本不覆盖新授权。只使用合成数据和本地容器。
+
+```sh
+CI=true go test -race -tags integration ./internal/repository \
+  -run '^Test(AccountRepoSuite|OpenAIOAuthMetadata|OAuthOSCredentialMigration|OpenAIOAuthShared|OpenAIOAuthRuntime)' \
+  -count=1 -json
+```
+
+初次集成检查修正了两个旧断言：同一冷却截止时间不能替换既有原因，测试需设置更晚截止时间再验证原重试筛选；撤销后的身份解析不再替代 token 校验，因此验证改为“新快照凭据为空、原 token provider 拒绝、旧请求代次失效”。测试过程中曾因并行修改测试名称造成编译中间态，最终统一检查以文件稳定后的结果为准。
+
+账号调度、刷新、连接测试、插件目录、候选快照和错误分类的合并单元回归 **868 项测试及子测试通过，无跳过或竞态报告**：
+
+```sh
+go test -race -tags unit ./internal/service ./internal/repository ./internal/handler \
+  -run '^Test(OpenAIScheduling|OpenAIOAuth|OpenAIOS|OpenAISharedAuthorization|OpenAIAccountScheduler|DefaultOpenAIAccountScheduler|Scheduler|FilterScheduler|AccountRepository_ListOAuthRefreshCandidatePage|ClassifySelectionFailure|OpenAIPlugin|OpenAIToken|TokenRefreshService|OpenAITokenRefresher|OAuthRefreshAPI|RateLimit|HandleUpstreamError|RecoverAccount|OpenAIAccountState|OpenAIGatewayService_(SelectAccount|RecheckSelected|OpenAIAccountSchedulerMetrics)|AccountTest|OpenAIRefreshCredentials)' \
+  -count=1 -json
+```
+
+调度回归包括普通／高级调度器、粘性会话及三系统／未知系统组合；使用没有 token 和系统授权信息的脱敏候选，确认它们按原账号条件进入选择，不再由测试夹具自动补授权来绕过问题。另验证空 token 仍由原 token provider 在发送阶段报错，不因此发送空凭据。
+
+新增同请求身份冻结回归：母账号及 Spark 在默认系统改变或 UA／安装 ID／同步根重生成后，重试、首次计划生成及凭据刷新均保留原请求身份，新 Gin 请求使用新配置。身份准备不读取授权状态，不修改原账号 token。上述定向身份检查通过后，再运行 HTTP／WebSocket 相邻转发回归。
+
+转发检查还修正了旧测试夹具：遥测使用完整、已持久化的三系统身份及账号凭据投影；撤销必须实际清除账号凭据并推进代次，不能只依赖旧私有状态字段。票据准备在凭据已撤销时返回不启用的被动结果，真正的空 token 拒绝继续由 token provider 负责。
+
+相邻回归中保留两项已确认的既有失败，不扩大本次修改范围：
+
+- `TestOpenAIHTTPPassthroughStripsOnlyOAuthLegacyResponsesBeta`：API Key 路径的实验 beta 头保留断言，已在此前交付的未修改基线复现，见本文末尾历史记录。
+- `TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB`：本次在隔离的 `d62c56269` 源码副本再次复现；默认 Codex 指令使转发正文长于测试的“消息上限＋4 KiB”断言（`17848623` 与 `17829888`），此前桥接、响应和用量断言均通过。该测试是 API Key 路径，与本次 OAuth 账号选择无关。最终定向回归明确排除这两项，不将它们计为通过。
+
+最终相邻转发回归 **630 项测试及子测试通过**，无新增失败或竞态报告，明确排除上述两个基线失败：
+
+```sh
+go test -race -tags unit ./internal/service \
+  -run '^Test(OpenAIWS|OpenAI.*WebSocket|OpenAIHTTPOAuth|OpenAIOAuthRequestScope|OpenAIOAuthIdentity|OpenAIOSIdentity|OpenAISharedAuthorization|CodexTelemetry.*Identity|CodexTelemetry(Persistent|SharedGrant|OSAuthorization|ProfilePersistence)|OpenAIHTTPPassthrough|OpenAIStreamingTerminalAndClientCancellation|CodexTurnState.*(HTTP|WS|Shared|OSCache))' \
+  -skip '^Test(OpenAIHTTPPassthroughStripsOnlyOAuthLegacyResponsesBeta|OpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB)$' \
+  -count=1 -json
+```
+
+根据用户追加问题，单独核对 TLS：内置 OAuth HTTP 的真实 RoundTrip 根据最终 UA 选择三系统 `codexnative` 模板；连接池键包含模板摘要、账号、代理和用途，WS→HTTP 桥接沿用该链路。遥测保留 exporter UA，TLS 选择使用冻结的业务 UA。模板仍是已有 `codex-cli-0.154.0-native-20260917-v1` 采样配置，本次不更新握手参数。**原生 WS 仍使用标准 TLS，没有接入三系统模板**；其连接虽然按最终身份摘要隔离，不能因此声称 TLS 指纹与系统一致。
+
+补充 TLS、HTTP 实际握手、CONNECT／SOCKS 代理、遥测 scope 与标准 WS 拨号回归 **116 项测试及子测试通过**，无跳过、失败或竞态报告；所有连接均为本地模拟端点：
+
+```sh
+go test -race -tags unit ./internal/pkg/codexnative ./internal/pkg/httpclient ./internal/service ./internal/repository \
+  -run '^Test(Native|OpenAINativeHTTP|OpenAINativeReq|WithOpenAINativeHTTPScope|OpenAINativeHTTPConcurrent|CodexTelemetryNativeHTTP|CodexAuxiliaryTransport|CoderOpenAIWSClientDialer|TLSFingerprint|CodexTurnStateCollectorNativeTransport)' \
+  -count=1 -json
+```
+
+本次未修改前端，未重复前端构建或浏览器验收，未运行全仓所有后端测试；未部署或调用真实业务、采集、授权、遥测端点。无关 `pelican-bicycle.html` 保留。
+
 ## OAuth 调度摘要回归修复（2026-09-22）
+
+本节为 `d62c56269` 的历史验证记录。其新增摘要判定已由上面的原调度恢复取代。
 
 `f7683086e` 恢复账号级凭据后，候选准入直接检查了 token，但 Redis 调度候选使用刻意去除 token 的 `sched:meta` 摘要，导致正常 OAuth 账号在加载完整凭据前被误判为不可用。账号页面的正常状态不受影响，因此可能出现全部候选被排除并返回 `No available accounts have usable OpenAI OAuth authorization`。之前的定向回归没有包含仓储调度摘要测试，漏掉了该路径。
 

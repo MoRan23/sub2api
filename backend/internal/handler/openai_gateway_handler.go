@@ -2772,8 +2772,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			)
 			if lastFailoverErr != nil {
 				closeOpenAIWSFailoverExhausted(c, wsConn, lastFailoverErr)
-			} else if errors.Is(err, service.ErrNoAvailableOpenAIOAuthOSAccounts) {
-				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available accounts with available OAuth account authorization")
 			} else {
 				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account")
 			}

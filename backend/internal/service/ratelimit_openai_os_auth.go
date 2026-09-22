@@ -4,89 +4,83 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
-	"strings"
+	"reflect"
 	"time"
-
-	"github.com/tidwall/gjson"
 )
 
-// RecoverOpenAIOAuthOSAfterSuccessfulTest clears the shared grant that was
-// tested. A late result after replacement or refresh loses its CAS.
+// RecoverOpenAIOAuthOSAfterSuccessfulTest restores ordinary account runtime
+// state only while the credentials used by the test are still current.
 func (s *RateLimitService) RecoverOpenAIOAuthOSAfterSuccessfulTest(ctx context.Context, account *Account) (*SuccessfulTestRecoveryResult, error) {
-	if s == nil || account == nil || account.OpenAIOAuthCredentialOS == "" {
-		return nil, fmt.Errorf("OpenAI OAuth test recovery requires a scoped credential snapshot")
+	if s == nil || account == nil {
+		return nil, fmt.Errorf("OpenAI OAuth test recovery requires a credential snapshot")
 	}
-	repo, ok := s.accountRepo.(OpenAIOAuthOSCredentialsRepository)
-	if !ok {
-		return nil, fmt.Errorf("OpenAI OAuth OS credential repository is not configured")
+	result, scoped, err := mutateOpenAIOAuthAccountState(ctx, s.accountRepo, account, OpenAIOAuthAccountStateChange{Kind: OpenAIOAuthAccountStateRecover})
+	if !scoped {
+		return s.RecoverAccountAfterSuccessfulTest(ctx, account.ID)
 	}
-	applied, err := repo.PatchOpenAIOAuthOSCredentialsIfUnchanged(ctx, account.OpenAIOAuthCredentialOwnerID,
-		account.OpenAIOAuthCredentialOS, account.OpenAIOAuthAuthorizationGeneration, account.OpenAIOAuthCredentialRevision,
-		account.ProxyID, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	return &SuccessfulTestRecoveryResult{ClearedError: applied}, nil
+	recovered := &SuccessfulTestRecoveryResult{}
+	if result == nil || !result.Applied {
+		return recovered, nil
+	}
+	recovered.ClearedError, recovered.ClearedRateLimit = result.ClearedError, result.ClearedRateLimit
+	if recovered.ClearedRateLimit && s.tempUnschedCache != nil {
+		if err := s.tempUnschedCache.DeleteTempUnsched(ctx, account.ID); err != nil {
+			slog.Warn("temp_unsched_cache_delete_failed", "account_id", account.ID, "error", err)
+		}
+	}
+	if recovered.ClearedError || recovered.ClearedRateLimit {
+		s.ResetOpenAI403Counter(ctx, account.ID)
+		s.notifyAccountSchedulingBlockCleared(account.ID)
+	}
+	return recovered, nil
 }
 
-// Authentication failures belong to the shared grant used by the request.
-// The selected OS remains an outbound identity, not an authorization boundary.
-func (s *RateLimitService) handleOpenAIOAuthOSAuthFailure(ctx context.Context, account *Account, status int, body []byte) (bool, bool) {
-	if s == nil || !RequiresOpenAIOAuthOSAuthorization(account) || (status != http.StatusUnauthorized && status != http.StatusForbidden) {
-		return false, false
+// Freeze metadata only when an older caller supplied the exact credentials it
+// used. Never attach a late response to current replacement credentials.
+func (s *RateLimitService) openAIOAuthErrorAccount(ctx context.Context, account *Account) (*Account, bool) {
+	if account == nil || !RequiresOpenAIOAuthOSAuthorization(account) {
+		return account, true
 	}
-	repo, supported := s.accountRepo.(OpenAIOAuthOSCredentialsRepository)
-	if !supported {
-		return false, false
+	reader, ok := s.accountRepo.(OpenAIOAuthOSCredentialsReader)
+	if !ok {
+		return account, true
 	}
-	if status == http.StatusForbidden && isHTMLResponse(body) {
-		return true, false
+	if snapshot, scoped := openAIOAuthAccountStateSnapshot(account); scoped {
+		current, err := reader.GetOpenAIOAuthOSCredential(ctx, snapshot.OwnerAccountID, account.OpenAIOAuthCredentialOS)
+		return account, err == nil && current != nil && current.AuthorizationGeneration == snapshot.AuthorizationGeneration && current.Revision == snapshot.CredentialRevision
 	}
-	// Preserve a frozen attempt's revision. Re-resolving a scoped snapshot here
-	// would incorrectly attach its late 401 to a newly refreshed token.
-	if account.OpenAIOAuthCredentialOS == "" {
-		var err error
-		account, err = ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, OpenAIRequestOSFromContext(ctx).Family)
-		if err != nil {
-			return true, true
+	current, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, OpenAIRequestOSFromContext(ctx).Family)
+	if err != nil || !reflect.DeepEqual(openAIRefreshAuthIdentity(account.Credentials), openAIRefreshAuthIdentity(current.Credentials)) {
+		return account, false
+	}
+	return current, true
+}
+
+func (s *RateLimitService) setAccountErrorForAttempt(ctx context.Context, account *Account, message, reason string, authFailure bool) (bool, error) {
+	result, scoped, err := mutateOpenAIOAuthAccountState(ctx, s.accountRepo, account, OpenAIOAuthAccountStateChange{Kind: OpenAIOAuthAccountStateError, ErrorMessage: message, AuthFailure: authFailure})
+	if scoped {
+		if err != nil || result == nil || !result.Applied {
+			return false, err
 		}
+	} else if err = s.accountRepo.SetError(ctx, account.ID, message); err != nil {
+		return false, err
 	}
-	if s.tokenCacheInvalidator != nil {
-		_ = s.tokenCacheInvalidator.InvalidateToken(ctx, account)
-	}
-	code := extractUpstreamErrorCode(body)
-	permanent := status == http.StatusUnauthorized && (code == "token_invalidated" || code == "token_revoked" ||
-		gjson.GetBytes(body, "detail").String() == "Unauthorized" || strings.TrimSpace(account.GetOpenAIRefreshToken()) == "")
-	if permanent {
-		_, _, err := persistOpenAIOAuthCredentialError(ctx, s.accountRepo, account, "OpenAI OAuth authorization requires sign-in")
-		if err != nil {
-			slog.Warn("openai_oauth_slot_auth_error_failed", "account_id", account.ID, "os", account.OpenAIOAuthCredentialOS, "error", err)
+	s.notifyAccountSchedulingBlocked(account, time.Time{}, reason)
+	return true, nil
+}
+
+func (s *RateLimitService) setAccountCooldownForAttempt(ctx context.Context, account *Account, until time.Time, message, reason string) (bool, error) {
+	result, scoped, err := mutateOpenAIOAuthAccountState(ctx, s.accountRepo, account, OpenAIOAuthAccountStateChange{Kind: OpenAIOAuthAccountStateCooldown, Until: until, Reason: message})
+	if scoped {
+		if err != nil || result == nil || !result.Applied {
+			return false, err
 		}
-		return true, true
+	} else if err = s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, message); err != nil {
+		return false, err
 	}
-	if status == http.StatusUnauthorized {
-		// Force a refresh of the shared grant once the retry delay expires.
-		applied, err := repo.PatchOpenAIOAuthOSCredentialsIfUnchanged(ctx, account.OpenAIOAuthCredentialOwnerID,
-			account.OpenAIOAuthCredentialOS, account.OpenAIOAuthAuthorizationGeneration, account.OpenAIOAuthCredentialRevision,
-			account.ProxyID, map[string]any{"expires_at": time.Now().Add(-time.Minute).Format(time.RFC3339)}, nil)
-		if err != nil || !applied {
-			return true, true
-		}
-		account, err = ReloadOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account)
-		if err != nil {
-			return true, true
-		}
-	}
-	cooldown := openAI403CooldownMinutesDefault
-	if status == http.StatusUnauthorized && s.cfg != nil && s.cfg.RateLimit.OAuth401CooldownMinutes > 0 {
-		cooldown = s.cfg.RateLimit.OAuth401CooldownMinutes
-	}
-	_, err := repo.SetOpenAIOAuthOSCredentialCooldownIfUnchanged(ctx, account.OpenAIOAuthCredentialOwnerID,
-		account.OpenAIOAuthCredentialOS, account.OpenAIOAuthAuthorizationGeneration, account.OpenAIOAuthCredentialRevision,
-		time.Now().Add(time.Duration(cooldown)*time.Minute), "OpenAI OAuth authorization temporarily unavailable")
-	if err != nil {
-		slog.Warn("openai_oauth_slot_auth_cooldown_failed", "account_id", account.ID, "os", account.OpenAIOAuthCredentialOS, "error", err)
-	}
-	return true, true
+	s.notifyAccountSchedulingBlocked(account, until, reason)
+	return true, nil
 }

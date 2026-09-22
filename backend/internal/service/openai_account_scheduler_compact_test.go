@@ -41,7 +41,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactPrefersSupported
 	cfg := &config.Config{}
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false
 	svc := &OpenAIGatewayService{
-		accountRepo:        newSchedulerTestOpenAIAccountRepo(accounts),
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
 		cache:              &schedulerTestGatewayCache{},
 		cfg:                cfg,
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
@@ -95,7 +95,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactRejectsExplicitl
 	cfg := &config.Config{}
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false
 	svc := &OpenAIGatewayService{
-		accountRepo:        newSchedulerTestOpenAIAccountRepo(accounts),
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
 		cache:              &schedulerTestGatewayCache{},
 		cfg:                cfg,
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
@@ -120,7 +120,7 @@ func newOpenAICompactionSchedulerTestService(accounts []Account, advanced bool) 
 	cfg := &config.Config{}
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false
 	svc := &OpenAIGatewayService{
-		accountRepo:        newSchedulerTestOpenAIAccountRepo(accounts),
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
 		cache:              &schedulerTestGatewayCache{},
 		cfg:                cfg,
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
@@ -339,7 +339,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactRequiresResponse
 	cfg := &config.Config{}
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false
 	svc := &OpenAIGatewayService{
-		accountRepo:        newSchedulerTestOpenAIAccountRepo(accounts),
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
 		cache:              &schedulerTestGatewayCache{},
 		cfg:                cfg,
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
@@ -399,7 +399,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactSkipsChatOnlyAcc
 	cfg := &config.Config{}
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false
 	svc := &OpenAIGatewayService{
-		accountRepo:        newSchedulerTestOpenAIAccountRepo(accounts),
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
 		cache:              &schedulerTestGatewayCache{},
 		cfg:                cfg,
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
@@ -456,7 +456,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactFallsBackToUnkno
 	cfg := &config.Config{}
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false
 	svc := &OpenAIGatewayService{
-		accountRepo:        newSchedulerTestOpenAIAccountRepo(accounts),
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
 		cache:              &schedulerTestGatewayCache{},
 		cfg:                cfg,
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
@@ -502,7 +502,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactAllowsGrok(t *te
 	cfg := &config.Config{}
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false
 	svc := &OpenAIGatewayService{
-		accountRepo:        newSchedulerTestOpenAIAccountRepo(accounts),
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
 		cache:              &schedulerTestGatewayCache{},
 		cfg:                cfg,
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),

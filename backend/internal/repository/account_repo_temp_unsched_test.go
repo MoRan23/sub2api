@@ -296,10 +296,12 @@ func TestAccountRepository_ListOAuthRefreshCandidatePage_SQLFilter(t *testing.T)
 	require.Contains(t, normalized, "platform = ANY($1)")
 	require.NotContains(t, normalized, "platform IN ('anthropic'",
 		"candidate platforms must come from the refresher registry instead of a second hard-coded list")
-	require.Contains(t, normalized, "credentials ? 'refresh_token'")
-	require.Contains(t, normalized, "btrim(credentials->>'refresh_token') <> ''")
-	require.Contains(t, normalized, "temp_unschedulable_until > NOW()")
-	require.Contains(t, normalized, "temp_unschedulable_reason LIKE 'token refresh retry exhausted:%'")
+	require.Contains(t, normalized, "AND credentials ? 'refresh_token' AND btrim(credentials->>'refresh_token') <> ''",
+		"every OAuth platform uses the account refresh token without requiring an OS authorization record")
+	require.NotContains(t, normalized, "account_openai_oauth_credentials")
+	require.NotContains(t, normalized, "refresh_retry_after")
+	require.Contains(t, normalized, "AND ( temp_unschedulable_until > NOW() AND temp_unschedulable_reason LIKE 'token refresh retry exhausted:%' ) IS NOT TRUE",
+		"OpenAI accounts must obey the same account refresh cooldown as other platforms")
 	require.Contains(t, normalized, "IS NOT TRUE",
 		"must use IS NOT TRUE so accounts with NULL temp_unschedulable_until are not silently excluded by PG 3-valued logic")
 	require.NotContains(t, normalized, "AND NOT (",

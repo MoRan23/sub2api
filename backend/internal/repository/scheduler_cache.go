@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -300,12 +299,6 @@ func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.Schedul
 		account, err := decodeCachedAccount(val)
 		if err != nil {
 			return nil, false, err
-		}
-		// Older metadata has no credential-presence summary. Its token fields
-		// are deliberately absent, so let the controlled DB fallback rebuild it
-		// instead of treating that omission as an unauthorized account.
-		if service.RequiresOpenAIOAuthOSAuthorization(account) && account.OpenAIOAuthCredentialsAvailable == nil {
-			return nil, false, nil
 		}
 		if err := applySchedulerLastUsed(account, lastUsedValues[i]); err != nil {
 			return nil, false, err
@@ -870,54 +863,35 @@ func (c *schedulerCache) mgetChunked(ctx context.Context, keys []string) ([]any,
 }
 
 func buildSchedulerMetadataAccount(account service.Account) service.Account {
-	requiresOSAuthorization := service.RequiresOpenAIOAuthOSAuthorization(&account)
-	oauthCredentialsAvailable := strings.TrimSpace(account.GetOpenAIAccessToken()) != "" || strings.TrimSpace(account.GetOpenAIRefreshToken()) != ""
 	return service.Account{
-		ID:                                 account.ID,
-		Name:                               account.Name,
-		Platform:                           account.Platform,
-		Type:                               account.Type,
-		Concurrency:                        account.Concurrency,
-		LoadFactor:                         account.LoadFactor,
-		Priority:                           account.Priority,
-		RateMultiplier:                     account.RateMultiplier,
-		Status:                             account.Status,
-		LastUsedAt:                         account.LastUsedAt,
-		ExpiresAt:                          account.ExpiresAt,
-		AutoPauseOnExpired:                 account.AutoPauseOnExpired,
-		Schedulable:                        account.Schedulable,
-		RateLimitedAt:                      account.RateLimitedAt,
-		RateLimitResetAt:                   account.RateLimitResetAt,
-		OverloadUntil:                      account.OverloadUntil,
-		TempUnschedulableUntil:             account.TempUnschedulableUntil,
-		TempUnschedulableReason:            account.TempUnschedulableReason,
-		SessionWindowStart:                 account.SessionWindowStart,
-		SessionWindowEnd:                   account.SessionWindowEnd,
-		SessionWindowStatus:                account.SessionWindowStatus,
-		ParentAccountID:                    account.ParentAccountID,
-		QuotaDimension:                     account.QuotaDimension,
-		AccountGroups:                      filterSchedulerAccountGroups(account.AccountGroups),
-		GroupIDs:                           filterSchedulerGroupIDs(account.GroupIDs, account.AccountGroups),
-		Credentials:                        filterSchedulerCredentials(account.Credentials),
-		Extra:                              filterSchedulerExtra(account.Extra),
-		OpenAIOAuthRequiresOSAuthorization: &requiresOSAuthorization,
-		OpenAIOAuthCredentialsAvailable:    &oauthCredentialsAvailable,
-		OpenAIOAuthOSProfiles:              schedulerOpenAIOAuthOSAuthorizationSummary(account.OpenAIOAuthOSProfiles),
+		ID:                      account.ID,
+		Name:                    account.Name,
+		Platform:                account.Platform,
+		Type:                    account.Type,
+		Concurrency:             account.Concurrency,
+		LoadFactor:              account.LoadFactor,
+		Priority:                account.Priority,
+		RateMultiplier:          account.RateMultiplier,
+		Status:                  account.Status,
+		LastUsedAt:              account.LastUsedAt,
+		ExpiresAt:               account.ExpiresAt,
+		AutoPauseOnExpired:      account.AutoPauseOnExpired,
+		Schedulable:             account.Schedulable,
+		RateLimitedAt:           account.RateLimitedAt,
+		RateLimitResetAt:        account.RateLimitResetAt,
+		OverloadUntil:           account.OverloadUntil,
+		TempUnschedulableUntil:  account.TempUnschedulableUntil,
+		TempUnschedulableReason: account.TempUnschedulableReason,
+		SessionWindowStart:      account.SessionWindowStart,
+		SessionWindowEnd:        account.SessionWindowEnd,
+		SessionWindowStatus:     account.SessionWindowStatus,
+		ParentAccountID:         account.ParentAccountID,
+		QuotaDimension:          account.QuotaDimension,
+		AccountGroups:           filterSchedulerAccountGroups(account.AccountGroups),
+		GroupIDs:                filterSchedulerGroupIDs(account.GroupIDs, account.AccountGroups),
+		Credentials:             filterSchedulerCredentials(account.Credentials),
+		Extra:                   filterSchedulerExtra(account.Extra),
 	}
-}
-
-func schedulerOpenAIOAuthOSAuthorizationSummary(profiles *service.OpenAIOAuthOSProfiles) *service.OpenAIOAuthOSProfiles {
-	if profiles == nil {
-		return nil
-	}
-	out := &service.OpenAIOAuthOSProfiles{DefaultOS: profiles.DefaultOS, Profiles: make(map[string]service.OpenAIOAuthOSProfile, len(profiles.Profiles))}
-	for os, profile := range profiles.Profiles {
-		summary := service.CloneOpenAIOAuthOSAuthorizationSummary(profile.Authorization)
-		// Scheduling needs authorization status and refresh cooldown only.
-		summary.LastError, summary.AuthorizedAt, summary.ExpiresAt = "", nil, nil
-		out.Profiles[os] = service.OpenAIOAuthOSProfile{OSFamily: os, Authorization: summary}
-	}
-	return out
 }
 
 func filterSchedulerAccountGroups(accountGroups []service.AccountGroup) []service.AccountGroup {

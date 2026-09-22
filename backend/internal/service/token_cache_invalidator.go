@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -89,12 +90,12 @@ func CheckTokenVersion(ctx context.Context, account *Account, repo AccountReposi
 	if account == nil || repo == nil {
 		return nil, false
 	}
-	if account.OpenAIOAuthCredentialOS != "" {
+	if account.OpenAIOAuthAuthorizationGeneration != "" {
 		latest, err := ReloadOpenAIOAuthCredentialAccount(ctx, repo, account)
 		if err != nil || latest == nil {
-			// A revoked grant or unavailable private state cannot safely supply the
-			// default mirror, nor permit an old token to be used on this request.
-			return nil, true
+			// Preserve the original transient read-failure policy; only a proven
+			// authorization replacement fences this in-flight token snapshot.
+			return nil, errors.Is(err, ErrOpenAIOAuthOSAuthorizationChanged)
 		}
 		return latest, OpenAITokenCacheKey(latest) != OpenAITokenCacheKey(account)
 	}

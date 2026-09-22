@@ -1331,18 +1331,15 @@ func (r *accountRepository) ListOAuthRefreshCandidatePage(ctx context.Context, o
 	}
 	if options.RequireRefreshToken {
 		query += `
-			AND CASE WHEN (` + codexTurnStateOwnerExpression("credentials") + `) THEN EXISTS (
-				SELECT 1 FROM account_openai_oauth_credentials c WHERE c.account_id=accounts.id
-				AND c.status='authorized' AND BTRIM(COALESCE(accounts.credentials->>'refresh_token',''))<>''
-				AND (c.refresh_retry_after IS NULL OR c.refresh_retry_after<=NOW()))
-			ELSE credentials ? 'refresh_token' AND btrim(credentials->>'refresh_token') <> '' END`
+			AND credentials ? 'refresh_token'
+			AND btrim(credentials->>'refresh_token') <> ''`
 	}
 	if options.ExcludeRetryCooldown {
 		query += `
-			AND ((` + codexTurnStateOwnerExpression("credentials") + `) OR (
+			AND (
 				temp_unschedulable_until > NOW()
 				AND temp_unschedulable_reason LIKE 'token refresh retry exhausted:%'
-			) IS NOT TRUE)`
+			) IS NOT TRUE`
 	}
 	query += `
 		ORDER BY id ASC

@@ -76,7 +76,7 @@ func cooldownOpenAIOAuthAccountLocked(ctx context.Context, client *dbent.Client,
 func restoreOpenAIOAuthOwnedPauseLocked(ctx context.Context, client *dbent.Client, id int64, reauthorized bool) error {
 	if reauthorized {
 		_, err := client.ExecContext(ctx, `UPDATE accounts a SET status=c.auth_pause_previous_status,schedulable=c.auth_pause_previous_schedulable,error_message=c.auth_pause_previous_error_message,updated_at=NOW()
-		FROM account_openai_oauth_credentials c WHERE a.id=$1 AND c.account_id=a.id AND c.auth_pause_owned AND a.status='error' AND NOT a.schedulable AND a.error_message=$2`, id, openAIOAuthPauseMessage)
+		FROM account_openai_oauth_credentials c WHERE a.id=$1 AND c.account_id=a.id AND c.auth_pause_owned AND a.status='error' AND NOT a.schedulable`, id)
 		if err != nil {
 			return err
 		}

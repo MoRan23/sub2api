@@ -1022,34 +1022,6 @@ func (s *OpenAIGatewayService) GetOrResolveOpenAIOAuthOutboundIdentity(
 	pinnedPlan *OpenAIOAuthOutboundIdentityPlan,
 ) (OpenAIOAuthOutboundIdentityPlan, error) {
 	options = normalizeOpenAIOAuthIdentityPlanOptions(options)
-	if RequiresOpenAIOAuthOSAuthorization(account) {
-		requestedOS := capture.OSFamily
-		if frozen := OpenAIRequestOSFromContext(ctx); frozen.Captured {
-			requestedOS = frozen.Family
-		}
-		resolved, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, requestedOS)
-		if err != nil {
-			return OpenAIOAuthOutboundIdentityPlan{}, err
-		}
-		account = resolved
-		validateFrozen := func(plan OpenAIOAuthIdentityPlan) error {
-			if plan.OSOwnerID == account.OpenAIOAuthCredentialOwnerID && plan.AuthorizationGeneration != "" &&
-				(plan.CredentialOS != account.OpenAIOAuthCredentialOS || plan.AuthorizationGeneration != account.OpenAIOAuthAuthorizationGeneration) {
-				return ErrOpenAIOAuthOSAuthorizationChanged
-			}
-			return nil
-		}
-		if pinnedPlan != nil {
-			if err := validateFrozen(*pinnedPlan); err != nil {
-				return OpenAIOAuthOutboundIdentityPlan{}, err
-			}
-		}
-		if cached, ok := OpenAIOAuthIdentityPlanFromContext(c); ok {
-			if err := validateFrozen(cached); err != nil {
-				return OpenAIOAuthOutboundIdentityPlan{}, err
-			}
-		}
-	}
 	if pinnedPlan != nil &&
 		openAIOAuthIdentityCapturesEqual(pinnedPlan.Capture, capture) &&
 		s.OpenAIOAuthIdentityPlanMatches(ctx, c, account, *pinnedPlan, options) {
