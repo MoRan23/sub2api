@@ -388,10 +388,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if normalizeOpenAIResponsesImageGenerationTools(payloadMap) {
 				bridgeModified = true
 			}
-			if applyCodexImageGenerationBridgeInstructions(payloadMap) {
-				bridgeModified = true
-				logOpenAIWSModeInfo("ingress_ws_codex_image_bridge_instructions_added account_id=%d", account.ID)
-			}
 			if bridgeModified {
 				rebuilt, marshalErr := json.Marshal(payloadMap)
 				if marshalErr != nil {
@@ -420,6 +416,26 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			normalized = next
 		}
 		SetOpsUpstreamModel(c, upstreamModel)
+		if codexBridgeEnabled {
+			// The selected upstream model owns the default template. Delay only
+			// instructions until mapping; tool declaration and policy order is unchanged.
+			var payloadMap map[string]any
+			if err := decodeOpenAIJSONUseNumber(normalized, &payloadMap); err != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", err)
+			}
+			instructionsChanged := applyDefaultCodexInstructions(payloadMap, upstreamModel)
+			if applyCodexImageGenerationBridgeInstructions(payloadMap) {
+				instructionsChanged = true
+				logOpenAIWSModeInfo("ingress_ws_codex_image_bridge_instructions_added account_id=%d", account.ID)
+			}
+			if instructionsChanged {
+				rebuilt, marshalErr := marshalOpenAIUpstreamJSON(payloadMap)
+				if marshalErr != nil {
+					return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", marshalErr)
+				}
+				normalized = rebuilt
+			}
+		}
 		if isCodexCLI && codexImageGenerationExplicitToolPolicy == codexImageGenerationExplicitToolPolicyStrip {
 			if stripped, changed, stripErr := stripOpenAIImageGenerationToolsFromRawPayload(normalized); stripErr != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", stripErr)
@@ -1140,6 +1156,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			payload = stamped
 			payloadBytes = len(stamped)
+		} else if account.IsOpenAIApiKey() {
+			updated, defaultErr := applyDefaultCodexInstructionsWSBody(payload)
+			if defaultErr != nil {
+				return nil, wrapOpenAIWSIngressTurnError("write_upstream_instructions", defaultErr, false)
+			}
+			payload = updated
+			payloadBytes = len(updated)
 		}
 		firstGuardedHeaderToken := ""
 		if turn == 1 {

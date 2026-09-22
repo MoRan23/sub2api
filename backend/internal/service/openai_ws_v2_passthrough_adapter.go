@@ -1149,6 +1149,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					return payload, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to stamp websocket request metadata", stampErr)
 				}
 				payload = stamped
+			} else if account.IsOpenAIApiKey() {
+				updated, defaultErr := applyDefaultCodexInstructionsWSBody(payload)
+				if defaultErr != nil {
+					return payload, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to prepare websocket instructions", defaultErr)
+				}
+				payload = updated
 			}
 			pendingFrameObservation = s.freezeFingerprintObservationWSFrame(c, account, currentTimezoneState, payload, physicalObservationHeaders, openAIWSObservationFramePlan(account, &framePlan))
 			recordOpenAICodexGuardianSourceThread(framePlan, nil, payload)

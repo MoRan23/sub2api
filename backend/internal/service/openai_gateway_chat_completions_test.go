@@ -347,7 +347,7 @@ func TestForwardAsChatCompletions_ResponsesShapeDoesNotAutoDerivePromptCacheKey(
 	require.Equal(t, isolateOpenAISessionID(99, "explicit-responses-key"), upstream.requests[2].Header.Get("session_id"))
 }
 
-func TestForwardAsChatCompletions_OAuthDoesNotInjectDefaultInstructions(t *testing.T) {
+func TestForwardAsChatCompletions_OAuthMissingInstructionsUsesDefault(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -385,7 +385,7 @@ func TestForwardAsChatCompletions_OAuthDoesNotInjectDefaultInstructions(t *testi
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, chatgptCodexURL, upstream.lastReq.URL.String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "instructions").Exists())
-	require.Equal(t, "", gjson.GetBytes(upstream.lastBody, "instructions").String())
+	require.Equal(t, defaultCodexSynthInstructions("gpt-5.4"), gjson.GetBytes(upstream.lastBody, "instructions").String())
 	require.NotContains(t, string(upstream.lastBody), "Communicate with the user by streaming thinking")
 }
 

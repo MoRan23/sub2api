@@ -1449,14 +1449,13 @@ func detectOpenAIPassthroughInstructionsRejectReason(reqModel string, body []byt
 	}
 
 	instructions := gjson.GetBytes(body, "instructions")
-	if !instructions.Exists() {
+	// Absent, null and blank prompts are filled by the final Responses wire
+	// projection after model mapping. Reject only an explicitly invalid type.
+	if !instructions.Exists() || instructions.Type == gjson.Null {
 		return ""
 	}
 	if instructions.Type != gjson.String {
 		return "instructions_not_string"
-	}
-	if strings.TrimSpace(instructions.String()) == "" {
-		return "instructions_empty"
 	}
 	return ""
 }

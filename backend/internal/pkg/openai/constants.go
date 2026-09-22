@@ -53,7 +53,7 @@ const DefaultTestModel = "gpt-5.4"
 const CodexUsageProbeModel = "codex-auto-review"
 
 // DefaultInstructions is the retained GPT-5-Codex template for legacy Codex
-// model catalog entries and account probes. It is not a forwarding default.
+// model catalog entries, account probes, and requests without client instructions.
 //
 //go:embed instructions.txt
 var DefaultInstructions string
@@ -69,10 +69,10 @@ var instructionsGPT52 string
 
 // Current templates below are copied from model_messages.instructions_template
 // in openai/codex codex-rs/models-manager/models.json at
-// 6149914a0e59363b6777080b3e953b05d592dbac. The three GPT-5.6 variants share
+// d1092865f8ec63735006211f65ee109ce91c30b9 (2026-09-22). The three GPT-5.6 variants share
 // one template; codex-auto-review shares the Daybreak Blue template.
-// These are used only for synthetic model catalogs and explicit account probes,
-// never as defaults added to a forwarded user's request.
+// Synthetic catalogs, account probes, and Responses requests without client
+// instructions use the same model-specific templates.
 //
 //go:embed instructions_gpt5_4.txt
 var instructionsGPT54 string

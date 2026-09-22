@@ -15,10 +15,11 @@ import (
 )
 
 const (
-	requestIntegrityMaxBytes       = 8 << 20
-	requestIntegrityMaxDepth       = 128
-	requestIntegrityMaxNodes       = 16384
-	requestIntegrityMaxDifferences = 32
+	requestIntegrityMaxBytes               = 8 << 20
+	requestIntegrityMaxDepth               = 128
+	requestIntegrityMaxNodes               = 16384
+	requestIntegrityMaxDifferences         = 32
+	requestIntegrityMaxInputAlignmentCells = 65536
 )
 
 // RequestIntegrityObservation contains diagnostics only. Neither request values
@@ -161,11 +162,40 @@ func (s *OpenAIRequestIntegrityState) Check(account *Account, wire []byte, opts 
 			rules["account_model_mapping"] = true
 		}
 	}
+	var beforeInputIndices, afterInputIndices []int
 	if account != nil && account.UsesOpenAICodexProtocol() {
-		canonicalizeRequestIntegrityCodex(before, rules)
-		canonicalizeRequestIntegrityCodex(after, rules)
-		if s.protocol == "messages" && opts.CompatTodoGuard && appendOpenAICompatClaudeCodeTodoGuardToRequestBody(before) {
-			rules["compat_todo_guard"] = true
+		beforeInputIndices = canonicalizeRequestIntegrityCodex(before, rules)
+		afterInputIndices = canonicalizeRequestIntegrityCodex(after, rules)
+		// The default must come from the independently selected model and the
+		// same missing-instructions guard used by forwarding. Never derive a
+		// supposedly trusted default from arbitrary outbound instructions.
+		if shouldApplyDefaultCodexInstructions(before) {
+			model, _ := before["model"].(string)
+			if expected := strings.TrimSpace(opts.ExpectedModel); expected != "" {
+				model = expected
+			}
+			instructions := defaultCodexSynthInstructions(model)
+			if actual, ok := after["instructions"].(string); ok && instructions != "" && actual == instructions {
+				before["instructions"] = instructions
+				rules["codex_default_instructions"] = true
+			}
+		}
+		if s.protocol == "messages" && opts.CompatTodoGuard {
+			input, _ := before["input"].([]any)
+			insertAt := 0
+			for insertAt < len(input) {
+				item, _ := input[insertAt].(map[string]any)
+				if strings.TrimSpace(firstNonEmptyString(item["type"])) != "message" || strings.TrimSpace(firstNonEmptyString(item["role"])) != "developer" {
+					break
+				}
+				insertAt++
+			}
+			if appendOpenAICompatClaudeCodeTodoGuardToRequestBody(before) {
+				beforeInputIndices = append(beforeInputIndices, -1)
+				copy(beforeInputIndices[insertAt+1:], beforeInputIndices[insertAt:])
+				beforeInputIndices[insertAt] = -1 // Synthesized equivalence has no ingress index.
+				rules["compat_todo_guard"] = true
+			}
 		}
 		for _, field := range []string{"max_output_tokens", "max_completion_tokens"} {
 			if _, present := before[field]; present {
@@ -176,7 +206,7 @@ func (s *OpenAIRequestIntegrityState) Check(account *Account, wire []byte, opts 
 			}
 		}
 	}
-	collector := requestIntegrityDifferenceCollector{}
+	collector := requestIntegrityDifferenceCollector{beforeInputIndices: beforeInputIndices, afterInputIndices: afterInputIndices}
 	if opts.CodexStatePatch != nil {
 		if codexStatePatchMatches(opts.CodexStatePatch, after) {
 			rules["codex_turn_state_cache"] = true
@@ -360,8 +390,10 @@ func cloneRequestIntegrityValue(value any) any {
 }
 
 type requestIntegrityDifferenceCollector struct {
-	fields    []string
-	truncated bool
+	fields             []string
+	truncated          bool
+	beforeInputIndices []int
+	afterInputIndices  []int
 }
 
 func (c *requestIntegrityDifferenceCollector) add(path string) {
@@ -387,6 +419,10 @@ func (c *requestIntegrityDifferenceCollector) compare(path string, before, after
 	}
 	if left, ok := before.([]any); ok {
 		if right, ok := after.([]any); ok {
+			if path == "input" {
+				c.compareInput(left, right)
+				return
+			}
 			length := max(len(left), len(right))
 			for i := 0; i < length && !c.truncated; i++ {
 				var l, r any
@@ -430,6 +466,125 @@ func (c *requestIntegrityDifferenceCollector) compare(path string, before, after
 		}
 	}
 	c.add(path)
+}
+
+// Compare the ordered input sequence before describing individual fields. A
+// single removed replay item must not make every following message look edited.
+// Paths with before/after explicitly identify which request owns the index;
+// matched items at the same position keep the existing path representation.
+func (c *requestIntegrityDifferenceCollector) compareInput(before, after []any) {
+	start := 0
+	for start < len(before) && start < len(after) && reflect.DeepEqual(before[start], after[start]) {
+		start++
+	}
+	beforeEnd, afterEnd := len(before), len(after)
+	for beforeEnd > start && afterEnd > start && reflect.DeepEqual(before[beforeEnd-1], after[afterEnd-1]) {
+		beforeEnd--
+		afterEnd--
+	}
+	n, m := beforeEnd-start, afterEnd-start
+	if n == 0 || m == 0 {
+		c.compareInputRun(before, after, start, beforeEnd, start, afterEnd)
+		return
+	}
+	if n > requestIntegrityMaxInputAlignmentCells/m {
+		// Retain the difference without inventing an index-by-index explanation
+		// when an adversarial/large sequence exhausts the alignment budget.
+		c.add("input")
+		return
+	}
+	width := m + 1
+	lcs := make([]int, (n+1)*width)
+	for i := n - 1; i >= 0; i-- {
+		for j := m - 1; j >= 0; j-- {
+			if reflect.DeepEqual(before[start+i], after[start+j]) {
+				lcs[i*width+j] = lcs[(i+1)*width+j+1] + 1
+			} else {
+				lcs[i*width+j] = max(lcs[(i+1)*width+j], lcs[i*width+j+1])
+			}
+		}
+	}
+	i, j, runBefore, runAfter := 0, 0, start, start
+	for i < n && j < m && !c.truncated {
+		if reflect.DeepEqual(before[start+i], after[start+j]) {
+			c.compareInputRun(before, after, runBefore, start+i, runAfter, start+j)
+			i++
+			j++
+			runBefore, runAfter = start+i, start+j
+		} else if lcs[(i+1)*width+j] >= lcs[i*width+j+1] {
+			i++
+		} else {
+			j++
+		}
+	}
+	if !c.truncated {
+		c.compareInputRun(before, after, runBefore, beforeEnd, runAfter, afterEnd)
+	}
+}
+
+func (c *requestIntegrityDifferenceCollector) compareInputRun(before, after []any, beforeStart, beforeEnd, afterStart, afterEnd int) {
+	// Equal-sized gaps between unchanged anchors can retain useful field-level
+	// diagnostics for replacements. Different-sized gaps are structural changes;
+	// pairing them by index would recreate the misleading shifted suffix.
+	paired := beforeEnd-beforeStart == afterEnd-afterStart
+	if paired {
+		for offset := 0; offset < beforeEnd-beforeStart; offset++ {
+			if !requestIntegrityInputItemsCompatible(before[beforeStart+offset], after[afterStart+offset]) {
+				paired = false
+				break
+			}
+		}
+	}
+	if paired {
+		for offset := 0; offset < beforeEnd-beforeStart && !c.truncated; offset++ {
+			i, j := beforeStart+offset, afterStart+offset
+			beforeIndex, afterIndex := requestIntegrityOriginalInputIndex(c.beforeInputIndices, i), requestIntegrityOriginalInputIndex(c.afterInputIndices, j)
+			if beforeIndex < 0 || afterIndex < 0 {
+				c.add("input")
+				continue
+			}
+			path := "input[" + strconv.Itoa(beforeIndex) + "]"
+			if beforeIndex != afterIndex {
+				path = "input.before[" + strconv.Itoa(beforeIndex) + "].after[" + strconv.Itoa(afterIndex) + "]"
+			}
+			c.compare(path, before[i], after[j], true, true)
+		}
+		return
+	}
+	for i := beforeStart; i < beforeEnd && !c.truncated; i++ {
+		c.add(requestIntegrityInputSidePath("before", requestIntegrityOriginalInputIndex(c.beforeInputIndices, i)))
+	}
+	for j := afterStart; j < afterEnd && !c.truncated; j++ {
+		c.add(requestIntegrityInputSidePath("after", requestIntegrityOriginalInputIndex(c.afterInputIndices, j)))
+	}
+}
+
+func requestIntegrityOriginalInputIndex(indices []int, normalized int) int {
+	if normalized < len(indices) {
+		return indices[normalized]
+	}
+	return normalized
+}
+
+func requestIntegrityInputSidePath(side string, index int) string {
+	if index < 0 {
+		return "input"
+	}
+	return "input." + side + "[" + strconv.Itoa(index) + "]"
+}
+
+func requestIntegrityInputItemsCompatible(before, after any) bool {
+	left, leftOK := before.(map[string]any)
+	right, rightOK := after.(map[string]any)
+	if !leftOK || !rightOK {
+		return false
+	}
+	for _, key := range []string{"type", "role", "call_id"} {
+		if !reflect.DeepEqual(left[key], right[key]) {
+			return false
+		}
+	}
+	return true
 }
 
 func requestIntegritySafePathKey(key string) bool {

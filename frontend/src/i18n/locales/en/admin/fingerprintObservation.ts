@@ -181,6 +181,7 @@ export default {
         result: 'Result', modeLabel: 'Check mode', protocolLabel: 'Inbound protocol', stageLabel: 'Baseline',
         attempt: 'Physical send attempt', transport: 'Transport', fields: 'Changed fields', rules: 'Transformation rules', reason: 'Reason',
         adapterBoundary: 'The baseline is the first converted Responses body. The protocol converter itself is outside this comparison.',
+        alignedInputPaths: 'before[n] is the inbound position and after[n] is the outbound position. Both appear when comparing an aligned item. Insertions and removals do not list every subsequent index shift as a difference.',
         truncated: 'Only the first 32 difference locations are shown; this list is incomplete.',
         status: { unchanged: 'No differences', expected_transform: 'Matches known transformations', difference: 'Differences found', skipped: 'Check incomplete' },
         modes: { observe: 'Observe only', off: 'Disabled' },

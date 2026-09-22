@@ -182,6 +182,12 @@ func (s *OpenAIGatewayService) projectOpenAIOAuthWSFrame(
 	}
 	finalPayload := payload
 	var err error
+	// Only inference frames receive a missing prompt. Control frames and prewarm
+	// remain independent of the request-level instructions fallback.
+	finalPayload, err = applyDefaultCodexInstructionsWSBody(finalPayload)
+	if err != nil {
+		return payload, err
+	}
 	if plan.WireProfile.ToolNamespacesAllowed {
 		finalPayload, _, err = normalizeOpenAIResponsesLiteToolsPayload(finalPayload)
 		if err != nil {

@@ -12,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 func TestFinalizeOpenAIOAuthResponsesRequestUsesFinalRoutingAndCanonicalIdentity(t *testing.T) {
@@ -41,7 +42,10 @@ func TestFinalizeOpenAIOAuthResponsesRequestUsesFinalRoutingAndCanonicalIdentity
 		Transport:        "test",
 	})
 	require.NoError(t, err)
-	require.Equal(t, body, out)
+	withoutDefault, err := sjson.DeleteBytes(out, "instructions")
+	require.NoError(t, err)
+	require.Equal(t, body, withoutDefault)
+	require.Equal(t, defaultCodexSynthInstructions("gpt-final"), gjson.GetBytes(out, "instructions").String())
 	require.Equal(t, "model=gpt-final;tier=priority", req.Header.Get(openAICodexRoutingHintHeader))
 	require.Equal(t, clientIdentity.UserAgent, req.Header.Get("User-Agent"))
 	require.Equal(t, clientIdentity.Originator, req.Header.Get("Originator"))
@@ -60,23 +64,50 @@ func TestFinalizeOpenAIOAuthResponsesRequestUsesFinalRoutingAndCanonicalIdentity
 	require.Equal(t, int64(len(out)), req.ContentLength)
 }
 
-func TestFinalizeOpenAIOAuthResponsesRequestIsNoOpForAPIKey(t *testing.T) {
+func TestFinalizeOpenAIOAuthResponsesRequestAppliesDefaultsAndWireSnapshotForAPIKey(t *testing.T) {
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, openaiPlatformAPIURL, strings.NewReader("original request body"))
 	require.NoError(t, err)
 	req.Header["openai-beta"] = []string{"responses=experimental, api-key-feature=v1"}
 	req.Header["x-codex-routing-hint"] = []string{"caller-owned"}
-	beforeHeaders := req.Header.Clone()
-	body := []byte(`{"model":"gpt-api-key","input":[]}`)
+	body := []byte(`{"model":"gpt-6-astra","input":[]}`)
 
 	out, err := (&OpenAIGatewayService{}).FinalizeOpenAIOAuthResponsesRequest(nil, account, req, body, OpenAIOAuthResponsesFinalizeOptions{
-		FinalModel:       "must-not-apply",
+		FinalModel:       "gpt-6-astra",
 		FinalServiceTier: "priority",
 	})
 	require.NoError(t, err)
+	withoutDefault, err := sjson.DeleteBytes(out, "instructions")
+	require.NoError(t, err)
+	require.Equal(t, body, withoutDefault)
+	require.Equal(t, defaultCodexSynthInstructions("gpt-6-astra"), gjson.GetBytes(out, "instructions").String())
+	require.Len(t, req.Header, 2)
+	require.Equal(t, "api-key-feature=v1", req.Header.Get("OpenAI-Beta"))
+	require.Equal(t, "model=gpt-6-astra;tier=priority", req.Header.Get(openAICodexRoutingHintHeader))
+
+	requestBody, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	require.Equal(t, out, requestBody)
+	replayed, err := req.GetBody()
+	require.NoError(t, err)
+	defer func() { _ = replayed.Close() }()
+	replayedBody, err := io.ReadAll(replayed)
+	require.NoError(t, err)
+	require.Equal(t, out, replayedBody)
+	require.Equal(t, int64(len(out)), req.ContentLength)
+}
+
+func TestFinalizeOpenAIOAuthResponsesRequestIsNoOpForOtherPlatforms(t *testing.T) {
+	account := &Account{Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://example.invalid/messages", strings.NewReader("original request body"))
+	require.NoError(t, err)
+	req.Header.Set("User-Agent", "caller-owned")
+	beforeHeaders := req.Header.Clone()
+	body := []byte(`{"model":"caller-model","input":[]}`)
+	out, err := (&OpenAIGatewayService{}).FinalizeOpenAIOAuthResponsesRequest(nil, account, req, body, OpenAIOAuthResponsesFinalizeOptions{FinalModel: "gpt-6-astra"})
+	require.NoError(t, err)
 	require.Equal(t, body, out)
 	require.Equal(t, beforeHeaders, req.Header)
-
 	requestBody, err := io.ReadAll(req.Body)
 	require.NoError(t, err)
 	require.Equal(t, "original request body", string(requestBody))

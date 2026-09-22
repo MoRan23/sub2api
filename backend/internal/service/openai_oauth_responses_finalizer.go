@@ -108,8 +108,12 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 		ensureOpenAIOAuthResponsesClientIdentity(req.Header, finalPlan.ClientIdentity)
 	}
 	finalInputBody := body
+	finalInputBody, _, err = applyDefaultCodexInstructionsBody(finalInputBody, options.FinalModel)
+	if err != nil {
+		return body, err
+	}
 	if modelCapabilities.UseResponsesLite {
-		finalInputBody, _, err = normalizeOpenAIResponsesLiteToolsPayload(body)
+		finalInputBody, _, err = normalizeOpenAIResponsesLiteToolsPayload(finalInputBody)
 		if err != nil {
 			writeOpenAIResponsesLiteValidationError(c, err)
 			return body, err

@@ -275,8 +275,14 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 		result.Modified = true
 	}
 
-	if isCodexSparkModel(normalizedModel) && applyCodexSparkImageUnsupportedInstructions(reqBody) {
-		result.Modified = true
+	if isCodexSparkModel(normalizedModel) {
+		// The server-owned image policy must not hide a missing caller prompt.
+		if applyDefaultCodexInstructions(reqBody, normalizedModel) {
+			result.Modified = true
+		}
+		if applyCodexSparkImageUnsupportedInstructions(reqBody) {
+			result.Modified = true
+		}
 	}
 	// gpt-5.3-codex-spark rejects the image_generation tool upstream (HTTP 400,
 	// param=tools); Codex CLI advertises it by default, so strip it for spark.

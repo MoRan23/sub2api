@@ -180,6 +180,7 @@ export default {
         result: '检查结果', modeLabel: '检查模式', protocolLabel: '入口协议', stageLabel: '比较基线',
         attempt: '物理发送尝试', transport: '传输方式', fields: '变化字段', rules: '转换规则', reason: '原因',
         adapterBoundary: '基线取自首次转换为 Responses 后的正文，检查范围不包含协议转换器本身。',
+        alignedInputPaths: 'before[n] 表示入站位置，after[n] 表示出站位置；两者同时出现表示对齐后比较的同一项。单项增删不会将后续下标变化逐条列为差异。',
         truncated: '仅展示前 32 个差异位置，列表不完整。',
         status: { unchanged: '无差异', expected_transform: '符合已知转换规则', difference: '发现差异', skipped: '未完成检查' },
         modes: { observe: '仅观察', off: '已关闭' },

@@ -398,6 +398,13 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			return nil, wrapOpenAIWSFallback("write_request_metadata", stampErr)
 		}
 		wirePayload = json.RawMessage(stamped)
+	} else if account.IsOpenAIApiKey() {
+		updated, defaultErr := applyDefaultCodexInstructionsWSBody(payloadAsJSONBytes(payload))
+		if defaultErr != nil {
+			lease.MarkBroken()
+			return nil, wrapOpenAIWSFallback("write_request_instructions", defaultErr)
+		}
+		wirePayload = json.RawMessage(updated)
 	}
 	observationBody := payloadAsJSONBytes(payload)
 	if raw, ok := wirePayload.(json.RawMessage); ok {

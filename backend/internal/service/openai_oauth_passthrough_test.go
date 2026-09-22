@@ -255,7 +255,7 @@ func TestOpenAIGatewayService_NativeResponsesBodyModificationPreservesHTMLChars(
 	require.NotContains(t, string(upstream.lastBody), `\\u0026`)
 }
 
-func TestOpenAIGatewayService_OAuthMessagesBridgeDoesNotInjectDefaultInstructions(t *testing.T) {
+func TestOpenAIGatewayService_OAuthMessagesBridgePreservesCallerDeveloperInstructions(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -1877,7 +1877,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_UpstreamRequestIgnoresClientCance
 	require.NoError(t, upstream.lastReq.Context().Err())
 }
 
-func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsStayAbsent(t *testing.T) {
+func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsGetsDefault(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	for _, stream := range []bool{false, true} {
@@ -1922,12 +1922,12 @@ func TestOpenAIGatewayService_OAuthPassthrough_CodexMissingInstructionsStayAbsen
 			} else {
 				require.False(t, gjson.GetBytes(upstream.lastBody, "stream").Exists())
 			}
-			require.False(t, gjson.GetBytes(upstream.lastBody, "instructions").Exists())
+			require.Equal(t, defaultCodexSynthInstructions("gpt-5.1-codex-max"), gjson.GetBytes(upstream.lastBody, "instructions").String())
 		})
 	}
 }
 
-func TestOpenAIGatewayService_Forward_MissingInstructionsStayAbsentAfterModelMapping(t *testing.T) {
+func TestOpenAIGatewayService_Forward_MissingInstructionsUsesMappedModelTemplate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -1961,10 +1961,10 @@ func TestOpenAIGatewayService_Forward_MissingInstructionsStayAbsentAfterModelMap
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "gpt-6-astra", gjson.GetBytes(upstream.lastBody, "model").String())
-	require.Empty(t, gjson.GetBytes(upstream.lastBody, "instructions").String())
+	require.Equal(t, defaultCodexSynthInstructions("gpt-6-astra"), gjson.GetBytes(upstream.lastBody, "instructions").String())
 }
 
-func TestOpenAIGatewayService_Forward_PreservesPythonToolsWithoutSyntheticInstructions(t *testing.T) {
+func TestOpenAIGatewayService_Forward_PreservesPythonToolsWithMissingInstructionsFallback(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, accountType := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
 		for _, passthrough := range []bool{false, true} {
@@ -2012,7 +2012,7 @@ func TestOpenAIGatewayService_Forward_PreservesPythonToolsWithoutSyntheticInstru
 					if explicitInstructions {
 						require.Equal(t, "Keep the caller's python tool name.", gjson.GetBytes(upstream.lastBody, "instructions").String())
 					} else {
-						require.Empty(t, gjson.GetBytes(upstream.lastBody, "instructions").String())
+						require.Equal(t, defaultCodexSynthInstructions("gpt-5.5"), gjson.GetBytes(upstream.lastBody, "instructions").String())
 					}
 					require.Contains(t, rec.Body.String(), `"name":"python"`)
 					require.NotContains(t, rec.Body.String(), `"name":"python_exec"`)
@@ -2058,7 +2058,7 @@ func TestOpenAIGatewayService_CompatBridgesPreservePythonToolNames(t *testing.T)
 				require.NotNil(t, upstream.lastReq, "request must reach the mocked upstream without a name-collision rejection")
 				require.Equal(t, "python", gjson.GetBytes(upstream.lastBody, "tools.0.name").String())
 				require.Equal(t, "python_exec", gjson.GetBytes(upstream.lastBody, "tools.1.name").String())
-				require.Empty(t, gjson.GetBytes(upstream.lastBody, "instructions").String())
+				require.Equal(t, defaultCodexSynthInstructions("gpt-5.4"), gjson.GetBytes(upstream.lastBody, "instructions").String())
 			})
 		}
 	}
@@ -3494,8 +3494,12 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PreservesBodyAndUsesResponsesEnd
 	require.False(t, ApplyOpenAIServiceTierBillingResolution(account, result).Downgraded)
 	require.Equal(t, "flex", *result.ServiceTier, "observed priority must not raise passthrough billing")
 	require.NotNil(t, upstream.lastReq)
-	require.Equal(t, originalBody, upstream.lastBody)
-	require.False(t, gjson.GetBytes(upstream.lastBody, "instructions").Exists())
+	// Missing instructions are the only additional content field introduced by
+	// the shared final wire projector; caller input and decoding precision stay intact.
+	expectedBody, err := sjson.SetBytes(originalBody, "instructions", defaultCodexSynthInstructions("gpt-5.2"))
+	require.NoError(t, err)
+	require.Equal(t, expectedBody, upstream.lastBody)
+	require.Equal(t, defaultCodexSynthInstructions("gpt-5.2"), gjson.GetBytes(upstream.lastBody, "instructions").String())
 	require.Equal(t, "https://api.openai.com/v1/responses", upstream.lastReq.URL.String())
 	require.Equal(t, "Bearer sk-api-key", upstream.lastReq.Header.Get("Authorization"))
 	// Safe identity pairing still replaces an unrecognized client UA when

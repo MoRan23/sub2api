@@ -276,6 +276,9 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 		}); err != nil {
 			return nil, err
 		}
+		// Fill before the server-owned todo guard is inserted: that server-owned
+		// developer message is not evidence of caller-supplied instructions.
+		applyDefaultCodexInstructions(reqBody, templateUpstreamModel)
 		ensureCodexOAuthInstructionsField(reqBody)
 		if shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
 			if appendOpenAICompatClaudeCodeTodoGuardToRequestBody(reqBody) {

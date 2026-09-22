@@ -8,7 +8,14 @@ import (
 // These are deliberately small, lossless equivalences, not another run of the
 // forwarding transformer. Unknown items, attributes and multimodal content are
 // left comparable; recovery that deletes content never belongs in this list.
-func canonicalizeRequestIntegrityCodex(body map[string]any, rules map[string]bool) {
+func canonicalizeRequestIntegrityCodex(body map[string]any, rules map[string]bool) []int {
+	var inputIndices []int
+	if input, ok := body["input"].([]any); ok {
+		inputIndices = make([]int, len(input))
+		for index := range input {
+			inputIndices[index] = index
+		}
+	}
 	if model, ok := body["model"].(string); ok && model != strings.TrimSpace(model) {
 		body["model"] = strings.TrimSpace(model)
 		rules["model_whitespace"] = true
@@ -29,9 +36,23 @@ func canonicalizeRequestIntegrityCodex(body map[string]any, rules map[string]boo
 	}
 	if text, ok := body["input"].(string); ok {
 		body["input"] = []any{map[string]any{"type": "message", "role": "user", "content": text}}
+		inputIndices = []int{-1} // The original carrier is scalar, not input[0].
 		rules["input_message_shape"] = true
 	}
-	canonicalizeRequestIntegritySystem(body, rules)
+	// The forwarder removes this exact client-only field before promoting
+	// system messages. Mirror that order so otherwise lossless promotion is
+	// not mistaken for deleting a message with an unknown content attribute.
+	if input, ok := body["input"].([]any); ok {
+		for _, raw := range input {
+			if item, ok := raw.(map[string]any); ok {
+				if _, exists := item["internal_chat_message_metadata_passthrough"]; exists {
+					delete(item, "internal_chat_message_metadata_passthrough")
+					rules["codex_input_metadata_removed"] = true
+				}
+			}
+		}
+	}
+	inputIndices = canonicalizeRequestIntegritySystem(body, rules, inputIndices)
 	if instructions, ok := body["instructions"].(string); body["instructions"] == nil || (ok && strings.TrimSpace(instructions) == "") {
 		if _, present := body["instructions"]; present {
 			rules["empty_instructions"] = true
@@ -80,7 +101,7 @@ func canonicalizeRequestIntegrityCodex(body map[string]any, rules map[string]boo
 	}
 	input, ok := body["input"].([]any)
 	if !ok {
-		return
+		return inputIndices
 	}
 	referenceIDs := codexItemReferenceIDMappings(input, false)
 	itemIDs := codexInputItemIDs(input)
@@ -89,12 +110,6 @@ func canonicalizeRequestIntegrityCodex(body map[string]any, rules map[string]boo
 		item, ok := raw.(map[string]any)
 		if !ok {
 			continue
-		}
-		// This exact input-item field is stripped by the Codex compatibility
-		// adapter. Adjacent or nested unknown fields remain fully comparable.
-		if _, exists := item["internal_chat_message_metadata_passthrough"]; exists {
-			delete(item, "internal_chat_message_metadata_passthrough")
-			rules["codex_input_metadata_removed"] = true
 		}
 		if item["role"] == "tool" && requestIntegrityOnlyKeys(item, "type", "role", "content", "tool_call_id", "call_id", "id") {
 			callID := strings.TrimSpace(firstNonEmptyString(item["call_id"], item["tool_call_id"], item["id"]))
@@ -170,6 +185,7 @@ func canonicalizeRequestIntegrityCodex(body map[string]any, rules map[string]boo
 			}
 		}
 	}
+	return inputIndices
 }
 
 func flattenRequestIntegrityFunction(tool map[string]any) bool {
@@ -229,10 +245,10 @@ func requestIntegrityLosslessText(raw any) (string, bool) {
 	return result.String(), true
 }
 
-func canonicalizeRequestIntegritySystem(body map[string]any, rules map[string]bool) {
+func canonicalizeRequestIntegritySystem(body map[string]any, rules map[string]bool, indices []int) []int {
 	input, ok := body["input"].([]any)
 	if !ok {
-		return
+		return indices
 	}
 	omit := true
 	if text, ok := body["text"].(map[string]any); ok {
@@ -242,15 +258,18 @@ func canonicalizeRequestIntegritySystem(body map[string]any, rules map[string]bo
 	}
 	var promoted []string
 	retained := make([]any, 0, len(input))
-	for _, raw := range input {
+	retainedIndices := make([]int, 0, len(indices))
+	for index, raw := range input {
 		item, ok := raw.(map[string]any)
 		if !ok || item["role"] != "system" || !requestIntegrityOnlyKeys(item, "type", "role", "content", "id") {
 			retained = append(retained, raw)
+			retainedIndices = append(retainedIndices, indices[index])
 			continue
 		}
 		text, lossless := requestIntegrityLosslessText(item["content"])
 		if !lossless {
 			retained = append(retained, raw)
+			retainedIndices = append(retainedIndices, indices[index])
 			continue
 		}
 		if text != "" {
@@ -259,6 +278,7 @@ func canonicalizeRequestIntegritySystem(body map[string]any, rules map[string]bo
 		if !omit {
 			item["role"] = "developer"
 			retained = append(retained, raw)
+			retainedIndices = append(retainedIndices, indices[index])
 		}
 		rules["system_instruction_promotion"] = true
 	}
@@ -270,4 +290,5 @@ func canonicalizeRequestIntegritySystem(body map[string]any, rules map[string]bo
 		}
 		body["instructions"] = instructions
 	}
+	return retainedIndices
 }

@@ -251,7 +251,7 @@ describe('FingerprintObservationRequestDetails', () => {
   it('shows a compact integrity status and expands fields and safe reasons with the correct baseline boundary', async () => {
     renderDetails({ request_integrity: {
       mode: 'observe', status: 'difference', baseline_protocol: 'messages', baseline_stage: 'responses_adapter_output',
-      attempt: 2, transport: 'ws', changed_fields: ['input.0.content', 'reasoning'], rule_codes: ['encrypted_reasoning_removed'], truncated: true,
+      attempt: 2, transport: 'ws', changed_fields: ['input.before[88]', 'input.before[97].after[96].arguments', 'reasoning'], rule_codes: ['encrypted_reasoning_removed'], truncated: true,
     } })
     expect(screen.getByTestId('request-integrity-summary').textContent).toContain('Differences found')
     expect(screen.queryByTestId('request-integrity-details')).toBeNull()
@@ -261,7 +261,9 @@ describe('FingerprintObservationRequestDetails', () => {
     expect(within(detail).getByText('Messages')).toBeTruthy()
     expect(within(detail).getByText('Converted Responses request')).toBeTruthy()
     expect(within(detail).getByText('The baseline is the first converted Responses body. The protocol converter itself is outside this comparison.')).toBeTruthy()
-    expect(within(detail).getByText('input.0.content')).toBeTruthy()
+    expect(within(detail).getByText('input.before[88]')).toBeTruthy()
+    expect(within(detail).getByText('input.before[97].after[96].arguments')).toBeTruthy()
+    expect(within(detail).getByText('before[n] is the inbound position and after[n] is the outbound position. Both appear when comparing an aligned item. Insertions and removals do not list every subsequent index shift as a difference.')).toBeTruthy()
     expect(within(detail).getByText('Encrypted reasoning removed during recovery (lossy)')).toBeTruthy()
     expect(within(detail).getByText('2')).toBeTruthy()
     expect(within(detail).getByText('WS')).toBeTruthy()

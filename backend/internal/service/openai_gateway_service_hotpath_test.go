@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 func TestOpenAIRequestView_ExtractsRawScalars(t *testing.T) {
@@ -141,8 +142,10 @@ func TestOpenAIGatewayService_Forward_APIKeyMissingInstructionsKeepsLargeInputRa
 	require.NotNil(t, result)
 	require.NotNil(t, upstream.lastReq)
 	expectedBody := `{"model":"gpt-5","stream":false,"reasoning":{"effort":"none"},"input":[{"type":"message","content":[{"type":"input_text","text":"hi","nonce":9007199254740993}]}]}`
-	require.JSONEq(t, expectedBody, string(upstream.lastBody))
-	require.False(t, gjson.GetBytes(upstream.lastBody, "instructions").Exists())
+	require.Equal(t, defaultCodexSynthInstructions("gpt-5"), gjson.GetBytes(upstream.lastBody, "instructions").String())
+	withoutDefault, err := sjson.DeleteBytes(upstream.lastBody, "instructions")
+	require.NoError(t, err)
+	require.JSONEq(t, expectedBody, string(withoutDefault))
 	require.Equal(t, "9007199254740993", gjson.GetBytes(upstream.lastBody, "input.0.content.0.nonce").Raw)
 }
 

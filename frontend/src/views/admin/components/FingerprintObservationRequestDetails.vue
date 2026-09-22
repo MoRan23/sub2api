@@ -57,6 +57,7 @@
         <p v-if="observation.request_integrity.baseline_stage === 'responses_adapter_output'" class="mt-3 text-gray-500 dark:text-gray-400">{{ t(`${integrityPrefix}.adapterBoundary`) }}</p>
         <div v-if="observation.request_integrity.changed_fields?.length" class="mt-3">
           <h4 class="text-gray-500 dark:text-gray-400">{{ t(`${integrityPrefix}.fields`) }}</h4>
+          <p v-if="hasAlignedInputDifferences" class="mt-1 text-gray-500 dark:text-gray-400">{{ t(`${integrityPrefix}.alignedInputPaths`) }}</p>
           <ul class="mt-1 space-y-1 break-all font-mono text-gray-800 dark:text-gray-200">
             <li v-for="(field, index) in observation.request_integrity.changed_fields" :key="index">{{ field }}</li>
           </ul>
@@ -174,6 +175,7 @@ const integrityPrefix = `${prefix}.integrity`
 const conversionPrefix = `${prefix}.conversionCheck`
 const detailsOpen = ref(false)
 const hasOutboundSearchLocation = computed(() => props.observation.outbound_timezone_observations?.items?.some(item => item.source === 'web_search' && item.location))
+const hasAlignedInputDifferences = computed(() => props.observation.request_integrity?.changed_fields?.some(field => /^input\.(before|after)\[/.test(field)))
 const directions = computed(() => [
   { key: 'inbound', scan: props.observation.inbound_timezone_observations },
   { key: 'outbound', scan: props.observation.outbound_timezone_observations },

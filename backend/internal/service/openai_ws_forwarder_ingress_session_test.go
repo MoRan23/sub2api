@@ -463,7 +463,7 @@ func testOpenAIWSKeepLeaseAcrossTurns(t *testing.T, accountType string) {
 		require.Equal(t, "python", gjson.Get(payload, "tools.0.name").String())
 		require.Equal(t, "python_exec", gjson.Get(payload, "tools.1.name").String())
 	}
-	require.Empty(t, gjson.Get(requestToJSONString(captureConn.writes[0]), "instructions").String())
+	require.Equal(t, defaultCodexSynthInstructions(gjson.Get(requestToJSONString(captureConn.writes[0]), "model").String()), gjson.Get(requestToJSONString(captureConn.writes[0]), "instructions").String())
 	require.Equal(t, "Use exactly the caller's tools.", gjson.Get(requestToJSONString(captureConn.writes[1]), "instructions").String())
 }
 
@@ -1140,7 +1140,8 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 		Schedulable: true,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"access_token": "test-token",
+			"access_token":  "test-token",
+			"model_mapping": map[string]any{"gpt-5.5": "gpt-6-astra"},
 		},
 		Extra: map[string]any{
 			"openai_oauth_responses_websockets_v2_enabled": true,
@@ -1238,6 +1239,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 		"model":"gpt-5.5",
 		"stream":false,
 		"previous_response_id":"resp_codex_image_lite",
+		"instructions":"Use the caller's image policy.",
 		"input":"draw a cat",
 		"tools":[{"type":"function","name":"image_gen.imagegen","parameters":{"type":"object"}}]
 	}`))
@@ -1277,7 +1279,8 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	require.True(t, gjson.Get(nonLitePayload, `tools.#(type=="image_generation")`).Exists())
 	require.Equal(t, "png", gjson.Get(nonLitePayload, `tools.#(type=="image_generation").output_format`).String())
 	require.Equal(t, "auto", gjson.Get(nonLitePayload, "tool_choice").String())
-	require.Contains(t, gjson.Get(nonLitePayload, "instructions").String(), "image_generation")
+	require.Equal(t, "gpt-6-astra", gjson.Get(nonLitePayload, "model").String())
+	require.Equal(t, defaultCodexSynthInstructions("gpt-6-astra")+"\n\n"+codexImageGenerationBridgeText, gjson.Get(nonLitePayload, "instructions").String())
 	require.False(t, gjson.Get(nonLitePayload, "reasoning.context").Exists())
 	require.True(t, gjson.Get(nonLitePayload, "parallel_tool_calls").Bool())
 	require.Equal(t, "900719925474099312345", gjson.Get(nonLitePayload, "sequence").Raw)
@@ -1301,6 +1304,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_CodexImageBridge
 	require.False(t, gjson.Get(functionPayload, `tools.#(type=="image_generation")`).Exists())
 	require.False(t, gjson.Get(functionPayload, "tool_choice").Exists())
 	require.NotContains(t, gjson.Get(functionPayload, "instructions").String(), codexImageGenerationBridgeMarker)
+	require.Equal(t, "Use the caller's image policy.", gjson.Get(functionPayload, "instructions").String())
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_DedicatedModeDoesNotReuseConnAcrossSessions(t *testing.T) {
@@ -1875,7 +1879,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 	require.Equal(t, "collaboration", gjson.Get(forwarded, `input.#(type=="additional_tools").tools.0.name`).String())
 	require.Equal(t, "python", gjson.Get(forwarded, `input.#(type=="additional_tools").tools.0.tools.1.name`).String())
 	require.Equal(t, "python_exec", gjson.Get(forwarded, `input.#(type=="additional_tools").tools.0.tools.2.name`).String())
-	require.Empty(t, gjson.Get(forwarded, "instructions").String())
+	require.Equal(t, defaultCodexSynthInstructions("gpt-5.1"), gjson.Get(forwarded, "instructions").String())
 	require.Equal(t, "namespace", gjson.Get(forwarded, "tool_choice.type").String())
 	require.Equal(t, "collaboration", gjson.Get(forwarded, "tool_choice.name").String())
 	require.Equal(t, "medium", gjson.Get(forwarded, "reasoning.effort").String())

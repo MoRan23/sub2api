@@ -367,7 +367,8 @@ func TestDetectOpenAIPassthroughInstructionsRejectReason(t *testing.T) {
 	}{
 		{name: "missing is optional", body: `{"model":"gpt-5.1-codex"}`, want: ""},
 		{name: "non string remains rejected", body: `{"instructions":{"text":"invalid"}}`, want: "instructions_not_string"},
-		{name: "empty remains rejected", body: `{"instructions":"  "}`, want: "instructions_empty"},
+		{name: "empty awaits final model default", body: `{"instructions":"  "}`, want: ""},
+		{name: "null awaits final model default", body: `{"instructions":null}`, want: ""},
 		{name: "non empty remains accepted", body: `{"instructions":"client guidance"}`, want: ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
