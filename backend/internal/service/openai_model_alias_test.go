@@ -15,7 +15,7 @@ func TestNormalizeKnownOpenAICodexModelGPT6Astra(t *testing.T) {
 
 func TestNormalizeKnownOpenAICodexModelGPT6Families(t *testing.T) {
 	for _, family := range []string{"gpt-6-sol", "gpt-6-luna"} {
-		for _, model := range []string{family, "openai/" + family, strings.ToUpper(strings.ReplaceAll(family, "-", "_")), family + "-high", family + "-max", family + "-2026-09-23"} {
+		for _, model := range []string{family, "openai/" + family, strings.ToUpper(strings.ReplaceAll(family, "-", "_")), family + "-minimal", family + "-high", family + "-max", family + "-ultra", family + "-2026-09-23", family + "-openai-compact", family + "-ultra-openai-compact"} {
 			t.Run(model, func(t *testing.T) {
 				require.Equal(t, family, normalizeKnownOpenAICodexModel(model))
 				require.Equal(t, family, normalizeCodexModel(model))
@@ -26,7 +26,7 @@ func TestNormalizeKnownOpenAICodexModelGPT6Families(t *testing.T) {
 			})
 		}
 	}
-	for _, unknown := range []string{"gpt-6-other", "gpt-6-sol-custom", "gpt-6-luna-custom"} {
+	for _, unknown := range []string{"gpt-6-other", "gpt-6-sol-custom", "gpt-6-luna-custom", "gpt-6-astra-custom", "gpt-6-sol-2026-99-01", "gpt-6-luna-2026-02-29", "gpt-6-sol-2026-09-31-openai-compact"} {
 		require.Empty(t, normalizeKnownOpenAICodexModel(unknown))
 		require.Equal(t, unknown, normalizeCodexModel(unknown))
 		require.False(t, isOpenAIGPT6Model(unknown))

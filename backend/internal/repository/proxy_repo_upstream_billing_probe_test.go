@@ -113,8 +113,7 @@ func TestProxyUpdateSkipsProbeInvalidationForNonIdentityChange(t *testing.T) {
 
 func expectProxyUpdateReload(mock sqlmock.Sqlmock, id int64, host, username, password string) {
 	now := time.Now()
-	mock.ExpectExec(regexp.QuoteMeta(`UPDATE "proxies" SET "backup_proxy_id" = NULL WHERE "backup_proxy_id" = $1`)).
-		WithArgs(id).WillReturnResult(sqlmock.NewResult(0, 0))
+	// Directed backups only change the updated row, never incoming references.
 	mock.ExpectQuery(`(?s)SELECT .* FROM "proxies" WHERE "id" = \$1`).
 		WithArgs(id).
 		WillReturnRows(sqlmock.NewRows([]string{

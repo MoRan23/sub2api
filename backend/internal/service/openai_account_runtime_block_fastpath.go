@@ -102,6 +102,10 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	// Any non-2xx upstream HTTP response means the model request was actually sent.
 	if s != nil {
 		scheduleOllamaCloudUsageActivity(s.deferredService, account)
+		scheduleOpenCodeGoUsageActivity(s.deferredService, account)
+	}
+	if isOpenAICloudflareBotBlock(account, statusCode, responseBody) {
+		return false
 	}
 	// Capacity shedding describes this request, not account health. Keep the
 	// account schedulable while the request-local retry budget handles recovery.
@@ -110,6 +114,16 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	}
 	stateCtx, cancel := openAIAccountStateContext(ctx)
 	defer cancel()
+	if s != nil && s.rateLimitService != nil && (statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden) {
+		var current bool
+		account, current = s.rateLimitService.openAIOAuthErrorAccount(stateCtx, account)
+		if !current {
+			// The physical attempt still failed, but its old credentials must not
+			// place the replacement authorization in the account-wide runtime block.
+			return true
+		}
+	}
+	_, versionedOAuthState := openAIOAuthAccountStateSnapshot(account)
 	if account != nil && account.Platform == PlatformOpenAI && isOpenAIHTTPUpstreamAccessStateError(statusCode, "", responseBody) {
 		message := "OpenAI upstream account or workspace is unavailable"
 		if upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(responseBody)); upstreamMsg != "" {
@@ -118,7 +132,7 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 		if s != nil && s.rateLimitService != nil {
 			s.rateLimitService.handleAuthError(stateCtx, account, message)
 		}
-		if s != nil {
+		if s != nil && !versionedOAuthState {
 			s.BlockAccountScheduling(account, time.Time{}, "openai_access_state")
 		}
 		return true
@@ -177,7 +191,10 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	shouldDisable := s.rateLimitService.HandleUpstreamError(stateCtx, account, statusCode, headers, responseBody)
 	modelTempMatched := statusCode != http.StatusUnauthorized && tempUnschedulableModel(stateCtx, nil) != "" &&
 		len(matchTempUnschedulableRules(account, statusCode, responseBody)) > 0
-	if shouldDisable && !modelTempMatched {
+	// Versioned OAuth mutations notify the blocker only after the repository CAS
+	// succeeds. An unconditional duplicate here would bypass that protection if
+	// a refresh or reauthorization won the race while the response was processed.
+	if shouldDisable && !modelTempMatched && !versionedOAuthState {
 		s.BlockAccountScheduling(account, time.Time{}, "upstream_disable")
 	}
 	// Pool-mode retryable upstream errors are already bounded by the request-local

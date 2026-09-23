@@ -28,7 +28,7 @@ func canonicalizeRequestIntegrityCodex(body map[string]any, rules map[string]boo
 		model, _ := body["model"].(string)
 		mode, _ := reasoning["mode"].(string)
 		effort, _ := reasoning["effort"].(string)
-		if !isOpenAIGPT6AstraModel(model) && strings.EqualFold(strings.TrimSpace(mode), "pro") && strings.TrimSpace(effort) == "" {
+		if !isOpenAIGPT6Model(model) && strings.EqualFold(strings.TrimSpace(mode), "pro") && strings.TrimSpace(effort) == "" {
 			reasoning["effort"] = "max"
 			delete(reasoning, "mode")
 			rules["reasoning_mode_alias"] = true

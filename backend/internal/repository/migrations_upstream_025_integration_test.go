@@ -75,7 +75,7 @@ func TestMigrationsUpstream025UpgradePreservesFixedRoots(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, legacyRoot, root)
 	var count int
-	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE filename LIKE '238_%'`).Scan(&count))
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE left(filename, 4) = '238_'`).Scan(&count))
 	require.Equal(t, 3, count, "all three 238 filenames must coexist")
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = $1`, service.SettingKeyEnableOpenAIOAuthDailySessionRotation).Scan(&enabled))
 	require.Equal(t, "true", enabled)

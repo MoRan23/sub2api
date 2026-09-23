@@ -450,7 +450,7 @@ export default {
       },
       claudeCode: {
         title: 'Claude Code 设置',
-        description: '控制 Claude Code 客户端访问要求',
+        description: '控制 Claude Code 客户端访问要求和出站声明版本',
         minVersion: '最低版本号',
         minVersionPlaceholder: '例如 2.1.63',
         minVersionHint: '拒绝低于此版本的 Claude Code 客户端请求（semver 格式）。留空则不检查版本。',
@@ -490,6 +490,18 @@ export default {
         debounceHint: '范围 1–60 分钟。最后一次模型请求安静满此时长后再抓取用量。',
         saved: 'Ollama Cloud 用量刷新设置已保存',
         saveFailed: '保存 Ollama Cloud 用量刷新设置失败'
+      },
+      opencodeGoUsage: {
+        title: 'OpenCode Go 用量刷新',
+        description: '刷新上游 OpenCode Go 账号上报的用量窗口；默认关闭，仅对单独开启的账号生效。',
+        enabled: '启用全局自动刷新',
+        enabledHint: '仅刷新账号自身也开启自动刷新的账号。手动刷新不受影响。',
+        intervalMinutes: '请求持续时的最长等待（分钟）',
+        intervalHint: '范围 5–1440 分钟。请求持续不断导致 debounce 一直后移时，最晚在此时间强制刷新。',
+        debounceMinutes: '请求安静等待（分钟）',
+        debounceHint: '范围 1–60 分钟，且必须小于刷新间隔。最后一次模型请求安静满此时长后再抓取用量。',
+        saved: 'OpenCode Go 用量刷新设置已保存',
+        saveFailed: '保存 OpenCode Go 用量刷新设置失败'
       },
       gatewayForwarding: {
         title: '请求转发行为',
@@ -562,6 +574,11 @@ export default {
         openaiOAuthDailySessionRotationHint: '每个常规 OpenAI OAuth 账号每天为 Windows、macOS、Linux 各生成一条流式根和一条同步根，共六条。按请求系统分配，跨业务日重新生成。默认关闭。',
         openaiCodexPATContextManagement: 'Codex PAT 上下文管理代理',
         openaiCodexPATContextManagementHint: '开启后为 Codex PAT 代理 History/Notes 请求，仅使用已确认订阅有效期且未到期的 Plus、Pro、Prolite OAuth 上游。不计用户或账号并发，不受限流影响；会话固定绑定账号，仅在订阅到期或账号不可调度时换绑。关闭时仅保留现有窗口身份归一化。',
+        claudeCodeClientVersion: 'Claude Code 客户端版本号',
+        claudeCodeClientVersionHint: '网关伪装为官方 Claude Code CLI 时对上游声明的客户端版本号。留空表示使用自动同步到的官方最新版本；填写后固定为该版本，不再跟随同步。仅在手填值和同步值均不可用时，才回退到环境变量 SUB2API_CLAUDE_CLI_VERSION 或内置版本。',
+        claudeCodeVersionAutoSync: '自动同步 Claude Code 版本号',
+        claudeCodeVersionAutoSyncHint: '每小时从官方发布渠道获取最新版本的 Claude Code 客户端版本号，无需为了跟版本而升级本服务。关闭后停止获取新版本，已同步的版本仍可使用；上方手填版本始终优先。',
+        claudeCodeVersionSyncedValue: '当前同步到：{version}',
         codexHardeningTitle: 'Codex 设置',
         codexClientRestrictionTitle: 'Codex 客户端限制',
         codexHardeningDesc:
@@ -1273,8 +1290,9 @@ export default {
         lowRatePriorityTitle: '低倍率优先',
         lowRatePriorityDescription: '开启后优先选择计费倍率较低的账号；倍率相同时，再比较账号优先级和当前负载等。启用实验调度策略后，此开关不生效。',
         oauthRateTitle: 'OAuth 调度参考倍率',
-        oauthRatePriorityDescription: '同一分组同时包含 API Key 和 OAuth 账号时，OAuth 账号按此倍率与已探测的 API Key 计费倍率一起排序。',
-        oauthRateWeightedDescription: '同一分组同时包含 API Key 和 OAuth 账号时，计算“计费倍率”得分时，OAuth 账号按此倍率参与计算。',
+        oauthRatePriorityDescription: 'OAuth 账号按此参考倍率参与低倍率优先排序；留空时使用各自的账号倍率。API Key 账号优先使用有效探测倍率，无有效探测时使用账号倍率。',
+        oauthRateWeightedDescription: '计算“计费倍率”得分时，OAuth 账号使用此参考倍率；留空时使用各自的账号倍率。API Key 账号优先使用有效探测倍率，无有效探测时使用账号倍率。',
+        oauthRateInvalid: 'OAuth 调度参考倍率必须是非负数字，或留空以使用账号倍率。',
         stickyWeightedTitle: '粘性加权',
         stickyWeightedDescription: '开启后 previous_response_id 和 session_hash 粘性进入高级调度打分；关闭时仍按旧逻辑硬命中粘性账号。',
         subscriptionPriorityTitle: '订阅优先',

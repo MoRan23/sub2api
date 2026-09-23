@@ -304,6 +304,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletionsWithHTTPBundle(ctx contex
 		if account.IsOpenAIOAuth() {
 			preserveOpenAIChatSystemMessageOrder(&chatReq)
 		}
+		chatReq.Model = upstreamModel
 		responsesReq, err = chatCompletionsToResponsesWithTimezoneObservation(c, &chatReq)
 		if err != nil {
 			return nil, fmt.Errorf("convert chat completions to responses: %w", err)
@@ -383,6 +384,10 @@ func (s *OpenAIGatewayService) forwardAsChatCompletionsWithHTTPBundle(ctx contex
 	}
 
 	// 4b. Apply OpenAI fast policy (may filter service_tier or block the request).
+	responsesBody, _, err = normalizeGPT6ResponsesSampling(responsesBody, upstreamModel)
+	if err != nil {
+		return nil, err
+	}
 	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
 	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError

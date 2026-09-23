@@ -93,7 +93,7 @@ func (s *OpenAIGatewayService) selectOpenAIHTTPBundleRoute(ctx context.Context, 
 	if old := codexHTTPRouteSelectionFromContext(c, account); old != nil && old.attempt != nil && !old.physical {
 		finishCodexTurnStateHTTPAttempt(s.codexTurnStateService, old.attempt, false)
 	}
-	capabilities := effectiveCodexModelCapabilities(s.openAICodexModelCapabilities(openAICodexModelCapabilitiesNamespace(account), model), explicitOpenAIResponsesLiteHTTP(c, nil) || isOpenAIResponsesLiteWebSocketPayload(body))
+	capabilities := effectiveCodexHTTPModelCapabilities(account, model, s.openAICodexModelCapabilities(openAICodexModelCapabilitiesNamespace(account), model), explicitOpenAIResponsesLiteHTTP(c, nil) || isOpenAIResponsesLiteWebSocketPayload(body))
 	baselineValue, _ := c.Get(codexHTTPRouteBaselineKey)
 	baseline, baselineSet := baselineValue.(codexHTTPBaselineScope)
 	baselineOnly := baselineSet && baseline.accountID == account.ID && baseline.model == model
@@ -275,9 +275,25 @@ func (s *OpenAIGatewayService) prepareOpenAIHTTPBundleModel(ctx context.Context,
 	case "chat":
 		model = normalizeOpenAIModelForUpstream(account, resolveOpenAIForwardModel(account, model, defaultModel))
 	default:
-		_, model = resolveOpenAIForwardMappedModels(account, model, isOpenAIResponsesCompactPath(c))
+		model = s.resolveOpenAIResponsesHTTPFinalModel(c, account, model)
 	}
 	s.selectOpenAIHTTPBundleRoute(ctx, c, account, model, body)
+}
+
+// Match the actual forwarding path before any model-sensitive normalization,
+// route or identity selection. Passthrough preserves the wire model except for
+// compact fallback; account mappings apply to the normal Responses adapter.
+func (s *OpenAIGatewayService) resolveOpenAIResponsesHTTPFinalModel(c *gin.Context, account *Account, model string) string {
+	if isOpenAIResponsesCompactPath(c) {
+		if compactModel := s.resolveOpenAICompactFallbackModel(account, model); compactModel != "" {
+			return compactModel
+		}
+	}
+	if account != nil && account.IsOpenAIPassthroughEnabled() {
+		return model
+	}
+	_, model = resolveOpenAIForwardMappedModels(account, model, isOpenAIResponsesCompactPath(c))
+	return model
 }
 
 func frozenOpenAIHTTPBundleCapabilities(c *gin.Context, account *Account, model string) (CodexModelCapabilities, bool) {

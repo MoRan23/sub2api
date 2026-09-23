@@ -60,8 +60,11 @@ func TestCodexBaseInstructionsForModelCurrentManifestTemplates(t *testing.T) {
 		{"gpt-6", instructionsGPT6Astra},
 		{"gpt-6-sol", instructionsGPT6Sol},
 		{"openai/GPT-6_SOL", instructionsGPT6Sol},
+		{"gpt-6-sol-minimal", instructionsGPT6Sol},
+		{"gpt-6-sol-ultra-openai-compact", instructionsGPT6Sol},
 		{"gpt-6-luna", instructionsGPT6Luna},
 		{"OPENAI/GPT-6_LUNA", instructionsGPT6Luna},
+		{"gpt-6-luna-2026-09-23", instructionsGPT6Luna},
 		{"gpt-5.6-sol", instructionsGPT56},
 		{"gpt-5.6-terra", instructionsGPT56},
 		{"gpt-5.6-luna", instructionsGPT56},
@@ -83,8 +86,8 @@ func TestCodexBaseInstructionsForModelCurrentManifestTemplates(t *testing.T) {
 	}
 }
 
-func TestCodexBaseInstructionsForModelNewVariantsUseExactNames(t *testing.T) {
-	for _, model := range []string{"gpt-6-sol-latest", "gpt-6-luna-2026-09-23", "gpt-6-other"} {
+func TestCodexBaseInstructionsForModelNewVariantsUseKnownNames(t *testing.T) {
+	for _, model := range []string{"gpt-6-sol-latest", "gpt-6-luna-2026-99-23", "gpt-6-astra-custom", "gpt-6-other"} {
 		t.Run(model, func(t *testing.T) {
 			if got := CodexBaseInstructionsForModel(model); got != instructionsGPT55 {
 				t.Fatal("unlisted GPT-6 name must retain the unknown-model fallback")

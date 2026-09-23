@@ -64,7 +64,7 @@ func TestOpenAIAuxRequestsRespectFrozenResidencyPolicy(t *testing.T) {
 			}
 			repo := &stubQuotaAccountRepo{accounts: map[int64]*Account{account.ID: account}}
 			tokens := quotaAuthorizedTokenFixture(t, repo, account, "test-token")
-			svc := NewOpenAIQuotaService(repo, nil, NewOpenAITokenProvider(repo, tokens, nil), factory)
+			svc := NewOpenAIQuotaService(repo, nil, NewOpenAITokenProvider(repo, tokens, nil), factory, nil)
 			_, err = svc.QueryUsage(ctx, account.ID)
 			require.NoError(t, err)
 			_, err = svc.ResetCreditTargeted(ctx, account.ID, "credit-test", "redeem-test")

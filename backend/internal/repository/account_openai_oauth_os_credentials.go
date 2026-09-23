@@ -175,7 +175,10 @@ func saveOpenAIOAuthOSCredentialLocked(ctx context.Context, client *dbent.Client
 	if err != nil {
 		return err
 	}
-	_, err = client.ExecContext(ctx, `UPDATE accounts SET credentials=(COALESCE(credentials,'{}'::jsonb)-$2::text[]) || $3::jsonb,updated_at=NOW() WHERE id=$1`, slot.OwnerAccountID, pq.Array(service.OpenAIOAuthProviderCredentialKeys()), string(payload))
+	// Preserve current non-auth configuration while replacing the complete token
+	// tuple. Historical login residue is scrubbed in the same locked transaction.
+	discardKeys := append(service.OpenAIOAuthProviderCredentialKeys(), service.StoredCredentialResidueKeys()...)
+	_, err = client.ExecContext(ctx, `UPDATE accounts SET credentials=(COALESCE(credentials,'{}'::jsonb)-$2::text[]) || $3::jsonb,updated_at=NOW() WHERE id=$1`, slot.OwnerAccountID, pq.Array(discardKeys), string(payload))
 	if err != nil {
 		return err
 	}

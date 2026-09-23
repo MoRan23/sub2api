@@ -85,6 +85,33 @@ func (s *AccountRepoSuite) TestOAuthOSCredentialsBindDefaultAndStaleSnapshots() 
 	s.Require().NoError(err)
 }
 
+func (s *AccountRepoSuite) TestOAuthCredentialsBindScrubsResidueAndPreservesConfiguration() {
+	credentials := oauthOSTestGrant("old")
+	credentials["id_token"] = "old-id-token"
+	credentials["client_id"] = "old-client"
+	credentials["model_mapping"] = map[string]any{"gpt-5": "gpt-5"}
+	credentials["account_id"] = "existing-account-id"
+	account := &service.Account{Name: "reauthorization-residue", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Credentials: credentials}
+	s.Require().NoError(s.repo.Create(s.ctx, account))
+	old, err := s.repo.GetOpenAIOAuthOSCredential(s.ctx, account.ID, service.OpenAIOSWindows)
+	s.Require().NoError(err)
+	// Simulate historical rows written before the login-input scrub was introduced.
+	_, err = s.client.ExecContext(s.ctx, `UPDATE accounts SET credentials=credentials || '{"password":"old-secret","sso_token":"old-secret","sso":"old-secret","sso-rw":"old-secret","clearTextPassword":"old-secret","cookie":"old-secret"}'::jsonb WHERE id=$1`, account.ID)
+	s.Require().NoError(err)
+	bound, err := s.repo.BindOpenAIOAuthOSCredentials(s.ctx, account.ID, service.OpenAIOSWindows, map[string]any{"access_token": "new-token", "refresh_token": "new-refresh-token"}, "reauthorization")
+	s.Require().NoError(err)
+	s.Require().NotEqual(old.AuthorizationGeneration, bound.AuthorizationGeneration)
+	fresh, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("new-token", fresh.GetCredential("access_token"))
+	s.Require().Equal("new-refresh-token", fresh.GetCredential("refresh_token"))
+	s.Require().Equal("existing-account-id", fresh.GetCredential("account_id"))
+	s.Require().Equal(map[string]any{"gpt-5": "gpt-5"}, fresh.Credentials["model_mapping"])
+	for _, key := range append(service.StoredCredentialResidueKeys(), "id_token", "client_id") {
+		s.Require().NotContains(fresh.Credentials, key, "stale credential field %q survived complete reauthorization", key)
+	}
+}
+
 func (s *AccountRepoSuite) TestOAuthOSCredentialsCASRejectsRevokeAndConcurrentRefresh() {
 	s.client = testEntClient(s.T())
 	s.repo = newAccountRepositoryWithSQL(s.client, integrationDB, nil)

@@ -1,5 +1,7 @@
 # OpenAI OAuth 共享授权与三系统身份
 
+> 历史迁移 255 阶段说明。迁移 256 已恢复 `accounts.credentials` 为唯一 OAuth 凭据源，后续票据包也已改为跨系统共享；下文关于第二份凭据表、授权面板及分系统票据的描述不再适用。当前行为以 [账号授权与票据规则](codex-turn-state.md#共享授权恢复与升级) 和实际实现为准，升级时不得恢复旧凭据表的读写或调度门控。
+
 常规 OpenAI OAuth 凭据账号只保存一份 ChatGPT 授权。Windows、macOS、Linux
 共用 access token、refresh token、授权状态及刷新过程；三套 UA、installation ID、
 会话根和系统活动池继续独立。Spark 共用母账号授权，保留自己的业务账号归属。

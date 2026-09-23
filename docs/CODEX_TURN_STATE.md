@@ -1,5 +1,7 @@
 # 账号级 Codex turn-state 缓存
 
+> 历史说明，已被 [当前 Codex turn-state 规则](codex-turn-state.md) 替代。下文保留旧版本设计记录，不用于配置或升级：当前票据包跨系统共享、仅用于 HTTP，本地有效期为 240 秒；原生 WebSocket 旁路票据。
+
 此功能为常规 OpenAI OAuth 账号提供按最终上游模型隔离的 `x-codex-turn-state` 缓存与后台维护。默认关闭。跨会话、跨轮次复用属于实验策略，符合目标形态不代表模型质量得到改善。
 
 ## 全局生效模型

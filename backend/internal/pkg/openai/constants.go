@@ -4,6 +4,7 @@ package openai
 import (
 	_ "embed"
 	"strings"
+	"time"
 )
 
 // Model represents an OpenAI model
@@ -156,15 +157,15 @@ func CanonicalizeOpenAIModelAliasSpelling(model string) string {
 func CodexBaseInstructionsForModel(model string) string {
 	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
 	switch {
-	case canonical == "gpt-6" || canonical == "gpt-6-astra" || strings.HasPrefix(canonical, "gpt-6-astra-"):
+	case IsKnownCodexModelVariant(canonical, "gpt-6") || IsKnownCodexModelVariant(canonical, "gpt-6-astra"):
 		if v := strings.TrimSpace(instructionsGPT6Astra); v != "" {
 			return instructionsGPT6Astra
 		}
-	case canonical == "gpt-5.6" || canonical == "gpt-5.6-sol" || canonical == "gpt-5.6-terra" || canonical == "gpt-5.6-luna":
+	case IsKnownCodexModelVariant(canonical, "gpt-5.6") || IsKnownCodexModelVariant(canonical, "gpt-5.6-sol") || IsKnownCodexModelVariant(canonical, "gpt-5.6-terra") || IsKnownCodexModelVariant(canonical, "gpt-5.6-luna"):
 		return instructionsGPT56
-	case canonical == "gpt-6-sol":
+	case IsKnownCodexModelVariant(canonical, "gpt-6-sol"):
 		return instructionsGPT6Sol
-	case canonical == "gpt-6-luna":
+	case IsKnownCodexModelVariant(canonical, "gpt-6-luna"):
 		return instructionsGPT6Luna
 	case canonical == "codex-auto-review":
 		return instructionsGPT56
@@ -188,4 +189,32 @@ func CodexBaseInstructionsForModel(model string) string {
 		}
 	}
 	return latestCodexInstructions()
+}
+
+// IsKnownCodexModelVariant recognizes only established effort, snapshot and
+// compact variants. A model with an arbitrary suffix must not inherit another
+// model's request normalization, capabilities or instruction template.
+func IsKnownCodexModelVariant(model, family string) bool {
+	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
+	canonical = strings.TrimSuffix(canonical, "-openai-compact")
+	if canonical == family {
+		return true
+	}
+	suffix, ok := strings.CutPrefix(canonical, family+"-")
+	if !ok {
+		return false
+	}
+	switch suffix {
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
+		return true
+	}
+	_, err := time.Parse("2006-01-02", suffix)
+	return err == nil
+}
+
+// IsGPT6SolOrLunaModelSpelling shares the same strict alias recognition as the
+// model catalog and reasoning compatibility paths.
+func IsGPT6SolOrLunaModelSpelling(model string) bool {
+	return IsKnownCodexModelVariant(model, "gpt-6-sol") ||
+		IsKnownCodexModelVariant(model, "gpt-6-luna")
 }

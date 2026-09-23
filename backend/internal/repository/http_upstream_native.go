@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -22,12 +21,7 @@ func (s *httpUpstreamService) doNativeHTTP(req *http.Request, proxyURL string, a
 		client.CheckRedirect = s.redirectChecker
 	}
 	client = s.httpClientForUpstreamRequest(client, req)
-	response, err := servertiming.Do(client, req)
-	if err != nil {
-		return nil, err
-	}
-	decompressResponseBody(response)
-	return response, nil
+	return doUpstreamRequest(client, req)
 }
 
 type nativeUpstreamRoundTripper struct {

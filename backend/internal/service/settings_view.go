@@ -273,7 +273,10 @@ type SystemSettings struct {
 
 	// OpenAI 指纹观测（兼容字段）：开启后记录每个 OAuth 请求的出站指纹到进程内环形缓冲；
 	// 默认 false，关闭即停止记录并清空。
-	InstallationObservationEnabled bool
+	InstallationObservationEnabled   bool
+	ClaudeCodeClientVersion          string // Administrator override; empty follows the synced CLI version.
+	ClaudeCodeClientVersionSynced    string // Latest synced official Claude CLI version.
+	ClaudeCodeVersionAutoSyncEnabled bool   // Claude CLI automatic version sync.
 
 	// Web Search Emulation
 	WebSearchEmulationEnabled bool // 是否启用 web search 模拟
@@ -286,7 +289,7 @@ type SystemSettings struct {
 
 	// OpenAI 账号调度
 	OpenAILowUpstreamRatePriorityEnabled                   bool
-	OpenAIOAuthSchedulingRateMultiplier                    float64
+	OpenAIOAuthSchedulingRateMultiplier                    *float64
 	OpenAIAdvancedSchedulerEnabled                         bool
 	OpenAIAdvancedSchedulerStickyWeightedEnabled           bool
 	OpenAIAdvancedSchedulerSubscriptionPriorityEnabled     bool

@@ -29,7 +29,7 @@ func (a *completedOpenAIOAuthAdmin) BindOpenAIOAuthCredentials(_ context.Context
 		return nil, a.bindErr
 	}
 	copy := *a.initial
-	copy.Credentials = service.PreserveOpenAIOAuthProviderCredentials(credentials, copy.Credentials)
+	copy.Credentials = service.SanitizeStoredCredentials(copy.Platform, service.PreserveOpenAIOAuthProviderCredentials(credentials, copy.Credentials))
 	a.initial = &copy
 	return &copy, nil
 }

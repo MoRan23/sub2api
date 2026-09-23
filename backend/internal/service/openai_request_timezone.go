@@ -698,7 +698,13 @@ func (s *requestTimezoneScanner) scanText(text, path string, current, eligible b
 }
 
 func (s *requestTimezoneScanner) validEnvironmentXML(text string) bool {
-	decoder := xml.NewDecoder(strings.NewReader(text))
+	// The scanner owns the cumulative text/node budgets. Also bound this
+	// individual parser so a future direct caller cannot bypass the text limit.
+	if len(text) > openAIRequestTimezoneTextLimit {
+		s.result.ScanStatus = "limited"
+		return false
+	}
+	decoder := xml.NewDecoder(io.LimitReader(strings.NewReader(text), openAIRequestTimezoneTextLimit))
 	depth := 0
 	children := map[string]bool{}
 	for {

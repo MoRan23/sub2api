@@ -455,7 +455,7 @@ export default {
       },
       claudeCode: {
         title: 'Claude Code Settings',
-        description: 'Control Claude Code client access requirements',
+        description: 'Control Claude Code client access requirements and the version declared upstream',
         minVersion: 'Minimum Version',
         minVersionPlaceholder: 'e.g. 2.1.63',
         minVersionHint:
@@ -497,6 +497,18 @@ export default {
         debounceHint: 'Range: 1–60 minutes. Refresh after the latest model request has been quiet for this long.',
         saved: 'Ollama Cloud usage refresh settings saved',
         saveFailed: 'Failed to save Ollama Cloud usage refresh settings'
+      },
+      opencodeGoUsage: {
+        title: 'OpenCode Go Usage Refresh',
+        description: 'Refresh usage windows reported by the upstream OpenCode Go account for individually opted-in accounts. Disabled by default.',
+        enabled: 'Enable global automatic refresh',
+        enabledHint: 'Only accounts with their own automatic refresh switch enabled are refreshed. Manual refresh remains available.',
+        intervalMinutes: 'Max wait while requests continue (minutes)',
+        intervalHint: 'Range: 5–1440 minutes. When continuous requests keep sliding the debounce, force a refresh after this wait.',
+        debounceMinutes: 'Quiet period after last request (minutes)',
+        debounceHint: 'Range: 1–60 minutes, and must be less than the refresh interval. Refresh after the latest model request has been quiet for this long.',
+        saved: 'OpenCode Go usage refresh settings saved',
+        saveFailed: 'Failed to save OpenCode Go usage refresh settings'
       },
       gatewayForwarding: {
         title: 'Request Forwarding',
@@ -569,6 +581,11 @@ export default {
         openaiOAuthDailySessionRotationHint: 'Creates one streaming root and one sync root for each of Windows, macOS and Linux per regular OpenAI OAuth account each business day, six roots in total. Requests select by operating system. Disabled by default.',
         openaiCodexPATContextManagement: 'Codex PAT context-management proxy',
         openaiCodexPATContextManagementHint: 'Proxy History/Notes for Codex PAT clients through Plus, Pro, or Prolite OAuth accounts with a confirmed, unexpired subscription. Requests bypass user/account concurrency and rate limits. Sessions stay bound until the subscription expires or the account becomes unavailable for scheduling. Disabling keeps existing window identity normalization only.',
+        claudeCodeClientVersion: 'Claude Code client version',
+        claudeCodeClientVersionHint: "The client version this gateway declares upstream when impersonating the official Claude Code CLI. Leave empty to use the auto-synced latest official release; setting a value pins it and stops following auto-sync. The SUB2API_CLAUDE_CLI_VERSION environment variable or built-in version is used only when neither the manual nor synced value is valid.",
+        claudeCodeVersionAutoSync: 'Auto-sync Claude Code version',
+        claudeCodeVersionAutoSyncHint: 'Fetches the latest Claude Code client version from the official release channel every hour, so you never need to upgrade this service just to keep the version current. When disabled, fetching stops but the previously synced version remains available. The manual version above always takes priority.',
+        claudeCodeVersionSyncedValue: 'Currently synced: {version}',
         codexHardeningTitle: "Codex Settings",
         codexClientRestrictionTitle: "Codex client restriction",
         codexHardeningDesc:
@@ -1279,8 +1296,9 @@ export default {
         lowRatePriorityTitle: 'Prefer lower rates',
         lowRatePriorityDescription: 'When enabled, accounts with lower billing rates are preferred. If rates are equal, account priority, current load, and other scheduling factors are considered. This switch is ignored when the experimental scheduler is enabled.',
         oauthRateTitle: 'OAuth scheduling reference rate',
-        oauthRatePriorityDescription: 'When a group contains both API Key and OAuth accounts, this rate is used to order OAuth accounts alongside probed API Key billing rates.',
-        oauthRateWeightedDescription: 'When a group contains both API Key and OAuth accounts, this rate is used for OAuth accounts when calculating the billing-rate score.',
+        oauthRatePriorityDescription: 'OAuth accounts use this reference rate for low-rate-first ordering. Leave blank to use each account\'s own rate. API Key accounts use a valid probed rate when available, otherwise their account rate.',
+        oauthRateWeightedDescription: 'OAuth accounts use this reference rate for the billing-rate score. Leave blank to use each account\'s own rate. API Key accounts use a valid probed rate when available, otherwise their account rate.',
+        oauthRateInvalid: 'The OAuth scheduling reference rate must be a non-negative number, or blank to use account rates.',
         stickyWeightedTitle: 'Sticky weighting',
         stickyWeightedDescription: 'When enabled, previous_response_id and session_hash affinity are scored by the advanced scheduler. When disabled, sticky accounts keep the legacy hard-hit behavior.',
         subscriptionPriorityTitle: 'Subscription priority',

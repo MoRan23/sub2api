@@ -1376,11 +1376,11 @@ func rewriteOpenAICodexTurnMetadataProjectionForCarrier(
 		}
 		delete(baseMetadata, codexInstallationIDKey)
 		baseMetadata["installation_id"] = mustMarshalJSONString(projection.installationID)
-		encoded, err := marshalJSONWithoutHTMLEscape(baseMetadata)
+		encoded, err := marshalCodexTurnMetadata(baseMetadata)
 		if err != nil {
 			return "", fmt.Errorf("encode OpenAI Codex installation metadata: %w", err)
 		}
-		return escapeNonASCIIJSON(encoded), nil
+		return string(encoded), nil
 	}
 	profile := cloneCodexWireProfile(projection.wireProfile)
 	if profile.Revision == "" {
@@ -1446,11 +1446,11 @@ func rewriteOpenAICodexTurnMetadataProjectionForCarrier(
 				projected[key] = append(json.RawMessage(nil), value...)
 			}
 		}
-		legacyEncoded, err := marshalJSONWithoutHTMLEscape(projected)
+		legacyEncoded, err := marshalCodexTurnMetadata(projected)
 		if err != nil {
 			return "", fmt.Errorf("encode compatible OpenAI Codex turn metadata: %w", err)
 		}
-		encoded = escapeNonASCIIJSON(legacyEncoded)
+		encoded = string(legacyEncoded)
 	}
 	return encoded, nil
 }
@@ -1479,7 +1479,7 @@ func escapeNonASCIIJSON(raw []byte) string {
 	for len(raw) > 0 {
 		r, size := utf8.DecodeRune(raw)
 		raw = raw[size:]
-		if r < utf8.RuneSelf {
+		if r < 0x7f {
 			out.WriteByte(byte(r))
 			continue
 		}

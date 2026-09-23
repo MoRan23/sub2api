@@ -87,7 +87,7 @@ func TestPluginDirectoryUsesDefaultOSProfileWithoutTurnIdentity(t *testing.T) {
 		Credentials: map[string]any{"access_token": "local-test-token"}}
 	profiles := auxOAuthProfileFixture(t, &account, OpenAIOSLinux)
 	gateway := &OpenAIGatewayService{accountRepo: &pluginAccountDirectoryRepository{accounts: []Account{account}}}
-	identity, err := gateway.ResolvePluginOutboundIdentity(context.Background(), account.ID)
+	identity, err := gateway.ResolvePluginOutboundIdentity(context.Background(), pluginOAuthTestScope(), account.ID)
 	require.NoError(t, err)
 	want := resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, profiles.Profiles[OpenAIOSLinux].UserAgent)
 	require.Equal(t, want.UserAgent, identity.Headers.Get("User-Agent"))
@@ -116,7 +116,7 @@ func TestPluginDirectoryStopsWhenProfileStorageFails(t *testing.T) {
 		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Credentials: map[string]any{"access_token": "local-test-token"}},
 	}}}
 	gateway := &OpenAIGatewayService{accountRepo: repo}
-	identity, err := gateway.ResolvePluginOutboundIdentity(context.Background(), 1)
+	identity, err := gateway.ResolvePluginOutboundIdentity(context.Background(), pluginOAuthTestScope(), 1)
 	require.ErrorIs(t, err, ErrOpenAIOAuthOSProfileUnavailable)
 	require.Nil(t, identity)
 }

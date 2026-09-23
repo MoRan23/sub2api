@@ -63,8 +63,8 @@ func TestProxyUpdateRouteGeneration(t *testing.T) {
 				WillReturnRows(sqlmock.NewRows([]string{"protocol", "host", "port", "username", "password", "status"}).
 					AddRow("http", "same.example", 8080, "user", "pass", service.StatusActive))
 			mock.ExpectExec(`UPDATE "proxies" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
-			mock.ExpectExec(regexp.QuoteMeta(`UPDATE "proxies" SET "backup_proxy_id" = NULL WHERE "backup_proxy_id" = $1`)).
-				WithArgs(input.ID).WillReturnResult(sqlmock.NewResult(0, 0))
+			// Clearing this proxy's directed backup must not clear other proxies'
+			// references to it. An unexpected second UPDATE fails the mock.
 			mock.ExpectQuery(`(?s)SELECT .* FROM "proxies" WHERE "id" = \$1`).WithArgs(input.ID).
 				WillReturnRows(sqlmock.NewRows([]string{
 					"id", "created_at", "updated_at", "deleted_at", "name", "protocol", "host", "port",

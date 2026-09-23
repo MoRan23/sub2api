@@ -110,7 +110,7 @@ func TestPluginLegacyBinaryMergeIntegration(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			store := newFakePluginKVStore()
-			hostServer := newPluginHostServiceServer(installation.PluginKey, store, nil)
+			hostServer := newPluginHostServiceServer(installation.PluginKey, store, nil, PluginAccountScope{})
 			pluginRuntime, err := startPluginRuntime(ctx, installation, 5*time.Second, t.TempDir(), hostServer)
 			require.NoError(t, err, "old SDK plugin must start even when the new host offers HostService")
 			t.Cleanup(pluginRuntime.kill)

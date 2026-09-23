@@ -37,13 +37,16 @@ func normalizeKnownOpenAICodexModel(model string) string {
 		}
 	}
 
-	switch {
-	case normalized == "gpt-6" || normalized == "gpt-6-astra":
-		return "gpt-6-astra"
-	case isKnownOpenAIGPT6Variant(normalized, "gpt-6-sol"):
-		return "gpt-6-sol"
-	case isKnownOpenAIGPT6Variant(normalized, "gpt-6-luna"):
+	if openai.IsGPT6SolOrLunaModelSpelling(normalized) {
+		if strings.HasPrefix(normalized, "gpt-6-sol") {
+			return "gpt-6-sol"
+		}
 		return "gpt-6-luna"
+	}
+
+	switch {
+	case isOpenAIGPT6AstraModel(normalized):
+		return "gpt-6-astra"
 	case strings.Contains(normalized, "gpt-5.6-sol"):
 		return "gpt-5.6-sol"
 	case strings.Contains(normalized, "gpt-5.6-terra"):
@@ -106,25 +109,14 @@ func isOpenAIGPT56Model(model string) bool {
 // isOpenAIGPT6AstraModel reports GPT-6 Astra and dated/provider-prefixed variants.
 // The public "gpt-6" alias routes to Astra; unrelated GPT-6 families stay excluded.
 func isOpenAIGPT6AstraModel(model string) bool {
-	normalized := canonicalizeOpenAIModelAliasSpelling(model)
-	return normalized == "gpt-6" || normalized == "gpt-6-astra" || strings.HasPrefix(normalized, "gpt-6-astra-")
+	return openai.IsKnownCodexModelVariant(model, "gpt-6") ||
+		openai.IsKnownCodexModelVariant(model, "gpt-6-astra")
 }
 
 // isOpenAIGPT6Model includes only the known GPT-6 families and their established
 // spelling, effort, and snapshot variants. The bare alias remains Astra.
 func isOpenAIGPT6Model(model string) bool {
-	normalized := canonicalizeOpenAIModelAliasSpelling(model)
-	return isOpenAIGPT6AstraModel(normalized) ||
-		isKnownOpenAIGPT6Variant(normalized, "gpt-6-sol") ||
-		isKnownOpenAIGPT6Variant(normalized, "gpt-6-luna")
-}
-
-func isKnownOpenAIGPT6Variant(normalized, family string) bool {
-	if normalized == family {
-		return true
-	}
-	suffix, ok := strings.CutPrefix(normalized, family+"-")
-	return ok && (suffix == "max" || suffix == "ultra" || isKnownCodexModelSuffix(suffix))
+	return isOpenAIGPT6AstraModel(model) || openai.IsGPT6SolOrLunaModelSpelling(model)
 }
 
 func appendUsageBillingModelCandidate(candidates []string, seen map[string]struct{}, model string) []string {

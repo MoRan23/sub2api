@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -44,4 +45,33 @@ func TestDefaultModelsPreferConcreteGPT56SolForAccountTests(t *testing.T) {
 func TestDefaultModelsIncludeGPTImage25(t *testing.T) {
 	require.Contains(t, DefaultModelIDs(), "gpt-image-2.5-flare")
 	require.Contains(t, DefaultModelIDs(), "gpt-image-2.5-sunburst")
+}
+
+func TestGPT6SolLunaModelIdentity(t *testing.T) {
+	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		require.Contains(t, DefaultModelIDs(), model)
+		require.True(t, IsGPT6SolOrLunaModelSpelling(model))
+	}
+	require.False(t, IsGPT6SolOrLunaModelSpelling("gpt-6-astra"))
+	require.False(t, IsGPT6SolOrLunaModelSpelling("gpt-6-solitude"))
+	require.False(t, IsGPT6SolOrLunaModelSpelling("gpt-6-luna-preview"))
+}
+
+func TestDefaultModelIDsAreUnique(t *testing.T) {
+	seen := make(map[string]bool)
+	for _, model := range DefaultModelIDs() {
+		require.False(t, seen[model], "duplicate default model %s", model)
+		seen[model] = true
+	}
+}
+
+func TestGPT6SolLunaModelVariantCompatibility(t *testing.T) {
+	for _, family := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		for _, suffix := range []string{"", "-minimal", "-ultra", "-2026-09-23", "-openai-compact", "-ultra-openai-compact", "-2026-09-23-openai-compact"} {
+			require.True(t, IsGPT6SolOrLunaModelSpelling("OPENAI/"+strings.ToUpper(family+suffix)), family+suffix)
+		}
+		for _, suffix := range []string{"-custom", "-latest", "-preview", "-2026-99-23", "-high-low", "-openai-compact-openai-compact"} {
+			require.False(t, IsGPT6SolOrLunaModelSpelling(family+suffix), family+suffix)
+		}
+	}
 }

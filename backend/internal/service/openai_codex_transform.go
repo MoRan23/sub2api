@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 var codexModelMap = map[string]string{
@@ -660,18 +661,8 @@ func isKnownCodexModelSuffix(suffix string) bool {
 }
 
 func isCodexDateSuffix(suffix string) bool {
-	parts := strings.Split(suffix, "-")
-	if len(parts) != 3 || len(parts[0]) != 4 || len(parts[1]) != 2 || len(parts[2]) != 2 {
-		return false
-	}
-	for _, part := range parts {
-		for _, r := range part {
-			if r < '0' || r > '9' {
-				return false
-			}
-		}
-	}
-	return true
+	parsed, err := time.Parse("2006-01-02", suffix)
+	return err == nil && parsed.Format("2006-01-02") == suffix
 }
 
 func isCodexSparkModel(model string) bool {

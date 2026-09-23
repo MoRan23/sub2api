@@ -28,6 +28,8 @@ describe('useModelWhitelist', () => {
       expect.objectContaining({ label: 'GPT-6 Sol', from: 'gpt-6-sol', to: 'gpt-6-sol' }),
       expect.objectContaining({ label: 'GPT-6 Luna', from: 'gpt-6-luna', to: 'gpt-6-luna' })
     ]))
+    const presetModels = getPresetMappingsByPlatform('openai').map(({ from }) => from)
+    expect(new Set(presetModels).size).toBe(presetModels.length)
   })
 
   it('openai 模型列表不再暴露已下线的 ChatGPT 登录 Codex 模型', () => {
@@ -54,6 +56,8 @@ describe('useModelWhitelist', () => {
     expect(getModelsByPlatform('antigravity')).toContain('claude-fable-5-1')
     expect(getModelsByPlatform('claude')).toContain('claude-fable-5')
     expect(getModelsByPlatform('antigravity')).toContain('claude-fable-5')
+    expect(getModelsByPlatform('claude')).toContain('claude-opus-5-5')
+    expect(getModelsByPlatform('antigravity')).not.toContain('claude-opus-5-5')
     expect(getModelsByPlatform('claude')).toContain('claude-opus-4-8')
     expect(getModelsByPlatform('antigravity')).toContain('claude-opus-4-8')
   })

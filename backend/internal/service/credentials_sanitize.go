@@ -1,5 +1,11 @@
 package service
 
+// StoredCredentialResidueKeys lists login inputs that must not remain beside
+// provider tokens. Return a copy so persistence callers can compose delete sets.
+func StoredCredentialResidueKeys() []string {
+	return []string{"password", "sso_token", "sso", "sso-rw", "clearTextPassword", "cookie"}
+}
+
 // SanitizeStoredCredentials strips secrets that must never be persisted on the
 // account credentials map after conversion to OAuth tokens (Grok Web SSO / password).
 // Call from admin create/update/import/apply-oauth paths.
@@ -12,9 +18,7 @@ func SanitizeStoredCredentials(platform string, creds map[string]any) map[string
 		return nil
 	}
 	_ = platform
-	for _, key := range []string{
-		"password", "sso_token", "sso", "sso-rw", "clearTextPassword", "cookie",
-	} {
+	for _, key := range StoredCredentialResidueKeys() {
 		delete(creds, key)
 	}
 	return creds

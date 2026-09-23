@@ -79,7 +79,8 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 		openAICodexModelCapabilitiesPlanNamespace(options.Plan),
 		strings.TrimSpace(options.FinalModel),
 	)
-	modelCapabilities := effectiveCodexModelCapabilities(
+	modelCapabilities := effectiveCodexHTTPModelCapabilities(
+		account, options.FinalModel,
 		observedCapabilities,
 		explicitOpenAIResponsesLiteHTTP(c, req.Header),
 	)
@@ -119,6 +120,14 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 		finalInputBody, _, err = normalizeOpenAIResponsesLiteToolsPayload(finalInputBody)
 		if err != nil {
 			writeOpenAIResponsesLiteValidationError(c, err)
+			return body, err
+		}
+	}
+	if !modelCapabilities.UseResponsesLite && codexHTTPModelRequiresNonLite(account, options.FinalModel) {
+		// Preserve the non-Lite-compatible additional tools, namespaces, history
+		// and reasoning.context; only the transport marker contradicts the plan.
+		finalInputBody, err = applyOpenAIResponsesLiteWSMarker(finalInputBody, false)
+		if err != nil {
 			return body, err
 		}
 	}

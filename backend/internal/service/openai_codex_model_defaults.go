@@ -3,7 +3,6 @@ package service
 import (
 	_ "embed"
 	"encoding/json"
-	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
@@ -48,15 +47,14 @@ func bundledCodexModelDefault(modelID string) json.RawMessage {
 	if raw := bundledCodexModelDefaults[getNormalizedCodexModel(canonical)]; raw != nil {
 		return raw
 	}
-	switch canonical {
-	case "gpt-6":
+	switch {
+	case openai.IsKnownCodexModelVariant(canonical, "gpt-6"):
 		return bundledCodexModelDefaults["gpt-6-astra"]
-	case "gpt-5.6":
+	case openai.IsKnownCodexModelVariant(canonical, "gpt-5.6"):
 		return bundledCodexModelDefaults["gpt-5.6-sol"]
 	}
 	for _, family := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4"} {
-		if suffix, ok := strings.CutPrefix(canonical, family+"-"); ok &&
-			(isKnownCodexModelSuffix(suffix) || ((strings.HasPrefix(family, "gpt-6-") || strings.HasPrefix(family, "gpt-5.6-")) && (suffix == "max" || suffix == "ultra"))) {
+		if openai.IsKnownCodexModelVariant(canonical, family) {
 			return bundledCodexModelDefaults[family]
 		}
 	}

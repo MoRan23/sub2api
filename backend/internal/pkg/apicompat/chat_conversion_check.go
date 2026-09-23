@@ -654,7 +654,13 @@ func (c *chatConversionChecker) checkContent(raw json.RawMessage, path, role str
 		kind, _ := chatCheckString(part["type"])
 		switch kind {
 		case "text":
-			if err := chatCheckKeys(part, partPath, "unsupported_content_part_field", "type", "text"); err != nil {
+			keys := []string{"type", "text"}
+			// Input content preserves the raw breakpoint during conversion. The
+			// assistant/tool routes flatten text and cannot preserve this policy.
+			if role != "assistant" && role != "tool" {
+				keys = append(keys, "prompt_cache_breakpoint")
+			}
+			if err := chatCheckKeys(part, partPath, "unsupported_content_part_field", keys...); err != nil {
 				return err
 			}
 			if err := chatCheckOptionalString(part, "text", partPath); err != nil {
@@ -700,7 +706,7 @@ func (c *chatConversionChecker) checkContent(raw json.RawMessage, path, role str
 }
 
 func (c *chatConversionChecker) checkMedia(part map[string]json.RawMessage, path, kind string) error {
-	if err := chatCheckKeys(part, path, "unsupported_content_part_field", "type", kind); err != nil {
+	if err := chatCheckKeys(part, path, "unsupported_content_part_field", "type", kind, "prompt_cache_breakpoint"); err != nil {
 		return err
 	}
 	if !chatCheckPresent(part[kind]) {

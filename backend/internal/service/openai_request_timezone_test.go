@@ -611,6 +611,22 @@ func TestOpenAIRequestTimezoneLocationFrozenPatchRequiresSameSourceKind(t *testi
 	assertTimezoneTestSearchLocation(t, out, "settings.user_location")
 }
 
+func TestOpenAIRequestTimezoneXMLParserTextBoundary(t *testing.T) {
+	const prefix = "<environment_context><padding>"
+	const suffix = "</padding></environment_context>"
+	for _, extra := range []int{0, 1} {
+		scanner := &requestTimezoneScanner{result: TimezoneScanResult{ScanStatus: "complete"}}
+		text := prefix + strings.Repeat("x", openAIRequestTimezoneTextLimit-len(prefix)-len(suffix)+extra) + suffix
+		valid := scanner.validEnvironmentXML(text)
+		if valid != (extra == 0) {
+			t.Fatalf("XML parser text boundary %d: valid=%v", len(text), valid)
+		}
+		if extra > 0 && (scanner.result.ScanStatus != "limited" || scanner.nodes != 0) {
+			t.Fatal("oversized XML must be rejected before parsing any tokens")
+		}
+	}
+}
+
 func TestOpenAIRequestTimezoneNodeBudgetRollsBackTextlessStructures(t *testing.T) {
 	env := timezoneTestEnvironment("UTC", "2026-09-10")
 	for _, kind := range []string{"messages", "content", "tools", "xml"} {
