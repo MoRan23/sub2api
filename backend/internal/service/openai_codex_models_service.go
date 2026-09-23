@@ -340,7 +340,6 @@ const (
 	configuredCodexGrokContext         = 500_000
 	configuredCodexGrokBuildContext    = 256_000
 	configuredCodexGPT56MaxContext     = 872_000
-	configuredCodexGPT6AstraContext    = 1_050_000
 	configuredCodexToolOutputMaxTokens = 10_000
 )
 
@@ -361,15 +360,18 @@ type configuredCodexServiceTier struct {
 }
 
 type configuredCodexModelMessages struct {
-	InstructionsTemplate  string `json:"instructions_template"`
-	InstructionsVariables any    `json:"instructions_variables"`
-	Approvals             any    `json:"approvals"`
-	CollaborationModes    any    `json:"collaboration_modes"`
-	AutoReview            any    `json:"auto_review"`
-	Permissions           any    `json:"permissions"`
-	MultiAgent            any    `json:"multi_agent"`
-	TokenBudget           any    `json:"token_budget"`
-	GuardianV2            any    `json:"guardian_v2"`
+	InstructionsTemplate   string `json:"instructions_template"`
+	InstructionsVariables  any    `json:"instructions_variables"`
+	Approvals              any    `json:"approvals"`
+	CollaborationModes     any    `json:"collaboration_modes"`
+	AutoReview             any    `json:"auto_review"`
+	Permissions            any    `json:"permissions"`
+	MultiAgent             any    `json:"multi_agent"`
+	TokenBudget            any    `json:"token_budget"`
+	GuardianV2             any    `json:"guardian_v2"`
+	PersistentInstructions any    `json:"persistent_instructions,omitempty"`
+	Tools                  any    `json:"tools,omitempty"`
+	ConfirmationPolicies   any    `json:"confirmation_policies,omitempty"`
 }
 
 // configuredCodexModelDescriptor is the minimum complete ModelInfo contract
@@ -397,6 +399,7 @@ type configuredCodexModelDescriptor struct {
 	IncludePluginUsageInstructions    bool                            `json:"include_plugin_usage_instructions"`
 	IncludeAppsUsageInstructions      bool                            `json:"include_apps_usage_instructions"`
 	SupportsReasoningSummaryParameter bool                            `json:"supports_reasoning_summary_parameter"`
+	SupportsReasoningSummaries        *bool                           `json:"supports_reasoning_summaries,omitempty"`
 	DefaultReasoningSummary           string                          `json:"default_reasoning_summary"`
 	SupportVerbosity                  bool                            `json:"support_verbosity"`
 	DefaultVerbosity                  *string                         `json:"default_verbosity"`
@@ -420,6 +423,10 @@ type configuredCodexModelDescriptor struct {
 	ModelSpecialty                    any                             `json:"model_specialty"`
 	ToolMode                          any                             `json:"tool_mode"`
 	MultiAgentVersion                 any                             `json:"multi_agent_version"`
+	SupportsReasoningEffortUpdates    *bool                           `json:"supports_reasoning_effort_updates,omitempty"`
+	SupportsExperimentalContext       *bool                           `json:"supports_experimental_context,omitempty"`
+	RequiresSandboxedReview           *bool                           `json:"requires_sandboxed_review,omitempty"`
+	Guardian                          any                             `json:"guardian,omitempty"`
 }
 
 type codexModelMetadataOverride struct {
@@ -510,7 +517,7 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 			descriptor.SupportedReasoningLevels = configuredCodexGPTReasoningLevels(modelID)
 			descriptor.DefaultReasoningSummary = "none"
 			descriptor.TruncationPolicy = configuredCodexTruncationPolicy{Mode: "tokens", Limit: configuredCodexToolOutputMaxTokens}
-			if isOpenAIGPT56Model(modelID) {
+			if isOpenAIGPT56Model(modelID) || isOpenAIGPT6Model(modelID) {
 				descriptor.MaxContextWindow = configuredCodexGPT56MaxContext
 			}
 			if isOpenAIGPT6AstraModel(modelID) {
@@ -519,8 +526,6 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 				multiAgentEffort := "xhigh"
 				descriptor.MultiAgentReasoningEffort = &multiAgentEffort
 				descriptor.MultiAgentVersion = "v2"
-				descriptor.ContextWindow = configuredCodexGPT6AstraContext
-				descriptor.MaxContextWindow = configuredCodexGPT6AstraContext
 			}
 		}
 		if SupportsVerbosity(modelID) {
@@ -530,10 +535,19 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 		}
 	}
 
+	applyBundledCodexModelDefaults(&descriptor, modelID)
 	return descriptor
 }
 
 func configuredCodexServiceTiersForModel(modelID string) []configuredCodexServiceTier {
+	if raw := bundledCodexModelDefault(modelID); raw != nil {
+		var model struct {
+			ServiceTiers []configuredCodexServiceTier `json:"service_tiers"`
+		}
+		if json.Unmarshal(raw, &model) == nil {
+			return model.ServiceTiers
+		}
+	}
 	tiers := make([]configuredCodexServiceTier, 0, 2)
 	if configuredCodexSupportsPriorityServiceTier(modelID) {
 		tiers = append(tiers, configuredCodexServiceTier{
@@ -560,11 +574,22 @@ func configuredCodexSupportsPriorityServiceTier(modelID string) bool {
 		}
 	}
 	// GPT-6 Astra advertises Fast via service_tier=priority in public model metadata.
-	return isOpenAIGPT6AstraModel(modelID)
+	return isOpenAIGPT6Model(modelID)
 }
 
 func configuredCodexSupportsUltrafastServiceTier(modelID string) bool {
-	return normalizeKnownOpenAICodexModel(modelID) == "gpt-5.6-sol"
+	var model struct {
+		ServiceTiers []configuredCodexServiceTier `json:"service_tiers"`
+	}
+	if raw := bundledCodexModelDefault(modelID); raw == nil || json.Unmarshal(raw, &model) != nil {
+		return false
+	}
+	for _, tier := range model.ServiceTiers {
+		if tier.ID == OpenAIFastTierUltrafast {
+			return true
+		}
+	}
+	return false
 }
 
 func configuredCodexGrokReasoningLevels(modelID string) []configuredCodexReasoningLevel {
@@ -623,13 +648,13 @@ func configuredCodexGPTReasoningLevels(modelID string) []configuredCodexReasonin
 		{Effort: "xhigh", Description: "Extra-high reasoning depth for difficult tasks"},
 	}
 	normalized := getNormalizedCodexModel(modelID)
-	if isOpenAIGPT56Model(modelID) || isOpenAIGPT6AstraModel(modelID) {
+	if isOpenAIGPT56Model(modelID) || isOpenAIGPT6Model(modelID) {
 		levels = append(levels, configuredCodexReasoningLevel{
 			Effort:      "max",
 			Description: "Maximum reasoning depth for complex tasks",
 		})
 	}
-	if isOpenAIGPT6AstraModel(modelID) || normalized == "gpt-5.6-sol" || normalized == "gpt-5.6-terra" {
+	if isOpenAIGPT6AstraModel(modelID) || normalized == "gpt-6-sol" || normalized == "gpt-5.6-sol" || normalized == "gpt-5.6-terra" {
 		levels = append(levels, configuredCodexReasoningLevel{
 			Effort:      "ultra",
 			Description: "Maximum reasoning with automatic task delegation",
@@ -648,12 +673,12 @@ func isOpenAICodexGPTModel(modelID string) bool {
 
 func isOpenAICodexReasoningGPTModel(modelID string) bool {
 	normalized := canonicalizeOpenAIModelAliasSpelling(modelID)
-	return isOpenAIGPT6AstraModel(normalized) || strings.HasPrefix(normalized, "gpt-5")
+	return isOpenAIGPT6Model(normalized) || strings.HasPrefix(normalized, "gpt-5")
 }
 
 func isOpenAICodexImageInputModel(modelID string) bool {
 	normalized := canonicalizeOpenAIModelAliasSpelling(modelID)
-	return isOpenAIGPT6AstraModel(normalized) ||
+	return isOpenAIGPT6Model(normalized) ||
 		strings.HasPrefix(normalized, "gpt-5") ||
 		strings.HasPrefix(normalized, "gpt-4o") ||
 		strings.HasPrefix(normalized, "gpt-4.1") ||
@@ -2094,6 +2119,8 @@ func CodexModelsManifestETag(body []byte) string {
 
 var apiKeyCodexModelsWithoutResponsesLite = map[string]struct{}{
 	"gpt-6-astra":   {},
+	"gpt-6-sol":     {},
+	"gpt-6-luna":    {},
 	"gpt-5.6-sol":   {},
 	"gpt-5.6-terra": {},
 	"gpt-5.6-luna":  {},
@@ -2127,8 +2154,8 @@ func adjustAPIKeyCodexModelsManifest(body []byte, account *Account) ([]byte, err
 		if account != nil {
 			target = account.GetMappedModel(slug)
 		}
-		if isOpenAIGPT6AstraModel(target) {
-			target = "gpt-6-astra"
+		if isOpenAIGPT6Model(target) {
+			target = normalizeKnownOpenAICodexModel(target)
 		}
 		if _, targeted := apiKeyCodexModelsWithoutResponsesLite[target]; !targeted {
 			continue
@@ -2435,6 +2462,14 @@ func completeAPIKeyCodexModelsManifestMetadata(body []byte, completeAll bool, ac
 
 		descriptor := newConfiguredCodexModelDescriptor(slug)
 		descriptor.SupportsSearchTool = shouldForwardOpenAIResponsesViaRawChatCompletions(account)
+		// A larger explicit upstream context must not acquire a smaller maximum
+		// just because the bundled fallback changed. Preserve an explicit maximum.
+		if value, exists := model["max_context_window"]; !exists || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			var upstreamContext int64
+			if json.Unmarshal(model["context_window"], &upstreamContext) == nil && upstreamContext > descriptor.MaxContextWindow {
+				descriptor.MaxContextWindow = upstreamContext
+			}
+		}
 		if accountCodexModelSupportsImageInput(account, slug) {
 			descriptor.InputModalities = []string{"text", "image"}
 		}

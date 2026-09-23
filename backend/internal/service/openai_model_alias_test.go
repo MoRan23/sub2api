@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -9,6 +10,29 @@ import (
 func TestNormalizeKnownOpenAICodexModelGPT6Astra(t *testing.T) {
 	for _, model := range []string{"gpt-6-astra", "openai/gpt-6-astra", "OPENAI/GPT-6_ASTRA", "gpt-6", "openai/gpt-6"} {
 		require.Equal(t, "gpt-6-astra", normalizeKnownOpenAICodexModel(model))
+	}
+}
+
+func TestNormalizeKnownOpenAICodexModelGPT6Families(t *testing.T) {
+	for _, family := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		for _, model := range []string{family, "openai/" + family, strings.ToUpper(strings.ReplaceAll(family, "-", "_")), family + "-high", family + "-max", family + "-2026-09-23"} {
+			t.Run(model, func(t *testing.T) {
+				require.Equal(t, family, normalizeKnownOpenAICodexModel(model))
+				require.Equal(t, family, normalizeCodexModel(model))
+				require.True(t, isOpenAIGPT6Model(model))
+				require.False(t, isOpenAIGPT6AstraModel(model))
+				require.True(t, supportsOpenAIReasoningEffortMax(model))
+				require.Equal(t, "max", normalizeOpenAIReasoningEffortForModel("max", model))
+			})
+		}
+	}
+	for _, unknown := range []string{"gpt-6-other", "gpt-6-sol-custom", "gpt-6-luna-custom"} {
+		require.Empty(t, normalizeKnownOpenAICodexModel(unknown))
+		require.Equal(t, unknown, normalizeCodexModel(unknown))
+		require.False(t, isOpenAIGPT6Model(unknown))
+	}
+	for _, family := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		require.Equal(t, []string{family}, usageBillingModelCandidates(family), "new models must not borrow another model's pricing")
 	}
 }
 

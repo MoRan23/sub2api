@@ -200,11 +200,17 @@ func requireCompleteConfiguredCodexModel(t *testing.T, model map[string]any, slu
 	require.Equal(t, slug, model["slug"])
 	require.NotEmpty(t, model["display_name"])
 	require.NotEmpty(t, model["description"])
-	require.Equal(t, "unified_exec", model["shell_type"])
+	shell := "unified_exec"
+	speedTiers := []any{}
+	if slug == "gpt-5.6" || slug == "gpt-5.6-sol" || slug == "gpt-5.5" {
+		shell = "shell_command"
+		speedTiers = []any{"fast"}
+	}
+	require.Equal(t, shell, model["shell_type"])
 	require.Equal(t, "list", model["visibility"])
 	require.Equal(t, true, model["supported_in_api"])
 	require.NotNil(t, model["priority"])
-	require.Equal(t, []any{}, model["additional_speed_tiers"])
+	require.Equal(t, speedTiers, model["additional_speed_tiers"])
 	require.IsType(t, []any{}, model["service_tiers"])
 	require.Contains(t, model, "default_service_tier")
 	require.Contains(t, model, "availability_nux")
@@ -340,11 +346,10 @@ func TestNewConfiguredCodexModelDescriptorUsesProviderMetadataAndSafeFallback(t 
 	require.Equal(t, []string{"none"}, effortsFromConfiguredCodexLevels(claudeHaiku.SupportedReasoningLevels))
 
 	gpt56 := newConfiguredCodexModelDescriptor("gpt-5.6-sol")
-	require.Equal(t, "GPT-5.6 Sol", gpt56.DisplayName)
-	require.Equal(t, "OpenAI GPT coding model routed through Sub2API.", gpt56.Description)
+	require.Equal(t, "GPT-5.6-Sol", gpt56.DisplayName)
+	require.Equal(t, "Older coding model for complex work.", gpt56.Description)
 	require.NotNil(t, gpt56.DefaultReasoningLevel)
 	require.Equal(t, "low", *gpt56.DefaultReasoningLevel)
-	require.Equal(t, configuredCodexGPTReasoningLevels("gpt-5.6-sol"), gpt56.SupportedReasoningLevels)
 	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max", "ultra"}, effortsFromConfiguredCodexLevels(gpt56.SupportedReasoningLevels))
 	require.True(t, gpt56.SupportsParallelToolCalls)
 	require.True(t, gpt56.SupportVerbosity)
@@ -361,10 +366,10 @@ func TestNewConfiguredCodexModelDescriptorUsesProviderMetadataAndSafeFallback(t 
 	require.Equal(t, "medium", *gpt56Luna.DefaultReasoningLevel)
 
 	gpt6Astra := newConfiguredCodexModelDescriptor("gpt-6-astra")
-	require.Equal(t, "GPT-6 Astra", gpt6Astra.DisplayName)
+	require.Equal(t, "GPT-6-Astra", gpt6Astra.DisplayName)
 	require.True(t, strings.HasPrefix(strings.TrimSpace(gpt6Astra.ModelMessages.InstructionsTemplate), "You are Codex, an agent based on GPT-6."))
 	require.NotNil(t, gpt6Astra.DefaultReasoningLevel)
-	require.Equal(t, "medium", *gpt6Astra.DefaultReasoningLevel)
+	require.Equal(t, "low", *gpt6Astra.DefaultReasoningLevel)
 	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max", "ultra"}, effortsFromConfiguredCodexLevels(gpt6Astra.SupportedReasoningLevels))
 	require.NotNil(t, gpt6Astra.MultiAgentReasoningEffort)
 	require.Equal(t, "xhigh", *gpt6Astra.MultiAgentReasoningEffort)
@@ -374,21 +379,21 @@ func TestNewConfiguredCodexModelDescriptorUsesProviderMetadataAndSafeFallback(t 
 	require.Equal(t, []configuredCodexServiceTier{{
 		ID:          "priority",
 		Name:        "Fast",
-		Description: "Priority processing for lower latency.",
+		Description: "2x speed, increased usage",
 	}}, gpt6Astra.ServiceTiers)
 	require.True(t, isOpenAICodexImageInputModel("gpt-6-astra"))
 	require.True(t, isOpenAICodexReasoningGPTModel("openai/gpt-6-astra"))
 	require.True(t, isOpenAIGPT6AstraModel("gpt-6-astra-2026-09-01"))
 	require.False(t, isOpenAIGPT6AstraModel("gpt-6-other"))
-	require.Equal(t, int64(1_050_000), gpt6Astra.ContextWindow)
-	require.Equal(t, int64(1_050_000), gpt6Astra.MaxContextWindow)
+	require.Equal(t, int64(272_000), gpt6Astra.ContextWindow)
+	require.Equal(t, int64(872_000), gpt6Astra.MaxContextWindow)
 	gpt6 := newConfiguredCodexModelDescriptor("gpt-6")
-	require.Equal(t, "GPT-6 (Astra)", gpt6.DisplayName)
+	require.Equal(t, "GPT-6-Astra", gpt6.DisplayName)
 	require.True(t, strings.HasPrefix(strings.TrimSpace(gpt6.ModelMessages.InstructionsTemplate), "You are Codex, an agent based on GPT-6."))
 	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max", "ultra"}, effortsFromConfiguredCodexLevels(gpt6.SupportedReasoningLevels))
 	require.NotNil(t, gpt6.MultiAgentReasoningEffort)
 	require.Equal(t, "xhigh", *gpt6.MultiAgentReasoningEffort)
-	require.Equal(t, int64(1_050_000), gpt6.ContextWindow)
+	require.Equal(t, int64(272_000), gpt6.ContextWindow)
 
 	gpt55 := newConfiguredCodexModelDescriptor("gpt-5.5")
 	require.Equal(t, "GPT-5.5", gpt55.DisplayName)
@@ -501,19 +506,23 @@ func TestBuildCodexModelsManifestAdvertisesPriorityServiceTierForFastGPTModels(t
 	require.Len(t, models, 3)
 
 	for _, model := range models {
+		description := "1.5x speed, increased usage"
+		if model["slug"] == "gpt-5.4-mini" {
+			description = "Priority processing for lower latency."
+		}
 		require.Equal(t, []any{
 			map[string]any{
 				"id":          "priority",
 				"name":        "Fast",
-				"description": "Priority processing for lower latency.",
+				"description": description,
 			},
 		}, model["service_tiers"])
 		require.Nil(t, model["default_service_tier"])
 	}
 }
 
-// Scenario: GPT-5.6 Sol 在 Fast 之外额外声明 ultrafast service tier。
-func TestBuildCodexModelsManifestAdvertisesUltrafastServiceTierForSol(t *testing.T) {
+// Scenario: 最新官方目录只为 Sol 声明 priority，不继续合成已移除的 ultrafast。
+func TestBuildCodexModelsManifestUsesCurrentServiceTiersForSol(t *testing.T) {
 	t.Parallel()
 
 	body, err := BuildCodexModelsManifest([]string{
@@ -528,12 +537,7 @@ func TestBuildCodexModelsManifestAdvertisesUltrafastServiceTierForSol(t *testing
 		map[string]any{
 			"id":          "priority",
 			"name":        "Fast",
-			"description": "Priority processing for lower latency.",
-		},
-		map[string]any{
-			"id":          "ultrafast",
-			"name":        "Ultrafast",
-			"description": "Ultra-low latency processing.",
+			"description": "1.5x speed, increased usage",
 		},
 	}
 	for _, model := range models {

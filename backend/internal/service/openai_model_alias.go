@@ -40,6 +40,10 @@ func normalizeKnownOpenAICodexModel(model string) string {
 	switch {
 	case normalized == "gpt-6" || normalized == "gpt-6-astra":
 		return "gpt-6-astra"
+	case isKnownOpenAIGPT6Variant(normalized, "gpt-6-sol"):
+		return "gpt-6-sol"
+	case isKnownOpenAIGPT6Variant(normalized, "gpt-6-luna"):
+		return "gpt-6-luna"
 	case strings.Contains(normalized, "gpt-5.6-sol"):
 		return "gpt-5.6-sol"
 	case strings.Contains(normalized, "gpt-5.6-terra"):
@@ -104,6 +108,23 @@ func isOpenAIGPT56Model(model string) bool {
 func isOpenAIGPT6AstraModel(model string) bool {
 	normalized := canonicalizeOpenAIModelAliasSpelling(model)
 	return normalized == "gpt-6" || normalized == "gpt-6-astra" || strings.HasPrefix(normalized, "gpt-6-astra-")
+}
+
+// isOpenAIGPT6Model includes only the known GPT-6 families and their established
+// spelling, effort, and snapshot variants. The bare alias remains Astra.
+func isOpenAIGPT6Model(model string) bool {
+	normalized := canonicalizeOpenAIModelAliasSpelling(model)
+	return isOpenAIGPT6AstraModel(normalized) ||
+		isKnownOpenAIGPT6Variant(normalized, "gpt-6-sol") ||
+		isKnownOpenAIGPT6Variant(normalized, "gpt-6-luna")
+}
+
+func isKnownOpenAIGPT6Variant(normalized, family string) bool {
+	if normalized == family {
+		return true
+	}
+	suffix, ok := strings.CutPrefix(normalized, family+"-")
+	return ok && (suffix == "max" || suffix == "ultra" || isKnownCodexModelSuffix(suffix))
 }
 
 func appendUsageBillingModelCandidate(candidates []string, seen map[string]struct{}, model string) []string {

@@ -58,6 +58,10 @@ func TestCodexBaseInstructionsForModelCurrentManifestTemplates(t *testing.T) {
 	}{
 		{"gpt-6-astra", instructionsGPT6Astra},
 		{"gpt-6", instructionsGPT6Astra},
+		{"gpt-6-sol", instructionsGPT6Sol},
+		{"openai/GPT-6_SOL", instructionsGPT6Sol},
+		{"gpt-6-luna", instructionsGPT6Luna},
+		{"OPENAI/GPT-6_LUNA", instructionsGPT6Luna},
 		{"gpt-5.6-sol", instructionsGPT56},
 		{"gpt-5.6-terra", instructionsGPT56},
 		{"gpt-5.6-luna", instructionsGPT56},
@@ -66,7 +70,7 @@ func TestCodexBaseInstructionsForModelCurrentManifestTemplates(t *testing.T) {
 		{"gpt-5.4", instructionsGPT54},
 		{"gpt-daybreak-blue-latest", instructionsDaybreakBlue},
 		{"gpt-daybreak-red-latest", instructionsDaybreakRed},
-		{"codex-auto-review", instructionsDaybreakBlue},
+		{"codex-auto-review", instructionsGPT56},
 	} {
 		t.Run(tt.model, func(t *testing.T) {
 			if strings.TrimSpace(tt.want) == "" {
@@ -76,5 +80,21 @@ func TestCodexBaseInstructionsForModelCurrentManifestTemplates(t *testing.T) {
 				t.Fatal("model did not select its official manifest template")
 			}
 		})
+	}
+}
+
+func TestCodexBaseInstructionsForModelNewVariantsUseExactNames(t *testing.T) {
+	for _, model := range []string{"gpt-6-sol-latest", "gpt-6-luna-2026-09-23", "gpt-6-other"} {
+		t.Run(model, func(t *testing.T) {
+			if got := CodexBaseInstructionsForModel(model); got != instructionsGPT55 {
+				t.Fatal("unlisted GPT-6 name must retain the unknown-model fallback")
+			}
+		})
+	}
+	if instructionsGPT6Astra == instructionsGPT6Sol || instructionsGPT6Astra == instructionsGPT6Luna || instructionsGPT6Sol == instructionsGPT6Luna {
+		t.Fatal("GPT-6 variants must keep their distinct official templates")
+	}
+	if CodexBaseInstructionsForModel("codex-auto-review") == instructionsDaybreakBlue {
+		t.Fatal("auto-review must follow its current template, not the older Daybreak template")
 	}
 }
