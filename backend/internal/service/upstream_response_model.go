@@ -26,6 +26,7 @@ const (
 // separate from the final outbound request tier until the usage-record boundary,
 // where credential and channel pricing rules may lower, but never raise, billing.
 type upstreamResponseModelObserver struct {
+	evidence *openAIResponseEvidenceState
 	first    string
 	terminal string
 	conflict bool
@@ -69,6 +70,7 @@ func normalizeObservedUpstreamResponseModel(model string) string {
 }
 
 func (o *upstreamResponseModelObserver) ObserveOpenAI(payload []byte, eventType string) {
+	observeOpenAIResponseEvidenceEvent(o.evidence, payload)
 	model := firstValidTrimmedGJSONString(payload, "response.model", "model")
 	terminal := isUpstreamResponseModelTerminalEvent(eventType)
 	o.Observe(model, terminal)
@@ -189,6 +191,7 @@ func beginUpstreamResponseModelObservation(c *gin.Context) *upstreamResponseMode
 	observer := &upstreamResponseModelObserver{}
 	if c != nil {
 		c.Set(upstreamResponseModelObserverContextKey, observer)
+		observer.evidence = beginOpenAIResponseEvidence(c, "")
 	}
 	return observer
 }

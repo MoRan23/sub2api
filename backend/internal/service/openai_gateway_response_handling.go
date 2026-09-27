@@ -309,7 +309,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		return int64(bufferedWriter.Buffered())
 	}
-	turnStateSuccessfulOutputPending := false
 	flushBuffered := func() error {
 		if firstOutputStage != nil && !firstOutputStage.closed {
 			if err := firstOutputStage.CommitTo(w); err != nil {
@@ -321,9 +320,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 		}
 		flusher.Flush()
-		if turnStateSuccessfulOutputPending {
-			markCodexTurnStateHTTPDelivered(resp)
-		}
 		if compactionDelivery != nil {
 			compactionDelivery.flushDelivered()
 		}
@@ -903,9 +899,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				} else {
 					if compactionDelivery != nil {
 						compactionDelivery.enqueue(dataBytes)
-					}
-					if eventType == "response.completed" || eventType == "response.done" || openAIStreamDataStartsVisibleOutput(data, eventType) {
-						turnStateSuccessfulOutputPending = true
 					}
 					eventInProgress = true
 				}
@@ -1886,12 +1879,9 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 	}
 
 	_, _, trackCompactDelivery := openAICodexCompactionPlanForResponse(c, account)
-	delivered := writeOpenAIResponseWithOptionalDeliveryTracking(c, resp.StatusCode, contentType, body, trackCompactDelivery || codexTurnStateHTTPCollectorFromResponse(resp) != nil)
+	delivered := writeOpenAIResponseWithOptionalDeliveryTracking(c, resp.StatusCode, contentType, body, trackCompactDelivery)
 	if delivered {
 		s.commitOpenAICodexJSONCompactionAfterDelivery(ctx, c, account, resp.StatusCode, body)
-		if gjson.GetBytes(body, "status").String() != "failed" && gjson.GetBytes(body, "error").Type != gjson.JSON {
-			markCodexTurnStateHTTPDelivered(resp)
-		}
 	}
 	if turnStateCanCommit && delivered {
 		s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
@@ -2001,13 +1991,10 @@ func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Conte
 		}
 	}
 	_, _, trackCompactDelivery := openAICodexCompactionPlanForResponse(c, account)
-	delivered := writeOpenAIResponseWithOptionalDeliveryTracking(c, resp.StatusCode, contentType, body, trackCompactDelivery || codexTurnStateHTTPCollectorFromResponse(resp) != nil)
+	delivered := writeOpenAIResponseWithOptionalDeliveryTracking(c, resp.StatusCode, contentType, body, trackCompactDelivery)
 	if delivered {
 		delivery := openAIJSONCompactionDeliveryFromSSE(bodyText, body, terminalType)
 		s.commitOpenAICodexJSONCompactionAfterDelivery(context.Background(), c, account, resp.StatusCode, body, &delivery)
-		if terminalType == "response.completed" || terminalType == "response.done" {
-			markCodexTurnStateHTTPDelivered(resp)
-		}
 	}
 	if turnStateCanCommit && delivered {
 		s.noteOpenAICodexTurnStateProvenance(c, account, turnState)

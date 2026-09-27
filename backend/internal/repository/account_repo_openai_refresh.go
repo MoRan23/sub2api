@@ -80,7 +80,6 @@ func (r *accountRepository) PatchOpenAIOAuthCredentialsIfUnchanged(
 		WITH updated AS (
 		UPDATE accounts AS a
 		SET credentials = (COALESCE(a.credentials, '{}'::jsonb) - $1::text[]) || $2::jsonb,
-			extra = `+guardedCodexTurnStateGenerationExpression("a.extra", "(COALESCE(a.credentials, '{}'::jsonb) - $1::text[]) || $2::jsonb")+`,
 			updated_at = NOW()
 		WHERE a.id = $3
 			AND a.deleted_at IS NULL
@@ -106,7 +105,6 @@ func (r *accountRepository) PatchOpenAIOAuthCredentialsIfUnchanged(
 	if err != nil || affected == 0 {
 		return false, err
 	}
-	notifyCodexTurnStateAccountAfterCommit(ctx, id)
 	if contextTx == nil {
 		r.syncSchedulerAccountSnapshotDetached(ctx, id)
 	}

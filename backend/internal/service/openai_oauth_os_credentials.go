@@ -245,8 +245,6 @@ func ResolveOpenAIOAuthCredentialAccount(ctx context.Context, repo AccountReposi
 	if account.OpenAIOAuthCredentialOS != "" && OpenAIOAuthOSProfilesComplete(account.OpenAIOAuthOSProfiles) {
 		out.OpenAIOAuthOSProfiles = CloneOpenAIOAuthOSProfiles(account.OpenAIOAuthOSProfiles)
 	}
-	out.Extra["codex_turn_state_generation"] = slot.StateGeneration
-	out.Extra["codex_turn_state_credential_epoch"] = slot.CredentialEpoch
 	out.OpenAIOAuthCredentialOS, out.OpenAIOAuthCredentialOwnerID = os, owner.ID
 	out.OpenAIOAuthAuthorizationGeneration, out.OpenAIOAuthCredentialRevision = slot.AuthorizationGeneration, slot.Revision
 	out.OpenAIOAuthCredentialStateGeneration, out.OpenAIOAuthCredentialEpoch = slot.StateGeneration, slot.CredentialEpoch

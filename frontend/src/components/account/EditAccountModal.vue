@@ -1651,13 +1651,6 @@
         <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
       </div>
 
-      <CodexTurnStateFields
-        v-if="supportsCodexTurnState(account)"
-        v-model="codexTurnStateConfig"
-        :proxies="proxies"
-        :inherited-from="account.codex_turn_state_inherited_from_account_id ?? account.parent_account_id"
-      />
-
       <UpstreamRequestIdHeaderField
         v-model="upstreamRequestIdHeader"
         :platform="account.platform"
@@ -2306,7 +2299,7 @@
             {{ t('admin.accounts.openai.codexFingerprintShadowHint') }}
           </p>
           <p v-else class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t(supportsCodexTurnState(account) ? 'admin.accounts.openai.codexFingerprintEditDesc' : 'admin.accounts.openai.codexFingerprintLegacyEditDesc') }}
+            {{ t(supportsManagedOpenAIOAuthIdentity(account) ? 'admin.accounts.openai.codexFingerprintEditDesc' : 'admin.accounts.openai.codexFingerprintLegacyEditDesc') }}
           </p>
           <p
             v-if="!isSparkShadow && !codexFingerprintNormalizationEnabled"
@@ -2355,7 +2348,7 @@
             {{ t('admin.accounts.openai.installationRegenerateSaveHint') }}
           </p>
 
-          <template v-if="!supportsCodexTurnState(account)">
+          <template v-if="!supportsManagedOpenAIOAuthIdentity(account)">
             <div class="mt-3 flex items-center gap-2">
               <input v-model="legacyPinnedInstallationID" type="text" readonly class="input min-w-0 flex-1 font-mono text-xs" :aria-label="t('admin.accounts.openai.installationID')" data-testid="openai-pinned-installation-id" />
               <button type="button" class="btn btn-secondary shrink-0" :disabled="legacyInstallationRegenerating || !openAIInstallationPinEnabled || !installationPinSavedEnabled" data-testid="openai-installation-regenerate" :title="t('admin.accounts.openai.installationRegenerate')" @click="regenerateLegacyOpenAIInstallationID">
@@ -2379,7 +2372,7 @@
           </p>
         </template>
         <OpenAIOAuthOSProfiles
-          v-if="supportsCodexTurnState(account)"
+          v-if="supportsManagedOpenAIOAuthIdentity(account)"
           :profiles="openAIOSProfiles"
           :inherited="isSparkShadow"
           :disabled="!openAIInstallationPinEnabled || !installationPinSavedEnabled"
@@ -3270,9 +3263,8 @@ import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestId
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
-import CodexTurnStateFields from './CodexTurnStateFields.vue'
 import OpenAIOAuthOSProfiles from './OpenAIOAuthOSProfiles.vue'
-import { codexTurnStateConfigChanged, defaultCodexTurnStateConfig, readCodexTurnStateConfig, supportsCodexTurnState } from './codexTurnState'
+import { supportsManagedOpenAIOAuthIdentity } from './openaiOAuthOS'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
@@ -4280,8 +4272,6 @@ const applyOpenAIModelMappingCredentials = (credentials: Record<string, unknown>
   }
 }
 
-const codexTurnStateConfig = ref(defaultCodexTurnStateConfig())
-const codexTurnStateInitial = ref(defaultCodexTurnStateConfig())
 const initialStatus = ref<'active' | 'inactive' | 'error'>('active')
 
 const syncFormFromAccount = (newAccount: Account | null) => {
@@ -4301,8 +4291,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.name = newAccount.name
   form.notes = newAccount.notes || ''
   form.proxy_id = newAccount.proxy_id
-  codexTurnStateConfig.value = readCodexTurnStateConfig(newAccount.codex_turn_state)
-  codexTurnStateInitial.value = readCodexTurnStateConfig(newAccount.codex_turn_state)
   form.concurrency = newAccount.concurrency
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
@@ -5273,7 +5261,7 @@ const setDefaultIdentityOS = async (os: OpenAIOAuthOS) => {
 }
 
 const regenerateOpenAIInstallationID = async (os: OpenAIOAuthOS) => {
-  if (!props.account || !supportsCodexTurnState(props.account) || isSparkShadow.value || installationRegenerating.value) return
+  if (!props.account || !supportsManagedOpenAIOAuthIdentity(props.account) || isSparkShadow.value || installationRegenerating.value) return
   if (!openAIInstallationPinEnabled.value || !installationPinSavedEnabled.value) {
     appStore.showError(t('admin.accounts.openai.installationRegenerateSaveHint'))
     return
@@ -5298,7 +5286,7 @@ const regenerateOpenAIInstallationID = async (os: OpenAIOAuthOS) => {
 }
 
 const regenerateLegacyOpenAIInstallationID = async () => {
-  if (!props.account || props.account.platform !== 'openai' || props.account.type !== 'oauth' || supportsCodexTurnState(props.account) || isSparkShadow.value || legacyInstallationRegenerating.value) return
+  if (!props.account || props.account.platform !== 'openai' || props.account.type !== 'oauth' || supportsManagedOpenAIOAuthIdentity(props.account) || isSparkShadow.value || legacyInstallationRegenerating.value) return
   if (!openAIInstallationPinEnabled.value || !installationPinSavedEnabled.value) {
     appStore.showError(t('admin.accounts.openai.installationRegenerateSaveHint'))
     return
@@ -5400,13 +5388,9 @@ const handleSubmit = async () => {
   // A name/configuration edit must not reclaim account-state ownership from
   // a newer OAuth failure that occurred while this dialog was open.
   if (form.status === initialStatus.value) delete updatePayload.status
-  if (supportsCodexTurnState(props.account) && !isSparkShadow.value &&
-    codexTurnStateConfigChanged(codexTurnStateConfig.value, codexTurnStateInitial.value)) {
-    updatePayload.codex_turn_state = readCodexTurnStateConfig(codexTurnStateConfig.value)
-  }
   try {
     if (props.account.platform === 'openai' &&
-      (props.account.type === 'apikey' || (props.account.type === 'oauth' && !supportsCodexTurnState(props.account))) &&
+      (props.account.type === 'apikey' || (props.account.type === 'oauth' && !supportsManagedOpenAIOAuthIdentity(props.account))) &&
       !isSparkShadow.value &&
       openAIEnvironmentFingerprint.value.trim() !== protectedConfigInitial.value.environment) {
       const fingerprint = openAIEnvironmentFingerprint.value.trim()

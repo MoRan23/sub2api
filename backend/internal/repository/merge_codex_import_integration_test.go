@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	adminhandler "github.com/Wei-Shaw/sub2api/internal/handler/admin"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -19,9 +18,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMergeCodexImportRealPostgresRemapsCollectorAndDropsRuntime(t *testing.T) {
+func TestCodexImportRealPostgresRetiresCollectorConfiguration(t *testing.T) {
 	ctx := context.Background()
-	policyRevision := installCodexStateModelPolicyFixture(t, []string{"gpt-5.4"})
 	client := testEntClient(t)
 	accounts := newAccountRepositoryWithSQL(client, integrationDB, nil)
 	proxies := NewProxyRepository(client, integrationDB)
@@ -48,30 +46,15 @@ func TestMergeCodexImportRealPostgresRemapsCollectorAndDropsRuntime(t *testing.T
 		Name: accountName, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
 		Credentials: map[string]any{"access_token": "synthetic-import-credential", "plan_type": "team"}, ProxyID: &business.ID,
 		Extra: map[string]any{
-			"note":                                   "portable configuration",
-			service.CodexTurnStateExtraKey:           map[string]any{"enabled": true, "account_type": "team_business", "collector_proxy_ids": []int64{alternate.ID, collector.ID, business.ID}},
-			service.CodexTurnStateGenerationExtraKey: "source-generation-must-not-copy",
-			"codex_turn_state_token":                 "source-token-must-not-copy",
-			"codex_turn_state_runtime":               map[string]any{"token": "source-runtime-must-not-copy"},
+			"note":                        "portable configuration",
+			"codex_turn_state":            map[string]any{"enabled": true, "account_type": "team_business", "collector_proxy_ids": []int64{alternate.ID, collector.ID, business.ID}},
+			"codex_turn_state_generation": "source-generation-must-not-copy",
+			"codex_turn_state_token":      "source-token-must-not-copy",
+			"codex_turn_state_runtime":    map[string]any{"token": "source-runtime-must-not-copy"},
 		},
 	})
 	_, err := accounts.EnsureOpenAIOAuthOSProfiles(ctx, source.ID)
 	require.NoError(t, err)
-	runtime := NewOpenAICodexStateRepository(integrationDB, integrationRedis)
-	key := service.CodexTurnStateKey{OwnerAccountID: source.ID, Model: "gpt-5.4"}
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT state_generation::text FROM account_openai_oauth_credentials WHERE account_id=$1`, source.ID).Scan(&key.Generation))
-	now := time.Now().UTC()
-	state, err := runtime.BeginBusiness(ctx, key, "synthetic-export", now, now.Add(time.Minute))
-	require.NoError(t, err)
-	require.NotNil(t, state)
-	state.EncryptedToken, state.Source, state.Shape = "source-encrypted-token-must-not-copy", "business", "accepted"
-	state.BundleBinding = service.CodexTurnStateBundleBinding{WireMode: "responses", EgressKind: "proxy", ProxyID: business.ID, ProxyRouteGeneration: business.RouteGeneration}
-	state.IssuedAt, state.ExpiresAt, state.TokenLength, state.CipherBlocks = now, now.Add(time.Hour), 332, 12
-	state.ModelPolicyRevision = policyRevision
-	saved, err := runtime.SaveCAS(ctx, *state, state.Version)
-	require.NoError(t, err)
-	require.True(t, saved)
-
 	exportedResponse := httptest.NewRecorder()
 	router.ServeHTTP(exportedResponse, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/admin/accounts/data?ids=%d", source.ID), nil))
 	require.Equal(t, http.StatusOK, exportedResponse.Code, exportedResponse.Body.String())
@@ -81,12 +64,8 @@ func TestMergeCodexImportRealPostgresRemapsCollectorAndDropsRuntime(t *testing.T
 	}
 	require.NoError(t, json.Unmarshal(exportedResponse.Body.Bytes(), &exported))
 	require.Len(t, exported.Data.Accounts, 1)
-	require.Len(t, exported.Data.Proxies, 3)
-	require.NotNil(t, exported.Data.Accounts[0].CodexTurnStateProxyKeys)
-	require.Len(t, *exported.Data.Accounts[0].CodexTurnStateProxyKeys, 3)
-	require.Nil(t, exported.Data.Accounts[0].CodexTurnStateProxyKey)
-	require.Nil(t, exported.Data.Accounts[0].CodexTurnState.CollectorProxyID)
-	require.Empty(t, exported.Data.Accounts[0].CodexTurnState.CollectorProxyIDs)
+	require.Len(t, exported.Data.Proxies, 1)
+	require.NotContains(t, exportedResponse.Body.String(), "codex_turn_state")
 
 	// Remove the source records so import must create a different local ID for
 	// each portable key, rather than accidentally passing by reusing an ID.
@@ -106,38 +85,24 @@ func TestMergeCodexImportRealPostgresRemapsCollectorAndDropsRuntime(t *testing.T
 	}
 	require.NoError(t, json.Unmarshal(importedResponse.Body.Bytes(), &imported))
 	require.Empty(t, imported.Data.Errors)
-	require.Equal(t, 3, imported.Data.ProxyCreated)
+	require.Equal(t, 1, imported.Data.ProxyCreated)
 	require.Equal(t, 1, imported.Data.AccountCreated)
 
-	var accountID, businessID, collectorID, alternateID int64
+	var accountID, businessID int64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT id FROM accounts WHERE name=$1", accountName).Scan(&accountID))
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT id FROM proxies WHERE name=$1", businessName).Scan(&businessID))
-	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT id FROM proxies WHERE name=$1", collectorName).Scan(&collectorID))
-	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT id FROM proxies WHERE name=$1", alternateName).Scan(&alternateID))
 	require.NotEqual(t, source.ID, accountID)
 	require.NotEqual(t, business.ID, businessID)
-	require.NotEqual(t, collector.ID, collectorID)
-	require.NotEqual(t, alternate.ID, alternateID)
 	stored, err := accounts.GetByID(ctx, accountID)
 	require.NoError(t, err)
 	require.Equal(t, &businessID, stored.ProxyID)
-	config := service.CodexTurnStateConfigForAccount(stored)
-	require.True(t, config.Enabled)
-	require.Equal(t, "team_business", config.AccountType)
-	require.Equal(t, []int64{alternateID, collectorID, businessID}, config.CollectorProxyIDs)
-	require.Equal(t, &alternateID, config.CollectorProxyID, "legacy API mirror follows the first configured proxy")
-	require.NotContains(t, stored.Extra[service.CodexTurnStateExtraKey], "collector_proxy_id", "storage remains list-only")
-	require.NotEmpty(t, service.CodexTurnStateGenerationForAccount(stored))
-	require.NotEqual(t, key.Generation, service.CodexTurnStateGenerationForAccount(stored))
+	require.NotContains(t, stored.Extra, "codex_turn_state")
 	require.NotContains(t, stored.Extra, "codex_turn_state_token")
 	require.NotContains(t, stored.Extra, "codex_turn_state_runtime")
-	states, err := runtime.ListByAccount(ctx, accountID)
-	require.NoError(t, err)
-	require.Empty(t, states)
-	for _, id := range []int64{alternateID, collectorID, businessID} {
+	for _, id := range []int64{businessID} {
 		count, err := proxies.CountAccountsByProxyID(ctx, id)
 		require.NoError(t, err)
-		require.EqualValues(t, 1, count, "an account sharing its business and collector proxy is counted once")
+		require.EqualValues(t, 1, count, "only the ordinary account proxy is retained")
 		require.ErrorIs(t, proxies.Delete(ctx, id), service.ErrProxyInUse)
 	}
 }

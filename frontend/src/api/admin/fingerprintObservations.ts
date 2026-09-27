@@ -6,7 +6,7 @@
  */
 
 import { apiClient } from '../client'
-import type { CodexResponseEvidence, CodexTurnStateRouteEvidence } from './accounts'
+import type { OpenAIResponseEvidence } from './accounts'
 
 export type FingerprintObservationRelation = 'root' | 'descendant' | 'unthreaded'
 
@@ -185,26 +185,7 @@ export interface FingerprintObservationEntry {
   outbound_codex_residency?: string
   outbound_codex_residency_source?: 'request_headers' | 'ws_handshake'
   request_integrity?: RequestIntegrityObservation
-  codex_turn_state?: CodexResponseEvidence & CodexTurnStateRouteEvidence & {
-    enabled: boolean
-    account_enabled?: boolean
-    maintenance_reason?: string
-    action: string
-    source?: string
-    model: string
-    outbound_length: number
-    outbound_header_length?: number
-    outbound_body_length?: number
-    outbound_carrier?: 'header' | 'body' | 'header_and_body' | 'ws_handshake' | 'ws_frame' | 'ws_handshake_and_frame'
-    response_length?: number
-    response_shape?: string
-    response_observed_shape?: 'personal_target' | 'personal_extended' | 'team_business_target' | 'team_business_extended' | 'invalid'
-    response_cipher_blocks?: number
-    response_validation_reason?: string
-    response_source?: 'header' | 'metadata'
-    expires_at?: string
-    renewal_reason?: string
-  }
+  response_evidence?: OpenAIResponseEvidence
   conversion_check?: RequestConversionCheck
 }
 

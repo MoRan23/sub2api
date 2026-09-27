@@ -268,14 +268,6 @@
             </div>
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
           </template>
-          <template #cell-codex_turn_state="{ row }">
-            <AccountCodexTurnStateCell
-              :account="row" :status="codexTurnStateStatuses[String(row.id)]" :models="codexTurnStateModels"
-              :loading="codexTurnStateLoading" :failed="codexTurnStateErrors.has(row.id)"
-              :now="Math.max(upstreamBillingNow, codexTurnStateObservedAt)" :observed-at="codexTurnStateObservedAt"
-              @open="codexTurnStateAccount = row"
-            />
-          </template>
           <template #cell-platform_type="{ row }">
             <div class="flex min-w-0 flex-col gap-1">
               <div class="flex flex-wrap items-center gap-1">
@@ -496,8 +488,7 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <CodexTurnStateStatusModal :show="codexTurnStateAccount !== null" :account="codexTurnStateAccount" @close="codexTurnStateAccount = null" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :codex-auth-exporting="codexAuthExporting || exportingData" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @codex-turn-state="codexTurnStateAccount = $event" @export-codex-auth="handleExportCodexAuth" @open-auth-parent="handleOpenAuthParent" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :codex-auth-exporting="codexAuthExporting || exportingData" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @export-codex-auth="handleExportCodexAuth" @open-auth-parent="handleOpenAuthParent" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -543,7 +534,6 @@ import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import type { OAuthDailySessionPool } from '@/api/admin/accounts'
 import { useTableLoader } from '@/composables/useTableLoader'
-import { useCodexTurnStateBatch } from '@/composables/useCodexTurnStateBatch'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
@@ -558,9 +548,7 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrsModal, TempUnschedStatusModal } from '@/components/account'
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
 import AccountDailyFixedRootsModal from '@/components/admin/account/AccountDailyFixedRootsModal.vue'
-import CodexTurnStateStatusModal from '@/components/admin/account/CodexTurnStateStatusModal.vue'
-import AccountCodexTurnStateCell from '@/components/admin/account/AccountCodexTurnStateCell.vue'
-import { supportsCodexTurnState } from '@/components/account/codexTurnState'
+import { supportsManagedOpenAIOAuthIdentity } from '@/components/account/openaiOAuthOS'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
@@ -1160,12 +1148,6 @@ const {
 
 const dailyFixedRootPools = reactive<Record<number, OAuthDailySessionPool>>({})
 const dailyFixedRootAccount = ref<Pick<AccountListItem, 'id' | 'name'> | null>(null)
-const codexTurnStateAccount = ref<Pick<AccountListItem, 'id' | 'name' | 'openai_oauth_os_profiles'> | null>(null)
-const {
-  statuses: codexTurnStateStatuses, errors: codexTurnStateErrors, models: codexTurnStateModels,
-  loading: codexTurnStateLoading, observedAt: codexTurnStateObservedAt, refresh: refreshCodexTurnStateBatch
-} = useCodexTurnStateBatch(accounts, computed(() => isColumnVisible('codex_turn_state')), loading,
-  (ids, signal) => adminAPI.accounts.getCodexTurnStates(ids, signal))
 const selectedDailyFixedRootPool = computed(() => {
   const pool = dailyFixedRootAccount.value ? dailyFixedRootPools[dailyFixedRootAccount.value.id] : undefined
   return Array.isArray(pool?.stream_session_ids) ? pool : undefined
@@ -1552,7 +1534,6 @@ const refreshAccountsIncrementally = async () => {
   autoRefreshAbortController = controller
   autoRefreshFetching.value = true
   try {
-    const rowsBeforeRefresh = accounts.value
     const result = await adminAPI.accounts.listWithEtag(
       requestPage,
       requestPageSize,
@@ -1582,8 +1563,6 @@ const refreshAccountsIncrementally = async () => {
     }
     upstreamBillingNow.value = Date.now()
 
-    // Runtime cache state can change even when the account-list ETag is unchanged.
-    if (accounts.value === rowsBeforeRefresh) await refreshCodexTurnStateBatch()
     if (!isCurrent()) return
     await refreshTodayStatsBatch()
   } catch (error) {
@@ -1965,7 +1944,6 @@ const allColumns = computed(() => {
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'daily_fixed_roots', label: t('admin.accounts.columns.dailyFixedRoots'), sortable: false },
-    { key: 'codex_turn_state', label: t('admin.accounts.columns.codexTurnState'), sortable: false },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]
@@ -2491,7 +2469,7 @@ const accountExportStepUp = useStepUp()
 const codexAuthExporting = ref(false)
 const codexAuthExportAccount = ref<Account | null>(null)
 const handleExportCodexAuth = async (account: Account) => {
-  if (codexAuthExporting.value || exportingData.value || account.parent_account_id != null || !supportsCodexTurnState(account)) return
+  if (codexAuthExporting.value || exportingData.value || account.parent_account_id != null || !supportsManagedOpenAIOAuthIdentity(account)) return
   try {
     const current = await adminAPI.accounts.getById(account.id)
     codexAuthExportAccount.value = current

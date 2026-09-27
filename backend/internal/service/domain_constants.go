@@ -725,8 +725,6 @@ const (
 	SettingKeyCodexTelemetryEnabled                 = "codex_telemetry_enabled"
 	SettingKeyCodexTelemetrySimulationEnabled       = "codex_telemetry_simulation_enabled"
 	SettingKeyCodexTelemetryObservationEnabled      = "codex_telemetry_observation_enabled"
-	SettingKeyCodexTurnStateModels                  = "codex_turn_state_models"
-	SettingKeyCodexTurnStateModelsRevision          = "codex_turn_state_models_revision"
 	SettingKeyOpenAIRequestIntegrityObserveEnabled  = "openai_request_integrity_observe_enabled"
 	// SettingKeyEnableOpenAICodexClientIdentityNormalization controls the Codex
 	// User-Agent/originator/version triplet under the master switch.

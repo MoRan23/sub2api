@@ -84,7 +84,7 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 		observedCapabilities,
 		explicitOpenAIResponsesLiteHTTP(c, req.Header),
 	)
-	if frozen, ok := frozenOpenAIHTTPBundleCapabilities(c, account, options.FinalModel); ok {
+	if frozen, ok := frozenOpenAIHTTPModelCapabilities(c, account, options.FinalModel); ok {
 		modelCapabilities = frozen
 	}
 	if options.DisableResponsesLite {

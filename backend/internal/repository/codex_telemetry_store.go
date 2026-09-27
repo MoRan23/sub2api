@@ -199,7 +199,7 @@ func (r *codexTelemetryStore) TransactPool(ctx context.Context, key service.Code
 	}
 	var owner int64
 	err = tx.QueryRowContext(ctx, `SELECT id FROM accounts WHERE id=$1 AND deleted_at IS NULL AND `+
-		codexTurnStateOwnerExpression("credentials")+` FOR SHARE`, key.OwnerAccountID).Scan(&owner)
+		openAIOAuthCredentialOwnerExpression("credentials")+` FOR SHARE`, key.OwnerAccountID).Scan(&owner)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrCodexTelemetryInvalidState
 	}

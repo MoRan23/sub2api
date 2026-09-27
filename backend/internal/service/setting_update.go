@@ -14,7 +14,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
-	"github.com/google/uuid"
 )
 
 // OmittedSettingKeys marks setting keys the caller's payload never carried.
@@ -102,16 +101,8 @@ func (s *SettingService) persistSettingsAndRefreshOpenAIPolicies(
 	s.settingsUpdateMu.Lock()
 	defer s.settingsUpdateMu.Unlock()
 
-	if _, present := updates[SettingKeyCodexTurnStateModels]; present {
-		models, err := parseCodexTurnStateModels(updates)
-		if err != nil {
-			return nil, infraerrors.BadRequest("INVALID_CODEX_TURN_STATE_MODELS", "codex_turn_state_models must be a valid array of exact model IDs")
-		}
-		raw, _ := json.Marshal(models)
-		updates[SettingKeyCodexTurnStateModels] = string(raw)
-		// SetMultiple commits the policy and its server-owned revision together.
-		updates[SettingKeyCodexTurnStateModelsRevision] = uuid.NewString()
-	}
+	delete(updates, "codex_turn_state_models")
+	delete(updates, "codex_turn_state_models_revision")
 	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
 		return nil, err
 	}
@@ -135,10 +126,6 @@ func (s *SettingService) persistSettingsAndRefreshOpenAIPolicies(
 	if value, present := updates[SettingKeyOpenAIRequestIntegrityObserveEnabled]; present {
 		s.publishOpenAIRequestIntegrityObserveEnabled(value)
 	}
-	if _, present := updates[SettingKeyCodexTurnStateModels]; present {
-		s.publishCodexTurnStateModels(updates)
-	}
-
 	if len(omitted) > 0 {
 		values, err := s.settingRepo.GetAll(ctx)
 		if err != nil {
@@ -181,13 +168,6 @@ func (s *SettingService) refreshCachedSettingsAfterWrite(settings *SystemSetting
 }
 
 func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings) (map[string]string, error) {
-	if settings.CodexTurnStateModels != nil {
-		models, err := NormalizeCodexTurnStateModels(settings.CodexTurnStateModels)
-		if err != nil {
-			return nil, infraerrors.BadRequest("INVALID_CODEX_TURN_STATE_MODELS", err.Error())
-		}
-		settings.CodexTurnStateModels = models
-	}
 	if err := ValidateOpenAICodexPATContextManagementSettings(settings); err != nil {
 		return nil, err
 	}
@@ -584,10 +564,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyCodexTelemetryEnabled] = strconv.FormatBool(settings.CodexTelemetryEnabled)
 	updates[SettingKeyCodexTelemetrySimulationEnabled] = strconv.FormatBool(settings.CodexTelemetrySimulationEnabled)
 	updates[SettingKeyCodexTelemetryObservationEnabled] = strconv.FormatBool(settings.CodexTelemetryObservationEnabled)
-	if settings.CodexTurnStateModels != nil {
-		raw, _ := json.Marshal(settings.CodexTurnStateModels)
-		updates[SettingKeyCodexTurnStateModels] = string(raw)
-	}
 	updates[SettingKeyOpenAIRequestIntegrityObserveEnabled] = strconv.FormatBool(settings.OpenAIRequestIntegrityObserveEnabled)
 	updates[SettingKeyEnableOpenAICodexClientIdentityNormalization] = strconv.FormatBool(settings.EnableOpenAICodexClientIdentityNormalization)
 	updates[SettingKeyEnableOpenAICodexPATContextManagement] = strconv.FormatBool(settings.EnableOpenAICodexPATContextManagement)

@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httpsendobserver"
 	pluginv1 "github.com/Wei-Shaw/sub2api/pkg/pluginapi/v1"
 )
 
@@ -967,9 +967,8 @@ func (m *PluginManager) RoundTripOpenAIOAuth(ctx context.Context, request *http.
 		return nil, true, errors.New("OpenAI OAuth 插件正在停止")
 	}
 	// Route selection and runtime admission are local checks, not physical sends.
-	// Apply the bundle and publish send diagnostics only at the admitted plugin
-	// boundary, including read-only diagnostics for feature-disabled business.
-	boundary := openaicookies.NewManager().Wrap(openAIPluginRoundTripFunc(func(outbound *http.Request) (*http.Response, error) {
+	// Publish physical-send observations only at the admitted plugin boundary.
+	boundary := httpsendobserver.Wrap(openAIPluginRoundTripFunc(func(outbound *http.Request) (*http.Response, error) {
 		return route.runtime.roundTrip(ctx, outbound, proxyURL, account)
 	}))
 	response, err := boundary.RoundTrip(request)

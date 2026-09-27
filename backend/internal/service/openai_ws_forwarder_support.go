@@ -148,7 +148,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	recordFrameObservation()
 	// This physical socket's first frame was a prewarm. Its handshake response
 	// cannot later be attributed to a different business model after pool reuse.
-	lease.ClaimCodexStateHandshakeHeaders()
+	lease.ClaimResponseEvidenceHeaders()
 	logOpenAIWSModeInfo("prewarm_write_sent account_id=%d conn_id=%s payload_bytes=%d", account.ID, connID, len(prewarmPayloadJSON))
 
 	prewarmResponseID := ""

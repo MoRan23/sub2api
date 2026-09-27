@@ -446,40 +446,38 @@ var ErrNoAvailableCompactAccounts = errors.New("no available accounts support /r
 
 // OpenAIGatewayService handles OpenAI API gateway operations
 type OpenAIGatewayService struct {
-	accountRepo             AccountRepository
-	usageLogRepo            UsageLogRepository
-	usageBillingRepo        UsageBillingRepository
-	userRepo                UserRepository
-	userSubRepo             UserSubscriptionRepository
-	cache                   GatewayCache
-	cfg                     *config.Config
-	codexDetector           CodexClientRestrictionDetector
-	schedulerSnapshot       *SchedulerSnapshotService
-	concurrencyService      *ConcurrencyService
-	billingService          *BillingService
-	rateLimitService        *RateLimitService
-	billingCacheService     *BillingCacheService
-	userGroupRateResolver   *userGroupRateResolver
-	httpUpstream            HTTPUpstream
-	pluginManager           *PluginManager
-	codexTelemetry          *CodexTelemetryService
-	codexTurnStateService   *CodexTurnStateService
-	codexTurnStateProxyRepo ProxyRepository
-	egressLocationService   *OpenAIEgressLocationService
-	deferredService         *DeferredService
-	openAITokenProvider     *OpenAITokenProvider
-	grokTokenProvider       *GrokTokenProvider
-	toolCorrector           *CodexToolCorrector
-	openaiWSResolver        OpenAIWSProtocolResolver
-	resolver                *ModelPricingResolver
-	channelService          *ChannelService
-	balanceNotifyService    *BalanceNotifyService
-	settingService          *SettingService
-	userPlatformQuotaRepo   UserPlatformQuotaRepository
-	oauthSyncSessionRepo    OAuthSyncSessionRepository
-	oauthDailySessionRepo   OAuthDailySessionRepository
-	liveAttestation         liveattestation.Provider
-	liveAttestationCipher   SecretEncryptor
+	accountRepo           AccountRepository
+	usageLogRepo          UsageLogRepository
+	usageBillingRepo      UsageBillingRepository
+	userRepo              UserRepository
+	userSubRepo           UserSubscriptionRepository
+	cache                 GatewayCache
+	cfg                   *config.Config
+	codexDetector         CodexClientRestrictionDetector
+	schedulerSnapshot     *SchedulerSnapshotService
+	concurrencyService    *ConcurrencyService
+	billingService        *BillingService
+	rateLimitService      *RateLimitService
+	billingCacheService   *BillingCacheService
+	userGroupRateResolver *userGroupRateResolver
+	httpUpstream          HTTPUpstream
+	pluginManager         *PluginManager
+	codexTelemetry        *CodexTelemetryService
+	egressLocationService *OpenAIEgressLocationService
+	deferredService       *DeferredService
+	openAITokenProvider   *OpenAITokenProvider
+	grokTokenProvider     *GrokTokenProvider
+	toolCorrector         *CodexToolCorrector
+	openaiWSResolver      OpenAIWSProtocolResolver
+	resolver              *ModelPricingResolver
+	channelService        *ChannelService
+	balanceNotifyService  *BalanceNotifyService
+	settingService        *SettingService
+	userPlatformQuotaRepo UserPlatformQuotaRepository
+	oauthSyncSessionRepo  OAuthSyncSessionRepository
+	oauthDailySessionRepo OAuthDailySessionRepository
+	liveAttestation       liveattestation.Provider
+	liveAttestationCipher SecretEncryptor
 
 	openaiWSPoolOnce               sync.Once
 	openaiWSStateStoreOnce         sync.Once
@@ -525,13 +523,6 @@ type OpenAIGatewayService struct {
 func (s *OpenAIGatewayService) SetOAuthSyncSessionRepository(repo OAuthSyncSessionRepository) {
 	if s != nil {
 		s.oauthSyncSessionRepo = repo
-	}
-}
-
-// SetCodexTurnStateService keeps construction compatible with narrow gateway tests.
-func (s *OpenAIGatewayService) SetCodexTurnStateService(state *CodexTurnStateService) {
-	if s != nil {
-		s.codexTurnStateService = state
 	}
 }
 

@@ -50,52 +50,19 @@ describe('FingerprintObservationRequestDetails', () => {
     expect(screen.getByText('macos / stream / 2026-09-21')).toBeTruthy()
   })
 
-  it.each([
-    [332, 12, 'team_business_target', 'Team / Business target shape (332 characters)'],
-    [356, 13, 'team_business_extended', 'Team / Business extended shape (356 characters)'],
-  ] as const)('shows a %s-character envelope separately from unknown subscription eligibility', async (length, blocks, shape, description) => {
-    renderDetails({ codex_turn_state: {
-      enabled: false, account_enabled: true, action: 'passthrough', model: 'gpt-observed', outbound_length: 0,
-      response_length: length, response_shape: 'unknown', response_source: 'header',
-      response_observed_shape: shape, response_cipher_blocks: blocks, response_validation_reason: 'account_type_unknown',
+  it('retains response model evidence without the retired ticket observation', async () => {
+    renderDetails({ response_evidence: {
+      upstream_response_model: 'observed-model', model_relation: 'different',
+      model_evidence_source: 'response.model', safety_buffering_enabled: true,
+      safety_buffering_faster_model: 'header-model', header_evidence_scope: 'response',
     } })
     await openDetails()
-    const observation = within(screen.getByTestId('codex-turn-state-observation'))
-    expect(observation.getByText(description)).toBeTruthy()
-    expect(observation.getByText(String(blocks))).toBeTruthy()
-    expect(observation.getByText(enAccounts.accounts.codexTurnState.responseEligibility)).toBeTruthy()
-    expect(observation.getByText(`Unclassified shape (${length})`)).toBeTruthy()
-    expect(observation.getByText('Subscription is unknown; cache target eligibility cannot be determined')).toBeTruthy()
-    expect(observation.getByText('Envelope shape describes the actual response; it does not identify the account subscription or model quality.')).toBeTruthy()
-    expect(observation.queryByText('Disabled (observation only)')).toBeNull()
-  })
-
-  it('shows the received response length as unclassified when the account subscription is unknown', async () => {
-    renderDetails({ codex_turn_state: {
-      enabled: false, action: 'passthrough', model: 'gpt-observed', outbound_length: 0,
-      response_length: 332, response_shape: 'unknown', response_source: 'header',
-    } })
-    await openDetails()
-    const observation = within(screen.getByTestId('codex-turn-state-observation'))
-    expect(observation.getByText('Unclassified shape (332)')).toBeTruthy()
-    expect(observation.getByText('Response header')).toBeTruthy()
-    expect(observation.queryByText('Not observed')).toBeNull()
-    expect(observation.queryByText('Matches target shape (332)')).toBeNull()
-  })
-
-  it('shows passive turn-state request and response observations when the account cache is disabled', async () => {
-    renderDetails({ codex_turn_state: {
-      enabled: false, action: 'passthrough', source: 'client', model: 'gpt-observed',
-      outbound_length: 292, response_length: 332, response_shape: 'target',
-    } })
+    const evidence = within(screen.getByTestId('openai-response-evidence'))
+    expect(evidence.getByText('observed-model')).toBeTruthy()
+    expect(evidence.getByText('header-model')).toBeTruthy()
+    expect(evidence.getByText(enAccounts.accounts.responseEvidence.modelRelations.different)).toBeTruthy()
     expect(screen.queryByTestId('codex-turn-state-observation')).toBeNull()
-    await openDetails()
-    const observation = within(screen.getByTestId('codex-turn-state-observation'))
-    expect(observation.getByText('Disabled (observation only)')).toBeTruthy()
-    expect(observation.getByText('gpt-observed')).toBeTruthy()
-    expect(observation.getByText('292')).toBeTruthy()
-    expect(observation.getByText('Matches target shape (332)')).toBeTruthy()
-    expect(observation.getByText('Passed through')).toBeTruthy()
+    expect(screen.queryByTestId('codex-cookie-diagnostic')).toBeNull()
   })
 
   it.each([

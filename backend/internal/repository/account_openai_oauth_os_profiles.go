@@ -23,7 +23,7 @@ func loadOpenAIOAuthOSProfiles(ctx context.Context, client *dbent.Client, ids []
 	}
 	eligible := ""
 	if len(eligibleOnly) > 0 && eligibleOnly[0] {
-		eligible = " AND EXISTS (SELECT 1 FROM accounts WHERE accounts.id=p.account_id AND deleted_at IS NULL AND " + codexTurnStateOwnerExpression("credentials") + ")"
+		eligible = " AND EXISTS (SELECT 1 FROM accounts WHERE accounts.id=p.account_id AND deleted_at IS NULL AND " + openAIOAuthCredentialOwnerExpression("credentials") + ")"
 	}
 	rows, err := client.QueryContext(ctx, `SELECT p.account_id, p.os_family, p.installation_id::text,
 		p.user_agent, p.sync_session_id::text, p.is_default, COALESCE(c.status,'unauthorized'),
@@ -295,7 +295,7 @@ func (r *accountRepository) RegenerateOpenAIOAuthOSProfileInstallationID(ctx con
 func (r *accountRepository) BackfillOpenAIOAuthOSProfiles(ctx context.Context) error {
 	var cursor int64
 	for {
-		rows, err := r.client.QueryContext(ctx, `SELECT id FROM accounts WHERE deleted_at IS NULL AND id>$1 AND `+codexTurnStateOwnerExpression("credentials")+` ORDER BY id LIMIT 100`, cursor)
+		rows, err := r.client.QueryContext(ctx, `SELECT id FROM accounts WHERE deleted_at IS NULL AND id>$1 AND `+openAIOAuthCredentialOwnerExpression("credentials")+` ORDER BY id LIMIT 100`, cursor)
 		if err != nil {
 			return err
 		}

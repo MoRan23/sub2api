@@ -15,7 +15,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -45,12 +44,6 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
-	return s.withOpenAIHTTPBundleBaseline(c, account, func() (*OpenAIForwardResult, error) {
-		return s.forwardAsAnthropicWithHTTPBundle(ctx, c, account, body, promptCacheKey, defaultMappedModel)
-	})
-}
-
-func (s *OpenAIGatewayService) forwardAsAnthropicWithHTTPBundle(ctx context.Context, c *gin.Context, account *Account, body []byte, promptCacheKey, defaultMappedModel string) (*OpenAIForwardResult, error) {
 	if account != nil && account.IsOpenAIOAuth() {
 		var scopeErr error
 		ctx, account, scopeErr = s.prepareOpenAIOAuthRequestScope(ctx, c, account, body)
@@ -79,7 +72,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropicWithHTTPBundle(ctx context.Cont
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
 	}
 	if account.Platform == PlatformOpenAI {
-		s.prepareOpenAIHTTPBundleModel(ctx, c, account, body, "messages", defaultMappedModel)
+		s.prepareOpenAIHTTPProtocol(c, account, body, "messages", defaultMappedModel)
 		ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 		if account.IsOpenAIOAuth() {
 			s.prepareOpenAIRequestTimezoneDeferred(ctx, c, account, body, account.IsOpenAIPassthroughEnabled())
@@ -503,7 +496,6 @@ func (s *OpenAIGatewayService) forwardAsAnthropicWithHTTPBundle(ctx context.Cont
 	if account.Platform == PlatformOpenAI {
 		upstreamReq = ApplyOpenAIRequestPolicy(upstreamReq, s.settingService)
 	}
-	upstreamReq = s.prepareOpenAICodexStateHTTPRequest(c, account, upstreamReq)
 	s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, openAIUpstreamRequestBodySnapshot(upstreamReq, responsesBody))
 
 	// 7. Send request
@@ -526,10 +518,8 @@ func (s *OpenAIGatewayService) forwardAsAnthropicWithHTTPBundle(ctx context.Cont
 		}
 		upstreamReq = markOpenAIGuardianSourceHTTPRequest(upstreamReq, c, account)
 		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, withCodexTelemetryGatewayContext(c.Request.Context(), c, account, "http"))
+		upstreamReq = markOpenAIResponseEvidenceHTTPRequest(upstreamReq, c)
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
-		if errors.Is(err, openaicookies.ErrBundleSendRejected) {
-			return nil, err
-		}
 		if err != nil {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 		}
@@ -816,17 +806,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
 	c.Header("Content-Type", "application/json; charset=utf-8")
-	if codexTurnStateHTTPCollectorFromResponse(resp) != nil {
-		encoded, err := json.Marshal(anthropicResp)
-		if err != nil {
-			return nil, fmt.Errorf("marshal messages response: %w", err)
-		}
-		if writeOpenAIResponseDataWithDelivery(c, http.StatusOK, "application/json; charset=utf-8", encoded) {
-			markCodexTurnStateHTTPDelivered(resp)
-		}
-	} else {
-		c.JSON(http.StatusOK, anthropicResp)
-	}
+	c.JSON(http.StatusOK, anthropicResp)
 
 	result := &OpenAIForwardResult{
 		RequestID:                     requestID,
@@ -1112,7 +1092,6 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	firstChunk := true
 	clientDisconnected := false
 	clientOutputStarted := false
-	turnStateSuccessfulOutputWritten := false
 	var streamFailoverErr error
 	var streamNonFailoverErr error
 	terminalEventType := ""
@@ -1291,16 +1270,10 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 					break
 				}
 				clientOutputStarted = true
-				if event.Type == "response.completed" || event.Type == "response.done" || openAIStreamDataStartsVisibleOutput(payload, event.Type) {
-					turnStateSuccessfulOutputWritten = true
-				}
 			}
 		}
 		if len(events) > 0 && !clientDisconnected {
 			c.Writer.Flush()
-			if turnStateSuccessfulOutputWritten {
-				markCodexTurnStateHTTPDelivered(resp)
-			}
 		}
 		return isTerminalEvent
 	}
@@ -1331,9 +1304,6 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			}
 			if !clientDisconnected {
 				c.Writer.Flush()
-				if turnStateSuccessfulOutputWritten || terminalEventType == "response.completed" || terminalEventType == "response.done" {
-					markCodexTurnStateHTTPDelivered(resp)
-				}
 			}
 		}
 		logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, &usage, terminalEventType, clientDisconnected)

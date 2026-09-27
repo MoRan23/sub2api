@@ -204,18 +204,8 @@ export async function getById(id: number): Promise<Account> {
   return data
 }
 
-export interface CodexCookieDiagnostic {
-  sent?: boolean
-  /** Whether the HTTP attempt reached the send boundary, independent of Cookie presence. */
-  send_state?: 'sent' | 'not_sent'
-  source?: 'none' | 'bundle' | 'persistent' | 'memory' | 'mixed'
-  names?: string[]
-  cookies?: { name: string; expires_at?: string }[]
-  reason?: string
-}
-
-/** Evidence belongs to one observed response, not necessarily the current cache. */
-export interface CodexResponseEvidence {
+/** Model and header evidence captured from the same upstream response. */
+export interface OpenAIResponseEvidence {
   upstream_response_model?: string
   model_relation?: 'not_reported' | 'exact' | 'known_alias' | 'different' | 'conflicting'
   model_conflict?: boolean
@@ -223,110 +213,6 @@ export interface CodexResponseEvidence {
   safety_buffering_enabled?: boolean
   safety_buffering_faster_model?: string
   header_evidence_scope?: 'response' | 'connection'
-  cookie_diagnostic?: CodexCookieDiagnostic
-}
-
-/** Safe physical-route diagnostics only; route generations and proxy URLs are private. */
-export interface CodexTurnStateRouteEvidence {
-  wire_mode?: 'responses' | 'lite'
-  /** Zero explicitly means direct; an absent value means no route evidence. */
-  actual_proxy_id?: number | null
-  route_source?: 'account' | 'bundle' | 'collector'
-  bundle_proxy_id?: number | null
-}
-
-export interface CodexTurnStateModelStatus {
-  os_family?: OpenAIOAuthOS
-  model: string
-  state: 'ready' | 'expired' | 'missing' | 'paused' | 'model_excluded' | 'model_policy_unavailable'
-  model_allowed?: boolean
-  cache_available?: boolean
-  collection_status?: 'idle' | 'scheduled' | 'pending' | 'collecting' | 'backoff' | 'paused' | 'blocked'
-  collection_reason?: string
-  shape: string
-  source: string
-  token_length: number
-  cipher_blocks: number
-  expires_at?: string
-  /** Complete HTTP package expiry, bounded by the token and every cookie. */
-  cookie_bundle_expires_at?: string
-  bundle_wire_mode?: 'responses' | 'lite'
-  bundle_egress_kind?: 'direct' | 'proxy'
-  bundle_proxy_id?: number | null
-  bundle_unavailable_reason?: string
-  remaining_seconds: number
-  last_business_at?: string
-  last_eligible_collection_at?: string
-  last_collected_at?: string
-  next_collect_at?: string
-  collector_paused: boolean
-  collector_proxy_id?: number | null
-  last_collector_proxy_id?: number | null
-  collector_extended_count?: number
-  last_error?: string
-  refresh_reason?: string
-  latest_response_evidence?: CodexResponseEvidence
-}
-
-export interface CodexTurnStateObservation extends CodexResponseEvidence, CodexTurnStateRouteEvidence {
-  os_family?: OpenAIOAuthOS
-  model: string
-  observed_at: string
-  request_source?: 'business' | 'collector'
-  observation_id?: string
-  request_sent_at?: string
-  outbound_action?: 'injected' | 'passthrough' | 'collector_omitted'
-  outbound_source?: 'business' | 'collector' | 'client'
-  maintenance_reason?: string
-  business_delivered?: boolean
-  snapshot_version?: number
-  snapshot_expires_at?: string
-  outbound_length: number
-  response_length: number
-  response_shape: string
-  response_observed_shape?: string
-  response_cipher_blocks?: number
-  response_validation_reason?: string
-  response_source?: 'header' | 'metadata'
-}
-
-export interface CodexTurnStateStatus {
-  cache_scope?: 'shared'
-  os_family?: OpenAIOAuthOS
-  account_id: number
-  owner_account_id: number
-  inherited: boolean
-  enabled: boolean
-  account_type: 'auto' | 'personal' | 'team_business'
-  resolved_account_type: string
-  collector_proxy_ids?: number[]
-  /** Legacy status response compatibility. */
-  collector_proxy_id?: number | null
-  expected_length: number
-  reason: string
-  models: CodexTurnStateModelStatus[]
-  /** Lightweight instance summaries are available independently of fingerprint capture. */
-  observation_enabled?: boolean
-  observation_scope?: 'instance'
-  observations?: CodexTurnStateObservation[]
-}
-
-export async function getCodexTurnState(id: number, signal?: AbortSignal, os?: OpenAIOAuthOS): Promise<CodexTurnStateStatus> {
-  // The OS filter selects observations only; model caches are shared across OSes.
-  const { data } = await apiClient.get<CodexTurnStateStatus>(`/admin/accounts/${id}/codex-turn-state`, { signal, ...(os ? { params: { os } } : {}) })
-  return data
-}
-
-export interface CodexTurnStateBatch {
-  items: Record<string, CodexTurnStateStatus>
-  models: string[]
-}
-
-export async function getCodexTurnStates(accountIds: number[], signal?: AbortSignal): Promise<CodexTurnStateBatch> {
-  const { data } = await apiClient.get<CodexTurnStateBatch>('/admin/accounts/codex-turn-state', {
-    params: { account_ids: accountIds.join(',') }, signal
-  })
-  return data
 }
 
 /**
@@ -1322,8 +1208,6 @@ export const accountsAPI = {
   listWithEtag,
   getUpstreamBillingRatesWithEtag,
   getById,
-  getCodexTurnState,
-  getCodexTurnStates,
   create,
   duplicate,
   update,

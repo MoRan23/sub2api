@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 const { get, post, put, remove } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), remove: vi.fn() }))
 vi.mock('@/api/client', () => ({ apiClient: { get, post, put, delete: remove } }))
-import { exportCodexAuth, getAvailableModels, getCodexTurnState, refreshOpenAIToken, revokeOpenAIOAuth, setDefaultOpenAIOAuthOS } from '@/api/admin/accounts'
+import { exportCodexAuth, getAvailableModels, refreshOpenAIToken, revokeOpenAIOAuth, setDefaultOpenAIOAuthOS } from '@/api/admin/accounts'
 
 describe('OpenAI shared authorization and system identity APIs', () => {
   beforeEach(() => {
@@ -9,14 +9,11 @@ describe('OpenAI shared authorization and system identity APIs', () => {
     for (const request of [get, post, put, remove]) request.mockResolvedValue({ data: { id: 42 } })
   })
 
-  it('exports shared auth while retaining identity selection for model and turn-state requests', async () => {
+  it('exports shared auth while retaining system identity selection for model requests', async () => {
     await exportCodexAuth(42)
     expect(get).toHaveBeenLastCalledWith('/admin/accounts/42/codex-auth', undefined)
     await getAvailableModels(42, 'linux')
     expect(get).toHaveBeenLastCalledWith('/admin/accounts/42/models', { params: { os: 'linux' } })
-    const signal = new AbortController().signal
-    await getCodexTurnState(42, signal, 'linux')
-    expect(get).toHaveBeenLastCalledWith('/admin/accounts/42/codex-turn-state', { params: { os: 'linux' }, signal })
   })
 
   it('sends manual imports to the explicit account without selecting a system grant', async () => {

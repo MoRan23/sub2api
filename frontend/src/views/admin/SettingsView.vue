@@ -6059,33 +6059,6 @@
             </div>
           </div>
 
-          <section class="card space-y-3 p-6" data-testid="codex-turn-state-models-settings">
-            <div>
-              <h2 id="codex-turn-state-models-label" class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.codexTurnStateModels.title") }}
-              </h2>
-              <p id="codex-turn-state-models-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.codexTurnStateModels.description") }}
-              </p>
-            </div>
-            <textarea
-              v-model="codexTurnStateModelsInput"
-              rows="4"
-              class="input w-full font-mono text-sm"
-              :spellcheck="false"
-              aria-labelledby="codex-turn-state-models-label"
-              aria-describedby="codex-turn-state-models-hint codex-turn-state-models-format"
-              data-testid="codex-turn-state-models-input"
-              @input="codexTurnStateModelsEdited = true"
-            />
-            <p id="codex-turn-state-models-format" class="text-xs text-gray-500 dark:text-gray-400">
-              {{ t("admin.settings.codexTurnStateModels.formatHint") }}
-            </p>
-            <p v-if="codexTurnStateModels.length === 0" class="text-xs text-amber-700 dark:text-amber-400" data-testid="codex-turn-state-models-paused">
-              {{ t("admin.settings.codexTurnStateModels.emptyHint") }}
-            </p>
-          </section>
-
           <section class="card p-6" data-testid="openai-request-integrity-settings">
             <div class="flex items-start justify-between gap-5">
               <div class="min-w-0">
@@ -10004,7 +9977,6 @@ type SettingsForm = Omit<
   | "installation_observation_enabled"
   | "codex_telemetry_effective_enabled"
   | "codex_telemetry_forced_off_reason"
-  | "codex_turn_state_models"
   | "openai_oauth_scheduling_rate_multiplier"
 > & {
   /** Form always binds a concrete boolean (SystemSettings marks this optional). */
@@ -11332,35 +11304,6 @@ const codexSyncedVersionLabel = computed(() => {
 const codexTelemetryEffectiveEnabled = ref<boolean | null>(null);
 const codexTelemetryForcedOffReason = ref("");
 
-const codexTurnStateModelsInput = ref("gpt-6-astra\ngpt-5.6-sol");
-const codexTurnStateModelsLoaded = ref(false);
-const codexTurnStateModelsEdited = ref(false);
-const codexTurnStateModels = computed(() => [...new Set(
-  codexTurnStateModelsInput.value.split(/\r?\n/).map(model => model.trim()).filter(Boolean),
-)]);
-
-function syncCodexTurnStateModels(settings: Partial<SystemSettings>) {
-  const models = settings.codex_turn_state_models;
-  // Missing/invalid fields in a legacy or partial response must not replace
-  // an explicit empty selection or silently persist the displayed defaults.
-  if (Array.isArray(models) && models.every(model => typeof model === "string")) {
-    codexTurnStateModelsInput.value = models.join("\n");
-    codexTurnStateModelsLoaded.value = true;
-    codexTurnStateModelsEdited.value = false;
-  }
-}
-
-function codexTurnStateModelsAreValid(): boolean {
-  return codexTurnStateModels.value.length <= 64 && codexTurnStateModels.value.every(model =>
-    new TextEncoder().encode(model).length <= 256 &&
-    !/[\s*?\[\]{}]/u.test(model) &&
-    ![...model].some(char => {
-      const code = char.codePointAt(0)!;
-      return code < 32 || (code >= 127 && code <= 159);
-    }),
-  );
-}
-
 function syncCodexTelemetrySettings(settings: Partial<SystemSettings>) {
   // Partial/legacy responses must not reset a saved choice or claim an
   // effective runtime state that the server has not reported.
@@ -11414,7 +11357,6 @@ async function loadSettings() {
       }
     }
     syncCodexTelemetrySettings(settings);
-    syncCodexTurnStateModels(settings);
     // For this optional override, null explicitly selects per-account rates.
     if (settings.openai_oauth_scheduling_rate_multiplier === null) {
       form.openai_oauth_scheduling_rate_multiplier = null;
@@ -11672,10 +11614,6 @@ const siteBillingModeHint = computed(() =>
 async function saveSettings() {
   saving.value = true;
   try {
-    if ((codexTurnStateModelsLoaded.value || codexTurnStateModelsEdited.value) && !codexTurnStateModelsAreValid()) {
-      appStore.showError(t("admin.settings.codexTurnStateModels.invalidModels"));
-      return;
-    }
     const normalizedTableDefaultPageSize = Math.floor(
       Number(form.table_default_page_size),
     );
@@ -12180,10 +12118,6 @@ async function saveSettings() {
       allow_user_view_error_requests: form.allow_user_view_error_requests,
     };
 
-    if (codexTurnStateModelsLoaded.value || codexTurnStateModelsEdited.value) {
-      payload.codex_turn_state_models = codexTurnStateModels.value;
-    }
-
     // 仅当 openai_fast_policy_settings 已成功从后端加载时才回写，
     // 否则省略整个字段，让后端保留既有规则（含默认值）。
     if (openaiFastPolicyLoaded.value) {
@@ -12239,7 +12173,6 @@ async function saveSettings() {
       }
     }
     syncCodexTelemetrySettings(updated);
-    syncCodexTurnStateModels(updated);
     if (updated.openai_oauth_scheduling_rate_multiplier === null) {
       form.openai_oauth_scheduling_rate_multiplier = null;
     }

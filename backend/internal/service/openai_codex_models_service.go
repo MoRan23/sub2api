@@ -2033,7 +2033,6 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 			if clientErr != nil {
 				return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_PROXY_INVALID", "invalid proxy configuration: %v", clientErr)
 			}
-			client = openAIHTTPCookieClient(s.httpUpstream, client, req)
 			resp, err = openai.HTTPClientWithCodexResidencyRedirectGuard(client).Do(req)
 		}
 	}

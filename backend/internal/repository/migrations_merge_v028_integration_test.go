@@ -72,7 +72,7 @@ func TestMergeV028MigrationsUpgradeAfterLocal259(t *testing.T) {
 	credentials := `{"access_token":"synthetic-access","refresh_token":"synthetic-refresh","client_id":"preserved-client"}`
 	require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO accounts (name, platform, type, credentials, extra)
 		VALUES ('merge-v028-identity', 'openai', 'oauth', $1::jsonb,
-		'{"codex_turn_state_use_ticket_proxy":false}'::jsonb) RETURNING id`, credentials).Scan(&accountID))
+		'{"note":"preserved-configuration"}'::jsonb) RETURNING id`, credentials).Scan(&accountID))
 	_, err = db.ExecContext(ctx, `INSERT INTO account_openai_oauth_os_profiles
 		(account_id, os_family, installation_id, sync_session_id, user_agent, is_default)
 		VALUES ($1, 'linux', 'deaf0000-0000-4000-8000-000000000028',

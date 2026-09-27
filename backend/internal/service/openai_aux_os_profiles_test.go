@@ -3,9 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"io"
-	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -58,30 +55,6 @@ func auxOAuthProfileFixture(t *testing.T, account *Account, defaultOS string) *O
 	return profiles
 }
 
-func TestCodexTurnStateCollectorUsesDefaultOSProfileWithoutTurnIdentity(t *testing.T) {
-	account, proxy := codexCollectorTransportFixture()
-	profiles := auxOAuthProfileFixture(t, account, OpenAIOSMacOS)
-	upstream := &codexCollectorTransportUpstream{}
-	do := ProvideCodexTurnStateCollectorHTTPDo(codexCollectorTransportAccounts{account: account}, codexCollectorTransportProxies{proxy: proxy}, upstream)
-	const body = `{"model":"gpt-5.4","input":[],"session_id":"collector-session"}`
-	request, err := http.NewRequest(http.MethodPost, chatgptCodexURL, strings.NewReader(body))
-	require.NoError(t, err)
-	request.Header.Set("session_id", "collector-session")
-	response, err := do(context.Background(), CodexTurnStateCollectRequest{
-		Account: account, Model: "gpt-5.4", ProxyID: proxy.ID, validateModelPolicy: allowCodexCollectorTestModelPolicy,
-	}, request)
-	require.NoError(t, err)
-	require.NoError(t, response.Body.Close())
-	want := resolveCodexClientIdentityPlan(CodexClientIdentityNormalize, profiles.Profiles[OpenAIOSMacOS].UserAgent)
-	require.Equal(t, want.UserAgent, upstream.request.Header.Get("User-Agent"))
-	require.Equal(t, "collector-session", upstream.request.Header.Get("session_id"))
-	require.Empty(t, upstream.request.Header.Get("thread_id"))
-	require.Empty(t, upstream.request.Header.Get("x-codex-installation-id"))
-	forwardedBody, err := io.ReadAll(upstream.request.Body)
-	require.NoError(t, err)
-	require.Equal(t, body, string(forwardedBody))
-}
-
 func TestPluginDirectoryUsesDefaultOSProfileWithoutTurnIdentity(t *testing.T) {
 	account := Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
 		Credentials: map[string]any{"access_token": "local-test-token"}}
@@ -94,21 +67,6 @@ func TestPluginDirectoryUsesDefaultOSProfileWithoutTurnIdentity(t *testing.T) {
 	require.Empty(t, identity.Headers.Get("session_id"))
 	require.Empty(t, identity.Headers.Get("thread_id"))
 	require.Empty(t, identity.Headers.Get("x-codex-installation-id"))
-}
-
-func TestCodexTurnStateCollectorStopsWhenProfileStorageFails(t *testing.T) {
-	account, proxy := codexCollectorTransportFixture()
-	upstream := &codexCollectorTransportUpstream{}
-	repo := auxOAuthUnavailableProfileRepository{AccountRepository: codexCollectorTransportAccounts{account: account}, incompleteProfile: true}
-	do := ProvideCodexTurnStateCollectorHTTPDo(repo, codexCollectorTransportProxies{proxy: proxy}, upstream)
-	request, err := http.NewRequest(http.MethodPost, chatgptCodexURL, strings.NewReader(`{}`))
-	require.NoError(t, err)
-	response, err := do(context.Background(), CodexTurnStateCollectRequest{
-		Account: account, Model: "gpt-5.4", ProxyID: proxy.ID, validateModelPolicy: allowCodexCollectorTestModelPolicy,
-	}, request)
-	require.ErrorIs(t, err, ErrOpenAIOAuthOSProfileUnavailable)
-	require.Nil(t, response)
-	require.Zero(t, upstream.calls)
 }
 
 func TestPluginDirectoryStopsWhenProfileStorageFails(t *testing.T) {

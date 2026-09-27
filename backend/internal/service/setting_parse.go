@@ -932,11 +932,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.CodexTelemetryEnabled = parseCodexTelemetryEnabled(settings[SettingKeyCodexTelemetryEnabled])
 	result.CodexTelemetrySimulationEnabled = parseCodexTelemetryEnabled(settings[SettingKeyCodexTelemetrySimulationEnabled])
 	result.CodexTelemetryObservationEnabled = parseCodexTelemetryEnabled(settings[SettingKeyCodexTelemetryObservationEnabled])
-	result.CodexTurnStateModels, _ = parseCodexTurnStateModels(settings)
-	if result.CodexTurnStateModels == nil {
-		// A malformed persisted policy fails closed, including in the admin UI.
-		result.CodexTurnStateModels = []string{}
-	}
 	result.OpenAIRequestIntegrityObserveEnabled = parseOpenAIRequestIntegrityObserveEnabled(settings[SettingKeyOpenAIRequestIntegrityObserveEnabled])
 	result.EnableOpenAIRequestTimezoneConversion = parseDefaultTrueSetting(settings, SettingKeyEnableOpenAIRequestTimezoneConversion)
 	result.EnableOpenAIPassthroughTimezoneConversion = parseDefaultTrueSetting(settings, SettingKeyEnableOpenAIPassthroughTimezoneConversion)

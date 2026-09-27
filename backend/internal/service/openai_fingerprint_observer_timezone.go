@@ -85,13 +85,9 @@ func cloneFingerprintTimezoneScan(scan *TimezoneScanResult) *TimezoneScanResult 
 
 func cloneFingerprintObservationEntry(entry FingerprintObservationEntry) FingerprintObservationEntry {
 	cloneFingerprintObservationMetadata(&entry)
-	if entry.CodexTurnState != nil {
-		copy := *entry.CodexTurnState
-		if copy.ExpiresAt != nil {
-			expires := *copy.ExpiresAt
-			copy.ExpiresAt = &expires
-		}
-		entry.CodexTurnState = &copy
+	if entry.ResponseEvidence != nil {
+		copy := entry.ResponseEvidence.clone()
+		entry.ResponseEvidence = &copy
 	}
 	if entry.EgressLocation != nil {
 		snapshot := *entry.EgressLocation

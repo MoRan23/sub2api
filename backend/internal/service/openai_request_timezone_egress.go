@@ -21,9 +21,7 @@ func FreezeOpenAIOutboundRoute(c *gin.Context, account *Account) OpenAIEgressRou
 		}
 	}
 	route := OpenAIEgressRoute{}
-	if selected := codexHTTPRouteSelectionFromContext(c, account); selected != nil && openAIHTTPBundleRouteEnabled(c) {
-		route = selected.route
-	} else if account != nil && account.ProxyID != nil && account.Proxy != nil {
+	if account != nil && account.ProxyID != nil && account.Proxy != nil {
 		route.ProxyID, route.ProxyURL = *account.ProxyID, account.Proxy.URL()
 	}
 	if c != nil && account != nil {

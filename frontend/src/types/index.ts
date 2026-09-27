@@ -1175,16 +1175,6 @@ export interface OllamaCloudUsageSettings {
   debounce_minutes: number
 }
 
-export interface CodexTurnStateConfig {
-  enabled: boolean
-  account_type: 'auto' | 'personal' | 'team_business'
-  /** Defaults to true for accounts created before the setting was introduced. */
-  use_ticket_proxy?: boolean
-  collector_proxy_ids?: number[]
-  /** Read compatibility for servers and accounts using the former single proxy setting. */
-  collector_proxy_id?: number | null
-}
-
 export type OpenAIOAuthOS = 'windows' | 'macos' | 'linux'
 
 export interface OpenAIOAuthOSProfile {
@@ -1263,8 +1253,6 @@ export interface Account {
   credentials_status?: Record<string, boolean>
   openai_environment_fingerprint?: string
   openai_oauth_os_profiles?: OpenAIOAuthOSProfiles
-  codex_turn_state?: CodexTurnStateConfig
-  codex_turn_state_inherited_from_account_id?: number
   ollama_cloud_usage?: OllamaCloudUsageState
   opencode_go_usage?: OpenCodeGoUsageState
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
@@ -1580,7 +1568,6 @@ export interface OpenAIResponsesState {
 
 export interface CreateAccountRequest {
   os?: OpenAIOAuthOS
-  codex_turn_state?: CodexTurnStateConfig
   name: string
   notes?: string | null
   platform: AccountPlatform
@@ -1600,7 +1587,6 @@ export interface CreateAccountRequest {
 }
 
 export interface UpdateAccountRequest {
-  codex_turn_state?: CodexTurnStateConfig
   name?: string
   notes?: string | null
   type?: AccountType
@@ -1717,9 +1703,6 @@ export interface AdminDataAccount {
   credentials: Record<string, unknown>
   extra?: Record<string, unknown>
   proxy_key?: string | null
-  codex_turn_state?: CodexTurnStateConfig
-  codex_turn_state_proxy_keys?: string[]
-  codex_turn_state_proxy_key?: string | null
   concurrency: number
   priority: number
   rate_multiplier?: number | null
@@ -1745,7 +1728,6 @@ export interface AdminDataImportResult {
 
 export interface CodexSessionImportRequest {
   os?: OpenAIOAuthOS
-  codex_turn_state?: CodexTurnStateConfig
   content?: string
   contents?: string[]
   name?: string

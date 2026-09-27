@@ -20,7 +20,7 @@ const openAIOAuthSlotColumns = `c.account_id,p.os_family,a.credentials,c.authori
 func readOpenAIOAuthOSCredentials(ctx context.Context, client *dbent.Client, id int64, os string) ([]*service.OpenAIOAuthOSCredential, error) {
 	// The OS selects only installation/runtime identity. There is exactly one
 	// authoritative credential tuple and CAS revision for the owning account.
-	query := `SELECT ` + openAIOAuthSlotColumns + ` FROM account_openai_oauth_credentials c JOIN accounts a ON a.id=c.account_id JOIN account_openai_oauth_os_profiles p ON p.account_id=c.account_id WHERE c.account_id=$1 AND a.deleted_at IS NULL AND ` + codexTurnStateOwnerExpression("a.credentials")
+	query := `SELECT ` + openAIOAuthSlotColumns + ` FROM account_openai_oauth_credentials c JOIN accounts a ON a.id=c.account_id JOIN account_openai_oauth_os_profiles p ON p.account_id=c.account_id WHERE c.account_id=$1 AND a.deleted_at IS NULL AND ` + openAIOAuthCredentialOwnerExpression("a.credentials")
 	args := []any{id}
 	if os != "" {
 		query += ` AND p.os_family=$2`
@@ -248,7 +248,6 @@ func (r *accountRepository) mutateOpenAIOAuthOSCredential(ctx context.Context, i
 		if err = enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 			return err
 		}
-		notifyCodexTurnStateAccountAfterCommit(ctx, id)
 	}
 	if tx != nil {
 		if err = tx.Commit(); err != nil {

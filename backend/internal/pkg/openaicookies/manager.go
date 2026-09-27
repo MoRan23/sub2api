@@ -10,9 +10,9 @@ import (
 	"time"
 )
 
-// Manager applies explicitly supplied ticket bundles. Its only mutable jar is
-// isolated, process-local memory for unbound OAuth flows. Bound cookie values
-// are persisted with the ticket only; this manager has no storage dependency.
+// Manager stores only process-local cookies for explicitly scoped, unbound
+// OAuth flows. Account-bound HTTP requests bypass this manager entirely.
+// No cookie value is persisted or shared between authorization flows.
 type Manager struct {
 	now    func() time.Time
 	mu     sync.Mutex
@@ -43,7 +43,8 @@ func (t *transport) CloseIdleConnections() {
 	}
 }
 
-// Wrap does not install an http.Client.Jar and never handles websocket upgrades.
+// Wrap keeps the client's shared Jar disabled. Only an explicit temporary
+// authorization flow can learn cookies; ordinary requests retain their headers.
 func (m *Manager) Wrap(next http.RoundTripper) http.RoundTripper {
 	if next == nil {
 		next = http.DefaultTransport
@@ -66,6 +67,15 @@ func websocketUpgrade(request *http.Request) bool {
 	return false
 }
 
+// EnabledForRequest selects temporary OAuth scopes only, never bound accounts.
+func EnabledForRequest(request *http.Request) bool {
+	if request == nil || websocketUpgrade(request) {
+		return false
+	}
+	scope, ok := ScopeFromContext(request.Context())
+	return ok && scope.Valid() && scope.EphemeralID != ""
+}
+
 func removeHeader(header http.Header, target string) {
 	for name := range header {
 		if strings.EqualFold(name, target) {
@@ -74,147 +84,24 @@ func removeHeader(header http.Header, target string) {
 	}
 }
 
-func restoreBundleRequest(request *http.Request, stripWithoutFallback bool) {
-	if restore, ok := request.Context().Value(fallbackKey{}).(func(*http.Request)); ok && restore != nil {
-		restore(request)
-	} else if stripWithoutFallback {
-		removeHeader(request.Header, "Cookie")
-		removeHeader(request.Header, "x-codex-turn-state")
-	}
-}
-
-func (t *transport) roundTripBypass(request *http.Request, rejectionReason ...string) (*http.Response, error) {
-	diagnostic := Diagnostic{Reason: "cookie_empty", SendState: "sent", Source: "none"}
-	names := make(map[string]bool)
-	for _, cookie := range request.Cookies() {
-		if AllowedName(cookie.Name) {
-			diagnostic.SentCount++
-			names[cookie.Name] = true
-		}
-	}
-	for name := range names {
-		diagnostic.Names = append(diagnostic.Names, name)
-	}
-	sort.Strings(diagnostic.Names)
-	if diagnostic.SentCount > 0 {
-		diagnostic.Sent, diagnostic.Reason, diagnostic.Source = true, "cookie_sent", "client"
-	}
-	if len(rejectionReason) > 0 && rejectionReason[0] != "" {
-		diagnostic.Reason = rejectionReason[0]
-	}
-	report(request.Context(), diagnostic)
-	return t.roundTripSend(request)
-}
-
-func (t *transport) roundTripSend(request *http.Request) (*http.Response, error) {
-	if observer, ok := request.Context().Value(sendObserverKey{}).(func(*http.Request)); ok && observer != nil {
-		observer(request)
-	}
-	return t.next.RoundTrip(request)
-}
-
 func (t *transport) RoundTrip(request *http.Request) (*http.Response, error) {
 	if request == nil {
 		return nil, errors.New("cookie_request_missing")
 	}
-	if websocketUpgrade(request) {
+	if t.manager == nil || !EnabledForRequest(request) {
 		return t.next.RoundTrip(request)
-	}
-	policy, enabled := request.Context().Value(bundleKey{}).(bundlePolicy)
-	scope, _ := ScopeFromContext(request.Context())
-	attempt := attemptFromContext(request.Context())
-	rejected := rejectedBundleSend(request.Context())
-	if rejected != nil && (policy.bypass || !enabled) {
-		attempt.invalidate()
-		report(request.Context(), Diagnostic{Reason: ErrBundleSendRejected.Error(), SendState: "not_sent", Source: "none"})
-		return nil, rejected
-	}
-	if policy.bypass || !enabled && scope.EphemeralID == "" {
-		attempt.invalidate()
-		return t.roundTripBypass(request)
 	}
 	clone := request.Clone(request.Context())
 	if clone.Header == nil {
 		clone.Header = make(http.Header)
 	}
-	if enabled {
-		if guard, ok := clone.Context().Value(guardKey{}).(func(*http.Request) bool); ok && guard != nil && !guard(clone) {
-			attempt.invalidate()
-			if rejected != nil {
-				report(clone.Context(), Diagnostic{Reason: ErrBundleSendRejected.Error(), SendState: "not_sent", Source: "none"})
-				return nil, rejected
-			}
-			restoreBundleRequest(clone, false)
-			return t.roundTripBypass(clone)
-		}
-	}
-	if t.manager == nil || !scope.Valid() || enabled && !scope.Persistent() {
-		attempt.invalidate()
-		if rejected != nil {
-			report(clone.Context(), Diagnostic{Reason: ErrInvalidScope.Error(), SendState: "not_sent", Source: "none"})
-			return nil, rejected
-		}
-		restoreBundleRequest(clone, true)
-		return t.roundTripBypass(clone, ErrInvalidScope.Error())
-	}
-	if !AllowedURL(clone.URL) {
-		attempt.invalidate()
-		if rejected != nil {
-			report(clone.Context(), Diagnostic{Reason: "cookie_host_not_allowed", SendState: "not_sent", Source: "none"})
-			return nil, rejected
-		}
-		restoreBundleRequest(clone, true)
-		return t.roundTripBypass(clone, "cookie_host_not_allowed")
-	}
-	if !enabled {
-		removeHeader(clone.Header, "Cookie")
-		return t.roundTripEphemeral(clone, scope)
-	}
-	now := t.manager.now()
-	if !policy.bundle.Fresh() && !policy.bundle.ValidAt(now) {
-		attempt.invalidate()
-		if rejected != nil {
-			report(clone.Context(), Diagnostic{Reason: ErrBundleExpired.Error(), SendState: "not_sent", Source: "none"})
-			return nil, rejected
-		}
-		restoreBundleRequest(clone, true)
-		return t.roundTripBypass(clone, ErrBundleExpired.Error())
-	}
-	sequence := attempt.begin(scope, t.manager.now)
-	if rejected != nil && attempt != nil && sequence == 0 {
-		attempt.invalidate()
-		report(clone.Context(), Diagnostic{Reason: ErrBundleSendRejected.Error(), SendState: "not_sent", Source: "none"})
-		return nil, rejected
-	}
+	// A flow never imports caller cookies. This also strips redirected cookies
+	// before applying the new destination's HTTPS and host restrictions.
 	removeHeader(clone.Header, "Cookie")
-	// Only cookies eligible for this physical URL belong to its candidate. The
-	// caller's raw Cookie header is never read or copied into an accepted bundle.
-	entries := make([]Entry, 0, len(policy.bundle.Entries))
-	for _, entry := range policy.bundle.Entries {
-		if entryMatches(entry, clone.URL, now) {
-			entries = append(entries, entry)
-		}
+	if !AllowedURL(clone.URL) {
+		return t.next.RoundTrip(clone)
 	}
-	diagnostic := apply(clone, entries, now)
-	diagnostic.SendState = "sent"
-	if diagnostic.Sent {
-		diagnostic.Source = "bundle"
-	}
-	report(clone.Context(), diagnostic)
-	response, err := t.roundTripSend(clone)
-	if response != nil && err == nil && response.StatusCode >= 200 && response.StatusCode < 300 {
-		receivedAt := t.manager.now()
-		entries = mergeEntries(entries, normalizeResponse(clone.URL, response.Cookies(), receivedAt))
-		attempt.capture(sequence, entries, receivedAt, diagnostic)
-		if attempt != nil && sequence != 0 {
-			diagnostic.Reason = "cookie_staged"
-			report(clone.Context(), diagnostic)
-		}
-	}
-	return response, err
-}
-
-func (t *transport) roundTripEphemeral(request *http.Request, scope Scope) (*http.Response, error) {
+	scope, _ := ScopeFromContext(clone.Context())
 	m := t.manager
 	now := m.now()
 	m.mu.Lock()
@@ -227,15 +114,10 @@ func (t *transport) roundTripEphemeral(request *http.Request, scope Scope) (*htt
 		entries = append(entries, entry)
 	}
 	m.mu.Unlock()
-	diagnostic := apply(request, entries, now)
-	diagnostic.SendState = "sent"
-	if diagnostic.Sent {
-		diagnostic.Source = "memory"
-	}
-	report(request.Context(), diagnostic)
-	response, err := t.roundTripSend(request)
+	apply(clone, entries, now)
+	response, err := t.next.RoundTrip(clone)
 	if response != nil && err == nil && response.StatusCode >= 200 && response.StatusCode < 400 {
-		changes := normalizeResponse(request.URL, response.Cookies(), m.now())
+		changes := normalizeResponse(clone.URL, response.Cookies(), m.now())
 		m.mu.Lock()
 		if m.memory[scope] == nil {
 			m.memory[scope] = make(map[string]Entry)
@@ -244,7 +126,11 @@ func (t *transport) roundTripEphemeral(request *http.Request, scope Scope) (*htt
 			if change.Entry == nil {
 				delete(m.memory[scope], change.Key)
 			} else {
-				m.memory[scope][change.Key] = *change.Entry
+				entry := *change.Entry
+				if previous, ok := m.memory[scope][change.Key]; ok {
+					entry.CreatedAt = previous.CreatedAt
+				}
+				m.memory[scope][change.Key] = entry
 			}
 		}
 		m.mu.Unlock()
@@ -252,30 +138,7 @@ func (t *transport) roundTripEphemeral(request *http.Request, scope Scope) (*htt
 	return response, err
 }
 
-func mergeEntries(base []Entry, changes []mutation) []Entry {
-	entries := make(map[string]Entry, len(base)+len(changes))
-	for _, entry := range base {
-		entries[entry.Key] = entry
-	}
-	for _, change := range changes {
-		if change.Entry == nil {
-			delete(entries, change.Key)
-			continue
-		}
-		entry := *change.Entry
-		if previous, ok := entries[change.Key]; ok {
-			entry.CreatedAt = previous.CreatedAt
-		}
-		entries[change.Key] = entry
-	}
-	result := make([]Entry, 0, len(entries))
-	for _, entry := range entries {
-		result = append(result, entry)
-	}
-	return result
-}
-
-func apply(request *http.Request, entries []Entry, now time.Time) Diagnostic {
+func apply(request *http.Request, entries []Entry, now time.Time) {
 	jar := newJar()
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].CreatedAt.Equal(entries[j].CreatedAt) {
@@ -291,43 +154,9 @@ func apply(request *http.Request, entries []Entry, now time.Time) Diagnostic {
 		cookie.Expires = time.Time{}
 		jar.SetCookies(&url.URL{Scheme: "https", Host: entry.Domain, Path: entry.Path}, []*http.Cookie{cookie})
 	}
-	diagnostic := Diagnostic{Reason: "cookie_empty", Source: "none"}
-	names := make(map[string]bool)
 	for _, cookie := range jar.Cookies(request.URL) {
 		request.AddCookie(cookie)
-		diagnostic.SentCount++
-		names[cookie.Name] = true
 	}
-	for _, entry := range entries {
-		if !names[entry.Name] || !entryMatches(entry, request.URL, now) {
-			continue
-		}
-		metadata := DiagnosticCookie{Name: entry.Name}
-		if !entry.ExpiresAt.IsZero() {
-			expires := entry.ExpiresAt
-			metadata.ExpiresAt = &expires
-		}
-		diagnostic.Cookies = append(diagnostic.Cookies, metadata)
-	}
-	for name := range names {
-		diagnostic.Names = append(diagnostic.Names, name)
-	}
-	sort.Strings(diagnostic.Names)
-	if diagnostic.SentCount > 0 {
-		diagnostic.Sent, diagnostic.Reason = true, "cookie_sent"
-	}
-	return diagnostic
-}
-
-func entryMatches(entry Entry, target *url.URL, now time.Time) bool {
-	if !entry.ExpiresAt.IsZero() && !entry.ExpiresAt.After(now) {
-		return false
-	}
-	jar := newJar()
-	cookie := entry.cookie()
-	cookie.Expires = time.Time{}
-	jar.SetCookies(&url.URL{Scheme: "https", Host: entry.Domain, Path: entry.Path}, []*http.Cookie{cookie})
-	return len(jar.Cookies(target)) != 0
 }
 
 func normalizeResponse(target *url.URL, cookies []*http.Cookie, now time.Time) []mutation {
@@ -337,12 +166,12 @@ func normalizeResponse(target *url.URL, cookies []*http.Cookie, now time.Time) [
 		if !accepted {
 			continue
 		}
-		mutation := mutation{Key: entry.Key}
+		change := mutation{Key: entry.Key}
 		if !remove {
 			entry.CreatedAt = now.Add(time.Duration(index) * time.Nanosecond)
-			mutation.Entry = &entry
+			change.Entry = &entry
 		}
-		changes[entry.Key] = mutation
+		changes[entry.Key] = change
 	}
 	result := make([]mutation, 0, len(changes))
 	for _, change := range changes {

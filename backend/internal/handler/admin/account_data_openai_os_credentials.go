@@ -21,7 +21,7 @@ func portableOpenAIOAuthCredentials(account *service.Account, credentials map[st
 }
 
 func portableOpenAIOAuthExtra(account *service.Account) map[string]any {
-	out := service.StripCodexTurnStateManagedExtra(account.Extra)
+	out := service.StripRetiredCodexStateExtra(account.Extra)
 	if !service.IsOpenAIOAuthOSProfileOwner(account) {
 		return out
 	}

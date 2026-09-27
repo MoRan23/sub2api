@@ -18,7 +18,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -345,7 +344,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		// Observe the finalized wire once per real physical attempt. An internal
 		// invalid_task retry is another send and therefore receives its own row,
 		// while request construction alone remains invisible.
-		upstreamReq = s.prepareOpenAICodexStateHTTPRequest(c, account, upstreamReq)
 		s.recordFingerprintObservationFromContextWithBody(
 			c,
 			account,
@@ -356,10 +354,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		upstreamStart := time.Now()
 		upstreamReq = markOpenAIGuardianSourceHTTPRequest(upstreamReq, c, account)
 		upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, withCodexTelemetryGatewayContext(c.Request.Context(), c, account, "http"))
+		upstreamReq = markOpenAIResponseEvidenceHTTPRequest(upstreamReq, c)
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
-		if errors.Is(err, openaicookies.ErrBundleSendRejected) {
-			return nil, err
-		}
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {
 			// Transport-level failure (proxy/DNS/TCP/TLS — no HTTP response). Convert to
@@ -2341,15 +2337,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	// flushPending 表示已写入但未到 SSE 空行边界的脏状态；defer 兜底函数退出前的残留，断连后不再 Flush。
 	flushPending := false
 	pendingSSEEventType := ""
-	turnStateSuccessfulOutputPending := false
 	flushPendingOutput := func() bool {
 		if clientDisconnected || !flushPending {
 			return false
 		}
 		flusher.Flush()
-		if turnStateSuccessfulOutputPending {
-			markCodexTurnStateHTTPDelivered(resp)
-		}
 		if !turnStateCommitted && turnState != "" && !openAIPassthroughCompactWindowActive(c) {
 			s.noteOpenAICodexTurnStateProvenance(c, account, turnState)
 			turnStateCommitted = true
@@ -2367,13 +2359,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		}
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			compactionDeliveryState.enqueue([]byte(data))
-			eventType := strings.TrimSpace(gjson.Get(data, "type").String())
-			if eventType == "" {
-				eventType = pendingSSEEventType
-			}
-			if eventType == "response.completed" || eventType == "response.done" || openAIStreamDataStartsVisibleOutput(data, eventType) {
-				turnStateSuccessfulOutputPending = true
-			}
 		}
 		flushPending = true
 		if line == "" && flushFrame {
@@ -2810,14 +2795,11 @@ func (s *OpenAIGatewayService) handleNonStreamingResponsePassthrough(
 		turnStateCanCommit = !c.Writer.Written()
 	}
 	delivered := writeOpenAIResponseWithOptionalDeliveryTracking(
-		c, resp.StatusCode, contentType, body, openAIPassthroughCompactWindowActive(c) || codexTurnStateHTTPCollectorFromResponse(resp) != nil,
+		c, resp.StatusCode, contentType, body, openAIPassthroughCompactWindowActive(c),
 	)
 	if delivered {
 		delivery := openAIJSONCompactionDelivery(body)
 		s.commitDeliveredOpenAIPassthroughCompactWindow(ctx, c, account, resp.StatusCode, &delivery, turnState)
-		if gjson.GetBytes(body, "status").String() != "failed" && gjson.GetBytes(body, "error").Type != gjson.JSON {
-			markCodexTurnStateHTTPDelivered(resp)
-		}
 	}
 	if turnStateCanCommit && delivered {
 		if !openAIPassthroughCompactWindowActive(c) {
@@ -2906,7 +2888,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(ctx context.Context, r
 		}
 	}
 	delivered := writeOpenAIResponseWithOptionalDeliveryTracking(
-		c, resp.StatusCode, contentType, body, openAIPassthroughCompactWindowActive(c) || codexTurnStateHTTPCollectorFromResponse(resp) != nil,
+		c, resp.StatusCode, contentType, body, openAIPassthroughCompactWindowActive(c),
 	)
 	if ok {
 		// The final JSON may contain a compaction item reconstructed from an
@@ -2917,9 +2899,6 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(ctx context.Context, r
 	}
 	if delivered {
 		s.commitDeliveredOpenAIPassthroughCompactWindow(ctx, c, account, resp.StatusCode, &delivery, turnState)
-		if terminalType == "response.completed" || terminalType == "response.done" {
-			markCodexTurnStateHTTPDelivered(resp)
-		}
 	}
 	if turnStateCanCommit && delivered {
 		if !openAIPassthroughCompactWindowActive(c) {

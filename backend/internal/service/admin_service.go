@@ -401,7 +401,6 @@ type UpdateGroupInput struct {
 type CreateAccountInput struct {
 	OpenAIOAuthInitialOS          string
 	OpenAIOAuthInitialCredentials map[string]map[string]any
-	CodexTurnState                *CodexTurnStateConfig
 	Name                          string
 	Notes                         *string
 	Platform                      string
@@ -435,7 +434,6 @@ type ShadowOptions struct {
 
 type UpdateAccountInput struct {
 	OpenAIAuthModeChange         bool
-	CodexTurnState               *CodexTurnStateConfig
 	Name                         string
 	Notes                        *string
 	Type                         string // Account type: oauth, setup-token, apikey
@@ -459,7 +457,6 @@ type UpdateAccountInput struct {
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.
 type BulkUpdateAccountsInput struct {
 	OpenAIAuthModeChange bool
-	CodexTurnState       *CodexTurnStateConfig
 	AccountIDs           []int64
 	Filters              *BulkUpdateAccountFilters
 	Name                 string

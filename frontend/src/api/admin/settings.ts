@@ -422,7 +422,6 @@ export interface SystemSettings {
   codex_telemetry_enabled?: boolean;
   codex_telemetry_simulation_enabled?: boolean;
   codex_telemetry_observation_enabled?: boolean;
-  codex_turn_state_models?: string[];
   openai_request_integrity_observe_enabled?: boolean;
   codex_telemetry_effective_enabled?: boolean;
   codex_telemetry_forced_off_reason?: string;
@@ -793,7 +792,6 @@ export interface UpdateSettingsRequest {
   codex_telemetry_enabled?: boolean;
   codex_telemetry_simulation_enabled?: boolean;
   codex_telemetry_observation_enabled?: boolean;
-  codex_turn_state_models?: string[];
   openai_request_integrity_observe_enabled?: boolean;
   enable_openai_codex_pat_context_management?: boolean;
   enable_openai_codex_client_identity_normalization?: boolean;

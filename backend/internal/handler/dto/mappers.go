@@ -251,8 +251,6 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		openCodeGoUsage = state
 	}
 	out := &Account{
-		CodexTurnState:                       service.CodexTurnStateConfigForAccount(a),
-		CodexTurnStateInheritedFromAccountID: a.ParentAccountID,
 
 		ID:                           a.ID,
 		Name:                         a.Name,
@@ -424,7 +422,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 }
 
 func redactAccountManagedExtra(extra map[string]any) map[string]any {
-	extra = service.StripCodexTurnStateManagedExtra(extra)
+	extra = service.StripRetiredCodexStateExtra(extra)
 	if extra == nil {
 		return nil
 	}
@@ -474,8 +472,6 @@ func AccountListItemFromAccount(a *Account) *AccountListItem {
 		return nil
 	}
 	return &AccountListItem{
-		CodexTurnState:                       a.CodexTurnState,
-		CodexTurnStateInheritedFromAccountID: a.CodexTurnStateInheritedFromAccountID,
 
 		ID: a.ID, Name: a.Name, Notes: a.Notes, Platform: a.Platform, Type: a.Type,
 		Credentials: a.Credentials, CredentialsStatus: a.CredentialsStatus, Extra: a.Extra,

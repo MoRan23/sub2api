@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -69,9 +68,6 @@ type DataAccount struct {
 	Credentials               map[string]any                          `json:"credentials"`
 	Extra                     map[string]any                          `json:"extra,omitempty"`
 	ProxyKey                  *string                                 `json:"proxy_key,omitempty"`
-	CodexTurnState            *service.CodexTurnStateConfig           `json:"codex_turn_state,omitempty"`
-	CodexTurnStateProxyKey    *string                                 `json:"codex_turn_state_proxy_key,omitempty"`
-	CodexTurnStateProxyKeys   *[]string                               `json:"codex_turn_state_proxy_keys,omitempty"`
 	Concurrency               int                                     `json:"concurrency"`
 	Priority                  int                                     `json:"priority"`
 	RateMultiplier            *float64                                `json:"rate_multiplier,omitempty"`
@@ -214,11 +210,6 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 				proxyKey = &key
 			}
 		}
-		turnState, turnStateProxyKeys, err := exportCodexTurnStateConfig(&acc, proxyKeyByID)
-		if err != nil {
-			response.ErrorFrom(c, err)
-			return
-		}
 		var expiresAt *int64
 		if acc.ExpiresAt != nil {
 			v := acc.ExpiresAt.Unix()
@@ -234,8 +225,6 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 			Credentials:               portableOpenAIOAuthCredentials(&acc, acc.Credentials),
 			Extra:                     portableOpenAIOAuthExtra(&acc),
 			ProxyKey:                  proxyKey,
-			CodexTurnState:            turnState,
-			CodexTurnStateProxyKeys:   turnStateProxyKeys,
 			Concurrency:               acc.Concurrency,
 			Priority:                  acc.Priority,
 			RateMultiplier:            acc.RateMultiplier,
@@ -467,14 +456,6 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			}
 		}
 
-		turnState, err := importCodexTurnStateConfig(item, proxyKeyToID)
-		if err != nil {
-			result.AccountFailed++
-			result.Errors = append(result.Errors, DataImportError{
-				Kind: "account", Name: item.Name, Message: err.Error(),
-			})
-			continue
-		}
 		enrichCredentialsFromIDToken(&item)
 		initialOS, initialCredentials, err := h.prepareOpenAIOAuthBackupImport(ctx, &item, proxyID)
 		if err != nil {
@@ -491,8 +472,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			Platform:                      item.Platform,
 			Type:                          item.Type,
 			Credentials:                   item.Credentials,
-			Extra:                         service.StripCodexTurnStateManagedExtra(item.Extra),
-			CodexTurnState:                turnState,
+			Extra:                         service.StripRetiredCodexStateExtra(item.Extra),
 			ProxyID:                       proxyID,
 			Concurrency:                   item.Concurrency,
 			Priority:                      item.Priority,
@@ -639,89 +619,12 @@ func (h *AccountHandler) resolveExportProxies(ctx context.Context, accounts []se
 	}
 	for i := range accounts {
 		add(accounts[i].ProxyID)
-		if service.IsCodexTurnStateAccount(&accounts[i]) {
-			for _, id := range service.CodexTurnStateCollectorProxyIDs(service.CodexTurnStateConfigForAccount(&accounts[i])) {
-				add(&id)
-			}
-		}
 	}
 	if len(ids) == 0 {
 		return []service.Proxy{}, nil
 	}
 
 	return h.adminService.GetProxiesByIDs(ctx, ids)
-}
-
-func exportCodexTurnStateConfig(account *service.Account, proxyKeyByID map[int64]string) (*service.CodexTurnStateConfig, *[]string, error) {
-	if !service.IsCodexTurnStateAccount(account) {
-		return nil, nil, nil
-	}
-	config := service.CodexTurnStateConfigForAccount(account)
-	proxyKeys := make([]string, 0)
-	for _, id := range service.CodexTurnStateCollectorProxyIDs(config) {
-		key, found := proxyKeyByID[id]
-		if !found {
-			return nil, nil, fmt.Errorf("account %d turn-state collector proxy not found", account.ID)
-		}
-		proxyKeys = append(proxyKeys, key)
-	}
-	config.CollectorProxyID = nil
-	config.CollectorProxyIDs = []int64{}
-	return &config, &proxyKeys, nil
-}
-
-func importCodexTurnStateConfig(item DataAccount, proxyKeyToID map[string]int64) (*service.CodexTurnStateConfig, error) {
-	var config *service.CodexTurnStateConfig
-	if item.CodexTurnState != nil {
-		value := *item.CodexTurnState
-		config = &value
-	} else if raw, exists := item.Extra[service.CodexTurnStateExtraKey]; exists && raw != nil {
-		// Older snapshots stored configuration inside extra. Decode only the
-		// allowed fields; no generation, token, or runtime observation is imported.
-		encoded, err := json.Marshal(raw)
-		if err != nil {
-			return nil, fmt.Errorf("invalid codex_turn_state: %w", err)
-		}
-		var value service.CodexTurnStateConfig
-		if err := json.Unmarshal(encoded, &value); err != nil {
-			return nil, fmt.Errorf("invalid codex_turn_state: %w", err)
-		}
-		config = &value
-	}
-	if config == nil {
-		if item.CodexTurnStateProxyKeys != nil || item.CodexTurnStateProxyKey != nil {
-			return nil, errors.New("codex_turn_state proxy keys require codex_turn_state configuration")
-		}
-		return nil, nil
-	}
-	if config.AccountType == "" {
-		config.AccountType = "auto"
-	}
-	var keys []string
-	switch {
-	case item.CodexTurnStateProxyKeys != nil:
-		keys = *item.CodexTurnStateProxyKeys
-	case item.CodexTurnStateProxyKey != nil:
-		keys = []string{*item.CodexTurnStateProxyKey}
-	case len(service.CodexTurnStateCollectorProxyIDs(*config)) != 0:
-		return nil, errors.New("codex_turn_state collector proxies require portable codex_turn_state_proxy_keys")
-	}
-	ids := make([]int64, 0, len(keys))
-	seen := make(map[int64]struct{}, len(keys))
-	for _, key := range keys {
-		id, found := proxyKeyToID[key]
-		if strings.TrimSpace(key) == "" || !found || id <= 0 {
-			return nil, errors.New("codex_turn_state_proxy_keys entry not found")
-		}
-		if _, duplicate := seen[id]; duplicate {
-			return nil, errors.New("codex_turn_state_proxy_keys contains duplicate proxy")
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
-	}
-	config.CollectorProxyID = nil
-	config.CollectorProxyIDs = ids
-	return config, nil
 }
 
 func parseAccountIDs(c *gin.Context) ([]int64, error) {

@@ -719,36 +719,20 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
     expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
     expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBeUndefined()
-    expect(importCodexSessionMock.mock.calls[0]?.[0]?.codex_turn_state).toEqual({ enabled: false, account_type: 'auto', use_ticket_proxy: true, collector_proxy_ids: [] })
+    expect(importCodexSessionMock.mock.calls[0]?.[0]).not.toHaveProperty('codex_turn_state')
   })
 
-  it('applies configured turn-state classification to standard OAuth session imports', async () => {
+  it('does not expose or submit retired ticket configuration during OAuth imports', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')
-    const fields = wrapper.get('[data-testid="codex-turn-state-fields"]')
-    await fields.get('input[type="checkbox"]').setValue(true)
-    await fields.get('select').setValue('team_business')
-    await fields.get('[data-testid="codex-turn-state-use-ticket-proxy"]').setValue(false)
+    expect(wrapper.find('[data-testid="codex-turn-state-fields"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="codex-turn-state-use-ticket-proxy"]').exists()).toBe(false)
     await wrapper.get('form#create-account-form input[type="text"]').setValue('Team account')
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
     await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
     await flushPromises()
-    expect(importCodexSessionMock.mock.calls[0]?.[0]?.codex_turn_state).toEqual({ enabled: true, account_type: 'team_business', use_ticket_proxy: false, collector_proxy_ids: [] })
-  })
-
-  it('sends an independent ordered collector proxy list for OAuth imports', async () => {
-    const wrapper = mountModal()
-    await selectButtonByText(wrapper, 'OpenAI')
-    const config = { enabled: true, account_type: 'team_business', use_ticket_proxy: true, collector_proxy_ids: [9, 7] }
-    wrapper.getComponent({ name: 'CodexTurnStateFields' }).vm.$emit('update:modelValue', config)
-    await wrapper.get('form#create-account-form input[type="text"]').setValue('Multiple collector proxies')
-    await wrapper.get('form#create-account-form').trigger('submit.prevent')
-    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
-    await flushPromises()
-    const sent = importCodexSessionMock.mock.calls[0]?.[0]?.codex_turn_state
-    expect(sent).toEqual(config)
-    expect(sent.collector_proxy_ids).not.toBe(config.collector_proxy_ids)
-    expect(sent).not.toHaveProperty('collector_proxy_id')
+    expect(importCodexSessionMock.mock.calls[0]?.[0]).not.toHaveProperty('codex_turn_state')
+    wrapper.unmount()
   })
 
   it('creates OAuth accounts with installation pin enabled and no client-supplied UUID', async () => {

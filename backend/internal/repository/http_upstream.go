@@ -29,6 +29,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httpsendobserver"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
@@ -195,22 +196,27 @@ func NewHTTPUpstreamWithCookies(cfg *config.Config, cookies *openaicookies.Manag
 	return s
 }
 
-// OpenAICookieClient derives only the HTTP policy. The wrapper runs on every
-// physical send, including native dispatch and redirects; cached transports do
-// not retain a particular account's cookie jar.
-func (s *httpUpstreamService) OpenAICookieClient(client *http.Client, request *http.Request) *http.Client {
+// httpClientWithRequestBoundary adds only request-local transport behavior.
+// Cached transports never retain an authorization flow's cookie jar or observer.
+func (s *httpUpstreamService) httpClientWithRequestBoundary(client *http.Client, request *http.Request) *http.Client {
 	if client == nil || request == nil {
 		return client
 	}
 	enabled := s.cookies != nil && openaicookies.EnabledForRequest(request)
-	if !enabled && !openaicookies.NeedsTransportObserver(request) {
+	// Native dispatch observes only after validation and pool acquisition.
+	_, native := client.Transport.(*nativeUpstreamRoundTripper)
+	observe := !native && httpsendobserver.Enabled(request)
+	if !enabled && !observe {
 		return client
 	}
 	clone := *client
+	if observe {
+		clone.Transport = httpsendobserver.Wrap(clone.Transport)
+	}
 	if enabled {
 		clone.Jar = nil
+		clone.Transport = s.cookies.Wrap(clone.Transport)
 	}
-	clone.Transport = s.cookies.Wrap(client.Transport)
 	return &clone
 }
 
@@ -390,7 +396,7 @@ func (s *httpUpstreamService) httpClientForUpstreamRequest(client *http.Client, 
 		return client
 	}
 	ctx := req.Context()
-	selected := s.OpenAICookieClient(client, req)
+	selected := s.httpClientWithRequestBoundary(client, req)
 	switch {
 	case service.HTTPUpstreamRedirectsDisabled(ctx):
 		clone := *selected

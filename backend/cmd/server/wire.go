@@ -124,7 +124,6 @@ func provideCleanup(
 	grokOAuth *service.GrokOAuthService,
 	openAIGateway *service.OpenAIGatewayService,
 	codexTelemetry *service.CodexTelemetryService,
-	codexTurnState *service.CodexTurnStateService,
 	egressLocation *service.OpenAIEgressLocationService,
 	adminService service.AdminService,
 	openAIOutboundSessionV1Cleanup *service.OpenAIOutboundSessionV1CleanupWorker,
@@ -145,11 +144,6 @@ func provideCleanup(
 	return func() {
 		if openAIOAuthOSProfiles != nil {
 			openAIOAuthOSProfiles.Stop()
-		}
-		// Cancel collectors and wait for their workers before closing transports,
-		// Redis subscriptions, or the durable runtime database.
-		if codexTurnState != nil {
-			codexTurnState.Stop()
 		}
 		if maintenance, ok := adminService.(interface{ StopProxyGeoBackfill() }); ok {
 			maintenance.StopProxyGeoBackfill()

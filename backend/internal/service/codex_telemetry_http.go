@@ -87,7 +87,7 @@ func (b *codexTelemetryHTTPBody) Close() error {
 // The existing gateway SSE/JSON parsers call this before any model/tool rewrite.
 // No second parser, reader goroutine, body buffering, or response limit is added.
 func observeCodexTelemetryHTTPPayload(response *http.Response, payload []byte, eventType string) {
-	observeCodexTurnStateHTTPPayload(response, payload, eventType)
+	observeOpenAIHTTPResponseEvidencePayload(response, payload)
 	if response == nil || response.Request == nil {
 		return
 	}
@@ -100,7 +100,6 @@ func observeCodexTelemetryHTTPPayload(response *http.Response, payload []byte, e
 // The gateway may reject an otherwise completed response (for example an empty
 // answer eligible for failover). Commit only after its existing parser returns.
 func completeCodexTelemetryHTTPResponse(response *http.Response, parseErr error) {
-	completeCodexTurnStateHTTPResponse(response, parseErr)
 	if response == nil || response.Request == nil {
 		return
 	}
@@ -111,7 +110,6 @@ func completeCodexTelemetryHTTPResponse(response *http.Response, parseErr error)
 }
 
 func beginCodexTelemetryHTTPParsing(response *http.Response) {
-	beginCodexTurnStateHTTPParsing(response)
 	if response == nil || response.Request == nil {
 		return
 	}
@@ -124,7 +122,7 @@ func beginCodexTelemetryHTTPParsing(response *http.Response) {
 }
 
 func observeCodexTelemetryHTTPBody(response *http.Response, body []byte) {
-	if response == nil || response.Request == nil || (response.Request.Context().Value(codexTelemetryHTTPResponseKey{}) == nil && codexTurnStateHTTPCollectorFromResponse(response) == nil) {
+	if response == nil || response.Request == nil {
 		return
 	}
 	if bodyHasSSEFraming(body) {

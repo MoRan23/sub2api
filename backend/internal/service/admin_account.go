@@ -474,6 +474,7 @@ func normalizeOpenAIInstallationPinUpdateExtra(account *Account, input *UpdateAc
 }
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
+	accountExtra = StripRetiredCodexStateExtra(accountExtra)
 	if input.OpenAIOAuthInitialOS != "" && NormalizeOpenAIOSFamily(input.OpenAIOAuthInitialOS) == "" {
 		return nil, infraerrors.BadRequest("OPENAI_OAUTH_OS_INVALID", "os must be windows, macos, or linux")
 	}
@@ -618,12 +619,6 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
-	if err := s.validateCodexTurnStateConfig(ctx, account, input.CodexTurnState); err != nil {
-		return nil, err
-	}
-	if err := PrepareCodexTurnStateForCreate(account, input.CodexTurnState); err != nil {
-		return nil, err
-	}
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
 		return nil, err
 	}
@@ -681,7 +676,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	} else if IsOpenAIOAuthOSProfileOwner(account) && input.Credentials != nil {
 		input.Credentials = PreserveOpenAIOAuthProviderCredentials(account.Credentials, input.Credentials)
 	}
-	input.Extra = StripCodexTurnStateManagedExtra(input.Extra)
+	input.Extra = StripRetiredCodexStateExtra(input.Extra)
 	// Regular OAuth environments are fixed per OS. Legacy clients may still send
 	// the old single-UA editor value; it is no longer configuration intent.
 	profileTarget := *account
@@ -1022,10 +1017,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
-	if err := s.validateCodexTurnStateConfig(ctx, account, input.CodexTurnState); err != nil {
-		return nil, err
-	}
-	configurationCtx := withAccountConfigurationIntent(ctx, []int64{id}, input.Extra, input.OpenAIEnvironmentFingerprint, input.CodexTurnState)
+	configurationCtx := withAccountConfigurationIntent(ctx, []int64{id}, input.Extra, input.OpenAIEnvironmentFingerprint)
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
 	if updater == nil {
@@ -1091,7 +1083,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
-	updates = StripCodexTurnStateManagedExtra(updates)
+	updates = StripRetiredCodexStateExtra(updates)
 	delete(updates, openAIPinnedInstallationIDKey)
 	delete(updates, openAIInstallationRotateEnabledKey)
 	delete(updates, openAIInstallationPinEnabledKey)
@@ -1164,7 +1156,7 @@ func (s *adminServiceImpl) RegenerateOpenAIInstallationIDForOS(ctx context.Conte
 // BulkUpdateAccounts updates multiple accounts in one request.
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
-	input.Extra = StripCodexTurnStateManagedExtra(input.Extra)
+	input.Extra = StripRetiredCodexStateExtra(input.Extra)
 	delete(input.Extra, openAIPinnedInstallationIDKey)
 	delete(input.Extra, openAIInstallationRotateEnabledKey)
 	delete(input.Extra, openAIInstallationPinEnabledKey)
@@ -1216,7 +1208,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.OpenAIAuthModeChange || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || input.CodexTurnState != nil {
+	if len(input.Credentials) > 0 || input.OpenAIAuthModeChange || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1245,17 +1237,6 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		if len(changedIDs) > 0 {
 			ctx = WithOpenAIOAuthCredentialModeChangeIntent(ctx, changedIDs...)
 			input.Credentials = normalizedCredentials
-		}
-	}
-	if input.CodexTurnState != nil {
-		for _, id := range input.AccountIDs {
-			account := targetsByID[id]
-			if account == nil {
-				return nil, ErrAccountNotFound
-			}
-			if err := s.validateCodexTurnStateConfig(ctx, account, input.CodexTurnState); err != nil {
-				return nil, err
-			}
 		}
 	}
 	if openAISettings.any() {
@@ -1358,10 +1339,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// Prepare bulk updates for columns and JSONB fields.
 	repoUpdates := AccountBulkUpdate{
-		CodexTurnState: input.CodexTurnState,
-		Credentials:    input.Credentials,
-		Extra:          input.Extra,
-		ProbeEnabled:   input.ProbeEnabled,
+		Credentials:  input.Credentials,
+		Extra:        input.Extra,
+		ProbeEnabled: input.ProbeEnabled,
 	}
 	if input.ProbeEnabled != nil {
 		if repoUpdates.Extra == nil {
@@ -1412,7 +1392,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	// Run bulk update for column/jsonb fields first.
-	configurationCtx := withAccountConfigurationIntent(ctx, input.AccountIDs, input.Extra, nil, input.CodexTurnState)
+	configurationCtx := withAccountConfigurationIntent(ctx, input.AccountIDs, input.Extra, nil)
 	if _, err := s.accountRepo.BulkUpdate(configurationCtx, input.AccountIDs, repoUpdates); err != nil {
 		return nil, err
 	}

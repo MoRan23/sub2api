@@ -3006,12 +3006,6 @@
         <ProxySelector v-model="form.proxy_id" :proxies="proxies" />
       </div>
 
-      <CodexTurnStateFields
-        v-if="form.platform === 'openai' && form.type === 'oauth'"
-        v-model="codexTurnStateConfig"
-        :proxies="proxies"
-      />
-
       <UpstreamRequestIdHeaderField
         v-model="upstreamRequestIdHeader"
         :platform="form.platform"
@@ -3630,9 +3624,6 @@
         @authorize-password="handleGrokAuthorizePassword"
       />
 
-      <p v-if="form.platform === 'openai' && (oauthFlowRef?.inputMethod === 'codex_pat' || oauthFlowRef?.inputMethod === 'agent_identity')" class="text-sm text-amber-700 dark:text-amber-400">
-        {{ t('admin.accounts.codexTurnState.unsupportedAuth') }}
-      </p>
     </div>
 
     <template #footer>
@@ -3992,9 +3983,7 @@ import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestId
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
-import CodexTurnStateFields from './CodexTurnStateFields.vue'
 import OpenAIOAuthOSProfiles from './OpenAIOAuthOSProfiles.vue'
-import { defaultCodexTurnStateConfig, readCodexTurnStateConfig } from './codexTurnState'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
@@ -5312,14 +5301,9 @@ const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<v
   }
 }
 
-const codexTurnStateConfig = ref(defaultCodexTurnStateConfig())
-
 const submitCreateAccount = async (payload: CreateAccountRequest) => {
   submitting.value = true
   try {
-    if (payload.platform === 'openai' && payload.type === 'oauth') {
-      payload.codex_turn_state = readCodexTurnStateConfig(codexTurnStateConfig.value)
-    }
     const account = await adminAPI.accounts.create(withAntigravityConfirmFlag(payload))
     const modelMapping = payload.credentials.model_mapping
     const hasConcreteMappedTarget = payload.type === 'apikey' &&
@@ -5373,7 +5357,6 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 
 // Methods
 const resetForm = () => {
-  codexTurnStateConfig.value = defaultCodexTurnStateConfig()
   step.value = 1
   form.name = ''
   form.notes = ''
@@ -6417,7 +6400,6 @@ const handleOpenAIExchange = async (authCode: string) => {
         notes: form.notes,
         platform: 'openai',
         type: 'oauth',
-        codex_turn_state: readCodexTurnStateConfig(codexTurnStateConfig.value),
         credentials,
         extra: withUpstreamRequestIdHeader(extra),
         proxy_id: form.proxy_id,
@@ -6522,7 +6504,6 @@ const handleOpenAIImportCodexSession = async (content: string) => {
   try {
     const extra = buildOpenAICodexImportExtra()
     const result = await adminAPI.accounts.importCodexSession({
-      codex_turn_state: isAgentIdentityImportContent(trimmed) ? undefined : readCodexTurnStateConfig(codexTurnStateConfig.value),
       content: trimmed,
       name: form.name,
       notes: form.notes || null,
@@ -6700,7 +6681,6 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
             notes: form.notes,
             platform: 'openai',
             type: 'oauth',
-            codex_turn_state: readCodexTurnStateConfig(codexTurnStateConfig.value),
             credentials,
             extra: withUpstreamRequestIdHeader(extra),
             proxy_id: form.proxy_id,

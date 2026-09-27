@@ -43,7 +43,6 @@ type UpdateSettingsRequest struct {
 	CodexTelemetryEnabled                        *bool                        `json:"codex_telemetry_enabled"`
 	CodexTelemetrySimulationEnabled              *bool                        `json:"codex_telemetry_simulation_enabled"`
 	CodexTelemetryObservationEnabled             *bool                        `json:"codex_telemetry_observation_enabled"`
-	CodexTurnStateModels                         []string                     `json:"codex_turn_state_models"`
 	OpenAIRequestIntegrityObserveEnabled         *bool                        `json:"openai_request_integrity_observe_enabled"`
 	EnableOpenAICodexFingerprintNormalization    *bool                        `json:"enable_openai_codex_fingerprint_normalization"`
 	EnableOpenAICodexInstallationIDNormalization *bool                        `json:"enable_openai_codex_installation_id_normalization"`
@@ -558,18 +557,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
-	if raw, sent := sentFields[service.SettingKeyCodexTurnStateModels]; sent {
-		if strings.TrimSpace(string(raw)) == "null" {
-			response.BadRequest(c, "codex_turn_state_models must be an array of exact model IDs; use [] to clear it")
-			return
-		}
-		models, err := service.NormalizeCodexTurnStateModels(req.CodexTurnStateModels)
-		if err != nil {
-			response.BadRequest(c, err.Error())
-			return
-		}
-		req.CodexTurnStateModels = models
-	}
 	if err := validatePaymentBalanceGiftRatio(req.PaymentBalanceGiftRatio); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -617,10 +604,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	codexTelemetryObservationEnabled := previousSettings.CodexTelemetryObservationEnabled
 	if req.CodexTelemetryObservationEnabled != nil {
 		codexTelemetryObservationEnabled = *req.CodexTelemetryObservationEnabled
-	}
-	codexTurnStateModels := previousSettings.CodexTurnStateModels
-	if _, sent := sentFields[service.SettingKeyCodexTurnStateModels]; sent {
-		codexTurnStateModels = req.CodexTurnStateModels
 	}
 	openAIRequestIntegrityObserveEnabled := previousSettings.OpenAIRequestIntegrityObserveEnabled
 	if req.OpenAIRequestIntegrityObserveEnabled != nil {
@@ -1673,7 +1656,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		CodexTelemetryEnabled:                        codexTelemetryEnabled,
 		CodexTelemetrySimulationEnabled:              codexTelemetrySimulationEnabled,
 		CodexTelemetryObservationEnabled:             codexTelemetryObservationEnabled,
-		CodexTurnStateModels:                         codexTurnStateModels,
 		OpenAIRequestIntegrityObserveEnabled:         openAIRequestIntegrityObserveEnabled,
 		EnableOpenAICodexFingerprintNormalization:    openAICodexFingerprintNormalizationEnabled,
 		EnableOpenAICodexInstallationIDNormalization: openAICodexInstallationIDNormalizationEnabled,
@@ -2365,7 +2347,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		CodexTelemetryEnabled:                                  updatedSettings.CodexTelemetryEnabled,
 		CodexTelemetrySimulationEnabled:                        updatedSettings.CodexTelemetrySimulationEnabled,
 		CodexTelemetryObservationEnabled:                       updatedSettings.CodexTelemetryObservationEnabled,
-		CodexTurnStateModels:                                   updatedSettings.CodexTurnStateModels,
 		OpenAIRequestIntegrityObserveEnabled:                   updatedSettings.OpenAIRequestIntegrityObserveEnabled,
 		CodexTelemetryEffectiveEnabled:                         telemetryEffectiveEnabled,
 		CodexTelemetryForcedOffReason:                          telemetryForcedOffReason,

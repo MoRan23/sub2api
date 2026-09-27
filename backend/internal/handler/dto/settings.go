@@ -50,7 +50,6 @@ type SystemSettings struct {
 	CodexTelemetryEnabled                        bool                     `json:"codex_telemetry_enabled"`
 	CodexTelemetrySimulationEnabled              bool                     `json:"codex_telemetry_simulation_enabled"`
 	CodexTelemetryObservationEnabled             bool                     `json:"codex_telemetry_observation_enabled"`
-	CodexTurnStateModels                         []string                 `json:"codex_turn_state_models"`
 	OpenAIRequestIntegrityObserveEnabled         bool                     `json:"openai_request_integrity_observe_enabled"`
 	CodexTelemetryEffectiveEnabled               bool                     `json:"codex_telemetry_effective_enabled"`
 	CodexTelemetryForcedOffReason                string                   `json:"codex_telemetry_forced_off_reason"`

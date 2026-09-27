@@ -84,10 +84,8 @@ func OpenAIOAuthTokenAccountSnapshot(business, credentials *Account) (*Account, 
 	if out.Extra == nil {
 		out.Extra = make(map[string]any)
 	}
-	for _, key := range []string{openAIPinnedInstallationIDKey, "codex_turn_state_generation", "codex_turn_state_credential_epoch"} {
-		if value, exists := credentials.Extra[key]; exists {
-			out.Extra[key] = value
-		}
+	if value, exists := credentials.Extra[openAIPinnedInstallationIDKey]; exists {
+		out.Extra[openAIPinnedInstallationIDKey] = value
 	}
 	out.OpenAIOAuthOSProfiles = CloneOpenAIOAuthOSProfiles(credentials.OpenAIOAuthOSProfiles)
 	out.OpenAIOAuthCredentialOS = credentials.OpenAIOAuthCredentialOS

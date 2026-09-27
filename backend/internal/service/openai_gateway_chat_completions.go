@@ -14,7 +14,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -72,12 +71,6 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
 ) (*OpenAIForwardResult, error) {
-	return s.withOpenAIHTTPBundleBaseline(c, account, func() (*OpenAIForwardResult, error) {
-		return s.forwardAsChatCompletionsWithHTTPBundle(ctx, c, account, body, promptCacheKey, defaultMappedModel, compatPromptCacheTenantIsolated)
-	})
-}
-
-func (s *OpenAIGatewayService) forwardAsChatCompletionsWithHTTPBundle(ctx context.Context, c *gin.Context, account *Account, body []byte, promptCacheKey, defaultMappedModel string, compatPromptCacheTenantIsolated bool) (*OpenAIForwardResult, error) {
 	if account != nil && account.IsOpenAIOAuth() {
 		var scopeErr error
 		ctx, account, scopeErr = s.prepareOpenAIOAuthRequestScope(ctx, c, account, body)
@@ -120,7 +113,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletionsWithHTTPBundle(ctx contex
 	}
 
 	if account.Platform == PlatformOpenAI {
-		s.prepareOpenAIHTTPBundleModel(ctx, c, account, body, "chat", defaultMappedModel)
+		s.prepareOpenAIHTTPProtocol(c, account, body, "chat", defaultMappedModel)
 		ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 		if account.IsOpenAIOAuth() && gjson.GetBytes(body, "messages").Exists() {
 			s.prepareOpenAIRequestTimezoneDeferred(ctx, c, account, body, account.IsOpenAIPassthroughEnabled())
@@ -436,18 +429,14 @@ func (s *OpenAIGatewayService) forwardAsChatCompletionsWithHTTPBundle(ctx contex
 	if account.Platform == PlatformOpenAI {
 		upstreamReq = ApplyOpenAIRequestPolicy(upstreamReq, s.settingService)
 	}
-	upstreamReq = s.prepareOpenAICodexStateHTTPRequest(c, account, upstreamReq)
 	s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, openAIUpstreamRequestBodySnapshot(upstreamReq, responsesBody))
 
 	// 7. Send request
 	proxyURL := OpenAIOutboundRouteForAccount(c, account).ProxyURL
 	upstreamReq = markOpenAIGuardianSourceHTTPRequest(upstreamReq, c, account)
 	upstreamReq = markCodexTelemetryHTTPRequest(upstreamReq, withCodexTelemetryGatewayContext(c.Request.Context(), c, account, "http"))
+	upstreamReq = markOpenAIResponseEvidenceHTTPRequest(upstreamReq, c)
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
-	if errors.Is(err, openaicookies.ErrBundleSendRejected) {
-		cancelUpstream()
-		return nil, err
-	}
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
@@ -673,17 +662,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	// writeContentType 仅在头不存在时才设置，无法覆盖。这里显式 Set 强制改回 JSON，
 	// 否则下游"看头判流式"的中间层（如 new-api）会把本应聚合的 JSON 当成 SSE 处理。
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	if codexTurnStateHTTPCollectorFromResponse(resp) != nil {
-		encoded, err := json.Marshal(chatResp)
-		if err != nil {
-			return nil, fmt.Errorf("marshal chat completion response: %w", err)
-		}
-		if writeOpenAIResponseDataWithDelivery(c, http.StatusOK, "application/json; charset=utf-8", encoded) {
-			markCodexTurnStateHTTPDelivered(resp)
-		}
-	} else {
-		c.JSON(http.StatusOK, chatResp)
-	}
+	c.JSON(http.StatusOK, chatResp)
 
 	result := &OpenAIForwardResult{
 		RequestID:                     requestID,
@@ -776,7 +755,6 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	firstChunk := true
 	clientDisconnected := false
 	clientOutputStarted := false
-	turnStateSuccessfulOutputWritten := false
 	pendingSSE := make([]string, 0, 4)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var streamFailoverErr *UpstreamFailoverError
@@ -980,16 +958,10 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					)
 					break
 				}
-				if event.Type == "response.completed" || event.Type == "response.done" || openAIStreamDataStartsVisibleOutput(payload, event.Type) {
-					turnStateSuccessfulOutputWritten = true
-				}
 			}
 		}
 		if len(chunks) > 0 && !clientDisconnected && clientOutputStarted {
 			c.Writer.Flush()
-			if turnStateSuccessfulOutputWritten {
-				markCodexTurnStateHTTPDelivered(resp)
-			}
 		}
 		return isTerminalEvent
 	}
@@ -1073,9 +1045,6 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		}
 		if !clientDisconnected {
 			c.Writer.Flush()
-			if turnStateSuccessfulOutputWritten || terminalEventType == "response.completed" || terminalEventType == "response.done" {
-				markCodexTurnStateHTTPDelivered(resp)
-			}
 		}
 		logOpenAISuccessMissingUsage(c.Request.Context(), c, account, resp, &usage, terminalEventType, clientDisconnected)
 		return resultWithUsage(), nil

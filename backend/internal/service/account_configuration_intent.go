@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"maps"
-	"slices"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/google/uuid"
@@ -12,9 +11,8 @@ import (
 // AccountConfigurationIntent is an immutable, request-local write intent. Only
 // typed admin entrypoints create it; a credentials/extra snapshot is not intent.
 type AccountConfigurationIntent struct {
-	Extra          map[string]any
-	Environment    *string
-	CodexTurnState *CodexTurnStateConfig
+	Extra       map[string]any
+	Environment *string
 }
 
 type accountConfigurationIntentKey struct{}
@@ -23,20 +21,8 @@ type accountConfigurationIntentScope struct {
 	intent AccountConfigurationIntent
 }
 
-func withAccountConfigurationIntent(ctx context.Context, ids []int64, extra map[string]any, environment *string, codex ...*CodexTurnStateConfig) context.Context {
+func withAccountConfigurationIntent(ctx context.Context, ids []int64, extra map[string]any, environment *string) context.Context {
 	intent := AccountConfigurationIntent{Extra: make(map[string]any)}
-	if len(codex) > 0 && codex[0] != nil {
-		value := *codex[0]
-		value.CollectorProxyIDs = slices.Clone(value.CollectorProxyIDs)
-		if value.UseTicketProxy != nil {
-			value.UseTicketProxy = new(*value.UseTicketProxy)
-		}
-		if value.CollectorProxyID != nil {
-			proxyID := *value.CollectorProxyID
-			value.CollectorProxyID = &proxyID
-		}
-		intent.CodexTurnState = &value
-	}
 	for _, key := range []string{openAIInstallationPinEnabledKey, "enable_tls_fingerprint", "tls_fingerprint_profile_id"} {
 		if value, exists := extra[key]; exists {
 			intent.Extra[key] = value
@@ -64,18 +50,6 @@ func AccountConfigurationIntentFromContext(ctx context.Context, id int64) Accoun
 	if intent.Environment != nil {
 		value := *intent.Environment
 		intent.Environment = &value
-	}
-	if intent.CodexTurnState != nil {
-		value := *intent.CodexTurnState
-		value.CollectorProxyIDs = slices.Clone(value.CollectorProxyIDs)
-		if value.UseTicketProxy != nil {
-			value.UseTicketProxy = new(*value.UseTicketProxy)
-		}
-		if value.CollectorProxyID != nil {
-			proxyID := *value.CollectorProxyID
-			value.CollectorProxyID = &proxyID
-		}
-		intent.CodexTurnState = &value
 	}
 	return intent
 }
@@ -147,7 +121,8 @@ func PreserveAccountConfiguration(current, target *Account, intent AccountConfig
 	if IsOpenAIOAuthOSProfileOwner(target) && target.OpenAIOAuthOSProfiles != nil {
 		ApplyOpenAIOAuthOSProfiles(target, target.OpenAIOAuthOSProfiles)
 	}
-	return preserveCodexTurnStateConfiguration(current, target, intent.CodexTurnState)
+	target.Extra = StripRetiredCodexStateExtra(target.Extra)
+	return nil
 }
 
 // AccountInstallationRegenerator is deliberately separate from AccountRepository

@@ -156,7 +156,6 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		CodexTelemetryEnabled:                                  settings.CodexTelemetryEnabled,
 		CodexTelemetrySimulationEnabled:                        settings.CodexTelemetrySimulationEnabled,
 		CodexTelemetryObservationEnabled:                       settings.CodexTelemetryObservationEnabled,
-		CodexTurnStateModels:                                   settings.CodexTurnStateModels,
 		OpenAIRequestIntegrityObserveEnabled:                   settings.OpenAIRequestIntegrityObserveEnabled,
 		CodexTelemetryEffectiveEnabled:                         telemetryEffectiveEnabled,
 		CodexTelemetryForcedOffReason:                          telemetryForcedOffReason,

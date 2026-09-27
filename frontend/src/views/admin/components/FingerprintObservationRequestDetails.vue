@@ -30,7 +30,7 @@
         </div>
       </dl>
       <OpenAIEgressLocationDetails v-if="observation.egress_location" :location="observation.egress_location" />
-      <CodexTurnStateObservationDetails v-if="observation.codex_turn_state" :state="observation.codex_turn_state" />
+      <OpenAIResponseEvidenceDetails v-if="observation.response_evidence" :evidence="observation.response_evidence" />
       <p v-if="observation.event_kind === 'ws_response_create'" class="text-gray-500 dark:text-gray-400">{{ t(`${prefix}.frameAttempt`) }}</p>
 
       <section v-if="observation.conversion_check" :aria-label="t(`${conversionPrefix}.title`)" class="min-w-0 rounded-lg border border-gray-200 p-3 dark:border-dark-700" data-testid="conversion-check-details">
@@ -163,7 +163,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { FingerprintObservationEntry, RequestEnvironmentSource, RequestTimezoneObservation, RequestTimezoneScan, RequestTimezoneSource } from '@/api/admin/fingerprintObservations'
-import CodexTurnStateObservationDetails from './CodexTurnStateObservationDetails.vue'
+import OpenAIResponseEvidenceDetails from '@/components/admin/account/OpenAIResponseEvidenceDetails.vue'
 import SearchLocationDetails from './SearchLocationDetails.vue'
 import CodexOutboundMetadataDetails from './CodexOutboundMetadataDetails.vue'
 import OpenAIEgressLocationDetails from './OpenAIEgressLocationDetails.vue'

@@ -66,7 +66,6 @@ type AccountHandler struct {
 	grokImportProber        grokImportProber
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
-	codexTurnState          codexTurnStateStatusService
 	cfg                     *config.Config
 	opencodeGoUsage         *service.OpenCodeGoUsageService
 }
@@ -121,8 +120,7 @@ func NewAccountHandler(
 
 // CreateAccountRequest represents create account request
 type CreateAccountRequest struct {
-	OS             string                        `json:"os"`
-	CodexTurnState *service.CodexTurnStateConfig `json:"codex_turn_state"`
+	OS string `json:"os"`
 
 	Name                    string         `json:"name" binding:"required"`
 	Notes                   *string        `json:"notes"`
@@ -145,8 +143,7 @@ type CreateAccountRequest struct {
 // UpdateAccountRequest represents update account request
 // 使用指针类型来区分"未提供"和"设置为0"
 type UpdateAccountRequest struct {
-	OpenAIAuthModeChange bool                          `json:"openai_auth_mode_change"`
-	CodexTurnState       *service.CodexTurnStateConfig `json:"codex_turn_state"`
+	OpenAIAuthModeChange bool `json:"openai_auth_mode_change"`
 
 	Name                         string         `json:"name"`
 	Notes                        *string        `json:"notes"`
@@ -170,8 +167,7 @@ type UpdateAccountRequest struct {
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
 type BulkUpdateAccountsRequest struct {
-	OpenAIAuthModeChange bool                          `json:"openai_auth_mode_change"`
-	CodexTurnState       *service.CodexTurnStateConfig `json:"codex_turn_state"`
+	OpenAIAuthModeChange bool `json:"openai_auth_mode_change"`
 
 	AccountIDs              []int64                   `json:"account_ids"`
 	Filters                 *BulkUpdateAccountFilters `json:"filters"`
@@ -384,7 +380,6 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 	if account == nil {
 		return item
 	}
-
 	if h.concurrencyService != nil {
 		if counts, err := h.concurrencyService.GetAccountConcurrencyBatch(ctx, []int64{account.ID}); err == nil {
 			item.CurrentConcurrency = counts[account.ID]
@@ -1054,7 +1049,6 @@ func (h *AccountHandler) Create(c *gin.Context) {
 	result, err := executeAdminIdempotent(c, "admin.accounts.create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
 		account, execErr := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
 			OpenAIOAuthInitialOS:  req.OS,
-			CodexTurnState:        req.CodexTurnState,
 			Name:                  req.Name,
 			Notes:                 req.Notes,
 			Platform:              req.Platform,
@@ -1192,7 +1186,6 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	}
 	account, err := h.adminService.UpdateAccount(ctx, accountID, &service.UpdateAccountInput{
 		OpenAIAuthModeChange:         req.OpenAIAuthModeChange,
-		CodexTurnState:               req.CodexTurnState,
 		Name:                         req.Name,
 		Notes:                        req.Notes,
 		Type:                         req.Type,
@@ -2470,7 +2463,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		req.GroupIDs != nil ||
 		len(req.Credentials) > 0 ||
 		len(req.Extra) > 0 ||
-		req.ProbeEnabled != nil || req.CodexTurnState != nil
+		req.ProbeEnabled != nil
 
 	if !hasUpdates {
 		response.BadRequest(c, "No updates provided")
@@ -2483,7 +2476,6 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 	}
 	result, err := h.adminService.BulkUpdateAccounts(ctx, &service.BulkUpdateAccountsInput{
 		OpenAIAuthModeChange:  req.OpenAIAuthModeChange,
-		CodexTurnState:        req.CodexTurnState,
 		AccountIDs:            req.AccountIDs,
 		Filters:               toServiceBulkUpdateAccountFilters(req.Filters),
 		Name:                  req.Name,

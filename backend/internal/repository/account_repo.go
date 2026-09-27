@@ -95,7 +95,7 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
 	client := clientFromContext(ctx, r.client)
 	var tx *dbent.Tx
-	if (service.IsOpenAIOAuthOSProfileOwner(account) || len(service.CodexTurnStateCollectorProxyIDs(service.CodexTurnStateConfigForAccount(account))) > 0) && dbent.TxFromContext(ctx) == nil {
+	if service.IsOpenAIOAuthOSProfileOwner(account) && dbent.TxFromContext(ctx) == nil {
 		var err error
 		tx, err = r.client.Tx(ctx)
 		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
@@ -128,22 +128,8 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 			return err
 		}
 	}
-	config := service.CodexTurnStateConfigForAccount(account)
-	if service.IsCodexTurnStateAccount(account) {
-		var requested *service.CodexTurnStateConfig
-		if _, configured := account.Extra[service.CodexTurnStateExtraKey]; configured {
-			requested = &config
-		}
-		if err := service.PrepareCodexTurnStateForCreate(account, requested); err != nil {
-			return err
-		}
-	} else {
-		account.Extra = service.StripCodexTurnStateManagedExtra(account.Extra)
-	}
-	if err := lockCodexTurnStateCollectorProxy(ctx, client, account); err != nil {
-		return err
-	}
 
+	account.Extra = service.StripRetiredCodexStateExtra(account.Extra)
 	builder := client.Account.Create().
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
@@ -574,9 +560,6 @@ func (r *accountRepository) updateLockedAccount(
 			}
 		}
 	}
-	if err := lockCodexTurnStateCollectorProxy(ctx, client, account); err != nil {
-		return nil, err
-	}
 	extra, err := lockAndMergeAccountProbeExtra(ctx, client, account, explicitProbeEnabled, explicitRateSyncEnabled)
 	if err != nil {
 		return nil, err
@@ -664,14 +647,6 @@ func (r *accountRepository) updateLockedAccount(
 	builder.SetNillableParentAccountID(account.ParentAccountID)
 
 	updated, err := builder.Save(ctx)
-	if err == nil {
-		err = preserveCodexTurnStateOnCollectorProxyChange(ctx, client, current, account)
-	}
-	if err == nil && dbent.TxFromContext(ctx) != nil &&
-		(service.CodexTurnStateGenerationForAccount(current) != service.CodexTurnStateGenerationForAccount(account) ||
-			service.CodexTurnStateCredentialEpochForAccount(current) != service.CodexTurnStateCredentialEpochForAccount(account)) {
-		notifyCodexTurnStateAccountAfterCommit(ctx, account.ID)
-	}
 	return updated, err
 }
 
@@ -932,13 +907,13 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 	}
 	rows, err := client.QueryContext(ctx, `
 		WITH previous_profile AS (
-			SELECT id AS profile_account_id, (`+codexTurnStateOwnerExpression("credentials")+`) AS was_profile_owner
+			SELECT id AS profile_account_id, (`+openAIOAuthCredentialOwnerExpression("credentials")+`) AS was_profile_owner
 			FROM accounts WHERE id=$2 AND deleted_at IS NULL FOR NO KEY UPDATE
 		)
 		UPDATE accounts
 		SET
 			credentials = `+guardedCredentials("$1::jsonb")+`,
-			extra = `+guardedCodexTurnStateGenerationExpression(`CASE
+			extra = CASE
 				-- 正确性依赖（非防御）：OpenCode 分支必须先于 Ollama 分支求值。两分支
 				-- 的 WHEN 并不互斥：Ollama 分支的守卫是宽谓词——NOT(ollamaMatch(old)
 				-- AND ollamaMatch(new)) 在旧行不匹配 ollama.com 基址时恒真，且两侧
@@ -1000,11 +975,11 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 				AND credentials IS DISTINCT FROM (`+guardedCredentials("$1::jsonb")+`)
 				THEN COALESCE(extra, '{}'::jsonb) - 'upstream_billing_probe'
 				ELSE extra
-		END`, guardedCredentials("$1::jsonb"))+`,
+		END,
 			updated_at = NOW()
 		FROM previous_profile
 		WHERE id = previous_profile.profile_account_id AND deleted_at IS NULL
-		RETURNING previous_profile.was_profile_owner IS DISTINCT FROM (`+codexTurnStateOwnerExpression("accounts.credentials")+`)
+		RETURNING previous_profile.was_profile_owner IS DISTINCT FROM (`+openAIOAuthCredentialOwnerExpression("accounts.credentials")+`)
 	`, string(payload), id)
 	if err != nil {
 		return err
@@ -1033,9 +1008,6 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 	}
 	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 		return err
-	}
-	if dbent.TxFromContext(ctx) != nil {
-		notifyCodexTurnStateAccountAfterCommit(ctx, id)
 	}
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
@@ -2810,9 +2782,8 @@ func (r *accountRepository) AutoPauseExpiredAccounts(ctx context.Context, now ti
 
 func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
 	updates = accountConfigurationExtraPatch(ctx, []int64{id}, updates)
-	// Turn-state configuration requires the account row lock and generation update
-	// provided by Update/BulkUpdate; a generic observational patch cannot set it.
-	delete(updates, service.CodexTurnStateExtraKey)
+	// Retired configuration and managed identity fields have already been removed
+	// from this generic observational patch.
 	if len(updates) == 0 {
 		return nil
 	}
@@ -2896,7 +2867,7 @@ func (r *accountRepository) CompareAndUpdateOpenAIAutoResetPreflight(
 	expectedState *service.OpenAIAutoResetCreditState,
 	updates map[string]any,
 ) (bool, error) {
-	updates = service.StripCodexTurnStateManagedExtra(updates)
+	updates = service.StripRetiredCodexStateExtra(updates)
 	if accountID <= 0 || len(updates) == 0 {
 		return false, nil
 	}
@@ -3421,7 +3392,6 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 				return 0, err
 			}
 			extraExpression += " || $" + itoa(idx) + "::jsonb"
-			extraExpression = preserveOmittedCodexTurnStateRoutingPolicyExpression(extraExpression, updates.Extra)
 			args = append(args, payload)
 			idx++
 			if upstreamBillingProbeExplicitlyDisabled(updates.Extra) || upstreamBillingProbeSnapshotClearRequested(updates.Extra) {
@@ -3494,11 +3464,6 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		if len(caseBranches) > 0 {
 			extraExpression = "CASE" + strings.Join(caseBranches, "") + " ELSE " + extraExpression + " END"
 		}
-		credentialsExpression := ""
-		if credentialPlaceholder != "" {
-			credentialsExpression = guardedCredentials("COALESCE(credentials, '{}'::jsonb) || " + credentialPlaceholder + "::jsonb")
-		}
-		extraExpression = guardedCodexTurnStateGenerationExpression(extraExpression, credentialsExpression)
 		setClauses = append(setClauses, "extra = "+guardedAccountExtraExpression(extraExpression))
 	}
 
@@ -3536,7 +3501,6 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 
-	previousCodexAccounts := make(map[int64]*service.Account)
 	previousOSProfileOwners := make(map[int64]bool)
 	_, authModeExplicit := updates.Credentials["auth_mode"]
 	_, legacyAuthModeExplicit := updates.Credentials["openai_auth_mode"]
@@ -3552,39 +3516,6 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 				return 0, err
 			}
 			previousOSProfileOwners[id] = service.IsOpenAIOAuthOSProfileOwner(current)
-		}
-	}
-	if updates.CodexTurnState != nil {
-		lockedIDs := append([]int64(nil), ids...)
-		sort.Slice(lockedIDs, func(i, j int) bool { return lockedIDs[i] < lockedIDs[j] })
-		lockClient := clientFromContext(ctx, r.client)
-		for _, id := range lockedIDs {
-			current, err := lockAccountConfiguration(ctx, lockClient, id)
-			if err != nil {
-				return 0, err
-			}
-			previous := *current
-			previous.Credentials = copyJSONMap(current.Credentials)
-			previousCodexAccounts[id] = &previous
-			if current.Credentials == nil {
-				current.Credentials = make(map[string]any)
-			}
-			for key, value := range updates.Credentials {
-				current.Credentials[key] = value
-			}
-			if service.IsOpenAIOAuthOSProfileOwner(&previous) && (service.IsOpenAIOAuthOSProfileOwner(current) || !service.OpenAIOAuthCredentialModeChangeAllowed(ctx, id)) {
-				current.Credentials = service.PreserveOpenAIOAuthProviderCredentials(previous.Credentials, current.Credentials)
-			}
-			if err := service.ValidateCodexTurnStateConfigUpdate(&previous, current, updates.CodexTurnState); err != nil {
-				return 0, err
-			}
-			if service.AccountConfigurationIntentFromContext(ctx, id).CodexTurnState == nil {
-				continue
-			}
-			current.Extra = map[string]any{service.CodexTurnStateExtraKey: updates.CodexTurnState}
-			if err := lockCodexTurnStateCollectorProxy(ctx, lockClient, current); err != nil {
-				return 0, err
-			}
 		}
 	}
 	result, err := exec.ExecContext(ctx, query, args...)
@@ -3607,16 +3538,6 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			}
 		}
 	}
-	for id, previous := range previousCodexAccounts {
-		lockClient := clientFromContext(ctx, r.client)
-		current, err := lockAccountConfiguration(ctx, lockClient, id)
-		if err != nil {
-			return 0, err
-		}
-		if err := preserveCodexTurnStateOnCollectorProxyChange(ctx, lockClient, previous, current); err != nil {
-			return 0, err
-		}
-	}
 	if updates.ProbeEnabled != nil {
 		expectedRows := int64(0)
 		seenIDs := make(map[int64]struct{}, len(ids))
@@ -3635,9 +3556,6 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		payload := map[string]any{"account_ids": ids}
 		if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, payload); err != nil {
 			return 0, err
-		}
-		if (updates.CodexTurnState != nil || credentialPlaceholder != "") && (dbent.TxFromContext(ctx) != nil || r.client == nil) {
-			notifyCodexTurnStateAccountAfterCommit(ctx, ids...)
 		}
 	}
 	if tx != nil {
