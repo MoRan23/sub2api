@@ -260,6 +260,9 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	phase string,
 	responseHeaders http.Header,
 ) *UpstreamFailoverError {
+	if isOpenAICandyTest(ctx) || isOpenAICandyTestContext(c) {
+		return &UpstreamFailoverError{StatusCode: http.StatusGatewayTimeout}
+	}
 	elapsed := time.Since(startTime)
 	logger.LegacyPrintf(
 		"service.openai_gateway",

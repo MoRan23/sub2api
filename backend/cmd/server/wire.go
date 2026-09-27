@@ -30,6 +30,7 @@ type Application struct {
 	Server        *http.Server
 	PromptAudit   *securityaudit.PromptService
 	PluginManager *service.PluginManager
+	CandyTests    *service.AccountCandyTestService
 	Cleanup       func()
 }
 
@@ -60,7 +61,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 		provideCleanup,
 
 		// Application struct
-		wire.Struct(new(Application), "Server", "PromptAudit", "PluginManager", "Cleanup"),
+		wire.Struct(new(Application), "Server", "PromptAudit", "PluginManager", "CandyTests", "Cleanup"),
 	)
 	return nil, nil
 }
@@ -124,6 +125,7 @@ func provideCleanup(
 	grokOAuth *service.GrokOAuthService,
 	openAIGateway *service.OpenAIGatewayService,
 	codexTelemetry *service.CodexTelemetryService,
+	candyTests *service.AccountCandyTestService,
 	egressLocation *service.OpenAIEgressLocationService,
 	adminService service.AdminService,
 	openAIOutboundSessionV1Cleanup *service.OpenAIOutboundSessionV1CleanupWorker,
@@ -144,6 +146,11 @@ func provideCleanup(
 	return func() {
 		if openAIOAuthOSProfiles != nil {
 			openAIOAuthOSProfiles.Stop()
+		}
+		// Stop test requests and their lease heartbeats before closing transports
+		// and the durable queue database. Interrupted requests are never replayed.
+		if candyTests != nil {
+			candyTests.Stop()
 		}
 		if maintenance, ok := adminService.(interface{ StopProxyGeoBackfill() }); ok {
 			maintenance.StopProxyGeoBackfill()

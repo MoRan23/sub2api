@@ -58,6 +58,7 @@ type AccountHandler struct {
 	rateLimitService        *service.RateLimitService
 	accountUsageService     *service.AccountUsageService
 	accountTestService      *service.AccountTestService
+	candyTestService        *service.AccountCandyTestService
 	concurrencyService      *service.ConcurrencyService
 	crsSyncService          *service.CRSSyncService
 	sessionLimitCache       service.SessionLimitCache
@@ -204,6 +205,7 @@ type CheckMixedChannelRequest struct {
 
 // AccountWithConcurrency extends Account with real-time concurrency info
 type AccountWithConcurrency struct {
+	CandyTest *service.CandyTestSummary `json:"candy_test,omitempty"`
 	*dto.Account
 	simpleMode         bool                         `json:"-"`
 	CurrentConcurrency int                          `json:"current_concurrency"`
@@ -219,6 +221,7 @@ type AccountWithConcurrency struct {
 // for lite=1. It embeds dto.AccountListItem instead of the full dto.Account,
 // so groups/account_groups never appear in the list payload.
 type AccountListItemWithConcurrency struct {
+	CandyTest *service.CandyTestSummary `json:"candy_test,omitempty"`
 	*dto.AccountListItem
 	CurrentConcurrency int                          `json:"current_concurrency"`
 	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
@@ -380,6 +383,12 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 	if account == nil {
 		return item
 	}
+	if h.candyTestService != nil {
+		if summaries, err := h.candyTestService.Summaries(ctx, []int64{account.ID}); err == nil {
+			item.CandyTest = summaries[account.ID]
+		}
+	}
+
 	if h.concurrencyService != nil {
 		if counts, err := h.concurrencyService.GetAccountConcurrencyBatch(ctx, []int64{account.ID}); err == nil {
 			item.CurrentConcurrency = counts[account.ID]
@@ -846,12 +855,24 @@ func (h *AccountHandler) List(c *gin.Context) {
 	}
 
 	h.enrichShadowParents(c.Request.Context(), result)
+	if h.candyTestService != nil {
+		ids := make([]int64, 0, len(accounts))
+		for i := range accounts {
+			ids = append(ids, accounts[i].ID)
+		}
+		if summaries, err := h.candyTestService.Summaries(c.Request.Context(), ids); err == nil {
+			for i := range result {
+				result[i].CandyTest = summaries[result[i].ID]
+			}
+		}
+	}
 
 	if lite {
 		compact := make([]AccountListItemWithConcurrency, len(result))
 		for i := range result {
 			item := result[i]
 			compact[i] = AccountListItemWithConcurrency{
+				CandyTest:          item.CandyTest,
 				AccountListItem:    dto.AccountListItemFromAccount(item.Account),
 				CurrentConcurrency: item.CurrentConcurrency,
 				SchedulerScore:     item.SchedulerScore,

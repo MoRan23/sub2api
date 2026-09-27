@@ -19,6 +19,10 @@
               <Icon name="chart" size="sm" class="text-indigo-500" />
               {{ t('admin.accounts.viewStats') }}
             </button>
+            <button v-if="account.platform === 'openai'" @click="$emit('candy-test', account); $emit('close')" data-testid="candy-test-action" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">
+              <Icon name="play" size="sm" class="text-indigo-500" />
+              {{ t('candyTests.title') }}
+            </button>
             <button @click="$emit('schedule', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">
               <Icon name="clock" size="sm" class="text-orange-500" />
               {{ t('admin.scheduledTests.schedule') }}
@@ -79,7 +83,7 @@ import type { Account } from '@/types'
 import { supportsManagedOpenAIOAuthIdentity } from '@/components/account/openaiOAuthOS'
 
 const props = defineProps<{ show: boolean; account: Account | null; anchorRect: DOMRect | null; codexAuthExporting?: boolean }>()
-const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'export-codex-auth', 'open-auth-parent'])
+const emit = defineEmits(['close', 'test', 'stats', 'schedule', 'duplicate', 'reauth', 'refresh-token', 'recover-state', 'reset-quota', 'set-privacy', 'create-spark-shadow', 'candy-test', 'export-codex-auth', 'open-auth-parent'])
 const { t } = useI18n()
 const menuRef = ref<HTMLElement | null>(null)
 const { width: viewportWidth, height: viewportHeight } = useWindowSize()

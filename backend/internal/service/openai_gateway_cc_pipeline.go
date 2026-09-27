@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tidwall/gjson"
 	"io"
 	"net/http"
 	"strings"
@@ -277,6 +278,8 @@ func (s *OpenAIGatewayService) scanCCStream(
 	emit func(*apicompat.ChatCompletionsChunk),
 ) ccStreamScanState {
 	var st ccStreamScanState
+	benchmark := isOpenAICandyTestContext(c)
+	benchmarkCompleted := false
 
 	scanner := s.newUpstreamSSEScanner(resp.Body)
 	for scanner.Scan() {
@@ -292,6 +295,30 @@ func (s *OpenAIGatewayService) scanCCStream(
 		if payload == "[DONE]" {
 			st.SawDone = true
 			break
+		}
+		if benchmark {
+			if c.Request.Context().Err() != nil {
+				st.Err = c.Request.Context().Err()
+				return st
+			}
+			if gjson.Get(payload, "error").Exists() {
+				st.Err = candyTestError("upstream_stream_failed")
+				return st
+			}
+			for _, choice := range gjson.Get(payload, "choices").Array() {
+				switch choice.Get("finish_reason").String() {
+				case "stop":
+					benchmarkCompleted = true
+				case "":
+				default:
+					st.Err = candyTestError("upstream_incomplete")
+					return st
+				}
+				if len(choice.Get("delta.tool_calls").Array()) > 0 || choice.Get("delta.function_call").Exists() {
+					st.Err = candyTestError("unexpected_tool_call")
+					return st
+				}
+			}
 		}
 		// 观察上游 CC chunk 回显的 model / service_tier（计费以回显为准）。
 		// CC chunk 无 type 字段，按 untyped payload 观察（上游约束：只有终止
@@ -327,6 +354,9 @@ func (s *OpenAIGatewayService) scanCCStream(
 			)
 		}
 		st.Err = err
+	}
+	if benchmark && st.Err == nil && (!st.SawDone || !benchmarkCompleted) {
+		st.Err = candyTestError("missing_terminal")
 	}
 	return st
 }

@@ -561,6 +561,9 @@ func detachedBillingContext(ctx context.Context) (context.Context, context.Cance
 }
 
 func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Context, context.CancelFunc) {
+	if isOpenAICandyTest(ctx) {
+		return ctx, func() {}
+	}
 	if ctx == nil {
 		return context.Background(), func() {}
 	}
@@ -571,6 +574,9 @@ func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Cont
 }
 
 func detachUpstreamContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if isOpenAICandyTest(ctx) {
+		return ctx, func() {}
+	}
 	if ctx == nil {
 		return context.Background(), func() {}
 	}

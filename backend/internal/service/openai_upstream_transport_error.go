@@ -106,6 +106,9 @@ func classifyUpstreamTransportError(err error) upstreamTransportErrorClass {
 //
 // passthrough tags the Ops error event for the OpenAI passthrough forward path.
 func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool) error {
+	if isOpenAICandyTest(ctx) || isOpenAICandyTestContext(c) {
+		return safeCandyTestError(ctx, err)
+	}
 	safeErr := sanitizeUpstreamErrorMessage(err.Error())
 	setOpsUpstreamError(c, 0, safeErr, "")
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -160,6 +163,9 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 //   - "openai.account_temp_unscheduled_transport_failed" — DB write attempted
 //     but returned an error.
 func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Context, account *Account, safeErr string) {
+	if isOpenAICandyTest(ctx) {
+		return
+	}
 	if s == nil || account == nil {
 		return
 	}

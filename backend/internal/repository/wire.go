@@ -74,6 +74,7 @@ var ProviderSet = wire.NewSet(
 	NewAccountRepository,
 	NewOpenAIOAuthSyncSessionRepository,
 	NewOpenAIOAuthDailySessionRepository,
+	NewAccountCandyTestRepository,
 	openaicookies.NewManager,
 	NewCodexTelemetryStore,
 	NewCodexTelemetryNotifier,

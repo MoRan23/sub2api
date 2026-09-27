@@ -21,6 +21,8 @@ import (
 )
 
 type Account struct {
+	// Set only on the benchmark's request-owned copy, never persisted or decoded.
+	openAICandyTest                      bool
 	ID                                   int64
 	Name                                 string
 	Notes                                *string

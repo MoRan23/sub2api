@@ -171,6 +171,11 @@ func runMainServer() {
 			log.Printf("Prompt Audit started in degraded state: %v", err)
 		}
 	}
+	// Recovered benchmarks must wait until all handlers and plugin transports
+	// have been initialized; constructing the dependency graph does not send them.
+	if app.CandyTests != nil {
+		app.CandyTests.Start()
+	}
 
 	// 启动服务器
 	go func() {

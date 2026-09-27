@@ -69,6 +69,29 @@ describe('AccountActionMenu viewport positioning', () => {
     expect(getMenu().textContent).toContain('admin.accounts.recoverState')
   })
 
+  it.each([
+    { type: 'oauth', credentials: {} },
+    { type: 'apikey', credentials: {} },
+    { type: 'oauth', credentials: { auth_mode: 'personal_access_token' } },
+    { type: 'oauth', credentials: { auth_mode: 'agent_identity' } },
+  ])('offers candy tests for every OpenAI credential type (%j)', async (overrides) => {
+    const wrapper = await mountMenu()
+    const selected = { ...account, ...overrides } as Account
+    await wrapper.setProps({ account: selected })
+    const button = getMenu().querySelector<HTMLButtonElement>('[data-testid="candy-test-action"]')!
+    expect(button).toBeTruthy()
+    button.click()
+    expect(wrapper.emitted('candy-test')).toEqual([[selected]])
+    expect(getMenu().textContent).not.toContain('codexTurnState')
+  })
+
+  it('keeps managed auth export while hiding candy tests for other platforms', async () => {
+    const wrapper = await mountMenu()
+    expect(getMenu().querySelector('[data-testid="export-codex-auth"]')).toBeTruthy()
+    await wrapper.setProps({ account: { ...account, platform: 'anthropic' } })
+    expect(getMenu().querySelector('[data-testid="candy-test-action"]')).toBeNull()
+  })
+
   it('opens below the trigger when the complete menu fits', async () => {
     await mountMenu(new DOMRect(500, 100, 32, 24))
 

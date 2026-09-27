@@ -59,7 +59,9 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 
 	// 自愈回写：历史里带明文 summary 的 reasoning item 刷新进缓存，覆盖 Redis
 	// 被 flush / 跨实例漂移后同 id 的 encrypted-only 副本无法再取明文的情况。
-	s.recacheReasoningItemsFromInput(responsesReq.Input)
+	if !isOpenAICandyTest(ctx) {
+		s.recacheReasoningItemsFromInput(responsesReq.Input)
+	}
 
 	chatReq, err := responsesToChatCompletionsWithTimezoneObservation(c, &responsesReq, &apicompat.ResponsesToChatOptions{
 		ReasoningContentByID: s.reasoningContentByID,
@@ -119,6 +121,9 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
+		if isOpenAICandyTest(ctx) {
+			return nil, candyTestError(fmt.Sprintf("upstream_http_%d", resp.StatusCode))
+		}
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
 		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
 			return nil, foErr
@@ -152,7 +157,9 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 		return nil, err
 	}
 	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel, customTools, functionTools, toolSearch, namespaceTools)
-	s.cacheReasoningItemsFromOutput(responsesResp.Output)
+	if !isOpenAICandyTestContext(c) {
+		s.cacheReasoningItemsFromOutput(responsesResp.Output)
+	}
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -226,7 +233,9 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 
 	scan := s.scanCCStream(c, resp, "openai responses chat fallback", requestID, startTime, func(chunk *apicompat.ChatCompletionsChunk) {
 		events := apicompat.ChatCompletionsChunkToResponsesEvents(chunk, state)
-		s.cacheReasoningItemsFromEvents(events)
+		if !isOpenAICandyTestContext(c) {
+			s.cacheReasoningItemsFromEvents(events)
+		}
 		writeEvents(events)
 	})
 
@@ -264,7 +273,9 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	}
 
 	finalEvents := apicompat.FinalizeChatCompletionsResponsesStream(state)
-	s.cacheReasoningItemsFromEvents(finalEvents)
+	if !isOpenAICandyTestContext(c) {
+		s.cacheReasoningItemsFromEvents(finalEvents)
+	}
 	writeEvents(finalEvents)
 	if !clientDisconnected {
 		writeStreamHeaders()

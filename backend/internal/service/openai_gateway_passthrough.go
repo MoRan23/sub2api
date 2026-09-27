@@ -363,6 +363,10 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 		}
 		if resp.StatusCode >= 400 {
+			if isOpenAICandyTest(ctx) {
+				_ = resp.Body.Close()
+				return nil, candyTestError(fmt.Sprintf("upstream_http_%d", resp.StatusCode))
+			}
 			// Peek only to identify an invalid task. Restore the body so the existing
 			// passthrough error handling sees the same response after recovery fails.
 			probeBody := s.readUpstreamErrorBody(resp)
@@ -488,7 +492,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		if snapshot := ParseCodexRateLimitHeaders(resp.Header); snapshot != nil {
 			s.updateCodexUsageSnapshot(ctx, account.ID, snapshot)
 		}
-	} else if account.ParentAccountID != nil {
+	} else if !isOpenAICandyTest(ctx) && account.ParentAccountID != nil {
 		notifyOpenAIAutoReset(*account.ParentAccountID)
 	}
 
@@ -2008,6 +2012,9 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 	canonicalModel ...string,
 ) (int, bool) {
 	statusCode := openAIStreamFailureStatus(payload, message)
+	if isOpenAICandyTestContext(c) || isOpenAICandyTestAccount(account) {
+		return statusCode, false
+	}
 	switch statusCode {
 	case http.StatusForbidden:
 		if !openAIStream403AccountFailure(payload, message) {
@@ -2036,6 +2043,9 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 }
 
 func openAIStreamFailedEventRetryableOnSameAccount(account *Account, payload []byte, message string) bool {
+	if isOpenAICandyTestAccount(account) {
+		return false
+	}
 	if account == nil {
 		return false
 	}
@@ -2121,6 +2131,9 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 	canonicalModel string,
 	responseHeaders ...http.Header,
 ) *UpstreamFailoverError {
+	if isOpenAICandyTestContext(c) || isOpenAICandyTestAccount(account) {
+		return &UpstreamFailoverError{StatusCode: openAIStreamFailureStatus(payload, message)}
+	}
 	message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message))
 	if message == "" {
 		message = "OpenAI stream disconnected before completion"

@@ -181,6 +181,7 @@
           :selecting-all="selectingAllResults"
           :all-results-selected="allResultsSelected"
           @delete="handleBulkDelete"
+          @candy-test="openCandyTest(selIds)"
           @reset-status="handleBulkResetStatus"
           @refresh-token="handleBulkRefreshToken"
           @probe-upstream-billing="handleBulkProbeUpstreamBilling"
@@ -267,6 +268,9 @@
               >{{ t('admin.accounts.dailyFixedRoots.viewDetails') }}</button>
             </div>
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
+          </template>
+          <template #cell-candy_test="{ row }">
+            <AccountCandyTestCell :account="row" @open="openCandyTest([row.id])" />
           </template>
           <template #cell-platform_type="{ row }">
             <div class="flex min-w-0 flex-col gap-1">
@@ -488,7 +492,8 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :codex-auth-exporting="codexAuthExporting || exportingData" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @export-codex-auth="handleExportCodexAuth" @open-auth-parent="handleOpenAuthParent" />
+    <AccountCandyTestModal :show="showCandyTest" :account-ids="candyTestAccountIds" :accounts="accounts" @close="showCandyTest = false" @updated="reload" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :codex-auth-exporting="codexAuthExporting || exportingData" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @candy-test="openCandyTest([$event.id])" @export-codex-auth="handleExportCodexAuth" @open-auth-parent="handleOpenAuthParent" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -548,6 +553,8 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrsModal, TempUnschedStatusModal } from '@/components/account'
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
 import AccountDailyFixedRootsModal from '@/components/admin/account/AccountDailyFixedRootsModal.vue'
+import AccountCandyTestModal from '@/components/admin/account/AccountCandyTestModal.vue'
+import AccountCandyTestCell from '@/components/admin/account/AccountCandyTestCell.vue'
 import { supportsManagedOpenAIOAuthIdentity } from '@/components/account/openaiOAuthOS'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
@@ -1148,6 +1155,12 @@ const {
 
 const dailyFixedRootPools = reactive<Record<number, OAuthDailySessionPool>>({})
 const dailyFixedRootAccount = ref<Pick<AccountListItem, 'id' | 'name'> | null>(null)
+const showCandyTest = ref(false)
+const candyTestAccountIds = ref<number[]>([])
+function openCandyTest(ids: number[]) {
+  candyTestAccountIds.value = [...ids]
+  showCandyTest.value = true
+}
 const selectedDailyFixedRootPool = computed(() => {
   const pool = dailyFixedRootAccount.value ? dailyFixedRootPools[dailyFixedRootAccount.value.id] : undefined
   return Array.isArray(pool?.stream_session_ids) ? pool : undefined
@@ -1448,6 +1461,7 @@ const isAnyModalOpen = computed(() => {
     showDeleteDialog.value ||
     showReAuth.value ||
     showTest.value ||
+    showCandyTest.value ||
     showStats.value ||
     showSchedulePanel.value ||
     showErrorPassthrough.value ||
@@ -1475,6 +1489,7 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
     current.rate_limit_reset_at !== next.rate_limit_reset_at ||
     current.overload_until !== next.overload_until ||
     current.temp_unschedulable_until !== next.temp_unschedulable_until ||
+    JSON.stringify(current.candy_test) !== JSON.stringify(next.candy_test) ||
     buildOpenAIUsageRefreshKey(current) !== buildOpenAIUsageRefreshKey(next) ||
     buildGrokUsageRefreshKey(current) !== buildGrokUsageRefreshKey(next)
   )
@@ -1944,6 +1959,7 @@ const allColumns = computed(() => {
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'daily_fixed_roots', label: t('admin.accounts.columns.dailyFixedRoots'), sortable: false },
+    { key: 'candy_test', label: t('candyTests.title'), sortable: false },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]

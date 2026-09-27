@@ -919,6 +919,9 @@ func (s *OpenAIGatewayService) recordFingerprintObservationFromContext(c *gin.Co
 }
 
 func (s *OpenAIGatewayService) recordFingerprintObservationFromContextWithBody(c *gin.Context, account *Account, outbound http.Header, body []byte) {
+	if isOpenAICandyTestContext(c) {
+		return
+	}
 	if !shouldRecordFingerprintObservationRequest(c, account) {
 		return
 	}

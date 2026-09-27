@@ -329,6 +329,12 @@ func ProvideOpenAIEgressLocationService(prober ProxyExitInfoProber, cache ProxyL
 	return svc
 }
 
+func ProvideAccountCandyTestService(repo CandyTestRepository, executor CandyTestExecutor) *AccountCandyTestService {
+	// Main starts the queue only after gateway handlers and plugin runtimes are
+	// ready, so recovered jobs use the same transport configuration as business.
+	return NewAccountCandyTestService(repo, executor)
+}
+
 // ProvideAdminService shares the gateway's egress cache with explicit proxy tests.
 // Keep the base constructor unchanged for integrations that do not run workers.
 func ProvideAdminService(
@@ -1048,6 +1054,9 @@ var ProviderSet = wire.NewSet(
 	ProvideRateLimitService,
 	ProvideAccountUsageService,
 	ProvideAccountTestService,
+	NewAccountCandyTestTransport,
+	wire.Bind(new(CandyTestExecutor), new(*AccountCandyTestTransport)),
+	ProvideAccountCandyTestService,
 	ProvideUpstreamBillingProbeService,
 	ProvideOllamaCloudUsageService,
 	ProvideOpenCodeGoUsageService,

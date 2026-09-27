@@ -50,6 +50,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 	idempotencyCleanupSvc := service.NewIdempotencyCleanupService(nil, cfg)
 	schedulerSnapshotSvc := service.NewSchedulerSnapshotService(nil, nil, nil, nil, cfg)
 	opsSystemLogSinkSvc := service.NewOpsSystemLogSink(nil)
+	candyTestSvc := service.NewAccountCandyTestService(nil, nil)
 
 	cleanup := provideCleanup(
 		nil, // entClient
@@ -90,6 +91,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // grokOAuth
 		nil, // openAIGateway
 		nil, // codexTelemetry
+		candyTestSvc,
 		nil, // egressLocation
 		nil, // adminService
 		nil, // openAIOutboundSessionV1Cleanup

@@ -140,6 +140,7 @@ describe('AccountsView daily fixed root HTTP contract', () => {
     const { renderErrors } = renderAccounts()
     await screen.findByText(accounts[0]!.name)
     expect(screen.queryByRole('columnheader', { name: 'admin.accounts.columns.codexTurnState' })).toBeNull()
+    expect(screen.getByRole('columnheader', { name: 'candyTests.title' })).toBeTruthy()
     expect(turnStateRequests).toEqual([])
     expect(renderErrors).not.toHaveBeenCalled()
   })

@@ -81,7 +81,7 @@ const makeAccounts = (count: number) => Array.from({ length: count }, (_, index)
 
 const AccountBulkActionsBarStub = {
   props: ['selectedIds', 'totalResults', 'selectingAll', 'allResultsSelected'],
-  emits: ['select-all-results', 'select-page', 'clear', 'refresh-token'],
+  emits: ['select-all-results', 'select-page', 'clear', 'refresh-token', 'candy-test'],
   template: `
     <div>
       <span data-test="selected-count">{{ selectedIds.length }}</span>
@@ -91,6 +91,7 @@ const AccountBulkActionsBarStub = {
       <button data-test="select-all-results" @click="$emit('select-all-results')">select all</button>
       <button data-test="clear" @click="$emit('clear')">clear</button>
       <button data-test="refresh-token" @click="$emit('refresh-token')">refresh token</button>
+      <button data-test="candy-test" @click="$emit('candy-test')">candy test</button>
     </div>
   `
 }
@@ -120,6 +121,7 @@ const mountView = () => mount(AccountsView, {
       ImportDataModal: true,
       ReAuthAccountModal: true,
       AccountTestModal: true,
+      AccountCandyTestModal: true,
       AccountStatsModal: true,
       ScheduledTestsPanel: true,
       SyncFromCrsModal: true,
@@ -230,10 +232,17 @@ describe('admin AccountsView select all filtered results', () => {
       include_scheduler_score: '0'
     }))
 
+    await wrapper.get('[data-test="candy-test"]').trigger('click')
+    const candyModal = wrapper.getComponent({ name: 'AccountCandyTestModal' })
+    expect(candyModal.props('accountIds')).toEqual(allAccounts.map(account => account.id))
+    expect(candyModal.props('show')).toBe(true)
+
     await wrapper.get('[data-test="change-filter"]').trigger('click')
 
     expect(wrapper.get('[data-test="selected-count"]').text()).toBe('0')
     expect(wrapper.get('[data-test="all-results-selected"]').text()).toBe('false')
+    // The submitted selection is frozen; later filters cannot reduce the batch to one page.
+    expect(candyModal.props('accountIds')).toHaveLength(45)
   })
 
   it('keeps the original page selection when loading all results fails', async () => {

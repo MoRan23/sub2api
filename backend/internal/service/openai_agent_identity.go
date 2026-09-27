@@ -274,7 +274,19 @@ func ensureAgentIdentityTaskForAccount(ctx context.Context, repo AccountReposito
 		}
 		sharedTaskMu = loadedTaskMu
 	}
-	sharedTaskMu.Lock()
+	if isOpenAICandyTest(ctx) {
+		for !sharedTaskMu.TryLock() {
+			timer := time.NewTimer(10 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+	} else {
+		sharedTaskMu.Lock()
+	}
 	defer sharedTaskMu.Unlock()
 	// Re-read inside the shared lock. Different request paths often receive
 	// independent repository snapshots; checking only the caller's snapshot
@@ -308,8 +320,14 @@ func ensureAgentIdentityTaskForAccount(ctx context.Context, repo AccountReposito
 		credentials[key] = value
 	}
 	credentials["task_id"] = newTaskID
-	if err := persistAccountCredentials(ctx, repo, credAccount, credentials); err != nil {
-		return err
+	if isOpenAICandyTest(ctx) {
+		if err := persistCandyAgentIdentityTask(ctx, repo, credAccount, newTaskID); err != nil {
+			return err
+		}
+	} else {
+		if err := persistAccountCredentials(ctx, repo, credAccount, credentials); err != nil {
+			return err
+		}
 	}
 	if !account.IsShadow() && account != credAccount {
 		account.Credentials = shallowCopyMap(credAccount.Credentials)

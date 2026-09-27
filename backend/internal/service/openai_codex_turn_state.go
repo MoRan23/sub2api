@@ -474,6 +474,9 @@ func (s *OpenAIGatewayService) noteOpenAICodexTurnStateProvenanceForPlan(
 	plan OpenAIOAuthIdentityPlan,
 ) {
 	requestOrigin, ok := openAICodexTurnStateRequestOriginFromPlan(account, plan)
+	if isOpenAICandyTestContext(c) {
+		return
+	}
 	if !ok {
 		return
 	}

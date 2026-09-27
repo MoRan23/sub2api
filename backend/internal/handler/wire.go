@@ -52,11 +52,13 @@ func ProvideAdminHandlers(
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 	tokenCacheInvalidator service.TokenCacheInvalidator,
 	opencodeGoUsage *service.OpenCodeGoUsageService,
+	candyTests *service.AccountCandyTestService,
 ) *AdminHandlers {
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
 	openaiOAuthHandler.SetTokenCacheInvalidator(tokenCacheInvalidator)
 	accountHandler.SetOpenCodeGoUsageService(opencodeGoUsage)
+	accountHandler.SetCandyTestService(candyTests)
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
 		User:                   userHandler,

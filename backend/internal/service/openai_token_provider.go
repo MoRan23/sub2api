@@ -167,6 +167,9 @@ func (p *OpenAITokenProvider) GetAccessTokenWithAccount(ctx context.Context, acc
 	}
 
 	cacheKey := OpenAITokenCacheKey(account)
+	if isOpenAICandyTest(ctx) {
+		return p.getCandyTestAccessToken(ctx, account)
+	}
 
 	// 1) Try cache first.
 	if p.tokenCache != nil {
