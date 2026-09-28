@@ -802,6 +802,13 @@ export default {
         oauthPassthroughDesc:
           '开启后，该 OpenAI 账号将自动透传请求与响应，仅替换认证并保留计费/并发/审计及必要安全过滤；如遇兼容性问题可随时关闭回滚。',
         flattenNamespaces: '摊平 Codex namespace 工具（兼容）',
+        excelUpstream: 'Excel 上游',
+        excelUpstreamDesc: '使用当前账号 OAuth 授权连接 Excel 上游；关闭后恢复 Codex 上游。仅支持常规 OAuth 母账号，Spark 不继承。',
+        excelUpstreamBulkDesc: '仅支持常规 OpenAI OAuth 母账号。选中 PAT、Agent Identity 或 Spark 时，开启操作会被拒绝。',
+        excelUpstreamUnchanged: '不修改',
+        excelUpstreamEnabled: '开启',
+        excelUpstreamDisabled: '关闭',
+        excelCompactUnavailable: 'Excel 上游不提供 Codex 的 compact 端点；原有探测结果保留，关闭 Excel 后恢复。',
         flattenNamespacesDesc:
           '默认关闭：/responses 上的 namespace 工具声明原样转发，这正是 ChatGPT Codex 后端期望的形态。仅当该 OAuth 账号指向不认识 namespace 的兼容上游时才开启——摊平会把工具改名为 namespace__tool，使按 functions.<命名空间>.<工具> 寻址的模型（如 gpt-5.6 多智能体）无法调用。压缩（compact）请求不受该开关影响，始终摊平。',
         longContextBilling: 'API 长上下文计费',

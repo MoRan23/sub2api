@@ -1769,6 +1769,12 @@
         </div>
       </div>
 
+      <OpenAIExcelUpstreamToggle
+        v-if="supportsOpenAIExcelUpstream(account)"
+        v-model="openAIExcelUpstreamEnabled"
+        data-testid="edit-openai-excel-upstream"
+      />
+
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
         v-if="account?.platform === 'openai' && account?.type === 'oauth'"
@@ -3265,6 +3271,8 @@ import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import OpenAIOAuthOSProfiles from './OpenAIOAuthOSProfiles.vue'
 import { supportsManagedOpenAIOAuthIdentity } from './openaiOAuthOS'
+import { supportsOpenAIExcelUpstream } from './openaiExcelUpstream'
+import OpenAIExcelUpstreamToggle from './OpenAIExcelUpstreamToggle.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
@@ -3816,6 +3824,7 @@ const customBaseUrl = ref('')
 const openaiPassthroughEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
+const openAIExcelUpstreamEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
 // installation_id 固定（仅 OpenAI OAuth）。UUID 由服务端生成。
 const openAIInstallationPinEnabled = ref(true)
@@ -4340,6 +4349,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
+  openAIExcelUpstreamEnabled.value = supportsOpenAIExcelUpstream(newAccount) && extra?.openai_excel_upstream_enabled === true
   openAILongContextBillingEnabled.value = false
   // 固定默认 ON；随后按 extra 覆盖。
   openAIInstallationPinEnabled.value = true
@@ -5930,6 +5940,11 @@ const handleSubmit = async () => {
         delete newExtra.openai_oauth_passthrough
       }
       // 缺省即保留 namespace，不写空值，避免 extra 里堆积默认项
+      if (supportsOpenAIExcelUpstream(props.account)) {
+        newExtra.openai_excel_upstream_enabled = openAIExcelUpstreamEnabled.value
+      } else {
+        delete newExtra.openai_excel_upstream_enabled
+      }
       if (props.account.type === 'oauth' && openaiFlattenNamespacesEnabled.value) {
         newExtra.openai_responses_flatten_namespaces = true
       } else {

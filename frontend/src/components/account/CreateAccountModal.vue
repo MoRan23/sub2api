@@ -3089,6 +3089,12 @@
         </div>
       </div>
 
+      <OpenAIExcelUpstreamToggle
+        v-if="canUseExcelUpstream"
+        v-model="openAIExcelUpstreamEnabled"
+        data-testid="create-openai-excel-upstream"
+      />
+
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
         v-if="form.platform === 'openai' && form.type === 'oauth'"
@@ -3984,6 +3990,7 @@ import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import OpenAIOAuthOSProfiles from './OpenAIOAuthOSProfiles.vue'
+import OpenAIExcelUpstreamToggle from './OpenAIExcelUpstreamToggle.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
@@ -4481,6 +4488,9 @@ const autoPauseOnExpired = ref(true)
 const openaiPassthroughEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
+const openAIExcelUpstreamEnabled = ref(false)
+const canUseExcelUpstream = computed(() => form.platform === 'openai' && form.type === 'oauth' &&
+  oauthFlowRef.value?.inputMethod !== 'codex_pat' && oauthFlowRef.value?.inputMethod !== 'agent_identity')
 const openAILongContextBillingEnabled = ref(false)
 const openAILongContextBillingTouched = ref(false)
 // installation_id 固定（仅 OpenAI OAuth），服务端在创建时生成 UUID。
@@ -4962,6 +4972,7 @@ watch(
     if (newPlatform !== 'openai') {
       openaiPassthroughEnabled.value = false
       openaiFlattenNamespacesEnabled.value = false
+      openAIExcelUpstreamEnabled.value = false
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
       openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
@@ -5415,6 +5426,7 @@ const resetForm = () => {
   autoPauseOnExpired.value = true
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
+  openAIExcelUpstreamEnabled.value = false
   openAILongContextBillingEnabled.value = false
   openAILongContextBillingTouched.value = false
   openAIInstallationPinEnabled.value = true
@@ -5506,6 +5518,11 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     extra.openai_responses_flatten_namespaces = true
   } else {
     delete extra.openai_responses_flatten_namespaces
+  }
+  if (canUseExcelUpstream.value && openAIExcelUpstreamEnabled.value) {
+    extra.openai_excel_upstream_enabled = true
+  } else {
+    delete extra.openai_excel_upstream_enabled
   }
   extra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
 

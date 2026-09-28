@@ -684,6 +684,13 @@ export default {
         oauthPassthroughDesc:
           'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',
         flattenNamespaces: 'Flatten Codex namespace tools (compatibility)',
+        excelUpstream: 'Excel upstream',
+        excelUpstreamDesc: 'Use this account’s OAuth authorization for the Excel upstream. Disable to restore Codex. Regular OAuth parent accounts only; Spark does not inherit this setting.',
+        excelUpstreamBulkDesc: 'Regular OpenAI OAuth parent accounts only. Enabling is rejected if PAT, Agent Identity, or Spark accounts are selected.',
+        excelUpstreamUnchanged: 'Leave unchanged',
+        excelUpstreamEnabled: 'Enable',
+        excelUpstreamDisabled: 'Disable',
+        excelCompactUnavailable: 'Excel does not provide Codex compact endpoints. Previous probe results are preserved and apply again after Excel routing is disabled.',
         flattenNamespacesDesc:
           'Disabled by default: Codex namespace tool declarations are forwarded as-is on /responses, which is what the ChatGPT Codex backend expects. Enable only when this OAuth account is routed to a relay that rejects namespace tools — flattening renames them to namespace__tool, which breaks models that address collaboration tools as functions.<namespace>.<tool>. Compaction requests always flatten regardless of this switch.',
         longContextBilling: 'API long-context pricing',

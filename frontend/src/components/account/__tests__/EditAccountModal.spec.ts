@@ -368,6 +368,36 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it('loads Excel routing and submits an explicit false when disabled', async () => {
+    const account = buildOpenAIOAuthAccount()
+    account.extra.openai_excel_upstream_enabled = true
+    updateAccountMock.mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const toggle = wrapper.get<HTMLInputElement>('[data-testid="edit-openai-excel-upstream"] input')
+    expect(toggle.element.checked).toBe(true)
+    await toggle.setValue(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls.at(-1)?.[1]?.extra?.openai_excel_upstream_enabled).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('hides Excel routing for PAT, Agent Identity, and Spark', async () => {
+    const regular = buildOpenAIOAuthAccount()
+    for (const account of [
+      { ...regular, credentials: { auth_mode: 'personalAccessToken' } },
+      { ...regular, credentials: { auth_mode: 'agentIdentity' } },
+      buildOpenAISparkShadowAccount()
+    ]) {
+      const wrapper = mountModal(account)
+      await flushPromises()
+      expect(wrapper.find('[data-testid="edit-openai-excel-upstream"]').exists()).toBe(false)
+      wrapper.unmount()
+    }
+  })
+
   beforeEach(() => {
     authIsSimpleMode.value = true
     getSettingsMock.mockReset().mockResolvedValue({

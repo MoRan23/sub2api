@@ -756,6 +756,21 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(extra).not.toHaveProperty('openai_pinned_installation_id')
   })
 
+  it('keeps Excel disabled by default and carries an explicit opt-in into OAuth import', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    const toggle = wrapper.get<HTMLInputElement>('[data-testid="create-openai-excel-upstream"] input')
+    expect(toggle.element.checked).toBe(false)
+    await toggle.setValue(true)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Excel OAuth')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra?.openai_excel_upstream_enabled).toBe(true)
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('openai_upstream_route_generation')
+    wrapper.unmount()
+  })
+
   it('allows installation preconfiguration while Codex normalization is globally paused', async () => {
     getSettingsMock.mockResolvedValueOnce({
       enable_openai_codex_fingerprint_normalization: false,

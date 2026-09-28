@@ -23,7 +23,7 @@ type accountConfigurationIntentScope struct {
 
 func withAccountConfigurationIntent(ctx context.Context, ids []int64, extra map[string]any, environment *string) context.Context {
 	intent := AccountConfigurationIntent{Extra: make(map[string]any)}
-	for _, key := range []string{openAIInstallationPinEnabledKey, "enable_tls_fingerprint", "tls_fingerprint_profile_id"} {
+	for _, key := range []string{openAIInstallationPinEnabledKey, "enable_tls_fingerprint", "tls_fingerprint_profile_id", OpenAIExcelUpstreamEnabledExtraKey} {
 		if value, exists := extra[key]; exists {
 			intent.Extra[key] = value
 		}
@@ -64,6 +64,9 @@ func PreserveAccountConfiguration(current, target *Account, intent AccountConfig
 	target.Extra = maps.Clone(target.Extra)
 	if target.Extra == nil {
 		target.Extra = make(map[string]any)
+	}
+	if err := preserveOpenAIExcelUpstreamConfiguration(current, target, intent); err != nil {
+		return err
 	}
 	copyCurrent := func(key string) {
 		delete(target.Extra, key)
