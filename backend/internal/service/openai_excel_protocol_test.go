@@ -286,6 +286,16 @@ func TestExcelProtocolSSEStopsAtCompletedWithoutWaitingForEOF(t *testing.T) {
 	}
 }
 
+func TestExcelProtocolAcceptsResponseDoneAsCompleted(t *testing.T) {
+	_, state := excelTestPrepare(t, `{"model":"gpt-6-astra","input":"hi"}`, nil)
+	actual, err := excelWrappedBody(t, state, excelSSE("response.done", map[string]any{
+		"response": map[string]any{"status": "completed", "output": []any{}, "model": "gpt-6-astra"},
+	}))
+	require.NoError(t, err)
+	require.Contains(t, actual, `"type":"response.completed"`)
+	require.NotContains(t, actual, `"type":"response.done"`)
+}
+
 func TestExcelProtocolCancellationClosesStream(t *testing.T) {
 	_, state := excelTestPrepare(t, `{"model":"gpt-6-astra","input":"hi"}`, nil)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -376,15 +386,14 @@ func TestExcelProtocolMixedNativeToolsNeverLeak(t *testing.T) {
 				excelSSE(terminal, map[string]any{"response": map[string]any{"status": strings.TrimPrefix(terminal, "response."), "output": []any{valid, unknown}}})
 			actual, err := excelWrappedBody(t, state, stream)
 			if terminal == "response.completed" {
-				require.Error(t, err)
-				require.NotContains(t, actual, "response.completed")
+				require.NoError(t, err)
+				require.Contains(t, actual, "response.completed")
 			} else {
 				require.NoError(t, err)
 			}
 			require.NotContains(t, actual, "delete_workbook")
 			require.NotContains(t, actual, "NEVER_FORWARD")
 			require.NotContains(t, actual, "run_officejs")
-			require.NotContains(t, actual, "response.function_call_arguments")
 		})
 	}
 }
@@ -400,6 +409,33 @@ func TestExcelProtocolMultipleToolsCompletedOutputMatchesEvents(t *testing.T) {
 	require.Contains(t, actual, `"output_index":1`)
 	require.NotContains(t, actual, "run_officejs")
 	state.parallel = false
-	_, err = excelWrappedBody(t, state, excelSSE("response.completed", map[string]any{"response": map[string]any{"status": "completed", "output": []any{function, custom}}}))
-	require.Error(t, err)
+	actual, err = excelWrappedBody(t, state, excelSSE("response.completed", map[string]any{"response": map[string]any{"status": "completed", "output": []any{function, custom}}}))
+	require.NoError(t, err)
+	// With parallel_tool_calls=false the first valid call is delivered and the
+	// client can submit its result before requesting another one.
+	require.Contains(t, actual, `"call_id":"call1"`)
+	require.NotContains(t, actual, `"call_id":"call2"`)
+}
+
+func TestExcelProtocolSynthesizesMissingNativeCallID(t *testing.T) {
+	history := excelTestHistory()
+	_, state := excelTestPrepare(t, `{"model":"gpt-6-astra","input":"hi","tools":[{"type":"function","name":"echo","parameters":{"type":"object"}}]}`, history)
+	native := map[string]any{
+		"type": "function_call",
+		"id":   "native_without_call_id",
+		"name": "run_officejs",
+		// WebView2 also emits the outer native arguments as an object.
+		"arguments": map[string]any{"code": `{"name":"echo","arguments":{}}`},
+	}
+	actual, err := excelWrappedBody(t, state, excelSSE("response.completed", map[string]any{
+		"response": map[string]any{"status": "completed", "output": []any{native}},
+	}))
+	require.NoError(t, err)
+	require.Contains(t, actual, `"name":"echo"`)
+	require.NotContains(t, actual, `run_officejs`)
+	require.Len(t, history.values, 1)
+	for key, stored := range history.values {
+		require.NotEmpty(t, key)
+		require.Contains(t, string(stored), `"call_id"`)
+	}
 }
