@@ -7,8 +7,12 @@ import (
 )
 
 const (
-	CandyTestMaxConcurrent    = 3
-	CandyTestTimeout          = 20 * time.Minute
+	CandyTestMaxConcurrent = 3
+	// Candy tests may legitimately spend several minutes waiting for a long
+	// reasoning response. Keep the persisted deadline and the worker context at
+	// the same half-hour window; the repository mirrors this value in its SQL
+	// lease/timeout predicates.
+	CandyTestTimeout          = 30 * time.Minute
 	CandyTestLease            = 30 * time.Second
 	CandyTestHeartbeat        = 5 * time.Second
 	CandyTestMaxResponseBytes = 1 << 20

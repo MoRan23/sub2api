@@ -59,4 +59,4 @@ go test -race ./internal/repository -run '^TestCandyHTTPTransportDoesNotReplayRe
 - 自动重定向通过既有 `WithHTTPUpstreamRedirectsDisabled` 上下文禁用。新增 `repository/account_candy_redirect_test.go` 用实际传输的标准／native 两条路径，各测试 307 和 308：第一个本地服务器接收可重放 POST 后重定向，第二个本地服务器未收到测试请求。再复用相同客户端发送普通上下文请求，第二端成功收到，证明限制为请求级且未污染普通请求。
 - 传输仓储已按服务端测试用途跳过共享 HTTP/2 健康状态的成功／失败学习，保留读取既有协议选择；相应传输回归结果由 HTTP 传输验证记录提供。
 - 本专项没有发送真实 OAuth 刷新、Agent 注册、糖果题推理，也没有用线上账号验证 UA、TLS 或代理端点。代理／TLS 的真实底层链与存储集成需结合仓库模拟传输及隔离数据库验收结果。
-- 20 分钟上限、跨实例全局并发、租约丢失、持久化取消及最近五条清理由后台队列负责；执行器接受并保留其上下文，不自行重试。
+- 30 分钟上限、跨实例全局并发、租约丢失、持久化取消及最近五条清理由后台队列负责；执行器接受并保留其上下文，不自行重试。`timeout` 仅表示本地截止；上游在更早时间报告流失败仍保留为 `upstream_stream_failed`，不由本地截止配置覆盖。

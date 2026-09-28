@@ -152,7 +152,7 @@ func (r *accountCandyTestRepository) Claim(ctx context.Context) (*service.CandyT
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	_, err = tx.ExecContext(ctx, `UPDATE account_candy_test_items SET status=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END,failure_code=CASE WHEN cancel_requested THEN 'cancelled' WHEN started_at + INTERVAL '20 minutes' <= NOW() THEN 'timeout' ELSE 'execution_interrupted' END,finished_at=NOW(),claim_id=NULL,lease_until=NULL WHERE status='running' AND (lease_until<=NOW() OR started_at+INTERVAL '20 minutes'<=NOW())`)
+	_, err = tx.ExecContext(ctx, `UPDATE account_candy_test_items SET status=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END,failure_code=CASE WHEN cancel_requested THEN 'cancelled' WHEN started_at + INTERVAL '30 minutes' <= NOW() THEN 'timeout' ELSE 'execution_interrupted' END,finished_at=NOW(),claim_id=NULL,lease_until=NULL WHERE status='running' AND (lease_until<=NOW() OR started_at+INTERVAL '30 minutes'<=NOW())`)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func (r *accountCandyTestRepository) Claim(ctx context.Context) (*service.CandyT
 }
 
 func (r *accountCandyTestRepository) Heartbeat(ctx context.Context, id int64, claim string) (bool, error) {
-	result, err := r.db.ExecContext(ctx, `UPDATE account_candy_test_items SET lease_until=NOW()+INTERVAL '30 seconds' WHERE id=$1 AND claim_id=$2 AND status='running' AND NOT cancel_requested AND lease_until>NOW() AND started_at+INTERVAL '20 minutes'>NOW()`, id, claim)
+	result, err := r.db.ExecContext(ctx, `UPDATE account_candy_test_items SET lease_until=NOW()+INTERVAL '30 seconds' WHERE id=$1 AND claim_id=$2 AND status='running' AND NOT cancel_requested AND lease_until>NOW() AND started_at+INTERVAL '30 minutes'>NOW()`, id, claim)
 	if err != nil {
 		return false, err
 	}
@@ -218,7 +218,7 @@ func (r *accountCandyTestRepository) Complete(ctx context.Context, item *service
 	if err != nil {
 		return false, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE account_candy_test_items SET status=CASE WHEN cancel_requested THEN 'cancelled' WHEN started_at+INTERVAL '20 minutes'<=NOW() THEN 'failed' ELSE $3 END, failure_code=CASE WHEN cancel_requested THEN 'cancelled' WHEN started_at+INTERVAL '20 minutes'<=NOW() THEN 'timeout' ELSE $4 END,answers=CASE WHEN cancel_requested OR started_at+INTERVAL '20 minutes'<=NOW() THEN '{}'::jsonb ELSE $5::jsonb END,response_text=$6,execution=$7,finished_at=NOW(),claim_id=NULL,lease_until=NULL WHERE id=$1 AND claim_id=$2 AND status='running' AND lease_until>NOW()`, item.ID, item.ClaimID, item.Status, item.FailureCode, answers, item.ResponseText, execution)
+	result, err := tx.ExecContext(ctx, `UPDATE account_candy_test_items SET status=CASE WHEN cancel_requested THEN 'cancelled' WHEN started_at+INTERVAL '30 minutes'<=NOW() THEN 'failed' ELSE $3 END, failure_code=CASE WHEN cancel_requested THEN 'cancelled' WHEN started_at+INTERVAL '30 minutes'<=NOW() THEN 'timeout' ELSE $4 END,answers=CASE WHEN cancel_requested OR started_at+INTERVAL '30 minutes'<=NOW() THEN '{}'::jsonb ELSE $5::jsonb END,response_text=$6,execution=$7,finished_at=NOW(),claim_id=NULL,lease_until=NULL WHERE id=$1 AND claim_id=$2 AND status='running' AND lease_until>NOW()`, item.ID, item.ClaimID, item.Status, item.FailureCode, answers, item.ResponseText, execution)
 	if err != nil {
 		return false, err
 	}

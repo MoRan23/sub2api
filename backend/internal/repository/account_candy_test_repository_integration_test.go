@@ -239,7 +239,7 @@ func TestCandyRepositoryTimeoutWinsOverSuccess(t *testing.T) {
 	b := candyIntegrationBatch(t, repo, candyIntegrationAccount(t))
 	item, err := repo.Claim(ctx)
 	require.NoError(t, err)
-	_, err = integrationDB.ExecContext(ctx, `UPDATE account_candy_test_items SET started_at=NOW()-INTERVAL '21 minutes',lease_until=NOW()+INTERVAL '30 seconds' WHERE id=$1`, item.ID)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_candy_test_items SET started_at=NOW()-INTERVAL '31 minutes',lease_until=NOW()+INTERVAL '30 seconds' WHERE id=$1`, item.ID)
 	require.NoError(t, err)
 	item.Status = "normal"
 	item.Answers = map[string]int{"q1_fixed": 32}
