@@ -20,7 +20,15 @@
             <Select id="candy-test-effort" v-model="effort" :options="effortOptions" :disabled="loading || creating" :aria-label="t('candyTests.effort')" />
           </div>
         </div>
+        <p class="mt-3 text-xs text-gray-500">{{ t('candyTests.modelSource') }}</p>
+        <p v-if="loading" role="status" class="mt-3 text-sm text-gray-500">{{ t('candyTests.loadingModels', { count: frozenAccountIds.length }) }}</p>
         <p v-if="!loading && !modelOptions.length" class="mt-3 text-sm text-gray-500">{{ t('candyTests.noModels') }}</p>
+        <div v-if="modelLoadFailures.length" class="mt-3 rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-900/20" data-testid="candy-model-failures">
+          <p class="font-medium text-amber-800 dark:text-amber-200">{{ t('candyTests.modelLoadFailures') }}</p>
+          <ul class="mt-2 max-h-40 space-y-1 overflow-auto text-amber-700 dark:text-amber-300">
+            <li v-for="account in modelLoadFailures" :key="account.account_id">{{ account.account_name || `#${account.account_id}` }}: {{ optionFailureReason(account.skip_reason) }}</li>
+          </ul>
+        </div>
         <p class="mt-3 text-xs text-gray-500">{{ t('candyTests.unsupportedNotice') }}</p>
         <div class="mt-3 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
           <p class="text-xs text-amber-700 dark:text-amber-300">{{ t('candyTests.quotaNotice') }}</p>
@@ -91,7 +99,7 @@
       </section>
     </div>
     <template #footer>
-      <button type="button" class="btn btn-secondary" :disabled="loading || refreshing" @click="refreshVisible">{{ t('candyTests.refresh') }}</button>
+      <button type="button" class="btn btn-secondary" data-testid="candy-refresh" :disabled="loading || refreshing || creating" @click="refreshVisible(true)">{{ t('candyTests.refresh') }}</button>
       <button type="button" class="btn btn-primary" @click="emit('close')">{{ t('candyTests.close') }}</button>
     </template>
   </BaseDialog>
@@ -111,7 +119,7 @@ import AccountCandyTestResult from './AccountCandyTestResult.vue'
 
 const props = withDefaults(defineProps<{ show: boolean; accountIds: number[]; accounts?: Account[] }>(), { accounts: () => [] })
 const emit = defineEmits<{ (event: 'close'): void; (event: 'updated'): void }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
 const statuses: CandyTestStatus[] = ['queued', 'running', 'normal', 'abnormal', 'failed', 'cancelled', 'skipped']
 const frozenAccountIds = ref<number[]>([])
 const options = ref<CandyTestOptions>({ models: [], accounts: [] })
@@ -135,8 +143,10 @@ let batchRequest = 0
 let historyRequest = 0
 let timer: ReturnType<typeof setTimeout> | undefined
 let submission: { fingerprint: string; key: string } | undefined
+let optionsController: AbortController | undefined
 
 const modelOptions = computed(() => options.value.models.map(option => ({ value: option.id, label: option.display_name || option.id })))
+const modelLoadFailures = computed(() => options.value.accounts.filter(account => account.skip_reason))
 const effortOptions = computed(() => [
   { value: '', label: t('candyTests.defaultEffort') },
   ...new Set((options.value.models.find(option => option.id === model.value)?.reasoning_efforts || []).filter(Boolean)),
@@ -153,9 +163,10 @@ watch(model, () => { effort.value = '' })
 watch(() => props.show, (show) => {
   lifecycle++
   stopPolling()
+  optionsController?.abort()
   if (show) void initialize()
 }, { immediate: true })
-onBeforeUnmount(() => { lifecycle++; stopPolling() })
+onBeforeUnmount(() => { lifecycle++; stopPolling(); optionsController?.abort() })
 
 function isCurrent(version: number): boolean { return props.show && lifecycle === version }
 function stopPolling() { if (timer) clearTimeout(timer); timer = undefined }
@@ -169,7 +180,6 @@ function rememberBatch(id: string) {
 }
 
 async function initialize() {
-  const version = lifecycle
   frozenAccountIds.value = [...new Set(props.accountIds)]
   options.value = { models: [], accounts: [] }
   batchId.value = ''
@@ -189,17 +199,38 @@ async function initialize() {
     if (summary?.active) rememberBatch(summary.active.batch_id)
   }
   if (knownBatchIds.value[0]) void selectBatch(knownBatchIds.value[0])
+  await Promise.all([loadOptions(), loadHistory()])
+}
+
+function optionFailureReason(reason?: string): string {
+  const key = `candyTests.failureReasons.${reason}`
+  return reason && te(key) ? t(key) : t('candyTests.modelLoadError')
+}
+
+async function loadOptions() {
+  const version = lifecycle
+  optionsController?.abort()
+  const controller = new AbortController()
+  optionsController = controller
+  loading.value = true
   try {
-    const result = await candyTestsAPI.options(frozenAccountIds.value)
-    if (!isCurrent(version)) return
+    const result = await candyTestsAPI.options(frozenAccountIds.value, controller.signal)
+    if (!isCurrent(version) || controller.signal.aborted) return
     options.value = { models: result.models || [], accounts: result.accounts || [] }
-    model.value = options.value.models[0]?.id || ''
+    if (!options.value.models.some(option => option.id === model.value)) model.value = options.value.models[0]?.id || ''
+    if (!effortOptions.value.some(option => option.value === effort.value)) effort.value = ''
   } catch {
-    if (isCurrent(version)) error.value = t('candyTests.loadError')
+    if (isCurrent(version) && !controller.signal.aborted) {
+      options.value = { models: [], accounts: [] }
+      model.value = ''
+      error.value = t('candyTests.modelLoadError')
+    }
   } finally {
-    if (isCurrent(version)) loading.value = false
+    if (optionsController === controller) {
+      optionsController = undefined
+      if (isCurrent(version)) loading.value = false
+    }
   }
-  if (isCurrent(version) && historyAccountId.value) await loadHistory()
 }
 
 async function loadHistory() {
@@ -258,10 +289,10 @@ async function loadBatch() {
   }
 }
 
-async function refreshVisible() {
+async function refreshVisible(includeOptions = false) {
   if (!props.show) return
   error.value = ''
-  await Promise.all([loadBatch(), loadHistory()])
+  await Promise.all([loadBatch(), loadHistory(), ...(includeOptions ? [loadOptions()] : [])])
 }
 
 async function startBatch() {

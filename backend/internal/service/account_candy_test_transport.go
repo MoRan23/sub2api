@@ -19,12 +19,17 @@ import (
 // AccountCandyTestTransport reuses the same pinned-account HTTP path as business
 // requests. The internal purpose removes health/usage side effects and replay.
 type AccountCandyTestTransport struct {
-	accounts AccountRepository
-	gateway  *OpenAIGatewayService
+	accounts    AccountRepository
+	gateway     *OpenAIGatewayService
+	fetchModels func(context.Context, *Account) (*OpenAIModelsResponse, error)
 }
 
 func NewAccountCandyTestTransport(accounts AccountRepository, gateway *OpenAIGatewayService) *AccountCandyTestTransport {
-	return &AccountCandyTestTransport{accounts: accounts, gateway: gateway}
+	runner := &AccountCandyTestTransport{accounts: accounts, gateway: gateway}
+	if gateway != nil {
+		runner.fetchModels = gateway.FetchCandyTestModels
+	}
+	return runner
 }
 
 func (r *AccountCandyTestTransport) Execute(parent context.Context, item *CandyTestItem) (*CandyTestExecution, error) {
@@ -44,8 +49,12 @@ func (r *AccountCandyTestTransport) Execute(parent context.Context, item *CandyT
 	}
 	account = snapshotOAuthRefreshAccount(account)
 	account.openAICandyTest = true
+	models, err := r.candyTestAccountModelOptions(parent, account)
+	if err != nil {
+		return nil, err
+	}
 	allowed := false
-	for _, model := range candyTestAccountModelOptions(account) {
+	for _, model := range models {
 		if model.ID == item.Model && (item.ReasoningEffort == "" || containsCandyEffort(model.ReasoningEfforts, item.ReasoningEffort)) {
 			allowed = true
 			break

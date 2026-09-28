@@ -89,13 +89,19 @@ export interface CreateCandyTestRequest {
   idempotency_key: string
 }
 
+// Each live catalog lookup has a 15-second server deadline, with three lookups
+// running concurrently. Leave time for the admin request and batch persistence.
+function catalogRequestTimeout(accountIds: number[]): number {
+  return Math.ceil(new Set(accountIds).size / 3) * 15000 + 30000
+}
+
 export const candyTestsAPI = {
-  async options(accountIds: number[]): Promise<CandyTestOptions> {
-    const { data } = await apiClient.post<CandyTestOptions>('/admin/accounts/candy-test-options', { account_ids: accountIds })
+  async options(accountIds: number[], signal?: AbortSignal): Promise<CandyTestOptions> {
+    const { data } = await apiClient.post<CandyTestOptions>('/admin/accounts/candy-test-options', { account_ids: accountIds }, { signal, timeout: catalogRequestTimeout(accountIds) })
     return data
   },
   async create(request: CreateCandyTestRequest): Promise<CandyTestBatch> {
-    const { data } = await apiClient.post<CandyTestBatch>('/admin/accounts/candy-tests', request)
+    const { data } = await apiClient.post<CandyTestBatch>('/admin/accounts/candy-tests', request, { timeout: catalogRequestTimeout(request.account_ids) })
     return data
   },
   async getBatch(id: string, page = 1, pageSize = 20): Promise<CandyTestBatch> {

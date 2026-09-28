@@ -116,7 +116,7 @@ func TestCandyTransportHTTPFailuresNeverRetryOrChangeAccount(t *testing.T) {
 				gateway.accountRepo = repo
 				// Any unguarded repository mutation hits the embedded nil implementation.
 				gateway.rateLimitService = &RateLimitService{accountRepo: repo}
-				runner := NewAccountCandyTestTransport(repo, gateway)
+				runner := newCandySyntheticCatalogTransport(repo, gateway)
 				_, err := runner.Execute(context.Background(), &CandyTestItem{AccountID: account.ID, Model: "gpt-5.5", PromptVersion: CandyTestPromptVersion})
 				require.Error(t, err)
 				require.Len(t, upstream.bodies, 1)
@@ -128,39 +128,27 @@ func TestCandyTransportHTTPFailuresNeverRetryOrChangeAccount(t *testing.T) {
 	}
 }
 
-func TestCandyTransportPreservesMappingAndObservesRawModel(t *testing.T) {
+func TestCandyTransportPreservesSelectedUpstreamModelAndObservesRawModel(t *testing.T) {
 	account := newOpenAIRejectedFieldTestAccount()
-	account.Credentials["model_mapping"] = map[string]any{"alias": "gpt-5.5"}
+	account.Credentials["model_mapping"] = map[string]any{"gpt-5.5": "gpt-6-astra"}
 	repo := &stubOpenAIAccountRepo{accounts: []Account{*account}}
 	answer := "| 问题 | 最少数量 | 最优取法 |\n| 第1问 | 32 | 任意 |\n| 第2问 | 29 | 任意 |\n| 第3问固定 | 40 | 任意 |\n| 第3问自适应 | 38 | 任意 |"
 	terminal, _ := json.Marshal(map[string]any{"type": "response.completed", "response": map[string]any{"id": "response_synthetic", "model": "gpt-6-luna", "status": "completed", "output": []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": answer}}}}, "usage": map[string]int{"input_tokens": 2, "output_tokens": 3}}})
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(bytes.NewReader(append(append([]byte("data: "), terminal...), []byte("\n\n")...)))}}}
 	gateway := newOpenAIRejectedFieldTestService(upstream)
 	gateway.accountRepo = repo
-	runner := NewAccountCandyTestTransport(repo, gateway)
-	result, err := runner.Execute(context.Background(), &CandyTestItem{AccountID: account.ID, Model: "alias", PromptVersion: CandyTestPromptVersion})
+	runner := newCandySyntheticCatalogTransport(repo, gateway)
+	result, err := runner.Execute(context.Background(), &CandyTestItem{AccountID: account.ID, Model: "gpt-5.5", PromptVersion: CandyTestPromptVersion})
 	require.NoError(t, err)
 	require.True(t, result.Completed)
 	require.Equal(t, answer, result.ResponseText)
 	require.Equal(t, "gpt-5.5", gjson.GetBytes(upstream.bodies[0], "model").String())
+	require.Equal(t, "gpt-5.5", result.RequestedModel)
+	require.Equal(t, "gpt-5.5", result.ActualModel)
 	require.Equal(t, "gpt-6-luna", result.UpstreamModel)
 	require.False(t, gjson.GetBytes(upstream.bodies[0], "tools").Exists())
 	require.False(t, gjson.GetBytes(upstream.bodies[0], "previous_response_id").Exists())
 	require.Equal(t, CandyTestPrompt, gjson.GetBytes(upstream.bodies[0], "input.0.content.0.text").String())
-}
-
-func TestCandyModelOptionsUnknownDefaultAndMappedEffort(t *testing.T) {
-	account := newOpenAIRejectedFieldTestAccount()
-	account.Credentials["model_mapping"] = map[string]any{"custom-unknown": "unknown-upstream", "alias": "gpt-6-astra"}
-	models := candyTestAccountModelOptions(account)
-	require.Len(t, models, 2)
-	for _, model := range models {
-		if model.ID == "custom-unknown" {
-			require.Empty(t, model.ReasoningEfforts)
-		} else {
-			require.Contains(t, model.ReasoningEfforts, "ultra")
-		}
-	}
 }
 
 func TestCandyTokenExpiredDoesNotSuspend(t *testing.T) {
@@ -188,7 +176,7 @@ func TestCandyOAuthDefaultSystemAndRelatedCredentialKinds(t *testing.T) {
 			upstream := &httpUpstreamRecorder{responses: []*http.Response{newOpenAIRejectedFieldTestResponse(401, `{"error":{"message":"synthetic denied"}}`)}}
 			gateway := newOpenAIRejectedFieldTestService(upstream, account)
 			gateway.accountRepo = repo
-			_, err = NewAccountCandyTestTransport(repo, gateway).Execute(context.Background(), &CandyTestItem{AccountID: account.ID, Model: "gpt-6-astra", PromptVersion: CandyTestPromptVersion})
+			_, err = newCandySyntheticCatalogTransport(repo, gateway).Execute(context.Background(), &CandyTestItem{AccountID: account.ID, Model: "gpt-6-astra", PromptVersion: CandyTestPromptVersion})
 			require.EqualError(t, err, "upstream_http_401")
 			require.Len(t, upstream.bodies, 1)
 			require.True(t, account.Schedulable)
@@ -214,7 +202,7 @@ func TestCandyOAuthDefaultSystemAndRelatedCredentialKinds(t *testing.T) {
 			upstream := &httpUpstreamRecorder{responses: []*http.Response{newOpenAIRejectedFieldTestResponse(403, `{"error":{"message":"synthetic denied"}}`)}}
 			gateway := newOpenAIRejectedFieldTestService(upstream)
 			gateway.accountRepo = repo
-			_, err := NewAccountCandyTestTransport(repo, gateway).Execute(context.Background(), &CandyTestItem{AccountID: account.ID, Model: "gpt-6-astra", PromptVersion: CandyTestPromptVersion})
+			_, err := newCandySyntheticCatalogTransport(repo, gateway).Execute(context.Background(), &CandyTestItem{AccountID: account.ID, Model: "gpt-6-astra", PromptVersion: CandyTestPromptVersion})
 			require.EqualError(t, err, "upstream_http_403")
 			require.Len(t, upstream.bodies, 1)
 			require.True(t, repo.accounts[0].Schedulable)
@@ -236,7 +224,7 @@ func TestCandySparkUsesParentDefaultIdentity(t *testing.T) {
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{newOpenAIRejectedFieldTestResponse(429, `{"error":{"message":"synthetic denied"}}`)}}
 	gateway := newOpenAIRejectedFieldTestService(upstream)
 	gateway.accountRepo = repo
-	_, err = NewAccountCandyTestTransport(repo, gateway).Execute(context.Background(), &CandyTestItem{AccountID: shadow.ID, Model: "gpt-5.5", PromptVersion: CandyTestPromptVersion})
+	_, err = newCandySyntheticCatalogTransport(repo, gateway).Execute(context.Background(), &CandyTestItem{AccountID: shadow.ID, Model: "gpt-5.5", PromptVersion: CandyTestPromptVersion})
 	require.EqualError(t, err, "upstream_http_429")
 	require.Len(t, upstream.bodies, 1)
 	require.Equal(t, OpenAIOSMacOS, openai.DetectOSFamilyFromUserAgent(upstream.lastReq.Header.Get("User-Agent")))

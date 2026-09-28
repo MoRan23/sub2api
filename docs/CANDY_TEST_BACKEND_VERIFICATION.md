@@ -4,8 +4,8 @@
 
 ## 执行契约
 
-- `AccountCandyTestTransport` 实现 `CandyTestExecutor.Options` 和 `Execute`；选项仅读取本地模型目录、账号映射及已保存能力。
-- 通过现有 `OpenAIGatewayService.Forward` 固定账号发起 HTTP 请求，保留既有模型映射、Responses／透传／Chat 转换、Lite、代理、TLS 和默认系统身份。
+- `AccountCandyTestTransport` 实现 `CandyTestExecutor.Options` 和 `Execute`；选项实时读取各账号上游模型目录，使用上游原始 ID，不从业务白名单或映射生成候选项。目录读取失败或为空时返回账号级原因，不回退本地模型列表；创建批次重新核对能力。
+- 通过现有 `OpenAIGatewayService.Forward` 固定账号发起 HTTP 请求，直接发送所选上游模型 ID，保留 Responses／透传／Chat 转换、Lite、代理、TLS 和默认系统身份。只有测试用途绕过业务模型白名单及映射，普通业务规则不变。
 - 服务端上下文携带测试用途，用户不能通过请求头或正文设置。实际发送入口限制一次推理调用，禁用自动重定向；测试保留原有截止时间和取消信号。
 - 只保存最终回答，限制为 1 MiB；单个 SSE 行／事件及输出项目分类也有界。明确失败优先于迟到完成，完整终态中的最终输出优先于早期增量，不保存推理或明确 commentary 内容。
 - 必要的 OAuth 刷新沿用现有凭据 CAS，但不回退旧令牌，也不改变账号状态。Agent Identity 首次 task 注册只对原认证元组做 `task_id` CAS，不全量覆盖凭据。
@@ -28,9 +28,9 @@ go test -race ./internal/repository -run '^TestCandyHTTPTransportDoesNotReplayRe
 | --- | --- |
 | 一次发送、无失败重试 | Responses、透传、Chat 三条路径分别模拟 400／401／403／429／500，共 15 个子用例；检查物理发送替身计数为 1 |
 | 账号副作用隔离 | 检查账号仍为 active／schedulable，原账号对象未被测试用途标记污染；限流仓储替身拒绝未预期写入 |
-| 模型映射和原始证据 | 请求别名映射至最终模型，保留公开名称改写前的上游声明模型；检查没有 tools、历史或 continuation |
+| 上游模型 ID 和原始证据 | 测试直接发送所选上游模型，不应用业务模型映射；保留公开名称改写前的上游声明模型，检查没有 tools、历史或 continuation |
 | 系统及凭据类型 | 三系统默认 UA，Spark 使用母账号默认系统，以及 OAuth、setup-token、PAT、已有 task 的 Agent Identity |
-| 能力选项 | 未知模型仅默认档位；已知映射模型使用最终模型能力 |
+| 能力选项 | 实时查询账号上游目录；未知能力仅默认档位，失败账号不生成本地回退候选项 |
 | 授权刷新 | 合成仓储验证 CAS 期望元组、成功凭据更新、失败不回退旧令牌、过期缺刷新凭据不暂停账号 |
 | 授权更换及 Agent task | 签名密钥变化被拒绝；旧 task 初始化不能覆盖替换后的密钥；等待初始化锁可被取消 |
 | 截止与取消 | 两种原有上下文分离方法均保留测试截止时间；目的标记穿过实际请求准备链 |
@@ -38,6 +38,20 @@ go test -race ./internal/repository -run '^TestCandyHTTPTransportDoesNotReplayRe
 | 安全错误 | 仅固定错误码，不把上游错误正文写入测试记录 |
 
 具体用例位于 `backend/internal/service/account_candy_test_transport_test.go`。
+
+## 2026-09-28 实时上游目录调整
+
+此前“打开弹窗仅读取本地目录／账号映射”的行为已被替代。弹窗在加载时展示等待状态与账号级目录错误；关闭时取消目录读取，历史和已有批次独立恢复。手动刷新重查目录，后台进度轮询不重复查询目录。选项与创建请求的前端超时按账号数预留每组 15 秒及额外 30 秒，覆盖最多 3 路并发的目录请求。
+
+前端合成接口验证已通过：`AccountCandyTestModal.spec.ts` 14 项、`admin.candyTests.spec.ts` 2 项、`localeKeyCompleteness.spec.ts` 3 项；全前端 `pnpm run typecheck` 与 `pnpm run lint:check` 通过。覆盖部分账号失败而其他模型仍可选、关闭取消目录读取且不取消测试、慢目录期间恢复历史与批次、手动刷新重试、跨页账号以及自适应 HTTP 超时。本次前端验证未请求真实上游。
+
+后端全部 `TestCandy` 及新 `TestFetchCandyTestModels` 默认／竞态测试通过。覆盖 Responses、透传、Chat 三路径与精确映射、通配映射、白名单外模型的 9 种组合，确认发送所选上游 ID 且普通业务映射不变；另覆盖实时目录不读写共享缓存、原始能力、最多 3 路并发、取消、目录为空／失败／所选模型消失时不发送推理，以及目录请求的 401／403／429 不改变账号健康状态。`go build ./...` 和前端生产构建通过。
+
+审查补充发现 OAuth 的旧模型归一也会改变部分实时 ID，已仅对糖果测试旁路。OAuth 和 Spark 的专项／竞态回归确认 `gpt-5.1-codex` 原样出站，普通请求仍按原规则归一至 `gpt-5.3-codex`；现有模型归一与映射专项通过。
+
+扩展模型目录回归中，`TestFetchCodexModelsManifestOAuth401OnlyCoolsSelectedAuthorization` 与 `TestFetchCodexModelsManifestOAuth401TokenRevokedOnlyDisablesSelectedAuthorization` 失败。这两项已在干净基线 `0c7c6f7dd` 使用相同工具链复现：旧测试仓储缺少账号级状态适配，未修改旧断言或以此掩盖新失败。本次所有验证使用本地替身与合成凭据，未发送真实上游目录、推理或授权请求；没有数据库结构变更，未重跑存储迁移集成测试。
+
+后端全量 lint 与前次基线按文件、检查器、问题文本比较，没有新增问题；全量检查仍因既有问题退出非零。初次检查发现的新测试类型断言未检查问题已修正，复查未再报告。前端验证使用组件及接口模拟，未重复执行完整浏览器验收。
 
 ## 仍需结合其他验收记录评估的范围
 

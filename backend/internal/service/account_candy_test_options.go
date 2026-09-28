@@ -4,11 +4,11 @@ import (
 	"context"
 	"sort"
 	"strings"
-
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"sync"
 )
 
-// Options is strictly local: opening a benchmark dialog never probes a provider.
+// Options reads each selected account's live upstream catalog, independently of
+// business model routing. A failing account cannot hide other accounts' models.
 func (r *AccountCandyTestTransport) Options(ctx context.Context, ids []int64) (*CandyTestOptions, error) {
 	accounts, err := r.accounts.GetByIDs(ctx, ids)
 	if err != nil {
@@ -20,25 +20,50 @@ func (r *AccountCandyTestTransport) Options(ctx context.Context, ids []int64) (*
 			byID[account.ID] = account
 		}
 	}
-	out := &CandyTestOptions{Models: []CandyTestModelOption{}, Accounts: []CandyTestAccountOptions{}}
-	union := make(map[string]CandyTestModelOption)
-	for _, id := range ids {
-		entry := CandyTestAccountOptions{AccountID: id, Models: []CandyTestModelOption{}}
-		account := byID[id]
-		if account == nil {
-			entry.SkipReason = "account_missing"
-		} else {
-			entry.AccountName = account.Name
-			if account.Platform != PlatformOpenAI {
-				entry.SkipReason = "unsupported_platform"
-			} else {
-				entry.Models = candyTestAccountModelOptions(account)
-				if len(entry.Models) == 0 {
-					entry.SkipReason = "no_supported_models"
+	out := &CandyTestOptions{Models: []CandyTestModelOption{}, Accounts: make([]CandyTestAccountOptions, len(ids))}
+	jobs := make(chan int, len(ids))
+	for i := range ids {
+		jobs <- i
+	}
+	close(jobs)
+	var workers sync.WaitGroup
+	for range min(3, len(ids)) {
+		workers.Go(func() {
+			for i := range jobs {
+				if ctx.Err() != nil {
+					return
 				}
+				id := ids[i]
+				entry := CandyTestAccountOptions{AccountID: id, Models: []CandyTestModelOption{}}
+				account := byID[id]
+				if account == nil {
+					entry.SkipReason = "account_missing"
+				} else {
+					entry.AccountName = account.Name
+					if account.Platform != PlatformOpenAI {
+						entry.SkipReason = "unsupported_platform"
+					} else {
+						models, fetchErr := r.candyTestAccountModelOptions(ctx, account)
+						if fetchErr != nil {
+							entry.SkipReason = "model_catalog_failed"
+						} else {
+							entry.Models = models
+						}
+						if fetchErr == nil && len(entry.Models) == 0 {
+							entry.SkipReason = "no_supported_models"
+						}
+					}
+				}
+				out.Accounts[i] = entry
 			}
-		}
-		out.Accounts = append(out.Accounts, entry)
+		})
+	}
+	workers.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	union := make(map[string]CandyTestModelOption)
+	for _, entry := range out.Accounts {
 		for _, model := range entry.Models {
 			if prior, exists := union[model.ID]; exists {
 				for _, effort := range model.ReasoningEfforts {
@@ -46,6 +71,7 @@ func (r *AccountCandyTestTransport) Options(ctx context.Context, ids []int64) (*
 						prior.ReasoningEfforts = append(prior.ReasoningEfforts, effort)
 					}
 				}
+				prior.ReasoningEfforts = normalizeCandyEfforts(prior.ReasoningEfforts)
 				union[model.ID] = prior
 			} else {
 				union[model.ID] = model
@@ -68,39 +94,50 @@ func containsCandyEffort(efforts []string, value string) bool {
 	return false
 }
 
-func candyTestAccountModelOptions(account *Account) []CandyTestModelOption {
-	models := AppendOpenAIConfiguredTestModels(append([]openai.Model(nil), openai.DefaultModels...), account)
-	if snapshot := account.GetUpstreamModelMetadataSnapshot(); snapshot != nil {
-		for id := range snapshot.Models {
-			models = append(models, openai.Model{ID: id, DisplayName: id})
-		}
+func (r *AccountCandyTestTransport) candyTestAccountModelOptions(ctx context.Context, account *Account) ([]CandyTestModelOption, error) {
+	if r.fetchModels == nil {
+		return nil, candyTestError("model_catalog_failed")
+	}
+	response, err := r.fetchModels(ctx, account)
+	if err != nil || response == nil || response.NotModified {
+		return nil, candyTestError("model_catalog_failed")
+	}
+	return candyTestUpstreamModelOptions(account, response.Body)
+}
+
+func candyTestUpstreamModelOptions(account *Account, body []byte) ([]CandyTestModelOption, error) {
+	models, liveMetadata, err := extractUpstreamModelCatalog(body, false)
+	if err != nil {
+		return nil, candyTestError("model_catalog_failed")
 	}
 	out := []CandyTestModelOption{}
 	seen := map[string]bool{}
 	for _, model := range models {
-		id := strings.TrimSpace(model.ID)
-		if id == "" || seen[id] || strings.Contains(id, "*") || !account.IsModelSupported(id) {
+		id := strings.TrimSpace(model)
+		if id == "" || seen[id] || strings.Contains(id, "*") {
 			continue
 		}
 		seen[id] = true
-		actual := id
-		if !account.IsOpenAIPassthroughEnabled() {
-			actual = account.GetMappedModel(id)
-		}
-		if !candyModelCanAnswer(actual) {
+		if !candyModelCanAnswer(id) {
 			continue
 		}
-		option := CandyTestModelOption{ID: id, DisplayName: model.DisplayName, ReasoningEfforts: []string{}}
+		metadata := liveMetadata[id]
+		option := CandyTestModelOption{ID: id, DisplayName: metadata.DisplayName, ReasoningEfforts: []string{}}
 		if option.DisplayName == "" {
-			option.DisplayName = id
+			option.DisplayName = openaiCodexDisplayName(id)
 		}
-		metadata, saved := account.GetUpstreamModelMetadata(actual)
-		if saved {
-			if metadata.Reasoning == nil || *metadata.Reasoning {
-				option.ReasoningEfforts = normalizeCandyEfforts(metadata.SupportedReasoningLevels)
-			}
-		} else if bundledCodexModelDefault(actual) != nil {
-			descriptor := newConfiguredCodexModelDescriptor(actual)
+		// Saved/bundled capabilities may fill missing reasoning metadata only;
+		// neither can add a model that the live upstream omitted.
+		if saved, ok := account.GetUpstreamModelMetadata(id); ok {
+			metadata, _ = mergeUpstreamModelMetadata(metadata, saved)
+		}
+		if metadata.Reasoning != nil && !*metadata.Reasoning {
+			out = append(out, option)
+			continue
+		}
+		option.ReasoningEfforts = normalizeCandyEfforts(metadata.SupportedReasoningLevels)
+		if len(option.ReasoningEfforts) == 0 && bundledCodexModelDefault(id) != nil {
+			descriptor := newConfiguredCodexModelDescriptor(id)
 			for _, level := range descriptor.SupportedReasoningLevels {
 				option.ReasoningEfforts = append(option.ReasoningEfforts, level.Effort)
 			}
@@ -109,7 +146,7 @@ func candyTestAccountModelOptions(account *Account) []CandyTestModelOption {
 		out = append(out, option)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
+	return out, nil
 }
 
 func normalizeCandyEfforts(values []string) []string {

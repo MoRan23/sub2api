@@ -13,6 +13,27 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
+// FetchCandyTestModels reads the selected account's current upstream catalog.
+// Unlike public discovery, diagnostics do not project business aliases, use a
+// cached catalog, or change account health when discovery fails. The original
+// Codex descriptor is retained so the picker can read its reasoning levels.
+func (s *OpenAIGatewayService) FetchCandyTestModels(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+	if s == nil || account == nil || !account.IsOpenAI() {
+		return nil, candyTestError("unsupported_platform")
+	}
+	ctx, cancel := context.WithTimeout(ctx, codexModelsManifestRequestTimeout)
+	defer cancel()
+	ctx = withOpenAICandyTest(ctx, &openAICandyTestAttempt{})
+	ctx = WithHTTPUpstreamRedirectsDisabled(ctx)
+	ctx = ContextWithOpenAIRequestOS(ctx, OpenAIRequestOS{Captured: true, Source: "account_default"})
+	account = snapshotOAuthRefreshAccount(account)
+	account.openAICandyTest = true
+	if account.IsOpenAIOAuthLike() {
+		return s.FetchCodexModelsManifest(ctx, account, "", "")
+	}
+	return s.FetchOpenAIModelsList(ctx, account)
+}
+
 // FetchOpenAIModelsList discovers a single account's raw public model catalog.
 // API keys use the standard endpoint; OAuth reuses the authenticated, cached
 // Codex source. Account mappings and group policy are applied after this cache.

@@ -1230,6 +1230,11 @@ func normalizeOpenAIResponsesImageOnlyModel(reqBody map[string]any) bool {
 }
 
 func normalizeOpenAIModelForUpstream(account *Account, model string) string {
+	// Benchmarks select a real ID from the live catalog. Legacy Codex aliases
+	// must not silently turn that selection into a different model.
+	if isOpenAICandyTestAccount(account) {
+		return strings.TrimSpace(model)
+	}
 	if account == nil || account.UsesOpenAICodexProtocol() {
 		return normalizeCodexModel(model)
 	}

@@ -63,7 +63,7 @@ describe('Account candy tests', () => {
     await wrapper.get('[data-testid="candy-start"]').trigger('click')
     await flushPromises()
     expect(api.create).toHaveBeenCalledWith({ account_ids: [42, 99, 110], model: 'gpt-6-astra', reasoning_effort: 'high', idempotency_key: expect.any(String) })
-    expect(api.options).toHaveBeenCalledWith([42, 99, 110])
+    expect(api.options).toHaveBeenCalledWith([42, 99, 110], expect.any(AbortSignal))
     wrapper.unmount()
   })
 
@@ -80,6 +80,61 @@ describe('Account candy tests', () => {
     wrapper.unmount()
   })
 
+  it('shows per-account catalog failures while keeping other upstream models selectable', async () => {
+    api.options.mockResolvedValue({
+      models: [{ id: 'upstream-raw-model', display_name: 'Upstream model', reasoning_efforts: [] }],
+      accounts: [
+        { account_id: 42, account_name: 'Available', models: [{ id: 'upstream-raw-model' }] },
+        { account_id: 99, account_name: 'Unavailable', models: [], skip_reason: 'model_catalog_failed' },
+        { account_id: 110, account_name: 'Empty catalog', models: [], skip_reason: 'no_supported_models' },
+      ],
+    })
+    const wrapper = mountModal([42, 99, 110])
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="candy-model-failures"]').text()).toContain('Unavailable: The upstream model list could not be fetched')
+    expect(wrapper.get('[data-testid="candy-model-failures"]').text()).toContain('Empty catalog: The upstream returned no available models')
+    expect(wrapper.get('#candy-test-model').element).toHaveProperty('value', 'upstream-raw-model')
+    expect(wrapper.get('[data-testid="candy-start"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('aborts pending catalog reads on close while loading history without waiting for upstream', async () => {
+    api.options.mockImplementationOnce(() => new Promise(() => {}))
+    api.history.mockResolvedValue({ items: [], summary: { active: item() } })
+    const wrapper = mountModal([42, 99])
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Fetching upstream models for 2 accounts')
+    expect(api.history).toHaveBeenCalledWith(42)
+    expect(api.getBatch).toHaveBeenCalledWith('batch-a', 1)
+    expect(wrapper.get('[data-testid="candy-start"]').attributes('disabled')).toBeDefined()
+    const signal = api.options.mock.calls[0][1] as AbortSignal
+    expect(signal.aborted).toBe(false)
+    await wrapper.setProps({ show: false })
+    expect(signal.aborted).toBe(true)
+    expect(api.cancel).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('refreshes a failed live catalog without clearing an unchanged model selection', async () => {
+    api.options.mockRejectedValueOnce(new Error('upstream unavailable'))
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('Could not fetch upstream model lists')
+    expect(wrapper.get('[data-testid="candy-start"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="candy-refresh"]').trigger('click')
+    await flushPromises()
+    expect(api.options).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    await wrapper.get('#candy-test-model').setValue('custom-model')
+    await wrapper.get('[data-testid="candy-refresh"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('#candy-test-model').element).toHaveProperty('value', 'custom-model')
+    wrapper.unmount()
+  })
+
   it('polls every five seconds and closing never cancels the backend job', async () => {
     const wrapper = mountModal()
     await wrapper.setProps({ show: true })
@@ -89,6 +144,7 @@ describe('Account candy tests', () => {
     await vi.advanceTimersByTimeAsync(5000)
     await flushPromises()
     expect(api.getBatch).toHaveBeenCalledTimes(1)
+    expect(api.options).toHaveBeenCalledTimes(1)
     await wrapper.setProps({ show: false })
     await vi.advanceTimersByTimeAsync(15000)
     expect(api.getBatch).toHaveBeenCalledTimes(1)

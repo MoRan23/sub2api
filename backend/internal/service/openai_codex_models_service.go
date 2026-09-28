@@ -1726,7 +1726,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	appendModelsPath := false
 	var clientIdentity CodexClientIdentityPlan
 	switch {
-	case credAccount.IsOpenAIOAuth():
+	case credAccount.IsOpenAIOAuth(), isOpenAICandyTest(ctx) && credAccount.IsOpenAIOAuthLike():
 		authToken, _, err = s.GetAccessToken(ctx, credAccount)
 		if err != nil {
 			return nil, openAIModelsCredentialError(err)
@@ -1835,6 +1835,9 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	// 错误时仍交给 handleCodexModelsManifestAccountAuthError 处理账号状态。
 	oauthFetch := func(fetchCtx context.Context, ifNoneMatch string) (*OpenAIModelsResponse, error) {
 		manifest, fetchErr := s.fetchCodexModelsManifestUpstream(fetchCtx, request, ifNoneMatch)
+		if isOpenAICandyTest(fetchCtx) {
+			return manifest, fetchErr
+		}
 		if !credAccount.IsOpenAIAgentIdentity() || !isAgentIdentityTaskInvalidCodexModelsError(fetchErr) {
 			s.handleCodexModelsManifestAccountAuthError(fetchCtx, account, credAccount, fetchErr)
 			return manifest, fetchErr
@@ -1880,7 +1883,7 @@ func isAgentIdentityTaskInvalidCodexModelsError(err error) bool {
 // and API key manifests come from custom upstreams whose /models auth may
 // diverge from their chat endpoints.
 func (s *OpenAIGatewayService) handleCodexModelsManifestAccountAuthError(ctx context.Context, account, credAccount *Account, err error) {
-	if s == nil || account == nil || err == nil {
+	if s == nil || account == nil || err == nil || isOpenAICandyTest(ctx) {
 		return
 	}
 	if credAccount == nil || !credAccount.IsOpenAIOAuth() || credAccount.IsOpenAIAgentIdentity() {
@@ -1913,6 +1916,15 @@ func openAIModelsCredentialError(err error) error {
 func (s *OpenAIGatewayService) fetchCachedOpenAIModels(ctx context.Context, request openAIModelsRequest, fetch func(ctx context.Context, ifNoneMatch string) (*OpenAIModelsResponse, error), ifNoneMatch string) (*OpenAIModelsResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if isOpenAICandyTest(ctx) {
+		// A test picker explicitly asks for the live catalog. Preserve its deadline
+		// and diagnostic purpose rather than entering the detached shared refresh.
+		response, err := fetch(ctx, "")
+		if err == nil && response != nil && response.NotModified {
+			return nil, invalidOpenAIModelsList(fmt.Errorf("upstream returned 304 without a diagnostic catalog"))
+		}
+		return response, err
 	}
 	cacheKey := buildOpenAIModelsCacheKey(request)
 	manifest, state := s.openAIModelsCache.get(cacheKey, time.Now())
@@ -2033,7 +2045,13 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 			if clientErr != nil {
 				return nil, infraerrors.Newf(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_PROXY_INVALID", "invalid proxy configuration: %v", clientErr)
 			}
-			resp, err = openai.HTTPClientWithCodexResidencyRedirectGuard(client).Do(req)
+			client = openai.HTTPClientWithCodexResidencyRedirectGuard(client)
+			if isOpenAICandyTest(req.Context()) {
+				diagnosticClient := *client
+				diagnosticClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+				client = &diagnosticClient
+			}
+			resp, err = client.Do(req)
 		}
 	}
 	if err != nil {
@@ -2088,7 +2106,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 		return response, err
 	}
 	if response.NotModified {
-		if !request.useAPIKeyUpstream {
+		if !request.useAPIKeyUpstream && !isOpenAICandyTest(ctx) {
 			namespace := openAICodexModelCapabilitiesNamespace(request.credentialAccount)
 			s.codexModelCapabilities.refreshNamespace(namespace, time.Now())
 		}
@@ -2143,7 +2161,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 				retryable: true,
 			}
 		}
-	} else {
+	} else if !isOpenAICandyTest(ctx) {
 		namespace := openAICodexModelCapabilitiesNamespace(request.credentialAccount)
 		s.codexModelCapabilities.observeManifest(namespace, body, time.Now())
 	}

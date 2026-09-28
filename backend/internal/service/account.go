@@ -919,6 +919,11 @@ func (a *Account) GetMappedModel(requestedModel string) string {
 // ResolveMappedModel 获取映射后的模型名，并返回是否命中了账号级映射。
 // matched=true 表示命中了精确映射或通配符映射，即使映射结果与原模型名相同。
 func (a *Account) ResolveMappedModel(requestedModel string) (mappedModel string, matched bool) {
+	// A candy benchmark selects an upstream model ID, not a business-facing
+	// alias. The marker exists only on the execution snapshot, never in storage.
+	if isOpenAICandyTestAccount(a) {
+		return requestedModel, false
+	}
 	mapping := a.GetModelMapping()
 	if len(mapping) == 0 {
 		return requestedModel, false
