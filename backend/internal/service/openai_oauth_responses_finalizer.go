@@ -136,7 +136,11 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 	if err != nil {
 		return body, err
 	}
-	stripOpenAILegacyResponsesBeta(req.Header)
+	// API-key accounts share identity projection, but their beta negotiation
+	// remains caller-controlled; only the Codex protocol retires this token.
+	if account.UsesOpenAICodexProtocol() {
+		stripOpenAILegacyResponsesBeta(req.Header)
+	}
 	applyOpenAICodexRoutingHintFromPlan(req.Header, finalPlan)
 	finalBody := s.guardOpenAICodexTurnStateEchoForPlan(c, account, finalPlan, req.Header, projectedBody)
 	setOpenAIRequestBodySnapshot(req, finalBody)

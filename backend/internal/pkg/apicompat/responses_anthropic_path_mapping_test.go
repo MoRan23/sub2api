@@ -37,6 +37,38 @@ func TestResponsesToAnthropicRequestWithPathMapping_TextProvenance(t *testing.T)
 			},
 		},
 		{
+			name:  "document before text occupies destination index",
+			input: `[{"role":"user","content":[{"type":"input_file","file_data":"data:application/pdf;base64,YQ=="},{"type":"input_text","text":"same"}]}]`,
+			want:  map[string]string{"input.0.content.1.text": "messages.0.content.1.text"},
+		},
+		{
+			name:  "document between identical texts preserves each source",
+			input: `[{"role":"user","content":[{"type":"input_text","text":"same"},{"type":"input_file","file_data":"data:application/pdf;base64,YQ==","text":"discarded"},{"type":"input_text","text":"same"}]}]`,
+			want: map[string]string{
+				"input.0.content.0.text": "messages.0.content.0.text",
+				"input.0.content.1.text": "",
+				"input.0.content.2.text": "messages.0.content.2.text",
+			},
+		},
+		{
+			name:  "skipped files do not occupy destination indices",
+			input: `[{"role":"user","content":[{"type":"input_file","file_id":"file_1"},{"type":"input_file","file_data":"https://example.invalid/file.pdf"},{"type":"input_file","file_data":"data:application/pdf,YQ=="},{"type":"input_file","file_data":"data:application/pdf;utf8,YQ=="},{"type":"input_text","text":"same"}]}]`,
+			want:  map[string]string{"input.0.content.4.text": "messages.0.content.0.text"},
+		},
+		{
+			name:  "document in merged user turn preserves later text offset",
+			input: `[{"role":"user","content":"same"},{"role":"user","content":[{"type":"input_file","file_data":"data:application/pdf;base64,YQ=="},{"type":"input_text","text":"same"}]}]`,
+			want: map[string]string{
+				"input.0.content":        "messages.0.content.0.text",
+				"input.1.content.1.text": "messages.0.content.2.text",
+			},
+		},
+		{
+			name:  "assistant files remain skipped",
+			input: `[{"role":"assistant","content":[{"type":"input_file","file_data":"data:application/pdf;base64,YQ=="},{"type":"output_text","text":"same"}]}]`,
+			want:  map[string]string{"input.0.content.1.text": "messages.0.content.0.text"},
+		},
+		{
 			name:  "reasoning and blank assistant discarded without matching repeated text",
 			input: `[{"type":"reasoning","content":[{"type":"reasoning_text","text":"same"}]},{"role":"assistant","content":" "},{"role":"user","content":"same"},{"role":"assistant","content":[{"type":"input_text","text":"same"},{"type":"output_text","text":"same"}]}]`,
 			want: map[string]string{

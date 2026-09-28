@@ -2864,11 +2864,14 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 func (r *accountRepository) CompareAndUpdateOpenAIAutoResetPreflight(
 	ctx context.Context,
 	accountID int64,
+	expectedAccount *service.Account,
 	expectedState *service.OpenAIAutoResetCreditState,
 	updates map[string]any,
 ) (bool, error) {
 	updates = service.StripRetiredCodexStateExtra(updates)
-	if accountID <= 0 || len(updates) == 0 {
+	if accountID <= 0 || len(updates) == 0 || expectedAccount == nil || expectedAccount.ID != accountID ||
+		expectedAccount.ParentAccountID != nil ||
+		(expectedAccount.OpenAIOAuthCredentialOwnerID != 0 && expectedAccount.OpenAIOAuthCredentialOwnerID != accountID) {
 		return false, nil
 	}
 	payload, err := json.Marshal(updates)
@@ -2884,6 +2887,7 @@ func (r *accountRepository) CompareAndUpdateOpenAIAutoResetPreflight(
 	contextTx := dbent.TxFromContext(ctx)
 	exec := r.sql
 	var tx *dbent.Tx
+	var sqlTx *sql.Tx
 	if contextTx != nil {
 		exec = contextTx.Client()
 	} else if r.client != nil {
@@ -2896,6 +2900,23 @@ func (r *accountRepository) CompareAndUpdateOpenAIAutoResetPreflight(
 			ctx = dbent.NewTxContext(ctx, tx)
 			exec = tx.Client()
 		}
+	} else if db, ok := r.sql.(*sql.DB); ok {
+		sqlTx, err = db.BeginTx(ctx, nil)
+		if err != nil {
+			return false, err
+		}
+		defer func() { _ = sqlTx.Rollback() }()
+		exec = sqlTx
+	}
+	// Authorization replacement locks accounts before its private grant. Acquire
+	// that same lock in a separate statement so the following metadata predicate
+	// sees a replacement that committed while this caller waited for the lock.
+	var lockedID int64
+	if err := scanSingleRow(ctx, exec, `SELECT id FROM accounts WHERE id=$1 AND deleted_at IS NULL FOR NO KEY UPDATE`, []any{accountID}, &lockedID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
 	}
 	result, err := exec.ExecContext(ctx, `
 		UPDATE accounts
@@ -2915,7 +2936,12 @@ func (r *accountRepository) CompareAndUpdateOpenAIAutoResetPreflight(
 				ELSE FALSE
 			END
 			AND COALESCE(extra -> 'codex_auto_reset_credit_state', 'null'::jsonb) = $3::jsonb
-	`, string(payload), accountID, string(expectedStateJSON))
+			AND (
+				($4 = '' AND NOT EXISTS (SELECT 1 FROM account_openai_oauth_credentials c WHERE c.account_id=accounts.id))
+				OR ($4 <> '' AND EXISTS (SELECT 1 FROM account_openai_oauth_credentials c
+					WHERE c.account_id=accounts.id AND c.authorization_generation::text=$4))
+			)
+	`, string(payload), accountID, string(expectedStateJSON), strings.TrimSpace(expectedAccount.OpenAIOAuthAuthorizationGeneration))
 	if err != nil {
 		return false, err
 	}
@@ -2931,6 +2957,11 @@ func (r *accountRepository) CompareAndUpdateOpenAIAutoResetPreflight(
 	}
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+	}
+	if sqlTx != nil {
+		if err := sqlTx.Commit(); err != nil {
 			return false, err
 		}
 	}

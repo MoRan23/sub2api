@@ -89,6 +89,7 @@ func TestToModelPlazaGroupDTO_UserRateAndFieldWhitelist(t *testing.T) {
 	g := service.PlazaGroup{
 		ID: 2, Name: "vip", Description: "d", Platform: "anthropic",
 		SubscriptionType: "standard", RateMultiplier: 1, IsExclusive: true,
+		VideoRateIndependent: true, VideoRateMultiplier: 0.7,
 		Models: []service.PlazaModel{{
 			Name:     "claude-sonnet",
 			Platform: "anthropic",
@@ -115,11 +116,14 @@ func TestToModelPlazaGroupDTO_UserRateAndFieldWhitelist(t *testing.T) {
 		"rate_multiplier", "user_rate_multiplier", "is_exclusive", "models",
 		"peak_rate_enabled", "peak_start", "peak_end", "peak_rate_multiplier",
 		"image_rate_independent", "image_rate_multiplier", "long_context_pricing_enabled",
+		"video_rate_independent", "video_rate_multiplier",
 	} {
 		_, exists := decoded[key]
 		require.Truef(t, exists, "plaza group DTO must expose %q", key)
 	}
 	require.InDelta(t, 0.5, decoded["user_rate_multiplier"].(float64), 1e-9)
+	require.Equal(t, true, decoded["video_rate_independent"])
+	require.Equal(t, 0.7, decoded["video_rate_multiplier"])
 
 	// 模型条目:pricing + official_pricing 并存;official 缺失字段输出 null 而非省略
 	models := decoded["models"].([]any)
@@ -147,6 +151,22 @@ func TestToModelPlazaGroupDTO_UserRateAndFieldWhitelist(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rawNoRate, &decodedNoRate))
 	_, hasRate := decodedNoRate["user_rate_multiplier"]
 	require.False(t, hasRate, "无专属倍率时 user_rate_multiplier 应 omitempty")
+}
+
+func TestToModelPlazaGroupDTO_IndependentMediaRatesPreserveExplicitZero(t *testing.T) {
+	group := service.PlazaGroup{
+		ID: 1, RateMultiplier: 2, ImageRateIndependent: true, ImageRateMultiplier: 0,
+		VideoRateIndependent: true, VideoRateMultiplier: 0,
+	}
+	data, err := json.Marshal(toModelPlazaGroupDTO(&group, map[int64]float64{1: 3}))
+	require.NoError(t, err)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(data, &body))
+	require.Equal(t, true, body["image_rate_independent"])
+	require.Equal(t, true, body["video_rate_independent"])
+	require.Equal(t, 0.0, body["image_rate_multiplier"])
+	require.Equal(t, 0.0, body["video_rate_multiplier"])
+	require.Equal(t, 3.0, body["user_rate_multiplier"])
 }
 
 func TestToModelPlazaOfficialPricing_NilPassthrough(t *testing.T) {

@@ -36,6 +36,9 @@ func TestCompareAndUpdateOpenAIAutoResetPreflightUsesEligibilityAndStateCAS(t *t
 			t.Cleanup(func() { _ = db.Close() })
 			expectedJSON, err := json.Marshal(test.expectedState)
 			require.NoError(t, err)
+			mock.ExpectBegin()
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM accounts WHERE id=$1 AND deleted_at IS NULL FOR NO KEY UPDATE")).
+				WithArgs(int64(17)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(17))
 			mock.ExpectExec(
 				`(?s)`+regexp.QuoteMeta("UPDATE accounts")+
 					`.*`+regexp.QuoteMeta("AND platform = 'openai'")+
@@ -46,18 +49,22 @@ func TestCompareAndUpdateOpenAIAutoResetPreflightUsesEligibilityAndStateCAS(t *t
 					`.*`+regexp.QuoteMeta("auto_reset_credit_enabled")+
 					`.*`+regexp.QuoteMeta("COALESCE(extra -> 'codex_auto_reset_credit_state', 'null'::jsonb) = $3::jsonb"),
 			).
-				WithArgs(sqlmock.AnyArg(), int64(17), string(expectedJSON)).
+				WithArgs(sqlmock.AnyArg(), int64(17), string(expectedJSON), "grant-1").
 				WillReturnResult(sqlmock.NewResult(0, test.affected))
 			if test.affected > 0 {
 				mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
 					WithArgs(service.SchedulerOutboxEventAccountChanged, int64(17), nil, nil, sqlmock.AnyArg()).
 					WillReturnResult(sqlmock.NewResult(1, 1))
+				mock.ExpectCommit()
+			} else {
+				mock.ExpectRollback()
 			}
 
 			repo := newAccountRepositoryWithSQL(nil, db, nil)
 			updated, err := repo.CompareAndUpdateOpenAIAutoResetPreflight(
 				context.Background(),
 				17,
+				&service.Account{ID: 17, OpenAIOAuthCredentialOwnerID: 17, OpenAIOAuthAuthorizationGeneration: "grant-1"},
 				test.expectedState,
 				map[string]any{
 					service.OpenAIAutoResetCreditStateExtraKey: &service.OpenAIAutoResetCreditState{Status: service.OpenAIAutoResetStatusNoCredit},

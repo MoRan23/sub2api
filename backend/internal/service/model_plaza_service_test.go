@@ -265,7 +265,8 @@ func TestListPlazaGroups_GroupImagePriceOverridesChannelPricing(t *testing.T) {
 	}}
 	groups := []Group{
 		{ID: 10, Name: "g-media", Platform: "openai", RateMultiplier: 1,
-			ImagePrice1K: &imgPrice, ImageRateIndependent: true, ImageRateMultiplier: 1},
+			ImagePrice1K: &imgPrice, ImageRateIndependent: true, ImageRateMultiplier: 1,
+			VideoRateIndependent: true, VideoRateMultiplier: 0.7},
 		{ID: 20, Name: "g-plain", Platform: "openai", RateMultiplier: 0.1},
 	}
 	svc := newPlazaService(channels, groups, nil)
@@ -279,6 +280,8 @@ func TestListPlazaGroups_GroupImagePriceOverridesChannelPricing(t *testing.T) {
 
 	media := byName["g-media"]
 	require.True(t, media.ImageRateIndependent)
+	require.True(t, media.VideoRateIndependent)
+	require.InDelta(t, 0.7, media.VideoRateMultiplier, 1e-9)
 	require.InDelta(t, 1.0, media.ImageRateMultiplier, 1e-9)
 	require.Len(t, media.Models, 1)
 	p := media.Models[0].Pricing
@@ -295,6 +298,7 @@ func TestListPlazaGroups_GroupImagePriceOverridesChannelPricing(t *testing.T) {
 
 	plain := byName["g-plain"]
 	require.False(t, plain.ImageRateIndependent)
+	require.False(t, plain.VideoRateIndependent)
 	require.Len(t, plain.Models, 1)
 	pp := plain.Models[0].Pricing
 	require.NotNil(t, pp)
@@ -303,6 +307,24 @@ func TestListPlazaGroups_GroupImagePriceOverridesChannelPricing(t *testing.T) {
 
 	// 合成为克隆,渠道原始定价不被修改
 	require.Len(t, channels[0].ModelPricing[0].Intervals, 1)
+}
+
+func TestListPlazaGroups_IndependentMediaRatesPreserveExplicitZero(t *testing.T) {
+	svc := newPlazaService([]Channel{{
+		ID: 1, Name: "media", Status: StatusActive, GroupIDs: []int64{10},
+		ModelPricing: []ChannelModelPricing{{Platform: PlatformOpenAI, Models: []string{"gpt-image-2"}, BillingMode: BillingModeImage}},
+	}}, []Group{{
+		ID: 10, Name: "free-media", Platform: PlatformOpenAI, RateMultiplier: 2,
+		ImageRateIndependent: true, ImageRateMultiplier: 0,
+		VideoRateIndependent: true, VideoRateMultiplier: 0,
+	}}, nil)
+	groups, err := svc.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+	require.True(t, groups[0].ImageRateIndependent)
+	require.True(t, groups[0].VideoRateIndependent)
+	require.Zero(t, groups[0].ImageRateMultiplier)
+	require.Zero(t, groups[0].VideoRateMultiplier)
 }
 
 func TestListPlazaGroups_GroupImagePriceIgnoredForNonImageModes(t *testing.T) {

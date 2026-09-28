@@ -644,7 +644,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 		// Current Codex HTTP no longer negotiates the legacy Responses
 		// experiment. Preserve independent beta tokens while removing only the
 		// obsolete negotiation before the final projection runs.
-		stripOpenAILegacyResponsesBeta(req.Header)
+		if account.UsesOpenAICodexProtocol() {
+			stripOpenAILegacyResponsesBeta(req.Header)
+		}
 		identityModeEnabled := s.openAIOutboundSessionIdentityModeEnabledForAccount(ctx, c, account)
 		projectionMode := OpenAIOAuthIdentityProjectionPassthrough
 		if isOpenAIResponsesCompactPath(c) {

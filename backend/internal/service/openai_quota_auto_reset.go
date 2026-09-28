@@ -29,6 +29,13 @@ const (
 	openAIAutoResetCycleJitter   = 5
 	openAIAutoResetBucketWidth   = openAIAutoResetCycleJitter*2 + 1
 	openAIAutoResetLeaderLockKey = "jobs:openai-auto-reset-credit"
+	// 查询阶段失败后的最短重试间隔。调度热路径和扫描都会触发评估，不设间隔时上游
+	// 故障期间同一账号会被十几秒重查一次；用卡阶段的失败不受此限，超时后仍立即用
+	// 同一幂等键重试。
+	openAIAutoResetQueryFailureRetryAfter = time.Minute
+	// 调度热路径每次过滤候选都会评估暂停，对同一账号的通知按此冷却合并；
+	// 后台每分钟全量扫描兜底，冷却不会让账号漏检。
+	openAIAutoResetSchedulerNotifyCooldown = 30 * time.Second
 )
 
 const (
@@ -70,6 +77,7 @@ type openAIAutoResetPreflightCASRepository interface {
 	CompareAndUpdateOpenAIAutoResetPreflight(
 		ctx context.Context,
 		accountID int64,
+		expectedAccount *Account,
 		expectedState *OpenAIAutoResetCreditState,
 		updates map[string]any,
 	) (bool, error)
@@ -301,16 +309,29 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 	if !isOpenAIAutoResetAccountEligible(account, config) {
 		return nil
 	}
+	// Freeze the grant before the query; a late observation cannot change the
+	// auto-reset state of a replacement authorization. Ordinary token refreshes
+	// retain this generation and therefore do not invalidate the observation.
+	expectedAccount, err := s.openAIAutoResetAuthorizationSnapshot(ctx, account)
+	if err != nil {
+		return err
+	}
 
 	now := time.Now()
 	assessment := s.assessExtra(account, config, now)
 	state := openAIAutoResetStateFromExtra(account.Extra)
+	// 达到用卡阈值本应立即查询以便用卡；但 10 分钟内已确认无卡时，重查不会改变结论，
+	// 只会让调度热路径的通知把同一账号的上游额度接口打到十几秒一次。
 	needsQuery := openAIAutoResetSnapshotStale(account.Extra, now) || assessment.resetReached
 	if assessment.pauseReached && !assessment.resetReached {
 		needsQuery = needsQuery || state == nil || state.Status == OpenAIAutoResetStatusChecking || state.Status == OpenAIAutoResetStatusFailed || openAIAutoResetStateStale(state, now)
 	}
+	queryBackoff := openAIAutoResetQueryFailureBackoffActive(state, now)
+	if openAIAutoResetNoCreditConfirmed(state, now) || queryBackoff {
+		needsQuery = false
+	}
 	if !needsQuery {
-		if !assessment.pauseReached && state != nil && state.TriggerWindow != "" {
+		if !queryBackoff && !assessment.pauseReached && state != nil && state.TriggerWindow != "" {
 			nextState := *state
 			nextState.TriggerWindow = ""
 			nextState.ErrorCode = ""
@@ -320,7 +341,7 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 			} else {
 				nextState.Status = OpenAIAutoResetStatusNoCredit
 			}
-			_, persistErr := s.persistOpenAIAutoResetPreflightCAS(ctx, accountID, nil, now, state, &nextState)
+			_, persistErr := s.persistOpenAIAutoResetPreflightCAS(ctx, accountID, expectedAccount, nil, now, state, &nextState)
 			return persistErr
 		}
 		return nil
@@ -331,13 +352,19 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 	// durable attempt provenance.
 	usage, err := s.quota.QueryUsage(ctx, accountID)
 	if err != nil {
-		return err
+		return s.persistOpenAIAutoResetQueryFailure(ctx, accountID, expectedAccount, state, assessment, "RESET_CREDIT_QUERY_FAILED", err)
 	}
 	if usage == nil {
-		return infraerrors.Conflict("RESET_CREDIT_QUERY_FAILED", "reset credit query returned an empty result")
+		queryErr := infraerrors.Conflict("RESET_CREDIT_QUERY_FAILED", "reset credit query returned an empty result")
+		return s.persistOpenAIAutoResetQueryFailure(ctx, accountID, expectedAccount, state, assessment, "RESET_CREDIT_QUERY_FAILED", queryErr)
 	}
 	if usage.RateLimitResetCredits == nil {
-		return infraerrors.Conflict("RESET_CREDIT_DETAILS_UNAVAILABLE", "reset credit details are unavailable")
+		queryErr := infraerrors.Conflict("RESET_CREDIT_DETAILS_UNAVAILABLE", "reset credit details are unavailable")
+		return s.persistOpenAIAutoResetQueryFailure(ctx, accountID, expectedAccount, state, assessment, "RESET_CREDIT_DETAILS_UNAVAILABLE", queryErr)
+	}
+	if credits := usage.RateLimitResetCredits; credits.AvailableCount > 0 && len(credits.Credits) == 0 {
+		queryErr := infraerrors.New(http.StatusBadGateway, "OPENAI_QUOTA_RESET_CREDITS_REFRESH_FAILED", "failed to refresh reset-credit expiration details; cached data was preserved")
+		return s.persistOpenAIAutoResetQueryFailure(ctx, accountID, expectedAccount, state, assessment, "RESET_CREDIT_DETAILS_UNAVAILABLE", queryErr)
 	}
 
 	// QueryUsage 期间其他实例可能已经记录或完成同周期 attempt。这里的重读既
@@ -362,16 +389,19 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		if available > 0 {
 			status = OpenAIAutoResetStatusAvailable
 		}
-		_, persistErr := s.persistOpenAIAutoResetPreflightCAS(ctx, accountID, usage, now, state, &OpenAIAutoResetCreditState{
+		_, persistErr := s.persistOpenAIAutoResetPreflightCAS(ctx, accountID, expectedAccount, usage, now, state, &OpenAIAutoResetCreditState{
 			Status:         status,
 			TriggerWindow:  assessment.triggerWindow,
 			AvailableCount: available,
 			CheckedAt:      now.UTC().Format(time.RFC3339),
 		})
+		if persistErr != nil {
+			return s.persistOpenAIAutoResetQueryFailure(ctx, accountID, expectedAccount, state, assessment, "USAGE_SNAPSHOT_WRITE_FAILED", persistErr)
+		}
 		return persistErr
 	}
 	if available <= 0 {
-		_, persistErr := s.persistOpenAIAutoResetPreflightCAS(ctx, accountID, usage, now, state, &OpenAIAutoResetCreditState{
+		_, persistErr := s.persistOpenAIAutoResetPreflightCAS(ctx, accountID, expectedAccount, usage, now, state, &OpenAIAutoResetCreditState{
 			Status:         OpenAIAutoResetStatusNoCredit,
 			TriggerWindow:  assessment.triggerWindow,
 			AvailableCount: 0,
@@ -379,6 +409,9 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 			LastResultAt:   now.UTC().Format(time.RFC3339),
 			ErrorCode:      "NO_RESET_CREDIT",
 		})
+		if persistErr != nil {
+			return s.persistOpenAIAutoResetQueryFailure(ctx, accountID, expectedAccount, state, assessment, "USAGE_SNAPSHOT_WRITE_FAILED", persistErr)
+		}
 		return persistErr
 	}
 
@@ -507,7 +540,7 @@ func (s *OpenAIQuotaAutoResetService) evaluateAccount(ctx context.Context, accou
 		failed.Status = OpenAIAutoResetStatusFailed
 		failed.ErrorCode = infraerrors.Reason(err)
 		failed.LastResultAt = time.Now().UTC().Format(time.RFC3339)
-		updated, persistErr := s.persistOpenAIAutoResetPreflightCAS(ctx, accountID, nil, time.Now(), latestState, &failed)
+		updated, persistErr := s.persistOpenAIAutoResetPreflightCAS(ctx, accountID, expectedAccount, nil, time.Now(), latestState, &failed)
 		if persistErr != nil {
 			return persistErr
 		}
@@ -784,6 +817,7 @@ func (s *OpenAIQuotaAutoResetService) persistFreshUsageAndState(ctx context.Cont
 func (s *OpenAIQuotaAutoResetService) persistOpenAIAutoResetPreflightCAS(
 	ctx context.Context,
 	accountID int64,
+	expectedAccount *Account,
 	usage *OpenAIQuotaUsage,
 	now time.Time,
 	expectedState *OpenAIAutoResetCreditState,
@@ -822,8 +856,61 @@ func (s *OpenAIQuotaAutoResetService) persistOpenAIAutoResetPreflightCAS(
 	if len(updates) == 0 {
 		return false, nil
 	}
-	updated, err := repo.CompareAndUpdateOpenAIAutoResetPreflight(ctx, accountID, expectedState, updates)
+	updated, err := repo.CompareAndUpdateOpenAIAutoResetPreflight(ctx, accountID, expectedAccount, expectedState, updates)
 	return updated, err
+}
+
+func (s *OpenAIQuotaAutoResetService) openAIAutoResetAuthorizationSnapshot(ctx context.Context, account *Account) (*Account, error) {
+	snapshot := *account
+	reader, ok := s.accountRepo.(OpenAIOAuthOSCredentialsReader)
+	if !ok {
+		return &snapshot, nil
+	}
+	// Empty OS asks the reader for the shared authorization's default profile;
+	// this is read-only and does not initialize installation identities.
+	slot, err := reader.GetOpenAIOAuthOSCredential(ctx, account.ID, "")
+	if err != nil {
+		return nil, err
+	}
+	if slot == nil {
+		snapshot.OpenAIOAuthCredentialOwnerID = 0
+		snapshot.OpenAIOAuthAuthorizationGeneration = ""
+		return &snapshot, nil
+	}
+	if slot.OwnerAccountID != account.ID {
+		return nil, ErrOpenAIOAuthOSAuthorizationChanged
+	}
+	snapshot.OpenAIOAuthCredentialOwnerID = slot.OwnerAccountID
+	snapshot.OpenAIOAuthAuthorizationGeneration = slot.AuthorizationGeneration
+	return &snapshot, nil
+}
+
+func (s *OpenAIQuotaAutoResetService) persistOpenAIAutoResetQueryFailure(
+	ctx context.Context,
+	accountID int64,
+	expectedAccount *Account,
+	expectedState *OpenAIAutoResetCreditState,
+	assessment openAIAutoResetAssessment,
+	code string,
+	queryErr error,
+) error {
+	failed := OpenAIAutoResetCreditState{}
+	if expectedState != nil {
+		// Keep any durable attempt identity. A query failure must never make the
+		// next evaluation eligible to consume a different credit for that cycle.
+		failed = *expectedState
+	}
+	failed.Status = OpenAIAutoResetStatusFailed
+	failed.TriggerWindow = assessment.triggerWindow
+	failed.ErrorCode = code
+	now := time.Now()
+	failed.LastResultAt = now.UTC().Format(time.RFC3339)
+	// A timed-out query often exhausts the worker's context. Persist its bounded
+	// retry marker independently, with the original state and grant CAS guards.
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	_, persistErr := s.persistOpenAIAutoResetPreflightCAS(persistCtx, accountID, expectedAccount, nil, now, expectedState, &failed)
+	return errors.Join(queryErr, persistErr)
 }
 
 func selectOpenAIAutoResetCandidate(candidates []openAIAutoResetCreditCandidate, available int, previous *OpenAIAutoResetCreditState, cycleHash string) (openAIAutoResetCreditCandidate, error) {
@@ -1014,6 +1101,30 @@ func openAIAutoResetStateFromExtra(extra map[string]any) *OpenAIAutoResetCreditS
 	return &state
 }
 
+// openAIAutoResetNoCreditConfirmed 报告账号在状态有效期内已被确认无卡。
+func openAIAutoResetNoCreditConfirmed(state *OpenAIAutoResetCreditState, now time.Time) bool {
+	return state != nil && state.Status == OpenAIAutoResetStatusNoCredit && !openAIAutoResetStateStale(state, now)
+}
+
+// openAIAutoResetQueryFailureBackoffActive 报告查询阶段刚失败、仍在重试间隔内。
+// 只覆盖查询、快照写入、卡明细缺失三类失败；用卡阶段的失败需要立即按原幂等键重试。
+func openAIAutoResetQueryFailureBackoffActive(state *OpenAIAutoResetCreditState, now time.Time) bool {
+	if state == nil || state.Status != OpenAIAutoResetStatusFailed {
+		return false
+	}
+	switch state.ErrorCode {
+	case "RESET_CREDIT_QUERY_FAILED", "USAGE_SNAPSHOT_WRITE_FAILED", "RESET_CREDIT_DETAILS_UNAVAILABLE":
+	default:
+		return false
+	}
+	failedAt, err := time.Parse(time.RFC3339, state.LastResultAt)
+	if err != nil {
+		return false
+	}
+	elapsed := now.Sub(failedAt)
+	return elapsed >= 0 && elapsed < openAIAutoResetQueryFailureRetryAfter
+}
+
 func openAIAutoResetStateStale(state *OpenAIAutoResetCreditState, now time.Time) bool {
 	if state == nil || state.CheckedAt == "" {
 		return true
@@ -1091,4 +1202,36 @@ func notifyOpenAIAutoReset(accountID int64) {
 // NotifyOpenAIAutoResetCredit 供额度查询入口发送轻量信号；不执行同步上游请求。
 func NotifyOpenAIAutoResetCredit(accountID int64) {
 	notifyOpenAIAutoReset(accountID)
+}
+
+// openAIAutoResetSchedulerNotifiedAt 记录调度热路径最近一次为某账号发出通知的时间。
+var openAIAutoResetSchedulerNotifiedAt sync.Map // accountID(int64) -> time.Time
+
+// notifyOpenAIAutoResetFromScheduler 供调度候选过滤使用。候选过滤按请求逐账号执行，
+// 每条通知都会让后台读一次账号，不做冷却时无卡或待用卡的账号会持续占满后台协程。
+func notifyOpenAIAutoResetFromScheduler(accountID int64) {
+	notifyOpenAIAutoResetFromSchedulerAt(accountID, time.Now())
+}
+
+func notifyOpenAIAutoResetFromSchedulerAt(accountID int64, now time.Time) bool {
+	if accountID <= 0 {
+		return false
+	}
+	for {
+		last, loaded := openAIAutoResetSchedulerNotifiedAt.LoadOrStore(accountID, now)
+		if !loaded {
+			break
+		}
+		if lastAt, ok := last.(time.Time); ok {
+			elapsed := now.Sub(lastAt)
+			if elapsed >= 0 && elapsed < openAIAutoResetSchedulerNotifyCooldown {
+				return false
+			}
+		}
+		if openAIAutoResetSchedulerNotifiedAt.CompareAndSwap(accountID, last, now) {
+			break
+		}
+	}
+	notifyOpenAIAutoReset(accountID)
+	return true
 }

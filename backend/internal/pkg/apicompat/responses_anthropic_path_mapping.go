@@ -170,6 +170,11 @@ func responsesAnthropicPathContent(raw json.RawMessage, prefix, role string, pat
 			sources = append(sources, fmt.Sprintf("%s.%d.text", prefix, i))
 		} else if role == "user" && part.Type == "input_image" && dataURIToAnthropicImageSource(part.ImageURL) != nil {
 			sources = append(sources, "")
+		} else if role == "user" && part.Type == "input_file" && dataURIToAnthropicFileSource(part.FileData) != nil {
+			// Documents occupy a destination block just like images. Use the
+			// converter's predicate so skipped file IDs and malformed data URIs
+			// do not shift the provenance of the text that follows them.
+			sources = append(sources, "")
 		}
 	}
 	return sources

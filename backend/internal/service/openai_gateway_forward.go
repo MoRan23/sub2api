@@ -1610,6 +1610,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 			req.Header.Del("OpenAI-Beta")
 			req.Header.Del("originator")
 		} else {
+			if account.UsesOpenAICodexProtocol() {
+				stripOpenAILegacyResponsesBeta(req.Header)
+			}
 			req.Header.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
 		}
 		// The legacy compact branch is overridden by prompt_cache_key when both
