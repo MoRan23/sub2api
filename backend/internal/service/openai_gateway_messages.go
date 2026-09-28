@@ -44,6 +44,14 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	ctx = withOpenAIExcelRequestScope(ctx, c, account, body)
+	ctx = withOpenAIBackendIngressSource(ctx, c, body)
+	if err := rejectOpenAIExcelContinuation(c, account, body); err != nil {
+		return nil, err
+	}
+	if c != nil && c.Request != nil {
+		c.Request = c.Request.WithContext(ctx)
+	}
 	if account != nil && account.IsOpenAIOAuth() {
 		var scopeErr error
 		ctx, account, scopeErr = s.prepareOpenAIOAuthRequestScope(ctx, c, account, body)

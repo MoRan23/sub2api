@@ -435,6 +435,14 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if writeClientMessage == nil {
 		return nil, errors.New("client websocket writer is nil")
 	}
+	ctx = withOpenAIExcelRequestScope(ctx, c, account, payload)
+	ctx = withOpenAIBackendIngressSource(ctx, c, payload)
+	if err := rejectOpenAIExcelContinuation(c, account, payload); err != nil {
+		return nil, err
+	}
+	if c != nil && c.Request != nil {
+		c.Request = c.Request.WithContext(ctx)
+	}
 	telemetryTurnCtx, finishTelemetryTurn := context.WithCancel(ctx)
 	defer finishTelemetryTurn()
 	responseModelObserver := &upstreamResponseModelObserver{}

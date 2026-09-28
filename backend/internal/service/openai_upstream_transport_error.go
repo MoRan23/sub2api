@@ -118,6 +118,25 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	if isOpenAICandyTest(ctx) || isOpenAICandyTestContext(c) {
 		return safeCandyTestError(ctx, err)
 	}
+	var preparationErr *openAIExcelPreparationError
+	if errors.As(err, &preparationErr) {
+		status, code, message := http.StatusBadGateway, "excel_preparation_failed", "Unable to prepare Excel upstream request"
+		var requestErr *OpenAIExcelRequestError
+		if errors.As(err, &requestErr) {
+			status, code, message = http.StatusBadRequest, requestErr.Code, requestErr.Message
+		}
+		if c != nil && !IsResponseCommitted(c) {
+			c.JSON(status, gin.H{"error": gin.H{"type": "invalid_request_error", "code": code, "message": message}})
+		}
+		return err // Local validation/storage failure: no network send or account failover.
+	}
+	var excelResponseErr *openAIExcelResponseError
+	if errors.As(err, &excelResponseErr) {
+		if c != nil && !IsResponseCommitted(c) {
+			c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"type": "upstream_error", "code": "excel_response_invalid", "message": excelResponseErr.Error()}})
+		}
+		return err // Already sent; do not replay or alter OAuth account health.
+	}
 	if isClientCanceledTransportError(ctx, err) {
 		return err
 	}

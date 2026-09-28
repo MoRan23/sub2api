@@ -99,6 +99,9 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	if isOpenAICandyTest(ctx) {
 		return false
 	}
+	if isOpenAIExcelCapabilityForbidden(account, statusCode, responseBody) {
+		return false
+	}
 	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(statusCode, responseBody) {
 		return false
 	}

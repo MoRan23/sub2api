@@ -1803,7 +1803,8 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	if err := validateOpenAIImagesModel(upstreamModel); err != nil {
 		return nil, err
 	}
-	direct := usesCodexDirectImages(upstreamModel) && !isOpenAIImagesForceResponses(ctx)
+	excel := account.IsOpenAIExcelUpstreamEnabled()
+	direct := excel || (usesCodexDirectImages(upstreamModel) && !isOpenAIImagesForceResponses(ctx))
 	beginUpstreamResponseModelObservation(c)
 	SetOpsUpstreamModel(c, upstreamModel)
 	logger.LegacyPrintf(
@@ -1824,7 +1825,9 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 
 	var responsesBody []byte
 	var targetURL string
-	if direct {
+	if excel {
+		responsesBody, targetURL, err = buildOpenAIExcelImagePayload(parsed, upstreamModel)
+	} else if direct {
 		responsesBody, targetURL, err = buildOpenAIImagesOAuthPayload(parsed, upstreamModel)
 	} else {
 		responsesBody, err = buildOpenAIImagesResponsesRequest(parsed, upstreamModel)
@@ -1854,6 +1857,15 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		upstreamReq.Header.Set("OpenAI-Beta", "responses=experimental")
 	}
 	upstreamReq = ApplyOpenAIRequestPolicy(upstreamReq, s.settingService)
+	if excel {
+		if err := setOpenAIExcelImageTarget(upstreamReq, targetURL); err != nil {
+			return nil, err
+		}
+		upstreamReq, err = s.prepareOpenAIExcelImageRequest(upstreamReq, account)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -1882,7 +1894,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		respBody := s.readUpstreamErrorBody(resp)
 		_ = resp.Body.Close()
 		respBody = s.redactAgentIdentitySensitiveBody(upstreamCtx, account, respBody)
-		if direct && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) {
+		if direct && !excel && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) {
 			return s.forwardOpenAIImagesOAuth(withOpenAIImagesForceResponses(ctx), c, account, parsed, channelMappedModel)
 		}
 		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
@@ -1925,6 +1937,18 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, upstreamModel)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if excel {
+		imageBody, readErr := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
+		if readErr != nil {
+			return nil, readErr
+		}
+		imageBody, readErr = s.backfillOpenAIExcelImageURLs(upstreamCtx, account, imageBody)
+		if readErr != nil {
+			return nil, readErr
+		}
+		_ = resp.Body.Close()
+		resp.Body = io.NopCloser(bytes.NewReader(imageBody))
+	}
 
 	var (
 		usage            OpenAIUsage
@@ -1936,7 +1960,9 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	// keepalive 心跳字节，避免 failover 第 2 轮起把上一轮心跳残留误判为已写响应。
 	writerSizeBeforeResponse := OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c)
 	if parsed.Stream {
-		if direct {
+		if excel {
+			usage, imageCount, imageOutputSizes, firstTokenMs, err = s.handleOpenAIExcelImagesStream(resp, c, startTime, parsed)
+		} else if direct {
 			usage, imageCount, imageOutputSizes, firstTokenMs, err = s.handleOpenAIImagesStreamingResponse(resp, c, startTime, parsed)
 		} else {
 			usage, imageCount, imageOutputSizes, firstTokenMs, err = s.handleOpenAIImagesOAuthStreamingResponse(resp, c, startTime, parsed.ResponseFormat, openAIImagesStreamPrefix(parsed), upstreamModel)
@@ -1992,7 +2018,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 			)
 		}
 	}
-	if imageCount <= 0 {
+	if imageCount <= 0 && !excel {
 		imageCount = parsed.N
 	}
 	return &OpenAIForwardResult{

@@ -40,6 +40,10 @@ func supplementUnmappedOpenAIModels(accounts []Account, models []string) []strin
 	for i := range accounts {
 		account := &accounts[i]
 		if account.Platform == PlatformOpenAI && (account.IsOpenAIPassthroughEnabled() || len(account.GetModelMapping()) == 0) {
+			if account.IsOpenAIExcelUpstreamEnabled() {
+				models = dedupeAndSortModelIDs(slices.Concat(models, OpenAIExcelSupportedModels()))
+				continue
+			}
 			return dedupeAndSortModelIDs(slices.Concat(models, openai.DefaultModelIDs()))
 		}
 	}

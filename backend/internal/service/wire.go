@@ -309,6 +309,7 @@ func ProvideOpenAIGatewayService(
 	dailySessionRepo OAuthDailySessionRepository,
 	codexTelemetry *CodexTelemetryService,
 	egressLocation *OpenAIEgressLocationService,
+	excelEncryptor SecretEncryptor,
 ) *OpenAIGatewayService {
 	svc := NewOpenAIGatewayService(
 		accountRepo, usageLogRepo, usageBillingRepo, userRepo, userSubRepo, userGroupRateRepo,
@@ -320,6 +321,9 @@ func ProvideOpenAIGatewayService(
 	svc.SetOAuthDailySessionRepository(dailySessionRepo)
 	svc.SetCodexTelemetryService(codexTelemetry)
 	svc.egressLocationService = egressLocation
+	if store, ok := cache.(OpenAIExcelStateBackend); ok {
+		svc.excelState = NewOpenAIExcelStateStore(store, excelEncryptor)
+	}
 	return svc
 }
 

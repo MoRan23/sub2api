@@ -94,6 +94,7 @@ type openAIWSFinalizingUpstreamFrameConn struct {
 	afterWrite      func(msgType coderws.MessageType, payload []byte, err error)
 	afterWriteTimed func(msgType coderws.MessageType, payload []byte, started, finished time.Time, err error)
 	afterRead       func(msgType coderws.MessageType, payload []byte, started, finished time.Time, err error)
+	validateRead    func(msgType coderws.MessageType, payload []byte) error
 }
 
 var _ openaiwsv2.FrameConn = (*openAIWSFinalizingUpstreamFrameConn)(nil)
@@ -104,6 +105,9 @@ func (c *openAIWSFinalizingUpstreamFrameConn) ReadFrame(ctx context.Context) (co
 	}
 	started := time.Now()
 	msgType, payload, err := c.inner.ReadFrame(ctx)
+	if err == nil && c.validateRead != nil {
+		err = c.validateRead(msgType, payload)
+	}
 	if c.afterRead != nil {
 		c.afterRead(msgType, payload, started, time.Now(), err)
 	}
@@ -751,6 +755,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return err
 	}
 	rawFirstClientMessage := append([]byte(nil), firstClientMessage...)
+	ctx = withOpenAIExcelRequestScope(ctx, c, account, rawFirstClientMessage)
+	ctx = withOpenAIBackendIngressSource(ctx, c, rawFirstClientMessage)
 	ctx = captureOpenAIRequestOSContext(ctx, c, rawFirstClientMessage)
 	if account.IsOpenAIOAuth() {
 		s.beginOpenAIWSRequestIntegrityTurn(ctx, c, rawFirstClientMessage, false)
@@ -779,6 +785,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	// For OAuth-like accounts, the physical-frame finalizer owns Responses Lite
 	// normalization after the final model and manifest capability are frozen.
+	wsBackendScope := s.openAIExcelHistoryScope(ctx, account, c.Request.Header, firstClientMessage)
+	if err := s.validateOpenAIBackendWSRequest(ctx, account, wsBackendScope, firstClientMessage, c.Request.Header); err != nil {
+		return err
+	}
 	originalFirstClientMessage := firstClientMessage
 	if next, policyErr := applyOpenAIWSReasoningEffortPolicy(firstClientMessage, hooks); policyErr != nil {
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
@@ -1089,9 +1099,18 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	telemetryFrameNumber := 0
 	physicalUpstreamFrameConn := &openAIWSFinalizingUpstreamFrameConn{
 		inner: relayUpstreamFrameConn,
+		validateRead: func(msgType coderws.MessageType, payload []byte) error {
+			if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
+				return nil
+			}
+			return s.rememberOpenAIBackendWSResponse(ctx, account, wsBackendScope, payload, handshakeHeaders)
+		},
 		finalize: func(msgType coderws.MessageType, payload []byte) ([]byte, error) {
 			if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
 				return payload, nil
+			}
+			if err := s.validateOpenAIBackendWSRequest(ctx, account, wsBackendScope, payload, headers); err != nil {
+				return nil, err
 			}
 			outboundIdentityMu.Lock()
 			framePlan := outboundIdentityPlan
@@ -1191,6 +1210,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 			isResponseCreate := eventType == "response.create"
+			if err := s.validateOpenAIBackendPayload(ctx, account, wsBackendScope, payload, nil); err != nil {
+				return nil, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "upstream continuation is unavailable; start a new conversation", err)
+			}
 			responseCreateAt := time.Now()
 			var frameIdentityPlan OpenAIOAuthIdentityPlan
 			if isResponseCreate && outboundIdentityModeEnabled {

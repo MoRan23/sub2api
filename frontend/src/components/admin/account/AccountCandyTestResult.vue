@@ -63,6 +63,7 @@ const failureReason = computed(() => {
   return te(key) ? t(key) : props.item.failure_code
 })
 const fields = computed(() => [
+  { label: t('candyTests.upstreamKind'), value: props.item.execution?.upstream_kind ? t(`candyTests.upstreamKinds.${props.item.execution.upstream_kind}`) : '—' },
   { label: t('candyTests.requestedModel'), value: props.item.execution?.requested_model || props.item.model },
   { label: t('candyTests.effort'), value: props.item.reasoning_effort || t('candyTests.defaultEffort') },
   { label: t('candyTests.outboundModel'), value: props.item.execution?.actual_model || t('candyTests.missing') },

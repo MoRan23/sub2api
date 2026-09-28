@@ -192,6 +192,8 @@ export default {
           disabled: 'Integrity observation is disabled', missing_baseline: 'Comparison baseline is missing', body_too_large: 'Request body exceeds the check size limit',
           parse_failed: 'Request body could not be parsed', depth_limit: 'JSON nesting exceeds the check depth limit', node_limit: 'JSON node count exceeds the check limit',
           content_changed: 'Content changes are not explained by known rules', checker_failure: 'The checker failed to complete',
+          excel_protocol_not_applicable: 'Excel protocol conversion: Codex integrity checks do not apply',
+          excel_protocol_conversion: 'Converted to the Excel upstream protocol',
           baseline_body_too_large: 'Baseline body exceeds the check size limit', outbound_body_too_large: 'Outbound body exceeds the check size limit',
           baseline_depth_limit: 'Baseline JSON nesting exceeds the check depth limit', outbound_depth_limit: 'Outbound JSON nesting exceeds the check depth limit',
           baseline_node_limit: 'Baseline JSON node count exceeds the check limit', outbound_node_limit: 'Outbound JSON node count exceeds the check limit',

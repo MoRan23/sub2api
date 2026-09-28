@@ -464,6 +464,7 @@ type OpenAIGatewayService struct {
 	httpUpstream          HTTPUpstream
 	pluginManager         *PluginManager
 	codexTelemetry        *CodexTelemetryService
+	excelState            *OpenAIExcelStateStore
 	egressLocationService *OpenAIEgressLocationService
 	deferredService       *DeferredService
 	openAITokenProvider   *OpenAITokenProvider
@@ -634,6 +635,9 @@ func (s *OpenAIGatewayService) ResolveChannelMappingAndRestrict(ctx context.Cont
 }
 
 func (s *OpenAIGatewayService) isCodexImageGenerationBridgeEnabled(ctx context.Context, account *Account, apiKey *APIKey) bool {
+	if account != nil && account.IsOpenAIExcelUpstreamEnabled() {
+		return false
+	}
 	if override := account.CodexImageGenerationBridgeOverride(); override != nil {
 		return *override
 	}

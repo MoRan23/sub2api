@@ -21,6 +21,9 @@ func (s *OpenAIGatewayService) FetchCandyTestModels(ctx context.Context, account
 	if s == nil || account == nil || !account.IsOpenAI() {
 		return nil, candyTestError("unsupported_platform")
 	}
+	if account.IsOpenAIExcelUpstreamEnabled() {
+		return s.excelModelsResponse(account)
+	}
 	ctx, cancel := context.WithTimeout(ctx, codexModelsManifestRequestTimeout)
 	defer cancel()
 	ctx = withOpenAICandyTest(ctx, &openAICandyTestAttempt{})
@@ -40,6 +43,9 @@ func (s *OpenAIGatewayService) FetchCandyTestModels(ctx context.Context, account
 func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
 	if s == nil || account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_MODELS_ACCOUNT_REQUIRED", "OpenAI account is required")
+	}
+	if account.IsOpenAIExcelUpstreamEnabled() {
+		return s.excelModelsResponse(account)
 	}
 	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	credentialAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)

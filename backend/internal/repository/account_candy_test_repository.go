@@ -67,7 +67,11 @@ func (r *accountCandyTestRepository) Create(ctx context.Context, request *servic
 		return nil, err
 	}
 	for _, item := range items {
-		_, err = tx.ExecContext(ctx, `INSERT INTO account_candy_test_items(batch_id,account_id,account_name,model,reasoning_effort,prompt_version,status,failure_code,finished_at) VALUES($1,$2,$3,$4,$5,$6,$7::varchar,$8,CASE WHEN $7::varchar='skipped' THEN NOW() ELSE NULL END)`, id, item.AccountID, item.AccountName, request.Model, request.ReasoningEffort, service.CandyTestPromptVersion, item.Status, item.FailureCode)
+		route, marshalErr := json.Marshal(map[string]string{"upstream_kind": item.ExpectedUpstreamKind, "route_generation": item.ExpectedRouteGeneration})
+		if marshalErr != nil {
+			return nil, marshalErr
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO account_candy_test_items(batch_id,account_id,account_name,model,reasoning_effort,prompt_version,status,failure_code,finished_at,execution) VALUES($1,$2,$3,$4,$5,$6,$7::varchar,$8,CASE WHEN $7::varchar='skipped' THEN NOW() ELSE NULL END,$9::jsonb)`, id, item.AccountID, item.AccountName, request.Model, request.ReasoningEffort, service.CandyTestPromptVersion, item.Status, item.FailureCode, route)
 		if err != nil {
 			return nil, err
 		}
@@ -93,6 +97,14 @@ func scanCandyItem(row scannable) (*service.CandyTestItem, error) {
 		return nil, err
 	}
 	if len(execution) > 0 {
+		var route struct {
+			Kind       string `json:"upstream_kind"`
+			Generation string `json:"route_generation"`
+		}
+		if err := json.Unmarshal(execution, &route); err != nil {
+			return nil, err
+		}
+		i.ExpectedUpstreamKind, i.ExpectedRouteGeneration = route.Kind, route.Generation
 		if err := json.Unmarshal(execution, &i.Execution); err != nil {
 			return nil, err
 		}

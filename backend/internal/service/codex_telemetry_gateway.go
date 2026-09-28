@@ -25,6 +25,9 @@ func (s *OpenAIGatewayService) SetCodexTelemetryService(telemetry *CodexTelemetr
 func (s *OpenAIGatewayService) beginCodexTelemetryFromWire(
 	ctx context.Context, account *Account, headers http.Header, body []byte, proxyURL string, websocket bool,
 ) *CodexTelemetryAttempt {
+	if account != nil && account.IsOpenAIExcelUpstreamEnabled() {
+		return nil
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}

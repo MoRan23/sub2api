@@ -191,6 +191,8 @@ export default {
           disabled: '完整性观察已关闭', missing_baseline: '缺少比较基线', body_too_large: '正文超过检查大小上限',
           parse_failed: '正文解析失败', depth_limit: 'JSON 嵌套深度超过检查上限', node_limit: 'JSON 节点数超过检查上限',
           content_changed: '内容字段发生未被已知规则解释的变化', checker_failure: '检查器异常，未能完成检查',
+          excel_protocol_not_applicable: 'Excel 协议转换：Codex 完整性检查不适用',
+          excel_protocol_conversion: '转换为 Excel 上游协议',
           baseline_body_too_large: '基线正文超过检查大小上限', outbound_body_too_large: '出站正文超过检查大小上限',
           baseline_depth_limit: '基线 JSON 嵌套深度超过检查上限', outbound_depth_limit: '出站 JSON 嵌套深度超过检查上限',
           baseline_node_limit: '基线 JSON 节点数超过检查上限', outbound_node_limit: '出站 JSON 节点数超过检查上限',

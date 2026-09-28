@@ -40,6 +40,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	}
 	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	rawRequest := payloadAsJSONBytes(reqBody)
+	ctx = withOpenAIExcelRequestScope(ctx, c, account, rawRequest)
+	ctx = withOpenAIBackendIngressSource(ctx, c, rawRequest)
 	if account.UsesOpenAICodexProtocol() {
 		if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
 			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, rawRequest, ""))
@@ -409,6 +411,15 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if raw, ok := wirePayload.(json.RawMessage); ok {
 		observationBody = raw
 	}
+	wsBackendScope := s.openAIExcelHistoryScope(ctx, account, wsHeaders, observationBody)
+	if err := s.validateOpenAIBackendWSRequest(ctx, account, wsBackendScope, observationBody, wsHeaders); err != nil {
+		lease.MarkBroken()
+		return nil, err
+	}
+	if err := s.rememberOpenAIBackendWSResponse(ctx, account, wsBackendScope, nil, lease.HandshakeHeaders()); err != nil {
+		lease.MarkBroken()
+		return nil, err
+	}
 	wirePayload = json.RawMessage(observationBody)
 	responseEvidence := beginOpenAIResponseEvidence(c, gjson.GetBytes(observationBody, "model").String())
 	observeOpenAIResponseEvidenceHeaders(responseEvidence, lease.ClaimResponseEvidenceHeaders(), "connection")
@@ -754,6 +765,10 @@ readLoop:
 			}
 			setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(readErr.Error()), "")
 			return nil, fmt.Errorf("openai ws read event: %w", readErr)
+		}
+		if err := s.rememberOpenAIBackendWSResponse(ctx, account, wsBackendScope, message, nil); err != nil {
+			lease.MarkBroken()
+			return nil, err
 		}
 		if normalized, changed := normalizeCompletedImageGenerationStatus(message); changed {
 			message = normalized
