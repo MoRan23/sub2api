@@ -4,7 +4,7 @@
 
 适配器使用固定的 `https://bps.openai.com/basispoints/api/`。进入 Excel 路径后，最终出站请求统一使用 Windows Excel WebView2 兼容 UA 模板（Windows 10 x64、Chrome/131、Edg/131），native HTTP transport 选择 Windows TLS。该模板是协议兼容配置，不表示来自真实抓取或本机安装的 Office 版本。这只覆盖 Excel 请求，普通 Codex 请求仍使用用户实际系统对应的 UA/TLS。installation ID、账号代理和会话身份仍来自冻结的账号请求计划。Excel 模型目录是本地内置目录，不是实时上游发现，支持 `gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol`、`gpt-6-sol`、`gpt-6-luna`、`gpt-6-astra`，推理档位为 `low`、`medium`、`high`、`xhigh`，未指定时为 `medium`。
 
-工具调用只转接到客户端，不在服务端执行。function、custom 和 namespace 调用及工具回传会校验账号、授权代次、路由代次、租户和会话范围。Redis 中只保存加密后的最小调用关联和附件 ID：调用关联最多 7 天，附件映射最多 24 小时；不保存 token、完整会话、工具输出或图片原文。缺少可证明的授权代次、跨后端 opaque 状态、未知 file ID、`previous_response_id` 单独续接或不支持的 `/responses/compact` 会明确返回错误，不静默丢历史或回退 Codex。
+工具调用只转接到客户端，不在服务端执行。function、custom 和 namespace 调用及工具回传会校验账号、授权代次、路由代次、租户和会话范围。Redis 中只保存加密后的最小调用关联和附件 ID：调用关联最多 7 天，附件映射最多 24 小时；不保存 token、完整会话、工具输出或图片原文。缺少可证明的授权代次、跨后端 opaque 状态、未知 file ID、`previous_response_id` 单独续接或不支持的 `/responses/compact` 会明确返回错误，不静默丢历史或回退 Codex。没有客户端工具目录时，适配器会显式发送 `tool_choice=none`，并在协议提示中禁止调用 MCP、宿主、技能和可视化工具，避免把对话中提到的工具名误当成可执行工具。
 
 工具转换不能以“丢掉不能转换的调用，再返回成功”降级。任何调用无法恢复、缺少真实 `call_id` 或违反关闭并行的约束，整次响应都明确失败，不把前面的准备说明包装成完成。启用客户端工具时，仅有明确 `commentary`、没有最终回答或工具调用的响应也会失败；普通简短回答不按字数或内容猜测是否完成。工具协议提示包含实际行动要求和稳定前缀提醒，但不会增加隐式推理重试。
 

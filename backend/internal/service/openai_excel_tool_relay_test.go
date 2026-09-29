@@ -58,6 +58,8 @@ func TestExcelToolRelayNoToolsAndNoneDoNotRequireTools(t *testing.T) {
 		require.Empty(t, state.tools)
 		require.Empty(t, state.toolProtocolReminder())
 		require.Contains(t, openAIExcelPartsText(openAIExcelMap(items[1])["content"]), "Return the answer as assistant text")
+		require.Contains(t, openAIExcelPartsText(openAIExcelMap(items[1])["content"]), "mcp__fastctx.inspect_local_file")
+		require.Equal(t, "none", openAIExcelString(wire["tool_choice"]))
 		require.NoError(t, state.translateResponse(context.Background(), map[string]any{
 			"output": []any{openAIExcelMessage("assistant", "hello")},
 		}))
