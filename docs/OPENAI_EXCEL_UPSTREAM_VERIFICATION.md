@@ -70,18 +70,6 @@ PostgreSQL 集成测试已编写，并用 `go test -tags=integration ./internal/
 
 验证通过：`go test -race ./internal/service -run 'Excel' -count=1`、`go vet ./internal/service`。修正新增代码的两项 staticcheck 风格问题后，`go test -race ./internal/service -run 'Excel.*Diagnostic' -count=1` 再次通过，`golangci-lint run --new-from-rev=10c694681 ./internal/service/...` 为 `0 issues`。没有新增 lint 豁免，也没有放宽原有失败断言。
 
-后续服务器诊断确认了另一类实际请求：适配器解析后的工具目录为空，但上游仍返回 `mcp__fastctx.inspect_local_file`，因此按 `native_tool_undeclared` 拒绝。这只能证明适配器未识别声明，不能证明原始客户端没有提供工具。`88cca483c` 对空目录显式设置 `tool_choice=none`，但遗漏结构化 Lite 工具载体，并且有目录时的禁止文案过宽；下节修正这两项问题。
-
-## 2026-09-29：恢复已声明的 MCP 和编码工具，补齐 Lite 目录
-
-基线 `88cca483c`。对照 [cpa-plugin-oai-basispoints 固定提交 b8c4023302eb07e280c15f4b2946f5419fd9196d](https://github.com/JaxsonWang/cpa-plugin-oai-basispoints/tree/b8c4023302eb07e280c15f4b2946f5419fd9196d) 的 `clientToolSpecs` / `additional_tools_test.go`，以及本地 Codex `core/src/client.rs`，确认合法 Lite 请求通过 `input[].type=additional_tools` 承载工具，顶层 `tools` 可以不存在。此前适配器只读取顶层，因而漏掉有效 MCP/编码工具；这与服务端观测到的零工具目录相符，但旧日志未保存原始请求，不能据此还原该次入站报文。
-
-本次独立实现结构化目录兼容，不从提示词、技能说明或工具结果文本猜测定义。已声明 MCP、文件读写、命令、技能与可视化工具均允许按原协议转接；提示只禁止目录外调用。显式 `tool_choice=none` 仍保留用户禁用工具的语义。参考插件的认证复制、进程级调用缓存、隐式重生成和不同 relay 编码不在本次范围，继续使用现有唯一账号授权、隔离加密历史和一次发送规则。
-
-修复前通过真实普通/透传 Forward 入口的本地模拟复现 `relay_tool_undeclared`；仅带 Lite 声明并指定 required 时误报没有工具，none 时又把未消费的 `additional_tools` 直接交给 Excel。修复后两处声明共用同一目录并消费 Lite 载体，完全相同的重复声明合并，同名不同定义拒绝，不照搬参考插件的静默覆盖。工具结果为空字符串/数组时原样保留；missing/null 明确拒绝，中继输出清除客户端 `name` / `namespace`，以原生 `call_id` 回传。
-
-新增合成回归涵盖完整准备→响应转换→重建历史存储→后续请求，包含声明的 MCP 文件读取、命令执行和 custom 补丁、直接/native 与 run_officejs 中继、默认/auto/required、空目录/none/named choice、Lite 工具合并/冲突、普通消息伪装声明排除，以及空字符串/空数组/图片结果。所有测试只处理夹具，不执行其中的命令、补丁或 MCP 调用。
-
-`go test -race ./internal/service -run 'Excel' -count=1` 和 `go vet ./internal/service` 通过。新增入口夹具补齐类型断言检查后，`go test ./internal/service -run '(ExcelLiteAdditionalTools)' -count=1` 再次通过，`golangci-lint run --new-from-rev=88cca483c ./internal/service/...` 为 `0 issues`。前端和数据库结构未修改，未重跑其全量测试或外部存储集成。本次未发送真实上游、授权、MCP、业务或遥测请求，未部署或重启服务器。
+后续服务器诊断确认了另一类实际请求：请求工具目录为空，但上游仍返回 `mcp__fastctx.inspect_local_file`，因此按 `native_tool_undeclared` 安全拒绝。为避免模型从对话中的技能/宿主名称自行生成调用，空目录请求现在显式设置 `tool_choice=none`，并强化禁止调用 MCP、宿主、文件系统和可视化工具的协议提示；有目录请求也明确要求不创造目录外工具。该修正尚未部署。
 
 本次只改后端工具兼容及本地日志；没有数据库迁移或前端改动。未重跑前端全量、全后端非 Excel 测试或外部 PostgreSQL/Redis 集成；状态回放使用内存后端和测试加密器。本次未发送真实上游、授权或遥测请求，未部署或重启服务。

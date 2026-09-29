@@ -76,7 +76,7 @@ func TestExcelProtocolTextProjection(t *testing.T) {
 	items, ok := payload["input"].([]any)
 	require.True(t, ok)
 	require.Equal(t, "Keep my instruction", openAIExcelPartsText(openAIExcelMap(items[0])["content"]))
-	require.Contains(t, openAIExcelPartsText(openAIExcelMap(items[1])["content"]), "Do not emit function_call or custom_tool_call")
+	require.Contains(t, openAIExcelPartsText(openAIExcelMap(items[1])["content"]), "Do not call")
 	metadata := openAIExcelMap(payload["metadata"])
 	require.NotEqual(t, "untrusted", metadata["task_id"])
 	require.NotEqual(t, "untrusted", metadata["turn_id"])
