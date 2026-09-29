@@ -324,6 +324,15 @@ func TestPricingService_BareGPT56AliasDeterministicallyUsesSol(t *testing.T) {
 	}
 }
 
+func TestPricingService_ProbeDefaultDoesNotChangeLegacyFallback(t *testing.T) {
+	legacy := &LiteLLMModelPricing{InputCostPerToken: 2.5e-6}
+	svc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"gpt-5.4":     legacy,
+		"gpt-5.6-sol": {InputCostPerToken: 5e-6},
+	}}
+	require.Same(t, legacy, svc.matchOpenAIModel("gpt-unlisted"))
+}
+
 func TestDefaultPricingIncludesOfficialGPT56Rates(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
 	require.NoError(t, err)

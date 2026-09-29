@@ -10,34 +10,40 @@ Python 保留名兼容补丁已移除：不再把 `python` 自动改成 `python_
 
 ## 服务端主动构造的测试与模型目录
 
-账号连接测试、compact 测试、服务端合成模型目录与业务缺省指令共用按模型选择的官方模板。独立 turn-state 采集仍使用其专用短请求指令。
+账号连接测试、compact 测试、服务端合成模型目录与业务缺省指令共用按模型选择的官方模板。糖果测试继续使用专用题目指令。
 
-当前官方模板核对并固定自 [openai/codex 的 models.json，提交 24462234b2aeeb27373e17bbe226baf9c0e97d3b](https://github.com/openai/codex/blob/24462234b2aeeb27373e17bbe226baf9c0e97d3b/codex-rs/models-manager/models.json)（2026-09-23 的 main），逐模型复制 `model_messages.instructions_template`：
+当前官方模板核对并固定自 [openai/codex 的 models.json，提交 8ffd91e42aa001b7e897bea812b02f89264f9fa0](https://github.com/openai/codex/blob/8ffd91e42aa001b7e897bea812b02f89264f9fa0/codex-rs/models-manager/models.json)（提交时间 2026-09-29 19:03:30 UTC），逐模型复制 `model_messages.instructions_template`：
 
 | 模型 | 本地模板 |
 | --- | --- |
+| GPT-6.1 Sol | `instructions_gpt6_1_sol.txt` |
 | GPT-6 Astra | `instructions_gpt6_astra.txt` |
 | GPT-6 Sol | `instructions_gpt6_sol.txt` |
 | GPT-6 Luna | `instructions_gpt6_luna.txt` |
 | GPT-5.6 Sol / Terra / Luna / Codex Auto Review | `instructions_gpt5_6.txt` |
 | GPT-5.5 | `instructions_gpt5_5.txt` |
-| GPT-5.4 | `instructions_gpt5_4.txt` |
 | Daybreak Blue | `instructions_daybreak_blue.txt` |
 | Daybreak Red | `instructions_daybreak_red.txt` |
 
 上述文件位于 `backend/internal/pkg/openai/`。官方目录未包含的旧模型保留既有兼容模板；未知模型保留 GPT-5.5 模板回退，这不代表上游模型映射。上游已经提供的模型目录提示词保持原样。
 
-本次增加 GPT-6 Sol / Luna 的独立模板和默认目录条目，保留既有默认模型顺序。更新 Astra 模板的消息发送授权段落及 GPT-5.6 模板的标题大小写；Codex Auto Review 改为其当前官方模板，与 GPT-5.6 三个变体一致，不再借用 Daybreak Blue。新增模型仅按精确名称及既有拼写规范化规则匹配，不推测日期后缀或 `-latest` 别名。
+本次新增 GPT-6.1 Sol 的独立模板、默认目录条目及前端候选和映射预设，保留既有默认模型顺序。其余现存模型的主模板与上一个快照一致；目录同步官方描述、优先级和附加策略字段。新模型沿用严格的提供商前缀、大小写、推理档位、合法日期及 compact 后缀规范化规则；这些是本地兼容写法，不表示官方新增了同名快照。`-latest`、`-custom` 等任意后缀不继承新模型能力。
 
 当前快照的 `instructions_variables` 均为 null；GPT-6 模板中的 `{{connector_id}}` 属于 Apps 链接语法示例，原样保留，不作为待填入变量。模型目录附加元数据与提示词字段保存在 `backend/internal/service/openai_codex_model_defaults.json`，主指令模板仍以本表文件为准。
 
-### 2026-09-23 目录默认值
+官方当前目录已移除 GPT-5.4，按本项目要求不保留旧快照或专用模板，同时删除默认列表、前端主模型／日期候选、指向 5.4 的映射预设和 OpenCode 配置条目。账号探测、缺省模型及旧别名兜底、未配置的 Opus 分发改用当前列表首选 GPT-5.6 Sol。GPT-5.4 Mini 是独立模型，维持原有入口；已保存的显式映射和历史记录不做迁移。计费兜底与探测默认模型解耦，保持既有金额规则。
+
+### 2026-09-29 目录默认值
+
+GPT-6.1 Sol 默认推理为 `low`，提供 `low / medium / high / xhigh / max / ultra`；默认上下文 272,000，最大上下文 872,000，最低 Codex 客户端版本 0.153.0。官方默认服务等级为空，可选 `priority`；保留其 `shell_command`、多代理 v2 和独立主模板。官方文件未提供创建时间、输出上限或价格，因此不推测这些值，也不继承 GPT-6 Sol / Luna 的定价、缓存写入或 `none` 采样例外。默认模型列表的 `created: 0` 表示来源未声明创建时间。
 
 合成目录对已知模型加载同一官方快照的元数据，包括 shell、推理档位、上下文、服务等级，以及 `model_messages` 中的权限和多代理等字段。GPT-6 Astra 默认推理为 `low`，Sol / Luna 为 `medium`；三者默认上下文为 272,000、最大上下文为 872,000，Luna 不提供 Ultra 工作流。GPT-5.6 Sol 的本地默认目录不再声明此次官方快照已移除的 `ultrafast`；上游明确提供的等级仍保留。
 
-这份快照用于补齐目录默认值，不替换账号模型映射、分组名单或路由能力判断。官方目录的套餐可见性、退役／升级提示及 WebSocket 偏好不改变本项目的可见模型和传输选择。无账号能力证据时继续使用 text-only、关闭搜索和 Lite；官方 OAuth 的 GPT-6 系列可按账号路径声明 Lite，API Key 的 GPT-6 Sol / Luna 继续强制使用完整 Responses。已有上游模型元数据和提示词优先，配置中的自定义上下文不会被静态默认值覆盖。此次不修改价格、turn-state 生效模型名单或已保存账号配置。
+这份快照用于补齐目录默认值，不替换账号模型映射、分组名单或路由能力判断。官方目录的套餐可见性、退役／升级提示及 WebSocket 偏好不改变本项目的可见模型和传输选择。无账号能力证据时继续使用 text-only、关闭搜索和 Lite；官方 OAuth 的 GPT-6 系列可按账号路径声明 Lite，API Key 的 GPT-6.1 Sol 及 GPT-6 系列继续使用完整 Responses。已有上游模型元数据和提示词优先，配置中的自定义上下文不会被静态默认值覆盖。此次不修改价格或已保存账号配置。
 
 更新快照时，从固定提交读取官方 `models.json`，仅移除各条目 `model_messages.instructions_template` 后保存 JSON，其余源字段保留；主模板按本表单独复制。服务端只投影自身支持的字段及本地路由策略，不执行目录中的任何指令。
+
+OpenCode 导出配置移除 GPT-5.4 主模型条目；GPT-6.1 Sol 尚未增加 OpenCode 预设，待其官方输出上限明确后再补齐，避免猜测该客户端所需的额度配置。
 
 ## 请求完整性检查
 
@@ -52,6 +58,14 @@ Python 保留名兼容补丁已移除：不再把 `python` 自动改成 `python_
 使用模拟出站与本地 WS 服务验证 OAuth/API Key、Responses 透传开关、Chat/Messages、WS 首帧与后续帧：工具名保持原样，缺失提示词按最终模型补入，已有提示词继续传递。
 
 相关 Go 回归覆盖模板按模型选择、保留上游模型目录提示词、完整性观测以及请求/响应工具名；完整性用例覆盖带元数据的 system 提升、真实指令丢失、插入/删除/移动、重复项、移位后参数修改、预算及显示上限，并运行相关竞态测试。前端测试验证对齐位置说明；类型检查与定向 lint 验证展示改动。验证不发送真实收费请求。
+
+### 2026-09-29 目录更新验证
+
+- 当前官方快照的 11 个条目及全部主模板与固定提交逐项一致；GPT-5.4 不再加入兼容快照。
+- `internal/pkg/openai` 全部测试通过；service 定向回归覆盖目录、模板、别名、GPT-6 能力、分发默认值、账号探测与计费。
+- 扩展回归中的 `TestForwardAsAnthropic_AutoDerivesPromptCacheKeyWhenMessagesDispatchHasNoSessionID` 和 `TestForwardAsAnthropic_InjectsPromptCacheKeyForAPIKeyMessagesDispatch` 缓存键断言失败；在未修改的 `4272862be` 导出基线上独立复现相同失败。最终定向回归仅排除这两项后通过，未改动缓存键逻辑。
+- 前端模型候选、配置导出和分发配置共 49 项测试通过；完整类型检查及改动文件定向 lint 通过。
+- 未运行全仓测试、竞态测试、前端构建或浏览器验收；未部署，未发送真实模型或账号探测请求。
 
 ### 2026-09-23 目录更新验证
 

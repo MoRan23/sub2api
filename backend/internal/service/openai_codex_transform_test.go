@@ -1499,11 +1499,11 @@ func TestNormalizeCodexModel_Gpt53(t *testing.T) {
 
 func TestNormalizeCodexModel_RemovedModelsFallbackToSupportedTargets(t *testing.T) {
 	cases := map[string]string{
-		"":                   "gpt-5.4",
-		"gpt-5":              "gpt-5.4",
-		"gpt-5-mini":         "gpt-5.4",
-		"gpt-5-nano":         "gpt-5.4",
-		"gpt-5.1":            "gpt-5.4",
+		"":                   "gpt-5.6-sol",
+		"gpt-5":              "gpt-5.6-sol",
+		"gpt-5-mini":         "gpt-5.6-sol",
+		"gpt-5-nano":         "gpt-5.6-sol",
+		"gpt-5.1":            "gpt-5.6-sol",
 		"gpt-5.1-codex":      "gpt-5.3-codex",
 		"gpt-5.1-codex-max":  "gpt-5.3-codex",
 		"gpt-5.1-codex-mini": "gpt-5.3-codex",

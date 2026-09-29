@@ -3,11 +3,12 @@ package service
 import (
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
 const (
-	defaultOpenAIMessagesDispatchOpusMappedModel   = "gpt-5.4"
+	defaultOpenAIMessagesDispatchOpusMappedModel   = openai.DefaultTestModel
 	defaultOpenAIMessagesDispatchSonnetMappedModel = "gpt-5.3-codex"
 	defaultOpenAIMessagesDispatchHaikuMappedModel  = "gpt-5.4-mini"
 )

@@ -25,10 +25,11 @@ var DefaultModels = []Model{
 	{ID: "gpt-5.6-terra", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Terra"},
 	{ID: "gpt-5.6-luna", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Luna"},
 	{ID: "gpt-6-astra", Object: "model", Created: 1788480000, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Astra"},
+	// The official Codex catalog does not provide a creation timestamp.
+	{ID: "gpt-6.1-sol", Object: "model", Created: 0, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6.1 Sol"},
 	{ID: "gpt-6-sol", Object: "model", Created: 1790121600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Sol"},
 	{ID: "gpt-6-luna", Object: "model", Created: 1790121600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Luna"},
 	{ID: "gpt-5.5", Object: "model", Created: 1776873600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.5"},
-	{ID: "gpt-5.4", Object: "model", Created: 1738368000, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.4"},
 	{ID: "gpt-5.4-mini", Object: "model", Created: 1738368000, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.4 Mini"},
 	{ID: "gpt-5.3-codex-spark", Object: "model", Created: 1735689600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.3 Codex Spark"},
 	{ID: "codex-auto-review", Object: "model", Created: 1776902400, OwnedBy: "openai", Type: "model", DisplayName: "Codex Auto Review"},
@@ -50,7 +51,7 @@ func DefaultModelIDs() []string {
 }
 
 // DefaultTestModel default model for testing OpenAI accounts
-const DefaultTestModel = "gpt-5.4"
+const DefaultTestModel = "gpt-5.6-sol"
 
 // CodexUsageProbeModel is the model used for OAuth Codex usage probes.
 const CodexUsageProbeModel = "codex-auto-review"
@@ -72,14 +73,11 @@ var instructionsGPT52 string
 
 // Current templates below are copied from model_messages.instructions_template
 // in openai/codex codex-rs/models-manager/models.json at
-// 24462234b2aeeb27373e17bbe226baf9c0e97d3b (2026-09-23). The three GPT-5.6 variants
+// 8ffd91e42aa001b7e897bea812b02f89264f9fa0 (2026-09-29). The three GPT-5.6 variants
 // and codex-auto-review share one template; each GPT-6 variant has its own.
 // Synthetic catalogs, account probes, and Responses requests without client
 // instructions use the same model-specific templates.
 //
-//go:embed instructions_gpt5_4.txt
-var instructionsGPT54 string
-
 //go:embed instructions_gpt5_5.txt
 var instructionsGPT55 string
 
@@ -88,6 +86,9 @@ var instructionsGPT56 string
 
 //go:embed instructions_gpt6_astra.txt
 var instructionsGPT6Astra string
+
+//go:embed instructions_gpt6_1_sol.txt
+var instructionsGPT61Sol string
 
 //go:embed instructions_gpt6_sol.txt
 var instructionsGPT6Sol string
@@ -165,6 +166,8 @@ func CodexBaseInstructionsForModel(model string) string {
 		return instructionsGPT56
 	case IsKnownCodexModelVariant(canonical, "gpt-6-sol"):
 		return instructionsGPT6Sol
+	case IsKnownCodexModelVariant(canonical, "gpt-6.1-sol"):
+		return instructionsGPT61Sol
 	case IsKnownCodexModelVariant(canonical, "gpt-6-luna"):
 		return instructionsGPT6Luna
 	case canonical == "codex-auto-review":
@@ -173,8 +176,6 @@ func CodexBaseInstructionsForModel(model string) string {
 		return instructionsDaybreakBlue
 	case canonical == "gpt-daybreak-red-latest":
 		return instructionsDaybreakRed
-	case canonical == "gpt-5.4":
-		return instructionsGPT54
 	case strings.Contains(canonical, "codex"):
 		return DefaultInstructions
 	case strings.HasPrefix(canonical, "gpt-5.5"):

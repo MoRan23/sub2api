@@ -353,7 +353,7 @@ func TestNewConfiguredCodexModelDescriptorUsesProviderMetadataAndSafeFallback(t 
 
 	gpt56 := newConfiguredCodexModelDescriptor("gpt-5.6-sol")
 	require.Equal(t, "GPT-5.6-Sol", gpt56.DisplayName)
-	require.Equal(t, "Older coding model for complex work.", gpt56.Description)
+	require.Equal(t, "Older generation workhorse model.", gpt56.Description)
 	require.NotNil(t, gpt56.DefaultReasoningLevel)
 	require.Equal(t, "low", *gpt56.DefaultReasoningLevel)
 	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max", "ultra"}, effortsFromConfiguredCodexLevels(gpt56.SupportedReasoningLevels))

@@ -938,7 +938,7 @@ export default {
         reasoningEffortMatchPrefix: '前缀',
         reasoningEffortMatchSuffix: '后缀',
         reasoningEffortMatchTypePlaceholder: '全匹配',
-        reasoningEffortModelPlaceholder: '留空则全部 / gpt / gpt-5.4',
+        reasoningEffortModelPlaceholder: '留空则全部 / gpt / gpt-6.1-sol',
         reasoningEffortFrom: '请求值',
         reasoningEffortTo: '转发值',
         reasoningEffortToDeny: '拒绝',
@@ -1250,7 +1250,7 @@ export default {
         familyMappingTitle: '系列默认映射',
         familyMappingHint: '当请求命中 Opus、Sonnet、Haiku 系列时，会优先使用这里配置的目标模型。',
         opusModel: 'Opus 映射模型',
-        opusModelPlaceholder: '例如: gpt-5.4',
+        opusModelPlaceholder: '例如: gpt-5.6-sol',
         sonnetModel: 'Sonnet 映射模型',
         sonnetModelPlaceholder: '例如: gpt-5.3-codex',
         haikuModel: 'Haiku 映射模型',
@@ -1262,7 +1262,7 @@ export default {
         claudeModel: 'Claude 模型',
         claudeModelPlaceholder: '例如: claude-sonnet-4-5-20250929',
         targetModel: '目标模型',
-        targetModelPlaceholder: '例如: gpt-5.4',
+        targetModelPlaceholder: '例如: gpt-6.1-sol',
         removeExactMapping: '删除精确映射'
       },
       openaiLive: {

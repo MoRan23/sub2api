@@ -7,29 +7,33 @@ vi.mock('@/api/admin/accounts', () => ({
 import { buildModelMappingObject, getModelsByPlatform, getPresetMappingsByPlatform, splitModelMappingObject } from '../useModelWhitelist'
 
 describe('useModelWhitelist', () => {
-  it('openai 模型列表包含 GPT-5.4 官方快照', () => {
+  it('openai 模型列表同步最新目录并移除 GPT-5.4 主模型', () => {
     const models = getModelsByPlatform('openai')
 
-    expect(models).toContain('gpt-5.4')
+    expect(models).not.toContain('gpt-5.4')
     expect(models).toContain('gpt-5.4-mini')
-    expect(models).toContain('gpt-5.4-2026-03-05')
+    expect(models).not.toContain('gpt-5.4-2026-03-05')
     expect(models).toContain('codex-auto-review')
     expect(models).toContain('gpt-5.6')
     expect(models).toContain('gpt-6')
     expect(models).toContain('gpt-6-astra')
+    expect(models).toContain('gpt-6.1-sol')
     expect(models).toContain('gpt-6-sol')
     expect(models).toContain('gpt-6-luna')
   })
 
-  it('openai 预设映射包含 GPT-6 别名和三个独立模型', () => {
+  it('openai 预设映射包含 GPT-6 别名及 GPT-6.1 Sol', () => {
     expect(getPresetMappingsByPlatform('openai')).toEqual(expect.arrayContaining([
       expect.objectContaining({ label: 'GPT-6', from: 'gpt-6', to: 'gpt-6' }),
       expect.objectContaining({ label: 'GPT-6 Astra', from: 'gpt-6-astra', to: 'gpt-6-astra' }),
+      expect.objectContaining({ label: 'GPT-6.1 Sol', from: 'gpt-6.1-sol', to: 'gpt-6.1-sol' }),
       expect.objectContaining({ label: 'GPT-6 Sol', from: 'gpt-6-sol', to: 'gpt-6-sol' }),
       expect.objectContaining({ label: 'GPT-6 Luna', from: 'gpt-6-luna', to: 'gpt-6-luna' })
     ]))
     const presetModels = getPresetMappingsByPlatform('openai').map(({ from }) => from)
     expect(new Set(presetModels).size).toBe(presetModels.length)
+    expect(presetModels).not.toContain('gpt-5.4')
+    expect(getPresetMappingsByPlatform('openai').some(({ to }) => to === 'gpt-5.4')).toBe(false)
   })
 
   it('openai 模型列表不再暴露已下线的 ChatGPT 登录 Codex 模型', () => {

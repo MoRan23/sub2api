@@ -1511,7 +1511,7 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 // 3. gpt-5.2-20251222 -> gpt-5.2（去掉日期版本号）
 // 4. gpt-5.3-codex -> gpt-5.2-codex
 // 5. gpt-5.4* -> 业务静态兜底价
-// 6. 最终回退到 DefaultTestModel (gpt-5.1-codex)
+// 6. 最终回退到既有 GPT-5.4 计费基准；不随账号探测默认模型变化
 func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 	if strings.HasPrefix(model, "gpt-5.3-codex-spark") {
 		if pricing, ok := s.pricingData["gpt-5.1-codex"]; ok {
@@ -1615,8 +1615,9 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 		return nil
 	}
 
-	// 最终回退到 DefaultTestModel
-	defaultModel := strings.ToLower(openai.DefaultTestModel)
+	// Keep the established billing fallback independent of catalog/probe defaults.
+	// Removing a selectable model must not silently change unrelated request prices.
+	const defaultModel = "gpt-5.4"
 	if pricing, ok := s.pricingData[defaultModel]; ok {
 		logger.LegacyPrintf("service.pricing", "[Pricing] OpenAI fallback to default model %s -> %s", model, defaultModel)
 		return pricing

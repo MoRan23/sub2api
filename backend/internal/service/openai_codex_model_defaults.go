@@ -7,8 +7,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
-// Bundled metadata from openai/codex at 24462234b2aeeb27373e17bbe226baf9c0e97d3b
-// (2026-09-23), codex-rs/models-manager/models.json. Only the main
+// Bundled metadata from openai/codex at 8ffd91e42aa001b7e897bea812b02f89264f9fa0
+// (2026-09-29), codex-rs/models-manager/models.json. Only the main
 // model_messages.instructions_template is omitted: pkg/openai embeds those
 // separately for both catalog generation and requests without instructions.
 //
@@ -53,7 +53,7 @@ func bundledCodexModelDefault(modelID string) json.RawMessage {
 	case openai.IsKnownCodexModelVariant(canonical, "gpt-5.6"):
 		return bundledCodexModelDefaults["gpt-5.6-sol"]
 	}
-	for _, family := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4"} {
+	for _, family := range []string{"gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"} {
 		if openai.IsKnownCodexModelVariant(canonical, family) {
 			return bundledCodexModelDefaults[family]
 		}

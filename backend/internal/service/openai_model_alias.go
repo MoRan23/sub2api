@@ -45,6 +45,8 @@ func normalizeKnownOpenAICodexModel(model string) string {
 	}
 
 	switch {
+	case openai.IsKnownCodexModelVariant(normalized, "gpt-6.1-sol"):
+		return "gpt-6.1-sol"
 	case isOpenAIGPT6AstraModel(normalized):
 		return "gpt-6-astra"
 	case strings.Contains(normalized, "gpt-5.6-sol"):
@@ -82,7 +84,7 @@ func normalizeKnownOpenAICodexModel(model string) string {
 	case strings.Contains(normalized, "codex"):
 		return "gpt-5.3-codex"
 	case strings.Contains(normalized, "gpt-5"):
-		return "gpt-5.4"
+		return openai.DefaultTestModel
 	default:
 		return ""
 	}
@@ -116,7 +118,8 @@ func isOpenAIGPT6AstraModel(model string) bool {
 // isOpenAIGPT6Model includes only the known GPT-6 families and their established
 // spelling, effort, and snapshot variants. The bare alias remains Astra.
 func isOpenAIGPT6Model(model string) bool {
-	return isOpenAIGPT6AstraModel(model) || openai.IsGPT6SolOrLunaModelSpelling(model)
+	return isOpenAIGPT6AstraModel(model) || openai.IsGPT6SolOrLunaModelSpelling(model) ||
+		openai.IsKnownCodexModelVariant(model, "gpt-6.1-sol")
 }
 
 func appendUsageBillingModelCandidate(candidates []string, seen map[string]struct{}, model string) []string {

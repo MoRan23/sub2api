@@ -956,7 +956,7 @@ export default {
         reasoningEffortMatchPrefix: 'Prefix',
         reasoningEffortMatchSuffix: 'Suffix',
         reasoningEffortMatchTypePlaceholder: 'All models',
-        reasoningEffortModelPlaceholder: 'Empty = all / gpt / gpt-5.4',
+        reasoningEffortModelPlaceholder: 'Empty = all / gpt / gpt-6.1-sol',
         reasoningEffortFrom: 'Request value',
         reasoningEffortTo: 'Forwarded value',
         reasoningEffortToDeny: 'Deny',
@@ -1252,7 +1252,7 @@ export default {
         familyMappingTitle: 'Family Default Mapping',
         familyMappingHint: 'Requests that match the Opus, Sonnet, or Haiku families will prefer the target model configured here.',
         opusModel: 'Opus Target Model',
-        opusModelPlaceholder: 'e.g., gpt-5.4',
+        opusModelPlaceholder: 'e.g., gpt-5.6-sol',
         sonnetModel: 'Sonnet Target Model',
         sonnetModelPlaceholder: 'e.g., gpt-5.3-codex',
         haikuModel: 'Haiku Target Model',
@@ -1264,7 +1264,7 @@ export default {
         claudeModel: 'Claude Model',
         claudeModelPlaceholder: 'e.g., claude-sonnet-4-5-20250929',
         targetModel: 'Target Model',
-        targetModelPlaceholder: 'e.g., gpt-5.4',
+        targetModelPlaceholder: 'e.g., gpt-6.1-sol',
         removeExactMapping: 'Remove Exact Mapping'
       },
       openaiLive: {

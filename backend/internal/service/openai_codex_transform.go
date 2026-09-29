@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 var codexModelMap = map[string]string{
+	"gpt-6.1-sol":          "gpt-6.1-sol",
 	"gpt-6-astra":          "gpt-6-astra",
 	"gpt-6-sol":            "gpt-6-sol",
 	"gpt-6-luna":           "gpt-6-luna",
@@ -45,10 +48,10 @@ var codexModelMap = map[string]string{
 	"gpt-5.2-medium":       "gpt-5.2",
 	"gpt-5.2-high":         "gpt-5.2",
 	"gpt-5.2-xhigh":        "gpt-5.2",
-	"gpt-5":                "gpt-5.4",
-	"gpt-5-mini":           "gpt-5.4",
-	"gpt-5-nano":           "gpt-5.4",
-	"gpt-5.1":              "gpt-5.4",
+	"gpt-5":                openai.DefaultTestModel,
+	"gpt-5-mini":           openai.DefaultTestModel,
+	"gpt-5-nano":           openai.DefaultTestModel,
+	"gpt-5.1":              openai.DefaultTestModel,
 	"gpt-5.1-codex":        "gpt-5.3-codex",
 	"gpt-5.1-codex-max":    "gpt-5.3-codex",
 	"gpt-5.1-codex-mini":   "gpt-5.3-codex",
@@ -61,6 +64,7 @@ var codexVersionModelPrefixes = []struct {
 	prefix string
 	target string
 }{
+	{prefix: "gpt-6.1-sol", target: "gpt-6.1-sol"},
 	{prefix: "gpt-6-sol", target: "gpt-6-sol"},
 	{prefix: "gpt-6-luna", target: "gpt-6-luna"},
 	{prefix: "gpt-5.6-sol", target: "gpt-5.6-sol"},
@@ -591,7 +595,7 @@ func stringifyCodexContentText(value any) string {
 func normalizeCodexModel(model string) string {
 	model = strings.TrimSpace(model)
 	if model == "" {
-		return "gpt-5.4"
+		return openai.DefaultTestModel
 	}
 	if mapped, ok := normalizeKnownCodexModel(model); ok {
 		return mapped

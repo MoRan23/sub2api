@@ -25,7 +25,7 @@ func TestDefaultModelsIncludeGPT6Astra(t *testing.T) {
 }
 
 func TestDefaultModelsIncludeGPT6SolAndLuna(t *testing.T) {
-	for id, displayName := range map[string]string{"gpt-6-sol": "GPT-6 Sol", "gpt-6-luna": "GPT-6 Luna"} {
+	for id, displayName := range map[string]string{"gpt-6.1-sol": "GPT-6.1 Sol", "gpt-6-sol": "GPT-6 Sol", "gpt-6-luna": "GPT-6 Luna"} {
 		matches := 0
 		for _, model := range DefaultModels {
 			if model.ID == id {
@@ -40,6 +40,8 @@ func TestDefaultModelsIncludeGPT6SolAndLuna(t *testing.T) {
 func TestDefaultModelsPreferConcreteGPT56SolForAccountTests(t *testing.T) {
 	require.NotEmpty(t, DefaultModels)
 	require.Equal(t, "gpt-5.6-sol", DefaultModels[0].ID)
+	require.Equal(t, DefaultModels[0].ID, DefaultTestModel)
+	require.NotContains(t, DefaultModelIDs(), "gpt-5.4")
 }
 
 func TestDefaultModelsIncludeGPTImage25(t *testing.T) {
@@ -53,6 +55,7 @@ func TestGPT6SolLunaModelIdentity(t *testing.T) {
 		require.True(t, IsGPT6SolOrLunaModelSpelling(model))
 	}
 	require.False(t, IsGPT6SolOrLunaModelSpelling("gpt-6-astra"))
+	require.False(t, IsGPT6SolOrLunaModelSpelling("gpt-6.1-sol"), "a new model must not inherit GPT-6 Sol/Luna pricing or sampling exceptions")
 	require.False(t, IsGPT6SolOrLunaModelSpelling("gpt-6-solitude"))
 	require.False(t, IsGPT6SolOrLunaModelSpelling("gpt-6-luna-preview"))
 }

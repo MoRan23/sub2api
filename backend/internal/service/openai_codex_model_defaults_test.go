@@ -10,12 +10,13 @@ import (
 
 func TestBundledCodexModelDefaultsCurrentGPT6Contract(t *testing.T) {
 	for _, tc := range []struct {
-		model, effort string
-		ultra, review bool
+		model, effort           string
+		ultra, review, priority bool
 	}{
-		{"gpt-6-astra", "low", true, true},
-		{"gpt-6-sol", "medium", true, true},
-		{"gpt-6-luna", "medium", false, false},
+		{"gpt-6.1-sol", "low", true, true, false},
+		{"gpt-6-astra", "low", true, true, false},
+		{"gpt-6-sol", "medium", true, true, true},
+		{"gpt-6-luna", "medium", false, false, true},
 	} {
 		t.Run(tc.model, func(t *testing.T) {
 			body, err := BuildCodexModelsManifest([]string{tc.model})
@@ -27,8 +28,10 @@ func TestBundledCodexModelDefaultsCurrentGPT6Contract(t *testing.T) {
 			require.Equal(t, "shell_command", model["shell_type"])
 			require.Equal(t, "v2", model["multi_agent_version"])
 			require.Equal(t, true, model["supports_reasoning_summaries"])
-			if tc.model != "gpt-6-astra" {
+			if tc.priority {
 				require.Equal(t, "priority", model["default_service_tier"])
+			} else {
+				require.Empty(t, model["default_service_tier"])
 			}
 			require.Equal(t, tc.review, model["node_repl_auto_review_required"])
 			require.Equal(t, tc.ultra, stringSliceContains(effortsFromManifestModel(t, model), "ultra"))
@@ -44,7 +47,7 @@ func TestBundledCodexModelDefaultsCurrentGPT6Contract(t *testing.T) {
 }
 
 func TestBundledCodexModelDefaultsPreserveAccountRouteConstraints(t *testing.T) {
-	for _, modelID := range []string{"gpt-6-sol", "gpt-6-luna"} {
+	for _, modelID := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
 		for _, tc := range []struct {
 			name, kind, baseURL string
 			lite, search, image bool
@@ -124,6 +127,7 @@ func TestBundledCodexModelDefaultsDescriptorsAreIndependent(t *testing.T) {
 func TestBundledCodexModelDefaultsKnownAliasesOnly(t *testing.T) {
 	for alias, base := range map[string]string{
 		"gpt-6": "gpt-6-astra", "gpt-5.6": "gpt-5.6-sol",
+		"openai/GPT-6.1_SOL-ultra": "gpt-6.1-sol", "gpt-6.1-sol-2026-09-29": "gpt-6.1-sol",
 		"openai/GPT-6-Sol-high": "gpt-6-sol", "gpt-6-luna-max": "gpt-6-luna",
 		"gpt-6-astra-2026-09-01": "gpt-6-astra", "gpt-6-sol-2026-09-23": "gpt-6-sol",
 	} {
@@ -135,7 +139,31 @@ func TestBundledCodexModelDefaultsKnownAliasesOnly(t *testing.T) {
 		require.Equal(t, canonical.DefaultReasoningLevel, model.DefaultReasoningLevel)
 		require.Equal(t, canonical.ShellType, model.ShellType)
 	}
-	for _, unknown := range []string{"gpt-6-other", "gpt-6-sol-custom", "company-gpt-5.5-private", "gpt-5-unknown"} {
+	for _, unknown := range []string{"gpt-6.1-sol-custom", "gpt-6.1-sol-latest", "gpt-6-other", "gpt-6-sol-custom", "company-gpt-5.5-private", "gpt-5-unknown"} {
 		require.Nil(t, bundledCodexModelDefault(unknown), unknown)
+	}
+}
+
+func TestBundledCodexModelDefaultsExcludeRetiredGPT54(t *testing.T) {
+	require.NotContains(t, bundledCodexModelDefaults, "gpt-5.4")
+	for _, model := range []string{"gpt-5.4", "openai/gpt-5.4", "gpt-5.4-2026-03-05"} {
+		require.Nil(t, bundledCodexModelDefault(model), model)
+	}
+}
+
+func TestBundledCodexModelDefaultsGPT61SolPreservesLiveMetadata(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"base_url": "https://relay.example/v1", "model_mapping": map[string]any{"my-sol": "gpt-6.1-sol"},
+	}}
+	body := []byte(`{"models":[{"slug":"gpt-6.1-sol","context_window":1000000,"use_responses_lite":true,"model_messages":{"instructions_template":"provider instructions"}},{"slug":"my-sol","use_responses_lite":true},{"slug":"openai/gpt-6.1-sol-ultra","use_responses_lite":true}]}`)
+	completed, err := completeAPIKeyCodexModelsManifestMetadata(body, true, account)
+	require.NoError(t, err)
+	completed, err = adjustAPIKeyCodexModelsManifest(completed, account)
+	require.NoError(t, err)
+	models := decodeCodexManifestModels(t, completed)
+	require.EqualValues(t, 1000000, models[0]["context_window"])
+	require.Equal(t, "provider instructions", models[0]["model_messages"].(map[string]any)["instructions_template"])
+	for _, model := range models {
+		require.Equal(t, false, model["use_responses_lite"])
 	}
 }
