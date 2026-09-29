@@ -131,11 +131,14 @@ func logOpenAIExcelProtocolFailure(ctx context.Context, err error) {
 	if detail := openAIExcelToolFailureReason(err); detail != "" {
 		fields = append(fields, zap.String("tool_reason", detail))
 	}
+	if diagnostic := openAIExcelToolDiagnostic(err); diagnostic != nil {
+		fields = append(fields, zap.Any("tool_diagnostic", diagnostic))
+	}
 	logger.FromContext(ctx).Warn("openai.excel_response_translation_failed", fields...)
 }
 
-// Reasons are a fixed vocabulary: never expose native tool names, arguments,
-// response text or storage errors in diagnostics.
+// Client-facing reasons use a fixed vocabulary; detailed sanitized tool
+// diagnostics are emitted separately and only to the server log.
 type openAIExcelProtocolFailure struct {
 	reason string
 	cause  error

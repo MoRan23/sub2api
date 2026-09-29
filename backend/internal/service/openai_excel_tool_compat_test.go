@@ -135,10 +135,10 @@ func TestExcelToolCompatDoesNotGuessToolNamespaces(t *testing.T) {
 		name, declaredNamespace, callName, callNamespace string
 	}{
 		{"no-host-prefix-added", "", "functions.execute", ""},
-		{"no-basename-guess", "functions", "execute", ""},
+		{"no-basename-guess-for-other-namespace", "client", "execute", ""},
 		{"wrong-explicit-namespace", "functions", "functions.execute", "unrelated"},
 		{"wrong-leaf-namespace", "functions", "execute", "unrelated"},
-		{"namespace-does-not-wrap-top-level", "", "execute", "functions"},
+		{"unrelated-namespace-does-not-wrap-top-level", "", "execute", "unrelated"},
 		{"unrelated-native-tool", "functions", "list_skills", ""},
 		{"unrelated-native-namespace", "functions", "run_officejs", "unrelated"},
 	} {
@@ -235,11 +235,18 @@ func TestExcelToolCompatSafeDiagnostics(t *testing.T) {
 			entries := logs.All()
 			require.Len(t, entries, 1)
 			require.Equal(t, "openai.excel_response_translation_failed", entries[0].Message)
-			require.Equal(t, map[string]any{"reason": "invalid_tool_call", "tool_reason": tc.reason}, entries[0].ContextMap())
-			logJSON := excelCompatJSON(t, entries[0].ContextMap())
+			fields := entries[0].ContextMap()
+			require.Equal(t, "invalid_tool_call", fields["reason"])
+			require.Equal(t, tc.reason, fields["tool_reason"])
+			require.NotNil(t, fields["tool_diagnostic"], "server diagnostics include only sanitized protocol metadata")
+			logJSON := excelCompatJSON(t, fields)
 			for _, secret := range []string{functionName, customName, propertyName, argument, schemaValue, "private_undeclared_tool", "private_call_id"} {
 				require.NotContains(t, safe, secret)
 				require.NotContains(t, err.Error(), secret)
+			}
+			// The requested server diagnostics may name valid tool identifiers;
+			// arguments, schema property/value data and call IDs remain private.
+			for _, secret := range []string{propertyName, argument, schemaValue, "private_call_id"} {
 				require.NotContains(t, logJSON+entries[0].Message, secret)
 			}
 			require.Empty(t, history.values)

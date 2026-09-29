@@ -127,8 +127,8 @@ func (s *OpenAIExcelWireState) toolInstructions() (string, error) {
 		parallel += " This response must call a catalog tool; a text-only answer does not satisfy the caller's tool_choice."
 	}
 	return `This request is relayed by an external Codex Responses API client, not by the live Excel workbook. The native run_officejs function is a transport endpoint: its output is intercepted and delivered to the client, and no Office code is executed. Only the client tools in the catalog below are available. Do not use other Excel, Office, connector, workbook, list_skills or web-search tools.
-Call a catalog tool through one native run_officejs call. The outer arguments contain summary, extended_summary, destructive=false, references=[], and code. The code field is JSON text, never JavaScript or OfficeJS. For a function tool encode {"name":"catalog.name","arguments":{...}}; for a custom tool encode {"name":"catalog.name","input":"raw input"}. Serialize the complete inner JSON object, including all quotes and backslashes, before placing it in code. Do not nest a second run_officejs wrapper. Use the exact name shown in the catalog, including any declared namespace. Do not add a display-only host prefix such as functions.; do not remove functions. when it is part of a catalog name. Follow each catalog schema exactly. Returned tool results belong to that client tool. Never repeat calls whose output is already in the history. Do not claim workspace access is unavailable when the catalog supplies a suitable tool. If fulfilling the request requires a client tool, do not stop at commentary or a plan saying you will act: make the actual tool call in the same response. A request that needs no tool may be answered directly. Native update_plan is permitted only when update_plan appears in the catalog and matches its schema; after its result, take the next substantive action through run_officejs when the task requires it.
-` + parallel + "\nAvailable client tools:\n" + string(raw), nil
+Call a catalog tool through one native run_officejs call. The outer arguments contain summary, extended_summary, destructive=false, references=[], and code. The code field is JSON text, never JavaScript or OfficeJS. For a function tool encode {"name":"catalog.name","arguments":{...}}; for a custom tool encode {"name":"catalog.name","input":"raw input"}. Serialize the complete inner JSON object, including all quotes and backslashes, before placing it in code. Do not nest a second run_officejs wrapper. Use the exact name shown in the catalog, including any declared namespace. Do not add a display-only host prefix such as functions.; do not remove functions. when it is part of a catalog name. Follow each catalog schema exactly. Returned tool results belong to that client tool. Never repeat calls whose output is already in the history. Do not claim workspace access is unavailable when the catalog supplies a suitable tool. If fulfilling the request requires a client tool, do not stop at commentary or a plan saying you will act: make the actual tool call in the same response. A request that needs no tool may be answered directly.
+` + s.nativePlanGuidance() + "\n" + parallel + "\nAvailable client tools:\n" + string(raw), nil
 }
 
 // Keep the reminder next to the stable tool catalog, before conversation
@@ -152,9 +152,7 @@ func (s *OpenAIExcelWireState) toolProtocolReminder() string {
 	if tool, ok := s.tools["apply_patch"]; ok && tool.Kind == "custom" {
 		reminder += " For apply_patch, put the complete raw patch in input; never use arguments.patch."
 	}
-	if _, ok := s.tools["update_plan"]; ok {
-		reminder += " Native update_plan is allowed for progress; after its result, take the next substantive action through run_officejs when the task requires it."
-	}
+	reminder += " " + s.nativePlanGuidance()
 	return reminder
 }
 
@@ -188,6 +186,12 @@ func (s *OpenAIExcelWireState) translateHistory(ctx context.Context, raw any) ([
 	}
 	result := make([]any, 0, len(items))
 	origins := make(map[string]map[string]any)
+	// planOrigins records whether the canonical client call resolved to the
+	// native update_plan tool.  The raw native call is retained verbatim in
+	// history; this separate bit lets the legacy codex_client__update_plan
+	// alias receive the same output normalization without treating a real
+	// client tool with that literal name as the native plan tool.
+	planOrigins := make(map[string]bool)
 	for _, rawItem := range items {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -236,6 +240,7 @@ func (s *OpenAIExcelWireState) translateHistory(ctx context.Context, raw any) ([
 				}
 			}
 			origins[callID] = native
+			planOrigins[callID] = openAIExcelIsNativePlanHistoryCall(native, item)
 			result = append(result, native)
 		case "function_call_output", "custom_tool_call_output":
 			callID := openAIExcelString(item["call_id"])
@@ -246,7 +251,7 @@ func (s *OpenAIExcelWireState) translateHistory(ctx context.Context, raw any) ([
 			if origin == nil {
 				return nil, errors.New("excel tool output requires its full call history")
 			}
-			if openAIExcelString(origin["type"]) == "function_call" && openAIExcelString(origin["name"]) == "update_plan" && openAIExcelString(origin["namespace"]) == "" {
+			if planOrigins[callID] {
 				item["output"] = `{"status":"ok"}`
 			}
 			if openAIExcelCallIsTransport(origin) {
@@ -301,24 +306,113 @@ func openAIExcelIsTransport(name string) bool {
 	return name == openAIExcelTransportTool || name == "functions."+openAIExcelTransportTool
 }
 
-// Match only a declared name. Responses can carry the namespace separately
-// from the leaf name; it is not a display prefix that may be discarded.
+// Codex treats absent and explicit "functions" namespaces as the same default
+// namespace. Other namespaces retain their exact identity. An ambiguous pair
+// of default declarations is rejected even when one has an exact lookup key.
 func (s *OpenAIExcelWireState) resolveClientTool(name, namespace string) (openAIExcelTool, bool) {
 	if namespace != "" {
 		if tool, ok := s.tools[namespace+"."+name]; ok && tool.Namespace == namespace && tool.Name == name {
-			return tool, true
+			return s.unambiguousClientTool(tool)
 		}
 		// A fully qualified name is also unambiguous when its declared
 		// namespace agrees with the explicit namespace field.
-		tool, ok := s.tools[name]
-		return tool, ok && tool.Namespace == namespace
+		if tool, ok := s.tools[name]; ok && tool.Namespace == namespace {
+			return s.unambiguousClientTool(tool)
+		}
+		if openAIExcelIsDefaultNamespace(namespace) {
+			tool, count := s.defaultNamespaceTool(name)
+			if count == 1 {
+				return tool, true
+			}
+			// The historical codex_client__ prefix is also accepted
+			// when the caller explicitly supplies the default namespace.
+			legacyName := strings.TrimPrefix(name, "codex_client__")
+			if legacyName != name {
+				tool, count = s.defaultNamespaceTool(legacyName)
+				return tool, count == 1
+			}
+			return tool, false
+		}
+		return openAIExcelTool{}, false
 	}
 	if tool, ok := s.tools[name]; ok {
-		return tool, true
+		return s.unambiguousClientTool(tool)
+	}
+	if tool, count := s.defaultNamespaceTool(name); count > 0 {
+		return tool, count == 1
 	}
 	// Preserve the bridge's legacy alias, but never override an exact name.
-	tool, ok := s.tools[strings.TrimPrefix(name, "codex_client__")]
-	return tool, ok
+	legacyName := strings.TrimPrefix(name, "codex_client__")
+	if legacyName == name {
+		return openAIExcelTool{}, false
+	}
+	if tool, ok := s.tools[legacyName]; ok {
+		return s.unambiguousClientTool(tool)
+	}
+	tool, count := s.defaultNamespaceTool(legacyName)
+	return tool, count == 1
+}
+
+func openAIExcelIsDefaultNamespace(namespace string) bool {
+	return namespace == "" || namespace == "functions"
+}
+
+func (s *OpenAIExcelWireState) defaultNamespaceTool(name string) (openAIExcelTool, int) {
+	var found openAIExcelTool
+	count := 0
+	for _, tool := range s.tools {
+		if tool.Name == name && openAIExcelIsDefaultNamespace(tool.Namespace) {
+			found, count = tool, count+1
+		}
+	}
+	return found, count
+}
+
+func (s *OpenAIExcelWireState) unambiguousClientTool(tool openAIExcelTool) (openAIExcelTool, bool) {
+	if openAIExcelIsDefaultNamespace(tool.Namespace) {
+		_, count := s.defaultNamespaceTool(tool.Name)
+		return tool, count == 1
+	}
+	return tool, true
+}
+
+// openAIExcelIsNativePlanCandidate recognizes the native plan call before
+// client-tool resolution. Qualified and historical aliases must still resolve
+// uniquely to the declared default-namespace update_plan tool before rewriting.
+func openAIExcelIsNativePlanCandidate(call map[string]any) bool {
+	if openAIExcelString(call["type"]) != "function_call" ||
+		!openAIExcelIsDefaultNamespace(openAIExcelString(call["namespace"])) {
+		return false
+	}
+	switch openAIExcelString(call["name"]) {
+	case "update_plan", "functions.update_plan", "codex_client__update_plan", "codex_client__functions.update_plan":
+		return true
+	default:
+		return false
+	}
+}
+
+// openAIExcelIsNativePlanHistoryCall requires both the original native call
+// and the already-resolved client call.  This prevents a user-declared tool
+// literally named codex_client__update_plan from being rewritten as the
+// server's plan result.
+func openAIExcelIsNativePlanHistoryCall(native, client map[string]any) bool {
+	return openAIExcelIsNativePlanCandidate(native) &&
+		openAIExcelString(client["type"]) == "function_call" &&
+		openAIExcelString(client["name"]) == "update_plan" &&
+		openAIExcelIsDefaultNamespace(openAIExcelString(client["namespace"]))
+}
+
+func (s *OpenAIExcelWireState) nativePlanGuidance() string {
+	tool, count := s.defaultNamespaceTool("update_plan")
+	if count != 1 || tool.Kind != "function" {
+		return "Native update_plan is unavailable; use a suitable catalog tool through run_officejs if the task needs planning."
+	}
+	name := tool.Name
+	if tool.Namespace != "" {
+		name = tool.Namespace + "." + name
+	}
+	return fmt.Sprintf("Native update_plan is permitted as the declared client tool %q and must match its schema; after its result, take the next substantive action through run_officejs when the task requires it.", name)
 }
 
 func openAIExcelCallIsTransport(call map[string]any) bool {
@@ -394,7 +488,21 @@ func openAIExcelRepairBackslashes(text string) string {
 	return out.String()
 }
 
-func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native map[string]any) (map[string]any, error) {
+func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native map[string]any) (clientCall map[string]any, callErr error) {
+	stage, depth := "native_identity", 0
+	transport := false
+	var envelope map[string]any
+	var code any
+	defer func() {
+		if callErr == nil {
+			return
+		}
+		candidate := native
+		if transport {
+			candidate = envelope
+		}
+		callErr = &openAIExcelToolDiagnosticError{cause: callErr, diagnostic: s.toolFailureDiagnostic(stage, native, candidate, transport, code, depth)}
+	}()
 	name := openAIExcelString(native["name"])
 	if value := native["namespace"]; value != nil {
 		if _, ok := value.(string); !ok {
@@ -402,26 +510,29 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 		}
 	}
 	namespace := openAIExcelString(native["namespace"])
-	transport := openAIExcelCallIsTransport(native)
-	var envelope map[string]any
+	transport = openAIExcelCallIsTransport(native)
 	if transport {
+		stage = "outer_arguments"
 		var args map[string]any
 		if !openAIExcelObjectValue(native["arguments"], &args) {
 			return nil, &openAIExcelToolCallError{reason: "native_arguments_invalid"}
 		}
+		stage, code = "relay_envelope", args["code"]
 		var err error
-		envelope, err = openAIExcelDecodeEnvelope(args["code"])
+		envelope, err = openAIExcelDecodeEnvelope(code)
 		if err != nil {
 			return nil, &openAIExcelToolCallError{reason: "relay_envelope_invalid"}
 		}
-		for depth := 0; openAIExcelCallIsTransport(envelope) && depth < 2; depth++ {
+		for openAIExcelCallIsTransport(envelope) && depth < 2 {
+			stage, depth = "nested_envelope", depth+1
 			arguments := openAIExcelMap(envelope["arguments"])
 			if str, ok := envelope["arguments"].(string); ok {
 				if openAIExcelJSON([]byte(str), &arguments) != nil {
 					return nil, &openAIExcelToolCallError{reason: "nested_envelope_invalid"}
 				}
 			}
-			envelope, err = openAIExcelDecodeEnvelope(arguments["code"])
+			code = arguments["code"]
+			envelope, err = openAIExcelDecodeEnvelope(code)
 			if err != nil {
 				return nil, &openAIExcelToolCallError{reason: "nested_envelope_invalid"}
 			}
@@ -430,6 +541,7 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 			return nil, &openAIExcelToolCallError{reason: "relay_nesting_limit"}
 		}
 		name = openAIExcelString(envelope["name"])
+		stage = "relay_identity"
 		if value := envelope["namespace"]; value != nil {
 			if _, ok := value.(string); !ok {
 				return nil, &openAIExcelToolCallError{reason: "tool_namespace_invalid"}
@@ -437,6 +549,7 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 		}
 		namespace = openAIExcelString(envelope["namespace"])
 	}
+	stage = "resolve_client_tool"
 	tool, allowed := s.resolveClientTool(name, namespace)
 	if !allowed {
 		reason := "native_tool_undeclared"
@@ -445,6 +558,7 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 		}
 		return nil, &openAIExcelToolCallError{reason: reason}
 	}
+	stage = "call_identity"
 	callID := openAIExcelString(native["call_id"])
 	if callID == "" {
 		return nil, &openAIExcelToolCallError{reason: "call_id_missing"}
@@ -459,6 +573,7 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 	}
 	client["id"] = id
 	if tool.Kind == "custom" {
+		stage = "custom_input"
 		client["type"] = "custom_tool_call"
 		client["id"] = "ctc_" + callID
 		value := native["input"]
@@ -471,6 +586,7 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 		}
 		client["input"] = input
 	} else {
+		stage = "function_arguments"
 		value := native["arguments"]
 		if transport {
 			value = envelope["arguments"]
@@ -484,9 +600,10 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 		if args == nil {
 			return nil, &openAIExcelToolCallError{reason: "function_arguments_not_object"}
 		}
-		if !transport && tool.Name == "update_plan" && tool.Namespace == "" {
+		if !transport && openAIExcelIsNativePlanCandidate(native) && tool.Name == "update_plan" && openAIExcelIsDefaultNamespace(tool.Namespace) {
 			args = openAIExcelNormalizePlan(args)
 		}
+		stage = "function_schema"
 		schema := openAIExcelToolSchema(tool.Spec)
 		if !openAIExcelMatchesSchema(args, schema, schema, 0) {
 			return nil, &openAIExcelToolCallError{reason: "function_schema_mismatch"}
@@ -494,6 +611,7 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 		encoded, _ := json.Marshal(args)
 		client["arguments"] = string(encoded)
 	}
+	stage = "store_history"
 	if s.options.History == nil || s.options.HistoryScope == "" {
 		return nil, ErrOpenAIExcelHistoryStorageUnavailable
 	}
