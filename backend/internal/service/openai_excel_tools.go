@@ -187,7 +187,7 @@ func (s *OpenAIExcelWireState) translateHistory(ctx context.Context, raw any) ([
 		}
 	}
 	result := make([]any, 0, len(items))
-	origins := make(map[string]string)
+	origins := make(map[string]map[string]any)
 	for _, rawItem := range items {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -235,7 +235,7 @@ func (s *OpenAIExcelWireState) translateHistory(ctx context.Context, raw any) ([
 					return nil, err
 				}
 			}
-			origins[callID] = openAIExcelString(native["name"])
+			origins[callID] = native
 			result = append(result, native)
 		case "function_call_output", "custom_tool_call_output":
 			callID := openAIExcelString(item["call_id"])
@@ -243,13 +243,13 @@ func (s *OpenAIExcelWireState) translateHistory(ctx context.Context, raw any) ([
 				return nil, errors.New("excel tool output is missing call_id")
 			}
 			origin := origins[callID]
-			if origin == "" {
+			if origin == nil {
 				return nil, errors.New("excel tool output requires its full call history")
 			}
-			if origin == "update_plan" {
+			if openAIExcelString(origin["type"]) == "function_call" && openAIExcelString(origin["name"]) == "update_plan" && openAIExcelString(origin["namespace"]) == "" {
 				item["output"] = `{"status":"ok"}`
 			}
-			if openAIExcelIsTransport(origin) {
+			if openAIExcelCallIsTransport(origin) {
 				item["type"] = "function_call_output"
 			}
 			item["id"] = "fc_" + callID
@@ -299,6 +299,35 @@ func openAIExcelRestoreCall(item map[string]any) (map[string]any, error) {
 
 func openAIExcelIsTransport(name string) bool {
 	return name == openAIExcelTransportTool || name == "functions."+openAIExcelTransportTool
+}
+
+// Match only a declared name. Responses can carry the namespace separately
+// from the leaf name; it is not a display prefix that may be discarded.
+func (s *OpenAIExcelWireState) resolveClientTool(name, namespace string) (openAIExcelTool, bool) {
+	if namespace != "" {
+		if tool, ok := s.tools[namespace+"."+name]; ok && tool.Namespace == namespace && tool.Name == name {
+			return tool, true
+		}
+		// A fully qualified name is also unambiguous when its declared
+		// namespace agrees with the explicit namespace field.
+		tool, ok := s.tools[name]
+		return tool, ok && tool.Namespace == namespace
+	}
+	if tool, ok := s.tools[name]; ok {
+		return tool, true
+	}
+	// Preserve the bridge's legacy alias, but never override an exact name.
+	tool, ok := s.tools[strings.TrimPrefix(name, "codex_client__")]
+	return tool, ok
+}
+
+func openAIExcelCallIsTransport(call map[string]any) bool {
+	name := openAIExcelString(call["name"])
+	namespace := openAIExcelString(call["namespace"])
+	if namespace == "" {
+		return openAIExcelIsTransport(name)
+	}
+	return namespace == "functions" && openAIExcelIsTransport(name)
 }
 
 // Decode only JSON, including fenced/assigned JSON occasionally produced by a
@@ -367,40 +396,58 @@ func openAIExcelRepairBackslashes(text string) string {
 
 func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native map[string]any) (map[string]any, error) {
 	name := openAIExcelString(native["name"])
-	transport := openAIExcelIsTransport(name)
+	if value := native["namespace"]; value != nil {
+		if _, ok := value.(string); !ok {
+			return nil, &openAIExcelToolCallError{reason: "tool_namespace_invalid"}
+		}
+	}
+	namespace := openAIExcelString(native["namespace"])
+	transport := openAIExcelCallIsTransport(native)
 	var envelope map[string]any
 	if transport {
 		var args map[string]any
 		if !openAIExcelObjectValue(native["arguments"], &args) {
-			return nil, errors.New("invalid Excel native tool arguments")
+			return nil, &openAIExcelToolCallError{reason: "native_arguments_invalid"}
 		}
 		var err error
 		envelope, err = openAIExcelDecodeEnvelope(args["code"])
 		if err != nil {
-			return nil, err
+			return nil, &openAIExcelToolCallError{reason: "relay_envelope_invalid"}
 		}
-		for depth := 0; openAIExcelIsTransport(openAIExcelString(envelope["name"])) && depth < 2; depth++ {
+		for depth := 0; openAIExcelCallIsTransport(envelope) && depth < 2; depth++ {
 			arguments := openAIExcelMap(envelope["arguments"])
 			if str, ok := envelope["arguments"].(string); ok {
 				if openAIExcelJSON([]byte(str), &arguments) != nil {
-					return nil, errors.New("invalid nested Excel tool envelope")
+					return nil, &openAIExcelToolCallError{reason: "nested_envelope_invalid"}
 				}
 			}
 			envelope, err = openAIExcelDecodeEnvelope(arguments["code"])
 			if err != nil {
-				return nil, err
+				return nil, &openAIExcelToolCallError{reason: "nested_envelope_invalid"}
 			}
 		}
+		if openAIExcelCallIsTransport(envelope) {
+			return nil, &openAIExcelToolCallError{reason: "relay_nesting_limit"}
+		}
 		name = openAIExcelString(envelope["name"])
+		if value := envelope["namespace"]; value != nil {
+			if _, ok := value.(string); !ok {
+				return nil, &openAIExcelToolCallError{reason: "tool_namespace_invalid"}
+			}
+		}
+		namespace = openAIExcelString(envelope["namespace"])
 	}
-	name = strings.TrimPrefix(name, "codex_client__")
-	tool, allowed := s.tools[name]
+	tool, allowed := s.resolveClientTool(name, namespace)
 	if !allowed {
-		return nil, fmt.Errorf("excel returned undeclared client tool %q", name)
+		reason := "native_tool_undeclared"
+		if transport {
+			reason = "relay_tool_undeclared"
+		}
+		return nil, &openAIExcelToolCallError{reason: reason}
 	}
 	callID := openAIExcelString(native["call_id"])
 	if callID == "" {
-		return nil, errors.New("excel native tool is missing call_id")
+		return nil, &openAIExcelToolCallError{reason: "call_id_missing"}
 	}
 	client := map[string]any{"type": tool.Kind + "_call", "name": tool.Name, "call_id": callID}
 	if tool.Namespace != "" {
@@ -420,7 +467,7 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 		}
 		input, ok := value.(string)
 		if !ok {
-			return nil, errors.New("excel custom tool input is not text")
+			return nil, &openAIExcelToolCallError{reason: "custom_input_not_text"}
 		}
 		client["input"] = input
 	} else {
@@ -431,18 +478,18 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 		args := openAIExcelMap(value)
 		if encoded, ok := value.(string); ok {
 			if !openAIExcelObjectValue(encoded, &args) {
-				return nil, errors.New("excel function arguments are not valid JSON")
+				return nil, &openAIExcelToolCallError{reason: "function_arguments_invalid"}
 			}
 		}
 		if args == nil {
-			return nil, errors.New("excel function arguments must be an object")
+			return nil, &openAIExcelToolCallError{reason: "function_arguments_not_object"}
 		}
-		if !transport && name == "update_plan" {
+		if !transport && tool.Name == "update_plan" && tool.Namespace == "" {
 			args = openAIExcelNormalizePlan(args)
 		}
 		schema := openAIExcelToolSchema(tool.Spec)
 		if !openAIExcelMatchesSchema(args, schema, schema, 0) {
-			return nil, fmt.Errorf("excel arguments do not match declared tool %q", name)
+			return nil, &openAIExcelToolCallError{reason: "function_schema_mismatch"}
 		}
 		encoded, _ := json.Marshal(args)
 		client["arguments"] = string(encoded)
@@ -452,7 +499,7 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 	}
 	raw, err := json.Marshal(native)
 	if err != nil || len(raw) > openAIExcelMaxItemBytes {
-		return nil, errors.New("excel native tool exceeds size limit")
+		return nil, &openAIExcelToolCallError{reason: "native_call_size_limit"}
 	}
 	if err = s.options.History.StoreExcelNativeCall(ctx, s.options.HistoryScope, callID, raw); err != nil {
 		if ctx.Err() != nil {
@@ -501,12 +548,12 @@ func openAIExcelNormalizePlan(arguments map[string]any) map[string]any {
 			step = openAIExcelString(item["title"])
 		}
 		status := openAIExcelString(item["status"])
-		switch strings.ToLower(strings.ReplaceAll(status, "-", "_")) {
-		case "pending", "not_started", "todo":
+		switch strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(status), "-", "_"), " ", "_")) {
+		case "pending", "not_started", "todo", "planned", "queued", "blocked":
 			status = "pending"
-		case "in_progress", "in progress", "running", "doing":
+		case "in_progress", "running", "doing", "active", "started", "current":
 			status = "in_progress"
-		case "completed", "complete", "done":
+		case "completed", "complete", "done", "finished":
 			status = "completed"
 		}
 		if step != "" && status != "" {

@@ -82,7 +82,7 @@ func TestExcelToolRelayMissingCallIDDoesNotStoreOrInventIdentity(t *testing.T) {
 	}
 	client, err := state.translateNativeCall(context.Background(), native)
 	require.Nil(t, client)
-	require.EqualError(t, err, "excel native tool is missing call_id")
+	require.Equal(t, "call_id_missing", openAIExcelToolFailureReason(err))
 	require.NotContains(t, native, "call_id")
 	require.Empty(t, history.values)
 }

@@ -23,7 +23,7 @@ import (
 func WrapOpenAIExcelResponse(ctx context.Context, response *http.Response, state *OpenAIExcelWireState) (result *http.Response, resultErr error) {
 	defer func() {
 		if resultErr != nil && ctx.Err() == nil {
-			logger.FromContext(ctx).Warn("openai.excel_response_translation_failed", zap.String("reason", openAIExcelProtocolReason(resultErr)))
+			logOpenAIExcelProtocolFailure(ctx, resultErr)
 		}
 	}()
 	if response == nil || response.Body == nil || state == nil {
@@ -46,7 +46,7 @@ func WrapOpenAIExcelResponse(ctx context.Context, response *http.Response, state
 			defer func() { _ = response.Body.Close() }()
 			err := state.transformSSE(ctx, response.Body, writer)
 			if err != nil && ctx.Err() == nil {
-				logger.FromContext(ctx).Warn("openai.excel_response_translation_failed", zap.String("reason", openAIExcelProtocolReason(err)))
+				logOpenAIExcelProtocolFailure(ctx, err)
 				// Preserve an explicit protocol failure, never fabricate a completed
 				// response from item.done or a disconnected stream.
 				payload, _ := json.Marshal(map[string]any{"type": "error", "code": "excel_protocol_error", "message": openAIExcelSafeProtocolError(err)})
@@ -105,7 +105,33 @@ func openAIExcelSafeProtocolError(err error) string {
 	}
 	// Parsing errors can contain upstream arguments. Keep those out of logs and
 	// protocol errors, while the internal Go error remains available to tests.
-	return "Excel upstream response could not be translated safely (" + openAIExcelProtocolReason(err) + ")"
+	reason := openAIExcelProtocolReason(err)
+	if detail := openAIExcelToolFailureReason(err); detail != "" {
+		reason += ": " + detail
+	}
+	return "Excel upstream response could not be translated safely (" + reason + ")"
+}
+
+// Tool failure details contain only static categories, never names, schema
+// property paths, arguments or the original response body.
+type openAIExcelToolCallError struct{ reason string }
+
+func (e *openAIExcelToolCallError) Error() string { return "excel tool call failed: " + e.reason }
+
+func openAIExcelToolFailureReason(err error) string {
+	var failure *openAIExcelToolCallError
+	if errors.As(err, &failure) {
+		return failure.reason
+	}
+	return ""
+}
+
+func logOpenAIExcelProtocolFailure(ctx context.Context, err error) {
+	fields := []zap.Field{zap.String("reason", openAIExcelProtocolReason(err))}
+	if detail := openAIExcelToolFailureReason(err); detail != "" {
+		fields = append(fields, zap.String("tool_reason", detail))
+	}
+	logger.FromContext(ctx).Warn("openai.excel_response_translation_failed", fields...)
 }
 
 // Reasons are a fixed vocabulary: never expose native tool names, arguments,
@@ -334,7 +360,7 @@ func (s *OpenAIExcelWireState) transformSSE(ctx context.Context, body io.Reader,
 			identity = make(map[string]any)
 			itemIdentities[index] = identity
 		}
-		for _, key := range []string{"type", "id", "call_id", "name"} {
+		for _, key := range []string{"type", "id", "call_id", "name", "namespace"} {
 			if value := openAIExcelString(item[key]); value != "" {
 				if previous := openAIExcelString(identity[key]); previous != "" && previous != value {
 					return &openAIExcelProtocolFailure{reason: "conflicting_output_items"}
@@ -422,7 +448,7 @@ func (s *OpenAIExcelWireState) transformSSE(ctx context.Context, body io.Reader,
 					return false, &openAIExcelProtocolFailure{reason: "incomplete_output_items"}
 				}
 				item := openAIExcelMap(output[index])
-				for _, key := range []string{"type", "id", "call_id", "name"} {
+				for _, key := range []string{"type", "id", "call_id", "name", "namespace"} {
 					if value := openAIExcelString(identity[key]); value != "" && value != openAIExcelString(item[key]) {
 						return false, &openAIExcelProtocolFailure{reason: "conflicting_output_items"}
 					}
