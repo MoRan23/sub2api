@@ -243,6 +243,9 @@ func (s *AccountCandyTestService) execute(item *CandyTestItem) {
 	case !execution.Completed:
 		item.FailureCode = "missing_terminal"
 	default:
+		// A completed response that does not supply four unique correct counts
+		// is an abnormal answer, not a transport or execution failure.
+		item.Status = "abnormal"
 		counts, gradeErr := GradeCandyAnswer(execution.ResponseText)
 		if gradeErr != nil {
 			item.FailureCode = "invalid_answer_format"
@@ -251,7 +254,6 @@ func (s *AccountCandyTestService) execute(item *CandyTestItem) {
 				item.FailureCode = gradeFailure.Code
 			}
 		} else {
-			item.Status = "abnormal"
 			if counts == ExpectedCandyAnswerCounts() {
 				item.Status = "normal"
 			}

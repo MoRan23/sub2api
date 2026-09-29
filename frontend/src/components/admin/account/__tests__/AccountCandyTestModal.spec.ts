@@ -241,6 +241,20 @@ describe('Account candy tests', () => {
     wrapper.unmount()
   })
 
+  it('shows completed unresolved answers as abnormal and keeps the reason and original answer', () => {
+    const answer = '|问题|最少数量|\n|第1问|未确定|\n|第2问|不知道|\n|第3问固定|待定|\n|第3问自适应|无法判断|'
+    const wrapper = mount(AccountCandyTestResult, { props: { item: item({ status: 'abnormal', failure_code: 'invalid_answer_format', answers: {}, response_text: answer }) } })
+    expect(wrapper.text()).toContain('Abnormal')
+    expect(wrapper.text()).not.toContain('Test failed')
+    expect(wrapper.get('[role="status"]').text()).toContain('could not be uniquely extracted')
+    expect(wrapper.get('pre').text()).toBe(answer)
+    expect(wrapper.findAll('tbody tr')).toHaveLength(4)
+    for (const row of wrapper.findAll('tbody tr')) {
+      expect(row.findAll('td')[1]?.text()).toBe('—')
+    }
+    wrapper.unmount()
+  })
+
   it('renders the raw answer as text, shows all four counts and keeps server grade', () => {
     const wrapper = mount(AccountCandyTestResult, { props: { item: item({ status: 'failed', failure_code: 'missing_terminal', answers: { q1_fixed: 32, q2_adaptive: 29, q3_fixed: 40, q3_adaptive: 38 }, response_text: '<img src=x onerror="alert(1)">' }) } })
     expect(wrapper.find('img').exists()).toBe(false)

@@ -1,7 +1,7 @@
 export const candyTestsEn = {
   title: 'Candy puzzle test',
   selected: '{count} accounts selected',
-  description: 'Grade only the four minimum counts. Methods and proofs do not affect the result.',
+  description: 'Grade only the four minimum counts, not methods or proofs. Completed answers with incorrect, missing, conflicting or indeterminate counts are abnormal; request or execution errors are test failures.',
   quotaNotice: 'This test consumes upstream quota. It does not change account status or scheduling.',
   backgroundNotice: 'Closing this dialog keeps the batch running. Up to 3 tests run at once; each has a 30-minute limit and is not retried automatically.',
   retentionNotice: 'The latest 5 completed tests per account are retained, including the final answer.',
@@ -113,7 +113,7 @@ type CandyLocale = { [Key in keyof typeof candyTestsEn]: typeof candyTestsEn[Key
 export const candyTestsZh: CandyLocale = {
   title: '糖果题测试',
   selected: '已选择 {count} 个账号',
-  description: '只判断四项最少颗数，取法和证明不参与评分。',
+  description: '只判断四项最少颗数，取法和证明不参与评分。完整回答中的错误、缺项、矛盾或未明确给出颗数均标为异常；请求或执行错误标为测试失败。',
   quotaNotice: '测试会消耗上游额度，不更改账号状态或调度。',
   backgroundNotice: '关闭弹窗后后台继续。全服务最多同时测试 3 个账号，每项最长 30 分钟，不自动重试。',
   retentionNotice: '每个账号保留最近 5 次终态测试记录及原始最终回答。',

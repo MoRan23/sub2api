@@ -74,6 +74,8 @@ func TestCandyQueueRejectsInvalidAndMissingAccounts(t *testing.T) {
 
 const candyQueueAnswer = "|问题|最少数量|取法|\n|---|---|---|\n|第1问|32|说明|\n|第2问|29|说明|\n|第3问固定|40|说明|\n|第3问自适应|38|说明|"
 
+const candyIndeterminateAnswer = "|问题|最少数量|最优取法（简洁）|\n|---|---|---|\n|第1问：固定取法|无法唯一确定|按不同解释可得32颗。|\n|第2问：自适应取法|无法唯一确定|题目未说明观察条件。|\n|第3问：固定取法|无法唯一确定|同第1问。|\n|第3问：自适应取法|无法唯一确定|不同解释下最少数量会不同。|"
+
 func TestCandyQueueExecutionClassifiesOnlyCompleteAnswers(t *testing.T) {
 	cases := []struct {
 		name, text   string
@@ -83,9 +85,15 @@ func TestCandyQueueExecutionClassifiesOnlyCompleteAnswers(t *testing.T) {
 	}{
 		{"correct", candyQueueAnswer, true, nil, "normal", ""},
 		{"wrong", strings.Replace(candyQueueAnswer, "|29|", "|30|", 1), true, nil, "abnormal", ""},
-		{"missing", "|问题|最少数量|\n|第1问|32|", true, nil, "failed", "missing_answer"},
+		{"missing", "|问题|最少数量|\n|第1问|32|", true, nil, "abnormal", "missing_answer"},
+		{"indeterminate", candyIndeterminateAnswer, true, nil, "abnormal", "invalid_answer_format"},
+		{"conflicting", candyQueueAnswer + "\n|第1问|33|另一个答案|", true, nil, "abnormal", "ambiguous_answer"},
+		{"refusal", "题目信息不足，无法给出四项最少数量。", true, nil, "abnormal", "missing_answer"},
 		{"incomplete", candyQueueAnswer, false, nil, "failed", "missing_terminal"},
+		{"incomplete_indeterminate", candyIndeterminateAnswer, false, nil, "failed", "missing_terminal"},
 		{"transport", candyQueueAnswer, true, errors.New("secret upstream credential"), "failed", "execution_failed"},
+		{"transport_indeterminate", candyIndeterminateAnswer, true, errors.New("synthetic stream failure"), "failed", "execution_failed"},
+		{"authorization_changed", candyQueueAnswer, true, candyTestError("authorization_changed"), "failed", "authorization_changed"},
 		{"size", strings.Repeat("x", CandyTestMaxResponseBytes+1), true, nil, "failed", "response_too_large"},
 	}
 	for _, tt := range cases {
@@ -105,6 +113,11 @@ func TestCandyQueueExecutionClassifiesOnlyCompleteAnswers(t *testing.T) {
 			require.Equal(t, 1, executor.calls, "failed inference is never retried")
 			if tt.name == "size" {
 				require.Empty(t, repo.completed.ResponseText)
+			} else {
+				require.Equal(t, tt.text, repo.completed.ResponseText)
+			}
+			if tt.code != "" {
+				require.Empty(t, repo.completed.Answers, "unavailable counts must not be invented")
 			}
 		})
 	}
@@ -123,6 +136,26 @@ func TestCandyQueueLateSuccessCannotOverrideDeadline(t *testing.T) {
 	require.Equal(t, "failed", repo.completed.Status)
 	require.Equal(t, "timeout", repo.completed.FailureCode)
 	require.Empty(t, repo.completed.Answers)
+}
+
+func TestCandyQueueUnresolvedAnswersAreAbnormalRegardlessOfWording(t *testing.T) {
+	for _, answer := range []string{"未确定", "无法唯一确定", "无法判断", "不知道", "条件不足", "待定", "N/A", "unknown", "not enough information", "—"} {
+		t.Run(answer, func(t *testing.T) {
+			repo := &candyQueueRepoStub{}
+			text := strings.ReplaceAll(candyIndeterminateAnswer, "无法唯一确定", answer)
+			executor := &candyQueueExecutorStub{execute: func(context.Context, *CandyTestItem) (*CandyTestExecution, error) {
+				return &CandyTestExecution{ResponseText: text, Completed: true}, nil
+			}}
+			s := NewAccountCandyTestService(repo, executor)
+			defer s.Stop()
+			s.execute(&CandyTestItem{ID: 1, ClaimID: "claim"})
+			require.Equal(t, "abnormal", repo.completed.Status)
+			require.Equal(t, "invalid_answer_format", repo.completed.FailureCode)
+			require.Equal(t, text, repo.completed.ResponseText)
+			require.Empty(t, repo.completed.Answers)
+			require.Equal(t, 1, executor.calls)
+		})
+	}
 }
 
 func TestCandyQueueFailureCodesNeverStoreErrorText(t *testing.T) {

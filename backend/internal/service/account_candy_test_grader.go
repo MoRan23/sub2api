@@ -16,8 +16,9 @@ const (
 
 var candyAnswerKeys = [4]string{"q1_fixed", "q2_adaptive", "q3_fixed", "q3_adaptive"}
 
-// CandyAnswerGradeError describes a parse failure without echoing model output.
-// A parse failure must not be reported as a mathematically incorrect answer.
+// CandyAnswerGradeError describes why a completed answer cannot be graded.
+// The caller marks it abnormal while retaining the reason, without inventing
+// numeric answers or claiming that a particular mathematical count was wrong.
 type CandyAnswerGradeError struct {
 	Code     string
 	Question string
