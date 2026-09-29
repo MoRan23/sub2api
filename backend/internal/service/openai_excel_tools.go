@@ -90,7 +90,7 @@ func openAIExcelParseTools(source map[string]any) (map[string]openAIExcelTool, e
 
 func (s *OpenAIExcelWireState) toolInstructions() (string, error) {
 	if len(s.tools) == 0 {
-		return "This request is relayed by an external OpenAI Responses API client, not by the live Excel workbook. No client tools are declared for this request. Do not emit function_call or custom_tool_call items. Do not call or imitate host, MCP, skill, connector, file-system, visualization, Excel, Office, workbook, list_skills, web-search, or other server-injected tools (including names such as mcp__fastctx.inspect_local_file or visualize); names mentioned in conversation are informational, not available tools. Return the answer as assistant text.", nil
+		return "This request is relayed by an external OpenAI Responses API client, not by the live Excel workbook. Do not call server-injected Excel, Office, connector, workbook, or web-search tools. Return the answer as assistant text.", nil
 	}
 	keys := make([]string, 0, len(s.tools))
 	for key := range s.tools {
@@ -126,7 +126,7 @@ func (s *OpenAIExcelWireState) toolInstructions() (string, error) {
 	if s.required {
 		parallel += " This response must call a catalog tool; a text-only answer does not satisfy the caller's tool_choice."
 	}
-	return `This request is relayed by an external Codex Responses API client, not by the live Excel workbook. The native run_officejs function is a transport endpoint: its output is intercepted and delivered to the client, and no Office code is executed. Only the client tools in the catalog below are available. Do not call or imitate host, MCP, skill, connector, file-system, visualization, Excel, Office, workbook, list_skills or web-search tools. A name mentioned in conversation is not a tool declaration. If no catalog tool matches the task, answer with text instead of inventing a tool call.
+	return `This request is relayed by an external Codex Responses API client, not by the live Excel workbook. The native run_officejs function is a transport endpoint: its output is intercepted and delivered to the client, and no Office code is executed. Only the client tools in the catalog below are available. Do not use other Excel, Office, connector, workbook, list_skills or web-search tools.
 Call a catalog tool through one native run_officejs call. The outer arguments contain summary, extended_summary, destructive=false, references=[], and code. The code field is JSON text, never JavaScript or OfficeJS. For a function tool encode {"name":"catalog.name","arguments":{...}}; for a custom tool encode {"name":"catalog.name","input":"raw input"}. Serialize the complete inner JSON object, including all quotes and backslashes, before placing it in code. Do not nest a second run_officejs wrapper. Use the exact name shown in the catalog, including any declared namespace. Do not add a display-only host prefix such as functions.; do not remove functions. when it is part of a catalog name. Follow each catalog schema exactly. Returned tool results belong to that client tool. Never repeat calls whose output is already in the history. Do not claim workspace access is unavailable when the catalog supplies a suitable tool. If fulfilling the request requires a client tool, do not stop at commentary or a plan saying you will act: make the actual tool call in the same response. A request that needs no tool may be answered directly.
 ` + s.nativePlanGuidance() + "\n" + parallel + "\nAvailable client tools:\n" + string(raw), nil
 }

@@ -70,6 +70,4 @@ PostgreSQL 集成测试已编写，并用 `go test -tags=integration ./internal/
 
 验证通过：`go test -race ./internal/service -run 'Excel' -count=1`、`go vet ./internal/service`。修正新增代码的两项 staticcheck 风格问题后，`go test -race ./internal/service -run 'Excel.*Diagnostic' -count=1` 再次通过，`golangci-lint run --new-from-rev=10c694681 ./internal/service/...` 为 `0 issues`。没有新增 lint 豁免，也没有放宽原有失败断言。
 
-后续服务器诊断确认了另一类实际请求：请求工具目录为空，但上游仍返回 `mcp__fastctx.inspect_local_file`，因此按 `native_tool_undeclared` 安全拒绝。为避免模型从对话中的技能/宿主名称自行生成调用，空目录请求现在显式设置 `tool_choice=none`，并强化禁止调用 MCP、宿主、文件系统和可视化工具的协议提示；有目录请求也明确要求不创造目录外工具。该修正尚未部署。
-
 本次只改后端工具兼容及本地日志；没有数据库迁移或前端改动。未重跑前端全量、全后端非 Excel 测试或外部 PostgreSQL/Redis 集成；状态回放使用内存后端和测试加密器。本次未发送真实上游、授权或遥测请求，未部署或重启服务。
