@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -83,18 +84,30 @@ func (r *AccountCandyTestTransport) Execute(parent context.Context, item *CandyT
 	}
 	initial := snapshotOAuthRefreshAccount(credential)
 	attempt.validate = func(check context.Context) error {
+		if err := check.Err(); err != nil {
+			return err
+		}
 		business, readErr := r.accounts.GetByID(check, account.ID)
-		if readErr != nil || business == nil {
+		if readErr != nil {
+			return candyAuthorizationCheckError(check, readErr)
+		}
+		if business == nil {
 			return candyTestError("authorization_changed")
 		}
 		current, readErr := resolveCredentialAccount(check, r.accounts, business)
-		if readErr != nil || current == nil || current.ID != initial.ID {
+		if readErr != nil {
+			return candyAuthorizationCheckError(check, readErr)
+		}
+		if current == nil || current.ID != initial.ID {
 			return candyTestError("authorization_changed")
 		}
 		if initial.OpenAIOAuthAuthorizationGeneration != "" {
 			current, readErr = ReloadOpenAIOAuthCredentialAccount(check, r.accounts, initial)
 		}
-		if readErr != nil || !sameCandyAuthorization(initial, current) {
+		if readErr != nil {
+			return candyAuthorizationCheckError(check, readErr)
+		}
+		if !sameCandyAuthorization(initial, current) {
 			return candyTestError("authorization_changed")
 		}
 		if !initial.IsOpenAIOAuth() || initial.IsOpenAIPersonalAccessToken() || initial.IsOpenAIAgentIdentity() {
@@ -156,6 +169,11 @@ func (r *AccountCandyTestTransport) Execute(parent context.Context, item *CandyT
 				return
 			case <-ticker.C:
 				if checkErr := attempt.validate(ctx); checkErr != nil {
+					// Forward completion cancels in-flight monitor reads. The final
+					// authorization check below uses the still-live parent context.
+					if ctx.Err() != nil {
+						return
+					}
 					monitorFailure <- checkErr
 					cancel()
 					return
@@ -208,6 +226,20 @@ func (r *AccountCandyTestTransport) Execute(parent context.Context, item *CandyT
 		return execution, err
 	}
 	return execution, nil
+}
+
+func candyAuthorizationCheckError(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	if errors.Is(err, ErrAccountNotFound) || errors.Is(err, ErrOpenAIOAuthOSAuthorizationChanged) {
+		return candyTestError("authorization_changed")
+	}
+	// A failed read does not prove that the account's authorization changed.
+	return candyTestError("authorization_check_failed")
 }
 
 func sameCandyStaticAuthorization(before, after *Account) bool {
