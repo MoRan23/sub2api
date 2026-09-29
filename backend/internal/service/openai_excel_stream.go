@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 )
 
 // WrapOpenAIExcelResponse translates JSON and SSE without a second upstream
@@ -123,7 +122,6 @@ func (s *OpenAIExcelWireState) translateResponse(ctx context.Context, response m
 	}
 	translated := make([]any, 0, len(output))
 	calls := 0
-	nativeCalls := 0
 	for _, raw := range output {
 		item := openAIExcelMap(raw)
 		if item == nil {
@@ -131,29 +129,13 @@ func (s *OpenAIExcelWireState) translateResponse(ctx context.Context, response m
 		}
 		kind := openAIExcelString(item["type"])
 		if kind == "function_call" || kind == "custom_tool_call" {
-			nativeCalls++
 			calls++
 			if !s.parallel && calls > 1 {
-				// Excel may still return a second native call when the client
-				// explicitly disabled parallel calls.  Keep the first valid call;
-				// the client will submit its result before asking for the next one.
-				calls--
-				continue
+				return errors.New("excel returned parallel tools when disabled")
 			}
 			call, err := s.translateNativeCall(ctx, item)
 			if err != nil {
-				// A malformed or undeclared native call must never leak through to
-				// Codex.  The reference bridge drops unusable calls and preserves
-				// any valid text/reasoning or tool calls in the same response.  Only
-				// storage and cancellation errors are fatal because they make a
-				// valid client call impossible to replay safely.
-				if errors.Is(err, ErrOpenAIExcelHistoryNotFound) ||
-					errors.Is(err, ErrOpenAIExcelHistoryStorageUnavailable) ||
-					ctx.Err() != nil {
-					return err
-				}
-				calls--
-				continue
+				return err
 			}
 			call["status"] = "completed"
 			translated = append(translated, call)
@@ -165,13 +147,6 @@ func (s *OpenAIExcelWireState) translateResponse(ctx context.Context, response m
 	response["output"] = translated
 	if s.required && calls == 0 {
 		return errors.New("excel response did not satisfy required tool_choice")
-	}
-	// If a response consisted solely of native tool calls and all of them were
-	// malformed, returning an empty successful response would hide an upstream
-	// protocol problem.  Optional tools are safe to drop when there is other
-	// assistant output, but an all-tool response needs a fresh model turn.
-	if nativeCalls > 0 && len(translated) == 0 && len(output) == nativeCalls {
-		return errors.New("excel response contained no usable client tool call")
 	}
 	return nil
 }
@@ -255,26 +230,6 @@ func (s *OpenAIExcelWireState) transformSSE(ctx context.Context, body io.Reader,
 	var data bytes.Buffer
 	items := make(map[int]map[string]any)
 	bufferedBytes := 0
-	var keepaliveResponse map[string]any
-	const keepaliveInterval = 15 * time.Second
-	type readResult struct {
-		line string
-		err  error
-	}
-	readResults := make(chan readResult, 1)
-	go func() {
-		for {
-			line, err := openAIExcelReadSSELine(reader)
-			select {
-			case readResults <- readResult{line: line, err: err}:
-			case <-ctx.Done():
-				return
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
 	process := func() (bool, error) {
 		if data.Len() == 0 {
 			event = ""
@@ -296,13 +251,6 @@ func (s *OpenAIExcelWireState) transformSSE(ctx context.Context, body io.Reader,
 		if kind == "" || strings.ContainsAny(kind, "\r\n") {
 			return false, errors.New("invalid Excel SSE event type")
 		}
-		if kind == "response.created" || kind == "response.in_progress" {
-			if response := openAIExcelMap(payload["response"]); response != nil {
-				// Keepalive must repeat only an upstream response identity we
-				// actually observed.  Do not invent a response or model.
-				keepaliveResponse = response
-			}
-		}
 		event = ""
 		data.Reset()
 		switch kind {
@@ -310,7 +258,7 @@ func (s *OpenAIExcelWireState) transformSSE(ctx context.Context, body io.Reader,
 			// Stop at the first failure; a late completion cannot turn it into success.
 			openAIExcelStripNativeOutput(payload)
 			return true, writer.event(kind, payload)
-		case "response.completed", "response.done":
+		case "response.completed":
 			response := openAIExcelMap(payload["response"])
 			if response == nil {
 				return false, errors.New("excel completion has no response")
@@ -344,9 +292,6 @@ func (s *OpenAIExcelWireState) transformSSE(ctx context.Context, body io.Reader,
 					}
 				}
 			}
-			// Some Excel/WebView2 versions call the terminal event
-			// response.done.  It carries the same completed response shape;
-			// normalize it so Codex sees the canonical Responses event.
 			return true, writer.event("response.completed", payload)
 		case "response.function_call_arguments.delta", "response.function_call_arguments.done", "response.custom_tool_call_input.delta", "response.custom_tool_call_input.done":
 			// Do not expose the Excel executor or its argument schema to a client.
@@ -379,25 +324,11 @@ func (s *OpenAIExcelWireState) transformSSE(ctx context.Context, body io.Reader,
 		openAIExcelStripNativeOutput(payload)
 		return false, writer.event(kind, payload)
 	}
-	ticker := time.NewTicker(keepaliveInterval)
-	defer ticker.Stop()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		var line string
-		var err error
-		select {
-		case result := <-readResults:
-			line, err = result.line, result.err
-		case <-ticker.C:
-			if keepaliveResponse != nil {
-				if err := writer.event("response.in_progress", map[string]any{"response": keepaliveResponse}); err != nil {
-					return err
-				}
-			}
-			continue
-		}
+		line, err := openAIExcelReadSSELine(reader)
 		if len(line) > openAIExcelMaxItemBytes || data.Len()+len(line) > openAIExcelMaxItemBytes {
 			return errors.New("excel SSE event exceeds size limit")
 		}

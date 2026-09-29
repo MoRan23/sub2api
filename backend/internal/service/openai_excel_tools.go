@@ -9,8 +9,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/google/uuid"
 )
 
 type openAIExcelTool struct {
@@ -346,7 +344,7 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 	var envelope map[string]any
 	if transport {
 		var args map[string]any
-		if !openAIExcelObjectValue(native["arguments"], &args) {
+		if openAIExcelJSON([]byte(openAIExcelString(native["arguments"])), &args) != nil {
 			return nil, errors.New("invalid Excel native tool arguments")
 		}
 		var err error
@@ -375,11 +373,7 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 	}
 	callID := openAIExcelString(native["call_id"])
 	if callID == "" {
-		// A few WebView2 builds omit call_id on the native item while still
-		// returning a stable item id.  Codex requires a call_id for the client
-		// tool result, so assign one locally and persist the normalized item.
-		callID = "excel_call_" + uuid.NewString()
-		native["call_id"] = callID
+		return nil, errors.New("excel native tool is missing call_id")
 	}
 	client := map[string]any{"type": tool.Kind + "_call", "name": tool.Name, "call_id": callID}
 	if tool.Namespace != "" {
@@ -409,7 +403,7 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 		}
 		args := openAIExcelMap(value)
 		if encoded, ok := value.(string); ok {
-			if !openAIExcelObjectValue(encoded, &args) {
+			if openAIExcelJSON([]byte(encoded), &args) != nil {
 				return nil, errors.New("excel function arguments are not valid JSON")
 			}
 		}
@@ -440,29 +434,6 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 		return nil, ErrOpenAIExcelHistoryStorageUnavailable
 	}
 	return client, nil
-}
-
-// Excel has emitted both JSON-string and object forms for function arguments
-// across WebView2 protocol versions.  Normalize both without accepting scalar
-// values, which cannot be represented as a Codex function-call argument map.
-func openAIExcelObjectValue(value any, destination *map[string]any) bool {
-	if destination == nil {
-		return false
-	}
-	if object := openAIExcelMap(value); object != nil {
-		*destination = object
-		return true
-	}
-	text, ok := value.(string)
-	if !ok || strings.TrimSpace(text) == "" {
-		return false
-	}
-	var object map[string]any
-	if openAIExcelJSON([]byte(text), &object) != nil || object == nil {
-		return false
-	}
-	*destination = object
-	return true
 }
 
 func openAIExcelNormalizePlan(arguments map[string]any) map[string]any {
