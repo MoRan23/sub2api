@@ -59,15 +59,3 @@ PostgreSQL 集成测试已编写，并用 `go test -tags=integration ./internal/
 验证通过：`go test -race ./internal/service -run 'Excel' -count=1`、`go vet ./internal/service`，以及新增往返/诊断测试的 `go test -race ./internal/service -run '^TestExcelToolCompat' -count=1`。夹具覆盖直接与转接的 function/custom、独立/全限定命名空间、真实状态存储的字段过滤与重新实例化恢复、同名内置工具隔离、十类细分错误及日志脱敏、SSE 一致性、18 种计划状态表达。状态存储验证使用内存后端与测试加密器，不代表外部 Redis 集成验证；本次未运行外部数据库、前端全量或真实上游测试。
 
 新测试的类型断言/返回值检查与格式化修正后，`golangci-lint run --new-from-rev=20770241d ./internal/service/...` 为 `0 issues`，未新增豁免。
-
-## 2026-09-29：默认 functions 命名空间与详细服务端诊断
-
-本次基线为 `10c694681`。此前只读日志确认 `native_tool_undeclared`，未记录原生工具名；不能从旧日志倒推出名称。对照本地 Codex `protocol/src/tool_name.rs` 与 Lite 工具序列化，确认缺失/空命名空间与 `functions` 等价。适配器此前只按完全相同的命名空间匹配，能够稳定复现声明 `functions.update_plan` 而原生调用省略命名空间时的误拒。此次兼容默认空间，仍拒绝其他命名空间错配和默认空间重名歧义；没有放行 `list_skills` 等未声明工具。
-
-按用户要求增加详细服务端诊断，记录有界标识符、阶段、转接状态、参数形状、匹配结果和声明工具清单；仅在失败时生成，客户端错误格式仍为静态原因码。非法/过长标识符整段隐藏，工具描述、参数及 schema 键值、令牌、URL、图片原文和业务正文不入日志。兼容修复和诊断代码已通过本地合成验证，但尚未部署，因此这些日志无法补回旧请求的原始信息。
-
-新增夹具覆盖 function/custom 的直接与转接调用、默认空间的省略/显式表达、重名歧义拒绝、legacy/全限定计划名称、字面同名工具隔离、参数归一及原生 history 精确回放。诊断覆盖 JSON/SSE、所有解析阶段、嵌套层数、错误候选名、恶意标识符、32 项清单上限及不可变快照；凭据、业务正文、参数键值与 schema 内容均不得进入日志或下游错误。既有并行限制、未知工具拒绝和真实终态要求保持。
-
-验证通过：`go test -race ./internal/service -run 'Excel' -count=1`、`go vet ./internal/service`。修正新增代码的两项 staticcheck 风格问题后，`go test -race ./internal/service -run 'Excel.*Diagnostic' -count=1` 再次通过，`golangci-lint run --new-from-rev=10c694681 ./internal/service/...` 为 `0 issues`。没有新增 lint 豁免，也没有放宽原有失败断言。
-
-本次只改后端工具兼容及本地日志；没有数据库迁移或前端改动。未重跑前端全量、全后端非 Excel 测试或外部 PostgreSQL/Redis 集成；状态回放使用内存后端和测试加密器。本次未发送真实上游、授权或遥测请求，未部署或重启服务。

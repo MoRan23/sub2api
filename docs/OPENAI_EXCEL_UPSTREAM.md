@@ -10,20 +10,7 @@
 
 SSE 必须收到真实的完成终态。终态省略输出或输出为空时，可以使用本次流中已完成且索引连续的 item 恢复输出；不能从 EOF、`[DONE]` 或单独的 item.done 推断成功。已宣布的工具不得在终态消失或改变关联。长思考的 15 秒进度保活只沿用已收到的响应身份，取消和连接关闭仍会停止读取。转换失败记录固定原因码（如 `invalid_tool_call`、`commentary_without_action`、`incomplete_output_items`），不记录工具参数、正文或原始上游流。
 
-工具名称同时支持声明中的全限定名称和独立 `namespace` 字段；直接调用与 `run_officejs` 内层使用同一声明匹配规则。按 Codex 的规则，未填写与显式 `functions` 属于同一默认命名空间；其他命名空间仍精确匹配。默认空间中有多个同名声明时明确拒绝，不猜测要执行哪个。原生 `update_plan` 的参数和结果回传同样识别默认空间；保存与回传的原生调用保持原样。未声明工具、缺少真实调用 ID 仍会失败。
-
-`invalid_tool_call` 会附带固定细分原因（如 `relay_tool_undeclared`、`function_schema_mismatch`、`call_id_missing`）。客户端错误不含工具名或参数。服务端 `openai.excel_response_translation_failed` 日志包含 `reason`、`tool_reason` 和 `tool_diagnostic`：原生/候选工具名与命名空间、失败阶段、参数类型与长度、调用 ID 是否存在、匹配结果、默认空间候选数量，以及排序后最多 32 项声明工具（另记总数和截断标记）。标识符只记录完整合法且不超过 128 字节的名称；其他内容整段隐藏。日志不记录参数键值、schema、工具描述、调用 ID 值、请求头、令牌、图片或业务正文。用同条日志的请求 ID 关联实际账号与业务错误记录。
-
-排错时先查上述日志事件及请求 ID，再查看以下字段；`tool_diagnostic.version=1`。诊断只对新版实际处理的失败生成，不能补回历史请求的工具信息。
-
-| 字段 | 排查用途 |
-| --- | --- |
-| `stage`、`tool_reason` | 区分外层参数、转接 JSON、声明匹配、调用 ID、输入/schema 和历史保存失败 |
-| `native_name`、`candidate_name`、对应 `namespace` | 区分上游直接调用的工具与 `run_officejs` 内层目标；名称在 `value` 中，被隐藏时显示 `redacted` |
-| `transport`、`relay_depth` | 是否经过转接，是否发生多层嵌套 |
-| `name_matches_declared`、`matched_name`、`matched_namespace` | 查找是否成功，以及最终匹配的客户端声明 |
-| `default_namespace_candidates` | 当前候选名在默认空间的声明数量；大于 1 表示歧义，别名匹配结果仍以 `name_matches_declared` 为准 |
-| `catalog_total`、`catalog_truncated`、`catalog` | 核对本轮实际声明的工具；清单截断时不能将未显示误当作未声明 |
+工具名称同时支持声明中的全限定名称和独立 `namespace` 字段；直接调用与 `run_officejs` 内层使用同一声明匹配规则。命名空间冲突、未声明工具、缺少真实调用 ID 仍会失败。原生 `update_plan` 按参考协议将 `active` 等状态转换为客户端状态，保存与回传的原生调用保持原样。`invalid_tool_call` 会附带固定细分原因（如 `relay_tool_undeclared`、`function_schema_mismatch`、`call_id_missing`），日志同时记录 `tool_reason`；这些诊断不含工具名、属性名、参数值或响应正文。
 
 图片输入通过受限 URL 获取或附件上传，单次最多 64 个输入，解码及 multipart 总工作量最多 64 MiB；Excel Images API 使用 `gpt-image-2`，结果按实际返回图片计数。Responses 内置 `image_generation` 不自动注入，显式请求该能力会返回不支持。图片生成、编辑、附件上传和工具转接均使用账号代理，以及上述 Windows Excel UA/TLS 规则。
 
