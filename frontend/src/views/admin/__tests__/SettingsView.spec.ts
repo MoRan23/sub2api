@@ -1394,6 +1394,35 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(updateSettings.mock.calls[0][0]).toHaveProperty("codex_telemetry_observation_enabled");
   });
 
+  it("binds the risk-control allowlist to the shared user selector and saves user IDs", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      cyber_policy_user_allowlist: "12, 12 34",
+    });
+    const wrapper = mount(SettingsView, {
+      global: { stubs: {
+        ...settingsViewStubs,
+        AdminUserMultiSelect: defineComponent({
+          name: "AdminUserMultiSelect",
+          props: { modelValue: { type: Array, default: () => [] } },
+          emits: ["update:modelValue"],
+          render() { return h("div"); },
+        }),
+      } },
+    });
+    await flushPromises();
+    const selector = wrapper.getComponent('[data-testid="risk-control-user-allowlist"]');
+    expect(selector.props("modelValue")).toEqual([12, 34]);
+    selector.vm.$emit("update:modelValue", [34, 56]);
+    await flushPromises();
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      cyber_policy_user_allowlist: "34,56",
+    }));
+    wrapper.unmount();
+  });
+
   it("defaults integrity observation on independently and preserves an explicit disable after a partial save response", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,

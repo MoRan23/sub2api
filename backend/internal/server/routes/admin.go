@@ -403,6 +403,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.GET("/:id", h.Admin.Account.GetByID)
 		accounts.GET("/:id/candy-tests", h.Admin.Account.GetCandyTestHistory)
 		accounts.GET("/:id/codex-auth", gin.HandlerFunc(stepUpAuth), h.Admin.Account.ExportCodexAuth)
+		accounts.GET("/:id/claude/reset-credits", h.Admin.Account.ClaudeResetCredits)
 		accounts.POST("", h.Admin.Account.Create)
 		accounts.POST("/:id/duplicate", h.Admin.Account.Duplicate)
 		accounts.POST("/check-mixed-channel", h.Admin.Account.CheckMixedChannel)

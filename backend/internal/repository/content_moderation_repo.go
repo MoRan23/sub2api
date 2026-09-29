@@ -197,6 +197,7 @@ func (r *contentModerationRepository) CountFlaggedByUserSince(ctx context.Contex
 		return 0, nil
 	}
 	// SQL 中的 action 字面量须与 service 层对应常量保持一致。
+	// Log-only events remain evidence and never become penalties after allowlist removal.
 	var count int
 	err := r.db.QueryRowContext(ctx, `
 WITH last_auto_ban AS (
@@ -210,6 +211,8 @@ WHERE user_id = $1
   AND flagged = TRUE
   AND action <> 'hash_block'
   AND action <> 'whitelist_allow'
+  AND mode <> 'cyber_log_only'
+  AND mode <> 'risk_control_log_only'
   AND ($3::bool IS FALSE OR action <> 'cyber_policy')
   AND created_at >= $2
   AND created_at > COALESCE((SELECT at FROM last_auto_ban), '-infinity'::timestamptz)
