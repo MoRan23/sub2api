@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type openAIExcelTool struct {
@@ -127,35 +129,8 @@ func (s *OpenAIExcelWireState) toolInstructions() (string, error) {
 		parallel += " This response must call a catalog tool; a text-only answer does not satisfy the caller's tool_choice."
 	}
 	return `This request is relayed by an external Codex Responses API client, not by the live Excel workbook. The native run_officejs function is a transport endpoint: its output is intercepted and delivered to the client, and no Office code is executed. Only the client tools in the catalog below are available. Do not use other Excel, Office, connector, workbook, list_skills or web-search tools.
-Call a catalog tool through one native run_officejs call. The outer arguments contain summary, extended_summary, destructive=false, references=[], and code. The code field is JSON text, never JavaScript or OfficeJS. For a function tool encode {"name":"catalog.name","arguments":{...}}; for a custom tool encode {"name":"catalog.name","input":"raw input"}. Serialize the complete inner JSON object, including all quotes and backslashes, before placing it in code. Do not nest a second run_officejs wrapper. Use the exact name shown in the catalog, including any declared namespace. Do not add a display-only host prefix such as functions.; do not remove functions. when it is part of a catalog name. Follow each catalog schema exactly. Returned tool results belong to that client tool. Never repeat calls whose output is already in the history. Do not claim workspace access is unavailable when the catalog supplies a suitable tool. If fulfilling the request requires a client tool, do not stop at commentary or a plan saying you will act: make the actual tool call in the same response. A request that needs no tool may be answered directly. Native update_plan is permitted only when update_plan appears in the catalog and matches its schema; after its result, take the next substantive action through run_officejs when the task requires it.
+Call a catalog tool through one native run_officejs call. The outer arguments contain summary, extended_summary, destructive=false, references=[], and code. The code field is JSON text, never JavaScript or OfficeJS. For a function tool encode {"name":"catalog.name","arguments":{...}}; for a custom tool encode {"name":"catalog.name","input":"raw input"}. Serialize the complete inner JSON object, including all quotes and backslashes, before placing it in code. Do not nest a second run_officejs wrapper. A display prefix such as functions. is not part of the catalog tool name. Follow each catalog schema exactly. Returned tool results belong to that client tool. Never repeat calls whose output is already in the history. Do not claim workspace access is unavailable when the catalog supplies a suitable tool. Native update_plan is permitted only when update_plan appears in the catalog and matches its schema.
 ` + parallel + "\nAvailable client tools:\n" + string(raw), nil
-}
-
-// Keep the reminder next to the stable tool catalog, before conversation
-// history. Appending it after history would break the shared prompt prefix on
-// every subsequent tool turn.
-func (s *OpenAIExcelWireState) toolProtocolReminder() string {
-	if len(s.tools) == 0 {
-		return ""
-	}
-	keys := make([]string, 0, len(s.tools))
-	hasCustom := false
-	for name, tool := range s.tools {
-		keys = append(keys, name)
-		hasCustom = hasCustom || tool.Kind == "custom"
-	}
-	sort.Strings(keys)
-	reminder := `Reminder: when the task requires a client tool, use the outer native run_officejs transport in the same response; do not merely say you will act. It never executes Office code here. Put exactly one catalog-tool JSON object as JSON text in code, not JavaScript or another transport envelope. Use the exact catalog name, retaining its declared namespace; a display-only host prefix must not be added or stripped from a real catalog name. Escape quotes and backslashes when serializing the inner JSON. A request that needs no tool may be answered directly. Client tools: ` + strings.Join(keys, ", ") + ". Other native tools are unavailable."
-	if hasCustom {
-		reminder += ` Custom tools use input, not arguments: {"name":"TOOL_NAME","input":"RAW_INPUT"}.`
-	}
-	if tool, ok := s.tools["apply_patch"]; ok && tool.Kind == "custom" {
-		reminder += " For apply_patch, put the complete raw patch in input; never use arguments.patch."
-	}
-	if _, ok := s.tools["update_plan"]; ok {
-		reminder += " Native update_plan is allowed for progress; after its result, take the next substantive action through run_officejs when the task requires it."
-	}
-	return reminder
 }
 
 func openAIExcelToolSchema(spec map[string]any) map[string]any {
@@ -400,7 +375,11 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 	}
 	callID := openAIExcelString(native["call_id"])
 	if callID == "" {
-		return nil, errors.New("excel native tool is missing call_id")
+		// A few WebView2 builds omit call_id on the native item while still
+		// returning a stable item id.  Codex requires a call_id for the client
+		// tool result, so assign one locally and persist the normalized item.
+		callID = "excel_call_" + uuid.NewString()
+		native["call_id"] = callID
 	}
 	client := map[string]any{"type": tool.Kind + "_call", "name": tool.Name, "call_id": callID}
 	if tool.Namespace != "" {
@@ -463,8 +442,9 @@ func (s *OpenAIExcelWireState) translateNativeCall(ctx context.Context, native m
 	return client, nil
 }
 
-// Accept JSON-string and object forms for function arguments without accepting
-// scalar values, which cannot be represented as a client argument map.
+// Excel has emitted both JSON-string and object forms for function arguments
+// across WebView2 protocol versions.  Normalize both without accepting scalar
+// values, which cannot be represented as a Codex function-call argument map.
 func openAIExcelObjectValue(value any, destination *map[string]any) bool {
 	if destination == nil {
 		return false

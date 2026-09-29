@@ -35,15 +35,3 @@ PostgreSQL 集成测试已编写，并用 `go test -tags=integration ./internal/
 | `TestForwardAsAnthropic_InjectsPromptCacheKeyForAPIKeyMessagesDispatch` | prompt cache key 预期差异 |
 
 未执行真实 Excel 服务连通性、真实 OAuth 刷新、实际糖果推理、生图和遥测。没有部署、发布标签或连接未知用途数据库。
-
-## 2026-09-29：修正只返回准备说明的回归
-
-本次基线为 `97c979d7c`。该版本跳过未知/损坏工具及超出并行限制的调用后，仍可能发送成功终态；若只剩 commentary 或 reasoning，客户端便没有工具可以继续执行。过滤还会改变终态的输出索引。现恢复整次响应失败的严格约束，并撤回虚构缺失 `call_id` 的处理；对象/字符串参数兼容保留。
-
-通过合成夹具覆盖：准备说明/空 reasoning/部分回答加坏工具、有效工具混排索引、并行关闭、真实 ID 回传、仅 commentary 失败及普通短回答成功、空/非最终消息不掩盖 commentary、真实终态省略/空输出的 item 恢复、已宣布工具在终态缺失/冲突、非法/重复索引、只有参数事件的工具关联、尾随 `[DONE]` 时读取协程退出、15 秒保活和取消。保活测试使用 Go 虚拟时钟，没有实际等待或外部推理。
-
-参考项目的行动提示与稳定前缀 reminder 已补齐；测试验证 tool_choice none、无工具的纯回答、原指令不变、真实命名空间和历史增长时前缀稳定。没有引入自动补发请求或自动执行工具。
-
-本次执行 `go test -race ./internal/service -run 'Excel' -count=1` 和 `go vet ./internal/service` 通过；补齐新测试的 lint 检查后，`go test ./internal/service -run '^TestExcelCompletion' -count=1` 通过，`golangci-lint run --new-from-rev=97c979d7c ./internal/service/...` 为 `0 issues`。新回归夹具覆盖错误不泄漏工具名称/参数、原始模型和 usage 保留，以及终态与工具事件的索引一致性。
-
-服务器只读检查在对应时段发现账号的 HTTP 200 完成记录，未保存原始成功响应流，因此不能从日志确认截图请求具体丢失了哪个调用。上述本地回归已独立复现，不将所有简短回答都归为该原因。本次不部署、不发送真实上游请求。前端和数据库结构未修改，未重跑前端全量与外部存储集成测试。

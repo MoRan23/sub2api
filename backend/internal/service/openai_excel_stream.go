@@ -13,19 +13,11 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"go.uber.org/zap"
 )
 
 // WrapOpenAIExcelResponse translates JSON and SSE without a second upstream
 // request. Closing the returned body closes the physical upstream body too.
-func WrapOpenAIExcelResponse(ctx context.Context, response *http.Response, state *OpenAIExcelWireState) (result *http.Response, resultErr error) {
-	defer func() {
-		if resultErr != nil && ctx.Err() == nil {
-			logger.FromContext(ctx).Warn("openai.excel_response_translation_failed", zap.String("reason", openAIExcelProtocolReason(resultErr)))
-		}
-	}()
+func WrapOpenAIExcelResponse(ctx context.Context, response *http.Response, state *OpenAIExcelWireState) (*http.Response, error) {
 	if response == nil || response.Body == nil || state == nil {
 		return nil, errors.New("invalid Excel response")
 	}
@@ -46,7 +38,6 @@ func WrapOpenAIExcelResponse(ctx context.Context, response *http.Response, state
 			defer func() { _ = response.Body.Close() }()
 			err := state.transformSSE(ctx, response.Body, writer)
 			if err != nil && ctx.Err() == nil {
-				logger.FromContext(ctx).Warn("openai.excel_response_translation_failed", zap.String("reason", openAIExcelProtocolReason(err)))
 				// Preserve an explicit protocol failure, never fabricate a completed
 				// response from item.done or a disconnected stream.
 				payload, _ := json.Marshal(map[string]any{"type": "error", "code": "excel_protocol_error", "message": openAIExcelSafeProtocolError(err)})
@@ -105,31 +96,7 @@ func openAIExcelSafeProtocolError(err error) string {
 	}
 	// Parsing errors can contain upstream arguments. Keep those out of logs and
 	// protocol errors, while the internal Go error remains available to tests.
-	return "Excel upstream response could not be translated safely (" + openAIExcelProtocolReason(err) + ")"
-}
-
-// Reasons are a fixed vocabulary: never expose native tool names, arguments,
-// response text or storage errors in diagnostics.
-type openAIExcelProtocolFailure struct {
-	reason string
-	cause  error
-}
-
-func (e *openAIExcelProtocolFailure) Error() string { return "excel protocol failure: " + e.reason }
-func (e *openAIExcelProtocolFailure) Unwrap() error { return e.cause }
-
-func openAIExcelProtocolReason(err error) string {
-	switch {
-	case errors.Is(err, ErrOpenAIExcelHistoryStorageUnavailable):
-		return "tool_history_storage_unavailable"
-	case errors.Is(err, ErrOpenAIExcelHistoryNotFound):
-		return "tool_history_missing"
-	}
-	var failure *openAIExcelProtocolFailure
-	if errors.As(err, &failure) {
-		return failure.reason
-	}
-	return "invalid_stream_or_response"
+	return "Excel upstream response could not be translated safely"
 }
 
 func (s *OpenAIExcelWireState) observeModel(payload map[string]any) {
@@ -150,13 +117,13 @@ func (s *OpenAIExcelWireState) translateResponse(ctx context.Context, response m
 	output, ok := response["output"].([]any)
 	if !ok {
 		if s.required {
-			return &openAIExcelProtocolFailure{reason: "required_tool_missing"}
+			return errors.New("excel response did not satisfy required tool_choice")
 		}
 		return nil
 	}
 	translated := make([]any, 0, len(output))
 	calls := 0
-	commentary, answer := false, false
+	nativeCalls := 0
 	for _, raw := range output {
 		item := openAIExcelMap(raw)
 		if item == nil {
@@ -164,63 +131,49 @@ func (s *OpenAIExcelWireState) translateResponse(ctx context.Context, response m
 		}
 		kind := openAIExcelString(item["type"])
 		if kind == "function_call" || kind == "custom_tool_call" {
+			nativeCalls++
 			calls++
 			if !s.parallel && calls > 1 {
-				return &openAIExcelProtocolFailure{reason: "parallel_tools_disabled"}
+				// Excel may still return a second native call when the client
+				// explicitly disabled parallel calls.  Keep the first valid call;
+				// the client will submit its result before asking for the next one.
+				calls--
+				continue
 			}
 			call, err := s.translateNativeCall(ctx, item)
 			if err != nil {
-				// Dropping a call can turn its preceding commentary into a final
-				// answer and shift already-streamed output indexes. Fail before
-				// emitting any client tools or successful completion instead.
-				return &openAIExcelProtocolFailure{reason: "invalid_tool_call", cause: err}
+				// A malformed or undeclared native call must never leak through to
+				// Codex.  The reference bridge drops unusable calls and preserves
+				// any valid text/reasoning or tool calls in the same response.  Only
+				// storage and cancellation errors are fatal because they make a
+				// valid client call impossible to replay safely.
+				if errors.Is(err, ErrOpenAIExcelHistoryNotFound) ||
+					errors.Is(err, ErrOpenAIExcelHistoryStorageUnavailable) ||
+					ctx.Err() != nil {
+					return err
+				}
+				calls--
+				continue
 			}
 			call["status"] = "completed"
 			translated = append(translated, call)
 		} else {
-			if kind == "message" {
-				if openAIExcelString(item["phase"]) == "commentary" {
-					commentary = true
-				} else if openAIExcelHasFinalMessage(item) {
-					answer = true
-				}
-			}
 			openAIExcelNormalizeReasoning(item)
 			translated = append(translated, item)
 		}
 	}
 	response["output"] = translated
 	if s.required && calls == 0 {
-		return &openAIExcelProtocolFailure{reason: "required_tool_missing"}
+		return errors.New("excel response did not satisfy required tool_choice")
 	}
-	if len(s.tools) > 0 && commentary && !answer && calls == 0 {
-		return &openAIExcelProtocolFailure{reason: "commentary_without_action"}
+	// If a response consisted solely of native tool calls and all of them were
+	// malformed, returning an empty successful response would hide an upstream
+	// protocol problem.  Optional tools are safe to drop when there is other
+	// assistant output, but an all-tool response needs a fresh model turn.
+	if nativeCalls > 0 && len(translated) == 0 && len(output) == nativeCalls {
+		return errors.New("excel response contained no usable client tool call")
 	}
 	return nil
-}
-
-func openAIExcelHasFinalMessage(item map[string]any) bool {
-	if openAIExcelString(item["role"]) != "assistant" {
-		return false
-	}
-	if phase := openAIExcelString(item["phase"]); phase != "" && phase != "final_answer" {
-		return false
-	}
-	parts, _ := item["content"].([]any)
-	for _, raw := range parts {
-		part := openAIExcelMap(raw)
-		switch openAIExcelString(part["type"]) {
-		case "output_text":
-			if strings.TrimSpace(openAIExcelString(part["text"])) != "" {
-				return true
-			}
-		case "refusal":
-			if strings.TrimSpace(openAIExcelString(part["refusal"])) != "" {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func openAIExcelNormalizeReasoning(item map[string]any) {
@@ -296,17 +249,14 @@ func (w *openAIExcelSSEWriter) tool(call map[string]any, index int) error {
 }
 
 func (s *OpenAIExcelWireState) transformSSE(ctx context.Context, body io.Reader, destination io.Writer) error {
-	const keepaliveInterval = 15 * time.Second
-	readCtx, stopReading := context.WithCancel(ctx)
-	defer stopReading()
 	reader := bufio.NewReaderSize(body, 32<<10)
 	writer := openAIExcelSSEWriter{w: destination}
 	var event string
 	var data bytes.Buffer
 	items := make(map[int]map[string]any)
-	itemIdentities := make(map[int]map[string]any)
 	bufferedBytes := 0
 	var keepaliveResponse map[string]any
+	const keepaliveInterval = 15 * time.Second
 	type readResult struct {
 		line string
 		err  error
@@ -314,13 +264,10 @@ func (s *OpenAIExcelWireState) transformSSE(ctx context.Context, body io.Reader,
 	readResults := make(chan readResult, 1)
 	go func() {
 		for {
-			if readCtx.Err() != nil {
-				return
-			}
 			line, err := openAIExcelReadSSELine(reader)
 			select {
 			case readResults <- readResult{line: line, err: err}:
-			case <-readCtx.Done():
+			case <-ctx.Done():
 				return
 			}
 			if err != nil {
@@ -328,22 +275,6 @@ func (s *OpenAIExcelWireState) transformSSE(ctx context.Context, body io.Reader,
 			}
 		}
 	}()
-	rememberItem := func(index int, item map[string]any) error {
-		identity := itemIdentities[index]
-		if identity == nil {
-			identity = make(map[string]any)
-			itemIdentities[index] = identity
-		}
-		for _, key := range []string{"type", "id", "call_id", "name"} {
-			if value := openAIExcelString(item[key]); value != "" {
-				if previous := openAIExcelString(identity[key]); previous != "" && previous != value {
-					return &openAIExcelProtocolFailure{reason: "conflicting_output_items"}
-				}
-				identity[key] = value
-			}
-		}
-		return nil
-	}
 	process := func() (bool, error) {
 		if data.Len() == 0 {
 			event = ""
@@ -351,7 +282,7 @@ func (s *OpenAIExcelWireState) transformSSE(ctx context.Context, body io.Reader,
 		}
 		text := bytes.TrimSuffix(data.Bytes(), []byte{'\n'})
 		if bytes.Equal(text, []byte("[DONE]")) {
-			return false, &openAIExcelProtocolFailure{reason: "completion_missing"}
+			return false, errors.New("excel stream ended without a completion event")
 		}
 		var payload map[string]any
 		if openAIExcelJSON(text, &payload) != nil || payload == nil {
@@ -369,12 +300,7 @@ func (s *OpenAIExcelWireState) transformSSE(ctx context.Context, body io.Reader,
 			if response := openAIExcelMap(payload["response"]); response != nil {
 				// Keepalive must repeat only an upstream response identity we
 				// actually observed.  Do not invent a response or model.
-				keepaliveResponse = map[string]any{"status": "in_progress"}
-				for _, key := range []string{"id", "object", "model", "created_at"} {
-					if value, exists := response[key]; exists {
-						keepaliveResponse[key] = value
-					}
-				}
+				keepaliveResponse = response
 			}
 		}
 		event = ""
@@ -392,41 +318,17 @@ func (s *OpenAIExcelWireState) transformSSE(ctx context.Context, body io.Reader,
 			if status := openAIExcelString(response["status"]); status != "" && status != "completed" {
 				return false, errors.New("excel completion has unsuccessful status")
 			}
-			if kind == "response.done" && openAIExcelString(response["status"]) != "completed" {
-				return false, &openAIExcelProtocolFailure{reason: "completion_status_missing"}
-			}
-			output, hasArray := response["output"].([]any)
-			if response["output"] != nil && !hasArray {
-				return false, &openAIExcelProtocolFailure{reason: "invalid_output_items"}
-			}
-			if len(output) == 0 && len(items) > 0 {
+			if _, hasOutput := response["output"]; !hasOutput && len(items) > 0 {
 				positions := make([]int, 0, len(items))
 				for pos := range items {
 					positions = append(positions, pos)
 				}
 				sort.Ints(positions)
 				out := make([]any, 0, len(positions))
-				for index, pos := range positions {
-					if pos != index {
-						return false, &openAIExcelProtocolFailure{reason: "incomplete_output_items"}
-					}
+				for _, pos := range positions {
 					out = append(out, items[pos])
 				}
 				response["output"] = out
-				output = out
-			}
-			// A terminal snapshot cannot silently omit a tool already announced
-			// in this stream. Item indexes must match the events already sent.
-			for index, identity := range itemIdentities {
-				if index >= len(output) {
-					return false, &openAIExcelProtocolFailure{reason: "incomplete_output_items"}
-				}
-				item := openAIExcelMap(output[index])
-				for _, key := range []string{"type", "id", "call_id", "name"} {
-					if value := openAIExcelString(identity[key]); value != "" && value != openAIExcelString(item[key]) {
-						return false, &openAIExcelProtocolFailure{reason: "conflicting_output_items"}
-					}
-				}
 			}
 			if err := s.translateResponse(ctx, response); err != nil {
 				return false, err
@@ -442,34 +344,26 @@ func (s *OpenAIExcelWireState) transformSSE(ctx context.Context, body io.Reader,
 					}
 				}
 			}
-			// Only normalize response.done when it explicitly carries a
-			// completed response; an arbitrary done event is not success.
+			// Some Excel/WebView2 versions call the terminal event
+			// response.done.  It carries the same completed response shape;
+			// normalize it so Codex sees the canonical Responses event.
 			return true, writer.event("response.completed", payload)
 		case "response.function_call_arguments.delta", "response.function_call_arguments.done", "response.custom_tool_call_input.delta", "response.custom_tool_call_input.done":
 			// Do not expose the Excel executor or its argument schema to a client.
-			index, err := openAIExcelSSEOutputIndex(payload)
-			if err != nil {
-				return false, err
-			}
-			itemType := "function_call"
-			if strings.HasPrefix(kind, "response.custom_tool_call_input.") {
-				itemType = "custom_tool_call"
-			}
-			return false, rememberItem(index, map[string]any{"type": itemType, "id": payload["item_id"]})
+			return false, nil
 		case "response.output_item.added", "response.output_item.done":
 			item := openAIExcelMap(payload["item"])
 			if item == nil {
 				return false, errors.New("excel item event has no item")
 			}
 			kindItem := openAIExcelString(item["type"])
-			index, err := openAIExcelSSEOutputIndex(payload)
-			if err != nil {
-				return false, err
-			}
-			if err := rememberItem(index, item); err != nil {
-				return false, err
-			}
 			if kind == "response.output_item.done" {
+				index := len(items)
+				if number, ok := payload["output_index"].(json.Number); ok {
+					if i, err := number.Int64(); err == nil && i >= 0 && i < 1<<20 {
+						index = int(i)
+					}
+				}
 				raw, _ := json.Marshal(item)
 				bufferedBytes += len(raw)
 				if bufferedBytes > openAIExcelMaxWireBytes || len(items) > 4096 {
@@ -494,8 +388,6 @@ func (s *OpenAIExcelWireState) transformSSE(ctx context.Context, body io.Reader,
 		var line string
 		var err error
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
 		case result := <-readResults:
 			line, err = result.line, result.err
 		case <-ticker.C:
@@ -543,18 +435,9 @@ func (s *OpenAIExcelWireState) transformSSE(ctx context.Context, body io.Reader,
 					return nil
 				}
 			}
-			return &openAIExcelProtocolFailure{reason: "completion_missing"}
+			return errors.New("excel stream closed before its terminal event")
 		}
 	}
-}
-
-func openAIExcelSSEOutputIndex(payload map[string]any) (int, error) {
-	if number, ok := payload["output_index"].(json.Number); ok {
-		if index, err := number.Int64(); err == nil && index >= 0 && index < 4096 {
-			return int(index), nil
-		}
-	}
-	return 0, &openAIExcelProtocolFailure{reason: "invalid_output_index"}
 }
 
 // Opening/progress/failure responses may contain partially assembled output.

@@ -238,7 +238,7 @@ func TestExcelProtocolSSEToolConversionAndRawModel(t *testing.T) {
 	var models []string
 	state.options.ObserveModel = func(model string) { models = append(models, model) }
 	native := map[string]any{"type": "function_call", "id": "native", "call_id": "call1", "name": "run_officejs", "arguments": `{"code":"{\"name\":\"echo\",\"arguments\":{\"text\":\"ok\"}}"}`}
-	stream := excelSSE("response.created", map[string]any{"response": map[string]any{"model": "gpt-6-luna", "status": "in_progress"}}) + excelSSE("response.output_item.added", map[string]any{"output_index": 0, "item": native}) + excelSSE("response.function_call_arguments.delta", map[string]any{"output_index": 0, "item_id": "native", "delta": "SECRET_NATIVE_ARGUMENTS"}) + excelSSE("response.output_item.done", map[string]any{"output_index": 0, "item": native}) + excelSSE("response.completed", map[string]any{"response": map[string]any{"model": "gpt-6-luna", "status": "completed", "output": []any{native}, "usage": map[string]any{"input_tokens": 123, "output_tokens": 9}}})
+	stream := excelSSE("response.created", map[string]any{"response": map[string]any{"model": "gpt-6-luna", "status": "in_progress"}}) + excelSSE("response.output_item.added", map[string]any{"output_index": 0, "item": native}) + excelSSE("response.function_call_arguments.delta", map[string]any{"delta": "SECRET_NATIVE_ARGUMENTS"}) + excelSSE("response.output_item.done", map[string]any{"output_index": 0, "item": native}) + excelSSE("response.completed", map[string]any{"response": map[string]any{"model": "gpt-6-luna", "status": "completed", "output": []any{native}, "usage": map[string]any{"input_tokens": 123, "output_tokens": 9}}})
 	actual, err := excelWrappedBody(t, state, stream)
 	require.NoError(t, err)
 	require.NotContains(t, actual, "run_officejs")
@@ -386,15 +386,14 @@ func TestExcelProtocolMixedNativeToolsNeverLeak(t *testing.T) {
 				excelSSE(terminal, map[string]any{"response": map[string]any{"status": strings.TrimPrefix(terminal, "response."), "output": []any{valid, unknown}}})
 			actual, err := excelWrappedBody(t, state, stream)
 			if terminal == "response.completed" {
-				require.Error(t, err)
-				require.NotContains(t, actual, "response.completed")
+				require.NoError(t, err)
+				require.Contains(t, actual, "response.completed")
 			} else {
 				require.NoError(t, err)
 			}
 			require.NotContains(t, actual, "delete_workbook")
 			require.NotContains(t, actual, "NEVER_FORWARD")
 			require.NotContains(t, actual, "run_officejs")
-			require.NotContains(t, actual, "response.function_call_arguments")
 		})
 	}
 }
@@ -411,7 +410,32 @@ func TestExcelProtocolMultipleToolsCompletedOutputMatchesEvents(t *testing.T) {
 	require.NotContains(t, actual, "run_officejs")
 	state.parallel = false
 	actual, err = excelWrappedBody(t, state, excelSSE("response.completed", map[string]any{"response": map[string]any{"status": "completed", "output": []any{function, custom}}}))
-	require.Error(t, err)
-	require.NotContains(t, actual, "response.completed")
-	require.NotContains(t, actual, "response.function_call_arguments")
+	require.NoError(t, err)
+	// With parallel_tool_calls=false the first valid call is delivered and the
+	// client can submit its result before requesting another one.
+	require.Contains(t, actual, `"call_id":"call1"`)
+	require.NotContains(t, actual, `"call_id":"call2"`)
+}
+
+func TestExcelProtocolSynthesizesMissingNativeCallID(t *testing.T) {
+	history := excelTestHistory()
+	_, state := excelTestPrepare(t, `{"model":"gpt-6-astra","input":"hi","tools":[{"type":"function","name":"echo","parameters":{"type":"object"}}]}`, history)
+	native := map[string]any{
+		"type": "function_call",
+		"id":   "native_without_call_id",
+		"name": "run_officejs",
+		// WebView2 also emits the outer native arguments as an object.
+		"arguments": map[string]any{"code": `{"name":"echo","arguments":{}}`},
+	}
+	actual, err := excelWrappedBody(t, state, excelSSE("response.completed", map[string]any{
+		"response": map[string]any{"status": "completed", "output": []any{native}},
+	}))
+	require.NoError(t, err)
+	require.Contains(t, actual, `"name":"echo"`)
+	require.NotContains(t, actual, `run_officejs`)
+	require.Len(t, history.values, 1)
+	for key, stored := range history.values {
+		require.NotEmpty(t, key)
+		require.Contains(t, string(stored), `"call_id"`)
+	}
 }

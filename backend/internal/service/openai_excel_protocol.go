@@ -197,9 +197,6 @@ func PrepareOpenAIExcelWire(ctx context.Context, body []byte, headers http.Heade
 		return nil, nil, nil, err
 	}
 	prologue = append(prologue, openAIExcelMessage("developer", protocol))
-	if reminder := state.toolProtocolReminder(); reminder != "" {
-		prologue = append(prologue, openAIExcelMessage("developer", reminder))
-	}
 	items = append(prologue, items...)
 	output := map[string]any{"model": model, "model_selection": "explicit", "stream": source["stream"] == true, "store": false, "input": items, "reasoning_effort": parsed.effort}
 	if management, ok := source["context_management"].([]any); ok {
