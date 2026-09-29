@@ -10,8 +10,6 @@
 
 SSE 必须收到真实的完成终态。终态省略输出或输出为空时，可以使用本次流中已完成且索引连续的 item 恢复输出；不能从 EOF、`[DONE]` 或单独的 item.done 推断成功。已宣布的工具不得在终态消失或改变关联。长思考的 15 秒进度保活只沿用已收到的响应身份，取消和连接关闭仍会停止读取。转换失败记录固定原因码（如 `invalid_tool_call`、`commentary_without_action`、`incomplete_output_items`），不记录工具参数、正文或原始上游流。
 
-工具名称同时支持声明中的全限定名称和独立 `namespace` 字段；直接调用与 `run_officejs` 内层使用同一声明匹配规则。命名空间冲突、未声明工具、缺少真实调用 ID 仍会失败。原生 `update_plan` 按参考协议将 `active` 等状态转换为客户端状态，保存与回传的原生调用保持原样。`invalid_tool_call` 会附带固定细分原因（如 `relay_tool_undeclared`、`function_schema_mismatch`、`call_id_missing`），日志同时记录 `tool_reason`；这些诊断不含工具名、属性名、参数值或响应正文。
-
 图片输入通过受限 URL 获取或附件上传，单次最多 64 个输入，解码及 multipart 总工作量最多 64 MiB；Excel Images API 使用 `gpt-image-2`，结果按实际返回图片计数。Responses 内置 `image_generation` 不自动注入，显式请求该能力会返回不支持。图片生成、编辑、附件上传和工具转接均使用账号代理，以及上述 Windows Excel UA/TLS 规则。
 
 Excel 路径仅写本地用量、错误、模型证据、系统、TLS、代理和耗时观测，不发送 Codex Analytics、OTLP、模拟活动或 Guardian 辅助请求。账号开关变化会推进私有路由代次；排队中的糖果测试在发送前和心跳时检查代次，切换后以配置变化结束，不重试或换模型。糖果题每项仍只发送一次推理请求，并保留取消、账号状态隔离和 30 分钟截止时间。

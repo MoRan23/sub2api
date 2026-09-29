@@ -47,15 +47,3 @@ PostgreSQL 集成测试已编写，并用 `go test -tags=integration ./internal/
 本次执行 `go test -race ./internal/service -run 'Excel' -count=1` 和 `go vet ./internal/service` 通过；补齐新测试的 lint 检查后，`go test ./internal/service -run '^TestExcelCompletion' -count=1` 通过，`golangci-lint run --new-from-rev=97c979d7c ./internal/service/...` 为 `0 issues`。新回归夹具覆盖错误不泄漏工具名称/参数、原始模型和 usage 保留，以及终态与工具事件的索引一致性。
 
 服务器只读检查在对应时段发现账号的 HTTP 200 完成记录，未保存原始成功响应流，因此不能从日志确认截图请求具体丢失了哪个调用。上述本地回归已独立复现，不将所有简短回答都归为该原因。本次不部署、不发送真实上游请求。前端和数据库结构未修改，未重跑前端全量与外部存储集成测试。
-
-## 2026-09-29：细分 invalid_tool_call 与命名空间兼容
-
-本次基线为 `20770241d`。只读服务器日志确认连续六次 `invalid_tool_call`，但该版未记录具体工具转换分支，不能据此认定这六次请求的确切失败形态。未采集原始业务内容、未发送真实推理、未部署。
-
-源码与合成夹具确认两项遗漏：独立 `namespace` 的 function/custom 调用只按叶名称查找，导致已声明工具被拒绝；原生 `update_plan` 的 `planned/queued/blocked/active/started/current/finished` 等参考状态别名未完整归一。修复按完整声明匹配工具，并保留原始调用历史；持久化字段白名单同步保留 `namespace`，回传结果根据完整原生调用识别 Excel 内置工具，避免误改其他命名空间的同名工具。流内已观察到的命名空间同样参与终态一致性检查。未知工具、命名空间冲突、缺失真实调用 ID 和不合法参数仍拒绝，不恢复吞工具、伪造调用 ID 或自动重试。
-
-新增固定的工具转换细分原因，覆盖原生参数、转接 envelope、嵌套上限、工具查找、调用 ID、custom 输入和 function schema；接口错误和日志均不输出原始工具名、参数键值、schema 路径或业务正文。
-
-验证通过：`go test -race ./internal/service -run 'Excel' -count=1`、`go vet ./internal/service`，以及新增往返/诊断测试的 `go test -race ./internal/service -run '^TestExcelToolCompat' -count=1`。夹具覆盖直接与转接的 function/custom、独立/全限定命名空间、真实状态存储的字段过滤与重新实例化恢复、同名内置工具隔离、十类细分错误及日志脱敏、SSE 一致性、18 种计划状态表达。状态存储验证使用内存后端与测试加密器，不代表外部 Redis 集成验证；本次未运行外部数据库、前端全量或真实上游测试。
-
-新测试的类型断言/返回值检查与格式化修正后，`golangci-lint run --new-from-rev=20770241d ./internal/service/...` 为 `0 issues`，未新增豁免。

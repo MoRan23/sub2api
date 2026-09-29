@@ -122,7 +122,7 @@ func (s *OpenAIExcelStateStore) StoreExcelNativeCall(ctx context.Context, scope,
 		return errors.New("invalid Excel native call")
 	}
 	filtered := make(map[string]json.RawMessage)
-	for _, key := range []string{"type", "id", "call_id", "name", "namespace", "arguments", "status", "input"} {
+	for _, key := range []string{"type", "id", "call_id", "name", "arguments", "status", "input"} {
 		if v, ok := input[key]; ok {
 			filtered[key] = v
 		}
