@@ -44,7 +44,6 @@ type FingerprintObservationEntry struct {
 	APIKeyName                   string                         `json:"api_key_name"`
 	AccountID                    int64                          `json:"account_id"`
 	AccountName                  string                         `json:"account_name"`
-	UpstreamKind                 string                         `json:"upstream_kind,omitempty"`
 	Pinned                       bool                           `json:"pinned"`
 	ClientReportedInstallationID string                         `json:"client_reported_installation_id"`
 	OutboundInstallationID       string                         `json:"outbound_installation_id"`
@@ -651,7 +650,6 @@ func (s *OpenAIGatewayService) recordFingerprintObservation(c *gin.Context, acco
 // in the wire header set.
 func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Context, account *Account, pin installationIDResolution, outbound http.Header, body []byte) {
 	evidence := beginOpenAIResponseEvidence(c, responseEvidenceModelFromBody(body))
-	markOpenAIResponseEvidenceUpstreamKind(evidence, account.OpenAIUpstreamKind())
 	state, _ := RequestTimezoneStateFromContext(c)
 	integrity := s.observeOpenAIRequestIntegrity(c, account, outbound, body, "http", state)
 	if !fingerprintObservationAccountEnabled(account) {
@@ -691,7 +689,6 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 		APIKeyName:                   actor.APIKeyName,
 		AccountID:                    account.ID,
 		AccountName:                  account.Name,
-		UpstreamKind:                 account.OpenAIUpstreamKind(),
 		Pinned:                       pin.Enabled,
 		ClientReportedInstallationID: pin.ClientID,
 		OutboundInstallationID:       pin.OutboundID,
@@ -922,11 +919,6 @@ func (s *OpenAIGatewayService) recordFingerprintObservationFromContext(c *gin.Co
 }
 
 func (s *OpenAIGatewayService) recordFingerprintObservationFromContextWithBody(c *gin.Context, account *Account, outbound http.Header, body []byte) {
-	// Excel has a subsequent protocol projection. Its shared sender records the
-	// final headers/body instead of this intermediate Codex representation.
-	if account != nil && account.IsOpenAIExcelUpstreamEnabled() {
-		return
-	}
 	if isOpenAICandyTestContext(c) {
 		return
 	}
@@ -1070,7 +1062,6 @@ func (s *OpenAIGatewayService) freezeFingerprintObservationWSFrame(c *gin.Contex
 	if evidence == nil {
 		evidence = beginOpenAIResponseEvidence(c, responseEvidenceModelFromBody(body))
 	}
-	markOpenAIResponseEvidenceUpstreamKind(evidence, account.OpenAIUpstreamKind())
 	integrity := s.observeOpenAIRequestIntegrity(c, account, handshakeHeaders, body, "ws", state)
 	if !fingerprintObservationAccountEnabled(account) {
 		return func() {}

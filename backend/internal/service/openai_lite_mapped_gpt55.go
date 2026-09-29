@@ -8,9 +8,6 @@ import (
 // The finalizer reuses this decision instead of stripping a Lite header after
 // freezing a Lite bundle and its egress. Native WebSocket does not use this rule.
 func effectiveCodexHTTPModelCapabilities(account *Account, finalModel string, observed CodexModelCapabilities, explicitLite bool) CodexModelCapabilities {
-	if account != nil && account.IsOpenAIExcelUpstreamEnabled() {
-		return CodexModelCapabilities{Known: true}
-	}
 	capabilities := effectiveCodexModelCapabilities(observed, explicitLite)
 	if codexHTTPModelRequiresNonLite(account, finalModel) {
 		capabilities.Known = true
@@ -20,5 +17,5 @@ func effectiveCodexHTTPModelCapabilities(account *Account, finalModel string, ob
 }
 
 func codexHTTPModelRequiresNonLite(account *Account, finalModel string) bool {
-	return account != nil && (account.IsOpenAIExcelUpstreamEnabled() || (account.IsOpenAIOAuthLike() && strings.TrimSpace(finalModel) == "gpt-5.5"))
+	return account != nil && account.IsOpenAIOAuthLike() && strings.TrimSpace(finalModel) == "gpt-5.5"
 }

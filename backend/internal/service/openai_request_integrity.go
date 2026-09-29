@@ -118,14 +118,6 @@ func (s *OpenAIRequestIntegrityState) Check(account *Account, wire []byte, opts 
 		}
 		logRequestIntegrityObservation(account, result)
 	}()
-	if account != nil && account.IsOpenAIExcelUpstreamEnabled() {
-		// Excel changes tool schemas, developer instructions and native history.
-		// The Codex semantic comparator does not establish equivalence for this
-		// protocol; disclose that boundary instead of declaring a false match.
-		result.Reason = "excel_protocol_not_applicable"
-		result.RuleCodes = []string{"excel_protocol_conversion"}
-		return result
-	}
 	if s.reason != "" {
 		result.Reason = s.reason
 		return result

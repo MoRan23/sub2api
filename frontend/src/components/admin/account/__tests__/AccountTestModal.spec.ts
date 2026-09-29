@@ -137,21 +137,6 @@ describe('AccountTestModal', () => {
     wrapper.unmount()
   })
 
-  it('shows the actual Excel route declared by the test start event', async () => {
-    getAvailableModels.mockResolvedValue([{ id: 'gpt-6-astra', display_name: 'Astra' }])
-    global.fetch = vi.fn().mockResolvedValue(createStreamResponse([
-      'data: {"type":"test_start","model":"gpt-6-astra","upstream_kind":"excel"}\n',
-      'data: {"type":"test_complete","success":true}\n',
-    ])) as any
-    const wrapper = mountModal({ id: 42, name: 'Excel', platform: 'openai', type: 'oauth', status: 'active', extra: { openai_excel_upstream_enabled: true } })
-    await wrapper.setProps({ show: true })
-    await flushPromises()
-    await wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!.trigger('click')
-    await flushPromises()
-    expect(wrapper.text()).toContain('candyTests.upstreamKinds.excel')
-    wrapper.unmount()
-  })
-
   it('uses any selected identity system for model lookup and the SSE test', async () => {
     const wrapper = mountModal({ id: 42, name: 'OpenAI', platform: 'openai', type: 'oauth', status: 'active' })
     await wrapper.setProps({ show: true })

@@ -48,9 +48,6 @@ func (r *AccountCandyTestTransport) Execute(parent context.Context, item *CandyT
 		return nil, candyTestError("unsupported_platform")
 	}
 	account = snapshotOAuthRefreshAccount(account)
-	if !candyTestRouteMatches(item, account) {
-		return nil, candyTestError("configuration_changed")
-	}
 	account.openAICandyTest = true
 	models, err := r.candyTestAccountModelOptions(parent, account)
 	if err != nil {
@@ -89,9 +86,6 @@ func (r *AccountCandyTestTransport) Execute(parent context.Context, item *CandyT
 		business, readErr := r.accounts.GetByID(check, account.ID)
 		if readErr != nil || business == nil {
 			return candyTestError("authorization_changed")
-		}
-		if business.OpenAIUpstreamKind() != account.OpenAIUpstreamKind() || business.OpenAIUpstreamRouteGeneration() != account.OpenAIUpstreamRouteGeneration() {
-			return candyTestError("configuration_changed")
 		}
 		current, readErr := resolveCredentialAccount(check, r.accounts, business)
 		if readErr != nil || current == nil || current.ID != initial.ID {
@@ -174,7 +168,6 @@ func (r *AccountCandyTestTransport) Execute(parent context.Context, item *CandyT
 	<-monitorDone
 	writer.finish()
 	execution := &CandyTestExecution{RequestedModel: item.Model, ReasoningEffort: item.ReasoningEffort,
-		UpstreamKind: account.OpenAIUpstreamKind(),
 		ResponseText: writer.answer(), Completed: writer.completed && !writer.failed, DurationMs: time.Since(started).Milliseconds(),
 		UpstreamModel: observedUpstreamResponseModel(c), ModelConflict: observedUpstreamResponseModelConflict(c)}
 	if execution.UpstreamModel != "" {
@@ -191,6 +184,9 @@ func (r *AccountCandyTestTransport) Execute(parent context.Context, item *CandyT
 			execution.ActualModel = firstNonEmpty(result.UpstreamModel, result.Model)
 		}
 	}
+	if writer.failure != "" {
+		return execution, candyTestError(writer.failure)
+	}
 	select {
 	case checkErr := <-monitorFailure:
 		return execution, checkErr
@@ -198,9 +194,6 @@ func (r *AccountCandyTestTransport) Execute(parent context.Context, item *CandyT
 	}
 	if parent.Err() != nil {
 		return execution, safeCandyTestError(parent, parent.Err())
-	}
-	if writer.failure != "" {
-		return execution, candyTestError(writer.failure)
 	}
 	if forwardErr != nil {
 		return execution, safeCandyTestError(parent, forwardErr)
@@ -215,14 +208,6 @@ func (r *AccountCandyTestTransport) Execute(parent context.Context, item *CandyT
 		return execution, err
 	}
 	return execution, nil
-}
-
-func candyTestRouteMatches(item *CandyTestItem, account *Account) bool {
-	if item.ExpectedUpstreamKind == "" {
-		// Existing queued jobs predate route snapshots and were Codex jobs.
-		return !account.IsOpenAIExcelUpstreamEnabled() && account.OpenAIUpstreamRouteGeneration() == ""
-	}
-	return item.ExpectedUpstreamKind == account.OpenAIUpstreamKind() && item.ExpectedRouteGeneration == account.OpenAIUpstreamRouteGeneration()
 }
 
 func sameCandyStaticAuthorization(before, after *Account) bool {

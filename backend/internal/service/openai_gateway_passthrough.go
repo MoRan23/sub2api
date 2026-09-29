@@ -1149,9 +1149,6 @@ func openAIJSONCompactionDeliveryFromSSE(bodyText string, body []byte, terminalT
 }
 
 func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, responseBody []byte) bool {
-	if isOpenAIExcelCapabilityForbidden(account, statusCode, responseBody) {
-		return false
-	}
 	if hit, _, _ := detectOpenAICyberPolicy(responseBody); hit {
 		return false
 	}

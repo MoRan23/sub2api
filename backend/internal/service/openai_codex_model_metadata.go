@@ -47,15 +47,6 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 	if account == nil {
 		return capabilities
 	}
-	if account.IsOpenAIExcelUpstreamEnabled() {
-		return map[string]json.RawMessage{
-			"supports_search_tool":       json.RawMessage("false"),
-			"use_responses_lite":         json.RawMessage("false"),
-			"tool_mode":                  json.RawMessage("null"),
-			"guardian":                   json.RawMessage("null"),
-			"auto_review_model_override": json.RawMessage("null"),
-		}
-	}
 	if metadata, ok := account.GetUpstreamModelMetadata(modelID); ok {
 		applyCodexToolCapabilities(capabilities, metadata.CodexToolCapabilities, true)
 	}
@@ -193,11 +184,6 @@ func groupCodexModelMetadata(
 			publicAlias = true
 		}
 		metadata, ok := account.GetUpstreamModelMetadata(lookupModel)
-		if account.IsOpenAIExcelUpstreamEnabled() {
-			metadata = UpstreamModelMetadata{ID: lookupModel, Description: "Excel upstream built-in compatibility catalog; not live upstream discovery.",
-				DefaultReasoningLevel: "medium", SupportedReasoningLevels: OpenAIExcelReasoningEfforts(), InputModalities: []string{"text", "image"}, ContextWindow: 272000, MaxContextWindow: 272000}
-			ok = true
-		}
 		if !ok {
 			if explicitTargetsConflict {
 				return codexModelMetadataOverride{

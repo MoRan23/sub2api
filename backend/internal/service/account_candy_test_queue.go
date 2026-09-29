@@ -88,9 +88,6 @@ func (s *AccountCandyTestService) Create(ctx context.Context, request *CandyTest
 			return nil, ErrCandyTestInvalidRequest
 		}
 		item := &CandyTestItem{AccountID: id, AccountName: account.AccountName, Status: "queued"}
-		item.ExpectedUpstreamKind = account.UpstreamKind
-		item.ExpectedRouteGeneration = account.RouteGeneration
-		item.Execution = &CandyTestExecution{UpstreamKind: account.UpstreamKind}
 		skip := account.SkipReason
 		if skip == "" {
 			skip = "unsupported_model"

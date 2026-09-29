@@ -25,43 +25,17 @@ func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 // doOpenAIUpstream 只在 OpenAI OAuth 能力绑定已启用时把真实请求交给插件。
 // 插件返回标准 http.Response，响应解析、错误映射、SSE 和计费仍由现有核心链处理。
 func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL string, account *Account) (response *http.Response, err error) {
-	if request != nil && account != nil {
-		if evidence, ok := request.Context().Value(openAIResponseEvidenceRequestKey{}).(*openAIResponseEvidenceState); ok {
-			markOpenAIResponseEvidenceUpstreamKind(evidence, account.OpenAIUpstreamKind())
-		}
-	}
-	var excelWire *OpenAIExcelWireState
-	var backendScope string
-	if openAIBackendProvenanceRequired(account) {
-		request, excelWire, backendScope, err = s.prepareOpenAIExcelUpstream(request, proxyURL, account)
-		if err != nil {
-			return nil, &openAIExcelPreparationError{cause: err}
-		}
-	}
 	request, err = candyTestBeforeSend(request)
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		observeOpenAIHTTPResponseEvidence(request, response)
-		if err == nil && response != nil && backendScope != "" {
-			response = s.wrapOpenAIBackendResponse(request, response, account, backendScope)
-		}
-		if err == nil && response != nil && excelWire != nil {
-			response, err = WrapOpenAIExcelResponse(request.Context(), response, excelWire)
-			if err != nil {
-				// An inference was already sent. Translation/storage errors may not
-				// be mistaken for a connection failure and replayed on another account.
-				err = &openAIExcelResponseError{cause: err}
-			}
-		}
-	}()
-	if account != nil && account.Platform == PlatformOpenAI && !account.IsOpenAIExcelUpstreamEnabled() {
+	defer func() { observeOpenAIHTTPResponseEvidence(request, response) }()
+	if account != nil && account.Platform == PlatformOpenAI {
 		request = ApplyOpenAIRequestPolicy(request, s.settingService)
 	}
 	var telemetryAttempt *CodexTelemetryAttempt
 	var telemetryStart sync.Once
-	if !isOpenAICandyTest(request.Context()) && !account.IsOpenAIExcelUpstreamEnabled() {
+	if !isOpenAICandyTest(request.Context()) {
 		recordOpenAIGuardianSourceHTTPRequest(request, account)
 		request = request.WithContext(httpsendobserver.WithObserver(request.Context(), func(outbound *http.Request) {
 			telemetryStart.Do(func() { telemetryAttempt = s.beginCodexTelemetryHTTPRequest(outbound, proxyURL, account) })
@@ -72,12 +46,8 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 			observeCodexTelemetryHTTPResponse(telemetryAttempt, response, err)
 		}
 	}()
-	transportPurpose := "gateway"
-	if account.IsOpenAIExcelUpstreamEnabled() {
-		transportPurpose = "excel_gateway"
-	}
-	request = withOpenAINativeHTTPRequestScope(request, account, s.accountRepo, transportPurpose)
-	if s.pluginManager != nil && !account.IsOpenAIExcelUpstreamEnabled() {
+	request = withOpenAINativeHTTPRequestScope(request, account, s.accountRepo, "gateway")
+	if s.pluginManager != nil {
 		var handled bool
 		response, handled, err = roundTripOpenAIPlugin(s.pluginManager, request, proxyURL, account)
 		if handled {
@@ -112,13 +82,6 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 	account *Account,
 	useTLSFallback bool,
 ) (*http.Response, error) {
-	if openAIBackendProvenanceRequired(account) {
-		gateway := s.openAIGatewayService
-		if gateway == nil {
-			gateway = &OpenAIGatewayService{accountRepo: s.accountRepo, cfg: s.cfg, settingService: s.settingService, httpUpstream: s.httpUpstream}
-		}
-		return gateway.doOpenAIUpstream(request, proxyURL, account)
-	}
 	if account != nil && account.Platform == PlatformOpenAI {
 		request = ApplyOpenAIRequestPolicy(request, s.settingService)
 	}

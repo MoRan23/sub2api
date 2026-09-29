@@ -17,11 +17,10 @@ type openAIResponseEvidenceRequestKey struct{}
 // This state is scoped to one physical HTTP attempt or WS turn. It retains
 // declarations only, never response bodies, credentials, cookies or opaque state.
 type openAIResponseEvidenceState struct {
-	mu           sync.Mutex
-	observer     codexModelEvidenceObserver
-	sentModel    string
-	sequence     uint64
-	upstreamKind string
+	mu        sync.Mutex
+	observer  codexModelEvidenceObserver
+	sentModel string
+	sequence  uint64
 }
 
 func beginOpenAIResponseEvidence(c *gin.Context, sentModel string) *openAIResponseEvidenceState {
@@ -50,28 +49,14 @@ func (s *openAIResponseEvidenceState) snapshot() CodexModelEvidence {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	evidence := s.observer.snapshot(s.sentModel)
-	evidence.UpstreamKind = s.upstreamKind
-	return evidence
-}
-
-func markOpenAIResponseEvidenceUpstreamKind(state *openAIResponseEvidenceState, kind string) {
-	if state == nil {
-		return
-	}
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	state.upstreamKind = strings.TrimSpace(kind)
-	state.publishLocked()
+	return s.observer.snapshot(s.sentModel)
 }
 
 func (s *openAIResponseEvidenceState) publishLocked() {
 	if s.sequence == 0 || globalFingerprintObserver == nil {
 		return
 	}
-	evidence := s.observer.snapshot(s.sentModel)
-	evidence.UpstreamKind = s.upstreamKind
-	globalFingerprintObserver.updateResponseEvidence(s.sequence, evidence)
+	globalFingerprintObserver.updateResponseEvidence(s.sequence, s.observer.snapshot(s.sentModel))
 }
 
 func bindOpenAIResponseEvidence(state *openAIResponseEvidenceState, sequence uint64) {
@@ -121,7 +106,7 @@ func markOpenAIResponseEvidenceHTTPRequest(request *http.Request, c *gin.Context
 		}
 		state.mu.Unlock()
 	}
-	return withOpenAIExcelGatewayContext(request.WithContext(context.WithValue(request.Context(), openAIResponseEvidenceRequestKey{}, state)), c)
+	return request.WithContext(context.WithValue(request.Context(), openAIResponseEvidenceRequestKey{}, state))
 }
 
 func observeOpenAIHTTPResponseEvidence(request *http.Request, response *http.Response) {

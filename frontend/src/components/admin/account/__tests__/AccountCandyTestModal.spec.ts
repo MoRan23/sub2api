@@ -80,29 +80,6 @@ describe('Account candy tests', () => {
     wrapper.unmount()
   })
 
-  it('distinguishes the Excel built-in catalog and its default reasoning effort', async () => {
-    api.options.mockResolvedValue({
-      models: [{ id: 'gpt-6-astra', display_name: 'Astra', reasoning_efforts: ['low', 'medium', 'high', 'xhigh'], catalog_source: 'excel_builtin' }],
-      accounts: [{ account_id: 42, account_name: 'Excel', models: [], catalog_source: 'excel_builtin', upstream_kind: 'excel' }],
-    })
-    const wrapper = mountModal()
-    await wrapper.setProps({ show: true })
-    await flushPromises()
-    expect(wrapper.get('[data-testid="candy-model-source"]').text()).toContain('built-in Excel compatibility catalog')
-    expect(wrapper.text()).toContain('leaving reasoning effort unspecified uses medium')
-    wrapper.unmount()
-  })
-
-  it('renders the recorded execution upstream rather than current account settings', () => {
-    const result = item({ status: 'normal', execution: {
-      upstream_kind: 'excel', requested_model: 'gpt-6-astra', actual_model: 'gpt-6-astra', upstream_model: 'gpt-6-astra',
-      reasoning_effort: 'high', model_conflict: false, model_evidence_source: 'upstream_json', completed: true, duration_ms: 500,
-    } })
-    const wrapper = mount(AccountCandyTestResult, { props: { item: result } })
-    expect(wrapper.text()).toContain('Excel upstream')
-    wrapper.unmount()
-  })
-
   it('shows per-account catalog failures while keeping other upstream models selectable', async () => {
     api.options.mockResolvedValue({
       models: [{ id: 'upstream-raw-model', display_name: 'Upstream model', reasoning_efforts: [] }],

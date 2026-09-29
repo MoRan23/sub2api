@@ -7,7 +7,6 @@ export interface CandyTestModelOption {
   id: string
   display_name: string
   reasoning_efforts: string[]
-  catalog_source?: 'excel_builtin' | 'upstream' | 'mixed'
 }
 
 export interface CandyTestAccountOptions {
@@ -15,8 +14,6 @@ export interface CandyTestAccountOptions {
   account_name: string
   models: CandyTestModelOption[]
   skip_reason?: string
-  catalog_source?: 'excel_builtin' | 'upstream'
-  upstream_kind?: 'excel' | 'codex'
 }
 
 export interface CandyTestOptions {
@@ -25,7 +22,6 @@ export interface CandyTestOptions {
 }
 
 export interface CandyTestExecution {
-  upstream_kind?: 'excel' | 'codex'
   requested_model: string
   actual_model: string
   upstream_model: string

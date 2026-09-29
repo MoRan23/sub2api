@@ -85,16 +85,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if account == nil {
 		return errors.New("account is nil")
 	}
-	ctx = withOpenAIExcelRequestScope(ctx, c, account, firstClientMessage)
-	ctx = withOpenAIBackendIngressSource(ctx, c, firstClientMessage)
-	var backendHeaders http.Header
-	if c.Request != nil {
-		backendHeaders = c.Request.Header
-	}
-	wsBackendScope := s.openAIExcelHistoryScope(ctx, account, backendHeaders, firstClientMessage)
-	if c.Request != nil {
-		c.Request = c.Request.WithContext(ctx)
-	}
 	firstAcceptedAt := time.Now()
 	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	SetOpenAIClientTransport(c, OpenAIClientTransportWS)
@@ -142,7 +132,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
-	forceHTTPBridge := account.Platform == PlatformGrok || account.IsOpenAIExcelUpstreamEnabled() ||
+	forceHTTPBridge := account.Platform == PlatformGrok ||
 		(s.pluginManager != nil && s.pluginManager.ShouldRouteOpenAIOAuth(account))
 	modeRouterV2Enabled := s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled
 	ingressMode := OpenAIWSIngressModeCtxPool
@@ -257,13 +247,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	parseClientPayload := func(turn int, raw []byte) (openAIWSClientPayload, error) {
-		var sourceHeaders http.Header
-		if turn == 1 {
-			sourceHeaders = c.Request.Header
-		}
-		if err := s.validateOpenAIBackendWSRequest(ctx, account, wsBackendScope, raw, sourceHeaders); err != nil {
-			return openAIWSClientPayload{}, err
-		}
 		acceptedAt := time.Now()
 		if turn == 1 {
 			acceptedAt = firstAcceptedAt
@@ -1117,17 +1100,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return nil, errors.New("upstream websocket lease is nil")
 		}
 		turnStart := time.Now()
-		if err := s.validateOpenAIBackendWSRequest(ctx, account, wsBackendScope, payload, baseAcquireReq.Headers); err != nil {
-			return nil, err
-		}
 		compactionDelivery := openAICodexWSCompactionDeliveryForPlan(account, pinnedIdentityPlan)
 		turnStateIdentityDigest := OpenAICodexTurnStateIdentityDigest(pinnedIdentityPlan)
 		handshakeHeadersForTurn := lease.HandshakeHeaders()
 		if !lease.HandshakeTurnStateCompatible(turnStateIdentityDigest) {
 			handshakeHeadersForTurn.Del(openAIWSTurnStateHeader)
-		}
-		if err := s.rememberOpenAIBackendWSResponse(ctx, account, wsBackendScope, nil, handshakeHeadersForTurn); err != nil {
-			return nil, err
 		}
 		wroteDownstream := false
 		turnStateCommitted := false
@@ -1257,14 +1234,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				)
 			}
 			if normalized, changed := normalizeCompletedImageGenerationStatus(upstreamMessage); changed {
-				if err := s.rememberOpenAIBackendWSResponse(ctx, account, wsBackendScope, upstreamMessage, nil); err != nil {
-					lease.MarkBroken()
-					return nil, err
-				}
 				upstreamMessage = normalized
-			} else if err := s.rememberOpenAIBackendWSResponse(ctx, account, wsBackendScope, upstreamMessage, nil); err != nil {
-				lease.MarkBroken()
-				return nil, err
 			}
 
 			eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)

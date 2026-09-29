@@ -22,9 +22,6 @@ func markCodexTelemetryHTTPRequest(request *http.Request, caller context.Context
 }
 
 func (s *OpenAIGatewayService) beginCodexTelemetryHTTPRequest(request *http.Request, proxyURL string, account *Account) *CodexTelemetryAttempt {
-	if account != nil && account.IsOpenAIExcelUpstreamEnabled() {
-		return nil
-	}
 	if s == nil || !s.codexTelemetry.Enabled() || account == nil || !account.IsOpenAIOAuth() || request == nil || request.GetBody == nil || request.URL == nil || !strings.HasSuffix(strings.TrimRight(request.URL.Path, "/"), "/responses") {
 		return nil
 	}

@@ -42,9 +42,6 @@ func (r *defaultOpenAIWSProtocolResolver) Resolve(account *Account) OpenAIWSProt
 	if !account.IsOpenAI() {
 		return openAIWSHTTPDecision("platform_not_openai")
 	}
-	if account.IsOpenAIExcelUpstreamEnabled() {
-		return openAIWSHTTPDecision("excel_http_bridge")
-	}
 	if account.IsOpenAIWSForceHTTPEnabled() {
 		return openAIWSHTTPDecision("account_force_http")
 	}

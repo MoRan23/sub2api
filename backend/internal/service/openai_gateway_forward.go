@@ -26,44 +26,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if scopeErr != nil {
 		return nil, scopeErr
 	}
-	ctx = withOpenAIExcelRequestScope(ctx, c, account, body)
-	ctx = withOpenAIBackendIngressSource(ctx, c, body)
-	if err := rejectOpenAIExcelContinuation(c, account, body); err != nil {
-		return nil, err
-	}
-	if c != nil && c.Request != nil {
-		c.Request = c.Request.WithContext(ctx)
-	}
-	if err := rejectOpenAIExcelCompact(c, account); err != nil {
-		return nil, err
-	}
-	// Validate Excel-specific request constraints before the request enters the
-	// normal protocol and transport pipeline.  Waiting until the physical
-	// transport is prepared turns a client-side unsupported option into a
-	// generic upstream 502, and can also let later normalization obscure the
-	// offending field.  Keep this validation local and fail with the typed 400
-	// response; it must never trigger account failover or a network send.
-	if account != nil && account.IsOpenAIExcelUpstreamEnabled() && !isOpenAIExcelImageRequest(ctx) {
-		if err := ValidateOpenAIExcelRequest(body); err != nil {
-			status := http.StatusBadRequest
-			code := "excel_request_invalid"
-			param := ""
-			message := err.Error()
-			var requestErr *OpenAIExcelRequestError
-			if errors.As(err, &requestErr) {
-				code, param, message = requestErr.Code, requestErr.Param, requestErr.Message
-			}
-			setOpsUpstreamError(c, status, message, "")
-			if c != nil && !IsResponseCommitted(c) {
-				payload := gin.H{"type": "invalid_request_error", "code": code, "message": message}
-				if param != "" {
-					payload["param"] = param
-				}
-				c.JSON(status, gin.H{"error": payload})
-			}
-			return nil, err
-		}
-	}
 	if account != nil && account.IsOpenAIOAuth() {
 		s.captureOpenAIRequestIntegrity(ctx, c, "responses", body)
 	}

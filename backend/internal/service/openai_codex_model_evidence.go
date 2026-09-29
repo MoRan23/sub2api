@@ -10,7 +10,6 @@ import (
 // CodexModelEvidence contains only upstream declarations from one physical
 // response. Header hints never stand in for the response body's model.
 type CodexModelEvidence struct {
-	UpstreamKind               string `json:"upstream_kind,omitempty"`
 	UpstreamResponseModel      string `json:"upstream_response_model,omitempty"`
 	ModelRelation              string `json:"model_relation"`
 	ModelConflict              bool   `json:"model_conflict"`

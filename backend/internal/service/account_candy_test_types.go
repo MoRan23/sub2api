@@ -25,20 +25,16 @@ var (
 )
 
 type CandyTestModelOption struct {
-	CatalogSource    string   `json:"catalog_source,omitempty"`
 	ID               string   `json:"id"`
 	DisplayName      string   `json:"display_name"`
 	ReasoningEfforts []string `json:"reasoning_efforts"`
 }
 
 type CandyTestAccountOptions struct {
-	UpstreamKind    string                 `json:"upstream_kind,omitempty"`
-	CatalogSource   string                 `json:"catalog_source,omitempty"`
-	RouteGeneration string                 `json:"-"`
-	AccountID       int64                  `json:"account_id"`
-	AccountName     string                 `json:"account_name"`
-	Models          []CandyTestModelOption `json:"models"`
-	SkipReason      string                 `json:"skip_reason,omitempty"`
+	AccountID   int64                  `json:"account_id"`
+	AccountName string                 `json:"account_name"`
+	Models      []CandyTestModelOption `json:"models"`
+	SkipReason  string                 `json:"skip_reason,omitempty"`
 }
 
 type CandyTestOptions struct {
@@ -55,30 +51,27 @@ type CandyTestCreateRequest struct {
 
 // CandyTestItem contains only benchmark data, never credentials or request headers.
 type CandyTestItem struct {
-	ExpectedUpstreamKind    string              `json:"-"`
-	ExpectedRouteGeneration string              `json:"-"`
-	ID                      int64               `json:"id"`
-	BatchID                 string              `json:"batch_id"`
-	AccountID               int64               `json:"account_id"`
-	AccountName             string              `json:"account_name"`
-	Model                   string              `json:"model"`
-	ReasoningEffort         string              `json:"reasoning_effort"`
-	PromptVersion           string              `json:"prompt_version"`
-	Status                  string              `json:"status"`
-	Answers                 map[string]int      `json:"answers,omitempty"`
-	ResponseText            string              `json:"response_text,omitempty"`
-	FailureCode             string              `json:"failure_code,omitempty"`
-	Execution               *CandyTestExecution `json:"execution,omitempty"`
-	CreatedAt               time.Time           `json:"created_at"`
-	StartedAt               *time.Time          `json:"started_at"`
-	FinishedAt              *time.Time          `json:"finished_at"`
-	CancelRequested         bool                `json:"cancel_requested"`
-	ClaimID                 string              `json:"-"`
-	LeaseUntil              *time.Time          `json:"-"`
+	ID              int64               `json:"id"`
+	BatchID         string              `json:"batch_id"`
+	AccountID       int64               `json:"account_id"`
+	AccountName     string              `json:"account_name"`
+	Model           string              `json:"model"`
+	ReasoningEffort string              `json:"reasoning_effort"`
+	PromptVersion   string              `json:"prompt_version"`
+	Status          string              `json:"status"`
+	Answers         map[string]int      `json:"answers,omitempty"`
+	ResponseText    string              `json:"response_text,omitempty"`
+	FailureCode     string              `json:"failure_code,omitempty"`
+	Execution       *CandyTestExecution `json:"execution,omitempty"`
+	CreatedAt       time.Time           `json:"created_at"`
+	StartedAt       *time.Time          `json:"started_at"`
+	FinishedAt      *time.Time          `json:"finished_at"`
+	CancelRequested bool                `json:"cancel_requested"`
+	ClaimID         string              `json:"-"`
+	LeaseUntil      *time.Time          `json:"-"`
 }
 
 type CandyTestExecution struct {
-	UpstreamKind        string       `json:"upstream_kind,omitempty"`
 	ResponseText        string       `json:"-"`
 	RequestedModel      string       `json:"requested_model"`
 	ActualModel         string       `json:"actual_model"`

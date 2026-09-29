@@ -51,13 +51,12 @@ const (
 
 // TestEvent represents a SSE event for account testing
 type TestEvent struct {
-	UpstreamKind string `json:"upstream_kind,omitempty"`
-	Type         string `json:"type"`
-	Text         string `json:"text,omitempty"`
-	Model        string `json:"model,omitempty"`
-	Status       string `json:"status,omitempty"`
-	Code         string `json:"code,omitempty"`
-	ImageURL     string `json:"image_url,omitempty"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Status   string `json:"status,omitempty"`
+	Code     string `json:"code,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
 	// AudioURL / VideoURL are data: or https URLs for in-browser media players.
 	AudioURL string `json:"audio_url,omitempty"`
 	VideoURL string `json:"video_url,omitempty"`
@@ -1048,7 +1047,6 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 // testOpenAIAccountConnection tests an OpenAI account's connection
 func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account *Account, modelID string, prompt string, mode string) error {
 	ctx := s.freezeOpenAIAccountTestPolicy(c.Request.Context(), c, account)
-	ctx = withOpenAIExcelRequestScope(ctx, c, account)
 	mode = normalizeAccountTestMode(mode)
 
 	// Default to openai.DefaultTestModel for OpenAI testing
@@ -1142,12 +1140,11 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)
 	payloadBytes, _ := json.Marshal(payload)
-	ctx = withOpenAIExcelRequestScope(ctx, c, account, payloadBytes)
 
 	// Send test_start event once. A task-invalid Agent Identity response may
 	// restart this probe after registering a replacement task.
 	if !agentIdentityTaskRecoveryWasTried(ctx) {
-		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID, UpstreamKind: account.OpenAIUpstreamKind()})
+		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(payloadBytes))
@@ -2479,9 +2476,6 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 // capability state on the account. The legacy unary /responses/compact
 // endpoint has been sunset upstream (404, #5598/#5624) and is no longer probed.
 func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account *Account, testModelID string) error {
-	if account.IsOpenAIExcelUpstreamEnabled() {
-		return s.sendErrorAndEnd(c, "Excel upstream does not support explicit compact requests")
-	}
 	ctx := s.freezeOpenAIAccountTestPolicy(c.Request.Context(), c, account)
 	credentialAccount := account
 	if account.IsShadow() && account.OpenAIOAuthCredentialOS == "" {
@@ -3483,7 +3477,7 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.Flush()
 
-	s.sendEvent(c, TestEvent{Type: "test_start", Model: modelID, UpstreamKind: account.OpenAIUpstreamKind()})
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: modelID})
 
 	parsed := &OpenAIImagesRequest{
 		Endpoint: openAIImagesGenerationsEndpoint,
@@ -3494,18 +3488,12 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 
 	upstreamModel := account.GetMappedModel(parsed.Model)
 	responsesBody, targetURL, err := buildOpenAIImagesOAuthPayload(parsed, upstreamModel)
-	excel := account.IsOpenAIExcelUpstreamEnabled()
-	if excel {
-		responsesBody, targetURL, err = buildOpenAIExcelImagePayload(parsed, upstreamModel)
-	}
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to build image request: %s", err.Error()))
 	}
 
-	direct := excel || usesCodexDirectImages(upstreamModel)
-	if excel {
-		s.sendEvent(c, TestEvent{Type: "content", Text: fmt.Sprintf("Calling Excel /images/generations; image model: %s\n", upstreamModel)})
-	} else if direct {
+	direct := usesCodexDirectImages(upstreamModel)
+	if direct {
 		s.sendEvent(c, TestEvent{Type: "content", Text: fmt.Sprintf("Calling Codex /images/generations; image model: %s\n", upstreamModel)})
 	} else {
 		s.sendEvent(c, TestEvent{Type: "content", Text: fmt.Sprintf("Calling Codex /responses image tool; driver: %s; image model: %s\n", openAIImagesResponsesMainModelValue(), upstreamModel)})
@@ -3582,15 +3570,6 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	if excel {
-		if err := setOpenAIExcelImageTarget(req, targetURL); err != nil {
-			return s.sendErrorAndEnd(c, "Failed to select Excel image endpoint")
-		}
-		req, err = gateway.prepareOpenAIExcelImageRequest(req, account)
-		if err != nil {
-			return s.sendErrorAndEnd(c, "Failed to prepare Excel image request")
-		}
-	}
 	resp, err := s.doOpenAIAccountTestUpstream(req, proxyURL, account, false)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Image upstream request failed: %s", err.Error()))
@@ -3610,17 +3589,11 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 		return s.sendErrorAndEnd(c, message)
 	}
 
-	body, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to read image response: %s", err.Error()))
 	}
 	body = redactAgentIdentitySensitiveBodyForAccount(ctx, s.accountRepo, credentialAccount, body)
-	if excel {
-		body, err = gateway.backfillOpenAIExcelImageURLs(ctx, account, body)
-		if err != nil {
-			return s.sendErrorAndEnd(c, "Failed to retrieve Excel image result")
-		}
-	}
 
 	var results []openAIResponsesImageResult
 	if direct {

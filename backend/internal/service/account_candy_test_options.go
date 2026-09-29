@@ -40,12 +40,6 @@ func (r *AccountCandyTestTransport) Options(ctx context.Context, ids []int64) (*
 					entry.SkipReason = "account_missing"
 				} else {
 					entry.AccountName = account.Name
-					entry.UpstreamKind = account.OpenAIUpstreamKind()
-					entry.RouteGeneration = account.OpenAIUpstreamRouteGeneration()
-					entry.CatalogSource = "upstream"
-					if account.IsOpenAIExcelUpstreamEnabled() {
-						entry.CatalogSource = "excel_builtin"
-					}
 					if account.Platform != PlatformOpenAI {
 						entry.SkipReason = "unsupported_platform"
 					} else {
@@ -72,9 +66,6 @@ func (r *AccountCandyTestTransport) Options(ctx context.Context, ids []int64) (*
 	for _, entry := range out.Accounts {
 		for _, model := range entry.Models {
 			if prior, exists := union[model.ID]; exists {
-				if prior.CatalogSource != model.CatalogSource {
-					prior.CatalogSource = "mixed"
-				}
 				for _, effort := range model.ReasoningEfforts {
 					if !containsCandyEffort(prior.ReasoningEfforts, effort) {
 						prior.ReasoningEfforts = append(prior.ReasoningEfforts, effort)
@@ -131,16 +122,13 @@ func candyTestUpstreamModelOptions(account *Account, body []byte) ([]CandyTestMo
 			continue
 		}
 		metadata := liveMetadata[id]
-		option := CandyTestModelOption{ID: id, DisplayName: metadata.DisplayName, ReasoningEfforts: []string{}, CatalogSource: "upstream"}
-		if account.IsOpenAIExcelUpstreamEnabled() {
-			option.CatalogSource = "excel_builtin"
-		}
+		option := CandyTestModelOption{ID: id, DisplayName: metadata.DisplayName, ReasoningEfforts: []string{}}
 		if option.DisplayName == "" {
 			option.DisplayName = openaiCodexDisplayName(id)
 		}
 		// Saved/bundled capabilities may fill missing reasoning metadata only;
 		// neither can add a model that the live upstream omitted.
-		if saved, ok := account.GetUpstreamModelMetadata(id); ok && !account.IsOpenAIExcelUpstreamEnabled() {
+		if saved, ok := account.GetUpstreamModelMetadata(id); ok {
 			metadata, _ = mergeUpstreamModelMetadata(metadata, saved)
 		}
 		if metadata.Reasoning != nil && !*metadata.Reasoning {
@@ -148,7 +136,7 @@ func candyTestUpstreamModelOptions(account *Account, body []byte) ([]CandyTestMo
 			continue
 		}
 		option.ReasoningEfforts = normalizeCandyEfforts(metadata.SupportedReasoningLevels)
-		if len(option.ReasoningEfforts) == 0 && !account.IsOpenAIExcelUpstreamEnabled() && bundledCodexModelDefault(id) != nil {
+		if len(option.ReasoningEfforts) == 0 && bundledCodexModelDefault(id) != nil {
 			descriptor := newConfiguredCodexModelDescriptor(id)
 			for _, level := range descriptor.SupportedReasoningLevels {
 				option.ReasoningEfforts = append(option.ReasoningEfforts, level.Effort)

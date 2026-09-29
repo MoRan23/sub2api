@@ -69,7 +69,6 @@
           label-key="display_name"
           :placeholder="loadingModels ? t('common.loading') + '...' : t('admin.accounts.selectTestModel')"
         />
-        <p v-if="usesOpenAIExcelUpstream(account)" class="text-xs text-gray-500">{{ t('candyTests.excelModelSource') }}</p>
       </div>
 
       <div v-if="isOpenAIAccount" class="space-y-1.5">
@@ -379,7 +378,6 @@ import { ADMIN_UI_REQUEST_HEADER } from '@/api/adminUIRequest'
 import { adminAPI } from '@/api/admin'
 import type { Account, ClaudeModel, OpenAIOAuthOS } from '@/types'
 import OpenAIOAuthOSSelect from '@/components/account/OpenAIOAuthOSSelect.vue'
-import { usesOpenAIExcelUpstream } from '@/components/account/openaiExcelUpstream'
 import { defaultOpenAIOS } from '@/components/account/openaiOAuthOS'
 import { supportsManagedOpenAIOAuthIdentity } from '@/components/account/openaiOAuthOS'
 
@@ -434,7 +432,7 @@ const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
 const isGrokAccount = computed(() => props.account?.platform === 'grok')
 const openAITestModeOptions = computed(() => [
   { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
-  ...(usesOpenAIExcelUpstream(props.account) ? [] : [{ value: 'compact', label: t('admin.accounts.openai.testModeCompact') }])
+  { value: 'compact', label: t('admin.accounts.openai.testModeCompact') }
 ])
 const grokTestModeOptions = computed(() => [
   { value: 'text', label: t('admin.accounts.grok.testModeText') },
@@ -843,9 +841,6 @@ const addLine = (text: string, className: string = 'text-gray-300') => {
 const addResponseInfo = (data: unknown) => {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return
   const info = data as Record<string, unknown>
-  if (info.upstream_kind === 'excel' || info.upstream_kind === 'codex') {
-    addLine(`${t('candyTests.upstreamKind')}: ${t(`candyTests.upstreamKinds.${info.upstream_kind}`)}`, 'text-cyan-400')
-  }
   if (streamingContent.value) {
     addLine(streamingContent.value, 'text-green-300')
     streamingContent.value = ''
@@ -992,15 +987,11 @@ const handleEvent = (event: {
   audio_url?: string
   video_url?: string
   mime_type?: string
-  upstream_kind?: string
   data?: unknown
 }) => {
   switch (event.type) {
     case 'test_start':
       addLine(t('admin.accounts.connectedToApi'), 'text-green-400')
-      if (event.upstream_kind === 'excel' || event.upstream_kind === 'codex') {
-        addLine(`${t('candyTests.upstreamKind')}: ${t(`candyTests.upstreamKinds.${event.upstream_kind}`)}`, 'text-cyan-400')
-      }
       if (event.model) {
         addLine(t('admin.accounts.usingModel', { model: event.model }), 'text-cyan-400')
       }

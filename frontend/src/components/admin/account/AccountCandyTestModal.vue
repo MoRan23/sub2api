@@ -20,8 +20,7 @@
             <Select id="candy-test-effort" v-model="effort" :options="effortOptions" :disabled="loading || creating" :aria-label="t('candyTests.effort')" />
           </div>
         </div>
-        <p class="mt-3 text-xs text-gray-500" data-testid="candy-model-source">{{ t(hasExcelCatalog ? 'candyTests.excelModelSource' : 'candyTests.modelSource') }}</p>
-        <p v-if="hasExcelCatalog" class="mt-1 text-xs text-gray-500">{{ t('candyTests.excelDefaultEffort') }}</p>
+        <p class="mt-3 text-xs text-gray-500">{{ t('candyTests.modelSource') }}</p>
         <p v-if="loading" role="status" class="mt-3 text-sm text-gray-500">{{ t('candyTests.loadingModels', { count: frozenAccountIds.length }) }}</p>
         <p v-if="!loading && !modelOptions.length" class="mt-3 text-sm text-gray-500">{{ t('candyTests.noModels') }}</p>
         <div v-if="modelLoadFailures.length" class="mt-3 rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-900/20" data-testid="candy-model-failures">
@@ -124,7 +123,6 @@ const { t, te } = useI18n()
 const statuses: CandyTestStatus[] = ['queued', 'running', 'normal', 'abnormal', 'failed', 'cancelled', 'skipped']
 const frozenAccountIds = ref<number[]>([])
 const options = ref<CandyTestOptions>({ models: [], accounts: [] })
-const hasExcelCatalog = computed(() => options.value.accounts.some(account => account.catalog_source === 'excel_builtin' || account.upstream_kind === 'excel'))
 const loading = ref(false)
 const creating = ref(false)
 const refreshing = ref(false)
