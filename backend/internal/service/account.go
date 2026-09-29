@@ -953,9 +953,6 @@ func (a *Account) GetOpenAICompactMode() string {
 // OpenAICompactSupportKnown reports whether compact capability is known for this
 // account and, when known, whether it is supported.
 func (a *Account) OpenAICompactSupportKnown() (supported bool, known bool) {
-	if a.IsOpenAIExcelUpstreamEnabled() {
-		return false, true
-	}
 	if a == nil || !a.IsOpenAI() {
 		return false, false
 	}
@@ -1001,9 +998,6 @@ const (
 // OpenAIRemoteCompactionV2SupportKnown reports the independent native-v2
 // probe result. It deliberately does not consult legacy compact mode/state.
 func (a *Account) OpenAIRemoteCompactionV2SupportKnown() (supported bool, known bool) {
-	if a != nil && a.IsOpenAIExcelUpstreamEnabled() {
-		return false, true
-	}
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false, false
 	}
@@ -1983,14 +1977,6 @@ func coerceExtraBool(v any) (value bool, ok bool) {
 func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapability) bool {
 	if a == nil {
 		return false
-	}
-	if a.IsOpenAIExcelUpstreamEnabled() {
-		switch capability {
-		case "", OpenAIEndpointCapabilityResponses, OpenAIEndpointCapabilityChatCompletions:
-			// Excel adapts these public endpoints to its native HTTP protocol.
-		default:
-			return false
-		}
 	}
 	if capability == OpenAIEndpointCapabilitySeedance {
 		configured, _ := a.openAIEndpointCapabilitySet()

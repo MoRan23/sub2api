@@ -10,7 +10,6 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/google/uuid"
 )
 
 const installationOwnerSQL = "platform = 'openai' AND type IN ('oauth', 'setup-token') AND parent_account_id IS NULL"
@@ -57,8 +56,7 @@ func accountConfigurationExtraPatch(ctx context.Context, ids []int64, updates ma
 	filtered := service.StripRetiredCodexStateExtra(updates)
 	delete(filtered, "openai_pinned_installation_id")
 	delete(filtered, "openai_installation_rotate_enabled")
-	delete(filtered, service.OpenAIUpstreamRouteGenerationExtraKey)
-	for _, key := range []string{"openai_installation_pin_enabled", "enable_tls_fingerprint", "tls_fingerprint_profile_id", service.OpenAIExcelUpstreamEnabledExtraKey} {
+	for _, key := range []string{"openai_installation_pin_enabled", "enable_tls_fingerprint", "tls_fingerprint_profile_id"} {
 		delete(filtered, key)
 		if len(ids) == 0 {
 			continue
@@ -99,47 +97,9 @@ func afterAccountConfigurationCommit(ctx context.Context, notify func()) {
 	notify()
 }
 
-func guardedAccountExtraExpression(expression string, nextCredentials ...string) string {
-	expression = guardedOpenAIExcelUpstreamExtraExpression(expression, nextCredentials...)
+func guardedAccountExtraExpression(expression string) string {
 	return "CASE WHEN " + installationOwnerSQL + " THEN (" + expression + ") - 'openai_installation_rotate_enabled'" +
 		" ELSE (" + expression + ") - 'openai_installation_rotate_enabled' - 'openai_pinned_installation_id' - 'openai_installation_pin_enabled' END"
-}
-
-// Both UPDATE expressions are evaluated against the locked latest account row.
-// Ordinary snapshots cannot supply a generation or restore an old upstream
-// selection. Credential eligibility changes also advance the route fence.
-func guardedOpenAIExcelUpstreamExtraExpression(expression string, nextCredentials ...string) string {
-	key := service.OpenAIExcelUpstreamEnabledExtraKey
-	generation := service.OpenAIUpstreamRouteGenerationExtraKey
-	credentials := "credentials"
-	if len(nextCredentials) > 0 && nextCredentials[0] != "" {
-		credentials = "(" + nextCredentials[0] + ")"
-	}
-	ownerExpression := func(credentials string) string {
-		eligible := openAIOAuthCredentialOwnerExpression(credentials)
-		for _, key := range []string{"auth_mode", "openai_auth_mode"} {
-			eligible += " AND LOWER(BTRIM(COALESCE((" + credentials + ") ->> '" + key + "', ''))) <> 'agent_identity'"
-		}
-		return "(" + eligible + ")"
-	}
-	currentEligible := ownerExpression("credentials")
-	nextEligible := ownerExpression(credentials)
-	cleaned := "(COALESCE((" + expression + "), '{}'::jsonb) - '" + generation + "')"
-	currentEnabled := currentEligible + " AND COALESCE(extra -> '" + key + "', 'false'::jsonb) = 'true'::jsonb"
-	nextEnabled := nextEligible + " AND COALESCE((" + expression + ") -> '" + key + "', 'false'::jsonb) = 'true'::jsonb"
-	keepGeneration := "CASE WHEN extra ? '" + generation + "' THEN jsonb_build_object('" + generation + "', extra -> '" + generation + "') ELSE '{}'::jsonb END"
-	// A server-generated UUID literal is shared only by rows in this one atomic
-	// statement; account ID remains part of every route scope. It is never read
-	// from an imported or stale snapshot.
-	newGeneration := "jsonb_build_object('" + generation + "', '" + uuid.NewString() + "'::text)"
-	guarded := "(CASE WHEN " + nextEligible + " THEN " + cleaned + " ELSE " + cleaned + " - '" + key + "' END) || CASE WHEN " +
-		currentEligible + " IS DISTINCT FROM " + nextEligible + " OR (" + currentEnabled + ") IS DISTINCT FROM (" + nextEnabled + ")" +
-		" THEN " + newGeneration + " ELSE " + keepGeneration + " END"
-	// Unrelated platforms retain their original NULL extra and their own cache
-	// invalidation semantics. Accounts with a historical route fence still enter
-	// this branch after becoming ineligible.
-	return "CASE WHEN " + currentEligible + " OR " + nextEligible + " OR COALESCE(extra, '{}'::jsonb) ?| ARRAY['" + key + "', '" + generation + "']" +
-		" THEN " + guarded + " ELSE (" + expression + ") END"
 }
 
 // SQL UPDATE evaluates these expressions against the locked, latest row, so an

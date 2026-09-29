@@ -280,9 +280,6 @@
                   :plan-type="getAccountPlanType(row)"
                   :privacy-mode="row.extra?.privacy_mode || row.parent_privacy_mode"
                   :subscription-expires-at="row.credentials?.subscription_expires_at || row.parent_subscription_expires_at" />
-                <span v-if="usesOpenAIExcelUpstream(row)" data-testid="excel-upstream-badge" class="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
-                  {{ t('admin.accounts.openai.excelUpstream') }}
-                </span>
                 <span
                   v-if="getAntigravityTierLabel(row)"
                   :class="['inline-block rounded px-1.5 py-0.5 text-[10px] font-medium', getAntigravityTierClass(row)]"
@@ -575,7 +572,6 @@ import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
-import { usesOpenAIExcelUpstream } from '@/components/account/openaiExcelUpstream'
 import Icon from '@/components/icons/Icon.vue'
 import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
 import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
@@ -1848,7 +1844,6 @@ type OpenAICompactBadgeMeta = {
 
 function getOpenAIRemoteCompactionV2State(row: any): OpenAICompactBadgeState | null {
   if (row.platform !== 'openai' || (row.type !== 'oauth' && row.type !== 'apikey')) return null
-  if (usesOpenAIExcelUpstream(row)) return 'blocked'
   const supported = row.extra?.openai_remote_compaction_v2_supported
   if (supported === true) return 'active'
   if (supported === false) return 'blocked'
@@ -1882,7 +1877,6 @@ function getOpenAIRemoteCompactionV2Meta(row: any): OpenAICompactBadgeMeta | nul
 }
 
 function getOpenAIRemoteCompactionV2Title(row: any): string {
-  if (usesOpenAIExcelUpstream(row)) return t('admin.accounts.openai.excelCompactUnavailable')
   const extra = row.extra as Record<string, unknown> | undefined
   const checkedAt = typeof extra?.openai_remote_compaction_v2_checked_at === 'string'
     ? extra.openai_remote_compaction_v2_checked_at
@@ -1902,7 +1896,6 @@ function getOpenAIRemoteCompactionV2Title(row: any): string {
 
 function getOpenAICompactState(row: any): OpenAICompactBadgeState | null {
   if (row.platform !== 'openai' || (row.type !== 'oauth' && row.type !== 'apikey')) return null
-  if (usesOpenAIExcelUpstream(row)) return 'blocked'
   const extra = row.extra as Record<string, unknown> | undefined
   const mode = typeof extra?.openai_compact_mode === 'string' ? extra.openai_compact_mode : 'auto'
   if (mode === 'force_on') return 'active'
@@ -1939,7 +1932,6 @@ function getOpenAICompactMeta(row: any): OpenAICompactBadgeMeta | null {
 }
 
 function getOpenAICompactTitle(row: any): string {
-  if (usesOpenAIExcelUpstream(row)) return t('admin.accounts.openai.excelCompactUnavailable')
   const extra = row.extra as Record<string, unknown> | undefined
   const checkedAt = typeof extra?.openai_compact_checked_at === 'string' ? extra.openai_compact_checked_at : ''
   const label = getOpenAICompactMeta(row)?.label || ''

@@ -913,7 +913,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 		UPDATE accounts
 		SET
 			credentials = `+guardedCredentials("$1::jsonb")+`,
-				extra = `+guardedOpenAIExcelUpstreamExtraExpression(`CASE
+			extra = CASE
 				-- 正确性依赖（非防御）：OpenCode 分支必须先于 Ollama 分支求值。两分支
 				-- 的 WHEN 并不互斥：Ollama 分支的守卫是宽谓词——NOT(ollamaMatch(old)
 				-- AND ollamaMatch(new)) 在旧行不匹配 ollama.com 基址时恒真，且两侧
@@ -975,7 +975,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 				AND credentials IS DISTINCT FROM (`+guardedCredentials("$1::jsonb")+`)
 				THEN COALESCE(extra, '{}'::jsonb) - 'upstream_billing_probe'
 				ELSE extra
-		END`, guardedCredentials("$1::jsonb"))+`,
+		END,
 			updated_at = NOW()
 		FROM previous_profile
 		WHERE id = previous_profile.profile_account_id AND deleted_at IS NULL
@@ -2813,15 +2813,6 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		}
 	}
 	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
-	if _, explicit := updates[service.OpenAIExcelUpstreamEnabledExtraKey]; explicit {
-		current, lockErr := lockAccountConfiguration(ctx, client, id)
-		if lockErr != nil {
-			return lockErr
-		}
-		if err := service.ValidateOpenAIExcelUpstreamExtra(current, updates); err != nil {
-			return err
-		}
-	}
 	if clearProbeSnapshot {
 		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 	}
@@ -3504,11 +3495,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		if len(caseBranches) > 0 {
 			extraExpression = "CASE" + strings.Join(caseBranches, "") + " ELSE " + extraExpression + " END"
 		}
-		nextCredentials := ""
-		if credentialPlaceholder != "" {
-			nextCredentials = guardedCredentials("COALESCE(credentials, '{}'::jsonb) || " + credentialPlaceholder + "::jsonb")
-		}
-		setClauses = append(setClauses, "extra = "+guardedAccountExtraExpression(extraExpression, nextCredentials))
+		setClauses = append(setClauses, "extra = "+guardedAccountExtraExpression(extraExpression))
 	}
 
 	if len(setClauses) == 0 {
@@ -3548,8 +3535,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	previousOSProfileOwners := make(map[int64]bool)
 	_, authModeExplicit := updates.Credentials["auth_mode"]
 	_, legacyAuthModeExplicit := updates.Credentials["openai_auth_mode"]
-	_, excelRouteExplicit := updates.Extra[service.OpenAIExcelUpstreamEnabledExtraKey]
-	if (authModeExplicit || legacyAuthModeExplicit || excelRouteExplicit) && r.client != nil {
+	if (authModeExplicit || legacyAuthModeExplicit) && r.client != nil {
 		lockedIDs := uniquePositiveInt64s(ids)
 		sort.Slice(lockedIDs, func(i, j int) bool { return lockedIDs[i] < lockedIDs[j] })
 		for _, id := range lockedIDs {
@@ -3561,17 +3547,6 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 				return 0, err
 			}
 			previousOSProfileOwners[id] = service.IsOpenAIOAuthOSProfileOwner(current)
-			if excelRouteExplicit {
-				for key, value := range updates.Credentials {
-					if current.Credentials == nil {
-						current.Credentials = make(map[string]any)
-					}
-					current.Credentials[key] = value
-				}
-				if err := service.ValidateOpenAIExcelUpstreamExtra(current, updates.Extra); err != nil {
-					return 0, err
-				}
-			}
 		}
 	}
 	result, err := exec.ExecContext(ctx, query, args...)
@@ -3620,7 +3595,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 	if rows > 0 && contextTx == nil {
-		shouldSync := excelRouteExplicit
+		shouldSync := false
 		if updates.Status != nil && (*updates.Status == service.StatusError || *updates.Status == service.StatusDisabled) {
 			shouldSync = true
 		}

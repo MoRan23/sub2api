@@ -520,9 +520,6 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Status:                        StatusActive,
 		Schedulable:                   true,
 	}
-	if err := prepareOpenAIExcelUpstreamForCreate(account); err != nil {
-		return nil, err
-	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
 			return nil, ErrUpstreamBillingProbeAccountInvalid
@@ -1020,9 +1017,6 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
-	if err := ValidateOpenAIExcelUpstreamExtra(account, input.Extra); err != nil {
-		return nil, err
-	}
 	configurationCtx := withAccountConfigurationIntent(ctx, []int64{id}, input.Extra, input.OpenAIEnvironmentFingerprint)
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
@@ -1090,16 +1084,6 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
 	updates = StripRetiredCodexStateExtra(updates)
-	delete(updates, OpenAIUpstreamRouteGenerationExtraKey)
-	if _, exists := updates[OpenAIExcelUpstreamEnabledExtraKey]; exists {
-		account, err := s.accountRepo.GetByID(ctx, id)
-		if err != nil {
-			return err
-		}
-		if err := ValidateOpenAIExcelUpstreamExtra(account, updates); err != nil {
-			return err
-		}
-	}
 	delete(updates, openAIPinnedInstallationIDKey)
 	delete(updates, openAIInstallationRotateEnabledKey)
 	delete(updates, openAIInstallationPinEnabledKey)
@@ -1173,7 +1157,6 @@ func (s *adminServiceImpl) RegenerateOpenAIInstallationIDForOS(ctx context.Conte
 // It merges credentials/extra keys instead of overwriting the whole object.
 func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error) {
 	input.Extra = StripRetiredCodexStateExtra(input.Extra)
-	delete(input.Extra, OpenAIUpstreamRouteGenerationExtraKey)
 	delete(input.Extra, openAIPinnedInstallationIDKey)
 	delete(input.Extra, openAIInstallationRotateEnabledKey)
 	delete(input.Extra, openAIInstallationPinEnabledKey)
@@ -1225,8 +1208,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	_, excelRouteRequested := input.Extra[OpenAIExcelUpstreamEnabledExtraKey]
-	if len(input.Credentials) > 0 || input.OpenAIAuthModeChange || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || excelRouteRequested || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if len(input.Credentials) > 0 || input.OpenAIAuthModeChange || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1237,17 +1219,6 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	for _, account := range cachedTargets {
 		if account != nil {
 			targetsByID[account.ID] = account
-		}
-	}
-	if excelRouteRequested {
-		for _, id := range input.AccountIDs {
-			account := targetsByID[id]
-			if account == nil {
-				return nil, ErrAccountNotFound
-			}
-			if err := ValidateOpenAIExcelUpstreamExtra(account, input.Extra); err != nil {
-				return nil, err
-			}
 		}
 	}
 	if input.OpenAIAuthModeChange {

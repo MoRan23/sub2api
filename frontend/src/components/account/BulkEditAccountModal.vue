@@ -82,16 +82,6 @@
         </div>
       </div>
 
-      <div v-if="allOpenAIOAuthOnly" class="border-t border-gray-200 pt-4 dark:border-dark-600">
-        <label class="input-label" for="bulk-edit-openai-excel-upstream">{{ t('admin.accounts.openai.excelUpstream') }}</label>
-        <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.excelUpstreamBulkDesc') }}</p>
-        <select id="bulk-edit-openai-excel-upstream" v-model="openAIExcelUpstreamMode" class="input">
-          <option value="unchanged">{{ t('admin.accounts.openai.excelUpstreamUnchanged') }}</option>
-          <option value="enabled">{{ t('admin.accounts.openai.excelUpstreamEnabled') }}</option>
-          <option value="disabled">{{ t('admin.accounts.openai.excelUpstreamDisabled') }}</option>
-        </select>
-      </div>
-
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
         v-if="allOpenAIOAuthOnly"
@@ -1686,7 +1676,6 @@ const groupIds = ref<number[]>([])
 const openaiPassthroughEnabled = ref(false)
 // Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
-const openAIExcelUpstreamMode = ref<'unchanged' | 'enabled' | 'disabled'>('unchanged')
 const openAILongContextBillingEnabled = ref(false)
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>([
   'chat_completions',
@@ -1968,9 +1957,6 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
   }
 
   // 同时校验可见性：勾选后又改了目标筛选条件时，不应把该键写到非 OAuth 账号上
-  if (allOpenAIOAuthOnly.value && openAIExcelUpstreamMode.value !== 'unchanged') {
-    ensureExtra().openai_excel_upstream_enabled = openAIExcelUpstreamMode.value === 'enabled'
-  }
   if (enableOpenAIFlattenNamespaces.value && allOpenAIOAuthOnly.value) {
     const extra = ensureExtra()
     extra.openai_responses_flatten_namespaces = openaiFlattenNamespacesEnabled.value
@@ -2169,7 +2155,6 @@ const handleSubmit = async () => {
     enableBaseUrl.value ||
     enableOpenAIPassthrough.value ||
     enableOpenAIFlattenNamespaces.value ||
-    (allOpenAIOAuthOnly.value && openAIExcelUpstreamMode.value !== 'unchanged') ||
     (enableOpenAILongContextBilling.value && allOpenAIPassthroughCapable.value) ||
     (enableOpenAIEndpointCapabilities.value && allOpenAIAPIKey.value) ||
     (enableOpenAIResponsesMode.value && allOpenAIAPIKey.value) ||
@@ -2347,7 +2332,6 @@ watch(
       baseUrl.value = ''
       openaiPassthroughEnabled.value = false
       openaiFlattenNamespacesEnabled.value = false
-      openAIExcelUpstreamMode.value = 'unchanged'
       openAILongContextBillingEnabled.value = false
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
       openAIResponsesMode.value = 'auto'

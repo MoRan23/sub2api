@@ -81,26 +81,6 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
 }
 
 describe('BulkEditAccountModal', () => {
-  it('applies an explicit Excel route without modifying other bulk fields', async () => {
-    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
-    expect(wrapper.get('#bulk-edit-openai-excel-upstream').element).toHaveProperty('value', 'unchanged')
-    await wrapper.get('#bulk-edit-openai-excel-upstream').setValue('enabled')
-    await wrapper.get('form').trigger('submit.prevent')
-    await flushPromises()
-    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], expect.objectContaining({
-      extra: { openai_excel_upstream_enabled: true }
-    }))
-    wrapper.unmount()
-  })
-
-  it('hides Excel routing for setup tokens and API keys', () => {
-    for (const type of ['setup-token', 'apikey']) {
-      const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: [type] })
-      expect(wrapper.find('#bulk-edit-openai-excel-upstream').exists()).toBe(false)
-      wrapper.unmount()
-    }
-  })
-
   beforeEach(() => {
     vi.mocked(adminAPI.accounts.bulkUpdate).mockReset()
     vi.mocked(adminAPI.accounts.checkMixedChannelRisk).mockReset()
