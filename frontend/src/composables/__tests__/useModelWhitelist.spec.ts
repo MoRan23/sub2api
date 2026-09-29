@@ -7,11 +7,11 @@ vi.mock('@/api/admin/accounts', () => ({
 import { buildModelMappingObject, getModelsByPlatform, getPresetMappingsByPlatform, splitModelMappingObject } from '../useModelWhitelist'
 
 describe('useModelWhitelist', () => {
-  it('openai 模型列表同步最新目录并移除 GPT-5.4 主模型', () => {
+  it('openai 模型列表同步最新目录并移除 GPT-5.4 和 Mini', () => {
     const models = getModelsByPlatform('openai')
 
     expect(models).not.toContain('gpt-5.4')
-    expect(models).toContain('gpt-5.4-mini')
+    expect(models).not.toContain('gpt-5.4-mini')
     expect(models).not.toContain('gpt-5.4-2026-03-05')
     expect(models).toContain('codex-auto-review')
     expect(models).toContain('gpt-5.6')

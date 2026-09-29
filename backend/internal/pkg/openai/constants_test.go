@@ -42,6 +42,7 @@ func TestDefaultModelsPreferConcreteGPT56SolForAccountTests(t *testing.T) {
 	require.Equal(t, "gpt-5.6-sol", DefaultModels[0].ID)
 	require.Equal(t, DefaultModels[0].ID, DefaultTestModel)
 	require.NotContains(t, DefaultModelIDs(), "gpt-5.4")
+	require.NotContains(t, DefaultModelIDs(), "gpt-5.4-mini")
 }
 
 func TestDefaultModelsIncludeGPTImage25(t *testing.T) {

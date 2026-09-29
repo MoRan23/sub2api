@@ -702,7 +702,7 @@ describe('UseKeyModal', () => {
     expect(wrapper.findAll('pre code').map((code) => code.text()).join('\n')).not.toContain('x-openai-actor-authorization')
   })
 
-  it('renders GPT-5.4 mini entry in OpenCode config', async () => {
+  it('omits retired GPT-5.4 family entries from OpenCode config', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {
         show: true,
@@ -732,8 +732,10 @@ describe('UseKeyModal', () => {
 
     const codeBlock = wrapper.find('pre code')
     expect(codeBlock.exists()).toBe(true)
-    expect(codeBlock.text()).toContain('"name": "GPT-5.4 Mini"')
-    expect(codeBlock.text()).not.toContain('"name": "GPT-5.4 Nano"')
+    const models = JSON.parse(codeBlock.text()).provider.openai.models
+    for (const model of ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano']) {
+      expect(models[model]).toBeUndefined()
+    }
   })
 
   it('renders GPT-5.6 and GPT-6 Astra capabilities in OpenCode config', async () => {

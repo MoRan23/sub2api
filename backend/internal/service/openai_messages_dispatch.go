@@ -10,7 +10,7 @@ import (
 const (
 	defaultOpenAIMessagesDispatchOpusMappedModel   = openai.DefaultTestModel
 	defaultOpenAIMessagesDispatchSonnetMappedModel = "gpt-5.3-codex"
-	defaultOpenAIMessagesDispatchHaikuMappedModel  = "gpt-5.4-mini"
+	defaultOpenAIMessagesDispatchHaikuMappedModel  = openai.DefaultTestModel
 )
 
 func normalizeOpenAIMessagesDispatchMappedModel(model string) string {

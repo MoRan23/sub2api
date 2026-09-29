@@ -29,6 +29,15 @@ func TestNormalizeOpenAIMessagesDispatchModelConfig(t *testing.T) {
 	}, cfg.ExactModelMappings)
 }
 
+func TestGroupResolveMessagesDispatchModel_DefaultsAvoidRetiredModels(t *testing.T) {
+	group := &Group{Platform: PlatformOpenAI}
+	for _, model := range []string{"claude-opus-4-6", "claude-haiku-4-5-20251001"} {
+		require.Equal(t, "gpt-5.6-sol", group.ResolveMessagesDispatchModel(model))
+	}
+	group.MessagesDispatchModelConfig.HaikuMappedModel = "gpt-6-luna"
+	require.Equal(t, "gpt-6-luna", group.ResolveMessagesDispatchModel("claude-haiku-4-5-20251001"))
+}
+
 func TestGroupResolveMessagesDispatchModel_GrokRequiresCrossClientMapping(t *testing.T) {
 	original := xai.RuntimeModelMappingOptions()
 	t.Cleanup(func() { xai.SetRuntimeModelMappingOptions(original) })

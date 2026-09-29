@@ -22,7 +22,7 @@ export function createDefaultMessagesDispatchFormState(): MessagesDispatchFormSt
     allow_messages_dispatch: false,
     opus_mapped_model: "gpt-5.6-sol",
     sonnet_mapped_model: "gpt-5.3-codex",
-    haiku_mapped_model: "gpt-5.4-mini",
+    haiku_mapped_model: "gpt-5.6-sol",
     exact_model_mappings: [],
   };
 }

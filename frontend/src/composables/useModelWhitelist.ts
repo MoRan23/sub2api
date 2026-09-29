@@ -13,8 +13,6 @@ const openaiModels = [
   'gpt-6', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna',
   // GPT-5.5 系列
   'gpt-5.5',
-  // GPT-5.4 Mini
-  'gpt-5.4-mini',
   // GPT-5.3 / Codex 系列
   'gpt-5.3-codex-spark', 'codex-auto-review',
   'gpt-4o-audio-preview', 'gpt-4o-realtime-preview',

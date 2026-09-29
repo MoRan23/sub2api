@@ -31,7 +31,7 @@ Python 保留名兼容补丁已移除：不再把 `python` 自动改成 `python_
 
 当前快照的 `instructions_variables` 均为 null；GPT-6 模板中的 `{{connector_id}}` 属于 Apps 链接语法示例，原样保留，不作为待填入变量。模型目录附加元数据与提示词字段保存在 `backend/internal/service/openai_codex_model_defaults.json`，主指令模板仍以本表文件为准。
 
-官方当前目录已移除 GPT-5.4，按本项目要求不保留旧快照或专用模板，同时删除默认列表、前端主模型／日期候选、指向 5.4 的映射预设和 OpenCode 配置条目。账号探测、缺省模型及旧别名兜底、未配置的 Opus 分发改用当前列表首选 GPT-5.6 Sol。GPT-5.4 Mini 是独立模型，维持原有入口；已保存的显式映射和历史记录不做迁移。计费兜底与探测默认模型解耦，保持既有金额规则。
+官方当前目录已移除 GPT-5.4，按本项目要求不保留旧快照或专用模板，同时删除默认列表、前端主模型／日期候选、指向 5.4 的映射预设和 OpenCode 配置条目。GPT-5.4 Mini 也从默认列表、前端候选和 OpenCode 配置中删除。账号探测、缺省模型及旧别名兜底、未配置的 Opus / Haiku 分发改用当前列表首选 GPT-5.6 Sol；已保存的显式映射和历史记录不做迁移。计费兜底与探测默认模型解耦，保持既有金额规则。
 
 ### 2026-09-29 目录默认值
 
@@ -43,7 +43,7 @@ GPT-6.1 Sol 默认推理为 `low`，提供 `low / medium / high / xhigh / max / 
 
 更新快照时，从固定提交读取官方 `models.json`，仅移除各条目 `model_messages.instructions_template` 后保存 JSON，其余源字段保留；主模板按本表单独复制。服务端只投影自身支持的字段及本地路由策略，不执行目录中的任何指令。
 
-OpenCode 导出配置移除 GPT-5.4 主模型条目；GPT-6.1 Sol 尚未增加 OpenCode 预设，待其官方输出上限明确后再补齐，避免猜测该客户端所需的额度配置。
+OpenCode 导出配置移除 GPT-5.4 主模型及 Mini 条目；GPT-6.1 Sol 尚未增加 OpenCode 预设，待其官方输出上限明确后再补齐，避免猜测该客户端所需的额度配置。
 
 ## 请求完整性检查
 

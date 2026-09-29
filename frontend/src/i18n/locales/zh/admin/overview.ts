@@ -1254,7 +1254,7 @@ export default {
         sonnetModel: 'Sonnet 映射模型',
         sonnetModelPlaceholder: '例如: gpt-5.3-codex',
         haikuModel: 'Haiku 映射模型',
-        haikuModelPlaceholder: '例如: gpt-5.4-mini',
+        haikuModelPlaceholder: '例如: gpt-5.6-sol',
         exactMappingTitle: '精确模型覆盖',
         exactMappingHint: '精确 Claude 模型覆盖优先级高于系列默认映射，可将某个具体 Claude 模型单独映射到不同的目标模型。',
         noExactMappings: '暂无精确模型覆盖规则',
