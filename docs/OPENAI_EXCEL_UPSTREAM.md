@@ -4,13 +4,17 @@
 
 适配器使用固定的 `https://bps.openai.com/basispoints/api/`。进入 Excel 路径后，最终出站请求统一使用 Windows Excel WebView2 兼容 UA 模板（Windows 10 x64、Chrome/131、Edg/131），native HTTP transport 选择 Windows TLS。该模板是协议兼容配置，不表示来自真实抓取或本机安装的 Office 版本。这只覆盖 Excel 请求，普通 Codex 请求仍使用用户实际系统对应的 UA/TLS。installation ID、账号代理和会话身份仍来自冻结的账号请求计划。Excel 模型目录是本地内置目录，不是实时上游发现，支持 `gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol`、`gpt-6-sol`、`gpt-6-luna`、`gpt-6-astra`，推理档位为 `low`、`medium`、`high`、`xhigh`，未指定时为 `medium`。
 
-工具调用只转接到客户端，不在服务端执行。function、custom 和 namespace 调用及工具回传会校验账号、授权代次、路由代次、租户和会话范围。Redis 中只保存加密后的最小调用关联和附件 ID：调用关联最多 7 天，附件映射最多 24 小时；不保存 token、完整会话、工具输出或图片原文。缺少可证明的授权代次、跨后端 opaque 状态、未知 file ID、`previous_response_id` 单独续接或不支持的 `/responses/compact` 会明确返回错误，不静默丢历史或回退 Codex。没有客户端工具目录时，适配器会显式发送 `tool_choice=none`，并在协议提示中禁止调用 MCP、宿主、技能和可视化工具，避免把对话中提到的工具名误当成可执行工具。
+工具调用只转接到客户端，不在服务端执行。function、custom 和 namespace 调用及工具回传会校验账号、授权代次、路由代次、租户和会话范围。Redis 中只保存加密后的最小调用关联和附件 ID：调用关联最多 7 天，附件映射最多 24 小时；不保存 token、完整会话、工具输出或图片原文。缺少可证明的授权代次、跨后端 opaque 状态、未知 file ID、`previous_response_id` 单独续接或不支持的 `/responses/compact` 会明确返回错误，不静默丢历史或回退 Codex。客户端声明的 MCP、文件读写、命令执行、技能和可视化工具均可转接，不按类别禁用。只有没有可用客户端工具目录时，适配器才发送 `tool_choice=none`；协议提示只禁止本轮未声明的工具，不能根据对话中提到的工具名自行创建可执行工具。
 
 工具转换不能以“丢掉不能转换的调用，再返回成功”降级。任何调用无法恢复、缺少真实 `call_id` 或违反关闭并行的约束，整次响应都明确失败，不把前面的准备说明包装成完成。启用客户端工具时，仅有明确 `commentary`、没有最终回答或工具调用的响应也会失败；普通简短回答不按字数或内容猜测是否完成。工具协议提示包含实际行动要求和稳定前缀提醒，但不会增加隐式推理重试。
 
 SSE 必须收到真实的完成终态。终态省略输出或输出为空时，可以使用本次流中已完成且索引连续的 item 恢复输出；不能从 EOF、`[DONE]` 或单独的 item.done 推断成功。已宣布的工具不得在终态消失或改变关联。长思考的 15 秒进度保活只沿用已收到的响应身份，取消和连接关闭仍会停止读取。转换失败记录固定原因码（如 `invalid_tool_call`、`commentary_without_action`、`incomplete_output_items`），不记录工具参数、正文或原始上游流。
 
 工具名称同时支持声明中的全限定名称和独立 `namespace` 字段；直接调用与 `run_officejs` 内层使用同一声明匹配规则。按 Codex 的规则，未填写与显式 `functions` 属于同一默认命名空间；其他命名空间仍精确匹配。默认空间中有多个同名声明时明确拒绝，不猜测要执行哪个。原生 `update_plan` 的参数和结果回传同样识别默认空间；保存与回传的原生调用保持原样。未声明工具、缺少真实调用 ID 仍会失败。
+
+工具目录同时读取顶层 `tools` 和 Codex Lite 的结构化 `input[].type=additional_tools` 中的 `tools`。Lite 请求可以没有顶层目录，这不表示不能调用工具。适配器读取声明后将其转换为 Excel 的客户端工具目录，保留完整名称、命名空间及参数定义；载体重复携带的完全相同定义合并，同名冲突明确拒绝。普通消息中的文字或 `tools` 字段不作为声明，不能从技能说明或历史文本猜测工具权限。
+
+工具回传保留空字符串、空数组及结构化图片结果，不把空结果改写为成功说明。输出字段缺失或为 `null` 时明确拒绝；已声明原生计划工具继续使用其既有结果协议。中继结果通过 `call_id` 关联到保存的原生调用，移除客户端附带的 `name` / `namespace`，避免把 MCP 名称错当成 Excel 原生工具身份。
 
 `invalid_tool_call` 会附带固定细分原因（如 `relay_tool_undeclared`、`function_schema_mismatch`、`call_id_missing`）。客户端错误不含工具名或参数。服务端 `openai.excel_response_translation_failed` 日志包含 `reason`、`tool_reason` 和 `tool_diagnostic`：原生/候选工具名与命名空间、失败阶段、参数类型与长度、调用 ID 是否存在、匹配结果、默认空间候选数量，以及排序后最多 32 项声明工具（另记总数和截断标记）。标识符只记录完整合法且不超过 128 字节的名称；其他内容整段隐藏。日志不记录参数键值、schema、工具描述、调用 ID 值、请求头、令牌、图片或业务正文。用同条日志的请求 ID 关联实际账号与业务错误记录。
 
