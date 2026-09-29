@@ -25,7 +25,7 @@ func (e *openAIExcelPreparationError) Unwrap() error { return e.cause }
 type openAIExcelResponseError struct{ cause error }
 
 func (e *openAIExcelResponseError) Error() string {
-	return "Excel upstream response could not be translated safely"
+	return openAIExcelSafeProtocolError(e.cause)
 }
 func (e *openAIExcelResponseError) Unwrap() error { return e.cause }
 
