@@ -10,7 +10,7 @@
           <span class="sr-only">{{ t('candyTests.generated') }}</span>
           <AccountCandyTestStatus v-if="summary.active" class="absolute right-1 top-1" :status="summary.active.status" />
         </template>
-        <div v-else class="flex h-full flex-col gap-1 overflow-hidden">
+        <div v-else class="flex h-full flex-col justify-center gap-1 overflow-hidden">
           <div class="flex gap-1">
             <AccountCandyTestStatus v-if="summary.latest" :status="summary.latest.status" />
             <span v-else class="text-gray-400">{{ t('candyTests.noResult') }}</span>
