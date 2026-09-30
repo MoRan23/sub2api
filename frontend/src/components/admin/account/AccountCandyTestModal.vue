@@ -9,16 +9,6 @@
 
       <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">{{ error }}</p>
 
-      <section class="space-y-3">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <h4 class="font-medium">{{ t(followLatest ? 'candyTests.latestResult' : 'candyTests.selectedResult') }}</h4>
-          <Select v-if="historyAccountOptions.length > 1" :model-value="historyAccountId" :options="historyAccountOptions" :aria-label="t('candyTests.historyAccount')" searchable @update:model-value="changeHistoryAccount(Number($event))" />
-          <button v-if="!followLatest" type="button" class="btn btn-secondary text-sm" data-testid="pelican-return-latest" @click="followLatest = true">{{ t('candyTests.returnLatest') }}</button>
-        </div>
-        <AccountCandyTestResult v-if="show && displayedItem" :key="displayedItem.id" :item="displayedItem" />
-        <p v-else-if="!historyLoading" class="text-sm text-gray-400">{{ t('candyTests.noHistory') }}</p>
-      </section>
-
       <div class="rounded-xl border border-gray-200 p-4 dark:border-dark-600">
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
@@ -87,6 +77,16 @@
           <span>{{ t('candyTests.page', { page, pages: totalPages }) }}</span>
           <button type="button" class="btn btn-secondary" :disabled="page >= totalPages || refreshing" @click="changePage(page + 1)">{{ t('candyTests.next') }}</button>
         </div>
+      </section>
+
+      <section class="space-y-3" data-testid="pelican-result-section">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h4 class="font-medium">{{ t(followLatest ? 'candyTests.latestResult' : 'candyTests.selectedResult') }}</h4>
+          <Select v-if="historyAccountOptions.length > 1" :model-value="historyAccountId" :options="historyAccountOptions" :aria-label="t('candyTests.historyAccount')" searchable @update:model-value="changeHistoryAccount(Number($event))" />
+          <button v-if="!followLatest" type="button" class="btn btn-secondary text-sm" data-testid="pelican-return-latest" @click="followLatest = true">{{ t('candyTests.returnLatest') }}</button>
+        </div>
+        <AccountCandyTestResult v-if="show && displayedItem" :key="displayedItem.id" :item="displayedItem" />
+        <p v-else-if="!historyLoading" class="text-sm text-gray-400">{{ t('candyTests.noHistory') }}</p>
       </section>
 
       <details data-testid="pelican-history" class="space-y-3">

@@ -24,10 +24,10 @@ const disconnectIntersection = vi.fn()
 function setVisible(visible: boolean) { intersect([{ isIntersecting: visible } as IntersectionObserverEntry], {} as IntersectionObserver) }
 function mountCell(latest: CandyTestItem, layout = createPelicanThumbnailLayout()) {
   const host = document.createElement('table')
-  host.innerHTML = '<tbody><tr><td></td></tr></tbody>'
+  host.innerHTML = '<tbody><tr><td><div data-natural-height></div></td><td data-preview></td></tr></tbody>'
   document.body.append(host)
   const wrapper = mount(AccountCandyTestCell, {
-    props: { account: account(latest) }, attachTo: host.querySelector('td')!,
+    props: { account: account(latest) }, attachTo: host.querySelector('[data-preview]')!,
     global: { provide: { [pelicanThumbnailLayoutKey as symbol]: layout } },
   })
   return { wrapper, dispose: () => { wrapper.unmount(); host.remove() } }
@@ -39,17 +39,21 @@ describe('account row pelican preview', () => {
     height = 120
     vi.stubGlobal('ResizeObserver', class { constructor(callback: ResizeObserverCallback) { resize = callback } observe() {} disconnect = disconnectResize })
     vi.stubGlobal('IntersectionObserver', class { constructor(callback: IntersectionObserverCallback) { intersect = callback } observe() {} disconnect = disconnectIntersection })
-    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function() { return this.tagName === 'TD' ? height : 0 })
-    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(240)
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function() { return this.tagName === 'TD' ? height + 8 : 0 })
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function() { return parseFloat(this.style.width) || 240 })
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function() {
+      return { top: 0, bottom: this.hasAttribute('data-natural-height') ? height + 8 : 0 } as DOMRect
+    })
   })
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-  it('loads only visible generated results and scales to the cell without contributing height', async () => {
+  it('loads only visible results and reserves the shared preview with compact gutters', async () => {
     const latest = result(101)
     api.history.mockResolvedValue({ items: [{ ...latest, html: source }] })
     const { wrapper, dispose } = mountCell(latest)
+    await flushPromises()
     expect(api.history).not.toHaveBeenCalled()
-    expect(wrapper.get('[data-testid="pelican-cell"]').classes()).toContain('h-0')
+    expect(wrapper.get('[data-testid="pelican-cell"]').element.style.height).toBe('128px')
     expect(wrapper.get('[data-testid="pelican-cell-content"]').classes()).toContain('absolute')
     setVisible(true)
     await flushPromises()
@@ -98,46 +102,74 @@ describe('account row pelican preview', () => {
     second.dispose()
   })
 
-  it('shares the smallest row scale per list, centers previews, and releases removed or failed rows', async () => {
+  it('uses the tallest natural row, expands shorter previews, and shrinks after resizing or removal', async () => {
     const layout = createPelicanThumbnailLayout()
     const short = mountCell({ ...result(201), html: source }, layout)
     const resizeShort = resize
     setVisible(true)
     height = 180
     const tall = mountCell({ ...result(202), html: source }, layout)
+    const resizeTall = resize
     setVisible(true)
+    height = 80
     const otherList = mountCell({ ...result(203), html: source })
     setVisible(true)
     await flushPromises()
+    height = 120
+    resizeShort([], {} as ResizeObserver)
+    height = 180
+    resizeTall([], {} as ResizeObserver)
+    await flushPromises()
     const shortFrame = short.wrapper.get('iframe').element
     const tallFrame = tall.wrapper.get('iframe').element
-    expect(shortFrame.style.transform).toBe('scale(0.2)')
+    expect(shortFrame.style.transform).toBe('scale(0.3)')
     expect(tallFrame.style.transform).toBe(shortFrame.style.transform)
     expect(shortFrame.style.top).toBe('0px')
-    expect(tallFrame.style.top).toBe('30px')
-    expect(otherList.wrapper.get('iframe').element.style.transform).toBe('scale(0.25)')
+    expect(tallFrame.style.top).toBe('0px')
+    expect(short.wrapper.get('[data-testid="pelican-cell"]').element.style.height).toBe('188px')
+    expect(short.wrapper.get('[data-testid="pelican-cell"]').element.style.width).toBe('288px')
+    expect(otherList.wrapper.get('iframe').element.style.transform).toBe(`scale(${80 / 600})`)
 
     height = 60
     resizeShort([], {} as ResizeObserver)
     await flushPromises()
-    expect(shortFrame.style.transform).toBe('scale(0.1)')
+    expect(shortFrame.style.transform).toBe('scale(0.3)')
     expect(tallFrame.style.transform).toBe(shortFrame.style.transform)
-    expect(tallFrame.style.top).toBe('60px')
+    expect(tallFrame.style.top).toBe('0px')
     expect(tall.wrapper.get('[data-testid="pelican-cell-content"]').element.style.height).toBe('180px')
     expect(short.wrapper.get('iframe').element).toBe(shortFrame)
     expect(tall.wrapper.get('iframe').element).toBe(tallFrame)
 
-    await short.wrapper.setProps({ account: account(result(204, 'failed')) })
-    expect(tallFrame.style.transform).toBe('scale(0.25)')
-    await short.wrapper.setProps({ account: account({ ...result(205), html: source }) })
+    height = 100
+    resizeTall([], {} as ResizeObserver)
     await flushPromises()
-    expect(tallFrame.style.transform).toBe('scale(0.1)')
-    short.dispose()
-    await flushPromises()
-    expect(tallFrame.style.transform).toBe('scale(0.25)')
-    expect(tall.wrapper.get('iframe').element).toBe(tallFrame)
+    expect(tallFrame.style.transform).toBe(`scale(${100 / 600})`)
+    expect(shortFrame.style.transform).toBe(tallFrame.style.transform)
+    expect(short.wrapper.get('[data-testid="pelican-cell"]').element.style.height).toBe('108px')
     tall.dispose()
+    await flushPromises()
+    expect(shortFrame.style.transform).toBe('scale(0.1)')
+    expect(short.wrapper.get('iframe').element).toBe(shortFrame)
+    short.dispose()
     otherList.dispose()
+  })
+
+  it('includes a tall status-only row without reserving preview space for that row', async () => {
+    const layout = createPelicanThumbnailLayout()
+    height = 60
+    const generated = mountCell({ ...result(204), html: source }, layout)
+    setVisible(true)
+    height = 140
+    const failed = mountCell(result(205, 'failed'), layout)
+    setVisible(true)
+    await flushPromises()
+    expect(generated.wrapper.get('iframe').element.style.transform).toBe(`scale(${140 / 600})`)
+    expect(failed.wrapper.get('[data-testid="pelican-cell"]').element.style.height).toBe('0px')
+    expect(failed.wrapper.find('iframe').exists()).toBe(false)
+    failed.dispose()
+    await flushPromises()
+    expect(generated.wrapper.get('iframe').element.style.transform).toBe('scale(0.1)')
+    generated.dispose()
   })
 
   it('replaces a new result and ignores an older request still in flight', async () => {

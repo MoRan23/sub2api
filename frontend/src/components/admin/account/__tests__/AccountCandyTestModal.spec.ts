@@ -167,6 +167,22 @@ describe('Account candy tests', () => {
     wrapper.unmount()
   })
 
+  it('opens batch details below the test list and model controls', async () => {
+    api.history.mockResolvedValue({ items: [], summary: { active: item() } })
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    const row = wrapper.get('[data-testid="candy-item-1"]')
+    await row.findAll('button')[0]!.trigger('click')
+    const resultSection = wrapper.get('[data-testid="pelican-result-section"]').element
+    expect(row.element.compareDocumentPosition(resultSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(wrapper.get('#candy-test-model').element.compareDocumentPosition(resultSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(resultSection.compareDocumentPosition(wrapper.get('[data-testid="pelican-history"]').element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(wrapper.findAllComponents(AccountCandyTestResult)).toHaveLength(1)
+    expect(wrapper.getComponent(AccountCandyTestResult).props('item').id).toBe(1)
+    wrapper.unmount()
+  })
+
   it('only cancels when explicitly requested', async () => {
     const wrapper = mountModal()
     await wrapper.setProps({ show: true })
