@@ -7,9 +7,12 @@
       <button v-else type="button" class="relative block h-full w-full overflow-hidden rounded text-left text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500" :title="detailsTitle" :aria-label="detailsTitle" @click.stop="emit('open')">
         <template v-if="previewVisible && html">
           <div class="relative mx-auto" :style="{ width: `${thumbnailWidth}px`, height: `${thumbnailHeight}px` }">
-            <PelicanHTMLThumbnail :key="summary.latest?.id" :html="html" :width="thumbnailWidth" :height="thumbnailHeight" :max-scale="layout.scale.value" />
+            <PelicanHTMLThumbnail :key="summary.latest?.id" :html="html" :width="thumbnailWidth" :height="thumbnailHeight" :max-scale="layout.scale.value">
+              <template v-if="summary.active" #overlay>
+                <AccountCandyTestStatus class="absolute right-1 top-1" :status="summary.active.status" overlay />
+              </template>
+            </PelicanHTMLThumbnail>
             <span class="sr-only">{{ t('candyTests.generated') }}</span>
-            <AccountCandyTestStatus v-if="summary.active" class="absolute right-1 top-1" :status="summary.active.status" overlay />
           </div>
           <div v-if="lastTestAt" class="flex items-center justify-center gap-1 whitespace-nowrap text-[10px] leading-none text-gray-600 dark:text-gray-300" :style="{ height: `${previewFooterHeight}px` }" data-testid="pelican-last-test">
             <span>{{ t('candyTests.lastTestAt') }}</span>

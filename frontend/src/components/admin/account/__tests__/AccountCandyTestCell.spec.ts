@@ -249,16 +249,25 @@ describe('account row pelican preview', () => {
     dispose()
   })
 
-  it('limits both dimensions with the same scale and does not restart on a width change', async () => {
-    const wrapper = mount(PelicanHTMLThumbnail, { props: { html: source, width: 120, height: 200 } })
+  it('keeps the unscaled overlay on the rendered page when resizing without restarting the frame', async () => {
+    const wrapper = mount(PelicanHTMLThumbnail, { props: { html: source, width: 120, height: 200 }, slots: { overlay: '<span>排队中</span>' } })
     const frame = wrapper.get('iframe').element
+    const overlay = wrapper.get('[data-testid="pelican-preview-overlay"]').element
     expect(frame.style.transform).toBe('scale(0.125)')
     expect(frame.style.top).toBe('62.5px')
     expect(parseFloat(frame.style.borderRadius) * 0.125).toBe(4)
+    expect(overlay.style.width).toBe('120px')
+    expect(overlay.style.height).toBe('75px')
+    expect(overlay.style.top).toBe('62.5px')
+    expect(overlay.style.transform).toBe('')
     await wrapper.setProps({ width: 240 })
     expect(wrapper.get('iframe').element).toBe(frame)
     expect(frame.style.transform).toBe('scale(0.25)')
     expect(parseFloat(frame.style.borderRadius) * 0.25).toBe(4)
+    expect(overlay.style.width).toBe('240px')
+    expect(overlay.style.height).toBe('150px')
+    expect(overlay.style.top).toBe('25px')
+    expect(overlay.style.transform).toBe('')
     wrapper.unmount()
   })
 })
