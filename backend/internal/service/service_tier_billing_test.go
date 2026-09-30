@@ -18,6 +18,11 @@ func TestResolveBillingServiceTier(t *testing.T) {
 	}{
 		{name: "openai priority served as cheaper default", requested: "priority", observed: "default", requestedCost: serviceTierTestCost(2), observedCost: serviceTierTestCost(1), billing: "default", downgraded: true},
 		{name: "anthropic fast served as cheaper standard", requested: "fast", observed: "standard", requestedCost: serviceTierTestCost(2), observedCost: serviceTierTestCost(1), billing: "standard", downgraded: true},
+		{name: "ultrafast served as cheaper priority", requested: "ultrafast", observed: "priority", requestedCost: serviceTierTestCost(3), observedCost: serviceTierTestCost(2), billing: "priority", downgraded: true},
+		{name: "ultrafast served as cheaper default", requested: "ultrafast", observed: "default", requestedCost: serviceTierTestCost(3), observedCost: serviceTierTestCost(1), billing: "default", downgraded: true},
+		{name: "ultrafast honoured", requested: "ultrafast", observed: "ultrafast", billing: "ultrafast"},
+		{name: "ultrafast missing declaration", requested: "ultrafast", billing: "ultrafast"},
+		{name: "response cannot raise cost with ultrafast", requested: "priority", observed: "ultrafast", requestedCost: serviceTierTestCost(2), observedCost: serviceTierTestCost(3), billing: "priority"},
 		{name: "priority honoured", requested: "priority", observed: "priority", billing: "priority"},
 		{name: "no declaration keeps request", requested: "priority", observed: "", billing: "priority"},
 		{name: "no request no declaration", requested: "", observed: "", billing: ""},

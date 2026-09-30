@@ -126,6 +126,39 @@ func TestApplyOpenAICompatModelNormalization(t *testing.T) {
 	})
 }
 
+func TestApplyOpenAICompatModelNormalizationGPT61Variants(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		model    string
+		explicit string
+		want     string
+	}{
+		{model: "gpt-6.1-sol"},
+		{model: "gpt-6.1-sol-2026-09-24"},
+		{model: "gpt-6.1-sol-openai-compact"},
+		{model: "gpt-6.1-sol-max-openai-compact", want: "max"},
+		{model: "gpt-6.1-sol-ultra", want: "ultra"},
+		{model: "gpt-6.1-sol-none", want: "none"},
+		{model: "gpt-6.1-sol-minimal", want: "minimal"},
+		{model: "gpt-6.1-sol-xhigh", explicit: "low", want: "low"},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			req := &apicompat.AnthropicRequest{Model: tc.model}
+			if tc.explicit != "" {
+				req.OutputConfig = &apicompat.AnthropicOutputConfig{Effort: tc.explicit}
+			}
+			applyOpenAICompatModelNormalization(req)
+			require.Equal(t, "gpt-6.1-sol", req.Model)
+			if tc.want == "" {
+				require.Nil(t, req.OutputConfig)
+			} else {
+				require.NotNil(t, req.OutputConfig)
+				require.Equal(t, tc.want, req.OutputConfig.Effort)
+			}
+		})
+	}
+}
+
 func TestForwardAsAnthropic_UsesExactFableMessagesDispatchModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Parallel()

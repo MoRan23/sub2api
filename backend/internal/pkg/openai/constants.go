@@ -3,6 +3,7 @@ package openai
 
 import (
 	_ "embed"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -100,6 +101,12 @@ var instructionsDaybreakBlue string
 
 //go:embed instructions_daybreak_red.txt
 var instructionsDaybreakRed string
+
+// CodexGPT61SolMetadata is the complete official descriptor from openai/codex
+// b1e72963c3b71a9265a551e54beff078384efed9, codex-rs/models-manager/models.json.
+//
+//go:embed codex_gpt61_sol.json
+var CodexGPT61SolMetadata []byte
 
 // latestCodexInstructions retains the existing GPT-5.5 fallback for models
 // without a known template; it is not evidence of an upstream model mapping.
@@ -217,4 +224,22 @@ func IsKnownCodexModelVariant(model, family string) bool {
 func IsGPT6SolOrLunaModelSpelling(model string) bool {
 	return IsKnownCodexModelVariant(model, "gpt-6-sol") ||
 		IsKnownCodexModelVariant(model, "gpt-6-luna")
+}
+
+// IsGPT61SolModelSpelling recognizes the published model and local effort/compact
+// spellings. Invalid effort suffixes remain identifiable for request validation.
+func IsGPT61SolModelSpelling(model string) bool {
+	return IsKnownCodexModelVariant(model, "gpt-6.1-sol")
+}
+
+// ValidateGPT61SolReasoningEffort rejects disabled reasoning instead of silently
+// increasing the client's requested effort on compatibility paths.
+func ValidateGPT61SolReasoningEffort(model, effort string) error {
+	if IsGPT61SolModelSpelling(model) {
+		switch strings.ToLower(strings.TrimSpace(effort)) {
+		case "none", "minimal":
+			return fmt.Errorf("gpt-6.1-sol does not support reasoning effort %q; use low, medium, high, xhigh or max", effort)
+		}
+	}
+	return nil
 }

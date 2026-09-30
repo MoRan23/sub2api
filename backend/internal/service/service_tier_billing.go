@@ -52,7 +52,7 @@ func ResolveBillingServiceTierWithCosts(requested, observed string, requestedCos
 
 func isKnownBillingServiceTier(tier string) bool {
 	switch normalizeBillingServiceTier(tier) {
-	case "default", "standard", "auto", "scale", "priority", "fast", "flex":
+	case "default", "standard", "auto", "scale", "priority", "fast", "flex", "ultrafast":
 		return true
 	default:
 		return false
