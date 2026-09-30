@@ -27,6 +27,9 @@ const frameStyle = computed(() => {
     top: `${(props.height - viewportHeight * scale) / 2}px`,
     transform: `scale(${scale})`,
     transformOrigin: 'top left',
+    // Round the actual preview, including when it is inset inside the cell.
+    // Compensate for scaling so every corner stays 4px on screen.
+    borderRadius: scale > 0 ? `${4 / scale}px` : '0px',
   }
 })
 </script>

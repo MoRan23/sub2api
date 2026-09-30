@@ -1,13 +1,13 @@
 <template>
-  <!-- Reserve only the shared preview height plus compact gutters. Other
-       columns determine its natural size; shorter preview rows may expand. -->
+  <!-- Preview and timestamp share the existing row height. Other columns
+       determine its natural size; shorter preview rows may expand. -->
   <div ref="anchor" class="relative max-w-full" :style="{ width: `${Math.max(240, layout.width.value)}px`, height: `${spacerHeight}px` }" data-testid="pelican-cell">
     <div class="absolute left-0 w-full overflow-hidden" :style="{ top: `${box.top}px`, height: `${contentHeight}px` }" data-testid="pelican-cell-content">
       <span v-if="account.platform !== 'openai'" class="flex h-full items-center text-gray-400">—</span>
       <button v-else type="button" class="relative block h-full w-full overflow-hidden rounded text-left text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500" :title="detailsTitle" :aria-label="detailsTitle" @click.stop="emit('open')">
         <template v-if="previewVisible && html">
-          <div class="relative" :style="{ height: `${thumbnailHeight}px` }">
-            <PelicanHTMLThumbnail :key="summary.latest?.id" :html="html" :width="box.width" :height="thumbnailHeight" :max-scale="layout.scale.value" />
+          <div class="relative mx-auto" :style="{ width: `${thumbnailWidth}px`, height: `${thumbnailHeight}px` }">
+            <PelicanHTMLThumbnail :key="summary.latest?.id" :html="html" :width="thumbnailWidth" :height="thumbnailHeight" :max-scale="layout.scale.value" />
             <span class="sr-only">{{ t('candyTests.generated') }}</span>
             <AccountCandyTestStatus v-if="summary.active" class="absolute right-1 top-1" :status="summary.active.status" overlay />
           </div>
@@ -45,7 +45,7 @@ import { formatDateTime } from '@/utils/format'
 import AccountCandyTestStatus from './AccountCandyTestStatus.vue'
 import PelicanHTMLThumbnail from './PelicanHTMLThumbnail.vue'
 import { loadPelicanThumbnail } from './pelicanThumbnail'
-import { createPelicanThumbnailLayout, pelicanThumbnailLayoutKey, pelicanRowContentHeight, PELICAN_THUMBNAIL_GUTTER } from './pelicanThumbnailLayout'
+import { createPelicanThumbnailLayout, pelicanThumbnailLayoutKey, pelicanRowContentHeight, PELICAN_THUMBNAIL_GUTTER, PELICAN_THUMBNAIL_WIDTH, PELICAN_THUMBNAIL_HEIGHT } from './pelicanThumbnailLayout'
 
 const props = defineProps<{ account: Account & { candy_test?: CandyTestSummary | null } }>()
 const emit = defineEmits<{ (event: 'open'): void }>()
@@ -61,9 +61,10 @@ const layoutKey = Symbol('pelican-cell')
 const hasGeneratedResult = computed(() => props.account.platform === 'openai' && summary.value.latest?.status === 'generated')
 const lastTestAt = computed(() => summary.value.latest?.finished_at || '')
 const previewFooterHeight = computed(() => hasGeneratedResult.value && lastTestAt.value ? 20 : 0)
-const spacerHeight = computed(() => hasGeneratedResult.value && layout.height.value > 0 ? Math.max(0, layout.height.value + previewFooterHeight.value + PELICAN_THUMBNAIL_GUTTER * 2 - box.value.padding) : 0)
-const contentHeight = computed(() => Math.max(box.value.height, hasGeneratedResult.value ? layout.height.value + previewFooterHeight.value : 0))
+const spacerHeight = computed(() => hasGeneratedResult.value && layout.height.value > 0 ? Math.max(0, layout.height.value + PELICAN_THUMBNAIL_GUTTER * 2 - box.value.padding) : 0)
+const contentHeight = computed(() => Math.max(box.value.height, hasGeneratedResult.value ? layout.height.value : 0))
 const thumbnailHeight = computed(() => Math.max(0, contentHeight.value - previewFooterHeight.value))
+const thumbnailWidth = computed(() => Math.min(box.value.width, thumbnailHeight.value * PELICAN_THUMBNAIL_WIDTH / PELICAN_THUMBNAIL_HEIGHT, layout.width.value))
 const visible = ref(false)
 const loading = ref(false)
 const loadedPreview = ref<{ id: number; html: string }>()
