@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AccountCandyTestCell from '../AccountCandyTestCell.vue'
 import PelicanHTMLThumbnail from '../PelicanHTMLThumbnail.vue'
+import { createPelicanThumbnailLayout, pelicanThumbnailLayoutKey } from '../pelicanThumbnailLayout'
 import type { Account } from '@/types'
 import type { CandyTestItem } from '@/api/admin/candyTests'
 
@@ -21,11 +22,14 @@ let height: number
 const disconnectResize = vi.fn()
 const disconnectIntersection = vi.fn()
 function setVisible(visible: boolean) { intersect([{ isIntersecting: visible } as IntersectionObserverEntry], {} as IntersectionObserver) }
-function mountCell(latest: CandyTestItem) {
+function mountCell(latest: CandyTestItem, layout = createPelicanThumbnailLayout()) {
   const host = document.createElement('table')
   host.innerHTML = '<tbody><tr><td></td></tr></tbody>'
   document.body.append(host)
-  const wrapper = mount(AccountCandyTestCell, { props: { account: account(latest) }, attachTo: host.querySelector('td')! })
+  const wrapper = mount(AccountCandyTestCell, {
+    props: { account: account(latest) }, attachTo: host.querySelector('td')!,
+    global: { provide: { [pelicanThumbnailLayoutKey as symbol]: layout } },
+  })
   return { wrapper, dispose: () => { wrapper.unmount(); host.remove() } }
 }
 
@@ -92,6 +96,48 @@ describe('account row pelican preview', () => {
     expect(second.wrapper.find('iframe').exists()).toBe(true)
     expect(api.history).toHaveBeenCalledTimes(1)
     second.dispose()
+  })
+
+  it('shares the smallest row scale per list, centers previews, and releases removed or failed rows', async () => {
+    const layout = createPelicanThumbnailLayout()
+    const short = mountCell({ ...result(201), html: source }, layout)
+    const resizeShort = resize
+    setVisible(true)
+    height = 180
+    const tall = mountCell({ ...result(202), html: source }, layout)
+    setVisible(true)
+    const otherList = mountCell({ ...result(203), html: source })
+    setVisible(true)
+    await flushPromises()
+    const shortFrame = short.wrapper.get('iframe').element
+    const tallFrame = tall.wrapper.get('iframe').element
+    expect(shortFrame.style.transform).toBe('scale(0.2)')
+    expect(tallFrame.style.transform).toBe(shortFrame.style.transform)
+    expect(shortFrame.style.top).toBe('0px')
+    expect(tallFrame.style.top).toBe('30px')
+    expect(otherList.wrapper.get('iframe').element.style.transform).toBe('scale(0.25)')
+
+    height = 60
+    resizeShort([], {} as ResizeObserver)
+    await flushPromises()
+    expect(shortFrame.style.transform).toBe('scale(0.1)')
+    expect(tallFrame.style.transform).toBe(shortFrame.style.transform)
+    expect(tallFrame.style.top).toBe('60px')
+    expect(tall.wrapper.get('[data-testid="pelican-cell-content"]').element.style.height).toBe('180px')
+    expect(short.wrapper.get('iframe').element).toBe(shortFrame)
+    expect(tall.wrapper.get('iframe').element).toBe(tallFrame)
+
+    await short.wrapper.setProps({ account: account(result(204, 'failed')) })
+    expect(tallFrame.style.transform).toBe('scale(0.25)')
+    await short.wrapper.setProps({ account: account({ ...result(205), html: source }) })
+    await flushPromises()
+    expect(tallFrame.style.transform).toBe('scale(0.1)')
+    short.dispose()
+    await flushPromises()
+    expect(tallFrame.style.transform).toBe('scale(0.25)')
+    expect(tall.wrapper.get('iframe').element).toBe(tallFrame)
+    tall.dispose()
+    otherList.dispose()
   })
 
   it('replaces a new result and ignores an older request still in flight', async () => {

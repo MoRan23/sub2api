@@ -531,7 +531,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, provide, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -555,6 +555,7 @@ import AccountTableActions from '@/components/admin/account/AccountTableActions.
 import AccountDailyFixedRootsModal from '@/components/admin/account/AccountDailyFixedRootsModal.vue'
 import AccountCandyTestModal from '@/components/admin/account/AccountCandyTestModal.vue'
 import AccountCandyTestCell from '@/components/admin/account/AccountCandyTestCell.vue'
+import { createPelicanThumbnailLayout, pelicanThumbnailLayoutKey } from '@/components/admin/account/pelicanThumbnailLayout'
 import { supportsManagedOpenAIOAuthIdentity } from '@/components/account/openaiOAuthOS'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
@@ -586,6 +587,7 @@ import { formatMultiplier } from '@/utils/formatters'
 import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 
 const { t } = useI18n()
+provide(pelicanThumbnailLayoutKey, createPelicanThumbnailLayout())
 const appStore = useAppStore()
 const authStore = useAuthStore()
 

@@ -6,7 +6,7 @@
       <span v-if="account.platform !== 'openai'" class="flex h-full items-center text-gray-400">—</span>
       <button v-else type="button" class="relative block h-full w-full overflow-hidden rounded text-left text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500" :title="detailsTitle" :aria-label="detailsTitle" @click.stop="emit('open')">
         <template v-if="previewVisible && html">
-          <PelicanHTMLThumbnail :key="summary.latest?.id" :html="html" :width="box.width" :height="box.height" />
+          <PelicanHTMLThumbnail :key="summary.latest?.id" :html="html" :width="box.width" :height="box.height" :max-scale="layout.scale.value" />
           <span class="sr-only">{{ t('candyTests.generated') }}</span>
           <AccountCandyTestStatus v-if="summary.active" class="absolute right-1 top-1" :status="summary.active.status" />
         </template>
@@ -26,7 +26,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
 import { PELICAN_TEST_PROMPT_VERSION } from '@/api/admin/candyTests'
@@ -35,6 +35,7 @@ import { formatDateTime } from '@/utils/format'
 import AccountCandyTestStatus from './AccountCandyTestStatus.vue'
 import PelicanHTMLThumbnail from './PelicanHTMLThumbnail.vue'
 import { loadPelicanThumbnail } from './pelicanThumbnail'
+import { createPelicanThumbnailLayout, pelicanThumbnailLayoutKey } from './pelicanThumbnailLayout'
 
 const props = defineProps<{ account: Account & { candy_test?: CandyTestSummary | null } }>()
 const emit = defineEmits<{ (event: 'open'): void }>()
@@ -45,6 +46,15 @@ const summary = computed(() => ({
 }))
 const anchor = ref<HTMLElement>()
 const box = ref({ top: 0, width: 0, height: 0 })
+const layout = inject(pelicanThumbnailLayoutKey, createPelicanThumbnailLayout, true)
+const layoutKey = Symbol('pelican-cell')
+watch([box, () => props.account.platform, () => summary.value.latest?.status], () => {
+  if (props.account.platform === 'openai' && summary.value.latest?.status === 'generated') {
+    layout.measure(layoutKey, box.value.width, box.value.height)
+  } else {
+    layout.remove(layoutKey)
+  }
+}, { flush: 'sync' })
 const visible = ref(false)
 const loading = ref(false)
 const loadedPreview = ref<{ id: number; html: string }>()
@@ -101,5 +111,5 @@ onMounted(() => {
   intersectionObserver = new IntersectionObserver(entries => { visible.value = entries.some(entry => entry.isIntersecting) })
   intersectionObserver.observe(container)
 })
-onBeforeUnmount(() => { resizeObserver?.disconnect(); intersectionObserver?.disconnect() })
+onBeforeUnmount(() => { resizeObserver?.disconnect(); intersectionObserver?.disconnect(); layout.remove(layoutKey) })
 </script>
