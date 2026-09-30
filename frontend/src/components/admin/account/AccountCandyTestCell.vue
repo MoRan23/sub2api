@@ -6,9 +6,15 @@
       <span v-if="account.platform !== 'openai'" class="flex h-full items-center text-gray-400">—</span>
       <button v-else type="button" class="relative block h-full w-full overflow-hidden rounded text-left text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500" :title="detailsTitle" :aria-label="detailsTitle" @click.stop="emit('open')">
         <template v-if="previewVisible && html">
-          <PelicanHTMLThumbnail :key="summary.latest?.id" :html="html" :width="box.width" :height="contentHeight" :max-scale="layout.scale.value" />
-          <span class="sr-only">{{ t('candyTests.generated') }}</span>
-          <AccountCandyTestStatus v-if="summary.active" class="absolute right-1 top-1" :status="summary.active.status" />
+          <div class="relative" :style="{ height: `${thumbnailHeight}px` }">
+            <PelicanHTMLThumbnail :key="summary.latest?.id" :html="html" :width="box.width" :height="thumbnailHeight" :max-scale="layout.scale.value" />
+            <span class="sr-only">{{ t('candyTests.generated') }}</span>
+            <AccountCandyTestStatus v-if="summary.active" class="absolute right-1 top-1" :status="summary.active.status" overlay />
+          </div>
+          <div v-if="lastTestAt" class="flex items-center justify-center gap-1 whitespace-nowrap text-[10px] leading-none text-gray-600 dark:text-gray-300" :style="{ height: `${previewFooterHeight}px` }" data-testid="pelican-last-test">
+            <span>{{ t('candyTests.lastTestAt') }}</span>
+            <time :datetime="lastTestAt" class="tabular-nums">{{ formatDateTime(lastTestAt) }}</time>
+          </div>
         </template>
         <div v-else class="flex h-full flex-col justify-center gap-1 overflow-hidden">
           <div class="flex gap-1">
@@ -17,6 +23,10 @@
             <AccountCandyTestStatus v-if="summary.active" :status="summary.active.status" />
           </div>
           <div v-if="summary.latest" class="truncate text-gray-600 dark:text-gray-300">{{ summary.latest.model }} · {{ summary.latest.reasoning_effort || t('candyTests.defaultEffort') }}</div>
+          <div v-if="lastTestAt" class="flex items-center gap-1 whitespace-nowrap text-[10px] text-gray-600 dark:text-gray-300" data-testid="pelican-last-test">
+            <span>{{ t('candyTests.lastTestAt') }}</span>
+            <time :datetime="lastTestAt" class="tabular-nums">{{ formatDateTime(lastTestAt) }}</time>
+          </div>
           <div v-if="summary.latest?.status === 'generated'" class="truncate text-gray-400">{{ t(loading ? 'candyTests.previewLoading' : 'candyTests.previewUnavailable') }}</div>
           <div class="truncate text-primary-500">{{ t(summary.active ? 'candyTests.activeBatch' : 'candyTests.details') }}</div>
         </div>
@@ -49,8 +59,11 @@ const box = ref({ top: 0, width: 0, height: 0, padding: 0 })
 const layout = inject(pelicanThumbnailLayoutKey, createPelicanThumbnailLayout, true)
 const layoutKey = Symbol('pelican-cell')
 const hasGeneratedResult = computed(() => props.account.platform === 'openai' && summary.value.latest?.status === 'generated')
-const spacerHeight = computed(() => hasGeneratedResult.value && layout.height.value > 0 ? Math.max(0, layout.height.value + PELICAN_THUMBNAIL_GUTTER * 2 - box.value.padding) : 0)
-const contentHeight = computed(() => Math.max(box.value.height, hasGeneratedResult.value ? layout.height.value : 0))
+const lastTestAt = computed(() => summary.value.latest?.finished_at || '')
+const previewFooterHeight = computed(() => hasGeneratedResult.value && lastTestAt.value ? 20 : 0)
+const spacerHeight = computed(() => hasGeneratedResult.value && layout.height.value > 0 ? Math.max(0, layout.height.value + previewFooterHeight.value + PELICAN_THUMBNAIL_GUTTER * 2 - box.value.padding) : 0)
+const contentHeight = computed(() => Math.max(box.value.height, hasGeneratedResult.value ? layout.height.value + previewFooterHeight.value : 0))
+const thumbnailHeight = computed(() => Math.max(0, contentHeight.value - previewFooterHeight.value))
 const visible = ref(false)
 const loading = ref(false)
 const loadedPreview = ref<{ id: number; html: string }>()

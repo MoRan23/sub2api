@@ -9,9 +9,11 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { CandyTestStatus } from '@/api/admin/candyTests'
 
-const props = defineProps<{ status: CandyTestStatus }>()
+const props = defineProps<{ status: CandyTestStatus; overlay?: boolean }>()
 const { t } = useI18n()
 const statusClass = computed(() => {
+  if (props.overlay && props.status === 'running') return 'bg-blue-700 text-white ring-1 ring-white/70 shadow-sm'
+  if (props.overlay && props.status === 'queued') return 'bg-amber-300 text-amber-950 ring-1 ring-black/10 shadow-sm'
   if (props.status === 'generated') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
   if (props.status === 'abnormal') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
   if (props.status === 'queued' || props.status === 'running') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'

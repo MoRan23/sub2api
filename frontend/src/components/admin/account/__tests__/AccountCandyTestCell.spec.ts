@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AccountCandyTestCell from '../AccountCandyTestCell.vue'
 import PelicanHTMLThumbnail from '../PelicanHTMLThumbnail.vue'
 import { createPelicanThumbnailLayout, pelicanThumbnailLayoutKey } from '../pelicanThumbnailLayout'
+import { formatDateTime } from '@/utils/format'
 import type { Account } from '@/types'
 import type { CandyTestItem } from '@/api/admin/candyTests'
 
@@ -53,7 +54,7 @@ describe('account row pelican preview', () => {
     const { wrapper, dispose } = mountCell(latest)
     await flushPromises()
     expect(api.history).not.toHaveBeenCalled()
-    expect(wrapper.get('[data-testid="pelican-cell"]').element.style.height).toBe('128px')
+    expect(wrapper.get('[data-testid="pelican-cell"]').element.style.height).toBe('148px')
     expect(wrapper.get('[data-testid="pelican-cell-content"]').classes()).toContain('absolute')
     setVisible(true)
     await flushPromises()
@@ -67,7 +68,7 @@ describe('account row pelican preview', () => {
     expect(frame.element.style.width).toBe('960px')
     expect(frame.element.style.height).toBe('600px')
     expect(frame.element.style.left).toBe('24px')
-    expect(wrapper.get('[data-testid="pelican-cell-content"]').element.style.height).toBe('120px')
+    expect(wrapper.get('[data-testid="pelican-cell-content"]').element.style.height).toBe('140px')
     height = 60
     resize([], {} as ResizeObserver)
     await flushPromises()
@@ -126,7 +127,7 @@ describe('account row pelican preview', () => {
     expect(tallFrame.style.transform).toBe(shortFrame.style.transform)
     expect(shortFrame.style.top).toBe('0px')
     expect(tallFrame.style.top).toBe('0px')
-    expect(short.wrapper.get('[data-testid="pelican-cell"]').element.style.height).toBe('188px')
+    expect(short.wrapper.get('[data-testid="pelican-cell"]').element.style.height).toBe('208px')
     expect(short.wrapper.get('[data-testid="pelican-cell"]').element.style.width).toBe('288px')
     expect(otherList.wrapper.get('iframe').element.style.transform).toBe(`scale(${80 / 600})`)
 
@@ -136,7 +137,7 @@ describe('account row pelican preview', () => {
     expect(shortFrame.style.transform).toBe('scale(0.3)')
     expect(tallFrame.style.transform).toBe(shortFrame.style.transform)
     expect(tallFrame.style.top).toBe('0px')
-    expect(tall.wrapper.get('[data-testid="pelican-cell-content"]').element.style.height).toBe('180px')
+    expect(tall.wrapper.get('[data-testid="pelican-cell-content"]').element.style.height).toBe('200px')
     expect(short.wrapper.get('iframe').element).toBe(shortFrame)
     expect(tall.wrapper.get('iframe').element).toBe(tallFrame)
 
@@ -145,7 +146,7 @@ describe('account row pelican preview', () => {
     await flushPromises()
     expect(tallFrame.style.transform).toBe(`scale(${100 / 600})`)
     expect(shortFrame.style.transform).toBe(tallFrame.style.transform)
-    expect(short.wrapper.get('[data-testid="pelican-cell"]').element.style.height).toBe('108px')
+    expect(short.wrapper.get('[data-testid="pelican-cell"]').element.style.height).toBe('128px')
     tall.dispose()
     await flushPromises()
     expect(shortFrame.style.transform).toBe('scale(0.1)')
@@ -192,6 +193,41 @@ describe('account row pelican preview', () => {
     dispose()
   })
 
+  it('keeps the last completed time and animation while the next test queues and runs', async () => {
+    const latest = { ...result(206), html: source }
+    const { wrapper, dispose } = mountCell(latest)
+    setVisible(true)
+    await flushPromises()
+    const frame = wrapper.get('iframe').element
+    for (const status of ['queued', 'running'] as const) {
+      const active = { ...result(207, status), created_at: '2026-09-30T01:00:00Z', started_at: status === 'running' ? '2026-09-30T01:01:00Z' : null, finished_at: null }
+      await wrapper.setProps({ account: { ...account(latest), candy_test: { latest, active } } })
+      await flushPromises()
+      expect(wrapper.text()).toContain(`candyTests.${status}`)
+      expect(wrapper.get('time').attributes('datetime')).toBe(latest.finished_at)
+      expect(wrapper.get('time').text()).toBe(formatDateTime(latest.finished_at))
+      expect(wrapper.get('iframe').element).toBe(frame)
+    }
+    const completed = { ...result(207), html: source, finished_at: '2026-09-30T01:05:00Z' }
+    await wrapper.setProps({ account: account(completed) })
+    await flushPromises()
+    expect(wrapper.get('time').attributes('datetime')).toBe(completed.finished_at)
+    expect(wrapper.text()).not.toContain('candyTests.running')
+    dispose()
+  })
+
+  it('does not invent a last test time for an account with only a queued test', async () => {
+    const active = { ...result(208, 'queued'), finished_at: null }
+    const { wrapper, dispose } = mountCell(active)
+    await wrapper.setProps({ account: { ...account(active), candy_test: { active } } })
+    setVisible(true)
+    await flushPromises()
+    expect(wrapper.text()).toContain('candyTests.queued')
+    expect(wrapper.find('time').exists()).toBe(false)
+    expect(api.history).not.toHaveBeenCalled()
+    dispose()
+  })
+
   it('never falls back to an older HTML when history is newer than the summary', async () => {
     api.history.mockResolvedValue({ items: [result(107, 'abnormal'), { ...result(106), html: source }] })
     const { wrapper, dispose } = mountCell(result(106))
@@ -208,6 +244,7 @@ describe('account row pelican preview', () => {
     await flushPromises()
     expect(api.history).not.toHaveBeenCalled()
     expect(wrapper.find('iframe').exists()).toBe(false)
+    expect(wrapper.get('time').attributes('datetime')).toBe(result(108, status).finished_at)
     dispose()
   })
 
