@@ -114,8 +114,8 @@ export const candyTestsAPI = {
   async cancel(id: string, itemIds?: number[]): Promise<void> {
     await apiClient.post(`/admin/accounts/candy-tests/${encodeURIComponent(id)}/cancel`, itemIds ? { item_ids: itemIds } : {})
   },
-  async history(accountId: number): Promise<CandyTestHistory> {
-    const { data } = await apiClient.get<CandyTestHistory>(`/admin/accounts/${accountId}/candy-tests`)
+  async history(accountId: number, signal?: AbortSignal): Promise<CandyTestHistory> {
+    const { data } = await apiClient.get<CandyTestHistory>(`/admin/accounts/${accountId}/candy-tests`, { signal })
     return data
   },
 }
