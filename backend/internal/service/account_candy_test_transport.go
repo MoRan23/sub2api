@@ -120,7 +120,7 @@ func (r *AccountCandyTestTransport) Execute(parent context.Context, item *CandyT
 	session := uuid.NewString()
 	payload := map[string]any{
 		"model": item.Model, "stream": true, "store": false,
-		"instructions":     "仅按用户题目独立推理，不联网、不运行代码、不调用工具。",
+		"instructions":     pelicanTestInstructions,
 		"input":            []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": CandyTestPrompt}}}},
 		"prompt_cache_key": session,
 	}

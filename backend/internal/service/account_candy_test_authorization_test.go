@@ -37,7 +37,7 @@ func (r *candyAuthorizationResponseReader) Read(p []byte) (int, error) {
 	return r.Reader.Read(p)
 }
 
-const candyAuthorizationCompletedResponse = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"response_synthetic\",\"model\":\"gpt-5.5\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"|问题|最少数量|\\n|第1问|32|\\n|第2问|29|\\n|第3问固定|40|\\n|第3问自适应|38|\"}]}]}}\n\n"
+const candyAuthorizationCompletedResponse = "data: {\"type\": \"response.completed\", \"response\": {\"id\": \"response_synthetic\", \"model\": \"gpt-5.5\", \"status\": \"completed\", \"output\": [{\"type\": \"message\", \"role\": \"assistant\", \"content\": [{\"type\": \"output_text\", \"text\": \"<html><body><svg></svg></body></html>\"}]}]}}\n\n"
 
 func TestCandyCompletedResponseSurvivesAuthorizationMonitorCancellation(t *testing.T) {
 	account := newOpenAIRejectedFieldTestAccount()
@@ -75,9 +75,9 @@ func TestCandyCompletedResponseSurvivesAuthorizationMonitorCancellation(t *testi
 	require.NotNil(t, result)
 	require.True(t, result.Completed)
 	require.NoError(t, err, "stopping the monitor after completion is not an authorization change")
-	counts, gradeErr := GradeCandyAnswer(result.ResponseText)
-	require.NoError(t, gradeErr)
-	require.Equal(t, ExpectedCandyAnswerCounts(), counts)
+	document, extractErr := ExtractPelicanHTML(result.ResponseText)
+	require.NoError(t, extractErr)
+	require.Equal(t, "<html><body><svg></svg></body></html>", document)
 	require.Len(t, upstream.bodies, 1)
 }
 

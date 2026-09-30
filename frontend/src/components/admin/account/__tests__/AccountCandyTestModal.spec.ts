@@ -22,10 +22,14 @@ vi.mock('@/api/admin/candyTests', async () => ({
 }))
 
 function item(overrides: Partial<CandyTestItem> = {}): CandyTestItem {
-  return { id: 1, batch_id: 'batch-a', account_id: 42, account_name: 'OpenAI account', model: 'gpt-6-astra', reasoning_effort: 'high', prompt_version: '1', status: 'running', created_at: '2026-09-28T10:00:00Z', started_at: '2026-09-28T10:00:01Z', finished_at: null, cancel_requested: false, ...overrides }
+  return { id: 1, batch_id: 'batch-a', account_id: 42, account_name: 'OpenAI account', model: 'gpt-6-astra', reasoning_effort: 'high', prompt_version: 'pelican-v1', status: 'running', created_at: '2026-09-28T10:00:00Z', started_at: '2026-09-28T10:00:01Z', finished_at: null, cancel_requested: false, ...overrides }
 }
 function batch(overrides: Partial<CandyTestBatch> = {}): CandyTestBatch {
-  return { id: 'batch-a', model: 'gpt-6-astra', reasoning_effort: 'high', prompt_version: '1', created_at: '2026-09-28T10:00:00Z', finished_at: null, total: 1, retained_total: 1, counts: { running: 1 }, items: [item()], page: 1, page_size: 20, ...overrides }
+  return { id: 'batch-a', model: 'gpt-6-astra', reasoning_effort: 'high', prompt_version: 'pelican-v1', created_at: '2026-09-28T10:00:00Z', finished_at: null, total: 1, retained_total: 1, counts: { running: 1 }, items: [item()], page: 1, page_size: 20, ...overrides }
+}
+const html = '<html><body><svg><circle r="12" /></svg><script>requestAnimationFrame(() => {})</script></body></html>'
+function generated(id = 1, accountId = 42): CandyTestItem {
+  return item({ id, account_id: accountId, status: 'generated', html, response_text: html, finished_at: '2026-09-28T10:01:00Z' })
 }
 function mountModal(ids = [42]) {
   return mount(AccountCandyTestModal, {
@@ -205,14 +209,14 @@ describe('Account candy tests', () => {
   })
 
   it('keeps latest terminal result visible while another test is running', () => {
-    const wrapper = mount(AccountCandyTestCell, { props: { account: { id: 42, platform: 'openai', candy_test: { latest: item({ status: 'normal', finished_at: '2026-09-28T10:01:00Z' }), active: item({ id: 2, status: 'running' }) } } as Account } })
-    expect(wrapper.text()).toContain('Normal')
+    const wrapper = mount(AccountCandyTestCell, { props: { account: { id: 42, platform: 'openai', candy_test: { latest: item({ status: 'generated', finished_at: '2026-09-28T10:01:00Z' }), active: item({ id: 2, status: 'running' }) } } as Account } })
+    expect(wrapper.text()).toContain('Generated')
     expect(wrapper.text()).toContain('Testing')
     wrapper.unmount()
   })
 
   it('uses retained item count for completed batch pagination', async () => {
-    api.create.mockResolvedValue(batch({ total: 50, retained_total: 2, counts: { normal: 50 }, items: [item({ status: 'normal' })], finished_at: '2026-09-28T10:01:00Z' }))
+    api.create.mockResolvedValue(batch({ total: 50, retained_total: 2, counts: { generated: 50 }, items: [item({ status: 'generated' })], finished_at: '2026-09-28T10:01:00Z' }))
     const wrapper = mountModal()
     await wrapper.setProps({ show: true })
     await flushPromises()
@@ -243,26 +247,134 @@ describe('Account candy tests', () => {
 
   it('shows completed unresolved answers as abnormal and keeps the reason and original answer', () => {
     const answer = '|问题|最少数量|\n|第1问|未确定|\n|第2问|不知道|\n|第3问固定|待定|\n|第3问自适应|无法判断|'
-    const wrapper = mount(AccountCandyTestResult, { props: { item: item({ status: 'abnormal', failure_code: 'invalid_answer_format', answers: {}, response_text: answer }) } })
+    const wrapper = mount(AccountCandyTestResult, { props: { item: item({ status: 'abnormal', failure_code: 'missing_html', answers: {}, response_text: answer }) } })
     expect(wrapper.text()).toContain('Abnormal')
     expect(wrapper.text()).not.toContain('Test failed')
-    expect(wrapper.get('[role="status"]').text()).toContain('could not be uniquely extracted')
+    expect(wrapper.get('[role="status"]').text()).toContain('does not contain a complete HTML document')
     expect(wrapper.get('pre').text()).toBe(answer)
-    expect(wrapper.findAll('tbody tr')).toHaveLength(4)
-    for (const row of wrapper.findAll('tbody tr')) {
-      expect(row.findAll('td')[1]?.text()).toBe('—')
-    }
+    expect(wrapper.find('table').exists()).toBe(false)
     wrapper.unmount()
   })
 
-  it('renders the raw answer as text, shows all four counts and keeps server grade', () => {
+  it('renders the raw answer as text without executing it or showing the old answer table', () => {
     const wrapper = mount(AccountCandyTestResult, { props: { item: item({ status: 'failed', failure_code: 'missing_terminal', answers: { q1_fixed: 32, q2_adaptive: 29, q3_fixed: 40, q3_adaptive: 38 }, response_text: '<img src=x onerror="alert(1)">' }) } })
     expect(wrapper.find('img').exists()).toBe(false)
     expect(wrapper.get('pre').text()).toContain('<img')
     expect(wrapper.text()).toContain('Test failed')
-    expect(wrapper.text()).not.toContain('Normal')
-    expect(wrapper.findAll('tbody tr')).toHaveLength(4)
+    expect(wrapper.text()).not.toContain('Generated')
+    expect(wrapper.find('table').exists()).toBe(false)
     expect(wrapper.text()).toContain('without a successful completion event')
+    wrapper.unmount()
+  })
+
+  it('opens the latest animation before the model catalog resolves, with history folded', async () => {
+    api.options.mockImplementationOnce(() => new Promise(() => {}))
+    api.history.mockResolvedValue({ items: [generated(2), generated(1)] })
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.findAll('iframe')).toHaveLength(1)
+    expect(wrapper.findAllComponents(AccountCandyTestResult)).toHaveLength(1)
+    expect(wrapper.getComponent(AccountCandyTestResult).props('item').id).toBe(2)
+    expect(wrapper.get('[data-testid="pelican-history"]').attributes('open')).toBeUndefined()
+    await wrapper.setProps({ show: false })
+    expect(wrapper.find('iframe').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each(['failed', 'abnormal'] as const)('shows the latest %s reason without falling back to a generated result', async (status) => {
+    api.history.mockResolvedValue({ items: [item({ id: 2, status, failure_code: 'missing_html' }), generated()] })
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.getComponent(AccountCandyTestResult).props('item').id).toBe(2)
+    expect(wrapper.find('iframe').exists()).toBe(false)
+    expect(wrapper.text()).toContain('does not contain a complete HTML document')
+    wrapper.unmount()
+  })
+
+  it('follows new results but preserves manual history selection and iframe identity during polling', async () => {
+    api.history.mockResolvedValue({ items: [generated(2), generated(1)] })
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    const frame = wrapper.get('iframe').element
+    const changes = vi.fn()
+    const observer = new MutationObserver(changes)
+    observer.observe(frame, { attributes: true, attributeFilter: ['srcdoc'] })
+    api.history.mockResolvedValue({ items: [{ ...generated(2) }, generated(1)] })
+    await vi.advanceTimersByTimeAsync(5000)
+    await flushPromises()
+    expect(wrapper.get('iframe').element).toBe(frame)
+    expect(changes).not.toHaveBeenCalled()
+    observer.disconnect()
+    api.history.mockResolvedValue({ items: [generated(3), generated(2), generated(1)] })
+    await vi.advanceTimersByTimeAsync(5000)
+    await flushPromises()
+    expect(wrapper.getComponent(AccountCandyTestResult).props('item').id).toBe(3)
+    await wrapper.get('[data-testid="pelican-history-1"]').trigger('click')
+    const oldFrame = wrapper.get('iframe').element
+    api.history.mockResolvedValue({ items: [generated(4), generated(3), generated(2)] })
+    await vi.advanceTimersByTimeAsync(5000)
+    await flushPromises()
+    expect(wrapper.getComponent(AccountCandyTestResult).props('item').id).toBe(1)
+    expect(wrapper.get('iframe').element).toBe(oldFrame)
+    await wrapper.get('[data-testid="pelican-return-latest"]').trigger('click')
+    expect(wrapper.getComponent(AccountCandyTestResult).props('item').id).toBe(4)
+    wrapper.unmount()
+  })
+
+  it('defaults to the first account and selects the switched account latest result, ignoring stale reads', async () => {
+    api.history.mockResolvedValueOnce({ items: [generated(1, 42), generated(2, 42)] })
+    const wrapper = mountModal([42, 99])
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(api.history).toHaveBeenCalledWith(42)
+    await wrapper.get('[data-testid="pelican-history-2"]').trigger('click')
+    let resolveOld!: (value: unknown) => void
+    api.history.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+    await wrapper.get('select[aria-label="Account history"]').setValue(99)
+    expect(wrapper.find('iframe').exists()).toBe(false)
+    api.history.mockResolvedValueOnce({ items: [generated(3, 42)] })
+    await wrapper.get('select[aria-label="Account history"]').setValue(42)
+    await flushPromises()
+    resolveOld({ items: [generated(9, 99)] })
+    await flushPromises()
+    expect(wrapper.getComponent(AccountCandyTestResult).props('item').id).toBe(3)
+    api.history.mockResolvedValueOnce({ items: [generated(10, 99)] })
+    await wrapper.get('select[aria-label="Account history"]').setValue(99)
+    await flushPromises()
+    expect(wrapper.getComponent(AccountCandyTestResult).props('item').id).toBe(10)
+    expect(wrapper.find('[data-testid="pelican-return-latest"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('refreshes history after the final batch poll', async () => {
+    api.history.mockResolvedValue({ items: [], summary: { active: item() } })
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    api.getBatch.mockImplementationOnce(async () => {
+      api.history.mockResolvedValue({ items: [generated()] })
+      return batch({ items: [generated()], counts: { generated: 1 }, finished_at: '2026-09-28T10:01:00Z' })
+    })
+    await vi.advanceTimersByTimeAsync(5000)
+    await flushPromises()
+    expect(wrapper.find('iframe').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('does not expose old puzzle history or summaries', async () => {
+    const old = item({ status: 'abnormal', prompt_version: 'candy-v1' })
+    api.history.mockResolvedValue({ items: [old], summary: { active: old } })
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.findComponent(AccountCandyTestResult).exists()).toBe(false)
+    expect(api.getBatch).not.toHaveBeenCalled()
+    const cell = mount(AccountCandyTestCell, { props: { account: { platform: 'openai', candy_test: { latest: old } } as Account } })
+    expect(cell.text()).toContain('Not tested')
+    cell.unmount()
     wrapper.unmount()
   })
 })

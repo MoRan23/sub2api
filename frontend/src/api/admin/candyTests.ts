@@ -1,6 +1,8 @@
 import { apiClient } from '../client'
 
-export type CandyTestStatus = 'queued' | 'running' | 'normal' | 'abnormal' | 'failed' | 'cancelled' | 'skipped'
+export const PELICAN_TEST_PROMPT_VERSION = 'pelican-v1'
+
+export type CandyTestStatus = 'queued' | 'running' | 'generated' | 'abnormal' | 'failed' | 'cancelled' | 'skipped'
 export type CandyTestAnswerKey = 'q1_fixed' | 'q2_adaptive' | 'q3_fixed' | 'q3_adaptive'
 
 export interface CandyTestModelOption {
@@ -49,6 +51,7 @@ export interface CandyTestItem {
   status: CandyTestStatus
   answers?: Partial<Record<CandyTestAnswerKey, number>>
   response_text?: string
+  html?: string
   failure_code?: string
   execution?: CandyTestExecution
   created_at: string

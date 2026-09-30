@@ -82,7 +82,7 @@ func TestCandyRepositoryGlobalCapacityAndAccountSerialization(t *testing.T) {
 	owned, err := repo.Heartbeat(ctx, claimed[0].ID, uuid.NewString())
 	require.NoError(t, err)
 	require.False(t, owned)
-	claimed[0].Status = "normal"
+	claimed[0].Status = "generated"
 	claimed[0].Answers = map[string]int{"q1_fixed": 32}
 	ok, err := repo.Complete(ctx, claimed[0])
 	require.NoError(t, err)
@@ -149,7 +149,7 @@ func TestCandyRepositoryCancellationLeaseExpiryAndLateCompletion(t *testing.T) {
 	owned, err := repo.Heartbeat(ctx, item.ID, item.ClaimID)
 	require.NoError(t, err)
 	require.False(t, owned)
-	item.Status = "normal"
+	item.Status = "generated"
 	ok, err := repo.Complete(ctx, item)
 	require.NoError(t, err)
 	require.True(t, ok)
@@ -165,7 +165,7 @@ func TestCandyRepositoryCancellationLeaseExpiryAndLateCompletion(t *testing.T) {
 	owned, err = repo.Heartbeat(ctx, item.ID, item.ClaimID)
 	require.NoError(t, err)
 	require.False(t, owned)
-	item.Status = "normal"
+	item.Status = "generated"
 	ok, err = repo.Complete(ctx, item)
 	require.NoError(t, err)
 	require.False(t, ok)
@@ -212,14 +212,15 @@ func TestCandyRepositoryIdempotencyAndFiveResultRetention(t *testing.T) {
 		item, claimErr := repo.Claim(ctx)
 		require.NoError(t, claimErr)
 		require.NotNil(t, item)
-		item.Status = "normal"
-		item.ResponseText = "final answer fixture"
+		item.Status = "generated"
+		item.ResponseText = "<html><body><svg></svg></body></html>"
 		_, err = repo.Complete(ctx, item)
 		require.NoError(t, err)
 	}
 	history, err := repo.History(ctx, id)
 	require.NoError(t, err)
 	require.Len(t, history, 5)
+	require.Equal(t, "<html><body><svg></svg></body></html>", history[0].HTML)
 	var n int
 	err = integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM account_candy_test_items WHERE account_id=$1`, id).Scan(&n)
 	require.NoError(t, err)
@@ -230,6 +231,7 @@ func TestCandyRepositoryIdempotencyAndFiveResultRetention(t *testing.T) {
 	require.NotNil(t, summary[id].Latest)
 	require.NotNil(t, summary[id].Active)
 	require.Empty(t, summary[id].Latest.ResponseText)
+	require.Empty(t, summary[id].Latest.HTML)
 	require.WithinDuration(t, time.Now(), summary[id].Latest.FinishedAt.UTC(), time.Minute)
 }
 
@@ -241,7 +243,7 @@ func TestCandyRepositoryTimeoutWinsOverSuccess(t *testing.T) {
 	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE account_candy_test_items SET started_at=NOW()-INTERVAL '31 minutes',lease_until=NOW()+INTERVAL '30 seconds' WHERE id=$1`, item.ID)
 	require.NoError(t, err)
-	item.Status = "normal"
+	item.Status = "generated"
 	item.Answers = map[string]int{"q1_fixed": 32}
 	ok, err := repo.Complete(ctx, item)
 	require.NoError(t, err)
@@ -260,7 +262,7 @@ func TestCandyRepositoryKeepsResultsUntilWholeBatchFinishes(t *testing.T) {
 	batch := candyIntegrationBatch(t, repo, firstID, heldID)
 	first, err := repo.Claim(ctx)
 	require.NoError(t, err)
-	first.Status = "normal"
+	first.Status = "generated"
 	_, err = repo.Complete(ctx, first)
 	require.NoError(t, err)
 	held, err := repo.Claim(ctx)
@@ -270,7 +272,7 @@ func TestCandyRepositoryKeepsResultsUntilWholeBatchFinishes(t *testing.T) {
 		candyIntegrationBatch(t, repo, firstID)
 		item, claimErr := repo.Claim(ctx)
 		require.NoError(t, claimErr)
-		item.Status = "normal"
+		item.Status = "generated"
 		_, err = repo.Complete(ctx, item)
 		require.NoError(t, err)
 	}
@@ -278,12 +280,12 @@ func TestCandyRepositoryKeepsResultsUntilWholeBatchFinishes(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, active.Items, 2, "an unfinished batch keeps its completed items")
 	require.Nil(t, active.FinishedAt)
-	held.Status = "normal"
+	held.Status = "generated"
 	_, err = repo.Complete(ctx, held)
 	require.NoError(t, err)
 	finished, err := repo.GetBatch(ctx, batch.ID, 1, 50)
 	require.NoError(t, err)
 	require.Equal(t, 2, finished.Total)
-	require.Equal(t, 2, finished.Counts["normal"], "original aggregate remains frozen after pruning")
+	require.Equal(t, 2, finished.Counts["generated"], "original aggregate remains frozen after pruning")
 	require.Equal(t, 1, finished.RetainedTotal)
 }

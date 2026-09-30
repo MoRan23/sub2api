@@ -149,6 +149,7 @@ func TestCandyTransportPreservesSelectedUpstreamModelAndObservesRawModel(t *test
 	require.False(t, gjson.GetBytes(upstream.bodies[0], "tools").Exists())
 	require.False(t, gjson.GetBytes(upstream.bodies[0], "previous_response_id").Exists())
 	require.Equal(t, CandyTestPrompt, gjson.GetBytes(upstream.bodies[0], "input.0.content.0.text").String())
+	require.Equal(t, pelicanTestInstructions, gjson.GetBytes(upstream.bodies[0], "instructions").String())
 }
 
 func TestCandyTokenExpiredDoesNotSuspend(t *testing.T) {

@@ -18,6 +18,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
+import { PELICAN_TEST_PROMPT_VERSION } from '@/api/admin/candyTests'
 import type { CandyTestSummary } from '@/api/admin/candyTests'
 import { formatDateTime } from '@/utils/format'
 import AccountCandyTestStatus from './AccountCandyTestStatus.vue'
@@ -25,5 +26,8 @@ import AccountCandyTestStatus from './AccountCandyTestStatus.vue'
 const props = defineProps<{ account: Account & { candy_test?: CandyTestSummary | null } }>()
 const emit = defineEmits<{ (event: 'open'): void }>()
 const { t } = useI18n()
-const summary = computed(() => props.account.candy_test)
+const summary = computed(() => ({
+  latest: props.account.candy_test?.latest?.prompt_version === PELICAN_TEST_PROMPT_VERSION ? props.account.candy_test.latest : undefined,
+  active: props.account.candy_test?.active?.prompt_version === PELICAN_TEST_PROMPT_VERSION ? props.account.candy_test.active : undefined,
+}))
 </script>

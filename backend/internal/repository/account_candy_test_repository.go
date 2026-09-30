@@ -39,10 +39,11 @@ func (r *accountCandyTestRepository) Create(ctx context.Context, request *servic
 	}
 	defer func() { _ = tx.Rollback() }()
 	snapshot, err := json.Marshal(struct {
-		AccountIDs []int64 `json:"account_ids"`
-		Model      string  `json:"model"`
-		Effort     string  `json:"reasoning_effort"`
-	}{request.AccountIDs, request.Model, request.ReasoningEffort})
+		AccountIDs    []int64 `json:"account_ids"`
+		Model         string  `json:"model"`
+		Effort        string  `json:"reasoning_effort"`
+		PromptVersion string  `json:"prompt_version"`
+	}{request.AccountIDs, request.Model, request.ReasoningEffort, service.CandyTestPromptVersion})
 	if err != nil {
 		return nil, err
 	}
@@ -97,6 +98,9 @@ func scanCandyItem(row scannable) (*service.CandyTestItem, error) {
 			return nil, err
 		}
 	}
+	if i.PromptVersion == service.CandyTestPromptVersion && i.Status == "generated" && i.ResponseText != "" {
+		i.HTML, _ = service.ExtractPelicanHTML(i.ResponseText)
+	}
 	return i, nil
 }
 
@@ -124,7 +128,7 @@ func (r *accountCandyTestRepository) GetBatch(ctx context.Context, id string, pa
 	}
 	b := &service.CandyTestBatch{Page: page, PageSize: size}
 	var counts []byte
-	err := r.db.QueryRowContext(ctx, `SELECT id::text,model,reasoning_effort,prompt_version,created_at,finished_at,total,counts FROM account_candy_test_batches WHERE id=$1`, id).Scan(&b.ID, &b.Model, &b.ReasoningEffort, &b.PromptVersion, &b.CreatedAt, &b.FinishedAt, &b.Total, &counts)
+	err := r.db.QueryRowContext(ctx, `SELECT id::text,model,reasoning_effort,prompt_version,created_at,finished_at,total,counts FROM account_candy_test_batches WHERE id=$1 AND prompt_version=$2`, id, service.CandyTestPromptVersion).Scan(&b.ID, &b.Model, &b.ReasoningEffort, &b.PromptVersion, &b.CreatedAt, &b.FinishedAt, &b.Total, &counts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrCandyTestNotFound
 	}
@@ -152,7 +156,7 @@ func (r *accountCandyTestRepository) Claim(ctx context.Context) (*service.CandyT
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	_, err = tx.ExecContext(ctx, `UPDATE account_candy_test_items SET status=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END,failure_code=CASE WHEN cancel_requested THEN 'cancelled' WHEN started_at + INTERVAL '30 minutes' <= NOW() THEN 'timeout' ELSE 'execution_interrupted' END,finished_at=NOW(),claim_id=NULL,lease_until=NULL WHERE status='running' AND (lease_until<=NOW() OR started_at+INTERVAL '30 minutes'<=NOW())`)
+	_, err = tx.ExecContext(ctx, `UPDATE account_candy_test_items SET status=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END,failure_code=CASE WHEN cancel_requested THEN 'cancelled' WHEN started_at + INTERVAL '30 minutes' <= NOW() THEN 'timeout' ELSE 'execution_interrupted' END,finished_at=NOW(),claim_id=NULL,lease_until=NULL WHERE prompt_version=$1 AND status='running' AND (lease_until<=NOW() OR started_at+INTERVAL '30 minutes'<=NOW())`, service.CandyTestPromptVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +171,7 @@ func (r *accountCandyTestRepository) Claim(ctx context.Context) (*service.CandyT
 		return nil, tx.Commit()
 	}
 	var id int64
-	err = tx.QueryRowContext(ctx, `SELECT i.id FROM account_candy_test_items i WHERE i.status='queued' AND NOT EXISTS(SELECT 1 FROM account_candy_test_items active WHERE active.account_id=i.account_id AND active.status='running') ORDER BY i.id LIMIT 1 FOR UPDATE OF i SKIP LOCKED`).Scan(&id)
+	err = tx.QueryRowContext(ctx, `SELECT i.id FROM account_candy_test_items i WHERE i.prompt_version=$1 AND i.status='queued' AND NOT EXISTS(SELECT 1 FROM account_candy_test_items active WHERE active.account_id=i.account_id AND active.status='running') ORDER BY i.id LIMIT 1 FOR UPDATE OF i SKIP LOCKED`, service.CandyTestPromptVersion).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, tx.Commit()
 	}
@@ -198,7 +202,7 @@ func (r *accountCandyTestRepository) Heartbeat(ctx context.Context, id int64, cl
 
 func (r *accountCandyTestRepository) Complete(ctx context.Context, item *service.CandyTestItem) (bool, error) {
 	switch item.Status {
-	case "normal", "abnormal", "failed", "cancelled":
+	case "generated", "abnormal", "failed", "cancelled":
 	default:
 		return false, service.ErrCandyTestInvalidRequest
 	}
@@ -218,7 +222,7 @@ func (r *accountCandyTestRepository) Complete(ctx context.Context, item *service
 	if err != nil {
 		return false, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE account_candy_test_items SET status=CASE WHEN cancel_requested THEN 'cancelled' WHEN started_at+INTERVAL '30 minutes'<=NOW() THEN 'failed' ELSE $3 END, failure_code=CASE WHEN cancel_requested THEN 'cancelled' WHEN started_at+INTERVAL '30 minutes'<=NOW() THEN 'timeout' ELSE $4 END,answers=CASE WHEN cancel_requested OR started_at+INTERVAL '30 minutes'<=NOW() THEN '{}'::jsonb ELSE $5::jsonb END,response_text=$6,execution=$7,finished_at=NOW(),claim_id=NULL,lease_until=NULL WHERE id=$1 AND claim_id=$2 AND status='running' AND lease_until>NOW()`, item.ID, item.ClaimID, item.Status, item.FailureCode, answers, item.ResponseText, execution)
+	result, err := tx.ExecContext(ctx, `UPDATE account_candy_test_items SET status=CASE WHEN cancel_requested THEN 'cancelled' WHEN started_at+INTERVAL '30 minutes'<=NOW() THEN 'failed' ELSE $3 END, failure_code=CASE WHEN cancel_requested THEN 'cancelled' WHEN started_at+INTERVAL '30 minutes'<=NOW() THEN 'timeout' ELSE $4 END,answers=CASE WHEN cancel_requested OR started_at+INTERVAL '30 minutes'<=NOW() THEN '{}'::jsonb ELSE $5::jsonb END,response_text=$6,execution=$7,finished_at=NOW(),claim_id=NULL,lease_until=NULL WHERE id=$1 AND claim_id=$2 AND status='running' AND lease_until>NOW() AND prompt_version=$8`, item.ID, item.ClaimID, item.Status, item.FailureCode, answers, item.ResponseText, execution, service.CandyTestPromptVersion)
 	if err != nil {
 		return false, err
 	}
@@ -245,7 +249,7 @@ func (r *accountCandyTestRepository) Cancel(ctx context.Context, id string, item
 	}
 	defer func() { _ = tx.Rollback() }()
 	var exists bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM account_candy_test_batches WHERE id=$1)`, id).Scan(&exists); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM account_candy_test_batches WHERE id=$1 AND prompt_version=$2)`, id, service.CandyTestPromptVersion).Scan(&exists); err != nil {
 		return err
 	}
 	if !exists {
@@ -267,7 +271,7 @@ func (r *accountCandyTestRepository) Cancel(ctx context.Context, id string, item
 }
 
 func (r *accountCandyTestRepository) History(ctx context.Context, accountID int64) ([]*service.CandyTestItem, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT `+candyItemColumns+` FROM account_candy_test_items WHERE account_id=$1 AND status NOT IN ('queued','running') ORDER BY finished_at DESC,id DESC LIMIT 5`, accountID)
+	rows, err := r.db.QueryContext(ctx, `SELECT `+candyItemColumns+` FROM account_candy_test_items WHERE account_id=$1 AND prompt_version=$2 AND status NOT IN ('queued','running') ORDER BY finished_at DESC,id DESC LIMIT 5`, accountID, service.CandyTestPromptVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -280,10 +284,10 @@ func (r *accountCandyTestRepository) Summaries(ctx context.Context, ids []int64)
 	if len(ids) == 0 {
 		return result, nil
 	}
-	args := make([]any, 0, len(ids))
+	args := []any{service.CandyTestPromptVersion}
 	placeholders := candyPlaceholders(&args, ids)
 	// Rank before selecting the text column: account lists never load raw answers.
-	rows, err := r.db.QueryContext(ctx, `SELECT id,batch_id::text,account_id,account_name,model,reasoning_effort,prompt_version,status,'{}'::jsonb,''::text,failure_code,execution,created_at,started_at,finished_at,cancel_requested,''::text,NULL::timestamptz FROM (SELECT i.*,ROW_NUMBER() OVER(PARTITION BY account_id,(status IN ('queued','running')) ORDER BY (status='running') DESC,COALESCE(finished_at,created_at) DESC,id DESC) AS rn FROM account_candy_test_items i WHERE account_id IN (`+placeholders+`)) ranked WHERE rn=1`, args...)
+	rows, err := r.db.QueryContext(ctx, `SELECT id,batch_id::text,account_id,account_name,model,reasoning_effort,prompt_version,status,'{}'::jsonb,''::text,failure_code,execution,created_at,started_at,finished_at,cancel_requested,''::text,NULL::timestamptz FROM (SELECT i.*,ROW_NUMBER() OVER(PARTITION BY account_id,(status IN ('queued','running')) ORDER BY (status='running') DESC,COALESCE(finished_at,created_at) DESC,id DESC) AS rn FROM account_candy_test_items i WHERE prompt_version=$1 AND account_id IN (`+placeholders+`)) ranked WHERE rn=1`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +323,7 @@ func candyPlaceholders(args *[]any, ids []int64) string {
 // Final batch counts are frozen before history pruning. Running batches retain
 // all their items so a result cannot disappear while another account is pending.
 func maintainCandyBatches(ctx context.Context, tx *sql.Tx) error {
-	rows, err := tx.QueryContext(ctx, `UPDATE account_candy_test_batches b SET counts=q.counts,finished_at=CASE WHEN q.active=0 THEN NOW() ELSE NULL END FROM (SELECT batch_id,jsonb_object_agg(status,n) AS counts,SUM(CASE WHEN status IN ('queued','running') THEN n ELSE 0 END) AS active FROM (SELECT i.batch_id,i.status,count(*) AS n FROM account_candy_test_items i JOIN account_candy_test_batches pending ON pending.id=i.batch_id WHERE pending.finished_at IS NULL GROUP BY i.batch_id,i.status) grouped GROUP BY batch_id) q WHERE b.id=q.batch_id AND b.finished_at IS NULL AND (b.counts IS DISTINCT FROM q.counts OR q.active=0) RETURNING b.finished_at IS NOT NULL`)
+	rows, err := tx.QueryContext(ctx, `UPDATE account_candy_test_batches b SET counts=q.counts,finished_at=CASE WHEN q.active=0 THEN NOW() ELSE NULL END FROM (SELECT batch_id,jsonb_object_agg(status,n) AS counts,SUM(CASE WHEN status IN ('queued','running') THEN n ELSE 0 END) AS active FROM (SELECT i.batch_id,i.status,count(*) AS n FROM account_candy_test_items i JOIN account_candy_test_batches pending ON pending.id=i.batch_id WHERE pending.finished_at IS NULL AND pending.prompt_version=$1 GROUP BY i.batch_id,i.status) grouped GROUP BY batch_id) q WHERE b.id=q.batch_id AND b.finished_at IS NULL AND (b.counts IS DISTINCT FROM q.counts OR q.active=0) RETURNING b.finished_at IS NOT NULL`, service.CandyTestPromptVersion)
 	if err != nil {
 		return err
 	}
@@ -337,10 +341,10 @@ func maintainCandyBatches(ctx context.Context, tx *sql.Tx) error {
 	if err != nil || !closedBatch {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `DELETE FROM account_candy_test_items WHERE id IN (SELECT id FROM (SELECT i.id,b.finished_at,ROW_NUMBER() OVER(PARTITION BY i.account_id ORDER BY i.finished_at DESC,i.id DESC) AS rn FROM account_candy_test_items i JOIN account_candy_test_batches b ON b.id=i.batch_id WHERE i.status NOT IN ('queued','running')) ranked WHERE rn>5 AND finished_at IS NOT NULL)`)
+	_, err = tx.ExecContext(ctx, `DELETE FROM account_candy_test_items WHERE id IN (SELECT id FROM (SELECT i.id,b.finished_at,ROW_NUMBER() OVER(PARTITION BY i.account_id ORDER BY i.finished_at DESC,i.id DESC) AS rn FROM account_candy_test_items i JOIN account_candy_test_batches b ON b.id=i.batch_id WHERE i.prompt_version=$1 AND i.status NOT IN ('queued','running')) ranked WHERE rn>5 AND finished_at IS NOT NULL)`, service.CandyTestPromptVersion)
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `DELETE FROM account_candy_test_batches b WHERE b.finished_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM account_candy_test_items i WHERE i.batch_id=b.id)`)
+	_, err = tx.ExecContext(ctx, `DELETE FROM account_candy_test_batches b WHERE b.prompt_version=$1 AND b.finished_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM account_candy_test_items i WHERE i.batch_id=b.id)`, service.CandyTestPromptVersion)
 	return err
 }

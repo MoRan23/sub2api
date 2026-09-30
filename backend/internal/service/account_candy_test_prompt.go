@@ -1,32 +1,8 @@
 package service
 
-// CandyTestPromptVersion identifies the question and output contract stored with
-// a test result. Changing either requires a new version so old results remain
-// interpretable.
-const CandyTestPromptVersion = "candy-v1"
+// Legacy Go/API names remain stable; new jobs exclusively use pelican-v1.
+const CandyTestPromptVersion = "pelican-v1"
 
-// CandyTestPrompt contains only the question, never the grading key. In
-// particular, the 32 in question 2 is part of the claim the model must assess.
-const CandyTestPrompt = `不允许联网、运行代码或调用任何外部工具，请独立推理。每一问都要给出答案和取法，并证明不能更少。
+const CandyTestPrompt = `创建一个HTML，内容是SVG绘制一个鹈鹕骑自行车的2D动画，你不需要进行任何测试`
 
-活动方最初往一个黑色袋子里装了五种口味（苹果、桃子、西瓜、葡萄、柠檬）、三种形状（圆形、五角星形、心形）的糖果，数量如下，其中圆形西瓜的数量漏记了，但已知装袋时西瓜味糖果一共 15 颗：
-
-| 形状 | 苹果 | 桃子 | 西瓜 | 葡萄 | 柠檬 |
-| --- | --- | --- | --- | --- | --- |
-| 圆形 | 5 | 3 | ? | 4 | 8 |
-| 五角星形 | 4 | 3 | 8 | 2 | 7 |
-| 心形 | 6 | 8 | 5 | 3 | 4 |
-
-活动开始前，工作人员为试吃取走了全部葡萄味心形、2 颗柠檬味圆形和 2 颗桃子味五角星，这些糖没有放回。
-
-糖果的糖纸颜色按口味区分，但袋子全黑，看不到。圆形、五角星、心形分别重 4 克、5 克、6 克，但摸的时候无法称重。手感方面，圆形可以和另外两种形状区分，五角星和心形摸起来完全一样。例外的是，柠檬味五角星因为糖纸加厚，摸起来和圆形一模一样，但它仍然是五角星。柠檬味圆形的糖纸也加厚了；西瓜味心形的糖纸有浅浅的压花，但太浅摸不出来。口味无法靠手感判断。
-
-手中能挑出一颗圆形、一颗五角星、一颗心形，且三者口味两两不同，即为成功。“保证”指无论运气多差都能成功。
-
-第 1 问：参赛者必须在开始前决定摸几颗“摸起来是圆形的糖”、几颗“摸起来不是圆形的糖”，过程中不能调整。最少一共要摸多少颗才能保证成功？怎么分配？
-
-第 2 问：改为一颗一颗地摸，每颗拿出来后立刻能看到它的口味和形状，每次都可以根据已摸到的糖决定下一颗摸哪一类。有人认为：“自适应的最好做法就是先把圆感糖摸到满意，再只摸非圆感糖；这样做和第 1 问一样要 32 颗，所以自适应没有帮助。”这个说法哪里对、哪里错？最少需要摸多少颗？
-
-第 3 问：成功条件追加一条，三颗糖中必须有一颗葡萄味。分别在第 1 问和第 2 问的规则下，最少要摸多少颗？
-
-只输出表格，三列依次为：问题、最少数量、最优取法（简洁）。用四行分别回答“第1问：固定取法”“第2问：自适应取法”“第3问：固定取法”“第3问：自适应取法”；最少数量列只填对应总颗数。`
+const pelicanTestInstructions = "请在最终回复中提供完整、自包含的 HTML 源码。"

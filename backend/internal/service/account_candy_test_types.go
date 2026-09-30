@@ -8,7 +8,7 @@ import (
 
 const (
 	CandyTestMaxConcurrent = 3
-	// Candy tests may legitimately spend several minutes waiting for a long
+	// Pelican tests may legitimately spend several minutes waiting for a long
 	// reasoning response. Keep the persisted deadline and the worker context at
 	// the same half-hour window; the repository mirrors this value in its SQL
 	// lease/timeout predicates.
@@ -19,9 +19,9 @@ const (
 )
 
 var (
-	ErrCandyTestNotFound            = errors.New("candy test not found")
-	ErrCandyTestInvalidRequest      = errors.New("invalid candy test request")
-	ErrCandyTestIdempotencyConflict = errors.New("candy test idempotency key reused with different request")
+	ErrCandyTestNotFound            = errors.New("pelican test not found")
+	ErrCandyTestInvalidRequest      = errors.New("invalid pelican test request")
+	ErrCandyTestIdempotencyConflict = errors.New("pelican test idempotency key reused with different request")
 )
 
 type CandyTestModelOption struct {
@@ -61,6 +61,7 @@ type CandyTestItem struct {
 	Status          string              `json:"status"`
 	Answers         map[string]int      `json:"answers,omitempty"`
 	ResponseText    string              `json:"response_text,omitempty"`
+	HTML            string              `json:"html,omitempty"`
 	FailureCode     string              `json:"failure_code,omitempty"`
 	Execution       *CandyTestExecution `json:"execution,omitempty"`
 	CreatedAt       time.Time           `json:"created_at"`

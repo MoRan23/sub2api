@@ -243,22 +243,15 @@ func (s *AccountCandyTestService) execute(item *CandyTestItem) {
 	case !execution.Completed:
 		item.FailureCode = "missing_terminal"
 	default:
-		// A completed response that does not supply four unique correct counts
-		// is an abnormal answer, not a transport or execution failure.
+		// Only document availability is classified, never visual quality.
 		item.Status = "abnormal"
-		counts, gradeErr := GradeCandyAnswer(execution.ResponseText)
-		if gradeErr != nil {
-			item.FailureCode = "invalid_answer_format"
-			var gradeFailure *CandyAnswerGradeError
-			if errors.As(gradeErr, &gradeFailure) {
-				item.FailureCode = gradeFailure.Code
-			}
+		document, extractErr := ExtractPelicanHTML(execution.ResponseText)
+		if extractErr != nil {
+			item.FailureCode = candySafeFailureCode(extractErr.Error(), "missing_html")
 		} else {
-			if counts == ExpectedCandyAnswerCounts() {
-				item.Status = "normal"
-			}
+			item.Status = "generated"
+			item.HTML = document
 			item.FailureCode = ""
-			item.Answers = map[string]int{"q1_fixed": counts[0], "q2_adaptive": counts[1], "q3_fixed": counts[2], "q3_adaptive": counts[3]}
 		}
 	}
 	// Completion uses a fresh short context so cancellation can be recorded, but

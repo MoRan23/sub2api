@@ -9,6 +9,16 @@
 
       <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">{{ error }}</p>
 
+      <section class="space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h4 class="font-medium">{{ t(followLatest ? 'candyTests.latestResult' : 'candyTests.selectedResult') }}</h4>
+          <Select v-if="historyAccountOptions.length > 1" :model-value="historyAccountId" :options="historyAccountOptions" :aria-label="t('candyTests.historyAccount')" searchable @update:model-value="changeHistoryAccount(Number($event))" />
+          <button v-if="!followLatest" type="button" class="btn btn-secondary text-sm" data-testid="pelican-return-latest" @click="followLatest = true">{{ t('candyTests.returnLatest') }}</button>
+        </div>
+        <AccountCandyTestResult v-if="show && displayedItem" :key="displayedItem.id" :item="displayedItem" />
+        <p v-else-if="!historyLoading" class="text-sm text-gray-400">{{ t('candyTests.noHistory') }}</p>
+      </section>
+
       <div class="rounded-xl border border-gray-200 p-4 dark:border-dark-600">
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
@@ -65,7 +75,7 @@
                 <td class="px-3 py-3 text-xs">{{ item.model }}<div class="mt-1 text-gray-500">{{ item.reasoning_effort || t('candyTests.defaultEffort') }}</div></td>
                 <td class="px-3 py-3 text-xs text-gray-500">{{ formatDateTime(item.finished_at) || '—' }}</td>
                 <td class="px-3 py-3"><div class="flex flex-wrap gap-3">
-                  <button type="button" class="text-xs text-primary-600 dark:text-primary-400" @click="selectedItem = item">{{ t('candyTests.details') }}</button>
+                  <button type="button" class="text-xs text-primary-600 dark:text-primary-400" @click="viewItem(item)">{{ t('candyTests.details') }}</button>
                   <button v-if="isCandyTestActive(item.status)" type="button" class="text-xs text-gray-500" :disabled="cancelling || item.cancel_requested" @click="cancelTests([item.id])">{{ t('candyTests.cancelItem') }}</button>
                 </div></td>
               </tr>
@@ -79,24 +89,17 @@
         </div>
       </section>
 
-      <AccountCandyTestResult v-if="selectedItem" :item="selectedItem" expanded />
-
-      <section class="space-y-3">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <h4 class="font-medium">{{ t('candyTests.history') }}</h4>
-          <Select v-if="historyAccountOptions.length > 1" :model-value="historyAccountId" :options="historyAccountOptions" :aria-label="t('candyTests.historyAccount')" searchable @update:model-value="changeHistoryAccount(Number($event))" />
-        </div>
+      <details data-testid="pelican-history" class="space-y-3">
+        <summary class="cursor-pointer font-medium">{{ t('candyTests.history') }}</summary>
         <p class="text-xs text-gray-500">{{ t('candyTests.retentionNotice') }}</p>
         <p v-if="!historyLoading && !history.length" class="py-3 text-sm text-gray-400">{{ t('candyTests.noHistory') }}</p>
-        <details v-for="item in history" :key="item.id" class="rounded-xl border border-gray-200 p-3 dark:border-dark-600">
-          <summary class="cursor-pointer text-sm">
-            <AccountCandyTestStatus :status="item.status" />
-            <span class="mx-2">{{ item.model }} · {{ item.reasoning_effort || t('candyTests.defaultEffort') }}</span>
-            <span class="text-xs text-gray-500">{{ formatDateTime(item.finished_at) }}</span>
-          </summary>
-          <AccountCandyTestResult class="mt-3" :item="item" />
-        </details>
-      </section>
+        <div v-for="item in history" :key="item.id" class="flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 p-3 text-sm dark:border-dark-600">
+          <AccountCandyTestStatus :status="item.status" />
+          <span>{{ item.model }} · {{ item.reasoning_effort || t('candyTests.defaultEffort') }}</span>
+          <span class="text-xs text-gray-500">{{ formatDateTime(item.finished_at) }}</span>
+          <button v-if="displayedItem?.id !== item.id" type="button" class="text-primary-600 dark:text-primary-400" :data-testid="`pelican-history-${item.id}`" @click="viewItem(item)">{{ t('candyTests.details') }}</button>
+        </div>
+      </details>
     </div>
     <template #footer>
       <button type="button" class="btn btn-secondary" data-testid="candy-refresh" :disabled="loading || refreshing || creating" @click="refreshVisible(true)">{{ t('candyTests.refresh') }}</button>
@@ -109,7 +112,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Account } from '@/types'
-import { candyTestsAPI, isCandyTestActive } from '@/api/admin/candyTests'
+import { candyTestsAPI, isCandyTestActive, PELICAN_TEST_PROMPT_VERSION } from '@/api/admin/candyTests'
 import type { CandyTestBatch, CandyTestItem, CandyTestOptions, CandyTestStatus, CandyTestSummary } from '@/api/admin/candyTests'
 import { formatDateTime } from '@/utils/format'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -120,7 +123,7 @@ import AccountCandyTestResult from './AccountCandyTestResult.vue'
 const props = withDefaults(defineProps<{ show: boolean; accountIds: number[]; accounts?: Account[] }>(), { accounts: () => [] })
 const emit = defineEmits<{ (event: 'close'): void; (event: 'updated'): void }>()
 const { t, te } = useI18n()
-const statuses: CandyTestStatus[] = ['queued', 'running', 'normal', 'abnormal', 'failed', 'cancelled', 'skipped']
+const statuses: CandyTestStatus[] = ['queued', 'running', 'generated', 'abnormal', 'failed', 'cancelled', 'skipped']
 const frozenAccountIds = ref<number[]>([])
 const options = ref<CandyTestOptions>({ models: [], accounts: [] })
 const loading = ref(false)
@@ -138,6 +141,8 @@ const selectedItem = ref<CandyTestItem | null>(null)
 const historyAccountId = ref<number>(0)
 const history = ref<CandyTestItem[]>([])
 const historyLoading = ref(false)
+const followLatest = ref(true)
+const displayedItem = computed(() => followLatest.value ? history.value[0] || null : selectedItem.value)
 let lifecycle = 0
 let batchRequest = 0
 let historyRequest = 0
@@ -172,7 +177,7 @@ function isCurrent(version: number): boolean { return props.show && lifecycle ==
 function stopPolling() { if (timer) clearTimeout(timer); timer = undefined }
 function schedulePoll() {
   stopPolling()
-  if (!props.show || !batchId.value || (batch.value && !batchActive.value)) return
+  if (!props.show) return
   timer = setTimeout(() => { void refreshVisible() }, 5000)
 }
 function rememberBatch(id: string) {
@@ -186,6 +191,7 @@ async function initialize() {
   batch.value = null
   knownBatchIds.value = []
   selectedItem.value = null
+  followLatest.value = true
   history.value = []
   error.value = ''
   model.value = ''
@@ -196,7 +202,7 @@ async function initialize() {
   for (const account of props.accounts) {
     if (!frozenAccountIds.value.includes(account.id)) continue
     const summary = (account as Account & { candy_test?: CandyTestSummary }).candy_test
-    if (summary?.active) rememberBatch(summary.active.batch_id)
+    if (summary?.active?.prompt_version === PELICAN_TEST_PROMPT_VERSION) rememberBatch(summary.active.batch_id)
   }
   if (knownBatchIds.value[0]) void selectBatch(knownBatchIds.value[0])
   await Promise.all([loadOptions(), loadHistory()])
@@ -242,8 +248,8 @@ async function loadHistory() {
   try {
     const result = await candyTestsAPI.history(accountId)
     if (!isCurrent(version) || request !== historyRequest || accountId !== historyAccountId.value) return
-    history.value = result.items || []
-    const activeId = result.summary?.active?.batch_id
+    history.value = (result.items || []).filter(item => item.prompt_version === PELICAN_TEST_PROMPT_VERSION && !isCandyTestActive(item.status))
+    const activeId = result.summary?.active?.prompt_version === PELICAN_TEST_PROMPT_VERSION ? result.summary.active.batch_id : undefined
     if (activeId) {
       rememberBatch(activeId)
       if (!batchId.value) await selectBatch(activeId)
@@ -251,7 +257,10 @@ async function loadHistory() {
   } catch {
     if (isCurrent(version) && request === historyRequest) error.value = t('candyTests.loadError')
   } finally {
-    if (isCurrent(version) && request === historyRequest) historyLoading.value = false
+    if (isCurrent(version) && request === historyRequest) {
+      historyLoading.value = false
+      schedulePoll()
+    }
   }
 }
 
@@ -261,7 +270,6 @@ async function selectBatch(id: string) {
   batchId.value = id
   batch.value = null
   page.value = 1
-  selectedItem.value = null
   rememberBatch(id)
   await loadBatch()
 }
@@ -275,6 +283,7 @@ async function loadBatch() {
   try {
     const result = await candyTestsAPI.getBatch(id, page.value)
     if (!isCurrent(version) || request !== batchRequest || id !== batchId.value) return
+    if (result.prompt_version !== PELICAN_TEST_PROMPT_VERSION) throw new Error('Unsupported test version')
     const changed = batch.value?.finished_at !== result.finished_at || JSON.stringify(batch.value?.counts) !== JSON.stringify(result.counts)
     batch.value = result
     if (selectedItem.value) selectedItem.value = result.items?.find(item => item.id === selectedItem.value?.id) || selectedItem.value
@@ -291,8 +300,15 @@ async function loadBatch() {
 
 async function refreshVisible(includeOptions = false) {
   if (!props.show) return
+  const version = lifecycle
   error.value = ''
-  await Promise.all([loadBatch(), loadHistory(), ...(includeOptions ? [loadOptions()] : [])])
+  // Read history after the batch response so the final poll cannot leave a stale
+  // preview when the batch completes between the two requests.
+  await Promise.all([
+    ...(!batch.value || batchActive.value || includeOptions ? [loadBatch()] : []),
+    ...(includeOptions ? [loadOptions()] : []),
+  ])
+  if (isCurrent(version)) await loadHistory()
 }
 
 async function startBatch() {
@@ -312,8 +328,8 @@ async function startBatch() {
     batch.value = result
     batchId.value = result.id
     page.value = result.page || 1
-    selectedItem.value = null
     rememberBatch(result.id)
+    await loadHistory()
     schedulePoll()
   } catch {
     if (isCurrent(version)) error.value = t('candyTests.createError')
@@ -343,8 +359,15 @@ async function changePage(next: number) {
   await loadBatch()
 }
 
+function viewItem(item: CandyTestItem) {
+  selectedItem.value = item
+  followLatest.value = false
+}
+
 async function changeHistoryAccount(accountId: number) {
   historyAccountId.value = accountId
+  selectedItem.value = null
+  followLatest.value = true
   history.value = []
   await loadHistory()
 }

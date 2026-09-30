@@ -72,7 +72,7 @@ func TestCandyQueueRejectsInvalidAndMissingAccounts(t *testing.T) {
 	}
 }
 
-const candyQueueAnswer = "|问题|最少数量|取法|\n|---|---|---|\n|第1问|32|说明|\n|第2问|29|说明|\n|第3问固定|40|说明|\n|第3问自适应|38|说明|"
+const candyQueueAnswer = `<!DOCTYPE html><html><body><svg></svg></body></html>`
 
 const candyIndeterminateAnswer = "|问题|最少数量|最优取法（简洁）|\n|---|---|---|\n|第1问：固定取法|无法唯一确定|按不同解释可得32颗。|\n|第2问：自适应取法|无法唯一确定|题目未说明观察条件。|\n|第3问：固定取法|无法唯一确定|同第1问。|\n|第3问：自适应取法|无法唯一确定|不同解释下最少数量会不同。|"
 
@@ -83,12 +83,12 @@ func TestCandyQueueExecutionClassifiesOnlyCompleteAnswers(t *testing.T) {
 		err          error
 		status, code string
 	}{
-		{"correct", candyQueueAnswer, true, nil, "normal", ""},
-		{"wrong", strings.Replace(candyQueueAnswer, "|29|", "|30|", 1), true, nil, "abnormal", ""},
-		{"missing", "|问题|最少数量|\n|第1问|32|", true, nil, "abnormal", "missing_answer"},
-		{"indeterminate", candyIndeterminateAnswer, true, nil, "abnormal", "invalid_answer_format"},
-		{"conflicting", candyQueueAnswer + "\n|第1问|33|另一个答案|", true, nil, "abnormal", "ambiguous_answer"},
-		{"refusal", "题目信息不足，无法给出四项最少数量。", true, nil, "abnormal", "missing_answer"},
+		{"correct", candyQueueAnswer, true, nil, "generated", ""},
+		{"fenced", "```html\n" + candyQueueAnswer + "```", true, nil, "generated", ""},
+		{"missing", "|问题|最少数量|\n|第1问|32|", true, nil, "abnormal", "missing_html"},
+		{"indeterminate", candyIndeterminateAnswer, true, nil, "abnormal", "missing_html"},
+		{"conflicting", candyQueueAnswer + "<html><body>different</body></html>", true, nil, "abnormal", "ambiguous_html"},
+		{"refusal", "题目信息不足，无法给出四项最少数量。", true, nil, "abnormal", "missing_html"},
 		{"incomplete", candyQueueAnswer, false, nil, "failed", "missing_terminal"},
 		{"incomplete_indeterminate", candyIndeterminateAnswer, false, nil, "failed", "missing_terminal"},
 		{"transport", candyQueueAnswer, true, errors.New("secret upstream credential"), "failed", "execution_failed"},
@@ -116,8 +116,11 @@ func TestCandyQueueExecutionClassifiesOnlyCompleteAnswers(t *testing.T) {
 			} else {
 				require.Equal(t, tt.text, repo.completed.ResponseText)
 			}
-			if tt.code != "" {
-				require.Empty(t, repo.completed.Answers, "unavailable counts must not be invented")
+			require.Empty(t, repo.completed.Answers, "pelican tests never grade numbers")
+			if tt.status == "generated" {
+				require.Equal(t, candyQueueAnswer, repo.completed.HTML)
+			} else {
+				require.Empty(t, repo.completed.HTML)
 			}
 		})
 	}
@@ -150,7 +153,7 @@ func TestCandyQueueUnresolvedAnswersAreAbnormalRegardlessOfWording(t *testing.T)
 			defer s.Stop()
 			s.execute(&CandyTestItem{ID: 1, ClaimID: "claim"})
 			require.Equal(t, "abnormal", repo.completed.Status)
-			require.Equal(t, "invalid_answer_format", repo.completed.FailureCode)
+			require.Equal(t, "missing_html", repo.completed.FailureCode)
 			require.Equal(t, text, repo.completed.ResponseText)
 			require.Empty(t, repo.completed.Answers)
 			require.Equal(t, 1, executor.calls)

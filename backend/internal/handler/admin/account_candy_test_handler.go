@@ -18,7 +18,7 @@ func (h *AccountHandler) SetCandyTestService(s *service.AccountCandyTestService)
 func (h *AccountHandler) candyTestsReady(c *gin.Context) bool {
 	c.Header("Cache-Control", "private, no-store")
 	if h.candyTestService == nil {
-		response.Error(c, http.StatusServiceUnavailable, "Candy test service unavailable")
+		response.Error(c, http.StatusServiceUnavailable, "Pelican test service unavailable")
 		return false
 	}
 	return true
@@ -27,15 +27,15 @@ func (h *AccountHandler) candyTestsReady(c *gin.Context) bool {
 func candyTestHTTPError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrCandyTestNotFound):
-		response.NotFound(c, "Candy test not found")
+		response.NotFound(c, "Pelican test not found")
 	case errors.Is(err, service.ErrCandyTestInvalidRequest):
-		response.BadRequest(c, "Invalid candy test request")
+		response.BadRequest(c, "Invalid pelican test request")
 	case errors.Is(err, service.ErrCandyTestIdempotencyConflict):
 		response.Error(c, http.StatusConflict, "Idempotency key already used with a different request")
 	default:
 		// Database and provider errors may contain credentials or arbitrary upstream
 		// text; only return a fixed diagnostic to the administrator.
-		response.Error(c, http.StatusInternalServerError, "Candy test operation failed")
+		response.Error(c, http.StatusInternalServerError, "Pelican test operation failed")
 	}
 }
 
@@ -47,7 +47,7 @@ func (h *AccountHandler) CandyTestOptions(c *gin.Context) {
 		AccountIDs []int64 `json:"account_ids"`
 	}
 	if c.ShouldBindJSON(&request) != nil {
-		response.BadRequest(c, "Invalid candy test request")
+		response.BadRequest(c, "Invalid pelican test request")
 		return
 	}
 	options, err := h.candyTestService.Options(c.Request.Context(), request.AccountIDs)
@@ -64,7 +64,7 @@ func (h *AccountHandler) CreateCandyTests(c *gin.Context) {
 	}
 	var request service.CandyTestCreateRequest
 	if c.ShouldBindJSON(&request) != nil {
-		response.BadRequest(c, "Invalid candy test request")
+		response.BadRequest(c, "Invalid pelican test request")
 		return
 	}
 	batch, err := h.candyTestService.Create(c.Request.Context(), &request)

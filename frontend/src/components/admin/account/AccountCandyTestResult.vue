@@ -14,18 +14,7 @@
     <p v-if="item.failure_code" role="status" class="break-words text-sm text-gray-600 dark:text-gray-300">
       {{ t('candyTests.error') }}: {{ failureReason }}
     </p>
-    <table class="w-full text-left text-xs">
-      <thead class="border-b border-gray-200 text-gray-500 dark:border-dark-600">
-        <tr><th class="py-2">{{ t('candyTests.question') }}</th><th>{{ t('candyTests.answer') }}</th><th>{{ t('candyTests.expected') }}</th></tr>
-      </thead>
-      <tbody>
-        <tr v-for="question in questions" :key="question.key">
-          <td class="py-2">{{ t(question.label) }}</td>
-          <td :class="answerClass(question.key, question.expected)">{{ item.answers?.[question.key] ?? '—' }}</td>
-          <td>{{ question.expected }}</td>
-        </tr>
-      </tbody>
-    </table>
+    <PelicanHTMLPreview v-if="item.status === 'generated' && item.html && item.prompt_version === PELICAN_TEST_PROMPT_VERSION" :key="item.id" :html="item.html" :item-id="item.id" />
     <details v-if="item.execution?.usage" class="text-xs">
       <summary class="cursor-pointer text-gray-500">{{ t('candyTests.usage') }}</summary>
       <div class="mt-2 flex flex-wrap gap-3">
@@ -44,18 +33,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { CandyTestAnswerKey, CandyTestItem } from '@/api/admin/candyTests'
+import type { CandyTestItem } from '@/api/admin/candyTests'
+import { PELICAN_TEST_PROMPT_VERSION } from '@/api/admin/candyTests'
+import PelicanHTMLPreview from './PelicanHTMLPreview.vue'
 import { formatDateTime } from '@/utils/format'
 import AccountCandyTestStatus from './AccountCandyTestStatus.vue'
 
 const props = withDefaults(defineProps<{ item: CandyTestItem; expanded?: boolean }>(), { expanded: false })
 const { t, te } = useI18n()
-const questions: { key: CandyTestAnswerKey; label: string; expected: number }[] = [
-  { key: 'q1_fixed', label: 'candyTests.q1', expected: 32 },
-  { key: 'q2_adaptive', label: 'candyTests.q2', expected: 29 },
-  { key: 'q3_fixed', label: 'candyTests.q3Fixed', expected: 40 },
-  { key: 'q3_adaptive', label: 'candyTests.q3Adaptive', expected: 38 },
-]
 const failureReason = computed(() => {
   const httpStatus = /^upstream_http_([1-5]\d\d)$/.exec(props.item.failure_code || '')?.[1]
   if (httpStatus) return t('candyTests.upstreamHttpError', { status: httpStatus })
@@ -72,9 +57,4 @@ const fields = computed(() => [
   { label: t('candyTests.completedAt'), value: formatDateTime(props.item.finished_at) || '—' },
   { label: t('candyTests.duration'), value: props.item.execution ? t('candyTests.seconds', { seconds: (props.item.execution.duration_ms / 1000).toFixed(1) }) : '—' },
 ])
-function answerClass(key: CandyTestAnswerKey, expected: number): string {
-  const answer = props.item.answers?.[key]
-  if (answer == null) return 'text-gray-400'
-  return answer === expected ? 'text-emerald-600 dark:text-emerald-400' : 'font-semibold text-red-600 dark:text-red-400'
-}
 </script>
