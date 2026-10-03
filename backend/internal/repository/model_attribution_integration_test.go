@@ -18,7 +18,7 @@ import (
 func attributionFixture(t *testing.T) (*attributionRepository, *accountRepository, *service.Account) {
 	t.Helper()
 	ctx := context.Background()
-	_, err := integrationDB.ExecContext(ctx, `TRUNCATE model_attribution_jobs,model_attribution_state; UPDATE model_attribution_config SET version=1,config='{"enabled":false,"base_url":"","default":{"model":"gpt-6-astra","high_models":[],"low_models":[]},"groups":[]}'`)
+	_, err := integrationDB.ExecContext(ctx, `TRUNCATE model_attribution_jobs,model_attribution_state,account_initial_tests; UPDATE model_attribution_config SET version=1,config='{"enabled":false,"base_url":"","default":{"model":"gpt-6-astra","high_models":[],"low_models":[]},"groups":[]}'`)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = integrationDB.ExecContext(ctx, `TRUNCATE model_attribution_jobs,model_attribution_state; UPDATE model_attribution_config SET version=version+1,config=jsonb_set(config,'{enabled}','false')`)
@@ -28,6 +28,10 @@ func attributionFixture(t *testing.T) (*attributionRepository, *accountRepositor
 	a := &service.Account{Name: "attribution-synthetic", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: oauthOSTestGrant("synthetic-token"), Extra: map[string]any{}}
 	a.Credentials["model_mapping"] = map[string]any{"old": "old", "alias": "custom", "wild*": "target", "high": "custom-high"}
 	require.NoError(t, ar.Create(ctx, a))
+	// This fixture represents an existing account; new-account tests create a
+	// second account after saving their configuration.
+	_, err = integrationDB.ExecContext(ctx, `UPDATE account_initial_tests SET processed_at=NOW() WHERE account_id=$1`, a.ID)
+	require.NoError(t, err)
 	t.Cleanup(func() { _, _ = integrationDB.ExecContext(ctx, `DELETE FROM accounts WHERE id=$1`, a.ID) })
 	c := service.DefaultAttributionConfig()
 	c.Enabled = true
@@ -222,6 +226,10 @@ func TestAttributionQueueLeasesRetentionAndRestart(t *testing.T) {
 	for range 4 {
 		b := &service.Account{Name: "attribution-parallel", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Credentials: oauthOSTestGrant("synthetic")}
 		require.NoError(t, ar.Create(ctx, b))
+		// This test exercises periodic scheduling of existing accounts. Initial
+		// creation events are covered by the dedicated new-account suite.
+		_, err := integrationDB.ExecContext(ctx, `UPDATE account_initial_tests SET processed_at=NOW() WHERE account_id=$1`, b.ID)
+		require.NoError(t, err)
 		ids = append(ids, b.ID)
 		t.Cleanup(func() { _, _ = integrationDB.ExecContext(ctx, `DELETE FROM accounts WHERE id=$1`, b.ID) })
 	}

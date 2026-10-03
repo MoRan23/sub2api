@@ -95,7 +95,7 @@ func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedul
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
 	client := clientFromContext(ctx, r.client)
 	var tx *dbent.Tx
-	if service.IsOpenAIOAuthOSProfileOwner(account) && dbent.TxFromContext(ctx) == nil {
+	if account != nil && account.IsOpenAIOAuth() && !account.IsShadow() && dbent.TxFromContext(ctx) == nil {
 		var err error
 		tx, err = r.client.Tx(ctx)
 		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
@@ -200,6 +200,17 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 			return err
 		}
 		if err := initializeOpenAIOAuthOSCredentialsLocked(ctx, client, account); err != nil {
+			return err
+		}
+	}
+	if account.IsOpenAIOAuth() && !account.IsShadow() {
+		// Persist with the account: rollback cannot leave a paid test behind, and
+		// imports and alternate creation paths get the same once-only behavior.
+		if _, err := client.ExecContext(ctx, `INSERT INTO account_initial_tests(account_id,attribution,pelican,model)
+			SELECT $1, COALESCE((config->>'enabled')::boolean,false) AND COALESCE((config->'new_account_tests'->>'attribution')::boolean,true),
+			COALESCE((config->'new_account_tests'->>'pelican')::boolean,true),
+			COALESCE(NULLIF(config->'new_account_tests'->>'model',''),$2)
+			FROM model_attribution_config WHERE id=1 ON CONFLICT DO NOTHING`, account.ID, service.AttributionDefaultModel); err != nil {
 			return err
 		}
 	}

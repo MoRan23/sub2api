@@ -38,6 +38,19 @@ func (r *accountCandyTestRepository) Create(ctx context.Context, request *servic
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	id, err := createCandyBatch(ctx, tx, request, items)
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return r.GetBatch(ctx, id, 1, 50)
+}
+
+// Caller holds the candy queue lock; allows account first tests to commit both
+// test queues and the consumed creation event in a single transaction.
+func createCandyBatch(ctx context.Context, tx *sql.Tx, request *service.CandyTestCreateRequest, items []*service.CandyTestItem) (string, error) {
 	snapshot, err := json.Marshal(struct {
 		AccountIDs    []int64 `json:"account_ids"`
 		Model         string  `json:"model"`
@@ -45,41 +58,35 @@ func (r *accountCandyTestRepository) Create(ctx context.Context, request *servic
 		PromptVersion string  `json:"prompt_version"`
 	}{request.AccountIDs, request.Model, request.ReasoningEffort, service.CandyTestPromptVersion})
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	var existing string
 	var matches bool
 	err = tx.QueryRowContext(ctx, `SELECT id::text, request_snapshot = $2::jsonb FROM account_candy_test_batches WHERE idempotency_key=$1`, request.IdempotencyKey, snapshot).Scan(&existing, &matches)
 	if err == nil {
 		if !matches {
-			return nil, service.ErrCandyTestIdempotencyConflict
+			return "", service.ErrCandyTestIdempotencyConflict
 		}
-		if err = tx.Commit(); err != nil {
-			return nil, err
-		}
-		return r.GetBatch(ctx, existing, 1, 50)
+		return existing, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
+		return "", err
 	}
 	id := uuid.NewString()
 	_, err = tx.ExecContext(ctx, `INSERT INTO account_candy_test_batches(id,idempotency_key,request_snapshot,model,reasoning_effort,prompt_version,total) VALUES($1,$2,$3,$4,$5,$6,$7)`, id, request.IdempotencyKey, snapshot, request.Model, request.ReasoningEffort, service.CandyTestPromptVersion, len(items))
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	for _, item := range items {
 		_, err = tx.ExecContext(ctx, `INSERT INTO account_candy_test_items(batch_id,account_id,account_name,model,reasoning_effort,prompt_version,status,failure_code,finished_at) VALUES($1,$2,$3,$4,$5,$6,$7::varchar,$8,CASE WHEN $7::varchar='skipped' THEN NOW() ELSE NULL END)`, id, item.AccountID, item.AccountName, request.Model, request.ReasoningEffort, service.CandyTestPromptVersion, item.Status, item.FailureCode)
 		if err != nil {
-			return nil, err
+			return "", err
 		}
 	}
 	if err = maintainCandyBatches(ctx, tx); err != nil {
-		return nil, err
+		return "", err
 	}
-	if err = tx.Commit(); err != nil {
-		return nil, err
-	}
-	return r.GetBatch(ctx, id, 1, 50)
+	return id, nil
 }
 
 const candyItemColumns = `id,batch_id::text,account_id,account_name,model,reasoning_effort,prompt_version,status,answers,response_text,failure_code,execution,created_at,started_at,finished_at,cancel_requested,COALESCE(claim_id::text,''),lease_until`

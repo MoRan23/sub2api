@@ -32,16 +32,22 @@ type AttributionGroupPolicy struct {
 	Enabled bool  `json:"enabled"`
 	AttributionPolicy
 }
+type NewAccountTestConfig struct {
+	Attribution bool   `json:"attribution"`
+	Pelican     bool   `json:"pelican"`
+	Model       string `json:"model"`
+}
 type AttributionConfig struct {
-	Version int64                    `json:"version"`
-	Enabled bool                     `json:"enabled"`
-	BaseURL string                   `json:"base_url"`
-	Default AttributionPolicy        `json:"default"`
-	Groups  []AttributionGroupPolicy `json:"groups"`
+	Version         int64                    `json:"version"`
+	Enabled         bool                     `json:"enabled"`
+	BaseURL         string                   `json:"base_url"`
+	Default         AttributionPolicy        `json:"default"`
+	Groups          []AttributionGroupPolicy `json:"groups"`
+	NewAccountTests NewAccountTestConfig     `json:"new_account_tests"`
 }
 
 func DefaultAttributionConfig() AttributionConfig {
-	return AttributionConfig{Version: 1, Default: AttributionPolicy{Model: AttributionDefaultModel, HighModels: []string{}, LowModels: []string{}}, Groups: []AttributionGroupPolicy{}}
+	return AttributionConfig{Version: 1, Default: AttributionPolicy{Model: AttributionDefaultModel, HighModels: []string{}, LowModels: []string{}}, Groups: []AttributionGroupPolicy{}, NewAccountTests: NewAccountTestConfig{Attribution: true, Pelican: true, Model: AttributionDefaultModel}}
 }
 
 func AttributionBaseURL(raw string) (string, error) {
@@ -57,6 +63,13 @@ func NormalizeAttributionConfig(c AttributionConfig) (AttributionConfig, error) 
 		return c, ErrAttributionInvalid
 	}
 	var err error
+	c.NewAccountTests.Model = strings.TrimSpace(c.NewAccountTests.Model)
+	if c.NewAccountTests.Model == "" {
+		c.NewAccountTests.Model = AttributionDefaultModel
+	}
+	if len(c.NewAccountTests.Model) > 200 || strings.ContainsAny(c.NewAccountTests.Model, "*\r\n\t ") {
+		return c, fmt.Errorf("%w: 首测模型须为具体模型 ID", ErrAttributionInvalid)
+	}
 	if c.Enabled || strings.TrimSpace(c.BaseURL) != "" {
 		c.BaseURL, err = AttributionBaseURL(c.BaseURL)
 		if err != nil {
@@ -247,6 +260,7 @@ type AttributionRepository interface {
 	Config(context.Context) (AttributionConfig, error)
 	SaveConfig(context.Context, AttributionConfig) (AttributionConfig, error)
 	Enqueue(context.Context, []int64, bool) ([]*AttributionJob, error)
+	EnqueueNewAccounts(context.Context) error
 	Claim(context.Context) (*AttributionJob, error)
 	Heartbeat(context.Context, *AttributionJob) (bool, error)
 	Validate(context.Context, *AttributionJob) (bool, error)

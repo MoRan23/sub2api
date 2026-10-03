@@ -13,7 +13,7 @@ vi.mock('@/api/admin/modelAttribution', () => ({ attributionAPI: api }))
 vi.mock('@/api/admin/groups', async () => ({ ...await vi.importActual<typeof import('@/api/admin/groups')>('@/api/admin/groups'), getAllIncludingInactive: vi.fn().mockResolvedValue([{ id: 10, name: 'Pro group' }, { id: 20, name: 'Other group' }]) }))
 vi.mock('vue-i18n', async () => ({ ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'), useI18n: () => ({ t: (key: string) => key, te: () => true }) }))
 const policy = { model: 'gpt-6-astra', high_models: ['gpt-6-astra'], low_models: ['gpt-6-luna'] }
-function config(): AttributionConfig { return { version: 1, enabled: false, base_url: '', default: structuredClone(policy), groups: [] } }
+function config(): AttributionConfig { return { version: 1, enabled: false, base_url: '', default: structuredClone(policy), groups: [], new_account_tests: { attribution: true, pelican: true, model: 'gpt-6-astra' } } }
 function job(id = 1, status: AttributionJob['status'] = 'passed'): AttributionJob {
   return { id, status, account_id: 42, account_name: 'Synthetic account', source: 'manual', snapshot: { config_version: 2, group_id: 0, policy: structuredClone(policy) }, result: { duration_ms: 1200, action: 'high', analysis: { prediction: 'gpt-6-astra', probability: 0.8, used_outputs: 3, results: [{ model: 'gpt-6-astra', probability: 0.8 }, { model: 'gpt-6-luna', probability: 0.2 }] } }, created_at: '2026-10-01T00:00:00Z', ...(status === 'running' ? {} : { finished_at: '2026-10-01T00:00:01Z' }) }
 }
@@ -74,6 +74,26 @@ describe('attribution account UI', () => {
 })
 
 describe('attribution configuration', () => {
+  it('saves independent initial test switches and a custom model without enabling periodic detection', async () => {
+    api.save.mockImplementation(async (c: AttributionConfig) => ({ ...c, version: 2 }))
+    const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
+    expect((wrapper.get('[data-testid="initial-model"]').element as HTMLInputElement).value).toBe('gpt-6-astra')
+    expect(wrapper.text()).toContain('attribution.newAccount.requiresEnabled')
+    await wrapper.get('[data-testid="initial-attribution"]').setValue(false)
+    await wrapper.get('[data-testid="initial-pelican"]').setValue(false)
+    await wrapper.get('[data-testid="initial-model"]').setValue('gpt-6-sol')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, new_account_tests: { attribution: false, pelican: false, model: 'gpt-6-sol' } }))
+    wrapper.unmount()
+  })
+  it('rejects invalid initial models before saving', async () => {
+    const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
+    await wrapper.get('[data-testid="initial-model"]').setValue('gpt-*')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="alert"]').text()).toContain('attribution.newAccount.invalid')
+    wrapper.unmount()
+  })
   it('starts disabled and blocks enabling without a service and both allowlists', async () => {
     const c = config(); c.default.high_models = []; api.config.mockResolvedValue(c)
     const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()

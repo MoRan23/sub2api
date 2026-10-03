@@ -6,6 +6,14 @@ export const attributionZh = {
   groupHelp: '多分组账户按账户分组优先级从小到大选择首个启用的独立配置；同优先级按分组 ID 排序。',
   notice: '每 10 分钟检测一次，每轮 3 条探针，全局并发 3 个账户。检测会消耗上游额度；执行失败或归因异常不会修改白名单。',
   mappingHelp: '仅替换同名白名单条目，保留自定义别名与通配符映射。启用前请填好服务地址及两份非空白名单。',
+  newAccount: {
+    title: '新 OAuth 账号首测', attribution: '新账号自动执行一次归因测试', pelican: '新账号自动执行一次鹈鹕测试', model: '首测模型',
+    help: '新建或导入的 OpenAI OAuth 实体账号自动排队，消耗上游额度。仅影响保存后新增的账号，不补测已有账号；停用、关闭调度、过期及自动透传账号跳过。关闭归因首测不影响每 10 分钟的周期检测。',
+    requiresEnabled: '归因首测需先配置并启用上方自动检测；鹈鹕首测可独立开启。',
+    modelHelp: '两种首测共用此模型，默认 gpt-6-astra。归因首测仍按账户分组选择高低级白名单；后续周期检测使用分组或全局探针模型。',
+    invalid: '请输入具体的首测模型 ID，不含空格或通配符。'
+  },
+  initial: '新账号首测',
   invalid: '请填写有效服务地址、探针模型及两份非空白名单（具体模型 ID，不含通配符）。', conflict: '配置已被其他管理员更新，请重新加载后再保存。',
   overview: '运行概况与历史', queuedCount: '排队 {count}', runningCount: '运行 {count}', total: '保留记录 {count}', refresh: '刷新',
   never: '未检测', latest: '最近结果', run: '立即测试', bulk: '批量归因测试', history: '检测历史', details: '检测详情', account: '账户', time: '检测时间', probability: '概率', top: '最高概率模型',
@@ -29,6 +37,14 @@ export const attributionEn = {
   groupHelp: 'For multiple groups, the first enabled override by account-group priority wins; ties use group ID.',
   notice: 'Three probes per account every 10 minutes, up to three accounts concurrently. Probes consume upstream quota. Failed or abnormal detections leave allowlists unchanged.',
   mappingHelp: 'Replace identity allowlist entries only; preserve custom aliases and wildcard mappings. Configure the service and both nonempty allowlists before enabling.',
+  newAccount: {
+    title: 'New OAuth account tests', attribution: 'Run attribution once for new accounts', pelican: 'Run pelican once for new accounts', model: 'Initial test model',
+    help: 'Newly created or imported physical OpenAI OAuth accounts are queued automatically and consume upstream quota. Applies to new accounts after saving, without backfilling existing accounts. Inactive, unschedulable, expired and passthrough accounts are skipped. Disabling initial attribution does not disable the ten-minute periodic checks.',
+    requiresEnabled: 'Initial attribution requires automatic detection to be configured and enabled above. Initial pelican tests can be enabled independently.',
+    modelHelp: 'Both initial tests use this model (default: gpt-6-astra). Attribution still uses the account group’s allowlists; later periodic tests use the group or global probe model.',
+    invalid: 'Enter a concrete initial model ID without whitespace or wildcards.'
+  },
+  initial: 'New account',
   invalid: 'Enter a valid service URL, probe model and two nonempty allowlists (concrete model IDs, without wildcards).', conflict: 'Another administrator updated the configuration. Reload before saving.',
   overview: 'Activity and history', queuedCount: '{count} queued', runningCount: '{count} running', total: '{count} retained records', refresh: 'Refresh',
   never: 'Not tested', latest: 'Latest result', run: 'Test now', bulk: 'Batch attribution test', history: 'Detection history', details: 'Detection details', account: 'Account', time: 'Detection time', probability: 'Probability', top: 'Top model',

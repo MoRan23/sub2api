@@ -38,7 +38,7 @@ type attributionQuery interface {
 }
 
 func attributionConfig(ctx context.Context, q attributionQuery) (service.AttributionConfig, error) {
-	var c service.AttributionConfig
+	c := service.DefaultAttributionConfig()
 	var b []byte
 	var version int64
 	if err := q.QueryRowContext(ctx, `SELECT version,config FROM model_attribution_config WHERE id=1`).Scan(&version, &b); err != nil {
@@ -216,7 +216,7 @@ func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual
 		return nil, service.ErrAttributionDisabled
 	}
 	if !manual {
-		rows, e := tx.QueryContext(ctx, `SELECT a.id FROM accounts a LEFT JOIN model_attribution_state s ON s.account_id=a.id WHERE a.deleted_at IS NULL AND a.platform='openai' AND a.type='oauth' AND a.parent_account_id IS NULL AND a.status='active' AND a.schedulable AND (a.expires_at IS NULL OR a.expires_at>NOW()) AND COALESCE(a.extra->'openai_passthrough',a.extra->'openai_oauth_passthrough','false'::jsonb) <> 'true'::jsonb AND (s.next_due_at IS NULL OR s.next_due_at<=NOW()) AND NOT EXISTS(SELECT 1 FROM model_attribution_jobs j WHERE j.account_id=a.id AND j.status IN ('queued','running')) ORDER BY s.next_due_at NULLS FIRST,a.id LIMIT 500`)
+		rows, e := tx.QueryContext(ctx, `SELECT a.id FROM accounts a LEFT JOIN model_attribution_state s ON s.account_id=a.id WHERE a.deleted_at IS NULL AND a.platform='openai' AND a.type='oauth' AND a.parent_account_id IS NULL AND a.status='active' AND a.schedulable AND (a.expires_at IS NULL OR a.expires_at>NOW()) AND COALESCE(a.extra->'openai_passthrough',a.extra->'openai_oauth_passthrough','false'::jsonb) <> 'true'::jsonb AND (s.next_due_at IS NULL OR s.next_due_at<=NOW()) AND NOT EXISTS(SELECT 1 FROM account_initial_tests initial WHERE initial.account_id=a.id AND initial.processed_at IS NULL) AND NOT EXISTS(SELECT 1 FROM model_attribution_jobs j WHERE j.account_id=a.id AND j.status IN ('queued','running')) ORDER BY s.next_due_at NULLS FIRST,a.id LIMIT 500`)
 		if e != nil {
 			return nil, e
 		}
@@ -237,38 +237,12 @@ func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual
 	}
 	out := []*service.AttributionJob{}
 	for _, id := range uniquePositiveInt64s(ids) {
-		existing, e := scanAttribution(tx.QueryRowContext(ctx, `SELECT `+attributionColumns+` FROM model_attribution_jobs WHERE account_id=$1 AND status IN ('queued','running')`, id))
-		if e == nil {
-			out = append(out, existing)
-			continue
-		}
-		if !errors.Is(e, sql.ErrNoRows) {
-			return nil, e
-		}
-		a, s, skip, e := attributionSnapshot(ctx, tx, id, c)
-		if e != nil {
-			return nil, e
-		}
-		if a == nil {
-			return nil, service.ErrAttributionNotFound
-		}
-		state := "queued"
 		source := "scheduled"
 		if manual {
 			source = "manual"
 		}
-		if skip != "" {
-			state = "skipped"
-		}
-		b, e := json.Marshal(s)
+		j, e := enqueueAttribution(ctx, tx, id, c, source, "")
 		if e != nil {
-			return nil, e
-		}
-		j, e := scanAttribution(tx.QueryRowContext(ctx, `INSERT INTO model_attribution_jobs(account_id,account_name,source,status,reason,snapshot,authorization_digest,fence_digest,finished_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,CASE WHEN $4::text='skipped' THEN NOW() ELSE NULL END) RETURNING `+attributionColumns, id, a.Name, source, state, skip, b, s.Authorization, s.Fence))
-		if e != nil {
-			return nil, e
-		}
-		if _, e = tx.ExecContext(ctx, `INSERT INTO model_attribution_state(account_id,next_due_at) VALUES($1,NOW()+interval '10 minutes') ON CONFLICT(account_id) DO UPDATE SET next_due_at=EXCLUDED.next_due_at`, id); e != nil {
 			return nil, e
 		}
 		out = append(out, j)
@@ -279,6 +253,40 @@ func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual
 		}
 	}
 	return out, tx.Commit()
+}
+
+func enqueueAttribution(ctx context.Context, tx *sql.Tx, id int64, c service.AttributionConfig, source, model string) (*service.AttributionJob, error) {
+	existing, err := scanAttribution(tx.QueryRowContext(ctx, `SELECT `+attributionColumns+` FROM model_attribution_jobs WHERE account_id=$1 AND status IN ('queued','running')`, id))
+	if err == nil {
+		return existing, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	a, s, skip, err := attributionSnapshot(ctx, tx, id, c)
+	if err != nil {
+		return nil, err
+	}
+	if a == nil {
+		return nil, service.ErrAttributionNotFound
+	}
+	if model != "" {
+		s.Policy.Model = model
+	}
+	state := "queued"
+	if skip != "" {
+		state = "skipped"
+	}
+	b, err := json.Marshal(s)
+	if err != nil {
+		return nil, err
+	}
+	j, err := scanAttribution(tx.QueryRowContext(ctx, `INSERT INTO model_attribution_jobs(account_id,account_name,source,status,reason,snapshot,authorization_digest,fence_digest,finished_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,CASE WHEN $4::text='skipped' THEN NOW() ELSE NULL END) RETURNING `+attributionColumns, id, a.Name, source, state, skip, b, s.Authorization, s.Fence))
+	if err != nil {
+		return nil, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO model_attribution_state(account_id,next_due_at) VALUES($1,NOW()+interval '10 minutes') ON CONFLICT(account_id) DO UPDATE SET next_due_at=EXCLUDED.next_due_at`, id)
+	return j, err
 }
 
 func (r *attributionRepository) Claim(ctx context.Context) (*service.AttributionJob, error) {
@@ -391,7 +399,9 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 				return e
 			}
 			j.Result.Action = "unchanged"
-			currentPolicy := service.AttributionDigest([]any{s.GroupID, s.Policy})
+			// Initial tests may use a different probe from the periodic group policy.
+			// Keep that baseline distinct so the next periodic result synchronizes it.
+			currentPolicy := service.AttributionDigest([]any{j.Snapshot.GroupID, j.Snapshot.Policy})
 			if j.Status == "mismatch" || verdict != "passed" || version != s.ConfigVersion || auth != s.Authorization || policy != currentPolicy {
 				models := s.Policy.HighModels
 				action := "high"

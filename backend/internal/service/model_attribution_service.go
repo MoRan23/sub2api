@@ -47,11 +47,18 @@ func (s *ModelAttributionService) Stop() {
 }
 func (s *ModelAttributionService) schedule(ctx context.Context) {
 	defer s.wg.Done()
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
+	var nextPeriodic time.Time
 	for {
-		if _, err := s.repo.Enqueue(ctx, nil, false); err != nil && !errors.Is(err, ErrAttributionDisabled) && ctx.Err() == nil {
-			slog.Warn("model_attribution_schedule_failed")
+		if err := s.repo.EnqueueNewAccounts(ctx); err != nil && ctx.Err() == nil {
+			slog.Warn("new_account_tests_schedule_failed")
+		}
+		if !time.Now().Before(nextPeriodic) {
+			if _, err := s.repo.Enqueue(ctx, nil, false); err != nil && !errors.Is(err, ErrAttributionDisabled) && ctx.Err() == nil {
+				slog.Warn("model_attribution_schedule_failed")
+			}
+			nextPeriodic = time.Now().Add(30 * time.Second)
 		}
 		select {
 		case <-ctx.Done():

@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -26,6 +27,31 @@ func newDuplicateAccountRepoStub() *duplicateAccountRepoStub {
 	return &duplicateAccountRepoStub{
 		sparkShadowRepoStub: newSparkShadowRepoStub(),
 		accountGroupsOf:     make(map[int64][]AccountGroup),
+	}
+}
+
+func TestAdminService_CreateAccountOAuthPublishesGroupsAtomically(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("failure_%t", fail), func(t *testing.T) {
+			repo := newDuplicateAccountRepoStub()
+			if fail {
+				repo.atomicCreateErr = errors.New("synthetic persistence failure")
+			}
+			svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+			a, err := svc.CreateAccount(context.Background(), &CreateAccountInput{
+				Name: "new-oauth", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+				Credentials: map[string]any{"access_token": "synthetic", "refresh_token": "synthetic-refresh"},
+				Concurrency: 1, GroupIDs: []int64{20, 10}, SkipDefaultGroupBind: true, SkipMixedChannelCheck: true,
+			})
+			if fail {
+				require.ErrorIs(t, err, repo.atomicCreateErr)
+				require.Nil(t, a)
+				require.Empty(t, repo.accounts)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, []AccountGroup{{AccountID: a.ID, GroupID: 20, Priority: 1}, {AccountID: a.ID, GroupID: 10, Priority: 2}}, repo.accountGroupsOf[a.ID])
+		})
 	}
 }
 

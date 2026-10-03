@@ -24,6 +24,7 @@ func TestAttributionConfigSelectionAndMapping(t *testing.T) {
 	c := DefaultAttributionConfig()
 	require.False(t, c.Enabled)
 	require.Equal(t, AttributionDefaultModel, c.Default.Model)
+	require.Equal(t, NewAccountTestConfig{Attribution: true, Pelican: true, Model: AttributionDefaultModel}, c.NewAccountTests)
 	c.Enabled = true
 	_, err := NormalizeAttributionConfig(c)
 	require.ErrorIs(t, err, ErrAttributionInvalid)
@@ -50,6 +51,25 @@ func TestAttributionConfigSelectionAndMapping(t *testing.T) {
 		_, err = AttributionBaseURL(url)
 		require.ErrorIs(t, err, ErrAttributionInvalid)
 	}
+}
+
+func TestAttributionNewAccountConfig(t *testing.T) {
+	c := DefaultAttributionConfig()
+	c.NewAccountTests = NewAccountTestConfig{Model: " gpt-6-sol "}
+	got, err := NormalizeAttributionConfig(c)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-6-sol", got.NewAccountTests.Model)
+	require.False(t, got.NewAccountTests.Attribution)
+	require.False(t, got.NewAccountTests.Pelican)
+	for _, model := range []string{"gpt-*", "two models", "gpt\n6", strings.Repeat("a", 201)} {
+		c.NewAccountTests.Model = model
+		_, err = NormalizeAttributionConfig(c)
+		require.ErrorIs(t, err, ErrAttributionInvalid)
+	}
+	c.NewAccountTests.Model = ""
+	got, err = NormalizeAttributionConfig(c)
+	require.NoError(t, err)
+	require.Equal(t, AttributionDefaultModel, got.NewAccountTests.Model)
 }
 func TestAttributionSkipConditions(t *testing.T) {
 	now := time.Now()
