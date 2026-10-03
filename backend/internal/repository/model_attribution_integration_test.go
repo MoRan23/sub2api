@@ -199,6 +199,15 @@ func TestAttributionFencesRefreshAndGroupBaseline(t *testing.T) {
 	require.Equal(t, g2.ID, j.Snapshot.GroupID)
 	require.Equal(t, "high", j.Result.Action)
 	require.Contains(t, attributionMapping(t, ar, a.ID), "group-high-2")
+	c, err = r.Config(ctx)
+	require.NoError(t, err)
+	c.GroupPriority = []int64{g1.ID, g2.ID}
+	_, err = r.SaveConfig(ctx, c)
+	require.NoError(t, err)
+	j = attributionRun(t, r, a.ID, "mismatch")
+	require.Equal(t, g1.ID, j.Snapshot.GroupID, "global order overrides account membership priority")
+	require.Equal(t, "low", j.Result.Action)
+	require.Contains(t, attributionMapping(t, ar, a.ID), "group-low")
 }
 
 func TestAttributionQueueLeasesRetentionAndRestart(t *testing.T) {
@@ -258,7 +267,7 @@ func TestAttributionQueueLeasesRetentionAndRestart(t *testing.T) {
 	for j := range claims {
 		claimed = append(claimed, j)
 	}
-	require.Len(t, claimed, 3)
+	require.Len(t, claimed, 5, "all accounts are claimed without a global capacity limit")
 	old := claimed[0]
 	ok, err := r.Heartbeat(ctx, old)
 	require.NoError(t, err)
@@ -267,8 +276,8 @@ func TestAttributionQueueLeasesRetentionAndRestart(t *testing.T) {
 	require.NoError(t, err)
 	next, err := r.Claim(ctx)
 	require.NoError(t, err)
-	require.NotNil(t, next)
-	require.NotEqual(t, old.ID, next.ID)
+	require.Nil(t, next, "expired work is never replayed")
+	next = claimed[1]
 	expired, err := r.Get(ctx, old.ID)
 	require.NoError(t, err)
 	require.Equal(t, "interrupted", expired.Reason)

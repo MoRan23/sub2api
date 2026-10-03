@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -97,7 +99,7 @@ func (e candyTestError) Error() string                { return string(e) }
 func (e candyTestError) CandyTestFailureCode() string { return string(e) }
 
 func safeCandyTestError(ctx context.Context, err error) error {
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return candyTestError("timeout")
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
@@ -106,6 +108,28 @@ func safeCandyTestError(ctx context.Context, err error) error {
 	var safe CandyTestFailure
 	if errors.As(err, &safe) {
 		return candyTestError(safe.CandyTestFailureCode())
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return candyTestError("upstream_timeout")
+	}
+	var failover *UpstreamFailoverError
+	if errors.As(err, &failover) {
+		if gjson.GetBytes(failover.ResponseBody, "error.type").String() == "first_output_timeout" {
+			return candyTestError("upstream_first_output_timeout")
+		}
+		if failover.StatusCode >= 400 && failover.StatusCode <= 599 {
+			return candyTestError(fmt.Sprintf("upstream_http_%d", failover.StatusCode))
+		}
+	}
+	var network net.Error
+	if errors.As(err, &network) {
+		if network.Timeout() {
+			return candyTestError("upstream_timeout")
+		}
+		return candyTestError("upstream_connection_failed")
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return candyTestError("upstream_stream_interrupted")
 	}
 	return candyTestError("upstream_failed")
 }

@@ -38,6 +38,7 @@ export interface CandyTestExecution {
   }
   completed: boolean
   duration_ms: number
+  retries?: number
 }
 
 export interface CandyTestItem {

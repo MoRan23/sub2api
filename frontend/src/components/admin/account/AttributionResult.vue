@@ -7,6 +7,7 @@
       <div><dt class="text-gray-500">{{ t('attribution.version') }} / {{ t('attribution.group') }}</dt><dd>{{ job.snapshot.config_version }} / {{ job.snapshot.group_id || t('attribution.allGroups') }}</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.time') }}</dt><dd>{{ formatDateTime(job.finished_at || job.started_at || job.created_at) }}</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.duration') }}</dt><dd>{{ (job.result.duration_ms / 1000).toFixed(1) }} s</dd></div>
+      <div v-if="job.result.retries"><dt class="text-gray-500">{{ t('attribution.retries') }}</dt><dd>{{ job.result.retries }}</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.action') }}</dt><dd>{{ t(`attribution.actions.${job.result.action || 'none'}`) }}</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.source') }}</dt><dd>{{ t(`attribution.${job.source}`) }}</dd></div>
     </dl>
@@ -29,6 +30,6 @@ import { formatDateTime } from '@/utils/format'
 import type { AttributionJob } from '@/api/admin/modelAttribution'
 defineProps<{ job: AttributionJob }>()
 const { t, te } = useI18n()
-const reason = (code: string) => te(`attribution.reasons.${code}`) ? t(`attribution.reasons.${code}`) : code
+const reason = (code: string) => /^upstream_http_\d{3}$/.test(code) ? t('candyTests.upstreamHttpError', { status: code.slice(-3) }) : te(`attribution.reasons.${code}`) ? t(`attribution.reasons.${code}`) : te(`candyTests.failureReasons.${code}`) ? t(`candyTests.failureReasons.${code}`) : code
 const percent = (p: number) => `${(p * 100).toFixed(2)}%`
 </script>

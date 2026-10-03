@@ -96,7 +96,7 @@ func TestCandyPurposeOneSendAndContext(t *testing.T) {
 	require.ErrorIs(t, detached.Err(), context.Canceled)
 }
 
-func TestCandyTransportHTTPFailuresNeverRetryOrChangeAccount(t *testing.T) {
+func TestCandyTransportHTTPFailuresRetryTransientOnlyWithoutChangingAccount(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, path := range []string{"responses", "passthrough", "chat"} {
 		for _, status := range []int{400, 401, 403, 429, 500} {
@@ -111,15 +111,23 @@ func TestCandyTransportHTTPFailuresNeverRetryOrChangeAccount(t *testing.T) {
 					account.Extra[openai_compat.ExtraKeyResponsesMode] = string(openai_compat.ResponsesSupportModeAuto)
 				}
 				repo := &stubOpenAIAccountRepo{accounts: []Account{*account}}
-				upstream := &httpUpstreamRecorder{responses: []*http.Response{newOpenAIRejectedFieldTestResponse(status, `{"error":{"message":"Unsupported parameter: max_output_tokens","param":"max_output_tokens"}}`)}}
+				attempts := 1
+				if status == 429 || status == 500 {
+					attempts = 3
+				}
+				upstream := &httpUpstreamRecorder{}
+				for range attempts {
+					upstream.responses = append(upstream.responses, newOpenAIRejectedFieldTestResponse(status, `{"error":{"message":"Unsupported parameter: max_output_tokens","param":"max_output_tokens"}}`))
+				}
 				gateway := newOpenAIRejectedFieldTestService(upstream)
 				gateway.accountRepo = repo
 				// Any unguarded repository mutation hits the embedded nil implementation.
 				gateway.rateLimitService = &RateLimitService{accountRepo: repo}
 				runner := newCandySyntheticCatalogTransport(repo, gateway)
-				_, err := runner.Execute(context.Background(), &CandyTestItem{AccountID: account.ID, Model: "gpt-5.5", PromptVersion: CandyTestPromptVersion})
+				result, err := runner.Execute(context.Background(), &CandyTestItem{AccountID: account.ID, Model: "gpt-5.5", PromptVersion: CandyTestPromptVersion})
 				require.Error(t, err)
-				require.Len(t, upstream.bodies, 1)
+				require.Len(t, upstream.bodies, attempts)
+				require.Equal(t, attempts-1, result.Retries)
 				require.True(t, repo.accounts[0].Schedulable)
 				require.Equal(t, StatusActive, repo.accounts[0].Status)
 				require.False(t, repo.accounts[0].openAICandyTest, "the repository account must not be marked or mutated")
@@ -165,6 +173,63 @@ func TestCandySafeErrorNeverContainsProviderBody(t *testing.T) {
 	err := safeCandyTestError(context.Background(), errors.New("Bearer synthetic-sensitive upstream arbitrary body"))
 	require.EqualError(t, err, "upstream_failed")
 }
+
+func TestCandyAndAttributionTransportRetryRecoveryAndAuthorizationFence(t *testing.T) {
+	for _, kind := range []string{"pelican", "attribution", "authorization_changed", "configuration_changed"} {
+		t.Run(kind, func(t *testing.T) {
+			account := newOpenAIRejectedFieldTestAccount()
+			repo := &stubOpenAIAccountRepo{accounts: []Account{*account}}
+			terminal := "data: {\"type\":\"response.completed\",\"response\":{\"model\":\"gpt-6-astra\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"synthetic answer\"}]}]}}\n\n"
+			failed := newOpenAIRejectedFieldTestResponse(503, `{"error":{"message":"temporarily unavailable"}}`)
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{failed, {StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(terminal))}}}
+			if kind == "authorization_changed" {
+				failed.Body = &diagnosticCloseHook{ReadCloser: failed.Body, close: func() { repo.accounts[0].Credentials["api_key"] = "synthetic-replaced-key" }}
+			}
+			ctx := context.Background()
+			if kind == "configuration_changed" {
+				ctx = context.WithValue(ctx, diagnosticRetryValidationKey{}, func(context.Context) error {
+					if len(upstream.bodies) > 0 {
+						return candyTestError("configuration_or_authorization_changed")
+					}
+					return nil
+				})
+			}
+			gateway := newOpenAIRejectedFieldTestService(upstream)
+			gateway.accountRepo = repo
+			gateway.rateLimitService = &RateLimitService{accountRepo: repo}
+			runner := newCandySyntheticCatalogTransport(repo, gateway)
+			var result *CandyTestExecution
+			var err error
+			if kind == "pelican" {
+				result, err = runner.Execute(ctx, &CandyTestItem{AccountID: account.ID, Model: "gpt-6-astra", PromptVersion: CandyTestPromptVersion})
+			} else {
+				result, err = runner.Probe(ctx, account.ID, "gpt-6-astra", "synthetic challenge")
+			}
+			if kind == "authorization_changed" || kind == "configuration_changed" {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "changed")
+				require.Len(t, upstream.bodies, 1, "a changed authorization/config must prevent another paid request")
+			} else {
+				require.NoError(t, err)
+				require.True(t, result.Completed)
+				require.Equal(t, 1, result.Retries)
+				require.Len(t, upstream.bodies, 2)
+				require.Equal(t, "gpt-6-astra", gjson.GetBytes(upstream.bodies[1], "model").String())
+				require.Equal(t, gjson.GetBytes(upstream.bodies[0], "input").Raw, gjson.GetBytes(upstream.bodies[1], "input").Raw)
+			}
+			require.True(t, repo.accounts[0].Schedulable)
+		})
+
+	}
+
+}
+
+type diagnosticCloseHook struct {
+	io.ReadCloser
+	close func()
+}
+
+func (r *diagnosticCloseHook) Close() error { r.close(); return r.ReadCloser.Close() }
 
 func TestCandyOAuthDefaultSystemAndRelatedCredentialKinds(t *testing.T) {
 	for _, family := range OpenAIOAuthOSFamilies() {
@@ -222,11 +287,11 @@ func TestCandySparkUsesParentDefaultIdentity(t *testing.T) {
 	shadow.Credentials = map[string]any{"model_mapping": map[string]any{"gpt-5.5": "gpt-5.5"}}
 	repo := newAuthorizedOpenAIOAuthTestRepo(parent)
 	repo.accounts[shadow.ID] = shadow
-	upstream := &httpUpstreamRecorder{responses: []*http.Response{newOpenAIRejectedFieldTestResponse(429, `{"error":{"message":"synthetic denied"}}`)}}
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{newOpenAIRejectedFieldTestResponse(403, `{"error":{"message":"synthetic denied"}}`)}}
 	gateway := newOpenAIRejectedFieldTestService(upstream)
 	gateway.accountRepo = repo
 	_, err = newCandySyntheticCatalogTransport(repo, gateway).Execute(context.Background(), &CandyTestItem{AccountID: shadow.ID, Model: "gpt-5.5", PromptVersion: CandyTestPromptVersion})
-	require.EqualError(t, err, "upstream_http_429")
+	require.EqualError(t, err, "upstream_http_403")
 	require.Len(t, upstream.bodies, 1)
 	require.Equal(t, OpenAIOSMacOS, openai.DetectOSFamilyFromUserAgent(upstream.lastReq.Header.Get("User-Agent")))
 	require.True(t, parent.Schedulable)

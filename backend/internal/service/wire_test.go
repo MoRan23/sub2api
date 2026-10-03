@@ -52,8 +52,8 @@ func (r *candyProviderBlockingRepository) Claim(ctx context.Context) (*CandyTest
 
 func TestProvideAccountCandyTestService_DefersStartUntilReady(t *testing.T) {
 	repo := &candyProviderBlockingRepository{
-		entered: make(chan struct{}, CandyTestMaxConcurrent),
-		stopped: make(chan struct{}, CandyTestMaxConcurrent),
+		entered: make(chan struct{}, 1),
+		stopped: make(chan struct{}, 1),
 	}
 	// The empty transport is never called: the fixture only exercises lifecycle
 	// wiring against blocked repository operations, without network or storage.
@@ -66,19 +66,15 @@ func TestProvideAccountCandyTestService_DefersStartUntilReady(t *testing.T) {
 	}
 	svc.Start()
 	deadline := time.After(3 * time.Second)
-	for range CandyTestMaxConcurrent {
-		select {
-		case <-repo.entered:
-		case <-deadline:
-			t.Fatal("provider did not start the candy queue workers")
-		}
+	select {
+	case <-repo.entered:
+	case <-deadline:
+		t.Fatal("provider did not start the candy dispatcher")
 	}
 	svc.Stop()
-	for range CandyTestMaxConcurrent {
-		select {
-		case <-repo.stopped:
-		default:
-			t.Fatal("Stop returned while a queue repository call was still running")
-		}
+	select {
+	case <-repo.stopped:
+	default:
+		t.Fatal("Stop returned while a repository call was still running")
 	}
 }

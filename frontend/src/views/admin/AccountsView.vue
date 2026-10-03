@@ -501,7 +501,7 @@
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
     <AccountCandyTestModal :show="showCandyTest" :account-ids="candyTestAccountIds" :accounts="accounts" @close="showCandyTest = false" @updated="reload" />
-    <AttributionModal v-if="showAttribution" :show="showAttribution" :account-ids="attributionAccountIds" @close="showAttribution = false; reload()" @updated="reload" />
+    <AttributionModal v-if="showAttribution" :show="showAttribution" :account-ids="attributionAccountIds" @close="showAttribution = false" @updated="reload" />
     <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :codex-auth-exporting="codexAuthExporting || exportingData" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @candy-test="openCandyTest([$event.id])" @export-codex-auth="handleExportCodexAuth" @open-auth-parent="handleOpenAuthParent" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />

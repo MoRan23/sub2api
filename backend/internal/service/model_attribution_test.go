@@ -71,6 +71,31 @@ func TestAttributionNewAccountConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, AttributionDefaultModel, got.NewAccountTests.Model)
 }
+
+func TestAttributionGlobalGroupPriority(t *testing.T) {
+	c := DefaultAttributionConfig()
+	c.Groups = []AttributionGroupPolicy{
+		{GroupID: 1, Enabled: true, AttributionPolicy: AttributionPolicy{Model: "first", HighModels: []string{"high-1"}, LowModels: []string{"low-1"}}},
+		{GroupID: 2, Enabled: true, AttributionPolicy: AttributionPolicy{Model: "second", HighModels: []string{"high-2"}, LowModels: []string{"low-2"}}},
+		{GroupID: 3, Enabled: false},
+	}
+	c.GroupPriority = []int64{3, 2, 1}
+	groups := []AccountGroup{{GroupID: 1, Priority: -10}, {GroupID: 2, Priority: 10}, {GroupID: 3, Priority: -20}}
+	policy, id := ResolveAttributionPolicy(c, groups)
+	require.EqualValues(t, 2, id)
+	require.Equal(t, []string{"high-2"}, policy.HighModels)
+	require.Equal(t, []string{"low-2"}, policy.LowModels)
+	c.GroupPriority = []int64{1}
+	_, id = ResolveAttributionPolicy(c, groups)
+	require.EqualValues(t, 1, id)
+	_, id = ResolveAttributionPolicy(c, []AccountGroup{{GroupID: 3}})
+	require.Zero(t, id)
+	for _, invalid := range [][]int64{{1, 1}, {0}, {-1}, make([]int64, 1001)} {
+		c.GroupPriority = invalid
+		_, err := NormalizeAttributionConfig(c)
+		require.ErrorIs(t, err, ErrAttributionInvalid)
+	}
+}
 func TestAttributionSkipConditions(t *testing.T) {
 	now := time.Now()
 	past := now.Add(-time.Second)

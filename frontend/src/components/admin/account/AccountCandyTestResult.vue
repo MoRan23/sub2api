@@ -56,5 +56,6 @@ const fields = computed(() => [
   { label: t('candyTests.startedAt'), value: formatDateTime(props.item.started_at) || '—' },
   { label: t('candyTests.completedAt'), value: formatDateTime(props.item.finished_at) || '—' },
   { label: t('candyTests.duration'), value: props.item.execution ? t('candyTests.seconds', { seconds: (props.item.execution.duration_ms / 1000).toFixed(1) }) : '—' },
+  ...(props.item.execution?.retries ? [{ label: t('candyTests.retries'), value: String(props.item.execution.retries) }] : []),
 ])
 </script>

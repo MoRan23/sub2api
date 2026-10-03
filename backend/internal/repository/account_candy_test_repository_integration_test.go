@@ -36,12 +36,14 @@ func candyIntegrationBatch(t *testing.T, repo service.CandyTestRepository, ids .
 	return b
 }
 
-func TestCandyRepositoryGlobalCapacityAndAccountSerialization(t *testing.T) {
+func TestCandyRepositoryParallelAccountsAndDeduplication(t *testing.T) {
 	ctx := context.Background()
 	repo := NewAccountCandyTestRepository(integrationDB)
 	ids := []int64{candyIntegrationAccount(t), candyIntegrationAccount(t), candyIntegrationAccount(t), candyIntegrationAccount(t)}
 	candyIntegrationBatch(t, repo, ids...)
-	candyIntegrationBatch(t, repo, ids[0])
+	duplicate := candyIntegrationBatch(t, repo, ids[0])
+	require.Equal(t, "skipped", duplicate.Items[0].Status)
+	require.Equal(t, "already_running", duplicate.Items[0].FailureCode)
 	var wg sync.WaitGroup
 	var ready sync.WaitGroup
 	ready.Add(12)
@@ -70,7 +72,7 @@ func TestCandyRepositoryGlobalCapacityAndAccountSerialization(t *testing.T) {
 	close(start)
 	wg.Wait()
 	require.Empty(t, claimErrors)
-	require.Len(t, claimed, 3)
+	require.Len(t, claimed, 4, "every distinct account starts without waiting for capacity")
 	seen := map[int64]bool{}
 	for _, item := range claimed {
 		require.False(t, seen[item.AccountID])
@@ -89,10 +91,10 @@ func TestCandyRepositoryGlobalCapacityAndAccountSerialization(t *testing.T) {
 	require.True(t, ok)
 	item, err := repo.Claim(ctx)
 	require.NoError(t, err)
-	require.NotNil(t, item)
+	require.Nil(t, item, "duplicate requests must not create a later paid inference")
 }
 
-func TestCandyRepositoryQueuedSameAccountWaitsAcrossInstances(t *testing.T) {
+func TestCandyRepositorySameAccountDeduplicatesAcrossInstances(t *testing.T) {
 	ctx := context.Background()
 	repo := NewAccountCandyTestRepository(integrationDB)
 	firstID, otherID := candyIntegrationAccount(t), candyIntegrationAccount(t)
@@ -123,7 +125,7 @@ func TestCandyRepositoryQueuedSameAccountWaitsAcrossInstances(t *testing.T) {
 	close(start)
 	wg.Wait()
 	require.Empty(t, claimErrors)
-	require.Len(t, claimed, 2, "duplicate account remains queued despite the third global slot being free")
+	require.Len(t, claimed, 2, "only one active test per account across instances")
 	for _, item := range claimed {
 		if item.AccountID == firstID {
 			item.Status = "failed"
@@ -134,8 +136,7 @@ func TestCandyRepositoryQueuedSameAccountWaitsAcrossInstances(t *testing.T) {
 	}
 	next, err := NewAccountCandyTestRepository(integrationDB).Claim(ctx)
 	require.NoError(t, err)
-	require.NotNil(t, next)
-	require.Equal(t, firstID, next.AccountID)
+	require.Nil(t, next, "duplicate account does not leave pending work behind")
 }
 
 func TestCandyRepositoryCancellationLeaseExpiryAndLateCompletion(t *testing.T) {

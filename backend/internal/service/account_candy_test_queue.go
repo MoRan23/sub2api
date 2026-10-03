@@ -20,11 +20,12 @@ type AccountCandyTestService struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
+	wake      chan struct{}
 }
 
 func NewAccountCandyTestService(repo CandyTestRepository, executor CandyTestExecutor) *AccountCandyTestService {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &AccountCandyTestService{repo: repo, executor: executor, ctx: ctx, cancel: cancel}
+	return &AccountCandyTestService{repo: repo, executor: executor, ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1)}
 }
 
 func candyAccountIDs(ids []int64) ([]int64, error) {
@@ -115,7 +116,14 @@ func (s *AccountCandyTestService) Create(ctx context.Context, request *CandyTest
 		}
 		items = append(items, item)
 	}
-	return s.repo.Create(ctx, &copyRequest, items)
+	batch, err := s.repo.Create(ctx, &copyRequest, items)
+	if err == nil {
+		select {
+		case s.wake <- struct{}{}:
+		default:
+		}
+	}
+	return batch, err
 }
 
 func (s *AccountCandyTestService) Batch(ctx context.Context, id string, page, size int) (*CandyTestBatch, error) {
@@ -143,10 +151,8 @@ func (s *AccountCandyTestService) Start() {
 		return
 	}
 	s.startOnce.Do(func() {
-		s.wg.Add(CandyTestMaxConcurrent)
-		for range CandyTestMaxConcurrent {
-			go s.worker()
-		}
+		s.wg.Add(1)
+		go s.worker()
 	})
 }
 
@@ -177,13 +183,18 @@ func (s *AccountCandyTestService) worker() {
 		item, err := s.repo.Claim(ctx)
 		cancel()
 		if err == nil && item != nil {
-			s.execute(item)
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				s.execute(item)
+			}()
 			continue
 		}
 		select {
 		case <-s.ctx.Done():
 			return
 		case <-ticker.C:
+		case <-s.wake:
 		}
 	}
 }

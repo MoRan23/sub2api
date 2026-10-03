@@ -13,7 +13,7 @@ vi.mock('@/api/admin/modelAttribution', () => ({ attributionAPI: api }))
 vi.mock('@/api/admin/groups', async () => ({ ...await vi.importActual<typeof import('@/api/admin/groups')>('@/api/admin/groups'), getAllIncludingInactive: vi.fn().mockResolvedValue([{ id: 10, name: 'Pro group' }, { id: 20, name: 'Other group' }]) }))
 vi.mock('vue-i18n', async () => ({ ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'), useI18n: () => ({ t: (key: string) => key, te: () => true }) }))
 const policy = { model: 'gpt-6-astra', high_models: ['gpt-6-astra'], low_models: ['gpt-6-luna'] }
-function config(): AttributionConfig { return { version: 1, enabled: false, base_url: '', default: structuredClone(policy), groups: [], new_account_tests: { attribution: true, pelican: true, model: 'gpt-6-astra' } } }
+function config(): AttributionConfig { return { version: 1, enabled: false, base_url: '', default: structuredClone(policy), groups: [], group_priority: [], new_account_tests: { attribution: true, pelican: true, model: 'gpt-6-astra' } } }
 function job(id = 1, status: AttributionJob['status'] = 'passed'): AttributionJob {
   return { id, status, account_id: 42, account_name: 'Synthetic account', source: 'manual', snapshot: { config_version: 2, group_id: 0, policy: structuredClone(policy) }, result: { duration_ms: 1200, action: 'high', analysis: { prediction: 'gpt-6-astra', probability: 0.8, used_outputs: 3, results: [{ model: 'gpt-6-astra', probability: 0.8 }, { model: 'gpt-6-luna', probability: 0.2 }] } }, created_at: '2026-10-01T00:00:00Z', ...(status === 'running' ? {} : { finished_at: '2026-10-01T00:00:01Z' }) }
 }
@@ -74,6 +74,20 @@ describe('attribution account UI', () => {
 })
 
 describe('attribution configuration', () => {
+  it('saves group priority globally without changing independent policies', async () => {
+    api.save.mockImplementation(async (c: AttributionConfig) => ({ ...c, version: 2 }))
+    const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
+    const priority = wrapper.get('[data-testid="global-group-priority"]')
+    await priority.get('select').setValue(10)
+    await priority.get('[data-testid="priority-add"]').trigger('click')
+    await priority.get('select').setValue(20)
+    await priority.get('[data-testid="priority-add"]').trigger('click')
+    await priority.findAll('[data-testid="priority-up"]')[1].trigger('click')
+    expect(priority.findAll('[data-testid="priority-row"]')[0].text()).toContain('Other group')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ group_priority: [20, 10], groups: [] }))
+    wrapper.unmount()
+  })
   it('saves independent initial test switches and a custom model without enabling periodic detection', async () => {
     api.save.mockImplementation(async (c: AttributionConfig) => ({ ...c, version: 2 }))
     const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
@@ -106,7 +120,7 @@ describe('attribution configuration', () => {
     api.save.mockImplementation(async (c: AttributionConfig) => ({ ...c, version: c.version + 1 }))
     const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
     expect(wrapper.findAll('[data-testid="whitelist"]')).toHaveLength(2)
-    await wrapper.get('select').setValue(10)
+    await wrapper.get('select[aria-label="attribution.group"]').setValue(10)
     await wrapper.findAll('button').find(b => b.text() === 'attribution.addGroup')!.trigger('click')
     expect(wrapper.text()).toContain('Pro group'); expect(wrapper.text()).toContain('attribution.inherit')
     await wrapper.get('[data-testid="attribution-url"]').setValue('http://localhost:5000')

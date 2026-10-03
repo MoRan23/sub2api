@@ -51,6 +51,18 @@ func (r *AccountCandyTestTransport) Probe(ctx context.Context, accountID int64, 
 }
 
 func (r *AccountCandyTestTransport) executeTextProbe(parent context.Context, item *CandyTestItem, prompt, instructions string, checkCatalog bool) (*CandyTestExecution, error) {
+	var authorization func(context.Context) error
+	return retryDiagnostic(parent, time.Second, func(ctx context.Context) (*CandyTestExecution, error) {
+		if authorization != nil {
+			if err := authorization(ctx); err != nil {
+				return nil, err
+			}
+		}
+		return r.executeTextProbeOnce(ctx, item, prompt, instructions, checkCatalog, &authorization)
+	})
+}
+
+func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context, item *CandyTestItem, prompt, instructions string, checkCatalog bool, authorization *func(context.Context) error) (*CandyTestExecution, error) {
 	started := time.Now()
 	if r == nil || r.accounts == nil || r.gateway == nil || item == nil {
 		return nil, candyTestError("runner_unavailable")
@@ -132,6 +144,18 @@ func (r *AccountCandyTestTransport) executeTextProbe(parent context.Context, ite
 			}
 		}
 		return nil
+	}
+	if *authorization == nil {
+		*authorization = attempt.validate
+	} else {
+		// Keep the first attempt's authorization fence at the final send boundary.
+		current, original := attempt.validate, *authorization
+		attempt.validate = func(ctx context.Context) error {
+			if err := original(ctx); err != nil {
+				return err
+			}
+			return current(ctx)
+		}
 	}
 	session := uuid.NewString()
 	payload := map[string]any{

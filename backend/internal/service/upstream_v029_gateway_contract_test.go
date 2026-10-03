@@ -65,11 +65,14 @@ func TestUpstreamV029CandyStreamRecoveryRequiresSuccessfulTerminal(t *testing.T)
 				}
 				repo := &stubOpenAIAccountRepo{accounts: []Account{*account}}
 				stream := upstreamV029CandyFailedStream(path, scenario)
-				upstream := &httpUpstreamRecorder{responses: []*http.Response{{
-					StatusCode: http.StatusOK,
-					Header:     http.Header{"Content-Type": {"text/event-stream"}},
-					Body:       io.NopCloser(strings.NewReader(stream)),
-				}}}
+				upstream := &httpUpstreamRecorder{}
+				for range 3 {
+					upstream.responses = append(upstream.responses, &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": {"text/event-stream"}},
+						Body:       io.NopCloser(strings.NewReader(stream)),
+					})
+				}
 				gateway := newOpenAIRejectedFieldTestService(upstream)
 				gateway.accountRepo = repo
 				// Any health mutation reaches an unimplemented repository method.
@@ -80,7 +83,8 @@ func TestUpstreamV029CandyStreamRecoveryRequiresSuccessfulTerminal(t *testing.T)
 				require.Error(t, err)
 				require.NotNil(t, result)
 				require.False(t, result.Completed)
-				require.Len(t, upstream.requests, 1, "failed or incomplete streams must not resend inference")
+				require.Len(t, upstream.requests, 3, "failed streams allow only two explicit retries")
+				require.Equal(t, 2, result.Retries)
 				require.True(t, repo.accounts[0].Schedulable)
 				require.Equal(t, StatusActive, repo.accounts[0].Status)
 			})

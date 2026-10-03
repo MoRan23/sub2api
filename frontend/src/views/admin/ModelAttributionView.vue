@@ -15,6 +15,19 @@
             <datalist id="attribution-models"><option v-for="id in candidates" :key="id" :value="id" /></datalist>
             <AttributionPolicyFields v-model="config.default" />
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('attribution.mappingHelp') }}</p>
+            <div class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="global-group-priority">
+              <h3 class="text-sm font-medium">{{ t('attribution.priority.title') }}</h3>
+              <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('attribution.priority.help') }}</p>
+              <div class="flex gap-3"><select v-model="priorityGroup" class="input flex-1" :aria-label="t('attribution.priority.title')" data-testid="priority-group"><option :value="0">{{ t('attribution.group') }}</option><option v-for="group in priorityAvailableGroups" :key="group.id" :value="group.id">{{ group.name }}</option></select><button type="button" class="btn btn-secondary" :disabled="!priorityGroup" data-testid="priority-add" @click="addPriority">{{ t('attribution.priority.add') }}</button></div>
+              <ol class="space-y-2">
+                <li v-for="(id, index) in config.group_priority" :key="id" class="flex items-center gap-3 text-sm" data-testid="priority-row">
+                  <span class="min-w-0 flex-1">{{ index + 1 }}. {{ groups.find(g => g.id === id)?.name || `#${id}` }}</span>
+                  <button type="button" class="btn btn-secondary btn-sm" :disabled="index === 0" data-testid="priority-up" @click="movePriority(index, -1)">{{ t('attribution.priority.up') }}</button>
+                  <button type="button" class="btn btn-secondary btn-sm" :disabled="index === config.group_priority.length - 1" data-testid="priority-down" @click="movePriority(index, 1)">{{ t('attribution.priority.down') }}</button>
+                  <button type="button" class="text-xs text-red-600 dark:text-red-400" @click="config.group_priority.splice(index, 1)">{{ t('attribution.remove') }}</button>
+                </li>
+              </ol>
+            </div>
           </section>
           <section class="space-y-4 rounded-xl border border-gray-200 bg-white p-5 dark:border-dark-600 dark:bg-dark-800" data-testid="new-account-tests">
             <h2 class="font-semibold">{{ t('attribution.newAccount.title') }}</h2>
@@ -55,14 +68,27 @@ const config = ref<AttributionConfig>()
 const groups = ref<AdminGroup[]>([])
 const candidates = ref<string[]>([])
 const newGroup = ref(0)
+const priorityGroup = ref(0)
 const saving = ref(false)
 const connecting = ref(false)
 const error = ref('')
 const message = ref('')
 const availableGroups = computed(() => groups.value.filter(g => !config.value?.groups.some(o => o.group_id === g.id)))
+const priorityAvailableGroups = computed(() => groups.value.filter(g => !config.value?.group_priority.includes(g.id)))
+function addPriority() {
+  if (!config.value || !priorityGroup.value) return
+  config.value.group_priority.push(priorityGroup.value)
+  priorityGroup.value = 0
+}
+function movePriority(index: number, delta: number) {
+  const ids = config.value?.group_priority
+  if (!ids || index + delta < 0 || index + delta >= ids.length) return
+  const [id] = ids.splice(index, 1)
+  ids.splice(index + delta, 0, id)
+}
 async function load() {
   error.value = ''; message.value = ''
-  try { const [c, g] = await Promise.all([attributionAPI.config(), getAllIncludingInactive()]); config.value = c; groups.value = g }
+  try { const [c, g] = await Promise.all([attributionAPI.config(), getAllIncludingInactive()]); config.value = { ...c, group_priority: c.group_priority || [] }; groups.value = g }
   catch { error.value = t('attribution.error') }
 }
 function addGroup() {

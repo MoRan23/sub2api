@@ -7,7 +7,6 @@ import (
 )
 
 const (
-	CandyTestMaxConcurrent = 3
 	// Pelican tests may legitimately spend several minutes waiting for a long
 	// reasoning response. Keep the persisted deadline and the worker context at
 	// the same half-hour window; the repository mirrors this value in its SQL
@@ -83,6 +82,7 @@ type CandyTestExecution struct {
 	Usage               *OpenAIUsage `json:"usage,omitempty"`
 	Completed           bool         `json:"completed"`
 	DurationMs          int64        `json:"duration_ms"`
+	Retries             int          `json:"retries,omitempty"`
 }
 
 type CandyTestBatch struct {
@@ -105,7 +105,8 @@ type CandyTestSummary struct {
 	Active *CandyTestItem `json:"active,omitempty"`
 }
 
-// CandyTestExecutor must never mutate account operational state or retry inference.
+// CandyTestExecutor must never mutate account operational state. Only the explicit
+// diagnostic retry policy may repeat inference after a transient failure.
 type CandyTestExecutor interface {
 	Options(context.Context, []int64) (*CandyTestOptions, error)
 	Execute(context.Context, *CandyTestItem) (*CandyTestExecution, error)

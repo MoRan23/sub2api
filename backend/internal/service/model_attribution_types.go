@@ -43,11 +43,12 @@ type AttributionConfig struct {
 	BaseURL         string                   `json:"base_url"`
 	Default         AttributionPolicy        `json:"default"`
 	Groups          []AttributionGroupPolicy `json:"groups"`
+	GroupPriority   []int64                  `json:"group_priority"`
 	NewAccountTests NewAccountTestConfig     `json:"new_account_tests"`
 }
 
 func DefaultAttributionConfig() AttributionConfig {
-	return AttributionConfig{Version: 1, Default: AttributionPolicy{Model: AttributionDefaultModel, HighModels: []string{}, LowModels: []string{}}, Groups: []AttributionGroupPolicy{}, NewAccountTests: NewAccountTestConfig{Attribution: true, Pelican: true, Model: AttributionDefaultModel}}
+	return AttributionConfig{Version: 1, Default: AttributionPolicy{Model: AttributionDefaultModel, HighModels: []string{}, LowModels: []string{}}, Groups: []AttributionGroupPolicy{}, GroupPriority: []int64{}, NewAccountTests: NewAccountTestConfig{Attribution: true, Pelican: true, Model: AttributionDefaultModel}}
 }
 
 func AttributionBaseURL(raw string) (string, error) {
@@ -61,6 +62,19 @@ func AttributionBaseURL(raw string) (string, error) {
 func NormalizeAttributionConfig(c AttributionConfig) (AttributionConfig, error) {
 	if c.Version < 1 || len(c.Groups) > 1000 {
 		return c, ErrAttributionInvalid
+	}
+	if len(c.GroupPriority) > 1000 {
+		return c, ErrAttributionInvalid
+	}
+	prioritySeen := map[int64]bool{}
+	if c.GroupPriority == nil {
+		c.GroupPriority = []int64{}
+	}
+	for _, id := range c.GroupPriority {
+		if id < 1 || prioritySeen[id] {
+			return c, ErrAttributionInvalid
+		}
+		prioritySeen[id] = true
 	}
 	var err error
 	c.NewAccountTests.Model = strings.TrimSpace(c.NewAccountTests.Model)
@@ -130,7 +144,19 @@ func NormalizeAttributionConfig(c AttributionConfig) (AttributionConfig, error) 
 
 func ResolveAttributionPolicy(c AttributionConfig, groups []AccountGroup) (AttributionPolicy, int64) {
 	ordered := append([]AccountGroup(nil), groups...)
+	rank := make(map[int64]int, len(c.GroupPriority))
+	for i, id := range c.GroupPriority {
+		rank[id] = i
+	}
 	sort.Slice(ordered, func(i, j int) bool {
+		a, aSet := rank[ordered[i].GroupID]
+		b, bSet := rank[ordered[j].GroupID]
+		if aSet != bSet {
+			return aSet
+		}
+		if aSet && a != b {
+			return a < b
+		}
 		if ordered[i].Priority != ordered[j].Priority {
 			return ordered[i].Priority < ordered[j].Priority
 		}
@@ -224,6 +250,7 @@ type AttributionResult struct {
 	ActualModels   []string             `json:"actual_models,omitempty"`
 	UpstreamModels []string             `json:"upstream_models,omitempty"`
 	DurationMS     int64                `json:"duration_ms"`
+	Retries        int                  `json:"retries,omitempty"`
 	Action         string               `json:"action"`
 	Before         map[string]any       `json:"before,omitempty"`
 	After          map[string]any       `json:"after,omitempty"`

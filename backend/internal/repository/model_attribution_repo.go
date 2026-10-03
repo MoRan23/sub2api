@@ -322,11 +322,7 @@ func (r *attributionRepository) Claim(ctx context.Context) (*service.Attribution
 			return nil, err
 		}
 	}
-	var running int
-	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM model_attribution_jobs WHERE status='running'`).Scan(&running); err != nil {
-		return nil, err
-	}
-	if running >= 3 || !c.Enabled {
+	if !c.Enabled {
 		return nil, tx.Commit()
 	}
 	j, err := scanAttribution(tx.QueryRowContext(ctx, `UPDATE model_attribution_jobs SET status='running',started_at=NOW(),claim_id=$1,lease_until=NOW()+interval '45 seconds' WHERE id=(SELECT id FROM model_attribution_jobs WHERE status='queued' ORDER BY id LIMIT 1) RETURNING `+attributionColumns, uuid.NewString()))

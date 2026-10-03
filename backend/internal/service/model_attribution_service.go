@@ -20,10 +20,11 @@ type ModelAttributionService struct {
 	stop     sync.Once
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
+	wake     chan struct{}
 }
 
 func NewModelAttributionService(repo AttributionRepository, accounts AccountRepository, probe *AccountCandyTestTransport) *ModelAttributionService {
-	return &ModelAttributionService{repo: repo, accounts: accounts, probe: probe, analyzer: NewModelTraceClient()}
+	return &ModelAttributionService{repo: repo, accounts: accounts, probe: probe, analyzer: NewModelTraceClient(), wake: make(chan struct{}, 1)}
 }
 func (s *ModelAttributionService) Start() {
 	s.start.Do(func() {
@@ -31,10 +32,8 @@ func (s *ModelAttributionService) Start() {
 		s.cancel = cancel
 		s.wg.Add(1)
 		go s.schedule(ctx)
-		for range 3 {
-			s.wg.Add(1)
-			go s.worker(ctx)
-		}
+		s.wg.Add(1)
+		go s.worker(ctx)
 	})
 }
 func (s *ModelAttributionService) Stop() {
@@ -60,6 +59,7 @@ func (s *ModelAttributionService) schedule(ctx context.Context) {
 			}
 			nextPeriodic = time.Now().Add(30 * time.Second)
 		}
+		s.notify()
 		select {
 		case <-ctx.Done():
 			return
@@ -80,14 +80,26 @@ func (s *ModelAttributionService) worker(ctx context.Context) {
 			slog.Warn("model_attribution_claim_failed")
 		}
 		if err == nil && j != nil {
-			s.execute(ctx, j)
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				s.execute(ctx, j)
+			}()
 			continue
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		case <-s.wake:
 		}
+	}
+}
+
+func (s *ModelAttributionService) notify() {
+	select {
+	case s.wake <- struct{}{}:
+	default:
 	}
 }
 
@@ -176,6 +188,13 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 		return
 	}
 	outputs := make([]AttributionOutput, 0, 3)
+	probeCtx := context.WithValue(ctx, diagnosticRetryValidationKey{}, func(check context.Context) error {
+		valid, err := s.repo.Validate(check, j)
+		if err != nil || !valid {
+			return candyTestError("configuration_or_authorization_changed")
+		}
+		return nil
+	})
 	for _, challenge := range challenges {
 		valid, err = s.repo.Validate(ctx, j)
 		if err != nil || !valid {
@@ -183,8 +202,9 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 			j.Reason = "configuration_or_authorization_changed"
 			return
 		}
-		execution, e := s.probe.Probe(ctx, j.AccountID, j.Snapshot.Policy.Model, challenge.Prompt)
+		execution, e := s.probe.Probe(probeCtx, j.AccountID, j.Snapshot.Policy.Model, challenge.Prompt)
 		if execution != nil {
+			j.Result.Retries += execution.Retries
 			j.Result.Usage = append(j.Result.Usage, execution.Usage)
 			j.Result.ActualModels = append(j.Result.ActualModels, execution.ActualModel)
 			j.Result.UpstreamModels = append(j.Result.UpstreamModels, execution.UpstreamModel)
@@ -256,7 +276,11 @@ func (s *ModelAttributionService) Create(ctx context.Context, ids []int64) ([]*A
 			return nil, ErrAttributionInvalid
 		}
 	}
-	return s.repo.Enqueue(ctx, ids, true)
+	jobs, err := s.repo.Enqueue(ctx, ids, true)
+	if err == nil {
+		s.notify()
+	}
+	return jobs, err
 }
 func (s *ModelAttributionService) List(ctx context.Context, id int64, page, size int) (*AttributionPage, error) {
 	if page < 1 || size < 1 || size > 100 || id < 0 {

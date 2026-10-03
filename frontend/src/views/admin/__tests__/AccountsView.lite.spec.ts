@@ -68,6 +68,7 @@ const DataTableStub = defineComponent({
       <div v-for="row in data" :key="row.id" :data-account-name="row.name">
         <slot name="cell-groups" :row="row" />
         <slot name="cell-actions" :row="row" />
+        <slot name="cell-model_attribution" :row="row" />
       </div>
     </div>
   `
@@ -110,6 +111,8 @@ function mountView(stubActionMenu = true) {
         ImportDataModal: true,
         ReAuthAccountModal: true,
         AccountTestModal: AccountTestModalStub,
+        AccountAttributionCell: { template: '<button data-test="open-attribution" @click="$emit(\'open\')">Open attribution</button>' },
+        AttributionModal: { template: '<button data-test="close-attribution" @click="$emit(\'close\')">Close attribution</button>' },
         AccountStatsModal: AccountStatsModalStub,
         ScheduledTestsPanel: true,
         SyncFromCrsModal: true,
@@ -186,6 +189,20 @@ describe('admin AccountsView lite account list', () => {
       expect.objectContaining({ lite: '1' }),
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
+    wrapper.unmount()
+  })
+
+  it('does not refresh the account list when attribution closes', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="open-attribution"]').trigger('click')
+    await flushPromises()
+    listAccounts.mockClear(); listWithEtag.mockClear()
+    await wrapper.get('[data-test="close-attribution"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="close-attribution"]').exists()).toBe(false)
+    expect(listAccounts).not.toHaveBeenCalled()
+    expect(listWithEtag).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

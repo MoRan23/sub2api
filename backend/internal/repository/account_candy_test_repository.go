@@ -78,6 +78,15 @@ func createCandyBatch(ctx context.Context, tx *sql.Tx, request *service.CandyTes
 		return "", err
 	}
 	for _, item := range items {
+		if item.Status == "queued" {
+			var active bool
+			if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM account_candy_test_items WHERE account_id=$1 AND prompt_version=$2 AND status IN ('queued','running'))`, item.AccountID, service.CandyTestPromptVersion).Scan(&active); err != nil {
+				return "", err
+			}
+			if active {
+				item.Status, item.FailureCode = "skipped", "already_running"
+			}
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO account_candy_test_items(batch_id,account_id,account_name,model,reasoning_effort,prompt_version,status,failure_code,finished_at) VALUES($1,$2,$3,$4,$5,$6,$7::varchar,$8,CASE WHEN $7::varchar='skipped' THEN NOW() ELSE NULL END)`, id, item.AccountID, item.AccountName, request.Model, request.ReasoningEffort, service.CandyTestPromptVersion, item.Status, item.FailureCode)
 		if err != nil {
 			return "", err
@@ -167,15 +176,14 @@ func (r *accountCandyTestRepository) Claim(ctx context.Context) (*service.CandyT
 	if err != nil {
 		return nil, err
 	}
+	// Discard duplicate pending work from older versions instead of running it
+	// after another test for the same account finishes.
+	_, err = tx.ExecContext(ctx, `UPDATE account_candy_test_items i SET status='skipped',failure_code='already_running',finished_at=NOW() WHERE i.prompt_version=$1 AND i.status='queued' AND EXISTS(SELECT 1 FROM account_candy_test_items active WHERE active.account_id=i.account_id AND active.prompt_version=$1 AND (active.status='running' OR (active.status='queued' AND active.id<i.id)))`, service.CandyTestPromptVersion)
+	if err != nil {
+		return nil, err
+	}
 	if err = maintainCandyBatches(ctx, tx); err != nil {
 		return nil, err
-	}
-	var count int
-	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM account_candy_test_items WHERE status='running'`).Scan(&count); err != nil {
-		return nil, err
-	}
-	if count >= service.CandyTestMaxConcurrent {
-		return nil, tx.Commit()
 	}
 	var id int64
 	err = tx.QueryRowContext(ctx, `SELECT i.id FROM account_candy_test_items i WHERE i.prompt_version=$1 AND i.status='queued' AND NOT EXISTS(SELECT 1 FROM account_candy_test_items active WHERE active.account_id=i.account_id AND active.status='running') ORDER BY i.id LIMIT 1 FOR UPDATE OF i SKIP LOCKED`, service.CandyTestPromptVersion).Scan(&id)
