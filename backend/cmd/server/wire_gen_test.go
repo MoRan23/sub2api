@@ -92,6 +92,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // openAIGateway
 		nil, // codexTelemetry
 		candyTestSvc,
+		nil, // attribution
 		nil, // egressLocation
 		nil, // adminService
 		nil, // openAIOutboundSessionV1Cleanup

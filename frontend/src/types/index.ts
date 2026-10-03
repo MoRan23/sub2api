@@ -1254,6 +1254,7 @@ export interface Account {
   openai_environment_fingerprint?: string
   openai_oauth_os_profiles?: OpenAIOAuthOSProfiles
   candy_test?: import('@/api/admin/candyTests').CandyTestSummary | null
+  model_attribution?: import('@/api/admin/modelAttribution').AttributionSummary | null
   ollama_cloud_usage?: OllamaCloudUsageState
   opencode_go_usage?: OpenCodeGoUsageState
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.

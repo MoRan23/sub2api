@@ -34,12 +34,26 @@ func NewAccountCandyTestTransport(accounts AccountRepository, gateway *OpenAIGat
 }
 
 func (r *AccountCandyTestTransport) Execute(parent context.Context, item *CandyTestItem) (*CandyTestExecution, error) {
+	if item == nil || item.PromptVersion != CandyTestPromptVersion {
+		return nil, candyTestError("prompt_version_unsupported")
+	}
+	return r.executeTextProbe(parent, item, CandyTestPrompt, pelicanTestInstructions, true)
+}
+
+// Probe executes an independent text challenge with the same pinned-account
+// authorization, streaming, no-replay and no-billing protections as Pelican.
+// A short explicit instruction prevents the gateway's missing-prompt fallback
+// from injecting the model's full coding-agent instructions into attribution.
+const textProbeInstructions = "Answer the user's request directly. Do not use tools."
+
+func (r *AccountCandyTestTransport) Probe(ctx context.Context, accountID int64, model, prompt string) (*CandyTestExecution, error) {
+	return r.executeTextProbe(ctx, &CandyTestItem{AccountID: accountID, Model: model}, prompt, textProbeInstructions, false)
+}
+
+func (r *AccountCandyTestTransport) executeTextProbe(parent context.Context, item *CandyTestItem, prompt, instructions string, checkCatalog bool) (*CandyTestExecution, error) {
 	started := time.Now()
 	if r == nil || r.accounts == nil || r.gateway == nil || item == nil {
 		return nil, candyTestError("runner_unavailable")
-	}
-	if item.PromptVersion != CandyTestPromptVersion {
-		return nil, candyTestError("prompt_version_unsupported")
 	}
 	account, err := r.accounts.GetByID(parent, item.AccountID)
 	if err != nil || account == nil {
@@ -50,19 +64,21 @@ func (r *AccountCandyTestTransport) Execute(parent context.Context, item *CandyT
 	}
 	account = snapshotOAuthRefreshAccount(account)
 	account.openAICandyTest = true
-	models, err := r.candyTestAccountModelOptions(parent, account)
-	if err != nil {
-		return nil, err
-	}
-	allowed := false
-	for _, model := range models {
-		if model.ID == item.Model && (item.ReasoningEffort == "" || containsCandyEffort(model.ReasoningEfforts, item.ReasoningEffort)) {
-			allowed = true
-			break
+	if checkCatalog {
+		models, err := r.candyTestAccountModelOptions(parent, account)
+		if err != nil {
+			return nil, err
 		}
-	}
-	if !allowed {
-		return nil, candyTestError("configuration_changed")
+		allowed := false
+		for _, model := range models {
+			if model.ID == item.Model && (item.ReasoningEffort == "" || containsCandyEffort(model.ReasoningEfforts, item.ReasoningEffort)) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return nil, candyTestError("configuration_changed")
+		}
 	}
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
@@ -120,8 +136,8 @@ func (r *AccountCandyTestTransport) Execute(parent context.Context, item *CandyT
 	session := uuid.NewString()
 	payload := map[string]any{
 		"model": item.Model, "stream": true, "store": false,
-		"instructions":     pelicanTestInstructions,
-		"input":            []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": CandyTestPrompt}}}},
+		"instructions":     instructions,
+		"input":            []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": prompt}}}},
 		"prompt_cache_key": session,
 	}
 	if item.ReasoningEffort != "" {

@@ -385,6 +385,13 @@ func registerGroupApplicationRoutes(admin *gin.RouterGroup, h *handler.Handlers,
 }
 
 func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
+	attribution := admin.Group("/model-attribution")
+	attribution.GET("/config", h.Admin.Account.AttributionConfig)
+	attribution.PUT("/config", h.Admin.Account.SaveAttributionConfig)
+	attribution.POST("/models", h.Admin.Account.AttributionModels)
+	attribution.POST("/jobs", h.Admin.Account.CreateAttributionJobs)
+	attribution.GET("/jobs", h.Admin.Account.ListAttributionJobs)
+	attribution.GET("/jobs/:id", h.Admin.Account.GetAttributionJob)
 	accounts := admin.Group("/accounts")
 	{
 		accounts.GET("", h.Admin.Account.List)

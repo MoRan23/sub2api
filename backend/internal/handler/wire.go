@@ -53,6 +53,7 @@ func ProvideAdminHandlers(
 	tokenCacheInvalidator service.TokenCacheInvalidator,
 	opencodeGoUsage *service.OpenCodeGoUsageService,
 	candyTests *service.AccountCandyTestService,
+	attribution *service.ModelAttributionService,
 	claudeResetCredits *service.ClaudeResetCreditService,
 ) *AdminHandlers {
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
@@ -60,6 +61,7 @@ func ProvideAdminHandlers(
 	openaiOAuthHandler.SetTokenCacheInvalidator(tokenCacheInvalidator)
 	accountHandler.SetOpenCodeGoUsageService(opencodeGoUsage)
 	accountHandler.SetCandyTestService(candyTests)
+	accountHandler.SetAttributionService(attribution)
 	accountHandler.SetClaudeResetCreditService(claudeResetCredits)
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,

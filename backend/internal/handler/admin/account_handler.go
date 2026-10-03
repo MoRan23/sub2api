@@ -61,6 +61,7 @@ type AccountHandler struct {
 	accountUsageService     *service.AccountUsageService
 	accountTestService      *service.AccountTestService
 	candyTestService        *service.AccountCandyTestService
+	attributionService      *service.ModelAttributionService
 	concurrencyService      *service.ConcurrencyService
 	crsSyncService          *service.CRSSyncService
 	sessionLimitCache       service.SessionLimitCache
@@ -207,7 +208,8 @@ type CheckMixedChannelRequest struct {
 
 // AccountWithConcurrency extends Account with real-time concurrency info
 type AccountWithConcurrency struct {
-	CandyTest *service.CandyTestSummary `json:"candy_test,omitempty"`
+	Attribution *service.AttributionSummary `json:"model_attribution,omitempty"`
+	CandyTest   *service.CandyTestSummary   `json:"candy_test,omitempty"`
 	*dto.Account
 	simpleMode         bool                         `json:"-"`
 	CurrentConcurrency int                          `json:"current_concurrency"`
@@ -223,7 +225,8 @@ type AccountWithConcurrency struct {
 // for lite=1. It embeds dto.AccountListItem instead of the full dto.Account,
 // so groups/account_groups never appear in the list payload.
 type AccountListItemWithConcurrency struct {
-	CandyTest *service.CandyTestSummary `json:"candy_test,omitempty"`
+	Attribution *service.AttributionSummary `json:"model_attribution,omitempty"`
+	CandyTest   *service.CandyTestSummary   `json:"candy_test,omitempty"`
 	*dto.AccountListItem
 	CurrentConcurrency int                          `json:"current_concurrency"`
 	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
@@ -388,6 +391,11 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 	if h.candyTestService != nil {
 		if summaries, err := h.candyTestService.Summaries(ctx, []int64{account.ID}); err == nil {
 			item.CandyTest = summaries[account.ID]
+		}
+	}
+	if h.attributionService != nil {
+		if summaries, err := h.attributionService.Summaries(ctx, []int64{account.ID}); err == nil {
+			item.Attribution = summaries[account.ID]
 		}
 	}
 
@@ -857,6 +865,17 @@ func (h *AccountHandler) List(c *gin.Context) {
 	}
 
 	h.enrichShadowParents(c.Request.Context(), result)
+	if h.attributionService != nil {
+		ids := make([]int64, 0, len(accounts))
+		for i := range accounts {
+			ids = append(ids, accounts[i].ID)
+		}
+		if summaries, err := h.attributionService.Summaries(c.Request.Context(), ids); err == nil {
+			for i := range result {
+				result[i].Attribution = summaries[result[i].ID]
+			}
+		}
+	}
 	if h.candyTestService != nil {
 		ids := make([]int64, 0, len(accounts))
 		for i := range accounts {
@@ -874,6 +893,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 		for i := range result {
 			item := result[i]
 			compact[i] = AccountListItemWithConcurrency{
+				Attribution:        item.Attribution,
 				CandyTest:          item.CandyTest,
 				AccountListItem:    dto.AccountListItemFromAccount(item.Account),
 				CurrentConcurrency: item.CurrentConcurrency,

@@ -6,8 +6,10 @@ import batchImage from './batchImage'
 import admin from './admin'
 import misc from './misc'
 import { candyTestsZh } from '../candyTests'
+import { attributionZh } from '../modelAttribution'
 
 export default {
+  attribution: attributionZh,
   candyTests: candyTestsZh,
   ...landing,
   ...common,

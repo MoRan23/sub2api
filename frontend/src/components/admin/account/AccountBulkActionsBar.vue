@@ -45,6 +45,7 @@
     <div class="flex flex-wrap gap-2">
       <template v-if="selectedIds.length > 0">
         <button @click="$emit('candy-test')" data-testid="bulk-candy-test" class="btn btn-secondary btn-sm">{{ t('candyTests.title') }}</button>
+        <button @click="$emit('attribution-test')" data-testid="bulk-attribution-test" class="btn btn-secondary btn-sm">{{ t('attribution.bulk') }}</button>
         <button @click="$emit('delete')" class="btn btn-danger btn-sm">{{ t('admin.accounts.bulkActions.delete') }}</button>
         <button @click="$emit('reset-status')" class="btn btn-secondary btn-sm">{{ t('admin.accounts.bulkActions.resetStatus') }}</button>
         <button @click="$emit('refresh-token')" class="btn btn-secondary btn-sm">{{ t('admin.accounts.bulkActions.refreshToken') }}</button>
@@ -71,6 +72,7 @@ defineProps<{
 }>()
 
 defineEmits([
+  'attribution-test',
   'candy-test',
   'delete',
   'edit-selected',

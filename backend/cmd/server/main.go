@@ -176,6 +176,9 @@ func runMainServer() {
 	if app.CandyTests != nil {
 		app.CandyTests.Start()
 	}
+	if app.Attribution != nil {
+		app.Attribution.Start()
+	}
 
 	// 启动服务器
 	go func() {

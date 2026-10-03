@@ -1058,6 +1058,7 @@ var ProviderSet = wire.NewSet(
 	NewAccountCandyTestTransport,
 	wire.Bind(new(CandyTestExecutor), new(*AccountCandyTestTransport)),
 	ProvideAccountCandyTestService,
+	NewModelAttributionService,
 	ProvideUpstreamBillingProbeService,
 	ProvideOllamaCloudUsageService,
 	ProvideOpenCodeGoUsageService,

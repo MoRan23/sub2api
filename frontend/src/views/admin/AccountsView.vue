@@ -182,6 +182,7 @@
           :all-results-selected="allResultsSelected"
           @delete="handleBulkDelete"
           @candy-test="openCandyTest(selIds)"
+          @attribution-test="openAttribution(selIds)"
           @reset-status="handleBulkResetStatus"
           @refresh-token="handleBulkRefreshToken"
           @probe-upstream-billing="handleBulkProbeUpstreamBilling"
@@ -271,6 +272,9 @@
           </template>
           <template #cell-candy_test="{ row }">
             <AccountCandyTestCell :account="row" @open="openCandyTest([row.id])" />
+          </template>
+          <template #cell-model_attribution="{ row }">
+            <AccountAttributionCell :account="row" @open="openAttribution([row.id])" />
           </template>
           <template #cell-platform_type="{ row }">
             <div class="flex min-w-0 flex-col gap-1">
@@ -497,6 +501,7 @@
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
     <AccountCandyTestModal :show="showCandyTest" :account-ids="candyTestAccountIds" :accounts="accounts" @close="showCandyTest = false" @updated="reload" />
+    <AttributionModal v-if="showAttribution" :show="showAttribution" :account-ids="attributionAccountIds" @close="showAttribution = false; reload()" @updated="reload" />
     <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :codex-auth-exporting="codexAuthExporting || exportingData" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @candy-test="openCandyTest([$event.id])" @export-codex-auth="handleExportCodexAuth" @open-auth-parent="handleOpenAuthParent" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
@@ -559,6 +564,8 @@ import AccountTableActions from '@/components/admin/account/AccountTableActions.
 import AccountDailyFixedRootsModal from '@/components/admin/account/AccountDailyFixedRootsModal.vue'
 import AccountCandyTestModal from '@/components/admin/account/AccountCandyTestModal.vue'
 import AccountCandyTestCell from '@/components/admin/account/AccountCandyTestCell.vue'
+import AccountAttributionCell from '@/components/admin/account/AccountAttributionCell.vue'
+import AttributionModal from '@/components/admin/account/AttributionModal.vue'
 import { createPelicanThumbnailLayout, pelicanThumbnailLayoutKey } from '@/components/admin/account/pelicanThumbnailLayout'
 import { supportsManagedOpenAIOAuthIdentity } from '@/components/account/openaiOAuthOS'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
@@ -1163,6 +1170,12 @@ const {
 const dailyFixedRootPools = reactive<Record<number, OAuthDailySessionPool>>({})
 const dailyFixedRootAccount = ref<Pick<AccountListItem, 'id' | 'name'> | null>(null)
 const showCandyTest = ref(false)
+const showAttribution = ref(false)
+const attributionAccountIds = ref<number[]>([])
+function openAttribution(ids: number[]) {
+  attributionAccountIds.value = [...ids]
+  showAttribution.value = true
+}
 const candyTestAccountIds = ref<number[]>([])
 function openCandyTest(ids: number[]) {
   candyTestAccountIds.value = [...ids]
@@ -1469,6 +1482,7 @@ const isAnyModalOpen = computed(() => {
     showReAuth.value ||
     showTest.value ||
     showCandyTest.value ||
+    showAttribution.value ||
     showStats.value ||
     showSchedulePanel.value ||
     showErrorPassthrough.value ||
@@ -1497,6 +1511,7 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
     current.overload_until !== next.overload_until ||
     current.temp_unschedulable_until !== next.temp_unschedulable_until ||
     JSON.stringify(current.candy_test) !== JSON.stringify(next.candy_test) ||
+    JSON.stringify(current.model_attribution) !== JSON.stringify(next.model_attribution) ||
     buildOpenAIUsageRefreshKey(current) !== buildOpenAIUsageRefreshKey(next) ||
     buildGrokUsageRefreshKey(current) !== buildGrokUsageRefreshKey(next)
   )
@@ -1967,6 +1982,7 @@ const allColumns = computed(() => {
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'daily_fixed_roots', label: t('admin.accounts.columns.dailyFixedRoots'), sortable: false },
     { key: 'candy_test', label: t('candyTests.title'), sortable: false },
+    { key: 'model_attribution', label: t('attribution.column'), sortable: false },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]

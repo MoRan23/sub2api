@@ -550,6 +550,12 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/model-attribution',
+    name: 'AdminModelAttribution',
+    component: () => import('@/views/admin/ModelAttributionView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'Model Attribution', titleKey: 'attribution.title', descriptionKey: 'attribution.description' }
+  },
+  {
     path: '/admin/plugins',
     name: 'AdminPlugins',
     component: () => import('@/views/admin/PluginsView.vue'),
