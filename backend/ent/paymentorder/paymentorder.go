@@ -32,6 +32,8 @@ const (
 	FieldGiftRatio = "gift_ratio"
 	// FieldGiftAmount holds the string denoting the gift_amount field in the database.
 	FieldGiftAmount = "gift_amount"
+	// FieldBonusAmount holds the string denoting the bonus_amount field in the database.
+	FieldBonusAmount = "bonus_amount"
 	// FieldRechargeCode holds the string denoting the recharge_code field in the database.
 	FieldRechargeCode = "recharge_code"
 	// FieldOutTradeNo holds the string denoting the out_trade_no field in the database.
@@ -121,6 +123,7 @@ var Columns = []string{
 	FieldFeeRate,
 	FieldGiftRatio,
 	FieldGiftAmount,
+	FieldBonusAmount,
 	FieldRechargeCode,
 	FieldOutTradeNo,
 	FieldPaymentType,
@@ -176,6 +179,8 @@ var (
 	DefaultGiftRatio float64
 	// DefaultGiftAmount holds the default value on creation for the "gift_amount" field.
 	DefaultGiftAmount float64
+	// DefaultBonusAmount holds the default value on creation for the "bonus_amount" field.
+	DefaultBonusAmount float64
 	// RechargeCodeValidator is a validator for the "recharge_code" field. It is called by the builders before save.
 	RechargeCodeValidator func(string) error
 	// DefaultOutTradeNo holds the default value on creation for the "out_trade_no" field.
@@ -267,6 +272,11 @@ func ByGiftRatio(opts ...sql.OrderTermOption) OrderOption {
 // ByGiftAmount orders the results by the gift_amount field.
 func ByGiftAmount(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldGiftAmount, opts...).ToFunc()
+}
+
+// ByBonusAmount orders the results by the bonus_amount field.
+func ByBonusAmount(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldBonusAmount, opts...).ToFunc()
 }
 
 // ByRechargeCode orders the results by the recharge_code field.

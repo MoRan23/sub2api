@@ -478,6 +478,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	if input.OpenAIOAuthInitialOS != "" && NormalizeOpenAIOSFamily(input.OpenAIOAuthInitialOS) == "" {
 		return nil, infraerrors.BadRequest("OPENAI_OAUTH_OS_INVALID", "os must be windows, macos, or linux")
 	}
+	if input.Platform == PlatformTypeSafe && input.Type != AccountTypeAPIKey {
+		return nil, errors.New("typesafe accounts only support apikey credentials")
+	}
 	// Probe/session state is system-managed. New accounts always start with automatic refresh disabled.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingRateSyncEnabledExtraKey)
@@ -704,6 +707,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		if _, validationErr := NormalizeOpenAIEnvironmentFingerprint(*input.OpenAIEnvironmentFingerprint); validationErr != nil {
 			return nil, infraerrors.BadRequest("OPENAI_ENVIRONMENT_FINGERPRINT_INVALID", validationErr.Error())
 		}
+	}
+	if account.Platform == PlatformTypeSafe && input.Type != "" && input.Type != AccountTypeAPIKey {
+		return nil, errors.New("typesafe accounts only support apikey credentials")
 	}
 	var normalizedExtra map[string]any
 	if input.Extra != nil {
