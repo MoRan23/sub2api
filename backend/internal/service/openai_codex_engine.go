@@ -23,14 +23,69 @@ import (
 
 // A business error has already been relayed verbatim. It must never become an
 // account health signal or a request replay on another account.
-type codexEngineResponseError struct{ status int }
+type codexEngineResponseError struct {
+	status                          int
+	code, errorType, message, event string
+}
 
 func (e *codexEngineResponseError) Error() string {
-	return fmt.Sprintf("Codex-Engine response error (%d)", e.status)
+	return fmt.Sprintf("Codex-Engine response error (%d) [%s]: %s", e.status, e.code, e.message)
 }
 func isCodexEngineResponseError(err error) bool {
 	var target *codexEngineResponseError
 	return errors.As(err, &target)
+}
+
+// Preserve the wire response while reporting the semantic failure of a 2xx SSE
+// stream. Never retain the response output, history or arbitrary extra fields.
+func newCodexEngineResponseError(status int, payload []byte, event string) *codexEngineResponseError {
+	failure := gjson.GetBytes(payload, "response.error")
+	if !failure.IsObject() {
+		failure = gjson.GetBytes(payload, "error")
+	}
+	if status >= 200 && status < 300 {
+		status = http.StatusBadGateway
+		for _, path := range []string{"response.error.status", "error.status", "status", "status_code"} {
+			if reported := gjson.GetBytes(payload, path).Int(); reported >= 400 && reported <= 599 {
+				status = int(reported)
+				break
+			}
+		}
+	}
+	message := failure.Get("message").String()
+	if strings.TrimSpace(message) == "" {
+		message = firstNonEmpty(gjson.GetBytes(payload, "response.incomplete_details.reason").String(), event, http.StatusText(status))
+	}
+	return &codexEngineResponseError{status: status, code: failure.Get("code").String(), errorType: failure.Get("type").String(), message: message, event: event}
+}
+
+func recordCodexEngineError(c *gin.Context, account *Account, resp *http.Response, failure *codexEngineResponseError) {
+	clean := func(value string, limit int) string {
+		if key := account.GetOpenAIApiKey(); key != "" {
+			value = strings.ReplaceAll(value, key, "[redacted]")
+		}
+		return truncateString(sanitizeUpstreamErrorMessage(strings.TrimSpace(value)), limit)
+	}
+	failure.code = clean(failure.code, 128)
+	failure.errorType = clean(failure.errorType, 128)
+	failure.message = clean(failure.message, 2048)
+	// A small error-only envelope keeps provider codes available to ops without
+	// storing generated content or the rest of a response.failed event.
+	detail, _ := json.Marshal(map[string]any{"error": map[string]string{
+		"code": failure.code, "type": failure.errorType, "message": failure.message,
+	}})
+	setOpsUpstreamError(c, failure.status, failure.message, string(detail))
+	kind := "http_error"
+	if failure.event != "" {
+		kind = "stream_error"
+	}
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
+		ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account),
+		UpstreamStatusCode: failure.status, UpstreamRequestID: firstNonEmpty(resp.Header.Get("X-Request-Id"), resp.Header.Get("Request-Id")),
+		Kind: kind, Reason: failure.code, Message: failure.message, Detail: string(detail),
+		UpstreamResponseBody: string(detail),
+	})
 }
 
 // CodexEngineResponseWritten prevents generic handlers from appending a second
@@ -237,18 +292,27 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 		}
 		c.Data(resp.StatusCode, contentType, data)
 		c.Set("codex_engine_response_written", true)
-		if gjson.GetBytes(data, "error").IsObject() {
-			err = &codexEngineResponseError{resp.StatusCode}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 || gjson.GetBytes(data, "error").IsObject() {
+			err = newCodexEngineResponseError(resp.StatusCode, data, "")
 		}
 	}
-	if resp.StatusCode >= 300 || resp.StatusCode < 200 {
-		return result, &codexEngineResponseError{resp.StatusCode}
+	if err == nil && (resp.StatusCode >= 300 || resp.StatusCode < 200) {
+		err = newCodexEngineResponseError(resp.StatusCode, nil, "")
+	}
+	var failure *codexEngineResponseError
+	if errors.As(err, &failure) {
+		recordCodexEngineError(c, account, resp, failure)
 	}
 	if err == nil && endpoint == "/v1/alpha/search" {
 		result.WebSearchCalls = 1
 	}
 	if result.ResponseID != "" {
 		s.bindHTTPResponseAccount(ctx, c, account, result.ResponseID)
+	}
+	if failure != nil && !openAIUsageHasTokens(&result.Usage) && result.ImageCount == 0 && !isOpenAICandyTest(ctx) {
+		// An unmetered rejection has no billable partial result. Diagnostics
+		// still need model evidence; they never enter downstream billing.
+		return nil, err
 	}
 	return result, err
 }
@@ -385,7 +449,7 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx context.Context, c *gi
 		}
 		failed := kind == "error" || kind == "response.failed" || kind == "response.incomplete" || gjson.GetBytes(payload, "error").IsObject()
 		if failed {
-			return &codexEngineResponseError{resp.StatusCode}
+			return newCodexEngineResponseError(resp.StatusCode, payload, kind)
 		}
 		if bytes.Equal(bytes.TrimSpace(payload), []byte("[DONE]")) || kind == "response.completed" || kind == "response.done" || kind == "message_stop" || (imageRequest && strings.HasSuffix(kind, ".completed")) {
 			terminal = true

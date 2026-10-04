@@ -14,7 +14,7 @@ import (
 func TestCodexEngineMixedPoolKeepsOriginalCompactWire(t *testing.T) {
 	// First account takes the legacy bridge and fails; the Engine attempt must
 	// receive the original /responses body, including fields legacy compact drops.
-	body := `{"model":"gpt-6-astra","stream":false,"unknown":9007199254740993123,"input":[{"type":"message","role":"user","content":"hello"},{"type":"compaction_trigger"}],"tools":[{"type":"namespace","name":"native","tools":[]}]}`
+	body := `{"model":"gpt-6-astra","stream":false,"unknown":9007199254740993123,"input":[{"type":"reasoning","id":"rs_original","encrypted_content":"opaque-original"},{"type":"message","role":"user","content":"hello"},{"type":"compaction_trigger"}],"tools":[{"type":"namespace","name":"native","tools":[]}]}`
 	upstream := newAstraProCapturedUpstream(astra403(), astra200())
 	h := newOpenAIResponsesFailoverTestHandler(t, upstream, func(accounts []service.Account) {
 		accounts[0].Extra = map[string]any{"openai_compact_supported": true}
@@ -48,14 +48,18 @@ func TestCodexEngineHandlerDoesNotReplayOrAppendBusinessError(t *testing.T) {
 				accounts[i].Extra = map[string]any{service.OpenAIAPIKeyModeExtraKey: "codex_engine"}
 			}
 		})
-		body := `{"model":"gpt-6-astra","input":"hi","stream":false}`
+		// Even upstream-invalid item IDs must remain untouched in dedicated mode.
+		// Engine decides whether it can replay the client's original history.
+		body := `{"model":"gpt-6-astra","input":[{"type":"reasoning","id":"item_original","encrypted_content":"opaque-original","summary":[]},{"role":"user","content":"hi"}],"tools":[{"type":"namespace","name":"native","tools":[]}],"unknown":9007199254740993123,"stream":false}`
 		if stream {
 			body = strings.Replace(body, "false", "true", 1)
 		}
 		c, rec := newAstraProFailoverContext(t, body)
 		h.Responses(c)
-		_, ids, _ := upstream.snapshot()
+		urls, ids, bodies := upstream.snapshot()
 		require.Len(t, ids, 1)
+		require.Equal(t, "https://engine.example/v1/responses", urls[0])
+		require.Equal(t, body, string(bodies[0]), "selected Engine account must preserve client history, IDs and ciphertext")
 		require.Equal(t, status, rec.Code)
 		require.Equal(t, wire, rec.Body.String())
 	}
