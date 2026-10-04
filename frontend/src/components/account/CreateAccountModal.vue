@@ -3075,9 +3075,11 @@
         </p>
       </div>
 
+      <OpenAIAccessModeSelect v-if="form.platform === 'openai' && accountCategory === 'apikey'" v-model="openAIAPIKeyMode" />
+
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
       <div
-        v-if="form.platform === 'openai'"
+        v-if="form.platform === 'openai' && (accountCategory !== 'apikey' || openAIAPIKeyMode === 'generic')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -4003,6 +4005,8 @@ import OpenAIOAuthOSProfiles from './OpenAIOAuthOSProfiles.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
+import OpenAIAccessModeSelect from '@/components/account/OpenAIAccessModeSelect.vue'
+import type { OpenAIAPIKeyMode } from '@/types'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
@@ -4506,6 +4510,7 @@ const applyGrokOAuthUpstreamConfig = (credentials: Record<string, unknown>) => {
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
 const openaiPassthroughEnabled = ref(false)
+const openAIAPIKeyMode = ref<OpenAIAPIKeyMode>('generic')
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -4750,7 +4755,8 @@ const openAIWSModeHintKey = computed(() =>
 )
 
 const isOpenAIModelRestrictionDisabled = computed(() =>
-  form.platform === 'openai' && openaiPassthroughEnabled.value
+  form.platform === 'openai' && openaiPassthroughEnabled.value &&
+    !(accountCategory.value === 'apikey' && openAIAPIKeyMode.value === 'codex_engine')
 )
 
 const mixedChannelWarningMessageText = computed(() => {
@@ -4996,6 +5002,7 @@ watch(
     }
     if (newPlatform !== 'openai') {
       openaiPassthroughEnabled.value = false
+      openAIAPIKeyMode.value = 'generic'
       openaiFlattenNamespacesEnabled.value = false
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
       openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
@@ -5449,6 +5456,7 @@ const resetForm = () => {
   interceptWarmupRequests.value = false
   autoPauseOnExpired.value = true
   openaiPassthroughEnabled.value = false
+  openAIAPIKeyMode.value = 'generic'
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
   openAILongContextBillingTouched.value = false
@@ -5520,6 +5528,7 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   }
 
   const extra: Record<string, unknown> = { ...(base || {}) }
+  if (accountCategory.value === 'apikey') extra.openai_api_key_mode = openAIAPIKeyMode.value
   if (accountCategory.value === 'oauth-based') {
     extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
     extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
@@ -5865,6 +5874,10 @@ const handleSubmit = async () => {
   }
 
   // Determine default base URL based on platform
+  if (form.platform === 'openai' && openAIAPIKeyMode.value === 'codex_engine' && !apiKeyBaseUrl.value.trim()) {
+    appStore.showError(t('admin.accounts.openai.engineBaseUrlRequired'))
+    return
+  }
   const defaultBaseUrl =
     form.platform === 'openai'
       ? 'https://api.openai.com'

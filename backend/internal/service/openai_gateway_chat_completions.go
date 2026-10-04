@@ -71,6 +71,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
 ) (*OpenAIForwardResult, error) {
+	if account.IsCodexEngine() {
+		return s.forwardCodexEngine(ctx, c, account, body, "/v1/chat/completions", defaultMappedModel)
+	}
 	if account != nil && account.IsOpenAIOAuth() {
 		var scopeErr error
 		ctx, account, scopeErr = s.prepareOpenAIOAuthRequestScope(ctx, c, account, body)

@@ -225,6 +225,9 @@ func NewAccountService(accountRepo AccountRepository, groupRepo GroupRepository)
 
 // Create 创建账号
 func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (*Account, error) {
+	if err := ValidateOpenAIAPIKeyMode(req.Platform, req.Type, req.Extra); err != nil {
+		return nil, err
+	}
 	if req.Platform == PlatformTypeSafe && req.Type != AccountTypeAPIKey {
 		return nil, errors.New("typesafe accounts only support apikey credentials")
 	}
@@ -361,6 +364,9 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	}
 
 	if req.Extra != nil {
+		if err := ValidateOpenAIAPIKeyMode(account.Platform, account.Type, *req.Extra); err != nil {
+			return nil, err
+		}
 		extra := make(map[string]any, len(*req.Extra))
 		for key, value := range *req.Extra {
 			extra[key] = value

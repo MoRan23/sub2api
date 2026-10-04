@@ -474,6 +474,9 @@ func normalizeOpenAIInstallationPinUpdateExtra(account *Account, input *UpdateAc
 }
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
+	if err := ValidateOpenAIAPIKeyMode(input.Platform, input.Type, accountExtra); err != nil {
+		return nil, err
+	}
 	accountExtra = StripRetiredCodexStateExtra(accountExtra)
 	if input.OpenAIOAuthInitialOS != "" && NormalizeOpenAIOSFamily(input.OpenAIOAuthInitialOS) == "" {
 		return nil, infraerrors.BadRequest("OPENAI_OAUTH_OS_INVALID", "os must be windows, macos, or linux")
@@ -695,6 +698,13 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	profileTarget := *account
 	if input.Type != "" {
 		profileTarget.Type = input.Type
+	}
+	modeExtra := input.Extra
+	if modeExtra == nil {
+		modeExtra = account.Extra
+	}
+	if err := ValidateOpenAIAPIKeyMode(account.Platform, profileTarget.Type, modeExtra); err != nil {
+		return nil, err
 	}
 	if len(input.Credentials) > 0 {
 		profileTarget.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
@@ -1099,6 +1109,15 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	if _, exists := updates[OpenAIAPIKeyModeExtraKey]; exists {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := ValidateOpenAIAPIKeyMode(account.Platform, account.Type, updates); err != nil {
+			return err
+		}
+	}
 	updates = StripRetiredCodexStateExtra(updates)
 	delete(updates, openAIPinnedInstallationIDKey)
 	delete(updates, openAIInstallationRotateEnabledKey)
@@ -1224,7 +1243,8 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.OpenAIAuthModeChange || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	_, updatingAccessMode := input.Extra[OpenAIAPIKeyModeExtraKey]
+	if updatingAccessMode || len(input.Credentials) > 0 || input.OpenAIAuthModeChange || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1261,6 +1281,17 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			return nil, err
 		}
 		result.LongContextInheritedCount = inheritedCount
+	}
+	if _, exists := input.Extra[OpenAIAPIKeyModeExtraKey]; exists {
+		for _, id := range input.AccountIDs {
+			account := targetsByID[id]
+			if account == nil {
+				return nil, ErrAccountNotFound
+			}
+			if err := ValidateOpenAIAPIKeyMode(account.Platform, account.Type, input.Extra); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if input.ProbeEnabled != nil {
 		for _, accountID := range input.AccountIDs {

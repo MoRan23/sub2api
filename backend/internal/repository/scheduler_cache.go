@@ -1020,6 +1020,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		// model_not_supported —— 转发阶段却仍按透传工作，表现为"单独测账号能通、
 		// 走网关报 no available accounts"。
 		"openai_passthrough",
+		service.OpenAIAPIKeyModeExtraKey,
 		"openai_oauth_passthrough",
 		"codex_5h_used_percent",
 		"codex_7d_used_percent",

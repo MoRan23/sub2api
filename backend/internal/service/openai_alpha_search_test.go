@@ -23,8 +23,16 @@ import (
 
 type alphaSearchAccountStateRepo struct {
 	AccountRepository
+	account       *Account
 	setErrorCalls int
 	lastError     string
+}
+
+func (r *alphaSearchAccountStateRepo) GetByID(_ context.Context, id int64) (*Account, error) {
+	if r.account == nil || r.account.ID != id {
+		return nil, ErrAccountNotFound
+	}
+	return r.account, nil
 }
 
 func (r *alphaSearchAccountStateRepo) SetError(_ context.Context, _ int64, errorMsg string) error {
@@ -654,6 +662,7 @@ func TestForwardAlphaSearchUnauthorizedDoesNotMarkAccountError(t *testing.T) {
 			"chatgpt_account_id": "chatgpt-account",
 		},
 	}
+	repo.account = account
 
 	result, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
 

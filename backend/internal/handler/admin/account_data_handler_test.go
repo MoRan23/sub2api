@@ -157,6 +157,27 @@ func TestExportDataIncludesSecrets(t *testing.T) {
 	require.Equal(t, "secret", resp.Data.Accounts[0].Credentials["token"])
 }
 
+func TestCodexEngineAccountDataRoundTrip(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	adminSvc.accounts = []service.Account{{ID: 21, Name: "engine", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "engine-key", "base_url": "https://engine.example/prefix/v1"}, Extra: map[string]any{service.OpenAIAPIKeyModeExtraKey: "codex_engine"}}}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/data", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var exported dataResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &exported))
+	require.Equal(t, "codex_engine", exported.Data.Accounts[0].Extra[service.OpenAIAPIKeyModeExtraKey])
+	payload, err := json.Marshal(map[string]any{"data": exported.Data, "skip_default_group_bind": true})
+	require.NoError(t, err)
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, adminSvc.createdAccounts, 1)
+	require.Equal(t, "codex_engine", adminSvc.createdAccounts[0].Extra[service.OpenAIAPIKeyModeExtraKey])
+}
+
 func TestExportDataWithoutProxies(t *testing.T) {
 	router, adminSvc := setupAccountDataRouter()
 

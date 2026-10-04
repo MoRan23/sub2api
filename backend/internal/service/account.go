@@ -983,6 +983,9 @@ func (a *Account) OpenAICompactSupportKnown() (supported bool, known bool) {
 // requests. Unknown capability remains allowed to avoid breaking older accounts
 // before an explicit probe has been run.
 func (a *Account) AllowsOpenAICompact() bool {
+	if a.IsCodexEngine() {
+		return true
+	}
 	if a == nil || !a.IsOpenAI() {
 		return false
 	}
@@ -1016,6 +1019,9 @@ func (a *Account) OpenAIRemoteCompactionV2SupportKnown() (supported bool, known 
 // AllowsOpenAIRemoteCompactionV2 keeps unprobed accounts eligible but rejects
 // an explicit negative native-v2 probe result.
 func (a *Account) AllowsOpenAIRemoteCompactionV2() bool {
+	if a.IsCodexEngine() {
+		return true
+	}
 	if a == nil || !a.IsOpenAI() {
 		return false
 	}
@@ -2006,6 +2012,12 @@ func coerceExtraBool(v any) (value bool, ok bool) {
 }
 
 func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapability) bool {
+	if a.IsCodexEngine() {
+		switch capability {
+		case OpenAIEndpointCapabilityResponses, OpenAIEndpointCapabilityChatCompletions, OpenAIEndpointCapabilityRemoteCompactionV2, OpenAIEndpointCapabilityAlphaSearch:
+			return true
+		}
+	}
 	if a == nil {
 		return false
 	}
@@ -2289,6 +2301,9 @@ func (a *Account) IsOveragesEnabled() bool {
 // 兼容字段：accounts.extra.openai_oauth_passthrough（历史 OAuth 开关）。
 // 字段缺失或类型不正确时，按 false（关闭）处理。
 func (a *Account) IsOpenAIPassthroughEnabled() bool {
+	if a.IsCodexEngine() {
+		return false
+	}
 	if a == nil || !a.IsOpenAI() || a.Extra == nil {
 		return false
 	}

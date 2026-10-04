@@ -369,6 +369,23 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it('loads and saves Codex-Engine mode without disabling model restrictions', async () => {
+    const account = buildAccount()
+    account.extra = { openai_api_key_mode: 'codex_engine', openai_passthrough: true }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    expect((wrapper.get('[data-testid="openai-api-key-mode"]').element as HTMLSelectElement).value).toBe('codex_engine')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra.openai_api_key_mode).toBe('codex_engine')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials.model_mapping).toEqual(account.credentials.model_mapping)
+    await wrapper.get('[data-testid="openai-api-key-mode"]').setValue('generic')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[1]?.[1]?.extra.openai_api_key_mode).toBe('generic')
+    wrapper.unmount()
+  })
   beforeEach(() => {
     authIsSimpleMode.value = true
     getSettingsMock.mockReset().mockResolvedValue({

@@ -469,17 +469,16 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.gatewayService.CaptureOpenAIRequestTimezone(c, body)
 	}
 	sessionHashBody := body
-	body, ok = h.normalizeOpenAIResponsesCompactRequest(c, reqLog, body)
-	if !ok {
-		return
-	}
+	originalRequestPath := c.Request.URL.Path
+	// Classify without changing the client wire. Compatibility bridges are
+	// applied only after account selection, separately for every attempt.
+	setOpenAICompactionRoute(c, classifyOpenAICompactionRoute(c, body))
 	compactionRoute := openAICompactionRouteFromContext(c)
 	legacyCompact := compactionRoute == openAICompactionRouteLegacy
-	// body-signal compact：上游 unary 等待期间向下游发 SSE 注释行心跳，防止
-	// 反向代理空闲超时掐断长压缩连接（#3887）。首拍延迟一个心跳间隔，快速
-	// 失败仍走 JSON+状态码链路；未标记客户端流式或间隔为 0 时是 no-op。
-	stopCompactKeepalive := service.StartOpenAICompactSSEKeepalive(c, h.openAICompactKeepaliveInterval())
-	defer stopCompactKeepalive()
+	if compactionRoute == openAICompactionRouteNativeV2 {
+		service.MarkOpenAINativeCompactionV2(c)
+	}
+	captureOpenAIResponsesIdentityInput(c, body, legacyCompact)
 
 	// 校验请求体 JSON 合法性
 	if !gjson.ValidBytes(body) {
@@ -506,18 +505,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	} else if changed {
 		body = cappedBody
-	}
-	if normalizedBody, changed := normalizeCodexAutomationBootstrap(body); changed {
-		body = normalizedBody
-		reqLog.Info("openai.codex_automation_bootstrap_normalized",
-			zap.String("normalization", "call_output_to_user_message"),
-		)
-	}
-	if normalizedBody, changed := normalizeCodexDelegationBootstrap(body); changed {
-		body = normalizedBody
-		reqLog.Info("openai.codex_delegation_bootstrap_normalized",
-			zap.String("normalization", "call_output_to_user_message"),
-		)
 	}
 
 	reqStream, ok := parseOpenAICompatibleStream(body)
@@ -605,11 +592,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		forwardModel,
 		legacyCompact,
 	))
-
-	// 提前校验 function_call_output 是否具备可关联上下文，避免上游 400。
-	if !h.validateFunctionCallOutputRequest(c, body, reqLog) {
-		return
-	}
 
 	// 绑定错误透传服务，允许 service 层在非 failover 错误场景复用规则。
 	if h.errorPassthroughService != nil {
@@ -815,15 +797,37 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// 跨 passthrough 边界的 failover：从 Kiro 等透传账号切到 Bedrock 等非透传账号前，
 		// 从不可变的 canonical forwardBody 派生本次尝试 body 并整块剔除上游私有的加密
 		// reasoning item（含耦合的 id/summary），避免非透传上游 400 拒绝 Kiro reasoning 形态。
-		attemptBody := h.deriveOpenAIForwardAttemptBody(reqLog, forwardBody, account, &passthroughFailoverState)
+		c.Request.URL.Path = originalRequestPath
+		attemptBody := forwardBody
+		attemptRejected := false
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
 			}()
+			if !account.IsCodexEngine() {
+				var valid bool
+				attemptBody, valid = h.normalizeOpenAIResponsesCompactRequest(c, reqLog, attemptBody)
+				if !valid {
+					attemptRejected = true
+					return nil, nil
+				}
+				attemptBody, _ = normalizeCodexAutomationBootstrap(attemptBody)
+				attemptBody, _ = normalizeCodexDelegationBootstrap(attemptBody)
+				if !h.validateFunctionCallOutputRequest(c, attemptBody, reqLog) {
+					attemptRejected = true
+					return nil, nil
+				}
+				attemptBody = h.deriveOpenAIForwardAttemptBody(reqLog, attemptBody, account, &passthroughFailoverState)
+				stopKeepalive := service.StartOpenAICompactSSEKeepalive(c, h.openAICompactKeepaliveInterval())
+				defer stopKeepalive()
+			}
 			return h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
 		}()
+		if attemptRejected {
+			return
+		}
 		var cyberBlockBodyHTTP []byte
 		if service.GetOpsCyberPolicy(c) != nil {
 			cyberBlockBodyHTTP = sessionHashBody
@@ -1120,7 +1124,9 @@ func (h *OpenAIGatewayHandler) normalizeOpenAIResponsesCompactRequest(c *gin.Con
 
 	// Capture the untouched ingress body before native-v2 returns early or the
 	// legacy bridge narrows the payload. Only legacy receives the endpoint alias.
-	captureOpenAIResponsesIdentityInput(c, body, route == openAICompactionRouteLegacy)
+	if _, captured := service.OpenAIOAuthIdentityCaptureFromContext(c); !captured {
+		captureOpenAIResponsesIdentityInput(c, body, route == openAICompactionRouteLegacy)
+	}
 	if service.HasCompactionTriggerInInput(body) {
 		if normalized, changed, err := service.NormalizeCompactionTriggerInputOrder(body); err != nil {
 			reqLog.Warn("codex.remote_compact.trigger_order_normalization_failed", zap.Error(err))
@@ -3864,6 +3870,9 @@ func shouldLogOpenAIForwardFailureAsWarn(c *gin.Context, wroteFallback bool) boo
 // strict clients may see the useful upstream message replaced by "Upstream
 // request failed" or receive duplicate terminal events.
 func openAIForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForward int, err error) bool {
+	if service.CodexEngineResponseWritten(c) {
+		return true
+	}
 	if err == nil || c == nil || c.Writer == nil {
 		return false
 	}

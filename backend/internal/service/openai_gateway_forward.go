@@ -22,6 +22,13 @@ func ptrUint64(v uint64) *uint64 { return &v }
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	if account.IsCodexEngine() {
+		endpoint := "/v1/responses"
+		if IsOpenAIResponsesCompactPath(c) {
+			endpoint += "/compact"
+		}
+		return s.forwardCodexEngine(ctx, c, account, body, endpoint, "")
+	}
 	ctx, account, scopeErr := s.prepareOpenAIOAuthRequestScope(ctx, c, account, body)
 	if scopeErr != nil {
 		return nil, scopeErr
@@ -1397,6 +1404,9 @@ type openAIUpstreamRequestBuildOptions struct {
 }
 
 func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
+	if account.IsCodexEngine() {
+		return false
+	}
 	if account == nil || account.Type != AccountTypeAPIKey {
 		return false
 	}

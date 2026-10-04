@@ -197,6 +197,19 @@ async function openCodexImportStep(toggleClicks = 0) {
 }
 
 describe('CreateAccountModal OpenAI long-context billing', () => {
+  it('defaults to generic and saves the selected Codex-Engine access mode', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    expect((wrapper.get('[data-testid="openai-api-key-mode"]').element as HTMLSelectElement).value).toBe('generic')
+    await wrapper.get('[data-testid="openai-api-key-mode"]').setValue('codex_engine')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Engine')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('engine-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra.openai_api_key_mode).toBe('codex_engine')
+    wrapper.unmount()
+  })
   beforeEach(() => {
     authIsSimpleMode.value = true
     createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'openai', type: 'apikey' })

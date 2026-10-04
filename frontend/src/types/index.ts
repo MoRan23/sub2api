@@ -1259,6 +1259,7 @@ export interface Account {
   opencode_go_usage?: OpenCodeGoUsageState
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
+    openai_api_key_mode?: OpenAIAPIKeyMode
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
     antigravity_credits_overages?: Record<string, { activated_at: string; active_until: string }>
     upstream_billing_probe_enabled?: boolean
@@ -1567,6 +1568,8 @@ export interface OpenAIResponsesState {
   openai_responses_mode?: OpenAIResponsesMode
   openai_responses_supported?: boolean
 }
+
+export type OpenAIAPIKeyMode = 'generic' | 'codex_engine'
 
 export interface CreateAccountRequest {
   os?: OpenAIOAuthOS

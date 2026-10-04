@@ -365,6 +365,9 @@ func (e openAINoAvailableSelectionError) Unwrap() error {
 // openAICompactSupportTier classifies an OpenAI-compatible account by compact capability.
 // 0 = explicitly unsupported, 1 = unknown / not yet probed, 2 = explicitly supported.
 func openAICompactSupportTier(account *Account) int {
+	if account.IsCodexEngine() {
+		return 2
+	}
 	if account == nil {
 		return 0
 	}
@@ -844,6 +847,14 @@ func prioritizeOpenAICompactAccounts(accounts []*Account) []*Account {
 // would be sent for a given request, honoring the legacy compact-only mapping
 // when the caller is on the /responses/compact path.
 func resolveOpenAIAccountUpstreamModelForRequest(account *Account, requestedModel string, requireCompact bool) string {
+	if account.IsCodexEngine() {
+		if requireCompact {
+			if model, matched := account.ResolveCompactMappedModel(requestedModel); matched {
+				return model
+			}
+		}
+		return account.GetMappedModel(requestedModel)
+	}
 	// Forward checks the raw Chat Completions fallback before passthrough.
 	// These API-key accounts therefore apply normal account model_mapping and
 	// upstream normalization, but never compact_model_mapping.

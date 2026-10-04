@@ -687,6 +687,10 @@ export default {
         codexFingerprintShadowHint: 'This shadow inherits all three Codex installation identities from its parent. Effective values are read-only here; regenerate IDs on the parent account.',
         baseUrlHint: 'Leave default for official OpenAI API',
         apiKeyHint: 'Your OpenAI API Key',
+        accessMode: 'Access mode',
+        accessModeGeneric: 'Generic',
+        accessModeHint: 'Codex-Engine requires its platform API URL and Engine Key. It forwards the original protocol, ignoring generic passthrough and compatibility settings. Model restrictions, mappings and group permissions still apply.',
+        engineBaseUrlRequired: 'Enter the Codex-Engine platform API URL',
         oauthPassthrough: 'Auto passthrough (auth only)',
         oauthPassthroughDesc:
           'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',

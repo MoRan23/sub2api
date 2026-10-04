@@ -73,6 +73,7 @@ type OpenAIImagesUpload struct {
 }
 
 type OpenAIImagesRequest struct {
+	deferCompatibility bool
 	Endpoint           string
 	ContentType        string
 	Multipart          bool
@@ -190,6 +191,16 @@ func (r *OpenAIImagesRequest) StickySessionSeed() string {
 }
 
 func (s *OpenAIGatewayService) ParseOpenAIImagesRequest(c *gin.Context, body []byte) (*OpenAIImagesRequest, error) {
+	return s.parseOpenAIImagesRequest(c, body, false)
+}
+
+// ParseOpenAIImagesRoutingRequest only identifies routing and security fields;
+// provider-specific restrictions are checked once the account is known.
+func (s *OpenAIGatewayService) ParseOpenAIImagesRoutingRequest(c *gin.Context, body []byte) (*OpenAIImagesRequest, error) {
+	return s.parseOpenAIImagesRequest(c, body, true)
+}
+
+func (s *OpenAIGatewayService) parseOpenAIImagesRequest(c *gin.Context, body []byte, deferCompatibility bool) (*OpenAIImagesRequest, error) {
 	if c == nil || c.Request == nil {
 		return nil, fmt.Errorf("missing request context")
 	}
@@ -200,10 +211,11 @@ func (s *OpenAIGatewayService) ParseOpenAIImagesRequest(c *gin.Context, body []b
 
 	contentType := strings.TrimSpace(c.GetHeader("Content-Type"))
 	req := &OpenAIImagesRequest{
-		Endpoint:    endpoint,
-		ContentType: contentType,
-		N:           1,
-		Body:        body,
+		deferCompatibility: deferCompatibility,
+		Endpoint:           endpoint,
+		ContentType:        contentType,
+		N:                  1,
+		Body:               body,
 	}
 	if len(body) > 0 {
 		sum := sha256.Sum256(body)
@@ -236,7 +248,7 @@ func (s *OpenAIGatewayService) ParseOpenAIImagesRequest(c *gin.Context, body []b
 			req.Model = model
 		}
 	}
-	if err := validateCompatibleImagesModel(req.Model); err != nil {
+	if err := validateCompatibleImagesModel(req.Model); err != nil && !deferCompatibility {
 		return nil, err
 	}
 	req.SizeTier = normalizeOpenAIImageSizeTier(req.Size)
@@ -263,7 +275,7 @@ func parseOpenAIImagesJSONRequest(body []byte, req *OpenAIImagesRequest) error {
 			return fmt.Errorf("invalid n field type")
 		}
 		req.N = int(nResult.Int())
-		if req.N <= 0 {
+		if req.N <= 0 && !req.deferCompatibility {
 			return fmt.Errorf("n must be greater than 0")
 		}
 	}
@@ -305,7 +317,7 @@ func parseOpenAIImagesJSONRequest(body []byte, req *OpenAIImagesRequest) error {
 					req.InputImageURLs = append(req.InputImageURLs, imageURL)
 					continue
 				}
-				if item.Get("file_id").Exists() {
+				if item.Get("file_id").Exists() && !req.deferCompatibility {
 					return fmt.Errorf("images[].file_id is not supported (use images[].image_url instead)")
 				}
 			}
@@ -314,10 +326,10 @@ func parseOpenAIImagesJSONRequest(body []byte, req *OpenAIImagesRequest) error {
 			req.MaskImageURL = maskImageURL
 			req.HasMask = true
 		}
-		if gjson.GetBytes(body, "mask.file_id").Exists() {
+		if gjson.GetBytes(body, "mask.file_id").Exists() && !req.deferCompatibility {
 			return fmt.Errorf("mask.file_id is not supported (use mask.image_url instead)")
 		}
-		if len(req.InputImageURLs) == 0 {
+		if len(req.InputImageURLs) == 0 && !req.deferCompatibility {
 			return fmt.Errorf("images[].image_url is required")
 		}
 	}
@@ -352,10 +364,13 @@ func parseOpenAIImagesMultipartRequest(body []byte, contentType string, req *Ope
 			continue
 		}
 
-		data, err := io.ReadAll(io.LimitReader(part, openAIImageMaxUploadPartSize))
+		data, err := io.ReadAll(io.LimitReader(part, openAIImageMaxUploadPartSize+1))
 		_ = part.Close()
 		if err != nil {
 			return fmt.Errorf("read multipart field %s: %w", name, err)
+		}
+		if int64(len(data)) > openAIImageMaxUploadPartSize {
+			return fmt.Errorf("multipart field %s exceeds upload size limit", name)
 		}
 
 		fileName := strings.TrimSpace(part.FileName())
@@ -609,10 +624,41 @@ func (s *OpenAIGatewayService) ForwardImages(
 		return nil, fmt.Errorf("parsed images request is required")
 	}
 	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
+	if account.IsCodexEngine() {
+		jsonBody, err := codexEngineImagesJSON(body, parsed.ContentType)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": err.Error(), "type": "invalid_request_error"}})
+			return nil, err
+		}
+		if channelMappedModel != "" {
+			jsonBody = ReplaceModelInBody(jsonBody, channelMappedModel)
+		} else if !gjson.GetBytes(jsonBody, "model").Exists() {
+			jsonBody = ReplaceModelInBody(jsonBody, parsed.Model)
+		}
+		result, err := s.forwardCodexEngine(ctx, c, account, jsonBody, parsed.Endpoint, "")
+		if result != nil {
+			result.ImageSize = parsed.SizeTier
+			result.ImageInputSize = parsed.Size
+			result.Model = parsed.Model
+		}
+		return result, err
+	}
 	switch account.Type {
 	case AccountTypeAPIKey:
+		if parsed.deferCompatibility {
+			if _, err := s.ParseOpenAIImagesRequest(c, body); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+				return nil, err
+			}
+		}
 		return s.forwardOpenAIImagesAPIKey(ctx, c, account, body, parsed, channelMappedModel)
 	case AccountTypeOAuth, AccountTypeSetupToken:
+		if parsed.deferCompatibility {
+			if _, err := s.ParseOpenAIImagesRequest(c, body); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+				return nil, err
+			}
+		}
 		return s.forwardOpenAIImagesOAuth(ctx, c, account, parsed, channelMappedModel)
 	default:
 		return nil, fmt.Errorf("unsupported account type: %s", account.Type)

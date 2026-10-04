@@ -260,6 +260,10 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 	body []byte,
 	defaultMappedModel string,
 ) error {
+	if account.IsCodexEngine() {
+		_, err := s.forwardCodexEngine(ctx, c, account, body, "/v1/messages/count_tokens", defaultMappedModel)
+		return err
+	}
 	captureOpenAIOAuthProfileRequest(c, body)
 	if account == nil {
 		writeAnthropicCountTokensError(c, http.StatusServiceUnavailable, "api_error", "No available OpenAI accounts")

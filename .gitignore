@@ -150,6 +150,7 @@ docs/*
 !docs/codex-credits.md
 !docs/pelican-tests-upgrade.md
 !docs/model-attribution.md
+!docs/codex-engine.md
 !docs/legal/
 !docs/legal/*.md
 !docs/screenshots/

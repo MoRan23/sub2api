@@ -44,6 +44,9 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	if account.IsCodexEngine() {
+		return s.forwardCodexEngine(ctx, c, account, body, "/v1/messages", defaultMappedModel)
+	}
 	if account != nil && account.IsOpenAIOAuth() {
 		var scopeErr error
 		ctx, account, scopeErr = s.prepareOpenAIOAuthRequestScope(ctx, c, account, body)
