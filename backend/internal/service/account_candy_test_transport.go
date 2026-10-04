@@ -234,9 +234,6 @@ func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context,
 	execution := &CandyTestExecution{RequestedModel: item.Model, ReasoningEffort: item.ReasoningEffort,
 		ResponseText: writer.answer(), Completed: writer.completed && !writer.failed, DurationMs: time.Since(started).Milliseconds(),
 		UpstreamModel: observedUpstreamResponseModel(c), ModelConflict: observedUpstreamResponseModelConflict(c)}
-	if execution.UpstreamModel != "" {
-		execution.ModelEvidenceSource = "upstream_json"
-	}
 	attempt.mu.Lock()
 	execution.ActualModel = attempt.actualModel
 	execution.ReasoningEffort = attempt.actualEffort
@@ -244,9 +241,16 @@ func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context,
 	if result != nil {
 		usage := result.Usage
 		execution.Usage = &usage
+		if execution.UpstreamModel == "" {
+			execution.UpstreamModel = result.UpstreamResponseModel
+		}
+		execution.ModelConflict = execution.ModelConflict || result.UpstreamResponseModelConflict
 		if execution.ActualModel == "" {
 			execution.ActualModel = firstNonEmpty(result.UpstreamModel, result.Model)
 		}
+	}
+	if execution.UpstreamModel != "" {
+		execution.ModelEvidenceSource = "upstream_json"
 	}
 	if writer.failure != "" {
 		return execution, candyTestError(writer.failure)

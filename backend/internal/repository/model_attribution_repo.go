@@ -98,7 +98,7 @@ func (r *attributionRepository) SaveConfig(ctx context.Context, c service.Attrib
 
 // Load and lock the authoritative routing row and authorization metadata. The
 // digest excludes rotating OAuth tokens and includes explicit authorization generation.
-func attributionSnapshot(ctx context.Context, tx *sql.Tx, id int64, c service.AttributionConfig) (*service.Account, service.AttributionSnapshot, string, error) {
+func attributionSnapshot(ctx context.Context, tx *sql.Tx, id int64, c service.AttributionConfig, manual bool) (*service.Account, service.AttributionSnapshot, string, error) {
 	a := &service.Account{}
 	var credentials, extra []byte
 	var deleted *time.Time
@@ -152,11 +152,18 @@ func attributionSnapshot(ctx context.Context, tx *sql.Tx, id int64, c service.At
 			identity[key] = a.Credentials[key]
 		}
 	}
+	if a.Platform == service.PlatformOpenAI && a.Type == service.AccountTypeAPIKey {
+		// Only a digest is persisted. Key/endpoint changes establish a new
+		// authorization baseline and invalidate any in-flight attribution result.
+		identity["api_key"] = a.GetOpenAIProtocolAPIKey()
+		identity["base_url"] = a.GetOpenAIBaseURL()
+		identity["codex_engine"] = a.IsCodexEngine()
+	}
 	s := service.AttributionSnapshot{ConfigVersion: c.Version}
 	s.Policy, s.GroupID = service.ResolveAttributionPolicy(c, a.AccountGroups)
 	s.Authorization = service.AttributionDigest(identity)
 	s.Fence = service.AttributionDigest([]any{s.Authorization, a.Credentials["model_mapping"], a.ProxyID, a.AccountGroups, groupVersions, a.Status, a.Schedulable, a.ExpiresAt, a.ParentAccountID, a.IsOpenAIPassthroughEnabled()})
-	reason := service.AttributionSkipReason(a, time.Now())
+	reason := service.AttributionSkipReason(a, time.Now(), manual)
 	if deleted != nil {
 		reason = "account_missing"
 	}
@@ -265,7 +272,7 @@ func enqueueAttribution(ctx context.Context, tx *sql.Tx, id int64, c service.Att
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	a, s, skip, err := attributionSnapshot(ctx, tx, id, c)
+	a, s, skip, err := attributionSnapshot(ctx, tx, id, c, source == "manual")
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +372,7 @@ func (r *attributionRepository) Validate(ctx context.Context, j *service.Attribu
 	if err != nil {
 		return false, err
 	}
-	a, s, skip, err := attributionSnapshot(ctx, tx, j.AccountID, c)
+	a, s, skip, err := attributionSnapshot(ctx, tx, j.AccountID, c, j.Source == "manual")
 	if err != nil {
 		return false, err
 	}
@@ -393,7 +400,7 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 		if e != nil {
 			return e
 		}
-		a, s, skip, e := attributionSnapshot(ctx, tx, j.AccountID, c)
+		a, s, skip, e := attributionSnapshot(ctx, tx, j.AccountID, c, j.Source == "manual")
 		if e != nil {
 			return e
 		}

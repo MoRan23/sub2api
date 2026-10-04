@@ -66,6 +66,96 @@ func attributionMapping(t *testing.T, ar *accountRepository, id int64) map[strin
 	return out
 }
 
+func attributionAPIKeyAccount(t *testing.T, ar *accountRepository) *service.Account {
+	t.Helper()
+	a := &service.Account{Name: "attribution-api-key", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "synthetic-api-key", "base_url": "https://synthetic.invalid/v1", "model_mapping": map[string]any{"old": "old", "alias": "custom"}}, Extra: map[string]any{}}
+	require.NoError(t, ar.Create(context.Background(), a))
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), `DELETE FROM accounts WHERE id=$1`, a.ID)
+	})
+	return a
+}
+
+func TestAttributionAPIKeyManualOnly(t *testing.T) {
+	ctx := context.Background()
+	r, ar, oauth := attributionFixture(t)
+	a := attributionAPIKeyAccount(t, ar)
+	require.NoError(t, r.EnqueueNewAccounts(ctx))
+	var initial int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM account_initial_tests WHERE account_id=$1`, a.ID).Scan(&initial))
+	require.Zero(t, initial)
+	jobs, err := r.Enqueue(ctx, []int64{a.ID}, true)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	require.Equal(t, "manual", jobs[0].Source)
+	require.Equal(t, "queued", jobs[0].Status)
+	duplicate, err := r.Enqueue(ctx, []int64{a.ID}, true)
+	require.NoError(t, err)
+	require.Equal(t, jobs[0].ID, duplicate[0].ID)
+	j, err := r.Claim(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, j)
+	valid, err := r.Validate(ctx, j)
+	require.NoError(t, err)
+	require.True(t, valid)
+	j.Status = "mismatch"
+	require.NoError(t, r.Finish(ctx, j))
+	require.Equal(t, map[string]any{"low": "low", "alias": "custom"}, attributionMapping(t, ar, a.ID))
+	require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
+	require.Equal(t, map[string]any{"high": "high", "high2": "high2", "alias": "custom"}, attributionMapping(t, ar, a.ID))
+	stored, err := ar.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, a.Credentials["api_key"], stored.Credentials["api_key"])
+	// Even after a manual result becomes due, periodic scans only select OAuth.
+	_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_state SET next_due_at=NOW()-interval '11 minutes'`)
+	require.NoError(t, err)
+	jobs, err = r.Enqueue(ctx, nil, false)
+	require.NoError(t, err)
+	var selected []int64
+	for _, job := range jobs {
+		require.NotEqual(t, a.ID, job.AccountID)
+		selected = append(selected, job.AccountID)
+	}
+	require.Contains(t, selected, oauth.ID)
+	var automatic int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM model_attribution_jobs WHERE account_id=$1 AND source<>'manual'`, a.ID).Scan(&automatic))
+	require.Zero(t, automatic)
+}
+
+func TestAttributionAPIKeyConfigurationFence(t *testing.T) {
+	for _, change := range []string{
+		`credentials=jsonb_set(credentials,'{api_key}','"replacement-synthetic-key"')`,
+		`credentials=jsonb_set(credentials,'{base_url}','"https://replacement.invalid/v1"')`,
+		`extra=jsonb_set(extra,'{openai_api_key_mode}','"codex_engine"')`,
+	} {
+		t.Run(change, func(t *testing.T) {
+			ctx := context.Background()
+			r, ar, _ := attributionFixture(t)
+			a := attributionAPIKeyAccount(t, ar)
+			_, err := r.Enqueue(ctx, []int64{a.ID}, true)
+			require.NoError(t, err)
+			j, err := r.Claim(ctx)
+			require.NoError(t, err)
+			require.NotNil(t, j)
+			_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET `+change+` WHERE id=$1`, a.ID)
+			require.NoError(t, err)
+			valid, err := r.Validate(ctx, j)
+			require.NoError(t, err)
+			require.False(t, valid)
+			j.Status = "passed"
+			require.NoError(t, r.Finish(ctx, j))
+			stale, err := r.Get(ctx, j.ID)
+			require.NoError(t, err)
+			require.Equal(t, "stale", stale.Result.Action)
+			require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
+			fresh := attributionRun(t, r, a.ID, "passed")
+			require.Equal(t, "high", fresh.Result.Action)
+			require.NotEqual(t, j.Snapshot.Authorization, fresh.Snapshot.Authorization)
+		})
+	}
+}
+
 func TestAttributionTransitionsAtomicityAndCache(t *testing.T) {
 	ctx := context.Background()
 	r, ar, a := attributionFixture(t)
@@ -359,8 +449,8 @@ func TestAttributionSkipAndMigrationRepeat(t *testing.T) {
 		{`UPDATE accounts SET status='active',schedulable=false WHERE id=$1`, "scheduling_disabled"},
 		{`UPDATE accounts SET schedulable=true,expires_at=NOW()-interval '1 minute' WHERE id=$1`, "account_expired"},
 		{`UPDATE accounts SET expires_at=NULL,extra='{"openai_passthrough":true}' WHERE id=$1`, "passthrough_account"},
-		{`UPDATE accounts SET extra='{}',type='apikey' WHERE id=$1`, "unsupported_account"},
-		{`UPDATE accounts SET type='oauth',deleted_at=NOW() WHERE id=$1`, "account_missing"},
+		{`UPDATE accounts SET extra='{}',platform='anthropic',type='apikey' WHERE id=$1`, "unsupported_account"},
+		{`UPDATE accounts SET platform='openai',type='oauth',deleted_at=NOW() WHERE id=$1`, "account_missing"},
 	} {
 		_, err := integrationDB.ExecContext(ctx, tc.sql, a.ID)
 		require.NoError(t, err)

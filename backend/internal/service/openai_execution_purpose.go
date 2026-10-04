@@ -112,6 +112,10 @@ func safeCandyTestError(ctx context.Context, err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return candyTestError("upstream_timeout")
 	}
+	var engine *codexEngineResponseError
+	if errors.As(err, &engine) && engine.status >= 400 && engine.status <= 599 {
+		return candyTestError(fmt.Sprintf("upstream_http_%d", engine.status))
+	}
 	var failover *UpstreamFailoverError
 	if errors.As(err, &failover) {
 		if gjson.GetBytes(failover.ResponseBody, "error.type").String() == "first_output_timeout" {

@@ -202,6 +202,10 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 	}
 	// Reuse the transport profile/proxy/concurrency, without OAuth wire identity
 	// rewriting or plugin/control headers.
+	req, err = candyTestBeforeSend(req)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := s.httpUpstream.Do(req, proxy, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(start).Milliseconds())
 	if err != nil {

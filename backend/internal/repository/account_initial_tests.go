@@ -53,7 +53,7 @@ func (r *attributionRepository) EnqueueNewAccounts(ctx context.Context) error {
 		// Eligibility does not require ModelTrace to be enabled for pelican.
 		eligibility := c
 		eligibility.Enabled = true
-		a, _, skip, err := attributionSnapshot(ctx, tx, p.id, eligibility)
+		a, _, skip, err := attributionSnapshot(ctx, tx, p.id, eligibility, false)
 		if err != nil {
 			return err
 		}

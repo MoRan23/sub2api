@@ -41,10 +41,19 @@ describe('attribution account UI', () => {
     await wrapper.get('button').trigger('click'); expect(wrapper.emitted('open')).toHaveLength(1)
     wrapper.unmount()
   })
-  it('shows skip reasons and excludes non-OAuth account actions', () => {
+  it('supports manual API Key detection and displays its latest result', async () => {
+    const wrapper = mount(AccountAttributionCell, { props: { account: { id: 43, platform: 'openai', type: 'apikey', model_attribution: { latest: job() } } as AccountListItem } })
+    expect(wrapper.text()).toContain('attribution.manualOnly')
+    expect(wrapper.text()).toContain('gpt-6-astra · 80.0%')
+    await wrapper.get('button').trigger('click')
+    expect(wrapper.emitted('open')).toHaveLength(1)
+    expect(api.create).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+  it('shows skip reasons and excludes other platforms', () => {
     const wrapper = mount(AccountAttributionCell, { props: { account: { platform: 'openai', type: 'oauth', model_attribution: { skip_reason: 'shadow_account' } } as AccountListItem } })
     expect(wrapper.text()).toContain('attribution.reasons.shadow_account'); wrapper.unmount()
-    const other = mount(AccountAttributionCell, { props: { account: { platform: 'openai', type: 'apikey' } as AccountListItem } })
+    const other = mount(AccountAttributionCell, { props: { account: { platform: 'anthropic', type: 'apikey' } as AccountListItem } })
     expect(other.find('button').exists()).toBe(false); other.unmount()
   })
   it('queues the selected batch once and shows skipped accounts', async () => {

@@ -186,17 +186,17 @@ func ResolveAttributionPolicy(c AttributionConfig, groups []AccountGroup) (Attri
 	return c.Default, groupID
 }
 
-func AttributionSkipReason(a *Account, now time.Time) string {
+func AttributionSkipReason(a *Account, now time.Time, manual bool) string {
 	if a == nil {
 		return "account_missing"
 	}
-	if !a.IsOpenAIOAuth() {
+	if !a.IsOpenAIOAuth() && !(manual && a.Platform == PlatformOpenAI && a.Type == AccountTypeAPIKey) {
 		return "unsupported_account"
 	}
 	if a.IsShadow() {
 		return "shadow_account"
 	}
-	if a.IsOpenAIPassthroughEnabled() {
+	if a.IsOpenAIOAuth() && a.IsOpenAIPassthroughEnabled() {
 		return "passthrough_account"
 	}
 	if a.Status != StatusActive {

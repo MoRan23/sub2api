@@ -6,7 +6,8 @@ export const attributionZh = {
   groupHelp: '多分组账户先按优先级选定分组：该组启用独立配置时使用组内配置，否则使用全局默认配置。',
   priority: { title: '分组优先级', help: '从上到下优先级递减，统一决定多分组账号使用哪组高级、低级模型白名单。未列出的分组排在后面，按账户分组优先级及分组 ID 排序；继承全局的分组也参与选择，选中时使用全局配置。', add: '加入排序', up: '上移', down: '下移' },
   retries: '自动重试次数',
-  notice: '每 10 分钟检测一次，每轮 3 条探针，不同账户同时检测。临时上游错误最多重试 2 次，总时限 10 分钟。检测及重试会消耗上游额度；执行失败或归因异常不会修改白名单。',
+  notice: 'OpenAI OAuth 账户每 10 分钟自动检测；API Key 账户仅手动检测。每轮 3 条探针，不同账户同时检测。临时上游错误最多重试 2 次，总时限 10 分钟。检测及重试会消耗上游额度；执行失败或归因异常不会修改白名单。',
+  manualOnly: '仅手动',
   mappingHelp: '仅替换同名白名单条目，保留自定义别名与通配符映射。启用前请填好服务地址及两份非空白名单。',
   newAccount: {
     title: '新 OAuth 账号首测', attribution: '新账号自动执行一次归因测试', pelican: '新账号自动执行一次鹈鹕测试', attributionModel: '归因首测模型', pelicanModel: '鹈鹕首测模型',
@@ -26,7 +27,7 @@ export const attributionZh = {
   actions: { high: '已应用高级白名单', low: '已应用低级白名单', unchanged: '无需修改', stale: '结果已过期，未修改', none: '未修改' },
   reasons: {
     account_rate_limited: '账户或测试模型当前被限流，已跳过测试',
-    disabled: '检测未启用', unsupported_account: '仅支持 OpenAI OAuth 实体账户', shadow_account: '共享凭据的影子账户', passthrough_account: '自动透传账户', account_inactive: '账户已停用', scheduling_disabled: '账户关闭调度', account_expired: '账户已过期', account_missing: '账户已删除或不存在',
+    disabled: '检测未启用', unsupported_account: '支持 OpenAI OAuth 实体账户及手动检测的 API Key 账户', shadow_account: '共享凭据的影子账户', passthrough_account: '自动透传账户', account_inactive: '账户已停用', scheduling_disabled: '账户关闭调度', account_expired: '账户已过期', account_missing: '账户已删除或不存在',
     model_not_enrolled: 'ModelTrace 尚未收录探针模型', modeltrace_unavailable: 'ModelTrace 服务不可用', modeltrace_failed: 'ModelTrace 请求失败', modeltrace_response_invalid: 'ModelTrace 返回格式无效', modeltrace_bank_invalid: '候选模型库无效', modeltrace_challenges_invalid: '需要三条独立且有效的探针',
     insufficient_valid_outputs: '三份回答未全部有效', modeltrace_probabilities_invalid: '归因概率无效', ambiguous_prediction: '最高概率并列', configuration_or_authorization_changed: '配置、分组、授权或模型限制已变化', configuration_unavailable: '配置读取失败',
     timeout: '检测超过 10 分钟', interrupted: '检测中断，未重放请求', probe_failed: '探针执行失败', probe_model_changed: '实际出站模型与探针不一致', internal_error: '检测内部错误', authorization_changed: '账户授权已变化', upstream_error: '上游请求失败', incomplete_response: '上游流未完成', response_too_large: '上游输出超过限制'
@@ -40,7 +41,8 @@ export const attributionEn = {
   groupHelp: 'Select the highest-priority group first. Use its independent policy if enabled; otherwise use the global defaults.',
   priority: { title: 'Group priority', help: 'Higher entries win when an account belongs to multiple groups. Unlisted groups follow account-group priority, then group ID. Groups inheriting global settings also participate and use global settings when selected.', add: 'Add to order', up: 'Move up', down: 'Move down' },
   retries: 'Automatic retries',
-  notice: 'Three probes per account every 10 minutes; accounts run concurrently. Transient upstream errors retry up to twice within the ten-minute deadline. Probes and retries consume upstream quota. Failed or abnormal detections leave allowlists unchanged.',
+  notice: 'OpenAI OAuth accounts are checked automatically every 10 minutes; API Key accounts are tested manually only. Three probes per account; accounts run concurrently. Transient upstream errors retry up to twice within the ten-minute deadline. Probes and retries consume upstream quota. Failed or abnormal detections leave allowlists unchanged.',
+  manualOnly: 'Manual only',
   mappingHelp: 'Replace identity allowlist entries only; preserve custom aliases and wildcard mappings. Configure the service and both nonempty allowlists before enabling.',
   newAccount: {
     title: 'New OAuth account tests', attribution: 'Run attribution once for new accounts', pelican: 'Run pelican once for new accounts', attributionModel: 'Initial attribution model', pelicanModel: 'Initial pelican model',
@@ -60,7 +62,7 @@ export const attributionEn = {
   actions: { high: 'High-tier allowlist applied', low: 'Low-tier allowlist applied', unchanged: 'No change needed', stale: 'Stale result, no changes', none: 'Unchanged' },
   reasons: {
     account_rate_limited: 'Account or probe model is rate limited; test skipped',
-    disabled: 'Detection disabled', unsupported_account: 'Only physical OpenAI OAuth accounts are supported', shadow_account: 'Shadow account with shared credentials', passthrough_account: 'Automatic passthrough account', account_inactive: 'Account inactive', scheduling_disabled: 'Scheduling disabled', account_expired: 'Account expired', account_missing: 'Account deleted or missing',
+    disabled: 'Detection disabled', unsupported_account: 'Supports physical OpenAI OAuth accounts and manual tests for API Key accounts', shadow_account: 'Shadow account with shared credentials', passthrough_account: 'Automatic passthrough account', account_inactive: 'Account inactive', scheduling_disabled: 'Scheduling disabled', account_expired: 'Account expired', account_missing: 'Account deleted or missing',
     model_not_enrolled: 'Probe model not enrolled in ModelTrace', modeltrace_unavailable: 'ModelTrace unavailable', modeltrace_failed: 'ModelTrace request failed', modeltrace_response_invalid: 'Invalid ModelTrace response', modeltrace_bank_invalid: 'Invalid candidate bank', modeltrace_challenges_invalid: 'Three independent valid probes required',
     insufficient_valid_outputs: 'Not all three answers were valid', modeltrace_probabilities_invalid: 'Invalid attribution probabilities', ambiguous_prediction: 'Highest probability tied', configuration_or_authorization_changed: 'Configuration, groups, authorization or model restrictions changed', configuration_unavailable: 'Configuration unavailable',
     timeout: 'Detection exceeded 10 minutes', interrupted: 'Interrupted; inference was not replayed', probe_failed: 'Probe execution failed', probe_model_changed: 'Outbound model differs from probe', internal_error: 'Internal detection error', authorization_changed: 'Account authorization changed', upstream_error: 'Upstream request failed', incomplete_response: 'Incomplete upstream stream', response_too_large: 'Upstream output limit exceeded'

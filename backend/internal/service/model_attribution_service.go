@@ -328,7 +328,7 @@ func (s *ModelAttributionService) Summaries(ctx context.Context, ids []int64) (m
 		if out[a.ID] == nil {
 			out[a.ID] = &AttributionSummary{}
 		}
-		reason := AttributionSkipReason(a, time.Now())
+		reason := AttributionSkipReason(a, time.Now(), true)
 		policy, _ := ResolveAttributionPolicy(c, a.AccountGroups)
 		if reason == "" && AccountDiagnosticRateLimited(a, policy.Model, time.Now()) {
 			reason = ErrDiagnosticRateLimited.Error()

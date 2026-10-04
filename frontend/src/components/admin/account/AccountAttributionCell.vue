@@ -1,7 +1,7 @@
 <template>
-  <div v-if="account.platform === 'openai' && account.type === 'oauth'" class="w-44 space-y-1 text-xs" data-testid="attribution-cell">
+  <div v-if="account.platform === 'openai' && (account.type === 'oauth' || account.type === 'apikey')" class="w-44 space-y-1 text-xs" data-testid="attribution-cell">
     <span v-if="summary?.active" class="inline-flex rounded bg-blue-700 px-1.5 py-0.5 text-white" data-testid="attribution-active">{{ t(`attribution.status.${summary.active.status}`) }}</span>
-    <p :class="color" data-testid="attribution-latest">{{ latest ? t(`attribution.status.${latest.status}`) : t('attribution.never') }}</p>
+    <p :class="color" data-testid="attribution-latest">{{ latest ? t(`attribution.status.${latest.status}`) : t('attribution.never') }}<span v-if="account.type === 'apikey'" class="ml-1 text-gray-500 dark:text-gray-400">· {{ t('attribution.manualOnly') }}</span></p>
     <p v-if="latest?.result.analysis" class="truncate" :title="latest.result.analysis.prediction">{{ latest.result.analysis.prediction }} · {{ (latest.result.analysis.probability * 100).toFixed(1) }}%</p>
     <p v-if="latest" class="text-gray-500 dark:text-gray-400">{{ formatDateTime(latest.finished_at || latest.created_at) }}</p>
     <p v-if="summary?.skip_reason" class="truncate text-gray-500" :title="reason(summary.skip_reason)">{{ reason(summary.skip_reason) }}</p>

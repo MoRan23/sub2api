@@ -160,6 +160,81 @@ func TestCandyTransportPreservesSelectedUpstreamModelAndObservesRawModel(t *test
 	require.Equal(t, pelicanTestInstructions, gjson.GetBytes(upstream.bodies[0], "instructions").String())
 }
 
+func TestAttributionAPIKeyProbeModes(t *testing.T) {
+	for _, mode := range []string{"generic", "passthrough", "codex_engine"} {
+		t.Run(mode, func(t *testing.T) {
+			account := newOpenAIRejectedFieldTestAccount()
+			account.Credentials["model_mapping"] = map[string]any{"gpt-6-astra": "low-model"}
+			account.Extra["openai_api_key_mode"] = mode
+			account.Extra["openai_passthrough"] = mode == "passthrough"
+			repo := &stubOpenAIAccountRepo{accounts: []Account{*account}}
+			terminal := "data: {\"type\":\"response.completed\",\"response\":{\"model\":\"gpt-6-luna\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\" 1, 002; 3 \\n\"}]}],\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}}\n\n"
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(terminal))}}}
+			gateway := newOpenAIRejectedFieldTestService(upstream)
+			gateway.accountRepo = repo
+			result, err := newCandySyntheticCatalogTransport(repo, gateway).Probe(context.Background(), account.ID, "gpt-6-astra", "synthetic challenge")
+			require.NoError(t, err)
+			require.True(t, result.Completed)
+			require.Equal(t, " 1, 002; 3 \n", result.ResponseText)
+			require.Equal(t, "gpt-6-astra", result.ActualModel)
+			require.Equal(t, "gpt-6-luna", result.UpstreamModel)
+			require.Equal(t, "upstream_json", result.ModelEvidenceSource)
+			require.NotNil(t, result.Usage)
+			require.EqualValues(t, 2, result.Usage.InputTokens)
+			require.Len(t, upstream.bodies, 1)
+			require.Equal(t, "gpt-6-astra", gjson.GetBytes(upstream.bodies[0], "model").String())
+			require.False(t, gjson.GetBytes(upstream.bodies[0], "tools").Exists())
+			require.Equal(t, "Bearer sk-test", upstream.lastReq.Header.Get("Authorization"))
+			require.Equal(t, "https://compat.example/v1/responses", upstream.lastReq.URL.String())
+			require.Equal(t, "low-model", repo.accounts[0].GetMappedModel("gpt-6-astra"))
+			require.True(t, repo.accounts[0].Schedulable)
+		})
+	}
+}
+
+func TestAttributionCodexEngineChecksAuthorizationBeforeSend(t *testing.T) {
+	account := newOpenAIRejectedFieldTestAccount()
+	account.Extra["openai_api_key_mode"] = "codex_engine"
+	upstream := &httpUpstreamRecorder{}
+	ctx := withOpenAICandyTest(context.Background(), &openAICandyTestAttempt{validate: func(context.Context) error {
+		return candyTestError("authorization_changed")
+	}})
+	body := []byte(`{"model":"gpt-6-astra","input":"synthetic"}`)
+	_, err := newOpenAIRejectedFieldTestService(upstream).Forward(ctx, newOpenAIRejectedFieldTestContext(body), account, body)
+	require.EqualError(t, err, "authorization_changed")
+	require.Empty(t, upstream.bodies)
+}
+
+func TestAttributionCodexEngineHTTPFailures(t *testing.T) {
+	for _, status := range []int{400, 401, 429, 503} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			account := newOpenAIRejectedFieldTestAccount()
+			account.Extra["openai_api_key_mode"] = "codex_engine"
+			repo := &stubOpenAIAccountRepo{accounts: []Account{*account}}
+			terminal := "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"synthetic\"}]}]}}\n\n"
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{
+				newOpenAIRejectedFieldTestResponse(status, `{"error":{"message":"synthetic failure"}}`),
+				{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(terminal))},
+			}}
+			gateway := newOpenAIRejectedFieldTestService(upstream)
+			gateway.accountRepo = repo
+			result, err := newCandySyntheticCatalogTransport(repo, gateway).Probe(context.Background(), account.ID, "gpt-6-astra", "synthetic challenge")
+			if status == 503 {
+				require.NoError(t, err)
+				require.True(t, result.Completed)
+				require.Equal(t, 1, result.Retries)
+				require.Len(t, upstream.bodies, 2)
+			} else {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "upstream_http_")
+				require.Equal(t, status == 429, diagnosticRateLimitError(err))
+				require.Len(t, upstream.bodies, 1)
+			}
+			require.True(t, repo.accounts[0].Schedulable)
+		})
+	}
+}
+
 func TestCandyTokenExpiredDoesNotSuspend(t *testing.T) {
 	account := &Account{ID: 5, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "synthetic", "expires_at": time.Now().Add(-time.Minute).Format(time.RFC3339)}}
 	repo := &stubOpenAIAccountRepo{accounts: []Account{*account}}

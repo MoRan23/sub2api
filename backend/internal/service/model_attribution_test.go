@@ -140,10 +140,42 @@ func TestAttributionSkipConditions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			a := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true}
 			tc.change(a)
-			require.Equal(t, tc.reason, AttributionSkipReason(a, now))
+			require.Equal(t, tc.reason, AttributionSkipReason(a, now, false))
+			if a.Type != AccountTypeAPIKey {
+				require.Equal(t, tc.reason, AttributionSkipReason(a, now, true))
+			}
 		})
 	}
-	require.Equal(t, "account_missing", AttributionSkipReason(nil, now))
+	require.Equal(t, "account_missing", AttributionSkipReason(nil, now, true))
+}
+
+func TestAttributionAPIKeyManualEligibility(t *testing.T) {
+	now := time.Now()
+	future := now.Add(time.Hour)
+	past := now.Add(-time.Hour)
+	parent := int64(1)
+	for _, tc := range []struct {
+		name   string
+		change func(*Account)
+		reason string
+	}{
+		{"generic", func(*Account) {}, ""},
+		{"passthrough", func(a *Account) { a.Extra = map[string]any{"openai_passthrough": true} }, ""},
+		{"engine", func(a *Account) { a.Extra = map[string]any{"openai_api_key_mode": "codex_engine"} }, ""},
+		{"rate_limited", func(a *Account) { a.RateLimitResetAt = &future }, "account_rate_limited"},
+		{"shadow", func(a *Account) { a.ParentAccountID = &parent }, "shadow_account"},
+		{"inactive", func(a *Account) { a.Status = "disabled" }, "account_inactive"},
+		{"unscheduled", func(a *Account) { a.Schedulable = false }, "scheduling_disabled"},
+		{"expired", func(a *Account) { a.ExpiresAt = &past }, "account_expired"},
+		{"other_platform", func(a *Account) { a.Platform = "anthropic" }, "unsupported_account"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true}
+			tc.change(a)
+			require.Equal(t, tc.reason, AttributionSkipReason(a, now, true))
+			require.Equal(t, "unsupported_account", AttributionSkipReason(a, now, false))
+		})
+	}
 }
 func TestAttributionProbabilityValidation(t *testing.T) {
 	models := []string{AttributionDefaultModel, "gpt-6-luna"}
