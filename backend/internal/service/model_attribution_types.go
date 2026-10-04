@@ -14,6 +14,7 @@ import (
 )
 
 const AttributionDefaultModel = "gpt-6-astra"
+const InitialPelicanDefaultModel = "gpt-6.1-sol"
 
 var (
 	ErrAttributionInvalid  = errors.New("invalid attribution configuration")
@@ -33,9 +34,10 @@ type AttributionGroupPolicy struct {
 	AttributionPolicy
 }
 type NewAccountTestConfig struct {
-	Attribution bool   `json:"attribution"`
-	Pelican     bool   `json:"pelican"`
-	Model       string `json:"model"`
+	Attribution      bool   `json:"attribution"`
+	Pelican          bool   `json:"pelican"`
+	AttributionModel string `json:"attribution_model"`
+	PelicanModel     string `json:"pelican_model"`
 }
 type AttributionConfig struct {
 	Version         int64                    `json:"version"`
@@ -48,7 +50,7 @@ type AttributionConfig struct {
 }
 
 func DefaultAttributionConfig() AttributionConfig {
-	return AttributionConfig{Version: 1, Default: AttributionPolicy{Model: AttributionDefaultModel, HighModels: []string{}, LowModels: []string{}}, Groups: []AttributionGroupPolicy{}, GroupPriority: []int64{}, NewAccountTests: NewAccountTestConfig{Attribution: true, Pelican: true, Model: AttributionDefaultModel}}
+	return AttributionConfig{Version: 1, Default: AttributionPolicy{Model: AttributionDefaultModel, HighModels: []string{}, LowModels: []string{}}, Groups: []AttributionGroupPolicy{}, GroupPriority: []int64{}, NewAccountTests: NewAccountTestConfig{Attribution: true, Pelican: true, AttributionModel: AttributionDefaultModel, PelicanModel: InitialPelicanDefaultModel}}
 }
 
 func AttributionBaseURL(raw string) (string, error) {
@@ -77,12 +79,20 @@ func NormalizeAttributionConfig(c AttributionConfig) (AttributionConfig, error) 
 		prioritySeen[id] = true
 	}
 	var err error
-	c.NewAccountTests.Model = strings.TrimSpace(c.NewAccountTests.Model)
-	if c.NewAccountTests.Model == "" {
-		c.NewAccountTests.Model = AttributionDefaultModel
-	}
-	if len(c.NewAccountTests.Model) > 200 || strings.ContainsAny(c.NewAccountTests.Model, "*\r\n\t ") {
-		return c, fmt.Errorf("%w: 首测模型须为具体模型 ID", ErrAttributionInvalid)
+	for _, field := range []struct {
+		model    *string
+		fallback string
+	}{
+		{&c.NewAccountTests.AttributionModel, AttributionDefaultModel},
+		{&c.NewAccountTests.PelicanModel, InitialPelicanDefaultModel},
+	} {
+		*field.model = strings.TrimSpace(*field.model)
+		if *field.model == "" {
+			*field.model = field.fallback
+		}
+		if len(*field.model) > 200 || strings.ContainsAny(*field.model, "*\r\n\t ") {
+			return c, fmt.Errorf("%w: 首测模型须为具体模型 ID", ErrAttributionInvalid)
+		}
 	}
 	if c.Enabled || strings.TrimSpace(c.BaseURL) != "" {
 		c.BaseURL, err = AttributionBaseURL(c.BaseURL)

@@ -68,18 +68,30 @@ func TestAttributionDirectProbeModelLimitAndInitialTests(t *testing.T) {
 	jobs, err = r.Enqueue(ctx, []int64{a.ID}, true)
 	require.NoError(t, err)
 	require.Equal(t, "account_rate_limited", jobs[0].Reason)
-	for _, limit := range []string{"global", "model"} {
+	for _, limit := range []string{"global", "attribution", "pelican"} {
 		fresh := initialTestAccount(t, ar, nil)
 		if limit == "global" {
 			_, err = integrationDB.Exec(`UPDATE accounts SET rate_limit_reset_at=NOW()+interval '1 hour' WHERE id=$1`, fresh.ID)
 		} else {
-			_, err = integrationDB.Exec(`UPDATE accounts SET extra=jsonb_build_object('model_rate_limits',jsonb_build_object($2::text,jsonb_build_object('rate_limit_reset_at','2099-01-01T00:00:00Z'))) WHERE id=$1`, fresh.ID, c.NewAccountTests.Model)
+			model := c.NewAccountTests.AttributionModel
+			if limit == "pelican" {
+				model = c.NewAccountTests.PelicanModel
+			}
+			_, err = integrationDB.Exec(`UPDATE accounts SET extra=jsonb_build_object('model_rate_limits',jsonb_build_object($2::text,jsonb_build_object('rate_limit_reset_at','2099-01-01T00:00:00Z'))) WHERE id=$1`, fresh.ID, model)
 		}
 		require.NoError(t, err)
 		require.NoError(t, r.EnqueueNewAccounts(ctx))
 		attr, pelican := initialTestCounts(t, fresh.ID)
-		require.Zero(t, attr)
-		require.Zero(t, pelican)
+		if limit == "pelican" {
+			require.Equal(t, 1, attr)
+		} else {
+			require.Zero(t, attr)
+		}
+		if limit == "attribution" {
+			require.Equal(t, 1, pelican)
+		} else {
+			require.Zero(t, pelican)
+		}
 	}
 }
 

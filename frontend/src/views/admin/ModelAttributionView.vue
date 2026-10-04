@@ -34,8 +34,9 @@
             <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('attribution.newAccount.help') }}</p>
             <label class="flex items-center gap-2 text-sm"><input v-model="config.new_account_tests.attribution" type="checkbox" data-testid="initial-attribution" />{{ t('attribution.newAccount.attribution') }}</label>
             <p v-if="config.new_account_tests.attribution && !config.enabled" class="text-xs text-amber-700 dark:text-amber-300">{{ t('attribution.newAccount.requiresEnabled') }}</p>
+            <label class="block text-sm font-medium">{{ t('attribution.newAccount.attributionModel') }}<input v-model="config.new_account_tests.attribution_model" list="attribution-models" class="input mt-2 w-full" placeholder="gpt-6-astra" maxlength="200" data-testid="initial-attribution-model" /></label>
             <label class="flex items-center gap-2 text-sm"><input v-model="config.new_account_tests.pelican" type="checkbox" data-testid="initial-pelican" />{{ t('attribution.newAccount.pelican') }}</label>
-            <label class="block text-sm font-medium">{{ t('attribution.newAccount.model') }}<input v-model="config.new_account_tests.model" list="attribution-models" class="input mt-2 w-full" placeholder="gpt-6-astra" maxlength="200" data-testid="initial-model" /></label>
+            <label class="block text-sm font-medium">{{ t('attribution.newAccount.pelicanModel') }}<input v-model="config.new_account_tests.pelican_model" class="input mt-2 w-full" placeholder="gpt-6.1-sol" maxlength="200" data-testid="initial-pelican-model" /></label>
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('attribution.newAccount.modelHelp') }}</p>
           </section>
           <section class="space-y-4 rounded-xl border border-gray-200 bg-white p-5 dark:border-dark-600 dark:bg-dark-800">
@@ -103,8 +104,8 @@ function validPolicy(p: AttributionPolicy) {
 async function save() {
   if (!config.value) return
   error.value = ''; message.value = ''
-  const initialModel = config.value.new_account_tests.model.trim()
-  if (!initialModel || initialModel.length > 200 || /[\s*]/.test(initialModel)) { error.value = t('attribution.newAccount.invalid'); return }
+  const initialModels = [config.value.new_account_tests.attribution_model, config.value.new_account_tests.pelican_model].map(m => m.trim())
+  if (initialModels.some(m => !m || m.length > 200 || /[\s*]/.test(m))) { error.value = t('attribution.newAccount.invalid'); return }
   if (config.value.enabled && (!/^https?:\/\//.test(config.value.base_url) || !validPolicy(config.value.default) || config.value.groups.some(g => g.enabled && !validPolicy(g)))) { error.value = t('attribution.invalid'); return }
   saving.value = true
   try { config.value = await attributionAPI.save(config.value); message.value = t('attribution.saved') }

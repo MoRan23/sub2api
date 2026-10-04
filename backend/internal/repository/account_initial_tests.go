@@ -27,18 +27,18 @@ func (r *attributionRepository) EnqueueNewAccounts(ctx context.Context) error {
 		return err
 	}
 	type pending struct {
-		id                   int64
-		attribution, pelican bool
-		model                string
+		id                             int64
+		attribution, pelican           bool
+		attributionModel, pelicanModel string
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT account_id,attribution,pelican,model FROM account_initial_tests WHERE processed_at IS NULL ORDER BY account_id LIMIT 50`)
+	rows, err := tx.QueryContext(ctx, `SELECT account_id,attribution,pelican,model,pelican_model FROM account_initial_tests WHERE processed_at IS NULL ORDER BY account_id LIMIT 50`)
 	if err != nil {
 		return err
 	}
 	var accounts []pending
 	for rows.Next() {
 		var p pending
-		if err = rows.Scan(&p.id, &p.attribution, &p.pelican, &p.model); err != nil {
+		if err = rows.Scan(&p.id, &p.attribution, &p.pelican, &p.attributionModel, &p.pelicanModel); err != nil {
 			_ = rows.Close()
 			return err
 		}
@@ -57,18 +57,18 @@ func (r *attributionRepository) EnqueueNewAccounts(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if a != nil && skip == "" && !service.AccountDiagnosticRateLimited(a, p.model, time.Now()) {
+		if a != nil && skip == "" {
 			var hasAttribution, hasPelican bool
 			if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM model_attribution_jobs WHERE account_id=$1), EXISTS(SELECT 1 FROM account_candy_test_items WHERE account_id=$1 AND prompt_version=$2)`, p.id, service.CandyTestPromptVersion).Scan(&hasAttribution, &hasPelican); err != nil {
 				return err
 			}
-			if p.attribution && c.Enabled && c.NewAccountTests.Attribution && !hasAttribution {
-				if _, err = enqueueAttribution(ctx, tx, p.id, c, "initial", p.model); err != nil {
+			if p.attribution && c.Enabled && c.NewAccountTests.Attribution && !hasAttribution && !service.AccountDiagnosticRateLimited(a, p.attributionModel, time.Now()) {
+				if _, err = enqueueAttribution(ctx, tx, p.id, c, "initial", p.attributionModel); err != nil {
 					return err
 				}
 			}
-			if p.pelican && c.NewAccountTests.Pelican && !hasPelican {
-				request := &service.CandyTestCreateRequest{AccountIDs: []int64{p.id}, Model: p.model, IdempotencyKey: fmt.Sprintf("new-account-pelican:%d", p.id)}
+			if p.pelican && c.NewAccountTests.Pelican && !hasPelican && !service.AccountDiagnosticRateLimited(a, p.pelicanModel, time.Now()) {
+				request := &service.CandyTestCreateRequest{AccountIDs: []int64{p.id}, Model: p.pelicanModel, IdempotencyKey: fmt.Sprintf("new-account-pelican:%d", p.id)}
 				if _, err = createCandyBatch(ctx, tx, request, []*service.CandyTestItem{{AccountID: p.id, AccountName: a.Name, Status: "queued"}}); err != nil {
 					return err
 				}

@@ -2,7 +2,7 @@ import { apiClient } from '../client'
 
 export interface AttributionPolicy { model: string; high_models: string[]; low_models: string[] }
 export interface AttributionGroup extends AttributionPolicy { group_id: number; enabled: boolean }
-export interface NewAccountTestConfig { attribution: boolean; pelican: boolean; model: string }
+export interface NewAccountTestConfig { attribution: boolean; pelican: boolean; attribution_model: string; pelican_model: string }
 export interface AttributionConfig { version: number; enabled: boolean; base_url: string; default: AttributionPolicy; groups: AttributionGroup[]; group_priority: number[]; new_account_tests: NewAccountTestConfig }
 export type AttributionStatus = 'queued' | 'running' | 'passed' | 'mismatch' | 'abnormal' | 'failed' | 'skipped'
 export interface AttributionJob {

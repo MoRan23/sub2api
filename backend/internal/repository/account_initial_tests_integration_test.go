@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/stretchr/testify/require"
 )
 
@@ -64,7 +65,7 @@ func TestAttributionNewAccountsOnceAcrossReplicas(t *testing.T) {
 	require.Equal(t, "initial", source)
 	require.Equal(t, service.AttributionDefaultModel, model)
 	require.NoError(t, integrationDB.QueryRow(`SELECT model,prompt_version FROM account_candy_test_items WHERE account_id=$1`, a.ID).Scan(&pelicanModel, &version))
-	require.Equal(t, model, pelicanModel)
+	require.Equal(t, service.InitialPelicanDefaultModel, pelicanModel)
 	require.Equal(t, service.CandyTestPromptVersion, version)
 	_, oldPelican := initialTestCounts(t, existing.ID)
 	require.Zero(t, oldPelican)
@@ -94,7 +95,7 @@ func TestAttributionNewAccountsIndependentSwitches(t *testing.T) {
 			c, err := r.Config(ctx)
 			require.NoError(t, err)
 			c.Enabled = tc.enabled
-			c.NewAccountTests = service.NewAccountTestConfig{Attribution: tc.attribution, Pelican: tc.pelican, Model: "gpt-6-sol"}
+			c.NewAccountTests = service.NewAccountTestConfig{Attribution: tc.attribution, Pelican: tc.pelican, AttributionModel: "gpt-6-astra", PelicanModel: "gpt-6-sol"}
 			c, err = r.SaveConfig(ctx, c)
 			require.NoError(t, err)
 			a := initialTestAccount(t, ar, nil)
@@ -102,6 +103,11 @@ func TestAttributionNewAccountsIndependentSwitches(t *testing.T) {
 			attr, pelican := initialTestCounts(t, a.ID)
 			require.Equal(t, tc.wantAttribution, attr)
 			require.Equal(t, tc.wantPelican, pelican)
+			if attr > 0 {
+				var model string
+				require.NoError(t, integrationDB.QueryRow(`SELECT snapshot->'policy'->>'model' FROM model_attribution_jobs WHERE account_id=$1`, a.ID).Scan(&model))
+				require.Equal(t, "gpt-6-astra", model)
+			}
 			if pelican > 0 {
 				var model string
 				require.NoError(t, integrationDB.QueryRow(`SELECT model FROM account_candy_test_items WHERE account_id=$1`, a.ID).Scan(&model))
@@ -122,6 +128,80 @@ func TestAttributionNewAccountsIndependentSwitches(t *testing.T) {
 			attr, pelican = initialTestCounts(t, a.ID)
 			require.Equal(t, tc.wantAttribution, attr)
 			require.Equal(t, tc.wantPelican, pelican)
+		})
+	}
+}
+
+func TestAttributionInitialModelsSnapshotAtAccountCreation(t *testing.T) {
+	ctx := context.Background()
+	r, ar, _ := attributionFixture(t)
+	c, err := r.Config(ctx)
+	require.NoError(t, err)
+	c.NewAccountTests.AttributionModel = "initial-attribution"
+	c.NewAccountTests.PelicanModel = "initial-pelican"
+	c, err = r.SaveConfig(ctx, c)
+	require.NoError(t, err)
+	a := initialTestAccount(t, ar, nil)
+	c.NewAccountTests.AttributionModel = "next-attribution"
+	c.NewAccountTests.PelicanModel = "next-pelican"
+	_, err = r.SaveConfig(ctx, c)
+	require.NoError(t, err)
+	next := initialTestAccount(t, ar, nil)
+	require.NoError(t, r.EnqueueNewAccounts(ctx))
+	for _, tc := range []struct {
+		id                   int64
+		attribution, pelican string
+	}{
+		{a.ID, "initial-attribution", "initial-pelican"},
+		{next.ID, "next-attribution", "next-pelican"},
+	} {
+		var attribution, pelican string
+		require.NoError(t, integrationDB.QueryRow(`SELECT snapshot->'policy'->>'model' FROM model_attribution_jobs WHERE account_id=$1`, tc.id).Scan(&attribution))
+		require.NoError(t, integrationDB.QueryRow(`SELECT model FROM account_candy_test_items WHERE account_id=$1`, tc.id).Scan(&pelican))
+		require.Equal(t, tc.attribution, attribution)
+		require.Equal(t, tc.pelican, pelican)
+	}
+}
+
+func TestAttributionInitialModelsMigration(t *testing.T) {
+	body, err := migrations.FS.ReadFile("265_split_initial_test_models.sql")
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, config, attribution, pelican string
+		enabled                            bool
+	}{
+		{"missing", `{}`, "gpt-6-astra", "gpt-6.1-sol", true},
+		{"old_default", `{"new_account_tests":{"attribution":false,"pelican":false,"model":"gpt-6-astra"}}`, "gpt-6-astra", "gpt-6.1-sol", false},
+		{"old_custom", `{"new_account_tests":{"model":"custom"}}`, "custom", "custom", true},
+		{"separate", `{"new_account_tests":{"attribution_model":"custom-a","pelican_model":"custom-p"}}`, "custom-a", "custom-p", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx, err := integrationDB.BeginTx(context.Background(), nil)
+			require.NoError(t, err)
+			defer func() { _ = tx.Rollback() }()
+			// Temporary tables shadow only the two old tables touched by this migration.
+			_, err = tx.Exec(`CREATE TEMP TABLE account_initial_tests(account_id BIGINT,model TEXT NOT NULL,processed_at TIMESTAMPTZ) ON COMMIT DROP;
+				CREATE TEMP TABLE model_attribution_config(version BIGINT,config JSONB,updated_at TIMESTAMPTZ) ON COMMIT DROP;
+				INSERT INTO account_initial_tests VALUES(1,'old-pending',NULL),(2,'old-finished',NOW());`)
+			require.NoError(t, err)
+			_, err = tx.Exec(`INSERT INTO model_attribution_config(version,config) VALUES(7,$1::jsonb)`, tc.config)
+			require.NoError(t, err)
+			_, err = tx.Exec(string(body))
+			require.NoError(t, err)
+			var version int
+			var attribution, pelican string
+			var attributionEnabled, pelicanEnabled, legacyModel bool
+			require.NoError(t, tx.QueryRow(`SELECT version,config->'new_account_tests'->>'attribution_model',config->'new_account_tests'->>'pelican_model',
+				(config->'new_account_tests'->>'attribution')::boolean,(config->'new_account_tests'->>'pelican')::boolean,config->'new_account_tests' ? 'model' FROM model_attribution_config`).Scan(&version, &attribution, &pelican, &attributionEnabled, &pelicanEnabled, &legacyModel))
+			require.Equal(t, 8, version)
+			require.Equal(t, tc.attribution, attribution)
+			require.Equal(t, tc.pelican, pelican)
+			require.Equal(t, tc.enabled, attributionEnabled)
+			require.Equal(t, tc.enabled, pelicanEnabled)
+			require.False(t, legacyModel)
+			var preserved int
+			require.NoError(t, tx.QueryRow(`SELECT count(*) FROM account_initial_tests WHERE pelican_model=model AND ((account_id=1 AND processed_at IS NULL) OR (account_id=2 AND processed_at IS NOT NULL))`).Scan(&preserved))
+			require.Equal(t, 2, preserved)
 		})
 	}
 }

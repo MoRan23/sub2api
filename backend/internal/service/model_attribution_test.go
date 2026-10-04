@@ -24,7 +24,7 @@ func TestAttributionConfigSelectionAndMapping(t *testing.T) {
 	c := DefaultAttributionConfig()
 	require.False(t, c.Enabled)
 	require.Equal(t, AttributionDefaultModel, c.Default.Model)
-	require.Equal(t, NewAccountTestConfig{Attribution: true, Pelican: true, Model: AttributionDefaultModel}, c.NewAccountTests)
+	require.Equal(t, NewAccountTestConfig{Attribution: true, Pelican: true, AttributionModel: AttributionDefaultModel, PelicanModel: InitialPelicanDefaultModel}, c.NewAccountTests)
 	c.Enabled = true
 	_, err := NormalizeAttributionConfig(c)
 	require.ErrorIs(t, err, ErrAttributionInvalid)
@@ -55,21 +55,26 @@ func TestAttributionConfigSelectionAndMapping(t *testing.T) {
 
 func TestAttributionNewAccountConfig(t *testing.T) {
 	c := DefaultAttributionConfig()
-	c.NewAccountTests = NewAccountTestConfig{Model: " gpt-6-sol "}
+	c.NewAccountTests = NewAccountTestConfig{AttributionModel: " gpt-6-sol ", PelicanModel: " gpt-6.1-sol "}
 	got, err := NormalizeAttributionConfig(c)
 	require.NoError(t, err)
-	require.Equal(t, "gpt-6-sol", got.NewAccountTests.Model)
+	require.Equal(t, "gpt-6-sol", got.NewAccountTests.AttributionModel)
+	require.Equal(t, "gpt-6.1-sol", got.NewAccountTests.PelicanModel)
 	require.False(t, got.NewAccountTests.Attribution)
 	require.False(t, got.NewAccountTests.Pelican)
 	for _, model := range []string{"gpt-*", "two models", "gpt\n6", strings.Repeat("a", 201)} {
-		c.NewAccountTests.Model = model
+		c.NewAccountTests = NewAccountTestConfig{AttributionModel: model}
+		_, err = NormalizeAttributionConfig(c)
+		require.ErrorIs(t, err, ErrAttributionInvalid)
+		c.NewAccountTests = NewAccountTestConfig{PelicanModel: model}
 		_, err = NormalizeAttributionConfig(c)
 		require.ErrorIs(t, err, ErrAttributionInvalid)
 	}
-	c.NewAccountTests.Model = ""
+	c.NewAccountTests = NewAccountTestConfig{}
 	got, err = NormalizeAttributionConfig(c)
 	require.NoError(t, err)
-	require.Equal(t, AttributionDefaultModel, got.NewAccountTests.Model)
+	require.Equal(t, AttributionDefaultModel, got.NewAccountTests.AttributionModel)
+	require.Equal(t, InitialPelicanDefaultModel, got.NewAccountTests.PelicanModel)
 }
 
 func TestAttributionGlobalGroupPriority(t *testing.T) {

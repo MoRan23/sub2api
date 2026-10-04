@@ -9,10 +9,10 @@ export const attributionZh = {
   notice: '每 10 分钟检测一次，每轮 3 条探针，不同账户同时检测。临时上游错误最多重试 2 次，总时限 10 分钟。检测及重试会消耗上游额度；执行失败或归因异常不会修改白名单。',
   mappingHelp: '仅替换同名白名单条目，保留自定义别名与通配符映射。启用前请填好服务地址及两份非空白名单。',
   newAccount: {
-    title: '新 OAuth 账号首测', attribution: '新账号自动执行一次归因测试', pelican: '新账号自动执行一次鹈鹕测试', model: '首测模型',
+    title: '新 OAuth 账号首测', attribution: '新账号自动执行一次归因测试', pelican: '新账号自动执行一次鹈鹕测试', attributionModel: '归因首测模型', pelicanModel: '鹈鹕首测模型',
     help: '新建或导入的 OpenAI OAuth 实体账号自动开始测试，消耗上游额度。仅影响保存后新增的账号，不补测已有账号；停用、关闭调度、过期及自动透传账号跳过。关闭归因首测不影响每 10 分钟的周期检测。',
     requiresEnabled: '归因首测需先配置并启用上方自动检测；鹈鹕首测可独立开启。',
-    modelHelp: '两种首测共用此模型，默认 gpt-6-astra。归因首测仍按账户分组选择高低级白名单；后续周期检测使用分组或全局探针模型。',
+    modelHelp: '两种首测的模型可分别设置：归因默认 gpt-6-astra，鹈鹕默认 gpt-6.1-sol。归因首测仍按账户分组选择高低级白名单；后续周期检测使用分组或全局探针模型。',
     invalid: '请输入具体的首测模型 ID，不含空格或通配符。'
   },
   initial: '新账号首测',
@@ -43,10 +43,10 @@ export const attributionEn = {
   notice: 'Three probes per account every 10 minutes; accounts run concurrently. Transient upstream errors retry up to twice within the ten-minute deadline. Probes and retries consume upstream quota. Failed or abnormal detections leave allowlists unchanged.',
   mappingHelp: 'Replace identity allowlist entries only; preserve custom aliases and wildcard mappings. Configure the service and both nonempty allowlists before enabling.',
   newAccount: {
-    title: 'New OAuth account tests', attribution: 'Run attribution once for new accounts', pelican: 'Run pelican once for new accounts', model: 'Initial test model',
+    title: 'New OAuth account tests', attribution: 'Run attribution once for new accounts', pelican: 'Run pelican once for new accounts', attributionModel: 'Initial attribution model', pelicanModel: 'Initial pelican model',
     help: 'Newly created or imported physical OpenAI OAuth accounts start tests automatically and consume upstream quota. Applies to new accounts after saving, without backfilling existing accounts. Inactive, unschedulable, expired and passthrough accounts are skipped. Disabling initial attribution does not disable the ten-minute periodic checks.',
     requiresEnabled: 'Initial attribution requires automatic detection to be configured and enabled above. Initial pelican tests can be enabled independently.',
-    modelHelp: 'Both initial tests use this model (default: gpt-6-astra). Attribution still uses the account group’s allowlists; later periodic tests use the group or global probe model.',
+    modelHelp: 'Set each initial model separately: attribution defaults to gpt-6-astra, pelican to gpt-6.1-sol. Attribution still uses the account group’s allowlists; later periodic tests use the group or global probe model.',
     invalid: 'Enter a concrete initial model ID without whitespace or wildcards.'
   },
   initial: 'New account',
