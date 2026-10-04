@@ -1158,9 +1158,8 @@ experimental_bearer_token = "${escapeTomlBasicString(apiKey)}"`
 
   return `${authConfig}
 supports_standalone_web_search = true
-stream_idle_timeout_ms = 600000${codexAuthMode.value === 'api-key'
-    ? '\nhttp_headers = { "x-openai-actor-authorization" = "local-image-extension" }'
-    : ''}`
+stream_idle_timeout_ms = 600000
+http_headers = { "x-openai-actor-authorization" = "local-image-extension" }`
 }
 
 function buildOpenAICodexFileConfigs(

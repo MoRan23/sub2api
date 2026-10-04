@@ -418,6 +418,7 @@ wire_api = "responses"
 requires_openai_auth = true
 supports_standalone_web_search = true
 stream_idle_timeout_ms = 600000
+http_headers = { "x-openai-actor-authorization" = "local-image-extension" }
 
 [features]
 goals = true
@@ -593,8 +594,8 @@ token_budget = false`)
     await nextTick()
 
     expect(wrapper.find('[data-testid="codex-api-key-restart-notice"]').exists()).toBe(false)
-    expect(wrapper.findAll('pre code').map((code) => code.text()).join('\n')).not.toContain(
-      'x-openai-actor-authorization'
+    expect(wrapper.findAll('pre code').map((code) => code.text()).join('\n')).toContain(
+      'http_headers = { "x-openai-actor-authorization" = "local-image-extension" }'
     )
   })
 
@@ -637,7 +638,7 @@ token_budget = false`)
     expect(configToml).not.toContain('model_auto_compact_token_limit')
     expect(configToml).toContain('requires_openai_auth = true')
     expect(configToml).not.toContain('experimental_bearer_token')
-    expect(configToml).not.toContain('x-openai-actor-authorization')
+    expect(configToml).toContain('http_headers = { "x-openai-actor-authorization" = "local-image-extension" }')
     expect(configToml).not.toContain('env_key')
     expect(configToml).toContain('web_search = "live"')
     expect(configToml).toContain('supports_standalone_web_search = true\nstream_idle_timeout_ms = 600000')
@@ -732,7 +733,7 @@ token_budget = false`)
     await nextTick()
 
     expect(wrapper.get('[data-testid="codex-auth-mode-legacy"]').attributes('aria-checked')).toBe('true')
-    expect(wrapper.findAll('pre code').map((code) => code.text()).join('\n')).not.toContain('x-openai-actor-authorization')
+    expect(wrapper.findAll('pre code').map((code) => code.text()).join('\n')).not.toContain('experimental_bearer_token')
   })
 
   it('omits retired GPT-5.4 family entries from OpenCode config', async () => {
