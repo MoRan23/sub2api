@@ -172,14 +172,18 @@ func ResolveAttributionPolicy(c AttributionConfig, groups []AccountGroup) (Attri
 		}
 		return ordered[i].GroupID < ordered[j].GroupID
 	})
-	for _, membership := range ordered {
-		for _, p := range c.Groups {
-			if p.Enabled && p.GroupID == membership.GroupID {
-				return p.AttributionPolicy, p.GroupID
-			}
+	if len(ordered) == 0 {
+		return c.Default, 0
+	}
+	// Choose the group first. Inheriting global settings must not cause a
+	// higher-priority group to lose to a lower-priority independent policy.
+	groupID := ordered[0].GroupID
+	for _, p := range c.Groups {
+		if p.Enabled && p.GroupID == groupID {
+			return p.AttributionPolicy, groupID
 		}
 	}
-	return c.Default, 0
+	return c.Default, groupID
 }
 
 func AttributionSkipReason(a *Account, now time.Time) string {

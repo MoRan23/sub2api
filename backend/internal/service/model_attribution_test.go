@@ -36,6 +36,9 @@ func TestAttributionConfigSelectionAndMapping(t *testing.T) {
 	require.Len(t, c.Default.HighModels, 1)
 	c.Groups = []AttributionGroupPolicy{{GroupID: 2, Enabled: true, AttributionPolicy: AttributionPolicy{Model: "group-2"}}, {GroupID: 1, Enabled: true, AttributionPolicy: AttributionPolicy{Model: "group-1"}}, {GroupID: 3, Enabled: false}}
 	p, id := ResolveAttributionPolicy(c, []AccountGroup{{GroupID: 3, Priority: 0}, {GroupID: 2, Priority: 1}, {GroupID: 1, Priority: 1}})
+	require.EqualValues(t, 3, id)
+	require.Equal(t, c.Default, p)
+	p, id = ResolveAttributionPolicy(c, []AccountGroup{{GroupID: 2, Priority: 1}, {GroupID: 1, Priority: 1}})
 	require.EqualValues(t, 1, id)
 	require.Equal(t, "group-1", p.Model)
 	p, id = ResolveAttributionPolicy(c, []AccountGroup{{GroupID: 2, Priority: 0}, {GroupID: 1, Priority: 1}})
@@ -87,14 +90,26 @@ func TestAttributionGlobalGroupPriority(t *testing.T) {
 	c.GroupPriority = []int64{3, 2, 1}
 	groups := []AccountGroup{{GroupID: 1, Priority: -10}, {GroupID: 2, Priority: 10}, {GroupID: 3, Priority: -20}}
 	policy, id := ResolveAttributionPolicy(c, groups)
+	require.EqualValues(t, 3, id)
+	require.Equal(t, c.Default, policy)
+	c.GroupPriority = []int64{2, 3, 1}
+	policy, id = ResolveAttributionPolicy(c, groups)
 	require.EqualValues(t, 2, id)
 	require.Equal(t, []string{"high-2"}, policy.HighModels)
 	require.Equal(t, []string{"low-2"}, policy.LowModels)
 	c.GroupPriority = []int64{1}
 	_, id = ResolveAttributionPolicy(c, groups)
 	require.EqualValues(t, 1, id)
-	_, id = ResolveAttributionPolicy(c, []AccountGroup{{GroupID: 3}})
-	require.Zero(t, id)
+	policy, id = ResolveAttributionPolicy(c, []AccountGroup{{GroupID: 3}})
+	require.EqualValues(t, 3, id)
+	require.Equal(t, c.Default, policy)
+	// A group without an override also inherits, including unlisted groups.
+	for _, priority := range [][]int64{{4, 2}, nil} {
+		c.GroupPriority = priority
+		policy, id = ResolveAttributionPolicy(c, []AccountGroup{{GroupID: 2, Priority: 1}, {GroupID: 4, Priority: 0}})
+		require.EqualValues(t, 4, id)
+		require.Equal(t, c.Default, policy)
+	}
 	for _, invalid := range [][]int64{{1, 1}, {0}, {-1}, make([]int64, 1001)} {
 		c.GroupPriority = invalid
 		_, err := NormalizeAttributionConfig(c)

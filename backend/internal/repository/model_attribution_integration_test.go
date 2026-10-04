@@ -208,6 +208,23 @@ func TestAttributionFencesRefreshAndGroupBaseline(t *testing.T) {
 	require.Equal(t, g1.ID, j.Snapshot.GroupID, "global order overrides account membership priority")
 	require.Equal(t, "low", j.Result.Action)
 	require.Contains(t, attributionMapping(t, ar, a.ID), "group-low")
+	// The highest-ranked group still wins when it switches to inheritance.
+	c, err = r.Config(ctx)
+	require.NoError(t, err)
+	c.Groups[0].Enabled = false
+	_, err = r.SaveConfig(ctx, c)
+	require.NoError(t, err)
+	j = attributionRun(t, r, a.ID, "passed")
+	require.Equal(t, g1.ID, j.Snapshot.GroupID)
+	require.Equal(t, c.Default, j.Snapshot.Policy)
+	require.Equal(t, "high", j.Result.Action)
+	require.Contains(t, attributionMapping(t, ar, a.ID), "high2")
+	require.NotContains(t, attributionMapping(t, ar, a.ID), "group-high-2")
+	j = attributionRun(t, r, a.ID, "mismatch")
+	require.Equal(t, g1.ID, j.Snapshot.GroupID)
+	require.Equal(t, "low", j.Result.Action)
+	require.Contains(t, attributionMapping(t, ar, a.ID), "low")
+	require.NotContains(t, attributionMapping(t, ar, a.ID), "group-low")
 }
 
 func TestAttributionQueueLeasesRetentionAndRestart(t *testing.T) {
