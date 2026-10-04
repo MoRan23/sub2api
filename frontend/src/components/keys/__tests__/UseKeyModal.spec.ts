@@ -402,21 +402,29 @@ describe('UseKeyModal', () => {
     const codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
     const configToml = codeBlocks.find((content) => content.includes('model_provider = "OpenAI"'))
 
-    expect(configToml).toBeDefined()
-    expect(configToml).toContain('model = "gpt-5.5"')
-    expect(configToml).toContain('review_model = "gpt-5.5"')
-    expect(configToml).not.toContain('model = "gpt-5.4"')
-    expect(configToml).not.toContain('model_context_window')
-    expect(configToml).not.toContain('model_auto_compact_token_limit')
-    expect(configToml).toContain('requires_openai_auth = true')
-    expect(configToml).not.toContain('experimental_bearer_token')
-    expect(configToml).not.toContain('x-openai-actor-authorization')
-    expect(configToml).not.toContain('env_key')
-    expect(configToml).not.toContain('image_generation')
-    expect(configToml).not.toContain('supports_websockets')
-    expect(configToml).not.toContain('responses_websockets_v2')
-    expect(configToml).toContain('[features]\ngoals = true')
-    expect(configToml).not.toContain('model_reasoning_effort = "xhigh"')
+    expect(configToml).toBe(`model_provider = "OpenAI"
+model = "gpt-5.5"
+review_model = "gpt-5.5"
+disable_response_storage = true
+network_access = "enabled"
+windows_wsl_setup_acknowledged = true
+web_search = "live"
+
+[model_providers.OpenAI]
+name = "OpenAI"
+base_url = "https://example.com/v1"
+model_catalog_url = "https://example.com/v1/models"
+wire_api = "responses"
+requires_openai_auth = true
+supports_standalone_web_search = true
+stream_idle_timeout_ms = 600000
+
+[features]
+goals = true
+api_key_model_discovery = true
+standalone_web_search = true
+image_generation = true
+token_budget = false`)
     expect(codeBlocks).toContain('{\n  "OPENAI_API_KEY": "sk-test"\n}')
     expect(wrapper.text()).toContain('auth.json')
     expect(wrapper.find('[data-testid="codex-api-key-restart-notice"]').exists()).toBe(false)
@@ -548,14 +556,31 @@ describe('UseKeyModal', () => {
     const configToml = codeBlocks.find((content) => content.includes('model_provider = "OpenAI"'))
 
     expect(apiKeyMode.attributes('aria-checked')).toBe('true')
-    expect(configToml).toBeDefined()
-    expect(configToml).toContain('requires_openai_auth = false')
-    expect(configToml).toContain('experimental_bearer_token = "sk-test"')
-    expect(configToml).toContain('http_headers = { "x-openai-actor-authorization" = "local-image-extension" }')
-    expect(configToml).toContain('model_catalog_url = "https://example.com/v1/models"')
-    expect(configToml).not.toContain('model_catalog_json')
-    expect(configToml).not.toContain('env_key')
-    expect(configToml).not.toContain('image_generation')
+    expect(configToml).toBe(`model_provider = "OpenAI"
+model = "gpt-5.5"
+review_model = "gpt-5.5"
+disable_response_storage = true
+network_access = "enabled"
+windows_wsl_setup_acknowledged = true
+web_search = "live"
+
+[model_providers.OpenAI]
+name = "OpenAI"
+base_url = "https://example.com/v1"
+model_catalog_url = "https://example.com/v1/models"
+wire_api = "responses"
+requires_openai_auth = false
+experimental_bearer_token = "sk-test"
+supports_standalone_web_search = true
+stream_idle_timeout_ms = 600000
+http_headers = { "x-openai-actor-authorization" = "local-image-extension" }
+
+[features]
+goals = true
+api_key_model_discovery = true
+standalone_web_search = true
+image_generation = true
+token_budget = false`)
     expect(codeBlocks).not.toContain('{\n  "OPENAI_API_KEY": "sk-test"\n}')
     expect(wrapper.text()).not.toContain('auth.json')
 
@@ -614,7 +639,9 @@ describe('UseKeyModal', () => {
     expect(configToml).not.toContain('experimental_bearer_token')
     expect(configToml).not.toContain('x-openai-actor-authorization')
     expect(configToml).not.toContain('env_key')
-    expect(configToml).not.toContain('image_generation')
+    expect(configToml).toContain('web_search = "live"')
+    expect(configToml).toContain('supports_standalone_web_search = true\nstream_idle_timeout_ms = 600000')
+    expect(configToml).toContain('api_key_model_discovery = true\nstandalone_web_search = true\nimage_generation = true\ntoken_budget = false')
     expect(configToml).toContain('supports_websockets = true')
     expect(configToml).toContain('[features]\nresponses_websockets_v2 = true\ngoals = true')
     expect(codeBlocks).toContain('{\n  "OPENAI_API_KEY": "sk-test"\n}')
@@ -662,7 +689,9 @@ describe('UseKeyModal', () => {
     expect(configToml).toContain('experimental_bearer_token = "sk-test"')
     expect(configToml).toContain('http_headers = { "x-openai-actor-authorization" = "local-image-extension" }')
     expect(configToml).not.toContain('env_key')
-    expect(configToml).not.toContain('image_generation')
+    expect(configToml).toContain('web_search = "live"')
+    expect(configToml).toContain('supports_standalone_web_search = true\nstream_idle_timeout_ms = 600000')
+    expect(configToml).toContain('api_key_model_discovery = true\nstandalone_web_search = true\nimage_generation = true\ntoken_budget = false')
     expect(configToml).toContain('supports_websockets = true')
     expect(configToml).toContain('[features]\nresponses_websockets_v2 = true\ngoals = true')
     expect(codeBlocks).not.toContain('{\n  "OPENAI_API_KEY": "sk-test"\n}')

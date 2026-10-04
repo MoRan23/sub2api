@@ -1132,27 +1132,35 @@ review_model = "${model}"
 ${reasoningEffortLine}disable_response_storage = true
 ${codexLocalCatalogToml.value}network_access = "enabled"
 windows_wsl_setup_acknowledged = true
+web_search = "live"
 
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "${baseUrl}"
 ${codexModelCatalogMode.value === 'remote' ? `model_catalog_url = "${escapeTomlBasicString(buildCodexModelCatalogUrl(baseUrl))}"\n` : ''}wire_api = "responses"
-${generateCodexProviderAuthConfig(apiKey)}
+${generateCodexProviderOptions(apiKey)}
 
 [features]
-goals = true`
+goals = true
+api_key_model_discovery = true
+standalone_web_search = true
+image_generation = true
+token_budget = false`
 
   return buildOpenAICodexFileConfigs(configDir, configContent, apiKey)
 }
 
-function generateCodexProviderAuthConfig(apiKey: string): string {
-  if (codexAuthMode.value === 'api-key') {
-    return `requires_openai_auth = false
-experimental_bearer_token = "${escapeTomlBasicString(apiKey)}"
-http_headers = { "x-openai-actor-authorization" = "local-image-extension" }`
-  }
+function generateCodexProviderOptions(apiKey: string): string {
+  const authConfig = codexAuthMode.value === 'api-key'
+    ? `requires_openai_auth = false
+experimental_bearer_token = "${escapeTomlBasicString(apiKey)}"`
+    : 'requires_openai_auth = true'
 
-  return 'requires_openai_auth = true'
+  return `${authConfig}
+supports_standalone_web_search = true
+stream_idle_timeout_ms = 600000${codexAuthMode.value === 'api-key'
+    ? '\nhttp_headers = { "x-openai-actor-authorization" = "local-image-extension" }'
+    : ''}`
 }
 
 function buildOpenAICodexFileConfigs(
@@ -1479,17 +1487,22 @@ review_model = "${model}"
 ${reasoningEffortLine}disable_response_storage = true
 ${codexLocalCatalogToml.value}network_access = "enabled"
 windows_wsl_setup_acknowledged = true
+web_search = "live"
 
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "${baseUrl}"
 ${codexModelCatalogMode.value === 'remote' ? `model_catalog_url = "${escapeTomlBasicString(buildCodexModelCatalogUrl(baseUrl))}"\n` : ''}wire_api = "responses"
 supports_websockets = true
-${generateCodexProviderAuthConfig(apiKey)}
+${generateCodexProviderOptions(apiKey)}
 
 [features]
 responses_websockets_v2 = true
-goals = true`
+goals = true
+api_key_model_discovery = true
+standalone_web_search = true
+image_generation = true
+token_budget = false`
 
   return buildOpenAICodexFileConfigs(configDir, configContent, apiKey)
 }
