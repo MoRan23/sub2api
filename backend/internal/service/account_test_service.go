@@ -2628,7 +2628,14 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, (2<<20)+1))
+	var probeErr error
+	if readErr != nil {
+		probeErr = fmt.Errorf("Failed to read compaction probe response: %w", readErr)
+	} else if len(body) > 2<<20 {
+		probeErr = fmt.Errorf("Compaction probe response exceeds the 2 MiB limit")
+		body = body[:2<<20]
+	}
 	body = redactAgentIdentitySensitiveBodyForAccount(ctx, s.accountRepo, credentialAccount, body)
 	if !agentIdentityTaskRecoveryWasTried(ctx) && credentialAccount.IsOpenAIAgentIdentity() && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, body) {
 		expectedTaskID := credentialAccount.GetCredential("task_id")
@@ -2645,8 +2652,11 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	})
 
 	compactionFound := openAICompactProbeFoundCompactionItem(body)
+	if probeErr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		probeErr = openAICompactProbeResponseError(body)
+	}
 	if s.accountRepo != nil {
-		updates := buildOpenAIRemoteCompactionV2ProbeExtraUpdates(resp, body, nil, compactionFound, time.Now())
+		updates := buildOpenAIRemoteCompactionV2ProbeExtraUpdates(resp, body, probeErr, compactionFound, time.Now())
 		if codexUpdates, err := extractOpenAICodexProbeUpdates(resp); err == nil && len(codexUpdates) > 0 {
 			updates = mergeExtraUpdates(updates, codexUpdates)
 		}
@@ -2660,12 +2670,15 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		}
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
 			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
 			s.recordOpenAIAccountTestUnauthorized(ctx, credentialAccount, errMsg)
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
+	}
+	if probeErr != nil {
+		return s.sendErrorAndEnd(c, probeErr.Error())
 	}
 
 	if !compactionFound {

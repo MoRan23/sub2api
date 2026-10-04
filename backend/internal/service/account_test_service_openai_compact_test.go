@@ -2,11 +2,13 @@ package service
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
@@ -275,4 +277,81 @@ func TestAccountTestService_TestAccountConnection_OpenAICompact2xxWithoutItemMar
 	require.Equal(t, false, updates[OpenAIRemoteCompactionV2SupportedExtraKey])
 	require.NotContains(t, updates, "openai_compact_supported")
 	require.Contains(t, rec.Body.String(), `"type":"error"`)
+}
+
+func TestAccountTestService_OpenAICompactExecutionFailurePreservesCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	failed := "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"native_error\",\"message\":\"Native compaction failed: checkpoint unavailable\"}}}\n\n"
+	item := "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"compaction\",\"encrypted_content\":\"opaque\"}}\n\n"
+	tests := []struct {
+		name     string
+		body     string
+		readErr  bool
+		want     string
+		wantCode string
+	}{
+		{name: "engine_failure", body: "data: {\"type\":\"response.created\",\"response\":{\"model\":\"gpt-6-astra\"}}\n\n" + failed, want: "Native compaction failed: checkpoint unavailable", wantCode: "native_error"},
+		{name: "failure_after_compaction_item", body: item + failed, want: "Native compaction failed: checkpoint unavailable", wantCode: "native_error"},
+		{name: "named_error_event", body: "event: error\ndata: {\"code\":\"worker_error\",\"message\":\"Worker disconnected\"}\n\n", want: "Worker disconnected", wantCode: "worker_error"},
+		{name: "incomplete", body: "data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n", want: "max_output_tokens"},
+		{name: "json_failure", body: `{"status":"failed","error":{"code":"compaction_failed","message":"Native checkpoint missing"},"output":[]}`, want: "Native checkpoint missing", wantCode: "compaction_failed"},
+		{name: "stream_without_terminal", body: item, want: "without a completed response"},
+		{name: "read_failure", body: item, readErr: true, want: "unexpected EOF"},
+		{name: "oversized", body: compactProbeSSESuccessBody + strings.Repeat(" ", 2<<20), want: "exceeds the 2 MiB limit"},
+	}
+	for _, mode := range []string{"generic", "codex_engine"} {
+		for _, test := range tests {
+			for _, prior := range []any{nil, true, false} {
+				name := fmt.Sprintf("%s/%s/prior_%v", mode, test.name, prior)
+				t.Run(name, func(t *testing.T) {
+					updatesCh := make(chan map[string]any, 1)
+					account := Account{
+						ID: 6, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+						Status: StatusActive, Schedulable: true, Concurrency: 1,
+						Credentials: map[string]any{"api_key": "engine-test-key", "base_url": "https://engine.example/v1"},
+						Extra:       map[string]any{"openai_api_key_mode": mode},
+					}
+					if prior != nil {
+						account.Extra[OpenAIRemoteCompactionV2SupportedExtraKey] = prior
+					}
+					repo := &snapshotUpdateAccountRepo{
+						stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{account}},
+						updateExtraCalls:      updatesCh,
+					}
+					var body io.Reader = strings.NewReader(test.body)
+					if test.readErr {
+						body = io.MultiReader(body, iotest.ErrReader(io.ErrUnexpectedEOF))
+					}
+					upstream := &httpUpstreamRecorder{resp: &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+						Body:       io.NopCloser(body),
+					}}
+					svc := &AccountTestService{
+						accountRepo: repo, httpUpstream: upstream,
+						cfg: &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+					}
+					rec := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(rec)
+					c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/6/test", nil)
+
+					err := svc.TestAccountConnection(c, account.ID, "gpt-6-astra", "", AccountTestModeCompact)
+					require.ErrorContains(t, err, test.want)
+					select {
+					case updates := <-updatesCh:
+						require.NotContains(t, updates, OpenAIRemoteCompactionV2SupportedExtraKey)
+						require.Equal(t, http.StatusOK, updates[OpenAIRemoteCompactionV2LastStatusExtraKey])
+						require.Contains(t, updates[OpenAIRemoteCompactionV2LastErrorExtraKey], test.want)
+						require.Contains(t, updates[OpenAIRemoteCompactionV2LastErrorExtraKey], test.wantCode)
+					default:
+						t.Fatal("missing probe diagnostic update")
+					}
+					require.Contains(t, rec.Body.String(), test.want)
+					require.Contains(t, rec.Body.String(), test.wantCode)
+					require.NotContains(t, rec.Body.String(), "unsupported on this chain")
+					require.NotContains(t, rec.Body.String(), `"success":true`)
+				})
+			}
+		}
+	}
 }

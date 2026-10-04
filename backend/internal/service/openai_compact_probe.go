@@ -1,10 +1,13 @@
 package service
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -69,12 +72,97 @@ func openAICompactProbeFoundCompactionItem(body []byte) bool {
 	return responsesOutputHasCompactionItem(body)
 }
 
+// HTTP 200 only acknowledges an SSE stream. A failed or unfinished execution
+// cannot establish whether the upstream supports compaction, even if it emitted
+// an output item before failing. Keep the public error code and message intact.
+func openAICompactProbeResponseError(body []byte) error {
+	var failure error
+	completed, invalid := false, false
+	inspect := func(eventType string, payload []byte) {
+		if !gjson.ValidBytes(payload) {
+			invalid = true
+			return
+		}
+		root := gjson.ParseBytes(payload)
+		if eventType == "" {
+			switch root.Get("type").String() {
+			case "error", "response.failed", "response.incomplete", "response.completed", "response.done":
+				eventType = root.Get("type").String()
+			}
+		}
+		response := root.Get("response")
+		if !response.IsObject() {
+			response = root
+		}
+		status := response.Get("status").String()
+		hasError := response.Get("error").Exists() && response.Get("error").Type != gjson.Null
+		if eventType == "error" || eventType == "response.failed" || eventType == "response.incomplete" ||
+			status == "failed" || status == "incomplete" || status == "cancelled" || status == "canceled" || hasError {
+			if failure == nil {
+				failure = openAICompactProbeExecutionError(eventType, status, payload)
+			}
+			return
+		}
+		if eventType == "response.completed" || eventType == "response.done" || eventType == "" {
+			if !response.Get("output").IsArray() || (status != "" && status != "completed") {
+				invalid = true
+				return
+			}
+			completed = true
+		}
+	}
+	if gjson.ValidBytes(body) {
+		inspect("", body)
+	} else {
+		forEachOpenAISSEFrame(string(body), inspect)
+	}
+	if failure != nil {
+		return failure
+	}
+	if invalid {
+		return fmt.Errorf("Upstream compaction returned an invalid response")
+	}
+	if !completed {
+		return fmt.Errorf("Upstream compaction ended without a completed response")
+	}
+	return nil
+}
+
+func openAICompactProbeExecutionError(eventType, status string, payload []byte) error {
+	if eventType == "" {
+		eventType = status
+	}
+	if eventType == "" {
+		eventType = "error"
+	}
+	label := "Upstream compaction failed (" + eventType + ")"
+	for _, path := range []string{"response.error.code", "error.code", "code", "response.error.type", "error.type"} {
+		if code := strings.TrimSpace(gjson.GetBytes(payload, path).String()); code != "" {
+			label += " [" + code + "]"
+			break
+		}
+	}
+	message := extractOpenAISSEErrorMessage(payload)
+	if message == "" {
+		for _, path := range []string{"response.incomplete_details.reason", "incomplete_details.reason"} {
+			if reason := strings.TrimSpace(gjson.GetBytes(payload, path).String()); reason != "" {
+				message = reason
+				break
+			}
+		}
+	}
+	if message != "" {
+		label += ": " + message
+	}
+	return fmt.Errorf("%s", truncateString(sanitizeUpstreamErrorMessage(label), 2048))
+}
+
 // buildOpenAIRemoteCompactionV2ProbeExtraUpdates computes the independent
 // native-v2 capability observation. Legacy /responses/compact state is never
 // read or written here.
-// compactionFound 是 v2 契约判据：HTTP 2xx 但响应无 compaction item 时同样
-// 记为不支持（链路把 compaction_trigger 吞掉的形态，等价 codex 的 "got 0
-// items" fatal，#5478/#5648）。
+// probeErr includes transport, read and response execution failures; these do
+// not change capability. Only a completed 2xx response without a compaction item
+// establishes that the native-v2 contract was not fulfilled.
 func buildOpenAIRemoteCompactionV2ProbeExtraUpdates(resp *http.Response, body []byte, probeErr error, compactionFound bool, now time.Time) map[string]any {
 	updates := map[string]any{
 		OpenAIRemoteCompactionV2CheckedAtExtraKey:  now.Format(time.RFC3339),

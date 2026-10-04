@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -212,5 +213,43 @@ func TestOpenAICompactProbeFoundCompactionItem_TerminalResponseOutput(t *testing
 	sseTerminalEmpty := []byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_e\",\"output\":[]}}\n\n")
 	if openAICompactProbeFoundCompactionItem(sseTerminalEmpty) {
 		t.Fatalf("终态 output 为空且无 item 事件时不应判定为支持")
+	}
+}
+
+func TestOpenAICompactProbeResponseError(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "completed_stream", body: compactProbeSSESuccessBody},
+		{name: "named_completed_event", body: "event: response.completed\ndata: {\"response\":{\"status\":\"completed\",\"output\":[]}}\n\n"},
+		{name: "legacy_done", body: "data: {\"type\":\"response.done\",\"response\":{\"output\":[]}}\n\n"},
+		{name: "json_response", body: `{"status":"completed","output":[]}`},
+		{name: "legacy_json_response", body: `{"output":[{"type":"compaction","encrypted_content":"opaque"}]}`},
+		{name: "json_error", body: `{"type":"error","code":"native_error","message":"RPC failed"}`, want: "[native_error]: RPC failed"},
+		{name: "json_error_envelope", body: `{"error":{"code":"worker_error","message":"Worker failed"}}`, want: "[worker_error]: Worker failed"},
+		{name: "json_incomplete", body: `{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[]}`, want: "max_output_tokens"},
+		{name: "cancelled", body: `{"status":"cancelled","output":[]}`, want: "cancelled"},
+		{name: "failed_without_message", body: "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"output\":[]}}\n\n", want: "response.failed"},
+		{name: "done_with_failed_status", body: "data: {\"type\":\"response.done\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"native_error\",\"message\":\"RPC failed\"},\"output\":[]}}\n\n", want: "[native_error]: RPC failed"},
+		{name: "multiline_named_failure", body: "event: response.failed\r\ndata: {\"response\":{\"status\":\"failed\",\r\ndata: \"error\":{\"code\":\"native_error\",\"message\":\"RPC failed\"}}}\r\n\r\n", want: "[native_error]: RPC failed"},
+		{name: "empty", want: "without a completed response"},
+		{name: "done_marker_only", body: "data: [DONE]\n\n", want: "without a completed response"},
+		{name: "malformed", body: "data: {broken}\n\n", want: "invalid response"},
+		{name: "invalid_terminal", body: "data: {\"type\":\"response.completed\"}\n\n", want: "invalid response"},
+		{name: "malformed_before_completion", body: "data: {broken}\n\n" + compactProbeSSESuccessBody, want: "invalid response"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := openAICompactProbeResponseError([]byte(tt.body))
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("completed response failed: %v", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
