@@ -496,8 +496,9 @@ describe('EditAccountModal', () => {
     expect(wrapper.find('[data-testid^="openai-installation-regenerate-"]').exists()).toBe(false)
   })
 
-  it('loads and submits the OpenAI environment fingerprint', async () => {
+  it.each(['generic', 'codex_engine'])('does not expose or submit the environment fingerprint for %s API key accounts', async (mode) => {
     const account = buildAccount()
+    account.extra.openai_api_key_mode = mode
     updateAccountMock.mockReset()
     checkMixedChannelRiskMock.mockReset()
     checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
@@ -505,16 +506,12 @@ describe('EditAccountModal', () => {
 
     const wrapper = mountModal(account)
     expect(wrapper.find('[data-testid="openai-codex-fingerprint-section"]').exists()).toBe(false)
-    const input = wrapper.get<HTMLInputElement>('[data-testid="openai-environment-fingerprint"]')
-    expect(input.element.value).toBe('(Ubuntu 22.4.0; x86_64) xterm-256color')
+    expect(wrapper.find('[data-testid="openai-environment-fingerprint"]').exists()).toBe(false)
 
-    await input.setValue('(Mac OS X 15.1.0; arm64) iTerm.app')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    expect(updateAccountMock.mock.calls[0]?.[1]?.openai_environment_fingerprint).toBe(
-      '(Mac OS X 15.1.0; arm64) iTerm.app'
-    )
+    expect(updateAccountMock.mock.calls[0]?.[1]).not.toHaveProperty('openai_environment_fingerprint')
   })
 
   it.each(['personalAccessToken', 'agentIdentity'])('keeps the legacy single identity editor for %s', async (authMode) => {
@@ -662,7 +659,8 @@ describe('EditAccountModal', () => {
   })
 
   it.each(['', '终端'])('rejects invalid OpenAI environment fingerprint %j', async (value) => {
-    const account = buildAccount()
+    const account = buildOpenAIOAuthAccount()
+    account.credentials.auth_mode = 'personalAccessToken'
     updateAccountMock.mockReset()
     checkMixedChannelRiskMock.mockReset()
     checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })

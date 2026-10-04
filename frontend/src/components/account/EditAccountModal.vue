@@ -2385,27 +2385,6 @@
         />
       </section>
 
-      <!-- API-key environment UA remains outside OAuth Codex normalization. -->
-      <div
-        v-if="account?.platform === 'openai' && account?.type === 'apikey'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <label for="openai-environment-fingerprint" class="input-label">
-          {{ t('admin.accounts.openai.environmentFingerprint') }}
-        </label>
-        <input
-          id="openai-environment-fingerprint"
-          v-model="openAIEnvironmentFingerprint"
-          type="text"
-          maxlength="256"
-          class="input font-mono text-sm"
-          :aria-label="t('admin.accounts.openai.environmentFingerprint')"
-          :placeholder="t('admin.accounts.openai.environmentFingerprintPlaceholder')"
-          data-testid="openai-environment-fingerprint"
-        />
-        <p class="input-hint">{{ t('admin.accounts.openai.environmentFingerprintDesc') }}</p>
-      </div>
-
       <div
         v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
@@ -5400,7 +5379,7 @@ const handleSubmit = async () => {
   if (form.status === initialStatus.value) delete updatePayload.status
   try {
     if (props.account.platform === 'openai' &&
-      (props.account.type === 'apikey' || (props.account.type === 'oauth' && !supportsManagedOpenAIOAuthIdentity(props.account))) &&
+      props.account.type === 'oauth' && !supportsManagedOpenAIOAuthIdentity(props.account) &&
       !isSparkShadow.value &&
       openAIEnvironmentFingerprint.value.trim() !== protectedConfigInitial.value.environment) {
       const fingerprint = openAIEnvironmentFingerprint.value.trim()
