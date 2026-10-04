@@ -94,6 +94,8 @@ func TestCandyQueueExecutionClassifiesOnlyCompleteAnswers(t *testing.T) {
 		{"transport", candyQueueAnswer, true, errors.New("secret upstream credential"), "failed", "execution_failed"},
 		{"transport_indeterminate", candyIndeterminateAnswer, true, errors.New("synthetic stream failure"), "failed", "execution_failed"},
 		{"authorization_changed", candyQueueAnswer, true, candyTestError("authorization_changed"), "failed", "authorization_changed"},
+		{"rate_limited", "", false, ErrDiagnosticRateLimited, "skipped", "account_rate_limited"},
+		{"429", "", false, candyTestError("upstream_http_429"), "skipped", "account_rate_limited"},
 		{"size", strings.Repeat("x", CandyTestMaxResponseBytes+1), true, nil, "failed", "response_too_large"},
 	}
 	for _, tt := range cases {

@@ -112,7 +112,7 @@ func TestCandyTransportHTTPFailuresRetryTransientOnlyWithoutChangingAccount(t *t
 				}
 				repo := &stubOpenAIAccountRepo{accounts: []Account{*account}}
 				attempts := 1
-				if status == 429 || status == 500 {
+				if status == 500 {
 					attempts = 3
 				}
 				upstream := &httpUpstreamRecorder{}

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -56,7 +57,7 @@ func (r *attributionRepository) EnqueueNewAccounts(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if a != nil && skip == "" {
+		if a != nil && skip == "" && !service.AccountDiagnosticRateLimited(a, p.model, time.Now()) {
 			var hasAttribution, hasPelican bool
 			if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM model_attribution_jobs WHERE account_id=$1), EXISTS(SELECT 1 FROM account_candy_test_items WHERE account_id=$1 AND prompt_version=$2)`, p.id, service.CandyTestPromptVersion).Scan(&hasAttribution, &hasPelican); err != nil {
 				return err

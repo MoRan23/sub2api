@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Options reads each selected account's live upstream catalog, independently of
@@ -42,6 +43,8 @@ func (r *AccountCandyTestTransport) Options(ctx context.Context, ids []int64) (*
 					entry.AccountName = account.Name
 					if account.Platform != PlatformOpenAI {
 						entry.SkipReason = "unsupported_platform"
+					} else if AccountDiagnosticRateLimited(account, "", time.Now()) {
+						entry.SkipReason = ErrDiagnosticRateLimited.Error()
 					} else {
 						models, fetchErr := r.candyTestAccountModelOptions(ctx, account)
 						if fetchErr != nil {

@@ -77,6 +77,7 @@ export const candyTestsEn = {
   cancelError: 'Could not cancel the test.',
   activeBatch: 'Resume batch progress',
   failureReasons: {
+    account_rate_limited: 'Account or test model is rate limited; test skipped.',
     unsupported_account: 'This account type does not support the test.',
     unsupported_model: 'The account does not support this model.',
     unsupported_reasoning_effort: 'The account does not support this reasoning effort.',
@@ -200,6 +201,7 @@ export const candyTestsZh: CandyLocale = {
   cancelError: '取消测试失败。',
   activeBatch: '继续查看批次进度',
   failureReasons: {
+    account_rate_limited: '账户或测试模型当前被限流，已跳过测试。',
     unsupported_account: '此账号类型不支持测试。',
     unsupported_model: '此账号不支持所选模型。',
     unsupported_reasoning_effort: '此账号不支持所选思考强度。',

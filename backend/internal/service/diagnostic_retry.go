@@ -74,7 +74,7 @@ func retryableDiagnosticError(err error) bool {
 	}
 	switch failure.CandyTestFailureCode() {
 	case "upstream_failed", "upstream_timeout", "upstream_connection_failed", "upstream_stream_interrupted", "upstream_first_output_timeout",
-		"missing_terminal", "incomplete_response", "upstream_stream_failed", "upstream_incomplete", "upstream_http_408", "upstream_http_429",
+		"missing_terminal", "incomplete_response", "upstream_stream_failed", "upstream_incomplete", "upstream_http_408",
 		"upstream_http_500", "upstream_http_502", "upstream_http_503", "upstream_http_504":
 		return true
 	default:

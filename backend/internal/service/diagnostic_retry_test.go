@@ -12,7 +12,7 @@ import (
 )
 
 func TestDiagnosticRetriesTransientErrorsOnly(t *testing.T) {
-	for _, code := range []string{"upstream_failed", "upstream_http_503", "upstream_http_429", "upstream_timeout", "missing_terminal"} {
+	for _, code := range []string{"upstream_failed", "upstream_http_503", "upstream_timeout", "missing_terminal"} {
 		t.Run(code, func(t *testing.T) {
 			calls := 0
 			execution, err := retryDiagnostic(context.Background(), 0, func(context.Context) (*CandyTestExecution, error) {
@@ -32,7 +32,7 @@ func TestDiagnosticRetriesTransientErrorsOnly(t *testing.T) {
 			require.Equal(t, &OpenAIUsage{InputTokens: 6, OutputTokens: 9, CacheReadInputTokens: 3}, execution.Usage)
 		})
 	}
-	for _, code := range []string{"authorization_changed", "configuration_changed", "upstream_http_401", "upstream_http_403", "upstream_http_400", "response_too_large", "missing_html", "ambiguous_html", "cancelled", "timeout"} {
+	for _, code := range []string{"account_rate_limited", "upstream_http_429", "authorization_changed", "configuration_changed", "upstream_http_401", "upstream_http_403", "upstream_http_400", "response_too_large", "missing_html", "ambiguous_html", "cancelled", "timeout"} {
 		t.Run(code, func(t *testing.T) {
 			calls := 0
 			e, err := retryDiagnostic(context.Background(), 0, func(context.Context) (*CandyTestExecution, error) {

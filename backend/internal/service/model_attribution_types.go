@@ -194,6 +194,9 @@ func AttributionSkipReason(a *Account, now time.Time) string {
 	if a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
 		return "account_expired"
 	}
+	if AccountDiagnosticRateLimited(a, "", now) {
+		return ErrDiagnosticRateLimited.Error()
+	}
 	return ""
 }
 

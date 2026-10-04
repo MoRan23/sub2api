@@ -242,6 +242,9 @@ func (s *AccountCandyTestService) execute(item *CandyTestItem) {
 		item.FailureCode = "timeout"
 	case contextErr != nil:
 		item.FailureCode = "execution_interrupted"
+	case diagnosticRateLimitError(err):
+		item.Status = "skipped"
+		item.FailureCode = ErrDiagnosticRateLimited.Error()
 	case err != nil:
 		var failure CandyTestFailure
 		if errors.As(err, &failure) {

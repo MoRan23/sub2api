@@ -74,6 +74,9 @@ func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context,
 	if account.Platform != PlatformOpenAI {
 		return nil, candyTestError("unsupported_platform")
 	}
+	if AccountDiagnosticRateLimited(account, item.Model, time.Now()) {
+		return nil, ErrDiagnosticRateLimited
+	}
 	account = snapshotOAuthRefreshAccount(account)
 	account.openAICandyTest = true
 	if checkCatalog {
@@ -121,6 +124,9 @@ func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context,
 		}
 		if business == nil {
 			return candyTestError("authorization_changed")
+		}
+		if AccountDiagnosticRateLimited(business, item.Model, time.Now()) {
+			return ErrDiagnosticRateLimited
 		}
 		current, readErr := resolveCredentialAccount(check, r.accounts, business)
 		if readErr != nil {
@@ -382,6 +388,13 @@ func (w *candyResponseWriter) consumeEvent() {
 			w.appendText(gjson.GetBytes(data, "delta").String())
 		}
 	case "response.failed", "response.incomplete", "error":
+		for _, path := range []string{"error.code", "error.type", "response.error.code", "response.error.type"} {
+			switch gjson.GetBytes(data, path).String() {
+			case "rate_limit_exceeded", "rate_limit_error", "usage_limit_reached", "too_many_requests", "insufficient_quota":
+				w.fail(ErrDiagnosticRateLimited.Error())
+				return
+			}
+		}
 		w.fail("upstream_stream_failed")
 	case "response.completed", "response.done":
 		if w.failed {

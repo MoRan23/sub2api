@@ -217,7 +217,7 @@ func (r *accountCandyTestRepository) Heartbeat(ctx context.Context, id int64, cl
 
 func (r *accountCandyTestRepository) Complete(ctx context.Context, item *service.CandyTestItem) (bool, error) {
 	switch item.Status {
-	case "generated", "abnormal", "failed", "cancelled":
+	case "generated", "abnormal", "failed", "cancelled", "skipped":
 	default:
 		return false, service.ErrCandyTestInvalidRequest
 	}

@@ -99,6 +99,7 @@ func TestAttributionGlobalGroupPriority(t *testing.T) {
 func TestAttributionSkipConditions(t *testing.T) {
 	now := time.Now()
 	past := now.Add(-time.Second)
+	future := now.Add(time.Hour)
 	parent := int64(2)
 	for _, tc := range []struct {
 		name   string
@@ -106,6 +107,8 @@ func TestAttributionSkipConditions(t *testing.T) {
 		reason string
 	}{
 		{"active", func(*Account) {}, ""},
+		{"rate_limited", func(a *Account) { a.RateLimitResetAt = &future }, "account_rate_limited"},
+		{"rate_limit_expired", func(a *Account) { a.RateLimitResetAt = &past }, ""},
 		{"platform", func(a *Account) { a.Platform = "anthropic" }, "unsupported_account"},
 		{"type", func(a *Account) { a.Type = "apikey" }, "unsupported_account"},
 		{"shadow", func(a *Account) { a.ParentAccountID = &parent }, "shadow_account"},
@@ -178,7 +181,7 @@ func (f attributionProbeFunc) Probe(c context.Context, id int64, m, p string) (*
 }
 
 func TestAttributionPipelineMockModelTrace(t *testing.T) {
-	for _, scenario := range []string{"pass", "mismatch", "unavailable", "not enrolled", "bad challenges", "invalid answer", "probe failure", "interrupted", "stale", "timeout"} {
+	for _, scenario := range []string{"pass", "mismatch", "unavailable", "not enrolled", "bad challenges", "invalid answer", "probe failure", "rate limited", "429", "interrupted", "stale", "timeout"} {
 		t.Run(scenario, func(t *testing.T) {
 			probes, analyzes := 0, 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -237,6 +240,12 @@ func TestAttributionPipelineMockModelTrace(t *testing.T) {
 				if scenario == "probe failure" {
 					return nil, errors.New("secret-oauth-token")
 				}
+				if scenario == "rate limited" {
+					return nil, ErrDiagnosticRateLimited
+				}
+				if scenario == "429" {
+					return nil, candyTestError("upstream_http_429")
+				}
 				if scenario == "interrupted" {
 					cancel()
 					return nil, context.Canceled
@@ -261,6 +270,9 @@ func TestAttributionPipelineMockModelTrace(t *testing.T) {
 				want = "failed"
 			case "stale":
 				want = "skipped"
+			case "rate limited", "429":
+				want = "skipped"
+				require.Equal(t, "account_rate_limited", repo.finished.Reason)
 			}
 			require.Equal(t, want, repo.finished.Status)
 			b, err := json.Marshal(repo.finished)
@@ -271,7 +283,7 @@ func TestAttributionPipelineMockModelTrace(t *testing.T) {
 			case "pass", "mismatch", "invalid answer":
 				require.Equal(t, 3, probes)
 				require.Equal(t, 1, analyzes)
-			case "probe failure", "interrupted":
+			case "probe failure", "interrupted", "rate limited", "429":
 				require.Equal(t, 1, probes)
 				require.Zero(t, analyzes)
 			default:

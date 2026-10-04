@@ -111,6 +111,7 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 	}
 	ctx, cancel := context.WithDeadline(parent, deadline)
 	done := make(chan struct{})
+	var validationFailure error // Read only after the monitor has closed done.
 	go func() {
 		defer close(done)
 		ticker := time.NewTicker(10 * time.Second)
@@ -127,6 +128,7 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 				}
 				release()
 				if err != nil || !ok {
+					validationFailure = err
 					cancel()
 					return
 				}
@@ -139,15 +141,19 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 			j.Status = "failed"
 			j.Reason = "internal_error"
 		}
-		if ctx.Err() != nil {
+		contextErr := ctx.Err()
+		cancel()
+		<-done
+		if diagnosticRateLimitError(validationFailure) {
+			j.Status = "skipped"
+			j.Reason = ErrDiagnosticRateLimited.Error()
+		} else if contextErr != nil {
 			j.Status = "failed"
 			j.Reason = "interrupted"
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			if errors.Is(contextErr, context.DeadlineExceeded) {
 				j.Reason = "timeout"
 			}
 		}
-		cancel()
-		<-done
 		j.Result.DurationMS = time.Since(started).Milliseconds()
 		saveCtx, saveCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer saveCancel()
@@ -160,6 +166,9 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 	if err != nil || !valid {
 		j.Status = "skipped"
 		j.Reason = "configuration_or_authorization_changed"
+		if diagnosticRateLimitError(err) {
+			j.Reason = ErrDiagnosticRateLimited.Error()
+		}
 		return
 	}
 	c, err := s.repo.Config(ctx)
@@ -190,6 +199,9 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 	outputs := make([]AttributionOutput, 0, 3)
 	probeCtx := context.WithValue(ctx, diagnosticRetryValidationKey{}, func(check context.Context) error {
 		valid, err := s.repo.Validate(check, j)
+		if diagnosticRateLimitError(err) {
+			return err
+		}
 		if err != nil || !valid {
 			return candyTestError("configuration_or_authorization_changed")
 		}
@@ -200,6 +212,10 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 		if err != nil || !valid {
 			j.Status = "failed"
 			j.Reason = "configuration_or_authorization_changed"
+			if diagnosticRateLimitError(err) {
+				j.Status = "skipped"
+				j.Reason = ErrDiagnosticRateLimited.Error()
+			}
 			return
 		}
 		execution, e := s.probe.Probe(probeCtx, j.AccountID, j.Snapshot.Policy.Model, challenge.Prompt)
@@ -215,6 +231,10 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 			var failure CandyTestFailure
 			if errors.As(e, &failure) {
 				j.Reason = failure.CandyTestFailureCode()
+			}
+			if diagnosticRateLimitError(e) {
+				j.Status = "skipped"
+				j.Reason = ErrDiagnosticRateLimited.Error()
 			}
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				j.Reason = "timeout"
@@ -309,6 +329,10 @@ func (s *ModelAttributionService) Summaries(ctx context.Context, ids []int64) (m
 			out[a.ID] = &AttributionSummary{}
 		}
 		reason := AttributionSkipReason(a, time.Now())
+		policy, _ := ResolveAttributionPolicy(c, a.AccountGroups)
+		if reason == "" && AccountDiagnosticRateLimited(a, policy.Model, time.Now()) {
+			reason = ErrDiagnosticRateLimited.Error()
+		}
 		if !c.Enabled {
 			reason = "disabled"
 		}

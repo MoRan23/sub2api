@@ -102,7 +102,7 @@ func attributionSnapshot(ctx context.Context, tx *sql.Tx, id int64, c service.At
 	a := &service.Account{}
 	var credentials, extra []byte
 	var deleted *time.Time
-	err := tx.QueryRowContext(ctx, `SELECT id,name,platform,type,status,schedulable,expires_at,parent_account_id,proxy_id,credentials,extra,deleted_at FROM accounts WHERE id=$1 FOR UPDATE`, id).Scan(&a.ID, &a.Name, &a.Platform, &a.Type, &a.Status, &a.Schedulable, &a.ExpiresAt, &a.ParentAccountID, &a.ProxyID, &credentials, &extra, &deleted)
+	err := tx.QueryRowContext(ctx, `SELECT id,name,platform,type,status,schedulable,expires_at,parent_account_id,proxy_id,credentials,extra,deleted_at,rate_limit_reset_at FROM accounts WHERE id=$1 FOR UPDATE`, id).Scan(&a.ID, &a.Name, &a.Platform, &a.Type, &a.Status, &a.Schedulable, &a.ExpiresAt, &a.ParentAccountID, &a.ProxyID, &credentials, &extra, &deleted, &a.RateLimitResetAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.AttributionSnapshot{}, "account_missing", nil
 	}
@@ -216,7 +216,7 @@ func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual
 		return nil, service.ErrAttributionDisabled
 	}
 	if !manual {
-		rows, e := tx.QueryContext(ctx, `SELECT a.id FROM accounts a LEFT JOIN model_attribution_state s ON s.account_id=a.id WHERE a.deleted_at IS NULL AND a.platform='openai' AND a.type='oauth' AND a.parent_account_id IS NULL AND a.status='active' AND a.schedulable AND (a.expires_at IS NULL OR a.expires_at>NOW()) AND COALESCE(a.extra->'openai_passthrough',a.extra->'openai_oauth_passthrough','false'::jsonb) <> 'true'::jsonb AND (s.next_due_at IS NULL OR s.next_due_at<=NOW()) AND NOT EXISTS(SELECT 1 FROM account_initial_tests initial WHERE initial.account_id=a.id AND initial.processed_at IS NULL) AND NOT EXISTS(SELECT 1 FROM model_attribution_jobs j WHERE j.account_id=a.id AND j.status IN ('queued','running')) ORDER BY s.next_due_at NULLS FIRST,a.id LIMIT 500`)
+		rows, e := tx.QueryContext(ctx, `SELECT a.id FROM accounts a LEFT JOIN model_attribution_state s ON s.account_id=a.id WHERE a.deleted_at IS NULL AND a.platform='openai' AND a.type='oauth' AND a.parent_account_id IS NULL AND a.status='active' AND a.schedulable AND (a.expires_at IS NULL OR a.expires_at>NOW()) AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at<=NOW()) AND COALESCE(a.extra->'openai_passthrough',a.extra->'openai_oauth_passthrough','false'::jsonb) <> 'true'::jsonb AND (s.next_due_at IS NULL OR s.next_due_at<=NOW()) AND NOT EXISTS(SELECT 1 FROM account_initial_tests initial WHERE initial.account_id=a.id AND initial.processed_at IS NULL) AND NOT EXISTS(SELECT 1 FROM model_attribution_jobs j WHERE j.account_id=a.id AND j.status IN ('queued','running')) ORDER BY s.next_due_at NULLS FIRST,a.id LIMIT 500`)
 		if e != nil {
 			return nil, e
 		}
@@ -245,7 +245,9 @@ func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual
 		if e != nil {
 			return nil, e
 		}
-		out = append(out, j)
+		if j != nil {
+			out = append(out, j)
+		}
 	}
 	if len(out) > 0 {
 		if err = pruneAttribution(ctx, tx); err != nil {
@@ -272,6 +274,14 @@ func enqueueAttribution(ctx context.Context, tx *sql.Tx, id int64, c service.Att
 	}
 	if model != "" {
 		s.Policy.Model = model
+	}
+	if skip == "" && service.AccountDiagnosticRateLimited(a, s.Policy.Model, time.Now()) {
+		skip = service.ErrDiagnosticRateLimited.Error()
+	}
+	if source == "scheduled" && skip == service.ErrDiagnosticRateLimited.Error() {
+		// Do not create repeated history entries while this model is cooling down.
+		_, err = tx.ExecContext(ctx, `INSERT INTO model_attribution_state(account_id,next_due_at) VALUES($1,NOW()+interval '30 seconds') ON CONFLICT(account_id) DO UPDATE SET next_due_at=EXCLUDED.next_due_at`, id)
+		return nil, err
 	}
 	state := "queued"
 	if skip != "" {
@@ -355,9 +365,12 @@ func (r *attributionRepository) Validate(ctx context.Context, j *service.Attribu
 	if err != nil {
 		return false, err
 	}
-	_, s, skip, err := attributionSnapshot(ctx, tx, j.AccountID, c)
+	a, s, skip, err := attributionSnapshot(ctx, tx, j.AccountID, c)
 	if err != nil {
 		return false, err
+	}
+	if service.AccountDiagnosticRateLimited(a, j.Snapshot.Policy.Model, time.Now()) {
+		return false, service.ErrDiagnosticRateLimited
 	}
 	return validAttributionSnapshot(j.Snapshot, s, skip), nil
 }
@@ -384,9 +397,15 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 		if e != nil {
 			return e
 		}
+		if skip == "" && service.AccountDiagnosticRateLimited(a, j.Snapshot.Policy.Model, time.Now()) {
+			skip = service.ErrDiagnosticRateLimited.Error()
+		}
 		if !validAttributionSnapshot(j.Snapshot, s, skip) {
 			j.Result.Action = "stale"
 			j.Reason = "configuration_or_authorization_changed"
+			if skip == service.ErrDiagnosticRateLimited.Error() {
+				j.Status, j.Reason = "skipped", skip
+			}
 		} else {
 			var version int64
 			var auth, verdict, policy string

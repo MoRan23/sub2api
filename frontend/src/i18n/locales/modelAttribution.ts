@@ -25,6 +25,7 @@ export const attributionZh = {
   status: { queued: '启动中', running: '检测中', passed: '通过', mismatch: '不通过', abnormal: '异常', failed: '执行失败', skipped: '已跳过' },
   actions: { high: '已应用高级白名单', low: '已应用低级白名单', unchanged: '无需修改', stale: '结果已过期，未修改', none: '未修改' },
   reasons: {
+    account_rate_limited: '账户或测试模型当前被限流，已跳过测试',
     disabled: '检测未启用', unsupported_account: '仅支持 OpenAI OAuth 实体账户', shadow_account: '共享凭据的影子账户', passthrough_account: '自动透传账户', account_inactive: '账户已停用', scheduling_disabled: '账户关闭调度', account_expired: '账户已过期', account_missing: '账户已删除或不存在',
     model_not_enrolled: 'ModelTrace 尚未收录探针模型', modeltrace_unavailable: 'ModelTrace 服务不可用', modeltrace_failed: 'ModelTrace 请求失败', modeltrace_response_invalid: 'ModelTrace 返回格式无效', modeltrace_bank_invalid: '候选模型库无效', modeltrace_challenges_invalid: '需要三条独立且有效的探针',
     insufficient_valid_outputs: '三份回答未全部有效', modeltrace_probabilities_invalid: '归因概率无效', ambiguous_prediction: '最高概率并列', configuration_or_authorization_changed: '配置、分组、授权或模型限制已变化', configuration_unavailable: '配置读取失败',
@@ -58,6 +59,7 @@ export const attributionEn = {
   status: { queued: 'Starting', running: 'Running', passed: 'Passed', mismatch: 'Mismatch', abnormal: 'Abnormal', failed: 'Failed', skipped: 'Skipped' },
   actions: { high: 'High-tier allowlist applied', low: 'Low-tier allowlist applied', unchanged: 'No change needed', stale: 'Stale result, no changes', none: 'Unchanged' },
   reasons: {
+    account_rate_limited: 'Account or probe model is rate limited; test skipped',
     disabled: 'Detection disabled', unsupported_account: 'Only physical OpenAI OAuth accounts are supported', shadow_account: 'Shadow account with shared credentials', passthrough_account: 'Automatic passthrough account', account_inactive: 'Account inactive', scheduling_disabled: 'Scheduling disabled', account_expired: 'Account expired', account_missing: 'Account deleted or missing',
     model_not_enrolled: 'Probe model not enrolled in ModelTrace', modeltrace_unavailable: 'ModelTrace unavailable', modeltrace_failed: 'ModelTrace request failed', modeltrace_response_invalid: 'Invalid ModelTrace response', modeltrace_bank_invalid: 'Invalid candidate bank', modeltrace_challenges_invalid: 'Three independent valid probes required',
     insufficient_valid_outputs: 'Not all three answers were valid', modeltrace_probabilities_invalid: 'Invalid attribution probabilities', ambiguous_prediction: 'Highest probability tied', configuration_or_authorization_changed: 'Configuration, groups, authorization or model restrictions changed', configuration_unavailable: 'Configuration unavailable',
