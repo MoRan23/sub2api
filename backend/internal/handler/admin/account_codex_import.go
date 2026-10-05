@@ -301,6 +301,11 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 				mergedCredentials = service.PreserveOpenAIOAuthProviderCredentials(existing.Credentials, mergedCredentials)
 			}
 			mergedExtra := mergeCodexImportMap(existing.Extra, extra)
+			for _, key := range []string{service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey} {
+				if _, explicit := extra[key]; !explicit {
+					delete(mergedExtra, key)
+				}
+			}
 			updateInput := &service.UpdateAccountInput{
 				Credentials:        mergedCredentials,
 				Extra:              mergedExtra,
@@ -353,6 +358,14 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			continue
 		}
 
+		for _, key := range []string{service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey} {
+			if enabled, _ := extra[key].(bool); enabled {
+				result.Warnings = append(result.Warnings, CodexSessionImportMessage{Index: entry.Index, Name: accountName, Message: "Daybreak 默认关闭；请在授权完成后检查实时模型能力，再开启 Blue 或 Red"})
+				break
+			}
+		}
+		delete(extra, service.OpenAIDaybreakBlueEnabledKey)
+		delete(extra, service.OpenAIDaybreakRedEnabledKey)
 		account, createErr := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
 			OpenAIOAuthInitialOS:  req.OS,
 			Name:                  accountName,

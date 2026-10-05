@@ -56,7 +56,7 @@ func accountConfigurationExtraPatch(ctx context.Context, ids []int64, updates ma
 	filtered := service.StripRetiredCodexStateExtra(updates)
 	delete(filtered, "openai_pinned_installation_id")
 	delete(filtered, "openai_installation_rotate_enabled")
-	for _, key := range []string{"openai_installation_pin_enabled", "enable_tls_fingerprint", "tls_fingerprint_profile_id"} {
+	for _, key := range []string{"openai_installation_pin_enabled", "enable_tls_fingerprint", "tls_fingerprint_profile_id", service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey} {
 		delete(filtered, key)
 		if len(ids) == 0 {
 			continue
@@ -97,7 +97,13 @@ func afterAccountConfigurationCommit(ctx context.Context, notify func()) {
 	notify()
 }
 
-func guardedAccountExtraExpression(expression string) string {
+func guardedAccountExtraExpression(expression string, credentialExpressions ...string) string {
+	credentials := "credentials"
+	if len(credentialExpressions) > 0 {
+		credentials = credentialExpressions[0]
+	}
+	daybreakEligible := strings.Replace(openAIOAuthCredentialOwnerExpression(credentials), " AND parent_account_id IS NULL", "", 1)
+	expression = "CASE WHEN " + daybreakEligible + " THEN (" + expression + ") ELSE (" + expression + ") - 'openai_daybreak_blue_enabled' - 'openai_daybreak_red_enabled' END"
 	return "CASE WHEN " + installationOwnerSQL + " THEN (" + expression + ") - 'openai_installation_rotate_enabled'" +
 		" ELSE (" + expression + ") - 'openai_installation_rotate_enabled' - 'openai_pinned_installation_id' - 'openai_installation_pin_enabled' END"
 }

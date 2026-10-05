@@ -86,6 +86,7 @@ type SyncFromCRSItemResult struct {
 	Name         string `json:"name"`
 	Action       string `json:"action"` // created/updated/failed/skipped
 	Error        string `json:"error,omitempty"`
+	Warning      string `json:"warning,omitempty"`
 }
 
 type SyncFromCRSResult struct {
@@ -650,6 +651,15 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 		var existingExtra map[string]any
 		if existing != nil {
 			existingExtra = existing.Extra
+		}
+		for _, key := range []string{OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey} {
+			if enabled, _ := extra[key].(bool); enabled {
+				item.Warning = "Daybreak settings are managed locally; new accounts start disabled and require a live capability check"
+			}
+			delete(extra, key)
+			if value, exists := existingExtra[key]; exists {
+				extra[key] = value
+			}
 		}
 		extra, err = mergeCRSOpenAILongContextBillingExtra(existingExtra, extra)
 		if err != nil {

@@ -117,6 +117,7 @@ type OpenAIModelsResponse struct {
 	upstreamSourceBody           []byte
 	convertedFromOpenAIModelList bool
 	NotModified                  bool
+	observedAt                   time.Time
 }
 
 // BuildGroupConfiguredCodexModelsManifest builds a Codex catalog from configured
@@ -1623,6 +1624,7 @@ type openAIModelsRequest struct {
 	useAPIKeyUpstream   bool
 	// Cached bodies have already been converted to their requested format.
 	standardModelsList bool
+	auxiliary          bool
 }
 
 type openAIModelsCacheEntry struct {
@@ -1710,6 +1712,12 @@ func (c *openAIModelsCache) set(key string, manifest *OpenAIModelsResponse, now 
 // passed through verbatim. Custom API key manifests receive only the narrowly
 // scoped compatibility adjustments required by custom-provider Codex clients.
 func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*OpenAIModelsResponse, error) {
+	return s.fetchCodexModelsManifest(ctx, account, clientVersion, ifNoneMatch, false)
+}
+
+// Auxiliary capability discovery shares the catalog cache without interpreting
+// a discovery failure as an inference failure or changing account health.
+func (s *OpenAIGatewayService) fetchCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string, auxiliary bool) (*OpenAIModelsResponse, error) {
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
 	}
@@ -1736,7 +1744,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	var clientIdentity CodexClientIdentityPlan
 	switch {
 	case credAccount.IsOpenAIOAuth(), isOpenAICandyTest(ctx) && credAccount.IsOpenAIOAuthLike():
-		authToken, _, err = s.GetAccessToken(ctx, credAccount)
+		authToken, _, err = s.GetAccessToken(openAIModelsTokenContext(ctx, auxiliary), credAccount)
 		if err != nil {
 			return nil, openAIModelsCredentialError(err)
 		}
@@ -1831,6 +1839,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 		credentialAccount:   credAccount,
 		accountConcurrency:  account.Concurrency,
 		useAPIKeyUpstream:   useAPIKeyUpstream,
+		auxiliary:           auxiliary,
 	}
 	if !useAPIKeyUpstream {
 		scope, _ := codexnative.ScopeFromContext(WithOpenAINativeHTTPScope(ctx, credAccount, ""))
@@ -1844,7 +1853,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	// 错误时仍交给 handleCodexModelsManifestAccountAuthError 处理账号状态。
 	oauthFetch := func(fetchCtx context.Context, ifNoneMatch string) (*OpenAIModelsResponse, error) {
 		manifest, fetchErr := s.fetchCodexModelsManifestUpstream(fetchCtx, request, ifNoneMatch)
-		if isOpenAICandyTest(fetchCtx) {
+		if auxiliary || isOpenAICandyTest(fetchCtx) {
 			return manifest, fetchErr
 		}
 		if !credAccount.IsOpenAIAgentIdentity() || !isAgentIdentityTaskInvalidCodexModelsError(fetchErr) {
@@ -1973,6 +1982,8 @@ func (s *OpenAIGatewayService) refreshCachedOpenAIModels(cacheKey string, reques
 			return nil, err
 		}
 		if manifest.NotModified && cached != nil {
+			cached = cloneOpenAIModelsResponse(cached)
+			cached.observedAt = time.Now()
 			s.openAIModelsCache.set(cacheKey, cached, time.Now())
 			return cached, nil
 		}
@@ -1999,7 +2010,7 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 		}
 		request.credentialAccount = credential
 		ctx = ContextWithOpenAIRequestOS(ctx, OpenAIRequestOS{Family: credential.OpenAIOAuthCredentialOS, Source: "frozen_authorization", Captured: true})
-		token, _, authErr := s.GetAccessToken(ctx, credential)
+		token, _, authErr := s.GetAccessToken(openAIModelsTokenContext(ctx, request.auxiliary), credential)
 		if authErr != nil {
 			return nil, openAIModelsCredentialError(authErr)
 		}
@@ -2181,6 +2192,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 		upstreamETag:                 etag,
 		upstreamSourceBody:           append([]byte(nil), upstreamBody...),
 		convertedFromOpenAIModelList: convertedFromOpenAIModelList,
+		observedAt:                   time.Now(),
 	}
 	if request.useAPIKeyUpstream && !bytes.Equal(body, upstreamBody) {
 		manifest.ETag = codexModelsManifestBodyETag(body)

@@ -7,12 +7,14 @@ const {
   checkMixedChannelRiskMock,
   regenerateInstallationIDMock,
   getSettingsMock,
+  getDaybreakCapabilitiesMock,
   authIsSimpleMode,
 } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
   regenerateInstallationIDMock: vi.fn(),
   getSettingsMock: vi.fn(),
+  getDaybreakCapabilitiesMock: vi.fn(),
   authIsSimpleMode: { value: true }
 }))
 
@@ -38,6 +40,7 @@ vi.mock('@/api/admin', () => ({
       update: updateAccountMock,
       checkMixedChannelRisk: checkMixedChannelRiskMock,
       regenerateInstallationID: regenerateInstallationIDMock,
+      getDaybreakCapabilities: getDaybreakCapabilitiesMock,
     },
     settings: {
       getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
@@ -388,6 +391,9 @@ describe('EditAccountModal', () => {
   })
   beforeEach(() => {
     authIsSimpleMode.value = true
+    getDaybreakCapabilitiesMock.mockReset().mockResolvedValue({
+      checked_at: null, blue_available: true, red_available: true, models: [], reason: ''
+    })
     getSettingsMock.mockReset().mockResolvedValue({
       enable_openai_codex_fingerprint_normalization: true,
       enable_openai_codex_installation_id_normalization: true,
@@ -1192,6 +1198,47 @@ describe('EditAccountModal', () => {
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_long_context_billing_enabled).toBe(false)
+  })
+
+  it('persists changed Daybreak choices and clears Red when Blue is turned off', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { openai_daybreak_blue_enabled: true, openai_daybreak_red_enabled: true, custom: 'keep' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('[data-testid="daybreak-blue"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      openai_daybreak_blue_enabled: false, openai_daybreak_red_enabled: false, custom: 'keep'
+    })
+    wrapper.unmount()
+  })
+
+  it('does not replay unchanged Daybreak preferences from the account snapshot', async () => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.extra = { openai_daybreak_blue_enabled: true, openai_daybreak_red_enabled: false }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('[data-tour="edit-account-form-name"]').setValue('renamed')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('openai_daybreak_blue_enabled')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('openai_daybreak_red_enabled')
+    wrapper.unmount()
+  })
+
+  it.each(['apikey', 'setup-token', 'personalAccessToken', 'agentIdentity', 'anthropic'])('does not show or fetch Daybreak capabilities for %s', async (kind) => {
+    const account = buildOpenAIOAuthParentAccount()
+    if (kind === 'apikey' || kind === 'setup-token') account.type = kind
+    else if (kind === 'anthropic') account.platform = kind
+    else account.credentials.auth_mode = kind
+    const wrapper = mountModal(account)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="openai-daybreak-settings"]').exists()).toBe(false)
+    expect(getDaybreakCapabilitiesMock).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('loads and clears the OAuth-only Codex namespace flatten toggle', async () => {

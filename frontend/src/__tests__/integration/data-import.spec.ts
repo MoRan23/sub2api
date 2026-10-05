@@ -175,6 +175,27 @@ describe('ImportDataModal', () => {
     expect(showSuccess).toHaveBeenCalledWith('admin.accounts.dataImportSuccess')
   })
 
+  it('keeps Daybreak import notices visible until the user closes the dialog', async () => {
+    const { adminAPI } = await import('@/api/admin')
+    vi.mocked(adminAPI.accounts.importData).mockResolvedValue({
+      proxy_created: 0, proxy_reused: 0, proxy_failed: 0, account_created: 1, account_failed: 0,
+      warnings: [{ kind: 'account', name: 'OAuth import', message: '完成授权后在编辑页验证启用 Daybreak' }]
+    })
+    const wrapper = mountModal()
+    const input = wrapper.find('input[type="file"]')
+    setInputFiles(input.element, [makeJsonFile('daybreak.json', JSON.stringify({ proxies: [], accounts: [{ name: 'OAuth import' }] }))])
+    await input.trigger('change')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="import-warnings"]').text()).toContain('完成授权后在编辑页验证启用 Daybreak')
+    expect(showWarning).toHaveBeenCalledWith('admin.accounts.dataImportCompletedWithWarnings')
+    expect(wrapper.emitted('imported')).toBeUndefined()
+    await wrapper.findAll('button.btn-secondary')[1]!.trigger('click')
+    expect(wrapper.emitted('imported')).toHaveLength(1)
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('部分成功时关闭弹窗仍通知父组件刷新', async () => {
     const { adminAPI } = await import('@/api/admin')
     vi.mocked(adminAPI.accounts.importData).mockResolvedValue({

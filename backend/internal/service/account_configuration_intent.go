@@ -23,7 +23,7 @@ type accountConfigurationIntentScope struct {
 
 func withAccountConfigurationIntent(ctx context.Context, ids []int64, extra map[string]any, environment *string) context.Context {
 	intent := AccountConfigurationIntent{Extra: make(map[string]any)}
-	for _, key := range []string{openAIInstallationPinEnabledKey, "enable_tls_fingerprint", "tls_fingerprint_profile_id"} {
+	for _, key := range []string{openAIInstallationPinEnabledKey, "enable_tls_fingerprint", "tls_fingerprint_profile_id", OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey} {
 		if value, exists := extra[key]; exists {
 			intent.Extra[key] = value
 		}
@@ -68,6 +68,22 @@ func PreserveAccountConfiguration(current, target *Account, intent AccountConfig
 	copyCurrent := func(key string) {
 		delete(target.Extra, key)
 		if value, exists := current.Extra[key]; exists {
+			target.Extra[key] = value
+		}
+	}
+	for _, key := range []string{OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey} {
+		copyCurrent(key)
+	}
+	if !IsOpenAIDaybreakAccount(target) {
+		delete(target.Extra, OpenAIDaybreakBlueEnabledKey)
+		delete(target.Extra, OpenAIDaybreakRedEnabledKey)
+	}
+	daybreakPatch, err := NormalizeOpenAIDaybreakSettings(target, intent.Extra)
+	if err != nil {
+		return err
+	}
+	for _, key := range []string{OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey} {
+		if value, explicit := daybreakPatch[key]; explicit {
 			target.Extra[key] = value
 		}
 	}

@@ -357,6 +357,7 @@ func ProvideAdminService(
 		defaultSubAssigner, userSubRepo, privacyClientFactory, runtimeBlocker,
 		affiliateService, compositeRouteRepo, compositeResolver, channelCacheInvalidators...)
 	impl := svc.(*adminServiceImpl)
+	impl.daybreakCapabilities, _ = runtimeBlocker.(OpenAIDaybreakCapabilityReader)
 	impl.egressLocationService = egressLocation
 	impl.proxyGeoStop = impl.startProxyGeoBackfill()
 	return svc

@@ -1167,6 +1167,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		// Keep the source-guarded payload for a permitted protocol repair retry.
 		guardedRetryPayload := append([]byte(nil), payload...)
+		payload = s.applyOpenAIDaybreakForPlan(ctx, account, pinnedIdentityPlan, payload)
 		payloadBytes = len(payload)
 		responseEvidence := beginOpenAIResponseEvidence(c, gjson.GetBytes(payload, "model").String())
 		observeOpenAIResponseEvidenceHeaders(responseEvidence, lease.ClaimResponseEvidenceHeaders(), "connection")

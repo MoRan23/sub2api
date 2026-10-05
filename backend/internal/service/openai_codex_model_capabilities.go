@@ -47,6 +47,9 @@ type CodexModelCapabilities struct {
 	NodeREPLAutoReviewRequired bool
 	NodeREPLDisabled           bool
 	Known                      bool
+	AccessProgramsKnown        bool
+	DaybreakBlue               bool
+	DaybreakRed                bool
 }
 
 type codexModelCapabilityEntry struct {
@@ -59,6 +62,9 @@ type codexModelCapabilityCache struct {
 	mu        sync.Mutex
 	entries   map[string]codexModelCapabilityEntry
 	nextOrder uint64
+	// Keep a bounded watermark even for empty manifests so an older cached
+	// response cannot resurrect a removed model or grant.
+	observations map[string]time.Time
 }
 
 func codexModelCapabilityKey(namespace, model string) string {
@@ -96,6 +102,9 @@ func (c *codexModelCapabilityCache) refreshNamespace(namespace string, now time.
 	prefix := strings.TrimSpace(namespace) + "\x00"
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if observed, ok := c.observations[strings.TrimSpace(namespace)]; ok && !now.Before(observed) {
+		c.observations[strings.TrimSpace(namespace)] = now
+	}
 	for key, entry := range c.entries {
 		if !strings.HasPrefix(key, prefix) {
 			continue
@@ -119,19 +128,51 @@ func (c *codexModelCapabilityCache) observeManifest(namespace string, body []byt
 	}
 	var envelope struct {
 		Models []struct {
-			Slug                       string `json:"slug"`
-			UseResponsesLite           bool   `json:"use_responses_lite"`
-			NodeREPLAutoReviewRequired bool   `json:"node_repl_auto_review_required"`
-			NodeREPLDisabled           bool   `json:"node_repl_disabled"`
+			Slug                       string          `json:"slug"`
+			UseResponsesLite           bool            `json:"use_responses_lite"`
+			NodeREPLAutoReviewRequired bool            `json:"node_repl_auto_review_required"`
+			NodeREPLDisabled           bool            `json:"node_repl_disabled"`
+			AvailableAccessPrograms    json.RawMessage `json:"available_access_programs"`
 		} `json:"models"`
 	}
-	if err := json.Unmarshal(body, &envelope); err != nil {
+	if err := json.Unmarshal(body, &envelope); err != nil || envelope.Models == nil {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.entries == nil {
 		c.entries = make(map[string]codexModelCapabilityEntry)
+	}
+	namespace = strings.TrimSpace(namespace)
+	if c.observations == nil {
+		c.observations = make(map[string]time.Time)
+	}
+	if observed, exists := c.observations[namespace]; exists && observed.After(now) {
+		return
+	}
+	if _, exists := c.observations[namespace]; !exists && len(c.observations) >= codexModelCapabilityCacheMaxEntries {
+		oldestNamespace := ""
+		var oldest time.Time
+		for candidate, observed := range c.observations {
+			if oldestNamespace == "" || observed.Before(oldest) {
+				oldestNamespace, oldest = candidate, observed
+			}
+		}
+		delete(c.observations, oldestNamespace)
+		for key := range c.entries {
+			if strings.HasPrefix(key, oldestNamespace+"\x00") {
+				delete(c.entries, key)
+			}
+		}
+	}
+	c.observations[namespace] = now
+	// A successful manifest replaces this authorization's complete model set.
+	// Models removed upstream must not retain access from an older observation.
+	prefix := strings.TrimSpace(namespace) + "\x00"
+	for key := range c.entries {
+		if strings.HasPrefix(key, prefix) {
+			delete(c.entries, key)
+		}
 	}
 	for _, model := range envelope.Models {
 		if strings.TrimSpace(model.Slug) == "" {
@@ -155,12 +196,16 @@ func (c *codexModelCapabilityCache) observeManifest(namespace string, body []byt
 			delete(c.entries, oldestKey)
 		}
 		c.nextOrder++
+		programsKnown, blue, red := parseOpenAIDaybreakAccessPrograms(model.AvailableAccessPrograms)
 		c.entries[codexModelCapabilityKey(namespace, model.Slug)] = codexModelCapabilityEntry{
 			capabilities: CodexModelCapabilities{
 				UseResponsesLite:           model.UseResponsesLite,
 				NodeREPLAutoReviewRequired: model.NodeREPLAutoReviewRequired,
 				NodeREPLDisabled:           model.NodeREPLDisabled,
 				Known:                      true,
+				AccessProgramsKnown:        programsKnown,
+				DaybreakBlue:               blue,
+				DaybreakRed:                red,
 			},
 			expiresAt: now.Add(codexModelCapabilityCacheTTL),
 			order:     c.nextOrder,

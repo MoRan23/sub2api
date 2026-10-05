@@ -130,6 +130,10 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	}
 
 	account.Extra = service.StripRetiredCodexStateExtra(account.Extra)
+	// A new row has no locally validated capability evidence. All creation
+	// paths, including external sync imports, begin with Daybreak disabled.
+	delete(account.Extra, service.OpenAIDaybreakBlueEnabledKey)
+	delete(account.Extra, service.OpenAIDaybreakRedEnabledKey)
 	builder := client.Account.Create().
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
@@ -543,6 +547,9 @@ func (r *accountRepository) updateLockedAccount(
 	explicitRateSyncEnabled *bool,
 	explicitRateMultiplier *float64,
 ) (*dbent.Account, error) {
+	if err := lockDaybreakEvidenceOwners(ctx, client, []int64{account.ID}); err != nil {
+		return nil, err
+	}
 	current, err := lockAccountConfiguration(ctx, client, account.ID)
 	if err != nil {
 		return nil, err
@@ -555,6 +562,9 @@ func (r *accountRepository) updateLockedAccount(
 		account.Credentials = service.PreserveOpenAIOAuthProviderCredentials(current.Credentials, account.Credentials)
 	}
 	if err := service.PreserveAccountConfiguration(current, account, service.AccountConfigurationIntentFromContext(ctx, account.ID)); err != nil {
+		return nil, err
+	}
+	if err := validateDaybreakPatchLocked(ctx, client, current, account, service.AccountConfigurationIntentFromContext(ctx, account.ID).Extra); err != nil {
 		return nil, err
 	}
 	if service.IsOpenAIOAuthOSProfileOwner(account) {
@@ -2807,7 +2817,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	}
 
 	clearProbeSnapshot := upstreamBillingProbeExplicitlyDisabled(updates) || upstreamBillingProbeSnapshotClearRequested(updates)
-	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot
+	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || service.HasOpenAIDaybreakSettings(updates)
 	baseCtx := ctx
 	contextTx := dbent.TxFromContext(ctx)
 	client := clientFromContext(ctx, r.client)
@@ -2822,6 +2832,26 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 			defer func() { _ = tx.Rollback() }()
 			ctx = dbent.NewTxContext(ctx, tx)
 			client = tx.Client()
+		}
+	}
+	if service.HasOpenAIDaybreakSettings(updates) {
+		if err := lockDaybreakEvidenceOwners(ctx, client, []int64{id}); err != nil {
+			return err
+		}
+		current, err := lockAccountConfiguration(ctx, client, id)
+		if err != nil {
+			return err
+		}
+		updates, err = service.NormalizeOpenAIDaybreakSettings(current, updates)
+		if err != nil {
+			return err
+		}
+		if err := validateDaybreakPatchLocked(ctx, client, current, current, updates); err != nil {
+			return err
+		}
+		payload, err = json.Marshal(updates)
+		if err != nil {
+			return err
 		}
 	}
 	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
@@ -3507,7 +3537,11 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		if len(caseBranches) > 0 {
 			extraExpression = "CASE" + strings.Join(caseBranches, "") + " ELSE " + extraExpression + " END"
 		}
-		setClauses = append(setClauses, "extra = "+guardedAccountExtraExpression(extraExpression))
+		daybreakCredentials := "credentials"
+		if credentialPlaceholder != "" {
+			daybreakCredentials = guardedCredentials("COALESCE(credentials, '{}'::jsonb) || " + credentialPlaceholder + "::jsonb")
+		}
+		setClauses = append(setClauses, "extra = "+guardedAccountExtraExpression(extraExpression, daybreakCredentials))
 	}
 
 	if len(setClauses) == 0 {
@@ -3545,6 +3579,27 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	}
 
 	previousOSProfileOwners := make(map[int64]bool)
+	if service.HasOpenAIDaybreakSettings(updates.Extra) {
+		client := clientFromContext(ctx, r.client)
+		if err := lockDaybreakEvidenceOwners(ctx, client, ids); err != nil {
+			return 0, err
+		}
+		orderedIDs := uniquePositiveInt64s(ids)
+		sort.Slice(orderedIDs, func(i, j int) bool { return orderedIDs[i] < orderedIDs[j] })
+		for _, id := range orderedIDs {
+			current, err := lockAccountConfiguration(ctx, client, id)
+			if err != nil {
+				return 0, err
+			}
+			target := *current
+			if len(updates.Credentials) > 0 {
+				target.Credentials = service.MergePreservingSensitiveCreds(current.Credentials, updates.Credentials)
+			}
+			if err := validateDaybreakPatchLocked(ctx, client, current, &target, updates.Extra); err != nil {
+				return 0, err
+			}
+		}
+	}
 	_, authModeExplicit := updates.Credentials["auth_mode"]
 	_, legacyAuthModeExplicit := updates.Credentials["openai_auth_mode"]
 	if (authModeExplicit || legacyAuthModeExplicit) && r.client != nil {
@@ -3607,7 +3662,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 	if rows > 0 && contextTx == nil {
-		shouldSync := false
+		shouldSync := service.HasOpenAIDaybreakSettings(updates.Extra)
 		if updates.Status != nil && (*updates.Status == service.StatusError || *updates.Status == service.StatusDisabled) {
 			shouldSync = true
 		}

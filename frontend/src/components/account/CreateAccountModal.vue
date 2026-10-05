@@ -3107,6 +3107,12 @@
         </div>
       </div>
 
+      <OpenAIDaybreakSettings
+        v-if="form.platform === 'openai' && form.type === 'oauth' && oauthFlowRef?.inputMethod !== 'codex_pat' && oauthFlowRef?.inputMethod !== 'agent_identity'"
+        :blue="false"
+        :red="false"
+      />
+
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
         v-if="form.platform === 'openai' && form.type === 'oauth'"
@@ -4006,6 +4012,7 @@ import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import OpenAIAccessModeSelect from '@/components/account/OpenAIAccessModeSelect.vue'
+import OpenAIDaybreakSettings from '@/components/account/OpenAIDaybreakSettings.vue'
 import type { OpenAIAPIKeyMode } from '@/types'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import Toggle from '@/components/common/Toggle.vue'
@@ -6578,7 +6585,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
       failed: result.failed
     }
 
-    if (successCount > 0 && result.failed === 0) {
+    if (successCount > 0 && result.failed === 0 && !result.warnings?.length) {
       appStore.showSuccess(t('admin.accounts.oauth.openai.codexSessionImportSuccess', params))
       emit('created')
       handleClose()
@@ -6591,6 +6598,7 @@ const handleOpenAIImportCodexSession = async (content: string) => {
 
     if (result.failed === 0) {
       appStore.showWarning(t('admin.accounts.oauth.openai.codexSessionImportSuccess', params))
+      if (successCount > 0) emit('created')
       return
     }
 

@@ -86,11 +86,13 @@ const OAuthAuthorizationFlowStub = defineComponent({
     showAgentIdentityOption: Boolean,
     showCodexPatOption: Boolean,
     initialInputMethod: String,
+    error: String,
   },
   data: () => ({ inputMethod: 'manual' }),
   emits: ['import-codex-session', 'import-codex-pat'],
   template: `
     <div>
+      <p v-if="error" data-testid="oauth-import-error">{{ error }}</p>
       <button data-testid="import-codex-session" @click="$emit('import-codex-session', 'session-json')">session</button>
       <button data-testid="import-codex-pat" @click="$emit('import-codex-pat', 'pat-token')">pat</button>
     </div>
@@ -201,6 +203,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')
     await selectButtonByText(wrapper, 'API Key')
+    expect(wrapper.find('[data-testid="openai-daybreak-settings"]').exists()).toBe(false)
     expect((wrapper.get('[data-testid="openai-api-key-mode"]').element as HTMLSelectElement).value).toBe('generic')
     expect(wrapper.find('[data-testid="openai-codex-fingerprint-section"]').exists()).toBe(false)
     await wrapper.get('[data-testid="openai-api-key-mode"]').setValue('codex_engine')
@@ -236,6 +239,17 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
   })
 
   afterEach(() => vi.useRealTimers())
+
+  it('keeps Daybreak disabled until the new OAuth account has been authorized and saved', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    expect(wrapper.get('[data-testid="daybreak-create-hint"]').exists()).toBe(true)
+    for (const key of ['blue', 'red']) {
+      expect(wrapper.get(`[data-testid="daybreak-${key}"]`).attributes('aria-checked')).toBe('false')
+      expect(wrapper.get(`[data-testid="daybreak-${key}"]`).attributes('disabled')).toBeDefined()
+    }
+    wrapper.unmount()
+  })
 
   it('sets month and year expiry presets without submitting the account form', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
@@ -726,6 +740,21 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(payload?.upstream_billing_probe_enabled).toBe(true)
     // 创建成功后前端立即发起一次首探（与其他 apikey 平台一致）。
     expect(probeUpstreamBillingMock).toHaveBeenCalledWith(42)
+  })
+
+  it('keeps successful Codex session import warnings visible instead of closing', async () => {
+    importCodexSessionMock.mockResolvedValueOnce({
+      created: 1, updated: 0, skipped: 0, failed: 0, errors: [],
+      warnings: [{ message: '完成授权后在编辑页验证启用 Daybreak' }]
+    })
+    const wrapper = await openCodexImportStep()
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="oauth-import-error"]').text()).toContain('完成授权后在编辑页验证启用 Daybreak')
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(wrapper.emitted('created')).toHaveLength(1)
+    expect(showWarningMock).toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('leaves Codex session import billing ownership to the backend', async () => {

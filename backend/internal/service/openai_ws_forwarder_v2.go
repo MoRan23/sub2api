@@ -409,6 +409,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if raw, ok := wirePayload.(json.RawMessage); ok {
 		observationBody = raw
 	}
+	observationBody = s.applyOpenAIDaybreakForPlan(ctx, account, outboundIdentityPlan, observationBody)
 	wirePayload = json.RawMessage(observationBody)
 	responseEvidence := beginOpenAIResponseEvidence(c, gjson.GetBytes(observationBody, "model").String())
 	observeOpenAIResponseEvidenceHeaders(responseEvidence, lease.ClaimResponseEvidenceHeaders(), "connection")

@@ -93,6 +93,7 @@ type DataImportResult struct {
 	AccountCreated int               `json:"account_created"`
 	AccountFailed  int               `json:"account_failed"`
 	Errors         []DataImportError `json:"errors,omitempty"`
+	Warnings       []DataImportError `json:"warnings,omitempty"`
 }
 
 type DataImportError struct {
@@ -482,6 +483,13 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			AutoPauseOnExpired:            item.AutoPauseOnExpired,
 			SkipDefaultGroupBind:          skipDefaultGroupBind,
 		}
+		daybreakRequested := false
+		for _, key := range []string{service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey} {
+			if enabled, _ := accountInput.Extra[key].(bool); enabled {
+				daybreakRequested = true
+			}
+			delete(accountInput.Extra, key)
+		}
 
 		created, err := h.adminService.CreateAccount(ctx, accountInput)
 		if err != nil {
@@ -499,6 +507,9 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		}
 		h.scheduleGrokImportProbe(created)
 		result.AccountCreated++
+		if daybreakRequested {
+			result.Warnings = append(result.Warnings, DataImportError{Kind: "account", Name: item.Name, Message: "Daybreak was imported disabled; authorize the account and check its live model capabilities before enabling Blue or Red"})
+		}
 	}
 
 	// 异步设置 Antigravity 隐私，避免大量导入时阻塞请求

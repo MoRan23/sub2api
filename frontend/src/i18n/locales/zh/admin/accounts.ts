@@ -32,6 +32,8 @@ export default {
       dataExportSelected: '导出选中',
       dataExportIncludeProxies: '导出代理（导出账号关联的代理）',
       dataImport: '导入',
+      dataImportWarnings: '导入提示',
+      dataImportCompletedWithWarnings: '导入完成，部分设置需要重新确认，请查看导入提示。',
       moreActions: '更多操作',
       dataActions: '数据操作',
       toolActions: '工具',
@@ -779,6 +781,16 @@ export default {
       },
       // OpenAI specific hints
       openai: {
+        daybreak: {
+          description: '按授权档位为支持模型补充未指定的 access_programs.cyber，保留客户端显式选择。关闭仅停止自动补充，不强制关闭上游 Daybreak。',
+          redRequiresBlue: 'Red 需要先开启 Blue；关闭 Blue 将同时关闭 Red。',
+          createHint: '默认关闭。完成账号授权后，请在编辑页检查模型能力并开启。',
+          checking: '正在检查模型能力…',
+          refresh: '刷新能力',
+          checkFailed: '无法读取上游模型能力，暂不能开启；已开启的开关仍可关闭。',
+          unavailable: '上游目录没有提供受支持的 Daybreak 模型能力，暂不能开启。',
+          checkedAt: '检查时间：{time}',
+        },
         codexFingerprintNormalization: 'Codex 指纹归一',
         codexFingerprintCreateDesc: '创建后自动生成 Windows、macOS、Linux 三套固定安装身份，共用账号的一份 OAuth 授权。默认系统为 Windows，可在编辑页调整。',
         codexFingerprintEditDesc: '按请求系统使用对应的固定安装身份。UA 由服务端自动维护，可单独重新生成每个系统的安装 ID。',

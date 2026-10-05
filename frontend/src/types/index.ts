@@ -1199,6 +1199,18 @@ export interface OpenAIOAuthOSProfiles {
   profiles: Record<OpenAIOAuthOS, OpenAIOAuthOSProfile>
 }
 
+export interface OpenAIDaybreakCapabilities {
+  checked_at: string | null
+  blue_available: boolean
+  red_available: boolean
+  models: Array<{
+    model: string
+    required_tier: 'blue' | 'red'
+    cyber: 'daybreak_blue' | 'daybreak_red'
+  }>
+  reason: string
+}
+
 export type OpenCodeGoUsageStatus = 'ok' | 'unauthorized' | 'failed'
 
 export interface OpenCodeGoUsageWindow {
@@ -1260,6 +1272,8 @@ export interface Account {
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
     openai_api_key_mode?: OpenAIAPIKeyMode
+    openai_daybreak_blue_enabled?: boolean
+    openai_daybreak_red_enabled?: boolean
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
     antigravity_credits_overages?: Record<string, { activated_at: string; active_until: string }>
     upstream_billing_probe_enabled?: boolean
@@ -1729,6 +1743,7 @@ export interface AdminDataImportResult {
   account_created: number
   account_failed: number
   errors?: AdminDataImportError[]
+  warnings?: AdminDataImportError[]
 }
 
 export interface CodexSessionImportRequest {

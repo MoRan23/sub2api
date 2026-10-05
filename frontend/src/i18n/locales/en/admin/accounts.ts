@@ -32,6 +32,8 @@ export default {
       dataExportSelected: 'Export Selected',
       dataExportIncludeProxies: 'Include proxies linked to the exported accounts',
       dataImport: 'Import',
+      dataImportWarnings: 'Import notices',
+      dataImportCompletedWithWarnings: 'Import completed. Some settings need confirmation; review the import notices.',
       moreActions: 'More Actions',
       dataActions: 'Data',
       toolActions: 'Tools',
@@ -661,6 +663,16 @@ export default {
       },
       // OpenAI specific hints
       openai: {
+        daybreak: {
+          description: 'Fill missing access_programs.cyber for supported models according to the approval tier. Explicit client choices are preserved. Turning switches off stops automatic additions; it does not force upstream Daybreak off.',
+          redRequiresBlue: 'Red requires Blue. Turning Blue off also turns Red off.',
+          createHint: 'Off by default. After authorization, check model capabilities in the edit dialog to enable Daybreak.',
+          checking: 'Checking model capabilities…',
+          refresh: 'Refresh capabilities',
+          checkFailed: 'Unable to read upstream model capabilities. Enabling is unavailable; enabled switches can still be turned off.',
+          unavailable: 'The upstream catalog did not provide supported Daybreak capabilities. Enabling is unavailable.',
+          checkedAt: 'Checked: {time}',
+        },
         codexFingerprintNormalization: 'Codex fingerprint normalization',
         codexFingerprintCreateDesc: 'Creation generates Windows, macOS and Linux installation identities sharing one account OAuth authorization. Windows is the default; change it in the edit page.',
         codexFingerprintEditDesc: 'Requests use the identity for their operating system. User-Agent values are managed by the server; each installation ID can be regenerated separately.',

@@ -9,6 +9,7 @@ import type {
   Account,
   OpenAIOAuthOS,
   OpenAIOAuthOSProfiles,
+  OpenAIDaybreakCapabilities,
   AccountListItem,
   CreateAccountRequest,
   UpdateAccountRequest,
@@ -741,6 +742,23 @@ export interface PreviewFromCRSResult {
   existing_accounts: CRSPreviewAccount[]
 }
 
+export interface SyncFromCRSItemResult {
+  crs_account_id: string
+  kind: string
+  name: string
+  action: string
+  error?: string
+  warning?: string
+}
+
+export interface SyncFromCRSResult {
+  created: number
+  updated: number
+  skipped: number
+  failed: number
+  items: SyncFromCRSItemResult[]
+}
+
 export async function previewFromCrs(params: {
   base_url: string
   username: string
@@ -756,32 +774,8 @@ export async function syncFromCrs(params: {
   password: string
   sync_proxies?: boolean
   selected_account_ids?: string[]
-}): Promise<{
-  created: number
-  updated: number
-  skipped: number
-  failed: number
-  items: Array<{
-    crs_account_id: string
-    kind: string
-    name: string
-    action: string
-    error?: string
-  }>
-}> {
-  const { data } = await apiClient.post<{
-    created: number
-    updated: number
-    skipped: number
-    failed: number
-    items: Array<{
-      crs_account_id: string
-      kind: string
-      name: string
-      action: string
-      error?: string
-    }>
-  }>('/admin/accounts/sync/crs', params, {
+}): Promise<SyncFromCRSResult> {
+  const { data } = await apiClient.post<SyncFromCRSResult>('/admin/accounts/sync/crs', params, {
     timeout: 180000 // 180s timeout: sync refreshes each existing account's OAuth token serially
   })
   return data
@@ -1202,7 +1196,13 @@ export async function refreshOpenCodeGoUsage(id: number): Promise<OpenCodeGoUsag
   return data
 }
 
+export async function getDaybreakCapabilities(id: number): Promise<OpenAIDaybreakCapabilities> {
+  const { data } = await apiClient.get<OpenAIDaybreakCapabilities>(`/admin/accounts/${id}/daybreak-capabilities`)
+  return data
+}
+
 export const accountsAPI = {
+  getDaybreakCapabilities,
   list,
   listDailySessionPools,
   listWithEtag,

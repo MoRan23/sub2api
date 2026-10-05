@@ -579,8 +579,12 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 					return io.NopCloser(bytes.NewReader(bodySnapshot)), nil
 				}
 			}
+			retryBody, restoreErr := restoreOpenAIAccessProgramsForRetry(guardedBody, requestBody)
+			if restoreErr != nil {
+				return nil, fmt.Errorf("preserve HTTP bridge access program retry source: %w", restoreErr)
+			}
 			requestBody = guardedBody
-			body = guardedBody
+			body = retryBody
 		}
 		if account.Platform != PlatformGrok && !account.UsesOpenAICodexProtocol() && isOpenAIResponsesLiteWebSocketPayload(payload) {
 			upstreamReq.Header.Set(responsesLiteHeader, "true")

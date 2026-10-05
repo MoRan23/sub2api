@@ -1021,6 +1021,8 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		// 走网关报 no available accounts"。
 		"openai_passthrough",
 		service.OpenAIAPIKeyModeExtraKey,
+		service.OpenAIDaybreakBlueEnabledKey,
+		service.OpenAIDaybreakRedEnabledKey,
 		"openai_oauth_passthrough",
 		"codex_5h_used_percent",
 		"codex_7d_used_percent",

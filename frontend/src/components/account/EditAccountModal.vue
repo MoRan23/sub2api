@@ -1771,6 +1771,14 @@
         </div>
       </div>
 
+      <OpenAIDaybreakSettings
+        v-if="supportsManagedOpenAIOAuthIdentity(account)"
+        :account-id="account.id"
+        :active="show"
+        v-model:blue="openAIDaybreakBlueEnabled"
+        v-model:red="openAIDaybreakRedEnabled"
+      />
+
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
       <div
         v-if="account?.platform === 'openai' && account?.type === 'oauth'"
@@ -3250,6 +3258,7 @@ import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import OpenAIAccessModeSelect from '@/components/account/OpenAIAccessModeSelect.vue'
+import OpenAIDaybreakSettings from '@/components/account/OpenAIDaybreakSettings.vue'
 import type { OpenAIAPIKeyMode } from '@/types'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
@@ -3798,6 +3807,8 @@ const customBaseUrl = ref('')
 // OpenAI 自动透传开关（OAuth/API Key）
 const openaiPassthroughEnabled = ref(false)
 const openAIAPIKeyMode = ref<OpenAIAPIKeyMode>('generic')
+const openAIDaybreakBlueEnabled = ref(false)
+const openAIDaybreakRedEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -4327,6 +4338,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openAIAPIKeyMode.value = newAccount.type === 'apikey' && extra?.openai_api_key_mode === 'codex_engine' ? 'codex_engine' : 'generic'
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
+  openAIDaybreakBlueEnabled.value = supportsManagedOpenAIOAuthIdentity(newAccount) && extra?.openai_daybreak_blue_enabled === true
+  openAIDaybreakRedEnabled.value = openAIDaybreakBlueEnabled.value && extra?.openai_daybreak_red_enabled === true
   openAILongContextBillingEnabled.value = false
   // 固定默认 ON；随后按 extra 覆盖。
   openAIInstallationPinEnabled.value = true
@@ -5903,6 +5916,17 @@ const handleSubmit = async () => {
       const currentExtra = (props.account.extra as Record<string, unknown>) || {}
       const newExtra: Record<string, unknown> = { ...currentExtra }
       const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
+      if (supportsManagedOpenAIOAuthIdentity(props.account)) {
+        // Send changed preferences only; an unrelated edit must not replay a stale switch value.
+        delete newExtra.openai_daybreak_blue_enabled
+        delete newExtra.openai_daybreak_red_enabled
+        if (openAIDaybreakBlueEnabled.value !== (currentExtra.openai_daybreak_blue_enabled === true)) {
+          newExtra.openai_daybreak_blue_enabled = openAIDaybreakBlueEnabled.value
+        }
+        if (openAIDaybreakRedEnabled.value !== (currentExtra.openai_daybreak_red_enabled === true)) {
+          newExtra.openai_daybreak_red_enabled = openAIDaybreakRedEnabled.value
+        }
+      }
       if (props.account.type === 'apikey') newExtra.openai_api_key_mode = openAIAPIKeyMode.value
       if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
         newExtra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value

@@ -74,6 +74,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if account.IsCodexEngine() {
 		return s.forwardCodexEngine(ctx, c, account, body, "/v1/chat/completions", defaultMappedModel)
 	}
+	clientAccessPrograms := json.RawMessage(gjson.GetBytes(body, "access_programs").Raw)
 	if account != nil && account.IsOpenAIOAuth() {
 		var scopeErr error
 		ctx, account, scopeErr = s.prepareOpenAIOAuthRequestScope(ctx, c, account, body)
@@ -400,6 +401,12 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	responsesBody = updatedBody
 	setOpenAIOAuthIdentityCaptureCallerSeed(c, promptCacheKey)
 	responsesReq.ServiceTier = normalizedOpenAIServiceTierValue(gjson.GetBytes(responsesBody, "service_tier").String())
+	if account.IsOpenAIOAuth() {
+		responsesBody, err = restoreOpenAIClientAccessPrograms(responsesBody, clientAccessPrograms)
+		if err != nil {
+			return nil, fmt.Errorf("preserve client access programs: %w", err)
+		}
+	}
 
 	// 5. Get access token
 	token, _, err := s.GetAccessToken(ctx, account)

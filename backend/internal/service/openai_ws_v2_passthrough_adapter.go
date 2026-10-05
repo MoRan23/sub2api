@@ -1119,6 +1119,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				payload = updated
 			}
+			payload = s.applyOpenAIDaybreakForPlan(ctx, account, framePlan, payload)
 			nextEvidence := beginOpenAIResponseEvidence(c, gjson.GetBytes(payload, "model").String())
 			if firstResponseEvidenceFrame {
 				observeOpenAIResponseEvidenceHeaders(nextEvidence, handshakeHeaders, "connection")

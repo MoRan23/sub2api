@@ -171,6 +171,16 @@
           {{ t('admin.accounts.syncResultSummary', result) }}
         </div>
 
+        <div v-if="warningItems.length" class="mt-2" data-testid="crs-import-warnings">
+          <div class="text-sm font-medium text-amber-600 dark:text-amber-400">
+            {{ t('admin.accounts.dataImportWarnings') }}
+          </div>
+          <div class="mt-2 max-h-48 overflow-auto rounded-lg bg-gray-50 p-3 font-mono text-xs dark:bg-dark-800">
+            <div v-for="(item, idx) in warningItems" :key="idx" class="whitespace-pre-wrap">
+              {{ item.kind }} {{ item.name || item.crs_account_id }} — {{ item.warning }}
+            </div>
+          </div>
+        </div>
         <div v-if="errorItems.length" class="mt-2">
           <div class="text-sm font-medium text-red-600 dark:text-red-400">
             {{ t('admin.accounts.syncErrors') }}
@@ -289,6 +299,7 @@ const errorItems = computed(() => {
     (i) => i.action === 'failed' || (i.action === 'skipped' && i.error !== 'not selected')
   )
 })
+const warningItems = computed(() => result.value?.items.filter(item => item.warning) || [])
 
 watch(
   () => props.show,
@@ -379,11 +390,14 @@ const handleSync = async () => {
     })
     result.value = res
     currentStep.value = 'result'
+    const summary = { created: res.created, updated: res.updated, skipped: res.skipped, failed: res.failed }
 
     if (res.failed > 0) {
-      appStore.showError(t('admin.accounts.syncCompletedWithErrors', res))
+      appStore.showError(t('admin.accounts.syncCompletedWithErrors', summary))
+    } else if (warningItems.value.length) {
+      appStore.showWarning(t('admin.accounts.dataImportCompletedWithWarnings'))
     } else {
-      appStore.showSuccess(t('admin.accounts.syncCompleted', res))
+      appStore.showSuccess(t('admin.accounts.syncCompleted', summary))
     }
     emit('synced')
   } catch (error: any) {
