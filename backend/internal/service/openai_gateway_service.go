@@ -299,6 +299,9 @@ type OpenAIForwardResult struct {
 	wsReplayInput                []json.RawMessage
 	wsReplayInputExists          bool
 	wsAccountFailoverReplayInput []json.RawMessage
+	// Native WS can only rebuild an account-independent chain after receiving
+	// a successful terminal event with its complete output array.
+	wsAccountFailoverReplayComplete bool
 	// wsClientOutputDelivered is set only by the HTTP-to-WebSocket bridge after
 	// at least one response frame has been written to the downstream client.
 	// It keeps an undelivered upstream handshake/header snapshot from mutating

@@ -207,6 +207,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	type openAIWSClientPayload struct {
 		payloadRaw               []byte
 		accountIdentitySourceRaw []byte
+		accountFailoverSourceRaw []byte
 		rawForHash               []byte
 		promptCacheKey           string
 		previousResponseID       string
@@ -294,6 +295,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		normalized, timezoneState := s.prepareOpenAIWSFrameTimezone(ctx, c, account, normalized, account.IsOpenAIPassthroughEnabled(), turn == 1, acceptedAt)
 		ctx = openAIWSContextForTimezoneState(ctx, c, timezoneState)
+		// A replacement attempt reruns admission and effort/model policies. Keep
+		// their original inputs so non-idempotent mappings are applied only once.
+		accountFailoverSourceRaw := append([]byte(nil), normalized...)
 		requestedReasoningEffort := CanonicalRequestedReasoningEffort(normalized, strings.TrimSpace(values[1].String()))
 		if next, policyErr := applyOpenAIWSReasoningEffortPolicy(normalized, hooks); policyErr != nil {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
@@ -510,6 +514,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return openAIWSClientPayload{
 			payloadRaw:               normalized,
 			accountIdentitySourceRaw: accountIdentitySourceRaw,
+			accountFailoverSourceRaw: accountFailoverSourceRaw,
 			rawForHash:               trimmed,
 			promptCacheKey:           promptCacheKey,
 			previousResponseID:       previousResponseID,
@@ -1490,6 +1495,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					result.wsReplayInput = replayInput
 					result.wsReplayInputExists = true
 				}
+				if (eventType == "response.completed" || eventType == "response.done") && !clientDisconnected {
+					output := gjson.GetBytes(upstreamMessage, "response.output")
+					if output.IsArray() {
+						result.wsAccountFailoverReplayComplete = true
+						for _, item := range output.Array() {
+							result.wsAccountFailoverReplayInput = append(result.wsAccountFailoverReplayInput, json.RawMessage(item.Raw))
+						}
+					}
+				}
 				if imageCount > 0 {
 					result.ImageCount = imageCount
 					result.ImageSize = imageSizeTier
@@ -1506,6 +1520,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	currentPayload := firstPayload.payloadRaw
 	// Admission hooks must see client model candidates before upstream mapping.
 	currentClientPayload := firstPayload.rawForHash
+	currentAccountIdentitySource := firstPayload.accountFailoverSourceRaw
+	currentFrameCapture, _ := OpenAIOAuthIdentityCaptureFromContext(c)
 	currentOriginalModel := firstPayload.originalModel
 	currentImageBillingModel := firstPayload.imageBillingModel
 	currentImageSizeTier := firstPayload.imageSizeTier
@@ -1569,6 +1585,24 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	defer releaseSessionLease()
 
 	turn := 1
+	var accountFailoverReplay openAIWSAccountFailoverReplay
+	accountFailoverPreparedTurn := 0
+	// Includes later-turn handshake failures as well as semantic rate limits.
+	// No later turn may escape as a bare failover and cause first-frame replay.
+	defer func() {
+		var failover *UpstreamFailoverError
+		if turn <= 1 || !errors.As(returnErr, &failover) {
+			return
+		}
+		if _, wrapped := OpenAIWSCurrentTurnRetryPayload(returnErr); wrapped {
+			return
+		}
+		if accountFailoverPreparedTurn != turn {
+			returnErr = newOpenAIWSCurrentTurnFailoverError(returnErr, nil, currentFrameCapture)
+			return
+		}
+		returnErr = accountFailoverReplay.Failover(returnErr, currentFrameCapture)
+	}()
 	rejectedFieldRetryState = newOpenAIResponsesRejectedFieldRetryState(currentPayload)
 	turnRetry := 0
 	turnPrevRecoveryTried := false
@@ -1812,6 +1846,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					truncateOpenAIWSLogValue(expectedPrev, openAIWSIDValueMaxLen),
 				)
 			}
+		}
+		if accountFailoverPreparedTurn != turn {
+			accountFailoverReplay.Prepare(currentAccountIdentitySource, currentOriginalModel, currentPreviousResponseID,
+				currentTimezoneState, s.sessionInvalidEncryptedContentDigests(groupID, sessionHash))
+			accountFailoverPreparedTurn = turn
 		}
 		var nextReplayInput []json.RawMessage
 		var nextReplayInputExists bool
@@ -2113,6 +2152,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if result == nil {
 			return errors.New("websocket turn result is nil")
 		}
+		accountFailoverReplay.Commit(result)
 		responseID := strings.TrimSpace(result.RequestID)
 		lastTurnResponseID = responseID
 		timezoneReplay.Commit(currentTurnReplayInput)
@@ -2181,11 +2221,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return parseErr
 		}
 		nextRoutingFields := gjson.GetManyBytes(nextPayload.payloadRaw, "model", "service_tier")
+		frameCapture := captureOpenAIWSFrameIdentity(nextPayload.rawForHash, &OpenAIOAuthIdentityPlan{
+			Capture: currentFrameCapture, RequestTurn: currentFrameCapture.RequestTurn, WireProfile: currentFrameCapture.WireProfile,
+		})
 		if pinnedIdentityModeEnabled {
 			// A turn without an explicit session/thread tuple inherits the socket's
 			// stable identity. The request-level turn snapshot is resolved for every
 			// frame, but is deliberately excluded from SocketDigest.
-			frameCapture := captureOpenAIWSFrameIdentity(nextPayload.rawForHash, &pinnedIdentityPlan)
+			frameCapture = captureOpenAIWSFrameIdentity(nextPayload.rawForHash, &pinnedIdentityPlan)
 			candidateLogicalIdentity := frameCapture.Logical
 			newPlan, identityErr := s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, frameCapture, OpenAIOAuthIdentityPlanOptions{
 				TurnIdentityEnabled: pinnedIdentityPlan.TurnIdentityRequested,
@@ -2340,6 +2383,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		baseAcquireReq.HeadersFactory = s.openAIWSHeadersFactory(ctx, account)
 		currentPayload = nextPayload.payloadRaw
 		currentClientPayload = nextPayload.rawForHash
+		currentAccountIdentitySource = nextPayload.accountFailoverSourceRaw
+		currentFrameCapture = frameCapture
 		currentOriginalModel = nextPayload.originalModel
 		currentImageBillingModel = nextPayload.imageBillingModel
 		currentImageSizeTier = nextPayload.imageSizeTier

@@ -10,7 +10,7 @@ func TestOpenAIWSNextAttemptMessageUsesCurrentTurnPayload(t *testing.T) {
 	firstMessage := []byte(`{"type":"response.create","input":"first"}`)
 	currentTurn := []byte(`{"type":"response.create","input":"turn-281"}`)
 
-	next, ok := openAIWSNextAttemptMessage(firstMessage, currentTurn, true)
+	next, ok := openAIWSNextAttemptMessage(firstMessage, currentTurn, true, true)
 
 	require.True(t, ok)
 	require.Equal(t, currentTurn, next)
@@ -19,7 +19,7 @@ func TestOpenAIWSNextAttemptMessageUsesCurrentTurnPayload(t *testing.T) {
 }
 
 func TestOpenAIWSNextAttemptMessageRejectsMissingCurrentTurnPayload(t *testing.T) {
-	next, ok := openAIWSNextAttemptMessage([]byte(`{"type":"response.create"}`), nil, true)
+	next, ok := openAIWSNextAttemptMessage([]byte(`{"type":"response.create"}`), nil, true, true)
 
 	require.False(t, ok)
 	require.Nil(t, next)
@@ -28,8 +28,14 @@ func TestOpenAIWSNextAttemptMessageRejectsMissingCurrentTurnPayload(t *testing.T
 func TestOpenAIWSNextAttemptMessageKeepsInitialMessageForFirstTurnFailover(t *testing.T) {
 	firstMessage := []byte(`{"type":"response.create","input":"first"}`)
 
-	next, ok := openAIWSNextAttemptMessage(firstMessage, nil, false)
+	next, ok := openAIWSNextAttemptMessage(firstMessage, nil, false, false)
 
 	require.True(t, ok)
 	require.Equal(t, firstMessage, next)
+}
+
+func TestOpenAIWSNextAttemptMessageNeverReplaysFirstFrameAfterTurnAdvanced(t *testing.T) {
+	next, ok := openAIWSNextAttemptMessage([]byte(`{"type":"response.create","input":"already completed"}`), nil, false, true)
+	require.False(t, ok)
+	require.Nil(t, next)
 }
