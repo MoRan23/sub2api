@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -159,15 +160,37 @@ func attributionSnapshot(ctx context.Context, tx *sql.Tx, id int64, c service.At
 		identity["base_url"] = a.GetOpenAIBaseURL()
 		identity["codex_engine"] = a.IsCodexEngine()
 	}
+	if manual && a.IsShadow() {
+		// Manual probes may use a shadow's credentials, but all three answers and
+		// the applied result must still belong to the same parent authorization.
+		// Lock and check the one-level relationship before following it.
+		var ownerID int64
+		err = tx.QueryRowContext(ctx, `SELECT id FROM accounts WHERE id=$1 AND deleted_at IS NULL AND parent_account_id IS NULL AND platform='openai' AND type='oauth' FOR UPDATE`, *a.ParentAccountID).Scan(&ownerID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return a, service.AttributionSnapshot{}, "authorization_changed", nil
+		}
+		if err != nil {
+			return nil, service.AttributionSnapshot{}, "", err
+		}
+		_, owner, skip, err := attributionSnapshot(ctx, tx, ownerID, c, true)
+		if err != nil || skip != "" {
+			return a, service.AttributionSnapshot{}, skip, err
+		}
+		identity["credential_owner"] = owner.Authorization
+	}
 	s := service.AttributionSnapshot{ConfigVersion: c.Version}
 	s.Policy, s.GroupID = service.ResolveAttributionPolicy(c, a.AccountGroups)
 	s.Authorization = service.AttributionDigest(identity)
-	s.Fence = service.AttributionDigest([]any{s.Authorization, a.Credentials["model_mapping"], a.ProxyID, a.AccountGroups, groupVersions, a.Status, a.Schedulable, a.ExpiresAt, a.ParentAccountID, a.IsOpenAIPassthroughEnabled()})
+	fence := []any{s.Authorization, a.Credentials["model_mapping"], a.ProxyID, a.AccountGroups, groupVersions, a.Status, a.Schedulable, a.ExpiresAt, a.ParentAccountID, a.IsOpenAIPassthroughEnabled()}
+	if manual {
+		fence = []any{s.Authorization, a.Credentials["model_mapping"], a.ProxyID, a.AccountGroups, groupVersions, a.ParentAccountID, a.IsOpenAIPassthroughEnabled()}
+	}
+	s.Fence = service.AttributionDigest(fence)
 	reason := service.AttributionSkipReason(a, time.Now(), manual)
 	if deleted != nil {
 		reason = "account_missing"
 	}
-	if !c.Enabled {
+	if !c.Enabled && !manual {
 		reason = "disabled"
 	}
 	return a, s, reason, nil
@@ -209,7 +232,17 @@ func pruneAttribution(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual bool) ([]*service.AttributionJob, error) {
+func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual bool, models ...string) ([]*service.AttributionJob, error) {
+	model := ""
+	if len(models) > 1 {
+		return nil, service.ErrAttributionInvalid
+	}
+	if len(models) == 1 {
+		model = strings.TrimSpace(models[0])
+		if !manual || len(model) > 200 || strings.ContainsAny(model, "*\r\n\t ") {
+			return nil, service.ErrAttributionInvalid
+		}
+	}
 	tx, err := r.transaction(ctx)
 	if err != nil {
 		return nil, err
@@ -219,8 +252,11 @@ func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual
 	if err != nil {
 		return nil, err
 	}
-	if !c.Enabled {
+	if !c.Enabled && !manual {
 		return nil, service.ErrAttributionDisabled
+	}
+	if _, err := service.AttributionBaseURL(c.BaseURL); err != nil {
+		return nil, err
 	}
 	if !manual {
 		rows, e := tx.QueryContext(ctx, `SELECT a.id FROM accounts a LEFT JOIN model_attribution_state s ON s.account_id=a.id WHERE a.deleted_at IS NULL AND a.platform='openai' AND a.type='oauth' AND a.parent_account_id IS NULL AND a.status='active' AND a.schedulable AND (a.expires_at IS NULL OR a.expires_at>NOW()) AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at<=NOW()) AND COALESCE(a.extra->'openai_passthrough',a.extra->'openai_oauth_passthrough','false'::jsonb) <> 'true'::jsonb AND (s.next_due_at IS NULL OR s.next_due_at<=NOW()) AND NOT EXISTS(SELECT 1 FROM account_initial_tests initial WHERE initial.account_id=a.id AND initial.processed_at IS NULL) AND NOT EXISTS(SELECT 1 FROM model_attribution_jobs j WHERE j.account_id=a.id AND j.status IN ('queued','running')) ORDER BY s.next_due_at NULLS FIRST,a.id LIMIT 500`)
@@ -248,7 +284,7 @@ func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual
 		if manual {
 			source = "manual"
 		}
-		j, e := enqueueAttribution(ctx, tx, id, c, source, "")
+		j, e := enqueueAttribution(ctx, tx, id, c, source, model)
 		if e != nil {
 			return nil, e
 		}
@@ -282,7 +318,7 @@ func enqueueAttribution(ctx context.Context, tx *sql.Tx, id int64, c service.Att
 	if model != "" {
 		s.Policy.Model = model
 	}
-	if skip == "" && service.AccountDiagnosticRateLimited(a, s.Policy.Model, time.Now()) {
+	if source != "manual" && skip == "" && service.AccountDiagnosticRateLimited(a, s.Policy.Model, time.Now()) {
 		skip = service.ErrDiagnosticRateLimited.Error()
 	}
 	if source == "scheduled" && skip == service.ErrDiagnosticRateLimited.Error() {
@@ -322,7 +358,7 @@ func (r *attributionRepository) Claim(ctx context.Context) (*service.Attribution
 	}
 	var disabledCount int64
 	if !c.Enabled {
-		disabled, e := tx.ExecContext(ctx, `UPDATE model_attribution_jobs SET status='skipped',reason='disabled',finished_at=NOW() WHERE status='queued'`)
+		disabled, e := tx.ExecContext(ctx, `UPDATE model_attribution_jobs SET status='skipped',reason='disabled',finished_at=NOW() WHERE status='queued' AND source<>'manual'`)
 		if e != nil {
 			return nil, e
 		}
@@ -338,9 +374,6 @@ func (r *attributionRepository) Claim(ctx context.Context) (*service.Attribution
 		if err = pruneAttribution(ctx, tx); err != nil {
 			return nil, err
 		}
-	}
-	if !c.Enabled {
-		return nil, tx.Commit()
 	}
 	j, err := scanAttribution(tx.QueryRowContext(ctx, `UPDATE model_attribution_jobs SET status='running',started_at=NOW(),claim_id=$1,lease_until=NOW()+interval '45 seconds' WHERE id=(SELECT id FROM model_attribution_jobs WHERE status='queued' ORDER BY id LIMIT 1) RETURNING `+attributionColumns, uuid.NewString()))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -376,7 +409,7 @@ func (r *attributionRepository) Validate(ctx context.Context, j *service.Attribu
 	if err != nil {
 		return false, err
 	}
-	if service.AccountDiagnosticRateLimited(a, j.Snapshot.Policy.Model, time.Now()) {
+	if j.Source != "manual" && service.AccountDiagnosticRateLimited(a, j.Snapshot.Policy.Model, time.Now()) {
 		return false, service.ErrDiagnosticRateLimited
 	}
 	return validAttributionSnapshot(j.Snapshot, s, skip), nil
@@ -404,7 +437,7 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 		if e != nil {
 			return e
 		}
-		if skip == "" && service.AccountDiagnosticRateLimited(a, j.Snapshot.Policy.Model, time.Now()) {
+		if j.Source != "manual" && skip == "" && service.AccountDiagnosticRateLimited(a, j.Snapshot.Policy.Model, time.Now()) {
 			skip = service.ErrDiagnosticRateLimited.Error()
 		}
 		if !validAttributionSnapshot(j.Snapshot, s, skip) {
@@ -413,6 +446,10 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 			if skip == service.ErrDiagnosticRateLimited.Error() {
 				j.Status, j.Reason = "skipped", skip
 			}
+		} else if len(s.Policy.HighModels) == 0 || len(s.Policy.LowModels) == 0 {
+			// Manual diagnostics work before automatic allowlist management is set up.
+			// Never clear an account's mappings or mark an unapplied policy as synced.
+			j.Result.Action = "unconfigured"
 		} else {
 			var version int64
 			var auth, verdict, policy string
@@ -421,7 +458,7 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 				return e
 			}
 			j.Result.Action = "unchanged"
-			// Initial tests may use a different probe from the periodic group policy.
+			// Manual and initial tests may use a different probe from the periodic policy.
 			// Keep that baseline distinct so the next periodic result synchronizes it.
 			currentPolicy := service.AttributionDigest([]any{j.Snapshot.GroupID, j.Snapshot.Policy})
 			if j.Status == "mismatch" || verdict != "passed" || version != s.ConfigVersion || auth != s.Authorization || policy != currentPolicy {

@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
+import Select from '@/components/common/Select.vue'
 import AccountAttributionCell from '../AccountAttributionCell.vue'
 import AttributionHistory from '../AttributionHistory.vue'
 import AttributionModal from '../AttributionModal.vue'
@@ -25,7 +26,7 @@ const stubs = {
   RouterLink: defineComponent({ template: '<a><slot /></a>' })
 }
 
-beforeEach(() => { vi.clearAllMocks(); api.config.mockResolvedValue(config()); api.history.mockResolvedValue(page([])); api.job.mockImplementation(async (id: number) => job(id)) })
+beforeEach(() => { vi.clearAllMocks(); api.config.mockResolvedValue(config()); api.models.mockResolvedValue(['gpt-6-astra', 'gpt-6.1-sol']); api.history.mockResolvedValue(page([])); api.job.mockImplementation(async (id: number) => job(id)) })
 afterEach(() => { vi.useRealTimers() })
 
 describe('attribution account UI', () => {
@@ -57,12 +58,52 @@ describe('attribution account UI', () => {
     expect(other.find('button').exists()).toBe(false); other.unmount()
   })
   it('queues the selected batch once and shows skipped accounts', async () => {
-    api.config.mockResolvedValue({ ...config(), enabled: true })
+    api.config.mockResolvedValue({ ...config(), enabled: true, base_url: 'http://modeltrace.invalid' })
     api.create.mockResolvedValue([{ ...job(3, 'skipped'), reason: 'shadow_account' }])
     const wrapper = mount(AttributionModal, { props: { show: true, accountIds: [42, 43] }, global: { stubs } })
-    await flushPromises(); await wrapper.get('button').trigger('click'); await flushPromises()
-    expect(api.create).toHaveBeenCalledTimes(1); expect(api.create).toHaveBeenCalledWith([42, 43])
+    await flushPromises(); await wrapper.get('[data-testid="attribution-run"]').trigger('click'); await flushPromises()
+    expect(api.create).toHaveBeenCalledTimes(1); expect(api.create).toHaveBeenCalledWith([42, 43], undefined)
     expect(wrapper.text()).toContain('attribution.reasons.shadow_account'); expect(wrapper.emitted('updated')).toHaveLength(1)
+    wrapper.unmount()
+  })
+  it('allows manual model selection while automatic detection is disabled without changing configuration', async () => {
+    const saved = { ...config(), base_url: 'http://modeltrace.invalid' }
+    api.config.mockResolvedValue(saved)
+    api.create.mockResolvedValue([job(3, 'running')])
+    const wrapper = mount(AttributionModal, { props: { show: true, accountIds: [42] }, global: { stubs } })
+    await flushPromises()
+    expect(wrapper.findComponent(Select).props('options')).toContainEqual({ value: 'gpt-6.1-sol', label: 'gpt-6.1-sol' })
+    wrapper.findComponent(Select).vm.$emit('update:modelValue', 'gpt-6.1-sol')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="attribution-run"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-testid="attribution-run"]').trigger('click'); await flushPromises()
+    expect(api.create).toHaveBeenCalledWith([42], 'gpt-6.1-sol')
+    expect(api.save).not.toHaveBeenCalled()
+    expect(saved.default.model).toBe('gpt-6-astra')
+    wrapper.unmount()
+  })
+  it('supports a typed model when loading candidates fails and rejects invalid model IDs', async () => {
+    api.config.mockResolvedValue({ ...config(), base_url: 'http://modeltrace.invalid' })
+    api.models.mockRejectedValue(new Error('offline'))
+    api.create.mockResolvedValue([job(3, 'running')])
+    const wrapper = mount(AttributionModal, { props: { show: true, accountIds: [42] }, global: { stubs } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('attribution.modelsUnavailable')
+    wrapper.findComponent(Select).vm.$emit('update:modelValue', 'gpt-*')
+    await flushPromises(); await wrapper.get('[data-testid="attribution-run"]').trigger('click')
+    expect(api.create).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="alert"]').text()).toBe('attribution.invalidManualModel')
+    wrapper.findComponent(Select).vm.$emit('update:modelValue', 'custom-model')
+    await flushPromises(); await wrapper.get('[data-testid="attribution-run"]').trigger('click'); await flushPromises()
+    expect(api.create).toHaveBeenCalledWith([42], 'custom-model')
+    wrapper.unmount()
+  })
+  it('requires the service address, not the automatic detection switch', async () => {
+    const wrapper = mount(AttributionModal, { props: { show: true, accountIds: [42] }, global: { stubs } })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="attribution-run"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('attribution.reasons.service_unconfigured')
+    expect(api.models).not.toHaveBeenCalled()
     wrapper.unmount()
   })
   it('refreshes history without changing a selected old result', async () => {

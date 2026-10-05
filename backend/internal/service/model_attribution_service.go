@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
@@ -11,6 +12,16 @@ import (
 type AttributionProbe interface {
 	Probe(context.Context, int64, string, string) (*CandyTestExecution, error)
 }
+
+// Set only for an explicit administrator attribution job, never from a public
+// request header. Automatic attribution and pelican probes keep their gates.
+type manualAttributionContextKey struct{}
+
+func isManualAttribution(ctx context.Context) bool {
+	manual, _ := ctx.Value(manualAttributionContextKey{}).(bool)
+	return manual
+}
+
 type ModelAttributionService struct {
 	repo     AttributionRepository
 	accounts AccountRepository
@@ -104,6 +115,9 @@ func (s *ModelAttributionService) notify() {
 }
 
 func (s *ModelAttributionService) execute(parent context.Context, j *AttributionJob) {
+	if j.Source == "manual" {
+		parent = context.WithValue(parent, manualAttributionContextKey{}, true)
+	}
 	started := time.Now()
 	deadline := started.Add(10 * time.Minute)
 	if j.StartedAt != nil {
@@ -287,7 +301,7 @@ func (s *ModelAttributionService) SaveConfig(ctx context.Context, c AttributionC
 func (s *ModelAttributionService) Models(ctx context.Context, base string) ([]string, error) {
 	return s.analyzer.Models(ctx, base)
 }
-func (s *ModelAttributionService) Create(ctx context.Context, ids []int64) ([]*AttributionJob, error) {
+func (s *ModelAttributionService) Create(ctx context.Context, ids []int64, model string) ([]*AttributionJob, error) {
 	if len(ids) == 0 || len(ids) > 500 {
 		return nil, ErrAttributionInvalid
 	}
@@ -296,7 +310,11 @@ func (s *ModelAttributionService) Create(ctx context.Context, ids []int64) ([]*A
 			return nil, ErrAttributionInvalid
 		}
 	}
-	jobs, err := s.repo.Enqueue(ctx, ids, true)
+	model = strings.TrimSpace(model)
+	if len(model) > 200 || strings.ContainsAny(model, "*\r\n\t ") {
+		return nil, ErrAttributionInvalid
+	}
+	jobs, err := s.repo.Enqueue(ctx, ids, true, model)
 	if err == nil {
 		s.notify()
 	}
@@ -329,12 +347,8 @@ func (s *ModelAttributionService) Summaries(ctx context.Context, ids []int64) (m
 			out[a.ID] = &AttributionSummary{}
 		}
 		reason := AttributionSkipReason(a, time.Now(), true)
-		policy, _ := ResolveAttributionPolicy(c, a.AccountGroups)
-		if reason == "" && AccountDiagnosticRateLimited(a, policy.Model, time.Now()) {
-			reason = ErrDiagnosticRateLimited.Error()
-		}
-		if !c.Enabled {
-			reason = "disabled"
+		if reason == "" && strings.TrimSpace(c.BaseURL) == "" {
+			reason = "service_unconfigured"
 		}
 		out[a.ID].SkipReason = reason
 	}

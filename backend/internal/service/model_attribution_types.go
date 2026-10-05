@@ -193,6 +193,11 @@ func AttributionSkipReason(a *Account, now time.Time, manual bool) string {
 	if !a.IsOpenAIOAuth() && !(manual && a.Platform == PlatformOpenAI && a.Type == AccountTypeAPIKey) {
 		return "unsupported_account"
 	}
+	// Explicit administrator probes do not participate in automatic scheduling.
+	// Existence and authorization are still checked at the transport boundary.
+	if manual {
+		return ""
+	}
 	if a.IsShadow() {
 		return "shadow_account"
 	}
@@ -303,7 +308,7 @@ type AttributionPage struct {
 type AttributionRepository interface {
 	Config(context.Context) (AttributionConfig, error)
 	SaveConfig(context.Context, AttributionConfig) (AttributionConfig, error)
-	Enqueue(context.Context, []int64, bool) ([]*AttributionJob, error)
+	Enqueue(context.Context, []int64, bool, ...string) ([]*AttributionJob, error)
 	EnqueueNewAccounts(context.Context) error
 	Claim(context.Context) (*AttributionJob, error)
 	Heartbeat(context.Context, *AttributionJob) (bool, error)

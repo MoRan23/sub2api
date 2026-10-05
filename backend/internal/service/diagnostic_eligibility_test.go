@@ -117,3 +117,27 @@ func TestDiagnosticStreamRateLimitStopsRetries(t *testing.T) {
 		require.False(t, retryableDiagnosticError(candyTestError(writer.failure)))
 	}
 }
+
+func TestManualAttributionBypassesLocalRateLimitsWithoutChangingAccount(t *testing.T) {
+	a := newOpenAIRejectedFieldTestAccount()
+	future, past := time.Now().Add(time.Hour), time.Now().Add(-time.Hour)
+	a.Status, a.Schedulable, a.ExpiresAt, a.RateLimitResetAt = "disabled", false, &past, &future
+	a.Extra[modelRateLimitsKey] = map[string]any{"gpt-5.5": map[string]any{"rate_limit_reset_at": future.Format(time.RFC3339)}}
+	repo := &stubOpenAIAccountRepo{accounts: []Account{*a}}
+	response := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(candyAuthorizationCompletedResponse))}
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{response}}
+	gateway := newOpenAIRejectedFieldTestService(upstream)
+	gateway.accountRepo = repo
+	runner := newCandySyntheticCatalogTransport(repo, gateway)
+	ctx := context.WithValue(context.Background(), manualAttributionContextKey{}, true)
+	result, err := runner.Probe(ctx, a.ID, "gpt-5.5", "synthetic manual probe")
+	require.NoError(t, err)
+	require.True(t, result.Completed)
+	require.Len(t, upstream.requests, 1)
+	require.False(t, repo.accounts[0].Schedulable)
+	require.Equal(t, "disabled", repo.accounts[0].Status)
+	require.Equal(t, &future, repo.accounts[0].RateLimitResetAt)
+	_, err = runner.Probe(context.Background(), a.ID, "gpt-5.5", "scheduled probe")
+	require.ErrorIs(t, err, ErrDiagnosticRateLimited)
+	require.Len(t, upstream.requests, 1, "automatic detection still skips the account")
+}

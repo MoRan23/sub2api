@@ -74,7 +74,7 @@ func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context,
 	if account.Platform != PlatformOpenAI {
 		return nil, candyTestError("unsupported_platform")
 	}
-	if AccountDiagnosticRateLimited(account, item.Model, time.Now()) {
+	if !isManualAttribution(parent) && AccountDiagnosticRateLimited(account, item.Model, time.Now()) {
 		return nil, ErrDiagnosticRateLimited
 	}
 	account = snapshotOAuthRefreshAccount(account)
@@ -125,7 +125,7 @@ func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context,
 		if business == nil {
 			return candyTestError("authorization_changed")
 		}
-		if AccountDiagnosticRateLimited(business, item.Model, time.Now()) {
+		if !isManualAttribution(check) && AccountDiagnosticRateLimited(business, item.Model, time.Now()) {
 			return ErrDiagnosticRateLimited
 		}
 		current, readErr := resolveCredentialAccount(check, r.accounts, business)

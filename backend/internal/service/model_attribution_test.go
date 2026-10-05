@@ -141,9 +141,11 @@ func TestAttributionSkipConditions(t *testing.T) {
 			a := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true}
 			tc.change(a)
 			require.Equal(t, tc.reason, AttributionSkipReason(a, now, false))
-			if a.Type != AccountTypeAPIKey {
-				require.Equal(t, tc.reason, AttributionSkipReason(a, now, true))
+			manualReason := ""
+			if tc.name == "platform" {
+				manualReason = "unsupported_account"
 			}
+			require.Equal(t, manualReason, AttributionSkipReason(a, now, true))
 		})
 	}
 	require.Equal(t, "account_missing", AttributionSkipReason(nil, now, true))
@@ -162,11 +164,11 @@ func TestAttributionAPIKeyManualEligibility(t *testing.T) {
 		{"generic", func(*Account) {}, ""},
 		{"passthrough", func(a *Account) { a.Extra = map[string]any{"openai_passthrough": true} }, ""},
 		{"engine", func(a *Account) { a.Extra = map[string]any{"openai_api_key_mode": "codex_engine"} }, ""},
-		{"rate_limited", func(a *Account) { a.RateLimitResetAt = &future }, "account_rate_limited"},
-		{"shadow", func(a *Account) { a.ParentAccountID = &parent }, "shadow_account"},
-		{"inactive", func(a *Account) { a.Status = "disabled" }, "account_inactive"},
-		{"unscheduled", func(a *Account) { a.Schedulable = false }, "scheduling_disabled"},
-		{"expired", func(a *Account) { a.ExpiresAt = &past }, "account_expired"},
+		{"rate_limited", func(a *Account) { a.RateLimitResetAt = &future }, ""},
+		{"shadow", func(a *Account) { a.ParentAccountID = &parent }, ""},
+		{"inactive", func(a *Account) { a.Status = "disabled" }, ""},
+		{"unscheduled", func(a *Account) { a.Schedulable = false }, ""},
+		{"expired", func(a *Account) { a.ExpiresAt = &past }, ""},
 		{"other_platform", func(a *Account) { a.Platform = "anthropic" }, "unsupported_account"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -209,9 +211,31 @@ func TestAttributionProbabilityValidation(t *testing.T) {
 
 type attributionTestRepo struct {
 	AttributionRepository
-	config   AttributionConfig
-	valid    bool
-	finished *AttributionJob
+	config       AttributionConfig
+	valid        bool
+	finished     *AttributionJob
+	createdModel string
+}
+
+func (r *attributionTestRepo) Enqueue(_ context.Context, ids []int64, manual bool, models ...string) ([]*AttributionJob, error) {
+	if !manual {
+		return nil, errors.New("expected manual job")
+	}
+	r.createdModel = models[0]
+	return []*AttributionJob{{AccountID: ids[0], Source: "manual", Snapshot: AttributionSnapshot{Policy: AttributionPolicy{Model: models[0]}}}}, nil
+}
+
+func TestAttributionManualModelRequest(t *testing.T) {
+	repo := &attributionTestRepo{}
+	s := &ModelAttributionService{repo: repo}
+	jobs, err := s.Create(context.Background(), []int64{42}, " gpt-6.1-sol ")
+	require.NoError(t, err)
+	require.Equal(t, "gpt-6.1-sol", jobs[0].Snapshot.Policy.Model)
+	for _, invalid := range []string{"gpt-*", "gpt 6", "gpt\n6", strings.Repeat("x", 201)} {
+		_, err := s.Create(context.Background(), []int64{42}, invalid)
+		require.ErrorIs(t, err, ErrAttributionInvalid)
+	}
+	require.Equal(t, "gpt-6.1-sol", repo.createdModel)
 }
 
 func (r *attributionTestRepo) Config(context.Context) (AttributionConfig, error) {
@@ -284,8 +308,9 @@ func TestAttributionPipelineMockModelTrace(t *testing.T) {
 			repo := &attributionTestRepo{valid: scenario != "stale", config: AttributionConfig{BaseURL: server.URL}}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			probe := attributionProbeFunc(func(_ context.Context, id int64, model, prompt string) (*CandyTestExecution, error) {
+			probe := attributionProbeFunc(func(probeCtx context.Context, id int64, model, prompt string) (*CandyTestExecution, error) {
 				probes++
+				require.True(t, isManualAttribution(probeCtx))
 				require.EqualValues(t, 11, id)
 				require.Equal(t, AttributionDefaultModel, model)
 				require.True(t, strings.HasPrefix(prompt, "challenge "))
@@ -305,7 +330,7 @@ func TestAttributionPipelineMockModelTrace(t *testing.T) {
 				return &CandyTestExecution{Completed: true, ActualModel: model, ResponseText: "synthetic-private-answer", Usage: &OpenAIUsage{InputTokens: 1, OutputTokens: 3}}, nil
 			})
 			s := &ModelAttributionService{repo: repo, probe: probe, analyzer: NewModelTraceClient()}
-			j := &AttributionJob{ID: 1, AccountID: 11, Snapshot: AttributionSnapshot{Policy: AttributionPolicy{Model: AttributionDefaultModel}}}
+			j := &AttributionJob{ID: 1, AccountID: 11, Source: "manual", Snapshot: AttributionSnapshot{Policy: AttributionPolicy{Model: AttributionDefaultModel}}}
 			if scenario == "timeout" {
 				past := time.Now().Add(-11 * time.Minute)
 				j.StartedAt = &past

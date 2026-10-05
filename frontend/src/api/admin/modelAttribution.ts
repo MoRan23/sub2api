@@ -35,7 +35,7 @@ export const attributionAPI = {
   async config(): Promise<AttributionConfig> { return (await apiClient.get<AttributionConfig>(`${root}/config`)).data },
   async save(config: AttributionConfig): Promise<AttributionConfig> { return (await apiClient.put<AttributionConfig>(`${root}/config`, config)).data },
   async models(base_url: string): Promise<string[]> { return (await apiClient.post<{ models: string[] }>(`${root}/models`, { base_url }, { timeout: 25000 })).data.models },
-  async create(account_ids: number[]): Promise<AttributionJob[]> { return (await apiClient.post<{ items: AttributionJob[] }>(`${root}/jobs`, { account_ids })).data.items },
+  async create(account_ids: number[], model?: string): Promise<AttributionJob[]> { return (await apiClient.post<{ items: AttributionJob[] }>(`${root}/jobs`, { account_ids, ...(model ? { model } : {}) })).data.items },
   async history(account_id?: number, page = 1): Promise<AttributionPage> { return (await apiClient.get<AttributionPage>(`${root}/jobs`, { params: { account_id, page, page_size: 20 } })).data },
   async job(id: number): Promise<AttributionJob> { return (await apiClient.get<AttributionJob>(`${root}/jobs/${id}`)).data }
 }
