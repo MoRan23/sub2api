@@ -405,9 +405,6 @@ describe('UseKeyModal', () => {
     expect(configToml).toBe(`model_provider = "OpenAI"
 model = "gpt-5.5"
 review_model = "gpt-5.5"
-disable_response_storage = true
-network_access = "enabled"
-windows_wsl_setup_acknowledged = true
 web_search = "live"
 
 [model_providers.OpenAI]
@@ -560,9 +557,6 @@ token_budget = false`)
     expect(configToml).toBe(`model_provider = "OpenAI"
 model = "gpt-5.5"
 review_model = "gpt-5.5"
-disable_response_storage = true
-network_access = "enabled"
-windows_wsl_setup_acknowledged = true
 web_search = "live"
 
 [model_providers.OpenAI]

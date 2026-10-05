@@ -884,11 +884,8 @@ const contextManagementFiles = computed((): FileConfig[] => {
   const codexBaseUrl = `${configuredBase}/backend-api/codex`
   const configContent = `model_provider = "openai"
 model = "gpt-5.5"
-disable_response_storage = true
 openai_base_url = "${codexBaseUrl}"
 model_catalog_json = "${catalogPath}"
-network_access = "enabled"
-windows_wsl_setup_acknowledged = true
 
 [features]
 context_management = true
@@ -1129,10 +1126,7 @@ function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const configContent = `model_provider = "OpenAI"
 model = "${model}"
 review_model = "${model}"
-${reasoningEffortLine}disable_response_storage = true
-${codexLocalCatalogToml.value}network_access = "enabled"
-windows_wsl_setup_acknowledged = true
-web_search = "live"
+${reasoningEffortLine}${codexLocalCatalogToml.value}web_search = "live"
 
 [model_providers.OpenAI]
 name = "OpenAI"
@@ -1373,9 +1367,6 @@ ${codexLocalCatalogToml.value}# Optional:
 # review_model = "${model}"
 # model_reasoning_effort = "medium"
 # model_context_window = 500000
-# disable_response_storage = true
-# network_access = "enabled"
-# windows_wsl_setup_acknowledged = true
 
 [model_providers.sub2api]
 name = "Sub2API Grok"
@@ -1449,7 +1440,6 @@ function generateRoutedCodexFiles(
 model_provider = "sub2api"
 model = "${model}"
 review_model = "${model}"
-disable_response_storage = true
 ${codexLocalCatalogToml.value}
 [model_providers.sub2api]
 name = "Sub2API ${label}"
@@ -1483,10 +1473,7 @@ function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const configContent = `model_provider = "OpenAI"
 model = "${model}"
 review_model = "${model}"
-${reasoningEffortLine}disable_response_storage = true
-${codexLocalCatalogToml.value}network_access = "enabled"
-windows_wsl_setup_acknowledged = true
-web_search = "live"
+${reasoningEffortLine}${codexLocalCatalogToml.value}web_search = "live"
 
 [model_providers.OpenAI]
 name = "OpenAI"
