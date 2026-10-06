@@ -25,6 +25,7 @@ import (
 // account health signal or a request replay on another account.
 type codexEngineResponseError struct {
 	status                          int
+	reportedStatus                  int
 	code, errorType, message, event string
 }
 
@@ -43,20 +44,28 @@ func newCodexEngineResponseError(status int, payload []byte, event string) *code
 	if !failure.IsObject() {
 		failure = gjson.GetBytes(payload, "error")
 	}
+	if !failure.IsObject() && (event == "error" || event == "response.failed") &&
+		(gjson.GetBytes(payload, "message").Exists() || gjson.GetBytes(payload, "code").Exists()) {
+		failure = gjson.ParseBytes(payload)
+	}
+	reportedStatus := 0
+	for _, value := range []gjson.Result{failure.Get("status_code"), failure.Get("status"), gjson.GetBytes(payload, "status_code"), gjson.GetBytes(payload, "status")} {
+		if reported := value.Int(); reported >= 400 && reported <= 599 {
+			reportedStatus = int(reported)
+			break
+		}
+	}
 	if status >= 200 && status < 300 {
 		status = http.StatusBadGateway
-		for _, path := range []string{"response.error.status", "error.status", "status", "status_code"} {
-			if reported := gjson.GetBytes(payload, path).Int(); reported >= 400 && reported <= 599 {
-				status = int(reported)
-				break
-			}
+		if reportedStatus != 0 {
+			status = reportedStatus
 		}
 	}
 	message := failure.Get("message").String()
 	if strings.TrimSpace(message) == "" {
 		message = firstNonEmpty(gjson.GetBytes(payload, "response.incomplete_details.reason").String(), event, http.StatusText(status))
 	}
-	return &codexEngineResponseError{status: status, code: failure.Get("code").String(), errorType: failure.Get("type").String(), message: message, event: event}
+	return &codexEngineResponseError{status: status, reportedStatus: reportedStatus, code: failure.Get("code").String(), errorType: failure.Get("type").String(), message: message, event: event}
 }
 
 func recordCodexEngineError(c *gin.Context, account *Account, resp *http.Response, failure *codexEngineResponseError) {
@@ -71,9 +80,13 @@ func recordCodexEngineError(c *gin.Context, account *Account, resp *http.Respons
 	failure.message = clean(failure.message, 2048)
 	// A small error-only envelope keeps provider codes available to ops without
 	// storing generated content or the rest of a response.failed event.
-	detail, _ := json.Marshal(map[string]any{"error": map[string]string{
+	errorFields := map[string]any{
 		"code": failure.code, "type": failure.errorType, "message": failure.message,
-	}})
+	}
+	if failure.reportedStatus != 0 {
+		errorFields["status_code"] = failure.reportedStatus
+	}
+	detail, _ := json.Marshal(map[string]any{"error": errorFields})
 	setOpsUpstreamError(c, failure.status, failure.message, string(detail))
 	kind := "http_error"
 	if failure.event != "" {
@@ -86,6 +99,23 @@ func recordCodexEngineError(c *gin.Context, account *Account, resp *http.Respons
 		Kind: kind, Reason: failure.code, Message: failure.message, Detail: string(detail),
 		UpstreamResponseBody: string(detail),
 	})
+	if failure.event == "response.failed" || failure.event == "error" {
+		// The terminal response may include output before its error fields, beyond
+		// the middleware's bounded capture. Preserve the already parsed, sanitized
+		// failure independently, without retaining output or changing the wire.
+		c.Set("codex_engine_terminal_error", []byte("event: "+failure.event+"\ndata: "+string(detail)+"\n\n"))
+	}
+}
+
+// CodexEngineTerminalError returns an error-only diagnostic envelope parsed from
+// the complete SSE frame. It is never sent to the client or used for billing.
+func CodexEngineTerminalError(c *gin.Context) []byte {
+	if c == nil {
+		return nil
+	}
+	value, _ := c.Get("codex_engine_terminal_error")
+	detail, _ := value.([]byte)
+	return detail
 }
 
 // CodexEngineResponseWritten prevents generic handlers from appending a second
@@ -449,6 +479,9 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx context.Context, c *gi
 		}
 		failed := kind == "error" || kind == "response.failed" || kind == "response.incomplete" || gjson.GetBytes(payload, "error").IsObject()
 		if failed {
+			if kind == "" {
+				kind = "error"
+			}
 			return newCodexEngineResponseError(resp.StatusCode, payload, kind)
 		}
 		if bytes.Equal(bytes.TrimSpace(payload), []byte("[DONE]")) || kind == "response.completed" || kind == "response.done" || kind == "message_stop" || (imageRequest && strings.HasSuffix(kind, ".completed")) {

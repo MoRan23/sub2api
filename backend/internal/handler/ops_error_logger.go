@@ -1111,6 +1111,11 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 
 		status := c.Writer.Status()
 		body := w.capturedBytes()
+		if detail := service.CodexEngineTerminalError(c); len(detail) > 0 {
+			// The forwarder parsed the complete event. Keep existing error
+			// classification while avoiding truncated capture and generated output.
+			body = detail
+		}
 		parsed := parseOpsErrorResponse(body)
 		if !parsed.StreamFailure {
 			if terminal, ok := w.capturedTerminalError(); ok {

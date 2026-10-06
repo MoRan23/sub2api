@@ -10,6 +10,8 @@ JSON 正文保留工具、namespace、历史、密文及未知字段，仅按现
 
 排查失败时，在运维错误记录查看上游请求 ID、错误代码和消息。HTTP 200 的 SSE 也可能以 `response.failed` 结束；这类失败会被记录为错误，客户端仍收到上游原始事件。没有实际 token 或图片用量的业务拒绝不生成普通使用记录；失败前已有用量的请求继续按现有规则结算。错误诊断只记录错误字段，不额外存储生成内容或请求历史。
 
+即使 `response.failed` 在错误字段前包含大量输出，诊断仍使用专用转发器从完整事件提取并脱敏的错误摘要，避免日志捕获上限把具体原因覆盖为 `upstream stream failed`。摘要沿用现有状态码和错误类型分类，不扩大正文留存范围；发给客户端的 SSE 保持原样。
+
 专用模式不会修正历史项 ID、删除密文或去掉 `previous_response_id`。`context_owner_unknown` 表示 Engine 无法确认密文历史归属；`invalid_id_prefix` 或 `unsupported_persisted_item_context` 表示上游拒绝了历史项或无法续接已存储上下文。应结合 Engine 日志处理具体原因；既有不兼容历史需要客户端开始新会话或提供可重放的有效历史，重复发送同一请求通常不能恢复。
 
 图片 JSON 参数原样保留。multipart 图片按上传顺序转为 `images[].image_url` data URL，保留内容及 MIME 类型；单个上传项超过现有 20 MiB 限制会明确报错，请求整体大小限制仍生效。`n`、尺寸、质量等显式参数不会自动改写为 Engine 支持的值；不支持的参数由 Engine 返回错误。转换后不上传或执行任何用户文件。

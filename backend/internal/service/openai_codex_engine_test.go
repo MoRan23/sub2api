@@ -248,7 +248,44 @@ func TestCodexEngineFailureMetadataOmitsGeneratedContentAndCredentials(t *testin
 		require.NotContains(t, events[0].Detail, private)
 		require.NotContains(t, err.Error(), private)
 	}
+	diagnostic := CodexEngineTerminalError(c)
+	require.Contains(t, string(diagnostic), `"status_code":403`)
+	require.Contains(t, string(diagnostic), `"code":"too_many_denials"`)
+	for _, private := range []string{"private generated content", "private prompt", "engine-key", "secret"} {
+		require.NotContains(t, string(diagnostic), private)
+	}
 	require.Equal(t, "data: "+wire+"\n\n", rec.Body.String(), "diagnostics must not alter the upstream response")
+}
+
+func TestCodexEngineTerminalErrorShapes(t *testing.T) {
+	for _, tc := range []struct {
+		name, payload, code, message string
+		status                       int
+	}{
+		{"flat", `{"type":"error","code":"native_error","message":"specific cause"}`, "native_error", "specific cause", 502},
+		{"flat response failed", `{"type":"response.failed","code":"native_error","message":"specific cause"}`, "native_error", "specific cause", 502},
+		{"unnamed", `{"error":{"code":"native_error","message":"specific cause"}}`, "native_error", "specific cause", 502},
+		{"status code", `{"type":"response.failed","response":{"error":{"status_code":403,"code":"permission_denied","message":"denied"}}}`, "permission_denied", "denied", 403},
+		{"status alias", `{"type":"error","status":429,"error":{"code":"rate_limit_exceeded","message":"wait"}}`, "rate_limit_exceeded", "wait", 429},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wire := "data: " + tc.payload + "\n\n"
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(wire))}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			result, err := svc.Forward(context.Background(), c, engineAccount(), []byte(`{"model":"alias","stream":true}`))
+			require.Nil(t, result)
+			var failure *codexEngineResponseError
+			require.ErrorAs(t, err, &failure)
+			require.Equal(t, tc.status, failure.status)
+			require.Equal(t, tc.code, failure.code)
+			require.Equal(t, tc.message, failure.message)
+			require.Contains(t, string(CodexEngineTerminalError(c)), tc.message)
+			require.Equal(t, wire, rec.Body.String())
+		})
+	}
 }
 
 func TestCodexEngineFailureRetainsPartialImagesAndDiagnosticEvidence(t *testing.T) {
