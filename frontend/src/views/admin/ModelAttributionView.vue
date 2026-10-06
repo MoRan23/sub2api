@@ -15,7 +15,7 @@
             <p class="text-xs" data-testid="detector-connection">{{ t(connected ? 'attribution.connected' : 'attribution.connectionRequired') }}</p>
             <p v-if="config.detector" class="break-all text-xs text-gray-500" data-testid="detector-version">{{ t('attribution.detectorVersion') }}: {{ config.detector.revision.slice(0, 12) }} · {{ config.detector.bank_built_at }}</p>
             <datalist id="attribution-models"><option v-for="id in candidates" :key="id" :value="id" /></datalist>
-            <AttributionPolicyFields v-model="config.default" />
+            <AttributionPolicyFields v-model="config.default" :candidates="candidates" />
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('attribution.mappingHelp') }}</p>
             <div class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="global-group-priority">
               <h3 class="text-sm font-medium">{{ t('attribution.priority.title') }}</h3>
@@ -37,6 +37,7 @@
             <label class="flex items-center gap-2 text-sm"><input v-model="config.new_account_tests.attribution" type="checkbox" data-testid="initial-attribution" />{{ t('attribution.newAccount.attribution') }}</label>
             <p v-if="config.new_account_tests.attribution && !config.enabled" class="text-xs text-amber-700 dark:text-amber-300">{{ t('attribution.newAccount.requiresEnabled') }}</p>
             <label class="block text-sm font-medium">{{ t('attribution.newAccount.attributionModel') }}<input v-model="config.new_account_tests.attribution_model" list="attribution-models" class="input mt-2 w-full" placeholder="gpt-6-astra" maxlength="200" data-testid="initial-attribution-model" /></label>
+            <AttributionExpectedModels v-model="config.new_account_tests.attribution_expected_models" :candidates="candidates" allow-inheritance data-testid="initial-expected-models" />
             <label class="flex items-center gap-2 text-sm"><input v-model="config.new_account_tests.pelican" type="checkbox" data-testid="initial-pelican" />{{ t('attribution.newAccount.pelican') }}</label>
             <label class="block text-sm font-medium">{{ t('attribution.newAccount.pelicanModel') }}<input v-model="config.new_account_tests.pelican_model" class="input mt-2 w-full" placeholder="gpt-6.1-sol" maxlength="200" data-testid="initial-pelican-model" /></label>
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('attribution.newAccount.modelHelp') }}</p>
@@ -47,7 +48,7 @@
             <div v-for="override in config.groups" :key="override.group_id" class="space-y-4 rounded-lg border border-gray-200 p-4 dark:border-dark-600">
               <div class="flex flex-wrap items-center justify-between gap-3"><h3 class="text-sm font-medium">{{ groups.find(g => g.id === override.group_id)?.name || `#${override.group_id}` }}</h3><button type="button" class="text-xs text-red-600 dark:text-red-400" @click="config.groups = config.groups.filter(g => g !== override)">{{ t('attribution.remove') }}</button></div>
               <label class="flex items-center gap-2 text-sm"><input v-model="override.enabled" type="checkbox" />{{ override.enabled ? t('attribution.independent') : t('attribution.inherit') }}</label>
-              <AttributionPolicyFields v-if="override.enabled" :model-value="override" @update:model-value="Object.assign(override, $event)" />
+              <AttributionPolicyFields v-if="override.enabled" :model-value="override" :candidates="candidates" @update:model-value="Object.assign(override, $event)" />
             </div>
           </section>
           <div class="flex flex-wrap items-center gap-3"><button type="submit" class="btn btn-primary" data-testid="attribution-save">{{ saving ? t('attribution.loading') : t('attribution.save') }}</button><button type="button" class="btn btn-secondary" @click="load">{{ t('attribution.reload') }}</button><span class="text-xs text-gray-500">{{ t('attribution.version') }} {{ config.version }}</span></div>
@@ -62,6 +63,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AttributionPolicyFields from '@/components/admin/account/AttributionPolicyFields.vue'
+import AttributionExpectedModels from '@/components/admin/account/AttributionExpectedModels.vue'
+import { validAttributionExpectedModels } from '@/utils/modelAttribution'
 import AttributionHistory from '@/components/admin/account/AttributionHistory.vue'
 import { attributionAPI, type AttributionConfig, type AttributionPolicy } from '@/api/admin/modelAttribution'
 import { getAllIncludingInactive } from '@/api/admin/groups'
@@ -96,7 +99,7 @@ function movePriority(index: number, delta: number) {
   ids.splice(index + delta, 0, id)
 }
 async function load() {
-  connectionGeneration++; connected.value = false
+  connectionGeneration++; connected.value = false; candidates.value = []
   error.value = ''; message.value = ''
   try { const [c, g] = await Promise.all([attributionAPI.config(), getAllIncludingInactive()]); config.value = { ...c, group_priority: c.group_priority || [] }; groups.value = g }
   catch { error.value = t('attribution.error') }
@@ -104,7 +107,7 @@ async function load() {
 function addGroup() {
   if (!config.value || !newGroup.value) return
   const policy = config.value.default
-  config.value.groups.push({ group_id: newGroup.value, enabled: false, model: policy.model, high_models: [...policy.high_models], low_models: [...policy.low_models] })
+  config.value.groups.push({ group_id: newGroup.value, enabled: false, model: policy.model, expected_models: [...(policy.expected_models || [])], high_models: [...policy.high_models], low_models: [...policy.low_models] })
   newGroup.value = 0
 }
 function validPolicy(p: AttributionPolicy) {
@@ -114,6 +117,8 @@ async function save() {
   if (!config.value) return
   error.value = ''; message.value = ''
   const initialModels = [config.value.new_account_tests.attribution_model, config.value.new_account_tests.pelican_model].map(m => m.trim())
+  const expectedLists = [config.value.default.expected_models, ...config.value.groups.map(g => g.expected_models), config.value.new_account_tests.attribution_expected_models]
+  if (expectedLists.some(models => !validAttributionExpectedModels(models))) { error.value = t('attribution.invalidExpectedModels'); return }
   if (initialModels.some(m => !m || m.length > 200 || /[\s*]/.test(m))) { error.value = t('attribution.newAccount.invalid'); return }
   if (config.value.enabled && (!/^https?:\/\//.test(config.value.base_url) || !validPolicy(config.value.default) || config.value.groups.some(g => g.enabled && !validPolicy(g)))) { error.value = t('attribution.invalid'); return }
   if (config.value.enabled && !config.value.detector) { error.value = t('attribution.connectionRequired'); return }

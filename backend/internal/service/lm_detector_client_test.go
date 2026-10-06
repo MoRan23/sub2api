@@ -103,7 +103,7 @@ func TestAttributionDetectorProtocolErrors(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			require.Error(t, ValidateAttributionAnalysis(a, AttributionDefaultModel, []string{AttributionDefaultModel, "gpt-6-luna"}))
+			require.Error(t, ValidateAttributionAnalysis(a, []string{AttributionDefaultModel}, []string{AttributionDefaultModel, "gpt-6-luna"}))
 		})
 	}
 }

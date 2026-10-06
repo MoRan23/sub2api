@@ -154,7 +154,7 @@ func validAttributionProbability(p *float64) bool {
 func finiteAttributionScore(p *float64) bool {
 	return p == nil || !math.IsNaN(*p) && !math.IsInf(*p, 0)
 }
-func ValidateAttributionAnalysis(a *AttributionAnalysis, expected string, models []string) error {
+func ValidateAttributionAnalysis(a *AttributionAnalysis, expected []string, models []string) error {
 	if a == nil || a.UsedOutputs != 3 || len(a.Diagnostics) != 3 {
 		return errors.New("insufficient_valid_outputs")
 	}
@@ -175,8 +175,13 @@ func ValidateAttributionAnalysis(a *AttributionAnalysis, expected string, models
 	for _, m := range models {
 		known[m] = true
 	}
-	if !known[expected] {
-		return errors.New("model_not_enrolled")
+	if len(expected) == 0 {
+		return errors.New("expected_model_not_enrolled")
+	}
+	for _, model := range expected {
+		if !known[model] {
+			return errors.New("expected_model_not_enrolled")
+		}
 	}
 	if len(a.Results) == 0 || len(a.Results) > 1000 {
 		return errors.New("detector_probabilities_invalid")
@@ -198,8 +203,10 @@ func ValidateAttributionAnalysis(a *AttributionAnalysis, expected string, models
 			tied = true
 		}
 	}
-	if !seen[expected] {
-		return errors.New("model_not_enrolled")
+	for _, model := range expected {
+		if !seen[model] {
+			return errors.New("expected_model_not_enrolled")
+		}
 	}
 	if tied {
 		return errors.New("ambiguous_prediction")

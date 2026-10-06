@@ -4,6 +4,7 @@
     <p v-if="job.reason" class="text-sm text-amber-700 dark:text-amber-300">{{ reason(job.reason) }}</p>
     <dl class="grid grid-cols-2 gap-3 text-sm">
       <div><dt class="text-gray-500">{{ t('attribution.model') }}</dt><dd class="break-all">{{ job.snapshot.policy.model }}</dd></div>
+      <div><dt class="text-gray-500">{{ t('attribution.expectedModels') }}</dt><dd class="break-all" data-testid="result-expected-models">{{ (job.snapshot.policy.expected_models?.length ? job.snapshot.policy.expected_models : [job.snapshot.policy.model]).join(', ') }}</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.version') }} / {{ t('attribution.group') }}</dt><dd>{{ job.snapshot.config_version }} / {{ job.snapshot.group_id || t('attribution.allGroups') }}</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.time') }}</dt><dd>{{ formatDateTime(job.finished_at || job.started_at || job.created_at) }}</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.duration') }}</dt><dd>{{ (job.result.duration_ms / 1000).toFixed(1) }} s</dd></div>

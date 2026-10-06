@@ -24,9 +24,10 @@ var (
 )
 
 type AttributionPolicy struct {
-	Model      string   `json:"model"`
-	HighModels []string `json:"high_models"`
-	LowModels  []string `json:"low_models"`
+	Model          string   `json:"model"`
+	ExpectedModels []string `json:"expected_models,omitempty"`
+	HighModels     []string `json:"high_models"`
+	LowModels      []string `json:"low_models"`
 }
 type AttributionGroupPolicy struct {
 	GroupID int64 `json:"group_id"`
@@ -38,7 +39,70 @@ type NewAccountTestConfig struct {
 	Pelican          bool   `json:"pelican"`
 	AttributionModel string `json:"attribution_model"`
 	PelicanModel     string `json:"pelican_model"`
+	// nil inherits the account policy; an explicit empty list follows the initial probe.
+	AttributionExpectedModels *[]string `json:"attribution_expected_models"`
 }
+
+type AttributionProbeOptions struct {
+	Model          string
+	ExpectedModels *[]string
+}
+
+func NormalizeAttributionExpectedModels(models []string) ([]string, error) {
+	if len(models) > 500 {
+		return nil, ErrAttributionInvalid
+	}
+	out := []string{}
+	seen := map[string]bool{}
+	for _, id := range models {
+		id = strings.TrimSpace(id)
+		if id == "" || len(id) > 200 || strings.ContainsAny(id, "*\r\n\t ") {
+			return nil, fmt.Errorf("%w: 期望模型须为具体模型 ID", ErrAttributionInvalid)
+		}
+		if !seen[id] {
+			out = append(out, id)
+			seen[id] = true
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func NormalizeAttributionProbeOptions(o AttributionProbeOptions) (AttributionProbeOptions, error) {
+	o.Model = strings.TrimSpace(o.Model)
+	if len(o.Model) > 200 || strings.ContainsAny(o.Model, "*\r\n\t ") {
+		return o, ErrAttributionInvalid
+	}
+	if o.ExpectedModels != nil {
+		models, err := NormalizeAttributionExpectedModels(*o.ExpectedModels)
+		if err != nil {
+			return o, err
+		}
+		o.ExpectedModels = &models
+	}
+	return o, nil
+}
+
+// Use the job's own probe for legacy snapshots and explicit follow-probe policies.
+func ExpectedAttributionModels(p AttributionPolicy) []string {
+	if len(p.ExpectedModels) == 0 {
+		return []string{p.Model}
+	}
+	models := append([]string(nil), p.ExpectedModels...)
+	sort.Strings(models)
+	return models
+}
+
+func AttributionPolicyDigest(s AttributionSnapshot) string {
+	p := s.Policy
+	p.ExpectedModels = ExpectedAttributionModels(p)
+	// Preserve the old baseline when the effective condition is unchanged.
+	if len(p.ExpectedModels) == 1 && p.ExpectedModels[0] == p.Model {
+		p.ExpectedModels = nil
+	}
+	return AttributionDigest([]any{s.GroupID, p, s.Detector})
+}
+
 type AttributionConfig struct {
 	Version         int64                    `json:"version"`
 	Enabled         bool                     `json:"enabled"`
@@ -80,6 +144,13 @@ func NormalizeAttributionConfig(c AttributionConfig) (AttributionConfig, error) 
 		prioritySeen[id] = true
 	}
 	var err error
+	if c.NewAccountTests.AttributionExpectedModels != nil {
+		models, e := NormalizeAttributionExpectedModels(*c.NewAccountTests.AttributionExpectedModels)
+		if e != nil {
+			return c, e
+		}
+		c.NewAccountTests.AttributionExpectedModels = &models
+	}
 	for _, field := range []struct {
 		model    *string
 		fallback string
@@ -109,6 +180,10 @@ func NormalizeAttributionConfig(c AttributionConfig) (AttributionConfig, error) 
 		valid := func(s string) bool { return len(s) > 0 && len(s) <= 200 && !strings.ContainsAny(s, "*\r\n\t ") }
 		if !valid(p.Model) {
 			return fmt.Errorf("%w: 探针模型须为具体模型 ID", ErrAttributionInvalid)
+		}
+		p.ExpectedModels, err = NormalizeAttributionExpectedModels(p.ExpectedModels)
+		if err != nil {
+			return err
 		}
 		for _, list := range []*[]string{&p.HighModels, &p.LowModels} {
 			out := []string{}
@@ -361,7 +436,7 @@ type AttributionPage struct {
 type AttributionRepository interface {
 	Config(context.Context) (AttributionConfig, error)
 	SaveConfig(context.Context, AttributionConfig) (AttributionConfig, error)
-	Enqueue(context.Context, []int64, bool, ...string) ([]*AttributionJob, error)
+	Enqueue(context.Context, []int64, bool, ...AttributionProbeOptions) ([]*AttributionJob, error)
 	EnqueueNewAccounts(context.Context) error
 	Claim(context.Context) (*AttributionJob, error)
 	Heartbeat(context.Context, *AttributionJob) (bool, error)

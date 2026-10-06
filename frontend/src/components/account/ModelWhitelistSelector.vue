@@ -95,6 +95,7 @@
     <!-- Quick Actions -->
     <div class="mb-4 flex flex-wrap gap-2">
       <button
+        v-if="options === undefined"
         type="button"
         @click="fillRelated"
         class="rounded-lg border border-blue-200 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/30"
@@ -159,6 +160,7 @@ const { t } = useI18n()
 
 const props = defineProps<{
   modelValue: string[]
+  options?: { value: string; label: string }[]
   modelMappings?: { from: string; to: string }[]
   platform?: string
   platforms?: string[]
@@ -225,6 +227,7 @@ const canSyncUpstream = computed(() => {
 })
 
 const availableOptions = computed(() => {
+  if (props.options !== undefined) return props.options
   if (normalizedPlatforms.value.length === 0) {
     return allModels
   }

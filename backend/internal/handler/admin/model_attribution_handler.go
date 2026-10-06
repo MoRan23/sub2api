@@ -89,14 +89,15 @@ func (h *AccountHandler) CreateAttributionJobs(c *gin.Context) {
 		return
 	}
 	var v struct {
-		AccountIDs []int64 `json:"account_ids"`
-		Model      string  `json:"model"`
+		AccountIDs     []int64   `json:"account_ids"`
+		Model          string    `json:"model"`
+		ExpectedModels *[]string `json:"expected_models"`
 	}
 	if c.ShouldBindJSON(&v) != nil {
 		response.BadRequest(c, "Invalid account IDs")
 		return
 	}
-	jobs, err := h.attributionService.Create(c.Request.Context(), v.AccountIDs, v.Model)
+	jobs, err := h.attributionService.Create(c.Request.Context(), v.AccountIDs, v.Model, v.ExpectedModels)
 	if err != nil {
 		attributionError(c, err)
 		return

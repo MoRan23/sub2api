@@ -6,6 +6,9 @@ import AccountAttributionCell from '../AccountAttributionCell.vue'
 import AttributionHistory from '../AttributionHistory.vue'
 import AttributionModal from '../AttributionModal.vue'
 import AttributionResult from '../AttributionResult.vue'
+import AttributionExpectedModels from '../AttributionExpectedModels.vue'
+import AttributionPolicyFields from '../AttributionPolicyFields.vue'
+import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import ModelAttributionView from '@/views/admin/ModelAttributionView.vue'
 import type { AttributionConfig, AttributionJob, AttributionPage } from '@/api/admin/modelAttribution'
 import type { AccountListItem } from '@/types'
@@ -32,6 +35,42 @@ beforeEach(() => { vi.clearAllMocks(); api.config.mockResolvedValue(config()); a
 afterEach(() => { vi.useRealTimers() })
 
 describe('attribution account UI', () => {
+  it('shows frozen expectations and falls back to the historical probe for old results', async () => {
+    const current = job()
+    current.snapshot.policy.expected_models = ['gpt-6-astra', 'gpt-6.1-sol']
+    const wrapper = mount(AttributionResult, { props: { job: current } })
+    expect(wrapper.get('[data-testid="result-expected-models"]').text()).toBe('gpt-6-astra, gpt-6.1-sol')
+    const legacy = job(); legacy.snapshot.policy.model = 'historical-probe'
+    await wrapper.setProps({ job: legacy })
+    expect(wrapper.get('[data-testid="result-expected-models"]').text()).toBe('historical-probe')
+    wrapper.unmount()
+  })
+  it('distinguishes inherited, explicit empty and custom batch expectations', async () => {
+    api.config.mockResolvedValue({ ...config(), base_url: 'http://detector.invalid' })
+    api.create.mockResolvedValue([job(3, 'running')])
+    const wrapper = mount(AttributionModal, { props: { show: true, accountIds: [42, 43] }, global: { stubs } })
+    await flushPromises()
+    const expected = wrapper.findComponent(AttributionExpectedModels)
+    expect(expected.props('candidates')).toEqual(['gpt-6-astra', 'gpt-6.1-sol'])
+    expect(expected.get('select').element.value).toBe('inherit')
+    await expected.get('select').setValue('custom')
+    expect(expected.get('[data-testid="expected-models-follow-probe"]').text()).toBe('attribution.expectedFollowProbe')
+    await wrapper.get('[data-testid="attribution-run"]').trigger('click'); await flushPromises()
+    expect(api.create).toHaveBeenLastCalledWith([42, 43], undefined, [])
+    expected.findComponent(ModelWhitelistSelector).vm.$emit('update:modelValue', ['gpt-6-astra', 'gpt-6.1-sol'])
+    await flushPromises(); await wrapper.get('[data-testid="attribution-run"]').trigger('click'); await flushPromises()
+    expect(api.create).toHaveBeenLastCalledWith([42, 43], undefined, ['gpt-6-astra', 'gpt-6.1-sol'])
+    expected.findComponent(ModelWhitelistSelector).vm.$emit('update:modelValue', ['gpt-*'])
+    await flushPromises(); api.create.mockClear()
+    await wrapper.get('[data-testid="attribution-run"]').trigger('click')
+    expect(api.create).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="alert"]').text()).toBe('attribution.invalidExpectedModels')
+    await expected.get('select').setValue('inherit')
+    await wrapper.get('[data-testid="attribution-run"]').trigger('click'); await flushPromises()
+    expect(api.create).toHaveBeenLastCalledWith([42, 43], undefined, undefined)
+    expect(api.save).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
   it('shows null confidence as unavailable and distinguishes legacy history', async () => {
     const current = job()
     current.snapshot.detector = detector
@@ -97,7 +136,7 @@ describe('attribution account UI', () => {
     api.create.mockResolvedValue([{ ...job(3, 'skipped'), reason: 'shadow_account' }])
     const wrapper = mount(AttributionModal, { props: { show: true, accountIds: [42, 43] }, global: { stubs } })
     await flushPromises(); await wrapper.get('[data-testid="attribution-run"]').trigger('click'); await flushPromises()
-    expect(api.create).toHaveBeenCalledTimes(1); expect(api.create).toHaveBeenCalledWith([42, 43], undefined)
+    expect(api.create).toHaveBeenCalledTimes(1); expect(api.create).toHaveBeenCalledWith([42, 43], undefined, undefined)
     expect(wrapper.text()).toContain('attribution.reasons.shadow_account'); expect(wrapper.emitted('updated')).toHaveLength(1)
     wrapper.unmount()
   })
@@ -112,7 +151,7 @@ describe('attribution account UI', () => {
     await flushPromises()
     expect(wrapper.get('[data-testid="attribution-run"]').attributes('disabled')).toBeUndefined()
     await wrapper.get('[data-testid="attribution-run"]').trigger('click'); await flushPromises()
-    expect(api.create).toHaveBeenCalledWith([42], 'gpt-6.1-sol')
+    expect(api.create).toHaveBeenCalledWith([42], 'gpt-6.1-sol', undefined)
     expect(api.save).not.toHaveBeenCalled()
     expect(saved.default.model).toBe('gpt-6-astra')
     wrapper.unmount()
@@ -130,7 +169,7 @@ describe('attribution account UI', () => {
     expect(wrapper.get('[role="alert"]').text()).toBe('attribution.invalidManualModel')
     wrapper.findComponent(Select).vm.$emit('update:modelValue', 'custom-model')
     await flushPromises(); await wrapper.get('[data-testid="attribution-run"]').trigger('click'); await flushPromises()
-    expect(api.create).toHaveBeenCalledWith([42], 'custom-model')
+    expect(api.create).toHaveBeenCalledWith([42], 'custom-model', undefined)
     wrapper.unmount()
   })
   it('requires the service address, not the automatic detection switch', async () => {
@@ -159,6 +198,32 @@ describe('attribution account UI', () => {
 })
 
 describe('attribution configuration', () => {
+  it('saves global, independent group and initial expected models separately', async () => {
+    const c = config()
+    c.base_url = 'http://detector.invalid'
+    c.groups = [{ group_id: 10, enabled: true, ...structuredClone(policy) }]
+    api.config.mockResolvedValue(c)
+    api.connection.mockResolvedValue({ models: ['gpt-6-astra', 'gpt-6.1-sol'], detector })
+    api.save.mockImplementation(async (value: AttributionConfig) => ({ ...value, version: 2 }))
+    const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'attribution.connect')!.trigger('click'); await flushPromises()
+    const policies = wrapper.findAllComponents(AttributionPolicyFields)
+    expect(policies[0].props('candidates')).toEqual(['gpt-6-astra', 'gpt-6.1-sol'])
+    policies[0].findComponent(AttributionExpectedModels).vm.$emit('update:modelValue', ['gpt-6-astra', 'gpt-6.1-sol'])
+    policies[1].findComponent(AttributionExpectedModels).vm.$emit('update:modelValue', ['gpt-6.1-sol'])
+    const initial = wrapper.get('[data-testid="initial-expected-models"]')
+    await initial.get('select').setValue('custom')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({
+      default: expect.objectContaining({ expected_models: ['gpt-6-astra', 'gpt-6.1-sol'] }),
+      groups: [expect.objectContaining({ expected_models: ['gpt-6.1-sol'] })],
+      new_account_tests: expect.objectContaining({ attribution_expected_models: [] })
+    }))
+    await initial.get('select').setValue('inherit')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ new_account_tests: expect.objectContaining({ attribution_expected_models: null }) }))
+    wrapper.unmount()
+  })
   it('saves group priority globally without changing independent policies', async () => {
     api.save.mockImplementation(async (c: AttributionConfig) => ({ ...c, version: 2 }))
     const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
@@ -207,7 +272,7 @@ describe('attribution configuration', () => {
   it('uses the existing whitelist selector, supports group inheritance and versioned saves', async () => {
     api.save.mockImplementation(async (c: AttributionConfig) => ({ ...c, version: c.version + 1 }))
     const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
-    expect(wrapper.findAll('[data-testid="whitelist"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-testid="whitelist"]')).toHaveLength(3)
     await wrapper.get('select[aria-label="attribution.group"]').setValue(10)
     await wrapper.findAll('button').find(b => b.text() === 'attribution.addGroup')!.trigger('click')
     expect(wrapper.text()).toContain('Pro group'); expect(wrapper.text()).toContain('attribution.inherit')

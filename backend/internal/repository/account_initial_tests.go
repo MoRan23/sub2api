@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -30,17 +31,25 @@ func (r *attributionRepository) EnqueueNewAccounts(ctx context.Context) error {
 		id                             int64
 		attribution, pelican           bool
 		attributionModel, pelicanModel string
+		expectedModels                 *[]string
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT account_id,attribution,pelican,model,pelican_model FROM account_initial_tests WHERE processed_at IS NULL ORDER BY account_id LIMIT 50`)
+	rows, err := tx.QueryContext(ctx, `SELECT account_id,attribution,pelican,model,pelican_model,attribution_expected_models FROM account_initial_tests WHERE processed_at IS NULL ORDER BY account_id LIMIT 50`)
 	if err != nil {
 		return err
 	}
 	var accounts []pending
 	for rows.Next() {
 		var p pending
-		if err = rows.Scan(&p.id, &p.attribution, &p.pelican, &p.attributionModel, &p.pelicanModel); err != nil {
+		var expected []byte
+		if err = rows.Scan(&p.id, &p.attribution, &p.pelican, &p.attributionModel, &p.pelicanModel, &expected); err != nil {
 			_ = rows.Close()
 			return err
+		}
+		if len(expected) > 0 {
+			if err = json.Unmarshal(expected, &p.expectedModels); err != nil {
+				_ = rows.Close()
+				return err
+			}
 		}
 		accounts = append(accounts, p)
 	}
@@ -63,7 +72,7 @@ func (r *attributionRepository) EnqueueNewAccounts(ctx context.Context) error {
 				return err
 			}
 			if p.attribution && c.Enabled && c.NewAccountTests.Attribution && !hasAttribution && !service.AccountDiagnosticRateLimited(a, p.attributionModel, time.Now()) {
-				if _, err = enqueueAttribution(ctx, tx, p.id, c, "initial", p.attributionModel); err != nil {
+				if _, err = enqueueAttribution(ctx, tx, p.id, c, "initial", p.attributionModel, p.expectedModels); err != nil {
 					return err
 				}
 			}

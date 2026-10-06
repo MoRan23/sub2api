@@ -185,7 +185,7 @@ func TestAttributionAPIKeyManualEligibility(t *testing.T) {
 }
 func TestAttributionProbabilityValidation(t *testing.T) {
 	models := []string{AttributionDefaultModel, "gpt-6-luna"}
-	require.NoError(t, ValidateAttributionAnalysis(validAttributionAnalysis(), AttributionDefaultModel, models))
+	require.NoError(t, ValidateAttributionAnalysis(validAttributionAnalysis(), []string{AttributionDefaultModel}, models))
 	for _, tc := range []struct {
 		name   string
 		change func(*AttributionAnalysis)
@@ -208,7 +208,7 @@ func TestAttributionProbabilityValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			a := validAttributionAnalysis()
 			tc.change(a)
-			require.Error(t, ValidateAttributionAnalysis(a, AttributionDefaultModel, models))
+			require.Error(t, ValidateAttributionAnalysis(a, []string{AttributionDefaultModel}, models))
 		})
 	}
 }
@@ -221,12 +221,16 @@ type attributionTestRepo struct {
 	createdModel string
 }
 
-func (r *attributionTestRepo) Enqueue(_ context.Context, ids []int64, manual bool, models ...string) ([]*AttributionJob, error) {
+func (r *attributionTestRepo) Enqueue(_ context.Context, ids []int64, manual bool, options ...AttributionProbeOptions) ([]*AttributionJob, error) {
 	if !manual {
 		return nil, errors.New("expected manual job")
 	}
-	r.createdModel = models[0]
-	return []*AttributionJob{{AccountID: ids[0], Source: "manual", Snapshot: AttributionSnapshot{Policy: AttributionPolicy{Model: models[0]}}}}, nil
+	r.createdModel = options[0].Model
+	p := AttributionPolicy{Model: options[0].Model}
+	if options[0].ExpectedModels != nil {
+		p.ExpectedModels = *options[0].ExpectedModels
+	}
+	return []*AttributionJob{{AccountID: ids[0], Source: "manual", Snapshot: AttributionSnapshot{Policy: p}}}, nil
 }
 
 func TestAttributionManualModelRequest(t *testing.T) {
@@ -261,9 +265,21 @@ func (f attributionProbeFunc) Probe(c context.Context, id int64, m, p string) (*
 }
 
 func TestAttributionPipelineMockLMDetector(t *testing.T) {
-	for _, scenario := range []string{"pass", "mismatch", "unavailable", "not enrolled", "bad challenges", "invalid answer", "probe failure", "rate limited", "429", "interrupted", "stale", "timeout", "version changed", "analyzer changed", "uncalibrated"} {
+	for _, scenario := range []string{"pass", "mismatch", "unavailable", "not enrolled", "bad challenges", "invalid answer", "probe failure", "rate limited", "429", "interrupted", "stale", "timeout", "version changed", "analyzer changed", "uncalibrated", "expected multi", "expected alternate", "expected mismatch", "expected missing", "alias probe"} {
 		t.Run(scenario, func(t *testing.T) {
 			probes, analyzes := 0, 0
+			policy := AttributionPolicy{Model: AttributionDefaultModel}
+			switch scenario {
+			case "expected multi", "expected alternate":
+				policy.ExpectedModels = []string{AttributionDefaultModel, "gpt-6-luna"}
+			case "expected mismatch":
+				policy.ExpectedModels = []string{"gpt-6-luna"}
+			case "expected missing":
+				policy.ExpectedModels = []string{AttributionDefaultModel, "unknown"}
+			case "alias probe":
+				policy.Model = "unlisted-probe-alias"
+				policy.ExpectedModels = []string{AttributionDefaultModel}
+			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				require.Empty(t, r.Header.Get("Authorization"))
 				w.Header().Set("Content-Type", "application/json")
@@ -314,7 +330,7 @@ func TestAttributionPipelineMockLMDetector(t *testing.T) {
 							a.Results[i].Probability = nil
 						}
 					}
-					if scenario == "mismatch" {
+					if scenario == "mismatch" || scenario == "expected alternate" {
 						a.Prediction = "gpt-6-luna"
 						a.Results[0].Probability = attrProbability(0.2)
 						a.Results[1].Probability = attrProbability(0.8)
@@ -337,7 +353,7 @@ func TestAttributionPipelineMockLMDetector(t *testing.T) {
 				probes++
 				require.True(t, isManualAttribution(probeCtx))
 				require.EqualValues(t, 11, id)
-				require.Equal(t, AttributionDefaultModel, model)
+				require.Equal(t, policy.Model, model)
 				require.True(t, strings.HasPrefix(prompt, "challenge "))
 				if scenario == "probe failure" {
 					return nil, errors.New("secret-oauth-token")
@@ -355,7 +371,7 @@ func TestAttributionPipelineMockLMDetector(t *testing.T) {
 				return &CandyTestExecution{Completed: true, ActualModel: model, ResponseText: "synthetic-private-answer", Usage: &OpenAIUsage{InputTokens: 1, OutputTokens: 3}}, nil
 			})
 			s := &ModelAttributionService{repo: repo, probe: probe, analyzer: NewLMDetectorClient()}
-			j := &AttributionJob{ID: 1, AccountID: 11, Source: "manual", Snapshot: AttributionSnapshot{Policy: AttributionPolicy{Model: AttributionDefaultModel}, Detector: testAttributionDetector()}}
+			j := &AttributionJob{ID: 1, AccountID: 11, Source: "manual", Snapshot: AttributionSnapshot{Policy: policy, Detector: testAttributionDetector()}}
 			if scenario == "timeout" {
 				past := time.Now().Add(-11 * time.Minute)
 				j.StartedAt = &past
@@ -364,9 +380,9 @@ func TestAttributionPipelineMockLMDetector(t *testing.T) {
 			require.NotNil(t, repo.finished)
 			want := "abnormal"
 			switch scenario {
-			case "pass":
+			case "pass", "expected multi", "expected alternate", "alias probe":
 				want = "passed"
-			case "mismatch":
+			case "mismatch", "expected mismatch":
 				want = "mismatch"
 			case "probe failure", "interrupted", "timeout":
 				want = "failed"
@@ -382,7 +398,7 @@ func TestAttributionPipelineMockLMDetector(t *testing.T) {
 			require.NotContains(t, string(b), "secret-oauth-token")
 			require.NotContains(t, string(b), "synthetic-private-answer")
 			switch scenario {
-			case "pass", "mismatch", "invalid answer", "analyzer changed", "uncalibrated":
+			case "pass", "mismatch", "invalid answer", "analyzer changed", "uncalibrated", "expected multi", "expected alternate", "expected mismatch", "alias probe":
 				require.Equal(t, 3, probes)
 				require.Equal(t, 1, analyzes)
 			case "probe failure", "interrupted", "rate limited", "429":

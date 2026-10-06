@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
-	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -232,15 +231,16 @@ func pruneAttribution(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual bool, models ...string) ([]*service.AttributionJob, error) {
-	model := ""
-	if len(models) > 1 {
+func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual bool, overrides ...service.AttributionProbeOptions) ([]*service.AttributionJob, error) {
+	options := service.AttributionProbeOptions{}
+	if len(overrides) > 1 || len(overrides) > 0 && !manual {
 		return nil, service.ErrAttributionInvalid
 	}
-	if len(models) == 1 {
-		model = strings.TrimSpace(models[0])
-		if !manual || len(model) > 200 || strings.ContainsAny(model, "*\r\n\t ") {
-			return nil, service.ErrAttributionInvalid
+	if len(overrides) == 1 {
+		var err error
+		options, err = service.NormalizeAttributionProbeOptions(overrides[0])
+		if err != nil {
+			return nil, err
 		}
 	}
 	tx, err := r.transaction(ctx)
@@ -284,7 +284,7 @@ func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual
 		if manual {
 			source = "manual"
 		}
-		j, e := enqueueAttribution(ctx, tx, id, c, source, model)
+		j, e := enqueueAttribution(ctx, tx, id, c, source, options.Model, options.ExpectedModels)
 		if e != nil {
 			return nil, e
 		}
@@ -300,7 +300,7 @@ func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual
 	return out, tx.Commit()
 }
 
-func enqueueAttribution(ctx context.Context, tx *sql.Tx, id int64, c service.AttributionConfig, source, model string) (*service.AttributionJob, error) {
+func enqueueAttribution(ctx context.Context, tx *sql.Tx, id int64, c service.AttributionConfig, source, model string, expectedModels ...*[]string) (*service.AttributionJob, error) {
 	existing, err := scanAttribution(tx.QueryRowContext(ctx, `SELECT `+attributionColumns+` FROM model_attribution_jobs WHERE account_id=$1 AND status IN ('queued','running')`, id))
 	if err == nil {
 		return existing, nil
@@ -318,6 +318,11 @@ func enqueueAttribution(ctx context.Context, tx *sql.Tx, id int64, c service.Att
 	if model != "" {
 		s.Policy.Model = model
 	}
+	if len(expectedModels) > 0 && expectedModels[0] != nil {
+		s.Policy.ExpectedModels = *expectedModels[0]
+	}
+	// Resolve after all overrides so an empty list follows this round's probe.
+	s.Policy.ExpectedModels = service.ExpectedAttributionModels(s.Policy)
 	if source != "manual" && skip == "" && service.AccountDiagnosticRateLimited(a, s.Policy.Model, time.Now()) {
 		skip = service.ErrDiagnosticRateLimited.Error()
 	}
@@ -463,7 +468,7 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 			j.Result.Action = "unchanged"
 			// Manual and initial tests may use a different probe from the periodic policy.
 			// Keep that baseline distinct so the next periodic result synchronizes it.
-			currentPolicy := service.AttributionDigest([]any{j.Snapshot.GroupID, j.Snapshot.Policy, j.Snapshot.Detector})
+			currentPolicy := service.AttributionPolicyDigest(j.Snapshot)
 			if j.Status == "passed" {
 				passStreak = 1
 				if version == s.ConfigVersion && auth == s.Authorization && policy == currentPolicy {

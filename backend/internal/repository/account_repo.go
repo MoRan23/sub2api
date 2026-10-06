@@ -210,11 +210,12 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if account.IsOpenAIOAuth() && !account.IsShadow() {
 		// Persist with the account: rollback cannot leave a paid test behind, and
 		// imports and alternate creation paths get the same once-only behavior.
-		if _, err := client.ExecContext(ctx, `INSERT INTO account_initial_tests(account_id,attribution,pelican,model,pelican_model)
+		if _, err := client.ExecContext(ctx, `INSERT INTO account_initial_tests(account_id,attribution,pelican,model,pelican_model,attribution_expected_models)
 			SELECT $1, COALESCE((config->>'enabled')::boolean,false) AND COALESCE((config->'new_account_tests'->>'attribution')::boolean,true),
 			COALESCE((config->'new_account_tests'->>'pelican')::boolean,true),
 			COALESCE(NULLIF(config->'new_account_tests'->>'attribution_model',''),$2),
-			COALESCE(NULLIF(config->'new_account_tests'->>'pelican_model',''),$3)
+			COALESCE(NULLIF(config->'new_account_tests'->>'pelican_model',''),$3),
+			NULLIF(config->'new_account_tests'->'attribution_expected_models','null'::jsonb)
 			FROM model_attribution_config WHERE id=1 ON CONFLICT DO NOTHING`, account.ID, service.AttributionDefaultModel, service.InitialPelicanDefaultModel); err != nil {
 			return err
 		}

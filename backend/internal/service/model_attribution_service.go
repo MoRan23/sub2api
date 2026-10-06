@@ -204,15 +204,16 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 		j.Reason = safeAttributionAnalyzerError(err)
 		return
 	}
-	known := false
-	for _, m := range models {
-		if m == j.Snapshot.Policy.Model {
-			known = true
-		}
+	expected := ExpectedAttributionModels(j.Snapshot.Policy)
+	known := make(map[string]bool, len(models))
+	for _, model := range models {
+		known[model] = true
 	}
-	if !known {
-		j.Reason = "model_not_enrolled"
-		return
+	for _, model := range expected {
+		if !known[model] {
+			j.Reason = "expected_model_not_enrolled"
+			return
+		}
 	}
 	challenges, err := s.analyzer.Challenges(ctx, c.BaseURL, detector)
 	if err != nil {
@@ -281,14 +282,17 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 	// Retain bounded numerical evidence for abnormal results such as tied winners
 	// or a rejected answer. Unknown model labels and invalid numbers are omitted.
 	j.Result.Analysis = attributionSafeAnalysis(analysis, models)
-	if err = ValidateAttributionAnalysis(analysis, j.Snapshot.Policy.Model, models); err != nil {
+	if err = ValidateAttributionAnalysis(analysis, expected, models); err != nil {
 		j.Reason = err.Error()
 		return
 	}
 	j.Result.Analysis = analysis
 	j.Status = "mismatch"
-	if analysis.Prediction == j.Snapshot.Policy.Model {
-		j.Status = "passed"
+	for _, model := range expected {
+		if analysis.Prediction == model {
+			j.Status = "passed"
+			break
+		}
 	}
 }
 func safeAttributionAnalyzerError(err error) string {
@@ -353,7 +357,7 @@ func (s *ModelAttributionService) Connection(ctx context.Context, base string) (
 	}
 	return &AttributionConnection{Models: models, Detector: detector}, nil
 }
-func (s *ModelAttributionService) Create(ctx context.Context, ids []int64, model string) ([]*AttributionJob, error) {
+func (s *ModelAttributionService) Create(ctx context.Context, ids []int64, model string, expectedModels ...*[]string) ([]*AttributionJob, error) {
 	if len(ids) == 0 || len(ids) > 500 {
 		return nil, ErrAttributionInvalid
 	}
@@ -362,11 +366,18 @@ func (s *ModelAttributionService) Create(ctx context.Context, ids []int64, model
 			return nil, ErrAttributionInvalid
 		}
 	}
-	model = strings.TrimSpace(model)
-	if len(model) > 200 || strings.ContainsAny(model, "*\r\n\t ") {
+	options := AttributionProbeOptions{Model: model}
+	if len(expectedModels) > 1 {
 		return nil, ErrAttributionInvalid
 	}
-	jobs, err := s.repo.Enqueue(ctx, ids, true, model)
+	if len(expectedModels) == 1 {
+		options.ExpectedModels = expectedModels[0]
+	}
+	options, err := NormalizeAttributionProbeOptions(options)
+	if err != nil {
+		return nil, err
+	}
+	jobs, err := s.repo.Enqueue(ctx, ids, true, options)
 	if err == nil {
 		s.notify()
 	}

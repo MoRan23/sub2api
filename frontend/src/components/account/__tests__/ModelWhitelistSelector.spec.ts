@@ -81,6 +81,18 @@ function findModelRow(wrapper: ReturnType<typeof mountSelector>, modelId: string
 }
 
 describe('ModelWhitelistSelector', () => {
+  it('uses supplied detector candidates instead of the platform catalog', async () => {
+    const wrapper = mountSelector({ options: [{ value: 'detector-a', label: 'detector-a' }, { value: 'detector-b', label: 'detector-b' }] })
+    await wrapper.get('.cursor-pointer').trigger('click')
+    expect(wrapper.findAll('[data-testid="model-option"]').map(row => row.text())).toEqual(['detector-a', 'detector-b'])
+    expect(wrapper.text()).not.toContain('admin.accounts.fillRelatedModels')
+    await findModelRow(wrapper, 'detector-b').get('[data-testid="select-model"]').trigger('click')
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([['detector-b']])
+    await wrapper.get('input[placeholder="admin.accounts.enterCustomModelName"]').setValue('custom-expected')
+    await wrapper.findAll('button').find(button => button.text() === 'admin.accounts.addModel')!.trigger('click')
+    expect(wrapper.emitted('update:modelValue')?.[1]).toEqual([['custom-expected']])
+    wrapper.unmount()
+  })
   beforeEach(() => {
     copyToClipboard.mockClear()
     showError.mockReset()

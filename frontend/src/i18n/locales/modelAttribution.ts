@@ -1,6 +1,9 @@
 export const attributionZh = {
   title: '降智检测', column: '归因测试', description: '定期核对模型归因：连续通过两次才应用高级白名单，不通过则立即应用低级白名单。',
-  global: '全局配置', enabled: '启用自动检测', service: 'LM Fingerpoint Detector 服务地址', model: '探针 / 期望模型', high: '高级模型白名单', low: '低级模型白名单',
+  global: '全局配置', enabled: '启用自动检测', service: 'LM Fingerpoint Detector 服务地址', model: '探针模型', high: '高级模型白名单', low: '低级模型白名单',
+  expectedModels: '期望模型列表', expectedInherit: '继承账号配置', expectedCustom: '单独设置', expectedFollowProbe: '当前为空：跟随本轮实际使用的探针模型。',
+  expectedHelp: '最高置信度模型属于此列表即通过；留空时须与本轮探针模型一致。候选项来自检测器参考库，可输入具体模型 ID，不支持通配符。',
+  expectedInheritHelp: '按各账号生效的全局／分组配置判断；继承的列表为空时，跟随本轮探针模型。', invalidExpectedModels: '期望列表最多 500 个具体模型 ID，每个最多 200 字符，不含空格或通配符。',
   detectorSource: '检测器来源', detectorVersion: '检测器版本 / 参考库时间', connected: '连接检查通过，保存后生效', connectionRequired: '请检查服务连接，确认检测器版本后保存配置。', unavailable: '不可用',
   confidenceHelp: '置信度仅表示参考库内的相对匹配程度，不是模型身份证明。', calibration: '置信度校准', rankingScore: '排名分数', calibrationStatus: { reference_calibrated: '参考库内校准', unavailable: '不可用' },
   connect: '测试连接并获取候选模型', candidates: '已收录的候选模型', saved: '配置已保存，后续检测按新配置累计；连续通过两次才应用高级白名单。', save: '保存配置', reload: '重新加载配置',
@@ -34,6 +37,7 @@ export const attributionZh = {
   actions: { high: '已应用高级白名单', low: '已应用低级白名单', awaiting_confirmation: '已通过 1 次，等待再次通过；白名单未修改', unchanged: '无需修改', stale: '结果已过期，未修改', none: '未修改', unconfigured: '未配置高低级白名单，仅记录结果' },
   reasons: {
     service_unconfigured: '请先配置并验证 LM Fingerpoint Detector 服务',
+    expected_model_not_enrolled: '参考库尚未收录全部期望模型',
     detector_changed: '检测器已切换，旧任务终止且不重放', detector_unavailable: '检测器服务不可用', detector_identity_invalid: '检测器身份或协议不匹配', detector_version_changed: '检测器版本已变化，请重新检查连接并保存配置', detector_response_invalid: '检测器响应格式无效', detector_bank_invalid: '检测器参考库无效', detector_challenges_invalid: '需要三条独立且有效的探针', detector_failed: '检测器请求失败', detector_probabilities_invalid: '检测器置信度无效', detector_calibration_unavailable: '校准不可用，未修改白名单',
     account_rate_limited: '账户或测试模型当前被限流，已跳过测试',
     disabled: '检测未启用', unsupported_account: '仅支持 OpenAI OAuth 或 API Key 账户', shadow_account: '共享凭据的影子账户', passthrough_account: '自动透传账户', account_inactive: '账户已停用', scheduling_disabled: '账户关闭调度', account_expired: '账户已过期', account_missing: '账户已删除或不存在',
@@ -44,7 +48,10 @@ export const attributionZh = {
 }
 export const attributionEn = {
   title: 'Model attribution', column: 'Attribution', description: 'Apply the high-tier allowlist after two consecutive passes; apply the low-tier allowlist immediately on a mismatch.',
-  global: 'Global configuration', enabled: 'Enable automatic detection', service: 'LM Fingerpoint Detector service URL', model: 'Probe / expected model', high: 'High-tier model allowlist', low: 'Low-tier model allowlist',
+  global: 'Global configuration', enabled: 'Enable automatic detection', service: 'LM Fingerpoint Detector service URL', model: 'Probe model', high: 'High-tier model allowlist', low: 'Low-tier model allowlist',
+  expectedModels: 'Expected models', expectedInherit: 'Inherit account configuration', expectedCustom: 'Set separately', expectedFollowProbe: 'Empty list: use the actual probe model for this round.',
+  expectedHelp: 'Pass when the highest-confidence model is in this list. An empty list requires the probe model itself. Candidates come from the detector reference bank; concrete IDs can also be entered. Wildcards are not supported.',
+  expectedInheritHelp: 'Use each account’s effective global or group configuration. If its list is empty, use this round’s probe model.', invalidExpectedModels: 'Use at most 500 concrete model IDs, each up to 200 characters, without whitespace or wildcards.',
   detectorSource: 'Detector source', detectorVersion: 'Detector revision / bank date', connected: 'Connection verified; save to apply', connectionRequired: 'Check the service connection and confirm its version before saving.', unavailable: 'Unavailable',
   confidenceHelp: 'Confidence is relative to models in the reference bank, not proof of model identity.', calibration: 'Confidence calibration', rankingScore: 'Ranking score', calibrationStatus: { reference_calibrated: 'Reference calibrated', unavailable: 'Unavailable' },
   connect: 'Test connection and fetch models', candidates: 'Enrolled candidate models', saved: 'Saved. Subsequent checks use the new configuration; two consecutive passes are required for the high-tier allowlist.', save: 'Save configuration', reload: 'Reload configuration',
@@ -78,6 +85,7 @@ export const attributionEn = {
   actions: { high: 'High-tier allowlist applied', low: 'Low-tier allowlist applied', awaiting_confirmation: 'Passed once; awaiting another pass. Allowlist unchanged', unchanged: 'No change needed', stale: 'Stale result, no changes', none: 'Unchanged', unconfigured: 'Allowlists not configured; result recorded only' },
   reasons: {
     service_unconfigured: 'Configure and verify LM Fingerpoint Detector first',
+    expected_model_not_enrolled: 'Not all expected models are enrolled in the reference bank',
     detector_changed: 'Detector changed; previous task terminated without replay', detector_unavailable: 'Detector unavailable', detector_identity_invalid: 'Detector identity or protocol mismatch', detector_version_changed: 'Detector version changed; verify the connection and save again', detector_response_invalid: 'Invalid detector response', detector_bank_invalid: 'Invalid reference bank', detector_challenges_invalid: 'Three independent valid probes required', detector_failed: 'Detector request failed', detector_probabilities_invalid: 'Invalid detector confidence', detector_calibration_unavailable: 'Calibration unavailable; allowlist unchanged',
     account_rate_limited: 'Account or probe model is rate limited; test skipped',
     disabled: 'Detection disabled', unsupported_account: 'Only OpenAI OAuth or API Key accounts are supported', shadow_account: 'Shadow account with shared credentials', passthrough_account: 'Automatic passthrough account', account_inactive: 'Account inactive', scheduling_disabled: 'Scheduling disabled', account_expired: 'Account expired', account_missing: 'Account deleted or missing',

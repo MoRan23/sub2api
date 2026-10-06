@@ -1,8 +1,8 @@
 import { apiClient } from '../client'
 
-export interface AttributionPolicy { model: string; high_models: string[]; low_models: string[] }
+export interface AttributionPolicy { model: string; expected_models?: string[]; high_models: string[]; low_models: string[] }
 export interface AttributionGroup extends AttributionPolicy { group_id: number; enabled: boolean }
-export interface NewAccountTestConfig { attribution: boolean; pelican: boolean; attribution_model: string; pelican_model: string }
+export interface NewAccountTestConfig { attribution: boolean; pelican: boolean; attribution_model: string; attribution_expected_models?: string[] | null; pelican_model: string }
 export interface AttributionDetector { provider: string; protocol: number; revision: string; algorithm: string; bank_built_at: string; reference_sha256: string; ranker_sha256: string; calibration_sha256: string }
 export interface AttributionConnection { models: string[]; detector: AttributionDetector }
 export interface AttributionConfig { version: number; enabled: boolean; base_url: string; detector?: AttributionDetector; default: AttributionPolicy; groups: AttributionGroup[]; group_priority: number[]; new_account_tests: NewAccountTestConfig }
@@ -39,7 +39,7 @@ export const attributionAPI = {
   async save(config: AttributionConfig): Promise<AttributionConfig> { return (await apiClient.put<AttributionConfig>(`${root}/config`, config)).data },
   async models(base_url: string): Promise<string[]> { return (await apiClient.post<{ models: string[] }>(`${root}/models`, { base_url }, { timeout: 25000 })).data.models },
   async connection(base_url: string): Promise<AttributionConnection> { return (await apiClient.post<AttributionConnection>(`${root}/models`, { base_url }, { timeout: 25000 })).data },
-  async create(account_ids: number[], model?: string): Promise<AttributionJob[]> { return (await apiClient.post<{ items: AttributionJob[] }>(`${root}/jobs`, { account_ids, ...(model ? { model } : {}) })).data.items },
+  async create(account_ids: number[], model?: string, expected_models?: string[] | null): Promise<AttributionJob[]> { return (await apiClient.post<{ items: AttributionJob[] }>(`${root}/jobs`, { account_ids, ...(model ? { model } : {}), ...(expected_models != null ? { expected_models } : {}) })).data.items },
   async history(account_id?: number, page = 1): Promise<AttributionPage> { return (await apiClient.get<AttributionPage>(`${root}/jobs`, { params: { account_id, page, page_size: 20 } })).data },
   async job(id: number): Promise<AttributionJob> { return (await apiClient.get<AttributionJob>(`${root}/jobs/${id}`)).data }
 }
