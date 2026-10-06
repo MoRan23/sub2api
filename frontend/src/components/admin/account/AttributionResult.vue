@@ -11,12 +11,16 @@
       <div><dt class="text-gray-500">{{ t('attribution.action') }}</dt><dd>{{ t(`attribution.actions.${job.result.action || 'none'}`) }}</dd></div>
       <div v-if="job.result.pass_streak !== undefined"><dt class="text-gray-500">{{ t('attribution.passStreak') }}</dt><dd data-testid="attribution-pass-streak">{{ job.result.pass_streak }} / 2</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.source') }}</dt><dd>{{ t(`attribution.${job.source}`) }}</dd></div>
+      <div><dt class="text-gray-500">{{ t('attribution.detectorSource') }}</dt><dd>{{ job.snapshot.detector ? 'LM Fingerpoint Detector' : 'ModelTrace' }}</dd></div>
+      <div v-if="job.snapshot.detector"><dt class="text-gray-500">{{ t('attribution.detectorVersion') }}</dt><dd class="break-all">{{ job.snapshot.detector.revision.slice(0, 12) }} · {{ job.snapshot.detector.bank_built_at }}</dd></div>
     </dl>
     <div v-if="job.result.analysis" class="space-y-2">
+      <p v-if="job.snapshot.detector" class="text-xs text-gray-500">{{ t('attribution.confidenceHelp') }}</p>
+      <p v-if="job.result.analysis.probability_status" class="text-xs">{{ t('attribution.calibration') }}: {{ t(`attribution.calibrationStatus.${job.result.analysis.probability_status}`) }}</p>
       <p class="text-sm font-medium">{{ t('attribution.top') }}: {{ job.result.analysis.prediction }} · {{ percent(job.result.analysis.probability) }}</p>
       <div v-for="candidate in job.result.analysis.results" :key="candidate.model" class="flex items-center gap-3 text-xs">
         <span class="w-48 shrink-0 truncate" :title="candidate.model">{{ candidate.model }}</span>
-        <div class="h-2 flex-1 overflow-hidden rounded bg-gray-100 dark:bg-dark-600"><div class="h-full bg-primary-500" :style="{ width: percent(candidate.probability) }" /></div><span class="w-16 text-right tabular-nums">{{ percent(candidate.probability) }}</span>
+        <div class="h-2 flex-1 overflow-hidden rounded bg-gray-100 dark:bg-dark-600"><div v-if="candidate.probability != null" class="h-full bg-primary-500" :style="{ width: percent(candidate.probability) }" /></div><span class="w-16 text-right tabular-nums">{{ percent(candidate.probability) }}</span><span v-if="candidate.score !== undefined" class="w-24 text-right tabular-nums" :title="t('attribution.rankingScore')">{{ candidate.score.toFixed(4) }}</span>
       </div>
     </div>
     <details class="text-sm"><summary class="cursor-pointer">{{ t('attribution.high') }} / {{ t('attribution.low') }}</summary><p class="mt-2 break-all">{{ t('attribution.high') }}: {{ job.snapshot.policy.high_models?.join(', ') }}</p><p class="break-all">{{ t('attribution.low') }}: {{ job.snapshot.policy.low_models?.join(', ') }}</p></details>
@@ -32,5 +36,5 @@ import type { AttributionJob } from '@/api/admin/modelAttribution'
 defineProps<{ job: AttributionJob }>()
 const { t, te } = useI18n()
 const reason = (code: string) => /^upstream_http_\d{3}$/.test(code) ? t('candyTests.upstreamHttpError', { status: code.slice(-3) }) : te(`attribution.reasons.${code}`) ? t(`attribution.reasons.${code}`) : te(`candyTests.failureReasons.${code}`) ? t(`candyTests.failureReasons.${code}`) : code
-const percent = (p: number) => `${(p * 100).toFixed(2)}%`
+const percent = (p: number | null) => p == null ? t('attribution.unavailable') : `${(p * 100).toFixed(2)}%`
 </script>

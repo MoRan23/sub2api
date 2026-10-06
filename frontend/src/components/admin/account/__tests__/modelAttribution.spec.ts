@@ -10,11 +10,12 @@ import ModelAttributionView from '@/views/admin/ModelAttributionView.vue'
 import type { AttributionConfig, AttributionJob, AttributionPage } from '@/api/admin/modelAttribution'
 import type { AccountListItem } from '@/types'
 
-const api = vi.hoisted(() => ({ config: vi.fn(), save: vi.fn(), models: vi.fn(), create: vi.fn(), history: vi.fn(), job: vi.fn() }))
+const api = vi.hoisted(() => ({ config: vi.fn(), save: vi.fn(), models: vi.fn(), connection: vi.fn(), create: vi.fn(), history: vi.fn(), job: vi.fn() }))
 vi.mock('@/api/admin/modelAttribution', () => ({ attributionAPI: api }))
 vi.mock('@/api/admin/groups', async () => ({ ...await vi.importActual<typeof import('@/api/admin/groups')>('@/api/admin/groups'), getAllIncludingInactive: vi.fn().mockResolvedValue([{ id: 10, name: 'Pro group' }, { id: 20, name: 'Other group' }]) }))
 vi.mock('vue-i18n', async () => ({ ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'), useI18n: () => ({ t: (key: string) => key, te: () => true }) }))
 const policy = { model: 'gpt-6-astra', high_models: ['gpt-6-astra'], low_models: ['gpt-6-luna'] }
+const detector = { provider: 'lm_fingerprint_detector', protocol: 1, revision: 'd53d3f5b158249a87a895e4fc7aaa8a940dfd6d6', algorithm: 'shared-detector-v1', bank_built_at: '2026-10-03T00:00:00Z', reference_sha256: 'b'.repeat(64), ranker_sha256: 'c'.repeat(64), calibration_sha256: 'd'.repeat(64) }
 function config(): AttributionConfig { return { version: 1, enabled: false, base_url: '', default: structuredClone(policy), groups: [], group_priority: [], new_account_tests: { attribution: true, pelican: true, attribution_model: 'gpt-6-astra', pelican_model: 'gpt-6.1-sol' } } }
 function job(id = 1, status: AttributionJob['status'] = 'passed'): AttributionJob {
   return { id, status, account_id: 42, account_name: 'Synthetic account', source: 'manual', snapshot: { config_version: 2, group_id: 0, policy: structuredClone(policy) }, result: { duration_ms: 1200, action: 'high', analysis: { prediction: 'gpt-6-astra', probability: 0.8, used_outputs: 3, results: [{ model: 'gpt-6-astra', probability: 0.8 }, { model: 'gpt-6-luna', probability: 0.2 }] } }, created_at: '2026-10-01T00:00:00Z', ...(status === 'running' ? {} : { finished_at: '2026-10-01T00:00:01Z' }) }
@@ -27,10 +28,27 @@ const stubs = {
   RouterLink: defineComponent({ template: '<a><slot /></a>' })
 }
 
-beforeEach(() => { vi.clearAllMocks(); api.config.mockResolvedValue(config()); api.models.mockResolvedValue(['gpt-6-astra', 'gpt-6.1-sol']); api.history.mockResolvedValue(page([])); api.job.mockImplementation(async (id: number) => job(id)) })
+beforeEach(() => { vi.clearAllMocks(); api.config.mockResolvedValue(config()); api.connection.mockResolvedValue({ models: ['gpt-6-astra'], detector }); api.models.mockResolvedValue(['gpt-6-astra', 'gpt-6.1-sol']); api.history.mockResolvedValue(page([])); api.job.mockImplementation(async (id: number) => job(id)) })
 afterEach(() => { vi.useRealTimers() })
 
 describe('attribution account UI', () => {
+  it('shows null confidence as unavailable and distinguishes legacy history', async () => {
+    const current = job()
+    current.snapshot.detector = detector
+    current.result.analysis!.probability = null
+    current.result.analysis!.probability_status = 'unavailable'
+    current.result.analysis!.results = [{ model: 'gpt-6-astra', probability: null, score: 1.23 }]
+    const wrapper = mount(AttributionResult, { props: { job: current } })
+    expect(wrapper.text()).toContain('LM Fingerpoint Detector')
+    expect(wrapper.text()).toContain('d53d3f5b1582')
+    expect(wrapper.text()).toContain('attribution.unavailable')
+    expect(wrapper.text()).not.toContain('0.00%')
+    expect(wrapper.text()).toContain('1.2300')
+    await wrapper.setProps({ job: job() })
+    expect(wrapper.text()).toContain('ModelTrace')
+    expect(wrapper.text()).toContain('80.00%')
+    wrapper.unmount()
+  })
   it('shows the first pass as awaiting confirmation and the second pass as upgraded', async () => {
     const first = job()
     first.result.action = 'awaiting_confirmation'
@@ -196,7 +214,12 @@ describe('attribution configuration', () => {
     await wrapper.get('[data-testid="attribution-url"]').setValue('http://localhost:5000')
     await wrapper.get('[data-testid="attribution-enable"]').setValue(true)
     await wrapper.get('form').trigger('submit'); await flushPromises()
-    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ version: 1, enabled: true, groups: [expect.objectContaining({ group_id: 10, enabled: false })] }))
+    expect(api.save).not.toHaveBeenCalled()
+    await wrapper.findAll('button').find(b => b.text() === 'attribution.connect')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="detector-version"]').text()).toContain('d53d3f5b1582')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ version: 1, enabled: true, detector, groups: [expect.objectContaining({ group_id: 10, enabled: false })] }))
     expect(wrapper.text()).toContain('attribution.saved'); wrapper.unmount()
   })
   it('keeps unsaved edits and reports optimistic version conflicts', async () => {
@@ -206,5 +229,17 @@ describe('attribution configuration', () => {
     await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(wrapper.get('[role="alert"]').text()).toBe('attribution.conflict')
     expect((wrapper.get('[data-testid="attribution-url"]').element as HTMLInputElement).value).toBe('http://localhost:5000'); wrapper.unmount()
+  })
+  it('discards a connection response when its URL has changed', async () => {
+    let resolve!: (value: unknown) => void
+    api.connection.mockReturnValueOnce(new Promise(r => { resolve = r }))
+    const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
+    await wrapper.get('[data-testid="attribution-url"]').setValue('http://first:8080')
+    await wrapper.findAll('button').find(b => b.text() === 'attribution.connect')!.trigger('click')
+    await wrapper.get('[data-testid="attribution-url"]').setValue('http://second:8080')
+    resolve({ models: ['gpt-6-astra'], detector }); await flushPromises()
+    expect(wrapper.find('[data-testid="detector-version"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="detector-connection"]').text()).toBe('attribution.connectionRequired')
+    wrapper.unmount()
   })
 })

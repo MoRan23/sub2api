@@ -9,9 +9,11 @@
           <section class="space-y-4 rounded-xl border border-gray-200 bg-white p-5 dark:border-dark-600 dark:bg-dark-800">
             <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="font-semibold">{{ t('attribution.global') }}</h2><label class="flex items-center gap-2 text-sm"><input v-model="config.enabled" type="checkbox" data-testid="attribution-enable" />{{ t('attribution.enabled') }}</label></div>
             <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('attribution.notice') }}</p>
-            <label class="block text-sm font-medium">{{ t('attribution.service') }}<input v-model="config.base_url" type="url" class="input mt-2 w-full" placeholder="http://modeltrace:5000" data-testid="attribution-url" /></label>
+            <label class="block text-sm font-medium">{{ t('attribution.service') }}<input v-model="config.base_url" type="url" class="input mt-2 w-full" placeholder="http://lm-detector:8080" data-testid="attribution-url" @input="clearConnection" /></label>
             <button type="button" class="btn btn-secondary btn-sm" :disabled="connecting || !config.base_url" @click="connect">{{ connecting ? t('attribution.loading') : t('attribution.connect') }}</button>
             <p v-if="candidates.length" class="break-all text-xs text-gray-500">{{ t('attribution.candidates') }}: {{ candidates.join(', ') }}</p>
+            <p class="text-xs" data-testid="detector-connection">{{ t(connected ? 'attribution.connected' : 'attribution.connectionRequired') }}</p>
+            <p v-if="config.detector" class="break-all text-xs text-gray-500" data-testid="detector-version">{{ t('attribution.detectorVersion') }}: {{ config.detector.revision.slice(0, 12) }} · {{ config.detector.bank_built_at }}</p>
             <datalist id="attribution-models"><option v-for="id in candidates" :key="id" :value="id" /></datalist>
             <AttributionPolicyFields v-model="config.default" />
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('attribution.mappingHelp') }}</p>
@@ -72,6 +74,12 @@ const newGroup = ref(0)
 const priorityGroup = ref(0)
 const saving = ref(false)
 const connecting = ref(false)
+const connected = ref(false)
+let connectionGeneration = 0
+function clearConnection() {
+  connectionGeneration++; connected.value = false; candidates.value = []
+  if (config.value) config.value.detector = undefined
+}
 const error = ref('')
 const message = ref('')
 const availableGroups = computed(() => groups.value.filter(g => !config.value?.groups.some(o => o.group_id === g.id)))
@@ -88,6 +96,7 @@ function movePriority(index: number, delta: number) {
   ids.splice(index + delta, 0, id)
 }
 async function load() {
+  connectionGeneration++; connected.value = false
   error.value = ''; message.value = ''
   try { const [c, g] = await Promise.all([attributionAPI.config(), getAllIncludingInactive()]); config.value = { ...c, group_priority: c.group_priority || [] }; groups.value = g }
   catch { error.value = t('attribution.error') }
@@ -107,6 +116,7 @@ async function save() {
   const initialModels = [config.value.new_account_tests.attribution_model, config.value.new_account_tests.pelican_model].map(m => m.trim())
   if (initialModels.some(m => !m || m.length > 200 || /[\s*]/.test(m))) { error.value = t('attribution.newAccount.invalid'); return }
   if (config.value.enabled && (!/^https?:\/\//.test(config.value.base_url) || !validPolicy(config.value.default) || config.value.groups.some(g => g.enabled && !validPolicy(g)))) { error.value = t('attribution.invalid'); return }
+  if (config.value.enabled && !config.value.detector) { error.value = t('attribution.connectionRequired'); return }
   saving.value = true
   try { config.value = await attributionAPI.save(config.value); message.value = t('attribution.saved') }
   catch (e) { error.value = e && typeof e === 'object' && 'status' in e && e.status === 409 ? t('attribution.conflict') : t('attribution.error') }
@@ -114,9 +124,16 @@ async function save() {
 }
 async function connect() {
   if (!config.value) return
+  const request = ++connectionGeneration
+  const base = config.value.base_url
   connecting.value = true; error.value = ''; candidates.value = []
-  try { candidates.value = await attributionAPI.models(config.value.base_url) }
-  catch { error.value = t('attribution.reasons.modeltrace_unavailable') }
+  connected.value = false
+  try {
+    const result = await attributionAPI.connection(base)
+    if (request !== connectionGeneration || base !== config.value?.base_url) return
+    candidates.value = result.models; config.value.detector = result.detector; connected.value = true
+  }
+  catch { if (request === connectionGeneration) { config.value.detector = undefined; error.value = t('attribution.reasons.detector_unavailable') } }
   finally { connecting.value = false }
 }
 onMounted(load)

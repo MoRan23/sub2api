@@ -18,7 +18,11 @@ import (
 )
 
 func validAttributionAnalysis() *AttributionAnalysis {
-	return &AttributionAnalysis{Prediction: AttributionDefaultModel, Probability: 0.8, UsedOutputs: 3, Results: []AttributionCandidate{{AttributionDefaultModel, 0.8}, {"gpt-6-luna", 0.2}}, Diagnostics: []AttributionDiagnostic{{0, 300, 165, true}, {1, 300, 165, true}, {2, 300, 165, true}}}
+	return &AttributionAnalysis{Prediction: AttributionDefaultModel, Probability: attrProbability(.8), UsedOutputs: 3, Results: []AttributionCandidate{{Model: AttributionDefaultModel, Probability: attrProbability(.8)}, {Model: "gpt-6-luna", Probability: attrProbability(.2)}}, Diagnostics: []AttributionDiagnostic{{0, 300, 165, true}, {1, 300, 165, true}, {2, 300, 165, true}}, Detector: testAttributionDetector(), Method: "shared-detector-v1", ProbabilityStatus: "reference_calibrated"}
+}
+func attrProbability(p float64) *float64 { return &p }
+func testAttributionDetector() *AttributionDetector {
+	return &AttributionDetector{Provider: "lm_fingerprint_detector", Protocol: 1, Revision: strings.Repeat("a", 40), Algorithm: "shared-detector-v1", BankBuiltAt: "2026-10-03T00:00:00Z", ReferenceSHA256: strings.Repeat("b", 64), RankerSHA256: strings.Repeat("c", 64), CalibrationSHA256: strings.Repeat("d", 64)}
 }
 func TestAttributionConfigSelectionAndMapping(t *testing.T) {
 	c := DefaultAttributionConfig()
@@ -191,13 +195,13 @@ func TestAttributionProbabilityValidation(t *testing.T) {
 		{"short", func(a *AttributionAnalysis) { a.Diagnostics[1].ParsedNumbers = 1 }},
 		{"duplicate diagnostic", func(a *AttributionAnalysis) { a.Diagnostics[1].Index = 0 }},
 		{"tie", func(a *AttributionAnalysis) {
-			a.Results[0].Probability = 0.5
-			a.Results[1].Probability = 0.5
-			a.Probability = 0.5
+			a.Results[0].Probability = attrProbability(0.5)
+			a.Results[1].Probability = attrProbability(0.5)
+			a.Probability = attrProbability(0.5)
 		}},
-		{"NaN", func(a *AttributionAnalysis) { a.Results[0].Probability = math.NaN() }},
-		{"infinite", func(a *AttributionAnalysis) { a.Probability = math.Inf(1) }},
-		{"sum", func(a *AttributionAnalysis) { a.Results[1].Probability = 0.1 }},
+		{"NaN", func(a *AttributionAnalysis) { a.Results[0].Probability = attrProbability(math.NaN()) }},
+		{"infinite", func(a *AttributionAnalysis) { a.Probability = attrProbability(math.Inf(1)) }},
+		{"sum", func(a *AttributionAnalysis) { a.Results[1].Probability = attrProbability(0.1) }},
 		{"prediction", func(a *AttributionAnalysis) { a.Prediction = "gpt-6-luna" }},
 		{"unknown", func(a *AttributionAnalysis) { a.Results[1].Model = "unknown" }},
 	} {
@@ -256,14 +260,24 @@ func (f attributionProbeFunc) Probe(c context.Context, id int64, m, p string) (*
 	return f(c, id, m, p)
 }
 
-func TestAttributionPipelineMockModelTrace(t *testing.T) {
-	for _, scenario := range []string{"pass", "mismatch", "unavailable", "not enrolled", "bad challenges", "invalid answer", "probe failure", "rate limited", "429", "interrupted", "stale", "timeout"} {
+func TestAttributionPipelineMockLMDetector(t *testing.T) {
+	for _, scenario := range []string{"pass", "mismatch", "unavailable", "not enrolled", "bad challenges", "invalid answer", "probe failure", "rate limited", "429", "interrupted", "stale", "timeout", "version changed", "analyzer changed", "uncalibrated"} {
 		t.Run(scenario, func(t *testing.T) {
 			probes, analyzes := 0, 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				require.Empty(t, r.Header.Get("Authorization"))
 				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-LM-Detector-Version", testAttributionDetector().Version())
+				if r.URL.Path != "/api/info" {
+					require.Equal(t, testAttributionDetector().Version(), r.Header.Get("X-LM-Detector-Version"))
+				}
 				switch r.URL.Path {
+				case "/api/info":
+					info := testAttributionDetector()
+					if scenario == "version changed" {
+						info.Revision = strings.Repeat("e", 40)
+					}
+					_ = json.NewEncoder(w).Encode(info)
 				case "/api/banks":
 					if scenario == "unavailable" {
 						w.WriteHeader(503)
@@ -282,6 +296,10 @@ func TestAttributionPipelineMockModelTrace(t *testing.T) {
 					_ = json.NewEncoder(w).Encode(map[string]any{"challenges": items})
 				case "/api/analyze":
 					analyzes++
+					if scenario == "analyzer changed" {
+						w.WriteHeader(409)
+						return
+					}
 					var body struct {
 						Outputs []AttributionOutput `json:"outputs"`
 					}
@@ -289,10 +307,17 @@ func TestAttributionPipelineMockModelTrace(t *testing.T) {
 					require.Len(t, body.Outputs, 3)
 					require.Equal(t, "synthetic-private-answer", body.Outputs[0].Text)
 					a := validAttributionAnalysis()
+					if scenario == "uncalibrated" {
+						a.ProbabilityStatus = "unavailable"
+						a.Probability = nil
+						for i := range a.Results {
+							a.Results[i].Probability = nil
+						}
+					}
 					if scenario == "mismatch" {
 						a.Prediction = "gpt-6-luna"
-						a.Results[0].Probability = 0.2
-						a.Results[1].Probability = 0.8
+						a.Results[0].Probability = attrProbability(0.2)
+						a.Results[1].Probability = attrProbability(0.8)
 					}
 					if scenario == "invalid answer" {
 						a.UsedOutputs = 2
@@ -305,7 +330,7 @@ func TestAttributionPipelineMockModelTrace(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			repo := &attributionTestRepo{valid: scenario != "stale", config: AttributionConfig{BaseURL: server.URL}}
+			repo := &attributionTestRepo{valid: scenario != "stale", config: AttributionConfig{BaseURL: server.URL, Detector: testAttributionDetector()}}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			probe := attributionProbeFunc(func(probeCtx context.Context, id int64, model, prompt string) (*CandyTestExecution, error) {
@@ -329,8 +354,8 @@ func TestAttributionPipelineMockModelTrace(t *testing.T) {
 				}
 				return &CandyTestExecution{Completed: true, ActualModel: model, ResponseText: "synthetic-private-answer", Usage: &OpenAIUsage{InputTokens: 1, OutputTokens: 3}}, nil
 			})
-			s := &ModelAttributionService{repo: repo, probe: probe, analyzer: NewModelTraceClient()}
-			j := &AttributionJob{ID: 1, AccountID: 11, Source: "manual", Snapshot: AttributionSnapshot{Policy: AttributionPolicy{Model: AttributionDefaultModel}}}
+			s := &ModelAttributionService{repo: repo, probe: probe, analyzer: NewLMDetectorClient()}
+			j := &AttributionJob{ID: 1, AccountID: 11, Source: "manual", Snapshot: AttributionSnapshot{Policy: AttributionPolicy{Model: AttributionDefaultModel}, Detector: testAttributionDetector()}}
 			if scenario == "timeout" {
 				past := time.Now().Add(-11 * time.Minute)
 				j.StartedAt = &past
@@ -357,7 +382,7 @@ func TestAttributionPipelineMockModelTrace(t *testing.T) {
 			require.NotContains(t, string(b), "secret-oauth-token")
 			require.NotContains(t, string(b), "synthetic-private-answer")
 			switch scenario {
-			case "pass", "mismatch", "invalid answer":
+			case "pass", "mismatch", "invalid answer", "analyzer changed", "uncalibrated":
 				require.Equal(t, 3, probes)
 				require.Equal(t, 1, analyzes)
 			case "probe failure", "interrupted", "rate limited", "429":

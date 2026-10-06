@@ -1,0 +1,18 @@
+# Overlay: docker compose -f docker-compose.yml -f docker-compose.lm-detector.yml up -d --build lm-detector
+# Then connect to http://lm-detector:8080 in the attribution settings before enabling detection.
+services:
+  lm-detector:
+    build:
+      context: ../services/lm-detector
+    image: sub2api-lm-detector:d53d3f5b1582
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - sub2api-network
+    # Internal container port only; do not publish a host port.
+    expose:
+      - "8080"

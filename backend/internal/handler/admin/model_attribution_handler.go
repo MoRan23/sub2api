@@ -77,12 +77,12 @@ func (h *AccountHandler) AttributionModels(c *gin.Context) {
 		attributionError(c, err)
 		return
 	}
-	models, err := h.attributionService.Models(c.Request.Context(), v.BaseURL)
+	connection, err := h.attributionService.Connection(c.Request.Context(), v.BaseURL)
 	if err != nil {
-		response.Error(c, http.StatusBadGateway, "ModelTrace unavailable or invalid model bank")
+		response.Error(c, http.StatusBadGateway, "LM Fingerpoint Detector unavailable or invalid reference bank")
 		return
 	}
-	response.Success(c, gin.H{"models": models})
+	response.Success(c, connection)
 }
 func (h *AccountHandler) CreateAttributionJobs(c *gin.Context) {
 	if !h.attributionReady(c) {

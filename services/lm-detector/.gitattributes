@@ -1,0 +1,2 @@
+# Integrity-checked upstream artifacts must retain their exact bytes on checkout.
+vendor/** -text

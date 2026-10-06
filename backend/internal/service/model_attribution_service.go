@@ -35,7 +35,7 @@ type ModelAttributionService struct {
 }
 
 func NewModelAttributionService(repo AttributionRepository, accounts AccountRepository, probe *AccountCandyTestTransport) *ModelAttributionService {
-	return &ModelAttributionService{repo: repo, accounts: accounts, probe: probe, analyzer: NewModelTraceClient(), wake: make(chan struct{}, 1)}
+	return &ModelAttributionService{repo: repo, accounts: accounts, probe: probe, analyzer: NewLMDetectorClient(), wake: make(chan struct{}, 1)}
 }
 func (s *ModelAttributionService) Start() {
 	s.start.Do(func() {
@@ -190,7 +190,16 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 		j.Reason = "configuration_unavailable"
 		return
 	}
-	models, err := s.analyzer.Models(ctx, c.BaseURL)
+	detector, err := s.analyzer.Info(ctx, c.BaseURL)
+	if err != nil {
+		j.Reason = safeAttributionAnalyzerError(err)
+		return
+	}
+	if !SameAttributionDetector(detector, j.Snapshot.Detector) || !SameAttributionDetector(detector, c.Detector) {
+		j.Reason = "detector_version_changed"
+		return
+	}
+	models, err := s.analyzer.Models(ctx, c.BaseURL, detector)
 	if err != nil {
 		j.Reason = safeAttributionAnalyzerError(err)
 		return
@@ -205,7 +214,7 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 		j.Reason = "model_not_enrolled"
 		return
 	}
-	challenges, err := s.analyzer.Challenges(ctx, c.BaseURL)
+	challenges, err := s.analyzer.Challenges(ctx, c.BaseURL, detector)
 	if err != nil {
 		j.Reason = safeAttributionAnalyzerError(err)
 		return
@@ -264,7 +273,7 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 		}
 		outputs = append(outputs, AttributionOutput{Text: execution.ResponseText, ExpectedCount: challenge.ExpectedCount})
 	}
-	analysis, err := s.analyzer.Analyze(ctx, c.BaseURL, outputs)
+	analysis, err := s.analyzer.Analyze(ctx, c.BaseURL, detector, outputs)
 	if err != nil {
 		j.Reason = safeAttributionAnalyzerError(err)
 		return
@@ -287,19 +296,62 @@ func safeAttributionAnalyzerError(err error) string {
 	// must not leak arbitrary response bodies/URLs into persistent diagnostics.
 	code := err.Error()
 	switch code {
-	case "modeltrace_unavailable", "modeltrace_response_invalid", "modeltrace_bank_invalid", "modeltrace_challenges_invalid":
+	case "detector_unavailable", "detector_response_invalid", "detector_bank_invalid", "detector_challenges_invalid", "detector_identity_invalid", "detector_version_changed", "detector_calibration_unavailable":
 		return code
 	}
-	return "modeltrace_failed"
+	return "detector_failed"
 }
 func (s *ModelAttributionService) Config(ctx context.Context) (AttributionConfig, error) {
 	return s.repo.Config(ctx)
 }
 func (s *ModelAttributionService) SaveConfig(ctx context.Context, c AttributionConfig) (AttributionConfig, error) {
+	var err error
+	c, err = NormalizeAttributionConfig(c)
+	if err != nil {
+		return c, err
+	}
+	previous, err := s.repo.Config(ctx)
+	if err != nil {
+		return c, err
+	}
+	if c.Version != previous.Version {
+		return c, ErrAttributionConflict
+	}
+	if !c.Enabled && c.BaseURL == previous.BaseURL && (c.Detector == nil || SameAttributionDetector(c.Detector, previous.Detector)) {
+		// Disabling must remain possible during an analyzer outage.
+		c.Detector = previous.Detector
+	} else if c.BaseURL != "" {
+		connection, err := s.Connection(ctx, c.BaseURL)
+		if err != nil {
+			return c, err
+		}
+		// The administrator must first inspect the connection's advertised version.
+		if !SameAttributionDetector(c.Detector, connection.Detector) {
+			return c, ErrAttributionInvalid
+		}
+		c.Detector = connection.Detector
+	} else {
+		c.Detector = nil
+	}
 	return s.repo.SaveConfig(ctx, c)
 }
 func (s *ModelAttributionService) Models(ctx context.Context, base string) ([]string, error) {
-	return s.analyzer.Models(ctx, base)
+	connection, err := s.Connection(ctx, base)
+	if err != nil {
+		return nil, err
+	}
+	return connection.Models, nil
+}
+func (s *ModelAttributionService) Connection(ctx context.Context, base string) (*AttributionConnection, error) {
+	detector, err := s.analyzer.Info(ctx, base)
+	if err != nil {
+		return nil, err
+	}
+	models, err := s.analyzer.Models(ctx, base, detector)
+	if err != nil {
+		return nil, err
+	}
+	return &AttributionConnection{Models: models, Detector: detector}, nil
 }
 func (s *ModelAttributionService) Create(ctx context.Context, ids []int64, model string) ([]*AttributionJob, error) {
 	if len(ids) == 0 || len(ids) > 500 {

@@ -1,0 +1,30 @@
+{
+  "repository": "https://github.com/Ikaleio/lm-detector",
+  "revision": "d53d3f5b158249a87a895e4fc7aaa8a940dfd6d6",
+  "files": {
+    "data/shared_detector.json": "24cb37ae32bfd70f97b43dad4e71332cfa82aaa8527fbb1fe7dc007ce16f216f",
+    "data/unified_bank.json": "b9ce4684fdc4b3de3bb5a907d13689536c531597ee8a3a6624b10769d29acb7d",
+    "data/unified_reference.jsonl": "d148ede6a21b87db83fc97aea2dbf80d6525e5557b4f3aee25398ce68b734475",
+    "LICENSE": "238afb57e498990742f84b9ce6167b4e256ac06104a9938ce953bc41c14bea51",
+    "shared/builder.ts": "b8679cca8aeee791320090ff1cb365cfaf528e5875ba852ed90bfbf4a6b8e49f",
+    "shared/challenge-browser.js": "65884da44d29b7d5337993609414596272010cb07cffe98b0c5546b1fe9728e4",
+    "shared/completion-request.ts": "f70ece4b4ee9653e138f59ab6d1fd0d47cc597b317c99ffba6e9c21d68423a15",
+    "shared/completion.ts": "5eec6adc0f8790cd419daeec90998f7a3da17bc58b58ae61b399b9d5d937f16b",
+    "shared/detection.ts": "898ab49e1e13c5e8702d782d2a1d1a0d4c36ad136fc559d4b7e0d2336a5d1653",
+    "shared/fingerprint-core.js": "5a096c0e5638b9b7e266714725660549273b018e0b5eddbec3302ef96af21f16",
+    "shared/gaussian-core.js": "ea5608232b75e993129a95d0a099c0e4ec998749954f76f66d2409c6bc1988dc",
+    "shared/number-features.js": "6d1618b67117a62067b504c9fe6f144bd147beaa8f7568cdec6635590c347130",
+    "shared/package.json": "6305be06e0c01eef4d2b9c5e44fb475f46ff03c12975aaf358aca473b6d60250",
+    "shared/privacy.ts": "705879b02c705b99412a30c5b2c6e7890e7aebad643ec54bc517149e1e95e26f",
+    "shared/README.md": "db22e1f130bb360e00f86a21a3070a5080a129e9062d09d4fe4d40fa1c42392c",
+    "shared/reference.ts": "2b3720328dce137891680eea8f1f69c89059dd416e5de13cef92642132e0f7c8",
+    "shared/sample-distribution.ts": "1fe603c0e830ce3a46777ec51610f04e3e4030aa0bb0d6cccab28b7ff054d53c",
+    "shared/shared-detector.ts": "15c4b40b1d7d1efdfb72901bfcb4181b539d4d7ba69f2a1ea645094869685c21",
+    "shared/throughput.ts": "f5a8cdb500545ddcfa10628e34129c29c5b5ceeb4453d59b8d1705129b5e4630",
+    "shared/tokenizer-bank.ts": "ff562e84d8c8fa30fad7134b75b7ec926ec82973b8bdbfb3e7b0dddb3245ef13",
+    "shared/tokenizer-posterior.ts": "6fb12b5aa7eab9f4bafc2b6f8279e1cbd4a4954ce676fb5eeaa54880a403e574",
+    "shared/tokenizer-probe.ts": "091f6877f08d958f237f92815e54963df6c68dc1b0a65737a06f823afc486ae8",
+    "shared/tokenizer-usage.ts": "faa5a7ec789767710ba48b257036a3374f4c5eb225722a531e9294caa2ccecda",
+    "shared/types.ts": "1199e1086ad586813ca939afdf61181baef29bb4f91ed97941476d516c4ea06d"
+  }
+}

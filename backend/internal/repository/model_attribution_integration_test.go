@@ -34,6 +34,7 @@ func attributionFixture(t *testing.T) (*attributionRepository, *accountRepositor
 	require.NoError(t, err)
 	t.Cleanup(func() { _, _ = integrationDB.ExecContext(ctx, `DELETE FROM accounts WHERE id=$1`, a.ID) })
 	c := service.DefaultAttributionConfig()
+	c.Detector = integrationAttributionDetector()
 	c.Enabled = true
 	c.BaseURL = "http://modeltrace.invalid"
 	c.Default.HighModels = []string{"high", "high2"}
@@ -41,6 +42,9 @@ func attributionFixture(t *testing.T) (*attributionRepository, *accountRepositor
 	_, err = r.SaveConfig(ctx, c)
 	require.NoError(t, err)
 	return r, ar, a
+}
+func integrationAttributionDetector() *service.AttributionDetector {
+	return &service.AttributionDetector{Provider: "lm_fingerprint_detector", Protocol: 1, Revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Algorithm: "shared-detector-v1", BankBuiltAt: "2026-10-03T00:00:00Z", ReferenceSHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", RankerSHA256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", CalibrationSHA256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}
 }
 func attributionRun(t *testing.T, r *attributionRepository, id int64, status string) *service.AttributionJob {
 	t.Helper()
@@ -566,7 +570,7 @@ func TestAttributionManualOverrideWithoutAutomaticEligibility(t *testing.T) {
 	require.Equal(t, "high", j.Result.Action)
 	var policyDigest string
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT policy_digest FROM model_attribution_state WHERE account_id=$1`, a.ID).Scan(&policyDigest))
-	require.Equal(t, service.AttributionDigest([]any{j.Snapshot.GroupID, j.Snapshot.Policy}), policyDigest)
+	require.Equal(t, service.AttributionDigest([]any{j.Snapshot.GroupID, j.Snapshot.Policy, j.Snapshot.Detector}), policyDigest)
 	require.NotEqual(t, service.AttributionDigest([]any{j.Snapshot.GroupID, c.Default}), policyDigest, "different manual probes must not satisfy the automatic baseline")
 }
 

@@ -43,6 +43,7 @@ type AttributionConfig struct {
 	Version         int64                    `json:"version"`
 	Enabled         bool                     `json:"enabled"`
 	BaseURL         string                   `json:"base_url"`
+	Detector        *AttributionDetector     `json:"detector,omitempty"`
 	Default         AttributionPolicy        `json:"default"`
 	Groups          []AttributionGroupPolicy `json:"groups"`
 	GroupPriority   []int64                  `json:"group_priority"`
@@ -56,7 +57,7 @@ func DefaultAttributionConfig() AttributionConfig {
 func AttributionBaseURL(raw string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return "", fmt.Errorf("%w: ModelTrace 地址须为 HTTP(S) 服务地址，不含凭据、查询参数或片段", ErrAttributionInvalid)
+		return "", fmt.Errorf("%w: 检测器地址须为 HTTP(S) 服务地址，不含凭据、查询参数或片段", ErrAttributionInvalid)
 	}
 	return strings.TrimRight(u.String(), "/"), nil
 }
@@ -242,9 +243,55 @@ func AttributionModelMapping(current map[string]any, models []string) map[string
 	return out
 }
 
+// Version is checked at the HTTP boundary and included in the saved policy baseline.
+type AttributionDetector struct {
+	Provider          string `json:"provider"`
+	Protocol          int    `json:"protocol"`
+	Revision          string `json:"revision"`
+	Algorithm         string `json:"algorithm"`
+	BankBuiltAt       string `json:"bank_built_at"`
+	ReferenceSHA256   string `json:"reference_sha256"`
+	RankerSHA256      string `json:"ranker_sha256"`
+	CalibrationSHA256 string `json:"calibration_sha256"`
+}
+
+func (d *AttributionDetector) Valid() bool {
+	if d == nil || d.Provider != "lm_fingerprint_detector" || d.Protocol != 1 || d.Algorithm != "shared-detector-v1" {
+		return false
+	}
+	for _, item := range []struct {
+		text string
+		size int
+	}{{d.Revision, 40}, {d.ReferenceSHA256, 64}, {d.RankerSHA256, 64}, {d.CalibrationSHA256, 64}} {
+		decoded, err := hex.DecodeString(item.text)
+		if err != nil || len(decoded)*2 != item.size || item.text != strings.ToLower(item.text) {
+			return false
+		}
+	}
+	_, err := time.Parse(time.RFC3339Nano, d.BankBuiltAt)
+	return err == nil
+}
+
+func (d *AttributionDetector) Version() string {
+	if d == nil {
+		return ""
+	}
+	return strings.Join([]string{d.Revision, d.RankerSHA256, d.ReferenceSHA256, d.CalibrationSHA256}, ":")
+}
+
+func SameAttributionDetector(a, b *AttributionDetector) bool {
+	return a.Valid() && b.Valid() && *a == *b
+}
+
+type AttributionConnection struct {
+	Models   []string             `json:"models"`
+	Detector *AttributionDetector `json:"detector"`
+}
+
 type AttributionCandidate struct {
-	Model       string  `json:"model"`
-	Probability float64 `json:"probability"`
+	Model       string   `json:"model"`
+	Probability *float64 `json:"probability"`
+	Score       *float64 `json:"score,omitempty"`
 }
 type AttributionDiagnostic struct {
 	Index          int  `json:"index"`
@@ -253,18 +300,23 @@ type AttributionDiagnostic struct {
 	Accepted       bool `json:"accepted"`
 }
 type AttributionAnalysis struct {
-	Prediction  string                  `json:"prediction"`
-	Probability float64                 `json:"probability"`
-	UsedOutputs int                     `json:"used_outputs"`
-	Results     []AttributionCandidate  `json:"results"`
-	Diagnostics []AttributionDiagnostic `json:"diagnostics"`
+	Prediction        string                  `json:"prediction"`
+	Probability       *float64                `json:"probability"`
+	RankingScore      *float64                `json:"ranking_score,omitempty"`
+	ProbabilityStatus string                  `json:"probability_status,omitempty"`
+	Method            string                  `json:"method,omitempty"`
+	Detector          *AttributionDetector    `json:"detector,omitempty"`
+	UsedOutputs       int                     `json:"used_outputs"`
+	Results           []AttributionCandidate  `json:"results"`
+	Diagnostics       []AttributionDiagnostic `json:"diagnostics"`
 }
 type AttributionSnapshot struct {
-	ConfigVersion int64             `json:"config_version"`
-	GroupID       int64             `json:"group_id"`
-	Policy        AttributionPolicy `json:"policy"`
-	Authorization string            `json:"-"`
-	Fence         string            `json:"-"`
+	ConfigVersion int64                `json:"config_version"`
+	GroupID       int64                `json:"group_id"`
+	Policy        AttributionPolicy    `json:"policy"`
+	Detector      *AttributionDetector `json:"detector,omitempty"`
+	Authorization string               `json:"-"`
+	Fence         string               `json:"-"`
 }
 type AttributionResult struct {
 	Analysis       *AttributionAnalysis `json:"analysis,omitempty"`

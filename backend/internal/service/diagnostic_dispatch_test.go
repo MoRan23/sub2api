@@ -75,7 +75,7 @@ type blockingAttributionAnalyzer struct {
 	started chan struct{}
 }
 
-func (a *blockingAttributionAnalyzer) Models(ctx context.Context, _ string) ([]string, error) {
+func (a *blockingAttributionAnalyzer) Info(ctx context.Context, _ string) (*AttributionDetector, error) {
 	a.started <- struct{}{}
 	<-ctx.Done()
 	return nil, ctx.Err()

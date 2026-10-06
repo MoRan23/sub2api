@@ -26,7 +26,7 @@ func (r *attributionRepository) transaction(ctx context.Context) (*sql.Tx, error
 		return nil, err
 	}
 	// Serializes capacity allocation, config changes and result application across
-	// replicas. No upstream or ModelTrace calls occur inside this transaction.
+	// replicas. No upstream or detector calls occur inside this transaction.
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(263,1)`); err != nil {
 		_ = tx.Rollback()
 		return nil, err
@@ -178,7 +178,7 @@ func attributionSnapshot(ctx context.Context, tx *sql.Tx, id int64, c service.At
 		}
 		identity["credential_owner"] = owner.Authorization
 	}
-	s := service.AttributionSnapshot{ConfigVersion: c.Version}
+	s := service.AttributionSnapshot{ConfigVersion: c.Version, Detector: c.Detector}
 	s.Policy, s.GroupID = service.ResolveAttributionPolicy(c, a.AccountGroups)
 	s.Authorization = service.AttributionDigest(identity)
 	fence := []any{s.Authorization, a.Credentials["model_mapping"], a.ProxyID, a.AccountGroups, groupVersions, a.Status, a.Schedulable, a.ExpiresAt, a.ParentAccountID, a.IsOpenAIPassthroughEnabled()}
@@ -393,7 +393,7 @@ func (r *attributionRepository) Heartbeat(ctx context.Context, j *service.Attrib
 	return n == 1, err
 }
 func validAttributionSnapshot(old, current service.AttributionSnapshot, skip string) bool {
-	return skip == "" && old.ConfigVersion == current.ConfigVersion && old.Fence == current.Fence
+	return skip == "" && old.ConfigVersion == current.ConfigVersion && old.Fence == current.Fence && service.SameAttributionDetector(old.Detector, current.Detector)
 }
 func (r *attributionRepository) Validate(ctx context.Context, j *service.AttributionJob) (bool, error) {
 	tx, err := r.transaction(ctx)
@@ -463,7 +463,7 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 			j.Result.Action = "unchanged"
 			// Manual and initial tests may use a different probe from the periodic policy.
 			// Keep that baseline distinct so the next periodic result synchronizes it.
-			currentPolicy := service.AttributionDigest([]any{j.Snapshot.GroupID, j.Snapshot.Policy})
+			currentPolicy := service.AttributionDigest([]any{j.Snapshot.GroupID, j.Snapshot.Policy, j.Snapshot.Detector})
 			if j.Status == "passed" {
 				passStreak = 1
 				if version == s.ConfigVersion && auth == s.Authorization && policy == currentPolicy {
