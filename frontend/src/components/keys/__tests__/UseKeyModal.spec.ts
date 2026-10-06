@@ -404,7 +404,6 @@ describe('UseKeyModal', () => {
 
     expect(configToml).toBe(`model_provider = "OpenAI"
 model = "gpt-5.5"
-review_model = "gpt-5.5"
 web_search = "live"
 
 [model_providers.OpenAI]
@@ -556,7 +555,6 @@ token_budget = false`)
     expect(apiKeyMode.attributes('aria-checked')).toBe('true')
     expect(configToml).toBe(`model_provider = "OpenAI"
 model = "gpt-5.5"
-review_model = "gpt-5.5"
 web_search = "live"
 
 [model_providers.OpenAI]
@@ -626,7 +624,7 @@ token_budget = false`)
 
     expect(configToml).toBeDefined()
     expect(configToml).toContain('model = "gpt-5.5"')
-    expect(configToml).toContain('review_model = "gpt-5.5"')
+    expect(configToml).not.toContain('review_model')
     expect(configToml).not.toContain('model = "gpt-5.4"')
     expect(configToml).not.toContain('model_context_window')
     expect(configToml).not.toContain('model_auto_compact_token_limit')
@@ -967,7 +965,7 @@ token_budget = false`)
       .map((code) => code.text())
       .find((content) => content.includes('[model_providers.sub2api]'))
     expect(loadedUnixConfig).toContain('model = "claude-opus-4-8"')
-    expect(loadedUnixConfig).toContain('review_model = "claude-opus-4-8"')
+    expect(loadedUnixConfig).not.toContain('review_model')
     expect(loadedUnixConfig).not.toContain('model = "gpt-5.5"')
     expect(loadedUnixConfig).toContain('model_catalog_json = "~/.codex/codex-models.json"')
     expect(loadedUnixConfig).not.toContain('model_catalog_url')
@@ -1080,7 +1078,7 @@ token_budget = false`)
       .map((code) => code.text())
       .find((content) => content.includes('[model_providers.sub2api]'))
     expect(config).toContain('model = "gpt-5.5"')
-    expect(config).toContain('review_model = "gpt-5.5"')
+    expect(config).not.toContain('review_model')
   })
 
   it('offers remote and optional file catalogs for OpenAI in both transport modes and on both platforms', async () => {

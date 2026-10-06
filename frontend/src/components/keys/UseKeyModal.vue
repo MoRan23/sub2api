@@ -1125,7 +1125,6 @@ function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
   // config.toml content
   const configContent = `model_provider = "OpenAI"
 model = "${model}"
-review_model = "${model}"
 ${reasoningEffortLine}${codexLocalCatalogToml.value}web_search = "live"
 
 [model_providers.OpenAI]
@@ -1364,7 +1363,6 @@ function generateGrokCodexFiles(baseUrl: string, apiKey: string): FileConfig[] {
 model_provider = "sub2api"
 model = "${model}"
 ${codexLocalCatalogToml.value}# Optional:
-# review_model = "${model}"
 # model_reasoning_effort = "medium"
 # model_context_window = 500000
 
@@ -1439,7 +1437,6 @@ function generateRoutedCodexFiles(
   const configContent = `# Codex CLI -> Sub2API ${label} group
 model_provider = "sub2api"
 model = "${model}"
-review_model = "${model}"
 ${codexLocalCatalogToml.value}
 [model_providers.sub2api]
 name = "Sub2API ${label}"
@@ -1472,7 +1469,6 @@ function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
   // config.toml content with WebSocket v2
   const configContent = `model_provider = "OpenAI"
 model = "${model}"
-review_model = "${model}"
 ${reasoningEffortLine}${codexLocalCatalogToml.value}web_search = "live"
 
 [model_providers.OpenAI]
