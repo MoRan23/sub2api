@@ -1,2 +1,3 @@
 # Integrity-checked upstream artifacts must retain their exact bytes on checkout.
 vendor/** -text
+update.sh text eol=lf

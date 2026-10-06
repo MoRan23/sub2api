@@ -1,3 +1,4 @@
 # This adapter ships the exact upstream code and data with its image.
 !vendor/
 !vendor/**
+__pycache__/

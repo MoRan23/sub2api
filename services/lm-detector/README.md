@@ -56,3 +56,46 @@ Sub2API regression tests, and release a new fixed container tag. Never point
 runtime code at `main` or `latest`. Updating the container requires an administrator
 to check the connection and save the new detector version in Sub2API; the
 consecutive-pass baseline then starts again. Old history remains readable.
+
+### Standalone server updater
+
+For the standalone deployment at `/opt/lm-detector`, install `update.sh` and
+`update.py` together in that directory (`chmod 755 update.sh`). Python 3 and
+Docker Compose are required; no host Bun installation or Git checkout is needed.
+The existing Compose file must contain **only** `lm-detector`, use an external
+Sub2API network, and publish no host ports.
+
+```sh
+# Download the latest official main revision and check it without switching.
+/opt/lm-detector/update.sh --check
+
+# Upgrade to an explicitly reviewed upstream commit (recommended).
+/opt/lm-detector/update.sh --ref <full-upstream-commit>
+
+# Or resolve main once and deploy that fixed revision.
+/opt/lm-detector/update.sh
+
+# Restore the previous successfully deployed detector.
+/opt/lm-detector/update.sh --rollback
+```
+
+The updater downloads only the official shared modules, three data files and
+license from the same resolved commit. It regenerates the required integrity
+manifest, retains the installed adapter, builds a fixed image, runs its offline
+tests, and checks a temporary container from the actual `sub2api` container.
+Algorithm/schema changes that break the adapter or tests abort the update; they
+require an adapter update rather than skipping checks. GitHub API/download
+failures also leave the current deployment intact.
+
+Only after validation does it replace the detector with `up --no-deps`. Failed
+switches restore the previous Compose file and image. An exclusive lock prevents
+concurrent updates. Source releases, images, and Compose backups remain available;
+there is no global Docker prune. `--check` retains its candidate source/image but
+removes its temporary container. At least 2 GiB free disk space is required.
+
+Pause automatic attribution before upgrading, then check the connection and save
+the new accepted detector version in the Sub2API admin page before re-enabling it.
+The updater does not change admin settings, restart Sub2API/PostgreSQL/Redis,
+modify database records, or send model requests. The address stays
+`http://lm-detector:8080`. Use `--directory` or `--sub2api-container` for other
+standalone deployment layouts. Updater regression tests: `python3 update_test.py`.
