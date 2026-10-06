@@ -35,6 +35,7 @@ func seedDaybreakTransportCapabilities(t *testing.T, svc *OpenAIGatewayService, 
 }
 
 func TestOAuthDaybreakHTTPFinalizerKeepsRetrySourceAndAuthorization(t *testing.T) {
+	enableDaybreakObservationTest(t)
 	svc := &OpenAIGatewayService{}
 	account := &Account{ID: 8110, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
 		OpenAIOAuthCredentialOS: "windows", OpenAIOAuthCredentialOwnerID: 8110, OpenAIOAuthAuthorizationGeneration: "old",
@@ -61,6 +62,18 @@ func TestOAuthDaybreakHTTPFinalizerKeepsRetrySourceAndAuthorization(t *testing.T
 			require.NoError(t, err)
 			require.NoError(t, replay.Close())
 			require.Equal(t, out, wire)
+			decision := openAIDaybreakDecisionFromRequest(req)
+			expectedSource, expectedReason := "automatic", "automatic"
+			if test.want == "" {
+				expectedSource, expectedReason = "not_added", "excluded_endpoint"
+			} else if test.name == "explicit" {
+				expectedSource, expectedReason = "client", "client_supplied"
+			}
+			require.Equal(t, expectedReason, decision)
+			svc.recordFingerprintObservationWithBody(nil, account, installationIDResolution{}, req.Header, openAIUpstreamRequestBodySnapshot(req, body), decision)
+			observed := SnapshotFingerprintObservations(1)[0].Daybreak
+			require.Equal(t, expectedSource, observed.Source)
+			require.Equal(t, test.want, observed.CyberValue)
 			otherAccount := &Account{ID: 8111, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 			otherReq := httptest.NewRequest(http.MethodPost, "https://chatgpt.com"+test.path, bytes.NewReader(body))
 			other, err := svc.FinalizeOpenAIOAuthResponsesRequest(nil, otherAccount, otherReq, body, OpenAIOAuthResponsesFinalizeOptions{FinalModel: "gpt-6-astra", RequestKind: test.kind})
@@ -73,6 +86,7 @@ func TestOAuthDaybreakHTTPFinalizerKeepsRetrySourceAndAuthorization(t *testing.T
 }
 
 func TestOAuthDaybreakHTTPToWSDoesNotInjectPrewarmOrSourceMap(t *testing.T) {
+	enableDaybreakObservationTest(t)
 	gin.SetMode(gin.TestMode)
 	cfg := newOpenAIWSV2TestConfig()
 	cfg.Gateway.OpenAIWS.PrewarmGenerateEnabled = true
@@ -101,12 +115,16 @@ func TestOAuthDaybreakHTTPToWSDoesNotInjectPrewarmOrSourceMap(t *testing.T) {
 	require.False(t, gjson.Get(prewarm, "access_programs").Exists())
 	require.Equal(t, "daybreak_blue", gjson.Get(inference, "access_programs.cyber").String())
 	require.NotContains(t, source, "access_programs")
+	observed := SnapshotFingerprintObservations(1)[0].Daybreak
+	require.Equal(t, "automatic", observed.Source)
+	require.Equal(t, "daybreak_blue", observed.CyberValue)
 }
 
 func TestOAuthDaybreakWSPhysicalSendUsesEachTurnMappedModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, mode := range []string{OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough, OpenAIWSIngressModeHTTPBridge} {
 		t.Run(mode, func(t *testing.T) {
+			enableDaybreakObservationTest(t)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			staged := newStagedPassthroughConn()
@@ -173,6 +191,21 @@ func TestOAuthDaybreakWSPhysicalSendUsesEachTurnMappedModel(t *testing.T) {
 			case <-done:
 			case <-ctx.Done():
 				t.Fatal("local WS gateway did not exit")
+			}
+			var observations []*OpenAIDaybreakObservation
+			for _, entry := range SnapshotFingerprintObservations(20) {
+				if entry.Daybreak != nil {
+					observations = append(observations, entry.Daybreak)
+				}
+			}
+			require.Len(t, observations, 3)
+			for index, want := range []string{"standard", "daybreak_red", "daybreak_blue"} {
+				require.Equal(t, want, observations[index].CyberValue)
+				source := "automatic"
+				if index == 0 {
+					source = "client"
+				}
+				require.Equal(t, source, observations[index].Source)
 			}
 		})
 	}

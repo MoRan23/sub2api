@@ -100,6 +100,7 @@ type FingerprintObservationEntry struct {
 	RequestIntegrity             *RequestIntegrityObservation   `json:"request_integrity,omitempty"`
 	ConversionCheck              *apicompat.ChatConversionCheck `json:"conversion_check,omitempty"`
 	ResponseEvidence             *CodexModelEvidence            `json:"response_evidence,omitempty"`
+	Daybreak                     *OpenAIDaybreakObservation     `json:"daybreak,omitempty"`
 }
 
 // OpenAIDailyRootObservation is request-local provenance written only after a
@@ -648,7 +649,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservation(c *gin.Context, acco
 // Headers remain authoritative; client_metadata is only a fallback for a
 // schema path that carries server-owned identity in the body but not aliases
 // in the wire header set.
-func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Context, account *Account, pin installationIDResolution, outbound http.Header, body []byte) {
+func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Context, account *Account, pin installationIDResolution, outbound http.Header, body []byte, daybreakDecision ...string) {
 	evidence := beginOpenAIResponseEvidence(c, responseEvidenceModelFromBody(body))
 	state, _ := RequestTimezoneStateFromContext(c)
 	integrity := s.observeOpenAIRequestIntegrity(c, account, outbound, body, "http", state)
@@ -662,6 +663,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 	}
 	entry := buildFingerprintObservationEntry(c, account, pin, outbound, body, trustedIdentity, hasTrustedIdentity, true)
 	entry.EventKind = FingerprintObservationEventHTTP
+	entry.Daybreak = observeOpenAIDaybreak(body, daybreakDecision...)
 	entry.RequestIntegrity = integrity
 	entry.ConversionCheck = GetOpenAIChatConversionCheck(c)
 	entry.OutboundCodexResidencySource = "request_headers"
@@ -918,7 +920,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationFromContext(c *gin.Co
 	s.recordFingerprintObservationFromContextWithBody(c, account, outbound, nil)
 }
 
-func (s *OpenAIGatewayService) recordFingerprintObservationFromContextWithBody(c *gin.Context, account *Account, outbound http.Header, body []byte) {
+func (s *OpenAIGatewayService) recordFingerprintObservationFromContextWithBody(c *gin.Context, account *Account, outbound http.Header, body []byte, daybreakDecision ...string) {
 	if isOpenAICandyTestContext(c) {
 		return
 	}
@@ -926,7 +928,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationFromContextWithBody(c
 		return
 	}
 	pin := installationIDResolutionFromContext(c, account)
-	s.recordFingerprintObservationWithBody(c, account, pin, outbound, body)
+	s.recordFingerprintObservationWithBody(c, account, pin, outbound, body, daybreakDecision...)
 }
 
 func fingerprintObservationTurnMetadataHeaderInstallationID(headers http.Header) string {
@@ -1057,7 +1059,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWSFrame(c *gin.Contex
 // Freeze the checked wire view before sending, then publish only after Write
 // succeeds. The closure retains scalar diagnostics rather than the raw token.
 func (s *OpenAIGatewayService) freezeFingerprintObservationWSFrame(c *gin.Context, account *Account,
-	state *RequestTimezoneState, body []byte, handshakeHeaders http.Header, plan *OpenAIOAuthIdentityPlan) func() {
+	state *RequestTimezoneState, body []byte, handshakeHeaders http.Header, plan *OpenAIOAuthIdentityPlan, daybreakDecision ...string) func() {
 	evidence := responseEvidenceFromContext(c)
 	if evidence == nil {
 		evidence = beginOpenAIResponseEvidence(c, responseEvidenceModelFromBody(body))
@@ -1077,6 +1079,7 @@ func (s *OpenAIGatewayService) freezeFingerprintObservationWSFrame(c *gin.Contex
 	entry := buildFingerprintObservationEntry(c, account, pin, handshakeHeaders, body, identity, trusted, false)
 	populateFingerprintObservationOS(&entry, plan)
 	entry.EventKind = FingerprintObservationEventWSFrame
+	entry.Daybreak = observeOpenAIDaybreak(body, daybreakDecision...)
 	entry.RequestIntegrity = integrity
 	entry.ConversionCheck = GetOpenAIChatConversionCheck(c)
 	entry.OutboundCodexResidencySource = "ws_handshake"

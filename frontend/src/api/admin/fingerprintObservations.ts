@@ -186,7 +186,17 @@ export interface FingerprintObservationEntry {
   outbound_codex_residency_source?: 'request_headers' | 'ws_handshake'
   request_integrity?: RequestIntegrityObservation
   response_evidence?: OpenAIResponseEvidence
+  daybreak?: OpenAIDaybreakObservation
   conversion_check?: RequestConversionCheck
+}
+
+export interface OpenAIDaybreakObservation {
+  cyber_present: boolean
+  cyber_value?: string
+  cyber_type: 'missing' | 'unavailable' | 'string' | 'null' | 'boolean' | 'number' | 'object' | 'array'
+  source: 'automatic' | 'client' | 'not_added' | 'unobserved'
+  reason: string
+  value_truncated?: boolean
 }
 
 export interface FingerprintObservationUserSummary {

@@ -124,6 +124,25 @@ export default {
     expandUnthreaded: '展开未归属线程的观测',
     collapseUnthreaded: '收起未归属线程的观测',
     request: {
+      daybreak: {
+        title: 'Daybreak 出站字段',
+        description: '取自本次出站尝试的最终正文，不代表上游已接收或启用 Daybreak。',
+        source: '字段来源', reason: '补充结果 / 原因', absent: '未携带', handshake: '握手不携带请求正文',
+        truncated: '观测值仅保留前 128 个字符；发送给上游的值未截断。',
+        types: { object: '对象（无效类型，内容未记录）', array: '数组（无效类型，内容未记录）' },
+        sources: { automatic: '自动补充', client: '客户端指定', not_added: '未自动补充', unobserved: '来源未采集' },
+        reasons: {
+          automatic: '开关与当前模型的能力证据满足条件', client_supplied: '保留客户端显式值',
+          blue_disabled: 'Blue 开关关闭', red_disabled: '当前模型要求同时开启 Red',
+          unrecognized_model: '未识别的模型', catalog_unavailable: '无法获取当前授权的模型目录',
+          capability_unavailable: '当前模型目录未声明所需能力', not_oauth: '不适用于此账号认证类型',
+          excluded_endpoint: '独立压缩或计数请求不自动补充', prewarm: '预热请求不自动补充',
+          non_inference: '非推理帧不自动补充', invalid_request: '请求正文无法观测',
+          invalid_access_programs: '客户端 access_programs 不是对象，保留原值',
+          patch_failed: '字段补充失败，保留原请求', decision_unobserved: '仅观测字段，未采集补充决策',
+          final_value_changed: '最终字段与自动补充结果不一致，来源无法确认',
+        },
+      },
       egressLocation: {
         title: '本次地域目标',
         status: { fresh: '出口地域已确认', stale: '沿用近期出口地域', fallback: 'Seattle 兜底' },

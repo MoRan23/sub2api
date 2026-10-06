@@ -1060,7 +1060,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if account.Platform == PlatformOpenAI {
 			upstreamReq = ApplyOpenAIRequestPolicy(upstreamReq, s.settingService)
 		}
-		s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, openAIUpstreamRequestBodySnapshot(upstreamReq, body))
+		s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, openAIUpstreamRequestBodySnapshot(upstreamReq, body), openAIDaybreakDecisionFromRequest(upstreamReq))
 
 		// Get proxy URL
 		proxyURL := OpenAIOutboundRouteForAccount(c, account).ProxyURL

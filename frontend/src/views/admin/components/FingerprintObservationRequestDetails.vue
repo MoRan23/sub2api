@@ -4,6 +4,9 @@
       <span class="font-medium">{{ t(`${prefix}.details`) }}</span>
       <span class="ml-3">{{ t(`${prefix}.comparison.${observation.timezone_comparison_status ?? 'not_collected'}`) }}</span>
       <span class="ml-3">{{ t(`${prefix}.residency`) }}: {{ residencyValue }}</span>
+      <span class="ml-3" data-testid="daybreak-summary">
+        Daybreak: {{ daybreakValue }}<template v-if="observation.daybreak"> · {{ t(`${daybreakPrefix}.sources.${observation.daybreak.source}`) }}</template>
+      </span>
       <span v-if="observation.request_integrity" class="ml-3" data-testid="request-integrity-summary">
         {{ t(`${integrityPrefix}.title`) }}: {{ t(`${integrityPrefix}.status.${observation.request_integrity.status}`) }}
       </span>
@@ -31,6 +34,27 @@
       </dl>
       <OpenAIEgressLocationDetails v-if="observation.egress_location" :location="observation.egress_location" />
       <OpenAIResponseEvidenceDetails v-if="observation.response_evidence" :evidence="observation.response_evidence" />
+      <section :aria-label="t(`${daybreakPrefix}.title`)" class="min-w-0 rounded-lg border border-gray-200 p-3 dark:border-dark-700" data-testid="daybreak-details">
+        <h3 class="font-semibold text-gray-800 dark:text-gray-200">{{ t(`${daybreakPrefix}.title`) }}</h3>
+        <p class="mt-1 text-gray-500 dark:text-gray-400">{{ t(`${daybreakPrefix}.description`) }}</p>
+        <dl class="mt-3 grid gap-3 sm:grid-cols-3">
+          <div class="min-w-0">
+            <dt class="text-gray-500 dark:text-gray-400">access_programs.cyber</dt>
+            <dd class="mt-1 break-all font-mono text-gray-800 dark:text-gray-200">{{ daybreakValue }}</dd>
+          </div>
+          <template v-if="observation.daybreak">
+            <div>
+              <dt class="text-gray-500 dark:text-gray-400">{{ t(`${daybreakPrefix}.source`) }}</dt>
+              <dd class="mt-1 text-gray-800 dark:text-gray-200">{{ t(`${daybreakPrefix}.sources.${observation.daybreak.source}`) }}</dd>
+            </div>
+            <div>
+              <dt class="text-gray-500 dark:text-gray-400">{{ t(`${daybreakPrefix}.reason`) }}</dt>
+              <dd class="mt-1 break-words text-gray-800 dark:text-gray-200">{{ daybreakReason }}</dd>
+            </div>
+          </template>
+        </dl>
+        <p v-if="observation.daybreak?.value_truncated" class="mt-2 text-amber-700 dark:text-amber-400">{{ t(`${daybreakPrefix}.truncated`) }}</p>
+      </section>
       <p v-if="observation.event_kind === 'ws_response_create'" class="text-gray-500 dark:text-gray-400">{{ t(`${prefix}.frameAttempt`) }}</p>
 
       <section v-if="observation.conversion_check" :aria-label="t(`${conversionPrefix}.title`)" class="min-w-0 rounded-lg border border-gray-200 p-3 dark:border-dark-700" data-testid="conversion-check-details">
@@ -173,6 +197,20 @@ const { t, te, locale } = useI18n()
 const prefix = 'admin.fingerprintObservation.request'
 const integrityPrefix = `${prefix}.integrity`
 const conversionPrefix = `${prefix}.conversionCheck`
+const daybreakPrefix = `${prefix}.daybreak`
+const daybreakValue = computed(() => {
+  const entry = props.observation.daybreak
+  if (!entry) return t(props.observation.event_kind === 'ws_handshake' ? `${daybreakPrefix}.handshake` : `${prefix}.notCollected`)
+  if (entry.cyber_type === 'unavailable') return t(`${prefix}.notCollected`)
+  if (!entry.cyber_present) return t(`${daybreakPrefix}.absent`)
+  if (entry.cyber_type === 'object' || entry.cyber_type === 'array') return t(`${daybreakPrefix}.types.${entry.cyber_type}`)
+  return entry.cyber_type === 'string' ? JSON.stringify(entry.cyber_value ?? '') : entry.cyber_value ?? entry.cyber_type
+})
+const daybreakReason = computed(() => {
+  const reason = props.observation.daybreak?.reason ?? ''
+  const key = `${daybreakPrefix}.reasons.${reason}`
+  return te(key) ? t(key) : reason
+})
 const detailsOpen = ref(false)
 const hasOutboundSearchLocation = computed(() => props.observation.outbound_timezone_observations?.items?.some(item => item.source === 'web_search' && item.location))
 const hasAlignedInputDifferences = computed(() => props.observation.request_integrity?.changed_fields?.some(field => /^input\.(before|after)\[/.test(field)))

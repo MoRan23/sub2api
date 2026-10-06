@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -12,9 +13,9 @@ import (
 // physical request. Keep account-local preferences while resolving capabilities
 // against its credential owner; never let a later default-OS change choose them.
 // Call only at a physical inference-send boundary, after preserving retry input.
-func (s *OpenAIGatewayService) applyOpenAIDaybreakForPlan(ctx context.Context, account *Account, plan OpenAIOAuthIdentityPlan, body []byte) []byte {
-	if account == nil || !account.IsOpenAIOAuth() {
-		return body
+func (s *OpenAIGatewayService) applyOpenAIDaybreakForPlan(ctx context.Context, account *Account, plan OpenAIOAuthIdentityPlan, body []byte) ([]byte, string) {
+	if !IsOpenAIDaybreakAccount(account) {
+		return body, "not_oauth"
 	}
 	scoped := *account
 	if plan.CredentialOS != "" {
@@ -22,7 +23,21 @@ func (s *OpenAIGatewayService) applyOpenAIDaybreakForPlan(ctx context.Context, a
 		scoped.OpenAIOAuthCredentialOwnerID = plan.OSOwnerID
 		scoped.OpenAIOAuthAuthorizationGeneration = plan.AuthorizationGeneration
 	}
-	return s.applyOpenAIDaybreak(ctx, &scoped, body)
+	return s.applyOpenAIDaybreakWithDecision(ctx, &scoped, body)
+}
+
+type openAIDaybreakDecisionContextKey struct{}
+
+func setOpenAIDaybreakDecision(req *http.Request, decision string) {
+	*req = *req.WithContext(context.WithValue(req.Context(), openAIDaybreakDecisionContextKey{}, decision))
+}
+
+func openAIDaybreakDecisionFromRequest(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+	decision, _ := req.Context().Value(openAIDaybreakDecisionContextKey{}).(string)
+	return decision
 }
 
 // restoreOpenAIClientAccessPrograms carries the original JSON value around

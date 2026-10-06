@@ -125,6 +125,25 @@ export default {
     expandUnthreaded: 'Expand unthreaded observations',
     collapseUnthreaded: 'Collapse unthreaded observations',
     request: {
+      daybreak: {
+        title: 'Daybreak outbound field',
+        description: 'Read from the final body of this outbound attempt; this does not confirm upstream receipt or activation of Daybreak.',
+        source: 'Field source', reason: 'Decision / reason', absent: 'Not present', handshake: 'Handshake has no request body',
+        truncated: 'Only the first 128 characters are recorded; the upstream value was not truncated.',
+        types: { object: 'Object (invalid type; contents not recorded)', array: 'Array (invalid type; contents not recorded)' },
+        sources: { automatic: 'Automatically added', client: 'Client supplied', not_added: 'Not automatically added', unobserved: 'Source not collected' },
+        reasons: {
+          automatic: 'Switches and current model capability evidence allow injection', client_supplied: 'Preserved the explicit client value',
+          blue_disabled: 'Blue switch is off', red_disabled: 'This model also requires Red',
+          unrecognized_model: 'Unrecognized model', catalog_unavailable: 'Current authorization model catalog is unavailable',
+          capability_unavailable: 'Current model catalog does not declare the required capability', not_oauth: 'Not applicable to this account authentication type',
+          excluded_endpoint: 'Standalone compaction and token counting do not receive automatic fields', prewarm: 'Prewarm requests do not receive automatic fields',
+          non_inference: 'Non-inference frames do not receive automatic fields', invalid_request: 'Request body could not be observed',
+          invalid_access_programs: 'Client access_programs is not an object; preserved unchanged',
+          patch_failed: 'Could not add the field; original request preserved', decision_unobserved: 'Field observed without an injection decision',
+          final_value_changed: 'Final field differs from the automatic result; source cannot be confirmed',
+        },
+      },
       egressLocation: {
         title: 'Request location target',
         status: { fresh: 'Exit location confirmed', stale: 'Recent exit location retained', fallback: 'Seattle fallback' },

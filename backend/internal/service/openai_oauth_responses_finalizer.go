@@ -143,11 +143,13 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 	}
 	applyOpenAICodexRoutingHintFromPlan(req.Header, finalPlan)
 	finalBody := s.guardOpenAICodexTurnStateEchoForPlan(c, account, finalPlan, req.Header, projectedBody)
+	daybreakDecision := "excluded_endpoint"
 	if !isOpenAIResponsesCompactPath(c) && finalPlan.ProjectionMode != OpenAIOAuthIdentityProjectionCompact &&
 		!strings.HasSuffix(strings.TrimRight(req.URL.Path, "/"), "/compact") &&
 		!strings.HasSuffix(strings.TrimRight(req.URL.Path, "/"), "/input_tokens") {
-		finalBody = s.applyOpenAIDaybreakForPlan(req.Context(), account, finalPlan, finalBody)
+		finalBody, daybreakDecision = s.applyOpenAIDaybreakForPlan(req.Context(), account, finalPlan, finalBody)
 	}
+	setOpenAIDaybreakDecision(req, daybreakDecision)
 	setOpenAIRequestBodySnapshot(req, finalBody)
 
 	if finalPlan.TurnIdentityEnabled {

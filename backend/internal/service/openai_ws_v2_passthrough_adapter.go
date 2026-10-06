@@ -1119,7 +1119,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				payload = updated
 			}
-			payload = s.applyOpenAIDaybreakForPlan(ctx, account, framePlan, payload)
+			payload, daybreakDecision := s.applyOpenAIDaybreakForPlan(ctx, account, framePlan, payload)
 			nextEvidence := beginOpenAIResponseEvidence(c, gjson.GetBytes(payload, "model").String())
 			if firstResponseEvidenceFrame {
 				observeOpenAIResponseEvidenceHeaders(nextEvidence, handshakeHeaders, "connection")
@@ -1128,7 +1128,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			responseEvidenceMu.Lock()
 			responseEvidence = nextEvidence
 			responseEvidenceMu.Unlock()
-			pendingFrameObservation = s.freezeFingerprintObservationWSFrame(c, account, currentTimezoneState, payload, physicalObservationHeaders, openAIWSObservationFramePlan(account, &framePlan))
+			pendingFrameObservation = s.freezeFingerprintObservationWSFrame(c, account, currentTimezoneState, payload, physicalObservationHeaders, openAIWSObservationFramePlan(account, &framePlan), daybreakDecision)
 			recordOpenAICodexGuardianSourceThread(framePlan, nil, payload)
 			currentTelemetry().finish(false)
 			telemetryFrameNumber++

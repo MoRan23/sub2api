@@ -349,6 +349,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			account,
 			upstreamReq.Header,
 			openAIUpstreamRequestBodySnapshot(upstreamReq, body),
+			openAIDaybreakDecisionFromRequest(upstreamReq),
 		)
 
 		upstreamStart := time.Now()

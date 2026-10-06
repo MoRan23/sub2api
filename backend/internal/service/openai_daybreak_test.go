@@ -155,7 +155,11 @@ func TestOpenAIDaybreakCatalogFailureDoesNotChangeHealthOrBody(t *testing.T) {
 			account.Extra = map[string]any{OpenAIDaybreakBlueEnabledKey: true}
 			registerAuxiliaryOSFixture(t, s, account)
 			body := []byte(`{"model":"gpt-6-sol","input":"test"}`)
-			require.Equal(t, body, s.applyOpenAIDaybreak(context.Background(), account, body))
+			wire, decision := s.applyOpenAIDaybreakWithDecision(context.Background(), account, body)
+			require.Equal(t, body, wire)
+			observation := observeOpenAIDaybreak(wire, decision)
+			require.Equal(t, "catalog_unavailable", observation.Reason)
+			require.Equal(t, "not_added", observation.Source)
 			require.EqualValues(t, 1, calls.Load())
 			require.Zero(t, repo.setErrorCalls)
 			require.Zero(t, repo.setTempUnschedCalls)

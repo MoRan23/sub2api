@@ -1167,12 +1167,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		// Keep the source-guarded payload for a permitted protocol repair retry.
 		guardedRetryPayload := append([]byte(nil), payload...)
-		payload = s.applyOpenAIDaybreakForPlan(ctx, account, pinnedIdentityPlan, payload)
+		var daybreakDecision string
+		payload, daybreakDecision = s.applyOpenAIDaybreakForPlan(ctx, account, pinnedIdentityPlan, payload)
 		payloadBytes = len(payload)
 		responseEvidence := beginOpenAIResponseEvidence(c, gjson.GetBytes(payload, "model").String())
 		observeOpenAIResponseEvidenceHeaders(responseEvidence, lease.ClaimResponseEvidenceHeaders(), "connection")
 		timezoneState, _ := RequestTimezoneStateFromContext(c)
-		recordFrameObservation := s.freezeFingerprintObservationWSFrame(c, account, timezoneState, payload, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &pinnedIdentityPlan))
+		recordFrameObservation := s.freezeFingerprintObservationWSFrame(c, account, timezoneState, payload, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &pinnedIdentityPlan), daybreakDecision)
 		recordOpenAICodexGuardianSourceThread(pinnedIdentityPlan, nil, payload)
 		telemetry = s.beginCodexTelemetryWS(withCodexTelemetryGatewayContext(ctx, c, account, fmt.Sprintf("ws:%d", turn), &pinnedIdentityPlan), account, lease.FingerprintObservationHeaders(), baseAcquireReq.Headers, payload)
 		telemetryWriteStarted := time.Now()

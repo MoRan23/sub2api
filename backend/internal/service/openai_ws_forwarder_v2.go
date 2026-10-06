@@ -409,11 +409,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if raw, ok := wirePayload.(json.RawMessage); ok {
 		observationBody = raw
 	}
-	observationBody = s.applyOpenAIDaybreakForPlan(ctx, account, outboundIdentityPlan, observationBody)
+	observationBody, daybreakDecision := s.applyOpenAIDaybreakForPlan(ctx, account, outboundIdentityPlan, observationBody)
 	wirePayload = json.RawMessage(observationBody)
 	responseEvidence := beginOpenAIResponseEvidence(c, gjson.GetBytes(observationBody, "model").String())
 	observeOpenAIResponseEvidenceHeaders(responseEvidence, lease.ClaimResponseEvidenceHeaders(), "connection")
-	recordFrameObservation := s.freezeFingerprintObservationWSFrame(c, account, timezoneState, observationBody, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &outboundIdentityPlan))
+	recordFrameObservation := s.freezeFingerprintObservationWSFrame(c, account, timezoneState, observationBody, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &outboundIdentityPlan), daybreakDecision)
 	recordOpenAICodexGuardianSourceThread(outboundIdentityPlan, nil, observationBody)
 	telemetry := s.beginCodexTelemetryWS(withCodexTelemetryGatewayContext(ctx, c, account, "http", &outboundIdentityPlan), account, lease.FingerprintObservationHeaders(), wsHeaders, observationBody)
 	defer func() {

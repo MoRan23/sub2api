@@ -87,6 +87,7 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 		account,
 		req.Header,
 		openAIUpstreamRequestBodySnapshot(req, body),
+		openAIDaybreakDecisionFromRequest(req),
 	)
 
 	upstreamStart := time.Now()
@@ -178,6 +179,7 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 		account,
 		req.Header,
 		openAIUpstreamRequestBodySnapshot(req, responsesBody),
+		openAIDaybreakDecisionFromRequest(req),
 	)
 
 	upstreamStart := time.Now()

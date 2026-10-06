@@ -38,6 +38,51 @@ async function openDetails() {
 afterEach(cleanup)
 
 describe('FingerprintObservationRequestDetails', () => {
+  it.each([
+    ['automatic', 'automatic', 'Automatically added'],
+    ['client', 'client_supplied', 'Client supplied'],
+  ] as const)('distinguishes %s from the same Daybreak wire value', async (source, reason, label) => {
+    renderDetails({ daybreak: { cyber_present: true, cyber_value: 'daybreak_blue', cyber_type: 'string', source, reason } })
+    expect(screen.getByTestId('daybreak-summary').textContent).toContain('daybreak_blue')
+    expect(screen.getByTestId('daybreak-summary').textContent).toContain(label)
+    expect(screen.queryByTestId('daybreak-details')).toBeNull()
+    await openDetails()
+    const detail = within(screen.getByTestId('daybreak-details'))
+    expect(detail.getByText('access_programs.cyber')).toBeTruthy()
+    expect(detail.getByText('"daybreak_blue"')).toBeTruthy()
+    expect(detail.getByText(label)).toBeTruthy()
+    expect(detail.getByText(en.fingerprintObservation.request.daybreak.description)).toBeTruthy()
+  })
+
+  it('shows a skipped injection and the reason without implying a field was sent', async () => {
+    renderDetails({ daybreak: { cyber_present: false, cyber_type: 'missing', source: 'not_added', reason: 'capability_unavailable' } })
+    await openDetails()
+    const detail = within(screen.getByTestId('daybreak-details'))
+    expect(detail.getByText('Not present')).toBeTruthy()
+    expect(detail.getByText('Current model catalog does not declare the required capability')).toBeTruthy()
+    expect(detail.queryByText('Automatically added')).toBeNull()
+  })
+
+  it('keeps an explicit null distinct from an absent field', async () => {
+    renderDetails({ daybreak: { cyber_present: true, cyber_type: 'null', cyber_value: 'null', source: 'client', reason: 'client_supplied' } })
+    await openDetails()
+    const detail = within(screen.getByTestId('daybreak-details'))
+    expect(detail.getByText('null')).toBeTruthy()
+    expect(detail.queryByText('Not present')).toBeNull()
+  })
+
+  it.each([
+    [undefined, 'Not collected'],
+    ['ws_handshake', 'Handshake has no request body'],
+  ] as const)('does not invent Daybreak data for %s observations', async (event_kind, label) => {
+    renderDetails({ event_kind })
+    await openDetails()
+    const detail = within(screen.getByTestId('daybreak-details'))
+    expect(detail.getByText(label)).toBeTruthy()
+    expect(detail.queryByText('Not present')).toBeNull()
+    expect(detail.queryByText('Automatically added')).toBeNull()
+  })
+
   it('shows the frozen operating system, selection source and corresponding daily root', async () => {
     renderDetails({
       routing_os_family: 'macos', routing_os_source: 'environment_context',

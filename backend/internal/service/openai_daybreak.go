@@ -178,48 +178,73 @@ func (s *OpenAIGatewayService) GetOpenAIDaybreakCapabilities(ctx context.Context
 
 // Only absent fields can be filled. Invalid/explicit null objects and values
 // remain the client's responsibility and must reach upstream without repair.
-func canSupplementOpenAIDaybreak(body []byte) bool {
+func openAIDaybreakInputSkipReason(body []byte) string {
 	if !gjson.ValidBytes(body) {
-		return false
+		return "invalid_request"
 	}
 	root := gjson.ParseBytes(body)
 	if !root.IsObject() {
-		return false
+		return "invalid_request"
 	}
 	if frameType := root.Get("type"); frameType.Exists() && frameType.String() != "response.create" {
-		return false
+		return "non_inference"
 	}
 	if generate := root.Get("generate"); generate.Type == gjson.False {
-		return false
+		return "prewarm"
 	}
 	programs := root.Get("access_programs")
-	return !programs.Exists() || programs.IsObject() && !programs.Get("cyber").Exists()
+	if programs.Exists() && !programs.IsObject() {
+		return "invalid_access_programs"
+	}
+	if programs.Get("cyber").Exists() {
+		return "client_supplied"
+	}
+	return ""
 }
 
 // applyOpenAIDaybreak runs only at the physical inference send boundary. It
 // never writes the source body used for another account attempt or prewarming.
 func (s *OpenAIGatewayService) applyOpenAIDaybreak(ctx context.Context, account *Account, body []byte) []byte {
-	if s == nil || !openAIDaybreakEnabled(account, OpenAIDaybreakBlueEnabledKey) || !canSupplementOpenAIDaybreak(body) {
-		return body
+	patched, _ := s.applyOpenAIDaybreakWithDecision(ctx, account, body)
+	return patched
+}
+
+// The decision travels with this physical request/frame, never in shared turn
+// state. Observers still read the value from the final outbound body.
+func (s *OpenAIGatewayService) applyOpenAIDaybreakWithDecision(ctx context.Context, account *Account, body []byte) ([]byte, string) {
+	if reason := openAIDaybreakInputSkipReason(body); reason != "" {
+		return body, reason
+	}
+	if !IsOpenAIDaybreakAccount(account) {
+		return body, "not_oauth"
+	}
+	if !openAIDaybreakEnabled(account, OpenAIDaybreakBlueEnabledKey) {
+		return body, "blue_disabled"
+	}
+	if s == nil {
+		return body, "catalog_unavailable"
 	}
 	model, recognized := openAIDaybreakModels[strings.TrimSpace(gjson.GetBytes(body, "model").String())]
-	if !recognized || model.RequiredTier == "red" && !openAIDaybreakEnabled(account, OpenAIDaybreakRedEnabledKey) {
-		return body
+	if !recognized {
+		return body, "unrecognized_model"
+	}
+	if model.RequiredTier == "red" && !openAIDaybreakEnabled(account, OpenAIDaybreakRedEnabledKey) {
+		return body, "red_disabled"
 	}
 	capabilities := s.openAICodexModelCapabilities(openAICodexModelCapabilitiesNamespace(account), model.Model)
 	if !capabilities.Known {
 		credential, _, err := s.fetchOpenAIDaybreakCatalog(ctx, account)
 		if err != nil {
-			return body
+			return body, "catalog_unavailable"
 		}
 		capabilities = s.openAICodexModelCapabilities(openAICodexModelCapabilitiesNamespace(credential), model.Model)
 	}
 	if !openAIDaybreakModelSupported(model, capabilities) {
-		return body
+		return body, "capability_unavailable"
 	}
 	patched, err := sjson.SetBytes(body, "access_programs.cyber", model.Cyber)
 	if err != nil {
-		return body
+		return body, "patch_failed"
 	}
-	return patched
+	return patched, "automatic"
 }
