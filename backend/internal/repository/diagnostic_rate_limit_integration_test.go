@@ -36,7 +36,8 @@ func TestAttributionRateLimitedManualPeriodicAndRecovery(t *testing.T) {
 	ended, err := r.Get(ctx, claimed.ID)
 	require.NoError(t, err)
 	require.Equal(t, "passed", ended.Status)
-	require.Equal(t, "high", ended.Result.Action)
+	require.Equal(t, "awaiting_confirmation", ended.Result.Action)
+	require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
 	_, err = integrationDB.Exec(`UPDATE accounts SET rate_limit_reset_at=NOW()-interval '1 second' WHERE id=$1;`, a.ID)
 	require.NoError(t, err)
 	_, err = integrationDB.Exec(`UPDATE model_attribution_state SET next_due_at=NOW() WHERE account_id=$1`, a.ID)
@@ -61,6 +62,7 @@ func TestAttributionRateLimitedManualPeriodicAndRecovery(t *testing.T) {
 	require.Equal(t, "skipped", ended.Status)
 	require.Equal(t, "account_rate_limited", ended.Reason)
 	require.Equal(t, before, attributionMapping(t, ar, a.ID))
+	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
 }
 
 func TestAttributionDirectProbeModelLimitAndInitialTests(t *testing.T) {

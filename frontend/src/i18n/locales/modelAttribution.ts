@@ -1,12 +1,13 @@
 export const attributionZh = {
-  title: '降智检测', column: '归因测试', description: '定期核对模型归因，按检测结果自动切换账户模型白名单。',
+  title: '降智检测', column: '归因测试', description: '定期核对模型归因：连续通过两次才应用高级白名单，不通过则立即应用低级白名单。',
   global: '全局配置', enabled: '启用自动检测', service: 'ModelTrace 服务地址', model: '探针 / 期望模型', high: '高级模型白名单', low: '低级模型白名单',
-  connect: '测试连接并获取候选模型', candidates: '已收录的候选模型', saved: '配置已保存，下次有效检测生效。', save: '保存配置', reload: '重新加载配置',
+  connect: '测试连接并获取候选模型', candidates: '已收录的候选模型', saved: '配置已保存，后续检测按新配置累计；连续通过两次才应用高级白名单。', save: '保存配置', reload: '重新加载配置',
   groupTitle: '分组配置', addGroup: '添加分组配置', inherit: '继承全局配置', independent: '启用独立配置', remove: '移除', group: '分组', version: '配置版本',
   groupHelp: '多分组账户先按优先级选定分组：该组启用独立配置时使用组内配置，否则使用全局默认配置。',
   priority: { title: '分组优先级', help: '从上到下优先级递减，统一决定多分组账号使用哪组高级、低级模型白名单。未列出的分组排在后面，按账户分组优先级及分组 ID 排序；继承全局的分组也参与选择，选中时使用全局配置。', add: '加入排序', up: '上移', down: '下移' },
   retries: '自动重试次数',
-  notice: 'OpenAI OAuth 账户每 10 分钟自动检测；API Key 账户仅手动检测。每轮 3 条探针，不同账户同时检测。临时上游错误最多重试 2 次，总时限 10 分钟。检测及重试会消耗上游额度；执行失败或归因异常不会修改白名单。',
+  notice: 'OpenAI OAuth 账户每 10 分钟自动检测；API Key 账户仅手动检测。每轮 3 条探针，不同账户同时检测。连续通过两次才应用高级白名单，不通过立即降级。失败、异常或跳过会打断连续通过，但不修改白名单。临时上游错误最多重试 2 次，总时限 10 分钟；检测及重试会消耗上游额度。',
+  passStreak: '连续通过次数',
   manualOnly: '仅手动',
   manualModelDefault: '跟随各账号的检测配置',
   manualHelp: '可选择候选模型或输入模型 ID，仅用于本次测试，不修改自动检测模型。手动测试不受自动检测开关、账号状态、调度开关、过期或本地限流标记限制；有效结果仍按已配置的高低级白名单处理，未配置名单时仅记录结果。',
@@ -28,7 +29,7 @@ export const attributionZh = {
   duration: '耗时', usage: '用量（输入 / 输出 tokens）', action: '白名单处理', changes: '模型映射变化', before: '变更前', after: '变更后', source: '来源', scheduled: '自动', manual: '手动',
   diagnostics: '探针有效性', evidence: '实际出站 / 上游声明模型', reason: '原因', allGroups: '全局默认', close: '关闭', loading: '加载中…', error: '操作失败，请重试。',
   status: { queued: '启动中', running: '检测中', passed: '通过', mismatch: '不通过', abnormal: '异常', failed: '执行失败', skipped: '已跳过' },
-  actions: { high: '已应用高级白名单', low: '已应用低级白名单', unchanged: '无需修改', stale: '结果已过期，未修改', none: '未修改', unconfigured: '未配置高低级白名单，仅记录结果' },
+  actions: { high: '已应用高级白名单', low: '已应用低级白名单', awaiting_confirmation: '已通过 1 次，等待再次通过；白名单未修改', unchanged: '无需修改', stale: '结果已过期，未修改', none: '未修改', unconfigured: '未配置高低级白名单，仅记录结果' },
   reasons: {
     service_unconfigured: '请先配置 ModelTrace 服务地址',
     account_rate_limited: '账户或测试模型当前被限流，已跳过测试',
@@ -39,14 +40,15 @@ export const attributionZh = {
   }
 }
 export const attributionEn = {
-  title: 'Model attribution', column: 'Attribution', description: 'Check model attribution periodically and switch account model allowlists.',
+  title: 'Model attribution', column: 'Attribution', description: 'Apply the high-tier allowlist after two consecutive passes; apply the low-tier allowlist immediately on a mismatch.',
   global: 'Global configuration', enabled: 'Enable automatic detection', service: 'ModelTrace service URL', model: 'Probe / expected model', high: 'High-tier model allowlist', low: 'Low-tier model allowlist',
-  connect: 'Test connection and fetch models', candidates: 'Enrolled candidate models', saved: 'Saved. Changes apply after the next valid detection.', save: 'Save configuration', reload: 'Reload configuration',
+  connect: 'Test connection and fetch models', candidates: 'Enrolled candidate models', saved: 'Saved. Subsequent checks use the new configuration; two consecutive passes are required for the high-tier allowlist.', save: 'Save configuration', reload: 'Reload configuration',
   groupTitle: 'Group configuration', addGroup: 'Add group configuration', inherit: 'Inherit global configuration', independent: 'Enable independent configuration', remove: 'Remove', group: 'Group', version: 'Configuration version',
   groupHelp: 'Select the highest-priority group first. Use its independent policy if enabled; otherwise use the global defaults.',
   priority: { title: 'Group priority', help: 'Higher entries win when an account belongs to multiple groups. Unlisted groups follow account-group priority, then group ID. Groups inheriting global settings also participate and use global settings when selected.', add: 'Add to order', up: 'Move up', down: 'Move down' },
   retries: 'Automatic retries',
-  notice: 'OpenAI OAuth accounts are checked automatically every 10 minutes; API Key accounts are tested manually only. Three probes per account; accounts run concurrently. Transient upstream errors retry up to twice within the ten-minute deadline. Probes and retries consume upstream quota. Failed or abnormal detections leave allowlists unchanged.',
+  notice: 'OpenAI OAuth accounts are checked every 10 minutes; API Key accounts are tested manually only. Three probes per account; accounts run concurrently. Two consecutive passes apply the high-tier allowlist; a mismatch immediately downgrades it. Failed, abnormal or skipped tests break the pass streak without changing allowlists. Transient upstream errors retry up to twice within ten minutes. Probes and retries consume upstream quota.',
+  passStreak: 'Consecutive passes',
   manualOnly: 'Manual only',
   manualModelDefault: 'Use each account’s detection configuration',
   manualHelp: 'Choose a candidate or enter a model ID for this test only. Automatic model settings stay unchanged. Manual tests ignore automatic detection, account status, scheduling, expiry and local rate-limit flags. Valid results still apply configured allowlists; without both lists, only the result is recorded.',
@@ -68,7 +70,7 @@ export const attributionEn = {
   duration: 'Duration', usage: 'Usage (input / output tokens)', action: 'Allowlist action', changes: 'Model mapping changes', before: 'Before', after: 'After', source: 'Source', scheduled: 'Automatic', manual: 'Manual',
   diagnostics: 'Probe validity', evidence: 'Outbound / upstream model', reason: 'Reason', allGroups: 'Global default', close: 'Close', loading: 'Loading…', error: 'Operation failed. Please retry.',
   status: { queued: 'Starting', running: 'Running', passed: 'Passed', mismatch: 'Mismatch', abnormal: 'Abnormal', failed: 'Failed', skipped: 'Skipped' },
-  actions: { high: 'High-tier allowlist applied', low: 'Low-tier allowlist applied', unchanged: 'No change needed', stale: 'Stale result, no changes', none: 'Unchanged', unconfigured: 'Allowlists not configured; result recorded only' },
+  actions: { high: 'High-tier allowlist applied', low: 'Low-tier allowlist applied', awaiting_confirmation: 'Passed once; awaiting another pass. Allowlist unchanged', unchanged: 'No change needed', stale: 'Stale result, no changes', none: 'Unchanged', unconfigured: 'Allowlists not configured; result recorded only' },
   reasons: {
     service_unconfigured: 'Configure the ModelTrace service URL first',
     account_rate_limited: 'Account or probe model is rate limited; test skipped',

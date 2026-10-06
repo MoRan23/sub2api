@@ -338,7 +338,7 @@ func enqueueAttribution(ctx context.Context, tx *sql.Tx, id int64, c service.Att
 	if err != nil {
 		return nil, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO model_attribution_state(account_id,next_due_at) VALUES($1,NOW()+interval '10 minutes') ON CONFLICT(account_id) DO UPDATE SET next_due_at=EXCLUDED.next_due_at`, id)
+	_, err = tx.ExecContext(ctx, `INSERT INTO model_attribution_state(account_id,next_due_at) VALUES($1,NOW()+interval '10 minutes') ON CONFLICT(account_id) DO UPDATE SET next_due_at=EXCLUDED.next_due_at,pass_streak=CASE WHEN $2 THEN 0 ELSE model_attribution_state.pass_streak END`, id, state == "skipped")
 	return j, err
 }
 
@@ -348,7 +348,7 @@ func (r *attributionRepository) Claim(ctx context.Context) (*service.Attribution
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	expired, err := tx.ExecContext(ctx, `UPDATE model_attribution_jobs SET status='failed',reason=CASE WHEN started_at<=NOW()-interval '10 minutes' THEN 'timeout' ELSE 'interrupted' END,finished_at=NOW(),lease_until=NULL WHERE status='running' AND (lease_until<NOW() OR started_at<NOW()-interval '10 minutes')`)
+	expired, err := tx.ExecContext(ctx, `WITH ended AS (UPDATE model_attribution_jobs SET status='failed',reason=CASE WHEN started_at<=NOW()-interval '10 minutes' THEN 'timeout' ELSE 'interrupted' END,finished_at=NOW(),lease_until=NULL WHERE status='running' AND (lease_until<NOW() OR started_at<NOW()-interval '10 minutes') RETURNING account_id) UPDATE model_attribution_state SET pass_streak=0 WHERE account_id IN (SELECT account_id FROM ended)`)
 	if err != nil {
 		return nil, err
 	}
@@ -358,7 +358,7 @@ func (r *attributionRepository) Claim(ctx context.Context) (*service.Attribution
 	}
 	var disabledCount int64
 	if !c.Enabled {
-		disabled, e := tx.ExecContext(ctx, `UPDATE model_attribution_jobs SET status='skipped',reason='disabled',finished_at=NOW() WHERE status='queued' AND source<>'manual'`)
+		disabled, e := tx.ExecContext(ctx, `WITH ended AS (UPDATE model_attribution_jobs SET status='skipped',reason='disabled',finished_at=NOW() WHERE status='queued' AND source<>'manual' RETURNING account_id) UPDATE model_attribution_state SET pass_streak=0 WHERE account_id IN (SELECT account_id FROM ended)`)
 		if e != nil {
 			return nil, e
 		}
@@ -428,6 +428,8 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 	if !owned {
 		return nil
 	}
+	passStreak := 0
+	j.Result.PassStreak = 0
 	if j.Status == "passed" || j.Status == "mismatch" {
 		c, e := attributionConfig(ctx, tx)
 		if e != nil {
@@ -452,8 +454,9 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 			j.Result.Action = "unconfigured"
 		} else {
 			var version int64
-			var auth, verdict, policy string
-			e = tx.QueryRowContext(ctx, `SELECT config_version,authorization_digest,verdict,policy_digest FROM model_attribution_state WHERE account_id=$1`, j.AccountID).Scan(&version, &auth, &verdict, &policy)
+			var auth, policy string
+			var previousPassStreak int
+			e = tx.QueryRowContext(ctx, `SELECT config_version,authorization_digest,policy_digest,pass_streak FROM model_attribution_state WHERE account_id=$1`, j.AccountID).Scan(&version, &auth, &policy, &previousPassStreak)
 			if e != nil {
 				return e
 			}
@@ -461,7 +464,17 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 			// Manual and initial tests may use a different probe from the periodic policy.
 			// Keep that baseline distinct so the next periodic result synchronizes it.
 			currentPolicy := service.AttributionDigest([]any{j.Snapshot.GroupID, j.Snapshot.Policy})
-			if j.Status == "mismatch" || verdict != "passed" || version != s.ConfigVersion || auth != s.Authorization || policy != currentPolicy {
+			if j.Status == "passed" {
+				passStreak = 1
+				if version == s.ConfigVersion && auth == s.Authorization && policy == currentPolicy {
+					passStreak = min(previousPassStreak+1, 2)
+				}
+				j.Result.PassStreak = passStreak
+				if passStreak < 2 {
+					j.Result.Action = "awaiting_confirmation"
+				}
+			}
+			if j.Status == "mismatch" || passStreak == 2 && previousPassStreak < 2 {
 				models := s.Policy.HighModels
 				action := "high"
 				if j.Status == "mismatch" {
@@ -490,6 +503,12 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 				return e
 			}
 		}
+	}
+	// Failed, abnormal, skipped, stale and unconfigured results break a streak,
+	// but do not change the latest valid verdict or the account's allowlist.
+	// This is committed with the job, mapping and outbox, including on recovery.
+	if _, err = tx.ExecContext(ctx, `UPDATE model_attribution_state SET pass_streak=$2 WHERE account_id=$1`, j.AccountID, passStreak); err != nil {
+		return err
 	}
 	if j.Result.Action == "" {
 		j.Result.Action = "none"

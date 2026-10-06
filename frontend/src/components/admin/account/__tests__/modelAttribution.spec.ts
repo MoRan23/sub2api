@@ -5,6 +5,7 @@ import Select from '@/components/common/Select.vue'
 import AccountAttributionCell from '../AccountAttributionCell.vue'
 import AttributionHistory from '../AttributionHistory.vue'
 import AttributionModal from '../AttributionModal.vue'
+import AttributionResult from '../AttributionResult.vue'
 import ModelAttributionView from '@/views/admin/ModelAttributionView.vue'
 import type { AttributionConfig, AttributionJob, AttributionPage } from '@/api/admin/modelAttribution'
 import type { AccountListItem } from '@/types'
@@ -30,6 +31,22 @@ beforeEach(() => { vi.clearAllMocks(); api.config.mockResolvedValue(config()); a
 afterEach(() => { vi.useRealTimers() })
 
 describe('attribution account UI', () => {
+  it('shows the first pass as awaiting confirmation and the second pass as upgraded', async () => {
+    const first = job()
+    first.result.action = 'awaiting_confirmation'
+    first.result.pass_streak = 1
+    const wrapper = mount(AttributionResult, { props: { job: first } })
+    expect(wrapper.text()).toContain('attribution.status.passed')
+    expect(wrapper.text()).toContain('attribution.actions.awaiting_confirmation')
+    expect(wrapper.get('[data-testid="attribution-pass-streak"]').text()).toBe('1 / 2')
+    expect(wrapper.text()).not.toContain('attribution.actions.high')
+    await wrapper.setProps({ job: { ...first, result: { ...first.result, action: 'high', pass_streak: 2 } } })
+    expect(wrapper.text()).toContain('attribution.actions.high')
+    expect(wrapper.get('[data-testid="attribution-pass-streak"]').text()).toBe('2 / 2')
+    await wrapper.setProps({ job: job() })
+    expect(wrapper.find('[data-testid="attribution-pass-streak"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
   it('separates the active task from the latest ended result and refreshes both', async () => {
     const account = { id: 42, platform: 'openai', type: 'oauth', model_attribution: { latest: job(), active: job(2, 'running') } } as AccountListItem
     const wrapper = mount(AccountAttributionCell, { props: { account } })

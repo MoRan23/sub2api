@@ -102,6 +102,8 @@ func TestAttributionAPIKeyManualOnly(t *testing.T) {
 	j.Status = "mismatch"
 	require.NoError(t, r.Finish(ctx, j))
 	require.Equal(t, map[string]any{"low": "low", "alias": "custom"}, attributionMapping(t, ar, a.ID))
+	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
+	require.Equal(t, map[string]any{"low": "low", "alias": "custom"}, attributionMapping(t, ar, a.ID))
 	require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
 	require.Equal(t, map[string]any{"high": "high", "high2": "high2", "alias": "custom"}, attributionMapping(t, ar, a.ID))
 	stored, err := ar.GetByID(ctx, a.ID)
@@ -150,8 +152,9 @@ func TestAttributionAPIKeyConfigurationFence(t *testing.T) {
 			require.Equal(t, "stale", stale.Result.Action)
 			require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
 			fresh := attributionRun(t, r, a.ID, "passed")
-			require.Equal(t, "high", fresh.Result.Action)
+			require.Equal(t, "awaiting_confirmation", fresh.Result.Action)
 			require.NotEqual(t, j.Snapshot.Authorization, fresh.Snapshot.Authorization)
+			require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
 		})
 	}
 }
@@ -165,8 +168,17 @@ func TestAttributionTransitionsAtomicityAndCache(t *testing.T) {
 	scheduler := service.NewSchedulerSnapshotService(cache, NewSchedulerOutboxRepository(integrationDB), ar, nil, &config.Config{Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{OutboxPollIntervalSeconds: 1, DbFallbackEnabled: true}}})
 	scheduler.Start()
 	defer scheduler.Stop()
+	var initialOutbox, firstOutbox int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM scheduler_outbox WHERE account_id=$1`, a.ID).Scan(&initialOutbox))
 	j := attributionRun(t, r, a.ID, "passed")
+	require.Equal(t, "awaiting_confirmation", j.Result.Action)
+	require.Equal(t, 1, j.Result.PassStreak)
+	require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM scheduler_outbox WHERE account_id=$1`, a.ID).Scan(&firstOutbox))
+	require.Equal(t, initialOutbox, firstOutbox)
+	j = attributionRun(t, r, a.ID, "passed")
 	require.Equal(t, "high", j.Result.Action)
+	require.Equal(t, 2, j.Result.PassStreak)
 	high := map[string]any{"high": "custom-high", "high2": "high2", "alias": "custom", "wild*": "target"}
 	require.Equal(t, high, attributionMapping(t, ar, a.ID))
 	require.Eventually(t, func() bool {
@@ -189,12 +201,16 @@ func TestAttributionTransitionsAtomicityAndCache(t *testing.T) {
 	require.Equal(t, "none", attributionRun(t, r, a.ID, "abnormal").Result.Action)
 	require.Equal(t, low, attributionMapping(t, ar, a.ID))
 	require.Equal(t, "none", attributionRun(t, r, a.ID, "failed").Result.Action)
+	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
+	require.Equal(t, low, attributionMapping(t, ar, a.ID))
 	require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
 	c, err := r.Config(ctx)
 	require.NoError(t, err)
 	c.Default.HighModels = []string{"new-high"}
 	_, err = r.SaveConfig(ctx, c)
 	require.NoError(t, err)
+	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
+	require.Equal(t, high, attributionMapping(t, ar, a.ID))
 	require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
 	require.Equal(t, "new-high", attributionMapping(t, ar, a.ID)["new-high"])
 	_, err = r.SaveConfig(ctx, c)
@@ -214,8 +230,10 @@ func TestAttributionTransitionsAtomicityAndCache(t *testing.T) {
 	require.Error(t, r.Finish(ctx, pending))
 	require.Equal(t, before, attributionMapping(t, ar, a.ID))
 	var verdict string
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT verdict FROM model_attribution_state WHERE account_id=$1`, a.ID).Scan(&verdict))
+	var streak int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT verdict,pass_streak FROM model_attribution_state WHERE account_id=$1`, a.ID).Scan(&verdict, &streak))
 	require.Equal(t, "passed", verdict)
+	require.Equal(t, 2, streak, "a rolled-back result must not reset the confirmed streak")
 }
 
 func TestAttributionFencesRefreshAndGroupBaseline(t *testing.T) {
@@ -238,9 +256,13 @@ func TestAttributionFencesRefreshAndGroupBaseline(t *testing.T) {
 	require.True(t, valid)
 	j.Status = "passed"
 	require.NoError(t, r.Finish(ctx, j))
+	require.Equal(t, "awaiting_confirmation", j.Result.Action)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET credentials=jsonb_set(credentials,'{access_token}','"rotated-again"') WHERE id=$1`, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action, "token refresh preserves the consecutive-pass baseline")
 	fresh, err := ar.GetByID(ctx, a.ID)
 	require.NoError(t, err)
-	require.Equal(t, "rotated-synthetic", fresh.GetCredential("access_token"))
+	require.Equal(t, "rotated-again", fresh.GetCredential("access_token"))
 	for _, mutation := range []string{"mapping", "authorization", "configuration", "group"} {
 		t.Run(mutation, func(t *testing.T) {
 			j = claim()
@@ -287,7 +309,8 @@ func TestAttributionFencesRefreshAndGroupBaseline(t *testing.T) {
 	require.NoError(t, err)
 	j = attributionRun(t, r, a.ID, "passed")
 	require.Equal(t, g2.ID, j.Snapshot.GroupID)
-	require.Equal(t, "high", j.Result.Action)
+	require.Equal(t, "awaiting_confirmation", j.Result.Action)
+	require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
 	require.Contains(t, attributionMapping(t, ar, a.ID), "group-high-2")
 	c, err = r.Config(ctx)
 	require.NoError(t, err)
@@ -307,7 +330,8 @@ func TestAttributionFencesRefreshAndGroupBaseline(t *testing.T) {
 	j = attributionRun(t, r, a.ID, "passed")
 	require.Equal(t, g1.ID, j.Snapshot.GroupID)
 	require.Equal(t, c.Default, j.Snapshot.Policy)
-	require.Equal(t, "high", j.Result.Action)
+	require.Equal(t, "awaiting_confirmation", j.Result.Action)
+	require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
 	require.Contains(t, attributionMapping(t, ar, a.ID), "high2")
 	require.NotContains(t, attributionMapping(t, ar, a.ID), "group-high-2")
 	j = attributionRun(t, r, a.ID, "mismatch")
@@ -427,6 +451,7 @@ func TestAttributionQueueLeasesRetentionAndRestart(t *testing.T) {
 	require.Empty(t, again)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_jobs SET status='failed',finished_at=NOW() WHERE status='queued'`)
 	require.NoError(t, err)
+	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
 	require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
 	_, err = integrationDB.ExecContext(ctx, `INSERT INTO model_attribution_jobs(account_id,account_name,source,status,snapshot,authorization_digest,fence_digest,finished_at) SELECT $1,'synthetic','manual','abnormal','{}','','',NOW() FROM generate_series(1,105)`, a.ID)
 	require.NoError(t, err)
@@ -437,6 +462,7 @@ func TestAttributionQueueLeasesRetentionAndRestart(t *testing.T) {
 	var verdict string
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT verdict FROM model_attribution_state WHERE account_id=$1`, a.ID).Scan(&verdict))
 	require.Equal(t, "passed", verdict)
+	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
 	require.Equal(t, "unchanged", attributionRun(t, r, a.ID, "passed").Result.Action)
 	b, err := json.Marshal(page)
 	require.NoError(t, err)
@@ -522,6 +548,15 @@ func TestAttributionManualOverrideWithoutAutomaticEligibility(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, auto, "automatic detection still skips local rate limits")
 	jobs, err = r.Enqueue(ctx, []int64{a.ID}, true, "gpt-6.1-sol")
+	require.NoError(t, err)
+	j, err = r.Claim(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, j)
+	j.Status = "passed"
+	require.NoError(t, r.Finish(ctx, j))
+	require.Equal(t, "awaiting_confirmation", j.Result.Action)
+	require.Equal(t, before, attributionMapping(t, ar, a.ID))
+	_, err = r.Enqueue(ctx, []int64{a.ID}, true, "gpt-6.1-sol")
 	require.NoError(t, err)
 	j, err = r.Claim(ctx)
 	require.NoError(t, err)

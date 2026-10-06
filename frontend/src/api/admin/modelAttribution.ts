@@ -18,6 +18,7 @@ export interface AttributionJob {
     duration_ms: number
     retries?: number
     action: string
+    pass_streak?: number
     before?: Record<string, unknown>
     after?: Record<string, unknown>
     actual_models?: string[]

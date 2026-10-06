@@ -274,6 +274,7 @@ type AttributionResult struct {
 	DurationMS     int64                `json:"duration_ms"`
 	Retries        int                  `json:"retries,omitempty"`
 	Action         string               `json:"action"`
+	PassStreak     int                  `json:"pass_streak,omitempty"`
 	Before         map[string]any       `json:"before,omitempty"`
 	After          map[string]any       `json:"after,omitempty"`
 }
