@@ -199,8 +199,8 @@ func TestCodexWireWindowIdentityIsServerOwnedReservedAndNestedOnly(t *testing.T)
 	require.NoError(t, err)
 
 	profile := ParseCodexWireProfile(string(raw))
-	require.Nil(t, profile.WindowNumber, "client metadata cannot seed the server-owned field")
-	require.Empty(t, profile.ContextWindowID, "client metadata cannot seed the server-owned field")
+	require.Equal(t, uint64Pointer(99), profile.WindowNumber, "the parser retains the wire snapshot for observation")
+	require.Equal(t, "01989f44-7c00-7000-8000-000000000099", profile.ContextWindowID)
 	for _, key := range []string{
 		"window_number", "context_window_id", "context-window-id", "x-codex-context-window-id", "x-codex-context_window_id",
 	} {
@@ -215,6 +215,12 @@ func TestCodexWireWindowIdentityIsServerOwnedReservedAndNestedOnly(t *testing.T)
 		},
 		TurnIdentityEnabled: true,
 	}
+	unbound := plan
+	unbound.TurnIdentityRequested = true
+	unbound, err = FinalizeOpenAICodexWirePlan(unbound, string(CodexWireRequestTurn), CodexModelCapabilities{})
+	require.NoError(t, err)
+	require.Nil(t, unbound.WireProfile.WindowNumber, "parsed client fields cannot seed the server-owned final window")
+	require.Empty(t, unbound.WireProfile.ContextWindowID)
 	bound, err := BindOpenAICodexWindowToPlan(plan, OpenAICodexWindowSnapshot{
 		ThreadID: codexWireTestThread, ContextWindowID: codexWireTestContextWindow,
 	}, strings.Repeat("a", 64))

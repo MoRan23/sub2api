@@ -101,7 +101,19 @@
         <dl class="mt-2 grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
           <div v-for="item in metadataItems" :key="item.key" class="min-w-0">
             <dt class="text-gray-500 dark:text-gray-400">{{ item.label }}</dt>
-            <dd class="mt-1 break-all font-mono text-gray-800 dark:text-gray-200">{{ item.value || '—' }}</dd>
+            <dd class="mt-1 break-all font-mono text-gray-800 dark:text-gray-200">{{ item.value ?? '—' }}</dd>
+          </div>
+          <div class="min-w-0 sm:col-span-2 lg:col-span-3">
+            <dt class="text-gray-500 dark:text-gray-400">{{ t(`${prefix}.extraMetadata`) }}</dt>
+            <dd class="mt-1 text-gray-800 dark:text-gray-200">
+              <dl v-if="extraMetadataItems.length" class="grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+                <div v-for="item in extraMetadataItems" :key="item.key" class="min-w-0">
+                  <dt class="break-all font-mono text-gray-500 dark:text-gray-400">{{ item.key }}</dt>
+                  <dd class="mt-1 whitespace-pre-wrap break-all font-mono">{{ item.value === '[redacted]' ? t(`${prefix}.extraMetadataRedacted`) : item.value }}</dd>
+                </div>
+              </dl>
+              <template v-else>—</template>
+            </dd>
           </div>
         </dl>
         <CodexOutboundMetadataDetails :observation="observation" class="mt-3" />
@@ -252,6 +264,7 @@ const metadataItems = computed(() => [
   ['windowNumber', props.observation.window_number?.toString()], ['contextWindow', props.observation.context_window_id],
   ['turn', props.observation.turn_id], ['parentTurn', props.observation.parent_turn_id], ['rootTurn', props.observation.root_turn_id],
   ['parentThread', props.observation.parent_thread_id], ['forkedFrom', props.observation.forked_from_thread_id],
+  ['guardianClassifierSourceThread', props.observation.guardian_classifier_source_thread_id],
   ['agent', props.observation.agent_name], ['subagent', props.observation.subagent_kind || props.observation.openai_subagent],
   ['threadSource', props.observation.thread_source], ['turnTrigger', props.observation.turn_trigger],
   ['sandbox', props.observation.sandbox || props.observation.sandbox_mode],
@@ -259,7 +272,14 @@ const metadataItems = computed(() => [
   ['nodeReplAutoReviewRequired', props.observation.node_repl_auto_review_required?.toString()],
   ['nodeReplDisabled', props.observation.node_repl_disabled?.toString()],
   ['workspaces', props.observation.workspaces?.join(', ')],
-].map(([key, value]) => ({ key, label: t(`${prefix}.${key}`), value })))
+].map(([key, value]) => ({ key, label: t(`${prefix}.${key}`), value: value === '' ? undefined : value })))
+const extraMetadataItems = computed(() => {
+  const metadata = props.observation.extra_metadata
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return []
+  return Object.entries(metadata)
+    .filter(([, value]) => typeof value === 'string')
+    .map(([key, value]) => ({ key, value }))
+})
 
 function onDetailsToggle(event: Event): void {
   detailsOpen.value = (event.target as HTMLDetailsElement).open

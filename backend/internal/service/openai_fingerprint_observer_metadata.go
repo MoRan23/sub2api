@@ -9,13 +9,14 @@ import (
 )
 
 const (
-	fingerprintMetadataMissing   = "missing"
-	fingerprintMetadataValid     = "valid"
-	fingerprintMetadataInvalid   = "invalid"
-	fingerprintMetadataTruncated = "truncated"
-	fingerprintNamespaceLimit    = 64
-	fingerprintFunctionLimit     = 256
-	fingerprintMetadataNameLimit = 256
+	fingerprintMetadataMissing       = "missing"
+	fingerprintMetadataValid         = "valid"
+	fingerprintMetadataInvalid       = "invalid"
+	fingerprintMetadataTruncated     = "truncated"
+	fingerprintNamespaceLimit        = 64
+	fingerprintFunctionLimit         = 256
+	fingerprintMetadataNameLimit     = 256
+	fingerprintExtraMetadataRedacted = "[redacted]"
 )
 
 // FingerprintMetadataStatus distinguishes absent wire fields from malformed
@@ -280,7 +281,48 @@ func parseFingerprintToolFunction(key string, raw json.RawMessage, truncated *bo
 	return item, true
 }
 
+// Extra fields have no reviewed schema. Retain bounded keys for diagnostics,
+// but never retain their values as they may contain credentials or prompts.
+func fingerprintObservationExtraMetadata(source map[string]string) map[string]string {
+	keys := make([]string, 0, len(source))
+	for key := range source {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var result map[string]string
+	for _, key := range keys {
+		if !validCodexExtraMetadata(key, source[key]) {
+			continue
+		}
+		if result == nil {
+			result = make(map[string]string)
+		}
+		result[key] = fingerprintExtraMetadataRedacted
+		if len(result) == 16 {
+			break
+		}
+	}
+	return result
+}
+
 func cloneFingerprintObservationMetadata(entry *FingerprintObservationEntry) {
+	if entry.WindowNumber != nil {
+		entry.WindowNumber = uint64Pointer(*entry.WindowNumber)
+	}
+	if entry.ForkedFromOrdinalExclusive != nil {
+		entry.ForkedFromOrdinalExclusive = uint64Pointer(*entry.ForkedFromOrdinalExclusive)
+	}
+	if entry.AutoReviewEnabled != nil {
+		entry.AutoReviewEnabled = boolPointer(*entry.AutoReviewEnabled)
+	}
+	if entry.NodeREPLAutoReviewRequired != nil {
+		entry.NodeREPLAutoReviewRequired = boolPointer(*entry.NodeREPLAutoReviewRequired)
+	}
+	if entry.NodeREPLDisabled != nil {
+		entry.NodeREPLDisabled = boolPointer(*entry.NodeREPLDisabled)
+	}
+	entry.Workspaces = append([]string(nil), entry.Workspaces...)
+	entry.ExtraMetadata = fingerprintObservationExtraMetadata(entry.ExtraMetadata)
 	if entry.MetadataStatus != nil {
 		value := *entry.MetadataStatus
 		entry.MetadataStatus = &value

@@ -12,6 +12,18 @@
       </div>
       <p class="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{{ t('admin.fingerprintObservation.telemetry.hint') }}</p>
       <p v-if="response?.forced_off_reason" class="break-words text-xs text-amber-700 dark:text-amber-300" role="status">{{ t('admin.fingerprintObservation.telemetry.forcedOff', { reason: response.forced_off_reason }) }}</p>
+      <div v-if="response?.coverage?.length" class="rounded-lg border border-gray-200 p-3 text-xs dark:border-dark-700" :aria-label="t('admin.fingerprintObservation.telemetry.coverage.title')">
+        <p class="font-medium text-gray-700 dark:text-gray-300">{{ t('admin.fingerprintObservation.telemetry.coverage.title') }}</p>
+        <ul class="mt-2 grid gap-3 sm:grid-cols-2">
+          <li v-for="signal in response.coverage" :key="signal.signal" class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="font-medium text-gray-700 dark:text-gray-300" :title="signal.event_names.join(', ')">{{ t(`admin.fingerprintObservation.telemetry.coverage.signals.${signal.signal}`) }}</span>
+              <span class="text-amber-700 dark:text-amber-300">{{ t(`admin.fingerprintObservation.telemetry.coverage.status.${signal.status}`) }}</span>
+            </div>
+            <p class="mt-1 leading-relaxed text-gray-500 dark:text-gray-400">{{ reasonLabel(signal.reason) }}</p>
+          </li>
+        </ul>
+      </div>
       <dl v-if="response" class="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-9">
         <div v-for="metric in metrics" :key="metric.key" class="min-w-0 rounded-lg bg-gray-50 px-3 py-2 dark:bg-dark-900/60">
           <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t(`admin.fingerprintObservation.telemetry.counters.${metric.key}`) }}</dt>

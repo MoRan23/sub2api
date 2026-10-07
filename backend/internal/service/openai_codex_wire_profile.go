@@ -437,7 +437,7 @@ func codexWireBool(raw json.RawMessage) *bool {
 
 func codexWireInt64(raw json.RawMessage) (int64, bool) {
 	var value int64
-	if len(raw) == 0 || json.Unmarshal(raw, &value) != nil {
+	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "null" || json.Unmarshal(raw, &value) != nil {
 		return 0, false
 	}
 	return value, true
@@ -445,7 +445,7 @@ func codexWireInt64(raw json.RawMessage) (int64, bool) {
 
 func codexWireUint64(raw json.RawMessage) *uint64 {
 	var value uint64
-	if len(raw) == 0 || json.Unmarshal(raw, &value) != nil {
+	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "null" || json.Unmarshal(raw, &value) != nil {
 		return nil
 	}
 	return uint64Pointer(value)
@@ -531,11 +531,15 @@ func readCodexTurnIDCandidate(metadata map[string]json.RawMessage, key string) (
 // never fills generated defaults; those are applied only after the final model
 // and request kind are known.
 func ParseCodexWireProfile(raw string) CodexWireProfile {
-	profile := newCodexWireProfile()
 	var metadata map[string]json.RawMessage
 	if json.Unmarshal([]byte(strings.TrimSpace(raw)), &metadata) != nil || metadata == nil {
-		return profile
+		return newCodexWireProfile()
 	}
+	return parseCodexWireMetadataObject(metadata)
+}
+
+func parseCodexWireMetadataObject(metadata map[string]json.RawMessage) CodexWireProfile {
+	profile := newCodexWireProfile()
 	if kind, ok := ParseCodexWireRequestKind(codexWireString(metadata["request_kind"])); ok {
 		profile.RequestKind = kind
 	}
@@ -544,6 +548,8 @@ func ParseCodexWireProfile(raw string) CodexWireProfile {
 	profile.ThreadID = codexWireString(metadata["thread_id"])
 	profile.AgentName = codexWireString(metadata["agent_name"])
 	profile.WindowID = codexWireString(metadata["window_id"])
+	profile.WindowNumber = codexWireUint64(metadata["window_number"])
+	profile.ContextWindowID = codexWireString(metadata["context_window_id"])
 	profile.ThreadSource = codexWireString(metadata["thread_source"])
 	profile.TurnTrigger = codexWireString(metadata["turn_trigger"])
 	profile.Sandbox = codexWireString(metadata["sandbox"])
@@ -667,6 +673,7 @@ func mergeCodexWireProfileMissing(target *CodexWireProfile, source CodexWireProf
 		&target.SessionID:                      source.SessionID,
 		&target.ThreadID:                       source.ThreadID,
 		&target.WindowID:                       source.WindowID,
+		&target.ContextWindowID:                source.ContextWindowID,
 		&target.AgentName:                      source.AgentName,
 		&target.ThreadSource:                   source.ThreadSource,
 		&target.TurnTrigger:                    source.TurnTrigger,
@@ -683,6 +690,9 @@ func mergeCodexWireProfileMissing(target *CodexWireProfile, source CodexWireProf
 	}
 	if !target.TurnStartedAtSet && source.TurnStartedAtSet {
 		target.TurnStartedAtUnixMS, target.TurnStartedAtSet = source.TurnStartedAtUnixMS, true
+	}
+	if target.WindowNumber == nil && source.WindowNumber != nil {
+		target.WindowNumber = uint64Pointer(*source.WindowNumber)
 	}
 	if target.AutoReviewEnabled == nil && source.AutoReviewEnabled != nil {
 		target.AutoReviewEnabled = boolPointer(*source.AutoReviewEnabled)
@@ -814,6 +824,8 @@ func parseCodexWireFlatMetadata(metadata map[string]json.RawMessage) CodexWirePr
 	profile.SessionID = firstValidOpenAICodexJSONField(metadata, "session_id", "session-id")
 	profile.ThreadID = firstValidOpenAICodexJSONField(metadata, "thread_id", "thread-id")
 	profile.WindowID = firstValidOpenAICodexJSONField(metadata, "x-codex-window-id", "window_id")
+	profile.WindowNumber = codexWireUint64(metadata["window_number"])
+	profile.ContextWindowID = firstValidOpenAICodexJSONField(metadata, "context_window_id", "context-window-id", "x-codex-context-window-id", "x-codex-context_window_id")
 	profile.SubagentHeader = firstValidOpenAICodexJSONField(metadata, "x-openai-subagent")
 	profile.TurnLineage.ParentThreadID = firstValidOpenAICodexJSONField(metadata, "x-codex-parent-thread-id", "parent_thread_id")
 	if raw, present := firstPresentOpenAICodexJSONField(metadata, "turn_id", "turn-id"); present {

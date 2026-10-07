@@ -101,6 +101,9 @@ type FingerprintObservationEntry struct {
 	ConversionCheck              *apicompat.ChatConversionCheck `json:"conversion_check,omitempty"`
 	ResponseEvidence             *CodexModelEvidence            `json:"response_evidence,omitempty"`
 	Daybreak                     *OpenAIDaybreakObservation     `json:"daybreak,omitempty"`
+
+	GuardianClassifierSourceThreadID string            `json:"guardian_classifier_source_thread_id,omitempty"`
+	ExtraMetadata                    map[string]string `json:"extra_metadata,omitempty"`
 }
 
 // OpenAIDailyRootObservation is request-local provenance written only after a
@@ -706,14 +709,13 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 	threadHeaderPresent := false
 	parentHeaderPresent := false
 	forkHeaderPresent := false
-	if outbound != nil {
-		if actual := strings.TrimSpace(outbound.Get(codexInstallationIDKey)); actual != "" {
-			entry.OutboundInstallationID = actual
-		}
+	{
 		profile := finalFingerprintCodexWireProfile(outbound, body)
 		entry.WindowID = profile.WindowID
 		entry.WindowNumber = profile.WindowNumber
 		entry.ContextWindowID = profile.ContextWindowID
+		entry.GuardianClassifierSourceThreadID = profile.GuardianClassifierSourceThreadID
+		entry.ExtraMetadata = fingerprintObservationExtraMetadata(profile.ExtraMetadata)
 		entry.TurnID = profile.TurnID.Value
 		entry.TurnStartedAtUnixMS = profile.TurnStartedAtUnixMS
 		entry.ParentTurnID = profile.TurnLineage.ParentTurnID.Value
@@ -734,6 +736,12 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 			entry.TurnID, entry.ParentTurnID, entry.RootTurnID = "", "", ""
 			entry.TurnStartedAtUnixMS, entry.WindowID, entry.ContextWindowID = 0, "", ""
 			entry.WindowNumber, entry.ForkedFromOrdinalExclusive = nil, nil
+			entry.GuardianClassifierSourceThreadID = ""
+		}
+	}
+	if outbound != nil {
+		if actual := strings.TrimSpace(outbound.Get(codexInstallationIDKey)); actual != "" {
+			entry.OutboundInstallationID = actual
 		}
 		if hasTrustedIdentity && identityHeaders {
 			entry.SessionID, sessionHeaderPresent = fingerprintObservationHeaderUUID(outbound, trustedIdentity.SessionID,
@@ -813,22 +821,33 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 		entry.SessionID, entry.ThreadID, entry.ParentThreadID, entry.ForkedFromThreadID = "", "", "", ""
 		entry.TurnID, entry.ParentTurnID, entry.RootTurnID = "", "", ""
 		entry.WindowID, entry.ContextWindowID, entry.AgentName, entry.SubagentKind, entry.OpenAISubagent = "", "", "", "", ""
+		entry.GuardianClassifierSourceThreadID, entry.ExtraMetadata = "", nil
 		entry.DailyFixedRootEnabled, entry.DailyFixedRootSessionID = false, ""
 	}
 	return entry
 }
 
 func finalFingerprintCodexWireProfile(outbound http.Header, body []byte) CodexWireProfile {
-	profile := captureCodexWireProfile(nil, body, "")
-	if outbound == nil {
-		return profile
-	}
-	for _, raw := range headerValuesCaseInsensitive(outbound, openAIWSTurnMetadataHeader) {
-		value, _, valid := decodeCodexWireNestedCarrier(json.RawMessage(raw), false)
-		if !valid {
-			continue
+	profile := newCodexWireProfile()
+	// Final observations use canonical body metadata, compatibility body metadata,
+	// then the physical header. Flat aliases can fill only fields absent from all
+	// nested wire carriers; request capture retains its own inbound precedence.
+	for _, carrier := range fingerprintFinalMetadataCarriers(outbound, body) {
+		if carrier.valid {
+			mergeCodexWireProfileMissing(&profile, parseCodexWireMetadataObject(carrier.fields))
 		}
-		mergeCodexWireProfileMissing(&profile, ParseCodexWireProfile(value))
+	}
+	mergeCodexWireProfileMissing(&profile, CodexWireProfile{
+		WindowID:       firstValidOpenAIOutboundSessionHeader(outbound, []string{"x-codex-window-id"}),
+		SubagentHeader: firstValidOpenAIOutboundSessionHeader(outbound, []string{"x-openai-subagent"}),
+	})
+	var root map[string]json.RawMessage
+	if len(body) > 0 && json.Unmarshal(body, &root) == nil {
+		var clientMetadata map[string]json.RawMessage
+		if json.Unmarshal(root["client_metadata"], &clientMetadata) == nil {
+			mergeCodexWireProfileMissing(&profile, parseCodexWireFlatMetadata(clientMetadata))
+		}
+		mergeCodexWireProfileMissing(&profile, parseCodexWireFlatMetadata(root))
 	}
 	return profile
 }

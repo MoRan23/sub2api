@@ -5,6 +5,14 @@ export type CodexTelemetryStatus = 'queued' | 'sent' | 'failed' | 'dropped' | 'c
 export type CodexTelemetryOS = 'windows' | 'macos' | 'linux'
 export type CodexTelemetrySource = 'observed' | 'simulated' | 'mixed'
 
+export interface CodexTelemetrySignalCoverage {
+  signal: 'skill_invocation' | 'auth_storage'
+  type: 'logs' | 'metrics'
+  status: 'unavailable' | 'awaiting_source'
+  event_names: string[]
+  reason: string
+}
+
 export interface CodexTelemetryEntry {
   id: number
   created_at: string
@@ -46,6 +54,7 @@ export interface CodexTelemetryObservationsResponse {
   effective_enabled: boolean
   forced_off_reason: string
   queue_depth: number
+  coverage?: CodexTelemetrySignalCoverage[]
   counters: Record<'attempts' | Exclude<CodexTelemetryStatus, 'unknown'>, number> & { unknown?: number }
   items: CodexTelemetryEntry[]
   total: number
@@ -73,6 +82,18 @@ async function list(
   )
   return {
     ...data,
+    coverage: Array.isArray(data.coverage)
+      ? data.coverage.filter((entry) => entry != null
+        && ['skill_invocation', 'auth_storage'].includes(entry.signal)
+        && ['logs', 'metrics'].includes(entry.type)
+        && ['unavailable', 'awaiting_source'].includes(entry.status)
+        && typeof entry.reason === 'string').map((entry) => ({
+        ...entry,
+        event_names: Array.isArray(entry.event_names)
+          ? entry.event_names.filter((name): name is string => typeof name === 'string')
+          : [],
+      }))
+      : [],
     items: Array.isArray(data.items)
       ? data.items.filter((entry) => entry != null).map((entry) => ({
         ...entry,

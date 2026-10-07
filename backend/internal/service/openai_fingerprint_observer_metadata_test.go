@@ -105,7 +105,9 @@ func TestFingerprintObservationMetadataDoesNotUseInboundOrPlan(t *testing.T) {
 	c.Request.Header.Set(openAIWSTurnMetadataHeader, `{"request_kind":"memory","history_ingest_requested":true}`)
 	SetOpenAIOAuthIdentityPlan(c, OpenAIOAuthIdentityPlan{WireProfile: CodexWireProfile{
 		RequestKind: CodexWireRequestMemory, HistoryIngestRequested: boolPointer(true),
-		Compaction: marshalCodexCompactionMetadata(DefaultCodexCompactionTurnMetadata(CodexCompactionImplementationResponses)),
+		Compaction:   marshalCodexCompactionMetadata(DefaultCodexCompactionTurnMetadata(CodexCompactionImplementationResponses)),
+		WindowNumber: uint64Pointer(77), ContextWindowID: codexWireTestContextWindow,
+		GuardianClassifierSourceThreadID: codexWireTestFork, ExtraMetadata: map[string]string{"annotation": "plan"},
 	}})
 	entry := buildFingerprintObservationEntry(c, newOpenAIOAuthPinAccount(1, nil), installationIDResolution{}, nil,
 		[]byte(`{"type":"response.create"}`), OpenAICodexTurnIdentity{}, false, false)
@@ -113,6 +115,10 @@ func TestFingerprintObservationMetadataDoesNotUseInboundOrPlan(t *testing.T) {
 	require.Nil(t, entry.HistoryIngestRequested)
 	require.Nil(t, entry.Compaction)
 	require.Nil(t, entry.ToolNamespacesInfo)
+	require.Nil(t, entry.WindowNumber)
+	require.Empty(t, entry.ContextWindowID)
+	require.Empty(t, entry.GuardianClassifierSourceThreadID)
+	require.Nil(t, entry.ExtraMetadata)
 	require.Equal(t, &FingerprintMetadataStatus{"missing", "missing", "missing", "missing"}, entry.MetadataStatus)
 }
 
@@ -120,7 +126,7 @@ func TestFingerprintObservationMetadataWSHandshakeSnapshot(t *testing.T) {
 	metadata := map[string]any{
 		"request_kind": "compaction", "history_ingest_requested": false,
 		"compaction": DefaultCodexCompactionTurnMetadata(CodexCompactionImplementationRemoteV2),
-		"unrelated":  "must-not-retain",
+		"unrelated":  map[string]any{"credentials": "must-not-retain"},
 	}
 	encoded, err := json.Marshal(metadata)
 	require.NoError(t, err)

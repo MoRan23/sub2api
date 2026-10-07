@@ -236,4 +236,24 @@ describe('CodexTelemetryObservations', () => {
     await (wrapper.vm as unknown as { refresh: () => Promise<void> }).refresh()
     expect(list.mock.lastCall?.[0]).toMatchObject({ os_family: 'linux', source: 'mixed' })
   })
+
+  it.each([
+    ['zh', '客户端事件采集范围', '技能调用', '凭据存储操作', '未采集（已兼容指标定义）', '当前没有原始指标接入'],
+    ['en', 'Client event collection coverage', 'Skill invocation', 'Credential storage operations', 'Not collected (metric definitions supported)', 'no raw metric ingress'],
+  ] as const)('explains uncollected client-only signals without creating delivery records (%s)', async (locale, title, skill, storage, status, reason) => {
+    list.mockResolvedValue(response({ configured_enabled: false, effective_enabled: false, items: [], total: 0, coverage: [
+      { signal: 'skill_invocation', type: 'logs', status: 'unavailable', event_names: ['codex.skill_invocation'], reason: 'client_skill_event_not_on_responses_wire' },
+      { signal: 'auth_storage', type: 'metrics', status: 'awaiting_source', event_names: ['codex.auth_storage.operation'], reason: 'client_auth_storage_not_on_responses_wire' },
+    ] }))
+    const wrapper = mountPanel(locale)
+    await flushPromises()
+    const coverage = wrapper.get(`[aria-label="${title}"]`)
+    expect(coverage.text()).toContain(skill)
+    expect(coverage.text()).toContain(storage)
+    expect(coverage.text()).toContain(status)
+    expect(coverage.text()).toContain(reason)
+    expect(coverage.find('[title="codex.skill_invocation"]').exists()).toBe(true)
+    expect(wrapper.findAll('details')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('admin.fingerprintObservation')
+  })
 })

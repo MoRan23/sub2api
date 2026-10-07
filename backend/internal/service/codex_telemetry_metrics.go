@@ -21,6 +21,13 @@ type codexMetricDescriptor struct {
 // invented when the corresponding transport or timing was not observed.
 var codexMetricDescriptors = []codexMetricDescriptor{
 	{"codex.process.start", "sum", "", "originator"},
+	// These describe client credential-store measurements only. A Responses
+	// request does not establish that the client loaded, saved or refreshed a
+	// credential; never include these descriptors in simulated startup samples.
+	{"codex.auth_storage.operation", "sum", "", "credential_kind,store_mode,selected_store,actual_store,operation,secure_outcome,outcome,fallback_reason,secure_error,storage_phase,originator"},
+	{"codex.auth_storage.duration", "histogram", "ms", "credential_kind,store_mode,selected_store,actual_store,operation,secure_outcome,outcome,fallback_reason,secure_error,storage_phase,originator"},
+	{"codex.auth_storage.refresh_persist", "sum", "", "credential_kind,store_mode,selected_store,actual_store,operation,secure_outcome,outcome,fallback_reason,secure_error,storage_phase,originator"},
+	{"codex.auth_storage.refresh_persist.duration", "histogram", "ms", "credential_kind,store_mode,selected_store,actual_store,operation,secure_outcome,outcome,fallback_reason,secure_error,storage_phase,originator"},
 	{"codex.sqlite.init.count", "sum", "", "db,error,originator,phase,status"},
 	{"codex.sqlite.init.duration_ms", "histogram", "ms", "db,error,originator,phase,status"},
 	{"codex.app_server.codex_home.size_bytes", "histogram", "", "compression_enabled,directory"},
@@ -283,7 +290,7 @@ func (s *codexTelemetryMetricStore) touch(profile codexTelemetryProfile) []codex
 func codexMetricIsStartup(name string) bool {
 	// These are explicitly simulated client initialization activities. Network
 	// request success and turn timings require an actual terminal response.
-	for _, prefix := range []string{"codex.turn.", "codex.responses_api", "codex.websocket.", "codex.sse_event", "codex.thread.", "codex.hooks.", "codex.guardian.", "codex.tool."} {
+	for _, prefix := range []string{"codex.auth_storage.", "codex.turn.", "codex.responses_api", "codex.websocket.", "codex.sse_event", "codex.thread.", "codex.hooks.", "codex.guardian.", "codex.tool."} {
 		if strings.HasPrefix(name, prefix) {
 			return false
 		}

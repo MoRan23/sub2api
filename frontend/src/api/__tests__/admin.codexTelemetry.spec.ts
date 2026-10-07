@@ -32,4 +32,24 @@ describe('codexTelemetryAPI', () => {
     expect(entry?.reasons).toEqual(['unknown_os'])
     expect(entry?.field_sources).toEqual({ model: 'observed', shell: 'simulated' })
   })
+
+  it('keeps collection coverage separate from events and tolerates older responses', async () => {
+    get.mockResolvedValueOnce({ data: { items: [], coverage: [
+      null,
+      { signal: 'auth_storage', type: 'metrics', status: 'awaiting_source', reason: 'client_auth_storage_not_on_responses_wire', event_names: ['codex.auth_storage.operation', null, 7] },
+      { signal: 'unknown', type: 'logs', status: 'unavailable', reason: 'unknown' },
+      { signal: 'skill_invocation', type: 'logs', status: 'collected', reason: 'unsupported' },
+      { signal: 'skill_invocation', type: 'logs', status: 'unavailable', reason: 'client_skill_event_not_on_responses_wire', event_names: null },
+    ] } })
+    const result = await codexTelemetryAPI.list()
+    expect(result.items).toEqual([])
+    expect(result.coverage).toEqual([
+      { signal: 'auth_storage', type: 'metrics', status: 'awaiting_source', reason: 'client_auth_storage_not_on_responses_wire', event_names: ['codex.auth_storage.operation'] },
+      { signal: 'skill_invocation', type: 'logs', status: 'unavailable', reason: 'client_skill_event_not_on_responses_wire', event_names: [] },
+    ])
+    get.mockResolvedValueOnce({ data: { items: [], coverage: null } })
+    expect((await codexTelemetryAPI.list()).coverage).toEqual([])
+    get.mockResolvedValueOnce({ data: { items: [] } })
+    expect((await codexTelemetryAPI.list()).coverage).toEqual([])
+  })
 })

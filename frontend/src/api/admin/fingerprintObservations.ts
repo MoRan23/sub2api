@@ -146,6 +146,8 @@ export interface FingerprintObservationEntry {
   window_id: string
   window_number?: number
   context_window_id: string
+  guardian_classifier_source_thread_id?: string
+  extra_metadata?: Record<string, string>
   agent_name: string
   subagent_kind: string
   openai_subagent: string

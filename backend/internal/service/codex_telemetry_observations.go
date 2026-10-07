@@ -27,17 +27,18 @@ type CodexTelemetryCounters struct {
 }
 
 type CodexTelemetryObservationSnapshot struct {
-	ConfiguredEnabled  bool                        `json:"configured_enabled"`
-	SimulationEnabled  bool                        `json:"simulation_enabled"`
-	ObservationEnabled bool                        `json:"observation_enabled"`
-	EffectiveEnabled   bool                        `json:"effective_enabled"`
-	ForcedOffReason    string                      `json:"forced_off_reason"`
-	QueueDepth         int                         `json:"queue_depth"`
-	Counters           CodexTelemetryCounters      `json:"counters"`
-	Items              []CodexTelemetryObservation `json:"items"`
-	Total              int                         `json:"total"`
-	Page               int                         `json:"page"`
-	PageSize           int                         `json:"page_size"`
+	ConfiguredEnabled  bool                           `json:"configured_enabled"`
+	SimulationEnabled  bool                           `json:"simulation_enabled"`
+	ObservationEnabled bool                           `json:"observation_enabled"`
+	EffectiveEnabled   bool                           `json:"effective_enabled"`
+	ForcedOffReason    string                         `json:"forced_off_reason"`
+	QueueDepth         int                            `json:"queue_depth"`
+	Counters           CodexTelemetryCounters         `json:"counters"`
+	Coverage           []CodexTelemetrySignalCoverage `json:"coverage"`
+	Items              []CodexTelemetryObservation    `json:"items"`
+	Total              int                            `json:"total"`
+	Page               int                            `json:"page"`
+	PageSize           int                            `json:"page_size"`
 }
 
 // CodexTelemetryObservation contains only allowlisted diagnostics. Never add
@@ -88,7 +89,7 @@ func (s *CodexTelemetryService) Observations(query CodexTelemetryObservationQuer
 	if query.PageSize > 100 {
 		query.PageSize = 100
 	}
-	result := CodexTelemetryObservationSnapshot{Items: []CodexTelemetryObservation{}, Page: query.Page, PageSize: query.PageSize}
+	result := CodexTelemetryObservationSnapshot{Items: []CodexTelemetryObservation{}, Coverage: codexTelemetrySignalCoverage(), Page: query.Page, PageSize: query.PageSize}
 	if s == nil {
 		return result
 	}

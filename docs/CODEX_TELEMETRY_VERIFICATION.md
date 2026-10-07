@@ -1,5 +1,42 @@
 # 三系统遥测验证记录
 
+## Codex 0.162 观测缺口修复（2026-10-07）
+
+基线为合并后的 `dev@7d758e332`。本轮补齐窗口元数据解析、最终出站
+Guardian 来源线程、脱敏额外字段和 WS 冻结快照，并兼容四项 auth-storage
+指标定义。技能日志和凭据存储操作没有客户端原始数据入口；接口和页面明确
+显示“未采集”，不推定或生成这些事件，不改变已有遥测开关及模拟策略。
+
+以下检查通过：
+
+```sh
+# backend
+go test -tags=unit ./internal/service ./internal/handler/admin -run 'Test.*(CodexTelemetry|CodexWire|Fingerprint|OpenAICodexWindow)' -count=1
+go test -race ./internal/service -run 'Test(CodexTelemetryCoverage|CodexTelemetryClientOnly|CodexTelemetryAuthStorage|CodexWireProfileParsesWindow|CodexWireWindowMetadataMerge|FingerprintObservationWireMetadata|FingerprintObservationExtraMetadata|FingerprintObservationSafe)' -count=1
+go build ./cmd/server
+go vet ./internal/service ./internal/handler/admin
+
+# frontend
+pnpm test:run src/views/admin/__tests__/CodexTelemetryObservations.spec.ts src/api/__tests__/admin.codexTelemetry.spec.ts src/views/admin/__tests__/FingerprintObservationRequestDetails.spec.ts src/views/admin/__tests__/FingerprintObservationView.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts
+pnpm typecheck
+pnpm build
+```
+
+前端 5 个测试文件、93 项测试通过；9 个改动文件的定向 ESLint 通过。
+构建只有现有大 chunk 和 Browserslist 数据陈旧提示，无编译失败。
+
+覆盖窗口序号零值、null／负数／溢出、嵌套与兼容载体优先级、服务器窗口
+不被客户端值覆盖、HTTP／WS 一致性、快照深拷贝、原始请求不变、未知额外
+字段值脱敏、旧记录缺失及页面安全文本。覆盖四项指标的标签、单位、聚合与
+序列化恢复，以及全部模式不生成客户端专属事件，coverage 不计为发送记录。
+
+使用本地 Vite、模拟管理员接口和独立无头 Chrome 验证中文 1280×720、英文
+390×844：采集范围两项状态可见，20 条列表和详情正常，桌面内部滚动与移动
+页面滚动有效，无横向溢出及 JavaScript 异常。未访问生产服务。
+
+本轮无数据库 schema 或迁移改动，未运行数据库集成测试或无关全仓库套件。
+全部上游和发送端均使用模拟；没有真实模型、官方遥测调用或部署。
+
 ## 四项兼容修正（2026-09-22）
 
 本轮从 `dev@a5411ee97` 修改，仍以本地 Codex 0.155.1 源码快照为依据。

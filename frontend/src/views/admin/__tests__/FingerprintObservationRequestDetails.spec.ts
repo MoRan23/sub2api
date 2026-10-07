@@ -648,6 +648,81 @@ describe('FingerprintObservationRequestDetails', () => {
     expect(flagValue('Node REPL disabled')).toBe('—')
   })
 
+  it('keeps a zero window number and context window ID distinct from missing metadata', async () => {
+    const view = renderDetails({ window_number: 0, context_window_id: '0' })
+    await openDetails()
+
+    const metadataValue = (label: string) => screen.getByText(label, { selector: 'dt' })
+      .parentElement?.querySelector('dd')?.textContent
+    expect(metadataValue('Window number')).toBe('0')
+    expect(metadataValue('Context window')).toBe('0')
+
+    await view.rerender({ observation: { ...legacyEntry, window_number: 7, context_window_id: 'context-window-7' } })
+    expect(metadataValue('Window number')).toBe('7')
+    expect(metadataValue('Context window')).toBe('context-window-7')
+
+    await view.rerender({ observation: legacyEntry })
+    expect(metadataValue('Window number')).toBe('—')
+    expect(metadataValue('Context window')).toBe('—')
+
+    await view.rerender({ observation: { ...legacyEntry, context_window_id: '' } })
+    expect(metadataValue('Context window')).toBe('—')
+  })
+
+  it('shows Guardian source threads and extra metadata only on expansion, preserving them as safe text', async () => {
+    const unsafeText = '<img src=x onerror="alert(1)">'
+    const unsafeKey = '<script>alert(2)</script>'
+    const view = renderDetails({
+      guardian_classifier_source_thread_id: unsafeText,
+      extra_metadata: { [unsafeKey]: unsafeText, zero: '0', multiline: 'first line\nsecond line' },
+    })
+    expect(screen.queryByText('Guardian classifier source thread')).toBeNull()
+    expect(screen.queryByText('Extra metadata')).toBeNull()
+    expect(screen.queryByText(unsafeText)).toBeNull()
+
+    await openDetails()
+    const guardianValue = screen.getByText('Guardian classifier source thread', { selector: 'dt' })
+      .parentElement!.querySelector('dd')!
+    const extraMetadata = screen.getByText('Extra metadata', { selector: 'dt' })
+      .parentElement!.querySelector('dd')!
+    expect(guardianValue.textContent).toBe(unsafeText)
+    expect(within(extraMetadata).getByText(unsafeKey, { selector: 'dt' })).toBeTruthy()
+    expect(within(extraMetadata).getByText(unsafeText, { selector: 'dd' })).toBeTruthy()
+    expect(within(extraMetadata).getByText('0', { selector: 'dd' })).toBeTruthy()
+    const multiline = within(extraMetadata).getByText('first line second line', { selector: 'dd' })
+    expect(multiline.textContent).toBe('first line\nsecond line')
+    expect(multiline.classList.contains('whitespace-pre-wrap')).toBe(true)
+    expect(view.container.querySelector('img, script')).toBeNull()
+
+    await view.rerender({ observation: legacyEntry })
+    expect(guardianValue.textContent).toBe('—')
+    expect(extraMetadata.textContent).toBe('—')
+    expect(screen.queryByText(unsafeText)).toBeNull()
+    expect(screen.queryByText(unsafeKey)).toBeNull()
+  })
+
+  it('ignores malformed extra metadata values instead of displaying them as recorded strings', async () => {
+    const metadata = { valid: 'observed', nested: { value: 'not a string' }, number: 0 }
+    renderDetails({ extra_metadata: metadata as unknown as Record<string, string> })
+    await openDetails()
+    const detail = screen.getByText('Extra metadata', { selector: 'dt' }).parentElement!.querySelector('dd')!
+    expect(within(detail).getByText('valid', { selector: 'dt' })).toBeTruthy()
+    expect(within(detail).getByText('observed', { selector: 'dd' })).toBeTruthy()
+    expect(within(detail).queryByText('nested')).toBeNull()
+    expect(within(detail).queryByText('number')).toBeNull()
+    expect(within(detail).queryByText('not a string')).toBeNull()
+  })
+
+  it('explains redacted extra values without showing the storage marker', async () => {
+    renderDetails({ extra_metadata: { authorization: '[redacted]', prompt: '[redacted]' } })
+    await openDetails()
+    const detail = screen.getByText('Extra metadata', { selector: 'dt' }).parentElement!.querySelector('dd')!
+    expect(within(detail).getAllByText('Value hidden (unknown field)')).toHaveLength(2)
+    expect(within(detail).getByText('authorization')).toBeTruthy()
+    expect(within(detail).getByText('prompt')).toBeTruthy()
+    expect(detail.textContent).not.toContain('[redacted]')
+  })
+
   it('keeps legacy missing data separate from a complete empty scan and an absent residency header', async () => {
     const view = renderDetails()
     await openDetails()

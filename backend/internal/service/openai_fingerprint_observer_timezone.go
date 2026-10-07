@@ -20,6 +20,11 @@ func cloneFingerprintObservationHeaders(headers http.Header) http.Header {
 	result := make(http.Header)
 	for name, values := range headers {
 		switch strings.ToLower(name) {
+		case "x-codex-window-id", "x-openai-subagent":
+			result[name] = make([]string, len(values))
+			for i, value := range values {
+				result[name][i] = fingerprintObservationBoundedMetadataString(value)
+			}
 		case "user-agent", "originator", "openai-beta", "version",
 			"x-openai-internal-codex-residency", codexInstallationIDKey,
 			"session-id", "session_id", "thread-id", "thread_id",
@@ -39,6 +44,14 @@ func cloneFingerprintObservationHeaders(headers http.Header) http.Header {
 		}
 	}
 	return result
+}
+
+func fingerprintObservationBoundedMetadataString(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > 128 || strings.IndexFunc(value, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return ""
+	}
+	return value
 }
 
 func fingerprintObservationSafeTurnMetadata(value string) string {
@@ -63,6 +76,53 @@ func fingerprintObservationSafeTurnMetadata(value string) string {
 				safe[name] = nil
 			}
 		}
+	}
+	kind, valid := ParseCodexWireRequestKind(codexWireString(metadata["request_kind"]))
+	if !valid {
+		kind = CodexWireRequestTurn
+	}
+	for _, name := range []string{
+		"turn_id", "parent_turn_id", "root_turn_id", "window_id", "context_window_id",
+		"guardian_classifier_source_thread_id", "agent_name", "subagent_kind", "thread_source",
+		"turn_trigger", "sandbox", "sandbox_mode",
+	} {
+		if raw, present := metadata[name]; present {
+			safe[name] = nil
+			value := fingerprintObservationBoundedMetadataString(codexWireString(raw))
+			switch name {
+			case "context_window_id", "guardian_classifier_source_thread_id":
+				value = NormalizeFingerprintObservationUUIDv7(value)
+			case "turn_id", "parent_turn_id", "root_turn_id":
+				id, _ := ResolveCodexTurnID(value, kind)
+				value = id.Value
+			}
+			if value != "" {
+				safe[name] = value
+			}
+		}
+	}
+	for _, name := range []string{"window_number", "forked_from_ordinal_exclusive"} {
+		if number := codexWireUint64(metadata[name]); number != nil {
+			safe[name] = *number
+		}
+	}
+	if started, present := codexWireInt64(metadata["turn_started_at_unix_ms"]); present {
+		safe["turn_started_at_unix_ms"] = started
+	}
+	for _, name := range []string{"auto_review_enabled", "node_repl_auto_review_required", "node_repl_disabled"} {
+		if enabled := codexWireBool(metadata[name]); enabled != nil {
+			safe[name] = *enabled
+		}
+	}
+	if workspaces := displayableCodexWorkspaces(metadata["workspaces"]); len(workspaces) > 0 {
+		paths := make(map[string]any, len(workspaces))
+		for _, path := range workspaces {
+			paths[path] = nil
+		}
+		safe["workspaces"] = paths
+	}
+	for key, value := range fingerprintObservationExtraMetadata(parseCodexWireMetadataObject(metadata).ExtraMetadata) {
+		safe[key] = value
 	}
 	copyFingerprintObservationSafeMetadata(safe, metadata)
 	encoded, _ := json.Marshal(safe)
@@ -118,6 +178,7 @@ func scrubFingerprintObservationEntry(entry *FingerprintObservationEntry) {
 		}
 	}
 	clear(entry.TimezoneConversions)
+	clear(entry.ExtraMetadata)
 	*entry = FingerprintObservationEntry{}
 }
 
