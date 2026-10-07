@@ -945,6 +945,7 @@ token_budget = false`)
     expect(unixConfig).toContain('[model_providers.sub2api]\nname = "Sub2API Composite"\nbase_url = "https://example.com/v1"\nmodel_catalog_url = "https://example.com/v1/models"')
     expect(unixConfig).not.toContain('model_catalog_json')
     expect(unixConfig).toContain('env_key = "SUB2API_API_KEY"')
+    expect(unixConfig).toContain('[features]\napi_key_model_discovery = true')
     expect(fetchMock).not.toHaveBeenCalled()
 
     await wrapper.get('[data-testid="codex-model-catalog-mode"]').setValue('file')
@@ -969,6 +970,7 @@ token_budget = false`)
     expect(loadedUnixConfig).not.toContain('model = "gpt-5.5"')
     expect(loadedUnixConfig).toContain('model_catalog_json = "~/.codex/codex-models.json"')
     expect(loadedUnixConfig).not.toContain('model_catalog_url')
+    expect(loadedUnixConfig).not.toContain('api_key_model_discovery')
 
     const downloadButton = wrapper.findAll('button').find((button) =>
       button.text().includes('keys.useKeyModal.codexModelCatalog.download')
@@ -990,12 +992,13 @@ token_budget = false`)
     // Codex does not expand %userprofile% in config.toml; it only expands ~/.
     expect(windowsConfig).toContain('model_catalog_json = "~/.codex/codex-models.json"')
     expect(windowsConfig).not.toContain('%userprofile%')
+    expect(windowsConfig).not.toContain('api_key_model_discovery')
     expect(wrapper.get('[data-testid="codex-model-catalog"]').text())
       .toContain('%userprofile%\\.codex\\codex-models.json')
   })
 
   it.each(['anthropic', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go'] as const)(
-    'offers Codex catalog configuration for the %s routed group',
+    'enables remote discovery and supports local Codex catalogs for the %s routed group',
     async (platform) => {
       const wrapper = mount(UseKeyModal, {
         props: {
@@ -1031,6 +1034,23 @@ token_budget = false`)
       expect(config).not.toContain('model_catalog_json')
       expect(config).toContain('base_url = "https://example.com/v1"')
       expect(config).toContain('wire_api = "responses"')
+      expect(config).toContain('[features]\napi_key_model_discovery = true')
+
+      await wrapper.get('[data-testid="codex-model-catalog-mode"]').setValue('file')
+      const fileConfig = wrapper.findAll('pre code')
+        .map((code) => code.text())
+        .find((content) => content.includes('[model_providers.sub2api]'))
+      expect(fileConfig).toContain('model_catalog_json = "~/.codex/codex-models.json"')
+      expect(fileConfig).not.toContain('model_catalog_url')
+      expect(fileConfig).not.toContain('api_key_model_discovery')
+
+      await wrapper.get('[data-testid="codex-model-catalog-mode"]').setValue('remote')
+      const restoredRemoteConfig = wrapper.findAll('pre code')
+        .map((code) => code.text())
+        .find((content) => content.includes('[model_providers.sub2api]'))
+      expect(restoredRemoteConfig).toContain('model_catalog_url = "https://example.com/v1/models"')
+      expect(restoredRemoteConfig).not.toContain('model_catalog_json')
+      expect(restoredRemoteConfig).toContain('[features]\napi_key_model_discovery = true')
     }
   )
 
