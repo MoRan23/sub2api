@@ -1594,7 +1594,9 @@ func partitionOpenAIChatGPTSubscriptionAccounts(accounts []*Account) ([]*Account
 	subscriptionAccounts := make([]*Account, 0, len(accounts))
 	regularAccounts := make([]*Account, 0, len(accounts))
 	for _, account := range accounts {
-		if account != nil && account.IsOpenAIChatGPTSubscription() {
+		// Engine accounts use API keys for authentication, but participate in the
+		// preferred pool alongside subscriptions rather than generic API keys.
+		if account != nil && (account.IsOpenAIChatGPTSubscription() || account.IsCodexEngine()) {
 			subscriptionAccounts = append(subscriptionAccounts, account)
 			continue
 		}

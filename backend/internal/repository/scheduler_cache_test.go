@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -35,6 +36,28 @@ func TestSchedulerMetadataAccountKeepsOpenAISubscriptionIdentity(t *testing.T) {
 
 	require.True(t, metadata.IsOpenAIChatGPTSubscription())
 	require.Empty(t, metadata.GetCredential("access_token"))
+}
+
+func TestSchedulerMetadataAccountKeepsCodexEngineModeAcrossCacheRoundTrip(t *testing.T) {
+	account := service.Account{
+		ID:       25,
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key": "secret-engine-key",
+		},
+		Extra: map[string]any{
+			service.OpenAIAPIKeyModeExtraKey: "codex_engine",
+		},
+	}
+	_, metaPayload, err := marshalSchedulerCacheAccount(account)
+	require.NoError(t, err)
+	var metadata service.Account
+	require.NoError(t, json.Unmarshal(metaPayload, &metadata))
+	require.True(t, metadata.IsCodexEngine())
+	require.Equal(t, service.AccountTypeAPIKey, metadata.Type)
+	require.False(t, metadata.IsOAuth())
+	require.Empty(t, metadata.GetCredential("api_key"))
 }
 
 func TestSchedulerMetadataAccountProjectsUpstreamBillingProbe(t *testing.T) {

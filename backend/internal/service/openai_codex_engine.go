@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -27,6 +28,35 @@ type codexEngineResponseError struct {
 	status                          int
 	reportedStatus                  int
 	code, errorType, message, event string
+}
+
+var errCodexEngineFirstOutputTimeout = errors.New("Codex-Engine first output timeout")
+var errCodexEngineUsageDrainTimeout = errors.New("Codex-Engine usage drain window expired after client disconnect")
+
+type codexEngineUsageDrainGuard struct {
+	mu     sync.Mutex
+	timer  *time.Timer
+	closed bool
+	window time.Duration
+	cancel context.CancelCauseFunc
+}
+
+func (g *codexEngineUsageDrainGuard) start() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closed || g.timer != nil || g.window <= 0 {
+		return
+	}
+	g.timer = time.AfterFunc(g.window, func() { g.cancel(errCodexEngineUsageDrainTimeout) })
+}
+
+func (g *codexEngineUsageDrainGuard) close() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.closed = true
+	if g.timer != nil {
+		g.timer.Stop()
+	}
 }
 
 func (e *codexEngineResponseError) Error() string {
@@ -251,20 +281,44 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 		return nil, err
 	}
 	imageRequest := strings.HasPrefix(endpoint, "/v1/images/")
+	streamRequest := gjson.GetBytes(body, "stream").Bool()
+	downstreamCtx := ctx
 	if imageRequest {
 		var release context.CancelFunc
 		ctx, release = detachUpstreamContext(ctx)
 		defer release()
+	} else {
+		// Keep a streaming attempt alive after a downstream disconnect so that
+		// Engine can finish it and return authoritative usage. Synchronous JSON
+		// requests retain their existing cancellation semantics.
+		var release context.CancelFunc
+		ctx, release = detachStreamUpstreamContext(ctx, streamRequest)
+		defer release()
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	drainWindow := time.Duration(0)
+	if s.cfg != nil {
+		drainWindow = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+	}
+	if imageRequest {
+		drainWindow = s.openAIImageStreamDataInterval()
+	}
+	drainGuard := &codexEngineUsageDrainGuard{window: drainWindow, cancel: cancel}
+	defer drainGuard.close()
+	if streamRequest && downstreamCtx != nil && !isOpenAICandyTest(ctx) {
+		// Observe the caller separately from the detached upstream context, also
+		// covering a disconnect while Engine has not yet returned response headers.
+		stopDisconnectWatch := context.AfterFunc(downstreamCtx, drainGuard.start)
+		defer stopDisconnectWatch()
+	}
 	effort := gjson.GetBytes(body, "reasoning.effort").String()
 	if effort == "" {
 		effort = gjson.GetBytes(body, "reasoning_effort").String()
 	}
 	var firstTimer *time.Timer
-	if timeout := s.openAIFirstOutputTimeout(effort); timeout > 0 && gjson.GetBytes(body, "stream").Bool() && !imageRequest {
-		firstTimer = time.AfterFunc(timeout, cancel)
+	if timeout := s.openAIFirstOutputTimeout(effort); timeout > 0 && streamRequest && !imageRequest {
+		firstTimer = time.AfterFunc(timeout, func() { cancel(errCodexEngineFirstOutputTimeout) })
 		defer firstTimer.Stop()
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
@@ -291,9 +345,22 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 	if err != nil {
 		return nil, err
 	}
+	if downstreamCtx != nil && downstreamCtx.Err() != nil {
+		// Detachment only protects an attempt already in flight. It must not
+		// start a fresh upstream request for a caller that has already gone away.
+		return nil, downstreamCtx.Err()
+	}
 	resp, err := s.httpUpstream.Do(req, proxy, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(start).Milliseconds())
 	if err != nil {
+		if errors.Is(context.Cause(ctx), errCodexEngineFirstOutputTimeout) {
+			recordCodexEngineFirstOutputTimeout(c, account, nil, start, "response_headers")
+			return nil, errCodexEngineFirstOutputTimeout
+		}
+		if errors.Is(context.Cause(ctx), errCodexEngineUsageDrainTimeout) {
+			recordCodexEngineUsageDrainTimeout(c, account, nil)
+			return nil, errCodexEngineUsageDrainTimeout
+		}
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
 	defer resp.Body.Close()
@@ -309,7 +376,7 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 	writeCodexEngineResponseHeaders(c.Writer.Header(), resp.Header)
 	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 		result.Stream = true
-		err = s.relayCodexEngineStream(ctx, c, resp, result, firstTimer, start, imageRequest)
+		err = s.relayCodexEngineStream(ctx, downstreamCtx, c, resp, result, firstTimer, start, imageRequest, drainGuard.start)
 	} else {
 		data, readErr := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 		if readErr != nil {
@@ -330,6 +397,12 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 		err = newCodexEngineResponseError(resp.StatusCode, nil, "")
 	}
 	var failure *codexEngineResponseError
+	if errors.Is(err, errCodexEngineFirstOutputTimeout) {
+		recordCodexEngineFirstOutputTimeout(c, account, resp.Header, start, "stream")
+	}
+	if errors.Is(err, errCodexEngineUsageDrainTimeout) {
+		recordCodexEngineUsageDrainTimeout(c, account, resp.Header)
+	}
 	if errors.As(err, &failure) {
 		recordCodexEngineError(c, account, resp, failure)
 	}
@@ -345,6 +418,29 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 		return nil, err
 	}
 	return result, err
+}
+
+func recordCodexEngineUsageDrainTimeout(c *gin.Context, account *Account, headers http.Header) {
+	message := errCodexEngineUsageDrainTimeout.Error()
+	setOpsUpstreamError(c, http.StatusGatewayTimeout, message, "")
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
+		ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account),
+		UpstreamStatusCode: http.StatusGatewayTimeout, UpstreamRequestID: firstNonEmpty(headers.Get("X-Request-Id"), headers.Get("Request-Id")),
+		Kind: "usage_drain_timeout", Reason: "usage_drain_timeout", Message: message,
+	})
+}
+
+func recordCodexEngineFirstOutputTimeout(c *gin.Context, account *Account, headers http.Header, start time.Time, phase string) {
+	message := errCodexEngineFirstOutputTimeout.Error()
+	setOpsUpstreamError(c, http.StatusGatewayTimeout, message, "")
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
+		ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account),
+		UpstreamStatusCode: http.StatusGatewayTimeout, UpstreamRequestID: firstNonEmpty(headers.Get("X-Request-Id"), headers.Get("Request-Id")),
+		Kind: "first_output_timeout", Reason: "first_output_timeout", Message: message,
+		Detail: fmt.Sprintf("phase=%s elapsed_ms=%d", phase, time.Since(start).Milliseconds()),
+	})
 }
 
 func writeCodexEngineResponseHeaders(dst, src http.Header) {
@@ -390,7 +486,7 @@ func observeCodexEnginePayload(result *OpenAIForwardResult, data []byte, event s
 
 // Relay complete SSE frames without rewriting their bytes. A separate reader
 // keeps the existing idle/first-output deadlines effective even on a stalled body.
-func (s *OpenAIGatewayService) relayCodexEngineStream(ctx context.Context, c *gin.Context, resp *http.Response, result *OpenAIForwardResult, firstTimer *time.Timer, start time.Time, imageRequest bool) error {
+func (s *OpenAIGatewayService) relayCodexEngineStream(ctx, downstreamCtx context.Context, c *gin.Context, resp *http.Response, result *OpenAIForwardResult, firstTimer *time.Timer, start time.Time, imageRequest bool, startUsageDrain func()) error {
 	type readResult struct {
 		line []byte
 		err  error
@@ -446,6 +542,29 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx context.Context, c *gi
 	c.Status(resp.StatusCode)
 	var frame, payload []byte
 	event, terminal := "", false
+	var streamFailure *codexEngineResponseError
+	var clientDone <-chan struct{}
+	if downstreamCtx != nil {
+		clientDone = downstreamCtx.Done()
+	}
+	markClientDisconnected := func() {
+		if result.ClientDisconnect {
+			return
+		}
+		result.ClientDisconnect = true
+		clientDone = nil
+		// Reuse the configured idle duration as the maximum disconnected usage
+		// collection window. Heartbeats must not retain a departed client's slot
+		// indefinitely. Zero retains the existing disabled-timeout semantics.
+		if startUsageDrain != nil {
+			startUsageDrain()
+		}
+	}
+	observeClientDisconnect := func() {
+		if downstreamCtx != nil && downstreamCtx.Err() != nil {
+			markClientDisconnected()
+		}
+	}
 	imageCounter := newOpenAIImageOutputCounter()
 	flush := func() error {
 		kind := event
@@ -469,12 +588,16 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx context.Context, c *gi
 				firstTimer.Stop()
 			}
 		}
+		observeClientDisconnect()
 		if !result.ClientDisconnect {
 			c.Set("codex_engine_response_written", true)
 			if _, err := c.Writer.Write(frame); err != nil {
-				result.ClientDisconnect = true
+				markClientDisconnected()
 			} else {
-				c.Writer.Flush()
+				observeClientDisconnect()
+				if !result.ClientDisconnect {
+					c.Writer.Flush()
+				}
 			}
 		}
 		failed := kind == "error" || kind == "response.failed" || kind == "response.incomplete" || gjson.GetBytes(payload, "error").IsObject()
@@ -482,7 +605,30 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx context.Context, c *gi
 			if kind == "" {
 				kind = "error"
 			}
-			return newCodexEngineResponseError(resp.StatusCode, payload, kind)
+			nextFailure := newCodexEngineResponseError(resp.StatusCode, payload, kind)
+			if streamFailure != nil {
+				// A terminal can supply only status/usage after a detailed bare
+				// error. Keep the earlier diagnosis while accepting its real usage.
+				if nextFailure.code == "" {
+					nextFailure.code = streamFailure.code
+				}
+				if nextFailure.errorType == "" {
+					nextFailure.errorType = streamFailure.errorType
+				}
+				if nextFailure.message == kind || nextFailure.message == http.StatusText(nextFailure.status) {
+					nextFailure.message = streamFailure.message
+				}
+				if nextFailure.reportedStatus == 0 && streamFailure.reportedStatus != 0 {
+					nextFailure.reportedStatus, nextFailure.status = streamFailure.reportedStatus, streamFailure.status
+				}
+			}
+			streamFailure = nextFailure
+			// A bare error can precede response.failed with the authoritative
+			// partial usage. Relay it unchanged and finish at the protocol terminal
+			// event, EOF or the existing upstream deadlines; never replay it.
+			if kind != "error" {
+				terminal = true
+			}
 		}
 		if bytes.Equal(bytes.TrimSpace(payload), []byte("[DONE]")) || kind == "response.completed" || kind == "response.done" || kind == "message_stop" || (imageRequest && strings.HasSuffix(kind, ".completed")) {
 			terminal = true
@@ -493,8 +639,22 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx context.Context, c *gi
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			if streamFailure != nil {
+				return errors.Join(streamFailure, context.Cause(ctx))
+			}
+			return context.Cause(ctx)
+		case <-clientDone:
+			observeClientDisconnect()
 		case <-timeout:
+			if result.ClientDisconnect {
+				if streamFailure != nil {
+					return errors.Join(streamFailure, errCodexEngineUsageDrainTimeout)
+				}
+				return errCodexEngineUsageDrainTimeout
+			}
+			if streamFailure != nil {
+				return streamFailure
+			}
 			return fmt.Errorf("Codex-Engine stream idle timeout")
 		case item := <-lines:
 			if timer != nil {
@@ -517,14 +677,30 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx context.Context, c *gi
 				event = strings.TrimSpace(string(line[6:]))
 			}
 			if len(frame) > maxLine {
-				return fmt.Errorf("upstream SSE event exceeds configured limit")
+				limitErr := fmt.Errorf("upstream SSE event exceeds configured limit")
+				if streamFailure != nil {
+					return errors.Join(streamFailure, limitErr)
+				}
+				return limitErr
 			}
 			if len(line) == 0 || item.err != nil {
 				if err := flush(); err != nil {
 					return err
 				}
+				if terminal {
+					if firstTimer != nil {
+						firstTimer.Stop()
+					}
+					if streamFailure != nil {
+						return streamFailure
+					}
+					return nil
+				}
 			}
 			if item.err != nil {
+				if streamFailure != nil {
+					return streamFailure
+				}
 				if item.err != io.EOF {
 					return item.err
 				}
