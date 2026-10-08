@@ -278,7 +278,8 @@ func CaptureOpenAIOAuthIdentityForAlphaSearch(c *gin.Context, body []byte, endpo
 }
 
 func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explicitTurnMetadata string, appendEndpointAlias, preferEndpointAlias, promptCacheKeyApplicable bool, forcedRequestKind CodexWireRequestKind) OpenAIOAuthIdentityCapture {
-	capture := captureOpenAICodexLogicalTurnIdentity(c, body, callerSeed, explicitTurnMetadata, appendEndpointAlias, preferEndpointAlias)
+	bodyView := newOpenAIIdentityCaptureBody(body)
+	capture := captureOpenAICodexLogicalTurnIdentityFromBody(c, bodyView, callerSeed, explicitTurnMetadata, appendEndpointAlias, preferEndpointAlias)
 	capture.syncSessionID = captureOpenAISyncSession(c, body)
 	capture.syncThreadID = captureOpenAISyncThread(c, body)
 	capture.UserAgent, capture.OSFamily, capture.OSSource = captureOpenAIRequestOS(c, body)
@@ -291,7 +292,7 @@ func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explici
 		// original ingress request, even when they cross the business midnight.
 		capture.ReceivedAt = existing.ReceivedAt
 	}
-	capture.WireProfile = captureCodexWireProfile(c, body, explicitTurnMetadata)
+	capture.WireProfile = captureCodexWireProfileFromBody(c, bodyView, explicitTurnMetadata)
 	capture.Logical.GuardianClassifierSourceThreadKey = capture.WireProfile.guardianClassifierSourceThread(capture.Logical.ThreadKey)
 	capture.Logical.GuardianClassifierParentTurnKey = capture.WireProfile.TurnLineage.ParentTurnID.Value
 	if forcedRequestKind.valid() {
@@ -312,10 +313,10 @@ func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explici
 	if forcedRequestKind == "" {
 		capture.ClientWindow = captureOpenAICodexClientWindow(c, body, capture.Logical)
 	}
-	capture.PromptCacheKey = captureOpenAICodexPromptCacheKey(
-		body, capture.Logical, capture.Aliases, capture.WireProfile, promptCacheKeyApplicable,
+	capture.PromptCacheKey = captureOpenAICodexPromptCacheKeyFromBody(
+		bodyView, capture.Logical, capture.Aliases, capture.WireProfile, promptCacheKeyApplicable,
 	)
-	requestTurn, conflicts, invalid := captureOpenAICodexRequestTurn(c, body, explicitTurnMetadata, capture.WireProfile.RequestKind)
+	requestTurn, conflicts, invalid := captureOpenAICodexRequestTurnFromBody(c, bodyView, explicitTurnMetadata, capture.WireProfile.RequestKind)
 	if strings.HasPrefix(capture.WireProfile.InvalidReason, "turn_id ") {
 		requestTurn = OpenAICodexRequestTurnSnapshot{}
 	}
@@ -326,14 +327,7 @@ func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explici
 	if conflicts > 0 {
 		openAICodexIdentityConflictTotal.Add(int64(conflicts))
 	}
-	var decoded map[string]any
-	decoder := json.NewDecoder(strings.NewReader(string(body)))
-	decoder.UseNumber()
-	if len(body) > 0 && decoder.Decode(&decoded) == nil {
-		capture.ClientInstallationID = extractClientInstallationID(c, decoded)
-	} else {
-		capture.ClientInstallationID = extractClientInstallationID(c, nil)
-	}
+	capture.ClientInstallationID = bodyView.clientInstallationID(c, body)
 	return capture
 }
 
@@ -394,6 +388,10 @@ func applyOpenAICodexRequestTurnToWireProfile(profile *CodexWireProfile, request
 }
 
 func captureOpenAICodexRequestTurn(c *gin.Context, body []byte, explicitTurnMetadata string, requestKind CodexWireRequestKind) (OpenAICodexRequestTurnSnapshot, int, int) {
+	return captureOpenAICodexRequestTurnFromBody(c, newOpenAIIdentityCaptureBody(body), explicitTurnMetadata, requestKind)
+}
+
+func captureOpenAICodexRequestTurnFromBody(c *gin.Context, bodyView openAIIdentityCaptureBody, explicitTurnMetadata string, requestKind CodexWireRequestKind) (OpenAICodexRequestTurnSnapshot, int, int) {
 	type candidate struct {
 		snapshot OpenAICodexRequestTurnSnapshot
 		valid    bool
@@ -416,17 +414,14 @@ func captureOpenAICodexRequestTurn(c *gin.Context, body []byte, explicitTurnMeta
 		candidates = append(candidates, candidate{snapshot: snapshot, valid: valid, invalid: !valid, carrier: carrier})
 	}
 
-	var root map[string]json.RawMessage
-	var clientMetadata map[string]json.RawMessage
-	if len(body) > 0 && utf8.Valid(body) && json.Unmarshal(body, &root) == nil && root != nil {
-		if raw, ok := root["client_metadata"]; ok {
-			if json.Unmarshal(raw, &clientMetadata) == nil && clientMetadata != nil {
-				if rawMetadata, ok := clientMetadata[openAIWSTurnMetadataHeader]; ok {
-					appendMetadata(rawMetadata, openAICodexRequestTurnSourceClientMetadata, openAICodexMetadataCarrierClientTurnMetadata, true)
-				}
-			} else {
-				candidates = append(candidates, candidate{invalid: true, carrier: openAICodexMetadataCarrierClientMetadataContainer})
+	root, clientMetadata := bodyView.root, bodyView.clientMetadata
+	if bodyView.clientMetadataPresent {
+		if clientMetadata != nil {
+			if rawMetadata, ok := clientMetadata[openAIWSTurnMetadataHeader]; ok {
+				appendMetadata(rawMetadata, openAICodexRequestTurnSourceClientMetadata, openAICodexMetadataCarrierClientTurnMetadata, true)
 			}
+		} else {
+			candidates = append(candidates, candidate{invalid: true, carrier: openAICodexMetadataCarrierClientMetadataContainer})
 		}
 	}
 	if c != nil && c.Request != nil {
@@ -508,17 +503,20 @@ func captureOpenAICodexPromptCacheKey(
 	profile CodexWireProfile,
 	applicable bool,
 ) OpenAICodexPromptCacheKeySnapshot {
+	return captureOpenAICodexPromptCacheKeyFromBody(newOpenAIIdentityCaptureBody(body), logical, aliases, profile, applicable)
+}
+
+func captureOpenAICodexPromptCacheKeyFromBody(
+	bodyView openAIIdentityCaptureBody,
+	logical OpenAICodexLogicalTurnIdentity,
+	aliases []OpenAICodexLogicalTurnAlias,
+	profile CodexWireProfile,
+	applicable bool,
+) OpenAICodexPromptCacheKeySnapshot {
 	snapshot := OpenAICodexPromptCacheKeySnapshot{
 		Kind: OpenAICodexPromptCacheKeyMissing, Applicable: applicable,
 	}
-	if len(body) == 0 || !utf8.Valid(body) {
-		return snapshot
-	}
-	var root map[string]json.RawMessage
-	if json.Unmarshal(body, &root) != nil || root == nil {
-		return snapshot
-	}
-	raw, present := root["prompt_cache_key"]
+	raw, present := bodyView.root["prompt_cache_key"]
 	if !present {
 		return snapshot
 	}

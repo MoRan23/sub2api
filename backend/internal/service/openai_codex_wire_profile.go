@@ -875,14 +875,12 @@ func parseCodexWireHeaderProfile(c *gin.Context) CodexWireProfile {
 }
 
 func captureCodexWireProfile(c *gin.Context, body []byte, explicitTurnMetadata string) CodexWireProfile {
+	return captureCodexWireProfileFromBody(c, newOpenAIIdentityCaptureBody(body), explicitTurnMetadata)
+}
+
+func captureCodexWireProfileFromBody(c *gin.Context, bodyView openAIIdentityCaptureBody, explicitTurnMetadata string) CodexWireProfile {
 	profile := newCodexWireProfile()
-	var root map[string]json.RawMessage
-	var clientMetadata map[string]json.RawMessage
-	if len(body) > 0 && utf8.Valid(body) && json.Unmarshal(body, &root) == nil && root != nil {
-		if raw, present := root["client_metadata"]; present {
-			_ = json.Unmarshal(raw, &clientMetadata)
-		}
-	}
+	root, clientMetadata := bodyView.root, bodyView.clientMetadata
 	var canonicalLocalMetadata CodexCompactionTurnMetadata
 	canonicalLocal := false
 	if raw, present := clientMetadata[openAIWSTurnMetadataHeader]; present {

@@ -216,25 +216,26 @@ func callEnsureOpenAIInstallationID(repo openAIInstallationIDCASRepository, ctx 
 // reported. Direct header/body fields take precedence over values embedded in
 // x-codex-turn-metadata. Opaque turn metadata is ignored without mutation.
 func extractClientInstallationID(c *gin.Context, reqBody map[string]any) string {
+	direct, turnMetadata := clientInstallationMetadataValues(reqBody)
+	return extractClientInstallationIDFromMetadata(c, direct, turnMetadata)
+}
+
+func extractClientInstallationIDFromMetadata(c *gin.Context, direct, turnMetadata string) string {
 	if c != nil && c.Request != nil {
 		if v := strings.TrimSpace(c.Request.Header.Get(codexInstallationIDKey)); v != "" {
 			return v
 		}
 	}
-	if reqBody != nil {
-		if direct, _ := clientInstallationMetadataValues(reqBody); direct != "" {
-			return direct
-		}
+	if direct != "" {
+		return direct
 	}
 	if c != nil && c.Request != nil {
 		if v := extractInstallationIDFromTurnMetadata(c.Request.Header.Get(openAIWSTurnMetadataHeader)); v != "" {
 			return v
 		}
 	}
-	if reqBody != nil {
-		if _, turnMetadata := clientInstallationMetadataValues(reqBody); turnMetadata != "" {
-			return extractInstallationIDFromTurnMetadata(turnMetadata)
-		}
+	if turnMetadata != "" {
+		return extractInstallationIDFromTurnMetadata(turnMetadata)
 	}
 	return ""
 }

@@ -1,13 +1,61 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
+
+// openAIIdentityCaptureBody is a synchronous, read-only view shared by identity
+// capture stages. Only metadata is decoded: large input/history values remain
+// borrowed bytes. Never retain this view in a capture, plan, or context cache.
+type openAIIdentityCaptureBody struct {
+	root                  map[string]json.RawMessage
+	clientMetadata        map[string]json.RawMessage
+	clientMetadataPresent bool
+}
+
+func newOpenAIIdentityCaptureBody(body []byte) openAIIdentityCaptureBody {
+	var view openAIIdentityCaptureBody
+	if len(body) == 0 || !utf8.Valid(body) {
+		return view
+	}
+	root, err := decodeOpenAIIdentityBodyView(body)
+	if err != nil || root == nil {
+		return view
+	}
+	view.root = root
+	if raw, present := root["client_metadata"]; present {
+		view.clientMetadataPresent = true
+		_ = json.Unmarshal(raw, &view.clientMetadata)
+	}
+	return view
+}
+
+func (view openAIIdentityCaptureBody) clientInstallationID(c *gin.Context, body []byte) string {
+	if view.root != nil {
+		var direct, turnMetadata string
+		_ = json.Unmarshal(view.clientMetadata[codexInstallationIDKey], &direct)
+		_ = json.Unmarshal(view.clientMetadata[openAIWSTurnMetadataHeader], &turnMetadata)
+		return extractClientInstallationIDFromMetadata(c, strings.TrimSpace(direct), turnMetadata)
+	}
+	// Installation capture historically accepts a first JSON object followed by
+	// trailing data, and replaces malformed UTF-8. Strict identity consumers do
+	// neither. Keep that compatibility path without decoding normal histories.
+	var decoded map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if len(body) > 0 && decoder.Decode(&decoded) == nil {
+		return extractClientInstallationID(c, decoded)
+	}
+	return extractClientInstallationID(c, nil)
+}
 
 // decodeOpenAIIdentityBodyView borrows top-level values from an immutable body.
 // Identity projection only replaces or deletes map entries; it must not mutate

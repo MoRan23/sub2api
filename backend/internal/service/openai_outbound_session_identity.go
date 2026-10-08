@@ -320,7 +320,11 @@ func ResolveOpenAICodexLogicalTurnIdentityWithTurnMetadata(c *gin.Context, body 
 }
 
 func captureOpenAICodexLogicalTurnIdentity(c *gin.Context, body []byte, callerSeed, explicitTurnMetadata string, appendEndpointAlias, preferEndpointAlias bool) OpenAIOAuthIdentityCapture {
-	metadata, bodyTurnMetadata, promptCacheKey := openAIOutboundSessionBodySignals(body)
+	return captureOpenAICodexLogicalTurnIdentityFromBody(c, newOpenAIIdentityCaptureBody(body), callerSeed, explicitTurnMetadata, appendEndpointAlias, preferEndpointAlias)
+}
+
+func captureOpenAICodexLogicalTurnIdentityFromBody(c *gin.Context, bodyView openAIIdentityCaptureBody, callerSeed, explicitTurnMetadata string, appendEndpointAlias, preferEndpointAlias bool) OpenAIOAuthIdentityCapture {
+	metadata, bodyTurnMetadata, promptCacheKey := bodyView.sessionSignals()
 	type logicalCandidate struct {
 		tuple   openAICodexLogicalTuple
 		source  string
@@ -540,13 +544,11 @@ func firstValidOpenAIOutboundSessionHeader(headers http.Header, names []string) 
 }
 
 func openAIOutboundSessionBodySignals(body []byte) (metadata map[string]json.RawMessage, turnMetadata [][]byte, promptCacheKey string) {
-	if len(body) == 0 || !utf8.Valid(body) {
-		return nil, nil, ""
-	}
-	var root map[string]json.RawMessage
-	if json.Unmarshal(body, &root) != nil || root == nil {
-		return nil, nil, ""
-	}
+	return newOpenAIIdentityCaptureBody(body).sessionSignals()
+}
+
+func (view openAIIdentityCaptureBody) sessionSignals() (metadata map[string]json.RawMessage, turnMetadata [][]byte, promptCacheKey string) {
+	root := view.root
 	if raw, ok := root["prompt_cache_key"]; ok {
 		_ = json.Unmarshal(raw, &promptCacheKey)
 	}
@@ -555,10 +557,7 @@ func openAIOutboundSessionBodySignals(body []byte) (metadata map[string]json.Raw
 			turnMetadata = append(turnMetadata, decoded)
 		}
 	}
-	if raw, ok := root["client_metadata"]; ok {
-		_ = json.Unmarshal(raw, &metadata)
-	}
-	return metadata, turnMetadata, promptCacheKey
+	return view.clientMetadata, turnMetadata, promptCacheKey
 }
 
 func normalizeOpenAIOutboundTurnMetadataRaw(raw json.RawMessage) []byte {
