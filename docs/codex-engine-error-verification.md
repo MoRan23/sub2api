@@ -38,11 +38,24 @@ Engine 的原生修复与发布验证在对应仓库交付；本项目的日志�
 ## 2026-10-08：`task_state_unconfirmed` 503
 
 只读核查账号「自研 普通」后，确认同一用户的错误链先出现于北京时间
-11:24:09（UTC 03:24:09）：Engine 返回 HTTP 400，消息为
-`Pending task proof changed`。从下一秒开始到 11:34:26，共有 50 条
+11:24:09（UTC 03:24:09）：Engine 在 HTTP 200 的 SSE 流中返回
+`continuation_required`，消息为 `Pending task proof changed`。从下一秒开始到 11:34:26，共有 50 条
 HTTP 503，原始消息为 `The original accepted execution could not be confirmed`。
 Engine 页面将同一错误码 `task_state_unconfirmed` 显示为
 `A relevant saved task could not be confirmed`。
+
+首个请求的错误页显示 400，而 Engine 内部记录 409。进一步核对 access 日志确认
+实际 HTTP 状态为 200；流内错误只有 `code`、`type: invalid_request_error` 和
+`message`，没有 `status` 或 `status_code`。Sub2API 根据错误类型推断诊断状态 400，
+没有将实际 HTTP 409 改写为 400。若 Engine 在流内提供显式错误状态，现有解析器会
+优先保留它；不能从缺少状态的错误体推断 Engine 内部的 409。
+
+Engine 会话后续只读关联了同一请求的持久状态：新请求的 binding 已保存，结果仍为
+`pending` 且独立结果文件缺失；原任务仍保留前一请求的等待工具状态。由此确认链路为
+绑定落盘、后置 proof 校验失败、SSE 头已发送导致接受标记未传回、原错误未持久化，
+随后相同请求持续在对账阶段返回 503。对应修复由 Engine 实现，包括接受确认后再发送
+SSE 开头、持久化派发模型前的失败结果，以及在任务锁内先完成可变 proof 校验再绑定。
+这些修改不需要 Sub2API 删除历史、修改请求或自动重放。
 
 截图末段 11:33:50–11:34:35 内的 15 条请求均只有一次上游 HTTP 错误事件，
 每条 Sub2API 请求 ID、客户端请求 ID 和 Engine 请求 ID 均不同。
