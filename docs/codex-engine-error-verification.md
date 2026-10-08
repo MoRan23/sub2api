@@ -34,3 +34,34 @@ golangci-lint run --new-from-rev=HEAD ./internal/service/... ./internal/handler/
 ```
 
 Engine 的原生修复与发布验证在对应仓库交付；本项目的日志修复本身不能恢复已损坏的历史上下文，也不代表线上故障已经消除。
+
+## 2026-10-08：`task_state_unconfirmed` 503
+
+只读核查账号「自研 普通」后，确认同一用户的错误链先出现于北京时间
+11:24:09（UTC 03:24:09）：Engine 返回 HTTP 400，消息为
+`Pending task proof changed`。从下一秒开始到 11:34:26，共有 50 条
+HTTP 503，原始消息为 `The original accepted execution could not be confirmed`。
+Engine 页面将同一错误码 `task_state_unconfirmed` 显示为
+`A relevant saved task could not be confirmed`。
+
+截图末段 11:33:50–11:34:35 内的 15 条请求均只有一次上游 HTTP 错误事件，
+每条 Sub2API 请求 ID、客户端请求 ID 和 Engine 请求 ID 均不同。
+这证明它们是独立入站请求，不是 Sub2API 对一次请求进行内部重试。
+数据库和现有日志不保存完整正文、会话头或执行摘要，不能据此证明这些请求的
+`input`、`instructions`、`tools` 或会话身份完全相同。
+
+本地核查及模拟回归验证以下边界：
+
+- 专用模式收到业务 HTTP 503 后，保留状态、错误码及消息，不转换为账号切换错误，
+  不自动重放，不停用账号；即使账号开启池内重试，仍只发送一次。
+- 请求声明 `stream: true` 而上游以 JSON 返回 503 时，保持原始 JSON 错误，
+  不追加 SSE 或第二份兜底错误；没有上游用量时不生成用量结算。
+- 历史、密文、响应 ID、工具和大整数未知字段保持原样；继续沿用现有模型映射及速度策略。
+- 原样转发 `Retry-After` 等响应头，因此客户端仍可能根据状态和提示发起新的请求。
+
+这次增加的是精确覆盖 `task_state_unconfirmed` 的本地回归，没有更改 Sub2API
+生产转发策略。原始任务的受理与恢复问题由 Engine 仓库处理；本地回归通过不代表
+已经修复或部署了 Engine，也不代表线上故障已消除。
+
+验证通过：`go test -tags unit ./internal/handler ./internal/service -run '^TestCodexEngine' -count=1`。
+本轮只改测试与诊断说明，不涉及前端、数据库迁移或生产配置。

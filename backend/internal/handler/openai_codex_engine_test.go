@@ -108,36 +108,42 @@ func TestCodexEngineMixedPoolKeepsOriginalCompactWire(t *testing.T) {
 }
 
 func TestCodexEngineHandlerDoesNotReplayOrAppendBusinessError(t *testing.T) {
-	for _, stream := range []bool{false, true} {
-		wire := `{"error":{"code":"native_error","message":"kept"}}`
-		status, contentType := 429, "application/json"
-		if stream {
-			wire = "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"native_error\"}}}\n\n"
-			status = 200
-			contentType = "text/event-stream"
-		}
-		upstream := newAstraProCapturedUpstream(&http.Response{StatusCode: status, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(wire))})
-		h := newOpenAIResponsesFailoverTestHandler(t, upstream, func(accounts []service.Account) {
-			for i := range accounts {
-				accounts[i].Type = service.AccountTypeAPIKey
-				accounts[i].Credentials = map[string]any{"api_key": "engine", "base_url": "https://engine.example", "pool_mode": true, "pool_mode_retry_count": 3}
-				accounts[i].Extra = map[string]any{service.OpenAIAPIKeyModeExtraKey: "codex_engine"}
+	const taskStateUnconfirmed = `{"error":{"code":"task_state_unconfirmed","type":"server_error","message":"The original accepted execution could not be confirmed"}}`
+	for _, tc := range []struct {
+		name, contentType, wire string
+		status                  int
+		stream                  bool
+	}{
+		{"rate limit", "application/json", `{"error":{"code":"native_error","message":"kept"}}`, http.StatusTooManyRequests, false},
+		{"failed event", "text/event-stream", "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"native_error\"}}}\n\n", http.StatusOK, true},
+		{"task state unconfirmed", "application/json", taskStateUnconfirmed, http.StatusServiceUnavailable, false},
+		{"task state unconfirmed with stream requested", "application/json", taskStateUnconfirmed, http.StatusServiceUnavailable, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := newAstraProCapturedUpstream(&http.Response{StatusCode: tc.status, Header: http.Header{"Content-Type": {tc.contentType}}, Body: io.NopCloser(strings.NewReader(tc.wire))}, astra200())
+			h := newOpenAIResponsesFailoverTestHandler(t, upstream, func(accounts []service.Account) {
+				for i := range accounts {
+					accounts[i].Type = service.AccountTypeAPIKey
+					accounts[i].Credentials = map[string]any{"api_key": "engine", "base_url": "https://engine.example", "pool_mode": true, "pool_mode_retry_count": 3}
+					accounts[i].Extra = map[string]any{service.OpenAIAPIKeyModeExtraKey: "codex_engine"}
+				}
+			})
+			// Even upstream-invalid item IDs must remain untouched in dedicated mode.
+			// Engine decides whether it can replay the client's original history.
+			body := `{"model":"gpt-6-astra","previous_response_id":"resp_original","input":[{"type":"reasoning","id":"item_original","encrypted_content":"opaque-original","summary":[]},{"type":"reasoning","encrypted_content":"opaque-missing-id"},{"type":"reasoning","id":null,"encrypted_content":"opaque-null-id"},{"type":"reasoning","id":"","encrypted_content":"opaque-empty-id"},{"type":"function_call_output","call_id":"call_original","output":"tool result"},{"role":"user","content":"hi"}],"tools":[{"type":"namespace","name":"native","tools":[]}],"unknown":9007199254740993123,"stream":false}`
+			if tc.stream {
+				body = strings.Replace(body, "false", "true", 1)
 			}
+			c, rec := newAstraProFailoverContext(t, body)
+			require.NoError(t, h.gatewayService.BindOpenAIHTTPResponseOwner(context.Background(), 3132, "resp_original", 100, 99))
+			h.Responses(c)
+			urls, ids, bodies := upstream.snapshot()
+			require.Len(t, ids, 1)
+			require.Equal(t, "https://engine.example/v1/responses", urls[0])
+			require.Equal(t, body, string(bodies[0]), "selected Engine account must preserve client history, IDs and ciphertext")
+			require.Equal(t, tc.status, rec.Code)
+			require.Equal(t, tc.contentType, rec.Header().Get("Content-Type"))
+			require.Equal(t, tc.wire, rec.Body.String(), "the original error must not be replaced by fallback success or appended SSE")
 		})
-		// Even upstream-invalid item IDs must remain untouched in dedicated mode.
-		// Engine decides whether it can replay the client's original history.
-		body := `{"model":"gpt-6-astra","previous_response_id":"resp_original","input":[{"type":"reasoning","id":"item_original","encrypted_content":"opaque-original","summary":[]},{"type":"reasoning","encrypted_content":"opaque-missing-id"},{"type":"reasoning","id":null,"encrypted_content":"opaque-null-id"},{"type":"reasoning","id":"","encrypted_content":"opaque-empty-id"},{"type":"function_call_output","call_id":"call_original","output":"tool result"},{"role":"user","content":"hi"}],"tools":[{"type":"namespace","name":"native","tools":[]}],"unknown":9007199254740993123,"stream":false}`
-		if stream {
-			body = strings.Replace(body, "false", "true", 1)
-		}
-		c, rec := newAstraProFailoverContext(t, body)
-		require.NoError(t, h.gatewayService.BindOpenAIHTTPResponseOwner(context.Background(), 3132, "resp_original", 100, 99))
-		h.Responses(c)
-		urls, ids, bodies := upstream.snapshot()
-		require.Len(t, ids, 1)
-		require.Equal(t, "https://engine.example/v1/responses", urls[0])
-		require.Equal(t, body, string(bodies[0]), "selected Engine account must preserve client history, IDs and ciphertext")
-		require.Equal(t, status, rec.Code)
-		require.Equal(t, wire, rec.Body.String())
 	}
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -177,6 +178,7 @@ func TestCodexEngineBusinessErrorsAndSSE(t *testing.T) {
 		{"native error", "application/json", `{"error":{"code":"native_error","message":"original"}}`, 409, true, 0, 0},
 		{"unknown context", "application/json", `{"error":{"code":"context_owner_unknown","type":"gateway_error","message":"Opaque context has no known account owner; restore replayable history"}}`, 409, true, 0, 0},
 		{"rate limit", "application/json", `{"error":{"code":"rate_limit","message":"wait"}}`, 429, true, 0, 0},
+		{"task state unconfirmed", "application/json", `{"error":{"code":"task_state_unconfirmed","type":"server_error","message":"The original accepted execution could not be confirmed"}}`, 503, true, 0, 0},
 		{"responses", "text/event-stream", "event: response.completed\r\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":4,\"output_tokens\":5}}}\r\n\r\n", 200, false, 4, 5},
 		{"chat", "text/event-stream", "data: {\"usage\":{\"prompt_tokens\":6,\"completion_tokens\":7}}\n\ndata: [DONE]\n\n", 200, false, 6, 7},
 		{"messages", "text/event-stream", "event: message_start\ndata: {\"message\":{\"usage\":{\"input_tokens\":9}}}\n\nevent: message_delta\ndata: {\"usage\":{\"output_tokens\":10}}\n\nevent: message_stop\ndata: {}\n\n", 200, false, 9, 10},
@@ -194,14 +196,28 @@ func TestCodexEngineBusinessErrorsAndSSE(t *testing.T) {
 				wire += "event: response.completed\ndata: {}\n\n"
 			}
 			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: tc.status, Header: http.Header{"Content-Type": {tc.contentType}, "Retry-After": {"42"}, "X-Request-Id": {"req_engine_failure"}}, Body: io.NopCloser(strings.NewReader(wire))}}
-			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
-			result, err := svc.Forward(context.Background(), c, engineAccount(), []byte(`{"model":"alias","stream":true}`))
+			healthSettings, err := json.Marshal(OpenAIAPIKeyHealthBreakerSettings{Enabled: true, WindowMinutes: 1, FailureThreshold: 3, CooldownMinutes: 5})
+			require.NoError(t, err)
+			healthCache := &openAIAPIKeyHealthCacheStub{tripped: true}
+			healthRepo := &openAIAPIKeyHealthAccountRepo{}
+			healthBlocker := &openAIAPIKeyHealthRuntimeBlocker{}
+			rateLimits := NewRateLimitService(healthRepo, nil, &config.Config{}, nil, healthCache)
+			rateLimits.SetSettingService(NewSettingService(&openAIAPIKeyHealthSettingRepo{value: string(healthSettings)}, &config.Config{}))
+			rateLimits.SetOpenAIAPIKeyHealthCache(healthCache)
+			rateLimits.SetAccountRuntimeBlocker(healthBlocker)
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, rateLimitService: rateLimits}
+			account := engineAccount()
+			account.ID = 42
+			account.Credentials["pool_mode"] = true
+			result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"alias","stream":true}`))
 			require.Equal(t, tc.failed, isCodexEngineResponseError(err))
 			if !tc.failed {
 				require.NoError(t, err)
 			}
 			require.Equal(t, tc.status, rec.Code)
+			require.Equal(t, tc.contentType, rec.Header().Get("Content-Type"))
 			require.Equal(t, tc.body, rec.Body.String())
+			require.Len(t, upstream.requests, 1)
 			if tc.failed && tc.input == 0 && tc.output == 0 {
 				require.Nil(t, result, "an unmetered rejection must not enter usage accounting")
 			} else {
@@ -212,7 +228,13 @@ func TestCodexEngineBusinessErrorsAndSSE(t *testing.T) {
 			require.Equal(t, "42", rec.Header().Get("Retry-After"))
 			require.True(t, CodexEngineResponseWritten(c))
 			if tc.failed {
-				require.False(t, svc.ReportOpenAIAccountScheduleResult(engineAccount(), "native", false, nil, err))
+				require.False(t, svc.ReportOpenAIAccountScheduleResult(account, "native", false, nil, err))
+				require.False(t, svc.ObserveOpenAIAccountHealthFailure(context.Background(), account, err))
+				require.Zero(t, healthCache.recordCalls)
+				require.Zero(t, healthCache.setCalls)
+				require.Zero(t, healthRepo.setCalls)
+				require.Zero(t, healthBlocker.calls)
+				require.Nil(t, account.TempUnschedulableUntil)
 				expectedStatus := tc.status
 				if expectedStatus == 200 {
 					expectedStatus = 502
@@ -224,6 +246,17 @@ func TestCodexEngineBusinessErrorsAndSSE(t *testing.T) {
 				require.Equal(t, expectedStatus, events[0].UpstreamStatusCode)
 				require.NotEmpty(t, events[0].Reason)
 				require.NotEmpty(t, events[0].Message)
+				if tc.contentType == "application/json" {
+					var failure *codexEngineResponseError
+					require.ErrorAs(t, err, &failure)
+					require.Equal(t, tc.status, failure.status)
+					require.Equal(t, gjson.Get(tc.body, "error.code").String(), failure.code)
+					require.Equal(t, gjson.Get(tc.body, "error.type").String(), failure.errorType)
+					require.Equal(t, gjson.Get(tc.body, "error.message").String(), failure.message)
+					require.Equal(t, failure.code, events[0].Reason)
+					require.Equal(t, failure.message, events[0].Message)
+					require.Equal(t, failure.message, c.GetString(OpsUpstreamErrorMessageKey))
+				}
 			}
 		})
 	}
