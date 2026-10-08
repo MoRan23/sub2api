@@ -561,23 +561,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			if finalizedPlan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok {
 				*identityPlan = finalizedPlan
 			}
-			finalizedBody := requestBody
-			if upstreamReq.GetBody != nil {
-				if snapshot, snapshotErr := upstreamReq.GetBody(); snapshotErr == nil {
-					if sentBody, readErr := io.ReadAll(snapshot); readErr == nil {
-						finalizedBody = sentBody
-					}
-					_ = snapshot.Close()
-				}
-			}
+			finalizedBody := openAIUpstreamRequestBodySnapshot(upstreamReq, requestBody)
 			guardedBody := s.guardOpenAICodexTurnStateEchoForPlan(c, account, *identityPlan, upstreamReq.Header, finalizedBody)
 			if !bytes.Equal(guardedBody, finalizedBody) {
-				bodySnapshot := append([]byte(nil), guardedBody...)
-				upstreamReq.Body = io.NopCloser(bytes.NewReader(bodySnapshot))
-				upstreamReq.ContentLength = int64(len(bodySnapshot))
-				upstreamReq.GetBody = func() (io.ReadCloser, error) {
-					return io.NopCloser(bytes.NewReader(bodySnapshot)), nil
-				}
+				setOpenAIRequestBodySnapshot(upstreamReq, guardedBody)
 			}
 			retryBody, restoreErr := restoreOpenAIAccessProgramsForRetry(guardedBody, requestBody)
 			if restoreErr != nil {
@@ -594,16 +581,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if identityPlan != nil && identityPlan.TurnIdentityEnabled {
 			setFingerprintObservationOutboundIdentity(c, identityPlan.TurnIdentity)
 		}
-		observationBody := requestBody
-		if upstreamReq.GetBody != nil {
-			if snapshot, snapshotErr := upstreamReq.GetBody(); snapshotErr == nil {
-				if sentBody, readErr := io.ReadAll(snapshot); readErr == nil {
-					observationBody = sentBody
-				}
-				_ = snapshot.Close()
-			}
-		}
-		observationBody = openAIUpstreamRequestBodySnapshot(upstreamReq, observationBody)
+		observationBody := openAIUpstreamRequestBodySnapshot(upstreamReq, requestBody)
 		s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, observationBody, openAIDaybreakDecisionFromRequest(upstreamReq))
 		return upstreamReq, nil
 	}

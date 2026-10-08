@@ -87,10 +87,14 @@ type TimezoneConversion struct {
 // first neutral Responses conversion. Attempts project those sources onto their
 // frozen egress target; an account's final body is never used as a new baseline.
 type RequestTimezoneState struct {
-	Policy               openai.RequestPolicy
-	AcceptedAt           time.Time
-	Inbound              *TimezoneScanResult
-	Conversions          []TimezoneConversion
+	Policy      openai.RequestPolicy
+	AcceptedAt  time.Time
+	Inbound     *TimezoneScanResult
+	Conversions []TimezoneConversion
+	// Internal request bodies are immutable: adapters replace the slice after a
+	// JSON edit instead of modifying its backing array. Account projections may
+	// share this snapshot; PreparedBody and CloneRequestTimezoneState are the
+	// explicit boundaries for callers that need independently writable bytes.
 	preparedBody         []byte
 	patches              []requestTimezoneBodyPatch
 	alphaSearch          bool
@@ -131,22 +135,44 @@ func (s *RequestTimezoneState) PreparedBody() []byte {
 // ApplyToBody reuses only frozen content patches, preserving later model/account
 // adaptation. A changed or missing source path rejects the entire patch group;
 // callers must never rescan the adapted body to select another environment.
+// The input and any unchanged output share immutable storage. JSON edits use
+// sjson's default copy-on-write behavior, never its ReplaceInPlace option.
 func (s *RequestTimezoneState) ApplyToBody(body []byte) ([]byte, bool) {
 	if s == nil || len(s.patches) == 0 {
-		return bytes.Clone(body), true
+		return body, true
 	}
+	if !s.matchesBody(body) {
+		return body, false
+	}
+	output := body
+	for _, patch := range s.patches {
+		if gjson.GetBytes(output, patch.path).Raw == patch.prepared {
+			continue
+		}
+		var err error
+		output, err = sjson.SetRawBytes(output, patch.path, []byte(patch.prepared))
+		if err != nil {
+			return body, false
+		}
+	}
+	return output, true
+}
+
+// matchesBody validates the whole group before any edit. Undo uses the same
+// check without materializing an unused forward projection of a large body.
+func (s *RequestTimezoneState) matchesBody(body []byte) bool {
 	if !gjson.ValidBytes(body) {
-		return bytes.Clone(body), false
+		return false
 	}
 	for _, patch := range s.patches {
 		if patch.containerPath != "" {
 			container := gjson.GetBytes(body, patch.containerPath)
 			if patch.toolType != "" {
 				if !gjson.GetBytes(body, "tools").IsArray() || !container.IsObject() || container.Get("type").String() != patch.toolType {
-					return bytes.Clone(body), false
+					return false
 				}
 			} else if container.Exists() && !container.IsObject() {
-				return bytes.Clone(body), false
+				return false
 			}
 		}
 		value := gjson.GetBytes(body, patch.path)
@@ -155,18 +181,10 @@ func (s *RequestTimezoneState) ApplyToBody(body []byte) ([]byte, bool) {
 		}
 		canonical, ok := canonicalRequestTimezonePatch(value)
 		if !ok || (canonical != patch.original && canonical != patch.prepared) {
-			return bytes.Clone(body), false
+			return false
 		}
 	}
-	output := bytes.Clone(body)
-	for _, patch := range s.patches {
-		var err error
-		output, err = sjson.SetRawBytes(output, patch.path, []byte(patch.prepared))
-		if err != nil {
-			return bytes.Clone(body), false
-		}
-	}
-	return output, true
+	return true
 }
 
 func canonicalRequestTimezonePatch(value gjson.Result) (string, bool) {
@@ -179,11 +197,20 @@ func canonicalRequestTimezonePatch(value gjson.Result) (string, bool) {
 }
 
 func CloneRequestTimezoneState(s *RequestTimezoneState) *RequestTimezoneState {
+	copy := cloneRequestTimezoneStateMetadata(s)
+	if copy != nil {
+		copy.preparedBody = bytes.Clone(s.preparedBody)
+	}
+	return copy
+}
+
+// cloneRequestTimezoneStateMetadata isolates mutable attempt metadata while
+// retaining the shared, read-only request snapshot.
+func cloneRequestTimezoneStateMetadata(s *RequestTimezoneState) *RequestTimezoneState {
 	if s == nil {
 		return nil
 	}
 	copy := *s
-	copy.preparedBody = bytes.Clone(s.preparedBody)
 	copy.patches = append([]requestTimezoneBodyPatch(nil), s.patches...)
 	copy.Conversions = cloneTimezoneConversions(s.Conversions)
 	copy.Inbound = cloneFingerprintTimezoneScan(s.Inbound)
@@ -242,22 +269,27 @@ type requestTimezoneScanner struct {
 // conversion or substitutes the configured target for an actual outbound value.
 func ScanOpenAIRequestTimezones(body []byte) *TimezoneScanResult {
 	scan := scanOpenAIRequestTimezones(body)
-	return &scan.result
+	// The scanner borrows request bytes; diagnostics can outlive the request and
+	// retain only their bounded values, never the backing body through a string.
+	return cloneFingerprintTimezoneScan(&scan.result)
 }
 
 // PrepareOpenAIRequestTimezone takes its clock from ingress. It is deterministic
 // for a given body, policy and acceptedAt, including during failover at midnight.
 func PrepareOpenAIRequestTimezone(body []byte, policy openai.RequestPolicy, acceptedAt time.Time, passthrough, observe bool) ([]byte, *RequestTimezoneState) {
-	return prepareOpenAIRequestTimezoneBody(body, policy, acceptedAt, passthrough, observe, false)
+	// Preserve the public snapshot API's writable input/output isolation. The
+	// gateway's internal preparation path already owns immutable ingress bytes.
+	prepared, state := prepareOpenAIRequestTimezoneBody(bytes.Clone(body), policy, acceptedAt, passthrough, observe, false)
+	return bytes.Clone(prepared), state
 }
 
 // alphaSearch is an explicit ingress classification, not a guess based on JSON
 // shape. Only a search_query may create an absent standalone search location.
 func prepareOpenAIRequestTimezoneBody(body []byte, policy openai.RequestPolicy, acceptedAt time.Time, passthrough, observe, alphaSearch bool) ([]byte, *RequestTimezoneState) {
-	state := &RequestTimezoneState{Policy: policy, AcceptedAt: acceptedAt, preparedBody: bytes.Clone(body), alphaSearch: alphaSearch, Target: openAIRequestSearchLocation(), passthrough: passthrough}
+	state := &RequestTimezoneState{Policy: policy, AcceptedAt: acceptedAt, preparedBody: body, alphaSearch: alphaSearch, Target: openAIRequestSearchLocation(), passthrough: passthrough}
 	enabled := policy.TimezoneConversionEnabled && (!passthrough || policy.PassthroughTimezoneConversionEnabled)
 	if !enabled && !observe {
-		return bytes.Clone(body), state
+		return body, state
 	}
 	scan := scanOpenAIRequestTimezoneIngress(body, alphaSearch)
 	state.projectionScanStatus = scan.result.ScanStatus
@@ -276,10 +308,10 @@ func prepareOpenAIRequestTimezoneBody(body []byte, policy openai.RequestPolicy, 
 	state.buildTargetProjection()
 	prepared, ok := state.ApplyToBody(body)
 	if !ok {
-		return bytes.Clone(body), state
+		return body, state
 	}
 	state.preparedBody = prepared
-	return bytes.Clone(prepared), state
+	return prepared, state
 }
 
 func (state *RequestTimezoneState) buildTargetProjection() {
@@ -404,7 +436,9 @@ func scanOpenAIRequestTimezonesWithOptions(body []byte, alphaSearch, structuralF
 		s.result.ScanStatus = "parse_failed"
 		return s
 	}
-	root := gjson.ParseBytes(body)
+	// Internal scans run against request-owned, immutable bytes. The state keeps
+	// their owner alive, and public diagnostic results are detached above.
+	root := parseRawJSONView(body)
 	if !root.IsObject() {
 		s.result.ScanStatus = "not_applicable"
 		return s

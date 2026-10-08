@@ -1,8 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -68,7 +70,7 @@ func TestFinalizeOpenAIOAuthResponsesRequestAppliesDefaultsAndWireSnapshotForAPI
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, openaiPlatformAPIURL, strings.NewReader("original request body"))
 	require.NoError(t, err)
-	req.Header["openai-beta"] = []string{"responses=experimental, api-key-feature=v1"}
+	req.Header.Set("OpenAI-Beta", "responses=experimental, api-key-feature=v1")
 	req.Header["x-codex-routing-hint"] = []string{"caller-owned"}
 	body := []byte(`{"model":"gpt-6-astra","input":[]}`)
 
@@ -82,7 +84,7 @@ func TestFinalizeOpenAIOAuthResponsesRequestAppliesDefaultsAndWireSnapshotForAPI
 	require.Equal(t, body, withoutDefault)
 	require.Equal(t, defaultCodexSynthInstructions("gpt-6-astra"), gjson.GetBytes(out, "instructions").String())
 	require.Len(t, req.Header, 2)
-	require.Equal(t, "api-key-feature=v1", req.Header.Get("OpenAI-Beta"))
+	require.Equal(t, "responses=experimental, api-key-feature=v1", req.Header.Get("OpenAI-Beta"), "API-key beta negotiation remains caller-controlled")
 	require.Equal(t, "model=gpt-6-astra;tier=priority", req.Header.Get(openAICodexRoutingHintHeader))
 
 	requestBody, err := io.ReadAll(req.Body)
@@ -95,6 +97,87 @@ func TestFinalizeOpenAIOAuthResponsesRequestAppliesDefaultsAndWireSnapshotForAPI
 	require.NoError(t, err)
 	require.Equal(t, out, replayedBody)
 	require.Equal(t, int64(len(out)), req.ContentLength)
+}
+
+func TestFinalizeOpenAIOAuthResponsesRequestKeepsWireBodyIsolatedFromCaller(t *testing.T) {
+	for _, accountType := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
+		t.Run(accountType, func(t *testing.T) {
+			account := &Account{Platform: PlatformOpenAI, Type: accountType}
+			body := []byte(`{"model":"gpt-6-astra","instructions":"Preserve this turn.","input":[]}`)
+			req, err := http.NewRequest(http.MethodPost, chatgptCodexURL, nil)
+			require.NoError(t, err)
+			out, err := (&OpenAIGatewayService{}).FinalizeOpenAIOAuthResponsesRequest(nil, account, req, body, OpenAIOAuthResponsesFinalizeOptions{FinalModel: "gpt-6-astra"})
+			require.NoError(t, err)
+			want := bytes.Clone(out)
+
+			// Both slices remain caller-owned after public finalization. Neither
+			// later edits nor body replay may alter the finalized wire bytes.
+			clear(body)
+			clear(out)
+			require.Equal(t, want, openAIUpstreamRequestBodySnapshot(req, nil))
+			wire, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.Equal(t, want, wire)
+			replay, err := req.GetBody()
+			require.NoError(t, err)
+			defer func() { _ = replay.Close() }()
+			replayed, err := io.ReadAll(replay)
+			require.NoError(t, err)
+			require.Equal(t, want, replayed)
+			require.Equal(t, int64(len(want)), req.ContentLength)
+		})
+	}
+}
+
+func TestOpenAIUpstreamRequestBodySnapshotKeepsReplaysIndependentAcrossRewrites(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, chatgptCodexURL, nil)
+	require.NoError(t, err)
+	firstBody := []byte(`{"account":"first","input":[]}`)
+	setOpenAIRequestBodySnapshot(req, firstBody)
+	firstObservation := openAIUpstreamRequestBodySnapshot(req, nil)
+	firstReplay, err := req.GetBody()
+	require.NoError(t, err)
+	defer func() { _ = firstReplay.Close() }()
+	prefix := make([]byte, 5)
+	_, err = io.ReadFull(firstReplay, prefix)
+	require.NoError(t, err)
+	require.Equal(t, firstBody, openAIUpstreamRequestBodySnapshot(req, nil), "observations use an independent cursor")
+
+	secondBody := []byte(`{"account":"second","input":[]}`)
+	setOpenAIRequestBodySnapshot(req, secondBody)
+	require.Equal(t, secondBody, openAIUpstreamRequestBodySnapshot(req, nil))
+	require.Equal(t, firstBody, firstObservation, "a new attempt must not reuse the old attempt's storage")
+	remainder, err := io.ReadAll(firstReplay)
+	require.NoError(t, err)
+	require.Equal(t, firstBody, append(prefix, remainder...))
+
+	// Some compatibility adapters replace GetBody themselves. The helper must
+	// follow that reader, never a stale snapshot attached to the request.
+	rewritten := `{"account":"adapter","input":[]}`
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(strings.NewReader(rewritten)), nil
+	}
+	require.Equal(t, rewritten, string(openAIUpstreamRequestBodySnapshot(req, nil)))
+}
+
+func BenchmarkOpenAIUpstreamRequestBodySnapshot(b *testing.B) {
+	for _, size := range []int{1024, 1024 * 1024} {
+		b.Run(fmt.Sprintf("bytes_%d", size), func(b *testing.B) {
+			req, err := http.NewRequest(http.MethodPost, chatgptCodexURL, nil)
+			if err != nil {
+				b.Fatal(err)
+			}
+			setOpenAIRequestBodySnapshot(req, bytes.Repeat([]byte{'x'}, size))
+			b.ReportAllocs()
+			b.SetBytes(int64(size))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if snapshot := openAIUpstreamRequestBodySnapshot(req, nil); len(snapshot) != size {
+					b.Fatalf("snapshot size = %d, want %d", len(snapshot), size)
+				}
+			}
+		})
+	}
 }
 
 func TestFinalizeOpenAIOAuthResponsesRequestIsNoOpForOtherPlatforms(t *testing.T) {

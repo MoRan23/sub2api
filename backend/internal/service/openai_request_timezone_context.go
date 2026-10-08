@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"strconv"
 	"strings"
@@ -28,6 +27,8 @@ type openAIRequestTimezoneCapture struct {
 
 // CaptureOpenAIRequestTimezone freezes the ingress clock and optional observation
 // before queuing, channel mapping, or account-specific request adaptation.
+// body is retained read-only for the request lifetime; adapters must return new
+// storage for edits instead of modifying this ingress buffer in place.
 func (s *OpenAIGatewayService) CaptureOpenAIRequestTimezone(c *gin.Context, body []byte) {
 	s.captureOpenAIRequestTimezoneSource(c, body, false)
 }
@@ -58,7 +59,7 @@ func (s *OpenAIGatewayService) captureOpenAIRequestTimezoneSource(c *gin.Context
 		ctx = c.Request.Context()
 	}
 	s.freezeOpenAIRequestPolicy(ctx, c)
-	capture := &openAIRequestTimezoneCapture{acceptedAt: acceptedAt, body: bytes.Clone(body), states: make(map[bool]*RequestTimezoneState), alphaSearch: alphaSearch}
+	capture := &openAIRequestTimezoneCapture{acceptedAt: acceptedAt, body: body, states: make(map[bool]*RequestTimezoneState), alphaSearch: alphaSearch}
 	if globalFingerprintObserver.enabled.Load() {
 		capture.inbound = &scanOpenAIRequestTimezoneIngress(body, alphaSearch).result
 	}
@@ -148,7 +149,7 @@ func applyCapturedOpenAIRequestTimezone(c *gin.Context, capture *openAIRequestTi
 	}
 	prepared, applied := active.ApplyToBody(body)
 	if !applied {
-		active = CloneRequestTimezoneState(active)
+		active = cloneRequestTimezoneStateMetadata(active)
 		for i := range active.Conversions {
 			if active.Conversions[i].Status == "converted" {
 				active.Conversions[i].Status = "skipped"
@@ -236,7 +237,7 @@ func applyDeferredOpenAIRequestTimezone(c *gin.Context, body []byte) []byte {
 	}
 	prepared, applied := state.ApplyToBody(body)
 	if !applied {
-		state = CloneRequestTimezoneState(state)
+		state = cloneRequestTimezoneStateMetadata(state)
 		for i := range state.Conversions {
 			if state.Conversions[i].Status == "converted" {
 				state.Conversions[i].Status, state.Conversions[i].Reason = "skipped", "source_changed_before_apply"

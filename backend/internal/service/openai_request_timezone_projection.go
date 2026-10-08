@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -13,28 +12,30 @@ import (
 // or content modified by an unrelated adapter.
 func (s *RequestTimezoneState) UndoToBody(body []byte) ([]byte, bool) {
 	if s == nil || len(s.patches) == 0 {
-		return bytes.Clone(body), true
+		return body, true
 	}
-	if _, ok := s.ApplyToBody(body); !ok {
-		return bytes.Clone(body), false
+	if !s.matchesBody(body) {
+		return body, false
 	}
-	out := bytes.Clone(body)
+	out := body
 	for _, patch := range s.patches {
 		var err error
 		if patch.originalExists {
-			out, err = sjson.SetRawBytes(out, patch.path, []byte(patch.original))
+			if gjson.GetBytes(out, patch.path).Raw != patch.original {
+				out, err = sjson.SetRawBytes(out, patch.path, []byte(patch.original))
+			}
 		} else {
 			out, err = sjson.DeleteBytes(out, patch.path)
 		}
 		if err != nil {
-			return bytes.Clone(body), false
+			return body, false
 		}
 		if !patch.containerExists && patch.containerPath != "" {
 			container := gjson.GetBytes(out, patch.containerPath)
 			if container.IsObject() && len(container.Map()) == 0 {
 				out, err = sjson.DeleteBytes(out, patch.containerPath)
 				if err != nil {
-					return bytes.Clone(body), false
+					return body, false
 				}
 			}
 		}
@@ -46,10 +47,10 @@ func (s *RequestTimezoneState) WithTarget(target RequestLocationObservation) *Re
 	if s == nil {
 		return nil
 	}
-	result := CloneRequestTimezoneState(s)
+	result := cloneRequestTimezoneStateMetadata(s)
 	result.Target = target
 	result.buildTargetProjection()
-	if len(s.preparedBody) != 0 {
+	if target != s.Target && len(s.preparedBody) != 0 {
 		if neutral, ok := s.UndoToBody(s.preparedBody); ok {
 			if prepared, valid := result.ApplyToBody(neutral); valid {
 				result.preparedBody = prepared
@@ -61,11 +62,16 @@ func (s *RequestTimezoneState) WithTarget(target RequestLocationObservation) *Re
 
 func (s *RequestTimezoneState) ProjectToTarget(body []byte, target RequestLocationObservation) ([]byte, *RequestTimezoneState, bool) {
 	if s == nil {
-		return bytes.Clone(body), nil, true
+		return body, nil, true
+	}
+	if target == s.Target {
+		state := s.WithTarget(target)
+		prepared, ok := state.ApplyToBody(body)
+		return prepared, state, ok
 	}
 	neutral, ok := s.UndoToBody(body)
 	if !ok {
-		return bytes.Clone(body), CloneRequestTimezoneState(s), false
+		return body, cloneRequestTimezoneStateMetadata(s), false
 	}
 	state := s.WithTarget(target)
 	prepared, ok := state.ApplyToBody(neutral)
@@ -116,7 +122,7 @@ func HistoricalRequestTimezoneState(s *RequestTimezoneState) *RequestTimezoneSta
 	if s == nil {
 		return nil
 	}
-	result := CloneRequestTimezoneState(s)
+	result := cloneRequestTimezoneStateMetadata(s)
 	dates := make(map[string]string, len(s.Conversions))
 	for _, report := range s.Conversions {
 		dates[report.Path] = report.DateAfter

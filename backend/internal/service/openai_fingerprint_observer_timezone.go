@@ -134,12 +134,80 @@ func cloneFingerprintTimezoneScan(scan *TimezoneScanResult) *TimezoneScanResult 
 		return nil
 	}
 	copy := *scan
+	copy.ScanStatus = strings.Clone(copy.ScanStatus)
 	if scan.Items != nil {
 		copy.Items = append([]TimezoneScanItem{}, scan.Items...)
 		for i := range copy.Items {
-			copy.Items[i].Location = cloneRequestLocation(copy.Items[i].Location)
+			item := &copy.Items[i]
+			item.Source = strings.Clone(item.Source)
+			item.Path = strings.Clone(item.Path)
+			item.Value = strings.Clone(item.Value)
+			item.CurrentDate = strings.Clone(item.CurrentDate)
+			item.Status = strings.Clone(item.Status)
+			item.Reason = strings.Clone(item.Reason)
+			item.EnvironmentSource = strings.Clone(item.EnvironmentSource)
+			item.Location = cloneFingerprintTimezoneLocation(item.Location)
 		}
 	}
+	return &copy
+}
+
+// Bounded observations can still be substrings of a complete parsed request.
+// Give every retained string its own backing storage before it reaches the
+// observation entry, so one small location cannot keep a large body alive.
+func cloneFingerprintTimezoneLocation(location *RequestLocationObservation) *RequestLocationObservation {
+	if location == nil {
+		return nil
+	}
+	copy := *location
+	copy.Type = strings.Clone(copy.Type)
+	copy.Country = strings.Clone(copy.Country)
+	copy.Region = strings.Clone(copy.Region)
+	copy.City = strings.Clone(copy.City)
+	copy.Timezone = strings.Clone(copy.Timezone)
+	return &copy
+}
+
+func cloneFingerprintTimezoneConversions(conversions []TimezoneConversion) []TimezoneConversion {
+	if conversions == nil {
+		return nil
+	}
+	result := append([]TimezoneConversion{}, conversions...)
+	for i := range result {
+		item := &result[i]
+		item.Source = strings.Clone(item.Source)
+		item.Path = strings.Clone(item.Path)
+		item.Original = strings.Clone(item.Original)
+		item.Output = strings.Clone(item.Output)
+		item.DateBefore = strings.Clone(item.DateBefore)
+		item.DateAfter = strings.Clone(item.DateAfter)
+		item.Status = strings.Clone(item.Status)
+		item.Reason = strings.Clone(item.Reason)
+		item.TimeBasis = strings.Clone(item.TimeBasis)
+		item.ReceivedAt = strings.Clone(item.ReceivedAt)
+		item.EnvironmentSource = strings.Clone(item.EnvironmentSource)
+		item.LocationBefore = cloneFingerprintTimezoneLocation(item.LocationBefore)
+		item.LocationAfter = cloneFingerprintTimezoneLocation(item.LocationAfter)
+	}
+	return result
+}
+
+func cloneFingerprintEgressLocation(location *OpenAIEgressLocationSnapshot) *OpenAIEgressLocationSnapshot {
+	if location == nil {
+		return nil
+	}
+	copy := *location
+	copy.RouteKey = strings.Clone(copy.RouteKey)
+	copy.RouteType = strings.Clone(copy.RouteType)
+	copy.IPAddress = strings.Clone(copy.IPAddress)
+	copy.Country = strings.Clone(copy.Country)
+	copy.CountryCode = strings.Clone(copy.CountryCode)
+	copy.Region = strings.Clone(copy.Region)
+	copy.City = strings.Clone(copy.City)
+	copy.Timezone = strings.Clone(copy.Timezone)
+	copy.Status = strings.Clone(copy.Status)
+	copy.Source = strings.Clone(copy.Source)
+	copy.Reason = strings.Clone(copy.Reason)
 	return &copy
 }
 
@@ -153,17 +221,14 @@ func cloneFingerprintObservationEntry(entry FingerprintObservationEntry) Fingerp
 		copy := entry.ResponseEvidence.clone()
 		entry.ResponseEvidence = &copy
 	}
-	if entry.EgressLocation != nil {
-		snapshot := *entry.EgressLocation
-		entry.EgressLocation = &snapshot
-	}
+	entry.TimezoneTarget = strings.Clone(entry.TimezoneTarget)
+	entry.TimezoneComparisonStatus = strings.Clone(entry.TimezoneComparisonStatus)
+	entry.EgressLocation = cloneFingerprintEgressLocation(entry.EgressLocation)
 	entry.RequestIntegrity = CloneRequestIntegrityObservation(entry.RequestIntegrity)
 	entry.ConversionCheck = cloneOpenAIChatConversionCheck(entry.ConversionCheck)
 	entry.InboundTimezoneObservations = cloneFingerprintTimezoneScan(entry.InboundTimezoneObservations)
 	entry.OutboundTimezoneObservations = cloneFingerprintTimezoneScan(entry.OutboundTimezoneObservations)
-	if entry.TimezoneConversions != nil {
-		entry.TimezoneConversions = cloneTimezoneConversions(entry.TimezoneConversions)
-	}
+	entry.TimezoneConversions = cloneFingerprintTimezoneConversions(entry.TimezoneConversions)
 	return entry
 }
 
@@ -220,17 +285,17 @@ func populateFingerprintObservationTimezones(entry *FingerprintObservationEntry,
 	entry.TimezoneTarget = OpenAIRequestTimezone
 	if state != nil {
 		if state.Target.Timezone != "" {
-			entry.TimezoneTarget = state.Target.Timezone
+			entry.TimezoneTarget = strings.Clone(state.Target.Timezone)
 		}
 		if state.EgressLocation != nil {
-			snapshot := *state.EgressLocation
-			entry.EgressLocation = &snapshot
+			entry.EgressLocation = cloneFingerprintEgressLocation(state.EgressLocation)
 		}
 		entry.InboundTimezoneObservations = cloneFingerprintTimezoneScan(state.Inbound)
-		entry.TimezoneConversions = cloneTimezoneConversions(state.Conversions)
+		entry.TimezoneConversions = cloneFingerprintTimezoneConversions(state.Conversions)
 	}
 	if body != nil {
-		entry.OutboundTimezoneObservations = &scanOpenAIRequestTimezonesWithSource(body, state != nil && state.alphaSearch).result
+		scan := scanOpenAIRequestTimezonesWithSource(body, state != nil && state.alphaSearch)
+		entry.OutboundTimezoneObservations = cloneFingerprintTimezoneScan(&scan.result)
 	}
 	entry.TimezoneComparisonStatus = compareFingerprintObservationTimezones(entry, paths)
 }

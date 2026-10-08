@@ -235,13 +235,30 @@ func setOpenAIRequestBodySnapshot(req *http.Request, body []byte) {
 	if req == nil {
 		return
 	}
+	// The finalizer returns body to callers, which may still modify it. Keep
+	// one private immutable copy for the wire body, replays, and observations.
 	snapshot := bytes.Clone(body)
-	req.Body = io.NopCloser(bytes.NewReader(snapshot))
+	snapshot = snapshot[:len(snapshot):len(snapshot)]
+	req.Body = newOpenAIRequestBodySnapshotReader(snapshot)
 	req.ContentLength = int64(len(snapshot))
 	req.GetBody = func() (io.ReadCloser, error) {
-		return io.NopCloser(bytes.NewReader(snapshot)), nil
+		return newOpenAIRequestBodySnapshotReader(snapshot), nil
 	}
 }
+
+// openAIRequestBodySnapshotReader gives each replay its own cursor over the
+// same immutable bytes. Recognizing this reader lets internal observations
+// borrow the final body without allocating another request-sized buffer.
+type openAIRequestBodySnapshotReader struct {
+	*bytes.Reader
+	snapshot []byte
+}
+
+func newOpenAIRequestBodySnapshotReader(snapshot []byte) *openAIRequestBodySnapshotReader {
+	return &openAIRequestBodySnapshotReader{Reader: bytes.NewReader(snapshot), snapshot: snapshot}
+}
+
+func (*openAIRequestBodySnapshotReader) Close() error { return nil }
 
 func stripOpenAILegacyResponsesBeta(headers http.Header) {
 	if headers == nil {

@@ -888,8 +888,8 @@ func mergeOpenAICodexTurnIdentityBody(body []byte, identity OpenAICodexTurnIdent
 	if strings.TrimSpace(identity.SessionID) == "" || strings.TrimSpace(identity.ThreadID) == "" {
 		return body, nil
 	}
-	var root map[string]json.RawMessage
-	if err := json.Unmarshal(body, &root); err != nil || root == nil {
+	root, err := decodeOpenAIIdentityBodyView(body)
+	if err != nil || root == nil {
 		if err == nil {
 			err = errors.New("expected object")
 		}
@@ -951,7 +951,7 @@ func mergeOpenAICodexTurnIdentityBody(body []byte, identity OpenAICodexTurnIdent
 			root[openAIWSTurnMetadataHeader] = mustMarshalJSONString(rewritten)
 		}
 	}
-	out, err := marshalJSONWithoutHTMLEscape(root)
+	out, err := marshalOpenAIIdentityBodyView(root)
 	if err != nil {
 		return body, fmt.Errorf("encode OpenAI Codex turn identity body: %w", err)
 	}
@@ -966,8 +966,8 @@ func mergeOpenAICodexIdentityBodyForPlan(body []byte, plan OpenAIOAuthIdentityPl
 	if !projection.enabled() {
 		return body, nil
 	}
-	var root map[string]json.RawMessage
-	if err := json.Unmarshal(body, &root); err != nil || root == nil {
+	root, err := decodeOpenAIIdentityBodyView(body)
+	if err != nil || root == nil {
 		if existingOnly {
 			return body, nil
 		}
@@ -1081,7 +1081,7 @@ func mergeOpenAICodexIdentityBodyForPlan(body []byte, plan OpenAIOAuthIdentityPl
 	if !rootModified {
 		return body, nil
 	}
-	out, err := marshalJSONWithoutHTMLEscape(root)
+	out, err := marshalOpenAIIdentityBodyView(root)
 	if err != nil {
 		return body, fmt.Errorf("encode OpenAI Codex identity body: %w", err)
 	}

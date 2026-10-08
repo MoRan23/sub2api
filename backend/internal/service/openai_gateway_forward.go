@@ -1382,7 +1382,8 @@ func setOpenAIOAuthIdentityCaptureCallerSeed(c *gin.Context, callerSeed string) 
 // openAIUpstreamRequestBodySnapshot returns the finalized body without
 // consuming req.Body. Compatibility callers use it after the shared builder's
 // single identity projection so observations and request-size accounting see
-// the bytes that will actually be sent.
+// the bytes that will actually be sent. The returned bytes are borrowed and
+// must not be modified; body rewrites must allocate their own result.
 func openAIUpstreamRequestBodySnapshot(req *http.Request, fallback []byte) []byte {
 	if req == nil || req.GetBody == nil {
 		return fallback
@@ -1392,6 +1393,9 @@ func openAIUpstreamRequestBodySnapshot(req *http.Request, fallback []byte) []byt
 		return fallback
 	}
 	defer func() { _ = reader.Close() }()
+	if snapshot, ok := reader.(*openAIRequestBodySnapshotReader); ok {
+		return snapshot.snapshot
+	}
 	body, err := io.ReadAll(reader)
 	if err != nil {
 		return fallback
