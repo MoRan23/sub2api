@@ -609,6 +609,8 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		AllowLive:                       input.AllowLive,
 		ForceOpenAIFast:                 input.ForceOpenAIFast,
 		FreeOpenAIFast:                  input.FreeOpenAIFast,
+		OpenAIDaybreakBlueEnabled:       input.OpenAIDaybreakBlueEnabled,
+		OpenAIDaybreakRedEnabled:        input.OpenAIDaybreakRedEnabled,
 		RequireOAuthOnly:                input.RequireOAuthOnly,
 		RequirePrivacySet:               input.RequirePrivacySet,
 		DefaultMappedModel:              input.DefaultMappedModel,
@@ -624,6 +626,10 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 	sanitizeGroupMessagesDispatchFields(group)
 	sanitizeGroupOpenAIFast(group)
+	group.OpenAIDaybreakBlueEnabled, group.OpenAIDaybreakRedEnabled, err = ResolveGroupDaybreak(group.Platform, group.OpenAIDaybreakBlueEnabled, group.OpenAIDaybreakRedEnabled, nil)
+	if err != nil {
+		return nil, err
+	}
 	if group.Platform != PlatformOpenAI && group.Platform != PlatformComposite {
 		group.AllowLive = false
 	}
@@ -993,6 +999,11 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.FreeOpenAIFast != nil {
 		group.FreeOpenAIFast = *input.FreeOpenAIFast
+	}
+	group.OpenAIDaybreakUpdate = &GroupDaybreakUpdate{Blue: input.OpenAIDaybreakBlueEnabled, Red: input.OpenAIDaybreakRedEnabled}
+	group.OpenAIDaybreakBlueEnabled, group.OpenAIDaybreakRedEnabled, err = ResolveGroupDaybreak(group.Platform, group.OpenAIDaybreakBlueEnabled, group.OpenAIDaybreakRedEnabled, group.OpenAIDaybreakUpdate)
+	if err != nil {
+		return nil, err
 	}
 	if input.RequireOAuthOnly != nil {
 		group.RequireOAuthOnly = *input.RequireOAuthOnly

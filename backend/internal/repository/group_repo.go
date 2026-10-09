@@ -90,6 +90,11 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 	if groupIn == nil {
 		return errors.New("group is nil")
 	}
+	blue, red, err := service.ResolveGroupDaybreak(groupIn.Platform, groupIn.OpenAIDaybreakBlueEnabled, groupIn.OpenAIDaybreakRedEnabled, nil)
+	if err != nil {
+		return err
+	}
+	groupIn.OpenAIDaybreakBlueEnabled, groupIn.OpenAIDaybreakRedEnabled = blue, red
 	modelPricing, err := json.Marshal(groupIn.ModelPricing)
 	if err != nil {
 		return fmt.Errorf("marshal group model pricing: %w", err)
@@ -139,6 +144,8 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetAllowLive(groupIn.AllowLive).
 		SetForceOpenaiFast(groupIn.ForceOpenAIFast).
 		SetFreeOpenaiFast(groupIn.FreeOpenAIFast).
+		SetOpenaiDaybreakBlueEnabled(groupIn.OpenAIDaybreakBlueEnabled).
+		SetOpenaiDaybreakRedEnabled(groupIn.OpenAIDaybreakRedEnabled).
 		SetRequireOauthOnly(groupIn.RequireOAuthOnly).
 		SetRequirePrivacySet(groupIn.RequirePrivacySet).
 		SetDefaultMappedModel(groupIn.DefaultMappedModel).
@@ -279,11 +286,36 @@ func (r *groupRepository) GetByIDLite(ctx context.Context, id int64) (*service.G
 }
 
 func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) error {
+	client := r.client
+	var ownedTx *dbent.Tx
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		client = tx.Client()
+	} else {
+		var err error
+		ownedTx, err = client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return err
+		}
+		if ownedTx != nil {
+			defer func() { _ = ownedTx.Rollback() }()
+			client = ownedTx.Client()
+		}
+	}
+	// An unrelated whole-group update may contain an old Daybreak snapshot.
+	// Merge only explicit Daybreak choices against the locked, current record.
+	stored, err := client.Group.Query().Where(group.IDEQ(groupIn.ID)).ForUpdate().Only(ctx)
+	if err != nil {
+		return translatePersistenceError(err, service.ErrGroupNotFound, nil)
+	}
+	blue, red, err := service.ResolveGroupDaybreak(groupIn.Platform, stored.OpenaiDaybreakBlueEnabled, stored.OpenaiDaybreakRedEnabled, groupIn.OpenAIDaybreakUpdate)
+	if err != nil {
+		return err
+	}
 	modelPricing, err := json.Marshal(groupIn.ModelPricing)
 	if err != nil {
 		return fmt.Errorf("marshal group model pricing: %w", err)
 	}
-	builder := r.client.Group.UpdateOneID(groupIn.ID).
+	builder := client.Group.UpdateOneID(groupIn.ID).
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
 		SetPlatform(groupIn.Platform).
@@ -320,6 +352,8 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetAllowLive(groupIn.AllowLive).
 		SetForceOpenaiFast(groupIn.ForceOpenAIFast).
 		SetFreeOpenaiFast(groupIn.FreeOpenAIFast).
+		SetOpenaiDaybreakBlueEnabled(blue).
+		SetOpenaiDaybreakRedEnabled(red).
 		SetRequireOauthOnly(groupIn.RequireOAuthOnly).
 		SetRequirePrivacySet(groupIn.RequirePrivacySet).
 		SetDefaultMappedModel(groupIn.DefaultMappedModel).
@@ -442,10 +476,18 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 	if err != nil {
 		return translatePersistenceError(err, service.ErrGroupNotFound, service.ErrGroupExists)
 	}
-	groupIn.UpdatedAt = updated.UpdatedAt
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
-		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group update failed: group=%d err=%v", groupIn.ID, err)
+	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
+		return err
 	}
+	if ownedTx != nil {
+		if err := ownedTx.Commit(); err != nil {
+			return err
+		}
+	}
+	groupIn.UpdatedAt = updated.UpdatedAt
+	groupIn.OpenAIDaybreakBlueEnabled = blue
+	groupIn.OpenAIDaybreakRedEnabled = red
+	groupIn.OpenAIDaybreakUpdate = nil
 	return nil
 }
 

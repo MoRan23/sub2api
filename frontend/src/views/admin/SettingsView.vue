@@ -5894,6 +5894,20 @@
             </div>
           </div>
 
+          <div class="card" data-testid="openai-daybreak-settings">
+            <div class="card-header">
+              <h3 class="text-base font-semibold text-gray-900 dark:text-gray-100">{{ t('admin.settings.gatewayForwarding.daybreakTitle') }}</h3>
+            </div>
+            <div class="card-body flex items-start justify-between gap-4">
+              <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.settings.gatewayForwarding.daybreakHint') }}</p>
+              <Toggle
+                v-model="form.openai_daybreak_enabled"
+                :aria-label="t('admin.settings.gatewayForwarding.daybreakTitle')"
+                data-testid="openai-daybreak-toggle"
+              />
+            </div>
+          </div>
+
           <!-- OpenAI OAuth Codex fingerprint normalization -->
           <div class="card" data-testid="codex-fingerprint-normalization-settings">
             <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -10059,6 +10073,7 @@ const form = reactive<SettingsForm>({
   session_binding_enabled: false,
   step_up_enabled: false,
   enable_openai_codex_fingerprint_normalization: true,
+  openai_daybreak_enabled: true,
   enable_openai_codex_installation_id_normalization: true,
   enable_openai_codex_client_identity_normalization: true,
   enable_openai_request_timezone_conversion: true,
@@ -11815,6 +11830,7 @@ async function saveSettings() {
       step_up_enabled: form.step_up_enabled,
       enable_openai_codex_fingerprint_normalization:
         form.enable_openai_codex_fingerprint_normalization,
+      openai_daybreak_enabled: form.openai_daybreak_enabled,
       enable_openai_codex_installation_id_normalization:
         form.enable_openai_codex_installation_id_normalization,
       enable_openai_uuidv7_session_identity:

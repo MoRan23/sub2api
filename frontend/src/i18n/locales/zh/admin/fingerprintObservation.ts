@@ -141,6 +141,11 @@ export default {
         reasons: {
           automatic: '开关与当前模型的能力证据满足条件', client_supplied: '保留客户端显式值',
           blue_disabled: 'Blue 开关关闭', red_disabled: '当前模型要求同时开启 Red',
+          global_disabled: '系统 Daybreak 已关闭，无需移除字段',
+          global_disabled_stripped: '系统 Daybreak 已关闭，已移除字段',
+          group_blue_disabled: '当前分组未允许 Blue 自动补充',
+          group_red_disabled: '当前模型要求分组同时允许 Blue 和 Red',
+          group_unavailable: '无有效请求分组，跳过自动补充',
           unrecognized_model: '未识别的模型', catalog_unavailable: '无法获取当前授权的模型目录',
           capability_unavailable: '当前模型目录未声明所需能力', not_oauth: '不适用于此账号认证类型',
           excluded_endpoint: '独立压缩或计数请求不自动补充', prewarm: '预热请求不自动补充',

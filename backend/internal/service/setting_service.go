@@ -170,6 +170,7 @@ type SettingService struct {
 	openAIRequestPolicyCache           atomic.Pointer[cachedOpenAIRequestPolicy]
 	openAIRequestPolicySF              singleflight.Group
 	openAIRequestIntegrityObserveCache atomic.Pointer[cachedOpenAIRequestIntegrityObserve]
+	openAIDaybreakCache                atomic.Pointer[cachedOpenAIDaybreak]
 
 	channelMonitorRuntimeListenersMu sync.Mutex
 	channelMonitorRuntimeListeners   []func()

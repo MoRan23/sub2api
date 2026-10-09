@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -20,6 +21,15 @@ import (
 )
 
 const daybreakTransportManifest = `{"models":[{"slug":"gpt-6-astra","available_access_programs":{"cyber":["standard","daybreak_blue"]}},{"slug":"gpt-5.6-cyber","available_access_programs":{"cyber":["daybreak_red"]}}]}`
+
+func daybreakTransportGroup() *Group {
+	return &Group{ID: 991, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true,
+		OpenAIDaybreakBlueEnabled: true, OpenAIDaybreakRedEnabled: true}
+}
+
+func daybreakTransportContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ctxkey.Group, daybreakTransportGroup())
+}
 
 func seedDaybreakTransportCapabilities(t *testing.T, svc *OpenAIGatewayService, account *Account) *Account {
 	t.Helper()
@@ -52,6 +62,7 @@ func TestOAuthDaybreakHTTPFinalizerKeepsRetrySourceAndAuthorization(t *testing.T
 		t.Run(test.name, func(t *testing.T) {
 			body := []byte(test.body)
 			req := httptest.NewRequest(http.MethodPost, "https://chatgpt.com"+test.path, bytes.NewReader(body))
+			req = req.WithContext(daybreakTransportContext(req.Context()))
 			out, err := svc.FinalizeOpenAIOAuthResponsesRequest(nil, account, req, body, OpenAIOAuthResponsesFinalizeOptions{Plan: plan, FinalModel: "gpt-6-astra", RequestKind: test.kind})
 			require.NoError(t, err)
 			require.Equal(t, test.want, gjson.GetBytes(out, "access_programs.cyber").String())
@@ -104,6 +115,7 @@ func TestOAuthDaybreakHTTPToWSDoesNotInjectPrewarmOrSourceMap(t *testing.T) {
 	account = seedDaybreakTransportCapabilities(t, svc, account)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request = c.Request.WithContext(daybreakTransportContext(c.Request.Context()))
 	source := map[string]any{"model": "gpt-6-astra", "input": []any{map[string]any{"role": "user", "content": "hello"}}}
 	_, err := svc.forwardOpenAIWSV2(context.Background(), c, account, source, "", "", "mock-oauth-token",
 		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, false, false, "client-alias", "gpt-6-astra", time.Now(), 1, "", nil)
@@ -133,6 +145,7 @@ func TestOAuthDaybreakWSPhysicalSendUsesEachTurnMappedModel(t *testing.T) {
 			cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
 			cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
 			svc := newPassthroughLifecycleService(cfg, staged)
+			svc.schedulerSnapshot = &SchedulerSnapshotService{groupRepo: profitControlGroupRepo{group: daybreakTransportGroup()}}
 			dialer := &integrityWSDialer{traffic: staged}
 			svc.openaiWSPassthroughDialer = dialer
 			svc.openaiWSPool = newOpenAIWSConnPool(cfg)
@@ -152,6 +165,7 @@ func TestOAuthDaybreakWSPhysicalSendUsesEachTurnMappedModel(t *testing.T) {
 			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			account = seedDaybreakTransportCapabilities(t, svc, account)
 			server, done := startPassthroughLifecycleServerWithHooks(t, ctx, svc, account, func(c *gin.Context) *OpenAIWSIngressHooks {
+				c.Request = c.Request.WithContext(daybreakTransportContext(c.Request.Context()))
 				setOpenAIClientRequestedStream(c, true)
 				return &OpenAIWSIngressHooks{MapRequestModel: func(turn int, _ string) (string, error) {
 					if turn == 2 {
@@ -250,6 +264,71 @@ func TestOAuthDaybreakCompatPreservesClientAccessPrograms(t *testing.T) {
 	}
 }
 
+func TestDaybreakWSGlobalSwitchUpdatesOnEveryPhysicalTurn(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, mode := range []string{OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough, OpenAIWSIngressModeHTTPBridge} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			staged := newStagedPassthroughConn()
+			cfg := passthroughLifecycleConfig()
+			cfg.Gateway.OpenAIWS.OAuthEnabled = true
+			cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+			cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+			svc := newPassthroughLifecycleService(cfg, staged)
+			svc.settingService = daybreakHTTPSettings(true)
+			dialer := &integrityWSDialer{traffic: staged}
+			svc.openaiWSPassthroughDialer = dialer
+			svc.openaiWSPool = newOpenAIWSConnPool(cfg)
+			svc.openaiWSPool.setClientDialerForTest(dialer)
+			defer svc.openaiWSPool.Close()
+			upstream := &httpUpstreamRecorder{}
+			if mode == OpenAIWSIngressModeHTTPBridge {
+				svc.httpUpstream = upstream
+				for turn := 1; turn <= 3; turn++ {
+					upstream.responses = append(upstream.responses, &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(fmt.Sprintf("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_policy_%d\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n", turn)))})
+				}
+			}
+			account := &Account{ID: 8131, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1,
+				Credentials: map[string]any{"access_token": "mock-oauth-token"},
+				Extra:       map[string]any{"responses_websockets_v2_enabled": true, "openai_oauth_responses_websockets_v2_mode": mode}}
+			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
+			server, done := startPassthroughLifecycleServerWithHooks(t, ctx, svc, account, func(c *gin.Context) *OpenAIWSIngressHooks {
+				setOpenAIClientRequestedStream(c, true)
+				return nil
+			})
+			defer server.Close()
+			client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", nil)
+			require.NoError(t, err)
+			defer func() { _ = client.CloseNow() }()
+			for turn, enabled := range []bool{true, false, true} {
+				svc.settingService.publishOpenAIDaybreakEnabled(fmt.Sprint(enabled))
+				baseline := []byte(fmt.Sprintf(`{"type":"response.create","model":"gpt-6-astra","stream":true,"input":[{"role":"user","content":"turn %d"}],"access_programs":{"cyber":"standard","other":900719925474099312345}}`, turn+1))
+				require.NoError(t, client.Write(ctx, coderws.MessageText, baseline))
+				var wire []byte
+				if mode != OpenAIWSIngressModeHTTPBridge {
+					wire = requirePassthroughUpstreamWrite(t, staged, 3*time.Second)
+					staged.Send(fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp_policy_%d","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}`, turn+1))
+				}
+				_, err = readPassthroughLifecycleFrame(t, client, 3*time.Second)
+				require.NoError(t, err)
+				if mode == OpenAIWSIngressModeHTTPBridge {
+					wire = upstream.lastBody
+				}
+				require.Equal(t, enabled, gjson.GetBytes(wire, "access_programs.cyber").Exists(), "turn %d must use the current switch", turn+1)
+				require.Equal(t, "900719925474099312345", gjson.GetBytes(wire, "access_programs.other").Raw)
+				require.Equal(t, "standard", gjson.GetBytes(baseline, "access_programs.cyber").String())
+			}
+			require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
+			select {
+			case <-done:
+			case <-ctx.Done():
+				t.Fatal("local WS gateway did not exit")
+			}
+		})
+	}
+}
+
 func TestOAuthDaybreakHTTPAdaptersInjectAfterMapping(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, mode := range []string{"responses", "passthrough", "chat", "messages"} {
@@ -268,6 +347,7 @@ func TestOAuthDaybreakHTTPAdaptersInjectAfterMapping(t *testing.T) {
 			}
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+			c.Request = c.Request.WithContext(daybreakTransportContext(c.Request.Context()))
 			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusBadRequest,
 				Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"mock validation error"}}`))}}
 			account := &Account{ID: 8140, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,

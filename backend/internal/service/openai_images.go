@@ -625,6 +625,26 @@ func (s *OpenAIGatewayService) ForwardImages(
 	}
 	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	if account.IsCodexEngine() {
+		// Engine's multipart adapter treats ordinary form fields as strings.
+		// Apply the global request-field guard before that conversion, while the
+		// access_programs field is still a JSON object, and retain this attempt's
+		// policy snapshot through the final physical HTTP send.
+		if parsed.Multipart {
+			guardRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, "/", nil)
+			if err != nil {
+				return nil, err
+			}
+			guardRequest.Header.Set("Content-Type", parsed.ContentType)
+			guardRequest.Body = newOpenAIRequestBodySnapshotReader(body)
+			if err := prepareOpenAIDaybreakHTTPRequest(guardRequest, account, s.settingService); err != nil {
+				return nil, err
+			}
+			ctx = guardRequest.Context()
+			body, err = openAIDaybreakHTTPRequestBody(guardRequest)
+			if err != nil {
+				return nil, err
+			}
+		}
 		jsonBody, err := codexEngineImagesJSON(body, parsed.ContentType)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": err.Error(), "type": "invalid_request_error"}})

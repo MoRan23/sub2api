@@ -51,7 +51,7 @@ func TestOpenAIDaybreakTierAndExplicitFieldPolicy(t *testing.T) {
 			s.codexModelCapabilities.observeManifest(openAICodexModelCapabilitiesNamespace(account), []byte(manifest), time.Now())
 			body := []byte(fmt.Sprintf(`{ "model":%q,"opaque":9007199254740993%s}`, tc.model, tc.extraBody))
 			original := string(body)
-			got := s.applyOpenAIDaybreak(context.Background(), account, body)
+			got := s.applyOpenAIDaybreak(daybreakEnabledTestContext(), account, body)
 			require.Equal(t, original, string(body), "must not mutate the retry source")
 			if tc.expected == "" {
 				require.Equal(t, original, string(got))
@@ -155,7 +155,8 @@ func TestOpenAIDaybreakCatalogFailureDoesNotChangeHealthOrBody(t *testing.T) {
 			account.Extra = map[string]any{OpenAIDaybreakBlueEnabledKey: true}
 			registerAuxiliaryOSFixture(t, s, account)
 			body := []byte(`{"model":"gpt-6-sol","input":"test"}`)
-			wire, decision := s.applyOpenAIDaybreakWithDecision(context.Background(), account, body)
+			wire, decision, err := s.applyOpenAIDaybreakWithDecision(daybreakEnabledTestContext(), account, body)
+			require.NoError(t, err)
 			require.Equal(t, body, wire)
 			observation := observeOpenAIDaybreak(wire, decision)
 			require.Equal(t, "catalog_unavailable", observation.Reason)
@@ -179,12 +180,12 @@ func TestOpenAIDaybreakRuntimeLazilyLoadsAndReusesCatalog(t *testing.T) {
 	account = scopedAuxiliaryOSFixture(t, s, account)
 	body := []byte(`{"model":"gpt-6-sol"}`)
 	for range 3 {
-		got := s.applyOpenAIDaybreak(context.Background(), account, body)
+		got := s.applyOpenAIDaybreak(daybreakEnabledTestContext(), account, body)
 		require.Equal(t, "daybreak_blue", gjson.GetBytes(got, "access_programs.cyber").String())
 	}
 	require.EqualValues(t, 1, calls.Load())
 	account.Extra[OpenAIDaybreakBlueEnabledKey] = false
-	require.Equal(t, body, s.applyOpenAIDaybreak(context.Background(), account, body))
+	require.Equal(t, body, s.applyOpenAIDaybreak(daybreakEnabledTestContext(), account, body))
 	require.EqualValues(t, 1, calls.Load())
 }
 
@@ -201,7 +202,7 @@ func TestOpenAIDaybreakRestoresEvictedCapabilitiesWithoutExtendingObservation(t 
 	s.codexModelCapabilities.entries = nil // Simulate independent capability eviction.
 	s.codexModelCapabilities.mu.Unlock()
 	body := []byte(`{"model":"gpt-6-sol"}`)
-	got := s.applyOpenAIDaybreak(context.Background(), account, body)
+	got := s.applyOpenAIDaybreak(daybreakEnabledTestContext(), account, body)
 	require.Equal(t, "daybreak_blue", gjson.GetBytes(got, "access_programs.cyber").String())
 	second, err := s.GetOpenAIDaybreakCapabilities(context.Background(), account)
 	require.NoError(t, err)
@@ -245,12 +246,12 @@ func TestOpenAIDaybreakShadowUsesOwnSwitchAndOwnerCapabilities(t *testing.T) {
 	repo.accounts[shadow.ID] = shadow
 	shadow = scopedAuxiliaryOSFixture(t, s, shadow)
 	body := []byte(`{"model":"gpt-6-sol"}`)
-	got := s.applyOpenAIDaybreak(context.Background(), shadow, body)
+	got := s.applyOpenAIDaybreak(daybreakEnabledTestContext(), shadow, body)
 	require.Equal(t, "daybreak_blue", gjson.GetBytes(got, "access_programs.cyber").String())
 	require.EqualValues(t, 1, calls.Load())
-	require.Equal(t, body, s.applyOpenAIDaybreak(context.Background(), owner, body), "owner must not inherit shadow preference")
+	require.Equal(t, body, s.applyOpenAIDaybreak(daybreakEnabledTestContext(), owner, body), "owner must not inherit shadow preference")
 	shadow.Extra[OpenAIDaybreakBlueEnabledKey] = false
 	owner.Extra[OpenAIDaybreakBlueEnabledKey] = true
-	require.Equal(t, body, s.applyOpenAIDaybreak(context.Background(), shadow, body), "shadow must not inherit owner preference")
+	require.Equal(t, body, s.applyOpenAIDaybreak(daybreakEnabledTestContext(), shadow, body), "shadow must not inherit owner preference")
 	require.EqualValues(t, 1, calls.Load())
 }

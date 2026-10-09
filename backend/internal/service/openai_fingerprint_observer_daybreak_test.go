@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -44,7 +43,8 @@ func TestFingerprintDaybreakDecisionsAndWireValues(t *testing.T) {
 				svc.codexModelCapabilities.observeManifest(openAICodexModelCapabilitiesNamespace(account), []byte(manifest), time.Now())
 			}
 			body := []byte(`{"model":"` + tc.model + `","input":"private prompt"` + tc.fields + `}`)
-			wire, decision := svc.applyOpenAIDaybreakWithDecision(context.Background(), account, body)
+			wire, decision, err := svc.applyOpenAIDaybreakWithDecision(daybreakEnabledTestContext(), account, body)
+			require.NoError(t, err)
 			observation := observeOpenAIDaybreak(wire, decision)
 			require.Equal(t, tc.source, observation.Source)
 			require.Equal(t, tc.reason, observation.Reason)

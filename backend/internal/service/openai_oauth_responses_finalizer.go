@@ -52,6 +52,7 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 	if req == nil {
 		return body, errors.New("finalize openai OAuth Responses request: request is nil")
 	}
+	freezeOpenAIDaybreakPolicyOnRequest(req, s.settingService)
 	requestKind := strings.TrimSpace(options.RequestKind)
 	if requestKind == "" {
 		requestKind = string(CodexWireRequestTurn)
@@ -143,11 +144,15 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 	}
 	applyOpenAICodexRoutingHintFromPlan(req.Header, finalPlan)
 	finalBody := s.guardOpenAICodexTurnStateEchoForPlan(c, account, finalPlan, req.Header, projectedBody)
-	daybreakDecision := "excluded_endpoint"
-	if !isOpenAIResponsesCompactPath(c) && finalPlan.ProjectionMode != OpenAIOAuthIdentityProjectionCompact &&
-		!strings.HasSuffix(strings.TrimRight(req.URL.Path, "/"), "/compact") &&
-		!strings.HasSuffix(strings.TrimRight(req.URL.Path, "/"), "/input_tokens") {
-		finalBody, daybreakDecision = s.applyOpenAIDaybreakForPlan(req.Context(), account, finalPlan, finalBody)
+	daybreakContext := req.Context()
+	if isOpenAIResponsesCompactPath(c) || finalPlan.ProjectionMode == OpenAIOAuthIdentityProjectionCompact ||
+		strings.HasSuffix(strings.TrimRight(req.URL.Path, "/"), "/compact") ||
+		strings.HasSuffix(strings.TrimRight(req.URL.Path, "/"), "/input_tokens") {
+		daybreakContext = withOpenAIDaybreakInjectionDisabled(daybreakContext)
+	}
+	finalBody, daybreakDecision, err := s.applyOpenAIDaybreakForPlanWithContext(daybreakContext, c, account, finalPlan, finalBody)
+	if err != nil {
+		return body, err
 	}
 	setOpenAIDaybreakDecision(req, daybreakDecision)
 	setOpenAIRequestBodySnapshot(req, finalBody)

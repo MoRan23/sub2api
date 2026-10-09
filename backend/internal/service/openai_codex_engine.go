@@ -345,6 +345,9 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 	if err != nil {
 		return nil, err
 	}
+	if err := prepareOpenAIDaybreakHTTPRequest(req, account, s.settingService); err != nil {
+		return nil, err
+	}
 	if downstreamCtx != nil && downstreamCtx.Err() != nil {
 		// Detachment only protects an attempt already in flight. It must not
 		// start a fresh upstream request for a caller that has already gone away.

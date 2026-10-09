@@ -22170,6 +22170,8 @@ type GroupMutation struct {
 	allow_live                              *bool
 	force_openai_fast                       *bool
 	free_openai_fast                        *bool
+	openai_daybreak_blue_enabled            *bool
+	openai_daybreak_red_enabled             *bool
 	require_oauth_only                      *bool
 	require_privacy_set                     *bool
 	default_mapped_model                    *string
@@ -25100,6 +25102,78 @@ func (m *GroupMutation) ResetFreeOpenaiFast() {
 	m.free_openai_fast = nil
 }
 
+// SetOpenaiDaybreakBlueEnabled sets the "openai_daybreak_blue_enabled" field.
+func (m *GroupMutation) SetOpenaiDaybreakBlueEnabled(b bool) {
+	m.openai_daybreak_blue_enabled = &b
+}
+
+// OpenaiDaybreakBlueEnabled returns the value of the "openai_daybreak_blue_enabled" field in the mutation.
+func (m *GroupMutation) OpenaiDaybreakBlueEnabled() (r bool, exists bool) {
+	v := m.openai_daybreak_blue_enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOpenaiDaybreakBlueEnabled returns the old "openai_daybreak_blue_enabled" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldOpenaiDaybreakBlueEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOpenaiDaybreakBlueEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOpenaiDaybreakBlueEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOpenaiDaybreakBlueEnabled: %w", err)
+	}
+	return oldValue.OpenaiDaybreakBlueEnabled, nil
+}
+
+// ResetOpenaiDaybreakBlueEnabled resets all changes to the "openai_daybreak_blue_enabled" field.
+func (m *GroupMutation) ResetOpenaiDaybreakBlueEnabled() {
+	m.openai_daybreak_blue_enabled = nil
+}
+
+// SetOpenaiDaybreakRedEnabled sets the "openai_daybreak_red_enabled" field.
+func (m *GroupMutation) SetOpenaiDaybreakRedEnabled(b bool) {
+	m.openai_daybreak_red_enabled = &b
+}
+
+// OpenaiDaybreakRedEnabled returns the value of the "openai_daybreak_red_enabled" field in the mutation.
+func (m *GroupMutation) OpenaiDaybreakRedEnabled() (r bool, exists bool) {
+	v := m.openai_daybreak_red_enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOpenaiDaybreakRedEnabled returns the old "openai_daybreak_red_enabled" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldOpenaiDaybreakRedEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOpenaiDaybreakRedEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOpenaiDaybreakRedEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOpenaiDaybreakRedEnabled: %w", err)
+	}
+	return oldValue.OpenaiDaybreakRedEnabled, nil
+}
+
+// ResetOpenaiDaybreakRedEnabled resets all changes to the "openai_daybreak_red_enabled" field.
+func (m *GroupMutation) ResetOpenaiDaybreakRedEnabled() {
+	m.openai_daybreak_red_enabled = nil
+}
+
 // SetRequireOauthOnly sets the "require_oauth_only" field.
 func (m *GroupMutation) SetRequireOauthOnly(b bool) {
 	m.require_oauth_only = &b
@@ -26001,7 +26075,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 67)
+	fields := make([]string, 0, 69)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26164,6 +26238,12 @@ func (m *GroupMutation) Fields() []string {
 	if m.free_openai_fast != nil {
 		fields = append(fields, group.FieldFreeOpenaiFast)
 	}
+	if m.openai_daybreak_blue_enabled != nil {
+		fields = append(fields, group.FieldOpenaiDaybreakBlueEnabled)
+	}
+	if m.openai_daybreak_red_enabled != nil {
+		fields = append(fields, group.FieldOpenaiDaybreakRedEnabled)
+	}
 	if m.require_oauth_only != nil {
 		fields = append(fields, group.FieldRequireOauthOnly)
 	}
@@ -26319,6 +26399,10 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.ForceOpenaiFast()
 	case group.FieldFreeOpenaiFast:
 		return m.FreeOpenaiFast()
+	case group.FieldOpenaiDaybreakBlueEnabled:
+		return m.OpenaiDaybreakBlueEnabled()
+	case group.FieldOpenaiDaybreakRedEnabled:
+		return m.OpenaiDaybreakRedEnabled()
 	case group.FieldRequireOauthOnly:
 		return m.RequireOauthOnly()
 	case group.FieldRequirePrivacySet:
@@ -26462,6 +26546,10 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldForceOpenaiFast(ctx)
 	case group.FieldFreeOpenaiFast:
 		return m.OldFreeOpenaiFast(ctx)
+	case group.FieldOpenaiDaybreakBlueEnabled:
+		return m.OldOpenaiDaybreakBlueEnabled(ctx)
+	case group.FieldOpenaiDaybreakRedEnabled:
+		return m.OldOpenaiDaybreakRedEnabled(ctx)
 	case group.FieldRequireOauthOnly:
 		return m.OldRequireOauthOnly(ctx)
 	case group.FieldRequirePrivacySet:
@@ -26874,6 +26962,20 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetFreeOpenaiFast(v)
+		return nil
+	case group.FieldOpenaiDaybreakBlueEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOpenaiDaybreakBlueEnabled(v)
+		return nil
+	case group.FieldOpenaiDaybreakRedEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOpenaiDaybreakRedEnabled(v)
 		return nil
 	case group.FieldRequireOauthOnly:
 		v, ok := value.(bool)
@@ -27656,6 +27758,12 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldFreeOpenaiFast:
 		m.ResetFreeOpenaiFast()
+		return nil
+	case group.FieldOpenaiDaybreakBlueEnabled:
+		m.ResetOpenaiDaybreakBlueEnabled()
+		return nil
+	case group.FieldOpenaiDaybreakRedEnabled:
+		m.ResetOpenaiDaybreakRedEnabled()
 		return nil
 	case group.FieldRequireOauthOnly:
 		m.ResetRequireOauthOnly()

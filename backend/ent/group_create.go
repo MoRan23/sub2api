@@ -746,6 +746,34 @@ func (_c *GroupCreate) SetNillableFreeOpenaiFast(v *bool) *GroupCreate {
 	return _c
 }
 
+// SetOpenaiDaybreakBlueEnabled sets the "openai_daybreak_blue_enabled" field.
+func (_c *GroupCreate) SetOpenaiDaybreakBlueEnabled(v bool) *GroupCreate {
+	_c.mutation.SetOpenaiDaybreakBlueEnabled(v)
+	return _c
+}
+
+// SetNillableOpenaiDaybreakBlueEnabled sets the "openai_daybreak_blue_enabled" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableOpenaiDaybreakBlueEnabled(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetOpenaiDaybreakBlueEnabled(*v)
+	}
+	return _c
+}
+
+// SetOpenaiDaybreakRedEnabled sets the "openai_daybreak_red_enabled" field.
+func (_c *GroupCreate) SetOpenaiDaybreakRedEnabled(v bool) *GroupCreate {
+	_c.mutation.SetOpenaiDaybreakRedEnabled(v)
+	return _c
+}
+
+// SetNillableOpenaiDaybreakRedEnabled sets the "openai_daybreak_red_enabled" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableOpenaiDaybreakRedEnabled(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetOpenaiDaybreakRedEnabled(*v)
+	}
+	return _c
+}
+
 // SetRequireOauthOnly sets the "require_oauth_only" field.
 func (_c *GroupCreate) SetRequireOauthOnly(v bool) *GroupCreate {
 	_c.mutation.SetRequireOauthOnly(v)
@@ -1173,6 +1201,14 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultFreeOpenaiFast
 		_c.mutation.SetFreeOpenaiFast(v)
 	}
+	if _, ok := _c.mutation.OpenaiDaybreakBlueEnabled(); !ok {
+		v := group.DefaultOpenaiDaybreakBlueEnabled
+		_c.mutation.SetOpenaiDaybreakBlueEnabled(v)
+	}
+	if _, ok := _c.mutation.OpenaiDaybreakRedEnabled(); !ok {
+		v := group.DefaultOpenaiDaybreakRedEnabled
+		_c.mutation.SetOpenaiDaybreakRedEnabled(v)
+	}
 	if _, ok := _c.mutation.RequireOauthOnly(); !ok {
 		v := group.DefaultRequireOauthOnly
 		_c.mutation.SetRequireOauthOnly(v)
@@ -1377,6 +1413,12 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.FreeOpenaiFast(); !ok {
 		return &ValidationError{Name: "free_openai_fast", err: errors.New(`ent: missing required field "Group.free_openai_fast"`)}
+	}
+	if _, ok := _c.mutation.OpenaiDaybreakBlueEnabled(); !ok {
+		return &ValidationError{Name: "openai_daybreak_blue_enabled", err: errors.New(`ent: missing required field "Group.openai_daybreak_blue_enabled"`)}
+	}
+	if _, ok := _c.mutation.OpenaiDaybreakRedEnabled(); !ok {
+		return &ValidationError{Name: "openai_daybreak_red_enabled", err: errors.New(`ent: missing required field "Group.openai_daybreak_red_enabled"`)}
 	}
 	if _, ok := _c.mutation.RequireOauthOnly(); !ok {
 		return &ValidationError{Name: "require_oauth_only", err: errors.New(`ent: missing required field "Group.require_oauth_only"`)}
@@ -1674,6 +1716,14 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.FreeOpenaiFast(); ok {
 		_spec.SetField(group.FieldFreeOpenaiFast, field.TypeBool, value)
 		_node.FreeOpenaiFast = value
+	}
+	if value, ok := _c.mutation.OpenaiDaybreakBlueEnabled(); ok {
+		_spec.SetField(group.FieldOpenaiDaybreakBlueEnabled, field.TypeBool, value)
+		_node.OpenaiDaybreakBlueEnabled = value
+	}
+	if value, ok := _c.mutation.OpenaiDaybreakRedEnabled(); ok {
+		_spec.SetField(group.FieldOpenaiDaybreakRedEnabled, field.TypeBool, value)
+		_node.OpenaiDaybreakRedEnabled = value
 	}
 	if value, ok := _c.mutation.RequireOauthOnly(); ok {
 		_spec.SetField(group.FieldRequireOauthOnly, field.TypeBool, value)
@@ -2786,6 +2836,30 @@ func (u *GroupUpsert) SetFreeOpenaiFast(v bool) *GroupUpsert {
 // UpdateFreeOpenaiFast sets the "free_openai_fast" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateFreeOpenaiFast() *GroupUpsert {
 	u.SetExcluded(group.FieldFreeOpenaiFast)
+	return u
+}
+
+// SetOpenaiDaybreakBlueEnabled sets the "openai_daybreak_blue_enabled" field.
+func (u *GroupUpsert) SetOpenaiDaybreakBlueEnabled(v bool) *GroupUpsert {
+	u.Set(group.FieldOpenaiDaybreakBlueEnabled, v)
+	return u
+}
+
+// UpdateOpenaiDaybreakBlueEnabled sets the "openai_daybreak_blue_enabled" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateOpenaiDaybreakBlueEnabled() *GroupUpsert {
+	u.SetExcluded(group.FieldOpenaiDaybreakBlueEnabled)
+	return u
+}
+
+// SetOpenaiDaybreakRedEnabled sets the "openai_daybreak_red_enabled" field.
+func (u *GroupUpsert) SetOpenaiDaybreakRedEnabled(v bool) *GroupUpsert {
+	u.Set(group.FieldOpenaiDaybreakRedEnabled, v)
+	return u
+}
+
+// UpdateOpenaiDaybreakRedEnabled sets the "openai_daybreak_red_enabled" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateOpenaiDaybreakRedEnabled() *GroupUpsert {
+	u.SetExcluded(group.FieldOpenaiDaybreakRedEnabled)
 	return u
 }
 
@@ -4065,6 +4139,34 @@ func (u *GroupUpsertOne) SetFreeOpenaiFast(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateFreeOpenaiFast() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateFreeOpenaiFast()
+	})
+}
+
+// SetOpenaiDaybreakBlueEnabled sets the "openai_daybreak_blue_enabled" field.
+func (u *GroupUpsertOne) SetOpenaiDaybreakBlueEnabled(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiDaybreakBlueEnabled(v)
+	})
+}
+
+// UpdateOpenaiDaybreakBlueEnabled sets the "openai_daybreak_blue_enabled" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateOpenaiDaybreakBlueEnabled() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiDaybreakBlueEnabled()
+	})
+}
+
+// SetOpenaiDaybreakRedEnabled sets the "openai_daybreak_red_enabled" field.
+func (u *GroupUpsertOne) SetOpenaiDaybreakRedEnabled(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiDaybreakRedEnabled(v)
+	})
+}
+
+// UpdateOpenaiDaybreakRedEnabled sets the "openai_daybreak_red_enabled" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateOpenaiDaybreakRedEnabled() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiDaybreakRedEnabled()
 	})
 }
 
@@ -5539,6 +5641,34 @@ func (u *GroupUpsertBulk) SetFreeOpenaiFast(v bool) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateFreeOpenaiFast() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateFreeOpenaiFast()
+	})
+}
+
+// SetOpenaiDaybreakBlueEnabled sets the "openai_daybreak_blue_enabled" field.
+func (u *GroupUpsertBulk) SetOpenaiDaybreakBlueEnabled(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiDaybreakBlueEnabled(v)
+	})
+}
+
+// UpdateOpenaiDaybreakBlueEnabled sets the "openai_daybreak_blue_enabled" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateOpenaiDaybreakBlueEnabled() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiDaybreakBlueEnabled()
+	})
+}
+
+// SetOpenaiDaybreakRedEnabled sets the "openai_daybreak_red_enabled" field.
+func (u *GroupUpsertBulk) SetOpenaiDaybreakRedEnabled(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetOpenaiDaybreakRedEnabled(v)
+	})
+}
+
+// UpdateOpenaiDaybreakRedEnabled sets the "openai_daybreak_red_enabled" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateOpenaiDaybreakRedEnabled() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateOpenaiDaybreakRedEnabled()
 	})
 }
 

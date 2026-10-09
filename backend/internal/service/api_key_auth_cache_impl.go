@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 24 // v24: enforcing model_allowlist, gift balance, Fast/reasoning policy, and Codex manifest fields
+const apiKeyAuthSnapshotVersion = 25 // v25: trusted group Daybreak Blue/Red preferences
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -422,6 +422,8 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			AllowLive:                       apiKey.Group.AllowLive,
 			ForceOpenAIFast:                 apiKey.Group.ForceOpenAIFast,
 			FreeOpenAIFast:                  apiKey.Group.FreeOpenAIFast,
+			OpenAIDaybreakBlueEnabled:       apiKey.Group.OpenAIDaybreakBlueEnabled,
+			OpenAIDaybreakRedEnabled:        apiKey.Group.OpenAIDaybreakRedEnabled,
 			DefaultMappedModel:              apiKey.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     apiKey.Group.MessagesDispatchModelConfig,
 			ModelAllowlist:                  apiKey.Group.ModelAllowlist,
@@ -526,6 +528,8 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			AllowLive:                       snapshot.Group.AllowLive,
 			ForceOpenAIFast:                 snapshot.Group.ForceOpenAIFast,
 			FreeOpenAIFast:                  snapshot.Group.FreeOpenAIFast,
+			OpenAIDaybreakBlueEnabled:       snapshot.Group.OpenAIDaybreakBlueEnabled,
+			OpenAIDaybreakRedEnabled:        snapshot.Group.OpenAIDaybreakRedEnabled,
 			DefaultMappedModel:              snapshot.Group.DefaultMappedModel,
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
 			ModelAllowlist:                  snapshot.Group.ModelAllowlist,

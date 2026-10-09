@@ -1274,6 +1274,11 @@ export default {
         unsupportedMessage: '当前 Sub2API 服务端无法生成 Live 所需的设备证明，即使开启也不能使用。是否仍然开启？',
         enableAnyway: '仍然开启'
       },
+      daybreak: {
+        title: 'Daybreak 自动补充',
+        hint: '系统、当前分组和所选 OAuth 账号都允许对应档位时，才自动补充缺失的 access_programs.cyber。分组关闭只停止自动补充，保留客户端字段；系统总开关关闭才会清除该字段。已有、新建及复制分组均默认关闭，需手动开启。',
+        redHint: 'Red 依赖 Blue。GPT-6 Astra / GPT-6.1 Sol 同样需要同时开启 Blue 和 Red，请求值仍为 daybreak_blue；最终还需账号能力支持。',
+      },
       openaiFast: {
         title: 'OpenAI Fast 模式',
         force: '强制使用 Fast（priority）',

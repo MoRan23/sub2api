@@ -29,6 +29,9 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 	if err != nil {
 		return nil, err
 	}
+	if err := prepareOpenAIDaybreakHTTPRequest(request, account, s.settingService); err != nil {
+		return nil, err
+	}
 	defer func() { observeOpenAIHTTPResponseEvidence(request, response) }()
 	if account != nil && account.Platform == PlatformOpenAI {
 		request = ApplyOpenAIRequestPolicy(request, s.settingService)
@@ -60,6 +63,9 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 // doCodexAuxiliaryUpstream keeps History/Notes on the configured OAuth plugin
 // route while excluding these requests from the account's transport concurrency.
 func (s *OpenAIGatewayService) doCodexAuxiliaryUpstream(request *http.Request, proxyURL string, account *Account) (*http.Response, error) {
+	if err := prepareOpenAIDaybreakHTTPRequest(request, account, s.settingService); err != nil {
+		return nil, err
+	}
 	request = ApplyOpenAIRequestPolicy(request, s.settingService)
 	request = request.WithContext(WithHTTPUpstreamProfile(request.Context(), HTTPUpstreamProfileCodexAuxiliary))
 	if s.pluginManager != nil {
@@ -82,6 +88,9 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 	account *Account,
 	useTLSFallback bool,
 ) (*http.Response, error) {
+	if err := prepareOpenAIDaybreakHTTPRequest(request, account, s.settingService); err != nil {
+		return nil, err
+	}
 	if account != nil && account.Platform == PlatformOpenAI {
 		request = ApplyOpenAIRequestPolicy(request, s.settingService)
 	}

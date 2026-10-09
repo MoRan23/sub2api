@@ -729,6 +729,7 @@ const (
 	SettingKeyCodexTelemetrySimulationEnabled       = "codex_telemetry_simulation_enabled"
 	SettingKeyCodexTelemetryObservationEnabled      = "codex_telemetry_observation_enabled"
 	SettingKeyOpenAIRequestIntegrityObserveEnabled  = "openai_request_integrity_observe_enabled"
+	SettingKeyOpenAIDaybreakEnabled                 = "openai_daybreak_enabled"
 	// SettingKeyEnableOpenAICodexClientIdentityNormalization controls the Codex
 	// User-Agent/originator/version triplet under the master switch.
 	SettingKeyEnableOpenAICodexClientIdentityNormalization = "enable_openai_codex_client_identity_normalization"

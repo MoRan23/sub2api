@@ -44,6 +44,7 @@ type UpdateSettingsRequest struct {
 	CodexTelemetrySimulationEnabled              *bool                        `json:"codex_telemetry_simulation_enabled"`
 	CodexTelemetryObservationEnabled             *bool                        `json:"codex_telemetry_observation_enabled"`
 	OpenAIRequestIntegrityObserveEnabled         *bool                        `json:"openai_request_integrity_observe_enabled"`
+	OpenAIDaybreakEnabled                        *bool                        `json:"openai_daybreak_enabled"`
 	EnableOpenAICodexFingerprintNormalization    *bool                        `json:"enable_openai_codex_fingerprint_normalization"`
 	EnableOpenAICodexInstallationIDNormalization *bool                        `json:"enable_openai_codex_installation_id_normalization"`
 	EnableOpenAICodexClientIdentityNormalization *bool                        `json:"enable_openai_codex_client_identity_normalization"`
@@ -477,6 +478,7 @@ var independentlyOmittedPointerSettingKeys = map[string]string{
 	service.SettingKeyCodexTelemetrySimulationEnabled:              service.SettingKeyCodexTelemetrySimulationEnabled,
 	service.SettingKeyCodexTelemetryObservationEnabled:             service.SettingKeyCodexTelemetryObservationEnabled,
 	service.SettingKeyOpenAIRequestIntegrityObserveEnabled:         service.SettingKeyOpenAIRequestIntegrityObserveEnabled,
+	service.SettingKeyOpenAIDaybreakEnabled:                        service.SettingKeyOpenAIDaybreakEnabled,
 	service.SettingKeyEnableOpenAICodexClientIdentityNormalization: service.SettingKeyEnableOpenAICodexClientIdentityNormalization,
 	service.SettingKeyEnableOpenAICodexPATContextManagement:        service.SettingKeyEnableOpenAICodexPATContextManagement,
 	service.SettingKeyEnableOpenAIRequestTimezoneConversion:        service.SettingKeyEnableOpenAIRequestTimezoneConversion,
@@ -609,6 +611,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	openAIRequestIntegrityObserveEnabled := previousSettings.OpenAIRequestIntegrityObserveEnabled
 	if req.OpenAIRequestIntegrityObserveEnabled != nil {
 		openAIRequestIntegrityObserveEnabled = *req.OpenAIRequestIntegrityObserveEnabled
+	}
+	openAIDaybreakEnabled := previousSettings.OpenAIDaybreakEnabled
+	if req.OpenAIDaybreakEnabled != nil {
+		openAIDaybreakEnabled = *req.OpenAIDaybreakEnabled
 	}
 	openAICodexFingerprintNormalizationEnabled := previousSettings.EnableOpenAICodexFingerprintNormalization
 	if req.EnableOpenAICodexFingerprintNormalization != nil {
@@ -1665,6 +1671,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		CodexTelemetrySimulationEnabled:              codexTelemetrySimulationEnabled,
 		CodexTelemetryObservationEnabled:             codexTelemetryObservationEnabled,
 		OpenAIRequestIntegrityObserveEnabled:         openAIRequestIntegrityObserveEnabled,
+		OpenAIDaybreakEnabled:                        openAIDaybreakEnabled,
 		EnableOpenAICodexFingerprintNormalization:    openAICodexFingerprintNormalizationEnabled,
 		EnableOpenAICodexInstallationIDNormalization: openAICodexInstallationIDNormalizationEnabled,
 		EnableOpenAICodexClientIdentityNormalization: openAICodexClientIdentityNormalizationEnabled,
@@ -2362,6 +2369,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		CodexTelemetrySimulationEnabled:                        updatedSettings.CodexTelemetrySimulationEnabled,
 		CodexTelemetryObservationEnabled:                       updatedSettings.CodexTelemetryObservationEnabled,
 		OpenAIRequestIntegrityObserveEnabled:                   updatedSettings.OpenAIRequestIntegrityObserveEnabled,
+		OpenAIDaybreakEnabled:                                  updatedSettings.OpenAIDaybreakEnabled,
 		CodexTelemetryEffectiveEnabled:                         telemetryEffectiveEnabled,
 		CodexTelemetryForcedOffReason:                          telemetryForcedOffReason,
 		EnableOpenAICodexFingerprintNormalization:              updatedSettings.EnableOpenAICodexFingerprintNormalization,

@@ -2446,6 +2446,9 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	if account.Platform == PlatformOpenAI {
 		req = ApplyOpenAIRequestPolicy(req, s.settingService)
 	}
+	if err := prepareOpenAIDaybreakHTTPRequest(req, account, s.settingService); err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to prepare Daybreak policy: %s", err.Error()))
+	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -3414,6 +3417,9 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 	account.ApplyHeaderOverrides(req.Header)
 	if account.Platform == PlatformOpenAI {
 		req = ApplyOpenAIRequestPolicy(req, s.settingService)
+	}
+	if err := prepareOpenAIDaybreakHTTPRequest(req, account, s.settingService); err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to prepare Daybreak policy: %s", err.Error()))
 	}
 
 	proxyURL := ""

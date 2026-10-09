@@ -505,6 +505,9 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 		}
 	}
 	stripOpenAIAlphaSearchResponsesHeaders(req.Header)
+	if err := prepareOpenAIDaybreakHTTPRequest(req, account, s.settingService); err != nil {
+		return nil, err
+	}
 	return ApplyOpenAIRequestPolicy(req, s.settingService), nil
 }
 

@@ -256,6 +256,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyCodexTelemetrySimulationEnabled:                    "true",
 		SettingKeyCodexTelemetryObservationEnabled:                   "true",
 		SettingKeyOpenAIRequestIntegrityObserveEnabled:               "true",
+		SettingKeyOpenAIDaybreakEnabled:                              "true",
 		SettingKeyEnableOpenAICodexClientIdentityNormalization:       "true",
 		SettingKeyEnableOpenAICodexPATContextManagement:              "false",
 		SettingKeyEnableOpenAIRequestTimezoneConversion:              "true",
@@ -935,6 +936,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.CodexTelemetrySimulationEnabled = parseCodexTelemetryEnabled(settings[SettingKeyCodexTelemetrySimulationEnabled])
 	result.CodexTelemetryObservationEnabled = parseCodexTelemetryEnabled(settings[SettingKeyCodexTelemetryObservationEnabled])
 	result.OpenAIRequestIntegrityObserveEnabled = parseOpenAIRequestIntegrityObserveEnabled(settings[SettingKeyOpenAIRequestIntegrityObserveEnabled])
+	result.OpenAIDaybreakEnabled = parseOpenAIDaybreakEnabled(settings[SettingKeyOpenAIDaybreakEnabled])
 	result.EnableOpenAIRequestTimezoneConversion = parseDefaultTrueSetting(settings, SettingKeyEnableOpenAIRequestTimezoneConversion)
 	result.EnableOpenAIPassthroughTimezoneConversion = parseDefaultTrueSetting(settings, SettingKeyEnableOpenAIPassthroughTimezoneConversion)
 	result.EnableOpenAICodexResidencyUS = parseDefaultTrueSetting(settings, SettingKeyEnableOpenAICodexResidencyUS)

@@ -157,6 +157,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		CodexTelemetrySimulationEnabled:                        settings.CodexTelemetrySimulationEnabled,
 		CodexTelemetryObservationEnabled:                       settings.CodexTelemetryObservationEnabled,
 		OpenAIRequestIntegrityObserveEnabled:                   settings.OpenAIRequestIntegrityObserveEnabled,
+		OpenAIDaybreakEnabled:                                  settings.OpenAIDaybreakEnabled,
 		CodexTelemetryEffectiveEnabled:                         telemetryEffectiveEnabled,
 		CodexTelemetryForcedOffReason:                          telemetryForcedOffReason,
 		EnableOpenAICodexFingerprintNormalization:              settings.EnableOpenAICodexFingerprintNormalization,

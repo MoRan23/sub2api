@@ -1685,6 +1685,19 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(payload).not.toHaveProperty("claude_code_client_version_synced");
   });
 
+  it.each([undefined, null, false, true])('loads the Daybreak system switch (%s) and saves its inverse', async (configured) => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, openai_daybreak_enabled: configured });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const control = wrapper.get<HTMLInputElement>('[data-testid="openai-daybreak-toggle"]');
+    expect(control.element.checked).toBe(configured ?? true);
+    await control.setValue(!(configured ?? true));
+    await wrapper.find('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ openai_daybreak_enabled: !(configured ?? true) }));
+  });
+
   it("pauses Codex fingerprint children without clearing their saved values", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,

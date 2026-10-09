@@ -592,8 +592,14 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 				errCh <- readErr
 				return
 			}
-			if _, authErr := s.resolveLiveCallAccount(proxyCtx, record); authErr != nil {
+			account, authErr := s.resolveLiveCallAccount(proxyCtx, record)
+			if authErr != nil {
 				errCh <- authErr
+				return
+			}
+			payload, guardErr := s.prepareOpenAILiveDaybreakFrame(proxyCtx, account, messageType, payload)
+			if guardErr != nil {
+				errCh <- guardErr
 				return
 			}
 			if writeErr := upstream.WriteFrame(proxyCtx, messageType, payload); writeErr != nil {
@@ -632,6 +638,19 @@ func (s *OpenAIGatewayService) ProxyLiveSideband(
 	}
 	go s.observeLiveCall(record)
 	return runErr
+}
+
+func (s *OpenAIGatewayService) prepareOpenAILiveDaybreakFrame(ctx context.Context, account *Account, messageType coderws.MessageType, payload []byte) ([]byte, error) {
+	if messageType != coderws.MessageText && messageType != coderws.MessageBinary {
+		return payload, nil
+	}
+	// Live sideband normally carries JSON control frames. Binary media has no
+	// request-field semantics and must retain its exact bytes.
+	if messageType == coderws.MessageBinary && (!json.Valid(payload) || !gjson.ParseBytes(payload).IsObject()) {
+		return payload, nil
+	}
+	updated, _, err := s.applyOpenAIDaybreakForPlanWithContext(withOpenAIDaybreakInjectionDisabled(ctx), nil, account, OpenAIOAuthIdentityPlan{}, payload)
+	return updated, err
 }
 
 // liveSessionEnded 判断控制连接的退出原因是否意味着会话已终结（应 finalize：写

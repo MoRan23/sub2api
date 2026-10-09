@@ -259,6 +259,7 @@ type SystemSettings struct {
 	CodexTelemetrySimulationEnabled              bool   // 按系统模拟客户端活动（默认 true）
 	CodexTelemetryObservationEnabled             bool   // 采集真实请求观测（默认 true）
 	OpenAIRequestIntegrityObserveEnabled         bool   // 独立的 OpenAI 请求完整性观察（默认 true，不改变请求）
+	OpenAIDaybreakEnabled                        bool   // Daybreak 总开关（默认 true；关闭时移除出站 cyber 字段）
 	EnableOpenAICodexClientIdentityNormalization bool   // UA/originator/version 归一分项（默认 true）
 	EnableOpenAICodexPATContextManagement        bool   // PAT Codex History/Notes 适配（默认 false）
 	EnableOpenAIRequestTimezoneConversion        bool   // 请求时区及本轮日期转换（默认 true）

@@ -142,6 +142,11 @@ export default {
         reasons: {
           automatic: 'Switches and current model capability evidence allow injection', client_supplied: 'Preserved the explicit client value',
           blue_disabled: 'Blue switch is off', red_disabled: 'This model also requires Red',
+          global_disabled: 'System Daybreak is off; no field needed removal',
+          global_disabled_stripped: 'System Daybreak is off; field removed',
+          group_blue_disabled: 'Current group does not allow automatic Blue fields',
+          group_red_disabled: 'This model requires both Blue and Red on the group',
+          group_unavailable: 'No valid request group; automatic fields skipped',
           unrecognized_model: 'Unrecognized model', catalog_unavailable: 'Current authorization model catalog is unavailable',
           capability_unavailable: 'Current model catalog does not declare the required capability', not_oauth: 'Not applicable to this account authentication type',
           excluded_endpoint: 'Standalone compaction and token counting do not receive automatic fields', prewarm: 'Prewarm requests do not receive automatic fields',

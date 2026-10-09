@@ -1098,9 +1098,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			outboundIdentityMu.Unlock()
 			if strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "response.create" {
 				if account.UsesOpenAICodexProtocol() {
-					return s.guardOpenAICodexTurnStateEchoForPlan(c, account, framePlan, nil, payload), nil
+					payload = s.guardOpenAICodexTurnStateEchoForPlan(c, account, framePlan, nil, payload)
 				}
-				return payload, nil
+				updated, decision, err := s.applyOpenAIDaybreakForPlanWithContext(withOpenAIDaybreakInjectionDisabled(ctx), c, account, framePlan, payload)
+				if err != nil {
+					return payload, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to prepare websocket Daybreak policy", err)
+				}
+				pendingFrameObservation = s.freezeFingerprintObservationWSFrame(c, account, currentTimezoneState, updated, physicalObservationHeaders, openAIWSObservationFramePlan(account, &framePlan), decision)
+				return updated, nil
 			}
 			if account.UsesOpenAICodexProtocol() {
 				projected, projectErr := s.projectOpenAIOAuthWSFrame(c, account, framePlan, payload)
@@ -1119,7 +1124,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				payload = updated
 			}
-			payload, daybreakDecision := s.applyOpenAIDaybreakForPlan(ctx, account, framePlan, payload)
+			payload, daybreakDecision, daybreakErr := s.applyOpenAIDaybreakForPlanWithContext(ctx, c, account, framePlan, payload)
+			if daybreakErr != nil {
+				return payload, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to prepare websocket Daybreak policy", daybreakErr)
+			}
 			nextEvidence := beginOpenAIResponseEvidence(c, gjson.GetBytes(payload, "model").String())
 			if firstResponseEvidenceFrame {
 				observeOpenAIResponseEvidenceHeaders(nextEvidence, handshakeHeaders, "connection")

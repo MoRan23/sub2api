@@ -506,6 +506,8 @@ export default {
         saveFailed: 'Failed to save OpenCode Go usage refresh settings'
       },
       gatewayForwarding: {
+        daybreakTitle: 'Daybreak system switch',
+        daybreakHint: 'Enabled by default: automatically add missing client fields only when the group, account, and actual model capabilities allow them. Disabling stops automatic fields and removes access_programs.cyber from every OpenAI outbound request, including API Key and Codex-Engine accounts. Account and group preferences are preserved. Groups default to off and must be enabled separately.',
         title: 'Request Forwarding',
         description: 'Control how requests are forwarded to upstream OAuth accounts',
         grokDefaultTextModel: 'Default Grok text model',

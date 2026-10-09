@@ -1044,6 +1044,34 @@ func (_u *GroupUpdate) SetNillableFreeOpenaiFast(v *bool) *GroupUpdate {
 	return _u
 }
 
+// SetOpenaiDaybreakBlueEnabled sets the "openai_daybreak_blue_enabled" field.
+func (_u *GroupUpdate) SetOpenaiDaybreakBlueEnabled(v bool) *GroupUpdate {
+	_u.mutation.SetOpenaiDaybreakBlueEnabled(v)
+	return _u
+}
+
+// SetNillableOpenaiDaybreakBlueEnabled sets the "openai_daybreak_blue_enabled" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableOpenaiDaybreakBlueEnabled(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetOpenaiDaybreakBlueEnabled(*v)
+	}
+	return _u
+}
+
+// SetOpenaiDaybreakRedEnabled sets the "openai_daybreak_red_enabled" field.
+func (_u *GroupUpdate) SetOpenaiDaybreakRedEnabled(v bool) *GroupUpdate {
+	_u.mutation.SetOpenaiDaybreakRedEnabled(v)
+	return _u
+}
+
+// SetNillableOpenaiDaybreakRedEnabled sets the "openai_daybreak_red_enabled" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableOpenaiDaybreakRedEnabled(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetOpenaiDaybreakRedEnabled(*v)
+	}
+	return _u
+}
+
 // SetRequireOauthOnly sets the "require_oauth_only" field.
 func (_u *GroupUpdate) SetRequireOauthOnly(v bool) *GroupUpdate {
 	_u.mutation.SetRequireOauthOnly(v)
@@ -1899,6 +1927,12 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.FreeOpenaiFast(); ok {
 		_spec.SetField(group.FieldFreeOpenaiFast, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.OpenaiDaybreakBlueEnabled(); ok {
+		_spec.SetField(group.FieldOpenaiDaybreakBlueEnabled, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.OpenaiDaybreakRedEnabled(); ok {
+		_spec.SetField(group.FieldOpenaiDaybreakRedEnabled, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.RequireOauthOnly(); ok {
 		_spec.SetField(group.FieldRequireOauthOnly, field.TypeBool, value)
@@ -3274,6 +3308,34 @@ func (_u *GroupUpdateOne) SetNillableFreeOpenaiFast(v *bool) *GroupUpdateOne {
 	return _u
 }
 
+// SetOpenaiDaybreakBlueEnabled sets the "openai_daybreak_blue_enabled" field.
+func (_u *GroupUpdateOne) SetOpenaiDaybreakBlueEnabled(v bool) *GroupUpdateOne {
+	_u.mutation.SetOpenaiDaybreakBlueEnabled(v)
+	return _u
+}
+
+// SetNillableOpenaiDaybreakBlueEnabled sets the "openai_daybreak_blue_enabled" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableOpenaiDaybreakBlueEnabled(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetOpenaiDaybreakBlueEnabled(*v)
+	}
+	return _u
+}
+
+// SetOpenaiDaybreakRedEnabled sets the "openai_daybreak_red_enabled" field.
+func (_u *GroupUpdateOne) SetOpenaiDaybreakRedEnabled(v bool) *GroupUpdateOne {
+	_u.mutation.SetOpenaiDaybreakRedEnabled(v)
+	return _u
+}
+
+// SetNillableOpenaiDaybreakRedEnabled sets the "openai_daybreak_red_enabled" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableOpenaiDaybreakRedEnabled(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetOpenaiDaybreakRedEnabled(*v)
+	}
+	return _u
+}
+
 // SetRequireOauthOnly sets the "require_oauth_only" field.
 func (_u *GroupUpdateOne) SetRequireOauthOnly(v bool) *GroupUpdateOne {
 	_u.mutation.SetRequireOauthOnly(v)
@@ -4159,6 +4221,12 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.FreeOpenaiFast(); ok {
 		_spec.SetField(group.FieldFreeOpenaiFast, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.OpenaiDaybreakBlueEnabled(); ok {
+		_spec.SetField(group.FieldOpenaiDaybreakBlueEnabled, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.OpenaiDaybreakRedEnabled(); ok {
+		_spec.SetField(group.FieldOpenaiDaybreakRedEnabled, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.RequireOauthOnly(); ok {
 		_spec.SetField(group.FieldRequireOauthOnly, field.TypeBool, value)

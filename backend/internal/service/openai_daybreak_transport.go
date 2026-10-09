@@ -5,17 +5,18 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
-// applyOpenAIDaybreakForPlan uses the same immutable authorization slot as the
+// applyOpenAIDaybreakForPlanWithContext uses the same immutable authorization slot as the
 // physical request. Keep account-local preferences while resolving capabilities
 // against its credential owner; never let a later default-OS change choose them.
 // Call only at a physical inference-send boundary, after preserving retry input.
-func (s *OpenAIGatewayService) applyOpenAIDaybreakForPlan(ctx context.Context, account *Account, plan OpenAIOAuthIdentityPlan, body []byte) ([]byte, string) {
-	if !IsOpenAIDaybreakAccount(account) {
-		return body, "not_oauth"
+func (s *OpenAIGatewayService) applyOpenAIDaybreakForPlanWithContext(ctx context.Context, c *gin.Context, account *Account, plan OpenAIOAuthIdentityPlan, body []byte) ([]byte, string, error) {
+	if account == nil {
+		return body, "not_oauth", nil
 	}
 	scoped := *account
 	if plan.CredentialOS != "" {
@@ -23,7 +24,7 @@ func (s *OpenAIGatewayService) applyOpenAIDaybreakForPlan(ctx context.Context, a
 		scoped.OpenAIOAuthCredentialOwnerID = plan.OSOwnerID
 		scoped.OpenAIOAuthAuthorizationGeneration = plan.AuthorizationGeneration
 	}
-	return s.applyOpenAIDaybreakWithDecision(ctx, &scoped, body)
+	return s.applyOpenAIDaybreakWithContext(ctx, c, &scoped, body)
 }
 
 type openAIDaybreakDecisionContextKey struct{}

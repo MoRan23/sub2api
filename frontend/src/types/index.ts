@@ -630,6 +630,9 @@ export interface Group {
 }
 
 export interface AdminGroup extends Group {
+  // Older server responses omit these fields; both default to disabled.
+  openai_daybreak_blue_enabled?: boolean
+  openai_daybreak_red_enabled?: boolean
   force_openai_fast: boolean
   free_openai_fast: boolean
   model_pricing: import('@/api/admin/channels').ChannelModelPricing[]
@@ -807,6 +810,8 @@ export interface CreateGroupRequest {
   long_context_pricing_enabled?: boolean
   force_openai_fast?: boolean
   free_openai_fast?: boolean
+  openai_daybreak_blue_enabled?: boolean
+  openai_daybreak_red_enabled?: boolean
   model_pricing?: import('@/api/admin/channels').ChannelModelPricing[]
   allow_image_generation?: boolean
   allow_batch_image_generation?: boolean
@@ -874,6 +879,8 @@ export interface UpdateGroupRequest {
   long_context_pricing_enabled?: boolean
   force_openai_fast?: boolean
   free_openai_fast?: boolean
+  openai_daybreak_blue_enabled?: boolean
+  openai_daybreak_red_enabled?: boolean
   model_pricing?: import('@/api/admin/channels').ChannelModelPricing[]
   allow_image_generation?: boolean
   allow_batch_image_generation?: boolean

@@ -124,6 +124,10 @@ const (
 	FieldForceOpenaiFast = "force_openai_fast"
 	// FieldFreeOpenaiFast holds the string denoting the free_openai_fast field in the database.
 	FieldFreeOpenaiFast = "free_openai_fast"
+	// FieldOpenaiDaybreakBlueEnabled holds the string denoting the openai_daybreak_blue_enabled field in the database.
+	FieldOpenaiDaybreakBlueEnabled = "openai_daybreak_blue_enabled"
+	// FieldOpenaiDaybreakRedEnabled holds the string denoting the openai_daybreak_red_enabled field in the database.
+	FieldOpenaiDaybreakRedEnabled = "openai_daybreak_red_enabled"
 	// FieldRequireOauthOnly holds the string denoting the require_oauth_only field in the database.
 	FieldRequireOauthOnly = "require_oauth_only"
 	// FieldRequirePrivacySet holds the string denoting the require_privacy_set field in the database.
@@ -279,6 +283,8 @@ var Columns = []string{
 	FieldAllowLive,
 	FieldForceOpenaiFast,
 	FieldFreeOpenaiFast,
+	FieldOpenaiDaybreakBlueEnabled,
+	FieldOpenaiDaybreakRedEnabled,
 	FieldRequireOauthOnly,
 	FieldRequirePrivacySet,
 	FieldDefaultMappedModel,
@@ -405,6 +411,10 @@ var (
 	DefaultForceOpenaiFast bool
 	// DefaultFreeOpenaiFast holds the default value on creation for the "free_openai_fast" field.
 	DefaultFreeOpenaiFast bool
+	// DefaultOpenaiDaybreakBlueEnabled holds the default value on creation for the "openai_daybreak_blue_enabled" field.
+	DefaultOpenaiDaybreakBlueEnabled bool
+	// DefaultOpenaiDaybreakRedEnabled holds the default value on creation for the "openai_daybreak_red_enabled" field.
+	DefaultOpenaiDaybreakRedEnabled bool
 	// DefaultRequireOauthOnly holds the default value on creation for the "require_oauth_only" field.
 	DefaultRequireOauthOnly bool
 	// DefaultRequirePrivacySet holds the default value on creation for the "require_privacy_set" field.
@@ -695,6 +705,16 @@ func ByForceOpenaiFast(opts ...sql.OrderTermOption) OrderOption {
 // ByFreeOpenaiFast orders the results by the free_openai_fast field.
 func ByFreeOpenaiFast(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldFreeOpenaiFast, opts...).ToFunc()
+}
+
+// ByOpenaiDaybreakBlueEnabled orders the results by the openai_daybreak_blue_enabled field.
+func ByOpenaiDaybreakBlueEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldOpenaiDaybreakBlueEnabled, opts...).ToFunc()
+}
+
+// ByOpenaiDaybreakRedEnabled orders the results by the openai_daybreak_red_enabled field.
+func ByOpenaiDaybreakRedEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldOpenaiDaybreakRedEnabled, opts...).ToFunc()
 }
 
 // ByRequireOauthOnly orders the results by the require_oauth_only field.

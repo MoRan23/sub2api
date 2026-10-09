@@ -305,6 +305,16 @@ func FreeOpenaiFast(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldFreeOpenaiFast, v))
 }
 
+// OpenaiDaybreakBlueEnabled applies equality check predicate on the "openai_daybreak_blue_enabled" field. It's identical to OpenaiDaybreakBlueEnabledEQ.
+func OpenaiDaybreakBlueEnabled(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiDaybreakBlueEnabled, v))
+}
+
+// OpenaiDaybreakRedEnabled applies equality check predicate on the "openai_daybreak_red_enabled" field. It's identical to OpenaiDaybreakRedEnabledEQ.
+func OpenaiDaybreakRedEnabled(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiDaybreakRedEnabled, v))
+}
+
 // RequireOauthOnly applies equality check predicate on the "require_oauth_only" field. It's identical to RequireOauthOnlyEQ.
 func RequireOauthOnly(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldRequireOauthOnly, v))
@@ -2358,6 +2368,26 @@ func FreeOpenaiFastEQ(v bool) predicate.Group {
 // FreeOpenaiFastNEQ applies the NEQ predicate on the "free_openai_fast" field.
 func FreeOpenaiFastNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldFreeOpenaiFast, v))
+}
+
+// OpenaiDaybreakBlueEnabledEQ applies the EQ predicate on the "openai_daybreak_blue_enabled" field.
+func OpenaiDaybreakBlueEnabledEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiDaybreakBlueEnabled, v))
+}
+
+// OpenaiDaybreakBlueEnabledNEQ applies the NEQ predicate on the "openai_daybreak_blue_enabled" field.
+func OpenaiDaybreakBlueEnabledNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldOpenaiDaybreakBlueEnabled, v))
+}
+
+// OpenaiDaybreakRedEnabledEQ applies the EQ predicate on the "openai_daybreak_red_enabled" field.
+func OpenaiDaybreakRedEnabledEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldOpenaiDaybreakRedEnabled, v))
+}
+
+// OpenaiDaybreakRedEnabledNEQ applies the NEQ predicate on the "openai_daybreak_red_enabled" field.
+func OpenaiDaybreakRedEnabledNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldOpenaiDaybreakRedEnabled, v))
 }
 
 // RequireOauthOnlyEQ applies the EQ predicate on the "require_oauth_only" field.

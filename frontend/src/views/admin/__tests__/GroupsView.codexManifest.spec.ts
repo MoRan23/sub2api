@@ -10,6 +10,7 @@ const {
   listGroups,
   getModelAllowlistCandidates,
   updateGroup,
+  createGroup,
   getUsageSummary,
   getCapacitySummary,
   getLiveCapability,
@@ -17,6 +18,7 @@ const {
   listGroups: vi.fn(),
   getModelAllowlistCandidates: vi.fn(),
   updateGroup: vi.fn(),
+  createGroup: vi.fn(),
   getUsageSummary: vi.fn(),
   getCapacitySummary: vi.fn(),
   getLiveCapability: vi.fn(),
@@ -33,7 +35,7 @@ vi.mock("@/api/admin", () => ({
       getUsageSummary,
       getCapacitySummary,
       getLiveCapability,
-      create: vi.fn(),
+      create: createGroup,
       update: updateGroup,
       delete: vi.fn(),
       duplicate: vi.fn(),
@@ -223,7 +225,11 @@ const mountView = () =>
         BaseDialog: BaseDialogStub,
         ConfirmDialog: true,
         EmptyState: true,
-        Select: true,
+        Select: defineComponent({
+          props: ['modelValue', 'options'],
+          emits: ['update:modelValue'],
+          template: `<select :value="modelValue" @change="$emit('update:modelValue', $event.target.value)"><option v-for="option in options" :key="option.value" :value="option.value">{{ option.label }}</option></select>`,
+        }),
         PlatformIcon: true,
         Icon: true,
         GroupCapacityBadge: true,
@@ -236,7 +242,7 @@ const mountView = () =>
     },
   });
 
-describe("GroupsView Codex manifest binding", () => {
+describe("GroupsView gateway settings", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
@@ -245,6 +251,7 @@ describe("GroupsView Codex manifest binding", () => {
     listGroups.mockReset();
     getModelAllowlistCandidates.mockReset();
     updateGroup.mockReset();
+    createGroup.mockReset();
     getUsageSummary.mockReset();
     getCapacitySummary.mockReset();
     getLiveCapability.mockReset();
@@ -258,6 +265,7 @@ describe("GroupsView Codex manifest binding", () => {
     });
     getModelAllowlistCandidates.mockResolvedValue([]);
     updateGroup.mockResolvedValue(sourceGroup);
+    createGroup.mockResolvedValue(sourceGroup);
     getUsageSummary.mockResolvedValue([]);
     getCapacitySummary.mockResolvedValue([]);
     getLiveCapability.mockResolvedValue({ supported: false });
@@ -284,6 +292,77 @@ describe("GroupsView Codex manifest binding", () => {
         fallback_to_scheduler: false,
       }),
     );
+  });
+
+  it.each(['openai', 'composite'])("loads Daybreak preferences and disables Red with Blue for %s", async (platform) => {
+    listGroups.mockResolvedValueOnce({
+      items: [{ ...sourceGroup, platform, openai_daybreak_blue_enabled: true, openai_daybreak_red_enabled: true }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    });
+    const view = mountView();
+    await fireEvent.click(await view.findByRole('button', { name: 'common.edit' }));
+    const blue = view.getByRole('switch', { name: 'Daybreak Blue' });
+    const red = view.getByRole('switch', { name: 'Daybreak Red' });
+    expect(blue.getAttribute('aria-checked')).toBe('true');
+    expect(red.getAttribute('aria-checked')).toBe('true');
+    await fireEvent.click(blue);
+    expect(red.getAttribute('aria-checked')).toBe('false');
+    expect(red.hasAttribute('disabled')).toBe(true);
+    await fireEvent.submit(view.container.querySelector('#edit-group-form')!);
+    await waitFor(() => expect(updateGroup).toHaveBeenCalledWith(42, expect.objectContaining({
+      openai_daybreak_blue_enabled: false, openai_daybreak_red_enabled: false,
+    })));
+  });
+
+  it('defaults old group responses to off and persists independent Blue and Red choices', async () => {
+    const view = mountView();
+    await fireEvent.click(await view.findByRole('button', { name: 'common.edit' }));
+    const blue = view.getByRole('switch', { name: 'Daybreak Blue' });
+    const red = view.getByRole('switch', { name: 'Daybreak Red' });
+    expect(blue.getAttribute('aria-checked')).toBe('false');
+    expect(red.hasAttribute('disabled')).toBe(true);
+    await fireEvent.click(blue);
+    expect(red.getAttribute('aria-checked')).toBe('false');
+    expect(red.hasAttribute('disabled')).toBe(false);
+    await fireEvent.click(red);
+    await fireEvent.submit(view.container.querySelector('#edit-group-form')!);
+    await waitFor(() => expect(updateGroup).toHaveBeenCalledWith(42, expect.objectContaining({
+      openai_daybreak_blue_enabled: true, openai_daybreak_red_enabled: true,
+    })));
+  });
+
+  it.each(['openai', 'composite'])('creates %s groups with Daybreak disabled and clears choices after changing platform', async (platform) => {
+    const view = mountView();
+    await fireEvent.click(await view.findByRole('button', { name: 'admin.groups.createGroup' }));
+    const platformInput = view.container.querySelector('[data-tour="group-form-platform"]')!;
+    await fireEvent.update(platformInput, platform);
+    const blue = view.getByRole('switch', { name: 'Daybreak Blue' });
+    const red = view.getByRole('switch', { name: 'Daybreak Red' });
+    expect(blue.getAttribute('aria-checked')).toBe('false');
+    expect(red.getAttribute('aria-checked')).toBe('false');
+    await fireEvent.click(blue);
+    await fireEvent.click(red);
+    await fireEvent.update(platformInput, 'anthropic');
+    expect(view.queryByRole('switch', { name: 'Daybreak Blue' })).toBeNull();
+    await fireEvent.update(platformInput, platform);
+    expect(view.getByRole('switch', { name: 'Daybreak Blue' }).getAttribute('aria-checked')).toBe('false');
+    expect(view.getByRole('switch', { name: 'Daybreak Red' }).getAttribute('aria-checked')).toBe('false');
+    await fireEvent.update(view.getByPlaceholderText('admin.groups.enterGroupName'), 'New group');
+    await fireEvent.submit(view.container.querySelector('#create-group-form')!);
+    await waitFor(() => expect(createGroup).toHaveBeenCalledWith(expect.objectContaining({
+      platform, openai_daybreak_blue_enabled: false, openai_daybreak_red_enabled: false,
+    })));
+  });
+
+  it('does not show Daybreak switches for other platforms', async () => {
+    listGroups.mockResolvedValueOnce({
+      items: [{ ...sourceGroup, platform: 'anthropic' }],
+      total: 1, page: 1, page_size: 20, pages: 1,
+    });
+    const view = mountView();
+    await fireEvent.click(await view.findByRole('button', { name: 'common.edit' }));
+    expect(view.queryByRole('switch', { name: 'Daybreak Blue' })).toBeNull();
+    expect(view.queryByRole('switch', { name: 'Daybreak Red' })).toBeNull();
   });
 
   it.each([false, true])("keeps total quota isolated from simple mode (%s)", async (simpleMode) => {

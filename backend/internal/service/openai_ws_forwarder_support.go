@@ -132,9 +132,18 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 		prewarmWirePayload = json.RawMessage(stamped)
 		observationPlan = &finalPlan
 	}
+	daybreakPlan := identityPlan
+	if observationPlan != nil {
+		daybreakPlan = *observationPlan
+	}
+	prewarmPayloadJSON, daybreakDecision, daybreakErr := s.applyOpenAIDaybreakForPlanWithContext(withOpenAIDaybreakInjectionDisabled(ctx), c, account, daybreakPlan, prewarmPayloadJSON)
+	if daybreakErr != nil {
+		return wrapOpenAIWSFallback("prewarm_daybreak", daybreakErr)
+	}
+	prewarmWirePayload = json.RawMessage(prewarmPayloadJSON)
 
 	timezoneState, _ := RequestTimezoneStateFromContext(c)
-	recordFrameObservation := s.freezeFingerprintObservationWSFrame(c, account, timezoneState, prewarmPayloadJSON, requestHeaders, observationPlan)
+	recordFrameObservation := s.freezeFingerprintObservationWSFrame(c, account, timezoneState, prewarmPayloadJSON, requestHeaders, observationPlan, daybreakDecision)
 	if err := lease.WriteJSONWithContextTimeout(ctx, prewarmWirePayload, s.openAIWSWriteTimeout()); err != nil {
 		lease.MarkBroken()
 		logOpenAIWSModeInfo(

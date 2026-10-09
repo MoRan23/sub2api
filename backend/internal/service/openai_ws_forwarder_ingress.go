@@ -1168,7 +1168,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		// Keep the source-guarded payload for a permitted protocol repair retry.
 		guardedRetryPayload := append([]byte(nil), payload...)
 		var daybreakDecision string
-		payload, daybreakDecision = s.applyOpenAIDaybreakForPlan(ctx, account, pinnedIdentityPlan, payload)
+		var daybreakErr error
+		payload, daybreakDecision, daybreakErr = s.applyOpenAIDaybreakForPlanWithContext(ctx, c, account, pinnedIdentityPlan, payload)
+		if daybreakErr != nil {
+			return nil, wrapOpenAIWSIngressTurnError("write_upstream_daybreak", daybreakErr, false)
+		}
 		payloadBytes = len(payload)
 		responseEvidence := beginOpenAIResponseEvidence(c, gjson.GetBytes(payload, "model").String())
 		observeOpenAIResponseEvidenceHeaders(responseEvidence, lease.ClaimResponseEvidenceHeaders(), "connection")

@@ -146,10 +146,13 @@ func cloneGroupForDuplicate(source *Group, operationID string) *Group {
 		AllowLive:                       source.AllowLive,
 		ForceOpenAIFast:                 source.ForceOpenAIFast,
 		FreeOpenAIFast:                  source.FreeOpenAIFast,
-		RequireOAuthOnly:                source.RequireOAuthOnly,
-		RequirePrivacySet:               source.RequirePrivacySet,
-		DefaultMappedModel:              source.DefaultMappedModel,
-		MessagesDispatchModelConfig:     cloneGroupMessagesDispatchModelConfig(source.MessagesDispatchModelConfig),
+		// A copy requires an explicit administrator choice before using Daybreak.
+		OpenAIDaybreakBlueEnabled:   false,
+		OpenAIDaybreakRedEnabled:    false,
+		RequireOAuthOnly:            source.RequireOAuthOnly,
+		RequirePrivacySet:           source.RequirePrivacySet,
+		DefaultMappedModel:          source.DefaultMappedModel,
+		MessagesDispatchModelConfig: cloneGroupMessagesDispatchModelConfig(source.MessagesDispatchModelConfig),
 		ModelAllowlist: GroupModelAllowlist{
 			Enabled: source.ModelAllowlist.Enabled,
 			Models:  append([]string(nil), source.ModelAllowlist.Models...),

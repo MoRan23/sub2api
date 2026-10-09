@@ -293,6 +293,8 @@ type CreateGroupInput struct {
 	AllowLive                   bool
 	ForceOpenAIFast             bool
 	FreeOpenAIFast              bool
+	OpenAIDaybreakBlueEnabled   bool
+	OpenAIDaybreakRedEnabled    bool
 	DefaultMappedModel          string
 	RequireOAuthOnly            bool
 	RequirePrivacySet           bool
@@ -375,6 +377,8 @@ type UpdateGroupInput struct {
 	AllowLive                   *bool
 	ForceOpenAIFast             *bool
 	FreeOpenAIFast              *bool
+	OpenAIDaybreakBlueEnabled   *bool
+	OpenAIDaybreakRedEnabled    *bool
 	DefaultMappedModel          *string
 	RequireOAuthOnly            *bool
 	RequirePrivacySet           *bool

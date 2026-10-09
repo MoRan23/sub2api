@@ -409,7 +409,11 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if raw, ok := wirePayload.(json.RawMessage); ok {
 		observationBody = raw
 	}
-	observationBody, daybreakDecision := s.applyOpenAIDaybreakForPlan(ctx, account, outboundIdentityPlan, observationBody)
+	observationBody, daybreakDecision, daybreakErr := s.applyOpenAIDaybreakForPlanWithContext(ctx, c, account, outboundIdentityPlan, observationBody)
+	if daybreakErr != nil {
+		lease.MarkBroken()
+		return nil, wrapOpenAIWSFallback("write_request_daybreak", daybreakErr)
+	}
 	wirePayload = json.RawMessage(observationBody)
 	responseEvidence := beginOpenAIResponseEvidence(c, gjson.GetBytes(observationBody, "model").String())
 	observeOpenAIResponseEvidenceHeaders(responseEvidence, lease.ClaimResponseEvidenceHeaders(), "connection")

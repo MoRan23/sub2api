@@ -1276,6 +1276,11 @@ export default {
         unsupportedMessage: 'This Sub2API server cannot generate the required Live attestation. Live will not work even if enabled. Continue anyway?',
         enableAnyway: 'Enable anyway'
       },
+      daybreak: {
+        title: 'Daybreak automatic fields',
+        hint: 'Automatic access_programs.cyber fields require the matching tier on the system, current group, and selected OAuth account. Disabling a group only stops automatic fields and preserves client values; disabling the system switch removes the field. Existing, new, and duplicated groups default to off and must be enabled manually.',
+        redHint: 'Red requires Blue. GPT-6 Astra / GPT-6.1 Sol require both switches while their request value remains daybreak_blue. The account must also support the required capability.',
+      },
       openaiFast: {
         title: 'OpenAI Fast mode',
         force: 'Force Fast (priority)',

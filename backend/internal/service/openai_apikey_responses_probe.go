@@ -198,6 +198,10 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 	// 账号级请求头覆写：能力探测与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
 	req = ApplyOpenAIRequestPolicy(req, s.settingService)
+	if err := prepareOpenAIDaybreakHTTPRequest(req, account, s.settingService); err != nil {
+		logger.LegacyPrintf("service.openai_probe", "probe_daybreak_policy_failed: account_id=%d err=%v", accountID, err)
+		return
+	}
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

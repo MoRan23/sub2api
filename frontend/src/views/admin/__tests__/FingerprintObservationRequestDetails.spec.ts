@@ -63,6 +63,18 @@ describe('FingerprintObservationRequestDetails', () => {
     expect(detail.queryByText('Automatically added')).toBeNull()
   })
 
+  it.each([
+    'global_disabled', 'global_disabled_stripped', 'group_blue_disabled',
+    'group_red_disabled', 'group_unavailable',
+  ] as const)('explains the Daybreak policy reason %s using the final absent field', async (reason) => {
+    renderDetails({ daybreak: { cyber_present: false, cyber_type: 'missing', source: 'not_added', reason } })
+    await openDetails()
+    const detail = within(screen.getByTestId('daybreak-details'))
+    expect(detail.getByText(en.fingerprintObservation.request.daybreak.reasons[reason])).toBeTruthy()
+    expect(detail.getByText('Not present')).toBeTruthy()
+    expect(detail.queryByText('Automatically added')).toBeNull()
+  })
+
   it('keeps an explicit null distinct from an absent field', async () => {
     renderDetails({ daybreak: { cyber_present: true, cyber_type: 'null', cyber_value: 'null', source: 'client', reason: 'client_supplied' } })
     await openDetails()

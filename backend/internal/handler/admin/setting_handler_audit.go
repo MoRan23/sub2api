@@ -86,6 +86,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.OpenAIRequestIntegrityObserveEnabled != after.OpenAIRequestIntegrityObserveEnabled {
 		changed = append(changed, service.SettingKeyOpenAIRequestIntegrityObserveEnabled)
 	}
+	if before.OpenAIDaybreakEnabled != after.OpenAIDaybreakEnabled {
+		changed = append(changed, service.SettingKeyOpenAIDaybreakEnabled)
+	}
 	if before.EnableOpenAICodexFingerprintNormalization != after.EnableOpenAICodexFingerprintNormalization {
 		changed = append(changed, service.SettingKeyEnableOpenAICodexFingerprintNormalization)
 	}

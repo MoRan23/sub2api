@@ -51,6 +51,7 @@ type SystemSettings struct {
 	CodexTelemetrySimulationEnabled              bool                     `json:"codex_telemetry_simulation_enabled"`
 	CodexTelemetryObservationEnabled             bool                     `json:"codex_telemetry_observation_enabled"`
 	OpenAIRequestIntegrityObserveEnabled         bool                     `json:"openai_request_integrity_observe_enabled"`
+	OpenAIDaybreakEnabled                        bool                     `json:"openai_daybreak_enabled"`
 	CodexTelemetryEffectiveEnabled               bool                     `json:"codex_telemetry_effective_enabled"`
 	CodexTelemetryForcedOffReason                string                   `json:"codex_telemetry_forced_off_reason"`
 	EnableOpenAICodexFingerprintNormalization    bool                     `json:"enable_openai_codex_fingerprint_normalization"`

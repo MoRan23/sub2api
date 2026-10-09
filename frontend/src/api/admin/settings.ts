@@ -416,6 +416,7 @@ export interface SystemSettings {
   session_binding_enabled: boolean; // 会话 IP/UA 绑定
   step_up_enabled: boolean; // 敏感操作 step-up 2FA
   enable_openai_codex_fingerprint_normalization: boolean; // OpenAI OAuth Codex 指纹归一总开关
+  openai_daybreak_enabled: boolean; // 关闭时清除所有 OpenAI 出站请求的 access_programs.cyber
   enable_openai_codex_installation_id_normalization: boolean; // installation_id 账号固定
   enable_openai_uuidv7_session_identity: boolean; // OpenAI UUIDv7 session/thread 标识对
   enable_openai_oauth_daily_session_rotation: boolean;
@@ -787,6 +788,7 @@ export interface UpdateSettingsRequest {
   session_binding_enabled?: boolean; // 会话 IP/UA 绑定
   step_up_enabled?: boolean; // 敏感操作 step-up 2FA
   enable_openai_codex_fingerprint_normalization?: boolean;
+  openai_daybreak_enabled?: boolean | null;
   enable_openai_codex_installation_id_normalization?: boolean;
   enable_openai_uuidv7_session_identity?: boolean; // OpenAI UUIDv7 session/thread 标识对
   enable_openai_oauth_daily_session_rotation?: boolean;

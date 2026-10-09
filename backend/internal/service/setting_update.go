@@ -126,6 +126,9 @@ func (s *SettingService) persistSettingsAndRefreshOpenAIPolicies(
 	if value, present := updates[SettingKeyOpenAIRequestIntegrityObserveEnabled]; present {
 		s.publishOpenAIRequestIntegrityObserveEnabled(value)
 	}
+	if value, present := updates[SettingKeyOpenAIDaybreakEnabled]; present {
+		s.publishOpenAIDaybreakEnabled(value)
+	}
 	if len(omitted) > 0 {
 		values, err := s.settingRepo.GetAll(ctx)
 		if err != nil {
@@ -569,6 +572,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyCodexTelemetrySimulationEnabled] = strconv.FormatBool(settings.CodexTelemetrySimulationEnabled)
 	updates[SettingKeyCodexTelemetryObservationEnabled] = strconv.FormatBool(settings.CodexTelemetryObservationEnabled)
 	updates[SettingKeyOpenAIRequestIntegrityObserveEnabled] = strconv.FormatBool(settings.OpenAIRequestIntegrityObserveEnabled)
+	updates[SettingKeyOpenAIDaybreakEnabled] = strconv.FormatBool(settings.OpenAIDaybreakEnabled)
 	updates[SettingKeyEnableOpenAICodexClientIdentityNormalization] = strconv.FormatBool(settings.EnableOpenAICodexClientIdentityNormalization)
 	updates[SettingKeyEnableOpenAICodexPATContextManagement] = strconv.FormatBool(settings.EnableOpenAICodexPATContextManagement)
 	updates[SettingKeyEnableOpenAIRequestTimezoneConversion] = strconv.FormatBool(settings.EnableOpenAIRequestTimezoneConversion)

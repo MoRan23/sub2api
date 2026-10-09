@@ -1592,6 +1592,12 @@
             </div>
           </div>
         </div>
+        <GroupDaybreakSettings
+          v-if="supportsGroupOpenAIFast(createForm.platform)"
+          v-model:blue="createForm.openai_daybreak_blue_enabled"
+          v-model:red="createForm.openai_daybreak_red_enabled"
+          data-testid="create-daybreak-settings"
+        />
         <!-- OpenAI Fast 开关（OpenAI 与 Composite 平台） -->
         <div
           v-if="supportsGroupOpenAIFast(createForm.platform)"
@@ -3261,6 +3267,12 @@
             </div>
           </div>
         </div>
+        <GroupDaybreakSettings
+          v-if="supportsGroupOpenAIFast(editForm.platform)"
+          v-model:blue="editForm.openai_daybreak_blue_enabled"
+          v-model:red="editForm.openai_daybreak_red_enabled"
+          data-testid="edit-daybreak-settings"
+        />
         <!-- OpenAI Fast 开关（OpenAI 与 Composite 平台） -->
         <div
           v-if="supportsGroupOpenAIFast(editForm.platform)"
@@ -4354,6 +4366,7 @@ import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import Icon from "@/components/icons/Icon.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
+import GroupDaybreakSettings from "@/components/admin/group/GroupDaybreakSettings.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
@@ -5004,6 +5017,8 @@ const createForm = reactive({
   long_context_pricing_enabled: true,
   force_openai_fast: false,
   free_openai_fast: false,
+  openai_daybreak_blue_enabled: false,
+  openai_daybreak_red_enabled: false,
   model_pricing: [] as PricingFormEntry[],
   // 图片生成计费配置
   allow_image_generation: false,
@@ -5370,6 +5385,8 @@ const editForm = reactive({
   long_context_pricing_enabled: true,
   force_openai_fast: false,
   free_openai_fast: false,
+  openai_daybreak_blue_enabled: false,
+  openai_daybreak_red_enabled: false,
   model_pricing: [] as PricingFormEntry[],
   // 图片生成计费配置
   allow_image_generation: false,
@@ -5849,6 +5866,8 @@ const closeCreateModal = () => {
   createForm.video_model_prices = createVideoModelPricesForm();
   createForm.force_openai_fast = false;
   createForm.free_openai_fast = false;
+  createForm.openai_daybreak_blue_enabled = false;
+  createForm.openai_daybreak_red_enabled = false;
   createForm.web_search_price_per_call = null;
   createForm.search_price_per_1k = null;
   createForm.audio_realtime_price_per_min = null;
@@ -5969,6 +5988,10 @@ const handleCreateGroup = async () => {
     // 构建请求数据，包含模型路由配置
     const requestData = {
       ...createGroupForm,
+      openai_daybreak_blue_enabled:
+        supportsGroupOpenAIFast(createForm.platform) && createForm.openai_daybreak_blue_enabled,
+      openai_daybreak_red_enabled:
+        supportsGroupOpenAIFast(createForm.platform) && createForm.openai_daybreak_blue_enabled && createForm.openai_daybreak_red_enabled,
       force_openai_fast: normalizeGroupOpenAIFast(
         createForm.platform,
         createForm.force_openai_fast,
@@ -6118,6 +6141,8 @@ const handleEdit = async (group: AdminGroup) => {
     group.long_context_pricing_enabled ?? true;
   editForm.force_openai_fast = group.force_openai_fast ?? false;
   editForm.free_openai_fast = group.free_openai_fast ?? false;
+  editForm.openai_daybreak_blue_enabled = group.openai_daybreak_blue_enabled ?? false;
+  editForm.openai_daybreak_red_enabled = editForm.openai_daybreak_blue_enabled && (group.openai_daybreak_red_enabled ?? false);
   editForm.model_pricing = groupPricingFromAPI(group.model_pricing);
   editForm.allow_image_generation = group.allow_image_generation ?? false;
   editForm.allow_batch_image_generation =
@@ -6252,6 +6277,8 @@ const closeEditModal = () => {
   editForm.long_context_pricing_enabled = true;
   editForm.force_openai_fast = false;
   editForm.free_openai_fast = false;
+  editForm.openai_daybreak_blue_enabled = false;
+  editForm.openai_daybreak_red_enabled = false;
   editForm.model_pricing = [];
   editForm.web_search_price_per_call = null;
   editForm.search_price_per_1k = null;
@@ -6307,6 +6334,10 @@ const handleUpdateGroup = async () => {
     // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
     const payload = {
       ...editForm,
+      openai_daybreak_blue_enabled:
+        supportsGroupOpenAIFast(editForm.platform) && editForm.openai_daybreak_blue_enabled,
+      openai_daybreak_red_enabled:
+        supportsGroupOpenAIFast(editForm.platform) && editForm.openai_daybreak_blue_enabled && editForm.openai_daybreak_red_enabled,
       force_openai_fast: normalizeGroupOpenAIFast(
         editForm.platform,
         editForm.force_openai_fast,
@@ -6762,6 +6793,8 @@ watch(
     }
     if (!supportsLivePlatform(newVal)) {
       createForm.allow_live = false;
+      createForm.openai_daybreak_blue_enabled = false;
+      createForm.openai_daybreak_red_enabled = false;
     }
     if (!isProfitControlPlatform(newVal)) {
       createForm.profit_control_enabled = false;
@@ -6819,6 +6852,8 @@ watch(
     }
     if (!supportsLivePlatform(newVal)) {
       editForm.allow_live = false;
+      editForm.openai_daybreak_blue_enabled = false;
+      editForm.openai_daybreak_red_enabled = false;
     }
     if (!isProfitControlPlatform(newVal)) {
       editForm.profit_control_enabled = false;
