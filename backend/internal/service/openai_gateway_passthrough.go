@@ -188,7 +188,11 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		// fallback above). Do not normalize reasoning against a mapping that this
 		// request will never send.
 		wireModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
-		normalizedBody, normalized, normalizeErr := normalizeOpenAIResponsesWebSocketCompatibilityBody(body, account, responsesLite, wireModel)
+		normalizedBody, normalized, normalizeErr := normalizeOpenAIResponsesCompatibilityBodyWithOptions(body, account, openAIResponsesCompatibilityOptions{
+			ResponsesLite: responsesLite,
+			Compact:       isOpenAIResponsesCompactPath(c),
+			FinalModel:    &wireModel,
+		})
 		if normalizeErr != nil {
 			return nil, fmt.Errorf("normalize passthrough Responses compatibility: %w", normalizeErr)
 		}
