@@ -407,6 +407,7 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 		recordCodexEngineUsageDrainTimeout(c, account, resp.Header)
 	}
 	if errors.As(err, &failure) {
+		s.observeCodexEngineDeploymentUnavailable(account, resp, failure, time.Now())
 		recordCodexEngineError(c, account, resp, failure)
 	}
 	if err == nil && endpoint == "/v1/alpha/search" {
@@ -449,6 +450,7 @@ func recordCodexEngineFirstOutputTimeout(c *gin.Context, account *Account, heade
 func writeCodexEngineResponseHeaders(dst, src http.Header) {
 	for _, name := range append(append([]string{}, codexEnginePublicHeaders...),
 		"Content-Type", "Cache-Control", "X-Request-Id", "Request-Id", "Retry-After", "X-Should-Retry",
+		codexEngineUnavailableScopeHeader,
 		"X-Codex-Engine-Compatibility", "X-Codex-Engine-Ignored-Fields", "X-Codex-Engine-Token-Estimate") {
 		if values := src.Values(name); len(values) > 0 {
 			dst[http.CanonicalHeaderKey(name)] = append([]string(nil), values...)

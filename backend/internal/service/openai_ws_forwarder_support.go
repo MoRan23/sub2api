@@ -637,6 +637,9 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return 0, nil, "", nil
 	}
+	if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel) {
+		return 0, nil, "", nil
+	}
 	if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return 0, nil, "", nil
@@ -694,7 +697,12 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 			return 0, nil, "", nil
 		}
 		if s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel) {
-			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+			// Deployment maintenance is temporary capacity, not invalid response
+			// ownership. Classify other blockers rather than re-reading deployment
+			// state: its deadline may expire or extend after the combined check.
+			if accountPersistedSchedulingCooldownActive(latest) || s.isOpenAIAccountModelRuntimeBlocked(latest, requestedModel) {
+				_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+			}
 			return 0, nil, "", nil
 		}
 		account = latest
