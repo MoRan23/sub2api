@@ -125,6 +125,30 @@ describe('attribution account UI', () => {
     expect(api.create).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+  it('removes the manual-only label for Engine accounts and restores it when switching back', async () => {
+    const account = { id: 43, platform: 'openai', type: 'apikey', extra: { openai_api_key_mode: 'codex_engine', openai_passthrough: true }, model_attribution: { latest: job() } } as AccountListItem
+    const wrapper = mount(AccountAttributionCell, { props: { account } })
+    expect(wrapper.get('[data-testid="attribution-latest"]').text()).toBe('attribution.status.passed')
+    expect(wrapper.text()).not.toContain('attribution.manualOnly')
+    expect(wrapper.text()).toContain('gpt-6-astra · 80.0%')
+    await wrapper.get('button').trigger('click')
+    expect(wrapper.emitted('open')).toHaveLength(1)
+    await wrapper.setProps({ account: { ...account, extra: { openai_api_key_mode: 'generic' } } })
+    expect(wrapper.text()).toContain('attribution.manualOnly')
+    await wrapper.setProps({ account: { ...account, type: 'oauth', extra: {} } })
+    expect(wrapper.text()).not.toContain('attribution.manualOnly')
+    expect(api.create).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+  it.each([
+    { platform: 'anthropic', type: 'apikey' },
+    { platform: 'openai', type: 'setup-token' }
+  ])('does not enable attribution based only on an Engine mode marker: $platform / $type', (account) => {
+    const wrapper = mount(AccountAttributionCell, { props: { account: { ...account, extra: { openai_api_key_mode: 'codex_engine' } } as AccountListItem } })
+    expect(wrapper.find('[data-testid="attribution-cell"]').exists()).toBe(false)
+    expect(wrapper.find('button').exists()).toBe(false)
+    wrapper.unmount()
+  })
   it('shows skip reasons and excludes other platforms', () => {
     const wrapper = mount(AccountAttributionCell, { props: { account: { platform: 'openai', type: 'oauth', model_attribution: { skip_reason: 'shadow_account' } } as AccountListItem } })
     expect(wrapper.text()).toContain('attribution.reasons.shadow_account'); wrapper.unmount()

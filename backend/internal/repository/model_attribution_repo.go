@@ -259,7 +259,17 @@ func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual
 		return nil, err
 	}
 	if !manual {
-		rows, e := tx.QueryContext(ctx, `SELECT a.id FROM accounts a LEFT JOIN model_attribution_state s ON s.account_id=a.id WHERE a.deleted_at IS NULL AND a.platform='openai' AND a.type='oauth' AND a.parent_account_id IS NULL AND a.status='active' AND a.schedulable AND (a.expires_at IS NULL OR a.expires_at>NOW()) AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at<=NOW()) AND COALESCE(a.extra->'openai_passthrough',a.extra->'openai_oauth_passthrough','false'::jsonb) <> 'true'::jsonb AND (s.next_due_at IS NULL OR s.next_due_at<=NOW()) AND NOT EXISTS(SELECT 1 FROM account_initial_tests initial WHERE initial.account_id=a.id AND initial.processed_at IS NULL) AND NOT EXISTS(SELECT 1 FROM model_attribution_jobs j WHERE j.account_id=a.id AND j.status IN ('queued','running')) ORDER BY s.next_due_at NULLS FIRST,a.id LIMIT 500`)
+		rows, e := tx.QueryContext(ctx, `SELECT a.id FROM accounts a LEFT JOIN model_attribution_state s ON s.account_id=a.id
+			WHERE a.deleted_at IS NULL AND a.platform='openai'
+			AND ((a.type='oauth' AND COALESCE(a.extra->'openai_passthrough',a.extra->'openai_oauth_passthrough','false'::jsonb) <> 'true'::jsonb)
+				OR (a.type='apikey' AND a.extra->>'openai_api_key_mode'='codex_engine'))
+			AND a.parent_account_id IS NULL AND a.status='active' AND a.schedulable
+			AND (a.expires_at IS NULL OR a.expires_at>NOW())
+			AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at<=NOW())
+			AND (s.next_due_at IS NULL OR s.next_due_at<=NOW())
+			AND NOT EXISTS(SELECT 1 FROM account_initial_tests initial WHERE initial.account_id=a.id AND initial.processed_at IS NULL)
+			AND NOT EXISTS(SELECT 1 FROM model_attribution_jobs j WHERE j.account_id=a.id AND j.status IN ('queued','running'))
+			ORDER BY s.next_due_at NULLS FIRST,a.id LIMIT 500`)
 		if e != nil {
 			return nil, e
 		}

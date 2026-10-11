@@ -179,7 +179,43 @@ func TestAttributionAPIKeyManualEligibility(t *testing.T) {
 			a := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true}
 			tc.change(a)
 			require.Equal(t, tc.reason, AttributionSkipReason(a, now, true))
-			require.Equal(t, "unsupported_account", AttributionSkipReason(a, now, false))
+			if tc.name == "engine" {
+				require.Empty(t, AttributionSkipReason(a, now, false))
+			} else {
+				require.Equal(t, "unsupported_account", AttributionSkipReason(a, now, false))
+			}
+		})
+	}
+}
+
+func TestAttributionCodexEngineScheduledEligibility(t *testing.T) {
+	now := time.Now()
+	past, future := now.Add(-time.Minute), now.Add(time.Hour)
+	parent := int64(1)
+	for _, tc := range []struct {
+		name   string
+		change func(*Account)
+		reason string
+	}{
+		{"active", func(*Account) {}, ""},
+		{"legacy passthrough ignored", func(a *Account) { a.Extra["openai_passthrough"] = true }, ""},
+		{"legacy oauth passthrough ignored", func(a *Account) { a.Extra["openai_oauth_passthrough"] = true }, ""},
+		{"rate limited", func(a *Account) { a.RateLimitResetAt = &future }, "account_rate_limited"},
+		{"expired rate limit", func(a *Account) { a.RateLimitResetAt = &past }, ""},
+		{"inactive", func(a *Account) { a.Status = StatusDisabled }, "account_inactive"},
+		{"scheduling disabled", func(a *Account) { a.Schedulable = false }, "scheduling_disabled"},
+		{"expired", func(a *Account) { a.ExpiresAt = &past }, "account_expired"},
+		{"shadow", func(a *Account) { a.ParentAccountID = &parent }, "shadow_account"},
+		{"generic", func(a *Account) { a.Extra[OpenAIAPIKeyModeExtraKey] = "generic" }, "unsupported_account"},
+		{"unknown mode", func(a *Account) { a.Extra[OpenAIAPIKeyModeExtraKey] = "other" }, "unsupported_account"},
+		{"other platform", func(a *Account) { a.Platform = PlatformAnthropic }, "unsupported_account"},
+		{"other type", func(a *Account) { a.Type = AccountTypeSetupToken }, "unsupported_account"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+				Extra: map[string]any{OpenAIAPIKeyModeExtraKey: "codex_engine"}}
+			tc.change(a)
+			require.Equal(t, tc.reason, AttributionSkipReason(a, now, false))
 		})
 	}
 }

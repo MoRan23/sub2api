@@ -113,7 +113,7 @@ func TestAttributionAPIKeyManualOnly(t *testing.T) {
 	stored, err := ar.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.Equal(t, a.Credentials["api_key"], stored.Credentials["api_key"])
-	// Even after a manual result becomes due, periodic scans only select OAuth.
+	// Even after a manual result becomes due, generic API Key accounts stay manual-only.
 	_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_state SET next_due_at=NOW()-interval '11 minutes'`)
 	require.NoError(t, err)
 	jobs, err = r.Enqueue(ctx, nil, false)
@@ -127,6 +127,86 @@ func TestAttributionAPIKeyManualOnly(t *testing.T) {
 	var automatic int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM model_attribution_jobs WHERE account_id=$1 AND source<>'manual'`, a.ID).Scan(&automatic))
 	require.Zero(t, automatic)
+}
+
+func TestAttributionCodexEnginePeriodicScheduling(t *testing.T) {
+	ctx := context.Background()
+	r, ar, oauth := attributionFixture(t)
+	expected := []int64{oauth.ID}
+	var engine *service.Account
+	for _, tc := range []struct {
+		name, change string
+		eligible     bool
+	}{
+		{"engine", `extra='{"openai_api_key_mode":"codex_engine"}'`, true},
+		{"engine_legacy_passthrough", `extra='{"openai_api_key_mode":"codex_engine","openai_passthrough":true,"openai_oauth_passthrough":true}'`, true},
+		{"generic", `extra='{"openai_api_key_mode":"generic"}'`, false},
+		{"mode_missing", `extra='{}'`, false},
+		{"mode_unknown", `extra='{"openai_api_key_mode":"future"}'`, false},
+		{"other_platform", `platform='anthropic',extra='{"openai_api_key_mode":"codex_engine"}'`, false},
+		{"oauth_passthrough", `type='oauth',extra='{"openai_api_key_mode":"codex_engine","openai_passthrough":true}'`, false},
+		{"inactive", `status='disabled',extra='{"openai_api_key_mode":"codex_engine"}'`, false},
+		{"unscheduled", `schedulable=false,extra='{"openai_api_key_mode":"codex_engine"}'`, false},
+		{"expired", `expires_at=NOW()-interval '1 minute',extra='{"openai_api_key_mode":"codex_engine"}'`, false},
+		{"rate_limited", `rate_limit_reset_at=NOW()+interval '1 hour',extra='{"openai_api_key_mode":"codex_engine"}'`, false},
+		{"deleted", `deleted_at=NOW(),extra='{"openai_api_key_mode":"codex_engine"}'`, false},
+	} {
+		a := attributionAPIKeyAccount(t, ar)
+		_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET `+tc.change+` WHERE id=$1`, a.ID)
+		require.NoError(t, err, tc.name)
+		if tc.eligible {
+			expected = append(expected, a.ID)
+		}
+		if tc.name == "engine" {
+			engine = a
+		}
+	}
+	// Extending periodic eligibility does not create OAuth-only initial tests.
+	var initial int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM account_initial_tests WHERE account_id=$1`, engine.ID).Scan(&initial))
+	require.Zero(t, initial)
+	jobs, err := r.Enqueue(ctx, nil, false)
+	require.NoError(t, err)
+	var selected []int64
+	for _, job := range jobs {
+		require.Equal(t, "scheduled", job.Source)
+		require.Equal(t, "queued", job.Status)
+		selected = append(selected, job.AccountID)
+	}
+	require.ElementsMatch(t, expected, selected)
+	again, err := r.Enqueue(ctx, nil, false)
+	require.NoError(t, err)
+	require.Empty(t, again, "active periodic jobs must not be duplicated")
+	for range jobs {
+		job, err := r.Claim(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, job)
+		valid, err := r.Validate(ctx, job)
+		require.NoError(t, err)
+		require.True(t, valid, "scheduled OAuth and Engine snapshots must both validate")
+		job.Status = "abnormal"
+		require.NoError(t, r.Finish(ctx, job))
+	}
+	again, err = r.Enqueue(ctx, nil, false)
+	require.NoError(t, err)
+	require.Empty(t, again, "finished jobs retain the ten-minute interval")
+	_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_state SET next_due_at=NOW()-interval '1 second' WHERE account_id=$1`, engine.ID)
+	require.NoError(t, err)
+	jobs, err = r.Enqueue(ctx, nil, false)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	require.Equal(t, engine.ID, jobs[0].AccountID)
+	job, err := r.Claim(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, job)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,'{openai_api_key_mode}','"generic"') WHERE id=$1`, engine.ID)
+	require.NoError(t, err)
+	valid, err := r.Validate(ctx, job)
+	require.NoError(t, err)
+	require.False(t, valid, "switching back to generic invalidates scheduled Engine work")
+	job.Status = "passed"
+	require.NoError(t, r.Finish(ctx, job))
+	require.Equal(t, "stale", job.Result.Action)
 }
 
 func TestAttributionAPIKeyConfigurationFence(t *testing.T) {

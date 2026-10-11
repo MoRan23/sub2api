@@ -8,6 +8,8 @@
 
 开启全局“订阅优先”时，Codex-Engine 账号与 OpenAI OAuth 订阅账号共同进入首选调度池，按原有账号优先级和负载评分选择，不因 API Key 认证方式被放到普通 API Key 后备池。账号类型、认证和计费方式保持 API Key。
 
+配置并启用自动归因检测后，符合条件的 Codex-Engine 账号与 OpenAI OAuth 账号一样每 10 分钟检测一次，沿用全局／分组策略及连续两轮通过才升级的规则。停用、关闭调度、过期、影子账号及本地限流仍跳过自动检测；普通透传配置不影响专用模式。普通 API Key 账号仍仅手动检测；新 OAuth 账号首测及鹈鹕测试不扩展到 Engine。详见[降智检测](model-attribution.md)。
+
 JSON 正文保留工具、namespace、历史、密文及未知字段，仅按现有模型映射和速度策略修改必要字段。公开会话、线程、回合与工具关联头会保留；下游认证与 Engine 内部控制头不会转发。Engine 的 JSON/SSE 和业务错误原样返回，业务错误不会触发账号停用、兼容降级或跨账号重放。已有用量及图片结算流程继续使用上游实际返回的信息，不估造缺失 token。
 
 当 Engine 返回 HTTP 503、错误代码为 `deployment_maintenance` 或 `capacity_unavailable`，且上游响应头明确给出 `X-Codex-Engine-Unavailable-Scope: deployment` 时，当前 Sub2API 进程暂时跳过该接入账号，后续独立请求按现有分组权限选择其他可用账号。冷却采用 `Retry-After`（秒数或 HTTP 日期），限制在 1～30 秒，缺失或无效时为 5 秒；到期后重新允许调度，既有成功响应不会提前解除冷却。该状态不写入账号健康或管理员调度设置，不扩散到同地址的其他账号；多实例分别根据各自收到的响应生效。
