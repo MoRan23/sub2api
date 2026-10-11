@@ -121,6 +121,61 @@ func TestParseGroupApplicationReplyExtractsCorrelationAndPlainText(t *testing.T)
 	require.True(t, parsed.HasPlainText)
 }
 
+func TestParseGroupApplicationReplyRemovesOutlookHistoryWithoutBlankLine(t *testing.T) {
+	const phrase = "我已仔细阅读并同意该协议"
+	const zhHeaders = "发件人: Smile API DayBreak <admin@example.com>\n发送时间: 2026年10月11日 14:21\n收件人: Applicant <applicant@example.com>\n主题: 分组申请已批准"
+	const enHeaders = "From: Admin <admin@example.com>\nSent: Sunday, October 11, 2026 2:21 PM\nTo: Applicant <applicant@example.com>\nCc: Another <another@example.com>\nSubject: Application approved"
+	const twHeaders = "寄件者：Admin <admin@example.com>\n寄件日期：2026年10月11日 下午 02:21\n收件者：Applicant <applicant@example.com>\n主旨：分組申請已批准"
+	quote := "____________________________\n" + zhHeaders + "\n\nGROUP ACCESS / 分组申请\n请回复：" + phrase
+	for _, test := range []struct {
+		name, body, want string
+	}{
+		{name: "Chinese no blank line", body: phrase + "\n" + quote, want: phrase},
+		{name: "Chinese blank line", body: phrase + "\n\n" + quote, want: phrase},
+		{name: "blank after separator", body: phrase + "\n____________________________\n\n" + zhHeaders, want: phrase},
+		{name: "without separator", body: phrase + "\n" + zhHeaders, want: phrase},
+		{name: "English with cc", body: phrase + "\n____________________________\n" + enHeaders, want: phrase},
+		{name: "Traditional Chinese fullwidth colons", body: phrase + "\n" + twHeaders, want: phrase},
+		{name: "quoted confirmation only", body: quote, want: ""},
+		{name: "quoted confirmation after other reply", body: "不同意\n" + quote, want: "不同意"},
+		{name: "additional reply before quote", body: phrase + "\n请提高额度\n" + quote, want: phrase + "\n请提高额度"},
+		{name: "separator is not a quote", body: phrase + "\n____________________________\n请提高额度", want: phrase + "\n____________________________\n请提高额度"},
+		{name: "incomplete headers", body: phrase + "\nFrom: Admin\n请提高额度", want: phrase + "\nFrom: Admin\n请提高额度"},
+		{name: "extra body inside headers", body: phrase + "\nFrom: Admin\n请提高额度\nSent: today\nTo: Applicant\nSubject: approval", want: phrase + "\nFrom: Admin\n请提高额度\nSent: today\nTo: Applicant\nSubject: approval"},
+		{name: "empty header value", body: phrase + "\nFrom:\nSent: today\nTo: Applicant\nSubject: approval", want: phrase + "\nFrom:\nSent: today\nTo: Applicant\nSubject: approval"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			raw := "From: Applicant <applicant@example.com>\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + strings.ReplaceAll(test.body, "\n", "\r\n")
+			parsed, err := parseGroupApplicationReply([]byte(raw))
+			require.NoError(t, err)
+			require.True(t, parsed.HasPlainText)
+			require.Equal(t, test.want, parsed.Reply)
+			require.Equal(t, test.want, parsed.ReplyForValidation)
+		})
+	}
+}
+
+func TestParseGroupApplicationReplyUsesOutlookPlainTextAlternative(t *testing.T) {
+	raw := strings.Join([]string{
+		"From: Applicant <applicant@example.com>",
+		"MIME-Version: 1.0",
+		"Content-Type: multipart/alternative; boundary=reply-boundary",
+		"", "--reply-boundary",
+		"Content-Type: text/plain; charset=UTF-8",
+		"", "CONFIRM", "____________________________",
+		"From: Admin <admin@example.com>", "Sent: Sunday, October 11, 2026 2:21 PM",
+		"To: Applicant <applicant@example.com>", "Subject: Application approved",
+		"", "Quoted original message", "--reply-boundary",
+		"Content-Type: text/html; charset=UTF-8",
+		"", "<div>CONFIRM</div><hr><div>From: Admin</div><div>Quoted original message</div>",
+		"--reply-boundary--", "",
+	}, "\r\n")
+	parsed, err := parseGroupApplicationReply([]byte(raw))
+	require.NoError(t, err)
+	require.True(t, parsed.HasPlainText)
+	require.Equal(t, "CONFIRM", parsed.ReplyForValidation)
+}
+
 func TestParseGroupApplicationReplyMarksHTMLOnlyBodyUnsupported(t *testing.T) {
 	raw := strings.Join([]string{
 		"From: Applicant <applicant@example.com>",

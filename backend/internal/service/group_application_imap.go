@@ -1317,13 +1317,63 @@ func extractNewestGroupApplicationReply(value string) string {
 	value = strings.ReplaceAll(value, "\r\n", "\n")
 	lines := strings.Split(value, "\n")
 	kept := make([]string, 0, len(lines))
-	for _, line := range lines {
+	for index, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		lower := strings.ToLower(trimmed)
-		if strings.HasPrefix(trimmed, ">") || strings.HasPrefix(lower, "on ") && strings.HasSuffix(lower, " wrote:") || strings.Contains(trimmed, "写道：") || strings.EqualFold(trimmed, "-----Original Message-----") {
+		if strings.HasPrefix(trimmed, ">") || strings.HasPrefix(lower, "on ") && strings.HasSuffix(lower, " wrote:") || strings.Contains(trimmed, "写道：") || strings.EqualFold(trimmed, "-----Original Message-----") || groupApplicationOutlookQuoteStartsAt(lines, index) {
 			break
 		}
 		kept = append(kept, line)
 	}
 	return NormalizeGroupApplicationReply(strings.Join(kept, "\n"))
+}
+
+// Outlook's plain-text alternative does not always leave a blank line before
+// the quoted message. Require its complete header block so a separator or an
+// ordinary line beginning with "From:" cannot hide additional reply text.
+func groupApplicationOutlookQuoteStartsAt(lines []string, start int) bool {
+	line := strings.TrimSpace(lines[start])
+	if line == "" {
+		return false
+	}
+	if len(line) >= 5 && (strings.Trim(line, "_") == "" || strings.Trim(line, "-") == "") {
+		start++
+	}
+	stage := 0
+	for ; start < len(lines); start++ {
+		line = strings.TrimSpace(lines[start])
+		if line == "" {
+			continue
+		}
+		separator := strings.IndexAny(line, ":：")
+		if separator < 0 {
+			return false
+		}
+		name := strings.ToLower(strings.TrimSpace(line[:separator]))
+		value := strings.TrimLeft(line[separator:], ":： \t")
+		if value == "" {
+			return false
+		}
+		switch stage {
+		case 0:
+			if name != "from" && name != "发件人" && name != "寄件者" {
+				return false
+			}
+		case 1:
+			if name != "sent" && name != "发送时间" && name != "寄件日期" {
+				return false
+			}
+		case 2:
+			if name != "to" && name != "收件人" && name != "收件者" {
+				return false
+			}
+		case 3:
+			if name == "cc" || name == "抄送" || name == "副本" {
+				continue
+			}
+			return name == "subject" || name == "主题" || name == "主旨"
+		}
+		stage++
+	}
+	return false
 }
