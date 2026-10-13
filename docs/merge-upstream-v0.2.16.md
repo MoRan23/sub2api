@@ -49,8 +49,12 @@ conflicts are resolved by combining the upstream behavior and local contracts.
   lifecycle, group/API-key/settings repositories, moderation locking and Engine
   attribution. Cache round trips also verify that candidate metadata contains no
   secrets while Gemini accounts remain selectable.
-- Repository integration CI now runs independently of unit tests. Non-repository
-  integration coverage remains in the existing test job.
+- Repository integration CI is configured to run independently of unit tests.
+  Non-repository integration coverage remains in the existing test job.
+- After merge commit `351620d54` was pushed to `origin/dev`, GitHub's repository
+  Actions permissions reported `enabled: false`; no new CI/check run was created.
+  That repository setting was not changed. The database validation reported here
+  was actually executed in local isolated WSL containers, not inferred from CI.
 
 ## Existing test limitations
 
