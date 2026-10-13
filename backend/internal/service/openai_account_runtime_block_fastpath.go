@@ -177,7 +177,8 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	// Isolate a custom temporary-unschedulable match to the known upstream
 	// model before entering the generic account error path. This keeps the
 	// account available to other models and avoids the account runtime blocker.
-	if s.rateLimitService != nil && statusCode != http.StatusUnauthorized && len(canonicalModel) > 0 && strings.TrimSpace(canonicalModel[0]) != "" &&
+	if s.rateLimitService != nil && len(canonicalModel) > 0 && strings.TrimSpace(canonicalModel[0]) != "" &&
+		tempUnschedRulesApply(account, statusCode, responseBody, canonicalModel[0]) &&
 		s.rateLimitService.HandleTempUnschedulable(stateCtx, account, statusCode, responseBody, canonicalModel[0]) {
 		return true
 	}
@@ -192,7 +193,8 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 		return false
 	}
 	shouldDisable := s.rateLimitService.HandleUpstreamError(stateCtx, account, statusCode, headers, responseBody)
-	modelTempMatched := statusCode != http.StatusUnauthorized && tempUnschedulableModel(stateCtx, nil) != "" &&
+	tempModel := tempUnschedulableModel(stateCtx, nil)
+	modelTempMatched := tempModel != "" && tempUnschedRulesApply(account, statusCode, responseBody, tempModel) &&
 		len(matchTempUnschedulableRules(account, statusCode, responseBody)) > 0
 	// Versioned OAuth mutations notify the blocker only after the repository CAS
 	// succeeds. An unconditional duplicate here would bypass that protection if

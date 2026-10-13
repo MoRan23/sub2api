@@ -956,7 +956,9 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	}
 	// Candidate-list admission evaluates the account override before hydrating
 	// the full account. Dropping it silently falls back to the platform threshold.
-	keys := []string{"model_mapping", "compact_model_mapping", "project_id", "oauth_type", "plan_type", "auth_mode", "openai_auth_mode", "account_scheduling_threshold"}
+	keys := []string{"model_mapping", "compact_model_mapping", "project_id", "oauth_type", "plan_type", "auth_mode", "openai_auth_mode", "account_scheduling_threshold",
+		// Gemini 候选只读取非敏感能力配置；实际 API Key 在选号后加载完整账号再校验。
+		"base_url", service.GeminiExplicitCacheUpstreamCredentialKey, service.GeminiExplicitCacheUpstreamMaxTTLCredentialKey}
 	filtered := make(map[string]any)
 	for _, key := range keys {
 		if value, ok := credentials[key]; ok && value != nil {

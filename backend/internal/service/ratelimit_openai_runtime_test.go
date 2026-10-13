@@ -132,6 +132,42 @@ func TestOpenAIOAuthRuntimePoliciesRemainEffective(t *testing.T) {
 	}
 }
 
+func TestOpenAIOAuthRuntimeTempUnschedScopePreservesAuthorizationFence(t *testing.T) {
+	for _, scope := range []string{TempUnschedScopeAccount, TempUnschedScopeModel} {
+		for _, stale := range []bool{false, true} {
+			t.Run(scope+map[bool]string{false: "/current", true: "/stale"}[stale], func(t *testing.T) {
+				r := &openAIOAuthRuntimeChangeRecorder{openAIOSRuntimeRepo: newOpenAIOSRuntimeRepo()}
+				r.account.Credentials["temp_unschedulable_enabled"] = true
+				r.account.Credentials["temp_unschedulable_rules"] = []any{map[string]any{
+					"error_code": 503, "keywords": []any{"unavailable"}, "duration_minutes": 7, "scope": scope,
+				}}
+				snapshot, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), r, r.account, OpenAIOSLinux)
+				require.NoError(t, err)
+				if stale {
+					r.slots[OpenAIOSWindows].Revision++
+				}
+				s := NewRateLimitService(r, nil, nil, nil, nil)
+				require.Equal(t, ErrorPolicyTempUnscheduled, s.CheckErrorPolicy(context.Background(), snapshot, 503, []byte(`{"error":{"message":"unavailable"}}`), "gpt-test"))
+				if scope == TempUnschedScopeModel {
+					require.Equal(t, OpenAIOAuthAccountStateModelCooldown, r.change.Kind)
+					require.Equal(t, "gpt-test", r.change.ModelKey)
+					require.Nil(t, r.account.TempUnschedulableUntil)
+					require.Equal(t, !stale, hasNonEmptyMapValue(r.account.Extra, "model_rate_limits"))
+				} else {
+					require.Equal(t, OpenAIOAuthAccountStateCooldown, r.change.Kind)
+					require.False(t, hasNonEmptyMapValue(r.account.Extra, "model_rate_limits"))
+					if stale {
+						require.Nil(t, r.account.TempUnschedulableUntil)
+					} else {
+						require.WithinDuration(t, time.Now().Add(7*time.Minute), *r.account.TempUnschedulableUntil, time.Second)
+					}
+				}
+				require.Equal(t, StatusActive, r.account.Status)
+			})
+		}
+	}
+}
+
 func TestOpenAIOAuthRuntimeSuccessfulTestRestoresAccountAndRejectsLateResults(t *testing.T) {
 	for _, stale := range []bool{false, true} {
 		r := newOpenAIOSRuntimeRepo()

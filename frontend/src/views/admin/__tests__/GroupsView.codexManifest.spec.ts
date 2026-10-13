@@ -390,7 +390,7 @@ describe("GroupsView gateway settings", () => {
     await fireEvent.submit(view.container.querySelector("#edit-group-form")!);
     await waitFor(() => expect(updateGroup).toHaveBeenCalledTimes(1));
     if (simpleMode) {
-      expect(updateGroup).toHaveBeenCalledWith(42, { name: "OpenAI", description: "" });
+      expect(updateGroup).toHaveBeenCalledWith(42, { name: "OpenAI", description: "", i18n: {} });
     } else {
       expect(updateGroup).toHaveBeenCalledWith(42, expect.objectContaining({
         subscription_type: "total_quota",

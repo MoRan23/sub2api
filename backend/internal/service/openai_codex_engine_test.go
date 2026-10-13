@@ -47,6 +47,33 @@ func TestCodexEngineModeAndValidation(t *testing.T) {
 	require.False(t, a.AllowsOpenAICompact())
 }
 
+func TestCodexEngineChatInputRejectionNeverFallsBack(t *testing.T) {
+	const rejection = `{"error":{"code":"invalid_type","param":"input","message":"Expected a string, but got an array instead."}}`
+	body := []byte(`{"model":"alias","messages":[{"role":"user","content":"hi"}],"stream":false,"access_programs":{"cyber":"client-choice"},"unknown":9007199254740993123}`)
+	before := string(body)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusBadRequest,
+		Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(rejection))}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := engineAccount()
+	account.Extra["openai_responses_mode"] = "auto"
+	account.Extra["openai_responses_supported"] = true
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+	require.True(t, isCodexEngineResponseError(err))
+	require.Nil(t, result)
+	require.Len(t, upstream.requests, 1)
+	require.Equal(t, "/prefix/v1/chat/completions", upstream.lastReq.URL.Path)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, rejection, rec.Body.String())
+	require.Equal(t, "native", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, "9007199254740993123", gjson.GetBytes(upstream.lastBody, "unknown").Raw)
+	require.Equal(t, "client-choice", gjson.GetBytes(upstream.lastBody, "access_programs.cyber").String())
+	require.Equal(t, before, string(body))
+}
+
 func TestCodexEngineURL(t *testing.T) {
 	for _, base := range []string{"https://engine.example/prefix", "https://engine.example/prefix/", "https://engine.example/prefix/v1", "https://engine.example/prefix/v1/"} {
 		got, err := codexEngineURL(base, "/v1/responses/compact")
