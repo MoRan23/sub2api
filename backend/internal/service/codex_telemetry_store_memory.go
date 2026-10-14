@@ -406,6 +406,10 @@ func memoryCodexTelemetryCloneBatch(batch CodexTelemetryBatch) CodexTelemetryBat
 	return batch
 }
 
+// Replacer is safe for concurrent use; build its immutable lookup tables once
+// instead of allocating them for every key in every stored activity.
+var codexTelemetryStoredKeyReplacer = strings.NewReplacer("-", "", "_", "", ".", "")
+
 // ValidateCodexTelemetryStoredJSON guards the allowlisted summaries against an
 // accidental request/response or credential object being persisted. Callers
 // must still construct their DTOs explicitly, rather than filtering raw bodies.
@@ -443,7 +447,7 @@ func ValidateCodexTelemetryStoredJSON(data json.RawMessage) error {
 					return false
 				}
 				seen[key] = true
-				normalized := strings.ToLower(strings.NewReplacer("-", "", "_", "", ".", "").Replace(key))
+				normalized := strings.ToLower(codexTelemetryStoredKeyReplacer.Replace(key))
 				switch normalized {
 				case "accesstoken", "refreshtoken", "idtoken", "authorization", "credentials", "instructions", "messages", "proxyurl", "requestbody", "rawresponse", "apikey", "bearertoken":
 					return false

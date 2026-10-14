@@ -13,6 +13,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -52,7 +53,9 @@ func TestCodexTelemetryPostgresRuntimeThreeSystemsAcrossRestart(t *testing.T) {
 		"linux":   "codex_cli_rs/0.155.1 (Ubuntu 24.04; x86_64)",
 	} {
 		installation := uuid.NewString()
-		profiles[os] = service.OpenAIOAuthOSProfile{OSFamily: os, InstallationID: installation, UserAgent: ua}
+		syncSession, err := uuid.NewV7()
+		require.NoError(t, err)
+		profiles[os] = service.OpenAIOAuthOSProfile{OSFamily: os, InstallationID: installation, SyncSessionID: syncSession.String(), UserAgent: ua}
 		inputs[os] = service.CodexTelemetryInput{AccountID: owner, OwnerAccountID: owner, OSFamily: os,
 			CredentialOS: os, AuthorizationGeneration: "authorization-" + os,
 			InstallationID: installation, ManagedInstallation: true, AccessToken: "stale-request-token",
@@ -74,6 +77,7 @@ func TestCodexTelemetryPostgresRuntimeThreeSystemsAcrossRestart(t *testing.T) {
 		account := &service.Account{ID: owner, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive,
 			Credentials:           map[string]any{"access_token": token, "chatgpt_account_id": "integration-workspace"},
 			OpenAIOAuthOSProfiles: &service.OpenAIOAuthOSProfiles{DefaultOS: "windows", Profiles: profiles}}
+		require.True(t, service.OpenAIOAuthOSProfilesComplete(account.OpenAIOAuthOSProfiles), "runtime fixture must provide complete persisted OS identities")
 		slots := map[string]*service.OpenAIOAuthOSCredential{}
 		for os := range profiles {
 			slots[os] = &service.OpenAIOAuthOSCredential{OwnerAccountID: owner, OSFamily: os,
@@ -85,6 +89,13 @@ func TestCodexTelemetryPostgresRuntimeThreeSystemsAcrossRestart(t *testing.T) {
 		return runtime
 	}
 	first := newRuntime("latest-first-token")
+	t.Cleanup(func() {
+		if t.Failed() {
+			for _, observation := range first.Observations(service.CodexTelemetryObservationQuery{AccountID: owner}).Items {
+				t.Logf("telemetry observation type=%s status=%s reason=%s", observation.Type, observation.Status, observation.Error)
+			}
+		}
+	})
 	for _, input := range inputs {
 		attempt := first.Begin(context.Background(), input)
 		require.NotNil(t, attempt)
@@ -96,11 +107,11 @@ func TestCodexTelemetryPostgresRuntimeThreeSystemsAcrossRestart(t *testing.T) {
 		require.NoError(t, integrationDB.QueryRowContext(context.Background(), query, owner).Scan(&n))
 		return n
 	}
-	require.Eventually(t, func() bool {
-		return count(`SELECT count(*) FROM codex_telemetry_activities a JOIN codex_telemetry_pools p ON p.id=a.pool_id
-			WHERE p.owner_account_id=$1 AND a.kind='attempt' AND (a.state->>'finished')::boolean`) == 3 &&
-			count(`SELECT count(*) FROM codex_telemetry_batches b JOIN codex_telemetry_pools p ON p.id=b.pool_id
-			WHERE p.owner_account_id=$1 AND b.status='sent'`) == 3
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		assert.Equal(collect, 3, count(`SELECT count(*) FROM codex_telemetry_activities a JOIN codex_telemetry_pools p ON p.id=a.pool_id
+			WHERE p.owner_account_id=$1 AND a.kind='attempt' AND (a.state->>'finished')::boolean`), "finished attempts")
+		assert.Equal(collect, 3, count(`SELECT count(*) FROM codex_telemetry_batches b JOIN codex_telemetry_pools p ON p.id=b.pool_id
+			WHERE p.owner_account_id=$1 AND b.status='sent'`), "sent batches")
 	}, 8*time.Second, 20*time.Millisecond)
 	first.Stop()
 	require.Equal(t, 3, count(`SELECT count(*) FROM codex_telemetry_pools WHERE owner_account_id=$1`))

@@ -201,7 +201,7 @@ func (r *codexTelemetryStore) TransactPool(ctx context.Context, key service.Code
 	err = tx.QueryRowContext(ctx, `SELECT id FROM accounts WHERE id=$1 AND deleted_at IS NULL AND `+
 		openAIOAuthCredentialOwnerExpression("credentials")+` FOR SHARE`, key.OwnerAccountID).Scan(&owner)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, service.ErrCodexTelemetryInvalidState
+		return nil, service.ErrCodexTelemetryOwnerUnavailable
 	}
 	if err != nil {
 		return nil, err
@@ -247,9 +247,17 @@ func (r *codexTelemetryStore) TransactPool(ctx context.Context, key service.Code
 			return nil, err
 		}
 	}
+	var nextDue time.Time
+	for _, activity := range state.Activities {
+		if !activity.DueAt.IsZero() && (nextDue.IsZero() || activity.DueAt.Before(nextDue)) {
+			nextDue = activity.DueAt
+		}
+	}
+	// Keep the scheduling summary in the same transaction as activity changes.
+	// Pollers can then limit an indexed pool scan without aggregating all history.
 	result, err := tx.ExecContext(ctx, `UPDATE codex_telemetry_pools SET template_version=$2,
-		last_business_at=$3,version=version+1,updated_at=$4 WHERE id=$1::uuid AND version=$5`, pool.ID,
-		state.Pool.TemplateVersion, nullableCodexTelemetryTime(state.Pool.LastBusinessAt), now, pool.Version)
+		last_business_at=$3,version=version+1,updated_at=$4,next_due_at=$6 WHERE id=$1::uuid AND version=$5`, pool.ID,
+		state.Pool.TemplateVersion, nullableCodexTelemetryTime(state.Pool.LastBusinessAt), now, pool.Version, nullableCodexTelemetryTime(nextDue))
 	if err != nil {
 		return nil, err
 	}
@@ -305,11 +313,13 @@ func saveCodexTelemetryActivities(ctx context.Context, tx *sql.Tx, poolID string
 		if a.Kind == "" || len(a.Kind) > 64 || a.Key == "" || len(a.Key) > 512 || k != service.CodexTelemetryActivityMapKey(a.Kind, a.Key) {
 			return service.ErrCodexTelemetryInvalidState
 		}
+		if old, ok := previous[k]; ok && bytes.Equal(old.Data, a.Data) && old.DueAt.Equal(a.DueAt) {
+			// These exact bytes already passed the storage boundary. Revalidating
+			// every untouched historical row makes each tiny update scale with JSON size.
+			continue
+		}
 		if err := service.ValidateCodexTelemetryStoredJSON(a.Data); err != nil {
 			return err
-		}
-		if old, ok := previous[k]; ok && bytes.Equal(old.Data, a.Data) && old.DueAt.Equal(a.DueAt) {
-			continue
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO codex_telemetry_activities(pool_id,kind,activity_key,state,due_at,updated_at)
 			VALUES($1::uuid,$2,$3,$4::jsonb,$5,$6) ON CONFLICT(pool_id,kind,activity_key) DO UPDATE SET
@@ -383,13 +393,17 @@ func codexTelemetryLimit(limit int) int {
 	return limit
 }
 
+var codexTelemetryDuePoolsQuery = `SELECT p.owner_account_id,p.os_family,p.installation_id
+	FROM codex_telemetry_pools p WHERE p.next_due_at <= $1
+	AND EXISTS (SELECT 1 FROM accounts owner WHERE owner.id=p.owner_account_id AND owner.deleted_at IS NULL AND ` +
+	openAIOAuthCredentialOwnerExpression("owner.credentials") + `)
+	ORDER BY p.next_due_at,p.id LIMIT $2`
+
 func (r *codexTelemetryStore) ListDuePools(ctx context.Context, now time.Time, limit int) ([]service.CodexTelemetryPoolKey, error) {
 	if err := r.available(); err != nil {
 		return nil, err
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT p.owner_account_id,p.os_family,p.installation_id
-		FROM codex_telemetry_pools p JOIN codex_telemetry_activities a ON a.pool_id=p.id
-		WHERE a.due_at <= $1 GROUP BY p.id ORDER BY MIN(a.due_at),p.id LIMIT $2`, now, codexTelemetryLimit(limit))
+	rows, err := r.db.QueryContext(ctx, codexTelemetryDuePoolsQuery, now, codexTelemetryLimit(limit))
 	if err != nil {
 		return nil, err
 	}
@@ -457,6 +471,8 @@ func (r *codexTelemetryStore) ClaimBatches(ctx context.Context, now time.Time, l
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT `+codexTelemetryBatchColumns+` FROM codex_telemetry_batches b
 		JOIN codex_telemetry_pools p ON p.id=b.pool_id WHERE b.status='queued' AND b.policy_epoch=$1 AND b.not_before<=$2
+		AND EXISTS (SELECT 1 FROM accounts owner WHERE owner.id=p.owner_account_id AND owner.deleted_at IS NULL AND `+
+		openAIOAuthCredentialOwnerExpression("owner.credentials")+`)
 		AND NOT EXISTS (SELECT 1 FROM codex_telemetry_batches earlier WHERE earlier.pool_id=b.pool_id
 			AND earlier.sequence<b.sequence AND earlier.status IN ('queued','claimed','sending'))
 		ORDER BY b.sequence LIMIT $3 FOR UPDATE OF b SKIP LOCKED`, p.Epoch, now, codexTelemetryLimit(limit))
@@ -592,8 +608,54 @@ func (r *codexTelemetryStore) Maintain(ctx context.Context, now time.Time) error
 	if _, err := readCodexTelemetryPolicy(ctx, tx, " FOR SHARE"); err != nil {
 		return err
 	}
+	if err := cleanUnavailableCodexTelemetryPools(ctx, tx, 100); err != nil {
+		return fmt.Errorf("clean unavailable Codex telemetry pools: %w", err)
+	}
 	if err := maintainCodexTelemetryBatches(ctx, tx, now, true); err != nil {
 		return fmt.Errorf("maintain Codex telemetry batches: %w", err)
 	}
 	return tx.Commit()
+}
+
+// Soft deletion does not fire foreign-key cascades. Repair historical pools in
+// bounded batches, even with telemetry disabled. Lock owners before pools, as
+// producers and account deletion do, and never erase a concurrently re-enabled owner.
+func cleanUnavailableCodexTelemetryPools(ctx context.Context, tx *sql.Tx, limit int) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM accounts
+		WHERE NOT (deleted_at IS NULL AND `+openAIOAuthCredentialOwnerExpression("credentials")+`)
+		AND EXISTS (SELECT 1 FROM codex_telemetry_pools p WHERE p.owner_account_id=accounts.id)
+		ORDER BY id LIMIT $1 FOR SHARE SKIP LOCKED`, limit)
+	if err != nil {
+		return err
+	}
+	var owners []int64
+	for rows.Next() {
+		var owner int64
+		if err = rows.Scan(&owner); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		owners = append(owners, owner)
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, owner := range owners {
+		result, err := tx.ExecContext(ctx, `DELETE FROM codex_telemetry_pools WHERE id IN
+			(SELECT id FROM codex_telemetry_pools WHERE owner_account_id=$1 ORDER BY id LIMIT $2)`, owner, limit)
+		if err != nil {
+			return err
+		}
+		removed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		limit -= int(removed)
+		if limit <= 0 {
+			break
+		}
+	}
+	return nil
 }

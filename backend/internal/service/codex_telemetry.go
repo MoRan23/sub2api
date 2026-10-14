@@ -206,6 +206,9 @@ type CodexTelemetryService struct {
 	notifierCancel       context.CancelFunc
 	pollMu               sync.Mutex
 	lastPolicyRefresh    time.Time
+	lastRuntimeDueScan   time.Time
+	lastRuntimeErrorLog  time.Time
+	runtimeFailures      codexTelemetryRuntimeFailures
 	runtimeWake          chan struct{}
 }
 

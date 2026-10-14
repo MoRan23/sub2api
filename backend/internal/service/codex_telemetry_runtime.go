@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -52,6 +53,8 @@ type codexTelemetryRuntimeAttempt struct {
 
 const codexTelemetryBusinessLease = 90 * time.Second
 const codexTelemetryActivityRetention = 7 * 24 * time.Hour
+const codexTelemetryDueScanInterval = time.Second
+const codexTelemetryRuntimeLogInterval = 30 * time.Second
 
 var errCodexTelemetryRuntimeCapacity = errors.New("Codex telemetry runtime capacity reached")
 
@@ -670,8 +673,9 @@ func (s *CodexTelemetryService) pollPersistentRuntime(now time.Time) {
 		return
 	}
 	defer s.pollMu.Unlock()
+	defer s.reportRuntimeFailures(now)
 	s.mu.Lock()
-	store, enabled := s.store, s.enabledLocked()
+	store := s.store
 	refresh := s.lastPolicyRefresh.IsZero() || !now.Before(s.lastPolicyRefresh.Add(30*time.Second))
 	if refresh {
 		s.lastPolicyRefresh = now
@@ -690,21 +694,72 @@ func (s *CodexTelemetryService) pollPersistentRuntime(now time.Time) {
 	// override, however, must never mutate shared work owned by other nodes.
 	_, forcedOffReason := CodexTelemetryEffectiveState(true)
 	if refresh && forcedOffReason == "" {
-		_ = store.Maintain(ctx, now)
+		if err := store.Maintain(ctx, now); err != nil {
+			s.runtimeFailures.maintenance++
+		}
 	}
-	if !enabled || !s.Enabled() {
+	if ctx.Err() != nil || !s.Enabled() {
 		return
 	}
 	if refresh {
-		s.heartbeatRuntimeAttempts(ctx, store, now)
+		s.runtimeFailures.heartbeats += s.heartbeatRuntimeAttempts(ctx, store, now)
 	}
+	if ctx.Err() != nil {
+		return
+	}
+	// Business begin/end mutations wake batch dispatch immediately, but must not
+	// turn every request into another scan of the persistent maintenance queue.
+	if s.lastRuntimeDueScan.IsZero() || !now.Before(s.lastRuntimeDueScan.Add(codexTelemetryDueScanInterval)) {
+		s.lastRuntimeDueScan = now
+		s.maintainDueRuntimePools(ctx, store, now)
+	}
+	if ctx.Err() == nil {
+		s.dispatchPersistedBatches(ctx)
+	}
+}
+
+type codexTelemetryRuntimeFailures struct {
+	maintenance int
+	listing     int
+	pools       int
+	heartbeats  int
+}
+
+// Called under pollMu. Counts are bounded to one log per interval, and never
+// include database errors, activity JSON, account names, or credential data.
+func (s *CodexTelemetryService) reportRuntimeFailures(now time.Time) {
+	failures := s.runtimeFailures
+	if failures == (codexTelemetryRuntimeFailures{}) || (!s.lastRuntimeErrorLog.IsZero() && now.Before(s.lastRuntimeErrorLog.Add(codexTelemetryRuntimeLogInterval))) {
+		return
+	}
+	s.lastRuntimeErrorLog = now
+	s.runtimeFailures = codexTelemetryRuntimeFailures{}
+	slog.Warn("Codex telemetry maintenance encountered storage failures",
+		"maintenance_failures", failures.maintenance,
+		"due_scan_failures", failures.listing,
+		"pool_failures", failures.pools,
+		"heartbeat_failures", failures.heartbeats)
+}
+
+func codexTelemetryExpectedLifecycleError(err error) bool {
+	return errors.Is(err, ErrCodexTelemetryOwnerUnavailable) || errors.Is(err, ErrCodexTelemetryPolicyDisabled) || errors.Is(err, ErrCodexTelemetryPolicyChanged)
+}
+
+func (s *CodexTelemetryService) maintainDueRuntimePools(ctx context.Context, store CodexTelemetryStore, now time.Time) {
 	keys, err := store.ListDuePools(ctx, now, 100)
-	if err == nil {
-		for _, key := range keys {
-			_, _ = store.TransactPool(ctx, key, now, func(tx *CodexTelemetryPoolTransaction) error { return tickCodexTelemetryRuntime(tx, now) })
+	if err != nil {
+		s.runtimeFailures.listing++
+		return
+	}
+	for _, key := range keys {
+		if ctx.Err() != nil {
+			return
+		}
+		_, err := store.TransactPool(ctx, key, now, func(tx *CodexTelemetryPoolTransaction) error { return tickCodexTelemetryRuntime(tx, now) })
+		if err != nil && !codexTelemetryExpectedLifecycleError(err) {
+			s.runtimeFailures.pools++
 		}
 	}
-	s.dispatchPersistedBatches(ctx)
 }
 
 func tickCodexTelemetryRuntime(tx *CodexTelemetryPoolTransaction, now time.Time) error {
@@ -743,6 +798,13 @@ func tickCodexTelemetryRuntime(tx *CodexTelemetryPoolTransaction, now time.Time)
 			if err := putRuntimeActivity(tx, "turn", activity.Key, turn, now, next); err != nil {
 				return err
 			}
+		} else {
+			// A lease can expire before the turn becomes idle, for example after
+			// another attempt finishes. Persist the expired lease removal and move
+			// the maintenance deadline forward without inventing a terminal event.
+			if err := putRuntimeActivity(tx, "turn", activity.Key, turn, now, turn.LastSeen.Add(codexTelemetryStateTTL)); err != nil {
+				return err
+			}
 		}
 	}
 	if err := pruneCodexTelemetryRuntime(tx, now, 0); err != nil {
@@ -761,7 +823,7 @@ func tickCodexTelemetryRuntime(tx *CodexTelemetryPoolTransaction, now time.Time)
 	return saveRuntimeMetrics(tx, metrics, now)
 }
 
-func (s *CodexTelemetryService) heartbeatRuntimeAttempts(ctx context.Context, store CodexTelemetryStore, now time.Time) {
+func (s *CodexTelemetryService) heartbeatRuntimeAttempts(ctx context.Context, store CodexTelemetryStore, now time.Time) int {
 	s.mu.Lock()
 	groups := make(map[CodexTelemetryPoolKey][]string)
 	for _, a := range s.runtimeAttempts {
@@ -787,8 +849,12 @@ func (s *CodexTelemetryService) heartbeatRuntimeAttempts(ctx context.Context, st
 		groups[a.poolKey] = append(groups[a.poolKey], a.attemptID)
 	}
 	s.mu.Unlock()
+	failures := 0
 	for key, ids := range groups {
-		_, _ = store.TransactPool(ctx, key, now, func(tx *CodexTelemetryPoolTransaction) error {
+		if ctx.Err() != nil {
+			break
+		}
+		_, err := store.TransactPool(ctx, key, now, func(tx *CodexTelemetryPoolTransaction) error {
 			for _, id := range ids {
 				a, exists, err := runtimeActivity[codexTelemetryRuntimeAttempt](tx, "attempt", id)
 				if err != nil {
@@ -818,7 +884,11 @@ func (s *CodexTelemetryService) heartbeatRuntimeAttempts(ctx context.Context, st
 			}
 			return nil
 		})
+		if err != nil && !codexTelemetryExpectedLifecycleError(err) {
+			failures++
+		}
 	}
+	return failures
 }
 
 func syncCodexTelemetryRuntimeEpoch(tx *CodexTelemetryPoolTransaction, now time.Time) error {
@@ -874,50 +944,35 @@ func pruneCodexTelemetryRuntime(tx *CodexTelemetryPoolTransaction, now time.Time
 		key     string
 		updated time.Time
 	}
-	var removable []candidate
 	count := 0
 	for key, activity := range tx.Activities {
-		completed := false
-		switch activity.Kind {
-		case "sampling":
-			count++
-			completed = true
-		case "attempt":
-			count++
-			var a codexTelemetryRuntimeAttempt
-			if err := json.Unmarshal(activity.Data, &a); err != nil {
-				return ErrCodexTelemetryInvalidState
-			}
-			completed = a.Finished
-			if !completed {
-				turn, exists, err := runtimeActivity[codexTelemetryRuntimeTurn](tx, "turn", a.TurnKey)
-				if err != nil {
-					return err
-				}
-				completed = !exists || turn.Incomplete || turn.Sealed
-			}
-		case "turn":
-			count++
-			var turn codexTelemetryRuntimeTurn
-			if err := json.Unmarshal(activity.Data, &turn); err != nil {
-				return ErrCodexTelemetryInvalidState
-			}
-			completed = turn.Sealed || turn.Incomplete
-			if !completed {
-				count += len(turn.Inflight)
-			}
-		default:
-			continue
+		weight, completed, err := codexTelemetryRuntimeActivityOccupancy(tx, activity)
+		if err != nil {
+			return err
 		}
+		count += weight
 		if !completed {
 			continue
 		}
 		if !activity.UpdatedAt.Add(codexTelemetryActivityRetention).After(now) {
 			delete(tx.Activities, key)
-			count--
-			continue
+			count -= weight
 		}
-		removable = append(removable, candidate{key: key, updated: activity.UpdatedAt})
+	}
+	if count+reserve <= codexTelemetryMaxStates {
+		return nil
+	}
+	// Most pools only need the retention pass. Build and sort eviction candidates
+	// only when capacity actually requires eviction, not for every business event.
+	var removable []candidate
+	for key, activity := range tx.Activities {
+		_, completed, err := codexTelemetryRuntimeActivityOccupancy(tx, activity)
+		if err != nil {
+			return err
+		}
+		if completed {
+			removable = append(removable, candidate{key: key, updated: activity.UpdatedAt})
+		}
 	}
 	sort.Slice(removable, func(i, j int) bool {
 		if removable[i].updated.Equal(removable[j].updated) {
@@ -936,4 +991,32 @@ func pruneCodexTelemetryRuntime(tx *CodexTelemetryPoolTransaction, now time.Time
 		return errCodexTelemetryRuntimeCapacity
 	}
 	return nil
+}
+
+func codexTelemetryRuntimeActivityOccupancy(tx *CodexTelemetryPoolTransaction, activity CodexTelemetryActivity) (int, bool, error) {
+	switch activity.Kind {
+	case "sampling":
+		return 1, true, nil
+	case "attempt":
+		var attempt codexTelemetryRuntimeAttempt
+		if err := json.Unmarshal(activity.Data, &attempt); err != nil {
+			return 0, false, ErrCodexTelemetryInvalidState
+		}
+		if attempt.Finished {
+			return 1, true, nil
+		}
+		turn, exists, err := runtimeActivity[codexTelemetryRuntimeTurn](tx, "turn", attempt.TurnKey)
+		return 1, !exists || turn.Incomplete || turn.Sealed, err
+	case "turn":
+		var turn codexTelemetryRuntimeTurn
+		if err := json.Unmarshal(activity.Data, &turn); err != nil {
+			return 0, false, ErrCodexTelemetryInvalidState
+		}
+		if turn.Sealed || turn.Incomplete {
+			return 1, true, nil
+		}
+		return 1 + len(turn.Inflight), false, nil
+	default:
+		return 0, false, nil
+	}
 }

@@ -8,9 +8,10 @@ import (
 )
 
 var (
-	ErrCodexTelemetryPolicyDisabled = errors.New("Codex telemetry policy disabled")
-	ErrCodexTelemetryPolicyChanged  = errors.New("Codex telemetry policy changed")
-	ErrCodexTelemetryInvalidState   = errors.New("invalid Codex telemetry state")
+	ErrCodexTelemetryPolicyDisabled   = errors.New("codex telemetry policy disabled")
+	ErrCodexTelemetryPolicyChanged    = errors.New("codex telemetry policy changed")
+	ErrCodexTelemetryInvalidState     = errors.New("invalid Codex telemetry state")
+	ErrCodexTelemetryOwnerUnavailable = errors.New("codex telemetry owner unavailable")
 )
 
 // CodexTelemetryPolicy is the shared publication fence. A node's environment

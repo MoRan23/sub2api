@@ -1,5 +1,47 @@
 # 三系统遥测验证记录
 
+## 失效池退出与维护热点修复（2026-10-14）
+
+基线为 `dev@3fb0fcd7c`。删除账号在同一事务内清理其遥测池；历史遗留的
+已删除或认证类型已改变的所有者先从到期扫描、批次领取中排除，再分批清理。
+迁移 271 一次性回填池级到期时间，并增加全量批次关联索引。日常扫描不再
+聚合历史活动；业务唤醒仍可立即派发批次，到期扫描限为每实例每秒一次。
+
+隔离 PostgreSQL／Redis 用例覆盖：101 个失效池不阻塞健康池、关闭遥测时
+分批清理、账号删除与级联回滚、并发写入不复活、认证资格变化、活动与到期
+汇总原子提交、重复迁移、终态批次索引，以及原地修改历史 JSON 仍须校验。
+查询计划断言确认日常到期查询不再访问活动表。
+
+服务用例覆盖高频通知合并、超时立即停止后续维护、并发删除、错误日志脱敏
+与限频、租约到期后的空闲截止时间前移，以及历史保留与容量保护。三系统
+重启测试补齐当前授权校验要求的 UUIDv7 `SyncSessionID`，保持精确批次数
+及重启断言；指标测试辅助函数显式推进维护，不依赖限频窗口内再次扫描。
+
+同一台开发机上的局部基准前后对比：
+
+| 步骤与样本 | 原耗时 | 修复后 | 每次分配字节（原 → 后） |
+| --- | --- | --- | --- |
+| JSON 校验，约 27 KB 嵌套指标 | 3.413 ms | 0.224 ms | 9,587,778 → 80,727 |
+| 未达容量的 3000 条已完成记录维护 | 194.6 µs | 44.3 µs | 368,289 → 0 |
+
+JSON 键校验复用只读替换器；未变更历史不重复运行存储边界校验；未超容量时
+不构造、排序淘汰列表。凭据字段、重复键和原地修改检查均保留。仍存在整池
+加载与快照复制，这些局部数据不能推算为整机 CPU／内存降幅，也不解决宿主机
+CPU steal。测试仅使用模拟发送端，没有真实模型、官方遥测或生产部署。
+
+以下检查通过（Go 1.27.2，`GOEXPERIMENT=jsonv2`）：
+
+```sh
+go test ./internal/service ./internal/handler/admin -run 'Test.*CodexTelemetry' -count=1 -timeout=180s
+go test -race ./internal/service -run 'Test.*CodexTelemetry' -count=1 -timeout=180s
+CI=1 go test -tags=integration ./internal/repository -run 'TestCodexTelemetry|TestMigration241CodexTelemetry|TestAccountDelete.*Telemetry' -count=1 -timeout=240s
+go build ./...
+golangci-lint run --new-from-rev=HEAD ./internal/service/... ./internal/repository/...
+```
+
+数据库与竞态检查在 WSL Linux 执行；数据库使用测试临时容器，未连接生产。
+本轮没有前端改动。
+
 ## Codex 0.162 观测缺口修复（2026-10-07）
 
 基线为合并后的 `dev@7d758e332`。本轮补齐窗口元数据解析、最终出站

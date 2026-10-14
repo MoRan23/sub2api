@@ -119,7 +119,12 @@ func telemetryFlushMetrics(t *testing.T, s *CodexTelemetryService) {
 		})
 		require.NoError(t, err)
 	}
-	s.flushMetrics(now)
+	// The helper advances the persisted collection window, not the scheduler's
+	// wall clock. Run due maintenance explicitly: a normal poll in the same
+	// second is intentionally coalesced by the production scan throttle.
+	s.pollMu.Lock()
+	s.maintainDueRuntimePools(context.Background(), store, now)
+	s.pollMu.Unlock()
 	telemetryWaitDrained(t, s)
 }
 

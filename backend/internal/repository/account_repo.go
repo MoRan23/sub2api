@@ -1072,6 +1072,13 @@ func (r *accountRepository) Delete(ctx context.Context, id int64) error {
 	if _, err := txClient.Account.Delete().Where(dbaccount.IDEQ(id)).Exec(ctx); err != nil {
 		return err
 	}
+	// Accounts are soft-deleted, so their telemetry foreign keys do not cascade.
+	// Remove owned pools in this transaction; their activities and batches cascade.
+	// The account update above also preserves the account-before-pool lock order
+	// used by telemetry writers, preventing a concurrent writer from recreating a pool.
+	if _, err := txClient.ExecContext(ctx, "DELETE FROM codex_telemetry_pools WHERE owner_account_id = $1", id); err != nil {
+		return err
+	}
 
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
