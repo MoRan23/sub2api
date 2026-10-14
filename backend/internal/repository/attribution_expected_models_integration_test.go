@@ -98,7 +98,7 @@ func TestAttributionExpectedModelsConsecutivePassesAndFence(t *testing.T) {
 	require.NoError(t, err)
 	old.Status = "passed"
 	require.NoError(t, r.Finish(ctx, old))
-	require.Equal(t, "stale", old.Result.Action)
+	require.Equal(t, "stale_policy", old.Result.Action)
 	require.Equal(t, []string{"first", "second"}, old.Snapshot.Policy.ExpectedModels)
 	require.Equal(t, "awaiting_confirmation", run("third", nil).Result.Action)
 	// Current configuration must never be used to interpret old history.

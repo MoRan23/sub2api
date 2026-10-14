@@ -10,12 +10,12 @@ export const attributionZh = {
   groupTitle: '分组配置', addGroup: '添加分组配置', inherit: '继承全局配置', independent: '启用独立配置', remove: '移除', group: '分组', version: '配置版本',
   groupHelp: '多分组账户先按优先级选定分组：该组启用独立配置时使用组内配置，否则使用全局默认配置。',
   priority: { title: '分组优先级', help: '从上到下优先级递减，统一决定多分组账号使用哪组高级、低级模型白名单。未列出的分组排在后面，按账户分组优先级及分组 ID 排序；继承全局的分组也参与选择，选中时使用全局配置。', add: '加入排序', up: '上移', down: '下移' },
-  retries: '自动重试次数',
-  notice: 'OpenAI OAuth 账户及 Codex-Engine 模式的 API Key 账户每 10 分钟自动检测；普通 API Key 账户仅手动检测。每轮 3 条探针，不同账户同时检测。连续通过两次才应用高级白名单，不通过立即降级。失败、异常或跳过会打断连续通过，但不修改白名单。临时上游错误最多重试 2 次，总时限 10 分钟；检测及重试会消耗上游额度。',
+  retries: '累计重试次数', completedProbes: '已完成探针', probeProgress: '已完成 {count} / 3 条探针', retryCount: '重试 {count} 次', nextAttempt: '下次尝试', cancel: '取消检测', cancelling: '取消中…',
+  notice: 'OpenAI OAuth 账户及 Codex-Engine 模式的 API Key 账户每 10 分钟自动检测；普通 API Key 账户仅手动检测。每轮 3 条探针，不同账户同时检测。连续通过两次才应用高级白名单，不通过立即降级。失败、异常、跳过或取消会打断连续通过，但不修改白名单。明确 503 持续重试，等待状态支持重启恢复；429 保持跳过逻辑。其他临时错误最多重试 2 次，非 503 执行及普通重试总预算 10 分钟。检测及重试会消耗上游额度。',
   passStreak: '连续通过次数',
   manualOnly: '仅手动',
   manualModelDefault: '跟随各账号的检测配置',
-  manualHelp: '可选择候选模型或输入模型 ID，仅用于本次测试，不修改自动检测模型。手动测试不受自动检测开关、账号状态、调度开关、过期或本地限流标记限制；有效结果仍按已配置的高低级白名单处理，未配置名单时仅记录结果。',
+  manualHelp: '可选择候选模型或输入模型 ID，仅用于本次测试，不修改自动检测模型。手动测试不受自动检测开关、账号状态、调度开关、过期或本地限流标记限制。任务开始后，切换调度、启停或换组不中断检测；结束时策略不兼容或管理员已修改映射，则只记录判定，不覆盖白名单。',
   modelsUnavailable: '候选模型读取失败，仍可输入模型 ID 发起测试。',
   invalidManualModel: '请输入具体模型 ID，不含空格或通配符。',
   mappingHelp: '仅替换同名白名单条目，保留自定义别名与通配符映射。启用前请填好服务地址及两份非空白名单。',
@@ -28,13 +28,13 @@ export const attributionZh = {
   },
   initial: '新账号首测',
   invalid: '请填写有效服务地址、探针模型及两份非空白名单（具体模型 ID，不含通配符）。', conflict: '配置已被其他管理员更新，请重新加载后再保存。',
-  overview: '运行概况与历史', queuedCount: '启动中 {count}', runningCount: '运行 {count}', total: '保留记录 {count}', refresh: '刷新',
+  overview: '运行概况与历史', queuedCount: '启动中 {count}', runningCount: '运行 {count}', waitingCount: '等待重试 {count}', total: '保留记录 {count}', refresh: '刷新',
   never: '未检测', latest: '最近结果', run: '立即测试', bulk: '批量归因测试', history: '检测历史', details: '检测详情', account: '账户', time: '检测时间', probability: '参考库内置信度', top: '最高置信度模型',
   selected: '已选择 {count} 个账户', created: '已开始检测；已有任务的账户不会重复测试。', next: '下一页', previous: '上一页', empty: '暂无检测记录',
   duration: '耗时', usage: '用量（输入 / 输出 tokens）', action: '白名单处理', changes: '模型映射变化', before: '变更前', after: '变更后', source: '来源', scheduled: '自动', manual: '手动',
   diagnostics: '探针有效性', evidence: '实际出站 / 上游声明模型', reason: '原因', allGroups: '全局默认', close: '关闭', loading: '加载中…', error: '操作失败，请重试。',
-  status: { queued: '启动中', running: '检测中', passed: '通过', mismatch: '不通过', abnormal: '异常', failed: '执行失败', skipped: '已跳过' },
-  actions: { high: '已应用高级白名单', low: '已应用低级白名单', awaiting_confirmation: '已通过 1 次，等待再次通过；白名单未修改', unchanged: '无需修改', stale: '结果已过期，未修改', none: '未修改', unconfigured: '未配置高低级白名单，仅记录结果' },
+  status: { queued: '启动中', running: '检测中', retry_wait: '等待重试', cancelled: '已取消', passed: '通过', mismatch: '不通过', abnormal: '异常', failed: '执行失败', skipped: '已跳过' },
+  actions: { high: '已应用高级白名单', low: '已应用低级白名单', awaiting_confirmation: '已通过 1 次，等待再次通过；白名单未修改', unchanged: '无需修改', stale: '结果已过期，未修改', stale_policy: '策略已变，判定已保存；未更新白名单或累计升级', none: '未修改', unconfigured: '未配置高低级白名单，仅记录结果' },
   reasons: {
     service_unconfigured: '请先配置并验证 LM Fingerpoint Detector 服务',
     expected_model_not_enrolled: '参考库尚未收录全部期望模型',
@@ -42,8 +42,8 @@ export const attributionZh = {
     account_rate_limited: '账户或测试模型当前被限流，已跳过测试',
     disabled: '检测未启用', unsupported_account: '仅支持 OpenAI OAuth 或 API Key 账户', shadow_account: '共享凭据的影子账户', passthrough_account: '自动透传账户', account_inactive: '账户已停用', scheduling_disabled: '账户关闭调度', account_expired: '账户已过期', account_missing: '账户已删除或不存在',
     model_not_enrolled: '参考库尚未收录探针模型', modeltrace_unavailable: 'ModelTrace 服务不可用', modeltrace_failed: 'ModelTrace 请求失败', modeltrace_response_invalid: 'ModelTrace 返回格式无效', modeltrace_bank_invalid: '候选模型库无效', modeltrace_challenges_invalid: '需要三条独立且有效的探针',
-    insufficient_valid_outputs: '三份回答未全部有效', modeltrace_probabilities_invalid: '归因概率无效', ambiguous_prediction: '最高概率并列', configuration_or_authorization_changed: '配置、分组、授权或模型限制已变化', configuration_unavailable: '配置读取失败',
-    timeout: '检测超过 10 分钟', interrupted: '检测中断，未重放请求', probe_failed: '探针执行失败', probe_model_changed: '实际出站模型与探针不一致', internal_error: '检测内部错误', authorization_changed: '账户授权已变化', upstream_error: '上游请求失败', incomplete_response: '上游流未完成', response_too_large: '上游输出超过限制'
+    insufficient_valid_outputs: '三份回答未全部有效', modeltrace_probabilities_invalid: '归因概率无效', ambiguous_prediction: '最高概率并列', configuration_or_authorization_changed: '检测配置或上游授权已变化', configuration_unavailable: '配置读取失败', checkpoint_invalid: '恢复进度无效，已停止检测且不重放请求', checkpoint_failed: '检测进度保存失败，已停止执行且不重放请求',
+    timeout: '非 503 执行及普通重试预算已用尽（10 分钟）', interrupted: '检测中断，未重放请求', cancelled: '管理员已取消检测，白名单未修改', policy_changed: '当前策略或模型映射已变化，本轮仅保存实际判定', upstream_503: '上游返回 503，保留成功探针并等待重试', probe_failed: '探针执行失败', probe_model_changed: '实际出站模型与探针不一致', internal_error: '检测内部错误', authorization_changed: '账户授权已变化', upstream_error: '上游请求失败', incomplete_response: '上游流未完成', response_too_large: '上游输出超过限制'
   }
 }
 export const attributionEn = {
@@ -58,12 +58,12 @@ export const attributionEn = {
   groupTitle: 'Group configuration', addGroup: 'Add group configuration', inherit: 'Inherit global configuration', independent: 'Enable independent configuration', remove: 'Remove', group: 'Group', version: 'Configuration version',
   groupHelp: 'Select the highest-priority group first. Use its independent policy if enabled; otherwise use the global defaults.',
   priority: { title: 'Group priority', help: 'Higher entries win when an account belongs to multiple groups. Unlisted groups follow account-group priority, then group ID. Groups inheriting global settings also participate and use global settings when selected.', add: 'Add to order', up: 'Move up', down: 'Move down' },
-  retries: 'Automatic retries',
-  notice: 'OpenAI OAuth accounts and API Key accounts in Codex-Engine mode are checked every 10 minutes; other API Key accounts are tested manually only. Three probes per account; accounts run concurrently. Two consecutive passes apply the high-tier allowlist; a mismatch immediately downgrades it. Failed, abnormal or skipped tests break the pass streak without changing allowlists. Transient upstream errors retry up to twice within ten minutes. Probes and retries consume upstream quota.',
+  retries: 'Total retries', completedProbes: 'Completed probes', probeProgress: '{count} / 3 probes completed', retryCount: '{count} retries', nextAttempt: 'Next attempt', cancel: 'Cancel test', cancelling: 'Cancelling…',
+  notice: 'OpenAI OAuth accounts and API Key accounts in Codex-Engine mode are checked every 10 minutes; other API Key accounts are tested manually only. Three probes per account; accounts run concurrently. Two consecutive passes apply the high-tier allowlist; a mismatch immediately downgrades it. Failed, abnormal, skipped or cancelled tests break the pass streak without changing allowlists. Explicit 503 errors retry until success; waiting tasks resume after restart. 429 still skips the test. Other transient errors retry up to twice, with a ten-minute budget for non-503 execution and ordinary retry waits. Probes and retries consume upstream quota.',
   passStreak: 'Consecutive passes',
   manualOnly: 'Manual only',
   manualModelDefault: 'Use each account’s detection configuration',
-  manualHelp: 'Choose a candidate or enter a model ID for this test only. Automatic model settings stay unchanged. Manual tests ignore automatic detection, account status, scheduling, expiry and local rate-limit flags. Valid results still apply configured allowlists; without both lists, only the result is recorded.',
+  manualHelp: 'Choose a candidate or enter a model ID for this test only. Automatic model settings stay unchanged. Manual tests ignore automatic detection, account status, scheduling, expiry and local rate-limit flags. Once started, scheduling, account status and group changes do not interrupt the test. If the effective policy is incompatible or an administrator changed model mappings, the verdict is recorded without overwriting allowlists.',
   modelsUnavailable: 'Could not load candidates. You can still enter a model ID and start a test.',
   invalidManualModel: 'Enter a concrete model ID without whitespace or wildcards.',
   mappingHelp: 'Replace identity allowlist entries only; preserve custom aliases and wildcard mappings. Configure the service and both nonempty allowlists before enabling.',
@@ -76,13 +76,13 @@ export const attributionEn = {
   },
   initial: 'New account',
   invalid: 'Enter a valid service URL, probe model and two nonempty allowlists (concrete model IDs, without wildcards).', conflict: 'Another administrator updated the configuration. Reload before saving.',
-  overview: 'Activity and history', queuedCount: '{count} starting', runningCount: '{count} running', total: '{count} retained records', refresh: 'Refresh',
+  overview: 'Activity and history', queuedCount: '{count} starting', runningCount: '{count} running', waitingCount: '{count} waiting to retry', total: '{count} retained records', refresh: 'Refresh',
   never: 'Not tested', latest: 'Latest result', run: 'Test now', bulk: 'Batch attribution test', history: 'Detection history', details: 'Detection details', account: 'Account', time: 'Detection time', probability: 'Reference-bank confidence', top: 'Highest-confidence model',
   selected: '{count} accounts selected', created: 'Tests started. Accounts with existing tasks are not tested again.', next: 'Next', previous: 'Previous', empty: 'No detection records',
   duration: 'Duration', usage: 'Usage (input / output tokens)', action: 'Allowlist action', changes: 'Model mapping changes', before: 'Before', after: 'After', source: 'Source', scheduled: 'Automatic', manual: 'Manual',
   diagnostics: 'Probe validity', evidence: 'Outbound / upstream model', reason: 'Reason', allGroups: 'Global default', close: 'Close', loading: 'Loading…', error: 'Operation failed. Please retry.',
-  status: { queued: 'Starting', running: 'Running', passed: 'Passed', mismatch: 'Mismatch', abnormal: 'Abnormal', failed: 'Failed', skipped: 'Skipped' },
-  actions: { high: 'High-tier allowlist applied', low: 'Low-tier allowlist applied', awaiting_confirmation: 'Passed once; awaiting another pass. Allowlist unchanged', unchanged: 'No change needed', stale: 'Stale result, no changes', none: 'Unchanged', unconfigured: 'Allowlists not configured; result recorded only' },
+  status: { queued: 'Starting', running: 'Running', retry_wait: 'Waiting to retry', cancelled: 'Cancelled', passed: 'Passed', mismatch: 'Mismatch', abnormal: 'Abnormal', failed: 'Failed', skipped: 'Skipped' },
+  actions: { high: 'High-tier allowlist applied', low: 'Low-tier allowlist applied', awaiting_confirmation: 'Passed once; awaiting another pass. Allowlist unchanged', unchanged: 'No change needed', stale: 'Stale result, no changes', stale_policy: 'Policy changed; verdict recorded without updating allowlists or promotion streak', none: 'Unchanged', unconfigured: 'Allowlists not configured; result recorded only' },
   reasons: {
     service_unconfigured: 'Configure and verify LM Fingerpoint Detector first',
     expected_model_not_enrolled: 'Not all expected models are enrolled in the reference bank',
@@ -90,7 +90,7 @@ export const attributionEn = {
     account_rate_limited: 'Account or probe model is rate limited; test skipped',
     disabled: 'Detection disabled', unsupported_account: 'Only OpenAI OAuth or API Key accounts are supported', shadow_account: 'Shadow account with shared credentials', passthrough_account: 'Automatic passthrough account', account_inactive: 'Account inactive', scheduling_disabled: 'Scheduling disabled', account_expired: 'Account expired', account_missing: 'Account deleted or missing',
     model_not_enrolled: 'Probe model not enrolled in the reference bank', modeltrace_unavailable: 'ModelTrace unavailable', modeltrace_failed: 'ModelTrace request failed', modeltrace_response_invalid: 'Invalid ModelTrace response', modeltrace_bank_invalid: 'Invalid candidate bank', modeltrace_challenges_invalid: 'Three independent valid probes required',
-    insufficient_valid_outputs: 'Not all three answers were valid', modeltrace_probabilities_invalid: 'Invalid attribution probabilities', ambiguous_prediction: 'Highest probability tied', configuration_or_authorization_changed: 'Configuration, groups, authorization or model restrictions changed', configuration_unavailable: 'Configuration unavailable',
-    timeout: 'Detection exceeded 10 minutes', interrupted: 'Interrupted; inference was not replayed', probe_failed: 'Probe execution failed', probe_model_changed: 'Outbound model differs from probe', internal_error: 'Internal detection error', authorization_changed: 'Account authorization changed', upstream_error: 'Upstream request failed', incomplete_response: 'Incomplete upstream stream', response_too_large: 'Upstream output limit exceeded'
+    insufficient_valid_outputs: 'Not all three answers were valid', modeltrace_probabilities_invalid: 'Invalid attribution probabilities', ambiguous_prediction: 'Highest probability tied', configuration_or_authorization_changed: 'Detection configuration or upstream authorization changed', configuration_unavailable: 'Configuration unavailable', checkpoint_invalid: 'Invalid saved progress; test stopped without replaying requests', checkpoint_failed: 'Could not save progress; execution stopped without replaying requests',
+    timeout: 'Ten-minute budget for non-503 execution and ordinary retries exhausted', interrupted: 'Interrupted; inference was not replayed', cancelled: 'Cancelled by an administrator; allowlist unchanged', policy_changed: 'Effective policy or model mappings changed; this round’s verdict was recorded only', upstream_503: 'Upstream returned 503; successful probes retained while waiting to retry', probe_failed: 'Probe execution failed', probe_model_changed: 'Outbound model differs from probe', internal_error: 'Internal detection error', authorization_changed: 'Account authorization changed', upstream_error: 'Upstream request failed', incomplete_response: 'Incomplete upstream stream', response_too_large: 'Upstream output limit exceeded'
   }
 }

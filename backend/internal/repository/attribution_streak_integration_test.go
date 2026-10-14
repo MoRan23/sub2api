@@ -93,7 +93,10 @@ func TestAttributionConsecutivePassRecoveryBreaksStreak(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, queued.ID, j.ID)
 				if reason == "timeout" {
-					_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_jobs SET started_at=NOW()-interval '11 minutes' WHERE id=$1`, j.ID)
+					// The worker owns the non-503 budget; repository lease recovery
+					// must not reinterpret elapsed wall time as an execution timeout.
+					j.Status, j.Reason = "failed", "timeout"
+					err = r.Finish(ctx, j)
 				} else {
 					_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_jobs SET lease_until=NOW()-interval '1 second' WHERE id=$1`, j.ID)
 				}

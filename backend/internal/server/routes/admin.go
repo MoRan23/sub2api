@@ -392,6 +392,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 	attribution.POST("/jobs", h.Admin.Account.CreateAttributionJobs)
 	attribution.GET("/jobs", h.Admin.Account.ListAttributionJobs)
 	attribution.GET("/jobs/:id", h.Admin.Account.GetAttributionJob)
+	attribution.POST("/jobs/:id/cancel", h.Admin.Account.CancelAttributionJob)
 	accounts := admin.Group("/accounts")
 	{
 		accounts.GET("", h.Admin.Account.List)

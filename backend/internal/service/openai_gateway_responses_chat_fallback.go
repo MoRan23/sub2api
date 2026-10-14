@@ -131,7 +131,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 
 	if resp.StatusCode >= 400 {
 		if isOpenAICandyTest(ctx) {
-			return nil, candyTestError(fmt.Sprintf("upstream_http_%d", resp.StatusCode))
+			return nil, candyTestHTTPError(ctx, resp)
 		}
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
 		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {

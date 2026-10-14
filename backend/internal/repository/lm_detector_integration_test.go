@@ -77,10 +77,10 @@ func TestAttributionDetectorVersionFenceAndStreak(t *testing.T) {
 	require.NoError(t, err)
 	valid, err := r.Validate(ctx, old)
 	require.NoError(t, err)
-	require.False(t, valid)
+	require.True(t, valid, "execution validation only checks upstream authorization; detector checks remain at the analyzer boundary")
 	old.Status = "passed"
 	require.NoError(t, r.Finish(ctx, old))
-	require.Equal(t, "stale", old.Result.Action)
+	require.Equal(t, "stale_policy", old.Result.Action)
 	require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
 	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
 	require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)

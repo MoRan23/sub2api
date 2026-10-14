@@ -1,6 +1,6 @@
 <template>
   <article class="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-dark-600" data-testid="attribution-result">
-    <div class="flex items-center justify-between gap-3"><h3 class="font-medium">{{ job.account_name }} · #{{ job.id }}</h3><span class="font-medium">{{ t(`attribution.status.${job.status}`) }}</span></div>
+    <div class="flex flex-wrap items-center justify-between gap-3"><h3 class="font-medium">{{ job.account_name }} · #{{ job.id }}</h3><div class="flex items-center gap-3"><span class="font-medium">{{ t(`attribution.status.${job.status}`) }}</span><button v-if="isAttributionActive(job.status)" class="btn btn-secondary btn-sm" :disabled="cancelling" @click="emit('cancel', job.id)">{{ t(cancelling ? 'attribution.cancelling' : 'attribution.cancel') }}</button></div></div>
     <p v-if="job.reason" class="text-sm text-amber-700 dark:text-amber-300">{{ reason(job.reason) }}</p>
     <dl class="grid grid-cols-2 gap-3 text-sm">
       <div><dt class="text-gray-500">{{ t('attribution.model') }}</dt><dd class="break-all">{{ job.snapshot.policy.model }}</dd></div>
@@ -8,7 +8,9 @@
       <div><dt class="text-gray-500">{{ t('attribution.version') }} / {{ t('attribution.group') }}</dt><dd>{{ job.snapshot.config_version }} / {{ job.snapshot.group_id || t('attribution.allGroups') }}</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.time') }}</dt><dd>{{ formatDateTime(job.finished_at || job.started_at || job.created_at) }}</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.duration') }}</dt><dd>{{ (job.result.duration_ms / 1000).toFixed(1) }} s</dd></div>
-      <div v-if="job.result.retries"><dt class="text-gray-500">{{ t('attribution.retries') }}</dt><dd>{{ job.result.retries }}</dd></div>
+      <div v-if="(job.snapshot.version ?? 0) >= 2 && job.result.completed_probes !== undefined"><dt class="text-gray-500">{{ t('attribution.completedProbes') }}</dt><dd data-testid="attribution-completed-probes">{{ job.result.completed_probes }} / 3</dd></div>
+      <div v-if="job.result.retries !== undefined"><dt class="text-gray-500">{{ t('attribution.retries') }}</dt><dd>{{ job.result.retries }}</dd></div>
+      <div v-if="job.status === 'retry_wait' && job.next_attempt_at"><dt class="text-gray-500">{{ t('attribution.nextAttempt') }}</dt><dd>{{ formatDateTime(job.next_attempt_at) }}</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.action') }}</dt><dd>{{ t(`attribution.actions.${job.result.action || 'none'}`) }}</dd></div>
       <div v-if="job.result.pass_streak !== undefined"><dt class="text-gray-500">{{ t('attribution.passStreak') }}</dt><dd data-testid="attribution-pass-streak">{{ job.result.pass_streak }} / 2</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.source') }}</dt><dd>{{ t(`attribution.${job.source}`) }}</dd></div>
@@ -34,7 +36,9 @@
 import { useI18n } from 'vue-i18n'
 import { formatDateTime } from '@/utils/format'
 import type { AttributionJob } from '@/api/admin/modelAttribution'
-defineProps<{ job: AttributionJob }>()
+import { isAttributionActive } from '@/utils/modelAttribution'
+defineProps<{ job: AttributionJob; cancelling?: boolean }>()
+const emit = defineEmits<{ cancel: [id: number] }>()
 const { t, te } = useI18n()
 const reason = (code: string) => /^upstream_http_\d{3}$/.test(code) ? t('candyTests.upstreamHttpError', { status: code.slice(-3) }) : te(`attribution.reasons.${code}`) ? t(`attribution.reasons.${code}`) : te(`candyTests.failureReasons.${code}`) ? t(`candyTests.failureReasons.${code}`) : code
 const percent = (p: number | null) => p == null ? t('attribution.unavailable') : `${(p * 100).toFixed(2)}%`

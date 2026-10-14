@@ -6,13 +6,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAttributionRateLimitedManualPeriodicAndRecovery(t *testing.T) {
 	ctx := context.Background()
-	r, ar, a := attributionFixture(t)
+	r, _, a := attributionFixture(t)
 	_, err := integrationDB.Exec(`UPDATE accounts SET rate_limit_reset_at=NOW()+interval '1 hour' WHERE id=$1`, a.ID)
 	require.NoError(t, err)
 	jobs, err := r.Enqueue(ctx, nil, false)
@@ -48,20 +47,22 @@ func TestAttributionRateLimitedManualPeriodicAndRecovery(t *testing.T) {
 	j, err := r.Claim(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, j)
-	// A limit applied after dispatch blocks retries and also fences late results.
-	before := attributionMapping(t, ar, a.ID)
+	// A local cooldown applied after dispatch is routing metadata. It must not
+	// erase a valid in-flight result; explicit upstream 429 is handled by transport.
 	_, err = integrationDB.Exec(`UPDATE accounts SET rate_limit_reset_at=NOW()+interval '1 hour' WHERE id=$1`, a.ID)
 	require.NoError(t, err)
 	valid, err = r.Validate(ctx, j)
-	require.False(t, valid)
-	require.ErrorIs(t, err, service.ErrDiagnosticRateLimited)
+	require.True(t, valid)
+	require.NoError(t, err)
 	j.Status = "passed"
 	require.NoError(t, r.Finish(ctx, j))
 	ended, err = r.Get(ctx, j.ID)
 	require.NoError(t, err)
-	require.Equal(t, "skipped", ended.Status)
-	require.Equal(t, "account_rate_limited", ended.Reason)
-	require.Equal(t, before, attributionMapping(t, ar, a.ID))
+	require.Equal(t, "passed", ended.Status)
+	require.Empty(t, ended.Reason)
+	require.Equal(t, "unchanged", ended.Result.Action)
+	// A skipped upstream 429 result still interrupts the consecutive-pass streak.
+	attributionRun(t, r, a.ID, "skipped")
 	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
 }
 

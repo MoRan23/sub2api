@@ -141,3 +141,20 @@ func (h *AccountHandler) GetAttributionJob(c *gin.Context) {
 	}
 	response.Success(c, j)
 }
+
+func (h *AccountHandler) CancelAttributionJob(c *gin.Context) {
+	if !h.attributionReady(c) {
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id < 1 {
+		response.BadRequest(c, "Invalid record ID")
+		return
+	}
+	j, err := h.attributionService.Cancel(c.Request.Context(), id)
+	if err != nil {
+		attributionError(c, err)
+		return
+	}
+	response.Success(c, j)
+}

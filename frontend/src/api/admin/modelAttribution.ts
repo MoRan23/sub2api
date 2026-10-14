@@ -6,7 +6,7 @@ export interface NewAccountTestConfig { attribution: boolean; pelican: boolean; 
 export interface AttributionDetector { provider: string; protocol: number; revision: string; algorithm: string; bank_built_at: string; reference_sha256: string; ranker_sha256: string; calibration_sha256: string }
 export interface AttributionConnection { models: string[]; detector: AttributionDetector }
 export interface AttributionConfig { version: number; enabled: boolean; base_url: string; detector?: AttributionDetector; default: AttributionPolicy; groups: AttributionGroup[]; group_priority: number[]; new_account_tests: NewAccountTestConfig }
-export type AttributionStatus = 'queued' | 'running' | 'passed' | 'mismatch' | 'abnormal' | 'failed' | 'skipped'
+export type AttributionStatus = 'queued' | 'running' | 'retry_wait' | 'cancelled' | 'passed' | 'mismatch' | 'abnormal' | 'failed' | 'skipped'
 export interface AttributionJob {
   id: number
   account_id: number
@@ -14,11 +14,12 @@ export interface AttributionJob {
   source: string
   status: AttributionStatus
   reason?: string
-  snapshot: { config_version: number; group_id: number; policy: AttributionPolicy; detector?: AttributionDetector }
+  snapshot: { version?: number; config_version: number; group_id: number; policy: AttributionPolicy; detector?: AttributionDetector }
   result: {
     analysis?: { prediction: string; probability: number | null; ranking_score?: number; probability_status?: string; method?: string; detector?: AttributionDetector; used_outputs: number; results?: { model: string; probability: number | null; score?: number }[]; diagnostics?: { index: number; accepted: boolean; parsed_numbers: number; minimum_numbers: number }[] }
     duration_ms: number
     retries?: number
+    completed_probes?: number
     action: string
     pass_streak?: number
     before?: Record<string, unknown>
@@ -30,9 +31,10 @@ export interface AttributionJob {
   created_at: string
   started_at?: string
   finished_at?: string
+  next_attempt_at?: string
 }
 export interface AttributionSummary { latest?: AttributionJob; active?: AttributionJob; skip_reason?: string }
-export interface AttributionPage { items: AttributionJob[]; total: number; page: number; page_size: number; queued: number; running: number }
+export interface AttributionPage { items: AttributionJob[]; total: number; page: number; page_size: number; queued: number; running: number; retry_wait?: number }
 const root = '/admin/model-attribution'
 export const attributionAPI = {
   async config(): Promise<AttributionConfig> { return (await apiClient.get<AttributionConfig>(`${root}/config`)).data },
@@ -41,5 +43,6 @@ export const attributionAPI = {
   async connection(base_url: string): Promise<AttributionConnection> { return (await apiClient.post<AttributionConnection>(`${root}/models`, { base_url }, { timeout: 25000 })).data },
   async create(account_ids: number[], model?: string, expected_models?: string[] | null): Promise<AttributionJob[]> { return (await apiClient.post<{ items: AttributionJob[] }>(`${root}/jobs`, { account_ids, ...(model ? { model } : {}), ...(expected_models != null ? { expected_models } : {}) })).data.items },
   async history(account_id?: number, page = 1): Promise<AttributionPage> { return (await apiClient.get<AttributionPage>(`${root}/jobs`, { params: { account_id, page, page_size: 20 } })).data },
-  async job(id: number): Promise<AttributionJob> { return (await apiClient.get<AttributionJob>(`${root}/jobs/${id}`)).data }
+  async job(id: number): Promise<AttributionJob> { return (await apiClient.get<AttributionJob>(`${root}/jobs/${id}`)).data },
+  async cancel(id: number): Promise<AttributionJob> { return (await apiClient.post<AttributionJob>(`${root}/jobs/${id}/cancel`)).data }
 }

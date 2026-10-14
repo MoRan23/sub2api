@@ -4,6 +4,12 @@ vi.mock('@/api/client', () => ({ apiClient: { post } }))
 import { attributionAPI } from '../modelAttribution'
 
 describe('attribution expected-model request', () => {
+  it('returns the cancelled job from the administrator cancellation endpoint', async () => {
+    const job = { id: 17, status: 'cancelled' }
+    post.mockResolvedValueOnce({ data: job })
+    expect(await attributionAPI.cancel(17)).toEqual(job)
+    expect(post).toHaveBeenLastCalledWith('/admin/model-attribution/jobs/17/cancel')
+  })
   it('preserves omitted inheritance and explicit empty override', async () => {
     await attributionAPI.create([1], 'probe')
     expect(post).toHaveBeenLastCalledWith('/admin/model-attribution/jobs', { account_ids: [1], model: 'probe' })

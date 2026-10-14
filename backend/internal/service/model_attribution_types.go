@@ -44,8 +44,8 @@ type NewAccountTestConfig struct {
 }
 
 type AttributionProbeOptions struct {
-	Model          string
-	ExpectedModels *[]string
+	Model          string    `json:"model"`
+	ExpectedModels *[]string `json:"expected_models"`
 }
 
 func NormalizeAttributionExpectedModels(models []string) ([]string, error) {
@@ -96,6 +96,13 @@ func ExpectedAttributionModels(p AttributionPolicy) []string {
 func AttributionPolicyDigest(s AttributionSnapshot) string {
 	p := s.Policy
 	p.ExpectedModels = ExpectedAttributionModels(p)
+	if s.Version >= 2 {
+		p.HighModels = append([]string{}, p.HighModels...)
+		p.LowModels = append([]string{}, p.LowModels...)
+		sort.Strings(p.HighModels)
+		sort.Strings(p.LowModels)
+		return AttributionDigest([]any{2, p, s.Detector})
+	}
 	// Preserve the old baseline when the effective condition is unchanged.
 	if len(p.ExpectedModels) == 1 && p.ExpectedModels[0] == p.Model {
 		p.ExpectedModels = nil
@@ -386,38 +393,56 @@ type AttributionAnalysis struct {
 	Diagnostics       []AttributionDiagnostic `json:"diagnostics"`
 }
 type AttributionSnapshot struct {
-	ConfigVersion int64                `json:"config_version"`
-	GroupID       int64                `json:"group_id"`
-	Policy        AttributionPolicy    `json:"policy"`
-	Detector      *AttributionDetector `json:"detector,omitempty"`
-	Authorization string               `json:"-"`
-	Fence         string               `json:"-"`
+	Version       int                     `json:"version,omitempty"`
+	Overrides     AttributionProbeOptions `json:"overrides"`
+	MappingDigest string                  `json:"mapping_digest,omitempty"`
+	ConfigVersion int64                   `json:"config_version"`
+	GroupID       int64                   `json:"group_id"`
+	Policy        AttributionPolicy       `json:"policy"`
+	Detector      *AttributionDetector    `json:"detector,omitempty"`
+	Authorization string                  `json:"-"`
+	Fence         string                  `json:"-"`
 }
 type AttributionResult struct {
-	Analysis       *AttributionAnalysis `json:"analysis,omitempty"`
-	Usage          []*OpenAIUsage       `json:"usage,omitempty"`
-	ActualModels   []string             `json:"actual_models,omitempty"`
-	UpstreamModels []string             `json:"upstream_models,omitempty"`
-	DurationMS     int64                `json:"duration_ms"`
-	Retries        int                  `json:"retries,omitempty"`
-	Action         string               `json:"action"`
-	PassStreak     int                  `json:"pass_streak,omitempty"`
-	Before         map[string]any       `json:"before,omitempty"`
-	After          map[string]any       `json:"after,omitempty"`
+	CompletedProbes int                  `json:"completed_probes"`
+	Analysis        *AttributionAnalysis `json:"analysis,omitempty"`
+	Usage           []*OpenAIUsage       `json:"usage,omitempty"`
+	ActualModels    []string             `json:"actual_models,omitempty"`
+	UpstreamModels  []string             `json:"upstream_models,omitempty"`
+	DurationMS      int64                `json:"duration_ms"`
+	Retries         int                  `json:"retries,omitempty"`
+	Action          string               `json:"action"`
+	PassStreak      int                  `json:"pass_streak,omitempty"`
+	Before          map[string]any       `json:"before,omitempty"`
+	After           map[string]any       `json:"after,omitempty"`
 }
 type AttributionJob struct {
-	ID          int64               `json:"id"`
-	AccountID   int64               `json:"account_id"`
-	AccountName string              `json:"account_name"`
-	Source      string              `json:"source"`
-	Status      string              `json:"status"`
-	Reason      string              `json:"reason,omitempty"`
-	Snapshot    AttributionSnapshot `json:"snapshot"`
-	Result      AttributionResult   `json:"result"`
-	CreatedAt   time.Time           `json:"created_at"`
-	StartedAt   *time.Time          `json:"started_at,omitempty"`
-	FinishedAt  *time.Time          `json:"finished_at,omitempty"`
-	Claim       string              `json:"-"`
+	ID            int64                  `json:"id"`
+	AccountID     int64                  `json:"account_id"`
+	AccountName   string                 `json:"account_name"`
+	Source        string                 `json:"source"`
+	Status        string                 `json:"status"`
+	Reason        string                 `json:"reason,omitempty"`
+	Snapshot      AttributionSnapshot    `json:"snapshot"`
+	Result        AttributionResult      `json:"result"`
+	CreatedAt     time.Time              `json:"created_at"`
+	StartedAt     *time.Time             `json:"started_at,omitempty"`
+	FinishedAt    *time.Time             `json:"finished_at,omitempty"`
+	NextAttemptAt *time.Time             `json:"next_attempt_at,omitempty"`
+	Checkpoint    *AttributionCheckpoint `json:"-"`
+	Claim         string                 `json:"-"`
+}
+
+// AttributionCheckpoint is private recovery data, stored separately from the
+// public job snapshot/result. Terminal transitions must erase the raw answers.
+type AttributionCheckpoint struct {
+	Version            int                    `json:"version"`
+	Challenges         []AttributionChallenge `json:"challenges"`
+	Outputs            []AttributionOutput    `json:"outputs"`
+	OrdinaryRetries    int                    `json:"ordinary_retries"`
+	UnavailableRetries int                    `json:"unavailable_retries"`
+	RemainingBudgetMS  int64                  `json:"remaining_budget_ms"`
+	ProbeAuthorization string                 `json:"probe_authorization,omitempty"`
 }
 type AttributionSummary struct {
 	Latest     *AttributionJob `json:"latest,omitempty"`
@@ -425,12 +450,13 @@ type AttributionSummary struct {
 	SkipReason string          `json:"skip_reason,omitempty"`
 }
 type AttributionPage struct {
-	Items    []*AttributionJob `json:"items"`
-	Total    int               `json:"total"`
-	Page     int               `json:"page"`
-	PageSize int               `json:"page_size"`
-	Queued   int               `json:"queued"`
-	Running  int               `json:"running"`
+	Items     []*AttributionJob `json:"items"`
+	Total     int               `json:"total"`
+	Page      int               `json:"page"`
+	PageSize  int               `json:"page_size"`
+	Queued    int               `json:"queued"`
+	Running   int               `json:"running"`
+	RetryWait int               `json:"retry_wait"`
 }
 
 type AttributionRepository interface {
@@ -441,6 +467,9 @@ type AttributionRepository interface {
 	Claim(context.Context) (*AttributionJob, error)
 	Heartbeat(context.Context, *AttributionJob) (bool, error)
 	Validate(context.Context, *AttributionJob) (bool, error)
+	SaveCheckpoint(context.Context, *AttributionJob) (bool, error)
+	DeferRetry(context.Context, *AttributionJob, time.Time) (bool, error)
+	Cancel(context.Context, int64) (*AttributionJob, error)
 	Finish(context.Context, *AttributionJob) error
 	List(context.Context, int64, int, int) (*AttributionPage, error)
 	Get(context.Context, int64) (*AttributionJob, error)

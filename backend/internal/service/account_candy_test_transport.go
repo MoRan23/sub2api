@@ -52,6 +52,9 @@ func (r *AccountCandyTestTransport) Probe(ctx context.Context, accountID int64, 
 
 func (r *AccountCandyTestTransport) executeTextProbe(parent context.Context, item *CandyTestItem, prompt, instructions string, checkCatalog bool) (*CandyTestExecution, error) {
 	var authorization func(context.Context) error
+	if !checkCatalog && isAttributionExecution(parent) {
+		return r.executeTextProbeOnce(parent, item, prompt, instructions, false, &authorization)
+	}
 	return retryDiagnostic(parent, time.Second, func(ctx context.Context) (*CandyTestExecution, error) {
 		if authorization != nil {
 			if err := authorization(ctx); err != nil {
@@ -78,6 +81,7 @@ func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context,
 		return nil, ErrDiagnosticRateLimited
 	}
 	account = snapshotOAuthRefreshAccount(account)
+	initialEngineMode := account.IsCodexEngine()
 	account.openAICandyTest = true
 	if checkCatalog {
 		models, err := r.candyTestAccountModelOptions(parent, account)
@@ -114,15 +118,33 @@ func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context,
 		}
 	}
 	initial := snapshotOAuthRefreshAccount(credential)
+	authorizationDigest := ""
+	if isAttributionExecution(parent) {
+		authorizationDigest = attributionProbeAuthorization(account, initial)
+		if expected, _ := parent.Value(attributionProbeAuthorizationKey{}).(string); expected != "" && expected != authorizationDigest {
+			return nil, candyTestError("authorization_changed")
+		}
+	}
 	attempt.validate = func(check context.Context) error {
 		if err := check.Err(); err != nil {
 			return err
+		}
+		if isAttributionExecution(check) {
+			if validate, ok := check.Value(diagnosticRetryValidationKey{}).(func(context.Context) error); ok {
+				if err := validate(check); err != nil {
+					return err
+				}
+			}
 		}
 		business, readErr := r.accounts.GetByID(check, account.ID)
 		if readErr != nil {
 			return candyAuthorizationCheckError(check, readErr)
 		}
 		if business == nil {
+			return candyTestError("authorization_changed")
+		}
+		if isAttributionExecution(check) && (business.Platform != account.Platform || business.Type != account.Type ||
+			business.IsCodexEngine() != initialEngineMode || business.GetCredential("base_url") != account.GetCredential("base_url")) {
 			return candyTestError("authorization_changed")
 		}
 		if !isManualAttribution(check) && AccountDiagnosticRateLimited(business, item.Model, time.Now()) {
@@ -178,6 +200,7 @@ func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context,
 		return nil, candyTestError("request_invalid")
 	}
 	writer := newCandyResponseWriter(cancel)
+	writer.attribution = !checkCatalog && isAttributionExecution(parent)
 	c, _ := gin.CreateTestContext(writer)
 	c.Request, err = http.NewRequestWithContext(ctx, http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	if err != nil {
@@ -233,7 +256,7 @@ func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context,
 	writer.finish()
 	execution := &CandyTestExecution{RequestedModel: item.Model, ReasoningEffort: item.ReasoningEffort,
 		ResponseText: writer.answer(), Completed: writer.completed && !writer.failed, DurationMs: time.Since(started).Milliseconds(),
-		UpstreamModel: observedUpstreamResponseModel(c), ModelConflict: observedUpstreamResponseModelConflict(c)}
+		UpstreamModel: observedUpstreamResponseModel(c), ModelConflict: observedUpstreamResponseModelConflict(c), AttributionAuthorization: authorizationDigest}
 	attempt.mu.Lock()
 	execution.ActualModel = attempt.actualModel
 	execution.ReasoningEffort = attempt.actualEffort
@@ -252,6 +275,31 @@ func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context,
 	if execution.UpstreamModel != "" {
 		execution.ModelEvidenceSource = "upstream_json"
 	}
+	if writer.attribution {
+		// An explicit HTTP rejection takes precedence over an error-body code.
+		// For HTTP 200 streams use the original event's numeric status instead.
+		execution.UpstreamStatus = writer.errorStatus
+		if writer.status >= 400 {
+			execution.UpstreamStatus = writer.status
+		}
+		retryAfter := attributionRetryAfter(writer.Header().Get("Retry-After"), time.Now())
+		if result != nil {
+			if retry := attributionRetryAfter(result.ResponseHeaders.Get("Retry-After"), time.Now()); retry > retryAfter {
+				retryAfter = retry
+			}
+		}
+		if execution.UpstreamStatus == 0 {
+			status, retry := AttributionProbeRetryStatus(forwardErr, nil)
+			execution.UpstreamStatus = status
+			if retry > retryAfter {
+				retryAfter = retry
+			}
+		}
+		execution.RetryAfter = retryAfter
+		if execution.UpstreamStatus != 0 {
+			return execution, &attributionProbeHTTPError{status: execution.UpstreamStatus, retryAfter: retryAfter}
+		}
+	}
 	if writer.failure != "" {
 		return execution, candyTestError(writer.failure)
 	}
@@ -264,6 +312,9 @@ func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context,
 		return execution, safeCandyTestError(parent, parent.Err())
 	}
 	if forwardErr != nil {
+		if writer.attribution {
+			return execution, safeAttributionProbeError(parent, forwardErr)
+		}
 		return execution, safeCandyTestError(parent, forwardErr)
 	}
 	if writer.status >= 400 {
@@ -323,6 +374,8 @@ type candyResponseWriter struct {
 	failure            string
 	cancel             context.CancelFunc
 	phases             map[int]string
+	attribution        bool
+	errorStatus        int
 }
 
 func newCandyResponseWriter(cancel context.CancelFunc) *candyResponseWriter {
@@ -392,6 +445,13 @@ func (w *candyResponseWriter) consumeEvent() {
 			w.appendText(gjson.GetBytes(data, "delta").String())
 		}
 	case "response.failed", "response.incomplete", "error":
+		if w.attribution {
+			if status := attributionStreamStatus(data); status != 0 {
+				w.errorStatus = status
+				w.fail(fmt.Sprintf("upstream_http_%d", status))
+				return
+			}
+		}
 		for _, path := range []string{"error.code", "error.type", "response.error.code", "response.error.type"} {
 			switch gjson.GetBytes(data, path).String() {
 			case "rate_limit_exceeded", "rate_limit_error", "usage_limit_reached", "too_many_requests", "insufficient_quota":

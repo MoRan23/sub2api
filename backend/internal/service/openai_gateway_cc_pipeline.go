@@ -315,6 +315,15 @@ func (s *OpenAIGatewayService) scanCCStream(
 				return st
 			}
 			if gjson.Get(payload, "error").Exists() {
+				if isAttributionExecution(c.Request.Context()) {
+					if status := attributionStreamStatus([]byte(payload)); status != 0 {
+						if usage := extractCCStreamUsage(payload); usage != nil {
+							st.Usage = *usage
+						}
+						st.Err = &attributionProbeHTTPError{status: status, retryAfter: attributionRetryAfter(resp.Header.Get("Retry-After"), time.Now())}
+						return st
+					}
+				}
 				st.Err = candyTestError("upstream_stream_failed")
 				return st
 			}

@@ -185,6 +185,7 @@ func attributionSnapshot(ctx context.Context, tx *sql.Tx, id int64, c service.At
 		fence = []any{s.Authorization, a.Credentials["model_mapping"], a.ProxyID, a.AccountGroups, groupVersions, a.ParentAccountID, a.IsOpenAIPassthroughEnabled()}
 	}
 	s.Fence = service.AttributionDigest(fence)
+	s.MappingDigest = service.AttributionDigest(a.Credentials["model_mapping"])
 	reason := service.AttributionSkipReason(a, time.Now(), manual)
 	if deleted != nil {
 		reason = "account_missing"
@@ -195,13 +196,15 @@ func attributionSnapshot(ctx context.Context, tx *sql.Tx, id int64, c service.At
 	return a, s, reason, nil
 }
 
-const attributionColumns = `id,account_id,account_name,source,status,reason,snapshot,authorization_digest,fence_digest,result,COALESCE(claim_id::text,''),created_at,started_at,finished_at`
+const attributionBaseColumns = `id,account_id,account_name,source,status,reason,snapshot,authorization_digest,fence_digest,result,COALESCE(claim_id::text,''),created_at,started_at,finished_at`
+const attributionColumns = attributionBaseColumns + `,checkpoint,next_attempt_at`
+const attributionPublicColumns = attributionBaseColumns + `,NULL::jsonb AS checkpoint,next_attempt_at`
 
 func scanAttribution(row scannable) (*service.AttributionJob, error) {
 	j := &service.AttributionJob{}
-	var snap, result []byte
+	var snap, result, checkpoint []byte
 	var auth, fence string
-	if err := row.Scan(&j.ID, &j.AccountID, &j.AccountName, &j.Source, &j.Status, &j.Reason, &snap, &auth, &fence, &result, &j.Claim, &j.CreatedAt, &j.StartedAt, &j.FinishedAt); err != nil {
+	if err := row.Scan(&j.ID, &j.AccountID, &j.AccountName, &j.Source, &j.Status, &j.Reason, &snap, &auth, &fence, &result, &j.Claim, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &checkpoint, &j.NextAttemptAt); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(snap, &j.Snapshot); err != nil {
@@ -211,6 +214,11 @@ func scanAttribution(row scannable) (*service.AttributionJob, error) {
 	j.Snapshot.Fence = fence
 	if err := json.Unmarshal(result, &j.Result); err != nil {
 		return nil, err
+	}
+	if len(checkpoint) > 0 {
+		if err := json.Unmarshal(checkpoint, &j.Checkpoint); err != nil {
+			return nil, err
+		}
 	}
 	return j, nil
 }
@@ -268,7 +276,7 @@ func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual
 			AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at<=NOW())
 			AND (s.next_due_at IS NULL OR s.next_due_at<=NOW())
 			AND NOT EXISTS(SELECT 1 FROM account_initial_tests initial WHERE initial.account_id=a.id AND initial.processed_at IS NULL)
-			AND NOT EXISTS(SELECT 1 FROM model_attribution_jobs j WHERE j.account_id=a.id AND j.status IN ('queued','running'))
+			AND NOT EXISTS(SELECT 1 FROM model_attribution_jobs j WHERE j.account_id=a.id AND j.status IN ('queued','running','retry_wait'))
 			ORDER BY s.next_due_at NULLS FIRST,a.id LIMIT 500`)
 		if e != nil {
 			return nil, e
@@ -311,7 +319,7 @@ func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual
 }
 
 func enqueueAttribution(ctx context.Context, tx *sql.Tx, id int64, c service.AttributionConfig, source, model string, expectedModels ...*[]string) (*service.AttributionJob, error) {
-	existing, err := scanAttribution(tx.QueryRowContext(ctx, `SELECT `+attributionColumns+` FROM model_attribution_jobs WHERE account_id=$1 AND status IN ('queued','running')`, id))
+	existing, err := scanAttribution(tx.QueryRowContext(ctx, `SELECT `+attributionColumns+` FROM model_attribution_jobs WHERE account_id=$1 AND status IN ('queued','running','retry_wait')`, id))
 	if err == nil {
 		return existing, nil
 	}
@@ -325,6 +333,15 @@ func enqueueAttribution(ctx context.Context, tx *sql.Tx, id int64, c service.Att
 	if a == nil {
 		return nil, service.ErrAttributionNotFound
 	}
+	s.Version = 2
+	s.Overrides.Model = model
+	if len(expectedModels) > 0 && expectedModels[0] != nil {
+		models := append([]string{}, (*expectedModels[0])...)
+		s.Overrides.ExpectedModels = &models
+	}
+	// The execution identity includes the credential source, independently of
+	// mutable routing metadata. Legacy snapshots retain their original digest.
+	s.Authorization = service.AttributionDigest([]any{s.Authorization, a.ParentAccountID})
 	if model != "" {
 		s.Policy.Model = model
 	}
@@ -363,7 +380,7 @@ func (r *attributionRepository) Claim(ctx context.Context) (*service.Attribution
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	expired, err := tx.ExecContext(ctx, `WITH ended AS (UPDATE model_attribution_jobs SET status='failed',reason=CASE WHEN started_at<=NOW()-interval '10 minutes' THEN 'timeout' ELSE 'interrupted' END,finished_at=NOW(),lease_until=NULL WHERE status='running' AND (lease_until<NOW() OR started_at<NOW()-interval '10 minutes') RETURNING account_id) UPDATE model_attribution_state SET pass_streak=0 WHERE account_id IN (SELECT account_id FROM ended)`)
+	expired, err := tx.ExecContext(ctx, `WITH ended AS (UPDATE model_attribution_jobs SET status='failed',reason='interrupted',finished_at=NOW(),lease_until=NULL,claim_id=NULL,checkpoint=NULL,next_attempt_at=NULL WHERE status='running' AND (lease_until IS NULL OR lease_until<NOW()) RETURNING account_id) UPDATE model_attribution_state SET pass_streak=0 WHERE account_id IN (SELECT account_id FROM ended)`)
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +407,7 @@ func (r *attributionRepository) Claim(ctx context.Context) (*service.Attribution
 			return nil, err
 		}
 	}
-	j, err := scanAttribution(tx.QueryRowContext(ctx, `UPDATE model_attribution_jobs SET status='running',started_at=NOW(),claim_id=$1,lease_until=NOW()+interval '45 seconds' WHERE id=(SELECT id FROM model_attribution_jobs WHERE status='queued' ORDER BY id LIMIT 1) RETURNING `+attributionColumns, uuid.NewString()))
+	j, err := scanAttribution(tx.QueryRowContext(ctx, `UPDATE model_attribution_jobs SET status='running',reason='',started_at=COALESCE(started_at,NOW()),claim_id=$1,lease_until=NOW()+interval '45 seconds',next_attempt_at=NULL WHERE id=(SELECT id FROM model_attribution_jobs WHERE status='queued' OR (status='retry_wait' AND next_attempt_at<=NOW()) ORDER BY COALESCE(next_attempt_at,created_at),id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING `+attributionColumns, uuid.NewString()))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, tx.Commit()
 	}
@@ -400,7 +417,7 @@ func (r *attributionRepository) Claim(ctx context.Context) (*service.Attribution
 	return j, tx.Commit()
 }
 func (r *attributionRepository) Heartbeat(ctx context.Context, j *service.AttributionJob) (bool, error) {
-	res, err := r.db.ExecContext(ctx, `UPDATE model_attribution_jobs SET lease_until=LEAST(NOW()+interval '45 seconds',started_at+interval '10 minutes') WHERE id=$1 AND claim_id=$2 AND status='running' AND lease_until>NOW() AND started_at>NOW()-interval '10 minutes'`, j.ID, j.Claim)
+	res, err := r.db.ExecContext(ctx, `UPDATE model_attribution_jobs SET lease_until=NOW()+interval '45 seconds' WHERE id=$1 AND claim_id=$2 AND status='running' AND lease_until>NOW()`, j.ID, j.Claim)
 	if err != nil {
 		return false, err
 	}
@@ -416,6 +433,10 @@ func (r *attributionRepository) Validate(ctx context.Context, j *service.Attribu
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	owned, err := ownsAttributionClaim(ctx, tx, j)
+	if err != nil || !owned {
+		return false, err
+	}
 	c, err := attributionConfig(ctx, tx)
 	if err != nil {
 		return false, err
@@ -424,10 +445,124 @@ func (r *attributionRepository) Validate(ctx context.Context, j *service.Attribu
 	if err != nil {
 		return false, err
 	}
+	if j.Snapshot.Version >= 2 {
+		return validAttributionAuthorization(j.Snapshot, a, s, skip), nil
+	}
 	if j.Source != "manual" && service.AccountDiagnosticRateLimited(a, j.Snapshot.Policy.Model, time.Now()) {
 		return false, service.ErrDiagnosticRateLimited
 	}
 	return validAttributionSnapshot(j.Snapshot, s, skip), nil
+}
+
+func ownsAttributionClaim(ctx context.Context, tx *sql.Tx, j *service.AttributionJob) (bool, error) {
+	if j == nil || j.Claim == "" {
+		return false, nil
+	}
+	var id int64
+	err := tx.QueryRowContext(ctx, `SELECT id FROM model_attribution_jobs WHERE id=$1 AND claim_id=$2 AND status='running' AND lease_until>NOW() FOR UPDATE`, j.ID, j.Claim).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func validAttributionAuthorization(old service.AttributionSnapshot, a *service.Account, current service.AttributionSnapshot, skip string) bool {
+	if a == nil || skip == "account_missing" || skip == "authorization_changed" {
+		return false
+	}
+	return old.Authorization == service.AttributionDigest([]any{current.Authorization, a.ParentAccountID})
+}
+
+func applyAttributionOverrides(s *service.AttributionSnapshot, options service.AttributionProbeOptions) {
+	if options.Model != "" {
+		s.Policy.Model = options.Model
+	}
+	if options.ExpectedModels != nil {
+		s.Policy.ExpectedModels = *options.ExpectedModels
+	}
+	s.Policy.ExpectedModels = service.ExpectedAttributionModels(s.Policy)
+}
+
+// Checkpoints and their public counters commit together, and only the live
+// worker may publish them. Raw answers never enter result or snapshot JSON.
+func (r *attributionRepository) SaveCheckpoint(ctx context.Context, j *service.AttributionJob) (bool, error) {
+	return r.saveCheckpoint(ctx, j, nil)
+}
+
+func (r *attributionRepository) DeferRetry(ctx context.Context, j *service.AttributionJob, next time.Time) (bool, error) {
+	return r.saveCheckpoint(ctx, j, &next)
+}
+
+func (r *attributionRepository) saveCheckpoint(ctx context.Context, j *service.AttributionJob, next *time.Time) (bool, error) {
+	if j == nil || j.Checkpoint == nil || j.Checkpoint.Version != 1 || len(j.Checkpoint.Outputs) > 3 || len(j.Checkpoint.Challenges) != 3 {
+		return false, service.ErrAttributionInvalid
+	}
+	checkpoint, err := json.Marshal(j.Checkpoint)
+	if err != nil {
+		return false, err
+	}
+	result, err := json.Marshal(j.Result)
+	if err != nil {
+		return false, err
+	}
+	tx, err := r.transaction(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	owned, err := ownsAttributionClaim(ctx, tx, j)
+	if err != nil || !owned {
+		return false, err
+	}
+	if next == nil {
+		_, err = tx.ExecContext(ctx, `UPDATE model_attribution_jobs SET checkpoint=$3,result=$4 WHERE id=$1 AND claim_id=$2`, j.ID, j.Claim, checkpoint, result)
+	} else {
+		_, err = tx.ExecContext(ctx, `UPDATE model_attribution_jobs SET checkpoint=$3,result=$4,status='retry_wait',reason='upstream_http_503',next_attempt_at=$5,lease_until=NULL,claim_id=NULL WHERE id=$1 AND claim_id=$2`, j.ID, j.Claim, checkpoint, result, next)
+	}
+	if err != nil {
+		return false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return false, err
+	}
+	if next != nil {
+		j.Status, j.Reason, j.NextAttemptAt = "retry_wait", "upstream_http_503", next
+	}
+	return true, nil
+}
+
+func (r *attributionRepository) Cancel(ctx context.Context, id int64) (*service.AttributionJob, error) {
+	tx, err := r.transaction(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	j, err := scanAttribution(tx.QueryRowContext(ctx, `SELECT `+attributionColumns+` FROM model_attribution_jobs WHERE id=$1 FOR UPDATE`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, service.ErrAttributionNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if j.Status != "queued" && j.Status != "running" && j.Status != "retry_wait" {
+		return j, tx.Commit()
+	}
+	j.Result.Action, j.Result.PassStreak = "none", 0
+	result, err := json.Marshal(j.Result)
+	if err != nil {
+		return nil, err
+	}
+	j, err = scanAttribution(tx.QueryRowContext(ctx, `UPDATE model_attribution_jobs SET status='cancelled',reason='cancelled',result=$2,finished_at=NOW(),checkpoint=NULL,next_attempt_at=NULL,lease_until=NULL,claim_id=NULL WHERE id=$1 RETURNING `+attributionColumns, id, result))
+	if err != nil {
+		return nil, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE model_attribution_state SET pass_streak=0 WHERE account_id=$1`, j.AccountID); err != nil {
+		return nil, err
+	}
+	if err = pruneAttribution(ctx, tx); err != nil {
+		return nil, err
+	}
+	return j, tx.Commit()
 }
 
 func (r *attributionRepository) Finish(ctx context.Context, j *service.AttributionJob) error {
@@ -436,8 +571,8 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var owned bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM model_attribution_jobs WHERE id=$1 AND claim_id=$2 AND status='running' AND lease_until>NOW())`, j.ID, j.Claim).Scan(&owned); err != nil {
+	owned, err := ownsAttributionClaim(ctx, tx, j)
+	if err != nil {
 		return err
 	}
 	if !owned {
@@ -454,13 +589,31 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 		if e != nil {
 			return e
 		}
-		if j.Source != "manual" && skip == "" && service.AccountDiagnosticRateLimited(a, j.Snapshot.Policy.Model, time.Now()) {
+		if j.Snapshot.Version < 2 && j.Source != "manual" && skip == "" && service.AccountDiagnosticRateLimited(a, j.Snapshot.Policy.Model, time.Now()) {
 			skip = service.ErrDiagnosticRateLimited.Error()
 		}
-		if !validAttributionSnapshot(j.Snapshot, s, skip) {
+		valid := validAttributionSnapshot(j.Snapshot, s, skip)
+		authorizationValid := valid
+		if j.Snapshot.Version >= 2 {
+			authorizationValid = validAttributionAuthorization(j.Snapshot, a, s, skip)
+			s.Version = j.Snapshot.Version
+			applyAttributionOverrides(&s, j.Snapshot.Overrides)
+			valid = authorizationValid && s.ConfigVersion == j.Snapshot.ConfigVersion &&
+				service.SameAttributionDetector(j.Snapshot.Detector, s.Detector) &&
+				service.AttributionPolicyDigest(j.Snapshot) == service.AttributionPolicyDigest(s) &&
+				j.Snapshot.MappingDigest == s.MappingDigest
+			// All accepted runs use the same identity representation for the
+			// consecutive-pass baseline, regardless of current group membership.
+			s.Authorization = j.Snapshot.Authorization
+		}
+		if !valid {
 			j.Result.Action = "stale"
 			j.Reason = "configuration_or_authorization_changed"
-			if skip == service.ErrDiagnosticRateLimited.Error() {
+			if j.Snapshot.Version >= 2 && authorizationValid {
+				j.Result.Action, j.Reason = "stale_policy", "policy_changed"
+			} else if j.Snapshot.Version >= 2 {
+				j.Status, j.Reason = "failed", "authorization_changed"
+			} else if j.Snapshot.Version < 2 && skip == service.ErrDiagnosticRateLimited.Error() {
 				j.Status, j.Reason = "skipped", skip
 			}
 		} else if len(s.Policy.HighModels) == 0 || len(s.Policy.LowModels) == 0 {
@@ -532,7 +685,7 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 	if err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE model_attribution_jobs SET status=$3,reason=$4,result=$5,finished_at=NOW(),lease_until=NULL WHERE id=$1 AND claim_id=$2 AND status='running'`, j.ID, j.Claim, j.Status, j.Reason, b); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE model_attribution_jobs SET status=$3,reason=$4,result=$5,finished_at=NOW(),lease_until=NULL,claim_id=NULL,checkpoint=NULL,next_attempt_at=NULL WHERE id=$1 AND claim_id=$2 AND status='running'`, j.ID, j.Claim, j.Status, j.Reason, b); err != nil {
 		return err
 	}
 	if err = pruneAttribution(ctx, tx); err != nil {
@@ -541,7 +694,7 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 	return tx.Commit()
 }
 func (r *attributionRepository) Get(ctx context.Context, id int64) (*service.AttributionJob, error) {
-	j, err := scanAttribution(r.db.QueryRowContext(ctx, `SELECT `+attributionColumns+` FROM model_attribution_jobs WHERE id=$1`, id))
+	j, err := scanAttribution(r.db.QueryRowContext(ctx, `SELECT `+attributionPublicColumns+` FROM model_attribution_jobs WHERE id=$1`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrAttributionNotFound
 	}
@@ -549,10 +702,10 @@ func (r *attributionRepository) Get(ctx context.Context, id int64) (*service.Att
 }
 func (r *attributionRepository) List(ctx context.Context, accountID int64, page, size int) (*service.AttributionPage, error) {
 	p := &service.AttributionPage{Page: page, PageSize: size}
-	if err := r.db.QueryRowContext(ctx, `SELECT count(*),count(*) FILTER(WHERE status='queued'),count(*) FILTER(WHERE status='running') FROM model_attribution_jobs WHERE ($1::bigint=0 OR account_id=$1)`, accountID).Scan(&p.Total, &p.Queued, &p.Running); err != nil {
+	if err := r.db.QueryRowContext(ctx, `SELECT count(*),count(*) FILTER(WHERE status='queued'),count(*) FILTER(WHERE status='running'),count(*) FILTER(WHERE status='retry_wait') FROM model_attribution_jobs WHERE ($1::bigint=0 OR account_id=$1)`, accountID).Scan(&p.Total, &p.Queued, &p.Running, &p.RetryWait); err != nil {
 		return nil, err
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT `+attributionColumns+` FROM model_attribution_jobs WHERE ($1::bigint=0 OR account_id=$1) ORDER BY id DESC LIMIT $2 OFFSET $3`, accountID, size, (page-1)*size)
+	rows, err := r.db.QueryContext(ctx, `SELECT `+attributionPublicColumns+` FROM model_attribution_jobs WHERE ($1::bigint=0 OR account_id=$1) ORDER BY id DESC LIMIT $2 OFFSET $3`, accountID, size, (page-1)*size)
 	if err != nil {
 		return nil, err
 	}
@@ -565,7 +718,7 @@ func (r *attributionRepository) Summaries(ctx context.Context, ids []int64) (map
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT `+attributionColumns+` FROM (SELECT DISTINCT ON(account_id,(finished_at IS NULL)) * FROM model_attribution_jobs WHERE account_id=ANY($1) ORDER BY account_id,(finished_at IS NULL),id DESC) latest`, pq.Array(ids))
+	rows, err := r.db.QueryContext(ctx, `SELECT `+attributionPublicColumns+` FROM (SELECT DISTINCT ON(account_id,(finished_at IS NULL)) * FROM model_attribution_jobs WHERE account_id=ANY($1) ORDER BY account_id,(finished_at IS NULL),id DESC) latest`, pq.Array(ids))
 	if err != nil {
 		return nil, err
 	}
@@ -575,6 +728,7 @@ func (r *attributionRepository) Summaries(ctx context.Context, ids []int64) (map
 		return nil, err
 	}
 	for _, j := range items {
+		j.Checkpoint = nil
 		if out[j.AccountID] == nil {
 			out[j.AccountID] = &service.AttributionSummary{}
 		}

@@ -13,7 +13,7 @@ import ModelAttributionView from '@/views/admin/ModelAttributionView.vue'
 import type { AttributionConfig, AttributionJob, AttributionPage } from '@/api/admin/modelAttribution'
 import type { AccountListItem } from '@/types'
 
-const api = vi.hoisted(() => ({ config: vi.fn(), save: vi.fn(), models: vi.fn(), connection: vi.fn(), create: vi.fn(), history: vi.fn(), job: vi.fn() }))
+const api = vi.hoisted(() => ({ config: vi.fn(), save: vi.fn(), models: vi.fn(), connection: vi.fn(), create: vi.fn(), history: vi.fn(), job: vi.fn(), cancel: vi.fn() }))
 vi.mock('@/api/admin/modelAttribution', () => ({ attributionAPI: api }))
 vi.mock('@/api/admin/groups', async () => ({ ...await vi.importActual<typeof import('@/api/admin/groups')>('@/api/admin/groups'), getAllIncludingInactive: vi.fn().mockResolvedValue([{ id: 10, name: 'Pro group' }, { id: 20, name: 'Other group' }]) }))
 vi.mock('vue-i18n', async () => ({ ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'), useI18n: () => ({ t: (key: string) => key, te: () => true }) }))
@@ -35,6 +35,120 @@ beforeEach(() => { vi.clearAllMocks(); api.config.mockResolvedValue(config()); a
 afterEach(() => { vi.useRealTimers() })
 
 describe('attribution account UI', () => {
+  it('shows durable retry progress and preserves the completed verdict when a policy changed', async () => {
+    const waiting = job(3, 'retry_wait')
+    waiting.snapshot.version = 2
+    waiting.result = { duration_ms: 900000, action: 'none', completed_probes: 2, retries: 7 }
+    waiting.next_attempt_at = '2026-10-14T08:05:00Z'
+    const wrapper = mount(AttributionResult, { props: { job: waiting } })
+    expect(wrapper.text()).toContain('attribution.status.retry_wait')
+    expect(wrapper.get('[data-testid="attribution-completed-probes"]').text()).toBe('2 / 3')
+    expect(wrapper.text()).toContain('attribution.nextAttempt')
+    expect(wrapper.text()).toContain('attribution.retries')
+    await wrapper.get('button').trigger('click')
+    expect(wrapper.emitted('cancel')).toEqual([[3]])
+    await wrapper.setProps({ cancelling: true })
+    expect(wrapper.get('button').attributes('disabled')).toBeDefined()
+    const completed = job(3, 'passed')
+    completed.reason = 'policy_changed'
+    completed.result.action = 'stale_policy'
+    await wrapper.setProps({ job: completed })
+    expect(wrapper.text()).toContain('attribution.status.passed')
+    expect(wrapper.text()).toContain('attribution.reasons.policy_changed')
+    expect(wrapper.text()).toContain('attribution.actions.stale_policy')
+    expect(wrapper.find('button').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('attribution.nextAttempt')
+    wrapper.unmount()
+  })
+  it('keeps waiting jobs active in account summaries', () => {
+    const waiting = job(2, 'retry_wait')
+    waiting.snapshot.version = 2
+    waiting.result = { duration_ms: 0, action: 'none', completed_probes: 2, retries: 4 }
+    waiting.next_attempt_at = '2026-10-14T08:05:00Z'
+    const wrapper = mount(AccountAttributionCell, { props: { account: { platform: 'openai', type: 'oauth', model_attribution: { active: waiting, latest: job() } } as AccountListItem } })
+    expect(wrapper.get('[data-testid="attribution-active"]').text()).toBe('attribution.status.retry_wait')
+    expect(wrapper.text()).toContain('attribution.probeProgress')
+    expect(wrapper.text()).toContain('attribution.nextAttempt')
+    expect(wrapper.get('[data-testid="attribution-latest"]').text()).toBe('attribution.status.passed')
+    wrapper.unmount()
+  })
+  it('polls waiting details and cancels them once without showing stale running state', async () => {
+    vi.useFakeTimers()
+    const waiting = job(3, 'retry_wait')
+    waiting.snapshot.version = 2
+    waiting.result = { duration_ms: 0, action: 'none', completed_probes: 2, retries: 4 }
+    waiting.next_attempt_at = '2026-10-14T08:05:00Z'
+    api.history.mockResolvedValue({ ...page([waiting]), retry_wait: 1 })
+    api.job.mockResolvedValue(waiting)
+    const wrapper = mount(AttributionHistory, { props: { accountId: 42 } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('attribution.waitingCount')
+    await wrapper.findAll('tbody button').find(button => button.text() === 'attribution.details')!.trigger('click')
+    await flushPromises()
+    const updated = { ...waiting, result: { ...waiting.result, retries: 5 } }
+    api.job.mockResolvedValue(updated)
+    await vi.advanceTimersByTimeAsync(5000); await flushPromises()
+    expect(api.job).toHaveBeenCalledTimes(2)
+    expect(wrapper.findComponent(AttributionResult).props('job').result.retries).toBe(5)
+    let resolveCancel!: (value: AttributionJob) => void
+    api.cancel.mockReturnValueOnce(new Promise(resolve => { resolveCancel = resolve }))
+    const cancel = wrapper.findAll('tbody button').find(button => button.text() === 'attribution.cancel')!
+    await cancel.trigger('click')
+    expect(cancel.attributes('disabled')).toBeDefined()
+    await cancel.trigger('click')
+    expect(api.cancel).toHaveBeenCalledTimes(1)
+    expect(api.cancel).toHaveBeenCalledWith(3)
+    const cancelled = { ...updated, status: 'cancelled' as const, reason: 'cancelled', next_attempt_at: undefined }
+    api.history.mockResolvedValue(page([cancelled]))
+    resolveCancel(cancelled); await flushPromises()
+    expect(wrapper.get('[data-testid="attribution-result"]').text()).toContain('attribution.status.cancelled')
+    expect(wrapper.findAll('button').some(button => button.text() === 'attribution.cancel')).toBe(false)
+    expect(wrapper.text()).not.toContain('attribution.waitingCount')
+    expect(wrapper.text()).not.toContain('attribution.nextAttempt')
+    wrapper.unmount()
+  })
+  it.each(['passed', 'mismatch'] as const)('does not display zero-value progress for legacy %s history', async (status) => {
+    const legacy = job(1, status)
+    legacy.result.completed_probes = 0
+    const wrapper = mount(AttributionResult, { props: { job: legacy } })
+    expect(wrapper.text()).toContain(`attribution.status.${status}`)
+    expect(wrapper.find('[data-testid="attribution-completed-probes"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('attribution.completedProbes')
+    await wrapper.setProps({ job: { ...legacy, snapshot: { ...legacy.snapshot, version: 2 }, result: { ...legacy.result, completed_probes: 3 } } })
+    expect(wrapper.get('[data-testid="attribution-completed-probes"]').text()).toBe('3 / 3')
+    wrapper.unmount()
+  })
+  it('keeps a failed cancellation available for retry', async () => {
+    api.history.mockResolvedValue(page([job(3, 'running')]))
+    api.cancel.mockRejectedValueOnce(new Error('offline'))
+    const wrapper = mount(AttributionHistory, { props: { accountId: 42 } })
+    await flushPromises()
+    await wrapper.findAll('tbody button').find(button => button.text() === 'attribution.cancel')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toBe('attribution.error')
+    expect(wrapper.findAll('tbody button').find(button => button.text() === 'attribution.cancel')!.attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).toContain('attribution.status.running')
+    wrapper.unmount()
+  })
+  it('discards an in-flight detail read when cancellation completes', async () => {
+    const running = job(3, 'running')
+    const cancelled = { ...running, status: 'cancelled' as const, reason: 'cancelled' }
+    api.history.mockResolvedValue(page([running]))
+    let resolveDetails!: (value: AttributionJob) => void
+    api.job.mockReturnValueOnce(new Promise(resolve => { resolveDetails = resolve }))
+    api.cancel.mockResolvedValueOnce(cancelled)
+    const wrapper = mount(AttributionHistory, { props: { accountId: 42 } })
+    await flushPromises()
+    await wrapper.findAll('tbody button').find(button => button.text() === 'attribution.details')!.trigger('click')
+    api.history.mockResolvedValue(page([cancelled]))
+    await wrapper.findAll('tbody button').find(button => button.text() === 'attribution.cancel')!.trigger('click')
+    await flushPromises()
+    resolveDetails(running); await flushPromises()
+    expect(wrapper.find('[data-testid="attribution-result"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('attribution.status.running')
+    expect(wrapper.text()).toContain('attribution.status.cancelled')
+    wrapper.unmount()
+  })
   it('shows frozen expectations and falls back to the historical probe for old results', async () => {
     const current = job()
     current.snapshot.policy.expected_models = ['gpt-6-astra', 'gpt-6.1-sol']

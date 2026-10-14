@@ -207,6 +207,8 @@ func TestAttributionCodexEnginePeriodicScheduling(t *testing.T) {
 	job.Status = "passed"
 	require.NoError(t, r.Finish(ctx, job))
 	require.Equal(t, "stale", job.Result.Action)
+	require.Equal(t, "failed", job.Status)
+	require.Equal(t, "authorization_changed", job.Reason)
 }
 
 func TestAttributionAPIKeyConfigurationFence(t *testing.T) {
@@ -234,6 +236,8 @@ func TestAttributionAPIKeyConfigurationFence(t *testing.T) {
 			stale, err := r.Get(ctx, j.ID)
 			require.NoError(t, err)
 			require.Equal(t, "stale", stale.Result.Action)
+			require.Equal(t, "failed", stale.Status)
+			require.Equal(t, "authorization_changed", stale.Reason)
 			require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
 			fresh := attributionRun(t, r, a.ID, "passed")
 			require.Equal(t, "awaiting_confirmation", fresh.Result.Action)
@@ -370,11 +374,22 @@ func TestAttributionFencesRefreshAndGroupBaseline(t *testing.T) {
 			before := attributionMapping(t, ar, a.ID)
 			valid, err = r.Validate(ctx, j)
 			require.NoError(t, err)
-			require.False(t, valid)
+			require.Equal(t, mutation != "authorization", valid)
 			j.Status = "mismatch"
 			require.NoError(t, r.Finish(ctx, j))
-			require.Equal(t, "stale", j.Result.Action)
-			require.Equal(t, before, attributionMapping(t, ar, a.ID))
+			switch mutation {
+			case "authorization":
+				require.Equal(t, "stale", j.Result.Action)
+				require.Equal(t, "failed", j.Status)
+				require.Equal(t, "authorization_changed", j.Reason)
+				require.Equal(t, before, attributionMapping(t, ar, a.ID))
+			case "group":
+				require.Equal(t, "low", j.Result.Action, "same effective policy permits the completed result to apply")
+				require.Contains(t, attributionMapping(t, ar, a.ID), "low")
+			default:
+				require.Equal(t, "stale_policy", j.Result.Action)
+				require.Equal(t, before, attributionMapping(t, ar, a.ID))
+			}
 		})
 	}
 	// Changing group priority selects a different policy even at the same config version.
@@ -509,7 +524,8 @@ func TestAttributionQueueLeasesRetentionAndRestart(t *testing.T) {
 	require.NoError(t, err)
 	expired, err = r.Get(ctx, next.ID)
 	require.NoError(t, err)
-	require.Equal(t, "timeout", expired.Reason)
+	require.Equal(t, "running", expired.Status, "wall time across 503 waits is no longer an execution deadline")
+	require.Empty(t, expired.Reason)
 	// Disable cancels queued work, and enabling requeues eligible accounts only once.
 	c, err := r.Config(ctx)
 	require.NoError(t, err)
@@ -687,5 +703,7 @@ func TestAttributionManualShadowAuthorizationFence(t *testing.T) {
 	j.Status = "mismatch"
 	require.NoError(t, r.Finish(ctx, j))
 	require.Equal(t, "stale", j.Result.Action)
+	require.Equal(t, "failed", j.Status)
+	require.Equal(t, "authorization_changed", j.Reason)
 	require.Equal(t, before, attributionMapping(t, ar, shadow.ID))
 }

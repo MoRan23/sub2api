@@ -1,6 +1,8 @@
 <template>
   <div v-if="account.platform === 'openai' && (account.type === 'oauth' || account.type === 'apikey')" class="w-44 space-y-1 text-xs" data-testid="attribution-cell">
     <span v-if="summary?.active" class="inline-flex rounded bg-blue-700 px-1.5 py-0.5 text-white" data-testid="attribution-active">{{ t(`attribution.status.${summary.active.status}`) }}</span>
+    <p v-if="summary?.active?.status === 'retry_wait' && (summary.active.snapshot.version ?? 0) >= 2" class="text-gray-500 dark:text-gray-400">{{ t('attribution.probeProgress', { count: summary.active.result.completed_probes ?? 0 }) }} · {{ t('attribution.retryCount', { count: summary.active.result.retries ?? 0 }) }}</p>
+    <p v-if="summary?.active?.status === 'retry_wait' && summary.active.next_attempt_at" class="text-gray-500 dark:text-gray-400">{{ t('attribution.nextAttempt') }}: {{ formatDateTime(summary.active.next_attempt_at) }}</p>
     <p :class="color" data-testid="attribution-latest">{{ latest ? t(`attribution.status.${latest.status}`) : t('attribution.never') }}<span v-if="manualOnly" class="ml-1 text-gray-500 dark:text-gray-400">· {{ t('attribution.manualOnly') }}</span></p>
     <p v-if="latest?.result.analysis" class="truncate" :title="t('attribution.probability')">{{ latest.result.analysis.prediction }} · {{ latest.result.analysis.probability == null ? t('attribution.unavailable') : (latest.result.analysis.probability * 100).toFixed(1) + '%' }}</p>
     <p v-if="latest" class="text-gray-500 dark:text-gray-400">{{ formatDateTime(latest.finished_at || latest.created_at) }}</p>

@@ -288,6 +288,9 @@ func (r *attributionTestRepo) Config(context.Context) (AttributionConfig, error)
 func (r *attributionTestRepo) Validate(context.Context, *AttributionJob) (bool, error) {
 	return r.valid, nil
 }
+func (r *attributionTestRepo) SaveCheckpoint(context.Context, *AttributionJob) (bool, error) {
+	return r.valid, nil
+}
 func (r *attributionTestRepo) Finish(_ context.Context, j *AttributionJob) error {
 	copy := *j
 	r.finished = &copy
@@ -409,8 +412,7 @@ func TestAttributionPipelineMockLMDetector(t *testing.T) {
 			s := &ModelAttributionService{repo: repo, probe: probe, analyzer: NewLMDetectorClient()}
 			j := &AttributionJob{ID: 1, AccountID: 11, Source: "manual", Snapshot: AttributionSnapshot{Policy: policy, Detector: testAttributionDetector()}}
 			if scenario == "timeout" {
-				past := time.Now().Add(-11 * time.Minute)
-				j.StartedAt = &past
+				j.Checkpoint = &AttributionCheckpoint{Version: 1, Challenges: attributionRetryChallenges(), RemainingBudgetMS: 0}
 			}
 			s.execute(ctx, j)
 			require.NotNil(t, repo.finished)

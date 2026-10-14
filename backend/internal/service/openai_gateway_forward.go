@@ -1114,7 +1114,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if resp.StatusCode >= 400 {
 			if isOpenAICandyTest(ctx) {
 				_ = resp.Body.Close()
-				return nil, candyTestError(fmt.Sprintf("upstream_http_%d", resp.StatusCode))
+				return nil, candyTestHTTPError(ctx, resp)
 			}
 			respBody := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
@@ -1252,6 +1252,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			streamResult, err := s.handleStreamingResponseWithReasoning(ctx, resp, c, account, startTime, originalModel, upstreamModel, reasoningEffortValue)
 			completeCodexTelemetryHTTPResponse(resp, err)
 			if err != nil {
+				if isAttributionExecution(ctx) && streamResult != nil {
+					return attributionPartialForwardResult(originalModel, upstreamModel, streamResult.usage, resp.Header), err
+				}
 				if signal, ok := asOpenAICompactFallbackSignal(err); ok {
 					if retryBody, fallbackModel, retry := s.prepareOpenAICompactFallbackRetry(
 						c, account, requestedModel, body, http.StatusBadRequest, signal.message, signal.payload, compactModelFallbackRetried,

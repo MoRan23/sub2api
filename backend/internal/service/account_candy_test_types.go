@@ -83,6 +83,11 @@ type CandyTestExecution struct {
 	Completed           bool         `json:"completed"`
 	DurationMs          int64        `json:"duration_ms"`
 	Retries             int          `json:"retries,omitempty"`
+	// Attribution-only transport evidence. Never expose retry headers or raw
+	// response content through the Pelican/attribution history endpoints.
+	UpstreamStatus           int           `json:"-"`
+	RetryAfter               time.Duration `json:"-"`
+	AttributionAuthorization string        `json:"-"`
 }
 
 type CandyTestBatch struct {

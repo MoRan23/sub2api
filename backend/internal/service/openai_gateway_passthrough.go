@@ -370,7 +370,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		if resp.StatusCode >= 400 {
 			if isOpenAICandyTest(ctx) {
 				_ = resp.Body.Close()
-				return nil, candyTestError(fmt.Sprintf("upstream_http_%d", resp.StatusCode))
+				return nil, candyTestHTTPError(ctx, resp)
 			}
 			// Peek only to identify an invalid task. Restore the body so the existing
 			// passthrough error handling sees the same response after recovery fails.
@@ -433,6 +433,10 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			result, handleErr := s.handleStreamingResponsePassthrough(ctx, resp, c, account, startTime, reqModel, upstreamPassthroughModel)
 			completeCodexTelemetryHTTPResponse(resp, handleErr)
 			if handleErr != nil {
+				if isAttributionExecution(ctx) && result != nil {
+					_ = resp.Body.Close()
+					return attributionPartialForwardResult(reqModel, upstreamPassthroughModel, result.usage, resp.Header), handleErr
+				}
 				if retryBody, fallbackModel, retry := s.applyOpenAIPassthroughCompactFallbackFromSignal(
 					c, account, requestedModel, body, handleErr, compactModelFallbackRetried, resp,
 				); retry {
@@ -2139,6 +2143,19 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 	responseHeaders ...http.Header,
 ) *UpstreamFailoverError {
 	if isOpenAICandyTestContext(c) || isOpenAICandyTestAccount(account) {
+		if c != nil && c.Request != nil && isAttributionExecution(c.Request.Context()) {
+			failure := &UpstreamFailoverError{StatusCode: openAIStreamFailureStatus(payload, message)}
+			if status := attributionStreamStatus(payload); status != 0 {
+				failure.StatusCode = status
+				// Preserve only numeric evidence, not the generated response or
+				// arbitrary provider error text, across the diagnostic boundary.
+				failure.ResponseBody = []byte(fmt.Sprintf(`{"status_code":%d}`, status))
+			}
+			if len(responseHeaders) > 0 {
+				failure.ResponseHeaders = http.Header{"Retry-After": {responseHeaders[0].Get("Retry-After")}}
+			}
+			return failure
+		}
 		return &UpstreamFailoverError{StatusCode: openAIStreamFailureStatus(payload, message)}
 	}
 	message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message))
