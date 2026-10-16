@@ -2,6 +2,7 @@
   <BaseDialog :show="show" :title="t('attribution.column')" width="extra-wide" @close="emit('close')">
     <div class="space-y-5">
       <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('attribution.selected', { count: accountIds.length }) }} · {{ t('attribution.notice') }}</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('diagnosticDaybreak.notice') }}</p>
       <div class="space-y-2">
         <label for="manual-attribution-model" class="block text-sm font-medium">{{ t('attribution.model') }}</label>
         <Select id="manual-attribution-model" v-model="model" data-testid="manual-attribution-model" :aria-label="t('attribution.model')" :options="modelOptions" :searchable="true" creatable :disabled="creating" class="max-w-lg" :placeholder="t('attribution.manualModelDefault')" />

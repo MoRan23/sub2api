@@ -7,9 +7,11 @@ import admin from './admin'
 import misc from './misc'
 import { candyTestsEn } from '../candyTests'
 import { attributionEn } from '../modelAttribution'
+import { diagnosticDaybreakEn } from '../diagnosticDaybreak'
 
 export default {
   attribution: attributionEn,
+  diagnosticDaybreak: diagnosticDaybreakEn,
   candyTests: candyTestsEn,
   ...landing,
   ...common,

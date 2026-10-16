@@ -333,7 +333,7 @@ func enqueueAttribution(ctx context.Context, tx *sql.Tx, id int64, c service.Att
 	if a == nil {
 		return nil, service.ErrAttributionNotFound
 	}
-	s.Version = 2
+	s.Version = 3
 	s.Overrides.Model = model
 	if len(expectedModels) > 0 && expectedModels[0] != nil {
 		models := append([]string{}, (*expectedModels[0])...)
@@ -407,15 +407,60 @@ func (r *attributionRepository) Claim(ctx context.Context) (*service.Attribution
 			return nil, err
 		}
 	}
-	j, err := scanAttribution(tx.QueryRowContext(ctx, `UPDATE model_attribution_jobs SET status='running',reason='',started_at=COALESCE(started_at,NOW()),claim_id=$1,lease_until=NOW()+interval '45 seconds',next_attempt_at=NULL WHERE id=(SELECT id FROM model_attribution_jobs WHERE status='queued' OR (status='retry_wait' AND next_attempt_at<=NOW()) ORDER BY COALESCE(next_attempt_at,created_at),id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING `+attributionColumns, uuid.NewString()))
+	var jobID int64
+	var firstStart bool
+	err = tx.QueryRowContext(ctx, `SELECT id,status='queued' AND started_at IS NULL FROM model_attribution_jobs WHERE status='queued' OR (status='retry_wait' AND next_attempt_at<=NOW()) ORDER BY COALESCE(next_attempt_at,created_at),id LIMIT 1 FOR UPDATE SKIP LOCKED`).Scan(&jobID, &firstStart)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, tx.Commit()
 	}
 	if err != nil {
 		return nil, err
 	}
+	j, err := scanAttribution(tx.QueryRowContext(ctx, `UPDATE model_attribution_jobs SET status='running',reason='',started_at=COALESCE(started_at,NOW()),claim_id=$1,lease_until=NOW()+interval '45 seconds',next_attempt_at=NULL WHERE id=$2 RETURNING `+attributionColumns, uuid.NewString(), jobID))
+	if err != nil {
+		return nil, err
+	}
+	if firstStart && j.Snapshot.Version >= 3 && j.Snapshot.Daybreak == nil {
+		// Freeze business-account preferences only when execution first starts.
+		// Resumed 503 waits retain this snapshot, even if account settings changed.
+		preferences, err := attributionDaybreakPreferences(ctx, tx, j.AccountID)
+		if err != nil {
+			return nil, err
+		}
+		j.Snapshot.Daybreak = &preferences
+		snapshot, err := json.Marshal(j.Snapshot)
+		if err != nil {
+			return nil, err
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE model_attribution_jobs SET snapshot=$3 WHERE id=$1 AND claim_id=$2 AND status='running'`, j.ID, j.Claim, snapshot); err != nil {
+			return nil, err
+		}
+	}
 	return j, tx.Commit()
 }
+
+func attributionDaybreakPreferences(ctx context.Context, tx *sql.Tx, accountID int64) (service.DiagnosticDaybreakPreferences, error) {
+	a := &service.Account{ID: accountID}
+	var credentials, extra []byte
+	err := tx.QueryRowContext(ctx, `SELECT platform,type,credentials,extra FROM accounts WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, accountID).Scan(&a.Platform, &a.Type, &credentials, &extra)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Execution validation retains the existing account-missing outcome.
+		return service.DiagnosticDaybreakPreferences{}, nil
+	}
+	if err != nil {
+		return service.DiagnosticDaybreakPreferences{}, err
+	}
+	if err = json.Unmarshal(credentials, &a.Credentials); err != nil {
+		return service.DiagnosticDaybreakPreferences{}, err
+	}
+	if len(extra) != 0 {
+		if err = json.Unmarshal(extra, &a.Extra); err != nil {
+			return service.DiagnosticDaybreakPreferences{}, err
+		}
+	}
+	return service.ReadDiagnosticDaybreakPreferences(a), nil
+}
+
 func (r *attributionRepository) Heartbeat(ctx context.Context, j *service.AttributionJob) (bool, error) {
 	res, err := r.db.ExecContext(ctx, `UPDATE model_attribution_jobs SET lease_until=NOW()+interval '45 seconds' WHERE id=$1 AND claim_id=$2 AND status='running' AND lease_until>NOW()`, j.ID, j.Claim)
 	if err != nil {
@@ -616,6 +661,10 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 			} else if j.Snapshot.Version < 2 && skip == service.ErrDiagnosticRateLimited.Error() {
 				j.Status, j.Reason = "skipped", skip
 			}
+		} else if j.Snapshot.Version >= 3 && j.Snapshot.Daybreak != nil && *j.Snapshot.Daybreak != service.ReadDiagnosticDaybreakPreferences(a) {
+			j.Result.Action, j.Reason = "stale_policy", "daybreak_preferences_changed"
+		} else if issue := service.AttributionDaybreakIssue(j.Snapshot, j.Result); issue != "" {
+			j.Result.Action, j.Reason = "stale_policy", issue
 		} else if len(s.Policy.HighModels) == 0 || len(s.Policy.LowModels) == 0 {
 			// Manual diagnostics work before automatic allowlist management is set up.
 			// Never clear an account's mappings or mark an unapplied policy as synced.
@@ -631,12 +680,12 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 			j.Result.Action = "unchanged"
 			// Manual and initial tests may use a different probe from the periodic policy.
 			// Keep that baseline distinct so the next periodic result synchronizes it.
-			currentPolicy := service.AttributionPolicyDigest(j.Snapshot)
+			currentPolicy := service.AttributionResultPolicyDigest(j.Snapshot, j.Result)
+			if version != s.ConfigVersion || auth != s.Authorization || policy != currentPolicy {
+				previousPassStreak = 0
+			}
 			if j.Status == "passed" {
-				passStreak = 1
-				if version == s.ConfigVersion && auth == s.Authorization && policy == currentPolicy {
-					passStreak = min(previousPassStreak+1, 2)
-				}
+				passStreak = min(previousPassStreak+1, 2)
 				j.Result.PassStreak = passStreak
 				if passStreak < 2 {
 					j.Result.Action = "awaiting_confirmation"

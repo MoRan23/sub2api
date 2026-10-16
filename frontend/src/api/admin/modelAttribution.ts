@@ -1,4 +1,5 @@
 import { apiClient } from '../client'
+import type { DiagnosticDaybreakEvidence, DiagnosticDaybreakPreferences } from '@/types/diagnosticDaybreak'
 
 export interface AttributionPolicy { model: string; expected_models?: string[]; high_models: string[]; low_models: string[] }
 export interface AttributionGroup extends AttributionPolicy { group_id: number; enabled: boolean }
@@ -14,7 +15,7 @@ export interface AttributionJob {
   source: string
   status: AttributionStatus
   reason?: string
-  snapshot: { version?: number; config_version: number; group_id: number; policy: AttributionPolicy; detector?: AttributionDetector }
+  snapshot: { version?: number; config_version: number; group_id: number; policy: AttributionPolicy; detector?: AttributionDetector; daybreak?: DiagnosticDaybreakPreferences }
   result: {
     analysis?: { prediction: string; probability: number | null; ranking_score?: number; probability_status?: string; method?: string; detector?: AttributionDetector; used_outputs: number; results?: { model: string; probability: number | null; score?: number }[]; diagnostics?: { index: number; accepted: boolean; parsed_numbers: number; minimum_numbers: number }[] }
     duration_ms: number
@@ -27,6 +28,7 @@ export interface AttributionJob {
     actual_models?: string[]
     upstream_models?: string[]
     usage?: ({ input_tokens: number; output_tokens: number } | null)[]
+    daybreak?: (DiagnosticDaybreakEvidence | null)[]
   }
   created_at: string
   started_at?: string

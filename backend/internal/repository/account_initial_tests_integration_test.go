@@ -286,18 +286,19 @@ func TestAttributionNewAccountGroupPolicyAndBaseline(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, valid)
 	j.Status = "passed"
+	attributionSuccessfulProbeEvidence(j, "")
 	require.NoError(t, r.Finish(ctx, j))
 	require.Equal(t, "awaiting_confirmation", j.Result.Action)
 	require.NotContains(t, attributionMapping(t, ar, a.ID), "group-high")
 	var digest string
 	require.NoError(t, integrationDB.QueryRow(`SELECT policy_digest FROM model_attribution_state WHERE account_id=$1`, a.ID).Scan(&digest))
-	require.Equal(t, service.AttributionPolicyDigest(j.Snapshot), digest)
+	require.Equal(t, service.AttributionResultPolicyDigest(j.Snapshot, j.Result), digest)
 	j = attributionRun(t, r, a.ID, "passed")
 	require.Equal(t, "periodic-model", j.Snapshot.Policy.Model)
 	require.Equal(t, "awaiting_confirmation", j.Result.Action, "the initial probe's pass does not count for a different periodic model")
 	require.NotContains(t, attributionMapping(t, ar, a.ID), "group-high")
 	require.NoError(t, integrationDB.QueryRow(`SELECT policy_digest FROM model_attribution_state WHERE account_id=$1`, a.ID).Scan(&digest))
-	require.Equal(t, service.AttributionPolicyDigest(j.Snapshot), digest)
+	require.Equal(t, service.AttributionResultPolicyDigest(j.Snapshot, j.Result), digest)
 	require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
 	require.Contains(t, attributionMapping(t, ar, a.ID), "group-high")
 }

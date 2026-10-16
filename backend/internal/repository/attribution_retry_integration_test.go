@@ -124,11 +124,13 @@ func TestAttributionRetryWaitRecoveryAndClaimFences(t *testing.T) {
 	require.Equal(t, j.Result, resumed.Result, "checkpointing must not double-count usage")
 	require.Nil(t, resumed.NextAttemptAt)
 	j.Status = "passed"
+	attributionSuccessfulProbeEvidence(j, "")
 	require.NoError(t, r.Finish(ctx, j))
 	still, err := r.Get(ctx, j.ID)
 	require.NoError(t, err)
 	require.Equal(t, "running", still.Status)
 	resumed.Status = "passed"
+	attributionSuccessfulProbeEvidence(resumed, "")
 	require.NoError(t, r.Finish(ctx, resumed))
 	ended, err := r.Get(ctx, j.ID)
 	require.NoError(t, err)
@@ -172,6 +174,7 @@ func TestAttributionCancelIsIdempotentAndFencesWorkers(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, cancelled, again)
 			j.Status = "passed"
+			attributionSuccessfulProbeEvidence(j, "")
 			require.NoError(t, r.Finish(ctx, j))
 			require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
 			require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
@@ -234,6 +237,7 @@ func TestAttributionOperationalChangesDoNotInterruptAndCompatibleGroupsApply(t *
 	require.NoError(t, err)
 	require.True(t, valid)
 	j.Status = "passed"
+	attributionSuccessfulProbeEvidence(j, "")
 	require.NoError(t, r.Finish(ctx, j))
 	require.Equal(t, "high", j.Result.Action)
 	require.Equal(t, 2, j.Result.PassStreak, "equivalent policy across groups retains the first pass")
@@ -275,6 +279,7 @@ func TestAttributionChangedPolicyOrMappingRecordsVerdictOnly(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, valid)
 			j.Status = "mismatch"
+			attributionSuccessfulProbeEvidence(j, "")
 			require.NoError(t, r.Finish(ctx, j))
 			require.Equal(t, "mismatch", j.Status)
 			require.Equal(t, "stale_policy", j.Result.Action)
@@ -419,6 +424,7 @@ func TestAttributionOverridesSurviveChangedInheritedPolicy(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, valid)
 			j.Status = "passed"
+			attributionSuccessfulProbeEvidence(j, "")
 			require.NoError(t, r.Finish(ctx, j))
 			if explicitEmpty {
 				require.Equal(t, "awaiting_confirmation", j.Result.Action)

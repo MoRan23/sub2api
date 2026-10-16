@@ -10,6 +10,10 @@
         <dd class="mt-1 break-words text-gray-800 dark:text-gray-200">{{ field.value }}</dd>
       </div>
     </dl>
+    <section class="space-y-2" :aria-label="t('diagnosticDaybreak.title')">
+      <h4 class="text-sm font-medium">{{ t('diagnosticDaybreak.title') }}</h4>
+      <DiagnosticDaybreakEvidence :evidence="item.execution?.daybreak" />
+    </section>
     <p v-if="item.execution?.model_conflict" class="text-xs text-amber-600 dark:text-amber-400">{{ t('candyTests.modelConflict') }}</p>
     <p v-if="item.failure_code" role="status" class="break-words text-sm text-gray-600 dark:text-gray-300">
       {{ t('candyTests.error') }}: {{ failureReason }}
@@ -38,6 +42,7 @@ import { PELICAN_TEST_PROMPT_VERSION } from '@/api/admin/candyTests'
 import PelicanHTMLPreview from './PelicanHTMLPreview.vue'
 import { formatDateTime } from '@/utils/format'
 import AccountCandyTestStatus from './AccountCandyTestStatus.vue'
+import DiagnosticDaybreakEvidence from './DiagnosticDaybreakEvidence.vue'
 
 const props = withDefaults(defineProps<{ item: CandyTestItem; expanded?: boolean }>(), { expanded: false })
 const { t, te } = useI18n()

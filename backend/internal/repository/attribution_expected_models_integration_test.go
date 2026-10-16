@@ -77,6 +77,7 @@ func TestAttributionExpectedModelsConsecutivePassesAndFence(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, j)
 		j.Status = "passed"
+		attributionSuccessfulProbeEvidence(j, "")
 		j.Result.Analysis = &service.AttributionAnalysis{Prediction: winner}
 		require.NoError(t, r.Finish(ctx, j))
 		return j
@@ -97,6 +98,7 @@ func TestAttributionExpectedModelsConsecutivePassesAndFence(t *testing.T) {
 	_, err = r.SaveConfig(ctx, c)
 	require.NoError(t, err)
 	old.Status = "passed"
+	attributionSuccessfulProbeEvidence(old, "")
 	require.NoError(t, r.Finish(ctx, old))
 	require.Equal(t, "stale_policy", old.Result.Action)
 	require.Equal(t, []string{"first", "second"}, old.Snapshot.Policy.ExpectedModels)

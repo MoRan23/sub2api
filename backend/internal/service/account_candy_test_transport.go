@@ -52,8 +52,12 @@ func (r *AccountCandyTestTransport) Probe(ctx context.Context, accountID int64, 
 
 func (r *AccountCandyTestTransport) executeTextProbe(parent context.Context, item *CandyTestItem, prompt, instructions string, checkCatalog bool) (*CandyTestExecution, error) {
 	var authorization func(context.Context) error
+	var preferences *DiagnosticDaybreakPreferences
+	if frozen, ok := diagnosticDaybreakPreferencesFromContext(parent); ok && !checkCatalog {
+		preferences = &frozen
+	}
 	if !checkCatalog && isAttributionExecution(parent) {
-		return r.executeTextProbeOnce(parent, item, prompt, instructions, false, &authorization)
+		return r.executeTextProbeOnce(parent, item, prompt, instructions, false, &authorization, &preferences)
 	}
 	return retryDiagnostic(parent, time.Second, func(ctx context.Context) (*CandyTestExecution, error) {
 		if authorization != nil {
@@ -61,11 +65,11 @@ func (r *AccountCandyTestTransport) executeTextProbe(parent context.Context, ite
 				return nil, err
 			}
 		}
-		return r.executeTextProbeOnce(ctx, item, prompt, instructions, checkCatalog, &authorization)
+		return r.executeTextProbeOnce(ctx, item, prompt, instructions, checkCatalog, &authorization, &preferences)
 	})
 }
 
-func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context, item *CandyTestItem, prompt, instructions string, checkCatalog bool, authorization *func(context.Context) error) (*CandyTestExecution, error) {
+func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context, item *CandyTestItem, prompt, instructions string, checkCatalog bool, authorization *func(context.Context) error, preferences **DiagnosticDaybreakPreferences) (*CandyTestExecution, error) {
 	started := time.Now()
 	if r == nil || r.accounts == nil || r.gateway == nil || item == nil {
 		return nil, candyTestError("runner_unavailable")
@@ -76,6 +80,10 @@ func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context,
 	}
 	if account.Platform != PlatformOpenAI {
 		return nil, candyTestError("unsupported_platform")
+	}
+	if checkCatalog && *preferences == nil {
+		frozen := ReadDiagnosticDaybreakPreferences(account)
+		*preferences = &frozen
 	}
 	if !isManualAttribution(parent) && AccountDiagnosticRateLimited(account, item.Model, time.Now()) {
 		return nil, ErrDiagnosticRateLimited
@@ -103,6 +111,9 @@ func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context,
 	defer cancel()
 	attempt := &openAICandyTestAttempt{}
 	ctx = withOpenAICandyTest(ctx, attempt)
+	if *preferences != nil {
+		ctx = withDiagnosticDaybreakAttempt(ctx, **preferences)
+	}
 	ctx = WithHTTPUpstreamRedirectsDisabled(ctx)
 	// An unknown ingress OS deliberately selects the account default, never the
 	// administrator's browser or the server's own operating system.
@@ -256,7 +267,8 @@ func (r *AccountCandyTestTransport) executeTextProbeOnce(parent context.Context,
 	writer.finish()
 	execution := &CandyTestExecution{RequestedModel: item.Model, ReasoningEffort: item.ReasoningEffort,
 		ResponseText: writer.answer(), Completed: writer.completed && !writer.failed, DurationMs: time.Since(started).Milliseconds(),
-		UpstreamModel: observedUpstreamResponseModel(c), ModelConflict: observedUpstreamResponseModelConflict(c), AttributionAuthorization: authorizationDigest}
+		UpstreamModel: observedUpstreamResponseModel(c), ModelConflict: observedUpstreamResponseModelConflict(c), AttributionAuthorization: authorizationDigest,
+		Daybreak: diagnosticDaybreakEvidenceFromContext(ctx)}
 	attempt.mu.Lock()
 	execution.ActualModel = attempt.actualModel
 	execution.ReasoningEffort = attempt.actualEffort

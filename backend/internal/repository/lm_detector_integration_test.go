@@ -45,6 +45,7 @@ func TestAttributionDetectorMigrationAndLateResult(t *testing.T) {
 	require.Equal(t, "failed", ended.Status)
 	require.Equal(t, "detector_changed", ended.Reason)
 	pending.Status = "passed"
+	attributionSuccessfulProbeEvidence(pending, "")
 	require.NoError(t, r.Finish(ctx, pending))
 	require.Equal(t, before, attributionMapping(t, ar, a.ID))
 	var streak int
@@ -79,6 +80,7 @@ func TestAttributionDetectorVersionFenceAndStreak(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, valid, "execution validation only checks upstream authorization; detector checks remain at the analyzer boundary")
 	old.Status = "passed"
+	attributionSuccessfulProbeEvidence(old, "")
 	require.NoError(t, r.Finish(ctx, old))
 	require.Equal(t, "stale_policy", old.Result.Action)
 	require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))

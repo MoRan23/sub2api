@@ -192,6 +192,10 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 		}
 		return
 	}
+	if j.Snapshot.Version >= 3 && j.Snapshot.Daybreak == nil {
+		j.Status, j.Reason = "failed", "daybreak_evidence_missing"
+		return
+	}
 	c, err := s.repo.Config(ctx)
 	if err != nil {
 		j.Reason = "configuration_unavailable"
@@ -257,6 +261,9 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 		}
 		return nil
 	})
+	if j.Snapshot.Version >= 3 {
+		probeBaseCtx = withDiagnosticDaybreakPreferences(probeBaseCtx, *j.Snapshot.Daybreak)
+	}
 	for len(cp.Outputs) < len(cp.Challenges) {
 		if cp.RemainingBudgetMS <= 0 {
 			j.Status, j.Reason = "failed", "timeout"
@@ -363,6 +370,15 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 			j.Status = "failed"
 			j.Reason = "probe_model_changed"
 			return
+		}
+		if j.Snapshot.Version >= 3 {
+			for len(j.Result.Daybreak) <= index {
+				j.Result.Daybreak = append(j.Result.Daybreak, nil)
+			}
+			if execution.Daybreak != nil {
+				evidence := *execution.Daybreak
+				j.Result.Daybreak[index] = &evidence
+			}
 		}
 		cp.Outputs = append(cp.Outputs, AttributionOutput{Text: execution.ResponseText, ExpectedCount: challenge.ExpectedCount})
 		cp.OrdinaryRetries, cp.UnavailableRetries = 0, 0

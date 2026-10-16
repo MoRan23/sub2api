@@ -5,6 +5,7 @@
         <p class="font-medium text-gray-800 dark:text-gray-200">{{ t('candyTests.selected', { count: frozenAccountIds.length }) }}</p>
         <p>{{ t('candyTests.description') }}</p>
         <p>{{ t('candyTests.backgroundNotice') }}</p>
+        <p>{{ t('diagnosticDaybreak.notice') }}</p>
       </div>
 
       <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">{{ error }}</p>

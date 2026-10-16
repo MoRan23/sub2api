@@ -72,17 +72,18 @@ type CandyTestItem struct {
 }
 
 type CandyTestExecution struct {
-	ResponseText        string       `json:"-"`
-	RequestedModel      string       `json:"requested_model"`
-	ActualModel         string       `json:"actual_model"`
-	UpstreamModel       string       `json:"upstream_model"`
-	ReasoningEffort     string       `json:"reasoning_effort"`
-	ModelConflict       bool         `json:"model_conflict"`
-	ModelEvidenceSource string       `json:"model_evidence_source"`
-	Usage               *OpenAIUsage `json:"usage,omitempty"`
-	Completed           bool         `json:"completed"`
-	DurationMs          int64        `json:"duration_ms"`
-	Retries             int          `json:"retries,omitempty"`
+	ResponseText        string                      `json:"-"`
+	RequestedModel      string                      `json:"requested_model"`
+	ActualModel         string                      `json:"actual_model"`
+	UpstreamModel       string                      `json:"upstream_model"`
+	ReasoningEffort     string                      `json:"reasoning_effort"`
+	ModelConflict       bool                        `json:"model_conflict"`
+	ModelEvidenceSource string                      `json:"model_evidence_source"`
+	Usage               *OpenAIUsage                `json:"usage,omitempty"`
+	Completed           bool                        `json:"completed"`
+	DurationMs          int64                       `json:"duration_ms"`
+	Retries             int                         `json:"retries,omitempty"`
+	Daybreak            *DiagnosticDaybreakEvidence `json:"daybreak,omitempty"`
 	// Attribution-only transport evidence. Never expose retry headers or raw
 	// response content through the Pelican/attribution history endpoints.
 	UpstreamStatus           int           `json:"-"`

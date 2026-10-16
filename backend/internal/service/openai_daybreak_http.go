@@ -13,9 +13,25 @@ import (
 // prepareOpenAIDaybreakHTTPRequest is the last-resort HTTP send guard, including
 // API-key, Engine and diagnostic routes that do not use the OAuth finalizer.
 // It never enables automatic injection and never changes the retry source.
-func prepareOpenAIDaybreakHTTPRequest(request *http.Request, account *Account, settings *SettingService) error {
+func prepareOpenAIDaybreakHTTPRequest(request *http.Request, account *Account, settings *SettingService) (resultErr error) {
 	if request == nil || account == nil || account.Platform != PlatformOpenAI {
 		return nil
+	}
+	defer func() {
+		if resultErr == nil {
+			recordDiagnosticDaybreakHTTPRequest(request, account)
+		}
+	}()
+	if diagnosticDaybreakHTTPRequest(request) {
+		if _, diagnostic := diagnosticDaybreakInferencePreferences(request.Context(), account); diagnostic {
+			body, err := openAIDaybreakHTTPRequestBody(request)
+			if err != nil {
+				return err
+			}
+			if diagnosticDaybreakInferenceBody(body) {
+				return nil
+			}
+		}
 	}
 	freezeOpenAIDaybreakPolicyOnRequest(request, settings)
 	if openAIDaybreakPolicyEnabled(request.Context(), settings) {

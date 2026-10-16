@@ -1,4 +1,5 @@
 import { apiClient } from '../client'
+import type { DiagnosticDaybreakEvidence } from '@/types/diagnosticDaybreak'
 
 export const PELICAN_TEST_PROMPT_VERSION = 'pelican-v1'
 
@@ -39,6 +40,7 @@ export interface CandyTestExecution {
   completed: boolean
   duration_ms: number
   retries?: number
+  daybreak?: DiagnosticDaybreakEvidence
 }
 
 export interface CandyTestItem {

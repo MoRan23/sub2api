@@ -46,6 +46,19 @@ func attributionFixture(t *testing.T) (*attributionRepository, *accountRepositor
 func integrationAttributionDetector() *service.AttributionDetector {
 	return &service.AttributionDetector{Provider: "lm_fingerprint_detector", Protocol: 1, Revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Algorithm: "shared-detector-v1", BankBuiltAt: "2026-10-03T00:00:00Z", ReferenceSHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", RankerSHA256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", CalibrationSHA256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}
 }
+
+// Existing repository tests synthesize an analyzed round without executing the
+// gateway. Supply its successful send evidence explicitly for the v3 contract.
+func attributionSuccessfulProbeEvidence(j *service.AttributionJob, cyber string) {
+	if j.Snapshot.Version < 3 {
+		return
+	}
+	j.Result.CompletedProbes = 3
+	j.Result.Daybreak = make([]*service.DiagnosticDaybreakEvidence, 3)
+	for i := range j.Result.Daybreak {
+		j.Result.Daybreak[i] = &service.DiagnosticDaybreakEvidence{Cyber: cyber, Reason: "test_evidence"}
+	}
+}
 func attributionRun(t *testing.T, r *attributionRepository, id int64, status string) *service.AttributionJob {
 	t.Helper()
 	ctx := context.Background()
@@ -57,6 +70,7 @@ func attributionRun(t *testing.T, r *attributionRepository, id int64, status str
 	require.NotNil(t, j)
 	require.Equal(t, jobs[0].ID, j.ID)
 	j.Status = status
+	attributionSuccessfulProbeEvidence(j, "")
 	require.NoError(t, r.Finish(ctx, j))
 	got, err := r.Get(ctx, j.ID)
 	require.NoError(t, err)
@@ -104,6 +118,7 @@ func TestAttributionAPIKeyManualOnly(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, valid)
 	j.Status = "mismatch"
+	attributionSuccessfulProbeEvidence(j, "")
 	require.NoError(t, r.Finish(ctx, j))
 	require.Equal(t, map[string]any{"low": "low", "alias": "custom"}, attributionMapping(t, ar, a.ID))
 	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
@@ -205,6 +220,7 @@ func TestAttributionCodexEnginePeriodicScheduling(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, valid, "switching back to generic invalidates scheduled Engine work")
 	job.Status = "passed"
+	attributionSuccessfulProbeEvidence(job, "")
 	require.NoError(t, r.Finish(ctx, job))
 	require.Equal(t, "stale", job.Result.Action)
 	require.Equal(t, "failed", job.Status)
@@ -232,6 +248,7 @@ func TestAttributionAPIKeyConfigurationFence(t *testing.T) {
 			require.NoError(t, err)
 			require.False(t, valid)
 			j.Status = "passed"
+			attributionSuccessfulProbeEvidence(j, "")
 			require.NoError(t, r.Finish(ctx, j))
 			stale, err := r.Get(ctx, j.ID)
 			require.NoError(t, err)
@@ -315,6 +332,7 @@ func TestAttributionTransitionsAtomicityAndCache(t *testing.T) {
 	})
 	before := attributionMapping(t, ar, a.ID)
 	pending.Status = "mismatch"
+	attributionSuccessfulProbeEvidence(pending, "")
 	require.Error(t, r.Finish(ctx, pending))
 	require.Equal(t, before, attributionMapping(t, ar, a.ID))
 	var verdict string
@@ -343,6 +361,7 @@ func TestAttributionFencesRefreshAndGroupBaseline(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, valid)
 	j.Status = "passed"
+	attributionSuccessfulProbeEvidence(j, "")
 	require.NoError(t, r.Finish(ctx, j))
 	require.Equal(t, "awaiting_confirmation", j.Result.Action)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET credentials=jsonb_set(credentials,'{access_token}','"rotated-again"') WHERE id=$1`, a.ID)
@@ -376,6 +395,7 @@ func TestAttributionFencesRefreshAndGroupBaseline(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, mutation != "authorization", valid)
 			j.Status = "mismatch"
+			attributionSuccessfulProbeEvidence(j, "")
 			require.NoError(t, r.Finish(ctx, j))
 			switch mutation {
 			case "authorization":
@@ -514,6 +534,7 @@ func TestAttributionQueueLeasesRetentionAndRestart(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "interrupted", expired.Reason)
 	old.Status = "passed"
+	attributionSuccessfulProbeEvidence(old, "")
 	require.NoError(t, r.Finish(ctx, old))
 	expired, err = r.Get(ctx, old.ID)
 	require.NoError(t, err)
@@ -633,6 +654,7 @@ func TestAttributionManualOverrideWithoutAutomaticEligibility(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, valid)
 	j.Status = "mismatch"
+	attributionSuccessfulProbeEvidence(j, "")
 	require.NoError(t, r.Finish(ctx, j))
 	require.Equal(t, "unconfigured", j.Result.Action)
 	require.Equal(t, before, attributionMapping(t, ar, a.ID))
@@ -655,6 +677,7 @@ func TestAttributionManualOverrideWithoutAutomaticEligibility(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, j)
 	j.Status = "passed"
+	attributionSuccessfulProbeEvidence(j, "")
 	require.NoError(t, r.Finish(ctx, j))
 	require.Equal(t, "awaiting_confirmation", j.Result.Action)
 	require.Equal(t, before, attributionMapping(t, ar, a.ID))
@@ -664,11 +687,12 @@ func TestAttributionManualOverrideWithoutAutomaticEligibility(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, j)
 	j.Status = "passed"
+	attributionSuccessfulProbeEvidence(j, "")
 	require.NoError(t, r.Finish(ctx, j))
 	require.Equal(t, "high", j.Result.Action)
 	var policyDigest string
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT policy_digest FROM model_attribution_state WHERE account_id=$1`, a.ID).Scan(&policyDigest))
-	require.Equal(t, service.AttributionPolicyDigest(j.Snapshot), policyDigest)
+	require.Equal(t, service.AttributionResultPolicyDigest(j.Snapshot, j.Result), policyDigest)
 	require.NotEqual(t, service.AttributionDigest([]any{j.Snapshot.GroupID, c.Default}), policyDigest, "different manual probes must not satisfy the automatic baseline")
 }
 
@@ -701,6 +725,7 @@ func TestAttributionManualShadowAuthorizationFence(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, valid, "reauthorizing the credential owner invalidates the shadow probe")
 	j.Status = "mismatch"
+	attributionSuccessfulProbeEvidence(j, "")
 	require.NoError(t, r.Finish(ctx, j))
 	require.Equal(t, "stale", j.Result.Action)
 	require.Equal(t, "failed", j.Status)

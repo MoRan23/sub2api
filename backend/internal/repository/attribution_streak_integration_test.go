@@ -40,6 +40,7 @@ func TestAttributionConsecutivePassRestartAndDuplicateFinish(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, j)
 	j.Status = "passed"
+	attributionSuccessfulProbeEvidence(j, "")
 	require.NoError(t, r.Finish(ctx, j))
 	require.Equal(t, "awaiting_confirmation", j.Result.Action)
 	// A different process and a duplicate completion must not count as another pass.
@@ -140,6 +141,7 @@ func TestAttributionConfirmationRollback(t *testing.T) {
 	var before, after int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM scheduler_outbox WHERE account_id=$1`, a.ID).Scan(&before))
 	j.Status = "passed"
+	attributionSuccessfulProbeEvidence(j, "")
 	require.Error(t, r.Finish(ctx, j))
 	var streak int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT pass_streak FROM model_attribution_state WHERE account_id=$1`, a.ID).Scan(&streak))

@@ -110,6 +110,55 @@ func AttributionPolicyDigest(s AttributionSnapshot) string {
 	return AttributionDigest([]any{s.GroupID, p, s.Detector})
 }
 
+// AttributionDaybreakCondition compares the actual successful probe requests,
+// not the account's desired preferences or failed physical attempts.
+func AttributionDaybreakCondition(result AttributionResult) (string, bool) {
+	if result.CompletedProbes != 3 || len(result.Daybreak) != 3 {
+		return "", false
+	}
+	cyber := ""
+	for i, evidence := range result.Daybreak {
+		if evidence == nil || (evidence.Cyber != "" && evidence.Cyber != "daybreak_blue" && evidence.Cyber != "daybreak_red") {
+			return "", false
+		}
+		if i == 0 {
+			cyber = evidence.Cyber
+		} else if evidence.Cyber != cyber {
+			return "", false
+		}
+	}
+	return cyber, true
+}
+
+func AttributionDaybreakIssue(snapshot AttributionSnapshot, result AttributionResult) string {
+	if snapshot.Version < 3 {
+		return ""
+	}
+	if snapshot.Daybreak == nil || result.CompletedProbes != 3 || len(result.Daybreak) != 3 {
+		return "daybreak_evidence_missing"
+	}
+	for _, evidence := range result.Daybreak {
+		if evidence == nil || (evidence.Cyber != "" && evidence.Cyber != "daybreak_blue" && evidence.Cyber != "daybreak_red") {
+			return "daybreak_evidence_missing"
+		}
+	}
+	if _, consistent := AttributionDaybreakCondition(result); !consistent {
+		return "daybreak_conditions_mixed"
+	}
+	return ""
+}
+
+// AttributionResultPolicyDigest is a consecutive-pass baseline. Keep it separate
+// from policy comparison so a current configuration need not invent wire evidence.
+func AttributionResultPolicyDigest(snapshot AttributionSnapshot, result AttributionResult) string {
+	policy := AttributionPolicyDigest(snapshot)
+	if snapshot.Version < 3 {
+		return policy
+	}
+	cyber, consistent := AttributionDaybreakCondition(result)
+	return AttributionDigest([]any{3, policy, snapshot.Daybreak, cyber, consistent})
+}
+
 type AttributionConfig struct {
 	Version         int64                    `json:"version"`
 	Enabled         bool                     `json:"enabled"`
@@ -393,28 +442,30 @@ type AttributionAnalysis struct {
 	Diagnostics       []AttributionDiagnostic `json:"diagnostics"`
 }
 type AttributionSnapshot struct {
-	Version       int                     `json:"version,omitempty"`
-	Overrides     AttributionProbeOptions `json:"overrides"`
-	MappingDigest string                  `json:"mapping_digest,omitempty"`
-	ConfigVersion int64                   `json:"config_version"`
-	GroupID       int64                   `json:"group_id"`
-	Policy        AttributionPolicy       `json:"policy"`
-	Detector      *AttributionDetector    `json:"detector,omitempty"`
-	Authorization string                  `json:"-"`
-	Fence         string                  `json:"-"`
+	Version       int                            `json:"version,omitempty"`
+	Daybreak      *DiagnosticDaybreakPreferences `json:"daybreak,omitempty"`
+	Overrides     AttributionProbeOptions        `json:"overrides"`
+	MappingDigest string                         `json:"mapping_digest,omitempty"`
+	ConfigVersion int64                          `json:"config_version"`
+	GroupID       int64                          `json:"group_id"`
+	Policy        AttributionPolicy              `json:"policy"`
+	Detector      *AttributionDetector           `json:"detector,omitempty"`
+	Authorization string                         `json:"-"`
+	Fence         string                         `json:"-"`
 }
 type AttributionResult struct {
-	CompletedProbes int                  `json:"completed_probes"`
-	Analysis        *AttributionAnalysis `json:"analysis,omitempty"`
-	Usage           []*OpenAIUsage       `json:"usage,omitempty"`
-	ActualModels    []string             `json:"actual_models,omitempty"`
-	UpstreamModels  []string             `json:"upstream_models,omitempty"`
-	DurationMS      int64                `json:"duration_ms"`
-	Retries         int                  `json:"retries,omitempty"`
-	Action          string               `json:"action"`
-	PassStreak      int                  `json:"pass_streak,omitempty"`
-	Before          map[string]any       `json:"before,omitempty"`
-	After           map[string]any       `json:"after,omitempty"`
+	CompletedProbes int                           `json:"completed_probes"`
+	Daybreak        []*DiagnosticDaybreakEvidence `json:"daybreak,omitempty"`
+	Analysis        *AttributionAnalysis          `json:"analysis,omitempty"`
+	Usage           []*OpenAIUsage                `json:"usage,omitempty"`
+	ActualModels    []string                      `json:"actual_models,omitempty"`
+	UpstreamModels  []string                      `json:"upstream_models,omitempty"`
+	DurationMS      int64                         `json:"duration_ms"`
+	Retries         int                           `json:"retries,omitempty"`
+	Action          string                        `json:"action"`
+	PassStreak      int                           `json:"pass_streak,omitempty"`
+	Before          map[string]any                `json:"before,omitempty"`
+	After           map[string]any                `json:"after,omitempty"`
 }
 type AttributionJob struct {
 	ID            int64                  `json:"id"`

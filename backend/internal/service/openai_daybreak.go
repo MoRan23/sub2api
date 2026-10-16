@@ -101,7 +101,7 @@ func openAIDaybreakModelSupported(model OpenAIDaybreakModel, capabilities CodexM
 // catalog itself still uses the normal cache, singleflight and observations.
 func openAIModelsTokenContext(ctx context.Context, auxiliary bool) context.Context {
 	if auxiliary {
-		return withOpenAICandyTest(ctx, &openAICandyTestAttempt{})
+		return withOpenAICandyTest(withoutDiagnosticDaybreakAttempt(ctx), &openAICandyTestAttempt{})
 	}
 	return ctx
 }
@@ -112,7 +112,7 @@ func (s *OpenAIGatewayService) fetchOpenAIDaybreakCatalog(ctx context.Context, a
 	if s == nil || !IsOpenAIDaybreakAccount(account) {
 		return nil, nil, infraerrors.New(http.StatusBadRequest, "OPENAI_DAYBREAK_ACCOUNT_UNSUPPORTED", "Daybreak settings require an OpenAI OAuth account")
 	}
-	ctx, cancel := context.WithTimeout(ctx, codexModelsManifestRequestTimeout)
+	ctx, cancel := context.WithTimeout(withoutDiagnosticDaybreakAttempt(ctx), codexModelsManifestRequestTimeout)
 	defer cancel()
 	credential, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {
@@ -224,7 +224,9 @@ func (s *OpenAIGatewayService) applyOpenAIDaybreakWithContext(ctx context.Contex
 	if s != nil {
 		settings = s.settingService
 	}
-	if !openAIDaybreakPolicyEnabled(ctx, settings) {
+	preferences, diagnostic := diagnosticDaybreakInferencePreferences(ctx, account)
+	diagnostic = diagnostic && diagnosticDaybreakInferenceBody(body)
+	if !diagnostic && !openAIDaybreakPolicyEnabled(ctx, settings) {
 		patched, changed, err := stripOpenAIRequestCyber(body)
 		if changed {
 			return patched, "global_disabled_stripped", err
@@ -242,7 +244,10 @@ func (s *OpenAIGatewayService) applyOpenAIDaybreakWithContext(ctx context.Contex
 	if !IsOpenAIDaybreakAccount(account) {
 		return body, "not_oauth", nil
 	}
-	if !openAIDaybreakEnabled(account, OpenAIDaybreakBlueEnabledKey) {
+	if !diagnostic {
+		preferences = ReadDiagnosticDaybreakPreferences(account)
+	}
+	if !preferences.Blue {
 		return body, "blue_disabled", nil
 	}
 	if s == nil {
@@ -252,18 +257,20 @@ func (s *OpenAIGatewayService) applyOpenAIDaybreakWithContext(ctx context.Contex
 	if !recognized {
 		return body, "unrecognized_model", nil
 	}
-	if model.RequiredTier == "red" && !openAIDaybreakEnabled(account, OpenAIDaybreakRedEnabledKey) {
+	if model.RequiredTier == "red" && !preferences.Red {
 		return body, "red_disabled", nil
 	}
-	group := s.openAIDaybreakGroup(ctx, c)
-	if group == nil {
-		return body, "group_unavailable", nil
-	}
-	if !group.OpenAIDaybreakBlueEnabled {
-		return body, "group_blue_disabled", nil
-	}
-	if model.RequiredTier == "red" && !group.OpenAIDaybreakRedEnabled {
-		return body, "group_red_disabled", nil
+	if !diagnostic {
+		group := s.openAIDaybreakGroup(ctx, c)
+		if group == nil {
+			return body, "group_unavailable", nil
+		}
+		if !group.OpenAIDaybreakBlueEnabled {
+			return body, "group_blue_disabled", nil
+		}
+		if model.RequiredTier == "red" && !group.OpenAIDaybreakRedEnabled {
+			return body, "group_red_disabled", nil
+		}
 	}
 	capabilities := s.openAICodexModelCapabilities(openAICodexModelCapabilitiesNamespace(account), model.Model)
 	if !capabilities.Known {

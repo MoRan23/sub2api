@@ -7,9 +7,11 @@ import admin from './admin'
 import misc from './misc'
 import { candyTestsZh } from '../candyTests'
 import { attributionZh } from '../modelAttribution'
+import { diagnosticDaybreakZh } from '../diagnosticDaybreak'
 
 export default {
   attribution: attributionZh,
+  diagnosticDaybreak: diagnosticDaybreakZh,
   candyTests: candyTestsZh,
   ...landing,
   ...common,

@@ -12,11 +12,19 @@
       <div v-if="job.result.retries !== undefined"><dt class="text-gray-500">{{ t('attribution.retries') }}</dt><dd>{{ job.result.retries }}</dd></div>
       <div v-if="job.status === 'retry_wait' && job.next_attempt_at"><dt class="text-gray-500">{{ t('attribution.nextAttempt') }}</dt><dd>{{ formatDateTime(job.next_attempt_at) }}</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.action') }}</dt><dd>{{ t(`attribution.actions.${job.result.action || 'none'}`) }}</dd></div>
+      <div v-if="job.snapshot.daybreak"><dt class="text-gray-500">{{ t('diagnosticDaybreak.preferences') }}</dt><dd>Blue: {{ t(job.snapshot.daybreak.blue ? 'diagnosticDaybreak.enabled' : 'diagnosticDaybreak.disabled') }} / Red: {{ t(job.snapshot.daybreak.red ? 'diagnosticDaybreak.enabled' : 'diagnosticDaybreak.disabled') }}</dd></div>
       <div v-if="job.result.pass_streak !== undefined"><dt class="text-gray-500">{{ t('attribution.passStreak') }}</dt><dd data-testid="attribution-pass-streak">{{ job.result.pass_streak }} / 2</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.source') }}</dt><dd>{{ t(`attribution.${job.source}`) }}</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.detectorSource') }}</dt><dd>{{ job.snapshot.detector ? 'LM Fingerpoint Detector' : 'ModelTrace' }}</dd></div>
       <div v-if="job.snapshot.detector"><dt class="text-gray-500">{{ t('attribution.detectorVersion') }}</dt><dd class="break-all">{{ job.snapshot.detector.revision.slice(0, 12) }} · {{ job.snapshot.detector.bank_built_at }}</dd></div>
     </dl>
+    <section class="space-y-2" :aria-label="t('diagnosticDaybreak.title')">
+      <h4 class="text-sm font-medium">{{ t('diagnosticDaybreak.title') }}</h4>
+      <template v-if="job.result.daybreak?.length">
+        <div v-for="(evidence, i) in job.result.daybreak" :key="i" class="flex items-baseline gap-2"><span class="text-xs">#{{ i + 1 }}</span><DiagnosticDaybreakEvidence :evidence="evidence" /></div>
+      </template>
+      <DiagnosticDaybreakEvidence v-else />
+    </section>
     <div v-if="job.result.analysis" class="space-y-2">
       <p v-if="job.snapshot.detector" class="text-xs text-gray-500">{{ t('attribution.confidenceHelp') }}</p>
       <p v-if="job.result.analysis.probability_status" class="text-xs">{{ t('attribution.calibration') }}: {{ t(`attribution.calibrationStatus.${job.result.analysis.probability_status}`) }}</p>
@@ -37,6 +45,7 @@ import { useI18n } from 'vue-i18n'
 import { formatDateTime } from '@/utils/format'
 import type { AttributionJob } from '@/api/admin/modelAttribution'
 import { isAttributionActive } from '@/utils/modelAttribution'
+import DiagnosticDaybreakEvidence from './DiagnosticDaybreakEvidence.vue'
 defineProps<{ job: AttributionJob; cancelling?: boolean }>()
 const emit = defineEmits<{ cancel: [id: number] }>()
 const { t, te } = useI18n()

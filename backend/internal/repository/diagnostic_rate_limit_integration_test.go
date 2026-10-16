@@ -31,6 +31,7 @@ func TestAttributionRateLimitedManualPeriodicAndRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, valid, "manual tests bypass local rate-limit flags")
 	claimed.Status = "passed"
+	attributionSuccessfulProbeEvidence(claimed, "")
 	require.NoError(t, r.Finish(ctx, claimed))
 	ended, err := r.Get(ctx, claimed.ID)
 	require.NoError(t, err)
@@ -55,6 +56,7 @@ func TestAttributionRateLimitedManualPeriodicAndRecovery(t *testing.T) {
 	require.True(t, valid)
 	require.NoError(t, err)
 	j.Status = "passed"
+	attributionSuccessfulProbeEvidence(j, "")
 	require.NoError(t, r.Finish(ctx, j))
 	ended, err = r.Get(ctx, j.ID)
 	require.NoError(t, err)
