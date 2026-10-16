@@ -100,6 +100,8 @@ func TestPrepareRefundRejectsWalletOverageBelowCurrencyTolerance(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)
 	order := createPendingRefundOrderForTest(t, ctx, client, "wallet-overage")
+	_, err := client.PaymentOrder.UpdateOneID(order.ID).SetStatus(OrderStatusCompleted).Save(ctx)
+	require.NoError(t, err)
 	svc := &PaymentService{entClient: client}
 
 	plan, result, err := svc.PrepareRefund(ctx, order.ID, 100.005, "", false, false)
@@ -136,6 +138,7 @@ func TestPendingRefundPreservesNoDeductBalance(t *testing.T) {
 			client := newPaymentConfigServiceTestClient(t)
 			order := createPendingRefundOrderForTest(t, ctx, client, "no-deduct-"+orderType)
 			order, err := client.PaymentOrder.UpdateOneID(order.ID).
+				SetStatus(OrderStatusCompleted).
 				SetOrderType(orderType).
 				SetGiftAmount(20).
 				Save(ctx)
@@ -169,7 +172,8 @@ func TestPendingRefundPreservesNoDeductBalance(t *testing.T) {
 			pendingResult, err := svc.markRefundPending(ctx, plan, &payment.RefundResponse{RefundID: "rf_no_deduct", Status: payment.ProviderStatusPending})
 			require.NoError(t, err)
 			require.False(t, pendingResult.Success)
-			pendingDetail := svc.latestRefundPendingDetail(ctx, order.ID)
+			pendingDetail, err := svc.latestRefundPendingDetail(ctx, order.ID)
+			require.NoError(t, err)
 			require.NotNil(t, pendingDetail.DeductBalance)
 			require.False(t, *pendingDetail.DeductBalance)
 			require.Equal(t, payment.DeductionTypeNone, pendingDetail.DeductionType)
@@ -196,12 +200,11 @@ func TestPendingRefundFinalFailureRestoresFailedWalletRollback(t *testing.T) {
 	client := newPaymentConfigServiceTestClient(t)
 	order := createPendingRefundOrderForTest(t, ctx, client, "failed-rollback-restored")
 	order, err := client.PaymentOrder.UpdateOneID(order.ID).
-		SetStatus(OrderStatusRefunding).
 		SetGiftAmount(20).
 		Save(ctx)
 	require.NoError(t, err)
 
-	repo := &refundWalletRepoTestDouble{mockUserRepo: &mockUserRepo{}, client: client, restoreFailures: 1}
+	repo := &refundWalletRepoTestDouble{mockUserRepo: &mockUserRepo{}, client: client}
 	authCache := &mockAuthCacheInvalidator{}
 	billingCache := &mockBillingCache{}
 	svc := &PaymentService{
@@ -213,22 +216,15 @@ func TestPendingRefundFinalFailureRestoresFailedWalletRollback(t *testing.T) {
 			billingCacheService:  &BillingCacheService{cache: billingCache},
 		},
 	}
-	plan := &RefundPlan{
-		OrderID:             order.ID,
-		Order:               order,
-		RefundAmount:        100,
-		GatewayAmount:       100,
-		Reason:              "provider pending",
-		DeductBalance:       true,
-		DeductionType:       payment.DeductionTypeBalance,
-		BalanceToDeduct:     80,
-		GiftBalanceToDeduct: 20,
-	}
-
-	pendingResult, err := svc.markRefundPending(ctx, plan, &payment.RefundResponse{RefundID: "rf_restore", Status: payment.ProviderStatusPending})
+	// Legacy pending rows held the original wallet deduction when their
+	// attempted rollback failed. They must still settle correctly after upgrade.
+	_, err = client.PaymentAuditLog.Update().
+		Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(order.ID, 10)), paymentauditlog.ActionEQ("REFUND_PENDING")).
+		SetDetail(`{"refundID":"rf_restore","deductionRollbackOK":false,"deductBalance":true,"deductionType":"balance","balanceDeducted":80,"giftBalanceDeducted":20}`).
+		Save(ctx)
 	require.NoError(t, err)
-	require.Contains(t, pendingResult.Warning, "rollback failed")
-	pendingDetail := svc.latestRefundPendingDetail(ctx, order.ID)
+	pendingDetail, err := svc.latestRefundPendingDetail(ctx, order.ID)
+	require.NoError(t, err)
 	require.False(t, pendingDetail.DeductionRollbackOK)
 	require.Equal(t, 80.0, pendingDetail.BalanceDeducted)
 	require.Equal(t, 20.0, pendingDetail.GiftBalanceDeducted)
@@ -387,6 +383,101 @@ func TestPendingRefundNonForceShortageRollsBackWalletDeduction(t *testing.T) {
 	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
 	require.NoError(t, err)
 	require.Equal(t, OrderStatusRefundPending, reloaded.Status)
+}
+
+func TestPendingRefundHoldsBothWalletsUntilGatewaySettles(t *testing.T) {
+	for _, status := range []string{payment.ProviderStatusSuccess, payment.ProviderStatusFailed} {
+		t.Run(status, func(t *testing.T) {
+			ctx := context.Background()
+			client := newPaymentConfigServiceTestClient(t)
+			order := createCompletedRefundableOrderForTest(t, ctx, client, "hold-gift-"+status)
+			order, err := client.PaymentOrder.UpdateOneID(order.ID).SetGiftAmount(20).Save(ctx)
+			require.NoError(t, err)
+			_, err = client.User.UpdateOneID(order.UserID).SetBalance(100).SetGiftBalance(20).Save(ctx)
+			require.NoError(t, err)
+			repo := &refundWalletRepoTestDouble{
+				mockUserRepo: &mockUserRepo{getByIDUser: &User{ID: order.UserID, Balance: 100, GiftBalance: 20}},
+				client:       client,
+			}
+			restore := replacePaymentProviderFactoryForTest(t, &pendingRefundProviderTestDouble{queryStatus: status})
+			defer restore()
+			svc := &PaymentService{entClient: client, loadBalancer: &captureLoadBalancer{}, userRepo: repo}
+			plan, early, err := svc.PrepareRefund(ctx, order.ID, 100, "both wallets", false, true)
+			require.NoError(t, err)
+			require.Nil(t, early)
+			result, err := svc.ExecuteRefund(ctx, plan)
+			require.NoError(t, err)
+			require.False(t, result.Success)
+			detail, err := svc.latestRefundPendingDetail(ctx, order.ID)
+			require.NoError(t, err)
+			require.True(t, detail.DeductionHeld)
+			require.Equal(t, 100.0, detail.BalanceDeducted)
+			require.Equal(t, 20.0, detail.GiftBalanceDeducted)
+			user, err := client.User.Get(ctx, order.UserID)
+			require.NoError(t, err)
+			require.Zero(t, user.Balance)
+			require.Zero(t, user.GiftBalance)
+
+			result, err = svc.QueryAndFinalizeRefund(ctx, order.ID)
+			require.NoError(t, err)
+			user, err = client.User.Get(ctx, order.UserID)
+			require.NoError(t, err)
+			if status == payment.ProviderStatusSuccess {
+				require.True(t, result.Success)
+				require.Equal(t, 100.0, result.BalanceDeducted)
+				require.Equal(t, 20.0, result.GiftBalanceDeducted)
+				require.Zero(t, user.Balance)
+				require.Zero(t, user.GiftBalance)
+			} else {
+				require.False(t, result.Success)
+				require.Equal(t, 100.0, user.Balance)
+				require.Equal(t, 20.0, user.GiftBalance)
+			}
+			_, err = svc.QueryAndFinalizeRefund(ctx, order.ID)
+			require.Equal(t, "INVALID_STATUS", infraerrors.Reason(err))
+		})
+	}
+}
+
+func TestPendingRefundFailedAuditRollsBackBothWalletRestores(t *testing.T) {
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	order := createPendingRefundOrderWithDetailForTest(t, ctx, client, "failed-gift-audit",
+		`{"refundID":"rf_test","deductionHeld":true,"deductionType":"balance","balanceDeducted":100,"giftBalanceDeducted":20}`)
+	_, err := client.ExecContext(ctx, `
+		CREATE TRIGGER fail_refund_failed_audit
+		BEFORE INSERT ON payment_audit_logs
+		WHEN NEW.action = 'REFUND_FAILED'
+		BEGIN
+			SELECT RAISE(ABORT, 'injected failed audit failure');
+		END
+	`)
+	require.NoError(t, err)
+	repo := &refundWalletRepoTestDouble{mockUserRepo: &mockUserRepo{}, client: client}
+	restore := replacePaymentProviderFactoryForTest(t, &pendingRefundProviderTestDouble{queryStatus: payment.ProviderStatusFailed})
+	defer restore()
+	svc := &PaymentService{entClient: client, loadBalancer: &captureLoadBalancer{}, userRepo: repo}
+
+	result, err := svc.QueryAndFinalizeRefund(ctx, order.ID)
+	require.Nil(t, result)
+	require.ErrorContains(t, err, "injected failed audit failure")
+	user, err := client.User.Get(ctx, order.UserID)
+	require.NoError(t, err)
+	require.Zero(t, user.Balance)
+	require.Zero(t, user.GiftBalance)
+	reloaded, err := client.PaymentOrder.Get(ctx, order.ID)
+	require.NoError(t, err)
+	require.Equal(t, OrderStatusRefundPending, reloaded.Status)
+
+	_, err = client.ExecContext(ctx, `DROP TRIGGER fail_refund_failed_audit`)
+	require.NoError(t, err)
+	result, err = svc.QueryAndFinalizeRefund(ctx, order.ID)
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	user, err = client.User.Get(ctx, order.UserID)
+	require.NoError(t, err)
+	require.Equal(t, 100.0, user.Balance)
+	require.Equal(t, 20.0, user.GiftBalance)
 }
 
 type refundWalletRepoTestDouble struct {

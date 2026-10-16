@@ -72,6 +72,16 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	rememberOpenCodeInboundBody(c, body)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
+	// Web Search 模拟：Chat Completions 转换会丢掉 web_search 工具，纯 web_search
+	// 请求在此直接调用搜索 API 构造 Anthropic 响应，不访问上游。
+	if groupID := getOpenAIGroupIDFromContext(c); shouldEmulateWebSearchFor(ctx, s.settingService, s.channelService, account, &groupID, body) {
+		stream := gjson.GetBytes(body, "stream").Bool()
+		res, err := writeEmulatedWebSearch(ctx, c, account, body, gjson.GetBytes(body, "model").String(), stream)
+		if err != nil {
+			return nil, err
+		}
+		return &OpenAIForwardResult{Model: res.Model, Stream: stream, Duration: res.Duration}, nil
+	}
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
 	}
@@ -180,7 +190,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 
 	// 3. Convert Anthropic → Responses after compatibility-only replay guard.
 	anthropicReq.Model = upstreamModel
-	responsesReq, err := anthropicToResponsesWithTimezoneObservation(c, &anthropicReq)
+	responsesReq, err := anthropicToResponsesWithTimezoneObservation(s.cfg, c, &anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("convert anthropic to responses: %w", err)
 	}

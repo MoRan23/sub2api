@@ -266,7 +266,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			preserveOpenAIChatSystemMessageOrder(&chatReq)
 		}
 		chatReq.Model = upstreamModel
-		responsesReq, err = chatCompletionsToResponsesWithTimezoneObservation(c, &chatReq)
+		responsesReq, err = chatCompletionsToResponsesWithTimezoneObservation(s.cfg, c, &chatReq)
 		if err != nil {
 			return nil, fmt.Errorf("convert chat completions to responses: %w", err)
 		}

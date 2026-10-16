@@ -26,10 +26,16 @@ func ComposeRequestPathMappings(first, next map[string]string) map[string]string
 // message text and server-search location paths. Mapping never depends on text
 // equality. The original conversion API and serialized payload are unchanged.
 func ChatCompletionsToResponsesWithPathMapping(req *ChatCompletionsRequest) (*ResponsesRequest, map[string]string, error) {
+	return ChatCompletionsToResponsesWithMinOutputTokensAndPathMapping(req, DefaultMinMaxOutputTokens)
+}
+
+// ChatCompletionsToResponsesWithMinOutputTokensAndPathMapping applies the
+// configured output-token floor while retaining text-field provenance.
+func ChatCompletionsToResponsesWithMinOutputTokensAndPathMapping(req *ChatCompletionsRequest, minOutputTokens int) (*ResponsesRequest, map[string]string, error) {
 	if req == nil {
 		return nil, nil, fmt.Errorf("chat completions request is nil")
 	}
-	out, err := ChatCompletionsToResponses(req)
+	out, err := ChatCompletionsToResponsesWithMinOutputTokens(req, minOutputTokens)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -92,10 +98,16 @@ func ChatCompletionsToResponsesWithPathMapping(req *ChatCompletionsRequest) (*Re
 // AnthropicToResponsesWithPathMapping exposes stable source paths through tool
 // extraction, image filtering, system promotion and message expansion.
 func AnthropicToResponsesWithPathMapping(req *AnthropicRequest) (*ResponsesRequest, map[string]string, error) {
+	return AnthropicToResponsesWithMinOutputTokensAndPathMapping(req, DefaultMinMaxOutputTokens)
+}
+
+// AnthropicToResponsesWithMinOutputTokensAndPathMapping applies the configured
+// output-token floor while retaining text-field provenance.
+func AnthropicToResponsesWithMinOutputTokensAndPathMapping(req *AnthropicRequest, minOutputTokens int) (*ResponsesRequest, map[string]string, error) {
 	if req == nil {
 		return nil, nil, fmt.Errorf("anthropic request is nil")
 	}
-	out, err := AnthropicToResponses(req)
+	out, err := AnthropicToResponsesWithMinOutputTokens(req, minOutputTokens)
 	if err != nil {
 		return nil, nil, err
 	}

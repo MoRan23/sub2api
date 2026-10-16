@@ -11,7 +11,13 @@ import (
 // converter and tool-pair normalizer. Empty destinations mean dropped fields;
 // joined or multiply emitted fields without a unique destination stay absent.
 func AnthropicToChatCompletionsRequestWithPathMapping(req *AnthropicRequest) (*ChatCompletionsRequest, map[string]string, error) {
-	out, err := AnthropicToChatCompletionsRequest(req)
+	return AnthropicToChatCompletionsRequestWithMinOutputTokensAndPathMapping(req, DefaultMinMaxOutputTokens)
+}
+
+// AnthropicToChatCompletionsRequestWithMinOutputTokensAndPathMapping combines
+// the configured output-token floor with the direct bridge's field provenance.
+func AnthropicToChatCompletionsRequestWithMinOutputTokensAndPathMapping(req *AnthropicRequest, minOutputTokens int) (*ChatCompletionsRequest, map[string]string, error) {
+	out, err := AnthropicToChatCompletionsRequestWithMinOutputTokens(req, minOutputTokens)
 	if err != nil {
 		return nil, nil, err
 	}

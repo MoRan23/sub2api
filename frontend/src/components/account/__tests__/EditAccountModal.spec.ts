@@ -12,6 +12,7 @@ const {
   checkMixedChannelRiskMock,
   regenerateInstallationIDMock,
   getSettingsMock,
+  getWebSearchEmulationConfigMock,
   getDaybreakCapabilitiesMock,
   authIsSimpleMode,
 } = vi.hoisted(() => ({
@@ -19,6 +20,7 @@ const {
   checkMixedChannelRiskMock: vi.fn(),
   regenerateInstallationIDMock: vi.fn(),
   getSettingsMock: vi.fn(),
+  getWebSearchEmulationConfigMock: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
   getDaybreakCapabilitiesMock: vi.fn(),
   authIsSimpleMode: { value: true }
 }))
@@ -48,7 +50,7 @@ vi.mock('@/api/admin', () => ({
       getDaybreakCapabilities: getDaybreakCapabilitiesMock,
     },
     settings: {
-      getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
+      getWebSearchEmulationConfig: getWebSearchEmulationConfigMock,
       getSettings: getSettingsMock
     },
     tlsFingerprintProfiles: {
@@ -377,6 +379,30 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it('limits the OpenAI web search emulation setting to ordinary API key mode', async () => {
+    getWebSearchEmulationConfigMock.mockResolvedValue({ enabled: true, providers: [{ id: 'test-provider' }] })
+    const account = buildAccount()
+    account.extra = { openai_api_key_mode: 'generic', web_search_emulation: 'enabled' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+
+    const setting = wrapper.get('[data-testid="web-search-emulation-mode"]')
+    expect((setting.element as HTMLSelectElement).value).toBe('enabled')
+    await setting.setValue('disabled')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra.web_search_emulation).toBe('disabled')
+
+    await wrapper.get('[data-testid="openai-api-key-mode"]').setValue('codex_engine')
+    expect(wrapper.find('[data-testid="web-search-emulation-mode"]').exists()).toBe(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[1]?.[1]?.extra.web_search_emulation).toBe('enabled')
+    wrapper.unmount()
+  })
+
   it('loads and saves Codex-Engine mode without disabling model restrictions', async () => {
     const account = buildAccount()
     account.extra = { openai_api_key_mode: 'codex_engine', openai_passthrough: true }
@@ -396,6 +422,7 @@ describe('EditAccountModal', () => {
   })
   beforeEach(() => {
     authIsSimpleMode.value = true
+    getWebSearchEmulationConfigMock.mockReset().mockResolvedValue({ enabled: false, providers: [] })
     getDaybreakCapabilitiesMock.mockReset().mockResolvedValue({
       checked_at: null, blue_available: true, red_available: true, models: [], reason: ''
     })

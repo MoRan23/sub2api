@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -1430,7 +1431,11 @@ func normalizeOpenAIResponseFormatSchemasBody(body []byte) ([]byte, bool, error)
 }
 
 func normalizeOpenAIResponsesWebSocketCompatibilityBody(body []byte, account *Account, responsesLite bool, finalModels ...string) ([]byte, bool, error) {
-	opts := openAIResponsesCompatibilityOptions{ResponsesLite: responsesLite}
+	return normalizeOpenAIResponsesWebSocketCompatibilityBodyWithConfig(nil, body, account, responsesLite, finalModels...)
+}
+
+func normalizeOpenAIResponsesWebSocketCompatibilityBodyWithConfig(cfg *config.Config, body []byte, account *Account, responsesLite bool, finalModels ...string) ([]byte, bool, error) {
+	opts := openAIResponsesCompatibilityOptions{Config: cfg, ResponsesLite: responsesLite}
 	if len(finalModels) > 0 {
 		opts.FinalModel = &finalModels[0]
 	}
@@ -1438,6 +1443,7 @@ func normalizeOpenAIResponsesWebSocketCompatibilityBody(body []byte, account *Ac
 }
 
 type openAIResponsesCompatibilityOptions struct {
+	Config        *config.Config
 	ResponsesLite bool
 	// Compact marks the /responses/compact wire shape, which is left as-is
 	// by request-shape compatibility rewrites such as web_search history.
@@ -1456,7 +1462,7 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 	changed := false
 	if account.IsOpenAIOAuthLike() {
 		var err error
-		normalized, changed, err = normalizeOpenAIResponsesLegacyIngress(body)
+		normalized, changed, err = normalizeOpenAIResponsesLegacyIngressWithConfig(opts.Config, body)
 		if err != nil {
 			return body, false, err
 		}

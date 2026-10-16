@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -133,11 +134,11 @@ func recordOpenAIRequestTimezonePrefixTrim(c *gin.Context, array string, removed
 	SetFingerprintObservationTimezonePathMapping(c, paths)
 }
 
-func chatCompletionsToResponsesWithTimezoneObservation(c *gin.Context, req *apicompat.ChatCompletionsRequest) (*apicompat.ResponsesRequest, error) {
+func chatCompletionsToResponsesWithTimezoneObservation(cfg *config.Config, c *gin.Context, req *apicompat.ChatCompletionsRequest) (*apicompat.ResponsesRequest, error) {
 	if !observeOpenAIRequestTimezoneAdapter(c) && !hasDeferredOpenAIRequestTimezone(c) {
-		return apicompat.ChatCompletionsToResponses(req)
+		return chatCompletionsToResponses(cfg, req)
 	}
-	out, paths, err := apicompat.ChatCompletionsToResponsesWithPathMapping(req)
+	out, paths, err := apicompat.ChatCompletionsToResponsesWithMinOutputTokensAndPathMapping(req, configuredMinOutputTokens(cfg))
 	if err == nil {
 		if hasDeferredOpenAIRequestTimezone(c) {
 			paths = normalizeDeferredOpenAIChatInput(out, paths)
@@ -190,11 +191,11 @@ func normalizeDeferredOpenAIChatInput(out *apicompat.ResponsesRequest, paths map
 	return remapped
 }
 
-func anthropicToResponsesWithTimezoneObservation(c *gin.Context, req *apicompat.AnthropicRequest) (*apicompat.ResponsesRequest, error) {
+func anthropicToResponsesWithTimezoneObservation(cfg *config.Config, c *gin.Context, req *apicompat.AnthropicRequest) (*apicompat.ResponsesRequest, error) {
 	if !observeOpenAIRequestTimezoneAdapter(c) && !hasDeferredOpenAIRequestTimezone(c) {
-		return apicompat.AnthropicToResponses(req)
+		return anthropicToResponses(cfg, req)
 	}
-	out, paths, err := apicompat.AnthropicToResponsesWithPathMapping(req)
+	out, paths, err := apicompat.AnthropicToResponsesWithMinOutputTokensAndPathMapping(req, configuredMinOutputTokens(cfg))
 	if err == nil {
 		if hasDeferredOpenAIRequestTimezone(c) {
 			freezeDeferredOpenAIRequestTimezoneBaseline(c, out, paths)
@@ -339,11 +340,11 @@ func responsesToAnthropicWithTimezoneObservation(c *gin.Context, req *apicompat.
 	return out, err
 }
 
-func anthropicToChatCompletionsWithTimezoneObservation(c *gin.Context, req *apicompat.AnthropicRequest) (*apicompat.ChatCompletionsRequest, error) {
+func anthropicToChatCompletionsWithTimezoneObservation(cfg *config.Config, c *gin.Context, req *apicompat.AnthropicRequest) (*apicompat.ChatCompletionsRequest, error) {
 	if !observeOpenAIRequestTimezoneAdapter(c) {
-		return apicompat.AnthropicToChatCompletionsRequest(req)
+		return apicompat.AnthropicToChatCompletionsRequestWithMinOutputTokens(req, configuredMinOutputTokens(cfg))
 	}
-	out, paths, err := apicompat.AnthropicToChatCompletionsRequestWithPathMapping(req)
+	out, paths, err := apicompat.AnthropicToChatCompletionsRequestWithMinOutputTokensAndPathMapping(req, configuredMinOutputTokens(cfg))
 	if err == nil {
 		recordOpenAIRequestTimezoneAdapterMapping(c, paths)
 		captureOpenAIRequestTimezoneObjectCheckpoint(c, out)

@@ -151,8 +151,12 @@ describe('AccountTestModal', () => {
     wrapper.unmount()
   })
 
-  it('gemini 图片模型测试会携带提示词并渲染图片预览', async () => {
-    const wrapper = mountModal()
+  it.each([
+    ['gemini', 'apikey'],
+    ['antigravity', 'apikey'],
+    ['antigravity', 'oauth'],
+  ])('%s %s 图片模型测试会携带提示词并渲染图片预览', async (platform, type) => {
+    const wrapper = mountModal({ id: 42, name: 'Image Test', platform, type, status: 'active' })
     await wrapper.setProps({ show: true })
     await flushPromises()
 
