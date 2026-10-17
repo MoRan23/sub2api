@@ -1155,6 +1155,30 @@ func TestRelay_WriteUpstreamFirstMessageFails(t *testing.T) {
 	require.Equal(t, "write_upstream", relayExit.Stage)
 }
 
+func TestRelay_CyberBareErrorWriteFailureDrainsTerminalUsage(t *testing.T) {
+	upstream := newPassthroughTestFrameConn([]passthroughTestFrame{
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"error","error":{"code":"cyber_policy"}}`)},
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.failed","response":{"id":"resp_refused","error":{"code":"cyber_policy"},"usage":{"input_tokens":19,"output_tokens":3,"input_tokens_details":{"cached_tokens":11}}}}`)},
+	}, true)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var turns []RelayTurnResult
+	result, _ := Relay(ctx, &errorOnWriteFrameConn{}, upstream, []byte(`{"type":"response.create","model":"gpt-5.1"}`), RelayOptions{
+		StartClientAfterFirstDownstream: true,
+		AfterClientWrite: func(_ coderws.MessageType, _ []byte, err error) error {
+			require.Error(t, err)
+			return ErrDrainCurrentTurn
+		},
+		OnTurnComplete: func(turn RelayTurnResult) { turns = append(turns, turn) },
+	})
+	require.Len(t, turns, 1)
+	require.Equal(t, 19, turns[0].Usage.InputTokens)
+	require.Equal(t, 3, turns[0].Usage.OutputTokens)
+	require.Equal(t, 11, turns[0].Usage.CacheReadInputTokens)
+	require.Equal(t, turns[0].Usage, result.Usage)
+	require.Len(t, upstream.Writes(), 1)
+}
+
 func TestRelay_ContextCanceled(t *testing.T) {
 	t.Parallel()
 

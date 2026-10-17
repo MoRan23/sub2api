@@ -286,7 +286,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		if service.GetOpsCyberPolicy(c) != nil {
 			cyberBlockBodyChat = body
 		}
-		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockBodyChat, clientRequestedUsageFields(c, channelMapping, reqModel, ""), service.HashUsageRequestPayload(body))
+		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil && result == nil, cyberBlockBodyChat, clientRequestedUsageFields(c, channelMapping, reqModel, ""), service.HashUsageRequestPayload(body))
 
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
@@ -340,6 +340,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					).Error("openai_chat_completions.record_usage_failed", zap.Error(err))
 				}
 			})
+		}
+		if service.GetOpsCyberPolicy(c) != nil {
+			submitChatUsage(result)
+			return
 		}
 		if err != nil {
 			if result != nil && result.ImageCount > 0 {

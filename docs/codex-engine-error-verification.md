@@ -78,3 +78,36 @@ SSE 开头、持久化派发模型前的失败结果，以及在任务锁内先�
 
 验证通过：`go test -tags unit ./internal/handler ./internal/service -run '^TestCodexEngine' -count=1`。
 本轮只改测试与诊断说明，不涉及前端、数据库迁移或生产配置。
+
+## 2026-10-17：结构化 `cyber_policy` 收尾
+
+Engine HTTP/SSE 专用转发原先只记录普通错误，没有接入专用 cyber 标记；
+原生 WS 则在标记后仍可能把同时带限流特征的拒绝送入切号分支。
+这次修改以结构化 `error.code` / `response.error.code` 为依据，保留拒绝，
+不根据消息文字判断，不恢复、切号或重新派发已接受的政策拒绝。
+
+Engine 约定在非流式响应中返回 HTTP 400 和原始错误对象；已开始的 SSE
+使用 `response.failed`，在 `response.error` 内携带 `code=cyber_policy`、
+`type=invalid_request_error`、原消息及 `status_code=400`。HTTP 200 不被改写，
+日志使用明确报告的语义状态。原始响应 ID、用量和请求 ID 有值才保留。
+
+专用标记在 Engine 终态与用量收集后设置。HTTP handler 有完整结果时沿用
+普通计费路径并标记 cyber，没有完整结果才使用专用兜底，避免重复结算或
+丢掉缓存等用量明细。图片、搜索和计数入口也执行专用错误记录；计数仍不计费。
+现有风控分组范围和仅记录设置保持有效，不改变它们的授权范围。
+
+WS 原拒绝先交付客户端，失败上游连接随后退役，不回池复用。bare `error`
+后允许最多 2 秒只读取同一任务的终态和真实用量，窗口不会因心跳延长，期间
+不接收新一轮、不重新发送；有 `response.failed` 时立即结束。明确的政策拒绝
+即使伴随限流、认证或服务错误特征，也不触发账号健康处罚。下游写失败不能
+把原拒绝变为新一次执行或产生第二次用量结算。
+
+本次验证使用本地模拟 HTTP/SSE/WS；不调用生产模型、不修写旧执行状态，
+不修改数据库结构。Engine 自己持有的模型 WS 由 Engine 退役；Sub2API 的
+连接收尾不能证明 Engine 内部连接已经关闭，也不代表双方已经部署。
+
+本地验证通过：Engine/handler 定向测试、WS/relay 广泛回归、受影响竞态测试、
+`GOEXPERIMENT=jsonv2 go build ./...` 以及 CI 固定的 golangci-lint v2.14.0
+改动范围检查。三个旧正文断言先在 `77a15ad75` 独立基线复现，再为对应测试
+请求显式填写固定 `instructions`，保留原始完整正文比较和行为断言；没有修改
+生产正文处理逻辑来使测试通过。

@@ -199,6 +199,13 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			return h.gatewayService.ForwardAlphaSearch(c.Request.Context(), c, account, forwardBody)
 		}()
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, time.Since(forwardStart).Milliseconds())
+		if service.GetOpsCyberPolicy(c) != nil {
+			h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, requestedModel, result == nil, body, clientRequestedUsageFields(c, channelMapping, requestedModel, ""), service.HashUsageRequestPayload(body))
+			if result != nil {
+				h.recordAlphaSearchUsage(c, apiKey, account, subscription, channelMapping, requestedModel, body, result, subject.UserID)
+			}
+			return
+		}
 
 		if err == nil {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, requestedModel, false, result), true, nil)
@@ -295,6 +302,7 @@ func (h *OpenAIGatewayHandler) recordAlphaSearchUsage(
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+	cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 
 	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
@@ -313,6 +321,7 @@ func (h *OpenAIGatewayHandler) recordAlphaSearchUsage(
 			SessionID:          sessionID,
 			ChannelUsageFields: channelMapping.ToUsageFields(requestedModel, result.UpstreamModel),
 			PricingAt:          service.OpenAIPricingAtFromContext(c.Request.Context()),
+			CyberBlocked:       cyberBlocked,
 		}); err != nil {
 			logger.L().With(
 				zap.String("component", "handler.openai_gateway.alpha_search"),

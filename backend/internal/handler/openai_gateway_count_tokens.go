@@ -316,4 +316,9 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	if err := h.gatewayService.ForwardCountTokensAsAnthropic(c.Request.Context(), c, account, forwardBody, defaultMappedModel); err != nil {
 		reqLog.Error("openai_count_tokens.forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 	}
+	// Token counting remains unbilled, including a policy rejection. Consume the
+	// marker so the dedicated risk/Ops record is not lost when middleware skips it.
+	if service.GetOpsCyberPolicy(c) != nil {
+		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, false, body, clientRequestedUsageFields(c, channelMapping, reqModel, ""), service.HashUsageRequestPayload(body))
+	}
 }

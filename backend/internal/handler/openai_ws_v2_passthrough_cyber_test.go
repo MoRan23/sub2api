@@ -25,6 +25,7 @@ type openAIWSPassthroughHandlerHarness struct {
 	moderationRepo *contentModerationHandlerTestRepo
 	gatewayCache   service.GatewayCache
 	apiKey         *service.APIKey
+	usageRepo      *openAIWSUsageHandlerUsageLogRepoStub
 }
 
 func newOpenAIWSPassthroughHandlerHarness(t *testing.T, upstreamURL string, settings ...map[string]string) *openAIWSPassthroughHandlerHarness {
@@ -129,6 +130,7 @@ func newOpenAIWSPassthroughHandlerHarness(t *testing.T, upstreamURL string, sett
 		moderationRepo: moderationRepo,
 		gatewayCache:   gatewayCache,
 		apiKey:         apiKey,
+		usageRepo:      usageRepo,
 	}
 }
 
@@ -148,7 +150,7 @@ func TestOpenAIResponsesWebSocketV2PassthroughCyberMarkIsConsumedAfterTurn(t *te
 		cancelRead()
 		require.NoError(t, err)
 
-		failed := []byte(`{"type":"response.failed","response":{"id":"resp_cyber_handler","model":"gpt-5.1","error":{"code":"cyber_policy","message":"blocked by upstream policy"},"usage":{"input_tokens":11,"output_tokens":3}}}`)
+		failed := []byte(`{"type":"response.failed","response":{"id":"resp_cyber_handler","model":"gpt-5.1","error":{"code":"cyber_policy","message":"blocked by upstream policy"},"usage":{"input_tokens":11,"output_tokens":3,"input_tokens_details":{"cached_tokens":6,"cache_write_tokens":1}}}}`)
 		writeCtx, cancelWrite := context.WithTimeout(r.Context(), 3*time.Second)
 		err = conn.Write(writeCtx, coderws.MessageText, failed)
 		cancelWrite()
@@ -200,25 +202,25 @@ func TestOpenAIResponsesWebSocketV2PassthroughCyberMarkIsConsumedAfterTurn(t *te
 		return findErr == nil && matched == blockKey
 	}, 3*time.Second, 10*time.Millisecond, "handler AfterTurn must write the cyber session block table")
 
-	writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
-	err = harness.clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","prompt_cache_key":"cyber-session-1","input":"follow-up"}`))
-	cancelWrite()
-	require.NoError(t, err)
-
 	readCtx, cancelRead = context.WithTimeout(context.Background(), 3*time.Second)
 	_, _, err = harness.clientConn.Read(readCtx)
 	cancelRead()
 	var closeErr coderws.CloseError
 	require.ErrorAs(t, err, &closeErr)
 	require.Equal(t, coderws.StatusPolicyViolation, closeErr.Code)
-	// closeOpenAIClientWS caps close reasons at 120 bytes; passthrough must expose
-	// the same client-visible prefix rather than dropping the close frame.
-	require.Equal(t, "该会话已被网络安全策略屏蔽，请开启新会话 / This session is blocked by cyber-security policy, please ", closeErr.Reason)
+	require.Equal(t, "request rejected by cyber-security policy", closeErr.Reason)
 	select {
 	case <-harness.handlerDone:
 	case <-time.After(3 * time.Second):
 		t.Fatal("websocket handler did not exit")
 	}
+	require.Len(t, harness.usageRepo.created, 1, "closing after AfterTurn must not record the refused turn twice")
+	usage := <-harness.usageRepo.created
+	require.Equal(t, service.RequestTypeCyberBlocked, usage.RequestType)
+	require.Equal(t, 4, usage.InputTokens)
+	require.Equal(t, 6, usage.CacheReadTokens)
+	require.Equal(t, 1, usage.CacheCreationTokens)
+	require.Equal(t, 3, usage.OutputTokens)
 	select {
 	case <-upstreamDone:
 	case <-time.After(3 * time.Second):
@@ -272,7 +274,9 @@ func TestOpenAIResponsesWebSocketV2PassthroughNonCyberTurnAllowsFollowup(t *test
 	defer upstreamServer.Close()
 	harness := newOpenAIWSPassthroughHandlerHarness(t, upstreamServer.URL)
 
-	firstPayload := `{"type":"response.create","model":"gpt-5.1","prompt_cache_key":"non-cyber-session-1","input":"first"}`
+	// Supply explicit instructions so the pre-existing default-instructions
+	// normalizer does not add a field to this full-wire comparison fixture.
+	firstPayload := `{"type":"response.create","model":"gpt-5.1","instructions":"test instructions","prompt_cache_key":"non-cyber-session-1","input":"first"}`
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
 	err := harness.clientConn.Write(writeCtx, coderws.MessageText, []byte(firstPayload))
 	cancelWrite()
@@ -284,7 +288,7 @@ func TestOpenAIResponsesWebSocketV2PassthroughNonCyberTurnAllowsFollowup(t *test
 	require.NoError(t, err)
 	require.Equal(t, "resp_non_cyber_handler_turn_1", gjson.GetBytes(firstEvent, "response.id").String())
 
-	secondPayload := `{"type":"response.create","model":"gpt-5.1","prompt_cache_key":"non-cyber-session-1","input":"follow-up"}`
+	secondPayload := `{"type":"response.create","model":"gpt-5.1","instructions":"test instructions","prompt_cache_key":"non-cyber-session-1","input":"follow-up"}`
 	writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
 	err = harness.clientConn.Write(writeCtx, coderws.MessageText, []byte(secondPayload))
 	cancelWrite()

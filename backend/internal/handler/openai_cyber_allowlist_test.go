@@ -15,7 +15,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func TestCyberAllowlistedUserBypassesExistingBlocksAndContinuesWebSocket(t *testing.T) {
+func TestCyberAllowlistedUserBypassesExistingBlocksButPolicyRefusalClosesWebSocket(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, nil)
@@ -66,10 +66,9 @@ func TestCyberAllowlistedUserBypassesExistingBlocksAndContinuesWebSocket(t *test
 	matched, err := store.FindCyberSessionBlocked(ctx, service.CyberSessionTranscriptBlockKeys(harness.apiKey.ID, payload))
 	require.NoError(t, err)
 	require.Empty(t, matched, "the cyber response must not write new transcript blocks")
-	require.NoError(t, harness.clientConn.Write(ctx, coderws.MessageText, payload))
 	_, event, err = harness.clientConn.Read(ctx)
-	require.NoError(t, err)
-	require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
+	require.Error(t, err)
+	require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(err), "log-only must not replay an upstream policy refusal")
 	_ = harness.clientConn.CloseNow()
 	select {
 	case <-harness.handlerDone:

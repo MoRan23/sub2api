@@ -24,6 +24,10 @@ type FrameConn interface {
 	Close() error
 }
 
+// ErrDrainCurrentTurn asks the relay to retain terminal usage after a failed
+// downstream write. The caller must impose a bounded upstream drain deadline.
+var ErrDrainCurrentTurn = errors.New("drain current upstream turn")
+
 type Usage struct {
 	InputTokens              int
 	ImageInputTokens         int
@@ -83,11 +87,12 @@ type RelayOptions struct {
 	OnTurnComplete                  func(turn RelayTurnResult)
 	BeforeWriteClient               func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error
 	BeforeClientWrite               func(msgType coderws.MessageType, payload []byte)
-	AfterClientWrite                func(msgType coderws.MessageType, payload []byte, writeErr error)
-	BeforeRelayCancel               func(exit RelayExit)
-	ReadClientFrame                 func(ctx context.Context, clientConn FrameConn) (coderws.MessageType, []byte, error)
-	OnTrace                         func(event RelayTraceEvent)
-	Now                             func() time.Time
+	// AfterClientWrite can stop the relay after the original frame has been delivered.
+	AfterClientWrite  func(msgType coderws.MessageType, payload []byte, writeErr error) error
+	BeforeRelayCancel func(exit RelayExit)
+	ReadClientFrame   func(ctx context.Context, clientConn FrameConn) (coderws.MessageType, []byte, error)
+	OnTrace           func(event RelayTraceEvent)
+	Now               func() time.Time
 }
 
 type RelayTraceEvent struct {
@@ -532,7 +537,7 @@ func runUpstreamToClient(
 	onTurnComplete func(turn RelayTurnResult),
 	beforeWriteClient func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error,
 	beforeClientWrite func(msgType coderws.MessageType, payload []byte),
-	afterClientWrite func(msgType coderws.MessageType, payload []byte, writeErr error),
+	afterClientWrite func(msgType coderws.MessageType, payload []byte, writeErr error) error,
 	afterWriteClient func(msgType coderws.MessageType, payload []byte),
 	dropDownstreamWrites *atomic.Bool,
 	forwardedFrames *atomic.Int64,
@@ -638,10 +643,15 @@ func runUpstreamToClient(
 			beforeClientWrite(msgType, payload)
 		}
 		writeErr := writeClient(msgType, payload)
+		var afterWriteErr error
 		if afterClientWrite != nil {
-			afterClientWrite(msgType, payload, writeErr)
+			afterWriteErr = afterClientWrite(msgType, payload, writeErr)
 		}
 		if writeErr != nil {
+			if errors.Is(afterWriteErr, ErrDrainCurrentTurn) && !observedEvent.terminal {
+				dropDownstreamWrites.Store(true)
+				continue
+			}
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:           "write_client_failed",
 				Direction:       "upstream_to_client",
@@ -656,6 +666,13 @@ func runUpstreamToClient(
 		wroteDownstream = true
 		if state != nil {
 			state.turnWroteDownstream.Store(true)
+		}
+		if afterWriteErr != nil {
+			if forwardedFrames != nil {
+				forwardedFrames.Add(1)
+			}
+			exitCh <- relayExitSignal{stage: "after_write_client", err: afterWriteErr, wroteDownstream: true}
+			return
 		}
 		if afterWriteClient != nil {
 			afterWriteClient(msgType, payload)
@@ -889,7 +906,7 @@ func emitTurnComplete(
 		return
 	}
 	responseID := strings.TrimSpace(observed.responseID)
-	if responseID == "" && strings.TrimSpace(observed.eventType) != "error" {
+	if responseID == "" && strings.TrimSpace(observed.eventType) != "error" && strings.TrimSpace(observed.eventType) != "response.failed" {
 		return
 	}
 	requestModel := ""

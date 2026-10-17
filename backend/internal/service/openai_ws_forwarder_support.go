@@ -9,10 +9,59 @@ import (
 	"strings"
 	"time"
 
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+// A policy rejection is an authoritative outcome, never a transport retry.
+var errOpenAIWSCyberPolicyStop = errors.New("websocket cyber policy rejection delivered")
+
+const openAIWSCyberPolicyDrainTimeout = 2 * time.Second
+
+// A bare error can precede response.failed with authoritative usage. Only drain
+// this accepted turn, with a fixed deadline that heartbeats cannot extend.
+func drainOpenAIWSCyberPolicyTurn(responseID string, read func(time.Duration) ([]byte, error), observe func([]byte)) []byte {
+	deadline := time.Now().Add(openAIWSCyberPolicyDrainTimeout)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil
+		}
+		payload, err := read(remaining)
+		if err != nil {
+			return nil
+		}
+		_, eventID, _ := parseOpenAIWSEventEnvelope(payload)
+		if responseID != "" && eventID != "" && eventID != responseID {
+			continue
+		}
+		if responseID == "" {
+			responseID = eventID
+		}
+		observe(payload)
+		if isOpenAIWSTerminalEvent(gjson.GetBytes(payload, "type").String()) {
+			return payload
+		}
+	}
+}
+
+func refreshOpenAIWSCyberPolicyUsage(c *gin.Context, usage OpenAIUsage) {
+	if mark := GetOpsCyberPolicy(c); mark != nil {
+		updated := *mark
+		updated.UpstreamInTok = usage.InputTokens
+		updated.UpstreamOutTok = usage.OutputTokens
+		c.Set(opsCyberPolicyKey, &updated)
+	}
+}
+
+func closeOpenAIWSCyberPolicyClient(conn *coderws.Conn) {
+	if conn != nil {
+		_ = conn.Close(coderws.StatusPolicyViolation, "request rejected by cyber-security policy")
+		_ = conn.CloseNow()
+	}
+}
 
 func (s *OpenAIGatewayService) isOpenAIWSGeneratePrewarmEnabled() bool {
 	return s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.PrewarmGenerateEnabled
@@ -336,6 +385,9 @@ func markOpenAIWSClientVisibleFailure(c *gin.Context, eventType string, payload 
 }
 
 func openAIWSPayloadTransientStatus(payload []byte) int {
+	if hit, _, _ := detectOpenAICyberPolicy(payload); hit {
+		return 0
+	}
 	if len(payload) == 0 {
 		return 0
 	}
@@ -406,6 +458,9 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 // failures and transient failures. Its return value lets stream callers avoid
 // applying the same transition twice for an error/response.failed pair.
 func (s *OpenAIGatewayService) handleOpenAIWSFailureAccountSideEffects(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) bool {
+	if hit, _, _ := detectOpenAICyberPolicy(payload); hit {
+		return false
+	}
 	message := extractOpenAISSEErrorMessage(payload)
 	status := openAIStreamFailureStatus(payload, message)
 	switch status {
@@ -747,6 +802,9 @@ func classifyOpenAIWSAcquireError(err error) string {
 
 func isOpenAIWSRateLimitError(codeRaw, errTypeRaw, msgRaw string) bool {
 	code := strings.ToLower(strings.TrimSpace(codeRaw))
+	if code == "cyber_policy" {
+		return false
+	}
 	errType := strings.ToLower(strings.TrimSpace(errTypeRaw))
 	msg := strings.ToLower(strings.TrimSpace(msgRaw))
 
@@ -830,6 +888,8 @@ func classifyOpenAIWSErrorEventFromRaw(codeRaw, errTypeRaw, msgRaw string) (stri
 	msg := strings.ToLower(strings.TrimSpace(msgRaw))
 
 	switch code {
+	case "cyber_policy":
+		return "cyber_policy", false
 	case "upgrade_required":
 		return "upgrade_required", true
 	case "websocket_not_supported", "websocket_unsupported":

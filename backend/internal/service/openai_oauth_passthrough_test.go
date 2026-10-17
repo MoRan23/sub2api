@@ -2824,7 +2824,8 @@ func TestOpenAIGatewayService_OpenAIPassthrough_RetryableStatusesTriggerFailover
 
 func TestOpenAIGatewayService_APIKeyPassthrough_Transient5xxTriggersFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	requestBody := []byte(`{"model":"gpt-5.2","stream":false,"input":"hello"}`)
+	// Default prompt injection is covered separately; this test preserves retry bytes.
+	requestBody := []byte(`{"model":"gpt-5.2","stream":false,"input":"hello","instructions":"fixture instructions"}`)
 
 	for _, statusCode := range []int{
 		http.StatusInternalServerError,

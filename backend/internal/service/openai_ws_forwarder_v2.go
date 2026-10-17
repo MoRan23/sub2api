@@ -837,7 +837,63 @@ readLoop:
 		}
 
 		if eventType == "error" || eventType == "response.failed" {
-			markOpenAICyberPolicyEvent(c, message, http.StatusOK, usage)
+			status := http.StatusOK
+			if !reqStream {
+				status = http.StatusBadRequest
+			}
+			if markOpenAICyberPolicyEvent(c, message, status, usage) {
+				// Accepted policy failures are final even if the envelope also says
+				// rate_limit/server_error. Deliver once and retire the native socket.
+				upstreamTerminalEvent = "response.failed"
+				if reqStream {
+					flushBufferedStreamEvents("cyber_policy")
+					emitStreamMessage(message, true)
+				}
+				if eventType == "error" {
+					terminal := drainOpenAIWSCyberPolicyTurn(responseID, func(timeout time.Duration) ([]byte, error) {
+						if len(pendingJSONDocuments) > 0 {
+							payload := pendingJSONDocuments[0]
+							pendingJSONDocuments = pendingJSONDocuments[1:]
+							return payload, nil
+						}
+						return lease.ReadMessageWithContextTimeout(upstreamReadCtx, timeout)
+					}, func(payload []byte) {
+						parseOpenAIWSResponseUsageFromCompletedEvent(payload, usage)
+						kind, id, _ := parseOpenAIWSEventEnvelope(payload)
+						responseModelObserver.ObserveOpenAI(payload, kind)
+						if responseID == "" {
+							responseID = id
+						}
+						imageCounter.AddSSEData(payload)
+					})
+					if terminal != nil {
+						// A paired terminal may contain usage without repeating the error.
+						// Non-streaming clients still need the original structured refusal.
+						if terminalHasPolicy, _, _ := detectOpenAICyberPolicy(terminal); reqStream || terminalHasPolicy {
+							message = terminal
+						}
+						if reqStream {
+							emitStreamMessage(terminal, true)
+						}
+					}
+				}
+				lease.MarkBroken()
+				refreshOpenAIWSCyberPolicyUsage(c, *usage)
+				if !reqStream && !clientDisconnected {
+					body := message
+					if response := gjson.GetBytes(message, "response"); response.IsObject() {
+						body = []byte(response.Raw)
+					}
+					stageTurnStateHeader()
+					if writeOpenAIResponseDataWithDelivery(c, status, "application/json", body) {
+						commitTurnState()
+					}
+				}
+				result := resultWithUsage()
+				result.ImageCount = imageCounter.Count()
+				result.ImageOutputSizes = imageCounter.Sizes()
+				return result, nil
+			}
 		}
 
 		if eventType == "error" {

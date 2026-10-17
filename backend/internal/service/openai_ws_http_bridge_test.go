@@ -1142,13 +1142,21 @@ func TestProxyOpenAIWSHTTPBridgeTurnMarksCyberPolicyForFailureShapes(t *testing.
 		wantOutput int
 		wantResult bool
 		wantError  bool
+		wantWrites int
 	}{
+		{
+			name:       "sse_bare_error_drains_terminal_usage",
+			statusCode: http.StatusOK,
+			body: "data: {\"type\":\"error\",\"error\":{\"code\":\"cyber_policy\",\"message\":\"blocked\"}}\n\n" +
+				"data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_cyber_usage\",\"error\":{\"code\":\"cyber_policy\",\"message\":\"blocked\"},\"usage\":{\"input_tokens\":19,\"output_tokens\":3,\"input_tokens_details\":{\"cached_tokens\":11}}}}\n\n",
+			wantStatus: http.StatusOK, wantInput: 19, wantOutput: 3, wantResult: true, wantWrites: 2,
+		},
 		{
 			name:       "http_error_body",
 			statusCode: http.StatusBadRequest,
 			body:       `{"error":{"code":"cyber_policy","message":"blocked by HTTP cyber policy"}}`,
 			wantStatus: http.StatusBadRequest,
-			wantError:  true,
+			wantResult: true,
 		},
 		{
 			name:       "sse_error_event",
@@ -1158,7 +1166,6 @@ func TestProxyOpenAIWSHTTPBridgeTurnMarksCyberPolicyForFailureShapes(t *testing.
 			wantInput:  5,
 			wantOutput: 1,
 			wantResult: true,
-			wantError:  true,
 		},
 		{
 			name:       "sse_response_failed_event",
@@ -1167,6 +1174,20 @@ func TestProxyOpenAIWSHTTPBridgeTurnMarksCyberPolicyForFailureShapes(t *testing.
 			wantStatus: http.StatusOK,
 			wantInput:  9,
 			wantOutput: 2,
+			wantResult: true,
+		},
+		{
+			name:       "http_503_policy_is_final",
+			statusCode: http.StatusServiceUnavailable,
+			body:       `{"error":{"code":"cyber_policy","type":"server_error","message":"please retry"}}`,
+			wantStatus: http.StatusServiceUnavailable,
+			wantResult: true,
+		},
+		{
+			name:       "sse_policy_overrides_rate_limit",
+			statusCode: http.StatusOK,
+			body:       "data: {\"type\":\"error\",\"error\":{\"code\":\"cyber_policy\",\"type\":\"rate_limit_error\",\"status_code\":429,\"message\":\"rate limit exceeded\"}}\n\n",
+			wantStatus: http.StatusOK,
 			wantResult: true,
 		},
 	}
@@ -1184,10 +1205,14 @@ func TestProxyOpenAIWSHTTPBridgeTurnMarksCyberPolicyForFailureShapes(t *testing.
 			c, _ := gin.CreateTestContext(recorder)
 			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 			payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
+			var writes [][]byte
 
 			result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
 				context.Background(), c, account, "sk-test", payload, len(payload),
-				"gpt-5", "", "", "", "", 1, func([]byte) error { return nil },
+				"gpt-5", "", "", "", "", 1, func(message []byte) error {
+					writes = append(writes, append([]byte(nil), message...))
+					return nil
+				},
 			)
 
 			require.Equal(t, tt.wantResult, result != nil)
@@ -1199,6 +1224,15 @@ func TestProxyOpenAIWSHTTPBridgeTurnMarksCyberPolicyForFailureShapes(t *testing.
 			require.Equal(t, tt.wantInput, mark.UpstreamInTok)
 			require.Equal(t, tt.wantOutput, mark.UpstreamOutTok)
 			require.Contains(t, mark.Body, `"code":"cyber_policy"`)
+			if tt.wantWrites == 0 {
+				tt.wantWrites = 1
+			}
+			require.Len(t, writes, tt.wantWrites)
+			if tt.wantWrites == 2 {
+				require.Equal(t, 11, result.Usage.CacheReadInputTokens)
+			}
+			hit, _, _ := detectOpenAICyberPolicy(writes[0])
+			require.True(t, hit, "bridge must retain the original structured code")
 		})
 	}
 }
@@ -2280,7 +2314,7 @@ func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
 
 	// Keep the normalized body below the bridge threshold after adding outbound
 	// identity metadata; only the original frame's padding crosses it.
-	payload := []byte(strings.Repeat(" ", 8192) + `{"type":"response.create","generate":true,"model":"gpt-5","stream":true,"input":"` + strings.Repeat("x", 17*1024*1024) + `"}`)
+	payload := []byte(strings.Repeat(" ", 8192) + `{"type":"response.create","generate":true,"model":"gpt-5","instructions":"Test bridge payload size.","stream":true,"input":"` + strings.Repeat("x", 17*1024*1024) + `"}`)
 	require.Greater(t, len(payload), 16*1024*1024)
 	require.GreaterOrEqual(t, int64(len(payload)), cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes)
 	require.Less(t, int64(len(payload)), ResolveOpenAIWSClientReadLimitBytes(cfg))

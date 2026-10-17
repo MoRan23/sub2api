@@ -18,6 +18,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const (
@@ -653,7 +654,31 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, openAIWSHTTPBridgeErrorBodyLimitBytes))
 		_ = resp.Body.Close()
-		markOpenAICyberPolicyEvent(c, respBody, resp.StatusCode, nil)
+		cyberUsage := OpenAIUsage{}
+		parseOpenAIWSResponseUsageFromCompletedEvent(respBody, &cyberUsage)
+		if markOpenAICyberPolicyEvent(c, respBody, resp.StatusCode, &cyberUsage) {
+			// HTTP errors need a WS event envelope, but keep the provider's structured
+			// error intact instead of replacing its code with a generic upstream error.
+			clientError := respBody
+			if eventType := gjson.GetBytes(clientError, "type").String(); eventType != "error" && eventType != "response.failed" {
+				clientError, err = sjson.SetBytes(clientError, "type", "error")
+				if err != nil {
+					return nil, fmt.Errorf("encode websocket cyber policy error: %w", err)
+				}
+			}
+			clientError, err = sjson.SetBytes(clientError, "status", resp.StatusCode)
+			if err != nil {
+				return nil, fmt.Errorf("encode websocket cyber policy status: %w", err)
+			}
+			if writeErr := writeClientMessage(clientError); writeErr == nil {
+				markOpenAIWSClientVisibleFailure(c, gjson.GetBytes(clientError, "type").String(), clientError)
+			}
+			return &OpenAIForwardResult{
+				RequestID: resp.Header.Get("X-Request-Id"), Model: originalModel, UpstreamModel: actualModel,
+				Usage: cyberUsage, Stream: true, OpenAIWSMode: true, UpstreamTerminalEvent: "response.failed",
+				ResponseHeaders: resp.Header.Clone(), Duration: time.Since(turnStart),
+			}, nil
+		}
 		if resp.StatusCode == http.StatusBadRequest &&
 			extractUpstreamErrorCode(respBody) == openAIWSFallbackReasonInvalidEncryptedContent {
 			s.markOpenAIWSInvalidEncryptedContentLineageFromPayload(
@@ -879,10 +904,66 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if openAIWSMessageShouldParseUsage(eventType, upstreamMessage) {
 			parseOpenAIWSResponseUsageFromCompletedEvent(upstreamMessage, &usage)
 		}
-		if eventType == "error" || eventType == "response.failed" {
+		cyberRejected := (eventType == "error" || eventType == "response.failed") &&
 			markOpenAICyberPolicyEvent(c, upstreamMessage, http.StatusOK, &usage)
-		}
 		imageCounter.AddSSEData(upstreamMessage)
+		if cyberRejected {
+			// A bare policy error is authoritative too. Deliver it now and only
+			// drain this turn briefly for the paired terminal's authoritative usage.
+			upstreamTerminalEvent = "response.failed"
+			if !clientDisconnected {
+				for _, message := range append(pendingClientMessages, upstreamMessage) {
+					if err := writeClientMessage(message); err != nil {
+						clientDisconnected = true
+						break
+					}
+				}
+				if !clientDisconnected {
+					markOpenAIWSClientVisibleFailure(c, eventType, upstreamMessage)
+				}
+			}
+			if eventType == "error" {
+				deadline := time.Now().Add(openAIWSCyberPolicyDrainTimeout)
+				drainTimer := time.AfterFunc(openAIWSCyberPolicyDrainTimeout, func() { _ = resp.Body.Close() })
+				for time.Now().Before(deadline) && scanner.Scan() {
+					line := scanner.Text()
+					if kind, ok := extractOpenAISSEEventLine(line); ok {
+						pendingSSEEventType = kind
+						continue
+					}
+					if strings.TrimSpace(line) == "" {
+						pendingSSEEventType = ""
+						continue
+					}
+					data, ok := extractOpenAISSEDataLine(line)
+					if !ok || strings.TrimSpace(data) == "[DONE]" {
+						continue
+					}
+					message := []byte(openAICompatPayloadWithEventType(strings.TrimSpace(data), pendingSSEEventType))
+					kind, id, _ := parseOpenAIWSEventEnvelope(message)
+					if responseID != "" && id != "" && id != responseID {
+						continue
+					}
+					parseOpenAIWSResponseUsageFromCompletedEvent(message, &usage)
+					responseModelObserver.ObserveOpenAI(message, kind)
+					imageCounter.AddSSEData(message)
+					if responseID == "" {
+						responseID = id
+					}
+					if isOpenAIWSTerminalEvent(kind) {
+						if !clientDisconnected {
+							if err := writeClientMessage(message); err == nil {
+								markOpenAIWSClientVisibleFailure(c, kind, message)
+							}
+						}
+						break
+					}
+				}
+				drainTimer.Stop()
+			}
+			refreshOpenAIWSCyberPolicyUsage(c, usage)
+			return resultWithUsage(), nil
+		}
 
 		if needModelReplace && len(mappedModelBytes) > 0 && openAIWSEventMayContainModel(eventType) && strings.Contains(trimmedData, mappedModel) {
 			upstreamMessage = replaceOpenAIWSMessageModel(upstreamMessage, mappedModel, originalModel)

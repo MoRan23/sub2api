@@ -269,6 +269,19 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			}()
 			return h.gatewayService.ForwardImages(requestCtx, c, account, body, parsed, channelMapping.MappedModel)
 		}()
+		cyberMarked := service.GetOpsCyberPolicy(c) != nil
+		if cyberMarked {
+			cyberBody := body
+			if parsed.Multipart {
+				// Only the parsed JSON view may contribute session evidence, never
+				// multipart file bytes or form boundaries.
+				cyberBody = parsed.ModerationBody()
+			}
+			h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, requestModel, result == nil, cyberBody, clientRequestedUsageFields(c, channelMapping, requestModel, ""), service.HashUsageRequestPayload(cyberBody))
+			if result == nil {
+				return
+			}
+		}
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
@@ -279,7 +292,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		if result != nil && result.FirstTokenMs != nil {
 			service.SetOpsLatencyMs(c, service.OpsTimeToFirstTokenMsKey, int64(*result.FirstTokenMs))
 		}
-		if err != nil {
+		if err != nil && !cyberMarked {
 			if result != nil && result.ImageCount > 0 {
 				reqLog.Warn("openai.images.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),
@@ -386,13 +399,13 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				return
 			}
 		}
-		if result != nil {
+		if result != nil && !cyberMarked {
 			// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
 			if account.Type == service.AccountTypeOAuth && !account.IsShadow() {
 				h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(c.Request.Context(), account.ID, result.ResponseHeaders)
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, requestModel, false, result), true, result.FirstTokenMs)
-		} else {
+		} else if !cyberMarked {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, requestModel, false, result), true, nil)
 		}
 
@@ -426,6 +439,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				APIKeyService:      h.apiKeyService,
 				QuotaPlatform:      quotaPlatform,
 				SessionID:          sessionID,
+				CyberBlocked:       cyberMarked,
 				ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, requestModel, upstreamModel),
 			}); err != nil {
 				logger.L().With(

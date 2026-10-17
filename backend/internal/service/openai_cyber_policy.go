@@ -10,13 +10,13 @@ import (
 
 // opsCyberPolicyKey 在 gin context 中携带 cyber_policy 命中标记。
 // 由 gateway 服务层在检测到上游 error.code=="cyber_policy" 时设置，
-// handler 在 Forward 返回后读取以触发风控记录、邮件与 tokens=0 用量行。
+// handler 在 Forward 返回后读取以触发风控记录、邮件与真实用量结算。
 const opsCyberPolicyKey = "ops_cyber_policy"
 
 // errOpenAICyberPolicyForwarded 表示 cyber_policy 已按当前端点格式透传给客户端
 // （error 已写出/下发）。compat 路径 ForwardAsChatCompletions / ForwardAsAnthropic 出口
-// 据此丢弃 result 并返回该哨兵，使 handler 落入 tokens=0 免费用量行（对齐 /v1/responses），
-// 既不计费、也不 failover、不重复写响应。
+// 据此丢弃 result 并返回该哨兵，使 handler 使用标记中的真实 token 结算，
+// 不 failover、不重复写响应。
 var errOpenAICyberPolicyForwarded = errors.New("openai cyber_policy forwarded to client")
 
 // CyberPolicyMark 记录一次 cyber_policy 硬阻断的上游证据。
@@ -24,7 +24,7 @@ type CyberPolicyMark struct {
 	Code           string // 固定 "cyber_policy"
 	Message        string // 上游 error.message
 	Body           string // 上游 response.failed / 400 原始 body（已截断；未脱敏，ops_error 落库由 sanitizeErrorBodyForStorage、风控日志由 redactContentModerationSecrets 统一脱敏）
-	UpstreamStatus int    // 上游 HTTP 状态（流式=200，非流式=400）
+	UpstreamStatus int    // 上游 HTTP 状态；Engine 流内错误使用其明确报告的语义状态
 	UpstreamInTok  int    // 上游已报 input tokens（如有）
 	UpstreamOutTok int    // 上游已报 output tokens（如有）
 }

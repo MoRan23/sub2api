@@ -12,7 +12,6 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/gjson"
 )
 
 // openAIWSIngressCapacityShedRepo 补齐 SetError，避免非容量类错误（如
@@ -191,15 +190,23 @@ func TestProxyResponsesWebSocketFromClient_MarksCyberPolicyBeforeEarlyReturn(t *
 	tests := []struct {
 		name          string
 		upstreamEvent []byte
+		terminalEvent []byte
 		wantFailover  bool
 		wantClientMsg bool
 		wantInput     int
 		wantOutput    int
 	}{
 		{
-			name:          "error_before_rate_limit_failover",
+			name:          "bare_policy_error_drains_terminal_usage",
+			upstreamEvent: []byte(`{"type":"error","error":{"code":"cyber_policy","message":"blocked by cyber policy"}}`),
+			terminalEvent: []byte(`{"type":"response.failed","response":{"id":"resp_cyber_usage","error":{"code":"cyber_policy","message":"blocked by cyber policy"},"usage":{"input_tokens":19,"output_tokens":3,"input_tokens_details":{"cached_tokens":11}}}}`),
+			wantClientMsg: true,
+			wantInput:     19, wantOutput: 3,
+		},
+		{
+			name:          "error_policy_overrides_rate_limit",
 			upstreamEvent: []byte(`{"type":"error","error":{"type":"rate_limit_error","code":"cyber_policy","message":"rate limit exceeded by cyber policy"},"usage":{"input_tokens":5,"output_tokens":1}}`),
-			wantFailover:  true,
+			wantClientMsg: true,
 			wantInput:     5,
 			wantOutput:    1,
 		},
@@ -209,6 +216,16 @@ func TestProxyResponsesWebSocketFromClient_MarksCyberPolicyBeforeEarlyReturn(t *
 			wantClientMsg: true,
 			wantInput:     9,
 			wantOutput:    2,
+		},
+		{
+			name:          "error_policy_overrides_server_recovery",
+			upstreamEvent: []byte(`{"type":"error","error":{"type":"server_error","code":"cyber_policy","status_code":503,"message":"previous response not found; please retry"}}`),
+			wantClientMsg: true,
+		},
+		{
+			name:          "failed_policy_overrides_authentication",
+			upstreamEvent: []byte(`{"type":"response.failed","response":{"id":"resp_cyber_auth","error":{"type":"authentication_error","code":"cyber_policy","status_code":401,"message":"blocked by cyber policy"}}}`),
+			wantClientMsg: true,
 		},
 	}
 
@@ -222,8 +239,12 @@ func TestProxyResponsesWebSocketFromClient_MarksCyberPolicyBeforeEarlyReturn(t *
 			cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
 
 			captureConn := &openAIWSCaptureConn{events: [][]byte{append([]byte(nil), tt.upstreamEvent...)}}
+			if tt.terminalEvent != nil {
+				captureConn.events = append(captureConn.events, tt.terminalEvent)
+			}
 			pool := newOpenAIWSConnPool(cfg)
 			pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: captureConn})
+			repo := &openAIStream403AccountRepo{}
 			svc := &OpenAIGatewayService{
 				cfg:              cfg,
 				httpUpstream:     &httpUpstreamRecorder{},
@@ -231,6 +252,7 @@ func TestProxyResponsesWebSocketFromClient_MarksCyberPolicyBeforeEarlyReturn(t *
 				openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
 				toolCorrector:    NewCodexToolCorrector(),
 				openaiWSPool:     pool,
+				rateLimitService: NewRateLimitService(repo, nil, cfg, nil, nil),
 			}
 			account := &Account{
 				ID: 5402, Name: "openai-ingress-cyber", Platform: PlatformOpenAI,
@@ -285,7 +307,14 @@ func TestProxyResponsesWebSocketFromClient_MarksCyberPolicyBeforeEarlyReturn(t *
 				_, message, readErr := clientConn.Read(readCtx)
 				cancelRead()
 				require.NoError(t, readErr)
-				require.Equal(t, "response.failed", gjson.GetBytes(message, "type").String())
+				require.JSONEq(t, string(tt.upstreamEvent), string(message), "deliver the original structured refusal")
+			}
+			if tt.terminalEvent != nil {
+				readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+				_, message, readErr := clientConn.Read(readCtx)
+				cancelRead()
+				require.NoError(t, readErr)
+				require.JSONEq(t, string(tt.terminalEvent), string(message))
 			}
 
 			select {
@@ -298,14 +327,24 @@ func TestProxyResponsesWebSocketFromClient_MarksCyberPolicyBeforeEarlyReturn(t *
 				t.Fatal("AfterTurn did not observe the cyber mark")
 			}
 
-			_ = clientConn.CloseNow()
+			readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+			_, _, closeErr := clientConn.Read(readCtx)
+			cancelRead()
+			require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(closeErr), "policy frame must precede the close")
 			select {
 			case serverErr := <-serverErrCh:
 				var failoverErr *UpstreamFailoverError
 				require.Equal(t, tt.wantFailover, errors.As(serverErr, &failoverErr))
+				require.NoError(t, serverErr)
 			case <-time.After(5 * time.Second):
 				t.Fatal("waiting for ingress websocket shutdown timed out")
 			}
+			captureConn.mu.Lock()
+			require.True(t, captureConn.closed, "rejected native socket must not return to the pool")
+			require.Len(t, captureConn.writes, 1, "accepted refusal must never be replayed")
+			captureConn.mu.Unlock()
+			require.Zero(t, repo.setErrorCalls)
+			require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
 		})
 	}
 }

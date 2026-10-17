@@ -98,7 +98,7 @@ func newCodexEngineResponseError(status int, payload []byte, event string) *code
 	return &codexEngineResponseError{status: status, reportedStatus: reportedStatus, code: failure.Get("code").String(), errorType: failure.Get("type").String(), message: message, event: event}
 }
 
-func recordCodexEngineError(c *gin.Context, account *Account, resp *http.Response, failure *codexEngineResponseError) {
+func recordCodexEngineError(c *gin.Context, account *Account, resp *http.Response, failure *codexEngineResponseError, usage *OpenAIUsage) {
 	clean := func(value string, limit int) string {
 		if key := account.GetOpenAIApiKey(); key != "" {
 			value = strings.ReplaceAll(value, key, "[redacted]")
@@ -117,6 +117,11 @@ func recordCodexEngineError(c *gin.Context, account *Account, resp *http.Respons
 		errorFields["status_code"] = failure.reportedStatus
 	}
 	detail, _ := json.Marshal(map[string]any{"error": errorFields})
+	// Mark only after the stream has finished collecting authoritative usage.
+	// A bare error may precede response.failed, and the first cyber mark wins.
+	// The error-only envelope preserves the structured code without retaining
+	// generated output or interpreting a refusal mentioned inside its message.
+	markOpenAICyberPolicyEvent(c, detail, failure.status, usage)
 	setOpsUpstreamError(c, failure.status, failure.message, string(detail))
 	kind := "http_error"
 	if failure.event != "" {
@@ -408,7 +413,7 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 	}
 	if errors.As(err, &failure) {
 		s.observeCodexEngineDeploymentUnavailable(account, resp, failure, time.Now())
-		recordCodexEngineError(c, account, resp, failure)
+		recordCodexEngineError(c, account, resp, failure, &result.Usage)
 	}
 	if err == nil && endpoint == "/v1/alpha/search" {
 		result.WebSearchCalls = 1

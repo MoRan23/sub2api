@@ -1085,6 +1085,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	telemetryMayRetry := true // The initial physical write can be retried by the caller.
 	defer func() { currentTelemetry().finish(telemetryMayRetry) }()
+	var cyberPolicyRejected atomic.Bool
+	cyberDrainDone := make(chan struct{})
+	var cyberDrainDoneOnce sync.Once
+	finishCyberDrain := func() { cyberDrainDoneOnce.Do(func() { close(cyberDrainDone) }) }
+	var cyberDrainTimer *time.Timer
+	defer func() {
+		if cyberDrainTimer != nil {
+			cyberDrainTimer.Stop()
+		}
+		finishCyberDrain()
+	}()
 	var pendingFrameObservation func()
 	telemetryFrameNumber := 0
 	physicalUpstreamFrameConn := &openAIWSFinalizingUpstreamFrameConn{
@@ -1195,6 +1206,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		// capturedSessionModel 的读写都发生在该 goroutine 内，因此无需
 		// 加锁/原子化。
 		filter: func(msgType coderws.MessageType, payload []byte) (out []byte, blocked *OpenAIFastBlockedError, filterErr error) {
+			if cyberPolicyRejected.Load() {
+				// Do not admit a new turn while the rejected turn is draining usage.
+				select {
+				case <-cyberDrainDone:
+				case <-ctx.Done():
+				}
+				return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "request rejected by cyber-security policy", errOpenAIWSCyberPolicyStop)
+			}
 			if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
 				return payload, nil, nil
 			}
@@ -1442,6 +1461,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		firstTurnStartedAt = hooks.InitialTurnStartedAt
 	}
 	failureAccountSideEffectsApplied := false
+	activeResponseID := ""
 	relayResult, relayExit := openaiwsv2.RunEntry(openaiwsv2.EntryInput{
 		Ctx:                ctx,
 		ClientConn:         policyClientConn,
@@ -1517,6 +1537,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					turnResult.Usage.OutputTokens,
 					turnResult.Usage.CacheReadInputTokens,
 				)
+				if cyberPolicyRejected.Load() {
+					refreshOpenAIWSCyberPolicyUsage(c, turnResult.Usage)
+				}
 				if hooks != nil && hooks.AfterTurn != nil {
 					hooks.AfterTurn(turnNo, turnResult, nil)
 				}
@@ -1526,7 +1549,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					turnLifecycle.beginTerminalWrite()
 				}
 			},
-			AfterClientWrite: func(msgType coderws.MessageType, payload []byte, writeErr error) {
+			AfterClientWrite: func(msgType coderws.MessageType, payload []byte, writeErr error) error {
 				isDataFrame := msgType == coderws.MessageText || msgType == coderws.MessageBinary
 				isTerminal := isDataFrame && openAIWSPassthroughIsTerminalOutput(payload)
 				if writeErr != nil || isTerminal {
@@ -1565,9 +1588,29 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if msgType == coderws.MessageText && openAIWSPassthroughIsTerminalOutput(payload) {
 					turnLifecycle.finishTerminalWrite(writeErr == nil, clientFrameConn.markTurnCompleted)
 				}
+				if msgType == coderws.MessageText && cyberPolicyRejected.Load() {
+					if openAIWSPassthroughIsTerminalOutput(payload) {
+						finishCyberDrain()
+						return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "request rejected by cyber-security policy", errOpenAIWSCyberPolicyStop)
+					}
+					if cyberDrainTimer == nil {
+						cyberDrainTimer = time.AfterFunc(openAIWSCyberPolicyDrainTimeout, func() {
+							finishCyberDrain()
+							_ = upstreamConn.Close()
+						})
+					}
+					if writeErr != nil {
+						return openaiwsv2.ErrDrainCurrentTurn
+					}
+				}
+				return nil
 			},
 			BeforeRelayCancel: func(exit openaiwsv2.RelayExit) {
 				if context.Cause(ctx) != nil {
+					return
+				}
+				if cyberPolicyRejected.Load() {
+					closeOpenAIWSCyberPolicyClient(clientConn)
 					return
 				}
 				status, reason, ok := openAIWSPassthroughRelayClientClose(exit, int(completedTurns.Load()))
@@ -1588,11 +1631,22 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if msgType != coderws.MessageText {
 					return nil
 				}
-				eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
+				eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(payload)
+				if cyberPolicyRejected.Load() && activeResponseID != "" && eventResponseID != "" && eventResponseID != activeResponseID {
+					return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "request rejected by cyber-security policy", errOpenAIWSCyberPolicyStop)
+				}
 				if eventType == "response.created" {
+					activeResponseID = eventResponseID
 					failureAccountSideEffectsApplied = false
 				}
 				if (eventType == "error" || eventType == "response.failed") && markOpenAIWSV2PassthroughCyberPolicy(c, payload) {
+					if activeResponseID == "" {
+						activeResponseID = eventResponseID
+					}
+					cyberPolicyRejected.Store(true)
+					return nil
+				}
+				if cyberPolicyRejected.Load() {
 					return nil
 				}
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(payload)
@@ -1638,6 +1692,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			},
 		},
 	})
+	if cyberPolicyRejected.Load() {
+		// Relay has delivered the original rejection, settled its terminal/bare-error
+		// usage exactly once and closed the upstream. Do not report account failure.
+		telemetryMayRetry = false
+		return nil
+	}
 	if cause := context.Cause(ctx); cause != nil {
 		if isOpenAIWSSessionPreempted(ctx) {
 			return errOpenAIWSSessionPreempted

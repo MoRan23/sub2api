@@ -60,9 +60,6 @@ func advanceOpenAIWSCyberBlockState(blocked, pending, marked bool, turnErr error
 	var failoverErr *service.UpstreamFailoverError
 	isFailover := errors.As(turnErr, &failoverErr)
 	if marked {
-		if isFailover {
-			return false, true
-		}
 		return true, false
 	}
 	if pending && !isFailover {
@@ -833,7 +830,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if service.GetOpsCyberPolicy(c) != nil {
 			cyberBlockBodyHTTP = sessionHashBody
 		}
-		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockBodyHTTP, clientRequestedUsageFields(c, channelMapping, reqModel, ""), service.HashUsageRequestPayload(body))
+		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil && result == nil, cyberBlockBodyHTTP, clientRequestedUsageFields(c, channelMapping, reqModel, ""), service.HashUsageRequestPayload(body))
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
@@ -889,6 +886,13 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					).Error("openai.record_usage_failed", zap.Error(err))
 				}
 			})
+		}
+		if service.GetOpsCyberPolicy(c) != nil {
+			// The refusal has already been delivered. Settle any complete usage
+			// once, without treating a policy decision as an account health signal
+			// or allowing a mixed error wrapper to retry the accepted request.
+			submitResponsesUsage(result)
+			return
 		}
 		if err != nil {
 			if result != nil && result.ClientDisconnect {
@@ -1523,7 +1527,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		if service.GetOpsCyberPolicy(c) != nil {
 			cyberBlockBodyMsg = body
 		}
-		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockBodyMsg, clientRequestedUsageFields(c, channelMappingMsg, reqModel, ""), service.HashUsageRequestPayload(body))
+		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil && result == nil, cyberBlockBodyMsg, clientRequestedUsageFields(c, channelMappingMsg, reqModel, ""), service.HashUsageRequestPayload(body))
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
@@ -1579,6 +1583,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					).Error("openai_messages.record_usage_failed", zap.Error(err))
 				}
 			})
+		}
+		if service.GetOpsCyberPolicy(c) != nil {
+			submitMessagesUsage(result)
+			return
 		}
 		if err != nil {
 			if result != nil && result.ImageCount > 0 {
@@ -3122,6 +3130,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			return
 		}
 		var wsAttemptAdvanced atomic.Bool
+		var cyberRejectedThisAttempt atomic.Bool
 		hooks := &service.OpenAIWSIngressHooks{
 			ClientLifecycleContext:      clientLifecycleCtx,
 			InitialRequestModel:         reqModel,
@@ -3279,20 +3288,20 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				turnUsageFields := turnMapping.ToUsageFields(turnRequestedModel, turnUpstreamModel)
 				cyberMarked := service.GetOpsCyberPolicy(c) != nil
-				h.recordCyberPolicyIfMarked(c, turnBillingAPIKey, account, subscription, turnRequestedModel, turnErr != nil, cyberBlockBody, turnUsageFields, requestPayloadHash)
+				if cyberMarked {
+					// Capture before turn cleanup; log-only exempts future sessions,
+					// never replay of the execution the upstream already refused.
+					cyberRejectedThisAttempt.Store(true)
+				}
+				h.recordCyberPolicyIfMarked(c, turnBillingAPIKey, account, subscription, turnRequestedModel, turnErr != nil && result == nil, cyberBlockBody, turnUsageFields, requestPayloadHash)
 				cyberBlockedThisConn, cyberBlockPendingAfterFailover = advanceOpenAIWSCyberBlockState(
 					cyberBlockedThisConn,
 					cyberBlockPendingAfterFailover,
 					cyberMarked && !h.cyberPolicyLogOnly(c, apiKey),
 					turnErr,
 				)
-				if turnErr != nil {
+				if turnErr != nil && !cyberMarked {
 					if result == nil || result.ImageCount <= 0 {
-						return
-					}
-					// cyber 命中时该 turn 的用量已由 recordCyberPolicyIfMarked(forwardErrored=true)
-					// 按真实 token 记录，这里不再走下方 RecordUsage，避免对同一 turn 双写/双扣费。
-					if service.GetOpsCyberPolicy(c) != nil {
 						return
 					}
 					reqLog.Warn("openai.websocket_partial_error_with_image_result",
@@ -3311,15 +3320,17 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					zap.String("turn_upstream_model", turnUpstreamModel),
 					zap.String("billing_model", result.BillingModel),
 				)
-				// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
-				if account.Type == service.AccountTypeOAuth && !account.IsShadow() {
-					h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(ctx, account.ID, result.ResponseHeaders)
+				if !cyberMarked {
+					// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
+					if account.Type == service.AccountTypeOAuth && !account.IsShadow() {
+						h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(ctx, account.ID, result.ResponseHeaders)
+					}
+					scheduleModel := turnUpstreamModel
+					if scheduleModel == "" {
+						scheduleModel = turnRequestedModel
+					}
+					h.gatewayService.ReportOpenAIAccountScheduleResult(account, scheduleModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
 				}
-				scheduleModel := turnUpstreamModel
-				if scheduleModel == "" {
-					scheduleModel = turnRequestedModel
-				}
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account, scheduleModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
 				quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
@@ -3377,7 +3388,15 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 
 		for {
 			wsAttemptAdvanced.Store(false)
+			cyberRejectedThisAttempt.Store(false)
 			err := h.gatewayService.ProxyResponsesWebSocketFromClient(ctx, c, wsConn, account, token, wsFirstMessage, hooks)
+			if cyberRejectedThisAttempt.Load() {
+				// Defense in depth if a forwarder accidentally wraps an accepted
+				// policy refusal in a retryable/health error. The original event was
+				// delivered and recorded in AfterTurn; only retire this connection.
+				closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "request rejected by cyber-security policy")
+				return
+			}
 			if err == nil {
 				reqLog.Info("openai.websocket_ingress_closed", zap.Int64("account_id", account.ID))
 				return
@@ -4533,10 +4552,11 @@ func (h *OpenAIGatewayHandler) enqueueCyberSessionBlockedOpsEntry(c *gin.Context
 }
 
 // recordCyberPolicyIfMarked 在 gateway forward 返回后检查 cyber 标记，异步写风控日志/邮件，
-// 并在 forward 返回错误时写一条 tokens=0 用量行。标记由 gateway 服务层在透传 cyber 后设置；
-// 当前请求已发给用户，本方法只做事后记录，不影响响应。forwardErrored 为 true 时才写用量行，
-// 避免与正常 RecordUsage(forward 成功路径)重复。每请求至多记录一次。
-func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey *service.APIKey, account *service.Account, subscription *service.UserSubscription, model string, forwardErrored bool, cyberBlockBody []byte, channelFields service.ChannelUsageFields, requestPayloadHash string) {
+// 仅在调用方不会提交完整 forward result 时补记上游真实用量。标记由 gateway 服务层
+// 在透传 cyber 后设置；当前请求已发给用户，本方法只做事后记录，不影响响应。
+// recordFallbackUsage 必须排除仍会正常结算的部分结果，以保留缓存、模型和档位等完整
+// 计费证据，并避免对同一请求重复记账。每请求至多记录一次。
+func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey *service.APIKey, account *service.Account, subscription *service.UserSubscription, model string, recordFallbackUsage bool, cyberBlockBody []byte, channelFields service.ChannelUsageFields, requestPayloadHash string) {
 	mark := service.GetOpsCyberPolicy(c)
 	if mark == nil {
 		return
@@ -4655,7 +4675,7 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 				UpstreamOutTok:  mark.UpstreamOutTok,
 			})
 		}
-		if forwardErrored && gwSvc != nil {
+		if recordFallbackUsage && gwSvc != nil {
 			gwSvc.RecordCyberPolicyUsageLog(ctx, service.CyberPolicyUsageInput{
 				APIKey:             apiKey,
 				Account:            account,

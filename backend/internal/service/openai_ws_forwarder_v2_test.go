@@ -102,14 +102,26 @@ func TestForwardOpenAIWSV2_MarksCyberPolicyForFailureEventShapes(t *testing.T) {
 	tests := []struct {
 		name          string
 		upstreamEvent []byte
+		terminalEvent []byte
 		wantError     bool
 		wantInput     int
 		wantOutput    int
 	}{
 		{
+			name:          "bare_error_drains_terminal_usage",
+			upstreamEvent: []byte(`{"type":"error","error":{"code":"cyber_policy","message":"blocked"}}`),
+			terminalEvent: []byte(`{"type":"response.failed","response":{"id":"resp_cyber_usage","error":{"code":"cyber_policy","message":"blocked"},"usage":{"input_tokens":19,"output_tokens":3,"input_tokens_details":{"cached_tokens":11}}}}`),
+			wantInput:     19, wantOutput: 3,
+		},
+		{
+			name:          "bare_error_preserved_when_terminal_only_has_usage",
+			upstreamEvent: []byte(`{"type":"error","error":{"code":"cyber_policy","message":"blocked"}}`),
+			terminalEvent: []byte(`{"type":"response.failed","response":{"id":"resp_cyber_usage","usage":{"input_tokens":19,"output_tokens":3,"input_tokens_details":{"cached_tokens":11}}}}`),
+			wantInput:     19, wantOutput: 3,
+		},
+		{
 			name:          "error_before_return",
 			upstreamEvent: []byte(`{"type":"error","error":{"type":"rate_limit_error","code":"cyber_policy","message":"rate limit exceeded by cyber policy"},"usage":{"input_tokens":5,"output_tokens":1}}`),
-			wantError:     true,
 			wantInput:     5,
 			wantOutput:    1,
 		},
@@ -118,6 +130,10 @@ func TestForwardOpenAIWSV2_MarksCyberPolicyForFailureEventShapes(t *testing.T) {
 			upstreamEvent: []byte(`{"type":"response.failed","response":{"id":"resp_cyber","status":"failed","error":{"code":"cyber_policy","message":"blocked by cyber policy"},"usage":{"input_tokens":9,"output_tokens":2}}}`),
 			wantInput:     9,
 			wantOutput:    2,
+		},
+		{
+			name:          "error_server_wrapper_is_not_fallback",
+			upstreamEvent: []byte(`{"type":"error","error":{"code":"cyber_policy","type":"server_error","message":"please retry"}}`),
 		},
 	}
 
@@ -132,6 +148,9 @@ func TestForwardOpenAIWSV2_MarksCyberPolicyForFailureEventShapes(t *testing.T) {
 			cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 			cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
 			captureConn := &openAIWSCaptureConn{events: [][]byte{append([]byte(nil), tt.upstreamEvent...)}}
+			if tt.terminalEvent != nil {
+				captureConn.events = append(captureConn.events, tt.terminalEvent)
+			}
 			pool := newOpenAIWSConnPool(cfg)
 			pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: captureConn})
 			svc := &OpenAIGatewayService{
@@ -158,7 +177,17 @@ func TestForwardOpenAIWSV2_MarksCyberPolicyForFailureEventShapes(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 				require.NotNil(t, result)
+				require.Equal(t, tt.wantInput, result.Usage.InputTokens)
+				require.Equal(t, tt.wantOutput, result.Usage.OutputTokens)
+				if tt.terminalEvent != nil {
+					require.Equal(t, 11, result.Usage.CacheReadInputTokens)
+				}
 			}
+			require.Contains(t, recorder.Body.String(), `"code":"cyber_policy"`)
+			captureConn.mu.Lock()
+			require.True(t, captureConn.closed)
+			require.Len(t, captureConn.writes, 1)
+			captureConn.mu.Unlock()
 
 			mark := GetOpsCyberPolicy(c)
 			require.NotNil(t, mark)

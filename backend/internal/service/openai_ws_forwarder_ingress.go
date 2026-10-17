@@ -819,8 +819,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if bridgeErr != nil && isOpenAIWSSessionPreempted(ctx) {
 				return errOpenAIWSSessionPreempted
 			}
+			cyberRejected := GetOpsCyberPolicy(c) != nil
 			if hooks != nil && hooks.AfterTurn != nil {
 				hooks.AfterTurn(turn, result, bridgeErr)
+			}
+			if cyberRejected {
+				closeOpenAIWSCyberPolicyClient(clientConn)
+				return nil
 			}
 			if bridgeErr != nil {
 				var failoverErr *UpstreamFailoverError
@@ -1264,10 +1269,43 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if openAIWSMessageShouldParseUsage(eventType, upstreamMessage) {
 				parseOpenAIWSResponseUsageFromCompletedEvent(upstreamMessage, &usage)
 			}
-			if eventType == "error" || eventType == "response.failed" {
+			cyberRejected := (eventType == "error" || eventType == "response.failed") &&
 				markOpenAICyberPolicyEvent(c, upstreamMessage, http.StatusOK, &usage)
+			cyberMessageDelivered := false
+			if cyberRejected {
+				// Retire this connection even when the rejection is a well-formed terminal.
+				// The original error is delivered below before ending the client session.
+				if eventType == "error" {
+					if err := writeClientMessage(upstreamMessage); err == nil {
+						wroteDownstream = true
+						markOpenAIWSClientVisibleFailure(c, eventType, upstreamMessage)
+					} else {
+						clientDisconnected = true
+					}
+					cyberMessageDelivered = true
+					terminal := drainOpenAIWSCyberPolicyTurn(responseID, func(timeout time.Duration) ([]byte, error) {
+						return lease.ReadMessageWithContextTimeout(ctx, timeout)
+					}, func(message []byte) {
+						parseOpenAIWSResponseUsageFromCompletedEvent(message, &usage)
+						kind, id, _ := parseOpenAIWSEventEnvelope(message)
+						responseModelObserver.ObserveOpenAI(message, kind)
+						if responseID == "" {
+							responseID = id
+						}
+						if !isOpenAIWSTerminalEvent(kind) {
+							imageCounter.AddSSEData(message)
+						}
+					})
+					if terminal != nil {
+						upstreamMessage = terminal
+						eventType, _, _ = parseOpenAIWSEventEnvelope(terminal)
+						cyberMessageDelivered = false
+					}
+				}
+				lease.MarkBroken()
+				refreshOpenAIWSCyberPolicyUsage(c, usage)
 			}
-			if eventType == "error" {
+			if eventType == "error" && !cyberRejected {
 				s.handleOpenAIWSErrorEventTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), upstreamMessage)
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(upstreamMessage)
 				statusCode := openAIWSRejectedFieldRetryHTTPStatus(upstreamMessage)
@@ -1373,7 +1411,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if isTokenEvent {
 				tokenEventCount++
 			}
-			isTerminalEvent := isOpenAIWSTerminalEvent(eventType)
+			isTerminalEvent := isOpenAIWSTerminalEvent(eventType) || cyberRejected
 			if isTerminalEvent {
 				terminalEventCount++
 			}
@@ -1383,7 +1421,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			imageCounter.AddSSEData(upstreamMessage)
 
-			if !clientDisconnected {
+			if !clientDisconnected && !cyberMessageDelivered {
 				if needModelReplace && len(mappedModelBytes) > 0 && openAIWSEventMayContainModel(eventType) && bytes.Contains(upstreamMessage, mappedModelBytes) {
 					upstreamMessage = replaceOpenAIWSMessageModel(upstreamMessage, mappedModel, originalModel)
 				}
@@ -1412,7 +1450,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 				if err := writeClientMessage(clientMessage); err != nil {
 					telemetry.markDelivery(false)
-					if isOpenAIWSClientDisconnectError(err) {
+					if isOpenAIWSClientDisconnectError(err) || cyberRejected {
 						clientDisconnected = true
 						closeStatus, closeReason := summarizeOpenAIWSReadCloseError(err)
 						logOpenAIWSModeInfo(
@@ -1453,6 +1491,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			if isTerminalEvent {
 				terminalEvent := s.handleOpenAIWSTerminalTransientFailure(ctx, account, mappedModel, lease.HandshakeHeaders(), upstreamMessage)
+				if cyberRejected {
+					terminalEvent = "response.failed"
+				}
 				// 客户端已断连时，上游连接的 session 状态不可信，标记 broken 避免回池复用。
 				if clientDisconnected {
 					lease.MarkBroken()
@@ -2152,8 +2193,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		turnPrevRecoveryTried = false
 		lastTurnFinishedAt = time.Now()
 		lastTurnClean = true
+		cyberRejected := GetOpsCyberPolicy(c) != nil
 		if hooks != nil && hooks.AfterTurn != nil {
 			hooks.AfterTurn(turn, result, nil)
+		}
+		if cyberRejected {
+			resetSessionLease(true)
+			closeOpenAIWSCyberPolicyClient(clientConn)
+			return nil
 		}
 		if result == nil {
 			return errors.New("websocket turn result is nil")
