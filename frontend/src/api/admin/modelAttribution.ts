@@ -6,6 +6,8 @@ export interface AttributionGroup extends AttributionPolicy { group_id: number; 
 export interface NewAccountTestConfig { attribution: boolean; pelican: boolean; attribution_model: string; attribution_expected_models?: string[] | null; pelican_model: string }
 export interface AttributionDetector { provider: string; protocol: number; revision: string; algorithm: string; bank_built_at: string; reference_sha256: string; ranker_sha256: string; calibration_sha256: string }
 export interface AttributionConnection { models: string[]; detector: AttributionDetector }
+export interface AttributionProbeModelAccount { account_id: number; account_name: string; models: string[]; status: 'success' | 'partial' | 'error'; error?: string }
+export interface AttributionProbeModels { models: string[]; accounts: AttributionProbeModelAccount[] }
 export interface AttributionConfig { version: number; enabled: boolean; base_url: string; detector?: AttributionDetector; default: AttributionPolicy; groups: AttributionGroup[]; group_priority: number[]; new_account_tests: NewAccountTestConfig }
 export type AttributionStatus = 'queued' | 'running' | 'retry_wait' | 'cancelled' | 'passed' | 'mismatch' | 'abnormal' | 'failed' | 'skipped'
 export interface AttributionJob {
@@ -43,6 +45,7 @@ export const attributionAPI = {
   async save(config: AttributionConfig): Promise<AttributionConfig> { return (await apiClient.put<AttributionConfig>(`${root}/config`, config)).data },
   async models(base_url: string): Promise<string[]> { return (await apiClient.post<{ models: string[] }>(`${root}/models`, { base_url }, { timeout: 25000 })).data.models },
   async connection(base_url: string): Promise<AttributionConnection> { return (await apiClient.post<AttributionConnection>(`${root}/models`, { base_url }, { timeout: 25000 })).data },
+  async probeModels(account_ids: number[], signal?: AbortSignal): Promise<AttributionProbeModels> { return (await apiClient.post<AttributionProbeModels>(`${root}/probe-models`, { account_ids }, { timeout: 30000, signal })).data },
   async create(account_ids: number[], model?: string, expected_models?: string[] | null): Promise<AttributionJob[]> { return (await apiClient.post<{ items: AttributionJob[] }>(`${root}/jobs`, { account_ids, ...(model ? { model } : {}), ...(expected_models != null ? { expected_models } : {}) })).data.items },
   async history(account_id?: number, page = 1): Promise<AttributionPage> { return (await apiClient.get<AttributionPage>(`${root}/jobs`, { params: { account_id, page, page_size: 20 } })).data },
   async job(id: number): Promise<AttributionJob> { return (await apiClient.get<AttributionJob>(`${root}/jobs/${id}`)).data },

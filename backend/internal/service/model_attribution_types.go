@@ -322,7 +322,8 @@ func AttributionSkipReason(a *Account, now time.Time, manual bool) string {
 	if a == nil {
 		return "account_missing"
 	}
-	if !a.IsOpenAIOAuth() && !a.IsCodexEngine() && !(manual && a.Platform == PlatformOpenAI && a.Type == AccountTypeAPIKey) {
+	eligible := a.IsOpenAIOAuth() || a.IsCodexEngine() || a.IsOpenAIAPIKeyAutoAttributionEnabled() || (manual && a.IsOpenAIApiKey())
+	if !eligible {
 		return "unsupported_account"
 	}
 	// Explicit administrator probes do not participate in automatic scheduling.

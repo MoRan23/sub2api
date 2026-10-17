@@ -225,6 +225,9 @@ func NewAccountService(accountRepo AccountRepository, groupRepo GroupRepository)
 
 // Create 创建账号
 func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (*Account, error) {
+	if err := ValidateOpenAIAPIKeyAutoAttribution(req.Platform, req.Type, req.Extra); err != nil {
+		return nil, err
+	}
 	if err := ValidateOpenAIAPIKeyMode(req.Platform, req.Type, req.Extra); err != nil {
 		return nil, err
 	}
@@ -364,6 +367,9 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	}
 
 	if req.Extra != nil {
+		if err := ValidateOpenAIAPIKeyAutoAttribution(account.Platform, account.Type, *req.Extra); err != nil {
+			return nil, err
+		}
 		if err := ValidateOpenAIAPIKeyMode(account.Platform, account.Type, *req.Extra); err != nil {
 			return nil, err
 		}
@@ -429,7 +435,13 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	}
 
 	// 执行更新
-	ctx = withAccountConfigurationIntent(ctx, []int64{id}, nil, nil)
+	var attributionIntent map[string]any
+	if req.Extra != nil {
+		if value, explicit := (*req.Extra)[OpenAIAPIKeyAutoAttributionEnabledExtraKey]; explicit {
+			attributionIntent = map[string]any{OpenAIAPIKeyAutoAttributionEnabledExtraKey: value}
+		}
+	}
+	ctx = withAccountConfigurationIntent(ctx, []int64{id}, attributionIntent, nil)
 	if err := s.accountRepo.Update(ctx, account); err != nil {
 		return nil, fmt.Errorf("update account: %w", err)
 	}

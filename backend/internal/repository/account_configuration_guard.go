@@ -56,7 +56,7 @@ func accountConfigurationExtraPatch(ctx context.Context, ids []int64, updates ma
 	filtered := service.StripRetiredCodexStateExtra(updates)
 	delete(filtered, "openai_pinned_installation_id")
 	delete(filtered, "openai_installation_rotate_enabled")
-	for _, key := range []string{"openai_installation_pin_enabled", "enable_tls_fingerprint", "tls_fingerprint_profile_id", service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey} {
+	for _, key := range []string{"openai_installation_pin_enabled", "enable_tls_fingerprint", "tls_fingerprint_profile_id", service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey, service.OpenAIAPIKeyAutoAttributionEnabledExtraKey} {
 		delete(filtered, key)
 		if len(ids) == 0 {
 			continue
@@ -98,6 +98,7 @@ func afterAccountConfigurationCommit(ctx context.Context, notify func()) {
 }
 
 func guardedAccountExtraExpression(expression string, credentialExpressions ...string) string {
+	expression = "CASE WHEN platform = 'openai' AND type = 'apikey' THEN (" + expression + ") ELSE (" + expression + ") - 'openai_api_key_auto_attribution_enabled' END"
 	credentials := "credentials"
 	if len(credentialExpressions) > 0 {
 		credentials = credentialExpressions[0]

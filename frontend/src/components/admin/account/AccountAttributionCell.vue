@@ -18,7 +18,7 @@ import { formatDateTime } from '@/utils/format'
 const props = defineProps<{ account: AccountListItem }>()
 const emit = defineEmits<{ open: [] }>()
 const { t, te } = useI18n()
-const manualOnly = computed(() => props.account.platform === 'openai' && props.account.type === 'apikey' && props.account.extra?.openai_api_key_mode !== 'codex_engine')
+const manualOnly = computed(() => props.account.platform === 'openai' && props.account.type === 'apikey' && props.account.extra?.openai_api_key_mode !== 'codex_engine' && props.account.extra?.openai_api_key_auto_attribution_enabled !== true)
 const summary = computed(() => props.account.model_attribution)
 const latest = computed(() => summary.value?.latest)
 const color = computed(() => latest.value?.status === 'passed' ? 'text-emerald-700 dark:text-emerald-300' : latest.value?.status === 'mismatch' ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-gray-400')

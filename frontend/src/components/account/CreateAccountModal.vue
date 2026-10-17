@@ -3287,6 +3287,35 @@
 
       <OpenAIAccessModeSelect v-if="form.platform === 'openai' && accountCategory === 'apikey'" v-model="openAIAPIKeyMode" />
 
+      <div
+        v-if="form.platform === 'openai' && accountCategory === 'apikey' && openAIAPIKeyMode === 'generic'"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label class="input-label mb-0">{{ t('attribution.apiKeyAutoEnabled') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('attribution.apiKeyAutoHint') }}</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            data-testid="openai-api-key-auto-attribution-toggle"
+            :aria-label="t('attribution.apiKeyAutoEnabled')"
+            :aria-checked="openAIAPIKeyAutoAttributionEnabled"
+            @click="openAIAPIKeyAutoAttributionEnabled = !openAIAPIKeyAutoAttributionEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              openAIAPIKeyAutoAttributionEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span :class="[
+              'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+              openAIAPIKeyAutoAttributionEnabled ? 'translate-x-5' : 'translate-x-0'
+            ]" />
+          </button>
+        </div>
+      </div>
+
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
       <div
         v-if="form.platform === 'openai' && (accountCategory !== 'apikey' || openAIAPIKeyMode === 'generic')"
@@ -4766,6 +4795,7 @@ const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
 const openaiPassthroughEnabled = ref(false)
 const openAIAPIKeyMode = ref<OpenAIAPIKeyMode>('generic')
+const openAIAPIKeyAutoAttributionEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -5287,6 +5317,7 @@ watch(
     if (newPlatform !== 'openai') {
       openaiPassthroughEnabled.value = false
       openAIAPIKeyMode.value = 'generic'
+      openAIAPIKeyAutoAttributionEnabled.value = false
       openaiFlattenNamespacesEnabled.value = false
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
       openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
@@ -5746,6 +5777,7 @@ const resetForm = () => {
   autoPauseOnExpired.value = true
   openaiPassthroughEnabled.value = false
   openAIAPIKeyMode.value = 'generic'
+  openAIAPIKeyAutoAttributionEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
   openAILongContextBillingTouched.value = false
@@ -5819,7 +5851,10 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   }
 
   const extra: Record<string, unknown> = { ...(base || {}) }
-  if (accountCategory.value === 'apikey') extra.openai_api_key_mode = openAIAPIKeyMode.value
+  if (accountCategory.value === 'apikey') {
+    extra.openai_api_key_mode = openAIAPIKeyMode.value
+    extra.openai_api_key_auto_attribution_enabled = openAIAPIKeyAutoAttributionEnabled.value
+  }
   if (accountCategory.value === 'oauth-based') {
     extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
     extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)

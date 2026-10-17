@@ -104,6 +104,25 @@ func (h *AccountHandler) CreateAttributionJobs(c *gin.Context) {
 	}
 	response.Success(c, gin.H{"items": jobs})
 }
+
+func (h *AccountHandler) AttributionProbeModels(c *gin.Context) {
+	if !h.attributionReady(c) {
+		return
+	}
+	var input struct {
+		AccountIDs []int64 `json:"account_ids"`
+	}
+	if c.ShouldBindJSON(&input) != nil {
+		response.BadRequest(c, "Invalid account IDs")
+		return
+	}
+	models, err := h.attributionService.ProbeModels(c.Request.Context(), input.AccountIDs)
+	if err != nil {
+		attributionError(c, err)
+		return
+	}
+	response.Success(c, models)
+}
 func (h *AccountHandler) ListAttributionJobs(c *gin.Context) {
 	if !h.attributionReady(c) {
 		return

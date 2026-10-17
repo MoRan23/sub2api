@@ -39,6 +39,18 @@ func (s *OpenAIGatewayService) FetchCandyTestModels(ctx context.Context, account
 // API keys use the standard endpoint; OAuth reuses the authenticated, cached
 // Codex source. Account mappings and group policy are applied after this cache.
 func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+	return s.fetchOpenAIModelsList(ctx, account, false)
+}
+
+// FetchOpenAIProbeModels reads the same cached raw catalog for administrator
+// probe selection, without interpreting discovery errors as account failures.
+// Unlike execution-time Candy discovery, this retains the shared cache.
+func (s *OpenAIGatewayService) FetchOpenAIProbeModels(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+	ctx = ContextWithOpenAIRequestOS(ctx, OpenAIRequestOS{Captured: true, Source: "account_default"})
+	return s.fetchOpenAIModelsList(ctx, account, true)
+}
+
+func (s *OpenAIGatewayService) fetchOpenAIModelsList(ctx context.Context, account *Account, auxiliary bool) (*OpenAIModelsResponse, error) {
 	if s == nil || account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_MODELS_ACCOUNT_REQUIRED", "OpenAI account is required")
 	}
@@ -57,7 +69,7 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, accoun
 		scoped.OpenAIOAuthCredentialOS = credentialAccount.OpenAIOAuthCredentialOS
 		scoped.OpenAIOAuthCredentialOwnerID = credentialAccount.OpenAIOAuthCredentialOwnerID
 		scoped.OpenAIOAuthAuthorizationGeneration = credentialAccount.OpenAIOAuthAuthorizationGeneration
-		response, err := s.FetchCodexModelsManifest(ctx, &scoped, clientVersion, "")
+		response, err := s.fetchCodexModelsManifest(ctx, &scoped, clientVersion, "", auxiliary)
 		if err != nil {
 			return nil, err
 		}
@@ -79,6 +91,7 @@ func (s *OpenAIGatewayService) FetchOpenAIModelsList(ctx context.Context, accoun
 		credentialAccountID: credentialAccount.ID, credentialAccount: credentialAccount,
 		accountConcurrency: account.Concurrency, useAPIKeyUpstream: true,
 		standardModelsList: true,
+		auxiliary:          auxiliary,
 	}
 	response, err := s.fetchCachedOpenAIModels(ctx, request, func(fetchCtx context.Context, etag string) (*OpenAIModelsResponse, error) {
 		response, err := s.fetchOpenAIModelsUpstream(fetchCtx, request, etag)

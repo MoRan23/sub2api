@@ -389,6 +389,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 	attribution.GET("/config", h.Admin.Account.AttributionConfig)
 	attribution.PUT("/config", h.Admin.Account.SaveAttributionConfig)
 	attribution.POST("/models", h.Admin.Account.AttributionModels)
+	attribution.POST("/probe-models", h.Admin.Account.AttributionProbeModels)
 	attribution.POST("/jobs", h.Admin.Account.CreateAttributionJobs)
 	attribution.GET("/jobs", h.Admin.Account.ListAttributionJobs)
 	attribution.GET("/jobs/:id", h.Admin.Account.GetAttributionJob)

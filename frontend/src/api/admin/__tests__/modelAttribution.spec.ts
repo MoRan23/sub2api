@@ -4,6 +4,13 @@ vi.mock('@/api/client', () => ({ apiClient: { post } }))
 import { attributionAPI } from '../modelAttribution'
 
 describe('attribution expected-model request', () => {
+  it('loads account probe catalogs separately from detector candidates', async () => {
+    const result = { models: ['target'], accounts: [{ account_id: 2, account_name: 'Account', status: 'partial', models: ['target'], error: 'model_catalog_failed' }] }
+    post.mockResolvedValueOnce({ data: result })
+    const signal = new AbortController().signal
+    expect(await attributionAPI.probeModels([2], signal)).toEqual(result)
+    expect(post).toHaveBeenLastCalledWith('/admin/model-attribution/probe-models', { account_ids: [2] }, { timeout: 30000, signal })
+  })
   it('returns the cancelled job from the administrator cancellation endpoint', async () => {
     const job = { id: 17, status: 'cancelled' }
     post.mockResolvedValueOnce({ data: job })

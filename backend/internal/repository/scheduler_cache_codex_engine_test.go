@@ -21,4 +21,14 @@ func TestCodexEngineSchedulerCacheRoundTrip(t *testing.T) {
 	got, err = cache.GetAccount(context.Background(), a.ID)
 	require.NoError(t, err)
 	require.False(t, got.IsCodexEngine())
+	a.Extra[service.OpenAIAPIKeyAutoAttributionEnabledExtraKey] = true
+	require.NoError(t, cache.SetAccount(context.Background(), a))
+	got, err = cache.GetAccount(context.Background(), a.ID)
+	require.NoError(t, err)
+	require.True(t, got.IsOpenAIAPIKeyAutoAttributionEnabled())
+	a.Extra[service.OpenAIAPIKeyAutoAttributionEnabledExtraKey] = false
+	require.NoError(t, cache.SetAccount(context.Background(), a))
+	got, err = cache.GetAccount(context.Background(), a.ID)
+	require.NoError(t, err)
+	require.False(t, got.IsOpenAIAPIKeyAutoAttributionEnabled())
 }

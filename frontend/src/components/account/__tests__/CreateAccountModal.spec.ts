@@ -245,6 +245,36 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
   afterEach(() => vi.useRealTimers())
 
+  it('defaults ordinary API key automatic attribution to off', async () => {
+    const wrapper = await submitApiKeyAccount('openai')
+    expect(wrapper.get('[data-testid="openai-api-key-auto-attribution-toggle"]').attributes('aria-checked')).toBe('false')
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra.openai_api_key_auto_attribution_enabled).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('preserves automatic attribution preference across access modes and resets a new form', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    expect(wrapper.find('[data-testid="openai-api-key-auto-attribution-toggle"]').exists()).toBe(false)
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('[data-testid="openai-api-key-auto-attribution-toggle"]').trigger('click')
+    await wrapper.get('[data-testid="openai-api-key-mode"]').setValue('codex_engine')
+    expect(wrapper.find('[data-testid="openai-api-key-auto-attribution-toggle"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="openai-api-key-mode"]').setValue('generic')
+    expect(wrapper.get('[data-testid="openai-api-key-auto-attribution-toggle"]').attributes('aria-checked')).toBe('true')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Auto attribution')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra.openai_api_key_auto_attribution_enabled).toBe(true)
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    expect(wrapper.get('[data-testid="openai-api-key-auto-attribution-toggle"]').attributes('aria-checked')).toBe('false')
+    wrapper.unmount()
+  })
+
   it('keeps Daybreak disabled until the new OAuth account has been authorized and saved', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')

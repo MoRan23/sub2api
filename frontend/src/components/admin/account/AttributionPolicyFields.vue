@@ -1,8 +1,6 @@
 <template>
   <div class="space-y-4">
-    <label class="block text-sm font-medium">{{ t('attribution.model') }}
-      <input :value="modelValue.model" class="input mt-2 w-full" list="attribution-models" placeholder="gpt-6-astra" @input="set('model', ($event.target as HTMLInputElement).value)" />
-    </label>
+    <AttributionProbeModelField :model-value="modelValue.model" :group-id="groupId" @update:model-value="set('model', $event)" />
     <AttributionExpectedModels :model-value="modelValue.expected_models || []" :candidates="candidates" @update:model-value="set('expected_models', $event || [])" />
     <div class="grid gap-4 lg:grid-cols-2">
       <div><h3 class="mb-2 text-sm font-medium">{{ t('attribution.high') }}</h3><ModelWhitelistSelector :model-value="modelValue.high_models" platform="openai" @update:model-value="set('high_models', $event)" /></div>
@@ -14,8 +12,9 @@
 import { useI18n } from 'vue-i18n'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import AttributionExpectedModels from './AttributionExpectedModels.vue'
+import AttributionProbeModelField from './AttributionProbeModelField.vue'
 import type { AttributionPolicy } from '@/api/admin/modelAttribution'
-const props = defineProps<{ modelValue: AttributionPolicy; candidates?: string[] }>()
+const props = defineProps<{ modelValue: AttributionPolicy; candidates?: string[]; groupId?: number }>()
 const emit = defineEmits<{ 'update:modelValue': [value: AttributionPolicy] }>()
 const { t } = useI18n()
 function set<K extends keyof AttributionPolicy>(key: K, value: AttributionPolicy[K]) { emit('update:modelValue', { ...props.modelValue, [key]: value }) }

@@ -14,7 +14,6 @@
             <p v-if="candidates.length" class="break-all text-xs text-gray-500">{{ t('attribution.candidates') }}: {{ candidates.join(', ') }}</p>
             <p class="text-xs" data-testid="detector-connection">{{ t(connected ? 'attribution.connected' : 'attribution.connectionRequired') }}</p>
             <p v-if="config.detector" class="break-all text-xs text-gray-500" data-testid="detector-version">{{ t('attribution.detectorVersion') }}: {{ config.detector.revision.slice(0, 12) }} · {{ config.detector.bank_built_at }}</p>
-            <datalist id="attribution-models"><option v-for="id in candidates" :key="id" :value="id" /></datalist>
             <AttributionPolicyFields v-model="config.default" :candidates="candidates" />
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('attribution.mappingHelp') }}</p>
             <div class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="global-group-priority">
@@ -36,7 +35,7 @@
             <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('attribution.newAccount.help') }}</p>
             <label class="flex items-center gap-2 text-sm"><input v-model="config.new_account_tests.attribution" type="checkbox" data-testid="initial-attribution" />{{ t('attribution.newAccount.attribution') }}</label>
             <p v-if="config.new_account_tests.attribution && !config.enabled" class="text-xs text-amber-700 dark:text-amber-300">{{ t('attribution.newAccount.requiresEnabled') }}</p>
-            <label class="block text-sm font-medium">{{ t('attribution.newAccount.attributionModel') }}<input v-model="config.new_account_tests.attribution_model" list="attribution-models" class="input mt-2 w-full" placeholder="gpt-6-astra" maxlength="200" data-testid="initial-attribution-model" /></label>
+            <AttributionProbeModelField v-model="config.new_account_tests.attribution_model" oauth-only :label="t('attribution.newAccount.attributionModel')" input-test-id="initial-attribution-model" />
             <AttributionExpectedModels v-model="config.new_account_tests.attribution_expected_models" :candidates="candidates" allow-inheritance data-testid="initial-expected-models" />
             <label class="flex items-center gap-2 text-sm"><input v-model="config.new_account_tests.pelican" type="checkbox" data-testid="initial-pelican" />{{ t('attribution.newAccount.pelican') }}</label>
             <label class="block text-sm font-medium">{{ t('attribution.newAccount.pelicanModel') }}<input v-model="config.new_account_tests.pelican_model" class="input mt-2 w-full" placeholder="gpt-6.1-sol" maxlength="200" data-testid="initial-pelican-model" /></label>
@@ -48,7 +47,7 @@
             <div v-for="override in config.groups" :key="override.group_id" class="space-y-4 rounded-lg border border-gray-200 p-4 dark:border-dark-600">
               <div class="flex flex-wrap items-center justify-between gap-3"><h3 class="text-sm font-medium">{{ groups.find(g => g.id === override.group_id)?.name || `#${override.group_id}` }}</h3><button type="button" class="text-xs text-red-600 dark:text-red-400" @click="config.groups = config.groups.filter(g => g !== override)">{{ t('attribution.remove') }}</button></div>
               <label class="flex items-center gap-2 text-sm"><input v-model="override.enabled" type="checkbox" />{{ override.enabled ? t('attribution.independent') : t('attribution.inherit') }}</label>
-              <AttributionPolicyFields v-if="override.enabled" :model-value="override" :candidates="candidates" @update:model-value="Object.assign(override, $event)" />
+              <AttributionPolicyFields v-if="override.enabled" :model-value="override" :candidates="candidates" :group-id="override.group_id" @update:model-value="Object.assign(override, $event)" />
             </div>
           </section>
           <div class="flex flex-wrap items-center gap-3"><button type="submit" class="btn btn-primary" data-testid="attribution-save">{{ saving ? t('attribution.loading') : t('attribution.save') }}</button><button type="button" class="btn btn-secondary" @click="load">{{ t('attribution.reload') }}</button><span class="text-xs text-gray-500">{{ t('attribution.version') }} {{ config.version }}</span></div>
@@ -64,6 +63,7 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AttributionPolicyFields from '@/components/admin/account/AttributionPolicyFields.vue'
 import AttributionExpectedModels from '@/components/admin/account/AttributionExpectedModels.vue'
+import AttributionProbeModelField from '@/components/admin/account/AttributionProbeModelField.vue'
 import { validAttributionExpectedModels } from '@/utils/modelAttribution'
 import AttributionHistory from '@/components/admin/account/AttributionHistory.vue'
 import { attributionAPI, type AttributionConfig, type AttributionPolicy } from '@/api/admin/modelAttribution'

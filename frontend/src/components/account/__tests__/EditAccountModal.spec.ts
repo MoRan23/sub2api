@@ -452,6 +452,49 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
   })
 
+  it.each([undefined, false, true])('does not replay unchanged automatic attribution preference %s on unrelated edits', async (enabled) => {
+    const account = buildAccount()
+    account.extra = enabled === undefined ? {} : { openai_api_key_auto_attribution_enabled: enabled }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    expect(wrapper.get('[data-testid="openai-api-key-auto-attribution-toggle"]').attributes('aria-checked')).toBe(String(enabled === true))
+    await wrapper.get('[data-tour="edit-account-form-name"]').setValue('Renamed account')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('openai_api_key_auto_attribution_enabled')
+    wrapper.unmount()
+  })
+
+  it.each([false, true])('saves an explicit automatic attribution preference change from %s', async (enabled) => {
+    const account = buildAccount()
+    account.extra = { openai_api_key_auto_attribution_enabled: enabled }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="openai-api-key-auto-attribution-toggle"]').trigger('click')
+    await wrapper.get('[data-testid="openai-api-key-mode"]').setValue('codex_engine')
+    expect(wrapper.find('[data-testid="openai-api-key-auto-attribution-toggle"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="openai-api-key-mode"]').setValue('generic')
+    expect(wrapper.get('[data-testid="openai-api-key-auto-attribution-toggle"]').attributes('aria-checked')).toBe(String(!enabled))
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra.openai_api_key_auto_attribution_enabled).toBe(!enabled)
+    wrapper.unmount()
+  })
+
+  it('does not show automatic attribution opt-in for OAuth and restores a stored Engine preference when switching back', async () => {
+    const wrapper = mountModal(buildOpenAIOAuthAccount())
+    expect(wrapper.find('[data-testid="openai-api-key-auto-attribution-toggle"]').exists()).toBe(false)
+    const account = buildAccount()
+    account.extra = { openai_api_key_mode: 'codex_engine', openai_api_key_auto_attribution_enabled: true }
+    await wrapper.setProps({ account })
+    expect(wrapper.find('[data-testid="openai-api-key-auto-attribution-toggle"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="openai-api-key-mode"]').setValue('generic')
+    expect(wrapper.get('[data-testid="openai-api-key-auto-attribution-toggle"]').attributes('aria-checked')).toBe('true')
+    wrapper.unmount()
+  })
+
   it('sends an explicitly changed status and omits a reverted state choice', async () => {
     const account = buildOpenAIOAuthAccount()
     updateAccountMock.mockReset().mockResolvedValue(account)

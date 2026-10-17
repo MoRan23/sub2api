@@ -474,6 +474,9 @@ func normalizeOpenAIInstallationPinUpdateExtra(account *Account, input *UpdateAc
 }
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
+	if err := ValidateOpenAIAPIKeyAutoAttribution(input.Platform, input.Type, accountExtra); err != nil {
+		return nil, err
+	}
 	if err := ValidateOpenAIAPIKeyMode(input.Platform, input.Type, accountExtra); err != nil {
 		return nil, err
 	}
@@ -709,6 +712,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err := ValidateOpenAIAPIKeyMode(account.Platform, profileTarget.Type, modeExtra); err != nil {
 		return nil, err
 	}
+	if err := ValidateOpenAIAPIKeyAutoAttribution(account.Platform, profileTarget.Type, input.Extra); err != nil {
+		return nil, err
+	}
 	if len(input.Credentials) > 0 {
 		profileTarget.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
 	}
@@ -763,7 +769,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		if err := ValidateUpstreamRequestIDHeaderExtra(normalizedExtra); err != nil {
 			return nil, err
 		}
-		for _, key := range []string{OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey} {
+		for _, key := range []string{OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey, OpenAIAPIKeyAutoAttributionEnabledExtraKey} {
 			if _, explicit := input.Extra[key]; !explicit {
 				if value, exists := account.Extra[key]; exists {
 					normalizedExtra[key] = value
@@ -1123,6 +1129,15 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
+	if HasOpenAIAPIKeyAutoAttributionSetting(updates) {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := ValidateOpenAIAPIKeyAutoAttribution(account.Platform, account.Type, updates); err != nil {
+			return err
+		}
+	}
 	if HasOpenAIDaybreakSettings(updates) {
 		account, err := s.accountRepo.GetByID(ctx, id)
 		if err != nil {
@@ -1268,7 +1283,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
 	_, updatingAccessMode := input.Extra[OpenAIAPIKeyModeExtraKey]
-	if HasOpenAIDaybreakSettings(input.Extra) || updatingAccessMode || len(input.Credentials) > 0 || input.OpenAIAuthModeChange || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if HasOpenAIDaybreakSettings(input.Extra) || HasOpenAIAPIKeyAutoAttributionSetting(input.Extra) || updatingAccessMode || len(input.Credentials) > 0 || input.OpenAIAuthModeChange || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1325,6 +1340,17 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 				return nil, ErrAccountNotFound
 			}
 			if err := ValidateOpenAIAPIKeyMode(account.Platform, account.Type, input.Extra); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if HasOpenAIAPIKeyAutoAttributionSetting(input.Extra) {
+		for _, id := range input.AccountIDs {
+			account := targetsByID[id]
+			if account == nil {
+				return nil, ErrAccountNotFound
+			}
+			if err := ValidateOpenAIAPIKeyAutoAttribution(account.Platform, account.Type, input.Extra); err != nil {
 				return nil, err
 			}
 		}

@@ -24,21 +24,26 @@ func isManualAttribution(ctx context.Context) bool {
 }
 
 type ModelAttributionService struct {
-	repo     AttributionRepository
-	accounts AccountRepository
-	probe    AttributionProbe
-	analyzer AttributionAnalyzer
-	start    sync.Once
-	stop     sync.Once
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
-	wake     chan struct{}
-	now      func() time.Time
-	wait     func(context.Context, time.Duration) error
+	repo             AttributionRepository
+	accounts         AccountRepository
+	probe            AttributionProbe
+	analyzer         AttributionAnalyzer
+	start            sync.Once
+	stop             sync.Once
+	cancel           context.CancelFunc
+	wg               sync.WaitGroup
+	wake             chan struct{}
+	now              func() time.Time
+	wait             func(context.Context, time.Duration) error
+	fetchProbeModels func(context.Context, *Account) (*OpenAIModelsResponse, error)
 }
 
 func NewModelAttributionService(repo AttributionRepository, accounts AccountRepository, probe *AccountCandyTestTransport) *ModelAttributionService {
-	return &ModelAttributionService{repo: repo, accounts: accounts, probe: probe, analyzer: NewLMDetectorClient(), wake: make(chan struct{}, 1)}
+	s := &ModelAttributionService{repo: repo, accounts: accounts, probe: probe, analyzer: NewLMDetectorClient(), wake: make(chan struct{}, 1)}
+	if probe != nil && probe.gateway != nil {
+		s.fetchProbeModels = probe.gateway.FetchOpenAIProbeModels
+	}
+	return s
 }
 func (s *ModelAttributionService) Start() {
 	s.start.Do(func() {

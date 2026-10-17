@@ -123,6 +123,9 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
+	if err := service.ValidateOpenAIAPIKeyAutoAttribution(account.Platform, account.Type, account.Extra); err != nil {
+		return err
+	}
 	if service.IsOpenAIOAuthOSProfileOwner(account) && !service.OpenAIOAuthOSProfilesComplete(account.OpenAIOAuthOSProfiles) {
 		if err := service.PrepareOpenAIOAuthOSProfilesForCreate(account); err != nil {
 			return err
@@ -2825,7 +2828,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	}
 
 	clearProbeSnapshot := upstreamBillingProbeExplicitlyDisabled(updates) || upstreamBillingProbeSnapshotClearRequested(updates)
-	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || service.HasOpenAIDaybreakSettings(updates)
+	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || service.HasOpenAIDaybreakSettings(updates) || service.HasOpenAIAPIKeyAutoAttributionSetting(updates)
 	baseCtx := ctx
 	contextTx := dbent.TxFromContext(ctx)
 	client := clientFromContext(ctx, r.client)
@@ -2859,6 +2862,15 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		}
 		payload, err = json.Marshal(updates)
 		if err != nil {
+			return err
+		}
+	}
+	if service.HasOpenAIAPIKeyAutoAttributionSetting(updates) {
+		current, err := lockAccountConfiguration(ctx, client, id)
+		if err != nil {
+			return err
+		}
+		if err := service.ValidateOpenAIAPIKeyAutoAttribution(current.Platform, current.Type, updates); err != nil {
 			return err
 		}
 	}
@@ -3587,6 +3599,19 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	}
 
 	previousOSProfileOwners := make(map[int64]bool)
+	if service.HasOpenAIAPIKeyAutoAttributionSetting(updates.Extra) {
+		orderedIDs := uniquePositiveInt64s(ids)
+		sort.Slice(orderedIDs, func(i, j int) bool { return orderedIDs[i] < orderedIDs[j] })
+		for _, id := range orderedIDs {
+			current, err := lockAccountConfiguration(ctx, clientFromContext(ctx, r.client), id)
+			if err != nil {
+				return 0, err
+			}
+			if err := service.ValidateOpenAIAPIKeyAutoAttribution(current.Platform, current.Type, updates.Extra); err != nil {
+				return 0, err
+			}
+		}
+	}
 	if service.HasOpenAIDaybreakSettings(updates.Extra) {
 		client := clientFromContext(ctx, r.client)
 		if err := lockDaybreakEvidenceOwners(ctx, client, ids); err != nil {
@@ -3670,7 +3695,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 	if rows > 0 && contextTx == nil {
-		shouldSync := service.HasOpenAIDaybreakSettings(updates.Extra)
+		shouldSync := service.HasOpenAIDaybreakSettings(updates.Extra) || service.HasOpenAIAPIKeyAutoAttributionSetting(updates.Extra)
 		if updates.Status != nil && (*updates.Status == service.StatusError || *updates.Status == service.StatusDisabled) {
 			shouldSync = true
 		}

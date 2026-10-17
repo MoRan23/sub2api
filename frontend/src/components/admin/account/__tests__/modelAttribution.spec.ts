@@ -8,12 +8,13 @@ import AttributionModal from '../AttributionModal.vue'
 import AttributionResult from '../AttributionResult.vue'
 import AttributionExpectedModels from '../AttributionExpectedModels.vue'
 import AttributionPolicyFields from '../AttributionPolicyFields.vue'
+import AttributionProbeModelField from '../AttributionProbeModelField.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import ModelAttributionView from '@/views/admin/ModelAttributionView.vue'
 import type { AttributionConfig, AttributionJob, AttributionPage } from '@/api/admin/modelAttribution'
 import type { AccountListItem } from '@/types'
 
-const api = vi.hoisted(() => ({ config: vi.fn(), save: vi.fn(), models: vi.fn(), connection: vi.fn(), create: vi.fn(), history: vi.fn(), job: vi.fn(), cancel: vi.fn() }))
+const api = vi.hoisted(() => ({ config: vi.fn(), save: vi.fn(), models: vi.fn(), probeModels: vi.fn(), connection: vi.fn(), create: vi.fn(), history: vi.fn(), job: vi.fn(), cancel: vi.fn() }))
 vi.mock('@/api/admin/modelAttribution', () => ({ attributionAPI: api }))
 vi.mock('@/api/admin/groups', async () => ({ ...await vi.importActual<typeof import('@/api/admin/groups')>('@/api/admin/groups'), getAllIncludingInactive: vi.fn().mockResolvedValue([{ id: 10, name: 'Pro group' }, { id: 20, name: 'Other group' }]) }))
 vi.mock('vue-i18n', async () => ({ ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'), useI18n: () => ({ t: (key: string) => key, te: () => true }) }))
@@ -31,7 +32,7 @@ const stubs = {
   RouterLink: defineComponent({ template: '<a><slot /></a>' })
 }
 
-beforeEach(() => { vi.clearAllMocks(); api.config.mockResolvedValue(config()); api.connection.mockResolvedValue({ models: ['gpt-6-astra'], detector }); api.models.mockResolvedValue(['gpt-6-astra', 'gpt-6.1-sol']); api.history.mockResolvedValue(page([])); api.job.mockImplementation(async (id: number) => job(id)) })
+beforeEach(() => { vi.clearAllMocks(); api.config.mockResolvedValue(config()); api.connection.mockResolvedValue({ models: ['gpt-6-astra'], detector }); api.models.mockResolvedValue(['gpt-6-astra', 'gpt-6.1-sol']); api.probeModels.mockImplementation(async (ids: number[]) => ({ models: ['gpt-6.1-sol'], accounts: ids.map(account_id => ({ account_id, account_name: `Account ${account_id}`, status: 'success', models: ['gpt-6.1-sol'] })) })); api.history.mockResolvedValue(page([])); api.job.mockImplementation(async (id: number) => job(id)) })
 afterEach(() => { vi.useRealTimers() })
 
 describe('attribution account UI', () => {
@@ -249,6 +250,8 @@ describe('attribution account UI', () => {
     expect(wrapper.emitted('open')).toHaveLength(1)
     await wrapper.setProps({ account: { ...account, extra: { openai_api_key_mode: 'generic' } } })
     expect(wrapper.text()).toContain('attribution.manualOnly')
+    await wrapper.setProps({ account: { ...account, extra: { openai_api_key_mode: 'generic', openai_api_key_auto_attribution_enabled: true } } })
+    expect(wrapper.text()).not.toContain('attribution.manualOnly')
     await wrapper.setProps({ account: { ...account, type: 'oauth', extra: {} } })
     expect(wrapper.text()).not.toContain('attribution.manualOnly')
     expect(api.create).not.toHaveBeenCalled()
@@ -294,9 +297,40 @@ describe('attribution account UI', () => {
     expect(saved.default.model).toBe('gpt-6-astra')
     wrapper.unmount()
   })
+  it('uses the account catalog union for probes and keeps detector candidates only for expectations', async () => {
+    api.config.mockResolvedValue({ ...config(), base_url: 'http://detector.invalid' })
+    api.models.mockResolvedValue(['detector-only'])
+    api.probeModels.mockResolvedValue({ models: ['local-only', 'shared-target'], accounts: [
+      { account_id: 42, account_name: 'First', status: 'success', models: ['shared-target'] },
+      { account_id: 43, account_name: 'Second', status: 'partial', models: ['local-only', 'shared-target'] }
+    ] })
+    const wrapper = mount(AttributionModal, { props: { show: true, accountIds: [42, 43] }, global: { stubs } })
+    await flushPromises()
+    const options = wrapper.findComponent(Select).props('options') as { value: string; label: string }[]
+    expect(options.map(option => option.value)).toEqual(['', 'local-only', 'shared-target'])
+    expect(wrapper.findComponent(AttributionExpectedModels).props('candidates')).toEqual(['detector-only'])
+    expect(wrapper.get('[data-testid="probe-catalog-coverage"]').text()).toContain('First')
+    expect(wrapper.get('[data-testid="probe-catalog-coverage"]').text()).toContain('attribution.catalogStatus.partial')
+    wrapper.findComponent(Select).vm.$emit('update:modelValue', 'unlisted-but-valid'); await flushPromises()
+    expect(wrapper.get('[data-testid="probe-catalog-coverage"]').text()).toContain('attribution.catalogModelUnlisted')
+    expect(wrapper.get('[data-testid="attribution-run"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+  it('discards catalogs belonging to a previously selected batch', async () => {
+    api.config.mockResolvedValue({ ...config(), base_url: 'http://detector.invalid' })
+    let resolveOld!: (value: unknown) => void
+    api.probeModels.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve }))
+    const wrapper = mount(AttributionModal, { props: { show: true, accountIds: [42] }, global: { stubs } })
+    await flushPromises()
+    api.probeModels.mockResolvedValueOnce({ models: ['current'], accounts: [{ account_id: 43, account_name: 'Current', status: 'success', models: ['current'] }] })
+    await wrapper.setProps({ accountIds: [43] }); await flushPromises()
+    resolveOld({ models: ['stale'], accounts: [] }); await flushPromises()
+    expect(wrapper.findComponent(Select).props('options')).toEqual([{ value: '', label: 'attribution.manualModelDefault' }, { value: 'current', label: 'current' }])
+    wrapper.unmount()
+  })
   it('supports a typed model when loading candidates fails and rejects invalid model IDs', async () => {
     api.config.mockResolvedValue({ ...config(), base_url: 'http://modeltrace.invalid' })
-    api.models.mockRejectedValue(new Error('offline'))
+    api.probeModels.mockRejectedValue(new Error('offline'))
     api.create.mockResolvedValue([job(3, 'running')])
     const wrapper = mount(AttributionModal, { props: { show: true, accountIds: [42] }, global: { stubs } })
     await flushPromises()
@@ -336,6 +370,20 @@ describe('attribution account UI', () => {
 })
 
 describe('attribution configuration', () => {
+  it('uses independent account catalog sources for global, group and OAuth initial probes', async () => {
+    const c = config()
+    c.groups = [{ group_id: 10, enabled: true, ...structuredClone(policy) }]
+    api.config.mockResolvedValue(c)
+    const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
+    const sources = wrapper.findAllComponents(AttributionProbeModelField)
+    expect(sources).toHaveLength(3)
+    expect(sources[0].props('groupId')).toBeUndefined()
+    expect(sources[1].props('oauthOnly')).toBe(true)
+    expect(sources[2].props('groupId')).toBe(10)
+    expect(api.probeModels).not.toHaveBeenCalled()
+    expect(wrapper.find('datalist#attribution-models').exists()).toBe(false)
+    wrapper.unmount()
+  })
   it('saves global, independent group and initial expected models separately', async () => {
     const c = config()
     c.base_url = 'http://detector.invalid'
