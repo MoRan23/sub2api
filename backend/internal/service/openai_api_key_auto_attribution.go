@@ -4,14 +4,14 @@ import infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 
 const OpenAIAPIKeyAutoAttributionEnabledExtraKey = "openai_api_key_auto_attribution_enabled"
 
-// IsOpenAIAPIKeyAutoAttributionEnabled is an enqueue preference. Engine retains
-// its existing periodic attribution independently of this generic API-key flag.
+// IsOpenAIAPIKeyAutoAttributionEnabled is an enqueue preference shared by generic
+// and Engine API-key accounts. Missing preferences never enable automatic probes.
 func (a *Account) IsOpenAIAPIKeyAutoAttributionEnabled() bool {
-	if a == nil || !a.IsOpenAIApiKey() || a.IsCodexEngine() {
+	if a == nil || !a.IsOpenAIApiKey() {
 		return false
 	}
 	mode, exists := a.Extra[OpenAIAPIKeyModeExtraKey]
-	if exists && mode != "generic" {
+	if exists && mode != "generic" && mode != "codex_engine" {
 		return false
 	}
 	enabled, _ := a.Extra[OpenAIAPIKeyAutoAttributionEnabledExtraKey].(bool)
@@ -31,8 +31,7 @@ func ValidateOpenAIAPIKeyAutoAttribution(platform, accountType string, extra map
 	if _, ok := value.(bool); !ok {
 		return infraerrors.BadRequest("OPENAI_API_KEY_AUTO_ATTRIBUTION_INVALID", "openai_api_key_auto_attribution_enabled must be a boolean")
 	}
-	// Keep the preference when switching between generic and Engine; it only
-	// applies in generic mode and never disables Engine's automatic tests.
+	// The same preference survives access-mode changes between generic and Engine.
 	if platform != PlatformOpenAI || accountType != AccountTypeAPIKey {
 		return infraerrors.BadRequest("OPENAI_API_KEY_AUTO_ATTRIBUTION_UNSUPPORTED", "automatic API-key attribution is only supported by OpenAI API key accounts")
 	}

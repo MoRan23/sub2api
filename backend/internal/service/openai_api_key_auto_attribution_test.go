@@ -23,10 +23,19 @@ func TestOpenAIAPIKeyAutoAttributionEligibility(t *testing.T) {
 		{"invalid boolean", func(a *Account) { a.Extra[OpenAIAPIKeyAutoAttributionEnabledExtraKey] = "true" }, "unsupported_account"},
 		{"unknown mode", func(a *Account) { a.Extra[OpenAIAPIKeyModeExtraKey] = "future" }, "unsupported_account"},
 		{"null mode", func(a *Account) { a.Extra[OpenAIAPIKeyModeExtraKey] = nil }, "unsupported_account"},
+		{"engine on", func(a *Account) { a.Extra[OpenAIAPIKeyModeExtraKey] = "codex_engine" }, ""},
+		{"engine missing", func(a *Account) {
+			a.Extra[OpenAIAPIKeyModeExtraKey] = "codex_engine"
+			delete(a.Extra, OpenAIAPIKeyAutoAttributionEnabledExtraKey)
+		}, "unsupported_account"},
 		{"engine off", func(a *Account) {
 			a.Extra[OpenAIAPIKeyModeExtraKey] = "codex_engine"
 			a.Extra[OpenAIAPIKeyAutoAttributionEnabledExtraKey] = false
-		}, ""},
+		}, "unsupported_account"},
+		{"engine invalid boolean", func(a *Account) {
+			a.Extra[OpenAIAPIKeyModeExtraKey] = "codex_engine"
+			a.Extra[OpenAIAPIKeyAutoAttributionEnabledExtraKey] = "true"
+		}, "unsupported_account"},
 		{"oauth off", func(a *Account) {
 			a.Type = AccountTypeOAuth
 			a.Extra[OpenAIAPIKeyAutoAttributionEnabledExtraKey] = false
@@ -92,6 +101,23 @@ func TestOpenAIAPIKeyAutoAttributionAdminUpdates(t *testing.T) {
 		},
 	} {
 		require.Error(t, call())
+	}
+}
+
+func TestOpenAIAPIKeyAutoAttributionPreferenceSurvivesModeChanges(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		account := engineAccount()
+		account.ID = 721
+		account.Extra = map[string]any{OpenAIAPIKeyModeExtraKey: "generic", OpenAIAPIKeyAutoAttributionEnabledExtraKey: enabled}
+		repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+		svc := &adminServiceImpl{accountRepo: repo}
+		for _, mode := range []string{"codex_engine", "generic"} {
+			updated, err := svc.UpdateAccount(context.Background(), account.ID, &UpdateAccountInput{Extra: map[string]any{OpenAIAPIKeyModeExtraKey: mode}})
+			require.NoError(t, err)
+			require.Equal(t, mode, updated.Extra[OpenAIAPIKeyModeExtraKey])
+			require.Equal(t, enabled, updated.Extra[OpenAIAPIKeyAutoAttributionEnabledExtraKey])
+			require.Equal(t, enabled, updated.IsOpenAIAPIKeyAutoAttributionEnabled())
+		}
 	}
 }
 

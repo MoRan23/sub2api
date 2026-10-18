@@ -139,7 +139,7 @@ func TestAttributionInitialTestsSkipAccountChangedToCodexEngine(t *testing.T) {
 	var pending bool
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT processed_at IS NULL FROM account_initial_tests WHERE account_id=$1`, a.ID).Scan(&pending))
 	require.True(t, pending)
-	_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET type='apikey',extra='{"openai_api_key_mode":"codex_engine"}',credentials='{"api_key":"synthetic-engine-key","base_url":"https://synthetic.invalid/v1"}' WHERE id=$1`, a.ID)
+	_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET type='apikey',extra='{"openai_api_key_mode":"codex_engine","openai_api_key_auto_attribution_enabled":true}',credentials='{"api_key":"synthetic-engine-key","base_url":"https://synthetic.invalid/v1"}' WHERE id=$1`, a.ID)
 	require.NoError(t, err)
 	require.NoError(t, r.EnqueueNewAccounts(ctx))
 	attribution, pelican := initialTestCounts(t, a.ID)

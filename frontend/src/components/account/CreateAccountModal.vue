@@ -3288,7 +3288,7 @@
       <OpenAIAccessModeSelect v-if="form.platform === 'openai' && accountCategory === 'apikey'" v-model="openAIAPIKeyMode" />
 
       <div
-        v-if="form.platform === 'openai' && accountCategory === 'apikey' && openAIAPIKeyMode === 'generic'"
+        v-if="form.platform === 'openai' && accountCategory === 'apikey'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between gap-4">

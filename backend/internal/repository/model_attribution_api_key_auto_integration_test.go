@@ -27,7 +27,11 @@ func TestAttributionAPIKeyAutomaticOptIn(t *testing.T) {
 		{"null", `{"openai_api_key_auto_attribution_enabled":null}`, "", false},
 		{"unknown mode", `{"openai_api_key_mode":"future","openai_api_key_auto_attribution_enabled":true}`, "", false},
 		{"null mode", `{"openai_api_key_mode":null,"openai_api_key_auto_attribution_enabled":true}`, "", false},
-		{"engine off", `{"openai_api_key_mode":"codex_engine","openai_api_key_auto_attribution_enabled":false}`, "", true},
+		{"engine missing", `{"openai_api_key_mode":"codex_engine"}`, "", false},
+		{"engine off", `{"openai_api_key_mode":"codex_engine","openai_api_key_auto_attribution_enabled":false}`, "", false},
+		{"engine on", `{"openai_api_key_mode":"codex_engine","openai_api_key_auto_attribution_enabled":true}`, "", true},
+		{"engine string true", `{"openai_api_key_mode":"codex_engine","openai_api_key_auto_attribution_enabled":"true"}`, "", false},
+		{"engine null", `{"openai_api_key_mode":"codex_engine","openai_api_key_auto_attribution_enabled":null}`, "", false},
 		{"inactive", `{"openai_api_key_auto_attribution_enabled":true}`, ",status='disabled'", false},
 		{"unscheduled", `{"openai_api_key_auto_attribution_enabled":true}`, ",schedulable=false", false},
 		{"expired", `{"openai_api_key_auto_attribution_enabled":true}`, ",expires_at=NOW()-interval '1 minute'", false},
@@ -59,51 +63,53 @@ func TestAttributionAPIKeyAutomaticOptIn(t *testing.T) {
 }
 
 func TestAttributionAPIKeyOptOutPreservesActiveTasks(t *testing.T) {
-	for _, phase := range []string{"queued", "running", "retry_wait"} {
-		t.Run(phase, func(t *testing.T) {
-			ctx := context.Background()
-			r, ar, oauth := attributionFixture(t)
-			_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET schedulable=false WHERE id=$1`, oauth.ID)
-			require.NoError(t, err)
-			a := attributionAPIKeyAccount(t, ar)
-			_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra='{"openai_api_key_auto_attribution_enabled":true}' WHERE id=$1`, a.ID)
-			require.NoError(t, err)
-			jobs, err := r.Enqueue(ctx, nil, false)
-			require.NoError(t, err)
-			require.Len(t, jobs, 1)
-			j := jobs[0]
-			if phase != "queued" {
-				j, err = r.Claim(ctx)
+	for _, mode := range []string{"generic", "codex_engine"} {
+		for _, phase := range []string{"queued", "running", "retry_wait"} {
+			t.Run(mode+"/"+phase, func(t *testing.T) {
+				ctx := context.Background()
+				r, ar, oauth := attributionFixture(t)
+				_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET schedulable=false WHERE id=$1`, oauth.ID)
 				require.NoError(t, err)
-				require.NotNil(t, j)
-			}
-			if phase == "retry_wait" {
-				j.Checkpoint = attributionRetryCheckpoint()
-				ok, err := r.DeferRetry(ctx, j, time.Now().Add(-time.Second))
+				a := attributionAPIKeyAccount(t, ar)
+				_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_build_object('openai_api_key_mode',$2::text,'openai_api_key_auto_attribution_enabled',true) WHERE id=$1`, a.ID, mode)
 				require.NoError(t, err)
-				require.True(t, ok)
-			}
-			_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra='{"openai_api_key_auto_attribution_enabled":false}' WHERE id=$1`, a.ID)
-			require.NoError(t, err)
-			if phase != "running" {
-				j, err = r.Claim(ctx)
+				jobs, err := r.Enqueue(ctx, nil, false)
 				require.NoError(t, err)
-				require.NotNil(t, j)
-			}
-			valid, err := r.Validate(ctx, j)
-			require.NoError(t, err)
-			require.True(t, valid, "opting out only affects subsequent enqueue")
-			j.Status = "passed"
-			attributionSuccessfulProbeEvidence(j, "")
-			require.NoError(t, r.Finish(ctx, j))
-			require.Equal(t, "awaiting_confirmation", j.Result.Action)
-			_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_state SET next_due_at=NOW()-interval '1 second' WHERE account_id=$1`, a.ID)
-			require.NoError(t, err)
-			jobs, err = r.Enqueue(ctx, nil, false)
-			require.NoError(t, err)
-			require.Empty(t, jobs)
-			require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action, "manual result and unchanged baseline remain valid")
-		})
+				require.Len(t, jobs, 1)
+				j := jobs[0]
+				if phase != "queued" {
+					j, err = r.Claim(ctx)
+					require.NoError(t, err)
+					require.NotNil(t, j)
+				}
+				if phase == "retry_wait" {
+					j.Checkpoint = attributionRetryCheckpoint()
+					ok, err := r.DeferRetry(ctx, j, time.Now().Add(-time.Second))
+					require.NoError(t, err)
+					require.True(t, ok)
+				}
+				_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,'{openai_api_key_auto_attribution_enabled}','false') WHERE id=$1`, a.ID)
+				require.NoError(t, err)
+				if phase != "running" {
+					j, err = r.Claim(ctx)
+					require.NoError(t, err)
+					require.NotNil(t, j)
+				}
+				valid, err := r.Validate(ctx, j)
+				require.NoError(t, err)
+				require.True(t, valid, "opting out only affects subsequent enqueue")
+				j.Status = "passed"
+				attributionSuccessfulProbeEvidence(j, "")
+				require.NoError(t, r.Finish(ctx, j))
+				require.Equal(t, "awaiting_confirmation", j.Result.Action)
+				_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_state SET next_due_at=NOW()-interval '1 second' WHERE account_id=$1`, a.ID)
+				require.NoError(t, err)
+				jobs, err = r.Enqueue(ctx, nil, false)
+				require.NoError(t, err)
+				require.Empty(t, jobs)
+				require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action, "manual result and unchanged baseline remain valid")
+			})
+		}
 	}
 }
 

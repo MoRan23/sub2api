@@ -240,14 +240,18 @@ describe('attribution account UI', () => {
     expect(api.create).not.toHaveBeenCalled()
     wrapper.unmount()
   })
-  it('removes the manual-only label for Engine accounts and restores it when switching back', async () => {
+  it('shows Engine accounts as manual-only until automatic attribution is explicitly enabled', async () => {
     const account = { id: 43, platform: 'openai', type: 'apikey', extra: { openai_api_key_mode: 'codex_engine', openai_passthrough: true }, model_attribution: { latest: job() } } as AccountListItem
     const wrapper = mount(AccountAttributionCell, { props: { account } })
-    expect(wrapper.get('[data-testid="attribution-latest"]').text()).toBe('attribution.status.passed')
-    expect(wrapper.text()).not.toContain('attribution.manualOnly')
+    expect(wrapper.get('[data-testid="attribution-latest"]').text()).toContain('attribution.status.passed')
+    expect(wrapper.text()).toContain('attribution.manualOnly')
     expect(wrapper.text()).toContain('gpt-6-astra · 80.0%')
     await wrapper.get('button').trigger('click')
     expect(wrapper.emitted('open')).toHaveLength(1)
+    await wrapper.setProps({ account: { ...account, extra: { openai_api_key_mode: 'codex_engine', openai_api_key_auto_attribution_enabled: true } } })
+    expect(wrapper.text()).not.toContain('attribution.manualOnly')
+    await wrapper.setProps({ account: { ...account, extra: { openai_api_key_mode: 'codex_engine', openai_api_key_auto_attribution_enabled: false } } })
+    expect(wrapper.text()).toContain('attribution.manualOnly')
     await wrapper.setProps({ account: { ...account, extra: { openai_api_key_mode: 'generic' } } })
     expect(wrapper.text()).toContain('attribution.manualOnly')
     await wrapper.setProps({ account: { ...account, extra: { openai_api_key_mode: 'generic', openai_api_key_auto_attribution_enabled: true } } })

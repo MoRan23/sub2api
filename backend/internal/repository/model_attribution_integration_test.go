@@ -153,18 +153,20 @@ func TestAttributionCodexEnginePeriodicScheduling(t *testing.T) {
 		name, change string
 		eligible     bool
 	}{
-		{"engine", `extra='{"openai_api_key_mode":"codex_engine"}'`, true},
-		{"engine_legacy_passthrough", `extra='{"openai_api_key_mode":"codex_engine","openai_passthrough":true,"openai_oauth_passthrough":true}'`, true},
+		{"engine", `extra='{"openai_api_key_mode":"codex_engine","openai_api_key_auto_attribution_enabled":true}'`, true},
+		{"engine_default_off", `extra='{"openai_api_key_mode":"codex_engine"}'`, false},
+		{"engine_explicit_off", `extra='{"openai_api_key_mode":"codex_engine","openai_api_key_auto_attribution_enabled":false}'`, false},
+		{"engine_legacy_passthrough", `extra='{"openai_api_key_mode":"codex_engine","openai_api_key_auto_attribution_enabled":true,"openai_passthrough":true,"openai_oauth_passthrough":true}'`, true},
 		{"generic", `extra='{"openai_api_key_mode":"generic"}'`, false},
 		{"mode_missing", `extra='{}'`, false},
 		{"mode_unknown", `extra='{"openai_api_key_mode":"future"}'`, false},
-		{"other_platform", `platform='anthropic',extra='{"openai_api_key_mode":"codex_engine"}'`, false},
-		{"oauth_passthrough", `type='oauth',extra='{"openai_api_key_mode":"codex_engine","openai_passthrough":true}'`, false},
-		{"inactive", `status='disabled',extra='{"openai_api_key_mode":"codex_engine"}'`, false},
-		{"unscheduled", `schedulable=false,extra='{"openai_api_key_mode":"codex_engine"}'`, false},
-		{"expired", `expires_at=NOW()-interval '1 minute',extra='{"openai_api_key_mode":"codex_engine"}'`, false},
-		{"rate_limited", `rate_limit_reset_at=NOW()+interval '1 hour',extra='{"openai_api_key_mode":"codex_engine"}'`, false},
-		{"deleted", `deleted_at=NOW(),extra='{"openai_api_key_mode":"codex_engine"}'`, false},
+		{"other_platform", `platform='anthropic',extra='{"openai_api_key_mode":"codex_engine","openai_api_key_auto_attribution_enabled":true}'`, false},
+		{"oauth_passthrough", `type='oauth',extra='{"openai_api_key_mode":"codex_engine","openai_api_key_auto_attribution_enabled":true,"openai_passthrough":true}'`, false},
+		{"inactive", `status='disabled',extra='{"openai_api_key_mode":"codex_engine","openai_api_key_auto_attribution_enabled":true}'`, false},
+		{"unscheduled", `schedulable=false,extra='{"openai_api_key_mode":"codex_engine","openai_api_key_auto_attribution_enabled":true}'`, false},
+		{"expired", `expires_at=NOW()-interval '1 minute',extra='{"openai_api_key_mode":"codex_engine","openai_api_key_auto_attribution_enabled":true}'`, false},
+		{"rate_limited", `rate_limit_reset_at=NOW()+interval '1 hour',extra='{"openai_api_key_mode":"codex_engine","openai_api_key_auto_attribution_enabled":true}'`, false},
+		{"deleted", `deleted_at=NOW(),extra='{"openai_api_key_mode":"codex_engine","openai_api_key_auto_attribution_enabled":true}'`, false},
 	} {
 		a := attributionAPIKeyAccount(t, ar)
 		_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET `+tc.change+` WHERE id=$1`, a.ID)

@@ -66,7 +66,7 @@ func (r *attributionRepository) EnqueueNewAccounts(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		// Periodic attribution also accepts Engine accounts; creation-time tests
+		// Periodic attribution also accepts opted-in API-key accounts; creation-time tests
 		// remain OAuth-only even if a pending account changes authentication type.
 		if a != nil && a.IsOpenAIOAuth() && skip == "" {
 			var hasAttribution, hasPelican bool

@@ -322,7 +322,7 @@ func AttributionSkipReason(a *Account, now time.Time, manual bool) string {
 	if a == nil {
 		return "account_missing"
 	}
-	eligible := a.IsOpenAIOAuth() || a.IsCodexEngine() || a.IsOpenAIAPIKeyAutoAttributionEnabled() || (manual && a.IsOpenAIApiKey())
+	eligible := a.IsOpenAIOAuth() || a.IsOpenAIAPIKeyAutoAttributionEnabled() || (manual && a.IsOpenAIApiKey())
 	if !eligible {
 		return "unsupported_account"
 	}

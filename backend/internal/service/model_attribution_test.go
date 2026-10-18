@@ -179,11 +179,7 @@ func TestAttributionAPIKeyManualEligibility(t *testing.T) {
 			a := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true}
 			tc.change(a)
 			require.Equal(t, tc.reason, AttributionSkipReason(a, now, true))
-			if tc.name == "engine" {
-				require.Empty(t, AttributionSkipReason(a, now, false))
-			} else {
-				require.Equal(t, "unsupported_account", AttributionSkipReason(a, now, false))
-			}
+			require.Equal(t, "unsupported_account", AttributionSkipReason(a, now, false))
 		})
 	}
 }
@@ -198,6 +194,8 @@ func TestAttributionCodexEngineScheduledEligibility(t *testing.T) {
 		reason string
 	}{
 		{"active", func(*Account) {}, ""},
+		{"automatic disabled", func(a *Account) { a.Extra[OpenAIAPIKeyAutoAttributionEnabledExtraKey] = false }, "unsupported_account"},
+		{"automatic missing", func(a *Account) { delete(a.Extra, OpenAIAPIKeyAutoAttributionEnabledExtraKey) }, "unsupported_account"},
 		{"legacy passthrough ignored", func(a *Account) { a.Extra["openai_passthrough"] = true }, ""},
 		{"legacy oauth passthrough ignored", func(a *Account) { a.Extra["openai_oauth_passthrough"] = true }, ""},
 		{"rate limited", func(a *Account) { a.RateLimitResetAt = &future }, "account_rate_limited"},
@@ -206,14 +204,14 @@ func TestAttributionCodexEngineScheduledEligibility(t *testing.T) {
 		{"scheduling disabled", func(a *Account) { a.Schedulable = false }, "scheduling_disabled"},
 		{"expired", func(a *Account) { a.ExpiresAt = &past }, "account_expired"},
 		{"shadow", func(a *Account) { a.ParentAccountID = &parent }, "shadow_account"},
-		{"generic", func(a *Account) { a.Extra[OpenAIAPIKeyModeExtraKey] = "generic" }, "unsupported_account"},
+		{"generic retains opt in", func(a *Account) { a.Extra[OpenAIAPIKeyModeExtraKey] = "generic" }, ""},
 		{"unknown mode", func(a *Account) { a.Extra[OpenAIAPIKeyModeExtraKey] = "other" }, "unsupported_account"},
 		{"other platform", func(a *Account) { a.Platform = PlatformAnthropic }, "unsupported_account"},
 		{"other type", func(a *Account) { a.Type = AccountTypeSetupToken }, "unsupported_account"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
-				Extra: map[string]any{OpenAIAPIKeyModeExtraKey: "codex_engine"}}
+				Extra: map[string]any{OpenAIAPIKeyModeExtraKey: "codex_engine", OpenAIAPIKeyAutoAttributionEnabledExtraKey: true}}
 			tc.change(a)
 			require.Equal(t, tc.reason, AttributionSkipReason(a, now, false))
 		})

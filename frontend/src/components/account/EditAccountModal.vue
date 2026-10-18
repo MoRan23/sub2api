@@ -1865,7 +1865,7 @@
       <OpenAIAccessModeSelect v-if="account?.platform === 'openai' && account?.type === 'apikey'" v-model="openAIAPIKeyMode" />
 
       <div
-        v-if="account?.platform === 'openai' && account?.type === 'apikey' && openAIAPIKeyMode === 'generic'"
+        v-if="account?.platform === 'openai' && account?.type === 'apikey'"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between gap-4">
@@ -6188,7 +6188,7 @@ const handleSubmit = async () => {
       }
       if (props.account.type === 'apikey') {
         newExtra.openai_api_key_mode = openAIAPIKeyMode.value
-        // Omitted preferences are preserved server-side, including while Engine mode hides this switch.
+        // Omitted preferences are preserved server-side across both API Key access modes.
         delete newExtra.openai_api_key_auto_attribution_enabled
         if (openAIAPIKeyAutoAttributionEnabled.value !== (currentExtra.openai_api_key_auto_attribution_enabled === true)) {
           newExtra.openai_api_key_auto_attribution_enabled = openAIAPIKeyAutoAttributionEnabled.value
