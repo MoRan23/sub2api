@@ -57,6 +57,74 @@ func TestAttributionProbeHTTPStatusAndRetryAfterSingleAttempt(t *testing.T) {
 	}
 }
 
+func TestAttributionCodexEngineDeployment503PreservesBusinessCooldown(t *testing.T) {
+	for _, tc := range []struct {
+		name, contentType, body string
+	}{
+		{
+			name:        "JSON maintenance",
+			contentType: "application/json",
+			body:        `{"error":{"code":"deployment_maintenance","message":"synthetic maintenance"},"usage":{"input_tokens":11,"output_tokens":2}}`,
+		},
+		{
+			name:        "SSE capacity",
+			contentType: "text/event-stream",
+			body:        "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"status\":503,\"code\":\"capacity_unavailable\",\"message\":\"synthetic capacity\"},\"usage\":{\"input_tokens\":11,\"output_tokens\":2}}}\n\n",
+		},
+	} {
+		for _, existingCooldown := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/existing=%t", tc.name, existingCooldown), func(t *testing.T) {
+				account := newOpenAIRejectedFieldTestAccount()
+				account.ID = 42
+				account.Extra[OpenAIAPIKeyModeExtraKey] = "codex_engine"
+				repo := &stubOpenAIAccountRepo{accounts: []Account{*account}}
+				response := &http.Response{
+					StatusCode: http.StatusServiceUnavailable,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader(tc.body)),
+				}
+				response.Header.Set("Content-Type", tc.contentType)
+				response.Header.Set("Retry-After", "120")
+				response.Header.Set(codexEngineUnavailableScopeHeader, "deployment")
+				upstream := &httpUpstreamRecorder{responses: []*http.Response{response}}
+				gateway := newOpenAIRejectedFieldTestService(upstream)
+				gateway.accountRepo = repo
+				gateway.rateLimitService = &RateLimitService{accountRepo: repo}
+				// Preserve a separate account's business cooldown as well as the
+				// selected account's shorter deadline: a diagnostic must neither
+				// extend the latter nor clear either entry.
+				wantCooldowns := map[int64]time.Time{account.ID + 1: time.Now().Add(time.Minute)}
+				if existingCooldown {
+					wantCooldowns[account.ID] = time.Now().Add(5 * time.Second)
+				}
+				gateway.codexEngineDeploymentCooldowns.until = make(map[int64]time.Time, len(wantCooldowns))
+				for id, until := range wantCooldowns {
+					gateway.codexEngineDeploymentCooldowns.until[id] = until
+				}
+
+				result, err := NewAccountCandyTestTransport(repo, gateway).Probe(attributionSingleAttemptContext(), account.ID, "gpt-6-astra", "synthetic challenge")
+
+				require.EqualError(t, err, "upstream_http_503")
+				require.NotNil(t, result)
+				require.False(t, result.Completed)
+				require.Zero(t, result.Retries)
+				require.Len(t, upstream.requests, 1, "durable attribution, not transport, owns retries")
+				status, wait := AttributionProbeRetryStatus(err, result)
+				require.Equal(t, http.StatusServiceUnavailable, status)
+				require.Equal(t, 120*time.Second, wait)
+				require.False(t, diagnosticRateLimitError(err))
+				require.NotNil(t, result.Usage)
+				require.Equal(t, 11, result.Usage.InputTokens)
+				require.Equal(t, 2, result.Usage.OutputTokens)
+				require.Equal(t, wantCooldowns, gateway.codexEngineDeploymentCooldowns.until)
+				require.True(t, repo.accounts[0].Schedulable)
+				require.Equal(t, StatusActive, repo.accounts[0].Status)
+				require.False(t, repo.accounts[0].openAICandyTest)
+			})
+		}
+	}
+}
+
 func TestAttributionProbeSSEStatusPriorityAndLegacyPelican(t *testing.T) {
 	for _, tc := range []struct {
 		name, event, code string

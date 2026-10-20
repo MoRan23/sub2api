@@ -51,9 +51,10 @@ func codexEngineDeploymentCooldown(retryAfter string, now time.Time) time.Durati
 // Only an explicit deployment-wide rejection from the selected Engine account
 // can suspend that account for subsequent requests. Group/model capacity errors,
 // other providers, and errors inside an already accepted HTTP 200 stream do not
-// establish deployment unavailability. Never turn this signal into a replay.
+// establish deployment unavailability. Internal account diagnostics must not
+// create or change business cooldowns. Never turn this signal into a replay.
 func (s *OpenAIGatewayService) observeCodexEngineDeploymentUnavailable(account *Account, resp *http.Response, failure *codexEngineResponseError, now time.Time) {
-	if s == nil || account == nil || account.ID <= 0 || !account.IsCodexEngine() ||
+	if s == nil || account == nil || account.ID <= 0 || !account.IsCodexEngine() || isOpenAICandyTestAccount(account) ||
 		resp == nil || resp.StatusCode != http.StatusServiceUnavailable || failure == nil ||
 		strings.TrimSpace(resp.Header.Get(codexEngineUnavailableScopeHeader)) != "deployment" {
 		return

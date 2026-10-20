@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -157,6 +158,144 @@ func TestCodexEngineDeploymentCooldownForwarding(t *testing.T) {
 			require.Nil(t, account.TempUnschedulableUntil)
 		})
 	}
+}
+
+func TestCodexEngineDeploymentCooldownDiagnosticDoesNotChangeState(t *testing.T) {
+	now := time.Date(2026, time.October, 20, 6, 0, 0, 0, time.UTC)
+	for _, code := range []string{"deployment_maintenance", "capacity_unavailable"} {
+		for _, tc := range []struct {
+			name       string
+			existing   time.Duration
+			retryAfter string
+		}{
+			{name: "does not create", retryAfter: "30"},
+			{name: "does not extend", existing: 5 * time.Second, retryAfter: "30"},
+			{name: "does not shorten or clear", existing: 30 * time.Second, retryAfter: "1"},
+		} {
+			t.Run(code+"/"+tc.name, func(t *testing.T) {
+				svc := &OpenAIGatewayService{}
+				account := engineAccount()
+				account.ID, account.Schedulable = 42, true
+				failure := &codexEngineResponseError{status: 503, code: code}
+				resp := &http.Response{StatusCode: 503, Header: make(http.Header)}
+				resp.Header.Set(codexEngineUnavailableScopeHeader, "deployment")
+				if tc.existing > 0 {
+					resp.Header.Set("Retry-After", fmt.Sprint(int(tc.existing/time.Second)))
+					svc.observeCodexEngineDeploymentUnavailable(account, resp, failure, now)
+				}
+				diagnostic := *account
+				diagnostic.openAICandyTest = true
+				resp.Header.Set("Retry-After", tc.retryAfter)
+				svc.observeCodexEngineDeploymentUnavailable(&diagnostic, resp, failure, now.Add(time.Second))
+
+				if tc.existing == 0 {
+					require.Empty(t, svc.codexEngineDeploymentCooldowns.until)
+					require.False(t, svc.isCodexEngineDeploymentUnavailable(account, now.Add(time.Second)))
+				} else {
+					require.Equal(t, now.Add(tc.existing), svc.codexEngineDeploymentCooldowns.until[account.ID])
+					require.True(t, svc.isCodexEngineDeploymentUnavailable(account, now.Add(tc.existing-time.Nanosecond)))
+					require.False(t, svc.isCodexEngineDeploymentUnavailable(account, now.Add(tc.existing)))
+				}
+				require.False(t, account.openAICandyTest, "the diagnostic marker belongs to an account copy")
+				require.True(t, account.Schedulable)
+				require.Nil(t, account.TempUnschedulableUntil)
+			})
+		}
+	}
+}
+
+func TestCodexEngineDeploymentCooldownDiagnosticForwarding(t *testing.T) {
+	for _, code := range []string{"deployment_maintenance", "capacity_unavailable"} {
+		for _, streaming := range []bool{false, true} {
+			for _, diagnostic := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/stream=%t/diagnostic=%t", code, streaming, diagnostic), func(t *testing.T) {
+					payload := fmt.Sprintf(`{"model":"native","error":{"code":%q,"type":"gateway_error","message":"Deployment temporarily unavailable","status_code":503},"usage":{"input_tokens":17,"output_tokens":3,"input_tokens_details":{"cached_tokens":11}}}`, code)
+					wire, contentType := payload, "application/json"
+					if streaming {
+						wire = "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":" + payload + "}\n\n"
+						contentType = "text/event-stream"
+					}
+					resp := &http.Response{StatusCode: 503, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(wire))}
+					resp.Header.Set("Content-Type", contentType)
+					resp.Header.Set("Retry-After", "30")
+					resp.Header.Set("X-Request-ID", "req_diagnostic_maintenance")
+					resp.Header.Set(codexEngineUnavailableScopeHeader, "deployment")
+					upstream := &httpUpstreamRecorder{resp: resp}
+					svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+					account := engineAccount()
+					account.ID, account.Schedulable = 42, true
+					ctx := context.Background()
+					var attempt *openAICandyTestAttempt
+					if diagnostic {
+						account = snapshotOAuthRefreshAccount(account)
+						account.openAICandyTest = true
+						attempt = &openAICandyTestAttempt{}
+						ctx = withOpenAICandyTest(ctx, attempt)
+					}
+					rec := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(rec)
+					c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+					// Public headers cannot grant the internal diagnostic exemption.
+					c.Request.Header.Set("X-Codex-Engine-Diagnostic", "true")
+					result, err := svc.Forward(ctx, c, account, []byte(`{"model":"native","stream":true}`))
+					var failure *codexEngineResponseError
+					require.ErrorAs(t, err, &failure)
+					require.Equal(t, 503, failure.status)
+					require.Equal(t, code, failure.code)
+					var failover *UpstreamFailoverError
+					require.NotErrorAs(t, err, &failover)
+					require.NotNil(t, result, "actual upstream usage must remain available")
+					require.EqualValues(t, 17, result.Usage.InputTokens)
+					require.EqualValues(t, 3, result.Usage.OutputTokens)
+					require.EqualValues(t, 11, result.Usage.CacheReadInputTokens)
+					require.Equal(t, "native", result.UpstreamResponseModel)
+					require.Equal(t, 503, rec.Code)
+					require.Equal(t, wire, rec.Body.String())
+					require.Equal(t, "30", rec.Header().Get("Retry-After"))
+					require.Equal(t, "req_diagnostic_maintenance", rec.Header().Get("X-Request-ID"))
+					require.Equal(t, "deployment", rec.Header().Get(codexEngineUnavailableScopeHeader))
+					require.Len(t, upstream.requests, 1, "a diagnostic error must not replay the inference")
+					require.Empty(t, upstream.lastReq.Header.Get("X-Codex-Engine-Diagnostic"))
+					require.Equal(t, !diagnostic, svc.isCodexEngineDeploymentUnavailable(account, time.Now()))
+					if attempt != nil {
+						require.Equal(t, 1, attempt.sends)
+					}
+					require.True(t, account.Schedulable)
+					require.Nil(t, account.TempUnschedulableUntil)
+				})
+			}
+		}
+	}
+}
+
+func TestCodexEngineDeploymentCooldownDiagnosticSuccessDoesNotClear(t *testing.T) {
+	now := time.Date(2026, time.October, 20, 6, 0, 0, 0, time.UTC)
+	account := engineAccount()
+	account.ID = 42
+	wire := `{"model":"native","output":[],"usage":{"input_tokens":7,"output_tokens":2}}`
+	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200,
+		Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(wire))}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	maintenance := &http.Response{StatusCode: 503, Header: make(http.Header)}
+	maintenance.Header.Set(codexEngineUnavailableScopeHeader, "deployment")
+	maintenance.Header.Set("Retry-After", "30")
+	svc.observeCodexEngineDeploymentUnavailable(account, maintenance, &codexEngineResponseError{status: 503, code: "deployment_maintenance"}, now)
+	diagnostic := *account
+	diagnostic.openAICandyTest = true
+	ctx := withOpenAICandyTest(context.Background(), &openAICandyTestAttempt{})
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+	result, err := svc.Forward(ctx, c, &diagnostic, []byte(`{"model":"native"}`))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, wire, rec.Body.String())
+	require.EqualValues(t, 7, result.Usage.InputTokens)
+	require.EqualValues(t, 2, result.Usage.OutputTokens)
+	require.Len(t, upstream.requests, 1)
+	require.Equal(t, now.Add(30*time.Second), svc.codexEngineDeploymentCooldowns.until[account.ID])
+	require.True(t, svc.isCodexEngineDeploymentUnavailable(account, now.Add(29*time.Second)))
+	require.False(t, svc.isCodexEngineDeploymentUnavailable(account, now.Add(30*time.Second)))
 }
 
 func TestCodexEngineDeploymentCooldownConcurrentExtensions(t *testing.T) {
