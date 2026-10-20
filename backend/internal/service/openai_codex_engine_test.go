@@ -289,6 +289,100 @@ func TestCodexEngineBusinessErrorsAndSSE(t *testing.T) {
 	}
 }
 
+func TestCodexEngineTaskStateFailuresPreserveWireWithoutReplayOrCooldown(t *testing.T) {
+	const unconfirmed = `{"error":{"code":"task_state_unconfirmed","message":"Existing task state could not be confirmed","type":"gateway_error"}}`
+	const cooling = "event: response.failed\ndata: {\"error\":{\"code\":\"task_cooling\",\"message\":\"Task checkpoint unloading is still being confirmed\",\"status_code\":409,\"type\":\"invalid_request_error\"}}\n\n"
+	const requestBody = `{"model":"alias","stream":true,"previous_response_id":"resp_original","input":[{"type":"reasoning","id":"item_original","encrypted_content":"opaque-original","summary":[]},{"type":"reasoning","id":null,"encrypted_content":"opaque-null-id"},{"type":"function_call_output","call_id":"call_original","output":"tool result"},{"role":"user","content":"continue"}],"tools":[{"type":"namespace","name":"native","tools":[]}],"unknown":9007199254740993123}`
+	for _, tc := range []struct {
+		name, contentType, wire, code, errorType, message string
+		wireStatus, semanticStatus                        int
+	}{
+		{"unconfirmed HTTP 503 JSON", "application/json", unconfirmed, "task_state_unconfirmed", "gateway_error", "Existing task state could not be confirmed", 503, 503},
+		{"cooling accepted SSE", "text/event-stream", cooling, "task_cooling", "invalid_request_error", "Task checkpoint unloading is still being confirmed", 200, 409},
+		{"cooling HTTP 409 SSE", "text/event-stream", cooling, "task_cooling", "invalid_request_error", "Task checkpoint unloading is still being confirmed", 409, 409},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
+			resp := &http.Response{StatusCode: tc.wireStatus, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(tc.wire))}
+			resp.Header.Set("Content-Type", tc.contentType)
+			resp.Header.Set("Retry-After", "17")
+			resp.Header.Set("X-Request-ID", "req_engine_task_state")
+			// A trusted deployment scope still cannot turn an unrelated task error
+			// into the maintenance/capacity cooldown contract.
+			resp.Header.Set(codexEngineUnavailableScopeHeader, "deployment")
+			upstream := &httpUpstreamRecorder{resp: resp}
+			healthSettings, err := json.Marshal(OpenAIAPIKeyHealthBreakerSettings{Enabled: true, WindowMinutes: 1, FailureThreshold: 1, CooldownMinutes: 5})
+			require.NoError(t, err)
+			healthCache := &openAIAPIKeyHealthCacheStub{tripped: true}
+			healthRepo := &openAIAPIKeyHealthAccountRepo{}
+			healthBlocker := &openAIAPIKeyHealthRuntimeBlocker{}
+			rateLimits := NewRateLimitService(healthRepo, nil, &config.Config{}, nil, healthCache)
+			rateLimits.SetSettingService(NewSettingService(&openAIAPIKeyHealthSettingRepo{value: string(healthSettings)}, &config.Config{}))
+			rateLimits.SetOpenAIAPIKeyHealthCache(healthCache)
+			rateLimits.SetAccountRuntimeBlocker(healthBlocker)
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, rateLimitService: rateLimits}
+			account := engineAccount()
+			account.ID, account.Schedulable, account.Status = 42, true, StatusActive
+			account.Credentials["pool_mode"] = true
+			account.Credentials["pool_mode_retry_count"] = 3
+			body := []byte(requestBody)
+			result, err := svc.Forward(context.Background(), c, account, body)
+
+			var failure *codexEngineResponseError
+			require.ErrorAs(t, err, &failure)
+			require.Equal(t, tc.semanticStatus, failure.status)
+			require.Equal(t, tc.code, failure.code)
+			require.Equal(t, tc.errorType, failure.errorType)
+			require.Equal(t, tc.message, failure.message)
+			var failover *UpstreamFailoverError
+			require.NotErrorAs(t, err, &failover, "task rejection must not enter handler account retry/failover")
+			require.Nil(t, result, "a task rejection without reported usage must not create a usage record")
+			require.Len(t, upstream.requests, 1)
+			require.Equal(t, "/prefix/v1/responses", upstream.lastReq.URL.Path)
+			require.Equal(t, strings.Replace(requestBody, `"model":"alias"`, `"model":"native"`, 1), string(upstream.lastBody), "only the configured model mapping may change the request")
+			require.Equal(t, requestBody, string(body), "the original retry/history source must remain immutable")
+			require.Equal(t, tc.wireStatus, rec.Code)
+			require.Equal(t, tc.contentType, rec.Header().Get("Content-Type"))
+			require.Equal(t, tc.wire, rec.Body.String(), "the error-only diagnostic must never replace the actual wire response")
+			require.Equal(t, "17", rec.Header().Get("Retry-After"))
+			require.Equal(t, "req_engine_task_state", rec.Header().Get("X-Request-ID"))
+			require.True(t, CodexEngineResponseWritten(c), "the handler must not append a fallback error")
+			require.Equal(t, tc.semanticStatus, c.GetInt(OpsUpstreamStatusCodeKey))
+			require.Equal(t, tc.message, c.GetString(OpsUpstreamErrorMessageKey))
+			events, ok := c.MustGet(OpsUpstreamErrorsKey).([]*OpsUpstreamErrorEvent)
+			require.True(t, ok)
+			require.Len(t, events, 1)
+			require.Equal(t, tc.semanticStatus, events[0].UpstreamStatusCode)
+			require.Equal(t, tc.code, events[0].Reason)
+			require.Equal(t, tc.message, events[0].Message)
+			require.Equal(t, "req_engine_task_state", events[0].UpstreamRequestID)
+			require.Equal(t, tc.code, gjson.Get(events[0].Detail, "error.code").String())
+			require.Equal(t, tc.errorType, gjson.Get(events[0].Detail, "error.type").String())
+			if tc.contentType == "text/event-stream" {
+				require.Equal(t, 409, failure.reportedStatus)
+				require.Equal(t, "stream_error", events[0].Kind)
+				require.Contains(t, string(CodexEngineTerminalError(c)), `"code":"task_cooling"`)
+				require.Contains(t, string(CodexEngineTerminalError(c)), `"status_code":409`)
+			} else {
+				require.Equal(t, "http_error", events[0].Kind)
+			}
+			require.False(t, svc.isCodexEngineDeploymentUnavailable(account, time.Now()))
+			require.Empty(t, svc.codexEngineDeploymentCooldowns.until)
+			require.False(t, svc.ReportOpenAIAccountScheduleResult(account, "native", false, nil, err))
+			require.False(t, svc.ObserveOpenAIAccountHealthFailure(context.Background(), account, err))
+			require.Zero(t, healthCache.recordCalls)
+			require.Zero(t, healthCache.setCalls)
+			require.Zero(t, healthRepo.setCalls)
+			require.Zero(t, healthBlocker.calls)
+			require.Equal(t, StatusActive, account.Status)
+			require.True(t, account.Schedulable)
+			require.Nil(t, account.TempUnschedulableUntil)
+		})
+	}
+}
+
 func TestCodexEngineFailureMetadataOmitsGeneratedContentAndCredentials(t *testing.T) {
 	wire := `{"type":"response.failed","response":{"id":"resp_failed","error":{"status":403,"code":"too_many_denials","type":"permission_error","message":"denied engine-key https://example.test?access_token=secret"},"output":[{"text":"private generated content"}],"input":"private prompt"}}`
 	rec := httptest.NewRecorder()
