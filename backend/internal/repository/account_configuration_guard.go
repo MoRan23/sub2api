@@ -15,7 +15,7 @@ import (
 const installationOwnerSQL = "platform = 'openai' AND type IN ('oauth', 'setup-token') AND parent_account_id IS NULL"
 
 func lockAccountConfiguration(ctx context.Context, client *dbent.Client, id int64) (*service.Account, error) {
-	rows, err := client.QueryContext(ctx, `SELECT platform, type, parent_account_id, credentials, extra
+	rows, err := client.QueryContext(ctx, `SELECT platform, type, parent_account_id, credentials, extra, schedulable, scheduling_revision, status
 		FROM accounts WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE`, id)
 	if err != nil {
 		return nil, err
@@ -30,7 +30,7 @@ func lockAccountConfiguration(ctx context.Context, client *dbent.Client, id int6
 	current := &service.Account{ID: id}
 	var parent sql.NullInt64
 	var credentials, extra []byte
-	if err := rows.Scan(&current.Platform, &current.Type, &parent, &credentials, &extra); err != nil {
+	if err := rows.Scan(&current.Platform, &current.Type, &parent, &credentials, &extra, &current.Schedulable, &current.SchedulingRevision, &current.Status); err != nil {
 		return nil, err
 	}
 	if parent.Valid {
@@ -56,7 +56,7 @@ func accountConfigurationExtraPatch(ctx context.Context, ids []int64, updates ma
 	filtered := service.StripRetiredCodexStateExtra(updates)
 	delete(filtered, "openai_pinned_installation_id")
 	delete(filtered, "openai_installation_rotate_enabled")
-	for _, key := range []string{"openai_installation_pin_enabled", "enable_tls_fingerprint", "tls_fingerprint_profile_id", service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey, service.OpenAIAPIKeyAutoAttributionEnabledExtraKey} {
+	for _, key := range []string{"openai_installation_pin_enabled", "enable_tls_fingerprint", "tls_fingerprint_profile_id", service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey, service.OpenAIAPIKeyAutoAttributionEnabledExtraKey, service.OpenAIAttributionReplaceWhitelistEnabledExtraKey} {
 		delete(filtered, key)
 		if len(ids) == 0 {
 			continue
@@ -98,6 +98,7 @@ func afterAccountConfigurationCommit(ctx context.Context, notify func()) {
 }
 
 func guardedAccountExtraExpression(expression string, credentialExpressions ...string) string {
+	expression = "CASE WHEN platform = 'openai' AND type IN ('oauth','apikey') THEN (" + expression + ") ELSE (" + expression + ") - 'openai_attribution_replace_whitelist_enabled' END"
 	expression = "CASE WHEN platform = 'openai' AND type = 'apikey' THEN (" + expression + ") ELSE (" + expression + ") - 'openai_api_key_auto_attribution_enabled' END"
 	credentials := "credentials"
 	if len(credentialExpressions) > 0 {

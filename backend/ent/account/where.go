@@ -150,6 +150,11 @@ func Schedulable(v bool) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldSchedulable, v))
 }
 
+// SchedulingRevision applies equality check predicate on the "scheduling_revision" field. It's identical to SchedulingRevisionEQ.
+func SchedulingRevision(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldSchedulingRevision, v))
+}
+
 // RateLimitedAt applies equality check predicate on the "rate_limited_at" field. It's identical to RateLimitedAtEQ.
 func RateLimitedAt(v time.Time) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldRateLimitedAt, v))
@@ -1103,6 +1108,46 @@ func SchedulableEQ(v bool) predicate.Account {
 // SchedulableNEQ applies the NEQ predicate on the "schedulable" field.
 func SchedulableNEQ(v bool) predicate.Account {
 	return predicate.Account(sql.FieldNEQ(FieldSchedulable, v))
+}
+
+// SchedulingRevisionEQ applies the EQ predicate on the "scheduling_revision" field.
+func SchedulingRevisionEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldSchedulingRevision, v))
+}
+
+// SchedulingRevisionNEQ applies the NEQ predicate on the "scheduling_revision" field.
+func SchedulingRevisionNEQ(v int64) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldSchedulingRevision, v))
+}
+
+// SchedulingRevisionIn applies the In predicate on the "scheduling_revision" field.
+func SchedulingRevisionIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldSchedulingRevision, vs...))
+}
+
+// SchedulingRevisionNotIn applies the NotIn predicate on the "scheduling_revision" field.
+func SchedulingRevisionNotIn(vs ...int64) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldSchedulingRevision, vs...))
+}
+
+// SchedulingRevisionGT applies the GT predicate on the "scheduling_revision" field.
+func SchedulingRevisionGT(v int64) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldSchedulingRevision, v))
+}
+
+// SchedulingRevisionGTE applies the GTE predicate on the "scheduling_revision" field.
+func SchedulingRevisionGTE(v int64) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldSchedulingRevision, v))
+}
+
+// SchedulingRevisionLT applies the LT predicate on the "scheduling_revision" field.
+func SchedulingRevisionLT(v int64) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldSchedulingRevision, v))
+}
+
+// SchedulingRevisionLTE applies the LTE predicate on the "scheduling_revision" field.
+func SchedulingRevisionLTE(v int64) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldSchedulingRevision, v))
 }
 
 // RateLimitedAtEQ applies the EQ predicate on the "rate_limited_at" field.

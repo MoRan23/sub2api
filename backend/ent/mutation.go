@@ -2318,6 +2318,8 @@ type AccountMutation struct {
 	expires_at                  *time.Time
 	auto_pause_on_expired       *bool
 	schedulable                 *bool
+	scheduling_revision         *int64
+	addscheduling_revision      *int64
 	rate_limited_at             *time.Time
 	rate_limit_reset_at         *time.Time
 	overload_until              *time.Time
@@ -3406,6 +3408,62 @@ func (m *AccountMutation) ResetSchedulable() {
 	m.schedulable = nil
 }
 
+// SetSchedulingRevision sets the "scheduling_revision" field.
+func (m *AccountMutation) SetSchedulingRevision(i int64) {
+	m.scheduling_revision = &i
+	m.addscheduling_revision = nil
+}
+
+// SchedulingRevision returns the value of the "scheduling_revision" field in the mutation.
+func (m *AccountMutation) SchedulingRevision() (r int64, exists bool) {
+	v := m.scheduling_revision
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSchedulingRevision returns the old "scheduling_revision" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldSchedulingRevision(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSchedulingRevision is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSchedulingRevision requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSchedulingRevision: %w", err)
+	}
+	return oldValue.SchedulingRevision, nil
+}
+
+// AddSchedulingRevision adds i to the "scheduling_revision" field.
+func (m *AccountMutation) AddSchedulingRevision(i int64) {
+	if m.addscheduling_revision != nil {
+		*m.addscheduling_revision += i
+	} else {
+		m.addscheduling_revision = &i
+	}
+}
+
+// AddedSchedulingRevision returns the value that was added to the "scheduling_revision" field in this mutation.
+func (m *AccountMutation) AddedSchedulingRevision() (r int64, exists bool) {
+	v := m.addscheduling_revision
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetSchedulingRevision resets all changes to the "scheduling_revision" field.
+func (m *AccountMutation) ResetSchedulingRevision() {
+	m.scheduling_revision = nil
+	m.addscheduling_revision = nil
+}
+
 // SetRateLimitedAt sets the "rate_limited_at" field.
 func (m *AccountMutation) SetRateLimitedAt(t time.Time) {
 	m.rate_limited_at = &t
@@ -4146,7 +4204,7 @@ func (m *AccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountMutation) Fields() []string {
-	fields := make([]string, 0, 31)
+	fields := make([]string, 0, 32)
 	if m.created_at != nil {
 		fields = append(fields, account.FieldCreatedAt)
 	}
@@ -4209,6 +4267,9 @@ func (m *AccountMutation) Fields() []string {
 	}
 	if m.schedulable != nil {
 		fields = append(fields, account.FieldSchedulable)
+	}
+	if m.scheduling_revision != nil {
+		fields = append(fields, account.FieldSchedulingRevision)
 	}
 	if m.rate_limited_at != nil {
 		fields = append(fields, account.FieldRateLimitedAt)
@@ -4290,6 +4351,8 @@ func (m *AccountMutation) Field(name string) (ent.Value, bool) {
 		return m.AutoPauseOnExpired()
 	case account.FieldSchedulable:
 		return m.Schedulable()
+	case account.FieldSchedulingRevision:
+		return m.SchedulingRevision()
 	case account.FieldRateLimitedAt:
 		return m.RateLimitedAt()
 	case account.FieldRateLimitResetAt:
@@ -4361,6 +4424,8 @@ func (m *AccountMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldAutoPauseOnExpired(ctx)
 	case account.FieldSchedulable:
 		return m.OldSchedulable(ctx)
+	case account.FieldSchedulingRevision:
+		return m.OldSchedulingRevision(ctx)
 	case account.FieldRateLimitedAt:
 		return m.OldRateLimitedAt(ctx)
 	case account.FieldRateLimitResetAt:
@@ -4537,6 +4602,13 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetSchedulable(v)
 		return nil
+	case account.FieldSchedulingRevision:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSchedulingRevision(v)
+		return nil
 	case account.FieldRateLimitedAt:
 		v, ok := value.(time.Time)
 		if !ok {
@@ -4630,6 +4702,9 @@ func (m *AccountMutation) AddedFields() []string {
 	if m.addrate_multiplier != nil {
 		fields = append(fields, account.FieldRateMultiplier)
 	}
+	if m.addscheduling_revision != nil {
+		fields = append(fields, account.FieldSchedulingRevision)
+	}
 	return fields
 }
 
@@ -4648,6 +4723,8 @@ func (m *AccountMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedPriority()
 	case account.FieldRateMultiplier:
 		return m.AddedRateMultiplier()
+	case account.FieldSchedulingRevision:
+		return m.AddedSchedulingRevision()
 	}
 	return nil, false
 }
@@ -4691,6 +4768,13 @@ func (m *AccountMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddRateMultiplier(v)
+		return nil
+	case account.FieldSchedulingRevision:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSchedulingRevision(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Account numeric field %s", name)
@@ -4886,6 +4970,9 @@ func (m *AccountMutation) ResetField(name string) error {
 		return nil
 	case account.FieldSchedulable:
 		m.ResetSchedulable()
+		return nil
+	case account.FieldSchedulingRevision:
+		m.ResetSchedulingRevision()
 		return nil
 	case account.FieldRateLimitedAt:
 		m.ResetRateLimitedAt()

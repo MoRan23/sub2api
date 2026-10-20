@@ -230,7 +230,9 @@ func TestAttributionOperationalChangesDoNotInterruptAndCompatibleGroupsApply(t *
 	require.NoError(t, err)
 	require.NotNil(t, j)
 	require.Equal(t, "scheduled", j.Source)
-	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET name='renamed',status='disabled',schedulable=false,expires_at=NOW()-interval '1 hour',rate_limit_reset_at=NOW()+interval '1 hour' WHERE id=$1`, a.ID)
+	// Administrative scheduling writes have their own v4 revision fence. Other
+	// operational changes still allow a compatible policy to apply unchanged.
+	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET name='renamed',status='disabled',expires_at=NOW()-interval '1 hour',rate_limit_reset_at=NOW()+interval '1 hour' WHERE id=$1`, a.ID)
 	require.NoError(t, err)
 	require.NoError(t, ar.BindGroups(ctx, a.ID, []int64{g.ID}))
 	valid, err := r.Validate(ctx, j)

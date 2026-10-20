@@ -658,8 +658,11 @@ func TestAttributionManualOverrideWithoutAutomaticEligibility(t *testing.T) {
 	j.Status = "mismatch"
 	attributionSuccessfulProbeEvidence(j, "")
 	require.NoError(t, r.Finish(ctx, j))
-	require.Equal(t, "unconfigured", j.Result.Action)
+	require.Equal(t, "mismatch", j.Status)
+	require.Equal(t, "stale_policy", j.Result.Action)
+	require.Equal(t, "scheduling_changed", j.Reason)
 	require.Equal(t, before, attributionMapping(t, ar, a.ID))
+	require.Equal(t, "unconfigured", attributionRun(t, r, a.ID, "mismatch").Result.Action)
 	c, err = r.Config(ctx)
 	require.NoError(t, err)
 	require.False(t, c.Enabled)

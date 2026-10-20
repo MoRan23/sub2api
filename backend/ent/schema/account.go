@@ -147,6 +147,7 @@ func (Account) Fields() []ent.Field {
 		// false 表示账户暂时不参与请求分配（如正在刷新 token）
 		field.Bool("schedulable").
 			Default(true),
+		field.Int64("scheduling_revision").Default(0),
 
 		// rate_limited_at: 触发速率限制的时间
 		// 当收到 429 错误时记录

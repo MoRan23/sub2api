@@ -78,7 +78,7 @@ func (r *attributionRepository) EnqueueNewAccounts(ctx context.Context) error {
 					return err
 				}
 			}
-			if p.pelican && c.NewAccountTests.Pelican && !hasPelican && !service.AccountDiagnosticRateLimited(a, p.pelicanModel, time.Now()) {
+			if p.pelican && a.Schedulable && c.NewAccountTests.Pelican && !hasPelican && !service.AccountDiagnosticRateLimited(a, p.pelicanModel, time.Now()) {
 				request := &service.CandyTestCreateRequest{AccountIDs: []int64{p.id}, Model: p.pelicanModel, IdempotencyKey: fmt.Sprintf("new-account-pelican:%d", p.id)}
 				if _, err = createCandyBatch(ctx, tx, request, []*service.CandyTestItem{{AccountID: p.id, AccountName: a.Name, Status: "queued"}}); err != nil {
 					return err

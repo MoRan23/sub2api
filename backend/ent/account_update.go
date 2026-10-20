@@ -370,6 +370,27 @@ func (_u *AccountUpdate) SetNillableSchedulable(v *bool) *AccountUpdate {
 	return _u
 }
 
+// SetSchedulingRevision sets the "scheduling_revision" field.
+func (_u *AccountUpdate) SetSchedulingRevision(v int64) *AccountUpdate {
+	_u.mutation.ResetSchedulingRevision()
+	_u.mutation.SetSchedulingRevision(v)
+	return _u
+}
+
+// SetNillableSchedulingRevision sets the "scheduling_revision" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableSchedulingRevision(v *int64) *AccountUpdate {
+	if v != nil {
+		_u.SetSchedulingRevision(*v)
+	}
+	return _u
+}
+
+// AddSchedulingRevision adds value to the "scheduling_revision" field.
+func (_u *AccountUpdate) AddSchedulingRevision(v int64) *AccountUpdate {
+	_u.mutation.AddSchedulingRevision(v)
+	return _u
+}
+
 // SetRateLimitedAt sets the "rate_limited_at" field.
 func (_u *AccountUpdate) SetRateLimitedAt(v time.Time) *AccountUpdate {
 	_u.mutation.SetRateLimitedAt(v)
@@ -894,6 +915,12 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Schedulable(); ok {
 		_spec.SetField(account.FieldSchedulable, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.SchedulingRevision(); ok {
+		_spec.SetField(account.FieldSchedulingRevision, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedSchedulingRevision(); ok {
+		_spec.AddField(account.FieldSchedulingRevision, field.TypeInt64, value)
 	}
 	if value, ok := _u.mutation.RateLimitedAt(); ok {
 		_spec.SetField(account.FieldRateLimitedAt, field.TypeTime, value)
@@ -1510,6 +1537,27 @@ func (_u *AccountUpdateOne) SetNillableSchedulable(v *bool) *AccountUpdateOne {
 	return _u
 }
 
+// SetSchedulingRevision sets the "scheduling_revision" field.
+func (_u *AccountUpdateOne) SetSchedulingRevision(v int64) *AccountUpdateOne {
+	_u.mutation.ResetSchedulingRevision()
+	_u.mutation.SetSchedulingRevision(v)
+	return _u
+}
+
+// SetNillableSchedulingRevision sets the "scheduling_revision" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableSchedulingRevision(v *int64) *AccountUpdateOne {
+	if v != nil {
+		_u.SetSchedulingRevision(*v)
+	}
+	return _u
+}
+
+// AddSchedulingRevision adds value to the "scheduling_revision" field.
+func (_u *AccountUpdateOne) AddSchedulingRevision(v int64) *AccountUpdateOne {
+	_u.mutation.AddSchedulingRevision(v)
+	return _u
+}
+
 // SetRateLimitedAt sets the "rate_limited_at" field.
 func (_u *AccountUpdateOne) SetRateLimitedAt(v time.Time) *AccountUpdateOne {
 	_u.mutation.SetRateLimitedAt(v)
@@ -2064,6 +2112,12 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if value, ok := _u.mutation.Schedulable(); ok {
 		_spec.SetField(account.FieldSchedulable, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.SchedulingRevision(); ok {
+		_spec.SetField(account.FieldSchedulingRevision, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedSchedulingRevision(); ok {
+		_spec.AddField(account.FieldSchedulingRevision, field.TypeInt64, value)
 	}
 	if value, ok := _u.mutation.RateLimitedAt(); ok {
 		_spec.SetField(account.FieldRateLimitedAt, field.TypeTime, value)

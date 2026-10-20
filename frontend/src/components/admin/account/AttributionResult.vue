@@ -11,7 +11,9 @@
       <div v-if="(job.snapshot.version ?? 0) >= 2 && job.result.completed_probes !== undefined"><dt class="text-gray-500">{{ t('attribution.completedProbes') }}</dt><dd data-testid="attribution-completed-probes">{{ job.result.completed_probes }} / 3</dd></div>
       <div v-if="job.result.retries !== undefined"><dt class="text-gray-500">{{ t('attribution.retries') }}</dt><dd>{{ job.result.retries }}</dd></div>
       <div v-if="job.status === 'retry_wait' && job.next_attempt_at"><dt class="text-gray-500">{{ t('attribution.nextAttempt') }}</dt><dd>{{ formatDateTime(job.next_attempt_at) }}</dd></div>
-      <div><dt class="text-gray-500">{{ t('attribution.action') }}</dt><dd>{{ t(`attribution.actions.${job.result.action || 'none'}`) }}</dd></div>
+      <div><dt class="text-gray-500">{{ t('attribution.resultMode') }}</dt><dd data-testid="attribution-result-mode">{{ t(scheduleMode ? 'attribution.resultModes.schedule' : 'attribution.resultModes.replace') }}</dd></div>
+      <div><dt class="text-gray-500">{{ t(scheduleMode ? 'attribution.schedulingAction' : 'attribution.action') }}</dt><dd data-testid="attribution-result-action">{{ actionText }}</dd></div>
+      <div v-if="scheduleMode && (job.result.scheduling_before != null || job.result.scheduling_after != null)"><dt class="text-gray-500">{{ t('attribution.schedulingChange') }}</dt><dd data-testid="attribution-scheduling-change">{{ schedulingText(job.result.scheduling_before) }} → {{ schedulingText(job.result.scheduling_after) }}</dd></div>
       <div v-if="job.snapshot.daybreak"><dt class="text-gray-500">{{ t('diagnosticDaybreak.preferences') }}</dt><dd>Blue: {{ t(job.snapshot.daybreak.blue ? 'diagnosticDaybreak.enabled' : 'diagnosticDaybreak.disabled') }} / Red: {{ t(job.snapshot.daybreak.red ? 'diagnosticDaybreak.enabled' : 'diagnosticDaybreak.disabled') }}</dd></div>
       <div v-if="job.result.pass_streak !== undefined"><dt class="text-gray-500">{{ t('attribution.passStreak') }}</dt><dd data-testid="attribution-pass-streak">{{ job.result.pass_streak }} / 2</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.source') }}</dt><dd>{{ t(`attribution.${job.source}`) }}</dd></div>
@@ -34,21 +36,30 @@
         <div class="h-2 flex-1 overflow-hidden rounded bg-gray-100 dark:bg-dark-600"><div v-if="candidate.probability != null" class="h-full bg-primary-500" :style="{ width: percent(candidate.probability) }" /></div><span class="w-16 text-right tabular-nums">{{ percent(candidate.probability) }}</span><span v-if="candidate.score !== undefined" class="w-24 text-right tabular-nums" :title="t('attribution.rankingScore')">{{ candidate.score.toFixed(4) }}</span>
       </div>
     </div>
-    <details class="text-sm"><summary class="cursor-pointer">{{ t('attribution.high') }} / {{ t('attribution.low') }}</summary><p class="mt-2 break-all">{{ t('attribution.high') }}: {{ job.snapshot.policy.high_models?.join(', ') }}</p><p class="break-all">{{ t('attribution.low') }}: {{ job.snapshot.policy.low_models?.join(', ') }}</p></details>
+    <details v-if="!scheduleMode" class="text-sm"><summary class="cursor-pointer">{{ t('attribution.high') }} / {{ t('attribution.low') }}</summary><p class="mt-2 break-all">{{ t('attribution.high') }}: {{ job.snapshot.policy.high_models?.join(', ') }}</p><p class="break-all">{{ t('attribution.low') }}: {{ job.snapshot.policy.low_models?.join(', ') }}</p></details>
     <details v-if="job.result.before || job.result.after" class="text-sm"><summary class="cursor-pointer">{{ t('attribution.changes') }}</summary><div class="mt-2 grid gap-3 sm:grid-cols-2"><div><p>{{ t('attribution.before') }}</p><pre class="overflow-auto rounded bg-gray-100 p-2 text-xs dark:bg-dark-900">{{ JSON.stringify(job.result.before || {}, null, 2) }}</pre></div><div><p>{{ t('attribution.after') }}</p><pre class="overflow-auto rounded bg-gray-100 p-2 text-xs dark:bg-dark-900">{{ JSON.stringify(job.result.after || {}, null, 2) }}</pre></div></div></details>
     <details v-if="job.result.usage?.length" class="text-sm"><summary class="cursor-pointer">{{ t('attribution.usage') }} · {{ t('attribution.evidence') }}</summary><p v-for="(usage, i) in job.result.usage" :key="i" class="mt-2 break-all">#{{ i + 1 }}: {{ usage?.input_tokens ?? '—' }} / {{ usage?.output_tokens ?? '—' }} · {{ job.result.actual_models?.[i] || '—' }} / {{ job.result.upstream_models?.[i] || '—' }}</p></details>
     <details v-if="job.result.analysis?.diagnostics?.length" class="text-sm"><summary class="cursor-pointer">{{ t('attribution.diagnostics') }}</summary><p v-for="d in job.result.analysis.diagnostics" :key="d.index">#{{ d.index + 1 }}: {{ d.parsed_numbers }} / {{ d.minimum_numbers }} · {{ d.accepted ? '✓' : '×' }}</p></details>
   </article>
 </template>
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { formatDateTime } from '@/utils/format'
 import type { AttributionJob } from '@/api/admin/modelAttribution'
 import { isAttributionActive } from '@/utils/modelAttribution'
 import DiagnosticDaybreakEvidence from './DiagnosticDaybreakEvidence.vue'
-defineProps<{ job: AttributionJob; cancelling?: boolean }>()
+const props = defineProps<{ job: AttributionJob; cancelling?: boolean }>()
 const emit = defineEmits<{ cancel: [id: number] }>()
 const { t, te } = useI18n()
+// Older jobs predate scheduling mode; never infer their mode from the current account.
+const scheduleMode = computed(() => (props.job.snapshot.version ?? 0) >= 4 && props.job.snapshot.result_mode === 'schedule')
+const actionText = computed(() => {
+  const action = props.job.result.action || 'none'
+  if (scheduleMode.value && ['awaiting_confirmation', 'stale_policy'].includes(action)) return t(`attribution.schedulingActions.${action}`)
+  return t(`attribution.actions.${action}`)
+})
+const schedulingText = (value: boolean | null | undefined) => t(value == null ? 'attribution.notRecorded' : value ? 'attribution.schedulingEnabled' : 'attribution.schedulingPaused')
 const reason = (code: string) => /^upstream_http_\d{3}$/.test(code) ? t('candyTests.upstreamHttpError', { status: code.slice(-3) }) : te(`attribution.reasons.${code}`) ? t(`attribution.reasons.${code}`) : te(`candyTests.failureReasons.${code}`) ? t(`candyTests.failureReasons.${code}`) : code
 const percent = (p: number | null) => p == null ? t('attribution.unavailable') : `${(p * 100).toFixed(2)}%`
 </script>

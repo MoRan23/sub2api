@@ -29,9 +29,9 @@ func newOpenAIOAuthRuntimeMock(t *testing.T) (*accountRepository, sqlmock.Sqlmoc
 }
 
 func expectOpenAIOAuthRuntimeGrant(mock sqlmock.Sqlmock, generation string, revision int64) {
-	mock.ExpectQuery(`SELECT platform, type, parent_account_id, credentials, extra .* FOR NO KEY UPDATE`).
-		WithArgs(int64(42)).WillReturnRows(sqlmock.NewRows([]string{"platform", "type", "parent_account_id", "credentials", "extra"}).
-		AddRow("openai", "oauth", nil, `{"access_token":"current"}`, `{}`))
+	mock.ExpectQuery(`SELECT platform, type, parent_account_id, credentials, extra, schedulable, scheduling_revision, status .* FOR NO KEY UPDATE`).
+		WithArgs(int64(42)).WillReturnRows(sqlmock.NewRows([]string{"platform", "type", "parent_account_id", "credentials", "extra", "schedulable", "scheduling_revision", "status"}).
+		AddRow("openai", "oauth", nil, `{"access_token":"current"}`, `{}`, true, int64(0), "active"))
 	mock.ExpectQuery(`SELECT authorization_generation::text,revision .* FOR UPDATE`).
 		WithArgs(int64(42)).WillReturnRows(sqlmock.NewRows([]string{"authorization_generation", "revision"}).AddRow(generation, revision))
 }

@@ -225,6 +225,9 @@ func NewAccountService(accountRepo AccountRepository, groupRepo GroupRepository)
 
 // Create 创建账号
 func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (*Account, error) {
+	if err := ValidateOpenAIAttributionResultMode(req.Platform, req.Type, req.Extra); err != nil {
+		return nil, err
+	}
 	if err := ValidateOpenAIAPIKeyAutoAttribution(req.Platform, req.Type, req.Extra); err != nil {
 		return nil, err
 	}
@@ -367,6 +370,9 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	}
 
 	if req.Extra != nil {
+		if err := ValidateOpenAIAttributionResultMode(account.Platform, account.Type, *req.Extra); err != nil {
+			return nil, err
+		}
 		if err := ValidateOpenAIAPIKeyAutoAttribution(account.Platform, account.Type, *req.Extra); err != nil {
 			return nil, err
 		}
@@ -437,8 +443,11 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	// 执行更新
 	var attributionIntent map[string]any
 	if req.Extra != nil {
-		if value, explicit := (*req.Extra)[OpenAIAPIKeyAutoAttributionEnabledExtraKey]; explicit {
-			attributionIntent = map[string]any{OpenAIAPIKeyAutoAttributionEnabledExtraKey: value}
+		attributionIntent = make(map[string]any)
+		for _, key := range []string{OpenAIAPIKeyAutoAttributionEnabledExtraKey, OpenAIAttributionReplaceWhitelistEnabledExtraKey} {
+			if value, explicit := (*req.Extra)[key]; explicit {
+				attributionIntent[key] = value
+			}
 		}
 	}
 	ctx = withAccountConfigurationIntent(ctx, []int64{id}, attributionIntent, nil)

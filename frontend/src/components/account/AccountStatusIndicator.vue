@@ -331,6 +331,7 @@ const statusClass = computed(() => {
     return 'badge-warning'
   }
   if (!props.account.schedulable) {
+    if (props.account.model_attribution?.scheduling_paused_by_attribution) return 'badge-warning'
     return 'badge-gray'
   }
   return 'badge-success'
@@ -351,6 +352,7 @@ const statusText = computed(() => {
     return t('admin.accounts.status.quotaExceeded')
   }
   if (!props.account.schedulable) {
+    if (props.account.model_attribution?.scheduling_paused_by_attribution) return t('attribution.pausedByAttribution')
     return t('admin.accounts.status.paused')
   }
   return t(`admin.accounts.status.${props.account.status}`)

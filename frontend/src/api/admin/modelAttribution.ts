@@ -17,7 +17,7 @@ export interface AttributionJob {
   source: string
   status: AttributionStatus
   reason?: string
-  snapshot: { version?: number; config_version: number; group_id: number; policy: AttributionPolicy; detector?: AttributionDetector; daybreak?: DiagnosticDaybreakPreferences }
+  snapshot: { version?: number; config_version: number; group_id: number; policy: AttributionPolicy; detector?: AttributionDetector; daybreak?: DiagnosticDaybreakPreferences; result_mode?: 'replace' | 'schedule'; scheduling_revision?: number }
   result: {
     analysis?: { prediction: string; probability: number | null; ranking_score?: number; probability_status?: string; method?: string; detector?: AttributionDetector; used_outputs: number; results?: { model: string; probability: number | null; score?: number }[]; diagnostics?: { index: number; accepted: boolean; parsed_numbers: number; minimum_numbers: number }[] }
     duration_ms: number
@@ -27,6 +27,8 @@ export interface AttributionJob {
     pass_streak?: number
     before?: Record<string, unknown>
     after?: Record<string, unknown>
+    scheduling_before?: boolean | null
+    scheduling_after?: boolean | null
     actual_models?: string[]
     upstream_models?: string[]
     usage?: ({ input_tokens: number; output_tokens: number } | null)[]
@@ -37,7 +39,7 @@ export interface AttributionJob {
   finished_at?: string
   next_attempt_at?: string
 }
-export interface AttributionSummary { latest?: AttributionJob; active?: AttributionJob; skip_reason?: string }
+export interface AttributionSummary { latest?: AttributionJob; active?: AttributionJob; skip_reason?: string; scheduling_paused_by_attribution?: boolean }
 export interface AttributionPage { items: AttributionJob[]; total: number; page: number; page_size: number; queued: number; running: number; retry_wait?: number }
 const root = '/admin/model-attribution'
 export const attributionAPI = {

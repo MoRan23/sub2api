@@ -51,6 +51,19 @@ function makeAccount(overrides: Partial<Account>): Account {
 }
 
 describe('AccountStatusIndicator', () => {
+  it('distinguishes attribution pauses from manual pauses without overriding other account states', async () => {
+    const account = makeAccount({ platform: 'openai', schedulable: false, model_attribution: { scheduling_paused_by_attribution: true } })
+    const wrapper = mount(AccountStatusIndicator, { props: { account } })
+    expect(wrapper.text()).toBe('attribution.pausedByAttribution')
+    expect(wrapper.get('span').classes()).toContain('badge-warning')
+    await wrapper.setProps({ account: { ...account, model_attribution: { scheduling_paused_by_attribution: false } } })
+    expect(wrapper.text()).toBe('admin.accounts.status.paused')
+    await wrapper.setProps({ account: { ...account, schedulable: true } })
+    expect(wrapper.text()).toBe('admin.accounts.status.active')
+    await wrapper.setProps({ account: { ...account, status: 'inactive' } })
+    expect(wrapper.text()).toBe('admin.accounts.status.inactive')
+    wrapper.unmount()
+  })
   it('Claude 5 系列模型限流时显示 Opus 和 Sonnet 的短别名', () => {
     const wrapper = mount(AccountStatusIndicator, {
       props: {

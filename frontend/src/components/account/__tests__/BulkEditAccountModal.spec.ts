@@ -98,6 +98,69 @@ describe('BulkEditAccountModal', () => {
     } as any)
   })
 
+  it('only changes attribution whitelist replacement after opting in', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'apikey'] })
+    const enabled = wrapper.get('#bulk-edit-attribution-replace-whitelist-enabled')
+    const toggle = wrapper.get('#bulk-edit-attribution-replace-whitelist-toggle')
+    expect((enabled.element as HTMLInputElement).checked).toBe(false)
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    expect(toggle.attributes('disabled')).toBeDefined()
+    await wrapper.get('#bulk-edit-status-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], { status: 'active' })
+    await enabled.setValue(true)
+    await toggle.trigger('click')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], {
+      status: 'active', extra: { openai_attribution_replace_whitelist_enabled: false }
+    })
+    await toggle.trigger('click')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], {
+      status: 'active', extra: { openai_attribution_replace_whitelist_enabled: true }
+    })
+  })
+
+  it.each([
+    [['openai'], ['setup-token']],
+    [['openai', 'anthropic'], ['apikey']],
+    [['anthropic'], ['oauth']],
+    [['openai'], []]
+  ])('does not offer attribution replacement for unsupported targets %s / %s', (platforms, types) => {
+    const wrapper = mountModal({ selectedPlatforms: platforms, selectedTypes: types })
+    expect(wrapper.find('#bulk-edit-attribution-replace-whitelist-enabled').exists()).toBe(false)
+  })
+
+  it('rechecks attribution target eligibility before submitting and resets closed forms', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-attribution-replace-whitelist-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-attribution-replace-whitelist-toggle').trigger('click')
+    await wrapper.setProps({ selectedPlatforms: ['anthropic'] })
+    await wrapper.get('#bulk-edit-status-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], { status: 'active' })
+    await wrapper.setProps({ show: false, selectedPlatforms: ['openai'] })
+    expect((wrapper.get('#bulk-edit-attribution-replace-whitelist-enabled').element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.get('#bulk-edit-attribution-replace-whitelist-toggle').attributes('aria-checked')).toBe('true')
+  })
+
+  it('supports attribution replacement for a filtered OpenAI OAuth and API key target', async () => {
+    const wrapper = mountModal({
+      accountIds: [], selectedPlatforms: [], selectedTypes: [],
+      target: { mode: 'filtered', filters: { platform: 'openai' }, previewCount: 12, selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'apikey'] }
+    })
+    await wrapper.get('#bulk-edit-attribution-replace-whitelist-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith({
+      filters: { platform: 'openai' }, extra: { openai_attribution_replace_whitelist_enabled: true }
+    })
+  })
+
   it('批量修改倍率时提示自动同步账号需要先关闭同步', async () => {
     const wrapper = mountModal()
 

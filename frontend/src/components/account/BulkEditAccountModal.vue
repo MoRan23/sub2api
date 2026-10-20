@@ -849,6 +849,49 @@
         </div>
       </div>
 
+      <!-- OpenAI attribution result action -->
+      <div v-if="allOpenAIAttributionCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="mb-3 flex items-center justify-between gap-4">
+          <label id="bulk-edit-attribution-replace-whitelist-label" class="input-label mb-0">
+            {{ t('attribution.replaceWhitelist') }}
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+            <input
+              v-model="enableAttributionReplaceWhitelist"
+              id="bulk-edit-attribution-replace-whitelist-enabled"
+              type="checkbox"
+              aria-controls="bulk-edit-attribution-replace-whitelist-body"
+              class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+            />
+            {{ t('attribution.enablePreferenceChange') }}
+          </label>
+        </div>
+        <div
+          id="bulk-edit-attribution-replace-whitelist-body"
+          :class="!enableAttributionReplaceWhitelist && 'opacity-50'"
+        >
+          <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">{{ t('attribution.replaceWhitelistHelp') }}</p>
+          <button
+            id="bulk-edit-attribution-replace-whitelist-toggle"
+            type="button"
+            role="switch"
+            aria-labelledby="bulk-edit-attribution-replace-whitelist-label"
+            :aria-checked="attributionReplaceWhitelistEnabled"
+            :disabled="!enableAttributionReplaceWhitelist"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed',
+              attributionReplaceWhitelistEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+            @click="attributionReplaceWhitelistEnabled = !attributionReplaceWhitelistEnabled"
+          >
+            <span :class="[
+              'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+              attributionReplaceWhitelistEnabled ? 'translate-x-5' : 'translate-x-0'
+            ]" />
+          </button>
+        </div>
+      </div>
+
       <!-- OpenAI OAuth WS mode -->
       <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -1573,6 +1616,13 @@ const allOpenAIAPIKey = computed(() => {
   )
 })
 
+const allOpenAIAttributionCapable = computed(() => (
+  targetSelectedPlatforms.value.length === 1 &&
+  targetSelectedPlatforms.value[0] === 'openai' &&
+  targetSelectedTypes.value.length > 0 &&
+  targetSelectedTypes.value.every(type => type === 'oauth' || type === 'apikey')
+))
+
 // 上游倍率自动探测已放宽到全部 API-key 平台：只要求所选类型全为 apikey，
 // 平台不限（sub2api 上游即可应答 /v1/sub2api/billing）。
 const allBillingProbeCapable = computed(() => {
@@ -1647,6 +1697,7 @@ const enableOpenAIResponsesMode = ref(false)
 const enableOpenAIWSMode = ref(false)
 const enableOpenAIAPIKeyWSMode = ref(false)
 const enableUpstreamBillingAutoProbe = ref(false)
+const enableAttributionReplaceWhitelist = ref(false)
 const enableCodexCLIOnly = ref(false)
 const enableCodexCLIOnlyAppServer = ref(false)
 const enableOpenAICompactMode = ref(false)
@@ -1686,6 +1737,7 @@ const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const upstreamBillingAutoProbeMode = ref<'enabled' | 'disabled'>('enabled')
+const attributionReplaceWhitelistEnabled = ref(true)
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
@@ -1957,6 +2009,10 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     }
   }
 
+  if (enableAttributionReplaceWhitelist.value && allOpenAIAttributionCapable.value) {
+    ensureExtra().openai_attribution_replace_whitelist_enabled = attributionReplaceWhitelistEnabled.value
+  }
+
   // 同时校验可见性：勾选后又改了目标筛选条件时，不应把该键写到非 OAuth 账号上
   if (enableOpenAIFlattenNamespaces.value && allOpenAIOAuthOnly.value) {
     const extra = ensureExtra()
@@ -2159,6 +2215,7 @@ const handleSubmit = async () => {
     (enableOpenAILongContextBilling.value && allOpenAIPassthroughCapable.value) ||
     (enableOpenAIEndpointCapabilities.value && allOpenAIAPIKey.value) ||
     (enableOpenAIResponsesMode.value && allOpenAIAPIKey.value) ||
+    (enableAttributionReplaceWhitelist.value && allOpenAIAttributionCapable.value) ||
     enableModelRestriction.value ||
     enableCustomErrorCodes.value ||
     enableInterceptWarmup.value ||
@@ -2222,6 +2279,15 @@ const handleSubmit = async () => {
 }
 
 const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
+  // Targets can change while a mixed-channel confirmation is open.
+  if (!allOpenAIAttributionCapable.value && baseUpdates.extra) {
+    const extra = { ...(baseUpdates.extra as Record<string, unknown>) }
+    delete extra.openai_attribution_replace_whitelist_enabled
+    baseUpdates = { ...baseUpdates }
+    if (Object.keys(extra).length) baseUpdates.extra = extra
+    else delete baseUpdates.extra
+    if (Object.keys(baseUpdates).length === 0) return
+  }
   // 无论是预检查确认还是 409 兜底确认，只要 mixedChannelConfirmed 为 true 就带上 flag
   const updates = mixedChannelConfirmed.value
     ? { ...baseUpdates, confirm_mixed_channel_risk: true }
@@ -2323,6 +2389,7 @@ watch(
       enableOpenAIWSMode.value = false
       enableOpenAIAPIKeyWSMode.value = false
       enableUpstreamBillingAutoProbe.value = false
+      enableAttributionReplaceWhitelist.value = false
       enableCodexCLIOnly.value = false
       enableCodexCLIOnlyAppServer.value = false
       enableOpenAICompactMode.value = false
@@ -2354,6 +2421,7 @@ watch(
       openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       upstreamBillingAutoProbeMode.value = 'enabled'
+      attributionReplaceWhitelistEnabled.value = true
       codexCLIOnlyEnabled.value = false
       codexCLIOnlyAppServerEnabled.value = false
       openAICompactMode.value = 'auto'

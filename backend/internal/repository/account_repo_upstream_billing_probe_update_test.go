@@ -371,8 +371,8 @@ func TestUpdateWithAccountBillingSettingsRollsBackWhenOutboxFails(t *testing.T) 
 	mock.ExpectBegin()
 	mock.ExpectQuery(`(?s)SELECT platform, type, parent_account_id, credentials, extra.*FOR NO KEY UPDATE`).
 		WithArgs(int64(27)).
-		WillReturnRows(sqlmock.NewRows([]string{"platform", "type", "parent_account_id", "credentials", "extra"}).
-			AddRow(service.PlatformOpenAI, service.AccountTypeAPIKey, nil, []byte(`{"api_key":"sk-test"}`), []byte(`{}`)))
+		WillReturnRows(sqlmock.NewRows([]string{"platform", "type", "parent_account_id", "credentials", "extra", "schedulable", "scheduling_revision", "status"}).
+			AddRow(service.PlatformOpenAI, service.AccountTypeAPIKey, nil, []byte(`{"api_key":"sk-test"}`), []byte(`{}`), true, int64(0), "active"))
 	mock.ExpectQuery(`(?s)SELECT a.status,a.schedulable,COALESCE\(a.error_message,''\).*c.auth_pause_owned`).
 		WithArgs(int64(27)).WillReturnRows(sqlmock.NewRows([]string{"status", "schedulable", "error_message"}))
 	mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
@@ -483,7 +483,7 @@ func updatedAccountRows(id int64, extra string) *sqlmock.Rows {
 	return sqlmock.NewRows(dbaccount.Columns).AddRow(
 		id, now, now, nil, "test", nil, service.PlatformOpenAI, service.AccountTypeAPIKey,
 		[]byte(`{"api_key":"sk-test"}`), []byte(extra), nil, nil, 1, nil, 1, 1.0,
-		service.StatusActive, nil, nil, nil, false, true, nil, nil, nil, nil, nil, nil,
+		service.StatusActive, nil, nil, nil, false, true, int64(0), nil, nil, nil, nil, nil, nil,
 		nil, nil, nil, service.QuotaDimensionGlobal,
 	)
 }

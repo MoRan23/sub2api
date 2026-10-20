@@ -40,6 +40,13 @@ type ModelAttributionService struct {
 
 func NewModelAttributionService(repo AttributionRepository, accounts AccountRepository, probe *AccountCandyTestTransport) *ModelAttributionService {
 	s := &ModelAttributionService{repo: repo, accounts: accounts, probe: probe, analyzer: NewLMDetectorClient(), wake: make(chan struct{}, 1)}
+	if publisher, ok := repo.(interface {
+		SetAccountChangedCallback(func(context.Context, int64))
+	}); ok {
+		if refresher, ok := accounts.(AccountSchedulingSnapshotRefresher); ok {
+			publisher.SetAccountChangedCallback(refresher.RefreshAccountSchedulingSnapshot)
+		}
+	}
 	if probe != nil && probe.gateway != nil {
 		s.fetchProbeModels = probe.gateway.FetchOpenAIProbeModels
 	}

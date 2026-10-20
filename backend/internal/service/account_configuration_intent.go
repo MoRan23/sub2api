@@ -23,7 +23,7 @@ type accountConfigurationIntentScope struct {
 
 func withAccountConfigurationIntent(ctx context.Context, ids []int64, extra map[string]any, environment *string) context.Context {
 	intent := AccountConfigurationIntent{Extra: make(map[string]any)}
-	for _, key := range []string{openAIInstallationPinEnabledKey, "enable_tls_fingerprint", "tls_fingerprint_profile_id", OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey, OpenAIAPIKeyAutoAttributionEnabledExtraKey} {
+	for _, key := range []string{openAIInstallationPinEnabledKey, "enable_tls_fingerprint", "tls_fingerprint_profile_id", OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey, OpenAIAPIKeyAutoAttributionEnabledExtraKey, OpenAIAttributionReplaceWhitelistEnabledExtraKey} {
 		if value, exists := extra[key]; exists {
 			intent.Extra[key] = value
 		}
@@ -72,6 +72,16 @@ func PreserveAccountConfiguration(current, target *Account, intent AccountConfig
 		}
 	}
 	copyCurrent(OpenAIAPIKeyAutoAttributionEnabledExtraKey)
+	copyCurrent(OpenAIAttributionReplaceWhitelistEnabledExtraKey)
+	if target.Platform != PlatformOpenAI || (target.Type != AccountTypeOAuth && target.Type != AccountTypeAPIKey) {
+		delete(target.Extra, OpenAIAttributionReplaceWhitelistEnabledExtraKey)
+	}
+	if err := ValidateOpenAIAttributionResultMode(target.Platform, target.Type, intent.Extra); err != nil {
+		return err
+	}
+	if value, explicit := intent.Extra[OpenAIAttributionReplaceWhitelistEnabledExtraKey]; explicit {
+		target.Extra[OpenAIAttributionReplaceWhitelistEnabledExtraKey] = value
+	}
 	if !target.IsOpenAIApiKey() {
 		delete(target.Extra, OpenAIAPIKeyAutoAttributionEnabledExtraKey)
 	}

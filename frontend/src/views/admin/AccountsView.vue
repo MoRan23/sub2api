@@ -2142,7 +2142,12 @@ const updateSchedulableInList = (accountIds: number[], schedulable: boolean) => 
   if (accountIds.length === 0) return
   resetAutoRefreshCache()
   const idSet = new Set(accountIds)
-  accounts.value = accounts.value.map((account) => (idSet.has(account.id) ? { ...account, schedulable } : account))
+  // An explicit administrator scheduling change also revokes attribution pause ownership.
+  accounts.value = accounts.value.map((account) => (idSet.has(account.id) ? {
+    ...account,
+    schedulable,
+    ...(account.model_attribution ? { model_attribution: { ...account.model_attribution, scheduling_paused_by_attribution: false } } : {})
+  } : account))
 }
 const normalizeBulkSchedulableResult = (
   result: {

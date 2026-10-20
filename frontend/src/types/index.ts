@@ -1311,6 +1311,7 @@ export interface Account {
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
     openai_api_key_mode?: OpenAIAPIKeyMode
     openai_api_key_auto_attribution_enabled?: boolean
+    openai_attribution_replace_whitelist_enabled?: boolean
     openai_daybreak_blue_enabled?: boolean
     openai_daybreak_red_enabled?: boolean
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>

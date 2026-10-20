@@ -254,6 +254,42 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     wrapper.unmount()
   })
 
+  it('defaults attribution whitelist replacement to on for new OpenAI API keys', async () => {
+    const wrapper = await submitApiKeyAccount('openai')
+    expect(wrapper.get('[data-testid="openai-attribution-replace-whitelist-toggle"]').attributes('aria-checked')).toBe('true')
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra.openai_attribution_replace_whitelist_enabled).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('keeps the attribution whitelist preference across OAuth and both API key modes', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    const selector = '[data-testid="openai-attribution-replace-whitelist-toggle"]'
+    expect(wrapper.get(selector).attributes('aria-checked')).toBe('true')
+    await wrapper.get(selector).trigger('click')
+    await selectButtonByText(wrapper, 'API Key')
+    expect(wrapper.get(selector).attributes('aria-checked')).toBe('false')
+    await wrapper.get('[data-testid="openai-api-key-mode"]').setValue('codex_engine')
+    expect(wrapper.get(selector).attributes('aria-checked')).toBe('false')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Engine attribution')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra.openai_attribution_replace_whitelist_enabled).toBe(false)
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await selectButtonByText(wrapper, 'OpenAI')
+    expect(wrapper.get(selector).attributes('aria-checked')).toBe('true')
+    wrapper.unmount()
+  })
+
+  it('does not expose the attribution whitelist setting to non-OpenAI accounts', async () => {
+    const wrapper = await submitApiKeyAccount('anthropic')
+    expect(wrapper.find('[data-testid="openai-attribution-replace-whitelist-toggle"]').exists()).toBe(false)
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra ?? {}).not.toHaveProperty('openai_attribution_replace_whitelist_enabled')
+    wrapper.unmount()
+  })
+
   it('preserves automatic attribution preference across access modes and resets a new form', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')

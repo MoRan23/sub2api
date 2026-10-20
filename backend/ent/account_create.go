@@ -279,6 +279,20 @@ func (_c *AccountCreate) SetNillableSchedulable(v *bool) *AccountCreate {
 	return _c
 }
 
+// SetSchedulingRevision sets the "scheduling_revision" field.
+func (_c *AccountCreate) SetSchedulingRevision(v int64) *AccountCreate {
+	_c.mutation.SetSchedulingRevision(v)
+	return _c
+}
+
+// SetNillableSchedulingRevision sets the "scheduling_revision" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableSchedulingRevision(v *int64) *AccountCreate {
+	if v != nil {
+		_c.SetSchedulingRevision(*v)
+	}
+	return _c
+}
+
 // SetRateLimitedAt sets the "rate_limited_at" field.
 func (_c *AccountCreate) SetRateLimitedAt(v time.Time) *AccountCreate {
 	_c.mutation.SetRateLimitedAt(v)
@@ -577,6 +591,10 @@ func (_c *AccountCreate) defaults() error {
 		v := account.DefaultSchedulable
 		_c.mutation.SetSchedulable(v)
 	}
+	if _, ok := _c.mutation.SchedulingRevision(); !ok {
+		v := account.DefaultSchedulingRevision
+		_c.mutation.SetSchedulingRevision(v)
+	}
 	if _, ok := _c.mutation.QuotaDimension(); !ok {
 		v := account.DefaultQuotaDimension
 		_c.mutation.SetQuotaDimension(v)
@@ -644,6 +662,9 @@ func (_c *AccountCreate) check() error {
 	}
 	if _, ok := _c.mutation.Schedulable(); !ok {
 		return &ValidationError{Name: "schedulable", err: errors.New(`ent: missing required field "Account.schedulable"`)}
+	}
+	if _, ok := _c.mutation.SchedulingRevision(); !ok {
+		return &ValidationError{Name: "scheduling_revision", err: errors.New(`ent: missing required field "Account.scheduling_revision"`)}
 	}
 	if v, ok := _c.mutation.SessionWindowStatus(); ok {
 		if err := account.SessionWindowStatusValidator(v); err != nil {
@@ -764,6 +785,10 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Schedulable(); ok {
 		_spec.SetField(account.FieldSchedulable, field.TypeBool, value)
 		_node.Schedulable = value
+	}
+	if value, ok := _c.mutation.SchedulingRevision(); ok {
+		_spec.SetField(account.FieldSchedulingRevision, field.TypeInt64, value)
+		_node.SchedulingRevision = value
 	}
 	if value, ok := _c.mutation.RateLimitedAt(); ok {
 		_spec.SetField(account.FieldRateLimitedAt, field.TypeTime, value)
@@ -1254,6 +1279,24 @@ func (u *AccountUpsert) SetSchedulable(v bool) *AccountUpsert {
 // UpdateSchedulable sets the "schedulable" field to the value that was provided on create.
 func (u *AccountUpsert) UpdateSchedulable() *AccountUpsert {
 	u.SetExcluded(account.FieldSchedulable)
+	return u
+}
+
+// SetSchedulingRevision sets the "scheduling_revision" field.
+func (u *AccountUpsert) SetSchedulingRevision(v int64) *AccountUpsert {
+	u.Set(account.FieldSchedulingRevision, v)
+	return u
+}
+
+// UpdateSchedulingRevision sets the "scheduling_revision" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateSchedulingRevision() *AccountUpsert {
+	u.SetExcluded(account.FieldSchedulingRevision)
+	return u
+}
+
+// AddSchedulingRevision adds v to the "scheduling_revision" field.
+func (u *AccountUpsert) AddSchedulingRevision(v int64) *AccountUpsert {
+	u.Add(account.FieldSchedulingRevision, v)
 	return u
 }
 
@@ -1844,6 +1887,27 @@ func (u *AccountUpsertOne) SetSchedulable(v bool) *AccountUpsertOne {
 func (u *AccountUpsertOne) UpdateSchedulable() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateSchedulable()
+	})
+}
+
+// SetSchedulingRevision sets the "scheduling_revision" field.
+func (u *AccountUpsertOne) SetSchedulingRevision(v int64) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetSchedulingRevision(v)
+	})
+}
+
+// AddSchedulingRevision adds v to the "scheduling_revision" field.
+func (u *AccountUpsertOne) AddSchedulingRevision(v int64) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddSchedulingRevision(v)
+	})
+}
+
+// UpdateSchedulingRevision sets the "scheduling_revision" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateSchedulingRevision() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateSchedulingRevision()
 	})
 }
 
@@ -2629,6 +2693,27 @@ func (u *AccountUpsertBulk) SetSchedulable(v bool) *AccountUpsertBulk {
 func (u *AccountUpsertBulk) UpdateSchedulable() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateSchedulable()
+	})
+}
+
+// SetSchedulingRevision sets the "scheduling_revision" field.
+func (u *AccountUpsertBulk) SetSchedulingRevision(v int64) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetSchedulingRevision(v)
+	})
+}
+
+// AddSchedulingRevision adds v to the "scheduling_revision" field.
+func (u *AccountUpsertBulk) AddSchedulingRevision(v int64) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.AddSchedulingRevision(v)
+	})
+}
+
+// UpdateSchedulingRevision sets the "scheduling_revision" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateSchedulingRevision() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateSchedulingRevision()
 	})
 }
 

@@ -126,6 +126,9 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if err := service.ValidateOpenAIAPIKeyAutoAttribution(account.Platform, account.Type, account.Extra); err != nil {
 		return err
 	}
+	if err := service.ValidateOpenAIAttributionResultMode(account.Platform, account.Type, account.Extra); err != nil {
+		return err
+	}
 	if service.IsOpenAIOAuthOSProfileOwner(account) && !service.OpenAIOAuthOSProfilesComplete(account.OpenAIOAuthOSProfiles) {
 		if err := service.PrepareOpenAIOAuthOSProfilesForCreate(account); err != nil {
 			return err
@@ -199,6 +202,7 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	account.ID = created.ID
 	account.CreatedAt = created.CreatedAt
 	account.UpdatedAt = created.UpdatedAt
+	account.SchedulingRevision = created.SchedulingRevision
 	if service.IsOpenAIOAuthOSProfileOwner(account) {
 		if _, err := saveOpenAIOAuthOSProfilesLocked(ctx, client, account, nil, account.OpenAIOAuthOSProfiles); err != nil {
 			return err
@@ -535,6 +539,8 @@ func (r *accountRepository) updateAccount(
 	}
 
 	account.UpdatedAt = updated.UpdatedAt
+	account.Schedulable = updated.Schedulable
+	account.SchedulingRevision = updated.SchedulingRevision
 	// 普通账号编辑（如 model_mapping / credentials）也需要立即刷新单账号快照，
 	// 否则网关在 outbox worker 延迟或异常时仍可能读到旧配置。
 	if contextTx == nil {
@@ -592,10 +598,12 @@ func (r *accountRepository) updateLockedAccount(
 	}
 	account.Extra = extra
 
-	schedulable := account.Schedulable
-	if account.Status == service.StatusError {
-		schedulable = false
-	}
+	// Full snapshots do not express scheduling intent. Keep the latest row's
+	// value and omit the column entirely so neither a pause nor its revision is
+	// changed by a name, credential, mapping or other unrelated update.
+	schedulable, schedulingExplicit := service.AccountSchedulingIntentFromContext(ctx, account.ID)
+	account.Schedulable = current.Schedulable
+	account.SchedulingRevision = current.SchedulingRevision
 
 	builder := client.Account.UpdateOneID(account.ID).
 		SetName(account.Name).
@@ -608,7 +616,17 @@ func (r *accountRepository) updateLockedAccount(
 		SetPriority(account.Priority).
 		SetAutoPauseOnExpired(account.AutoPauseOnExpired)
 	if !preserveAuthPause {
-		builder.SetStatus(account.Status).SetErrorMessage(account.ErrorMessage).SetSchedulable(schedulable)
+		builder.SetStatus(account.Status).SetErrorMessage(account.ErrorMessage)
+		if schedulingExplicit {
+			if account.Status == service.StatusError {
+				schedulable = false
+			}
+			builder.SetSchedulable(schedulable)
+		} else if account.Status == service.StatusError && (current.Status != service.StatusError || current.Schedulable) {
+			// A newly reported account failure still owns a safety pause. Rewriting
+			// an already-paused error snapshot must not revoke another pause owner.
+			builder.SetSchedulable(false)
+		}
 	}
 
 	if explicitRateMultiplier != nil {
@@ -1895,6 +1913,10 @@ func (r *accountRepository) syncSchedulerAccountSnapshotDetached(ctx context.Con
 	r.syncSchedulerAccountSnapshot(propagationCtx, accountID)
 }
 
+func (r *accountRepository) RefreshAccountSchedulingSnapshot(ctx context.Context, accountID int64) {
+	r.syncSchedulerAccountSnapshotDetached(ctx, accountID)
+}
+
 func (r *accountRepository) deleteSchedulerAccountSnapshot(ctx context.Context, accountID int64) {
 	if r == nil || r.schedulerCache == nil || accountID <= 0 {
 		return
@@ -2756,18 +2778,44 @@ func (r *accountRepository) UpdateSessionWindowEnd(ctx context.Context, id int64
 }
 
 func (r *accountRepository) SetSchedulable(ctx context.Context, id int64, schedulable bool) error {
-	_, err := r.client.Account.Update().
-		Where(dbaccount.IDEQ(id)).
+	baseCtx := ctx
+	client := clientFromContext(ctx, r.client)
+	var tx *dbent.Tx
+	unknownCommitBoundary := false
+	if dbent.TxFromContext(ctx) == nil {
+		var err error
+		tx, err = r.client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return err
+		}
+		if tx != nil {
+			defer func() { _ = tx.Rollback() }()
+			ctx = dbent.NewTxContext(ctx, tx)
+			client = tx.Client()
+		} else {
+			// A repository built around tx.Client() without a transaction context
+			// can only publish the durable outbox; its commit is owned elsewhere.
+			unknownCommitBoundary = true
+		}
+	}
+	_, err := client.Account.Update().
+		Where(dbaccount.IDEQ(id), dbaccount.DeletedAtIsNil()).
 		SetSchedulable(schedulable).
 		Save(ctx)
 	if err != nil {
 		return err
 	}
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue schedulable change failed: account=%d err=%v", id, err)
+	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		return err
 	}
-	if !schedulable {
-		r.syncSchedulerAccountSnapshot(ctx, id)
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	publishCtx := dbent.NewTxContext(baseCtx, nil)
+	if !unknownCommitBoundary {
+		afterAccountConfigurationCommit(baseCtx, func() { r.syncSchedulerAccountSnapshotDetached(publishCtx, id) })
 	}
 	return nil
 }
@@ -2828,7 +2876,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	}
 
 	clearProbeSnapshot := upstreamBillingProbeExplicitlyDisabled(updates) || upstreamBillingProbeSnapshotClearRequested(updates)
-	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || service.HasOpenAIDaybreakSettings(updates) || service.HasOpenAIAPIKeyAutoAttributionSetting(updates)
+	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot || service.HasOpenAIDaybreakSettings(updates) || service.HasOpenAIAPIKeyAutoAttributionSetting(updates) || service.HasOpenAIAttributionResultMode(updates)
 	baseCtx := ctx
 	contextTx := dbent.TxFromContext(ctx)
 	client := clientFromContext(ctx, r.client)
@@ -2865,12 +2913,15 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 			return err
 		}
 	}
-	if service.HasOpenAIAPIKeyAutoAttributionSetting(updates) {
+	if service.HasOpenAIAPIKeyAutoAttributionSetting(updates) || service.HasOpenAIAttributionResultMode(updates) {
 		current, err := lockAccountConfiguration(ctx, client, id)
 		if err != nil {
 			return err
 		}
 		if err := service.ValidateOpenAIAPIKeyAutoAttribution(current.Platform, current.Type, updates); err != nil {
+			return err
+		}
+		if err := service.ValidateOpenAIAttributionResultMode(current.Platform, current.Type, updates); err != nil {
 			return err
 		}
 	}
@@ -3599,7 +3650,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 	}
 
 	previousOSProfileOwners := make(map[int64]bool)
-	if service.HasOpenAIAPIKeyAutoAttributionSetting(updates.Extra) {
+	if service.HasOpenAIAPIKeyAutoAttributionSetting(updates.Extra) || service.HasOpenAIAttributionResultMode(updates.Extra) {
 		orderedIDs := uniquePositiveInt64s(ids)
 		sort.Slice(orderedIDs, func(i, j int) bool { return orderedIDs[i] < orderedIDs[j] })
 		for _, id := range orderedIDs {
@@ -3608,6 +3659,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 				return 0, err
 			}
 			if err := service.ValidateOpenAIAPIKeyAutoAttribution(current.Platform, current.Type, updates.Extra); err != nil {
+				return 0, err
+			}
+			if err := service.ValidateOpenAIAttributionResultMode(current.Platform, current.Type, updates.Extra); err != nil {
 				return 0, err
 			}
 		}
@@ -3699,7 +3753,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		if updates.Status != nil && (*updates.Status == service.StatusError || *updates.Status == service.StatusDisabled) {
 			shouldSync = true
 		}
-		if updates.Schedulable != nil && !*updates.Schedulable {
+		if updates.Schedulable != nil {
 			shouldSync = true
 		}
 		if shouldSync {
@@ -4061,6 +4115,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		CreatedAt:               m.CreatedAt,
 		UpdatedAt:               m.UpdatedAt,
 		Schedulable:             m.Schedulable,
+		SchedulingRevision:      m.SchedulingRevision,
 		RateLimitedAt:           m.RateLimitedAt,
 		RateLimitResetAt:        m.RateLimitResetAt,
 		OverloadUntil:           m.OverloadUntil,

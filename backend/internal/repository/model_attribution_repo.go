@@ -13,10 +13,19 @@ import (
 	"github.com/lib/pq"
 )
 
-type attributionRepository struct{ db *sql.DB }
+type attributionRepository struct {
+	db               *sql.DB
+	onAccountChanged func(context.Context, int64)
+}
 
 func NewAttributionRepository(db *sql.DB) service.AttributionRepository {
 	return &attributionRepository{db: db}
+}
+
+// SetAccountChangedCallback installs the runtime cache refresh hook. Durable
+// outbox publication remains transactional; the hook runs only after commit.
+func (r *attributionRepository) SetAccountChangedCallback(callback func(context.Context, int64)) {
+	r.onAccountChanged = callback
 }
 
 func (r *attributionRepository) transaction(ctx context.Context) (*sql.Tx, error) {
@@ -102,7 +111,7 @@ func attributionSnapshot(ctx context.Context, tx *sql.Tx, id int64, c service.At
 	a := &service.Account{}
 	var credentials, extra []byte
 	var deleted *time.Time
-	err := tx.QueryRowContext(ctx, `SELECT id,name,platform,type,status,schedulable,expires_at,parent_account_id,proxy_id,credentials,extra,deleted_at,rate_limit_reset_at FROM accounts WHERE id=$1 FOR UPDATE`, id).Scan(&a.ID, &a.Name, &a.Platform, &a.Type, &a.Status, &a.Schedulable, &a.ExpiresAt, &a.ParentAccountID, &a.ProxyID, &credentials, &extra, &deleted, &a.RateLimitResetAt)
+	err := tx.QueryRowContext(ctx, `SELECT id,name,platform,type,status,schedulable,scheduling_revision,expires_at,parent_account_id,proxy_id,credentials,extra,deleted_at,rate_limit_reset_at FROM accounts WHERE id=$1 FOR UPDATE`, id).Scan(&a.ID, &a.Name, &a.Platform, &a.Type, &a.Status, &a.Schedulable, &a.SchedulingRevision, &a.ExpiresAt, &a.ParentAccountID, &a.ProxyID, &credentials, &extra, &deleted, &a.RateLimitResetAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.AttributionSnapshot{}, "account_missing", nil
 	}
@@ -177,7 +186,10 @@ func attributionSnapshot(ctx context.Context, tx *sql.Tx, id int64, c service.At
 		}
 		identity["credential_owner"] = owner.Authorization
 	}
-	s := service.AttributionSnapshot{ConfigVersion: c.Version, Detector: c.Detector}
+	s := service.AttributionSnapshot{ConfigVersion: c.Version, Detector: c.Detector, SchedulingRevision: a.SchedulingRevision, ResultMode: service.AttributionResultModeReplace}
+	if !a.OpenAIAttributionReplacesWhitelist() {
+		s.ResultMode = service.AttributionResultModeSchedule
+	}
 	s.Policy, s.GroupID = service.ResolveAttributionPolicy(c, a.AccountGroups)
 	s.Authorization = service.AttributionDigest(identity)
 	fence := []any{s.Authorization, a.Credentials["model_mapping"], a.ProxyID, a.AccountGroups, groupVersions, a.Status, a.Schedulable, a.ExpiresAt, a.ParentAccountID, a.IsOpenAIPassthroughEnabled()}
@@ -272,7 +284,8 @@ func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual
 			AND ((a.type='oauth' AND COALESCE(a.extra->'openai_passthrough',a.extra->'openai_oauth_passthrough','false'::jsonb) <> 'true'::jsonb)
 				OR (a.type='apikey' AND (NOT (a.extra ? 'openai_api_key_mode') OR a.extra->'openai_api_key_mode' IN ('"generic"'::jsonb,'"codex_engine"'::jsonb))
 					AND a.extra->'openai_api_key_auto_attribution_enabled'='true'::jsonb))
-			AND a.parent_account_id IS NULL AND a.status='active' AND a.schedulable
+			AND a.parent_account_id IS NULL AND a.status='active'
+			AND (a.schedulable OR a.extra->'openai_attribution_replace_whitelist_enabled'='false'::jsonb)
 			AND (a.expires_at IS NULL OR a.expires_at>NOW())
 			AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at<=NOW())
 			AND (s.next_due_at IS NULL OR s.next_due_at<=NOW())
@@ -334,7 +347,7 @@ func enqueueAttribution(ctx context.Context, tx *sql.Tx, id int64, c service.Att
 	if a == nil {
 		return nil, service.ErrAttributionNotFound
 	}
-	s.Version = 3
+	s.Version = 4
 	s.Overrides.Model = model
 	if len(expectedModels) > 0 && expectedModels[0] != nil {
 		models := append([]string{}, (*expectedModels[0])...)
@@ -625,6 +638,7 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 		return nil
 	}
 	passStreak := 0
+	accountChanged := false
 	j.Result.PassStreak = 0
 	if j.Status == "passed" || j.Status == "mismatch" {
 		c, e := attributionConfig(ctx, tx)
@@ -640,11 +654,13 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 		}
 		valid := validAttributionSnapshot(j.Snapshot, s, skip)
 		authorizationValid := valid
+		modeChanged := j.Snapshot.EffectiveResultMode() != s.ResultMode
+		schedulingChanged := j.Snapshot.Version >= 4 && j.Snapshot.SchedulingRevision != s.SchedulingRevision
 		if j.Snapshot.Version >= 2 {
 			authorizationValid = validAttributionAuthorization(j.Snapshot, a, s, skip)
 			s.Version = j.Snapshot.Version
 			applyAttributionOverrides(&s, j.Snapshot.Overrides)
-			valid = authorizationValid && s.ConfigVersion == j.Snapshot.ConfigVersion &&
+			valid = authorizationValid && !modeChanged && !schedulingChanged && s.ConfigVersion == j.Snapshot.ConfigVersion &&
 				service.SameAttributionDetector(j.Snapshot.Detector, s.Detector) &&
 				service.AttributionPolicyDigest(j.Snapshot) == service.AttributionPolicyDigest(s) &&
 				j.Snapshot.MappingDigest == s.MappingDigest
@@ -652,11 +668,17 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 			// consecutive-pass baseline, regardless of current group membership.
 			s.Authorization = j.Snapshot.Authorization
 		}
+		valid = valid && !modeChanged && !schedulingChanged
 		if !valid {
 			j.Result.Action = "stale"
 			j.Reason = "configuration_or_authorization_changed"
 			if j.Snapshot.Version >= 2 && authorizationValid {
 				j.Result.Action, j.Reason = "stale_policy", "policy_changed"
+				if modeChanged {
+					j.Reason = "result_mode_changed"
+				} else if schedulingChanged {
+					j.Reason = "scheduling_changed"
+				}
 			} else if j.Snapshot.Version >= 2 {
 				j.Status, j.Reason = "failed", "authorization_changed"
 			} else if j.Snapshot.Version < 2 && skip == service.ErrDiagnosticRateLimited.Error() {
@@ -666,7 +688,7 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 			j.Result.Action, j.Reason = "stale_policy", "daybreak_preferences_changed"
 		} else if issue := service.AttributionDaybreakIssue(j.Snapshot, j.Result); issue != "" {
 			j.Result.Action, j.Reason = "stale_policy", issue
-		} else if len(s.Policy.HighModels) == 0 || len(s.Policy.LowModels) == 0 {
+		} else if j.Snapshot.EffectiveResultMode() == service.AttributionResultModeReplace && (len(s.Policy.HighModels) == 0 || len(s.Policy.LowModels) == 0) {
 			// Manual diagnostics work before automatic allowlist management is set up.
 			// Never clear an account's mappings or mark an unapplied policy as synced.
 			j.Result.Action = "unconfigured"
@@ -674,7 +696,8 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 			var version int64
 			var auth, policy string
 			var previousPassStreak int
-			e = tx.QueryRowContext(ctx, `SELECT config_version,authorization_digest,policy_digest,pass_streak FROM model_attribution_state WHERE account_id=$1`, j.AccountID).Scan(&version, &auth, &policy, &previousPassStreak)
+			var pauseRevision sql.NullInt64
+			e = tx.QueryRowContext(ctx, `SELECT config_version,authorization_digest,policy_digest,pass_streak,pause_revision FROM model_attribution_state WHERE account_id=$1 FOR UPDATE`, j.AccountID).Scan(&version, &auth, &policy, &previousPassStreak, &pauseRevision)
 			if e != nil {
 				return e
 			}
@@ -692,7 +715,12 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 					j.Result.Action = "awaiting_confirmation"
 				}
 			}
-			if j.Status == "mismatch" || passStreak == 2 && previousPassStreak < 2 {
+			if j.Snapshot.EffectiveResultMode() == service.AttributionResultModeSchedule {
+				accountChanged, e = applyAttributionScheduling(ctx, tx, a, j, passStreak, pauseRevision)
+				if e != nil {
+					return e
+				}
+			} else if j.Status == "mismatch" || passStreak == 2 && previousPassStreak < 2 {
 				models := s.Policy.HighModels
 				action := "high"
 				if j.Status == "mismatch" {
@@ -709,12 +737,15 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 					if _, e = tx.ExecContext(ctx, `UPDATE accounts SET credentials=jsonb_set(COALESCE(credentials,'{}'::jsonb),'{model_mapping}',$2::jsonb),updated_at=NOW() WHERE id=$1`, a.ID, b); e != nil {
 						return e
 					}
-					if e = enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &a.ID, nil, buildSchedulerGroupPayload(a.GroupIDs)); e != nil {
-						return e
-					}
+					accountChanged = true
 					j.Result.Action = action
 					j.Result.Before = current
 					j.Result.After = next
+				}
+			}
+			if accountChanged {
+				if e = enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &a.ID, nil, buildSchedulerGroupPayload(a.GroupIDs)); e != nil {
+					return e
 				}
 			}
 			if _, e = tx.ExecContext(ctx, `UPDATE model_attribution_state SET config_version=$2,authorization_digest=$3,verdict=$4,policy_digest=$5 WHERE account_id=$1`, j.AccountID, s.ConfigVersion, s.Authorization, j.Status, currentPolicy); e != nil {
@@ -723,8 +754,8 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 		}
 	}
 	// Failed, abnormal, skipped, stale and unconfigured results break a streak,
-	// but do not change the latest valid verdict or the account's allowlist.
-	// This is committed with the job, mapping and outbox, including on recovery.
+	// but do not change the latest valid verdict, allowlist or scheduling state.
+	// This is committed with the job, account change and outbox, including on recovery.
 	if _, err = tx.ExecContext(ctx, `UPDATE model_attribution_state SET pass_streak=$2 WHERE account_id=$1`, j.AccountID, passStreak); err != nil {
 		return err
 	}
@@ -741,7 +772,68 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 	if err = pruneAttribution(ctx, tx); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	if accountChanged && r.onAccountChanged != nil {
+		r.onAccountChanged(ctx, j.AccountID)
+	}
+	return nil
+}
+
+// The account row and attribution state are already locked. A pause is owned
+// only while its revision still matches; even an explicit false-to-false admin
+// update revokes ownership through the account scheduling-revision trigger.
+func applyAttributionScheduling(ctx context.Context, tx *sql.Tx, a *service.Account, j *service.AttributionJob, passStreak int, pauseRevision sql.NullInt64) (bool, error) {
+	before, after := a.Schedulable, a.Schedulable
+	j.Result.SchedulingBefore, j.Result.SchedulingAfter = &before, &after
+	owned := !a.Schedulable && pauseRevision.Valid && pauseRevision.Int64 == a.SchedulingRevision
+	if !owned {
+		pauseRevision = sql.NullInt64{}
+	}
+	changed := false
+	if j.Status == "mismatch" {
+		j.Result.Action = "schedule_already_paused"
+		if a.Schedulable {
+			var revision int64
+			if err := tx.QueryRowContext(ctx, `UPDATE accounts SET schedulable=false,updated_at=NOW() WHERE id=$1 RETURNING scheduling_revision`, a.ID).Scan(&revision); err != nil {
+				return false, err
+			}
+			pauseRevision = sql.NullInt64{Int64: revision, Valid: true}
+			after, changed = false, true
+			j.Result.Action = "schedule_paused"
+		}
+	} else if passStreak >= 2 && !a.Schedulable {
+		j.Result.Action = "schedule_manual_pause"
+		if owned {
+			j.Result.Action = "schedule_ineligible"
+			now := time.Now()
+			eligible := a.Status == service.StatusActive && (a.ExpiresAt == nil || now.Before(*a.ExpiresAt)) && !service.AccountDiagnosticRateLimited(a, j.Snapshot.Policy.Model, now)
+			if eligible && a.IsOpenAIOAuth() {
+				// Keep authorization pauses authoritative even if an older account row
+				// still says active. Legacy OAuth accounts without a managed grant keep
+				// their existing execution-time credential validation.
+				var grantActive bool
+				err := tx.QueryRowContext(ctx, `SELECT status=$2 AND NOT auth_pause_owned FROM account_openai_oauth_credentials WHERE account_id=$1`, a.ID, service.OpenAIOAuthAuthorizationAuthorized).Scan(&grantActive)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return false, err
+				}
+				eligible = errors.Is(err, sql.ErrNoRows) || grantActive
+			}
+			if eligible {
+				if _, err := tx.ExecContext(ctx, `UPDATE accounts SET schedulable=true,updated_at=NOW() WHERE id=$1`, a.ID); err != nil {
+					return false, err
+				}
+				pauseRevision = sql.NullInt64{}
+				after, changed = true, true
+				j.Result.Action = "schedule_resumed"
+			}
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE model_attribution_state SET pause_revision=$2 WHERE account_id=$1`, a.ID, pauseRevision); err != nil {
+		return false, err
+	}
+	return changed, nil
 }
 func (r *attributionRepository) Get(ctx context.Context, id int64) (*service.AttributionJob, error) {
 	j, err := scanAttribution(r.db.QueryRowContext(ctx, `SELECT `+attributionPublicColumns+` FROM model_attribution_jobs WHERE id=$1`, id))
@@ -798,6 +890,27 @@ func (r *attributionRepository) Summaries(ctx context.Context, ids []int64) (map
 		} else {
 			out[j.AccountID].Latest = j
 		}
+	}
+	// Ownership is live account state, not an inference from the latest historical
+	// result. A manual scheduling write or mode change invalidates it immediately.
+	pauses, err := r.db.QueryContext(ctx, `SELECT a.id,COALESCE(NOT a.schedulable AND a.extra->'openai_attribution_replace_whitelist_enabled'='false'::jsonb AND s.pause_revision=a.scheduling_revision,false) FROM accounts a LEFT JOIN model_attribution_state s ON s.account_id=a.id WHERE a.id=ANY($1) AND a.deleted_at IS NULL`, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = pauses.Close() }()
+	for pauses.Next() {
+		var id int64
+		var paused bool
+		if err = pauses.Scan(&id, &paused); err != nil {
+			return nil, err
+		}
+		if out[id] == nil {
+			out[id] = &service.AttributionSummary{}
+		}
+		out[id].SchedulingPausedByAttribution = paused
+	}
+	if err = pauses.Err(); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

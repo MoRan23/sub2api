@@ -36,6 +36,53 @@ beforeEach(() => { vi.clearAllMocks(); api.config.mockResolvedValue(config()); a
 afterEach(() => { vi.useRealTimers() })
 
 describe('attribution account UI', () => {
+  it.each(['schedule_paused', 'schedule_resumed', 'schedule_already_paused', 'schedule_manual_pause', 'schedule_ineligible'])('shows the frozen scheduling mode and %s action', (action) => {
+    const current = job(9, action === 'schedule_paused' ? 'mismatch' : 'passed')
+    current.snapshot.version = 4
+    current.snapshot.result_mode = 'schedule'
+    current.result.action = action
+    current.result.scheduling_before = false
+    current.result.scheduling_after = action === 'schedule_resumed'
+    const wrapper = mount(AttributionResult, { props: { job: current } })
+    expect(wrapper.get('[data-testid="attribution-result-mode"]').text()).toBe('attribution.resultModes.schedule')
+    expect(wrapper.get('[data-testid="attribution-result-action"]').text()).toBe(`attribution.actions.${action}`)
+    expect(wrapper.get('[data-testid="attribution-scheduling-change"]').text()).toBe(`attribution.schedulingPaused → attribution.${action === 'schedule_resumed' ? 'schedulingEnabled' : 'schedulingPaused'}`)
+    expect(wrapper.text()).not.toContain('attribution.high')
+    wrapper.unmount()
+  })
+  it('keeps legacy allowlist history separate from scheduling confirmation and stale results', async () => {
+    const current = job()
+    current.snapshot.version = 4
+    current.snapshot.result_mode = 'schedule'
+    current.result.action = 'awaiting_confirmation'
+    const wrapper = mount(AttributionResult, { props: { job: current } })
+    expect(wrapper.get('[data-testid="attribution-result-action"]').text()).toBe('attribution.schedulingActions.awaiting_confirmation')
+    expect(wrapper.find('[data-testid="attribution-scheduling-change"]').exists()).toBe(false)
+    await wrapper.setProps({ job: { ...current, reason: 'scheduling_changed', result: { ...current.result, action: 'stale_policy' } } })
+    expect(wrapper.text()).toContain('attribution.reasons.scheduling_changed')
+    expect(wrapper.get('[data-testid="attribution-result-action"]').text()).toBe('attribution.schedulingActions.stale_policy')
+    const legacy = job()
+    legacy.result.action = 'awaiting_confirmation'
+    await wrapper.setProps({ job: legacy })
+    expect(wrapper.get('[data-testid="attribution-result-mode"]').text()).toBe('attribution.resultModes.replace')
+    expect(wrapper.get('[data-testid="attribution-result-action"]').text()).toBe('attribution.actions.awaiting_confirmation')
+    expect(wrapper.text()).toContain('attribution.high')
+    await wrapper.setProps({ job: { ...legacy, snapshot: { ...legacy.snapshot, version: 3, result_mode: 'schedule' } } })
+    expect(wrapper.get('[data-testid="attribution-result-mode"]').text()).toBe('attribution.resultModes.replace')
+    expect(wrapper.get('[data-testid="attribution-result-action"]').text()).toBe('attribution.actions.awaiting_confirmation')
+    expect(wrapper.text()).toContain('attribution.high')
+    wrapper.unmount()
+  })
+  it('shows only current attribution-owned pauses in the account cell', async () => {
+    const account = { platform: 'openai', type: 'oauth', schedulable: false, model_attribution: { latest: job(), scheduling_paused_by_attribution: true } } as AccountListItem
+    const wrapper = mount(AccountAttributionCell, { props: { account } })
+    expect(wrapper.get('[data-testid="attribution-scheduling-paused"]').text()).toBe('attribution.pausedByAttribution')
+    await wrapper.setProps({ account: { ...account, schedulable: true } })
+    expect(wrapper.find('[data-testid="attribution-scheduling-paused"]').exists()).toBe(false)
+    await wrapper.setProps({ account: { ...account, model_attribution: { latest: job(), scheduling_paused_by_attribution: false } } })
+    expect(wrapper.find('[data-testid="attribution-scheduling-paused"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
   it('shows durable retry progress and preserves the completed verdict when a policy changed', async () => {
     const waiting = job(3, 'retry_wait')
     waiting.snapshot.version = 2

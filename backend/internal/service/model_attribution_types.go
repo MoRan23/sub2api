@@ -101,6 +101,9 @@ func AttributionPolicyDigest(s AttributionSnapshot) string {
 		p.LowModels = append([]string{}, p.LowModels...)
 		sort.Strings(p.HighModels)
 		sort.Strings(p.LowModels)
+		if s.Version >= 4 {
+			return AttributionDigest([]any{4, p, s.Detector, s.EffectiveResultMode()})
+		}
 		return AttributionDigest([]any{2, p, s.Detector})
 	}
 	// Preserve the old baseline when the effective condition is unchanged.
@@ -340,7 +343,7 @@ func AttributionSkipReason(a *Account, now time.Time, manual bool) string {
 	if a.Status != StatusActive {
 		return "account_inactive"
 	}
-	if !a.Schedulable {
+	if !a.Schedulable && a.OpenAIAttributionReplacesWhitelist() {
 		return "scheduling_disabled"
 	}
 	if a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
@@ -443,30 +446,49 @@ type AttributionAnalysis struct {
 	Diagnostics       []AttributionDiagnostic `json:"diagnostics"`
 }
 type AttributionSnapshot struct {
-	Version       int                            `json:"version,omitempty"`
-	Daybreak      *DiagnosticDaybreakPreferences `json:"daybreak,omitempty"`
-	Overrides     AttributionProbeOptions        `json:"overrides"`
-	MappingDigest string                         `json:"mapping_digest,omitempty"`
-	ConfigVersion int64                          `json:"config_version"`
-	GroupID       int64                          `json:"group_id"`
-	Policy        AttributionPolicy              `json:"policy"`
-	Detector      *AttributionDetector           `json:"detector,omitempty"`
-	Authorization string                         `json:"-"`
-	Fence         string                         `json:"-"`
+	Version            int                            `json:"version,omitempty"`
+	ResultMode         string                         `json:"result_mode,omitempty"`
+	SchedulingRevision int64                          `json:"scheduling_revision,omitempty"`
+	Daybreak           *DiagnosticDaybreakPreferences `json:"daybreak,omitempty"`
+	Overrides          AttributionProbeOptions        `json:"overrides"`
+	MappingDigest      string                         `json:"mapping_digest,omitempty"`
+	ConfigVersion      int64                          `json:"config_version"`
+	GroupID            int64                          `json:"group_id"`
+	Policy             AttributionPolicy              `json:"policy"`
+	Detector           *AttributionDetector           `json:"detector,omitempty"`
+	Authorization      string                         `json:"-"`
+	Fence              string                         `json:"-"`
 }
+
+const (
+	AttributionResultModeReplace  = "replace"
+	AttributionResultModeSchedule = "schedule"
+)
+
+// Old jobs always retain allowlist replacement semantics. The account's current
+// mode must never reinterpret a result created under a different policy.
+func (s AttributionSnapshot) EffectiveResultMode() string {
+	if s.Version >= 4 && s.ResultMode == AttributionResultModeSchedule {
+		return AttributionResultModeSchedule
+	}
+	return AttributionResultModeReplace
+}
+
 type AttributionResult struct {
-	CompletedProbes int                           `json:"completed_probes"`
-	Daybreak        []*DiagnosticDaybreakEvidence `json:"daybreak,omitempty"`
-	Analysis        *AttributionAnalysis          `json:"analysis,omitempty"`
-	Usage           []*OpenAIUsage                `json:"usage,omitempty"`
-	ActualModels    []string                      `json:"actual_models,omitempty"`
-	UpstreamModels  []string                      `json:"upstream_models,omitempty"`
-	DurationMS      int64                         `json:"duration_ms"`
-	Retries         int                           `json:"retries,omitempty"`
-	Action          string                        `json:"action"`
-	PassStreak      int                           `json:"pass_streak,omitempty"`
-	Before          map[string]any                `json:"before,omitempty"`
-	After           map[string]any                `json:"after,omitempty"`
+	CompletedProbes  int                           `json:"completed_probes"`
+	Daybreak         []*DiagnosticDaybreakEvidence `json:"daybreak,omitempty"`
+	Analysis         *AttributionAnalysis          `json:"analysis,omitempty"`
+	Usage            []*OpenAIUsage                `json:"usage,omitempty"`
+	ActualModels     []string                      `json:"actual_models,omitempty"`
+	UpstreamModels   []string                      `json:"upstream_models,omitempty"`
+	DurationMS       int64                         `json:"duration_ms"`
+	Retries          int                           `json:"retries,omitempty"`
+	Action           string                        `json:"action"`
+	PassStreak       int                           `json:"pass_streak,omitempty"`
+	Before           map[string]any                `json:"before,omitempty"`
+	After            map[string]any                `json:"after,omitempty"`
+	SchedulingBefore *bool                         `json:"scheduling_before,omitempty"`
+	SchedulingAfter  *bool                         `json:"scheduling_after,omitempty"`
 }
 type AttributionJob struct {
 	ID            int64                  `json:"id"`
@@ -497,9 +519,10 @@ type AttributionCheckpoint struct {
 	ProbeAuthorization string                 `json:"probe_authorization,omitempty"`
 }
 type AttributionSummary struct {
-	Latest     *AttributionJob `json:"latest,omitempty"`
-	Active     *AttributionJob `json:"active,omitempty"`
-	SkipReason string          `json:"skip_reason,omitempty"`
+	Latest                        *AttributionJob `json:"latest,omitempty"`
+	Active                        *AttributionJob `json:"active,omitempty"`
+	SkipReason                    string          `json:"skip_reason,omitempty"`
+	SchedulingPausedByAttribution bool            `json:"scheduling_paused_by_attribution"`
 }
 type AttributionPage struct {
 	Items     []*AttributionJob `json:"items"`

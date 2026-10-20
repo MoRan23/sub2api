@@ -469,6 +469,52 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
   })
 
+  it.each([undefined, false, true, null, 'false'])('preserves the effective attribution whitelist preference %s on unrelated edits', async (enabled) => {
+    const account = buildAccount()
+    account.extra = enabled === undefined ? {} : { openai_attribution_replace_whitelist_enabled: enabled }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    expect(wrapper.get('[data-testid="openai-attribution-replace-whitelist-toggle"]').attributes('aria-checked')).toBe(String(enabled !== false))
+    await wrapper.get('[data-tour="edit-account-form-name"]').setValue('Renamed account')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('openai_attribution_replace_whitelist_enabled')
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['oauth', 'generic'], ['apikey', 'generic'], ['apikey', 'codex_engine']
+  ])('saves attribution whitelist preference for %s / %s', async (type, mode) => {
+    const account = type === 'oauth' ? buildOpenAIOAuthAccount() : buildAccount()
+    account.extra = { openai_api_key_mode: mode, openai_attribution_replace_whitelist_enabled: true }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="openai-attribution-replace-whitelist-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra.openai_attribution_replace_whitelist_enabled).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('saves an explicit return to whitelist replacement and reloads when the edited account changes', async () => {
+    const account = buildAccount()
+    account.extra = { openai_attribution_replace_whitelist_enabled: false }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="openai-attribution-replace-whitelist-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra.openai_attribution_replace_whitelist_enabled).toBe(true)
+    await wrapper.setProps({ account: { ...account, id: 2 } })
+    expect(wrapper.get('[data-testid="openai-attribution-replace-whitelist-toggle"]').attributes('aria-checked')).toBe('false')
+    await wrapper.setProps({ account: { ...buildAccount(), platform: 'anthropic' } })
+    expect(wrapper.find('[data-testid="openai-attribution-replace-whitelist-toggle"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it.each([false, true])('saves an explicit automatic attribution preference change from %s', async (enabled) => {
     const account = buildAccount()
     account.extra = { openai_api_key_auto_attribution_enabled: enabled }
