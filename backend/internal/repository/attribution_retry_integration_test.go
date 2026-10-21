@@ -146,6 +146,8 @@ func TestAttributionCancelIsIdempotentAndFencesWorkers(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			ctx := context.Background()
 			r, ar, a := attributionFixture(t)
+			require.Equal(t, "low", attributionRun(t, r, a.ID, "mismatch").Result.Action)
+			low := attributionMapping(t, ar, a.ID)
 			require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
 			jobs, err := r.Enqueue(ctx, []int64{a.ID}, true)
 			require.NoError(t, err)
@@ -176,7 +178,7 @@ func TestAttributionCancelIsIdempotentAndFencesWorkers(t *testing.T) {
 			j.Status = "passed"
 			attributionSuccessfulProbeEvidence(j, "")
 			require.NoError(t, r.Finish(ctx, j))
-			require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
+			require.Equal(t, low, attributionMapping(t, ar, a.ID))
 			require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
 			require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
 		})
@@ -219,6 +221,7 @@ func TestAttributionCancelConcurrentWithRetryWait(t *testing.T) {
 func TestAttributionOperationalChangesDoNotInterruptAndCompatibleGroupsApply(t *testing.T) {
 	ctx := context.Background()
 	r, ar, a := attributionFixture(t)
+	require.Equal(t, "low", attributionRun(t, r, a.ID, "mismatch").Result.Action)
 	g := mustCreateGroup(t, integrationEntClient, &service.Group{Name: "attribution-equivalent-group", Platform: service.PlatformOpenAI})
 	t.Cleanup(func() { _, _ = integrationDB.ExecContext(ctx, `DELETE FROM groups WHERE id=$1`, g.ID) })
 	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
@@ -258,7 +261,7 @@ func TestAttributionChangedPolicyOrMappingRecordsVerdictOnly(t *testing.T) {
 			c.Groups = []service.AttributionGroupPolicy{{GroupID: g.ID, Enabled: true, AttributionPolicy: service.AttributionPolicy{Model: "different", HighModels: []string{"new-high"}, LowModels: []string{"new-low"}}}}
 			_, err = r.SaveConfig(ctx, c)
 			require.NoError(t, err)
-			require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
+			require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
 			_, err = r.Enqueue(ctx, []int64{a.ID}, true)
 			require.NoError(t, err)
 			j, err := r.Claim(ctx)
@@ -429,8 +432,9 @@ func TestAttributionOverridesSurviveChangedInheritedPolicy(t *testing.T) {
 			attributionSuccessfulProbeEvidence(j, "")
 			require.NoError(t, r.Finish(ctx, j))
 			if explicitEmpty {
-				require.Equal(t, "awaiting_confirmation", j.Result.Action)
+				require.Equal(t, "high", j.Result.Action)
 				require.Equal(t, 1, j.Result.PassStreak)
+				require.Contains(t, attributionMapping(t, ar, a.ID), "high2")
 			} else {
 				require.Equal(t, "stale_policy", j.Result.Action)
 				require.Zero(t, j.Result.PassStreak)

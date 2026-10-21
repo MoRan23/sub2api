@@ -694,14 +694,18 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 			j.Result.Action = "unconfigured"
 		} else {
 			var version int64
-			var auth, policy string
+			var auth, policy, previousVerdict string
 			var previousPassStreak int
 			var pauseRevision sql.NullInt64
-			e = tx.QueryRowContext(ctx, `SELECT config_version,authorization_digest,policy_digest,pass_streak,pause_revision FROM model_attribution_state WHERE account_id=$1 FOR UPDATE`, j.AccountID).Scan(&version, &auth, &policy, &previousPassStreak, &pauseRevision)
+			e = tx.QueryRowContext(ctx, `SELECT config_version,authorization_digest,policy_digest,pass_streak,pause_revision,verdict FROM model_attribution_state WHERE account_id=$1 FOR UPDATE`, j.AccountID).Scan(&version, &auth, &policy, &previousPassStreak, &pauseRevision, &previousVerdict)
 			if e != nil {
 				return e
 			}
 			j.Result.Action = "unchanged"
+			// The first applicable verdict initializes the allowlist immediately.
+			// Keep this independent of the streak baseline: policy changes, failed
+			// tests and history pruning must not grant another first-result bypass.
+			firstWhitelistResult := j.Snapshot.EffectiveResultMode() == service.AttributionResultModeReplace && previousVerdict == ""
 			// Manual and initial tests may use a different probe from the periodic policy.
 			// Keep that baseline distinct so the next periodic result synchronizes it.
 			currentPolicy := service.AttributionResultPolicyDigest(j.Snapshot, j.Result)
@@ -711,7 +715,7 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 			if j.Status == "passed" {
 				passStreak = min(previousPassStreak+1, 2)
 				j.Result.PassStreak = passStreak
-				if passStreak < 2 {
+				if passStreak < 2 && !firstWhitelistResult {
 					j.Result.Action = "awaiting_confirmation"
 				}
 			}
@@ -720,7 +724,7 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 				if e != nil {
 					return e
 				}
-			} else if j.Status == "mismatch" || passStreak == 2 && previousPassStreak < 2 {
+			} else if firstWhitelistResult || j.Status == "mismatch" || passStreak == 2 && previousPassStreak < 2 {
 				models := s.Policy.HighModels
 				action := "high"
 				if j.Status == "mismatch" {

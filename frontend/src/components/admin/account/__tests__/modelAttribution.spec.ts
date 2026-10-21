@@ -55,8 +55,10 @@ describe('attribution account UI', () => {
     current.snapshot.version = 4
     current.snapshot.result_mode = 'schedule'
     current.result.action = 'awaiting_confirmation'
+    current.result.pass_streak = 1
     const wrapper = mount(AttributionResult, { props: { job: current } })
     expect(wrapper.get('[data-testid="attribution-result-action"]').text()).toBe('attribution.schedulingActions.awaiting_confirmation')
+    expect(wrapper.get('[data-testid="attribution-pass-streak"]').text()).toBe('1')
     expect(wrapper.find('[data-testid="attribution-scheduling-change"]').exists()).toBe(false)
     await wrapper.setProps({ job: { ...current, reason: 'scheduling_changed', result: { ...current.result, action: 'stale_policy' } } })
     expect(wrapper.text()).toContain('attribution.reasons.scheduling_changed')
@@ -250,18 +252,32 @@ describe('attribution account UI', () => {
     expect(wrapper.text()).toContain('80.00%')
     wrapper.unmount()
   })
-  it('shows the first pass as awaiting confirmation and the second pass as upgraded', async () => {
+  it.each(['manual', 'scheduled', 'initial'] as const)('shows an immediately applied first valid verdict for %s tests with its actual streak', async (source) => {
+    const first = job()
+    first.source = source
+    first.result.action = 'high'
+    first.result.pass_streak = 1
+    const wrapper = mount(AttributionResult, { props: { job: first } })
+    expect(wrapper.get('[data-testid="attribution-result-action"]').text()).toBe('attribution.actions.high')
+    expect(wrapper.get('[data-testid="attribution-pass-streak"]').text()).toBe('1')
+    expect(wrapper.text()).not.toContain('attribution.actions.awaiting_confirmation')
+    await wrapper.setProps({ job: { ...first, status: 'mismatch', result: { ...first.result, action: 'low', pass_streak: 0 } } })
+    expect(wrapper.get('[data-testid="attribution-result-action"]').text()).toBe('attribution.actions.low')
+    expect(wrapper.get('[data-testid="attribution-pass-streak"]').text()).toBe('0')
+    wrapper.unmount()
+  })
+  it('shows later upgrades awaiting confirmation until the second consecutive pass and preserves legacy history', async () => {
     const first = job()
     first.result.action = 'awaiting_confirmation'
     first.result.pass_streak = 1
     const wrapper = mount(AttributionResult, { props: { job: first } })
     expect(wrapper.text()).toContain('attribution.status.passed')
     expect(wrapper.text()).toContain('attribution.actions.awaiting_confirmation')
-    expect(wrapper.get('[data-testid="attribution-pass-streak"]').text()).toBe('1 / 2')
+    expect(wrapper.get('[data-testid="attribution-pass-streak"]').text()).toBe('1')
     expect(wrapper.text()).not.toContain('attribution.actions.high')
     await wrapper.setProps({ job: { ...first, result: { ...first.result, action: 'high', pass_streak: 2 } } })
     expect(wrapper.text()).toContain('attribution.actions.high')
-    expect(wrapper.get('[data-testid="attribution-pass-streak"]').text()).toBe('2 / 2')
+    expect(wrapper.get('[data-testid="attribution-pass-streak"]').text()).toBe('2')
     await wrapper.setProps({ job: job() })
     expect(wrapper.find('[data-testid="attribution-pass-streak"]').exists()).toBe(false)
     wrapper.unmount()

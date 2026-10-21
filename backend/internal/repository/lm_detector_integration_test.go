@@ -14,6 +14,7 @@ import (
 func TestAttributionDetectorMigrationAndLateResult(t *testing.T) {
 	ctx := context.Background()
 	r, ar, a := attributionFixture(t)
+	require.Equal(t, "low", attributionRun(t, r, a.ID, "mismatch").Result.Action)
 	first := attributionRun(t, r, a.ID, "passed")
 	require.Equal(t, "awaiting_confirmation", first.Result.Action)
 	before := attributionMapping(t, ar, a.ID)
@@ -67,6 +68,8 @@ func TestAttributionDetectorMigrationAndLateResult(t *testing.T) {
 func TestAttributionDetectorVersionFenceAndStreak(t *testing.T) {
 	ctx := context.Background()
 	r, ar, a := attributionFixture(t)
+	require.Equal(t, "low", attributionRun(t, r, a.ID, "mismatch").Result.Action)
+	low := attributionMapping(t, ar, a.ID)
 	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
 	_, err := r.Enqueue(ctx, []int64{a.ID}, true)
 	require.NoError(t, err)
@@ -83,7 +86,7 @@ func TestAttributionDetectorVersionFenceAndStreak(t *testing.T) {
 	attributionSuccessfulProbeEvidence(old, "")
 	require.NoError(t, r.Finish(ctx, old))
 	require.Equal(t, "stale_policy", old.Result.Action)
-	require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
+	require.Equal(t, low, attributionMapping(t, ar, a.ID))
 	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
 	require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
 	// The historical result remains readable without detector metadata or nullable fields.

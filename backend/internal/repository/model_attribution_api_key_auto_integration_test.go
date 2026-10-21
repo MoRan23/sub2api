@@ -101,13 +101,16 @@ func TestAttributionAPIKeyOptOutPreservesActiveTasks(t *testing.T) {
 				j.Status = "passed"
 				attributionSuccessfulProbeEvidence(j, "")
 				require.NoError(t, r.Finish(ctx, j))
-				require.Equal(t, "awaiting_confirmation", j.Result.Action)
+				require.Equal(t, "high", j.Result.Action)
+				require.Equal(t, 1, j.Result.PassStreak)
 				_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_state SET next_due_at=NOW()-interval '1 second' WHERE account_id=$1`, a.ID)
 				require.NoError(t, err)
 				jobs, err = r.Enqueue(ctx, nil, false)
 				require.NoError(t, err)
 				require.Empty(t, jobs)
-				require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action, "manual result and unchanged baseline remain valid")
+				manual := attributionRun(t, r, a.ID, "passed")
+				require.Equal(t, "unchanged", manual.Result.Action, "manual result and unchanged baseline remain valid")
+				require.Equal(t, 2, manual.Result.PassStreak)
 			})
 		}
 	}

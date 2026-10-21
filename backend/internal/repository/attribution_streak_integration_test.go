@@ -34,6 +34,8 @@ func TestAttributionConsecutivePassInterrupted(t *testing.T) {
 func TestAttributionConsecutivePassRestartAndDuplicateFinish(t *testing.T) {
 	ctx := context.Background()
 	r, ar, a := attributionFixture(t)
+	require.Equal(t, "low", attributionRun(t, r, a.ID, "mismatch").Result.Action)
+	low := attributionMapping(t, ar, a.ID)
 	_, err := r.Enqueue(ctx, []int64{a.ID}, true)
 	require.NoError(t, err)
 	j, err := r.Claim(ctx)
@@ -49,7 +51,7 @@ func TestAttributionConsecutivePassRestartAndDuplicateFinish(t *testing.T) {
 	var streak int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT pass_streak FROM model_attribution_state WHERE account_id=$1`, a.ID).Scan(&streak))
 	require.Equal(t, 1, streak)
-	require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
+	require.Equal(t, low, attributionMapping(t, ar, a.ID))
 	// State survives pruning all history and reapplying already-run migrations.
 	_, err = integrationDB.ExecContext(ctx, `DELETE FROM model_attribution_jobs WHERE account_id=$1`, a.ID)
 	require.NoError(t, err)
@@ -62,11 +64,13 @@ func TestAttributionConsecutivePassRestartAndDuplicateFinish(t *testing.T) {
 func TestAttributionConsecutivePassAuthorizationBaseline(t *testing.T) {
 	ctx := context.Background()
 	r, ar, a := attributionFixture(t)
+	require.Equal(t, "low", attributionRun(t, r, a.ID, "mismatch").Result.Action)
+	low := attributionMapping(t, ar, a.ID)
 	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
 	_, err := integrationDB.ExecContext(ctx, `UPDATE account_openai_oauth_credentials SET authorization_generation=$2 WHERE account_id=$1`, a.ID, uuid.NewString())
 	require.NoError(t, err)
 	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
-	require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
+	require.Equal(t, low, attributionMapping(t, ar, a.ID))
 	require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
 }
 
@@ -75,6 +79,8 @@ func TestAttributionConsecutivePassRecoveryBreaksStreak(t *testing.T) {
 		t.Run(reason, func(t *testing.T) {
 			ctx := context.Background()
 			r, ar, a := attributionFixture(t)
+			require.Equal(t, "low", attributionRun(t, r, a.ID, "mismatch").Result.Action)
+			low := attributionMapping(t, ar, a.ID)
 			require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
 			if reason == "account_inactive" {
 				_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET status='disabled' WHERE id=$1`, a.ID)
@@ -117,7 +123,7 @@ func TestAttributionConsecutivePassRecoveryBreaksStreak(t *testing.T) {
 			require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT pass_streak,verdict FROM model_attribution_state WHERE account_id=$1`, a.ID).Scan(&streak, &verdict))
 			require.Zero(t, streak)
 			require.Equal(t, "passed", verdict)
-			require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
+			require.Equal(t, low, attributionMapping(t, ar, a.ID))
 			require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
 			require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
 		})
@@ -127,6 +133,8 @@ func TestAttributionConsecutivePassRecoveryBreaksStreak(t *testing.T) {
 func TestAttributionConfirmationRollback(t *testing.T) {
 	ctx := context.Background()
 	r, ar, a := attributionFixture(t)
+	require.Equal(t, "low", attributionRun(t, r, a.ID, "mismatch").Result.Action)
+	low := attributionMapping(t, ar, a.ID)
 	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
 	_, err := r.Enqueue(ctx, []int64{a.ID}, true)
 	require.NoError(t, err)
@@ -146,7 +154,7 @@ func TestAttributionConfirmationRollback(t *testing.T) {
 	var streak int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT pass_streak FROM model_attribution_state WHERE account_id=$1`, a.ID).Scan(&streak))
 	require.Equal(t, 1, streak)
-	require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
+	require.Equal(t, low, attributionMapping(t, ar, a.ID))
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM scheduler_outbox WHERE account_id=$1`, a.ID).Scan(&after))
 	require.Equal(t, before, after)
 	_, err = integrationDB.ExecContext(ctx, `DROP TRIGGER attribution_confirmation_reject ON model_attribution_jobs; DROP FUNCTION attribution_confirmation_reject()`)

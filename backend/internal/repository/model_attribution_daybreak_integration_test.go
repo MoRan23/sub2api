@@ -80,7 +80,8 @@ func TestAttributionDaybreakEvidenceBlocksMixedOrMissingWriteback(t *testing.T) 
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			r, ar, a := attributionFixture(t)
-			require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
+			require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
+			high := attributionMapping(t, ar, a.ID)
 			_, err := r.Enqueue(ctx, []int64{a.ID}, true)
 			require.NoError(t, err)
 			j, err := r.Claim(ctx)
@@ -105,7 +106,7 @@ func TestAttributionDaybreakEvidenceBlocksMixedOrMissingWriteback(t *testing.T) 
 			require.Equal(t, "mismatch", j.Status, "analysis verdict must remain visible")
 			require.Equal(t, "stale_policy", j.Result.Action)
 			require.Equal(t, reason, j.Reason)
-			require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
+			require.Equal(t, high, attributionMapping(t, ar, a.ID))
 			var streak int
 			require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT pass_streak FROM model_attribution_state WHERE account_id=$1`, a.ID).Scan(&streak))
 			require.Zero(t, streak)
@@ -116,6 +117,7 @@ func TestAttributionDaybreakEvidenceBlocksMixedOrMissingWriteback(t *testing.T) 
 
 func TestAttributionDaybreakBaselineSeparatesPreferenceAndActualCyber(t *testing.T) {
 	r, ar, a := attributionFixture(t)
+	require.Equal(t, "low", attributionRun(t, r, a.ID, "mismatch").Result.Action)
 	setAttributionDaybreakPreferences(t, a.ID, true, true)
 	// Capability may be unavailable in one round, so preferences alone cannot
 	// identify equivalent successful executions.
@@ -136,6 +138,7 @@ func TestAttributionDaybreakBaselineSeparatesPreferenceAndActualCyber(t *testing
 func TestAttributionDaybreakLegacyQueuedJobsDoNotInjectOrShareBaseline(t *testing.T) {
 	ctx := context.Background()
 	r, _, a := attributionFixture(t)
+	require.Equal(t, "low", attributionRun(t, r, a.ID, "mismatch").Result.Action)
 	setAttributionDaybreakPreferences(t, a.ID, true, true)
 	jobs, err := r.Enqueue(ctx, []int64{a.ID}, true)
 	require.NoError(t, err)
@@ -222,6 +225,8 @@ func TestAttributionDaybreakSharedCredentialsUseBusinessAccountPreferences(t *te
 	j.Status = "passed"
 	attributionSuccessfulProbeEvidence(j, "daybreak_blue")
 	require.NoError(t, r.Finish(ctx, j))
-	require.Equal(t, "awaiting_confirmation", j.Result.Action)
+	require.Equal(t, "high", j.Result.Action)
+	require.Equal(t, 1, j.Result.PassStreak)
+	require.Contains(t, attributionMapping(t, ar, shadow.ID), "high2")
 	require.Empty(t, j.Reason)
 }

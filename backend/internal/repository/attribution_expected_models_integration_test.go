@@ -69,6 +69,8 @@ func TestAttributionExpectedModelsConsecutivePassesAndFence(t *testing.T) {
 	c.Default.ExpectedModels = []string{"first", "second"}
 	c, err = r.SaveConfig(ctx, c)
 	require.NoError(t, err)
+	require.Equal(t, "low", attributionRun(t, r, a.ID, "mismatch").Result.Action)
+	low := attributionMapping(t, ar, a.ID)
 	run := func(winner string, override *[]string) *service.AttributionJob {
 		t.Helper()
 		_, err := r.Enqueue(ctx, []int64{a.ID}, true, service.AttributionProbeOptions{ExpectedModels: override})
@@ -84,7 +86,7 @@ func TestAttributionExpectedModelsConsecutivePassesAndFence(t *testing.T) {
 	}
 	first := run("first", nil)
 	require.Equal(t, "awaiting_confirmation", first.Result.Action)
-	require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
+	require.Equal(t, low, attributionMapping(t, ar, a.ID))
 	second := run("second", nil)
 	require.Equal(t, "high", second.Result.Action)
 	other := []string{"second"}

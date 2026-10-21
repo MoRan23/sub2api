@@ -259,9 +259,10 @@ func TestAttributionAPIKeyConfigurationFence(t *testing.T) {
 			require.Equal(t, "authorization_changed", stale.Reason)
 			require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
 			fresh := attributionRun(t, r, a.ID, "passed")
-			require.Equal(t, "awaiting_confirmation", fresh.Result.Action)
+			require.Equal(t, "high", fresh.Result.Action)
+			require.Equal(t, 1, fresh.Result.PassStreak)
 			require.NotEqual(t, j.Snapshot.Authorization, fresh.Snapshot.Authorization)
-			require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
+			require.Equal(t, "unchanged", attributionRun(t, r, a.ID, "passed").Result.Action)
 		})
 	}
 }
@@ -277,16 +278,16 @@ func TestAttributionTransitionsAtomicityAndCache(t *testing.T) {
 	defer scheduler.Stop()
 	var initialOutbox, firstOutbox int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM scheduler_outbox WHERE account_id=$1`, a.ID).Scan(&initialOutbox))
-	j := attributionRun(t, r, a.ID, "passed")
-	require.Equal(t, "awaiting_confirmation", j.Result.Action)
-	require.Equal(t, 1, j.Result.PassStreak)
-	require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM scheduler_outbox WHERE account_id=$1`, a.ID).Scan(&firstOutbox))
-	require.Equal(t, initialOutbox, firstOutbox)
-	j = attributionRun(t, r, a.ID, "passed")
-	require.Equal(t, "high", j.Result.Action)
-	require.Equal(t, 2, j.Result.PassStreak)
 	high := map[string]any{"high": "custom-high", "high2": "high2", "alias": "custom", "wild*": "target"}
+	j := attributionRun(t, r, a.ID, "passed")
+	require.Equal(t, "high", j.Result.Action)
+	require.Equal(t, 1, j.Result.PassStreak)
+	require.Equal(t, high, attributionMapping(t, ar, a.ID))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM scheduler_outbox WHERE account_id=$1`, a.ID).Scan(&firstOutbox))
+	require.Greater(t, firstOutbox, initialOutbox)
+	j = attributionRun(t, r, a.ID, "passed")
+	require.Equal(t, "unchanged", j.Result.Action)
+	require.Equal(t, 2, j.Result.PassStreak)
 	require.Equal(t, high, attributionMapping(t, ar, a.ID))
 	require.Eventually(t, func() bool {
 		cached, e := cache.GetAccount(ctx, a.ID)
@@ -294,7 +295,7 @@ func TestAttributionTransitionsAtomicityAndCache(t *testing.T) {
 	}, 5*time.Second, 50*time.Millisecond)
 	var outbox int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM scheduler_outbox WHERE account_id=$1`, a.ID).Scan(&outbox))
-	require.Positive(t, outbox)
+	require.Equal(t, firstOutbox, outbox)
 	j = attributionRun(t, r, a.ID, "passed")
 	require.Equal(t, "unchanged", j.Result.Action)
 	var after int
@@ -347,6 +348,7 @@ func TestAttributionTransitionsAtomicityAndCache(t *testing.T) {
 func TestAttributionFencesRefreshAndGroupBaseline(t *testing.T) {
 	ctx := context.Background()
 	r, ar, a := attributionFixture(t)
+	require.Equal(t, "low", attributionRun(t, r, a.ID, "mismatch").Result.Action)
 	claim := func() *service.AttributionJob {
 		_, e := r.Enqueue(ctx, []int64{a.ID}, true)
 		require.NoError(t, e)
@@ -576,8 +578,8 @@ func TestAttributionQueueLeasesRetentionAndRestart(t *testing.T) {
 	require.Empty(t, again)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_jobs SET status='failed',finished_at=NOW() WHERE status='queued'`)
 	require.NoError(t, err)
-	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
 	require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
+	require.Equal(t, "unchanged", attributionRun(t, r, a.ID, "passed").Result.Action)
 	_, err = integrationDB.ExecContext(ctx, `INSERT INTO model_attribution_jobs(account_id,account_name,source,status,snapshot,authorization_digest,fence_digest,finished_at) SELECT $1,'synthetic','manual','abnormal','{}','','',NOW() FROM generate_series(1,105)`, a.ID)
 	require.NoError(t, err)
 	attributionRun(t, r, a.ID, "abnormal")
@@ -684,8 +686,9 @@ func TestAttributionManualOverrideWithoutAutomaticEligibility(t *testing.T) {
 	j.Status = "passed"
 	attributionSuccessfulProbeEvidence(j, "")
 	require.NoError(t, r.Finish(ctx, j))
-	require.Equal(t, "awaiting_confirmation", j.Result.Action)
-	require.Equal(t, before, attributionMapping(t, ar, a.ID))
+	require.Equal(t, "high", j.Result.Action)
+	require.Equal(t, 1, j.Result.PassStreak)
+	require.Equal(t, map[string]any{"high": "custom-high", "alias": "custom", "wild*": "target"}, attributionMapping(t, ar, a.ID))
 	_, err = r.Enqueue(ctx, []int64{a.ID}, true, service.AttributionProbeOptions{Model: "gpt-6.1-sol"})
 	require.NoError(t, err)
 	j, err = r.Claim(ctx)
@@ -694,7 +697,8 @@ func TestAttributionManualOverrideWithoutAutomaticEligibility(t *testing.T) {
 	j.Status = "passed"
 	attributionSuccessfulProbeEvidence(j, "")
 	require.NoError(t, r.Finish(ctx, j))
-	require.Equal(t, "high", j.Result.Action)
+	require.Equal(t, "unchanged", j.Result.Action)
+	require.Equal(t, 2, j.Result.PassStreak)
 	var policyDigest string
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT policy_digest FROM model_attribution_state WHERE account_id=$1`, a.ID).Scan(&policyDigest))
 	require.Equal(t, service.AttributionResultPolicyDigest(j.Snapshot, j.Result), policyDigest)
