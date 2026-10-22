@@ -18,12 +18,13 @@ const openAIEnvironmentFingerprintMaxLen = 256
 // openAIEnvironmentFingerprints is the built-in pool used for newly created
 // OpenAI accounts. The selected value is persisted in credentials.user_agent
 // and remains stable until an administrator edits the account.
-// Versions were checked against stable releases on 2026-09-10. Ubuntu stays
-// on the 24.04 series; Windows uses the current x86_64 release (25H2).
-// xterm-256color and screen-256color are TERM names, not software versions.
+// Ubuntu VERSION_ID=24.04 is rendered by Codex's os_info as 24.4.0, regardless
+// of the distribution's point release. Terminal tokens describe each preset:
+// xterm-256color and screen-256color are TERM fallbacks, not software versions.
+// A process with no terminal identifiers emits unknown instead.
 var openAIEnvironmentFingerprints = []string{
 	codexCLIEnvironmentFingerprint,
-	"(Ubuntu 24.04.4; x86_64) screen-256color",
+	"(Ubuntu 24.4.0; x86_64) screen-256color",
 	"(Mac OS 26.6.2; arm64) iTerm.app/3.7.0",
 	"(Windows 10.0.26200; x86_64) WindowsTerminal",
 }

@@ -861,7 +861,7 @@ export default {
         environmentFingerprint: '环境指纹',
         environmentFingerprintDesc: '仅编辑 User-Agent 的系统、架构和终端后缀；客户端类型和版本由系统统一维护。',
         environmentFingerprintCreateDesc: '环境指纹在创建账号时生成并持久保存；创建后可在账号详情中查看。',
-        environmentFingerprintPlaceholder: '(Ubuntu 24.04.4; x86_64) xterm-256color',
+        environmentFingerprintPlaceholder: '(Ubuntu 24.4.0; x86_64) xterm-256color',
         environmentFingerprintShadowHint: '环境指纹继承自母账号，此处不展示或提交。',
         environmentFingerprintRequired: '环境指纹不能为空',
         environmentFingerprintInvalid: '环境指纹必须是不超过 256 个字符的单行 ASCII 文本',
