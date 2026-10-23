@@ -72,6 +72,9 @@ func NewProxyService(proxyRepo ProxyRepository) *ProxyService {
 
 // Create 创建代理
 func (s *ProxyService) Create(ctx context.Context, req CreateProxyRequest) (*Proxy, error) {
+	if err := ValidateProxyCredentials(req.Protocol, req.Username, req.Password); err != nil {
+		return nil, err
+	}
 	// 创建代理
 	proxy := &Proxy{
 		Name:     req.Name,
@@ -123,6 +126,8 @@ func (s *ProxyService) Update(ctx context.Context, id int64, req UpdateProxyRequ
 	if err != nil {
 		return nil, fmt.Errorf("get proxy: %w", err)
 	}
+	updated := *proxy
+	proxy = &updated
 
 	// 更新字段
 	if req.Name != nil {
@@ -151,6 +156,9 @@ func (s *ProxyService) Update(ctx context.Context, id int64, req UpdateProxyRequ
 
 	if req.Status != nil {
 		proxy.Status = *req.Status
+	}
+	if err := ValidateProxyCredentials(proxy.Protocol, proxy.Username, proxy.Password); err != nil {
+		return nil, err
 	}
 
 	if err := s.proxyRepo.Update(ctx, proxy); err != nil {

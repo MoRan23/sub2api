@@ -115,11 +115,18 @@ class ReleaseMatrixTest(unittest.TestCase):
         Path('deploy/docker-entrypoint.sh').write_text('#!/bin/sh\nexec /app/sub2api\n')
         Path('backend/resources').mkdir()
         Path('backend/resources/data').write_text('fixture')
+        notices = Path('backend/third_party/sing-shadowsocks')
+        (notices / 'sing').mkdir(parents=True)
+        (notices / 'COPYING').write_text('GPL fixture')
+        (notices / 'sing/LICENSE').write_text('nested dependency notice')
         release.contexts(args)
         for arch in ('amd64', 'arm64'):
             binary = Path('contexts') / arch / 'sub2api'
             self.assertEqual(binary.read_bytes(), b'fixture')
             self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
+            packaged = binary.parent / notices
+            self.assertEqual((packaged / 'COPYING').read_text(), 'GPL fixture')
+            self.assertEqual((packaged / 'sing/LICENSE').read_text(), 'nested dependency notice')
 
     def test_plan_requires_a_tag_for_publication(self):
         args = argparse.Namespace(ref='main', dry_run=False, simple=False)

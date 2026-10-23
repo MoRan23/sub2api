@@ -1553,6 +1553,15 @@ func buildUpstreamTransportWithTLSFingerprint(settings poolSettings, proxyURL *u
 	} else {
 		scheme := strings.ToLower(proxyURL.Scheme)
 		switch scheme {
+		case "ss":
+			dial, err := proxyutil.NewShadowsocksDialer(proxyURL)
+			if err != nil {
+				return nil, err
+			}
+			// Preserve the selected TLS profile inside the encrypted tunnel;
+			// ordinary HTTP destinations must use the same proxy route.
+			transport.DialContext = dial
+			transport.DialTLSContext = tlsfingerprint.NewDialer(profile, dial).DialTLSContext
 		case "socks5", "socks5h":
 			// SOCKS5 代理：使用 SOCKS5ProxyDialer
 			slog.Debug("tls_fingerprint_transport_socks5", "proxy", proxyURL.Host)

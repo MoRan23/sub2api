@@ -463,8 +463,10 @@
           </div>
         </div>
         <div>
-          <label class="input-label">{{ t('admin.proxies.username') }}</label>
+          <label class="input-label">{{ t(createForm.protocol === 'ss' ? 'admin.proxies.ssMethod' : 'admin.proxies.username') }}</label>
+          <Select v-if="createForm.protocol === 'ss'" v-model="createForm.username" :options="ssMethodOptions" />
           <input
+            v-else
             v-model="createForm.username"
             type="text"
             class="input"
@@ -472,13 +474,13 @@
           />
         </div>
         <div>
-          <label class="input-label">{{ t('admin.proxies.password') }}</label>
+          <label class="input-label">{{ t(createForm.protocol === 'ss' ? 'admin.proxies.ssPassword' : 'admin.proxies.password') }}</label>
           <div class="relative">
             <input
               v-model="createForm.password"
               :type="createPasswordVisible ? 'text' : 'password'"
               class="input pr-10"
-              :placeholder="t('admin.proxies.optionalAuth')"
+              :placeholder="t(createForm.protocol === 'ss' ? 'admin.proxies.ssPassword' : 'admin.proxies.optionalAuth')"
             />
             <button
               type="button"
@@ -489,6 +491,7 @@
             </button>
           </div>
         </div>
+        <p v-if="createForm.protocol === 'ss'" class="input-hint">{{ t('admin.proxies.ssHint') }}</p>
         <div>
           <label class="input-label">{{ t('admin.proxies.expiresAt') }}</label>
           <div class="mb-2 flex flex-wrap gap-2">
@@ -696,11 +699,12 @@
           </div>
         </div>
         <div>
-          <label class="input-label">{{ t('admin.proxies.username') }}</label>
-          <input v-model="editForm.username" type="text" class="input" />
+          <label class="input-label">{{ t(editForm.protocol === 'ss' ? 'admin.proxies.ssMethod' : 'admin.proxies.username') }}</label>
+          <Select v-if="editForm.protocol === 'ss'" v-model="editForm.username" :options="ssMethodOptions" />
+          <input v-else v-model="editForm.username" type="text" class="input" />
         </div>
         <div>
-          <label class="input-label">{{ t('admin.proxies.password') }}</label>
+          <label class="input-label">{{ t(editForm.protocol === 'ss' ? 'admin.proxies.ssPassword' : 'admin.proxies.password') }}</label>
           <div class="relative">
             <input
               v-model="editForm.password"
@@ -718,6 +722,7 @@
             </button>
           </div>
         </div>
+        <p v-if="editForm.protocol === 'ss'" class="input-hint">{{ t('admin.proxies.ssHint') }}</p>
         <div>
           <label class="input-label">{{ t('admin.proxies.status') }}</label>
           <Select v-model="editForm.status" :options="editStatusOptions" />
@@ -987,6 +992,8 @@ import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { applyProxyProbeResult } from '@/utils/proxyGeo'
+import { buildProxyUrl, parseProxyUrl, proxyAuthority, shadowsocksMethods, shadowsocksCredentialError } from '@/utils/proxyUrl'
+import type { ParsedProxyUrl } from '@/utils/proxyUrl'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -1013,7 +1020,8 @@ const protocolOptions = computed(() => [
   { value: 'http', label: 'HTTP' },
   { value: 'https', label: 'HTTPS' },
   { value: 'socks5', label: 'SOCKS5' },
-  { value: 'socks5h', label: 'SOCKS5H' }
+  { value: 'socks5h', label: 'SOCKS5H' },
+  { value: 'ss', label: 'Shadowsocks' }
 ])
 
 const statusOptions = computed(() => [
@@ -1028,8 +1036,11 @@ const protocolSelectOptions = computed(() => [
   { value: 'http', label: t('admin.proxies.protocols.http') },
   { value: 'https', label: t('admin.proxies.protocols.https') },
   { value: 'socks5', label: t('admin.proxies.protocols.socks5') },
-  { value: 'socks5h', label: t('admin.proxies.protocols.socks5h') }
+  { value: 'socks5h', label: t('admin.proxies.protocols.socks5h') },
+  { value: 'ss', label: t('admin.proxies.protocols.ss') }
 ])
+
+const ssMethodOptions = shadowsocksMethods.map(value => ({ value, label: value }))
 
 const editStatusOptions = computed(() => [
   { value: 'active', label: t('admin.accounts.status.active') },
@@ -1111,13 +1122,7 @@ const batchParseResult = reactive({
   valid: 0,
   invalid: 0,
   duplicate: 0,
-  proxies: [] as Array<{
-    protocol: ProxyProtocol
-    host: string
-    port: number
-    username: string
-    password: string
-  }>
+  proxies: [] as ParsedProxyUrl[]
 })
 
 const createForm = reactive({
@@ -1279,46 +1284,6 @@ const handleDataImported = () => {
   loadProxies()
 }
 
-// Parse proxy URL: protocol://user:pass@host:port or protocol://host:port
-// Host may be a domain, IPv4, or bracketed IPv6 ([2001:db8::1]).
-const parseProxyUrl = (
-  line: string
-): {
-  protocol: ProxyProtocol
-  host: string
-  port: number
-  username: string
-  password: string
-} | null => {
-  const trimmed = line.trim()
-  if (!trimmed) return null
-
-  // Regex to parse proxy URL (supports http, https, socks5, socks5h).
-  // Host alternatives: [bracketed-IPv6] | hostname/IPv4 (colon-free, so the
-  // match stops before the final :port).
-  const regex =
-    /^(https?|socks5h?):\/\/(?:([^:@\[\]]+):([^@\[\]]+)@)?(\[[0-9a-f:.]+\]|[^:\[\]]+):(\d+)$/i
-  const match = trimmed.match(regex)
-
-  if (!match) return null
-
-  const [, protocol, username, password, rawHost, port] = match
-  const portNum = parseInt(port, 10)
-
-  if (portNum < 1 || portNum > 65535) return null
-
-  // Strip brackets from IPv6 literals; the backend re-brackets via net.JoinHostPort.
-  const host = rawHost.replace(/^\[|\]$/g, '').trim()
-
-  return {
-    protocol: protocol.toLowerCase() as ProxyProtocol,
-    host,
-    port: portNum,
-    username: username?.trim() || '',
-    password: password?.trim() || ''
-  }
-}
-
 const parseBatchInput = () => {
   const lines = batchInput.value.split('\n').filter((l) => l.trim())
   const seen = new Set<string>()
@@ -1333,8 +1298,7 @@ const parseBatchInput = () => {
       continue
     }
 
-    // Check for duplicates (same host:port:username:password)
-    const key = `${parsed.host}:${parsed.port}:${parsed.username}:${parsed.password}`
+    const key = JSON.stringify([parsed.protocol, parsed.host, parsed.port, parsed.username, parsed.password])
     if (seen.has(key)) {
       duplicate++
       continue
@@ -1369,7 +1333,7 @@ const handleBatchCreate = async () => {
     loadProxies()
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToImport'))
-    console.error('Error batch creating proxies:', error)
+    // Do not log the batch request body containing proxy credentials.
   } finally {
     submitting.value = false
   }
@@ -1388,6 +1352,13 @@ const handleCreateProxy = async () => {
     appStore.showError(t('admin.proxies.portInvalid'))
     return
   }
+  if (createForm.protocol === 'ss') {
+    const error = shadowsocksCredentialError(createForm.username.trim(), createForm.password)
+    if (error) {
+      appStore.showError(t(`admin.proxies.${error}`))
+      return
+    }
+  }
   submitting.value = true
   try {
     await adminAPI.proxies.create({
@@ -1396,7 +1367,7 @@ const handleCreateProxy = async () => {
       host: createForm.host.trim(),
       port: createForm.port,
       username: createForm.username.trim() || null,
-      password: createForm.password.trim() || null,
+      password: (createForm.protocol === 'ss' ? createForm.password : createForm.password.trim()) || null,
       expires_at: createForm.expires_at ? Math.floor(new Date(createForm.expires_at).getTime() / 1000) : null,
       fallback_mode: createForm.fallback_mode,
       backup_proxy_id: createForm.fallback_mode === 'proxy' ? createForm.backup_proxy_id : null,
@@ -1407,7 +1378,7 @@ const handleCreateProxy = async () => {
     loadProxies()
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToCreate'))
-    console.error('Error creating proxy:', error)
+    // Axios error objects contain the submitted credentials in config.data.
   } finally {
     submitting.value = false
   }
@@ -1453,6 +1424,15 @@ const handleUpdateProxy = async () => {
     return
   }
 
+  if (editForm.protocol === 'ss') {
+    const needsPassword = editPasswordDirty.value || editingProxy.value.protocol !== 'ss'
+    const error = shadowsocksCredentialError(editForm.username.trim(), needsPassword ? editForm.password : undefined)
+    if (error) {
+      appStore.showError(t(`admin.proxies.${error}`))
+      return
+    }
+  }
+
   submitting.value = true
   try {
     const updateData: any = {
@@ -1470,7 +1450,7 @@ const handleUpdateProxy = async () => {
 
     // Only include password if user actually modified the field
     if (editPasswordDirty.value) {
-      updateData.password = editForm.password.trim()
+      updateData.password = editForm.protocol === 'ss' ? editForm.password : editForm.password.trim()
     }
 
     await adminAPI.proxies.update(editingProxy.value.id, updateData)
@@ -1479,7 +1459,7 @@ const handleUpdateProxy = async () => {
     loadProxies()
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.proxies.failedToUpdate'))
-    console.error('Error updating proxy:', error)
+    // Do not log request config containing proxy credentials.
   } finally {
     submitting.value = false
   }
@@ -1996,19 +1976,6 @@ const closeAccountsModal = () => {
 }
 
 // ── Proxy URL copy ──
-function buildAuthPart(row: any): string {
-  const user = row.username ? encodeURIComponent(row.username) : ''
-  const pass = row.password ? encodeURIComponent(row.password) : ''
-  if (user && pass) return `${user}:${pass}@`
-  if (user) return `${user}@`
-  if (pass) return `:${pass}@`
-  return ''
-}
-
-function buildProxyUrl(row: any): string {
-  return `${row.protocol}://${buildAuthPart(row)}${row.host}:${row.port}`
-}
-
 function getCopyFormats(row: any) {
   const hasAuth = row.username || row.password
   const fullUrl = buildProxyUrl(row)
@@ -2019,7 +1986,7 @@ function getCopyFormats(row: any) {
     const withoutProtocol = fullUrl.replace(/^[^:]+:\/\//, '')
     formats.push({ label: withoutProtocol, value: withoutProtocol })
   }
-  formats.push({ label: `${row.host}:${row.port}`, value: `${row.host}:${row.port}` })
+  formats.push({ label: proxyAuthority(row), value: proxyAuthority(row) })
   return formats
 }
 

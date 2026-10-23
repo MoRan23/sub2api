@@ -1,0 +1,25 @@
+Shadowsocks TCP support uses the unmodified Go modules below, downloaded via
+the Go module system and pinned in backend/go.mod and backend/go.sum.
+
+github.com/sagernet/sing-shadowsocks v0.2.9
+Source: https://github.com/SagerNet/sing-shadowsocks/tree/v0.2.9
+Copyright (C) 2022 nekohasekai <contact-sagernet@sekai.icu>
+License: GNU GPL version 3 or (at your option) any later version.
+The upstream license notice is reproduced in LICENSE; the GPL version 3 text
+is reproduced in COPYING.
+
+github.com/sagernet/sing v0.7.6
+Source: https://github.com/SagerNet/sing/tree/v0.7.6
+Copyright (C) 2022 nekohasekai <contact-sagernet@sekai.icu>
+License: GNU GPL version 3 or (at your option) any later version.
+The upstream license notice is reproduced in sing/LICENSE.
+
+lukechampine.com/blake3 v1.4.1
+Source: https://github.com/lukechampine/blake3/tree/v1.4.1
+Copyright (c) 2020 Luke Champine
+License: MIT, reproduced in blake3/LICENSE.
+
+These dependency licenses are separate from the repository's root license.
+Distributing a combined executable containing the GPL components requires
+compliance with the applicable GPL terms, including Corresponding Source and
+license notices. The dependency source is not vendored in these notice folders.

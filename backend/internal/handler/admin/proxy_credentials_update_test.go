@@ -36,6 +36,10 @@ func TestProxyHandlerUpdateCredentialPresence(t *testing.T) {
 	check("clear both", `{"username":"","password":""}`, &empty, &empty)
 	check("clear username only", `{"username":""}`, &empty, nil)
 	check("clear password only", `{"password":""}`, nil, &empty)
-	check("trim values", `{"username":" user ","password":" pass "}`, &username, &password)
-	check("whitespace clears", `{"username":"  ","password":"  "}`, &empty, &empty)
+	check("plain values", `{"username":"user","password":"pass"}`, &username, &password)
+	// The service normalizes passwords after merging an omitted protocol. It
+	// trims ordinary proxy passwords but preserves opaque Shadowsocks passwords.
+	padded, spaces := " pass ", "  "
+	check("preserve password until protocol resolved", `{"username":" user ","password":" pass "}`, &username, &padded)
+	check("whitespace forwarded", `{"username":"  ","password":"  "}`, &empty, &spaces)
 }

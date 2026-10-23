@@ -11,7 +11,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 
@@ -268,12 +267,8 @@ func createReqClient(proxyURL string) (*req.Client, error) {
 		ImpersonateChrome().
 		SetCookieJar(nil) // 禁用 CookieJar
 
-	trimmed, _, err := proxyurl.Parse(proxyURL)
-	if err != nil {
+	if err := configureReqClientProxy(client, proxyURL); err != nil {
 		return nil, err
-	}
-	if trimmed != "" {
-		client.SetProxyURL(trimmed)
 	}
 
 	return instrumentReqClient(client), nil

@@ -141,7 +141,7 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 			result.Errors = append(result.Errors, DataImportError{
 				Kind:     "proxy",
 				Name:     item.Name,
-				ProxyKey: key,
+				ProxyKey: proxyImportErrorKey(item, key),
 				Message:  err.Error(),
 			})
 			continue
@@ -188,7 +188,7 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 					result.Errors = append(result.Errors, DataImportError{
 						Kind:     "proxy",
 						Name:     item.Name,
-						ProxyKey: key,
+						ProxyKey: proxyImportErrorKey(item, key),
 						Message:  "update status failed: " + err.Error(),
 					})
 				}
@@ -215,7 +215,7 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 				result.Errors = append(result.Errors, DataImportError{
 					Kind:     "proxy",
 					Name:     item.Name,
-					ProxyKey: key,
+					ProxyKey: proxyImportErrorKey(item, key),
 					Message:  fmt.Sprintf("backup_proxy_name %q not found, fallback_mode downgraded to none", item.BackupProxyName),
 				})
 			}
@@ -238,7 +238,7 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 			result.Errors = append(result.Errors, DataImportError{
 				Kind:     "proxy",
 				Name:     item.Name,
-				ProxyKey: key,
+				ProxyKey: proxyImportErrorKey(item, key),
 				Message:  err.Error(),
 			})
 			continue
@@ -270,7 +270,7 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 				result.Errors = append(result.Errors, DataImportError{
 					Kind:     "proxy",
 					Name:     item.Name,
-					ProxyKey: key,
+					ProxyKey: proxyImportErrorKey(item, key),
 					Message:  "update status failed: " + err.Error(),
 				})
 			}

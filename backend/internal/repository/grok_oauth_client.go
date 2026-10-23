@@ -15,6 +15,8 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	sharedhttp "github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
@@ -243,11 +245,17 @@ func grokOAuthHasExplicitEntitlementDenial(body string) bool {
 func createGrokHTTPClient(proxyURL string, noRedirect bool) (*http.Client, error) {
 	transport := &http.Transport{}
 	if strings.TrimSpace(proxyURL) != "" {
-		parsed, err := url.Parse(proxyURL)
+		_, parsed, err := proxyurl.Parse(proxyURL)
 		if err != nil {
 			return nil, err
 		}
-		transport.Proxy = http.ProxyURL(parsed)
+		if parsed.Scheme == "ss" {
+			if err := proxyutil.ConfigureTransportProxy(transport, parsed); err != nil {
+				return nil, err
+			}
+		} else {
+			transport.Proxy = http.ProxyURL(parsed)
+		}
 	}
 	client := &http.Client{Timeout: 120 * time.Second, Transport: transport}
 	if noRedirect {

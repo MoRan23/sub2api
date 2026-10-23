@@ -9,6 +9,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpsendobserver"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -107,9 +108,14 @@ func (s *httpUpstreamService) acquireNativeClient(proxyURL string, accountID int
 	if err != nil {
 		return nil, err
 	}
-	// req implements all proxy protocols itself. In particular HTTPS proxy TLS
-	// is separate from the native TLS handshake inside its CONNECT tunnel.
-	if parsed != nil {
+	// req handles HTTP/SOCKS proxies itself. Shadowsocks instead supplies an
+	// encrypted dialer beneath the native TLS handshake. HTTPS proxy outer TLS
+	// remains separate from the native handshake inside its CONNECT tunnel.
+	if parsed != nil && parsed.Scheme == "ss" {
+		if err := proxyutil.ConfigureTransportProxy(base, parsed); err != nil {
+			return nil, err
+		}
+	} else if parsed != nil {
 		base.Proxy = http.ProxyURL(parsed)
 	}
 	transport, err := codexnative.NewTransport(selection.Platform, base)

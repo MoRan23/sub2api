@@ -152,6 +152,8 @@ def contexts(args):
         (dest / 'deploy').mkdir(exist_ok=True)
         shutil.copy2('deploy/docker-entrypoint.sh', dest / 'deploy/docker-entrypoint.sh')
         shutil.copytree('backend/resources', dest / 'backend/resources', dirs_exist_ok=True)
+        shutil.copytree('backend/third_party/sing-shadowsocks',
+                        dest / 'backend/third_party/sing-shadowsocks', dirs_exist_ok=True)
 
 
 def main():

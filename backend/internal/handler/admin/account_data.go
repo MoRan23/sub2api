@@ -2,6 +2,8 @@ package admin
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -104,7 +106,20 @@ type DataImportError struct {
 }
 
 func buildProxyKey(protocol, host string, port int, username, password string) string {
+	if protocol == "ss" {
+		// SS passwords are opaque. Hash the tuple to keep whitespace significant
+		// without exposing credentials through import errors or account references.
+		identity, _ := json.Marshal([]any{protocol, strings.TrimSpace(host), port, username, password})
+		return fmt.Sprintf("ss|%x", sha256.Sum256(identity))
+	}
 	return fmt.Sprintf("%s|%s|%d|%s|%s", strings.TrimSpace(protocol), strings.TrimSpace(host), port, strings.TrimSpace(username), strings.TrimSpace(password))
+}
+
+func proxyImportErrorKey(item DataProxy, key string) string {
+	if item.Protocol == "ss" {
+		return buildProxyKey(item.Protocol, item.Host, item.Port, item.Username, item.Password)
+	}
+	return key
 }
 
 func (h *AccountHandler) ExportData(c *gin.Context) {
@@ -305,7 +320,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			result.Errors = append(result.Errors, DataImportError{
 				Kind:     "proxy",
 				Name:     item.Name,
-				ProxyKey: key,
+				ProxyKey: proxyImportErrorKey(item, key),
 				Message:  err.Error(),
 			})
 			continue
@@ -371,7 +386,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 				result.Errors = append(result.Errors, DataImportError{
 					Kind:     "proxy",
 					Name:     item.Name,
-					ProxyKey: key,
+					ProxyKey: proxyImportErrorKey(item, key),
 					Message:  fmt.Sprintf("backup_proxy_name %q not found, fallback_mode downgraded to none", item.BackupProxyName),
 				})
 			}
@@ -394,7 +409,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			result.Errors = append(result.Errors, DataImportError{
 				Kind:     "proxy",
 				Name:     item.Name,
-				ProxyKey: key,
+				ProxyKey: proxyImportErrorKey(item, key),
 				Message:  createErr.Error(),
 			})
 			continue
@@ -716,9 +731,12 @@ func validateDataProxy(item DataProxy) error {
 		return errors.New("proxy port is invalid")
 	}
 	switch item.Protocol {
-	case "http", "https", "socks5", "socks5h":
+	case "http", "https", "socks5", "socks5h", "ss":
 	default:
 		return fmt.Errorf("proxy protocol is invalid: %s", item.Protocol)
+	}
+	if err := service.ValidateProxyCredentials(item.Protocol, item.Username, item.Password); err != nil {
+		return err
 	}
 	if item.Status != "" {
 		normalizedStatus := normalizeProxyStatus(item.Status)

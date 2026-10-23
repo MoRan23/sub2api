@@ -4,6 +4,7 @@
 //   - HTTP/HTTPS: 通过 Transport.Proxy 设置
 //   - SOCKS5: 通过 Transport.DialContext 设置（客户端本地解析 DNS）
 //   - SOCKS5H: 通过 Transport.DialContext 设置（代理端远程解析 DNS，推荐）
+//   - Shadowsocks: 原生 AEAD / SS2022 TCP 加密，目标 DNS 由代理解析
 //
 // 注意：proxyurl.Parse() 会自动将 socks5:// 升级为 socks5h://，
 // 确保 DNS 也由代理端解析，防止 DNS 泄漏。
@@ -78,6 +79,15 @@ func ConfigureTransportProxy(transport *http.Transport, proxyURL *url.URL) error
 				return dialer.Dial(network, addr)
 			}
 		}
+		return nil
+
+	case "ss":
+		dial, err := NewShadowsocksDialer(proxyURL)
+		if err != nil {
+			return err
+		}
+		transport.Proxy = nil
+		transport.DialContext = dial
 		return nil
 
 	default:

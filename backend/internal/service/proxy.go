@@ -5,7 +5,26 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 )
+
+// ValidateProxyCredentials validates Shadowsocks' method/password pair without
+// tightening the authentication rules of existing HTTP and SOCKS proxies.
+func ValidateProxyCredentials(protocol, username, password string) error {
+	if protocol != "ss" {
+		return nil
+	}
+	// Match the existing Ent MaxLen validators (bytes, not runes).
+	if len(username) > 100 || len(password) > 100 {
+		return infraerrors.BadRequest("PROXY_SS_CREDENTIALS_INVALID", "Shadowsocks method and password must not exceed 100 bytes")
+	}
+	if err := proxyutil.ValidateShadowsocksCredentials(username, password); err != nil {
+		return infraerrors.BadRequest("PROXY_SS_CREDENTIALS_INVALID", err.Error())
+	}
+	return nil
+}
 
 const (
 	FallbackModeNone   = "none"

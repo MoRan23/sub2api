@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openaicookies"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
 
 	"github.com/imroc/req/v3"
@@ -60,12 +59,8 @@ func getSharedReqClient(opts reqClientOptions) (*req.Client, error) {
 		// 在同一出口 IP 下稳定通过，故改用 Firefox 指纹。
 		client = client.ImpersonateFirefox()
 	}
-	trimmed, _, err := proxyurl.Parse(opts.ProxyURL)
-	if err != nil {
+	if err := configureReqClientProxy(client, opts.ProxyURL); err != nil {
 		return nil, err
-	}
-	if trimmed != "" {
-		client.SetProxyURL(trimmed)
 	}
 	client = instrumentReqClient(client)
 	if opts.OpenAINativeHTTP {

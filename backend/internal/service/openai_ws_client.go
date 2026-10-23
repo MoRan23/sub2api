@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -192,8 +194,8 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string, scopes ...open
 	var parsedProxyURL *url.URL
 	if normalizedProxy != "" {
 		var err error
-		parsedProxyURL, err = url.Parse(normalizedProxy)
-		if err != nil || parsedProxyURL.Scheme == "" || parsedProxyURL.Host == "" {
+		_, parsedProxyURL, err = proxyurl.Parse(normalizedProxy)
+		if err != nil {
 			// url.Parse errors may include the original URL and its credentials.
 			return nil, errors.New("invalid proxy url")
 		}
@@ -236,6 +238,11 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string, scopes ...open
 			IdleConnTimeout:     openAIWSProxyTransportIdleConnTimeout,
 			TLSHandshakeTimeout: 10 * time.Second,
 			ForceAttemptHTTP2:   true,
+		}
+		if parsedProxyURL.Scheme == "ss" {
+			if err := proxyutil.ConfigureTransportProxy(transport, parsedProxyURL); err != nil {
+				return nil, err
+			}
 		}
 		client = &http.Client{Transport: transport}
 	}

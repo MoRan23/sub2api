@@ -51,6 +51,7 @@ dockers:
     extra_files:
       - deploy/docker-entrypoint.sh
       - backend/resources
+      - backend/third_party/sing-shadowsocks
     build_flag_templates:
       - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.version={{ .Version }}"

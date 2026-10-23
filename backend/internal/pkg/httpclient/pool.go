@@ -98,14 +98,17 @@ func buildClient(opts Options) (*http.Client, error) {
 		base := transport.Clone()
 		// Let req handle CONNECT/SOCKS itself, including cancellation, instead of
 		// carrying the ordinary client's already-proxied SOCKS dialer twice.
+		// Shadowsocks must retain its encrypted dialer beneath the native TLS.
 		_, parsed, parseErr := proxyurl.Parse(opts.ProxyURL)
 		if parseErr != nil {
 			return nil, parseErr
 		}
-		base.DialContext = (&net.Dialer{Timeout: defaultDialTimeout}).DialContext
-		base.Proxy = nil
-		if parsed != nil {
-			base.Proxy = http.ProxyURL(parsed)
+		if parsed == nil || parsed.Scheme != "ss" {
+			base.DialContext = (&net.Dialer{Timeout: defaultDialTimeout}).DialContext
+			base.Proxy = nil
+			if parsed != nil {
+				base.Proxy = http.ProxyURL(parsed)
+			}
 		}
 		rt = codexnative.NewDispatcher(rt, func(platform codexnative.Platform) (http.RoundTripper, error) {
 			return codexnative.NewTransport(platform, base)

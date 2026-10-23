@@ -97,7 +97,8 @@ export default {
         http: 'HTTP',
         https: 'HTTPS',
         socks5: 'SOCKS5',
-        socks5h: 'SOCKS5H (Remote DNS)'
+        socks5h: 'SOCKS5H (Remote DNS)',
+        ss: 'Shadowsocks (SS / SS2022)'
       },
       columns: {
         name: 'Name',
@@ -164,6 +165,13 @@ export default {
       enterProxyName: 'Enter proxy name',
       leaveEmptyToKeep: 'Leave empty to keep current',
       optionalAuth: 'Optional authentication',
+      ssMethod: 'Cipher',
+      ssPassword: 'Password / key',
+      ssHint: 'SS2022 requires a Base64 key: 16 bytes for AES-128, 32 bytes for AES-256 or ChaCha20. Enter one key, without a multi-user key chain. Password spaces are preserved. Plugins are not supported.',
+      ssMethodInvalid: 'Select a supported Shadowsocks cipher.',
+      ssPasswordRequired: 'Enter the Shadowsocks password or key.',
+      ssPasswordTooLong: 'The Shadowsocks password must not exceed 100 UTF-8 bytes.',
+      ssKeyInvalid: 'SS2022 requires a valid Base64 key of the size specified for the cipher.',
       form: {
         hostPlaceholder: 'proxy.example.com',
         portPlaceholder: '8080'
@@ -175,9 +183,9 @@ export default {
       batchAdd: 'Quick Add',
       batchInput: 'Proxy List',
       batchInputPlaceholder:
-        "Enter one proxy per line in the following formats:\nsocks5://user:pass{'@'}192.168.1.1:1080\nhttp://192.168.1.1:8080\nhttps://user:pass{'@'}proxy.example.com:443",
+        "Enter one proxy per line in the following formats:\nsocks5://user:pass{'@'}192.168.1.1:1080\nhttp://192.168.1.1:8080\nss://aes-256-gcm:password{'@'}proxy.example.com:8388#Name",
       batchInputHint:
-        "Supports http, https, socks5 protocols. Format: protocol://[user:pass{'@'}]host:port",
+        "Supports http, https, socks5, socks5h and ss. SS accepts percent-encoded cipher:password or AEAD Base64 userinfo, and an optional #name. SS2022 requires percent-encoded userinfo. Plugins and URL query options are rejected.",
       parsedCount: '{count} valid',
       invalidCount: '{count} invalid',
       duplicateCount: '{count} duplicate',

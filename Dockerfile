@@ -143,6 +143,7 @@ WORKDIR /app
 # Copy binary/resources with ownership to avoid extra full-layer chown copy
 COPY --from=backend-builder --chown=sub2api:sub2api /app/sub2api /app/sub2api
 COPY --from=backend-builder --chown=sub2api:sub2api /app/backend/resources /app/resources
+COPY --from=backend-builder /app/backend/third_party/sing-shadowsocks /app/licenses/sing-shadowsocks
 
 # Create data directory
 RUN mkdir -p /app/data && chown sub2api:sub2api /app/data

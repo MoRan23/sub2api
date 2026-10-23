@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -56,6 +57,9 @@ func (s *adminServiceImpl) GetProxiesByIDs(ctx context.Context, ids []int64) ([]
 }
 
 func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyInput) (*Proxy, error) {
+	if err := ValidateProxyCredentials(input.Protocol, input.Username, input.Password); err != nil {
+		return nil, err
+	}
 	if !isJSONTimeInRange(input.ExpiresAt) {
 		return nil, infraerrors.BadRequest("PROXY_EXPIRY_INVALID", "proxy expiry year must be between 0 and 9999")
 	}
@@ -106,6 +110,10 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	if err != nil {
 		return nil, err
 	}
+	// Validate a private copy: a failed partial update must not mutate a cached
+	// repository snapshot or mix new credentials with the old proxy protocol.
+	updated := *proxy
+	proxy = &updated
 
 	// Merge only supplied fields, then validate the resulting fallback configuration.
 	mode := proxy.FallbackMode
@@ -140,6 +148,12 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	}
 	if input.Password != nil {
 		proxy.Password = *input.Password
+		if proxy.Protocol != "ss" {
+			proxy.Password = strings.TrimSpace(proxy.Password)
+		}
+	}
+	if err := ValidateProxyCredentials(proxy.Protocol, proxy.Username, proxy.Password); err != nil {
+		return nil, err
 	}
 	if input.Status != "" {
 		proxy.Status = input.Status
