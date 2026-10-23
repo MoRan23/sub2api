@@ -1,6 +1,6 @@
 module github.com/Wei-Shaw/sub2api
 
-go 1.27.2
+go 1.27.3
 
 // Pinned req fork adds opt-in HTTP/1.1 header casing and request-bound dialing.
 replace github.com/imroc/req/v3 v3.59.0 => ./third_party/req

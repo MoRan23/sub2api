@@ -157,3 +157,50 @@ func TestSchedulerCacheSnapshotIgnoresLegacyOAuthAdmissionSummaries(t *testing.T
 		})
 	}
 }
+
+func TestSchedulerCacheSnapshotMemoKeepsOAuthHydrationRequestOwned(t *testing.T) {
+	ctx := context.Background()
+	cache, _, recorder := newSchedulerCacheMemoUnit(t, defaultSchedulerSnapshotWriteChunkSize)
+	bucket := service.SchedulerBucket{GroupID: 78, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	account := service.Account{
+		ID: 7810, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true, SchedulingRevision: 42,
+		Credentials: map[string]any{"access_token": "original-token", "model_mapping": map[string]any{"alias": "target"}},
+		Extra:       map[string]any{service.OpenAIDaybreakBlueEnabledKey: true, service.OpenAIAttributionReplaceWhitelistEnabledExtraKey: false},
+		OpenAIOAuthOSProfiles: &service.OpenAIOAuthOSProfiles{
+			DefaultOS:     service.OpenAIOSLinux,
+			Authorization: &service.OpenAIOAuthOSAuthorizationSummary{Status: service.OpenAIOAuthAuthorizationAuthorized},
+			Profiles: map[string]service.OpenAIOAuthOSProfile{
+				service.OpenAIOSLinux: {OSFamily: service.OpenAIOSLinux, InstallationID: "original-installation"},
+			},
+		},
+	}
+	memoPublish(t, cache, bucket, account)
+	memoRead(t, cache, bucket)
+
+	first, err := cache.GetAccount(ctx, account.ID)
+	require.NoError(t, err)
+	first.Credentials["access_token"] = "request-local-token"
+	first.Credentials["model_mapping"].(map[string]any)["alias"] = "request-local-target"
+	first.Extra[service.OpenAIDaybreakBlueEnabledKey] = false
+	first.OpenAIOAuthOSProfiles.Authorization.Status = service.OpenAIOAuthAuthorizationReauthRequired
+	first.OpenAIOAuthOSProfiles.Profiles[service.OpenAIOSLinux] = service.OpenAIOAuthOSProfile{InstallationID: "request-local-installation"}
+
+	recorder.reset()
+	second := memoRead(t, cache, bucket)[0]
+	require.Zero(t, recorder.countPrefix("zrange "), "second candidate read must use the shared memo")
+	require.Empty(t, second.GetCredential("access_token"))
+	require.Nil(t, second.OpenAIOAuthOSProfiles)
+	require.Equal(t, "target", second.GetMappedModel("alias"))
+	require.Equal(t, true, second.Extra[service.OpenAIDaybreakBlueEnabledKey])
+	require.Equal(t, false, second.Extra[service.OpenAIAttributionReplaceWhitelistEnabledExtraKey])
+	require.EqualValues(t, 42, second.SchedulingRevision)
+
+	hydrated, err := cache.GetAccount(ctx, account.ID)
+	require.NoError(t, err)
+	require.Equal(t, "original-token", hydrated.GetCredential("access_token"))
+	require.Equal(t, "target", hydrated.GetMappedModel("alias"))
+	require.Equal(t, true, hydrated.Extra[service.OpenAIDaybreakBlueEnabledKey])
+	require.Equal(t, service.OpenAIOAuthAuthorizationAuthorized, hydrated.OpenAIOAuthOSProfiles.Authorization.Status)
+	require.Equal(t, "original-installation", hydrated.OpenAIOAuthOSProfiles.Profiles[service.OpenAIOSLinux].InstallationID)
+}

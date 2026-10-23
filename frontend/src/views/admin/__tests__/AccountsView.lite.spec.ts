@@ -4,6 +4,7 @@ import { defineComponent } from 'vue'
 
 import AccountsView from '../AccountsView.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
+import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 
 const {
   listAccounts,
@@ -187,6 +188,53 @@ describe('admin AccountsView lite account list', () => {
       1,
       20,
       expect.objectContaining({ lite: '1' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
+    wrapper.unmount()
+  })
+
+  it('restores saved platform and status without replacing the local lite-list request settings', async () => {
+    localStorage.setItem('account-filter-values', JSON.stringify({ platform: 'openai', status: 'unschedulable', lite: '0', group: '99' }))
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(listAccounts).toHaveBeenCalledWith(
+      1, 20,
+      expect.objectContaining({ platform: 'openai', status: 'unschedulable', group: '', lite: '1' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
+    wrapper.unmount()
+  })
+
+  it.each(['invalid json', '[]', 'null', '{"platform":"unknown","status":"deleted"}'])(
+    'falls back to unfiltered accounts for invalid persisted filters %s', async raw => {
+      localStorage.setItem('account-filter-values', raw)
+      const wrapper = mountView()
+      await flushPromises()
+
+      expect(listAccounts).toHaveBeenCalledWith(
+        1, 20,
+        expect.objectContaining({ platform: '', status: '', lite: '1' }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      )
+      wrapper.unmount()
+    }
+  )
+
+  it('persists changed platform and status while retaining other filters only for the current page', async () => {
+    vi.useFakeTimers()
+    const wrapper = mountView()
+    await flushPromises()
+    const filters = wrapper.getComponent(AccountTableFilters)
+    filters.vm.$emit('update:filters', { platform: 'gemini', status: 'rate_limited', group: '7' })
+    filters.vm.$emit('change')
+    await vi.advanceTimersByTimeAsync(400)
+    await flushPromises()
+
+    expect(JSON.parse(localStorage.getItem('account-filter-values')!)).toEqual({ platform: 'gemini', status: 'rate_limited' })
+    expect(listAccounts).toHaveBeenLastCalledWith(
+      1, 20,
+      expect.objectContaining({ platform: 'gemini', status: 'rate_limited', group: '7', lite: '1' }),
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
     wrapper.unmount()
