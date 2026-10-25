@@ -640,6 +640,12 @@ func openAICodexRequestTurnUUIDUnixMilli(value uuid.UUID) int64 {
 }
 
 func openAICodexRequestTurnSnapshotValid(snapshot OpenAICodexRequestTurnSnapshot) bool {
+	if validCodexTurnUUIDv4(snapshot.ID) {
+		// Native mailbox wakeups have random UUIDs, without an embedded clock.
+		// Their explicit timestamp is optional and must not be invented merely
+		// to keep the same turn across a WebSocket tool continuation.
+		return true
+	}
 	_, err := canonicalUUIDv7(snapshot.ID)
 	return err == nil && snapshot.StartedAtUnixMS > 0
 }

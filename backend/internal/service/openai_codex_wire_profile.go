@@ -26,12 +26,13 @@ type CodexTurnIDKind string
 
 const (
 	CodexTurnIDUserUUIDv7     CodexTurnIDKind = "user_uuidv7"
+	CodexTurnIDUserUUIDv4     CodexTurnIDKind = "user_uuidv4"
 	CodexTurnIDOpaqueInternal CodexTurnIDKind = "opaque_internal"
 )
 
 // CodexTurnID keeps the source-compatible string ID separate from its wire
-// family. Normal turns accept UUIDv7 only; explicitly internal request kinds
-// may carry Codex-owned opaque IDs.
+// family. Native regular turns use UUIDv7 for user submissions and UUIDv4 for
+// mailbox wakeups. Only explicitly internal request kinds may carry opaque IDs.
 type CodexTurnID struct {
 	Kind  CodexTurnIDKind
 	Value string
@@ -47,6 +48,8 @@ func (id CodexTurnID) ValidFor(kind CodexWireRequestKind) bool {
 	case CodexTurnIDUserUUIDv7:
 		_, err := canonicalUUIDv7(id.Value)
 		return err == nil
+	case CodexTurnIDUserUUIDv4:
+		return validCodexTurnUUIDv4(id.Value)
 	case CodexTurnIDOpaqueInternal:
 		return kind.internal() && validCodexOpaqueTurnID(id.Value)
 	default:
@@ -355,10 +358,18 @@ func ResolveCodexTurnID(value string, kind CodexWireRequestKind) (CodexTurnID, b
 	if canonical, err := canonicalUUIDv7(value); err == nil {
 		return CodexTurnID{Kind: CodexTurnIDUserUUIDv7, Value: canonical}, true
 	}
+	if validCodexTurnUUIDv4(value) {
+		return CodexTurnID{Kind: CodexTurnIDUserUUIDv4, Value: value}, true
+	}
 	if kind.internal() && validCodexOpaqueTurnID(value) {
 		return CodexTurnID{Kind: CodexTurnIDOpaqueInternal, Value: value}, true
 	}
 	return CodexTurnID{}, false
+}
+
+func validCodexTurnUUIDv4(value string) bool {
+	parsed, err := uuid.Parse(value)
+	return err == nil && value == parsed.String() && parsed.Version() == uuid.Version(4) && parsed.Variant() == uuid.RFC4122
 }
 
 func parseCodexTurnID(value string, kind CodexWireRequestKind) (CodexTurnID, bool) {
