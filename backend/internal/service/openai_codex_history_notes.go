@@ -281,6 +281,10 @@ func (s *OpenAIGatewayService) doCodexAuxiliaryRequest(ctx context.Context, c *g
 	if account == nil || !account.Schedulable || !codexAuxiliaryAccountAvailable(account, now) {
 		return nil, ErrNoAvailableAccounts
 	}
+	proxyURL, err := ResolveAccountProxyURL(ctx, nil, account)
+	if err != nil {
+		return nil, err
+	}
 	credentials, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {
 		return nil, err
@@ -369,7 +373,7 @@ func (s *OpenAIGatewayService) doCodexAuxiliaryRequest(ctx context.Context, c *g
 		entry.UpstreamSent = true
 	}
 	req = ApplyOpenAIRequestPolicy(req, s.settingService)
-	resp, err := s.doCodexAuxiliaryUpstream(req, resolveAccountProxyURL(account), account)
+	resp, err := s.doCodexAuxiliaryUpstream(req, proxyURL, account)
 	if err != nil {
 		// Preserve transport error classification without changing account ownership.
 		return resp, &codexAuxiliaryTransportError{err: err}

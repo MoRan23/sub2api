@@ -151,6 +151,10 @@ func (s *OpenAIGatewayService) ResolvePluginOutboundIdentity(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
+	proxyURL, err := ResolveAccountProxyURL(ctx, nil, account)
+	if err != nil {
+		return nil, err
+	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, err
@@ -179,7 +183,7 @@ func (s *OpenAIGatewayService) ResolvePluginOutboundIdentity(ctx context.Context
 		AccountID:   account.ID,
 		Platform:    account.Platform,
 		AccountType: account.Type,
-		ProxyURL:    resolveAccountProxyURL(account),
+		ProxyURL:    proxyURL,
 		Token:       token,
 		Headers:     headers,
 	}, nil

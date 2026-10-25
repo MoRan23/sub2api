@@ -209,6 +209,7 @@ func TestTokenRefreshService_RefreshFailureDoesNotCallPrivacy(t *testing.T) {
 	}{
 		{name: "retry exhausted", err: errors.New("temporary upstream timeout")},
 		{name: "non retryable", err: errors.New("invalid_grant: token revoked")},
+		{name: "configured proxy unavailable", err: ErrAccountProxyUnavailable},
 	}
 
 	for _, tt := range tests {
@@ -236,7 +237,12 @@ func TestTokenRefreshService_RefreshFailureDoesNotCallPrivacy(t *testing.T) {
 			err := svc.refreshWithRetry(context.Background(), account, &tokenRefreshTestRefresher{err: tt.err}, nil, time.Hour)
 
 			require.Error(t, err)
-			if isNonRetryableRefreshError(tt.err) {
+			if errors.Is(tt.err, ErrAccountProxyUnavailable) {
+				require.ErrorIs(t, err, ErrAccountProxyUnavailable)
+				require.Zero(t, repo.setErrorCalls)
+				require.Zero(t, repo.setTempUnschedCalls)
+				require.Empty(t, repo.updatedCredentialIDs)
+			} else if isNonRetryableRefreshError(tt.err) {
 				require.Equal(t, 1, repo.setErrorCalls)
 				require.Zero(t, repo.setTempUnschedCalls)
 			} else {

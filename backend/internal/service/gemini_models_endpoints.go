@@ -180,6 +180,9 @@ func (s *GeminiMessagesCompatService) ForwardGetModel(ctx context.Context, accou
 // forwardGeminiModelsGET 向 AI Studio 兼容上游转发模型接口的 GET 请求。
 // path 会被直接拼到上游 base URL 后面，因此按路径护栏逐片段校验，见 upstream_path_guard.go。
 func (s *GeminiMessagesCompatService) forwardGeminiModelsGET(ctx context.Context, account *Account, path string) (*UpstreamHTTPResult, error) {
+	if _, err := ResolveAccountProxyURL(ctx, nil, account); err != nil {
+		return nil, err
+	}
 	sanitizedPath, ok := sanitizedUpstreamPathSuffix(path)
 	if !ok || sanitizedPath == "" {
 		return nil, errors.New("invalid path")
@@ -223,6 +226,9 @@ func (s *GeminiMessagesCompatService) forwardGeminiModelsGET(ctx context.Context
 // listVertexGeminiModels 读取 Vertex 服务账号在指定区域可用的 Gemini 模型。
 // 上游返回非 2xx 时 failure 为该页的原始响应，modelIDs 与 err 均为空。
 func (s *GeminiMessagesCompatService) listVertexGeminiModels(ctx context.Context, account *Account, location string) (modelIDs []string, failure *UpstreamHTTPResult, err error) {
+	if _, err := ResolveAccountProxyURL(ctx, nil, account); err != nil {
+		return nil, nil, err
+	}
 	if s.tokenProvider == nil {
 		return nil, nil, errors.New("gemini token provider not configured")
 	}
@@ -260,9 +266,9 @@ func (s *GeminiMessagesCompatService) listVertexGeminiModels(ctx context.Context
 
 // doGeminiModelsGET 发送模型接口请求并读取响应。响应体上限取 gateway.models_list_read_max_bytes，超出时报错；响应头按配置过滤。
 func (s *GeminiMessagesCompatService) doGeminiModelsGET(req *http.Request, account *Account) (*UpstreamHTTPResult, error) {
-	var proxyURL string
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := ResolveAccountProxyURL(req.Context(), nil, account)
+	if err != nil {
+		return nil, err
 	}
 
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)

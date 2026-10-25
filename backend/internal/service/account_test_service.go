@@ -648,6 +648,12 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		c.Set(openAIOAuthAccountTestCredentialKey, account)
 	}
 
+	// A missing eager-loaded proxy must not turn an account probe into a direct
+	// request. Resolve after OAuth credential selection, which may change routing.
+	if _, err := ResolveAccountProxyURL(ctx, nil, account); err != nil {
+		return s.sendErrorAndEnd(c, err.Error())
+	}
+
 	// Route to platform-specific test method
 	// 按入站协议分流的多协议供应商（国产厂商等）：按账号协议选测试路径。
 	if account.RoutesProtocolByInbound() {

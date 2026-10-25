@@ -1731,6 +1731,10 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifest(ctx context.Context, acc
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
 	}
+	proxyURL, err := ResolveAccountProxyURL(ctx, nil, account)
+	if err != nil {
+		return nil, err
+	}
 	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
 	credAccount, err := resolveCredentialAccount(ctx, s.accountRepo, account)
 	if err != nil {
@@ -1831,11 +1835,6 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifest(ctx context.Context, acc
 		headers.Set("Originator", clientIdentity.Originator)
 		headers.Set("Version", clientIdentity.Version)
 		headers.Set("User-Agent", clientIdentity.UserAgent)
-	}
-
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
 	}
 
 	policy, _ := openai.RequestPolicyFromContext(ctx)

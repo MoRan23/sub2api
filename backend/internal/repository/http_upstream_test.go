@@ -1019,11 +1019,14 @@ func TestHTTPUpstreamPublicHostsOnlyValidatesEveryRedirectHop(t *testing.T) {
 
 	plain, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://cdn.example.com/a.png", nil)
 	require.NoError(t, err)
-	require.Same(t, base, upstream.httpClientForUpstreamRequest(base, plain))
+	require.Same(t, base, upstream.httpClientForUpstreamRequest(base, plain, nil))
 
 	guarded, err := http.NewRequestWithContext(service.WithHTTPUpstreamPublicHostsOnly(t.Context()), http.MethodGet, "https://cdn.example.com/a.png", nil)
 	require.NoError(t, err)
-	client := upstream.httpClientForUpstreamRequest(base, guarded)
+	validator, err := upstream.buildHostValidator("")
+	require.NoError(t, err)
+	defer validator.CloseIdleConnections()
+	client := upstream.httpClientForUpstreamRequest(base, guarded, validator)
 	require.NotSame(t, base, client)
 	require.NotNil(t, client.CheckRedirect)
 	require.Nil(t, base.CheckRedirect, "the cached client must stay untouched")

@@ -76,7 +76,7 @@ func (p *GeminiTokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	if needsRefresh && p.refreshAPI != nil && p.executor != nil {
 		result, err := p.refreshAPI.RefreshIfNeeded(ctx, account, p.executor, geminiTokenRefreshSkew)
 		if err != nil {
-			if p.refreshPolicy.OnRefreshError == ProviderRefreshErrorReturn {
+			if errors.Is(err, ErrAccountProxyUnavailable) || p.refreshPolicy.OnRefreshError == ProviderRefreshErrorReturn {
 				return "", err
 			}
 		} else if result.LockHeld {
@@ -116,11 +116,9 @@ func (p *GeminiTokenProvider) GetAccessToken(ctx context.Context, account *Accou
 			return accessToken, nil
 		}
 
-		var proxyURL string
-		if account.ProxyID != nil && p.geminiOAuthService.proxyRepo != nil {
-			if proxy, err := p.geminiOAuthService.proxyRepo.GetByID(ctx, *account.ProxyID); err == nil && proxy != nil {
-				proxyURL = proxy.URL()
-			}
+		proxyURL, err := ResolveConfiguredProxyURL(ctx, p.geminiOAuthService.proxyRepo, account.ProxyID)
+		if err != nil {
+			return "", err
 		}
 
 		detected, tierID, err := p.geminiOAuthService.fetchProjectID(ctx, accessToken, proxyURL)

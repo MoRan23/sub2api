@@ -91,15 +91,9 @@ func (s *OpenAIOAuthService) GenerateAuthURLForOS(ctx context.Context, proxyID *
 	}
 
 	// Get proxy URL if specified
-	var proxyURL string
-	if proxyID != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *proxyID)
-		if err != nil {
-			return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_OAUTH_PROXY_NOT_FOUND", "proxy not found: %v", err)
-		}
-		if proxy != nil {
-			proxyURL = proxy.URL()
-		}
+	proxyURL, err := ResolveConfiguredProxyURL(ctx, s.proxyRepo, proxyID)
+	if err != nil {
+		return nil, err
 	}
 
 	// Use default redirect URI if not specified
@@ -204,12 +198,10 @@ func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExch
 	// override is only for an in-memory legacy session without a purpose.
 	proxyURL := session.ProxyURL
 	if input.ProxyID != nil && session.Purpose == "" {
-		proxy, err := s.proxyRepo.GetByID(ctx, *input.ProxyID)
+		var err error
+		proxyURL, err = ResolveConfiguredProxyURL(ctx, s.proxyRepo, input.ProxyID)
 		if err != nil {
-			return nil, infraerrors.Newf(http.StatusBadRequest, "OPENAI_OAUTH_PROXY_NOT_FOUND", "proxy not found: %v", err)
-		}
-		if proxy != nil {
-			proxyURL = proxy.URL()
+			return nil, err
 		}
 	}
 
@@ -443,12 +435,9 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 	ctx = WithOpenAINativeHTTPScope(ctx, account, "")
 	ctx = withOpenAIOAuthAuthUserAgent(ctx, account.GetOpenAIUserAgent())
 
-	var proxyURL string
-	if account.ProxyID != nil && s.proxyRepo != nil {
-		proxy, err := s.proxyRepo.GetByID(ctx, *account.ProxyID)
-		if err == nil && proxy != nil {
-			proxyURL = proxy.URL()
-		}
+	proxyURL, err := ResolveConfiguredProxyURL(ctx, s.proxyRepo, account.ProxyID)
+	if err != nil {
+		return nil, err
 	}
 
 	accessToken := account.GetCredential("access_token")

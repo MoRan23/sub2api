@@ -437,6 +437,10 @@ func (p *tokenRefreshProviderState) recordResult(err error) {
 		p.consecutiveFailures = 0
 		return
 	}
+	if errors.Is(err, ErrAccountProxyUnavailable) {
+		// A missing local route is not evidence of a provider outage.
+		return
+	}
 	if errors.Is(err, errRefreshSkipped) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		var attemptTimeoutErr *refreshAttemptTimeoutError
 		if !errors.As(err, &attemptTimeoutErr) {
@@ -999,6 +1003,11 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 		if errors.Is(err, errRefreshSkipped) {
 			return errRefreshSkipped
 		}
+		if errors.Is(err, ErrAccountProxyUnavailable) {
+			// Keep local proxy failures out of credential errors and account
+			// cooldowns. The next maintenance cycle can resolve the route again.
+			return err
+		}
 		if isProviderScopedTerminalRefreshError(err) {
 			return err
 		}
@@ -1548,11 +1557,9 @@ func (s *TokenRefreshService) ensureOpenAIPrivacy(ctx context.Context, account *
 		return
 	}
 
-	var proxyURL string
-	if account.ProxyID != nil && s.proxyRepo != nil {
-		if p, err := s.proxyRepo.GetByID(ctx, *account.ProxyID); err == nil && p != nil {
-			proxyURL = p.URL()
-		}
+	proxyURL, err := ResolveConfiguredProxyURL(ctx, s.proxyRepo, account.ProxyID)
+	if err != nil {
+		return
 	}
 
 	ctx = FreezeOpenAIRequestPolicy(ctx, s.settingService)
@@ -1595,11 +1602,9 @@ func (s *TokenRefreshService) ensureAntigravityPrivacy(ctx context.Context, acco
 
 	projectID, _ := account.Credentials["project_id"].(string)
 
-	var proxyURL string
-	if account.ProxyID != nil && s.proxyRepo != nil {
-		if p, err := s.proxyRepo.GetByID(ctx, *account.ProxyID); err == nil && p != nil {
-			proxyURL = p.URL()
-		}
+	proxyURL, err := ResolveConfiguredProxyURL(ctx, s.proxyRepo, account.ProxyID)
+	if err != nil {
+		return
 	}
 
 	mode := setAntigravityPrivacy(ctx, token, projectID, proxyURL)

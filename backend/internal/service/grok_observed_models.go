@@ -61,6 +61,12 @@ func (s *GrokQuotaService) syncGrokObservedModels(ctx context.Context, account *
 			return nil
 		}
 	}
+	scopedAccount := *account
+	account = &scopedAccount
+	proxyURL, err := s.resolveProxyURL(ctx, account)
+	if err != nil {
+		return err
+	}
 	token := strings.TrimSpace(account.GetGrokAccessToken())
 	if token == "" && s.tokenProvider != nil {
 		// Best-effort warm; avoid forcing refresh storms.
@@ -106,12 +112,6 @@ func (s *GrokQuotaService) syncGrokObservedModels(ctx context.Context, account *
 	}
 	account.ApplyHeaderOverrides(req.Header)
 
-	proxyURL := ""
-	if s.proxyRepo != nil && account.ProxyID != nil {
-		if p, err := s.proxyRepo.GetByID(ctx, *account.ProxyID); err == nil && p != nil {
-			proxyURL = p.URL()
-		}
-	}
 	if s.httpUpstream == nil {
 		return nil
 	}

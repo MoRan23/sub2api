@@ -189,15 +189,9 @@ func (s *OpenAIOAuthService) AuthorizeAccountWithRefreshToken(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	var proxyURL string
-	if account.ProxyID != nil && s.proxyRepo != nil {
-		proxy, proxyErr := s.proxyRepo.GetByID(ctx, *account.ProxyID)
-		if proxyErr != nil {
-			return nil, proxyErr
-		}
-		if proxy != nil {
-			proxyURL = proxy.URL()
-		}
+	proxyURL, err := ResolveConfiguredProxyURL(ctx, s.proxyRepo, account.ProxyID)
+	if err != nil {
+		return nil, err
 	}
 	// Subject verification precedes privacy/account enrichment, so importing an
 	// unrelated login cannot mutate that unrelated account's preferences.

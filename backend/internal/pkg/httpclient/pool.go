@@ -16,6 +16,7 @@
 package httpclient
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -61,8 +62,14 @@ type Options struct {
 // sharedClients 存储按配置参数缓存的 http.Client 实例
 var sharedClients sync.Map
 
-// 允许测试替换校验函数，生产默认指向真实实现。
-var validateResolvedIP = urlvalidator.ValidateResolvedIP
+type resolvedIPValidator interface {
+	Validate(context.Context, string) error
+	CloseIdleConnections()
+}
+
+var newResolvedIPValidator = func(proxyURL string) (resolvedIPValidator, error) {
+	return urlvalidator.NewResolvedIPValidator(proxyURL)
+}
 
 // GetClient 返回共享的 HTTP 客户端实例
 // 性能优化：相同配置复用同一客户端，避免重复创建 Transport
@@ -80,7 +87,10 @@ func GetClient(opts Options) (*http.Client, error) {
 		return nil, err
 	}
 
-	actual, _ := sharedClients.LoadOrStore(key, client)
+	actual, loaded := sharedClients.LoadOrStore(key, client)
+	if loaded {
+		client.CloseIdleConnections()
+	}
 	if c, ok := actual.(*http.Client); ok {
 		return c, nil
 	}
@@ -115,7 +125,14 @@ func buildClient(opts Options) (*http.Client, error) {
 		})
 	}
 	if opts.ValidateResolvedIP && !opts.AllowPrivateHosts {
-		rt = newValidatedTransport(rt)
+		validated, err := newValidatedTransport(rt, opts.ProxyURL)
+		if err != nil {
+			if closer, ok := rt.(interface{ CloseIdleConnections() }); ok {
+				closer.CloseIdleConnections()
+			}
+			return nil, err
+		}
+		rt = validated
 	}
 	rt = servertiming.WrapRoundTripper(rt)
 	return &http.Client{
@@ -184,21 +201,26 @@ func buildClientKey(opts Options) string {
 
 type validatedTransport struct {
 	base           http.RoundTripper
+	validator      resolvedIPValidator
 	validatedHosts sync.Map // map[string]time.Time, value 为过期时间
 	now            func() time.Time
 }
 
 func (t *validatedTransport) CloseIdleConnections() {
+	if t.validator != nil {
+		t.validator.CloseIdleConnections()
+	}
 	if closer, ok := t.base.(interface{ CloseIdleConnections() }); ok {
 		closer.CloseIdleConnections()
 	}
 }
 
-func newValidatedTransport(base http.RoundTripper) *validatedTransport {
-	return &validatedTransport{
-		base: base,
-		now:  time.Now,
+func newValidatedTransport(base http.RoundTripper, proxyURL string) (*validatedTransport, error) {
+	validator, err := newResolvedIPValidator(proxyURL)
+	if err != nil {
+		return nil, err
 	}
+	return &validatedTransport{base: base, validator: validator, now: time.Now}, nil
 }
 
 func (t *validatedTransport) isValidatedHost(host string, now time.Time) bool {
@@ -222,7 +244,16 @@ func (t *validatedTransport) isValidatedHost(host string, now time.Time) bool {
 }
 
 func (t *validatedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t == nil || t.base == nil || t.validator == nil {
+		return nil, fmt.Errorf("validated transport is not initialized")
+	}
 	if req != nil && req.URL != nil {
+		if err := req.Context().Err(); err != nil {
+			if req.Body != nil {
+				_ = req.Body.Close()
+			}
+			return nil, err
+		}
 		host := strings.ToLower(strings.TrimSpace(req.URL.Hostname()))
 		if host != "" {
 			now := time.Now()
@@ -230,15 +261,15 @@ func (t *validatedTransport) RoundTrip(req *http.Request) (*http.Response, error
 				now = t.now()
 			}
 			if !t.isValidatedHost(host, now) {
-				if err := validateResolvedIP(host); err != nil {
+				if err := t.validator.Validate(req.Context(), host); err != nil {
+					if req.Body != nil {
+						_ = req.Body.Close()
+					}
 					return nil, err
 				}
 				t.validatedHosts.Store(host, now.Add(validatedHostTTL))
 			}
 		}
-	}
-	if t == nil || t.base == nil {
-		return nil, fmt.Errorf("validated transport base is nil")
 	}
 	return t.base.RoundTrip(req)
 }

@@ -188,7 +188,11 @@ func getVertexServiceAccountAccessToken(ctx context.Context, cache GeminiTokenCa
 		}
 	}
 
-	accessToken, ttl, err := exchangeVertexServiceAccountToken(ctx, key, vertexServiceAccountProxyURL(account))
+	proxyURL, err := vertexServiceAccountProxyURL(ctx, account)
+	if err != nil {
+		return "", err
+	}
+	accessToken, ttl, err := exchangeVertexServiceAccountToken(ctx, key, proxyURL)
 	if err != nil {
 		return "", err
 	}
@@ -198,11 +202,8 @@ func getVertexServiceAccountAccessToken(ctx context.Context, cache GeminiTokenCa
 	return accessToken, nil
 }
 
-func vertexServiceAccountProxyURL(account *Account) string {
-	if account == nil || account.ProxyID == nil || account.Proxy == nil {
-		return ""
-	}
-	return account.Proxy.URL()
+func vertexServiceAccountProxyURL(ctx context.Context, account *Account) (string, error) {
+	return ResolveAccountProxyURL(ctx, nil, account)
 }
 
 func newVertexServiceAccountHTTPClient(proxyURL string) (*http.Client, error) {

@@ -18,11 +18,12 @@ const upstreamProtocolModeNativeHTTP = "codex_native_h1"
 // The outer http.Client owns redirects. Each physical RoundTrip selects the
 // final UA again, so redirected requests cannot inherit an incompatible pool.
 func (s *httpUpstreamService) doNativeHTTP(req *http.Request, proxyURL string, accountID int64, concurrency int) (*http.Response, error) {
-	client := &http.Client{Transport: &nativeUpstreamRoundTripper{s: s, proxyURL: proxyURL, accountID: accountID, concurrency: concurrency}}
-	if s.shouldValidateResolvedIP() {
-		client.CheckRedirect = s.redirectChecker
+	client := &http.Client{
+		Transport: &nativeUpstreamRoundTripper{s: s, proxyURL: proxyURL, accountID: accountID, concurrency: concurrency},
+		// RoundTrip validates each hop with its acquired proxy-specific client.
+		CheckRedirect: checkUpstreamRedirectLimit,
 	}
-	client = s.httpClientForUpstreamRequest(client, req)
+	client = s.httpClientForUpstreamRequest(client, req, nil)
 	return doUpstreamRequest(client, req)
 }
 
@@ -34,12 +35,6 @@ type nativeUpstreamRoundTripper struct {
 }
 
 func (t *nativeUpstreamRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if err := t.s.validateRequestHost(req); err != nil {
-		if req.Body != nil {
-			_ = req.Body.Close()
-		}
-		return nil, err
-	}
 	scope, _ := codexnative.ScopeFromContext(req.Context())
 	selection := codexnative.Resolve(codexnative.UserAgent(req.Header), scope)
 	profile := service.HTTPUpstreamProfileFromContext(req.Context())
@@ -53,6 +48,13 @@ func (t *nativeUpstreamRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 	release := func() {
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
+	}
+	if err := t.s.validateRequestHost(req, entry.hostValidator); err != nil {
+		release()
+		if req.Body != nil {
+			_ = req.Body.Close()
+		}
+		return nil, err
 	}
 	httpsendobserver.Notify(req)
 	response, err := entry.client.Transport.RoundTrip(req)
@@ -122,7 +124,12 @@ func (s *httpUpstreamService) acquireNativeClient(proxyURL string, accountID int
 	if err != nil {
 		return nil, err
 	}
-	entry = &upstreamClientEntry{client: &http.Client{Transport: transport}, proxyKey: proxyKey, poolKey: poolKey, protocolMode: upstreamProtocolModeNativeHTTP}
+	validator, err := s.buildHostValidator(proxyURL)
+	if err != nil {
+		(&http.Client{Transport: transport}).CloseIdleConnections()
+		return nil, err
+	}
+	entry = &upstreamClientEntry{client: &http.Client{Transport: transport}, hostValidator: validator, proxyKey: proxyKey, poolKey: poolKey, protocolMode: upstreamProtocolModeNativeHTTP}
 	atomic.StoreInt64(&entry.inFlight, 1)
 	atomic.StoreInt64(&entry.lastUsed, now.UnixNano())
 	s.clients[cacheKey] = entry

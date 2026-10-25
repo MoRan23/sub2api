@@ -134,12 +134,18 @@ type openAIHTTP2Settings struct {
 // upstreamClientEntry 上游客户端缓存条目
 // 记录客户端实例及其元数据，用于连接池管理和淘汰策略
 type upstreamClientEntry struct {
-	client       *http.Client // HTTP 客户端实例
-	proxyKey     string       // 代理标识（用于检测代理变更）
-	poolKey      string       // 连接池配置标识（用于检测配置变更）
-	protocolMode string       // 协议模式（default/long_stream_h2/openai_h1/openai_h2/openai_h1_fallback）
-	lastUsed     int64        // 最后使用时间戳（纳秒），用于 LRU 淘汰
-	inFlight     int64        // 当前进行中的请求数，>0 时不可淘汰
+	client        *http.Client          // HTTP 客户端实例
+	hostValidator upstreamHostValidator // DNS validation uses this client's selected proxy.
+	proxyKey      string                // 代理标识（用于检测代理变更）
+	poolKey       string                // 连接池配置标识（用于检测配置变更）
+	protocolMode  string                // 协议模式（default/long_stream_h2/openai_h1/openai_h2/openai_h1_fallback）
+	lastUsed      int64                 // 最后使用时间戳（纳秒），用于 LRU 淘汰
+	inFlight      int64                 // 当前进行中的请求数，>0 时不可淘汰
+}
+
+type upstreamHostValidator interface {
+	Validate(context.Context, string) error
+	CloseIdleConnections()
 }
 
 type openAIHTTP2FallbackState struct {
@@ -167,10 +173,11 @@ type openAIHTTP2FallbackState struct {
 // 7. 代理变更时清空旧连接池，避免复用错误代理
 // 8. 账号并发数与连接池上限对应（账号隔离策略下）
 type httpUpstreamService struct {
-	cfg     *config.Config // 全局配置
-	cookies *openaicookies.Manager
-	mu      sync.RWMutex                    // 保护 clients map 的读写锁
-	clients map[string]*upstreamClientEntry // 客户端缓存池，key 由隔离策略决定
+	cfg              *config.Config // 全局配置
+	cookies          *openaicookies.Manager
+	mu               sync.RWMutex                    // 保护 clients map 的读写锁
+	clients          map[string]*upstreamClientEntry // 客户端缓存池，key 由隔离策略决定
+	newHostValidator func(string) (upstreamHostValidator, error)
 	// OpenAI 走 HTTP/HTTPS 代理时的 H2->H1 回退状态（key=标准化 proxyKey）
 	openAIHTTP2Fallbacks sync.Map
 }
@@ -238,9 +245,6 @@ func (s *httpUpstreamService) httpClientWithRequestBoundary(client *http.Client,
 //   - inFlight > 0 的客户端不会被淘汰，确保活跃请求不被中断
 func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
 	applyGrokCLIProxyHeaders(req)
-	if err := s.validateRequestHost(req); err != nil {
-		return nil, err
-	}
 	if req != nil {
 		if _, enabled := codexnative.ScopeFromContext(req.Context()); enabled {
 			return s.doNativeHTTP(req, proxyURL, accountID, accountConcurrency)
@@ -256,9 +260,14 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	if err != nil {
 		return nil, err
 	}
+	if err := s.validateRequestHost(req, entry.hostValidator); err != nil {
+		atomic.AddInt64(&entry.inFlight, -1)
+		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
+		return nil, err
+	}
 
 	// 执行请求
-	client := s.httpClientForUpstreamRequest(entry.client, req)
+	client := s.httpClientForUpstreamRequest(entry.client, req, entry.hostValidator)
 	client = httpClientWithGrokAccessDeniedFallback(client)
 	resp, err := doUpstreamRequest(client, req)
 	if err != nil {
@@ -314,18 +323,19 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	}
 	slog.Debug("tls_fingerprint_enabled", "account_id", accountID, "target", targetHost, "proxy", proxyLogIdentity(proxyURL), "profile", profile.Name)
 
-	if err := s.validateRequestHost(req); err != nil {
-		return nil, err
-	}
-
 	entry, err := s.acquireClientWithTLS(proxyURL, accountID, accountConcurrency, profile, upstreamProfile)
 	if err != nil {
 		// Parser and network errors can embed a proxy URL containing userinfo.
 		slog.Debug("tls_fingerprint_acquire_client_failed", "account_id", accountID, "error_type", fmt.Sprintf("%T", err))
 		return nil, err
 	}
+	if err := s.validateRequestHost(req, entry.hostValidator); err != nil {
+		atomic.AddInt64(&entry.inFlight, -1)
+		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
+		return nil, err
+	}
 
-	client := s.httpClientForUpstreamRequest(entry.client, req)
+	client := s.httpClientForUpstreamRequest(entry.client, req, entry.hostValidator)
 	client = httpClientWithGrokAccessDeniedFallback(client)
 	resp, err := doUpstreamRequest(client, req)
 	if err != nil {
@@ -395,7 +405,7 @@ func (b *cancelOnCloseBody) Close() error {
 
 // httpClientForUpstreamRequest 按请求上下文的标记派生客户端：禁用重定向，或对重定向的每一跳做主机校验。
 // 派生的克隆与缓存客户端共享 Transport；未打标记时原样返回。
-func (s *httpUpstreamService) httpClientForUpstreamRequest(client *http.Client, req *http.Request) *http.Client {
+func (s *httpUpstreamService) httpClientForUpstreamRequest(client *http.Client, req *http.Request, validator upstreamHostValidator) *http.Client {
 	if client == nil || req == nil {
 		return client
 	}
@@ -410,7 +420,7 @@ func (s *httpUpstreamService) httpClientForUpstreamRequest(client *http.Client, 
 		selected = &clone
 	case service.HTTPUpstreamPublicHostsOnly(ctx) && selected.CheckRedirect == nil:
 		clone := *selected
-		clone.CheckRedirect = s.redirectChecker
+		clone.CheckRedirect = s.redirectChecker(validator)
 		selected = &clone
 	}
 	if openai.IsCodexResidencyRequest(req) {
@@ -672,16 +682,23 @@ func (s *httpUpstreamService) getClientEntryWithTLS(proxyURL string, accountID i
 		s.mu.Unlock()
 		return nil, fmt.Errorf("build TLS fingerprint transport: %w", err)
 	}
+	validator, err := s.buildHostValidator(proxyURL)
+	if err != nil {
+		(&http.Client{Transport: transport}).CloseIdleConnections()
+		s.mu.Unlock()
+		return nil, err
+	}
 
 	client := &http.Client{Transport: transport}
 	if s.shouldValidateResolvedIP() {
-		client.CheckRedirect = s.redirectChecker
+		client.CheckRedirect = s.redirectChecker(validator)
 	}
 
 	entry := &upstreamClientEntry{
-		client:   client,
-		proxyKey: proxyKey,
-		poolKey:  poolKey,
+		client:        client,
+		hostValidator: validator,
+		proxyKey:      proxyKey,
+		poolKey:       poolKey,
 	}
 	atomic.StoreInt64(&entry.lastUsed, nowUnix)
 	if markInFlight {
@@ -705,9 +722,16 @@ func (s *httpUpstreamService) shouldValidateResolvedIP() bool {
 	return !s.cfg.Security.URLAllowlist.AllowPrivateHosts
 }
 
+func (s *httpUpstreamService) buildHostValidator(proxyURL string) (upstreamHostValidator, error) {
+	if s.newHostValidator != nil {
+		return s.newHostValidator(proxyURL)
+	}
+	return urlvalidator.NewResolvedIPValidator(proxyURL)
+}
+
 // validateRequestHost 校验请求主机的解析结果不落在回环、私网、链路本地或未指定地址。
 // 是否全局启用由 security.url_allowlist 决定；带 WithHTTPUpstreamPublicHostsOnly 标记的请求无论配置如何都校验。
-func (s *httpUpstreamService) validateRequestHost(req *http.Request) error {
+func (s *httpUpstreamService) validateRequestHost(req *http.Request, validator upstreamHostValidator) error {
 	publicHostsOnly := req != nil && service.HTTPUpstreamPublicHostsOnly(req.Context())
 	if !s.shouldValidateResolvedIP() && !publicHostsOnly {
 		return nil
@@ -719,17 +743,26 @@ func (s *httpUpstreamService) validateRequestHost(req *http.Request) error {
 	if host == "" {
 		return errors.New("request host is empty")
 	}
-	if err := urlvalidator.ValidateResolvedIP(host); err != nil {
-		return err
+	if validator == nil {
+		return errors.New("upstream host validator is not initialized")
+	}
+	return validator.Validate(req.Context(), host)
+}
+
+func checkUpstreamRedirectLimit(_ *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
 	}
 	return nil
 }
 
-func (s *httpUpstreamService) redirectChecker(req *http.Request, via []*http.Request) error {
-	if len(via) >= 10 {
-		return errors.New("stopped after 10 redirects")
+func (s *httpUpstreamService) redirectChecker(validator upstreamHostValidator) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if err := checkUpstreamRedirectLimit(req, via); err != nil {
+			return err
+		}
+		return s.validateRequestHost(req, validator)
 	}
-	return s.validateRequestHost(req)
 }
 
 // acquireClient 获取或创建客户端，并标记为进行中请求
@@ -829,15 +862,22 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 		s.mu.Unlock()
 		return nil, fmt.Errorf("build transport: %w", err)
 	}
+	validator, err := s.buildHostValidator(proxyURL)
+	if err != nil {
+		transport.CloseIdleConnections()
+		s.mu.Unlock()
+		return nil, err
+	}
 	client := &http.Client{Transport: transport}
 	if s.shouldValidateResolvedIP() {
-		client.CheckRedirect = s.redirectChecker
+		client.CheckRedirect = s.redirectChecker(validator)
 	}
 	entry := &upstreamClientEntry{
-		client:       client,
-		proxyKey:     proxyKey,
-		poolKey:      poolKey,
-		protocolMode: protocolMode,
+		client:        client,
+		hostValidator: validator,
+		proxyKey:      proxyKey,
+		poolKey:       poolKey,
+		protocolMode:  protocolMode,
 	}
 	atomic.StoreInt64(&entry.lastUsed, nowUnix)
 	if markInFlight {
@@ -875,6 +915,9 @@ func (s *httpUpstreamService) shouldReuseEntry(entry *upstreamClientEntry, isola
 //   - entry: 客户端条目
 func (s *httpUpstreamService) removeClientLocked(key string, entry *upstreamClientEntry) {
 	delete(s.clients, key)
+	if entry != nil && entry.hostValidator != nil {
+		entry.hostValidator.CloseIdleConnections()
+	}
 	if entry != nil && entry.client != nil {
 		// 关闭空闲连接，释放系统资源
 		// 注意：这不会中断活跃连接

@@ -103,6 +103,9 @@ func (p *AntigravityTokenProvider) GetAccessToken(ctx context.Context, account *
 		defer cancel()
 		result, err := p.refreshAPI.RefreshIfNeeded(refreshCtx, account, p.executor, antigravityTokenRefreshSkew)
 		if err != nil {
+			if errors.Is(err, ErrAccountProxyUnavailable) {
+				return "", err
+			}
 			// 标记账号临时不可调度，避免后续请求继续命中
 			p.markTempUnschedulable(account, err)
 			if p.refreshPolicy.OnRefreshError == ProviderRefreshErrorReturn {
@@ -136,7 +139,12 @@ func (p *AntigravityTokenProvider) GetAccessToken(ctx context.Context, account *
 	if strings.TrimSpace(account.GetCredential("project_id")) == "" && p.antigravityOAuthService != nil {
 		if p.shouldAttemptBackfill(account.ID) {
 			p.markBackfillAttempted(account.ID)
-			if projectID, err := p.antigravityOAuthService.FillProjectID(ctx, account, accessToken); err == nil && projectID != "" {
+			projectID, err := p.antigravityOAuthService.FillProjectID(ctx, account, accessToken)
+			if errors.Is(err, ErrAccountProxyUnavailable) {
+				p.backfillCooldown.Delete(account.ID)
+				return "", err
+			}
+			if err == nil && projectID != "" {
 				account.Credentials["project_id"] = projectID
 				if updateErr := persistAccountCredentials(ctx, p.accountRepo, account, account.Credentials); updateErr != nil {
 					slog.Warn("antigravity_project_id_backfill_persist_failed",

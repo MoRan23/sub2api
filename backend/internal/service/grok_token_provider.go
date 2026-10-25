@@ -99,7 +99,7 @@ func (p *GrokTokenProvider) GetAccessToken(ctx context.Context, account *Account
 		defer cancel()
 		result, err := p.refreshAPI.RefreshIfNeeded(withOAuthRefreshRequestPath(refreshCtx), account, p.executor, grokTokenRefreshSkew)
 		if err != nil {
-			if p.refreshPolicy.OnRefreshError == ProviderRefreshErrorReturn {
+			if errors.Is(err, ErrAccountProxyUnavailable) || p.refreshPolicy.OnRefreshError == ProviderRefreshErrorReturn {
 				return "", err
 			}
 		} else if result != nil && result.LockHeld {
@@ -213,6 +213,9 @@ func (p *GrokTokenProvider) GetAccessTokenForManualTest(ctx context.Context, acc
 	defer cancel()
 	result, err := p.refreshAPI.RefreshIfNeeded(refreshCtx, account, p.executor, grokTokenRefreshSkew)
 	if err != nil {
+		if errors.Is(err, ErrAccountProxyUnavailable) {
+			return "", err
+		}
 		if tokenValid {
 			return accessToken, nil
 		}
