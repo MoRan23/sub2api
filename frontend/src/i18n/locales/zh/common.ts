@@ -308,6 +308,7 @@ export default {
     promoCodeInvalidCannotRegister: '优惠码无效，请检查后重试或清空优惠码',
     invitationCodeLabel: '邀请码',
     invitationCodePlaceholder: '请输入邀请码',
+    invitationCodeAcceptedHint: '支持注册邀请码或有效的返利邀请码；使用返利邀请码会自动绑定邀请人。',
     invitationCodeRequired: '请输入邀请码',
     invitationCodeValid: '邀请码有效',
     invitationCodeInvalid: '邀请码无效或已被使用',

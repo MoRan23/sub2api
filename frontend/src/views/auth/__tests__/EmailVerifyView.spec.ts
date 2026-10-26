@@ -800,14 +800,15 @@ describe('EmailVerifyView', () => {
     expect(showSuccessMock).not.toHaveBeenCalled()
   })
 
-  it('keeps the normal email registration flow unchanged', async () => {
+  it.each([undefined, 'REFERRAL123'])('preserves registration invitation and referral fields through email verification (%s)', async (referral) => {
     sessionStorage.setItem(
       'register_data',
       JSON.stringify({
         email: 'normal@example.com',
         password: 'secret-456',
         promo_code: 'PROMO',
-        invitation_code: 'INVITE',
+        invitation_code: referral || 'INVITE',
+        ...(referral ? { aff_code: referral } : {}),
       })
     )
     registerMock.mockResolvedValue({})
@@ -836,7 +837,8 @@ describe('EmailVerifyView', () => {
       tencent_captcha_ticket: undefined,
       tencent_captcha_randstr: undefined,
       promo_code: 'PROMO',
-      invitation_code: 'INVITE',
+      invitation_code: referral || 'INVITE',
+      ...(referral ? { aff_code: referral } : {}),
     })
     expect(apiClientPostMock).not.toHaveBeenCalled()
     expect(pushMock).toHaveBeenCalledWith('/dashboard')

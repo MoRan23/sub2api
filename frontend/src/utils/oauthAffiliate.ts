@@ -122,6 +122,12 @@ export function clearOAuthAffiliateCode(): void {
   }
 }
 
+// OAuth redirects keep their own referral snapshot; a saved registration link is
+// the fallback when the provider flow did not create that snapshot.
+export function loadOAuthRegistrationInvitationCode(): string {
+  return loadOAuthAffiliateCode() || loadAffiliateReferralCode()
+}
+
 export function clearAllAffiliateReferralCodes(): void {
   clearOAuthAffiliateCode()
   clearAffiliateReferralCode()

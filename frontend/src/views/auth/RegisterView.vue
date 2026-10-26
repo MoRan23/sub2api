@@ -164,6 +164,9 @@
               </span>
             </div>
           </transition>
+          <p class="mt-2 text-xs text-gray-500 dark:text-dark-400">
+            {{ t('auth.invitationCodeAcceptedHint') }}
+          </p>
         </div>
 
         <!-- Affiliate Invitation Code Input (Optional) -->
@@ -183,6 +186,7 @@
               :disabled="registrationActionDisabled"
               class="input pl-11"
               :placeholder="t('auth.invitationCodePlaceholder')"
+              @input="handleAffiliateCodeInput"
             />
           </div>
         </div>
@@ -497,6 +501,9 @@ const invitationValidation = reactive({
   message: ''
 })
 let invitationValidateTimeout: ReturnType<typeof setTimeout> | null = null
+let invitationValidationRequest = 0
+let invitationCodeEdited = false
+let affiliateCodeEdited = false
 
 const formData = reactive({
   email: '',
@@ -550,10 +557,21 @@ watch(validationToastMessage, (value, previousValue) => {
 
 function syncAffiliateReferralCode(): string {
   const code = resolveAffiliateReferralCode(route.query.aff, route.query.aff_code)
-  if (code) {
+  if (code && !affiliateCodeEdited) {
     formData.aff_code = code
   }
+  if (
+    invitationCodeEnabled.value && !invitationCodeEdited && formData.aff_code &&
+    formData.invitation_code !== formData.aff_code
+  ) {
+    formData.invitation_code = formData.aff_code
+    scheduleInvitationCodeValidation()
+  }
   return code
+}
+
+function handleAffiliateCodeInput(): void {
+  affiliateCodeEdited = true
 }
 
 // ==================== Lifecycle ====================
@@ -617,6 +635,7 @@ watch(
 )
 
 onUnmounted(() => {
+  invitationValidationRequest++
   if (promoValidateTimeout) {
     clearTimeout(promoValidateTimeout)
   }
@@ -763,7 +782,18 @@ function getPromoErrorMessage(errorCode?: string): string {
 // ==================== Invitation Code Validation ====================
 
 function handleInvitationCodeInput(): void {
+  invitationCodeEdited = true
+  scheduleInvitationCodeValidation()
+}
+
+function scheduleInvitationCodeValidation(): void {
   const code = formData.invitation_code.trim()
+  invitationValidationRequest++
+  invitationValidating.value = false
+  if (invitationValidateTimeout) {
+    clearTimeout(invitationValidateTimeout)
+    invitationValidateTimeout = null
+  }
 
   // Clear previous validation
   invitationValidation.valid = false
@@ -776,20 +806,22 @@ function handleInvitationCodeInput(): void {
   }
 
   // Debounce validation
-  if (invitationValidateTimeout) {
-    clearTimeout(invitationValidateTimeout)
-  }
-
   invitationValidateTimeout = setTimeout(() => {
     validateInvitationCodeDebounced(code)
   }, 500)
 }
 
 async function validateInvitationCodeDebounced(code: string): Promise<void> {
+  if (invitationValidateTimeout) {
+    clearTimeout(invitationValidateTimeout)
+    invitationValidateTimeout = null
+  }
+  const request = ++invitationValidationRequest
   invitationValidating.value = true
 
   try {
     const result = await validateInvitationCode(code)
+    if (request !== invitationValidationRequest || code !== formData.invitation_code.trim()) return
 
     if (result.valid) {
       invitationValidation.valid = true
@@ -801,11 +833,12 @@ async function validateInvitationCodeDebounced(code: string): Promise<void> {
       invitationValidation.message = getInvitationErrorMessage(result.error_code)
     }
   } catch {
+    if (request !== invitationValidationRequest || code !== formData.invitation_code.trim()) return
     invitationValidation.valid = false
     invitationValidation.invalid = true
     invitationValidation.message = t('auth.invitationCodeInvalid')
   } finally {
-    invitationValidating.value = false
+    if (request === invitationValidationRequest) invitationValidating.value = false
   }
 }
 

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 import PendingOAuthCreateAccountForm from '../PendingOAuthCreateAccountForm.vue'
+import { storeAffiliateReferralCode } from '@/utils/oauthAffiliate'
 
 const sendVerifyCode = vi.fn()
 const sendPendingOAuthVerifyCode = vi.fn()
@@ -39,6 +40,8 @@ vi.mock('@/stores', () => ({
 
 describe('PendingOAuthCreateAccountForm', () => {
   beforeEach(() => {
+    localStorage.clear()
+    sessionStorage.clear()
     sendVerifyCode.mockReset()
     sendPendingOAuthVerifyCode.mockReset()
     getPublicSettings.mockReset()
@@ -49,6 +52,39 @@ describe('PendingOAuthCreateAccountForm', () => {
       turnstile_enabled: false,
       turnstile_site_key: ''
     })
+  })
+
+  it('prefills a saved referral after settings load and preserves the user edit on submit', async () => {
+    storeAffiliateReferralCode('SAVED-REFERRAL')
+    let resolveSettings!: (value: Record<string, boolean>) => void
+    getPublicSettings.mockReturnValueOnce(new Promise(resolve => { resolveSettings = resolve }))
+    const wrapper = mount(PendingOAuthCreateAccountForm, {
+      props: { testIdPrefix: 'oidc', initialEmail: 'user@example.com', isSubmitting: false }
+    })
+    expect(wrapper.find('[data-testid="oidc-create-account-invitation-code"]').exists()).toBe(false)
+    resolveSettings({ invitation_code_enabled: true, email_verify_enabled: false })
+    await flushPromises()
+
+    const invitation = wrapper.get('[data-testid="oidc-create-account-invitation-code"]')
+    expect((invitation.element as HTMLInputElement).value).toBe('SAVED-REFERRAL')
+    await invitation.setValue('MANUAL-REFERRAL')
+    await wrapper.get('[data-testid="oidc-create-account-password"]').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({ invitationCode: 'MANUAL-REFERRAL' })
+  })
+
+  it('does not submit a hidden invitation prefill when invitation-only signup is disabled', async () => {
+    sessionStorage.setItem('oauth_aff_code', 'OAUTH-REFERRAL')
+    getPublicSettings.mockResolvedValue({ invitation_code_enabled: false, email_verify_enabled: false })
+    const wrapper = mount(PendingOAuthCreateAccountForm, {
+      props: { testIdPrefix: 'oidc', initialEmail: 'user@example.com', isSubmitting: false }
+    })
+    await flushPromises()
+    await wrapper.get('[data-testid="oidc-create-account-password"]').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+
+    expect(wrapper.find('[data-testid="oidc-create-account-invitation-code"]').exists()).toBe(false)
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({ invitationCode: undefined })
   })
 
   it('does not restart the code cooldown after switching away during a send', async () => {

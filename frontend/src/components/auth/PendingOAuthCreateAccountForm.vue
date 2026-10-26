@@ -76,6 +76,9 @@
       :placeholder="t('auth.invitationCodePlaceholder')"
       :disabled="isSubmitting"
     />
+    <p v-if="invitationCodeEnabled" class="text-xs text-gray-500 dark:text-dark-400">
+      {{ t('auth.invitationCodeAcceptedHint') }}
+    </p>
     <button
       :data-testid="`${testIdPrefix}-create-account-submit`"
       type="button"
@@ -102,6 +105,7 @@ import { useI18n } from 'vue-i18n'
 import TurnstileWidget from '@/components/CaptchaChallenge.vue'
 import { getPublicSettings, sendPendingOAuthVerifyCode } from '@/api/auth'
 import { useAppStore } from '@/stores'
+import { loadOAuthRegistrationInvitationCode } from '@/utils/oauthAffiliate'
 
 export type PendingOAuthCreateAccountPayload = {
   email: string
@@ -131,7 +135,7 @@ const appStore = useAppStore()
 const email = ref('')
 const password = ref('')
 const verifyCode = ref('')
-const invitationCode = ref('')
+const invitationCode = ref(loadOAuthRegistrationInvitationCode())
 const isSendingCode = ref(false)
 const sendCodeError = ref('')
 const sendCodeSuccess = ref(false)
@@ -333,7 +337,7 @@ async function handleSubmit() {
           tencentCaptchaRandstr: tencentCaptchaRandstr.value
         }
       : {}),
-    invitationCode: invitationCode.value.trim() || undefined
+    invitationCode: invitationCodeEnabled.value ? invitationCode.value.trim() || undefined : undefined
   })
 
   if (actionCaptchaEnabled.value) {

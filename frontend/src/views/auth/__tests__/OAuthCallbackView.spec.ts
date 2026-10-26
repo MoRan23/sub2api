@@ -96,6 +96,7 @@ describe('OAuthCallbackView', () => {
     exchangePendingOAuthCompletionMock.mockReset()
     apiPostMock.mockReset()
     window.sessionStorage.clear()
+    window.localStorage.clear()
   })
 
   it('renders localized callback copy actions', () => {
@@ -177,6 +178,7 @@ describe('OAuthCallbackView', () => {
     await passwordInputs[0].setValue('secret-123')
     await passwordInputs[1].setValue('secret-123')
     const invitationInput = wrapper.find('input[type="text"]')
+    expect((invitationInput.element as HTMLInputElement).value).toBe('AFF456')
     await invitationInput.setValue('INVITE456')
     await wrapper.findAll('button').at(0)?.trigger('click')
 
@@ -186,6 +188,26 @@ describe('OAuthCallbackView', () => {
       aff_code: 'AFF456',
     })
     expect(setTokenMock).toHaveBeenCalledWith('token-1')
+  })
+
+  it('uses the saved OAuth referral directly as the required registration invitation', async () => {
+    routeState.path = '/auth/oauth/callback'
+    exchangePendingOAuthCompletionMock.mockResolvedValue({
+      error: 'invitation_required', provider: 'github', resolved_email: 'pending@example.com'
+    })
+    apiPostMock.mockResolvedValue({ data: { access_token: 'token-1' } })
+    window.sessionStorage.setItem('oauth_aff_code', 'REFERRAL123')
+    const wrapper = mount(OAuthCallbackView)
+    await vi.dynamicImportSettled()
+    const passwordInputs = wrapper.findAll('input[type="password"]')
+    await passwordInputs[0].setValue('secret-123')
+    await passwordInputs[1].setValue('secret-123')
+    expect((wrapper.get('input[type="text"]').element as HTMLInputElement).value).toBe('REFERRAL123')
+    await wrapper.findAll('button').at(0)?.trigger('click')
+
+    expect(apiPostMock).toHaveBeenCalledWith('/auth/oauth/github/complete-registration', {
+      password: 'secret-123', invitation_code: 'REFERRAL123', aff_code: 'REFERRAL123'
+    })
   })
 
   it('completes email oauth registration with readonly email and without posting email', async () => {

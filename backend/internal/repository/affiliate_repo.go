@@ -76,6 +76,44 @@ func (r *affiliateRepository) GetAffiliateByCode(ctx context.Context, code strin
 	return queryAffiliateByCode(ctx, client, code)
 }
 
+// BindRegistrationInviter keeps referral admission, the active inviter and
+// account creation in one transaction. Share locks prevent concurrent deletion,
+// disabling or referral-code replacement until registration commits.
+func (r *affiliateRepository) BindRegistrationInviter(ctx context.Context, userID, inviterID int64, code string) error {
+	if dbent.TxFromContext(ctx) == nil || userID <= 0 || inviterID <= 0 || userID == inviterID {
+		return service.ErrInvitationCodeInvalid
+	}
+	client := clientFromContext(ctx, r.client)
+	rows, err := client.QueryContext(ctx, `
+SELECT u.id
+FROM users u JOIN user_affiliates ua ON ua.user_id = u.id
+WHERE u.id = $1 AND u.status = 'active' AND u.deleted_at IS NULL AND ua.aff_code = $2
+FOR SHARE OF u FOR UPDATE OF ua`, inviterID, strings.ToUpper(strings.TrimSpace(code)))
+	if err != nil {
+		return fmt.Errorf("validate registration inviter: %w", err)
+	}
+	found := rows.Next()
+	rowsErr := rows.Err()
+	closeErr := rows.Close()
+	if rowsErr != nil {
+		return rowsErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if !found {
+		return service.ErrInvitationCodeInvalid
+	}
+	bound, err := r.BindInviter(ctx, userID, inviterID)
+	if err != nil {
+		return err
+	}
+	if !bound {
+		return service.ErrInvitationCodeInvalid
+	}
+	return nil
+}
+
 func (r *affiliateRepository) BindInviter(ctx context.Context, userID, inviterID int64) (bool, error) {
 	var bound bool
 	err := r.withTx(ctx, func(txCtx context.Context, txClient *dbent.Client) error {

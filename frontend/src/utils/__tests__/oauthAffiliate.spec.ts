@@ -4,6 +4,7 @@ import {
   clearOAuthAffiliateCode,
   loadAffiliateReferralCode,
   loadOAuthAffiliateCode,
+  loadOAuthRegistrationInvitationCode,
   resolveAffiliateReferralCode,
   storeAffiliateReferralCode,
   storeOAuthAffiliateCode
@@ -44,5 +45,12 @@ describe('oauthAffiliate', () => {
 
     clearAffiliateReferralCode()
     expect(loadAffiliateReferralCode()).toBe('')
+  })
+
+  it('prefers the OAuth flow referral snapshot for invitation prefill and falls back to the saved link', () => {
+    storeAffiliateReferralCode('SAVED-LINK')
+    expect(loadOAuthRegistrationInvitationCode()).toBe('SAVED-LINK')
+    storeOAuthAffiliateCode('OAUTH-SNAPSHOT')
+    expect(loadOAuthRegistrationInvitationCode()).toBe('OAUTH-SNAPSHOT')
   })
 })

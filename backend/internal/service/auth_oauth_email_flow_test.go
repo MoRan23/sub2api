@@ -552,3 +552,31 @@ func TestFinalizeOAuthEmailAccount_SnapshotsPlatformQuotaDefaults(t *testing.T) 
 	require.NotNil(t, anthropicRecord.DailyLimitUSD)
 	require.InDelta(t, 5.5, *anthropicRecord.DailyLimitUSD, 0.0001)
 }
+
+func TestPendingOAuthReferralAdmissionRequiresCreationTransaction(t *testing.T) {
+	for _, verified := range []bool{false, true} {
+		t.Run(map[bool]string{false: "local verification", true: "provider verified"}[verified], func(t *testing.T) {
+			svc := newRegistrationInvitationTestService()
+			svc.emailService = NewEmailService(&settingRepoStub{}, &emailCacheStub{data: &VerificationCodeData{
+				Code: "246810", CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Minute),
+			}})
+			var user *User
+			var err error
+			if verified {
+				_, user, err = svc.RegisterVerifiedOAuthEmailAccount(context.Background(), "referral-new@example.com", "password123", "", "google", "REFERRAL")
+			} else {
+				_, user, err = svc.RegisterOAuthEmailAccount(context.Background(), "referral-new@example.com", "password123", "246810", "", "oidc", "REFERRAL")
+			}
+			require.ErrorIs(t, err, ErrServiceUnavailable)
+			require.Nil(t, user)
+			_, err = svc.userRepo.GetByEmail(context.Background(), "referral-new@example.com")
+			require.ErrorIs(t, err, ErrUserNotFound)
+		})
+	}
+}
+
+func TestPendingOAuthReferralExplicitInvalidDoesNotUseAffiliateFallback(t *testing.T) {
+	svc := newRegistrationInvitationTestService()
+	_, _, err := svc.RegisterVerifiedOAuthEmailAccount(context.Background(), "referral-new@example.com", "password123", "INVALID", "google", "REFERRAL")
+	require.ErrorIs(t, err, ErrInvitationCodeInvalid)
+}

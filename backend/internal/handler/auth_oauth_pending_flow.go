@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -1766,15 +1765,33 @@ func (h *AuthHandler) createPendingOAuthAccount(c *gin.Context, provider string)
 		return
 	}
 
+	affiliateCode := strings.TrimSpace(req.AffCode)
+	if affiliateCode == "" {
+		affiliateCode = pendingSessionStringValue(session.UpstreamIdentityClaims, "aff_code")
+	}
+	decision, err := h.ensurePendingOAuthAdoptionDecision(c, session.ID, req.adoptionDecision())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	tx, err := client.Tx(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, infraerrors.InternalServer("PENDING_AUTH_BIND_APPLY_FAILED", "failed to bind pending oauth identity").WithCause(err))
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	txCtx := dbent.NewTxContext(c.Request.Context(), tx)
 	tokenPair, user, err := h.authService.RegisterOAuthEmailAccount(
-		c.Request.Context(),
+		txCtx,
 		email,
 		req.Password,
 		strings.TrimSpace(req.VerifyCode),
 		strings.TrimSpace(req.InvitationCode),
 		strings.TrimSpace(session.ProviderType),
+		affiliateCode,
 	)
 	if err != nil {
+		_ = tx.Rollback()
 		if errors.Is(err, service.ErrEmailExists) {
 			existingUser, lookupErr := findUserByNormalizedEmail(c.Request.Context(), client, email)
 			if lookupErr != nil {
@@ -1793,50 +1810,15 @@ func (h *AuthHandler) createPendingOAuthAccount(c *gin.Context, provider string)
 		return
 	}
 
-	rollbackCreatedUser := func(originalErr error) bool {
-		if user == nil || user.ID <= 0 {
-			return false
+	committed := false
+	defer func() {
+		if !committed {
+			_ = h.authService.RevokeRefreshToken(context.WithoutCancel(c.Request.Context()), tokenPair.RefreshToken)
 		}
-		if rollbackErr := h.authService.RollbackOAuthEmailAccountCreation(
-			c.Request.Context(),
-			user.ID,
-			strings.TrimSpace(req.InvitationCode),
-		); rollbackErr != nil {
-			response.ErrorFrom(c, infraerrors.InternalServer(
-				"PENDING_AUTH_ACCOUNT_ROLLBACK_FAILED",
-				"failed to rollback pending oauth account creation",
-			).WithCause(fmt.Errorf("original error: %w; rollback error: %v", originalErr, rollbackErr)))
-			return true
-		}
-		user = nil
-		return false
-	}
-
-	decision, err := h.ensurePendingOAuthAdoptionDecision(c, session.ID, req.adoptionDecision())
-	if err != nil {
-		if rollbackCreatedUser(err) {
-			return
-		}
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	tx, err := client.Tx(c.Request.Context())
-	if err != nil {
-		if rollbackCreatedUser(err) {
-			return
-		}
-		response.ErrorFrom(c, infraerrors.InternalServer("PENDING_AUTH_BIND_APPLY_FAILED", "failed to bind pending oauth identity").WithCause(err))
-		return
-	}
-	defer func() { _ = tx.Rollback() }()
-	txCtx := dbent.NewTxContext(c.Request.Context(), tx)
+	}()
 
 	if err := applyPendingOAuthBinding(txCtx, client, h.authService, h.userService, session, decision, &user.ID, true, false); err != nil {
 		_ = tx.Rollback()
-		if rollbackCreatedUser(err) {
-			return
-		}
 		respondPendingOAuthBindingApplyError(c, err)
 		return
 	}
@@ -1846,21 +1828,15 @@ func (h *AuthHandler) createPendingOAuthAccount(c *gin.Context, provider string)
 		user,
 		strings.TrimSpace(req.InvitationCode),
 		strings.TrimSpace(session.ProviderType),
-		strings.TrimSpace(req.AffCode),
+		affiliateCode,
 	); err != nil {
 		_ = tx.Rollback()
-		if rollbackCreatedUser(err) {
-			return
-		}
 		response.ErrorFrom(c, err)
 		return
 	}
 
 	if err := consumePendingOAuthBrowserSessionTx(txCtx, tx, session); err != nil {
 		_ = tx.Rollback()
-		if rollbackCreatedUser(err) {
-			return
-		}
 		clearCookies()
 		response.ErrorFrom(c, err)
 		return
@@ -1869,21 +1845,16 @@ func (h *AuthHandler) createPendingOAuthAccount(c *gin.Context, provider string)
 	if pendingOAuthCreateAccountPreCommitHook != nil {
 		if err := pendingOAuthCreateAccountPreCommitHook(txCtx, session); err != nil {
 			_ = tx.Rollback()
-			if rollbackCreatedUser(err) {
-				return
-			}
 			respondPendingOAuthBindingApplyError(c, err)
 			return
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		if rollbackCreatedUser(err) {
-			return
-		}
 		response.ErrorFrom(c, infraerrors.InternalServer("PENDING_AUTH_BIND_APPLY_FAILED", "failed to bind pending oauth identity").WithCause(err))
 		return
 	}
+	committed = true
 
 	h.authService.ApplyOAuthSignupPromoCode(c.Request.Context(), user.ID, pendingOAuthPromoCode(session))
 	h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)

@@ -257,6 +257,7 @@ import {
 import {
   clearAllAffiliateReferralCodes,
   loadOAuthAffiliateCode,
+  loadOAuthRegistrationInvitationCode,
   oauthAffiliatePayload
 } from '@/utils/oauthAffiliate'
 
@@ -272,7 +273,7 @@ const errorMessage = ref('')
 
 // Invitation code flow state
 const needsInvitation = ref(false)
-const invitationCode = ref('')
+const invitationCode = ref(loadOAuthRegistrationInvitationCode())
 const isSubmitting = ref(false)
 const invitationError = ref('')
 const redirectTo = ref('/dashboard')

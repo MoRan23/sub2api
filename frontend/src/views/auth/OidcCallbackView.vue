@@ -267,6 +267,7 @@ import {
 import {
   clearAllAffiliateReferralCodes,
   loadOAuthAffiliateCode,
+  loadOAuthRegistrationInvitationCode,
   oauthAffiliatePayload
 } from '@/utils/oauthAffiliate'
 
@@ -280,7 +281,7 @@ const appStore = useAppStore()
 const isProcessing = ref(true)
 const errorMessage = ref('')
 const needsInvitation = ref(false)
-const invitationCode = ref('')
+const invitationCode = ref(loadOAuthRegistrationInvitationCode())
 const isSubmitting = ref(false)
 const invitationError = ref('')
 const redirectTo = ref('/dashboard')

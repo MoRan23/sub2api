@@ -1782,8 +1782,15 @@ func TestCreateOIDCOAuthAccountRollsBackCreatedUserWhenBindingFails(t *testing.T
 }
 
 func TestCreateOIDCOAuthAccountRollsBackPostBindFailureBeforeIdentityCanCommit(t *testing.T) {
+	refreshCache := &oauthPendingFlowRefreshTokenCacheStub{}
+	defaultSubAssigner := &oauthPendingFlowDefaultSubAssignerStub{}
 	handler, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{
 		emailVerifyEnabled: true,
+		refreshTokenCache:  refreshCache,
+		defaultSubAssigner: defaultSubAssigner,
+		settingValues: map[string]string{
+			service.SettingKeyAuthSourceDefaultOIDCSubscriptions: `[{"group_id":101,"validity_days":30}]`,
+		},
 		emailCache: &oauthPendingFlowEmailCacheStub{
 			verificationCodes: map[string]*service.VerificationCodeData{
 				"fresh@example.com": {
@@ -1851,6 +1858,9 @@ func TestCreateOIDCOAuthAccountRollsBackPostBindFailureBeforeIdentityCanCommit(t
 	storedSession, err := client.PendingAuthSession.Get(ctx, session.ID)
 	require.NoError(t, err)
 	require.Nil(t, storedSession.ConsumedAt)
+	require.Len(t, refreshCache.storedHashes, 1)
+	require.Equal(t, refreshCache.storedHashes, refreshCache.deletedHashes, "a failed transaction revokes the session created before finalization")
+	require.Empty(t, defaultSubAssigner.calls, "signup bootstrap runs only after commit")
 }
 
 func TestBindOIDCOAuthLoginBindsExistingUserAndConsumesSession(t *testing.T) {
@@ -2516,6 +2526,7 @@ type oauthPendingFlowTestHandlerOptions struct {
 	invitationEnabled  bool
 	emailVerifyEnabled bool
 	emailCache         service.EmailCache
+	refreshTokenCache  service.RefreshTokenCache
 	settingValues      map[string]string
 	promoRepo          service.PromoCodeRepository
 	defaultSubAssigner service.DefaultSubscriptionAssigner
@@ -2622,11 +2633,15 @@ CREATE TABLE IF NOT EXISTS user_affiliates (
 			},
 		}, options.emailCache)
 	}
+	refreshTokenCache := options.refreshTokenCache
+	if refreshTokenCache == nil {
+		refreshTokenCache = &oauthPendingFlowRefreshTokenCacheStub{}
+	}
 	authSvc := service.NewAuthService(
 		client,
 		userRepo,
 		redeemRepo,
-		&oauthPendingFlowRefreshTokenCacheStub{},
+		refreshTokenCache,
 		cfg,
 		settingSvc,
 		emailService,
@@ -2795,7 +2810,10 @@ func (s *oauthPendingFlowSettingRepoStub) Delete(context.Context, string) error 
 	return nil
 }
 
-type oauthPendingFlowRefreshTokenCacheStub struct{}
+type oauthPendingFlowRefreshTokenCacheStub struct {
+	storedHashes  []string
+	deletedHashes []string
+}
 
 type oauthPendingFlowEmailCacheStub struct {
 	verificationCodes map[string]*service.VerificationCodeData
@@ -2861,7 +2879,8 @@ func (s *oauthPendingFlowEmailCacheStub) GetNotifyCodeUserRate(context.Context, 
 	return 0, nil
 }
 
-func (s *oauthPendingFlowRefreshTokenCacheStub) StoreRefreshToken(context.Context, string, *service.RefreshTokenData, time.Duration) error {
+func (s *oauthPendingFlowRefreshTokenCacheStub) StoreRefreshToken(_ context.Context, hash string, _ *service.RefreshTokenData, _ time.Duration) error {
+	s.storedHashes = append(s.storedHashes, hash)
 	return nil
 }
 
@@ -2869,7 +2888,8 @@ func (s *oauthPendingFlowRefreshTokenCacheStub) GetRefreshToken(context.Context,
 	return nil, service.ErrRefreshTokenNotFound
 }
 
-func (s *oauthPendingFlowRefreshTokenCacheStub) DeleteRefreshToken(context.Context, string) error {
+func (s *oauthPendingFlowRefreshTokenCacheStub) DeleteRefreshToken(_ context.Context, hash string) error {
+	s.deletedHashes = append(s.deletedHashes, hash)
 	return nil
 }
 
@@ -3102,8 +3122,15 @@ type oauthPendingFlowUserRepoOptions struct {
 	rejectDeleteWhileAuthIdentityExists bool
 }
 
+func (r *oauthPendingFlowUserRepo) flowClient(ctx context.Context) *dbent.Client {
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		return tx.Client()
+	}
+	return r.client
+}
+
 func (r *oauthPendingFlowUserRepo) Create(ctx context.Context, user *service.User) error {
-	entity, err := r.client.User.Create().
+	entity, err := r.flowClient(ctx).User.Create().
 		SetEmail(user.Email).
 		SetUsername(user.Username).
 		SetNotes(user.Notes).
@@ -3145,7 +3172,7 @@ func (r *oauthPendingFlowUserRepo) CountUsersByEmailDomain(ctx context.Context, 
 	if domain == "" {
 		return 0, nil
 	}
-	emails, err := r.client.User.Query().Select(dbuser.FieldEmail).Strings(ctx)
+	emails, err := r.flowClient(ctx).User.Query().Select(dbuser.FieldEmail).Strings(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -3170,7 +3197,7 @@ func (r *oauthPendingFlowUserRepo) CreateWithEmailAliasGuardAndDomainLimit(ctx c
 }
 
 func (r *oauthPendingFlowUserRepo) GetByID(ctx context.Context, id int64) (*service.User, error) {
-	entity, err := r.client.User.Get(ctx, id)
+	entity, err := r.flowClient(ctx).User.Get(ctx, id)
 	if err != nil {
 		if dbent.IsNotFound(err) {
 			return nil, service.ErrUserNotFound
@@ -3181,7 +3208,7 @@ func (r *oauthPendingFlowUserRepo) GetByID(ctx context.Context, id int64) (*serv
 }
 
 func (r *oauthPendingFlowUserRepo) GetByEmail(ctx context.Context, email string) (*service.User, error) {
-	entity, err := r.client.User.Query().Where(dbuser.EmailEQ(email)).Only(ctx)
+	entity, err := r.flowClient(ctx).User.Query().Where(dbuser.EmailEQ(email)).Only(ctx)
 	if err != nil {
 		if dbent.IsNotFound(err) {
 			return nil, service.ErrUserNotFound
@@ -3196,7 +3223,7 @@ func (r *oauthPendingFlowUserRepo) GetFirstAdmin(context.Context) (*service.User
 }
 
 func (r *oauthPendingFlowUserRepo) Update(ctx context.Context, user *service.User, fields service.UserUpdateFields) error {
-	entity, err := r.client.User.UpdateOneID(user.ID).
+	entity, err := r.flowClient(ctx).User.UpdateOneID(user.ID).
 		SetEmail(user.Email).
 		SetUsername(user.Username).
 		SetNotes(user.Notes).
@@ -3221,12 +3248,12 @@ func (r *oauthPendingFlowUserRepo) Update(ctx context.Context, user *service.Use
 }
 
 func (r *oauthPendingFlowUserRepo) UpdateUserLastActiveAt(ctx context.Context, userID int64, activeAt time.Time) error {
-	return r.client.User.UpdateOneID(userID).SetLastActiveAt(activeAt).Exec(ctx)
+	return r.flowClient(ctx).User.UpdateOneID(userID).SetLastActiveAt(activeAt).Exec(ctx)
 }
 
 func (r *oauthPendingFlowUserRepo) Delete(ctx context.Context, id int64) error {
 	if r.options.rejectDeleteWhileAuthIdentityExists {
-		count, err := r.client.AuthIdentity.Query().Where(authidentity.UserIDEQ(id)).Count(ctx)
+		count, err := r.flowClient(ctx).AuthIdentity.Query().Where(authidentity.UserIDEQ(id)).Count(ctx)
 		if err != nil {
 			return err
 		}
@@ -3234,7 +3261,7 @@ func (r *oauthPendingFlowUserRepo) Delete(ctx context.Context, id int64) error {
 			return errors.New("cannot delete user while auth identities still exist")
 		}
 	}
-	return r.client.User.DeleteOneID(id).Exec(ctx)
+	return r.flowClient(ctx).User.DeleteOneID(id).Exec(ctx)
 }
 
 func (r *oauthPendingFlowUserRepo) GetUserAvatar(ctx context.Context, userID int64) (*service.UserAvatar, error) {

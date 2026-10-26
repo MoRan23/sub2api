@@ -1,5 +1,6 @@
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { reactive } from 'vue'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import RegisterView from '@/views/auth/RegisterView.vue'
 
 const {
@@ -8,6 +9,8 @@ const {
   showErrorMock,
   pushMock,
   verifyActionMock,
+  validateInvitationCodeMock,
+  routeState,
   appStoreMock
 } = vi.hoisted(() => ({
   getPublicSettingsMock: vi.fn(),
@@ -15,6 +18,8 @@ const {
   showErrorMock: vi.fn(),
   pushMock: vi.fn(),
   verifyActionMock: vi.fn(),
+  validateInvitationCodeMock: vi.fn(),
+  routeState: { query: {} as Record<string, string> },
   appStoreMock: {
     cachedPublicSettings: null as { promo_code_enabled?: boolean } | null,
     showError: (...args: unknown[]) => showErrorMock(...args),
@@ -42,7 +47,7 @@ const publicSettings = {
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: pushMock }),
-  useRoute: () => ({ query: {} })
+  useRoute: () => routeState
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -69,7 +74,8 @@ vi.mock('@/api/auth', async () => {
   const actual = await vi.importActual<typeof import('@/api/auth')>('@/api/auth')
   return {
     ...actual,
-    getPublicSettings: (...args: unknown[]) => getPublicSettingsMock(...args)
+    getPublicSettings: (...args: unknown[]) => getPublicSettingsMock(...args),
+    validateInvitationCode: (...args: unknown[]) => validateInvitationCodeMock(...args)
   }
 })
 
@@ -95,6 +101,8 @@ function mountRegister() {
   })
 }
 
+enableAutoUnmount(afterEach)
+
 describe('RegisterView', () => {
   beforeEach(() => {
     getPublicSettingsMock.mockReset()
@@ -102,11 +110,138 @@ describe('RegisterView', () => {
     showErrorMock.mockReset()
     pushMock.mockReset()
     verifyActionMock.mockReset()
+    validateInvitationCodeMock.mockReset()
+    validateInvitationCodeMock.mockResolvedValue({ valid: true })
+    routeState.query = reactive({})
     appStoreMock.cachedPublicSettings = null
     sessionStorage.removeItem('register_data')
+    localStorage.clear()
     verifyActionMock.mockResolvedValue({ token: 'ticket', randstr: 'randstr' })
     getPublicSettingsMock.mockResolvedValue(publicSettings)
     registerMock.mockResolvedValue({})
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('prefills and validates the latest referral link after asynchronous settings load', async () => {
+    vi.useFakeTimers()
+    routeState.query.aff = 'FIRST'
+    let resolveSettings!: (settings: typeof publicSettings) => void
+    getPublicSettingsMock.mockReturnValueOnce(new Promise(resolve => { resolveSettings = resolve }))
+    const wrapper = mountRegister()
+    expect(wrapper.find('#invitation_code').exists()).toBe(false)
+
+    routeState.query.aff = 'LATEST'
+    await flushPromises()
+    resolveSettings({ ...publicSettings, invitation_code_enabled: true, github_oauth_enabled: true })
+    await flushPromises()
+    expect((wrapper.get('#invitation_code').element as HTMLInputElement).value).toBe('LATEST')
+    expect(wrapper.getComponent({ name: 'EmailOAuthButtons' }).props('affCode')).toBe('LATEST')
+
+    await vi.advanceTimersByTimeAsync(500)
+    expect(validateInvitationCodeMock).toHaveBeenCalledTimes(1)
+    expect(validateInvitationCodeMock).toHaveBeenCalledWith('LATEST')
+    expect(wrapper.text()).toContain('auth.invitationCodeValid')
+    expect(wrapper.text()).toContain('auth.invitationCodeAcceptedHint')
+  })
+
+  it('keeps a manually edited invitation code when the referral link changes', async () => {
+    vi.useFakeTimers()
+    routeState.query.aff = 'LINK'
+    getPublicSettingsMock.mockResolvedValueOnce({ ...publicSettings, invitation_code_enabled: true })
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#invitation_code').setValue('MANUAL')
+    routeState.query.aff = 'OTHER'
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect((wrapper.get('#invitation_code').element as HTMLInputElement).value).toBe('MANUAL')
+    expect(validateInvitationCodeMock).toHaveBeenCalledTimes(1)
+    expect(validateInvitationCodeMock).toHaveBeenCalledWith('MANUAL')
+  })
+
+  it('keeps a manually edited optional referral when the referral link changes', async () => {
+    routeState.query.aff = 'LINK'
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#affiliate_code').setValue('MANUAL')
+    routeState.query.aff = 'OTHER'
+    await flushPromises()
+
+    expect((wrapper.get('#affiliate_code').element as HTMLInputElement).value).toBe('MANUAL')
+  })
+
+  it('ignores validation from an earlier referral after the displayed code changes', async () => {
+    vi.useFakeTimers()
+    routeState.query.aff = 'OLD'
+    getPublicSettingsMock.mockResolvedValueOnce({ ...publicSettings, invitation_code_enabled: true })
+    let rejectOld!: (result: { valid: boolean }) => void
+    validateInvitationCodeMock.mockReturnValueOnce(new Promise(resolve => { rejectOld = resolve }))
+    const wrapper = mountRegister()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(500)
+
+    routeState.query.aff = 'NEW'
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(500)
+    rejectOld({ valid: false })
+    await flushPromises()
+
+    expect((wrapper.get('#invitation_code').element as HTMLInputElement).value).toBe('NEW')
+    expect(wrapper.text()).toContain('auth.invitationCodeValid')
+    expect(showErrorMock).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])('preserves the referral admission code through email verification %s', async (emailVerify) => {
+    routeState.query.aff = 'REFERRAL123'
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings,
+      turnstile_enabled: false,
+      invitation_code_enabled: true,
+      email_verify_enabled: emailVerify
+    })
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#email').setValue('user@example.com')
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    const expected = {
+      email: 'user@example.com', password: 'secret-123',
+      invitation_code: 'REFERRAL123', aff_code: 'REFERRAL123'
+    }
+    expect(validateInvitationCodeMock).toHaveBeenCalledTimes(1)
+    expect(validateInvitationCodeMock).toHaveBeenCalledWith('REFERRAL123')
+    if (emailVerify) {
+      expect(JSON.parse(sessionStorage.getItem('register_data')!)).toEqual(expected)
+      expect(pushMock).toHaveBeenCalledWith('/email-verify')
+    } else {
+      expect(registerMock).toHaveBeenCalledWith(expect.objectContaining(expected))
+      expect(pushMock).toHaveBeenCalledWith('/dashboard')
+    }
+  })
+
+  it('accepts a referral entered directly in the required invitation field', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings, turnstile_enabled: false, invitation_code_enabled: true
+    })
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#email').setValue('user@example.com')
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
+    await wrapper.get('#invitation_code').setValue('REFERRAL456')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(validateInvitationCodeMock).toHaveBeenCalledWith('REFERRAL456')
+    expect(registerMock).toHaveBeenCalledWith(expect.objectContaining({ invitation_code: 'REFERRAL456' }))
+    expect(registerMock.mock.calls[0][0]).not.toHaveProperty('aff_code')
   })
 
   it('does not flash the promo-code field before disabled settings finish loading', async () => {

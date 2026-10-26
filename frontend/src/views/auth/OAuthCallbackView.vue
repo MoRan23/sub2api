@@ -161,6 +161,7 @@ import {
 import {
   clearAllAffiliateReferralCodes,
   loadOAuthAffiliateCode,
+  loadOAuthRegistrationInvitationCode,
   oauthAffiliatePayload
 } from '@/utils/oauthAffiliate'
 
@@ -177,7 +178,7 @@ const invitationRequired = ref(false)
 const registrationEmail = ref('')
 const password = ref('')
 const confirmPassword = ref('')
-const invitationCode = ref('')
+const invitationCode = ref(loadOAuthRegistrationInvitationCode())
 const registrationError = ref('')
 const pendingProvider = ref<'github' | 'google'>('github')
 const redirectTo = ref('/dashboard')

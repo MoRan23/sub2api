@@ -58,27 +58,18 @@ func (s *AuthService) SendPendingOAuthVerifyCode(ctx context.Context, email stri
 	}, nil
 }
 
-func (s *AuthService) validateOAuthRegistrationInvitation(ctx context.Context, invitationCode string) (*RedeemCode, error) {
-	if s == nil || s.settingService == nil || !s.settingService.IsInvitationCodeEnabled(ctx) {
-		return nil, nil
+func (s *AuthService) validatePendingOAuthRegistrationInvitation(ctx context.Context, invitationCode, affiliateCode string) (*registrationInvitation, error) {
+	invitation, err := s.resolveRegistrationInvitation(ctx, invitationCode, affiliateCode)
+	if err != nil {
+		return nil, err
 	}
-	if s.redeemRepo == nil && s.oauthEmailFlowClient(ctx) == nil {
+	// Pending OAuth consumes admission at finalization, after binding the
+	// identity. Referral admission requires the same transaction to own creation
+	// and finalization, so a failed bind cannot leave an admitted orphan user.
+	if invitation != nil && invitation.affiliateCode != "" && dbent.TxFromContext(ctx) == nil {
 		return nil, ErrServiceUnavailable
 	}
-
-	invitationCode = strings.TrimSpace(invitationCode)
-	if invitationCode == "" {
-		return nil, ErrInvitationCodeRequired
-	}
-
-	redeemCode, err := s.loadOAuthRegistrationInvitation(ctx, invitationCode)
-	if err != nil {
-		return nil, ErrInvitationCodeInvalid
-	}
-	if redeemCode.Type != RedeemTypeInvitation || !redeemCode.CanUse() {
-		return nil, ErrInvitationCodeInvalid
-	}
-	return redeemCode, nil
+	return invitation, nil
 }
 
 // VerifyOAuthEmailCode verifies the locally entered email verification code for
@@ -109,6 +100,7 @@ func (s *AuthService) RegisterOAuthEmailAccount(
 	verifyCode string,
 	invitationCode string,
 	signupSource string,
+	affiliateCodes ...string,
 ) (*TokenPair, *User, error) {
 	if s == nil {
 		return nil, nil, ErrServiceUnavailable
@@ -126,7 +118,7 @@ func (s *AuthService) RegisterOAuthEmailAccount(
 		return nil, nil, err
 	}
 
-	if _, err := s.validateOAuthRegistrationInvitation(ctx, invitationCode); err != nil {
+	if _, err := s.validatePendingOAuthRegistrationInvitation(ctx, invitationCode, firstOAuthAffiliateCode(affiliateCodes)); err != nil {
 		slog.Error("oauth email register: invitation failed", "email", email, "error", err.Error())
 		return nil, nil, err
 	}
@@ -191,6 +183,7 @@ func (s *AuthService) RegisterVerifiedOAuthEmailAccount(
 	password string,
 	invitationCode string,
 	signupSource string,
+	affiliateCodes ...string,
 ) (*TokenPair, *User, error) {
 	if s == nil {
 		return nil, nil, ErrServiceUnavailable
@@ -212,7 +205,7 @@ func (s *AuthService) RegisterVerifiedOAuthEmailAccount(
 	if strings.TrimSpace(password) == "" {
 		return nil, nil, infraerrors.BadRequest("PASSWORD_REQUIRED", "password is required")
 	}
-	if _, err := s.validateOAuthRegistrationInvitation(ctx, invitationCode); err != nil {
+	if _, err := s.validatePendingOAuthRegistrationInvitation(ctx, invitationCode, firstOAuthAffiliateCode(affiliateCodes)); err != nil {
 		return nil, nil, err
 	}
 
@@ -283,23 +276,45 @@ func (s *AuthService) FinalizeOAuthEmailAccount(
 	}
 
 	signupSource = normalizeOAuthSignupSource(signupSource)
-	invitationRedeemCode, err := s.validateOAuthRegistrationInvitation(ctx, invitationCode)
+	invitation, err := s.resolveRegistrationInvitation(ctx, invitationCode, affiliateCode)
 	if err != nil {
 		return err
 	}
-	if invitationRedeemCode != nil {
-		if err := s.useOAuthRegistrationInvitation(ctx, invitationRedeemCode.ID, user.ID); err != nil {
-			return ErrInvitationCodeInvalid
-		}
+	if err := s.consumeRegistrationInvitation(ctx, user.ID, invitation); err != nil {
+		return err
 	}
 
 	s.updateOAuthSignupSource(ctx, user.ID, signupSource)
 	grantPlan := s.resolveSignupGrantPlan(ctx, signupSource)
-	s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
-	// snapshot user × platform quota（fail-open）
-	_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
-	s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
+	bootstrap := func() {
+		bootstrapCtx := dbent.WithoutTx(ctx)
+		s.assignSubscriptions(bootstrapCtx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
+		// The quota snapshot intentionally uses an independent transaction; the
+		// new user must be committed before its foreign key can be referenced.
+		_ = s.snapshotPlatformQuotaDefaults(bootstrapCtx, user.ID, &grantPlan)
+		s.bindOAuthAffiliate(bootstrapCtx, user.ID, invitation.optionalAffiliateCode(affiliateCode))
+	}
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		tx.OnCommit(func(next dbent.Committer) dbent.Committer {
+			return dbent.CommitFunc(func(commitCtx context.Context, tx *dbent.Tx) error {
+				if err := next.Commit(commitCtx, tx); err != nil {
+					return err
+				}
+				bootstrap()
+				return nil
+			})
+		})
+	} else {
+		bootstrap()
+	}
 	return nil
+}
+
+func firstOAuthAffiliateCode(codes []string) string {
+	if len(codes) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(codes[0])
 }
 
 // RollbackOAuthEmailAccountCreation removes a partially-created local account
