@@ -348,6 +348,10 @@ func enqueueAttribution(ctx context.Context, tx *sql.Tx, id int64, c service.Att
 		return nil, service.ErrAttributionNotFound
 	}
 	s.Version = 4
+	if source == "manual" && a.IsOpenAIApiKey() {
+		allowed := a.IsOpenAIAPIKeyAutoAttributionEnabled()
+		s.ManualResultUpdatesAllowed = &allowed
+	}
 	s.Overrides.Model = model
 	if len(expectedModels) > 0 && expectedModels[0] != nil {
 		models := append([]string{}, (*expectedModels[0])...)
@@ -684,6 +688,10 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 			} else if j.Snapshot.Version < 2 && skip == service.ErrDiagnosticRateLimited.Error() {
 				j.Status, j.Reason = "skipped", skip
 			}
+		} else if reason := j.ManualResultWritebackReason(a); reason != "" {
+			// A manual diagnostic may finish and retain its real verdict, but it
+			// cannot consume the first applicable result or gain a pass streak.
+			j.Result.Action, j.Reason = "record_only", reason
 		} else if j.Snapshot.Version >= 3 && j.Snapshot.Daybreak != nil && *j.Snapshot.Daybreak != service.ReadDiagnosticDaybreakPreferences(a) {
 			j.Result.Action, j.Reason = "stale_policy", "daybreak_preferences_changed"
 		} else if issue := service.AttributionDaybreakIssue(j.Snapshot, j.Result); issue != "" {

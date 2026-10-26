@@ -109,8 +109,8 @@ func TestAttributionAPIKeyOptOutPreservesActiveTasks(t *testing.T) {
 				require.NoError(t, err)
 				require.Empty(t, jobs)
 				manual := attributionRun(t, r, a.ID, "passed")
-				require.Equal(t, "unchanged", manual.Result.Action, "manual result and unchanged baseline remain valid")
-				require.Equal(t, 2, manual.Result.PassStreak)
+				require.Equal(t, "record_only", manual.Result.Action, "manual diagnostics cannot apply results after automatic attribution is disabled")
+				require.Zero(t, manual.Result.PassStreak)
 			})
 		}
 	}

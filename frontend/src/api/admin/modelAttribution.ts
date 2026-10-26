@@ -17,7 +17,7 @@ export interface AttributionJob {
   source: string
   status: AttributionStatus
   reason?: string
-  snapshot: { version?: number; config_version: number; group_id: number; policy: AttributionPolicy; detector?: AttributionDetector; daybreak?: DiagnosticDaybreakPreferences; result_mode?: 'replace' | 'schedule'; scheduling_revision?: number }
+  snapshot: { version?: number; config_version: number; group_id: number; policy: AttributionPolicy; detector?: AttributionDetector; daybreak?: DiagnosticDaybreakPreferences; result_mode?: 'replace' | 'schedule'; scheduling_revision?: number; manual_result_updates_allowed?: boolean | null }
   result: {
     analysis?: { prediction: string; probability: number | null; ranking_score?: number; probability_status?: string; method?: string; detector?: AttributionDetector; used_outputs: number; results?: { model: string; probability: number | null; score?: number }[]; diagnostics?: { index: number; accepted: boolean; parsed_numbers: number; minimum_numbers: number }[] }
     duration_ms: number

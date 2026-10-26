@@ -446,18 +446,21 @@ type AttributionAnalysis struct {
 	Diagnostics       []AttributionDiagnostic `json:"diagnostics"`
 }
 type AttributionSnapshot struct {
-	Version            int                            `json:"version,omitempty"`
-	ResultMode         string                         `json:"result_mode,omitempty"`
-	SchedulingRevision int64                          `json:"scheduling_revision,omitempty"`
-	Daybreak           *DiagnosticDaybreakPreferences `json:"daybreak,omitempty"`
-	Overrides          AttributionProbeOptions        `json:"overrides"`
-	MappingDigest      string                         `json:"mapping_digest,omitempty"`
-	ConfigVersion      int64                          `json:"config_version"`
-	GroupID            int64                          `json:"group_id"`
-	Policy             AttributionPolicy              `json:"policy"`
-	Detector           *AttributionDetector           `json:"detector,omitempty"`
-	Authorization      string                         `json:"-"`
-	Fence              string                         `json:"-"`
+	Version int `json:"version,omitempty"`
+	// Only manual API-key diagnostics freeze this permission. Missing evidence
+	// on a legacy manual job must not grant permission to change routing state.
+	ManualResultUpdatesAllowed *bool                          `json:"manual_result_updates_allowed,omitempty"`
+	ResultMode                 string                         `json:"result_mode,omitempty"`
+	SchedulingRevision         int64                          `json:"scheduling_revision,omitempty"`
+	Daybreak                   *DiagnosticDaybreakPreferences `json:"daybreak,omitempty"`
+	Overrides                  AttributionProbeOptions        `json:"overrides"`
+	MappingDigest              string                         `json:"mapping_digest,omitempty"`
+	ConfigVersion              int64                          `json:"config_version"`
+	GroupID                    int64                          `json:"group_id"`
+	Policy                     AttributionPolicy              `json:"policy"`
+	Detector                   *AttributionDetector           `json:"detector,omitempty"`
+	Authorization              string                         `json:"-"`
+	Fence                      string                         `json:"-"`
 }
 
 const (
@@ -505,6 +508,22 @@ type AttributionJob struct {
 	NextAttemptAt *time.Time             `json:"next_attempt_at,omitempty"`
 	Checkpoint    *AttributionCheckpoint `json:"-"`
 	Claim         string                 `json:"-"`
+}
+
+// ManualResultWritebackReason keeps diagnostics available without granting them
+// account-management authority. OAuth has no account-level automatic switch.
+// Call with the account loaded under the result transaction's row lock.
+func (j *AttributionJob) ManualResultWritebackReason(a *Account) string {
+	if j.Source != "manual" || a == nil || !a.IsOpenAIApiKey() {
+		return ""
+	}
+	if !a.IsOpenAIAPIKeyAutoAttributionEnabled() || (j.Snapshot.ManualResultUpdatesAllowed != nil && !*j.Snapshot.ManualResultUpdatesAllowed) {
+		return "manual_auto_attribution_disabled"
+	}
+	if j.Snapshot.ManualResultUpdatesAllowed == nil {
+		return "manual_auto_attribution_unrecorded"
+	}
+	return ""
 }
 
 // AttributionCheckpoint is private recovery data, stored separately from the

@@ -23,6 +23,9 @@ func TestAttributionFirstVerdictInitializesWhitelist(t *testing.T) {
 						_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET extra='{"openai_api_key_mode":"codex_engine"}' WHERE id=$1`, a.ID)
 						require.NoError(t, err)
 					}
+					// First-result initialization requires permission to manage the
+					// whitelist; opt-out manual diagnostics are covered separately.
+					attributionSetAutomatic(t, a.ID, true)
 				}
 				first := attributionRun(t, r, a.ID, verdict)
 				want := map[string]any{"alias": "custom"}

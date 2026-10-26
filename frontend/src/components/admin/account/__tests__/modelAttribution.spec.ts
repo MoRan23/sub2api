@@ -36,6 +36,58 @@ beforeEach(() => { vi.clearAllMocks(); api.config.mockResolvedValue(config()); a
 afterEach(() => { vi.useRealTimers() })
 
 describe('attribution account UI', () => {
+  it.each([
+    { mode: 'replace', status: 'passed' },
+    { mode: 'replace', status: 'mismatch' },
+    { mode: 'schedule', status: 'passed' },
+    { mode: 'schedule', status: 'mismatch' }
+  ] as const)('keeps the $status verdict visible when $mode mode only records a manual result', ({ mode, status }) => {
+    const current = job(9, status)
+    current.snapshot.version = 4
+    current.snapshot.result_mode = mode
+    current.snapshot.manual_result_updates_allowed = false
+    current.reason = 'manual_auto_attribution_disabled'
+    current.result.action = 'record_only'
+    current.result.pass_streak = 0
+    const wrapper = mount(AttributionResult, { props: { job: current } })
+    expect(wrapper.text()).toContain(`attribution.status.${status}`)
+    expect(wrapper.text()).toContain('attribution.reasons.manual_auto_attribution_disabled')
+    expect(wrapper.get('[data-testid="attribution-result-action"]').text()).toBe('attribution.actions.record_only')
+    expect(wrapper.get('[data-testid="attribution-result-mode"]').text()).toBe(`attribution.resultModes.${mode}`)
+    expect(wrapper.get('[data-testid="attribution-pass-streak"]').text()).toBe('0')
+    expect(wrapper.text()).not.toContain('attribution.actions.high')
+    expect(wrapper.text()).not.toContain('attribution.actions.low')
+    expect(wrapper.text()).not.toContain('attribution.actions.schedule_paused')
+    expect(wrapper.find('[data-testid="attribution-scheduling-change"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+  it('shows why a legacy manual task only records its result without inferring snapshot permission', () => {
+    const current = job()
+    current.reason = 'manual_auto_attribution_unrecorded'
+    current.result.action = 'record_only'
+    const wrapper = mount(AttributionResult, { props: { job: current } })
+    expect(wrapper.text()).toContain('attribution.reasons.manual_auto_attribution_unrecorded')
+    expect(wrapper.get('[data-testid="attribution-result-action"]').text()).toBe('attribution.actions.record_only')
+    expect(wrapper.text()).toContain('attribution.status.passed')
+    wrapper.unmount()
+  })
+  it('labels record-only results in history alongside their actual verdicts', async () => {
+    const passed = job(1, 'passed')
+    passed.result.action = 'record_only'
+    const mismatch = job(2, 'mismatch')
+    mismatch.snapshot.version = 4
+    mismatch.snapshot.result_mode = 'schedule'
+    mismatch.result.action = 'record_only'
+    api.history.mockResolvedValue(page([passed, mismatch]))
+    const wrapper = mount(AttributionHistory, { props: { accountId: 42 } })
+    await flushPromises()
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].text()).toContain('attribution.status.passed')
+    expect(rows[1].text()).toContain('attribution.status.mismatch')
+    for (const row of rows) expect(row.text()).toContain('attribution.actions.record_only')
+    wrapper.unmount()
+  })
   it.each(['schedule_paused', 'schedule_resumed', 'schedule_already_paused', 'schedule_manual_pause', 'schedule_ineligible'])('shows the frozen scheduling mode and %s action', (action) => {
     const current = job(9, action === 'schedule_paused' ? 'mismatch' : 'passed')
     current.snapshot.version = 4

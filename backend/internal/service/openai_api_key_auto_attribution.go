@@ -4,8 +4,9 @@ import infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 
 const OpenAIAPIKeyAutoAttributionEnabledExtraKey = "openai_api_key_auto_attribution_enabled"
 
-// IsOpenAIAPIKeyAutoAttributionEnabled is an enqueue preference shared by generic
-// and Engine API-key accounts. Missing preferences never enable automatic probes.
+// IsOpenAIAPIKeyAutoAttributionEnabled controls automatic enqueue and whether
+// manual diagnostics may apply routing changes for generic and Engine accounts.
+// Missing preferences never enable automatic probes or manual result updates.
 func (a *Account) IsOpenAIAPIKeyAutoAttributionEnabled() bool {
 	if a == nil || !a.IsOpenAIApiKey() {
 		return false
