@@ -10,7 +10,7 @@ import (
 func TestPelicanPromptIsExactAndVersioned(t *testing.T) {
 	require.Equal(t, "pelican-v1", CandyTestPromptVersion)
 	require.Equal(t, "创建一个HTML，内容是SVG绘制一个鹈鹕骑自行车的2D动画，你不需要进行任何测试", CandyTestPrompt)
-	require.Equal(t, "请在最终回复中提供完整、自包含的 HTML 源码。", pelicanTestInstructions)
+	require.Equal(t, "直接返回完整、独立的 HTML，不使用 Markdown 代码块或外部依赖。只输出 HTML，不要解释。", pelicanTestInstructions)
 }
 
 func TestExtractPelicanHTML(t *testing.T) {
