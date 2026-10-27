@@ -29,7 +29,17 @@ export const attributionZh = {
   modelsUnavailable: '部分账号目录读取失败，保留可用的账号配置候选，仍可输入模型 ID 发起测试。',
   expectedModelsUnavailable: '检测器参考库读取失败，仍可输入期望模型 ID；执行时会验证是否收录。',
   invalidManualModel: '请输入具体模型 ID，不含空格或通配符。',
-  mappingHelp: '仅替换同名白名单条目，保留自定义别名与通配符映射。启用前请填好服务地址及两份非空白名单。',
+  mappingHelp: '未开启“替换模型映射”时保留自定义别名及通配符映射；开启后使用该档白名单和映射整体替换。启用自动检测前请填好服务地址及两份非空白名单。',
+  accountActions: {
+    modeHelp: '以下动作仅用于账号的白名单模式，与高级／低级白名单同时应用。首次有效判定立即应用，此后升级需连续通过两次、不通过立即降级。保存配置不会立即修改账号。',
+    replaceMapping: '替换模型映射', replaceMappingHelp: '整体替换该账号的模型配置，删除其他旧映射。该档白名单与下方映射共同生效；同名键以显式映射为准。留空表示只保留该档白名单。',
+    keepMappingHelp: '保持现有行为：只替换同名白名单条目，保留账号原有别名与通配符映射。',
+    mappingFrom: '请求模型 ID（支持末尾 *）', mappingTo: '目标模型 ID', addMapping: '添加模型映射', removeMapping: '移除第 {index} 条映射', preview: '预览最终模型配置',
+    invalidMapping: '每条映射须填写来源和目标（最多 200 字符且不含空白）；来源最多一个末尾 *，目标不允许通配符。', duplicateMapping: '来源模型重复，请为每个来源只保留一条映射。', tooManyMappings: '模型映射最多 500 条。',
+    replaceGroups: '调整所属分组', replaceGroupsHelp: '用以下列表整体替换账号所属分组，至少选择一个分组；顺序决定绑定优先级。下一轮按新分组策略检测，策略不同则重新累计连续通过。OAuth-only 组仅适用于 OAuth 账号。',
+    groupRequired: '启用分组调整后，至少选择一个目标分组。', invalid: '请修正模型映射或目标分组配置后再保存。',
+    appliedTier: '本轮实际应用档位', tiers: { high: '高级配置', low: '低级配置' }, groupChanges: '所属分组变化（按绑定优先级）', groupsUnchanged: '本轮未调整所属分组', mappingUnchanged: '本轮未修改模型配置', noGroups: '无所属分组'
+  },
   newAccount: {
     title: '新 OAuth 账号首测', attribution: '新账号自动执行一次归因测试', pelican: '新账号自动执行一次鹈鹕测试', attributionModel: '归因首测模型', pelicanModel: '鹈鹕首测模型',
     help: '新建或导入的 OpenAI OAuth 实体账号自动开始测试，消耗上游额度。仅影响保存后新增的账号，不补测已有账号；停用、过期及自动透传账号跳过。关闭调度时，只有采用调度处理模式的归因首测可继续，鹈鹕首测仍跳过。关闭归因首测不影响每 10 分钟的周期检测。',
@@ -45,8 +55,11 @@ export const attributionZh = {
   duration: '耗时', usage: '用量（输入 / 输出 tokens）', action: '白名单处理', changes: '模型映射变化', before: '变更前', after: '变更后', source: '来源', scheduled: '自动', manual: '手动',
   diagnostics: '探针有效性', evidence: '实际出站 / 上游声明模型', reason: '原因', allGroups: '全局默认', close: '关闭', loading: '加载中…', error: '操作失败，请重试。',
   status: { queued: '启动中', running: '检测中', retry_wait: '等待重试', cancelled: '已取消', passed: '通过', mismatch: '不通过', abnormal: '异常', failed: '执行失败', skipped: '已跳过' },
-  actions: { high: '已应用高级白名单', low: '已应用低级白名单', awaiting_confirmation: '已通过 1 次，等待再次通过；白名单未修改', unchanged: '无需修改', stale: '结果已过期，未修改', stale_policy: '判定已保存；未更新白名单或累计升级', record_only: '仅记录判定；白名单和调度未修改，不累计升级／恢复次数', none: '未修改', unconfigured: '未配置高低级白名单，仅记录结果', schedule_paused: '已暂停调度，白名单未修改', schedule_resumed: '已连续通过两次，恢复由归因暂停的调度', schedule_already_paused: '调度原已关闭，保持原暂停来源', schedule_manual_pause: '已连续通过两次，保留管理员暂停', schedule_ineligible: '已连续通过两次，账号已停用或过期，保留暂停' },
+  actions: { high: '已应用高级配置', low: '已应用低级配置', awaiting_confirmation: '已通过 1 次，等待再次通过；账号配置未修改', unchanged: '无需修改', stale: '结果已过期，未修改', stale_policy: '判定已保存；未更新账号配置或累计升级', actions_blocked: '判定已保存；目标分组不可应用，账号配置未修改', record_only: '仅记录判定；模型配置、分组和调度未修改，不累计升级／恢复次数', none: '未修改', unconfigured: '未配置高低级白名单，仅记录结果', schedule_paused: '已暂停调度，白名单未修改', schedule_resumed: '已连续通过两次，恢复由归因暂停的调度', schedule_already_paused: '调度原已关闭，保持原暂停来源', schedule_manual_pause: '已连续通过两次，保留管理员暂停', schedule_ineligible: '已连续通过两次，账号已停用或过期，保留暂停' },
   reasons: {
+    account_groups_changed: '检测期间账号所属分组或绑定优先级已被修改；本轮只保存判定，不覆盖该调整',
+    target_groups_unavailable: '目标分组已删除或不可用；本轮只保存判定，不修改模型配置和所属分组',
+    target_groups_incompatible: '目标分组与当前账号或运行模式不兼容；本轮只保存判定，不修改模型配置和所属分组',
     manual_auto_attribution_disabled: '创建手动任务时或应用结果前，账号未开启自动归因；本轮仅记录判定',
     manual_auto_attribution_unrecorded: '旧手动任务未记录账号自动归因设置；本轮仅记录判定',
     result_mode_changed: '账号结果处理模式已变化，本轮仅保存实际判定', scheduling_changed: '调度设置已被修改，本轮仅保存实际判定',
@@ -94,7 +107,17 @@ export const attributionEn = {
   modelsUnavailable: 'Some account catalogs could not be loaded. Available configured candidates are retained; you can still enter a model ID.',
   expectedModelsUnavailable: 'Could not load the detector reference bank. You can still enter expected model IDs; enrollment is checked when the test runs.',
   invalidManualModel: 'Enter a concrete model ID without whitespace or wildcards.',
-  mappingHelp: 'Replace identity allowlist entries only; preserve custom aliases and wildcard mappings. Configure the service and both nonempty allowlists before enabling.',
+  mappingHelp: 'When mapping replacement is off, preserve custom aliases and wildcard mappings. When enabled, replace the complete model configuration with this tier’s allowlist and mappings. Configure the service and both nonempty allowlists before enabling automatic detection.',
+  accountActions: {
+    modeHelp: 'These actions apply only in account allowlist mode, together with the selected tier. Apply the first valid verdict immediately; later promotion requires two consecutive passes, while a mismatch applies the low tier immediately. Saving does not modify accounts.',
+    replaceMapping: 'Replace model mappings', replaceMappingHelp: 'Replace the complete account model configuration and remove all other mappings. Combine this tier’s allowlist with the mappings below; explicit mappings take precedence for the same key. Leave empty to retain only this tier’s allowlist.',
+    keepMappingHelp: 'Keep existing behavior: replace identity allowlist entries while preserving the account’s aliases and wildcard mappings.',
+    mappingFrom: 'Request model ID (trailing * allowed)', mappingTo: 'Target model ID', addMapping: 'Add model mapping', removeMapping: 'Remove mapping {index}', preview: 'Preview final model configuration',
+    invalidMapping: 'Each mapping needs a source and target, up to 200 characters without whitespace. The source may contain one trailing *; targets cannot contain wildcards.', duplicateMapping: 'Duplicate source model; keep only one mapping for each source.', tooManyMappings: 'Up to 500 model mappings are allowed.',
+    replaceGroups: 'Change account groups', replaceGroupsHelp: 'Replace all account memberships with this nonempty list. Order determines binding priority. The next test follows the new groups’ policy; a different policy starts a new pass streak. OAuth-only groups require an OAuth account.',
+    groupRequired: 'Select at least one target group when group replacement is enabled.', invalid: 'Correct the model mappings or target groups before saving.',
+    appliedTier: 'Tier applied this round', tiers: { high: 'High-tier configuration', low: 'Low-tier configuration' }, groupChanges: 'Group membership changes (binding priority order)', groupsUnchanged: 'No group membership changes this round', mappingUnchanged: 'No model configuration changes this round', noGroups: 'No groups'
+  },
   newAccount: {
     title: 'New OAuth account tests', attribution: 'Run attribution once for new accounts', pelican: 'Run pelican once for new accounts', attributionModel: 'Initial attribution model', pelicanModel: 'Initial pelican model',
     help: 'Newly created or imported physical OpenAI OAuth accounts start tests automatically and consume upstream quota. Applies to new accounts after saving, without backfilling existing accounts. Inactive, expired and passthrough accounts are skipped. Paused scheduling only permits initial attribution in scheduling mode; initial pelican tests still skip. Disabling initial attribution does not disable the ten-minute periodic checks.',
@@ -110,8 +133,11 @@ export const attributionEn = {
   duration: 'Duration', usage: 'Usage (input / output tokens)', action: 'Allowlist action', changes: 'Model mapping changes', before: 'Before', after: 'After', source: 'Source', scheduled: 'Automatic', manual: 'Manual',
   diagnostics: 'Probe validity', evidence: 'Outbound / upstream model', reason: 'Reason', allGroups: 'Global default', close: 'Close', loading: 'Loading…', error: 'Operation failed. Please retry.',
   status: { queued: 'Starting', running: 'Running', retry_wait: 'Waiting to retry', cancelled: 'Cancelled', passed: 'Passed', mismatch: 'Mismatch', abnormal: 'Abnormal', failed: 'Failed', skipped: 'Skipped' },
-  actions: { high: 'High-tier allowlist applied', low: 'Low-tier allowlist applied', awaiting_confirmation: 'Passed once; awaiting another pass. Allowlist unchanged', unchanged: 'No change needed', stale: 'Stale result, no changes', stale_policy: 'Verdict recorded without updating allowlists or promotion streak', record_only: 'Verdict recorded only; allowlists and scheduling unchanged, with no promotion or recovery progress', none: 'Unchanged', unconfigured: 'Allowlists not configured; result recorded only', schedule_paused: 'Scheduling paused; allowlists unchanged', schedule_resumed: 'Two consecutive passes; attribution-paused scheduling resumed', schedule_already_paused: 'Scheduling was already disabled; original pause ownership retained', schedule_manual_pause: 'Two consecutive passes; administrator pause preserved', schedule_ineligible: 'Two consecutive passes; account inactive or expired, scheduling remains paused' },
+  actions: { high: 'High-tier configuration applied', low: 'Low-tier configuration applied', awaiting_confirmation: 'Passed once; awaiting another pass. Account configuration unchanged', unchanged: 'No change needed', stale: 'Stale result, no changes', stale_policy: 'Verdict recorded without updating account configuration or promotion streak', actions_blocked: 'Verdict recorded; target groups cannot be applied, account configuration unchanged', record_only: 'Verdict recorded only; model configuration, groups and scheduling unchanged, with no promotion or recovery progress', none: 'Unchanged', unconfigured: 'Allowlists not configured; result recorded only', schedule_paused: 'Scheduling paused; allowlists unchanged', schedule_resumed: 'Two consecutive passes; attribution-paused scheduling resumed', schedule_already_paused: 'Scheduling was already disabled; original pause ownership retained', schedule_manual_pause: 'Two consecutive passes; administrator pause preserved', schedule_ineligible: 'Two consecutive passes; account inactive or expired, scheduling remains paused' },
   reasons: {
+    account_groups_changed: 'Account groups or binding priorities changed during the test; verdict recorded without overwriting those changes',
+    target_groups_unavailable: 'A target group was deleted or is unavailable; verdict recorded without changing model configuration or groups',
+    target_groups_incompatible: 'Target groups are incompatible with the account or run mode; verdict recorded without changing model configuration or groups',
     manual_auto_attribution_disabled: 'Account automatic attribution was off when this manual task was created or before its result was applied; verdict recorded only',
     manual_auto_attribution_unrecorded: 'This older manual task did not record account automatic attribution settings; verdict recorded only',
     result_mode_changed: 'Account result mode changed; this round’s verdict was recorded only', scheduling_changed: 'Scheduling settings changed; this round’s verdict was recorded only',

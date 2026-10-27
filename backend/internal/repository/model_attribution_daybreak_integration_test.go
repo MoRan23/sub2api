@@ -36,7 +36,7 @@ func TestAttributionDaybreakPreferencesFreezeAtStartAndSurviveRetry(t *testing.T
 	r, ar, a := attributionFixture(t)
 	jobs, err := r.Enqueue(ctx, []int64{a.ID}, true)
 	require.NoError(t, err)
-	require.Equal(t, 4, jobs[0].Snapshot.Version)
+	require.Equal(t, 5, jobs[0].Snapshot.Version)
 	require.Nil(t, jobs[0].Snapshot.Daybreak, "queueing must not freeze preferences")
 	setAttributionDaybreakPreferences(t, a.ID, true, true)
 	j, err := r.Claim(ctx)

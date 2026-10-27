@@ -227,6 +227,36 @@ func (r *groupRepository) CreateFromSource(ctx context.Context, groupIn *service
 		txClient = r.client
 	}
 
+	// Freeze the source candidates before taking account locks. Recheck their
+	// membership in the INSERT below; an account added later belongs to a later
+	// copy operation, rather than being inserted without its routing-row lock.
+	rows, err := txClient.QueryContext(ctx, `SELECT account_id FROM account_groups
+		WHERE group_id=$1 ORDER BY account_id`, sourceGroupID)
+	if err != nil {
+		return err
+	}
+	var accountIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		accountIDs = append(accountIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := lockAccountGroupAccounts(ctx, txClient, accountIDs); err != nil {
+		return err
+	}
+	if err := lockLiveGroups(ctx, txClient, []int64{sourceGroupID}); err != nil {
+		return err
+	}
 	if err := createGroupRecord(ctx, txClient, groupIn); err != nil {
 		return err
 	}
@@ -237,6 +267,7 @@ func (r *groupRepository) CreateFromSource(ctx context.Context, groupIn *service
 		 FROM account_groups ag
 		 JOIN accounts a ON a.id = ag.account_id
 		 WHERE ag.group_id = $1
+		   AND a.id = ANY($5::bigint[])
 		   AND a.deleted_at IS NULL
 		   AND (NOT $3 OR a.type <> $4)
 		 ON CONFLICT (account_id, group_id) DO NOTHING`,
@@ -244,6 +275,7 @@ func (r *groupRepository) CreateFromSource(ctx context.Context, groupIn *service
 		groupIn.ID,
 		groupIn.RequireOAuthOnly,
 		service.AccountTypeAPIKey,
+		pq.Array(accountIDs),
 	)
 	if err != nil {
 		return err
@@ -896,13 +928,48 @@ func (r *groupRepository) GetAccountCount(ctx context.Context, groupID int64) (t
 }
 
 func (r *groupRepository) DeleteAccountGroupsByGroupID(ctx context.Context, groupID int64) (int64, error) {
-	res, err := r.sql.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1", groupID)
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return 0, err
+	}
+	exec := sqlExecutor(r.client)
+	if tx != nil {
+		defer func() { _ = tx.Rollback() }()
+		exec = tx.Client()
+	}
+	// Like group deletion, a whole-group clear never locks accounts after the
+	// group. The exclusive group lock fences every account-scoped writer and
+	// prevents new members appearing between enumeration and deletion.
+	rows, err := exec.QueryContext(ctx, `SELECT id FROM groups WHERE id=$1 FOR UPDATE`, groupID)
+	if err != nil {
+		return 0, err
+	}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	res, err := exec.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1", groupID)
 	if err != nil {
 		return 0, err
 	}
 	affected, _ := res.RowsAffected()
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
-		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group account clear failed: group=%d err=%v", groupID, err)
+	if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
+		return 0, err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return 0, err
+		}
 	}
 	return affected, nil
 }
@@ -1169,6 +1236,9 @@ func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64
 		defer func() { _ = tx.Rollback() }()
 		exec = tx.Client()
 	}
+	if err := lockAccountGroupAccounts(ctx, exec, accountIDs); err != nil {
+		return err
+	}
 	if err := lockLiveGroups(ctx, exec, []int64{groupID}); err != nil {
 		return err
 	}
@@ -1185,15 +1255,12 @@ func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64
 	if err != nil {
 		return err
 	}
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	// 发送调度器事件
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
-		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue bind accounts to group failed: group=%d err=%v", groupID, err)
+	if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
+		return err
+	}
+	if tx != nil {
+		return tx.Commit()
 	}
 
 	return nil

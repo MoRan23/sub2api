@@ -8,6 +8,8 @@ import AttributionModal from '../AttributionModal.vue'
 import AttributionResult from '../AttributionResult.vue'
 import AttributionExpectedModels from '../AttributionExpectedModels.vue'
 import AttributionPolicyFields from '../AttributionPolicyFields.vue'
+import AttributionTierFields from '../AttributionTierFields.vue'
+import GroupSelector from '@/components/common/GroupSelector.vue'
 import AttributionProbeModelField from '../AttributionProbeModelField.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import ModelAttributionView from '@/views/admin/ModelAttributionView.vue'
@@ -36,6 +38,42 @@ beforeEach(() => { vi.clearAllMocks(); api.config.mockResolvedValue(config()); a
 afterEach(() => { vi.useRealTimers() })
 
 describe('attribution account UI', () => {
+  it('shows frozen applied tier and ordered group changes, without inferring legacy evidence', async () => {
+    const current = job()
+    current.snapshot.version = 5
+    current.result.applied_tier = 'low'
+    current.result.groups_before = [10, 20]
+    current.result.groups_after = [30, 10]
+    current.result.before = { alias: 'old-target' }
+    current.result.after = { alias: 'new-target' }
+    const wrapper = mount(AttributionResult, { props: { job: current } })
+    expect(wrapper.get('[data-testid="attribution-applied-tier"]').text()).toBe('attribution.accountActions.tiers.low')
+    expect(wrapper.get('[data-testid="attribution-group-changes"]').text()).toContain('#10 → #20')
+    expect(wrapper.get('[data-testid="attribution-group-changes"]').text()).toContain('#30 → #10')
+    expect(wrapper.get('[data-testid="attribution-mapping-changes"]').text()).toContain('new-target')
+    await wrapper.setProps({ job: job() })
+    expect(wrapper.get('[data-testid="attribution-group-changes"]').text()).toContain('attribution.notRecorded')
+    expect(wrapper.get('[data-testid="attribution-mapping-changes"]').text()).toContain('attribution.notRecorded')
+    expect(wrapper.get('[data-testid="attribution-applied-tier"]').text()).toBe('attribution.notRecorded')
+    wrapper.unmount()
+  })
+  it('keeps a blocked group action separate from the real detection verdict', async () => {
+    const current = job()
+    current.snapshot.version = 5
+    current.result.action = 'actions_blocked'
+    current.reason = 'target_groups_incompatible'
+    const wrapper = mount(AttributionResult, { props: { job: current } })
+    expect(wrapper.text()).toContain('attribution.status.passed')
+    expect(wrapper.text()).toContain('attribution.reasons.target_groups_incompatible')
+    expect(wrapper.get('[data-testid="attribution-result-action"]').text()).toBe('attribution.actions.actions_blocked')
+    expect(wrapper.get('[data-testid="attribution-applied-tier"]').text()).toBe('attribution.actions.none')
+    wrapper.unmount()
+    api.history.mockResolvedValue(page([current]))
+    const history = mount(AttributionHistory)
+    await flushPromises()
+    expect(history.get('tbody tr').text()).toContain('attribution.actions.actions_blocked')
+    history.unmount()
+  })
   it.each([
     { mode: 'replace', status: 'passed' },
     { mode: 'replace', status: 'mismatch' },
@@ -489,6 +527,111 @@ describe('attribution account UI', () => {
 })
 
 describe('attribution configuration', () => {
+  it('keeps both action switches off for old configuration and preserves explicit empty mapping and null', async () => {
+    api.save.mockImplementation(async (value: AttributionConfig) => ({ ...value, version: value.version + 1 }))
+    const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
+    for (const tier of ['high', 'low']) {
+      expect((wrapper.get(`[data-testid="${tier}-mapping-toggle"]`).element as HTMLInputElement).checked).toBe(false)
+      expect((wrapper.get(`[data-testid="${tier}-groups-toggle"]`).element as HTMLInputElement).checked).toBe(false)
+    }
+    await wrapper.get('[data-testid="high-mapping-toggle"]').setValue(true)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ default: expect.objectContaining({ high_model_mapping: {} }) }))
+    await wrapper.get('[data-testid="high-mapping-toggle"]').setValue(false)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ default: expect.objectContaining({ high_model_mapping: null }) }))
+    wrapper.unmount()
+  })
+  it.each([
+    ['bad*source', 'target', 'invalidMapping'],
+    ['source', 'target*', 'invalidMapping'],
+    ['source name', 'target', 'invalidMapping'],
+    ['source', '', 'invalidMapping']
+  ])('blocks invalid mapping %s → %s without silently dropping the row', async (from, to, reason) => {
+    const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
+    await wrapper.get('[data-testid="high-mapping-toggle"]').setValue(true)
+    await wrapper.get('[data-testid="high-mapping-add"]').trigger('click')
+    await wrapper.get('[data-testid="high-mapping-from"]').setValue(from)
+    await wrapper.get('[data-testid="high-mapping-to"]').setValue(to)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="high-mapping-error"]').text()).toBe(`attribution.accountActions.${reason}`)
+    wrapper.unmount()
+  })
+  it('rejects duplicate sources and previews explicit mappings over identity entries', async () => {
+    api.save.mockImplementation(async (value: AttributionConfig) => ({ ...value, version: 2 }))
+    const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
+    await wrapper.get('[data-testid="high-mapping-toggle"]').setValue(true)
+    await wrapper.get('[data-testid="high-mapping-add"]').trigger('click')
+    await wrapper.get('[data-testid="high-mapping-from"]').setValue('gpt-6-astra')
+    await wrapper.get('[data-testid="high-mapping-to"]').setValue('actual-model')
+    expect(JSON.parse(wrapper.get('[data-testid="high-mapping-preview"] pre').text())).toEqual({ 'gpt-6-astra': 'actual-model' })
+    await wrapper.get('[data-testid="high-mapping-add"]').trigger('click')
+    await wrapper.findAll('[data-testid="high-mapping-from"]')[1].setValue(' gpt-6-astra ')
+    await wrapper.findAll('[data-testid="high-mapping-to"]')[1].setValue('other-model')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="high-mapping-error"]').text()).toBe('attribution.accountActions.duplicateMapping')
+    await wrapper.findAll('[data-testid="high-mapping-from"]')[1].setValue('custom-*')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ default: expect.objectContaining({ high_model_mapping: { 'gpt-6-astra': 'actual-model', 'custom-*': 'other-model' } }) }))
+    wrapper.unmount()
+  })
+  it('reloads saved mapping rows even when an invalid draft last emitted the same object contents', async () => {
+    const c = config()
+    c.default.high_model_mapping = {}
+    api.config.mockResolvedValue(c)
+    api.save.mockImplementation(async (value: AttributionConfig) => ({ ...value, version: 2 }))
+    const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
+    await wrapper.get('[data-testid="high-mapping-add"]').trigger('click')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).not.toHaveBeenCalled()
+    api.config.mockResolvedValueOnce(structuredClone(c))
+    await wrapper.findAll('button').find(button => button.text() === 'attribution.reload')!.trigger('click'); await flushPromises()
+    expect(wrapper.findAll('[data-testid="high-mapping-row"]')).toHaveLength(0)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).toHaveBeenCalledOnce()
+    wrapper.unmount()
+  })
+  it('requires a target group, preserves its order and sends null when the action is disabled', async () => {
+    api.save.mockImplementation(async (value: AttributionConfig) => ({ ...value, version: value.version + 1 }))
+    const groupStub = defineComponent({ props: ['modelValue', 'groups', 'platform'], template: '<div />' })
+    const wrapper = mount(ModelAttributionView, { global: { stubs: { ...stubs, GroupSelector: groupStub } } }); await flushPromises()
+    await wrapper.get('[data-testid="low-groups-toggle"]').setValue(true)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).not.toHaveBeenCalled()
+    const selector = wrapper.findComponent(GroupSelector)
+    expect(selector.props('platform')).toBe('openai')
+    selector.vm.$emit('update:modelValue', [10, 20]); await flushPromises()
+    await wrapper.findAll('[data-testid="low-group-up"]')[1].trigger('click')
+    expect(wrapper.findAll('[data-testid="low-group-row"]')[0].text()).toContain('Other group')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ default: expect.objectContaining({ low_group_ids: [20, 10] }) }))
+    await wrapper.get('[data-testid="low-groups-toggle"]').setValue(false)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ default: expect.objectContaining({ low_group_ids: null }) }))
+    wrapper.unmount()
+  })
+  it('clones action configuration into independent groups without sharing mapping or membership state', async () => {
+    const c = config()
+    c.default.high_model_mapping = { alias: 'target' }
+    c.default.low_model_mapping = {}
+    c.default.high_group_ids = [20, 10]
+    c.default.low_group_ids = null
+    api.config.mockResolvedValue(c)
+    api.save.mockImplementation(async (value: AttributionConfig) => ({ ...value, version: 2 }))
+    const wrapper = mount(ModelAttributionView, { global: { stubs: { ...stubs, GroupSelector: true } } }); await flushPromises()
+    await wrapper.get('select[aria-label="attribution.group"]').setValue(10)
+    await wrapper.findAll('button').find(button => button.text() === 'attribution.addGroup')!.trigger('click')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ groups: [expect.objectContaining({ group_id: 10, enabled: false, high_model_mapping: { alias: 'target' }, low_model_mapping: {}, high_group_ids: [20, 10], low_group_ids: null })] }))
+    const inherited = api.save.mock.calls[0][0].groups[0]
+    expect(inherited.high_model_mapping).not.toBe(c.default.high_model_mapping)
+    expect(inherited.high_group_ids).not.toBe(c.default.high_group_ids)
+    const high = wrapper.findAllComponents(AttributionTierFields).find(fields => fields.props('tier') === 'high')!
+    expect(high.props('modelValue').high_group_ids).toEqual([20, 10])
+    wrapper.unmount()
+  })
   it('uses independent account catalog sources for global, group and OAuth initial probes', async () => {
     const c = config()
     c.groups = [{ group_id: 10, enabled: true, ...structuredClone(policy) }]

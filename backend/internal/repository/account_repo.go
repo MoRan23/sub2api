@@ -253,11 +253,10 @@ func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account
 	for i := range groups {
 		groupIDs = append(groupIDs, groups[i].GroupID)
 	}
-	if err := lockLiveGroups(ctx, txClient, groupIDs); err != nil {
+	if err := createAccountRecord(ctx, txClient, account); err != nil {
 		return err
 	}
-
-	if err := createAccountRecord(ctx, txClient, account); err != nil {
+	if err := lockLiveGroups(ctx, txClient, groupIDs); err != nil {
 		return err
 	}
 	if len(groups) > 0 {
@@ -1065,10 +1064,6 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 }
 
 func (r *accountRepository) Delete(ctx context.Context, id int64) error {
-	groupIDs, err := r.loadAccountGroupIDs(ctx, id)
-	if err != nil {
-		return err
-	}
 	// 使用事务保证账号与关联分组的删除原子性
 	tx, err := r.client.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
@@ -1084,6 +1079,16 @@ func (r *accountRepository) Delete(ctx context.Context, id int64) error {
 		txClient = r.client
 	}
 
+	if err := lockAccountGroupAccounts(ctx, txClient, []int64{id}); err != nil {
+		return err
+	}
+	groupIDs, err := loadAccountGroupIDsLocked(ctx, txClient, id)
+	if err != nil {
+		return err
+	}
+	if err := lockAccountGroupRows(ctx, txClient, groupIDs); err != nil {
+		return err
+	}
 	if _, err := txClient.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(id)).Exec(ctx); err != nil {
 		return err
 	}
@@ -1989,6 +1994,9 @@ func (r *accountRepository) AddToGroup(ctx context.Context, accountID, groupID i
 		defer func() { _ = tx.Rollback() }()
 		client = tx.Client()
 	}
+	if err := lockAccountGroupAccounts(ctx, client, []int64{accountID}); err != nil {
+		return err
+	}
 	if err := lockLiveGroups(ctx, client, []int64{groupID}); err != nil {
 		return err
 	}
@@ -2000,20 +2008,33 @@ func (r *accountRepository) AddToGroup(ctx context.Context, accountID, groupID i
 	if err != nil {
 		return err
 	}
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
 	payload := buildSchedulerGroupPayload([]int64{groupID})
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue add to group failed: account=%d group=%d err=%v", accountID, groupID, err)
+	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
+		return err
+	}
+	if tx != nil {
+		return tx.Commit()
 	}
 	return nil
 }
 
 func (r *accountRepository) RemoveFromGroup(ctx context.Context, accountID, groupID int64) error {
-	_, err := r.client.AccountGroup.Delete().
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return err
+	}
+	client := r.client
+	if tx != nil {
+		defer func() { _ = tx.Rollback() }()
+		client = tx.Client()
+	}
+	if err := lockAccountGroupAccounts(ctx, client, []int64{accountID}); err != nil {
+		return err
+	}
+	if err := lockAccountGroupRows(ctx, client, []int64{groupID}); err != nil {
+		return err
+	}
+	_, err = client.AccountGroup.Delete().
 		Where(
 			dbaccountgroup.AccountIDEQ(accountID),
 			dbaccountgroup.GroupIDEQ(groupID),
@@ -2023,8 +2044,11 @@ func (r *accountRepository) RemoveFromGroup(ctx context.Context, accountID, grou
 		return err
 	}
 	payload := buildSchedulerGroupPayload([]int64{groupID})
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue remove from group failed: account=%d group=%d err=%v", accountID, groupID, err)
+	if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
+		return err
+	}
+	if tx != nil {
+		return tx.Commit()
 	}
 	return nil
 }
@@ -2047,10 +2071,6 @@ func (r *accountRepository) GetGroups(ctx context.Context, accountID int64) ([]s
 }
 
 func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, groupIDs []int64) error {
-	existingGroupIDs, err := r.loadAccountGroupIDs(ctx, accountID)
-	if err != nil {
-		return err
-	}
 	// 使用事务保证删除旧绑定与创建新绑定的原子性
 	tx, err := r.client.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
@@ -2065,19 +2085,22 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		// 已处于外部事务中（ErrTxStarted），复用当前 client
 		txClient = r.client
 	}
+	if err := lockAccountGroupAccounts(ctx, txClient, []int64{accountID}); err != nil {
+		return err
+	}
+	existingGroupIDs, err := loadAccountGroupIDsLocked(ctx, txClient, accountID)
+	if err != nil {
+		return err
+	}
+	if err := lockAccountGroupRows(ctx, txClient, mergeGroupIDs(existingGroupIDs, groupIDs)); err != nil {
+		return err
+	}
 	if err := lockLiveGroups(ctx, txClient, groupIDs); err != nil {
 		return err
 	}
 
 	if _, err := txClient.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(accountID)).Exec(ctx); err != nil {
 		return err
-	}
-
-	if len(groupIDs) == 0 {
-		if tx != nil {
-			return tx.Commit()
-		}
-		return nil
 	}
 
 	builders := make([]*dbent.AccountGroupCreate, 0, len(groupIDs))
@@ -2089,18 +2112,19 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		)
 	}
 
-	if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
-		return err
-	}
-
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
+	if len(builders) > 0 {
+		if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
 			return err
 		}
 	}
 	payload := buildSchedulerGroupPayload(mergeGroupIDs(existingGroupIDs, groupIDs))
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue bind groups failed: account=%d err=%v", accountID, err)
+	if err := enqueueSchedulerOutbox(ctx, txClient, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
+		return err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -4032,21 +4056,6 @@ func uniquePositiveInt64s(ids []int64) []int64 {
 		out = append(out, id)
 	}
 	return out
-}
-
-func (r *accountRepository) loadAccountGroupIDs(ctx context.Context, accountID int64) ([]int64, error) {
-	entries, err := r.client.AccountGroup.
-		Query().
-		Where(dbaccountgroup.AccountIDEQ(accountID)).
-		All(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]int64, 0, len(entries))
-	for _, entry := range entries {
-		ids = append(ids, entry.GroupID)
-	}
-	return ids, nil
 }
 
 func mergeGroupIDs(a []int64, b []int64) []int64 {

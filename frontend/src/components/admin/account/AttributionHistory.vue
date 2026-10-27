@@ -11,7 +11,7 @@
             <td class="p-3">
               <p>{{ t(`attribution.status.${job.status}`) }}</p>
               <p v-if="isAttributionActive(job.status) && (job.snapshot.version ?? 0) >= 2 && job.result.completed_probes !== undefined" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('attribution.probeProgress', { count: job.result.completed_probes }) }} · {{ t('attribution.retryCount', { count: job.result.retries ?? 0 }) }}</p>
-              <p v-if="job.result.action === 'stale_policy' || job.result.action === 'record_only'" class="mt-1 text-xs text-amber-700 dark:text-amber-300">{{ t(`attribution.actions.${job.result.action}`) }}</p>
+              <p v-if="['stale_policy', 'record_only', 'actions_blocked'].includes(job.result.action)" class="mt-1 text-xs text-amber-700 dark:text-amber-300">{{ t(`attribution.actions.${job.result.action}`) }}</p>
             </td>
             <td class="p-3"><span v-if="job.result.analysis">{{ job.result.analysis.prediction }} · {{ job.result.analysis.probability == null ? t('attribution.unavailable') : (job.result.analysis.probability * 100).toFixed(2) + '%' }}</span><span v-else>—</span></td>
             <td class="whitespace-nowrap p-3 text-xs"><p>{{ formatDateTime(job.finished_at || job.started_at || job.created_at) }}</p><p v-if="job.status === 'retry_wait' && job.next_attempt_at" class="mt-1 text-gray-500 dark:text-gray-400">{{ t('attribution.nextAttempt') }}: {{ formatDateTime(job.next_attempt_at) }}</p></td>

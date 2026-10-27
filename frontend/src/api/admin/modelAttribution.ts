@@ -1,7 +1,16 @@
 import { apiClient } from '../client'
 import type { DiagnosticDaybreakEvidence, DiagnosticDaybreakPreferences } from '@/types/diagnosticDaybreak'
 
-export interface AttributionPolicy { model: string; expected_models?: string[]; high_models: string[]; low_models: string[] }
+export interface AttributionPolicy {
+  model: string
+  expected_models?: string[]
+  high_models: string[]
+  low_models: string[]
+  high_model_mapping?: Record<string, string> | null
+  low_model_mapping?: Record<string, string> | null
+  high_group_ids?: number[] | null
+  low_group_ids?: number[] | null
+}
 export interface AttributionGroup extends AttributionPolicy { group_id: number; enabled: boolean }
 export interface NewAccountTestConfig { attribution: boolean; pelican: boolean; attribution_model: string; attribution_expected_models?: string[] | null; pelican_model: string }
 export interface AttributionDetector { provider: string; protocol: number; revision: string; algorithm: string; bank_built_at: string; reference_sha256: string; ranker_sha256: string; calibration_sha256: string }
@@ -17,7 +26,7 @@ export interface AttributionJob {
   source: string
   status: AttributionStatus
   reason?: string
-  snapshot: { version?: number; config_version: number; group_id: number; policy: AttributionPolicy; detector?: AttributionDetector; daybreak?: DiagnosticDaybreakPreferences; result_mode?: 'replace' | 'schedule'; scheduling_revision?: number; manual_result_updates_allowed?: boolean | null }
+  snapshot: { version?: number; config_version: number; group_id: number; policy: AttributionPolicy; detector?: AttributionDetector; daybreak?: DiagnosticDaybreakPreferences; result_mode?: 'replace' | 'schedule'; scheduling_revision?: number; manual_result_updates_allowed?: boolean | null; account_groups?: { group_id: number; priority: number }[] }
   result: {
     analysis?: { prediction: string; probability: number | null; ranking_score?: number; probability_status?: string; method?: string; detector?: AttributionDetector; used_outputs: number; results?: { model: string; probability: number | null; score?: number }[]; diagnostics?: { index: number; accepted: boolean; parsed_numbers: number; minimum_numbers: number }[] }
     duration_ms: number
@@ -25,8 +34,11 @@ export interface AttributionJob {
     completed_probes?: number
     action: string
     pass_streak?: number
-    before?: Record<string, unknown>
-    after?: Record<string, unknown>
+    before?: Record<string, unknown> | null
+    after?: Record<string, unknown> | null
+    applied_tier?: 'high' | 'low'
+    groups_before?: number[] | null
+    groups_after?: number[] | null
     scheduling_before?: boolean | null
     scheduling_after?: boolean | null
     actual_models?: string[]

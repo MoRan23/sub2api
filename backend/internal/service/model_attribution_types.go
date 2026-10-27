@@ -24,10 +24,14 @@ var (
 )
 
 type AttributionPolicy struct {
-	Model          string   `json:"model"`
-	ExpectedModels []string `json:"expected_models,omitempty"`
-	HighModels     []string `json:"high_models"`
-	LowModels      []string `json:"low_models"`
+	Model            string                    `json:"model"`
+	ExpectedModels   []string                  `json:"expected_models,omitempty"`
+	HighModels       []string                  `json:"high_models"`
+	LowModels        []string                  `json:"low_models"`
+	HighModelMapping *AttributionModelMappings `json:"high_model_mapping,omitempty"`
+	LowModelMapping  *AttributionModelMappings `json:"low_model_mapping,omitempty"`
+	HighGroupIDs     *[]int64                  `json:"high_group_ids,omitempty"`
+	LowGroupIDs      *[]int64                  `json:"low_group_ids,omitempty"`
 }
 type AttributionGroupPolicy struct {
 	GroupID int64 `json:"group_id"`
@@ -95,6 +99,9 @@ func ExpectedAttributionModels(p AttributionPolicy) []string {
 
 func AttributionPolicyDigest(s AttributionSnapshot) string {
 	p := s.Policy
+	if s.Version < 5 || s.EffectiveResultMode() != AttributionResultModeReplace {
+		p = p.WithoutActions()
+	}
 	p.ExpectedModels = ExpectedAttributionModels(p)
 	if s.Version >= 2 {
 		p.HighModels = append([]string{}, p.HighModels...)
@@ -232,6 +239,9 @@ func NormalizeAttributionConfig(c AttributionConfig) (AttributionConfig, error) 
 		}
 	}
 	normalize := func(p *AttributionPolicy, required bool) error {
+		if err := normalizeAttributionActions(p); err != nil {
+			return err
+		}
 		p.Model = strings.TrimSpace(p.Model)
 		if p.Model == "" {
 			p.Model = AttributionDefaultModel
@@ -446,7 +456,8 @@ type AttributionAnalysis struct {
 	Diagnostics       []AttributionDiagnostic `json:"diagnostics"`
 }
 type AttributionSnapshot struct {
-	Version int `json:"version,omitempty"`
+	Version       int                        `json:"version,omitempty"`
+	AccountGroups *[]AttributionAccountGroup `json:"account_groups,omitempty"`
 	// Only manual API-key diagnostics freeze this permission. Missing evidence
 	// on a legacy manual job must not grant permission to change routing state.
 	ManualResultUpdatesAllowed *bool                          `json:"manual_result_updates_allowed,omitempty"`
@@ -478,6 +489,9 @@ func (s AttributionSnapshot) EffectiveResultMode() string {
 }
 
 type AttributionResult struct {
+	AppliedTier      string                        `json:"applied_tier,omitempty"`
+	GroupsBefore     *[]int64                      `json:"groups_before,omitempty"`
+	GroupsAfter      *[]int64                      `json:"groups_after,omitempty"`
 	CompletedProbes  int                           `json:"completed_probes"`
 	Daybreak         []*DiagnosticDaybreakEvidence `json:"daybreak,omitempty"`
 	Analysis         *AttributionAnalysis          `json:"analysis,omitempty"`
@@ -488,8 +502,8 @@ type AttributionResult struct {
 	Retries          int                           `json:"retries,omitempty"`
 	Action           string                        `json:"action"`
 	PassStreak       int                           `json:"pass_streak,omitempty"`
-	Before           map[string]any                `json:"before,omitempty"`
-	After            map[string]any                `json:"after,omitempty"`
+	Before           map[string]any                `json:"before"`
+	After            map[string]any                `json:"after"`
 	SchedulingBefore *bool                         `json:"scheduling_before,omitempty"`
 	SchedulingAfter  *bool                         `json:"scheduling_after,omitempty"`
 }

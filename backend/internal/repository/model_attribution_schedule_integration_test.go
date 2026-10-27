@@ -54,7 +54,7 @@ func TestAttributionSchedulePauseAndTwoPassRecovery(t *testing.T) {
 		require.Zero(t, running, "cache refresh must run after the complete result transaction commits")
 	})
 	mismatch := attributionRun(t, r, a.ID, "mismatch")
-	require.Equal(t, 4, mismatch.Snapshot.Version)
+	require.Equal(t, 5, mismatch.Snapshot.Version)
 	require.Equal(t, service.AttributionResultModeSchedule, mismatch.Snapshot.ResultMode)
 	require.Equal(t, initialRevision, mismatch.Snapshot.SchedulingRevision)
 	require.Equal(t, "schedule_paused", mismatch.Result.Action)

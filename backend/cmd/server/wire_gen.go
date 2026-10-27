@@ -305,7 +305,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	candyTestRepository := repository.NewAccountCandyTestRepository(db)
 	accountCandyTestTransport := service.NewAccountCandyTestTransport(accountRepository, openAIGatewayService)
 	accountCandyTestService := service.ProvideAccountCandyTestService(candyTestRepository, accountCandyTestTransport)
-	attributionRepository := repository.NewAttributionRepository(db)
+	attributionRepository := repository.NewAttributionRepository(db, configConfig)
 	modelAttributionService := service.NewModelAttributionService(attributionRepository, accountRepository, accountCandyTestTransport)
 	idempotencyCoordinator := service.ProvideIdempotencyCoordinator(idempotencyRepository, configConfig)
 	claudeResetCreditService := service.ProvideClaudeResetCreditService(accountRepository, claudeTokenProvider, proxyRepository, settingService, idempotencyCoordinator, leaderLockCache)

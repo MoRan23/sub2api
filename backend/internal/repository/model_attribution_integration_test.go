@@ -274,9 +274,10 @@ func TestAttributionTransitionsAtomicityAndCache(t *testing.T) {
 	// Seed a cached pre-detection account; the transactional outbox must replace it.
 	cache := NewSchedulerCache(testRedis(t))
 	require.NoError(t, cache.SetAccount(ctx, a))
-	scheduler := service.NewSchedulerSnapshotService(cache, NewSchedulerOutboxRepository(integrationDB), ar, nil, &config.Config{Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{OutboxPollIntervalSeconds: 1, DbFallbackEnabled: true}}})
-	scheduler.Start()
-	defer scheduler.Stop()
+	// Creation and attribution account events may legally deduplicate. Isolate
+	// this transition, and inspect row counts before starting the consumer.
+	_, err := integrationDB.ExecContext(ctx, `DELETE FROM scheduler_outbox WHERE account_id=$1`, a.ID)
+	require.NoError(t, err)
 	var initialOutbox, firstOutbox int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM scheduler_outbox WHERE account_id=$1`, a.ID).Scan(&initialOutbox))
 	high := map[string]any{"high": "custom-high", "high2": "high2", "alias": "custom", "wild*": "target"}
@@ -290,10 +291,6 @@ func TestAttributionTransitionsAtomicityAndCache(t *testing.T) {
 	require.Equal(t, "unchanged", j.Result.Action)
 	require.Equal(t, 2, j.Result.PassStreak)
 	require.Equal(t, high, attributionMapping(t, ar, a.ID))
-	require.Eventually(t, func() bool {
-		cached, e := cache.GetAccount(ctx, a.ID)
-		return e == nil && cached != nil && cached.GetModelMapping()["high2"] == "high2"
-	}, 5*time.Second, 50*time.Millisecond)
 	var outbox int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM scheduler_outbox WHERE account_id=$1`, a.ID).Scan(&outbox))
 	require.Equal(t, firstOutbox, outbox)
@@ -302,6 +299,16 @@ func TestAttributionTransitionsAtomicityAndCache(t *testing.T) {
 	var after int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM scheduler_outbox WHERE account_id=$1`, a.ID).Scan(&after))
 	require.Equal(t, outbox, after)
+	var eventID int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT max(id) FROM scheduler_outbox WHERE account_id=$1`, a.ID).Scan(&eventID))
+	scheduler := service.NewSchedulerSnapshotService(cache, NewSchedulerOutboxRepository(integrationDB), ar, NewGroupRepository(integrationEntClient, integrationDB), &config.Config{Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{OutboxPollIntervalSeconds: 1, DbFallbackEnabled: true}}})
+	scheduler.Start()
+	defer scheduler.Stop()
+	require.Eventually(t, func() bool {
+		cached, e := cache.GetAccount(ctx, a.ID)
+		watermark, watermarkErr := cache.GetOutboxWatermark(ctx)
+		return e == nil && cached != nil && cached.GetModelMapping()["high2"] == "high2" && watermarkErr == nil && watermark >= eventID
+	}, 5*time.Second, 50*time.Millisecond)
 	j = attributionRun(t, r, a.ID, "mismatch")
 	require.Equal(t, "low", j.Result.Action)
 	low := map[string]any{"low": "low", "high": "custom-high", "alias": "custom", "wild*": "target"}

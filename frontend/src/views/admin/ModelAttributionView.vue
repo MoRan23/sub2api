@@ -14,7 +14,7 @@
             <p v-if="candidates.length" class="break-all text-xs text-gray-500">{{ t('attribution.candidates') }}: {{ candidates.join(', ') }}</p>
             <p class="text-xs" data-testid="detector-connection">{{ t(connected ? 'attribution.connected' : 'attribution.connectionRequired') }}</p>
             <p v-if="config.detector" class="break-all text-xs text-gray-500" data-testid="detector-version">{{ t('attribution.detectorVersion') }}: {{ config.detector.revision.slice(0, 12) }} · {{ config.detector.bank_built_at }}</p>
-            <AttributionPolicyFields v-model="config.default" :candidates="candidates" />
+            <AttributionPolicyFields ref="defaultFields" v-model="config.default" :candidates="candidates" :groups="groups" />
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('attribution.mappingHelp') }}</p>
             <div class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="global-group-priority">
               <h3 class="text-sm font-medium">{{ t('attribution.priority.title') }}</h3>
@@ -47,7 +47,7 @@
             <div v-for="override in config.groups" :key="override.group_id" class="space-y-4 rounded-lg border border-gray-200 p-4 dark:border-dark-600">
               <div class="flex flex-wrap items-center justify-between gap-3"><h3 class="text-sm font-medium">{{ groups.find(g => g.id === override.group_id)?.name || `#${override.group_id}` }}</h3><button type="button" class="text-xs text-red-600 dark:text-red-400" @click="config.groups = config.groups.filter(g => g !== override)">{{ t('attribution.remove') }}</button></div>
               <label class="flex items-center gap-2 text-sm"><input v-model="override.enabled" type="checkbox" />{{ override.enabled ? t('attribution.independent') : t('attribution.inherit') }}</label>
-              <AttributionPolicyFields v-if="override.enabled" :model-value="override" :candidates="candidates" :group-id="override.group_id" @update:model-value="Object.assign(override, $event)" />
+              <AttributionPolicyFields v-if="override.enabled" ref="groupFields" :model-value="override" :candidates="candidates" :group-id="override.group_id" :groups="groups" @update:model-value="Object.assign(override, $event)" />
             </div>
           </section>
           <div class="flex flex-wrap items-center gap-3"><button type="submit" class="btn btn-primary" data-testid="attribution-save">{{ saving ? t('attribution.loading') : t('attribution.save') }}</button><button type="button" class="btn btn-secondary" @click="load">{{ t('attribution.reload') }}</button><span class="text-xs text-gray-500">{{ t('attribution.version') }} {{ config.version }}</span></div>
@@ -64,7 +64,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import AttributionPolicyFields from '@/components/admin/account/AttributionPolicyFields.vue'
 import AttributionExpectedModels from '@/components/admin/account/AttributionExpectedModels.vue'
 import AttributionProbeModelField from '@/components/admin/account/AttributionProbeModelField.vue'
-import { validAttributionExpectedModels } from '@/utils/modelAttribution'
+import { cloneAttributionPolicy, validAttributionActions, validAttributionExpectedModels } from '@/utils/modelAttribution'
 import AttributionHistory from '@/components/admin/account/AttributionHistory.vue'
 import { attributionAPI, type AttributionConfig, type AttributionPolicy } from '@/api/admin/modelAttribution'
 import { getAllIncludingInactive } from '@/api/admin/groups'
@@ -72,6 +72,8 @@ import type { AdminGroup } from '@/types'
 const { t } = useI18n()
 const config = ref<AttributionConfig>()
 const groups = ref<AdminGroup[]>([])
+const defaultFields = ref<InstanceType<typeof AttributionPolicyFields>>()
+const groupFields = ref<InstanceType<typeof AttributionPolicyFields>[]>([])
 const candidates = ref<string[]>([])
 const newGroup = ref(0)
 const priorityGroup = ref(0)
@@ -107,7 +109,7 @@ async function load() {
 function addGroup() {
   if (!config.value || !newGroup.value) return
   const policy = config.value.default
-  config.value.groups.push({ group_id: newGroup.value, enabled: false, model: policy.model, expected_models: [...(policy.expected_models || [])], high_models: [...policy.high_models], low_models: [...policy.low_models] })
+  config.value.groups.push({ ...cloneAttributionPolicy(policy), group_id: newGroup.value, enabled: false })
   newGroup.value = 0
 }
 function validPolicy(p: AttributionPolicy) {
@@ -116,6 +118,10 @@ function validPolicy(p: AttributionPolicy) {
 async function save() {
   if (!config.value) return
   error.value = ''; message.value = ''
+  if (defaultFields.value?.validate() === false || groupFields.value.some(fields => !fields.validate()) ||
+      !validAttributionActions(config.value.default) || config.value.groups.some(group => !validAttributionActions(group))) {
+    error.value = t('attribution.accountActions.invalid'); return
+  }
   const initialModels = [config.value.new_account_tests.attribution_model, config.value.new_account_tests.pelican_model].map(m => m.trim())
   const expectedLists = [config.value.default.expected_models, ...config.value.groups.map(g => g.expected_models), config.value.new_account_tests.attribution_expected_models]
   if (expectedLists.some(models => !validAttributionExpectedModels(models))) { error.value = t('attribution.invalidExpectedModels'); return }

@@ -13,6 +13,7 @@
       <div v-if="job.status === 'retry_wait' && job.next_attempt_at"><dt class="text-gray-500">{{ t('attribution.nextAttempt') }}</dt><dd>{{ formatDateTime(job.next_attempt_at) }}</dd></div>
       <div><dt class="text-gray-500">{{ t('attribution.resultMode') }}</dt><dd data-testid="attribution-result-mode">{{ t(scheduleMode ? 'attribution.resultModes.schedule' : 'attribution.resultModes.replace') }}</dd></div>
       <div><dt class="text-gray-500">{{ t(scheduleMode ? 'attribution.schedulingAction' : 'attribution.action') }}</dt><dd data-testid="attribution-result-action">{{ actionText }}</dd></div>
+      <div v-if="!scheduleMode"><dt class="text-gray-500">{{ t('attribution.accountActions.appliedTier') }}</dt><dd data-testid="attribution-applied-tier">{{ job.result.applied_tier ? t(`attribution.accountActions.tiers.${job.result.applied_tier}`) : t((job.snapshot.version ?? 0) >= 5 ? 'attribution.actions.none' : 'attribution.notRecorded') }}</dd></div>
       <div v-if="scheduleMode && (job.result.scheduling_before != null || job.result.scheduling_after != null)"><dt class="text-gray-500">{{ t('attribution.schedulingChange') }}</dt><dd data-testid="attribution-scheduling-change">{{ schedulingText(job.result.scheduling_before) }} → {{ schedulingText(job.result.scheduling_after) }}</dd></div>
       <div v-if="job.snapshot.daybreak"><dt class="text-gray-500">{{ t('diagnosticDaybreak.preferences') }}</dt><dd>Blue: {{ t(job.snapshot.daybreak.blue ? 'diagnosticDaybreak.enabled' : 'diagnosticDaybreak.disabled') }} / Red: {{ t(job.snapshot.daybreak.red ? 'diagnosticDaybreak.enabled' : 'diagnosticDaybreak.disabled') }}</dd></div>
       <div v-if="job.result.pass_streak !== undefined"><dt class="text-gray-500">{{ t('attribution.passStreak') }}</dt><dd data-testid="attribution-pass-streak">{{ job.result.pass_streak }}</dd></div>
@@ -37,7 +38,15 @@
       </div>
     </div>
     <details v-if="!scheduleMode" class="text-sm"><summary class="cursor-pointer">{{ t('attribution.high') }} / {{ t('attribution.low') }}</summary><p class="mt-2 break-all">{{ t('attribution.high') }}: {{ job.snapshot.policy.high_models?.join(', ') }}</p><p class="break-all">{{ t('attribution.low') }}: {{ job.snapshot.policy.low_models?.join(', ') }}</p></details>
-    <details v-if="job.result.before || job.result.after" class="text-sm"><summary class="cursor-pointer">{{ t('attribution.changes') }}</summary><div class="mt-2 grid gap-3 sm:grid-cols-2"><div><p>{{ t('attribution.before') }}</p><pre class="overflow-auto rounded bg-gray-100 p-2 text-xs dark:bg-dark-900">{{ JSON.stringify(job.result.before || {}, null, 2) }}</pre></div><div><p>{{ t('attribution.after') }}</p><pre class="overflow-auto rounded bg-gray-100 p-2 text-xs dark:bg-dark-900">{{ JSON.stringify(job.result.after || {}, null, 2) }}</pre></div></div></details>
+    <details v-if="!scheduleMode" class="text-sm" data-testid="attribution-mapping-changes"><summary class="cursor-pointer">{{ t('attribution.changes') }}</summary><div v-if="job.result.before != null || job.result.after != null" class="mt-2 grid gap-3 sm:grid-cols-2"><div><p>{{ t('attribution.before') }}</p><pre class="overflow-auto rounded bg-gray-100 p-2 text-xs dark:bg-dark-900">{{ job.result.before == null ? t('attribution.notRecorded') : JSON.stringify(job.result.before, null, 2) }}</pre></div><div><p>{{ t('attribution.after') }}</p><pre class="overflow-auto rounded bg-gray-100 p-2 text-xs dark:bg-dark-900">{{ job.result.after == null ? t('attribution.notRecorded') : JSON.stringify(job.result.after, null, 2) }}</pre></div></div><p v-else class="mt-2 text-gray-500 dark:text-gray-400">{{ t((job.snapshot.version ?? 0) >= 5 ? 'attribution.accountActions.mappingUnchanged' : 'attribution.notRecorded') }}</p></details>
+    <section v-if="!scheduleMode" class="text-sm" data-testid="attribution-group-changes">
+      <h4 class="font-medium">{{ t('attribution.accountActions.groupChanges') }}</h4>
+      <div v-if="job.result.groups_before != null || job.result.groups_after != null" class="mt-2 grid gap-3 sm:grid-cols-2">
+        <p>{{ t('attribution.before') }}: {{ job.result.groups_before == null ? t('attribution.notRecorded') : groupList(job.result.groups_before) }}</p>
+        <p>{{ t('attribution.after') }}: {{ job.result.groups_after == null ? t('attribution.notRecorded') : groupList(job.result.groups_after) }}</p>
+      </div>
+      <p v-else class="mt-2 text-gray-500 dark:text-gray-400">{{ t((job.snapshot.version ?? 0) >= 5 ? 'attribution.accountActions.groupsUnchanged' : 'attribution.notRecorded') }}</p>
+    </section>
     <details v-if="job.result.usage?.length" class="text-sm"><summary class="cursor-pointer">{{ t('attribution.usage') }} · {{ t('attribution.evidence') }}</summary><p v-for="(usage, i) in job.result.usage" :key="i" class="mt-2 break-all">#{{ i + 1 }}: {{ usage?.input_tokens ?? '—' }} / {{ usage?.output_tokens ?? '—' }} · {{ job.result.actual_models?.[i] || '—' }} / {{ job.result.upstream_models?.[i] || '—' }}</p></details>
     <details v-if="job.result.analysis?.diagnostics?.length" class="text-sm"><summary class="cursor-pointer">{{ t('attribution.diagnostics') }}</summary><p v-for="d in job.result.analysis.diagnostics" :key="d.index">#{{ d.index + 1 }}: {{ d.parsed_numbers }} / {{ d.minimum_numbers }} · {{ d.accepted ? '✓' : '×' }}</p></details>
   </article>
@@ -60,6 +69,7 @@ const actionText = computed(() => {
   return t(`attribution.actions.${action}`)
 })
 const schedulingText = (value: boolean | null | undefined) => t(value == null ? 'attribution.notRecorded' : value ? 'attribution.schedulingEnabled' : 'attribution.schedulingPaused')
+const groupList = (ids: number[]) => ids.length ? ids.map(id => `#${id}`).join(' → ') : t('attribution.accountActions.noGroups')
 const reason = (code: string) => /^upstream_http_\d{3}$/.test(code) ? t('candyTests.upstreamHttpError', { status: code.slice(-3) }) : te(`attribution.reasons.${code}`) ? t(`attribution.reasons.${code}`) : te(`candyTests.failureReasons.${code}`) ? t(`candyTests.failureReasons.${code}`) : code
 const percent = (p: number | null) => p == null ? t('attribution.unavailable') : `${(p * 100).toFixed(2)}%`
 </script>

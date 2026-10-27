@@ -58,6 +58,13 @@ func (r *attributionRepository) EnqueueNewAccounts(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	ids := make([]int64, 0, len(accounts))
+	for _, p := range accounts {
+		ids = append(ids, p.id)
+	}
+	if err = lockAttributionBatchAccounts(ctx, tx, ids, false); err != nil {
+		return err
+	}
 	for _, p := range accounts {
 		// Eligibility does not require ModelTrace to be enabled for pelican.
 		eligibility := c

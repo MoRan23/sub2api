@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -15,11 +16,12 @@ import (
 
 type attributionRepository struct {
 	db               *sql.DB
+	cfg              *config.Config
 	onAccountChanged func(context.Context, int64)
 }
 
-func NewAttributionRepository(db *sql.DB) service.AttributionRepository {
-	return &attributionRepository{db: db}
+func NewAttributionRepository(db *sql.DB, cfg *config.Config) service.AttributionRepository {
+	return &attributionRepository{db: db, cfg: cfg}
 }
 
 // SetAccountChangedCallback installs the runtime cache refresh hook. Durable
@@ -86,6 +88,9 @@ func (r *attributionRepository) SaveConfig(ctx context.Context, c service.Attrib
 			return c, service.ErrAttributionInvalid
 		}
 	}
+	if err = r.validateAttributionConfigGroups(ctx, tx, c); err != nil {
+		return c, err
+	}
 	b, err := json.Marshal(c)
 	if err != nil {
 		return c, err
@@ -107,16 +112,26 @@ func (r *attributionRepository) SaveConfig(ctx context.Context, c service.Attrib
 
 // Load and lock the authoritative routing row and authorization metadata. The
 // digest excludes rotating OAuth tokens and includes explicit authorization generation.
-func attributionSnapshot(ctx context.Context, tx *sql.Tx, id int64, c service.AttributionConfig, manual bool) (*service.Account, service.AttributionSnapshot, string, error) {
-	a := &service.Account{}
-	var credentials, extra []byte
-	var deleted *time.Time
-	err := tx.QueryRowContext(ctx, `SELECT id,name,platform,type,status,schedulable,scheduling_revision,expires_at,parent_account_id,proxy_id,credentials,extra,deleted_at,rate_limit_reset_at FROM accounts WHERE id=$1 FOR UPDATE`, id).Scan(&a.ID, &a.Name, &a.Platform, &a.Type, &a.Status, &a.Schedulable, &a.SchedulingRevision, &a.ExpiresAt, &a.ParentAccountID, &a.ProxyID, &credentials, &extra, &deleted, &a.RateLimitResetAt)
+func attributionSnapshot(ctx context.Context, tx *sql.Tx, id int64, c service.AttributionConfig, manual bool, targetGroupIDs ...int64) (*service.Account, service.AttributionSnapshot, string, error) {
+	parentID, err := lockAttributionSnapshotAccounts(ctx, tx, id, manual)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.AttributionSnapshot{}, "account_missing", nil
 	}
 	if err != nil {
 		return nil, service.AttributionSnapshot{}, "", err
+	}
+	a := &service.Account{}
+	var credentials, extra []byte
+	var deleted *time.Time
+	err = tx.QueryRowContext(ctx, `SELECT id,name,platform,type,status,schedulable,scheduling_revision,expires_at,parent_account_id,proxy_id,credentials,extra,deleted_at,rate_limit_reset_at FROM accounts WHERE id=$1 FOR UPDATE`, id).Scan(&a.ID, &a.Name, &a.Platform, &a.Type, &a.Status, &a.Schedulable, &a.SchedulingRevision, &a.ExpiresAt, &a.ParentAccountID, &a.ProxyID, &credentials, &extra, &deleted, &a.RateLimitResetAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, service.AttributionSnapshot{}, "account_missing", nil
+	}
+	if err != nil {
+		return nil, service.AttributionSnapshot{}, "", err
+	}
+	if manual && !reflect.DeepEqual(parentID, a.ParentAccountID) {
+		return nil, service.AttributionSnapshot{}, "", &pq.Error{Code: "40001", Message: "attribution credential owner changed while locking accounts"}
 	}
 	if err = json.Unmarshal(credentials, &a.Credentials); err != nil {
 		return nil, service.AttributionSnapshot{}, "", err
@@ -126,12 +141,25 @@ func attributionSnapshot(ctx context.Context, tx *sql.Tx, id int64, c service.At
 			return nil, service.AttributionSnapshot{}, "", err
 		}
 	}
-	var generation, status string
-	err = tx.QueryRowContext(ctx, `SELECT authorization_generation::text,status FROM account_openai_oauth_credentials WHERE account_id=$1 FOR UPDATE`, id).Scan(&generation, &status)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	identity, err := attributionAccountAuthorization(ctx, tx, a)
+	if err != nil {
 		return nil, service.AttributionSnapshot{}, "", err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT ag.group_id,ag.priority,g.updated_at FROM account_groups ag JOIN groups g ON g.id=ag.group_id WHERE ag.account_id=$1 AND g.deleted_at IS NULL ORDER BY ag.priority,ag.group_id FOR SHARE OF ag,g`, id)
+	if manual && a.IsShadow() {
+		owner, skip, err := attributionShadowOwnerAuthorization(ctx, tx, *a.ParentAccountID)
+		if err != nil || skip != "" {
+			return a, service.AttributionSnapshot{}, skip, err
+		}
+		identity["credential_owner"] = owner
+	}
+	groupIDs, err := loadAccountGroupIDsLocked(ctx, tx, id)
+	if err != nil {
+		return nil, service.AttributionSnapshot{}, "", err
+	}
+	if err = lockAccountGroupRows(ctx, tx, append(groupIDs, targetGroupIDs...)); err != nil {
+		return nil, service.AttributionSnapshot{}, "", err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT ag.group_id,ag.priority,g.updated_at FROM account_groups ag JOIN groups g ON g.id=ag.group_id WHERE ag.account_id=$1 AND g.deleted_at IS NULL ORDER BY ag.priority,ag.group_id FOR SHARE OF ag`, id)
 	if err != nil {
 		return nil, service.AttributionSnapshot{}, "", err
 	}
@@ -152,45 +180,15 @@ func attributionSnapshot(ctx context.Context, tx *sql.Tx, id int64, c service.At
 	if err != nil {
 		return nil, service.AttributionSnapshot{}, "", err
 	}
-	identity := map[string]any{"generation": generation, "status": status, "id": id, "platform": a.Platform, "type": a.Type}
-	for _, key := range []string{"chatgpt_account_id", "chatgpt_user_id", "organization_id", "auth_mode", "openai_auth_mode"} {
-		identity[key] = a.Credentials[key]
-	}
-	if a.IsOpenAIPersonalAccessToken() || a.IsOpenAIAgentIdentity() || generation == "" {
-		for _, key := range []string{"access_token", "agent_private_key", "agent_runtime_id"} {
-			identity[key] = a.Credentials[key]
-		}
-	}
-	if a.Platform == service.PlatformOpenAI && a.Type == service.AccountTypeAPIKey {
-		// Only a digest is persisted. Key/endpoint changes establish a new
-		// authorization baseline and invalidate any in-flight attribution result.
-		identity["api_key"] = a.GetOpenAIProtocolAPIKey()
-		identity["base_url"] = a.GetOpenAIBaseURL()
-		identity["codex_engine"] = a.IsCodexEngine()
-	}
-	if manual && a.IsShadow() {
-		// Manual probes may use a shadow's credentials, but all three answers and
-		// the applied result must still belong to the same parent authorization.
-		// Lock and check the one-level relationship before following it.
-		var ownerID int64
-		err = tx.QueryRowContext(ctx, `SELECT id FROM accounts WHERE id=$1 AND deleted_at IS NULL AND parent_account_id IS NULL AND platform='openai' AND type='oauth' FOR UPDATE`, *a.ParentAccountID).Scan(&ownerID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return a, service.AttributionSnapshot{}, "authorization_changed", nil
-		}
-		if err != nil {
-			return nil, service.AttributionSnapshot{}, "", err
-		}
-		_, owner, skip, err := attributionSnapshot(ctx, tx, ownerID, c, true)
-		if err != nil || skip != "" {
-			return a, service.AttributionSnapshot{}, skip, err
-		}
-		identity["credential_owner"] = owner.Authorization
-	}
 	s := service.AttributionSnapshot{ConfigVersion: c.Version, Detector: c.Detector, SchedulingRevision: a.SchedulingRevision, ResultMode: service.AttributionResultModeReplace}
 	if !a.OpenAIAttributionReplacesWhitelist() {
 		s.ResultMode = service.AttributionResultModeSchedule
 	}
 	s.Policy, s.GroupID = service.ResolveAttributionPolicy(c, a.AccountGroups)
+	if s.ResultMode == service.AttributionResultModeReplace && s.Policy.ChangesGroups() {
+		groups := service.AttributionAccountGroups(a.AccountGroups)
+		s.AccountGroups = &groups
+	}
 	s.Authorization = service.AttributionDigest(identity)
 	fence := []any{s.Authorization, a.Credentials["model_mapping"], a.ProxyID, a.AccountGroups, groupVersions, a.Status, a.Schedulable, a.ExpiresAt, a.ParentAccountID, a.IsOpenAIPassthroughEnabled()}
 	if manual {
@@ -310,8 +308,12 @@ func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual
 			return nil, e
 		}
 	}
+	ids = uniquePositiveInt64s(ids)
+	if err = lockAttributionBatchAccounts(ctx, tx, ids, manual); err != nil {
+		return nil, err
+	}
 	out := []*service.AttributionJob{}
-	for _, id := range uniquePositiveInt64s(ids) {
+	for _, id := range ids {
 		source := "scheduled"
 		if manual {
 			source = "manual"
@@ -347,7 +349,7 @@ func enqueueAttribution(ctx context.Context, tx *sql.Tx, id int64, c service.Att
 	if a == nil {
 		return nil, service.ErrAttributionNotFound
 	}
-	s.Version = 4
+	s.Version = 5
 	if source == "manual" && a.IsOpenAIApiKey() {
 		allowed := a.IsOpenAIAPIKeyAutoAttributionEnabled()
 		s.ManualResultUpdatesAllowed = &allowed
@@ -628,7 +630,7 @@ func (r *attributionRepository) Cancel(ctx context.Context, id int64) (*service.
 	return j, tx.Commit()
 }
 
-func (r *attributionRepository) Finish(ctx context.Context, j *service.AttributionJob) error {
+func (r *attributionRepository) finishAttempt(ctx context.Context, j *service.AttributionJob) error {
 	tx, err := r.transaction(ctx)
 	if err != nil {
 		return err
@@ -649,7 +651,7 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 		if e != nil {
 			return e
 		}
-		a, s, skip, e := attributionSnapshot(ctx, tx, j.AccountID, c, j.Source == "manual")
+		a, s, skip, e := attributionSnapshot(ctx, tx, j.AccountID, c, j.Source == "manual", j.Snapshot.Policy.ActionGroups()...)
 		if e != nil {
 			return e
 		}
@@ -660,6 +662,8 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 		authorizationValid := valid
 		modeChanged := j.Snapshot.EffectiveResultMode() != s.ResultMode
 		schedulingChanged := j.Snapshot.Version >= 4 && j.Snapshot.SchedulingRevision != s.SchedulingRevision
+		groupsChanged := j.Snapshot.Version >= 5 && j.Snapshot.EffectiveResultMode() == service.AttributionResultModeReplace && j.Snapshot.Policy.ChangesGroups() &&
+			(j.Snapshot.AccountGroups == nil || a == nil || !reflect.DeepEqual(*j.Snapshot.AccountGroups, service.AttributionAccountGroups(a.AccountGroups)))
 		if j.Snapshot.Version >= 2 {
 			authorizationValid = validAttributionAuthorization(j.Snapshot, a, s, skip)
 			s.Version = j.Snapshot.Version
@@ -672,7 +676,7 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 			// consecutive-pass baseline, regardless of current group membership.
 			s.Authorization = j.Snapshot.Authorization
 		}
-		valid = valid && !modeChanged && !schedulingChanged
+		valid = valid && !modeChanged && !schedulingChanged && !groupsChanged
 		if !valid {
 			j.Result.Action = "stale"
 			j.Reason = "configuration_or_authorization_changed"
@@ -682,6 +686,8 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 					j.Reason = "result_mode_changed"
 				} else if schedulingChanged {
 					j.Reason = "scheduling_changed"
+				} else if groupsChanged {
+					j.Reason = "account_groups_changed"
 				}
 			} else if j.Snapshot.Version >= 2 {
 				j.Status, j.Reason = "failed", "authorization_changed"
@@ -700,6 +706,10 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 			// Manual diagnostics work before automatic allowlist management is set up.
 			// Never clear an account's mappings or mark an unapplied policy as synced.
 			j.Result.Action = "unconfigured"
+		} else if reason, err := r.attributionTargetGroupIssue(ctx, tx, a, j); err != nil {
+			return err
+		} else if reason != "" {
+			j.Result.Action, j.Reason = "actions_blocked", reason
 		} else {
 			var version int64
 			var auth, policy, previousVerdict string
@@ -733,14 +743,26 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 					return e
 				}
 			} else if firstWhitelistResult || j.Status == "mismatch" || passStreak == 2 && previousPassStreak < 2 {
-				models := s.Policy.HighModels
+				policy := j.Snapshot.Policy
+				if j.Snapshot.Version < 5 {
+					policy = policy.WithoutActions()
+				}
+				models, mapping, groups := policy.HighModels, policy.HighModelMapping, policy.HighGroupIDs
 				action := "high"
 				if j.Status == "mismatch" {
-					models = s.Policy.LowModels
+					models, mapping, groups = policy.LowModels, policy.LowModelMapping, policy.LowGroupIDs
 					action = "low"
 				}
 				current, _ := a.Credentials["model_mapping"].(map[string]any)
-				next := service.AttributionModelMapping(current, models)
+				next := service.AttributionActionModelMapping(current, models, mapping)
+				j.Result.AppliedTier = action
+				if j.Snapshot.Version >= 5 {
+					j.Result.Before = current
+					if current == nil {
+						j.Result.Before = map[string]any{}
+					}
+					j.Result.After = next
+				}
 				if !reflect.DeepEqual(current, next) {
 					b, e := json.Marshal(next)
 					if e != nil {
@@ -751,12 +773,29 @@ func (r *attributionRepository) Finish(ctx context.Context, j *service.Attributi
 					}
 					accountChanged = true
 					j.Result.Action = action
-					j.Result.Before = current
-					j.Result.After = next
+					if j.Snapshot.Version < 5 {
+						j.Result.Before = current
+						j.Result.After = next
+					}
+				}
+				if groups != nil {
+					before, after := append([]int64{}, a.GroupIDs...), append([]int64{}, (*groups)...)
+					j.Result.GroupsBefore, j.Result.GroupsAfter = &before, &after
+					if !sameAttributionGroupBindings(a.AccountGroups, after) {
+						if e = replaceAttributionGroups(ctx, tx, a.ID, after); e != nil {
+							return e
+						}
+						accountChanged = true
+						j.Result.Action = action
+					}
 				}
 			}
 			if accountChanged {
-				if e = enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &a.ID, nil, buildSchedulerGroupPayload(a.GroupIDs)); e != nil {
+				affectedGroups := a.GroupIDs
+				if j.Result.GroupsAfter != nil {
+					affectedGroups = mergeGroupIDs(affectedGroups, *j.Result.GroupsAfter)
+				}
+				if e = enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &a.ID, nil, buildSchedulerGroupPayload(affectedGroups)); e != nil {
 					return e
 				}
 			}
