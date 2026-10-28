@@ -31,6 +31,7 @@ func (s *CodexTelemetryService) enqueueAnalyticsLocked(profile codexTelemetryPro
 			seen[event.EventType] = true
 		}
 	}
+	profile = codexAnalyticsFieldSources(profile, events)
 	entry := s.newObservationLocked(profile, attemptID, "analytics", names, 1)
 	for _, event := range events {
 		if value, present := event.EventParams["is_worktree"]; event.EventType == "codex_thread_initialized" && present && value == nil {
@@ -189,8 +190,11 @@ func (s *CodexTelemetryService) send(parent context.Context, sender CodexTelemet
 		req.Header.Set("Chatgpt-Account-Id", client.accountID)
 		req.Header.Set("User-Agent", client.userAgent)
 		req.Header.Set("Originator", client.originator)
-		if client.version != "" {
-			req.Header.Set("Version", client.version)
+		if job.profile.input.ProductSKU != "" {
+			req.Header.Set("X-OpenAI-Product-Sku", job.profile.input.ProductSKU)
+		}
+		if job.profile.input.CodexResidency != "" {
+			req.Header.Set("X-OpenAI-Internal-Codex-Residency", job.profile.input.CodexResidency)
 		}
 	}
 	var resp *http.Response

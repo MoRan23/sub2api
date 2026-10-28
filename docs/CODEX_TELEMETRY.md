@@ -5,7 +5,8 @@
 账号，Spark 使用母账号身份池并保留实际业务账号归属。API Key、PAT、Agent
 Identity、账号测试、独立 turn-state 采集、预热及内部维护请求不驱动这些池。
 
-事件、OS 标签、计时和指标语义依据本地 Codex 0.155.1 源码快照核对。
+现有事件 schema、辅助请求头及 skills 指标区间已按本地 Codex 0.165.0 源码核对；
+其余 OS 标签、计时和指标语义沿用此前 0.155.1 的核对结果。
 这不是完整 Codex 客户端：模拟的工具、命令、文件修改、hook、Guardian、
 标题和启动事件不表示网关或用户机器实际发生过这些行为。
 
@@ -74,6 +75,19 @@ Stop／Interrupt。Guardian 沿用原排除规则。hook 事件和运行次数�
 可以使用另一系统上的执行服务，不能只凭 UA 推断执行权限。业务代理、UA 和
 版本按批次冻结，不额外向 OTLP 发送 installation ID 等私有标识。
 
+Analytics 辅助请求使用 UA、originator 和认证头，省略独立 `Version` 头。
+`X-OpenAI-Product-Sku` 与 `x-openai-internal-codex-residency` 仅复制最终 HTTP
+请求或 WS 物理握手中实际存在的值，并随批次元数据冻结；常规缺失时省略，
+不从账号、模型目录或最新配置推断 SKU。Statsig metrics 不附加这两个头。
+旧批次缺少这些元数据时保持省略，发送前刷新凭据不改变批次归属。
+
+既有模拟 turn 事件增加 `multi_agent_version=disabled`、`tools_change_count=0`，
+字段来源明确标记为 `simulated`。command 的 `model_slug`、`reasoning_effort`
+使用已知请求值并标记为 `observed`，缺失则为 null。客户端插件库存、语音会话、
+限额窗口、工具调用来源类型、sandbox 后端及 Guardian context mode 当前均为
+null。事件正文按官方字段集合输出，内部父 turn、fork 和 agent 关联仍保留在
+本地状态及诊断中。此更新不新增客户端事件或日志、trace 采集。
+
 ## 回合和指标语义
 
 HTTP、Responses 透传、Chat/Messages 转 Responses、HTTP/WS bridge 和原生 WS
@@ -117,6 +131,8 @@ SSE／WS 指标按事件的 `kind` 和 `success` 分组；最终失败不覆盖�
 1 TiB 区间，分别模拟 `sessions` 和 `archived_sessions`，不读取服务器目录。
 两项 SQLite 字节指标使用 128 B 至 16 MiB 的倍增区间。其他指标区间和模拟
 策略保持不变；这些模拟值不代表用户客户端或服务器的真实磁盘活动。
+四项 skills 指标使用专用区间：enabled/kept 为整数 0–512，truncated 为
+`[0,1]`，description_truncated_chars 为最大 131072 的 511 个对数边界。
 
 当前指标目录包含 74 种定义，按场景、平台、模式及官方 Statsig 排除名单选取；
 这不意味着每个账号、每个平台或每个批次都会发送全部定义。
@@ -237,12 +253,14 @@ Compose 可在 `deploy/.env` 配置；直接运行时设置进程环境。环境
 进程内模拟与新持久化规则混跑。各系统首次有业务时建立池，不把旧内存摘要
 转成历史启动或客户端完成事实，也不批量制造历史遥测。
 
-四项兼容修正不新增数据库迁移或公共 API。内部指标聚合快照写入 v2，并兼容
-读取 v1：保留其他指标、采集时间及初始化去重标记；三个旧字节直方图无法从
-原桶精确换算，只丢弃它们尚未封口的聚合，并在内部快照中保留固定
-`compatibility_reason=legacy_byte_histogram_discarded`，不进入报文或公共接口。旧流事件
-缺少类别时归入 `unknown`。已封口批次保持原样，不修改、不重放。升级仍需
-排空并停止全部旧进程，不能让旧程序与 v2 写入程序共享运行中的聚合快照。
+兼容修正不新增数据库迁移或公共 API。内部指标聚合快照写入 v3，并兼容读取
+v1/v2：保留池 ID、种子、其他指标、采集时间及初始化去重标记；v1 的三个旧
+字节直方图、v1/v2 的四个旧 skills 直方图只丢弃尚未封口的聚合。旧桶未保存
+原始样本，迁移不执行重分桶。内部快照保存固定 `compatibility_reason`：
+`legacy_byte_histogram_discarded`、`legacy_skills_histogram_discarded`，或两者均有时
+的 `legacy_byte_and_skills_histograms_discarded`；这些诊断不进入报文或公共接口。
+旧流事件缺少类别时归入 `unknown`。已封口批次保持原样，不修改、不重放。
+升级仍需排空并停止全部旧进程，避免旧程序与 v3 写入程序共享运行中的快照。
 
 验证使用模拟 HTTP/WS 上游、隔离 PostgreSQL/Redis 和浏览器模拟接口，不向
 真实业务或遥测端点发送请求。覆盖三系统隔离、模式组合、多次 sampling、

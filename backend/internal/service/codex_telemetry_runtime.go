@@ -623,6 +623,7 @@ func appendRuntimeAnalytics(tx *CodexTelemetryPoolTransaction, profile codexTele
 	if len(events) == 0 {
 		return nil
 	}
+	profile = codexAnalyticsFieldSources(profile, events)
 	profile.source = events[0].source
 	for _, event := range events[1:] {
 		if profile.source != event.source {

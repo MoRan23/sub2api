@@ -85,9 +85,9 @@ func TestCodexTelemetryAnalyticsEventContract(t *testing.T) {
 	turn := terminal[len(terminal)-1].EventParams
 	for key, expected := range map[string]any{
 		"session_id": "actual-session", "thread_id": "actual-thread", "turn_id": "actual-turn", "root_turn_id": "actual-root-turn",
-		"parent_thread_id": "actual-parent-thread", "parent_turn_id": "actual-parent-turn", "forked_from_thread_id": "actual-fork-source",
-		"sandbox_policy": "workspace_write", "approval_policy": "on-request", "thread_source": "subagent", "turn_trigger": "collaboration",
-		"agent_name": "review-agent", "subagent_source": "review", "service_tier": "priority", "status": "completed",
+		"parent_thread_id": "actual-parent-thread",
+		"sandbox_policy":   "workspace_write", "approval_policy": "on-request", "thread_source": "subagent", "turn_trigger": "collaboration",
+		"subagent_source": "review", "service_tier": "priority", "status": "completed",
 		"input_tokens": int64(70), "output_tokens": int64(30), "total_tokens": int64(100), "cached_input_tokens": int64(20), "reasoning_output_tokens": int64(5),
 		"duration_ms": int64(2000), "before_first_sampling_ms": int64(0),
 	} {
@@ -100,7 +100,7 @@ func TestCodexTelemetryAnalyticsEventContract(t *testing.T) {
 		case "codex_command_execution_event", "codex_dynamic_tool_call_event", "codex_file_change_event":
 			require.Equal(t, "resp_actual", event.EventParams["originating_response_id"])
 			require.Equal(t, "actual-parent-thread", event.EventParams["parent_thread_id"])
-			require.Equal(t, "actual-parent-turn", event.EventParams["parent_turn_id"])
+			require.NotContains(t, event.EventParams, "parent_turn_id")
 		case "codex_accepted_line_fingerprints":
 			require.Nil(t, event.EventParams["repo_hash"])
 			require.Empty(t, event.EventParams["line_fingerprints"])

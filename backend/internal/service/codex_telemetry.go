@@ -48,6 +48,8 @@ type CodexTelemetryInput struct {
 	UserAgent               string
 	Originator              string
 	Version                 string
+	ProductSKU              string
+	CodexResidency          string
 	SessionID               string
 	ThreadID                string
 	TurnID                  string

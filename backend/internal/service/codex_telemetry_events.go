@@ -48,6 +48,32 @@ func newCodexAnalyticsEvent(profile codexTelemetryProfile, eventType string, par
 	return codexAnalyticsEvent{EventType: eventType, EventParams: params, client: profile.client, source: "simulated"}
 }
 
+// Field provenance is local batch metadata, not an extension to official events.
+// Copy before adding fields because profiles can share a restored snapshot map.
+func codexAnalyticsFieldSources(profile codexTelemetryProfile, events []codexAnalyticsEvent) codexTelemetryProfile {
+	profile.fieldSources = cloneCodexTelemetryFieldSources(profile.fieldSources)
+	if profile.fieldSources == nil {
+		profile.fieldSources = make(map[string]string)
+	}
+	for _, event := range events {
+		switch event.EventType {
+		case "codex_turn_event":
+			for _, field := range []string{"multi_agent_version", "tools_change_count"} {
+				if _, present := event.EventParams[field]; present && codexSimulatesClientBehavior(profile) {
+					profile.fieldSources[field] = "simulated"
+				}
+			}
+		case "codex_command_execution_event":
+			for _, field := range []string{"model_slug", "reasoning_effort"} {
+				if value, present := event.EventParams[field]; present && value != nil {
+					profile.fieldSources[field] = "observed"
+				}
+			}
+		}
+	}
+	return profile
+}
+
 // Initialization needs actual session/thread identity, but does not invent a
 // main turn ID when a client did not send one.
 func codexInitializationEvents(profile codexTelemetryProfile) []codexAnalyticsEvent {
@@ -201,17 +227,19 @@ func codexTurnEventBase(profile codexTelemetryProfile, spec codexTurnSpec) map[s
 		"initialization_mode": "new", "input_tokens": 0, "is_first_turn": profile.firstThread,
 		"mcp_tool_call_count": 0, "model": spec.model, "model_provider": "openai", "num_input_images": 0,
 		"output_tokens": 0, "parent_thread_id": codexOptionalString(profile.input.ParentThreadID), "personality": "pragmatic",
-		"parent_turn_id": codexOptionalString(profile.input.ParentTurnID), "forked_from_thread_id": codexOptionalString(profile.input.ForkedFromThreadID),
+		"active_plugin_ids_at_turn_start": nil, "voice_session_id": nil, "usage_limit_window_minutes": nil,
 		"reasoning_effort": spec.effort, "reasoning_output_tokens": 0, "reasoning_summary": "detailed",
 		"root_turn_id": codexOptionalString(profile.rootTurnID), "runtime": codexRuntime(profile), "sampling_request_count": requestCount,
 		"sampling_retry_count": max(profile.clientRetryCount, 0), "sandbox_network_access": codexTelemetrySandboxNetworkAccess(profile), "service_tier": profile.serviceTier,
 		"session_id": profile.sessionID, "shell_command_count": commandCount, "started_at": profile.started.Unix(),
 		"steer_count": 0, "subagent_source": codexOptionalString(profile.input.SubagentKind), "subagent_tool_call_count": 0, "submission_type": nil,
-		"agent_name": codexOptionalString(profile.input.AgentName),
-		"thread_id":  spec.threadID, "thread_source": codexOptionalString(codexTelemetryThreadSource(profile)), "tool_blocking_ms": 0,
+		"thread_id": spec.threadID, "thread_source": codexOptionalString(codexTelemetryThreadSource(profile)), "tool_blocking_ms": 0,
 		"total_tokens": 0, "total_tool_call_count": dynamicCount + fileCount, "turn_error": nil,
 		"turn_id": spec.turnID, "turn_trigger": firstNonEmptyString(profile.input.TurnTrigger, "composer"), "web_search_count": 0, "workspace_kind": nil,
 		"guardian_v2_enabled": false, "approvals_reviewer": codexSimulatedReviewer(profile),
+	}
+	if codexSimulatesClientBehavior(profile) {
+		params["multi_agent_version"], params["tools_change_count"] = "disabled", 0
 	}
 	if profile.input.GuardianV2Enabled != nil {
 		params["guardian_v2_enabled"] = *profile.input.GuardianV2Enabled
@@ -260,7 +288,8 @@ func codexGuardianReviewEvent(profile codexTelemetryProfile) codexAnalyticsEvent
 	duration := codexActivityDuration(profile, "guardian", 100, 800)
 	target, action := codexGuardianTarget(profile)
 	return newCodexAnalyticsEvent(profile, "codex_guardian_review", map[string]any{
-		"session_id": profile.sessionID, "app_server_client": codexAppServerClient(profile), "runtime": codexRuntime(profile),
+		"guardian_context_mode": nil,
+		"session_id":            profile.sessionID, "app_server_client": codexAppServerClient(profile), "runtime": codexRuntime(profile),
 		"thread_id": profile.threadID, "turn_id": profile.turnID, "review_id": codexActivityID(profile, "guardian-review"),
 		"target_item_id": target, "approval_request_source": "main_turn", "reviewed_action": action, "reviewed_action_truncated": false,
 		"decision": "approved", "terminal_status": "approved", "failure_reason": nil, "attempt_count": 1,
@@ -299,6 +328,8 @@ func codexCommandEvent(profile codexTelemetryProfile, terminal []byte) codexAnal
 	params["cell_id"], params["command_execution_source"] = "1", "unifiedExecStartup"
 	params["exit_code"], params["failure_kind"], params["tool_name"] = exitCode, failure, "unified_exec"
 	params["plugin_id"], params["script_path"] = nil, nil
+	params["sandbox_backend"] = nil
+	params["model_slug"], params["reasoning_effort"] = codexOptionalString(profile.model), codexOptionalString(profile.effort)
 	setCodexCommandCounts(params, simulatedInt(codexScenarioKey(profile)+":command-kind", 4))
 	return newCodexAnalyticsEvent(profile, "codex_command_execution_event", params)
 }
@@ -348,7 +379,7 @@ func codexToolEventBase(profile codexTelemetryProfile, spec codexToolSpec) map[s
 		"duration_ms": spec.duration, "execution_duration_ms": spec.duration, "failure_kind": nil,
 		"final_approval_outcome": approvalOutcome, "guardian_review_count": guardianCount, "item_id": spec.itemID,
 		"originating_response_id": codexOptionalString(codexResponseID(spec.terminal)), "parent_call_id": nil,
-		"parent_thread_id": codexOptionalString(profile.input.ParentThreadID), "parent_turn_id": codexOptionalString(profile.input.ParentTurnID),
+		"parent_thread_id": codexOptionalString(profile.input.ParentThreadID), "tool_event_type": nil,
 		"requested_additional_permissions": false, "requested_network_access": false,
 		"review_count": guardianCount, "root_turn_id": codexOptionalString(profile.rootTurnID), "runtime": codexRuntime(profile),
 		"session_id": profile.sessionID, "started_at_ms": completed.Add(-time.Duration(spec.duration) * time.Millisecond).UnixMilli(),

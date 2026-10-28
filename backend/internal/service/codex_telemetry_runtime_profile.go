@@ -22,6 +22,8 @@ type codexTelemetryProfileSnapshot struct {
 	UserAgent               string            `json:"user_agent"`
 	Originator              string            `json:"originator"`
 	Version                 string            `json:"version"`
+	ProductSKU              string            `json:"product_sku,omitempty"`
+	CodexResidency          string            `json:"codex_residency,omitempty"`
 	SessionID               string            `json:"session_id"`
 	ThreadID                string            `json:"thread_id"`
 	TurnID                  string            `json:"turn_id"`
@@ -70,6 +72,7 @@ func marshalCodexTelemetryProfile(p codexTelemetryProfile) ([]byte, error) {
 		CredentialOS: i.CredentialOS, AuthorizationGeneration: i.AuthorizationGeneration,
 		InstallationID: i.InstallationID, ManagedInstallation: i.ManagedInstallation, ProxyID: i.ProxyID,
 		SamplingID: i.SamplingID, UserAgent: p.client.userAgent, Originator: p.client.originator, Version: p.client.version,
+		ProductSKU: i.ProductSKU, CodexResidency: i.CodexResidency,
 		SessionID: p.sessionID, ThreadID: p.threadID, TurnID: p.turnID, RootTurnID: p.rootTurnID,
 		ParentThreadID: i.ParentThreadID, ParentTurnID: i.ParentTurnID, ForkedFromThreadID: i.ForkedFromThreadID,
 		ThreadSource: i.ThreadSource, TurnTrigger: i.TurnTrigger, AgentName: i.AgentName,
@@ -94,6 +97,7 @@ func unmarshalCodexTelemetryProfile(data []byte) (codexTelemetryProfile, error) 
 		CredentialOS: snap.CredentialOS, AuthorizationGeneration: snap.AuthorizationGeneration,
 		InstallationID: snap.InstallationID, ManagedInstallation: snap.ManagedInstallation, ProxyID: snap.ProxyID,
 		SamplingID: snap.SamplingID, UserAgent: snap.UserAgent, Originator: snap.Originator, Version: snap.Version,
+		ProductSKU: snap.ProductSKU, CodexResidency: snap.CodexResidency,
 		SessionID: snap.SessionID, ThreadID: snap.ThreadID, TurnID: snap.TurnID, RootTurnID: snap.RootTurnID,
 		ParentThreadID: snap.ParentThreadID, ParentTurnID: snap.ParentTurnID, ForkedFromThreadID: snap.ForkedFromThreadID,
 		ThreadSource: snap.ThreadSource, TurnTrigger: snap.TurnTrigger, AgentName: snap.AgentName,

@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -21,6 +22,14 @@ import (
 // Exercise the upgrade boundary through actual PostgreSQL transactions and
 // independent runtime instances. All senders are local; no telemetry leaves the test.
 func TestCodexTelemetryPostgresMetricV1UpgradeAcrossInstancesAndRestart(t *testing.T) {
+	for _, version := range []int{1, 2} {
+		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
+			testCodexTelemetryPostgresMetricUpgrade(t, version)
+		})
+	}
+}
+
+func testCodexTelemetryPostgresMetricUpgrade(t *testing.T, legacyVersion int) {
 	store, key, now := telemetryStoreFixture(t)
 	ctx := context.Background()
 	t.Setenv("CODEX_TELEMETRY_ENABLED", "true")
@@ -110,20 +119,23 @@ func TestCodexTelemetryPostgresMetricV1UpgradeAcrossInstancesAndRestart(t *testi
 		metric := raw.(map[string]any)
 		var attributes []any
 		for _, attribute := range metric["attributes"].([]any) {
-			if attribute.(map[string]any)["key"] != "kind" {
+			if legacyVersion != 1 || attribute.(map[string]any)["key"] != "kind" {
 				attributes = append(attributes, attribute)
 			}
 		}
 		metric["attributes"] = attributes
 	}
-	legacyNames := []string{"codex.app_server.codex_home.size_bytes", "codex.sqlite.logs.write.bytes", "codex.sqlite.logs.write.max_entry_bytes"}
+	legacyNames := []string{"codex.thread.skills.enabled_total", "codex.thread.skills.kept_total", "codex.thread.skills.truncated", "codex.thread.skills.description_truncated_chars"}
+	if legacyVersion == 1 {
+		legacyNames = append(legacyNames, "codex.app_server.codex_home.size_bytes", "codex.sqlite.logs.write.bytes", "codex.sqlite.logs.write.max_entry_bytes")
+	}
 	for _, name := range legacyNames {
 		buckets := make([]uint64, 16)
 		buckets[12] = 1
 		pending = append(pending, map[string]any{"name": name, "kind": "histogram", "unit": "", "attributes": []any{},
 			"started": now, "finished": now, "count": 1, "sum": 4096, "min": 4096, "max": 4096, "buckets": buckets})
 	}
-	state["pending"], snapshot["version"] = pending, 1
+	state["pending"], snapshot["version"] = pending, legacyVersion
 	writeSnapshot(snapshot, now.Add(time.Minute))
 
 	// A batch sealed by the old binary is immutable even though its distribution
@@ -164,8 +176,12 @@ func TestCodexTelemetryPostgresMetricV1UpgradeAcrossInstancesAndRestart(t *testi
 	second.Stop()
 	third.Stop()
 	snapshot = readSnapshot()
-	require.EqualValues(t, 2, snapshot["version"])
-	require.Equal(t, "legacy_byte_histogram_discarded", snapshot["compatibility_reason"])
+	require.EqualValues(t, 3, snapshot["version"])
+	if legacyVersion == 1 {
+		require.Equal(t, "legacy_byte_and_skills_histograms_discarded", snapshot["compatibility_reason"])
+	} else {
+		require.Equal(t, "legacy_skills_histogram_discarded", snapshot["compatibility_reason"])
+	}
 	require.Equal(t, clients, snapshot["clients"], "upgrade must retain durable startup deduplication")
 	states = snapshot["states"].([]any)
 	require.Len(t, states, 1, "instances must share one aggregate partition")
@@ -187,7 +203,11 @@ func TestCodexTelemetryPostgresMetricV1UpgradeAcrossInstancesAndRestart(t *testi
 			}
 		}
 	}
-	require.Equal(t, map[string]float64{"unknown": 2, "response.output_text.delta": 7}, byKind)
+	if legacyVersion == 1 {
+		require.Equal(t, map[string]float64{"unknown": 2, "response.output_text.delta": 7}, byKind)
+	} else {
+		require.Equal(t, map[string]float64{"response.output_text.delta": 9}, byKind)
+	}
 
 	// Advance only the stored metric collection window; a new process seals it
 	// without any synthetic business request or reliance on Redis notification.

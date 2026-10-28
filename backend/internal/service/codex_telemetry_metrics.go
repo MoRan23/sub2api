@@ -103,6 +103,21 @@ var codexHistogramBounds = []float64{0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1
 var codexValueHistogramBounds = []float64{0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000}
 var codexHomeSizeHistogramBounds = []float64{1048576, 10485760, 104857600, 1073741824, 10737418240, 107374182400, 1099511627776}
 var codexSQLiteBytesHistogramBounds = []float64{128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216}
+var codexSkillsCountHistogramBounds = func() []float64 {
+	bounds := make([]float64, 513)
+	for index := range bounds {
+		bounds[index] = float64(index)
+	}
+	return bounds
+}()
+var codexSkillsTruncatedHistogramBounds = []float64{0, 1}
+var codexSkillsDescriptionHistogramBounds = func() []float64 {
+	bounds := make([]float64, 511)
+	for index := 1; index < len(bounds); index++ {
+		bounds[index] = math.Pow(2, 17*float64(index-1)/509)
+	}
+	return bounds
+}()
 
 func codexMetricBounds(descriptor codexMetricDescriptor) []float64 {
 	switch descriptor.name {
@@ -110,6 +125,12 @@ func codexMetricBounds(descriptor codexMetricDescriptor) []float64 {
 		return codexHomeSizeHistogramBounds
 	case "codex.sqlite.logs.write.bytes", "codex.sqlite.logs.write.max_entry_bytes":
 		return codexSQLiteBytesHistogramBounds
+	case "codex.thread.skills.enabled_total", "codex.thread.skills.kept_total":
+		return codexSkillsCountHistogramBounds
+	case "codex.thread.skills.truncated":
+		return codexSkillsTruncatedHistogramBounds
+	case "codex.thread.skills.description_truncated_chars":
+		return codexSkillsDescriptionHistogramBounds
 	}
 	if descriptor.unit == "ms" {
 		return codexHistogramBounds
@@ -831,7 +852,29 @@ type codexMetricStoreSnapshot struct {
 	Clients             map[string]time.Time       `json:"clients"`
 }
 
-const codexMetricLegacyBytesDiscarded = "legacy_byte_histogram_discarded"
+const (
+	codexMetricSnapshotVersion               = 3
+	codexMetricLegacyBytesDiscarded          = "legacy_byte_histogram_discarded"
+	codexMetricLegacySkillsDiscarded         = "legacy_skills_histogram_discarded"
+	codexMetricLegacyBytesAndSkillsDiscarded = "legacy_byte_and_skills_histograms_discarded"
+)
+
+func (s *codexTelemetryMetricStore) noteLegacyHistogramDiscard(reason string) {
+	if s.compatibilityReason == "" {
+		s.compatibilityReason = reason
+	} else if s.compatibilityReason != reason {
+		s.compatibilityReason = codexMetricLegacyBytesAndSkillsDiscarded
+	}
+}
+
+func codexMetricHasMigratedSkillsBounds(name string) bool {
+	switch name {
+	case "codex.thread.skills.enabled_total", "codex.thread.skills.kept_total", "codex.thread.skills.truncated", "codex.thread.skills.description_truncated_chars":
+		return true
+	default:
+		return false
+	}
+}
 
 type codexMetricStateSnapshot struct {
 	Profile           json.RawMessage                `json:"profile"`
@@ -859,7 +902,7 @@ type codexMetricAggregateSnapshot struct {
 }
 
 func marshalCodexTelemetryMetricStore(store *codexTelemetryMetricStore) ([]byte, error) {
-	snapshot := codexMetricStoreSnapshot{Version: 2, Clients: make(map[string]time.Time)}
+	snapshot := codexMetricStoreSnapshot{Version: codexMetricSnapshotVersion, Clients: make(map[string]time.Time)}
 	if store == nil {
 		return json.Marshal(snapshot)
 	}
@@ -910,13 +953,14 @@ func unmarshalCodexTelemetryMetricStore(encoded []byte) (*codexTelemetryMetricSt
 	if err := json.Unmarshal(encoded, &snapshot); err != nil {
 		return nil, err
 	}
-	if (snapshot.Version != 1 && snapshot.Version != 2) || len(snapshot.States) > codexTelemetryMetricStateLimit || len(snapshot.Clients) > codexTelemetryMetricStateLimit {
+	if snapshot.Version < 1 || snapshot.Version > codexMetricSnapshotVersion || len(snapshot.States) > codexTelemetryMetricStateLimit || len(snapshot.Clients) > codexTelemetryMetricStateLimit {
 		return nil, errors.New("unsupported telemetry metric snapshot")
 	}
 	// Keep only a fixed local compatibility marker. It is persisted with the
 	// aggregate transaction and is never part of an exported metric batch.
-	if snapshot.CompatibilityReason == codexMetricLegacyBytesDiscarded {
-		store.compatibilityReason = codexMetricLegacyBytesDiscarded
+	switch snapshot.CompatibilityReason {
+	case codexMetricLegacyBytesDiscarded, codexMetricLegacySkillsDiscarded, codexMetricLegacyBytesAndSkillsDiscarded:
+		store.compatibilityReason = snapshot.CompatibilityReason
 	}
 	for key, value := range snapshot.Clients {
 		store.clients[key] = value
@@ -940,7 +984,16 @@ func unmarshalCodexTelemetryMetricStore(encoded []byte) (*codexTelemetryMetricSt
 				// Version 1 retained no original samples or bounds. These three
 				// pending distributions cannot be rebucketed without inventing data.
 				// Preserve the rest of the state; already sealed batches are untouched.
-				store.compatibilityReason = codexMetricLegacyBytesDiscarded
+				store.noteLegacyHistogramDiscard(codexMetricLegacyBytesDiscarded)
+				continue
+			}
+			if snapshot.Version < 3 && codexMetricHasMigratedSkillsBounds(item.Name) {
+				if item.Kind != "histogram" || item.Unit != "" || len(item.Buckets) != len(codexValueHistogramBounds)+1 {
+					return nil, errors.New("invalid legacy telemetry skills histogram")
+				}
+				// The old coarse distribution has no original samples. Drop only
+				// this pending aggregate; keep the pool, markers and sealed batches.
+				store.noteLegacyHistogramDiscard(codexMetricLegacySkillsDiscarded)
 				continue
 			}
 			if !codexStatsigMetricAllowed(item.Name) || (item.Kind != "sum" && item.Kind != "histogram") || len(item.Buckets) != len(codexMetricBounds(descriptor))+1 {

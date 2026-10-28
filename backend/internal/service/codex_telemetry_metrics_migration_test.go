@@ -76,7 +76,7 @@ func TestCodexTelemetryMetricsLegacySnapshotMigratesOnlyByteHistograms(t *testin
 	require.NoError(t, err)
 	var migrated codexMetricStoreSnapshot
 	require.NoError(t, json.Unmarshal(encoded, &migrated))
-	require.Equal(t, 2, migrated.Version)
+	require.Equal(t, codexMetricSnapshotVersion, migrated.Version)
 	require.Equal(t, "legacy_byte_histogram_discarded", migrated.CompatibilityReason)
 	require.Len(t, migrated.States, 1)
 	expected := legacy.States[0]
@@ -122,7 +122,7 @@ func TestCodexTelemetryMetricsV2ByteHistogramRoundTripAcceptsNewSamples(t *testi
 			require.NoError(t, err)
 			var snapshot codexMetricStoreSnapshot
 			require.NoError(t, json.Unmarshal(encoded, &snapshot))
-			require.Equal(t, 2, snapshot.Version)
+			require.Equal(t, codexMetricSnapshotVersion, snapshot.Version)
 			require.Len(t, snapshot.States[0].Pending[0].Buckets, test.bucketCount)
 
 			restored, err := unmarshalCodexTelemetryMetricStore(encoded)
@@ -225,7 +225,7 @@ func TestCodexTelemetryRuntimeMigratesPendingMetricsAndKeepsSealedPayload(t *tes
 	activity := store.activities[attempt.poolKey][CodexTelemetryActivityMapKey("metrics", "current")]
 	var saved codexMetricStoreSnapshot
 	require.NoError(t, json.Unmarshal(activity.Data, &saved))
-	require.Equal(t, 2, saved.Version)
+	require.Equal(t, codexMetricSnapshotVersion, saved.Version)
 	require.Equal(t, "legacy_byte_histogram_discarded", saved.CompatibilityReason)
 	require.Equal(t, legacy.Clients, saved.Clients)
 	require.Len(t, saved.States, 1)
@@ -298,7 +298,7 @@ func TestCodexTelemetryMetricsLegacyEventSnapshotAddsUnknownKind(t *testing.T) {
 			require.NoError(t, err)
 			var migrated codexMetricStoreSnapshot
 			require.NoError(t, json.Unmarshal(encoded, &migrated))
-			require.Equal(t, 2, migrated.Version)
+			require.Equal(t, codexMetricSnapshotVersion, migrated.Version)
 			require.Len(t, migrated.States[0].Pending, 1)
 			expected := legacy.States[0].Pending[0]
 			expected.Attributes = append([]any{codexMetricMigrationStringAttribute("kind", "unknown")}, expected.Attributes...)
@@ -371,7 +371,7 @@ func TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions(t *tes
 				require.NoError(t, err)
 				var migrated codexMetricStoreSnapshot
 				require.NoError(t, json.Unmarshal(encoded, &migrated))
-				require.Equal(t, 2, migrated.Version)
+				require.Equal(t, codexMetricSnapshotVersion, migrated.Version)
 				require.Len(t, migrated.States[0].Pending, 2, "only identical success labels should merge")
 				merged := missing
 				merged.Attributes = []any{codexMetricMigrationStringAttribute("kind", "unknown"), missing.Attributes[0], missing.Attributes[1]}

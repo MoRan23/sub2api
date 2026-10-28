@@ -188,8 +188,10 @@ func codexTelemetryInputFromWire(account *Account, headers http.Header, body []b
 		Shell: codexTelemetryShellFromBody(body), ReturnedToolCallIDs: codexTelemetryReturnedToolCallIDs(body),
 		AccessToken: strings.Clone(token), ChatGPTAccountID: strings.Clone(codexTelemetryHeader(headers, "Chatgpt-Account-Id")), ProxyURL: strings.Clone(proxyURL),
 		UserAgent: strings.Clone(userAgent), Originator: strings.Clone(codexTelemetryHeader(headers, "originator")), Version: strings.Clone(version),
-		SessionID: identity(profile.SessionID, "session-id", "session_id"),
-		ThreadID:  identity(profile.ThreadID, "thread-id", "thread_id"), TurnID: strings.Clone(profile.TurnID.Value),
+		ProductSKU:     codexTelemetryAuxiliaryHeader(headers, "X-OpenAI-Product-Sku"),
+		CodexResidency: codexTelemetryAuxiliaryHeader(headers, "X-OpenAI-Internal-Codex-Residency"),
+		SessionID:      identity(profile.SessionID, "session-id", "session_id"),
+		ThreadID:       identity(profile.ThreadID, "thread-id", "thread_id"), TurnID: strings.Clone(profile.TurnID.Value),
 		ParentThreadID: identity(profile.TurnLineage.ParentThreadID, "x-codex-parent-thread-id"),
 		ParentTurnID:   strings.Clone(profile.TurnLineage.ParentTurnID.Value), RootTurnID: strings.Clone(profile.TurnLineage.RootTurnID.Value),
 		ForkedFromThreadID: codexTelemetryUUID(profile.TurnLineage.ForkedFromThreadID),
@@ -601,6 +603,28 @@ func codexTelemetryHeader(headers http.Header, name string) string {
 		}
 	}
 	return ""
+}
+
+// Attribution comes only from a final request header, never client configuration
+// or a newer account snapshot. Conflicting or invalid values remain unknown.
+func codexTelemetryAuxiliaryHeader(headers http.Header, name string) string {
+	var selected string
+	for _, raw := range headerValuesCaseInsensitive(headers, name) {
+		value := strings.TrimSpace(raw)
+		if value == "" || len(value) > 256 || strings.ContainsAny(raw, "\r\n") {
+			return ""
+		}
+		for _, char := range value {
+			if char < 32 || char > 126 {
+				return ""
+			}
+		}
+		if selected != "" && selected != value {
+			return ""
+		}
+		selected = value
+	}
+	return strings.Clone(selected)
 }
 
 func codexTelemetryUUID(value string) string {

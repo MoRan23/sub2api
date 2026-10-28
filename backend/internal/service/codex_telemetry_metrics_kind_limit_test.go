@@ -219,7 +219,7 @@ func codexMetricKindLimitSnapshot(t *testing.T, profile codexTelemetryProfile, v
 }
 
 func TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions(t *testing.T) {
-	for _, version := range []int{1, 2} {
+	for _, version := range []int{1, 2, 3} {
 		for _, websocket := range []bool{false, true} {
 			for _, waitsFirst := range []bool{false, true} {
 				name := "codex.sse_event"
@@ -240,7 +240,7 @@ func TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions(t *testing
 					require.NoError(t, err)
 					var saved codexMetricStoreSnapshot
 					require.NoError(t, json.Unmarshal(encoded, &saved))
-					require.Equal(t, 2, saved.Version)
+					require.Equal(t, codexMetricSnapshotVersion, saved.Version)
 					require.Len(t, saved.States[0].Pending, 256, "both instruments must persist no more than 128 pairs each")
 
 					reloaded, err := unmarshalCodexTelemetryMetricStore(encoded)

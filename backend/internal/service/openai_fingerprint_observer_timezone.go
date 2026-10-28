@@ -26,7 +26,7 @@ func cloneFingerprintObservationHeaders(headers http.Header) http.Header {
 				result[name][i] = fingerprintObservationBoundedMetadataString(value)
 			}
 		case "user-agent", "originator", "openai-beta", "version",
-			"x-openai-internal-codex-residency", codexInstallationIDKey,
+			"x-openai-internal-codex-residency", "x-openai-product-sku", codexInstallationIDKey,
 			"session-id", "session_id", "thread-id", "thread_id",
 			"conversation_id", "conversation-id", "x-client-request-id",
 			"x-codex-parent-thread-id", "parent-thread-id", "parent_thread_id",
