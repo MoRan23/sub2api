@@ -1760,6 +1760,14 @@ func TestOpenAIChannelForwardModelForScheduler(t *testing.T) {
 }
 
 func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
+	t.Run("interrupt cleanup does not penalize account", func(t *testing.T) {
+		err := fmt.Errorf("wrapped ingress turn: %w", service.NewOpenAIWSInterruptCleanupError())
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
+		var closeErr *service.OpenAIWSClientCloseError
+		require.ErrorAs(t, err, &closeErr)
+		require.Equal(t, coderws.StatusTryAgainLater, closeErr.StatusCode())
+	})
+
 	t.Run("unsupported client model switch does not penalize account", func(t *testing.T) {
 		err := fmt.Errorf("wrapped ingress turn: %w", newOpenAIWSUnsupportedModelSwitchError("gpt-unsupported"))
 		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))

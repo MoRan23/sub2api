@@ -775,6 +775,12 @@ func observeUpstreamMessage(
 	if eventType == "" {
 		return observedUpstreamEvent{}
 	}
+	// Interrupt acknowledgements identify the response they control, but are
+	// not response activity. In particular a late acknowledgement must not
+	// recreate a turn after its terminal usage has already been settled.
+	if eventType == "response.interrupt.accepted" || eventType == "response.interrupt.failed" {
+		return observedUpstreamEvent{eventType: eventType}
+	}
 	responseID := strings.TrimSpace(values[1].String())
 	if responseID == "" {
 		responseID = strings.TrimSpace(values[2].String())

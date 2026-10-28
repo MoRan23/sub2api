@@ -528,6 +528,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}, nil
 	}
 
+	var nativeControl *openAIWSNativeControl
 	writeClientMessage := func(message []byte) error {
 		writeCtx, cancel := newOpenAIWSDownstreamWriteContext(ctx, hooks, s.openAIWSWriteTimeout())
 		defer cancel()
@@ -907,6 +908,16 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			currentBridgePayload = nextPayload
 		}
 	}
+	nativeControl = getOpenAIWSNativeControl(c, ctx, clientConn, s.openAIWSIngressInterTurnIdleTimeout(), s.openAIWSWriteTimeout(), writeClientMessage)
+	writeClientMessage = func(message []byte) error {
+		err := nativeControl.write(message)
+		if err == nil {
+			nativeControl.start()
+		}
+		return err
+	}
+	readClientMessage = func() ([]byte, error) { return nativeControl.next(ctx) }
+	defer func() { nativeControl.finishAttempt(returnErr) }()
 	firstRoutingFields := gjson.GetManyBytes(firstPayload.payloadRaw, "model", "service_tier")
 	wsHeaders, wsSessionResolution, buildHdrErr := s.buildOpenAIWSHeadersWithBody(
 		ctx,
@@ -1109,6 +1120,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
 		}
+		turnReadCtx := nativeControl.begin(ctx, lease)
+		defer nativeControl.detach()
 		turnStart := time.Now()
 		compactionDelivery := openAICodexWSCompactionDeliveryForPlan(account, pinnedIdentityPlan)
 		turnStateIdentityDigest := OpenAICodexTurnStateIdentityDigest(pinnedIdentityPlan)
@@ -1186,7 +1199,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		recordOpenAICodexGuardianSourceThread(pinnedIdentityPlan, nil, payload)
 		telemetry = s.beginCodexTelemetryWS(withCodexTelemetryGatewayContext(ctx, c, account, fmt.Sprintf("ws:%d", turn), &pinnedIdentityPlan), account, lease.FingerprintObservationHeaders(), baseAcquireReq.Headers, payload)
 		telemetryWriteStarted := time.Now()
-		telemetryWriteErr := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout())
+		telemetryWriteErr := lease.WriteJSONWithContextTimeout(turnReadCtx, json.RawMessage(payload), s.openAIWSWriteTimeout())
 		telemetry.sent(telemetryWriteStarted, time.Now(), telemetryWriteErr)
 		if err := telemetryWriteErr; err != nil {
 			telemetry.writeFailed()
@@ -1225,6 +1238,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		lastEventType := ""
 		needModelReplace := false
 		clientDisconnected := false
+		var terminalResult *OpenAIForwardResult
 		mappedModel := ""
 		var mappedModelBytes []byte
 		if originalModel != "" {
@@ -1239,10 +1253,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		for {
 			telemetryReadStarted := time.Now()
-			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
+			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(turnReadCtx, s.openAIWSReadTimeout())
 			telemetry.observeRead(upstreamMessage, "", telemetryReadStarted, time.Now(), readErr)
 			if readErr != nil {
-				lease.MarkBroken()
+				nativeControl.retireLease(lease)
+				if terminalResult != nil {
+					return terminalResult, nil
+				}
 				return nil, wrapOpenAIWSIngressTurnError(
 					"read_upstream",
 					fmt.Errorf("read upstream websocket event: %w", readErr),
@@ -1254,6 +1271,27 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 
 			eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
+			if eventType == "response.interrupt.accepted" || eventType == "response.interrupt.failed" {
+				nativeControl.observeAck(upstreamMessage)
+				if !clientDisconnected {
+					if err := writeClientMessage(upstreamMessage); err != nil {
+						clientDisconnected = true
+						nativeControl.readerStopped(err)
+					}
+				}
+				if terminalResult != nil && nativeControl.finishReady() {
+					return terminalResult, nil
+				}
+				continue
+			}
+			if terminalResult != nil {
+				// Only the interrupt handshake remains. Never settle or mutate the
+				// completed response twice while waiting for a late acknowledgement.
+				continue
+			}
+			if eventResponseID != "" {
+				nativeControl.observeCreated(eventResponseID)
+			}
 			observeOpenAIResponseEvidenceEvent(responseEvidence, upstreamMessage)
 			responseModelObserver.ObserveOpenAI(upstreamMessage, eventType)
 			if responseID == "" && eventResponseID != "" {
@@ -1302,7 +1340,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						cyberMessageDelivered = false
 					}
 				}
-				lease.MarkBroken()
+				nativeControl.retireLease(lease)
 				refreshOpenAIWSCyberPolicyUsage(c, usage)
 			}
 			if eventType == "error" && !cyberRejected {
@@ -1391,7 +1429,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				// previous_response_not_found 在 ingress 模式支持单次恢复重试：
 				// 不把该 error 直接下发客户端，而是由上层去掉 previous_response_id 后重放当前 turn。
 				if recoverablePrevNotFound {
-					lease.MarkBroken()
+					nativeControl.retireLease(lease)
 					errMsg := strings.TrimSpace(errMsgRaw)
 					if errMsg == "" {
 						errMsg = "previous response not found"
@@ -1403,7 +1441,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					)
 				}
 				if !wroteDownstream && isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw) {
-					lease.MarkBroken()
+					nativeControl.retireLease(lease)
 					return nil, s.newOpenAIWSSemanticRateLimitFailoverError(account, lease.HandshakeHeaders(), upstreamMessage, errMsgRaw)
 				}
 			}
@@ -1413,6 +1451,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			isTerminalEvent := isOpenAIWSTerminalEvent(eventType) || cyberRejected
 			if isTerminalEvent {
+				// The client may close immediately after receiving this frame. Its
+				// reader must already know this response reached a real terminal.
+				nativeControl.receivedTerminal()
 				terminalEventCount++
 			}
 			if firstTokenMs == nil && isTokenEvent {
@@ -1496,7 +1537,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 				// 客户端已断连时，上游连接的 session 状态不可信，标记 broken 避免回池复用。
 				if clientDisconnected {
-					lease.MarkBroken()
+					nativeControl.retireLease(lease)
 				}
 				firstTokenMsValue := -1
 				if firstTokenMs != nil {
@@ -1559,7 +1600,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					result.BillingModel = imageBillingModel
 				}
 				telemetry.finish(false)
-				return result, nil
+				terminalResult = result
+				if nativeControl.terminal() {
+					return result, nil
+				}
 			}
 		}
 	}
@@ -1613,10 +1657,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	// 因此 releaseSessionLease 中只需在非正常结束时 MarkBroken。
 	lastTurnClean := false
 	releaseSessionLease := func() {
+		nativeControl.detach()
 		if sessionLease == nil {
 			return
 		}
-		if !lastTurnClean {
+		if !lastTurnClean || nativeControl.mustRetire() {
 			sessionLease.MarkBroken()
 		}
 		unpinSessionConn(sessionConnID)
@@ -1686,6 +1731,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return currentTurnReplayInputExists && openAIWSRawItemsHasFunctionCallOutput(currentTurnReplayInput)
 	}
 	resetSessionLease := func(markBroken bool) {
+		nativeControl.detach()
 		if sessionLease == nil {
 			return
 		}
@@ -2161,6 +2207,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				sessionLease.MarkBroken()
 				return errOpenAIWSSessionPreempted
 			}
+			if nativeControl.interruptedTurn() {
+				telemetry.finish(false)
+				if hooks != nil && hooks.AfterTurn != nil {
+					hooks.AfterTurn(turn, nil, nativeControl.cleanupError())
+				}
+				sessionLease.MarkBroken()
+				return nativeControl.cleanupError()
+			}
 			var rejectedFieldErr *openAIWSRejectedFieldRetryError
 			if errors.As(relayErr, &rejectedFieldErr) && rejectedFieldErr != nil && len(rejectedFieldErr.body) > 0 {
 				telemetry.finish(true)
@@ -2196,6 +2250,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		cyberRejected := GetOpsCyberPolicy(c) != nil
 		if hooks != nil && hooks.AfterTurn != nil {
 			hooks.AfterTurn(turn, result, nil)
+		}
+		if nativeControl.mustRetire() {
+			resetSessionLease(true)
+			if nativeControl.clientGone() {
+				return nil
+			}
+			return nativeControl.cleanupError()
 		}
 		if cyberRejected {
 			resetSessionLease(true)

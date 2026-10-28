@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"golang.org/x/net/http/httpguts"
 )
 
 const (
@@ -348,7 +349,58 @@ func (c *openAIWSToolCallReplayCollector) addItem(item gjson.Result) {
 	c.items = append(c.items, json.RawMessage(raw))
 }
 
-func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string) []byte {
+func validOpenAIWSRetryAfter(value string) bool {
+	if !httpguts.ValidHeaderFieldValue(value) {
+		return false
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	if _, err := strconv.ParseUint(value, 10, 64); err == nil {
+		return true
+	}
+	_, err := http.ParseTime(value)
+	return err == nil
+}
+
+func openAIWSBridgeRetryAdvice(event, source []byte, headers http.Header) []byte {
+	// Match the client precedence: usable nested advice wins over the outer
+	// envelope, followed by the actual HTTP response behind the bridge.
+	for _, path := range []string{"error.headers", "headers"} {
+		value := ""
+		values := make(map[string]string, 2)
+		gjson.GetBytes(source, path).ForEach(func(key, candidate gjson.Result) bool {
+			if strings.EqualFold(key.String(), "retry-after") && (candidate.Type == gjson.String || candidate.Type == gjson.Number || candidate.Type == gjson.True || candidate.Type == gjson.False) && httpguts.ValidHeaderFieldValue(candidate.String()) {
+				values[key.String()] = candidate.String()
+			}
+			return true
+		})
+		// Codex iterates its JSON object's sorted keys before inserting into a
+		// case-insensitive HeaderMap. Keep the same duplicate-name precedence.
+		keys := make([]string, 0, len(values))
+		for key := range values {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		for _, key := range keys {
+			value = values[key]
+		}
+		if validOpenAIWSRetryAfter(value) {
+			if updated, err := sjson.SetBytes(event, path+".retry-after", value); err == nil {
+				return updated
+			}
+		}
+	}
+	if value := headers.Get("Retry-After"); validOpenAIWSRetryAfter(value) {
+		if updated, err := sjson.SetBytes(event, "headers.retry-after", value); err == nil {
+			return updated
+		}
+	}
+	return event
+}
+
+func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string, responseHeaders ...http.Header) []byte {
 	message = strings.TrimSpace(message)
 	if message == "" {
 		message = http.StatusText(statusCode)
@@ -364,6 +416,13 @@ func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string) []byte {
 			"type":    "upstream_error",
 			"message": message,
 		},
+	}
+	// A WebSocket client cannot inspect the HTTP response behind this bridge.
+	// Preserve actual retry advice in the wrapped error's header envelope.
+	if len(responseHeaders) > 0 {
+		if value := responseHeaders[0].Get("Retry-After"); validOpenAIWSRetryAfter(value) {
+			event["headers"] = map[string]string{"retry-after": value}
+		}
 	}
 	body, err := json.Marshal(event)
 	if err != nil {
@@ -670,6 +729,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			if err != nil {
 				return nil, fmt.Errorf("encode websocket cyber policy status: %w", err)
 			}
+			clientError = openAIWSBridgeRetryAdvice(clientError, respBody, resp.Header)
 			if writeErr := writeClientMessage(clientError); writeErr == nil {
 				markOpenAIWSClientVisibleFailure(c, gjson.GetBytes(clientError, "type").String(), clientError)
 			}
@@ -718,7 +778,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if account.Platform != PlatformGrok && (shouldFailover || shouldCooldownOpenAITransientUpstreamError(resp.StatusCode, respBody)) {
 			s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, actualModel)
 		}
-		clientError := buildOpenAIWSHTTPBridgeErrorEvent(resp.StatusCode, upstreamMsg)
+		clientError := buildOpenAIWSHTTPBridgeErrorEvent(resp.StatusCode, upstreamMsg, resp.Header)
+		clientError = openAIWSBridgeRetryAdvice(clientError, respBody, resp.Header)
 		if writeErr := writeClientMessage(clientError); writeErr == nil {
 			markOpenAIWSClientVisibleFailure(c, "error", clientError)
 		}
