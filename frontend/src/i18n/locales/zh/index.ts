@@ -1,3 +1,4 @@
+import adminAccessKeys from './adminAccessKeys'
 import landing from './landing'
 import common from './common'
 import dashboard from './dashboard'
@@ -13,6 +14,7 @@ export default {
   attribution: attributionZh,
   diagnosticDaybreak: diagnosticDaybreakZh,
   candyTests: candyTestsZh,
+  adminAccessKeys,
   ...landing,
   ...common,
   ...dashboard,

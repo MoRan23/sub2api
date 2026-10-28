@@ -703,7 +703,7 @@ func TestProvideSettingService_FingerprintObservationFailsClosedOnSettingsLoadEr
 		getAllErr: errors.New("settings unavailable"),
 	}
 
-	ProvideSettingService(repo, nil, nil, &config.Config{})
+	ProvideSettingService(nil, repo, nil, nil, &config.Config{})
 
 	require.False(t, IsFingerprintObservationEnabled())
 }

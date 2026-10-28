@@ -88,7 +88,8 @@ describe('diagnostic Daybreak evidence', () => {
     delete job.snapshot.version
     delete job.snapshot.daybreak
     render(AttributionResult, { props: { job }, global: { plugins: [i18n()] } })
-    expect(screen.getByText('未记录')).toBeTruthy()
+    const evidence = within(screen.getByRole('region', { name: 'Daybreak 出站证据' }))
+    expect(evidence.getByText('未记录')).toBeTruthy()
     expect(screen.queryByText('daybreak_blue')).toBeNull()
     expect(screen.queryByText('账号 Daybreak 偏好（任务快照）')).toBeNull()
   })
@@ -106,8 +107,8 @@ describe('diagnostic Daybreak evidence', () => {
     render(AttributionResult, { props: { job }, global: { plugins: [i18n()] } })
     expect(screen.getByText(status === 'passed' ? '通过' : '不通过')).toBeTruthy()
     expect(screen.getByText(new RegExp(text))).toBeTruthy()
-    expect(screen.getByText('判定已保存；未更新白名单或累计升级')).toBeTruthy()
-    expect(screen.getByText('0 / 2')).toBeTruthy()
+    expect(screen.getByTestId('attribution-result-action').textContent).toBe(attributionZh.actions.stale_policy)
+    expect(screen.getByTestId('attribution-pass-streak').textContent).toBe('0')
   })
 
   it('shows the pelican successful execution field and updates to an omitted-field reason', async () => {

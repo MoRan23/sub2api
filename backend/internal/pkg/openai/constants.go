@@ -245,6 +245,10 @@ func IsGPT61TerraModelSpelling(model string) bool {
 	return IsKnownCodexModelVariant(model, "gpt-6.1-terra")
 }
 
+func RequiresResponsesForToolCalls(model string) bool {
+	return IsGPT61SolModelSpelling(model) || IsGPT61TerraModelSpelling(model)
+}
+
 // ValidateGPT61SolReasoningEffort rejects disabled reasoning instead of silently
 // increasing the client's requested effort on compatibility paths.
 func ValidateGPT61SolReasoningEffort(model, effort string) error {

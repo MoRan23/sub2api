@@ -187,6 +187,7 @@ func TestCodexEngineEntrypointsPreserveProtocol(t *testing.T) {
 			require.Empty(t, rec.Header().Get("X-Codex-Owner"))
 			require.Equal(t, "estimated-v1", rec.Header().Get("X-Codex-Engine-Token-Estimate"))
 			if result != nil {
+				require.Equal(t, strings.HasPrefix(path, "/v1/images/"), result.ImageEndpoint)
 				require.Equal(t, 17, result.Usage.InputTokens)
 				require.Equal(t, 8, result.Usage.OutputTokens)
 				require.Equal(t, 3, result.Usage.CacheReadInputTokens)

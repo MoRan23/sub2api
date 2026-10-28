@@ -59,7 +59,7 @@ func (s *GroupRepoSuite) TestDaybreakPlatformChangeAndDatabaseDefault() {
 func (s *APIKeyRepoSuite) TestDaybreakAuthSelectPreservesTrustedGroupPolicy() {
 	user := s.mustCreateUser("daybreak-auth@test.com")
 	group, err := s.client.Group.Create().SetName("daybreak-auth").SetPlatform(service.PlatformComposite).
-		SetOpenaiDaybreakBlueEnabled(true).SetOpenaiDaybreakRedEnabled(true).Save(s.ctx)
+		SetOpenaiDaybreakBlueEnabled(true).SetOpenaiDaybreakRedEnabled(true).SetImageCountBilling(true).Save(s.ctx)
 	s.Require().NoError(err)
 	key := &service.APIKey{UserID: user.ID, GroupID: &group.ID, Key: "sk-daybreak-auth", Name: "daybreak", Status: service.StatusActive}
 	s.Require().NoError(s.repo.Create(s.ctx, key))
@@ -69,6 +69,7 @@ func (s *APIKeyRepoSuite) TestDaybreakAuthSelectPreservesTrustedGroupPolicy() {
 	s.True(got.Group.Hydrated)
 	s.True(got.Group.OpenAIDaybreakBlueEnabled)
 	s.True(got.Group.OpenAIDaybreakRedEnabled)
+	s.True(got.Group.ImageCountBilling)
 }
 
 func TestGroupDaybreakOwnedTransactionRollback(t *testing.T) {

@@ -68,7 +68,7 @@ func TestOpenAICompatBufferedModelEvidenceIncludesNonTerminalFrames(t *testing.T
 		t.Run(tc.name, func(t *testing.T) {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			s := &OpenAIGatewayService{}
-			response, _, _, err := s.readOpenAICompatBufferedTerminal(&http.Response{Body: io.NopCloser(strings.NewReader(tc.frames))}, c, "test", "test")
+			response, _, _, _, err := s.readOpenAICompatBufferedTerminal(&http.Response{Body: io.NopCloser(strings.NewReader(tc.frames))}, c, nil, "test", "test")
 			require.NoError(t, err)
 			require.NotNil(t, response)
 			require.Equal(t, tc.model, observedUpstreamResponseModel(c))

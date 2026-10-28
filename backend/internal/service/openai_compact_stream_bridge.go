@@ -167,7 +167,7 @@ func writeOpenAIResponseDataWithDelivery(c *gin.Context, statusCode int, content
 	if c == nil {
 		return false
 	}
-	if strings.TrimSpace(c.Writer.Header().Get("Content-Type")) == "" && strings.TrimSpace(contentType) != "" {
+	if strings.TrimSpace(contentType) != "" {
 		c.Writer.Header().Set("Content-Type", contentType)
 	}
 	c.Writer.WriteHeader(statusCode)
@@ -184,6 +184,9 @@ func writeOpenAIResponseWithOptionalDeliveryTracking(
 ) bool {
 	if !trackDelivery {
 		if !writeOpenAICompactSSEBridge(c, statusCode, body) {
+			// SSE aggregation may have copied the upstream event-stream header;
+			// Gin's Data helper does not replace an already populated Content-Type.
+			c.Writer.Header().Set("Content-Type", contentType)
 			c.Data(statusCode, contentType, body)
 		}
 		return c != nil && c.Writer.Written()

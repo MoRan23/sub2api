@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAPIKeyAuthSnapshotV24LocalFieldsAndModelAllowlistRoundtrip(t *testing.T) {
+func TestAPIKeyAuthSnapshotV26LocalFieldsAndModelAllowlistRoundtrip(t *testing.T) {
 	for _, limit := range []*float64{nil, new(float64), new(125.5)} {
 		apiKey := profitAuthTestAPIKey()
 		apiKey.User.Balance = 1.25
@@ -18,10 +18,13 @@ func TestAPIKeyAuthSnapshotV24LocalFieldsAndModelAllowlistRoundtrip(t *testing.T
 		apiKey.Group.ModelAllowlist = GroupModelAllowlist{Enabled: true, Models: []string{"gpt-6-astra"}}
 		apiKey.Group.ForceOpenAIFast = true
 		apiKey.Group.FreeOpenAIFast = true
+		apiKey.Group.OpenAIDaybreakBlueEnabled = true
+		apiKey.Group.OpenAIDaybreakRedEnabled = true
+		apiKey.Group.ImageCountBilling = true
 		apiKey.Group.MaxReasoningEffortOverLimit = ReasoningEffortOverLimitDeny
 		svc := &APIKeyService{}
 		snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
-		require.Equal(t, 24, snapshot.Version)
+		require.Equal(t, 26, snapshot.Version)
 
 		payload, err := json.Marshal(&APIKeyAuthCacheEntry{Snapshot: snapshot})
 		require.NoError(t, err)
@@ -37,8 +40,21 @@ func TestAPIKeyAuthSnapshotV24LocalFieldsAndModelAllowlistRoundtrip(t *testing.T
 		require.Equal(t, apiKey.Group.ModelAllowlist, restored.Group.ModelAllowlist)
 		require.True(t, restored.Group.ForceOpenAIFast)
 		require.True(t, restored.Group.FreeOpenAIFast)
+		require.True(t, restored.Group.OpenAIDaybreakBlueEnabled)
+		require.True(t, restored.Group.OpenAIDaybreakRedEnabled)
+		require.True(t, restored.Group.ImageCountBilling)
 		require.Equal(t, ReasoningEffortOverLimitDeny, restored.Group.MaxReasoningEffortOverLimit)
 	}
+}
+
+func TestAPIKeyAuthSnapshotRejectsV25BranchSpecificSchemas(t *testing.T) {
+	svc := &APIKeyService{}
+	snapshot := svc.snapshotFromAPIKey(context.Background(), profitAuthTestAPIKey())
+	snapshot.Version = 25
+	restored, used, err := svc.applyAuthCacheEntry("pre-merge-fields", &APIKeyAuthCacheEntry{Snapshot: snapshot})
+	require.NoError(t, err)
+	require.False(t, used)
+	require.Nil(t, restored)
 }
 
 func TestAPIKeyAuthSnapshotRejectsV23BeforeModelAllowlist(t *testing.T) {

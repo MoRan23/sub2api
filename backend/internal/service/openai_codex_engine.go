@@ -372,7 +372,7 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
 	defer resp.Body.Close()
-	result := &OpenAIForwardResult{Model: model, BillingModel: billingModel, UpstreamModel: upstreamModel, UpstreamEndpoint: endpoint,
+	result := &OpenAIForwardResult{Model: model, BillingModel: billingModel, UpstreamModel: upstreamModel, UpstreamEndpoint: endpoint, ImageEndpoint: imageRequest,
 		RequestID: resp.Header.Get("X-Request-Id"), UpstreamHeaders: resp.Header.Clone(), ResponseHeaders: resp.Header.Clone()}
 	if effort != "" {
 		result.ReasoningEffort = &effort

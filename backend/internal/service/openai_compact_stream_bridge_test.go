@@ -290,6 +290,33 @@ func TestWriteOpenAICompactSSEBridge_RequiresMarkAndSuccessStatus(t *testing.T) 
 	require.Contains(t, rec.Body.String(), "event: response.completed")
 }
 
+func TestOpenAIResponseWriteReplacesAggregatedSSEContentType(t *testing.T) {
+	finalResponse := []byte(`{"id":"resp_1","status":"completed","output":[{"type":"compaction","encrypted_content":"x"}]}`)
+	for _, tc := range []struct {
+		name          string
+		trackDelivery bool
+		clientStream  bool
+	}{
+		{name: "JSON without delivery tracking"},
+		{name: "JSON with delivery tracking", trackDelivery: true},
+		{name: "compact SSE without delivery tracking", clientStream: true},
+		{name: "compact SSE with delivery tracking", trackDelivery: true, clientStream: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, rec := newCompactBridgeTestContext(t, tc.clientStream)
+			c.Header("Content-Type", "text/event-stream")
+			require.True(t, writeOpenAIResponseWithOptionalDeliveryTracking(c, http.StatusOK, "application/json", finalResponse, tc.trackDelivery))
+			if tc.clientStream {
+				require.Equal(t, "text/event-stream", rec.Result().Header.Get("Content-Type"))
+				require.Contains(t, rec.Body.String(), "event: response.completed")
+			} else {
+				require.Equal(t, "application/json", rec.Result().Header.Get("Content-Type"))
+				require.JSONEq(t, string(finalResponse), rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestCompactResponseDeliveryRequiresCompleteWriterSuccess(t *testing.T) {
 	finalResponse := []byte(`{"id":"resp_1","status":"completed","output":[{"type":"compaction","encrypted_content":"x"}]}`)
 

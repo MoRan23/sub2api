@@ -133,6 +133,7 @@ deploy/docker-compose.override.yml
 .gocache/
 vite.config.js
 docs/*
+!docs/admin-api-keys.md
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
@@ -143,6 +144,7 @@ docs/*
 !docs/channel-monitor-v2-safe-defaults.md
 !docs/OPENAI_PROMPTS_AND_TOOL_NAMES.md
 !docs/CODEX_0165_COMPATIBILITY.md
+!docs/UPSTREAM_MERGE_V0_2_19.md
 !docs/OPENAI_OAUTH_OS_IDENTITIES.md
 !docs/OPENAI_CODEX_AUTH_EXPORT.md
 !docs/OPENAI_OAUTH_OS_VERIFICATION.md
