@@ -28,6 +28,7 @@ var DefaultModels = []Model{
 	{ID: "gpt-6-astra", Object: "model", Created: 1788480000, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Astra"},
 	// The official Codex catalog does not provide a creation timestamp.
 	{ID: "gpt-6.1-sol", Object: "model", Created: 0, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6.1 Sol"},
+	{ID: "gpt-6.1-terra", Object: "model", Created: 0, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6.1 Terra"},
 	{ID: "gpt-6-sol", Object: "model", Created: 1790121600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Sol"},
 	{ID: "gpt-6-luna", Object: "model", Created: 1790121600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Luna"},
 	{ID: "gpt-5.5", Object: "model", Created: 1776873600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.5"},
@@ -73,8 +74,9 @@ var instructionsGPT52 string
 
 // Current templates below are copied from model_messages.instructions_template
 // in openai/codex codex-rs/models-manager/models.json at
-// 8ffd91e42aa001b7e897bea812b02f89264f9fa0 (2026-09-29). The three GPT-5.6 variants
-// and codex-auto-review share one template; each GPT-6 variant has its own.
+// e742db9f7ba98e63e502b310857d49d047888518 (Codex 0.165.0). The three GPT-5.6
+// variants and codex-auto-review share one template. GPT-6.1 Terra explicitly
+// shares Astra's identical main template; its other policies remain independent.
 // Synthetic catalogs, account probes, and Responses requests without client
 // instructions use the same model-specific templates.
 //
@@ -103,7 +105,7 @@ var instructionsDaybreakBlue string
 var instructionsDaybreakRed string
 
 // CodexGPT61SolMetadata is the complete official descriptor from openai/codex
-// b1e72963c3b71a9265a551e54beff078384efed9, codex-rs/models-manager/models.json.
+// e742db9f7ba98e63e502b310857d49d047888518, codex-rs/models-manager/models.json.
 //
 //go:embed codex_gpt61_sol.json
 var CodexGPT61SolMetadata []byte
@@ -168,6 +170,11 @@ func CodexBaseInstructionsForModel(model string) string {
 		if v := strings.TrimSpace(instructionsGPT6Astra); v != "" {
 			return instructionsGPT6Astra
 		}
+	case IsGPT61TerraModelSpelling(canonical):
+		// The official Terra and Astra main templates are byte-for-byte identical.
+		return instructionsGPT6Astra
+	case strings.HasPrefix(canonical, "gpt-6.1-terra"):
+		return latestCodexInstructions()
 	case IsKnownCodexModelVariant(canonical, "gpt-5.6") || IsKnownCodexModelVariant(canonical, "gpt-5.6-sol") || IsKnownCodexModelVariant(canonical, "gpt-5.6-terra") || IsKnownCodexModelVariant(canonical, "gpt-5.6-luna"):
 		return instructionsGPT56
 	case IsKnownCodexModelVariant(canonical, "gpt-6-sol"):
@@ -230,6 +237,12 @@ func IsGPT6SolOrLunaModelSpelling(model string) bool {
 // spellings. Invalid effort suffixes remain identifiable for request validation.
 func IsGPT61SolModelSpelling(model string) bool {
 	return IsKnownCodexModelVariant(model, "gpt-6.1-sol")
+}
+
+// IsGPT61TerraModelSpelling recognizes only established Terra variants, without
+// granting Astra's pricing or other family-specific behavior.
+func IsGPT61TerraModelSpelling(model string) bool {
+	return IsKnownCodexModelVariant(model, "gpt-6.1-terra")
 }
 
 // ValidateGPT61SolReasoningEffort rejects disabled reasoning instead of silently

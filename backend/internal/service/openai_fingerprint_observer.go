@@ -74,6 +74,11 @@ type FingerprintObservationEntry struct {
 	Workspaces                   []string                       `json:"workspaces,omitempty"`
 	RequestKind                  CodexWireRequestKind           `json:"request_kind,omitempty"`
 	HistoryIngestRequested       *bool                          `json:"history_ingest_requested,omitempty"`
+	HistoryInitialization        CodexHistoryInitialization     `json:"history_initialization,omitempty"`
+	GuardianRecordedItems        *bool                          `json:"guardian_recorded_items,omitempty"`
+	AnalyticsEnabled             *bool                          `json:"analytics_enabled,omitempty"`
+	MCPAttribution               *FingerprintMCPAttribution     `json:"mcp_attribution,omitempty"`
+	PromptCacheKey               *FingerprintPromptCacheKey     `json:"prompt_cache_key,omitempty"`
 	Compaction                   *CodexCompactionTurnMetadata   `json:"compaction,omitempty"`
 	ToolNamespacesInfo           []FingerprintToolNamespace     `json:"tool_namespaces_info,omitempty"`
 	MetadataStatus               *FingerprintMetadataStatus     `json:"metadata_status,omitempty"`

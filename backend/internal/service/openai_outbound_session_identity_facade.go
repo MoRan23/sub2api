@@ -84,24 +84,44 @@ const (
 	OpenAICodexPromptCacheKeyInvalid    OpenAICodexPromptCacheKeyKind = "invalid"
 )
 
+// OpenAICodexPromptCacheAbsencePolicy is selected by the ingress contract,
+// independently of client fingerprints and the transport used for forwarding.
+type OpenAICodexPromptCacheAbsencePolicy string
+
+const (
+	OpenAICodexPromptCachePreserveAbsent    OpenAICodexPromptCacheAbsencePolicy = ""
+	OpenAICodexPromptCacheSynthesizeSession OpenAICodexPromptCacheAbsencePolicy = "synthesize_session"
+)
+
+type OpenAICodexPromptCacheKeyAction string
+
+const (
+	OpenAICodexPromptCacheKeyUnmanaged OpenAICodexPromptCacheKeyAction = ""
+	OpenAICodexPromptCacheKeySet       OpenAICodexPromptCacheKeyAction = "set"
+	OpenAICodexPromptCacheKeyOmit      OpenAICodexPromptCacheKeyAction = "omit"
+)
+
 // OpenAICodexPromptCacheKeySnapshot is captured from the untouched ingress
 // body. It remains account-independent so retries and credential failover can
 // materialize a new owner-scoped outbound value without reparsing a narrowed
 // compact body.
 type OpenAICodexPromptCacheKeySnapshot struct {
-	Value      string
-	Kind       OpenAICodexPromptCacheKeyKind
-	Present    bool
-	Valid      bool
-	Applicable bool
+	AbsencePolicy OpenAICodexPromptCacheAbsencePolicy
+	Value         string
+	Kind          OpenAICodexPromptCacheKeyKind
+	Present       bool
+	Valid         bool
+	Applicable    bool
 }
 
 // OpenAICodexPromptCacheKeyPlan is the immutable final wire value. Generic
 // overrides are mapped with an owner-scoped HMAC; no prompt-cache mapping is
 // persisted in Redis or the UUIDv7 identity store.
 type OpenAICodexPromptCacheKeyPlan struct {
-	Value   string
-	Kind    OpenAICodexPromptCacheKeyKind
+	Action OpenAICodexPromptCacheKeyAction
+	Value  string
+	Kind   OpenAICodexPromptCacheKeyKind
+	// Enabled reports whether projection manages the key (Set or Omit).
 	Enabled bool
 }
 
@@ -258,7 +278,17 @@ func CaptureOpenAIOAuthIdentityWithTurnMetadata(c *gin.Context, body []byte, cal
 // ordinary turns before request-turn capture. Inbound Responses metadata must
 // not be able to suppress the UUIDv7 that Chat/Messages conversion later needs.
 func CaptureOpenAIOAuthIdentityForCompatTurn(c *gin.Context, body []byte, callerSeed string) OpenAIOAuthIdentityCapture {
-	return captureOpenAIOAuthIdentity(c, body, callerSeed, "", false, false, true, CodexWireRequestTurn)
+	capture := captureOpenAIOAuthIdentity(c, body, callerSeed, "", false, false, true, CodexWireRequestTurn)
+	capture.PromptCacheKey.AbsencePolicy = OpenAICodexPromptCacheSynthesizeSession
+	return capture
+}
+
+// CaptureOpenAIOAuthIdentityForSyntheticTurn opts gateway-owned probes into the
+// session cache key that compatibility requests have historically synthesized.
+func CaptureOpenAIOAuthIdentityForSyntheticTurn(c *gin.Context, body []byte, callerSeed string) OpenAIOAuthIdentityCapture {
+	capture := CaptureOpenAIOAuthIdentity(c, body, callerSeed)
+	capture.PromptCacheKey.AbsencePolicy = OpenAICodexPromptCacheSynthesizeSession
+	return capture
 }
 
 // CaptureOpenAIOAuthIdentityWithEndpointAlias captures an endpoint-native
@@ -274,6 +304,7 @@ func CaptureOpenAIOAuthIdentityWithEndpointAlias(c *gin.Context, body []byte, en
 // replaced locally instead of rejecting an otherwise valid alpha request.
 func CaptureOpenAIOAuthIdentityForAlphaSearch(c *gin.Context, body []byte, endpointAlias string) OpenAIOAuthIdentityCapture {
 	capture := captureOpenAIOAuthIdentity(c, body, endpointAlias, "", true, true, false, "")
+	capture.PromptCacheKey.AbsencePolicy = OpenAICodexPromptCacheSynthesizeSession
 	return normalizeOpenAIOAuthAlphaSearchCapture(capture)
 }
 
@@ -667,12 +698,23 @@ func openAICodexRequestTurnSnapshotValidForWire(snapshot OpenAICodexRequestTurnS
 // request always keeps priority.
 func FillOpenAIOAuthIdentityCaptureFallback(c *gin.Context, callerSeed string) bool {
 	capture, ok := OpenAIOAuthIdentityCaptureFromContext(c)
-	if !ok || strings.TrimSpace(capture.Logical.SessionKey) != "" {
+	if !ok {
 		return false
+	}
+	capture, filled := fillOpenAIOAuthIdentityCaptureFallback(capture, callerSeed)
+	if filled {
+		SetOpenAIOAuthIdentityCapture(c, capture)
+	}
+	return filled
+}
+
+func fillOpenAIOAuthIdentityCaptureFallback(capture OpenAIOAuthIdentityCapture, callerSeed string) (OpenAIOAuthIdentityCapture, bool) {
+	if strings.TrimSpace(capture.Logical.SessionKey) != "" {
+		return capture, false
 	}
 	seed := sanitizeSessionID(callerSeed)
 	if seed == "" {
-		return false
+		return capture, false
 	}
 	capture.Logical = normalizeLogicalTuple(
 		openAICodexLogicalTuple{session: seed, thread: seed},
@@ -684,8 +726,7 @@ func FillOpenAIOAuthIdentityCaptureFallback(c *gin.Context, callerSeed string) b
 		ThreadKey:  seed,
 		Source:     capture.Logical.Source,
 	}}
-	SetOpenAIOAuthIdentityCapture(c, capture)
-	return true
+	return capture, true
 }
 
 func normalizeOpenAIOAuthIdentityPlanOptions(options OpenAIOAuthIdentityPlanOptions) OpenAIOAuthIdentityPlanOptions {
@@ -746,8 +787,7 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 		s.oauthDailySessionRotationEnabled(ctx) &&
 		(openAIClientRequestedStream(c, nil, false) || openAIOAuthDailyStreamRequested(c)) {
 		if seed := s.oauthDailyLogicalSessionFallbackSeedForRequest(ctx, c, nil); seed != "" {
-			fallback := CaptureOpenAIOAuthIdentity(c, nil, seed)
-			capture.Logical, capture.Aliases = fallback.Logical, fallback.Aliases
+			capture, _ = fillOpenAIOAuthIdentityCaptureFallback(capture, seed)
 			plan.Capture = cloneOpenAIOAuthIdentityCapture(capture)
 			plan.RequestTurn = capture.RequestTurn
 		}
@@ -905,6 +945,11 @@ func (s *OpenAIGatewayService) resolveOpenAICodexPromptCacheKeyPlan(plan OpenAIO
 		return result, nil
 	}
 	result.Enabled = true
+	result.Action = OpenAICodexPromptCacheKeySet
+	if snapshot.Applicable && !snapshot.Present && snapshot.AbsencePolicy != OpenAICodexPromptCacheSynthesizeSession {
+		result.Action = OpenAICodexPromptCacheKeyOmit
+		return result, nil
+	}
 	if !snapshot.Applicable {
 		result.Kind = OpenAICodexPromptCacheKeyDefault
 		result.Value = sessionID
@@ -928,8 +973,8 @@ func (s *OpenAIGatewayService) resolveOpenAICodexPromptCacheKeyPlan(plan OpenAIO
 		// parent-scoped contract, so isolate it as a generic override instead.
 		return s.resolveOpenAICodexPromptCacheOverride(plan, result)
 	default:
-		// Missing, invalid, and normal Codex values all converge on the mapped
-		// session id. This restores the official session/cache-key invariant.
+		// Explicit invalid values retain the existing session fallback. Missing
+		// values reach this branch only for gateway compatibility/synthetic input.
 		result.Value = sessionID
 	}
 	return result, nil

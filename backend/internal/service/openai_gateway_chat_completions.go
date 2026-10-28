@@ -36,7 +36,6 @@ var cursorResponsesUnsupportedFields = []string{
 	"prompt_cache_retention",
 	"safety_identifier",
 	"metadata",
-	"stream_options",
 }
 
 // ForwardAsChatCompletions accepts a Chat Completions request body, converts it
@@ -96,7 +95,11 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 	resetOpenAIRequestIntegrityAttemptRules(c)
 	if _, captured := OpenAIOAuthIdentityCaptureFromContext(c); !captured {
-		SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentityForCompatTurn(c, body, promptCacheKey))
+		if !gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists() {
+			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, body, promptCacheKey))
+		} else {
+			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentityForCompatTurn(c, body, promptCacheKey))
+		}
 	}
 	rememberOpenCodeInboundBody(c, body)
 	beginUpstreamResponseModelObservation(c)
@@ -244,6 +247,15 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			if stripped, derr := sjson.DeleteBytes(responsesBody, field); derr == nil {
 				responsesBody = stripped
 			}
+		}
+		if account.IsOpenAIOAuthLike() {
+			responsesBody, _, err = normalizeOpenAICodexStreamOptionsBody(responsesBody, false)
+			if err != nil {
+				return nil, err
+			}
+		} else if stripped, deleteErr := sjson.DeleteBytes(responsesBody, "stream_options"); deleteErr == nil {
+			// Preserve the existing Responses-shape API-key adapter behavior.
+			responsesBody = stripped
 		}
 		var normalizedServiceTier string
 		responsesBody, normalizedServiceTier, err = normalizeResponsesBodyServiceTier(responsesBody)

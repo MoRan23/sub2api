@@ -76,6 +76,45 @@ func TestDefaultCodexInstructionsFinalWirePaths(t *testing.T) {
 	}
 }
 
+func TestDefaultCodexInstructionsGPT61TerraFinalWirePaths(t *testing.T) {
+	for _, accountType := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
+		for _, transport := range []string{"http", "ws"} {
+			for _, prompt := range []string{"", " Keep caller instructions exactly. "} {
+				t.Run(accountType+"/"+transport+"/"+prompt, func(t *testing.T) {
+					account := &Account{ID: 12, Platform: PlatformOpenAI, Type: accountType}
+					service := &OpenAIGatewayService{}
+					body := []byte(`{"model":"gpt-6.1-terra","input":[{"role":"user","content":"hi"}]}`)
+					if prompt != "" {
+						var err error
+						body, err = sjson.SetBytes(body, "instructions", prompt)
+						require.NoError(t, err)
+					}
+					var actual []byte
+					var err error
+					if transport == "http" {
+						req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://example.invalid/responses", strings.NewReader(string(body)))
+						require.NoError(t, reqErr)
+						actual, err = service.FinalizeOpenAIOAuthResponsesRequest(nil, account, req, body, OpenAIOAuthResponsesFinalizeOptions{FinalModel: "gpt-6.1-terra"})
+						require.NoError(t, err)
+						wire, readErr := io.ReadAll(req.Body)
+						require.NoError(t, readErr)
+						require.Equal(t, actual, wire)
+					} else {
+						actual, err = service.projectOpenAIOAuthWSFrame(nil, account, OpenAIOAuthIdentityPlan{}, body)
+						require.NoError(t, err)
+					}
+					want := prompt
+					if want == "" {
+						want = defaultCodexSynthInstructions("gpt-6-astra")
+					}
+					require.Equal(t, want, gjson.GetBytes(actual, "instructions").String())
+					require.Equal(t, "gpt-6.1-terra", gjson.GetBytes(actual, "model").String())
+				})
+			}
+		}
+	}
+}
+
 func TestDefaultCodexInstructionsSkipWebSocketControlAndPrewarm(t *testing.T) {
 	account := &Account{ID: 12, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 	for _, body := range []string{

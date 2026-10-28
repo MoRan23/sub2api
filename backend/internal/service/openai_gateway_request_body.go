@@ -1512,6 +1512,12 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 		}
 		normalized = oauthBody
 		changed = changed || oauthChanged
+		streamBody, streamChanged, err := normalizeOpenAICodexStreamOptionsBody(normalized, opts.Compact)
+		if err != nil {
+			return body, false, err
+		}
+		normalized = streamBody
+		changed = changed || streamChanged
 		for _, field := range openAIChatGPTInternalUnsupportedFields {
 			if !gjson.GetBytes(normalized, field).Exists() {
 				continue
@@ -1619,6 +1625,12 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 		changed = true
 	}
 
+	streamBody, streamChanged, err := normalizeOpenAICodexStreamOptionsBody(normalized, compact)
+	if err != nil {
+		return body, false, err
+	}
+	normalized = streamBody
+	changed = changed || streamChanged
 	for _, field := range openAIChatGPTInternalUnsupportedFields {
 		if value := gjson.GetBytes(normalized, field); !value.Exists() {
 			continue

@@ -25,7 +25,7 @@ func TestDefaultModelsIncludeGPT6Astra(t *testing.T) {
 }
 
 func TestDefaultModelsIncludeGPT6SolAndLuna(t *testing.T) {
-	for id, displayName := range map[string]string{"gpt-6.1-sol": "GPT-6.1 Sol", "gpt-6-sol": "GPT-6 Sol", "gpt-6-luna": "GPT-6 Luna"} {
+	for id, displayName := range map[string]string{"gpt-6.1-sol": "GPT-6.1 Sol", "gpt-6.1-terra": "GPT-6.1 Terra", "gpt-6-sol": "GPT-6 Sol", "gpt-6-luna": "GPT-6 Luna"} {
 		matches := 0
 		for _, model := range DefaultModels {
 			if model.ID == id {
@@ -97,4 +97,17 @@ func TestGPT61SolIdentityAndEffort(t *testing.T) {
 		require.NoError(t, ValidateGPT61SolReasoningEffort("gpt-6-sol", effort))
 	}
 	require.Contains(t, CodexBaseInstructionsForModel("gpt-6.1-sol"), "based on GPT-6")
+}
+
+func TestGPT61TerraModelVariantCompatibility(t *testing.T) {
+	require.Contains(t, DefaultModelIDs(), "gpt-6.1-terra")
+	for _, suffix := range []string{"", "-low", "-medium", "-high", "-xhigh", "-max", "-ultra", "-2026-10-28", "-openai-compact", "-ultra-openai-compact", "-2026-10-28-openai-compact"} {
+		model := "OPENAI/" + strings.ToUpper(strings.ReplaceAll("gpt-6.1-terra"+suffix, "-", "_"))
+		require.True(t, IsGPT61TerraModelSpelling(model), model)
+		require.False(t, IsGPT61SolModelSpelling(model), model)
+		require.False(t, IsGPT6SolOrLunaModelSpelling(model), model)
+	}
+	for _, model := range []string{"gpt-6.1", "gpt-6.1-terrain", "gpt-6.1-terra-custom", "gpt-6.1-terra-latest", "gpt-6.1-terra-preview", "gpt-6.1-terra-2026-99-28", "gpt-6.1-terra-2026-02-29", "gpt-6.1-terra-high-low", "gpt-6.1-terra-openai-compact-openai-compact", "gpt-6-astra", "gpt-6.1-sol"} {
+		require.False(t, IsGPT61TerraModelSpelling(model), model)
+	}
 }

@@ -620,7 +620,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_UUIDv7LatePrompt
 	require.NotEmpty(t, firstSessionID)
 	require.NotEmpty(t, firstThreadID)
 	require.NotEmpty(t, firstTurnID)
-	require.Equal(t, firstSessionID, gjson.Get(firstForwarded, "prompt_cache_key").String())
+	require.False(t, gjson.Get(firstForwarded, "prompt_cache_key").Exists())
 	secondPromptCacheKey := gjson.Get(secondForwarded, "prompt_cache_key").String()
 	thirdPromptCacheKey := gjson.Get(thirdForwarded, "prompt_cache_key").String()
 	require.True(t, strings.HasPrefix(secondPromptCacheKey, "pc_"))

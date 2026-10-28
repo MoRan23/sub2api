@@ -12,6 +12,7 @@ import (
 )
 
 var codexModelMap = map[string]string{
+	"gpt-6.1-terra":        "gpt-6.1-terra",
 	"gpt-6.1-sol":          "gpt-6.1-sol",
 	"gpt-6-astra":          "gpt-6-astra",
 	"gpt-6-sol":            "gpt-6-sol",
@@ -64,6 +65,7 @@ var codexVersionModelPrefixes = []struct {
 	prefix string
 	target string
 }{
+	{prefix: "gpt-6.1-terra", target: "gpt-6.1-terra"},
 	{prefix: "gpt-6.1-sol", target: "gpt-6.1-sol"},
 	{prefix: "gpt-6-sol", target: "gpt-6-sol"},
 	{prefix: "gpt-6-luna", target: "gpt-6-luna"},
@@ -152,7 +154,6 @@ var openAIChatGPTInternalUnsupportedFields = []string{
 	"metadata",
 	"prompt_cache_retention",
 	"safety_identifier",
-	"stream_options",
 	"truncation",
 	"stop_sequences",
 }
@@ -219,6 +220,17 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 	for _, key := range openAICodexOAuthUnsupportedFields {
 		if _, ok := reqBody[key]; ok {
 			delete(reqBody, key)
+			result.Modified = true
+		}
+	}
+	if options, present := reqBody["stream_options"]; present {
+		filtered, changed := filterOpenAICodexStreamOptions(options, opts.IsCompact)
+		if changed {
+			if filtered == nil {
+				delete(reqBody, "stream_options")
+			} else {
+				reqBody["stream_options"] = filtered
+			}
 			result.Modified = true
 		}
 	}

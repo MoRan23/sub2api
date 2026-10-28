@@ -182,6 +182,12 @@ func (s *OpenAIGatewayService) projectOpenAIOAuthWSFrame(
 	}
 	finalPayload := payload
 	var err error
+	if account.UsesOpenAICodexProtocol() {
+		finalPayload, _, err = normalizeOpenAICodexStreamOptionsBody(finalPayload, plan.ProjectionMode == OpenAIOAuthIdentityProjectionCompact)
+		if err != nil {
+			return payload, err
+		}
+	}
 	// Only inference frames receive a missing prompt. Control frames and prewarm
 	// remain independent of the request-level instructions fallback.
 	finalPayload, err = applyDefaultCodexInstructionsWSBody(finalPayload)

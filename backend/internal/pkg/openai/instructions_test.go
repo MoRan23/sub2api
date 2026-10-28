@@ -63,6 +63,10 @@ func TestCodexBaseInstructionsForModelCurrentManifestTemplates(t *testing.T) {
 		{"openai/GPT-6.1_SOL", instructionsGPT61Sol},
 		{"gpt-6.1-sol-ultra-openai-compact", instructionsGPT61Sol},
 		{"gpt-6.1-sol-2026-09-29", instructionsGPT61Sol},
+		{"gpt-6.1-terra", instructionsGPT6Astra},
+		{"openai/GPT-6.1_TERRA", instructionsGPT6Astra},
+		{"gpt-6.1-terra-ultra-openai-compact", instructionsGPT6Astra},
+		{"gpt-6.1-terra-2026-10-28", instructionsGPT6Astra},
 		{"openai/GPT-6_SOL", instructionsGPT6Sol},
 		{"gpt-6-sol-minimal", instructionsGPT6Sol},
 		{"gpt-6-sol-ultra-openai-compact", instructionsGPT6Sol},
@@ -90,7 +94,12 @@ func TestCodexBaseInstructionsForModelCurrentManifestTemplates(t *testing.T) {
 }
 
 func TestCodexBaseInstructionsForModelNewVariantsUseKnownNames(t *testing.T) {
-	for _, model := range []string{"gpt-6.1-sol-latest", "gpt-6.1-sol-custom", "gpt-6.1-sol-2026-99-29", "gpt-6-sol-latest", "gpt-6-luna-2026-99-23", "gpt-6-astra-custom", "gpt-6-other"} {
+	for _, model := range []string{"gpt-6.1-terra-codex", "gpt-6.1-terrain-codex"} {
+		if got := CodexBaseInstructionsForModel(model); got != instructionsGPT55 {
+			t.Errorf("unlisted Terra variant %q must retain the unknown-model fallback", model)
+		}
+	}
+	for _, model := range []string{"gpt-6.1-terra-latest", "gpt-6.1-terra-custom", "gpt-6.1-terra-2026-99-29", "gpt-6.1-sol-latest", "gpt-6.1-sol-custom", "gpt-6.1-sol-2026-99-29", "gpt-6-sol-latest", "gpt-6-luna-2026-99-23", "gpt-6-astra-custom", "gpt-6-other"} {
 		t.Run(model, func(t *testing.T) {
 			if got := CodexBaseInstructionsForModel(model); got != instructionsGPT55 {
 				t.Fatal("unlisted GPT-6 name must retain the unknown-model fallback")

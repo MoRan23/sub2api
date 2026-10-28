@@ -48,11 +48,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	if account != nil && usesOpenAICodexIdentityProtocol(account) {
 		capture, captured := OpenAIOAuthIdentityCaptureFromContext(c)
-		if !captured || (capture.Logical.SessionKey == "" && s.oauthDailyLogicalSessionFallbackSeed(ctx, c, account, body) != "") {
+		if !captured {
 			// The facade reads prompt_cache_key from the untouched body. Passing it
 			// again as callerSeed would misclassify its source and priority.
 			fallbackSeed := s.oauthDailyLogicalSessionFallbackSeed(ctx, c, account, body)
 			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentity(c, body, fallbackSeed))
+		} else if capture.Logical.SessionKey == "" {
+			FillOpenAIOAuthIdentityCaptureFallback(c, s.oauthDailyLogicalSessionFallbackSeed(ctx, c, account, body))
 		}
 		if kindErr := s.validateOpenAICodexHTTPMemoryRequestShapeForAccount(ctx, c, account); kindErr != nil {
 			setOpsUpstreamError(c, http.StatusBadRequest, kindErr.Error(), "")
@@ -1618,6 +1620,10 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 			identityPlan.WireProfile.WindowNumber = ptrUint64(identityPlan.Window.Number)
 			identityPlan.WireProfile.ContextWindowID = identityPlan.Window.ContextWindowID
 			identityPlan.WindowMappingKey = "oauth-sync:" + syncIdentity.ThreadID
+			identityPlan.PromptCacheKey, planErr = s.resolveOpenAICodexPromptCacheKeyPlan(identityPlan)
+			if planErr != nil {
+				return nil, fmt.Errorf("resolve synchronous OpenAI prompt cache key: %w", planErr)
+			}
 		}
 		compatMessagesBridge = isOpenAICompatMessagesBridgeContext(c) || isOpenAICompatMessagesBridgeBody(body)
 		// 清除客户端透传的 session 头，后续用隔离后的值重新设置，防止跨用户会话碰撞。

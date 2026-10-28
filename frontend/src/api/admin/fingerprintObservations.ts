@@ -99,6 +99,21 @@ export interface RequestConversionCheck {
 }
 
 export type CodexMetadataStatus = 'missing' | 'valid' | 'invalid' | 'truncated'
+export type CodexHistoryInitialization = 'new' | 'cleared' | 'cold_resume' | 'warm_fork' | 'cold_fork' | 'supplied_history'
+export type CodexMetadataKey = 'request_kind' | 'history_ingest_requested' | 'history_initialization' | 'guardian_recorded_items' | 'analytics_enabled' | 'compaction' | 'tool_namespaces_info'
+
+export interface CodexMCPAttributionObservation {
+  present: boolean
+  type: 'missing' | 'unavailable' | 'string' | 'object' | 'array' | 'boolean' | 'number' | 'null'
+  bytes?: number
+  status: 'missing' | 'valid' | 'invalid' | 'oversized'
+  reported_status?: 'none' | 'complete' | 'attribution_error'
+}
+
+export interface CodexPromptCacheKeyObservation {
+  present: boolean
+  strategy: 'absent' | 'session' | 'override' | 'invalid'
+}
 
 export interface CodexCompactionMetadata {
   trigger: string
@@ -161,9 +176,14 @@ export interface FingerprintObservationEntry {
   workspaces?: string[]
   request_kind?: 'turn' | 'prewarm' | 'compaction' | 'memory'
   history_ingest_requested?: boolean
+  history_initialization?: CodexHistoryInitialization
+  guardian_recorded_items?: boolean
+  analytics_enabled?: boolean
+  mcp_attribution?: CodexMCPAttributionObservation
+  prompt_cache_key?: CodexPromptCacheKeyObservation
   compaction?: CodexCompactionMetadata
   tool_namespaces_info?: CodexToolNamespaceMetadata[]
-  metadata_status?: Record<'request_kind' | 'history_ingest_requested' | 'compaction' | 'tool_namespaces_info', CodexMetadataStatus>
+  metadata_status?: Partial<Record<CodexMetadataKey, CodexMetadataStatus>>
   daily_fixed_root_enabled: boolean
   routing_os_family?: 'windows' | 'macos' | 'linux'
   routing_os_source?: 'user_agent' | 'environment_context' | 'account_default'

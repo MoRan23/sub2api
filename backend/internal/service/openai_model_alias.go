@@ -48,6 +48,10 @@ func normalizeKnownOpenAICodexModel(model string) string {
 	}
 
 	switch {
+	case openai.IsGPT61TerraModelSpelling(normalized):
+		return "gpt-6.1-terra"
+	case strings.HasPrefix(normalized, "gpt-6.1-terra"):
+		return ""
 	case openai.IsKnownCodexModelVariant(normalized, "gpt-6.1-sol"):
 		return "gpt-6.1-sol"
 	case isOpenAIGPT6AstraModel(normalized):
@@ -122,7 +126,7 @@ func isOpenAIGPT6AstraModel(model string) bool {
 // spelling, effort, and snapshot variants. The bare alias remains Astra.
 func isOpenAIGPT6Model(model string) bool {
 	return isOpenAIGPT6AstraModel(model) || openai.IsGPT6SolOrLunaModelSpelling(model) ||
-		openai.IsKnownCodexModelVariant(model, "gpt-6.1-sol")
+		openai.IsGPT61SolModelSpelling(model) || openai.IsGPT61TerraModelSpelling(model)
 }
 
 func appendUsageBillingModelCandidate(candidates []string, seen map[string]struct{}, model string) []string {

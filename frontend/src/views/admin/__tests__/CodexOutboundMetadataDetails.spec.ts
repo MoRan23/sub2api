@@ -50,6 +50,96 @@ function fieldValue(wrapper: ReturnType<typeof mountMetadata>, label: string): s
 afterEach(() => { for (const wrapper of mounted.splice(0)) wrapper.unmount() })
 
 describe('CodexOutboundMetadataDetails', () => {
+  it.each(['new', 'cleared', 'cold_resume', 'warm_fork', 'cold_fork', 'supplied_history'] as const)(
+    'shows the observed %s history state and preserves explicit false boolean metadata',
+    historyInitialization => {
+      const wrapper = mountMetadata({
+        history_initialization: historyInitialization,
+        guardian_recorded_items: false,
+        analytics_enabled: true,
+        metadata_status: { history_initialization: 'valid', guardian_recorded_items: 'valid', analytics_enabled: 'valid' },
+      })
+      expect(fieldValue(wrapper, 'History initialization')).toBe(historyInitialization)
+      expect(fieldValue(wrapper, 'Guardian recorded items')).toBe('false')
+      expect(fieldValue(wrapper, 'Analytics enabled')).toBe('true')
+    },
+  )
+
+  it('distinguishes missing typed metadata from legacy observations and invalid values', async () => {
+    const wrapper = mountMetadata({ agent_name: 'guardian', subagent_kind: 'guardian' })
+    for (const label of ['History initialization', 'Guardian recorded items', 'Analytics enabled']) {
+      expect(fieldValue(wrapper, label)).toBe('Not collected')
+    }
+    await wrapper.setProps({ observation: {
+      metadata_status: { history_initialization: 'missing', guardian_recorded_items: 'missing', analytics_enabled: 'missing' },
+    } as FingerprintObservationEntry })
+    for (const label of ['History initialization', 'Guardian recorded items', 'Analytics enabled']) {
+      expect(fieldValue(wrapper, label)).toBe('Not provided')
+    }
+    await wrapper.setProps({ observation: {
+      history_initialization: '<unsafe>', guardian_recorded_items: 'false', analytics_enabled: 'true',
+      metadata_status: { history_initialization: 'valid', guardian_recorded_items: 'valid', analytics_enabled: 'invalid' },
+    } as unknown as FingerprintObservationEntry })
+    for (const label of ['History initialization', 'Guardian recorded items', 'Analytics enabled']) {
+      expect(fieldValue(wrapper, label)).toBe('Unable to parse')
+    }
+    expect(wrapper.text()).not.toContain('<unsafe>')
+    await wrapper.setProps({ observation: {
+      guardian_recorded_items: true, analytics_enabled: false,
+      metadata_status: { guardian_recorded_items: 'valid', analytics_enabled: 'valid' },
+    } as FingerprintObservationEntry })
+    expect(fieldValue(wrapper, 'Guardian recorded items')).toBe('true')
+    expect(fieldValue(wrapper, 'Analytics enabled')).toBe('false')
+  })
+
+  it('shows only the bounded MCP attribution summary and distinguishes oversized and invalid carriers', async () => {
+    const wrapper = mountMetadata({})
+    expect(fieldValue(wrapper, 'MCP attribution')).toBe('Not collected')
+    await wrapper.setProps({ observation: {
+      mcp_attribution: { present: false, type: 'missing', status: 'missing' },
+    } as FingerprintObservationEntry })
+    expect(fieldValue(wrapper, 'MCP attribution')).toBe('Absent · Missing · Not provided')
+    await wrapper.setProps({ observation: {
+      mcp_attribution: { present: true, type: 'string', bytes: 42, status: 'valid', reported_status: 'complete', content: 'private server content' },
+    } as unknown as FingerprintObservationEntry })
+    expect(fieldValue(wrapper, 'MCP attribution')).toBe('Present · String · 42 bytes · Recorded · Reported status: complete')
+    expect(wrapper.text()).not.toContain('private server content')
+    await wrapper.setProps({ observation: {
+      mcp_attribution: { present: true, type: 'string', bytes: 16385, status: 'oversized' },
+    } as FingerprintObservationEntry })
+    expect(fieldValue(wrapper, 'MCP attribution')).toBe('Present · String · >16384 bytes · Exceeds 16 KiB')
+    await wrapper.setProps({ observation: {
+      mcp_attribution: { present: true, type: 'object', status: 'invalid' },
+    } as FingerprintObservationEntry })
+    expect(fieldValue(wrapper, 'MCP attribution')).toBe('Present · Object · Unable to parse')
+    await wrapper.setProps({ observation: {
+      mcp_attribution: { present: false, type: 'unavailable', status: 'invalid' },
+    } as FingerprintObservationEntry })
+    expect(fieldValue(wrapper, 'MCP attribution')).toBe('Absent · Unavailable · Unable to parse')
+    await wrapper.setProps({ observation: {
+      mcp_attribution: { present: true, type: 'string', bytes: 80, status: 'valid', reported_status: 'attribution_error', error_reason: 'private error' },
+    } as unknown as FingerprintObservationEntry })
+    expect(fieldValue(wrapper, 'MCP attribution')).toBe('Present · String · 80 bytes · Recorded · Reported status: attribution_error')
+    expect(wrapper.text()).not.toContain('private error')
+  })
+
+  it('shows prompt cache absence, session matching and overrides without exposing the key', async () => {
+    const wrapper = mountMetadata({})
+    expect(fieldValue(wrapper, 'Prompt cache key')).toBe('Not collected')
+    for (const [present, strategy, expected] of [
+      [false, 'absent', 'Absent · Not provided'],
+      [true, 'session', 'Present · Matches outbound session'],
+      [true, 'override', 'Present · Explicit override'],
+      [true, 'invalid', 'Present · Invalid value'],
+    ] as const) {
+      await wrapper.setProps({ observation: {
+        prompt_cache_key: { present, strategy, value: 'private-cache-key' },
+      } as unknown as FingerprintObservationEntry })
+      expect(fieldValue(wrapper, 'Prompt cache key')).toBe(expected)
+      expect(wrapper.text()).not.toContain('private-cache-key')
+    }
+  })
+
   it('keeps request flags compact and expands all observed tool and compaction fields only on demand', async () => {
     const wrapper = mountMetadata()
     expect(fieldValue(wrapper, 'Request kind')).toBe('compaction')
@@ -121,13 +211,24 @@ describe('CodexOutboundMetadataDetails', () => {
   })
 
   it('provides complete Chinese metadata labels and summaries', async () => {
-    const wrapper = mountMetadata(observation, 'zh')
+    const wrapper = mountMetadata({
+      ...observation,
+      history_initialization: 'warm_fork', guardian_recorded_items: false, analytics_enabled: true,
+      metadata_status: { ...observation.metadata_status, history_initialization: 'valid', guardian_recorded_items: 'valid', analytics_enabled: 'valid' },
+      mcp_attribution: { present: true, type: 'string', bytes: 42, status: 'valid' },
+      prompt_cache_key: { present: true, strategy: 'override' },
+    }, 'zh')
     expect(wrapper.text()).toContain('请求与工具元数据')
     expect(wrapper.text()).toContain('1 个命名空间 · 2 个函数')
     await expand(wrapper, 'codex-compaction')
     await expand(wrapper, 'codex-tool-namespaces')
     expect(wrapper.text()).toContain('MCP 服务名称')
     expect(fieldValue(wrapper, '请求历史导入')).toBe('false')
+    expect(fieldValue(wrapper, '历史初始化')).toBe('warm_fork')
+    expect(fieldValue(wrapper, 'Guardian 已记录条目')).toBe('false')
+    expect(fieldValue(wrapper, '分析已启用')).toBe('true')
+    expect(fieldValue(wrapper, 'MCP 归属')).toBe('存在 · 字符串 · 42 字节 · 已记录')
+    expect(fieldValue(wrapper, '提示缓存键')).toBe('存在 · 显式覆盖')
     expect(wrapper.text()).not.toContain('admin.fingerprintObservation')
   })
 })

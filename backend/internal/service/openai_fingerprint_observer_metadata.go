@@ -17,6 +17,7 @@ const (
 	fingerprintFunctionLimit         = 256
 	fingerprintMetadataNameLimit     = 256
 	fingerprintExtraMetadataRedacted = "[redacted]"
+	fingerprintMCPAttributionLimit   = 16 * 1024
 )
 
 // FingerprintMetadataStatus distinguishes absent wire fields from malformed
@@ -26,6 +27,26 @@ type FingerprintMetadataStatus struct {
 	HistoryIngestRequested string `json:"history_ingest_requested"`
 	Compaction             string `json:"compaction"`
 	ToolNamespacesInfo     string `json:"tool_namespaces_info"`
+	HistoryInitialization  string `json:"history_initialization"`
+	GuardianRecordedItems  string `json:"guardian_recorded_items"`
+	AnalyticsEnabled       string `json:"analytics_enabled"`
+}
+
+// FingerprintMCPAttribution retains only bounded wire shape and a known producer
+// status. Sources, names and attribution content never enter the ring buffer.
+type FingerprintMCPAttribution struct {
+	Present        bool   `json:"present"`
+	Type           string `json:"type"`
+	Bytes          *int   `json:"bytes,omitempty"`
+	Status         string `json:"status"`
+	ReportedStatus string `json:"reported_status,omitempty"`
+}
+
+// FingerprintPromptCacheKey describes the final cache-key shape without
+// retaining arbitrary user-provided cache keys.
+type FingerprintPromptCacheKey struct {
+	Present  bool   `json:"present"`
+	Strategy string `json:"strategy"`
 }
 
 // Namespace and Function preserve the original inventory map keys separately
@@ -106,6 +127,7 @@ func fingerprintMetadataField(carriers []fingerprintMetadataCarrier, field strin
 func populateFingerprintObservationMetadata(entry *FingerprintObservationEntry, headers http.Header, body []byte) {
 	carriers := fingerprintFinalMetadataCarriers(headers, body)
 	populateFingerprintObservationMetadataFromCarriers(entry, carriers)
+	populateFingerprintObservationBodyMetadata(entry, headers, body)
 }
 
 func populateFingerprintObservationMetadataFromCarriers(entry *FingerprintObservationEntry, carriers []fingerprintMetadataCarrier) {
@@ -129,6 +151,29 @@ func populateFingerprintObservationMetadataFromCarriers(entry *FingerprintObserv
 			status.HistoryIngestRequested = fingerprintMetadataInvalid
 		}
 	}
+	raw, status.HistoryInitialization = fingerprintMetadataField(carriers, "history_initialization")
+	if status.HistoryInitialization == fingerprintMetadataValid {
+		entry.HistoryInitialization = codexWireHistoryInitialization(raw)
+		if !entry.HistoryInitialization.valid() {
+			status.HistoryInitialization = fingerprintMetadataInvalid
+		}
+	}
+	for _, field := range []struct {
+		name   string
+		value  **bool
+		status *string
+	}{
+		{"guardian_recorded_items", &entry.GuardianRecordedItems, &status.GuardianRecordedItems},
+		{"analytics_enabled", &entry.AnalyticsEnabled, &status.AnalyticsEnabled},
+	} {
+		raw, *field.status = fingerprintMetadataField(carriers, field.name)
+		if *field.status == fingerprintMetadataValid {
+			*field.value = codexWireBool(raw)
+			if *field.value == nil {
+				*field.status = fingerprintMetadataInvalid
+			}
+		}
+	}
 	raw, status.Compaction = fingerprintMetadataField(carriers, "compaction")
 	if status.Compaction == fingerprintMetadataValid {
 		var metadata CodexCompactionTurnMetadata
@@ -148,8 +193,8 @@ func populateFingerprintObservationMetadataFromCarriers(entry *FingerprintObserv
 // Tool inventories are body-only in the canonical header writer and must not be
 // re-encoded from a possibly truncated observation as if they were complete.
 func copyFingerprintObservationSafeMetadata(safe map[string]any, metadata map[string]json.RawMessage) {
-	selected := make(map[string]json.RawMessage, 3)
-	for _, field := range []string{"request_kind", "history_ingest_requested", "compaction"} {
+	selected := make(map[string]json.RawMessage, 6)
+	for _, field := range []string{"request_kind", "history_ingest_requested", "compaction", "history_initialization", "guardian_recorded_items", "analytics_enabled"} {
 		if raw, present := metadata[field]; present {
 			selected[field] = raw
 			safe[field] = nil // Retain invalid presence without arbitrary raw values.
@@ -165,6 +210,99 @@ func copyFingerprintObservationSafeMetadata(safe map[string]any, metadata map[st
 	}
 	if entry.MetadataStatus.Compaction == fingerprintMetadataValid {
 		safe["compaction"] = *entry.Compaction
+	}
+	if entry.MetadataStatus.HistoryInitialization == fingerprintMetadataValid {
+		safe["history_initialization"] = entry.HistoryInitialization
+	}
+	if entry.MetadataStatus.GuardianRecordedItems == fingerprintMetadataValid {
+		safe["guardian_recorded_items"] = *entry.GuardianRecordedItems
+	}
+	if entry.MetadataStatus.AnalyticsEnabled == fingerprintMetadataValid {
+		safe["analytics_enabled"] = *entry.AnalyticsEnabled
+	}
+}
+
+func populateFingerprintObservationBodyMetadata(entry *FingerprintObservationEntry, headers http.Header, body []byte) {
+	if len(body) == 0 {
+		return // A handshake has no body and supplies no cache/attribution evidence.
+	}
+	entry.MCPAttribution = &FingerprintMCPAttribution{Type: "missing", Status: fingerprintMetadataMissing}
+	entry.PromptCacheKey = &FingerprintPromptCacheKey{Strategy: "absent"}
+	root, valid := fingerprintMetadataObject(body)
+	if !utf8.Valid(body) || !valid {
+		entry.MCPAttribution.Type, entry.MCPAttribution.Status = "unavailable", fingerprintMetadataInvalid
+		entry.PromptCacheKey.Strategy = "invalid"
+		return
+	}
+	if raw, present := root["prompt_cache_key"]; present {
+		entry.PromptCacheKey.Present = true
+		var key string
+		if json.Unmarshal(raw, &key) != nil || strings.TrimSpace(key) == "" {
+			entry.PromptCacheKey.Strategy = "invalid"
+		} else if key == finalFingerprintCodexWireProfile(headers, body).SessionID {
+			entry.PromptCacheKey.Strategy = "session"
+		} else {
+			entry.PromptCacheKey.Strategy = "override"
+		}
+	}
+	raw, present := root["client_metadata"]
+	if !present || string(raw) == "null" {
+		return
+	}
+	client, valid := fingerprintMetadataObject(raw)
+	if !valid {
+		entry.MCPAttribution.Type, entry.MCPAttribution.Status = "unavailable", fingerprintMetadataInvalid
+		return
+	}
+	raw, present = client["mcp_attribution"]
+	if !present {
+		return
+	}
+	summary := entry.MCPAttribution
+	summary.Present, summary.Status = true, fingerprintMetadataInvalid
+	summary.Type = fingerprintJSONType(raw)
+	if summary.Type != "string" {
+		return
+	}
+	var serialized string
+	if json.Unmarshal(raw, &serialized) != nil {
+		return
+	}
+	size := len(serialized)
+	if size > fingerprintMCPAttributionLimit {
+		size = fingerprintMCPAttributionLimit + 1
+		summary.Bytes, summary.Status = &size, "oversized"
+		return
+	}
+	summary.Bytes = &size
+	attribution, valid := fingerprintMetadataObject(json.RawMessage(serialized))
+	if !valid {
+		return
+	}
+	var reportedStatus string
+	if json.Unmarshal(attribution["status"], &reportedStatus) == nil && oneOf(reportedStatus, "none", "complete", "attribution_error") {
+		summary.ReportedStatus, summary.Status = reportedStatus, fingerprintMetadataValid
+	}
+}
+
+func fingerprintJSONType(raw json.RawMessage) string {
+	raw = json.RawMessage(strings.TrimSpace(string(raw)))
+	if len(raw) == 0 {
+		return "unavailable"
+	}
+	switch raw[0] {
+	case '"':
+		return "string"
+	case '{':
+		return "object"
+	case '[':
+		return "array"
+	case 'n':
+		return "null"
+	case 't', 'f':
+		return "boolean"
+	default:
+		return "number"
 	}
 }
 
@@ -329,6 +467,24 @@ func cloneFingerprintObservationMetadata(entry *FingerprintObservationEntry) {
 	}
 	if entry.HistoryIngestRequested != nil {
 		entry.HistoryIngestRequested = boolPointer(*entry.HistoryIngestRequested)
+	}
+	if entry.GuardianRecordedItems != nil {
+		entry.GuardianRecordedItems = boolPointer(*entry.GuardianRecordedItems)
+	}
+	if entry.AnalyticsEnabled != nil {
+		entry.AnalyticsEnabled = boolPointer(*entry.AnalyticsEnabled)
+	}
+	if entry.MCPAttribution != nil {
+		value := *entry.MCPAttribution
+		if value.Bytes != nil {
+			size := *value.Bytes
+			value.Bytes = &size
+		}
+		entry.MCPAttribution = &value
+	}
+	if entry.PromptCacheKey != nil {
+		value := *entry.PromptCacheKey
+		entry.PromptCacheKey = &value
 	}
 	if entry.Compaction != nil {
 		value := *entry.Compaction

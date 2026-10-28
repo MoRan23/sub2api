@@ -113,6 +113,14 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 		ensureOpenAIOAuthResponsesClientIdentity(req.Header, finalPlan.ClientIdentity)
 	}
 	finalInputBody := body
+	if account.UsesOpenAICodexProtocol() {
+		legacyCompact := isOpenAIResponsesCompactPath(c) || finalPlan.ProjectionMode == OpenAIOAuthIdentityProjectionCompact ||
+			strings.HasSuffix(strings.TrimRight(req.URL.Path, "/"), "/compact")
+		finalInputBody, _, err = normalizeOpenAICodexStreamOptionsBody(finalInputBody, legacyCompact)
+		if err != nil {
+			return body, err
+		}
+	}
 	finalInputBody, _, err = applyDefaultCodexInstructionsBody(finalInputBody, options.FinalModel)
 	if err != nil {
 		return body, err

@@ -162,7 +162,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 
 	if account != nil && account.UsesOpenAICodexProtocol() {
 		if rejectReason := detectOpenAIPassthroughInstructionsRejectReason(reqModel, body); rejectReason != "" {
-			rejectMsg := "OpenAI codex passthrough requires a non-empty instructions field"
+			rejectMsg := "OpenAI codex passthrough instructions must be a string when provided"
 			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
 			logOpenAIPassthroughInstructionsRejected(ctx, c, account, reqModel, rejectReason, body)
 			c.JSON(http.StatusForbidden, gin.H{
@@ -678,9 +678,11 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 			// installation passthrough, even if it originated from another path.
 			installationPolicy = OpenAIOAuthInstallationAccountPin
 		}
-		if !captured || (capture.Logical.SessionKey == "" && s.oauthDailyLogicalSessionFallbackSeed(ctx, c, account, body) != "") {
+		if !captured {
 			fallbackSeed := s.oauthDailyLogicalSessionFallbackSeed(ctx, c, account, body)
 			capture = CaptureOpenAIOAuthIdentity(c, body, fallbackSeed)
+		} else if capture.Logical.SessionKey == "" {
+			capture, _ = fillOpenAIOAuthIdentityCaptureFallback(capture, s.oauthDailyLogicalSessionFallbackSeed(ctx, c, account, body))
 		}
 		SetOpenAIOAuthIdentityCapture(c, capture)
 		planOptions := OpenAIOAuthIdentityPlanOptions{
@@ -754,6 +756,10 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 				identityPlan.WireProfile.WindowNumber = ptrUint64(identityPlan.Window.Number)
 				identityPlan.WireProfile.ContextWindowID = identityPlan.Window.ContextWindowID
 				identityPlan.WindowMappingKey = "oauth-sync:" + syncIdentity.ThreadID
+				identityPlan.PromptCacheKey, planErr = s.resolveOpenAICodexPromptCacheKeyPlan(identityPlan)
+				if planErr != nil {
+					return nil, fmt.Errorf("resolve synchronous OpenAI prompt cache key: %w", planErr)
+				}
 			}
 		}
 		promptCacheKey := strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())

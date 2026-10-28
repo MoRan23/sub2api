@@ -14,7 +14,11 @@ func TestNormalizeKnownOpenAICodexModelGPT6Astra(t *testing.T) {
 }
 
 func TestNormalizeKnownOpenAICodexModelGPT6Families(t *testing.T) {
-	for _, family := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
+	for _, unknown := range []string{"gpt-6.1-terra-codex", "gpt-6.1-terrain-codex"} {
+		require.Empty(t, normalizeKnownOpenAICodexModel(unknown))
+		require.Equal(t, unknown, normalizeCodexModel(unknown))
+	}
+	for _, family := range []string{"gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna"} {
 		for _, model := range []string{family, "openai/" + family, strings.ToUpper(strings.ReplaceAll(family, "-", "_")), family + "-minimal", family + "-high", family + "-max", family + "-ultra", family + "-2026-09-23", family + "-openai-compact", family + "-ultra-openai-compact"} {
 			t.Run(model, func(t *testing.T) {
 				require.Equal(t, family, normalizeKnownOpenAICodexModel(model))
@@ -26,12 +30,12 @@ func TestNormalizeKnownOpenAICodexModelGPT6Families(t *testing.T) {
 			})
 		}
 	}
-	for _, unknown := range []string{"gpt-6.1-sol-custom", "gpt-6.1-sol-latest", "gpt-6.1-sol-2026-99-01", "gpt-6-other", "gpt-6-sol-custom", "gpt-6-luna-custom", "gpt-6-astra-custom", "gpt-6-sol-2026-99-01", "gpt-6-luna-2026-02-29", "gpt-6-sol-2026-09-31-openai-compact"} {
+	for _, unknown := range []string{"gpt-6.1-terra-custom", "gpt-6.1-terra-latest", "gpt-6.1-terra-2026-99-01", "gpt-6.1-terra-2026-02-29", "gpt-6.1-terra-high-low", "gpt-6.1-sol-custom", "gpt-6.1-sol-latest", "gpt-6.1-sol-2026-99-01", "gpt-6-other", "gpt-6-sol-custom", "gpt-6-luna-custom", "gpt-6-astra-custom", "gpt-6-sol-2026-99-01", "gpt-6-luna-2026-02-29", "gpt-6-sol-2026-09-31-openai-compact"} {
 		require.Empty(t, normalizeKnownOpenAICodexModel(unknown))
 		require.Equal(t, unknown, normalizeCodexModel(unknown))
 		require.False(t, isOpenAIGPT6Model(unknown))
 	}
-	for _, family := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
+	for _, family := range []string{"gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna"} {
 		require.Equal(t, []string{family}, usageBillingModelCandidates(family), "new models must not borrow another model's pricing")
 	}
 }

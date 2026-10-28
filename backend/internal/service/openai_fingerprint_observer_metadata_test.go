@@ -55,7 +55,10 @@ func TestFingerprintObservationMetadataFinalWire(t *testing.T) {
 	require.NotNil(t, entry.HistoryIngestRequested)
 	require.False(t, *entry.HistoryIngestRequested)
 	require.Equal(t, CodexCompactionImplementationRemoteV2, entry.Compaction.Implementation)
-	require.Equal(t, &FingerprintMetadataStatus{"valid", "valid", "valid", "valid"}, entry.MetadataStatus)
+	require.Equal(t, &FingerprintMetadataStatus{
+		RequestKind: "valid", HistoryIngestRequested: "valid", Compaction: "valid", ToolNamespacesInfo: "valid",
+		HistoryInitialization: "missing", GuardianRecordedItems: "missing", AnalyticsEnabled: "missing",
+	}, entry.MetadataStatus)
 	require.Len(t, entry.ToolNamespacesInfo, 1)
 	function := entry.ToolNamespacesInfo[0].Functions[0]
 	require.Equal(t, "tools", entry.ToolNamespacesInfo[0].Namespace)
@@ -119,7 +122,10 @@ func TestFingerprintObservationMetadataDoesNotUseInboundOrPlan(t *testing.T) {
 	require.Empty(t, entry.ContextWindowID)
 	require.Empty(t, entry.GuardianClassifierSourceThreadID)
 	require.Nil(t, entry.ExtraMetadata)
-	require.Equal(t, &FingerprintMetadataStatus{"missing", "missing", "missing", "missing"}, entry.MetadataStatus)
+	require.Equal(t, &FingerprintMetadataStatus{
+		RequestKind: "missing", HistoryIngestRequested: "missing", Compaction: "missing", ToolNamespacesInfo: "missing",
+		HistoryInitialization: "missing", GuardianRecordedItems: "missing", AnalyticsEnabled: "missing",
+	}, entry.MetadataStatus)
 }
 
 func TestFingerprintObservationMetadataWSHandshakeSnapshot(t *testing.T) {
@@ -154,7 +160,10 @@ func TestFingerprintObservationMetadataWSHandshakeSnapshot(t *testing.T) {
 	frozen = cloneFingerprintObservationHeaders(http.Header{openAIWSTurnMetadataHeader: []string{string(encoded)}})
 	entry = FingerprintObservationEntry{}
 	populateFingerprintObservationMetadata(&entry, frozen, nil)
-	require.Equal(t, &FingerprintMetadataStatus{"invalid", "invalid", "invalid", "missing"}, entry.MetadataStatus)
+	require.Equal(t, &FingerprintMetadataStatus{
+		RequestKind: "invalid", HistoryIngestRequested: "invalid", Compaction: "invalid", ToolNamespacesInfo: "missing",
+		HistoryInitialization: "missing", GuardianRecordedItems: "missing", AnalyticsEnabled: "missing",
+	}, entry.MetadataStatus)
 	encoded, _ = json.Marshal(frozen)
 	require.NotContains(t, string(encoded), "must-not-retain")
 }

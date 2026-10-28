@@ -12,18 +12,20 @@ func TestBundledCodexModelDefaultsCurrentGPT6Contract(t *testing.T) {
 	for _, tc := range []struct {
 		model, effort           string
 		ultra, review, priority bool
+		contextWindow           int
 	}{
-		{"gpt-6.1-sol", "low", true, true, false},
-		{"gpt-6-astra", "low", true, true, false},
-		{"gpt-6-sol", "medium", true, true, true},
-		{"gpt-6-luna", "medium", false, false, true},
+		{"gpt-6.1-sol", "low", true, true, false, 500000},
+		{"gpt-6.1-terra", "low", true, true, false, 500000},
+		{"gpt-6-astra", "low", true, true, false, 272000},
+		{"gpt-6-sol", "medium", true, true, true, 272000},
+		{"gpt-6-luna", "medium", false, false, true, 272000},
 	} {
 		t.Run(tc.model, func(t *testing.T) {
 			body, err := BuildCodexModelsManifest([]string{tc.model})
 			require.NoError(t, err)
 			model := decodeCodexManifestModels(t, body)[0]
 			require.Equal(t, tc.effort, model["default_reasoning_level"])
-			require.EqualValues(t, 272000, model["context_window"])
+			require.EqualValues(t, tc.contextWindow, model["context_window"])
 			require.EqualValues(t, 872000, model["max_context_window"])
 			require.Equal(t, "shell_command", model["shell_type"])
 			require.Equal(t, "v2", model["multi_agent_version"])
@@ -47,7 +49,7 @@ func TestBundledCodexModelDefaultsCurrentGPT6Contract(t *testing.T) {
 }
 
 func TestBundledCodexModelDefaultsPreserveAccountRouteConstraints(t *testing.T) {
-	for _, modelID := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
+	for _, modelID := range []string{"gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna"} {
 		for _, tc := range []struct {
 			name, kind, baseURL string
 			lite, search, image bool
@@ -72,6 +74,11 @@ func TestBundledCodexModelDefaultsPreserveAccountRouteConstraints(t *testing.T) 
 				require.Equal(t, "my-model", model["display_name"])
 				require.Equal(t, tc.lite, model["use_responses_lite"])
 				require.Equal(t, tc.search, model["supports_search_tool"])
+				if tc.lite {
+					require.Equal(t, "code_mode_only", model["tool_mode"])
+				} else {
+					require.Nil(t, model["tool_mode"])
+				}
 				if tc.image {
 					require.Contains(t, model["input_modalities"], "image")
 				} else {
@@ -128,7 +135,9 @@ func TestBundledCodexModelDefaultsKnownAliasesOnly(t *testing.T) {
 	for alias, base := range map[string]string{
 		"gpt-6": "gpt-6-astra", "gpt-5.6": "gpt-5.6-sol",
 		"openai/GPT-6.1_SOL-ultra": "gpt-6.1-sol", "gpt-6.1-sol-2026-09-29": "gpt-6.1-sol",
-		"openai/GPT-6-Sol-high": "gpt-6-sol", "gpt-6-luna-max": "gpt-6-luna",
+		"openai/GPT-6.1_TERRA-ultra": "gpt-6.1-terra", "gpt-6.1-terra-2026-10-28": "gpt-6.1-terra",
+		"gpt-6.1-terra-ultra-openai-compact": "gpt-6.1-terra",
+		"openai/GPT-6-Sol-high":              "gpt-6-sol", "gpt-6-luna-max": "gpt-6-luna",
 		"gpt-6-astra-2026-09-01": "gpt-6-astra", "gpt-6-sol-2026-09-23": "gpt-6-sol",
 	} {
 		model := newConfiguredCodexModelDescriptor(alias)
@@ -139,9 +148,80 @@ func TestBundledCodexModelDefaultsKnownAliasesOnly(t *testing.T) {
 		require.Equal(t, canonical.DefaultReasoningLevel, model.DefaultReasoningLevel)
 		require.Equal(t, canonical.ShellType, model.ShellType)
 	}
-	for _, unknown := range []string{"gpt-6.1-sol-custom", "gpt-6.1-sol-latest", "gpt-6-other", "gpt-6-sol-custom", "company-gpt-5.5-private", "gpt-5-unknown"} {
+	for _, unknown := range []string{"gpt-6.1-terra-custom", "gpt-6.1-terra-latest", "gpt-6.1-terra-2026-99-28", "gpt-6.1-sol-custom", "gpt-6.1-sol-latest", "gpt-6-other", "gpt-6-sol-custom", "company-gpt-5.5-private", "gpt-5-unknown"} {
 		require.Nil(t, bundledCodexModelDefault(unknown), unknown)
 	}
+}
+
+func TestBundledCodexModelDefaults0165MessageFields(t *testing.T) {
+	var catalog struct {
+		Models []struct {
+			Slug          string                     `json:"slug"`
+			ModelMessages map[string]json.RawMessage `json:"model_messages"`
+		} `json:"models"`
+	}
+	require.NoError(t, json.Unmarshal(bundledCodexModelDefaultsJSON, &catalog))
+	require.Len(t, catalog.Models, 12)
+	seen := make(map[string]bool)
+	for _, model := range catalog.Models {
+		require.False(t, seen[model.Slug], "duplicate catalog model %s", model.Slug)
+		seen[model.Slug] = true
+		require.NotContains(t, model.ModelMessages, "instructions_template")
+		body, err := BuildCodexModelsManifest([]string{model.Slug})
+		require.NoError(t, err)
+		messages, ok := decodeCodexManifestModels(t, body)[0]["model_messages"].(map[string]any)
+		require.True(t, ok)
+		if model.Slug == "gpt-6.1-terra" {
+			require.JSONEq(t, "null", string(model.ModelMessages["instructions_variables"]))
+			require.Contains(t, messages, "instructions_variables")
+			require.Nil(t, messages["instructions_variables"])
+		} else {
+			require.NotContains(t, model.ModelMessages, "instructions_variables")
+			require.NotContains(t, messages, "instructions_variables")
+		}
+	}
+}
+
+func TestBundledCodexModelDefaultsGPT61TerraKeepsOwnPolicies(t *testing.T) {
+	terra := newConfiguredCodexModelDescriptor("gpt-6.1-terra")
+	astra := newConfiguredCodexModelDescriptor("gpt-6-astra")
+	require.Equal(t, astra.ModelMessages.InstructionsTemplate, terra.ModelMessages.InstructionsTemplate)
+	require.NotEqual(t, astra.ModelMessages.CollaborationModes, terra.ModelMessages.CollaborationModes)
+	require.NotEqual(t, astra.ModelMessages.ConfirmationPolicies, terra.ModelMessages.ConfirmationPolicies)
+	var official configuredCodexModelDescriptor
+	require.NoError(t, json.Unmarshal(bundledCodexModelDefaults["gpt-6.1-terra"], &official))
+	require.Equal(t, official.ModelMessages.CollaborationModes, terra.ModelMessages.CollaborationModes)
+	require.Equal(t, official.ModelMessages.ConfirmationPolicies, terra.ModelMessages.ConfirmationPolicies)
+	require.Equal(t, []string{"low", "medium", "high", "xhigh", "max", "ultra"}, effortsFromConfiguredCodexLevels(terra.SupportedReasoningLevels))
+	require.Equal(t, "xhigh", *terra.MultiAgentReasoningEffort)
+	require.Equal(t, "v2", terra.MultiAgentVersion)
+	require.True(t, official.UseResponsesLite)
+	require.Equal(t, "code_mode_only", official.ToolMode)
+	require.False(t, configuredCodexSupportsUltrafastServiceTier("gpt-6.1-terra"))
+}
+
+func TestBundledCodexModelDefaultsGPT61TerraPreservesLiveMetadata(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"base_url": "https://relay.example/v1", "model_mapping": map[string]any{"my-terra": "gpt-6.1-terra"},
+	}}
+	body := []byte(`{"models":[{"slug":"gpt-6.1-terra","description":"Provider Terra","context_window":1000000,"use_responses_lite":true,"service_tiers":[{"id":"provider-fast"}],"model_messages":{"instructions_template":"provider instructions","instructions_variables":{"custom":"keep"}}},{"slug":"my-terra","use_responses_lite":true},{"slug":"openai/GPT-6.1_TERRA-ultra","use_responses_lite":true},{"slug":"gpt-6.1-terra-custom","use_responses_lite":true}]}`)
+	completed, err := completeAPIKeyCodexModelsManifestMetadata(body, true, account)
+	require.NoError(t, err)
+	completed, err = adjustAPIKeyCodexModelsManifest(completed, account)
+	require.NoError(t, err)
+	models := decodeCodexManifestModels(t, completed)
+	require.Equal(t, "Provider Terra", models[0]["description"])
+	require.EqualValues(t, 1000000, models[0]["context_window"])
+	require.EqualValues(t, 1000000, models[0]["max_context_window"])
+	require.Equal(t, []any{map[string]any{"id": "provider-fast"}}, models[0]["service_tiers"])
+	messages, ok := models[0]["model_messages"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "provider instructions", messages["instructions_template"])
+	require.Equal(t, map[string]any{"custom": "keep"}, messages["instructions_variables"])
+	for _, model := range models[:3] {
+		require.Equal(t, false, model["use_responses_lite"])
+	}
+	require.Equal(t, true, models[3]["use_responses_lite"], "unrecognized names retain upstream capabilities")
 }
 
 func TestBundledCodexModelDefaultsExcludeRetiredGPT54(t *testing.T) {

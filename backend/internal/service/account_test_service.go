@@ -170,10 +170,11 @@ func captureOpenAIOAuthSyntheticRequest(c *gin.Context, body []byte, callerSeed 
 	seed := sanitizeSessionID(callerSeed)
 	if current, ok := OpenAIOAuthIdentityCaptureFromContext(c); ok &&
 		current.Logical.Source == OpenAIOutboundSessionLogicalKeySourceCallerSeed &&
-		current.Logical.SessionKey == seed {
+		current.Logical.SessionKey == seed &&
+		current.PromptCacheKey.AbsencePolicy == OpenAICodexPromptCacheSynthesizeSession {
 		return current
 	}
-	capture := CaptureOpenAIOAuthIdentity(nil, body, callerSeed)
+	capture := CaptureOpenAIOAuthIdentityForSyntheticTurn(nil, body, callerSeed)
 	if scoped := OpenAIOAuthAccountTestCredential(c); scoped != nil {
 		capture.OSFamily = scoped.OpenAIOAuthCredentialOS
 		capture.OSSource = "account_test"

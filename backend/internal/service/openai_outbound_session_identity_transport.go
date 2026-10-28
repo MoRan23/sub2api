@@ -716,14 +716,28 @@ func openAICodexMetadataProjectionFromPlan(plan OpenAIOAuthIdentityPlan) openAIC
 // and passthrough must retain all unrelated bytes, so the immutable plan is
 // projected only after those transforms have completed.
 func applyOpenAICodexPromptCacheKeyBody(body []byte, plan OpenAIOAuthIdentityPlan) ([]byte, error) {
-	if !plan.PromptCacheKey.Enabled || strings.TrimSpace(plan.PromptCacheKey.Value) == "" ||
+	if plan.PromptCacheKey.Action == OpenAICodexPromptCacheKeyUnmanaged ||
 		!openAICodexProjectionCarriesPromptCacheKey(plan.ProjectionMode) || len(body) == 0 {
 		return body, nil
 	}
 	if !utf8.Valid(body) || !gjson.ParseBytes(body).IsObject() {
 		return body, nil
 	}
-	out, err := sjson.SetBytes(body, "prompt_cache_key", plan.PromptCacheKey.Value)
+	var out []byte
+	var err error
+	switch plan.PromptCacheKey.Action {
+	case OpenAICodexPromptCacheKeyOmit:
+		// Compatibility transforms may have injected a key after capture. The
+		// final projection restores the native request's deliberate absence.
+		out, err = sjson.DeleteBytes(body, "prompt_cache_key")
+	case OpenAICodexPromptCacheKeySet:
+		if strings.TrimSpace(plan.PromptCacheKey.Value) == "" {
+			return body, nil
+		}
+		out, err = sjson.SetBytes(body, "prompt_cache_key", plan.PromptCacheKey.Value)
+	default:
+		return body, nil
+	}
 	if err != nil {
 		return body, fmt.Errorf("splice OpenAI Codex prompt_cache_key: %w", err)
 	}
@@ -865,6 +879,10 @@ func deleteOpenAICodexNestedOnlyHeaders(headers http.Header) {
 		"forked-from-ordinal-exclusive",
 		"history_ingest_requested",
 		"history-ingest-requested",
+		"history_initialization", "history-initialization",
+		"guardian_recorded_items", "guardian-recorded-items",
+		"analytics_enabled", "analytics-enabled",
+		"mcp_attribution", "mcp-attribution",
 		"turn_trigger",
 		"turn-trigger",
 	} {
@@ -1105,6 +1123,7 @@ func deleteOpenAICodexFlatNestedOnlyFields(metadata map[string]json.RawMessage) 
 		"context_window_id", "context-window-id",
 		"x-codex-context-window-id", "x-codex-context_window_id",
 		"forked_from_ordinal_exclusive", "turn_trigger", "history_ingest_requested",
+		"history_initialization", "guardian_recorded_items", "analytics_enabled",
 		"guardian_classifier_source_thread_id",
 	} {
 		if _, exists := metadata[field]; exists {
@@ -1122,6 +1141,7 @@ func deleteOpenAICodexRootNestedOnlyFields(root map[string]json.RawMessage) bool
 		"context_window_id", "context-window-id",
 		"x-codex-context-window-id", "x-codex-context_window_id",
 		"forked_from_ordinal_exclusive", "turn_trigger", "history_ingest_requested",
+		"history_initialization", "guardian_recorded_items", "analytics_enabled", "mcp_attribution",
 		"guardian_classifier_source_thread_id",
 	} {
 		if _, exists := root[field]; exists {
@@ -1152,6 +1172,7 @@ func applyOpenAICodexStrictFlatWireProfile(metadata map[string]json.RawMessage, 
 		"context_window_id", "context-window-id", "x-codex-context-window-id", "x-codex-context_window_id",
 		"request_kind", "compaction", "code_mode_tool_names", "tool_namespaces_info",
 		"turn_started_at_unix_ms", "turn-started-at-unix-ms", "history_ingest_requested",
+		"history_initialization", "guardian_recorded_items", "analytics_enabled",
 		"forked_from_thread_id", "forked-from-thread-id", "forked_from_ordinal_exclusive",
 		"parent_thread_id", "parent-thread-id", "x-codex-parent-thread-id",
 		"parent_turn_id", "root_turn_id", "subagent_kind", "x-openai-subagent",
@@ -1268,6 +1289,7 @@ func mergeOpenAIOAuthPassthroughIdentityBody(body []byte, plan OpenAIOAuthIdenti
 		"context_window_id", "context-window-id",
 		"x-codex-context-window-id", "x-codex-context_window_id",
 		"forked_from_ordinal_exclusive", "turn_trigger", "history_ingest_requested",
+		"history_initialization", "guardian_recorded_items", "analytics_enabled", "mcp_attribution",
 	} {
 		if gjson.GetBytes(out, path).Exists() {
 			out, err = sjson.DeleteBytes(out, path)

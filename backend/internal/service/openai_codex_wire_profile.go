@@ -14,12 +14,14 @@ import (
 	"golang.org/x/net/http/httpguts"
 )
 
-// CodexWireProfileRevision and CodexWireProfileCommit pin the private Codex
-// metadata contract implemented here. They are plan bookkeeping and are never
-// serialized onto the wire.
+// CodexWireProfileCommit records the original fixture baseline. The typed
+// metadata additions follow local Codex 0.165.0 responses_metadata.rs; this does
+// not claim that the entire local source tree matches a remote commit. These
+// constants are plan bookkeeping and are never serialized onto the wire.
 const (
-	CodexWireProfileRevision = "responses_metadata"
-	CodexWireProfileCommit   = "316795b"
+	CodexWireProfileRevision             = "responses_metadata"
+	CodexWireProfileCommit               = "316795b"
+	CodexWireProfileCompatibilityVersion = "0.165.0"
 )
 
 type CodexTurnIDKind string
@@ -94,6 +96,39 @@ type CodexTurnLineage struct {
 	ParentThreadID             string
 	ParentTurnID               CodexTurnID
 	RootTurnID                 CodexTurnID
+}
+
+// CodexHistoryInitialization is reported by the client that initialized the
+// history. An empty value means it was not supplied; the gateway never infers
+// it from thread lineage or request kind.
+type CodexHistoryInitialization string
+
+const (
+	CodexHistoryInitializationNew             CodexHistoryInitialization = "new"
+	CodexHistoryInitializationCleared         CodexHistoryInitialization = "cleared"
+	CodexHistoryInitializationColdResume      CodexHistoryInitialization = "cold_resume"
+	CodexHistoryInitializationWarmFork        CodexHistoryInitialization = "warm_fork"
+	CodexHistoryInitializationColdFork        CodexHistoryInitialization = "cold_fork"
+	CodexHistoryInitializationSuppliedHistory CodexHistoryInitialization = "supplied_history"
+)
+
+func (value CodexHistoryInitialization) valid() bool {
+	switch value {
+	case CodexHistoryInitializationNew, CodexHistoryInitializationCleared,
+		CodexHistoryInitializationColdResume, CodexHistoryInitializationWarmFork,
+		CodexHistoryInitializationColdFork, CodexHistoryInitializationSuppliedHistory:
+		return true
+	default:
+		return false
+	}
+}
+
+func codexWireHistoryInitialization(raw json.RawMessage) CodexHistoryInitialization {
+	var value CodexHistoryInitialization
+	if json.Unmarshal(raw, &value) != nil || !value.valid() {
+		return ""
+	}
+	return value
 }
 
 type CodexCompactionTurnMetadata struct {
@@ -223,9 +258,10 @@ func marshalCodexCompactionMetadata(metadata CodexCompactionTurnMetadata) json.R
 	return encoded
 }
 
-// CodexWireProfile is the immutable request metadata snapshot corresponding to
-// codex 316795b responses_metadata.rs. Structured inventories stay as JSON so
-// accepted client snapshots are not lossy-reencoded before projection.
+// CodexWireProfile is the immutable request metadata snapshot, including the
+// typed fields from local Codex 0.165.0 responses_metadata.rs. Structured
+// inventories stay as JSON so accepted client snapshots are not lossy-reencoded
+// before projection.
 type CodexWireProfile struct {
 	Revision  string
 	Commit    string
@@ -263,6 +299,9 @@ type CodexWireProfile struct {
 	NodeREPLAutoReviewRequired *bool
 	NodeREPLDisabled           *bool
 	HistoryIngestRequested     *bool
+	HistoryInitialization      CodexHistoryInitialization
+	GuardianRecordedItems      *bool
+	AnalyticsEnabled           *bool
 	SubagentHeader             string
 	SubagentKind               string
 	Workspaces                 json.RawMessage
@@ -386,7 +425,8 @@ var codexWireReservedMetadataKeys = map[string]struct{}{
 	"parent_thread_id": {}, "parent_turn_id": {}, "root_turn_id": {},
 	"subagent_kind": {}, "thread_source": {}, "turn_trigger": {}, "sandbox": {}, "sandbox_mode": {}, "auto_review_enabled": {},
 	"node_repl_auto_review_required": {}, "node_repl_disabled": {}, "workspaces": {},
-	"guardian_classifier_source_thread_id": {},
+	"guardian_classifier_source_thread_id": {}, "guardian_recorded_items": {},
+	"history_initialization": {}, "analytics_enabled": {}, "mcp_attribution": {},
 }
 
 func validCodexExtraMetadata(key, value string) bool {
@@ -571,6 +611,9 @@ func parseCodexWireMetadataObject(metadata map[string]json.RawMessage) CodexWire
 	profile.NodeREPLAutoReviewRequired = codexWireBool(metadata["node_repl_auto_review_required"])
 	profile.NodeREPLDisabled = codexWireBool(metadata["node_repl_disabled"])
 	profile.HistoryIngestRequested = codexWireBool(metadata["history_ingest_requested"])
+	profile.HistoryInitialization = codexWireHistoryInitialization(metadata["history_initialization"])
+	profile.GuardianRecordedItems = codexWireBool(metadata["guardian_recorded_items"])
+	profile.AnalyticsEnabled = codexWireBool(metadata["analytics_enabled"])
 	profile.Compaction = rawJSONObject(metadata["compaction"])
 	profile.Workspaces = rawJSONObject(metadata["workspaces"])
 	profile.ToolNamespacesInfo = rawJSONObject(metadata["tool_namespaces_info"])
@@ -640,6 +683,12 @@ func cloneCodexWireProfile(profile CodexWireProfile) CodexWireProfile {
 	}
 	if profile.HistoryIngestRequested != nil {
 		profile.HistoryIngestRequested = boolPointer(*profile.HistoryIngestRequested)
+	}
+	if profile.GuardianRecordedItems != nil {
+		profile.GuardianRecordedItems = boolPointer(*profile.GuardianRecordedItems)
+	}
+	if profile.AnalyticsEnabled != nil {
+		profile.AnalyticsEnabled = boolPointer(*profile.AnalyticsEnabled)
 	}
 	if profile.ExtraMetadata != nil {
 		profile.ExtraMetadata = cloneCodexWireStringMap(profile.ExtraMetadata)
@@ -716,6 +765,15 @@ func mergeCodexWireProfileMissing(target *CodexWireProfile, source CodexWireProf
 	}
 	if target.HistoryIngestRequested == nil && source.HistoryIngestRequested != nil {
 		target.HistoryIngestRequested = boolPointer(*source.HistoryIngestRequested)
+	}
+	if !target.HistoryInitialization.valid() && source.HistoryInitialization.valid() {
+		target.HistoryInitialization = source.HistoryInitialization
+	}
+	if target.GuardianRecordedItems == nil && source.GuardianRecordedItems != nil {
+		target.GuardianRecordedItems = boolPointer(*source.GuardianRecordedItems)
+	}
+	if target.AnalyticsEnabled == nil && source.AnalyticsEnabled != nil {
+		target.AnalyticsEnabled = boolPointer(*source.AnalyticsEnabled)
 	}
 	if target.TurnLineage.ForkedFromOrdinalExclusive == nil && source.TurnLineage.ForkedFromOrdinalExclusive != nil {
 		target.TurnLineage.ForkedFromOrdinalExclusive = uint64Pointer(*source.TurnLineage.ForkedFromOrdinalExclusive)
@@ -996,6 +1054,9 @@ func (profile CodexWireProfile) withDefaults(metadataProfile CodexMetadataProfil
 
 func (profile CodexWireProfile) nestedObject(includeToolNamespaces bool) map[string]any {
 	metadata := make(map[string]any, 24+len(profile.ExtraMetadata))
+	if profile.GuardianRecordedItems != nil {
+		metadata["guardian_recorded_items"] = *profile.GuardianRecordedItems
+	}
 	kindKnown := profile.RequestKind.valid()
 	hasTurnIdentity := !kindKnown || profile.RequestKind.hasTurnIdentity()
 	hasRequestIdentity := kindKnown && profile.RequestKind.hasTurnIdentity()
@@ -1020,6 +1081,9 @@ func (profile CodexWireProfile) nestedObject(includeToolNamespaces bool) map[str
 	}
 	if kindKnown {
 		metadata["request_kind"] = string(profile.RequestKind)
+	}
+	if profile.HistoryInitialization.valid() {
+		metadata["history_initialization"] = string(profile.HistoryInitialization)
 	}
 	putNonEmptyString(metadata, "forked_from_thread_id", profile.TurnLineage.ForkedFromThreadID)
 	if strings.TrimSpace(profile.TurnLineage.ForkedFromThreadID) != "" && profile.TurnLineage.ForkedFromOrdinalExclusive != nil {
@@ -1061,6 +1125,9 @@ func (profile CodexWireProfile) nestedObject(includeToolNamespaces bool) map[str
 	if profile.HistoryIngestRequested != nil {
 		metadata["history_ingest_requested"] = *profile.HistoryIngestRequested
 	}
+	if profile.AnalyticsEnabled != nil {
+		metadata["analytics_enabled"] = *profile.AnalyticsEnabled
+	}
 	if profile.RequestKind == CodexWireRequestCompaction {
 		if object := rawJSONObject(profile.Compaction); len(object) > 0 {
 			metadata["compaction"] = object
@@ -1091,6 +1158,7 @@ func putNonEmptyString(target map[string]any, key, value string) {
 func (profile CodexWireProfile) MarshalNestedJSON(includeToolNamespaces bool) (string, error) {
 	metadata := profile.nestedObject(includeToolNamespaces)
 	orderedKeys := []string{
+		"guardian_recorded_items",
 		"installation_id",
 		"session_id",
 		"thread_id",
@@ -1100,6 +1168,7 @@ func (profile CodexWireProfile) MarshalNestedJSON(includeToolNamespaces bool) (s
 		"window_number",
 		"context_window_id",
 		"request_kind",
+		"history_initialization",
 		"forked_from_thread_id",
 		"forked_from_ordinal_exclusive",
 		"parent_thread_id",
@@ -1118,6 +1187,7 @@ func (profile CodexWireProfile) MarshalNestedJSON(includeToolNamespaces bool) (s
 		"tool_namespaces_info",
 		"turn_started_at_unix_ms",
 		"history_ingest_requested",
+		"analytics_enabled",
 		"compaction",
 	}
 	extraKeys := make([]string, 0, len(profile.ExtraMetadata))

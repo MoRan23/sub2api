@@ -73,7 +73,11 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	// Inspect the original Chat shape before policies or typed decoding can drop
 	// semantic fields. Enforcement waits until the selected account is known.
 	service.PrepareOpenAIChatConversionCheck(c, body)
-	service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentityForCompatTurn(c, body, ""))
+	if !gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists() {
+		service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentity(c, body, ""))
+	} else {
+		service.SetOpenAIOAuthIdentityCapture(c, service.CaptureOpenAIOAuthIdentityForCompatTurn(c, body, ""))
+	}
 	h.gatewayService.CaptureOpenAIRequestTimezone(c, body)
 
 	modelResult := gjson.GetBytes(body, "model")

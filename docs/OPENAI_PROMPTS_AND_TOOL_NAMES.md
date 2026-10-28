@@ -12,11 +12,12 @@ Python 保留名兼容补丁已移除：不再把 `python` 自动改成 `python_
 
 账号连接测试、compact 测试、服务端合成模型目录与业务缺省指令共用按模型选择的官方模板。糖果测试继续使用专用题目指令。
 
-当前官方模板核对并固定自 [openai/codex 的 models.json，提交 8ffd91e42aa001b7e897bea812b02f89264f9fa0](https://github.com/openai/codex/blob/8ffd91e42aa001b7e897bea812b02f89264f9fa0/codex-rs/models-manager/models.json)（提交时间 2026-09-29 19:03:30 UTC），逐模型复制 `model_messages.instructions_template`：
+当前官方目录与模板固定自 [openai/codex 的 models.json，提交 e742db9f7ba98e63e502b310857d49d047888518](https://github.com/openai/codex/blob/e742db9f7ba98e63e502b310857d49d047888518/codex-rs/models-manager/models.json)，对应本地 Codex 源码版本 0.165.0，共 12 个模型。`model_messages.instructions_template` 按模型单独嵌入：
 
 | 模型 | 本地模板 |
 | --- | --- |
 | GPT-6.1 Sol | `instructions_gpt6_1_sol.txt` |
+| GPT-6.1 Terra | `instructions_gpt6_astra.txt`（与 Astra 主模板逐字相同，显式复用） |
 | GPT-6 Astra | `instructions_gpt6_astra.txt` |
 | GPT-6 Sol | `instructions_gpt6_sol.txt` |
 | GPT-6 Luna | `instructions_gpt6_luna.txt` |
@@ -27,19 +28,21 @@ Python 保留名兼容补丁已移除：不再把 `python` 自动改成 `python_
 
 上述文件位于 `backend/internal/pkg/openai/`。官方目录未包含的旧模型保留既有兼容模板；未知模型保留 GPT-5.5 模板回退，这不代表上游模型映射。上游已经提供的模型目录提示词保持原样。
 
-本次新增 GPT-6.1 Sol 的独立模板、默认目录条目及前端候选和映射预设，保留既有默认模型顺序。其余现存模型的主模板与上一个快照一致；目录同步官方描述、优先级和附加策略字段。新模型沿用严格的提供商前缀、大小写、推理档位、合法日期及 compact 后缀规范化规则；这些是本地兼容写法，不表示官方新增了同名快照。`-latest`、`-custom` 等任意后缀不继承新模型能力。
+本次新增 GPT-6.1 Terra 的默认目录条目及前端候选和映射预设，保留既有默认模型的相对顺序。Terra 只复用 Astra 的主模板，其 `collaboration_modes`、`confirmation_policies` 等描述符策略来自 Terra 自己的条目。其余现存模型的主模板与上一个快照一致。新模型沿用严格的提供商前缀、大小写、推理档位、合法日期及 compact 后缀规范化规则；这些是本地兼容写法。`-latest`、`-custom` 等任意后缀不继承新模型能力。
 
-当前快照的 `instructions_variables` 均为 null；GPT-6 模板中的 `{{connector_id}}` 属于 Apps 链接语法示例，原样保留，不作为待填入变量。模型目录附加元数据与提示词字段保存在 `backend/internal/service/openai_codex_model_defaults.json`，主指令模板仍以本表文件为准。
+当前快照从既有 11 个模型中移除了 `model_messages.instructions_variables: null`，新增 Terra 条目仍保留该字段的显式 null；本地目录 JSON 与 Sol 完整补充同步各自的源字段状态。GPT-6 模板中的 `{{connector_id}}` 属于 Apps 链接语法示例，原样保留。模型目录附加元数据与提示词字段保存在 `backend/internal/service/openai_codex_model_defaults.json`，主指令模板仍以本表文件为准。
 
 官方当前目录已移除 GPT-5.4，按本项目要求不保留旧快照或专用模板，同时删除默认列表、前端主模型／日期候选、指向 5.4 的映射预设和 OpenCode 配置条目。GPT-5.4 Mini 也从默认列表、前端候选和 OpenCode 配置中删除。账号探测、缺省模型及旧别名兜底、未配置的 Opus / Haiku 分发改用当前列表首选 GPT-5.6 Sol；已保存的显式映射和历史记录不做迁移。计费兜底与探测默认模型解耦，保持既有金额规则。
 
-### 2026-09-29 目录默认值
+### Codex 0.165.0 目录默认值
 
-GPT-6.1 Sol 默认推理为 `low`，提供 `low / medium / high / xhigh / max / ultra`；默认上下文 272,000，最大上下文 872,000，最低 Codex 客户端版本 0.153.0。官方默认服务等级为空，可选 `priority`；保留其 `shell_command`、多代理 v2 和独立主模板。官方文件未提供创建时间、输出上限或价格，因此不推测这些值，也不继承 GPT-6 Sol / Luna 的定价、缓存写入或 `none` 采样例外。默认模型列表的 `created: 0` 表示来源未声明创建时间。
+GPT-6.1 Terra 默认推理为 `low`，提供 `low / medium / high / xhigh / max / ultra`；默认上下文 500,000，最大上下文 872,000，最低 Codex 客户端版本 0.153.0。官方条目声明 `shell_command`、多代理 `v2`（Ultra 工作流推理为 `xhigh`）、`code_mode_only` 和 `use_responses_lite=true`；实际工具与传输能力仍按账号路径投影。
+
+GPT-6.1 Sol 同样默认使用 `low` 及上述六档推理。其官方默认上下文保持 272,000，本项目合成目录继续使用已有的 500,000 本地覆盖，最大上下文为 872,000；上游明确提供的上下文优先。Sol 保留 `shell_command`、多代理 v2 和独立主模板。两款 GPT-6.1 模型的官方默认服务等级均为空，可选 `priority`；默认模型列表的 `created: 0` 表示来源未声明创建时间。目录同步不新增价格、输出上限、GPT-6 Sol / Luna 定价与采样例外或 Daybreak 套餐权限。
 
 合成目录对已知模型加载同一官方快照的元数据，包括 shell、推理档位、上下文、服务等级，以及 `model_messages` 中的权限和多代理等字段。GPT-6 Astra 默认推理为 `low`，Sol / Luna 为 `medium`；三者默认上下文为 272,000、最大上下文为 872,000，Luna 不提供 Ultra 工作流。GPT-5.6 Sol 的本地默认目录不再声明此次官方快照已移除的 `ultrafast`；上游明确提供的等级仍保留。
 
-这份快照用于补齐目录默认值，不替换账号模型映射、分组名单或路由能力判断。官方目录的套餐可见性、退役／升级提示及 WebSocket 偏好不改变本项目的可见模型和传输选择。无账号能力证据时继续使用 text-only、关闭搜索和 Lite；官方 OAuth 的 GPT-6 系列可按账号路径声明 Lite，API Key 的 GPT-6.1 Sol 及 GPT-6 系列继续使用完整 Responses。已有上游模型元数据和提示词优先，配置中的自定义上下文不会被静态默认值覆盖。此次不修改价格或已保存账号配置。
+这份快照用于补齐目录默认值，不替换账号模型映射、分组名单或路由能力判断。官方目录的套餐可见性、退役／升级提示及 WebSocket 偏好不改变本项目的可见模型和传输选择。无账号能力证据时继续使用 text-only、关闭搜索和 Lite；官方 OAuth 的 GPT-6 系列可按账号路径声明 Lite，API Key 的 GPT-6.1 Sol / Terra 及 GPT-6 系列继续使用完整 Responses。已有上游模型元数据和提示词优先，配置中的自定义上下文不会被静态默认值覆盖。此次不修改价格或已保存账号配置。
 
 更新快照时，从固定提交读取官方 `models.json`，仅移除各条目 `model_messages.instructions_template` 后保存 JSON，其余源字段保留；主模板按本表单独复制。服务端只投影自身支持的字段及本地路由策略，不执行目录中的任何指令。
 

@@ -357,18 +357,18 @@ type configuredCodexServiceTier struct {
 }
 
 type configuredCodexModelMessages struct {
-	InstructionsTemplate   string `json:"instructions_template"`
-	InstructionsVariables  any    `json:"instructions_variables"`
-	Approvals              any    `json:"approvals"`
-	CollaborationModes     any    `json:"collaboration_modes"`
-	AutoReview             any    `json:"auto_review"`
-	Permissions            any    `json:"permissions"`
-	MultiAgent             any    `json:"multi_agent"`
-	TokenBudget            any    `json:"token_budget"`
-	GuardianV2             any    `json:"guardian_v2"`
-	PersistentInstructions any    `json:"persistent_instructions,omitempty"`
-	Tools                  any    `json:"tools,omitempty"`
-	ConfirmationPolicies   any    `json:"confirmation_policies,omitempty"`
+	InstructionsTemplate   string          `json:"instructions_template"`
+	InstructionsVariables  json.RawMessage `json:"instructions_variables,omitempty"`
+	Approvals              any             `json:"approvals"`
+	CollaborationModes     any             `json:"collaboration_modes"`
+	AutoReview             any             `json:"auto_review"`
+	Permissions            any             `json:"permissions"`
+	MultiAgent             any             `json:"multi_agent"`
+	TokenBudget            any             `json:"token_budget"`
+	GuardianV2             any             `json:"guardian_v2"`
+	PersistentInstructions any             `json:"persistent_instructions,omitempty"`
+	Tools                  any             `json:"tools,omitempty"`
+	ConfirmationPolicies   any             `json:"confirmation_policies,omitempty"`
 }
 
 // configuredCodexModelDescriptor is the minimum complete ModelInfo contract
@@ -515,7 +515,7 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 		descriptor.ServiceTiers = configuredCodexServiceTiersForModel(modelID)
 		if isOpenAICodexReasoningGPTModel(modelID) {
 			defaultReasoningLevel := "medium"
-			if getNormalizedCodexModel(modelID) == "gpt-5.6-sol" || openai.IsGPT61SolModelSpelling(modelID) {
+			if getNormalizedCodexModel(modelID) == "gpt-5.6-sol" || openai.IsGPT61SolModelSpelling(modelID) || openai.IsGPT61TerraModelSpelling(modelID) {
 				defaultReasoningLevel = "low"
 			}
 			descriptor.DefaultReasoningLevel = &defaultReasoningLevel
@@ -545,8 +545,8 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 		// Keep extra official fields without overriding account capability and
 		// visibility safeguards already applied by the bundled catalog.
 		descriptor.officialMetadata = openai.CodexGPT61SolMetadata
-		// The October 12, 2026 Codex/Work default increased to 500k after
-		// the bundled official snapshot. Explicit upstream metadata still wins.
+		// Keep the October 12, 2026 Codex/Work 500k default even though the
+		// bundled official snapshot remains 272k. Explicit upstream metadata wins.
 		descriptor.ContextWindow = 500_000
 	}
 	return descriptor
@@ -667,7 +667,7 @@ func configuredCodexGPTReasoningLevels(modelID string) []configuredCodexReasonin
 			Description: "Maximum reasoning depth for complex tasks",
 		})
 	}
-	if isOpenAIGPT6AstraModel(modelID) || openai.IsGPT61SolModelSpelling(modelID) || normalized == "gpt-6-sol" || normalized == "gpt-5.6-sol" || normalized == "gpt-5.6-terra" {
+	if isOpenAIGPT6AstraModel(modelID) || openai.IsGPT61SolModelSpelling(modelID) || openai.IsGPT61TerraModelSpelling(modelID) || normalized == "gpt-6-sol" || normalized == "gpt-5.6-sol" || normalized == "gpt-5.6-terra" {
 		levels = append(levels, configuredCodexReasoningLevel{
 			Effort:      "ultra",
 			Description: "Maximum reasoning with automatic task delegation",
@@ -2221,6 +2221,7 @@ func CodexModelsManifestETag(body []byte) string {
 }
 
 var apiKeyCodexModelsWithoutResponsesLite = map[string]struct{}{
+	"gpt-6.1-terra": {},
 	"gpt-6.1-sol":   {},
 	"gpt-6-astra":   {},
 	"gpt-6-sol":     {},

@@ -237,7 +237,6 @@ func requireCompleteConfiguredCodexModel(t *testing.T, model map[string]any, slu
 	require.True(t, ok)
 	require.NotEmpty(t, modelMessages["instructions_template"])
 	for _, key := range []string{
-		"instructions_variables",
 		"approvals",
 		"collaboration_modes",
 		"auto_review",
@@ -2416,6 +2415,11 @@ func TestAdjustAPIKeyCodexModelsManifest(t *testing.T) {
 		want string
 	}{
 		{
+			name: "terra variants disable responses lite without matching unknown names",
+			body: `{"models":[{"slug":"gpt-6.1-terra","use_responses_lite":true},{"slug":"openai/GPT-6.1_TERRA-ultra-openai-compact","use_responses_lite":true},{"slug":"gpt-6.1-terra-2026-10-28","use_responses_lite":true},{"slug":"gpt-6.1-terra-custom","use_responses_lite":true}]}`,
+			want: `{"models":[{"slug":"gpt-6.1-terra","use_responses_lite":false},{"slug":"openai/GPT-6.1_TERRA-ultra-openai-compact","use_responses_lite":false},{"slug":"gpt-6.1-terra-2026-10-28","use_responses_lite":false},{"slug":"gpt-6.1-terra-custom","use_responses_lite":true}]}`,
+		},
+		{
 			name: "affected models disable responses lite and preserve unknown fields",
 			body: `{"models":[{"slug":"gpt-6-astra","use_responses_lite":true},{"slug":"gpt-5.6-sol","use_responses_lite":true,"unknown_model":{"enabled":true}},{"slug":"gpt-5.6-terra","use_responses_lite":true},{"slug":"gpt-5.6-luna","use_responses_lite":true}],"unknown_top":{"version":1}}`,
 			want: `{"models":[{"slug":"gpt-6-astra","use_responses_lite":false},{"slug":"gpt-5.6-sol","unknown_model":{"enabled":true},"use_responses_lite":false},{"slug":"gpt-5.6-terra","use_responses_lite":false},{"slug":"gpt-5.6-luna","use_responses_lite":false}],"unknown_top":{"version":1}}`,
@@ -2442,7 +2446,7 @@ func TestAdjustAPIKeyCodexModelsManifest(t *testing.T) {
 }
 
 func TestFetchCodexModelsManifestAPIKeyDisablesResponsesLiteForAffectedModels(t *testing.T) {
-	const upstreamBody = `{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":true},{"slug":"gpt-5.6-codex","use_responses_lite":true}],"metadata":{"version":1}}`
+	const upstreamBody = `{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":true},{"slug":"gpt-6.1-terra","use_responses_lite":true},{"slug":"gpt-5.6-codex","use_responses_lite":true}],"metadata":{"version":1}}`
 	upstream := &codexModelsHTTPUpstreamStub{do: func(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -2454,7 +2458,7 @@ func TestFetchCodexModelsManifestAPIKeyDisablesResponsesLiteForAffectedModels(t 
 	s := newCodexModelsAPIKeyTestService(upstream)
 	manifest, err := fetchAuthorizedCodexModelsFixture(t, s, context.Background(), newCodexModelsAPIKeyTestAccount("https://upstream.example"), "0.145.0", "")
 	require.NoError(t, err)
-	require.JSONEq(t, `{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":false},{"slug":"gpt-5.6-codex","use_responses_lite":true}],"metadata":{"version":1}}`, string(manifest.Body))
+	require.JSONEq(t, `{"models":[{"slug":"gpt-5.6-sol","use_responses_lite":false},{"slug":"gpt-6.1-terra","use_responses_lite":false},{"slug":"gpt-5.6-codex","use_responses_lite":true}],"metadata":{"version":1}}`, string(manifest.Body))
 	require.Equal(t, codexModelsManifestBodyETag(manifest.Body), manifest.ETag)
 	require.Equal(t, `"upstream-strong"`, manifest.upstreamETag)
 
@@ -2465,7 +2469,7 @@ func TestFetchCodexModelsManifestAPIKeyDisablesResponsesLiteForAffectedModels(t 
 }
 
 func TestFetchCodexModelsManifestOAuthPreservesResponsesLite(t *testing.T) {
-	const manifestBody = ` {"models":[{"slug":"gpt-5.6-sol","use_responses_lite":true},{"slug":"gpt-6.1-sol","context_window":500000,"max_context_window":1000000,"use_responses_lite":true}]} `
+	const manifestBody = ` {"models":[{"slug":"gpt-5.6-sol","use_responses_lite":true},{"slug":"gpt-6.1-terra","context_window":500000,"max_context_window":872000,"use_responses_lite":true},{"slug":"gpt-6.1-sol","context_window":500000,"max_context_window":1000000,"use_responses_lite":true}]} `
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(manifestBody))
 	}))
@@ -3835,7 +3839,7 @@ func TestCodexGPTIdentityPatternsCoverBundledPrompts(t *testing.T) {
 }
 
 func TestGPT6SolLunaCatalogKeepsAuthoritativeCapabilities(t *testing.T) {
-	for _, id := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
+	for _, id := range []string{"gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna"} {
 		svc := &OpenAIGatewayService{}
 		manifest := &OpenAIModelsResponse{Body: []byte(`{"models":[{"slug":"` + id + `","supported_reasoning_levels":[{"effort":"ultra"}],"default_reasoning_level":"ultra","multi_agent_reasoning_effort":"xhigh","service_tiers":[{"id":"ultrafast"}],"context_window":300000,"max_context_window":900000,"supports_search_tool":false,"apply_patch_tool_type":null}]}`)}
 		account := newCodexModelsAPIKeyTestAccount("https://api.openai.com/v1")
@@ -3892,6 +3896,7 @@ func TestAstraUltrafastCatalogUsesAccountCapabilities(t *testing.T) {
 	}{
 		{AccountTypeAPIKey, "https://api.openai.com", "gpt-6-astra", true},
 		{AccountTypeAPIKey, "https://api.openai.com", "gpt-6.1-sol", false},
+		{AccountTypeAPIKey, "https://api.openai.com", "gpt-6.1-terra", false},
 		{AccountTypeAPIKey, "https://proxy.example", "gpt-6-astra", false},
 		{AccountTypeOAuth, "https://chatgpt.com", "gpt-6-astra", false},
 	} {

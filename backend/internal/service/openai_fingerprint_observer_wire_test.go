@@ -25,6 +25,7 @@ func TestFingerprintObservationWindowMetadataFinalWireHTTPAndWS(t *testing.T) {
 		"sandbox": "workspace-write", "auto_review_enabled": false,
 		"node_repl_auto_review_required": false, "node_repl_disabled": true,
 		"request_kind": "turn", "history_ingest_requested": false,
+		"history_initialization": "warm_fork", "guardian_recorded_items": false, "analytics_enabled": true,
 		"annotation": "outgoing",
 	}
 	nested, err := json.Marshal(metadata)
@@ -95,6 +96,9 @@ func TestFingerprintObservationWindowMetadataFinalWireHTTPAndWS(t *testing.T) {
 					require.Equal(t, boolPointer(true), entry.NodeREPLDisabled)
 					require.Equal(t, CodexWireRequestTurn, entry.RequestKind)
 					require.Equal(t, boolPointer(false), entry.HistoryIngestRequested)
+					require.Equal(t, CodexHistoryInitializationWarmFork, entry.HistoryInitialization)
+					require.Equal(t, boolPointer(false), entry.GuardianRecordedItems)
+					require.Equal(t, boolPointer(true), entry.AnalyticsEnabled)
 					require.Equal(t, map[string]string{"annotation": fingerprintExtraMetadataRedacted}, entry.ExtraMetadata)
 				}
 				encoded, err := json.Marshal(entry)

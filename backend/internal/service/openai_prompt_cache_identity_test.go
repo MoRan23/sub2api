@@ -276,7 +276,13 @@ func TestOpenAICodexPromptCacheFallbackWithoutJWTSecretAndDisabledBoundaries(t *
 
 	apiKey := &Account{ID: 73006, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 	_, apiKeyPlan := resolvePromptCacheIdentityPlan(t, &OpenAIGatewayService{}, apiKey, body, OpenAIOAuthIdentityProjectionRegular, 75)
-	require.False(t, apiKeyPlan.PromptCacheKey.Enabled)
+	require.True(t, apiKeyPlan.PromptCacheKey.Enabled)
+	require.Equal(t, OpenAICodexPromptCacheKeySet, apiKeyPlan.PromptCacheKey.Action)
+	require.True(t, strings.HasPrefix(apiKeyPlan.PromptCacheKey.Value, "pc_"))
+	_, missingAPIKeyPlan := resolvePromptCacheIdentityPlan(t, &OpenAIGatewayService{}, apiKey,
+		[]byte(`{"client_metadata":{"session_id":"root"}}`), OpenAIOAuthIdentityProjectionRegular, 75)
+	require.Equal(t, OpenAICodexPromptCacheKeyOmit, missingAPIKeyPlan.PromptCacheKey.Action)
+	require.Empty(t, missingAPIKeyPlan.PromptCacheKey.Value)
 }
 
 func TestOpenAICodexMemoryCaptureAndProjectionHaveNoRequestTurnOrLineage(t *testing.T) {

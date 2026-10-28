@@ -430,6 +430,9 @@ func captureOpenAIWSFrameIdentity(payload []byte, currentPlan *OpenAIOAuthIdenti
 	if currentPlan == nil {
 		return capture
 	}
+	// Each frame owns its key (including omission); only the ingress contract
+	// follows the connection across HTTP/WS bridges and retries.
+	capture.PromptCacheKey.AbsencePolicy = currentPlan.Capture.PromptCacheKey.AbsencePolicy
 	// The physical connection owns one OS/profile/date. Frames may carry new
 	// logical turns, but cannot change the handshake's machine identity.
 	capture.UserAgent = currentPlan.Capture.UserAgent
@@ -466,6 +469,7 @@ func captureOpenAIWSFrameIdentity(payload []byte, currentPlan *OpenAIOAuthIdenti
 			frameWireProfile,
 			capture.PromptCacheKey.Applicable,
 		)
+		stable.PromptCacheKey.AbsencePolicy = capture.PromptCacheKey.AbsencePolicy
 		stable.ConflictCount = capture.ConflictCount
 		stable.InvalidMetadataCount = capture.InvalidMetadataCount
 		if strings.TrimSpace(capture.ClientInstallationID) != "" {

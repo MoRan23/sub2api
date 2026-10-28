@@ -276,7 +276,7 @@ func TestOpenAISetupTokenIdentityPlanIsCredentialOwnerScoped(t *testing.T) {
 
 func TestOpenAISetupTokenIdentityFlagOffAndAPIKeyStayNoOp(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	body := []byte(" { \"model\" : \"gpt-5.4\", \"client_metadata\" : {\"session_id\":\"raw-session\"} } \n")
+	body := []byte(" { \"model\" : \"gpt-5.4\", \"instructions\": \"client instructions\", \"client_metadata\" : {\"session_id\":\"raw-session\"} } \n")
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Set(openAICodexFingerprintPolicyContextKey, CodexFingerprintPolicySnapshot{})
