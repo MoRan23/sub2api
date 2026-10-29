@@ -31,6 +31,7 @@ type AccountDaybreakEvidence struct {
 	CredentialOwnerID       int64
 	CredentialOS            string
 	AuthorizationGeneration string
+	CredentialIdentity      string
 }
 
 type accountDaybreakEvidenceKey struct{}
@@ -73,7 +74,7 @@ func NormalizeOpenAIDaybreakSettings(account *Account, updates map[string]any) (
 		}
 	}
 	if !IsOpenAIDaybreakAccount(account) {
-		return nil, infraerrors.BadRequest("DAYBREAK_ACCOUNT_UNSUPPORTED", "Daybreak settings require an OpenAI OAuth account")
+		return nil, infraerrors.BadRequest("DAYBREAK_ACCOUNT_UNSUPPORTED", "Daybreak settings require an OpenAI OAuth or ordinary API Key account")
 	}
 	blue, _ := account.Extra[OpenAIDaybreakBlueEnabledKey].(bool)
 	red, _ := account.Extra[OpenAIDaybreakRedEnabledKey].(bool)
@@ -104,6 +105,17 @@ func daybreakSettingsEnable(account *Account, patch map[string]any) bool {
 }
 
 func (s *adminServiceImpl) prepareDaybreakUpdate(ctx context.Context, account *Account, updates map[string]any) (context.Context, map[string]any, error) {
+	// Validate the requested access mode, not only the previously saved mode.
+	// Preference values remain the current ones when detecting a new enable.
+	if mode, explicit := updates[OpenAIAPIKeyModeExtraKey]; explicit {
+		candidate := *account
+		candidate.Extra = maps.Clone(account.Extra)
+		if candidate.Extra == nil {
+			candidate.Extra = make(map[string]any)
+		}
+		candidate.Extra[OpenAIAPIKeyModeExtraKey] = mode
+		account = &candidate
+	}
 	patch, err := NormalizeOpenAIDaybreakSettings(account, updates)
 	if err != nil {
 		return ctx, nil, err
@@ -112,7 +124,7 @@ func (s *adminServiceImpl) prepareDaybreakUpdate(ctx context.Context, account *A
 		return ctx, patch, nil
 	}
 	if s.daybreakCapabilities == nil {
-		return ctx, nil, infraerrors.ServiceUnavailable("DAYBREAK_CAPABILITIES_UNAVAILABLE", "check Daybreak capabilities after OAuth authorization")
+		return ctx, nil, infraerrors.ServiceUnavailable("DAYBREAK_CAPABILITIES_UNAVAILABLE", "save account credentials and check Daybreak capabilities before enabling")
 	}
 	capability, err := s.daybreakCapabilities.GetOpenAIDaybreakCapabilities(ctx, account)
 	if err != nil {
@@ -120,9 +132,9 @@ func (s *adminServiceImpl) prepareDaybreakUpdate(ctx context.Context, account *A
 	}
 	red, _ := patch[OpenAIDaybreakRedEnabledKey].(bool)
 	if capability == nil || !capability.BlueAvailable || (red && !capability.RedAvailable) {
-		return ctx, nil, infraerrors.BadRequest("DAYBREAK_CAPABILITY_REQUIRED", "the current OAuth model catalog does not support the requested Daybreak tier")
+		return ctx, nil, infraerrors.BadRequest("DAYBREAK_CAPABILITY_REQUIRED", "the current upstream model catalog does not support the requested Daybreak tier")
 	}
-	ctx = withAccountDaybreakEvidence(ctx, account.ID, AccountDaybreakEvidence{CredentialOwnerID: capability.CredentialOwnerID, CredentialOS: capability.CredentialOS, AuthorizationGeneration: capability.AuthorizationGeneration})
+	ctx = withAccountDaybreakEvidence(ctx, account.ID, AccountDaybreakEvidence{CredentialOwnerID: capability.CredentialOwnerID, CredentialOS: capability.CredentialOS, AuthorizationGeneration: capability.AuthorizationGeneration, CredentialIdentity: capability.CredentialIdentity})
 	return ctx, patch, nil
 }
 
@@ -133,7 +145,7 @@ func validateNewAccountDaybreak(account *Account) error {
 	}
 	for _, key := range []string{OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey} {
 		if enabled, _ := patch[key].(bool); enabled {
-			return infraerrors.BadRequest("DAYBREAK_AUTHORIZE_FIRST", "new accounts start with Daybreak disabled; authorize the account and check capabilities before enabling it")
+			return infraerrors.BadRequest("DAYBREAK_AUTHORIZE_FIRST", "new accounts start with Daybreak disabled; save account credentials and check capabilities before enabling it")
 		}
 	}
 	account.Extra = patch

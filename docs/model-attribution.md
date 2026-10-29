@@ -45,7 +45,7 @@ docker compose -f docker-compose.yml -f docker-compose.lm-detector.yml up -d --b
 
 ## Daybreak 测试条件
 
-手动、定时、新账号首测归因及鹈鹕测试，按任务开始时冻结的账号 Blue／Red 偏好自动补充 `access_programs.cyber`，独立于系统 Daybreak 总开关和分组开关。只适用于普通 OpenAI OAuth 账号；API Key、Codex-Engine、普通业务请求和账号连接测试不获得这个例外。共享凭据账号使用被测业务账号的偏好，能力证据仍来自实际凭据源。
+手动、定时、新账号首测归因及鹈鹕测试，按任务开始时冻结的账号 Blue／Red 偏好自动补充 `access_programs.cyber`，独立于系统 Daybreak 总开关和分组开关。适用于普通 OpenAI OAuth 和普通 API Key 账号，不新增 API Key 首测；Codex-Engine、普通业务请求和账号连接测试不获得这个例外。共享凭据账号使用被测业务账号的偏好，能力证据仍来自实际凭据源。
 
 仍使用现有模型档位和真实上游目录能力校验。GPT-6 Astra／6.1 Sol 需要 Blue＋Red，但发送值是 `daybreak_blue`；Cyber 型号使用 `daybreak_red`。未开启所需档位、型号未识别、目录查询失败或能力不足时，继续测试且不添加字段，并记录原因；每次发送按现有缓存期限核实能力，不无限沿用过期证据。
 

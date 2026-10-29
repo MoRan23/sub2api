@@ -523,7 +523,7 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		h.scheduleGrokImportProbe(created)
 		result.AccountCreated++
 		if daybreakRequested {
-			result.Warnings = append(result.Warnings, DataImportError{Kind: "account", Name: item.Name, Message: "Daybreak was imported disabled; authorize the account and check its live model capabilities before enabling Blue or Red"})
+			result.Warnings = append(result.Warnings, DataImportError{Kind: "account", Name: item.Name, Message: "Daybreak was imported disabled; save account credentials and check its live model capabilities before enabling Blue or Red"})
 		}
 	}
 

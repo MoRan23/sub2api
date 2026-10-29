@@ -61,17 +61,35 @@ func validateDaybreakPatchLocked(ctx context.Context, client *dbent.Client, curr
 		return nil
 	}
 	stale := func() error {
-		return infraerrors.Conflict("DAYBREAK_CAPABILITY_STALE", "OAuth authorization or Daybreak settings changed; reload capabilities and retry")
+		return infraerrors.Conflict("DAYBREAK_CAPABILITY_STALE", "upstream credentials, access mode or Daybreak settings changed; save credentials, reload capabilities and retry")
 	}
 	evidence, ok := service.AccountDaybreakEvidenceFromContext(ctx, current.ID)
-	if !ok || evidence.AuthorizationGeneration == "" || evidence.CredentialOS == "" {
+	if !ok {
+		return stale()
+	}
+	if current.IsOpenAIApiKey() || target.IsOpenAIApiKey() {
+		// Both rows must match: a stale full snapshot must not reinstate the old
+		// key after a concurrent edit. A combined credential edit and enable must
+		// save its new credentials and obtain fresh evidence first.
+		if evidence.CredentialOwnerID != current.ID || evidence.CredentialIdentity == "" ||
+			service.OpenAIDaybreakAPIKeyCredentialIdentity(current) != evidence.CredentialIdentity ||
+			service.OpenAIDaybreakAPIKeyCredentialIdentity(target) != evidence.CredentialIdentity {
+			return stale()
+		}
+		return nil
+	}
+	if evidence.AuthorizationGeneration == "" || evidence.CredentialOS == "" {
 		return stale()
 	}
 	owner := current.ID
 	if current.ParentAccountID != nil {
 		owner = *current.ParentAccountID
 	}
-	if owner != evidence.CredentialOwnerID || !current.IsOpenAIOAuth() || !target.IsOpenAIOAuth() {
+	targetOwner := target.ID
+	if target.ParentAccountID != nil {
+		targetOwner = *target.ParentAccountID
+	}
+	if owner != evidence.CredentialOwnerID || targetOwner != owner || !current.IsOpenAIOAuth() || !target.IsOpenAIOAuth() {
 		return stale()
 	}
 	slots, err := readOpenAIOAuthOSCredentials(ctx, client, owner, "")

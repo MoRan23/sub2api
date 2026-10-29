@@ -33,6 +33,10 @@ func daybreakTransportContext(ctx context.Context) context.Context {
 
 func seedDaybreakTransportCapabilities(t *testing.T, svc *OpenAIGatewayService, account *Account) *Account {
 	t.Helper()
+	if account.IsOpenAIApiKey() {
+		svc.codexModelCapabilities.observeManifest(openAIDaybreakCapabilitiesNamespace(account), []byte(daybreakTransportManifest), time.Now())
+		return account
+	}
 	for _, family := range OpenAIOAuthOSFamilies() {
 		scoped, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), svc.accountRepo, account, family)
 		require.NoError(t, err)
@@ -42,6 +46,32 @@ func seedDaybreakTransportCapabilities(t *testing.T, svc *OpenAIGatewayService, 
 	scoped, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), svc.accountRepo, account, "")
 	require.NoError(t, err)
 	return scoped
+}
+
+func runDaybreakTransportAccountTypes(t *testing.T, run func(*testing.T, string)) {
+	t.Helper()
+	for _, accountType := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
+		t.Run(accountType, func(t *testing.T) { run(t, accountType) })
+	}
+}
+
+func configureDaybreakTransportAccount(account *Account, accountType string) {
+	account.Type = accountType
+	if accountType != AccountTypeAPIKey {
+		return
+	}
+	delete(account.Credentials, "access_token")
+	delete(account.Credentials, "chatgpt_account_id")
+	account.Credentials["api_key"] = "mock-api-key"
+	account.Credentials["base_url"] = "https://api.openai.com"
+	if account.Extra == nil {
+		account.Extra = make(map[string]any)
+	}
+	account.Extra["openai_responses_mode"] = "force_responses"
+	if mode, ok := account.Extra["openai_oauth_responses_websockets_v2_mode"]; ok {
+		account.Extra["openai_apikey_responses_websockets_v2_mode"] = mode
+		delete(account.Extra, "openai_oauth_responses_websockets_v2_mode")
+	}
 }
 
 func TestOAuthDaybreakHTTPFinalizerKeepsRetrySourceAndAuthorization(t *testing.T) {
@@ -96,10 +126,55 @@ func TestOAuthDaybreakHTTPFinalizerKeepsRetrySourceAndAuthorization(t *testing.T
 	require.Equal(t, "old", account.OpenAIOAuthAuthorizationGeneration)
 }
 
-func TestOAuthDaybreakHTTPToWSDoesNotInjectPrewarmOrSourceMap(t *testing.T) {
+func TestAPIKeyDaybreakHTTPFinalizerKeepsRetrySourceAndClientChoice(t *testing.T) {
+	enableDaybreakObservationTest(t)
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 8112, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "mock-api-key", "base_url": "https://api.openai.com"},
+		Extra:       map[string]any{OpenAIDaybreakBlueEnabledKey: true, OpenAIDaybreakRedEnabledKey: true}}
+	seedDaybreakTransportCapabilities(t, svc, account)
+	for _, test := range []struct{ name, path, body, want, decision string }{
+		{"turn", "/v1/responses", `{"model":"gpt-6-astra","input":[]}`, `"daybreak_blue"`, "automatic"},
+		{"explicit", "/v1/responses", `{"model":"gpt-6-astra","access_programs":{"cyber":"standard"}}`, `"standard"`, "client_supplied"},
+		{"explicit_null", "/v1/responses", `{"model":"gpt-6-astra","access_programs":{"cyber":null}}`, `null`, "client_supplied"},
+		{"compact", "/v1/responses/compact", `{"model":"gpt-6-astra","input":[]}`, "", "excluded_endpoint"},
+		{"count_tokens", "/v1/responses/input_tokens", `{"model":"gpt-6-astra","input":[]}`, "", "excluded_endpoint"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := []byte(test.body)
+			req := httptest.NewRequest(http.MethodPost, "https://api.openai.com"+test.path, bytes.NewReader(body))
+			req = req.WithContext(daybreakTransportContext(req.Context()))
+			out, err := svc.FinalizeOpenAIOAuthResponsesRequest(nil, account, req, body, OpenAIOAuthResponsesFinalizeOptions{FinalModel: "gpt-6-astra", RequestKind: "turn"})
+			require.NoError(t, err)
+			require.Equal(t, test.want, gjson.GetBytes(out, "access_programs.cyber").Raw)
+			require.Equal(t, test.body, string(body))
+			require.Equal(t, test.decision, openAIDaybreakDecisionFromRequest(req))
+			replay, err := req.GetBody()
+			require.NoError(t, err)
+			wire, err := io.ReadAll(replay)
+			require.NoError(t, err)
+			require.NoError(t, replay.Close())
+			require.Equal(t, out, wire)
+
+			other := &Account{ID: 8113, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+				Credentials: map[string]any{"api_key": "other-api-key", "base_url": "https://api.openai.com"}}
+			otherReq := httptest.NewRequest(http.MethodPost, "https://api.openai.com"+test.path, bytes.NewReader(body))
+			retried, err := svc.FinalizeOpenAIOAuthResponsesRequest(nil, other, otherReq, body, OpenAIOAuthResponsesFinalizeOptions{FinalModel: "gpt-6-astra", RequestKind: "turn"})
+			require.NoError(t, err)
+			require.Equal(t, gjson.GetBytes(body, "access_programs").Raw, gjson.GetBytes(retried, "access_programs").Raw)
+		})
+	}
+}
+
+func TestDaybreakHTTPToWSDoesNotInjectPrewarmOrSourceMap(t *testing.T) {
+	runDaybreakTransportAccountTypes(t, testDaybreakHTTPToWSDoesNotInjectPrewarmOrSourceMap)
+}
+
+func testDaybreakHTTPToWSDoesNotInjectPrewarmOrSourceMap(t *testing.T, accountType string) {
 	enableDaybreakObservationTest(t)
 	gin.SetMode(gin.TestMode)
 	cfg := newOpenAIWSV2TestConfig()
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
 	cfg.Gateway.OpenAIWS.PrewarmGenerateEnabled = true
 	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
 	completed := []byte(`{"type":"response.completed","response":{"id":"resp_daybreak","model":"gpt-6-astra","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}`)
@@ -110,6 +185,7 @@ func TestOAuthDaybreakHTTPToWSDoesNotInjectPrewarmOrSourceMap(t *testing.T) {
 	account := &Account{ID: 8120, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
 		Credentials: map[string]any{"access_token": "mock-oauth-token"},
 		Extra:       map[string]any{"responses_websockets_v2_enabled": true, OpenAIDaybreakBlueEnabledKey: true, OpenAIDaybreakRedEnabledKey: true}}
+	configureDaybreakTransportAccount(account, accountType)
 	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: &httpUpstreamRecorder{}, cache: &stubGatewayCache{}, toolCorrector: NewCodexToolCorrector(), openaiWSPool: pool,
 		accountRepo: newAuthorizedOpenAIOAuthTestRepo(account)}
 	account = seedDaybreakTransportCapabilities(t, svc, account)
@@ -132,7 +208,11 @@ func TestOAuthDaybreakHTTPToWSDoesNotInjectPrewarmOrSourceMap(t *testing.T) {
 	require.Equal(t, "daybreak_blue", observed.CyberValue)
 }
 
-func TestOAuthDaybreakWSPhysicalSendUsesEachTurnMappedModel(t *testing.T) {
+func TestDaybreakWSPhysicalSendUsesEachTurnMappedModel(t *testing.T) {
+	runDaybreakTransportAccountTypes(t, testDaybreakWSPhysicalSendUsesEachTurnMappedModel)
+}
+
+func testDaybreakWSPhysicalSendUsesEachTurnMappedModel(t *testing.T, accountType string) {
 	gin.SetMode(gin.TestMode)
 	for _, mode := range []string{OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough, OpenAIWSIngressModeHTTPBridge} {
 		t.Run(mode, func(t *testing.T) {
@@ -162,6 +242,7 @@ func TestOAuthDaybreakWSPhysicalSendUsesEachTurnMappedModel(t *testing.T) {
 				Credentials: map[string]any{"access_token": "mock-oauth-token"},
 				Extra: map[string]any{"responses_websockets_v2_enabled": true, "openai_oauth_responses_websockets_v2_mode": mode,
 					OpenAIDaybreakBlueEnabledKey: true, OpenAIDaybreakRedEnabledKey: true}}
+			configureDaybreakTransportAccount(account, accountType)
 			svc.accountRepo = newAuthorizedOpenAIOAuthTestRepo(account)
 			account = seedDaybreakTransportCapabilities(t, svc, account)
 			server, done := startPassthroughLifecycleServerWithHooks(t, ctx, svc, account, func(c *gin.Context) *OpenAIWSIngressHooks {
@@ -225,7 +306,11 @@ func TestOAuthDaybreakWSPhysicalSendUsesEachTurnMappedModel(t *testing.T) {
 	}
 }
 
-func TestOAuthDaybreakCompatPreservesClientAccessPrograms(t *testing.T) {
+func TestDaybreakCompatPreservesClientAccessPrograms(t *testing.T) {
+	runDaybreakTransportAccountTypes(t, testDaybreakCompatPreservesClientAccessPrograms)
+}
+
+func testDaybreakCompatPreservesClientAccessPrograms(t *testing.T, accountType string) {
 	gin.SetMode(gin.TestMode)
 	for _, endpoint := range []string{"/v1/chat/completions", "/v1/messages"} {
 		for _, value := range []string{
@@ -248,6 +333,7 @@ func TestOAuthDaybreakCompatPreservesClientAccessPrograms(t *testing.T) {
 					ID: 8101, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
 					Credentials: map[string]any{"access_token": "mock-oauth-token", "chatgpt_account_id": "mock-owner"},
 				}
+				configureDaybreakTransportAccount(account, accountType)
 				svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, accountRepo: newAuthorizedOpenAIOAuthTestRepo(account)}
 				var err error
 				if endpoint == "/v1/chat/completions" {
@@ -329,7 +415,11 @@ func TestDaybreakWSGlobalSwitchUpdatesOnEveryPhysicalTurn(t *testing.T) {
 	}
 }
 
-func TestOAuthDaybreakHTTPAdaptersInjectAfterMapping(t *testing.T) {
+func TestDaybreakHTTPAdaptersInjectAfterMapping(t *testing.T) {
+	runDaybreakTransportAccountTypes(t, testDaybreakHTTPAdaptersInjectAfterMapping)
+}
+
+func testDaybreakHTTPAdaptersInjectAfterMapping(t *testing.T, accountType string) {
 	gin.SetMode(gin.TestMode)
 	for _, mode := range []string{"responses", "passthrough", "chat", "messages"} {
 		t.Run(mode, func(t *testing.T) {
@@ -353,6 +443,7 @@ func TestOAuthDaybreakHTTPAdaptersInjectAfterMapping(t *testing.T) {
 			account := &Account{ID: 8140, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
 				Credentials: map[string]any{"access_token": "mock-oauth-token", "model_mapping": map[string]any{"client-alias": "gpt-6-astra"}},
 				Extra:       map[string]any{OpenAIDaybreakBlueEnabledKey: true, OpenAIDaybreakRedEnabledKey: true, "openai_passthrough": mode == "passthrough"}}
+			configureDaybreakTransportAccount(account, accountType)
 			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, accountRepo: newAuthorizedOpenAIOAuthTestRepo(account), cache: &stubGatewayCache{}, toolCorrector: NewCodexToolCorrector()}
 			seedDaybreakTransportCapabilities(t, svc, account)
 			var err error
@@ -369,6 +460,36 @@ func TestOAuthDaybreakHTTPAdaptersInjectAfterMapping(t *testing.T) {
 			require.Equal(t, "gpt-6-astra", gjson.GetBytes(upstream.lastBody, "model").String())
 			require.Equal(t, "daybreak_blue", gjson.GetBytes(upstream.lastBody, "access_programs.cyber").String())
 			require.False(t, gjson.GetBytes(body, "access_programs").Exists())
+		})
+	}
+}
+
+func TestAPIKeyDaybreakNativeChatKeepsClientAccessPrograms(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, value := range []string{"", `{"cyber":"standard","future":900719925474099312345}`} {
+		t.Run(value, func(t *testing.T) {
+			field := ""
+			if value != "" {
+				field = `,"access_programs":` + value
+			}
+			body := []byte(`{"model":"gpt-6-astra","messages":[{"role":"user","content":"hello"}],"stream":false` + field + `}`)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+			c.Request = c.Request.WithContext(daybreakTransportContext(c.Request.Context()))
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusBadRequest,
+				Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"mock validation error"}}`))}}
+			account := &Account{ID: 8141, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+				Credentials: map[string]any{"api_key": "mock-api-key", "base_url": "https://api.openai.com"},
+				Extra: map[string]any{OpenAIDaybreakBlueEnabledKey: true, OpenAIDaybreakRedEnabledKey: true,
+					"openai_responses_mode": "force_chat_completions"}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			seedDaybreakTransportCapabilities(t, svc, account)
+			_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-6-astra")
+			require.Error(t, err)
+			require.NotNil(t, upstream.lastReq)
+			require.True(t, strings.HasSuffix(upstream.lastReq.URL.Path, "/chat/completions"))
+			require.Equal(t, value, gjson.GetBytes(upstream.lastBody, "access_programs").Raw)
+			require.Equal(t, value, gjson.GetBytes(body, "access_programs").Raw)
 		})
 	}
 }

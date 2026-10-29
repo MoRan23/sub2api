@@ -2,7 +2,7 @@
   <section class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="openai-daybreak-settings">
     <div class="flex items-center justify-between gap-3">
       <h3 class="input-label mb-0">Daybreak</h3>
-      <button v-if="accountId" type="button" class="btn btn-secondary btn-sm" :disabled="loading || !active" data-testid="daybreak-refresh" @click="loadCapabilities">
+      <button v-if="accountId" type="button" class="btn btn-secondary btn-sm" :disabled="loading || !active || requiresSave" data-testid="daybreak-refresh" @click="loadCapabilities">
         {{ t(loading ? 'admin.accounts.openai.daybreak.checking' : 'admin.accounts.openai.daybreak.refresh') }}
       </button>
     </div>
@@ -17,6 +17,7 @@
     </div>
     <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.openai.daybreak.redRequiresBlue') }}</p>
     <p v-if="!accountId" class="text-xs text-gray-500 dark:text-gray-400" data-testid="daybreak-create-hint">{{ t('admin.accounts.openai.daybreak.createHint') }}</p>
+    <p v-else-if="requiresSave" class="text-xs text-gray-500 dark:text-gray-400" data-testid="daybreak-save-hint">{{ t('admin.accounts.openai.daybreak.saveHint') }}</p>
     <p v-else-if="loading" class="text-xs text-gray-500 dark:text-gray-400" role="status">{{ t('admin.accounts.openai.daybreak.checking') }}</p>
     <p v-else-if="error" class="text-xs text-red-600 dark:text-red-400" role="alert">{{ error }}</p>
     <template v-else-if="capabilities">
@@ -45,9 +46,10 @@ import Toggle from '@/components/common/Toggle.vue'
 const props = withDefaults(defineProps<{
   accountId?: number
   active?: boolean
+  requiresSave?: boolean
   blue: boolean
   red: boolean
-}>(), { active: true })
+}>(), { active: true, requiresSave: false })
 const emit = defineEmits<{
   'update:blue': [value: boolean]
   'update:red': [value: boolean]
@@ -57,7 +59,7 @@ const capabilities = ref<OpenAIDaybreakCapabilities | null>(null)
 const loading = ref(false)
 const error = ref('')
 let requestVersion = 0
-const canEnableBlue = computed(() => props.active && !!props.accountId && !loading.value && !error.value && capabilities.value?.blue_available === true)
+const canEnableBlue = computed(() => props.active && !props.requiresSave && !!props.accountId && !loading.value && !error.value && capabilities.value?.blue_available === true)
 const canEnableRed = computed(() => canEnableBlue.value && props.blue && capabilities.value?.red_available === true)
 
 function updateBlue(value: boolean) {
@@ -77,7 +79,7 @@ async function loadCapabilities() {
   capabilities.value = null
   error.value = ''
   loading.value = false
-  if (!props.active || !accountId) return
+  if (!props.active || props.requiresSave || !accountId) return
   loading.value = true
   try {
     const result = await adminAPI.accounts.getDaybreakCapabilities(accountId)
@@ -91,6 +93,6 @@ async function loadCapabilities() {
   }
 }
 
-watch(() => [props.accountId, props.active], loadCapabilities, { immediate: true })
+watch(() => [props.accountId, props.active, props.requiresSave], loadCapabilities, { immediate: true })
 onBeforeUnmount(() => { requestVersion++ })
 </script>

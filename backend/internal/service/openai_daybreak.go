@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -37,6 +39,7 @@ type OpenAIDaybreakCapabilities struct {
 	CredentialOwnerID       int64  `json:"-"`
 	CredentialOS            string `json:"-"`
 	AuthorizationGeneration string `json:"-"`
+	CredentialIdentity      string `json:"-"`
 }
 
 // This is a tier policy, not an availability list: every entry also requires
@@ -58,8 +61,80 @@ var openAIDaybreakModels = map[string]OpenAIDaybreakModel{
 }
 
 func IsOpenAIDaybreakAccount(account *Account) bool {
-	return account != nil && account.IsOpenAIOAuth() &&
-		!account.IsOpenAIPersonalAccessToken() && !account.IsOpenAIAgentIdentity()
+	return account != nil && ((account.IsOpenAIOAuth() &&
+		!account.IsOpenAIPersonalAccessToken() && !account.IsOpenAIAgentIdentity()) ||
+		(account.IsOpenAIApiKey() && !account.IsCodexEngine()))
+}
+
+// OpenAIDaybreakAPIKeyCredentialIdentity binds capability evidence to the real
+// upstream credential and endpoint. It contains no plaintext credential and is
+// used only internally for cache isolation and the locked settings save.
+func OpenAIDaybreakAPIKeyCredentialIdentity(account *Account) string {
+	if account == nil || !account.IsOpenAIApiKey() || account.IsCodexEngine() {
+		return ""
+	}
+	mode, _ := account.Extra[OpenAIAPIKeyModeExtraKey].(string)
+	if mode == "" {
+		mode = "generic"
+	}
+	var overrides map[string]string
+	if account.IsHeaderOverrideEnabled() {
+		// Do not mutate the account's header-override cache: namespace lookup also
+		// runs concurrently with forwarding for this shared account snapshot.
+		overrides = resolveHeaderOverrides(stringMappingFromRaw(account.Credentials[credKeyHeaderOverrides]))
+	}
+	identity, _ := json.Marshal(struct {
+		ID       int64             `json:"id"`
+		ParentID *int64            `json:"parent_id"`
+		BaseURL  string            `json:"base_url"`
+		APIKey   string            `json:"api_key"`
+		Mode     string            `json:"mode"`
+		Headers  map[string]string `json:"headers"`
+	}{account.ID, account.ParentAccountID, account.GetOpenAIBaseURL(), account.GetOpenAIApiKey(), mode, overrides})
+	return fmt.Sprintf("%x", sha256.Sum256(identity))
+}
+
+func openAIDaybreakCapabilitiesNamespace(account *Account) string {
+	if identity := OpenAIDaybreakAPIKeyCredentialIdentity(account); identity != "" {
+		return openAIOutboundSessionIdentityNamespace(account) + "/daybreak/apikey/" + identity
+	}
+	return openAICodexModelCapabilitiesNamespace(account)
+}
+
+// Only the actual catalog supplies access programs. API-key catalogs may use
+// the OpenAI data/id envelope; adapt that shape without adding static metadata,
+// mapped aliases, or any locally completed capabilities.
+func (s *OpenAIGatewayService) observeOpenAIDaybreakAPIKeyCatalog(account *Account, raw []byte, observedAt time.Time) {
+	if s == nil || account == nil || !account.IsOpenAIApiKey() || !IsOpenAIDaybreakAccount(account) {
+		return
+	}
+	var envelope struct {
+		Models json.RawMessage `json:"models"`
+		Data   []struct {
+			ID                      string          `json:"id"`
+			AvailableAccessPrograms json.RawMessage `json:"available_access_programs,omitempty"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &envelope) != nil {
+		return
+	}
+	if envelope.Models == nil {
+		if envelope.Data == nil {
+			return
+		}
+		type model struct {
+			Slug                    string          `json:"slug"`
+			AvailableAccessPrograms json.RawMessage `json:"available_access_programs,omitempty"`
+		}
+		models := make([]model, 0, len(envelope.Data))
+		for _, item := range envelope.Data {
+			models = append(models, model{item.ID, item.AvailableAccessPrograms})
+		}
+		raw, _ = json.Marshal(struct {
+			Models []model `json:"models"`
+		}{models})
+	}
+	s.codexModelCapabilities.observeManifest(openAIDaybreakCapabilitiesNamespace(account), raw, observedAt)
 }
 
 func openAIDaybreakEnabled(account *Account, key string) bool {
@@ -110,7 +185,7 @@ func openAIModelsTokenContext(ctx context.Context, auxiliary bool) context.Conte
 // business account and its switches are never replaced by the owner's extra.
 func (s *OpenAIGatewayService) fetchOpenAIDaybreakCatalog(ctx context.Context, account *Account) (*Account, *OpenAIModelsResponse, error) {
 	if s == nil || !IsOpenAIDaybreakAccount(account) {
-		return nil, nil, infraerrors.New(http.StatusBadRequest, "OPENAI_DAYBREAK_ACCOUNT_UNSUPPORTED", "Daybreak settings require an OpenAI OAuth account")
+		return nil, nil, infraerrors.New(http.StatusBadRequest, "OPENAI_DAYBREAK_ACCOUNT_UNSUPPORTED", "Daybreak settings require an OpenAI OAuth or ordinary API Key account")
 	}
 	ctx, cancel := context.WithTimeout(withoutDiagnosticDaybreakAttempt(ctx), codexModelsManifestRequestTimeout)
 	defer cancel()
@@ -119,11 +194,13 @@ func (s *OpenAIGatewayService) fetchOpenAIDaybreakCatalog(ctx context.Context, a
 		return nil, nil, openAIModelsCredentialError(err)
 	}
 	if !IsOpenAIDaybreakAccount(credential) {
-		return nil, nil, infraerrors.New(http.StatusBadRequest, "OPENAI_DAYBREAK_ACCOUNT_UNSUPPORTED", "The credential source must use OpenAI OAuth")
+		return nil, nil, infraerrors.New(http.StatusBadRequest, "OPENAI_DAYBREAK_ACCOUNT_UNSUPPORTED", "The credential source must use OpenAI OAuth or an ordinary API Key")
 	}
-	credential, err = ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, credential, credential.OpenAIOAuthCredentialOS)
-	if err != nil {
-		return nil, nil, openAIModelsCredentialError(err)
+	if credential.IsOpenAIOAuth() {
+		credential, err = ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, credential, credential.OpenAIOAuthCredentialOS)
+		if err != nil {
+			return nil, nil, openAIModelsCredentialError(err)
+		}
 	}
 	// Keep the selected account's proxy and business settings, while binding the
 	// model request to the same authorization as this inference attempt.
@@ -135,7 +212,11 @@ func (s *OpenAIGatewayService) fetchOpenAIDaybreakCatalog(ctx context.Context, a
 	if err == nil && manifest != nil && !manifest.observedAt.IsZero() && time.Now().Before(manifest.observedAt.Add(codexModelCapabilityCacheTTL)) {
 		// The smaller capability cache may have evicted an otherwise fresh catalog.
 		// Restore from the actual observation time, never extend it on cache reads.
-		s.codexModelCapabilities.observeManifest(openAICodexModelCapabilitiesNamespace(credential), manifest.Body, manifest.observedAt)
+		if credential.IsOpenAIApiKey() {
+			s.observeOpenAIDaybreakAPIKeyCatalog(credential, manifest.upstreamSourceBody, manifest.observedAt)
+		} else {
+			s.codexModelCapabilities.observeManifest(openAIDaybreakCapabilitiesNamespace(credential), manifest.Body, manifest.observedAt)
+		}
 	}
 	return credential, manifest, err
 }
@@ -150,6 +231,7 @@ func (s *OpenAIGatewayService) GetOpenAIDaybreakCapabilities(ctx context.Context
 		CredentialOwnerID:       credential.OpenAIOAuthCredentialOwnerID,
 		CredentialOS:            credential.OpenAIOAuthCredentialOS,
 		AuthorizationGeneration: credential.OpenAIOAuthAuthorizationGeneration,
+		CredentialIdentity:      OpenAIDaybreakAPIKeyCredentialIdentity(credential),
 	}
 	if result.CredentialOwnerID == 0 {
 		result.CredentialOwnerID = credential.ID
@@ -158,7 +240,7 @@ func (s *OpenAIGatewayService) GetOpenAIDaybreakCapabilities(ctx context.Context
 		checked := manifest.observedAt
 		result.CheckedAt = &checked
 	}
-	namespace := openAICodexModelCapabilitiesNamespace(credential)
+	namespace := openAIDaybreakCapabilitiesNamespace(credential)
 	for _, model := range openAIDaybreakModels {
 		capabilities := s.openAICodexModelCapabilities(namespace, model.Model)
 		if !openAIDaybreakModelSupported(model, capabilities) {
@@ -170,9 +252,9 @@ func (s *OpenAIGatewayService) GetOpenAIDaybreakCapabilities(ctx context.Context
 	}
 	sort.Slice(result.Models, func(i, j int) bool { return result.Models[i].Model < result.Models[j].Model })
 	if !result.BlueAvailable {
-		result.Reason = "未从当前 OAuth 授权的 available_access_programs 中获取到支持的 Daybreak 模型"
+		result.Reason = "未从当前上游凭据的 available_access_programs 中获取到支持的 Daybreak 模型"
 	} else if !result.RedAvailable {
-		result.Reason = "当前 OAuth 授权未声明支持 Red 档模型"
+		result.Reason = "当前上游凭据未声明支持 Red 档模型"
 	}
 	return result, nil
 }
@@ -272,13 +354,13 @@ func (s *OpenAIGatewayService) applyOpenAIDaybreakWithContext(ctx context.Contex
 			return body, "group_red_disabled", nil
 		}
 	}
-	capabilities := s.openAICodexModelCapabilities(openAICodexModelCapabilitiesNamespace(account), model.Model)
+	capabilities := s.openAICodexModelCapabilities(openAIDaybreakCapabilitiesNamespace(account), model.Model)
 	if !capabilities.Known {
 		credential, _, err := s.fetchOpenAIDaybreakCatalog(ctx, account)
 		if err != nil {
 			return body, "catalog_unavailable", nil
 		}
-		capabilities = s.openAICodexModelCapabilities(openAICodexModelCapabilitiesNamespace(credential), model.Model)
+		capabilities = s.openAICodexModelCapabilities(openAIDaybreakCapabilitiesNamespace(credential), model.Model)
 	}
 	if !openAIDaybreakModelSupported(model, capabilities) {
 		return body, "capability_unavailable", nil

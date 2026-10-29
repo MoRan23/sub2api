@@ -684,7 +684,8 @@ export default {
         daybreak: {
           description: 'Fill missing access_programs.cyber for supported models according to the approval tier. Explicit client choices are preserved. Turning switches off stops automatic additions; it does not force upstream Daybreak off.',
           redRequiresBlue: 'Red requires Blue. Turning Blue off also turns Red off.',
-          createHint: 'Off by default. After authorization, check model capabilities in the edit dialog to enable Daybreak.',
+          createHint: 'Off by default. Configure credentials and save the account, then check live upstream model capabilities in the edit dialog to enable Daybreak.',
+          saveHint: 'The upstream URL, API key, access mode, or effective header overrides have changed. Save the account before checking capabilities and enabling Daybreak. Enabled switches can still be turned off.',
           checking: 'Checking model capabilities…',
           refresh: 'Refresh capabilities',
           checkFailed: 'Unable to read upstream model capabilities. Enabling is unavailable; enabled switches can still be turned off.',

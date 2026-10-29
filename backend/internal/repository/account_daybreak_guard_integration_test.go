@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -13,6 +14,84 @@ type daybreakIntegrationReader func(context.Context, *service.Account) (*service
 
 func (f daybreakIntegrationReader) GetOpenAIDaybreakCapabilities(ctx context.Context, a *service.Account) (*service.OpenAIDaybreakCapabilities, error) {
 	return f(ctx, a)
+}
+
+func (s *AccountRepoSuite) TestDaybreakAPIKeyPersistenceAndModeIsolation() {
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "daybreak-api-key", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "integration-key", "base_url": "https://daybreak.invalid"}})
+	admin := service.NewAdminService(nil, nil, nil, s.repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, s.client, nil, nil, nil, nil, nil, nil, nil, nil)
+	admin.(interface {
+		SetOpenAIDaybreakCapabilityReader(service.OpenAIDaybreakCapabilityReader)
+	}).SetOpenAIDaybreakCapabilityReader(daybreakIntegrationReader(func(_ context.Context, a *service.Account) (*service.OpenAIDaybreakCapabilities, error) {
+		return &service.OpenAIDaybreakCapabilities{BlueAvailable: true, RedAvailable: true, CredentialOwnerID: a.ID,
+			CredentialIdentity: service.OpenAIDaybreakAPIKeyCredentialIdentity(a)}, nil
+	}))
+	stale, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	_, err = admin.UpdateAccount(s.ctx, account.ID, &service.UpdateAccountInput{Extra: map[string]any{service.OpenAIDaybreakBlueEnabledKey: true, service.OpenAIDaybreakRedEnabledKey: true}})
+	s.Require().NoError(err)
+	stale.Extra[service.OpenAIDaybreakBlueEnabledKey] = false
+	s.Require().NoError(s.repo.Update(s.ctx, stale))
+	s.Require().NoError(s.repo.UpdateExtra(s.ctx, account.ID, map[string]any{service.OpenAIDaybreakRedEnabledKey: false}))
+	stored, err := s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(true, stored.Extra[service.OpenAIDaybreakBlueEnabledKey])
+	s.Require().Equal(true, stored.Extra[service.OpenAIDaybreakRedEnabledKey])
+	s.Require().NoError(admin.UpdateAccountExtra(s.ctx, account.ID, map[string]any{service.OpenAIDaybreakBlueEnabledKey: false}))
+	stored, err = s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(false, stored.Extra[service.OpenAIDaybreakRedEnabledKey])
+	_, err = admin.BulkUpdateAccounts(s.ctx, &service.BulkUpdateAccountsInput{AccountIDs: []int64{account.ID}, Extra: map[string]any{service.OpenAIDaybreakBlueEnabledKey: true}})
+	s.Require().NoError(err)
+	stored, err = s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(true, stored.Extra[service.OpenAIDaybreakBlueEnabledKey])
+	s.Require().NoError(admin.UpdateAccountExtra(s.ctx, account.ID, map[string]any{service.OpenAIAPIKeyModeExtraKey: "codex_engine"}))
+	stored, err = s.repo.GetByID(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Require().True(stored.IsCodexEngine())
+	s.Require().NotContains(stored.Extra, service.OpenAIDaybreakBlueEnabledKey)
+	s.Require().NotContains(stored.Extra, service.OpenAIDaybreakRedEnabledKey)
+	err = admin.UpdateAccountExtra(s.ctx, account.ID, map[string]any{service.OpenAIDaybreakBlueEnabledKey: true})
+	s.Require().Equal("DAYBREAK_ACCOUNT_UNSUPPORTED", infraerrors.Reason(err))
+}
+
+func (s *AccountRepoSuite) TestDaybreakAPIKeyAllWritesRecheckCredentialIdentity() {
+	for _, mutation := range []string{
+		`credentials = credentials || '{"api_key":"changed-key"}'::jsonb`,
+		`credentials = credentials || '{"base_url":"https://changed.invalid"}'::jsonb`,
+		`extra = extra || '{"openai_api_key_mode":"codex_engine"}'::jsonb`,
+	} {
+		for _, writeKind := range []string{"update", "extra", "bulk"} {
+			account := mustCreateAccount(s.T(), s.client, &service.Account{Name: fmt.Sprintf("daybreak-api-key-cas-%s", writeKind), Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+				Credentials: map[string]any{"api_key": "integration-key", "base_url": "https://daybreak.invalid"}})
+			admin := service.NewAdminService(nil, nil, nil, s.repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, s.client, nil, nil, nil, nil, nil, nil, nil, nil)
+			admin.(interface {
+				SetOpenAIDaybreakCapabilityReader(service.OpenAIDaybreakCapabilityReader)
+			}).SetOpenAIDaybreakCapabilityReader(daybreakIntegrationReader(func(ctx context.Context, a *service.Account) (*service.OpenAIDaybreakCapabilities, error) {
+				caps := &service.OpenAIDaybreakCapabilities{BlueAvailable: true, RedAvailable: true, CredentialOwnerID: a.ID,
+					CredentialIdentity: service.OpenAIDaybreakAPIKeyCredentialIdentity(a)}
+				_, err := s.client.ExecContext(ctx, "UPDATE accounts SET "+mutation+" WHERE id=$1", a.ID)
+				return caps, err
+			}))
+			patch := map[string]any{service.OpenAIDaybreakBlueEnabledKey: true}
+			var err error
+			switch writeKind {
+			case "update":
+				_, err = admin.UpdateAccount(s.ctx, account.ID, &service.UpdateAccountInput{Extra: patch})
+			case "extra":
+				err = admin.UpdateAccountExtra(s.ctx, account.ID, patch)
+			case "bulk":
+				_, err = admin.BulkUpdateAccounts(s.ctx, &service.BulkUpdateAccountsInput{AccountIDs: []int64{account.ID}, Extra: patch})
+			}
+			s.Require().Error(err, "%s %s", writeKind, mutation)
+			s.Require().Contains([]string{"DAYBREAK_CAPABILITY_STALE", "DAYBREAK_ACCOUNT_UNSUPPORTED"}, infraerrors.Reason(err))
+			stored, getErr := s.repo.GetByID(s.ctx, account.ID)
+			s.Require().NoError(getErr)
+			enabled, _ := stored.Extra[service.OpenAIDaybreakBlueEnabledKey].(bool)
+			s.Require().False(enabled)
+		}
+	}
 }
 
 func (s *AccountRepoSuite) TestDaybreakAdminGrantCASAndStaleSnapshots() {

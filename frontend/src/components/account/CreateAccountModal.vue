@@ -3376,7 +3376,7 @@
       </div>
 
       <OpenAIDaybreakSettings
-        v-if="form.platform === 'openai' && form.type === 'oauth' && oauthFlowRef?.inputMethod !== 'codex_pat' && oauthFlowRef?.inputMethod !== 'agent_identity'"
+        v-if="form.platform === 'openai' && ((accountCategory === 'apikey' && openAIAPIKeyMode === 'generic') || (form.type === 'oauth' && oauthFlowRef?.inputMethod !== 'codex_pat' && oauthFlowRef?.inputMethod !== 'agent_identity'))"
         :blue="false"
         :red="false"
       />

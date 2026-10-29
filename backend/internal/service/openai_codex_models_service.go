@@ -1657,6 +1657,20 @@ type openAIModelsCache struct {
 	entries   map[string]openAIModelsCacheEntry
 	nextOrder uint64
 	refresh   singleflight.Group
+	// Real responses need distinct ordering even on clocks whose resolution is
+	// coarser than two back-to-back catalog fetches. Cache reads reuse their
+	// original observation and never advance this clock.
+	lastObservedAt time.Time
+}
+
+func (c *openAIModelsCache) nextObservationTime(now time.Time) time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !now.After(c.lastObservedAt) {
+		now = c.lastObservedAt.Add(time.Nanosecond)
+	}
+	c.lastObservedAt = now
+	return now
 }
 
 func (c *openAIModelsCache) get(key string, now time.Time) (*OpenAIModelsResponse, openAIModelsCacheState) {
@@ -1996,7 +2010,10 @@ func (s *OpenAIGatewayService) refreshCachedOpenAIModels(cacheKey string, reques
 		}
 		if manifest.NotModified && cached != nil {
 			cached = cloneOpenAIModelsResponse(cached)
-			cached.observedAt = time.Now()
+			cached.observedAt = manifest.observedAt
+			if cached.observedAt.IsZero() {
+				cached.observedAt = s.openAIModelsCache.nextObservationTime(time.Now())
+			}
 			s.openAIModelsCache.set(cacheKey, cached, time.Now())
 			return cached, nil
 		}
@@ -2139,9 +2156,12 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 		return response, err
 	}
 	if response.NotModified {
+		response.observedAt = s.openAIModelsCache.nextObservationTime(time.Now())
 		if !request.useAPIKeyUpstream && !isOpenAICandyTest(ctx) {
 			namespace := openAICodexModelCapabilitiesNamespace(request.credentialAccount)
-			s.codexModelCapabilities.refreshNamespace(namespace, time.Now())
+			s.codexModelCapabilities.refreshNamespace(namespace, response.observedAt)
+		} else if request.useAPIKeyUpstream && !isOpenAICandyTest(ctx) && IsOpenAIDaybreakAccount(request.credentialAccount) {
+			s.codexModelCapabilities.refreshNamespace(openAIDaybreakCapabilitiesNamespace(request.credentialAccount), response.observedAt)
 		}
 		return response, nil
 	}
@@ -2194,9 +2214,14 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 				retryable: true,
 			}
 		}
-	} else if !isOpenAICandyTest(ctx) {
+	}
+	observedAt := s.openAIModelsCache.nextObservationTime(time.Now())
+	if !request.useAPIKeyUpstream && !isOpenAICandyTest(ctx) {
 		namespace := openAICodexModelCapabilitiesNamespace(request.credentialAccount)
-		s.codexModelCapabilities.observeManifest(namespace, body, time.Now())
+		s.codexModelCapabilities.observeManifest(namespace, body, observedAt)
+	}
+	if request.useAPIKeyUpstream && !isOpenAICandyTest(ctx) {
+		s.observeOpenAIDaybreakAPIKeyCatalog(request.credentialAccount, upstreamBody, observedAt)
 	}
 	etag := response.upstreamETag
 	manifest := &OpenAIModelsResponse{
@@ -2205,7 +2230,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 		upstreamETag:                 etag,
 		upstreamSourceBody:           append([]byte(nil), upstreamBody...),
 		convertedFromOpenAIModelList: convertedFromOpenAIModelList,
-		observedAt:                   time.Now(),
+		observedAt:                   observedAt,
 	}
 	if request.useAPIKeyUpstream && !bytes.Equal(body, upstreamBody) {
 		manifest.ETag = codexModelsManifestBodyETag(body)
@@ -2322,6 +2347,11 @@ func convertOpenAIModelListToCodexManifestForAccount(body []byte, account *Accou
 	var entries []map[string]json.RawMessage
 	if err := json.Unmarshal(data, &entries); err != nil {
 		return body
+	}
+	if entries != nil && len(entries) == 0 {
+		// A valid empty upstream catalog revokes all capabilities. Preserve that
+		// fact instead of treating data:[] as an invalid Codex envelope.
+		return []byte(`{"models":[]}`)
 	}
 	modelIDs := make([]string, 0, len(entries))
 	modelMetadata := make(map[string]codexModelMetadataOverride, len(entries))

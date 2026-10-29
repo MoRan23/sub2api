@@ -1436,8 +1436,8 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_long_context_billing_enabled).toBe(false)
   })
 
-  it('persists changed Daybreak choices and clears Red when Blue is turned off', async () => {
-    const account = buildOpenAIOAuthParentAccount()
+  it.each(['oauth', 'apikey'])('persists changed %s Daybreak choices and clears Red when Blue is turned off', async (kind) => {
+    const account = kind === 'oauth' ? buildOpenAIOAuthParentAccount() : buildAccount()
     account.extra = { openai_daybreak_blue_enabled: true, openai_daybreak_red_enabled: true, custom: 'keep' }
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
@@ -1451,8 +1451,8 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
   })
 
-  it('does not replay unchanged Daybreak preferences from the account snapshot', async () => {
-    const account = buildOpenAIOAuthParentAccount()
+  it.each(['oauth', 'apikey'])('does not replay unchanged %s Daybreak preferences from the account snapshot', async (kind) => {
+    const account = kind === 'oauth' ? buildOpenAIOAuthParentAccount() : buildAccount()
     account.extra = { openai_daybreak_blue_enabled: true, openai_daybreak_red_enabled: false }
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
@@ -1465,9 +1465,101 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
   })
 
-  it.each(['apikey', 'setup-token', 'personalAccessToken', 'agentIdentity', 'anthropic'])('does not show or fetch Daybreak capabilities for %s', async (kind) => {
+  it('enables ordinary API Key Daybreak after checking live capabilities', async () => {
+    const account = buildAccount()
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    expect(getDaybreakCapabilitiesMock).toHaveBeenCalledWith(account.id)
+    await wrapper.get('[data-testid="daybreak-blue"]').trigger('click')
+    await wrapper.get('[data-testid="daybreak-red"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      openai_daybreak_blue_enabled: true, openai_daybreak_red_enabled: true
+    })
+    wrapper.unmount()
+  })
+
+  it('hides Daybreak and omits pending preferences when changing an API Key to Engine', async () => {
+    const account = buildAccount()
+    account.extra = { openai_daybreak_blue_enabled: true, openai_daybreak_red_enabled: true }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    await wrapper.get('[data-testid="daybreak-blue"]').trigger('click')
+    await wrapper.get('[data-testid="openai-api-key-mode"]').setValue('codex_engine')
+    expect(wrapper.find('[data-testid="openai-daybreak-settings"]').exists()).toBe(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('openai_daybreak_blue_enabled')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('openai_daybreak_red_enabled')
+    wrapper.unmount()
+  })
+
+  it.each(['base_url', 'api_key', 'mode'])('requires saving an API Key %s change before enabling Daybreak', async (field) => {
+    const account = buildAccount()
+    if (field === 'mode') account.extra = { openai_api_key_mode: 'codex_engine' }
+    const wrapper = mountModal(account)
+    await flushPromises()
+    if (field === 'base_url') {
+      await wrapper.get('input[placeholder="https://api.openai.com"]').setValue('https://new-upstream.example')
+    } else if (field === 'api_key') {
+      await wrapper.get('input[type="password"]').setValue('new-api-key')
+    } else {
+      await wrapper.get('[data-testid="openai-api-key-mode"]').setValue('generic')
+    }
+    await flushPromises()
+    expect(wrapper.get('[data-testid="daybreak-save-hint"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="daybreak-refresh"]').attributes('disabled')).toBeDefined()
+    if (field === 'mode') expect(getDaybreakCapabilitiesMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('rechecks Daybreak evidence only when effective header overrides change', async () => {
+    const account = buildAccount()
+    account.credentials.header_override_enabled = true
+    account.credentials.header_overrides = { 'OpenAI-Project': 'old-project' }
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const name = wrapper.get('input[placeholder="admin.accounts.headerOverride.namePlaceholder"]')
+    const value = wrapper.get('input[placeholder="admin.accounts.headerOverride.valuePlaceholder"]')
+    await name.setValue(' openai-project ')
+    await value.setValue(' old-project ')
+    expect(wrapper.find('[data-testid="daybreak-save-hint"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeUndefined()
+    await value.setValue('new-project')
+    expect(wrapper.get('[data-testid="daybreak-save-hint"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeDefined()
+    await value.setValue('old-project')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="daybreak-save-hint"]').exists()).toBe(false)
+    expect(getDaybreakCapabilitiesMock).toHaveBeenCalledTimes(2)
+    await wrapper.get('[data-testid="edit-header-override-toggle"]').trigger('click')
+    expect(wrapper.get('[data-testid="daybreak-save-hint"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('ignores stored disabled header overrides until they are enabled', async () => {
+    const account = buildAccount()
+    account.credentials.header_override_enabled = false
+    account.credentials.header_overrides = { Authorization: 'Bearer override-token' }
+    const wrapper = mountModal(account)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="daybreak-save-hint"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="edit-header-override-toggle"]').trigger('click')
+    expect(wrapper.get('[data-testid="daybreak-save-hint"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it.each(['codex_engine', 'setup-token', 'personalAccessToken', 'agentIdentity', 'anthropic'])('does not show or fetch Daybreak capabilities for %s', async (kind) => {
     const account = buildOpenAIOAuthParentAccount()
-    if (kind === 'apikey' || kind === 'setup-token') account.type = kind
+    if (kind === 'codex_engine') {
+      account.type = 'apikey'
+      account.extra = { openai_api_key_mode: 'codex_engine' }
+    } else if (kind === 'setup-token') account.type = kind
     else if (kind === 'anthropic') account.platform = kind
     else account.credentials.auth_mode = kind
     const wrapper = mountModal(account)

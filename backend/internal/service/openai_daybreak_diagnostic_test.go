@@ -91,7 +91,6 @@ func TestDiagnosticDaybreakPrivateScopeDoesNotExemptOtherRequests(t *testing.T) 
 		})
 	}
 	for _, account := range []*Account{
-		{Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
 		{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"openai_api_key_mode": "codex_engine"}},
 		{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"auth_mode": OpenAIAuthModePersonalAccessToken}},
 		{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"auth_mode": OpenAIAuthModeAgentIdentity}},
@@ -158,6 +157,49 @@ func TestDiagnosticDaybreakProbeAndPelicanObserveFinalWire(t *testing.T) {
 	}
 }
 
+func TestAPIKeyDiagnosticDaybreakProbeAndPelicanObserveFinalWire(t *testing.T) {
+	for _, kind := range []string{"pelican", "attribution", "unavailable"} {
+		t.Run(kind, func(t *testing.T) {
+			owner := &Account{ID: 8911, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+				Status: StatusActive, Schedulable: true, Concurrency: 1,
+				Credentials: map[string]any{"api_key": "mock-api-key", "base_url": "https://synthetic.invalid"}}
+			account := owner
+			account.Extra = map[string]any{OpenAIDaybreakBlueEnabledKey: true}
+			repo := &installationIdentityRepoStub{accounts: map[int64]*Account{owner.ID: owner, account.ID: account}}
+			upstream := &httpUpstreamRecorder{responses: []*http.Response{diagnosticDaybreakSuccessResponse()}}
+			gateway := newOpenAIRejectedFieldTestService(upstream)
+			gateway.accountRepo, gateway.settingService = repo, daybreakHTTPSettings(false)
+			program := "daybreak_blue"
+			if kind == "unavailable" {
+				program = "standard"
+			}
+			gateway.observeOpenAIDaybreakAPIKeyCatalog(owner, []byte(fmt.Sprintf(`{"data":[{"id":"gpt-5.5","available_access_programs":{"cyber":[%q]}}]}`, program)), time.Now())
+			runner := newCandySyntheticCatalogTransport(repo, gateway)
+			ctx := context.Background()
+			var result *CandyTestExecution
+			var err error
+			if kind == "attribution" {
+				ctx = context.WithValue(ctx, attributionExecutionContextKey{}, true)
+				ctx = withDiagnosticDaybreakPreferences(ctx, ReadDiagnosticDaybreakPreferences(account))
+				account.Extra[OpenAIDaybreakBlueEnabledKey] = false
+				result, err = runner.Probe(ctx, account.ID, "gpt-5.5", "synthetic challenge")
+			} else {
+				result, err = runner.Execute(ctx, &CandyTestItem{AccountID: account.ID, Model: "gpt-5.5", PromptVersion: CandyTestPromptVersion})
+			}
+			require.NoError(t, err)
+			require.True(t, result.Completed)
+			require.Len(t, upstream.bodies, 1)
+			if kind == "unavailable" {
+				require.False(t, gjson.GetBytes(upstream.bodies[0], "access_programs.cyber").Exists())
+				require.Equal(t, &DiagnosticDaybreakEvidence{Reason: "capability_unavailable"}, result.Daybreak)
+			} else {
+				require.Equal(t, "daybreak_blue", gjson.GetBytes(upstream.bodies[0], "access_programs.cyber").String())
+				require.Equal(t, &DiagnosticDaybreakEvidence{Cyber: "daybreak_blue", Reason: "automatic"}, result.Daybreak)
+			}
+		})
+	}
+}
+
 func diagnosticDaybreakSuccessResponse() *http.Response {
 	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"model\":\"gpt-5.5\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"synthetic answer\"}]}]}}\n\n"))}
 }
@@ -200,12 +242,12 @@ func TestDiagnosticDaybreakPelicanRetriesUseFrozenBusinessPreferences(t *testing
 	require.False(t, openAIDaybreakEnabled(account, OpenAIDaybreakBlueEnabledKey))
 }
 
-func TestDiagnosticDaybreakAPIKeyAndEngineHaveExplicitNoProgramEvidence(t *testing.T) {
+func TestDiagnosticDaybreakDisabledAPIKeyAndEngineHaveExplicitNoProgramEvidence(t *testing.T) {
 	for _, mode := range []string{"generic", "codex_engine"} {
 		t.Run(mode, func(t *testing.T) {
 			account := newOpenAIRejectedFieldTestAccount()
 			account.Extra["openai_api_key_mode"] = mode
-			account.Extra[OpenAIDaybreakBlueEnabledKey] = true
+			account.Extra[OpenAIDaybreakBlueEnabledKey] = mode == "codex_engine"
 			repo := &stubOpenAIAccountRepo{accounts: []Account{*account}}
 			upstream := &httpUpstreamRecorder{responses: []*http.Response{diagnosticDaybreakSuccessResponse()}}
 			gateway := newOpenAIRejectedFieldTestService(upstream)

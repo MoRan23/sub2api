@@ -2596,7 +2596,7 @@ func TestFetchCodexModelsManifestRejectsInvalidEnvelope(t *testing.T) {
 		name string
 		body string
 	}{
-		{name: "OpenAI models list", body: `{"object":"list","data":[]}`},
+		{name: "OpenAI models list null", body: `{"object":"list","data":null}`},
 		{name: "invalid JSON", body: `{"models":`},
 		{name: "invalid nested array JSON", body: `{"models":[{"slug":"gpt-5.4",}]}`},
 		{name: "trailing JSON value", body: `{"models":[]} {}`},
@@ -2645,7 +2645,7 @@ func TestValidateCodexModelsManifestEnvelopeRequiresExactModelsKey(t *testing.T)
 func TestFetchCodexModelsManifestAPIKeyDoesNotCacheInvalidEnvelope(t *testing.T) {
 	var calls atomic.Int32
 	upstream := &codexModelsHTTPUpstreamStub{do: func(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
-		body := `{"object":"list","data":[]}`
+		body := `{"object":"list","data":null}`
 		if calls.Add(1) > 1 {
 			body = `{"models":[{"slug":"gpt-5.6"}]}`
 		}

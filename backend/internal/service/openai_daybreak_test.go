@@ -78,13 +78,17 @@ func TestOpenAIDaybreakMissingAndMalformedPrograms(t *testing.T) {
 func TestOpenAIDaybreakAccountIsolation(t *testing.T) {
 	body := []byte(`{"model":"gpt-6-sol"}`)
 	for _, account := range []*Account{
-		{Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+		{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{OpenAIAPIKeyModeExtraKey: "codex_engine"}},
 		{Platform: PlatformOpenAI, Type: AccountTypeSetupToken},
 		{Platform: PlatformAnthropic, Type: AccountTypeOAuth},
 		{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"auth_mode": OpenAIAuthModePersonalAccessToken}},
 		{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"auth_mode": OpenAIAuthModeAgentIdentity}},
 	} {
-		account.Extra = map[string]any{OpenAIDaybreakBlueEnabledKey: true, OpenAIDaybreakRedEnabledKey: true}
+		if account.Extra == nil {
+			account.Extra = make(map[string]any)
+		}
+		account.Extra[OpenAIDaybreakBlueEnabledKey] = true
+		account.Extra[OpenAIDaybreakRedEnabledKey] = true
 		require.False(t, IsOpenAIDaybreakAccount(account))
 		require.Equal(t, body, (&OpenAIGatewayService{}).applyOpenAIDaybreak(context.Background(), account, body))
 	}

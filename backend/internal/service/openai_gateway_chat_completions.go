@@ -373,7 +373,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	responsesBody = updatedBody
 	setOpenAIOAuthIdentityCaptureCallerSeed(c, promptCacheKey)
 	responsesReq.ServiceTier = normalizedOpenAIServiceTierValue(gjson.GetBytes(responsesBody, "service_tier").String())
-	if account.IsOpenAIOAuth() {
+	if account.IsOpenAIOAuth() || (account.IsOpenAIApiKey() && !account.IsCodexEngine()) {
 		responsesBody, err = restoreOpenAIClientAccessPrograms(responsesBody, clientAccessPrograms)
 		if err != nil {
 			return nil, fmt.Errorf("preserve client access programs: %w", err)

@@ -104,7 +104,8 @@ func guardedAccountExtraExpression(expression string, credentialExpressions ...s
 	if len(credentialExpressions) > 0 {
 		credentials = credentialExpressions[0]
 	}
-	daybreakEligible := strings.Replace(openAIOAuthCredentialOwnerExpression(credentials), " AND parent_account_id IS NULL", "", 1)
+	daybreakEligible := "(" + strings.Replace(openAIOAuthCredentialOwnerExpression(credentials), " AND parent_account_id IS NULL", "", 1) +
+		" OR (platform = 'openai' AND type = 'apikey' AND COALESCE((" + expression + ") ->> 'openai_api_key_mode', '') <> 'codex_engine'))"
 	expression = "CASE WHEN " + daybreakEligible + " THEN (" + expression + ") ELSE (" + expression + ") - 'openai_daybreak_blue_enabled' - 'openai_daybreak_red_enabled' END"
 	return "CASE WHEN " + installationOwnerSQL + " THEN (" + expression + ") - 'openai_installation_rotate_enabled'" +
 		" ELSE (" + expression + ") - 'openai_installation_rotate_enabled' - 'openai_pinned_installation_id' - 'openai_installation_pin_enabled' END"

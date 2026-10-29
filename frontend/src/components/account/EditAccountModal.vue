@@ -845,6 +845,7 @@
           <button
             type="button"
             @click="headerOverrideEnabled = !headerOverrideEnabled"
+            data-testid="edit-header-override-toggle"
             :class="[
               'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
               headerOverrideEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
@@ -2105,9 +2106,10 @@
       </div>
 
       <OpenAIDaybreakSettings
-        v-if="supportsManagedOpenAIOAuthIdentity(account)"
+        v-if="supportsOpenAIDaybreakSettings"
         :account-id="account.id"
         :active="show"
+        :requires-save="daybreakCredentialsChanged"
         v-model:blue="openAIDaybreakBlueEnabled"
         v-model:red="openAIDaybreakRedEnabled"
       />
@@ -3613,6 +3615,7 @@ import {
   applyInterceptWarmup,
   applyOpenCodeGoProtocolRules,
   applyPlanType,
+  buildHeaderOverridesObject,
   buildPlanTypeOptions,
   cloneOpenCodeGoProtocolRules,
   defaultOpenCodeProtocolRules,
@@ -4331,6 +4334,28 @@ const openAIAPIKeyAutoAttributionEnabled = ref(false)
 const openAIAttributionReplaceWhitelistEnabled = ref(true)
 const openAIDaybreakBlueEnabled = ref(false)
 const openAIDaybreakRedEnabled = ref(false)
+const supportsOpenAIDaybreakSettings = computed(() => {
+  const account = props.account
+  return !!account && (supportsManagedOpenAIOAuthIdentity(account) ||
+    (account.platform === 'openai' && account.type === 'apikey' && openAIAPIKeyMode.value === 'generic'))
+})
+const daybreakCredentialsChanged = computed(() => {
+  const account = props.account
+  if (account?.platform !== 'openai' || account.type !== 'apikey') return false
+  const savedBaseUrl = String(account.credentials?.base_url || 'https://api.openai.com').trim()
+  const savedMode = account.extra?.openai_api_key_mode === 'codex_engine' ? 'codex_engine' : 'generic'
+  const effectiveHeaders = (enabled: boolean, rows: HeaderOverrideRow[]) => JSON.stringify(
+    enabled ? Object.entries(buildHeaderOverridesObject(rows)).sort(([left], [right]) => left.localeCompare(right)) : []
+  )
+  const savedHeaders = effectiveHeaders(
+    account.credentials?.[HEADER_OVERRIDE_ENABLED_CREDENTIAL_KEY] === true,
+    splitHeaderOverridesObject(account.credentials?.[HEADER_OVERRIDES_CREDENTIAL_KEY])
+  )
+  return !!editApiKey.value.trim() ||
+    (editBaseUrl.value.trim() || 'https://api.openai.com') !== savedBaseUrl ||
+    openAIAPIKeyMode.value !== savedMode ||
+    effectiveHeaders(headerOverrideEnabled.value, headerOverrideRows.value) !== savedHeaders
+})
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -4874,7 +4899,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openAIAttributionReplaceWhitelistEnabled.value = extra?.openai_attribution_replace_whitelist_enabled !== false
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
-  openAIDaybreakBlueEnabled.value = supportsManagedOpenAIOAuthIdentity(newAccount) && extra?.openai_daybreak_blue_enabled === true
+  openAIDaybreakBlueEnabled.value = (supportsManagedOpenAIOAuthIdentity(newAccount) ||
+    (newAccount.platform === 'openai' && newAccount.type === 'apikey')) && extra?.openai_daybreak_blue_enabled === true
   openAIDaybreakRedEnabled.value = openAIDaybreakBlueEnabled.value && extra?.openai_daybreak_red_enabled === true
   openAILongContextBillingEnabled.value = false
   // 固定默认 ON；随后按 extra 覆盖。
@@ -6513,10 +6539,10 @@ const handleSubmit = async () => {
         openAIAttributionReplaceWhitelistEnabled.value !== (currentExtra.openai_attribution_replace_whitelist_enabled !== false)) {
         newExtra.openai_attribution_replace_whitelist_enabled = openAIAttributionReplaceWhitelistEnabled.value
       }
-      if (supportsManagedOpenAIOAuthIdentity(props.account)) {
-        // Send changed preferences only; an unrelated edit must not replay a stale switch value.
-        delete newExtra.openai_daybreak_blue_enabled
-        delete newExtra.openai_daybreak_red_enabled
+      // Omit unchanged or inactive preferences, including when switching to Engine.
+      delete newExtra.openai_daybreak_blue_enabled
+      delete newExtra.openai_daybreak_red_enabled
+      if (supportsOpenAIDaybreakSettings.value) {
         if (openAIDaybreakBlueEnabled.value !== (currentExtra.openai_daybreak_blue_enabled === true)) {
           newExtra.openai_daybreak_blue_enabled = openAIDaybreakBlueEnabled.value
         }

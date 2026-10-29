@@ -22,12 +22,18 @@ func TestDaybreakAdminValidation(t *testing.T) {
 	}
 	_, err := NormalizeOpenAIDaybreakSettings(account, map[string]any{OpenAIDaybreakRedEnabledKey: true})
 	require.Error(t, err)
-	for _, kind := range []string{AccountTypeAPIKey, AccountTypeSetupToken} {
+	for _, kind := range []string{AccountTypeSetupToken} {
 		other := *account
 		other.Type = kind
 		_, err := NormalizeOpenAIDaybreakSettings(&other, map[string]any{OpenAIDaybreakBlueEnabledKey: true})
 		require.Error(t, err)
 	}
+	apiKey := &Account{ID: 16, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	_, err = NormalizeOpenAIDaybreakSettings(apiKey, map[string]any{OpenAIDaybreakBlueEnabledKey: true})
+	require.NoError(t, err)
+	apiKey.Extra = map[string]any{OpenAIAPIKeyModeExtraKey: "codex_engine"}
+	_, err = NormalizeOpenAIDaybreakSettings(apiKey, map[string]any{OpenAIDaybreakBlueEnabledKey: true})
+	require.Error(t, err)
 	account.Extra[OpenAIDaybreakBlueEnabledKey] = true
 	account.Extra[OpenAIDaybreakRedEnabledKey] = true
 	patch, err := NormalizeOpenAIDaybreakSettings(account, map[string]any{OpenAIDaybreakBlueEnabledKey: false, OpenAIDaybreakRedEnabledKey: true})

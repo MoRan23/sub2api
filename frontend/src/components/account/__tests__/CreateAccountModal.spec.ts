@@ -208,10 +208,11 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')
     await selectButtonByText(wrapper, 'API Key')
-    expect(wrapper.find('[data-testid="openai-daybreak-settings"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="openai-daybreak-settings"]').exists()).toBe(true)
     expect((wrapper.get('[data-testid="openai-api-key-mode"]').element as HTMLSelectElement).value).toBe('generic')
     expect(wrapper.find('[data-testid="openai-codex-fingerprint-section"]').exists()).toBe(false)
     await wrapper.get('[data-testid="openai-api-key-mode"]').setValue('codex_engine')
+    expect(wrapper.find('[data-testid="openai-daybreak-settings"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="openai-codex-fingerprint-section"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="openai-api-key-auto-attribution-toggle"]').attributes('aria-checked')).toBe('false')
     await wrapper.get('form#create-account-form input[type="text"]').setValue('Engine')
@@ -318,9 +319,10 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     wrapper.unmount()
   })
 
-  it('keeps Daybreak disabled until the new OAuth account has been authorized and saved', async () => {
+  it.each(['oauth', 'apikey'])('keeps Daybreak disabled until the new %s account has been configured and saved', async (kind) => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')
+    if (kind === 'apikey') await selectButtonByText(wrapper, 'API Key')
     expect(wrapper.get('[data-testid="daybreak-create-hint"]').exists()).toBe(true)
     for (const key of ['blue', 'red']) {
       expect(wrapper.get(`[data-testid="daybreak-${key}"]`).attributes('aria-checked')).toBe('false')
