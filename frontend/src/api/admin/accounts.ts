@@ -206,6 +206,13 @@ export async function getById(id: number): Promise<Account> {
   return data
 }
 
+/** Sanitized, administrator-only diagnostics from upstream response headers. */
+export interface OpenAIHeaderDiagnostics {
+  imagegen_request_id?: string
+  authorization_error?: string
+  identity_error_code?: string
+}
+
 /** Model and header evidence captured from the same upstream response. */
 export interface OpenAIResponseEvidence {
   upstream_response_model?: string
@@ -215,6 +222,11 @@ export interface OpenAIResponseEvidence {
   safety_buffering_enabled?: boolean
   safety_buffering_faster_model?: string
   header_evidence_scope?: 'response' | 'connection'
+  header_diagnostics?: OpenAIHeaderDiagnostics
+  guardian_assessment?: {
+    status: 'review_required' | 'review_not_required' | 'mixed' | 'invalid'
+    invalid_present?: boolean
+  }
 }
 
 /**

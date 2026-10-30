@@ -54,7 +54,7 @@ const (
 	openAICompactSessionSeedKey        = "openai_compact_session_seed"
 	openAIUpstreamEndpointContextKey   = "openai_actual_upstream_endpoint"
 	// codexCLIVersion 是 UA 首段、尾部和 version 头共用的编译期兜底版本。
-	codexCLIVersion = "0.165.0"
+	codexCLIVersion = "0.166.0"
 	// Codex 限额快照仅用于后台展示/诊断，不需要每个成功请求都立即落库。
 	openAICodexSnapshotPersistMinInterval = 30 * time.Second
 	// 配额自动暂停时，超过该时长仍未刷新的 used% 快照视为陈旧，不再据此暂停账号。
@@ -69,6 +69,7 @@ var codexCLIUserAgent = buildCodexCLIUserAgent(codexCLIVersion)
 
 // OpenAI allowed headers whitelist (for non-passthrough).
 var openaiAllowedHeaders = map[string]bool{
+	openAITimingMetricsHeader: true,
 	"accept-language":         true,
 	"content-type":            true,
 	"conversation_id":         true,
@@ -89,6 +90,7 @@ var openaiAllowedHeaders = map[string]bool{
 // OpenAI passthrough allowed headers whitelist.
 // 透传模式下仅放行这些低风险请求头，避免将非标准/环境噪声头传给上游触发风控。
 var openaiPassthroughAllowedHeaders = map[string]bool{
+	openAITimingMetricsHeader: true,
 	"accept":                  true,
 	"accept-language":         true,
 	"content-type":            true,

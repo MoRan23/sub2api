@@ -6,6 +6,7 @@
 
 import { apiClient, buildGatewayUrl } from '../client'
 import type { PaginatedResponse } from '@/types'
+import type { OpenAIHeaderDiagnostics } from './accounts'
 
 export type OpsQueryMode = 'auto' | 'raw' | 'preagg'
 
@@ -23,6 +24,7 @@ export type OpsUpstreamErrorEvent = {
   kind?: string
   message?: string
   detail?: string
+  header_diagnostics?: OpenAIHeaderDiagnostics
 }
 
 export interface OpsDashboardOverview {

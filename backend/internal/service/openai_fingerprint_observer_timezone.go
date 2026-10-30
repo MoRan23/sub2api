@@ -20,6 +20,15 @@ func cloneFingerprintObservationHeaders(headers http.Header) http.Header {
 	result := make(http.Header)
 	for name, values := range headers {
 		switch strings.ToLower(name) {
+		case openAITimingMetricsHeader:
+			result[name] = make([]string, len(values))
+			for i, value := range values {
+				value = strings.TrimSpace(value)
+				if value != "true" && value != "false" {
+					value = "invalid"
+				}
+				result[name][i] = value
+			}
 		case "x-codex-window-id", "x-openai-subagent":
 			result[name] = make([]string, len(values))
 			for i, value := range values {
@@ -213,6 +222,14 @@ func cloneFingerprintEgressLocation(location *OpenAIEgressLocationSnapshot) *Ope
 
 func cloneFingerprintObservationEntry(entry FingerprintObservationEntry) FingerprintObservationEntry {
 	cloneFingerprintObservationMetadata(&entry)
+	if entry.RuntimeTimingMetrics != nil {
+		copy := *entry.RuntimeTimingMetrics
+		if copy.Enabled != nil {
+			enabled := *copy.Enabled
+			copy.Enabled = &enabled
+		}
+		entry.RuntimeTimingMetrics = &copy
+	}
 	if entry.Daybreak != nil {
 		copy := *entry.Daybreak
 		entry.Daybreak = &copy

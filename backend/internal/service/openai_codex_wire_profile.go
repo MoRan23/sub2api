@@ -15,13 +15,14 @@ import (
 )
 
 // CodexWireProfileCommit records the original fixture baseline. The typed
-// metadata additions follow local Codex 0.165.0 responses_metadata.rs; this does
+// metadata additions follow local Codex 0.166.0 responses_metadata.rs (unchanged
+// from the 0.165.0 baseline); this does
 // not claim that the entire local source tree matches a remote commit. These
 // constants are plan bookkeeping and are never serialized onto the wire.
 const (
 	CodexWireProfileRevision             = "responses_metadata"
 	CodexWireProfileCommit               = "316795b"
-	CodexWireProfileCompatibilityVersion = "0.165.0"
+	CodexWireProfileCompatibilityVersion = "0.166.0"
 )
 
 type CodexTurnIDKind string

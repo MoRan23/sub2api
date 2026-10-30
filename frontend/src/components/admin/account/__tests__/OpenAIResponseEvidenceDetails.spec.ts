@@ -10,6 +10,40 @@ function render(evidence: OpenAIResponseEvidence = {}) {
 }
 
 describe('OpenAI response evidence after cache retirement', () => {
+  it.each(['review_required', 'review_not_required', 'mixed', 'invalid'] as const)('renders Guardian %s as response evidence', (status) => {
+    const wrapper = render({ guardian_assessment: { status, invalid_present: true } })
+    expect(wrapper.get('[data-testid="openai-guardian-assessment"]').text()).toContain(`guardianStatuses.${status}`)
+    expect(wrapper.get('[data-testid="openai-guardian-invalid"]').text()).toContain('guardianInvalidPresent')
+    expect(wrapper.text()).toContain('guardianHint')
+  })
+
+  it('keeps missing historical diagnostics distinct from valid negative assessments', async () => {
+    const wrapper = render()
+    expect(wrapper.get('[data-testid="openai-guardian-assessment"]').text()).toContain('notRecorded')
+    for (const key of ['imagegen_request_id', 'authorization_error', 'identity_error_code']) {
+      expect(wrapper.get(`[data-testid="openai-diagnostic-${key}"]`).text()).toContain('notRecorded')
+    }
+    await wrapper.setProps({ evidence: { guardian_assessment: { status: 'review_not_required' } } })
+    expect(wrapper.get('[data-testid="openai-guardian-assessment"]').text()).toContain('guardianStatuses.review_not_required')
+    expect(wrapper.find('[data-testid="openai-guardian-invalid"]').exists()).toBe(false)
+  })
+
+  it('renders only sanitized header fields as text and clears them on another observation', async () => {
+    const wrapper = render({ header_diagnostics: {
+      imagegen_request_id: 'image-request-1', authorization_error: '<img src=x onerror=alert(1)>',
+      identity_error_code: 'authorization_revoked',
+      raw_error_json: 'private-base64',
+    } } as OpenAIResponseEvidence)
+    expect(wrapper.get('[data-testid="openai-diagnostic-imagegen_request_id"]').text()).toBe('image-request-1')
+    expect(wrapper.get('[data-testid="openai-diagnostic-authorization_error"]').text()).toBe('<img src=x onerror=alert(1)>')
+    expect(wrapper.get('[data-testid="openai-diagnostic-identity_error_code"]').text()).toBe('authorization_revoked')
+    expect(wrapper.find('img').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('private-base64')
+    await wrapper.setProps({ evidence: {} })
+    expect(wrapper.text()).not.toContain('image-request-1')
+    expect(wrapper.text()).not.toContain('authorization_revoked')
+  })
+
   it('keeps a JSON model mismatch independent of safety buffering headers', () => {
     const wrapper = render({ upstream_response_model: 'gpt-5.6-luna', model_relation: 'different',
       model_conflict: false, model_evidence_source: 'response.model', safety_buffering_enabled: true,

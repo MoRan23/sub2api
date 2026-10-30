@@ -1,6 +1,12 @@
 export default {
     accounts: {
       responseEvidence: {
+        notRecorded: '未记录',
+        guardianAssessment: 'Guardian 评估',
+        guardianStatuses: { review_required: '需要审核', review_not_required: '无需审核', mixed: '包含不同审核要求', invalid: '无有效评估' },
+        guardianInvalidPresent: '同时收到了无效的 Guardian 元数据。',
+        guardianHint: '此处为上游动作评估，执行权限仍由客户端控制。',
+        headerDiagnostics: { title: '响应头诊断', imagegen_request_id: '生图请求 ID', authorization_error: '认证错误摘要', identity_error_code: '身份错误码' },
         upstreamResponseModel: '上游声明模型',
         modelRelation: '响应模型关系',
         modelConflict: '模型声明冲突',

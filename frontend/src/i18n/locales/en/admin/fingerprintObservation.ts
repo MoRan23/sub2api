@@ -261,6 +261,11 @@ export default {
       target: 'Effective target timezone',
       residency: 'Outbound residency',
       residencyHandshake: 'From the current connection handshake headers; the request frame body does not contain this header.',
+      runtimeTiming: {
+        title: 'Runtime timing metrics header', notRecorded: 'Not recorded', absent: 'Not provided',
+        enabled: 'Enabled', disabled: 'Disabled', invalid: 'Invalid value',
+        sources: { http_request: 'Actual HTTP request header', ws_handshake: 'Actual WS connection handshake header; reused frames retain this value.' },
+      },
       frameAttempt: 'This event records a frame prepared for sending, not confirmation of upstream receipt or response delivery.',
       inbound: 'Client inbound declarations',
       outbound: 'Actual outbound content',

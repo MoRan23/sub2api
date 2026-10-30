@@ -34,6 +34,40 @@ describe('OpsErrorDetailModal', () => {
     mocks.listRequestErrorUpstreamErrors.mockResolvedValue({ items: [] })
   })
 
+  it('displays header diagnostics separately for each upstream attempt', async () => {
+    mocks.getRequestErrorDetail.mockResolvedValue({
+      id: 1, created_at: '2026-10-30T00:00:00Z', status_code: 502,
+      upstream_errors: JSON.stringify([
+        { upstream_request_id: 'attempt-1', header_diagnostics: { imagegen_request_id: 'image-1', identity_error_code: 'invalid_identity' } },
+        { upstream_request_id: 'attempt-2', header_diagnostics: { authorization_error: '<b>access denied</b>' } },
+        { header_diagnostics: { identity_error_code: { unexpected: true } } },
+      ]),
+    })
+    const wrapper = shallowMount(OpsErrorDetailModal, {
+      props: { show: true, errorId: 1, errorType: 'request' },
+      global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, Icon: true, OpenAIHeaderDiagnosticsDetails: false } },
+    })
+    await flushPromises()
+    const diagnostics = wrapper.get('[data-testid="ops-header-diagnostics"]')
+    expect(diagnostics.findAll('[data-testid="openai-header-diagnostics"]')).toHaveLength(2)
+    expect(diagnostics.text()).toContain('attempt-1')
+    expect(diagnostics.text()).toContain('attempt-2')
+    expect(diagnostics.text()).toContain('image-1')
+    expect(diagnostics.text()).toContain('invalid_identity')
+    expect(diagnostics.text()).toContain('<b>access denied</b>')
+    expect(diagnostics.find('b').exists()).toBe(false)
+  })
+
+  it.each([undefined, '[]', 'invalid json', '{}', '[null,{"header_diagnostics":null}]'])('handles old or malformed diagnostic records (%s)', async (upstream_errors) => {
+    mocks.getRequestErrorDetail.mockResolvedValue({ id: 1, upstream_errors })
+    const wrapper = shallowMount(OpsErrorDetailModal, {
+      props: { show: true, errorId: 1, errorType: 'request' },
+      global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, Icon: true } },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="ops-header-diagnostics"]').exists()).toBe(false)
+  })
+
   it('prioritizes upstream root cause and deduplicates diagnostic payloads', async () => {
     mocks.getRequestErrorDetail.mockResolvedValue({
       id: 1,

@@ -8,7 +8,11 @@
       <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.safetyBufferingEnabled`) }}</dt><dd data-testid="openai-safety-buffering-enabled">{{ flag(evidence.safety_buffering_enabled) }}</dd></div>
       <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.safetyBufferingFasterModel`) }}</dt><dd class="break-all font-mono" data-testid="openai-safety-buffering-faster-model">{{ evidence.safety_buffering_faster_model || t(`${prefix}.modelNotReported`) }}</dd></div>
       <div v-if="evidence.header_evidence_scope === 'response' || evidence.header_evidence_scope === 'connection'"><dt class="text-xs text-gray-500">{{ t(`${prefix}.headerEvidenceScope`) }}</dt><dd data-testid="openai-header-evidence-scope">{{ t(`${prefix}.headerEvidenceScopes.${evidence.header_evidence_scope}`) }}</dd></div>
+      <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.guardianAssessment`) }}</dt><dd data-testid="openai-guardian-assessment">{{ guardianStatus }}</dd></div>
     </dl>
+    <p v-if="evidence.guardian_assessment?.invalid_present" class="text-xs text-amber-700 dark:text-amber-400" data-testid="openai-guardian-invalid">{{ t(`${prefix}.guardianInvalidPresent`) }}</p>
+    <p v-if="evidence.guardian_assessment" class="text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.guardianHint`) }}</p>
+    <OpenAIHeaderDiagnosticsDetails :diagnostics="evidence.header_diagnostics" />
     <p class="text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.modelEvidenceHint`) }}</p>
   </section>
 </template>
@@ -17,12 +21,19 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { OpenAIResponseEvidence } from '@/api/admin/accounts'
+import OpenAIHeaderDiagnosticsDetails from './OpenAIHeaderDiagnosticsDetails.vue'
 
 const props = defineProps<{ evidence: OpenAIResponseEvidence }>()
 const { t } = useI18n()
 const prefix = 'admin.accounts.responseEvidence'
 const relations = new Set(['not_reported', 'exact', 'known_alias', 'different', 'conflicting'])
 const relation = computed(() => t(`${prefix}.modelRelations.${props.evidence.model_conflict ? 'conflicting' : relations.has(props.evidence.model_relation || '') ? props.evidence.model_relation : 'not_reported'}`))
+const guardianStatuses = new Set(['review_required', 'review_not_required', 'mixed', 'invalid'])
+const guardianStatus = computed(() => {
+  const assessment = props.evidence.guardian_assessment
+  if (!assessment) return t(`${prefix}.notRecorded`)
+  return t(`${prefix}.guardianStatuses.${guardianStatuses.has(assessment.status) ? assessment.status : 'invalid'}`)
+})
 function flag(value?: boolean) {
   return t(`${prefix}.evidenceFlags.${typeof value === 'boolean' ? value ? 'yes' : 'no' : 'unknown'}`)
 }

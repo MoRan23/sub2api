@@ -39,6 +39,35 @@ afterEach(cleanup)
 
 describe('FingerprintObservationRequestDetails', () => {
   it.each([
+    [undefined, 'Not recorded'],
+    [{ status: 'absent', source: 'http_request' }, 'Not provided'],
+    [{ status: 'valid', enabled: true, source: 'http_request' }, 'Enabled'],
+    [{ status: 'valid', enabled: false, source: 'http_request' }, 'Disabled'],
+    [{ status: 'invalid', source: 'http_request' }, 'Invalid value'],
+    [{ status: 'valid', source: 'http_request' }, 'Invalid value'],
+  ] as const)('distinguishes the actual runtime timing state %#', async (runtime_timing_metrics, label) => {
+    renderDetails({ runtime_timing_metrics })
+    await openDetails()
+    expect(screen.getByTestId('runtime-timing-state').textContent).toBe(label)
+    if (runtime_timing_metrics) {
+      expect(within(screen.getByTestId('runtime-timing-metrics')).getByText('Actual HTTP request header')).toBeTruthy()
+    }
+  })
+
+  it('uses the physical handshake evidence for reused WS frames and resets for legacy records', async () => {
+    const { rerender } = renderDetails({
+      event_kind: 'ws_response_create',
+      runtime_timing_metrics: { status: 'valid', enabled: false, source: 'ws_handshake' },
+    })
+    await openDetails()
+    expect(screen.getByTestId('runtime-timing-state').textContent).toBe('Disabled')
+    expect(within(screen.getByTestId('runtime-timing-metrics')).getByText(en.fingerprintObservation.request.runtimeTiming.sources.ws_handshake)).toBeTruthy()
+    await rerender({ observation: { ...legacyEntry } })
+    expect(screen.getByTestId('runtime-timing-state').textContent).toBe('Not recorded')
+    expect(screen.queryByText(en.fingerprintObservation.request.runtimeTiming.sources.ws_handshake)).toBeNull()
+  })
+
+  it.each([
     ['automatic', 'automatic', 'Automatically added'],
     ['client', 'client_supplied', 'Client supplied'],
   ] as const)('distinguishes %s from the same Daybreak wire value', async (source, reason, label) => {

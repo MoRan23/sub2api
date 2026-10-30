@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -21,6 +22,72 @@ type openAIResponseEvidenceState struct {
 	observer  codexModelEvidenceObserver
 	sentModel string
 	sequence  uint64
+	accountID int64
+	requestID string
+}
+
+// Reset only a request-bound attempt, never the ambient Gin state: auxiliary
+// requests and late responses must not overwrite a different inference attempt.
+func prepareOpenAIResponseEvidenceAttempt(request *http.Request, account *Account) {
+	if request == nil {
+		return
+	}
+	state, _ := request.Context().Value(openAIResponseEvidenceRequestKey{}).(*openAIResponseEvidenceState)
+	if state == nil {
+		return
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	state.requestID = ""
+	state.observer = codexModelEvidenceObserver{}
+	if account != nil {
+		state.accountID = account.ID
+	}
+}
+
+func openAIHeaderDiagnosticsForOps(c *gin.Context, accountID int64, requestID string) *OpenAIHeaderDiagnostics {
+	state := responseEvidenceFromContext(c)
+	if state == nil {
+		return nil
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.accountID != 0 && state.accountID != accountID {
+		return nil
+	}
+	if state.requestID != "" && requestID != "" && state.requestID != strings.TrimSpace(requestID) {
+		return nil
+	}
+	return state.observer.headers.HeaderDiagnostics.clone()
+}
+
+// Failed handshakes have no response turn or successful handshake observation.
+// Capture only their own response headers; an earlier turn's evidence is stale.
+func observeOpenAIWSDialDiagnostics(c *gin.Context, account *Account, err error) {
+	var dialErr *openAIWSDialError
+	if !errors.As(err, &dialErr) || dialErr == nil {
+		return
+	}
+	state := beginOpenAIResponseEvidence(c, "")
+	state.mu.Lock()
+	if account != nil {
+		state.accountID = account.ID
+	}
+	state.requestID = strings.TrimSpace(dialErr.ResponseHeaders.Get("x-request-id"))
+	requestID := state.requestID
+	state.mu.Unlock()
+	observeOpenAIResponseEvidenceHeaders(state, dialErr.ResponseHeaders, "connection")
+	diagnostics := state.snapshot().HeaderDiagnostics
+	if diagnostics == nil || account == nil {
+		return
+	}
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
+		ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account),
+		UpstreamStatusCode: dialErr.StatusCode, UpstreamRequestID: requestID,
+		HeaderDiagnostics: diagnostics, Kind: "ws_handshake_error", Stage: "handshake",
+		Message: "Upstream WebSocket handshake failed",
+	})
 }
 
 func beginOpenAIResponseEvidence(c *gin.Context, sentModel string) *openAIResponseEvidenceState {
@@ -117,6 +184,9 @@ func observeOpenAIHTTPResponseEvidence(request *http.Request, response *http.Res
 	if state == nil {
 		return
 	}
+	state.mu.Lock()
+	state.requestID = strings.TrimSpace(response.Header.Get("x-request-id"))
+	state.mu.Unlock()
 	observeOpenAIResponseEvidenceHeaders(state, response.Header, "response")
 	if response.Request == nil {
 		response.Request = request

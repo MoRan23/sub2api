@@ -89,10 +89,15 @@ type openAIWSAcquireRequest struct {
 	ForceNewConn bool
 	// ForcePreferredConn: 强制本次只使用 PreferredConnID，禁止漂移到其它连接。
 	ForcePreferredConn bool
+	// ResponseContinuation marks a preferred connection resolved from the
+	// previous_response_id binding. Timing may differ on this socket without
+	// promoting the existing soft preference into a mandatory connection pin.
+	ResponseContinuation bool
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
 	betaFeatures   string
+	timingMetrics  string
 	identityDigest string
 	residency      string
 	transportScope openAIWSTransportScope
@@ -850,7 +855,18 @@ func (c *openAIWSConn) matchesHandshakeCompatibility(compatibility openAIWSHands
 	// pre-V2 mirror fields instead of dialing it through the pool.
 	return c.handshakeCompatibility == (openAIWSHandshakeCompatibilityKey{}) &&
 		c.betaFeatures == compatibility.betaFeatures &&
-		c.identityDigest == compatibility.identityDigest && compatibility.residency == ""
+		c.identityDigest == compatibility.identityDigest && compatibility.residency == "" && compatibility.timingMetrics == ""
+}
+
+// A timing request is advisory and fixed at handshake. A continuation pinned to
+// an existing socket must retain its context when only this advisory value
+// changes; every identity, residency and transport restriction still applies.
+func (c *openAIWSConn) matchesContinuationCompatibility(compatibility openAIWSHandshakeCompatibilityKey) bool {
+	if c == nil {
+		return false
+	}
+	compatibility.timingMetrics = c.handshakeCompatibility.timingMetrics
+	return c.matchesHandshakeCompatibility(compatibility)
 }
 
 func (c *openAIWSConn) matchesRoutingAffinity(routingAffinity string) bool {
@@ -1256,6 +1272,16 @@ retryAcquire:
 	allowReuse := !req.ForceNewConn
 	preferredConnID := stringsTrim(req.PreferredConnID)
 	forcePreferredConn := allowReuse && req.ForcePreferredConn
+	boundContinuation := func() *openAIWSConn {
+		if !allowReuse || !req.ResponseContinuation || preferredConnID == "" {
+			return nil
+		}
+		conn := ap.conns[preferredConnID]
+		if conn.matchesContinuationCompatibility(compatibility) {
+			return conn
+		}
+		return nil
+	}
 
 	if allowReuse {
 		if forcePreferredConn {
@@ -1266,7 +1292,7 @@ retryAcquire:
 				return nil, errOpenAIWSPreferredConnUnavailable
 			}
 			preferredConn, ok := ap.conns[preferredConnID]
-			if !ok || !preferredConn.matchesHandshakeCompatibility(compatibility) {
+			if !ok || !preferredConn.matchesContinuationCompatibility(compatibility) {
 				p.recordConnPickDuration(time.Since(pickStartedAt))
 				ap.mu.Unlock()
 				closeOpenAIWSConns(evicted)
@@ -1358,7 +1384,7 @@ retryAcquire:
 		}
 
 		if preferredConnID != "" {
-			if conn, ok := ap.conns[preferredConnID]; ok && conn.matchesHandshakeCompatibility(compatibility) && conn.tryAcquire() {
+			if conn, ok := ap.conns[preferredConnID]; ok && conn != nil && (conn.matchesHandshakeCompatibility(compatibility) || conn == boundContinuation()) && conn.tryAcquire() {
 				connPick := time.Since(pickStartedAt)
 				p.recordConnPickDuration(connPick)
 				ap.mu.Unlock()
@@ -1443,12 +1469,16 @@ retryAcquire:
 
 	if !req.ForceNewConn && len(ap.conns)+ap.creating >= effectiveMaxConns {
 		affine := p.pickLeastBusyConnWithRoutingAffinityLocked(ap, compatibility, routingAffinity)
-		if idle := p.pickOldestIdleConnWithoutHandshakeCompatibilityLocked(ap, compatibility); idle != nil {
+		continuation := boundContinuation()
+		if idle := p.pickOldestIdleConnWithoutHandshakeCompatibilityLocked(ap, compatibility, continuation); idle != nil {
 			delete(ap.conns, idle.id)
 			evicted = append(evicted, idle)
 			p.metrics.scaleDownTotal.Add(1)
 		} else if affine == nil {
 			compatible := p.pickLeastBusyConnLocked(ap, "", compatibility)
+			if continuation != nil {
+				compatible = continuation
+			}
 			if compatible != nil {
 				// Capacity is full and every compatible connection is busy. The
 				// hint remains soft here: queue on a compatible connection below.
@@ -1549,6 +1579,9 @@ retryAcquire:
 
 acquireAtCapacity:
 	target := p.pickLeastBusyConnLocked(ap, req.PreferredConnID, compatibility)
+	if continuation := boundContinuation(); continuation != nil {
+		target = continuation
+	}
 	connPick := time.Since(pickStartedAt)
 	p.recordConnPickDuration(connPick)
 	if target == nil {
@@ -1659,13 +1692,14 @@ func (p *openAIWSConnPool) pickOldestIdleConnLocked(ap *openAIWSAccountPool) *op
 func (p *openAIWSConnPool) pickOldestIdleConnWithoutHandshakeCompatibilityLocked(
 	ap *openAIWSAccountPool,
 	compatibility openAIWSHandshakeCompatibilityKey,
+	continuation *openAIWSConn,
 ) *openAIWSConn {
 	if ap == nil || len(ap.conns) == 0 {
 		return nil
 	}
 	var oldest *openAIWSConn
 	for _, conn := range ap.conns {
-		if conn == nil ||
+		if conn == nil || conn == continuation ||
 			conn.matchesHandshakeCompatibility(compatibility) ||
 			conn.isLeased() || conn.waiters.Load() > 0 || p.isConnPinnedLocked(ap, conn.id) {
 			continue
@@ -2508,6 +2542,7 @@ func normalizeOpenAIWSHandshakeCompatibility(headers http.Header, identityDigest
 	}
 	return openAIWSHandshakeCompatibilityKey{
 		betaFeatures:   normalizeOpenAIWSBetaFeatures(headers),
+		timingMetrics:  openAITimingMetricsCompatibility(headers),
 		identityDigest: identityDigest,
 		residency:      normalizeOpenAIWSResidency(headers),
 	}

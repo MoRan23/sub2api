@@ -260,6 +260,11 @@ export default {
       target: '本次目标时区',
       residency: '出站 residency',
       residencyHandshake: '来自当前连接的握手请求头；请求帧正文不包含此头。',
+      runtimeTiming: {
+        title: '运行时序指标请求头', notRecorded: '未记录', absent: '未提供',
+        enabled: '开启', disabled: '关闭', invalid: '无效值',
+        sources: { http_request: '实际 HTTP 请求头', ws_handshake: '实际 WS 连接握手头；复用连接的后续帧沿用此值。' },
+      },
       frameAttempt: '此记录表示准备发送请求帧，不代表上游已接收或响应已交付。',
       inbound: '客户端入站声明',
       outbound: '实际出站内容',

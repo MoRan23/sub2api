@@ -130,6 +130,14 @@
         <div class="mt-3 break-words text-sm font-medium text-amber-900 dark:text-amber-100">{{ rootCauseMessage }}</div>
       </div>
 
+      <section v-if="headerDiagnosticEvents.length" class="space-y-4 rounded-xl bg-gray-50 p-6 dark:bg-dark-900" data-testid="ops-header-diagnostics">
+        <h3 class="text-sm font-black uppercase tracking-wider text-gray-900 dark:text-white">{{ t('admin.accounts.responseEvidence.headerDiagnostics.title') }}</h3>
+        <div v-for="entry in headerDiagnosticEvents" :key="entry.index" class="space-y-2">
+          <p class="break-all font-mono text-xs text-gray-500 dark:text-gray-400">#{{ entry.index + 1 }}<template v-if="entry.requestID"> · {{ entry.requestID }}</template></p>
+          <OpenAIHeaderDiagnosticsDetails :diagnostics="entry.diagnostics" />
+        </div>
+      </section>
+
       <div class="rounded-xl bg-gray-50 p-6 dark:bg-dark-900">
         <h3 class="text-sm font-black uppercase tracking-wider text-gray-900 dark:text-white">{{ t('admin.ops.errorDetail.diagnosticPayloads') }}</h3>
         <div v-if="!diagnosticPayloadSections.length" class="mt-4 text-sm text-gray-500 dark:text-gray-400">{{ t('common.noData') }}</div>
@@ -231,6 +239,8 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores'
 import { opsAPI, type OpsErrorDetail } from '@/api/admin/ops'
+import type { OpenAIHeaderDiagnostics } from '@/api/admin/accounts'
+import OpenAIHeaderDiagnosticsDetails from '@/components/admin/account/OpenAIHeaderDiagnosticsDetails.vue'
 import { formatDateTime } from '@/utils/format'
 import { resolveUpstreamPayload } from '../utils/errorDetailResponse'
 
@@ -258,6 +268,28 @@ const detail = ref<OpsErrorDetail | null>(null)
 const showUpstreamList = computed(() => props.errorType === 'request')
 
 const requestId = computed(() => detail.value?.request_id || detail.value?.client_request_id || '')
+
+const headerDiagnosticEvents = computed(() => {
+  try {
+    const events: unknown = JSON.parse(detail.value?.upstream_errors || '[]')
+    if (!Array.isArray(events)) return []
+    return events.flatMap((event: unknown, index) => {
+      if (!event || typeof event !== 'object') return []
+      const record = event as Record<string, unknown>
+      const header = record.header_diagnostics
+      if (!header || typeof header !== 'object' || Array.isArray(header)) return []
+      const diagnostics: OpenAIHeaderDiagnostics = {}
+      for (const key of ['imagegen_request_id', 'authorization_error', 'identity_error_code'] as const) {
+        const value = (header as Record<string, unknown>)[key]
+        if (typeof value === 'string' && value.trim()) diagnostics[key] = value
+      }
+      if (!Object.keys(diagnostics).length) return []
+      return [{ index, diagnostics, requestID: typeof record.upstream_request_id === 'string' ? record.upstream_request_id : '' }]
+    })
+  } catch {
+    return []
+  }
+})
 
 type DiagnosticPayloadKey = 'client' | 'upstream_message' | 'upstream_detail' | 'upstream_events'
 

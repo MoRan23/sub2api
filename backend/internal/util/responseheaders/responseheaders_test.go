@@ -7,6 +7,21 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 )
 
+func TestImagegenDiagnosticHeaderDefaultAndExplicitRemoval(t *testing.T) {
+	src := http.Header{"X-Request-Id": {"req-outer"}, "X-Codex-Imagegen-Request-Id": {"req-inner"}, "X-Openai-Authorization-Error": {"private"}, "X-Error-Json": {"encoded-private"}}
+	filtered := FilterHeaders(src, nil)
+	if filtered.Get("x-request-id") != "req-outer" || filtered.Get("x-codex-imagegen-request-id") != "req-inner" {
+		t.Fatal("both request IDs must remain independent")
+	}
+	if filtered.Get("x-openai-authorization-error") != "" || filtered.Get("x-error-json") != "" {
+		t.Fatal("administrator diagnostics cannot be newly forwarded")
+	}
+	filtered = FilterHeaders(src, CompileHeaderFilter(config.ResponseHeaderConfig{Enabled: true, ForceRemove: []string{"x-codex-imagegen-request-id"}}))
+	if filtered.Get("x-codex-imagegen-request-id") != "" {
+		t.Fatal("explicit removal wins")
+	}
+}
+
 func TestFilterHeadersDisabledUsesDefaultAllowlist(t *testing.T) {
 	src := http.Header{}
 	src.Add("Content-Type", "application/json")

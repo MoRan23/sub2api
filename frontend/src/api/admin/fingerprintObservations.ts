@@ -208,6 +208,11 @@ export interface FingerprintObservationEntry {
   outbound_codex_residency_source?: 'request_headers' | 'ws_handshake'
   request_integrity?: RequestIntegrityObservation
   response_evidence?: OpenAIResponseEvidence
+  runtime_timing_metrics?: {
+    status: 'absent' | 'valid' | 'invalid'
+    enabled?: boolean
+    source: 'http_request' | 'ws_handshake'
+  }
   daybreak?: OpenAIDaybreakObservation
   conversion_check?: RequestConversionCheck
 }

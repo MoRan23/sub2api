@@ -244,18 +244,20 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	defer acquireCancel()
 
 	lease, err := s.getOpenAIWSConnPool().Acquire(acquireCtx, openAIWSAcquireRequest{
-		Account:           account,
-		WSURL:             wsURL,
-		Headers:           wsHeaders,
-		HandshakeObserver: freezeFingerprintObservationWSHandshake(c, account),
-		IdentityDigest:    outboundIdentityPlan.SocketDigest,
-		HeadersFactory:    s.openAIWSHeadersFactory(ctx, account),
-		PreferredConnID:   preferredConnID,
-		ForceNewConn:      forceNewConn,
-		ProxyURL:          OpenAIOutboundRouteForAccount(c, account).ProxyURL,
+		Account:              account,
+		WSURL:                wsURL,
+		Headers:              wsHeaders,
+		HandshakeObserver:    freezeFingerprintObservationWSHandshake(c, account),
+		IdentityDigest:       outboundIdentityPlan.SocketDigest,
+		HeadersFactory:       s.openAIWSHeadersFactory(ctx, account),
+		PreferredConnID:      preferredConnID,
+		ResponseContinuation: previousResponseID != "" && preferredConnID != "",
+		ForceNewConn:         forceNewConn,
+		ProxyURL:             OpenAIOutboundRouteForAccount(c, account).ProxyURL,
 	})
 	if err != nil {
 		var agentDialErr *openAIWSDialError
+		observeOpenAIWSDialDiagnostics(c, account, err)
 		if s.isAgentIdentityAccount(ctx, account) && errors.As(err, &agentDialErr) && isAgentIdentityTaskInvalidWSDialError(agentDialErr) && agentTaskRecoveryTried != nil && !*agentTaskRecoveryTried {
 			*agentTaskRecoveryTried = true
 			if recoveryErr := s.recoverAgentIdentityTask(ctx, account, account.GetCredential("task_id")); recoveryErr != nil {

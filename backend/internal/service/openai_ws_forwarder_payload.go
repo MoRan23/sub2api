@@ -173,6 +173,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 
 	sessionResolution := resolveOpenAIWSSessionHeaders(c, promptCacheKey)
 	if c != nil && c.Request != nil {
+		copyOpenAITimingMetricsHeader(headers, c.Request.Header)
 		if v := strings.TrimSpace(c.Request.Header.Get("accept-language")); v != "" {
 			headers.Set("accept-language", v)
 		}

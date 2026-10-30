@@ -1,6 +1,12 @@
 export default {
     accounts: {
       responseEvidence: {
+        notRecorded: 'Not recorded',
+        guardianAssessment: 'Guardian assessment',
+        guardianStatuses: { review_required: 'Review required', review_not_required: 'Review not required', mixed: 'Mixed review requirements', invalid: 'No valid assessment' },
+        guardianInvalidPresent: 'Invalid Guardian metadata was also received.',
+        guardianHint: 'This is the upstream action assessment; execution permissions remain controlled by the client.',
+        headerDiagnostics: { title: 'Response header diagnostics', imagegen_request_id: 'Image generation request ID', authorization_error: 'Authorization error summary', identity_error_code: 'Identity error code' },
         upstreamResponseModel: 'Upstream declared model',
         modelRelation: 'Response model relation',
         modelConflict: 'Conflicting model declarations',

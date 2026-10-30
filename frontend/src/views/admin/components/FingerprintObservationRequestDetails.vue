@@ -31,6 +31,11 @@
           <dd class="mt-1 break-all font-mono text-gray-800 dark:text-gray-200">{{ residencyValue }}</dd>
           <dd v-if="observation.outbound_codex_residency_source === 'ws_handshake'" class="mt-1 text-gray-500 dark:text-gray-400">{{ t(`${prefix}.residencyHandshake`) }}</dd>
         </div>
+        <div data-testid="runtime-timing-metrics">
+          <dt class="text-gray-500 dark:text-gray-400">{{ t(`${prefix}.runtimeTiming.title`) }}</dt>
+          <dd class="mt-1 text-gray-800 dark:text-gray-200" data-testid="runtime-timing-state">{{ timingState }}</dd>
+          <dd v-if="timingSource" class="mt-1 text-gray-500 dark:text-gray-400">{{ timingSource }}</dd>
+        </div>
       </dl>
       <OpenAIEgressLocationDetails v-if="observation.egress_location" :location="observation.egress_location" />
       <OpenAIResponseEvidenceDetails v-if="observation.response_evidence" :evidence="observation.response_evidence" />
@@ -210,6 +215,17 @@ const prefix = 'admin.fingerprintObservation.request'
 const integrityPrefix = `${prefix}.integrity`
 const conversionPrefix = `${prefix}.conversionCheck`
 const daybreakPrefix = `${prefix}.daybreak`
+const timingState = computed(() => {
+  const timing = props.observation.runtime_timing_metrics
+  if (!timing) return t(`${prefix}.runtimeTiming.notRecorded`)
+  if (timing.status === 'absent') return t(`${prefix}.runtimeTiming.absent`)
+  if (timing.status !== 'valid' || typeof timing.enabled !== 'boolean') return t(`${prefix}.runtimeTiming.invalid`)
+  return t(`${prefix}.runtimeTiming.${timing.enabled ? 'enabled' : 'disabled'}`)
+})
+const timingSource = computed(() => {
+  const source = props.observation.runtime_timing_metrics?.source
+  return source === 'http_request' || source === 'ws_handshake' ? t(`${prefix}.runtimeTiming.sources.${source}`) : ''
+})
 const daybreakValue = computed(() => {
   const entry = props.observation.daybreak
   if (!entry) return t(props.observation.event_kind === 'ws_handshake' ? `${daybreakPrefix}.handshake` : `${prefix}.notCollected`)
