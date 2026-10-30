@@ -106,12 +106,13 @@ func telemetryRequireEventKeys(t *testing.T, event codexAnalyticsEvent, fields s
 	require.ElementsMatch(t, strings.Fields(fields), keys, event.EventType)
 }
 
-// Independent key sets copied from Codex 0.165.0 analytics/events.rs. These
-// prevent compatibility fields from silently leaking into the official schema.
+// Independent key sets copied from Codex 0.165.0 analytics/events.rs, including
+// its flattened critical-path fields (unchanged in 0.166.0). These prevent
+// compatibility fields from silently leaking into the official schema.
 func TestCodexTelemetry0165AnalyticsSchemaAndProvenance(t *testing.T) {
 	profile := codexTelemetryEventTestProfile()
 	turn := codexMainTurnEvent(profile, codexTelemetryTerminal{status: "completed", finished: profile.started.Add(time.Second), httpStatus: 200})
-	telemetryRequireEventKeys(t, turn, `thread_id session_id turn_id active_plugin_ids_at_turn_start voice_session_id root_turn_id turn_trigger codex_turn_source submission_type app_server_client runtime ephemeral thread_source initialization_mode subagent_source parent_thread_id model model_provider sandbox_policy reasoning_effort reasoning_summary service_tier approval_policy approvals_reviewer guardian_v2_enabled multi_agent_version sandbox_network_access collaboration_mode personality workspace_kind num_input_images image_preparations is_first_turn status explicit_client_interrupt_requested_at_ms turn_error codex_error_kind codex_error_http_status_code usage_limit_window_minutes steer_count total_tool_call_count shell_command_count file_change_count mcp_tool_call_count dynamic_tool_call_count subagent_tool_call_count web_search_count image_generation_count input_tokens cached_input_tokens cache_write_input_tokens output_tokens reasoning_output_tokens total_tokens before_first_sampling_ms sampling_ms compaction_ms between_sampling_overhead_ms tool_blocking_ms after_last_sampling_ms sampling_request_count sampling_retry_count tools_change_count duration_ms started_at completed_at`)
+	telemetryRequireEventKeys(t, turn, `thread_id session_id turn_id active_plugin_ids_at_turn_start voice_session_id root_turn_id turn_trigger codex_turn_source submission_type app_server_client runtime ephemeral thread_source initialization_mode subagent_source parent_thread_id model model_provider sandbox_policy reasoning_effort reasoning_summary service_tier approval_policy approvals_reviewer guardian_v2_enabled multi_agent_version sandbox_network_access collaboration_mode personality workspace_kind num_input_images image_preparations is_first_turn status explicit_client_interrupt_requested_at_ms turn_error codex_error_kind codex_error_http_status_code usage_limit_window_minutes steer_count total_tool_call_count shell_command_count file_change_count mcp_tool_call_count dynamic_tool_call_count subagent_tool_call_count web_search_count image_generation_count input_tokens cached_input_tokens cache_write_input_tokens output_tokens reasoning_output_tokens total_tokens before_first_sampling_ms sampling_ms compaction_ms between_sampling_overhead_ms tool_blocking_ms after_last_sampling_ms sampling_request_count sampling_retry_count tools_change_count critical_path_status critical_path_duration_ms critical_path_inference_ms critical_path_auto_review_ms critical_path_user_wait_ms critical_path_tools_ms critical_path_overhead_ms critical_path_unknown_ms duration_ms started_at completed_at`)
 	for _, field := range []string{"active_plugin_ids_at_turn_start", "voice_session_id", "usage_limit_window_minutes"} {
 		require.Contains(t, turn.EventParams, field)
 		require.Nil(t, turn.EventParams[field])
@@ -142,7 +143,7 @@ func TestCodexTelemetry0165AnalyticsSchemaAndProvenance(t *testing.T) {
 	observer := &CodexTelemetryService{}
 	entry := observer.newObservationLocked(restored, 1, "analytics", nil, 1)
 	require.True(t, entry.ContainsSimulated)
-	require.Equal(t, map[string]string{"multi_agent_version": "simulated", "tools_change_count": "simulated", "model_slug": "observed", "reasoning_effort": "observed"}, entry.FieldSources)
+	require.Equal(t, map[string]string{"multi_agent_version": "simulated", "tools_change_count": "simulated", "critical_path_status": "simulated", "model_slug": "observed", "reasoning_effort": "observed"}, entry.FieldSources)
 	require.NotContains(t, string(tx.Batches[0].Payload), "field_sources")
 	require.Equal(t, "actual-parent-turn", restored.input.ParentTurnID)
 	require.Equal(t, "actual-fork-source", restored.input.ForkedFromThreadID)

@@ -5,7 +5,7 @@
 账号，Spark 使用母账号身份池并保留实际业务账号归属。API Key、PAT、Agent
 Identity、账号测试、独立 turn-state 采集、预热及内部维护请求不驱动这些池。
 
-现有事件 schema、辅助请求头及 skills 指标区间已按本地 Codex 0.165.0 源码核对；
+现有事件 schema、辅助请求头及 skills 指标区间已按本地 Codex 0.166.0 源码核对；
 其余 OS 标签、计时和指标语义沿用此前 0.155.1 的核对结果。
 这不是完整 Codex 客户端：模拟的工具、命令、文件修改、hook、Guardian、
 标题和启动事件不表示网关或用户机器实际发生过这些行为。
@@ -87,6 +87,13 @@ Analytics 辅助请求使用 UA、originator 和认证头，省略独立 `Versio
 限额窗口、工具调用来源类型、sandbox 后端及 Guardian context mode 当前均为
 null。事件正文按官方字段集合输出，内部父 turn、fork 和 agent 关联仍保留在
 本地状态及诊断中。此更新不新增客户端事件或日志、trace 采集。
+
+0.166 适配补齐此前遗漏的 `critical_path_status=disabled` 和七项
+`critical_path_*_ms=null`，覆盖现有模拟主回合与标题回合。状态来源标记为
+`simulated`，不把网关耗时推算成客户端关键路径；仅观测模式不新增模拟事件。
+旧未封批状态正常恢复后由新生成器封批，已封批正文保持原样发送和重试，
+无需修改指标快照版本或数据库结构。请求 timing 开关与响应诊断参见
+[Codex 0.166 适配说明](CODEX_0166_COMPATIBILITY.md)。
 
 ## 回合和指标语义
 

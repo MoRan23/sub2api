@@ -58,7 +58,7 @@ func codexAnalyticsFieldSources(profile codexTelemetryProfile, events []codexAna
 	for _, event := range events {
 		switch event.EventType {
 		case "codex_turn_event":
-			for _, field := range []string{"multi_agent_version", "tools_change_count"} {
+			for _, field := range []string{"multi_agent_version", "tools_change_count", "critical_path_status"} {
 				if _, present := event.EventParams[field]; present && codexSimulatesClientBehavior(profile) {
 					profile.fieldSources[field] = "simulated"
 				}
@@ -240,6 +240,15 @@ func codexTurnEventBase(profile codexTelemetryProfile, spec codexTurnSpec) map[s
 	}
 	if codexSimulatesClientBehavior(profile) {
 		params["multi_agent_version"], params["tools_change_count"] = "disabled", 0
+		// This virtual client does not capture a critical path. Unknown category
+		// durations remain null rather than being inferred from gateway timings.
+		params["critical_path_status"] = "disabled"
+		for _, field := range [...]string{
+			"critical_path_duration_ms", "critical_path_inference_ms", "critical_path_auto_review_ms",
+			"critical_path_user_wait_ms", "critical_path_tools_ms", "critical_path_overhead_ms", "critical_path_unknown_ms",
+		} {
+			params[field] = nil
+		}
 	}
 	if profile.input.GuardianV2Enabled != nil {
 		params["guardian_v2_enabled"] = *profile.input.GuardianV2Enabled
