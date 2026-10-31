@@ -170,7 +170,7 @@ export async function deleteUser(id: number): Promise<{ message: string }> {
  * @param balance - New balance
  * @param operation - Operation type ('set', 'add', 'subtract')
  * @param notes - Optional notes for the balance adjustment
- * @param giftBalance - Gift balance to add (only supported by the add operation)
+ * @param giftBalance - Gift balance amount to add or subtract; set accepts only zero
  * @returns Updated user
  */
 export async function updateBalance(

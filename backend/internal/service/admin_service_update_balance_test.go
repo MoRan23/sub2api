@@ -89,6 +89,23 @@ func (s *giftBalanceUserRepoStub) AdjustWallets(_ context.Context, _ int64, ordi
 	return change, nil
 }
 
+func (s *giftBalanceUserRepoStub) SubtractWallets(_ context.Context, _ int64, ordinary, gift float64) (WalletChange, error) {
+	if s.adjustErr != nil {
+		return WalletChange{}, s.adjustErr
+	}
+	user := s.user
+	change := WalletChange{OldOrdinary: user.Balance, NewOrdinary: user.Balance - ordinary, OldGift: user.GiftBalance, NewGift: user.GiftBalance - gift}
+	if ordinary > 0 && change.NewOrdinary < 0 {
+		return change, ErrOrdinaryBalanceInsufficient
+	}
+	if gift > 0 && change.NewGift < 0 {
+		return change, ErrGiftBalanceInsufficient
+	}
+	user.Balance, user.GiftBalance = change.NewOrdinary, change.NewGift
+	s.changes = append(s.changes, change)
+	return change, nil
+}
+
 type authCacheInvalidatorStub struct {
 	userIDs  []int64
 	groupIDs []int64
@@ -211,8 +228,8 @@ func TestAdminService_UpdateUserBalance_UsesActualOrdinaryDiffForHistoryAndAffil
 	require.Equal(t, 3.0, redeemRepo.created[0].GiftValue)
 }
 
-func TestAdminService_UpdateUserBalance_RejectsGiftForSetAndSubtract(t *testing.T) {
-	for _, operation := range []string{"set", "subtract"} {
+func TestAdminService_UpdateUserBalance_RejectsGiftForSet(t *testing.T) {
+	for _, operation := range []string{"set"} {
 		t.Run(operation, func(t *testing.T) {
 			repo := &giftBalanceUserRepoStub{balanceUserRepoStub: &balanceUserRepoStub{userRepoStub: &userRepoStub{user: &User{ID: 7, Balance: 10}}}}
 			svc := &adminServiceImpl{

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
+	"github.com/shopspring/decimal"
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
@@ -34,6 +36,7 @@ type userRepository struct {
 }
 
 var _ service.RedeemUserAdjustmentRepository = (*userRepository)(nil)
+var _ service.AdminWalletSubtractRepository = (*userRepository)(nil)
 
 func NewUserRepository(client *dbent.Client, sqlDB *sql.DB) service.UserRepository {
 	return newUserRepositoryWithSQL(client, sqlDB)
@@ -1071,6 +1074,67 @@ func (r *userRepository) AdjustWallets(ctx context.Context, id int64, ordinaryDe
 		return service.WalletChange{}, err
 	}
 	return service.WalletChange{}, service.ErrUserNotFound
+}
+
+// SubtractWallets applies an exact administrator debit to both wallets. The
+// locked snapshot is used for both sufficiency checks and returned balances;
+// unlike payment refunds, insufficient funds never result in a partial debit.
+func (r *userRepository) SubtractWallets(ctx context.Context, id int64, ordinary, gift float64) (service.WalletChange, error) {
+	if math.IsNaN(ordinary) || math.IsInf(ordinary, 0) || math.IsNaN(gift) || math.IsInf(gift, 0) || ordinary < 0 || gift < 0 {
+		return service.WalletChange{}, fmt.Errorf("wallet deduction amounts must be finite and nonnegative")
+	}
+	ordinary = decimal.NewFromFloat(ordinary).Round(8).InexactFloat64()
+	gift = decimal.NewFromFloat(gift).Round(8).InexactFloat64()
+	if ordinary == 0 && gift == 0 {
+		return service.WalletChange{}, fmt.Errorf("wallet deduction requires a positive amount at wallet precision")
+	}
+	rows, err := clientFromContext(ctx, r.client).QueryContext(ctx, `
+		WITH target AS (
+			SELECT id, balance, gift_balance
+			FROM users
+			WHERE id = $3 AND deleted_at IS NULL
+			FOR UPDATE
+		), updated AS (
+			UPDATE users AS u
+			SET balance = target.balance - $1::numeric,
+				gift_balance = target.gift_balance - $2::numeric,
+				updated_at = NOW()
+			FROM target
+			WHERE u.id = target.id AND u.deleted_at IS NULL
+				AND ($1::numeric = 0 OR target.balance >= $1::numeric)
+				AND ($2::numeric = 0 OR target.gift_balance >= $2::numeric)
+			RETURNING u.id, u.balance, u.gift_balance
+		)
+		SELECT target.balance, COALESCE(updated.balance, target.balance),
+			target.gift_balance, COALESCE(updated.gift_balance, target.gift_balance),
+			updated.id IS NOT NULL
+		FROM target LEFT JOIN updated USING (id)
+	`, ordinary, gift, id)
+	if err != nil {
+		return service.WalletChange{}, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return service.WalletChange{}, err
+		}
+		return service.WalletChange{}, service.ErrUserNotFound
+	}
+	var change service.WalletChange
+	var applied bool
+	if err := rows.Scan(&change.OldOrdinary, &change.NewOrdinary, &change.OldGift, &change.NewGift, &applied); err != nil {
+		return service.WalletChange{}, err
+	}
+	if err := rows.Err(); err != nil {
+		return service.WalletChange{}, err
+	}
+	if !applied {
+		if ordinary > 0 && change.OldOrdinary < ordinary {
+			return change, service.ErrOrdinaryBalanceInsufficient
+		}
+		return change, service.ErrGiftBalanceInsufficient
+	}
+	return change, nil
 }
 
 // DeductAvailableBalance atomically deducts min(amount, max(balance, 0)).

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/authidentity"
 	"github.com/Wei-Shaw/sub2api/ent/authidentitychannel"
@@ -528,8 +530,10 @@ func (s *adminServiceImpl) UpdateUserBalance(ctx context.Context, userID int64, 
 			return nil, infraerrors.BadRequest("INVALID_BALANCE", "add requires balance or gift_balance to be positive")
 		}
 	case "subtract":
-		if balance <= 0 || giftBalance != 0 {
-			return nil, infraerrors.BadRequest("INVALID_BALANCE", "subtract requires a positive balance and does not accept gift_balance")
+		balance = decimal.NewFromFloat(balance).Round(8).InexactFloat64()
+		giftBalance = decimal.NewFromFloat(giftBalance).Round(8).InexactFloat64()
+		if balance <= 0 && giftBalance <= 0 {
+			return nil, infraerrors.BadRequest("INVALID_BALANCE", "subtract requires balance or gift_balance to be positive at eight decimal places")
 		}
 	default:
 		return nil, fmt.Errorf("unsupported balance operation: %q", operation)
@@ -601,8 +605,14 @@ func (s *adminServiceImpl) applyUserBalanceUpdate(ctx context.Context, userID in
 			return nil, 0, 0, errors.New("user repository does not support gift balance adjustments")
 		}
 	case "subtract":
-		change, err = s.userRepo.AdjustBalance(ctx, userID, -balance)
-		walletChange = WalletChange{OldOrdinary: change.Old, NewOrdinary: change.New}
+		if walletRepo, ok := s.userRepo.(AdminWalletSubtractRepository); ok {
+			walletChange, err = walletRepo.SubtractWallets(ctx, userID, balance, giftBalance)
+		} else if giftBalance == 0 {
+			change, err = s.userRepo.AdjustBalance(ctx, userID, -balance)
+			walletChange = WalletChange{OldOrdinary: change.Old, NewOrdinary: change.New}
+		} else {
+			return nil, 0, 0, errors.New("user repository does not support gift balance subtraction")
+		}
 	default:
 		return nil, 0, 0, fmt.Errorf("unsupported balance operation: %q", operation)
 	}

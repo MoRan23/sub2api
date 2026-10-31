@@ -92,4 +92,23 @@ describe('UserBalanceHistoryModal gift balance', () => {
     expect(wrapper.text()).toContain('admin.users.ordinaryBalance +$10.00')
     expect(wrapper.text()).toContain('admin.users.giftBalance +$2.50 (25%)')
   })
+
+  it.each([[0, -2.5, '$-2.50'], [-3, -2.5, '$-5.50']])('shows negative gift deductions as admin withdrawals', async (ordinary, gift, total) => {
+    getUserBalanceHistory.mockResolvedValue({
+      items: [{ id: 2, code: 'ADMIN-DEDUCTION', type: 'admin_balance', value: ordinary, gift_value: gift,
+        status: 'used', used_at: '2026-09-01T01:00:00Z', notes: 'reclaim gift' }],
+      total: 1, page: 1, page_size: 15, pages: 1, total_recharged: 10
+    })
+    const wrapper = mount(UserBalanceHistoryModal, {
+      props: { show: false, user },
+      global: { stubs: { BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /></div>' }, Select: true, Icon: true } }
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.text()).toContain('redeem.balanceDeductedAdmin')
+    expect(wrapper.text()).toContain(total)
+    expect(wrapper.text()).toContain('admin.users.giftBalance $-2.50')
+    expect(wrapper.text()).toContain(`admin.users.ordinaryBalance ${ordinary < 0 ? '$-3.00' : '+$0.00'}`)
+    expect(wrapper.find('.text-red-600').exists()).toBe(true)
+  })
 })

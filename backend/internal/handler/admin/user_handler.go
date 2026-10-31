@@ -431,8 +431,8 @@ func (h *UserHandler) UpdateBalance(c *gin.Context) {
 			return
 		}
 	case "subtract":
-		if req.Balance <= 0 || req.GiftBalance != 0 {
-			response.BadRequest(c, "subtract requires a positive balance and does not accept gift_balance")
+		if req.Balance <= 0 && req.GiftBalance <= 0 {
+			response.BadRequest(c, "subtract requires balance or gift_balance to be positive")
 			return
 		}
 	}

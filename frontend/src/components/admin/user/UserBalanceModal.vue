@@ -15,25 +15,28 @@
         </div>
       </div>
       <div>
-        <label class="input-label">{{ operation === 'add' ? t('admin.users.ordinaryDepositAmount') : t('admin.users.withdrawAmount') }}</label>
+        <label class="input-label">{{ operation === 'add' ? t('admin.users.ordinaryDepositAmount') : t('admin.users.ordinaryWithdrawAmount') }}</label>
         <div class="relative flex gap-2">
-          <div class="relative flex-1"><div class="absolute left-3 top-1/2 -translate-y-1/2 font-medium text-gray-500">$</div><input v-model.number="form.amount" data-test="ordinary-amount" type="number" step="any" min="0" :required="operation === 'subtract'" class="input pl-8" /></div>
-          <button v-if="operation === 'subtract'" type="button" @click="fillAllBalance" class="btn btn-secondary whitespace-nowrap">{{ t('admin.users.withdrawAll') }}</button>
+          <div class="relative flex-1"><div class="absolute left-3 top-1/2 -translate-y-1/2 font-medium text-gray-500">$</div><input v-model.number="form.amount" data-test="ordinary-amount" type="number" step="any" min="0" class="input pl-8" /></div>
+          <button v-if="operation === 'subtract'" data-test="withdraw-all-ordinary" type="button" @click="fillAllBalance('ordinary')" class="btn btn-secondary whitespace-nowrap">{{ t('admin.users.withdrawAllBalance') }}</button>
         </div>
       </div>
-      <div v-if="operation === 'add'">
-        <label class="input-label">{{ t('admin.users.giftDepositAmount') }}</label>
-        <div class="relative">
-          <div class="absolute left-3 top-1/2 -translate-y-1/2 font-medium text-gray-500">$</div>
-          <input v-model.number="form.giftAmount" data-test="gift-amount" type="number" step="any" min="0" class="input pl-8" />
+      <div>
+        <label class="input-label">{{ operation === 'add' ? t('admin.users.giftDepositAmount') : t('admin.users.giftWithdrawAmount') }}</label>
+        <div class="relative flex gap-2">
+          <div class="relative flex-1">
+            <div class="absolute left-3 top-1/2 -translate-y-1/2 font-medium text-gray-500">$</div>
+            <input v-model.number="form.giftAmount" data-test="gift-amount" type="number" step="any" min="0" class="input pl-8" />
+          </div>
+          <button v-if="operation === 'subtract'" data-test="withdraw-all-gift" type="button" @click="fillAllBalance('gift')" class="btn btn-secondary whitespace-nowrap">{{ t('admin.users.withdrawAllBalance') }}</button>
         </div>
-        <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.users.giftDepositHint') }}</p>
+        <p v-if="operation === 'add'" class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.users.giftDepositHint') }}</p>
       </div>
       <div><label class="input-label">{{ t('admin.users.notes') }}</label><textarea v-model="form.notes" rows="3" class="input"></textarea></div>
       <div v-if="hasAdjustment" class="space-y-2 rounded-xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
-        <div class="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400"><span>{{ t('admin.users.ordinaryBalance') }}</span><span>${{ formatBalance(newOrdinaryBalance) }}</span></div>
-        <div class="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400"><span>{{ t('admin.users.giftBalance') }}</span><span>${{ formatBalance(newGiftBalance) }}</span></div>
-        <div class="flex items-center justify-between border-t border-blue-200 pt-2 text-sm dark:border-blue-800"><span class="text-gray-700 dark:text-gray-300">{{ t('admin.users.newBalance') }}:</span><span class="font-bold text-gray-900 dark:text-gray-100">${{ formatBalance(newTotalBalance) }}</span></div>
+        <div class="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400"><span>{{ t('admin.users.ordinaryBalance') }}</span><span data-test="new-ordinary-balance">${{ formatBalance(newOrdinaryBalance) }}</span></div>
+        <div class="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400"><span>{{ t('admin.users.giftBalance') }}</span><span data-test="new-gift-balance">${{ formatBalance(newGiftBalance) }}</span></div>
+        <div class="flex items-center justify-between border-t border-blue-200 pt-2 text-sm dark:border-blue-800"><span class="text-gray-700 dark:text-gray-300">{{ t('admin.users.newBalance') }}:</span><span data-test="new-total-balance" class="font-bold text-gray-900 dark:text-gray-100">${{ formatBalance(newTotalBalance) }}</span></div>
       </div>
     </form>
     <template #footer>
@@ -57,15 +60,23 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 const props = defineProps<{ show: boolean, user: AdminUser | null, operation: 'add' | 'subtract' }>()
 const emit = defineEmits(['close', 'success']); const { t } = useI18n(); const appStore = useAppStore()
 
-const submitting = ref(false); const form = reactive({ amount: 0, giftAmount: 0, notes: '' })
-watch(() => props.show, (v) => { if(v) { form.amount = 0; form.giftAmount = 0; form.notes = '' } })
+const submitting = ref(false)
+const form = reactive<{ amount: number | string; giftAmount: number | string; notes: string }>({ amount: 0, giftAmount: 0, notes: '' })
+watch([() => props.show, () => props.user?.id, () => props.operation], () => {
+  if (props.show) { form.amount = 0; form.giftAmount = 0; form.notes = '' }
+})
 
 const ordinaryBalance = computed(() => Number(props.user?.balance || 0))
 const giftBalance = computed(() => Number(props.user?.gift_balance || 0))
 const totalBalance = computed(() => Number(props.user?.total_balance ?? ordinaryBalance.value + giftBalance.value))
-const hasAdjustment = computed(() => props.operation === 'add'
-  ? form.amount > 0 || form.giftAmount > 0
-  : form.amount > 0)
+// An empty optional wallet input is zero; invalid/non-finite input cannot be submitted.
+const ordinaryAmount = computed(() => Number(form.amount))
+const giftAmount = computed(() => Number(form.giftAmount))
+const hasAdjustment = computed(() => (
+  Number.isFinite(ordinaryAmount.value) && Number.isFinite(giftAmount.value) &&
+  ordinaryAmount.value >= 0 && giftAmount.value >= 0 &&
+  (ordinaryAmount.value > 0 || giftAmount.value > 0)
+))
 
 // 格式化余额：显示完整精度，去除尾部多余的0
 const formatBalance = (value: number) => {
@@ -80,40 +91,45 @@ const formatBalance = (value: number) => {
 }
 
 // 填入全部余额
-const fillAllBalance = () => {
+const fillAllBalance = (wallet: 'ordinary' | 'gift') => {
   if (props.user) {
-    form.amount = Math.max(0, ordinaryBalance.value)
+    if (wallet === 'ordinary') form.amount = Math.max(0, ordinaryBalance.value)
+    else form.giftAmount = Math.max(0, giftBalance.value)
   }
 }
 
 const normalizeZero = (value: number) => Math.abs(value) < 1e-10 ? 0 : value
 const newOrdinaryBalance = computed(() => normalizeZero(
-  props.operation === 'add' ? ordinaryBalance.value + form.amount : ordinaryBalance.value - form.amount
+  props.operation === 'add' ? ordinaryBalance.value + ordinaryAmount.value : ordinaryBalance.value - ordinaryAmount.value
 ))
 const newGiftBalance = computed(() => normalizeZero(
-  giftBalance.value + (props.operation === 'add' ? form.giftAmount : 0)
+  props.operation === 'add' ? giftBalance.value + giftAmount.value : giftBalance.value - giftAmount.value
 ))
 const newTotalBalance = computed(() => normalizeZero(newOrdinaryBalance.value + newGiftBalance.value))
 
 const handleBalanceSubmit = async () => {
-  if (!props.user) return
-  if (!hasAdjustment.value || form.amount < 0 || form.giftAmount < 0) {
+  if (!props.user || submitting.value) return
+  if (!hasAdjustment.value) {
     appStore.showError(t('admin.users.amountRequired'))
     return
   }
   // 退款时验证金额不超过实际余额
-  if (props.operation === 'subtract' && form.amount > ordinaryBalance.value) {
-    appStore.showError(t('admin.users.insufficientBalance'))
+  if (props.operation === 'subtract' && ordinaryAmount.value > 0 && ordinaryAmount.value > ordinaryBalance.value) {
+    appStore.showError(t('admin.users.insufficientOrdinaryBalance'))
+    return
+  }
+  if (props.operation === 'subtract' && giftAmount.value > 0 && giftAmount.value > giftBalance.value) {
+    appStore.showError(t('admin.users.insufficientGiftBalance'))
     return
   }
   submitting.value = true
   try {
     await adminAPI.users.updateBalance(
       props.user.id,
-      form.amount,
+      ordinaryAmount.value,
       props.operation,
       form.notes,
-      props.operation === 'add' ? form.giftAmount : 0
+      giftAmount.value
     )
     appStore.showSuccess(t('common.success')); emit('success'); emit('close')
   } catch (e: any) {

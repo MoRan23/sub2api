@@ -78,6 +78,22 @@ curl -s "${BASE}/api/v1/admin/users/123" \
 
 用途：人工补偿 / 扣减，支持 `set` / `add` / `subtract`。
 
+管理员“用户管理 → 退款”使用此接口调整站内余额，不调用支付网关。
+`subtract` 的 `balance` 和 `gift_balance` 分别指定普通余额、赠送余额扣除金额；
+两者默认 `0`，必须为有限非负数，按八位小数处理后至少一项大于零。
+可只扣赠送余额，也可同时扣除两种余额；弹窗分别提供“全部扣除”和扣款后余额预览。
+任一指定钱包不足，整笔操作拒绝，不跨钱包抵扣、不截断扣款金额。
+普通余额已有欠款时，`balance=0` 仍可扣赠送余额。
+
+余额不足返回 HTTP `400`，错误码分别为 `INSUFFICIENT_ORDINARY_BALANCE` 和
+`INSUFFICIENT_GIFT_BALANCE`。双钱包扣减与 `admin_balance` 账变同事务提交；
+账变分别记录负向普通金额和赠送金额，保留备注，提交后刷新余额缓存。
+累计充值及邀请返佣不因扣款改变。继续使用同一 `Idempotency-Key` 重试相同请求，避免重复扣款。
+`set` 仍只设置普通余额，订单退款规则不变。
+
+上线前由现有迁移流程应用 `274_admin_gift_balance_debits.sql`，仅允许
+`admin_balance` 账变的 `gift_value` 为负，其他兑换码仍要求非负；不改历史数据。
+
 请求体示例（扣减）：
 ```json
 {
@@ -197,6 +213,28 @@ curl -s "${BASE}/api/v1/admin/users/123" \
 `POST /api/v1/admin/users/:id/balance`
 
 Use case: manual correction with `set` / `add` / `subtract`.
+
+The administrator's **Users → Refund** dialog adjusts internal wallets through
+this endpoint; it does not call a payment provider. For `subtract`, `balance`
+and `gift_balance` are independent ordinary and gift debit amounts, both defaulting
+to zero. Values must be finite and nonnegative, with at least one positive after
+rounding to eight decimal places. Gift-only and combined debits are supported.
+The dialog provides separate full-balance buttons and resulting balance previews.
+If either requested wallet lacks funds, the entire adjustment is rejected;
+wallets do not cover each other and amounts are not clamped. An existing ordinary
+debt is preserved when `balance=0` and only the gift wallet is debited.
+
+Insufficient funds return HTTP `400` with `INSUFFICIENT_ORDINARY_BALANCE` or
+`INSUFFICIENT_GIFT_BALANCE`. Both debits and their signed `admin_balance` history
+are committed together, retaining the notes and refreshing caches after commit.
+Cumulative recharge and affiliate rebates remain unchanged. Retry the same
+request with the same `Idempotency-Key` to avoid duplicate debits. The `set`
+operation still accepts only ordinary balance; payment-order refunds are unchanged.
+
+The normal migration process must apply `274_admin_gift_balance_debits.sql` before
+using gift debits. It permits negative `gift_value` only for `admin_balance`
+history, retaining the nonnegative rule for other redeem-code types and leaving
+existing history unchanged.
 
 Request body example (`subtract`):
 ```json

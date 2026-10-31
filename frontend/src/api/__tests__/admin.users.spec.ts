@@ -161,4 +161,15 @@ describe('admin users api auth identity binding', () => {
       notes: 'promotion'
     })
   })
+
+  it('posts a gift-only deduction using the existing balance endpoint', async () => {
+    post.mockResolvedValue({ data: { id: 9 } })
+    await updateBalance(9, 0, 'subtract', 'reclaim gift', 1.12345678)
+    expect(post).toHaveBeenCalledWith('/admin/users/9/balance', {
+      balance: 0,
+      gift_balance: 1.12345678,
+      operation: 'subtract',
+      notes: 'reclaim gift'
+    })
+  })
 })
